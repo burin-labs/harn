@@ -279,18 +279,14 @@ fn parse_presets(src: &str) -> Result<Vec<McpPreset>, toml::de::Error> {
 }
 
 /// Resolve the runtime overlay, if any: the `HARN_MCP_PRESETS_CONFIG` path
-/// wins, else `~/.config/harn/mcp_presets.toml`. Skipped under `cfg(test)` so
-/// unit tests see only the bundled defaults plus explicit overlays.
+/// wins, else `mcp_presets.toml` in the user configuration directory
+/// ([`crate::user_dirs::config_dir`]).
 fn load_overlay() -> Option<Vec<McpPreset>> {
     if let Ok(path) = std::env::var("HARN_MCP_PRESETS_CONFIG") {
         return read_overlay(&path);
     }
-    if should_load_home_overlay() {
-        let home = crate::user_dirs::home_dir()?;
-        let path = home.join(".config").join("harn").join("mcp_presets.toml");
-        return read_overlay(&path.to_string_lossy());
-    }
-    None
+    let path = crate::user_dirs::config_file("mcp_presets.toml")?;
+    read_overlay(&path.to_string_lossy())
 }
 
 fn read_overlay(path: &str) -> Option<Vec<McpPreset>> {
@@ -302,10 +298,6 @@ fn read_overlay(path: &str) -> Option<Vec<McpPreset>> {
             None
         }
     }
-}
-
-fn should_load_home_overlay() -> bool {
-    !cfg!(test)
 }
 
 /// Merge an overlay into the base list: replace presets sharing an `id`

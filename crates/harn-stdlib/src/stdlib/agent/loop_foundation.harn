@@ -56,10 +56,16 @@ pub fn __agent_loop_deadline_contract(
 pub fn __agent_loop_apply_deadline(opts: dict, budget: dict, now_ms: int) -> dict {
   const contract = __agent_loop_deadline_contract(now_ms, opts?.deadline_ms, budget?.wall_clock_ms)
   return if contract == nil {
-    opts
+    opts + {_deadline_at_ms: nil, _deadline_source: nil}
   } else {
     opts + {_deadline_at_ms: contract.deadline_at_ms, _deadline_source: contract.source}
   }
+}
+
+pub fn __agent_loop_deadline_reached(opts: dict, clock: HarnessClock) -> bool {
+  return opts?._deadline_source == "deadline_ms"
+    && opts?._deadline_at_ms != nil
+    && __agent_loop_clock_now_ms(clock) >= opts._deadline_at_ms
 }
 
 pub const __AGENT_LOOP_CHECKPOINT_ITERATION_START = "iteration_start"
@@ -276,11 +282,14 @@ pub fn __agent_loop_invoke_main_request(
   iteration_index: int,
 ) -> dict {
   __agent_loop_next_tool_claim_receipt(harness.agent, session_id, llm_opts, iteration_index)
+  // The main request is the turn a person is waiting to read, so its visible
+  // text streams to the host as it arrives. Side calls (classifiers, judges,
+  // titles) leave this unset and stream nothing visible.
   return __invoke_llm_with_autocontinue(
     harness,
     message,
     turn_system,
-    llm_opts,
+    llm_opts + {_user_visible: true},
     turn_opts,
     session_id,
     iteration_index,

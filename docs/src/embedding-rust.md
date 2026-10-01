@@ -11,7 +11,7 @@ against:
 
 ```toml
 [dependencies]
-harn-serve = { git = "https://github.com/burin-labs/harn", tag = "v0.10.142" }
+harn-serve = { git = "https://github.com/burin-labs/harn", tag = "v0.10.152" }
 serde_json = "1"
 tokio = { version = "1", features = ["rt", "sync"] }
 ```
@@ -56,10 +56,10 @@ start.
 
 ```toml
 # Parity-critical eval harness
-harn-serve = { git = "...", tag = "v0.10.142", features = ["full"] }
+harn-serve = { git = "...", tag = "v0.10.152", features = ["full"] }
 
 # Lean smoke-test harness
-harn-serve = { git = "...", tag = "v0.10.142", features = ["hostlib"] }
+harn-serve = { git = "...", tag = "v0.10.152", features = ["hostlib"] }
 ```
 
 When either hostlib feature is enabled, dispatch the private process guardian
@@ -82,6 +82,11 @@ guardian removes inherited credentials and does not copy that data into its
 own arguments or environment.
 Without the dispatch, those commands fail during startup. Windows uses a Job
 Object and the function returns `false`.
+
+On Linux, the guardian transfers confinement to the process that starts the
+payload. For loopback-only commands, the namespace helper creates the private
+network namespace before applying Landlock and seccomp. The guardian keeps
+the ruleset descriptor open through the helper's exec.
 
 Finer control is available one layer down: `harn-hostlib`'s `ast` feature is
 the code-intelligence mechanism only. Per-family grammar features

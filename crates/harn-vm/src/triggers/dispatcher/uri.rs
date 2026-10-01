@@ -1,6 +1,7 @@
 use crate::triggers::TriggerHandlerSpec;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum DispatchUriError {
     Empty,
     MissingTarget { scheme: String },

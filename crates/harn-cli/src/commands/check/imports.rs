@@ -35,7 +35,7 @@ pub(super) fn scan_import_collisions(
                     continue;
                 };
                 let import_str = import_path.display().to_string();
-                let names = graph.exports_for_module(Path::new(&import_path));
+                let names = graph.exports_for_import(file_path, Path::new(&import_path));
                 for name in names {
                     if let Some(existing) = imported_names.get(&name) {
                         if existing.module_path != import_str {

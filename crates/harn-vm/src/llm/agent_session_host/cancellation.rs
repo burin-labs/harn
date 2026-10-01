@@ -161,11 +161,12 @@ impl AgentSessionInitRollback {
         self.armed = false;
     }
 
-    pub(super) async fn fail(&mut self) {
+    pub(super) async fn fail(&mut self, ctx: Option<&crate::vm::AsyncBuiltinCtx>) {
         if let Err(error) = super::live_transcript_journal::flush_init_terminal(
             &self.session_id,
             "failed",
             "session_initialization_failed",
+            ctx,
         )
         .await
         {
@@ -240,6 +241,14 @@ pub(crate) async fn abandon_agent_session(session_id: &str) -> Result<(), VmErro
                 .get(session_id)
                 .is_some_and(|session| session.owns_session)
         });
+    // A stop that lands while a tool runs leaves its call unanswered, and
+    // providers refuse every later request that carries one (harn#8951).
+    // Answer it with the typed repair result before the terminal is written,
+    // so the durable transcript a resume loads is already well formed.
+    super::message_history::pair_orphaned_tool_use(
+        session_id,
+        super::message_history::UNANSWERED_TOOL_CALL_OBSERVATION,
+    );
     if crate::agent_sessions::has_journal(session_id) {
         let provider_call_count = super::AGENT_HOST_SESSIONS.with(|sessions| {
             sessions
@@ -252,7 +261,7 @@ pub(crate) async fn abandon_agent_session(session_id: &str) -> Result<(), VmErro
             crate::agent_events::classify_agent_terminal("cancelled", "cancelled", false, None),
             "cancelled",
         );
-        Box::pin(super::live_transcript_journal::flush_terminal(
+        let phase = Box::pin(super::live_transcript_journal::flush_terminal(
             session_id,
             "cancelled",
             "cancelled",
@@ -265,6 +274,12 @@ pub(crate) async fn abandon_agent_session(session_id: &str) -> Result<(), VmErro
             },
         ))
         .await?;
+        crate::llm::emit_live_agent_event_sync(
+            &crate::agent_events::AgentEvent::TurnPhaseChanged {
+                session_id: session_id.to_string(),
+                phase,
+            },
+        );
     }
     let removed =
         super::AGENT_HOST_SESSIONS.with(|sessions| sessions.borrow_mut().remove(session_id));
@@ -287,6 +302,10 @@ pub(crate) async fn abandon_agent_session(session_id: &str) -> Result<(), VmErro
     crate::llm::agent_runtime::fire_session_close_hooks(session_id);
     if owns_session {
         crate::agent_sessions::close(session_id);
+    } else {
+        // A stop reclaims what the stopped run's session started even when
+        // the session itself stays open for its host; closing it already did.
+        crate::agent_sessions::reclaim_hooks::fire(session_id);
     }
     Ok(())
 }

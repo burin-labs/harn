@@ -123,7 +123,12 @@ const floor = goal_check(g, {ci_green: false})
   steering left it. A steer that carried a `goal` (see
   [Retarget](../remote-session-control.md#retarget)) replaces the objective and
   moves every success criterion to `retired_criteria`, which no longer gates
-  completion. `goal_reloop` applies it on every completion check. The
-  `with_goal` fragment and `goal_pin` render the goal as it was built; after a
-  retarget the model reads the new objective from the steer's standing
-  `contract` directive, which outranks them.
+  completion. `with_goal` applies this projection before each model request;
+  `goal_judge` and `goal_reloop` apply it at completion. Each projection records
+  retired criterion ids and descriptions in a
+  `harn.goal_criteria_retired.v1` checkpoint, linked to the accepted control.
+  When the retarget lands, typed goal pins replace their objective and retire
+  their criteria, preserving constraints and budget across compaction.
+  Unstructured goal pins retire; the new objective's standing directive survives
+  compaction. `agent_pin` projects a `goal_pin`
+  under the current obligations even when you reuse a pin built before steering.

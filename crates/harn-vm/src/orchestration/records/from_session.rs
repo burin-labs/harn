@@ -345,6 +345,8 @@ async fn child_records(
 /// Facts folded out of one pass over the session's events.
 #[derive(Default)]
 struct SessionFold {
+    reasoning_receipts: Option<Vec<crate::llm::ReasoningReceipt>>,
+    reasoning_receipts_dropped: u32,
     run_started_at: Option<EventClock>,
     execution_id: Option<String>,
     last_observed_at: Option<EventClock>,
@@ -742,7 +744,7 @@ fn assemble(
         total_cost: known_cost_usd,
         ..fold.usage
     };
-    let (execution_id, execution_identity_gaps) = match fold.execution_id.as_deref() {
+    let (execution_id, mut evidence_gaps) = match fold.execution_id.as_deref() {
         Some(execution_id) => match crate::ExecutionId::parse(execution_id) {
             Ok(execution_id) => (Some(execution_id.to_string()), Vec::new()),
             Err(_) => (
@@ -766,6 +768,10 @@ fn assemble(
         ),
     };
 
+    if let Some(gap) = crate::llm::reasoning_receipt::overflow_gap(fold.reasoning_receipts_dropped)
+    {
+        evidence_gaps.push(gap);
+    }
     Ok(RunRecord {
         type_name: "run".to_string(),
         id: meta.id.clone(),
@@ -786,8 +792,9 @@ fn assemble(
         evidence: ExecutionEvidenceRecord {
             schema_version: EXECUTION_EVIDENCE_SCHEMA_VERSION,
             execution_id,
+            reasoning_receipts: fold.reasoning_receipts,
             trace_spans: llm_call_spans(&meta.id, run_clock.started_at_ms, &fold.llm_calls),
-            gaps: execution_identity_gaps,
+            gaps: evidence_gaps,
             ..ExecutionEvidenceRecord::default()
         },
         tool_recordings: fold.tools,
@@ -851,6 +858,7 @@ impl SessionFold {
             "tool_call_update" => self.absorb_tool_update(event),
             "tool_result" => self.absorb_tool_result(event),
             "llm_call" => self.absorb_llm_call(event),
+            "reasoning_receipt" => self.absorb_reasoning_receipt(event),
             "loop_checkpoint" => self.absorb_checkpoint(event),
             "sub_agent_start" => self.absorb_sub_agent_start(event),
             "agent_run_terminal" => self.absorb_terminal(event),
@@ -882,6 +890,9 @@ impl SessionFold {
             ms: event.ts_ms,
         });
         self.execution_id = facts::string_at(&event.payload, facts::EXECUTION_ID);
+        if facts::bool_at(&event.payload, facts::REASONING_RECEIPTS_REPORTED) {
+            self.reasoning_receipts = Some(Vec::new());
+        }
         self.last_observed_at = self.run_started_at.clone();
     }
 
@@ -912,6 +923,22 @@ impl SessionFold {
             role,
             content: text,
         });
+    }
+
+    fn absorb_reasoning_receipt(&mut self, event: &StoredEvent) {
+        let Some(value) = facts::semantic_value(&event.payload, &[facts::REASONING_RECEIPT]) else {
+            return;
+        };
+        let Ok(mut receipt) = serde_json::from_value::<crate::llm::ReasoningReceipt>(value) else {
+            return;
+        };
+        let receipts = self.reasoning_receipts.get_or_insert_with(Vec::new);
+        if receipts.len() == crate::llm::reasoning_receipt::MAX_REASONING_RECEIPTS {
+            self.reasoning_receipts_dropped = self.reasoning_receipts_dropped.saturating_add(1);
+        } else {
+            receipt.index = u32::try_from(receipts.len()).unwrap_or(u32::MAX);
+            receipts.push(receipt);
+        }
     }
 
     fn absorb_llm_call(&mut self, event: &StoredEvent) {

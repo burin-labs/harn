@@ -14,7 +14,8 @@ use super::decision::{DecisionLimits, DecisionProtocol, DecisionQuestionKind};
 use super::model::{
     fill_opt, CacheBreakpointStyle, Capabilities, CapabilitiesFile, ComputerUseStyle,
     LiveEndpointFamily, ProviderDefaults, ReasoningHistoryWireField, ReasoningRoundTripPolicy,
-    ScreenshotScaling, SystemMessagePlacement, ToolFormatJustification, ToolModeParitySource,
+    ScreenshotScaling, SystemMessagePlacement, ThinkingOffType, ToolFormatJustification,
+    ToolModeParitySource,
 };
 use super::pattern::{rule_matches, ModelPatterns};
 use super::projection::{defaults_to_caps, rule_to_caps};
@@ -23,6 +24,7 @@ pub(super) use super::effort::{rule_reasoning_effort_supported, rule_thinking_mo
 
 /// One row of the capability matrix.
 #[derive(Debug, Clone, Deserialize)]
+#[non_exhaustive]
 pub struct ProviderRule {
     /// One glob pattern, or a list of aliases that share one contract.
     pub model_match: ModelPatterns,
@@ -277,6 +279,9 @@ pub struct ProviderRule {
     /// the same role there.
     #[serde(default)]
     pub preserve_thinking: Option<bool>,
+    /// Whether this transport honors `preserve_thinking` in chat-template options.
+    #[serde(default)]
+    pub honors_preserve_thinking_kwarg: Option<bool>,
     /// Provider-visible replay policy for prior assistant reasoning. Typed so
     /// unknown or misspelled policies fail capability loading.
     #[serde(default)]
@@ -359,6 +364,10 @@ pub struct ProviderRule {
     /// Some routes require reasoning and reject the provider's disabled shape.
     #[serde(default)]
     pub reasoning_disable_supported: Option<bool>,
+    /// The Anthropic `thinking.type` that turns thinking off where
+    /// `reasoning_disable_supported` is true. Unset means `disabled`.
+    #[serde(default)]
+    pub thinking_off_type: Option<ThinkingOffType>,
     /// Whether this model performs *tool calls inside its reasoning channel*,
     /// so disabling reasoning silently breaks tool calling. The canonical case
     /// is the OpenAI gpt-oss (Harmony) family: with reasoning disabled it emits
@@ -420,6 +429,9 @@ pub struct ProviderRule {
     /// one-call assistant turns for those routes.
     #[serde(default)]
     pub supports_parallel_tool_calls: Option<bool>,
+    /// Whether this route requires `parallel_tool_calls: false` on the wire.
+    #[serde(default)]
+    pub requires_parallel_tool_calls_false: Option<bool>,
     /// Whether the route rejects `response_format` when native `tools` are
     /// present. Strict OpenAI-compatible servers such as Cerebras accept each
     /// feature alone but reject the pair together.
@@ -634,6 +646,7 @@ impl ProviderRule {
             vision_supported,
             image_url_input_supported,
             preserve_thinking,
+            honors_preserve_thinking_kwarg,
             reasoning_round_trip,
             reasoning_history_wire_field,
             server_parser,
@@ -648,6 +661,7 @@ impl ProviderRule {
             reasoning_none_supported,
             max_thinking_budget,
             reasoning_disable_supported,
+            thinking_off_type,
             reasoning_required_for_tools,
             reasoning_text_promotable,
             reasoning_wire_format,
@@ -663,6 +677,7 @@ impl ProviderRule {
             allowed_tool_choice_modes,
             requires_tool_result_adjacency,
             supports_parallel_tool_calls,
+            requires_parallel_tool_calls_false,
             tools_exclude_response_format,
             recommended_endpoint,
             text_tool_wire_format_supported,
@@ -750,6 +765,10 @@ impl ProviderRule {
             image_url_input_supported,
         );
         fill_opt(&mut self.preserve_thinking, preserve_thinking);
+        fill_opt(
+            &mut self.honors_preserve_thinking_kwarg,
+            honors_preserve_thinking_kwarg,
+        );
         fill_opt(&mut self.reasoning_round_trip, reasoning_round_trip);
         fill_opt(
             &mut self.reasoning_history_wire_field,
@@ -788,6 +807,7 @@ impl ProviderRule {
             &mut self.reasoning_disable_supported,
             reasoning_disable_supported,
         );
+        fill_opt(&mut self.thinking_off_type, thinking_off_type);
         fill_opt(
             &mut self.reasoning_required_for_tools,
             reasoning_required_for_tools,
@@ -829,6 +849,10 @@ impl ProviderRule {
         fill_opt(
             &mut self.supports_parallel_tool_calls,
             supports_parallel_tool_calls,
+        );
+        fill_opt(
+            &mut self.requires_parallel_tool_calls_false,
+            requires_parallel_tool_calls_false,
         );
         fill_opt(
             &mut self.tools_exclude_response_format,
@@ -904,17 +928,26 @@ pub(super) struct RuleResolution {
     pub(super) merged: Option<ProviderRule>,
     /// `model_match` provenance of every absorbed rule, in precedence order.
     pub(super) matched_patterns: Vec<String>,
+    /// Each absorbed rule as an author would find it: its table header,
+    /// `model_match`, and whether it came from a user overlay or Harn's
+    /// built-in capability sources. Named in refusals and steer notes so a
+    /// quirk is attributed to the row that caused it.
+    pub(super) matched_rules: Vec<String>,
 }
 
 impl RuleResolution {
     /// Merge `rule` into the accumulator. Returns `true` when the walk must
     /// terminate: the rule does not opt into `extends` fall-through, which is
     /// exactly the pre-`extends` first-match-wins behavior.
-    fn absorb(&mut self, layer_provider: &str, rule: &ProviderRule) -> bool {
+    fn absorb(&mut self, layer_provider: &str, rule: &ProviderRule, origin: &str) -> bool {
         if self.provider.is_none() {
             self.provider = Some(layer_provider.to_string());
         }
         self.matched_patterns.push(rule.match_label());
+        self.matched_rules.push(format!(
+            "[[provider.{layer_provider}]] model_match = \"{}\" ({origin})",
+            rule.match_label()
+        ));
         match &mut self.merged {
             None => self.merged = Some(rule.clone()),
             Some(merged) => merged.fill_missing_from(rule),
@@ -942,10 +975,17 @@ pub(super) fn absorb_layer_matches(
     model: &str,
     resolution: &mut RuleResolution,
 ) -> bool {
-    for file in user.into_iter().chain(std::iter::once(builtin)) {
+    let files = user
+        .map(|file| (file, "user capability overlay"))
+        .into_iter()
+        .chain(std::iter::once((
+            builtin,
+            "Harn built-in, crates/harn-vm/src/llm/capability_sources",
+        )));
+    for (file, origin) in files {
         if let Some(rules) = file.provider.get(layer_provider) {
             for rule in rules {
-                if rule_matches(rule, model) && resolution.absorb(layer_provider, rule) {
+                if rule_matches(rule, model) && resolution.absorb(layer_provider, rule, origin) {
                     return true;
                 }
             }

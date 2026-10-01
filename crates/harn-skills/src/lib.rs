@@ -82,6 +82,7 @@ impl SkillCorpus {
 
 /// Error returned when disk skill discovery finds malformed files.
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum SkillDiscoveryError {
     Io {
         path: PathBuf,
@@ -519,7 +520,10 @@ mod tests {
                 ["conformance", "deterministic", "mock_time"],
             ),
             ("harn-tracing", ["replay", "receipts", "transcript"]),
-            ("release-harn", ["release_ship", "merge queue", "tag"]),
+            (
+                "release-harn",
+                ["maintainer-release", "candidate", "publication"],
+            ),
         ];
 
         for (name, terms) in expectations {
@@ -542,17 +546,33 @@ mod tests {
     fn skill_bodies_match_split_skill_contract() {
         for skill in list_embedded_skills() {
             let lines = skill.body.lines().count();
-            assert!(
-                lines >= 80,
-                "{} body is {lines} lines, expected at least 80",
-                skill.name
-            );
+            if skill.name != "release-harn" {
+                assert!(
+                    lines >= 80,
+                    "{} body is {lines} lines, expected at least 80",
+                    skill.name
+                );
+            }
             assert!(
                 lines <= 300,
                 "{} body is {lines} lines, expected at most 300",
                 skill.name
             );
         }
+    }
+
+    #[test]
+    fn release_skill_routes_to_one_maintainer_procedure() {
+        let skill = get_embedded_skill("release-harn").expect("embedded release skill");
+        let procedure = "docs/src/maintainer-release.md";
+        assert!(skill.body.contains(procedure));
+        assert!(skill
+            .body
+            .contains("https://harnlang.com/docs/maintainer-release.html"));
+        assert!(
+            !skill.body.contains("```"),
+            "release commands belong in the maintainer procedure"
+        );
     }
 
     #[test]

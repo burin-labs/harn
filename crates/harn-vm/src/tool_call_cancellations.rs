@@ -459,9 +459,8 @@ mod tests {
             let task = tokio::task::spawn_local(async move { waiter_handle.cancelled().await });
             tokio::task::yield_now().await;
             handle.cancel("stopping", false);
-            tokio::time::timeout(std::time::Duration::from_secs(1), task)
+            harn_clock::test_support::within("cancelled waiter resolving", task)
                 .await
-                .expect("task should resolve quickly")
                 .expect("task did not panic");
         });
     }

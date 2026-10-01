@@ -28,7 +28,9 @@
  * A model answer never outranks a deterministic rule, and `confidence` is
  * uncalibrated until a calibration report says otherwise.
  */
-pub type BooleanQuestion = {kind: "boolean", instructions: string}
+pub type BooleanCriteria = {true: string, false: string}
+
+pub type BooleanQuestion = {kind: "boolean", instructions: string, criteria?: BooleanCriteria}
 
 pub type ChoiceQuestion = {kind: "choice", instructions: string, criteria: dict<string, string>}
 
@@ -79,11 +81,11 @@ pub type EvaluationPolicy = {
   backend: "structured_llm" | "native_decision",
   provider: string,
   model: string,
-  effort: string,
-  temperature: float,
+  effort?: string,
+  temperature?: float,
   threshold: float,
-  evaluation_cost_limit: float,
-  run_cost_limit: float,
+  evaluation_cost_limit?: float,
+  run_cost_limit?: float,
 }
 
 pub type PredicateOutcome = {kind: "verdict", value: PredicateVerdict, receipt: string} \
@@ -114,6 +116,7 @@ pub type PredicateOutcome = {kind: "verdict", value: PredicateVerdict, receipt: 
     | "unsupported_options" \
     | "transport_failed" \
     | "authority_denied" \
+    | "admission_refused" \
     | "producer_cancelled" \
     | "cache_miss",
   receipt: string,
@@ -131,6 +134,10 @@ pub type PredicateOutcome = {kind: "verdict", value: PredicateVerdict, receipt: 
   kind: "question_invalid",
   question: string,
   reason: "too_many_options" \
+    | "empty_questions" \
+    | "empty_options" \
+    | "empty_identifier" \
+    | "duplicate_labels" \
     | "too_few_levels" \
     | "too_many_levels" \
     | "empty_instructions" \
@@ -179,6 +186,7 @@ pub type EvaluationOutcome = {
     | "unsupported_options" \
     | "transport_failed" \
     | "authority_denied" \
+    | "admission_refused" \
     | "producer_cancelled" \
     | "cache_miss",
   receipt: string,
@@ -196,6 +204,10 @@ pub type EvaluationOutcome = {
   kind: "question_invalid",
   question: string,
   reason: "too_many_options" \
+    | "empty_questions" \
+    | "empty_options" \
+    | "empty_identifier" \
+    | "duplicate_labels" \
     | "too_few_levels" \
     | "too_many_levels" \
     | "empty_instructions" \
@@ -213,7 +225,10 @@ pub type EvaluationOutcome = {
  * @effects: []
  * @errors: []
  */
-pub fn boolean(instructions: string) -> BooleanQuestion {
+pub fn boolean(instructions: string, criteria: BooleanCriteria? = nil) -> BooleanQuestion {
+  if criteria != nil {
+    return {kind: "boolean", instructions: instructions, criteria: criteria}
+  }
   return {kind: "boolean", instructions: instructions}
 }
 
@@ -257,7 +272,12 @@ pub type EvaluationWindowing = {
   receipt: string,
 }
 
-pub type EvaluationWindowOptions = {budget_tokens: int, overlap_items?: int, anchor?: string}
+pub type EvaluationWindowOptions = {
+  budget_tokens: int,
+  overlap_items?: int,
+  anchor?: string,
+  max_items?: int,
+}
 
 /**
  * The state a window becomes, and the only shape these windows are measured as.
@@ -297,13 +317,15 @@ pub fn evaluation_window_state(
  * items start, after the repeated ones: the primary ranges partition the list,
  * so a caller joining per-item answers keeps exactly one answer per item
  * without re-deriving the overlap arithmetic at every call site.
+ * `max_items` additionally bounds the question count when each item becomes
+ * one question. Callers obtain this limit from the resolved route contract.
  *
  * Throws when one item cannot fit the budget on its own. There is no window
  * that would hold it, and returning a window the ceiling will refuse would
  * hand the caller exactly the failure this prevents.
  *
  * @effects: []
- * @errors: ["an item does not fit the budget on its own", "budget_tokens is not positive", "overlap_items is negative or does not shrink the remainder"]
+ * @errors: ["an item does not fit the budget on its own", "budget_tokens is not positive", "overlap_items is negative or does not shrink the remainder", "max_items is not positive or does not exceed overlap_items"]
  */
 pub fn evaluation_windows(
   llm: HarnessLlm,
@@ -318,6 +340,10 @@ pub fn evaluation_windows(
   if overlap < 0 {
     throw "evaluation_windows needs a non-negative overlap_items, got ${overlap}"
   }
+  const max_items = options?.max_items
+  if max_items != nil && (max_items <= 0 || overlap >= max_items) {
+    throw "evaluation_windows needs positive max_items greater than overlap_items"
+  }
   const anchor = options?.anchor ?? ""
   const anchor_tokens = llm.estimate_state_tokens(evaluation_window_state([], anchor))
   let windows: list<EvaluationWindow> = []
@@ -331,6 +357,9 @@ pub fn evaluation_windows(
     // encoded size of a record is not the sum of its parts, so summing
     // per-item estimates would drift from what the ceiling reads.
     while start + taken < len(items) {
+      if max_items != nil && taken >= max_items {
+        break
+      }
       const candidate = items.slice(start, start + taken + 1)
       const size = llm.estimate_state_tokens(evaluation_window_state(candidate, anchor))
       if size > budget && taken > 0 {

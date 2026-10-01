@@ -16,9 +16,9 @@
  *   - Growth past a file's banked number by more than the tolerance band.
  *   - Any frame inside the near-ceiling band, whatever its budget says,
  *     unless a dated exception with an owner admits it.
- *   - A budgeted file absent from the census, because a census that failed to
- *     measure a crate is indistinguishable here from a frame that shrank, and
- *     absence must never read as a pass.
+ *   - A budgeted file absent from both diagnostics and current compiler source
+ *     coverage. A proven source with no diagnostic is below the measurement
+ *     floor; an unmeasured source must never read as a pass.
  *
  * Shrinkage passes and is reported, not refused. In-band movement passes and
  * is reported. Banking a new baseline happens on main, in the banking job, so
@@ -60,6 +60,13 @@ pub type ClippyMessage = {
 }
 
 pub type ClippyRecord = {reason: string, message: ClippyMessage, ...dict<string, unknown>}
+
+pub type SourceCoverageRecord = {
+  reason: string,
+  floor_bytes: int,
+  paths: list<string>,
+  ...dict<string, unknown>,
+}
 
 pub type StackFrameBudgetFile = {path: string, max_bytes: int}
 
@@ -153,6 +160,27 @@ pub fn worst_frame_by_file(census_text: string) {
   return worst
 }
 
+/** Source modules named by depfiles of this census run's compiler artifacts. */
+pub fn covered_sources(census_text: string) {
+  let covered: dict<string, bool> = {}
+  for line in census_text.split("\n") {
+    const trimmed = line.trim()
+    if !trimmed.starts_with("{") || !contains(trimmed, "harn-source-coverage") {
+      continue
+    }
+    const parsed = json_parse(trimmed)
+    if schema_is(parsed, schema_of(SourceCoverageRecord)) {
+      const record: SourceCoverageRecord = parsed
+      if record.reason == "harn-source-coverage" && record.floor_bytes > 0 {
+        for path in record.paths {
+          covered[path] = true
+        }
+      }
+    }
+  }
+  return covered
+}
+
 /** Pull the byte count out of clippy's own sentence. */
 pub fn frame_bytes(message: string) {
   const matches = regex_captures("allocate ([0-9]+) bytes", message)
@@ -175,18 +203,10 @@ pub fn frame_bytes(message: string) {
  * this gate unusable: it refused pull requests over deltas smaller than the
  * ground the budget already held, on files they never touched.
  *
- * A budgeted file that is ABSENT from the census is still a refusal, and it is
- * the one kind of absence that cannot be relaxed. It now has ONE cause: the
- * census never measured that crate, which is exactly how this gate shipped a
- * baseline too low to hold. Absence must never read as a pass.
- *
- * It used to have two, and they were indistinguishable from here: a crate that
- * went unmeasured, or a frame that shrank under the collection threshold. That
- * second cause made shrinking a frame unmergeable, because the reward for
- * making a frame smaller was a refusal naming it absent. The census is now
- * taken at a MEASUREMENT floor well under the smallest banked budget, so a
- * budgeted frame keeps reporting a number however far it shrinks, and
- * `threshold_bytes` governs only which unbudgeted file is worth surfacing.
+ * A diagnostic-free budgeted file passes only when its source module appears
+ * in a depfile bound to this run's compiler artifacts. This proves Clippy
+ * compiled the source and measured every frame below its configured floor;
+ * absence without that proof still fails closed.
  */
 /**
  * The rows a banking run writes, from the census it just took.
@@ -211,7 +231,12 @@ pub fn banked_files(worst: dict<string, int>, budget: StackFrameBudget) {
   return files
 }
 
-pub fn judge_stack_frames(worst: dict<string, int>, budget: StackFrameBudget, today: string) {
+pub fn judge_stack_frames(
+  worst: dict<string, int>,
+  budget: StackFrameBudget,
+  today: string,
+  covered: dict<string, bool> = {},
+) {
   const near_floor = to_int(to_float(budget.ceiling_bytes) * (1.0 - budget.near_ceiling_fraction))
   let exception_for: dict<string, StackFrameException> = {}
   for allowed in budget.exceptions {
@@ -226,18 +251,28 @@ pub fn judge_stack_frames(worst: dict<string, int>, budget: StackFrameBudget, to
   for entry in budget.files {
     const observed = worst[entry.path]
     if observed == nil {
-      findings = findings
-        + [
-          {
-            kind: "absent_from_census",
-            path: entry.path,
-            budget_bytes: entry.max_bytes,
-            detail: "budgeted file has no measured frame in this census. That is "
-              + "either a shrink under the collection threshold or a crate the "
-              + "census failed to measure, and those are indistinguishable here, "
-              + "so it is refused rather than read as a pass",
-          },
-        ]
+      if covered[entry.path] ?? false {
+        notes = notes
+          + [
+            {
+              kind: "below_measurement_floor",
+              path: entry.path,
+              budget_bytes: entry.max_bytes,
+              detail: "source was compiled in this census; no frame reached the measurement floor",
+            },
+          ]
+      } else {
+        findings = findings
+          + [
+            {
+              kind: "absent_from_census",
+              path: entry.path,
+              budget_bytes: entry.max_bytes,
+              detail:
+                "budgeted source has neither a stack diagnostic nor current compiler coverage",
+            },
+          ]
+      }
     } else if observed > entry.max_bytes + tolerance_for(budget, entry.max_bytes) {
       findings = findings
         + [
@@ -370,6 +405,12 @@ pub fn render_drift(report: FrameReport) {
   }
   let out = "frame drift: " + to_string(len(report.notes)) + " file(s) moved within band\n"
   for note in report.notes {
+    if note.observed_bytes == nil {
+      out = out + "\n- " + note.path + ": below measurement floor (banked "
+        + to_string(note.budget_bytes)
+        + ")"
+      continue
+    }
     const observed = note.observed_bytes ?? 0
     const delta = observed - note.budget_bytes
     const sign = if delta > 0 {
@@ -461,11 +502,20 @@ fn main(harness: Harness) {
     harness.runtime.exit(2)
   }
   const budget: StackFrameBudget = budget_value
-  const worst = worst_frame_by_file(harness.fs.read_text(census_path))
+  const census_text = harness.fs.read_text(census_path)
+  const worst = worst_frame_by_file(census_text)
+  const covered = covered_sources(census_text)
   if len(keys(worst)) == 0 {
     harness.stdio.eprintln(
       "error: the census carries no large_stack_frames diagnostics. A census "
         + "that measured nothing must not read as a clean tree; re-collect it.",
+    )
+    harness.runtime.exit(1)
+  }
+  if len(keys(covered)) == 0 {
+    harness.stdio.eprintln(
+      "error: the census carries no current compiler source coverage; "
+        + "a diagnostic-free source cannot be judged without it",
     )
     harness.runtime.exit(1)
   }
@@ -477,7 +527,7 @@ fn main(harness: Harness) {
     )
     harness.runtime.exit(2)
   }
-  const report = judge_stack_frames(worst, budget, today)
+  const report = judge_stack_frames(worst, budget, today, covered)
   if parsed?.write ?? false {
     // Banking is a main-branch act. On a pull request it rewrites the baseline
     // to whatever that branch happens to measure, which turns the gate into a

@@ -34,8 +34,8 @@ supplies its ordered legend through `options.level_order`, which also turns on
 
 | Field | Default | Meaning |
 | --- | --- | --- |
-| `thresholds` | `[0.5, 0.7, 0.9]` | Candidate acceptance thresholds to score. |
-| `target_error` | `0.05` | Target error rate for the conformal threshold. |
+| `thresholds` | `[0.5, 0.7, 0.9]` | Finite acceptance probabilities in `[0, 1]`. |
+| `target_error` | `0.05` | Finite target error strictly between `0` and `1`. |
 | `seed` | `1` | Seed for the deterministic calibration/holdout split. |
 | `model_revision` | `""` | Recorded in the report contract. |
 | `served_model_id` | `""` | Recorded in the report contract. |
@@ -75,6 +75,10 @@ pipeline measure(harness: Harness, task: unknown) {
   harness.stdio.println("calibration error ${to_string(error)}")
 }
 ```
+
+Out-of-range probability options return `invalid_options`. Typed option fields
+reject nonfinite numbers at call admission; nonfinite row confidence returns
+`invalid_confidence`. None produces a report or threshold.
 
 Or a refusal, which is what an empty corpus, a one-row corpus, a missing label,
 a confidence outside `[0, 1]`, or a label outside the supplied legend produces:

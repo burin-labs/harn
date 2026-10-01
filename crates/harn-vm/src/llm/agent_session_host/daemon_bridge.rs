@@ -202,7 +202,10 @@ fn operator_steer_directive(
     };
     let mut reminder = SystemReminder::new(body, ReminderSource::Bridge, 0);
     reminder.tags = vec![OPERATOR_STEER_TAG.to_string()];
-    reminder.dedupe_key = Some(format!("{OPERATOR_STEER_TAG}/{}", message.message_id));
+    reminder.dedupe_key = Some(match goal {
+        Some(_) => format!("{OPERATOR_STEER_TAG}/goal"),
+        None => format!("{OPERATOR_STEER_TAG}/{}", message.message_id),
+    });
     reminder.authority = DirectiveAuthority::Contract;
     reminder.ttl_turns = None;
     reminder.preserve_on_compact = true;
@@ -264,6 +267,10 @@ async fn drain_bridge_injections_for_checkpoint(
                 )
                 .map_err(VmError::Runtime)?;
                 let goal = accepted_steer_goal(session_id, &message.message_id);
+                if goal.is_some() {
+                    crate::agent_sessions::retire_goal_pins(session_id)
+                        .map_err(VmError::Runtime)?;
+                }
                 if let Some(directive) = operator_steer_directive(&message, goal.as_ref()) {
                     crate::agent_sessions::inject_reminder(session_id, directive)
                         .map_err(VmError::Runtime)?;

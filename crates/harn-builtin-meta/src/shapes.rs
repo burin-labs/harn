@@ -493,9 +493,33 @@ pub const LLM_USAGE: Ty = Ty::Shape(&[
     ShapeFieldDescriptor::optional("invalid_modality_counts", TY_BOOL),
 ]);
 
+/// Selection provenance for a provider-confirmed reasoning effort.
+pub const REASONING_EFFORT_SOURCE: Ty = Ty::Union(&[
+    Ty::LitString("operator"),
+    Ty::LitString("catalog"),
+    Ty::LitString("policy"),
+    Ty::LitString("request"),
+    Ty::LitString("provider_default"),
+    Ty::LitString("provider_adjusted"),
+]);
+
+/// Provider-confirmed effort or an explicit absence of an effort report.
+pub const EFFECTIVE_REASONING_EFFORT: Ty = Ty::Union(&[
+    Ty::Shape(&[ShapeFieldDescriptor::new(
+        "status",
+        Ty::LitString("not_reported"),
+    )]),
+    Ty::Shape(&[
+        ShapeFieldDescriptor::new("status", Ty::LitString("reported")),
+        ShapeFieldDescriptor::new("level", TY_STRING),
+        ShapeFieldDescriptor::new("source", REASONING_EFFORT_SOURCE),
+    ]),
+]);
+
 /// Harn-facing response dict assembled by `vm_build_llm_result` for
 /// `llm_call` and `llm_completion`.
 pub const LLM_CALL_RESULT: Ty = Ty::Shape(&[
+    ShapeFieldDescriptor::new("effective_reasoning_effort", EFFECTIVE_REASONING_EFFORT),
     ShapeFieldDescriptor::new("text", TY_STRING),
     ShapeFieldDescriptor::new("model", TY_STRING),
     ShapeFieldDescriptor::new("provider", TY_STRING),

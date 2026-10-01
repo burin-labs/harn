@@ -71,7 +71,7 @@ pub(in crate::commands::test) async fn run_parallel_conformance_tests(
                 if !output.stderr.is_empty() {
                     eprint!("{}", String::from_utf8_lossy(&output.stderr));
                 }
-                match parse_worker_report(worker.index, &output.stdout) {
+                match parse_worker_report(worker.index, &output) {
                     Ok(mut report) => results.append(&mut report.results),
                     Err(error) => {
                         infrastructure_error = Some(error);
@@ -242,12 +242,26 @@ async fn spawn_worker(
     })
 }
 
-fn parse_worker_report(index: usize, stdout: &[u8]) -> Result<ConformanceJsonReport, String> {
-    let envelope: JsonEnvelope<ConformanceJsonReport> =
-        serde_json::from_slice(stdout).map_err(|e| {
+fn parse_worker_report(
+    index: usize,
+    output: &process::Output,
+) -> Result<ConformanceJsonReport, String> {
+    if output.stdout.is_empty() {
+        return Err(if output.status.success() {
+            format!("conformance worker {index} exited successfully without a report")
+        } else {
             format!(
-                "conformance worker {index} returned invalid JSON: {e}\n{}",
-                String::from_utf8_lossy(stdout)
+                "conformance worker {index} terminated with {} before producing results",
+                output.status
+            )
+        });
+    }
+    let envelope: JsonEnvelope<ConformanceJsonReport> = serde_json::from_slice(&output.stdout)
+        .map_err(|e| {
+            format!(
+                "conformance worker {index} returned invalid JSON (worker status: {}): {e}\n{}",
+                output.status,
+                String::from_utf8_lossy(&output.stdout)
             )
         })?;
     if envelope.schema_version != CONFORMANCE_TEST_SCHEMA_VERSION {
@@ -408,6 +422,22 @@ fn test_report_from_conformance(
 mod tests {
     use super::*;
 
+    #[cfg(unix)]
+    use std::os::unix::process::ExitStatusExt;
+    #[cfg(windows)]
+    use std::os::windows::process::ExitStatusExt;
+
+    fn exit_status(code: u32) -> process::ExitStatus {
+        #[cfg(unix)]
+        {
+            process::ExitStatus::from_raw((code as i32) << 8)
+        }
+        #[cfg(windows)]
+        {
+            process::ExitStatus::from_raw(code)
+        }
+    }
+
     #[test]
     fn worker_reports_are_parsed_from_failed_test_processes() {
         let report = ConformanceJsonReport::new(
@@ -437,9 +467,49 @@ mod tests {
         };
         let encoded = serde_json::to_vec(&envelope).unwrap();
 
-        let parsed = parse_worker_report(2, &encoded).unwrap();
+        let parsed = parse_worker_report(
+            2,
+            &process::Output {
+                status: exit_status(1),
+                stdout: encoded,
+                stderr: Vec::new(),
+            },
+        )
+        .unwrap();
 
         assert_eq!(parsed.results.len(), 1);
         assert_eq!(parsed.results[0].name, "failure.harn");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn dead_worker_is_not_reported_as_invalid_json() {
+        let output = process::Output {
+            status: process::ExitStatus::from_raw(libc::SIGABRT),
+            stdout: Vec::new(),
+            stderr: b"fatal runtime error: stack overflow".to_vec(),
+        };
+        let error = parse_worker_report(8, &output).unwrap_err();
+        assert!(
+            error.contains("conformance worker 8 terminated with signal"),
+            "{error}"
+        );
+        assert!(error.contains("before producing results"), "{error}");
+        assert!(!error.contains("invalid JSON"), "{error}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn empty_successful_worker_is_not_a_pass() {
+        let output = process::Output {
+            status: process::ExitStatus::from_raw(0),
+            stdout: Vec::new(),
+            stderr: Vec::new(),
+        };
+        let error = parse_worker_report(3, &output).unwrap_err();
+        assert_eq!(
+            error,
+            "conformance worker 3 exited successfully without a report"
+        );
     }
 }

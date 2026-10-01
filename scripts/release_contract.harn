@@ -1,4 +1,4 @@
-import { read_json_result, read_yaml } from "std/fs"
+import { read_json_result } from "std/fs"
 import "std/schema"
 import { path_visibility } from "./path_visibility.harn"
 
@@ -16,12 +16,44 @@ pub type ReleaseTagContract = {
   candidate_trailer: "Harn-Release-Candidate",
 }
 
-pub type ReleaseWorkflowContract = {
-  path: string,
-  name: string,
-  dispatch_inputs: list<string>,
-  jobs: list<string>,
-  observed_steps: list<string>,
+pub type SourceCandidateRequest = {
+  event: string,
+  ref_type: string,
+  ref_name: string,
+  runner_profile: string,
+  warm_cache_only: bool,
+  benchmark_only: bool,
+  targets: string,
+  benchmark_source_ref: string,
+  benchmark_source_sha: string,
+  benchmark_cargo_bloat: bool,
+}
+
+pub type SourceCandidateDecision = {
+  schema_version: "harn.source_candidate_decision.v1",
+  accepted: bool,
+  reason: "accepted" \
+    | "wrong_event" \
+    | "wrong_ref" \
+    | "wrong_runner_profile" \
+    | "conflicting_inputs" \
+    | "invalid_request",
+  build_mode: "candidate" | "none",
+  candidate_purpose: "source" | "none",
+}
+
+/**
+ * Which dispatch may build a signed source candidate. Only this repository's
+ * producer reads it, so it is not part of the projected cross-repository
+ * contract below.
+ */
+pub type SourceCandidatePolicy = {
+  event: "workflow_dispatch",
+  ref_type: "branch",
+  ref_name: "main",
+  runner_profile: "policy",
+  build_mode: "candidate",
+  purpose: "source",
 }
 
 pub type ReleaseContract = {
@@ -29,7 +61,17 @@ pub type ReleaseContract = {
   versions: ReleaseVersionContract,
   changelog: {published_heading: "top_version_heading", candidate_fragments: "must_be_folded"},
   tag: ReleaseTagContract,
-  workflows: {publish: ReleaseWorkflowContract, binaries: ReleaseWorkflowContract},
+}
+
+pub fn source_candidate_policy() -> SourceCandidatePolicy {
+  return {
+    event: "workflow_dispatch",
+    ref_type: "branch",
+    ref_name: "main",
+    runner_profile: "policy",
+    build_mode: "candidate",
+    purpose: "source",
+  }
 }
 
 /** Harn's release semantics, projected for orchestrators and recovery tools. */
@@ -47,57 +89,64 @@ pub fn release_contract() -> ReleaseContract {
       release_subject_template: "Release v{version}",
       candidate_trailer: "Harn-Release-Candidate",
     },
-    workflows: {
-      publish: {
-        path: ".github/workflows/publish-release.yml",
-        name: "Publish release",
-        dispatch_inputs: [
-          "tag",
-          "expected_source_sha",
-          "expected_policy_sha",
-          "bootstrap_new_crates",
-          "skip_dry_run",
-          "reaudit",
-          "allow_unfolded_fragments",
-        ],
-        jobs: ["detect-drift", "publish"],
-        observed_steps: [
-          "Compare Cargo.toml workspace version to latest vX.Y.Z tag",
-          "Publish release",
-        ],
-      },
-      binaries: {
-        path: ".github/workflows/build-release-binaries.yml",
-        name: "Build release binaries",
-        dispatch_inputs: [
-          "warm_cache_only",
-          "targets",
-          "benchmark_only",
-          "benchmark_source_ref",
-          "benchmark_source_sha",
-          "benchmark_cargo_bloat",
-          "runner_profile",
-        ],
-        jobs: [
-          "setup",
-          "prepare_cli_aot",
-          "build",
-          "collect_candidate_manifest",
-          "release-residual-audit",
-          "release-smoke",
-          "cache_budget",
-        ],
-        observed_steps: [
-          "Verify benchmark source revision",
-          "Verify candidate source revision",
-          "Check the distribution fuse",
-          "Evaluate the binary-size growth signal",
-          "Validate the candidate manifest",
-          "Run the release residual audit",
-        ],
-      },
-    },
   }
+}
+
+/** One request decision, shared by workflow and local producer callers. */
+pub fn source_candidate_decision(request: SourceCandidateRequest) -> SourceCandidateDecision {
+  const policy = source_candidate_policy()
+  let reason = "accepted"
+  if request.event != policy.event {
+    reason = "wrong_event"
+  } else if request.ref_type != policy.ref_type || request.ref_name != policy.ref_name {
+    reason = "wrong_ref"
+  } else if request.runner_profile != policy.runner_profile {
+    reason = "wrong_runner_profile"
+  } else if request.warm_cache_only || request.benchmark_only || request.targets != ""
+    || request.benchmark_source_ref != ""
+    || request.benchmark_source_sha != ""
+    || request.benchmark_cargo_bloat {
+    reason = "conflicting_inputs"
+  }
+  const accepted = reason == "accepted"
+  return {
+    schema_version: "harn.source_candidate_decision.v1",
+    accepted: accepted,
+    reason: reason,
+    build_mode: accepted ? policy.build_mode : "none",
+    candidate_purpose: accepted ? policy.purpose : "none",
+  }
+}
+
+/** Validate external requests once before the typed decision owner. */
+pub fn source_candidate_decision_parse(value: unknown) -> SourceCandidateDecision {
+  const report = schema_validator(
+    schema_closed_object(
+      {
+        event: schema_string(),
+        ref_type: schema_string(),
+        ref_name: schema_string(),
+        runner_profile: schema_string(),
+        warm_cache_only: schema_bool(),
+        benchmark_only: schema_bool(),
+        targets: schema_string(),
+        benchmark_source_ref: schema_string(),
+        benchmark_source_sha: schema_string(),
+        benchmark_cargo_bloat: schema_bool(),
+      },
+    ),
+  )
+    .report(value)
+  if !report.ok {
+    return {
+      schema_version: "harn.source_candidate_decision.v1",
+      accepted: false,
+      reason: "invalid_request",
+      build_mode: "none",
+      candidate_purpose: "none",
+    }
+  }
+  return source_candidate_decision(report.value)
 }
 
 /** The suffix used by Harn's release metadata implementation. */
@@ -106,15 +155,6 @@ pub fn release_development_prerelease() -> string {
 }
 
 pub fn release_contract_schema() {
-  const workflow = schema_closed_object(
-    {
-      path: schema_string() + {min_len: 1},
-      name: schema_string() + {min_len: 1},
-      dispatch_inputs: schema_list(schema_string() + {min_len: 1}),
-      jobs: schema_list(schema_string() + {min_len: 1}),
-      observed_steps: schema_list(schema_string() + {min_len: 1}),
-    },
-  )
   return schema_closed_object(
     {
       schema_version: schema_literal("harn.release_contract.v1"),
@@ -140,7 +180,6 @@ pub fn release_contract_schema() {
           candidate_trailer: schema_literal("Harn-Release-Candidate"),
         },
       ),
-      workflows: schema_closed_object({publish: workflow, binaries: workflow}),
     },
   )
 }
@@ -153,71 +192,9 @@ pub fn release_contract_parse(value: unknown) -> ReleaseContract? {
   return report.value
 }
 
-fn keys(value: any) -> list<string> {
-  if type_of(value) != "dict" {
-    return []
-  }
-  return value.keys().map({ key -> to_string(key) }).to_list()
-}
-
-fn workflow_step_names(document: any) -> list<string> {
-  let names: list<string> = []
-  for job_name in keys(document?.jobs) {
-    for step in document?.jobs?.get(job_name)?.steps ?? [] {
-      if type_of(step?.name) == "string" {
-        names = names + [step.name]
-      }
-    }
-  }
-  return names
-}
-
-/** Structural names consumed across repository boundaries that no rename may silently strand. */
-pub fn release_contract_source_errors(
-  fs: HarnessFs,
-  root: string,
-  contract: ReleaseContract,
-) -> list<string> {
+/** Owning sources that must consume the generated contract instead of restating it. */
+pub fn release_contract_source_errors(fs: HarnessFs, root: string) -> list<string> {
   let errors: list<string> = []
-  for workflow in [contract.workflows.publish, contract.workflows.binaries] {
-    const path = path_join(root, workflow.path)
-    const seen = path_visibility(fs, "release-contract", path)
-    if seen.denial != "" {
-      errors = errors + [seen.denial]
-      continue
-    }
-    if !seen.exists {
-      errors = errors + ["missing workflow " + workflow.path]
-      continue
-    }
-    const document = read_yaml(fs, path, nil)
-    if document?.name != workflow.name {
-      errors = errors + [workflow.path + " does not declare workflow name `" + workflow.name + "`"]
-    }
-    const inputs = keys(document?.on?.workflow_dispatch?.inputs)
-    for input in workflow.dispatch_inputs {
-      if !inputs.contains(input) {
-        errors = errors + [workflow.path + " is missing dispatch input `" + input + "`"]
-      }
-    }
-    for input in inputs {
-      if !workflow.dispatch_inputs.contains(input) {
-        errors = errors + [workflow.path + " has undeclared dispatch input `" + input + "`"]
-      }
-    }
-    const jobs = keys(document?.jobs)
-    for job in workflow.jobs {
-      if !jobs.contains(job) {
-        errors = errors + [workflow.path + " is missing job `" + job + "`"]
-      }
-    }
-    const steps = workflow_step_names(document)
-    for step in workflow.observed_steps {
-      if !steps.contains(step) {
-        errors = errors + [workflow.path + " is missing observed step `" + step + "`"]
-      }
-    }
-  }
   const version_source = fs.read_text(path_join(root, "scripts/release_metadata.harn"))
   if !version_source.contains("release_development_prerelease()") {
     errors = errors + ["release_metadata.harn bypasses the typed development-prerelease owner"]
@@ -244,13 +221,26 @@ fn flag_value(args: list<string>, name: string, fallback: string) -> string {
 }
 
 fn main(harness: Harness) {
+  const request_path = flag_value(argv, "--source-candidate-request", "")
+  if request_path != "" {
+    const request = read_json_result(harness.fs, request_path)
+    if is_err(request) {
+      harness.stdio.eprintln("source candidate request cannot be read: " + request_path)
+    }
+    const decision = source_candidate_decision_parse(is_ok(request) ? unwrap(request) : nil)
+    harness.stdio.println(json_stringify(decision))
+    if !decision.accepted {
+      harness.runtime.exit(2)
+    }
+    return
+  }
   const root = flag_value(argv, "--root", ".")
   const output = flag_value(argv, "--output", "scripts/release_contract.json")
   const shell_output = flag_value(argv, "--shell-output", "scripts/release_contract.env")
   const check = argv.contains("--check")
   const contract = release_contract()
   const rendered = json_stringify(contract) + "\n"
-  const errors = release_contract_source_errors(harness.fs, root, contract)
+  const errors = release_contract_source_errors(harness.fs, root)
   if len(errors) > 0 {
     for error in errors {
       harness.stdio.eprintln("release contract: " + error)

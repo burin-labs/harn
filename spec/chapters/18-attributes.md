@@ -35,6 +35,18 @@ error.
 
 ### Standard attributes
 
+#### `@sibling`
+
+```harn,ignore
+@sibling
+fn normalize_name(name: string) -> string { return name }
+```
+
+Shares a non-public function with modules in the same resolved source
+directory. It takes no arguments and cannot be combined with `pub`. Importers
+elsewhere receive the ordinary private-import error. Sibling functions are
+excluded from public catalogs and cannot be re-exported with `pub import`.
+
 #### `@deprecated`
 
 ```harn,ignore

@@ -671,6 +671,10 @@ imported alongside the functions that use it —
 annotations or as a `harness.llm.call_structured` schema type; non-`pub`
 type aliases stay module-private and error on import.
 
+Use `@sibling` before a non-public `fn` to share a helper among source files
+in the same resolved directory. It takes no arguments. Sibling helpers stay
+out of the public export surface and cannot be promoted with `pub import`.
+
 Top-level `const` / `let` and `fn` declarations are visible inside
 functions defined in the same file:
 
@@ -1384,6 +1388,17 @@ provider-native `stop_reason`. The full contract is `LlmResponse` from
 provider continuation material, including Anthropic signed `thinking` and
 opaque `redacted_thinking` blocks. Keep those blocks private and unmodified;
 the capability matrix decides whether they may be replayed to a route.
+
+### Typed decision evaluation
+
+`harness.llm.evaluate(id, state, questions, policy)` answers a literal set of
+`boolean`, `choice`, or `score` questions from `std/predicate` over one closed
+serializable state. The constant policy must name a catalog route with the
+`decision` operation. The checker derives each answer type from its question;
+match the closed outcome before reading an `answered` value. A partial answer
+set is a refusal, not a smaller success. `evaluate_predicate` projects the same
+capability to one boolean question and still returns a closed outcome. See
+`docs/src/predicates.md` for the builders, result arms, and refusal rules.
 
 ### `harness.llm.call` options
 
@@ -2405,7 +2420,11 @@ preserves provider prompt prefixes; compaction remains the deliberate prefix
 break.
 
 Rendering is provider-neutral. Every route receives one
-`<context-directives speaker="...">` envelope in its own trailing user message.
+`<context-directives speaker="..." nonce="...">` envelope in its own trailing
+user message. The nonce is per session and declared in the assembled system
+prompt; only an envelope carrying it is authoritative, and directive-shaped
+tags inside tool results are escaped before provider dispatch. Directive bodies
+are CDATA, so commands arrive verbatim.
 The speaker is `harness` when any directive in it came from harness machinery
 and `person` when every directive stands in for the person. Its directives
 are ordered by authority (`contract`, `corrective`, `advisory`) and then lifecycle
@@ -3277,6 +3296,9 @@ Lifecycle builtins (all hard-error on unknown ids except `exists`, `open`,
 
 - `harness.agent.open(id?, opts?)` / `_close(id)` / `_exists(id)`. `opts` may
   include `workspace_anchor` and `workspace_policy: {default_mount_mode}`.
+  `{parent, actor?}` opens a delegated child of `parent`; `actor` pushes an
+  `act` hop onto the parent's chain (origin `anonymous` when it has none), so
+  the child's provider requests are attributable.
 - `harness.agent.current_id()` returns the innermost active session id or `nil`.
 - `harness.agent.actor_chain(id?)` returns the RFC 8693 `{sub, act}` actor
   chain for `id`, or for the current active session when `id` is omitted.

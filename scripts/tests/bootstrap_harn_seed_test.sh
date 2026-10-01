@@ -10,7 +10,7 @@ mkdir -p "$fixture/archive" "$tools"
 
 cat > "$fixture/archive/harn" <<'SEED'
 #!/bin/sh
-exit 0
+exit "${HARN_SEED_TEST_EXIT_CODE:-0}"
 SEED
 chmod +x "$fixture/archive/harn"
 tar -czf "$fixture/harn-x86_64-unknown-linux-gnu.tar.gz" -C "$fixture/archive" harn
@@ -51,6 +51,7 @@ chmod +x "$tools/uname" "$tools/curl"
 
 run_seed() {
   PATH="$tools:$PATH" \
+  TMPDIR="$scratch" \
   XDG_CACHE_HOME="$scratch/cache-home" \
   HARN_EXT_BOOTSTRAP_SEED_VERSION=9.8.7 \
   HARN_SEED_TEST_FIXTURE="$fixture" \
@@ -70,6 +71,67 @@ run_seed >/dev/null
 cache=$scratch/cache-home/harn/bootstrap-seed/9.8.7/x86_64-unknown-linux-gnu
 cmp "$fixture/SHA256SUMS" "$cache/SHA256SUMS"
 cmp "$fixture/harn-x86_64-unknown-linux-gnu.tar.gz" "$cache/harn-x86_64-unknown-linux-gnu.tar.gz"
+
+# Drive the adapter's real EXIT trap with a simulated executable lock. Keep
+# the scratch root outside the tool shim so the test can remove leftovers.
+real_rm=$(command -v rm)
+export HARN_SEED_TEST_REAL_RM="$real_rm"
+cat > "$tools/rm" <<'EOF'
+#!/bin/sh
+for argument do
+  case "$argument" in
+    */harn-seed.*)
+      printf '%s\n' "$argument" > "$HARN_SEED_TEST_LEFTOVER"
+      echo 'simulated Windows executable lock' >&2
+      exit 1
+      ;;
+  esac
+done
+exec "$HARN_SEED_TEST_REAL_RM" "$@"
+EOF
+chmod +x "$tools/rm"
+export HARN_SEED_TEST_LEFTOVER="$scratch/leftover"
+if run_seed > "$scratch/locked.stdout" 2> "$scratch/locked.stderr"; then
+  status=0
+else
+  status=$?
+fi
+[ "$status" = 0 ] || { echo "verified seed failed on cleanup: status=$status" >&2; exit 1; }
+leftover=$(cat "$HARN_SEED_TEST_LEFTOVER")
+test -f "$leftover/harn"
+grep -F "warning: bootstrap seed cleanup left $leftover" "$scratch/locked.stderr" >/dev/null
+"$real_rm" -rf "$leftover"
+
+# A seed/verification failure must survive a simultaneous cleanup failure.
+export HARN_SEED_TEST_EXIT_CODE=7
+if run_seed > "$scratch/failed.stdout" 2> "$scratch/failed.stderr"; then
+  status=0
+else
+  status=$?
+fi
+[ "$status" = 7 ] || { echo "seed failure was masked by cleanup: status=$status" >&2; exit 1; }
+leftover=$(cat "$HARN_SEED_TEST_LEFTOVER")
+test -f "$leftover/harn"
+grep -F "warning: bootstrap seed cleanup left $leftover" "$scratch/failed.stderr" >/dev/null
+"$real_rm" -rf "$leftover"
+unset HARN_SEED_TEST_EXIT_CODE
+
+# Corrupt bytes must still fail verification even when cleanup also fails.
+cp "$fixture/harn-x86_64-unknown-linux-gnu.tar.gz" "$fixture/archive.valid"
+printf '%s\n' corrupt > "$fixture/harn-x86_64-unknown-linux-gnu.tar.gz"
+"$real_rm" -f "$cache/harn-x86_64-unknown-linux-gnu.tar.gz"
+if run_seed > "$scratch/corrupt.stdout" 2> "$scratch/corrupt.stderr"; then
+  echo 'corrupt seed unexpectedly passed verification' >&2
+  exit 1
+fi
+grep -F 'seed checksum mismatch' "$scratch/corrupt.stderr" >/dev/null
+leftover=$(cat "$HARN_SEED_TEST_LEFTOVER")
+grep -F "warning: bootstrap seed cleanup left $leftover" "$scratch/corrupt.stderr" >/dev/null
+test ! -e "$cache/harn-x86_64-unknown-linux-gnu.tar.gz"
+"$real_rm" -rf "$leftover"
+cp "$fixture/archive.valid" "$fixture/harn-x86_64-unknown-linux-gnu.tar.gz"
+"$real_rm" -f "$tools/rm"
+run_seed >/dev/null
 
 PATH="$tools:$PATH" \
 XDG_CACHE_HOME="$scratch/cache-home" \

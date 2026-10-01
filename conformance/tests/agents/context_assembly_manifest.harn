@@ -18,9 +18,11 @@ pipeline main(harness: Harness) {
         harness.fs.workspace_temp_dir(),
         "harn-context-assembly-manifest-" + harness.random.uuid(),
       )
+      const session_id = "context-assembly-manifest-" + harness.random.uuid()
+      const _ = harness.agent.open(session_id)
       const replacement: SystemReplacement = {mode: "replace", content: REPLACEMENT}
       const explained = harness.agent.prompt_explain(
-        {system: replacement, call_role: "model.router"},
+        {system: replacement, call_role: "model.router", session_id: session_id},
       )
       const opts: AgentSpec = {
         provider: "mock",
@@ -31,6 +33,7 @@ pipeline main(harness: Harness) {
         done_sentinel: "##DONE##",
         max_iterations: 1,
         llm_transcript_dir: transcript_dir,
+        session_id: session_id,
       }
       const result = agent_loop(harness, "Complete the task.", "must not leak", opts)
       const records = read_jsonl(
@@ -58,7 +61,7 @@ pipeline main(harness: Harness) {
       harness.stdio.println(manifest.segments[0].id == "replacement")
       harness.stdio.println(manifest.segments[0].producer == "caller")
       harness.stdio.println(manifest.segments[0].included)
-      harness.stdio.println(manifest.segments[0].bytes == len(REPLACEMENT))
+      harness.stdio.println(manifest.segments[0].bytes > len(REPLACEMENT))
       harness.stdio.println(manifest.segments[0].digest == explained.fragments[0].digest)
       harness.stdio.println(manifest.whole_prompt_digest == explained.whole_prompt_digest)
       harness.stdio.println(manifest.system_prompt_bytes == explained.system_prompt_bytes)

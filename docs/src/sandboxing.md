@@ -32,8 +32,9 @@ Three terms show up throughout, so it helps to pin them down first:
 Confinement then comes in two layers. Harn checks every path itself, against
 the roots in the active policy. Separately, when a script spawns a
 subprocess, the operating system confines that child using whatever mechanism
-the platform provides: Landlock on Linux, `sandbox-exec` on macOS,
-AppContainer on Windows.
+the platform provides: Landlock on Linux, `sandbox-exec` on macOS. Windows has
+no OS sandbox, so a child there runs unconfined; see
+[Windows](#windows-and-other-platforms-without-a-backend).
 
 Both layers stay in force alongside approval policy, the separate rule set
 that decides which risky operations have to ask a human first. None of the
@@ -194,10 +195,9 @@ A profile decides two independent questions:
   and `read_only_roots`, plus the launch-cwd check for subprocesses. It
   is portable and deterministic, because Harn performs it itself.
 - **OS confinement** — is a platform mechanism (Linux Landlock+seccomp,
-  macOS sandbox-exec, Windows AppContainer) applied to spawned
-  subprocesses? This depends on a mechanism that may be unavailable, and
-  it is the only axis that can deny a child something Harn never asked
-  about.
+  macOS sandbox-exec) applied to spawned subprocesses? Windows has
+  none. This depends on a mechanism that may be unavailable, and it is
+  the only axis that can deny a child something Harn never asked about.
 
 | Profile | Path enforcement | OS confinement | When the spawn fails |
 |---|---|---|---|
@@ -217,9 +217,10 @@ so path scoping alone is not containment.
 
 Top-level `agent_loop` sessions install an empty-ceiling `os_hardened`
 carrier by default, so agent subprocess tools require the OS sandbox
-even when the caller did not pass an explicit capability policy. Direct
-scripts and process calls keep the `worktree` default unless their
-caller selects a stricter profile.
+even when the caller did not pass an explicit capability policy. On
+Windows, which has none, those tools are refused. Direct scripts and
+process calls keep the `worktree` default unless their caller selects a
+stricter profile.
 
 The strictness ladder is `unrestricted < workspace_paths < worktree <
 wasi < os_hardened`. `CapabilityPolicy::intersect` always picks the
@@ -233,17 +234,42 @@ for the `worktree` profile. `os_hardened` ignores the env var on
 purpose: a profile that means "the OS sandbox is required" cannot be
 silently downgraded by an environment variable.
 
+### What each backend confines
+
+OS confinement is not one thing. Each backend's mechanism holds a confined child
+to some dimensions of the policy and not others, and this table is the runtime's
+statement of which. `harn doctor` reports the active backend's row, and an
+`os_hardened` spawn is refused when its policy requires a dimension the row marks
+`not enforced`. Other profiles run, and the row is their receipt.
+
+A cell is filled only from what the sandbox conformance suite measures on that
+platform, and the suite judges every case against it, so a cell that claims more
+or less than the backend does fails a named case. `unmeasured` means no
+measurement backs a claim either way. Network confinement is only required below
+the `network` ceiling. No policy term requires process confinement yet.
+
+<!-- sandbox-enforcement-table:begin -->
+| Backend | writes | reads | credential reads | network | process |
+|---|---|---|---|---|---|
+| Linux Landlock | enforced | enforced | enforced | enforced | unmeasured |
+| macOS sandbox-exec | enforced | enforced | enforced | enforced | unmeasured |
+| OpenBSD unveil | unmeasured | unmeasured | unmeasured | unmeasured | unmeasured |
+| No OS sandbox | not enforced | not enforced | not enforced | not enforced | unmeasured |
+<!-- sandbox-enforcement-table:end -->
+
 ### Reading a mechanism refusal
 
 A spawn refused because the platform mechanism could not be attached carries
 the cause as typed fields rather than as advice prose. The caught value is a
 `tool_rejected` dict whose `source` is `sandbox_mechanism` and whose
 `sandbox_mechanism` member names the `mechanism` (`linux_landlock`,
-`macos_sandbox_exec`, `windows_app_container`), the `availability`
-(`absent_on_host` or `entry_point_cannot_attach`), the requested `profile`, the
-unsatisfied `requirement` (`profile` or `fallback`), and `selector_honored` —
+`macos_sandbox_exec`, `openbsd_unveil`, or `none` on a platform with no OS
+sandbox), the `availability` (`absent_on_host` or `does_not_confine`), the requested `profile`, the unsatisfied `requirement`
+(`profile` or `fallback`), and `selector_honored` —
 false when the requested profile requires the mechanism outright, so no
-`HARN_HANDLER_SANDBOX` value can weaken it.
+`HARN_HANDLER_SANDBOX` value can weaken it. A `does_not_confine` refusal also
+lists the table dimensions the profile required and the backend does not hold,
+as `unconfined` (for example `["reads", "network"]`).
 
 Harn's own message states the mechanism fact and nothing else. Which control an
 operator actually has depends on the embedding product: an embedder that hardens
@@ -270,7 +296,8 @@ those paths unless they are also in `workspace_roots` or `read_only_roots`.
     "read_roots": ["/opt/vendor-sdk"],
     "write_roots": ["/opt/vendor-cache"],
     "allow_tcp_loopback": false,
-    "unix_socket_roots": []
+    "unix_socket_roots": [],
+    "allow_child_workspace_write": false
   }
 }
 ```
@@ -284,14 +311,23 @@ those paths unless they are also in `workspace_roots` or `read_only_roots`.
   `~/.rustup`, `~/.cargo`, `~/.pyenv`, `~/.nvm`, `~/.volta`, and `~/go`.
 - `package_manager_config`: read-only per-user npm, pip, cargo, git, and CA
   config/cache roots under `$HOME`, such as `.npmrc`, `.gitconfig`, `.netrc`,
-  `.config`, `.cache`, and cargo config/registry paths.
-- `user_temp`: scratch/cache roots used by developer tools. These roots are
-  writable only when the active capability policy already allows workspace
-  writes.
+  `.config/git`, `.config/pip`, `.config/rustfmt`, `.cache/pip`, and cargo
+  config paths. It doesn't grant all of `.config` or `.cache`. See the
+  [measured toolchain paths](./sandbox-config-census.md) and
+  [credential denials](./sandbox-read-deny-reference.md).
+- `user_temp`: the session's own temp dir, `.harn-tmp` in the first
+  workspace root, which the child's `TMPDIR`, `TMP`, and `TEMP` name. On macOS
+  it also covers Foundation's atomic-replacement staging dir
+  (`TemporaryItems` in the per-user temp dir), which SwiftPM's build-file
+  writes need. The host's shared temp dirs (`/tmp`, `/var/folders`) are never
+  granted: they hold every other process's files. Caches that default there,
+  such as clang's module cache and xcrun's lookup cache, are pointed into the
+  workspace by the child's environment instead. Writable only when the active
+  policy lets child processes write (see `allow_child_workspace_write` below).
 
 An explicit empty `presets: []` disables every named preset. `read_roots` and
-`write_roots` are for subprocesses only; `write_roots` are also gated by the
-workspace-write capability. `CapabilityPolicy::intersect` narrows presets and
+`write_roots` are for subprocesses only; `write_roots` are also gated by
+whether child processes may write at all. `CapabilityPolicy::intersect` narrows presets and
 roots to their common set, so managed or parent ceilings can prevent a child
 policy from adding host filesystem reach. `read_deny_roots` is the one subtractive term: it beats every
 grant, and it unions rather than intersects as policies nest, because narrowing
@@ -302,6 +338,38 @@ a denial would widen authority. See the
 nor erase an outer host grant. `unix_socket_roots` follows the same rule: a
 nested policy keeps only the roots the outer grant already covers. Stage-policy validation also rejects a flattened
 child that tries to introduce it beyond its ceiling.
+
+#### Child writes for read-only roles
+
+A child process may write its writable roots (the workspace roots,
+`write_roots`, the session temp dir, and the toolchain caches) when the policy's
+`workspace` capability grants `write_text` or `delete`, when `capabilities` is
+empty, or when `process_sandbox.allow_child_workspace_write` is `true`.
+Otherwise it can write nothing, not even its `TMPDIR`, and every build or test
+it runs fails on its first write.
+
+`allow_child_workspace_write` exists for roles whose tools run commands but edit
+nothing, such as a reviewer or a verifier:
+
+```json
+{
+  "capabilities": {"process": ["exec"], "workspace": ["read_text", "list"]},
+  "sandbox_profile": "os_hardened",
+  "process_sandbox": {"allow_child_workspace_write": true}
+}
+```
+
+It changes only the OS profile rendered for child processes. Harn's own file
+builtins still read the `workspace` capability, so the role above cannot call
+`write_text`. `read_only_roots` stay unwritable to the child on every backend,
+and nothing outside the writable roots becomes writable. A nested policy keeps
+the grant only when its ceiling's children could already write, through the
+same grant or through the ceiling's `workspace` capability; stage-policy
+validation rejects a flattened child that adds it beyond that. The
+`harn run` provenance receipt reports `process_child_writes` (whether children
+may write) and `process_child_workspace_write_granted` (whether the grant is
+what allowed it), and a refused write under a policy whose children may write
+nowhere is explained as the missing grant.
 
 ### Running real toolchains in the sandbox
 
@@ -325,23 +393,21 @@ the Unix desktop backends grant child processes read-only access to common
 home-scoped toolchain and package-manager roots under the first absolute
 `$HOME`. That includes user-managed runtimes such as `.local/share/uv`,
 `.cargo`, `.rustup`, `.pyenv`, `.nvm`, `.volta`, and `go`, plus
-package-manager config/cache paths such as `.npmrc`, `.gitconfig`, `.netrc`,
-`.yarnrc.yml`, `.config`, `.npm`, `.cache`, `.pip`, `.pypirc`, `.composer`,
-`Library/Preferences/pnpm`, `.cargo/config`, `.cargo/config.toml`,
-`.cargo/credentials`, `.cargo/credentials.toml`, `.cargo/registry`, and
-`.cargo/git`. These grants
-are process-only: Harn file builtins still need `workspace_roots` or
-`read_only_roots`, and the extra home-dir paths stay unwritable by the OS
-profile.
+package-manager config paths such as `.gitconfig`, `.yarnrc.yml`, `.pip`,
+`.composer`, and `.cargo/config.toml`. XDG grants cover only the
+[measured tool paths](./sandbox-config-census.md), and
+[credential denials](./sandbox-read-deny-reference.md) still win inside them.
+These grants are process-only: Harn file builtins still need `workspace_roots`
+or `read_only_roots`. Config roots stay read-only; developer-toolchain caches
+are writable when the policy permits child writes.
 
-Windows AppContainer confinement is more conservative for omitted presets:
-granting a home-scoped root requires mutating filesystem ACLs recursively, so
-the Windows backend does not materialize implicit default
-`developer_toolchains` or `package_manager_config` roots on every spawn. A
-policy that explicitly sets `process_sandbox.presets` still asks Windows to
-grant those preset roots, and `process_sandbox.read_roots` / `.write_roots`
-remain the preferred way to add the specific SDK, cache, or config directory a
-subprocess needs.
+For Git, the `package_manager_config` preset also asks the host's Git to
+resolve global and system config includes for each workspace. Included config
+files and paths those configs name for hooks, excludes, attributes, and direct
+credential-helper executables are readable by confined children. External
+paths gain no write grant, and repository-local config cannot add process read
+roots. Credential-helper data files are not inferred from helper arguments;
+on macOS and Linux, the credential read denylist still takes precedence.
 
 Other admitted child variables still come from the parent environment. That
 includes corporate proxy and CA variables such as `HTTP_PROXY`,
@@ -570,7 +636,8 @@ small, named kernel feature, never an open-ended escape hatch.
 | `workspace.delete` | Landlock `_REMOVE_DIR` + `_REMOVE_FILE` | removes scoped to `workspace_roots` |
 | `read_only_roots: [...]` | Landlock `_READ_FILE` + `_READ_DIR` + `_EXECUTE` only | each read-only root is readable but never writable, regardless of the `workspace.*` capabilities |
 | `process_sandbox.presets` includes `package_manager_config` | Landlock read-only rules for existing npm, pip, cargo, git, and CA config/cache roots under `$HOME` | package managers can resolve real per-user config without granting Harn file builtin access or write rights |
-| `process_sandbox.read_roots` / `.write_roots` | Landlock read-only rules, plus writable rules only when workspace writes are allowed | process-only roots for SDKs/caches without widening Harn file builtins |
+| `process_sandbox.allow_child_workspace_write` | the full write set above on `workspace_roots`, plus writable `process_sandbox.write_roots` and toolchain caches | a read-only role's children can build and test; `read_only_roots` keep read-only rules |
+| `process_sandbox.read_roots` / `.write_roots` | Landlock read-only rules, plus writable rules only when child writes are allowed | process-only roots for SDKs/caches without widening Harn file builtins |
 | standard process devices | Landlock grants read/write on `/dev/null` and read-only access on `/dev/zero`, `/dev/random`, and `/dev/urandom`; ABI ≥ 5 also handles `_IOCTL_DEV` but does not grant it to these device rules | language runtimes and test harnesses can open the devices they normally need without broad `/dev` access or device ioctl rights |
 | `side_effect_level < network` | seccomp-bpf allowlist excludes addressable socket openers: `socket`, `connect`, `accept`, `accept4`, `bind`, `listen`. `socketpair`, `sendto`, `sendmsg`, `recvfrom`, and `recvmsg` stay allowlisted for inherited anonymous local IPC | addressable-socket / egress syscalls fail with `EPERM`, while local IPC keeps working |
 | always | seccomp-bpf default-deny allowlist omits tier-1 dangerous syscalls including `bpf`, mount/module/kexec/sysctl families, `ptrace`, `process_vm_readv`/`process_vm_writev`, `io_uring_*`, `perf_event_open`, `userfaultfd`, `fanotify_init`, and `open_by_handle_at` | unknown and dangerous syscalls fail with `EPERM` |
@@ -590,9 +657,9 @@ falls back to the warn/enforce decision documented above.
 | standard process devices | `(allow file-read* ...)` for `/dev/null`, `/dev/zero`, `/dev/random`, `/dev/urandom`, `/dev/stdin`, `/dev/stdout`, `/dev/stderr`, and `/dev/fd`; `(allow file-write* ...)` only for `/dev/null`, `/dev/stdout`, `/dev/stderr`, and `/dev/fd` | common stdio, entropy, and zero devices work without granting broad `/dev` writes |
 | `process_sandbox.presets` | named read/write rules for `system_runtime`, `developer_toolchains`, `package_manager_config`, and `user_temp` | default process reach for system binaries, Xcode/Homebrew/toolchains, read-only package-manager home config, and per-user developer-tool caches without granting Harn file builtin access |
 | `process_sandbox.allow_tcp_loopback` | bind/inbound on local `localhost:*`; outbound to remote `localhost:*` | IPv4 and IPv6 loopback servers and clients work without opening remote egress |
-| `process_sandbox.unix_socket_roots` | `(allow network-bind (subpath "<root>"))`, `(allow network-inbound (subpath "<root>"))`, `(allow network-outbound (subpath "<root>"))` for each granted root, and for the UserTemp write roots (`/tmp`, `/var/folders`, …) when that preset is on | build servers bind and connect Unix-domain sockets whose socket file lives under a granted root or the platform temp dir; `subpath` never matches an IP endpoint, so no egress opens |
+| `process_sandbox.unix_socket_roots` | `(allow network-bind (subpath "<root>"))`, `(allow network-inbound (subpath "<root>"))`, `(allow network-outbound (subpath "<root>"))` for each granted root, and for the session temp dir when the `user_temp` preset is on | build servers bind and connect Unix-domain sockets whose socket file lives under a granted root or the session temp dir; a daemon that binds under the shared temp dirs (sbt under `/tmp/bsbt`) needs that root named; `subpath` never matches an IP endpoint, so no egress opens |
 | `workspace_roots: [...]` / `read_only_roots: [...]` | `(allow file-read* (subpath "<root>"))` | workspace and read-only roots are readable |
-| `workspace.write_text` / `workspace.delete` (or empty `capabilities`) | writable `user_temp`, `process_sandbox.write_roots`, and `workspace_roots`, followed by `(deny file-write* (subpath "<read_only_root>"))` | scratch dirs, explicit process-write roots, and writable `workspace_roots` are writable; each `read_only_roots` entry is then re-denied write. `sandbox-exec` is last-match-wins, so the trailing deny keeps a read-only root nested under a writable root unwritable even though the two lists are nominally disjoint |
+| `workspace.write_text` / `workspace.delete` (or empty `capabilities`, or `process_sandbox.allow_child_workspace_write`) | writable `user_temp`, `process_sandbox.write_roots`, and `workspace_roots`, followed by `(deny file-write* (subpath "<read_only_root>"))` | scratch dirs, explicit process-write roots, and writable `workspace_roots` are writable; each `read_only_roots` entry is then re-denied write. `sandbox-exec` is last-match-wins, so the trailing deny keeps a read-only root nested under a writable root unwritable even though the two lists are nominally disjoint |
 | `side_effect_level >= network` | `(allow network*)` | otherwise outbound network is denied |
 
 SwiftPM commands (`swift build`, `swift test`, `swift run`, and
@@ -608,38 +675,33 @@ mechanism Apple ships for non-App-Store binaries. We track that
 status in the file-level docstring and will switch to a supported
 successor when one exists.
 
-### Windows (`crates/harn-vm/src/stdlib/sandbox/windows.rs`)
-
-| Capability / policy | Win32 mechanism | Effect |
-|---|---|---|
-| always | `CreateAppContainerProfile` + `STARTUPINFOEX` + `PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES` | the process runs inside a per-spawn AppContainer with no capability SIDs |
-| always | `GetAppContainerFolderPath` plus child `LOCALAPPDATA` / `TEMP` / `TMP` overrides | child processes use AppContainer-owned profile and scratch directories instead of inheriting host-user temp paths that the AppContainer cannot access |
-| `workspace.write_text` / `workspace.delete` | `icacls /grant *<sid>:(OI)(CI)M /T /C` on each `workspace_roots` entry | the AppContainer SID gets Modify access on the roots; revoked on `Drop` |
-| read-only (denied workspace write, or any `read_only_roots` entry) | `icacls /grant *<sid>:(OI)(CI)RX /T /C` | the AppContainer SID gets ReadAndExecute; `read_only_roots` always use this grant even when workspace writes are allowed |
-| explicit `process_sandbox.presets` includes `developer_toolchains` / `package_manager_config` | `icacls /grant *<sid>:(OI)(CI)RX /T /C` on existing home-scoped preset roots | explicit preset requests get read-only access; omitted presets are not materialized as recursive ACL grants on Windows |
-| `process_sandbox.read_roots` / `.write_roots` | `icacls /grant *<sid>:(OI)(CI)RX` or Modify | process-only roots, with writes gated by workspace-write capability |
-| always | `CreateJobObjectW` with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`, `_DIE_ON_UNHANDLED_EXCEPTION`, `_ACTIVE_PROCESS` (cap 32), `_PROCESS_MEMORY` (cap 512 MiB) | resource caps and lifecycle binding |
-| `side_effect_level >= network` | AppContainer `internetClient` and `privateNetworkClientServer` capability SIDs | public-network client access plus private-network client and server (inbound) access; otherwise the AppContainer receives no network capability |
-| always | direct `CreateProcessW` with `CREATE_NO_WINDOW`, explicit handle list, `STARTF_USESTDHANDLES`, and Job Object UI restrictions | stdin/stdout/stderr inheritance is restricted to the three pipes the runtime created, console commands do not bind to an interactive desktop, and child UI escape surfaces stay disabled |
-
-`std::process::Command` cannot carry an AppContainer
-`SECURITY_CAPABILITIES` block, so Windows callers must use
-`process_sandbox::command_output(...)` (which goes through
-`SandboxBackend::run_to_output`). The `std_command_for` /
-`tokio_command_for` helpers warn-or-error per the active fallback
-policy.
-
 ### OpenBSD (`crates/harn-vm/src/stdlib/sandbox/openbsd.rs`)
 
 | Capability / policy | OpenBSD mechanism | Effect |
 |---|---|---|
 | always | `unveil("/bin", "rx")`, `("/usr", "rx")`, `("/lib", "rx")`, `("/etc", "r")`, `("/dev", "rw")` | minimum surface required to exec |
-| `workspace_roots: [...]` | `unveil("<root>", "rwcx" \| "rx")` | rwcx when `workspace.write_text` / `workspace.delete` present, otherwise rx |
+| `workspace_roots: [...]` | `unveil("<root>", "rwcx" \| "rx")` | rwcx when `workspace.write_text` / `workspace.delete` present or `process_sandbox.allow_child_workspace_write` is set, otherwise rx |
 | `read_only_roots: [...]` | `unveil("<root>", "rx")` | each read-only root is read+execute only, never write/create |
-| `process_sandbox.read_roots` / `.write_roots` | `unveil("<root>", "rx" \| "rwcx")` | process-only roots, with writes gated by workspace-write capability |
+| `process_sandbox.read_roots` / `.write_roots` | `unveil("<root>", "rx" \| "rwcx")` | process-only roots, with writes gated by whether child processes may write |
 | always | `pledge("stdio rpath proc exec", NULL)` | minimum process-exec promise set |
-| `workspace.write_text` / `workspace.delete` | adds `wpath cpath dpath` to pledge | filesystem mutation promises |
+| `workspace.write_text` / `workspace.delete`, or `process_sandbox.allow_child_workspace_write` | adds `wpath cpath dpath` to pledge | filesystem mutation promises |
 | `side_effect_level >= network` | adds `inet dns` to pledge | network promises |
+
+### Windows and other platforms without a backend
+
+Windows has no OS sandbox. A child process runs with the parent's full
+filesystem and network access, and Harn says so instead of passing silently:
+
+| Profile | On Windows |
+|---|---|
+| `os_hardened` | the spawn is refused before it starts, as a typed `does_not_confine` refusal naming mechanism `none` and every dimension the policy required |
+| `worktree` | the child runs unconfined after a one-time `handler_sandbox` warning, `this platform has no OS process sandbox; child processes run unconfined`; `HARN_HANDLER_SANDBOX=enforce` refuses instead |
+| `unrestricted`, `workspace_paths` | the child runs unconfined, as on every platform |
+
+`harn doctor` reports `backend=unconfined filesystem_mechanism=none
+active=false` and the `No OS sandbox` row of the table above. Harn's own path
+checks, the process environment it builds, and the launch-cwd check still
+apply. Any other platform without a backend behaves the same way.
 
 ## How spawns route
 
@@ -657,7 +719,7 @@ process_sandbox::{command_output, std_command_for, tokio_command_for}
         ├── linux::Backend       (pre_exec → seccomp + Landlock)
         ├── macos::Backend       (wrap with sandbox-exec)
         ├── openbsd::Backend     (pre_exec → unveil + pledge)
-        └── windows::Backend     (CreateProcessW with AppContainer + Job Object)
+        └── UnconfinedBackend    (Windows and others: no OS sandbox; warn, or refuse)
 ```
 
 The backend trait is defined in
@@ -690,14 +752,34 @@ E2B, …) implement the same trait from wherever they run.
 
 ## Diagnostics from a script
 
-Three Harn builtins surface backend identity for `harn doctor`-style
+Harn builtins surface backend identity and confinement for `harn doctor`-style
 scripts and conformance fixtures:
 
 | Builtin | Returns | Use |
 |---|---|---|
-| `harness.system.sandbox_active_backend()` | `string` | name of the compiled-in backend (`linux`, `macos`, `windows`, `openbsd`, `noop`) |
-| `harness.system.sandbox_backend_available()` | `bool` | whether the platform mechanism behind the backend is reachable on the running host |
+| `harness.system.sandbox_active_backend()` | `string` | name of the compiled-in backend (`linux`, `macos`, `openbsd`, `unconfined`) |
+| `harness.system.sandbox_backend_available()` | `bool` | whether the backend is available; Linux reports `true` even when Landlock is unavailable |
 | `harness.system.sandbox_active_profile()` | `string` | profile carried by the current execution policy (`worktree` under default `harn run`, `unrestricted` if no policy is active) |
+| `harness.system.sandbox_confinement()` | closed record | whether this host can confine child processes, before any spawn |
+
+The confinement record has schema `harn.process.sandbox_confinement.v1`.
+Its `backend` names the compiled backend; `mechanism` names its filesystem
+confinement mechanism. `confines_processes` reports whether that mechanism is
+available on the running host. On Linux, the backend can be available while
+Landlock is unavailable, so check `confines_processes` before promising confinement.
+
+When the mechanism is unavailable, `os_hardened_refusal` contains the exact
+structured value an `os_hardened` spawn throws under the current execution
+policy. On an unconfined platform, its `sandbox_mechanism.unconfined` list
+names the dimensions that policy requires. Otherwise it is `nil`.
+Both `harness.process.run` and `harness.tools.run_command` preserve this value
+in a `catch` binding. This host status doesn't guarantee that every requested
+policy dimension is enforceable; each spawn checks its own policy.
+
+ACP clients read the same engine-host record from
+`agentCapabilities._meta.harn.sandboxConfinement` in the initialize response.
+This lets a client report a remote engine's confinement status before its
+first command.
 
 ## Replay fidelity
 

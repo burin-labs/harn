@@ -7,6 +7,7 @@ import {
   completion_evidence_id,
   completion_requirement_evidence_packet,
 } from "std/agent/completion_evidence"
+import { CompletionPrecheckResult } from "std/agent/completion_precheck"
 import {
   CompletionRequirementBoundary,
   CompletionRequirementEvidencePacket,
@@ -30,6 +31,8 @@ pub import {
   agent_verify_completion_judge_cap,
 } from "std/agent/completion_review"
 import { agent_feedback_emit } from "std/agent/feedback"
+import { __goal_judge_system } from "std/agent/goal_contract"
+import { __agent_goal_projection } from "std/agent/goal_projection"
 pub import {
   CompletionJudgeInvocations,
   CompletionPolicyEvaluation,
@@ -48,12 +51,14 @@ import {
   __completion_judge_gap_class,
   __completion_typed_green_terminal,
   __completion_verification_state_read,
+  __judge_checkpoint_route_unavailable,
   __judge_checkpoint_unavailable,
   __judge_emit_decision,
   __judge_emit_started,
   __judge_run_checkpoint_bounded,
 } from "std/agent/judge_internals"
 import { __judge_resolve_itemization } from "std/agent/judge_itemization"
+import { completion_precheck_from_snapshot } from "std/agent/judge_precheck"
 pub import {
   CompletionJudgeGapItem,
   CompletionJudgeVerdict,
@@ -127,6 +132,7 @@ pub type CompletionDirectiveReceipt = {
   checkpoint?: dict?,
   requirements?: CompletionRequirementReport?,
   completion_claim?: CompletionClaim,
+  precheck?: CompletionPrecheckResult?,
 }
 
 pub type CompletionDirective = {
@@ -331,6 +337,7 @@ fn __judge_payload_with_verification(
 }
 
 fn __judge_stable_prefix(
+  agent: HarnessAgent,
   judge_cfg: any,
   opts: dict,
   payload: CompletionEvidenceSnapshot,
@@ -349,7 +356,14 @@ fn __judge_stable_prefix(
   // The steering block sits AFTER the goal, rubric, and requirement rows so its
   // supersession clause reads over all of them. It renders empty for an
   // unsteered run, which keeps that run's prefix byte-identical (and cacheable).
-  return system
+  const current_system = if judge_cfg?.goal != nil {
+    __goal_judge_system(
+      __agent_goal_projection(agent, payload.session_id, judge_cfg.goal, payload.obligations),
+    )
+  } else {
+    system
+  }
+  return current_system
     + "\n\nStable completion goal:\n"
     + completion_obligations_objective(payload.obligations, payload.task)
     + rubric_block
@@ -438,7 +452,14 @@ fn __judge_invoke_structured(
     "typed_checkpoint",
     payload.judge_evidence_projection,
   )
-  const stable_prefix = __judge_stable_prefix(judge_cfg, opts, payload, system, schema)
+  const stable_prefix = __judge_stable_prefix(
+    harness.agent,
+    judge_cfg,
+    opts,
+    payload,
+    system,
+    schema,
+  )
   const user = completion_judge_user_prompt(harness.fs, payload)
   const ran = __judge_run_checkpoint_bounded(
     harness,
@@ -459,11 +480,17 @@ fn __judge_invoke_structured(
     if unavailable {
       const judge_outcome = if checkpoint?.status == "admission_refused" {
         "admission_refused"
-      } else if checkpoint?.status == "model_unconfigured" {
+      } else if checkpoint?.status == "model_unconfigured"
+        || checkpoint?.status == "schema_unsupported" {
         // Its own outcome, not a timeout. A misconfiguration reported as a
         // deadline sends the reader to look at latency for a setting that was
         // never set, which is how this class of defect stays open.
         "model_unconfigured"
+      } else if __judge_checkpoint_route_unavailable(checkpoint) {
+        // The route never ran (no credential, no region). Its error is host
+        // configuration, so it ends the run on its own reason and, like every
+        // outcome in this branch, carries no `feedback` into the transcript.
+        "route_unavailable"
       } else {
         "timeout"
       }
@@ -471,6 +498,8 @@ fn __judge_invoke_structured(
         "completion_judge_deadline_admission_refused"
       } else if judge_outcome == "model_unconfigured" {
         "completion_judge_model_unconfigured"
+      } else if judge_outcome == "route_unavailable" {
+        "completion_judge_route_unavailable"
       } else {
         "completion_judge_deadline_timeout"
       }
@@ -935,6 +964,7 @@ fn __judge_directive(
     verification: payload.verification,
     admission: verdict?.admission,
     checkpoint: verdict?.typed_checkpoint,
+    precheck: verdict?.precheck,
     // A receipt describes the whole boundary, not only the last adjudicator.
     // Explicit emptiness on a done distinguishes no declarations from lost data.
     requirements: if ledger.required_count > 0 || ledger.pending_count > 0
@@ -1198,13 +1228,45 @@ fn __completion_policy_run_stage(
           // skip decision for it.
         }
       }
+      const precheck = if config.precheck == nil {
+        nil
+      } else {
+        completion_precheck_from_snapshot(harness.llm, config.precheck, payload, ledger)
+      }
+      if precheck?.action == "continue" || precheck?.action == "control_stop" {
+        const stopped = precheck.action == "control_stop"
+        const skipped: CompletionStageVerdict = {
+          vetoed: !stopped,
+          verdict: "continue",
+          source: "completion_precheck",
+          judge_outcome: "skipped_precheck",
+          reason: precheck.reason,
+          feedback: if stopped {
+            ""
+          } else {
+            "Complete and verify: ${precheck.gap_name}"
+          },
+          next_step: precheck.gap_name ?? "",
+          trigger: trigger,
+          terminal_judge_reason: if stopped {
+            "completion_precheck_${precheck.reason}"
+          } else {
+            nil
+          },
+          terminal_evidence_preserved: stopped,
+          requirement_report: ledger,
+          precheck: precheck,
+        }
+        __judge_emit_decision(harness.agent, payload.session_id, iteration, skipped)
+        return evaluation + {verdict: skipped}
+      }
       __judge_emit_started(harness.agent, payload.session_id, iteration, trigger)
       let verdict = __judge_invoke_structured(harness, config, opts, payload)
       verdict = __completion_arbitrate_contradiction(
         __completion_arbitrate_verification(verdict, evaluation),
         evaluation,
       )
-        + {trigger: trigger}
+        + {trigger: trigger, precheck: precheck}
       __judge_emit_decision(harness.agent, payload.session_id, iteration, verdict)
       const report = verdict.requirement_report
       let boundary = evaluation.requirement_boundary
@@ -1319,6 +1381,12 @@ pub fn agent_evaluate_completion(
   iteration: int = 0,
   raw_text: string = "",
 ) -> CompletionDirective {
+  agent_emit_event(
+    harness.agent,
+    session.session_id,
+    "turn_phase_changed",
+    {phase: "verifying", candidate_reply: text},
+  )
   const payload = __judge_payload(
     harness.agent,
     session,

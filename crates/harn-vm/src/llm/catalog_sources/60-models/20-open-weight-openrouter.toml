@@ -68,7 +68,7 @@ name = "DeepSeek V3.2"
 provider = "openrouter"
 context_window = 163840
 capabilities = ["tools", "streaming"]
-pricing = { input_per_mtok = 0.269, output_per_mtok = 0.40, cache_read_per_mtok = 0.1345 }
+pricing = { input_per_mtok = 0.28, output_per_mtok = 0.42, cache_read_per_mtok = 0.028 }
 tier = "mid"
 open_weight = true
 strengths = ["coding", "tool_use", "cheap"]
@@ -78,7 +78,7 @@ name = "Kimi K2.6"
 provider = "openrouter"
 context_window = 262144
 capabilities = ["tools", "vision", "streaming", "thinking", "prompt_caching"]
-pricing = { input_per_mtok = 0.95, output_per_mtok = 4.00, cache_read_per_mtok = 0.16 }
+pricing = { input_per_mtok = 0.65, output_per_mtok = 3.41, cache_read_per_mtok = 0.15 }
 tier = "frontier"
 open_weight = true
 strengths = ["coding", "agentic", "long_context", "tool_use", "reasoning", "vision"]
@@ -89,7 +89,7 @@ name = "Kimi K2.7 Code"
 provider = "openrouter"
 context_window = 262144
 capabilities = ["tools", "vision", "video", "streaming", "thinking", "prompt_caching"]
-pricing = { input_per_mtok = 0.7062, output_per_mtok = 3.21, cache_read_per_mtok = 0.18 }
+pricing = { input_per_mtok = 0.6712, output_per_mtok = 3.35, cache_read_per_mtok = 0.18 }
 tier = "frontier"
 open_weight = true
 strengths = ["coding", "agentic", "long_context", "tool_use", "reasoning", "vision"]
@@ -103,7 +103,7 @@ equivalence_group = "openai-gpt-oss-120b"
 served_variant = "openrouter"
 api_dialect = "openai_chat"
 capabilities = ["tools", "streaming"]
-pricing = { input_per_mtok = 0.15, output_per_mtok = 0.60, cache_read_per_mtok = 0.075 }
+pricing = { input_per_mtok = 0.037, output_per_mtok = 0.17, cache_read_per_mtok = 0.075 }
 architecture = { parameter_count_b = 117.0, active_parameter_count_b = 5.1, moe = true, license = "Apache-2.0", source_url = "https://developers.openai.com/api/docs/models/gpt-oss-120b", last_verified = "2026-06-05" }
 # Explicit metadata keeps this row self-described across fragment boundaries.
 # GPT-OSS 120B is Apache-2.0 (open weight) and text-only; it is Burin's cheap

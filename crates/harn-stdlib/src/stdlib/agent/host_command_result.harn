@@ -1,0 +1,31 @@
+import {
+  AgentToolHandlerOutcome,
+  AgentToolHandlerResult,
+  agent_tool_handler_result_normalize,
+} from "std/agent/tool_lifecycle"
+
+fn command_outcome(result: dict) -> AgentToolHandlerOutcome {
+  if result?.denial != nil || result?.status == "blocked" || result?.status == "requires_approval" {
+    return "rejected"
+  }
+  if result?.status == "running" {
+    return "ok"
+  }
+  if result?.timed_out == true || (result?.exit_code != nil && result.exit_code != 0) {
+    return "error"
+  }
+  return "ok"
+}
+
+/**
+ * Preserve the host command's outcome alongside formatted feedback.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn __agent_host_command_result(
+  rendered: unknown,
+  data: dict,
+) -> AgentToolHandlerResult<unknown> {
+  return agent_tool_handler_result_normalize(rendered, data, command_outcome(data))
+}

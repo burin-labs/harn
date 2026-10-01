@@ -8,9 +8,14 @@
     { "name": "Verify publishable crates", "match": "exact" },
     { "name": "Rust workspace tests", "match": "exact" },
     { "name": "Run Linux sandbox tests", "match": "exact" },
-    { "name": "Run Harn conformance tests", "match": "exact" },
+    { "name": "Run Harn conformance tests (1/4)", "match": "exact" },
+    { "name": "Run Harn conformance tests (2/4)", "match": "exact" },
+    { "name": "Run Harn conformance tests (3/4)", "match": "exact" },
+    { "name": "Run Harn conformance tests (4/4)", "match": "exact" },
     { "name": "Check Harn sources and generated files", "match": "exact" },
-    { "name": "Check repository policies", "match": "exact" }
+    { "name": "Check Harn documentation", "match": "exact" },
+    { "name": "Run Harn script tests", "match": "exact" },
+    { "name": "Check fast repository policies", "match": "exact" }
   ],
   "observed_baseline": {
     "schema_version": 2,
@@ -87,6 +92,7 @@
       "rust-producer-capacity": { "budget_ms": 30000 },
       "fmt": { "budget_ms": 60000 },
       "package-audit": { "budget_ms": 590000 },
+      "public-api": { "budget_ms": 420000 },
       "lint-md": { "budget_ms": 30000 },
       "release-contract": { "budget_ms": 120000 },
       "release-residual-audit": { "budget_ms": 600000 },
@@ -102,8 +108,6 @@
       "audit-scripts": { "budget_ms": 390000 },
       "fast-policy-gates": { "budget_ms": 240000 },
       "stack-frames": { "budget_ms": 600000 },
-      "windows-plan": { "budget_ms": 30000 },
-      "windows": { "budget_ms": 600000 },
       "windows-cross-check": { "budget_ms": 360000 },
       "macos-plan": { "budget_ms": 30000 },
       "macos": { "budget_ms": 600000 },

@@ -22,6 +22,7 @@ SH
 
 cp "$repo_root/scripts/lib/harn_bin.sh" "$fixture/scripts/lib/harn_bin.sh"
 cp "$repo_root/scripts/lib/harn_bin_freshness.sh" "$fixture/scripts/lib/harn_bin_freshness.sh"
+cp "$repo_root/scripts/lib/sha256.sh" "$fixture/scripts/lib/sha256.sh"
 
 fake_harn="$fixture/target/debug/harn"
 printf '#!/usr/bin/env bash\nexit 0\n' > "$fake_harn"

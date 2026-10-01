@@ -150,6 +150,8 @@ pub(super) fn user_test_report_from_summary(
     for result in &summary.results {
         let outcome = if result.passed {
             TestOutcome::Passed
+        } else if result.skip_reason.is_some() {
+            TestOutcome::Skipped
         } else if result.timeout.is_some() {
             TestOutcome::TimedOut
         } else {
@@ -165,7 +167,7 @@ pub(super) fn user_test_report_from_summary(
             timeout: result.timeout,
             phases: result.phases,
             timing_spans: result.timing_spans.clone(),
-            message: result.error.clone(),
+            message: result.skip_reason.clone().or_else(|| result.error.clone()),
             captured_output: result.captured_output.clone(),
         });
     }
@@ -249,7 +251,12 @@ pub(super) fn user_test_progress(verbose: bool) -> test_runner::TestRunProgress 
             }
         }
         test_runner::TestRunEvent::TestFinished(result) => {
-            if result.passed {
+            if let Some(reason) = &result.skip_reason {
+                println!(
+                    "  \x1b[33mSKIP\x1b[0m  {} [{}]: {reason}",
+                    result.name, result.file
+                );
+            } else if result.passed {
                 println!(
                     "  \x1b[32mPASS\x1b[0m  {} [{}] ({} ms)",
                     result.name, result.file, result.duration_ms
@@ -302,7 +309,12 @@ pub(super) fn print_test_results(
 
     if !options.progress {
         for result in &summary.results {
-            if result.passed {
+            if let Some(reason) = &result.skip_reason {
+                println!(
+                    "  \x1b[33mSKIP\x1b[0m  {} [{}]: {reason}",
+                    result.name, result.file
+                );
+            } else if result.passed {
                 println!(
                     "  \x1b[32mPASS\x1b[0m  {} [{}] ({} ms)",
                     result.name, result.file, result.duration_ms
@@ -324,15 +336,15 @@ pub(super) fn print_test_results(
     println!();
     if summary.failed > 0 {
         println!(
-            "\x1b[31m{} passed, {} failed, {} total ({} ms)\x1b[0m",
-            summary.passed, summary.failed, summary.total, summary.duration_ms
+            "\x1b[31m{} passed, {} failed, {} skipped, {} total ({} ms)\x1b[0m",
+            summary.passed, summary.failed, summary.skipped, summary.total, summary.duration_ms
         );
     } else if summary.total == 0 {
         println!("No test pipelines found");
     } else {
         println!(
-            "\x1b[32m{} passed, {} total ({} ms)\x1b[0m",
-            summary.passed, summary.total, summary.duration_ms
+            "\x1b[32m{} passed, {} skipped, {} total ({} ms)\x1b[0m",
+            summary.passed, summary.skipped, summary.total, summary.duration_ms
         );
     }
 
@@ -482,6 +494,7 @@ mod tests {
                     name: "test_timeout".into(),
                     file: "/suite/test_timeout.harn".into(),
                     passed: false,
+                    skip_reason: None,
                     error: Some("execute phase timed out after 30ms".into()),
                     captured_output: Some("[harn] before the deadline\n".into()),
                     timeout: Some(TestTimeout {
@@ -496,6 +509,7 @@ mod tests {
                     name: "<file error>".into(),
                     file: "/suite/broken.harn".into(),
                     passed: false,
+                    skip_reason: None,
                     error: Some("parse failed".into()),
                     captured_output: None,
                     timeout: None,
@@ -506,6 +520,7 @@ mod tests {
             ],
             passed: 0,
             failed: 2,
+            skipped: 0,
             total: 2,
             duration_ms: 31,
             timing: DurationSummary::from_samples(&[30]),

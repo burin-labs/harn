@@ -15,7 +15,7 @@
 # count    2  crates/harn-stdlib/src/stdlib/agent/daemon.harn
 # count   13  crates/harn-stdlib/src/stdlib/agent/events.harn
 # count    2  crates/harn-stdlib/src/stdlib/agent/fact.harn
-# count    8  crates/harn-stdlib/src/stdlib/agent/goal.harn
+# count    6  crates/harn-stdlib/src/stdlib/agent/goal.harn
 # count    2  crates/harn-stdlib/src/stdlib/agent/governors.harn
 # count    4  crates/harn-stdlib/src/stdlib/agent/guardrails.harn
 # count    5  crates/harn-stdlib/src/stdlib/agent/host_tools.harn
@@ -24,7 +24,7 @@
 # count    1  crates/harn-stdlib/src/stdlib/agent/loop.harn
 # count    4  crates/harn-stdlib/src/stdlib/agent/loop_call_resolution.harn
 # count   11  crates/harn-stdlib/src/stdlib/agent/loop_foundation.harn
-# count   30  crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn
+# count   28  crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn
 # count    1  crates/harn-stdlib/src/stdlib/agent/loop_result_status.harn
 # count    1  crates/harn-stdlib/src/stdlib/agent/loop_run.harn
 # count   12  crates/harn-stdlib/src/stdlib/agent/loop_support.harn
@@ -153,7 +153,7 @@
 # count    8  crates/harn-stdlib/src/stdlib/stdlib_web.harn
 # count    5  crates/harn-stdlib/src/stdlib/stdlib_worktree.harn
 # count    1  crates/harn-stdlib/src/stdlib/stdlib_xml.harn
-# count   21  crates/harn-stdlib/src/stdlib/verification_core.harn
+# count   19  crates/harn-stdlib/src/stdlib/verification_core.harn
 # count    6  crates/harn-stdlib/src/stdlib/verification_ladder.harn
 # count   13  crates/harn-stdlib/src/stdlib/verification_targets.harn
 # count    1  crates/harn-stdlib/src/stdlib/workflow/checkpoints.harn
@@ -203,11 +203,9 @@ crates/harn-stdlib/src/stdlib/agent/fact.harn::invalidate_facts
 crates/harn-stdlib/src/stdlib/agent/fact.harn::store_fact
 crates/harn-stdlib/src/stdlib/agent/goal.harn::goal
 crates/harn-stdlib/src/stdlib/agent/goal.harn::goal_check
-crates/harn-stdlib/src/stdlib/agent/goal.harn::goal_context_fragment
 crates/harn-stdlib/src/stdlib/agent/goal.harn::goal_pin
 crates/harn-stdlib/src/stdlib/agent/goal.harn::goal_prompt_part
 crates/harn-stdlib/src/stdlib/agent/goal.harn::goal_reloop
-crates/harn-stdlib/src/stdlib/agent/goal.harn::goal_text
 crates/harn-stdlib/src/stdlib/agent/goal.harn::with_goal
 crates/harn-stdlib/src/stdlib/agent/governors.harn::compose_post_turn
 crates/harn-stdlib/src/stdlib/agent/governors.harn::governor_post_turn
@@ -283,8 +281,6 @@ crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn::__intra_turn_re
 crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn::__intra_turn_resource_keys
 crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn::__intra_turn_result_mutated
 crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn::__invoke_tool_with_index
-crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn::__resolve_intra_turn_failure_fanout_cap
-crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn::__resolve_max_concurrent_tools
 crates/harn-stdlib/src/stdlib/agent/loop_result_status.harn::__tool_result_name
 crates/harn-stdlib/src/stdlib/agent/loop_run.harn::__agent_loop_run
 crates/harn-stdlib/src/stdlib/agent/loop_support.harn::__agent_loop_build_turn_prompt
@@ -1215,11 +1211,9 @@ crates/harn-stdlib/src/stdlib/stdlib_worktree.harn::worktree_status
 crates/harn-stdlib/src/stdlib/stdlib_xml.harn::from_xml
 crates/harn-stdlib/src/stdlib/verification_core.harn::__verification_capture_snapshot
 crates/harn-stdlib/src/stdlib/verification_core.harn::__verification_delta_direct_count
-crates/harn-stdlib/src/stdlib/verification_core.harn::__verification_duration_ms
 crates/harn-stdlib/src/stdlib/verification_core.harn::__verification_exit
 crates/harn-stdlib/src/stdlib/verification_core.harn::__verification_failure_signature
 crates/harn-stdlib/src/stdlib/verification_core.harn::__verification_gate_embedded_classification
-crates/harn-stdlib/src/stdlib/verification_core.harn::__verification_opts
 crates/harn-stdlib/src/stdlib/verification_core.harn::__verification_snapshot_map
 crates/harn-stdlib/src/stdlib/verification_core.harn::__verification_toolchain_probe
 crates/harn-stdlib/src/stdlib/verification_core.harn::__verification_toolchain_probe_options

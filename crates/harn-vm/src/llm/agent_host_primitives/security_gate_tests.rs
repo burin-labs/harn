@@ -8,6 +8,7 @@ fn allow_decision() -> crate::orchestration::PolicyEvaluation {
         required_approval: None,
         risk_labels: Vec::new(),
         denied_paths: Vec::new(),
+        denied_network_targets: Vec::new(),
         receipt: serde_json::json!({
             "type": "policy_decision",
             "action": "allow",

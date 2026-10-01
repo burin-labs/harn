@@ -11,6 +11,7 @@ use std::task::Poll;
 
 fn text_mock(text: &str) -> LlmMock {
     LlmMock {
+        effective_reasoning_effort: Default::default(),
         text: text.to_string(),
         tool_calls: Vec::new(),
         raw_tool_calls: Vec::new(),
@@ -112,7 +113,12 @@ fn cli_llm_mock_record_scope_collects_provider_worker_thread_results() {
     reset_llm_mock_state();
     enable_cli_llm_mock_recording();
     let request = LlmRequestPayload::from(&crate::llm::api::options::base_opts("anthropic"));
-    let result = build_mock_result(&text_mock("cross-thread record"), 7, &mut 0);
+    let mut result = build_mock_result(&text_mock("cross-thread record"), 7, &mut 0);
+    let effort = crate::llm::EffectiveReasoningEffort::Reported {
+        level: "medium".into(),
+        source: crate::llm::ReasoningEffortSource::ProviderDefault,
+    };
+    result.telemetry.effective_reasoning_effort = effort.clone();
 
     assert!(request.cli_llm_mock_scope.is_some());
     std::thread::spawn(move || record_cli_llm_result(&request, &result))
@@ -122,6 +128,16 @@ fn cli_llm_mock_record_scope_collects_provider_worker_thread_results() {
     let recordings = take_cli_llm_recordings();
     assert_eq!(recordings.len(), 1);
     assert_eq!(recordings[0].text, "cross-thread record");
+    let serialized = crate::llm::jsonl::serialize_llm_mock(recordings[0].clone()).unwrap();
+    let replay =
+        crate::llm::jsonl::parse_llm_mock_value(&serde_json::from_str(&serialized).unwrap())
+            .unwrap();
+    assert_eq!(
+        build_mock_result(&replay, 7, &mut 0)
+            .telemetry
+            .effective_reasoning_effort,
+        effort
+    );
     clear_cli_llm_mock_mode();
 }
 
@@ -453,6 +469,7 @@ fn v1_fixture(strict_scopes: bool, entries: &[serde_json::Value]) -> LlmMockFixt
     LlmMockFixture {
         schema_version: 1,
         strict_scopes,
+        live_after_calls: None,
         mocks,
         warnings: Vec::new(),
     }
@@ -689,5 +706,166 @@ fn cli_mock_preserves_a_recorded_tool_call_id() {
     let result = mock_llm_response(&request).expect("recorded response");
 
     assert_eq!(result.tool_calls[0]["id"], "recorded-call");
+    clear_cli_llm_mock_mode();
+}
+
+// --- Replay prefix, then live (`liveAfterCalls`) ---
+
+/// A recorded v1 document whose header replays two calls, then goes live. The
+/// third entry is past the prefix and must never be served.
+const LIVE_PREFIX_FIXTURE: &str = include_str!("testdata/live_prefix_fixture.jsonl");
+
+fn prefix_marker(result: &LlmResult) -> Option<(LlmMockPrefixServedBy, u64, u64)> {
+    result
+        .telemetry
+        .llm_mock_prefix
+        .as_deref()
+        .map(|marker| (marker.served_by, marker.call, marker.live_after_calls))
+}
+
+/// Burin's path: the pipeline loads the fixture document through
+/// `harness.llm.mock_load_jsonl`, then its model calls name a real provider.
+/// The first K calls replay the recording, including its tool call; call K+1
+/// reaches the configured provider (the scripted fake), and every call says
+/// which side answered it.
+#[tokio::test(flavor = "current_thread")]
+async fn live_prefix_replays_k_calls_then_hands_off_to_the_configured_provider() {
+    use crate::llm::fake::{
+        fake_llm_captured_calls, install_fake_llm_script, FakeLlmEvent, FakeLlmScript, FakeLlmTurn,
+        FakeStopReason,
+    };
+    let _fake = install_fake_llm_script(FakeLlmScript::new().push(FakeLlmTurn::stream(vec![
+        FakeLlmEvent::Token("LIVE-3".into()),
+        FakeLlmEvent::Done(FakeStopReason::EndTurn),
+    ])));
+    let script = [
+        "fn main(harness: Harness) {".to_string(),
+        format!("  const receipt = harness.llm.mock_load_jsonl(\"\"\"{LIVE_PREFIX_FIXTURE}\"\"\")"),
+        "  const loaded = to_string(receipt.count) + \" of \" + to_string(receipt.live_after_calls)".into(),
+        "  harness.stdio.println(\"loaded \" + loaded)".into(),
+        "  for turn in [1, 2, 3] {".into(),
+        "    const options = {provider: \"fake\", model: \"fake-live\"}".into(),
+        "    const r = harness.llm.call(\"turn \" + to_string(turn), nil, options)".into(),
+        "    const m = r.usage.provider_telemetry.llm_mock_prefix".into(),
+        "    const calls = r.tool_calls ?? []".into(),
+        "    const first_tool = if len(calls) > 0 { calls[0].name } else { \"-\" }".into(),
+        "    const served = m.served_by + \"|\" + to_string(m.call)".into(),
+        "    harness.stdio.println(r.text + \"|\" + first_tool + \"|\" + served)".into(),
+        "  }".into(),
+        "}".into(),
+    ]
+    .join("\n");
+    let chunk = crate::compile_source(&script).expect("compile live-prefix script");
+    let mut vm = crate::Vm::new();
+    crate::register_vm_stdlib(&mut vm);
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(vm.execute(&chunk))
+        .await
+        .expect("live-prefix script");
+
+    assert_eq!(
+        vm.output(),
+        "loaded 2 of 2\n|read_file|fixture|1\nPREFIX-2|-|fixture|2\nLIVE-3|-|live|3\n"
+    );
+    let live_calls = fake_llm_captured_calls();
+    assert_eq!(live_calls.len(), 1, "only call K+1 may reach the provider");
+    assert_eq!(live_calls[0].model, "fake-live");
+}
+
+/// The `harn run --llm-mock` install point hands off the same way: replay
+/// stops intercepting at exactly K served calls, and the next response the
+/// configured provider returns is marked live.
+#[test]
+fn cli_live_prefix_stops_intercepting_after_k_served_calls() {
+    reset_llm_mock_state();
+    install_cli_llm_mock_fixture(
+        crate::llm::jsonl::parse_llm_mocks_jsonl(LIVE_PREFIX_FIXTURE).expect("parse fixture"),
+    );
+    let request = request_with_scope("first", None);
+
+    let first = mock_llm_response(&request).expect("call 1 replays");
+    assert_eq!(first.tool_calls[0]["id"], "call_rec_1");
+    assert_eq!(
+        prefix_marker(&first),
+        Some((LlmMockPrefixServedBy::Fixture, 1, 2))
+    );
+    assert!(crate::llm::providers::MockProvider::should_intercept_request(&request));
+
+    let second = mock_llm_response(&request).expect("call 2 replays");
+    assert_eq!(second.text, "PREFIX-2");
+    assert_eq!(
+        prefix_marker(&second),
+        Some((LlmMockPrefixServedBy::Fixture, 2, 2))
+    );
+    assert!(
+        !crate::llm::providers::MockProvider::should_intercept_request(&request),
+        "a served prefix must hand call K+1 to the configured provider"
+    );
+    assert!(!any_llm_mock_active());
+
+    let mut live = build_mock_result(&text_mock("from the provider"), 0, &mut 0);
+    *live.telemetry = Default::default();
+    mark_live_after_mock_prefix(&request, &mut live);
+    assert_eq!(
+        prefix_marker(&live),
+        Some((LlmMockPrefixServedBy::Live, 3, 2))
+    );
+    clear_cli_llm_mock_mode();
+}
+
+/// A call the prefix cannot serve is a divergence from the recording. It
+/// fails closed and keeps intercepting, even though the fixture is not
+/// strict and would otherwise synthesize a placeholder response.
+#[test]
+fn a_diverged_live_prefix_fails_closed_instead_of_going_live() {
+    reset_llm_mock_state();
+    let fixture = crate::llm::jsonl::parse_llm_mocks_jsonl(
+        "{\"schemaVersion\":1,\"strictScopes\":false,\"liveAfterCalls\":2}\n\
+         {\"id\":\"main-1\",\"scope\":\"agent.main\",\"consume\":\"once\",\"text\":\"MAIN-1\"}\n\
+         {\"id\":\"main-2\",\"scope\":\"agent.main\",\"consume\":\"once\",\"text\":\"MAIN-2\"}\n",
+    )
+    .expect("parse fixture");
+    install_builtin_llm_mock_fixture(fixture);
+    let main = request_with_scope("main turn", Some("agent.main"));
+    let judge = request_with_scope("judge the claim", Some("completion.judge"));
+
+    assert_eq!(mock_llm_response(&main).expect("call 1").text, "MAIN-1");
+    let error = mock_llm_response(&judge)
+        .expect_err("a call the recording never made must not be answered")
+        .to_string();
+    assert!(
+        error.contains("diverged at call 2 of 2") && error.contains("completion.judge"),
+        "{error}"
+    );
+    assert!(
+        crate::llm::providers::MockProvider::should_intercept_request(&judge),
+        "a divergence must not hand off to the live provider"
+    );
+    reset_llm_mock_state();
+}
+
+/// Without `liveAfterCalls` nothing changes: an exhausted replay keeps
+/// intercepting and misses with the legacy error, and no call is marked.
+#[test]
+fn replay_without_a_live_prefix_is_unchanged_after_exhaustion() {
+    reset_llm_mock_state();
+    install_cli_llm_mock_fixture(v1_fixture(false, &[serde_json::json!({"text": "ONLY"})]));
+    let request = request_with_scope("prompt", None);
+
+    let served = mock_llm_response(&request).expect("served");
+    assert_eq!(served.text, "ONLY");
+    assert_eq!(prefix_marker(&served), None);
+
+    assert!(crate::llm::providers::MockProvider::should_intercept_request(&request));
+    let error = mock_llm_response(&request)
+        .expect_err("exhausted replay still misses")
+        .to_string();
+    assert!(error.contains("No --llm-mock fixture matched"), "{error}");
+
+    let mut live = build_mock_result(&text_mock("unrelated"), 0, &mut 0);
+    *live.telemetry = Default::default();
+    mark_live_after_mock_prefix(&request, &mut live);
+    assert_eq!(prefix_marker(&live), None);
     clear_cli_llm_mock_mode();
 }

@@ -1,0 +1,75 @@
+import { agent_capture_events } from "std/agent/events"
+import { agent_loop } from "std/agent/loop"
+import { AgentSpec } from "std/agent/options"
+import { contract_effect, contract_negative } from "./lib/mechanism_contract"
+
+fn slow_caller(testing: HarnessTesting) {
+  return { _call ->
+    testing.clock_advance(1500)
+    return {ok: true, value: {text: "still working", provider: "mock", model: "mock"}}
+  }
+}
+
+pipeline default(harness: Harness) {
+  harness.testing.clock_set(0)
+  try {
+    const callback_path = path_join(
+      harness.fs.mkdtemp_in_workspace("agent-deadline"),
+      "callback.json",
+    )
+    const deadline_session = "deadline-contract-" + harness.random.uuid()
+    const deadline_opts: AgentSpec = {
+      session_id: deadline_session,
+      provider: "mock",
+      deadline_ms: 1000,
+      llm_caller: slow_caller(harness.testing),
+      loop_until_done: true,
+      iteration_budget: {mode: "fixed", initial: 5, max: 5},
+      final_wrapup: false,
+      terminal_callback: { info ->
+        harness.fs.write_text(callback_path, json_stringify(info))
+        return {message: "Try another turn."}
+      },
+    }
+    const expired = agent_capture_events(
+      harness.agent,
+      deadline_session,
+      fn() { return agent_loop(harness, "Keep inspecting.", nil, deadline_opts) },
+    )
+    const callback = if harness.fs.exists(callback_path) {
+      json_parse(harness.fs.read_text(callback_path))
+    } else {
+      nil
+    }
+    contract_effect(
+      harness.stdio,
+      "deadline_terminal",
+      expired.result.terminal.kind == "policy_budget"
+        && expired.result.stop_reason == "deadline"
+        && expired.result.llm.iterations == 1,
+    )
+    contract_effect(
+      harness.stdio,
+      "callback_cannot_reopen",
+      callback?.final_status == "budget_exhausted"
+        && callback?.stop_reason == "deadline"
+        && expired.result.llm.iterations == 1,
+    )
+    const ordinary_opts: AgentSpec = {
+      session_id: "no-deadline-contract-" + harness.random.uuid(),
+      provider: "mock",
+      llm_caller: slow_caller(harness.testing),
+      loop_until_done: true,
+      iteration_budget: {mode: "fixed", initial: 2, max: 2},
+      final_wrapup: false,
+    }
+    const ordinary = agent_loop(harness, "Keep inspecting.", nil, ordinary_opts)
+    contract_negative(
+      harness.stdio,
+      "no_deadline_stays_open",
+      ordinary.stop_reason == "deadline" || ordinary.llm.iterations != 2,
+    )
+  } finally {
+    harness.testing.clock_reset()
+  }
+}

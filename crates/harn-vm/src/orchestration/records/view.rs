@@ -307,6 +307,7 @@ pub struct SessionViewOptions {
 }
 
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum RunViewError {
     EventLog(LogError),
 }

@@ -205,11 +205,19 @@ fi
 # hook budget and still yields no verdict. Prove the adapter enforces its own
 # deadline, releases the hook, and denies the command when the policy has not
 # established that it is safe.
+#
+# The stub ignores TERM until the descendant's pid is on disk. Bash runs a TERM
+# trap between commands, so with the trap armed first a deadline that expired
+# right after the fork exited the stub before the write, and the survival check
+# below had no pid to test. A stub that has not reached its first line when the
+# deadline expires can still be stopped before the write; the check below
+# reports that as a fixture race.
 cat >"$fixture_root/hanging-harn" <<'STUB'
 #!/usr/bin/env bash
-trap 'exit 0' TERM
+trap '' TERM
 (trap '' TERM; while :; do sleep 1; done) &
 printf '%s\n' "$!" >"$GUARD_CHILD_PID_FILE"
+trap 'exit 0' TERM
 printf '%s\n' '{"partial":"must-not-escape"}'
 wait
 STUB
@@ -240,7 +248,18 @@ if (( deadline_elapsed >= 10 )); then
   echo "adapter waited ${deadline_elapsed}s on a hanging policy past its bounded deadline" >&2
   exit 1
 fi
+# An absent or empty pid file means the fixture never recorded its descendant.
+# That is a fixture race, not evidence about the adapter, so it gets its own
+# message instead of reading as a survivor or aborting inside `cat`.
+if [[ ! -e "$fixture_root/hanging-child.pid" ]]; then
+  echo "fixture race: the hanging policy stub was stopped before it recorded its descendant's pid, so descendant survival was not checked" >&2
+  exit 1
+fi
 hanging_child_pid="$(cat "$fixture_root/hanging-child.pid")"
+if [[ -z "$hanging_child_pid" ]]; then
+  echo "fixture race: the hanging policy stub left an empty pid file, so descendant survival was not checked" >&2
+  exit 1
+fi
 if kill -0 "$hanging_child_pid" 2>/dev/null; then
   echo "adapter left a TERM-ignoring policy descendant running: $hanging_child_pid" >&2
   exit 1

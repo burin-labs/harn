@@ -38,6 +38,7 @@ pub fn should_handle(harness: Harness, event: TriggerEvent) -> bool {
             push_dispatcher_llm_mock(
                 &dispatcher,
                 LlmMock {
+                    effective_reasoning_effort: Default::default(),
                     text: "yes".to_string(),
                     tool_calls: Vec::new(),
                     raw_tool_calls: Vec::new(),
@@ -131,6 +132,7 @@ pub fn should_handle(harness: Harness, event: TriggerEvent) -> bool {
             push_dispatcher_llm_mock(
                 &dispatcher,
                 LlmMock {
+                    effective_reasoning_effort: Default::default(),
                     text: "yes".to_string(),
                     tool_calls: Vec::new(),
                     raw_tool_calls: Vec::new(),
@@ -392,6 +394,7 @@ pub fn should_handle(harness: Harness, event: TriggerEvent) -> bool {
             push_dispatcher_llm_mock(
                 &dispatcher,
                 LlmMock {
+                    effective_reasoning_effort: Default::default(),
                     text: "yes".to_string(),
                     tool_calls: Vec::new(),
                     raw_tool_calls: Vec::new(),

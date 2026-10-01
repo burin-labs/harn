@@ -46,7 +46,7 @@ async fn ordinary_init_failure_persists_terminal_before_releasing_owned_session(
     crate::agent_sessions::open_or_create_for_test(Some(session_id.to_string()));
     crate::agent_sessions::install_journal(session_id, prepared.state).expect("install journal");
     let mut rollback = super::AgentSessionInitRollback::new(session_id.to_string(), true);
-    rollback.fail().await;
+    rollback.fail(None).await;
 
     assert!(!crate::agent_sessions::exists(session_id));
     assert!(!crate::agent_sessions::has_journal(session_id));
@@ -61,11 +61,38 @@ async fn ordinary_init_failure_persists_terminal_before_releasing_owned_session(
     let events = crate::stdlib::session_store::read_all_events(&store, session_id)
         .await
         .expect("read canonical events");
-    let terminals = events
+    let terminals: Vec<_> = events
         .iter()
-        .filter(|event| event.payload.to_string().contains("agent_run_terminal"))
-        .count();
-    assert_eq!(terminals, 1, "ordinary failure needs one durable terminal");
+        .filter(|event| {
+            event
+                .payload
+                .pointer("/transcript_event/kind")
+                .and_then(serde_json::Value::as_str)
+                == Some("agent_run_terminal")
+        })
+        .collect();
+    assert_eq!(
+        terminals.len(),
+        1,
+        "ordinary failure needs one durable terminal"
+    );
+    assert_eq!(
+        terminals[0]
+            .payload
+            .pointer("/transcript_event/metadata/visible_reply"),
+        Some(&json!(""))
+    );
+    let replay = crate::agent_session_restore::load_canonical_session_replay_events_from_store(
+        &*store, session_id,
+    )
+    .await
+    .expect("restore initialization failure")
+    .expect("known session");
+    assert!(replay.iter().any(
+        |event| matches!(&event.event, crate::agent_events::AgentEvent::TurnPhaseChanged {
+        phase: crate::agent_events::AgentTurnPhase::Terminal { reply, outcome }, ..
+    } if reply.is_empty() && outcome.kind == crate::agent_events::AgentTerminalKind::RuntimeError)
+    ));
     crate::agent_sessions::reset_session_store();
 }
 
@@ -597,7 +624,7 @@ async fn persisted_terminal_seals_the_live_session_against_late_mutation() {
         crate::agent_events::classify_agent_terminal("completed", "end_turn", false, None),
         "end_turn",
     );
-    super::super::live_transcript_journal::flush_terminal(
+    let persisted_phase = super::super::live_transcript_journal::flush_terminal(
         session_id,
         "completed",
         "end_turn",
@@ -611,6 +638,28 @@ async fn persisted_terminal_seals_the_live_session_against_late_mutation() {
     )
     .await
     .expect("persist terminal");
+    let cancelled = crate::agent_events::AgentTerminalOutcome::new(
+        crate::agent_events::AgentTerminalKind::UserCancelled,
+        "cancelled",
+    );
+    let retried_phase = super::super::live_transcript_journal::flush_terminal(
+        session_id,
+        "cancelled",
+        "cancelled",
+        None,
+        None,
+        &cancelled,
+        super::super::live_transcript_journal::TerminalAccounting {
+            provider_call_count: 1,
+            adaptive_budget: None,
+        },
+    )
+    .await
+    .expect("reuse committed terminal");
+    assert_eq!(
+        retried_phase, persisted_phase,
+        "retry must return the committed outcome"
+    );
 
     let error = crate::agent_sessions::append_event(
         session_id,
@@ -803,6 +852,21 @@ fn stale_finalization_retry_receipt_cannot_claim_a_successor_run() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn failed_terminal_flush_retains_completed_side_effect_stages_for_retry() {
+    struct TerminalPhaseCounter(Arc<AtomicUsize>);
+    impl crate::agent_events::AgentEventSink for TerminalPhaseCounter {
+        fn handle_event(&self, event: &crate::agent_events::AgentEvent) {
+            if matches!(
+                event,
+                crate::agent_events::AgentEvent::TurnPhaseChanged {
+                    phase: crate::agent_events::AgentTurnPhase::Terminal { .. },
+                    ..
+                }
+            ) {
+                self.0.fetch_add(1, Ordering::SeqCst);
+            }
+        }
+    }
+
     crate::agent_sessions::reset_session_store();
     super::super::reset_agent_session_host_state();
     let root = tempfile::tempdir().expect("temp root");
@@ -833,6 +897,30 @@ async fn failed_terminal_flush_retains_completed_side_effect_stages_for_retry() 
         .close(session_id)
         .await
         .expect("close canonical session to inject terminal flush failure");
+
+    let delivered = Arc::new(AtomicUsize::new(0));
+    crate::agent_events::register_sink(
+        session_id,
+        Arc::new(TerminalPhaseCounter(delivered.clone())),
+    );
+    let assert_observer_live = || {
+        crate::agent_events::emit_event(&crate::agent_events::AgentEvent::TurnPhaseChanged {
+            session_id: session_id.to_string(),
+            phase: crate::agent_events::AgentTurnPhase::Terminal {
+                reply: "observer control".to_string(),
+                outcome: Box::new(crate::agent_events::AgentTerminalOutcome::new(
+                    crate::agent_events::AgentTerminalKind::Natural,
+                    "done",
+                )),
+            },
+        });
+        assert_eq!(
+            delivered.swap(0, Ordering::SeqCst),
+            1,
+            "observer must be live"
+        );
+    };
+    assert_observer_live();
 
     let status = crate::stdlib::json_to_vm_value(&json!({
         "final_status": "failed",
@@ -866,25 +954,34 @@ async fn failed_terminal_flush_retains_completed_side_effect_stages_for_retry() 
             super::super::AgentFinalizationStage::PromptOutcomeProjected
         );
     });
-    let terminal_errors = crate::agent_sessions::transcript(session_id)
-        .and_then(|transcript| transcript.as_dict().cloned())
-        .and_then(|transcript| transcript.get("events").cloned())
-        .and_then(|events| match events {
-            crate::value::VmValue::List(events) => Some(
-                events
-                    .iter()
-                    .filter(|event| {
-                        event
-                            .as_dict()
-                            .and_then(|event| event.get("kind"))
-                            .is_some_and(|kind| kind.display() == "agent_loop_terminal_error")
-                    })
-                    .count(),
-            ),
-            _ => None,
-        })
-        .unwrap_or(0);
-    assert_eq!(terminal_errors, 1);
+    let count_kind = |kind: &str| {
+        crate::agent_sessions::transcript(session_id)
+            .and_then(|transcript| transcript.as_dict().cloned())
+            .and_then(|transcript| transcript.get("events").cloned())
+            .and_then(|events| match events {
+                crate::value::VmValue::List(events) => Some(
+                    events
+                        .iter()
+                        .filter(|event| {
+                            event
+                                .as_dict()
+                                .and_then(|event| event.get("kind"))
+                                .is_some_and(|actual| actual.display() == kind)
+                        })
+                        .count(),
+                ),
+                _ => None,
+            })
+            .expect("retained transcript events")
+    };
+    assert_eq!(count_kind("agent_loop_terminal_error"), 1);
+    assert_eq!(count_kind("turn_phase_changed"), 0);
+    assert_eq!(
+        delivered.load(Ordering::SeqCst),
+        0,
+        "failed persistence cannot publish finality"
+    );
+    assert_observer_live();
 
     let mut retry = crate::value::DictMap::new();
     retry.put_str("retry_run_id", run_id);
@@ -898,26 +995,20 @@ async fn failed_terminal_flush_retains_completed_side_effect_stages_for_retry() 
     .await
     .expect_err("retry still sees the deliberately closed store");
     assert!(retry_error.to_string().contains("closed"));
-    let terminal_errors_after_retry = crate::agent_sessions::transcript(session_id)
-        .and_then(|transcript| transcript.as_dict().cloned())
-        .and_then(|transcript| transcript.get("events").cloned())
-        .and_then(|events| match events {
-            crate::value::VmValue::List(events) => Some(
-                events
-                    .iter()
-                    .filter(|event| {
-                        event
-                            .as_dict()
-                            .and_then(|event| event.get("kind"))
-                            .is_some_and(|kind| kind.display() == "agent_loop_terminal_error")
-                    })
-                    .count(),
-            ),
-            _ => None,
-        })
-        .unwrap_or(0);
-    assert_eq!(terminal_errors_after_retry, 1);
+    assert_eq!(count_kind("agent_loop_terminal_error"), 1);
+    assert_eq!(
+        count_kind("turn_phase_changed"),
+        0,
+        "failed retries cannot record a terminal phase"
+    );
+    assert_eq!(
+        delivered.load(Ordering::SeqCst),
+        0,
+        "failed retry cannot publish finality"
+    );
+    assert_observer_live();
 
+    crate::agent_events::clear_session_sinks(session_id);
     crate::agent_sessions::reset_session_store();
     super::super::reset_agent_session_host_state();
 }
@@ -954,4 +1045,71 @@ fn cancelled_nested_guard_does_not_pop_callers_policy() {
     pop_execution_policy();
     drop(abandoned_stack);
     clear_execution_policy_stacks();
+}
+
+/// harn#8951: a stop that lands while a tool runs must not persist an
+/// unanswered call, or every resumed turn is refused by the provider. The
+/// durable transcript carries the typed repair result before the terminal.
+#[tokio::test(flavor = "current_thread")]
+async fn a_cancel_mid_tool_persists_an_answer_for_the_open_call() {
+    crate::agent_sessions::reset_session_store();
+    let root = tempfile::tempdir().expect("temp root");
+    let session_id = "cancelled-mid-tool";
+    let mut options = crate::value::DictMap::new();
+    options.put_str("root", root.path().to_string_lossy().as_ref());
+    let prepared = crate::agent_session_journal::prepare(
+        session_id,
+        &options,
+        "run-cancelled-mid-tool".to_string(),
+        "turn-cancelled-mid-tool".to_string(),
+    )
+    .await
+    .expect("prepare journal");
+    crate::agent_sessions::open_or_create_for_test(Some(session_id.to_string()));
+    crate::agent_sessions::install_journal(session_id, prepared.state).expect("install journal");
+    crate::llm::agent_session_host::seed_host_session_provider_model(session_id, "mock", "fixture");
+    for message in [
+        json!({"role": "user", "content": "run the slow command"}),
+        json!({"role": "assistant", "content": "", "tool_calls": [
+            {"id": "call_stopped", "type": "function", "function": {"name": "run", "arguments": "{}"}}
+        ]}),
+    ] {
+        crate::agent_sessions::inject_message(
+            session_id,
+            crate::stdlib::json_to_vm_value(&message),
+        )
+        .expect("enqueue transcript mutation");
+    }
+
+    super::abandon_agent_session(session_id)
+        .await
+        .expect("abandonment");
+
+    let store = crate::stdlib::session_store::open_canonical_agent_session(
+        &crate::stdlib::session_store::SessionStoreDir::under_root(root.path()),
+        session_id,
+        None,
+        harn_session_store::SessionType::User,
+    )
+    .await
+    .expect("open canonical session");
+    let payloads = crate::stdlib::session_store::read_all_events(&store, session_id)
+        .await
+        .expect("read canonical events")
+        .iter()
+        .map(|event| event.payload.to_string())
+        .collect::<Vec<_>>();
+    let answer = payloads
+        .iter()
+        .position(|payload| payload.contains("call_stopped") && payload.contains("harness_repair"))
+        .unwrap_or_else(|| panic!("no persisted answer for the open call: {payloads:#?}"));
+    let terminal = payloads
+        .iter()
+        .position(|payload| payload.contains("agent_run_terminal"))
+        .expect("terminal persisted");
+    assert!(
+        answer < terminal,
+        "the answer precedes the terminal: {payloads:#?}"
+    );
+    crate::agent_sessions::reset_session_store();
 }

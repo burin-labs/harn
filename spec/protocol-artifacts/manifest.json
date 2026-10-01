@@ -372,6 +372,7 @@
       "tool_batch_disposition",
       "tool_call_audit",
       "tool_format_override",
+      "turn_phase_changed",
       "typed_checkpoint"
     ],
     "harnAgentEventMethod": "_harn/agentEvent",
@@ -457,6 +458,7 @@
       "context_overflow",
       "provider_misconfigured",
       "provider_unavailable",
+      "provider_billing",
       "rate_limited",
       "timeout",
       "resource_busy",

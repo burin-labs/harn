@@ -1081,6 +1081,15 @@ pub(crate) fn spawn_pipe_drain<R: std::io::Read + Send + 'static>(
 pub fn capture_output_interruptible(
     command: &mut std::process::Command,
 ) -> std::io::Result<std::process::Output> {
+    capture_output_interruptible_in_session(command).map(|(output, _)| output)
+}
+
+/// [`capture_output_interruptible`], also returning the child's pid. On Unix
+/// the child leads its own session (see [`configure_kill_group`]), so the pid
+/// is also the session id every descendant inherits unless it calls `setsid`.
+pub fn capture_output_interruptible_in_session(
+    command: &mut std::process::Command,
+) -> std::io::Result<(std::process::Output, u32)> {
     use std::process::Stdio;
     command
         .stdout(Stdio::piped())
@@ -1110,11 +1119,14 @@ pub fn capture_output_interruptible(
     let stderr = rx_err
         .map(|rx| drain_captured_pipe(&rx, killed, pid))
         .unwrap_or_default();
-    Ok(std::process::Output {
-        status,
-        stdout,
-        stderr,
-    })
+    Ok((
+        std::process::Output {
+            status,
+            stdout,
+            stderr,
+        },
+        pid,
+    ))
 }
 
 #[cfg(test)]

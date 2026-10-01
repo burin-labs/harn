@@ -49,6 +49,7 @@ fn register_manifest_host_operations(extensions: &crate::package::RuntimeExtensi
 #[derive(Debug)]
 enum CaseOutcome {
     Passed(harn_vm::VmValue),
+    Skipped(String),
     RuntimeError(String),
     ExecutionTimedOut,
 }
@@ -348,6 +349,7 @@ async fn execute_compiled(
                 .await
             {
                 Ok(value) => CaseOutcome::Passed(value),
+                Err(harn_vm::VmError::TestSkipped(reason)) => CaseOutcome::Skipped(reason),
                 Err(harn_vm::VmError::ExecutionDeadlineExceeded) => CaseOutcome::ExecutionTimedOut,
                 Err(error) => CaseOutcome::RuntimeError(vm.format_runtime_error(&error)),
             };
@@ -397,17 +399,19 @@ async fn execute_compiled(
     phases.teardown_ms = teardown_start.elapsed().as_millis() as u64;
 
     let elapsed_ms = total_start.elapsed().as_millis() as u64;
-    let (passed, error, timeout, duration_ms, value) = match result {
+    let (passed, skip_reason, error, timeout, duration_ms, value) = match result {
         Ok((outcome, setup_ms, execute_ms)) => {
             phases.setup_ms = setup_ms;
             phases.execute_ms = execute_ms;
             match outcome {
-                CaseOutcome::Passed(value) => (true, None, None, elapsed_ms, Some(value)),
+                CaseOutcome::Passed(value) => (true, None, None, None, elapsed_ms, Some(value)),
+                CaseOutcome::Skipped(reason) => (false, Some(reason), None, None, elapsed_ms, None),
                 CaseOutcome::RuntimeError(message) => {
-                    (false, Some(message), None, elapsed_ms, None)
+                    (false, None, Some(message), None, elapsed_ms, None)
                 }
                 CaseOutcome::ExecutionTimedOut => (
                     false,
+                    None,
                     Some(format!("execute phase timed out after {timeout_ms}ms")),
                     Some(TestTimeout {
                         phase: TestPhase::Execute,
@@ -420,7 +424,7 @@ async fn execute_compiled(
         }
         Err(setup_error) => {
             phases.setup_ms = failed_setup_ms.unwrap_or_default();
-            (false, Some(setup_error), None, elapsed_ms, None)
+            (false, None, Some(setup_error), None, elapsed_ms, None)
         }
     };
 
@@ -429,6 +433,7 @@ async fn execute_compiled(
             name: result_name.to_string(),
             file: file_display,
             passed,
+            skip_reason,
             error,
             captured_output,
             timeout,
@@ -451,6 +456,7 @@ fn compile_failure(
         name: result_name.to_string(),
         file: case.file.display().to_string(),
         passed: false,
+        skip_reason: None,
         error: Some(format!("Compile error: {error}")),
         captured_output: None,
         timeout: None,

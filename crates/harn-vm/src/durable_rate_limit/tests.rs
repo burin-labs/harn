@@ -6,7 +6,6 @@ use std::sync::{mpsc, Arc, Barrier};
 use std::time::Duration;
 
 const TRANSIENT_LOCK_TEST_BUSY_TIMEOUT_MS: u64 = 25;
-const TRANSIENT_LOCK_SIGNAL_TIMEOUT: Duration = Duration::from_secs(2);
 
 async fn run_harn(base_dir: &std::path::Path, source: &str) -> Vec<String> {
     reset_thread_local_state();
@@ -372,9 +371,10 @@ fn transient_sqlite_write_lock_retries_instead_of_erroring() {
         )
     });
 
-    busy_rx
-        .recv_timeout(TRANSIENT_LOCK_SIGNAL_TIMEOUT)
-        .expect("worker should observe the transient sqlite lock before retrying");
+    harn_clock::test_support::recv_within(
+        "worker observing the transient sqlite lock before retrying",
+        &busy_rx,
+    );
     drop(tx);
 
     let attempt = handle

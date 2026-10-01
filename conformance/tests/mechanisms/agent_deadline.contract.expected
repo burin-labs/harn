@@ -1,0 +1,3 @@
+deadline_terminal=true
+callback_cannot_reopen=true
+no_deadline_stays_open=true

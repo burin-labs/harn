@@ -45,11 +45,22 @@ fn auto_select_prefers_local_provider_without_cloud_credentials() {
     // regardless of ambient cloud API keys: no preferred/credentialed cloud
     // provider is present, so the local fallback wins deterministically.
     let config = parse_config_toml(
-            "[providers.ollama]\nbase_url = \"http://localhost:11434\"\nchat_endpoint = \"/v1/chat/completions\"\n",
+            "[providers.ollama]\nbase_url = \"http://localhost:11434\"\nchat_endpoint = \"/v1/chat/completions\"\nchat_api_adapter = \"ollama_openai_compat\"\n",
         )
         .expect("config parses");
     assert!(provider_is_local(config.providers.get("ollama").unwrap()));
+    assert_eq!(
+        config.providers["ollama"].chat_api_adapter,
+        Some(ChatApiAdapter::OllamaOpenAiCompat)
+    );
     assert_eq!(auto_select_provider(&config), "ollama");
+}
+
+#[test]
+fn chat_api_adapter_rejects_unknown_variant() {
+    let error = parse_config_toml("[providers.ollama]\nchat_api_adapter = \"ollama_v2\"\n")
+        .expect_err("chat adapter variants are closed");
+    assert!(error.to_string().contains("ollama_v2"));
 }
 
 #[test]
@@ -506,7 +517,8 @@ fn groq_qwen_3_8_catalog_row_preserves_public_route_metadata() {
         .expect("Groq Qwen 3.8's public preview route must be catalogued");
 
     assert_eq!(model.provider, "groq");
-    assert_eq!(model.context_window, 131_042);
+    // Groq's /models record reported 131,072 on 2026-09-29 (131,042 before).
+    assert_eq!(model.context_window, 131_072);
     assert_eq!(model.wire_model.as_deref(), Some("qwen/qwen3.8-27b"));
     assert_eq!(model.open_weight, Some(true));
     for capability in ["tools", "vision", "streaming", "thinking"] {
@@ -534,6 +546,21 @@ fn groq_qwen_3_8_catalog_row_preserves_public_route_metadata() {
     assert!(capabilities.reasoning_none_supported);
     assert!(capabilities.presence_penalty_supported);
     assert!(!capabilities.top_k_supported);
+}
+
+#[test]
+fn deepinfra_v41_flash_resolves_to_the_served_route() {
+    let id = "deepinfra/deepseek-ai/DeepSeek-V4.1-Flash";
+    let row = model_catalog_entry(id).expect("the observed DeepInfra route is catalogued");
+    assert_eq!(row.provider, "deepinfra");
+    assert_eq!(
+        row.wire_model.as_deref(),
+        Some("deepseek-ai/DeepSeek-V4.1-Flash")
+    );
+    let selected = resolve_model_request(id, None).expect("the route resolves");
+    assert_eq!(selected.resolved_provider, "deepinfra");
+    assert_eq!(selected.resolved_model, id);
+    assert!(model_catalog_entry("deepinfra/deepseek-ai/DeepSeek-V4.2-Flash").is_none());
 }
 
 #[test]
@@ -775,3 +802,87 @@ mod embedded_catalog;
 mod overlays;
 mod provider_prefix;
 mod tool_protocol;
+
+/// Together still lists these models in `/v1/models`, but a chat call returns
+/// "Unable to access non-serverless model" (live sweep 2026-09-29). They must
+/// stay `dedicated` so hosts never offer them as one-click routes. MiniMax M3
+/// answered serverless the same day and is the control that keeps this from
+/// passing on a catalog that marked every Together row dedicated.
+#[test]
+fn together_routes_that_need_a_dedicated_endpoint_are_marked_dedicated() {
+    for id in [
+        "openai/gpt-oss-20b",
+        "moonshotai/Kimi-K2.7-Code",
+        "MiniMaxAI/MiniMax-M2.7",
+        "Qwen/Qwen2.5-7B-Instruct-Turbo",
+        "google/gemma-4-31B-it",
+        "Qwen/Qwen3.5-397B-A17B",
+        "together/nvidia/nemotron-3-ultra-550b-a55b",
+        "Qwen/Qwen3-Coder-Next-FP8",
+    ] {
+        let model = model_catalog_entry(id).unwrap_or_else(|| panic!("{id} must be catalogued"));
+        assert_eq!(model.provider, "together", "{id}");
+        assert_eq!(model.availability, ModelAvailability::Dedicated, "{id}");
+    }
+    let control = model_catalog_entry("MiniMaxAI/MiniMax-M3").expect("Together MiniMax M3 row");
+    assert_eq!(control.provider, "together");
+    assert_ne!(control.availability, ModelAvailability::Dedicated);
+}
+
+/// A provider's default model is its own authored `runtime` entry, whichever
+/// provider is the default. Before this, a user overlay naming another default
+/// provider left `provider: "anthropic"` with no default, and a provider with
+/// no authored default was handed Anthropic's model.
+#[test]
+fn provider_default_does_not_depend_on_the_default_provider() {
+    reset_overrides();
+    for default_provider in ["ollama", "mistral"] {
+        let overlay = parse_config_toml(&format!("default_provider = \"{default_provider}\"\n"))
+            .expect("overlay parses");
+        set_user_overrides(Some(overlay));
+        assert_eq!(
+            default_model_for_provider("anthropic").as_deref(),
+            Ok("claude-sonnet-4-6"),
+            "default_provider = {default_provider}"
+        );
+        assert!(
+            matches!(
+                default_model_for_provider("mistral"),
+                Err(ModelResolutionError::MissingProviderDefault { .. })
+            ),
+            "mistral has no authored default and must not borrow one (default_provider = {default_provider})"
+        );
+        clear_user_overrides();
+    }
+}
+
+/// `fallback_model` is the retired spelling of the default provider's default
+/// model. The merge turns it into that provider's `runtime` entry, and an
+/// explicit `provider_defaults` entry in the same overlay still wins.
+#[test]
+fn legacy_fallback_model_normalizes_into_provider_defaults() {
+    let mut config = parse_config_toml("default_provider = \"anthropic\"\n").expect("base parses");
+    let legacy =
+        parse_config_toml("default_provider = \"ollama\"\nfallback_model = \"llama3.2\"\n")
+            .expect("overlay parses");
+    config.merge_from(&legacy);
+    assert_eq!(config.default_provider.as_deref(), Some("ollama"));
+    assert_eq!(
+        config.provider_defaults["ollama"].runtime.as_deref(),
+        Some("llama3.2")
+    );
+    assert_eq!(
+        config.fallback_model, None,
+        "no second mechanism survives the merge"
+    );
+
+    let explicit = parse_config_toml(
+        "fallback_model = \"legacy\"\n[provider_defaults.ollama]\nruntime = \"explicit\"\n",
+    )
+    .expect("overlay parses");
+    config.merge_from(&explicit);
+    assert_eq!(
+        config.provider_defaults["ollama"].runtime.as_deref(),
+        Some("explicit")
+    );
+}

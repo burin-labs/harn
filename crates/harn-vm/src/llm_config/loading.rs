@@ -109,10 +109,8 @@ fn load_config_snapshot() -> &'static Arc<ProvidersConfig> {
         );
         let host_path = std::env::var(HOST_PROVIDERS_CONFIG_ENV).ok();
         let user_path = std::env::var("HARN_PROVIDERS_CONFIG").ok();
-        let home_path = should_load_home_config()
-            .then(dirs_or_home)
-            .flatten()
-            .map(|home| format!("{home}/.config/harn/providers.toml"));
+        let home_path =
+            user_providers_config_path().map(|path| path.to_string_lossy().into_owned());
         let (config, paths) = load_external_config_layers(
             default_config(),
             host_path.as_deref(),
@@ -196,10 +194,12 @@ fn read_external_config(path: &str, verbose: bool) -> Option<ProvidersConfig> {
     }
 }
 
-fn should_load_home_config() -> bool {
-    // Unit tests should cover embedded defaults plus explicit overlays, not
-    // whichever provider file happens to exist on the developer machine.
-    !cfg!(test)
+/// `providers.toml` in the user configuration directory. The directory's one
+/// owner is [`crate::user_dirs::config_dir`]; the test environment points
+/// `XDG_CONFIG_HOME` at an empty directory, so tests never read a developer's
+/// provider overlay.
+pub fn user_providers_config_path() -> Option<std::path::PathBuf> {
+    crate::user_dirs::config_file("providers.toml")
 }
 
 /// Parse a provider/model catalog overlay in the same shape as
@@ -631,10 +631,6 @@ pub(crate) fn effective_config_with_user_overrides(
 
 fn runtime_catalog_overlay() -> &'static RwLock<Option<ProvidersConfig>> {
     RUNTIME_CATALOG_OVERLAY.get_or_init(|| RwLock::new(None))
-}
-
-fn dirs_or_home() -> Option<String> {
-    crate::user_dirs::home_dir().map(|home| home.to_string_lossy().into_owned())
 }
 
 /// Embedded copy of generated `llm/providers.toml`, built from

@@ -1,0 +1,9 @@
+auth status=completion_unverified
+auth stop_reason=completion_judge_route_unavailable
+auth transcript_has_error=false
+auth next_request_has_error=false
+environment status=completion_unverified
+environment stop_reason=completion_judge_route_unavailable
+environment transcript_has_error=false
+environment next_request_has_error=false
+generic stop_reason=completion_judge_error

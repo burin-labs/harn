@@ -16,12 +16,13 @@ pub use provider_setup::{
     connector_service_issues, ConnectorConditionalProfileRequirement,
     ConnectorConfigurationEnvironmentManifest, ConnectorCredentialEnvironmentManifest,
     ConnectorEnvironment, ConnectorEvidenceRequirement, ConnectorExternalSpend,
-    ConnectorHealthCheckManifest, ConnectorOperationEffect, ConnectorOperationManifest,
-    ConnectorParameterManifest, ConnectorParameterType, ConnectorProtectedProfileManifest,
-    ConnectorReconciliation, ConnectorRecoveryCopy, ConnectorRedactionTarget,
-    ConnectorRequiredSecretManifest, ConnectorSecretDirection, ConnectorServiceManifest,
-    ConnectorSetupConfigurationField, ConnectorTestProfile, ProtectedProfileFieldClass,
-    ProviderManifestEntry, ProviderSetupManifest, ResolvedProviderConnectorConfig,
+    ConnectorHealthCheckManifest, ConnectorOperationEffect, ConnectorOperationKind,
+    ConnectorOperationManifest, ConnectorParameterManifest, ConnectorParameterType,
+    ConnectorProtectedProfileManifest, ConnectorReconciliation, ConnectorRecoveryCopy,
+    ConnectorRedactionTarget, ConnectorRequiredSecretManifest, ConnectorSecretDirection,
+    ConnectorServiceManifest, ConnectorSetupConfigurationField, ConnectorTestProfile,
+    ProtectedProfileFieldClass, ProviderManifestEntry, ProviderSetupManifest,
+    ResolvedProviderConnectorConfig,
 };
 
 #[derive(Debug, Clone, Deserialize)]
@@ -1010,6 +1011,7 @@ pub struct RuntimeExtensions {
     pub root_manifest: Option<Manifest>,
     pub root_manifest_path: Option<PathBuf>,
     pub root_manifest_dir: Option<PathBuf>,
+    pub(crate) root_manifest_identity: Option<[u8; 32]>,
     pub(crate) runtime_personas: Vec<ResolvedRuntimePersona>,
     pub llm: Option<harn_vm::llm_config::ProvidersConfig>,
     pub capabilities: Option<harn_vm::llm::capabilities::CapabilitiesFile>,
@@ -1246,6 +1248,14 @@ fn llm_manifest_diagnostics(content: &str) -> Vec<harn_vm::llm_config::ProviderC
 }
 
 pub(crate) fn read_manifest_from_path(path: &Path) -> Result<Manifest, PackageError> {
+    read_manifest_from_path_with_identity(path).map(|(manifest, _)| manifest)
+}
+
+pub(crate) fn read_manifest_from_path_with_identity(
+    path: &Path,
+) -> Result<(Manifest, [u8; 32]), PackageError> {
+    use sha2::{Digest, Sha256};
+
     let content = fs::read_to_string(path).map_err(|error| {
         if error.kind() == std::io::ErrorKind::NotFound {
             PackageError::Manifest(format!(
@@ -1263,7 +1273,7 @@ pub(crate) fn read_manifest_from_path(path: &Path) -> Result<Manifest, PackageEr
     for diagnostic in llm_manifest_diagnostics(&content) {
         eprintln!("[llm_config] warning in {}: {diagnostic}", path.display());
     }
-    Ok(manifest)
+    Ok((manifest, Sha256::digest(content.as_bytes()).into()))
 }
 
 /// Load the `[workspace]` config and the directory of the `harn.toml`

@@ -22,12 +22,37 @@ use super::session_change::{remember_title, TitleMemory};
 
 const POLL: Duration = Duration::from_millis(250);
 
+/// What wakes the watch loop out of its poll wait. The loop never inspects a
+/// filesystem event: any wake means "read `data_version` now".
+enum WatchSignal {
+    /// Filesystem activity near the database, or a stop request.
+    Wake,
+    /// Test barrier: poll once, then acknowledge. The acknowledgement proves
+    /// the loop read `data_version` after every commit made before the
+    /// request, and published whatever that read found.
+    #[cfg(test)]
+    Flush(mpsc::Sender<()>),
+}
+
+impl WatchSignal {
+    /// Called after the poll that followed this signal.
+    fn polled(self) {
+        match self {
+            Self::Wake => {}
+            #[cfg(test)]
+            Self::Flush(ack) => {
+                let _ = ack.send(());
+            }
+        }
+    }
+}
+
 struct WatchState {
     stop: Arc<AtomicBool>,
     /// Wakes the loop out of its poll wait so a stop is observed at once.
     /// Without it, joining costs up to one whole [`POLL`] interval, and a
     /// store handle closing on a hot path would pay that every time.
-    wake: mpsc::Sender<notify::Result<notify::Event>>,
+    wake: mpsc::Sender<WatchSignal>,
     thread: JoinHandle<()>,
 }
 
@@ -154,7 +179,7 @@ fn stop_watcher(path: &Path) {
 /// the receiver and the join would still wait out a poll interval.
 fn stop_and_join(state: WatchState) {
     state.stop.store(true, Ordering::Relaxed);
-    let _ = state.wake.send(Ok(notify::Event::default()));
+    let _ = state.wake.send(WatchSignal::Wake);
     let _ = state.thread.join();
 }
 
@@ -164,6 +189,37 @@ fn stop_and_join(state: WatchState) {
 #[cfg(test)]
 pub(super) fn watcher_count_for(path: &Path) -> usize {
     watchers().iter().filter(|(seen, _)| seen == path).count()
+}
+
+/// Block until the watcher for `path` has polled after every commit made
+/// before this call, and published what that poll found. Test-only: it is
+/// the positive barrier that lets a case assert a publish did *not* happen
+/// without waiting out a guessed quiet period.
+#[cfg(test)]
+pub(super) fn flush_watcher(path: &Path) {
+    let wake = watchers()
+        .iter()
+        .find(|(seen, _)| seen == path)
+        .map(|(_, state)| state.wake.clone())
+        .expect("a watcher is running for this path");
+    let (ack, acked) = mpsc::channel();
+    wake.send(WatchSignal::Flush(ack))
+        .expect("the watch loop is running");
+    harn_clock::test_support::recv_within("session WAL watcher flush", &acked);
+}
+
+/// Record every current title and pin as already seen, so the first poll
+/// publishes only what moves after this point.
+fn seed_title_memory(reader: &rusqlite::Connection) {
+    if let Ok(snapshots) = list_title_snapshots(reader) {
+        for snapshot in snapshots {
+            remember_title(
+                &snapshot.id,
+                snapshot.title.as_deref(),
+                snapshot.title_pinned,
+            );
+        }
+    }
 }
 
 fn start_watcher(path: PathBuf) {
@@ -177,15 +233,7 @@ fn start_watcher(path: PathBuf) {
     let Ok(initial_version) = data_version(&reader) else {
         return;
     };
-    if let Ok(snapshots) = list_title_snapshots(&reader) {
-        for snapshot in snapshots {
-            remember_title(
-                &snapshot.id,
-                snapshot.title.as_deref(),
-                snapshot.title_pinned,
-            );
-        }
-    }
+    seed_title_memory(&reader);
 
     let stop = Arc::new(AtomicBool::new(false));
     let thread_stop = Arc::clone(&stop);
@@ -213,11 +261,11 @@ fn watch_loop(
     reader: rusqlite::Connection,
     mut last_version: i64,
     stop: Arc<AtomicBool>,
-    tx: mpsc::Sender<notify::Result<notify::Event>>,
-    rx: mpsc::Receiver<notify::Result<notify::Event>>,
+    tx: mpsc::Sender<WatchSignal>,
+    rx: mpsc::Receiver<WatchSignal>,
 ) {
-    let mut watcher = match notify::recommended_watcher(move |event| {
-        let _ = tx.send(event);
+    let mut watcher = match notify::recommended_watcher(move |_: notify::Result<notify::Event>| {
+        let _ = tx.send(WatchSignal::Wake);
     }) {
         Ok(watcher) => watcher,
         Err(_) => return,
@@ -231,19 +279,34 @@ fn watch_loop(
     }
 
     while !stop.load(Ordering::Relaxed) {
-        match rx.recv_timeout(POLL) {
-            Ok(_) | Err(RecvTimeoutError::Timeout) => {}
+        let signal = match rx.recv_timeout(POLL) {
+            Ok(signal) => Some(signal),
+            Err(RecvTimeoutError::Timeout) => None,
             Err(RecvTimeoutError::Disconnected) => break,
-        }
-        let Ok(version) = data_version(&reader) else {
-            continue;
         };
-        if version == last_version {
-            continue;
+        poll_once(&reader, &mut last_version);
+        if let Some(signal) = signal {
+            signal.polled();
         }
-        last_version = version;
-        publish_title_changes(&reader);
     }
+}
+
+/// One watch step, with no thread or timer: read `data_version` and, when
+/// another connection has committed since `last_version`, publish every title
+/// or pin that moved. Returns whether a new commit was observed.
+///
+/// `data_version` is per connection, so `last_version` is only meaningful
+/// against the same `reader`.
+fn poll_once(reader: &rusqlite::Connection, last_version: &mut i64) -> bool {
+    let Ok(version) = data_version(reader) else {
+        return false;
+    };
+    if version == *last_version {
+        return false;
+    }
+    *last_version = version;
+    publish_title_changes(reader);
+    true
 }
 
 fn publish_title_changes(reader: &rusqlite::Connection) {
@@ -269,8 +332,8 @@ fn publish_title_changes(reader: &rusqlite::Connection) {
 mod tests {
     use std::sync::mpsc;
     use std::sync::Arc;
-    use std::time::Duration;
 
+    use harn_clock::test_support::recv_within;
     use harn_session_store::{
         CreateSession, SessionChangeObserver, SessionMeta, SessionStore, UpdateSession,
     };
@@ -286,6 +349,61 @@ mod tests {
         }
     }
 
+    /// Detection without a thread or a clock: a foreign commit is published
+    /// by exactly the next poll, and a poll with nothing new publishes
+    /// nothing.
+    #[tokio::test]
+    async fn one_poll_publishes_a_foreign_title_commit() {
+        let _bus = crate::stdlib::session_change::test_support::exclusive_bus().await;
+        let root = TempDir::new().expect("root");
+        let database = {
+            let store = open_canonical_store(root.path()).expect("open canonical store");
+            store
+                .create(CreateSession {
+                    id: Some("polled".to_string()),
+                    title: Some("before".to_string()),
+                    ..CreateSession::default()
+                })
+                .await
+                .expect("create");
+            store.path().to_path_buf()
+        };
+
+        // No handle is open, so subscribing starts no watcher for this store:
+        // the only thing that can publish below is the direct poll.
+        let (tx, rx) = mpsc::channel();
+        let _subscription = subscribe_session_changes(Arc::new(Recording(tx)));
+        assert_eq!(super::watcher_count_for(&database), 0);
+
+        let reader =
+            harn_session_store::wal_watch::open_watch_reader(&database).expect("watch reader");
+        let mut last_version =
+            harn_session_store::wal_watch::data_version(&reader).expect("data version");
+        super::seed_title_memory(&reader);
+        assert!(
+            !super::poll_once(&reader, &mut last_version),
+            "no commit since the baseline"
+        );
+
+        let foreign = rusqlite::Connection::open(&database).expect("foreign writer");
+        foreign
+            .execute(
+                "UPDATE sessions SET title = ?1 WHERE id = ?2",
+                rusqlite::params!["after", "polled"],
+            )
+            .expect("foreign rename");
+
+        assert!(super::poll_once(&reader, &mut last_version));
+        assert_eq!(rx.try_recv().as_deref(), Ok("after"));
+        assert!(!super::poll_once(&reader, &mut last_version));
+        assert_eq!(
+            rx.try_recv(),
+            Err(mpsc::TryRecvError::Empty),
+            "a quiet poll publishes nothing"
+        );
+    }
+
+    /// The same path through the real watcher thread and filesystem watcher.
     #[tokio::test]
     async fn foreign_title_write_reaches_a_subscriber_in_this_process() {
         let _bus = crate::stdlib::session_change::test_support::exclusive_bus().await;
@@ -312,9 +430,7 @@ mod tests {
             )
             .expect("foreign rename");
 
-        let title = rx
-            .recv_timeout(Duration::from_secs(2))
-            .expect("watcher published the foreign title");
+        let title = recv_within("watcher publishing the foreign title", &rx);
         assert_eq!(title, "after");
     }
 
@@ -360,6 +476,11 @@ mod tests {
             })
             .await
             .expect("create");
+        // Make the watcher see "before" on its own. Otherwise it can fold the
+        // create and the rename into one poll, meet the session first as
+        // "after", and stay silent whether or not the hook deduplicates, which
+        // would make the assertion below vacuous.
+        super::flush_watcher(store.path());
 
         store
             .update(
@@ -372,12 +493,15 @@ mod tests {
             .await
             .expect("local rename");
 
-        let first = rx
-            .recv_timeout(Duration::from_secs(2))
-            .expect("in-process hook published");
+        let first = recv_within("in-process hook publishing the rename", &rx);
         assert_eq!(first, "after");
-        assert!(
-            rx.recv_timeout(Duration::from_millis(600)).is_err(),
+        // Wait until the watcher has polled past the rename's commit, so a
+        // republish would already be on the channel, rather than hoping a
+        // quiet period was long enough for it to look.
+        super::flush_watcher(store.path());
+        assert_eq!(
+            rx.try_recv(),
+            Err(mpsc::TryRecvError::Empty),
             "watcher must not republish a title the in-process hook already sent"
         );
     }

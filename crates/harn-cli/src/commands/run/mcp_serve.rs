@@ -122,11 +122,7 @@ pub(crate) async fn load_file_tool_registry_local(
     vm.set_source_dir(&entry_source_dir(path));
     // A missing publication must never read as success because another
     // in-process adapter left a registry in thread-local state.
-    let _stale_registry = harn_vm::take_mcp_serve_registry();
-    let _stale_resources = harn_vm::take_mcp_serve_resources();
-    let _stale_resource_templates = harn_vm::take_mcp_serve_resource_templates();
-    let _stale_prompts = harn_vm::take_mcp_serve_prompts();
-    let _stale_metadata = harn_vm::take_mcp_serve_metadata();
+    harn_vm::reset_mcp_serve_publication();
     vm.execute(&chunk)
         .await
         .map_err(|error| ToolRegistryLoadError {
@@ -158,6 +154,12 @@ pub(crate) async fn load_file_tool_registry_local(
         })?;
     if !vm.output().is_empty() {
         diagnostics.push_str(vm.output());
+    }
+    if let Some(rejection) = harn_vm::take_mcp_serve_rejection() {
+        return Err(ToolRegistryLoadError {
+            message: format!("{diagnostics}invalid MCP publication: {rejection}\n"),
+            exit_code: 1,
+        });
     }
     let registry = harn_vm::take_mcp_serve_registry().ok_or_else(|| ToolRegistryLoadError {
         message: format!(
@@ -426,7 +428,11 @@ async fn run_reloadable_stdio(path: &str, card_source: Option<&str>, loaded: Loa
                 std::process::exit(1);
             }
         };
-    let watch_root = Path::new(path).parent().unwrap_or(Path::new("."));
+    // A bare filename has an empty parent, which notify cannot watch.
+    let watch_root = Path::new(path)
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
     if let Err(error) = watcher.watch(watch_root, RecursiveMode::Recursive) {
         eprintln!(
             "error: failed to watch MCP source root {}: {error}",

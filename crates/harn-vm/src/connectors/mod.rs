@@ -1,10 +1,9 @@
 //! Connector traits and shared helpers for inbound event-source providers.
 //! Runtime contracts live here beside their event, secret, and trigger dependencies.
 use std::collections::{BTreeMap, HashMap};
-use std::fmt;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
-use std::time::Duration as StdDuration;
+use std::{fmt, time::Duration as StdDuration};
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -12,12 +11,11 @@ use serde_json::Value as JsonValue;
 use time::OffsetDateTime;
 use tokio::sync::Mutex as AsyncMutex;
 
-use crate::event_log::AnyEventLog;
-use crate::secrets::SecretProvider;
 use crate::triggers::test_util::clock::{self, ClockInstant};
 use crate::triggers::{
     InboxIndex, ProviderId, ProviderMetadata, ProviderRuntimeMetadata, TenantId, TriggerEvent,
 };
+use crate::{event_log::AnyEventLog, secrets::SecretProvider};
 
 pub mod a2a_push;
 mod active_clients;
@@ -209,6 +207,7 @@ pub trait ConnectorClient: Send + Sync {
 
 /// Minimal outbound client errors shared by connector implementations.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum ClientError {
     MethodNotFound(String),
     InvalidArgs(String),
@@ -235,6 +234,7 @@ impl std::error::Error for ClientError {}
 
 /// Shared connector-layer errors.
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum ConnectorError {
     DuplicateProvider(String),
     DuplicateDelivery(String),

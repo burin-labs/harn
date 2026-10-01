@@ -1,0 +1,52 @@
+import { GoalSpec, __goal_pin_spec, goal_under_obligations } from "std/agent/goal_contract"
+import { CompletionObligations } from "std/agent/obligations"
+import { agent_emit_event } from "std/agent/state"
+
+/**
+ * Project the typed goal and record which frozen criteria this projection
+ * retires. Check callbacks stay in memory; the replay record carries ids and
+ * descriptions, never a claim that those criteria were satisfied.
+ *
+ * @effects: [agent]
+ * @errors: []
+ * @api_stability: internal
+ */
+pub fn __agent_goal_projection(
+  agent: HarnessAgent,
+  session_id: string,
+  g: GoalSpec,
+  obligations: CompletionObligations?,
+) -> GoalSpec {
+  const current = goal_under_obligations(g, obligations)
+  const retarget = obligations?.retarget
+  if retarget != nil && len(g.success_criteria ?? []) > 0 {
+    const retired = __goal_pin_spec(g).success_criteria ?? []
+    const control_id = retarget.control_id
+    const recorded = ((agent.snapshot(session_id) ?? {})?.events ?? []).any(
+      { event ->
+        event?.metadata?.schema == "harn.goal_criteria_retired.v1"
+          && event?.metadata?.control_id == control_id
+          && event?.metadata?.previous_objective == g.objective
+          && event?.metadata?.retired == retired
+      },
+    )
+    if recorded {
+      return current
+    }
+    agent_emit_event(
+      agent,
+      session_id,
+      "typed_checkpoint",
+      {
+        schema: "harn.goal_criteria_retired.v1",
+        kind: "goal_criteria_retired",
+        control_id: retarget.control_id,
+        message_id: retarget.message_id,
+        objective: current.objective,
+        previous_objective: g.objective,
+        retired: retired,
+      },
+    )
+  }
+  return current
+}

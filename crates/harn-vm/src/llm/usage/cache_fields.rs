@@ -65,6 +65,9 @@ fn reported_counter(
     let mut reported = None;
     for path in paths {
         if let Some(value) = value.pointer(path) {
+            if value.is_null() {
+                continue;
+            }
             let count = value.as_i64().ok_or("token counter is not an integer")?;
             if count < 0 {
                 return Err("negative token count");

@@ -96,7 +96,7 @@ pub fn schema_value() -> Value {
                                 "effect": {"enum": ["retention", "training"]},
                                 "applies_to": {
                                     "type": "array",
-                                    "items": {"enum": ["anthropic_sse", "open_ai_sse", "ollama_ndjson", "gemini_json", "gemini_interactions_sse"]}
+                                    "items": {"enum": llm_config::DataControlDialect::ALL}
                                 },
                                 "caveat": {"type": "string"}
                             },
@@ -175,6 +175,7 @@ pub fn schema_value() -> Value {
                         "additionalProperties": {"$ref": "#/$defs/endpoint_region"}
                     },
                     "chat_endpoint": {"type": "string", "minLength": 1},
+                    "chat_api_adapter": {"enum": harn_provider_catalog::ChatApiAdapter::ALL},
                     "completion_endpoint": {"type": "string"},
                     "embeddings_endpoint": {"type": "string"}
                 },

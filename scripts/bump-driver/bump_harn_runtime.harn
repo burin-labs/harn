@@ -1,7 +1,11 @@
 #!/usr/bin/env harn
-import { live_bump_adapter } from "std/bump/live"
 import { bump_options, run_bump } from "std/bump/runtime"
 import { gha_append_summary, gha_write_output } from "std/gha"
+import {
+  github_bump_auth_options,
+  github_bump_live_adapter,
+  github_bump_read_private_key,
+} from "./authentication"
 /** Thin GitHub Actions entry point for the package-backed Harn bump driver. */
 import { github_bump_remote } from "./github_remote"
 import { gha_bool_output, gha_int_output } from "./wire_outputs"
@@ -40,11 +44,28 @@ fn package_test_receipt(fs: HarnessFs, env: HarnessEnv) -> string? {
 
 pipeline main(harness: Harness) {
   const repo = env_or(harness.env, "GITHUB_REPOSITORY", "")
-  const token = harness.env.get_or("HARN_BUMP_TOKEN", "")
-  if trim(repo) == "" || trim(token) == "" {
-    harness.stdio.eprintln("bump_harn_runtime: GITHUB_REPOSITORY and HARN_BUMP_TOKEN are required")
+  if trim(repo) == "" {
+    harness.stdio.eprintln("bump_harn_runtime: GITHUB_REPOSITORY is required")
     return 2
   }
+  const key_file = harness.env.get_or("GITHUB_APP_PRIVATE_KEY_FILE", "")
+  const private_key = if key_file == "" {
+    ""
+  } else {
+    github_bump_read_private_key(
+      harness.fs,
+      {path: key_file, temporary_root: harness.env.get_or("RUNNER_TEMP", "")},
+    )
+  }
+  const auth_options = github_bump_auth_options(
+    {
+      app_id: harness.env.get_or("GITHUB_APP_ID", ""),
+      installation_id: harness.env.get_or("GITHUB_INSTALLATION_ID", ""),
+      private_key_pem: private_key,
+      token: harness.env.get_or("HARN_BUMP_TOKEN", ""),
+    },
+    repo,
+  )
   const release_repo = env_or(harness.env, "HARN_BUMP_RELEASE_REPO", "burin-labs/harn")
   const branch = env_or(harness.env, "HARN_BUMP_BRANCH", "automation/bump-harn-runtime")
   const base = env_or(harness.env, "HARN_BUMP_BASE", "main")
@@ -60,29 +81,34 @@ pipeline main(harness: Harness) {
     {
       repo: repo,
       release_repo: release_repo,
-      token: token,
+      options: auth_options,
       branch: branch,
       base: base,
+      bot_login: env_or(harness.env, "HARN_EXT_BUMP_BOT_LOGIN", "harn-release-bot[bot]"),
+      source_revision: env_or(harness.env, "HARN_BUMP_SOURCE_REVISION", ""),
       package_test_receipt: package_test_receipt(harness.fs, harness.env) ?? "",
     },
   )
-  const adapter = live_bump_adapter(
-    harness.clock,
-    harness.tools,
-    remote,
+  const adapter = github_bump_live_adapter(
+    harness,
     {
-      release_repo: release_repo,
-      validation_command: env_or(harness.env, "HARN_BUMP_VALIDATE", ""),
-      refresh_command: env_or(
-        harness.env,
-        "HARN_BUMP_REFRESH",
-        "harn install --locked || harn install",
-      ),
-      readiness_max_attempts: env_int(harness.env, "HARN_BUMP_READINESS_ATTEMPTS", 1),
-      readiness_interval_ms: env_int(harness.env, "HARN_BUMP_READINESS_INTERVAL_MS", 20000),
-      readiness_timeout_ms: env_int(harness.env, "HARN_BUMP_READINESS_TIMEOUT_MS", 20000),
+      remote: remote,
+      authentication: auth_options,
+      config: {
+        release_repo: release_repo,
+        validation_command: env_or(harness.env, "HARN_BUMP_VALIDATE", ""),
+        refresh_command: env_or(
+          harness.env,
+          "HARN_BUMP_REFRESH",
+          "harn install --locked || harn install",
+        ),
+        // The adapter mints a current scoped token when each refresh begins.
+        readiness_max_attempts: env_int(harness.env, "HARN_BUMP_READINESS_ATTEMPTS", 1),
+        readiness_interval_ms: env_int(harness.env, "HARN_BUMP_READINESS_INTERVAL_MS", 20000),
+        readiness_timeout_ms: env_int(harness.env, "HARN_BUMP_READINESS_TIMEOUT_MS", 20000),
+        source_repo_dir: "../.harn-runtime",
+      },
     },
-    harness.fs,
   )
   const receipt = run_bump(
     bump_options(
@@ -91,6 +117,7 @@ pipeline main(harness: Harness) {
         branch: branch,
         base: base,
         tag: env_or(harness.env, "HARN_BUMP_TARGET_TAG", ""),
+        source_revision: env_or(harness.env, "HARN_BUMP_SOURCE_REVISION", ""),
         enable_auto_merge: enable_auto_merge,
         publish_failure_for_repair: publish_failure_for_repair,
       },
@@ -101,6 +128,7 @@ pipeline main(harness: Harness) {
   gha_write_output(harness, "outcome", receipt.outcome)
   gha_write_output(harness, "ok", gha_bool_output(receipt.ok))
   gha_write_output(harness, "target_tag", receipt.target_tag)
+  gha_write_output(harness, "target_revision", receipt.target_revision)
   gha_write_output(harness, "ready", gha_bool_output(receipt.ready))
   if receipt.pr_number != nil {
     gha_write_output(harness, "pr_number", gha_int_output(receipt.pr_number))

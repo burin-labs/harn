@@ -33,7 +33,6 @@ pipeline default(harness: Harness) {
           mutation_status: "applied",
           raw_output: {ok: true},
           duration_ms: 12,
-          future_extension: {schema: "harn.future.event.v1"},
         },
       )
       agent_emit_event(
@@ -89,7 +88,14 @@ pipeline default(harness: Harness) {
   harness.stdio.println(is_type(captured, agent_event_capture_schema()))
   harness.stdio.println(agent_event_capture_report(captured).ok)
   harness.stdio.println(agent_event_capture_value(captured).result.ok)
-  harness.stdio.println(is_type(captured.events[0], agent_event_schema()))
+  // The schema remains open to future readers; the host emitter itself must
+  // only publish fields its current AgentEvent variant can preserve.
+  harness.stdio.println(
+    is_type(
+      captured.events[0] + {future_extension: {schema: "harn.future.event.v1"}},
+      agent_event_schema(),
+    ),
+  )
   harness.stdio.println(
     agent_event_report(captured.events[0], agent_tool_lifecycle_event_schema()).ok,
   )

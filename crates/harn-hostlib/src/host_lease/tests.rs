@@ -2,7 +2,10 @@ use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{mpsc, Arc, Barrier, OnceLock};
 use std::thread;
+use std::time::Instant;
 
+use harn_clock::test_support::recv_within;
+use harn_clock::PausedClock;
 use rusqlite::Connection;
 use tempfile::TempDir;
 
@@ -11,8 +14,24 @@ use super::*;
 #[path = "tests/status.rs"]
 mod status_tests;
 
+#[path = "tests/wait_deadlines.rs"]
+mod wait_deadlines;
+
 fn store(temp: &TempDir) -> HostLeaseStore {
     HostLeaseStore::for_root(temp.path()).unwrap()
+}
+
+/// A store whose wait deadlines advance only when the test advances the
+/// clock, so outcomes depend on queue order rather than scheduler latency.
+fn paused_store(temp: &TempDir) -> (HostLeaseStore, Arc<PausedClock>) {
+    let origin = time::OffsetDateTime::from_unix_timestamp(1_800_000_000).unwrap();
+    let clock = PausedClock::new(origin);
+    let store = HostLeaseStore::for_root_with_clock(
+        temp.path(),
+        Arc::clone(&clock) as Arc<dyn harn_clock::Clock>,
+    )
+    .unwrap();
+    (store, clock)
 }
 
 #[derive(Debug)]
@@ -102,12 +121,12 @@ fn status_reports_an_admitted_worker_before_the_next_acquisition() {
         thread::spawn(move || {
             let mut report = |receipt: &HostLeaseAcquireReceipt| {
                 progress_tx.send(receipt.clone()).unwrap();
-                resume_rx.recv().unwrap();
+                recv_within("host lease worker resumes", &resume_rx);
             };
             store.acquire_wait_for_run_with_progress(&run_id, std::process::id(), &mut report)
         })
     };
-    let progress = progress_rx.recv().unwrap();
+    let progress = recv_within("pending host lease worker reports progress", &progress_rx);
     assert_eq!(progress.queue.unwrap().position, 1);
     assert!(
         store
@@ -145,7 +164,8 @@ fn wait_progress_schedule_reports_immediately_then_bounds_silence() {
 #[test]
 fn supervised_wait_projects_typed_progress_before_event_driven_handoff() {
     let temp = TempDir::new().unwrap();
-    let store = Arc::new(store(&temp));
+    let (store, _clock) = paused_store(&temp);
+    let store = Arc::new(store);
     let holder = store.try_acquire(request("compile-lane")).unwrap();
     let handle = holder.handle.unwrap();
     let run = store
@@ -179,7 +199,10 @@ fn supervised_wait_projects_typed_progress_before_event_driven_handoff() {
         })
     };
 
-    let progress = progress_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+    // The first attempt is always deferred behind the holder and the schedule
+    // reports at elapsed zero, so this event is guaranteed. If the waiter
+    // fails instead, its sender drops and the receive fails immediately.
+    let progress = recv_within("queued host lease waiter reports progress", &progress_rx);
     assert_eq!(progress.status, HostLeaseAcquireStatus::Deferred);
     assert_eq!(
         progress.defer.unwrap().active.unwrap().owner,
@@ -304,7 +327,7 @@ fn same_class_waiters_are_fifo_across_reversed_wake_order_and_restart() {
             requested_at_ms: 2_000,
             recoverable: true,
         };
-        let deadline = unix_now_ms().unwrap().saturating_add(60_000);
+        let deadline = store.now_ms().unwrap().saturating_add(60_000);
         let first_a = store
             .enqueue_waiter(
                 &resource,
@@ -408,7 +431,7 @@ fn higher_priority_waiter_preempts_an_older_lower_priority_waiter() {
         requested_at_ms: 2_000,
         recoverable: true,
     };
-    let deadline = unix_now_ms().unwrap().saturating_add(60_000);
+    let deadline = store.now_ms().unwrap().saturating_add(60_000);
     store
         .enqueue_waiter(
             &resource,
@@ -443,7 +466,8 @@ fn supervised_waiters_handoff_fifo_on_the_public_restart_path() {
     let mut handoff_micros = Vec::new();
     for run in 0..8 {
         let temp = TempDir::new().unwrap();
-        let store = Arc::new(store(&temp));
+        let (store, _clock) = paused_store(&temp);
+        let store = Arc::new(store);
         let mut holder_request = request("holder-c");
         holder_request.priority_class = HostLeasePriorityClass::Interactive;
         let holder = store.try_acquire(holder_request).unwrap().handle.unwrap();
@@ -1311,7 +1335,8 @@ fn release_waits_for_internal_registry_writer() {
 #[test]
 fn wait_rechecks_after_cross_thread_release_without_polling() {
     let temp = TempDir::new().unwrap();
-    let store = Arc::new(store(&temp));
+    let (store, _clock) = paused_store(&temp);
+    let store = Arc::new(store);
     let first = store.try_acquire(request("codex-0")).unwrap();
     let handle = first.handle.unwrap();
     let waiter = {
@@ -1379,7 +1404,7 @@ fn dead_recoverable_waiters_do_not_block_the_queue() {
         requested_at_ms: 1_000,
         recoverable: true,
     };
-    let deadline = unix_now_ms().unwrap().saturating_add(3_600_000);
+    let deadline = store.now_ms().unwrap().saturating_add(3_600_000);
     store
         .enqueue_waiter(
             &resource,

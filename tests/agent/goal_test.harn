@@ -5,9 +5,18 @@
 // dropping the deterministic floor: a criterion `check` that is set but not
 // callable, and a `goal_reloop` `facts_fn` that is set but not callable. Also
 // pins the behavior-identical swap of `__goal_without_control_keys` onto the
-// `__dict_omit` builtin. Everything here is PURE — no LLM, no host.
-import { goal, goal_check, goal_reloop, goal_text, goal_under_obligations } from "std/agent/goal"
+// `__dict_omit` builtin, and typed goal pin serialization. No model calls.
+import {
+  goal,
+  goal_check,
+  goal_judge,
+  goal_pin,
+  goal_reloop,
+  goal_text,
+  goal_under_obligations,
+} from "std/agent/goal"
 import { agent_loop_options } from "std/agent/options"
+import { pin_reminder } from "std/agent/pins"
 
 fn __manual_omit(o: dict, drop: any) {
   let out = {}
@@ -97,6 +106,59 @@ const __RETARGETED = {
   original_task: "ship it",
   steers: [{message_id: "msg_inj_1", mode: "finish_step", content: "change of plan"}],
   retarget: {control_id: "ctl-1", message_id: "msg_inj_1", objective: "reply BRAVO"},
+}
+
+pipeline test_goal_pin_carries_serializable_criteria_and_limits(harness: Harness) {
+  const g = goal(
+    {
+      objective: "reply ALPHA",
+      success_criteria: [{id: "alpha", description: "Reply ALPHA", check: { _ -> false }}],
+      constraints: ["keep the constraint"],
+      budget: {tokens: 42},
+    },
+  )
+  const reminder = pin_reminder(harness.agent, goal_pin(harness.random, g))
+  assert_eq(goal_pin(harness.random, g).meta.goal.success_criteria[0]?.check, nil)
+  const injected = harness.agent.transcript_inject_reminder(transcript_from_messages([]), reminder)
+  const stored = transcript_events_by_kind(injected.transcript, "system_reminder")
+  assert_eq(len(stored), 1)
+  assert_eq(stored[0].reminder.goal_pin.spec.objective, "reply ALPHA")
+  assert_eq(stored[0].reminder.goal_pin.spec.success_criteria[0].id, "alpha")
+  assert_eq(stored[0].reminder.goal_pin.spec.success_criteria[0]?.check, nil)
+  assert_eq(stored[0].reminder.goal_pin.spec.constraints, ["keep the constraint"])
+  assert_eq(stored[0].reminder.goal_pin.spec.budget.tokens, 42)
+  const bounded = pin_reminder(harness.agent, goal_pin(harness.random, g), {max_body: 24})
+  assert_eq(bounded.goal_pin.max_body, 24)
+  assert(contains(bounded.body, "[pin reminder truncated]"))
+  const bounded_stored = harness.agent.transcript_inject_reminder(
+    transcript_from_messages([]),
+    bounded,
+  )
+  assert_eq(
+    transcript_events_by_kind(bounded_stored.transcript, "system_reminder")[0].reminder.goal_pin
+      .max_body,
+    24,
+  )
+  const invalid = try {
+    harness.agent.transcript_inject_reminder(
+      transcript_from_messages([]),
+      reminder + {goal_pin: reminder.goal_pin + {unexpected: true}},
+    )
+  }
+  assert(is_err(invalid), "unknown typed pin fields must fail at injection")
+}
+
+pipeline test_goal_judge_keeps_the_typed_goal() {
+  const g = goal({objective: "reply ALPHA", success_criteria: ["ALPHA"]})
+  const config = goal_judge(g)
+  assert_eq(config.goal.objective, "reply ALPHA")
+  assert_eq(config.goal.success_criteria[0].description, "ALPHA")
+}
+
+pipeline test_goal_projection_does_not_duplicate_retired_criteria() {
+  const g = goal({objective: "reply ALPHA", success_criteria: ["ALPHA"]})
+  const current = goal_under_obligations(g, __RETARGETED)
+  assert_eq(goal_under_obligations(current, __RETARGETED), current)
 }
 
 pipeline test_a_retarget_replaces_the_objective_and_retires_criteria(

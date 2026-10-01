@@ -6,7 +6,7 @@
 
 use std::path::{Path, PathBuf};
 
-use super::{read_manifest_from_path, Manifest, PackageError};
+use super::{read_manifest_from_path_with_identity, Manifest, PackageError};
 
 /// Outcome of locating and parsing the nearest `harn.toml`.
 ///
@@ -24,6 +24,7 @@ pub(crate) enum ManifestSearch {
     Found {
         manifest: Box<Manifest>,
         dir: PathBuf,
+        identity: [u8; 32],
     },
     /// A `harn.toml` was found but failed to parse; the error names the path.
     Malformed(PackageError),
@@ -39,7 +40,21 @@ impl ManifestSearch {
     /// as a soft default.
     pub(crate) fn into_result(self) -> Result<Option<(Manifest, PathBuf)>, PackageError> {
         match self {
-            ManifestSearch::Found { manifest, dir } => Ok(Some((*manifest, dir))),
+            ManifestSearch::Found { manifest, dir, .. } => Ok(Some((*manifest, dir))),
+            ManifestSearch::Malformed(error) => Err(error),
+            ManifestSearch::Missing => Ok(None),
+        }
+    }
+
+    pub(crate) fn into_result_with_identity(
+        self,
+    ) -> Result<Option<(Manifest, PathBuf, [u8; 32])>, PackageError> {
+        match self {
+            ManifestSearch::Found {
+                manifest,
+                dir,
+                identity,
+            } => Ok(Some((*manifest, dir, identity))),
             ManifestSearch::Malformed(error) => Err(error),
             ManifestSearch::Missing => Ok(None),
         }
@@ -54,10 +69,11 @@ pub(crate) fn load_nearest_manifest(start: &Path) -> ManifestSearch {
     let Some(found) = harn_modules::manifest_walk::find_nearest_manifest(start) else {
         return ManifestSearch::Missing;
     };
-    match read_manifest_from_path(&found.path) {
-        Ok(manifest) => ManifestSearch::Found {
+    match read_manifest_from_path_with_identity(&found.path) {
+        Ok((manifest, identity)) => ManifestSearch::Found {
             manifest: Box::new(manifest),
             dir: found.dir,
+            identity,
         },
         Err(error) => ManifestSearch::Malformed(error),
     }
@@ -77,7 +93,7 @@ pub(crate) fn find_nearest_manifest_dir(start: &Path) -> Option<PathBuf> {
 /// instead and propagate `Malformed`.
 pub(crate) fn nearest_manifest_or_warn(start: &Path) -> Option<(Manifest, PathBuf)> {
     match load_nearest_manifest(start) {
-        ManifestSearch::Found { manifest, dir } => Some((*manifest, dir)),
+        ManifestSearch::Found { manifest, dir, .. } => Some((*manifest, dir)),
         ManifestSearch::Malformed(error) => {
             eprintln!("warning: ignoring malformed harn.toml: {error}");
             None

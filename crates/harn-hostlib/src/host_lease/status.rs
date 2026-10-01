@@ -75,7 +75,7 @@ impl HostLeaseStore {
         let domain = domain.map(normalize_domain).transpose()?;
         let mut conn = self.connection(SQLITE_MUTATION_BUSY_TIMEOUT)?;
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let now = unix_now_ms()?;
+        let now = self.now_ms()?;
         let removed = admission::cleanup_waiters(&tx, now, self.process_inspector.as_ref())?;
         let keys = resource_keys(&tx, &host, domain.as_deref())?;
         let resources = keys

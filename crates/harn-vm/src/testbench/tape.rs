@@ -191,6 +191,11 @@ pub enum TapeRecordKind {
         request_digest: String,
         response: TapePayload,
     },
+    /// Completed typed evaluation, including its exact request and receipt.
+    DecisionEvaluation {
+        request_digest: String,
+        response: TapePayload,
+    },
     /// Filesystem read against the testbench overlay. The content hash
     /// lets fidelity checks reason about read consistency without
     /// inlining every byte.
@@ -261,6 +266,7 @@ impl TapeRecordKind {
             Self::ClockRead { .. } => "clock_read",
             Self::ClockSleep { .. } => "clock_sleep",
             Self::LlmCall { .. } => "llm_call",
+            Self::DecisionEvaluation { .. } => "decision_evaluation",
             Self::FileRead { .. } => "file_read",
             Self::FileWrite { .. } => "file_write",
             Self::FileDelete { .. } => "file_delete",
@@ -394,6 +400,15 @@ impl EventTape {
     /// Persist the tape (NDJSON + sidecar) to `path`. The sidecar lives
     /// at `<path>.cas/`; the parent directory is created if needed.
     pub fn persist(&self, path: &Path) -> Result<(), String> {
+        self.persist_with_mode(path, false)
+    }
+
+    /// Create a new tape without overwriting a concurrent recording.
+    pub fn persist_new(&self, path: &Path) -> Result<(), String> {
+        self.persist_with_mode(path, true)
+    }
+
+    fn persist_with_mode(&self, path: &Path, exclusive: bool) -> Result<(), String> {
         if let Some(parent) = path.parent() {
             if !parent.as_os_str().is_empty() {
                 std::fs::create_dir_all(parent)
@@ -412,8 +427,6 @@ impl EventTape {
             body.push_str(&line);
             body.push('\n');
         }
-        std::fs::write(path, body).map_err(|err| format!("write {}: {err}", path.display()))?;
-
         if !self.cas.is_empty() {
             let cas_dir = cas_dir_for(path);
             std::fs::create_dir_all(&cas_dir)
@@ -423,6 +436,18 @@ impl EventTape {
                 std::fs::write(&entry, bytes)
                     .map_err(|err| format!("write {}: {err}", entry.display()))?;
             }
+        }
+        if exclusive {
+            use std::io::Write;
+            let mut file = std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(path)
+                .map_err(|err| format!("create new tape {}: {err}", path.display()))?;
+            file.write_all(body.as_bytes())
+                .map_err(|err| format!("write {}: {err}", path.display()))?;
+        } else {
+            std::fs::write(path, body).map_err(|err| format!("write {}: {err}", path.display()))?;
         }
         Ok(())
     }
@@ -512,7 +537,8 @@ fn cas_dir_for(tape_path: &Path) -> PathBuf {
 
 fn visit_payloads(kind: &TapeRecordKind, mut visit: impl FnMut(&TapePayload)) {
     match kind {
-        TapeRecordKind::LlmCall { response, .. } => visit(response),
+        TapeRecordKind::LlmCall { response, .. }
+        | TapeRecordKind::DecisionEvaluation { response, .. } => visit(response),
         TapeRecordKind::ProcessSpawn {
             stdout_payload,
             stderr_payload,

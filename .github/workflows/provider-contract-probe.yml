@@ -93,6 +93,7 @@ jobs:
     outputs:
       live: ${{ steps.campaign.outputs.live }}
       exit_code: ${{ steps.campaign.outputs.exit_code }}
+      catalog_drift_count: ${{ steps.campaign.outputs.catalog_drift_count }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -162,6 +163,8 @@ jobs:
             echo "::error::provider contract campaign produced no report"
             exit 2
           fi
+          catalog_drift_count="$(jq -er '.summary.fail | select(type == "number" and . >= 0 and floor == .)' "$report")"
+          echo "catalog_drift_count=$catalog_drift_count" >> "$GITHUB_OUTPUT"
           jq -r '
             "cells=\(.cell_count) pass=\(.summary.pass) fail=\(.summary.fail) error=\(.summary.error) skip=\(.summary.skip) pending=\(.summary.planned) controls=\(.claim_controls.status) supported=\(.claim_controls.measured_supported_count) unsupported=\(.claim_controls.measured_unsupported_count) unmeasured=\(.claim_controls.unmeasured_count)"
           ' "$report" | tee -a "$GITHUB_STEP_SUMMARY"
@@ -190,12 +193,16 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           EXIT_CODE: ${{ needs.probe.outputs.exit_code }}
+          CATALOG_DRIFT_COUNT: ${{ needs.probe.outputs.catalog_drift_count }}
         shell: bash
         run: |
           set -euo pipefail
-          title="Provider contract probe needs catalog review"
+          title="Provider contract probe needs measurement recovery"
+          if [[ "$CATALOG_DRIFT_COUNT" =~ ^[0-9]+$ ]] && (( CATALOG_DRIFT_COUNT > 0 )); then
+            title="Provider contract probe needs catalog review"
+          fi
           run_url="https://github.com/$GH_REPO/actions/runs/$GITHUB_RUN_ID"
-          body="The weekly endpoint capability probe exited $EXIT_CODE. The run summary reports explicit pass, fail, error, skipped, pending, supported-control, unsupported-control, and unmeasured counts. Review the attached typed receipts before changing the catalog: $run_url"
+          body="The weekly endpoint capability probe exited $EXIT_CODE; catalog drift count: ${CATALOG_DRIFT_COUNT:-unreported}. The run summary reports explicit pass, fail, error, skipped, pending, supported-control, unsupported-control, and unmeasured counts. Review the attached typed receipts before changing the catalog: $run_url"
           existing="$(gh issue list --repo "$GH_REPO" --state open --search "\"$title\" in:title" --json number --jq '.[0].number // empty')"
           if [[ -n "$existing" ]]; then
             gh issue comment "$existing" --repo "$GH_REPO" --body "$body"

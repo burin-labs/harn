@@ -2,8 +2,8 @@
 //!
 //! Every check here is local. A question the route's declared limits refuse is
 //! refused before dispatch, so the caller gets `question_invalid` having made
-//! zero provider requests and paid nothing. The checker already proved the set
-//! is a literal; this layer proves it fits the route.
+//! zero provider requests and paid nothing. Static and runtime-declared
+//! vocabularies share these semantic and route-limit checks.
 
 use crate::value::VmValue;
 
@@ -20,6 +20,10 @@ pub struct QuestionRefusal {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum QuestionRefusalReason {
+    EmptyQuestions,
+    EmptyOptions,
+    EmptyIdentifier,
+    DuplicateLabels,
     TooManyOptions,
     TooFewLevels,
     TooManyLevels,
@@ -31,6 +35,10 @@ pub enum QuestionRefusalReason {
 impl QuestionRefusalReason {
     pub fn as_str(self) -> &'static str {
         match self {
+            Self::EmptyQuestions => "empty_questions",
+            Self::EmptyOptions => "empty_options",
+            Self::EmptyIdentifier => "empty_identifier",
+            Self::DuplicateLabels => "duplicate_labels",
             Self::TooManyOptions => "too_many_options",
             Self::TooFewLevels => "too_few_levels",
             Self::TooManyLevels => "too_many_levels",
@@ -41,19 +49,29 @@ impl QuestionRefusalReason {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 pub enum QuestionBody {
     Boolean,
+    /// Explicit yes/no descriptions; plain boolean identities stay unchanged.
+    BooleanWithCriteria(BooleanCriteria),
     /// Label to the description the model judges against, in declared order.
     Choice(Vec<(String, String)>),
     /// Ordered levels, lowest first.
     Score(Vec<String>),
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+pub struct BooleanCriteria {
+    #[serde(rename = "true")]
+    pub yes: String,
+    #[serde(rename = "false")]
+    pub no: String,
+}
+
 impl QuestionBody {
     pub fn kind(&self) -> DecisionQuestionKind {
         match self {
-            Self::Boolean => DecisionQuestionKind::Boolean,
+            Self::Boolean | Self::BooleanWithCriteria(_) => DecisionQuestionKind::Boolean,
             Self::Choice(_) => DecisionQuestionKind::Choice,
             Self::Score(_) => DecisionQuestionKind::Score,
         }
@@ -63,14 +81,14 @@ impl QuestionBody {
     /// carries one probability rather than a map, so it has none.
     pub fn labels(&self) -> Vec<String> {
         match self {
-            Self::Boolean => Vec::new(),
+            Self::Boolean | Self::BooleanWithCriteria(_) => Vec::new(),
             Self::Choice(criteria) => criteria.iter().map(|(label, _)| label.clone()).collect(),
             Self::Score(levels) => levels.clone(),
         }
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 pub struct Question {
     pub id: String,
     pub instructions: String,
@@ -79,7 +97,7 @@ pub struct Question {
 
 /// A whole question set, in declared order. Order is significant: it is part
 /// of the request and part of the cache identity.
-#[derive(Clone, Debug, PartialEq, Eq, Default)]
+#[derive(Clone, Debug, PartialEq, Eq, Default, serde::Serialize)]
 pub struct QuestionSet {
     pub questions: Vec<Question>,
 }
@@ -115,7 +133,25 @@ impl QuestionSet {
             let kind = text(fields.get("kind"))
                 .ok_or_else(|| format!("question `{id}` has no question kind"))?;
             let body = match kind.as_str() {
-                "boolean" => QuestionBody::Boolean,
+                "boolean" => match fields.get("criteria") {
+                    None | Some(VmValue::Nil) => QuestionBody::Boolean,
+                    Some(criteria) => {
+                        let criteria = criteria.as_dict().ok_or_else(|| {
+                            format!("boolean question `{id}` has non-record criteria")
+                        })?;
+                        if criteria.len() != 2 {
+                            return Err(format!("boolean question `{id}` criteria must contain exactly true and false"));
+                        }
+                        QuestionBody::BooleanWithCriteria(BooleanCriteria {
+                            yes: text(criteria.get("true")).ok_or_else(|| {
+                                format!("boolean question `{id}` has no string true criterion")
+                            })?,
+                            no: text(criteria.get("false")).ok_or_else(|| {
+                                format!("boolean question `{id}` has no string false criterion")
+                            })?,
+                        })
+                    }
+                },
                 "choice" => {
                     let criteria = fields
                         .get("criteria")
@@ -164,10 +200,6 @@ impl QuestionSet {
         Ok(Self { questions })
     }
 
-    pub fn is_empty(&self) -> bool {
-        self.questions.is_empty()
-    }
-
     /// The declared ids, in order. Read by the mock backend's request log.
     #[cfg(test)]
     pub fn ids(&self) -> Vec<String> {
@@ -182,6 +214,12 @@ impl QuestionSet {
     /// outcome instead of an error to catch.
     pub fn admit(&self, contract: &DecisionContract) -> Result<(), QuestionRefusal> {
         let limits = &contract.limits;
+        if self.questions.is_empty() {
+            return Err(QuestionRefusal {
+                question: String::new(),
+                reason: QuestionRefusalReason::EmptyQuestions,
+            });
+        }
         if let Some(max) = limits.max_questions {
             if self.questions.len() > max {
                 return Err(QuestionRefusal {
@@ -197,6 +235,9 @@ impl QuestionSet {
                     reason,
                 })
             };
+            if question.id.trim().is_empty() {
+                return refuse(QuestionRefusalReason::EmptyIdentifier);
+            }
             if question.instructions.trim().is_empty() {
                 return refuse(QuestionRefusalReason::EmptyInstructions);
             }
@@ -204,18 +245,31 @@ impl QuestionSet {
                 return refuse(QuestionRefusalReason::UnsupportedQuestionKind);
             }
             match &question.body {
-                QuestionBody::Boolean => {}
+                QuestionBody::Boolean | QuestionBody::BooleanWithCriteria(_) => {}
                 QuestionBody::Choice(criteria) => {
+                    if criteria.is_empty() {
+                        return refuse(QuestionRefusalReason::EmptyOptions);
+                    }
+                    if criteria.iter().any(|(label, _)| label.trim().is_empty()) {
+                        return refuse(QuestionRefusalReason::EmptyIdentifier);
+                    }
                     if criteria.len() > limits.max_choice_options {
                         return refuse(QuestionRefusalReason::TooManyOptions);
                     }
-                    // A degenerate one-label choice is not refused here. The
-                    // union has no `too_few_options` reason, and labelling it
-                    // `too_many_options` would put a false cause on the
-                    // receipt. The checker already refuses a choice with no
-                    // labels at all, which is the case that types no answer.
+                    // One label remains a legitimate bounded vocabulary.
                 }
                 QuestionBody::Score(levels) => {
+                    if levels.iter().any(|label| label.trim().is_empty()) {
+                        return refuse(QuestionRefusalReason::EmptyIdentifier);
+                    }
+                    if levels
+                        .iter()
+                        .collect::<std::collections::BTreeSet<_>>()
+                        .len()
+                        != levels.len()
+                    {
+                        return refuse(QuestionRefusalReason::DuplicateLabels);
+                    }
                     if levels.len() < limits.score_levels_min {
                         return refuse(QuestionRefusalReason::TooFewLevels);
                     }

@@ -519,7 +519,9 @@ mod tests {
 
     fn fake_request() -> LlmRequestPayload {
         LlmRequestPayload {
+            reasoning_effort_source: crate::llm::ReasoningEffortSource::Request,
             data_controls: crate::llm_config::DataPosture::Default,
+            inference_boundary: None,
             provider: "fake".to_string(),
             model: "fake-model".to_string(),
             region: None,
@@ -544,6 +546,7 @@ mod tests {
             presence_penalty: None,
             parallel_tool_calls: None,
             provider_contract_probe: None,
+            portable_option_intent: Default::default(),
             fast: false,
             reasoning_mode: None,
             output_format: OutputFormat::Text,

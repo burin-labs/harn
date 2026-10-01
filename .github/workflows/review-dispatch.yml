@@ -1,0 +1,112 @@
+# Ask an external review workflow to review each same-repository pull request.
+#
+# This workflow runs on `pull_request_target`, so GitHub always runs the copy on
+# the base branch: a pull request that edits this file does not change what runs
+# for it. It never checks out or executes pull request code. Its only effect is
+# one `workflow_dispatch` naming the pull request and its exact head, sent with
+# an App token that can do nothing but that, on one repository.
+#
+# The review repository and workflow come from repository variables, so this
+# file names no reviewer. The reviewer re-checks everything it is sent, posts
+# its verdict as an ordinary pull request review, and applies its own limits.
+#
+#   REVIEW_DISPATCH_REPOSITORY   the review repository's name, in this owner
+#   REVIEW_DISPATCH_WORKFLOW     the review workflow's file name there
+#
+# A fork, a draft, a bot-authored pull request, or an unconfigured repository
+# still runs this job, under a name that says it was skipped and why, and mints
+# nothing. Pull request secrets are available to `pull_request_target` runs from
+# forks, so the skip is decided before any step that could touch one.
+name: Automatic review dispatch
+
+on:
+  pull_request_target: # zizmor: ignore[dangerous-triggers] never checks out or runs pull request code; it only dispatches a review of the head SHA
+    types: [opened, reopened, ready_for_review, synchronize]
+
+permissions: {}
+
+concurrency:
+  # A newer head supersedes a dispatch still queued for an older one; the
+  # reviewer also refuses a head that has moved.
+  group: review-dispatch-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  dispatch:
+    name: >-
+      ${{ github.event.pull_request.head.repo.full_name != github.repository && 'Automatic review: skipped (fork)'
+      || github.event.pull_request.draft && 'Automatic review: skipped (draft)'
+      || github.event.pull_request.user.type == 'Bot' && 'Automatic review: skipped (bot author)'
+      || (vars.REVIEW_DISPATCH_REPOSITORY == '' || vars.REVIEW_DISPATCH_WORKFLOW == '') && 'Automatic review: skipped (not configured)'
+      || 'Automatic review: requested' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    env:
+      ELIGIBLE: >-
+        ${{ github.event.pull_request.head.repo.full_name == github.repository
+        && !github.event.pull_request.draft
+        && github.event.pull_request.user.type != 'Bot'
+        && vars.REVIEW_DISPATCH_REPOSITORY != ''
+        && vars.REVIEW_DISPATCH_WORKFLOW != '' }}
+    steps:
+      - name: Say why no review was requested
+        if: env.ELIGIBLE != 'true'
+        env:
+          FROM_FORK: ${{ github.event.pull_request.head.repo.full_name != github.repository }}
+          IS_DRAFT: ${{ github.event.pull_request.draft }}
+          AUTHOR_TYPE: ${{ github.event.pull_request.user.type }}
+          REVIEW_REPOSITORY_NAME: ${{ vars.REVIEW_DISPATCH_REPOSITORY }}
+          REVIEW_WORKFLOW: ${{ vars.REVIEW_DISPATCH_WORKFLOW }}
+        run: |
+          set -euo pipefail
+          if [ "$FROM_FORK" = "true" ]; then
+            echo "::notice title=Automatic review skipped::The head branch is on a fork. No token was minted and no review was requested; a maintainer reviews fork pull requests."
+          elif [ "$IS_DRAFT" = "true" ]; then
+            echo "::notice title=Automatic review skipped::The pull request is a draft. Marking it ready for review requests a review."
+          elif [ "$AUTHOR_TYPE" = "Bot" ]; then
+            echo "::notice title=Automatic review skipped::The pull request was opened by a bot, and no person triggered this review."
+          elif [ -z "$REVIEW_REPOSITORY_NAME" ] || [ -z "$REVIEW_WORKFLOW" ]; then
+            echo "::warning title=Automatic review not configured::Set the repository variables REVIEW_DISPATCH_REPOSITORY and REVIEW_DISPATCH_WORKFLOW to request reviews."
+          fi
+
+      # Scoped to the review repository alone, and to dispatching workflows
+      # there: actions write is the one permission a workflow dispatch needs.
+      - name: Mint a token that can only dispatch the review workflow
+        id: token
+        if: env.ELIGIBLE == 'true'
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ secrets.RELEASE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ vars.REVIEW_DISPATCH_REPOSITORY }}
+          permission-actions: write
+
+      - name: Request a review of this head
+        if: env.ELIGIBLE == 'true'
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+          REVIEW_REPOSITORY: ${{ github.repository_owner }}/${{ vars.REVIEW_DISPATCH_REPOSITORY }}
+          REVIEW_WORKFLOW: ${{ vars.REVIEW_DISPATCH_WORKFLOW }}
+          TARGET_REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          # Optional: the review workflow's branch. Unset means its default
+          # branch; a branch is set only to prove a reviewer change before it
+          # lands there.
+          REVIEW_REF: ${{ vars.REVIEW_DISPATCH_REF }}
+        run: |
+          set -euo pipefail
+          ref_args=()
+          if [ -n "${REVIEW_REF:-}" ]; then
+            ref_args=(--ref "$REVIEW_REF")
+          fi
+          gh workflow run "$REVIEW_WORKFLOW" \
+            --repo "$REVIEW_REPOSITORY" \
+            "${ref_args[@]}" \
+            -f repository="$TARGET_REPOSITORY" \
+            -f pr="$PR_NUMBER" \
+            -f head_sha="$HEAD_SHA"
+          echo "Requested an automatic review of $TARGET_REPOSITORY#$PR_NUMBER at $HEAD_SHA."
+          echo "The review arrives as a pull request review; a stand-down arrives as a comment."

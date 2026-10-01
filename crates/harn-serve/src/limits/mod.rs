@@ -261,6 +261,21 @@ impl BudgetSpec {
             _pg_queries: self.pg_queries.map(harn_vm::install_pg_query_budget),
         })
     }
+
+    /// Install this budget for one turn of a session that has already spent
+    /// `llm_spent_usd`. The cost scope is installed even without a ceiling so
+    /// the turn's spend is still measured and carried into the next turn.
+    pub(crate) fn install_session_turn(&self, llm_spent_usd: f64) -> BudgetGuard {
+        BudgetGuard {
+            _llm_cost: Some(harn_vm::install_llm_cost_budget_seeded(
+                self.llm_cost_usd,
+                llm_spent_usd,
+            )),
+            _llm_tokens: self.llm_tokens.map(harn_vm::install_llm_token_budget),
+            _mcp_calls: self.mcp_calls.map(harn_vm::install_mcp_call_budget),
+            _pg_queries: self.pg_queries.map(harn_vm::install_pg_query_budget),
+        }
+    }
 }
 
 /// Aggregate of per-cap guards held for the lifetime of one dispatch.

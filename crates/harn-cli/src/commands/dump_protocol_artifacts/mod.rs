@@ -24,6 +24,7 @@ mod records;
 mod schema_records;
 mod session_recap;
 mod session_update_payloads;
+mod session_update_rust_validation;
 mod session_update_validation;
 mod support;
 mod values;

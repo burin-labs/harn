@@ -88,19 +88,26 @@ pub type CapabilityChange = {
   evidence: string,
 }
 
+pub type AdditionChange = {kind: "addition", provider: string, model_id: string, evidence: string}
+
 pub type ProviderCatalogCandidate = PriceChange \
   | PromotionChange \
   | RetirementChange \
   | EndpointChange \
-  | CapabilityChange
+  | CapabilityChange \
+  | AdditionChange
 
 pub type NoticeExtraction = {
-  classification: "candidate" | "irrelevant",
+  classification: "candidate" | "irrelevant" | "uncertain",
   candidate?: ProviderCatalogCandidate,
   reason?: string,
 }
 
-pub type NoticeDisposition = "patch" | "no_op" | "incomplete_add" | "rejected"
+pub type NoticeDisposition = "patch" \
+  | "no_op" \
+  | "incomplete_add" \
+  | "incomplete_capability" \
+  | "rejected"
 
 pub type NoticeValidationReceipt = {
   schema_version: "harn.provider_catalog_notice.v1",
@@ -115,6 +122,9 @@ pub type NoticeValidationReceipt = {
   disposition: NoticeDisposition,
   reason: string,
   evidence?: string,
+  extraction?: dict,
+  tool_evidence?: dict,
+  extraction_run?: {mode: "live" | "replay", max_cost_usd: float, timeout_secs: int},
   source_url?: string,
   source_path?: string,
   unresolved_verification: list<string>,

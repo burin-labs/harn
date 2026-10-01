@@ -31,6 +31,8 @@ fn make_fake(config: dict = {}) {
     ready: true,
     readiness_detail: "harn-cli 0.10.30 published; assets present; release finalized",
     current: "v0.10.29",
+    current_revision: "",
+    revision_relation: "untracked",
     apply_ok: true,
     apply_changed: true,
     refreshed: ["harn.lock"],
@@ -51,8 +53,11 @@ fn make_fake(config: dict = {}) {
     commit_oid: "c0ffee",
     auto_merge_enabled: true,
     disable_ok: true,
+    disable_expected_base_oid: nil,
+    advance_base_during_disarm_to: nil,
   }
     + config
+  let current_remote_base_oid = cfg.remote_base_oid
   const adapter: BumpAdapter = {
     resolve_target_tag: fn(tag) { return if trim(tag ?? "") != "" {
       tag
@@ -66,9 +71,16 @@ fn make_fake(config: dict = {}) {
       attempt_lines: ["attempt 1: ${cfg.readiness_detail}"],
     } },
     read_current_version: fn() { return cfg.current },
+    read_current_revision: fn() { return cfg.current_revision },
+    revision_relation: fn(previous, target, tag) {
+      record("revision_relation", {previous: previous, target: target, tag: tag})
+      return cfg.revision_relation
+    },
     base_sha: fn() { return cfg.base_sha },
-    apply_version: fn(_target) {
-      record("apply_version", _target)
+    preserve_repairs:
+      fn(_existing, _base) { return {ok: true, commits: [], conflicts: [], detail: ""} },
+    apply_version: fn(_target, _revision) {
+      record("apply_version", {tag: _target, revision: _revision})
       return {
         ok: cfg.apply_ok,
         changed: cfg.apply_changed,
@@ -105,6 +117,9 @@ fn make_fake(config: dict = {}) {
         sequence[len(sequence) - 1]
       }
       remote_base_index = remote_base_index + 1
+      if value.available {
+        current_remote_base_oid = value.oid
+      }
       return value
     },
     adopt_base: fn(request) {
@@ -127,6 +142,16 @@ fn make_fake(config: dict = {}) {
     find_bump_pr: fn() { return cfg.existing_pr },
     disable_auto_merge: fn(pr, base_sha) {
       record("disable_auto_merge", {pr: pr, base_sha: base_sha})
+      if cfg.advance_base_during_disarm_to != nil {
+        current_remote_base_oid = cfg.advance_base_during_disarm_to
+        record("advance_remote_base", {oid: current_remote_base_oid})
+        if base_sha != current_remote_base_oid {
+          return false
+        }
+      }
+      if cfg.disable_expected_base_oid != nil && base_sha != cfg.disable_expected_base_oid {
+        return false
+      }
       return cfg.disable_ok
     },
     publish_commit: fn(request) {
@@ -197,6 +222,50 @@ pipeline test_already_current_is_a_clean_noop(harness: Harness, task: unknown) {
   assert_eq(call_names(fake.calls()), [])
 }
 
+/** Equal release tags still advance when their source commit advances. */
+pipeline test_equal_tag_newer_revision_runs_full_bump(harness: Harness, task: unknown) {
+  const old = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  const next = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  const fake = make_fake({current: "v0.10.30", current_revision: old, revision_relation: "behind"})
+  const receipt = run_bump(opts({source_revision: next}), fake.adapter)
+  assert_eq(receipt.outcome, "committed")
+  assert_eq(receipt.version_relation, "equal")
+  assert_eq(receipt.revision_relation, "behind")
+  assert_eq(receipt.previous_revision, old)
+  assert_eq(receipt.target_revision, next)
+  assert_eq(call_names(fake.calls())[0], "revision_relation")
+  assert_eq(call_names(fake.calls())[2], "apply_version")
+}
+
+pipeline test_equal_tag_same_revision_does_no_mutation(harness: Harness, task: unknown) {
+  const revision = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  const fake = make_fake(
+    {current: "v0.10.30", current_revision: revision, revision_relation: "equal"},
+  )
+  const receipt = run_bump(opts({source_revision: revision}), fake.adapter)
+  assert_eq(receipt.outcome, "already_current")
+  assert_eq(call_names(fake.calls()), ["revision_relation"])
+}
+
+pipeline test_stale_or_diverged_revision_refuses_mutation(harness: Harness, task: unknown) {
+  for relation in ["ahead", "diverged"] {
+    const fake = make_fake(
+      {
+        current: "v0.10.30",
+        current_revision: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        revision_relation: relation,
+      },
+    )
+    const receipt = run_bump(
+      opts({source_revision: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}),
+      fake.adapter,
+    )
+    assert_eq(receipt.outcome, "revision_conflict")
+    assert_eq(receipt.ok, false)
+    assert_eq(call_names(fake.calls()), ["revision_relation"])
+  }
+}
+
 /** A stale target can never roll a consumer back from a newer release. */
 pipeline test_newer_pin_refuses_downgrade_without_mutation(harness: Harness, task: unknown) {
   const fake = make_fake({current: "v0.10.85", target: "v0.10.84"})
@@ -230,6 +299,17 @@ pipeline test_release_not_ready_stops_before_mutation(harness: Harness, task: un
   assert_eq(receipt.ok, true)
   assert_eq(receipt.ready, false)
   assert_eq(receipt.readiness_detail, "missing release assets: SHA256SUMS")
+  assert_eq(call_names(fake.calls()), [])
+}
+
+pipeline test_source_revision_waits_for_release_readiness(harness: Harness, task: unknown) {
+  const fake = make_fake({ready: false})
+  const receipt = run_bump(
+    opts({source_revision: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}),
+    fake.adapter,
+  )
+  assert_eq(receipt.outcome, "not_ready")
+  assert_eq(receipt.revision_relation, nil)
   assert_eq(call_names(fake.calls()), [])
 }
 
@@ -396,8 +476,8 @@ pipeline test_stale_lease_is_disarmed_before_publication(harness: Harness, task:
   assert_eq(
     call_names(fake.calls()),
     [
-      "disable_auto_merge",
       "remote_base_head",
+      "disable_auto_merge",
       "apply_version",
       "run_validation",
       "remote_base_head",
@@ -425,7 +505,70 @@ pipeline test_failed_lease_disarm_stops_before_publication(harness: Harness, tas
     assert_throws({ -> run_bump(opts(), fake.adapter) }),
     "std/bump/runtime: failed to disable stale auto-merge on #72",
   )
-  assert_eq(call_names(fake.calls()), ["disable_auto_merge"])
+  assert_eq(call_names(fake.calls()), ["remote_base_head", "disable_auto_merge"])
+}
+
+pipeline test_armed_pr_uses_current_base_instead_of_its_historical_snapshot() {
+  const stale: BumpPrState = {
+    number: 73,
+    head_oid: "stale101",
+    base_ref: "main",
+    base_oid: "historical",
+    auto_merge_enabled: true,
+    auto_merge_method: "SQUASH",
+    url: "https://example.test/pull/73",
+    state: "open",
+  }
+  const fake = make_fake({existing_pr: stale, disable_expected_base_oid: "base000"})
+  const receipt = run_bump(opts(), fake.adapter)
+  assert_eq(receipt.outcome, "committed")
+  assert_eq(receipt.lease_recovered, true)
+  const disarms = fake.calls().filter({ call -> call.name == "disable_auto_merge" }).to_list()
+  assert_eq(len(disarms), 1)
+  assert_eq(disarms[0].arg.base_sha, "base000")
+}
+
+pipeline test_missing_current_base_does_not_disarm_an_existing_pr() {
+  const stale: BumpPrState = {
+    number: 74,
+    head_oid: "stale102",
+    base_ref: "main",
+    base_oid: "historical",
+    auto_merge_enabled: true,
+    auto_merge_method: "SQUASH",
+    url: "https://example.test/pull/74",
+    state: "open",
+  }
+  const fake = make_fake({existing_pr: stale, remote_base_available: false})
+  const receipt = run_bump(opts(), fake.adapter)
+  assert_eq(receipt.outcome, "base_advanced")
+  assert_eq(receipt.ok, false)
+  assert_eq(receipt.lease_recovered, false)
+  assert_eq(call_names(fake.calls()), ["remote_base_head"])
+}
+
+pipeline test_base_advance_during_disarm_refuses_refresh() {
+  const stale: BumpPrState = {
+    number: 75,
+    head_oid: "stale103",
+    base_ref: "main",
+    base_oid: "historical",
+    auto_merge_enabled: true,
+    auto_merge_method: "SQUASH",
+    url: "https://example.test/pull/75",
+    state: "open",
+  }
+  const fake = make_fake({existing_pr: stale, advance_base_during_disarm_to: "base001"})
+  assert_eq(
+    assert_throws({ -> run_bump(opts(), fake.adapter) }),
+    "std/bump/runtime: failed to disable stale auto-merge on #75",
+  )
+  assert_eq(
+    call_names(fake.calls()),
+    ["remote_base_head", "disable_auto_merge", "advance_remote_base"],
+  )
+  assert_eq(fake.calls()[1].arg.base_sha, "base000")
+  assert_eq(fake.calls()[2].arg.oid, "base001")
 }
 
 /**

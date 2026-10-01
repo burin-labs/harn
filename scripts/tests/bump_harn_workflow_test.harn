@@ -1,4 +1,5 @@
 import { read_yaml } from "std/fs"
+import { GITHUB_BUMP_PERMISSIONS } from "../bump-driver/github_authority"
 
 fn checkout_boundary_errors(steps: list) -> list<string> {
   let errors: list<string> = []
@@ -36,6 +37,7 @@ fn refresh_order_errors(
   safe_repairs: string,
   caller_refresh: string,
   format_migration: string,
+  finalization: string,
   refresh_sentinel: string,
 ) -> list<string> {
   let errors: list<string> = []
@@ -51,8 +53,11 @@ fn refresh_order_errors(
   if command.index_of(safe_repairs) >= command.index_of(format_migration) {
     errors = errors + ["behavior-preserving repairs must precede the format migration"]
   }
-  if command.index_of(format_migration) >= command.index_of(refresh_sentinel) {
-    errors = errors + ["format migration must finish before refresh success is recorded"]
+  if command.index_of(format_migration) >= command.index_of(finalization) {
+    errors = errors + ["source formatting must finish before artifact finalization"]
+  }
+  if command.index_of(finalization) >= command.index_of(refresh_sentinel) {
+    errors = errors + ["artifact finalization must finish before refresh success is recorded"]
   }
   return errors
 }
@@ -80,6 +85,10 @@ fn orchestration_identity_errors(inputs: dict, steps: list, text: string) -> lis
 
 fn workflow_input_errors(inputs: dict) -> list<string> {
   let errors: list<string> = []
+  if inputs.get("finalize-refresh-command")?.type != "string"
+    || inputs.get("finalize-refresh-command")?.default != "" {
+    errors = errors + ["finalize-refresh-command must remain an optional typed empty-default input"]
+  }
   if inputs.get("refresh-command")?.type != "string" {
     errors = errors + ["refresh-command must remain a typed reusable-workflow input"]
   }
@@ -91,6 +100,33 @@ fn workflow_input_errors(inputs: dict) -> list<string> {
   }
   if inputs.get("node-version")?.type != "string" {
     errors = errors + ["node-version must remain a typed reusable-workflow input"]
+  }
+  return errors
+}
+
+fn authentication_boundary_errors(steps: list, env: dict) -> list<string> {
+  let errors: list<string> = []
+  if env?.GITHUB_APP_ID != "$" + "{{ secrets.app-client-id }}"
+    || env?.GITHUB_INSTALLATION_ID != "$" + "{{ steps.app-token.outputs.installation-id }}"
+    || env?.GITHUB_APP_PRIVATE_KEY != "$" + "{{ secrets.app-private-key }}" {
+    errors = errors + ["bump orchestration must receive renewable App credentials"]
+  }
+  if env?.GH_TOKEN != nil || env?.HARN_BUMP_TOKEN != nil {
+    errors = errors + ["bump orchestration must not retain the expiring bootstrap token"]
+  }
+  const bootstrap = steps.find({ step -> step?.name == "Mint GitHub App installation token" })
+  const permission_fields = bootstrap?.with?.keys().filter(
+    { key -> key.starts_with("permission-") },
+  )
+    ?? []
+  if len(permission_fields) != len(GITHUB_BUMP_PERMISSIONS) {
+    errors = errors + ["bootstrap and renewable token permission ceilings must match"]
+  }
+  for name in GITHUB_BUMP_PERMISSIONS.keys() {
+    if bootstrap?.with?.get("permission-" + name.replace("_", "-"))
+      != GITHUB_BUMP_PERMISSIONS[name] {
+      errors = errors + ["bootstrap and renewable permission differ: " + name]
+    }
   }
   return errors
 }
@@ -148,6 +184,10 @@ fn bump_workflow_errors(workflow: dict, text: string) -> list<string> {
     errors = errors + ["refresh, validation, and git effects must run from the consumer package"]
   }
   const env = run?.env ?? {}
+  if env?.BUMP_REFRESH_FINALIZE_COMMAND != "$" + "{{ inputs.finalize-refresh-command }}" {
+    errors = errors + ["artifact finalization must consume only the typed caller command"]
+  }
+  errors = errors + authentication_boundary_errors(steps, env)
   if env?.HARN_BUMP_REFRESH_COMMAND != "$" + "{{ inputs.refresh-command }}" {
     errors = errors + ["refresh-command must flow into the orchestration environment"]
   }
@@ -164,6 +204,7 @@ fn bump_workflow_errors(workflow: dict, text: string) -> list<string> {
   const safe_repairs = "harn fix --apply --safety behavior-preserving ."
   const caller_refresh = "eval \"$HARN_BUMP_REFRESH_COMMAND\""
   const format_migration = "eval \"$HARN_BUMP_FORMAT_COMMAND\""
+  const finalization = "eval \"$BUMP_REFRESH_FINALIZE_COMMAND\""
   const refresh_sentinel = "> \"$HARN_BUMP_REFRESH_SENTINEL\""
   const refresh_pipeline = "$"
     + "{refresh_caller}"
@@ -176,6 +217,8 @@ fn bump_workflow_errors(workflow: dict, text: string) -> list<string> {
     + "$"
     + "{refresh_format}"
     + "$"
+    + "{refresh_finalize}"
+    + "$"
     + "{refresh_complete}"
   for required in [
     implicit_any,
@@ -184,6 +227,7 @@ fn bump_workflow_errors(workflow: dict, text: string) -> list<string> {
     caller_refresh,
     "test -n \"$HARN_BUMP_FORMAT_COMMAND\"",
     format_migration,
+    finalization,
     refresh_sentinel,
     "test -f \"$HARN_BUMP_REFRESH_SENTINEL\"",
     "eval \"$HARN_BUMP_VALIDATE_COMMAND\"",
@@ -201,6 +245,7 @@ fn bump_workflow_errors(workflow: dict, text: string) -> list<string> {
       safe_repairs,
       caller_refresh,
       format_migration,
+      finalization,
       refresh_sentinel,
     )
   if !command.contains(refresh_pipeline) {
@@ -228,7 +273,89 @@ pipeline test_reusable_bump_workflow_preserves_refresh_and_workspace_boundaries(
   assert_eq(bump_workflow_errors(read_yaml(harness.fs, path), text), [])
 }
 
-fn assert_refresh_execution(harness: Harness, caller_ok: bool) {
+pipeline test_bump_workflow_rejects_expiring_token_or_permission_drift(harness: Harness) {
+  const path = path_join(harness.fs.source_dir(), "../../.github/workflows/bump-harn.yml")
+  const text = harness.fs.read_text(path)
+  const workflow = read_yaml(harness.fs, path)
+  for mutation in ["expired_token", "permission_drift"] {
+    const steps = workflow.jobs.bump.steps.map(
+      { step ->
+        if mutation == "expired_token" && step.name == "Run bump orchestration" {
+          return step + {env: step.env + {HARN_BUMP_TOKEN: "expired-bootstrap-token"}}
+        }
+        if mutation == "permission_drift" && step.name == "Mint GitHub App installation token" {
+          return step + {with: step.with + {"permission-contents": "read"}}
+        }
+        return step
+      },
+    )
+      .to_list()
+    const changed = workflow + {jobs: workflow.jobs + {bump: workflow.jobs.bump + {steps: steps}}}
+    const errors = bump_workflow_errors(changed, text)
+    assert(
+      len(errors) > 0,
+      "the same shipped-workflow check must reject the known bad configuration",
+    )
+    const expected = if mutation == "expired_token" {
+      "bump orchestration must not retain the expiring bootstrap token"
+    } else {
+      "bootstrap and renewable permission differ: contents"
+    }
+    assert(errors.contains(expected))
+  }
+}
+
+pipeline test_shipped_workflow_removes_private_key_before_child_launch(harness: Harness) {
+  const path = path_join(harness.fs.source_dir(), "../../.github/workflows/bump-harn.yml")
+  const workflow = read_yaml(harness.fs, path)
+  const step = workflow.jobs.bump.steps.find({ entry -> entry.name == "Run bump orchestration" })
+  for remove_unset in [false, true] {
+    const root = harness.fs.mkdtemp_in_workspace("bump-workflow-key-")
+    const adapter =
+      "harn() { case \"$1\" in --version) : ;; run) printf '%s\\n' \"$GITHUB_APP_PRIVATE_KEY_FILE\"; bash -c 'test -z \"$"
+      + "{GITHUB_APP_PRIVATE_KEY+x}\"' ;; *) return 64 ;; esac; }; export -f harn\n"
+    const command = if remove_unset {
+      step.run.replace("unset GITHUB_APP_PRIVATE_KEY", "true")
+    } else {
+      step.run
+    }
+    const result = harness.process.run(
+      {
+        program: "bash",
+        args: ["-c", adapter + command],
+        env: {
+          RUNNER_TEMP: root,
+          GITHUB_APP_PRIVATE_KEY: "synthetic-key",
+          HARN_BUMP_APPLY_BEHAVIOR_PRESERVING_FIXES: "true",
+        },
+      },
+    )
+    assert_eq(
+      result.success,
+      !remove_unset,
+      "dropping the real workflow's unset must expose the known credential-inheritance failure",
+    )
+    const lines = split(trim(result.stdout), "\n")
+    const key_path = lines[len(lines) - 1]
+    assert(
+      key_path.starts_with(root + "/harn-bump-app-key."),
+      "the credential handoff must have fired",
+    )
+    assert_eq(
+      harness.fs.status(key_path, "read").status,
+      "missing",
+      "the exit trap cleans both success and failure",
+    )
+    harness.fs.delete(root)
+  }
+}
+
+fn assert_refresh_execution(
+  harness: Harness,
+  caller_ok: bool,
+  finalize_ok: bool = true,
+  finalize_enabled: bool = true,
+) {
   const path = path_join(harness.fs.source_dir(), "../../.github/workflows/bump-harn.yml")
   const workflow = read_yaml(harness.fs, path)
   const step = workflow.jobs.bump.steps.find({ entry -> entry.name == "Run bump orchestration" })
@@ -258,20 +385,34 @@ fn assert_refresh_execution(harness: Harness, caller_ok: bool) {
         program: "bash",
         args: ["-c", adapter + "\n" + step.run],
         env: {
+          RUNNER_TEMP: root,
+          GITHUB_APP_PRIVATE_KEY: "synthetic-app-key",
           PHASES: phases,
-          HARN_BUMP_REFRESH_COMMAND: "printf 'caller\\n' >> \"$PHASES\"; "
+          HARN_BUMP_REFRESH_COMMAND: "test -z \"$"
+            + "{GITHUB_APP_PRIVATE_KEY+x}\"; printf 'caller\\n' >> \"$PHASES\"; "
             + if caller_ok {
               "true"
             } else {
               "false"
             },
           HARN_BUMP_FORMAT_COMMAND: "printf 'format\\n' >> \"$PHASES\"",
+          BUMP_REFRESH_FINALIZE_COMMAND: if finalize_enabled {
+            "printf 'finalize\\n' >> \"$PHASES\"; "
+              + if finalize_ok {
+                "true"
+              } else {
+                "false"
+              }
+          } else {
+            ""
+          },
           HARN_BUMP_REFRESH_SENTINEL: sentinel,
           HARN_BUMP_APPLY_BEHAVIOR_PRESERVING_FIXES: repairs,
         },
       },
     )
-    assert_eq(result.success, caller_ok, result.stderr)
+    const completed = caller_ok && (!finalize_enabled || finalize_ok)
+    assert_eq(result.success, completed, result.stderr)
     const observed = harness.fs.read_text(phases)
     const expected = if caller_ok {
       "caller\nmigration\nmigration\n"
@@ -280,12 +421,17 @@ fn assert_refresh_execution(harness: Harness, caller_ok: bool) {
         } else {
           "format\n"
         }
+        + if finalize_enabled {
+          "finalize\n"
+        } else {
+          ""
+        }
     } else {
       "caller\n"
     }
     assert_eq(observed, expected)
-    assert_eq(harness.fs.exists(sentinel), caller_ok)
-    if caller_ok {
+    assert_eq(harness.fs.exists(sentinel), completed)
+    if completed {
       assert_eq(harness.fs.read_text(sentinel), "ok\n")
     }
   }
@@ -297,4 +443,12 @@ pipeline test_failed_caller_stops_refresh_before_migrations_and_sentinel(harness
 
 pipeline test_successful_caller_reaches_format_and_sentinel(harness: Harness) {
   assert_refresh_execution(harness, true)
+}
+
+pipeline test_failed_finalizer_refuses_refresh_success(harness: Harness) {
+  assert_refresh_execution(harness, true, false)
+}
+
+pipeline test_callers_without_generated_artifacts_need_no_finalizer(harness: Harness) {
+  assert_refresh_execution(harness, true, true, false)
 }

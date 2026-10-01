@@ -48,18 +48,20 @@ if [ -f clippy.toml ]; then
 fi
 printf 'stack-size-threshold = %s\n' "$threshold" >> "$conf_dir/clippy.toml"
 
-# The census is a measurement, not the lint gate. `-D warnings` is dropped and
-# clippy's exit status ignored on purpose: at a lowered threshold this lint
-# fires by design, and under the workspace RUSTFLAGS that would abort the run
-# before the diagnostics were written. The lint gate itself lives in the Rust
-# lint lane and keeps its own ceiling. The only pass condition here is the
-# non-null control below.
+# The census is a measurement, not the lint gate. `-D warnings` is dropped so
+# large-frame diagnostics do not abort the compile. A compiler failure is still
+# fatal: otherwise a partial workspace could be mistaken for a clean census.
 set +e
 env -u CARGO_BUILD_BUILD_DIR CLIPPY_CONF_DIR="$conf_dir" CARGO_TARGET_DIR="$census_target_dir" RUSTFLAGS="" \
   "$repo_root/scripts/cargo_with_worktree_build_dir.sh" clippy --workspace --all-targets \
   --message-format=json > "$raw_out"
 cargo_status=$?
 set -e
+
+if [ "$cargo_status" -ne 0 ]; then
+  echo "error: stack-frame census compiler failed (exit ${cargo_status})." >&2
+  exit 1
+fi
 
 if [ ! -s "$raw_out" ]; then
   echo "error: clippy wrote no output (exit ${cargo_status}); the census measured nothing." >&2
@@ -73,4 +75,10 @@ if ! grep -q 'clippy::large_stack_frames' "$raw_out"; then
   echo "different threshold reports the previous run. Re-run against a cold target." >&2
   exit 1
 fi
+
+# A source file with no diagnostic may have shrunk below the measurement floor.
+# Bind that conclusion to the compiler artifacts emitted by THIS cargo run and
+# their depfiles, which list the source modules actually compiled for each
+# artifact. Old depfiles alone are not proof that this run measured the file.
+node "$repo_root/scripts/ci/collect_stack_sources.mjs" "$raw_out" "$repo_root" "$threshold"
 echo "stack-frame census captured at a ${threshold}-byte threshold"

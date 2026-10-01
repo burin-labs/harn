@@ -41,12 +41,15 @@
  */
 import { agent_typed_output_checkpoint } from "std/agent/primitives"
 import { deep_merge } from "std/collections"
+import { omit } from "std/json"
 
 /** The canonical decision record schema, one per reviewer verdict. */
 pub const APPROVAL_REVIEW_DECISION_SCHEMA = "harn.approval_review_decision.v1"
 
 /** The checkpoint name the reviewer's model call is recorded under. */
 pub const APPROVAL_REVIEW_CHECKPOINT = "agent.approval_review"
+
+const APPROVAL_REVIEW_MEMO_MAX_ENTRIES = 64
 
 /**
  * The verdict the reviewer model must return.
@@ -273,21 +276,9 @@ fn approval_review_unavailable(request: dict, reason: string, detail: any) -> di
 pub fn approval_review_decide(harness: Harness, policy: dict, request: dict) -> dict {
   const effective_policy = __approval_review_effective_policy(policy)
   const category = trim(to_string(request?.category ?? ""))
-  if approval_review_is_floor(effective_policy, category) {
-    return {
-      schema: APPROVAL_REVIEW_DECISION_SCHEMA,
-      approved: false,
-      outcome: "denied",
-      risk: "critical",
-      authorization: "unknown",
-      rationale: "category '" + category + "' can never be granted by any reviewer",
-      reviewer_answered: false,
-      unavailable_reason: "floor",
-      detail: "",
-      site: request?.site,
-      category: category,
-      cost_usd: 0.0,
-    }
+  const floor = approval_review_floor_decision(policy, request)
+  if floor != nil {
+    return floor
   }
   const schema = approval_review_verdict_schema(effective_policy)
   const route = __approval_review_route(harness.llm, policy, effective_policy, request)
@@ -304,6 +295,7 @@ pub fn approval_review_decide(harness: Harness, policy: dict, request: dict) -> 
       system: approval_review_system_prompt(effective_policy),
       timeout_ms: effective_policy?.reviewer?.timeout_ms,
       output: {schema: schema, strict: true, validation: "error"},
+      mock_scope: "agent.approval_review",
       _call_stage: "verify",
     }
       + route.reasoning,
@@ -506,8 +498,49 @@ fn __approval_review_cost(checkpoint: any) {
  * @errors: []
  */
 pub fn approval_reviewer_for(harness: Harness, policy: dict, goal: string) -> any {
+  // The closure is installed for one reviewer session. Keep only answered
+  // decisions, and only for an exact repeated refusal in the same session:
+  // sharing a verdict across different paths or authorization context would
+  // turn a speed optimization into a wider grant. Bound retained decisions so
+  // a noisy run cannot grow the closure indefinitely.
+  let answered = []
   return { request ->
-    approval_review_decide(
+    const session_id = trim(to_string(request?.session_id ?? ""))
+    // The policy's repeat counter changes on each identical action even when
+    // its rule, risk labels, and reviewer question do not. Keep every other
+    // decided field so a changed authority or target still misses.
+    const policy_decision = request?.policy_decision
+    const stable_request = if policy_decision?.context != nil {
+      request
+        + {
+          policy_decision: policy_decision
+            + {context: omit(policy_decision.context, ["repeat_count"])},
+        }
+    } else {
+      request
+    }
+    const fingerprint = if session_id != "" {
+      sha256(json_stringify(stable_request))
+    } else {
+      nil
+    }
+    if fingerprint != nil {
+      for entry in answered {
+        if entry.fingerprint == fingerprint {
+          // This refusal was answered earlier; no provider call or new spend
+          // happened. Keep the verdict, but do not bill its first call twice.
+          return entry.decision
+            + {
+              duration_ms: 0,
+              cost_usd: 0.0,
+              accounting_status: "reported",
+              unpriced_calls: 0,
+              memoized: true,
+            }
+        }
+      }
+    }
+    const decision = approval_review_decide(
       harness,
       policy,
       {
@@ -525,6 +558,12 @@ pub fn approval_reviewer_for(harness: Harness, policy: dict, goal: string) -> an
         route: request?.route,
       },
     )
+    if fingerprint != nil
+      && (decision?.reviewer_answered ?? false)
+      && len(answered) < APPROVAL_REVIEW_MEMO_MAX_ENTRIES {
+      answered = answered + [{fingerprint: fingerprint, decision: decision}]
+    }
+    return decision
   }
 }
 
@@ -582,6 +621,40 @@ pub fn approval_review_is_floor(policy: dict, category: string) -> bool {
 }
 
 /**
+ * Return the canonical never-grant denial, or nil when review remains eligible.
+ *
+ * Eligibility does not authorize the action. Category provenance comes from
+ * the caller, with the existing tool-name fallback; this does not classify
+ * command text or replace the independent process catastrophic floor.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn approval_review_floor_decision(policy: dict, request: dict) -> dict? {
+  const effective_policy = __approval_review_effective_policy(policy)
+  const category = __reviewer_category(request)
+  if !approval_review_is_floor(effective_policy, category) {
+    return nil
+  }
+  return {
+    schema: APPROVAL_REVIEW_DECISION_SCHEMA,
+    approved: false,
+    outcome: "denied",
+    risk: "critical",
+    authorization: "unknown",
+    rationale: "category '" + category + "' can never be granted by any reviewer",
+    reviewer_answered: false,
+    unavailable_reason: "floor",
+    detail: "",
+    site: request?.site,
+    category: category,
+    cost_usd: 0.0,
+    accounting_status: "reported",
+    unpriced_calls: 0,
+  }
+}
+
+/**
  * The `allow_all` resolver, as a reviewer.
  *
  * Yolo is not a separate code path. It is this seam with a reviewer that says
@@ -596,29 +669,11 @@ pub fn approval_review_is_floor(policy: dict, category: string) -> bool {
  * @errors: []
  */
 pub fn approval_allow_all_reviewer(policy: dict) -> any {
-  const effective_policy = __approval_review_effective_policy(policy)
   return { request ->
-    const category = trim(to_string(request?.category ?? request?.tool ?? ""))
-    if approval_review_is_floor(effective_policy, category) {
-      // The floor stands even here. This is the whole reason allow_all routes
-      // through the reviewer seam instead of around it.
-      {
-        schema: APPROVAL_REVIEW_DECISION_SCHEMA,
-        approved: false,
-        outcome: "denied",
-        risk: "critical",
-        authorization: "unknown",
-        rationale: "category '" + category + "' is below the floor; allow_all does not lift it",
-        reviewer_answered: true,
-        unavailable_reason: nil,
-        detail: "",
-        site: request?.site,
-        category: category,
-        // A real zero: no model was called, so nothing was spent.
-        cost_usd: 0.0,
-        accounting_status: "reported",
-        unpriced_calls: 0,
-      }
+    const category = __reviewer_category(request)
+    const floor = approval_review_floor_decision(policy, request)
+    if floor != nil {
+      floor
     } else {
       {
         schema: APPROVAL_REVIEW_DECISION_SCHEMA,

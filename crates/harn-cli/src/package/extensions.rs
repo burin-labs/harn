@@ -43,7 +43,9 @@ fn try_load_runtime_extensions_with_packages(
     if include_packages {
         ensure_dependencies_materialized(anchor)?;
     }
-    let Some((root_manifest, manifest_dir)) = load_nearest_manifest(anchor).into_result()? else {
+    let Some((root_manifest, manifest_dir, identity)) =
+        load_nearest_manifest(anchor).into_result_with_identity()?
+    else {
         return Ok(RuntimeExtensions::default());
     };
 
@@ -94,6 +96,7 @@ fn try_load_runtime_extensions_with_packages(
     Ok(RuntimeExtensions {
         root_manifest_path: Some(root_manifest_path),
         root_manifest_dir: Some(manifest_dir),
+        root_manifest_identity: Some(identity),
         root_manifest: Some(root_manifest),
         runtime_personas,
         llm: (!llm.is_empty()).then_some(llm),

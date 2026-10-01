@@ -8,6 +8,8 @@
 //! report itself as an approval decision.
 
 use super::*;
+use crate::orchestration::policy::external_roots::{governing_root, is_read_side};
+use crate::orchestration::policy::ExternalRootAccess;
 
 /// The deny-by-default sensitive-path guard.
 pub const SOURCE_DEFAULT_SENSITIVE_PATH: &str = "default_sensitive_path";
@@ -15,6 +17,12 @@ pub const SOURCE_DEFAULT_SENSITIVE_PATH: &str = "default_sensitive_path";
 pub const SOURCE_DEFAULT_PATH_GUARD: &str = "default_path_guard";
 /// The workspace path boundary refusing a path outside every admitted root.
 pub const SOURCE_DEFAULT_EXTERNAL_PATH: &str = "default_external_path";
+/// Refusal id and risk label for a write-side call under a `read` external
+/// root. Its source is [`SOURCE_DEFAULT_EXTERNAL_PATH`]: the same workspace
+/// boundary, refusing on the root's mode rather than on its absence.
+pub const EXTERNAL_ROOT_READ_ONLY: &str = "external_root_read_only";
+/// The prepared-run network policy, evaluated before endpoint health.
+pub const SOURCE_NET_POLICY: &str = "harn.net_policy";
 
 /// Which refusing mechanism a deciding rule belongs to.
 ///
@@ -33,6 +41,7 @@ pub fn denial_gate_for_source(source: Option<&str>) -> crate::agent_events::Deni
     use crate::agent_events::DenialGate;
     match source {
         Some(SOURCE_DEFAULT_SENSITIVE_PATH) => DenialGate::SensitivePath,
+        Some(SOURCE_NET_POLICY) => DenialGate::NetworkPolicy,
         Some(SOURCE_DEFAULT_PATH_GUARD) | Some(SOURCE_DEFAULT_EXTERNAL_PATH) => {
             DenialGate::WorkspaceBoundary
         }
@@ -53,6 +62,7 @@ pub(super) fn default_guard(
             let path = sensitive_paths::bounded_evidence(&path);
             return Some(Candidate {
                 source: SOURCE_DEFAULT_SENSITIVE_PATH.to_string(),
+                source_rank: PolicyRuleSource::Policy,
                 index: None,
                 id: Some("sensitive_path".to_string()),
                 action: PolicyAction::Deny,
@@ -64,43 +74,70 @@ pub(super) fn default_guard(
         }
     }
 
-    if !policy.allow_external_paths {
-        for entry in &ctx.path_entries {
-            if matches!(entry.kind, WorkspacePathKind::Invalid) {
-                return Some(Candidate {
-                    source: SOURCE_DEFAULT_PATH_GUARD.to_string(),
-                    index: None,
-                    id: Some("invalid_path".to_string()),
-                    action: PolicyAction::Deny,
-                    reason: entry
-                        .reason
-                        .clone()
-                        .unwrap_or_else(|| format!("path '{}' is invalid", entry.display_path())),
-                    approval: ApprovalShape::default(),
-                    risk_labels: vec!["invalid_path".to_string()],
-                    denied_paths: vec![entry.display_path().to_string()],
-                });
-            }
-            if entry.workspace_path.is_none()
-                && entry
-                    .host_path
-                    .as_ref()
-                    .is_some_and(|path| !under_external_root(path, &policy.external_roots))
+    // The external-root mode is checked even when `allow_external_paths` opts
+    // out of the boundary: that switch admits paths no root names, and a root
+    // the host declared `read` is still a declaration that it is read-only.
+    for entry in &ctx.path_entries {
+        if !policy.allow_external_paths && matches!(entry.kind, WorkspacePathKind::Invalid) {
+            return Some(Candidate {
+                source: SOURCE_DEFAULT_PATH_GUARD.to_string(),
+                source_rank: PolicyRuleSource::Policy,
+                index: None,
+                id: Some("invalid_path".to_string()),
+                action: PolicyAction::Deny,
+                reason: entry
+                    .reason
+                    .clone()
+                    .unwrap_or_else(|| format!("path '{}' is invalid", entry.display_path())),
+                approval: ApprovalShape::default(),
+                risk_labels: vec!["invalid_path".to_string()],
+                denied_paths: vec![entry.display_path().to_string()],
+            });
+        }
+        if entry.workspace_path.is_some() {
+            continue;
+        }
+        let Some(host_path) = entry.host_path.as_deref() else {
+            continue;
+        };
+        if let Some(root) = governing_root(host_path, &policy.external_roots) {
+            if root.access == ExternalRootAccess::Read
+                && !is_read_side(ctx.side_effect.as_deref(), ctx.tool_kind.as_deref())
             {
                 return Some(Candidate {
                     source: SOURCE_DEFAULT_EXTERNAL_PATH.to_string(),
+                    source_rank: PolicyRuleSource::Policy,
                     index: None,
-                    id: Some("external_path".to_string()),
+                    id: Some(EXTERNAL_ROOT_READ_ONLY.to_string()),
                     action: PolicyAction::Deny,
                     reason: format!(
-                        "path '{}' is outside the workspace and no external root allows it",
-                        entry.display_path()
+                        "path '{}' is under external root '{}' whose access is '{}'; \
+                         tool '{}' may only read there",
+                        entry.display_path(),
+                        root.path,
+                        root.access,
+                        ctx.tool_name,
                     ),
                     approval: ApprovalShape::default(),
-                    risk_labels: vec!["external_path".to_string()],
+                    risk_labels: vec![EXTERNAL_ROOT_READ_ONLY.to_string()],
                     denied_paths: vec![entry.display_path().to_string()],
                 });
             }
+        } else if !policy.allow_external_paths {
+            return Some(Candidate {
+                source: SOURCE_DEFAULT_EXTERNAL_PATH.to_string(),
+                source_rank: PolicyRuleSource::Policy,
+                index: None,
+                id: Some("external_path".to_string()),
+                action: PolicyAction::Deny,
+                reason: format!(
+                    "path '{}' is outside the workspace and no external root allows it",
+                    entry.display_path()
+                ),
+                approval: ApprovalShape::default(),
+                risk_labels: vec!["external_path".to_string()],
+                denied_paths: vec![entry.display_path().to_string()],
+            });
         }
     }
 
@@ -136,6 +173,7 @@ impl PolicyEvaluation {
             self.reason.clone(),
         );
         denial.denied_paths = self.denied_paths.clone();
+        denial.denied_network_targets = self.denied_network_targets.clone();
         denial
     }
 }

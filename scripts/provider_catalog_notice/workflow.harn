@@ -3,11 +3,10 @@ import "./types.harn"
 
 pub fn provider_notice_checks() -> list<string> {
   return [
-    "check-provider-catalog-drift",
+    "check-provider-catalog-drift-core",
     "check-provider-catalog",
     "check-provider-matrix",
     "check-provider-support",
-    "check-docs-snippets",
   ]
 }
 
@@ -84,6 +83,20 @@ fn __model_rows(catalog: dict, provider: string, model_id: string) -> list {
   return rows
 }
 
+fn __trusted_no_op_identity(
+  notice: ProviderNotice,
+  candidate: dict,
+  model_row: dict,
+  current_matches_old: bool,
+) -> bool {
+  if current_matches_old {
+    return true
+  }
+  const text = lowercase(notice.text ?? "")
+  return contains(text, lowercase(candidate.model_id))
+    || (__nonempty(model_row?.name) && contains(text, lowercase(model_row.name)))
+}
+
 fn __base_receipt(
   harness: Harness,
   notice: ProviderNotice,
@@ -115,8 +128,11 @@ fn __base_receipt(
 }
 
 fn __candidate_common_error(notice: ProviderNotice, candidate: dict) -> string? {
-  if !contains(["price", "promotion", "retirement", "endpoint", "capability"], candidate?.kind) {
-    return "candidate.kind must be price, promotion, retirement, endpoint, or capability"
+  if !contains(
+    ["addition", "price", "promotion", "retirement", "endpoint", "capability"],
+    candidate?.kind,
+  ) {
+    return "candidate.kind must be addition, price, promotion, retirement, endpoint, or capability"
   }
   if !__nonempty(candidate?.provider) || !__nonempty(candidate?.model_id) {
     return "candidate provider and model_id are required"
@@ -124,10 +140,11 @@ fn __candidate_common_error(notice: ProviderNotice, candidate: dict) -> string? 
   if candidate.provider != notice.provider {
     return "candidate provider conflicts with notice provider"
   }
-  if !__nonempty(candidate?.effective_date) {
+  if candidate.kind != "addition" && !__nonempty(candidate?.effective_date) {
     return "candidate effective_date is required"
   }
-  if regex_match("^[0-9]{4}-[0-9]{2}-[0-9]{2}$", candidate.effective_date) == nil {
+  if candidate.kind != "addition"
+    && regex_match("^[0-9]{4}-[0-9]{2}-[0-9]{2}$", candidate.effective_date) == nil {
     return "candidate effective_date must be YYYY-MM-DD"
   }
   if !__nonempty(candidate?.evidence) {
@@ -165,6 +182,9 @@ fn __promotion_candidate_error(candidate: dict) -> string? {
 }
 
 fn __candidate_variant_error(candidate: dict) -> string? {
+  if candidate.kind == "addition" {
+    return nil
+  }
   if candidate.kind == "price" {
     if !contains(
       ["input_per_mtok", "output_per_mtok", "cache_read_per_mtok", "cache_write_per_mtok"],
@@ -344,11 +364,50 @@ fn __patch_descriptor(candidate: dict) -> dict {
   }
 }
 
+/**
+ * Evidence comes from Harn's validating scorecard command, separately from model-extracted facts.
+ */
+fn __missing_native_tool_evidence(candidate: dict, tool_evidence: dict?) -> bool {
+  if candidate.kind != "capability"
+    || candidate.capability != "native_tools"
+    || !candidate.new_value {
+    return false
+  }
+  return !(tool_evidence?.routes ?? []).any(
+    { route ->
+      route?.provider == candidate.provider
+        && route?.model == candidate.model_id
+        && (route?.passed_probes ?? []).contains("native_tool_probe")
+    },
+  )
+}
+
+/**
+ * A retirement's old value is the row's own flag, which the catalog already
+ * knows; only the replacement is the notice's to supply, and it must name a
+ * row the catalog can route to.
+ */
+fn __resolve_retirement(candidate: dict, current: unknown, catalog: dict) -> Result<dict, string> {
+  if candidate.kind != "retirement" {
+    return Ok(candidate)
+  }
+  let resolved = candidate + {old_value: current}
+  if __nonempty(candidate?.replacement) {
+    const replacement = regex_replace(r"[.\s]+$", "", trim(candidate.replacement))
+    if len(__model_rows(catalog, candidate.provider, replacement)) != 1 {
+      return Err("replacement must be exactly one catalog model id")
+    }
+    resolved = resolved + {replacement: replacement}
+  }
+  return Ok(resolved)
+}
+
 pub fn plan_notice(
   harness: Harness,
   notice_raw: dict,
   extraction: dict,
   catalog: dict,
+  tool_evidence: dict? = nil,
 ) -> NoticePlan {
   const validated = validate_notice(harness, notice_raw)
   if is_err(validated) {
@@ -377,25 +436,24 @@ pub fn plan_notice(
       ),
     }
   }
-  if extraction?.classification != "candidate" || extraction?.candidate == nil {
-    return {receipt: __base_receipt(harness, notice, "rejected", "malformed extraction result")}
-  }
-  const candidate = extraction.candidate
-  const common_error = __candidate_common_error(notice, candidate)
-  const variant_error = if common_error == nil {
-    __candidate_variant_error(candidate)
-  } else {
-    nil
-  }
-  if common_error != nil || variant_error != nil {
+  if extraction?.classification == "uncertain" {
     return {
       receipt: __base_receipt(
         harness,
         notice,
         "rejected",
-        common_error ?? variant_error ?? "invalid candidate",
+        extraction?.reason ?? "notice requires model identity review",
       ),
     }
+  }
+  if extraction?.classification != "candidate" || extraction?.candidate == nil {
+    return {receipt: __base_receipt(harness, notice, "rejected", "malformed extraction result")}
+  }
+  let candidate = extraction.candidate
+  const candidate_error = __candidate_common_error(notice, candidate)
+    ?? __candidate_variant_error(candidate)
+  if candidate_error != nil {
+    return {receipt: __base_receipt(harness, notice, "rejected", candidate_error)}
   }
   const providers = __provider_rows(catalog, candidate.provider)
   if len(providers) == 0 {
@@ -420,6 +478,21 @@ pub fn plan_notice(
   }
   const models = __model_rows(catalog, candidate.provider, candidate.model_id)
   if len(models) == 0 {
+    if candidate.kind != "addition" {
+      return {
+        receipt: __base_receipt(
+          harness,
+          notice,
+          "rejected",
+          "existing-model change requires an exact catalog model id",
+        )
+          + {
+            model_id: candidate.model_id,
+            change_kind: candidate.kind,
+            evidence: candidate.evidence,
+          },
+      }
+    }
     return {
       receipt: __base_receipt(
         harness,
@@ -445,7 +518,22 @@ pub fn plan_notice(
   if len(models) != 1 {
     return {receipt: __base_receipt(harness, notice, "rejected", "model identity is ambiguous")}
   }
+  if candidate.kind == "addition" {
+    return {
+      receipt: __base_receipt(harness, notice, "no_op", "model is already in the catalog")
+        + {model_id: candidate.model_id, change_kind: candidate.kind, evidence: candidate.evidence},
+      candidate: candidate,
+    }
+  }
   const current = __current_value(candidate, providers[0], models[0])
+  const resolved = __resolve_retirement(candidate, current, catalog)
+  if is_err(resolved) {
+    return {
+      receipt: __base_receipt(harness, notice, "rejected", unwrap_err(resolved))
+        + {model_id: candidate.model_id, change_kind: candidate.kind, evidence: candidate.evidence},
+    }
+  }
+  candidate = unwrap(resolved)
   const current_promotion = if candidate.kind == "promotion" {
     __promotion_by_id(current, candidate.promotion_id)
   } else {
@@ -455,6 +543,24 @@ pub fn plan_notice(
     __promotion_matches(current_promotion, candidate)
   } else {
     __values_equal(current, candidate.new_value)
+  }
+  const current_matches_old = if candidate.kind == "promotion" {
+    current_promotion == nil && __price_rates_equal(current, candidate.old_value)
+  } else {
+    __values_equal(current, candidate.old_value)
+  }
+  if already_applied
+    && !__trusted_no_op_identity(notice, candidate, models[0], current_matches_old) {
+    return {
+      receipt: __base_receipt(
+        harness,
+        notice,
+        "rejected",
+        "proposed value is present but the notice does not identify this exact model",
+      )
+        + {model_id: candidate.model_id, change_kind: candidate.kind, evidence: candidate.evidence},
+      candidate: candidate,
+    }
   }
   if already_applied {
     return {
@@ -473,12 +579,7 @@ pub fn plan_notice(
       candidate: candidate,
     }
   }
-  const current_matches = if candidate.kind == "promotion" {
-    current_promotion == nil && __price_rates_equal(current, candidate.old_value)
-  } else {
-    __values_equal(current, candidate.old_value)
-  }
-  if !current_matches {
+  if !current_matches_old {
     return {
       receipt: __base_receipt(
         harness,
@@ -495,9 +596,27 @@ pub fn plan_notice(
       candidate: candidate,
     }
   }
+  if __missing_native_tool_evidence(candidate, tool_evidence) {
+    return {
+      receipt: __base_receipt(
+        harness,
+        notice,
+        "incomplete_capability",
+        "native tools require a passing live probe of this exact provider and model",
+      )
+        + {
+          model_id: candidate.model_id,
+          change_kind: candidate.kind,
+          tool_evidence: tool_evidence,
+          unresolved_verification: ["passing live native_tool_probe for the exact catalog route"],
+        },
+      candidate: candidate,
+    }
+  }
   return {
     receipt: __base_receipt(harness, notice, "patch", "validated against one current catalog row")
       + {
+        tool_evidence: tool_evidence,
         model_id: candidate.model_id,
         change_kind: candidate.kind,
         effective_date: candidate.effective_date,
@@ -606,6 +725,11 @@ fn __table_bounds(lines: list<string>, header: string) -> Result<dict, string> {
       break
     }
     cursor = cursor + 1
+  }
+  // Blank lines and comments before the next header belong to that header,
+  // so a field appended at `end` stays with this table's own fields.
+  while end > start + 1 && (trim(lines[end - 1]) == "" || starts_with(trim(lines[end - 1]), "#")) {
+    end = end - 1
   }
   return Ok({start: start, end: end})
 }
@@ -725,38 +849,41 @@ fn __apply_retirement(
   bounds: dict,
   candidate: dict,
 ) -> Result<list<string>, string> {
-  let updated = lines
-  let insertion = bounds.end
-  const deprecated = __optional_field_line(lines, bounds, "deprecated")
-  if is_err(deprecated) {
-    return Err(unwrap_err(deprecated))
-  }
-  if unwrap(deprecated) != nil {
-    updated = __replace_line(
-      updated,
-      unwrap(deprecated) ?? 0,
-      "deprecated = " + to_string(candidate.new_value),
-    )
-  } else {
-    updated = __insert_lines(updated, insertion, ["deprecated = " + to_string(candidate.new_value)])
-    insertion = insertion + 1
-  }
-  let note = "Retires " + candidate.effective_date + " per " + candidate.evidence + "."
-  if candidate?.replacement != nil && trim(candidate.replacement) != "" {
+  const has_replacement = candidate?.replacement != nil && trim(candidate.replacement) != ""
+  const evidence = regex_replace(r"[.\s]+$", "", candidate.evidence)
+  let note = "Retires " + candidate.effective_date + " per " + evidence + "."
+  if has_replacement {
     note = note + " Use " + candidate.replacement + "."
   }
-  const existing_note = __optional_field_line(lines, bounds, "deprecation_note")
-  if is_err(existing_note) {
-    return Err(unwrap_err(existing_note))
+  let fields: list<{name: string, value: string}> = [
+    {name: "deprecated", value: to_string(candidate.new_value)},
+    {name: "deprecation_note", value: json_stringify(note)},
+  ]
+  // The retirement date and replacement are typed catalog fields; the note
+  // alone would leave them readable only as prose.
+  if candidate.new_value {
+    fields = fields + [{name: "sunset_date", value: json_stringify(candidate.effective_date)}]
+    if has_replacement {
+      fields = fields
+        + [{name: "superseded_by", value: json_stringify(trim(candidate.replacement))}]
+    }
   }
-  if unwrap(existing_note) != nil {
-    updated = __replace_line(
-      updated,
-      unwrap(existing_note) ?? 0,
-      "deprecation_note = " + json_stringify(note),
-    )
-  } else {
-    updated = __insert_lines(updated, insertion, ["deprecation_note = " + json_stringify(note)])
+  // Insertions land at the table end, after every existing field line, so
+  // line indices found in `lines` stay valid in `updated`.
+  let updated = lines
+  let insertion = bounds.end
+  for field in fields {
+    const existing = __optional_field_line(lines, bounds, field.name)
+    if is_err(existing) {
+      return Err(unwrap_err(existing))
+    }
+    const line = field.name + " = " + field.value
+    if unwrap(existing) != nil {
+      updated = __replace_line(updated, unwrap(existing) ?? 0, line)
+    } else {
+      updated = __insert_lines(updated, insertion, [line])
+      insertion = insertion + 1
+    }
   }
   return Ok(updated)
 }
@@ -826,22 +953,63 @@ pub fn apply_candidate_to_source(
   return Ok(unwrap(outcome).join("\n"))
 }
 
-pub fn extraction_prompt(notice: ProviderNotice) -> string {
+pub fn catalog_model_context(catalog: dict, notice: ProviderNotice) -> list {
+  let provider_models = []
+  for row in catalog?.models ?? [] {
+    if row?.provider == notice.provider {
+      provider_models = provider_models + [row]
+    }
+  }
+  let context = []
+  for row in provider_models {
+    if len(provider_models) <= 60
+      || (__nonempty(row?.id) && contains(notice.text ?? "", row.id))
+      || (__nonempty(row?.name) && contains(notice.text ?? "", row.name)) {
+      context = context + [{id: row.id, name: row?.name, pricing: row?.pricing}]
+    }
+  }
+  return context
+}
+
+pub fn extraction_prompt(notice: ProviderNotice, catalog: dict) -> string {
   return """
 Extract at most one provider-catalog change from this trusted notice.
-Return classification "irrelevant" when it does not explicitly change a model price,
-temporary promotion, retirement, provider endpoint, or model capability. Never infer missing identifiers
+Return classification "candidate" with kind "addition" when the notice explicitly names a
+new provider model. An addition needs provider, model_id, and evidence only; it becomes a
+reviewable incomplete proposal, never an automatic catalog row. For existing models, extract
+one explicit price, temporary promotion, retirement, endpoint, or capability change. Select
+model_id only from the catalog rows below, using the old value and model name to disambiguate.
+For a price change, match the stated old price to that row's current field; do not select
+a different row merely because its current price equals the proposed new price.
+For a retirement, effective_date is the date requests to the model stop working, not the
+date the deprecation was announced. When the notice states more than one retirement date,
+use the earliest. Write every date as a calendar date, YYYY-MM-DD, with no time of day.
+If no row matches unambiguously, do not invent an id; return "uncertain" with the ambiguity
+as the reason. An actual addition must be explicitly described as a new model by the notice.
+Return "irrelevant" only when no catalog change is stated. Never infer missing identifiers
 or values. Preserve a short supporting excerpt or immutable link as evidence.
+
+Current provider catalog rows:
+${json_stringify_pretty(catalog_model_context(catalog, notice))}
 
 Neutral notice:
 ${json_stringify_pretty(notice)}
 """
 }
 
-pub fn extract_notice(llm: HarnessLlm, notice: ProviderNotice, options: dict) -> NoticeExtraction {
+pub fn extract_notice(
+  llm: HarnessLlm,
+  notice: ProviderNotice,
+  catalog: dict,
+  options: dict,
+) -> NoticeExtraction {
   const resolved: LlmCallOptions = schema_expect(
     options + {budget: options?.budget ?? {max_cost_usd: 0.1}, max_tokens: 1200},
     schema_of(LlmCallOptions),
   )
-  return llm.call_structured(extraction_prompt(notice), schema_of(NoticeExtraction), resolved)
+  return llm.call_structured(
+    extraction_prompt(notice, catalog),
+    schema_of(NoticeExtraction),
+    resolved,
+  )
 }

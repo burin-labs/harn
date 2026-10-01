@@ -1,5 +1,6 @@
 // @harn-entrypoint-category agent.stdlib
 import { agent_emit_event } from "std/agent/state"
+import { agent_tool_handler_result } from "std/agent/tool_lifecycle"
 import { filter_nil, pick_keys } from "std/collections"
 import { ToolRegistry } from "std/tools"
 
@@ -207,7 +208,8 @@ fn __subagent_pause_tool(agent: HarnessAgent, args: dict) {
     throw "subagent_pause: reason is required"
   }
   __agent_lifecycle_tool_audit(agent, "subagent_pause", "parent", reason, handle)
-  return suspend_agent(agent, handle, reason, {initiator: "parent"})
+  const result = suspend_agent(agent, handle, reason, {initiator: "parent"})
+  return agent_tool_handler_result(to_string(result), result)
 }
 
 fn __subagent_resume_tool(agent: HarnessAgent, args: dict) {
@@ -220,7 +222,8 @@ fn __subagent_resume_tool(agent: HarnessAgent, args: dict) {
     throw "subagent_resume: continue_transcript must be a bool"
   }
   __agent_lifecycle_tool_audit(agent, "subagent_resume", "parent", "resume requested", handle)
-  return resume_agent(agent, handle, args?.input, continue_transcript)
+  const result = resume_agent(agent, handle, args?.input, continue_transcript)
+  return agent_tool_handler_result(to_string(result), result)
 }
 
 fn __subagent_stop_tool(agent: HarnessAgent, args: dict) {
@@ -237,7 +240,8 @@ fn __subagent_stop_tool(agent: HarnessAgent, args: dict) {
     reason = "parent requested stop"
   }
   __agent_lifecycle_tool_audit(agent, "subagent_stop", "parent", reason, handle)
-  return agent_stop(agent, handle, {graceful: graceful, reason: reason})
+  const result = agent_stop(agent, handle, {graceful: graceful, reason: reason})
+  return agent_tool_handler_result(to_string(result), result)
 }
 
 fn __agent_await_resumption_tool(_args: unknown) {

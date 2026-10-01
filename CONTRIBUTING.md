@@ -667,7 +667,10 @@ A named integration fact is fine where behavior depends on it — a downstream
 host's artifact directory in the code-index ignore list is a real directory the
 walker must skip. `scripts/check_public_product_names.sh` enforces the naming
 half of this rule and carries the allowlist of those deliberate exceptions; add
-to that allowlist rather than working around the scan.
+to that allowlist rather than working around the scan. New public text (a pull
+request's title, body, commit messages, and the lines it adds, plus issue
+comments) must not name the downstream brand even as a bare word; older tracked
+text is held only to the compound product names.
 
 ## Maintaining the changelog
 

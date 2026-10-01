@@ -1,3 +1,4 @@
+import { agent_tool_handler_result } from "std/agent/tool_lifecycle"
 // std/web — deterministic HTTP-backed source ingest and extraction helpers.
 import { cache_get, cache_put } from "std/cache"
 import { JsonParseFailure } from "std/json"
@@ -591,7 +592,10 @@ pub fn web_grounding_tools(
         },
       },
       annotations: {readOnlyHint: true},
-      handler: { args -> web_search(harness, args.query, __web_search_tool_options(opts, args)) },
+      handler: { args ->
+        const result = web_search(harness, args.query, __web_search_tool_options(opts, args))
+        agent_tool_handler_result(to_string(result), result, result.ok ? "ok" : "error")
+      },
       guidance:
         "For unfamiliar APIs, package names, or recent behavior, call web_search against authoritative docs or registries before coding. Prefer pinned docs and registry evidence over general web snippets, and carry source URLs into the answer or follow-up prompt.",
     },
@@ -613,7 +617,12 @@ pub fn web_grounding_tools(
       },
       annotations: {readOnlyHint: true},
       handler: { args ->
-        verify_imports(harness.fs, args.paths ?? [args.path], __web_search_tool_options(opts, args))
+        const result = verify_imports(
+          harness.fs,
+          args.paths ?? [args.path],
+          __web_search_tool_options(opts, args),
+        )
+        agent_tool_handler_result(to_string(result), result, result.ok ? "ok" : "error")
       },
       guidance:
         "After generating or editing code with imports, call verify_imports on the touched source files. Treat package_not_found and symbol_not_found as blockers. Treat fresh_package or low_trust_package warnings as a forced lookup trigger before proceeding.",

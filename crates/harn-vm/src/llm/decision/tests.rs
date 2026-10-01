@@ -5,6 +5,9 @@
 //! the same counter reads one when a dispatch does happen, so every
 //! zero-request test is paired with a dispatch that proves the counter moves.
 
+#[path = "replay_tests.rs"]
+mod replay_tests;
+
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -12,7 +15,10 @@ use super::answer::{AnswerBody, ConfidenceKind, EvidenceKind};
 use super::backend::{
     ConfidenceProvenance, DecisionTransportError, RawAnswer, RawDecisionResponse, RefusalReason,
 };
-use super::contract::{DecisionContract, DecisionLimits, DecisionProtocol, DecisionQuestionKind};
+use super::contract::{
+    DecisionContract, DecisionLimits, DecisionProtocol, DecisionQuestionKind,
+    StructuredOutputStrategy,
+};
 use super::mock::MockDecisionBackend;
 use super::question::{Question, QuestionBody, QuestionRefusalReason, QuestionSet};
 use super::*;
@@ -20,6 +26,7 @@ use super::*;
 fn contract(window: usize, max_questions: Option<usize>) -> DecisionContract {
     DecisionContract {
         protocol: DecisionProtocol::StructuredLlm,
+        structured_output_strategy: Some(StructuredOutputStrategy::NativeSchema),
         question_kinds: vec![
             DecisionQuestionKind::Boolean,
             DecisionQuestionKind::Choice,
@@ -31,6 +38,7 @@ fn contract(window: usize, max_questions: Option<usize>) -> DecisionContract {
             score_levels_min: 2,
             score_levels_max: 10,
             state_window_tokens: window,
+            request_window_tokens: None,
         },
         input_price_per_mtok: Some(0.042),
         output_price_per_mtok: Some(0.0),
@@ -69,6 +77,61 @@ fn score(id: &str, levels: &[&str]) -> Question {
 
 fn set(questions: Vec<Question>) -> QuestionSet {
     QuestionSet { questions }
+}
+
+#[test]
+fn question_identity_includes_rubric_descriptions() {
+    let original = set(vec![choice("action", &["read", "write"])]);
+    let mut changed = original.clone();
+    let QuestionBody::Choice(criteria) = &mut changed.questions[0].body else {
+        unreachable!()
+    };
+    criteria[0].1 = "a different criterion with the same label".into();
+    assert_ne!(
+        question_set_digest(&original),
+        question_set_digest(&changed)
+    );
+    assert_eq!(
+        question_set_digest(&original),
+        question_set_digest(&original.clone())
+    );
+}
+
+#[test]
+fn boolean_criteria_are_closed_and_change_the_cache_identity() {
+    let plain = questions_value();
+    let make = |criteria| {
+        VmValue::dict(vec![(
+            "safe",
+            VmValue::dict(vec![
+                ("kind", VmValue::string("boolean")),
+                ("instructions", VmValue::string("Is this safe to run?")),
+                ("criteria", criteria),
+            ]),
+        )])
+    };
+    let rubric = make(VmValue::dict(vec![
+        ("true", VmValue::string("Only reads")),
+        ("false", VmValue::string("Mutates files")),
+    ]));
+    let plain = QuestionSet::from_value(&plain).unwrap();
+    let rubric = QuestionSet::from_value(&rubric).unwrap();
+    assert_ne!(
+        super::question_set_digest(&plain),
+        super::question_set_digest(&rubric)
+    );
+    assert!(
+        matches!(&rubric.questions[0].body, QuestionBody::BooleanWithCriteria(criteria) if criteria.yes == "Only reads" && criteria.no == "Mutates files")
+    );
+    for criteria in [
+        VmValue::dict(vec![("true", VmValue::string("Only reads"))]),
+        VmValue::dict(vec![
+            ("true", VmValue::string("Only reads")),
+            ("false", VmValue::Int(1)),
+        ]),
+    ] {
+        assert!(QuestionSet::from_value(&make(criteria)).is_err());
+    }
 }
 
 fn distribution(pairs: &[(&str, f64)]) -> BTreeMap<String, f64> {
@@ -179,6 +242,41 @@ fn empty_instructions_are_refused_before_dispatch() {
     );
 }
 
+#[test]
+fn runtime_vocabularies_refuse_unbound_and_duplicate_labels() {
+    let route = contract(32_000, None);
+    for (questions, reason) in [
+        (set(vec![]), QuestionRefusalReason::EmptyQuestions),
+        (
+            set(vec![choice("tool", &[])]),
+            QuestionRefusalReason::EmptyOptions,
+        ),
+        (
+            set(vec![boolean("")]),
+            QuestionRefusalReason::EmptyIdentifier,
+        ),
+        (
+            set(vec![choice("tool", &[" "])]),
+            QuestionRefusalReason::EmptyIdentifier,
+        ),
+        (
+            set(vec![score("risk", &["low", "low"])]),
+            QuestionRefusalReason::DuplicateLabels,
+        ),
+    ] {
+        assert_eq!(
+            questions
+                .admit(&route)
+                .expect_err("invalid runtime vocabulary")
+                .reason,
+            reason
+        );
+    }
+    set(vec![choice("tool", &["one"])])
+        .admit(&route)
+        .expect("one label is a valid vocabulary");
+}
+
 // --- Answer projection ------------------------------------------------------
 
 #[test]
@@ -209,6 +307,7 @@ fn a_model_reported_number_is_never_labelled_as_a_measured_distribution() {
     let answer = Answer::project(
         &choice("q", &["keep", "drop"]),
         &RawAnswer::Choice {
+            selected: None,
             probabilities: distribution(&[("keep", 0.9), ("drop", 0.1)]),
             reported_confidence: Some(0.9),
             evidence: Some("cited".into()),
@@ -222,6 +321,7 @@ fn a_model_reported_number_is_never_labelled_as_a_measured_distribution() {
     let measured = Answer::project(
         &choice("q", &["keep", "drop"]),
         &RawAnswer::Choice {
+            selected: None,
             probabilities: distribution(&[("keep", 0.9), ("drop", 0.1)]),
             reported_confidence: Some(0.9),
             evidence: None,
@@ -240,6 +340,7 @@ fn a_distribution_that_does_not_match_its_question_is_rejected() {
     let rejection = Answer::project(
         &choice("q", &["keep", "drop"]),
         &RawAnswer::Choice {
+            selected: None,
             probabilities: distribution(&[("keep", 0.6), ("delete", 0.4)]),
             reported_confidence: None,
             evidence: None,
@@ -265,6 +366,7 @@ fn a_distribution_that_does_not_match_its_question_is_rejected() {
     Answer::project(
         &boolean("q"),
         &RawAnswer::Choice {
+            selected: None,
             probabilities: distribution(&[("keep", 1.0)]),
             reported_confidence: None,
             evidence: None,
@@ -277,6 +379,7 @@ fn a_distribution_that_does_not_match_its_question_is_rejected() {
     Answer::project(
         &choice("q", &["keep", "drop"]),
         &RawAnswer::Choice {
+            selected: None,
             probabilities: distribution(&[("keep", 0.6), ("drop", 0.4)]),
             reported_confidence: None,
             evidence: None,
@@ -377,14 +480,34 @@ fn the_policy_digest_covers_the_threshold() {
         model: "fixture".into(),
         effort: "low".into(),
         temperature: 0.0,
+        native_options_supplied: false,
         threshold,
-        evaluation_cost_limit: 1.0,
-        run_cost_limit: 1.0,
+        evaluation_cost_limit: Some(1.0),
+        run_cost_limit: Some(1.0),
     };
     // The same answers under a different threshold are a different decision. A
     // cache keyed without it would reuse an acceptance the caller withdrew.
     assert_ne!(policy(0.8).digest(), policy(0.9).digest());
     assert_eq!(policy(0.8).digest(), policy(0.8).digest());
+}
+
+#[test]
+fn runtime_policy_uses_the_closed_registry_and_optional_caps_are_explicit_in_identity() {
+    let value = policy_value(0.5, 1.0);
+    let explicit = EvaluationPolicy::from_value(&value).unwrap();
+    let mut fields = value.as_dict().unwrap().clone();
+    fields.remove("evaluation_cost_limit");
+    fields.remove("run_cost_limit");
+    let inherited = EvaluationPolicy::from_value(&VmValue::dict(fields.clone())).unwrap();
+    assert_eq!(inherited.evaluation_cost_limit, None);
+    assert_eq!(inherited.run_cost_limit, None);
+    assert_ne!(explicit.digest(), inherited.digest());
+    fields.insert(
+        crate::value::intern_key("run_cost_limti"),
+        VmValue::Float(1.0),
+    );
+    let error = EvaluationPolicy::from_value(&VmValue::dict(fields)).unwrap_err();
+    assert!(error.contains("unknown field `run_cost_limti`"));
 }
 
 // --- Through the evaluator, with the request counter as the instrument ------
@@ -420,6 +543,8 @@ fn questions_value() -> VmValue {
 
 fn answering(probability: f64) -> RawDecisionResponse {
     RawDecisionResponse {
+        usage: None,
+        native_transport: None,
         answers: BTreeMap::from([(
             "safe".to_string(),
             RawAnswer::Boolean {
@@ -444,12 +569,28 @@ fn run(
     policy: VmValue,
     scripted: Vec<super::mock::MockOutcome>,
 ) -> (String, super::receipt::EvaluationReceipt, u32) {
-    let backend = Arc::new(MockDecisionBackend::scripted(scripted));
-    let _guard = super::install_backend(backend.clone());
     // The route the policies below name. A window of 4096 tokens is small
     // enough that the oversized-state test crosses it and large enough that
     // every other state here fits, so one route serves all of them.
-    let _route = super::install_route("mock", "fixture", contract(4096, None));
+    let (outcome, receipt, requests) =
+        run_on(contract(4096, None), state, questions, policy, scripted);
+    (outcome.kind.to_string(), receipt, requests)
+}
+
+fn run_on(
+    route: DecisionContract,
+    state: VmValue,
+    questions: VmValue,
+    policy: VmValue,
+    scripted: Vec<super::mock::MockOutcome>,
+) -> (
+    super::outcome::Outcome,
+    super::receipt::EvaluationReceipt,
+    u32,
+) {
+    let backend = Arc::new(MockDecisionBackend::scripted(scripted));
+    let _guard = super::install_backend(backend.clone());
+    let _route = super::install_route("mock", "fixture", route);
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -457,8 +598,8 @@ fn run(
     let outcome = runtime.block_on(async {
         let mut vm = crate::Vm::new();
         crate::register_vm_stdlib(&mut vm);
-        let ctx = crate::vm::AsyncBuiltinCtx::for_test(vm);
-        super::evaluate(
+        let ctx = crate::vm::AsyncBuiltinCtx::for_test(vm.child_vm());
+        let result = super::evaluate(
             &ctx,
             &[
                 VmValue::String("triage.v1".into()),
@@ -468,10 +609,21 @@ fn run(
             ],
         )
         .await
-        .expect("evaluation returns an outcome, not an error")
+        .expect("evaluation returns an outcome, not an error");
+        let receipts = vm
+            .execution_evidence(None, Vec::new())
+            .evaluation_receipts
+            .expect("VM reports its evaluation journal");
+        assert_eq!(
+            receipts.len(),
+            1,
+            "child evaluation belongs to the parent execution"
+        );
+        assert_eq!(receipts[0].outcome_kind, result.0.kind);
+        result
     });
     let receipt = super::last_receipt().expect("every evaluation records a receipt");
-    (outcome.0.kind.to_string(), receipt, backend.request_count())
+    (outcome.0, receipt, backend.request_count())
 }
 
 #[test]
@@ -503,6 +655,50 @@ fn an_answered_batch_records_one_request_and_a_settled_receipt() {
 }
 
 #[test]
+fn structured_paid_answers_and_refusals_retain_authoritative_cache_settlement() {
+    let mut usage = crate::llm::usage::LlmUsage::known_zero_attempt();
+    usage.input_tokens = 1000;
+    usage.output_tokens = 20;
+    usage.cost_usd = Some(0.00017);
+    usage.known_cost_usd = 0.00017;
+    usage.cache_supported = true;
+    usage.cache_accounting_declared = Some(true);
+    usage.cache_read_tokens = 900;
+    usage.cache_hit_ratio = Some(0.9);
+    let mut answer = answering(0.95);
+    answer.usage = Some(Box::new(usage.clone()));
+    for (expected, response) in [
+        ("answered", Ok(answer)),
+        (
+            "refused",
+            Err(DecisionTransportError::Refused {
+                reason: RefusalReason::SchemaInvalid,
+                diagnostic: "paid malformed response".into(),
+            }
+            .with_usage(usage.clone(), Some("served-fixture".into()))),
+        ),
+    ] {
+        let (kind, receipt, requests) = run(
+            VmValue::string("short"),
+            questions_value(),
+            policy_value(0.5, 1.0),
+            vec![response],
+        );
+        assert_eq!(kind, expected);
+        assert_eq!(requests, 1);
+        assert_eq!(receipt.physical_attempts, 1);
+        assert_eq!(receipt.input_tokens, Some(1000));
+        assert_eq!(
+            receipt.cost_usd,
+            Some(0.00017),
+            "never reprice cached tokens at the base rate"
+        );
+        assert_eq!(receipt.accounting_status, AccountingStatus::Settled);
+        assert_eq!(receipt.usage.as_deref(), Some(&usage));
+    }
+}
+
+#[test]
 fn an_answer_below_the_threshold_is_low_confidence_not_a_verdict() {
     let (kind, _, requests) = run(
         VmValue::dict(vec![("text", VmValue::String("short".into()))]),
@@ -512,6 +708,53 @@ fn an_answer_below_the_threshold_is_low_confidence_not_a_verdict() {
     );
     assert_eq!(kind, "low_confidence");
     assert_eq!(requests, 1);
+}
+
+#[test]
+fn a_thirteen_question_limit_refuses_fourteen_before_dispatch() {
+    for count in [13, 14] {
+        let questions = VmValue::dict(
+            (0..count)
+                .map(|index| {
+                    (
+                        format!("m{index}"),
+                        VmValue::dict(vec![
+                            ("kind", VmValue::string("boolean")),
+                            (
+                                "instructions",
+                                VmValue::string(format!("Keep message {index}?")),
+                            ),
+                        ]),
+                    )
+                })
+                .collect::<Vec<_>>(),
+        );
+        let mut response = answering(0.95);
+        let answer = response.answers.remove("safe").unwrap();
+        response.answers = (0..count)
+            .map(|index| (format!("m{index}"), answer.clone()))
+            .collect();
+        let (outcome, receipt, requests) = run_on(
+            contract(4096, Some(13)),
+            VmValue::string("shared state"),
+            questions,
+            policy_value(0.5, 1.0),
+            vec![Ok(response)],
+        );
+        assert_eq!(receipt.questions.len(), count);
+        if count == 13 {
+            assert_eq!(outcome.kind, "answered");
+            assert_eq!(
+                requests, 1,
+                "positive control reaches the same dispatch counter"
+            );
+        } else {
+            assert_eq!(outcome.kind, "question_invalid");
+            assert_eq!(field(&outcome.into_value(), "reason"), "too_many_questions");
+            assert_eq!(requests, 0);
+            assert_eq!(receipt.physical_attempts, 0);
+        }
+    }
 }
 
 #[test]
@@ -639,6 +882,19 @@ fn an_invalid_question_refuses_before_dispatch() {
 }
 
 #[test]
+fn an_empty_runtime_question_set_refuses_with_a_receipt_and_zero_requests() {
+    let (kind, receipt, requests) = run(
+        VmValue::dict(vec![("text", VmValue::String("short".into()))]),
+        VmValue::dict(Vec::<(&str, VmValue)>::new()),
+        policy_value(0.5, 1.0),
+        vec![Ok(answering(0.95))],
+    );
+    assert_eq!(kind, "question_invalid");
+    assert_eq!(requests, 0);
+    assert_eq!(receipt.physical_attempts, 0);
+}
+
+#[test]
 fn an_unconfigured_route_refuses_before_dispatch() {
     let policy = VmValue::dict(vec![
         ("backend", VmValue::String("structured_llm".into())),
@@ -672,6 +928,70 @@ fn an_evaluation_cost_bound_over_the_limit_refuses_before_dispatch() {
     );
     assert_eq!(kind, "budget_cut");
     assert_eq!(requests, 0);
+}
+
+fn native_policy() -> VmValue {
+    VmValue::dict(vec![
+        ("backend", VmValue::String("native_decision".into())),
+        ("provider", VmValue::String("mock".into())),
+        ("model", VmValue::String("fixture".into())),
+        ("threshold", VmValue::Float(0.5)),
+        ("evaluation_cost_limit", VmValue::Float(0.01)),
+        ("run_cost_limit", VmValue::Float(0.5)),
+    ])
+}
+
+fn run_native() -> (VmValue, super::receipt::EvaluationReceipt, u32) {
+    let route = DecisionContract {
+        protocol: DecisionProtocol::OpenrouterDecisions,
+        structured_output_strategy: None,
+        output_price_per_mtok: Some(0.0),
+        ..contract(4096, None)
+    };
+    let (outcome, receipt, requests) = run_on(
+        route,
+        VmValue::dict(vec![("text", VmValue::String("short".into()))]),
+        questions_value(),
+        native_policy(),
+        vec![Ok(answering(0.95))],
+    );
+    (outcome.into_value(), receipt, requests)
+}
+
+fn field(value: &VmValue, key: &str) -> String {
+    value
+        .as_dict()
+        .and_then(|fields| fields.get(key))
+        .map(|value| value.display())
+        .unwrap_or_default()
+}
+
+#[test]
+fn a_native_decision_after_an_unreserved_chat_call_reports_the_admission_refusal() {
+    use crate::llm::admission::{reserve, swap_scope, AdmissionScope};
+    let previous = swap_scope(AdmissionScope::default());
+    // Control: a fresh execution installs the policy's run ceiling and dispatches.
+    let (outcome, _, requests) = run_native();
+    assert_eq!(field(&outcome, "kind"), "answered");
+    assert_eq!(requests, 1);
+
+    // A chat call with no budget runs unreserved, so the policy's run ceiling
+    // can no longer be installed for this execution.
+    swap_scope(AdmissionScope::default());
+    let mut chat = crate::llm::api::options::base_opts("openai");
+    chat.model = "gpt-5.6-luna".into();
+    chat.provider_overrides = None;
+    chat.budget = None;
+    let request = crate::llm::api::LlmRequestPayload::from(&chat);
+    assert!(reserve(&chat, &request).unwrap().is_none());
+
+    let (outcome, receipt, requests) = run_native();
+    swap_scope(previous);
+    assert_eq!(requests, 0, "the refusal precedes transport");
+    assert_eq!(field(&outcome, "kind"), "unavailable");
+    // No provider was asked, so this is not a credential or entitlement denial.
+    assert_eq!(field(&outcome, "reason"), "admission_refused");
+    assert_eq!(receipt.admission_reason.as_deref(), Some("late_activation"));
 }
 
 #[test]
@@ -744,4 +1064,44 @@ fn the_dispatched_request_carries_the_admitted_profile_unchanged() {
         Some("short"),
         "the backend is handed the caller's state, not a summary of it"
     );
+}
+
+#[test]
+fn saved_answers_use_the_public_label_vocabulary() {
+    // Evaluation tapes serialize answers with serde while receipts and the
+    // stdlib types spell the same labels in snake case. A tape must not carry
+    // a second spelling of one label.
+    let label = |value: serde_json::Value| value.as_str().map(str::to_string);
+    assert_eq!(
+        label(serde_json::to_value(ConfidenceKind::BinaryProbability).unwrap()).as_deref(),
+        Some("binary_probability")
+    );
+    assert_eq!(
+        label(serde_json::to_value(ConfidenceKind::DistributionShape).unwrap()).as_deref(),
+        Some("distribution_shape")
+    );
+    assert_eq!(
+        label(serde_json::to_value(ConfidenceKind::ModelRationale).unwrap()).as_deref(),
+        Some("model_rationale")
+    );
+    assert_eq!(
+        label(serde_json::to_value(EvidenceKind::InputReference).unwrap()).as_deref(),
+        Some("input_reference")
+    );
+    assert_eq!(
+        label(serde_json::to_value(EvidenceKind::ModelRationale).unwrap()).as_deref(),
+        Some("model_rationale")
+    );
+    let body = serde_json::to_value(AnswerBody::Boolean {
+        verdict: true,
+        probability: 0.9,
+    })
+    .unwrap();
+    assert!(body.get("boolean").is_some(), "answer body tag: {body}");
+    let choice = serde_json::to_value(AnswerBody::Choice {
+        choice: "keep".into(),
+        probabilities: BTreeMap::new(),
+    })
+    .unwrap();
+    assert!(choice.get("choice").is_some(), "answer body tag: {choice}");
 }

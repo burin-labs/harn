@@ -243,10 +243,6 @@ fn burin_mini_explain_repo_fixture_run_passes() {
     );
 }
 
-#[cfg_attr(
-    windows,
-    ignore = "harn#8037: the sandboxed child exits STATUS_DLL_INIT_FAILED (-1073741502) with empty output, which is a child process initialization failure and not the AppContainer read contract; the same run proves a sandboxed child runs the host node and a full workflow passes"
-)]
 #[test]
 fn burin_mini_comment_file_fixture_run_updates_workspace_copy() {
     let (_temp, experiment_root) = setup_experiment_copy();
@@ -307,10 +303,6 @@ fn burin_mini_comment_file_fixture_run_updates_workspace_copy() {
     );
 }
 
-#[cfg_attr(
-    windows,
-    ignore = "harn#8037: the sandboxed child exits STATUS_DLL_INIT_FAILED (-1073741502) with empty output, which is a child process initialization failure and not the AppContainer read contract; the same run proves a sandboxed child runs the host node and a full workflow passes"
-)]
 #[test]
 fn burin_mini_rate_limit_fixture_run_wires_middleware() {
     let (_temp, experiment_root) = setup_experiment_copy();
@@ -422,10 +414,6 @@ fn burin_mini_rate_limit_fixture_run_wires_middleware() {
     );
 }
 
-#[cfg_attr(
-    windows,
-    ignore = "harn#8037: the sandboxed child exits STATUS_DLL_INIT_FAILED (-1073741502) with empty output, which is a child process initialization failure and not the AppContainer read contract; the same run proves a sandboxed child runs the host node and a full workflow passes"
-)]
 #[test]
 fn burin_mini_rate_limit_liveish_fixture_ignores_redundant_read_actions() {
     let (_temp, experiment_root) = setup_experiment_copy();
@@ -467,10 +455,6 @@ fn burin_mini_rate_limit_liveish_fixture_ignores_redundant_read_actions() {
     );
 }
 
-#[cfg_attr(
-    windows,
-    ignore = "harn#8037: the sandboxed child exits STATUS_DLL_INIT_FAILED (-1073741502) with empty output, which is a child process initialization failure and not the AppContainer read contract; the same run proves a sandboxed child runs the host node and a full workflow passes"
-)]
 #[test]
 fn burin_mini_rate_limit_weak_verify_plan_normalizes_to_single_verify_action() {
     let (_temp, experiment_root) = setup_experiment_copy();
@@ -532,10 +516,6 @@ fn burin_mini_rate_limit_weak_verify_plan_normalizes_to_single_verify_action() {
     );
 }
 
-#[cfg_attr(
-    windows,
-    ignore = "harn#8037: the sandboxed child exits STATUS_DLL_INIT_FAILED (-1073741502) with empty output, which is a child process initialization failure and not the AppContainer read contract; the same run proves a sandboxed child runs the host node and a full workflow passes"
-)]
 #[test]
 fn burin_mini_rate_limit_overresearch_planner_commits_final_action_graph() {
     let (_temp, experiment_root) = setup_experiment_copy();
@@ -734,158 +714,13 @@ mod stage_summary_tests {
     }
 }
 
-/// ADVERSARIAL WRITE-CONFINEMENT CHECK (harn#7993). Every candidate fix for
-/// the Windows read-closed defect widens READS; none of them may widen
-/// WRITES. This drives the same seam the failing fixtures use
-/// (`execute_playground_inputs` -> the `run` tool -> `process.shell_at` ->
-/// `run_captured_spawn` -> the Windows sandbox backend) and checks the real
-/// filesystem afterward, not `cmd.exe`'s own stdout wording — different
-/// candidates may implement confinement through different mechanisms with
-/// different denial text/exit codes, but the file either exists on disk or
-/// it does not, and that check is mechanism-agnostic.
-///
-/// Both write targets sit under `%USERPROFILE%`, OUTSIDE the workspace: one
-/// directly in the profile root (a path that exists on every machine), and
-/// one inside a fresh subdirectory this test creates itself (proving, on
-/// the host side and before the sandboxed run, that the subdirectory exists
-/// and is writable) — so a candidate cannot pass by only closing off a
-/// well-known top-level path while leaving a freshly created one open. A
-/// failure to deny either write can only be the sandbox's own write
-/// confinement, never an ambient OS permission the account never had.
-///
-/// This deliberately does NOT target the system temp directory the way an
-/// earlier version of this test did. The temp directory is a legitimately
-/// granted write root under this backend's own `UserTemp` preset whenever
-/// workspace writes are allowed, so a successful write there is the policy
-/// working correctly, not an escape — using it as a denial arm produced a
-/// false violation. (An even earlier version used `%TEMP%` directly inside
-/// the sandboxed command, which was vacuous for a different reason: the
-/// Windows backend overrides the child's own `TEMP`/`TMP` to an
-/// AppContainer-local path — see `environment_overrides` in `windows.rs` —
-/// so `%TEMP%` expanded inside the child never resolved to the host path
-/// this test was checking.)
-///
-/// A third write lands inside the workspace (the run tool's cwd is
-/// `workspace_root(fs)`, see `experiments/burin-mini/lib/workspace.harn`)
-/// and MUST succeed: a candidate that closes reads by also closing writes
-/// it used to allow is a regression, not a fix, even if the 5 real
-/// fixtures happen to pass.
-///
-/// Before trusting an absent escape file as a genuine denial, a negative
-/// control writes to the exact same two `%USERPROFILE%`-rooted paths
-/// through an *unsandboxed* spawn (no harn sandbox in the path at all) and
-/// asserts both files appear, then removes them. Skipping this would make
-/// the whole test vacuous in exactly the way the earlier `%TEMP%` checks
-/// were: an absent file proves nothing unless something first proves the
-/// file would have been there to find.
-///
-/// Any escape file this test finds is deleted before the assertion panics,
-/// and the subdirectory it creates is always removed on the way out, so a
-/// broken candidate does not leave stray files or directories on the
-/// runner.
-#[cfg(windows)]
-#[test]
-fn windows_sandbox_fix_keeps_writes_confined_to_the_workspace() {
-    let (_temp, experiment_root) = setup_experiment_copy();
-
-    let userprofile_dir = std::env::var("USERPROFILE").expect(
-        "USERPROFILE must be set to run the write-confinement check or its negative control",
-    );
-    let userprofile_dir = PathBuf::from(userprofile_dir);
-    let userprofile_escape = userprofile_dir.join("harn-escape-7993-userprofile.txt");
-    let subdir = userprofile_dir.join("harn-escape-7993-subdir");
-    let subdir_escape = subdir.join("harn-escape-7993-nested.txt");
-
-    // Create the subdirectory on the host side and prove, before the
-    // sandboxed run, that this (unsandboxed) test process can actually
-    // write inside it. If this fails, the real check below would not be
-    // measuring the sandbox at all.
-    fs::create_dir_all(&subdir).unwrap_or_else(|error| {
-        panic!(
-            "could not create the write-confinement subdirectory {} on the host: {error}",
-            subdir.display()
-        )
-    });
-    let subdir_sentinel = subdir.join("harn-subdir-host-writable-sentinel-7993.txt");
-    fs::write(&subdir_sentinel, "host-writable").unwrap_or_else(|error| {
-        panic!(
-            "the write-confinement subdirectory {} is not host-writable, so it cannot be used \
-             as a denial target: {error}",
-            subdir.display()
-        )
-    });
-    fs::remove_file(&subdir_sentinel).unwrap_or_else(|error| {
-        panic!(
-            "could not clean up the host-writable sentinel at {}: {error}",
-            subdir_sentinel.display()
-        )
-    });
-
-    // Negative control: prove the detector can see a write at these exact
-    // paths before trusting that an absent file means the sandbox denied
-    // it. Same target paths, no sandbox anywhere in the call path.
-    // `raw_arg`, not `arg`. Rust quotes an ordinary argument for the
-    // MSVC convention and escapes the inner quotes as `\"`, which `cmd.exe`
-    // does not understand: it reports "The filename, directory name, or
-    // volume label syntax is incorrect" and the control fails before it can
-    // prove anything. `raw_arg` hands the command line over verbatim, which
-    // is the only way to pass a quoted path through `cmd /C`.
-    let control_status = {
-        use std::os::windows::process::CommandExt as _;
-        std::process::Command::new("cmd.exe")
-            .raw_arg(format!(
-                "/D /C echo control > \"{}\" & echo control > \"{}\"",
-                userprofile_escape.display(),
-                subdir_escape.display()
-            ))
-            .status()
-            .expect("spawn the unsandboxed write-confinement negative control")
-    };
-    assert!(
-        control_status.success(),
-        "unsandboxed negative control command itself failed to run"
-    );
-    for control_path in [&userprofile_escape, &subdir_escape] {
-        assert!(
-            control_path.exists(),
-            "negative control: an unsandboxed write to {} did not appear; the detector \
-             cannot tell a real denial from a broken probe, so the real check below would \
-             prove nothing",
-            control_path.display()
-        );
-    }
-    for control_path in [&userprofile_escape, &subdir_escape] {
-        fs::remove_file(control_path).unwrap_or_else(|error| {
-            panic!(
-                "negative control: could not clean up {} before the real run: {error}",
-                control_path.display()
-            )
-        });
-    }
-
-    let outcome = run_playground_case(
-        experiment_root.clone(),
-        "Comment what this file does".to_string(),
-        "windows_write_confinement_probe.jsonl",
-    );
-    assert_writes_stay_confined(
-        &experiment_root,
-        &outcome,
-        &[
-            ("USERPROFILE", Some(userprofile_escape)),
-            ("USERPROFILE subdirectory", Some(subdir_escape)),
-        ],
-        &[&subdir],
-    );
-}
-
-/// The write-confinement assertion the Windows, macOS and Linux backends
-/// share. Each platform's test supplies its own escape targets, because the
-/// paths a normal process can write to outside a workspace differ by OS; the
-/// verdict below does not.
+/// The write-confinement assertion the macOS and Linux backends share. Each
+/// platform's test supplies its own escape targets, because the paths a
+/// normal process can write to outside a workspace differ by OS; the verdict
+/// below does not.
 ///
 /// The check reads the real filesystem rather than the shell's own stdout
-/// wording. Denial text and exit codes differ across the three backends, but
+/// wording. Denial text and exit codes differ across the backends, but
 /// the file either exists on disk or it does not, and that is
 /// mechanism-agnostic.
 ///
@@ -904,7 +739,7 @@ fn windows_sandbox_fix_keeps_writes_confined_to_the_workspace() {
 /// best-effort: it warns and runs the child unconfined. Continuous
 /// integration runs on exactly such a host, which is worth stating plainly —
 /// no Linux job here can prove write confinement, so the confinement claim
-/// rests on macOS and Windows.
+/// rests on macOS. Windows has no OS sandbox at all.
 ///
 /// The point of returning a fact rather than skipping is that the assertion
 /// above keeps binding either way: where isolation is active the escapes must
@@ -919,12 +754,7 @@ fn process_filesystem_isolation_is_active() -> bool {
         .unwrap_or(false)
 }
 
-#[cfg(windows)]
-fn process_filesystem_isolation_is_active() -> bool {
-    // The AppContainer this backend launches is always available.
-    true
-}
-
+#[cfg(unix)]
 fn assert_writes_stay_confined(
     experiment_root: &Path,
     outcome: &Result<String, String>,
@@ -1010,136 +840,10 @@ fn assert_writes_stay_confined(
     );
 }
 
-/// Every `tool_call_update` transcript event for the `run` tool, across every
-/// stage and regardless of status: the command asked for, what the tool
-/// returned, and the error when the call failed outright. The diagnostic
-/// below deliberately runs commands whose interesting content is what they
-/// printed rather than whether they "failed", so a summary that only reads
-/// failed stages would drop exactly the part worth reading.
-#[cfg(windows)]
-fn dump_run_tool_transcript(report: &serde_json::Value) -> String {
-    let mut out = String::new();
-    let Some(stages) = report["stages"].as_array() else {
-        return "  (no execution.run.stages in this report)\n".to_string();
-    };
-    for stage in stages {
-        let Some(events) = stage["transcript"]["events"].as_array() else {
-            continue;
-        };
-        for event in events {
-            if event["kind"] != "tool_call_update" {
-                continue;
-            }
-            let metadata = &event["metadata"];
-            if metadata["tool_name"] != "run" {
-                continue;
-            }
-            out.push_str(&format!(
-                "  tool_call_update status={} raw_input={} raw_output={} error={}\n",
-                metadata["status"].as_str().unwrap_or("<none>"),
-                metadata["raw_input"],
-                metadata["raw_output"],
-                metadata["error"].as_str().unwrap_or("<none>"),
-            ));
-        }
-    }
-    if out.is_empty() {
-        out.push_str("  (no run tool_call_update events found in any stage's transcript)\n");
-    }
-    out
-}
-
-/// Standing Windows diagnostic for the read-open contract (harn#7993). The
-/// five playground fixtures above fail the moment a confined child cannot
-/// read the interpreter its command names, and `cmd.exe` reports that as
-/// "'node' is not recognized as an internal or external command" — a message
-/// that blames the search path for a file-permission problem and has twice
-/// sent a diagnosis down the wrong road.
-///
-/// Five commands through the exact seam the fixtures use, with all five
-/// outputs printed on failure, so one red round answers every question at
-/// once instead of costing a round each:
-///
-/// 1. `whoami /groups /fo list` — which SIDs the child token carries,
-///    including whether `ALL APPLICATION PACKAGES` is among them. Everything
-///    about read access follows from this.
-/// 2. `icacls` on the Node install directory — whether its permissions admit
-///    the container at all. Permissions that already name
-///    `ALL APPLICATION PACKAGES` while the read still fails would falsify the
-///    file-permission premise this whole area rests on.
-/// 3. `type` on a plain file inside it — a read with no path search, no
-///    extension resolution and no executable launch in the way, separating
-///    "cannot read" from "cannot resolve".
-/// 4. `dotnet --version` — the positive control. It is another global install
-///    under the same Program Files prefix, so if it runs while Node does not,
-///    the difference is that one directory's permissions rather than anything
-///    about the prefix, the sandbox, or the search path.
-/// 5. `node --version` — the product claim itself, in the fixtures' shape.
-///
-/// The assertion is on (5). The other four mutate nothing, which is why this
-/// is safe to keep permanently, and that is the point: the next read
-/// regression prints its own cause instead of needing a probe invented for it
-/// again.
-#[cfg(windows)]
-#[test]
-fn windows_sandboxed_run_child_can_read_the_host_node_toolchain() {
-    // Turn the backend's own per-decision trace on for this test's process.
-    // The backend keeps it behind an environment variable so production
-    // spawns stay quiet, but a timeout here is unreadable without it: the
-    // trace is what names which roots were probed, which were granted, and
-    // how many milliseconds each cost. Safe to set process-wide because the
-    // test runner gives every test its own process.
-    std::env::set_var("HARN_WINDOWS_SANDBOX_TRACE", "1");
-    let (_temp, experiment_root) = setup_experiment_copy();
-    let outcome = run_playground_case(
-        experiment_root.clone(),
-        "Comment what this file does".to_string(),
-        "windows_system_read_diagnostic.jsonl",
-    );
-    let stdout = match &outcome {
-        Ok(stdout) => stdout.clone(),
-        Err(error) => error.clone(),
-    };
-    let report_path = generated_report_path(&experiment_root, &stdout, "comment_file-latest.json");
-    let transcript_dump = if report_path.exists() {
-        let report = read_json(&report_path);
-        dump_run_tool_transcript(&report)
-    } else {
-        format!(
-            "  (no report at {} — execute_playground_inputs result: {outcome:?})\n",
-            report_path.display()
-        )
-    };
-    let full_dump = format!(
-        "=== windows_sandboxed_run_child_can_read_the_host_node_toolchain ===\n\
-         playground stdout/error:\n{stdout}\n\
-         run tool transcript (5 commands, in order: whoami /groups /fo list; \
-         icacls on the Node install directory; type on a plain file inside \
-         it; dotnet --version as the positive control; node --version):\n\
-         {transcript_dump}\n\
-         === end diagnostic ==="
-    );
-    // `cmd` expands `%ERRORLEVEL%` when it parses the line, so a same-line
-    // status read reports the status of the line BEFORE it. The marker is
-    // chained with `&&` instead, which only runs when the tool itself
-    // exited 0.
-    assert!(
-        full_dump.contains("DIAGNOSTIC_NODE_VERSION=ok"),
-        "the sandboxed run tool's child could not run the host's `node`. The \
-         four diagnostic commands above it say why: whether the child token \
-         carries ALL APPLICATION PACKAGES, whether the Node install \
-         directory's permissions admit it, whether a plain file read inside \
-         that directory succeeds, and whether the neighbouring dotnet install \
-         under the same prefix runs\n{full_dump}"
-    );
-}
-
-/// The macOS/Linux half of the same adversarial check the Windows test above
-/// runs (harn#7993 swarm brief). The three OS backends confine writes through
-/// three different mechanisms -- seatbelt on macOS, Landlock on Linux, an
-/// AppContainer plus file permissions on Windows -- so the confinement claim
-/// is only as good as its weakest backend, and until now only Windows was
-/// asserted.
+/// An adversarial write-confinement check (harn#7993). The two OS backends
+/// confine writes through different mechanisms -- seatbelt on macOS, Landlock
+/// on Linux -- so the confinement claim is only as good as its weakest
+/// backend. Windows has no OS sandbox, so it has no half of this check.
 ///
 /// Picking escape targets is the whole difficulty, and getting it wrong in
 /// either direction produces a test that proves nothing:

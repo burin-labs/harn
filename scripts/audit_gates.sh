@@ -26,10 +26,18 @@
 # throughput for a measurement that reflects the workload rather than runner
 # contention.
 #
-# Usage: scripts/audit_gates.sh [--phase all|conformance|audit] [--tree-sitter-parser-preflighted]
+# Usage: scripts/audit_gates.sh [--phase all|conformance|audit] [--group GROUP]
+#                               [--shard K/N] [--tree-sitter-parser-preflighted]
 #   --phase all             run both worker pools together (default; local use)
 #   --phase conformance     run conformance workers, then the performance ratchet
 #   --phase audit           run only the independent audit gate fanout
+#   --group GROUP           with --phase audit, run one runner-sized slice:
+#                            `sources` (lint, format, generated artifacts),
+#                            `docs` (check-docs), or `scripts` (Harn script and
+#                            agent-loop suites). Default `all`.
+#   --shard K/N             with --phase conformance, run slice K of N. Each
+#                            worker is one of N*workers serial shard processes;
+#                            only slice 1 runs the performance ratchet.
 #   --tree-sitter-parser-preflighted
 #                            omit that gate only after the caller ran it on the
 #                            same checkout (CI uses this to overlap it with the
@@ -52,6 +60,8 @@ gate_command=("$0" "$@")
 gate_receipt="${HARN_EXT_GATE_RECEIPT:-$SCRIPT_DIR/../.harn/receipts/source-gate.json}"
 
 phase="all"
+group="all"
+shard=""
 tree_sitter_parser_preflighted="false"
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -64,12 +74,30 @@ while [ "$#" -gt 0 ]; do
       phase="${1#--phase=}"
       shift
       ;;
+    --group)
+      [ "$#" -ge 2 ] || { echo "error: --group requires a value" >&2; exit 2; }
+      group="$2"
+      shift 2
+      ;;
+    --shard)
+      [ "$#" -ge 2 ] || { echo "error: --shard requires a value" >&2; exit 2; }
+      shard="$2"
+      shift 2
+      ;;
+    --group=*)
+      group="${1#--group=}"
+      shift
+      ;;
+    --shard=*)
+      shard="${1#--shard=}"
+      shift
+      ;;
     --tree-sitter-parser-preflighted)
       tree_sitter_parser_preflighted="true"
       shift
       ;;
     -h|--help)
-      echo "usage: scripts/audit_gates.sh [--phase all|conformance|audit] [--tree-sitter-parser-preflighted]"
+      echo "usage: scripts/audit_gates.sh [--phase all|conformance|audit] [--group sources|docs|scripts] [--shard K/N] [--tree-sitter-parser-preflighted]"
       exit 0
       ;;
     *)
@@ -85,6 +113,34 @@ case "$phase" in
     exit 2
     ;;
 esac
+case "$group" in
+  all) ;;
+  sources|docs|scripts)
+    if [ "$phase" != "audit" ]; then
+      echo "error: --group $group requires --phase audit" >&2
+      exit 2
+    fi
+    ;;
+  *)
+    echo "error: invalid --group '$group' (expected sources, docs, or scripts)" >&2
+    exit 2
+    ;;
+esac
+shard_index=1
+shard_total=1
+if [ -n "$shard" ]; then
+  if [ "$phase" != "conformance" ]; then
+    echo "error: --shard requires --phase conformance" >&2
+    exit 2
+  fi
+  if [[ ! "$shard" =~ ^([1-9][0-9]*)/([1-9][0-9]*)$ ]] \
+    || [ "${BASH_REMATCH[1]}" -gt "${BASH_REMATCH[2]}" ]; then
+    echo "error: invalid --shard '$shard' (expected K/N with 1 <= K <= N)" >&2
+    exit 2
+  fi
+  shard_index="${BASH_REMATCH[1]}"
+  shard_total="${BASH_REMATCH[2]}"
+fi
 
 gate_temp_root="$(mktemp -d "${TMPDIR:-/tmp}/harn-audit-gates.XXXXXX")"
 export PYTHONPYCACHEPREFIX="$gate_temp_root/python-pyc"
@@ -154,6 +210,35 @@ if [ "$tree_sitter_parser_preflighted" = "true" ]; then
   done
   GATES=("${filtered_gates[@]}")
 fi
+
+# Runner-sized slices of the audit fanout for CI, which gives each its own
+# runner. Measured serially on 2026-10-01 (24-core Linux, CI binary): check-docs
+# 183s+, the agent-loop suite 120s, lint-harn 78s, the script suite 68s, and
+# every other gate under 5s. One four-vCPU runner carrying all of them took
+# 824s. `docs` and `scripts` hold the long poles; `sources` holds the rest.
+DOCS_GATES=(check-docs)
+SCRIPT_GATES=(test-agent-scripts)
+run_script_tests="true"
+case "$group" in
+  docs)
+    GATES=("${DOCS_GATES[@]}")
+    run_script_tests="false"
+    ;;
+  scripts)
+    GATES=("${SCRIPT_GATES[@]}")
+    ;;
+  sources)
+    filtered_gates=()
+    for gate in "${GATES[@]}"; do
+      case " ${DOCS_GATES[*]} ${SCRIPT_GATES[*]} " in
+        *" $gate "*) ;;
+        *) filtered_gates+=("$gate") ;;
+      esac
+    done
+    GATES=("${filtered_gates[@]}")
+    run_script_tests="false"
+    ;;
+esac
 
 nproc_count() { getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4; }
 explicit_audit_concurrency="${AUDIT_GATES_CONCURRENCY-}"
@@ -286,11 +371,19 @@ if [ "$phase" != "conformance" ]; then
   audit_gates=("${GATES[@]}")
   ordinary_concurrency="$concurrency"
   script_test_jobs=0
-  if [ "$concurrency" -gt 1 ]; then
+  if [ "$run_script_tests" != "true" ]; then
+    :
+  elif [ "$concurrency" -gt 1 ]; then
     script_test_jobs=$((concurrency / 2))
     ordinary_concurrency=$((concurrency - script_test_jobs))
   else
     audit_gates=("$SCRIPT_TEST_GATE" "${audit_gates[@]}")
+  fi
+  # The agent-loop suite fans out into shard processes. On the scripts slice it
+  # is the only ordinary gate, so it takes exactly the ordinary budget rather
+  # than defaulting to every core beside the script suite's reserved workers.
+  if [ "$group" = "scripts" ]; then
+    export HARN_TEST_JOBS="$ordinary_concurrency"
   fi
   : > "$audit_log"
 
@@ -330,13 +423,24 @@ conformance_status=0
 conformance_pid=""
 if [ "$phase" != "audit" ]; then
   conformance_started="$(date +%s)"
-  echo "=== conformance ($conformance_jobs process-isolated workers, HARN_BIN warm) ==="
-  (
-    "$SCRIPT_DIR/harn_test_env.sh" "$HARN_BIN" test conformance \
-      --parallel \
-      --jobs "$conformance_jobs" \
-      --timeout "$conformance_timeout_ms"
-  ) >"$conformance_log" 2>&1 &
+  if [ "$shard_total" -eq 1 ]; then
+    echo "=== conformance ($conformance_jobs process-isolated workers, HARN_BIN warm) ==="
+    (
+      "$SCRIPT_DIR/harn_test_env.sh" "$HARN_BIN" test conformance \
+        --parallel \
+        --jobs "$conformance_jobs" \
+        --timeout "$conformance_timeout_ms"
+    ) >"$conformance_log" 2>&1 &
+  else
+    # `--parallel` cannot combine with explicit sharding, so a runner slice
+    # runs its share as serial shard processes, one per worker.
+    echo "=== conformance slice $shard_index/$shard_total ($conformance_jobs shard processes, HARN_BIN warm) ==="
+    (
+      HARN_TEST_JOBS="$conformance_jobs" "$SCRIPT_DIR/run_harn_test_shards.sh" \
+        --slice "$shard_index/$shard_total" conformance \
+        --timeout "$conformance_timeout_ms"
+    ) >"$conformance_log" 2>&1 &
+  fi
   conformance_pid=$!
   child_pids+=("$conformance_pid")
 fi
@@ -391,6 +495,7 @@ fi
 # so its resource measurements are comparable to the platform baseline.
 performance_status=0
 if [ "$phase" != "audit" ] \
+  && [ "$shard_index" -eq 1 ] \
   && [ "$conformance_status" -eq 0 ] \
   && [ "$audit_status" -eq 0 ] \
   && [ "$script_test_status" -eq 0 ]; then
@@ -465,8 +570,22 @@ if [ "$performance_status" -ne 0 ]; then
 fi
 case "$phase" in
   all) summary="conformance and audit gates passed" ;;
-  conformance) summary="conformance and performance gates passed" ;;
-  audit) summary="audit gates passed" ;;
+  conformance)
+    if [ "$shard_total" -eq 1 ]; then
+      summary="conformance and performance gates passed"
+    elif [ "$shard_index" -eq 1 ]; then
+      summary="conformance slice $shard_index/$shard_total and performance gates passed"
+    else
+      summary="conformance slice $shard_index/$shard_total passed"
+    fi
+    ;;
+  audit)
+    if [ "$group" = "all" ]; then
+      summary="audit gates passed"
+    else
+      summary="audit gates ($group) passed"
+    fi
+    ;;
 esac
 echo "=== $summary ==="
 subtask_placement="${HARN_VM_SUBTASK_PLACEMENT:-worker}"

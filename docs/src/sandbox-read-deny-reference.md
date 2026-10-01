@@ -12,7 +12,7 @@ For how the process sandbox works overall, see
 | --- | --- |
 | Type | `Vec<String>` |
 | JSON field | `process_sandbox.read_deny_roots` |
-| Default | the fourteen home-relative paths below, resolved against `$HOME` |
+| Default | the home-relative paths below, resolved against `$HOME` |
 | Scope | child processes, and Harn's own file builtins via `check_fs_path_scope` |
 | Nesting | **unions**; every other field of the policy intersects |
 
@@ -24,8 +24,8 @@ Two properties distinguish it from every other field:
 
 - **It beats every grant.** The denial is checked before any preset, any
   `read_roots` entry, and any `workspace_roots` entry. `PackageManagerConfig`
-  grants `~/.config`, `~/.cache`, and `~/.netrc` wholesale, so a term that
-  merely competed with presets would never fire on the paths it exists for.
+  grants tool roots such as `~/.config/composer`, whose `auth.json` remains
+  denied. Explicit host grants may also cover credential directories.
 - **It unions as policies nest.** `CapabilityPolicy::intersect` narrows presets
   and roots to their common set. Narrowing a *denial* would widen authority, so
   a nested policy may add a denial and can never drop one.
@@ -59,7 +59,17 @@ the data instead of in a comment that drifts from it.
 `.ssh`, `.aws`, `.gnupg`, `.netrc`, `.docker/config.json`,
 `.config/gh/hosts.yml`, `.config/gcloud`, `.kube/config`, `.npmrc`, `.pypirc`,
 `.cargo/credentials`, `.cargo/credentials.toml`, `.composer/auth.json`,
-`.config/composer/auth.json`.
+`.config/composer/auth.json`, `.config/git/credentials`, `.config/glab-cli`,
+`.config/hub`, `.config/github-copilot`, `.config/rclone/rclone.conf`,
+`.config/doctl`, `.config/hcloud`, `.config/containers/auth.json`,
+`.config/.wrangler`, `.config/stripe`, `.config/sops/age`,
+`.config/configstore/firebase-tools.json`, `.cache/huggingface/token`,
+`.cache/huggingface/stored_tokens`.
+
+The list names the default credential locations of widely used CLIs. It is not
+exhaustive: credentials elsewhere inside an admitted tool root need another
+denial. Unknown `~/.config` and `~/.cache` siblings aren't admitted by the
+preset. See [Toolchain config and cache reference](./sandbox-config-census.md).
 
 A denied config file is not left for the tool to trip over. npm and pnpm read
 `~/.npmrc` at startup and exit on the `EPERM`, so a confined child instead gets
@@ -77,10 +87,12 @@ A host may add to this list through `read_deny_roots`. It cannot remove from it.
 | --- | --- | --- |
 | macOS | `(deny file-read* (subpath …))` emitted after every allow | yes |
 | Linux | Landlock grants the siblings that do not lead to the denial | yes |
-| Windows | AppContainer | not yet |
+| Windows | none: Windows runs with no OS sandbox confinement | no |
 | OpenBSD | `unveil` | not yet |
 
-Windows and OpenBSD do not refuse the spawn either. The default denylist is
+Only an `os_hardened` spawn refuses on Windows, as it does for every
+dimension the enforcement table marks not enforced there. Other profiles on
+Windows and OpenBSD do not refuse the spawn. The default denylist is
 never empty, so refusing on an unsupporting backend would refuse every spawn on
 that platform. The term is simply unenforced there, and saying so is worth more
 than a claim the code does not honor.
@@ -138,6 +150,6 @@ agent-handler denial shape (`gate: "process_sandbox"`, `retryable: false`). Its
 `sandbox.denial_reporting` field is always present. `inferred_only` means a
 null `denial` is not evidence that every child operation was allowed;
 `backend_unavailable` and `not_enforced` name the other two coverage states.
-Current Landlock, seatbelt, and AppContainer integrations cannot report a
+Current Landlock and seatbelt integrations cannot report a
 resource or operation directly, so inferred records use `resource: null` and
 `operation: "unknown"` rather than parsing tool- or locale-specific prose.

@@ -283,78 +283,89 @@ impl UsageCostCertainty {
     pub const fn has_priced_attempt(&self) -> bool {
         self.unpriced_calls < self.provider_call_count || self.known_cost_usd > 0.0
     }
+
+    /// Measured total only when every physical attempt has a price.
+    #[must_use]
+    pub fn cost_usd(&self) -> Option<f64> {
+        (self.unpriced_calls == 0).then_some(self.known_cost_usd)
+    }
+
+    /// Fold one completed call without retaining its detailed trace.
+    pub(crate) fn record(&mut self, usage: &LlmUsage) {
+        let summary = self;
+        // An absent call count identifies ledgers recorded before the
+        // aggregation fields existed. Reconstruct their one-call
+        // certainty from the original stable fields. A present zero is a
+        // measurement and remains zero.
+        let legacy = usage.provider_call_count.is_none();
+        summary.known_cost_usd += if legacy {
+            usage.cost_usd.unwrap_or(0.0)
+        } else {
+            usage.known_cost_usd
+        };
+        summary.provider_call_count += usage.provider_call_count.unwrap_or(1);
+        summary.unpriced_calls += if legacy {
+            i64::from(usage.cost_usd.is_none())
+        } else {
+            usage.unpriced_calls
+        };
+        summary.usage_unknown_calls += if legacy {
+            i64::from(usage.accounting_status == UsageAccountingStatus::Unknown)
+        } else {
+            usage.usage_unknown_calls
+        };
+        summary.unpriced_tokens += if legacy {
+            if usage.cost_usd.is_none() {
+                usage.input_tokens.saturating_add(usage.output_tokens)
+            } else {
+                0
+            }
+        } else {
+            usage.unpriced_tokens()
+        };
+        let reason = if legacy {
+            usage.cost_usd.is_none().then_some(UnpricedReason::Mixed)
+        } else {
+            usage.unpriced_reason()
+        };
+        if let Some(reason) = reason {
+            summary.unpriced_reason = Some(
+                summary
+                    .unpriced_reason
+                    .map_or(reason, |existing| existing.merge(reason)),
+            );
+        }
+        // A legacy ledger has no stored projection, so its own cost stands
+        // in: priced members project to exactly what they cost, unpriced
+        // ones refuse.
+        let member_projection = if legacy {
+            usage.cost_usd
+        } else {
+            usage.projected_cost_usd()
+        };
+        let member_known = if legacy {
+            usage.cost_usd.unwrap_or(0.0)
+        } else {
+            usage.known_cost_usd
+        };
+        match member_projection {
+            Some(projected) => {
+                summary.unpriced_projection_usd += (projected - member_known).max(0.0);
+            }
+            None => summary.unprojectable = true,
+        }
+    }
 }
 
 /// Fold cost and accounting certainty once for every reporting projection.
 pub fn summarize_usage_cost_certainty<'a>(
     usages: impl IntoIterator<Item = &'a LlmUsage>,
 ) -> UsageCostCertainty {
-    usages
-        .into_iter()
-        .fold(UsageCostCertainty::default(), |mut summary, usage| {
-            // An absent call count identifies ledgers recorded before the
-            // aggregation fields existed. Reconstruct their one-call
-            // certainty from the original stable fields. A present zero is a
-            // measurement and folds as one.
-            let legacy = usage.provider_call_count.is_none();
-            summary.known_cost_usd += if legacy {
-                usage.cost_usd.unwrap_or(0.0)
-            } else {
-                usage.known_cost_usd
-            };
-            summary.provider_call_count += usage.provider_call_count.unwrap_or(1);
-            summary.unpriced_calls += if legacy {
-                i64::from(usage.cost_usd.is_none())
-            } else {
-                usage.unpriced_calls
-            };
-            summary.usage_unknown_calls += if legacy {
-                i64::from(usage.accounting_status == UsageAccountingStatus::Unknown)
-            } else {
-                usage.usage_unknown_calls
-            };
-            summary.unpriced_tokens += if legacy {
-                if usage.cost_usd.is_none() {
-                    usage.input_tokens.saturating_add(usage.output_tokens)
-                } else {
-                    0
-                }
-            } else {
-                usage.unpriced_tokens()
-            };
-            let reason = if legacy {
-                usage.cost_usd.is_none().then_some(UnpricedReason::Mixed)
-            } else {
-                usage.unpriced_reason()
-            };
-            if let Some(reason) = reason {
-                summary.unpriced_reason = Some(
-                    summary
-                        .unpriced_reason
-                        .map_or(reason, |existing| existing.merge(reason)),
-                );
-            }
-            // A legacy ledger has no stored projection, so its own cost stands
-            // in: priced members project to exactly what they cost, unpriced
-            // ones refuse.
-            let member_projection = if legacy {
-                usage.cost_usd
-            } else {
-                usage.projected_cost_usd()
-            };
-            let member_known = if legacy {
-                usage.cost_usd.unwrap_or(0.0)
-            } else {
-                usage.known_cost_usd
-            };
-            match member_projection {
-                Some(projected) => {
-                    summary.unpriced_projection_usd += (projected - member_known).max(0.0);
-                }
-                None => summary.unprojectable = true,
-            }
-            summary
-        })
+    let mut summary = UsageCostCertainty::default();
+    for usage in usages {
+        summary.record(usage);
+    }
+    summary
 }
 
 /// Classify one attempt's missing price and bound what it may have cost.

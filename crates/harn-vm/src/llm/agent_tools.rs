@@ -26,7 +26,7 @@ async fn run_tool_handler(
     handler: &VmClosure,
     tool_name: &str,
     tool_args: &serde_json::Value,
-    declared_failure: &mut Option<&'static str>,
+    handler_outcome: &mut Option<handler_result::HandlerOutcome>,
 ) -> Result<serde_json::Value, VmError> {
     let args_vm = crate::stdlib::json_to_vm_value(tool_args);
     let _trusted_bridge_guard = crate::orchestration::allow_trusted_bridge_calls();
@@ -37,8 +37,8 @@ async fn run_tool_handler(
     }
     match outcome {
         Ok(val) => {
-            let (payload, failure) = handler_result::coerce_and_classify_handler_result(&val);
-            *declared_failure = failure;
+            let (payload, outcome) = handler_result::coerce_and_classify_handler_result(&val)?;
+            *handler_outcome = Some(outcome);
             Ok(payload)
         }
         Err(VmError::CategorizedError {
@@ -394,7 +394,8 @@ fn is_denied_tool_result_object(value: &serde_json::Value) -> bool {
             .is_some_and(|status| status == "blocked")
 }
 
-/// Classify a tool result that came back as `Ok(value)` (no Rust-level error).
+/// Classify a native host or MCP result that returned without a Rust error.
+/// Script handler outcomes are validated separately and never pass here.
 ///
 /// A tool/host primitive can complete the dispatch without throwing yet still
 /// signal a *failure* in the result body — e.g. the host bridge returns a
@@ -463,9 +464,8 @@ fn ok_result_failure_category_object(value: &serde_json::Value) -> Option<&'stat
 pub(super) struct ToolDispatchOutcome {
     pub result: Result<serde_json::Value, VmError>,
     pub executor: Option<ToolExecutor>,
-    /// A failure the handler declared in its return value, read while that
-    /// value was still structured (harn#7884).
-    pub declared_failure: Option<&'static str>,
+    /// Validated handler disposition, retained independently of display data.
+    pub handler_outcome: Option<handler_result::HandlerOutcome>,
 }
 
 /// Dispatch a single tool invocation to its execution backend, recording
@@ -524,9 +524,9 @@ pub(super) async fn dispatch_tool_execution_with_mcp(
     let mut executor: Option<ToolExecutor> = None;
     // Reset per attempt: a retry re-runs the handler and re-reads whatever the
     // new return value declares.
-    let mut declared_failure: Option<&'static str>;
+    let mut handler_outcome: Option<handler_result::HandlerOutcome>;
     loop {
-        declared_failure = None;
+        handler_outcome = None;
         let result = if matches!(declared.as_deref(), Some("provider_native")) {
             // The runtime never dispatches provider-native tools — the
             // model returns the already-executed result inline. Reaching
@@ -549,7 +549,7 @@ pub(super) async fn dispatch_tool_execution_with_mcp(
             let Some(bridge) = bridge else {
                 executor = Some(ToolExecutor::HostBridge);
                 return ToolDispatchOutcome {
-                    declared_failure: None,
+                    handler_outcome: None,
                     result: Err(VmError::CategorizedError {
                         message: format!(
                             "tool '{tool_name}' is declared executor: \"host_bridge\" \
@@ -596,7 +596,7 @@ pub(super) async fn dispatch_tool_execution_with_mcp(
                 // Harn-side `handler` overrides (custom MCP wrappers).
                 let Some(vm) = ctx.map(crate::vm::AsyncBuiltinCtx::child_vm) else {
                     return ToolDispatchOutcome {
-                        declared_failure: None,
+                        handler_outcome: None,
                         result: Err(VmError::CategorizedError {
                             message: format!(
                                 "tool '{tool_name}' is MCP-served but no child VM context was available"
@@ -612,7 +612,7 @@ pub(super) async fn dispatch_tool_execution_with_mcp(
                     &handler,
                     tool_name,
                     tool_args,
-                    &mut declared_failure,
+                    &mut handler_outcome,
                 )
                 .await
             } else if let Some(bridge) = bridge {
@@ -661,7 +661,7 @@ pub(super) async fn dispatch_tool_execution_with_mcp(
             });
             let Some(vm) = ctx.map(crate::vm::AsyncBuiltinCtx::child_vm) else {
                 return ToolDispatchOutcome {
-                    declared_failure: None,
+                    handler_outcome: None,
                     result: Err(VmError::CategorizedError {
                         message: format!(
                             "tool '{tool_name}' is Harn-owned but no child VM context was available"
@@ -677,7 +677,7 @@ pub(super) async fn dispatch_tool_execution_with_mcp(
                 &handler,
                 tool_name,
                 tool_args,
-                &mut declared_failure,
+                &mut handler_outcome,
             )
             .await
         } else if let Some(local_result) = handle_tool_locally(tool_name, tool_args) {
@@ -732,7 +732,7 @@ pub(super) async fn dispatch_tool_execution_with_mcp(
             if !matches!(
                 error,
                 VmError::CategorizedError {
-                    category: ErrorCategory::ToolRejected,
+                    category: ErrorCategory::ToolRejected | ErrorCategory::SchemaValidation,
                     ..
                 }
             ) && !crate::value::error_to_category(error).is_internal()
@@ -741,7 +741,7 @@ pub(super) async fn dispatch_tool_execution_with_mcp(
             break ToolDispatchOutcome {
                 result,
                 executor,
-                declared_failure,
+                handler_outcome,
             };
         }
         attempt += 1;

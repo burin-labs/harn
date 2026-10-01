@@ -285,6 +285,10 @@ struct MockState {
     stdout_hangs_after_exit_until_kill: bool,
     stderr_hangs_after_exit_until_kill: bool,
     pipes_released_by_cleanup: Mutex<bool>,
+    /// Pipe readers handed out by `take_stdout`/`take_stderr` and not yet
+    /// dropped. A kill waits for this to reach zero; see `record_kill`.
+    open_readers: Mutex<usize>,
+    readers_cv: Condvar,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -313,6 +317,8 @@ impl MockState {
             stdout_hangs_after_exit_until_kill: config.stdout_hangs_after_exit_until_kill,
             stderr_hangs_after_exit_until_kill: config.stderr_hangs_after_exit_until_kill,
             pipes_released_by_cleanup: Mutex::new(false),
+            open_readers: Mutex::new(0),
+            readers_cv: Condvar::new(),
         }
     }
 
@@ -351,6 +357,42 @@ impl MockState {
         drop(exit);
         *self.pipes_released_by_cleanup.lock().unwrap() = true;
         self.notify_exit_and_pipes();
+        self.wait_for_readers_to_close();
+    }
+
+    /// A real child's pipe readers run for the whole command, so by the time
+    /// a kill returns they have already read everything the child wrote and
+    /// only have to observe EOF. A mock kill can land before the reader
+    /// thread was ever scheduled, which leaves the caller's short post-kill
+    /// drain racing thread startup (harn#8997). Returning only after every
+    /// handed-out reader has been dropped makes the kill ordering
+    /// deterministic, because the command reader threads send what they read
+    /// before they drop the reader.
+    fn wait_for_readers_to_close(&self) {
+        // Readers see EOF once the kill is recorded, so this completes as
+        // soon as they are scheduled. The ceiling only turns a test that
+        // takes a pipe and never reads it into a clear failure, not a hang.
+        let open = self.open_readers.lock().unwrap();
+        let (open, result) = self
+            .readers_cv
+            .wait_timeout_while(open, Duration::from_mins(1), |open| *open > 0)
+            .unwrap();
+        assert!(
+            !result.timed_out(),
+            "MockProcess: {} pipe reader(s) still open 60s after kill; a taken \
+             stdout/stderr reader must be read to EOF or dropped",
+            *open
+        );
+    }
+
+    fn reader_opened(&self) {
+        *self.open_readers.lock().unwrap() += 1;
+    }
+
+    fn reader_closed(&self) {
+        let mut open = self.open_readers.lock().unwrap();
+        *open -= 1;
+        self.readers_cv.notify_all();
     }
 
     fn pipe_has_reached_eof(&self, kind: PipeKind) -> bool {
@@ -431,6 +473,7 @@ impl ProcessHandle for MockProcess {
             return None;
         }
         self.stdout_taken = true;
+        self.state.reader_opened();
         Some(Box::new(MockStdoutReader {
             state: Arc::clone(&self.state),
             kind: PipeKind::Stdout,
@@ -445,6 +488,7 @@ impl ProcessHandle for MockProcess {
             return None;
         }
         self.stderr_taken = true;
+        self.state.reader_opened();
         Some(Box::new(MockStdoutReader {
             state: Arc::clone(&self.state),
             kind: PipeKind::Stderr,
@@ -566,6 +610,12 @@ impl Read for MockStdoutReader {
             }
             data = cv.wait(data).unwrap();
         }
+    }
+}
+
+impl Drop for MockStdoutReader {
+    fn drop(&mut self) {
+        self.state.reader_closed();
     }
 }
 

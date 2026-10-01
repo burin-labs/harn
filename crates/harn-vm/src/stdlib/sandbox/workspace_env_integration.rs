@@ -411,6 +411,7 @@ fn explicit_session_env_grant_wins_over_workspace_default() {
             },
             expose_as_env: Some("HOME".to_string()),
             for_command: None,
+            expose_to: Default::default(),
         }],
         &|name| (name == "EXPLICIT_HOME").then(|| "/caller/home".to_string()),
     )

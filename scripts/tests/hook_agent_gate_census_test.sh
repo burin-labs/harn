@@ -6,6 +6,7 @@
 set -euo pipefail
 
 repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
+hook_source_root=${HOOK_TEST_SOURCE_ROOT:-$repo_root}
 
 tmp_root=$(mktemp -d)
 trap 'rm -rf "$tmp_root"' EXIT
@@ -45,11 +46,16 @@ set -euo pipefail
 printf 'make %s HARN_BIN=%s\n' "$*" "${HARN_BIN:-}" >> "$MAKE_COMMAND_RECORD"
 case "$*" in
   "-s check-agent-gates")
+    if [[ "${CENSUS_RESULT:-pass}" == "unavailable" ]]; then
+      printf '%s\n' "error[HARN-MOD-001]: unresolved import 'std/dev/agent_gates'" >&2
+      exit 1
+    fi
     if [[ "${CENSUS_RESULT:-pass}" == "pass" ]]; then
       printf '%s\n' '{"entries":516,"failures":[],"pending":0}'
       exit 0
     fi
     printf '%s\n' '{"entries":516,"failures":["stale readers ModelPolicySpec.max_iterations","stale projection docs/src/dev/agent-gates/runner.md"],"pending":2}'
+    printf '%s\n' 'Regenerate with make gen-agent-gates, then stage spec/agent-gates and docs/src/dev/agent-gates.'
     printf '%s\n' 'error: Thrown: agent gate registry: unregistered reads or stale projections' >&2
     exit 1
     ;;
@@ -87,6 +93,10 @@ case " $* " in
     [[ -z "${WORKTREE_STALE:-}" ]] || exit 1
     ;;
   *)
+    if [[ -n "${HARN_BUILD_FAIL:-}" ]]; then
+      printf '%s\n' 'fixture: verified worktree build unavailable' >&2
+      exit 1
+    fi
     printf 'build\n' >> "$BUILD_RECORD"
     ;;
 esac
@@ -100,8 +110,8 @@ exit 0
 SH
 chmod +x "$fake_bin/npx"
 
-cp "$repo_root/.githooks/lib.sh" "$work/.githooks/lib.sh"
-cp "$repo_root/.githooks/pre-push" "$work/.githooks/pre-push"
+cp "$hook_source_root/.githooks/lib.sh" "$work/.githooks/lib.sh"
+cp "$hook_source_root/.githooks/pre-push" "$work/.githooks/pre-push"
 chmod +x "$work/.githooks/pre-push"
 
 printf '%s\n' 'pipeline options() {}' > "$work/$changed_reader"
@@ -177,6 +187,32 @@ fail() {
   done
   exit 1
 }
+
+# A usable executable on PATH is not proof that it can interpret this branch.
+# Without a fresh artifact the actual pre-push path must refuse, without
+# running the census or claiming that a row was measured as stale.
+missing_out="$tmp_root/missing.out"
+if INHERITED_HARN_BIN='' WORKTREE_STALE=1 HARN_BUILD_FAIL=1 \
+    run_prepush "$changed_reader" pass "$missing_out"; then
+  fail "an unverified installed runtime allowed the push" "$missing_out"
+fi
+grep -Fq "UNMEASURED" "$missing_out" ||
+  fail "the missing runtime was not reported as unmeasured" "$missing_out"
+if grep -Fq "check-agent-gates" "$make_record"; then
+  fail "the census ran through an unverified installed runtime" "$make_record"
+fi
+
+# An explicit artifact still has to execute the audit successfully. Import
+# failures are not a completed census and cannot justify regeneration advice.
+unavailable_out="$tmp_root/unavailable.out"
+if run_prepush "$changed_reader" unavailable "$unavailable_out"; then
+  fail "an unavailable census allowed the push" "$unavailable_out"
+fi
+grep -Fq "HARN-MOD-001" "$unavailable_out" ||
+  fail "the actual interpreter failure was hidden" "$unavailable_out"
+if grep -Eq "make gen-agent-gates|no longer matches" "$unavailable_out"; then
+  fail "an unexecuted census was described as stale rows" "$unavailable_out"
+fi
 
 # Falsifier: the #8291 shape. A recorded reader moved and the registry was not
 # regenerated, so the push is refused and the stale rows are named.

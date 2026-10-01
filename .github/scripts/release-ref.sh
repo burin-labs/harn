@@ -12,7 +12,8 @@
 # is exactly what happened to four call sites in this repo.
 #
 # Sourced by `.github/workflows/ci.yml` (the `changes` job checks out the repo
-# before use) and by `scripts/native_platform_ci_plan.sh`.
+# before use), by `.github/workflows/windows-nightly.yml` (its `route` job), and
+# by `scripts/native_platform_ci_plan.sh`.
 #
 # GitHub Actions `if:` expressions cannot source this file. The one such call
 # site, `.github/workflows/cli-cold-start-budget.yml`, spells the same policy as
@@ -41,4 +42,34 @@ release_head_ref_version() {
 # Convenience predicate for callers that only need the yes/no.
 is_release_head_ref() {
   release_head_ref_version "${1-}" >/dev/null
+}
+
+# Print whether a release-PR-only lane runs for one workflow event: `true` for
+# every non-pull-request trigger the workflow declares (schedule, dispatch), and
+# for a pull request only when its head is a release branch. Print `false` for
+# any other pull request.
+#
+# An empty event, or a pull request with no head ref, is a caller that could not
+# read its own context. It returns 2 instead of printing `false`, so a routing
+# step under `set -e` fails by name rather than skipping the lane as if the ref
+# had been read and rejected.
+release_pr_only_lane_run() {
+  local event="${1-}" head_ref="${2-}"
+  if [[ -z "$event" ]]; then
+    echo "release_pr_only_lane_run: event name is empty" >&2
+    return 2
+  fi
+  if [[ "$event" != "pull_request" ]]; then
+    printf 'true\n'
+    return 0
+  fi
+  if [[ -z "$head_ref" ]]; then
+    echo "release_pr_only_lane_run: pull_request event has no head ref" >&2
+    return 2
+  fi
+  if is_release_head_ref "$head_ref"; then
+    printf 'true\n'
+  else
+    printf 'false\n'
+  fi
 }

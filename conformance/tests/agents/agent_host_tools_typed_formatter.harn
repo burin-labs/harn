@@ -29,5 +29,24 @@ pipeline main(harness: Harness) {
   harness.stdio.println(result.result.schema)
   harness.stdio.println(result.result.data.exit_code)
   harness.stdio.println(result.result.data.stdout)
+  const failed = agent_dispatch_tool_call(
+    harness.tools,
+    {name: "run_command", arguments: {argv: ["sh", "-c", "exit 7"]}},
+    tools,
+  )
+  assert(failed.ok == false)
+  assert(failed.error_category == "tool_error")
+  assert(failed.result.outcome == "error")
+  assert(failed.result.data.exit_code == 7)
+  assert(failed.rendered_result == "command-ok")
+  const denied = agent_dispatch_tool_call(
+    harness.tools,
+    {name: "run_command", arguments: {argv: ["printf", "must not run"]}},
+    tools,
+  )
+  assert(denied.ok == false)
+  assert(denied.error_category == "tool_rejected")
+  assert(denied.result.outcome == "rejected")
+  assert(denied.rendered_result == "command-ok")
   harness.fs.delete(root)
 }

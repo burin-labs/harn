@@ -4,6 +4,7 @@ import {
   CompletionJudgeVerdict,
   __judge_completion_verdict_contradicts_itself,
   __judge_completion_verdict_read,
+  __judge_sentinel_gaps,
   __judge_ungrounded_gap_quotes,
 } from "std/agent/judge_verdict"
 import { agent_emit_event } from "std/agent/state"
@@ -152,6 +153,58 @@ pub fn __judge_ungrounded_quote_retry_prompt(quotes: list<string>) -> string {
 }
 
 /**
+ * Resolve a refusal that names the done sentinel (harn#8775).
+ *
+ * Re-asked rather than overruled: the gap that names the sentinel often bundles
+ * a real obligation with it ("write a brief summary ... then emit ##DONE##"),
+ * and only the judge can say whether the substantive half still stands.
+ *
+ * @effects: [llm, event]
+ * @errors: []
+ * @api_stability: internal
+ * @example: __judge_resolve_sentinel_gaps(harness, request, data, [], "##DONE##")
+ */
+pub fn __judge_resolve_sentinel_gaps(
+  harness: Harness,
+  request: JudgeCheckpointRequest,
+  data: dict,
+  criteria: list<string>,
+  sentinel: string,
+) -> JudgeContradictionResolution {
+  if len(criteria) == 0 {
+    return {data: data, reasked: false}
+  }
+  return __judge_reask_once(
+    harness,
+    request,
+    data,
+    __judge_sentinel_retry_prompt(criteria, sentinel),
+    "done_sentinel",
+  )
+}
+
+/**
+ * The instruction added to the user turn when a refusal named the done sentinel.
+ *
+ * It says why the marker cannot be observed and keeps the substantive exit
+ * open, so a judge that also found real missing work still refuses on it.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: internal
+ * @example: __judge_sentinel_retry_prompt(["emit ##DONE##"], "##DONE##")
+ */
+pub fn __judge_sentinel_retry_prompt(criteria: list<string>, sentinel: string) -> string {
+  return "\n\nYour previous reply refused the work on `" + sentinel + "`:\n"
+    + join(criteria.map({ criterion -> "  - " + criterion }), "\n")
+    + "\nThat marker is the runtime's completion protocol. It is removed from the response "
+    + "before you see it and the runtime enforces it, so you cannot observe it and it is "
+    + "never a gap. Answer again without it. If something substantive in that criterion is "
+    + "still unmet, such as a summary of what changed that the response does not give, reply "
+    + "`continue` naming only that, with no mention of the marker. Otherwise reply `done`."
+}
+
+/**
  * One re-ask on the user turn, with the reason named.
  *
  * Both re-ask reasons share this so the retry stays a single behaviour: the
@@ -201,15 +254,17 @@ pub type JudgeSettledReply = {
 }
 
 /**
- * Run both re-ask reasons in order and return the reply of record.
+ * Run every re-ask reason in order and return the reply of record.
  *
- * Two things can make a reply unusable, and both are readable without a model:
+ * Three things can make a reply unusable, and each is readable without a model:
  *
  * 1. `done` beside a named gap. The judge accepted and refused inside one
  *    object (harn#7910, harn#8060).
  * 2. A refusal quoting evidence that is not in the packet the judge was handed
  *    (#8100). Measured on two scheduler trials, where the judge refused ten
  *    times over a file view that already showed the fix.
+ * 3. A refusal naming the done sentinel, which the judge cannot observe
+ *    (harn#8775).
  *
  * Each is re-asked exactly once, in that order, because a grounding check
  * should run against the reply the contradiction pass settled on rather than
@@ -256,20 +311,30 @@ pub fn __judge_settle_reply(
   } else {
     {data: contradiction.data, reasked: false}
   }
-  if grounding.reasked {
-    return {
-      decoded: __judge_completion_verdict_read(
-        grounding.data,
-        contract,
-        payload.judge_evidence_packet,
-      ),
-      reply_of_record: grounding.data,
-      contradiction_reasked: contradiction.reasked,
-    }
+  const after_grounding = if grounding.reasked {
+    __judge_completion_verdict_read(grounding.data, contract, payload.judge_evidence_packet)
+  } else {
+    after_contradiction
+  }
+  const sentinel = to_string(request.opts?.done_sentinel ?? "")
+  const sentinel_pass = if after_grounding.verdict == "continue" {
+    __judge_resolve_sentinel_gaps(
+      harness,
+      request,
+      grounding.data,
+      __judge_sentinel_gaps(after_grounding.gaps, sentinel),
+      sentinel,
+    )
+  } else {
+    {data: grounding.data, reasked: false}
   }
   return {
-    decoded: after_contradiction,
-    reply_of_record: contradiction.data,
+    decoded: if sentinel_pass.reasked {
+      __judge_completion_verdict_read(sentinel_pass.data, contract, payload.judge_evidence_packet)
+    } else {
+      after_grounding
+    },
+    reply_of_record: sentinel_pass.data,
     contradiction_reasked: contradiction.reasked,
   }
 }

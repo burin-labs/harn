@@ -34,6 +34,7 @@ pipeline default(harness: Harness) {
     [llm_text("done ##DONE##")],
     { ->
       const replacement: SystemReplacement = {mode: "replace", content: REPLACEMENT}
+      const session_id = "system-prompt-replacement-" + harness.random.uuid()
       const opts: AgentSpec = {
         provider: "mock",
         model: "mock",
@@ -48,13 +49,18 @@ pipeline default(harness: Harness) {
           ],
         },
         tools: replacement_test_tools(),
+        session_id: session_id,
       }
       const result = agent_loop(harness, "Do the task.", "POSITIONAL PRIMARY MUST NOT LEAK", opts)
       const calls = harness.llm.mock_calls()
       require len(calls) > 0
       const call = calls[0]
       harness.stdio.println(result.status == "done")
-      harness.stdio.println(call.system == REPLACEMENT)
+      harness.stdio.println(
+        call.system.starts_with(REPLACEMENT)
+          && contains(call.system, "Harn directive authority nonce for this session:")
+          && !contains(call.system, "MUST NOT LEAK"),
+      )
     },
   )
   // Provider normalization historically hoists leading system/developer

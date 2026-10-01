@@ -14,6 +14,19 @@ This keeps the tool contract explicit:
 
 ## Pattern
 
+Agent dispatch rejects freeform dictionary results, including results returned
+through helpers. Use a nominal struct with exactly one boolean `ok` or `success`
+field, or `agent_tool_handler_result(text, data, outcome)` from
+`std/agent/tool_lifecycle`. The helper returns a
+`harn.agent_tool_handler_result.v2` envelope. Its `outcome` is `"ok"` by default;
+pass `"error"` for a failed operation or `"rejected"` for a refusal.
+Dispatch renders `text` and preserves `data` without reading data fields to
+decide success. Scalar and list results use successful return as their execution
+outcome; throw an error when execution fails.
+
+`Result<T, E>` also declares the outcome: `Ok(data)` succeeds and `Err(error)`
+fails, regardless of keys inside the value.
+
 Build a registry with `tool_define(...)`, give each tool a precise input and
 output shape, and keep the handler body purely stdlib. For repeated
 declarative specs, import `tool_define_many(...)` or `tool_registry_from(...)`
@@ -46,6 +59,7 @@ fn agent_opts_from_package() -> AgentSpec {
 
 ```harn
 import "std/vision"
+import { agent_tool_handler_result } from "std/agent/tool_lifecycle"
 
 fn deterministic_tools() {
   let tools = tool_registry()
@@ -125,7 +139,10 @@ fn deterministic_tools() {
         stats: {type: "object"},
       },
     },
-    handler: { args -> return ocr(args.image, args.options) },
+    handler: { args ->
+      const result = ocr(args.image, args.options)
+      return agent_tool_handler_result(to_string(result), result)
+    },
   })
 
   return tools
@@ -158,8 +175,8 @@ tool-result message; ACP clients receive it at `_meta.harn.data`. Harn does not
 maintain a key allowlist for this map, so producers can add typed outcome
 records without runtime changes. Only `text` is used for `rendered_result` and
 the model-visible observation, so changing the prose does not change the
-structured facts. Unmarked dict returns retain their historical display-string
-behavior and do not gain promoted `data`.
+structured facts. Unmarked dict returns are rejected with `schema_validation`;
+they don't gain promoted `data` or a success verdict.
 
 Tool handlers cannot call the privileged `host_call(...)` wire, including
 through a helper. The wire is serviceable only while the host-selected trusted

@@ -10,7 +10,6 @@ use std::time::Duration;
 
 use serde_json::{json, Value as JsonValue};
 use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncWrite, AsyncWriteExt, BufReader};
-use tokio::process::Command;
 
 use crate::llm::api::{DeltaSender, LlmRequestPayload, LlmResult};
 use crate::llm::provider::{LlmProvider, LlmProviderChat};
@@ -136,12 +135,11 @@ impl AcpProviderRuntime {
     }
 }
 
-async fn run_acp_provider_process(
-    runtime: AcpProviderRuntime,
-    request: &LlmRequestPayload,
-    delta_tx: Option<DeltaSender>,
-) -> Result<LlmResult, VmError> {
-    let mut command = Command::new(&runtime.command);
+/// The ACP provider's child process. It is a child of the session, so its base
+/// environment is the session policy's child environment (never an
+/// in-process-only grant), with the provider's configured `env` on top.
+fn acp_provider_command(runtime: &AcpProviderRuntime) -> Result<tokio::process::Command, VmError> {
+    let mut command = crate::process_sandbox::session_tokio_command(&runtime.command)?;
     command
         .args(&runtime.args)
         .current_dir(&runtime.cwd)
@@ -151,7 +149,15 @@ async fn run_acp_provider_process(
     for (key, value) in &runtime.env {
         command.env(key, value);
     }
-    let mut child = command.spawn().map_err(|error| {
+    Ok(command)
+}
+
+async fn run_acp_provider_process(
+    runtime: AcpProviderRuntime,
+    request: &LlmRequestPayload,
+    delta_tx: Option<DeltaSender>,
+) -> Result<LlmResult, VmError> {
+    let mut child = acp_provider_command(&runtime)?.spawn().map_err(|error| {
         vm_err(format!(
             "failed to launch ACP provider `{}` with `{}`: {error}",
             runtime.provider, runtime.command
@@ -781,5 +787,47 @@ mod tests {
         assert_eq!(result.stop_reason.as_deref(), Some("end_turn"));
         assert_eq!(delta_rx.try_recv().unwrap(), "alpha");
         assert_eq!(delta_rx.try_recv().unwrap(), " beta");
+    }
+
+    /// An ACP provider transport is a child of the session: it starts with
+    /// the session-wide grant and without the unadmitted engine variable or
+    /// the in-process-only grant. The control builds the same command with no
+    /// policy installed and reads all three.
+    #[tokio::test(flavor = "current_thread")]
+    async fn provider_transport_starts_under_the_session_environment_policy() {
+        use crate::security::child_env_probe as probe;
+        let _planted = probe::plant();
+        let (command, args) = probe::report_command();
+        let runtime = AcpProviderRuntime {
+            provider: "probe-acp".to_string(),
+            command,
+            args,
+            env: BTreeMap::new(),
+            cwd: absolute_cwd(Some(".".to_string())).unwrap(),
+            mcp_servers: Vec::new(),
+            client_capabilities: json!({}),
+            client_info: json!({"name": "harn-test"}),
+        };
+        async fn report(runtime: &AcpProviderRuntime) -> String {
+            let output = acp_provider_command(runtime)
+                .expect("build the provider command")
+                .output()
+                .await
+                .expect("run the provider command");
+            assert!(output.status.success(), "provider probe failed: {output:?}");
+            String::from_utf8(output.stdout).expect("utf8 report")
+        }
+
+        let control = {
+            let _session = probe::InstalledSession::install(None);
+            report(&runtime).await
+        };
+        assert_eq!(control, probe::expected_report(&probe::NAMES));
+
+        let governed = {
+            let _session = probe::InstalledSession::install(Some(probe::granted_session()));
+            report(&runtime).await
+        };
+        assert_eq!(governed, probe::expected_report(&[probe::SESSION]));
     }
 }

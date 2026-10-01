@@ -9,7 +9,6 @@
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use crate::value::VmError;
 
@@ -35,7 +34,7 @@ impl Default for GitOps {
 impl GitOps {
     /// Run `git` with the given args in `cwd`. Returns stdout on success.
     pub fn run(&self, cwd: &Path, args: &[&str]) -> Result<String, VmError> {
-        let mut cmd = Command::new("git");
+        let mut cmd = crate::process_sandbox::session_std_command("git")?;
         cmd.current_dir(cwd);
         // Force a deterministic environment so commit SHAs are reproducible
         // when the manifest commit messages and author identities are stable.

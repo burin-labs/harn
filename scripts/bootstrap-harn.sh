@@ -41,15 +41,33 @@ work=$(mktemp -d "${TMPDIR:-/tmp}/harn-seed.XXXXXXXX")
 asset=harn-$target.$extension
 manifest_tmp=$cache/SHA256SUMS.tmp.$$
 archive_tmp=$cache/$asset.tmp.$$
-trap 'rm -rf "$work"; rm -f "$manifest_tmp" "$archive_tmp"' EXIT HUP INT TERM
+cleanup() {
+  status=$?
+  trap - EXIT HUP INT TERM
+  # Windows may keep the seed executable locked after it exits. Cleanup must
+  # preserve the install/verification result, including failures.
+  if ! rm -rf "$work"; then
+    printf 'warning: bootstrap seed cleanup left %s\n' "$work" >&2
+  fi
+  if ! rm -f "$manifest_tmp" "$archive_tmp"; then
+    printf 'warning: bootstrap cache cleanup left %s or %s\n' "$manifest_tmp" "$archive_tmp" >&2
+  fi
+  exit "$status"
+}
+trap cleanup EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
 base=https://github.com/burin-labs/harn/releases/download/v$version
 download() {
   if command -v curl >/dev/null 2>&1; then curl -fLsS --retry 3 --retry-all-errors --connect-timeout 15 --max-time 120 "$1" -o "$2"
   else wget -q --tries=3 --timeout=120 "$1" -O "$2"; fi
 }
 digest() {
-  if command -v sha256sum >/dev/null 2>&1; then result=$(sha256sum "$1") || return
-  else result=$(shasum -a 256 "$1") || return; fi
+  # Hash standard input: with a file name, sha256sum escapes a Windows path and
+  # prefixes the digest with a backslash.
+  if command -v sha256sum >/dev/null 2>&1; then result=$(sha256sum < "$1") || return
+  else result=$(shasum -a 256 < "$1") || return; fi
   printf '%s\n' "${result%% *}"
 }
 if [ "$HARN_EXT_BOOTSTRAP_OFFLINE" != 1 ]; then

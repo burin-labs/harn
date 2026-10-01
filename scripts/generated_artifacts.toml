@@ -45,6 +45,7 @@ exempt_checks = [
   "check-vm-rss-soak",              # perf/RSS soak, not a sync guard
   "check-test-case-performance",     # parallel per-test performance ratchet, not a generated mirror
   "check-ported-handler-loc",       # LOC ratchet (epic #2293), not a sync guard
+  "check-provider-catalog-drift-core", # refresh and notice behavior without the nested sandbox proof
   "check-source-file-lengths",      # merge-base repo source LOC ratchet, not a generated mirror
   "check-stack-frames",             # re-entrant stack-frame budget ratchet, not a generated mirror
   "check-test-target-coverage",     # census that hand-listed test files are run by a CI target, not a generated mirror
@@ -120,7 +121,7 @@ make_all = true
 
 [[artifact]]
 id = "release-contract"
-description = "Typed Harn-owned release semantics consumed by the external release orchestrator, including version/fold/tag policy and cross-repository workflow identifiers."
+description = "Typed Harn-owned release semantics consumed by the external release orchestrator: version, changelog fold, and tag policy."
 gen = "gen-release-contract"
 check = "check-release-contract"
 outputs = ["scripts/release_contract.json", "scripts/release_contract.env"]
@@ -129,8 +130,6 @@ sources = [
   "scripts/release_metadata.harn",
   "scripts/release_ship.sh",
   "scripts/lib/release_version.sh",
-  ".github/workflows/publish-release.yml",
-  ".github/workflows/build-release-binaries.yml",
 ]
 ci = true
 make_all = true
@@ -266,7 +265,7 @@ id = "language-spec"
 description = "spec/HARN_SPEC.md (single-file assembly), docs/src/language-spec.md (docs landing page), the per-chapter docs pages under docs/src/spec/language/, and the chapter list in docs/src/SUMMARY.md are all generated from the per-chapter sources in spec/chapters/."
 gen = "sync-language-spec"
 check = "check-language-spec"
-outputs = ["spec/HARN_SPEC.md", "docs/src/language-spec.md", "docs/src/spec/language", "docs/src/SUMMARY.md"]
+outputs = ["spec/HARN_SPEC.md", "docs/src/language-spec.md", "docs/src/spec/language/", "docs/src/SUMMARY.md"]
 sources = ["spec/chapters/*.md"]
 ci = true
 make_all = true
@@ -555,6 +554,19 @@ ci = true
 make_all = true
 
 [[artifact]]
+id = "cli-surface"
+description = "Flat sorted listing of every harn command, alias, flag, positional slot, and enumerated value, projected from the live Clap parser; the pull-request gate diffs it to refuse an undeclared removal."
+gen = "gen-cli-surface"
+check = "check-cli-surface"
+outputs = ["spec/cli-surface.txt"]
+sources = [
+  "crates/harn-cli/src/cli/",
+  "crates/harn-cli/src/commands/argument_schema.rs",
+]
+ci = true
+make_all = true
+
+[[artifact]]
 id = "provider-matrix"
 description = "Provider/model capability matrix doc generated from the authoritative provider catalog and capability registry."
 gen = "gen-provider-matrix"
@@ -698,11 +710,13 @@ make_all = false  # excluded from `make all` for the same reason (no sibling che
 "check-harness-migrations" = "binary"
 "check-session-bundle-schema" = "binary"
 "check-trigger-quickref" = "binary"
+"check-cli-surface" = "binary"
 "check-provider-matrix" = "binary"
 "check-provider-support" = "binary"
 "check-provider-catalog" = "binary"
 "check-connector-matrix" = "binary"
 "check-provider-catalog-drift" = "binary"
+"check-provider-catalog-drift-core" = "binary"
 "check-diagnostics-catalog" = "binary"
 "check-docs-cli-flags" = "binary"
 "check-trigger-examples" = "binary"

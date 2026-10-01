@@ -47,6 +47,41 @@ grep -q 'rust_test_execution_seconds=' "$log"
 RUST_MIN_STACK=4194304 "$script" \
   bash -c 'test "$RUST_MIN_STACK" = 4194304' >/dev/null 2>&1
 
+# CI lanes run in the same isolated environment as `make test`: the host's
+# config pointers are dropped, and the user config directory is a private,
+# empty directory that is removed afterwards.
+config_dir_record="$tmpdir/config-dir"
+HARN_PROVIDERS_CONFIG=/host/providers.toml \
+  HARN_HOST_PROVIDERS_CONFIG=/host/host-providers.toml \
+  HARN_LLM_PROVIDER=poison-provider \
+  HARN_LLM_MODEL=poison-model \
+  HARN_DEFAULT_PROVIDER=poison-default \
+  HARN_SESSION_STORE_ROOT=/host/sessions \
+  XDG_CONFIG_HOME=/host/config \
+  APPDATA=/host/appdata \
+  "$script" bash -c '
+    test -z "${HARN_PROVIDERS_CONFIG:-}" &&
+    test -z "${HARN_HOST_PROVIDERS_CONFIG:-}" &&
+    test -z "${HARN_LLM_PROVIDER:-}" &&
+    test -z "${HARN_LLM_MODEL:-}" &&
+    test -z "${HARN_DEFAULT_PROVIDER:-}" &&
+    test "$XDG_CONFIG_HOME" != /host/config &&
+    test -d "$XDG_CONFIG_HOME" &&
+    test "$APPDATA" = "$XDG_CONFIG_HOME" &&
+    test -z "$(ls -A "$XDG_CONFIG_HOME")" &&
+    test "$HARN_LLM_CALLS_DISABLED" = 1 &&
+    test -z "${HARN_SESSION_STORE_ROOT:-}" &&
+    printf "%s" "$XDG_CONFIG_HOME" >"$1"
+  ' _ "$config_dir_record" >/dev/null 2>&1
+test ! -e "$(cat "$config_dir_record")"
+# Negative control: the check above can fail, so its pass means something.
+if HARN_PROVIDERS_CONFIG=/host/providers.toml \
+  "$script" bash -c 'test "${HARN_PROVIDERS_CONFIG:-}" = /host/providers.toml' \
+  >/dev/null 2>&1; then
+  echo "ambient HARN_PROVIDERS_CONFIG reached the test process" >&2
+  exit 1
+fi
+
 # Structured reporters need a pure stdout stream. The wrapper keeps its own
 # resource receipt on the terminal while routing only the child stream to the
 # caller-owned path.

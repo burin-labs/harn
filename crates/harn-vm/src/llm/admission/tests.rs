@@ -2,6 +2,99 @@ use super::*;
 use crate::llm::api::options::base_opts;
 use crate::llm::cost::LlmBudgetEnvelope;
 
+#[test]
+fn concurrent_native_calls_share_one_reservation_and_unknown_usage_keeps_it() {
+    let scope = AdmissionScope::default();
+    let release = Arc::new(std::sync::Barrier::new(3));
+    let (sent, received) = std::sync::mpsc::channel();
+    std::thread::scope(|threads| {
+        for _ in 0..2 {
+            let scope = scope.clone();
+            let release = release.clone();
+            let sent = sent.clone();
+            threads.spawn(move || {
+                swap_scope(scope);
+                let hold = reserve_decision(0.6, Some(1.0), Some(1.0));
+                sent.send(hold.is_ok()).unwrap();
+                // Both calls have attempted admission before either can
+                // finish transport or release its hold.
+                release.wait();
+                if let Ok(hold) = hold {
+                    hold.settle(None).unwrap();
+                }
+            });
+        }
+        let admitted =
+            usize::from(received.recv().unwrap()) + usize::from(received.recv().unwrap());
+        let receipt = scope.receipt().unwrap();
+        release.wait();
+        assert_eq!(
+            admitted, 1,
+            "only one physical dispatch may follow admission"
+        );
+        assert_eq!(receipt.in_flight_usd, money(0.6).unwrap());
+        assert_eq!(receipt.denied_attempts, 1);
+    });
+    let previous = swap_scope(scope.clone());
+    assert_eq!(scope.receipt().unwrap().uncertain_usd, money(0.6).unwrap());
+    assert!(reserve_decision(0.5, Some(1.0), Some(1.0)).is_err());
+    let affordable = reserve_decision(0.4, Some(1.0), Some(1.0)).unwrap();
+    affordable.settle(Some(0.1)).unwrap();
+    assert_eq!(
+        scope.receipt().unwrap().settled_upper_usd,
+        money(0.1).unwrap()
+    );
+    swap_scope(previous);
+}
+
+#[test]
+fn native_downstream_retry_retains_cost_and_closes_shared_admission() {
+    let scope = AdmissionScope::default();
+    let previous = swap_scope(scope.clone());
+    reserve_decision(0.1, Some(1.0), Some(1.0))
+        .unwrap()
+        .retain_contract_violation()
+        .unwrap();
+    let receipt = scope.receipt().unwrap();
+    assert_eq!(receipt.uncertain_usd, money(0.1).unwrap());
+    assert!(reserve_decision(0.1, Some(1.0), Some(1.0)).is_err());
+    let options = opts(1.0);
+    assert!(reserve(&options, &LlmRequestPayload::from(&options)).is_err());
+    swap_scope(previous);
+}
+
+#[test]
+fn native_optional_caps_inherit_existing_authority_without_inventing_one() {
+    let scope = AdmissionScope::default();
+    let previous = swap_scope(scope);
+    assert!(reserve_decision(0.1, None, None).is_err());
+    assert_eq!(
+        remaining_allowance(),
+        None,
+        "absence is not a measured zero"
+    );
+    reserve_decision(0.1, Some(0.1), Some(1.0))
+        .unwrap()
+        .settle(Some(0.1))
+        .unwrap();
+    let inherited = reserve_decision(0.3, None, None).unwrap();
+    assert!((remaining_allowance().unwrap() - 0.6).abs() < 1e-12);
+    assert!(
+        reserve_decision(0.7, None, None).is_err(),
+        "omission cannot bypass in-flight holds"
+    );
+    inherited.settle(None).unwrap();
+    assert!(
+        reserve_decision(0.61, None, None).is_err(),
+        "unknown usage remains reserved"
+    );
+    assert!(
+        reserve_decision(0.2, Some(0.1), None).is_err(),
+        "an explicit per-call cap tightens inheritance"
+    );
+    swap_scope(previous);
+}
+
 fn opts(ceiling: f64) -> LlmCallOptions {
     let mut opts = base_opts("openai");
     opts.model = "gpt-5.6-luna".into();
@@ -456,4 +549,145 @@ fn host_allowance_suspended_future_cannot_replace_a_parent() {
         !resumed.get(),
         "a suspended future replaced the parent allowance"
     );
+}
+
+#[test]
+fn host_session_budget_inherits_machine_scope_without_replacing_it() {
+    swap_scope(AdmissionScope::default());
+    let temp = tempfile::tempdir().unwrap();
+    let machine = MachineSpendQuota::open(
+        temp.path().join("spend.sqlite"),
+        "person",
+        MachineSpendPolicy {
+            daily_limit_microusd: Some(1_000_000),
+            monthly_limit_microusd: Some(1_000_000),
+        },
+    )
+    .unwrap();
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap()
+        .block_on(async {
+            machine
+                .scope(async {
+                    let session = ConservativeLlmBudget::new(0.6).unwrap();
+                    session
+                        .scope(async {
+                            let options = opts(0.6);
+                            let request = LlmRequestPayload::from(&options);
+                            let reservation = reserve(&options, &request).unwrap().unwrap();
+                            assert!(machine_receipt().unwrap().is_some());
+                            drop(reservation);
+                            tokio::task::yield_now().await;
+                            assert!(machine_receipt().unwrap().is_some());
+                        })
+                        .await
+                        .unwrap();
+                })
+                .await
+                .unwrap();
+        });
+    assert!(machine.receipt().unwrap().reserved_microusd > 0);
+    assert!(machine_receipt().unwrap().is_none());
+}
+
+#[test]
+fn registered_self_hosted_route_is_known_zero_under_machine_quota() {
+    swap_scope(AdmissionScope::default());
+    let temp = tempfile::tempdir().unwrap();
+    let machine = MachineSpendQuota::open(
+        temp.path().join("spend.sqlite"),
+        "person",
+        MachineSpendPolicy {
+            daily_limit_microusd: Some(0),
+            monthly_limit_microusd: Some(0),
+        },
+    )
+    .unwrap();
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap()
+        .block_on(async {
+            machine
+                .scope(async {
+                    let mut options = base_opts("ollama");
+                    options.provider = "ollama".into();
+                    options.model = "any-locally-served-model".into();
+                    let request = LlmRequestPayload::from(&options);
+                    assert!(reserve(&options, &request).unwrap().is_none());
+                })
+                .await
+                .unwrap();
+        });
+    assert_eq!(machine.receipt().unwrap().reserved_microusd, 0);
+}
+
+#[test]
+fn machine_quota_refuses_late_activation_after_provider_admission() {
+    swap_scope(AdmissionScope::default());
+    let options = opts(0.6);
+    let request = LlmRequestPayload::from(&options);
+    drop(reserve(&options, &request).unwrap().unwrap());
+    let temp = tempfile::tempdir().unwrap();
+    let machine = MachineSpendQuota::open(
+        temp.path().join("spend.sqlite"),
+        "person",
+        MachineSpendPolicy {
+            daily_limit_microusd: Some(1_000_000),
+            monthly_limit_microusd: Some(1_000_000),
+        },
+    )
+    .unwrap();
+    let outcome = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap()
+        .block_on(machine.scope(async {}));
+    assert!(outcome.is_err(), "prior attempt escaped machine accounting");
+    swap_scope(AdmissionScope::default());
+}
+
+#[test]
+fn native_decisions_draw_on_and_are_refused_by_the_machine_quota() {
+    swap_scope(AdmissionScope::default());
+    let temp = tempfile::tempdir().unwrap();
+    let machine = MachineSpendQuota::open(
+        temp.path().join("spend.sqlite"),
+        "person",
+        MachineSpendPolicy {
+            daily_limit_microusd: Some(500_000),
+            monthly_limit_microusd: Some(500_000),
+        },
+    )
+    .unwrap();
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap()
+        .block_on(async {
+            machine
+                .scope(async {
+                    // The execution ceiling allows 0.6, but the durable
+                    // machine allowance of 0.5 refuses it before transport.
+                    assert!(reserve_decision(0.6, Some(1.0), Some(1.0)).is_err());
+                    let hold = reserve_decision(0.4, Some(1.0), Some(1.0)).unwrap();
+                    assert_eq!(machine.receipt().unwrap().reserved_microusd, 400_000);
+                    // Complete usage releases only the proven-unused amount.
+                    hold.settle(Some(0.1)).unwrap();
+                    let receipt = machine.receipt().unwrap();
+                    assert_eq!(receipt.reserved_microusd, 100_000);
+                    assert_eq!(receipt.actual_known_microusd, 100_000);
+                    // A downstream contract violation closes the durable scope.
+                    reserve_decision(0.1, Some(1.0), Some(1.0))
+                        .unwrap()
+                        .retain_contract_violation()
+                        .unwrap();
+                })
+                .await
+                .unwrap();
+        });
+    assert!(machine.receipt().unwrap().contract_broken);
+    swap_scope(AdmissionScope::default());
 }

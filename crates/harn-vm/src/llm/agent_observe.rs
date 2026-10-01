@@ -33,6 +33,10 @@
 //!   transcript (user task, nudge, assistant reply, tool result, host
 //!   push).
 //! - `served_message` — one deduplicated, redacted message definition.
+//! - `output_schema` `{schema, content_hash, output_schema}` — one
+//!   deduplicated definition per distinct structured-output schema, so the
+//!   hashes on a request's `structured_output` receipt resolve to the exact
+//!   schema requested and the one sent after provider projection.
 //! - `routing_decision` `{call_id, iteration, policy, requested_quality,
 //!   selected_provider, selected_model, fallback_chain, alternatives}` —
 //!   emitted once before `provider_call_request` whenever a routing
@@ -44,7 +48,8 @@
 //!   slim metadata for a single model call.
 //!   No `messages`, `system`, or `tool_schemas` fields; those are reconstructable.
 //!   `structured_output` records mode, strictness, and stable redacted hashes
-//!   for the requested and provider-compatible schemas, never schema contents.
+//!   for the requested and provider-compatible schemas; the contents live in
+//!   `output_schema` definitions.
 //!   `served_context` carries prompt/schema/tool hashes, a context-manifest
 //!   hash, and ordered message lineage joined to call, projection, compaction,
 //!   source index, semantic kind, and retained redacted message definitions.
@@ -119,7 +124,8 @@ pub(crate) use raw_provider_capture::{
 pub(crate) use transcript_ambient::pop_llm_transcript_dir;
 use transcript_ambient::{
     capability_snapshot_needs_definition, context_manifest_changed, current_transcript_dir,
-    record_capability_snapshot_definition, record_served_message_definition,
+    output_schema_needs_definition, record_capability_snapshot_definition,
+    record_output_schema_definition, record_served_message_definition,
     served_message_needs_definition, system_prompt_changed, tool_schemas_changed,
 };
 pub(crate) use transcript_ambient::{
@@ -429,13 +435,21 @@ fn rand_range_inclusive<R: rand::RngExt>(max: u64, rng: &mut R) -> u64 {
 #[derive(Clone)]
 pub(crate) struct ObservedAttemptToken {
     session_id: Option<String>,
+    reasoning_receipts: super::reasoning_receipt::RequestReceipts,
 }
 
 impl ObservedAttemptToken {
-    fn for_current_session() -> Self {
+    fn for_current_session(session_id: Option<&str>, call_id: &str) -> Self {
         Self {
             session_id: super::agent_runtime::current_agent_session_id(),
+            reasoning_receipts: super::reasoning_receipt::RequestReceipts::for_journal(
+                session_id, call_id,
+            ),
         }
+    }
+
+    pub(crate) fn reasoning_receipts(&self) -> super::reasoning_receipt::RequestReceipts {
+        self.reasoning_receipts.clone()
     }
 
     /// Record one physical provider dispatch.
@@ -595,7 +609,8 @@ pub(crate) async fn observed_llm_call(
             &effective_tool_format,
             opts,
         )?;
-        let observed_attempt = ObservedAttemptToken::for_current_session();
+        let observed_attempt =
+            ObservedAttemptToken::for_current_session(opts.session_id.as_deref(), &call_id);
 
         let first_token = super::first_token::FirstTokenTimer::for_current_span();
         let start = std::time::Instant::now();
@@ -612,7 +627,8 @@ pub(crate) async fn observed_llm_call(
             });
         let raw_capture_context =
             RawProviderCaptureContext::new(call_id.clone(), iteration.unwrap_or(0));
-        let llm_result = with_raw_provider_capture_context(raw_capture_context, async {
+        let reasoning_receipts = observed_attempt.reasoning_receipts();
+        let provider_call = with_raw_provider_capture_context(raw_capture_context, async {
             if let Some(b) = bridge {
                 let delta_tx = spawn_progress_forwarder(
                     b,
@@ -696,7 +712,11 @@ pub(crate) async fn observed_llm_call(
                 ))
                 .await
             }
-        })
+        });
+        let llm_result = super::reasoning_receipt::scope_request_receipts(
+            reasoning_receipts.clone(),
+            provider_call,
+        )
         .await;
         drop(rate_limit_permit);
         let duration_ms = start.elapsed().as_millis() as u64;
@@ -714,6 +734,9 @@ pub(crate) async fn observed_llm_call(
             governor_reserved,
             &llm_result,
         );
+        if let Some(error) = reasoning_receipts.take_journal_error() {
+            return Err(VmError::Runtime(error));
+        }
 
         match llm_result {
             Ok(mut result) => {

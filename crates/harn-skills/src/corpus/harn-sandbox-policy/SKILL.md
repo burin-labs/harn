@@ -1,7 +1,7 @@
 ---
 name: harn-sandbox-policy
 short: What a confined child may read and write, the credential denylist, and how to prove a change to either.
-description: Use for the process sandbox — read/write roots, the credential denylist, the toolchain-cache environment, and the per-backend profile emission on macOS seatbelt, Linux Landlock, and Windows AppContainer.
+description: Use for the process sandbox — read/write roots, the credential denylist, the toolchain-cache environment, and the per-backend profile emission on macOS seatbelt and Linux Landlock (Windows has no OS sandbox).
 when_to_use: Use when adding a read root or a denylist row, when a toolchain command fails "Permission denied" or "No module named X" under an agent, or when changing anything under stdlib/sandbox.
 ---
 
@@ -26,6 +26,10 @@ Confusing these is the most common mistake here.
    grants on this axis: loopback admits IP on `localhost`, socket roots admit
    Unix-domain sockets whose socket file lives under a root, and neither opens
    remote egress. Both are host-owned: a nested policy cannot invent them.
+   Whether a child may write *any* of its writable roots is
+   `CapabilityPolicy::children_may_write`: the `workspace` write capability, or
+   `process_sandbox.allow_child_workspace_write` for a role that runs commands
+   but edits nothing. Every backend reads that one predicate.
 3. **`sandbox_profile`** decides whether either is enforced at all.
    `enforces_path_scope()` gates axis 1 and the toolchain-cache environment;
    `confines_processes()` gates axis 2.
@@ -50,9 +54,10 @@ before it.
 under `defaults.home_relative`, plus a line under `[reason]` saying why. It is
 data on purpose: nothing in the Rust module decides what belongs on the list.
 
-The denylist **beats every grant**, which is the point — `PackageManagerConfig`
-opens `~/.config`, `~/.cache`, and `~/.netrc` wholesale, so a denial that merely
-competed with presets would never fire on the paths it exists for. It is
+The denylist **beats every grant**. `PackageManagerConfig` admits measured
+tool roots, including credential-bearing `~/.config/composer`; unknown
+`~/.config` and `~/.cache` siblings stay closed. A host's explicit parent grant
+also loses to a denial. The denial is
 checked before any grant in `check_fs_path_scope`, and it unions rather than
 intersects as policies nest, because narrowing a denial would widen authority.
 
@@ -70,7 +75,8 @@ Per backend:
   denial, so stopping early is strictly narrower than continuing. Refusing
   instead took every run down twice here, once for a missing `~/.kube` and once
   for an unreadable `$HOME`, and gained no authority either time.
-- **Windows / OpenBSD** do not apply the denylist yet.
+- **Windows** has no OS sandbox, so nothing applies the denylist there;
+  **OpenBSD** does not apply it yet.
 
 ## When a toolchain command fails under an agent
 
@@ -103,7 +109,10 @@ reach for every time:
 - `home_read` — tool config under `~` that no preset grants or the denylist
   refuses. Point the tool at a workspace-local config through its `*_HOME` /
   `*_CONFIG` variable rather than widening a read root.
-- `write` — a cache outside every write root; see the first shape above.
+- `write` — a cache outside every write root; see the first shape above. When
+  the policy's children may write nowhere (a read-only role with no child write
+  grant), even the workspace and `TMPDIR` are refused, and the fix is
+  `allow_child_workspace_write`, not another root.
 
 The classifier is `sandbox/refusal_mechanism.rs`; its phrase vocabulary is
 `sandbox/refusal_markers.toml`. A new tool that prints a new phrase for one of

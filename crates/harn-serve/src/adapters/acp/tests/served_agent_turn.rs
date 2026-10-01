@@ -55,7 +55,7 @@ fn answer_host_capabilities(
 
 /// Send one `session/prompt` and return its response, answering the host
 /// capability handshake along the way.
-async fn prompt(
+pub(super) async fn prompt(
     request_tx: &mpsc::UnboundedSender<serde_json::Value>,
     response_rx: &mut mpsc::UnboundedReceiver<String>,
     session_id: &str,
@@ -74,33 +74,30 @@ async fn prompt(
         }))
         .expect("send session/prompt");
 
-    let mut seen_methods = Vec::new();
-    tokio::time::timeout(std::time::Duration::from_secs(15), async {
+    harn_clock::test_support::within(&format!("session/prompt response {id}"), async {
         loop {
             let line = response_rx
                 .recv()
                 .await
                 .expect("ACP response channel closed");
             let message: serde_json::Value = serde_json::from_str(&line).expect("ACP JSON line");
+            if message["id"] != id {
+                eprintln!(
+                    "session/prompt response {id}: saw {}",
+                    message["method"]
+                        .as_str()
+                        .unwrap_or("<response-with-another-id>")
+                );
+            }
             if answer_host_capabilities(request_tx, &message) {
-                seen_methods.push("host/capabilities".to_string());
                 continue;
             }
             if message["id"] == id {
                 return message;
             }
-            seen_methods.push(
-                message["method"]
-                    .as_str()
-                    .unwrap_or("<response-with-another-id>")
-                    .to_string(),
-            );
         }
     })
     .await
-    .unwrap_or_else(|_| {
-        panic!("timed out waiting for session/prompt response {id}; saw {seen_methods:?}")
-    })
 }
 
 /// The falsifier for the served-path blocker, driven over the real ACP wire in

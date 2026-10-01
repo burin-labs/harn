@@ -5,6 +5,8 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 # shellcheck source=scripts/lib/package_verify_bootstrap.sh
 source "$ROOT_DIR/scripts/lib/package_verify_bootstrap.sh"
+# shellcheck source=scripts/lib/sha256.sh
+source "$ROOT_DIR/scripts/lib/sha256.sh"
 
 VERIFY_CLI=0
 while [[ $# -gt 0 ]]; do
@@ -114,16 +116,7 @@ package_version() {
 }
 
 sha256_file() {
-  if command -v sha256sum >/dev/null 2>&1; then
-    sha256sum "$1" | awk '{print $1}'
-    return
-  fi
-  if command -v shasum >/dev/null 2>&1; then
-    shasum -a 256 "$1" | awk '{print $1}'
-    return
-  fi
-  echo "error: sha256sum or shasum is required for packaged-crate receipts" >&2
-  return 1
+  sha256_file_hex "$1"
 }
 
 resolved_dependency_version() {

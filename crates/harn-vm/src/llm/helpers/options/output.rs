@@ -144,6 +144,15 @@ pub(super) fn opt_data_posture_field(
     }
 }
 
+pub(super) fn opt_inference_boundary_field(
+    options: Option<&crate::value::DictMap>,
+) -> Result<Option<crate::llm::api::InferenceBoundary>, VmError> {
+    options
+        .and_then(|opts| opts.get("inference_boundary"))
+        .map(crate::llm::api::inference_boundary::parse_vm_value)
+        .transpose()
+}
+
 pub(super) fn parse_schema_value(
     raw: Option<&VmValue>,
     field: &str,
@@ -168,9 +177,12 @@ pub(super) fn output_format_error(message: impl Into<String>) -> VmError {
 }
 
 pub(super) fn unsupported_option_error(option: &str, provider: &str, model: &str) -> VmError {
+    let rule = crate::llm::capabilities::capability_rule_provenance(provider, model)
+        .map(|rule| format!(" Decided by {rule}."))
+        .unwrap_or_default();
     crate::llm::call::invalid_request_error(
         format!(
-            "option `{option}` is not supported by `{model}` (provider `{provider}`). See `harn provider catalog matrix` for compatibility."
+            "option `{option}` is not supported by `{model}` (provider `{provider}`).{rule} See `harn provider catalog matrix` for compatibility."
         ),
         provider,
         model,

@@ -28,9 +28,21 @@ env:
   CARGO_TERM_COLOR: always
   # A cold merge-group producer can take more than 15 minutes to publish its
   # exact-run artifacts. Every live consumer shares this bounded wait policy;
-  # the barrier jobs add scheduling and API headroom above it.
-  HARN_ARTIFACT_WAIT_MAX_ATTEMPTS: "270"
-  HARN_ARTIFACT_WAIT_INTERVAL_SECONDS: "10"
+  # the barrier jobs add scheduling and API headroom above it. The waits share
+  # the workflow token's API budget with every job in the repository, so each
+  # backs off from 10s to 15s between reads, and a producer still queued after
+  # 30 minutes fails the wait by name, inside the shortest waiter's 45-minute
+  # job timeout, instead of polling until that timeout.
+  #
+  # Every Harn proof lane starts its real work when its waiter sees the CLI, so
+  # the cap is merge-queue latency: at 60s a consumer noticed the artifact
+  # about 30s late on average. On the organization's Enterprise plan the token
+  # allows 15,000 requests an hour per repository; nine waiters at two reads
+  # per poll spend about 450 of them in a six-minute wait.
+  HARN_EXT_ARTIFACT_WAIT_MAX_ATTEMPTS: "270"
+  HARN_EXT_ARTIFACT_WAIT_INTERVAL_SECONDS: "10"
+  HARN_EXT_ARTIFACT_WAIT_MAX_INTERVAL_SECONDS: "15"
+  HARN_EXT_ARTIFACT_WAIT_MAX_QUEUE_SECONDS: "1800"
   HARN_EXT_ARTIFACT_PRODUCER_JOB: "Rust workspace tests"
   # Incremental fights the within-job sccache wrapper. Cross-run reuse is
   # owned by each lane's persistent compiler-object cache. Do not persist a
@@ -114,7 +126,27 @@ jobs:
       release_contract: ${{ steps.surface_filter.outputs.release_contract }}
       release_residual: ${{ steps.surface_filter.outputs.release_residual }}
       release_metadata_only: ${{ steps.release_metadata.outputs.release_metadata_only }}
+      sprint_fast_ci: ${{ steps.sprint_fast_ci.outputs.active }}
     steps:
+      # The sprint fast-CI switch (#7628). The one place that decides it: the
+      # five slow proof families and ci-status read this output, never the
+      # variable. It applies only to pull requests and merge groups, so a push
+      # to main always runs and requires the full slow set. Deleting the
+      # variable, or any value other than exactly `true`, restores full
+      # pre-merge proof without a code change.
+      - name: Decide the sprint fast-CI mode
+        id: sprint_fast_ci
+        env:
+          SPRINT_FAST_CI: ${{ vars.SPRINT_FAST_CI }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          active=false
+          if [ "$SPRINT_FAST_CI" = "true" ] \
+            && { [ "$EVENT_NAME" = "pull_request" ] || [ "$EVENT_NAME" = "merge_group" ]; }; then
+            active=true
+            echo "::notice title=Sprint fast CI::SPRINT_FAST_CI=true: Windows cross-compile, macOS, Harn conformance and source audit, and Linux sandbox proofs run after merge on main instead of here."
+          fi
+          echo "active=$active" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
         id: filter
@@ -429,6 +461,10 @@ jobs:
       HARN_RUNNER_TIER: github-hosted
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The public API check diffs against a pull request merge commit's
+          # first parent, so keep one parent.
+          fetch-depth: 2
       - uses: ./.github/actions/rust-toolchain
       # Bounded coarse rust-cache. The former per-object sccache GHA backend
       # used 5.35 GiB / 6,785 entries for a 31% warm hit rate, crowding the
@@ -455,6 +491,64 @@ jobs:
         # so their shared feature graph compiles once, then checks every exact
         # publishable archive in one temporary Cargo workspace.
         run: ./scripts/verify_crate_packages.sh
+  # A public API break in a published crate needs a breaking fragment with its
+  # migration. This proof shares nothing with package verification but its
+  # trigger and warm dependency cache, so it runs beside it: in sequence the two
+  # took 1,045-1,449s of one runner across the 2026-10-01 merge-group sample,
+  # the longest job in the queue.
+  public-api:
+    name: Check public Rust API
+    needs: [changes]
+    if: needs.changes.outputs.package_audit == 'true'
+    runs-on: ubuntu-latest
+    # Hang tripwire, not a perf budget.
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    env:
+      CARGO_PROFILE_DEV_DEBUG: line-tables-only
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The public API check diffs against a pull request merge commit's
+          # first parent, so keep one parent.
+          fetch-depth: 2
+      - uses: ./.github/actions/rust-toolchain
+      # Restore-only: the rustdoc builds reuse package verification's compiled
+      # dependency graph, and package-audit remains its sole writer.
+      - uses: ./.github/actions/rust-cache
+        continue-on-error: true
+        with:
+          shared-key: package-audit
+          cache-bin: false
+          cache-workspace-crates: "true"
+      - name: Install cargo-semver-checks
+        uses: taiki-e/install-action@3f74d7c16a4242f1c95561e98edc25d36adb4375 # v2.87.12
+        with:
+          tool: cargo-semver-checks@0.50.0
+      - name: Resolve the public API baseline
+        id: api-baseline
+        env:
+          EVENT: ${{ github.event_name }}
+          MERGE_GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha }}
+          PUSH_BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          # The checkout is shallow, so name the "before" commit explicitly
+          # rather than asking git for a merge base: a pull request's merge
+          # commit's first parent, the merge group's base, or the pushed range.
+          case "$EVENT" in
+            pull_request) base="$(git rev-parse HEAD^1)" ;;
+            merge_group) base="$MERGE_GROUP_BASE_SHA" ;;
+            *) base="$PUSH_BEFORE_SHA" ;;
+          esac
+          git fetch --no-tags --depth=1 origin "$base"
+          echo "base_sha=$base" >> "$GITHUB_OUTPUT"
+      - name: Check public Rust API for an undeclared break
+        env:
+          BASE_SHA: ${{ steps.api-baseline.outputs.base_sha }}
+          HEAD_SHA: HEAD
+        run: ./.github/scripts/breaking-surface-check.sh rust-api
 
   lint-md:
     name: Markdown lint
@@ -502,13 +596,32 @@ jobs:
       # deliberate change to which release semantics this repository is
       # checked against.
       ORCHESTRATOR_REPOSITORY: burin-labs/harn-bump-fleet
-      ORCHESTRATOR_REF: 0eb9ccd5efdd2f94b0037999a8a70f97c5ea0c5e
+      ORCHESTRATOR_REF: 058dbde5e3f2548e30e3d08f2a9428189502c18a
     steps:
       - name: Check out this repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
+
+      # The merge queue lands a whole group in one push, and a release is built
+      # and promoted only from the head of its push. An entry queued behind a
+      # release commit would bury it, so that entry leaves the queue and is
+      # re-queued after the release merges.
+      - name: Keep a release commit last in its merge group
+        if: github.event_name == 'merge_group'
+        env:
+          BASE_SHA: ${{ github.event.merge_group.base_sha }}
+          HEAD_SHA: ${{ github.event.merge_group.head_sha }}
+        run: |
+          set -euo pipefail
+          # shellcheck source=scripts/lib/release_version.sh
+          source scripts/lib/release_version.sh
+          releases="$(release_range_release_commits "$BASE_SHA" "$HEAD_SHA")"
+          if [[ -n "$releases" && "$releases" != "$HEAD_SHA" ]]; then
+            echo "::error::This entry is queued behind release commit(s) ${releases//$'\n'/, }. A release must be the last entry of its merge group; re-queue this entry after the release merges."
+            exit 1
+          fi
 
       - name: Check out the pinned release orchestrator
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -605,17 +718,32 @@ jobs:
       - name: Run the release residual audit
         run: ./scripts/release_gate.sh audit --residual-only
 
-  # Strict Clippy is an independent compile proof. Its warm hosted-cache time is
-  # already below the SLO; the full test graph is owned by rust-check-inputs so the
-  # repository pays for one behavior build rather than two competing builds.
+  # Strict Clippy is an independent compile proof. The full test graph is owned
+  # by rust-check-inputs so the repository pays for one behavior build rather
+  # than two competing builds.
   rust-checks:
-    name: Check Rust code
+    name: ${{ matrix.name }}
     needs: [changes]
     # Heavy Linux Rust lanes. Skipped on a docs/website/markdown-only PR; forced
     # on for merge_group and non-metadata pushes (see the `changes` job).
     # ci-status treats a skip here as PASS so branch protection isn't deadlocked.
     if: needs.changes.outputs.rust == 'true'
     runs-on: ${{ vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true' && (github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) && 'blacksmith-8vcpu-ubuntu-2404' || 'ubuntu-latest' }}
+    # Each leg resolves a different feature graph, so none reuses another's
+    # check units. Run in sequence on one runner they summed to 15-16 minutes
+    # (7m15s + 4m02s + 4m42s on 2026-10-01), the longest Rust lane in the merge
+    # queue. Separate free hosted runners make the lane cost its slowest leg.
+    # `scripts/ci/run_rust_lint_lane.sh --list-legs` owns the leg names.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - kind: workspace
+            name: Check Rust code
+          - kind: lean-lsp
+            name: Check Rust code (lean LSP features)
+          - kind: freshness-checker
+            name: Check Rust code (freshness checker)
     # Linux-only: emit line-tables-only debuginfo for dev builds. Trims link
     # time and disk on these link-bound lanes while keeping panic line numbers
     # for nextest backtraces. NOT applied to the Windows/macOS jobs — #2127/
@@ -629,12 +757,16 @@ jobs:
       # FULLY REPLACES the workflow-level `-D warnings` (env vars clobber, they
       # do not merge — and they also clobber any `.cargo/config.toml` rustflags,
       # of which there are none), so `-D warnings` is re-stated here and the mold
-      # link-arg appended. Linux-only: the windows/macos jobs never see this and
-      # keep the workflow-level `-D warnings`.
+      # link-arg appended. Linux-only: the macOS job never sees this and
+      # keeps the workflow-level `-D warnings`.
       RUSTFLAGS: "-D warnings -Clink-arg=-fuse-ld=mold"
       HARN_RUNNER_TIER: ${{ vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true' && (github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) && 'blacksmith' || 'github-hosted' }}
+    # Matrix legs share one outputs map and the last leg to finish wins each
+    # key, so every leg owns a distinct key and ci-status requires all three.
     outputs:
-      lint_ok: ${{ steps.lint-ok.outputs.ok }}
+      lint_ok_workspace: ${{ steps.lint-ok.outputs.workspace }}
+      lint_ok_lean_lsp: ${{ steps.lint-ok.outputs.lean-lsp }}
+      lint_ok_freshness_checker: ${{ steps.lint-ok.outputs.freshness-checker }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -655,29 +787,30 @@ jobs:
       - uses: ./.github/actions/rust-toolchain
         with:
           components: clippy
-      - name: Install cargo-machete
-        uses: taiki-e/install-action@3f74d7c16a4242f1c95561e98edc25d36adb4375 # v2.87.12
-        with:
-          tool: cargo-machete@0.9.2
-      - uses: ./.github/actions/rust-cache
-        continue-on-error: true
-        with:
-          shared-key: workspace-tests
-          cache-on-failure: true
-          cache-bin: false
-          # Keep workspace artifacts so merge_group does not rebuild every
-          # harn-* crate after an exact rust-cache hit (#5003).
-          cache-workspace-crates: "true"
+      # No Rust cache. The producer's cache holds build artifacts, and Clippy
+      # check units cannot reuse them: with a 5.9 GiB exact hit this lane still
+      # re-checked 584 crates, and the one cache-miss merge-group run in the
+      # 2026-10-01 sample linted in 895s against 874-966s for hits. The restore
+      # itself cost 60-145s of every run.
       # Keep this lane compilation-only. Harn-backed repository policy checks
       # use the shared CLI in audit-scripts rather than rebuilding it here.
       - name: Check Rust code with Clippy
         id: release-audit-rust-lint
-        run: ./scripts/ci/run_rust_lint_lane.sh
+        run: ./scripts/ci/run_rust_lint_lane.sh --leg "${{ matrix.kind }}"
+      # Dependency hygiene compiles nothing, so it rides the shortest leg.
+      - name: Install cargo-machete
+        if: matrix.kind == 'lean-lsp'
+        uses: taiki-e/install-action@94c31af3204a9f15ab40b35ad084410b905bbc73 # v2.87.17
+        with:
+          tool: cargo-machete@0.9.2
       - name: Reject unused Rust dependencies
+        if: matrix.kind == 'lean-lsp'
         run: make lint-deps
       - name: Mark lint leg success
         id: lint-ok
-        run: echo "ok=true" >> "$GITHUB_OUTPUT"
+        env:
+          LINT_LEG: ${{ matrix.kind }}
+        run: echo "${LINT_LEG}=true" >> "$GITHUB_OUTPUT"
 
   # One persistent producer owns the complete environment-neutral Rust graph.
   # It builds the exact CLI/security artifacts consumed by GitHub Ubuntu, then
@@ -699,22 +832,29 @@ jobs:
       RELEASE_APP_CLIENT_ID: ${{ secrets.RELEASE_APP_CLIENT_ID }}
       RELEASE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
 
-  # Say where the producer is about to land, and refuse when that cannot be
-  # measured. The routing expression below can only choose; it cannot report,
-  # and it reads an unreadable census exactly like a census that reported no
-  # capacity. Both fall through to a hosted runner and silently downgrade the
-  # tier, leaving nothing to attribute the downgrade to.
+  # Say where the producer is about to land, and name a hosted fallback when
+  # the census cannot be read. The routing expression below reads this job's
+  # route output instead of the census, so a census outage routes the producer
+  # hosted by name rather than skipping it or failing the expression.
+  # `!cancelled()` because a failed census probe must still reach a decision:
+  # skipping here would skip the required producer behind it.
   rust-producer-capacity:
     name: Name the Rust producer runner capacity decision
     needs: runner-availability
-    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    if: >-
+      ${{ !cancelled() && github.event_name == 'pull_request'
+        && github.event.pull_request.head.repo.full_name == github.repository }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    outputs:
+      route: ${{ steps.decision.outputs.route }}
+      fallback: ${{ steps.decision.outputs.fallback }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 1
       - name: Decide where the Rust workspace producer lands
+        id: decision
         run: bash scripts/ci/runner_capacity.sh
         env:
           CAPACITY_LABEL: RUST_PRODUCER_CAPACITY
@@ -764,22 +904,14 @@ jobs:
       ${{ (vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true'
         && (github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository))
         && 'blacksmith-8vcpu-ubuntu-2404')
-        || (github.event_name == 'pull_request'
-        && github.event.pull_request.head.repo.full_name == github.repository
-        && needs.runner-availability.outputs.selfhosted_disabled == ''
-        && needs.runner-availability.outputs.capacity != ''
-        && fromJSON(needs.runner-availability.outputs.capacity).linux_big.online > 0
+        || (needs.rust-producer-capacity.outputs.route == 'owned'
         && fromJSON('["self-hosted", "Linux", "X64", "harn-ci-big"]'))
         || 'ubuntu-8core' }}
     timeout-minutes: >-
       ${{ (vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true'
         && (github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository))
         && 20)
-        || (github.event_name == 'pull_request'
-        && github.event.pull_request.head.repo.full_name == github.repository
-        && needs.runner-availability.outputs.selfhosted_disabled == ''
-        && needs.runner-availability.outputs.capacity != ''
-        && fromJSON(needs.runner-availability.outputs.capacity).linux_big.online > 0
+        || (needs.rust-producer-capacity.outputs.route == 'owned'
         && 76)
         || 70 }}
     # The GitHub-hosted rung remains the authorized main-branch cache writer;
@@ -807,11 +939,7 @@ jobs:
         ${{ (vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true'
           && (github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository))
           && 'blacksmith')
-          || (github.event_name == 'pull_request'
-          && github.event.pull_request.head.repo.full_name == github.repository
-          && needs.runner-availability.outputs.selfhosted_disabled == ''
-          && needs.runner-availability.outputs.capacity != ''
-          && fromJSON(needs.runner-availability.outputs.capacity).linux_big.online > 0
+          || (needs.rust-producer-capacity.outputs.route == 'owned'
           && 'self-hosted')
           || 'github-hosted' }}
     steps:
@@ -872,7 +1000,7 @@ jobs:
       - name: Record the sccache baseline
         run: ./scripts/ci/sccache_baseline.sh
       - name: Install cargo-nextest
-        uses: taiki-e/install-action@3f74d7c16a4242f1c95561e98edc25d36adb4375 # v2.87.12
+        uses: taiki-e/install-action@94c31af3204a9f15ab40b35ad084410b905bbc73 # v2.87.17
         with:
           tool: nextest@0.9.132
       - name: Build portable Harn CLI
@@ -1004,15 +1132,20 @@ jobs:
           ./scripts/ci/wait_for_run_artifacts.sh
           harn-cli.tar.zst
 
-  # The Linux sandbox proof consumes its own exact-commit archive. Waiting on
-  # that immutable input instead of the producer's terminal state overlaps the
-  # sandbox with the producer's independently required workspace tests.
+  # The Linux sandbox proof consumes its own exact-commit archive, which the
+  # producer uploads several minutes before it finishes its test phase. Like
+  # the CLI barrier, this one starts at once and lets the waiter read the
+  # producer's state: a queued or running producer is pending, so queue time
+  # cannot spend the wait, and a producer that completes without the archive
+  # fails the wait by name. Waiting for producer completion instead (#8751)
+  # put about 90s of barrier, sandbox tests, and aggregation behind the
+  # longest job in the merge queue.
   security-tests-ready:
     name: Wait for Linux security tests
     needs: [changes]
-    if: needs.changes.outputs.rust == 'true'
+    if: needs.changes.outputs.rust == 'true' && needs.changes.outputs.sprint_fast_ci != 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 50
     permissions:
       actions: read
       contents: read
@@ -1023,8 +1156,6 @@ jobs:
       - name: Wait for Linux security tests
         env:
           GH_TOKEN: ${{ github.token }}
-          # Six minutes setup + 20 CLI + 24 workspace archive + five dispatch/upload.
-          HARN_ARTIFACT_WAIT_MAX_ATTEMPTS: "330"
         run: >-
           ./scripts/ci/wait_for_run_artifacts.sh
           harn-security.tar.zst
@@ -1076,7 +1207,7 @@ jobs:
           check-command: mold
       - uses: ./.github/actions/rust-toolchain
       - name: Install cargo-nextest
-        uses: taiki-e/install-action@3f74d7c16a4242f1c95561e98edc25d36adb4375 # v2.87.12
+        uses: taiki-e/install-action@94c31af3204a9f15ab40b35ad084410b905bbc73 # v2.87.17
         with:
           tool: nextest@0.9.132
       - name: Start workspace test archive download timer
@@ -1132,12 +1263,13 @@ jobs:
 
   rust-security:
     name: Run Linux sandbox tests
-    # Start from exact-commit artifact readiness rather than producer
-    # completion. ci-status still requires the producer and this proof
-    # independently, so the overlap cannot hide a failed workspace test.
+    # The ready barrier sees the exact-commit artifact as soon as the producer
+    # uploads it; ci-status still requires both the producer and this proof.
     needs: [changes, security-tests-ready]
+    # `!cancelled()` for the same transitive skip as `security-tests-ready`.
     if: >-
-      needs.changes.outputs.rust == 'true'
+      !cancelled()
+      && needs.changes.outputs.rust == 'true'
       && needs.security-tests-ready.result == 'success'
     runs-on: ubuntu-latest
     # Hang backstop, not a performance gate. The Landlock proof runs in ~2m,
@@ -1164,7 +1296,7 @@ jobs:
           check-command: mold
       - uses: ./.github/actions/rust-toolchain
       - name: Install cargo-nextest
-        uses: taiki-e/install-action@3f74d7c16a4242f1c95561e98edc25d36adb4375 # v2.87.12
+        uses: taiki-e/install-action@94c31af3204a9f15ab40b35ad084410b905bbc73 # v2.87.17
         with:
           tool: nextest@0.9.132
       - name: Download security test archive
@@ -1212,19 +1344,29 @@ jobs:
         run: |
           set -euo pipefail
           receipt="$HARN_SANDBOX_ENFORCEMENT_RECEIPT"
-          if [[ ! -f "$receipt" ]] || [[ "$(wc -l < "$receipt")" -ne 1 ]]; then
-            echo "sandbox enforcement probe produced no single-line receipt" >&2
+          if [[ ! -f "$receipt" ]] || [[ "$(wc -l < "$receipt")" -lt 1 ]]; then
+            echo "sandbox enforcement probe produced no receipt" >&2
             exit 1
           fi
+          # Line one is the enforcement marker; every later line is one
+          # PATH-derived read-and-execute grant with its source entry.
           IFS= read -r marker < "$receipt"
           case "$marker" in
             harn.sandbox_enforcement*) ;;
             *) echo "sandbox enforcement probe produced an invalid receipt" >&2; exit 1 ;;
           esac
+          if ! awk 'NR > 1 && !/^harn\.sandbox_path_grant / { bad = 1 } END { exit bad }' "$receipt"; then
+            echo "sandbox enforcement receipt carries an unrecognized line" >&2
+            exit 1
+          fi
           {
             echo "### Process filesystem confinement"
             echo
             echo "\`$marker\`"
+            echo
+            tail -n +2 "$receipt" | while IFS= read -r grant; do
+              echo "- \`$grant\`"
+            done
           } >> "$GITHUB_STEP_SUMMARY"
 
   harn-audit:
@@ -1232,23 +1374,59 @@ jobs:
     # Start CLI-independent setup immediately. Each worker waits for and
     # verifies the exact-commit binary only at the last responsible moment.
     needs: [changes]
-    if: needs.changes.outputs.rust == 'true'
+    if: needs.changes.outputs.rust == 'true' && needs.changes.outputs.sprint_fast_ci != 'true'
     runs-on: ${{ vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true' && (github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) && 'blacksmith-8vcpu-ubuntu-2404' || 'ubuntu-latest' }}
-    # The immutable CLI producer is shared, but conformance and the independent
-    # source/grammar/generated audits use separate free hosted workers. Putting
-    # both four-way pools on one four-core runner starved conformance and kept
-    # this post-build phase near ten minutes even after the CLI was ready.
+    # The immutable CLI producer is shared, and the Harn proof work after it is
+    # spread over free hosted workers. Everything here starts only once the CLI
+    # exists (about six minutes in), so each worker must finish its share in a
+    # few minutes for the merge queue to meet its ten-minute target. On
+    # 2026-10-01 one worker ran conformance in 461s and another ran every audit
+    # gate in 824s; `scripts/audit_gates.sh` documents the measured split.
     strategy:
       fail-fast: false
       matrix:
         include:
-          - kind: conformance
-            name: Run Harn conformance tests
-            step_name: conformance tests
+          - kind: conformance-1
+            name: Run Harn conformance tests (1/4)
+            step_name: conformance tests (1/4)
+            phase: conformance
+            selector: --shard=1/4
+            fetch_depth: 1
+          - kind: conformance-2
+            name: Run Harn conformance tests (2/4)
+            step_name: conformance tests (2/4)
+            phase: conformance
+            selector: --shard=2/4
+            fetch_depth: 1
+          - kind: conformance-3
+            name: Run Harn conformance tests (3/4)
+            step_name: conformance tests (3/4)
+            phase: conformance
+            selector: --shard=3/4
+            fetch_depth: 1
+          - kind: conformance-4
+            name: Run Harn conformance tests (4/4)
+            step_name: conformance tests (4/4)
+            phase: conformance
+            selector: --shard=4/4
             fetch_depth: 1
           - kind: audit
             name: Check Harn sources and generated files
             step_name: source and generated-file checks
+            phase: audit
+            selector: --group=sources
+            fetch_depth: 0
+          - kind: audit-docs
+            name: Check Harn documentation
+            step_name: documentation checks
+            phase: audit
+            selector: --group=docs
+            fetch_depth: 0
+          - kind: audit-scripts
+            name: Run Harn script tests
+            step_name: Harn script and agent-loop suites
+            phase: audit
+            selector: --group=scripts
             fetch_depth: 0
     # Hang backstop, not a performance budget. The per-test performance ratchet
     # still owns performance regressions.
@@ -1276,7 +1454,7 @@ jobs:
           node-version: "22"
           cache-dependency-path: tree-sitter-harn/package-lock.json
       - name: Install Harn script test dependencies
-        if: matrix.kind == 'audit'
+        if: startsWith(matrix.kind, 'audit')
         uses: ./.github/actions/apt-install
         timeout-minutes: 5
         with:
@@ -1320,7 +1498,7 @@ jobs:
           HARN_EXT_SOURCE_LENGTH_BASE_REF: ${{ github.event.pull_request.base.sha || '' }}
           TREE_SITTER_PARSER_PREFLIGHTED: ${{ matrix.kind == 'audit' && 'true' || 'false' }}
         run: |
-          args=(--phase "${{ matrix.kind }}")
+          args=(--phase "${{ matrix.phase }}" "${{ matrix.selector }}")
           if [ "$TREE_SITTER_PARSER_PREFLIGHTED" = true ]; then
             args+=(--tree-sitter-parser-preflighted)
           fi
@@ -1843,433 +2021,40 @@ jobs:
         if: always()
         run: make repository-policies
 
-  windows-plan:
-    name: Windows CI routing
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      actions: read
-    outputs:
-      run_windows: ${{ steps.detect.outputs.run_windows }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          # Full history makes each event's owning diff base reachable: PR base,
-          # merge-group base, or the pushed ref's previous tip.
-          fetch-depth: 0
-      - name: Detect Windows-relevant changes
-        id: detect
-        shell: bash
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha || '' }}
-          MERGE_GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha || '' }}
-          PR_HEAD_REF: ${{ github.event.pull_request.head.ref || '' }}
-          # Previous tip of the pushed ref — the diff base for `push` events.
-          # Routed through env (never inlined into the script) to avoid a
-          # template-injection sink, matching how BASE_SHA is handled.
-          BEFORE_SHA: ${{ github.event.before || '' }}
-          GITHUB_TOKEN: ${{ github.token }}
-          REPOSITORY: ${{ github.repository }}
-          COMMIT_SHA: ${{ github.sha }}
-        run: |
-          set -euo pipefail
-          run_windows=false
-
-          # A successful native job on the exact merge-group candidate is the
-          # admission proof for the identical main SHA. Any missing, skipped,
-          # failed, cancelled, or ambiguous proof falls through to the normal
-          # main-push backstop.
-          if [[ "$EVENT_NAME" == "push" ]]; then
-            if proven="$(
-              ./scripts/ci_merge_group_proof.sh \
-                "$REPOSITORY" ci.yml "$COMMIT_SHA" \
-                --require-job "Rust on Windows (build + smoke test)"
-            )" && [[ "$proven" == "true" ]]; then
-              echo "::notice::windows: exact merge-group candidate already passed native Windows; skipping duplicate main proof."
-              echo "run_windows=false" >> "$GITHUB_OUTPUT"
-              exit 0
-            fi
-            echo "::notice::windows: exact native merge-group proof unavailable; retaining the main fallback."
-          fi
-
-          # Pick the canonical diff base per event. Internal PR heads do not
-          # run native Windows: the merge-group candidate is the sole pre-merge
-          # admission owner and exercises the queued tree, not a nearby head.
-          diff_base=""
-          if [[ "$EVENT_NAME" == "push" ]]; then
-            diff_base="$BEFORE_SHA"
-          elif [[ "$EVENT_NAME" == "pull_request" ]]; then
-            diff_base="$BASE_SHA"
-          elif [[ "$EVENT_NAME" == "merge_group" ]]; then
-            diff_base="$MERGE_GROUP_BASE_SHA"
-          fi
-
-          if [[ "$EVENT_NAME" == "push" || "$EVENT_NAME" == "pull_request" || "$EVENT_NAME" == "merge_group" ]]; then
-            if [[ -z "$diff_base" || "$diff_base" == "0000000000000000000000000000000000000000" ]]; then
-              # New branch / first push / force-push / missing PR base — the diff
-              # base is invalid, so run the full build defensively.
-              echo "windows: missing or zero diff base ($EVENT_NAME); running Windows smoke defensively."
-              run_windows=true
-            elif ! git diff --name-only "$diff_base" HEAD > "$RUNNER_TEMP/windows-changed-files.txt" 2>/dev/null; then
-              # Diff failed (e.g. base SHA not present) — never silently skip the
-              # backstop; run defensively.
-              echo "windows: git diff against $diff_base failed; running Windows smoke defensively."
-              run_windows=true
-            else
-              ci_diff="$RUNNER_TEMP/windows-ci-workflow.diff"
-              policy_diff="$RUNNER_TEMP/windows-native-policy.diff"
-              : > "$ci_diff"
-              : > "$policy_diff"
-              if grep -Fxq ".github/workflows/ci.yml" "$RUNNER_TEMP/windows-changed-files.txt"; then
-                if ! git diff --unified=0 "$diff_base" HEAD -- .github/workflows/ci.yml > "$ci_diff" 2>/dev/null; then
-                  echo "windows: ci.yml diff against $diff_base failed; running Windows smoke defensively."
-                  run_windows=true
-                fi
-              fi
-              if ! git diff --unified=0 "$diff_base" HEAD -- \
-                .github/release-runner-policy.json \
-                .github/workflows/build-release-binaries.yml \
-                .github/workflows/release-smoke.yml \
-                scripts/release_runner_matrix.sh \
-                scripts/release_smoke.harn \
-                scripts/smoke_installed_binary.sh > "$policy_diff" 2>/dev/null; then
-                echo "windows: native policy diff against $diff_base failed; running Windows smoke defensively."
-                run_windows=true
-              fi
-              cat "$RUNNER_TEMP/windows-changed-files.txt"
-              if [[ "$run_windows" != "true" ]]; then
-                run_windows="$(
-                  ./scripts/native_platform_ci_plan.sh \
-                    --platform windows \
-                    --event "$EVENT_NAME" \
-                    --head-ref "$PR_HEAD_REF" \
-                    --changed-files "$RUNNER_TEMP/windows-changed-files.txt" \
-                    --ci-diff "$ci_diff" \
-                    --policy-diff "$policy_diff"
-                )"
-              fi
-            fi
-          fi
-
-          echo "run_windows=$run_windows" >> "$GITHUB_OUTPUT"
-          echo "windows: run=$run_windows"
-
-  windows:
-    name: Rust on Windows (build + smoke test)
-    runs-on: ${{ vars.HARN_CI_ENABLE_BLACKSMITH_WINDOWS == 'true' && 'blacksmith-8vcpu-windows-2025' || 'windows-latest' }}
-    permissions:
-      contents: read
-      actions: read
-    # Standard hosted Windows runners need more wall time than the explicit
-    # Blacksmith escape hatch. Keep paid runs bounded while giving the free
-    # default enough room to compile and execute its canonical smoke proof.
-    timeout-minutes: ${{ vars.HARN_CI_ENABLE_BLACKSMITH_WINDOWS == 'true' && 60 || 90 }}
-    needs: windows-plan
-    # Windows-sensitive candidates run once at merge-group admission. An exact
-    # successful candidate proof suppresses the identical main-push run; every
-    # uncertain or non-identical case retains the main backstop. Nightly keeps
-    # its independent full Windows surface.
-    if: needs.windows-plan.outputs.run_windows == 'true'
-    env:
-      HARN_RUNNER_TIER: ${{ vars.HARN_CI_ENABLE_BLACKSMITH_WINDOWS == 'true' && 'blacksmith' || 'github-hosted' }}
-      # EXPERIMENT (toggle via the HARN_WINDOWS_LLD repo variable): drive rustc
-      # at the toolchain-bundled rust-lld instead of MSVC link.exe — the Windows
-      # analog of the `-Clink-arg=-fuse-ld=mold` the Linux rust-checks lane uses.
-      # link.exe is the Windows warm-path long pole once the dep graph is cached;
-      # rust-lld links far faster (community reports ~2x full / ~5x incremental).
-      # This is NOT a no-op: rust-lld became the default only on
-      # x86_64-unknown-linux-gnu in 1.90 — x86_64-pc-windows-msvc still defaults
-      # to link.exe on 1.95, and `-Clinker-features=+lld` is stable on linux-gnu
-      # ONLY, so the linux flag can't express it. rustc self-resolves the bundled
-      # `rust-lld` and injects the `-flavor link` (lld-link) mode for the msvc
-      # target. A job-level RUSTFLAGS FULLY REPLACES the workflow-level
-      # `-D warnings` (env vars clobber, they do not merge — see the rust-checks
-      # gotcha), so `-D warnings` is restated. Kept byte-identical to the
-      # windows-nightly.yml writer so the shared-cache policy's consumer/producer
-      # input comparison still matches (see scripts/check_ci_cache_policy.harn).
-      RUSTFLAGS: ${{ vars.HARN_WINDOWS_LLD == 'on' && '-D warnings -Clinker=rust-lld.exe' || '-D warnings' }}
-    # Drop sccache on the Windows job. PR #2114 documented 0% cache-hit
-    # rate on the harn-vm Windows compile plus periodic `os error 10054`
-    # failures where the GHA backend dropped the rmeta upload mid-rustc.
-    # build-release-binaries.yml and release-smoke.yml already skip
-    # sccache on Windows. Swatinem/rust-cache stays in place.
-    #
-    # Bench on PRs #2127 (E2 line-tables-only), #2128 (E1 this change),
-    # #2129 (E3 both) — compile+test step, warm-cache rerun:
-    #     baseline 8:29 → this PR 6:21 (~25% saved).
-    # Pairing this with `CARGO_PROFILE_DEV_DEBUG=line-tables-only` (E3)
-    # was tested and actually regressed Windows compile time vs E1 alone,
-    # so the dev-debug override is not applied here.
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          # PR Windows runs use the same merge-base affected-crate selection as
-          # Linux fast feedback. Merge-queue and main pushes keep the shallow
-          # checkout because they run the full workspace unconditionally.
-          fetch-depth: ${{ github.event_name == 'pull_request' && '0' || '1' }}
-      # EXPERIMENT (toggle via the HARN_WINDOWS_DEVDRIVE repo variable): move the
-      # Cargo home and target dir onto a ReFS Dev Drive VHDX. Windows filesystem
-      # overhead plus Defender real-time scanning of the thousands of small
-      # object/rmeta writes a cold compile emits is the classic Windows CI tax; a
-      # Dev Drive's performance mode + copy-on-write cut it. The windows-2025
-      # runner image dropped its D: drive (2025-07-14) and ships no pre-created
-      # Dev Drive, so it is created here. Placed before the toolchain and cache
-      # steps so CARGO_HOME / CARGO_TARGET_DIR are already redirected when rustup
-      # and Swatinem/rust-cache run. The cache invocation below passes the
-      # redirected target explicitly; rust-cache otherwise ignores
-      # CARGO_TARGET_DIR. Blacksmith's Windows image does not expose the Hyper-V
-      # New-VHD command required by this action, so the paid lane uses the native
-      # filesystem and only the GitHub-hosted fallback creates the same ReFS Dev
-      # Drive as the windows-nightly.yml writer.
-      - name: Set up Dev Drive
-        if: ${{ vars.HARN_WINDOWS_DEVDRIVE == 'on' && env.HARN_RUNNER_TIER == 'github-hosted' }}
-        uses: samypr100/setup-dev-drive@562171fe8df7401fdf582d766cd3b6ab80d5b1a0 # v4.1.0
-        with:
-          # A warm target occupies about 15 GB before a changed workspace is
-          # linked. Pull requests use an affected package set; main/push is the
-          # full-workspace backstop and needs the same 50 GB ceiling already
-          # proven by release certification (harn#6485 / harn#6964).
-          drive-size: ${{ github.event_name == 'pull_request' && '25GB' || '50GB' }}
-          drive-format: ReFS
-          env-mapping: |
-            CARGO_HOME,{{ DEV_DRIVE }}/.cargo
-            CARGO_TARGET_DIR,{{ DEV_DRIVE }}/target
-      - uses: ./.github/actions/rust-toolchain
-      - name: Report Windows storage (initial)
-        id: windows-storage-initial
-        if: always()
-        shell: bash
-        run: ./scripts/ci/windows_storage_budget.sh report initial
-      # A short-retention artifact produced by the main Windows workspace tests is the
-      # provider-neutral warm path. It is attempted before rust-cache so an
-      # internal Blacksmith run can reuse GitHub-hosted build output without
-      # requiring compatible cache backends. A missing, stale, or incompatible
-      # generation fails this step but not the job; rust-cache remains the cold
-      # hosted/provider-local fallback.
-      - name: Restore Windows workspace warm artifact
-        id: windows-warm-restore
-        continue-on-error: true
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          receipt="${RUNNER_TEMP}/windows-warm-restore.txt"
-          set +e
-          ./scripts/ci/workspace_warm_artifact.sh windows download-and-restore \
-            --repo "${{ github.repository }}" \
-            --target-dir "${CARGO_TARGET_DIR:-target}" >"${receipt}" 2>&1
-          status=$?
-          set -e
-          cat "${receipt}"
-          grep -E '^windows_warm_restore_(run_id|producer_commit|reason|target_bytes|headroom_bytes|free_bytes|existing_target_bytes|available_after_replace_bytes)=' "${receipt}" >> "$GITHUB_OUTPUT" || true
-          if [[ "${status}" -eq 0 ]]; then
-            grep -E '^windows_warm_restore=hit$' "${receipt}" >> "$GITHUB_OUTPUT"
-          else
-            echo "windows_warm_restore=miss" >> "$GITHUB_OUTPUT"
-            echo "windows_warm_restore_status=${status}" >> "$GITHUB_OUTPUT"
-          fi
-          exit "${status}"
-      - uses: ./.github/actions/rust-cache
-        if: steps.windows-warm-restore.outputs.windows_warm_restore != 'hit' && steps.windows-warm-restore.outputs.windows_warm_restore_reason != 'insufficient_space'
-        continue-on-error: true
-        with:
-          # Restore the latest full-suite nightly cache. PR refs stay
-          # restore-only; windows-nightly.yml owns the default-branch writer.
-          # Keep one stable Swatinem namespace so its native restore key can
-          # reuse the latest compatible target generation. Cargo remains the
-          # owner of source and include_str! invalidation.
-          shared-key: workspace-windows
-          target-dir: ${{ env.CARGO_TARGET_DIR }}
-          cache-on-failure: true
-          cache-bin: false
-      - name: Report Windows warm restore outcome
-        if: always()
-        shell: bash
-        env:
-          RESTORE_OUTCOME: ${{ steps.windows-warm-restore.outcome }}
-          RESTORE_RESULT: ${{ steps.windows-warm-restore.outputs.windows_warm_restore || 'miss' }}
-          RESTORE_REASON: ${{ steps.windows-warm-restore.outputs.windows_warm_restore_reason || 'unavailable' }}
-          RESTORE_PRODUCER_COMMIT: ${{ steps.windows-warm-restore.outputs.windows_warm_restore_producer_commit || 'unavailable' }}
-          RESTORE_RUN_ID: ${{ steps.windows-warm-restore.outputs.windows_warm_restore_run_id || 'unavailable' }}
-        run: |
-          echo "windows_warm_restore_outcome=${RESTORE_OUTCOME}"
-          echo "windows_warm_restore=${RESTORE_RESULT}"
-          echo "windows_warm_restore_reason=${RESTORE_REASON}"
-          echo "windows_warm_restore_producer_commit=${RESTORE_PRODUCER_COMMIT}"
-          echo "windows_warm_restore_run_id=${RESTORE_RUN_ID}"
-          if [[ "${RESTORE_RESULT}" == "hit" ]]; then
-            echo "Windows PR feedback restored a compatible main warm artifact."
-          elif [[ "${RESTORE_REASON}" == "insufficient_space" ]]; then
-            echo "Windows PR feedback rejected the warm target's capacity budget and will compile cold."
-          else
-            echo "Windows PR feedback is continuing through the provider-local rust-cache/cold fallback."
-          fi
-      - name: Report Windows storage (after restore)
-        if: always()
-        shell: bash
-        run: ./scripts/ci/windows_storage_budget.sh report after_restore
-      - name: Install cargo-nextest
-        uses: taiki-e/install-action@3f74d7c16a4242f1c95561e98edc25d36adb4375 # v2.87.12
-        with:
-          tool: nextest@0.9.132
-      # The `burin-mini` playground fixtures shell out to `node` from inside
-      # the Harn sandbox (harn#7993). This job never installed Node
-      # explicitly — it relied on whatever the runner image happened to
-      # preinstall, an implicit dependency unlike every other pinned
-      # toolchain here. Making it explicit removes that variable from the
-      # ongoing Windows `node`-not-found investigation: if the sandboxed
-      # child still cannot resolve a Node this job just installed and put on
-      # PATH, the defect is in Harn's environment plumbing, not the runner
-      # image's contents.
-      - name: Install Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: "22"
-      # Don't gate the whole pipeline on the full Windows test surface yet —
-      # this job exists to catch hard regressions (compile breaks, missing
-      # cfg-gates, hardcoded `/bin/sh`, etc.). PRs compile the changed crates
-      # plus their reverse-dependency closure, matching the Linux affected
-      # test lane. Merge-queue and main pushes still compile the whole
-      # workspace, and windows-nightly.yml remains the full Windows test
-      # safety net.
-      #
-      # Keep the Rust work in one test-profile build. Mixing `cargo check`,
-      # `cargo build`, and nextest made Windows recompile the same local crates
-      # three times in separate artifact sets; nextest package selection keeps
-      # compile coverage focused while the filter limits the tests that
-      # actually execute.
-      - name: Compile Windows tests and run unit slice
-        id: windows-native-tests
-        shell: bash
-        env:
-          # Hosted Windows runners can return transient misses from the live
-          # Credential Manager. The file-backend tests cover deterministic
-          # secret-store behavior; this lane is for compile plus core unit
-          # coverage.
-          HARN_SECRET_STORE_BACKEND: file
-          HARN_LLM_CALLS_DISABLED: "1"
-          # Match the production CLI's 16 MiB runtime stack
-          # (`CLI_RUNTIME_STACK_SIZE`). Windows stack frames are larger than
-          # Unix, so tests that drive the Harn VM's deep-but-bounded recursive
-          # walk overflow libtest's / tokio's default 2 MiB worker stack and
-          # abort the test process (0xc00000fd). std::thread and tokio's
-          # default-stack workers honor RUST_MIN_STACK; see windows-nightly.yml
-          # for the full rationale.
-          RUST_MIN_STACK: "16777216"
-          # Failure output stays suppressed on success; when a Windows
-          # AppContainer test times out, these milestones show whether it
-          # stalled in CreateProcess, pipe draining, or ACL cleanup.
-          HARN_WINDOWS_SANDBOX_TRACE: "1"
-          BASE_REF: ${{ github.event.pull_request.base.ref }}
-          AFFECTED_BASE: origin/${{ github.event.pull_request.base.ref }}
-        run: |
-          windows_filter='package(harn-lexer) or package(harn-parser) or package(harn-stdlib) or package(harn-vm) or package(harn-hostlib) or package(harn-terminal) or package(harn-fmt) or package(harn-lint) or package(harn-modules) or package(harn-dap)'
-          package_args=(--workspace)
-
-          if [[ "${GITHUB_EVENT_NAME}" == "pull_request" ]]; then
-            git fetch --no-tags origin "$BASE_REF"
-            args="$(./scripts/ci/affected_crate_args.sh --base "$AFFECTED_BASE")"
-            if [[ -z "$args" ]]; then
-              echo "windows: no workspace crate selected; falling back to full workspace."
-            elif [[ "$args" == "--workspace" ]]; then
-              echo "windows: global PR change selected the full workspace; focusing Windows smoke packages."
-              package_args=(-p harn-vm -p harn-cli)
-            else
-              read -r -a package_args <<< "$args"
-              # The smoke test below executes the Cargo target's harn.exe.
-              # Keep that binary warm even for PRs that only touch a leaf crate.
-              if [[ " ${package_args[*]} " != *" -p harn-cli "* ]]; then
-                package_args+=(-p harn-cli)
-              fi
-            fi
-          fi
-
-          echo "windows: cargo package args: ${package_args[*]}"
-          # Some affected crate sets compile Windows-only surfaces but have no
-          # tests matching the core unit filter; the compile itself is still
-          # the smoke gate for those PRs.
-          cargo nextest run --locked "${package_args[@]}" \
-            --features internal-freshness-checker \
-            --profile ci -E "$windows_filter" --no-tests=warn
-          # The default Harn CLI profile is the release-critical pre-merge set:
-          # library tests, fast integration tests, and the seven explicitly
-          # registered shipped-binary cases. Keep this native so Windows file
-          # durability and command-rendering defects cannot wait for release
-          # certification to become visible.
-          cargo nextest run --locked -p harn-cli \
-            --features internal-freshness-checker --profile ci
-          # Exercise the native Windows artifact identity binary, including
-          # drive-colon/backslash/space fixtures.
-          cargo test --locked -p harn-cli --bin harn-freshness-check \
-            --features internal-freshness-checker -- --nocapture
-          printf 'completed_epoch=%s\n' "$(date +%s)" >> "$GITHUB_OUTPUT"
-      # Cargo owns every top-level target artifact until the last native test
-      # command returns. Publish the one receipt only after that mutation
-      # boundary; smoke then has no legal path that can relink the artifact.
-      - name: Produce exact Windows Harn binary
-        shell: bash
-        run: HARN_BIN='' ./scripts/ci_warm_harn_bin.sh --profile test --github-env "$GITHUB_ENV"
-      - name: Smoke test harn run
-        shell: bash
-        env:
-          WINDOWS_NATIVE_TEST_COMPLETED_EPOCH: ${{ steps.windows-native-tests.outputs.completed_epoch }}
-        run: |
-          smoke_started="$(date +%s)"
-          harn_bin="$(HARN_BIN='' HARN_BIN_NO_BUILD=1 ./scripts/harn_bin.sh --no-build --print)"
-          target_dir="$(cd "${CARGO_TARGET_DIR:-target}" && pwd -P)"
-          hook_resolved="$(
-            CARGO_TARGET_DIR="$target_dir" sh -c \
-              '. .githooks/lib.sh; hook_find_fresh_worktree_harn_bin'
-          )"
-          expected_bin="$target_dir/debug/harn.exe"
-          # Git Bash can spell one Windows file as either E:/target/... or
-          # /e/target/.... Compare filesystem identity, not path text.
-          if [[ ! "$harn_bin" -ef "$expected_bin" \
-            || ! "$hook_resolved" -ef "$harn_bin" ]]; then
-            printf 'Windows proof mismatch: resolved=%q hook=%q expected=%q\n' \
-              "$harn_bin" "$hook_resolved" "$expected_bin" >&2
-            exit 1
-          fi
-          echo 'fn main(harness: Harness) { harness.stdio.println("ok") }' > smoke.harn
-          "$harn_bin" run smoke.harn
-          cp "$harn_bin" "$target_dir/debug/harn-lsp.exe"
-          cp "$harn_bin" "$target_dir/debug/harn-dap.exe"
-          "$target_dir/debug/harn-lsp.exe" --version | grep '^harn-lsp '
-          "$target_dir/debug/harn-dap.exe" --version | grep '^harn-dap '
-          printf 'windows_native_test_to_smoke_seconds=%s\n' \
-            "$(( $(date +%s) - WINDOWS_NATIVE_TEST_COMPLETED_EPOCH ))"
-          printf 'windows_smoke_seconds=%s\n' "$(( $(date +%s) - smoke_started ))"
-      - name: Report Windows storage (terminal)
-        if: always()
-        shell: bash
-        run: ./scripts/ci/windows_storage_budget.sh report terminal
-
-  # Deterministic Windows compile integration ratchet. The path-gated native
-  # Windows job remains the pre-merge product proof; this pinned cross-rs pass
-  # runs on each Rust-changing main tree and reports through `ci-status`.
+  # Deterministic Windows compile integration ratchet, and the only Windows lane
+  # in this workflow. Native Windows is advisory: `windows-nightly.yml` runs the
+  # full workspace nightly, on dispatch, and on release pull requests, and never
+  # gates a pull request or merge-group candidate. This pinned cross-rs pass is
+  # the one Windows admission check: it runs on every merge-group candidate and
+  # on each Rust-changing main push, and reports through `ci-status`. It needs
+  # only `changes`, and nothing but `ci-status` waits on it, so it runs beside
+  # the Linux lanes rather than in front of them. A successful run on the
+  # candidate is also what lets the identical main push reuse the merge-group
+  # proof (scripts/ci_merge_group_proof.sh requires it by name).
   # `cross check` performs no linking, so the windows-gnu target compiles the
   # C-dependency graph in the digest-pinned MinGW image and reaches workspace Rust —
   # `x86_64-pc-windows-msvc` cannot (it needs the Windows SDK headers). The
   # `cfg(windows)` / `cfg(not(unix))` surface is identical across gnu/msvc, so a
-  # missing unix cfg-gate is caught here regardless of the ABI difference. The
-  # full `windows` job stays the source of truth for msvc-specific + runtime
-  # behavior (build + smoke test).
+  # missing unix cfg-gate is caught here regardless of the ABI difference.
+  # msvc-specific and runtime behavior is covered by `windows-nightly.yml`.
   windows-cross-check:
     name: Windows cross-compile check
     needs: changes
-    # Main pushes force the Rust surface on, while non-Rust pushes may skip.
+    # Every merge-group candidate runs it; main pushes run it when the Rust
+    # surface is on, so a push already proven on merge_group may skip.
     if: >-
-      github.event_name == 'push'
+      (github.event_name == 'merge_group'
+      && needs.changes.outputs.sprint_fast_ci != 'true')
+      || (github.event_name == 'push'
       && github.ref == 'refs/heads/main'
-      && needs.changes.outputs.rust == 'true'
+      && needs.changes.outputs.rust == 'true')
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/rust-toolchain
       - name: Install pinned cross CLI
-        uses: taiki-e/install-action@3f74d7c16a4242f1c95561e98edc25d36adb4375 # v2.87.12
+        uses: taiki-e/install-action@94c31af3204a9f15ab40b35ad084410b905bbc73 # v2.87.17
         with:
           tool: cross@0.2.5
           fallback: none
@@ -2394,7 +2179,7 @@ jobs:
     # runners rather than probing a self-hosted pool.
     runs-on: macos-latest
     timeout-minutes: 60
-    needs: macos-plan
+    needs: [changes, macos-plan]
     # macOS coverage stays off the default PR / merge-queue critical path, but
     # runs before merge for changes that touch macOS-gated process, sandbox,
     # secret-store, or CLI paths. Other PRs rely on the main-push backstop plus
@@ -2405,7 +2190,9 @@ jobs:
     # target — including the cfg-gated test targets like
     # `secret_store_os_native` that no Linux lane ever builds — but does NOT
     # execute the live-Keychain tests (that's the nightly's job).
-    if: needs.macos-plan.outputs.run_macos == 'true'
+    if: >-
+      needs.macos-plan.outputs.run_macos == 'true'
+      && needs.changes.outputs.sprint_fast_ci != 'true'
     env:
       RUSTFLAGS: "-D warnings"
     steps:
@@ -2702,6 +2489,7 @@ jobs:
         changes,
         fmt,
         package-audit,
+        public-api,
         lint-md,
         release-contract,
         release-residual-audit,
@@ -2718,8 +2506,6 @@ jobs:
         source-length-ratchet,
         ci-walltime-report,
         audit-scripts,
-        windows-plan,
-        windows,
         windows-cross-check,
         macos-plan,
         macos,
@@ -2739,6 +2525,10 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           GIT_REF: ${{ github.ref }}
           RUST_SELECTED: ${{ needs.changes.outputs.rust }}
+          WINDOWS_CROSS_REQUIRED: ${{ (github.event_name == 'merge_group' && needs.changes.outputs.sprint_fast_ci != 'true') || (github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.changes.outputs.rust == 'true') }}
+          # Exactly the `changes` decision: true only on pull requests and
+          # merge groups with SPRINT_FAST_CI=true. Only a skip is excused by it.
+          SPRINT_FAST_CI_ACTIVE: ${{ needs.changes.outputs.sprint_fast_ci }}
         run: |
           # A skipped job is valid only when its owning condition permits it.
           # Missing, pending, failed, and cancelled results always fail closed.
@@ -2759,7 +2549,6 @@ jobs:
           declare -A results=(
             ["Detect changes"]="${{ needs.changes.result }}"
             ["Markdown lint"]="${{ needs['lint-md'].result }}"
-            ["Windows CI routing"]="${{ needs['windows-plan'].result }}"
             ["macOS CI routing"]="${{ needs['macos-plan'].result }}"
             ["GitHub Actions hygiene"]="${{ needs.actions.result }}"
           )
@@ -2793,6 +2582,20 @@ jobs:
             fi
           fi
 
+          # The public API check shares package verification's trigger, so the
+          # same skips are the only acceptable ones.
+          public_api_result="${{ needs['public-api'].result }}"
+          echo "Public Rust API check: $public_api_result"
+          if [ "$public_api_result" != "success" ]; then
+            if [ "$public_api_result" = "skipped" ] \
+              && { [ "$package_audit_expected" != "true" ] || [ "$merge_group_proven" = "true" ]; }; then
+              :
+            else
+              echo "::error::Public Rust API check failed or skipped when required."
+              exit 1
+            fi
+          fi
+
           # The release contract is the gate that decides whether this
           # repository's release semantics still agree with the orchestrator
           # that drives cuts. A skip is acceptable ONLY when the `changes`
@@ -2817,12 +2620,19 @@ jobs:
 
           # Rust checks remain pre-merge product proof. Repository policies are
           # handled separately below as a main-only integration ratchet.
+          # The lint lane is a matrix; its result is success only when every
+          # leg succeeded, and each leg publishes its own proof flag.
           rust_checks_result="${{ needs['rust-checks'].result }}"
-          lint_ok="${{ needs['rust-checks'].outputs.lint_ok }}"
-          echo "Rust lint: $rust_checks_result (lint_ok=$lint_ok)"
+          lint_ok_workspace="${{ needs['rust-checks'].outputs.lint_ok_workspace }}"
+          lint_ok_lean_lsp="${{ needs['rust-checks'].outputs.lint_ok_lean_lsp }}"
+          lint_ok_freshness_checker="${{ needs['rust-checks'].outputs.lint_ok_freshness_checker }}"
+          echo "Rust lint: $rust_checks_result (workspace=$lint_ok_workspace lean_lsp=$lint_ok_lean_lsp freshness_checker=$lint_ok_freshness_checker)"
           require_result "$rust_checks_result" "Rust lint failed." true
-          if [ "${{ needs.changes.outputs.rust }}" = "true" ] && [ "$lint_ok" != "true" ]; then
-            echo "::error::Rust lint proof is missing."
+          if [ "${{ needs.changes.outputs.rust }}" = "true" ] \
+            && { [ "$lint_ok_workspace" != "true" ] \
+              || [ "$lint_ok_lean_lsp" != "true" ] \
+              || [ "$lint_ok_freshness_checker" != "true" ]; }; then
+            echo "::error::Rust lint proof is missing for at least one leg."
             exit 1
           fi
 
@@ -2840,11 +2650,10 @@ jobs:
           fi
 
           # The capacity decision is fail-closed on the runs that can make it.
-          # It refuses by name when the fleet census cannot be read, and a
-          # refusal that only warned would let the producer fall through to a
-          # hosted runner with nothing to attribute the downgrade to. It is
-          # skipped on fork pull requests and on every non-pull-request event,
-          # which is not a failure.
+          # A census it cannot read is a named hosted fallback, not a failure,
+          # so only a decision that did not complete is red. It is skipped on
+          # fork pull requests and on every non-pull-request event, which is
+          # not a failure.
           rust_producer_capacity_result="${{ needs['rust-producer-capacity'].result }}"
           echo "Rust producer capacity decision: $rust_producer_capacity_result"
           if [ "$rust_producer_capacity_result" != "success" ] \
@@ -2867,7 +2676,8 @@ jobs:
           security_tests_ready_result="${{ needs['security-tests-ready'].result }}"
           echo "Linux security test inputs: $security_tests_ready_result"
           require_result "$security_tests_ready_result" \
-            "Linux security test input handoff failed or skipped while Rust proof was required." [ "${{ needs.changes.outputs.rust }}" != "true" ]
+            "Linux security test input handoff failed or skipped while Rust proof was required." \
+            test "${{ needs.changes.outputs.rust }}" != "true" -o "$SPRINT_FAST_CI_ACTIVE" = "true"
           # With co-location active the environment-neutral suite proof lives
           # inside the single persistent producer. A successful artifact build
           # without the explicit test marker must fail closed.
@@ -2894,12 +2704,14 @@ jobs:
           rust_security_result="${{ needs['rust-security'].result }}"
           echo "Linux sandbox tests: $rust_security_result"
           require_result "$rust_security_result" \
-            "Linux sandbox tests failed or skipped while Rust checks were required." [ "${{ needs.changes.outputs.rust }}" != "true" ]
+            "Linux sandbox tests failed or skipped while Rust checks were required." \
+            test "${{ needs.changes.outputs.rust }}" != "true" -o "$SPRINT_FAST_CI_ACTIVE" = "true"
 
           harn_audit_result="${{ needs['harn-audit'].result }}"
           echo "Harn proof workers: $harn_audit_result"
           require_result "$harn_audit_result" \
-            "Harn proof workers failed or skipped while Rust proof was required." [ "${{ needs.changes.outputs.rust }}" != "true" ]
+            "Harn proof workers failed or skipped while Rust proof was required." \
+            test "${{ needs.changes.outputs.rust }}" != "true" -o "$SPRINT_FAST_CI_ACTIVE" = "true"
 
           source_length_result="${{ needs['source-length-ratchet'].result }}"
           echo "Source file lengths: $source_length_result"
@@ -2926,21 +2738,14 @@ jobs:
             "Repository policy checks failed or skipped on a Rust-changing main push." \
             test "${EVENT_NAME}:${GIT_REF}:${RUST_SELECTED}" != "push:refs/heads/main:true"
 
-          # Native Windows runs once on a Windows-sensitive merge-group
-          # candidate. Its exact successful proof suppresses the identical
-          # main push; missing or unsafe proof retains the main fallback.
-          # Treat a planned skip as passing; only an actual failure fails.
-          windows_result="${{ needs.windows.result }}"
-          echo "Rust on Windows (build + smoke test): $windows_result"
-          require_result "$windows_result" "Windows job failed." true
-
-          # Cross-compilation is an integration ratchet. It runs on every
-          # Rust-changing main tree and remains visible through this aggregate.
+          # The one Windows admission check. A merge-group candidate must
+          # produce a success; a skip there is a failure. On a Rust-changing
+          # main push it is the integration ratchet; elsewhere a skip is fine.
           windows_cross_result="${{ needs['windows-cross-check'].result }}"
-          echo "Windows cross-compile check: $windows_cross_result"
+          echo "Windows cross-compile check: $windows_cross_result (required=$WINDOWS_CROSS_REQUIRED)"
           require_result "$windows_cross_result" \
-            "Windows cross-compile check failed or skipped on a Rust-changing main push." \
-            test "${EVENT_NAME}:${GIT_REF}:${RUST_SELECTED}" != "push:refs/heads/main:true"
+            "Windows cross-compile check failed or skipped on a merge-group candidate or a Rust-changing main push." \
+            [ "$WINDOWS_CROSS_REQUIRED" != "true" ]
 
           # The macOS job runs on `push` to main and on pull requests whose
           # diff touches macOS-gated process/sandbox/secret-store/CLI paths. It

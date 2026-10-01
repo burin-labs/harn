@@ -1,6 +1,12 @@
 import { agent_loop } from "std/agent/loop"
 import { llm_text, with_llm_script } from "std/testing"
 
+struct JudgmentOutcome {
+  success: bool
+  accepted: bool
+  verdict: string
+}
+
 /**
  * Regression: a route whose `tool_mode_parity` forbids the native channel
  * (`native_unreliable`, e.g. openrouter/deepseek-v3.2) used to resolve an
@@ -28,7 +34,9 @@ fn judge_tools() {
     "emit_judgment",
     "Emit the final judgment exactly once",
     {
-      handler: { args -> return {accepted: true, verdict: args?.verdict ?? "unclear"} },
+      handler: { args ->
+        return JudgmentOutcome {success: true, accepted: true, verdict: args?.verdict ?? "unclear"}
+      },
       parameters: {verdict: {type: "string", description: "complete | incomplete | unclear"}},
       returns: {type: "object"},
       annotations: {kind: "judgment", side_effect_level: "read_only"},

@@ -5,6 +5,10 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, LazyLock, Mutex, MutexGuard};
 
 use super::api::{LlmResult, ProviderTelemetry, RawProviderToolCall};
+pub(crate) use super::hash_replay::{
+    fixture_hash_for_request, get_replay_mode, load_fixture, save_fixture,
+};
+pub use super::hash_replay::{set_replay_mode, LlmReplayMode};
 pub use super::mock_error::MockError;
 use super::mock_store::{MockQueue, QueueMatch};
 use crate::orchestration::ToolCallRecord;
@@ -32,14 +36,6 @@ fn generated_prose_with_completion(
         }
         (Some(sentinel), _) => format!("{prose_body} {sentinel}"),
     }
-}
-
-/// LLM replay mode.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum LlmReplayMode {
-    Off,
-    Record,
-    Replay,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -93,6 +89,8 @@ pub const KNOWN_MOCK_SCOPES: &[&str] = &[
     SHARED_MOCK_SCOPE,
     "agent.main",
     "agent.input_guardrail",
+    "agent.approval_review",
+    "agent.missing_tool_call",
     "agent.scope_classifier",
     "compaction",
     "completion.judge",
@@ -170,6 +168,7 @@ fn consume_label(sticky: bool) -> &'static str {
 
 #[derive(Clone, Debug)]
 pub struct LlmMock {
+    pub effective_reasoning_effort: super::EffectiveReasoningEffort,
     pub text: String,
     pub tool_calls: Vec<serde_json::Value>,
     pub raw_tool_calls: Vec<RawProviderToolCall>,
@@ -220,8 +219,41 @@ pub struct LlmMock {
 pub struct LlmMockFixture {
     pub schema_version: u32,
     pub strict_scopes: bool,
+    /// Header `liveAfterCalls: K`: replay the first K entries as a prefix,
+    /// then hand every later call to the configured provider.
+    ///
+    /// Only the first K entries are installed, and each of the first K calls
+    /// that reach the mock dispatcher must be served by one of them under the
+    /// ordinary scope/glob matching. A call the prefix cannot serve fails
+    /// closed rather than going live early, even in a non-strict fixture.
+    /// Once K calls have been served the fixture stops intercepting, so later
+    /// calls take the normal provider path with its credential, validation,
+    /// and budget checks. `None` keeps the ordinary replay contract.
+    pub live_after_calls: Option<u64>,
     pub mocks: Vec<LlmMock>,
     pub warnings: Vec<String>,
+}
+
+/// Which side of a `liveAfterCalls` handoff answered one LLM call.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LlmMockPrefixServedBy {
+    /// A recorded fixture entry inside the replay prefix.
+    Fixture,
+    /// The configured provider, after the prefix was fully served.
+    Live,
+}
+
+/// Per-call marker carried on `ProviderTelemetry::llm_mock_prefix` whenever a
+/// `liveAfterCalls` fixture is installed. `call` is 1-based: fixture calls are
+/// `1..=live_after_calls`, and live calls continue the count, so the handoff
+/// is the first call whose `served_by` is `live`. Live calls are counted when
+/// they return a response.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct LlmMockPrefixMarker {
+    pub served_by: LlmMockPrefixServedBy,
+    pub call: u64,
+    pub live_after_calls: u64,
 }
 
 /// Producer-owned facts returned after atomically installing a fixture
@@ -230,6 +262,7 @@ pub struct LlmMockFixture {
 pub(crate) struct LlmMockFixtureReceipt {
     pub schema_version: u32,
     pub strict_scopes: bool,
+    pub live_after_calls: Option<u64>,
     pub count: usize,
     pub scopes: Vec<String>,
     pub warnings: Vec<String>,
@@ -344,8 +377,6 @@ impl LlmMockContext {
 }
 
 thread_local! {
-    static LLM_REPLAY_MODE: RefCell<LlmReplayMode> = const { RefCell::new(LlmReplayMode::Off) };
-    static LLM_FIXTURE_DIR: RefCell<String> = const { RefCell::new(String::new()) };
     static TOOL_RECORDINGS: RefCell<Vec<ToolCallRecord>> = const { RefCell::new(Vec::new()) };
     static LLM_MOCK_CONTEXT: RefCell<LlmMockContext> = RefCell::new(LlmMockContext::default());
     // Scripted streaming chunks for the most recently matched builtin mock,
@@ -446,6 +477,7 @@ pub(crate) fn install_builtin_llm_mock_fixture(fixture: LlmMockFixture) -> LlmMo
     let receipt = LlmMockFixtureReceipt {
         schema_version: queue.schema_version(),
         strict_scopes: queue.strict_scopes(),
+        live_after_calls: queue.live_after_calls(),
         count: queue.count(),
         scopes: queue.scopes(),
         warnings: queue.warnings().to_vec(),
@@ -567,6 +599,7 @@ pub fn install_cli_llm_mocks(mocks: Vec<LlmMock>) {
         queue: MockQueue::from_fixture(LlmMockFixture {
             schema_version: 0,
             strict_scopes: false,
+            live_after_calls: None,
             mocks,
             warnings: Vec::new(),
         }),
@@ -608,13 +641,47 @@ pub(crate) fn cli_llm_mock_replay_active() -> bool {
     cli_llm_mock_replay_active_for_scope(current_cli_llm_mock_scope())
 }
 
+/// Whether CLI replay still intercepts calls for this scope. A `liveAfterCalls`
+/// fixture stops intercepting once its prefix is served.
 pub(crate) fn cli_llm_mock_replay_active_for_scope(scope: Option<u64>) -> bool {
     let Some(scope) = scope else {
         return false;
     };
     cli_llm_mock_scopes()
         .get(&scope)
-        .is_some_and(|state| state.mode == CliLlmMockMode::Replay)
+        .is_some_and(|state| state.mode == CliLlmMockMode::Replay && !state.queue.handed_off())
+}
+
+/// Mark a response the configured provider returned after a `liveAfterCalls`
+/// prefix handed off. A no-op unless such a fixture is installed and served,
+/// so ordinary live, record, and replay calls carry no marker.
+pub(crate) fn mark_live_after_mock_prefix(
+    request: &super::api::LlmRequestPayload,
+    result: &mut LlmResult,
+) {
+    let cli_marker = request.cli_llm_mock_scope.and_then(|scope| {
+        cli_llm_mock_scopes()
+            .get_mut(&scope)
+            .filter(|state| state.mode == CliLlmMockMode::Replay)
+            .and_then(|state| state.queue.next_live_call())
+    });
+    let marker =
+        cli_marker.or_else(|| with_mock_state_mut(|state| state.builtin_queue.next_live_call()));
+    if let Some(marker) = marker {
+        result.telemetry.llm_mock_prefix = Some(Box::new(marker));
+    }
+}
+
+/// The replay-prefix position a miss landed on, from whichever installed
+/// fixture this call could reach.
+fn mock_prefix_miss(cli_scope: Option<u64>) -> Option<(u64, u64)> {
+    let cli_miss = cli_scope.and_then(|scope| {
+        cli_llm_mock_scopes()
+            .get(&scope)
+            .filter(|state| state.mode == CliLlmMockMode::Replay)
+            .and_then(|state| state.queue.prefix_miss())
+    });
+    cli_miss.or_else(|| with_mock_state(|state| state.builtin_queue.prefix_miss()))
 }
 
 fn record_llm_mock_call(request: &super::api::LlmRequestPayload) {
@@ -764,7 +831,10 @@ fn build_mock_result(
         stop_reason: mock.stop_reason.clone(),
         blocks,
         logprobs: mock.logprobs.clone(),
-        telemetry: Box::new(ProviderTelemetry::mock_replay(mock.simulated_cost_usd)),
+        telemetry: Box::new(ProviderTelemetry {
+            effective_reasoning_effort: mock.effective_reasoning_effort.clone(),
+            ..ProviderTelemetry::mock_replay(mock.simulated_cost_usd)
+        }),
     }
 }
 
@@ -925,14 +995,18 @@ fn build_scoped_match(
     match_text: &str,
     next_tool_call_id: &mut u64,
 ) -> ScopedMatch {
-    let QueueMatch { mock, receipt } = selected;
+    let QueueMatch {
+        mock,
+        receipt,
+        prefix,
+    } = selected;
     let outcome = match &mock.error {
         Some(err) => Err(mock_error_to_vm_error(err)),
-        None => Ok(build_mock_result(
-            &mock,
-            match_text.len(),
-            next_tool_call_id,
-        )),
+        None => {
+            let mut result = build_mock_result(&mock, match_text.len(), next_tool_call_id);
+            result.telemetry.llm_mock_prefix = prefix.map(Box::new);
+            Ok(result)
+        }
     };
     ScopedMatch { outcome, receipt }
 }
@@ -980,6 +1054,7 @@ pub(crate) fn record_cli_llm_result(request: &super::api::LlmRequestPayload, res
         return;
     }
     state.recordings.push(LlmMock {
+        effective_reasoning_effort: result.telemetry.effective_reasoning_effort.clone(),
         text: result.text.clone(),
         tool_calls: result.tool_calls.clone(),
         raw_tool_calls: result.raw_tool_calls.clone(),
@@ -1132,6 +1207,22 @@ fn unmatched_cli_prompt_error(match_text: &str) -> VmError {
     VmError::Runtime(format!("No --llm-mock fixture matched prompt: {snippet:?}"))
 }
 
+fn diverged_prefix_error(
+    call: u64,
+    live_after_calls: u64,
+    scope: &str,
+    match_text: &str,
+) -> VmError {
+    let mut snippet: String = match_text.chars().take(200).collect();
+    if match_text.chars().count() > 200 {
+        snippet.push_str("...");
+    }
+    VmError::Runtime(format!(
+        "LLM mock replay prefix diverged at call {call} of {live_after_calls}: no fixture \
+         entry matched scope {scope:?}; refusing to go live early. Prompt: {snippet:?}"
+    ))
+}
+
 fn unmatched_builtin_prompt_error(match_text: &str) -> VmError {
     let mut snippet: String = match_text.chars().take(200).collect();
     if match_text.chars().count() > 200 {
@@ -1140,112 +1231,6 @@ fn unmatched_builtin_prompt_error(match_text: &str) -> VmError {
     VmError::Runtime(format!(
         "No llm_mock fixture matched prompt in a strict scope: {snippet:?}"
     ))
-}
-
-/// Set LLM replay mode (record/replay) and fixture directory.
-pub fn set_replay_mode(mode: LlmReplayMode, fixture_dir: &str) {
-    LLM_REPLAY_MODE.with(|v| *v.borrow_mut() = mode);
-    LLM_FIXTURE_DIR.with(|v| *v.borrow_mut() = fixture_dir.to_string());
-}
-
-pub(crate) fn get_replay_mode() -> LlmReplayMode {
-    LLM_REPLAY_MODE.with(|v| *v.borrow())
-}
-
-pub(crate) fn get_fixture_dir() -> String {
-    LLM_FIXTURE_DIR.with(|v| v.borrow().clone())
-}
-
-/// Hash a request for fixture file naming using canonical JSON serialization.
-pub(crate) fn fixture_hash(
-    model: &str,
-    messages: &[serde_json::Value],
-    system: Option<&str>,
-    mock_scope: Option<&str>,
-) -> String {
-    use std::hash::{Hash, Hasher};
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    model.hash(&mut hasher);
-    // Canonical JSON hashing is stable across Debug-format changes.
-    crate::canonical_json::to_string(&serde_json::Value::Array(messages.to_vec()))
-        .hash(&mut hasher);
-    system.hash(&mut hasher);
-    if mock_scope.is_some_and(|scope| scope != DEFAULT_MOCK_SCOPE) {
-        mock_scope.hash(&mut hasher);
-    }
-    format!("{:016x}", hasher.finish())
-}
-
-pub(crate) fn fixture_hash_for_request(request: &super::api::LlmRequestPayload) -> String {
-    fixture_hash(
-        &request.model,
-        &request.messages,
-        request.system.as_deref(),
-        request.mock_scope.as_deref(),
-    )
-}
-
-pub(crate) fn save_fixture(hash: &str, result: &LlmResult) {
-    let dir = get_fixture_dir();
-    if dir.is_empty() {
-        return;
-    }
-    let _ = std::fs::create_dir_all(&dir);
-    let path = format!("{dir}/{hash}.json");
-    let json = serde_json::json!({
-        "text": result.text,
-        "tool_calls": result.tool_calls,
-        "raw_tool_calls": result.raw_tool_calls,
-        "input_tokens": result.input_tokens,
-        "output_tokens": result.output_tokens,
-        "cache_read_tokens": result.cache_read_tokens,
-        "cache_write_tokens": result.cache_write_tokens,
-        "model": result.model,
-        "provider": result.provider,
-        "thinking": result.thinking,
-        "thinking_summary": result.thinking_summary,
-        "stop_reason": result.stop_reason,
-        "blocks": result.blocks,
-        "logprobs": result.logprobs,
-    });
-    let _ = std::fs::write(
-        &path,
-        serde_json::to_string_pretty(&json).unwrap_or_default(),
-    );
-}
-
-pub(crate) fn load_fixture(hash: &str) -> Option<LlmResult> {
-    let dir = get_fixture_dir();
-    if dir.is_empty() {
-        return None;
-    }
-    let path = format!("{dir}/{hash}.json");
-    let content = std::fs::read_to_string(&path).ok()?;
-    let json: serde_json::Value = serde_json::from_str(&content).ok()?;
-    Some(LlmResult {
-        attempts: Default::default(),
-        text_projection: None,
-        served_fast: false,
-        text: json["text"].as_str().unwrap_or("").to_string(),
-        tool_calls: json["tool_calls"].as_array().cloned().unwrap_or_default(),
-        raw_tool_calls: RawProviderToolCall::array_from_value(&json["raw_tool_calls"]).ok()?,
-        input_tokens: json["input_tokens"].as_i64().unwrap_or(0),
-        output_tokens: json["output_tokens"].as_i64().unwrap_or(0),
-        cache_read_tokens: json["cache_read_tokens"].as_i64().unwrap_or(0),
-        cache_write_tokens: json["cache_write_tokens"]
-            .as_i64()
-            .or_else(|| json["cache_creation_input_tokens"].as_i64())
-            .unwrap_or(0),
-        cache_supported: json["cache_supported"].as_bool().unwrap_or(true),
-        model: json["model"].as_str().unwrap_or("").to_string(),
-        provider: json["provider"].as_str().unwrap_or("mock").to_string(),
-        thinking: json["thinking"].as_str().map(|s| s.to_string()),
-        thinking_summary: json["thinking_summary"].as_str().map(|s| s.to_string()),
-        stop_reason: json["stop_reason"].as_str().map(|s| s.to_string()),
-        blocks: json["blocks"].as_array().cloned().unwrap_or_default(),
-        logprobs: json["logprobs"].as_array().cloned().unwrap_or_default(),
-        telemetry: serde_json::from_value(json["telemetry"].clone()).unwrap_or_default(),
-    })
 }
 
 /// Generate stub argument values for required parameters in a tool schema.
@@ -1385,6 +1370,14 @@ pub(crate) fn mock_llm_response(
         record_mock_receipt(request.session_id.as_deref(), source, receipt);
     }
 
+    if let Some((call, live_after_calls)) = mock_prefix_miss(request.cli_llm_mock_scope) {
+        return Err(diverged_prefix_error(
+            call,
+            live_after_calls,
+            requested_scope,
+            &match_text,
+        ));
+    }
     if cli_llm_mock_replay_active_for_scope(request.cli_llm_mock_scope) {
         return Err(unmatched_cli_prompt_error(&match_text));
     }

@@ -14,6 +14,8 @@ use crate::value::{
 use crate::vm::Vm;
 use crate::wait_for_graph::{channel_target, ChannelTarget, WaitGuard};
 
+mod channel_send;
+
 pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
     // sync
     &SYNC_RELEASE_BUILTIN_DEF,
@@ -362,7 +364,6 @@ fn channel_send_wait(vm: &Vm, target: ChannelTarget) -> Result<Option<WaitGuard>
     }
     vm.wait_for_graph
         .wait_for_channel_send(&vm.runtime_context.task_id, target)
-        .map(Some)
 }
 
 fn channel_receive_wait(vm: &Vm, channels: &[VmValue]) -> Result<Option<WaitGuard>, VmError> {
@@ -381,7 +382,6 @@ fn channel_receive_wait(vm: &Vm, channels: &[VmValue]) -> Result<Option<WaitGuar
     }
     vm.wait_for_graph
         .wait_for_channel_receive(&vm.runtime_context.task_id, targets)
-        .map(Some)
 }
 
 pub(crate) fn register_concurrency_builtins(vm: &mut Vm) {
@@ -1352,48 +1352,7 @@ async fn send_builtin(
     ctx: crate::vm::AsyncBuiltinCtx,
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
-    if args.len() < 2 {
-        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-            "send: requires channel and value",
-        ))));
-    }
-    if let VmValue::Channel(ch) = &args[0] {
-        let vm = current_async_vm(&ctx, "send");
-        let target = channel_target(ch);
-        let mut closed_rx = ch.subscribe_closed();
-        if ch.is_closed() || *closed_rx.borrow() {
-            return Err(channel_closed_error("send", ch.name.as_ref()));
-        }
-        let val = args[1].clone();
-        let val = match ch.sender.try_send(val) {
-            Ok(()) => {
-                vm.wait_for_graph.notify_channel_send(&target);
-                return Ok(VmValue::Bool(true));
-            }
-            Err(tokio::sync::mpsc::error::TrySendError::Full(val)) => val,
-            Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
-                return Err(channel_closed_error("send", ch.name.as_ref()));
-            }
-        };
-        let _wait = channel_send_wait(&vm, target.clone())?;
-        tokio::select! {
-            biased;
-            _ = closed_rx.changed() => Err(channel_closed_error("send", ch.name.as_ref())),
-            result = ch.sender.send(val) => {
-                match result {
-                    Ok(()) => {
-                        vm.wait_for_graph.notify_channel_send(&target);
-                        Ok(VmValue::Bool(true))
-                    }
-                    Err(_) => Err(channel_closed_error("send", ch.name.as_ref())),
-                }
-            }
-        }
-    } else {
-        Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-            "send: first argument must be a channel",
-        ))))
-    }
+    channel_send::send(ctx, args).await
 }
 
 #[harn_builtin(

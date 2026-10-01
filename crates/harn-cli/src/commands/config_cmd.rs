@@ -167,15 +167,10 @@ fn legacy_provider_layer() -> Result<Option<harn_vm::config::ConfigLayer>, Strin
     let path = if let Ok(path) = env::var("HARN_PROVIDERS_CONFIG") {
         PathBuf::from(path)
     } else {
-        let Some(path) = harn_vm::config::user_config_path_for_os(
-            env::consts::OS,
-            env::var("HOME").ok().as_deref(),
-            env::var("XDG_CONFIG_HOME").ok().as_deref(),
-            env::var("APPDATA").ok().as_deref(),
-        ) else {
+        let Some(path) = harn_vm::llm_config::user_providers_config_path() else {
             return Ok(None);
         };
-        path.with_file_name("providers.toml")
+        path
     };
     if !path.is_file() {
         return Ok(None);
@@ -285,14 +280,9 @@ fn user_config_paths() -> Vec<PathBuf> {
     if let Some(paths) = split_env_paths("HARN_CONFIG_USER") {
         return paths;
     }
-    harn_vm::config::user_config_path_for_os(
-        env::consts::OS,
-        env::var("HOME").ok().as_deref(),
-        env::var("XDG_CONFIG_HOME").ok().as_deref(),
-        env::var("APPDATA").ok().as_deref(),
-    )
-    .into_iter()
-    .collect()
+    harn_vm::user_dirs::config_file("config.toml")
+        .into_iter()
+        .collect()
 }
 
 fn managed_config_paths() -> Vec<PathBuf> {

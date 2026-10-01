@@ -32,7 +32,7 @@ These are the only tools you can call. Any name not listed here will be rejected
 
 ## Example (illustrative shape only — `<tool>` stands in for a real tool from the list above)
 
-A whole-file body rides the verbatim channel, so nothing in it is escaped:
+A whole-file body rides the verbatim channel, so nothing in it is escaped. The empty line before `BODY` is the file's final newline:
 
 ```tool
 { "name": "<tool>", "args": { "path": "README.md", "content": "<<BODY" } }
@@ -46,6 +46,7 @@ echo hi
 ```
 
 Done.
+
 BODY
 ```
 

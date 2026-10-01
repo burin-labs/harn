@@ -150,7 +150,7 @@ pub(super) fn llm_model_defaults_builtin(
     Ok(VmValue::dict(dict))
 }
 
-/// Return the fully-merged llm_call options for `opts`. Requires opts.model.
+/// Return merged call options. An omitted model uses normal dispatch defaults.
 #[harn_builtin(
     exposure = "harness.llm.resolved_options",
     effects = ["llm.read@dynamic"],
@@ -168,18 +168,28 @@ pub(super) fn llm_resolved_options_builtin(
     let model = opts
         .get("model")
         .map(|v| v.display())
-        .filter(|s| !s.is_empty())
-        .ok_or_else(|| {
-            VmError::Runtime("llm_resolved_options: opts.model is required".to_string())
-        })?;
+        .filter(|s| !s.is_empty());
     let user_provider = opts
         .get("provider")
         .map(|v| v.display())
         .filter(|s| !s.is_empty());
-    let (resolved_id, provider_from_alias) = llm_config::resolve_model(&model);
-    let final_provider = user_provider.unwrap_or_else(|| {
-        provider_from_alias.unwrap_or_else(|| llm_config::infer_provider(&resolved_id))
-    });
+    let (resolved_id, final_provider) = if let Some(model) = model {
+        let (resolved_id, provider_from_alias) = llm_config::resolve_model(&model);
+        let provider = user_provider.unwrap_or_else(|| {
+            provider_from_alias.unwrap_or_else(|| llm_config::infer_provider(&resolved_id))
+        });
+        (resolved_id, provider)
+    } else {
+        let mut defaults_options = opts.clone();
+        defaults_options.remove("model");
+        if user_provider.is_none() {
+            defaults_options.remove("provider");
+        }
+        let options = Some(defaults_options);
+        let provider = crate::llm::helpers::vm_resolve_provider(&options);
+        let model = crate::llm::helpers::vm_resolve_model(&options, &provider)?;
+        (model, provider)
+    };
     let defaults = llm_config::model_params_for_route(&final_provider, &resolved_id);
     let mut out = opts.clone();
     for (k, v) in &defaults {
@@ -282,7 +292,7 @@ fn llm_complementary_reviewer_builtin(
     Ok(json_to_vm_value(&json))
 }
 
-fn parse_complementary_reviewer_options(
+pub(super) fn parse_complementary_reviewer_options(
     value: Option<&VmValue>,
 ) -> Result<llm_config::ComplementaryReviewerOptions, VmError> {
     let dict = value.and_then(|value| value.as_dict()).ok_or_else(|| {
@@ -318,11 +328,37 @@ fn parse_complementary_reviewer_options(
         })?;
     let max_price_multiplier = dict
         .get("max_price_multiplier")
-        .map(vm_value_as_f64)
+        .map(|value| vm_value_as_f64(value, "max_price_multiplier"))
         .transpose()?;
     if max_price_multiplier.is_some_and(|value| !value.is_finite() || value <= 0.0) {
         return Err(VmError::Runtime(
             "llm_complementary_reviewer: max_price_multiplier must be positive".to_string(),
+        ));
+    }
+    let min_price_cap_per_mtok = dict
+        .get("min_price_cap_per_mtok")
+        .map(|value| vm_value_as_f64(value, "min_price_cap_per_mtok"))
+        .transpose()?;
+    let max_price_cap_per_mtok = dict
+        .get("max_price_cap_per_mtok")
+        .map(|value| vm_value_as_f64(value, "max_price_cap_per_mtok"))
+        .transpose()?;
+    if min_price_cap_per_mtok.is_some_and(|value| !value.is_finite() || value <= 0.0) {
+        return Err(VmError::Runtime(
+            "llm_complementary_reviewer: min_price_cap_per_mtok must be positive".to_string(),
+        ));
+    }
+    if max_price_cap_per_mtok.is_some_and(|value| !value.is_finite() || value <= 0.0) {
+        return Err(VmError::Runtime(
+            "llm_complementary_reviewer: max_price_cap_per_mtok must be positive".to_string(),
+        ));
+    }
+    if min_price_cap_per_mtok
+        .zip(max_price_cap_per_mtok)
+        .is_some_and(|(floor, ceiling)| floor > ceiling)
+    {
+        return Err(VmError::Runtime(
+            "llm_complementary_reviewer: min_price_cap_per_mtok must not exceed max_price_cap_per_mtok".to_string(),
         ));
     }
     Ok(llm_config::ComplementaryReviewerOptions {
@@ -330,16 +366,18 @@ fn parse_complementary_reviewer_options(
         author_provider,
         intent,
         max_price_multiplier,
+        min_price_cap_per_mtok,
+        max_price_cap_per_mtok,
     })
 }
 
-fn vm_value_as_f64(value: &VmValue) -> Result<f64, VmError> {
+fn vm_value_as_f64(value: &VmValue, field: &str) -> Result<f64, VmError> {
     match value {
         VmValue::Float(value) => Ok(*value),
         VmValue::Int(value) => Ok(*value as f64),
         other => Err(VmError::Runtime(format!(
-            "llm_complementary_reviewer: max_price_multiplier must be numeric, got {}",
-            other.type_name()
+            "llm_complementary_reviewer: {field} must be numeric, got {}",
+            other.type_name(),
         ))),
     }
 }

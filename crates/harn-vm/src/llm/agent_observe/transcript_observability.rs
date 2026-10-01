@@ -455,6 +455,17 @@ pub(super) fn dump_llm_request(
             record_served_message_definition(message_id);
         }
     }
+    for definition in served_context_receipts::output_schema_definitions(opts, &payload) {
+        let Some(schema_id) = definition
+            .get("content_hash")
+            .and_then(serde_json::Value::as_str)
+        else {
+            continue;
+        };
+        if output_schema_needs_definition(schema_id) && append_llm_transcript_entry(&definition) {
+            record_output_schema_definition(schema_id);
+        }
+    }
 
     let structural_experiment = opts
         .applied_structural_experiment
@@ -557,6 +568,7 @@ pub(super) fn dump_llm_request(
         "route_policy": opts.route_policy.as_label(),
         "fallback_chain": opts.fallback_chain.clone(),
         "routing_decision": opts.routing_decision.clone(),
+        "resolution": opts.resolution,
     });
     project_call_stage(&mut request_event, opts.call_stage.as_deref());
     if verbose_llm_transcript_enabled() {
@@ -653,6 +665,7 @@ pub(super) fn dump_llm_response(
         // (an IDE host bug report) was blind to output-cap cuts. `null` when the
         // provider reported nothing.
         "stop_reason": result.stop_reason,
+        "effective_reasoning_effort": result.telemetry.effective_reasoning_effort,
         "response_ms": response_ms,
         // Server-side runtime telemetry (Ollama timings, llama.cpp prefill /
         // decode breakdown, etc.). Empty for providers that report nothing.

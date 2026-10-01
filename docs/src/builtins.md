@@ -1949,14 +1949,14 @@ See [LLM calls and agent loops](llm-and-agents.md) for full documentation.
 | `harness.llm.model_info(model)` | model: string | dict | Return resolved model/provider metadata plus normalized `family`/`lineage`, catalog entry, capabilities, API-key availability, and QC default |
 | `harness.llm.model_ladder(name)` | name: string | dict/nil | Return one named catalog `[model_ladders.<name>]` row with its label and ordered route steps; unknown names return `nil` |
 | `harness.llm.pick_model(target, options?)` | target: string, options: dict | dict | Resolve a model alias or tier to `{id, provider, tier}` |
-| `harness.llm.complementary_reviewer(options)` | options: `{author_model, author_provider?, intent?, max_price_multiplier?}` | dict | Pick a different-family reviewer model for `review`, `critique`, or `plan_review`, returning the selected model, fallback reason when needed, and estimated incremental cost |
+| `harness.llm.complementary_reviewer(options)` | options: `{author_model, author_provider?, intent?, max_price_multiplier?, min_price_cap_per_mtok?, max_price_cap_per_mtok?}` | dict | Pick a different-family reviewer model for `review`, `critique`, or `plan_review`, returning the selected model, fallback reason when needed, and estimated incremental cost. The selector applies the relative price cap, raises it to the optional floor, then limits it to the optional ceiling; candidates without catalog pricing cannot pass a cap. |
 | `harness.llm.infer_provider(model_id)` | model_id: string | string | Infer provider from model ID (e.g. `"claude-*"` → `"anthropic"`) |
 | `harness.llm.model_tier(model_id)` | model_id: string | string | Get capability tier: `"small"`, `"mid"`, or `"frontier"` |
 | `harness.llm.healthcheck(provider?, options?)` | provider: string or `{provider, api_key?, model?}`, options: `{api_key?, model?}` or model string | dict | Validate a configured provider healthcheck. Returns `{provider, valid, message, metadata}`; `api_key` lets hosts validate a candidate key without first exporting it. For OpenAI-compatible `/models` healthchecks, passing a `model` (positional, `{model: "..."}`, or `{provider, model: "..."}`) verifies the selected model/alias is served and surfaces distinct `metadata.category` values such as `unreachable`, `bad_status`, `model_missing`, and `invalid_url` |
 | `harness.llm.apply_reasoning_policy(opts)` | opts: dict | dict | Apply Harn's provider-aware `reasoning_policy` lowering to a `harness.llm.call` option dict, preserving caller-supplied `thinking` or `effort` |
 | `harness.llm.rate_limit(provider, options?)` | provider: string, options: dict | int/nil/bool/dict | Set (`{rpm: N, tpm: N, input_tpm: N, output_tpm: N, concurrency: N}`), query legacy RPM, query rich details with `{details: true}`, or clear (`{rpm: 0}`) per-provider rate limits |
 | `harness.llm.providers()` | — | list | List all configured provider names |
-| `harness.llm.providers()` | — | list | Per-provider availability + credential snapshot: `[{name, available, credential_status}, ...]`. `credential_status` is one of `"ok"`, `"missing"`, `"not_required"`, `"deferred"`, `"needs_user_approval"` (a stored credential that only a system dialog this process does not show could release) |
+| `harness.llm.providers()` | — | list | Per-provider availability + credential snapshot: `[{name, available, credential_status}, ...]`. `credential_status` is one of `"ok"`, `"missing"`, `"not_required"`, `"deferred"`, `"needs_user_approval"` (a stored credential that only a system dialog this process does not show could release), `"region_unconfigured"`, or `"credentials_unconfigured"` (a platform-managed provider such as Bedrock whose region or credential source does not resolve without the network; `available` is then false) |
 | `harness.llm.available_providers()` | — | list | List providers usable in the current environment (auth configured or no auth required) |
 | `harness.llm.known_models()` | — | list | List configured model alias names |
 | `harness.llm.qc_default_model(provider)` | provider: string | string/nil | Return the configured cheap QC/repair model for a provider, honoring `BURIN_QC_MODEL` |
@@ -1966,7 +1966,7 @@ See [LLM calls and agent loops](llm-and-agents.md) for full documentation.
 | `harness.llm.catalog_refresh(options?)` | `options?: dict\|nil` | dict | Refresh the process-wide provider/model catalog overlay from the configured hosted catalog, validating the remote document before installing it |
 | `harness.llm.config(provider?)` | provider: string | dict | Get provider config (base_url, auth_style, etc.) |
 | `llm_cost(model, input_tokens, output_tokens)` | model: string, input_tokens: int, output_tokens: int | decimal | Estimate USD cost (exact `decimal`) from catalog pricing, falling back to embedded pricing |
-| `harness.llm.session_cost()` | — | dict | Session totals: `{total_cost, input_tokens, output_tokens, call_count}` |
+| `harness.llm.session_cost()` | — | dict | Session usage: logical `call_count`, physical `provider_call_count`, tokens, nullable measured `total_cost` and `cost_usd`, `known_cost_usd`, `unpriced_calls`, `usage_unknown_calls`; `budget_charged_usd` separately reports the admission charge, including uncertain reservations |
 | `harness.llm.budget(max_cost)` | max_cost: float | nil | Set session budget in USD. LLM calls pre-flight and throw if projected cost would exceed it |
 | `harness.llm.budget_remaining()` | — | float or nil | Remaining budget (nil if no budget set) |
 | `tiktoken_count_tokens(text, model)` | text: string, model: string | int | Count text with the selected tiktoken encoder for known OpenAI models and labeled Claude/Gemini approximations |
@@ -2631,10 +2631,17 @@ tool registry dict.
 | `composition_typescript_declarations(manifest)` | manifest: dict | string | Emit declaration-only TypeScript bindings from the manifest |
 | `composition_crystallization_trace(report, options?)` | report: dict, options?: dict | dict | Convert a composition report into crystallization trace input |
 | `harness.tools.mcp_tools(registry)` | registry: dict | nil | Register tools for MCP serving |
-| `harness.tools.mcp_resource(config)` | config: dict | nil | Register a static resource (`{uri, name, text, description?, mime_type?}`) |
-| `harness.tools.mcp_resource_template(config)` | config: dict | nil | Register a resource template (`{uri_template, name, handler, description?, mime_type?, completions?}`); `completions` maps URI variable names to static suggestion lists or completion closures |
-| `harness.tools.mcp_prompt(config)` | config: dict | nil | Register a prompt (`{name, handler, description?, arguments?}`); prompt arguments may include `suggestions`/`completions` or a `complete` closure for MCP `completion/complete` |
+| `harness.tools.mcp_resource(config)` | config: dict | nil | Register a static resource (`{uri, name, text, title?, description?, mime_type?, meta?}`) |
+| `harness.tools.mcp_resource_template(config)` | config: dict | nil | Register a resource template (`{uri_template, name, handler, title?, description?, mime_type?, completions?}`); `completions` maps declared URI variables to static suggestion lists or completion closures |
+| `harness.tools.mcp_prompt(config)` | config: dict | nil | Register a prompt (`{name, handler, title?, description?, arguments?}`); prompt arguments accept `name`, optional `title`, `description`, `required`, and `suggestions`/`completions` or a `complete` closure |
 | `harness.tools.mcp_report_progress(progress, opts?)` | progress: number, opts?: dict | bool | Emit a `notifications/progress` update for the in-flight MCP tool call (no-op when the client did not opt in via `_meta.progressToken`). `opts`: `{total?: number, message?: string, token?: string\|number}` |
+
+Resource, template, and prompt declarations reject unknown fields, mistyped string fields,
+duplicate resource URIs or prompt names, and malformed arguments or completion
+sources. Resource URIs must parse as absolute URIs; resource templates support
+simple `{name}` variables and may only offer completions for declared variables.
+`harn serve mcp` refuses the whole candidate if a declaration fails, even when
+the script catches the individual error. Static resource `text` must be a string.
 
 The `composition_*` builtins back [Governed Code Mode](./code-mode.md). The
 executor is read-only: it rejects imports, writes, process execution, network
@@ -2780,6 +2787,26 @@ paths outside the workspace are also denied unless `external_roots` explicitly
 allows the root or `allow_external_paths: true` is set. Set
 `allow_sensitive_paths: true` only when a host already mediates secret reads.
 
+Each `external_roots` entry grants an access mode. Write it as
+`{path: "/opt/fixtures", access: "read"}` or
+`{path: "/opt/scratch", access: "read_write"}`. `access` defaults to `read`,
+and a bare path string also means `read`. Under a `read` root:
+
+- the approval boundary refuses any call that is not known to be read-only
+  (side effect `workspace_write` or stronger, or a non-read tool kind) with
+  the refusal id `external_root_read_only`, whose reason names the path, the
+  root, and its mode. This holds even with `allow_external_paths: true`.
+
+An approval-policy root does not by itself grant filesystem access. The
+`harness.fs.*` builtins and confined child processes read only the capability
+policy's `read_only_roots`, so a caller-authored approval policy cannot widen
+the parent's filesystem ceiling. A host that wants a `read` root readable by
+those builtins and children projects it into `read_only_roots` as well.
+
+When roots nest, the deepest root containing a path decides its mode. Each
+decision receipt lists the roots that governed its declared paths, with their
+modes, under `context.external_roots`.
+
 `ask` and `require_approval` call the host via the canonical ACP
 `session/request_permission` request and **fail closed** if the host does not
 implement it. The prompt payload includes a `policyDecision` receipt with the
@@ -2829,15 +2856,20 @@ const managed_enterprise_policy = {
     {deny: {domain: ["*.pastebin.com", "*.ngrok.io"]}},
     {deny: {path: ["**/.env*", "**/.aws/credentials"]}}
   ],
-  external_roots: ["/tmp/harn-approved"]
+  external_roots: [
+    {path: "/opt/reference", access: "read"},
+    {path: "/tmp/harn-approved", access: "read_write"}
+  ]
 }
 ```
 
 Policies compose
 across nested scopes with most-restrictive intersection: auto-deny and
 require-approval take the union, while `auto_approve` and
-`write_path_allowlist` take the intersection. Rule lists concatenate and retain
-deny/ask/allow precedence; repeat limits keep the smaller threshold.
+`write_path_allowlist` take the intersection. `external_roots` also take the
+intersection, and a root both scopes name keeps the narrower mode. Rule lists
+concatenate and retain deny/ask/allow precedence; repeat limits keep the
+smaller threshold.
 
 Example (`agent.harn`):
 

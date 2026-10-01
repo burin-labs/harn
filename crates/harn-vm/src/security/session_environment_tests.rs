@@ -27,6 +27,7 @@ fn env_grant(name: &str, var: &str, expose: Option<&str>) -> GrantSpec {
         },
         expose_as_env: expose.map(str::to_string),
         for_command: None,
+        expose_to: Default::default(),
     }
 }
 
@@ -39,6 +40,7 @@ fn secret_grant(name: &str, account: &str, key: &str, expose: Option<&str>) -> G
         },
         expose_as_env: expose.map(str::to_string),
         for_command: None,
+        expose_to: Default::default(),
     }
 }
 
@@ -57,6 +59,7 @@ fn command_grant(
         },
         expose_as_env: Some(expose.to_string()),
         for_command: Some(for_command.to_string()),
+        expose_to: Default::default(),
     }
 }
 
@@ -68,6 +71,7 @@ fn literal_grant(name: &str, value: &str, expose: Option<&str>) -> GrantSpec {
         },
         expose_as_env: expose.map(str::to_string),
         for_command: None,
+        expose_to: Default::default(),
     }
 }
 
@@ -387,12 +391,14 @@ fn receipts_record_shape_and_never_the_value() {
                 source_kind: "env".to_string(),
                 exposed_as_env: Some("FIREWORKS_API_KEY".to_string()),
                 for_command: None,
+                exposed_to: GrantAudience::Session,
             },
             GrantReceipt {
                 name: "gh_token".to_string(),
                 source_kind: "secret_store".to_string(),
                 exposed_as_env: None,
                 for_command: None,
+                exposed_to: GrantAudience::Session,
             },
         ]
     );
@@ -647,6 +653,7 @@ fn for_command_requires_expose_and_rejects_paths() {
             },
             expose_as_env: None,
             for_command: Some("gh".to_string()),
+            expose_to: Default::default(),
         }],
         &no_env,
     )
@@ -663,6 +670,7 @@ fn for_command_requires_expose_and_rejects_paths() {
             },
             expose_as_env: Some("GH_TOKEN".to_string()),
             for_command: Some("/usr/bin/gh".to_string()),
+            expose_to: Default::default(),
         }],
         &no_env,
     )
@@ -705,4 +713,157 @@ fn a_case_insensitive_insert_adds_a_new_key_when_none_matches() {
     let mut map = BTreeMap::new();
     insert_env_value_case_insensitive(&mut map, "HOME", "/root".to_string());
     assert_eq!(map.get("HOME").map(String::as_str), Some("/root"));
+}
+
+fn in_process_grant(name: &str, var: &str, expose: &str) -> GrantSpec {
+    GrantSpec {
+        expose_to: GrantAudience::InProcess,
+        ..env_grant(name, var, Some(expose))
+    }
+}
+
+/// The in-process audience is visible to Harn's own reader and to nothing a
+/// child receives. The session-scoped grant beside it is the control: the
+/// same builders must still hand that one to children, or the exclusion
+/// below would pass on builders that hand children nothing at all.
+#[test]
+fn an_in_process_grant_reaches_the_in_process_reader_and_no_child() {
+    let env = env_from(&[
+        ("LAUNCHER_PROVIDER_KEY", "provider-value"),
+        ("LAUNCHER_SESSION_KEY", "session-value"),
+    ]);
+    let environment = SessionEnvironment::launch(
+        EnvironmentPolicyKind::Granted,
+        vec![
+            in_process_grant("provider", "LAUNCHER_PROVIDER_KEY", "PROVIDER_KEY"),
+            env_grant("session", "LAUNCHER_SESSION_KEY", Some("SESSION_KEY")),
+        ],
+        &env,
+    )
+    .unwrap();
+    let never = |_: &str, _: &str| None;
+
+    assert_eq!(
+        environment
+            .env_exposure_for("PROVIDER_KEY", &never)
+            .unwrap(),
+        Some("provider-value".to_string()),
+        "Harn's own reader must see the in-process grant",
+    );
+    for overlay in [
+        environment.env_exposure(&never).unwrap(),
+        environment
+            .env_exposure_for_command("/usr/bin/env", &never)
+            .unwrap(),
+    ] {
+        let names: Vec<&str> = overlay.iter().map(|(name, _)| name.as_str()).collect();
+        assert_eq!(
+            names,
+            vec!["SESSION_KEY"],
+            "a child overlay must carry the session grant and never the in-process one",
+        );
+    }
+    let names = environment.admitted_environment_names();
+    assert!(names.contains(&"SESSION_KEY".to_string()));
+    assert!(
+        !names.contains(&"PROVIDER_KEY".to_string()),
+        "admitted names describe what a child could see; the in-process name is not one",
+    );
+}
+
+#[test]
+fn an_in_process_grant_is_receipted_with_its_audience() {
+    let env = env_from(&[("LAUNCHER_PROVIDER_KEY", "provider-value")]);
+    let environment = SessionEnvironment::launch(
+        EnvironmentPolicyKind::Granted,
+        vec![in_process_grant(
+            "provider",
+            "LAUNCHER_PROVIDER_KEY",
+            "PROVIDER_KEY",
+        )],
+        &env,
+    )
+    .unwrap();
+    let receipts = environment.receipts();
+    assert_eq!(receipts[0].exposed_to, GrantAudience::InProcess);
+    assert_eq!(receipts[0].child_visible_env(), None);
+    let json = serde_json::to_string(&receipts).unwrap();
+    assert!(json.contains("\"exposed_to\":\"in_process\""), "{json}");
+    assert!(!json.contains("provider-value"), "receipt leaked the value");
+
+    // The default audience stays off the wire, so a record written before
+    // audiences existed and one written now read back identically.
+    let session = SessionEnvironment::launch(
+        EnvironmentPolicyKind::Granted,
+        vec![env_grant(
+            "provider",
+            "LAUNCHER_PROVIDER_KEY",
+            Some("PROVIDER_KEY"),
+        )],
+        &env,
+    )
+    .unwrap();
+    let json = serde_json::to_string(&session.receipts()).unwrap();
+    assert!(!json.contains("exposed_to"), "{json}");
+    assert_eq!(
+        session.receipts()[0].child_visible_env(),
+        Some("PROVIDER_KEY")
+    );
+}
+
+#[test]
+fn an_in_process_grant_needs_a_name_and_no_command() {
+    let env = env_from(&[("LAUNCHER_PROVIDER_KEY", "provider-value")]);
+    let without_expose = GrantSpec {
+        expose_to: GrantAudience::InProcess,
+        ..env_grant("provider", "LAUNCHER_PROVIDER_KEY", None)
+    };
+    assert_eq!(
+        SessionEnvironment::launch(EnvironmentPolicyKind::Granted, vec![without_expose], &env),
+        Err(EnvironmentPolicyError::InProcessWithoutExpose {
+            name: "provider".to_string()
+        })
+    );
+    let with_command = GrantSpec {
+        for_command: Some("gh".to_string()),
+        ..in_process_grant("provider", "LAUNCHER_PROVIDER_KEY", "PROVIDER_KEY")
+    };
+    let refusal =
+        SessionEnvironment::launch(EnvironmentPolicyKind::Granted, vec![with_command], &env)
+            .unwrap_err();
+    assert_eq!(
+        refusal,
+        EnvironmentPolicyError::InProcessWithCommand {
+            name: "provider".to_string()
+        }
+    );
+    assert_eq!(refusal.code(), "environment_policy.in_process_with_command");
+}
+
+#[test]
+fn an_in_process_grant_spec_round_trips_and_narrows_unchanged() {
+    let spec = in_process_grant("provider", "LAUNCHER_PROVIDER_KEY", "PROVIDER_KEY");
+    let json = serde_json::to_value(&spec).unwrap();
+    assert_eq!(json["expose_to"], "in_process");
+    let parsed: GrantSpec = serde_json::from_value(json).unwrap();
+    assert_eq!(parsed, spec);
+
+    let env = env_from(&[("LAUNCHER_PROVIDER_KEY", "provider-value")]);
+    let parent =
+        SessionEnvironment::launch(EnvironmentPolicyKind::Granted, vec![spec.clone()], &env)
+            .unwrap();
+    // A child may keep the grant as declared...
+    let child = parent
+        .narrow(EnvironmentPolicyKind::Granted, vec![spec.clone()])
+        .unwrap();
+    assert_eq!(child.grants()[0].audience(), GrantAudience::InProcess);
+    // ...but may not widen it to the session audience.
+    let widened = GrantSpec {
+        expose_to: GrantAudience::Session,
+        ..spec
+    };
+    assert!(matches!(
+        parent.narrow(EnvironmentPolicyKind::Granted, vec![widened]),
+        Err(EnvironmentPolicyError::ChildPolicyExceedsParent { .. })
+    ));
 }

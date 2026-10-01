@@ -40,7 +40,10 @@ mod agent_tool_governance;
 mod agent_tools;
 pub use agent_tools::handler_result::AGENT_TOOL_HANDLER_RESULT_SCHEMA;
 pub(crate) mod admission;
-pub use admission::{AdmissionMode, AdmissionReceipt, ConservativeLlmBudget};
+pub use admission::{
+    AdmissionMode, AdmissionReceipt, ConservativeLlmBudget, MachineSpendPolicy, MachineSpendQuota,
+    MachineSpendReceipt,
+};
 pub mod api;
 #[cfg(test)]
 mod api_routing_credentials_tests;
@@ -72,11 +75,13 @@ pub(crate) mod cost_route;
 #[cfg(test)]
 mod cost_route_pricing_tests;
 pub(crate) mod daemon;
-pub(crate) mod decision;
+pub mod decision;
 pub mod eval;
 pub(crate) mod fake;
 pub(crate) mod first_token;
+mod hash_replay;
 pub(crate) mod helpers;
+pub use helpers::admit_reasoning_literals;
 pub mod introspection;
 pub mod jsonl;
 pub mod local_profiles;
@@ -139,8 +144,10 @@ pub(crate) fn effort_probe_ungated() -> bool {
 pub(crate) fn catalog_may_shape_requested_reasoning() -> bool {
     !effort_probe_ungated()
 }
+mod effective_effort;
 pub(crate) mod reasoning_modes;
 pub mod reasoning_receipt;
+pub use effective_effort::{EffectiveReasoningEffort, ReasoningEffortSource};
 pub use reasoning_receipt::{
     dropped_reasoning_receipts, peek_reasoning_receipts, reset_reasoning_receipts, ReasoningReceipt,
 };
@@ -324,6 +331,7 @@ mod stream;
 pub(crate) mod tool_delimiter;
 pub(crate) mod tools;
 mod trace;
+pub(crate) use trace::LlmTraceRuntime;
 pub(crate) mod trigger_predicate;
 
 /// Process-environment mutation for the test suites, with one owner.
@@ -373,8 +381,8 @@ use self::stream_builtins::{llm_stream_builtin, llm_stream_call_impl, llm_stream
 use self::trace::trace_llm_call;
 
 pub use self::api::{
-    normalize_ollama_keep_alive, ollama_readiness, OllamaReadinessOptions, OllamaReadinessResult,
-    OllamaWarmupResult,
+    normalize_ollama_keep_alive, ollama_readiness, ollama_readiness_for_provider,
+    OllamaReadinessOptions, OllamaReadinessResult, OllamaWarmupResult,
 };
 
 #[cfg(feature = "llm-bench-internals")]
@@ -441,9 +449,10 @@ pub(crate) use self::call::{
     structured_safe_envelope_ok, SchemaLoopOutcome,
 };
 pub use self::cost::{
-    calculate_cost_for_provider, install_llm_cost_budget, install_llm_token_budget,
-    peek_llm_cost_budget, peek_llm_token_budget, peek_total_cost, peek_total_tokens,
-    set_llm_cost_budget, set_llm_token_budget, LlmBudgetGuard, LlmTokenBudgetGuard,
+    calculate_cost_for_provider, install_llm_cost_budget, install_llm_cost_budget_seeded,
+    install_llm_token_budget, peek_llm_cost_budget, peek_llm_token_budget, peek_total_cost,
+    peek_total_tokens, set_llm_cost_budget, set_llm_token_budget, LlmBudgetGuard,
+    LlmTokenBudgetGuard,
 };
 pub use self::healthcheck::{
     build_healthcheck_url, run_provider_healthcheck, run_provider_healthcheck_with_options,
@@ -1133,6 +1142,7 @@ mod tests {
     async fn execute_llm_call_retries_when_response_has_no_json_data() {
         reset_llm_state();
         mock::push_llm_mock(mock::LlmMock {
+            effective_reasoning_effort: Default::default(),
             text: "Analyzing the task carefully".to_string(),
             tool_calls: Vec::new(),
             raw_tool_calls: Vec::new(),
@@ -1156,6 +1166,7 @@ mod tests {
             stream_chunks: Vec::new(),
         });
         mock::push_llm_mock(mock::LlmMock {
+            effective_reasoning_effort: Default::default(),
             text: "{\"name\":\"Ada\"}".to_string(),
             tool_calls: Vec::new(),
             raw_tool_calls: Vec::new(),

@@ -121,11 +121,27 @@ impl Drop for LlmBudgetGuard {
 /// `BudgetExceeded`-categorised error which adapter codecs render as
 /// HTTP 429.
 pub fn install_llm_cost_budget(max_cost_usd: f64) -> LlmBudgetGuard {
+    install_llm_cost_budget_seeded(Some(max_cost_usd), 0.0)
+}
+
+/// Install a cost scope that has already spent `spent_usd`, with an optional
+/// ceiling. A durable session spans many dispatches (one per prompt, and a new
+/// process on resume); seeding is what makes its ceiling cover the whole
+/// session instead of restarting at $0 each time. Every reader of the running
+/// total (preflight projection, post-call check, `llm_budget_remaining`) sees
+/// the seed, and [`peek_total_cost`] read before the guard drops is the new
+/// session total to carry forward.
+pub fn install_llm_cost_budget_seeded(max_cost_usd: Option<f64>, spent_usd: f64) -> LlmBudgetGuard {
     let previous_budget = LLM_BUDGET.with(|b| b.borrow().to_owned());
     let previous_accumulated = LLM_ACCUMULATED_COST.with(|a| *a.borrow());
     let previous_observed = peek_observed_session_usage();
-    LLM_BUDGET.with(|b| *b.borrow_mut() = Some(max_cost_usd.max(0.0)));
-    LLM_ACCUMULATED_COST.with(|a| *a.borrow_mut() = 0.0);
+    LLM_BUDGET.with(|b| *b.borrow_mut() = max_cost_usd.map(|max| max.max(0.0)));
+    let seed = if spent_usd.is_finite() {
+        spent_usd.max(0.0)
+    } else {
+        0.0
+    };
+    LLM_ACCUMULATED_COST.with(|a| *a.borrow_mut() = seed);
     LLM_OBSERVED_USAGE.with(|u| *u.borrow_mut() = ObservedSessionUsage::EMPTY);
     LlmBudgetGuard {
         previous_budget,
@@ -756,7 +772,7 @@ pub(crate) fn cache_savings_usd_for_provider(
     cache_read_savings + cache_write_savings
 }
 
-fn accumulate_llm_usage(
+pub(crate) fn accumulate_llm_usage(
     model: &str,
     input_tokens: i64,
     output_tokens: i64,
@@ -765,13 +781,22 @@ fn accumulate_llm_usage(
     // Always attribute usage to the active `@step` (if any), even when
     // the per-call cost is zero — token-only step budgets need the
     // count regardless of pricing.
-    crate::step_runtime::record_step_llm_usage(model, input_tokens, output_tokens, cost)?;
+    let step_result =
+        crate::step_runtime::record_step_llm_usage(model, input_tokens, output_tokens, cost);
     let total_tokens = input_tokens.max(0) as u64 + output_tokens.max(0) as u64;
     if total_tokens > 0 {
         LLM_ACCUMULATED_TOKENS.with(|acc| {
             let mut slot = acc.borrow_mut();
             *slot = slot.saturating_add(total_tokens);
         });
+    }
+    // This response has already completed. Record every charge before any
+    // budget error can return, while preserving step/token/cost error priority.
+    LLM_ACCUMULATED_COST.with(|acc| {
+        *acc.borrow_mut() += cost;
+    });
+    step_result?;
+    if total_tokens > 0 {
         LLM_TOKEN_BUDGET.with(|budget| {
             if let Some(max) = *budget.borrow() {
                 let total = LLM_ACCUMULATED_TOKENS.with(|acc| *acc.borrow());
@@ -788,9 +813,6 @@ fn accumulate_llm_usage(
     if cost == 0.0 {
         return Ok(());
     }
-    LLM_ACCUMULATED_COST.with(|acc| {
-        *acc.borrow_mut() += cost;
-    });
     LLM_BUDGET.with(|budget| {
         if let Some(max) = *budget.borrow() {
             let total = LLM_ACCUMULATED_COST.with(|acc| *acc.borrow());
@@ -845,16 +867,52 @@ fn llm_cost_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError
 
 #[harn_builtin(exposure = "privileged_wire", effects = ["state.observe@const=llm-cost-ledger"], sig = "__llm_session_cost() -> dict", category = "llm.economics")]
 fn llm_session_cost_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    let (total_input, total_output, _duration, call_count) = super::trace::peek_trace_summary();
-    let total_cost = LLM_ACCUMULATED_COST.with(|acc| *acc.borrow());
+    let summary = super::trace::peek_trace_usage_summary();
+    let budget_charged_usd = super::admission::charged_upper_usd()
+        .unwrap_or_else(|| LLM_ACCUMULATED_COST.with(|acc| *acc.borrow()));
+    let measured_cost = summary
+        .cost
+        .cost_usd()
+        .map(VmValue::Float)
+        .unwrap_or(VmValue::Nil);
     let mut result = BTreeMap::new();
     if let Some(admission) = super::admission::receipt() {
         result.insert("admission".to_string(), admission);
     }
-    result.insert("total_cost".to_string(), VmValue::Float(total_cost));
-    result.insert("input_tokens".to_string(), VmValue::Int(total_input));
-    result.insert("output_tokens".to_string(), VmValue::Int(total_output));
-    result.insert("call_count".to_string(), VmValue::Int(call_count));
+    if let Some(machine_spend) = super::admission::machine_receipt()? {
+        result.insert("machine_spend".to_string(), machine_spend);
+    }
+    result.insert("total_cost".to_string(), measured_cost.clone());
+    result.insert(
+        "budget_charged_usd".to_string(),
+        VmValue::Float(budget_charged_usd),
+    );
+    result.insert(
+        "input_tokens".to_string(),
+        VmValue::Int(summary.input_tokens),
+    );
+    result.insert(
+        "output_tokens".to_string(),
+        VmValue::Int(summary.output_tokens),
+    );
+    result.insert("call_count".to_string(), VmValue::Int(summary.call_count));
+    result.insert(
+        "provider_call_count".to_string(),
+        VmValue::Int(summary.cost.provider_call_count),
+    );
+    result.insert(
+        "known_cost_usd".to_string(),
+        VmValue::Float(summary.cost.known_cost_usd),
+    );
+    result.insert("cost_usd".to_string(), measured_cost);
+    result.insert(
+        "unpriced_calls".to_string(),
+        VmValue::Int(summary.cost.unpriced_calls),
+    );
+    result.insert(
+        "usage_unknown_calls".to_string(),
+        VmValue::Int(summary.cost.usage_unknown_calls),
+    );
     Ok(VmValue::dict(result))
 }
 
@@ -875,12 +933,18 @@ fn llm_budget_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
 
 #[harn_builtin(exposure = "privileged_wire", effects = ["state.observe@const=llm-cost-budget"], sig = "__llm_budget_remaining() -> float?", category = "llm.economics")]
 fn llm_budget_remaining_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    let remaining = LLM_BUDGET.with(|budget| {
+    let session_remaining = LLM_BUDGET.with(|budget| {
         budget.borrow().map(|max| {
             let spent = LLM_ACCUMULATED_COST.with(|acc| *acc.borrow());
             max - spent
         })
     });
+    let execution_remaining = super::admission::execution_remaining_usd()?;
+    let machine_remaining = super::admission::machine_remaining_usd()?;
+    let remaining = [session_remaining, execution_remaining, machine_remaining]
+        .into_iter()
+        .flatten()
+        .reduce(f64::min);
     Ok(remaining.map(VmValue::Float).unwrap_or(VmValue::Nil))
 }
 
