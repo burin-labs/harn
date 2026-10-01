@@ -168,6 +168,7 @@ async fn execution_budget_starts_after_setup_and_stops_cpu_bound_code() {
     assert_eq!(
         result
             .work
+            .as_ref()
             .expect("timeout constructed a measured VM")
             .vm_steps,
         0
@@ -229,7 +230,14 @@ async fn imported_testing_skip_is_typed_and_stops_the_case() {
     )
     .await;
 
-    assert!(result.work.expect("skip retains measured work").vm_steps > 0);
+    assert!(
+        result
+            .work
+            .as_ref()
+            .expect("skip retains measured work")
+            .vm_steps
+            > 0
+    );
     assert!(!result.passed);
     assert_eq!(
         result.skip_reason.as_deref(),
