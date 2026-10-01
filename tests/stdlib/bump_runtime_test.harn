@@ -77,6 +77,8 @@ fn make_fake(config: dict = {}) {
       return cfg.revision_relation
     },
     base_sha: fn() { return cfg.base_sha },
+    preserve_repairs:
+      fn(_existing, _base) { return {ok: true, commits: [], conflicts: [], detail: ""} },
     apply_version: fn(_target, _revision) {
       record("apply_version", {tag: _target, revision: _revision})
       return {

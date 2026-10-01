@@ -26,4 +26,18 @@ for skill in harn-agent harn-de-slop harn-docs harn-orchestration harn-probe har
     fail "missing canonical skill $skill"
 done
 
+release_skill=crates/harn-skills/src/corpus/release-harn/SKILL.md
+[[ -f "$release_skill" ]] || fail "missing canonical release skill"
+grep -Fq 'docs/src/maintainer-release.md' "$release_skill" ||
+  fail "release skill must route to the maintainer procedure"
+for source in AGENTS.md .codex/skills/harn-release/SKILL.md .codex/skills/release-harn/SKILL.md; do
+  grep -Fq 'harn skill get release-harn --full' "$source" ||
+    fail "$source must discover the embedded release skill"
+done
+for source in AGENTS.md .codex/skills/harn-release/SKILL.md .codex/skills/release-harn/SKILL.md "$release_skill" docs/src/maintainer-release.md; do
+  if grep -Eq 'hosted-release\.yml|watch_harn_release|run_harn_release|release_harn\.harn|workflow run publish-release' "$source"; then
+    fail "$source contains a retired or competing release entry point"
+  fi
+done
+
 echo "Agent guidance is canonical and linked."

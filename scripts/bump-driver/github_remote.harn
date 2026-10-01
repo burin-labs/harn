@@ -9,6 +9,7 @@ import {
   GithubClientOptions,
   GithubMergeQueueMembership,
   GithubPullRequestUpsertRequest,
+  api_call,
   call_typed,
   github_branch_head,
   github_close_pr,
@@ -44,9 +45,67 @@ pub type GithubBumpRemoteConfig = {
   repo_dir?: string,
   source_revision?: string,
   package_test_receipt?: string,
+  bot_login?: string,
 }
 
 type GithubRepo = {owner: string, name: string}
+
+/** Older targets can parse the driver and reach its runtime-contract diagnostic. */
+type PublicationMetadata = {expected_branch_oid?: string, repair_commits?: list<string>, ...rest}
+
+type CommitIdentity = {
+  oid: string,
+  author: {user: {login: string, ...rest}?, ...rest},
+  signature: {isValid: bool, wasSignedByGitHub: bool, ...rest}?,
+  ...rest,
+}
+
+type CommitIdentityResponse = {
+  data?: {repository: {commit: CommitIdentity?, ...rest}?, ...rest}?,
+  errors?: list<unknown>,
+  ...rest,
+}
+
+fn __is_generated_commit(
+  harness: Harness,
+  repo: GithubRepo,
+  options: GithubClientOptions,
+  bot_login: string,
+  oid: string,
+) -> bool {
+  if regex_match("^[0-9a-f]{40}$", oid) == nil {
+    throw "bump-driver: commit identity requires a full commit ID"
+  }
+  const response: CommitIdentityResponse = schema_expect(
+    __must(
+      api_call(
+        harness,
+        {
+          path: "/graphql",
+          method: "POST",
+          body: {
+            query:
+              "query($owner:String!,$repo:String!,$oid:GitObjectID!){repository(owner:$owner,name:$repo){commit:object(oid:$oid){... on Commit{oid author{user{login}} signature{isValid wasSignedByGitHub}}}}}",
+            variables: {owner: repo.owner, repo: repo.name, oid: oid},
+          },
+          options: options,
+        },
+      ),
+      "commit identity lookup",
+    ),
+    schema_of(CommitIdentityResponse),
+  )
+  if len(response.errors ?? []) > 0 {
+    throw "bump-driver: commit identity lookup returned GraphQL errors"
+  }
+  const commit = response.data?.repository?.commit
+  if commit == nil || commit.oid != oid {
+    throw "bump-driver: commit identity lookup did not resolve the inspected commit"
+  }
+  return lowercase(commit.author.user?.login ?? "") == bot_login
+    && (commit.signature?.isValid ?? false)
+    && (commit.signature?.wasSignedByGitHub ?? false)
+}
 
 fn __repo(value: string) -> GithubRepo {
   const parts = split(trim(value), "/")
@@ -122,6 +181,9 @@ fn __publish_worktree(harness: Harness, publication: GithubWorktreeCommitRequest
 
 /** Bind the GitHub connector package to std/bump/live's provider boundary. */
 pub fn github_bump_remote(harness: Harness, config: GithubBumpRemoteConfig) -> LiveBumpRemote {
+  if !contains(schema_of(LiveBumpRemote).properties.keys(), "is_generated_commit") {
+    throw "bump-driver: target runtime lacks the authenticated repair identity contract; upgrade Harn before refreshing a consumer branch"
+  }
   const repo = __repo(config.repo)
   const release_repo = __repo(config.release_repo)
   if config.options != nil && config.token != nil {
@@ -129,6 +191,10 @@ pub fn github_bump_remote(harness: Harness, config: GithubBumpRemoteConfig) -> L
   }
   const options: GithubClientOptions = config.options
     ?? {installation_token: config.token ?? ""}
+  const bot_login = lowercase(trim(config.bot_login ?? "harn-release-bot[bot]"))
+  if bot_login == "" {
+    throw "bump-driver: bot login is required"
+  }
   return {
     latest_release_tag: fn() {
       const latest = __must(
@@ -179,6 +245,13 @@ pub fn github_bump_remote(harness: Harness, config: GithubBumpRemoteConfig) -> L
       const head = unwrap(result)
       return {available: true, oid: head.oid, detail: ""}
     },
+    is_generated_commit: fn(oid) { return __is_generated_commit(
+      harness,
+      repo,
+      options,
+      bot_login,
+      oid,
+    ) },
     fetch_base: fn(oid) {
       // The runner checks the package repo out with `persist-credentials:
       // false`, so `origin` carries no authentication. Supply the installation
@@ -200,7 +273,7 @@ pub fn github_bump_remote(harness: Harness, config: GithubBumpRemoteConfig) -> L
             "--no-tags",
             "--force",
             "origin",
-            config.base,
+            oid,
           ],
           cwd: config.repo_dir ?? ".",
           env: {HARN_BUMP_FETCH_TOKEN: github_bump_access_token(harness, options)},
@@ -210,7 +283,7 @@ pub fn github_bump_remote(harness: Harness, config: GithubBumpRemoteConfig) -> L
       const outcome: LiveBumpFetch = {
         ok: ok,
         detail: if ok {
-          "fetched ${config.base} while adopting ${oid}"
+          "fetched commit ${oid}"
         } else {
           trim(to_string(result.stderr ?? ""))
         },
@@ -275,6 +348,7 @@ pub fn github_bump_remote(harness: Harness, config: GithubBumpRemoteConfig) -> L
       return true
     },
     publish_commit: fn(request) {
+      const metadata: PublicationMetadata = schema_expect(request, schema_of(PublicationMetadata))
       const publication: GithubWorktreeCommitRequest = {
         owner: repo.owner,
         repo: repo.name,
@@ -285,6 +359,11 @@ pub fn github_bump_remote(harness: Harness, config: GithubBumpRemoteConfig) -> L
         base_oid: request.base_sha,
         create_branch: true,
         reset_branch: true,
+        expected_branch_oid: metadata.expected_branch_oid ?? "",
+        body: join(
+          (metadata.repair_commits ?? []).map({ oid -> "Harn-Repair-Commit: ${oid}" }),
+          "\n",
+        ),
         options: options,
       }
       const receipt = __must(

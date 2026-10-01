@@ -91,7 +91,16 @@ pub type BumpPrState = {
 }
 
 /** Inputs to one atomic provider-owned branch + signed-commit publication. */
-pub type BumpCommitRequest = {branch: string, base_sha: string, headline: string}
+pub type BumpCommitRequest = {
+  branch: string,
+  base_sha: string,
+  headline: string,
+  expected_branch_oid?: string,
+  repair_commits?: list<string>,
+}
+
+/** Repair patches carried onto refreshed files before validation and publication. */
+pub type BumpRepairs = {ok: bool, commits: list<string>, conflicts: list<string>, detail: string}
 
 /** Result of atomically publishing the bump branch and signed commit. */
 pub type BumpCommitResult = {oid: string, url: string, branch_action: string}
@@ -120,6 +129,7 @@ pub type BumpAdapter = {
   revision_relation: fn(string, string, string) -> BumpRevisionRelation,
   base_sha: fn() -> string,
   apply_version: fn(string, string) -> BumpApplyOutcome,
+  preserve_repairs: fn(BumpPrState?, string) -> BumpRepairs,
   run_validation: fn() -> BumpValidation,
   working_changes: fn() -> BumpChangeSet,
   remote_base_head: fn() -> BumpBaseHead,
@@ -145,6 +155,7 @@ pub type BumpOutcome = "not_ready" \
   | "validation_failed" \
   | "base_advanced" \
   | "base_conflict" \
+  | "repair_conflict" \
   | "closed_noop" \
   | "committed"
 
@@ -179,6 +190,8 @@ pub type BumpReceipt = {
   recovery: BumpRecovery,
   base_adoptions: int,
   lease_recovered: bool,
+  repair_commits: list<string>,
+  repair_conflicts: list<string>,
   commit_oid: string?,
   pr_action: BumpPrAction,
   pr_number: int?,
@@ -296,6 +309,8 @@ fn __bump_receipt_base(
     recovery: {kind: "none", base_oid: nil},
     base_adoptions: 0,
     lease_recovered: false,
+    repair_commits: [],
+    repair_conflicts: [],
     commit_oid: nil,
     pr_action: "none",
     pr_number: nil,
@@ -576,7 +591,27 @@ pub fn run_bump(options: BumpOptions, adapter: BumpAdapter) -> BumpReceipt {
           notes: receipt.notes + ["refresh failed: ${apply.detail}"],
         }
     }
-    if !apply.changed {
+    const repairs = adapter.preserve_repairs(existing, receipt.expected_base_oid ?? "")
+    receipt = receipt + {repair_commits: repairs.commits, repair_conflicts: repairs.conflicts}
+    if !repairs.ok {
+      return receipt
+        + {
+          outcome: "repair_conflict",
+          ok: false,
+          notes: receipt.notes
+            + [repairs.detail, "repair conflicts: ${join(repairs.conflicts, ", ")}"],
+        }
+    }
+    if len(repairs.commits) > 0 {
+      const repair_changes = adapter.working_changes()
+      receipt = receipt
+        + {
+          refreshed: (receipt.refreshed + repair_changes.additions + repair_changes.deletions)
+            .unique()
+            .to_list(),
+        }
+    }
+    if !apply.changed && len(repairs.commits) == 0 {
       return receipt
         + {
           outcome: "already_current",
@@ -653,7 +688,13 @@ pub fn run_bump(options: BumpOptions, adapter: BumpAdapter) -> BumpReceipt {
   // under the observed base lease. The provider adapter owns the worktree
   // encoding and branch mutation as one deep operation.
   const commit = adapter.publish_commit(
-    {branch: options.branch, base_sha: base_sha, headline: "chore: bump Harn runtime to ${target}"},
+    {
+      branch: options.branch,
+      base_sha: base_sha,
+      headline: "chore: bump Harn runtime to ${target}",
+      expected_branch_oid: existing?.head_oid ?? "",
+      repair_commits: receipt.repair_commits,
+    },
   )
   receipt = receipt + {commit_oid: commit.oid}
   // Phase 8 — if the refreshed branch tree already matches base, the bump is a

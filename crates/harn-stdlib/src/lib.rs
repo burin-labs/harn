@@ -446,6 +446,7 @@ pub const STDLIB_SOURCES: &[StdlibSource] = embedded_catalog!(StdlibSource, modu
     "security" => "stdlib/stdlib_security.harn",
     "pii" => "stdlib/stdlib_pii.harn",
     "bump/runtime" => "stdlib/bump/runtime.harn",
+    "bump/repairs" => "stdlib/bump/repairs.harn",
     "bump/live" => "stdlib/bump/live.harn",
 ]);
 

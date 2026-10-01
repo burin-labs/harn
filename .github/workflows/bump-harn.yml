@@ -275,6 +275,7 @@ jobs:
           GITHUB_APP_ID: ${{ secrets.app-client-id }}
           GITHUB_INSTALLATION_ID: ${{ steps.app-token.outputs.installation-id }}
           GITHUB_APP_PRIVATE_KEY: ${{ secrets.app-private-key }}
+          HARN_EXT_BUMP_BOT_LOGIN: ${{ steps.app-token.outputs.app-slug }}[bot]
           HARN_BUMP_TARGET_TAG: ${{ steps.resolve.outputs.version }}
           HARN_BUMP_SOURCE_REVISION: ${{ inputs.source-revision }}
           HARN_BUMP_REFRESH_COMMAND: ${{ inputs.refresh-command }}

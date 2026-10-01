@@ -543,25 +543,43 @@ const MERGE_ARTIFACTS = [
   {id: "catalog", gen: "gen-catalog", outputs: ["spec/catalog.json", "tree/src/"]},
   {id: "synced", gen: "sync-spec", outputs: ["spec/SPEC.md"]},
   {id: "payload", gen: "gen-payload", lifecycle: "release-package", outputs: ["out/bin"]},
+  {id: "handwritten", check: "check-handwritten", outputs: ["reviewed.txt"]},
 ]
 
 @test
 pipeline test_merge_attribute_covers_file_and_directory_outputs(harness: Harness, task: unknown) {
-  const attrs = "# generated\nspec/catalog.json -merge\ntree/src/** eol=lf -merge\n"
+  const attrs =
+    "# generated\nspec/catalog.json -merge\ntree/src/** eol=lf -merge\nspec/SPEC.md -merge\n"
   assert_eq(merge_attribute_errors(MERGE_ARTIFACTS, attrs), [])
 }
 
 @test
-pipeline test_merge_attribute_accepts_a_named_driver(harness: Harness, task: unknown) {
-  const attrs = "spec/catalog.json merge=harn-generated eol=lf\ntree/src/** -merge\n"
-  assert_eq(merge_attribute_errors(MERGE_ARTIFACTS, attrs), [])
+pipeline test_merge_attribute_rejects_a_named_driver(harness: Harness, task: unknown) {
+  const attrs =
+    "spec/catalog.json merge=harn-generated eol=lf\ntree/src/** -merge\nspec/SPEC.md -merge\n"
+  const errors = merge_attribute_errors(MERGE_ARTIFACTS, attrs)
+  assert_eq(len(errors), 1)
+  assert(contains(errors[0], "spec/catalog.json -merge"))
+}
+
+@test
+pipeline test_merge_attribute_rejects_a_later_override(harness: Harness, task: unknown) {
+  for attrs in [
+    "spec/catalog.json -merge merge=harn-generated\ntree/src/** -merge\nspec/SPEC.md -merge\n",
+    "spec/catalog.json -merge\nspec/catalog.json merge=harn-generated\ntree/src/** -merge\nspec/SPEC.md -merge\n",
+    "spec/catalog.json -merge\nspec/catalog.json !merge\ntree/src/** -merge\nspec/SPEC.md -merge\n",
+  ] {
+    const errors = merge_attribute_errors(MERGE_ARTIFACTS, attrs)
+    assert_eq(len(errors), 1)
+    assert(contains(errors[0], "spec/catalog.json -merge"))
+  }
 }
 
 @test
 pipeline test_merge_attribute_missing_output_is_named(harness: Harness, task: unknown) {
   const errors = merge_attribute_errors(
     MERGE_ARTIFACTS,
-    "spec/catalog.json eol=lf\ntree/src/** -merge\n",
+    "spec/catalog.json eol=lf\ntree/src/** -merge\nspec/SPEC.md -merge\n",
   )
   assert_eq(errors.count, 1)
   assert(contains(errors[0], "`spec/catalog.json`"))
@@ -569,21 +587,32 @@ pipeline test_merge_attribute_missing_output_is_named(harness: Harness, task: un
 }
 
 @test
-pipeline test_merge_attribute_ignores_sync_and_release_package_outputs(
+pipeline test_merge_attribute_covers_sync_and_ignores_release_package_outputs(
   harness: Harness,
   task: unknown,
 ) {
   const errors = merge_attribute_errors(MERGE_ARTIFACTS, "")
-  assert_eq(errors.count, 2)
-  assert(!contains(errors.join("\n"), "SPEC.md"))
+  assert_eq(errors.count, 3)
+  assert(contains(errors.join("\n"), "SPEC.md"))
   assert(!contains(errors.join("\n"), "out/bin"))
+  assert(!contains(errors.join("\n"), "reviewed.txt"))
+}
+
+@test
+pipeline test_merge_attribute_rejects_a_named_driver_for_synced_outputs(harness: Harness) {
+  const errors = merge_attribute_errors(
+    [{id: "synced", gen: "sync-spec", outputs: ["spec/SPEC.md"]}],
+    "spec/SPEC.md merge=harn-generated\n",
+  )
+  assert_eq(errors.count, 1)
+  assert(contains(errors[0], "spec/SPEC.md -merge"))
 }
 
 @test
 pipeline test_merge_attribute_commented_line_does_not_count(harness: Harness, task: unknown) {
   const errors = merge_attribute_errors(
     MERGE_ARTIFACTS,
-    "# spec/catalog.json -merge\ntree/src/** -merge\n",
+    "# spec/catalog.json -merge\ntree/src/** -merge\nspec/SPEC.md -merge\n",
   )
   assert_eq(errors.count, 1)
 }

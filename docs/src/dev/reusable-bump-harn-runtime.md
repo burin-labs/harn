@@ -24,6 +24,22 @@ declared refresh and validation commands.
 
 ## Minimal caller workflow
 
+An open bump pull request may contain consumer repair commits. Refresh replays
+non-bot repairs onto the new pin before the declared validation command runs.
+Signed bump commits retain `Harn-Repair-Commit` trailers, so later refreshes
+can replay those same repairs after the branch was flattened. Repair commits
+must remain fetchable by their recorded IDs. A missing commit fails the run.
+
+The GitHub adapter identifies generated commits by the configured publisher's
+GitHub login and a valid GitHub signature. A local Git author name is not
+identity evidence. Unsigned, unknown, or other publishers' commits are repairs;
+an unavailable identity lookup fails the run. Repair merge commits are refused.
+A patch conflict
+returns `repair_conflict` without publishing or arming auto-merge. Publication
+also rechecks the inspected pull-request head and refuses an observed change
+before replacing it. The receipt's `repair_commits` names the repair set, and
+`repair_conflicts` names contested paths.
+
 Drop this into the consuming repo. The only repo-specific parts are the trigger
 schedule and, when the default lock refresh is insufficient, the
 `refresh-command`, `format-command`, `finalize-refresh-command`, and `validate-command`.
@@ -199,6 +215,11 @@ The driver package declares the runtime floor it needs in
 `scripts/bump-driver/harn.toml`. A caller that repins `orchestration-sha` ahead
 of its runtime gets that floor as a diagnostic rather than a missing-capability
 failure part-way through a bump.
+
+Repair preservation also requires the `is_generated_commit` method in the
+target runtime's `LiveBumpRemote` contract. The GitHub driver checks that
+contract before it can refresh or publish a branch. Older runtimes are refused
+rather than silently refreshing without authenticated repair preservation.
 
 ## Security boundary
 

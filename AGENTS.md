@@ -248,23 +248,12 @@ live in [Engineering principles](docs/src/dev/engineering-principles.md):
 
 ## Release
 
-- Run live releases only through the `hosted-release.yml` workflow on
-  `burin-labs/harn-bump-fleet`, pinned to an exact current `origin/main` SHA,
-  and approve its protected `release` environment. Do not run the local
-  harness or `scripts/release_ship.sh` for a normal live release.
-- After the tag exists, resume durable post-tag proof from `harn-bump-fleet`
-  with
-  `scripts/watch_harn_release.sh --tag vX.Y.Z --repo <harn-checkout> --yes-live-release`.
-- Run the watcher from the `harn-bump-fleet` checkout so its pinned runtime,
-  environment loader, release lease, and cleanup authority stay canonical.
-  Completion requires the release PR, complete asset manifest, and transient-ref
-  cleanup. Cache warming is explicit: pass `--warm-cache` when required, and
-  otherwise retain its `not_requested` receipt instead of claiming it passed.
-  Downstream convergence belongs to hosted release and its `converge_fleet`
-  input; the crate publisher does not start a second update controller.
-- Dry-run the full release gate with
-  `./scripts/release_gate.sh full --bump patch --dry-run`.
-- Dry-run crate publishing with `./scripts/publish.sh --dry-run`.
+- Read `harn skill get release-harn --full`, or its version-matched source at
+  `crates/harn-skills/src/corpus/release-harn/SKILL.md`. Follow the linked
+  [maintainer release procedure](docs/src/maintainer-release.md) for commands,
+  admission, frozen candidates, recovery, and terminal publication evidence.
+- Keep release publication and downstream consumer convergence as separate
+  proofs. The owning workflows control both; don't add another controller.
 
 ## Merge overrides
 
