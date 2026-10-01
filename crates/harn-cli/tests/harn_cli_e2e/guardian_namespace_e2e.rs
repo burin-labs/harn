@@ -39,7 +39,7 @@ except PermissionError:
 else:
     raise AssertionError('Landlock confinement missing')
 libc = ctypes.CDLL(None, use_errno=True)
-assert libc.unshare(0x40000000) == -1
+assert libc.unshare(0) == -1
 assert ctypes.get_errno() == errno.EPERM, 'seccomp ceiling missing'
 if len(sys.argv) == 1:
     print('loopback-egress-landlock-seccomp-ok', flush=True)
@@ -110,7 +110,9 @@ fn owner_death_preserves_namespace_then_confinement() {
             "--seccomp-hex",
             "060000000000ff7f",
             "--",
-            "/usr/bin/true",
+            "/usr/bin/python3",
+            "-c",
+            "import ctypes; assert ctypes.CDLL(None).unshare(0) == 0",
         ])
         .output()
         .expect("probe namespace helper authority");
