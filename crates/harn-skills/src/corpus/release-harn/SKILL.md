@@ -7,7 +7,7 @@ when_to_use: Use when preparing or publishing a Harn release, checking its termi
 
 # Release Harn
 
-Read the [maintainer release procedure](https://harnlang.com/docs/maintainer-release.html)
+Read the [maintainer release procedure](https://harnlang.com/maintainer-release.html)
 before release work. In a Harn checkout, read `docs/src/maintainer-release.md`
 for the version-matched procedure.
 
