@@ -54,8 +54,10 @@ fn make_fake(config: dict = {}) {
     auto_merge_enabled: true,
     disable_ok: true,
     disable_expected_base_oid: nil,
+    advance_base_during_disarm_to: nil,
   }
     + config
+  let current_remote_base_oid = cfg.remote_base_oid
   const adapter: BumpAdapter = {
     resolve_target_tag: fn(tag) { return if trim(tag ?? "") != "" {
       tag
@@ -113,6 +115,9 @@ fn make_fake(config: dict = {}) {
         sequence[len(sequence) - 1]
       }
       remote_base_index = remote_base_index + 1
+      if value.available {
+        current_remote_base_oid = value.oid
+      }
       return value
     },
     adopt_base: fn(request) {
@@ -135,6 +140,13 @@ fn make_fake(config: dict = {}) {
     find_bump_pr: fn() { return cfg.existing_pr },
     disable_auto_merge: fn(pr, base_sha) {
       record("disable_auto_merge", {pr: pr, base_sha: base_sha})
+      if cfg.advance_base_during_disarm_to != nil {
+        current_remote_base_oid = cfg.advance_base_during_disarm_to
+        record("advance_remote_base", {oid: current_remote_base_oid})
+        if base_sha != current_remote_base_oid {
+          return false
+        }
+      }
       if cfg.disable_expected_base_oid != nil && base_sha != cfg.disable_expected_base_oid {
         return false
       }
@@ -544,12 +556,17 @@ pipeline test_base_advance_during_disarm_refuses_refresh() {
     url: "https://example.test/pull/75",
     state: "open",
   }
-  const fake = make_fake({existing_pr: stale, disable_expected_base_oid: "base001"})
+  const fake = make_fake({existing_pr: stale, advance_base_during_disarm_to: "base001"})
   assert_eq(
     assert_throws({ -> run_bump(opts(), fake.adapter) }),
     "std/bump/runtime: failed to disable stale auto-merge on #75",
   )
-  assert_eq(call_names(fake.calls()), ["remote_base_head", "disable_auto_merge"])
+  assert_eq(
+    call_names(fake.calls()),
+    ["remote_base_head", "disable_auto_merge", "advance_remote_base"],
+  )
+  assert_eq(fake.calls()[1].arg.base_sha, "base000")
+  assert_eq(fake.calls()[2].arg.oid, "base001")
 }
 
 /**
