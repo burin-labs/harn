@@ -1,0 +1,57 @@
+{
+  "baseline": {
+    "agent_events->orchestration": 6,
+    "agent_sessions->orchestration": 12,
+    "agent_sessions->stdlib": 17,
+    "connectors->stdlib": 9,
+    "llm->agent_events": 148,
+    "llm->agent_sessions": 419,
+    "llm->orchestration": 281,
+    "llm->stdlib": 353,
+    "llm->triggers": 6,
+    "llm_config->llm": 56,
+    "llm_config->orchestration": 1,
+    "llm_config->stdlib": 12,
+    "orchestration->stdlib": 132,
+    "provider_catalog->llm": 12,
+    "provider_catalog->stdlib": 1,
+    "triggers->stdlib": 34,
+    "value->orchestration": 1,
+    "value->stdlib": 1,
+    "value->vm": 6,
+    "vm->agent_sessions": 19,
+    "vm->connectors": 7,
+    "vm->llm": 39,
+    "vm->orchestration": 121,
+    "vm->provider_catalog": 1,
+    "vm->stdlib": 151,
+    "vm->triggers": 11
+  },
+  "layers": [
+    [
+      "value"
+    ],
+    [
+      "vm"
+    ],
+    [
+      "llm_config",
+      "provider_catalog"
+    ],
+    [
+      "llm"
+    ],
+    [
+      "agent_events",
+      "agent_sessions"
+    ],
+    [
+      "orchestration",
+      "triggers",
+      "connectors"
+    ],
+    [
+      "stdlib"
+    ]
+  ]
+}

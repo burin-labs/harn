@@ -186,6 +186,7 @@ GATES=(
   check-session-bundle-schema
   check-provider-catalog-drift
   check-ported-handler-loc
+  check-harn-vm-layering
   check-test-target-coverage
   check-gate-path-visibility
   check-python-boundary
