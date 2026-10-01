@@ -1522,6 +1522,8 @@ check-release-audit-contract:
 
 check-ci-cache-policy:
 	@echo "=== Checking CI cache ownership policy ==="
+	bash scripts/tests/ci_sprint_fast_ci_test.sh
+	@$(HARN_SCRIPT_TEST_ENV) $(HARN_CMD) test scripts/tests/ci_sprint_fast_ci_policy_test.harn
 	@$(HARN_CMD) run scripts/check_ci_cache_policy.harn
 
 # The `#[harn_builtin(exposure = "harness...")]` declarations in harn-vm are the
