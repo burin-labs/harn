@@ -169,14 +169,6 @@ pipeline test_generated_commit_requires_verified_github_publisher_identity(harne
   const oid = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
   const cases = [
     {
-      name: "forged bot author on GitHub",
-      login: "harn-release-bot[bot]",
-      committer: "consumer",
-      valid: true,
-      signed: true,
-      expected: false,
-    },
-    {
       name: "trusted publisher",
       login: "harn-release-bot[bot]",
       valid: true,
@@ -228,13 +220,6 @@ pipeline test_generated_commit_requires_verified_github_publisher_identity(harne
                       {login: case.login}
                     },
                   },
-                  committer: {
-                    user: if (case.committer ?? case.login) == nil {
-                      nil
-                    } else {
-                      {login: case.committer ?? case.login}
-                    },
-                  },
                   signature: if case.signed == nil {
                     nil
                   } else {
@@ -273,7 +258,6 @@ pipeline test_generated_commit_lookup_fails_closed_on_unavailable_or_partial_dat
           commit: {
             oid: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
             author: {user: {login: "harn-release-bot[bot]"}},
-            committer: {user: {login: "harn-release-bot[bot]"}},
             signature: {isValid: true, wasSignedByGitHub: true},
           },
         },

@@ -31,7 +31,7 @@ can replay those same repairs after the branch was flattened. Repair commits
 must remain fetchable by their recorded IDs. A missing commit fails the run.
 
 The GitHub adapter identifies generated commits by the configured publisher's
-GitHub author and committer logins and a valid GitHub signature. A local Git author name is not
+GitHub login and a valid GitHub signature. A local Git author name is not
 identity evidence. Unsigned, unknown, or other publishers' commits are repairs;
 an unavailable identity lookup fails the run. Repair merge commits are refused.
 A patch conflict
