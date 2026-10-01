@@ -1,4 +1,3 @@
-// A running tool sees its own call already persisted.
 tool_call:slow_command:pending
 tool_call_update:slow_command:in_progress
 done
