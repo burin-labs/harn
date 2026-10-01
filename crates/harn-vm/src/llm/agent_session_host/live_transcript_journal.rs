@@ -348,6 +348,17 @@ async fn host_agent_emit_event(
                 .map_err(VmError::Runtime)?;
         }
     }
+    // A call about to run must be on disk first. Otherwise a process killed
+    // mid-call restores a session with no trace of the call (harn#9061).
+    if matches!(
+        event,
+        crate::agent_events::AgentEvent::ToolCallUpdate {
+            status: crate::agent_events::ToolCallStatus::InProgress,
+            ..
+        }
+    ) {
+        crate::agent_session_journal::flush(&session_id).await?;
+    }
     crate::llm::agent_runtime::emit_agent_event_with_ctx(Some(&ctx), &event).await;
     Ok(VmValue::Nil)
 }
