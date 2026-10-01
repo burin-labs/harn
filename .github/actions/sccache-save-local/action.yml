@@ -2,8 +2,12 @@ name: Save local sccache directory
 description: >
   Persist a bounded local SCCACHE_DIR after a compile lane. Used only when the
   setup path restored via local-cache; sticky-disk lanes do not need this.
-  Prunes older generations for the same family before saving so the blob store
-  stays inside the repository Actions cache budget.
+  Prunes older generations for the same family after saving, so each family
+  holds one entry and the blob store stays inside the repository Actions cache
+  budget. Pruning first left two per family (the survivor plus the new save),
+  which evicted CI's own caches under the 10 GB limit. If the save fails or is
+  not listed yet, the newest existing entry survives, so a family is never
+  emptied.
 
 inputs:
   cache-key:
@@ -13,16 +17,16 @@ inputs:
 runs:
   using: composite
   steps:
-    - name: Prune superseded local sccache generations
-      shell: bash
-      env:
-        GH_TOKEN: ${{ github.token }}
-        HARN_CACHE_FAMILY_PREFIX: ${{ github.repository }}-sccache-local-${{ inputs.cache-key }}-${{ runner.os }}-${{ runner.arch }}-
-      run: ./scripts/prune_ci_cache_generations.sh --local-sccache-family-prefix "$HARN_CACHE_FAMILY_PREFIX"
-
     - name: Save local sccache directory
       uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5
       continue-on-error: true
       with:
         path: ~/.cache/sccache
         key: ${{ github.repository }}-sccache-local-${{ inputs.cache-key }}-${{ runner.os }}-${{ runner.arch }}-${{ github.sha }}
+
+    - name: Prune superseded local sccache generations
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        HARN_CACHE_FAMILY_PREFIX: ${{ github.repository }}-sccache-local-${{ inputs.cache-key }}-${{ runner.os }}-${{ runner.arch }}-
+      run: ./scripts/prune_ci_cache_generations.sh --local-sccache-family-prefix "$HARN_CACHE_FAMILY_PREFIX"
