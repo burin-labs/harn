@@ -401,6 +401,7 @@
 - [Release binary-size policy](./dev/release-binary-size-policy.md)
 - [Reusable bump-harn workflow](./dev/reusable-bump-harn-runtime.md)
 - [Merge overrides](./dev/merge-overrides.md)
+- [Sprint fast CI](./dev/sprint-fast-ci.md)
 - [Agent shell guard](./dev/agent-shell-guard.md)
 - [Deterministic test patterns](./dev/testing.md)
 - [Check documentation examples](./dev/check-docs-snippets.md)

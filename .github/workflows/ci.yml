@@ -126,7 +126,27 @@ jobs:
       release_contract: ${{ steps.surface_filter.outputs.release_contract }}
       release_residual: ${{ steps.surface_filter.outputs.release_residual }}
       release_metadata_only: ${{ steps.release_metadata.outputs.release_metadata_only }}
+      sprint_fast_ci: ${{ steps.sprint_fast_ci.outputs.active }}
     steps:
+      # The sprint fast-CI switch (#7628). The one place that decides it: the
+      # five slow proof families and ci-status read this output, never the
+      # variable. It applies only to pull requests and merge groups, so a push
+      # to main always runs and requires the full slow set. Deleting the
+      # variable, or any value other than exactly `true`, restores full
+      # pre-merge proof without a code change.
+      - name: Decide the sprint fast-CI mode
+        id: sprint_fast_ci
+        env:
+          SPRINT_FAST_CI: ${{ vars.SPRINT_FAST_CI }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          active=false
+          if [ "$SPRINT_FAST_CI" = "true" ] \
+            && { [ "$EVENT_NAME" = "pull_request" ] || [ "$EVENT_NAME" = "merge_group" ]; }; then
+            active=true
+            echo "::notice title=Sprint fast CI::SPRINT_FAST_CI=true: Windows cross-compile, macOS, Harn conformance and source audit, and Linux sandbox proofs run after merge on main instead of here."
+          fi
+          echo "active=$active" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
         id: filter
@@ -1123,7 +1143,7 @@ jobs:
   security-tests-ready:
     name: Wait for Linux security tests
     needs: [changes]
-    if: needs.changes.outputs.rust == 'true'
+    if: needs.changes.outputs.rust == 'true' && needs.changes.outputs.sprint_fast_ci != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 50
     permissions:
@@ -1354,7 +1374,7 @@ jobs:
     # Start CLI-independent setup immediately. Each worker waits for and
     # verifies the exact-commit binary only at the last responsible moment.
     needs: [changes]
-    if: needs.changes.outputs.rust == 'true'
+    if: needs.changes.outputs.rust == 'true' && needs.changes.outputs.sprint_fast_ci != 'true'
     runs-on: ${{ vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true' && (github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) && 'blacksmith-8vcpu-ubuntu-2404' || 'ubuntu-latest' }}
     # The immutable CLI producer is shared, and the Harn proof work after it is
     # spread over free hosted workers. Everything here starts only once the CLI
@@ -2023,7 +2043,8 @@ jobs:
     # Every merge-group candidate runs it; main pushes run it when the Rust
     # surface is on, so a push already proven on merge_group may skip.
     if: >-
-      github.event_name == 'merge_group'
+      (github.event_name == 'merge_group'
+      && needs.changes.outputs.sprint_fast_ci != 'true')
       || (github.event_name == 'push'
       && github.ref == 'refs/heads/main'
       && needs.changes.outputs.rust == 'true')
@@ -2158,7 +2179,7 @@ jobs:
     # runners rather than probing a self-hosted pool.
     runs-on: macos-latest
     timeout-minutes: 60
-    needs: macos-plan
+    needs: [changes, macos-plan]
     # macOS coverage stays off the default PR / merge-queue critical path, but
     # runs before merge for changes that touch macOS-gated process, sandbox,
     # secret-store, or CLI paths. Other PRs rely on the main-push backstop plus
@@ -2169,7 +2190,9 @@ jobs:
     # target — including the cfg-gated test targets like
     # `secret_store_os_native` that no Linux lane ever builds — but does NOT
     # execute the live-Keychain tests (that's the nightly's job).
-    if: needs.macos-plan.outputs.run_macos == 'true'
+    if: >-
+      needs.macos-plan.outputs.run_macos == 'true'
+      && needs.changes.outputs.sprint_fast_ci != 'true'
     env:
       RUSTFLAGS: "-D warnings"
     steps:
@@ -2502,7 +2525,10 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           GIT_REF: ${{ github.ref }}
           RUST_SELECTED: ${{ needs.changes.outputs.rust }}
-          WINDOWS_CROSS_REQUIRED: ${{ github.event_name == 'merge_group' || (github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.changes.outputs.rust == 'true') }}
+          WINDOWS_CROSS_REQUIRED: ${{ (github.event_name == 'merge_group' && needs.changes.outputs.sprint_fast_ci != 'true') || (github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.changes.outputs.rust == 'true') }}
+          # Exactly the `changes` decision: true only on pull requests and
+          # merge groups with SPRINT_FAST_CI=true. Only a skip is excused by it.
+          SPRINT_FAST_CI_ACTIVE: ${{ needs.changes.outputs.sprint_fast_ci }}
         run: |
           # A skipped job is valid only when its owning condition permits it.
           # Missing, pending, failed, and cancelled results always fail closed.
@@ -2650,7 +2676,8 @@ jobs:
           security_tests_ready_result="${{ needs['security-tests-ready'].result }}"
           echo "Linux security test inputs: $security_tests_ready_result"
           require_result "$security_tests_ready_result" \
-            "Linux security test input handoff failed or skipped while Rust proof was required." [ "${{ needs.changes.outputs.rust }}" != "true" ]
+            "Linux security test input handoff failed or skipped while Rust proof was required." \
+            test "${{ needs.changes.outputs.rust }}" != "true" -o "$SPRINT_FAST_CI_ACTIVE" = "true"
           # With co-location active the environment-neutral suite proof lives
           # inside the single persistent producer. A successful artifact build
           # without the explicit test marker must fail closed.
@@ -2677,12 +2704,14 @@ jobs:
           rust_security_result="${{ needs['rust-security'].result }}"
           echo "Linux sandbox tests: $rust_security_result"
           require_result "$rust_security_result" \
-            "Linux sandbox tests failed or skipped while Rust checks were required." [ "${{ needs.changes.outputs.rust }}" != "true" ]
+            "Linux sandbox tests failed or skipped while Rust checks were required." \
+            test "${{ needs.changes.outputs.rust }}" != "true" -o "$SPRINT_FAST_CI_ACTIVE" = "true"
 
           harn_audit_result="${{ needs['harn-audit'].result }}"
           echo "Harn proof workers: $harn_audit_result"
           require_result "$harn_audit_result" \
-            "Harn proof workers failed or skipped while Rust proof was required." [ "${{ needs.changes.outputs.rust }}" != "true" ]
+            "Harn proof workers failed or skipped while Rust proof was required." \
+            test "${{ needs.changes.outputs.rust }}" != "true" -o "$SPRINT_FAST_CI_ACTIVE" = "true"
 
           source_length_result="${{ needs['source-length-ratchet'].result }}"
           echo "Source file lengths: $source_length_result"
