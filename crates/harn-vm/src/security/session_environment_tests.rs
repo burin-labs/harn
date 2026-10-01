@@ -6,6 +6,283 @@
 
 use super::*;
 
+#[test]
+fn host_inference_ceiling_survives_isolation_and_withholds_child_exposure() {
+    use crate::llm::api::inference_boundary::HOST_BOUNDARY_ENV;
+    use crate::llm::api::{InferenceBoundary, InferenceReach};
+    let host = InferenceBoundary {
+        reach: InferenceReach::LocalOnly,
+        allow_training_discounts: false,
+    };
+    let snapshot = BTreeMap::from([
+        (HOST_BOUNDARY_ENV.into(), "untrusted ambient value".into()),
+        ("UNCHANGED_SENTINEL".into(), "retained".into()),
+    ]);
+    let parent = SessionEnvironment::launch_from_snapshot(
+        EnvironmentPolicyKind::Inherited,
+        vec![],
+        snapshot,
+        &no_env,
+    )
+    .unwrap()
+    .with_host_inference_boundary(Some(host));
+    let child_env = super::super::resolve_env(&parent, &no_env, &|_, _| None).unwrap();
+    assert_eq!(
+        child_env.get("UNCHANGED_SENTINEL").map(String::as_str),
+        Some("retained")
+    );
+    assert!(!child_env.contains_key(HOST_BOUNDARY_ENV));
+    let isolated = parent
+        .narrow(EnvironmentPolicyKind::Isolated, vec![])
+        .unwrap();
+    let raw = isolated
+        .env_exposure_for(HOST_BOUNDARY_ENV, &|_, _| None)
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        serde_json::from_str::<InferenceBoundary>(&raw).unwrap(),
+        host
+    );
+    assert!(isolated.grants().is_empty());
+    let fork = isolated
+        .narrow(EnvironmentPolicyKind::Isolated, vec![])
+        .unwrap();
+    assert_eq!(
+        fork.env_exposure_for(HOST_BOUNDARY_ENV, &|_, _| None)
+            .unwrap(),
+        Some(raw)
+    );
+    assert!(isolated
+        .narrow(
+            EnvironmentPolicyKind::Isolated,
+            vec![GrantSpec {
+                name: "additional-authority".into(),
+                source: GrantSourceSpec::Literal {
+                    value: "refused".into()
+                },
+                expose_as_env: Some("EXTRA".into()),
+                for_command: None,
+                expose_to: GrantAudience::Session,
+            }]
+        )
+        .is_err());
+    assert_eq!(
+        isolated.receipts().last().unwrap().exposed_to,
+        GrantAudience::InProcess
+    );
+    assert!(!isolated
+        .admitted_environment_names()
+        .iter()
+        .any(|name| name == HOST_BOUNDARY_ENV));
+}
+
+#[test]
+fn session_grant_cannot_widen_or_expose_host_inference_ceiling() {
+    use crate::llm::api::inference_boundary::HOST_BOUNDARY_ENV;
+    use crate::llm::api::{InferenceBoundary, InferenceReach};
+    let host = InferenceBoundary {
+        reach: InferenceReach::HostedOpenWeight,
+        allow_training_discounts: false,
+    };
+    for requested in [InferenceReach::AnyHosted, InferenceReach::LocalOnly] {
+        let grant = GrantSpec {
+            name: "client-boundary".into(),
+            source: GrantSourceSpec::Literal {
+                value: serde_json::to_string(&InferenceBoundary {
+                    reach: requested,
+                    allow_training_discounts: true,
+                })
+                .unwrap(),
+            },
+            expose_as_env: Some(HOST_BOUNDARY_ENV.into()),
+            for_command: None,
+            expose_to: GrantAudience::Session,
+        };
+        let environment = SessionEnvironment::launch_from_snapshot(
+            EnvironmentPolicyKind::Granted,
+            vec![grant],
+            BTreeMap::new(),
+            &no_env,
+        )
+        .unwrap()
+        .with_host_inference_boundary(Some(host));
+        let value = environment
+            .env_exposure_for(HOST_BOUNDARY_ENV, &|_, _| None)
+            .unwrap()
+            .unwrap();
+        let effective: InferenceBoundary = serde_json::from_str(&value).unwrap();
+        assert_eq!(
+            effective.reach,
+            if requested == InferenceReach::AnyHosted {
+                host.reach
+            } else {
+                requested
+            }
+        );
+        assert!(!effective.allow_training_discounts);
+        assert!(environment.env_exposure(&|_, _| None).unwrap().is_empty());
+        let child = environment
+            .narrow(EnvironmentPolicyKind::Isolated, vec![])
+            .unwrap();
+        let child_value = child
+            .env_exposure_for(HOST_BOUNDARY_ENV, &|_, _| None)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            serde_json::from_str::<InferenceBoundary>(&child_value).unwrap(),
+            effective
+        );
+        assert_eq!(
+            environment.receipts().len(),
+            1,
+            "only effective host authority is receipted"
+        );
+    }
+}
+
+#[test]
+fn host_inference_reserved_name_obeys_platform_case_semantics() {
+    use super::super::environment_policy::{
+        environment_names_equal, environment_names_equal_for_platform,
+    };
+    use crate::llm::api::inference_boundary::HOST_BOUNDARY_ENV;
+    use crate::llm::api::{InferenceBoundary, InferenceReach};
+    let lowercase = HOST_BOUNDARY_ENV.to_ascii_lowercase();
+    assert!(environment_names_equal_for_platform(
+        HOST_BOUNDARY_ENV,
+        &lowercase,
+        true
+    ));
+    assert!(!environment_names_equal_for_platform(
+        HOST_BOUNDARY_ENV,
+        &lowercase,
+        false
+    ));
+    assert_eq!(
+        environment_names_equal(HOST_BOUNDARY_ENV, &lowercase),
+        cfg!(windows)
+    );
+    let host = InferenceBoundary {
+        reach: InferenceReach::LocalOnly,
+        allow_training_discounts: false,
+    };
+    let snapshot = BTreeMap::from([(lowercase.clone(), "case control".into())]);
+    let environment = SessionEnvironment::launch_from_snapshot(
+        EnvironmentPolicyKind::Inherited,
+        vec![],
+        snapshot,
+        &no_env,
+    )
+    .unwrap()
+    .with_host_inference_boundary(Some(host));
+    let child = super::super::resolve_env(&environment, &no_env, &|_, _| None).unwrap();
+    assert_eq!(child.contains_key(&lowercase), !cfg!(windows));
+    let grant = GrantSpec {
+        name: "client-case-control".into(),
+        source: GrantSourceSpec::Literal {
+            value: serde_json::to_string(&host).unwrap(),
+        },
+        expose_as_env: Some(lowercase.clone()),
+        for_command: None,
+        expose_to: GrantAudience::Session,
+    };
+    let granted = SessionEnvironment::launch_from_snapshot(
+        EnvironmentPolicyKind::Granted,
+        vec![grant],
+        BTreeMap::new(),
+        &no_env,
+    )
+    .unwrap()
+    .with_host_inference_boundary(Some(host));
+    assert_eq!(
+        granted.env_exposure(&|_, _| None).unwrap().is_empty(),
+        cfg!(windows)
+    );
+    assert_eq!(granted.receipts().len(), if cfg!(windows) { 1 } else { 2 });
+}
+
+#[test]
+fn malformed_session_boundary_cannot_replace_host_floor() {
+    use crate::llm::api::inference_boundary::HOST_BOUNDARY_ENV;
+    use crate::llm::api::{InferenceBoundary, InferenceReach};
+    let grant = GrantSpec {
+        name: "malformed-boundary".into(),
+        source: GrantSourceSpec::Literal {
+            value: "invalid private value".into(),
+        },
+        expose_as_env: Some(HOST_BOUNDARY_ENV.into()),
+        for_command: None,
+        expose_to: GrantAudience::InProcess,
+    };
+    let environment = SessionEnvironment::launch_from_snapshot(
+        EnvironmentPolicyKind::Granted,
+        vec![grant],
+        BTreeMap::new(),
+        &no_env,
+    )
+    .unwrap()
+    .with_host_inference_boundary(Some(InferenceBoundary {
+        reach: InferenceReach::LocalOnly,
+        allow_training_discounts: false,
+    }));
+    let error = environment
+        .env_exposure_for(HOST_BOUNDARY_ENV, &|_, _| None)
+        .unwrap_err();
+    assert_eq!(error.code(), "inference_boundary.host_boundary_malformed");
+    assert!(!error
+        .to_json()
+        .to_string()
+        .contains("invalid private value"));
+    assert_eq!(
+        environment
+            .narrow(EnvironmentPolicyKind::Isolated, vec![])
+            .unwrap_err(),
+        error
+    );
+}
+
+#[test]
+fn dispatch_scope_keeps_stricter_session_and_restores_previous_authority() {
+    use crate::llm::api::inference_boundary::HOST_BOUNDARY_ENV;
+    use crate::llm::api::{InferenceBoundary, InferenceReach};
+    use crate::stdlib::process::{
+        current_session_environment, declare_session_environment_if_absent,
+    };
+    crate::reset_thread_local_state();
+    let strict = InferenceBoundary {
+        reach: InferenceReach::LocalOnly,
+        allow_training_discounts: false,
+    };
+    let parent = SessionEnvironment::launch_from_snapshot(
+        EnvironmentPolicyKind::Isolated,
+        vec![],
+        BTreeMap::new(),
+        &no_env,
+    )
+    .unwrap()
+    .with_host_inference_boundary(Some(strict));
+    let outer = declare_session_environment_if_absent(parent.clone());
+    let inner = declare_session_environment_if_absent(SessionEnvironment::inherited())
+        .with_host_inference_boundary(Some(InferenceBoundary {
+            reach: InferenceReach::AnyHosted,
+            allow_training_discounts: true,
+        }));
+    let active = current_session_environment().unwrap();
+    assert!(active.is_isolated());
+    let value = active
+        .env_exposure_for(HOST_BOUNDARY_ENV, &|_, _| None)
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        serde_json::from_str::<InferenceBoundary>(&value).unwrap(),
+        strict
+    );
+    drop(inner);
+    assert_eq!(current_session_environment(), Some(parent));
+    drop(outer);
+    assert!(current_session_environment().is_none());
+}
+
 fn no_env(_: &str) -> Option<String> {
     None
 }

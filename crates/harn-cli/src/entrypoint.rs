@@ -141,7 +141,8 @@ pub(crate) async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMo
         },
         Command::Run(args) => {
             let _operator_approval_guard = args.install_operator_approval_grant();
-            if !args.explain_cost {
+            let sandbox_options = commands::run::sandbox::sandbox_options_from_args(&args.sandbox);
+            if !args.explain_cost && sandbox_options.environment.bootstrap_permitted() {
                 match (args.eval.as_deref(), args.file.as_deref()) {
                     (Some(code), None) => {
                         provider_bootstrap::maybe_seed_ollama_for_inline(
@@ -180,7 +181,6 @@ pub(crate) async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMo
                 agent_id: args.attest_agent.clone(),
             });
             let profile_options = run_profile_options(&args.profile);
-            let sandbox_options = commands::run::sandbox::sandbox_options_from_args(&args.sandbox);
             let json_options = args
                 .json
                 .then_some(commands::run::RunJsonOptions { quiet: args.quiet });

@@ -238,11 +238,13 @@ impl AcpWebSocketHub {
                         return;
                     }
                 };
-                runtime.block_on(crate::acp::run_acp_channel_server(
+                if let Err(error) = runtime.block_on(crate::acp::run_acp_channel_server(
                     pipeline,
                     to_acp_rx,
                     from_acp_tx,
-                ));
+                )) {
+                    eprintln!("[harn] ACP worker launch refused: {error}");
+                }
             })
             .map_err(|error| format!("worker spawn failed: {error}"))?;
 

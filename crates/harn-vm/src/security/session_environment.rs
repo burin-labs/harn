@@ -50,6 +50,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
+use super::environment_policy::environment_names_equal;
 use serde::{Deserialize, Serialize};
 
 /// Where a granted value originates. Recorded in receipts as a stable
@@ -496,6 +497,7 @@ pub struct SessionEnvironment {
     kind: EnvironmentPolicyKind,
     launcher_snapshot: BTreeMap<String, String>,
     grants: Vec<SessionGrant>,
+    host_inference_boundary: Option<crate::llm::api::InferenceBoundary>,
 }
 
 impl SessionEnvironment {
@@ -561,7 +563,27 @@ impl SessionEnvironment {
             kind,
             launcher_snapshot,
             grants,
+            host_inference_boundary: None,
         })
+    }
+
+    /// Bind trusted host authority independently of the client's environment
+    /// choice. It remains in-process even under inherited child environments.
+    pub fn with_host_inference_boundary(
+        mut self,
+        boundary: Option<crate::llm::api::InferenceBoundary>,
+    ) -> Self {
+        self.host_inference_boundary =
+            crate::llm::api::inference_boundary::meet(self.host_inference_boundary, boundary);
+        if self.host_inference_boundary.is_some() {
+            self.launcher_snapshot.retain(|name, _| {
+                !environment_names_equal(
+                    name,
+                    crate::llm::api::inference_boundary::HOST_BOUNDARY_ENV,
+                )
+            });
+        }
+        self
     }
 
     /// An isolated environment with no grants.
@@ -594,7 +616,18 @@ impl SessionEnvironment {
         requested: EnvironmentPolicyKind,
         specs: Vec<GrantSpec>,
     ) -> Result<Self, EnvironmentPolicyError> {
-        match (self.kind, requested) {
+        let inherited_boundary = if self.host_inference_boundary.is_some() {
+            self.env_exposure_for(
+                crate::llm::api::inference_boundary::HOST_BOUNDARY_ENV,
+                &|_, _| None,
+            )?
+            .map(|raw| crate::llm::api::inference_boundary::parse_host_boundary(&raw))
+            .transpose()
+            .map_err(|_| EnvironmentPolicyError::MalformedHostInferenceBoundary)?
+        } else {
+            None
+        };
+        let child = match (self.kind, requested) {
             (EnvironmentPolicyKind::Inherited, EnvironmentPolicyKind::Inherited)
                 if specs.is_empty() =>
             {
@@ -607,6 +640,7 @@ impl SessionEnvironment {
                     kind: requested,
                     launcher_snapshot: self.launcher_snapshot.clone(),
                     grants: Vec::new(),
+                    host_inference_boundary: self.host_inference_boundary,
                 })
             }
             (EnvironmentPolicyKind::Inherited, EnvironmentPolicyKind::Granted) => {
@@ -626,15 +660,15 @@ impl SessionEnvironment {
                     snapshot.get(name).cloned()
                 })
             }
-            (EnvironmentPolicyKind::Granted, EnvironmentPolicyKind::Isolated)
-                if specs.is_empty() =>
-            {
-                Ok(Self {
-                    kind: requested,
-                    launcher_snapshot: self.launcher_snapshot.clone(),
-                    grants: Vec::new(),
-                })
-            }
+            (
+                EnvironmentPolicyKind::Granted | EnvironmentPolicyKind::Isolated,
+                EnvironmentPolicyKind::Isolated,
+            ) if specs.is_empty() => Ok(Self {
+                kind: requested,
+                launcher_snapshot: self.launcher_snapshot.clone(),
+                grants: Vec::new(),
+                host_inference_boundary: self.host_inference_boundary,
+            }),
             (EnvironmentPolicyKind::Granted, EnvironmentPolicyKind::Granted) => {
                 validate_unique_specs(&specs)?;
                 let mut grants = Vec::with_capacity(specs.len());
@@ -657,6 +691,7 @@ impl SessionEnvironment {
                     kind: requested,
                     launcher_snapshot: self.launcher_snapshot.clone(),
                     grants,
+                    host_inference_boundary: self.host_inference_boundary,
                 })
             }
             _ => Err(EnvironmentPolicyError::ChildPolicyExceedsParent {
@@ -667,7 +702,8 @@ impl SessionEnvironment {
                     "a child may keep or reduce its parent's environment access, never widen it"
                         .to_string(),
             }),
-        }
+        }?;
+        Ok(child.with_host_inference_boundary(inherited_boundary))
     }
 
     /// The launcher's value for `name`, matched the way the host platform
@@ -682,14 +718,22 @@ impl SessionEnvironment {
     /// there that it means on POSIX, where names are case-sensitive and the
     /// exact lookup is the correct one.
     pub(crate) fn launcher_value(&self, name: &str) -> Option<&str> {
+        self.launcher_value_for_platform(name, cfg!(windows))
+    }
+
+    pub(crate) fn launcher_value_for_platform(&self, name: &str, windows: bool) -> Option<&str> {
         if let Some(value) = self.launcher_snapshot.get(name) {
             return Some(value.as_str());
         }
-        if cfg!(windows) {
+        if windows {
             return self
                 .launcher_snapshot
                 .iter()
-                .find(|(key, _)| key.eq_ignore_ascii_case(name))
+                .find(|(key, _)| {
+                    super::environment_policy::environment_names_equal_for_platform(
+                        key, name, windows,
+                    )
+                })
                 .map(|(_, value)| value.as_str());
         }
         None
@@ -704,10 +748,35 @@ impl SessionEnvironment {
         &self.grants
     }
 
+    pub(crate) fn is_host_inference_target(&self, name: &str) -> bool {
+        self.host_inference_boundary.is_some()
+            && environment_names_equal(name, crate::llm::api::inference_boundary::HOST_BOUNDARY_ENV)
+    }
+
     /// The non-secret receipts recorded on the session run-record. Empty for an
     /// isolated policy, which makes `grants: []` a checked property.
     pub fn receipts(&self) -> Vec<GrantReceipt> {
-        self.grants.iter().map(SessionGrant::receipt).collect()
+        let mut receipts: Vec<_> = self
+            .grants
+            .iter()
+            .filter(|grant| {
+                !grant
+                    .expose_as_env
+                    .as_deref()
+                    .is_some_and(|name| self.is_host_inference_target(name))
+            })
+            .map(SessionGrant::receipt)
+            .collect();
+        if self.host_inference_boundary.is_some() {
+            receipts.push(GrantReceipt {
+                name: "host-inference-boundary".into(),
+                source_kind: GrantSource::Literal.as_str().into(),
+                exposed_as_env: Some(crate::llm::api::inference_boundary::HOST_BOUNDARY_ENV.into()),
+                for_command: None,
+                exposed_to: GrantAudience::InProcess,
+            });
+        }
+        receipts
     }
 
     /// Every environment variable name a child of this session can see, sorted
@@ -731,7 +800,12 @@ impl SessionEnvironment {
     pub fn admitted_environment_names(&self) -> Vec<String> {
         let mut names: Vec<String> = self.launcher_snapshot.keys().cloned().collect();
         for grant in &self.grants {
-            if grant.audience == GrantAudience::InProcess {
+            if grant.audience == GrantAudience::InProcess
+                || grant
+                    .expose_as_env
+                    .as_deref()
+                    .is_some_and(|name| self.is_host_inference_target(name))
+            {
                 continue;
             }
             if let Some(var) = grant.expose_as_env.clone() {
@@ -779,6 +853,13 @@ impl SessionEnvironment {
     ) -> Result<Vec<(String, String)>, EnvironmentPolicyError> {
         self.grants
             .iter()
+            .filter(|grant| {
+                self.host_inference_boundary.is_none()
+                    || !grant
+                        .expose_as_env
+                        .as_deref()
+                        .is_some_and(|name| self.is_host_inference_target(name))
+            })
             .filter(|grant| grant.reaches_spawn(program))
             .filter_map(|grant| grant.exposure(resolve_secret))
             .collect()
@@ -800,6 +881,31 @@ impl SessionEnvironment {
         var: &str,
         resolve_secret: &dyn Fn(&str, &str) -> Option<String>,
     ) -> Result<Option<String>, EnvironmentPolicyError> {
+        if environment_names_equal(var, crate::llm::api::inference_boundary::HOST_BOUNDARY_ENV) {
+            if let Some(host) = self.host_inference_boundary {
+                let requested = self.grants.iter().find(|grant| {
+                    grant.reaches_in_process()
+                        && grant
+                            .expose_as_env
+                            .as_deref()
+                            .is_some_and(|name| environment_names_equal(name, var))
+                });
+                let requested = requested
+                    .and_then(|grant| grant.exposure(resolve_secret))
+                    .transpose()?
+                    .map(|(_, value)| {
+                        crate::llm::api::inference_boundary::parse_host_boundary(&value)
+                    })
+                    .transpose()
+                    .map_err(|_| EnvironmentPolicyError::MalformedHostInferenceBoundary)?;
+                let effective = crate::llm::api::inference_boundary::meet(Some(host), requested)
+                    .expect("the host ceiling is present");
+                return Ok(Some(
+                    serde_json::to_string(&effective)
+                        .expect("the closed inference ceiling is serializable"),
+                ));
+            }
+        }
         let Some(grant) = self.grants.iter().find(|grant| {
             grant.reaches_in_process() && grant.expose_as_env.as_deref() == Some(var)
         }) else {
@@ -830,7 +936,9 @@ fn insert_env_value_case_insensitive(
 ) {
     let existing_key = map
         .keys()
-        .find(|key| key.eq_ignore_ascii_case(name))
+        .find(|key| {
+            super::environment_policy::environment_names_equal_for_platform(key, name, true)
+        })
         .cloned();
     map.insert(existing_key.unwrap_or_else(|| name.to_string()), value);
 }
@@ -902,6 +1010,8 @@ impl GrantReceipt {
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum EnvironmentPolicyError {
+    /// A host or session inference ceiling was not a closed, valid policy.
+    MalformedHostInferenceBoundary,
     /// A grant spec had an empty name.
     EmptyName,
     /// An `env` source named an empty variable.
@@ -951,6 +1061,9 @@ pub enum EnvironmentPolicyError {
 impl fmt::Display for EnvironmentPolicyError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::MalformedHostInferenceBoundary => {
+                write!(f, "[inference_boundary.host_boundary_malformed] invalid host inference ceiling")
+            }
             EnvironmentPolicyError::EmptyName => write!(
                 f,
                 "[environment_policy.empty_grant_name] grant spec has an empty name"
@@ -1049,6 +1162,7 @@ impl EnvironmentPolicyError {
     /// Stable machine-readable code for CLI, ACP, and host integrations.
     pub fn code(&self) -> &'static str {
         match self {
+            Self::MalformedHostInferenceBoundary => "inference_boundary.host_boundary_malformed",
             Self::EmptyName => "environment_policy.empty_grant_name",
             Self::EmptyEnvVar { .. } => "environment_policy.empty_source_variable",
             Self::LiteralSecretReference { .. } => "environment_policy.literal_secret_reference",
@@ -1126,7 +1240,7 @@ impl EnvironmentPolicyError {
                     object.insert("grant".to_string(), serde_json::json!(grant));
                 }
             }
-            Self::EmptyName => {}
+            Self::EmptyName | Self::MalformedHostInferenceBoundary => {}
         }
         value
     }

@@ -78,6 +78,7 @@ impl From<EnvironmentPolicyArg> for EnvironmentPolicyKind {
 pub(crate) struct EnvironmentPolicyConfig {
     kind: EnvironmentPolicyKind,
     grants: Vec<GrantSpec>,
+    host_inference_boundary: Result<Option<harn_vm::llm::api::InferenceBoundary>, String>,
 }
 
 impl Default for EnvironmentPolicyConfig {
@@ -85,6 +86,7 @@ impl Default for EnvironmentPolicyConfig {
         Self {
             kind: EnvironmentPolicyKind::Inherited,
             grants: Vec::new(),
+            host_inference_boundary: harn_vm::llm::api::InferenceBoundary::capture_process(),
         }
     }
 }
@@ -111,7 +113,17 @@ impl EnvironmentPolicyConfig {
             .iter()
             .map(|spec| parse_grant_spec(spec))
             .collect::<Result<Vec<_>, _>>()?;
-        Ok(Self { kind, grants })
+        Ok(Self {
+            kind,
+            grants,
+            host_inference_boundary: harn_vm::llm::api::InferenceBoundary::capture_process(),
+        })
+    }
+
+    /// A malformed captured ceiling must reach the normal setup-error path
+    /// without first probing a provider during CLI configuration seeding.
+    pub(crate) fn bootstrap_permitted(&self) -> bool {
+        self.host_inference_boundary.is_ok()
     }
 
     /// Resolve the configuration into a runtime [`SessionEnvironment`], snapshotting each
@@ -120,9 +132,13 @@ impl EnvironmentPolicyConfig {
     pub(crate) fn launch(
         &self,
     ) -> Result<SessionEnvironment, harn_vm::security::EnvironmentPolicyError> {
+        let host = self.host_inference_boundary.as_ref().map_err(|_| {
+            harn_vm::security::EnvironmentPolicyError::MalformedHostInferenceBoundary
+        })?;
         SessionEnvironment::launch(self.kind, self.grants.clone(), &|var| {
             std::env::var(var).ok()
         })
+        .map(|environment| environment.with_host_inference_boundary(*host))
     }
 }
 
