@@ -266,6 +266,7 @@ pub fn transferable_confinement(program: &str) -> Result<Option<TransferableConf
     let Some((policy, profile)) = super::active_sandbox_policy() else {
         return Ok(None);
     };
+    super::ensure_spawn_enforceable::<Backend>(&policy)?;
     // Resolve exactly as the direct spawn path does. The resolved path is what
     // the ruleset grants read and execute on, so a bare name here would build a
     // ruleset that refuses the very program it was built for.
@@ -1437,10 +1438,13 @@ const DIRECTORY_ONLY_ACCESS_FS: u64 = LANDLOCK_ACCESS_FS_READ_DIR
 #[path = "netns.rs"]
 mod netns;
 
+pub use super::command_for::command_for_reexec;
 pub use netns::decode_seccomp_hex;
 pub use netns::keep_ruleset_across_exec;
 pub(crate) use netns::keep_ruleset_across_exec_tokio;
-use netns::{namespaced_loopback_grant, namespaced_outcome, resolve_netns_launcher};
+pub use netns::ReexecConfinement;
+pub(super) use netns::{launcher_argv_with_ruleset, resolve_netns_launcher};
+use netns::{namespaced_loopback_grant, namespaced_outcome};
 
 #[cfg(test)]
 #[path = "linux_tests.rs"]

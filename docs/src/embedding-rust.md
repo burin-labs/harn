@@ -83,6 +83,11 @@ own arguments or environment.
 Without the dispatch, those commands fail during startup. Windows uses a Job
 Object and the function returns `false`.
 
+On Linux, the guardian transfers confinement to the process that starts the
+payload. For loopback-only commands, the namespace helper creates the private
+network namespace before applying Landlock and seccomp. The guardian keeps
+the ruleset descriptor open through the helper's exec.
+
 Finer control is available one layer down: `harn-hostlib`'s `ast` feature is
 the code-intelligence mechanism only. Per-family grammar features
 (`grammar-web`, `grammar-systems`, `grammar-scripting`, `grammar-jvm`,

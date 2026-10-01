@@ -64,6 +64,8 @@ pub const NETNS_SECCOMP_FLAG: &str = "--seccomp-hex";
 /// name costs two lines there for no benefit to a reader.
 #[cfg(target_os = "linux")]
 pub use crate::stdlib::sandbox::linux::keep_ruleset_across_exec;
+#[cfg(target_os = "linux")]
+pub use crate::stdlib::sandbox::linux::{command_for_reexec, ReexecConfinement};
 /// Confinement an embedder builds here and enters in a process it re-execs.
 ///
 /// An embedder that spawns the payload directly never needs this: `pre_exec`

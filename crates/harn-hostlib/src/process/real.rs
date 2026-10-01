@@ -181,15 +181,26 @@ pub(crate) fn prepare_command(
     spec: &SpawnSpec,
     cleanup_token: Option<String>,
 ) -> Result<PreparedSpawn, ProcessError> {
+    validate_program(spec)?;
+    let command = process_sandbox::std_command_for_with_env_state(&spec.program, &spec.args)
+        .map_err(|e| ProcessError::SandboxSetup(format!("{e:?}")))?;
+    prepare_command_from(spec, cleanup_token, command)
+}
+
+pub(crate) fn validate_program(spec: &SpawnSpec) -> Result<(), ProcessError> {
     if spec.program.is_empty() {
         return Err(ProcessError::InvalidArgv(
             "first element of argv must be a non-empty program name".to_string(),
         ));
     }
+    Ok(())
+}
 
-    let (mut command, session_closed) =
-        process_sandbox::std_command_for_with_env_state(&spec.program, &spec.args)
-            .map_err(|e| ProcessError::SandboxSetup(format!("{e:?}")))?;
+pub(crate) fn prepare_command_from(
+    spec: &SpawnSpec,
+    cleanup_token: Option<String>,
+    (mut command, session_closed): (Command, bool),
+) -> Result<PreparedSpawn, ProcessError> {
     let env_cleared = session_closed || spec.env_mode == EnvMode::Replace;
 
     let mut env: Vec<_> = spec
