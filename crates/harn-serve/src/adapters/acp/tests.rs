@@ -1484,6 +1484,7 @@ mod host_call_turn_cache;
 mod modes;
 mod oauth_redirect;
 mod prompt_errors;
+mod reasoning_receipts;
 mod runtime_overrides;
 mod served_agent_turn;
 mod served_json_tool_fence;

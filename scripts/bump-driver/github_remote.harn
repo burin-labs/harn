@@ -1,6 +1,7 @@
 import { LiveBumpFetch, LiveBumpRemote } from "std/bump/live"
 import { BumpAutoMerge } from "std/bump/runtime"
 import { command_run } from "std/command"
+import { github_bump_access_token } from "./authentication"
 /** GitHub package implementation of std/bump/live's remote capability. */
 import {
   GithubBranchHeadRequest,
@@ -36,7 +37,8 @@ const WORKTREE_PUBLICATION_RETRY_DELAYS_MS = [250, 1000]
 pub type GithubBumpRemoteConfig = {
   repo: string,
   release_repo: string,
-  token: string,
+  token?: string,
+  options?: GithubClientOptions,
   branch: string,
   base: string,
   repo_dir?: string,
@@ -122,7 +124,11 @@ fn __publish_worktree(harness: Harness, publication: GithubWorktreeCommitRequest
 pub fn github_bump_remote(harness: Harness, config: GithubBumpRemoteConfig) -> LiveBumpRemote {
   const repo = __repo(config.repo)
   const release_repo = __repo(config.release_repo)
-  const options = {installation_token: config.token}
+  if config.options != nil && config.token != nil {
+    throw "bump-driver: choose client options or a supplied token"
+  }
+  const options: GithubClientOptions = config.options
+    ?? {installation_token: config.token ?? ""}
   return {
     latest_release_tag: fn() {
       const latest = __must(
@@ -197,7 +203,7 @@ pub fn github_bump_remote(harness: Harness, config: GithubBumpRemoteConfig) -> L
             config.base,
           ],
           cwd: config.repo_dir ?? ".",
-          env: {HARN_BUMP_FETCH_TOKEN: config.token},
+          env: {HARN_BUMP_FETCH_TOKEN: github_bump_access_token(harness, options)},
         },
       )
       const ok: bool = result.success ?? false

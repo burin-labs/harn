@@ -360,6 +360,16 @@ capabilities = ["tools", "streaming"]
   const retirement_out = unwrap(apply_candidate_to_source(source, retirement))
   assert(contains(retirement_out, "deprecated = true"))
   assert(contains(retirement_out, "Use claude-haiku-next"))
+  assert(contains(retirement_out, "sunset_date = \"" + price.effective_date + "\""))
+  assert(contains(retirement_out, "superseded_by = \"claude-haiku-next\""))
+  const followed = "[models.\"claude-haiku-4-5-20251001\"]\nname = \"Claude Haiku\"\n\n"
+    + "# Next model.\n[models.\"claude-haiku-next\"]\nname = \"Next\"\n"
+  const followed_out = unwrap(
+    apply_candidate_to_source(followed, retirement + {evidence: "Retired by notice."}),
+  )
+  assert(contains(followed_out, "name = \"Claude Haiku\"\ndeprecated = true\n"))
+  assert(contains(followed_out, "superseded_by = \"claude-haiku-next\"\n\n# Next model.\n"))
+  assert(contains(followed_out, "per Retired by notice. Use"))
   const capability = price
     + {kind: "capability", capability: "vision", old_value: false, new_value: true}
   const capability_source = """
@@ -454,6 +464,23 @@ pipeline test_canonical_catalog_shapes_validate_all_non_price_variants(
     candidate: common + {kind: "retirement", old_value: false, new_value: true},
   }
   assert_eq(plan_notice(harness, input.notice, retirement, canonical).receipt.disposition, "patch")
+  const guessed = {
+    classification: "candidate",
+    candidate: retirement.candidate + {old_value: true, replacement: "claude-haiku-4-5-20251001."},
+  }
+  const guessed_plan = plan_notice(harness, input.notice, guessed, canonical)
+  assert_eq(guessed_plan.receipt.disposition, "patch")
+  const resolved: dict = guessed_plan.candidate ?? {}
+  assert_eq(resolved.old_value, false)
+  assert_eq(resolved.replacement, "claude-haiku-4-5-20251001")
+  const unknown_replacement = {
+    classification: "candidate",
+    candidate: retirement.candidate + {replacement: "claude-haiku-next"},
+  }
+  assert_eq(
+    plan_notice(harness, input.notice, unknown_replacement, canonical).receipt.disposition,
+    "rejected",
+  )
   const capability = {
     classification: "candidate",
     candidate: common

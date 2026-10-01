@@ -29,8 +29,10 @@
 # equivalent data as Rust literals in llm_config.rs — that creates the
 # parallel system this catalog exists to eliminate.
 
+# The provider a call uses when it names neither a provider nor a model. Its
+# model comes from `provider_defaults.<provider>.runtime`, like every other
+# provider's; there is no separate global fallback model.
 default_provider = "anthropic"
-fallback_model = "claude-sonnet-4-6"
 
 # --- source: 10-providers/all.toml ---
 # ── Providers ────────────────────────────────────────────────────────────────
@@ -2648,6 +2650,7 @@ reasoning_effort = "high"
 # Host-supplied local/MLX model environment variables still take precedence.
 
 [provider_defaults.anthropic]
+runtime = "claude-sonnet-4-6"
 portal = "claude-sonnet-4-6"
 
 [provider_defaults.local]
@@ -2670,9 +2673,10 @@ portal = "llama3.2"
 runtime = "anthropic/claude-sonnet-4-6"
 portal = "Qwen/Qwen3.5-9B"
 
-# Keep the legacy runtime fallback for providers without a catalog-specific
-# model pin. Its provider is the built-in default_provider (Anthropic).
-# A missing route or later deprecation fails catalog generation.
+# A provider with no `runtime` entry has no default model: a call that names
+# only that provider fails before dispatch and lists the provider's routes.
+# It never borrows another provider's model. Catalog generation requires the
+# built-in default_provider to have one.
 
 # --- source: 40-defaults/qc.toml ---
 # ── QC defaults ──────────────────────────────────────────────────────────────
@@ -2839,10 +2843,12 @@ coordinates = { variant = "astra", effort = "xhigh" }
 
 # Anthropic ─ pricing pages: https://www.anthropic.com/pricing &
 # https://platform.claude.com/docs/en/about-claude/model-deprecations.
-# Verified 2026-07-02 against the provider /v1/models API and the
-# deprecations page: Sonnet 4 / Opus 4 are retired, Opus 4.1 is deprecated
-# (retires 2026-08-05), Opus 3 is retired, dated Sonnet 4.5 remains active,
-# and Sonnet 5 joined the lineup. Since the 4.6 generation the full 1M-token
+# Verified 2026-09-30 against the provider /v1/models API and the
+# deprecations page: Sonnet 4 / Opus 4 / Opus 4.1 / Opus 3 are retired, and
+# dated Sonnet 4.5 is deprecated (announced 2026-09-30). The deprecations page
+# gives its retirement as 2026-11-30 while the customer notice email gives
+# 2026-11-24 9AM PT with reduced availability from 2026-10-30; the row carries
+# the earlier date. Since the 4.6 generation the full 1M-token
 # context window ships at standard per-token pricing (no long-context beta
 # or premium tier), so 4.6+ rows carry context_window = 1000000.
 
@@ -2879,7 +2885,7 @@ context_window = 200000
 capabilities = ["tools", "streaming", "prompt_caching", "thinking"]
 pricing = { input_per_mtok = 3.00, output_per_mtok = 15.00, cache_read_per_mtok = 0.30, cache_write_per_mtok = 3.75, cache_write_1h_per_mtok = 6.00 }
 deprecated = true
-deprecation_note = "Retired 2025-10-28 per Anthropic deprecations page. Use claude-sonnet-4-5-20250929 or claude-sonnet-4-6."
+deprecation_note = "Retired 2025-10-28 per Anthropic deprecations page. Use claude-sonnet-4-6."
 superseded_by = "claude-sonnet-4-6"
 tier = "frontier"
 open_weight = false
@@ -2894,7 +2900,7 @@ context_window = 200000
 capabilities = ["tools", "streaming", "prompt_caching", "thinking"]
 pricing = { input_per_mtok = 3.00, output_per_mtok = 15.00, cache_read_per_mtok = 0.30, cache_write_per_mtok = 3.75, cache_write_1h_per_mtok = 6.00 }
 deprecated = true
-deprecation_note = "Retired 2025-10-28 per Anthropic deprecations page. Use claude-sonnet-4-5-20250929 or claude-sonnet-4-6."
+deprecation_note = "Retired 2025-10-28 per Anthropic deprecations page. Use claude-sonnet-4-6."
 superseded_by = "claude-sonnet-4-6"
 tier = "frontier"
 open_weight = false
@@ -2921,8 +2927,9 @@ context_window = 200000
 capabilities = ["tools", "streaming", "prompt_caching", "thinking"]
 pricing = { input_per_mtok = 3.00, output_per_mtok = 15.00, cache_read_per_mtok = 0.30, cache_write_per_mtok = 3.75, cache_write_1h_per_mtok = 6.00, hosted_tool_fees = { web_search = { per_1k_calls = 10.0, source_url = "https://platform.claude.com/docs/en/agents-and-tools/tool-use/web-search-tool" } } }
 deprecated = true
-deprecation_note = "Undated compatibility selector. Anthropic's active API id is claude-sonnet-4-5-20250929; prefer that dated id or claude-sonnet-4-6."
-superseded_by = "claude-sonnet-4-5-20250929"
+deprecation_note = "Undated compatibility selector for claude-sonnet-4-5-20250929, which Anthropic deprecated 2026-09-30. Use claude-sonnet-5-5."
+superseded_by = "claude-sonnet-5-5"
+sunset_date = "2026-11-24"
 tier = "frontier"
 open_weight = false
 strengths = ["coding", "reasoning", "tool_use", "long_context", "agentic"]
@@ -2942,6 +2949,10 @@ strengths = ["coding", "reasoning", "tool_use", "long_context", "agentic"]
 benchmarks = { swe_bench_verified = 77.2 }
 released = "2025-09-29"
 row_kind = "snapshot"
+deprecated = true
+deprecation_note = "Deprecated 2026-09-30. Retires 2026-11-24 9AM PT per Anthropic's customer notice (the deprecations page lists 2026-11-30), with reduced availability and rate errors from 2026-10-30. Use claude-sonnet-5-5."
+sunset_date = "2026-11-24"
+superseded_by = "claude-sonnet-5-5"
 
 [models."claude-sonnet-4-6"]
 name = "Claude Sonnet 4.6"

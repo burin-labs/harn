@@ -2,6 +2,7 @@ import {
   ALWAYS_EXPECTED_CHECKS,
   PATH_GATED_CHECKS,
   build_census,
+  check_expectations,
   check_run_observations,
   classify_check_run,
   classify_commit_status,
@@ -107,6 +108,102 @@ pipeline test_unobservable_expectations_refuse(task: unknown) {
   assert_eq(census.missing, 0)
   assert_eq(census.verdict, "missing")
   assert_eq(census.exit_code, 3)
+}
+
+pipeline test_explicitly_required_skip_refuses() {
+  const page = {
+    total_count: 2,
+    check_runs: [
+      run(1, "CI status", "completed", "skipped"),
+      run(2, "Optional check", "completed", "skipped"),
+    ],
+  }
+  const census = build_census(
+    "d".repeat(40),
+    check_run_observations(page),
+    ["CI status"],
+    [],
+    "explicit",
+  )
+  assert_eq(census.bad_names, ["CI status"])
+  assert_eq(census.bad, 1)
+  assert_eq(census.intentional_skip, 1)
+  assert_eq(census.exit_code, 1)
+}
+
+pipeline test_cross_repo_workflow_cannot_supply_harn_expectations(harness: Harness) {
+  const filters = workflow_surface_filters(ci_workflow(harness.fs), "surface_filter")
+  const diff = {ok: true, paths: ["Cargo.toml"]}
+  const foreign = check_expectations("burin-labs/harn-cloud", "burin-labs/harn", [], filters, diff)
+  assert_eq(foreign.source, "unobservable")
+  assert_eq(foreign.expected_names, [])
+  assert_eq(foreign.path_required_names, [])
+  const page = {check_runs: [run(1, "CI status", "completed", "success")]}
+  const census = build_census(
+    "f".repeat(40),
+    check_run_observations(page),
+    foreign.expected_names,
+    foreign.path_required_names,
+    foreign.source,
+  )
+  assert_eq(census.success, 1)
+  assert_eq(census.exit_code, 3)
+  const owned = check_expectations("burin-labs/harn", "burin-labs/harn", [], filters, diff)
+  assert_eq(owned.source, "workflow_filters")
+  assert_eq(owned.expected_names.contains("Harn and release orchestrator agree"), true)
+}
+
+pipeline test_harn_registry_does_not_describe_other_owned_workflows(harness: Harness) {
+  const filters = workflow_surface_filters(ci_workflow(harness.fs), "surface_filter")
+  const diff = {ok: true, paths: ["Cargo.toml"]}
+  assert_eq(
+    check_expectations("burin-labs/harn-cloud", "burin-labs/harn-cloud", [], filters, diff).source,
+    "unobservable",
+  )
+  assert_eq(
+    check_expectations("burin-labs/harn", "burin-labs/harn-cloud", [], filters, diff).source,
+    "unobservable",
+  )
+  assert_eq(check_expectations("burin-labs/harn", nil, [], filters, diff).source, "unobservable")
+}
+
+pipeline test_explicit_expectations_bypass_workflow_inference(harness: Harness) {
+  const filters = workflow_surface_filters(ci_workflow(harness.fs), "surface_filter")
+  const explicit = ["Dashboard contract", "CI status"]
+  const result = check_expectations(
+    "burin-labs/harn-cloud",
+    "burin-labs/harn",
+    explicit,
+    filters,
+    {ok: true, paths: ["Cargo.toml"]},
+  )
+  assert_eq(result.source, "explicit")
+  assert_eq(result.expected_names, explicit)
+  assert_eq(result.path_required_names, [])
+  const page = {
+    check_runs: [
+      run(1, "CI status", "completed", "success"),
+      run(2, "Dashboard contract", "completed", "success"),
+      run(3, "Optional check", "completed", "skipped"),
+    ],
+  }
+  const census = build_census(
+    "f".repeat(40),
+    check_run_observations(page),
+    result.expected_names,
+    result.path_required_names,
+    result.source,
+  )
+  assert_eq(census.success, 2)
+  assert_eq(census.intentional_skip, 1)
+  assert_eq(census.exit_code, 0)
+}
+
+pipeline test_incomplete_workflow_registry_refuses() {
+  assert_eq(
+    check_expectations("burin-labs/harn", "burin-labs/harn", [], {}, {ok: true, paths: []}).source,
+    "unobservable",
+  )
 }
 
 pipeline test_a_skip_on_a_path_required_check_is_bad_not_a_pass(task: unknown) {

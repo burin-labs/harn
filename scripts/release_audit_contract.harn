@@ -711,6 +711,25 @@ pub fn release_audit_ci_contract_report(contract: ReleaseAuditContract, ci: dict
       }
     }
   }
+  // A proof covers a matrix job only when every leg it runs is named. Otherwise
+  // a new leg can fail on a merge group whose proof still reads as complete.
+  let contracted_jobs: list<string> = []
+  for expected in contract.merge_group_jobs {
+    if !contracted_jobs.contains(expected.job_id) {
+      contracted_jobs = contracted_jobs + [expected.job_id]
+    }
+  }
+  for job_id in contracted_jobs {
+    for entry in ci_job(ci, job_id)?.strategy?.matrix?.include ?? [] {
+      const kind = trim(entry?.kind ?? "")
+      const covered = contract.merge_group_jobs.any(
+        { expected -> expected.job_id == job_id && expected.matrix_kind == kind },
+      )
+      if !covered {
+        errors = errors + ["uncontracted matrix kind: " + job_id + ":" + kind]
+      }
+    }
+  }
   const ok = len(errors) == 0
   return {
     ok: ok,

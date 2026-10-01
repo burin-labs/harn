@@ -223,7 +223,7 @@ fn hosted_lane(cache_key: string, write_cache: bool = false) {
   return lane
 }
 
-fn elastic_lane(cache_key: string) {
+fn lint_lane() {
   return {
     "runs-on": gha_expression(
       "vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true' && (github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) && 'blacksmith-8vcpu-ubuntu-2404' || 'ubuntu-latest'",
@@ -233,18 +233,23 @@ fn elastic_lane(cache_key: string) {
         "vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true' && (github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) && 'blacksmith' || 'github-hosted'",
       ),
     },
-    steps: [
-      {
-        uses: "./.github/actions/rust-cache",
-        with: {"shared-key": cache_key, "cache-workspace-crates": "true"},
+    strategy: {
+      "fail-fast": false,
+      matrix: {
+        include: [
+          {kind: "workspace", name: "Check Rust code"},
+          {kind: "lean-lsp", name: "Check Rust code (lean LSP features)"},
+          {kind: "freshness-checker", name: "Check Rust code (freshness checker)"},
+        ],
       },
-    ],
+    },
+    steps: [],
   }
 }
 
 fn workflow() {
   const package_audit = hosted_lane("package-audit", true)
-  const lint = elastic_lane("workspace-tests")
+  const lint = lint_lane()
   const producer = persistent_lane(
     "blacksmith-8vcpu-ubuntu-2404",
     "workspace-tests",
@@ -332,7 +337,13 @@ fn workflow() {
         ...lint,
         env: {...lint.env, RUSTFLAGS: "-D warnings -Clink-arg=-fuse-ld=mold"},
         steps: lint.steps
-          + [{name: "Check Rust code with Clippy", run: "./scripts/ci/run_rust_lint_lane.sh"}],
+          + [
+            {
+              name: "Check Rust code with Clippy",
+              run: "./scripts/ci/run_rust_lint_lane.sh --leg \"" + gha_expression("matrix.kind")
+                + "\"",
+            },
+          ],
       },
       "rust-cache-refresh": {
         "runs-on": "ubuntu-latest",
@@ -1114,14 +1125,80 @@ pipeline test_rejects_unowned_runner_routing(harness: Harness, task: unknown) {
       },
       "rust-checks": {
         ...rust_job,
-        strategy: {matrix: {include: [{kind: "lint"}, {kind: "workspace-tests"}]}},
+        strategy: {
+          ...rust_job.strategy,
+          matrix: {include: [{kind: "lint"}, {kind: "workspace-tests"}]},
+        },
       },
     },
   }
   const errors = ci_linux_lane_policy_errors(invalid)
   assert(errors.contains("ci.yml:package-audit must run on ubuntu-latest"))
   assert(
-    errors.contains("ci.yml:rust-checks must remain one fixed lint lane, not a compile matrix"),
+    errors.contains(
+      "ci.yml:rust-checks must run exactly one fail-slow matrix leg per lint leg: workspace, lean-lsp, freshness-checker",
+    ),
+  )
+}
+
+@test
+pipeline test_rust_lint_lane_runs_every_leg_without_a_build_cache(harness: Harness, task: unknown) {
+  const valid = workflow()
+  const rust_job = valid.jobs["rust-checks"]
+  assert_eq(
+    ci_linux_lane_policy_errors(valid).filter({ e -> contains(e, "rust-checks") }).to_list(),
+    [],
+  )
+  const leg_message =
+    "ci.yml:rust-checks must run exactly one fail-slow matrix leg per lint leg: workspace, lean-lsp, freshness-checker"
+  // Dropping a leg leaves that feature graph unlinted on every merge group.
+  const missing_leg = {
+    ...valid,
+    jobs: {
+      ...valid.jobs,
+      "rust-checks": {
+        ...rust_job,
+        strategy: {
+          ...rust_job.strategy,
+          matrix: {
+            include: rust_job.strategy.matrix.include.filter({ e -> e.kind != "lean-lsp" })
+              .to_list(),
+          },
+        },
+      },
+    },
+  }
+  assert(ci_linux_lane_policy_errors(missing_leg).contains(leg_message))
+  // Fail-fast would cancel sibling legs and hide their verdicts.
+  const fail_fast = {
+    ...valid,
+    jobs: {
+      ...valid.jobs,
+      "rust-checks": {...rust_job, strategy: {...rust_job.strategy, "fail-fast": true}},
+    },
+  }
+  assert(ci_linux_lane_policy_errors(fail_fast).contains(leg_message))
+  // Clippy cannot reuse the producer's build cache; restoring it only costs time.
+  const cached = {
+    ...valid,
+    jobs: {
+      ...valid.jobs,
+      "rust-checks": {
+        ...rust_job,
+        steps: [
+          {
+            uses: "./.github/actions/rust-cache",
+            with: {"shared-key": "workspace-tests", "cache-workspace-crates": "true"},
+          },
+        ]
+          + rust_job.steps,
+      },
+    },
+  }
+  assert(
+    ci_linux_lane_policy_errors(cached).contains(
+      "ci.yml:rust-checks must not restore a build cache Clippy cannot reuse",
+    ),
   )
 }
 

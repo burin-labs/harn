@@ -150,7 +150,9 @@ arbitrary orchestration ref.
   before this command existed record `package_test_inventory_unsupported`;
   they never report an unmeasured suite as zero.
 - Stale heads: an open bump PR with auto-merge armed is disarmed only under its
-  exact PR-head and base-head leases before refresh begins. The runtime checks
+  exact PR-head and the freshly observed base-branch head before refresh begins.
+  The PR's historical base snapshot does not identify the current branch head;
+  an unavailable current head prevents disarming. The runtime checks
   the checkout's exact base against the remote branch before refresh, after
   validation, and again immediately before arming. The connector derives and
   publishes a GitHub-signed commit only while the measured lease is current.
@@ -194,10 +196,12 @@ failure part-way through a bump.
 
 ## Security boundary
 
-- **Least privilege, short-lived credentials.** The workflow mints a GitHub App
-  installation token scoped to `contents: write` + `pull-requests: write` for
-  the run only. The caller passes the App client id and private key as
-  `secrets`; no long-lived PAT is used.
+- **Least privilege, renewable credentials.** The caller passes its App client
+  id and private key as `secrets`. The driver mints tokens for only the calling
+  repository, with `contents: write` and `pull_requests: write`. The locked
+  connector retains these restrictions across expiry and 401 renewal. Git
+  fetches and each new refresh callback obtain a current token. A child making
+  GitHub calls beyond its token's lifetime must manage its own renewal.
 - **Signed commits.** The bump commit is created through GitHub's
   `createCommitOnBranch` GraphQL mutation under the App identity, so GitHub
   signs it and an org `required_signatures` ruleset is satisfied. A local
@@ -219,6 +223,8 @@ failure part-way through a bump.
   no orchestration, release-readiness, signing, branch, or PR machinery.
 - **Sandbox posture.** The orchestration runs under `harn run --no-sandbox`
   because it must reach git, the GitHub API through the connector, and the
-  caller's refresh and validation commands. It carries no secret beyond the
-  scoped installation token, which is passed via the environment and never
-  written to the repo.
+  caller's refresh and validation commands. The workflow removes the raw App
+  key from its environment before starting Harn. A mode-600 runner temporary
+  file hands the key to the driver, which reads and deletes that exact file
+  before any child runs. The driver retains the key in memory; caller refresh
+  commands receive only a scoped token through `GH_TOKEN`.

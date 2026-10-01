@@ -2103,7 +2103,7 @@
       },
       "deprecation": {
         "status": "deprecated",
-        "note": "Retired 2025-10-28 per Anthropic deprecations page. Use claude-sonnet-4-5-20250929 or claude-sonnet-4-6.",
+        "note": "Retired 2025-10-28 per Anthropic deprecations page. Use claude-sonnet-4-6.",
         "superseded_by": "claude-sonnet-4-6"
       },
       "availability": "serverless",
@@ -2217,7 +2217,7 @@
       },
       "deprecation": {
         "status": "deprecated",
-        "note": "Retired 2025-10-28 per Anthropic deprecations page. Use claude-sonnet-4-5-20250929 or claude-sonnet-4-6.",
+        "note": "Retired 2025-10-28 per Anthropic deprecations page. Use claude-sonnet-4-6.",
         "superseded_by": "claude-sonnet-4-6"
       },
       "availability": "serverless",
@@ -4155,8 +4155,9 @@
       },
       "deprecation": {
         "status": "deprecated",
-        "note": "Undated compatibility selector. Anthropic's active API id is claude-sonnet-4-5-20250929; prefer that dated id or claude-sonnet-4-6.",
-        "superseded_by": "claude-sonnet-4-5-20250929"
+        "note": "Undated compatibility selector for claude-sonnet-4-5-20250929, which Anthropic deprecated 2026-09-30. Use claude-sonnet-5-5.",
+        "sunset_date": "2026-11-24",
+        "superseded_by": "claude-sonnet-5-5"
       },
       "availability": "serverless",
       "quality_tags": [],
@@ -4283,7 +4284,10 @@
         }
       },
       "deprecation": {
-        "status": "active"
+        "status": "deprecated",
+        "note": "Deprecated 2026-09-30. Retires 2026-11-24 9AM PT per Anthropic's customer notice (the deprecations page lists 2026-11-30), with reduced availability and rate errors from 2026-10-30. Use claude-sonnet-5-5.",
+        "sunset_date": "2026-11-24",
+        "superseded_by": "claude-sonnet-5-5"
       },
       "availability": "serverless",
       "quality_tags": [],
@@ -33246,31 +33250,6 @@
         "prefers_xml_scaffolding",
         "prompt_caching",
         "reasoning_effort",
-        "streaming",
-        "structured_output",
-        "structured_output_mode:native_json",
-        "text_tools",
-        "thinking",
-        "tool_search",
-        "tools",
-        "vision"
-      ]
-    },
-    {
-      "provider": "anthropic",
-      "model": "claude-sonnet-4-5-20250929",
-      "base_url": "https://api.anthropic.com/v1",
-      "secret_env": "ANTHROPIC_API_KEY",
-      "label": "Claude Sonnet 4.5",
-      "family": "anthropic-claude",
-      "capabilities": [
-        "audio",
-        "batch",
-        "files",
-        "native_tools",
-        "pdf",
-        "prefers_xml_scaffolding",
-        "prompt_caching",
         "streaming",
         "structured_output",
         "structured_output_mode:native_json",

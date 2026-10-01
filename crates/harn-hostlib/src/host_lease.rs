@@ -823,8 +823,10 @@ impl HostLeaseStore {
                     observer(&receipt);
                 }
             }
+            // A progress callback can outlive this admission snapshot. Decide
+            // expiry from the receipt, so a later clock read cannot return it stale.
             if receipt.status == HostLeaseAcquireStatus::Acquired
-                || self.clock.monotonic_ms() >= deadline_monotonic_ms
+                || receipt.waited_ms >= wait_timeout_ms.unsigned_abs()
             {
                 if receipt.status == HostLeaseAcquireStatus::Deferred {
                     self.remove_waiter(&identity.waiter_id)?;
@@ -845,7 +847,8 @@ impl HostLeaseStore {
                     .max(0) as u64,
             );
             if remaining.is_zero() {
-                return Ok(receipt);
+                // Re-observe expiry and remove the waiter through the terminal path.
+                continue;
             }
             let mut wait_duration = wake_duration.min(remaining);
             if let Some(schedule) = progress_schedule {

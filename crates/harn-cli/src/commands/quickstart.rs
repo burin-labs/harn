@@ -636,10 +636,7 @@ fn providers_config_path() -> PathBuf {
     env::var_os("HARN_PROVIDERS_CONFIG")
         .filter(|value| !value.is_empty())
         .map(PathBuf::from)
-        .or_else(|| {
-            harn_vm::user_dirs::home_dir()
-                .map(|home| home.join(".config").join("harn").join("providers.toml"))
-        })
+        .or_else(harn_vm::llm_config::user_providers_config_path)
         .unwrap_or_else(|| PathBuf::from(".config/harn/providers.toml"))
 }
 

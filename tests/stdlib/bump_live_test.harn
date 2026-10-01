@@ -34,11 +34,17 @@ fn git_ok(tools: HarnessTools, root: string, args: list<string>) {
   return trim(result.stdout ?? "")
 }
 
+fn init_fixture_repo(tools: HarnessTools, root: string) {
+  git_ok(tools, root, ["init", "--quiet"])
+  git_ok(tools, root, ["config", "user.email", "harn-test@example.invalid"])
+  git_ok(tools, root, ["config", "user.name", "Harn Test"])
+  git_ok(tools, root, ["config", "commit.gpgsign", "false"])
+  git_ok(tools, root, ["config", "tag.gpgsign", "false"])
+}
+
 fn adoption_fixture(harness: Harness) {
   const root = harness.fs.mkdtemp_in_workspace("harn-bump-adopt-")
-  git_ok(harness.tools, root, ["init", "--quiet"])
-  git_ok(harness.tools, root, ["config", "user.email", "harn-test@example.invalid"])
-  git_ok(harness.tools, root, ["config", "user.name", "Harn Test"])
+  init_fixture_repo(harness.tools, root)
   harness.fs.write_text(path_join(root, "base.txt"), "first\n")
   git_ok(harness.tools, root, ["add", "base.txt"])
   git_ok(harness.tools, root, ["commit", "--quiet", "-m", "first"])
@@ -162,9 +168,7 @@ pipeline test_apply_version_includes_untracked_generated_files(harness: Harness)
 
 pipeline test_source_revision_relation_uses_commit_ancestry(harness: Harness) {
   const root = harness.fs.mkdtemp_in_workspace("harn-bump-source-")
-  git_ok(harness.tools, root, ["init", "--quiet"])
-  git_ok(harness.tools, root, ["config", "user.email", "harn-test@example.invalid"])
-  git_ok(harness.tools, root, ["config", "user.name", "Harn Test"])
+  init_fixture_repo(harness.tools, root)
   harness.fs.write_text(path_join(root, "source.txt"), "first\n")
   git_ok(harness.tools, root, ["add", "source.txt"])
   git_ok(harness.tools, root, ["commit", "--quiet", "-m", "first"])
