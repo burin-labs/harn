@@ -37,6 +37,7 @@ fn refresh_order_errors(
   safe_repairs: string,
   caller_refresh: string,
   format_migration: string,
+  finalization: string,
   refresh_sentinel: string,
 ) -> list<string> {
   let errors: list<string> = []
@@ -52,8 +53,11 @@ fn refresh_order_errors(
   if command.index_of(safe_repairs) >= command.index_of(format_migration) {
     errors = errors + ["behavior-preserving repairs must precede the format migration"]
   }
-  if command.index_of(format_migration) >= command.index_of(refresh_sentinel) {
-    errors = errors + ["format migration must finish before refresh success is recorded"]
+  if command.index_of(format_migration) >= command.index_of(finalization) {
+    errors = errors + ["source formatting must finish before artifact finalization"]
+  }
+  if command.index_of(finalization) >= command.index_of(refresh_sentinel) {
+    errors = errors + ["artifact finalization must finish before refresh success is recorded"]
   }
   return errors
 }
@@ -81,6 +85,10 @@ fn orchestration_identity_errors(inputs: dict, steps: list, text: string) -> lis
 
 fn workflow_input_errors(inputs: dict) -> list<string> {
   let errors: list<string> = []
+  if inputs.get("finalize-refresh-command")?.type != "string"
+    || inputs.get("finalize-refresh-command")?.default != "" {
+    errors = errors + ["finalize-refresh-command must remain an optional typed empty-default input"]
+  }
   if inputs.get("refresh-command")?.type != "string" {
     errors = errors + ["refresh-command must remain a typed reusable-workflow input"]
   }
@@ -176,6 +184,9 @@ fn bump_workflow_errors(workflow: dict, text: string) -> list<string> {
     errors = errors + ["refresh, validation, and git effects must run from the consumer package"]
   }
   const env = run?.env ?? {}
+  if env?.BUMP_REFRESH_FINALIZE_COMMAND != "$" + "{{ inputs.finalize-refresh-command }}" {
+    errors = errors + ["artifact finalization must consume only the typed caller command"]
+  }
   errors = errors + authentication_boundary_errors(steps, env)
   if env?.HARN_BUMP_REFRESH_COMMAND != "$" + "{{ inputs.refresh-command }}" {
     errors = errors + ["refresh-command must flow into the orchestration environment"]
@@ -193,6 +204,7 @@ fn bump_workflow_errors(workflow: dict, text: string) -> list<string> {
   const safe_repairs = "harn fix --apply --safety behavior-preserving ."
   const caller_refresh = "eval \"$HARN_BUMP_REFRESH_COMMAND\""
   const format_migration = "eval \"$HARN_BUMP_FORMAT_COMMAND\""
+  const finalization = "eval \"$BUMP_REFRESH_FINALIZE_COMMAND\""
   const refresh_sentinel = "> \"$HARN_BUMP_REFRESH_SENTINEL\""
   const refresh_pipeline = "$"
     + "{refresh_caller}"
@@ -205,6 +217,8 @@ fn bump_workflow_errors(workflow: dict, text: string) -> list<string> {
     + "$"
     + "{refresh_format}"
     + "$"
+    + "{refresh_finalize}"
+    + "$"
     + "{refresh_complete}"
   for required in [
     implicit_any,
@@ -213,6 +227,7 @@ fn bump_workflow_errors(workflow: dict, text: string) -> list<string> {
     caller_refresh,
     "test -n \"$HARN_BUMP_FORMAT_COMMAND\"",
     format_migration,
+    finalization,
     refresh_sentinel,
     "test -f \"$HARN_BUMP_REFRESH_SENTINEL\"",
     "eval \"$HARN_BUMP_VALIDATE_COMMAND\"",
@@ -230,6 +245,7 @@ fn bump_workflow_errors(workflow: dict, text: string) -> list<string> {
       safe_repairs,
       caller_refresh,
       format_migration,
+      finalization,
       refresh_sentinel,
     )
   if !command.contains(refresh_pipeline) {
@@ -334,7 +350,12 @@ pipeline test_shipped_workflow_removes_private_key_before_child_launch(harness: 
   }
 }
 
-fn assert_refresh_execution(harness: Harness, caller_ok: bool) {
+fn assert_refresh_execution(
+  harness: Harness,
+  caller_ok: bool,
+  finalize_ok: bool = true,
+  finalize_enabled: bool = true,
+) {
   const path = path_join(harness.fs.source_dir(), "../../.github/workflows/bump-harn.yml")
   const workflow = read_yaml(harness.fs, path)
   const step = workflow.jobs.bump.steps.find({ entry -> entry.name == "Run bump orchestration" })
@@ -375,12 +396,23 @@ fn assert_refresh_execution(harness: Harness, caller_ok: bool) {
               "false"
             },
           HARN_BUMP_FORMAT_COMMAND: "printf 'format\\n' >> \"$PHASES\"",
+          BUMP_REFRESH_FINALIZE_COMMAND: if finalize_enabled {
+            "printf 'finalize\\n' >> \"$PHASES\"; "
+              + if finalize_ok {
+                "true"
+              } else {
+                "false"
+              }
+          } else {
+            ""
+          },
           HARN_BUMP_REFRESH_SENTINEL: sentinel,
           HARN_BUMP_APPLY_BEHAVIOR_PRESERVING_FIXES: repairs,
         },
       },
     )
-    assert_eq(result.success, caller_ok, result.stderr)
+    const completed = caller_ok && (!finalize_enabled || finalize_ok)
+    assert_eq(result.success, completed, result.stderr)
     const observed = harness.fs.read_text(phases)
     const expected = if caller_ok {
       "caller\nmigration\nmigration\n"
@@ -389,12 +421,17 @@ fn assert_refresh_execution(harness: Harness, caller_ok: bool) {
         } else {
           "format\n"
         }
+        + if finalize_enabled {
+          "finalize\n"
+        } else {
+          ""
+        }
     } else {
       "caller\n"
     }
     assert_eq(observed, expected)
-    assert_eq(harness.fs.exists(sentinel), caller_ok)
-    if caller_ok {
+    assert_eq(harness.fs.exists(sentinel), completed)
+    if completed {
       assert_eq(harness.fs.read_text(sentinel), "ok\n")
     }
   }
@@ -406,4 +443,12 @@ pipeline test_failed_caller_stops_refresh_before_migrations_and_sentinel(harness
 
 pipeline test_successful_caller_reaches_format_and_sentinel(harness: Harness) {
   assert_refresh_execution(harness, true)
+}
+
+pipeline test_failed_finalizer_refuses_refresh_success(harness: Harness) {
+  assert_refresh_execution(harness, true, false)
+}
+
+pipeline test_callers_without_generated_artifacts_need_no_finalizer(harness: Harness) {
+  assert_refresh_execution(harness, true, true, false)
 }

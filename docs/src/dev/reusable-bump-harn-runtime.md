@@ -26,7 +26,13 @@ declared refresh and validation commands.
 
 Drop this into the consuming repo. The only repo-specific parts are the trigger
 schedule and, when the default lock refresh is insufficient, the
-`refresh-command`, `format-command`, and `validate-command`.
+`refresh-command`, `format-command`, `finalize-refresh-command`, and `validate-command`.
+
+Set `finalize-refresh-command` when generated artifacts depend on Harn source files.
+It runs after compatibility migrations, repairs, and formatting, before validation.
+For example, use `pnpm run codegen` to regenerate bytecode from the final source tree.
+The default is empty. A failed finalizer refuses refresh success.
+With the default `publish-failure-for-repair: false`, the bump stops before validation or publication.
 
 ```yaml
 name: Bump Harn Runtime
@@ -94,7 +100,7 @@ jobs:
       # head lease. Ordinary callers should keep the default false.
       publish-failure-for-repair: false
       # Optional. The shared workflow applies `harn fix --safety
-      # behavior-preserving` to your sources before your refresh command, so a
+      # behavior-preserving` to your sources after your refresh command, so a
       # bump can normalize its own fallout. Set false to decline that pass and
       # keep the bump limited to the version change plus mandatory compatibility
       # migrations and your own commands. The implicit-any compatibility
@@ -219,7 +225,8 @@ failure part-way through a bump.
 - **One package-contract owner.** The shared workflow invokes Harn's structural
   test-discovery inventory but encodes none of a package's code-generation or
   build/test commands. Repositories expose those owner commands through
-  `refresh-command`, `format-command`, and `validate-command`; consumers copy
+  `refresh-command`, `format-command`, `finalize-refresh-command`, and
+  `validate-command`; consumers copy
   no orchestration, release-readiness, signing, branch, or PR machinery.
 - **Sandbox posture.** The orchestration runs under `harn run --no-sandbox`
   because it must reach git, the GitHub API through the connector, and the
