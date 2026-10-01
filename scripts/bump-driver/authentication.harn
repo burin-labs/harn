@@ -1,9 +1,7 @@
 import { LiveBumpRemote, live_bump_adapter } from "std/bump/live"
 import { BumpAdapter } from "std/bump/runtime"
+import { GITHUB_BUMP_PERMISSIONS } from "./github_authority"
 import { GithubClientOptions, installation_token } from "harn-github-connector/default"
-
-/** Repository automation retains the bootstrap workflow's permission ceiling. */
-pub const GITHUB_BUMP_PERMISSIONS = {contents: "write", pull_requests: "write"}
 
 pub type GithubBumpCredentials = {
   app_id?: string,

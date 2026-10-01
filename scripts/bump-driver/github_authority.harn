@@ -1,0 +1,2 @@
+/** Repository automation retains the bootstrap workflow's permission ceiling. */
+pub const GITHUB_BUMP_PERMISSIONS = {contents: "write", pull_requests: "write"}
