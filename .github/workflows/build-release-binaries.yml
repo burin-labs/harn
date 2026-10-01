@@ -656,6 +656,12 @@ jobs:
       # The per-object GHA sccache backend remains forbidden: Windows hit
       # `os error 10054` mid harn-vm compile (#2114), and the hosted trial
       # burned storage without useful hits (v0.10.39).
+      # Local blob caches share the repository's 10 GB Actions cache with the
+      # merge queue's Rust caches (about 5.4 GB), which every merge restores.
+      # Release candidates are rarer, so each target's local store is capped
+      # at 1G: at 2G, three targets reached about 4 GB compressed and LRU
+      # evicted the merge queue's shared CLI cache. A Blacksmith sticky disk
+      # is outside that budget, but its local fallback is not.
       - uses: ./.github/actions/sccache
         if: matrix.sccache_backend == 'sticky'
         continue-on-error: true
@@ -665,7 +671,7 @@ jobs:
           # Warm/standard/recovery Intel macOS is not Blacksmith; keep a local
           # blob fallback so version-only commits still reuse object cache.
           local-cache: ${{ contains(matrix.runner, 'blacksmith') && 'false' || 'true' }}
-          cache-size: "2G"
+          cache-size: "1G"
 
       - uses: ./.github/actions/sccache
         if: matrix.sccache_backend == 'local'
@@ -673,7 +679,7 @@ jobs:
         with:
           cache-key: release-${{ matrix.target }}
           local-cache: "true"
-          cache-size: "2G"
+          cache-size: "1G"
 
       - uses: ./.github/actions/sccache-install
         if: matrix.sccache_backend == 'install'
