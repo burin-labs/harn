@@ -188,6 +188,7 @@ async fn acp_session_timeline_query_and_subscribe_use_event_log() {
                 .expect("send timeline run query");
             let run_snapshot = recv_json(&mut response_rx).await;
             assert_eq!(run_snapshot["id"], 23);
+            assert!(run_snapshot.get("error").is_none(), "{run_snapshot}");
             let root = run_snapshot["result"]["nodes"]
                 .as_array()
                 .unwrap()
