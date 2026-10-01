@@ -1,6 +1,10 @@
 import { agent_loop } from "std/agent/loop"
 import { llm_text, llm_tool_call, with_llm_script } from "std/testing"
 
+struct SlowOutcome {
+  success: bool
+}
+
 /**
  * A tool call is in the canonical session store before its handler runs.
  *
@@ -40,7 +44,7 @@ preferred_tool_format = "native"
                 + to_string(transcript_event.metadata?.status)]
           }
         }
-        return {success: true}
+        return SlowOutcome {success: true}
       },
       parameters: {},
       returns: {type: "object"},
