@@ -669,17 +669,32 @@ jobs:
       - name: Run the release residual audit
         run: ./scripts/release_gate.sh audit --residual-only
 
-  # Strict Clippy is an independent compile proof. Its warm hosted-cache time is
-  # already below the SLO; the full test graph is owned by rust-check-inputs so the
-  # repository pays for one behavior build rather than two competing builds.
+  # Strict Clippy is an independent compile proof. The full test graph is owned
+  # by rust-check-inputs so the repository pays for one behavior build rather
+  # than two competing builds.
   rust-checks:
-    name: Check Rust code
+    name: ${{ matrix.name }}
     needs: [changes]
     # Heavy Linux Rust lanes. Skipped on a docs/website/markdown-only PR; forced
     # on for merge_group and non-metadata pushes (see the `changes` job).
     # ci-status treats a skip here as PASS so branch protection isn't deadlocked.
     if: needs.changes.outputs.rust == 'true'
     runs-on: ${{ vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true' && (github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) && 'blacksmith-8vcpu-ubuntu-2404' || 'ubuntu-latest' }}
+    # Each leg resolves a different feature graph, so none reuses another's
+    # check units. Run in sequence on one runner they summed to 15-16 minutes
+    # (7m15s + 4m02s + 4m42s on 2026-10-01), the longest Rust lane in the merge
+    # queue. Separate free hosted runners make the lane cost its slowest leg.
+    # `scripts/ci/run_rust_lint_lane.sh --list-legs` owns the leg names.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - kind: workspace
+            name: Check Rust code
+          - kind: lean-lsp
+            name: Check Rust code (lean LSP features)
+          - kind: freshness-checker
+            name: Check Rust code (freshness checker)
     # Linux-only: emit line-tables-only debuginfo for dev builds. Trims link
     # time and disk on these link-bound lanes while keeping panic line numbers
     # for nextest backtraces. NOT applied to the Windows/macOS jobs — #2127/
@@ -697,8 +712,12 @@ jobs:
       # keeps the workflow-level `-D warnings`.
       RUSTFLAGS: "-D warnings -Clink-arg=-fuse-ld=mold"
       HARN_RUNNER_TIER: ${{ vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true' && (github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) && 'blacksmith' || 'github-hosted' }}
+    # Matrix legs share one outputs map and the last leg to finish wins each
+    # key, so every leg owns a distinct key and ci-status requires all three.
     outputs:
-      lint_ok: ${{ steps.lint-ok.outputs.ok }}
+      lint_ok_workspace: ${{ steps.lint-ok.outputs.workspace }}
+      lint_ok_lean_lsp: ${{ steps.lint-ok.outputs.lean-lsp }}
+      lint_ok_freshness_checker: ${{ steps.lint-ok.outputs.freshness-checker }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -719,29 +738,30 @@ jobs:
       - uses: ./.github/actions/rust-toolchain
         with:
           components: clippy
-      - name: Install cargo-machete
-        uses: taiki-e/install-action@94c31af3204a9f15ab40b35ad084410b905bbc73 # v2.87.17
-        with:
-          tool: cargo-machete@0.9.2
-      - uses: ./.github/actions/rust-cache
-        continue-on-error: true
-        with:
-          shared-key: workspace-tests
-          cache-on-failure: true
-          cache-bin: false
-          # Keep workspace artifacts so merge_group does not rebuild every
-          # harn-* crate after an exact rust-cache hit (#5003).
-          cache-workspace-crates: "true"
+      # No Rust cache. The producer's cache holds build artifacts, and Clippy
+      # check units cannot reuse them: with a 5.9 GiB exact hit this lane still
+      # re-checked 584 crates, and the one cache-miss merge-group run in the
+      # 2026-10-01 sample linted in 895s against 874-966s for hits. The restore
+      # itself cost 60-145s of every run.
       # Keep this lane compilation-only. Harn-backed repository policy checks
       # use the shared CLI in audit-scripts rather than rebuilding it here.
       - name: Check Rust code with Clippy
         id: release-audit-rust-lint
-        run: ./scripts/ci/run_rust_lint_lane.sh
+        run: ./scripts/ci/run_rust_lint_lane.sh --leg "${{ matrix.kind }}"
+      # Dependency hygiene compiles nothing, so it rides the shortest leg.
+      - name: Install cargo-machete
+        if: matrix.kind == 'lean-lsp'
+        uses: taiki-e/install-action@94c31af3204a9f15ab40b35ad084410b905bbc73 # v2.87.17
+        with:
+          tool: cargo-machete@0.9.2
       - name: Reject unused Rust dependencies
+        if: matrix.kind == 'lean-lsp'
         run: make lint-deps
       - name: Mark lint leg success
         id: lint-ok
-        run: echo "ok=true" >> "$GITHUB_OUTPUT"
+        env:
+          LINT_LEG: ${{ matrix.kind }}
+        run: echo "${LINT_LEG}=true" >> "$GITHUB_OUTPUT"
 
   # One persistent producer owns the complete environment-neutral Rust graph.
   # It builds the exact CLI/security artifacts consumed by GitHub Ubuntu, then
@@ -2498,12 +2518,19 @@ jobs:
 
           # Rust checks remain pre-merge product proof. Repository policies are
           # handled separately below as a main-only integration ratchet.
+          # The lint lane is a matrix; its result is success only when every
+          # leg succeeded, and each leg publishes its own proof flag.
           rust_checks_result="${{ needs['rust-checks'].result }}"
-          lint_ok="${{ needs['rust-checks'].outputs.lint_ok }}"
-          echo "Rust lint: $rust_checks_result (lint_ok=$lint_ok)"
+          lint_ok_workspace="${{ needs['rust-checks'].outputs.lint_ok_workspace }}"
+          lint_ok_lean_lsp="${{ needs['rust-checks'].outputs.lint_ok_lean_lsp }}"
+          lint_ok_freshness_checker="${{ needs['rust-checks'].outputs.lint_ok_freshness_checker }}"
+          echo "Rust lint: $rust_checks_result (workspace=$lint_ok_workspace lean_lsp=$lint_ok_lean_lsp freshness_checker=$lint_ok_freshness_checker)"
           require_result "$rust_checks_result" "Rust lint failed." true
-          if [ "${{ needs.changes.outputs.rust }}" = "true" ] && [ "$lint_ok" != "true" ]; then
-            echo "::error::Rust lint proof is missing."
+          if [ "${{ needs.changes.outputs.rust }}" = "true" ] \
+            && { [ "$lint_ok_workspace" != "true" ] \
+              || [ "$lint_ok_lean_lsp" != "true" ] \
+              || [ "$lint_ok_freshness_checker" != "true" ]; }; then
+            echo "::error::Rust lint proof is missing for at least one leg."
             exit 1
           fi
 

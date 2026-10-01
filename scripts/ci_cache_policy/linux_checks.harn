@@ -319,15 +319,23 @@ fn hosted_compile_lane_errors(
   return errors
 }
 
-/** Keep a compile lane switchable between elastic and GitHub-hosted capacity. */
-fn elastic_compile_lane_errors(
-  workflow: dict,
-  job_name: string,
-  rust_cache_key: string,
-) -> list<string> {
+/**
+ * The legs `scripts/ci/run_rust_lint_lane.sh --leg` accepts. Each resolves its
+ * own feature graph, so the lane runs them on separate runners.
+ */
+const RUST_LINT_LEGS = ["workspace", "lean-lsp", "freshness-checker"]
+
+/**
+ * Keep strict Clippy one leg per runner on the elastic switch, without a build
+ * cache it cannot use. Clippy check units share nothing with the producer's
+ * build artifacts: an exact 5.9 GiB hit still re-checked 584 crates, and the
+ * restore cost 60-145s per run.
+ */
+fn rust_lint_lane_errors(workflow: dict) -> list<string> {
+  const job_name = "rust-checks"
   const job = workflow?.jobs?.[job_name]
   if job == nil {
-    return ["ci.yml:${job_name} must define the elastic Linux compile lane"]
+    return ["ci.yml:${job_name} must define the strict Clippy lane"]
   }
   let errors: list<string> = []
   if trim(job?.["runs-on"] ?? "") != blacksmith_runner_expression(BLACKSMITH_8CPU_RUNNER) {
@@ -342,14 +350,16 @@ fn elastic_compile_lane_errors(
   if len(matching_steps(job, PERSISTENT_SCCACHE_ACTION)) > 0 {
     errors = errors + ["ci.yml:${job_name} must not claim the producer's persistent sccache"]
   }
-  const caches = matching_steps(job, RUST_CACHE_ACTION)
-  if len(caches) != 1 || trim(caches[0]?.if ?? "") != "" {
+  if len(matching_steps(job, RUST_CACHE_ACTION)) > 0 {
+    errors = errors + ["ci.yml:${job_name} must not restore a build cache Clippy cannot reuse"]
+  }
+  const kinds = (job?.strategy?.matrix?.include ?? []).map({ entry -> trim(entry?.kind ?? "") })
+    .to_list()
+  if kinds != RUST_LINT_LEGS || job?.strategy?.["fail-fast"] != false {
     errors = errors
-      + ["ci.yml:${job_name} must restore its portable rust-cache on both runner tiers"]
-  } else if trim(to_string(caches[0]?.with?.["shared-key"] ?? "")) != rust_cache_key
-    || trim(to_string(caches[0]?.with?.[WORKSPACE_CACHE_INPUT] ?? ""))
-      != "true" {
-    errors = errors + ["ci.yml:${job_name} must keep complete portable cache ${rust_cache_key}"]
+      + [
+        "ci.yml:${job_name} must run exactly one fail-slow matrix leg per lint leg: ${join(RUST_LINT_LEGS, ", ")}",
+      ]
   }
   return errors
 }
@@ -1028,7 +1038,7 @@ fn strict_clippy_entrypoint_errors(rust_job: dict?) -> list<string> {
   const lint_step = step_by_name(rust_job?.steps ?? [], "Check Rust code with Clippy")
   if trim(lint_step?.if ?? "") == ""
     && trim(lint_step?.run ?? "")
-      == "./scripts/ci/run_rust_lint_lane.sh"
+      == "./scripts/ci/run_rust_lint_lane.sh --leg \"$" + "{{ matrix.kind }}\""
     && rust_job?.env?.RUN_PROMPT_PROSE_RATCHET == nil
     && lint_step?.env?.RUN_PROMPT_PROSE_RATCHET == nil {
     return []
@@ -1181,7 +1191,7 @@ pub fn cache_refresh_workflow_errors(workflow: dict) -> list<string> {
 
 pub fn ci_linux_lane_policy_errors(workflow: dict) -> list<string> {
   let errors = hosted_compile_lane_errors(workflow, "package-audit", "package-audit")
-    + elastic_compile_lane_errors(workflow, "rust-checks", "workspace-tests")
+    + rust_lint_lane_errors(workflow)
     + persistent_compile_lane_errors(
       workflow,
       "rust-check-inputs",
@@ -1190,10 +1200,6 @@ pub fn ci_linux_lane_policy_errors(workflow: dict) -> list<string> {
       "workspace-tests",
     )
   const rust_job = workflow?.jobs?.["rust-checks"]
-  if rust_job?.strategy != nil {
-    errors = errors
-      + ["ci.yml:rust-checks must remain one fixed lint lane, not a compile matrix"]
-  }
   errors = errors + strict_clippy_entrypoint_errors(rust_job)
   errors = errors + early_source_policy_errors(workflow)
   const producer = workflow?.jobs?.["rust-check-inputs"]
