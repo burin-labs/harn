@@ -456,7 +456,8 @@ pub const STDLIB_SOURCES: &[StdlibSource] = embedded_catalog!(StdlibSource, modu
 /// are generated from these declarations by `harn connector-schema-codegen`.
 ///
 /// It is intentionally NOT registered in [`STDLIB_SOURCES`]: it is a codegen
-/// input (like `spec/openapi.yaml`), not a module loaded into every program.
+/// input (like `crates/harn-serve/openapi.yaml`), not a module loaded into every
+/// program.
 /// Exposing it as an embedded string keeps the generator independent of the
 /// current working directory.
 pub const CONNECTOR_EVENT_SCHEMAS_SOURCE: &str = include_str!("stdlib/stdlib_event_schemas.harn");
