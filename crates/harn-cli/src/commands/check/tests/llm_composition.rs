@@ -10,6 +10,68 @@ fn diagnostics(source: &str) -> Vec<PreflightDiagnostic> {
 }
 
 #[test]
+fn direct_tool_preflight_requires_known_nonempty_tools() {
+    for tools in ["nil", "[]", "{tools: []}", "empty_tools"] {
+        let source = format!(
+            r#"
+fn main(harness: Harness) {{
+  const empty_tools = []
+  harness.llm.call("hello", nil, {{
+    provider: "openrouter",
+    model: "deepseek/deepseek-v3.2",
+    tool_format: "text",
+    tools: {tools},
+  }})
+}}
+"#
+        );
+        assert!(diagnostics(&source).is_empty(), "{source}");
+    }
+    for tools in ["[{name: \"echo\"}]", "{tools: [{name: \"echo\"}]}"] {
+        for format in ["text", "auto"] {
+            for search in ["", ", tool_search: false", ", tool_search: nil"] {
+                let source = format!(
+                    r#"
+fn main(harness: Harness) {{
+  harness.llm.call("hello", nil, {{
+    provider: "openrouter", model: "deepseek/deepseek-v3.2",
+    tool_format: "{format}", tools: {tools}{search},
+  }})
+}}
+"#
+                );
+                let found = diagnostics(&source);
+                assert_eq!(found.len(), 1, "{source}: {found:?}");
+                assert!(found[0].message.contains("would drop its tools"));
+            }
+        }
+    }
+}
+
+#[test]
+fn harness_direct_calls_keep_direct_channel_policy() {
+    let no_tools = r#"
+fn main(harness: Harness) {
+  harness.llm.call("hello", nil, {
+    provider: "openrouter", model: "deepseek/deepseek-v3.2", tool_format: "native",
+  })
+}
+"#;
+    assert!(diagnostics(no_tools).is_empty());
+    let unaudited_override = r#"
+fn main(harness: Harness) {
+  harness.llm.call("hello", nil, {
+    provider: "openrouter", model: "deepseek/deepseek-v3.2", tool_format: "native",
+    tools: [{name: "echo"}], tool_format_override_reason: "probe",
+  })
+}
+"#;
+    let found = diagnostics(unaudited_override);
+    assert_eq!(found.len(), 1);
+    assert!(found[0].message.contains("native_unreliable"));
+}
+
+#[test]
 fn preflight_rejects_only_provably_unsafe_literal_llm_compositions() {
     let rejected = [
         r#"

@@ -185,7 +185,6 @@ pub fn capability_rule_provenance(provider: &str, model: &str) -> Option<String>
 }
 
 /// [`lookup`] through [`effective_capability_route`].
-/// [`lookup`] through [`effective_capability_route`].
 pub fn lookup_for_mockable_route(provider: &str, model: &str) -> Capabilities {
     let (provider, model) = effective_capability_route(provider, model);
     lookup(provider, model)
