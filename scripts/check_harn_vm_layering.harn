@@ -1,0 +1,157 @@
+/**
+ * Keep harn-vm's module cycle from growing while it is decomposed (#9112).
+ *
+ * 108 of harn-vm's top-level modules (97% of its lines) form one strongly
+ * connected component, which is why the crate cannot be split and why its
+ * single-threaded front end bounds every Rust build. The target order is
+ * declared in `scripts/harn_vm_layering.json`, bottom layer first. A
+ * `crate::<module>` reference from a module to one in a higher layer is a
+ * back-edge. This gate counts back-edges per module pair and refuses any pair
+ * whose count grows past its committed baseline, so the decomposition only
+ * moves one way.
+ *
+ * `--write` lowers the baseline to the current counts. It refuses to raise
+ * one: a ratchet that can be re-blessed upward bounds nothing.
+ *
+ * Blind spot: a reference written through `super::` or a `use` re-export is
+ * not a `crate::` path, so it is not counted. The count is a progress measure
+ * and a growth guard, not proof that a module is free of upward dependencies.
+ */
+import { scan_files } from "./path_visibility.harn"
+
+const CHECK_NAME = "check-harn-vm-layering"
+
+const POLICY_PATH = "scripts/harn_vm_layering.json"
+
+const SOURCE_ROOT = "crates/harn-vm/src"
+
+type LayeringPolicy = {layers: list<list<string>>, baseline: dict<string, int>}
+
+/** The top-level module a source file belongs to: `llm/x.rs` and `llm.rs` are both `llm`. */
+pub fn top_module(rel: string) -> string {
+  const inside = rel.split(SOURCE_ROOT + "/")
+  const tail = inside[len(inside) - 1]
+  const first = tail.split("/")[0]
+  if first.ends_with(".rs") {
+    return first.substring(0, len(first) - 3)
+  }
+  return first
+}
+
+/** Layer index per declared module; undeclared modules are not constrained. */
+pub fn layer_index(layers: list<list<string>>) -> dict<string, int> {
+  let index: dict<string, int> = {}
+  let position = 0
+  for layer in layers {
+    for module in layer {
+      index = index + {[module]: position}
+    }
+    position = position + 1
+  }
+  return index
+}
+
+/** Back-edge counts keyed `from->to` for one file's text. */
+pub fn back_edges(source: string, text: string, index: dict<string, int>) -> dict<string, int> {
+  let counts: dict<string, int> = {}
+  const source_layer = index[source]
+  if source_layer == nil {
+    return counts
+  }
+  for reference in regex_match("crate::[a-z_][a-z0-9_]*", text) ?? [] {
+    const target = reference.substring(7, len(reference))
+    const target_layer = index[target]
+    if target != source && target_layer != nil && target_layer > source_layer {
+      const key = source + "->" + target
+      counts = counts + {[key]: (counts[key] ?? 0) + 1}
+    }
+  }
+  return counts
+}
+
+pub fn merge_counts(a: dict<string, int>, b: dict<string, int>) -> dict<string, int> {
+  let merged = a
+  for entry in b {
+    merged = merged + {[entry.key]: (merged[entry.key] ?? 0) + entry.value}
+  }
+  return merged
+}
+
+/** Pairs whose current count exceeds the baseline, including pairs the baseline never had. */
+pub fn growth(current: dict<string, int>, baseline: dict<string, int>) -> list<string> {
+  let grown: list<string> = []
+  for entry in current {
+    const allowed = baseline[entry.key] ?? 0
+    if entry.value > allowed {
+      grown = grown + ["${entry.key}: ${entry.value} (baseline ${allowed})"]
+    }
+  }
+  return grown.sorted()
+}
+
+fn total(counts: dict<string, int>) -> int {
+  let sum = 0
+  for entry in counts {
+    sum = sum + entry.value
+  }
+  return sum
+}
+
+pipeline main(harness: Harness, task: unknown) {
+  const policy: LayeringPolicy = json_parse(harness.fs.read_text(POLICY_PATH))
+  const index = layer_index(policy.layers)
+  // scan-refused: scan_files is the refusal; it throws on an empty result.
+  const files = scan_files(harness.fs, CHECK_NAME, SOURCE_ROOT, "**/*.rs")
+  let current: dict<string, int> = {}
+  for rel in files {
+    current = merge_counts(current, back_edges(top_module(rel), harness.fs.read_text(rel), index))
+  }
+  const grown = growth(current, policy.baseline)
+  if argv.contains("--write") {
+    if len(grown) > 0 {
+      harness.stdio.eprintln("${CHECK_NAME}: refusing to raise the baseline:")
+      for line in grown {
+        harness.stdio.eprintln("  - ${line}")
+      }
+      return 1
+    }
+    let lowered: dict<string, int> = {}
+    for entry in current {
+      if entry.value > 0 {
+        lowered = lowered + {[entry.key]: entry.value}
+      }
+    }
+    harness.fs.write_text(
+      POLICY_PATH,
+      json_stringify_pretty({layers: policy.layers, baseline: lowered}) + "\n",
+    )
+    harness.stdio.println(
+      "${CHECK_NAME}: baseline lowered to ${total(lowered)} back-references (was ${total(policy.baseline)})",
+    )
+    return 0
+  }
+  if len(grown) > 0 {
+    harness.stdio.eprintln(
+      "${CHECK_NAME}: harn-vm gained upward module references (#9112). Move the shared type or",
+    )
+    harness.stdio.eprintln(
+      "contract down a layer instead of reaching up from ${POLICY_PATH}'s lower layers:",
+    )
+    for line in grown {
+      harness.stdio.eprintln("  - ${line}")
+    }
+    return 1
+  }
+  const baseline_total = total(policy.baseline)
+  const current_total = total(current)
+  if current_total < baseline_total {
+    harness.stdio.println(
+      "${CHECK_NAME}: OK (${current_total} back-references, below the ${baseline_total} baseline; run with --write to lower it)",
+    )
+  } else {
+    harness.stdio.println(
+      "${CHECK_NAME}: OK (${current_total} back-references across ${len(files)} Rust sources)",
+    )
+  }
+  return 0
+}
