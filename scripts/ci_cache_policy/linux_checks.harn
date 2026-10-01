@@ -1192,6 +1192,40 @@ pub fn cache_refresh_workflow_errors(workflow: dict) -> list<string> {
   return hosted_refresh_lane_errors(workflow) + rust_cache_refresh_errors(workflow)
 }
 
+/**
+ * The CI residual rehearsal may skip `make check-docs` only by naming the
+ * sibling job that runs it on the same commit. That name is derived from the
+ * `harn-audit` row running `--group=docs`, so renaming or removing that row
+ * fails here instead of leaving the rehearsal pointing at a job that no longer
+ * proves anything. Sprint mode skips that job, so the rehearsal must not lean
+ * on it there.
+ */
+fn residual_docs_proof_errors(workflow: dict) -> list<string> {
+  let docs_job = ""
+  for entry in workflow?.jobs?.["harn-audit"]?.strategy?.matrix?.include ?? [] {
+    if trim(to_string(entry?.selector ?? "")) == "--group=docs" {
+      docs_job = trim(to_string(entry?.name ?? ""))
+    }
+  }
+  const step = step_by_name(
+    workflow?.jobs?.["release-residual-audit"]?.steps ?? [],
+    "Run the release residual audit",
+  )
+  const expected = "$"
+    + "{{ needs.changes.outputs.sprint_fast_ci != 'true' && '${docs_job}' || '' }}"
+  if docs_job == ""
+    || trim(to_string(step?.env?.DOCS_CONTRACTS_PROVEN_BY ?? "")) != expected
+    || !contains(
+      to_string(step?.run ?? ""),
+      "--docs-contracts-proven-by \"$DOCS_CONTRACTS_PROVEN_BY\"",
+    ) {
+    return [
+      "ci.yml:release-residual-audit may skip check-docs only by naming the harn-audit docs slice outside sprint mode",
+    ]
+  }
+  return []
+}
+
 pub fn ci_linux_lane_policy_errors(workflow: dict) -> list<string> {
   let errors = hosted_compile_lane_errors(workflow, "package-audit", "package-audit")
     + rust_lint_lane_errors(workflow)
@@ -1204,6 +1238,7 @@ pub fn ci_linux_lane_policy_errors(workflow: dict) -> list<string> {
     )
   const rust_job = workflow?.jobs?.["rust-checks"]
   errors = errors + strict_clippy_entrypoint_errors(rust_job)
+  errors = errors + residual_docs_proof_errors(workflow)
   errors = errors + early_source_policy_errors(workflow)
   const producer = workflow?.jobs?.["rust-check-inputs"]
   // The measured budget only bounds anything if the step it reads exists and

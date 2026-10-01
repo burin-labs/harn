@@ -733,6 +733,7 @@ test-pr-gate-scripts:
 	./scripts/tests/cli_aot_merge_driver_test.sh
 	./scripts/tests/release_gate_harn_bin_test.sh
 	./scripts/tests/release_gate_stale_out_dir_test.sh
+	./scripts/tests/release_gate_docs_proof_test.sh
 	./scripts/tests/prune_stale_targets_test.sh
 	./scripts/tests/prune_stale_targets_retention_test.sh
 	./scripts/tests/target_gc_maintenance_test.sh
