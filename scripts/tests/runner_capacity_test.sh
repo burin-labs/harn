@@ -5,15 +5,21 @@ source "$root/scripts/ci/runner_capacity.sh"
 diagnostic=$(mktemp "${TMPDIR:-/tmp}/harn-e2e-runner-capacity.XXXXXX")
 trap 'rm -f "$diagnostic"' EXIT
 
-refuses() {
-  local reason=$1
+# A census that cannot be read routes hosted as a named fallback: the decision
+# succeeds (the required job still runs), the line says fallback=true with the
+# reason, and a FALLBACK warning annotation makes it countable. It must never
+# read as a measured empty pool.
+falls_back() {
+  local reason=$1 decision
   shift
-  if runner_capacity_decision "$@" 2>"$diagnostic"; then
-    echo "expected refusal $reason, got a decision" >&2
+  if ! decision=$(runner_capacity_decision "$@" 2>"$diagnostic"); then
+    echo "expected fallback $reason, got a refusal" >&2
     exit 1
   fi
-  grep -q "RUNNER_CAPACITY_DECISION_UNMEASURED reason=$reason " "$diagnostic"
-  grep -q 'carriers=unmeasured' "$diagnostic"
+  [[ $decision == *"route=hosted reason=$reason fallback=true "* ]]
+  [[ $decision == *carriers=unmeasured* ]]
+  [[ $decision != *route=owned* ]]
+  grep -q "::warning::RUNNER_CAPACITY_DECISION_FALLBACK reason=$reason " "$diagnostic"
 }
 
 measured='{"linux_big":{"online":3,"idle":1}}'
@@ -29,6 +35,26 @@ decision=$(runner_capacity_decision push '' "$retired")
 [[ $decision == \
   'RUNNER_CAPACITY_DECISION event=push route=hosted reason=pool_reported_zero_carriers pool=linux_big carriers=0 idle=0' ]]
 [[ $decision != *route=owned* ]]
+
+# A fully busy pool routes hosted by name rather than queueing (#9086), and an
+# unreported idle count is not a measured zero, so it keeps the owned route.
+busy='{"linux_big":{"online":3,"idle":0}}'
+[[ $(runner_capacity_decision push '' "$busy") == \
+  'RUNNER_CAPACITY_DECISION event=push route=hosted reason=pool_fully_busy pool=linux_big carriers=3 idle=0' ]]
+unreported='{"linux_big":{"online":3}}'
+[[ $(runner_capacity_decision push '' "$unreported") == \
+  'RUNNER_CAPACITY_DECISION event=push route=owned pool=linux_big carriers=3 idle=unreported' ]]
+
+# The main entry point names the decision in the job summary as well as the log.
+summary=$(mktemp "${TMPDIR:-/tmp}/harn-capacity-summary.XXXXXX")
+outputs=$(mktemp "${TMPDIR:-/tmp}/harn-capacity-outputs.XXXXXX")
+EVENT_NAME=push SELFHOSTED_DISABLED='' RUNNER_CAPACITY="$busy" FLEET_EVACUATION='' \
+  GITHUB_OUTPUT="$outputs" GITHUB_STEP_SUMMARY="$summary" runner_capacity_main 2>/dev/null
+grep -qx 'route=hosted' "$outputs"
+# shellcheck disable=SC2016 # Literal Markdown code span.
+grep -q 'route `hosted`' "$summary"
+grep -q 'reason=pool_fully_busy' "$summary"
+rm -f "$summary" "$outputs"
 
 # Every non-push event keeps hosted runners without consulting the census.
 [[ $(runner_capacity_decision pull_request '' '') == \
@@ -54,18 +80,21 @@ decision=$(runner_capacity_decision push '' "$retired")
 [[ $(runner_capacity_decision push 'retired' "$measured") == \
   'RUNNER_CAPACITY_DECISION event=push route=hosted reason=owned_routing_retired pool=linux_big carriers=not_consulted' ]]
 
-# An unmeasurable census must refuse by name and never read as an empty pool.
-refuses capacity_census_missing push '' ''
-refuses capacity_census_missing push '' '   '
-refuses capacity_census_unreadable push '' 'not json'
-refuses capacity_census_unreadable push '' '{"linux_big":'
-refuses capacity_pool_absent push '' '{"macos_big":{"online":2}}'
-refuses capacity_pool_absent push '' '{"linux_big":{"idle":0}}'
-refuses capacity_pool_absent push '' '{"linux_big":{"online":"3"}}'
+# An unmeasurable census falls back by name and never reads as an empty pool.
+falls_back capacity_census_missing push '' ''
+falls_back capacity_census_missing push '' '   '
+falls_back capacity_census_unreadable push '' 'not json'
+falls_back capacity_census_unreadable push '' '{"linux_big":'
+falls_back capacity_pool_absent push '' '{"macos_big":{"online":2}}'
+falls_back capacity_pool_absent push '' '{"linux_big":{"idle":0}}'
+falls_back capacity_pool_absent push '' '{"linux_big":{"online":"3"}}'
 
-# The pool-absent refusal names which pools the census did report, so the
+# A measured zero is not a fallback: only the unmeasured census carries it.
+[[ $(runner_capacity_decision push '' "$retired") != *fallback=* ]]
+
+# The pool-absent fallback names which pools the census did report, so the
 # difference between a renamed pool and a dead census is readable.
-runner_capacity_decision push '' '{"macos_big":{"online":2}}' 2>"$diagnostic" || true
+runner_capacity_decision push '' '{"macos_big":{"online":2}}' 2>"$diagnostic" >/dev/null
 grep -q 'pools=macos_big' "$diagnostic"
 
 # The routed event is a parameter, not a constant. The Rust workspace producer
@@ -84,4 +113,4 @@ CAPACITY_LABEL=RUST_PRODUCER_CAPACITY
 [[ $(runner_capacity_decision push '' "$measured") == "RUST_PRODUCER_CAPACITY "* ]]
 CAPACITY_LABEL=RUNNER_CAPACITY_DECISION
 
-echo 'Runner capacity: owned, retired, unrouted-event, evacuation-switch, retired-routing, unmeasurable-census, routed-event and label controls passed'
+echo 'Runner capacity: owned, retired, unrouted-event, evacuation-switch, retired-routing, census-fallback, routed-event and label controls passed'

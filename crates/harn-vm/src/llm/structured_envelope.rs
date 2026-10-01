@@ -35,6 +35,9 @@ use crate::value::{VmError, VmValue};
 use super::helpers::{extract_llm_options, vm_value_to_json};
 use super::{execute_schema_retry_loop, rewrite_structured_args, SchemaLoopOutcome};
 
+mod prepared;
+pub(crate) use prepared::run_prepared_structured_call;
+
 /// Build the `{ok, data, raw_text, error, error_category, attempts,
 /// repaired, repair_tier, extracted_json, usage, model, provider}`
 /// envelope. Never
@@ -226,7 +229,7 @@ fn is_unsupported_structured_transport_error(err: &VmError) -> bool {
         || message.contains("unsupported structured_output strategy")
 }
 
-fn apply_prompt_mode_structured_transport(args: &mut [VmValue], schema: &VmValue) {
+pub(crate) fn apply_prompt_mode_structured_transport(args: &mut [VmValue], schema: &VmValue) {
     if let Some(prompt) = args.get_mut(0).and_then(|value| match value {
         VmValue::String(text) => Some(text.to_string()),
         _ => None,
@@ -242,7 +245,7 @@ fn apply_prompt_mode_structured_transport(args: &mut [VmValue], schema: &VmValue
     }
 }
 
-fn install_prompt_mode_validation(
+pub(crate) fn install_prompt_mode_validation(
     mut opts: crate::llm::api::LlmCallOptions,
     schema: &VmValue,
 ) -> crate::llm::api::LlmCallOptions {

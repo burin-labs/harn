@@ -75,9 +75,12 @@ runtime placement, worker counts, command, finish time, and result. The gate
 refuses a dirty tree, a changed PR head, or an explicit binary without source
 proof. An edit, amend, or rebase makes the old receipt invalid.
 
-Hosted CI uploads the same JSON shape as `harn-source-gate-audit` and
-`harn-source-gate-conformance` artifacts. Its downloaded binary is bound by
-the existing Rust artifact manifest before the gate runs.
+Hosted CI splits the gate across workers and uploads one receipt of the same
+JSON shape per worker, named `harn-source-gate-<kind>`: `audit`, `audit-docs`,
+and `audit-scripts` for the `--phase audit --group` slices, and
+`conformance-1` through `conformance-4` for the `--phase conformance --shard`
+slices. Each worker's downloaded binary is bound by the existing Rust artifact
+manifest before the gate runs.
 
 For a native nextest filter expression, use the shell-opaque focused target:
 
@@ -228,28 +231,50 @@ async fn timeout_fires_after_deadline() {
 ### `EventLog::subscribe()`
 
 For tests that wait for something to happen inside a running component,
-subscribe to its `EventLog` and block on the channel with a `tokio::time::timeout`
+subscribe to its `EventLog` and wait on the channel under the shared hang
 ceiling.
 
 ```rust
+use harn_clock::test_support::within;
+
 let (log, handle) = EventLog::new();
 let mut sub = log.subscribe("trigger.outbox").await;
 
 // Trigger the action under test.
 component.do_thing().await;
 
-// Wait for the expected event — hard fail-fast after 5 s.
-let event = tokio::time::timeout(Duration::from_secs(5), sub.recv())
+// Wait for the expected event. A hang fails with this label.
+let event = within("trigger.outbox dispatch event", sub.recv())
     .await
-    .expect("timed out waiting for trigger.outbox event")
     .expect("channel closed");
 
 assert_eq!(event.kind, "dispatch");
 ```
 
-The `tokio::time::timeout` here is the right pattern: it is a hard ceiling that
-turns a hang into a fast failure. Pair it with a meaningful error message so the
-failure is obvious.
+**The hang-ceiling rule.** A wait on an event the code under test produces by
+construction is bounded only to turn a hang into a named failure. Every such
+wait uses `harn_clock::test_support::within(label, future)`, or
+`recv_within(label, &rx)` for a blocking `std::sync::mpsc` channel. Both apply
+one ceiling, `HANG_CEILING` (45 s, below nextest's 60 s kill), and panic with
+the label and elapsed time. Never pick a tighter literal: a
+`timeout(Duration::from_secs(2), …)` around compile-and-run work asserts that
+it finishes in two seconds on whatever machine runs the suite, and fails under
+load while the code is correct. A claim about how long something takes belongs
+in a paused-clock test. When a timeout's expiry is itself the behavior under
+test, keep it explicit and prefer paused time.
+
+The deadline is wall-clock time kept off the tokio timer, so it does not fire
+early under `start_paused` and needs no time driver. Enable it from
+`[dev-dependencies]` only:
+
+```toml
+harn-clock = { path = "../harn-clock", version = "=X.Y.Z", features = ["test-support"] }
+```
+
+A "nothing else arrives" assertion needs a positive barrier, not a quiet
+period: wait until the producer has provably processed the input (for example
+the session WAL watcher's test-only `flush_watcher`), then assert the channel
+is empty with `try_recv`.
 
 ### `OrchestratorHarness`
 
@@ -407,16 +432,17 @@ child of the same root when a case needs its own staging directory.
 
 The following patterns are banned in test files by `make lint-test-patterns`.
 The script searches files under `crates/**/tests/**/*.rs`,
-`crates/**/src/**/tests.rs`, `crates/**/src/**/tests_*.rs`, and
+`crates/**/src/**/tests.rs`, `crates/**/src/**/tests_*.rs`, the inline
+`#[cfg(test)] mod` block of any other `crates/**/*.rs` file, and
 `conformance/tests/**/*.harn`.
 
 | Pattern | Why it is banned | Approved alternative |
 |---|---|---|
 | `std::thread::harness.clock.sleep_ms(` | Blocks the thread, races against scheduler | `tokio::time::pause()` + `advance()` |
 | `tokio::time::harness.clock.sleep_ms(` (outside `start_paused`) | Non-deterministic; races against system load | `start_paused = true` + `advance()` |
-| `while … Instant::now()` | Wall-clock polling loop; flaky under load | `EventLog::subscribe()` + `timeout` |
+| `while … Instant::now()` | Wall-clock polling loop; flaky under load | `EventLog::subscribe()` + `within` |
 | `SystemTime::now()` in tests | Real wall-clock timestamp; non-reproducible | `MockClock` or injected timestamp |
-| `recv_timeout(Duration::from_millis(…))` | Busy-wait with a short literal timeout | `tokio::time::timeout` with event channel |
+| `timeout(Duration::…)` / `recv_timeout(Duration::…)` with a literal duration | A hand-picked hang bound becomes a latency assertion that fails under load | `harn_clock::test_support::within` / `recv_within` (the hang-ceiling rule above); a deliberate expiry is pinned in `LITERAL_TIMEOUT_BASELINE` with its reason |
 | `#[ignore]` outside slow harn-cli integration tests | Hides regressions behind default-suite skips | run the test by default, or move subprocess coverage to the harn-cli E2E profile |
 | copied conformance subprocess wait helpers | Drifts retry ceilings and diagnostics between fixtures | import `conformance/tests/_common.harn` |
 | `harness.random.range(20000, 45000)` for server ports | Races with other tests and local services | bind port `0` and read the readiness log |
@@ -524,7 +550,7 @@ async fn broken() {
 ```
 
 If your test needs both time control and real I/O, use the multi-thread runtime
-and a `tokio::time::timeout` ceiling instead of `start_paused`.
+and the `within` hang ceiling instead of `start_paused`.
 
 ### `advance()` semantics
 

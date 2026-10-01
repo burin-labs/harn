@@ -25,6 +25,7 @@
 //! (Fly Machines, Modal, E2B, …) implement the same [`SandboxBackend`]
 //! contract from wherever they run.
 
+pub mod conformance;
 mod local;
 
 pub use local::{LocalSandbox, LocalSandboxConfig};
@@ -49,6 +50,7 @@ pub const OUTPUTS_MOUNT: &str = "/mnt/session/outputs";
 
 /// Errors surfaced by a [`SandboxBackend`].
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum SandboxError {
     /// No live session matches the supplied id.
     #[error("sandbox session `{0}` was not found")]

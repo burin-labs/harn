@@ -7,14 +7,18 @@
 # Short flagship aliases — these track whatever the current
 # generation is. Bump these when a successor lands.
 [aliases.sonnet]
-id = "claude-sonnet-5"
+id = "claude-sonnet-5-5"
 provider = "anthropic"
 
+[aliases.sonnet55]
+id = "claude-sonnet-5-5"
+provider = "anthropic"
+
+# Previous Sonnet generations, kept addressable for pinned workflows.
 [aliases.sonnet5]
 id = "claude-sonnet-5"
 provider = "anthropic"
 
-# Previous Sonnet generation, kept addressable for pinned workflows.
 [aliases.sonnet46]
 id = "claude-sonnet-4-6"
 provider = "anthropic"
@@ -56,11 +60,11 @@ id = "claude-haiku-4-5-20251001"
 provider = "anthropic"
 
 [aliases.frontier]
-id = "claude-sonnet-5"
+id = "claude-sonnet-5-5"
 provider = "anthropic"
 
 [aliases."tier/frontier"]
-id = "claude-sonnet-5"
+id = "claude-sonnet-5-5"
 provider = "anthropic"
 
 # Default balanced hosted route for routine coding-agent work.
@@ -79,9 +83,11 @@ id = "accounts/fireworks/models/gpt-oss-120b"
 provider = "fireworks"
 
 # GPT-6 tiers: Astra is the frontier, Sol the balanced tier (GPT-6 has no
-# Terra; Sol is cheaper than GPT-5.6 Terra), Luna the small tier.
+# Terra; Sol is cheaper than GPT-5.6 Terra), Luna the small tier. The balanced
+# tier tracks the newest Sol, GPT-6.1 Sol (2026-09-29); GPT-6 Sol stays
+# addressable by id and as `sol6`.
 [aliases."openai/mid"]
-id = "gpt-6-sol"
+id = "gpt-6.1-sol"
 provider = "openai"
 
 [aliases."openai/frontier"]
@@ -109,6 +115,14 @@ id = "gpt-6-astra"
 provider = "openai"
 
 [aliases.sol]
+id = "gpt-6.1-sol"
+provider = "openai"
+
+[aliases.sol61]
+id = "gpt-6.1-sol"
+provider = "openai"
+
+[aliases.sol6]
 id = "gpt-6-sol"
 provider = "openai"
 
@@ -476,9 +490,10 @@ id = "nvidia/nemotron-nano-3-30b-a3b"
 provider = "nvidia"
 tool_format = "native"
 
-# NIM end-of-lifed both undated DeepSeek V4 builds on 2026-08-07. This alias
-# follows NIM to the dated Flash snapshot. There is no NIM DeepSeek V4 Pro
-# build to point at.
+# NIM end-of-lifed both undated DeepSeek V4 builds on 2026-08-07, and by
+# 2026-09-26 the dated Flash snapshot too. This alias names V4, so it stays on
+# the deprecated snapshot row, whose `superseded_by` names the V4.1 route,
+# rather than silently moving callers to a different model.
 [aliases."nvidia-deepseek-v4-flash"]
 id = "nvidia/deepseek-v4-flash-0731"
 provider = "nvidia"
@@ -629,13 +644,13 @@ provider = "openrouter"
 id = "z-ai/glm-5.3-flash"
 provider = "openrouter"
 
-# DeepSeek V4 direct API aliases.
+# DeepSeek direct API aliases. The legacy V4 Flash ID now serves V4.1 Flash.
 [aliases.deepseek]
-id = "deepseek-v4-flash"
+id = "deepseek-flash"
 provider = "deepseek"
 
 [aliases."deepseek-flash"]
-id = "deepseek-v4-flash"
+id = "deepseek-flash"
 provider = "deepseek"
 
 [aliases."deepseek-pro"]

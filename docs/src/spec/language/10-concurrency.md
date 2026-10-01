@@ -479,8 +479,17 @@ fields plus `rules`, a compact allow/ask/deny DSL. A rule may be written as
 `tool_kind`, `side_effect`, `path`, `command`, `command_identity`, `url`,
 `domain`, `method`, `mcp_server`, `mcp_tool`, `agent`, `persona`, `mode`,
 `capability`, and `repeat_count_gte`. Dimensions inside a rule are ANDed;
-string fields accept glob patterns. Deny beats ask, ask beats allow, and
-unmatched tools are approved.
+string fields accept glob patterns. Rules may declare `source: "mode"` for a
+mode default or `source: "user"` for an explicit remembered choice; omitted
+`source` means `policy`. Configured denials outrank remembered choices;
+remembered denials outrank configured approval requests; configured approval
+requests outrank remembered allows. Every remembered choice outranks a mode
+default. A configured allow remains permissive and cannot override a remembered
+deny. Within a tier, deny beats ask, ask beats allow, and the first matching
+rule wins an action tie. Legacy `auto_approve`, `auto_deny`, and
+`require_approval` entries retain policy source; a host must label mode rules
+explicitly. Write-path allowlists and repeat limits remain policy constraints.
+Unmatched tools are approved.
 
 When an approval policy is active, sensitive paths such as `.env`, private
 keys, and credential files are denied by default unless
@@ -490,7 +499,16 @@ compatibility boundary, and effective file-reader operands produced by the
 quote-aware command parser. Arbitrary string arguments and inert interpreter
 source are not paths. Declared host-absolute paths outside the workspace are
 denied unless `external_roots` covers the path or
-`allow_external_paths: true` is set. `ask` decisions call the host via
+`allow_external_paths: true` is set. Each `external_roots` entry is a path
+string or `{path, access}` with `access` one of `read` (the default) or
+`read_write`; a path string means `read`. The deepest root containing a path
+decides its mode. Under a `read` root, a call not known to be read-only is
+denied with id `external_root_read_only`, even when `allow_external_paths` is
+set. An approval-policy root does not by itself grant filesystem access: the
+file builtins and confined children read only the capability policy's
+`read_only_roots`, so a host projects a `read` root there to make it readable
+by them. Intersecting two approval policies keeps the
+narrower mode for a root both name. `ask` decisions call the host via
 `session/request_permission` and fail closed when no host bridge is attached.
 Each approval decision produces a `harn.permission_policy_decision.v1` receipt
 containing the matched rule, risk labels, normalized context, and rationale;

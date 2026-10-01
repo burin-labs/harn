@@ -41,8 +41,13 @@ pub(crate) fn visible_messages_with_lineage(
         &crate::llm::capabilities::Capabilities::default(),
         &reminders,
     );
+    let directive_nonce = crate::llm::helpers::directive_nonce_for_session(session_id);
     let source_count = messages.len();
-    let mut visible = crate::llm::helpers::apply_rendered_reminder_messages(messages, &rendered);
+    let mut visible = crate::llm::helpers::apply_rendered_reminder_messages(
+        messages,
+        &rendered,
+        &directive_nonce,
+    );
     let compaction_receipt_ref = latest_compaction_receipt_ref(session_id);
     for (position, message) in visible.iter_mut().enumerate() {
         let semantic_kind = semantic_kind(message);
@@ -135,7 +140,10 @@ fn latest_compaction_receipt_ref(session_id: &str) -> Option<String> {
 /// re-sends those exact bytes at the same index instead of re-deriving a
 /// placement that moves. Directives already present in history are not
 /// re-issued, so an unchanged provider firing every turn commits nothing and
-/// no earlier turn is ever edited to remove a stale one.
+/// no earlier turn is ever edited to remove a stale one. The one exception is
+/// a history that ends on a withdrawn turn's placeholder: its rejection
+/// directive is restated so the next request never ends on an assistant
+/// message (see `turn_boundary_directives`).
 ///
 /// Returns the number of directives committed, which is zero when nothing is
 /// pending or when everything pending is already in history.
@@ -156,10 +164,14 @@ fn host_agent_session_commit_directives_builtin(
     }
     let messages = durable_messages(&session_id);
     let reminders = crate::llm::helpers::pending_reminders_from_session(Some(&session_id));
-    let capabilities = crate::llm::capabilities::Capabilities::default();
-    let rendered = crate::llm::helpers::render_pending_reminders(&capabilities, &reminders);
-    let pending = crate::llm::helpers::uncommitted_directives(&messages, &rendered);
-    let Some(message) = crate::llm::helpers::directive_envelope_message(&pending) else {
+    let withdrawal_reason = crate::agent_sessions::last_withdrawal_reason(&session_id);
+    let pending = crate::llm::helpers::turn_boundary_directives(
+        &messages,
+        &reminders,
+        withdrawal_reason.as_deref(),
+    );
+    let nonce = crate::llm::helpers::directive_nonce_for_session(&session_id);
+    let Some(message) = crate::llm::helpers::directive_envelope_message(&pending, &nonce) else {
         return Ok(VmValue::Int(0));
     };
     crate::agent_sessions::inject_message(&session_id, super::json_to_vm(&message))

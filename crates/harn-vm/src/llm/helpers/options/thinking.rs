@@ -88,9 +88,36 @@ pub(crate) fn resolve_thinking_config(
     model: &str,
     caps: &crate::llm::capabilities::Capabilities,
 ) -> Result<crate::llm::api::ThinkingConfig, VmError> {
+    resolve_thinking_config_with_source(options, model_defaults, provider, model, caps)
+        .map(|(thinking, _)| thinking)
+}
+
+/// [`resolve_thinking_config`], plus which configuration layer decided it,
+/// for the per-call resolution receipt.
+pub(crate) fn resolve_thinking_config_with_source(
+    options: Option<&crate::value::DictMap>,
+    model_defaults: &std::collections::BTreeMap<String, toml::Value>,
+    provider: &str,
+    model: &str,
+    caps: &crate::llm::capabilities::Capabilities,
+) -> Result<(crate::llm::api::ThinkingConfig, &'static str), VmError> {
     let policy =
         crate::llm::reasoning_policy::resolve_for_llm_call(options, provider, model, caps)?;
+    let has = |key: &str| options.is_some_and(|opts| opts.contains_key(key));
+    // Same precedence as `resolve_thinking_config_with_policy`.
+    let source = if has("effort") {
+        "caller.effort"
+    } else if policy.is_some() {
+        "reasoning_policy"
+    } else if has("thinking") {
+        "caller.thinking"
+    } else if model_defaults.contains_key("reasoning_effort") {
+        "catalog.model_defaults.reasoning_effort"
+    } else {
+        "unset"
+    };
     resolve_thinking_config_with_policy(options, model_defaults, provider, model, caps, policy)
+        .map(|thinking| (thinking, source))
 }
 
 /// Resolve catalog defaults without inheriting ambient session policy.
@@ -161,6 +188,13 @@ fn resolve_thinking_config_with_policy(
             provider,
             model,
         ));
+    }
+    if has_thinking_option
+        && matches!(thinking, crate::llm::api::ThinkingConfig::Disabled)
+        && !caps.reasoning_disable_supported
+        && !effort_ladder_check_suspended()
+    {
+        return Err(unsupported_option_error("thinking", provider, model));
     }
     validate_thinking_supported(
         &thinking,
@@ -444,6 +478,52 @@ pub(super) fn validate_anthropic_beta_feature_name(feature: &str) -> Result<(), 
     Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
         "anthropic_beta_features: invalid beta feature name `{feature}`; expected ASCII letters, digits, '-' or '_'"
     )))))
+}
+
+/// Check-time admission for literal reasoning options on a known route.
+///
+/// Runs the same resolution and capability gates a call would, over a dict
+/// holding only the literal `effort` / `thinking` values, and returns the
+/// refusal message a call would raise. `harn check` uses it so a known-bad
+/// literal (effort on a route without it) fails before any run.
+pub fn admit_reasoning_literals(
+    provider: &str,
+    model: &str,
+    effort: Option<&str>,
+    thinking: Option<bool>,
+) -> Result<(), String> {
+    let mut options = crate::value::DictMap::new();
+    if let Some(effort) = effort {
+        options.insert(
+            crate::value::intern_key("effort"),
+            VmValue::String(arcstr::ArcStr::from(effort)),
+        );
+    }
+    if let Some(thinking) = thinking {
+        options.insert(
+            crate::value::intern_key("thinking"),
+            VmValue::Bool(thinking),
+        );
+    }
+    let capability_model = crate::llm_config::capability_model_id(provider, model);
+    let caps = crate::llm::capabilities::lookup(provider, &capability_model);
+    let model_defaults = crate::llm_config::model_params_for_route(provider, &capability_model);
+    resolve_thinking_config_with_policy(
+        Some(&options),
+        &model_defaults,
+        provider,
+        &capability_model,
+        &caps,
+        None,
+    )
+    .map(|_| ())
+    .map_err(|error| match error {
+        VmError::Thrown(VmValue::Dict(fields)) => fields
+            .get("message")
+            .map(VmValue::display)
+            .unwrap_or_else(|| "reasoning option refused".to_string()),
+        other => other.to_string(),
+    })
 }
 
 #[cfg(test)]

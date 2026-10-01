@@ -288,17 +288,13 @@ pipeline default(harness: Harness, task: unknown) {{
             let mut result = serde_json::Value::Null;
 
             for _ in 0..4096 {
-                let message = match tokio::time::timeout(
-                    std::time::Duration::from_secs(20),
-                    response_rx.recv(),
-                )
-                .await
-                {
-                    Ok(Some(line)) => {
-                        serde_json::from_str::<serde_json::Value>(&line).expect("ACP JSON line")
-                    }
-                    _ => break,
+                let Some(line) =
+                    harn_clock::test_support::within("ACP message", response_rx.recv()).await
+                else {
+                    break;
                 };
+                let message =
+                    serde_json::from_str::<serde_json::Value>(&line).expect("ACP JSON line");
                 let method = message["method"].as_str().unwrap_or_default();
                 if method == "host/capabilities" {
                     request_tx
@@ -435,17 +431,13 @@ pipeline default(harness: Harness, task: unknown) {{
             let mut builtin_calls_at_cancel: Option<usize> = None;
             let mut result = serde_json::Value::Null;
             for _ in 0..4096 {
-                let message = match tokio::time::timeout(
-                    std::time::Duration::from_secs(20),
-                    response_rx.recv(),
-                )
-                .await
-                {
-                    Ok(Some(line)) => {
-                        serde_json::from_str::<serde_json::Value>(&line).expect("ACP JSON line")
-                    }
-                    _ => break,
+                let Some(line) =
+                    harn_clock::test_support::within("ACP message", response_rx.recv()).await
+                else {
+                    break;
                 };
+                let message =
+                    serde_json::from_str::<serde_json::Value>(&line).expect("ACP JSON line");
                 let method = message["method"].as_str().unwrap_or_default();
                 if method == "host/capabilities" {
                     request_tx

@@ -570,9 +570,9 @@ fn hostname_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
     let name = std::env::var("HOSTNAME")
         .or_else(|_| std::env::var("COMPUTERNAME"))
         .or_else(|_| {
-            std::process::Command::new("hostname")
-                .output()
+            crate::process_sandbox::session_std_command("hostname")
                 .ok()
+                .and_then(|mut command| command.output().ok())
                 .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
                 .ok_or(std::env::VarError::NotPresent)
         })
@@ -1290,7 +1290,7 @@ pub(crate) fn session_closed_env_for_command(
 /// Session-scoped grants only — command-bound exposures are invisible here.
 pub(crate) fn session_env() -> Result<Option<BTreeMap<String, String>>, VmError> {
     session_env_with(
-        |grant| grant.for_command().is_none(),
+        |grant| grant.reaches_spawn(None),
         |environment, lookup| {
             crate::security::resolve_env(environment, lookup, &resolve_grant_secret)
         },
@@ -1302,12 +1302,8 @@ pub(crate) fn session_env() -> Result<Option<BTreeMap<String, String>>, VmError>
 pub(crate) fn session_env_for_command(
     program: &str,
 ) -> Result<Option<BTreeMap<String, String>>, VmError> {
-    let basename = crate::security::command_basename(program).to_string();
     session_env_with(
-        move |grant| match grant.for_command() {
-            None => true,
-            Some(expected) => expected == basename,
-        },
+        |grant| grant.reaches_spawn(Some(program)),
         |environment, lookup| {
             crate::security::resolve_env_for_command(
                 environment,

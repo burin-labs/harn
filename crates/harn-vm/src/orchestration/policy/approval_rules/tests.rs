@@ -1,7 +1,9 @@
 use std::collections::BTreeMap;
 
 use super::*;
-use crate::orchestration::{pop_execution_policy, push_execution_policy, CapabilityPolicy};
+use crate::orchestration::{
+    pop_execution_policy, push_execution_policy, CapabilityPolicy, ExternalRoot,
+};
 use crate::tool_annotations::{SideEffectLevel, ToolAnnotations, ToolArgSchema, ToolKind};
 
 fn policy_with_path_annotation(tool: &str, kind: ToolKind) {
@@ -58,6 +60,12 @@ fn ambiguous_or_invalid_rule_shapes_are_rejected() {
         "path": "**/.env"
     }));
     assert!(mixed_matchers.is_err());
+
+    let invalid_source = serde_json::from_value::<PolicyRule>(serde_json::json!({
+        "source": "superuser",
+        "allow": {"tool": "read_file"}
+    }));
+    assert!(invalid_source.is_err());
 }
 
 #[test]
@@ -77,6 +85,226 @@ fn deny_beats_ask_and_allow_regardless_of_order() {
     assert_eq!(
         decision.matched_rule.as_ref().and_then(|rule| rule.index),
         Some(2)
+    );
+}
+
+#[test]
+fn explicit_user_rules_outrank_mode_defaults_and_name_the_winner() {
+    let policy: ToolApprovalPolicy = serde_json::from_value(serde_json::json!({
+        "rules": [
+            {"id": "mode-ask", "source": "mode", "ask": {"tool": "run_command"}},
+            {"id": "remembered-allow", "source": "user", "allow": {"tool": "run_command"}}
+        ]
+    }))
+    .expect("policy with typed user source");
+    let decision = evaluate_tool_approval_policy(
+        &policy,
+        "run_command",
+        &serde_json::json!({"command": "git status"}),
+        None,
+    );
+    assert!(decision.is_allow(), "{decision:?}");
+    assert_eq!(
+        decision
+            .matched_rule
+            .as_ref()
+            .map(|rule| rule.source.as_str()),
+        Some("user")
+    );
+    assert_eq!(decision.receipt["matched_rule"]["source"], "user");
+    let host_decision = policy.evaluate_request(&ToolApprovalRequest {
+        tool_name: "run_command".to_string(),
+        arguments: serde_json::json!({"command": "git status"}),
+        ..Default::default()
+    });
+    assert_eq!(host_decision.action, decision.action);
+    assert_eq!(host_decision.receipt["matched_rule"]["source"], "user");
+
+    let policy: ToolApprovalPolicy = serde_json::from_value(serde_json::json!({
+        "rules": [
+            {"id": "mode-allow", "source": "mode", "allow": {"tool": "run_command"}},
+            {"id": "remembered-deny", "source": "user", "deny": {"tool": "run_command"}}
+        ]
+    }))
+    .expect("policy with typed user source");
+    let decision = evaluate_tool_approval_policy(
+        &policy,
+        "run_command",
+        &serde_json::json!({"command": "git status"}),
+        None,
+    );
+    assert!(decision.is_deny(), "{decision:?}");
+    assert_eq!(
+        decision
+            .matched_rule
+            .as_ref()
+            .map(|rule| rule.source.as_str()),
+        Some("user")
+    );
+}
+
+#[test]
+fn user_allow_cannot_override_path_guards() {
+    policy_with_path_annotation("read_file", ToolKind::Read);
+    let policy: ToolApprovalPolicy = serde_json::from_value(serde_json::json!({
+        "rules": [{"source": "user", "allow": {"tool": "read_file"}}]
+    }))
+    .expect("policy with typed user source");
+    for (path, source) in [
+        ("config/.env", SOURCE_DEFAULT_SENSITIVE_PATH),
+        ("/tmp/outside.txt", SOURCE_DEFAULT_EXTERNAL_PATH),
+        ("../outside.txt", SOURCE_DEFAULT_PATH_GUARD),
+    ] {
+        let decision = evaluate_tool_approval_policy(
+            &policy,
+            "read_file",
+            &serde_json::json!({"path": path}),
+            None,
+        );
+        assert!(decision.is_deny(), "{path}: {decision:?}");
+        assert_eq!(
+            decision
+                .matched_rule
+                .as_ref()
+                .map(|rule| rule.source.as_str()),
+            Some(source)
+        );
+    }
+    pop_execution_policy();
+}
+
+#[test]
+fn source_priority_only_overrides_mode_defaults() {
+    let policy: ToolApprovalPolicy = serde_json::from_value(serde_json::json!({
+        "require_approval": ["run_command"],
+        "rules": [
+            {"source": "user", "allow": {"tool": "run_command"}, "id": "user-allow"}
+        ]
+    }))
+    .expect("legacy approval constraint");
+    let decision = evaluate_tool_approval_policy(
+        &policy,
+        "run_command",
+        &serde_json::json!({"command": "git status"}),
+        None,
+    );
+    assert!(decision.is_ask(), "{decision:?}");
+    assert_eq!(
+        decision
+            .matched_rule
+            .as_ref()
+            .map(|rule| rule.source.as_str()),
+        Some("require_approval")
+    );
+
+    let policy: ToolApprovalPolicy = serde_json::from_value(serde_json::json!({
+        "rules": [
+            {"source": "mode", "deny": {"tool": "run_command"}, "id": "mode-deny"},
+            {"source": "user", "allow": {"tool": "run_command"}, "id": "user-allow"}
+        ]
+    }))
+    .expect("typed sources");
+    let decision = evaluate_tool_approval_policy(
+        &policy,
+        "run_command",
+        &serde_json::json!({"command": "git status"}),
+        None,
+    );
+    assert!(decision.is_allow(), "{decision:?}");
+    assert_eq!(
+        decision
+            .matched_rule
+            .as_ref()
+            .and_then(|rule| rule.id.as_deref()),
+        Some("user-allow")
+    );
+
+    let policy: ToolApprovalPolicy = serde_json::from_value(serde_json::json!({
+        "rules": [
+            {"source": "mode", "deny": {"tool": "run_command"}, "id": "mode-deny"},
+            {"source": "user", "allow": {"tool": "run_command"}, "id": "user-allow"},
+            {"source": "policy", "deny": {"tool": "run_command"}, "id": "policy-deny"}
+        ]
+    }))
+    .expect("typed sources");
+    let decision = evaluate_tool_approval_policy(
+        &policy,
+        "run_command",
+        &serde_json::json!({"command": "git status"}),
+        None,
+    );
+    assert!(decision.is_deny(), "{decision:?}");
+    assert_eq!(
+        decision
+            .matched_rule
+            .as_ref()
+            .and_then(|rule| rule.id.as_deref()),
+        Some("policy-deny")
+    );
+
+    let policy: ToolApprovalPolicy = serde_json::from_value(serde_json::json!({
+        "rules": [
+            {"source": "policy", "allow": {"tool": "run_command"}, "id": "policy-allow"},
+            {"source": "user", "deny": {"tool": "run_command"}, "id": "user-deny"}
+        ]
+    }))
+    .expect("a policy allow and explicit user deny");
+    let decision = evaluate_tool_approval_policy(
+        &policy,
+        "run_command",
+        &serde_json::json!({"command": "git status"}),
+        None,
+    );
+    assert!(decision.is_deny(), "{decision:?}");
+    assert_eq!(
+        decision
+            .matched_rule
+            .as_ref()
+            .and_then(|rule| rule.id.as_deref()),
+        Some("user-deny")
+    );
+
+    let policy: ToolApprovalPolicy = serde_json::from_value(serde_json::json!({
+        "rules": [
+            {"source": "user", "allow": {"tool": "run_command"}, "id": "first-allow"},
+            {"source": "user", "deny": {"tool": "run_command"}, "id": "second-deny"}
+        ]
+    }))
+    .expect("same-source rules");
+    let decision = evaluate_tool_approval_policy(
+        &policy,
+        "run_command",
+        &serde_json::json!({"command": "git status"}),
+        None,
+    );
+    assert!(decision.is_deny(), "{decision:?}");
+    assert_eq!(
+        decision
+            .matched_rule
+            .as_ref()
+            .and_then(|rule| rule.id.as_deref()),
+        Some("second-deny")
+    );
+
+    let policy: ToolApprovalPolicy = serde_json::from_value(serde_json::json!({
+        "rules": [
+            {"source": "user", "allow": {"tool": "run_command"}, "id": "first"},
+            {"source": "user", "allow": {"tool": "run_command"}, "id": "second"}
+        ]
+    }))
+    .expect("same-source ties");
+    let decision = evaluate_tool_approval_policy(
+        &policy,
+        "run_command",
+        &serde_json::json!({"command": "git status"}),
+        None,
+    );
+    assert_eq!(
+        decision
+            .matched_rule
+            .as_ref()
+            .and_then(|rule| rule.id.as_deref()),
+        Some("first")
     );
 }
 
@@ -801,4 +1029,142 @@ fn a_path_refusal_names_the_path_that_refused_not_every_path_declared() {
 
     pop_execution_policy();
     crate::stdlib::process::set_thread_execution_context(None);
+}
+
+fn with_workspace_and_external_root<T>(run: impl FnOnce(&str, &str) -> T) -> T {
+    let workspace = tempfile::tempdir().unwrap();
+    let external = tempfile::tempdir().unwrap();
+    crate::stdlib::process::set_thread_execution_context(Some(
+        crate::orchestration::RunExecutionRecord {
+            cwd: Some(workspace.path().to_string_lossy().into_owned()),
+            source_dir: Some(workspace.path().to_string_lossy().into_owned()),
+            ..Default::default()
+        },
+    ));
+    let external_root = external.path().to_string_lossy().into_owned();
+    let inside = external
+        .path()
+        .join("notes.txt")
+        .to_string_lossy()
+        .into_owned();
+    let result = run(&external_root, &inside);
+    crate::stdlib::process::set_thread_execution_context(None);
+    result
+}
+
+fn evaluate_annotated(
+    policy: &ToolApprovalPolicy,
+    tool: &str,
+    kind: ToolKind,
+    path: &str,
+) -> PolicyEvaluation {
+    policy_with_path_annotation(tool, kind);
+    let decision =
+        evaluate_tool_approval_policy(policy, tool, &serde_json::json!({ "path": path }), None);
+    pop_execution_policy();
+    decision
+}
+
+/// The negative-control shape: the policy carries nothing but the root. No
+/// deny rule, no `auto_deny`, no write-path allowlist. A refused write here
+/// can only come from Harn's own boundary reading the root's mode.
+#[test]
+fn a_string_external_root_admits_reads_and_refuses_writes_at_the_boundary() {
+    with_workspace_and_external_root(|root, inside| {
+        let policy: ToolApprovalPolicy =
+            serde_json::from_value(serde_json::json!({ "external_roots": [root] })).unwrap();
+        assert!(policy.rules.is_empty() && policy.auto_deny.is_empty());
+
+        let read = evaluate_annotated(&policy, "read_file", ToolKind::Read, inside);
+        assert!(read.is_allow(), "read under a read root: {}", read.reason);
+        assert_eq!(
+            read.receipt["context"]["external_roots"],
+            serde_json::json!([{ "path": root, "access": "read" }])
+        );
+
+        let write = evaluate_annotated(&policy, "write_file", ToolKind::Edit, inside);
+        assert!(write.is_deny(), "write under a read root: {}", write.reason);
+        let rule = write.matched_rule.as_ref().expect("the boundary decided");
+        assert_eq!(rule.source, SOURCE_DEFAULT_EXTERNAL_PATH);
+        assert_eq!(rule.id.as_deref(), Some(EXTERNAL_ROOT_READ_ONLY));
+        assert_eq!(write.risk_labels, vec![EXTERNAL_ROOT_READ_ONLY.to_string()]);
+        // The boundary reports a host path with forward slashes on every OS.
+        let reported = inside.replace('\\', "/");
+        assert_eq!(write.denied_paths, vec![reported.clone()]);
+        assert!(
+            write.reason.contains(&reported)
+                && write.reason.contains(root)
+                && write.reason.contains("'read'"),
+            "the refusal names the path, the root, and its mode: {}",
+            write.reason
+        );
+        assert_eq!(
+            write.denial_gate(),
+            crate::agent_events::DenialGate::WorkspaceBoundary
+        );
+        assert_eq!(
+            write.receipt["context"]["external_roots"],
+            serde_json::json!([{ "path": root, "access": "read" }])
+        );
+    });
+}
+
+#[test]
+fn a_read_write_external_root_admits_writes() {
+    with_workspace_and_external_root(|root, inside| {
+        let policy: ToolApprovalPolicy = serde_json::from_value(serde_json::json!({
+            "external_roots": [{ "path": root, "access": "read_write" }]
+        }))
+        .unwrap();
+        let write = evaluate_annotated(&policy, "write_file", ToolKind::Edit, inside);
+        assert!(
+            write.is_allow(),
+            "write under a read_write root: {}",
+            write.reason
+        );
+        assert_eq!(
+            write.receipt["context"]["external_roots"],
+            serde_json::json!([{ "path": root, "access": "read_write" }])
+        );
+    });
+}
+
+#[test]
+fn a_read_root_still_refuses_writes_when_external_paths_are_opted_out() {
+    with_workspace_and_external_root(|root, inside| {
+        let policy = ToolApprovalPolicy {
+            allow_external_paths: true,
+            external_roots: vec![ExternalRoot::read(root)],
+            ..Default::default()
+        };
+        let write = evaluate_annotated(&policy, "write_file", ToolKind::Edit, inside);
+        assert!(write.is_deny(), "{}", write.reason);
+        assert_eq!(
+            write
+                .matched_rule
+                .as_ref()
+                .and_then(|rule| rule.id.as_deref()),
+            Some(EXTERNAL_ROOT_READ_ONLY)
+        );
+    });
+}
+
+#[test]
+fn intersecting_policies_keeps_the_narrower_mode_for_a_shared_root() {
+    let host = ToolApprovalPolicy {
+        external_roots: vec![ExternalRoot::read("/opt/shared")],
+        ..Default::default()
+    };
+    let session = ToolApprovalPolicy {
+        external_roots: vec![ExternalRoot::read_write("/opt/shared")],
+        ..Default::default()
+    };
+    assert_eq!(
+        host.intersect(&session).external_roots,
+        vec![ExternalRoot::read("/opt/shared")]
+    );
+    assert_eq!(
+        session.intersect(&host).external_roots,
+        vec![ExternalRoot::read("/opt/shared")]
+    );
 }

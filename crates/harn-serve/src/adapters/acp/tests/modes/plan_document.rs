@@ -8,13 +8,7 @@ async fn receive_plan_mutation(
     let mut response = None;
     let mut received = Vec::new();
     for _ in 0..4 {
-        let line = tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv())
-            .await
-            .unwrap_or_else(|_| {
-                panic!("timed out waiting for plan mutation {response_id}; received {received:?}")
-            })
-            .expect("ACP response channel closed");
-        let message: serde_json::Value = serde_json::from_str(&line).expect("ACP JSON line");
+        let message = recv_json(rx).await;
         received.push(message.clone());
         if message["method"] == "session/update"
             && message["params"]["update"]["sessionUpdate"] == "plan"
@@ -31,10 +25,10 @@ async fn receive_plan_mutation(
             break;
         }
     }
-    (
-        notification.expect("plan mutation notification"),
-        response.expect("plan mutation response"),
-    )
+    let (Some(notification), Some(response)) = (notification, response) else {
+        panic!("plan mutation {response_id} incomplete after 4 messages; received {received:?}");
+    };
+    (notification, response)
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -256,19 +250,22 @@ async fn acp_plan_mutations_conflict_receipt_reopen_and_replay() {
             "params": {"sessionId": session_id},
         }))
         .await;
-    let mut replayed_document = None;
-    loop {
-        let message = recv_json(&mut rx).await;
-        if message["method"] == "session/update"
-            && message["params"]["update"]["sessionUpdate"] == "plan"
-        {
-            replayed_document = Some(message["params"]["update"]["harnPlanDocument"].clone());
+    let replayed_document = harn_clock::test_support::within("plan replay response", async {
+        let mut replayed_document = None;
+        loop {
+            let line = rx.recv().await.expect("ACP response channel closed");
+            let message: serde_json::Value = serde_json::from_str(&line).expect("ACP JSON line");
+            if message["method"] == "session/update"
+                && message["params"]["update"]["sessionUpdate"] == "plan"
+            {
+                replayed_document = Some(message["params"]["update"]["harnPlanDocument"].clone());
+            }
+            if message["id"] == 8 {
+                return replayed_document.expect("replayed plan document");
+            }
         }
-        if message["id"] == 8 {
-            break;
-        }
-    }
-    let replayed_document = replayed_document.expect("replayed plan document");
+    })
+    .await;
     assert_eq!(
         replayed_document["current_revision"]["revision_id"],
         approved_revision

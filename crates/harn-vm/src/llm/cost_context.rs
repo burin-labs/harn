@@ -127,13 +127,17 @@ pub(crate) fn project_llm_call_context_breakdown(
             )
         })
         .sum();
+    let output_schema_tokens = opts.wire_output_schema().map_or(0, |(schema, _)| {
+        estimate_text_tokens_for_model(&crate::canonical_json::to_string(&schema), &opts.model)
+    });
     let projected_input_tokens = system_tokens
         .saturating_add(user_message_tokens)
         .saturating_add(assistant_message_tokens)
         .saturating_add(tool_result_tokens)
         .saturating_add(other_message_tokens)
         .saturating_add(tool_tokens)
-        .saturating_add(provider_tool_tokens);
+        .saturating_add(provider_tool_tokens)
+        .saturating_add(output_schema_tokens);
     let projected_output_tokens = opts.max_tokens.max(0);
     let segments = vec![
         LlmContextTokenSegment {
@@ -175,6 +179,11 @@ pub(crate) fn project_llm_call_context_breakdown(
             id: "provider_tools",
             label: "Provider-hosted tools",
             tokens: provider_tool_tokens,
+        },
+        LlmContextTokenSegment {
+            id: "output_schema",
+            label: "Structured output schema",
+            tokens: output_schema_tokens,
         },
         LlmContextTokenSegment {
             id: "output_budget",

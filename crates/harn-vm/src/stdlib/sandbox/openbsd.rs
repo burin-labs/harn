@@ -9,7 +9,7 @@ use std::os::unix::process::CommandExt;
 use std::process::Command;
 
 use super::{
-    policy_allows_network, policy_allows_workspace_write, process_sandbox_policy_read_roots,
+    policy_allows_child_writes, policy_allows_network, process_sandbox_policy_read_roots,
     process_sandbox_policy_write_roots, process_sandbox_readonly_roots, process_sandbox_roots,
     sandbox_rejection, PrepareOutcome, SandboxBackend,
 };
@@ -86,7 +86,7 @@ fn profile_setup(policy: &CapabilityPolicy) -> Result<ProcessProfile, VmError> {
                 .to_string(),
         ));
     }
-    let workspace_permissions = if policy_allows_workspace_write(policy) {
+    let workspace_permissions = if policy_allows_child_writes(policy) {
         "rwcx"
     } else {
         "rx"
@@ -112,14 +112,14 @@ fn profile_setup(policy: &CapabilityPolicy) -> Result<ProcessProfile, VmError> {
     for root in process_sandbox_policy_read_roots(policy) {
         unveil_rules.push((root.display().to_string(), "rx".to_string()));
     }
-    if policy_allows_workspace_write(policy) {
+    if policy_allows_child_writes(policy) {
         for root in process_sandbox_policy_write_roots(policy) {
             unveil_rules.push((root.display().to_string(), "rwcx".to_string()));
         }
     }
 
     let mut promises = vec!["stdio", "rpath", "proc", "exec"];
-    if policy_allows_workspace_write(policy) {
+    if policy_allows_child_writes(policy) {
         promises.extend(["wpath", "cpath", "dpath"]);
     }
     if policy_allows_network(policy) {

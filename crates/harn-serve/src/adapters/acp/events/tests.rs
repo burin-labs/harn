@@ -30,24 +30,13 @@ mod schema_contract;
 mod step_judge_skips;
 mod subagent_stop;
 mod tool_data;
+mod tool_format_override;
+mod turn_phase;
 use budget_exhausted::{empty_budget_exhausted_event, fixture_budget_exhausted_event};
 use compaction_events::fixture_compaction_receipt;
 use plan_document::fixture_plan_document_event;
 
-pub(super) async fn collect_notifications(events: Vec<AgentEvent>) -> Vec<serde_json::Value> {
-    let (tx, mut rx) = mpsc::unbounded_channel();
-    let (sink, expected_len) = (AcpAgentEventSink::new(AcpOutput::Channel(tx)), events.len());
-    for event in events {
-        sink.handle_event(&event);
-    }
-
-    let mut notifications = Vec::with_capacity(expected_len);
-    for _ in 0..expected_len {
-        let line = rx.recv().await.expect("ACP event notification");
-        notifications.push(serde_json::from_str(&line).expect("json"));
-    }
-    notifications
-}
+pub(super) use schema_contract::collect_notifications;
 
 fn fixture_handoff() -> HandoffArtifact {
     HandoffArtifact {
@@ -630,6 +619,8 @@ fn agent_event_ext_fixture_events() -> Vec<AgentEvent> {
             recommended_format: "text".to_string(),
             catalog_parity: "native_unreliable".to_string(),
             override_reason: Some("cross-check provider regression".to_string()),
+            applied_format: Some("text".to_string()),
+            steered: Some(true),
         },
         AgentEvent::ToolCallAudit {
             session_id: "session-1".to_string(),
@@ -643,7 +634,9 @@ fn agent_event_ext_fixture_events() -> Vec<AgentEvent> {
         },
     ];
     drop(events.splice(14..14, registration_fixtures::events()));
-    schema_contract::with_purpose_label(events)
+    let mut events = schema_contract::with_purpose_label(events);
+    events.extend(turn_phase::fixture_events());
+    events
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -772,32 +765,6 @@ async fn input_guardrail_verdict_agent_event_carries_tripwire_shape() {
     assert_eq!(params["label"], "secret_exfiltration");
     assert_eq!(params["confidenceThreshold"], 0.8);
     assert_eq!(params["classifierKind"], "custom");
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn tool_format_override_agent_event_uses_camel_case_fields() {
-    let actual = collect_notifications(vec![AgentEvent::ToolFormatOverride {
-        session_id: "session-1".to_string(),
-        provider: "openrouter".to_string(),
-        model: "qwen/qwen3-coder".to_string(),
-        requested_format: "native".to_string(),
-        recommended_format: "text".to_string(),
-        catalog_parity: "native_unreliable".to_string(),
-        override_reason: Some("cross-check provider regression".to_string()),
-    }])
-    .await;
-
-    let notification = &actual[0];
-    assert_eq!(notification["method"], HARN_AGENT_EVENT_METHOD);
-    let params = &notification["params"];
-    assert_eq!(params["kind"], "tool_format_override");
-    assert_eq!(params["sessionId"], "session-1");
-    assert_eq!(params["provider"], "openrouter");
-    assert_eq!(params["model"], "qwen/qwen3-coder");
-    assert_eq!(params["requestedFormat"], "native");
-    assert_eq!(params["recommendedFormat"], "text");
-    assert_eq!(params["catalogParity"], "native_unreliable");
-    assert_eq!(params["overrideReason"], "cross-check provider regression");
 }
 
 #[tokio::test(flavor = "current_thread")]

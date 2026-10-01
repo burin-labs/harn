@@ -115,12 +115,26 @@ The aggregate receipt exposes `test_file_compile_ms`, `test_files_compiled`,
 and `test_entries_compiled` so compile-once behavior is mechanically visible.
 Cold module compilation overlaps the suite compile phase; module instantiation
 and initialization remain attributed to the test that executes them. User JSON
-report schema v4 carries the same distribution, typed timeout metadata,
-per-case phases, and named `std/timing` spans. Conformance JSON schema v3 uses the same typed distribution
-owner. Module compile/load values overlap compile, setup, and execution and
+report schema v5 carries the same distribution, typed timeout metadata,
+per-case phases, and named `std/timing` spans. Conformance JSON schema v3 uses
+the same typed distribution owner. Module compile/load values overlap compile, setup, and execution and
 must not be added to total wall time.
 
-Timing-aware shards consume a complete, passing schema-v4 user-test receipt
+Each case also reports `work: {"vm_steps": N}` alongside `phases`.
+The VM counts each decoded bytecode instruction dispatched, including failing
+instructions, imported code, case fixtures, and child VMs. Recording starts
+at VM construction and ends after case teardown. Shared suite compilation and
+successful file-scoped fixture execution aren't charged to individual cases.
+Cases that never construct a VM report `work: null`; a measured zero remains
+`{"vm_steps": 0}`. Native work inside builtins isn't counted.
+
+Identical instruction sequences produce identical counts regardless of host
+load or compilation-cache state. Compare counts using the same Harn build;
+compiler changes can alter the instruction sequence. Timeouts, racing detached
+tasks, and nondeterministic inputs can change how many instructions run.
+The counter doesn't replace wall-clock budgets for blocked I/O or native work.
+
+Timing-aware shards consume a complete, passing schema-v5 user-test receipt
 from an unsharded run. `--timing-environment` stamps the environment that owns
 the measurement; a later `--timing-baseline` run refuses a different stamp,
 an older report schema, a partial shard receipt, or a deleted or renamed case.
@@ -453,6 +467,46 @@ Application-owned roles should use a dotted namespace such as
 `app.classifier`; dotted scopes are open vocabulary and do not produce an
 unknown-Harn-purpose advisory.
 
+### Replay a prefix, then go live
+
+To measure what a model does at one exact point in a recorded run, replay the
+recording up to that point and let the real provider answer from there. Add
+`liveAfterCalls` to a versioned header:
+
+```jsonl
+{"schemaVersion":1,"strictScopes":false,"liveAfterCalls":2}
+{"id":"record-0","scope":"agent.main","consume":"once","tool_calls":[{"id":"call_1","name":"read_file","arguments":{"path":"a.txt"}}]}
+{"id":"record-1","scope":"agent.main","consume":"once","text":"Done."}
+{"id":"record-2","scope":"agent.main","consume":"once","text":"never served"}
+```
+
+- Only the first `liveAfterCalls` entries are installed. A full recording can
+  carry a shorter prefix, so you do not need to truncate the file. The value
+  must be at least 1 and no more than the number of entries.
+- A call is one model request that reaches the mock dispatcher, whatever its
+  scope. That includes retries and auxiliary calls such as a completion judge.
+  An entry that scripts an `error` still counts as a served call.
+- Each of the first K calls must be served by a prefix entry under the ordinary
+  scope and `match` rules. If one cannot be served, the run has diverged from
+  the recording. It fails with `LLM mock replay prefix diverged at call N of K`
+  and does not go live early, even in a non-strict fixture.
+- Once K calls have been served, the fixture stops intercepting. Every later
+  call goes to the provider and model the call names, with normal credential
+  resolution, option validation, routing, and cost accounting. The live part
+  of the run therefore needs real credentials.
+- Every call carries `provider_telemetry.llm_mock_prefix`, for example
+  `{"served_by": "fixture", "call": 2, "live_after_calls": 2}`. `served_by` is
+  `fixture` or `live`, and the handoff is the first `live` call. Live calls are
+  counted when they return a response. The marker appears on the
+  `provider_call_response` transcript event and on `usage.provider_telemetry`
+  in a call result. Runs without `liveAfterCalls` carry no marker.
+
+To make a prefix fixture, record once with `harn run --llm-mock-record`, count
+the calls up to the decision point, and set `liveAfterCalls` in the recorded
+header. `harness.llm.mock_load_jsonl` honors the same header and reports
+`live_after_calls` in its receipt, so a host that installs fixtures from its own
+pipeline needs no new flag.
+
 To import an external eval trace into the same fixture format:
 
 ```bash
@@ -754,6 +808,24 @@ assert(x > 0, "x must be positive")
 assert_eq(len(items), 3)
 assert_approx(total, 0.3)
 assert_matches(receipt.id, "^rcpt-\\d+$")
+```
+
+### Skipping a case
+
+Call `skip(reason)` when a test cannot run because a required service or
+platform feature is unavailable. It stops the case immediately. The runner
+prints `SKIP` with the reason and counts the case separately from passes and
+failures. JSON and JUnit reports retain the reason. A suite that requires every
+case to run can use `harn test tests/ --fail-on-skip` to exit with a failure if
+any case skips; the default command treats skips as information.
+
+```harn
+pipeline test_external_service() {
+  if !service_available() {
+    skip("external service unavailable")
+  }
+  assert(service_works())
+}
 ```
 
 ### Argument order

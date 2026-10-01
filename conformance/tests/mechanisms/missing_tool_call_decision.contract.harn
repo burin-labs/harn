@@ -1,0 +1,130 @@
+// Trigger: a zero-tool native turn has an explicit typed intended-call verdict.
+// Effect: a corrective turn executes the declared tool.
+// Negative: an explicit negative verdict completes without recovering a tool.
+import { agent_capture_events } from "std/agent/events"
+import { agent_loop } from "std/agent/loop"
+import { MissingToolCallVerdict } from "std/agent/options_types"
+import { llm_text, llm_tool_call, with_llm_script } from "std/testing"
+
+fn run_case(harness: Harness, intended: bool) {
+  const session_id = "missing-call-contract-" + harness.random.uuid()
+  const calls_key = session_id + ".classifier_calls"
+  harness.runtime.store_set(calls_key, 0)
+  const yes: MissingToolCallVerdict = {
+    action: "tool_call_intended",
+    tool_name: "inspect",
+    confidence: 0.96,
+    evidence: "Explicit positive fixture",
+  }
+  const no: MissingToolCallVerdict = {
+    action: "no_tool_call_intended",
+    tool_name: "",
+    confidence: 0.96,
+    evidence: "Explicit negative fixture",
+  }
+  const tools = tool_define(
+    tool_registry(),
+    "inspect",
+    "Inspect a file.",
+    {
+      handler: { _ -> "inspection completed" },
+      parameters: {},
+      returns: {type: "string"},
+      annotations: {kind: "read"},
+    },
+  )
+  with_llm_script(
+    harness.llm,
+    if intended {
+      [
+        llm_text("Opaque first response."),
+        llm_tool_call("inspect", {}),
+        llm_text("Opaque final response."),
+      ]
+    } else {
+      [llm_text("Opaque first response."), llm_text("##DONE##")]
+    },
+    { ->
+      const captured = agent_capture_events(
+        harness.agent,
+        session_id,
+        { ->
+          return agent_loop(
+            harness,
+            "Complete the fixture.",
+            nil,
+            {
+              session_id: session_id,
+              provider: "mock",
+              tool_format: "native",
+              tools: tools,
+              loop_until_done: true,
+              max_iterations: 4,
+              max_nudges: 2,
+              missing_tool_call_recovery: {
+                classifier: { payload ->
+                  harness.runtime.store_set(calls_key, harness.runtime.store_get(calls_key) + 1)
+                  return if intended && payload.iteration == 0 {
+                    yes
+                  } else {
+                    no
+                  }
+                },
+              },
+            },
+          )
+        },
+      )
+      assert_eq(captured.result.status, "done")
+      assert(harness.runtime.store_get(calls_key) > 0, "typed fixture must be reached")
+      const verdicts = captured.events.filter(
+        { event -> event.type == "missing_tool_call_verdict" },
+      )
+        .to_list()
+      assert(len(verdicts) > 0, "consumer must publish its classification")
+      const nudges = captured.events.filter(
+        { event -> event.type == "feedback_injected" && event?.kind == "missing_tool_call_nudge" },
+      )
+        .to_list()
+      assert_eq(
+        len(nudges),
+        if intended {
+          1
+        } else {
+          0
+        },
+      )
+      assert_eq(
+        verdicts[0].action,
+        if intended {
+          "tool_call_intended"
+        } else {
+          "no_tool_call_intended"
+        },
+      )
+      assert_eq(
+        len(harness.llm.mock_calls()),
+        if intended {
+          3
+        } else {
+          2
+        },
+      )
+      assert_eq(
+        captured.result.tools.successful,
+        if intended {
+          ["inspect"]
+        } else {
+          []
+        },
+      )
+    },
+  )
+}
+
+pipeline default(harness: Harness) {
+  run_case(harness, true)
+  harness.stdio.log("missing-call trigger emitted classification and recovered the tool")
+  run_case(harness, false)
+  harness.stdio.log("missing-call negative completed without recovering a tool")
+}

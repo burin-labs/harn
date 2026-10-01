@@ -35,6 +35,14 @@ cadence_reason = "Daily detects gradual startup regressions; minute 47 avoids co
 job_ids = ["cold-start-budget"]
 
 [[workflow]]
+path = ".github/workflows/consumer-canary.yml"
+name = "Consumer canary"
+claim = "The downstream consumer's update rehearsal still passes at main's current revision"
+crons = ["53 */4 * * *"]
+cadence_reason = "Every four hours bounds a report-only signal whose rehearsal takes about 45 minutes; a run at an unchanged main commit is skipped by name."
+job_ids = ["decide", "consumers", "settled"]
+
+[[workflow]]
 path = ".github/workflows/e2e.yml"
 name = "CLI end-to-end behavior"
 claim = "Slow subprocess CLI behavior remains functional outside the pull-request fast path"

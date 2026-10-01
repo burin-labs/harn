@@ -10,6 +10,68 @@ fn diagnostics(source: &str) -> Vec<PreflightDiagnostic> {
 }
 
 #[test]
+fn direct_tool_preflight_requires_known_nonempty_tools() {
+    for tools in ["nil", "[]", "{tools: []}", "empty_tools"] {
+        let source = format!(
+            r#"
+fn main(harness: Harness) {{
+  const empty_tools = []
+  harness.llm.call("hello", nil, {{
+    provider: "openrouter",
+    model: "deepseek/deepseek-v3.2",
+    tool_format: "text",
+    tools: {tools},
+  }})
+}}
+"#
+        );
+        assert!(diagnostics(&source).is_empty(), "{source}");
+    }
+    for tools in ["[{name: \"echo\"}]", "{tools: [{name: \"echo\"}]}"] {
+        for format in ["text", "auto"] {
+            for search in ["", ", tool_search: false", ", tool_search: nil"] {
+                let source = format!(
+                    r#"
+fn main(harness: Harness) {{
+  harness.llm.call("hello", nil, {{
+    provider: "openrouter", model: "deepseek/deepseek-v3.2",
+    tool_format: "{format}", tools: {tools}{search},
+  }})
+}}
+"#
+                );
+                let found = diagnostics(&source);
+                assert_eq!(found.len(), 1, "{source}: {found:?}");
+                assert!(found[0].message.contains("would drop its tools"));
+            }
+        }
+    }
+}
+
+#[test]
+fn harness_direct_calls_keep_direct_channel_policy() {
+    let no_tools = r#"
+fn main(harness: Harness) {
+  harness.llm.call("hello", nil, {
+    provider: "openrouter", model: "deepseek/deepseek-v3.2", tool_format: "native",
+  })
+}
+"#;
+    assert!(diagnostics(no_tools).is_empty());
+    let unaudited_override = r#"
+fn main(harness: Harness) {
+  harness.llm.call("hello", nil, {
+    provider: "openrouter", model: "deepseek/deepseek-v3.2", tool_format: "native",
+    tools: [{name: "echo"}], tool_format_override_reason: "probe",
+  })
+}
+"#;
+    let found = diagnostics(unaudited_override);
+    assert_eq!(found.len(), 1);
+    assert!(found[0].message.contains("native_unreliable"));
+}
+
+#[test]
 fn preflight_rejects_only_provably_unsafe_literal_llm_compositions() {
     let rejected = [
         r#"
@@ -327,4 +389,123 @@ fn main(harness: Harness) {
         "completion options live at index 3: {found:?}"
     );
     assert!(found[0].message.contains("`harness.llm.completion`"));
+}
+
+/// The check-time error names the catalog rule that forbids the combination,
+/// so the author can find the row instead of reverse-engineering the gate.
+#[test]
+fn preflight_names_the_catalog_rule_behind_a_forbidden_tool_format() {
+    let found = diagnostics(
+        r#"
+fn main(harness: Harness) {
+  harness.llm.call("hello", nil, {
+    provider: "openrouter",
+    model: "deepseek/deepseek-v3.2",
+    tool_format: "native",
+    tools: [{name: "echo"}],
+  })
+}
+"#,
+    );
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert!(
+        found[0]
+            .message
+            .contains("[[provider.openrouter]] model_match = ")
+            && found[0].message.contains("capability_sources"),
+        "the diagnostic should name the deciding catalog row: {}",
+        found[0].message
+    );
+}
+
+/// A direct call offering tools on a text-channel format would send no tools;
+/// the agent loop's call and the native channel are not this case.
+#[test]
+fn preflight_rejects_direct_text_channel_tools() {
+    let rejected = r#"
+fn main(harness: Harness) {
+  harness.llm.call("hello", nil, {
+    provider: "openrouter",
+    model: "deepseek/deepseek-v3.2",
+    tool_format: "json",
+    tools: [{name: "echo"}],
+  })
+}
+"#;
+    let found = diagnostics(rejected);
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert!(
+        found[0].message.contains("would drop its tools")
+            && found[0].message.contains("agent_loop"),
+        "{}",
+        found[0].message
+    );
+    for accepted in [
+        // Agent options feed the loop, which renders the contract.
+        r#"
+fn main(harness: Harness) {
+  agent_options({
+    provider: "openrouter",
+    model: "deepseek/deepseek-v3.2",
+    tool_format: "json",
+    tools: [{name: "echo"}],
+  })
+}
+"#,
+        // An empty tool set sends nothing either way.
+        r#"
+fn main(harness: Harness) {
+  harness.llm.call("hello", nil, {
+    provider: "openrouter",
+    model: "deepseek/deepseek-v3.2",
+    tool_format: "json",
+    tools: [],
+  })
+}
+"#,
+    ] {
+        assert!(diagnostics(accepted).is_empty(), "{accepted}");
+    }
+}
+
+/// Literal reasoning options run through the runtime's reasoning gate.
+#[test]
+fn preflight_rejects_literal_effort_on_a_route_without_it() {
+    harn_vm::llm::capabilities::set_user_overrides_toml(
+        r#"
+[[provider.test-provider]]
+model_match = "budget-only"
+thinking_modes = ["enabled"]
+
+[[provider.test-provider]]
+model_match = "effort-capable"
+thinking_modes = ["effort"]
+reasoning_effort_supported = true
+reasoning_effort_levels = ["low", "medium", "high"]
+"#,
+    )
+    .expect("capability overlay");
+    let found = diagnostics(
+        r#"
+fn main(harness: Harness) {
+  harness.llm.call("hello", nil, {provider: "test-provider", model: "budget-only", effort: "high"})
+  harness.llm.call("hello", nil, {provider: "test-provider", model: "budget-only", thinking: true})
+  harness.llm.call("hello", nil, {provider: "test-provider", model: "effort-capable", effort: "high"})
+}
+"#,
+    );
+    harn_vm::llm::capabilities::clear_user_overrides();
+    assert_eq!(
+        found.len(),
+        1,
+        "only the effort-less route refuses effort: {found:?}"
+    );
+    assert!(
+        found[0]
+            .message
+            .contains("option `effort` is not supported")
+            && found[0].message.contains("model_match = \"budget-only\""),
+        "{}",
+        found[0].message
+    );
 }

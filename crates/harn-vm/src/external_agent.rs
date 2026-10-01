@@ -244,6 +244,7 @@ impl Default for ExternalAgentDelegationEnvelope {
 }
 
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum ExternalAgentError {
     InvalidRequest(String),
     Discovery(String),

@@ -3,7 +3,6 @@
 #![cfg(unix)]
 
 use std::sync::{mpsc, Arc};
-use std::time::Duration;
 
 use harn_hostlib::process::{
     install_spawner, ExitStatus, MockHandleController, MockProcessConfig, MockSpawner, SpawnerGuard,
@@ -171,9 +170,11 @@ fn background_finalization_reuses_active_artifact_lease() {
     controller.complete_with(ExitStatus::from_code(0));
 
     assert_eq!(
-        wait_rx
-            .recv_timeout(Duration::from_secs(10))
-            .expect("background finalization deadlocked on its active artifact lease"),
+        harn_clock::test_support::recv_within(
+            "wait_command status (a hang means background finalization deadlocked on its \
+             active artifact lease)",
+            &wait_rx,
+        ),
         "completed"
     );
     waiter.join().expect("background waiter thread panicked");

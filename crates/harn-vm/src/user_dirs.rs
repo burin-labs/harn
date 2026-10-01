@@ -94,6 +94,50 @@ pub fn package_cache_dir() -> Option<PathBuf> {
     )
 }
 
+/// Harn's per-user configuration directory, resolved from explicit values.
+///
+/// This is the one owner of where user-level configuration lives
+/// (`config.toml`, `providers.toml`, `mcp_presets.toml`,
+/// `mcp_bulk_auth.toml`, and `skills/`). Resolution order:
+///
+/// 1. On Windows, `%APPDATA%\Harn`.
+/// 2. `$XDG_CONFIG_HOME/harn`.
+/// 3. `~/.config/harn`.
+///
+/// Pointing `XDG_CONFIG_HOME` at an empty directory runs Harn with no user
+/// configuration; the test environment (`scripts/harn_test_env.sh`) does this.
+/// Blank values are treated as unset. `os` is [`std::env::consts::OS`] in
+/// production and explicit here so every platform's order is unit-testable.
+pub fn config_dir_from_environment(
+    os: &str,
+    home: Option<&Path>,
+    xdg_config_home: Option<&OsStr>,
+    appdata: Option<&OsStr>,
+) -> Option<PathBuf> {
+    if os == "windows" {
+        return non_blank(appdata).map(|root| root.join("Harn"));
+    }
+    if let Some(xdg) = non_blank(xdg_config_home) {
+        return Some(xdg.join("harn"));
+    }
+    home.map(|home| home.join(".config").join("harn"))
+}
+
+/// [`config_dir_from_environment`] against the current process environment.
+pub fn config_dir() -> Option<PathBuf> {
+    config_dir_from_environment(
+        std::env::consts::OS,
+        home_dir().as_deref(),
+        std::env::var_os("XDG_CONFIG_HOME").as_deref(),
+        std::env::var_os("APPDATA").as_deref(),
+    )
+}
+
+/// The path of one file in Harn's user configuration directory.
+pub fn config_file(name: &str) -> Option<PathBuf> {
+    config_dir().map(|dir| dir.join(name))
+}
+
 /// Prefixes that stand in for the home directory, longest first so `"$HOME/"`
 /// is tried before the bare `"$HOME"`.
 const HOME_PREFIXES: &[&str] = &["~/", "$HOME/", "~", "$HOME"];
@@ -197,6 +241,40 @@ mod tests {
     fn none_when_both_unset_or_empty() {
         assert_eq!(home_dir_from(None, None), None);
         assert_eq!(home_dir_from(os(""), os("")), None);
+    }
+
+    #[test]
+    fn config_dir_resolution_order() {
+        let appdata = os(r"C:\Users\Ada\AppData\Roaming");
+        assert_eq!(
+            config_dir_from_environment("windows", home(), os("/xdg"), appdata),
+            Some(PathBuf::from(r"C:\Users\Ada\AppData\Roaming").join("Harn"))
+        );
+        assert_eq!(
+            config_dir_from_environment("linux", home(), os("/xdg"), None),
+            Some(PathBuf::from("/xdg/harn"))
+        );
+        assert_eq!(
+            config_dir_from_environment("macos", home(), os("/xdg"), None),
+            Some(PathBuf::from("/xdg/harn"))
+        );
+        assert_eq!(
+            config_dir_from_environment("macos", home(), None, None),
+            Some(PathBuf::from("/home/ada/.config/harn"))
+        );
+    }
+
+    #[test]
+    fn config_dir_treats_blank_values_as_unset() {
+        assert_eq!(
+            config_dir_from_environment("linux", home(), os(" "), None),
+            Some(PathBuf::from("/home/ada/.config/harn"))
+        );
+        assert_eq!(
+            config_dir_from_environment("windows", home(), None, os("")),
+            None
+        );
+        assert_eq!(config_dir_from_environment("linux", None, None, None), None);
     }
 
     #[test]

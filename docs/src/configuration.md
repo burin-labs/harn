@@ -42,7 +42,7 @@ Layers are merged from lowest to highest precedence:
 1. Built-in defaults compiled into `harn-vm`.
 2. Embedding-host provider defaults from `HARN_HOST_PROVIDERS_CONFIG`.
 3. Legacy provider compatibility from `HARN_PROVIDERS_CONFIG` or
-   `~/.config/harn/providers.toml`.
+   `providers.toml` in the user config directory.
 4. Runtime install defaults.
 5. Remote defaults from an explicitly trusted URL.
 6. User config.
@@ -58,6 +58,25 @@ environment override still wins over both.
 
 ## File locations
 
+### User config directory
+
+Every user-level file lives in one directory: `config.toml`, `providers.toml`,
+`mcp_presets.toml`, `mcp_bulk_auth.toml`, and `skills/`. Harn resolves it in
+this order:
+
+| Order | Directory |
+|---|---|
+| 1 | Windows: `%APPDATA%\Harn`; unavailable if `APPDATA` is unset |
+| 2 | macOS/Linux: `$XDG_CONFIG_HOME/harn`, if set |
+| 3 | macOS/Linux: `~/.config/harn` |
+
+On macOS and Linux, set `XDG_CONFIG_HOME` to an empty directory to run Harn
+with no user configuration, for example in CI or when reproducing a bug report.
+On Windows, use an empty `APPDATA` directory instead. Harn's test environment
+sets both directories. A file-specific override, such as
+`HARN_CONFIG_USER` or `HARN_PROVIDERS_CONFIG`, still takes precedence over the
+directory for that one file.
+
 Runtime install defaults:
 
 | OS | Default path | Override |
@@ -69,8 +88,7 @@ User config:
 
 | OS | Default path | Override |
 |---|---|---|
-| macOS/Linux | `$XDG_CONFIG_HOME/harn/config.toml`, or `~/.config/harn/config.toml` | `HARN_CONFIG_USER` |
-| Windows | `%APPDATA%\Harn\config.toml` | `HARN_CONFIG_USER` |
+| All | `config.toml` in the user config directory | `HARN_CONFIG_USER` |
 
 Managed policy:
 
@@ -267,7 +285,7 @@ local_ml() // spotlight + trifecta gate + on-device injection detection
 ## Compatibility
 
 Existing provider config keeps working. `HARN_PROVIDERS_CONFIG` and
-`~/.config/harn/providers.toml` are still consumed by the LLM runtime above
+`providers.toml` in the user config directory are still consumed by the LLM runtime above
 an optional host-owned `HARN_HOST_PROVIDERS_CONFIG` overlay, and
 `harn config inspect --explain` projects that legacy provider surface into the
 canonical `models` section so teams can see where those values came from.

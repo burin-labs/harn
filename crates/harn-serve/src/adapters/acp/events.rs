@@ -1022,6 +1022,11 @@ impl AgentEventSink for AcpAgentEventSink {
                     }),
                 );
             }
+            AgentEvent::TurnPhaseChanged { session_id, phase } => {
+                let payload =
+                    serde_json::to_value(phase).expect("agent turn phase is serializable");
+                self.emit_agent_event_ext("turn_phase_changed", session_id, payload);
+            }
             AgentEvent::JudgeStarted {
                 session_id,
                 iteration,
@@ -1095,6 +1100,8 @@ impl AgentEventSink for AcpAgentEventSink {
                 skipped,
                 reason,
                 judge_error,
+                unavailable_reason,
+                unavailable_count,
                 on_veto,
                 input_tokens,
                 output_tokens,
@@ -1116,6 +1123,8 @@ impl AgentEventSink for AcpAgentEventSink {
                         "skipped": skipped,
                         "reason": reason,
                         "judgeError": judge_error,
+                        "unavailableReason": unavailable_reason,
+                        "unavailableCount": unavailable_count,
                         "onVeto": on_veto,
                         "inputTokens": input_tokens,
                         "outputTokens": output_tokens,

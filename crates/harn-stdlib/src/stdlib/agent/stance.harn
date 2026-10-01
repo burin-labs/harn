@@ -1,5 +1,6 @@
 import { agent_emit_event, agent_session_messages } from "std/agent/state"
 import { agent_tool_is_read_only } from "std/agent/tool_annotations"
+import { agent_tool_handler_result } from "std/agent/tool_lifecycle"
 // Read-only stance: an intent-armed, least-privilege tool window with a
 // justified, consent-verified escape hatch.
 //
@@ -205,19 +206,21 @@ fn __stance_register_escape_tool(
     )
     if granted {
       harness.runtime.atomic_set(grant_flag, 1)
-      {
+      const result = {
         granted: true,
         message: "Write access re-enabled: user consent verified. Mutating tools return next turn.",
         reason: verdict?.reason ?? "",
       }
+      agent_tool_handler_result(to_string(result), result)
     } else {
-      {
+      const result = {
         granted: false,
         message: "Denied: no express or implied user consent to modify the workspace was found."
           + " Ask the user directly whether to proceed with changes, then call this tool again"
           + " citing their answer.",
         reason: verdict?.reason ?? "",
       }
+      agent_tool_handler_result(to_string(result), result, "rejected")
     }
   }
   return tool_define(

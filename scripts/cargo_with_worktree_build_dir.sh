@@ -10,26 +10,37 @@ source "$script_dir/lib/cargo_env.sh"
 
 # A rustc earlier on PATH than the rustup shim shadows rust-toolchain.toml, so
 # a local gate silently compiles under a different compiler than CI and its
-# green or red is not comparable. Refuse before Cargo starts, naming both
-# versions and the correction.
+# green or red is not comparable. Prefer the already-installed pinned rustup
+# toolchain when PATH shadows it; explicit overrides still fail by name.
 harn_require_pinned_rustc() {
   local pin_file="$workspace/rust-toolchain.toml"
-  local pinned resolved
+  local pinned resolved pinned_rustc compiler="${RUSTC:-rustc}"
   [[ -f "$pin_file" ]] || return 0
   pinned="$(sed -n 's/^channel[[:space:]]*=[[:space:]]*"\(.*\)"/\1/p' "$pin_file" | head -n 1)"
   # Only an exact version pin is comparable; a channel name resolves per host.
   [[ "$pinned" =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$ ]] || return 0
   # A rustc that cannot report a version is Cargo's problem to fail on, loudly
   # and by itself. This guard only answers "which compiler", never "is there one".
-  resolved="$(rustc --version 2>/dev/null | awk '{print $2}')" || return 0
+  resolved="$("$compiler" --version 2>/dev/null | awk '{print $2}')" || return 0
   [[ -n "$resolved" && "$resolved" != "$pinned" ]] || return 0
-  echo "error: rust-toolchain.toml pins rustc $pinned but $(command -v rustc) resolves to $resolved" >&2
+  if [[ -z "${RUSTC:-}" && -z "${RUSTUP_TOOLCHAIN:-}" ]] && command -v rustup >/dev/null 2>&1; then
+    # `which` never installs the missing toolchain. Prepending its actual bin
+    # directory selects Cargo and rustc together, including supervised builds.
+    pinned_rustc="$(rustup which --toolchain "$pinned" rustc 2>/dev/null)" || pinned_rustc=""
+    if [[ -x "$pinned_rustc" ]] && \
+      [[ "$("$pinned_rustc" --version | awk '{print $2}')" = "$pinned" ]]; then
+      export PATH="$(dirname "$pinned_rustc"):$PATH"
+      return 0
+    fi
+  fi
+  echo "error: rust-toolchain.toml pins rustc $pinned but $(command -v "$compiler") resolves to $resolved" >&2
   echo "       local results under $resolved are not comparable to CI" >&2
   # PATH order is the fix, not RUSTUP_TOOLCHAIN: a shadowing compiler that is
   # not a rustup shim ignores that variable entirely, so suggesting it first
   # would send the reader in a circle.
   echo "       fix: put the rustup shim directory (usually \$HOME/.cargo/bin) ahead of $(dirname "$(command -v rustc)") on PATH" >&2
   echo "       RUSTUP_TOOLCHAIN=$pinned only helps once the shim resolves first" >&2
+  echo "       install the pinned toolchain with rustup toolchain install $pinned, or remove an explicit compiler override" >&2
   exit 1
 }
 if [[ "${HARN_ALLOW_TOOLCHAIN_MISMATCH:-0}" != "1" ]]; then

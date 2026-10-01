@@ -423,8 +423,10 @@ pipeline test_completion_judge_keeps_declared_execute_observation_without_guessi
       ],
     },
   )
-  assert_eq(projected.stats.included_action_count, 0)
-  assert_eq(projected.stats.included_fallback_observation_count, 1)
+  // A declared process observation is an action of its own now, not only the
+  // fallback when nothing else was kept: its output can be the work itself.
+  assert_eq(projected.stats.included_action_count, 1)
+  assert_eq(projected.stats.included_fallback_observation_count, 0)
   assert(contains(projected.serialized, "artifact evidence"))
 }
 
@@ -684,11 +686,11 @@ pipeline test_completion_judge_refuses_request_that_cannot_fit_terminal_deadline
               loop_until_done: true,
               done_sentinel: "##DONE##",
               max_iterations: 2,
-              deadline_ms: 1,
+              deadline_ms: 5000,
               verify_completion_judge: {
                 provider: "mock",
                 max_invocations: 1,
-                operation_timeout_ms: 100,
+                operation_timeout_ms: 10000,
                 deadline_reserve_ms: 0,
               },
               turn_end_condition: {provider: "mock", max_invocations: 1},

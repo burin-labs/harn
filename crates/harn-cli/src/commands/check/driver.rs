@@ -78,6 +78,7 @@ pub(crate) struct CheckedFile {
 struct EffectiveCheckConfig {
     config: package::CheckConfig,
     host_capabilities: ResolvedHostCapabilities,
+    llm: super::llm_context::LlmCheckContext,
 }
 
 fn worker_count(files: usize) -> usize {
@@ -312,8 +313,16 @@ fn run_ordered_checks<State>(
 }
 
 fn internal_failure(file: &Path, want_text: bool) -> CheckedFile {
+    check_failure(
+        file,
+        "internal `harn check` failure while analyzing this file",
+        Some("report this reproducible checker failure to the Harn maintainers"),
+        want_text,
+    )
+}
+
+fn check_failure(file: &Path, message: &str, help: Option<&str>, want_text: bool) -> CheckedFile {
     let path = file.to_string_lossy().into_owned();
-    let message = "internal `harn check` failure while analyzing this file";
     let text = if want_text {
         CheckTextOutput {
             rendered: format!("{path}: error: {message}\n"),
@@ -332,9 +341,7 @@ fn internal_failure(file: &Path, want_text: bool) -> CheckedFile {
                 code: None,
                 message: message.to_string(),
                 span: None,
-                help: Some(
-                    "report this reproducible checker failure to the Harn maintainers".to_string(),
-                ),
+                help: help.map(str::to_string),
             }],
         },
         strict: false,
@@ -380,6 +387,31 @@ fn check_one_retaining_analysis(
     let context = config_by_dir
         .get(&check_config_key(file))
         .expect("every checked file has a precomputed check context");
+    match context.llm.with(|| {
+        check_one_in_context(
+            analysis,
+            file,
+            module_graph,
+            context,
+            cross_file_imports,
+            overrides,
+            want_text,
+        )
+    }) {
+        Ok(checked) => checked,
+        Err(error) => check_failure(file, error, None, want_text),
+    }
+}
+
+fn check_one_in_context(
+    analysis: &mut AnalysisDatabase,
+    file: &Path,
+    module_graph: &harn_modules::ModuleGraph,
+    context: &EffectiveCheckConfig,
+    cross_file_imports: &HashSet<String>,
+    overrides: &CheckCliOverrides,
+    want_text: bool,
+) -> CheckedFile {
     let config = &context.config;
 
     // Persistent result cache (#4391): key on the file's content + import
@@ -392,7 +424,7 @@ fn check_one_retaining_analysis(
         .flatten()
         .map(|source| {
             let exemptions = lint_exemptions_for_file(file, module_graph, cross_file_imports);
-            super::result_cache::result_cache_key(
+            context.llm.cache_key(super::result_cache::result_cache_key(
                 file,
                 &file.to_string_lossy(),
                 &source,
@@ -400,7 +432,7 @@ fn check_one_retaining_analysis(
                 context.host_capabilities.source_content.as_deref(),
                 overrides.invariants,
                 &exemptions,
-            )
+            ))
         });
     if let Some(key) = cache_key.as_ref() {
         if let Some(hit) =
@@ -529,6 +561,7 @@ fn build_check_contexts_with(
             EffectiveCheckConfig {
                 config,
                 host_capabilities,
+                llm: super::llm_context::LlmCheckContext::load(file),
             },
         );
     }

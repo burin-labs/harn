@@ -1,0 +1,78 @@
+// A completion judge whose route cannot run at all (no credential, no region)
+// never produced a reading, so there is nothing for the model to act on. It
+// ends the run on its own reason, and the configuration error stays out of the
+// transcript: a follow-up turn on the same session must not be sent the error
+// text as if it were judge feedback. An unreadable judge reply keeps the
+// generic `completion_judge_error` reason (the control case).
+import { agent_loop } from "std/agent/loop"
+import { agent_loop_options } from "std/agent/options"
+import { agent_session_messages } from "std/agent/state"
+import { llm_text, with_llm_script } from "std/testing"
+
+const ROUTE_ERROR = "judge-route-marker: the provider region is not configured"
+
+fn run_once(harness: Harness, category: string, session: string) {
+  const options = agent_loop_options(
+    harness,
+    {
+      provider: "mock",
+      loop_until_done: true,
+      max_iterations: 3,
+      session_id: session,
+      turn_end_condition: {max_invocations: 1},
+    },
+  )
+  return with_llm_script(
+    harness.llm,
+    [
+      llm_text("First completion claim. ##DONE##"),
+      {error: {category: category, message: ROUTE_ERROR}},
+      {error: {category: category, message: ROUTE_ERROR}},
+    ],
+    { ->
+      agent_loop(
+        harness,
+        "Finish only after the completion judge verifies the claim.",
+        nil,
+        options,
+      )
+    },
+  )
+}
+
+fn follow_up_request(harness: Harness, session: string) -> string {
+  return with_llm_script(
+    harness.llm,
+    [llm_text("Follow-up answer. ##DONE##")],
+    { ->
+      agent_loop(
+        harness,
+        "Continue.",
+        nil,
+        {provider: "mock", session_id: session, max_iterations: 1},
+      )
+      const calls = harness.llm.mock_calls()
+      return json_stringify(calls[len(calls) - 1].messages)
+    },
+  )
+}
+
+pipeline default(harness: Harness) {
+  for category in ["auth", "environment"] {
+    const session = "judge-route-unavailable-" + category + "-" + harness.random.uuid()
+    const result = run_once(harness, category, session)
+    harness.stdio.println(category + " status=" + result.status)
+    harness.stdio.println(category + " stop_reason=" + result.stop_reason)
+    const transcript = json_stringify(agent_session_messages(harness.agent, session))
+    harness.stdio.println(
+      category + " transcript_has_error=" + to_string(contains(transcript, "judge-route-marker")),
+    )
+    const next_request = follow_up_request(harness, session)
+    harness.stdio.println(
+      category + " next_request_has_error="
+        + to_string(contains(next_request, "judge-route-marker")),
+    )
+  }
+  const control = run_once(harness, "generic", "judge-route-control-" + harness.random.uuid())
+  harness.stdio.println("generic stop_reason=" + control.stop_reason)
+}

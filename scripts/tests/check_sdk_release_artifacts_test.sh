@@ -20,7 +20,7 @@ write_manifest() {
 language=${language}
 harn_version=0.10.116
 sdk_version=0.10.0
-openapi_spec=spec/openapi.yaml
+openapi_spec=crates/harn-serve/openapi.yaml
 openapi_sha256=279739bbe7aff1242dcdb68d6061776277927701b8e0da3fd1d80120b200557a
 EOF
 }

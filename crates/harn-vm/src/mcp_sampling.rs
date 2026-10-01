@@ -795,6 +795,7 @@ mod tests {
         // applies whenever any builtin mock is installed, regardless
         // of the requested provider — see `MockProvider::should_intercept`.
         crate::llm::mock::push_llm_mock(crate::llm::mock::LlmMock {
+            effective_reasoning_effort: Default::default(),
             text: "sampled text".to_string(),
             tool_calls: Vec::new(),
             raw_tool_calls: Vec::new(),

@@ -555,6 +555,9 @@ pub(crate) fn process_error_to_hostlib(
             builtin,
             message: format!("sandbox setup failed: {message}"),
         },
+        ProcessError::SandboxMechanismUnavailable(refusal) => {
+            HostlibError::SandboxMechanismUnavailable { builtin, refusal }
+        }
         ProcessError::SandboxCwd(message) => HostlibError::Backend {
             builtin,
             message: format!("sandbox cwd rejected: {message}"),
@@ -896,8 +899,6 @@ pub(crate) fn sandbox_kind() -> &'static str {
         "landlock"
     } else if cfg!(target_os = "macos") {
         "sandbox-exec"
-    } else if cfg!(target_os = "windows") {
-        "appcontainer"
     } else {
         "none"
     }
@@ -1214,5 +1215,32 @@ mod tests {
         assert!(!result.interrupted);
         assert!(result.process_cleanup.is_none());
         assert_eq!(killer.calls(), 0);
+    }
+
+    /// A missing platform mechanism must reach the script as the VM's typed
+    /// refusal. Falsifier: before `ProcessError::SandboxMechanismUnavailable`,
+    /// the spawner stringified the refusal into `SandboxSetup`, and the script
+    /// caught `backend_error` text.
+    #[test]
+    fn a_missing_sandbox_mechanism_stays_typed_through_hostlib() {
+        let refusal: harn_vm::process_sandbox::SandboxMechanismUnavailable =
+            serde_json::from_value(serde_json::json!({
+                "schema": "harn.process.sandbox_mechanism_unavailable.v1",
+                "mechanism": "linux_landlock",
+                "availability": "absent_on_host",
+                "profile": "os_hardened",
+                "requirement": "profile",
+            }))
+            .expect("refusal fixture");
+        let spawn_error = ProcessError::sandbox_setup(
+            harn_vm::VmError::SandboxMechanismUnavailable(Box::new(refusal.clone())),
+        );
+        let vm_error = harn_vm::VmError::from(process_error_to_hostlib(
+            "hostlib_tools_run_command",
+            None,
+            std::path::Path::new("/workspace"),
+            spawn_error,
+        ));
+        assert_eq!(vm_error.sandbox_mechanism_unavailable(), Some(&refusal));
     }
 }

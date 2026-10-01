@@ -26,6 +26,7 @@ import {
   __judge_completion_gaps_read,
   __judge_completion_verdict_read,
   __judge_completion_verdict_schema,
+  __judge_sentinel_gaps,
   __judge_ungrounded_gap_quotes,
 } from "std/agent/judge_verdict"
 import { agent_loop } from "std/agent/loop"
@@ -426,4 +427,78 @@ pipeline test_a_refusal_quoting_absent_evidence_is_reasked_once(harness: Harness
     __retries(run.events, "contradiction") == 0,
     "and it must not be attributed to the contradiction path",
   )
+}
+
+/**
+ * A refusal whose one gap is `criterion`. harn#8775: a refusal naming the done
+ * sentinel asks for a marker the judge can never observe, and a weaker judge
+ * model refused on it every round until the cap, over a verified pass.
+ */
+fn __refusal_naming(criterion: string) -> dict {
+  return {
+    text: json_stringify(
+      {
+        verdict: "continue",
+        detail: "missing final summary and marker",
+        gaps: [
+          {
+            criterion: criterion,
+            gap_class: "missing_artifact",
+            detail: "add the summary and marker",
+          },
+        ],
+      },
+    ),
+  }
+}
+
+pipeline test_a_refusal_naming_the_done_sentinel_is_reasked_once(harness: Harness, task: unknown) {
+  const run = __run_judge(
+    harness,
+    "loop-sentinel",
+    [
+      llm_done(),
+      __refusal_naming("write a brief summary, then emit ##DONE## on its own final line"),
+      {
+        text: json_stringify(
+          {verdict: "done", detail: "the summary is present; the work is verified"},
+        ),
+      },
+      llm_done(),
+    ],
+  )
+  assert(
+    __retries(run.events, "done_sentinel") == 1,
+    "exactly one sentinel re-ask, got " + to_string(__retries(run.events, "done_sentinel")),
+  )
+  assert(
+    to_string(run.result?.status ?? "") == "done",
+    "and the re-asked approval ends the run, got: " + to_string(run.result?.status ?? ""),
+  )
+}
+
+pipeline test_a_refusal_not_naming_the_sentinel_is_not_reasked(harness: Harness, task: unknown) {
+  // NEGATIVE CONTROL: a substantive refusal keeps its veto untouched.
+  const run = __run_judge(
+    harness,
+    "loop-no-sentinel",
+    [
+      llm_done(),
+      __refusal_naming("write a brief summary of what changed"),
+      llm_done(),
+      {text: json_stringify({verdict: "done", detail: "the summary is now present"})},
+    ],
+  )
+  assert(
+    __retries(run.events, "done_sentinel") == 0,
+    "a refusal that never names the marker is not re-asked, got "
+      + to_string(__retries(run.events, "done_sentinel")),
+  )
+}
+
+pipeline test_the_sentinel_predicate_needs_a_configured_sentinel(harness: Harness, task: unknown) {
+  const gaps = __judge_completion_verdict_read(json_parse(__refusal_naming("emit ##DONE##").text))
+    .gaps
+  assert_eq(len(__judge_sentinel_gaps(gaps, "##DONE##")), 1)
+  assert_eq(len(__judge_sentinel_gaps(gaps, "")), 0)
 }

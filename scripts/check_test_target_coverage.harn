@@ -80,6 +80,12 @@ const UNLINTED_HARN_ROOTS: list<UnlintedRoot> = [
       "One parser fixture under tests/fixtures, read by a Rust test that owns the tree it must produce.",
   },
   {
+    root: "crates/harn-vm/src/llm/agent_host_primitives/auto_review_decider_tests",
+    kind: "fixture_input",
+    reason:
+      "Reviewer closures embedded by Rust permission-path tests, which execute the fixture and assert the actual permission metadata and host decision.",
+  },
+  {
     root: "crates/harn-cli/assets/evals",
     kind: "unlinted_backlog",
     reason:

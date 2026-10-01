@@ -1,7 +1,324 @@
-import { assert_eq } from "std/testing"
+import { assert_eq, assert_throws } from "std/testing"
+import { github_bump_auth_options, github_bump_live_adapter } from "../authentication"
 import { bump_pull_request_body, github_bump_remote } from "../github_remote"
+import { reset_token_cache } from "harn-github-connector/default"
 
 const API = "https://api.github.com"
+
+pipeline test_each_refresh_callback_receives_a_current_scoped_token(harness: Harness) {
+  const root = harness.fs.mkdtemp_in_workspace("bump-refresh-token-")
+  const log = root + "/observed-token"
+  const options = github_bump_auth_options(
+    {
+      app_id: "12345",
+      installation_id: "77",
+      private_key_pem: harness.fs.read_text(
+        path_join(harness.fs.source_dir(), "fixtures/github_app_test_key.pem"),
+      ),
+    },
+    "octo-org/octo-repo",
+  )
+  const remote = github_bump_remote(
+    harness,
+    {
+      repo: "octo-org/octo-repo",
+      release_repo: "burin-labs/harn",
+      options: options,
+      branch: "automation/bump-harn-runtime",
+      base: "main",
+    },
+  )
+  const adapter = github_bump_live_adapter(
+    harness,
+    {
+      remote: remote,
+      authentication: options,
+      config: {
+        repo_dir: root,
+        version_file: root + "/.harn-version",
+        revision_file: root + "/.harn-revision",
+        refresh_command: "printf '%s\\n' \"$GH_TOKEN\" >> \"$TOKEN_LOG\"",
+        refresh_environment: {TOKEN_LOG: log},
+      },
+    },
+  )
+  reset_token_cache(harness.runtime)
+  harness.testing.http_mock_clear()
+  harness.testing.clock_set(1700000000000)
+  try {
+    harness.testing.http_mock(
+      "POST",
+      API + "/app/installations/77/access_tokens",
+      {
+        responses: [
+          {
+            status: 201,
+            body: "{\"token\":\"first-synthetic-token\",\"expires_at\":\"2023-11-14T23:13:20Z\"}",
+          },
+          {
+            status: 201,
+            body: "{\"token\":\"renewed-synthetic-token\",\"expires_at\":\"2023-11-15T00:13:20Z\"}",
+          },
+        ],
+      },
+    )
+    assert(adapter.apply_version("v0.10.2", "").ok)
+    harness.testing.clock_advance(3700000)
+    assert(adapter.apply_version("v0.10.3", "").ok)
+    assert_eq(
+      harness.fs.read_text(log),
+      "first-synthetic-token\nrenewed-synthetic-token\n",
+      "each actual child must observe its callback's current token",
+    )
+    const calls = harness.testing.http_mock_calls()
+    assert_eq(len(calls), 2, "both callbacks must reach token issuance")
+    assert_eq(json_parse(calls[0].body), json_parse(calls[1].body), "renewal retains scope")
+  } finally {
+    harness.testing.clock_reset()
+    harness.testing.http_mock_clear()
+    reset_token_cache(harness.runtime)
+    harness.fs.delete(root)
+  }
+}
+
+pipeline test_long_build_renews_before_base_read_fetch_and_repair_identity(harness: Harness) {
+  const fixture = publication_repo(pick(harness, ["fs", "process"]))
+  git_ok(harness.process, fixture.dir, ["remote", "add", "origin", fixture.dir])
+  const options = github_bump_auth_options(
+    {
+      app_id: "12345",
+      installation_id: "77",
+      private_key_pem: harness.fs.read_text(
+        path_join(harness.fs.source_dir(), "fixtures/github_app_test_key.pem"),
+      ),
+    },
+    "octo-org/octo-repo",
+  )
+  const driver = github_bump_remote(
+    harness,
+    {
+      repo: "octo-org/octo-repo",
+      release_repo: "burin-labs/harn",
+      options: options,
+      branch: "automation/bump-harn-runtime",
+      base: "main",
+      repo_dir: fixture.dir,
+    },
+  )
+  reset_token_cache(harness.runtime)
+  harness.testing.http_mock_clear()
+  harness.testing.clock_set(1700000000000)
+  try {
+    harness.testing.http_mock(
+      "POST",
+      API + "/app/installations/77/access_tokens",
+      {
+        responses: [
+          {
+            status: 201,
+            body: "{\"token\":\"initial-token\",\"expires_at\":\"2023-11-14T23:13:20Z\"}",
+          },
+          {
+            status: 201,
+            body: "{\"token\":\"read-renewed-token\",\"expires_at\":\"2023-11-15T00:13:20Z\"}",
+          },
+          {
+            status: 201,
+            body: "{\"token\":\"fetch-renewed-token\",\"expires_at\":\"2023-11-15T01:13:20Z\"}",
+          },
+          {
+            status: 201,
+            body: "{\"token\":\"identity-renewed-token\",\"expires_at\":\"2023-11-15T02:13:20Z\"}",
+          },
+        ],
+      },
+    )
+    harness.testing.http_mock(
+      "GET",
+      API + "/repos/octo-org/octo-repo/branches/main",
+      {status: 200, body: json_stringify({name: "main", commit: {sha: fixture.base}})},
+    )
+    assert_eq(driver.base_head().oid, fixture.base)
+    harness.testing.clock_advance(3700000)
+    assert_eq(driver.base_head().oid, fixture.base, "base read after a long build must renew")
+    harness.testing.clock_advance(3700000)
+    assert(driver.fetch_base(fixture.base).ok, "fresh token issuance must reach a real Git fetch")
+    assert_eq(
+      trim(to_string(git_ok(harness.process, fixture.dir, ["rev-parse", "FETCH_HEAD"]).stdout)),
+      fixture.base,
+    )
+    harness.testing.http_mock(
+      "POST",
+      API + "/graphql",
+      {
+        status: 200,
+        body: json_stringify(
+          {
+            data: {
+              repository: {
+                commit: {
+                  oid: fixture.base,
+                  author: {user: {login: "harn-release-bot[bot]"}},
+                  signature: {isValid: true, wasSignedByGitHub: true},
+                },
+              },
+            },
+          },
+        ),
+      },
+    )
+    harness.testing.clock_advance(3700000)
+    assert(driver.is_generated_commit(fixture.base), "repair identity lookup must renew")
+    const calls = harness.testing.http_mock_calls()
+    assert_eq(len(calls), 7, "four token exchanges, two base reads and identity must fire")
+    assert_eq(calls[6].url, API + "/graphql")
+    for index in [0, 2, 4, 5] {
+      assert_eq(
+        json_parse(calls[index].body),
+        {repositories: ["octo-repo"], permissions: {contents: "write", pull_requests: "write"}},
+      )
+    }
+  } finally {
+    harness.testing.clock_reset()
+    harness.testing.http_mock_clear()
+    reset_token_cache(harness.runtime)
+    harness.fs.delete(fixture.dir)
+  }
+}
+
+type RepairIdentityRemote = {is_generated_commit: fn(string) -> bool, ...rest}
+
+pipeline test_generated_commit_requires_verified_github_publisher_identity(harness: Harness) {
+  const oid = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  const cases = [
+    {
+      name: "trusted publisher",
+      login: "harn-release-bot[bot]",
+      valid: true,
+      signed: true,
+      expected: true,
+    },
+    {name: "forged display name", login: "consumer", valid: true, signed: true, expected: false},
+    {
+      name: "invalid signature",
+      login: "harn-release-bot[bot]",
+      valid: false,
+      signed: true,
+      expected: false,
+    },
+    {
+      name: "local signature",
+      login: "harn-release-bot[bot]",
+      valid: true,
+      signed: false,
+      expected: false,
+    },
+    {
+      name: "unsigned commit",
+      login: "harn-release-bot[bot]",
+      valid: false,
+      signed: nil,
+      expected: false,
+    },
+    {name: "unknown author", login: nil, valid: true, signed: true, expected: false},
+  ]
+  for case in cases {
+    harness.testing.http_mock_clear()
+    harness.testing.http_mock(
+      "POST",
+      API + "/graphql",
+      {
+        status: 200,
+        body: json_stringify(
+          {
+            data: {
+              repository: {
+                commit: {
+                  oid: oid,
+                  author: {
+                    name: "harn-release-bot[bot]",
+                    user: if case.login == nil {
+                      nil
+                    } else {
+                      {login: case.login}
+                    },
+                  },
+                  signature: if case.signed == nil {
+                    nil
+                  } else {
+                    {isValid: case.valid, wasSignedByGitHub: case.signed}
+                  },
+                },
+              },
+            },
+          },
+        ),
+      },
+    )
+    const identity: RepairIdentityRemote = schema_expect(
+      remote(harness),
+      schema_of(RepairIdentityRemote),
+    )
+    assert_eq(
+      {case: case.name, generated: identity.is_generated_commit(oid)},
+      {case: case.name, generated: case.expected},
+    )
+    assert_eq(harness.testing.http_mock_calls().map({ call -> call.method }).to_list(), ["POST"])
+  }
+  harness.testing.http_mock_clear()
+}
+
+pipeline test_generated_commit_lookup_fails_closed_on_unavailable_or_partial_data(
+  harness: Harness,
+) {
+  const oid = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  for body in [
+    {data: {repository: {commit: nil}}},
+    {errors: [{message: "unavailable"}]},
+    {
+      data: {
+        repository: {
+          commit: {
+            oid: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            author: {user: {login: "harn-release-bot[bot]"}},
+            signature: {isValid: true, wasSignedByGitHub: true},
+          },
+        },
+      },
+    },
+  ] {
+    harness.testing.http_mock_clear()
+    harness.testing.http_mock("POST", API + "/graphql", {status: 200, body: json_stringify(body)})
+    const identity: RepairIdentityRemote = schema_expect(
+      remote(harness),
+      schema_of(RepairIdentityRemote),
+    )
+    assert_throws({ -> identity.is_generated_commit(oid) })
+    assert_eq(harness.testing.http_mock_calls().map({ call -> call.method }).to_list(), ["POST"])
+  }
+  harness.testing.http_mock_clear()
+}
+
+pipeline test_signed_publication_refuses_a_repair_added_after_inspection(harness: Harness) {
+  harness.testing.http_mock_clear()
+  const publication = mock_publication_branch(harness, 1)
+  const fixture = publication.fixture
+  assert_throws(
+    { ->
+      remote(harness, fixture.dir).publish_commit(
+        {
+          branch: "automation/bump-harn-runtime",
+          headline: "Bump Harn runtime",
+          base_sha: fixture.base,
+          expected_branch_oid: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          repair_commits: ["bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"],
+        },
+      )
+    },
+  )
+  assert_eq(harness.testing.http_mock_calls().map({ call -> call.method }).to_list(), ["GET"])
+  harness.testing.http_mock_clear()
+}
 
 fn remote(harness: Harness, repo_dir: string = ".") {
   return github_bump_remote(
@@ -150,6 +467,13 @@ pipeline test_bump_pr_body_attaches_exact_package_test_receipt(task: unknown) {
   assert(contains(body, "sha256:" + sha256(receipt)))
   assert(contains(body, base64_encode(receipt)))
   assert_eq(base64_decode(base64_encode(receipt)), receipt)
+}
+
+pipeline test_bump_pr_body_names_exact_source_commit(task: unknown) {
+  const revision = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  const body = bump_pull_request_body(nil, revision)
+  assert(contains(body, "Target Harn source revision: `${revision}`."))
+  assert(!contains(bump_pull_request_body(), "Target Harn source revision"))
 }
 
 pipeline test_release_projection_is_closed_and_exact(harness: Harness, task: unknown) {

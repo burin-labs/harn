@@ -81,6 +81,7 @@ export interface HarnProviderEndpoint {
   region_env?: string
   regions?: Record<string, HarnProviderEndpointRegion>
   chat_endpoint: string
+  chat_api_adapter?: __HARN_CHAT_API_ADAPTERS__
   completion_endpoint?: string
   embeddings_endpoint?: string
 }
@@ -124,7 +125,7 @@ export interface HarnProviderDataControl {
   value_kind: "bool" | "string"
   value: string
   effect: "retention" | "training"
-  applies_to?: ("anthropic_sse" | "open_ai_sse" | "ollama_ndjson" | "gemini_json" | "gemini_interactions_sse")[]
+  applies_to?: (__HARN_DATA_CONTROL_DIALECTS__)[]
   caveat?: string
 }
 

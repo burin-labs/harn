@@ -1,0 +1,61 @@
+import { workspace_reuse_writer_errors } from "../ci_cache_policy/policy_core"
+
+const MESSAGE =
+  "ci.yml:producer saves workspace crates, so it must restore with reuse-workspace-crates and record its source only on success"
+
+fn cache_step(reuse: bool) {
+  let inputs = {"shared-key": "workspace-tests", "cache-workspace-crates": "true", save: "true"}
+  if reuse {
+    inputs = inputs + {"reuse-workspace-crates": "true"}
+  }
+  return {uses: "./.github/actions/rust-cache", with: inputs}
+}
+
+fn record_step(condition: string) {
+  return {
+    name: "Record the workspace cache source",
+    if: condition,
+    run: "./scripts/ci/reuse_workspace_crates.sh record target",
+  }
+}
+
+pipeline test_writer_that_restores_and_records_on_success_passes(harness: Harness, task: unknown) {
+  const step = cache_step(true)
+  const job = {steps: [step, {run: "cargo build"}, record_step("success()")]}
+  assert_eq(workspace_reuse_writer_errors("ci.yml", "producer", job, step), [])
+}
+
+pipeline test_writer_missing_either_end_is_refused(harness: Harness, task: unknown) {
+  // No reuse restore: an inherited record would survive into the save.
+  const no_restore = cache_step(false)
+  assert_eq(
+    workspace_reuse_writer_errors(
+      "ci.yml",
+      "producer",
+      {steps: [no_restore, record_step("success()")]},
+      no_restore,
+    ),
+    [MESSAGE],
+  )
+  // No record: reuse never activates, which is safe but silently useless.
+  const step = cache_step(true)
+  assert_eq(workspace_reuse_writer_errors("ci.yml", "producer", {steps: [step]}, step), [MESSAGE])
+  // A record written even after a failure would name a tree the cache does not hold.
+  assert_eq(
+    workspace_reuse_writer_errors(
+      "ci.yml",
+      "producer",
+      {steps: [step, record_step("always()")]},
+      step,
+    ),
+    [MESSAGE],
+  )
+}
+
+pipeline test_writer_without_workspace_crates_is_not_constrained(harness: Harness, task: unknown) {
+  const step = {
+    uses: "./.github/actions/rust-cache",
+    with: {"shared-key": "release-x", save: "true"},
+  }
+  assert_eq(workspace_reuse_writer_errors("ci.yml", "release", {steps: [step]}, step), [])
+}

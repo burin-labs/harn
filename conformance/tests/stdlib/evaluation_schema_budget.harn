@@ -1,0 +1,58 @@
+import { boolean } from "std/predicate"
+import { llm_text, with_llm_script } from "std/testing"
+
+pipeline test(harness: Harness) {
+  with_llm_script(
+    harness.llm,
+    [
+      llm_text(
+        json_stringify({answers: {safe: {verdict: true, confidence: 1.0, evidence: "fixture"}}}),
+      ),
+    ],
+    { ->
+      const result = harness.llm.evaluate_request(
+        "affordable-schema-budget.v1",
+        {text: "short"},
+        {safe: boolean("Is this safe?")},
+        {
+          backend: "structured_llm",
+          provider: "openai",
+          model: "gpt-5.4-nano",
+          effort: "none",
+          temperature: 0.0,
+          threshold: 0.0,
+          evaluation_cost_limit: 0.003,
+        },
+      )
+      assert_eq(result.kind, "answered")
+      assert_eq(len(harness.llm.mock_calls()), 1)
+    },
+  )
+  with_llm_script(
+    harness.llm,
+    [
+      llm_text(
+        json_stringify({answers: {safe: {verdict: true, confidence: 1.0, evidence: "fixture"}}}),
+      ),
+    ],
+    { ->
+      const result = harness.llm.evaluate_request(
+        "full-schema-budget.v1",
+        {text: "short"},
+        {safe: boolean("Is this safe? " + "rubric ".repeat(20000))},
+        {
+          backend: "structured_llm",
+          provider: "openai",
+          model: "gpt-5.4-nano",
+          effort: "none",
+          temperature: 0.0,
+          threshold: 0.0,
+          evaluation_cost_limit: 0.003,
+        },
+      )
+      assert_eq(result.kind, "unavailable")
+      assert_eq(len(harness.llm.mock_calls()), 0)
+    },
+  )
+  harness.stdio.log("full schema participates in pre-dispatch budget admission")
+}

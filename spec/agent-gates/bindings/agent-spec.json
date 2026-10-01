@@ -826,6 +826,10 @@
         ]
       },
       {
+        "function": "__loop_dispatch_options",
+        "name": "turn_opts"
+      },
+      {
         "function": "__maybe_inject_action_nudge",
         "name": "opts"
       },
@@ -1179,6 +1183,14 @@
       },
       {
         "function": "__invoke",
+        "name": "opts"
+      },
+      {
+        "function": "__should_skip",
+        "name": "opts"
+      },
+      {
+        "function": "__step_is_read_only",
         "name": "opts"
       },
       {

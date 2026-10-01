@@ -11,7 +11,8 @@ use super::*;
 use crate::TypeCheckFacts;
 
 const BUILDERS: &str = r#"
-fn boolean(instructions: string) -> {kind: "boolean", instructions: string} {
+fn boolean(instructions: string, criteria: {true: string, false: string}? = nil) -> {kind: "boolean", instructions: string, criteria?: {true: string, false: string}} {
+  if criteria != nil { return {kind: "boolean", instructions: instructions, criteria: criteria} }
   return {kind: "boolean", instructions: instructions}
 }
 fn choice(
@@ -67,6 +68,37 @@ fn errors(facts: &TypeCheckFacts) -> Vec<Code> {
 }
 
 #[test]
+fn runtime_evaluation_admits_typed_vocabulary_and_preserves_outcome_obligations() {
+    let body = r#"
+      fn decide(llm: HarnessLlm, names: dict<string, string>, provider: string) {
+        const policy = {backend: "structured_llm", provider: provider, model: "dynamic",
+          effort: "low", temperature: 0.0, threshold: 0.0,
+          evaluation_cost_limit: 0.1, run_cost_limit: 1.0}
+        return llm.evaluate_request("tools.v1", {text: "example"},
+          {tool: choice("Which tool?", names)}, policy)
+      }
+    "#;
+    let checked = facts(body);
+    assert!(errors(&checked).is_empty(), "{:?}", checked.diagnostics);
+    assert_eq!(checked.predicate_sites.len(), 1);
+    assert_eq!(
+        checked.predicate_sites[0].kind,
+        crate::PredicateSiteKind::RuntimeEvaluation
+    );
+    assert!(checked.predicate_sites[0].questions.is_empty());
+    assert!(checked.predicate_sites[0].model_route.is_none());
+    let unused = facts(
+        r#"const unused = harness.llm.evaluate_request("runtime.v1", {text: "x"},
+        {safe: boolean("Safe?")}, policy)"#,
+    );
+    assert!(
+        errors(&unused).contains(&Code::PredicateOutcomeUnused),
+        "{:?}",
+        unused.diagnostics
+    );
+}
+
+#[test]
 fn batched_evaluation_records_every_question_and_its_labels() {
     let facts = facts(&format!(
         r#"
@@ -101,6 +133,26 @@ fn batched_evaluation_records_every_question_and_its_labels() {
         site.questions[2].instructions,
         "Safe to run without asking?"
     );
+}
+
+#[test]
+fn boolean_builders_accept_only_closed_yes_no_criteria() {
+    for (criteria, rejected) in [
+        ("{true: \"Only reads\", false: \"Mutates files\"}", false),
+        ("{true: \"Only reads\"}", true),
+        ("{true: \"Only reads\", false: 1}", true),
+    ] {
+        let checked = facts(&format!(
+            "const answers = {}\nmatch answers.kind {{ _ -> {{ harness.stdio.println(answers.receipt) }} }}",
+            call(&format!("{{safe: boolean(\"Safe?\", {criteria})}}"))
+        ));
+        assert_eq!(
+            !errors(&checked).is_empty(),
+            rejected,
+            "{criteria}: {:?}",
+            checked.diagnostics
+        );
+    }
 }
 
 #[test]
@@ -175,6 +227,30 @@ fn a_score_answer_level_is_the_literal_union_of_its_declared_levels() {
         call(QUESTIONS)
     ));
     assert!(errors(&facts).is_empty(), "{:?}", facts.diagnostics);
+}
+
+#[test]
+fn answer_comparisons_reject_undeclared_labels_in_either_operand() {
+    for (expression, rejected) in [
+        ("answers.value.disposition.choice == \"keep\"", false),
+        ("\"drop\" != answers.value.disposition.choice", false),
+        ("answers.value.disposition.choice == \"delete\"", true),
+        ("\"delete\" != answers.value.disposition.choice", true),
+        ("answers.value.risk.level == \"catastrophic\"", true),
+    ] {
+        let checked = facts(&format!(
+            "const answers = {}\nmatch answers.kind {{\n\
+             \"answered\" -> {{ harness.stdio.println({expression}) }}\n\
+             _ -> {{ harness.stdio.println(answers.receipt) }}\n}}",
+            call(QUESTIONS)
+        ));
+        assert_eq!(
+            errors(&checked).contains(&Code::InvalidBinaryOperator),
+            rejected,
+            "{expression}: {:?}",
+            checked.diagnostics
+        );
+    }
 }
 
 #[test]

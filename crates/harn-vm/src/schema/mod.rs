@@ -143,15 +143,7 @@ pub fn validate_value_against_canonical_schema(
     }
 }
 
-pub(crate) const BYTES_B64_TAG: &str = "$bytes_b64";
-
-pub(crate) fn tagged_bytes_json(bytes: &[u8]) -> serde_json::Value {
-    use base64::Engine;
-
-    serde_json::json!({
-        BYTES_B64_TAG: base64::engine::general_purpose::STANDARD.encode(bytes),
-    })
-}
+pub(crate) use crate::value::json::{tagged_bytes_json, BYTES_B64_TAG};
 
 pub(super) fn vm_value_to_serde_json(value: &VmValue) -> serde_json::Value {
     match value {

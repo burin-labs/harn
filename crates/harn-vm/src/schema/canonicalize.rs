@@ -1,3 +1,4 @@
+pub use crate::value::json::json_to_vm_value;
 use crate::value::VmDictExt;
 use std::collections::BTreeSet;
 
@@ -799,29 +800,4 @@ fn json_type_for_harn(type_name: &str) -> serde_json::Value {
         other => other,
     };
     serde_json::Value::String(json_type.to_string())
-}
-
-pub fn json_to_vm_value(jv: &serde_json::Value) -> VmValue {
-    match jv {
-        serde_json::Value::Null => VmValue::Nil,
-        serde_json::Value::Bool(b) => VmValue::Bool(*b),
-        serde_json::Value::Number(n) => {
-            if let Some(i) = n.as_i64() {
-                VmValue::Int(i)
-            } else {
-                VmValue::Float(n.as_f64().unwrap_or(0.0))
-            }
-        }
-        serde_json::Value::String(s) => VmValue::String(arcstr::ArcStr::from(s.as_str())),
-        serde_json::Value::Array(arr) => VmValue::List(std::sync::Arc::new(
-            arr.iter().map(json_to_vm_value).collect(),
-        )),
-        serde_json::Value::Object(map) => {
-            let mut m = crate::value::DictMap::new();
-            for (k, v) in map {
-                m.insert(crate::value::intern_key(k), json_to_vm_value(v));
-            }
-            VmValue::dict(m)
-        }
-    }
 }

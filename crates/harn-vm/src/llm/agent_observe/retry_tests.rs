@@ -1423,3 +1423,22 @@ fn the_typed_retry_after_field_is_read_before_any_message() {
     );
     assert_eq!(extract_retry_after_ms(&err), Some(2000));
 }
+
+/// The retry decision itself, on the exact value the stream reader throws.
+/// A malformed generated channel is resampled; a request fault is not.
+#[test]
+fn malformed_generated_channel_is_retried_and_request_fault_is_not() {
+    let malformed = crate::llm::api::classify_provider_stream_error(
+        "fireworks",
+        r#"{"error":{"message":"Invalid channel: tool_call","type":"invalid_request_error","code":"invalid_request_error"}}"#,
+        false,
+    );
+    assert!(is_retryable_llm_error(&malformed));
+
+    let request_fault = crate::llm::api::classify_provider_stream_error(
+        "fireworks",
+        r#"{"error":{"message":"Unknown parameter: foo","type":"invalid_request_error","code":"invalid_request_error"}}"#,
+        false,
+    );
+    assert!(!is_retryable_llm_error(&request_fault));
+}

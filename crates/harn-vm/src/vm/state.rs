@@ -331,6 +331,7 @@ pub struct Vm {
     pub(crate) owns_execution: bool,
     /// Exact source path recorder shared by this VM tree when explicitly enabled.
     pub(crate) flight_recorder: Option<Arc<crate::flight_recorder::FlightRecorder>>,
+    pub(crate) evaluation: Box<crate::llm::decision::receipt::EvaluationExecutionState>,
     /// Root-only configuration used to create a fresh recorder per execution.
     pub(crate) flight_recorder_max_events: Option<usize>,
     /// Host-side agent-loop state owned by this VM tree.
@@ -426,8 +427,8 @@ pub struct Vm {
     /// Authority provenance used for the next root module graph. This can only
     /// move from ordinary user code to trusted host dispatch before loading.
     pub(crate) module_provenance: crate::module_artifact::ModuleProvenance,
-    /// Optional timing recorder shared by this VM execution tree.
-    pub(crate) module_phase_recorder: Option<super::ModulePhaseRecorder>,
+    /// Optional observations shared by this VM execution tree.
+    pub(super) recorders: Option<Box<super::work::VmRecorders>>,
     /// Successful module loads staged by an isolated graph transaction.
     /// `None` records immediately; `Some` commits the count with the graph.
     pub(crate) staged_module_load_count: Option<usize>,
@@ -620,7 +621,7 @@ impl VmBaseline {
             prepared_module_cache: self.prepared_module_cache.clone(),
             prepared_module_validation: crate::prepared_module::PreparedModuleValidation::default(),
             module_provenance: self.module_provenance,
-            module_phase_recorder: None,
+            recorders: None,
             staged_module_load_count: None,
             lazy_callable_modules: Arc::new(crate::value::VmMutex::new(BTreeMap::new())),
             source_cache: Arc::clone(&self.source_cache),
@@ -630,6 +631,7 @@ impl VmBaseline {
             source_text: self.source_text.clone(),
             coverage: crate::coverage::for_primary(self.source_file.as_deref()),
             flight_recorder: None,
+            evaluation: Default::default(),
             flight_recorder_max_events: None,
             bridge: None,
             denied_builtins: Arc::clone(&self.denied_builtins),
@@ -896,7 +898,7 @@ impl Vm {
             prepared_module_cache: crate::PreparedModuleCache::default(),
             prepared_module_validation: crate::prepared_module::PreparedModuleValidation::default(),
             module_provenance: crate::module_artifact::ModuleProvenance::User,
-            module_phase_recorder: None,
+            recorders: None,
             staged_module_load_count: None,
             lazy_callable_modules: Arc::new(crate::value::VmMutex::new(BTreeMap::new())),
             source_cache: Arc::new(BTreeMap::new()),
@@ -906,6 +908,7 @@ impl Vm {
             source_text: None,
             coverage: crate::coverage::for_primary(None),
             flight_recorder: None,
+            evaluation: Default::default(),
             flight_recorder_max_events: None,
             bridge: None,
             denied_builtins: Arc::new(HashSet::new()),
@@ -1182,7 +1185,7 @@ impl Vm {
             prepared_module_cache: self.prepared_module_cache.clone(),
             prepared_module_validation: self.prepared_module_validation.clone(),
             module_provenance: self.module_provenance,
-            module_phase_recorder: self.module_phase_recorder.clone(),
+            recorders: self.recorders.clone(),
             staged_module_load_count: None,
             lazy_callable_modules: Arc::clone(&self.lazy_callable_modules),
             source_cache: Arc::clone(&self.source_cache),
@@ -1192,6 +1195,7 @@ impl Vm {
             source_text: self.source_text.clone(),
             coverage: crate::coverage::for_primary(self.source_file.as_deref()),
             flight_recorder: self.flight_recorder.clone(),
+            evaluation: self.evaluation.clone(),
             flight_recorder_max_events: None,
             bridge: self.bridge.clone(),
             denied_builtins: Arc::clone(&self.denied_builtins),

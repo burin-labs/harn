@@ -11,7 +11,7 @@ use uuid::Uuid;
 use crate::test_runner::{RunOptions, TestRunSession, TestRunSessionStats, TestShard};
 
 const PROTOCOL_VERSION: &str = "1";
-const TEST_RUN_SCHEMA_VERSION: u32 = 3;
+const TEST_RUN_SCHEMA_VERSION: u32 = 5;
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -369,7 +369,7 @@ mod tests {
     }
 
     #[test]
-    fn pins_test_run_response_schema_v3() {
+    fn pins_test_run_response_schema_v5() {
         let response = TestRunResponse {
             schema_version: TEST_RUN_SCHEMA_VERSION,
             worker_id: "worker-1".to_string(),
@@ -391,6 +391,7 @@ mod tests {
                     name: "test_timeout".to_string(),
                     file: "test_timeout.harn".to_string(),
                     passed: false,
+                    skip_reason: None,
                     error: Some("timed out".to_string()),
                     captured_output: Some("[harn] probe\n".to_string()),
                     timeout: Some(crate::test_runner::TestTimeout {
@@ -398,6 +399,7 @@ mod tests {
                         limit_ms: 10,
                     }),
                     duration_ms: 12,
+                    work: Some(Box::new(harn_vm::VmWork { vm_steps: 5 })),
                     phases: Some(crate::test_runner::PhaseTimings {
                         setup_ms: 1,
                         compile_ms: 1,
@@ -410,6 +412,7 @@ mod tests {
                 }],
                 passed: 0,
                 failed: 1,
+                skipped: 0,
                 total: 1,
                 duration_ms: 13,
                 timing: crate::test_timing::DurationSummary::from_samples(&[12]),
@@ -434,7 +437,7 @@ mod tests {
         assert_eq!(
             serde_json::to_value(response).unwrap(),
             json!({
-                "schema_version": 3,
+                "schema_version": 5,
                 "worker_id": "worker-1",
                 "process_id": 42,
                 "run_count": 3,
@@ -457,6 +460,7 @@ mod tests {
                         "captured_output": "[harn] probe\n",
                         "timeout": {"phase": "execute", "limit_ms": 10},
                         "duration_ms": 12,
+                        "work": {"vm_steps": 5},
                         "phases": {
                             "setup_ms": 1, "compile_ms": 1,
                             "execute_ms": 10, "teardown_ms": 0,
@@ -466,7 +470,7 @@ mod tests {
                             }
                         }
                     }],
-                    "passed": 0, "failed": 1, "total": 1, "duration_ms": 13,
+                    "passed": 0, "failed": 1, "skipped": 0, "total": 1, "duration_ms": 13,
                     "timing": {
                         "sample_count": 1, "average_ms": 12,
                         "p50_ms": 12, "p90_ms": 12, "p95_ms": 12, "p99_ms": 12

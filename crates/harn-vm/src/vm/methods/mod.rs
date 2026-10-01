@@ -1,8 +1,6 @@
 mod dict;
 mod dispatch;
 mod generator;
-mod harness;
-mod harness_verdict;
 mod iter;
 mod list;
 mod number;

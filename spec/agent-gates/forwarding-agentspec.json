@@ -506,13 +506,20 @@
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/loop.harn",
-    "expression": "agent_session_init(harness.agent, message, effective_system, opts)",
-    "owner": "agent_session_init",
-    "evidence": "Consumer agent_session_init.opts in crates/harn-stdlib/src/stdlib/agent/state.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "expression": "__dict_omit(opts, [\"context_profile\"])",
+    "owner": "__dict_omit",
+    "evidence": "The dictionary projection removes the loop-owned context profile before session initialization without interpreting option values."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/loop.harn",
+    "expression": "__agent_primary_system_text(harness.agent, initialized_session, opts)",
+    "owner": "__agent_primary_system_text",
+    "evidence": "Consumer __agent_primary_system_text.opts in crates/harn-stdlib/src/stdlib/agent/preflight.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
     "consumers": [
       {
         "scope": "AgentSpec",
-        "function": "agent_session_init",
+        "function": "__agent_primary_system_text",
         "parameter": "opts"
       }
     ]
@@ -1902,7 +1909,7 @@
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/preflight.harn",
-    "expression": "__agent_context_profile_fragments(opts)",
+    "expression": "__agent_context_profile_fragments(harness.agent, session, opts)",
     "owner": "__agent_context_profile_fragments",
     "evidence": "Consumer __agent_context_profile_fragments.opts in crates/harn-stdlib/src/stdlib/agent/preflight.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
     "consumers": [

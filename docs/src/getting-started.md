@@ -127,7 +127,7 @@ To use a cloud provider, set its API key in your shell and test the route:
 
 ```bash
 export ANTHROPIC_API_KEY=your-key
-harn models test claude-sonnet-5 --provider anthropic
+harn models test claude-sonnet-5-5 --provider anthropic
 ```
 
 `harn models test` sends one small prompt and reports timing, tokens, and cost.
@@ -137,7 +137,7 @@ it checks the provider path without requiring a Harn program.
 To use the same provider in code, change the options in the example to:
 
 ```harn
-{ provider: "anthropic", model: "claude-sonnet-5" }
+{ provider: "anthropic", model: "claude-sonnet-5-5" }
 ```
 
 Do not copy API keys into Harn source or commit them. See [Configure a

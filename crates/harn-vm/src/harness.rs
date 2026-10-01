@@ -345,7 +345,7 @@ impl Clock for HarnessClockRouter {
 
 /// Shared, refcounted state backing every sub-handle of a single `Harness`.
 ///
-/// Method implementations (in `crate::vm::methods::harness`) borrow this to
+/// Method implementations (in `crate::harness_methods`) borrow this to
 /// reach the concrete OS-backed primitives. Wrapped in `Arc` so handles are
 /// `Send + Sync` for VM contexts that move work onto other tasks.
 pub struct HarnessInner {
@@ -1175,7 +1175,7 @@ pub struct HarnessLlm {
 /// bound by the dispatching host (see [`crate::harness_tenant`]). No
 /// host state — the methods consult a thread-local stack — but the
 /// handle still rides the shared `Arc<HarnessInner>` so null/mock-mode
-/// gating in [`crate::vm::methods::harness`] applies uniformly.
+/// gating in [`crate::harness_methods`] applies uniformly.
 #[derive(Debug, Clone)]
 pub struct HarnessTenant {
     inner: Arc<HarnessInner>,
@@ -1187,7 +1187,7 @@ pub struct HarnessTenant {
 /// [`crate::harness_auth`]). Like [`HarnessTenant`] it holds no host
 /// state — the methods consult a thread-local stack — but rides the
 /// shared `Arc<HarnessInner>` so null/mock-mode gating in
-/// [`crate::vm::methods::harness`] applies uniformly.
+/// [`crate::harness_methods`] applies uniformly.
 #[derive(Debug, Clone)]
 pub struct HarnessAuth {
     inner: Arc<HarnessInner>,

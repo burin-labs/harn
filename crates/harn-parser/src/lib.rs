@@ -187,6 +187,7 @@ pub fn static_signature_names() -> impl Iterator<Item = &'static str> {
 /// Error from a source processing pipeline stage. Wraps the inner error
 /// types so callers can dispatch on the failing stage.
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum PipelineError {
     Lex(harn_lexer::LexerError),
     Parse(ParserError),

@@ -145,10 +145,15 @@ impl OllamaRuntimeSettings {
     }
 
     pub fn from_env_overrides_and_model(overrides: Option<&Value>, model: Option<&str>) -> Self {
+        Self::for_route("ollama", model, overrides)
+    }
+
+    /// Effective request settings for one concrete provider/model route.
+    pub fn for_route(provider: &str, model: Option<&str>, overrides: Option<&Value>) -> Self {
         Self {
             num_ctx: num_ctx_from_overrides(overrides)
                 .or_else(num_ctx_from_env)
-                .or_else(|| num_ctx_from_model_catalog(model))
+                .or_else(|| num_ctx_from_model_catalog(provider, model))
                 .unwrap_or(OLLAMA_DEFAULT_NUM_CTX),
             keep_alive: keep_alive_from_overrides(overrides)
                 .or_else(keep_alive_from_env)
@@ -215,16 +220,19 @@ pub async fn warm_ollama_model_with_settings(
     }
 }
 
-pub(crate) fn apply_ollama_runtime_settings(body: &mut Value, overrides: Option<&Value>) {
+pub(crate) fn apply_ollama_runtime_settings(
+    body: &mut Value,
+    provider: &str,
+    model: &str,
+    overrides: Option<&Value>,
+) {
     apply_non_runtime_ollama_overrides(body, overrides);
+    let settings = OllamaRuntimeSettings::for_route(provider, Some(model), overrides);
 
     let explicit_num_ctx = num_ctx_from_overrides(overrides);
     if explicit_num_ctx.is_some() || body.pointer("/options/num_ctx").is_none() {
-        let num_ctx = explicit_num_ctx
-            .or_else(num_ctx_from_env)
-            .or_else(|| num_ctx_from_model_catalog(body.get("model").and_then(Value::as_str)))
-            .unwrap_or(OLLAMA_DEFAULT_NUM_CTX);
-        ensure_options_object(body).insert("num_ctx".to_string(), serde_json::json!(num_ctx));
+        ensure_options_object(body)
+            .insert("num_ctx".to_string(), serde_json::json!(settings.num_ctx));
     }
 
     let explicit_keep_alive = keep_alive_from_overrides(overrides);
@@ -261,12 +269,12 @@ fn num_ctx_from_env() -> Option<u64> {
     })
 }
 
-fn num_ctx_from_model_catalog(model: Option<&str>) -> Option<u64> {
+fn num_ctx_from_model_catalog(provider: &str, model: Option<&str>) -> Option<u64> {
     let model = model?.trim();
     if model.is_empty() {
         return None;
     }
-    let entry = crate::llm_config::model_catalog_entry(model)?;
+    let entry = crate::llm_config::model_catalog_entry_for_route(provider, model)?;
     entry
         .runtime_context_window
         .filter(|window| *window > 0)
@@ -382,7 +390,20 @@ fn apply_non_runtime_ollama_overrides(body: &mut Value, overrides: Option<&Value
 }
 
 pub async fn ollama_readiness(options: OllamaReadinessOptions) -> OllamaReadinessResult {
-    let base_url = options.base_url.unwrap_or_else(default_ollama_base_url);
+    ollama_readiness_for_provider("ollama", options).await
+}
+
+/// Probe and warm the selected Ollama-compatible provider using its own settings.
+pub async fn ollama_readiness_for_provider(
+    provider: &str,
+    options: OllamaReadinessOptions,
+) -> OllamaReadinessResult {
+    let base_url = options.base_url.unwrap_or_else(|| {
+        crate::llm_config::provider_config(provider)
+            .as_ref()
+            .map(crate::llm_config::resolve_base_url)
+            .unwrap_or_else(default_ollama_base_url)
+    });
     let mut result = OllamaReadinessResult::probing(base_url.clone(), options.model.clone());
 
     let tags_url = match ollama_endpoint_url(&base_url, "/api/tags") {
@@ -454,7 +475,7 @@ pub async fn ollama_readiness(options: OllamaReadinessOptions) -> OllamaReadines
     };
     result.matched_model = Some(matched.clone());
 
-    let settings = OllamaRuntimeSettings::from_env_overrides_and_model(None, Some(&matched));
+    let settings = OllamaRuntimeSettings::for_route(provider, Some(&options.model), None);
     let keep_alive = options
         .keep_alive
         .clone()
@@ -470,7 +491,10 @@ pub async fn ollama_readiness(options: OllamaReadinessOptions) -> OllamaReadines
         let warm = ollama_warmup(
             &base_url,
             &matched,
-            Some(keep_alive),
+            &OllamaRuntimeSettings {
+                num_ctx: settings.num_ctx,
+                keep_alive,
+            },
             options.warmup_timeout,
         )
         .await;
@@ -670,7 +694,7 @@ fn describe_context_drift(expected: u64, actual: u64) -> String {
 async fn ollama_warmup(
     base_url: &str,
     model: &str,
-    keep_alive: Option<serde_json::Value>,
+    settings: &OllamaRuntimeSettings,
     timeout: Duration,
 ) -> OllamaWarmupResult {
     let url = match ollama_endpoint_url(base_url, "/api/generate") {
@@ -693,11 +717,7 @@ async fn ollama_warmup(
     // context, and a subsequent chat request asking for a smaller
     // num_ctx cannot shrink an already-loaded runner — see the
     // "Effective vs. loaded context" section of docs/src/llm/providers.md.
-    let settings = OllamaRuntimeSettings::from_env_overrides_and_model(None, Some(model));
-    let mut body = settings.warmup_body(model);
-    if let Some(value) = keep_alive {
-        body["keep_alive"] = value;
-    }
+    let body = settings.warmup_body(model);
 
     let client = crate::llm::blocking_client_for_base_url(base_url);
     let response = match client
@@ -914,7 +934,7 @@ mod tests {
             "options": {"top_k": 20, "num_ctx": 999},
             "think": true,
         });
-        apply_ollama_runtime_settings(&mut body, Some(&overrides));
+        apply_ollama_runtime_settings(&mut body, "ollama", "", Some(&overrides));
         assert_eq!(body["options"]["num_ctx"], serde_json::json!(65536));
         assert_eq!(body["options"]["top_k"], serde_json::json!(20));
         assert_eq!(body["options"]["temperature"], serde_json::json!(0.1));
@@ -954,7 +974,7 @@ mod tests {
                 performance: None,
                 architecture: None,
                 local_memory: None,
-                runtime_context_window: Some(32_768),
+                runtime_context_window: Some(49_152),
                 stream_timeout: None,
                 capabilities: vec![],
                 pricing: None,
@@ -988,8 +1008,8 @@ mod tests {
             "model": "qwen-test",
             "options": {"temperature": 0.1}
         });
-        apply_ollama_runtime_settings(&mut body, None);
-        assert_eq!(body["options"]["num_ctx"], serde_json::json!(32768));
+        apply_ollama_runtime_settings(&mut body, "ollama", "qwen-test", None);
+        assert_eq!(body["options"]["num_ctx"], serde_json::json!(49152));
         assert_eq!(body["options"]["temperature"], serde_json::json!(0.1));
 
         crate::llm_config::clear_user_overrides();

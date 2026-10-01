@@ -49,7 +49,7 @@ async fn wait_for_log_event(
         }
     }
 
-    tokio::time::timeout(StdDuration::from_secs(5), async {
+    harn_clock::test_support::within("matching event", async {
         loop {
             let Some(received) = stream.next().await else {
                 panic!("event stream ended before matching event");
@@ -61,7 +61,6 @@ async fn wait_for_log_event(
         }
     })
     .await
-    .expect("matching event")
 }
 
 async fn wait_for_attempt(
@@ -505,7 +504,7 @@ pub fn scan(harness: Harness, event: TriggerEvent) -> dict {
                 .await
                 .expect("enqueue job");
 
-            let response = tokio::time::timeout(StdDuration::from_secs(5), async {
+            let response = harn_clock::test_support::within("worker response", async {
                 loop {
                     let Some(received) = responses.next().await else {
                         panic!("response stream ended");
@@ -518,8 +517,7 @@ pub fn scan(harness: Harness, event: TriggerEvent) -> dict {
                         .expect("response record");
                 }
             })
-            .await
-            .expect("worker response");
+            .await;
 
             let outcome = response.outcome.expect("dispatch outcome");
             assert_eq!(response.job_event_id, own.job_event_id);

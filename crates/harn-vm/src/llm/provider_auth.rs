@@ -14,6 +14,12 @@ pub enum ProviderCredentialStatus {
     /// The credential is in a store that would only answer through a system
     /// dialog (a locked macOS Keychain) that this process does not show.
     NeedsUserApproval,
+    /// A platform-managed provider needs a region and none resolves without
+    /// the network.
+    RegionUnconfigured,
+    /// A platform-managed provider has no credential source discoverable
+    /// without the network.
+    CredentialsUnconfigured,
 }
 
 impl ProviderCredentialStatus {
@@ -24,6 +30,17 @@ impl ProviderCredentialStatus {
             Self::NotRequired => "not_required",
             Self::Deferred => "deferred",
             Self::NeedsUserApproval => "needs_user_approval",
+            Self::RegionUnconfigured => "region_unconfigured",
+            Self::CredentialsUnconfigured => "credentials_unconfigured",
+        }
+    }
+}
+
+impl From<super::providers::PlatformPrerequisiteGap> for ProviderCredentialStatus {
+    fn from(gap: super::providers::PlatformPrerequisiteGap) -> Self {
+        match gap {
+            super::providers::PlatformPrerequisiteGap::Region => Self::RegionUnconfigured,
+            super::providers::PlatformPrerequisiteGap::Credentials => Self::CredentialsUnconfigured,
         }
     }
 }
@@ -77,6 +94,8 @@ enum ResolvedProviderCredential {
     Missing,
     NotRequired,
     Deferred,
+    /// Platform-managed, and its client's offline prerequisites do not resolve.
+    PlatformUnconfigured(super::providers::PlatformPrerequisiteGap),
     ResolutionError(VmError),
 }
 
@@ -146,7 +165,10 @@ fn resolve_provider_auth_with_definition(
         ResolvedProviderCredential::NotRequired
     } else if let Some(definition) = definition {
         if definition.is_credential_resolution_platform_managed() {
-            ResolvedProviderCredential::Deferred
+            match super::providers::platform_offline_prerequisites(provider) {
+                Ok(()) => ResolvedProviderCredential::Deferred,
+                Err(gap) => ResolvedProviderCredential::PlatformUnconfigured(gap),
+            }
         } else if definition.auth_style == "none"
             || matches!(definition.auth_env, llm_config::AuthEnv::None)
         {
@@ -169,6 +191,7 @@ fn resolve_provider_auth_with_definition(
         }
         ResolvedProviderCredential::NotRequired => (true, ProviderCredentialStatus::NotRequired),
         ResolvedProviderCredential::Deferred => (true, ProviderCredentialStatus::Deferred),
+        ResolvedProviderCredential::PlatformUnconfigured(gap) => (false, (*gap).into()),
     };
     ResolvedProviderAuth {
         status: ProviderAuthStatus {
@@ -266,9 +289,13 @@ fn resolve_api_key_with_definition(
         .credential
     {
         ResolvedProviderCredential::Key(api_key) => Ok(api_key),
-        ResolvedProviderCredential::NotRequired | ResolvedProviderCredential::Deferred => {
-            Ok(String::new())
-        }
+        // A platform-managed client still owns the live answer: its chain also
+        // reaches sources only the network can (instance metadata), and it
+        // raises its own typed error when nothing resolves. Availability is
+        // what reads the offline gap; an explicit dispatch is not refused here.
+        ResolvedProviderCredential::NotRequired
+        | ResolvedProviderCredential::Deferred
+        | ResolvedProviderCredential::PlatformUnconfigured(_) => Ok(String::new()),
         ResolvedProviderCredential::ResolutionError(error) => Err(error),
         // Presence reads only; a value read never produces either.
         ResolvedProviderCredential::Present | ResolvedProviderCredential::NeedsUserApproval => {
@@ -561,6 +588,9 @@ mod tests {
         let _azure_key = ScopedEnv::unset("AZURE_OPENAI_API_KEY");
         let _azure_token = ScopedEnv::unset("AZURE_OPENAI_AD_TOKEN");
         let _azure_bearer = ScopedEnv::unset("AZURE_OPENAI_BEARER_TOKEN");
+        let _aws_region = ScopedEnv::set("AWS_REGION", "us-east-1");
+        let _aws_key = ScopedEnv::set("AWS_ACCESS_KEY_ID", "AKIDEXAMPLE");
+        let _aws_secret = ScopedEnv::set("AWS_SECRET_ACCESS_KEY", "example-secret");
 
         assert_eq!(
             provider_auth_status("anthropic").credential_status,
@@ -581,6 +611,68 @@ mod tests {
         assert_eq!(resolve_api_key("bedrock").unwrap(), "");
         assert_eq!(resolve_api_key("vertex").unwrap(), "");
         assert!(resolve_api_key("azure_openai").is_err());
+    }
+
+    #[test]
+    fn bedrock_is_unavailable_until_its_offline_prerequisites_resolve() {
+        let _guard = crate::llm::env_guard();
+        let mut env = crate::llm::test_env::UnconfiguredProviderEnv::new();
+
+        let status = provider_auth_status("bedrock");
+        assert!(!status.available, "{status:?}");
+        assert_eq!(status.credential_status.as_str(), "region_unconfigured");
+
+        env.set("AWS_REGION", "us-east-1");
+        let status = provider_auth_status("bedrock");
+        assert!(!status.available, "{status:?}");
+        assert_eq!(
+            status.credential_status.as_str(),
+            "credentials_unconfigured"
+        );
+
+        // Negative control: a region and a key pair make it eligible again.
+        env.set("AWS_ACCESS_KEY_ID", "AKIDEXAMPLE");
+        env.set("AWS_SECRET_ACCESS_KEY", "example-secret");
+        let status = provider_auth_status("bedrock");
+        assert!(status.available, "{status:?}");
+        assert_eq!(status.credential_status.as_str(), "deferred");
+    }
+
+    #[test]
+    fn bedrock_prerequisites_resolve_from_shared_files_and_container_env() {
+        let _guard = crate::llm::env_guard();
+        let mut env = crate::llm::test_env::UnconfiguredProviderEnv::new();
+        let dir = env.aws_dir().to_path_buf();
+        std::fs::write(
+            dir.join("config"),
+            "[profile work]\nregion = eu-west-1\n[default]\noutput = json\n",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("credentials"),
+            "[work]\naws_access_key_id = AKIDEXAMPLE\naws_secret_access_key = example\n",
+        )
+        .unwrap();
+
+        // The default profile has neither a region nor a credential.
+        assert_eq!(
+            provider_auth_status("bedrock").credential_status.as_str(),
+            "region_unconfigured"
+        );
+        env.set("AWS_PROFILE", "work");
+        assert!(provider_auth_status("bedrock").available);
+
+        // A container credential endpoint is a credential source on its own.
+        std::fs::write(dir.join("credentials"), "").unwrap();
+        assert_eq!(
+            provider_auth_status("bedrock").credential_status.as_str(),
+            "credentials_unconfigured"
+        );
+        env.set(
+            "AWS_CONTAINER_CREDENTIALS_RELATIVE_URI",
+            "/v2/credentials/id",
+        );
+        assert!(provider_auth_status("bedrock").available);
     }
 
     #[test]
@@ -802,6 +894,7 @@ mod tests {
                 },
                 expose_as_env: Some("ANTHROPIC_API_KEY".to_string()),
                 for_command: None,
+                expose_to: Default::default(),
             }],
             &|name| std::env::var(name).ok(),
         )
@@ -879,6 +972,7 @@ mod tests {
                 },
                 expose_as_env: Some("ANTHROPIC_API_KEY".to_string()),
                 for_command: None,
+                expose_to: Default::default(),
             }],
             &|name| std::env::var(name).ok(),
         )
@@ -998,6 +1092,9 @@ mod tests {
         let _vertex_token = ScopedEnv::unset("VERTEX_AI_ACCESS_TOKEN");
         let _google_token = ScopedEnv::unset("GOOGLE_OAUTH_ACCESS_TOKEN");
         let _google_credentials = ScopedEnv::unset("GOOGLE_APPLICATION_CREDENTIALS");
+        let _aws_region = ScopedEnv::set("AWS_REGION", "us-east-1");
+        let _aws_key = ScopedEnv::set("AWS_ACCESS_KEY_ID", "AKIDEXAMPLE");
+        let _aws_secret = ScopedEnv::set("AWS_SECRET_ACCESS_KEY", "example-secret");
 
         let available = available_provider_names();
         assert!(available.iter().any(|name| name == "bedrock"));

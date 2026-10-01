@@ -59,6 +59,7 @@ async fn host_agent_session_init(
         system.clone(),
         ctx.execution_id(),
         ctx.task_id(),
+        &ctx,
     )
     .await?;
     let has_canonical_history = initialized.has_canonical_history;
@@ -93,6 +94,7 @@ async fn host_agent_session_init(
                 &prompt_session_id,
                 "blocked",
                 "user_prompt_submit_blocked",
+                Some(&ctx),
             )
             .await?;
             let blocked = build_user_prompt_block_result(&prompt_session_id, &message, &reason);
@@ -113,6 +115,7 @@ async fn host_agent_session_init(
                     &prompt_session_id,
                     "blocked",
                     "autonomy_budget_denied",
+                    Some(&ctx),
                 )
                 .await?;
                 return Ok(SessionInitOutcome::Admission(agent_init_control_done(
@@ -126,8 +129,27 @@ async fn host_agent_session_init(
         };
 
         let resolved = prompt_session_id.clone();
-        let session_system_prompt =
-            crate::llm::helpers::compose_system_prompt(system.clone(), Some(&opts_map))?;
+        // Reentry with no new system shape keeps the previously assembled
+        // prompt. Otherwise adding the runtime directive nonce below would
+        // replace the saved primary prompt with the nonce alone.
+        let no_option_system = match opts_map.get("system") {
+            None | Some(VmValue::Nil) => true,
+            Some(VmValue::String(value)) => value.trim().is_empty(),
+            _ => false,
+        };
+        let no_new_system = system
+            .as_deref()
+            .is_none_or(|value| value.trim().is_empty())
+            && no_option_system;
+        let retained_system = if no_new_system {
+            crate::agent_sessions::system_prompt(&resolved)
+        } else {
+            None
+        };
+        let session_system_prompt = match retained_system {
+            Some(saved) => Some(saved),
+            None => crate::llm::helpers::compose_system_prompt(system.clone(), Some(&opts_map))?,
+        };
         if let Some(system_prompt) = session_system_prompt.as_deref() {
             crate::agent_sessions::record_system_prompt(&resolved, system_prompt)
                 .map_err(VmError::Runtime)?;
@@ -174,13 +196,28 @@ async fn host_agent_session_init(
             crate::agent_sessions::inject_message(&resolved, history_msg)
                 .map_err(VmError::Runtime)?;
         }
-        if !(has_history && message.trim().is_empty()) {
+        let user_content = initial_user_content(&opts_map, &message);
+        let has_user_content = match &user_content {
+            serde_json::Value::String(text) => !text.trim().is_empty(),
+            serde_json::Value::Array(blocks) => !blocks.is_empty(),
+            _ => false,
+        };
+        if !has_history || !message.trim().is_empty() || has_user_content {
             let user_msg = serde_json::json!({
                 "role": "user",
-                "content": initial_user_content(&opts_map, &message),
+                "content": user_content,
             });
             crate::agent_sessions::inject_message(&resolved, json_to_vm(&user_msg))
                 .map_err(VmError::Runtime)?;
+        } else {
+            let omitted = crate::llm::helpers::transcript_event(
+                "agent_user_turn_omitted",
+                "system",
+                "internal",
+                "No user turn was added for an empty continuation",
+                Some(serde_json::json!({"reason": "empty_continuation"})),
+            );
+            crate::agent_sessions::append_event(&resolved, omitted).map_err(VmError::Runtime)?;
         }
 
         // Install the policy only after every fallible synchronous setup step.
@@ -194,6 +231,7 @@ async fn host_agent_session_init(
                     &resolved,
                     "blocked",
                     "nested_policy_denied",
+                    Some(&ctx),
                 )
                 .await?;
                 return Ok(SessionInitOutcome::Admission(agent_init_control_done(
@@ -311,7 +349,7 @@ async fn host_agent_session_init(
             Ok(result)
         }
         Err(error) => {
-            init_rollback.fail().await;
+            init_rollback.fail(Some(&ctx)).await;
             Err(error)
         }
     }
@@ -601,7 +639,7 @@ pub(super) async fn host_agent_session_finalize(
     }
     let recap_store = crate::agent_sessions::journal_store(&session_id);
     let recap_from_event_id = crate::agent_sessions::journal_first_event_id(&session_id);
-    live_transcript_journal::flush_terminal(
+    let phase = live_transcript_journal::flush_terminal(
         &session_id,
         &canonical_status,
         &stop_reason,
@@ -614,6 +652,14 @@ pub(super) async fn host_agent_session_finalize(
         },
     )
     .await?;
+    let visible_text = match &phase {
+        crate::agent_events::AgentTurnPhase::Terminal { reply, .. } => reply.clone(),
+        _ => unreachable!("terminal persistence returns a terminal phase"),
+    };
+    let terminal_phase = crate::agent_events::AgentEvent::TurnPhaseChanged {
+        session_id: session_id.clone(),
+        phase,
+    };
     let recap = if let Some(store) = recap_store {
         match crate::session_recap::query_session_recap(
             &store,
@@ -646,6 +692,7 @@ pub(super) async fn host_agent_session_finalize(
             crate::session_recap::SessionRecapUnavailableReason::JournalUnavailable,
         )
     };
+    crate::llm::agent_runtime::emit_agent_event_with_ctx(Some(&ctx), &terminal_phase).await;
     let mut session = finalization.commit();
     permissions::clear_session_grants(&session_id);
     crate::orchestration::clear_approval_policy_repeat_counts(&session_id);
@@ -666,10 +713,6 @@ pub(super) async fn host_agent_session_finalize(
         .as_ref()
         .map(vm_to_json)
         .unwrap_or(serde_json::Value::Null);
-    let visible_text = snapshot
-        .as_ref()
-        .and_then(crate::llm::agent_result_projection::last_assistant_text)
-        .unwrap_or_default();
 
     emit_event(&terminal_outcome.checkpoint(&session_id, &canonical_status, &stop_reason));
     // The trace event log never carried tool or loop-lifecycle facts (#5997),

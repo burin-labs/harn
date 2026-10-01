@@ -234,12 +234,7 @@ pub(crate) fn build_report(
     let snapshot = super::providers::load_source_snapshot()?;
     let notes = load_notes(notes_path)?;
     let empirical = load_empirical(empirical_paths)?;
-    Ok(build_report_from_parts(
-        snapshot,
-        notes_source_label(notes_path),
-        notes,
-        empirical,
-    ))
+    build_report_from_parts(snapshot, notes_source_label(notes_path), notes, empirical)
 }
 
 fn build_report_from_parts(
@@ -247,7 +242,7 @@ fn build_report_from_parts(
     notes_source: String,
     notes: SupportNotesFile,
     empirical: EmpiricalIndex,
-) -> ProviderSupportReport {
+) -> Result<ProviderSupportReport, String> {
     let catalog = &snapshot.catalog;
     let providers_by_id = catalog
         .providers
@@ -301,6 +296,31 @@ fn build_report_from_parts(
         snapshot: &snapshot,
     };
 
+    let unchosen = ids
+        .iter()
+        .filter(|id| {
+            let note = note_by_id.get(*id).copied();
+            let catalog_provider = note
+                .and_then(|entry| entry.catalog_provider.as_deref())
+                .unwrap_or(id.as_str());
+            note.and_then(|entry| entry.recommended_model.as_ref())
+                .is_none()
+                && !catalog.qc_defaults.contains_key(catalog_provider)
+                && models_by_provider
+                    .get(catalog_provider)
+                    .is_some_and(|models| models.iter().any(|model| is_active_chat_route(model)))
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    if !unchosen.is_empty() {
+        return Err(format!(
+            "provider support: {} has cataloged chat routes but no chosen recommendation; \
+             set `recommended_model` in {} or a `qc_defaults` entry",
+            unchosen.join(", "),
+            notes_source
+        ));
+    }
+
     let providers = ids
         .into_iter()
         .map(|id| {
@@ -309,7 +329,7 @@ fn build_report_from_parts(
         })
         .collect();
 
-    ProviderSupportReport {
+    Ok(ProviderSupportReport {
         schema_version: PROVIDER_SUPPORT_SCHEMA_VERSION,
         generated_by: "harn provider catalog support".to_string(),
         sources: ProviderSupportSources {
@@ -320,7 +340,7 @@ fn build_report_from_parts(
         },
         credentials: build_credentials(catalog, &snapshot.config),
         providers,
-    }
+    })
 }
 
 /// Order every catalogued provider the way a reader wants it: the curated
@@ -422,6 +442,7 @@ fn build_entry(
         || provider
             .is_some_and(|provider| provider.features.iter().any(|feature| feature == "batch"));
 
+    let no_chat_route = model_id == "*";
     ProviderSupportEntry {
         id: id.to_string(),
         display_name,
@@ -439,9 +460,15 @@ fn build_entry(
             model: model_id,
             display_name: model.map(|model| model.name.clone()),
             tool_format: recommended_tool_format,
-            harn_options: note
-                .map(|entry| entry.recommended_options.clone())
-                .unwrap_or_else(|| default_options(catalog_provider, model, &caps)),
+            // A note that only pins the model still gets the derived options;
+            // a noted provider with no chat route (TypeSafe) gets none.
+            harn_options: match note {
+                Some(entry) if !entry.recommended_options.is_empty() => {
+                    entry.recommended_options.clone()
+                }
+                Some(_) if no_chat_route => Vec::new(),
+                _ => default_options(catalog_provider, model, &caps),
+            },
         },
         capabilities: SupportCapabilities {
             native_tools: caps.native_tools,
@@ -489,26 +516,13 @@ fn recommended_model_id(
     capability_rows_by_provider: &BTreeMap<String, Vec<ProviderCapabilityMatrixRow>>,
     qc_defaults: &BTreeMap<String, String>,
 ) -> Option<String> {
+    // There is deliberately no "cheapest active route" fallback. It moved a
+    // provider's recommendation whenever a cheaper row was cataloged (a
+    // decision-only route, a tiny model, a tie broken by id order), so a
+    // provider with chat routes must name its choice; `build_report_from_parts`
+    // refuses to render one that does not.
     note.and_then(|entry| entry.recommended_model.clone())
         .or_else(|| qc_defaults.get(provider).cloned())
-        .or_else(|| {
-            models_by_provider
-                .get(provider)
-                .and_then(|models| {
-                    models
-                        .iter()
-                        .filter(|model| {
-                            matches!(&model.deprecation.status, DeprecationStatus::Active)
-                        })
-                        .filter(|model| serves_text(model))
-                        .min_by(|a, b| {
-                            model_price_rank(a)
-                                .cmp(&model_price_rank(b))
-                                .then_with(|| a.id.cmp(&b.id))
-                        })
-                })
-                .map(|model| model.id.clone())
-        })
         .or_else(|| {
             // Last resort: a capability row naming a route that tools work on.
             // Its `model` is a match pattern, not necessarily a model id, and
@@ -533,26 +547,17 @@ fn recommended_model_id(
         })
 }
 
-/// Whether a catalog row is one a reader can send a prompt to.
+/// Whether a catalog row is an active route a reader can send a prompt to.
 ///
 /// The provider-support doc recommends exactly one route per provider, and
-/// every consumer of that field treats it as a chat route. Ranking by price
-/// alone put a decision-only row at the top of the Vercel gateway the moment
-/// one was cataloged: Jev is the cheapest thing there and cannot hold a
-/// conversation. A provider with no text route at all gets no recommendation
-/// rather than its nearest non-text row.
-fn serves_text(model: &CatalogModel) -> bool {
-    model
-        .operations
-        .contains(&harn_vm::llm_config::ModelOperation::TextGeneration)
-}
-
-fn model_price_rank(model: &CatalogModel) -> u64 {
-    model
-        .pricing
-        .as_ref()
-        .map(|pricing| ((pricing.input_per_mtok + pricing.output_per_mtok) * 1000.0) as u64)
-        .unwrap_or(u64::MAX)
+/// every consumer of that field treats it as a chat route. A provider whose
+/// rows are all decision-only (TypeSafe) or all deprecated has no chat route
+/// to recommend, so it needs no chosen recommendation and renders `*`.
+fn is_active_chat_route(model: &CatalogModel) -> bool {
+    matches!(&model.deprecation.status, DeprecationStatus::Active)
+        && model
+            .operations
+            .contains(&harn_vm::llm_config::ModelOperation::TextGeneration)
 }
 
 fn selector_for(provider: &str, model: &str) -> String {
@@ -1218,272 +1223,4 @@ fn check_file(path: &Path, expected: &str) -> Result<(), String> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn default_report_includes_core_recommendations() {
-        let report = build_report(Path::new(DEFAULT_NOTES_PATH), &[]).expect("report");
-        for id in [
-            "anthropic",
-            "openai",
-            "gemini",
-            "mistral",
-            "ollama",
-            "local",
-        ] {
-            assert!(
-                report.providers.iter().any(|entry| entry.id == id),
-                "missing provider support entry {id}"
-            );
-        }
-        let mistral = report
-            .providers
-            .iter()
-            .find(|entry| entry.id == "mistral")
-            .expect("mistral row");
-        assert_eq!(mistral.catalog_provider, "openrouter");
-        assert_eq!(mistral.recommended.model, "mistralai/mistral-small-2603");
-        assert_eq!(mistral.empirical.status, "not_recorded");
-
-        let azure = report
-            .providers
-            .iter()
-            .find(|entry| entry.id == "azure_openai")
-            .expect("azure row");
-        assert_ne!(azure.recommended.model, "*");
-        assert!(azure.capabilities.native_tools);
-        assert!(
-            azure.capabilities.batch_api,
-            "Azure OpenAI should surface Batch API support"
-        );
-
-        let openai = report
-            .providers
-            .iter()
-            .find(|entry| entry.id == "openai")
-            .expect("openai row");
-        assert_eq!(openai.recommended.model, "gpt-5.4-mini");
-        assert!(
-            openai
-                .capabilities
-                .serving_tiers
-                .iter()
-                .any(|tier| tier.id == "flex" && tier.economics == "discounted"),
-            "OpenAI support row should surface synchronous Flex separately from Batch"
-        );
-
-        let gemini = report
-            .providers
-            .iter()
-            .find(|entry| entry.id == "gemini")
-            .expect("gemini row");
-        assert!(
-            gemini
-                .capabilities
-                .serving_tiers
-                .iter()
-                .any(|tier| tier.id == "priority"
-                    && tier.request_value.as_deref() == Some("priority")),
-            "Gemini support row should surface Priority as a synchronous serving tier"
-        );
-    }
-
-    #[test]
-    fn curated_recommendations_do_not_point_at_superseded_models() {
-        let report = build_report(Path::new(DEFAULT_NOTES_PATH), &[]).expect("report");
-        for entry in &report.providers {
-            if entry.recommended.model == "*" || entry.recommended.model.contains('*') {
-                continue;
-            }
-            let model = harn_vm::llm_config::model_catalog_entry(&entry.recommended.model)
-                .unwrap_or_else(|| panic!("{} recommends missing catalog model", entry.id));
-            assert_eq!(
-                model.provider, entry.catalog_provider,
-                "{} recommends {} from provider {}, not {}",
-                entry.id, entry.recommended.model, model.provider, entry.catalog_provider
-            );
-            assert!(
-                model.superseded_by.is_none(),
-                "{} recommends superseded model {} -> {:?}",
-                entry.id,
-                entry.recommended.model,
-                model.superseded_by
-            );
-        }
-    }
-
-    /// A recommended route is a route a reader sends a prompt to, so no
-    /// provider may recommend a row that does not serve text generation, and a
-    /// provider whose whole catalog is decision-only must recommend nothing at
-    /// all rather than fall back to a capability-rule match pattern.
-    ///
-    /// The number of text-free providers measured is asserted non-zero, and
-    /// TypeSafe is named explicitly, so a catalog that stopped shipping a
-    /// decision-only provider fails here instead of passing vacuously.
-    #[test]
-    fn no_provider_recommends_a_route_that_cannot_answer_a_prompt() {
-        let report = build_report(Path::new(DEFAULT_NOTES_PATH), &[]).expect("report");
-        let mut decision_only_providers = 0_usize;
-        for entry in &report.providers {
-            if entry.recommended.model == "*" || entry.recommended.model.contains('*') {
-                continue;
-            }
-            let model = harn_vm::llm_config::model_catalog_entry(&entry.recommended.model)
-                .unwrap_or_else(|| panic!("{} recommends missing catalog model", entry.id));
-            assert!(
-                model.supports_operation(harn_vm::llm_config::ModelOperation::TextGeneration),
-                "{} recommends {}, which does not serve text generation",
-                entry.id,
-                entry.recommended.model
-            );
-        }
-        let catalog = harn_vm::llm_config::model_catalog_entries();
-        for entry in &report.providers {
-            let rows: Vec<_> = catalog
-                .iter()
-                .filter(|(_, model)| model.provider == entry.catalog_provider)
-                .collect();
-            // A provider with no cataloged rows at all (Azure OpenAI, for one)
-            // has made no operation claim, and its recommendation legitimately
-            // comes from a capability match pattern. The rule here is about a
-            // provider whose rows exist and all refuse text.
-            if rows.is_empty()
-                || rows.iter().any(|(_, model)| {
-                    model.supports_operation(harn_vm::llm_config::ModelOperation::TextGeneration)
-                })
-            {
-                continue;
-            }
-            decision_only_providers += 1;
-            assert_eq!(
-                entry.recommended.model, "*",
-                "{} serves no text route but recommends {}",
-                entry.id, entry.recommended.model
-            );
-        }
-        assert!(
-            decision_only_providers > 0,
-            "no provider in the catalog is text-free, so this test measured nothing"
-        );
-        // The concrete case this rule was written for, named so a future
-        // catalog that drops every text-free provider fails here loudly
-        // instead of leaving the rule measuring only empty providers.
-        let typesafe = report
-            .providers
-            .iter()
-            .find(|entry| entry.catalog_provider == "typesafe")
-            .expect("typesafe support row");
-        assert_eq!(typesafe.recommended.model, "*");
-        assert_eq!(typesafe.recommended.display_name, None);
-    }
-
-    #[test]
-    fn empirical_summary_attaches_to_matching_model() {
-        let tmp = tempfile::tempdir().expect("tempdir");
-        let summary = tmp.path().join("summary.json");
-        fs::write(
-            &summary,
-            r#"{
-              "runs": [
-                {
-                  "run_id": "python-add__openrouter_mistral-small__native",
-                  "selector": {"provider": "openrouter", "model": "mistralai/mistral-small-2603"},
-                  "tool_format": "native",
-                  "status": "passed",
-                  "passed": true,
-                  "skipped": false
-                },
-                {
-                  "run_id": "python-add__openrouter_mistral-small__text",
-                  "selector": {"provider": "openrouter", "model": "mistralai/mistral-small-2603"},
-                  "tool_format": "text",
-                  "status": "failed",
-                  "passed": false,
-                  "skipped": false
-                }
-              ],
-              "comparisons": [
-                {
-                  "selector": {"provider": "openrouter", "model": "mistralai/mistral-small-2603"},
-                  "equivalent": false
-                }
-              ]
-            }"#,
-        )
-        .expect("write summary");
-
-        let report = build_report(Path::new(DEFAULT_NOTES_PATH), &[summary]).expect("report");
-        let mistral = report
-            .providers
-            .iter()
-            .find(|entry| entry.id == "mistral")
-            .expect("mistral row");
-        assert_eq!(mistral.empirical.total_runs, 2);
-        assert_eq!(mistral.empirical.passed_runs, 1);
-        assert_eq!(
-            mistral.empirical.best_tool_format.as_deref(),
-            Some("native")
-        );
-        assert_eq!(
-            mistral.empirical.native_text_parity.as_deref(),
-            Some("diverged")
-        );
-        assert_eq!(mistral.empirical.sources, vec!["summary.json"]);
-
-        let openrouter = report
-            .providers
-            .iter()
-            .find(|entry| entry.id == "openrouter")
-            .expect("openrouter row");
-        assert_eq!(openrouter.empirical.status, "not_recorded");
-    }
-
-    #[test]
-    fn empirical_summary_matches_model_patterns() {
-        let tmp = tempfile::tempdir().expect("tempdir");
-        let summary = tmp.path().join("summary.json");
-        fs::write(
-            &summary,
-            r#"{
-              "runs": [
-                {
-                  "run_id": "azure-gpt4o-native",
-                  "selector": {"provider": "azure_openai", "model": "gpt-4o"},
-                  "tool_format": "native",
-                  "status": "passed",
-                  "passed": true,
-                  "skipped": false
-                }
-              ]
-            }"#,
-        )
-        .expect("write summary");
-
-        let report = build_report(Path::new(DEFAULT_NOTES_PATH), &[summary]).expect("report");
-        let azure = report
-            .providers
-            .iter()
-            .find(|entry| entry.id == "azure_openai")
-            .expect("azure row");
-        assert_eq!(azure.recommended.model, "gpt-*");
-        assert_eq!(azure.empirical.status, "observed_pass");
-        assert_eq!(azure.empirical.total_runs, 1);
-    }
-
-    #[test]
-    fn markdown_and_json_render_generated_surfaces() {
-        let report = build_report(Path::new(DEFAULT_NOTES_PATH), &[]).expect("report");
-        let markdown = render_markdown(&report);
-        assert!(markdown.contains("GENERATED by `harn provider catalog support`"));
-        assert!(markdown.contains("Provider support recommendations"));
-        assert!(!markdown.contains("API_KEY="));
-
-        let json = render_json(&report).expect("json");
-        let parsed: JsonValue = serde_json::from_str(&json).expect("valid json");
-        assert_eq!(parsed["schema_version"], PROVIDER_SUPPORT_SCHEMA_VERSION);
-        assert!(parsed["providers"]
-            .as_array()
-            .is_some_and(|rows| rows.len() >= 6));
-    }
-}
+mod tests;

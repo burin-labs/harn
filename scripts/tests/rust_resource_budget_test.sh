@@ -29,6 +29,10 @@ ps() { printf 'systemd\nRunner.Listener\nRunner.Listener\nsshd\n'; }
 [[ $(online_local_runners) == 2 ]]
 ps() { printf 'Runner.Listener\nsshd\n'; }
 [[ $(online_local_runners) == 1 ]]
+# macOS prints each listener's full path, as read from an owned Mac mini. An
+# exact name match counts these as zero and refuses the host as retired.
+ps() { printf '/sbin/launchd\n/Users/ci/actions-runners/w1/bin/Runner.Listener\n/Users/ci/actions-runner/bin/Runner.Listener\n/Users/ci/bin/Not.Runner.Listener\n'; }
+[[ $(online_local_runners) == 2 ]]
 
 # A retired pool is the case this refusal exists for: the host is alive and
 # measurable, and it is running no listeners at all. It must refuse by name
@@ -125,7 +129,16 @@ for reading in '' 0 unknown -1; do
   grep -qx "::error::E2E_RESOURCE_BUDGET_UNMEASURED reason=memory_census_not_positive cpu_cores=4 online_local_runners=1 memory_mb=${reading:-unset}" "$diagnostic"
 done
 
-# Exercise the real memory census through the same shape the host uses.
+# The hosted macOS runner this lane mostly lands on: three cores and a
+# reported 7168 MiB. Cores alone allow two compilers, and two or three
+# concurrent compilers there swapped 3.8 million pages and took 58 minutes to
+# build what one compiler builds in 27 (harn#8599). Memory must bind at one.
+[[ $(rust_resource_budget "$policy" 3 1 producer 7168) == $'build_jobs=1\ntest_threads=2' ]]
+[[ $(rust_resource_budget "$policy" 3 1 producer 7168) != $'build_jobs=2\ntest_threads=2' ]]
+
+# Exercise the real memory census through the same shape the host uses. The
+# Linux rows pin the kernel so they read /proc on any machine that runs this.
+uname() { echo Linux; }
 cat() { printf 'MemTotal:       16384000 kB\nMemFree:  100 kB\n'; }
 [[ $(host_memory_mb) == 16000 ]]
 
@@ -144,4 +157,31 @@ fi
 grep -qx '::error::E2E_RESOURCE_BUDGET_UNMEASURED reason=memory_census_failed cpu_cores=4 online_local_runners=unmeasured memory_mb=unmeasured' "$diagnostic"
 unset -f cat
 
-echo 'Rust resource budget: CPU, memory, profile ceilings, hosted decision, removal, retired-pool, empty and failed census controls passed'
+# macOS has neither /proc nor nproc. Both censuses read sysctl there, in the
+# units the hosted runner actually reported.
+nproc() { echo 'nproc must not be called on macOS' >&2; return 1; }
+uname() { echo Darwin; }
+sysctl() {
+  case "$2" in
+    hw.memsize) echo 7516192768 ;;
+    hw.ncpu) echo 3 ;;
+    *) return 1 ;;
+  esac
+}
+[[ $(host_memory_mb) == 7168 ]]
+[[ $(host_cpu_cores) == 3 ]]
+output=$(mktemp "${TMPDIR:-/tmp}/harn-resource-budget-output.XXXXXX")
+trap 'rm -f "$diagnostic" "$output"' EXIT
+GITHUB_OUTPUT=$output RUNNER_ENVIRONMENT=github-hosted HARN_BUDGET_PROFILE=producer \
+  resource_budget_main 2>/dev/null
+[[ $(cat "$output") == $'build_jobs=1\ntest_threads=2' ]]
+
+# An unreadable sysctl is unmeasured, never a zero-memory box.
+sysctl() { return 1; }
+if host_memory_mb 3 2>"$diagnostic"; then
+  echo 'failed macOS memory census passed' >&2; exit 1
+fi
+grep -qx '::error::E2E_RESOURCE_BUDGET_UNMEASURED reason=memory_census_empty cpu_cores=3 online_local_runners=unmeasured memory_mb=unmeasured hw_memsize=absent' "$diagnostic"
+unset -f nproc uname sysctl
+
+echo 'Rust resource budget: CPU, memory, profile ceilings, hosted Linux and macOS decisions, macOS census, removal, retired-pool, empty and failed census controls passed'

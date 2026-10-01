@@ -49,6 +49,11 @@
     },
     {
       "workflow": "ci.yml",
+      "job": "rust-cli",
+      "shared_key": "harn-cli"
+    },
+    {
+      "workflow": "ci.yml",
       "job": "rust-check-inputs",
       "shared_key": "workspace-tests"
     },
@@ -56,6 +61,11 @@
       "workflow": "rust-cache-refresh.yml",
       "job": "rust-cache-refresh",
       "shared_key": "workspace-tests"
+    },
+    {
+      "workflow": "rust-cache-refresh.yml",
+      "job": "rust-cache-refresh",
+      "shared_key": "harn-cli"
     },
     {
       "workflow": "rust-cache-refresh.yml",

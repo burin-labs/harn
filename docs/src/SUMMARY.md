@@ -35,6 +35,8 @@
 # How-to guides
 
 - [Common tasks](./common-tasks.md)
+- [Ask a decision model a question](./decision-evaluation.md)
+- [Record and replay decision evaluations](./decision-replay.md)
 - [Configure a provider](./provider-setup.md)
 - [Run a workflow bundle from the CLI](./workflow-authoring-quickstart.md)
 - [Cookbook](./cookbook.md)
@@ -323,6 +325,8 @@
 - [`std/cli/render`](./cli-render-reference.md)
 - [`std/cli/paths`](./cli-paths-reference.md)
 - [`std/eval/calibration`](./eval-calibration-reference.md)
+- [Decision evaluation contract](./decision-evaluation-reference.md)
+- [`std/eval/selective_risk`](./eval-selective-risk-reference.md)
 - [Builtin functions](./builtins.md)
 - [Postgres](./postgres.md)
 - [SQLite](./sqlite.md)
@@ -344,6 +348,7 @@
 - [Host boundary](./host-boundary.md)
 - [Process sandboxing](./sandboxing.md)
 - [Credential denylist reference](./sandbox-read-deny-reference.md)
+- [Toolchain config and cache reference](./sandbox-config-census.md)
 - [OpenTrustGraph v0 spec](./spec/open-trust-graph/v0.md)
 - [LLM dialect ownership](./dev/llm-dialect-contract.md)
 - [Agent plane ownership](./dev/agent-loops.md)
@@ -396,6 +401,7 @@
 - [Release binary-size policy](./dev/release-binary-size-policy.md)
 - [Reusable bump-harn workflow](./dev/reusable-bump-harn-runtime.md)
 - [Merge overrides](./dev/merge-overrides.md)
+- [Sprint fast CI](./dev/sprint-fast-ci.md)
 - [Agent shell guard](./dev/agent-shell-guard.md)
 - [Deterministic test patterns](./dev/testing.md)
 - [Check documentation examples](./dev/check-docs-snippets.md)

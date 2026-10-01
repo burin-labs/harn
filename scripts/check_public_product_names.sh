@@ -6,7 +6,11 @@
 # a downstream's product or hardware.
 #
 #   1. Product names, matched as literal patterns. These are public product
-#      names, so carrying them here costs nothing.
+#      names, so carrying them here costs nothing. New public text (pull-request
+#      metadata, commit messages, comments, and the lines a pull request adds)
+#      is held to a stricter rule: it must not name the downstream brand at all,
+#      not even as a bare word ("after the <brand> integration lands"). The
+#      tracked tree predates that rule and is held only to the compound names.
 #   2. Private infrastructure, matched against a committed sha256 denylist
 #      (`scripts/consumer-host-denylist.sha256`). The plaintext is deliberately
 #      absent: a gate that listed the hostnames it guards would publish them on
@@ -23,18 +27,34 @@ set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 product="burin"
-brand="Burin"
+brand="$(printf '%s' "${product:0:1}" | tr '[:lower:]' '[:upper:]')${product:1}"
 pattern="${product}-code|${product}-evals|${product}-commerce|${brand} Code"
+# New text also refuses the bare brand word. The organisation's legal name
+# (`<brand> Labs`, e.g. a license copyright line) is the repository owner, not a
+# downstream product, so it is masked before matching.
+new_text_pattern="${pattern}|\\<${brand}\\>"
+legal_name="${brand} Labs"
 denylist="$repo_root/scripts/consumer-host-denylist.sha256"
 scanner="$repo_root/scripts/scan_hashed_denylist.mjs"
 
+usage() {
+  echo "usage: check_public_product_names.sh [--stdin-label <public-label> | --added-lines <base-sha> <head-sha>]" >&2
+  exit 2
+}
+
 stdin_label=""
+added_base=""
+added_head=""
 if [[ "$#" -ne 0 ]]; then
-  if [[ "$#" -ne 2 || "$1" != "--stdin-label" || ! "$2" =~ ^[A-Za-z0-9._/-]+$ ]]; then
-    echo "usage: check_public_product_names.sh [--stdin-label <public-label>]" >&2
-    exit 2
+  if [[ "$#" -eq 2 && "$1" == "--stdin-label" && "$2" =~ ^[A-Za-z0-9._/-]+$ ]]; then
+    stdin_label="$2"
+  elif [[ "$#" -eq 3 && "$1" == "--added-lines" && "$2" =~ ^[0-9a-f]{40,64}$ \
+    && "$3" =~ ^[0-9a-f]{40,64}$ ]]; then
+    added_base="$2"
+    added_head="$3"
+  else
+    usage
   fi
-  stdin_label="$2"
 fi
 
 tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/harn-public-product-names.XXXXXX")"
@@ -61,6 +81,21 @@ report_verdict() {
   fi
 
   echo "public product-name and infrastructure scan passed"
+}
+
+# Print `-n -o` matches of the new-text vocabulary in file $1, one
+# `line:match` per hit, with the organisation's legal name masked first.
+scan_new_text() {
+  local masked="$tmp_dir/masked.txt" status
+  sed "s/${legal_name}/${brand}_Labs/g" "$1" >"$masked"
+  set +e
+  grep -a -n -o -E -- "$new_text_pattern" "$masked"
+  status=$?
+  set -e
+  if [[ "$status" -gt 1 ]]; then
+    echo "error: failed to scan public text for downstream product names" >&2
+    exit "$status"
+  fi
 }
 
 # Paths whose match is deliberate. A path is allowlisted for BOTH arms; keep
@@ -91,14 +126,7 @@ if [[ -n "$stdin_label" ]]; then
   umask 077
   cat >"$metadata"
 
-  set +e
-  grep -a -n -o -E -- "$pattern" "$metadata" >"$tmp_dir/all-hits.txt"
-  scan_status=$?
-  set -e
-  if [[ "$scan_status" -gt 1 ]]; then
-    echo "error: failed to scan public text for downstream product names" >&2
-    exit "$scan_status"
-  fi
+  scan_new_text "$metadata" >"$tmp_dir/all-hits.txt"
 
   while IFS= read -r hit; do
     [[ -z "$hit" ]] && continue
@@ -118,6 +146,53 @@ if [[ -n "$stdin_label" ]]; then
     exit "$host_status"
   fi
   cat "$tmp_dir/host-hits.txt" >>"$tmp_dir/hits.txt"
+  report_verdict
+  exit 0
+fi
+
+if [[ -n "$added_base" ]]; then
+  # Lines a pull request adds are new public text. Project each added line onto
+  # one row of `added.txt` and its `path:line` onto the same row of
+  # `added-locations.txt`, so a hit's row number names the source location.
+  added="$tmp_dir/added.txt"
+  locations="$tmp_dir/added-locations.txt"
+  if ! git -C "$repo_root" -c core.quotePath=false diff --no-color --no-ext-diff \
+    --unified=0 --diff-filter=d "$added_base" "$added_head" >"$tmp_dir/diff.txt"; then
+    echo "error: the added-line range could not be diffed" >&2
+    exit 2
+  fi
+  awk -v added="$added" -v locations="$locations" '
+    # An added line whose text starts with "++ " looks like a file header, so
+    # headers are read only between `diff --git` and the first hunk.
+    /^diff --git / { in_hunk = 0; path = ""; next }
+    !in_hunk && /^\+\+\+ / { path = substr($0, 7); next }
+    /^@@ / {
+      split($3, target, ",")
+      line = substr(target[1], 2) + 0
+      in_hunk = 1
+      next
+    }
+    in_hunk && /^\+/ && path != "" {
+      print substr($0, 2) >added
+      print path ":" line >locations
+      line += 1
+    }
+  ' "$tmp_dir/diff.txt"
+  touch "$added" "$locations"
+
+  scan_new_text "$added" >"$tmp_dir/all-hits.txt"
+  while IFS= read -r hit; do
+    [[ -z "$hit" ]] && continue
+    row="${hit%%:*}"
+    matched="${hit#*:}"
+    location="$(sed -n "${row}p" "$locations")"
+    path="${location%:*}"
+    if [[ "$path" == "README.md" ]] || is_allowlisted "$path"; then
+      continue
+    fi
+    digest="$(printf '%s' "$matched" | sha256_of_stdin)"
+    printf '%s: sha256:%s\n' "$location" "${digest:0:12}" >>"$tmp_dir/hits.txt"
+  done <"$tmp_dir/all-hits.txt"
   report_verdict
   exit 0
 fi

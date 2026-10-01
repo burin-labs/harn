@@ -73,7 +73,7 @@ pub const RELEASE_PATH_FILTER_OUTPUT = "$"
 pub const RELEASE_PATH_FILTER_BRANCH = "[[ \"$RELEASE_BUILD_INPUTS_CHANGED\" == \"true\" ]]"
 
 pub const RELEASE_WORKFLOW_CONCURRENCY_GROUP = "build-release-binaries-$"
-  + "{{ (github.event_name == 'workflow_dispatch' && inputs.benchmark_source_sha != '' && format('benchmark-{0}', inputs.benchmark_source_sha)) || (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.warm_cache_only)) && 'warm-main' || (github.event_name == 'push' && format('branch-{0}', github.run_id)) || github.ref_name }}"
+  + "{{ (github.event_name == 'workflow_dispatch' && inputs.benchmark_source_sha != '' && format('benchmark-{0}-{1}', inputs.benchmark_source_sha, github.sha)) || (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.warm_cache_only)) && 'warm-main' || (github.event_name == 'push' && format('branch-{0}', github.run_id)) || github.ref_name }}"
 
 pub const RELEASE_WORKFLOW_CANCEL_POLICY = "$"
   + "{{ github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.warm_cache_only) }}"
@@ -207,7 +207,12 @@ pub const RUST_CACHE_ACTION = "./.github/actions/rust-cache"
 // top-level token is contents/read-only; without a job-level grant, Swatinem
 // save fails under continue-on-error and the Linux workspace-tests cache stays
 // empty (#5003).
-pub const CI_CACHE_WRITE_JOBS = ["package-audit", "rust-check-inputs", "rust-cache-refresh"]
+pub const CI_CACHE_WRITE_JOBS = [
+  "package-audit",
+  "rust-cli",
+  "rust-check-inputs",
+  "rust-cache-refresh",
+]
 
 // Compile fan-out on the producer is measured, not typed, and the ceiling now
 // rests on a measurement rather than on a fear. It lives in
@@ -364,6 +369,20 @@ pub const E2E_WORKFLOW_CANCEL_POLICY = "$"
 pub const MAIN_ONLY_RUST_IF =
   "github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.changes.outputs.rust == 'true'"
 
+/**
+ * The Windows cross-compile check is the one Windows admission lane: every
+ * merge-group candidate, plus Rust-changing main pushes.
+ */
+/** Skips a slow proof family under the sprint fast-CI switch (#7628). */
+pub const SPRINT_FAST_CI_GUARD = "needs.changes.outputs.sprint_fast_ci != 'true'"
+
+pub const WINDOWS_CROSS_CHECK_IF = "(github.event_name == 'merge_group' && "
+  + SPRINT_FAST_CI_GUARD
+  + ") || (github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.changes.outputs.rust == 'true')"
+
+/** `ci-status` requires the cross-check exactly where the job itself must run. */
+pub const WINDOWS_CROSS_REQUIRED_ENV = "$" + "{{ " + WINDOWS_CROSS_CHECK_IF + " }}"
+
 pub const MAIN_ONLY_POLICY_IF = MAIN_ONLY_RUST_IF
   + " && needs.rust-artifacts-ready.result == 'success'"
 
@@ -492,17 +511,9 @@ pub const WINDOWS_BLACKSMITH_ENABLE_VAR = "HARN_CI_ENABLE_BLACKSMITH_WINDOWS"
 
 pub const HOSTED_WINDOWS_RUNNER = "windows-latest"
 
-pub const BLACKSMITH_8CPU_WINDOWS_RUNNER = "blacksmith-8vcpu-windows-2025"
-
-// The nightly compiles and runs the WHOLE workspace, not an affected-crate
-// closure, so it is the one Windows lane where core count buys real wall time.
-// The cache generation it writes does not depend on vCPU count, so the producer
-// and its consumer may sit on different sizes of the same tier.
+// The nightly compiles and runs the WHOLE workspace, so it is the one Windows
+// lane where core count buys real wall time.
 pub const BLACKSMITH_16CPU_WINDOWS_RUNNER = "blacksmith-16vcpu-windows-2025"
-
-pub const WINDOWS_WARM_RESTORE_STEP = "Restore Windows workspace warm artifact"
-
-pub const WINDOWS_WARM_REPORT_STEP = "Report Windows warm restore outcome"
 
 pub const WINDOWS_STORAGE_REPORT_MARKER = "windows_storage_budget.sh report"
 
@@ -513,42 +524,32 @@ pub const WINDOWS_STORAGE_REPORT_MARKER = "windows_storage_budget.sh report"
  */
 pub const WINDOWS_STORAGE_HEADROOM_FLAG = "--require-free-headroom"
 
-pub const WINDOWS_STORAGE_INITIAL_STEP = "Report Windows storage (initial)"
-
-pub const WINDOWS_STORAGE_INITIAL_STEP_ID = "windows-storage-initial"
-
-pub const WINDOWS_STORAGE_AFTER_RESTORE_STEP = "Report Windows storage (after restore)"
-
 pub const WINDOWS_STORAGE_TERMINAL_STEP = "Report Windows storage (terminal)"
 
 pub const WINDOWS_NIGHTLY_STORAGE_BEFORE_STEP = "Report Windows storage (before build)"
 
-pub const WINDOWS_WARM_RESTORE_STEP_ID = "windows-warm-restore"
-
 pub const MACOS_WARM_RESTORE_STEP_ID = "macos-warm-restore"
-
-pub const WINDOWS_CACHE_FALLBACK_GUARD =
-  "steps.windows-warm-restore.outputs.windows_warm_restore != 'hit' && "
-  + "steps.windows-warm-restore.outputs.windows_warm_restore_reason != 'insufficient_space'"
-
-pub const WINDOWS_TEST_STEP = "Compile Windows tests and run unit slice"
-
-pub const WINDOWS_TEST_STEP_ID = "windows-native-tests"
-
-pub const WINDOWS_TEST_COMPLETED_EXPRESSION = "$"
-  + "{{ steps.${WINDOWS_TEST_STEP_ID}.outputs.completed_epoch }}"
-
-// This checker rejects the old CI telemetry key; it does not declare a
-// Harn-owned environment variable, so keep the forbidden spelling non-contiguous.
-pub const WINDOWS_LEGACY_HARN_TELEMETRY = "HARN_" + "NATIVE_TEST_COMPLETED_EPOCH"
-
-pub const WINDOWS_BINARY_PRODUCER_STEP = "Produce exact Windows Harn binary"
-
-pub const WINDOWS_SMOKE_STEP = "Smoke test harn run"
 
 pub const WINDOWS_NIGHTLY_TEST_STEP = "Run workspace nextest"
 
 pub const WINDOWS_TEST_STACK_BYTES = "16777216"
+
+/** The one owner of release head-ref recognition that workflow steps source. */
+pub const RELEASE_REF_HELPER = ".github/scripts/release-ref.sh"
+
+/** The release-ref function that decides whether a release-PR-only lane runs. */
+pub const RELEASE_PR_ONLY_LANE_FN = "release_pr_only_lane_run"
+
+/** The native Windows nightly's routing job, step, and published decision. */
+pub const WINDOWS_ROUTE_JOB = "route"
+
+pub const WINDOWS_ROUTE_STEP = "Decide whether this event runs native Windows"
+
+pub const WINDOWS_ROUTE_STEP_ID = "decide"
+
+pub const WINDOWS_ROUTE_OUTPUT = "$" + "{{ steps.${WINDOWS_ROUTE_STEP_ID}.outputs.run }}"
+
+pub const WINDOWS_NIGHTLY_RELEASE_ROUTE_IF = "needs.${WINDOWS_ROUTE_JOB}.outputs.run == 'true'"
 
 pub const MACOS_CACHE_KEY = "workspace-macos"
 
@@ -640,15 +641,6 @@ pub fn policy_schema() {
  */
 pub fn windows_nightly_dev_drive_size(warm: WindowsWorkspaceWarmPolicy) -> string {
   return warm.dev_drive_size_full_workspace
-}
-
-pub fn windows_ci_dev_drive_size(warm: WindowsWorkspaceWarmPolicy) -> string {
-  return "$"
-    + "{{ github.event_name == 'pull_request' && '"
-    + warm.dev_drive_size_default
-    + "' || '"
-    + warm.dev_drive_size_full_workspace
-    + "' }}"
 }
 
 pub fn release_warm_cache_path_policy_schema() {
@@ -1538,6 +1530,38 @@ pub fn rust_cache_reader_errors(policy: CiCachePolicy, workflows: dict) -> list<
   return errors
 }
 
+/**
+ * A writer that saves workspace crates must take part in workspace crate
+ * reuse on both ends: run the restore, which drops any inherited source
+ * record, and record its own commit only after a successful build. A writer
+ * that skipped either could save a record naming a tree its artifacts were not
+ * built from, and a later restore would pass stale crates as fresh.
+ */
+pub fn workspace_reuse_writer_errors(
+  workflow: string,
+  job: string,
+  job_doc: dict,
+  cache_step: dict,
+) -> list<string> {
+  if lowercase(trim(to_string(cache_step?.with?.["cache-workspace-crates"] ?? "false"))) != "true" {
+    return []
+  }
+  const reuses = lowercase(trim(to_string(cache_step?.with?.["reuse-workspace-crates"] ?? "false")))
+    == "true"
+  const records = (job_doc?.steps ?? []).any(
+    { step ->
+      contains(to_string(step?.run ?? ""), "scripts/ci/reuse_workspace_crates.sh record")
+        && contains(to_string(step?.if ?? ""), "success()")
+    },
+  )
+  if reuses && records {
+    return []
+  }
+  return [
+    "${workflow}:${job} saves workspace crates, so it must restore with reuse-workspace-crates and record its source only on success",
+  ]
+}
+
 pub fn ci_cache_policy_errors(
   policy: CiCachePolicy,
   action: dict,
@@ -1571,6 +1595,7 @@ pub fn ci_cache_policy_errors(
           errors = errors + [ephemeral_error]
         }
         if uses == policy.rust_cache_action && save_requested(step) {
+          errors = errors + workspace_reuse_writer_errors(workflow, job, jobs[job], step)
           const shared_key = trim(step?.with?.["shared-key"] ?? "")
           // Expand matrix.cache_key writers (rust-cache-refresh dual Linux keys).
           let expanded_keys: list<string> = [shared_key]
@@ -1669,12 +1694,14 @@ pub fn e2e_workflow_concurrency_errors(workflow: dict) -> list<string> {
   )
 }
 
+/**
+ * The owned rung reads the capacity job's named route, not the census. The
+ * script is the one owner of that decision, and a census the routing
+ * expression parsed itself would fail the whole job on malformed JSON instead
+ * of falling back hosted by name.
+ */
 pub fn owned_producer_condition() -> string {
-  return "(github.event_name == 'pull_request'"
-    + "\n  && github.event.pull_request.head.repo.full_name == github.repository"
-    + "\n  && needs.runner-availability.outputs.selfhosted_disabled == ''"
-    + "\n  && needs.runner-availability.outputs.capacity != ''"
-    + "\n  && fromJSON(needs.runner-availability.outputs.capacity).${SELFHOSTED_LINUX_BIG_POOL}.online > 0"
+  return "(needs.rust-producer-capacity.outputs.route == 'owned'"
 }
 
 pub fn paid_producer_condition() -> string {
@@ -1731,7 +1758,7 @@ pub fn minimal_pr_capacity_errors(ci: dict, publish: dict) -> list<string> {
   }
   // The Rust workspace producer carries one more rung than its siblings.
   // A same-repository pull request prefers the owned pool when its census
-  // reports online carriers, including a busy pool that must queue work.
+  // reports an idle carrier; a fully busy pool routes hosted (#9086).
   // Merge groups and main pushes are deliberately NOT eligible: main pushes are
   // the authorized cache writer, and merge throughput must not depend on a
   // residential machine's health, which is the objection #6217 recorded when it
@@ -1778,8 +1805,17 @@ pub fn minimal_pr_capacity_errors(ci: dict, publish: dict) -> list<string> {
       }
     }
   }
-  if trim(jobs["windows-cross-check"]?.if ?? "") != MAIN_ONLY_RUST_IF {
-    errors = errors + ["ci.yml:windows-cross-check must run on Rust-changing main pushes only"]
+  const cross_check = jobs["windows-cross-check"] ?? {}
+  if trim(cross_check?.if ?? "") != WINDOWS_CROSS_CHECK_IF {
+    errors = errors
+      + [
+        "ci.yml:windows-cross-check must run on every merge-group candidate and on Rust-changing main pushes",
+      ]
+  }
+  // Off the critical path: it waits on the cheap `changes` router only.
+  const cross_needs = cross_check?.needs
+  if cross_needs != "changes" && cross_needs != ["changes"] {
+    errors = errors + ["ci.yml:windows-cross-check must need only changes"]
   }
   const status = jobs["ci-status"] ?? {}
   for name in [
@@ -1793,11 +1829,21 @@ pub fn minimal_pr_capacity_errors(ci: dict, publish: dict) -> list<string> {
       errors = errors + ["ci.yml:ci-status must retain ${name}"]
     }
   }
-  const status_run = step_by_name(status?.steps ?? [], "Verify required CI jobs")?.run ?? ""
+  const status_step = step_by_name(status?.steps ?? [], "Verify required CI jobs")
+  const status_run = status_step?.run ?? ""
+  // The skip allowance must read the same condition the job runs under, so a
+  // merge-group candidate cannot pass the aggregate with the check skipped.
+  if trim(to_string(status_step?.env?.WINDOWS_CROSS_REQUIRED ?? "")) != WINDOWS_CROSS_REQUIRED_ENV
+    || !contains(status_run, "[ \"$WINDOWS_CROSS_REQUIRED\" != \"true\" ]") {
+    errors = errors
+      + [
+        "ci.yml:ci-status must require the Windows cross-compile check wherever the job itself must run",
+      ]
+  }
   for message in [
     "Repository policy checks failed or skipped on a Rust-changing main push.",
     "Fast repository policy gates failed or skipped while Rust proof was required.",
-    "Windows cross-compile check failed or skipped on a Rust-changing main push.",
+    "Windows cross-compile check failed or skipped on a merge-group candidate or a Rust-changing main push.",
   ] {
     if !contains(status_run, message) {
       errors = errors + ["ci.yml:ci-status does not enforce '${message}'"]
@@ -1859,6 +1905,52 @@ pub fn e2e_elastic_capacity_errors(e2e: dict) -> list<string> {
         "e2e.yml:e2e-capacity must pass ${BLACKSMITH_ENABLE_VAR} to the route it measures "
           + "as ${E2E_EVACUATION_INPUT}",
       ]
+  }
+  return errors
+}
+
+pub const CONSUMER_CANARY_WORKFLOW = "consumer-canary.yml"
+
+pub const CONSUMER_CANARY_JOB = "consumers"
+
+pub const CONSUMER_CANARY_ACTIONS = ["actions/checkout@", "actions/create-github-app-token@"]
+
+/**
+ * Keep the consumer canary from publishing anything its consumer produced.
+ *
+ * The consumer it rehearses may be private, and this repository's logs,
+ * artifacts and step summaries are public. The job may check out this
+ * revision, mint its credential and run the canary script, which prints only
+ * the verdict, the link and the wall time. Any other action is a way for the
+ * consumer's content to leave, an upload most directly, so it is refused by
+ * shape rather than by name. A step summary is refused the same way. The
+ * consumer's identity must come from a secret: the runner prints each step's
+ * inputs and environment, and masks only secrets.
+ */
+pub fn consumer_canary_errors(workflow: dict) -> list<string> {
+  const job = workflow?.jobs?.[CONSUMER_CANARY_JOB]
+  if job == nil {
+    return ["${CONSUMER_CANARY_WORKFLOW}:${CONSUMER_CANARY_JOB} must define the consumer canary"]
+  }
+  let errors: list<string> = []
+  if contains(json_stringify(job), "vars.CONSUMER_CANARY_REPOSITORY") {
+    errors = errors
+      + [
+        "${CONSUMER_CANARY_WORKFLOW}:${CONSUMER_CANARY_JOB} must read the consumer's identity from secrets.CONSUMER_CANARY_REPOSITORY, which the runner masks",
+      ]
+  }
+  for step in job?.steps ?? [] {
+    const uses = step_uses(step)
+    if uses != "" && !CONSUMER_CANARY_ACTIONS.any({ prefix -> uses.starts_with(prefix) }) {
+      errors = errors
+        + [
+          "${CONSUMER_CANARY_WORKFLOW}:${CONSUMER_CANARY_JOB} must not run ${uses}; only checkout and the credential mint may run beside the canary script",
+        ]
+    }
+    if contains(to_string(step?.run ?? ""), "GITHUB_STEP_SUMMARY") {
+      errors = errors
+        + ["${CONSUMER_CANARY_WORKFLOW}:${CONSUMER_CANARY_JOB} must not write a step summary"]
+    }
   }
   return errors
 }

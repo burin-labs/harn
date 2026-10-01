@@ -11,6 +11,10 @@ pub struct TestResult {
     pub name: String,
     pub file: String,
     pub passed: bool,
+    /// Present only when the case deliberately stopped before its remaining
+    /// assertions. The reason is the runner's typed skip signal.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub skip_reason: Option<String>,
     pub error: Option<String>,
     /// Everything the case wrote via `log`/`print`/`println`/etc, in
     /// execution order. `None` when nothing was written — keeps quiet,
@@ -26,6 +30,10 @@ pub struct TestResult {
     /// errors have no execution timeline and leave this absent.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub phases: Option<PhaseTimings>,
+    /// Counted VM work through case teardown, or null if no VM was constructed.
+    /// A measured zero is distinct from unavailable work.
+    /// Boxed so the new measurement keeps the existing progress event compact.
+    pub work: Option<Box<harn_vm::VmWork>>,
     /// Script-owned `std/timing` spans closed while this case executed.
     /// These are the receipt-level attribution boundary for sub-operations
     /// inside an otherwise monolithic test case.
@@ -58,6 +66,7 @@ pub struct TestSummary {
     pub results: Vec<TestResult>,
     pub passed: usize,
     pub failed: usize,
+    pub skipped: usize,
     pub total: usize,
     pub duration_ms: u64,
     /// Distribution of per-test wall-clock durations.
@@ -202,12 +211,53 @@ impl AggregateTimings {
 }
 
 impl TestResult {
+    /// Construct a result without an execution timeline or measured VM work.
+    ///
+    /// Use this constructor instead of a struct literal when producing results
+    /// outside the runner. Set diagnostics on the returned result as needed.
+    /// Instrumented producers must set `work` from the stopped VM recorder;
+    /// leaving it absent means unavailable, not measured zero.
+    ///
+    /// ```
+    /// use harn_test_runner::TestResult;
+    ///
+    /// let mut result = TestResult::unmeasured("case", "test_example.harn", false, 0);
+    /// result.error = Some("Discovery failed".into());
+    /// assert!(result.work.is_none());
+    /// ```
+    pub fn unmeasured(
+        name: impl Into<String>,
+        file: impl Into<String>,
+        passed: bool,
+        duration_ms: u64,
+    ) -> Self {
+        Self {
+            name: name.into(),
+            file: file.into(),
+            passed,
+            skip_reason: None,
+            error: None,
+            captured_output: None,
+            timeout: None,
+            duration_ms,
+            phases: None,
+            work: None,
+            timing_spans: Vec::new(),
+        }
+    }
+
     /// Emit a one-line phase breakdown to stderr. Driven by `--diagnose`
     /// / `HARN_TEST_DIAGNOSE=1`. The format is intentionally
     /// machine-readable so downstream eval pipelines can grep it.
     #[doc(hidden)]
     pub fn emit_diagnose(&self) {
-        let outcome = if self.passed { "ok" } else { "FAIL" };
+        let outcome = if self.passed {
+            "ok"
+        } else if self.skip_reason.is_some() {
+            "SKIP"
+        } else {
+            "FAIL"
+        };
         let phases = self
             .phases
             .expect("diagnostics are emitted only for executed cases");

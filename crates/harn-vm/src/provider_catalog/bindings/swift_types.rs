@@ -217,6 +217,7 @@ public struct HarnProviderEndpoint: Codable, Sendable, Equatable {
     public let regionEnv: String?
     public let regions: [String: HarnProviderEndpointRegion]?
     public let chatEndpoint: String
+    public let chatAPIAdapter: String?
     public let completionEndpoint: String?
     public let embeddingsEndpoint: String?
 
@@ -226,6 +227,7 @@ public struct HarnProviderEndpoint: Codable, Sendable, Equatable {
         case regionEnv = "region_env"
         case regions
         case chatEndpoint = "chat_endpoint"
+        case chatAPIAdapter = "chat_api_adapter"
         case completionEndpoint = "completion_endpoint"
         case embeddingsEndpoint = "embeddings_endpoint"
     }

@@ -220,6 +220,8 @@ pub struct ProviderDefaults {
     pub advanced_generation_options: Option<Vec<super::PortableOption>>,
     #[serde(default)]
     pub supports_parallel_tool_calls: Option<bool>,
+    #[serde(default)]
+    pub requires_parallel_tool_calls_false: Option<bool>,
 }
 
 /// Copies `src` into `dst` when `src` is set (last-writer-wins overlay).
@@ -314,6 +316,10 @@ macro_rules! merge_provider_defaults {
             &mut $dst.supports_parallel_tool_calls,
             &$src.supports_parallel_tool_calls,
         );
+        $op(
+            &mut $dst.requires_parallel_tool_calls_false,
+            &$src.requires_parallel_tool_calls_false,
+        );
     }};
 }
 
@@ -361,6 +367,7 @@ impl ProviderDefaults {
             || self.stop_supported.is_some()
             || self.advanced_generation_options.is_some()
             || self.supports_parallel_tool_calls.is_some()
+            || self.requires_parallel_tool_calls_false.is_some()
     }
 }
 
@@ -612,6 +619,35 @@ impl ReasoningHistoryWireField {
     }
 }
 
+/// The Anthropic `thinking.type` that turns thinking off on a route whose
+/// `reasoning_disable_supported` is true.
+///
+/// An enum rather than a free string: the wrong value is an HTTP 400 on every
+/// thinking-off call, and generation-5 Claude defaults thinking on, so a
+/// mistyped catalog value must fail capability loading instead of reaching
+/// the wire.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ThinkingOffType {
+    /// `{"type": "disabled"}`, the off switch through Claude Sonnet 5.
+    #[default]
+    Disabled,
+    /// `{"type": "between_tools"}` (Claude Sonnet 5.5). The model does not
+    /// think before responding; the short updates it writes between tool
+    /// calls come back as thinking blocks. `disabled` is a 400 on these
+    /// models.
+    BetweenTools,
+}
+
+impl ThinkingOffType {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Disabled => "disabled",
+            Self::BetweenTools => "between_tools",
+        }
+    }
+}
+
 /// Where a route's `tool_mode_parity` verdict came from.
 ///
 /// Both variants are declarations about a route, not measurements of one. A
@@ -666,10 +702,45 @@ impl CapabilityProbeStatus {
     }
 }
 
+/// The supported structured transport, distinct from presentation preferences.
+/// Prompt validation is a Harn capability, not a vendor schema guarantee.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum StructuredOutputStrategy {
+    NativeSchema,
+    ToolSchema,
+    FormatSchema,
+    #[default]
+    PromptValidation,
+    Unsupported,
+}
+
+impl StructuredOutputStrategy {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::NativeSchema => "native_schema",
+            Self::ToolSchema => "tool_schema",
+            Self::FormatSchema => "format_schema",
+            Self::PromptValidation => "prompt_validation",
+            Self::Unsupported => "unsupported",
+        }
+    }
+
+    pub(super) fn from_declaration(declaration: Option<&str>) -> Self {
+        match declaration {
+            Some("native") => Self::NativeSchema,
+            Some("tool_use") => Self::ToolSchema,
+            Some("format_kw") => Self::FormatSchema,
+            Some("delimited") | None => Self::PromptValidation,
+            Some(_) => Self::Unsupported,
+        }
+    }
+}
+
 /// Resolved capabilities for a `(provider, model)` pair. Unset rule
 /// fields resolve to `false` / empty / `None` so callers never have to
 /// unwrap an `Option<bool>` for what are really boolean gates.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct Capabilities {
     pub native_tools: bool,
     pub message_wire_format: WireDialect,
@@ -712,6 +783,7 @@ pub struct Capabilities {
     pub files_api_supported: bool,
     pub file_upload_wire_format: Option<String>,
     pub structured_output: Option<String>,
+    pub structured_output_strategy: StructuredOutputStrategy,
     /// Legacy mirror for CLI display and older callers.
     pub json_schema: Option<String>,
     pub prefers_xml_scaffolding: bool,
@@ -755,6 +827,8 @@ pub struct Capabilities {
     pub vision_supported: bool,
     pub image_url_input_supported: bool,
     pub preserve_thinking: bool,
+    /// Whether the route honors the preserve-thinking request knob.
+    pub honors_preserve_thinking_kwarg: bool,
     /// Typed provider-visible reasoning replay policy. Defaults to strip.
     pub reasoning_round_trip: ReasoningRoundTripPolicy,
     /// Provider-specific wire field used to replay Harn's private reasoning
@@ -779,6 +853,8 @@ pub struct Capabilities {
     /// the provider's own default ceiling.
     pub max_thinking_budget: Option<i64>,
     pub reasoning_disable_supported: bool,
+    /// See [`ProviderRule::thinking_off_type`].
+    pub thinking_off_type: ThinkingOffType,
     /// See [`ProviderRule::reasoning_required_for_tools`].
     pub reasoning_required_for_tools: bool,
     pub reasoning_text_promotable: bool,
@@ -797,6 +873,8 @@ pub struct Capabilities {
     pub allowed_tool_choice_modes: Vec<String>,
     pub requires_tool_result_adjacency: bool,
     pub supports_parallel_tool_calls: bool,
+    /// Whether the request must explicitly suppress parallel calls on the wire.
+    pub requires_parallel_tool_calls_false: bool,
     pub tools_exclude_response_format: bool,
     pub recommended_endpoint: Option<String>,
     pub text_tool_wire_format_supported: bool,
@@ -887,6 +965,7 @@ impl Default for Capabilities {
             files_api_supported: false,
             file_upload_wire_format: None,
             structured_output: None,
+            structured_output_strategy: StructuredOutputStrategy::default(),
             json_schema: None,
             prefers_xml_scaffolding: false,
             reserved_tool_call_token: false,
@@ -907,6 +986,7 @@ impl Default for Capabilities {
             vision_supported: false,
             image_url_input_supported: true,
             preserve_thinking: false,
+            honors_preserve_thinking_kwarg: false,
             reasoning_round_trip: ReasoningRoundTripPolicy::Strip,
             reasoning_history_wire_field: None,
             server_parser: "none".to_string(),
@@ -921,6 +1001,7 @@ impl Default for Capabilities {
             reasoning_none_supported: false,
             max_thinking_budget: None,
             reasoning_disable_supported: true,
+            thinking_off_type: ThinkingOffType::Disabled,
             reasoning_required_for_tools: false,
             reasoning_text_promotable: false,
             reasoning_wire_format: None,
@@ -936,6 +1017,7 @@ impl Default for Capabilities {
             allowed_tool_choice_modes: Vec::new(),
             requires_tool_result_adjacency: false,
             supports_parallel_tool_calls: true,
+            requires_parallel_tool_calls_false: false,
             tools_exclude_response_format: false,
             recommended_endpoint: None,
             text_tool_wire_format_supported: true,
@@ -954,5 +1036,27 @@ impl Default for Capabilities {
             system_message_placement: None,
             runtime_probe: None,
         }
+    }
+}
+
+#[cfg(test)]
+mod structured_strategy_tests {
+    use super::StructuredOutputStrategy as Strategy;
+
+    #[test]
+    fn absence_can_use_prompt_validation_but_explicit_denial_cannot() {
+        assert_eq!(Strategy::from_declaration(None), Strategy::PromptValidation);
+        assert_eq!(
+            Strategy::from_declaration(Some("delimited")),
+            Strategy::PromptValidation
+        );
+        assert_eq!(
+            Strategy::from_declaration(Some("none")),
+            Strategy::Unsupported
+        );
+        assert_eq!(
+            Strategy::from_declaration(Some("misspelled")),
+            Strategy::Unsupported
+        );
     }
 }

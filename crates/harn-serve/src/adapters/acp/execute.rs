@@ -256,8 +256,16 @@ pub(super) async fn execute_chunk(
             );
         }
     }
-    let mut mcp_globals =
-        load_host_mcp_clients(host_bridge.clone(), &served_host_capabilities).await;
+    // Host MCP servers are children of this session, so they start under its
+    // environment policy rather than the engine's whole environment. The
+    // policy is installed for the turn further down; declare it for the boot
+    // too, leaving any policy an enclosing surface installed in place.
+    let mut mcp_globals = {
+        let _environment = harn_vm::stdlib::process::declare_session_environment_if_absent(
+            setup.session_environment.clone(),
+        );
+        load_host_mcp_clients(host_bridge.clone(), &served_host_capabilities).await
+    };
     for global in AcpAmbientGlobal::ALL {
         let value = match global {
             AcpAmbientGlobal::Prompt => harn_vm::VmValue::String(arcstr::ArcStr::from(prompt.text)),
@@ -847,9 +855,8 @@ require_declared_operations_served = true
                 session_environment: harn_vm::security::SessionEnvironment::inherited(),
             },
         );
-        tokio::time::timeout(std::time::Duration::from_secs(10), execution)
+        harn_clock::test_support::within("importing turn", execution)
             .await
-            .expect("importing turn completes within the test bound")
             .expect("importing turn executes");
         responder.abort();
         drop(bridge);

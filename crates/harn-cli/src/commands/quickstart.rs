@@ -114,7 +114,8 @@ async fn probe_ollama(model: Option<&str>) -> OllamaProbe {
     let selected_model = model
         .filter(|value| !value.trim().is_empty())
         .map(|value| value.trim().to_string())
-        .unwrap_or_else(|| harn_vm::llm_config::default_model_for_provider("ollama"));
+        .or_else(|| harn_vm::llm_config::default_model_for_provider("ollama").ok())
+        .unwrap_or_default();
     let mut options = harn_vm::llm::OllamaReadinessOptions::new(selected_model);
     options.tags_timeout = Duration::from_secs(2);
     let result = harn_vm::llm::ollama_readiness(options).await;
@@ -162,27 +163,32 @@ fn provider_choice(
     let def = harn_vm::llm_config::provider_config(name)?;
     let auth_envs = harn_vm::llm_config::auth_env_names(&def.auth_env);
     let auth_available = harn_vm::llm::provider_auth_status(name).available;
+    let model = default_model_for_choice(name, model, ollama)?;
     Some(ProviderChoice {
         name: name.to_string(),
-        model: default_model_for_choice(name, model, ollama),
+        model,
         auth_envs,
         auth_available,
     })
 }
 
-fn default_model_for_choice(provider: &str, model: Option<&str>, ollama: &OllamaProbe) -> String {
+fn default_model_for_choice(
+    provider: &str,
+    model: Option<&str>,
+    ollama: &OllamaProbe,
+) -> Option<String> {
     if let Some(model) = model.filter(|value| !value.trim().is_empty()) {
-        return model.trim().to_string();
+        return Some(model.trim().to_string());
     }
     if provider == "ollama" {
         if let Some(model) = recommended_ollama_selector(&ollama.available_models) {
-            return model;
+            return Some(model);
         }
         if let Some(model) = ollama.available_models.first() {
-            return ollama_selector_for_model(model);
+            return Some(ollama_selector_for_model(model));
         }
     }
-    harn_vm::llm_config::default_model_for_provider(provider)
+    harn_vm::llm_config::default_model_for_provider(provider).ok()
 }
 
 fn recommended_ollama_selector(available_models: &[String]) -> Option<String> {
@@ -199,6 +205,25 @@ fn ordered_ollama_models(available_models: &[String]) -> Vec<String> {
     local_readiness::recommended_models_for_provider("ollama", available_models)
 }
 
+fn requested_choice<'a>(
+    choices: &'a [ProviderChoice],
+    provider: &str,
+) -> Result<&'a ProviderChoice, String> {
+    choices
+        .iter()
+        .find(|choice| choice.name == provider)
+        .ok_or_else(|| {
+            if harn_vm::llm_config::provider_config(provider).is_some() {
+                match harn_vm::llm_config::default_model_for_provider(provider) {
+                    Err(error) => error.to_string(),
+                    Ok(_) => format!("provider '{provider}' is unavailable"),
+                }
+            } else {
+                format!("unknown provider '{provider}'")
+            }
+        })
+}
+
 fn choose_non_interactive(
     args: &QuickstartArgs,
     choices: &[ProviderChoice],
@@ -206,10 +231,7 @@ fn choose_non_interactive(
 ) -> Result<ProviderSelection, String> {
     let choice = if let Some(provider) = args.provider.as_deref() {
         let provider = provider.trim();
-        choices
-            .iter()
-            .find(|choice| choice.name == provider)
-            .ok_or_else(|| format!("unknown provider '{provider}'"))?
+        requested_choice(choices, provider)?
     } else {
         choices
             .iter()
@@ -239,10 +261,7 @@ fn choose_interactive(
 ) -> Result<ProviderSelection, String> {
     let choice = if let Some(provider) = args.provider.as_deref() {
         let provider = provider.trim();
-        choices
-            .iter()
-            .find(|choice| choice.name == provider)
-            .ok_or_else(|| format!("unknown provider '{provider}'"))?
+        requested_choice(choices, provider)?
     } else {
         println!();
         println!("Choose a provider:");
@@ -617,10 +636,7 @@ fn providers_config_path() -> PathBuf {
     env::var_os("HARN_PROVIDERS_CONFIG")
         .filter(|value| !value.is_empty())
         .map(PathBuf::from)
-        .or_else(|| {
-            harn_vm::user_dirs::home_dir()
-                .map(|home| home.join(".config").join("harn").join("providers.toml"))
-        })
+        .or_else(harn_vm::llm_config::user_providers_config_path)
         .unwrap_or_else(|| PathBuf::from(".config/harn/providers.toml"))
 }
 

@@ -18,6 +18,8 @@
 //! - the effective per-file `CheckConfig` (exhaustively destructured so new
 //!   fields cannot be forgotten), the `--invariants` flag, the path string
 //!   diagnostics render with, and the file's cross-file lint-exemption set;
+//! - the driver folds the exact project-manifest identity into this base key,
+//!   matching the model aliases and capability overlays scoped to each check;
 //! - a recorded log of every filesystem probe the preflight scan made
 //!   beyond the import closure (template/asset reads, directory checks,
 //!   project-root resolution, the "did you mean" basename walk), replayed

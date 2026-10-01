@@ -16,6 +16,17 @@ use crate::llm::mock::{self, LlmMock, LlmMockFixture, MockError, DEFAULT_MOCK_SC
 struct FixtureHeaderV1 {
     schema_version: u32,
     strict_scopes: bool,
+    /// Optional replay-prefix handoff. See [`LlmMockFixture::live_after_calls`].
+    #[serde(default)]
+    live_after_calls: Option<u64>,
+}
+
+/// The validated file-level policy a v1 header declares.
+#[derive(Debug, PartialEq, Eq)]
+struct FixtureHeader {
+    schema_version: u32,
+    strict_scopes: bool,
+    live_after_calls: Option<u64>,
 }
 
 /// Parse a JSONL fixture file through the text-level contract owner.
@@ -53,9 +64,10 @@ pub fn parse_llm_mocks_jsonl(text: &str) -> Result<LlmMockFixture, String> {
         // Only the first non-empty line is eligible to be a version header.
         if !header_slot_seen {
             header_slot_seen = true;
-            if let Some((schema_version, strict_scopes)) = header {
-                fixture.schema_version = schema_version;
-                fixture.strict_scopes = strict_scopes;
+            if let Some(header) = header {
+                fixture.schema_version = header.schema_version;
+                fixture.strict_scopes = header.strict_scopes;
+                fixture.live_after_calls = header.live_after_calls;
                 continue;
             }
         } else if header.is_some() {
@@ -85,14 +97,25 @@ pub fn parse_llm_mocks_jsonl(text: &str) -> Result<LlmMockFixture, String> {
         entry_index += 1;
         fixture.mocks.push(mock);
     }
+    if let Some(live_after_calls) = fixture.live_after_calls {
+        let entries = fixture.mocks.len();
+        if usize::try_from(live_after_calls).map_or(true, |calls| calls > entries) {
+            return Err(format!(
+                "liveAfterCalls {live_after_calls} exceeds the {entries} fixture entries; \
+                 the replay prefix can never be served"
+            ));
+        }
+    }
     Ok(fixture)
 }
 
 /// Detect and validate a contract header. Returns `Ok(None)` when the line is
-/// an ordinary v0 entry (no `schemaVersion` key) and `Ok(Some((version,
-/// strict)))` for a valid v1 header. V1 headers are structurally closed and
-/// require `strictScopes`, so spelling errors never manufacture defaults.
-fn parse_fixture_header(value: &serde_json::Value) -> Result<Option<(u32, bool)>, String> {
+/// an ordinary v0 entry (no `schemaVersion` key) and `Ok(Some(header))` for a
+/// valid v1 header. V1 headers are structurally closed and require
+/// `strictScopes`, so spelling errors never manufacture defaults.
+/// `liveAfterCalls` is the one optional header field; zero is refused because
+/// a prefix that serves nothing is a live run with a fixture that never applies.
+fn parse_fixture_header(value: &serde_json::Value) -> Result<Option<FixtureHeader>, String> {
     let Some(object) = value.as_object() else {
         return Ok(None);
     };
@@ -108,7 +131,14 @@ fn parse_fixture_header(value: &serde_json::Value) -> Result<Option<(u32, bool)>
             mock::MAX_MOCK_SCHEMA_VERSION
         ));
     }
-    Ok(Some((schema_version, header.strict_scopes)))
+    if header.live_after_calls == Some(0) {
+        return Err("liveAfterCalls must be at least 1".to_string());
+    }
+    Ok(Some(FixtureHeader {
+        schema_version,
+        strict_scopes: header.strict_scopes,
+        live_after_calls: header.live_after_calls,
+    }))
 }
 
 /// Parse a single JSON value into an [`LlmMock`] using the v0 contract. Public
@@ -198,6 +228,14 @@ pub fn parse_llm_mock_value_versioned(
     };
 
     Ok(LlmMock {
+        effective_reasoning_effort: object
+            .get("effective_reasoning_effort")
+            .map(|value| {
+                serde_json::from_value(value.clone())
+                    .map_err(|error| format!("invalid effective_reasoning_effort: {error}"))
+            })
+            .transpose()?
+            .unwrap_or_default(),
         text,
         tool_calls,
         raw_tool_calls,
@@ -257,6 +295,13 @@ fn serialize_llm_mock_value(
 ) -> Result<serde_json::Value, String> {
     let versioned = v1_entry_id.is_some();
     let mut object = serde_json::Map::new();
+    if mock.effective_reasoning_effort != super::EffectiveReasoningEffort::NotReported {
+        object.insert(
+            "effective_reasoning_effort".into(),
+            serde_json::to_value(mock.effective_reasoning_effort)
+                .map_err(|error| format!("failed to serialize reasoning effort: {error}"))?,
+        );
+    }
     if let Some(match_pattern) = mock.match_pattern {
         object.insert(
             "match".to_string(),
@@ -555,6 +600,7 @@ fn required_v1_string_field(
 /// returns before reading them at v0, so authoring one here would be the very
 /// silent drop this check exists to stop.
 const V0_ENTRY_FIELDS: &[&str] = &[
+    "effective_reasoning_effort",
     "match",
     "consume_match",
     "text",
@@ -632,6 +678,7 @@ fn unknown_field_message(label: &str, key: &str, allowed_fields: &[&str]) -> Str
 }
 
 const V1_ENTRY_FIELDS: &[&str] = &[
+    "effective_reasoning_effort",
     "id",
     "scope",
     "consume",

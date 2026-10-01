@@ -177,6 +177,34 @@ Every other `gap_class` vetoes exactly as before. The judge keeps sole authority
 over artifact clauses, manner and negative clauses, and authorization, and loses
 it only over the one question a deterministic oracle has already answered.
 
+### Turn phase events
+
+Agent streams emit `turn_phase_changed` with a session id and a typed `phase`.
+ACP carries the same payload through `_harn/agentEvent`. Events arrive in turn
+order for each session.
+
+| Phase | Payload | Meaning |
+| --- | --- | --- |
+| `generating` | none | The actor is generating, including a re-ask or final wrap-up. |
+| `verifying` | `candidate_reply` | Completion review is running. The candidate reply is provisional. |
+| `terminal` | `reply`, `outcome` | Session finalization supplies the final visible reply and typed stop outcome. |
+
+Verification starts before deterministic checks, prechecks, model judges, and
+arbitration. `judge_started` still identifies a model judge call within that
+phase. A rejected candidate can lead to another `generating` phase.
+
+Hosts should hold or de-emphasize assistant text until `terminal` supplies
+`reply`. Neither `iteration_end` nor a `done` judge verdict makes text terminal.
+`outcome.kind` distinguishes natural completion from cancellation, failure,
+policy stops, and suspension. A withdrawn candidate can leave `reply` empty.
+Admission denials and initialization failures emit `terminal` with an empty
+reply before any provider call.
+The phase events survive canonical session replay. Older recordings without
+these events don't establish reply finality through this contract.
+
+Rust consumers must handle `AgentEvent::TurnPhaseChanged` in exhaustive event
+matches. Its `AgentTurnPhase` value carries the phase-specific reply fields.
+
 ### When the judge is not called at all
 
 Neither judge seam is called when the runtime already holds the answer. All seven
@@ -235,6 +263,41 @@ Projection receipts name their selected actions and resolved evidence roles in
 `completion_evidence_role` — and whose passing verification is therefore counted
 and then dropped from the bounded packet — is visible without arithmetic on the
 counts.
+
+### Optional negative completion precheck
+
+`JudgeConfig.precheck` accepts a `CompletionPrecheckConfig` from
+`std/agent/completion_precheck`. It runs after existing deterministic decisions,
+judge caps, and catalog skips, before announcing or invoking the full judge.
+It is absent by default and cannot authorize completion.
+
+The config contains `policy` and an optional `facts(session_id, evidence_id)`
+callback. The callback supplies observed commit and pull-request facts, each
+with `observed: bool?` and `evidence_refs: list<string>`. An absent callback
+means unknown facts. The runtime projects the requirement ledger, verifier
+reading, and last assistant claim into the remaining input. Accepted stops or
+amended goals bypass this precheck so the full judge owns their interpretation.
+
+The policy contains an `EvaluationPolicy`, an `achieved_ceiling` in `[0, 0.5)`,
+and a `missing_confidence_floor` in `(0.5, 1]`. One evaluation asks whether the
+requirements are achieved and which named requirement is missing. Only a
+negative answer meeting both authored thresholds returns `continue` with that
+gap. These thresholds are configuration, not a calibrated accuracy guarantee.
+When using a run-cost ceiling, install the conservative parent budget before
+the first actor call; a late precheck cannot retroactively establish accounting
+for earlier calls. The per-evaluation ceiling remains a separate bound.
+
+Positive, uncertain, malformed, and unavailable answers fall through to the
+full judge. Inputs exceeding 12,000 UTF-8 bytes are refused without truncation.
+Cancellation and parent-budget, deadline, or run-cost refusal return
+`control_stop`, which ends the checkpoint unverified. Existing deterministic
+verification and requirement rules retain their authority.
+
+The directive receipt records `precheck`, including its input digest, decision,
+and available evaluation receipt. A precheck veto leaves the full-judge
+invocation false and emits no `judge_started` event; the normal loop delivers
+the named gap to the next actor turn. Standalone callers can use
+`completion_precheck(llm, input, policy)` with the same typed input and policy.
 
 ## See also
 

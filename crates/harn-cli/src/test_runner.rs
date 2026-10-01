@@ -462,7 +462,11 @@ async fn run_tests_with_session_impl(
     all_results.extend(execution.infrastructure_errors);
     let total = all_results.len();
     let passed = all_results.iter().filter(|result| result.passed).count();
-    let failed = total - passed;
+    let skipped = all_results
+        .iter()
+        .filter(|result| result.skip_reason.is_some())
+        .count();
+    let failed = total - passed - skipped;
     let aggregate = AggregateTimings::from_results(
         collection_ms,
         module_preparation,
@@ -474,6 +478,7 @@ async fn run_tests_with_session_impl(
         results: all_results,
         passed,
         failed,
+        skipped,
         total,
         duration_ms: start.elapsed().as_millis() as u64,
         timing,
@@ -761,11 +766,13 @@ fn discover_test_cases(files: &[PathBuf], filter: Option<&str>, workers: usize) 
                     name: "<file error>".to_string(),
                     file: file.display().to_string(),
                     passed: false,
+                    skip_reason: None,
                     error: Some(format!("Failed to read {}: {e}", file.display())),
                     captured_output: None,
                     timeout: None,
                     duration_ms: 0,
                     phases: None,
+                    work: None,
                     timing_spans: Vec::new(),
                 });
                 continue;
@@ -779,11 +786,13 @@ fn discover_test_cases(files: &[PathBuf], filter: Option<&str>, workers: usize) 
                     name: "<file error>".to_string(),
                     file: file.display().to_string(),
                     passed: false,
+                    skip_reason: None,
                     error: Some(e),
                     captured_output: None,
                     timeout: None,
                     duration_ms: 0,
                     phases: None,
+                    work: None,
                     timing_spans: Vec::new(),
                 });
                 continue;
@@ -804,11 +813,13 @@ fn discover_test_cases(files: &[PathBuf], filter: Option<&str>, workers: usize) 
                 name: "<file error>".to_string(),
                 file: file.display().to_string(),
                 passed: false,
+                skip_reason: None,
                 error: Some(error),
                 captured_output: None,
                 timeout: None,
                 duration_ms: 0,
                 phases: None,
+                work: None,
                 timing_spans: Vec::new(),
             }),
         }
@@ -985,6 +996,7 @@ fn stale_baseline_error(cases: &[TestCase], baseline: &TimingBaseline) -> Option
         name: "<timing baseline error>".to_string(),
         file: String::new(),
         passed: false,
+        skip_reason: None,
         error: Some(format!(
             "timing baseline contains cases absent from the selected suite: {}",
             stale.join(", ")
@@ -993,6 +1005,7 @@ fn stale_baseline_error(cases: &[TestCase], baseline: &TimingBaseline) -> Option
         timeout: None,
         duration_ms: 0,
         phases: None,
+        work: None,
         timing_spans: Vec::new(),
     })
 }
@@ -1163,7 +1176,11 @@ async fn execute_cases(
                 TestRunEvent::TestFinished(result.clone()),
             );
             results.push(result);
-            if options.fail_fast && !results.last().is_some_and(|result| result.passed) {
+            if options.fail_fast
+                && results
+                    .last()
+                    .is_some_and(|result| !result.passed && result.skip_reason.is_none())
+            {
                 break;
             }
         }

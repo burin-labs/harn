@@ -8,8 +8,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
-use std::fs;
-use std::path::Path;
+use std::{fs, path::Path};
 
 use chrono::{DateTime, SecondsFormat, Utc};
 use serde::{Deserialize, Serialize};
@@ -434,6 +433,7 @@ pub struct BundleAttachment {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum SessionBundleError {
     Decode(String),
     Encode(String),

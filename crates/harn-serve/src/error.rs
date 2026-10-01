@@ -2,6 +2,7 @@ use std::collections::BTreeSet;
 use std::fmt::{Display, Formatter};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum DispatchError {
     /// The caller failed authentication (no credential matched any
     /// configured method). Adapters render this as HTTP 401.

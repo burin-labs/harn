@@ -39,6 +39,7 @@ const SESSION_MESSAGE_FACTS_KEY: &str = "_harn";
 enum SessionMessageFacts {
     Assistant {
         tool_calls: Vec<serde_json::Value>,
+        effective_reasoning_effort: crate::llm::EffectiveReasoningEffort,
     },
     ToolResult {
         tool_call_id: String,
@@ -121,7 +122,18 @@ pub(crate) fn attach_assistant_facts(message: VmValue, llm_result: &VmValue) -> 
                 })
         })
         .unwrap_or_default();
-    attach_session_message_facts(message, &SessionMessageFacts::Assistant { tool_calls })
+    let effective_reasoning_effort = llm_result
+        .as_dict()
+        .and_then(|result| result.get("effective_reasoning_effort"))
+        .and_then(|value| serde_json::from_value(crate::llm::helpers::vm_value_to_json(value)).ok())
+        .unwrap_or_default();
+    attach_session_message_facts(
+        message,
+        &SessionMessageFacts::Assistant {
+            tool_calls,
+            effective_reasoning_effort,
+        },
+    )
 }
 
 /// Attach the dispatch-owned result identity and outcome to a durable result

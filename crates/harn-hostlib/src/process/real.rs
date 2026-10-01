@@ -181,15 +181,26 @@ pub(crate) fn prepare_command(
     spec: &SpawnSpec,
     cleanup_token: Option<String>,
 ) -> Result<PreparedSpawn, ProcessError> {
+    validate_program(spec)?;
+    let command = process_sandbox::std_command_for_with_env_state(&spec.program, &spec.args)
+        .map_err(ProcessError::sandbox_setup)?;
+    prepare_command_from(spec, cleanup_token, command)
+}
+
+pub(crate) fn validate_program(spec: &SpawnSpec) -> Result<(), ProcessError> {
     if spec.program.is_empty() {
         return Err(ProcessError::InvalidArgv(
             "first element of argv must be a non-empty program name".to_string(),
         ));
     }
+    Ok(())
+}
 
-    let (mut command, session_closed) =
-        process_sandbox::std_command_for_with_env_state(&spec.program, &spec.args)
-            .map_err(|e| ProcessError::SandboxSetup(format!("{e:?}")))?;
+pub(crate) fn prepare_command_from(
+    spec: &SpawnSpec,
+    cleanup_token: Option<String>,
+    (mut command, session_closed): (Command, bool),
+) -> Result<PreparedSpawn, ProcessError> {
     let env_cleared = session_closed || spec.env_mode == EnvMode::Replace;
 
     let mut env: Vec<_> = spec
@@ -198,7 +209,11 @@ pub(crate) fn prepare_command(
         .map(|(key, value)| (key.clone(), value.clone()))
         .collect();
     let mut env_remove = spec.env_remove.clone();
-    process_sandbox::apply_active_rustc_wrapper_policy(&mut env, &mut env_remove);
+    process_sandbox::apply_active_rustc_wrapper_policy(
+        &mut env,
+        &mut env_remove,
+        spec.cwd.as_deref(),
+    );
 
     if let Some(cwd) = spec.cwd.as_ref() {
         process_sandbox::enforce_process_cwd(cwd)
@@ -246,7 +261,7 @@ pub(crate) fn prepare_command(
             let granted: std::collections::BTreeSet<String> = session
                 .receipts()
                 .into_iter()
-                .filter_map(|receipt| receipt.exposed_as_env)
+                .filter_map(|receipt| receipt.child_visible_env().map(str::to_string))
                 .collect();
             for (key, _) in std::env::vars_os() {
                 if let Some(name) = key.to_str() {

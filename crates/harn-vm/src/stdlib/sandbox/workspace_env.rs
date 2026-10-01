@@ -44,7 +44,10 @@ fn create_self_ignored_dir(
     Some(path)
 }
 
-pub(crate) fn workspace_local_tmpdir(policy: &CapabilityPolicy) -> Option<PathBuf> {
+/// The session's own temp dir, `.harn-tmp` in the first writable workspace
+/// root, created on first use. A confined child's `TMPDIR`, `TMP`, and `TEMP`
+/// point here. `None` when the profile does not scope paths.
+pub fn workspace_local_tmpdir(policy: &CapabilityPolicy) -> Option<PathBuf> {
     create_self_ignored_dir(
         policy,
         WORKSPACE_TMPDIR_NAME,
@@ -196,6 +199,22 @@ fn workspace_toolchain_env_with_package_cache(
             "SWIFTPM_MODULECACHE_OVERRIDE".to_string(),
             path("SWIFTPM_MODULECACHE_OVERRIDE", "swiftpm/modules"),
         ),
+        // clang and swift-frontend default their module cache to the per-user
+        // cache dir under `/var/folders`, and xcrun (behind every `/usr/bin`
+        // developer shim) keeps its lookup cache in the per-user temp dir.
+        // Neither follows TMPDIR, and the profile grants neither: the host's
+        // shared temp and cache dirs hold every other process's files, and a
+        // confined child that could write these caches could poison the
+        // user's own builds. Without the module cache swiftc cannot load the
+        // standard library at all.
+        (
+            "CLANG_MODULE_CACHE_PATH".to_string(),
+            path("CLANG_MODULE_CACHE_PATH", "clang-module-cache"),
+        ),
+        (
+            "xcrun_db".to_string(),
+            root.join("xcrun/xcrun_db").display().to_string(),
+        ),
         (
             "CARGO_TARGET_DIR".to_string(),
             path("CARGO_TARGET_DIR", "cargo-target"),
@@ -261,6 +280,13 @@ fn workspace_toolchain_env_with_package_cache(
             ("GIT_CONFIG_GLOBAL", home.join(".gitconfig")),
             ("PIP_CONFIG_FILE", home.join(".config/pip/pip.conf")),
         ] {
+            // An explicitly selected Git global config is the source the
+            // sandbox root discovery queried. Replacing it with ~/.gitconfig
+            // here would send the child to a different config after its roots
+            // have already been decided.
+            if key == "GIT_CONFIG_GLOBAL" && std::env::var_os(key).is_some() {
+                continue;
+            }
             if candidate.is_file() {
                 env.push((key.to_string(), candidate.display().to_string()));
             }

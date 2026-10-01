@@ -1015,16 +1015,15 @@
         "DEEPSEEK_API_KEY"
       ],
       "recommended": {
-        "selector": "deepseek:deepseek-v4-flash",
+        "selector": "deepseek:deepseek-flash",
         "provider": "deepseek",
-        "model": "deepseek-v4-flash",
-        "display_name": "DeepSeek V4 Flash",
+        "model": "deepseek-flash",
+        "display_name": "DeepSeek V4.1 Flash",
         "tool_format": "native",
         "harn_options": [
           "provider = \"deepseek\"",
-          "model = \"deepseek-v4-flash\"",
-          "tool_format = \"native\"",
-          "structured_output_mode = \"native_json\""
+          "model = \"deepseek-flash\"",
+          "tool_format = \"native\""
         ]
       },
       "capabilities": {
@@ -1044,7 +1043,7 @@
         "batch_api": false,
         "batch_discount_percent": null,
         "serving_tiers": [],
-        "usage_accounting_confidence": "high"
+        "usage_accounting_confidence": "medium"
       },
       "empirical": {
         "status": "not_recorded",
@@ -1057,8 +1056,13 @@
         "native_text_parity": null,
         "evidence": []
       },
-      "notes": [],
-      "caveats": [],
+      "notes": [
+        "DeepSeek V4.1 Flash is the current direct Flash route; the older deepseek-v4-flash ID temporarily serves the same model."
+      ],
+      "caveats": [
+        "Direct tool calling has not been probed in this refresh; the capability row follows DeepSeek's published API documentation.",
+        "Chinese public holidays receive off-peak rates but are not modeled; cost estimates on those weekdays may be high."
+      ],
       "mcp_notes": [],
       "local_setup_notes": []
     },
@@ -1076,7 +1080,7 @@
         "provider": "fireworks",
         "model": "accounts/fireworks/models/gpt-oss-120b",
         "display_name": "GPT-OSS 120B (Fireworks)",
-        "tool_format": "text",
+        "tool_format": "native",
         "harn_options": [
           "provider = \"fireworks\"",
           "model = \"accounts/fireworks/models/gpt-oss-120b\"",
@@ -1085,10 +1089,10 @@
         ]
       },
       "capabilities": {
-        "native_tools": false,
+        "native_tools": true,
         "text_tools": true,
-        "preferred_tool_format": "text",
-        "tool_mode_parity": "text_only",
+        "preferred_tool_format": "native",
+        "tool_mode_parity": "unknown",
         "structured_output_transport": "none",
         "structured_output_mode": "native_json",
         "streaming": true,
@@ -1096,7 +1100,7 @@
           "effort",
           "reasoning_effort"
         ],
-        "prompt_or_context_cache": false,
+        "prompt_or_context_cache": true,
         "batch_api": true,
         "batch_discount_percent": 50,
         "serving_tiers": [],
@@ -2118,14 +2122,14 @@
         "NIM_API_KEY"
       ],
       "recommended": {
-        "selector": "nvidia:nvidia/kimi-k2.6",
+        "selector": "nvidia:nvidia/kimi-k3",
         "provider": "nvidia",
-        "model": "nvidia/kimi-k2.6",
-        "display_name": "Kimi K2.6 (NVIDIA NIM)",
+        "model": "nvidia/kimi-k3",
+        "display_name": "Kimi K3 (NVIDIA NIM)",
         "tool_format": "native",
         "harn_options": [
           "provider = \"nvidia\"",
-          "model = \"nvidia/kimi-k2.6\"",
+          "model = \"nvidia/kimi-k3\"",
           "tool_format = \"native\"",
           "structured_output_mode = \"native_json\""
         ]
@@ -2138,14 +2142,12 @@
         "structured_output_transport": "native",
         "structured_output_mode": "native_json",
         "streaming": true,
-        "reasoning_knobs": [
-          "enabled"
-        ],
-        "prompt_or_context_cache": true,
+        "reasoning_knobs": [],
+        "prompt_or_context_cache": false,
         "batch_api": false,
         "batch_discount_percent": null,
         "serving_tiers": [],
-        "usage_accounting_confidence": "high"
+        "usage_accounting_confidence": "provider_default"
       },
       "empirical": {
         "status": "not_recorded",
@@ -2650,31 +2652,30 @@
         "TOGETHER_AI_API_KEY"
       ],
       "recommended": {
-        "selector": "together:openai/gpt-oss-20b",
+        "selector": "together:MiniMaxAI/MiniMax-M3",
         "provider": "together",
-        "model": "openai/gpt-oss-20b",
-        "display_name": "GPT-OSS 20B (Together)",
-        "tool_format": "native",
+        "model": "MiniMaxAI/MiniMax-M3",
+        "display_name": "MiniMax M3 (Together)",
+        "tool_format": "text",
         "harn_options": [
           "provider = \"together\"",
-          "model = \"openai/gpt-oss-20b\"",
-          "tool_format = \"native\"",
+          "model = \"MiniMaxAI/MiniMax-M3\"",
+          "tool_format = \"text\"",
           "structured_output_mode = \"native_json\""
         ]
       },
       "capabilities": {
         "native_tools": true,
         "text_tools": true,
-        "preferred_tool_format": "native",
-        "tool_mode_parity": "unknown",
+        "preferred_tool_format": "text",
+        "tool_mode_parity": "native_unreliable",
         "structured_output_transport": "native",
         "structured_output_mode": "native_json",
         "streaming": true,
         "reasoning_knobs": [
-          "effort",
-          "reasoning_effort"
+          "enabled"
         ],
-        "prompt_or_context_cache": false,
+        "prompt_or_context_cache": true,
         "batch_api": true,
         "batch_discount_percent": 50,
         "serving_tiers": [],
@@ -2692,7 +2693,9 @@
         "evidence": []
       },
       "notes": [],
-      "caveats": [],
+      "caveats": [
+        "Family-on-host consistency pin: Together MiniMax-M2.7 native was 1/5 fidelity in the 2026-06-24 sweep; no M3-on-Together probe yet, so inherit text rather than an optimistic native pin."
+      ],
       "mcp_notes": [],
       "local_setup_notes": []
     },

@@ -10,6 +10,29 @@ pub fn use_phase(p: Phase) -> string { return p }
 "#;
 
 #[test]
+fn closed_string_comparisons_resolve_aliases_and_preserve_open_domains() {
+    for (ty, expression, rejected) in [
+        ("Phase", "p == \"prepare\"", true),
+        ("Phase", "\"prepare\" != p", true),
+        ("Phase", "p == \"submit\"", false),
+        ("\"submit\"", "p == \"prepare\"", true),
+        ("string", "p == \"prepare\"", false),
+        ("Phase | string", "p == \"prepare\"", false),
+        ("Phase?", "p == nil", false),
+        ("Phase", "\"submit\" == \"prepare\"", false),
+    ] {
+        let diagnostics = errors(&format!(
+            "{PHASE}pub fn compare(p: {ty}) -> bool {{ return {expression} }}"
+        ));
+        assert_eq!(
+            !diagnostics.is_empty(),
+            rejected,
+            "{ty}: {expression}: {diagnostics:?}"
+        );
+    }
+}
+
+#[test]
 fn rejects_string_literal_not_in_union() {
     let errs = errors(&format!(
         "{PHASE}pub fn caller() -> string {{ return use_phase(\"prepare\") }}"

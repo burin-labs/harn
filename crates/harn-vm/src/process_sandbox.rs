@@ -4,8 +4,8 @@
 //! `harn-hostlib` deterministic-tool builtins) must funnel every spawn
 //! through these helpers so the active orchestration capability policy is
 //! enforced — Linux seccomp/landlock filters via `pre_exec`, macOS
-//! `sandbox-exec` wrapping, Windows AppContainer + Job Object launches
-//! through `command_output`, plus workspace-root cwd enforcement.
+//! `sandbox-exec` wrapping, no OS confinement on Windows (a warning, or a
+//! refusal under `os_hardened`), plus workspace-root cwd enforcement.
 //!
 //! The same surface also exposes [`check_fs_path_scope`] so embedders that
 //! resolve host *paths* on behalf of Harn scripts (the `harn-hostlib`
@@ -20,16 +20,17 @@
 pub use crate::stdlib::sandbox::{
     active_backend_available, active_backend_filesystem_available,
     active_backend_filesystem_mechanism, active_backend_name, active_workspace_process_env,
-    apply_active_rustc_wrapper_policy, check_fs_path_scope, command_output,
-    deterministic_message_locale_env, enforce_process_cwd, infer_process_sandbox_mechanism,
-    is_process_sandbox_signal, process_spawn_error, process_violation_error,
-    push_process_sandbox_scope, render_policy_root, std_command_for,
-    std_command_for_with_env_state, tokio_command_for, FsAccess, ProcessCommandConfig,
+    apply_active_rustc_wrapper_policy, check_fs_path_scope, command_output, conformance,
+    deterministic_message_locale_env, enforce_process_cwd, enforcement, host_confinement,
+    infer_process_sandbox_mechanism, is_process_sandbox_signal, process_spawn_error,
+    process_violation_error, push_process_sandbox_scope, render_policy_root, rustc_wrapper,
+    session_std_command, session_tokio_command, std_command_for, std_command_for_with_env_state,
+    tokio_command_for, workspace_local_tmpdir, FsAccess, ProcessCommandConfig,
     ProcessSandboxAssessment, ProcessSandboxDenialReporting, ProcessSandboxGrants,
     ProcessSandboxMechanism, ProcessSandboxOperation, ProcessSandboxRefusal,
     ProcessSandboxReportingContext, ProcessSandboxScope, ProcessSandboxScopeGuard,
     SandboxMechanism, SandboxMechanismAvailability, SandboxMechanismUnavailable,
-    SandboxRequirement, SandboxViolation, MESSAGE_LOCALE_OVERRIDE_ENV,
+    SandboxRequirement, SandboxViolation, MESSAGE_LOCALE_OVERRIDE_ENV, SANDBOX_CONFINEMENT_SCHEMA,
 };
 
 /// The subcommand the namespace helper is invoked as, and the flags that
@@ -63,6 +64,8 @@ pub const NETNS_SECCOMP_FLAG: &str = "--seccomp-hex";
 /// name costs two lines there for no benefit to a reader.
 #[cfg(target_os = "linux")]
 pub use crate::stdlib::sandbox::linux::keep_ruleset_across_exec;
+#[cfg(target_os = "linux")]
+pub use crate::stdlib::sandbox::linux::{command_for_reexec, ReexecConfinement};
 /// Confinement an embedder builds here and enters in a process it re-execs.
 ///
 /// An embedder that spawns the payload directly never needs this: `pre_exec`

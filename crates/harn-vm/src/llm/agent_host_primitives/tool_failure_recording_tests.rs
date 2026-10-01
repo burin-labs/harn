@@ -1,18 +1,6 @@
-//! A Harn tool handler that returns a plain dict describing failure — never a
-//! throw — must be recorded as a failed call, and the failure text must reach
-//! the transcript the next turn reads.
-//!
-//! Before harn#7893, `carries_typed_outcome` only recognized a typed struct
-//! return, so a plain `{ok: false, error: "..."}` dict was display-stringified
-//! before the failure detector ever saw it, and the detector was then handed
-//! unparseable prose instead of JSON. Every non-throwing failure — `{ok:
-//! false}`, `{success: false}`, `{status: "error"}`, `{isError: true}` (the
-//! MCP shape) — read as a success, and only an explicit `throw` recorded a
-//! failure. This exercises the real dispatch entry point end to end (not just
-//! the classifier unit tests in `agent_tools/handler_result.rs`), through a
-//! compiled Harn handler closure exactly the way a `tool_define`d tool
-//! dispatches, so a regression anywhere between classification and the
-//! recorded tool-result envelope fails here.
+//! Typed handler failures must reach the dispatch record and the next turn's
+//! observation. These tests compile real Harn closures and exercise the public
+//! dispatch primitive, including successful outcomes and host-call boundaries.
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -107,8 +95,10 @@ async fn dispatch(tool_name: &str, handler_source: &str) -> serde_json::Value {
         "name": tool_name,
         "arguments": {},
     }));
+    let mut vm = crate::vm::Vm::new();
+    crate::register_vm_stdlib(&mut vm);
     let result = host_agent_dispatch_tool_call(
-        crate::vm::AsyncBuiltinCtx::for_test(crate::vm::Vm::new()),
+        crate::vm::AsyncBuiltinCtx::for_test(vm),
         call,
         Some(&tools),
         &DictMap::new(),
@@ -139,14 +129,14 @@ async fn dispatch_trusted(tool_name: &str, handler_source: &str) -> serde_json::
     crate::llm::helpers::vm_value_to_json(&result)
 }
 
-/// The shape the maturity gate scored 0/3: a handler returns `{ok: false,
-/// error: "..."}` without throwing. The dispatch record must say the call
-/// failed, and the failure text must be what the next turn reads back.
+/// A nominal failure must be recorded as failed, with its feedback available
+/// to the next turn.
 #[tokio::test]
 async fn a_non_throwing_ok_false_return_is_recorded_as_a_failed_call() {
     let result = dispatch(
         "flaky_write",
-        r#"fn handler(request: dict) { return {ok: false, error: "disk full"} }"#,
+        r#"struct WriteOutcome { ok: bool, error: string }
+        fn handler(request: dict) -> WriteOutcome { return WriteOutcome{ok: false, error: "disk full"} }"#,
     )
     .await;
 
@@ -174,13 +164,14 @@ async fn a_non_throwing_ok_false_return_is_recorded_as_a_failed_call() {
     );
 }
 
-/// The MCP-shaped sibling (`isError: true` rather than `ok`/`success`), so the
-/// fix is proven across the documented failure vocabulary, not one key.
+/// MCP-shaped producer data is paired with an explicit handler failure.
 #[tokio::test]
 async fn an_is_error_true_return_is_recorded_as_a_failed_call() {
     let result = dispatch(
         "flaky_mcp_call",
-        r#"fn handler(request: dict) { return {isError: true, message: "server unavailable"} }"#,
+        r#"fn handler(request: dict) {
+            return {schema: "harn.agent_tool_handler_result.v2", outcome: "error", text: "server unavailable", data: {isError: true}}
+        }"#,
     )
     .await;
 
@@ -193,13 +184,13 @@ async fn an_is_error_true_return_is_recorded_as_a_failed_call() {
     );
 }
 
-/// The negative control: an ordinary successful plain-dict return must not be
-/// swept into failure by a classifier that got too eager.
+/// A nominal success is the negative control for declared failures.
 #[tokio::test]
 async fn a_non_throwing_ok_true_return_is_recorded_as_a_successful_call() {
     let result = dispatch(
         "reliable_write",
-        r#"fn handler(request: dict) { return {ok: true, message: "wrote 12 bytes"} }"#,
+        r#"struct WriteOutcome { ok: bool, message: string }
+        fn handler(request: dict) -> WriteOutcome { return WriteOutcome{ok: true, message: "wrote 12 bytes"} }"#,
     )
     .await;
 
@@ -242,9 +233,10 @@ async fn host_call_inside_tool_handler_fails_loudly_while_pipeline_call_remains_
 async fn command_hook_consent_reaches_the_host_without_opening_other_handler_calls() {
     let calls = Arc::new(AtomicUsize::new(0));
     let _bridge = crate::install_host_call_bridge(Arc::new(ConsentBridge(calls.clone())));
-    let source = r#"fn handler(request: dict) {
+    let source = r#"struct ConsentOutcome { ok: bool }
+    fn handler(request: dict) {
         const response = host_call("permission.request", {})
-        return {ok: response.approved}
+        return ConsentOutcome{ok: response.approved}
     }"#;
 
     let direct = dispatch_trusted("direct_consent", source).await;

@@ -21,16 +21,20 @@ if ! grep -Fq 'benchmark_source_ref and benchmark_source_sha must be provided to
   echo "build_revision_workflow_test: benchmark source ref/SHA must be an atomic contract" >&2
   exit 1
 fi
-if ! grep -Fq 'an explicit benchmark source must be dispatched from main so current policy is authoritative' "$release_workflow"; then
-  echo "build_revision_workflow_test: immutable benchmark sources must use current-main policy" >&2
+if ! grep -Fq 'Policy from ${REF_TYPE}/${REF_NAME} will benchmark immutable source' "$release_workflow"; then
+  echo "build_revision_workflow_test: immutable benchmark sources must name the evaluated policy ref" >&2
+  exit 1
+fi
+if grep -Fq 'an explicit benchmark source must be dispatched from main' "$release_workflow"; then
+  echo "build_revision_workflow_test: non-publishing benchmarks must permit branch policy experiments" >&2
   exit 1
 fi
 if ! grep -Fq 'benchmark source resolved to $actual_source_sha; expected $EXPECTED_SOURCE_SHA' "$release_workflow"; then
   echo "build_revision_workflow_test: benchmark source mismatches must fail closed" >&2
   exit 1
 fi
-if ! grep -Fq "format('benchmark-{0}', inputs.benchmark_source_sha)" "$release_workflow"; then
-  echo "build_revision_workflow_test: immutable benchmark sources need a source-qualified concurrency lane" >&2
+if ! grep -Fq "format('benchmark-{0}-{1}', inputs.benchmark_source_sha, github.sha)" "$release_workflow"; then
+  echo "build_revision_workflow_test: immutable benchmark sources need a source-and-policy-qualified concurrency lane" >&2
   exit 1
 fi
 

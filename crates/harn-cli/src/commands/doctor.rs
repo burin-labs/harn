@@ -20,12 +20,14 @@ use crate::env_guard::ScopedEnvVar;
 use crate::json_envelope::{to_string_pretty, JsonEnvelope, JsonOutput};
 use crate::package;
 
+mod credentials;
 mod next_step;
 mod process_sandbox;
 mod repo_checks;
 mod rust_toolchain;
 mod targets;
 
+use credentials::check_provider_credentials;
 use next_step::next_step_suggestion;
 use process_sandbox::{process_sandbox_info, ProcessSandboxInfo};
 use repo_checks::{check_protocol_artifacts, find_harn_repo_root};
@@ -581,101 +583,6 @@ fn check_harn_version() -> DoctorCheck {
     }
 }
 
-fn check_provider_credentials() -> Vec<DoctorCheck> {
-    let mut providers = llm_config::provider_names();
-    providers.sort();
-
-    let mut checks = Vec::new();
-    let mut any_credential_path = false;
-    for name in &providers {
-        let Some(def) = llm_config::provider_config(name) else {
-            continue;
-        };
-        let auth = harn_vm::llm::provider_auth_status(name);
-        let envs = llm_config::auth_env_names(&def.auth_env);
-        let (status, detail, fix_command) = match auth.credential_status {
-            harn_vm::llm::ProviderCredentialStatus::Ok => {
-                any_credential_path = true;
-                (DoctorStatus::Ok, "credential present".to_string(), None)
-            }
-            harn_vm::llm::ProviderCredentialStatus::Deferred => {
-                any_credential_path = true;
-                (
-                    DoctorStatus::Ok,
-                    "credential resolution deferred to platform provider".to_string(),
-                    None,
-                )
-            }
-            harn_vm::llm::ProviderCredentialStatus::NotRequired => {
-                (DoctorStatus::Skip, "no key required".to_string(), None)
-            }
-            status @ (harn_vm::llm::ProviderCredentialStatus::Missing
-            | harn_vm::llm::ProviderCredentialStatus::NeedsUserApproval) => {
-                let detail = if status == harn_vm::llm::ProviderCredentialStatus::NeedsUserApproval
-                {
-                    "stored; needs a Keychain approval this process cannot show".to_string()
-                } else if envs.is_empty() {
-                    "credential unavailable".to_string()
-                } else {
-                    format!("missing: {}", envs.join(", "))
-                };
-                let fix = envs.first().map(|env| format!("export {env}=…"));
-                (DoctorStatus::Warn, detail, fix)
-            }
-        };
-        checks.push(DoctorCheck {
-            id: format!("creds:{name}"),
-            status,
-            label: format!("creds:{name}"),
-            detail,
-            fix_command,
-            docs_url: Some("https://harnlang.com/llm/providers.html".to_string()),
-            blocks: Vec::new(),
-        });
-    }
-
-    // Add an aggregate row that fails only when no provider has creds AND
-    // ollama appears unreachable. Reachability is best-effort: we only flag
-    // FAIL when the synchronous `ollama --version` probe errors. Otherwise
-    // demote to WARN so users without local models still get a softer signal.
-    let ollama_present = which::which("ollama").is_ok();
-    let aggregate_status = if any_credential_path {
-        DoctorStatus::Ok
-    } else if ollama_present {
-        DoctorStatus::Warn
-    } else {
-        DoctorStatus::Fail
-    };
-    let aggregate_detail = if any_credential_path {
-        "at least one provider credential path is available".to_string()
-    } else if ollama_present {
-        "no cloud credentials; falling back to local Ollama".to_string()
-    } else {
-        "no provider credentials and no local Ollama".to_string()
-    };
-    let aggregate_blocks: Vec<&'static str> = if aggregate_status == DoctorStatus::Fail {
-        vec!["scripting"]
-    } else {
-        Vec::new()
-    };
-    let aggregate_fix = if aggregate_status == DoctorStatus::Fail {
-        Some("harn models recommend && harn quickstart --non-interactive".to_string())
-    } else {
-        None
-    };
-    checks.push(DoctorCheck {
-        id: "creds:any".to_string(),
-        status: aggregate_status,
-        label: "credentials".to_string(),
-        detail: aggregate_detail,
-        fix_command: aggregate_fix,
-        docs_url: Some("https://harnlang.com/llm/providers.html".to_string()),
-        blocks: aggregate_blocks,
-    });
-
-    checks
-}
-
 async fn check_ollama() -> DoctorCheck {
     let binary = which::which("ollama").ok();
     check_ollama_at(binary.as_deref()).await
@@ -999,10 +906,7 @@ fn check_platform_capabilities() -> Vec<DoctorCheck> {
             DoctorStatus::Warn
         },
         label: "process-sandbox".to_string(),
-        detail: format!(
-            "backend={} filesystem_mechanism={} active={}",
-            sandbox.backend, sandbox.filesystem_mechanism, sandbox.active
-        ),
+        detail: sandbox.detail(),
         ..Default::default()
     });
 

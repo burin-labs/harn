@@ -178,6 +178,18 @@ pub(super) fn probe_request_payload_for_format(
         tool_choice = Some(json!("required"));
     }
     let caps = crate::llm::capabilities::lookup(provider, model);
+    // A route whose row rejects forced tool choice (Fable 5.1, Opus 5.5,
+    // Sonnet 5.5) answers every forced shape with a 400, so a forced probe
+    // could never measure it. Ask with `auto`, the choice real calls reach
+    // through `relax_rejected_forced_tool_choice`: the probe exposes one tool
+    // and its contract tells the model to call it.
+    if tool_choice
+        .as_ref()
+        .is_some_and(crate::llm::providers::anthropic::tool_choice_forces_tool_use)
+        && !crate::llm::providers::anthropic::forced_tool_choice_allowed(&caps)
+    {
+        tool_choice = Some(json!("auto"));
+    }
     let thinking = crate::llm::helpers::resolve_catalog_thinking_config(
         &model_defaults,
         provider,
@@ -194,7 +206,9 @@ pub(super) fn probe_request_payload_for_format(
     );
     let max_tokens = tool_probe_max_tokens(default_int("max_tokens"), &thinking);
     let mut payload = LlmRequestPayload {
+        reasoning_effort_source: crate::llm::ReasoningEffortSource::Request,
         data_controls: crate::llm_config::DataPosture::Default,
+        inference_boundary: None,
         provider: provider.to_string(),
         model: model.to_string(),
         region: None,
@@ -219,6 +233,7 @@ pub(super) fn probe_request_payload_for_format(
         presence_penalty: None,
         parallel_tool_calls: None,
         provider_contract_probe: None,
+        portable_option_intent: Default::default(),
         fast: false,
         reasoning_mode: None,
         output_format: OutputFormat::Text,

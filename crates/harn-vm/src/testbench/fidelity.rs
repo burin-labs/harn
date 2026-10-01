@@ -323,6 +323,16 @@ fn compare_kind(
                 request_digest: replay_req,
                 response: replay_res,
             },
+        )
+        | (
+            DecisionEvaluation {
+                request_digest: recorded_req,
+                response: recorded_res,
+            },
+            DecisionEvaluation {
+                request_digest: replay_req,
+                response: replay_res,
+            },
         ) => {
             if recorded_req != replay_req {
                 out.push(Divergence {
@@ -707,6 +717,7 @@ fn record_kind_tag(kind: &TapeRecordKind) -> &'static str {
         TapeRecordKind::ClockRead { .. } => "clock_read",
         TapeRecordKind::ClockSleep { .. } => "clock_sleep",
         TapeRecordKind::LlmCall { .. } => "llm_call",
+        TapeRecordKind::DecisionEvaluation { .. } => "decision_evaluation",
         TapeRecordKind::FileRead { .. } => "file_read",
         TapeRecordKind::FileWrite { .. } => "file_write",
         TapeRecordKind::FileDelete { .. } => "file_delete",

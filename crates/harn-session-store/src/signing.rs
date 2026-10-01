@@ -105,6 +105,7 @@ fn finalize_sha256(hasher: Sha256) -> String {
 
 /// Verify a per-event signature.
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum VerifyError {
     NotSigned,
     UnsupportedAlgorithm(String),

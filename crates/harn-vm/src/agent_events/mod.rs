@@ -34,6 +34,7 @@ mod sinks;
 mod terminal;
 mod terminal_suspension;
 mod tool;
+mod turn_phase;
 mod worker;
 
 #[cfg(test)]
@@ -45,8 +46,7 @@ mod tool_taxonomy_tests;
 
 pub use agent::{
     AgentEvent, FinalWrapupToolCallParseStatus, FinalWrapupUnconsumedToolCall, PurposeLabelSource,
-    StagedWriteSummary, ToolBatchDisposition, ToolBatchDispositionReceipt, ToolBatchPhase,
-    ToolBatchProposalStatus,
+    ToolBatchDisposition, ToolBatchDispositionReceipt, ToolBatchPhase, ToolBatchProposalStatus,
 };
 pub use durable_projection::DurableAgentEventProjector;
 pub use host_injection::{
@@ -75,9 +75,10 @@ pub use terminal::{
 };
 pub use terminal_suspension::{AgentTerminalSuspension, ResumeWait};
 pub use tool::{
-    DenialGate, SideEffectCeilingDetails, SideEffectCeilingRemedy, ToolCallErrorCategory,
-    ToolCallStatus, ToolDenial, ToolExecutor, ToolMutationStatus,
+    DenialGate, SideEffectCeilingDetails, SideEffectCeilingRemedy, StagedWriteSummary,
+    ToolCallErrorCategory, ToolCallStatus, ToolDenial, ToolExecutor, ToolMutationStatus,
 };
+pub use turn_phase::AgentTurnPhase;
 pub use worker::{
     AgentRunRef, DelegatedJoinBoundaries, DelegatedRunLineage, FsWatchEvent,
     SubagentTerminalStatus, WorkerEvent,

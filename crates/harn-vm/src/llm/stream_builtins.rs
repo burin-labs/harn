@@ -87,7 +87,7 @@ fn llm_stream_chunk(
     visible_delta: &str,
     partial: &str,
     stop_reason: Option<&str>,
-    usage: Option<VmValue>,
+    result: Option<&super::api::LlmResult>,
 ) -> VmValue {
     let mut dict = std::collections::BTreeMap::new();
     dict.put_str("delta", delta);
@@ -106,8 +106,15 @@ fn llm_stream_chunk(
     // `llm_call` publishes (see `build_usage_value`). Without it a streaming
     // caller can render tokens but can never report what the turn cost or how
     // fast the server prefilled and decoded it.
-    if let Some(usage) = usage {
-        dict.insert("usage".to_string(), usage);
+    if let Some(result) = result {
+        dict.insert("usage".to_string(), super::api::build_usage_value(result));
+        dict.insert(
+            "effective_reasoning_effort".to_string(),
+            crate::schema::json_to_vm_value(
+                &serde_json::to_value(&result.telemetry.effective_reasoning_effort)
+                    .expect("effort observation serializes"),
+            ),
+        );
     }
     VmValue::dict(dict)
 }
@@ -205,7 +212,7 @@ pub(super) async fn llm_stream_call_impl(args: Vec<VmValue>) -> Result<VmValue, 
                                 "",
                                 &partial,
                                 result.stop_reason.as_deref(),
-                                Some(super::api::build_usage_value(&result)),
+                                Some(&result),
                             );
                             let _ = stream_tx.send(Ok(final_chunk)).await;
                         }
@@ -404,6 +411,11 @@ mod tests {
                         .expect("stream should produce first chunk")?;
                 assert_eq!(dict_string(&first_chunk, "delta").as_deref(), Some("hello"));
                 drop(first_chunk);
+                let terminal = receiver.recv().await.expect("terminal chunk")?;
+                assert_eq!(
+                    crate::llm::vm_value_to_json(&terminal)["effective_reasoning_effort"],
+                    serde_json::json!({"status": "not_reported"}),
+                );
 
                 let profile = crate::profile::build(&crate::tracing::peek_spans());
                 let first_token_ms = profile

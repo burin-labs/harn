@@ -9,18 +9,10 @@ use super::host_injection::{
     AttachmentFlavor, AttachmentRendering, HostInjectionProvenance, InjectionDelivery,
     SanitizationVerdict,
 };
-use super::tool::{ToolCallErrorCategory, ToolCallStatus, ToolExecutor, ToolMutationStatus};
+use super::tool::{
+    StagedWriteSummary, ToolCallErrorCategory, ToolCallStatus, ToolExecutor, ToolMutationStatus,
+};
 use super::worker::{FsWatchEvent, SubagentTerminalStatus, WorkerEvent};
-
-/// Reviewable summary of one path in the staged filesystem overlay.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct StagedWriteSummary {
-    pub path: String,
-    pub kind: String,
-    pub byte_delta: i64,
-    pub snapshot_id: Option<String>,
-}
 
 /// The dependency/effect phase assigned to one model-proposed tool call.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -188,7 +180,7 @@ pub enum AgentEvent {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         changed_paths: Option<Vec<String>>,
         /// Producer-owned facts declared by an
-        /// `harn.agent_tool_handler_result.v1` envelope. The dispatcher
+        /// `harn.agent_tool_handler_result.v2` envelope. The dispatcher
         /// projects the complete map without interpreting producer-specific
         /// keys or parsing rendered output.
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -433,13 +425,15 @@ pub enum AgentEvent {
         skipped: bool,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         reason: Option<String>,
-        /// True when this `verdict: "pass"` is the result of the step-judge
-        /// model itself erroring and `fail_open` swallowing the error — the
-        /// turn proceeded, but the adversarial-review surface was UNAVAILABLE
-        /// (not a genuine approval). Lets telemetry tell an inert reviewer
-        /// apart from a real pass. Mirrors `reason: "judge_unavailable"`.
+        /// The judge could not review the turn; it proceeded as `unavailable`, not a pass.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         judge_error: bool,
+        /// Closed-set cause when `judge_error`: schema_unsupported, model_unconfigured, ...
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        unavailable_reason: Option<String>,
+        /// Unavailable decisions so far in this loop, including this one.
+        #[serde(default, skip_serializing_if = "is_zero_usize")]
+        unavailable_count: usize,
         on_veto: String,
         input_tokens: u64,
         output_tokens: u64,
@@ -1086,6 +1080,14 @@ pub enum AgentEvent {
         catalog_parity: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         override_reason: Option<String>,
+        /// Format actually sent after explicit-route steering. Absence keeps
+        /// older records distinct from a route that made no change.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        applied_format: Option<String>,
+        /// Whether the requested format was changed for this route. Preserve
+        /// explicit false rather than inferring it from a missing field.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        steered: Option<bool>,
     },
     /// Emitted when a `tool_caller` middleware (see std/llm/tool_middleware)
     /// attaches structured audit metadata to a tool call — typically a
@@ -1369,6 +1371,13 @@ pub enum AgentEvent {
         #[serde(default, skip_serializing_if = "is_false")]
         unreported: bool,
     },
+    /// Phase and reply finality for one agent-loop invocation. Consumers must
+    /// not treat assistant chunks or iteration endings as terminal replies.
+    TurnPhaseChanged {
+        session_id: String,
+        #[serde(flatten)]
+        phase: super::AgentTurnPhase,
+    },
 }
 
 fn is_zero_usize(value: &usize) -> bool {
@@ -1399,7 +1408,8 @@ impl AgentEvent {
 
     pub fn session_id(&self) -> &str {
         match self {
-            Self::AgentMessageChunk { session_id, .. }
+            Self::TurnPhaseChanged { session_id, .. }
+            | Self::AgentMessageChunk { session_id, .. }
             | Self::AgentThoughtChunk { session_id, .. }
             | Self::UserMessage { session_id, .. }
             | Self::ToolCall { session_id, .. }

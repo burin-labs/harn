@@ -21,6 +21,21 @@ mode requires an explicit target subset and either `standard` or `fast`. It
 compiles and runs the binary-size gate, but cannot sign, notarize, package,
 upload, or save a cache.
 
+The `source_candidate` dispatch input defaults to false. When true, it requires
+the main branch and policy runners, excludes warm and benchmark inputs, and
+uses the same five-target candidate builder, signing, notarization,
+attestations, manifest and checks as a release candidate. Its context records
+`candidate_purpose=source`, and its notes identify the unreleased commit.
+Promotion accepts only stable version-changing main pushes, so this dispatch
+does not publish a tag or release. The request policy lives in
+`scripts/release_contract.harn`; the workflow passes a closed request to its
+decision function and records the typed admission or refusal receipt. The
+existing verified bootstrap supplies the decision interpreter. Only this
+repository reads the source policy, so it is not projected into
+`scripts/release_contract.json`, the contract the release orchestrator checks.
+Scheduled source production and downstream artifact consumption are separate
+from this explicit producer input.
+
 ```bash
 gh workflow run build-release-binaries.yml \
   --ref <branch> \
@@ -38,62 +53,57 @@ and [Blacksmith pricing](https://www.blacksmith.sh/pricing).
 
 ## Current decision
 
-Use `macos-15-intel` for policy-selected `x86_64-apple-darwin` builds and
-`macos-latest` for native workspace certification by default. Keep the proven
-Blacksmith M4 and GitHub xlarge profiles available only for explicit incident
-or benchmark dispatches. Routine main pushes, scheduled cache refreshes,
-certification, and shipping therefore stay on the public repository's free
-standard capacity unless an owner opts into a paid profile.
+Release candidates build both Apple targets on `macos-15-xlarge`, including
+the x86_64 cross build. Linux targets and CLI AOT preparation use Blacksmith's
+16-vCPU Ubuntu 22.04 image. GitHub's 16-core Ubuntu 22.04 pool is the independent
+Linux recovery path. Windows remains on `windows-latest` because the measured
+47m05s Windows job fits the 75-minute release objective after the slower Apple
+jobs move off the critical path. Routine cache refreshes remain on standard
+capacity.
 
-The public repository uses GitHub-hosted release capacity by default. Set the
-repository Actions variable `HARN_RELEASE_ENABLE_BLACKSMITH_MACOS=true` to opt
-policy-selected primary and recovery Intel builds into Blacksmith. Explicit
-`standard` and `fast` recovery or benchmark profiles still honor the operator's
-selected profile. Set `HARN_RELEASE_ENABLE_BLACKSMITH_LINUX=true` to opt release
-and benchmark CLI AOT preparation into Blacksmith; warm-cache runs use
-`ubuntu-latest` regardless. Leave both variables unset unless a reviewed
-release incident justifies paid capacity.
+The v0.10.144 release is the baseline. Its candidate started at 23:01:22Z,
+completed at 00:31:15Z, and published at 00:32:37Z, for 91m15s from candidate
+start to publication. The Intel Apple job took 75m20s, the ARM Apple job took
+53m17s, Windows took 47m05s, and the Linux jobs took 22m46s and 24m40s.
 
-The primary and recovery choice is based on a same-source cold-cache pair.
-Both runs used Harn source commit
-`34e00360c1f310b364b92dd2e4aeabeddde46528`, the same target, AOT payload,
-thin-LTO profile, and 16 codegen units. The branches differed only in runner
-policy, and both reported `Swatinem cache hit: false`.
+Every comparison below built immutable source
+`8d7d82bf191e79de0a0a6319cb863f43d877acce` with benchmark mode. That mode
+cannot sign, notarize, package, publish, upload an archive, or save a cache.
+Costs apply whole-minute billing to the two target jobs and exclude the
+standard-capacity AOT preparation job.
 
-| Receipt | Runner | Cargo duration | Job duration | Cost |
-| --- | --- | ---: | ---: | ---: |
-| [GitHub M2 benchmark](https://github.com/burin-labs/harn/actions/runs/31321615097) | `macos-15-xlarge` | 10m01s | 10m25s | about $1.12 before credits |
-| [Blacksmith M4 benchmark](https://github.com/burin-labs/harn/actions/runs/31321636531) | `blacksmith-12vcpu-macos-15` | 5m30s | 5m53s | about $0.96 |
+| Receipt | Capacity | Target build times | Full workflow | Projected target cost | Result |
+| --- | --- | --- | ---: | ---: | --- |
+| [GitHub macOS XLarge](https://github.com/burin-labs/harn/actions/runs/36281705312) | `macos-15-xlarge` | ARM 11m10s; x86 cross 14m36s | 21m46s | $2.96 | both passed |
+| [GitHub Linux 16-core](https://github.com/burin-labs/harn/actions/runs/36281767553) | `ubuntu-16core-release` | ARM 8m26s; x86 12m38s | 21m24s | $1.01 | both passed glibc gate |
+| [GitHub Linux 32-core](https://github.com/burin-labs/harn/actions/runs/36281754601) | `ubuntu-32core-release` | ARM 8m31s; x86 9m25s | 18m50s | $1.72 | both passed glibc gate |
+| [Blacksmith Linux 16-core](https://github.com/burin-labs/harn/actions/runs/36282552096) | `blacksmith-16vcpu-ubuntu-2204` | ARM 6m56s; x86 7m38s | 14m47s | $0.54 | both passed glibc gate |
+| [Blacksmith Linux 32-core](https://github.com/burin-labs/harn/actions/runs/36282572802) | `blacksmith-32vcpu-ubuntu-2204` | ARM 7m17s; x86 7m05s | 14m43s | $1.02 | both passed glibc gate |
+| [Blacksmith Linux 16-core, Ubuntu 24.04](https://github.com/burin-labs/harn/actions/runs/36281741414) | retired image | ARM 6m54s; x86 7m05s | 12m50s | $0.51 | rejected GLIBC_2.39 |
+| [Blacksmith Linux 32-core, Ubuntu 24.04](https://github.com/burin-labs/harn/actions/runs/36281721595) | retired image | ARM 6m26s; x86 7m11s | 14m15s | $1.02 | rejected GLIBC_2.39 |
 
-Blacksmith saved 4m31s of Cargo time, or 45.1%, and 4m32s of job wall time over
-the credit-eligible GitHub M2 recovery. More importantly, it cut 18m39s from
-the previously selected cache-hit Intel Large job. Harn published 60 v0.10.x
-releases in the 30 days ending 2026-08-09. At that unusually high cadence, the
-measured Blacksmith macOS job projects to about $58 per month. The 16-vCPU
-Blacksmith AOT job adds about $6 per month at the same cadence.
+The 16-core Blacksmith Linux result is faster and cheaper than both GitHub
+larger-runner results. The 32-core Blacksmith run saved four seconds of workflow
+wall time while nearly doubling the target cost, so the policy selects 16
+cores. The Ubuntu 24.04 trials compiled quickly but produced
+binaries above Harn's glibc 2.35 compatibility ceiling, so their artifacts were
+rejected. Runner operating system, architecture, glibc version, provider, and
+rate now live in the policy registry. The matrix resolver rejects a target
+whose runner OS or glibc floor is incompatible before dispatch.
 
-A second [Blacksmith validation run](https://github.com/burin-labs/harn/actions/runs/31322262014)
-identified the cross-compiled output as an x86_64 Mach-O and executed
-`harn --version` under Rosetta. The downloaded artifact independently passed
-the same execution check, then passed ad-hoc signing, strict signature
-verification, and another x86_64 execution on an Apple Silicon host.
+The chosen target jobs add about $3.50 per release: $2.96 for both Apple jobs
+and $0.54 for both Linux jobs. A measured Blacksmith 16-vCPU AOT job adds about
+$0.10, keeping the projected increment below $3.60. The unchanged Windows job
+therefore owns the expected critical path at about 47 minutes, with more than
+25 minutes of release-tail allowance under the 75-minute objective. Moving
+Windows to a follow-up asset would add manifest and consumer complexity without
+improving the stated objective, so it remains part of the candidate archive.
 
-CLI AOT preparation used to take 4m57s on standard Linux in the same benchmark
-cohort. A controlled
-[16-vCPU Blacksmith run](https://github.com/burin-labs/harn/actions/runs/31322214994)
-finished that job in 2m26s. A GitHub 16-core trial was abandoned after five
-minutes without runner assignment, so it is not a production fallback. The
-measured AOT plus primary macOS job is about 8m19s before the sub-minute signing
-and notarization tail; this is a component-path estimate, not a completed
-release SLO claim.
-
-Cache availability remains the larger lever. The v0.10.67 release
-[missed its cache](https://github.com/burin-labs/harn/actions/runs/31312058230)
-and spent 79m05s in Cargo on standard Intel. A warm standard runner cut that to
-36m38s without paid capacity. The ARM runners complete cold builds faster than
-that warm Intel path, so primary release latency no longer depends on an x86
-cache hit. Intel cache warms remain useful for the emergency standard fallback
-and retain the repository's existing storage budgets and pruning.
+Set `HARN_RELEASE_ENABLE_BLACKSMITH_LINUX=true` so candidate and benchmark AOT
+preparation uses the policy's Blacksmith runner. The macOS variable is retained
+for compatibility, but the selected GitHub XLarge primary does not depend on
+it. Explicit `standard` and `fast` benchmark profiles continue to honor the
+operator's selected profile.
 
 ## Compiler-cache backends
 

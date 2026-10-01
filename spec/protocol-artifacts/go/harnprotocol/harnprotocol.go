@@ -206,6 +206,7 @@ var HarnAgentEventKinds = []HarnAgentEventKind{
 	"tool_batch_disposition",
 	"tool_call_audit",
 	"tool_format_override",
+	"turn_phase_changed",
 	"typed_checkpoint",
 }
 
@@ -366,6 +367,7 @@ var AgentTerminalClasses = []AgentTerminalClass{
 	"context_overflow",
 	"provider_misconfigured",
 	"provider_unavailable",
+	"provider_billing",
 	"rate_limited",
 	"timeout",
 	"resource_busy",
@@ -1509,6 +1511,7 @@ type ACPTranscriptCompactedUpdateMetaHarn struct {
 	CompactionPolicy        json.RawMessage `json:"compactionPolicy"`
 	Recap                   json.RawMessage `json:"recap"`
 	SourceMeasurement       json.RawMessage `json:"sourceMeasurement"`
+	Classification          json.RawMessage `json:"classification"`
 	Replayed                *bool           `json:"replayed,omitempty"`
 }
 

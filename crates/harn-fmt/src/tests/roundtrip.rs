@@ -26,6 +26,40 @@ fn basic_constructs_round_trip() {
 }
 
 #[test]
+fn batched_evaluation_questions_and_answer_match_round_trip() {
+    let source = r#"fn main(harness: Harness) {
+  const answers = harness.llm.evaluate("triage.v1", {text: "window"}, {
+    disposition: choice("Keep or drop?", {keep: "needed", drop: "superseded"}),
+    risk: score("How risky?", ["low", "high"]),
+    safe: boolean("Safe to run?"),
+  }, policy)
+  match answers.kind {
+    "answered" -> {
+      match answers.value.disposition.choice {
+        "keep" -> { harness.stdio.println("keep") }
+        "drop" -> { harness.stdio.println("drop") }
+      }
+    }
+    _ -> { harness.stdio.println(answers.receipt) }
+  }
+}"#;
+    let formatted = format_source(source).expect("batched evaluation formats");
+    for expected in [
+        "disposition: choice(",
+        "risk: score(",
+        "safe: boolean(",
+        "answers.value.disposition.choice",
+        "\"drop\" ->",
+    ] {
+        assert!(
+            formatted.contains(expected),
+            "formatter lost {expected}: {formatted}"
+        );
+    }
+    assert_roundtrip(source);
+}
+
+#[test]
 fn range_subexpressions_keep_required_parentheses() {
     assert_roundtrip("pipeline default(task) { let x = c ? (a to b) : d }");
     assert_roundtrip("pipeline default(task) { let x = (a to b) to c }");

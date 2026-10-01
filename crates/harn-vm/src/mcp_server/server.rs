@@ -876,6 +876,9 @@ impl McpServer {
                         .map(|a| {
                             let mut arg =
                                 serde_json::json!({ "name": a.name, "required": a.required });
+                            if let Some(ref title) = a.title {
+                                arg["title"] = serde_json::json!(title);
+                            }
                             if let Some(ref desc) = a.description {
                                 arg["description"] = serde_json::json!(desc);
                             }

@@ -34,7 +34,10 @@ use primitive_args::{
     options_value as agent_primitive_options_value_arg, tools as agent_primitive_tools_arg,
     tools_value as agent_primitive_tools_value_arg,
 };
-use side_effect_ceiling::{request_side_effect_permission, SideEffectPermissionOutcome};
+use side_effect_ceiling::{
+    review_or_request_side_effect_permission, SideEffectPermissionOutcome,
+    SideEffectPermissionRequest,
+};
 use tool_catalog::{
     annotations_for as tool_annotations_for, descriptor_for as tool_descriptor_for,
     permission_context_for,
@@ -853,33 +856,20 @@ pub(super) async fn host_agent_dispatch_tool_call(
             // same order the approval-policy path uses. Without this a run
             // carrying both a capability policy and a reviewer refuses the
             // call and never asks (harn#7982), which is every product loop.
-            let reviewer_decision = crate::orchestration::maybe_grant_side_effect_by_auto_review(
-                Some(&ctx),
-                &tool_name,
-                &tool_args,
-                &session_id,
-                violation.ceiling.as_str(),
-                violation.required_level.as_str(),
-                &policy_denial.reason,
+            let (reviewer_granted, ceiling_outcome) = review_or_request_side_effect_permission(
+                &ctx,
+                bridge.as_ref(),
+                SideEffectPermissionRequest {
+                    session_id: &session_id,
+                    tool_call_id: &tool_id,
+                    tool_name: &tool_name,
+                    tool_args: &tool_args,
+                    violation,
+                    reason: policy_denial.reason.clone(),
+                    tool_context: permission_context_for(tools, &tool_name),
+                },
             )
             .await;
-            let reviewer_granted = reviewer_decision.is_some();
-            let ceiling_outcome = match reviewer_decision {
-                Some(policy_decision) => SideEffectPermissionOutcome::Allowed { policy_decision },
-                None => {
-                    request_side_effect_permission(
-                        bridge.as_ref(),
-                        &session_id,
-                        &tool_id,
-                        &tool_name,
-                        &tool_args,
-                        violation,
-                        policy_denial.reason.clone(),
-                        permission_context_for(tools, &tool_name),
-                    )
-                    .await
-                }
-            };
             match ceiling_outcome {
                 SideEffectPermissionOutcome::Allowed { policy_decision } => {
                     let Some(grant) = policy_denial.side_effect_grant_for(&tool_name) else {
@@ -1512,7 +1502,7 @@ pub(super) async fn host_agent_dispatch_tool_call(
                             category: crate::value::ErrorCategory::Cancelled,
                         }),
                         executor: None,
-                        declared_failure: None,
+                        handler_outcome: None,
                     },
                     true,
                 ),
@@ -1521,7 +1511,7 @@ pub(super) async fn host_agent_dispatch_tool_call(
         None => (dispatch_future.await, false),
     };
     let execution_duration_ms = started.elapsed().as_millis() as u64;
-    let declared_failure = outcome.declared_failure;
+    let handler_outcome = outcome.handler_outcome;
     let executor = outcome
         .executor
         .as_ref()
@@ -1610,15 +1600,11 @@ pub(super) async fn host_agent_dispatch_tool_call(
                 super::reminder_providers::options_map_to_json(options),
             ))
             .await?;
-            // A dispatch that returned `Ok(..)` can still carry a failure in its
-            // body (`{ok:false}` / `{status:"error"}` / `{error:".."}`, or an
-            // MCP-shaped `{isError:true}`). Surface those instead of laundering
-            // them into `ok:true`: the agent loop reads `ok`/`status`.
-            // Prefer the pre-coercion declaration: a dict-returning handler's
-            // coerced payload no longer parses (harn#7884).
+            // Script handlers declare their outcome before rendering. Native
+            // bridge and MCP results retain their protocol-specific adapter.
             let failure = structured_tool_result::failure_projection(
                 &raw_result,
-                declared_failure,
+                handler_outcome,
                 &rendered,
                 hook_denial.as_deref(),
             );

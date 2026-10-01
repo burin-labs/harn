@@ -41,6 +41,7 @@ use reporting::{
 };
 
 pub(crate) async fn run_command(mut args: TestArgs) {
+    classify_test_paths(&mut args);
     // Record what the caller typed before the environment gets a vote. The
     // `--plan` refusal below is the only consumer that has to tell the two
     // apart, and it cannot once the two have been merged.
@@ -84,13 +85,24 @@ pub(crate) async fn run_command(mut args: TestArgs) {
         );
     }
     if args.watch && !args.test_paths.is_empty() {
-        command_error("`harn test --watch` does not support --test-path");
+        command_error("`harn test --watch` accepts at most one positional path");
     }
     if args.timing_baseline.is_some() && args.timing_environment.is_none() {
         command_error("--timing-baseline requires --timing-environment <name>");
     }
     if args.watch && args.timing_baseline.is_some() {
         command_error("--timing-baseline is not supported with --watch");
+    }
+    if args.fail_on_skip
+        && (args.watch
+            || args.determinism
+            || args.evals
+            || matches!(
+                args.target.as_deref(),
+                Some("agents-conformance" | "conformance" | "protocols" | "package")
+            ))
+    {
+        command_error("--fail-on-skip is supported only for one-shot user-test suites");
     }
     if (args.timing_baseline.is_some() || args.timing_environment.is_some())
         && (args.determinism
@@ -152,7 +164,7 @@ pub(crate) async fn run_command(mut args: TestArgs) {
     }
     if args.evals {
         if !args.test_paths.is_empty() {
-            command_error("`harn test package --evals` does not support --test-path");
+            command_error("`harn test package --evals` does not accept extra positional paths");
         }
         if shard_requested {
             command_error("--evals cannot be combined with test sharding");
@@ -173,9 +185,23 @@ pub(crate) async fn run_command(mut args: TestArgs) {
     }
 }
 
+/// Give the first token one meaning before any execution or supervision path
+/// reads it. Special suites own at most one selection; ordinary paths all go
+/// to the same compile-once user-test scheduler.
+fn classify_test_paths(args: &mut TestArgs) {
+    let mut paths = std::mem::take(&mut args.paths).into_iter();
+    args.target = paths.next();
+    let special_suite = matches!(
+        args.target.as_deref(),
+        Some("conformance" | "protocols" | "agents-conformance")
+    ) || (args.evals && args.target.as_deref() == Some("package"));
+    args.selection = if special_suite { paths.next() } else { None };
+    args.test_paths = paths.collect();
+}
+
 async fn run_agents_conformance_command(args: TestArgs, shard_requested: bool) {
     if !args.test_paths.is_empty() {
-        command_error("`harn test agents-conformance` does not support --test-path");
+        command_error("`harn test agents-conformance` does not accept extra positional paths");
     }
     if args.selection.is_some() {
         command_error(
@@ -207,7 +233,7 @@ async fn run_agents_conformance_command(args: TestArgs, shard_requested: bool) {
 
 fn run_protocols_command(args: TestArgs, shard_requested: bool) {
     if !args.test_paths.is_empty() {
-        command_error("`harn test protocols` does not support --test-path");
+        command_error("`harn test protocols` does not accept extra positional paths");
     }
     if args.evals || args.determinism || args.record || args.replay || args.watch {
         command_error(
@@ -240,7 +266,7 @@ fn run_protocols_command(args: TestArgs, shard_requested: bool) {
 
 async fn run_determinism_command(args: Box<TestArgs>, shard_requested: bool) {
     if !args.test_paths.is_empty() {
-        command_error("`harn test --determinism` does not support --test-path");
+        command_error("`harn test --determinism` accepts at most one positional path");
     }
     if shard_requested {
         command_error("--determinism cannot be combined with test sharding");
@@ -255,7 +281,7 @@ async fn run_determinism_command(args: Box<TestArgs>, shard_requested: bool) {
     if let Some(t) = args.target.as_deref() {
         if t == "conformance" {
             if !args.test_paths.is_empty() {
-                command_error("`harn test conformance` does not support --test-path");
+                command_error("`harn test conformance` does not accept extra positional paths");
             }
             Box::pin(run_conformance_determinism_tests(
                 t,
@@ -305,7 +331,7 @@ async fn run_standard_command(
     if let Some(t) = args.target.as_deref() {
         if t == "conformance" {
             if !args.test_paths.is_empty() {
-                command_error("`harn test conformance` does not support --test-path");
+                command_error("`harn test conformance` does not accept extra positional paths");
             }
             let shard = resolve_test_shard(args.shard_index, args.shard_total);
             if args.parallel && shard.is_some() {
@@ -326,6 +352,14 @@ async fn run_standard_command(
                 allow_empty: args.allow_empty || args.internal_conformance_worker.is_some(),
                 cli_skill_dirs: &cli_skill_dirs,
             };
+            // Workers inherit the cache this warms, so only the top-level
+            // process pays for it.
+            if args.internal_conformance_worker.is_none() {
+                conformance::warm_stdlib_before_cases(
+                    crate::test_runner::resolve_parallel_workers(args.jobs),
+                    args.json,
+                );
+            }
             if args.parallel {
                 run_parallel_conformance_tests(
                     t,
@@ -438,6 +472,7 @@ async fn run_user_test_targets(
         max_execute_ms: args.max_execute_ms,
         parallel: args.parallel,
         fail_fast: args.fail_fast,
+        fail_on_skip: args.fail_on_skip,
         allow_empty,
         jobs: args.jobs,
         shard: resolve_test_shard(args.shard_index, args.shard_total),
@@ -714,6 +749,7 @@ pub(crate) struct UserTestRunArgs<'a> {
     pub max_execute_ms: Option<u64>,
     pub parallel: bool,
     pub fail_fast: bool,
+    pub fail_on_skip: bool,
     /// Whether a one-shot invocation may report success after executing zero
     /// tests. Watch mode consumes the same execution shape but has no terminal
     /// verdict; it remains active so a newly-created test can be observed.
@@ -941,6 +977,7 @@ pub(crate) async fn run_user_tests(
     }
 
     let allow_empty = args.allow_empty;
+    let fail_on_skip = args.fail_on_skip;
     let filter = args.filter;
     let summary = run_user_test_paths_once(&paths, args).await;
 
@@ -972,6 +1009,13 @@ pub(crate) async fn run_user_tests(
     }
 
     if summary.failed > 0 {
+        process::exit(crate::exit::PROGRAM_FAILURE);
+    }
+    if fail_on_skip && summary.skipped > 0 {
+        eprintln!(
+            "error: {} user test(s) skipped under --fail-on-skip",
+            summary.skipped
+        );
         process::exit(crate::exit::PROGRAM_FAILURE);
     }
     if summary.total == 0 && !allow_empty {

@@ -18,7 +18,7 @@ use crate::stdlib::json_to_vm_value;
 use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
 use crate::value::{VmError, VmValue};
 
-use super::bare::{bare_tool_names, parse_bare_calls_in_body, parse_bare_calls_in_body_with_known};
+use super::bare::{bare_tool_names, parse_bare_calls_in_body, parse_bare_calls_scoped, ProseScope};
 use super::scan::{call_head, scan_units, ScanSpec};
 use super::syntax::{
     balanced_json_object_len, parse_object_literal_from, parse_ts_call_from, render_canonical_call,
@@ -570,7 +570,15 @@ fn host_tool_scan_bare_units_builtin(
                 // structural text unit before invoking the single-unit parser;
                 // retaining separator whitespace here changes model-facing
                 // error excerpts even though the parse decision is identical.
-                let parsed = parse_bare_calls_in_body_with_known(text.trim(), &known);
+                // A `fenced_line` may have been cut out of a markdown fence, and
+                // a `harmony_line` is channel framing: neither is prose the
+                // mid-line payload report can read safely.
+                let scope = if kind.as_str() == "text" {
+                    ProseScope::Prose
+                } else {
+                    ProseScope::Code
+                };
+                let parsed = parse_bare_calls_scoped(text.trim(), &known, scope);
                 return json_to_vm_value(&serde_json::json!({"bare": {
                     "calls": parsed.calls,
                     "errors": parsed.errors,

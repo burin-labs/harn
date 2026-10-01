@@ -18,12 +18,51 @@
 import { web_fetch, web_parse_html } from "std/web"
 import "./provider_catalog_refresh.harn"
 
-/** OpenRouter UTC overrides become a peak card and disjoint discount windows. */
+/**
+ * OpenRouter overrides come in two kinds. A `min_prompt_tokens` row reprices a
+ * whole request above a prompt size and becomes an input token band; every
+ * other row is a UTC time window, and the windows become a peak card and
+ * disjoint discount windows.
+ */
 pub fn openrouter_scheduled_pricing(wire: dict, base: dict) -> dict {
-  const overrides = (wire?.overrides ?? []).map({ row -> __pricing_bounds(row) })
+  const rows = wire?.overrides ?? []
+  const banded = __openrouter_token_bands(
+    rows.filter({ row -> row?.min_prompt_tokens != nil }),
+    base,
+  )
+  const overrides = rows.filter({ row -> row?.min_prompt_tokens == nil }).map(
+    { row -> __pricing_bounds(row) },
+  )
   if len(overrides) == 0 {
+    return banded
+  }
+  return __openrouter_time_windows(overrides, banded)
+}
+
+/**
+ * `min_prompt_tokens` is the smallest prompt the row applies to, which is the
+ * inclusive `minimum_input_tokens` of a band. Band multipliers are relative to
+ * the base card, so a card without positive base rates keeps no bands.
+ */
+fn __openrouter_token_bands(rows: list<dict>, base: dict) -> dict {
+  if len(rows) == 0 || (base?.input_per_mtok ?? 0.0) <= 0.0
+    || (base?.output_per_mtok ?? 0.0) <= 0.0 {
     return base
   }
+  const bands = rows.map(
+    { row ->
+      {
+        minimum_input_tokens: to_int(row.min_prompt_tokens),
+        input_multiplier: to_float(row.prompt) * 1000000.0 / base.input_per_mtok,
+        output_multiplier: to_float(row.completion) * 1000000.0 / base.output_per_mtok,
+      }
+    },
+  )
+    .sort_by({ band -> band.minimum_input_tokens })
+  return base + {input_token_bands: bands}
+}
+
+fn __openrouter_time_windows(overrides: list<dict>, base: dict) -> dict {
   let peak_in = base.input_per_mtok
   let peak_out = base.output_per_mtok
   let peak_cache = base?.cache_read_per_mtok
@@ -115,15 +154,18 @@ fn __pricing_bounds(row: dict) -> dict {
     throw "Invalid recurring pricing HHMM boundary"
   }
   const days = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
-  if len(row?.utc_days ?? []) == 0 {
-    throw "Recurring pricing has no UTC days"
+  // A window that names no days applies every day.
+  const utc_days = if len(row?.utc_days ?? []) == 0 {
+    days
+  } else {
+    row.utc_days
   }
-  for day in row.utc_days {
+  for day in utc_days {
     if !contains(days, day) {
       throw "Unknown recurring pricing UTC day"
     }
   }
-  return row + {begins: begins, until: until}
+  return row + {begins: begins, until: until, utc_days: utc_days}
 }
 
 fn __pricing_applies(row: dict, days: list<string>, day: int, minute: int) -> bool {

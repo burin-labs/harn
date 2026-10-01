@@ -1,0 +1,5 @@
+import { hidden } from "./sibling/sibling_export_lib"
+
+pipeline default(harness: Harness) {
+  harness.stdio.println(hidden())
+}

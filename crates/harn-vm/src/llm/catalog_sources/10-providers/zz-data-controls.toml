@@ -48,8 +48,6 @@ unverified = [
   "qianfan",
   "sambanova",
   "siliconflow",
-  "typesafe",
-  "vercel_ai_gateway",
   "volcengine_ark",
   "zai",
 ]
@@ -96,8 +94,8 @@ name = "store"
 value = false
 effect = "retention"
 
-# OpenRouter is the only catalog provider with a per-request control over
-# training as well as retention: `provider.data_collection` selects providers
+# OpenRouter has per-request controls over training and retention:
+# `provider.data_collection` selects providers
 # by their data policy, and `provider.zdr` restricts routing to zero-retention
 # endpoints. Both are routing restrictions, so the effective posture still
 # depends on the upstream provider actually serving the call.
@@ -110,13 +108,14 @@ sources = [
   "https://openrouter.ai/docs/features/provider-routing",
   "https://openrouter.ai/docs/features/privacy-and-logging",
 ]
-note = "Both controls restrict which upstream providers may serve the call; retention and training behavior is otherwise the routed provider's."
+note = "Both controls restrict which upstream providers may serve the call; retention and training behavior is otherwise the routed provider's. The alpha decisions endpoint has not been verified to honor these chat controls, so native decisions do not apply them."
 
 [[providers.openrouter.data_controls.request_controls]]
 location = "body"
 name = "provider.data_collection"
 value = "deny"
 effect = "training"
+applies_to = ["open_ai_sse"]
 caveat = "Defaults to allow. Restricts routing to providers that do not collect prompts; it does not retroactively bind one that does."
 
 [[providers.openrouter.data_controls.request_controls]]
@@ -124,6 +123,37 @@ location = "body"
 name = "provider.zdr"
 value = true
 effect = "retention"
+applies_to = ["open_ai_sse"]
+
+# The evaluation route was reached on 2026-09-22 with both controls. Its
+# routing metadata reported one successful TypeSafe attempt eligible for ZDR
+# and no prompt training. This proves routing admission, not backend storage.
+[providers.vercel_ai_gateway.data_controls]
+control_scope = "per_request"
+retention_default = "unspecified"
+training_default = "unspecified"
+checked_on = "2026-09-22"
+sources = [
+  "https://vercel.com/blog/zdr-on-ai-gateway",
+  "https://vercel.com/docs/ai-gateway/security-and-compliance/disallow-prompt-training",
+  "https://vercel.com/docs/ai-gateway/modalities/evaluation",
+]
+note = "The native evaluation route honors providerOptions.gateway privacy filters. These are routing restrictions, not proof of storage behavior. Chat dialect controls are not declared by this evaluation-route probe; default upstream retention and training remain unspecified."
+
+[[providers.vercel_ai_gateway.data_controls.request_controls]]
+location = "body"
+name = "providerOptions.gateway.zeroDataRetention"
+value = true
+effect = "retention"
+applies_to = ["vercel_evaluate"]
+caveat = "Routes only to providers with gateway ZDR agreements; per-request ZDR availability depends on the gateway account plan."
+
+[[providers.vercel_ai_gateway.data_controls.request_controls]]
+location = "body"
+name = "providerOptions.gateway.disallowPromptTraining"
+value = true
+effect = "training"
+applies_to = ["vercel_evaluate"]
 
 # Gemini's `store` is an Interactions API field. `generateContent` documents no
 # equivalent, so the control is scoped to the Interactions dialect rather than
@@ -147,6 +177,17 @@ effect = "retention"
 applies_to = ["gemini_interactions_sse"]
 
 # ── Account- or contract-scoped providers ────────────────────────────────────
+
+[providers.typesafe.data_controls]
+control_scope = "account"
+retention_default = "retained"
+training_default = "does_not_train"
+checked_on = "2026-09-22"
+sources = [
+  "https://docs.typesafe.ai/legal",
+  "https://typesafe.ai/legal/privacy-policy",
+]
+note = "The privacy policy excludes training and fine-tuning on inputs but permits retention for service and business purposes. Zero data retention is offered to enterprise customers by agreement, not as the default or a documented per-request control. This direct-provider posture does not establish gateway decision-route controls."
 
 [providers.anthropic.data_controls]
 control_scope = "account"

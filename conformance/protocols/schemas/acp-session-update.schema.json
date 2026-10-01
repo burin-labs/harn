@@ -145,6 +145,12 @@
           "type": "object",
           "required": ["sessionId", "kind"],
           "additionalProperties": true,
+          "allOf": [
+            {
+              "if": { "properties": { "kind": { "const": "turn_phase_changed" } }, "required": ["kind"] },
+              "then": { "$ref": "#/$defs/AgentTurnPhase" }
+            }
+          ],
           "properties": {
             "sessionId": { "type": "string", "minLength": 1 },
             "kind": {
@@ -193,6 +199,7 @@
                 "tool_batch_disposition",
                 "tool_call_audit",
                 "tool_format_override",
+                "turn_phase_changed",
                 "typed_checkpoint"
               ]
             }
@@ -238,6 +245,38 @@
         "terminal": { "$ref": "#/$defs/AgentTerminalOutcome" }
       }
     },
+    "AgentTurnPhase": {
+      "type": "object",
+      "required": ["phase"],
+      "oneOf": [
+        {
+          "properties": {
+            "phase": { "const": "generating" },
+            "candidate_reply": false,
+            "reply": false,
+            "outcome": false
+          }
+        },
+        {
+          "required": ["candidate_reply"],
+          "properties": {
+            "phase": { "const": "verifying" },
+            "candidate_reply": { "type": "string" },
+            "reply": false,
+            "outcome": false
+          }
+        },
+        {
+          "required": ["reply", "outcome"],
+          "properties": {
+            "phase": { "const": "terminal" },
+            "reply": { "type": "string" },
+            "outcome": { "$ref": "#/$defs/AgentTerminalOutcome" },
+            "candidate_reply": false
+          }
+        }
+      ]
+    },
     "AgentTerminalOutcome": {
       "type": "object",
       "required": ["kind", "reason", "owner"],
@@ -268,6 +307,7 @@
             "context_overflow",
             "provider_misconfigured",
             "provider_unavailable",
+            "provider_billing",
             "rate_limited",
             "timeout",
             "resource_busy",
@@ -321,6 +361,7 @@
             "context_overflow",
             "provider_misconfigured",
             "provider_unavailable",
+            "provider_billing",
             "rate_limited",
             "timeout",
             "resource_busy",
@@ -714,7 +755,8 @@
               "mode", "strategy", "snapshotAssetId", "reason", "receiptId", "schemaVersion",
               "engineStrategy", "requestedStrategy", "resolvedThresholdTokens", "thresholdSource",
               "hardLimitTokens", "archivedMessages", "estimatedTokensBefore", "estimatedTokensAfter",
-              "instructionMode", "instructionSource", "compactionPolicy", "recap", "sourceMeasurement"
+              "instructionMode", "instructionSource", "compactionPolicy", "recap", "sourceMeasurement",
+              "classification"
             ],
             "additionalProperties": true,
             "properties": {
@@ -731,7 +773,8 @@
               "resolvedThresholdTokens": { "type": ["integer", "null"], "minimum": 0 },
               "thresholdSource": { "type": ["string", "null"] },
               "hardLimitTokens": { "type": ["integer", "null"], "minimum": 0 },
-              "sourceMeasurement": {}
+              "sourceMeasurement": {},
+              "classification": {}
             }
           } }
         }

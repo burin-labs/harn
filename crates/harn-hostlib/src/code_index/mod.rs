@@ -178,24 +178,29 @@ impl CodeIndexCapability {
     ///
     /// Returns `true` on a successful restore, `false` if no snapshot
     /// existed, the format was unrecognised, or the snapshot does not
-    /// describe `workspace_root` (wrong checkout or `HEAD`). Errors
+    /// describe `workspace_root` (wrong checkout). Errors
     /// propagate I/O problems verbatim so callers can decide whether to
     /// fall back to `rebuild`.
     pub fn restore_from_disk(&self, workspace_root: &Path) -> std::io::Result<bool> {
         match CodeIndexSnapshot::load(workspace_root)? {
             Some(snap) => {
-                let mut state = IndexState::from_snapshot(snap);
+                let mut state = IndexState::from_snapshot(snap)?;
                 // Always anchor at the caller root. `load` already rejected a
-                // snapshot whose recorded root/HEAD does not match; this keeps
+                // snapshot whose recorded root does not match; this keeps
                 // the live slot on the requested checkout rather than the
                 // stored path string.
                 state.root = state::canonicalize(workspace_root);
                 state.reap_after_recovery(state::now_unix_ms());
                 // A snapshot is a starting point, not a claim of freshness.
-                // Matching `HEAD` says nothing about uncommitted edits, so
-                // reconcile against the files on disk before anyone can read
-                // the index. On an unchanged tree this is a stat walk.
-                let outcome = state.refresh_from_root(self.harn_reference_resolver.as_ref());
+                // Reconcile against the files on disk before anyone can read
+                // the index. A changed HEAD forces content verification even
+                // when size and mtime happen to match.
+                let outcome = state.refresh_from_root(None);
+                // Resolver-backed Harn references are omitted from the
+                // snapshot. Project them once from this host after the file
+                // graph is current, so a changed Harn file is not resolved
+                // twice against two different graph states.
+                state.relink_harn_references(self.harn_reference_resolver.as_ref());
                 tracing::info!(
                     target: "harn_hostlib::code_index",
                     root = %state.root.display(),
@@ -205,6 +210,19 @@ impl CodeIndexCapability {
                     files_removed = outcome.files_removed,
                     "code-index snapshot restored and reconciled",
                 );
+                // Carry the reconciled metadata and graph into the next
+                // process. A read-only workspace can still use this valid
+                // in-memory state, so persistence failure is advisory.
+                if !outcome.is_noop() || outcome.files_touched_only > 0 {
+                    if let Err(error) = state.snapshot().save(&state.root) {
+                        tracing::debug!(
+                            target: "harn_hostlib::code_index",
+                            %error,
+                            root = %state.root.display(),
+                            "code-index reconciled snapshot could not be persisted",
+                        );
+                    }
+                }
                 let mut guard = self.index.lock().expect("code_index mutex poisoned");
                 *guard = Some(state);
                 Ok(true)

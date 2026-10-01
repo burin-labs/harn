@@ -47,6 +47,33 @@ pub(crate) use openai_compat::OpenAiCompatibleProvider;
 pub(crate) use openai_responses::OpenAiResponsesProvider;
 pub(crate) use vertex::VertexProvider;
 
+/// A prerequisite a platform-managed provider's own client needs and could not
+/// find without the network.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PlatformPrerequisiteGap {
+    /// No region resolves from the environment or the platform's config files.
+    Region,
+    /// No credential source is discoverable from the environment, the
+    /// platform's config files, or a prepared identity.
+    Credentials,
+}
+
+/// Check the offline prerequisites of a platform-managed provider.
+///
+/// `credential_resolution = "platform_managed"` hands credential discovery to
+/// the provider's own client, so the generic `auth_env` lookup cannot answer
+/// whether the route can run. Each such client owns the answer here, keyed the
+/// same way `transport` dispatches to it. A provider whose client declares no
+/// offline check is reported as deferred, as before.
+pub(crate) fn platform_offline_prerequisites(
+    provider: &str,
+) -> Result<(), PlatformPrerequisiteGap> {
+    match provider {
+        "bedrock" => bedrock::offline_prerequisites(),
+        _ => Ok(()),
+    }
+}
+
 /// Deterministic in-process providers used by tests and replay. They are not
 /// network routes and must not participate in provider-health recovery.
 pub(crate) fn is_internal_simulator(provider: &str) -> bool {

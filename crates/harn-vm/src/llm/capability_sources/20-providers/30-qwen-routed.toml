@@ -21,6 +21,7 @@ auto_reasoning_overrides = { agent = "off", verify = "off", code = "off" }
 preserve_thinking = true
 server_parser = "none"
 honors_chat_template_kwargs = true
+honors_preserve_thinking_kwarg = true
 recommended_endpoint = "/v1/chat/completions"
 text_tool_wire_format_supported = true
 thinking_disable_directive = "/no_think"
@@ -61,6 +62,7 @@ auto_reasoning_overrides = { agent = "off", verify = "off", code = "off" }
 preserve_thinking = true
 server_parser = "none"
 honors_chat_template_kwargs = true
+honors_preserve_thinking_kwarg = true
 recommended_endpoint = "/v1/chat/completions"
 text_tool_wire_format_supported = true
 thinking_disable_directive = "/no_think"
@@ -91,24 +93,36 @@ prefers_role_developer = false
 prefers_xml_tools = false
 thinking_block_style = "inline"
 
-# Fireworks-hosted GPT-OSS (`accounts/fireworks/models/gpt-oss-120b`) bills
-# empty native completions with no dispatchable tool calls in eval JSONL, so it
-# stays off the provider-native channel. Between the two TEXT-channel grammars
-# (`json` fenced-block vs `text` heredoc), an empirical A/B (2026-06-21, real
-# Fireworks calls, 3 samples per arm, task = author a Zig file heavy in `\\`
-# multiline-string literals) showed `json` corrupts the file body in 3/3 runs
-# (doubled `\\` -> `\\\\` multiline prefixes, escaped quotes `\"name\"`, and one
-# run leaked literal `\n`/`\"` for the whole file) while `text`/heredoc emitted
-# byte-clean Zig in 3/3 because a JSON string arg forces the model to escape
-# the backslashes the Zig source already needs, and gpt-oss double-escapes them.
-# Tool-call dispatch was 3/3 on BOTH channels (no heredoc-wrapper regression).
-# Pin to `text` so escape-free heredoc bodies carry source verbatim.
+# Fireworks-hosted GPT-OSS (`accounts/fireworks/models/gpt-oss-120b`) uses the
+# provider-native tool channel, re-measured 2026-09-27 in a downstream host:
+#   * Agent eval, the host's canonical-25 tune cells, N=5, same build, only the
+#     channel changed. Native vs fenced `json`: visible reasoning-voice prose
+#     in main-agent replies 0/19 trials vs 4/19 (21%, 95% CI [5%, 42%]); pass
+#     18/19 vs 16/20 measured; $0.27 vs $0.32. 224 native main-agent replies:
+#     202 carried a tool call, 0 were empty. The "bills empty native
+#     completions" failure that closed this channel in June did not recur.
+#   * Direct calls: 12/12 clean `tool_calls`, reasoning in `thinking`, empty
+#     visible text.
+# Residual risk, still open: backslash-heavy file bodies. Measured 2026-09-27
+# through agent_loop, 20 trials per cell (Python raw strings / LaTeX / Zig):
+#   channel   byte-exact   exact modulo edge newline   backslashes altered
+#   native    29/60        31/60                       29/60 (LaTeX 19, Zig 9)
+#   json       0/60        40/60                       20/60 (Zig 17, Py 3)
+#   text       0/60        43/60                       16/60 (Zig 14, LaTeX 2)
+# Native double-escapes JSON-looking sequences (`\t` in `\textbackslash`);
+# the text channels lose the body's final newline (a Harn parser defect, not
+# the model). No channel is byte-safe here; native trades more backslash
+# corruption than json on LaTeX for the leak fix above. The leak pair is
+# N=5 per cell with no held-out cells. Revert trigger:
+# backslash-heavy authoring regressions on this route -> restore
+# `native_tools = false` and `preferred_tool_format = "text"`.
 [[provider.fireworks]]
 model_match = "accounts/fireworks/models/gpt-oss-*"
-native_tools = false
-preferred_tool_format = "text"
+native_tools = true
+preferred_tool_format = "native"
 text_tool_wire_format_supported = true
 supports_parallel_tool_calls = false
+requires_parallel_tool_calls_false = true
 thinking_modes = ["effort"]
 reasoning_effort_supported = true
 reasoning_effort_levels = ["low", "medium", "high"]
@@ -177,6 +191,40 @@ prefers_role_developer = false
 prefers_xml_tools = false
 thinking_block_style = "inline"
 
+[[provider.fireworks]]
+model_match = "accounts/fireworks/models/kimi-k3*"
+native_tools = true
+preferred_tool_format = "native"
+tool_mode_parity_notes = "2026-09-26 probe: one-tool `tool_choice: auto` request returned a single native `message.tool_calls` entry with empty content."
+structured_output = "native"
+thinking_modes = ["enabled"]
+prompt_caching = true
+vision = true
+vision_supported = true
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
+
+[[provider.fireworks]]
+model_match = "accounts/fireworks/models/nemotron-lightning-*"
+native_tools = true
+preferred_tool_format = "native"
+tool_mode_parity_notes = "2026-09-26 probe: one-tool `tool_choice: auto` request returned a single native `message.tool_calls` entry with empty content."
+thinking_modes = ["enabled"]
+prompt_caching = true
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
+
 # MiniMax M3 on Fireworks. Credentialed probe (2026-07-18, harn 0.10.23
 # binary, direct Fireworks /v1, N=2) upgrades the prior un-probed verdict:
 # with the backslash/quote/unicode large-string argument the native channel
@@ -214,6 +262,7 @@ auto_reasoning_overrides = { agent = "off", verify = "off", code = "off" }
 preserve_thinking = true
 server_parser = "none"
 honors_chat_template_kwargs = true
+honors_preserve_thinking_kwarg = true
 recommended_endpoint = "/v1/chat/completions"
 text_tool_wire_format_supported = true
 thinking_disable_directive = "/no_think"
@@ -237,6 +286,7 @@ auto_reasoning_overrides = { agent = "off", verify = "off", code = "off" }
 preserve_thinking = true
 server_parser = "none"
 honors_chat_template_kwargs = true
+honors_preserve_thinking_kwarg = true
 recommended_endpoint = "/v1/chat/completions"
 text_tool_wire_format_supported = true
 thinking_disable_directive = "/no_think"
@@ -331,6 +381,21 @@ model_match = "anthropic/claude-opus-*"
 version_min = [5, 5]
 extends = true
 native_tools = true
+allowed_tool_choice_modes = ["auto", "none"]
+
+# Sonnet 5.5 through OpenRouter, probed 2026-09-29: `tool_choice: "required"`
+# is a 400 carrying Anthropic's "type tool and any are not supported" error,
+# and `reasoning: {enabled: false}` is a 400 ("Reasoning is mandatory for this
+# endpoint and cannot be disabled"). OpenRouter does not expose Anthropic's
+# `between_tools` off switch. With `reasoning_disable_supported = false`, a
+# default call omits the disable directive and succeeds, and an explicit
+# `thinking: false` is refused locally rather than sent to that 400.
+[[provider.openrouter]]
+model_match = "anthropic/claude-sonnet-*"
+version_min = [5, 5]
+extends = true
+native_tools = true
+reasoning_disable_supported = false
 allowed_tool_choice_modes = ["auto", "none"]
 
 [[provider.openrouter]]
@@ -834,6 +899,7 @@ auto_reasoning_overrides = { agent = "off", verify = "off", code = "off" }
 preserve_thinking = true
 server_parser = "none"
 honors_chat_template_kwargs = true
+honors_preserve_thinking_kwarg = true
 recommended_endpoint = "/v1/chat/completions"
 text_tool_wire_format_supported = true
 thinking_disable_directive = "/no_think"
@@ -937,6 +1003,7 @@ auto_reasoning_overrides = { agent = "off", verify = "off", code = "off" }
 preserve_thinking = true
 server_parser = "none"
 honors_chat_template_kwargs = true
+honors_preserve_thinking_kwarg = true
 recommended_endpoint = "/v1/chat/completions"
 text_tool_wire_format_supported = true
 thinking_disable_directive = "/no_think"

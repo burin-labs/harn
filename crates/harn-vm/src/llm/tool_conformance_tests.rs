@@ -134,6 +134,42 @@ fn request_report_materializes_large_string_case_without_provider_call() {
     );
 }
 
+/// Routes that reject forced tool choice are probed with `auto`; the forced
+/// probe was a guaranteed 400 on them. Opus 5 still accepts forcing and is the
+/// control that keeps the named-tool shape, so a change that relaxed every
+/// route would fail here.
+#[test]
+fn probe_asks_with_auto_only_where_forced_tool_choice_is_rejected() {
+    for (provider, model, expected) in [
+        ("anthropic", "claude-opus-5-5", json!({"type": "auto"})),
+        ("anthropic", "claude-sonnet-5-5", json!({"type": "auto"})),
+        (
+            "anthropic",
+            "claude-opus-5",
+            json!({"type": "tool", "name": TOOL_PROBE_TOOL_NAME}),
+        ),
+    ] {
+        let report = tool_conformance_request_report(
+            provider,
+            model,
+            None,
+            vec![ToolProbeMode::NonStreaming],
+            ToolProbeCase::SingleToolCall,
+            ToolProbeRequestProfile::CatalogDefault,
+            "marker",
+        )
+        .expect("request report");
+        let request = &report.requests[0];
+        assert_eq!(request.request_body["tool_choice"], expected, "{model}");
+        assert_eq!(
+            request.validation.status,
+            ToolConformanceRequestValidationStatus::Pass,
+            "{model}: {:?}",
+            request.validation.issues
+        );
+    }
+}
+
 #[test]
 fn request_report_for_json_format_uses_prompt_contract_without_native_tools() {
     let report = tool_conformance_request_report_for_format(
@@ -1328,13 +1364,24 @@ fn aggregates_anthropic_streaming_tool_use_deltas() {
 
 #[test]
 fn report_satisfies_tool_probe_when_text_fallback_passes() {
-    let report = classify_tool_conformance_fixture(
+    let mut report = classify_tool_conformance_fixture(
         "llamacpp",
         "qwen",
         ToolProbeMode::NonStreaming,
         DEFAULT_TOOL_PROBE_MARKER,
         r#"{"content":"echo_marker({ value: \"harn_tool_probe_marker\" })"}"#,
     );
+    assert_eq!(
+        report.evidence_source,
+        ToolProbeEvidenceSource::SavedResponse
+    );
+    assert!(!report_satisfies_required_probe(&report, "tool_probe"));
+    let mut legacy = serde_json::to_value(&report).unwrap();
+    legacy.as_object_mut().unwrap().remove("evidence_source");
+    legacy["schema_version"] = serde_json::json!(1);
+    let legacy: ToolConformanceReport = serde_json::from_value(legacy).unwrap();
+    assert!(!report_satisfies_required_probe(&legacy, "tool_probe"));
+    report.evidence_source = ToolProbeEvidenceSource::LiveRequest;
     assert!(report_satisfies_required_probe(&report, "tool_probe"));
     assert!(!report_satisfies_required_probe(
         &report,

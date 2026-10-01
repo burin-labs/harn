@@ -351,6 +351,7 @@ impl CacheKey {
 /// value the operator set and Harn cannot honor is an error, never a silent
 /// downgrade.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum CacheDirError {
     /// `$HARN_CACHE_DIR` is set to an empty value.
     Empty,

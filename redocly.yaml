@@ -1,6 +1,6 @@
 apis:
   agents-protocol@v1:
-    root: spec/openapi.yaml
+    root: crates/harn-serve/openapi.yaml
 extends:
   - recommended
 rules:

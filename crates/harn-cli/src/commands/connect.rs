@@ -140,6 +140,7 @@ struct ConnectorStatus {
     usable: bool,
     status: String,
     reason: String,
+    inbound: ConnectorInboundReadiness,
     #[serde(skip_serializing_if = "Option::is_none")]
     auth_type: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -158,6 +159,13 @@ struct ConnectorStatus {
     expires_at_unix: Option<i64>,
     health_checks: Vec<ConnectorHealthStatus>,
     recovery: ConnectorRecoveryCopy,
+}
+
+#[derive(Clone, Debug, Serialize)]
+struct ConnectorInboundReadiness {
+    status: String,
+    required_secrets: Vec<String>,
+    missing_secrets: Vec<String>,
 }
 
 #[derive(Clone, Debug, Serialize)]

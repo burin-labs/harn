@@ -251,6 +251,10 @@ pub(crate) fn capabilities_to_vm_value(
             .unwrap_or(VmValue::Nil),
     );
     dict.insert(
+        crate::value::intern_key("structured_output_strategy"),
+        VmValue::string(caps.structured_output_strategy.as_str()),
+    );
+    dict.insert(
         crate::value::intern_key("json_schema"),
         caps.json_schema
             .as_deref()
@@ -287,6 +291,14 @@ pub(crate) fn capabilities_to_vm_value(
         VmValue::Bool(caps.preserve_thinking),
     );
     dict.insert(
+        crate::value::intern_key("honors_preserve_thinking_kwarg"),
+        VmValue::Bool(caps.honors_preserve_thinking_kwarg),
+    );
+    dict.insert(
+        crate::value::intern_key("requires_parallel_tool_calls_false"),
+        VmValue::Bool(caps.requires_parallel_tool_calls_false),
+    );
+    dict.insert(
         crate::value::intern_key("reasoning_history_wire_field"),
         reasoning_history_wire_field_value(caps),
     );
@@ -313,6 +325,10 @@ pub(crate) fn capabilities_to_vm_value(
     dict.insert(
         crate::value::intern_key("reasoning_disable_supported"),
         VmValue::Bool(caps.reasoning_disable_supported),
+    );
+    dict.insert(
+        crate::value::intern_key("thinking_off_type"),
+        VmValue::String(arcstr::ArcStr::from(caps.thinking_off_type.as_str())),
     );
     dict.insert(
         crate::value::intern_key("reasoning_text_promotable"),

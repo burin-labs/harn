@@ -9,6 +9,7 @@ mod execution;
 mod execution_deadline;
 mod execution_evidence;
 mod format;
+mod harness_seam;
 mod interrupts;
 mod introspection;
 pub mod iter;
@@ -23,6 +24,7 @@ mod stdlib_registration;
 pub mod subtask;
 mod task_cleanup;
 mod tool_callable;
+mod work;
 
 #[cfg(test)]
 mod depth_regression_tests;
@@ -49,11 +51,14 @@ pub(crate) use async_builtin::run_async_builtin_with;
 pub use async_builtin::AsyncBuiltinCtx;
 pub use builtin::{VmBuiltinArity, VmBuiltinKind, VmBuiltinMetadata};
 pub use debug::{DebugAction, DebugState};
+pub(crate) use harness_seam::{install_harness_methods, HarnessMethodFuture, HarnessMethods};
 pub use module_phase_timing::{ModulePhaseRecorder, ModulePhaseStats};
 pub use modules::resolve_module_import_path;
 pub use state::{Vm, VmBaseline};
 pub(crate) use stdlib_artifact::prepare_stdlib_module_artifact;
+pub use stdlib_artifact::{warm_embedded_stdlib, StdlibWarmReport};
 pub(crate) use task_cleanup::PendingTaskCleanup;
+pub use work::{VmWork, VmWorkRecorder};
 
 pub(crate) use call_args::CallArgs;
 pub(crate) use state::{

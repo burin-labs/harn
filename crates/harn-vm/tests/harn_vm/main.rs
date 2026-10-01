@@ -60,6 +60,7 @@ mod sandbox_hardened;
 mod session_environment_inherited_path;
 mod session_environment_leak;
 mod skill_activation_evidence_conformance;
+mod spawn_audit;
 mod stdlib_event_registration;
 mod thread_local_audit;
 mod tool_call_cancellation;

@@ -350,6 +350,10 @@ pub(crate) async fn execute_with_skill_dirs_and_options(
                 } else {
                     None
                 };
+            // Stdlib methods may come from a cached registration shared by
+            // consecutive VMs, so reset their publication slots at the script
+            // execution boundary rather than during method registration.
+            harn_vm::reset_mcp_serve_publication();
             let execution_result = vm
                 .execute(&chunk)
                 .await

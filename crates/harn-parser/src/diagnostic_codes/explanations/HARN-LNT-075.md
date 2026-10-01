@@ -1,15 +1,15 @@
 # HARN-LNT-075 — tool handler returns a freeform dict
 
-A tool handler's return value is what tells the runtime whether the operation
-succeeded. When that value is a plain dict, nothing in it says so. The runtime
-has to guess from key names, and every reader of the result has to guess the
-same way.
+A tool handler must declare its operation outcome independently of its data.
+Freeform dictionaries don't declare that outcome, so dispatch rejects them
+with `schema_validation`, including dictionaries returned by helpers or mutable
+bindings.
 
 That guess cannot be finished. A dict carrying a `status` key may be declaring
 a failure or merely reporting progress, and no set of key names separates the
 two, because the value carries no type saying which it is. A handler is equally
 free to return `{failed: true}` or `{error_code: 7}`, which no convention
-covers, and those read as success.
+covers. Those shapes are now contract errors.
 
 This is not hypothetical. A handler returning `{ok: false}` had its refusal
 rendered to display text before anything classified it, and every dict-shaped
@@ -41,15 +41,24 @@ beside it:
 ```harn
 fn search_handler(args: dict) -> dict {
   return {
-    schema: "harn.agent_tool_handler_result.v1",
+    schema: "harn.agent_tool_handler_result.v2",
+    outcome: "ok",
     text: "3 matches",
     data: {matches: 3},
   }
 }
 ```
 
+The envelope requires `outcome`, `text`, and `data`. `outcome` accepts `"ok"`,
+`"error"`, or `"rejected"`. `agent_tool_handler_result(text, data, outcome)`
+constructs it; omitted `outcome` defaults to `"ok"`. Data fields never override
+the declaration. Nominal structs must carry exactly one boolean `ok` or
+`success` field; other fields don't decide the outcome.
+
 ## Severity
 
-This reports as a warning while in-tree handlers migrate. It becomes an error
-once no untyped handler result remains, at which point outcome classification
-stops being a heuristic over key names.
+This is an error for a freeform dict literal returned directly from a tool
+handler or through a same-body immutable binding. The checker
+does not follow every mutable binding or helper-function return. Dispatch
+validates their actual return values before rendering. A `handler` in a
+different contract, such as a tool-search strategy, is outside this rule.

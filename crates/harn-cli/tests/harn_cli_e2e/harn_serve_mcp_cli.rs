@@ -54,6 +54,41 @@ pub fn greet(name: string, excited: bool = false) -> dict {
     .unwrap();
 }
 
+#[test]
+fn serve_mcp_rejects_caught_invalid_catalog_declaration() {
+    let temp = TempDir::new().unwrap();
+    fs::write(
+        temp.path().join("server.harn"),
+        r#"
+fn main(harness: Harness) {
+  const rejected = try {
+    harness.tools.mcp_prompt(
+      {name: "review", arguments: [{name: "input"}, 7], handler: {args -> args.input}},
+    )
+  }
+  assert(is_err(rejected), "the declaration must fail")
+  harness.tools.mcp_tools(tool_registry())
+}
+"#,
+    )
+    .unwrap();
+
+    let output = harn_e2e_command()
+        .current_dir(temp.path())
+        .args(["serve", "mcp", "server.harn"])
+        .output()
+        .unwrap();
+    assert!(
+        !output.status.success(),
+        "invalid catalog must not start serving"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("invalid MCP publication") && stderr.contains("arguments[1]"),
+        "startup must identify the rejected declaration: {stderr}"
+    );
+}
+
 #[ignore = "binary surface — runs in the slow E2E/smoke job"]
 #[test]
 fn serve_mcp_dispatches_declared_tool_parameters() {

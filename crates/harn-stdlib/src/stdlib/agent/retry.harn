@@ -48,6 +48,7 @@ const __AGENT_NEVER_RETRY_STATUSES = [
 
 const __AGENT_NEVER_RETRY_ERROR_TAGS = [
   "auth",
+  "billing_limit",
   "not_found",
   "schema_validation",
   "invalid_request",

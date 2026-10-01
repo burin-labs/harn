@@ -1,0 +1,69 @@
+{
+  "request": {
+    "model": "typesafe/jev-1.13",
+    "state": "The read-only command printed README.md.",
+    "questions": {
+      "safe": {
+        "type": "noul",
+        "instructions": "Was the command read only?"
+      },
+      "action": {
+        "type": "choice",
+        "instructions": "What happened?",
+        "criteria": {
+          "read": "read file",
+          "write": "changed file"
+        }
+      },
+      "risk": {
+        "type": "score",
+        "instructions": "Risk of data loss?",
+        "criteria": [
+          "none",
+          "high"
+        ]
+      }
+    },
+    "provider": {
+      "allow_fallbacks": false
+    }
+  },
+  "response": {
+    "model": "typesafe/jev-1.13-20260917",
+    "answers": {
+      "safe": {
+        "type": "noul",
+        "noul": 0.94
+      },
+      "action": {
+        "type": "choice",
+        "choice": "read",
+        "probabilities": {
+          "write": 0,
+          "read": 1
+        },
+        "confidence": 1
+      },
+      "risk": {
+        "type": "score",
+        "score": 0,
+        "legend": {
+          "0": "none",
+          "1": "high"
+        },
+        "probabilities": {
+          "0": 1,
+          "1": 0
+        },
+        "confidence": 1
+      }
+    },
+    "usage": {
+      "input_tokens": 356,
+      "output_tokens": 61,
+      "cost": 1.4952e-05
+    },
+    "id": "gen-dec-1790087880-uZFMpcqgVyqdtoPpmekM",
+    "provider": "TypeSafe"
+  }
+}
