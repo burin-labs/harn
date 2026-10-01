@@ -197,7 +197,8 @@ pipeline test_literal_timeout_pattern_matches_literal_waits(harness: Harness, ta
 
 @test
 pipeline test_literal_timeout_pattern_spans_a_line_break(harness: Harness, task: unknown) {
-  const text = "let a = 1;\nlet v = tokio::time::timeout(\n    Duration::from_secs(5),\n    fut,\n)\n"
+  const text =
+    "let a = 1;\nlet v = tokio::time::timeout(\n    Duration::from_secs(5),\n    fut,\n)\n"
   const hits = find_hits(text, literal_timeout_pattern())
   assert_eq(hits.count, 1)
   // Reported on the line the call starts, not the line before it.
@@ -223,7 +224,10 @@ pipeline test_literal_timeout_pattern_rejections(harness: Harness, task: unknown
 @test
 pipeline test_literal_timeout_baseline_is_a_ratchet(harness: Harness, task: unknown) {
   assert_eq(grandfather_count("literal_timeout", "crates/harn-vm/src/llm/rate_limit.rs"), 3)
-  assert_eq(grandfather_count("literal_timeout", "crates/harn-serve/src/adapters/acp/tests.rs"), nil)
+  assert_eq(
+    grandfather_count("literal_timeout", "crates/harn-serve/src/adapters/acp/tests.rs"),
+    nil,
+  )
   assert_eq(grandfather_duplicates(), [])
 }
 
