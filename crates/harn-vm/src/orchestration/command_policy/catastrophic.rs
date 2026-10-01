@@ -319,14 +319,17 @@ fn git_push_rewrite(args: &[String]) -> Option<RemoteRefRewrite> {
             {
                 rewrite = Some(RemoteRefRewrite::Delete);
             } else if value.is_none()
-                && matches!(
-                    name,
-                    "--push-option"
-                        | "--repo"
-                        | "--receive-pack"
-                        | "--exec"
-                        | "--recurse-submodules"
-                )
+                && [
+                    "--push-option",
+                    "--repo",
+                    "--receive-pack",
+                    "--exec",
+                    "--recurse-submodules",
+                ]
+                .iter()
+                .filter(|option| abbreviates(name, option))
+                .count()
+                    == 1
             {
                 index += 1;
             }

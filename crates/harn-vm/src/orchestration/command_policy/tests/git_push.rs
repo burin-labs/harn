@@ -65,6 +65,19 @@ fn floor_blocks_every_force_push_shape() {
     }
 }
 
+#[test]
+fn valued_option_abbreviations_do_not_turn_values_into_refspecs() {
+    for option in ["--push-o", "--push-op", "--push-opt", "--push-optio"] {
+        let ordinary = format!("git push {option} +ordinary-value origin main");
+        assert!(!has_git_force_push(&ordinary), "{ordinary}");
+        assert!(!is_cat_root(&ordinary), "{ordinary}");
+
+        let forced = format!("git push {option} +ordinary-value origin +main");
+        assert!(has_git_force_push(&forced), "{forced}");
+        assert!(is_cat_root(&forced), "{forced}");
+    }
+}
+
 /// Deleting a remote ref is labelled `git_force_push` so policy can deny or
 /// gate it, but it stays approvable: only a push that can overwrite remote
 /// history is on the never-approvable floor.
