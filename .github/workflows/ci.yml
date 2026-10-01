@@ -128,6 +128,7 @@ jobs:
       release_metadata_only: ${{ steps.release_metadata.outputs.release_metadata_only }}
       sprint_fast_ci: ${{ steps.sprint_fast_ci.outputs.active }}
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       # The sprint fast-CI switch (#7628). The one place that decides it: the
       # five slow proof families and ci-status read this output, never the
       # variable. It applies only to pull requests and merge groups, so a push
@@ -136,18 +137,11 @@ jobs:
       # pre-merge proof without a code change.
       - name: Decide the sprint fast-CI mode
         id: sprint_fast_ci
+        shell: bash
         env:
           SPRINT_FAST_CI: ${{ vars.SPRINT_FAST_CI }}
           EVENT_NAME: ${{ github.event_name }}
-        run: |
-          active=false
-          if [ "$SPRINT_FAST_CI" = "true" ] \
-            && { [ "$EVENT_NAME" = "pull_request" ] || [ "$EVENT_NAME" = "merge_group" ]; }; then
-            active=true
-            echo "::notice title=Sprint fast CI::SPRINT_FAST_CI=true: Windows cross-compile, macOS, Harn conformance and source audit, and Linux sandbox proofs run after merge on main instead of here."
-          fi
-          echo "active=$active" >> "$GITHUB_OUTPUT"
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        run: bash scripts/ci/sprint_fast_ci.sh
       - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
         id: filter
         with:

@@ -56,6 +56,19 @@ fn step_with_id(job: dict?, id: string) {
   return nil
 }
 
+fn checkout_before_decision(job: dict?) -> bool {
+  let checked_out = false
+  for step in job?.steps ?? [] {
+    if trim(to_string(step?.id ?? "")) == SPRINT_STEP_ID {
+      return checked_out
+    }
+    if to_string(step?.uses ?? "").starts_with("actions/checkout@") {
+      checked_out = true
+    }
+  }
+  return false
+}
+
 /** The text of one `require_result` call, from its result variable to the next blank line. */
 fn require_call(command: string, result_var: string) -> string {
   const marker = "require_result \"$" + result_var + "\""
@@ -75,10 +88,10 @@ pub fn sprint_fast_ci_errors(workflows: dict) -> list<string> {
   if trim(to_string(changes?.outputs?.sprint_fast_ci ?? ""))
     != gha("steps.${SPRINT_STEP_ID}.outputs.active")
     || trim(to_string(decision?.env?.SPRINT_FAST_CI ?? "")) != gha(SPRINT_VARIABLE)
-    || !contains(decision_run, "[ \"$SPRINT_FAST_CI\" = \"true\" ]")
-    || !contains(decision_run, "\"$EVENT_NAME\" = \"pull_request\"")
-    || !contains(decision_run, "\"$EVENT_NAME\" = \"merge_group\"")
-    || contains(decision_run, "push") {
+    || trim(to_string(decision?.env?.EVENT_NAME ?? "")) != gha("github.event_name")
+    || trim(to_string(decision?.shell ?? "")) != "bash"
+    || trim(decision_run) != "bash scripts/ci/sprint_fast_ci.sh"
+    || !checkout_before_decision(changes) {
     errors = errors
       + [
         "ci.yml:changes must own the sprint fast-CI decision: exactly `true`, pull requests and merge groups only",
