@@ -1106,21 +1106,20 @@ jobs:
           ./scripts/ci/wait_for_run_artifacts.sh
           harn-cli.tar.zst
 
-  # The Linux sandbox proof consumes its own exact-commit archive. Schedule
-  # its barrier only after the producer finishes, so runner queue time cannot
-  # spend the artifact wait and a missing archive names a completed producer.
+  # The Linux sandbox proof consumes its own exact-commit archive, which the
+  # producer uploads several minutes before it finishes its test phase. Like
+  # the CLI barrier, this one starts at once and lets the waiter read the
+  # producer's state: a queued or running producer is pending, so queue time
+  # cannot spend the wait, and a producer that completes without the archive
+  # fails the wait by name. Waiting for producer completion instead (#8751)
+  # put about 90s of barrier, sandbox tests, and aggregation behind the
+  # longest job in the merge queue.
   security-tests-ready:
     name: Wait for Linux security tests
-    needs: [changes, rust-check-inputs]
-    # `!cancelled()` because a plain `if` implies `success()` over every
-    # transitive need, and `rust-producer-capacity` is skipped outside pull
-    # requests, which silently skipped this barrier on every push to main.
-    if: >-
-      !cancelled()
-      && needs.changes.outputs.rust == 'true'
-      && needs.rust-check-inputs.result == 'success'
+    needs: [changes]
+    if: needs.changes.outputs.rust == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 50
     permissions:
       actions: read
       contents: read
@@ -1131,9 +1130,6 @@ jobs:
       - name: Wait for Linux security tests
         env:
           GH_TOKEN: ${{ github.token }}
-          # After producer completion, only unreadable job metadata can spend
-          # this budget. A genuinely missing archive fails on the first read.
-          HARN_EXT_ARTIFACT_WAIT_MAX_ATTEMPTS: "6"
         run: >-
           ./scripts/ci/wait_for_run_artifacts.sh
           harn-security.tar.zst
@@ -1241,8 +1237,8 @@ jobs:
 
   rust-security:
     name: Run Linux sandbox tests
-    # The ready barrier verifies the exact-commit artifact after its producer
-    # completed; ci-status still requires both the producer and this proof.
+    # The ready barrier sees the exact-commit artifact as soon as the producer
+    # uploads it; ci-status still requires both the producer and this proof.
     needs: [changes, security-tests-ready]
     # `!cancelled()` for the same transitive skip as `security-tests-ready`.
     if: >-

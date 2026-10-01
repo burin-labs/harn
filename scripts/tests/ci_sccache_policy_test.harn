@@ -393,14 +393,13 @@ fn workflow() {
       "rust-test": rust_test,
       "security-tests-ready": {
         "runs-on": "ubuntu-latest",
-        "timeout-minutes": 15,
-        needs: ["changes", "rust-check-inputs"],
-        if: "needs.changes.outputs.rust == 'true' && needs.rust-check-inputs.result == 'success'",
+        "timeout-minutes": 50,
+        needs: ["changes"],
+        if: "needs.changes.outputs.rust == 'true'",
         permissions: {actions: "read", contents: "read"},
         steps: [
           {
             name: "Wait for Linux security tests",
-            env: {HARN_EXT_ARTIFACT_WAIT_MAX_ATTEMPTS: "6"},
             run: "./scripts/ci/wait_for_run_artifacts.sh harn-security.tar.zst",
           },
         ],
@@ -875,7 +874,7 @@ pipeline test_rejects_artifact_wait_shorter_than_cold_producer_headroom(
   )
   assert(
     errors.contains(
-      "ci.yml:security-tests-ready must wait for the security archive producer to finish",
+      "ci.yml:security-tests-ready must be the bounded free-hosted security archive barrier",
     ),
   )
 }
@@ -1338,7 +1337,7 @@ pipeline test_owned_cli_rejects_the_hosted_only_timeout(harness: Harness) {
   assert_eq(producer_owned_ceiling_minutes(), 76)
 }
 
-pipeline test_security_wait_bounds_unmeasured_metadata() {
+pipeline test_security_wait_uses_the_shared_waiter_budget() {
   const valid = workflow()
   const ready = valid.jobs["security-tests-ready"]
   const unbounded = {
@@ -1357,23 +1356,32 @@ pipeline test_security_wait_bounds_unmeasured_metadata() {
   assert_eq(ci_linux_lane_policy_errors(valid), [])
   assert(
     ci_linux_lane_policy_errors(unbounded).contains(
-      "ci.yml:security-tests-ready must wait for the security archive producer to finish",
+      "ci.yml:security-tests-ready must be the bounded free-hosted security archive barrier",
     ),
   )
 }
 
-pipeline test_security_barrier_requires_completed_producer() {
+pipeline test_security_barrier_overlaps_the_producer() {
   const valid = workflow()
   const ready = valid.jobs["security-tests-ready"]
-  assert_eq(ready.needs, ["changes", "rust-check-inputs"])
+  assert_eq(ready.needs, ["changes"])
   assert_eq(ci_linux_lane_policy_errors(valid), [])
-  const premature = {
+  // Waiting for producer completion delays the sandbox proof behind the whole
+  // test phase; the waiter already treats a running producer as pending.
+  const serialized = {
     ...valid,
-    jobs: {...valid.jobs, "security-tests-ready": {...ready, needs: ["changes"]}},
+    jobs: {
+      ...valid.jobs,
+      "security-tests-ready": {
+        ...ready,
+        needs: ["changes", "rust-check-inputs"],
+        if: "needs.changes.outputs.rust == 'true' && needs.rust-check-inputs.result == 'success'",
+      },
+    },
   }
   assert(
-    ci_linux_lane_policy_errors(premature).contains(
-      "ci.yml:security-tests-ready must wait for the security archive producer to finish",
+    ci_linux_lane_policy_errors(serialized).contains(
+      "ci.yml:security-tests-ready must be the bounded free-hosted security archive barrier",
     ),
   )
 }
