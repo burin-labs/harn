@@ -56,6 +56,7 @@ mod evaluation_receipt_verification;
 mod explain_dispatch;
 mod git_config_sandbox_cli;
 mod graph_cli;
+mod guardian_namespace_e2e;
 mod harn_script_lint_rules_dispatch;
 mod harn_serve_api_cli;
 mod harn_serve_mcp_cli;

@@ -20,6 +20,54 @@ use crate::VmError;
 use super::{sandbox_rejection, LandlockProfile, ProcessProfile, TransferableConfinement};
 use crate::stdlib::sandbox::backend::PrepareOutcome;
 
+/// Who enters a transferred Linux confinement before the payload starts.
+pub enum ReexecConfinement {
+    /// The supervisor enters confinement immediately before executing the payload.
+    BeforeExec(TransferableConfinement),
+    /// The supervisor passes the ruleset to the helper without entering it.
+    AfterNamespace(TransferableConfinement),
+}
+
+/// Prepare a command for an exec-based supervisor. The caller carries the
+/// returned ruleset on `ruleset_fd`; a namespace helper enters it only after
+/// constructing the network boundary. No callback is lost in the projection.
+///
+/// The boolean reports whether the session policy cleared the environment.
+/// `None` means no confinement is active; an unavailable requested mechanism
+/// returns an error. The returned command has no confinement callbacks, so
+/// the caller must transfer and apply the returned confinement as directed.
+pub fn command_for_reexec(
+    program: &str,
+    args: &[String],
+    ruleset_fd: i32,
+) -> Result<(Command, bool, Option<ReexecConfinement>), VmError> {
+    let resolved = crate::stdlib::process::resolve_program_path_for_spawn(program);
+    let mut command = Command::new(&resolved);
+    command.args(args);
+    let confinement = match super::transferable_confinement(program)? {
+        None => None,
+        Some(confinement) => {
+            let (policy, _) = crate::stdlib::sandbox::active_sandbox_policy()
+                .expect("confinement requires policy");
+            if let Some(launcher) = resolve_netns_launcher(&policy)? {
+                command = Command::new(launcher);
+                command.args(launcher_argv_with_ruleset(
+                    &resolved,
+                    args,
+                    &confinement,
+                    confinement.ruleset_fd().map(|_| ruleset_fd),
+                ));
+                Some(ReexecConfinement::AfterNamespace(confinement))
+            } else {
+                Some(ReexecConfinement::BeforeExec(confinement))
+            }
+        }
+    };
+    let (command, env_closed) =
+        crate::stdlib::sandbox::command_for::close_std_command_environment(command, program)?;
+    Ok((command, env_closed, confinement))
+}
+
 /// Turn a prepared profile into the helper invocation that will enter it.
 ///
 /// The profile is consumed rather than borrowed: the ruleset descriptor has to
@@ -95,8 +143,22 @@ pub(super) fn namespaced_launcher_argv(
     payload_args: &[String],
     confinement: &TransferableConfinement,
 ) -> Vec<String> {
+    launcher_argv_with_ruleset(
+        payload_program,
+        payload_args,
+        confinement,
+        confinement.ruleset_fd(),
+    )
+}
+
+pub(super) fn launcher_argv_with_ruleset(
+    payload_program: &str,
+    payload_args: &[String],
+    confinement: &TransferableConfinement,
+    ruleset_fd: Option<i32>,
+) -> Vec<String> {
     let mut argv = vec![NETNS_LAUNCH_SUBCOMMAND.to_string()];
-    if let Some(fd) = confinement.ruleset_fd() {
+    if let Some(fd) = ruleset_fd {
         argv.push(NETNS_RULESET_FD_FLAG.to_string());
         argv.push(fd.to_string());
     }

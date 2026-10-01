@@ -83,7 +83,7 @@ pub fn std_command_for_with_env_state(
 ) -> Result<(Command, bool), VmError> {
     let resolved_program = crate::stdlib::process::resolve_program_path_for_spawn(program);
     let active = active_sandbox_policy();
-    let mut command = match active.as_ref() {
+    let command = match active.as_ref() {
         Some((policy, profile)) => {
             build_std_command::<ActiveBackend>(&resolved_program, args, policy, *profile)?
         }
@@ -93,10 +93,18 @@ pub fn std_command_for_with_env_state(
             command
         }
     };
-    let env_closed = close_env_for_session!(command, program);
+    let (mut command, env_closed) = close_std_command_environment(command, program)?;
     if let Some(proxy) = active.and_then(|(policy, _)| policy.process_network_proxy) {
         process_output::apply_managed_proxy_env(&mut command, proxy);
     }
+    Ok((command, env_closed))
+}
+
+pub(super) fn close_std_command_environment(
+    mut command: Command,
+    program: &str,
+) -> Result<(Command, bool), VmError> {
+    let env_closed = close_env_for_session!(command, program);
     Ok((command, env_closed))
 }
 

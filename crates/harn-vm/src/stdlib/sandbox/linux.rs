@@ -266,6 +266,7 @@ pub fn transferable_confinement(program: &str) -> Result<Option<TransferableConf
     let Some((policy, profile)) = super::active_sandbox_policy() else {
         return Ok(None);
     };
+    super::ensure_spawn_enforceable::<Backend>(&policy)?;
     // Resolve exactly as the direct spawn path does. The resolved path is what
     // the ruleset grants read and execute on, so a bare name here would build a
     // ruleset that refuses the very program it was built for.
@@ -1440,6 +1441,7 @@ mod netns;
 pub use netns::decode_seccomp_hex;
 pub use netns::keep_ruleset_across_exec;
 pub(crate) use netns::keep_ruleset_across_exec_tokio;
+pub use netns::{command_for_reexec, ReexecConfinement};
 use netns::{namespaced_loopback_grant, namespaced_outcome, resolve_netns_launcher};
 
 #[cfg(test)]
