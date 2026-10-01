@@ -42,13 +42,16 @@
 #   CANARY_REPOSITORY  owner/name of the consumer.
 #   CANARY_WORKFLOW    the consumer's rehearsal workflow file.
 #   SOURCE_REVISION    the commit under test.
-#   TARGET_VERSION     the workspace version at that commit, as vX.Y.Z[-pre].
+#   WORKSPACE_VERSION  the workspace version at that commit, as X.Y.Z[-dev].
 #   PAIRING_TEXT       description and commit messages to read trailers from.
 #   GH_TOKEN           may dispatch and read the consumer's workflow runs.
 #   CANARY_POLL_SECONDS, CANARY_DEADLINE_SECONDS  optional overrides.
 #   GITHUB_OUTPUT      when set, receives verdict=pass|fail once the consumer
 #                      run concluded; an unmeasured run writes no verdict.
 set -euo pipefail
+
+# shellcheck source=scripts/lib/release_version.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/lib/release_version.sh"
 
 # The consumer's repository name, which no output line may contain.
 CANARY_SECRET_NAME=
@@ -88,7 +91,7 @@ canary_read_pairing() {
 
 canary_main() {
   local repo=${CANARY_REPOSITORY:-} workflow=${CANARY_WORKFLOW:-}
-  local revision=${SOURCE_REVISION:-} version=${TARGET_VERSION:-}
+  local revision=${SOURCE_REVISION:-} workspace_version=${WORKSPACE_VERSION:-}
   # The consumer's rehearsal took about 45 minutes in the runs this canary
   # dispatched on 2026-09-30, both green after a 40-minute deadline had
   # already called them unmeasured. 55 minutes leaves headroom; the job's
@@ -103,9 +106,12 @@ canary_main() {
   canary_say "CONSUMER_CANARY consumer=configured secret=CONSUMER_CANARY_REPOSITORY"
   [[ -n "$workflow" ]] || canary_fail consumer_workflow_unset
   [[ "$revision" =~ ^[0-9a-f]{40}$ ]] || canary_fail source_revision_invalid
-  # The consumer reads the target as a tag name, so a bare workspace version
-  # is refused there; refuse it here first, by name.
-  [[ "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+ ]] || canary_fail target_version_invalid "target=$version"
+  # The consumer reads the target as a tag name, so resolve the source's
+  # published version before choosing the dispatch target.
+  local published_version target_version
+  published_version="$(release_published_version_for_workspace "$workspace_version")" \
+    || canary_fail workspace_version_unpublished "version=$workspace_version"
+  target_version="v$published_version"
 
   local paired ref label=default
   canary_read_pairing "${PAIRING_TEXT:-}"
@@ -127,7 +133,7 @@ canary_main() {
   local started dispatched run_id
   started=$(date +%s)
   dispatched=$(gh workflow run "$workflow" -R "$repo" --ref "$ref" \
-    -f target="$version" -f source_revision="$revision" -f legs=clean 2>&1) \
+    -f target="$target_version" -f source_revision="$revision" -f legs=clean 2>&1) \
     || canary_fail dispatch_refused
   run_id=$(grep -oE "https://github\.com/$repo/actions/runs/[0-9]+" <<< "$dispatched" | head -1 || true)
   run_id=${run_id##*/}
