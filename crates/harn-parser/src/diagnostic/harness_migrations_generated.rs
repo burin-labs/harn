@@ -319,6 +319,7 @@ pub(super) const HARNESS_MIGRATIONS: &[(&str, &str)] = &[
     ("sandbox_active_backend", "harness.system.sandbox_active_backend"),
     ("sandbox_active_profile", "harness.system.sandbox_active_profile"),
     ("sandbox_backend_available", "harness.system.sandbox_backend_available"),
+    ("sandbox_confinement", "harness.system.sandbox_confinement"),
     ("scan_directory", "harness.project.scan_directory"),
     ("schema_recover", "harness.llm.recover_schema"),
     ("select", "harness.runtime.select"),

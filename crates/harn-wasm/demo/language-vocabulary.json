@@ -708,6 +708,7 @@
     "sandbox_active_backend",
     "sandbox_active_profile",
     "sandbox_backend_available",
+    "sandbox_confinement",
     "scan_directory",
     "schema_check",
     "schema_expect",
