@@ -481,9 +481,13 @@ fragments. Provider capability rules use the same pattern:
 `crates/harn-vm/src/llm/capability_sources/` generates
 `crates/harn-vm/src/llm/capabilities.toml`.
 
-The bare runtime fallback is `fallback_model` in `00-base.toml`.
-`40-defaults/provider-models.toml` records provider-specific `runtime` and
-`portal` choices; they may differ deliberately. Keep those routes in the
+`00-base.toml` names the `default_provider`, used when a call names neither a
+provider nor a model. `40-defaults/provider-models.toml` records each
+provider's `runtime` and `portal` default; they may differ deliberately. A
+provider without a `runtime` entry has no default model, and a call naming only
+that provider fails before dispatch rather than borrowing another provider's
+model. The retired top-level `fallback_model` key is still accepted in
+overlays, and becomes the `runtime` default of the overlay's default provider. Keep those routes in the
 catalog rather than in Rust match tables. Catalog generation rejects unknown,
 provider-mismatched, or deprecated choices there, in `qc_defaults`, the three
 tier aliases, and model ladders. Host environment overrides for local models

@@ -1088,9 +1088,11 @@ fn a_string_external_root_admits_reads_and_refuses_writes_at_the_boundary() {
         assert_eq!(rule.source, SOURCE_DEFAULT_EXTERNAL_PATH);
         assert_eq!(rule.id.as_deref(), Some(EXTERNAL_ROOT_READ_ONLY));
         assert_eq!(write.risk_labels, vec![EXTERNAL_ROOT_READ_ONLY.to_string()]);
-        assert_eq!(write.denied_paths, vec![inside.to_string()]);
+        // The boundary reports a host path with forward slashes on every OS.
+        let reported = inside.replace('\\', "/");
+        assert_eq!(write.denied_paths, vec![reported.clone()]);
         assert!(
-            write.reason.contains(inside)
+            write.reason.contains(&reported)
                 && write.reason.contains(root)
                 && write.reason.contains("'read'"),
             "the refusal names the path, the root, and its mode: {}",

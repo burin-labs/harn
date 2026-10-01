@@ -25,5 +25,7 @@
 # equivalent data as Rust literals in llm_config.rs — that creates the
 # parallel system this catalog exists to eliminate.
 
+# The provider a call uses when it names neither a provider nor a model. Its
+# model comes from `provider_defaults.<provider>.runtime`, like every other
+# provider's; there is no separate global fallback model.
 default_provider = "anthropic"
-fallback_model = "claude-sonnet-4-6"

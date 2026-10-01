@@ -179,17 +179,13 @@ pub fn parse_env_skills_path(raw: &str) -> Vec<PathBuf> {
         .collect()
 }
 
-/// Canonical system-level search paths. We read `$XDG_CONFIG_HOME` with
-/// the usual `$HOME/.config` fallback and always include `/etc/harn/skills`
-/// on Unix.
+/// Canonical system-level search paths: `skills/` in the user configuration
+/// directory ([`crate::user_dirs::config_dir`]) and, on Unix,
+/// `/etc/harn/skills`.
 pub fn default_system_dirs() -> Vec<PathBuf> {
     let mut out = Vec::new();
-    if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME") {
-        if !xdg.is_empty() {
-            out.push(PathBuf::from(xdg).join("harn").join("skills"));
-        }
-    } else if let Some(home) = dirs_home() {
-        out.push(home.join(".config").join("harn").join("skills"));
+    if let Some(dir) = crate::user_dirs::config_dir() {
+        out.push(dir.join("skills"));
     }
     #[cfg(unix)]
     {
@@ -224,14 +220,14 @@ mod tests {
     }
 
     #[test]
-    fn default_system_dirs_respects_xdg() {
-        let tmp = tempfile::tempdir().unwrap();
-        let xdg = tmp.path().to_path_buf();
-        // SAFETY for test isolation: each test process has its own env.
-        std::env::set_var("XDG_CONFIG_HOME", &xdg);
+    fn default_system_dirs_include_the_user_config_skills_dir() {
+        // The directory's resolution order is `user_dirs`' to test; here the
+        // skills search path must follow whatever it resolves.
         let dirs = default_system_dirs();
-        assert!(dirs.iter().any(|p| p.starts_with(&xdg)));
-        std::env::remove_var("XDG_CONFIG_HOME");
+        match crate::user_dirs::config_dir() {
+            Some(config) => assert!(dirs.contains(&config.join("skills")), "{dirs:?}"),
+            None => assert!(dirs.iter().all(|dir| dir.ends_with("etc/harn/skills"))),
+        }
     }
 
     #[test]

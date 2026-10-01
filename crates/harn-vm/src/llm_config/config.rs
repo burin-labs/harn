@@ -223,8 +223,19 @@ impl ProvidersConfig {
         if overlay.default_provider.is_some() {
             self.default_provider = overlay.default_provider.clone();
         }
-        if overlay.fallback_model.is_some() {
-            self.fallback_model = overlay.fallback_model.clone();
+        // `fallback_model` is the retired spelling of "the default provider's
+        // default model". Normalize it here, at the one merge every overlay
+        // passes through, into that provider's `runtime` default, so older
+        // overlays keep working and no resolver sees a second mechanism. An
+        // explicit `provider_defaults` entry below still wins.
+        if let Some(model) = &overlay.fallback_model {
+            if let Some(provider) = overlay
+                .default_provider
+                .clone()
+                .or_else(|| self.default_provider.clone())
+            {
+                self.provider_defaults.entry(provider).or_default().runtime = Some(model.clone());
+            }
         }
         for (provider, defaults) in &overlay.provider_defaults {
             let current = self.provider_defaults.entry(provider.clone()).or_default();

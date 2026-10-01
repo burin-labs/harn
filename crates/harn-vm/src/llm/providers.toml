@@ -29,8 +29,10 @@
 # equivalent data as Rust literals in llm_config.rs — that creates the
 # parallel system this catalog exists to eliminate.
 
+# The provider a call uses when it names neither a provider nor a model. Its
+# model comes from `provider_defaults.<provider>.runtime`, like every other
+# provider's; there is no separate global fallback model.
 default_provider = "anthropic"
-fallback_model = "claude-sonnet-4-6"
 
 # --- source: 10-providers/all.toml ---
 # ── Providers ────────────────────────────────────────────────────────────────
@@ -2648,6 +2650,7 @@ reasoning_effort = "high"
 # Host-supplied local/MLX model environment variables still take precedence.
 
 [provider_defaults.anthropic]
+runtime = "claude-sonnet-4-6"
 portal = "claude-sonnet-4-6"
 
 [provider_defaults.local]
@@ -2670,9 +2673,10 @@ portal = "llama3.2"
 runtime = "anthropic/claude-sonnet-4-6"
 portal = "Qwen/Qwen3.5-9B"
 
-# Keep the legacy runtime fallback for providers without a catalog-specific
-# model pin. Its provider is the built-in default_provider (Anthropic).
-# A missing route or later deprecation fails catalog generation.
+# A provider with no `runtime` entry has no default model: a call that names
+# only that provider fails before dispatch and lists the provider's routes.
+# It never borrows another provider's model. Catalog generation requires the
+# built-in default_provider to have one.
 
 # --- source: 40-defaults/qc.toml ---
 # ── QC defaults ──────────────────────────────────────────────────────────────
