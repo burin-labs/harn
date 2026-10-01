@@ -96,31 +96,94 @@
       ]
     },
     {
-    "name": "Run Harn conformance tests",
-    "job_id": "harn-audit",
-    "matrix_kind": "conformance",
+      "name": "Run Harn conformance tests (1/4)",
+      "job_id": "harn-audit",
+      "matrix_kind": "conformance-1",
       "proofs": ["harn-audit"],
       "steps": [
         {
           "id": "release-audit-harn",
           "condition": "",
-        "run": "args=(--phase \"${{ matrix.kind }}\")\nif [ \"$TREE_SITTER_PARSER_PREFLIGHTED\" = true ]; then\n  args+=(--tree-sitter-parser-preflighted)\nfi\n./scripts/audit_gates.sh \"${args[@]}\"\n"
-      }
-    ]
-  },
-  {
-    "name": "Check Harn sources and generated files",
-    "job_id": "harn-audit",
-    "matrix_kind": "audit",
-    "proofs": [
-      "harn-audit"
-    ],
-    "steps": [
-      {
-        "id": "release-audit-harn",
-        "condition": "",
-        "run": "args=(--phase \"${{ matrix.kind }}\")\nif [ \"$TREE_SITTER_PARSER_PREFLIGHTED\" = true ]; then\n  args+=(--tree-sitter-parser-preflighted)\nfi\n./scripts/audit_gates.sh \"${args[@]}\"\n"
-      }
+          "run": "args=(--phase \"${{ matrix.phase }}\" \"${{ matrix.selector }}\")\nif [ \"$TREE_SITTER_PARSER_PREFLIGHTED\" = true ]; then\n  args+=(--tree-sitter-parser-preflighted)\nfi\n./scripts/audit_gates.sh \"${args[@]}\"\n"
+        }
+      ]
+    },
+    {
+      "name": "Run Harn conformance tests (2/4)",
+      "job_id": "harn-audit",
+      "matrix_kind": "conformance-2",
+      "proofs": ["harn-audit"],
+      "steps": [
+        {
+          "id": "release-audit-harn",
+          "condition": "",
+          "run": "args=(--phase \"${{ matrix.phase }}\" \"${{ matrix.selector }}\")\nif [ \"$TREE_SITTER_PARSER_PREFLIGHTED\" = true ]; then\n  args+=(--tree-sitter-parser-preflighted)\nfi\n./scripts/audit_gates.sh \"${args[@]}\"\n"
+        }
+      ]
+    },
+    {
+      "name": "Run Harn conformance tests (3/4)",
+      "job_id": "harn-audit",
+      "matrix_kind": "conformance-3",
+      "proofs": ["harn-audit"],
+      "steps": [
+        {
+          "id": "release-audit-harn",
+          "condition": "",
+          "run": "args=(--phase \"${{ matrix.phase }}\" \"${{ matrix.selector }}\")\nif [ \"$TREE_SITTER_PARSER_PREFLIGHTED\" = true ]; then\n  args+=(--tree-sitter-parser-preflighted)\nfi\n./scripts/audit_gates.sh \"${args[@]}\"\n"
+        }
+      ]
+    },
+    {
+      "name": "Run Harn conformance tests (4/4)",
+      "job_id": "harn-audit",
+      "matrix_kind": "conformance-4",
+      "proofs": ["harn-audit"],
+      "steps": [
+        {
+          "id": "release-audit-harn",
+          "condition": "",
+          "run": "args=(--phase \"${{ matrix.phase }}\" \"${{ matrix.selector }}\")\nif [ \"$TREE_SITTER_PARSER_PREFLIGHTED\" = true ]; then\n  args+=(--tree-sitter-parser-preflighted)\nfi\n./scripts/audit_gates.sh \"${args[@]}\"\n"
+        }
+      ]
+    },
+    {
+      "name": "Check Harn sources and generated files",
+      "job_id": "harn-audit",
+      "matrix_kind": "audit",
+      "proofs": ["harn-audit"],
+      "steps": [
+        {
+          "id": "release-audit-harn",
+          "condition": "",
+          "run": "args=(--phase \"${{ matrix.phase }}\" \"${{ matrix.selector }}\")\nif [ \"$TREE_SITTER_PARSER_PREFLIGHTED\" = true ]; then\n  args+=(--tree-sitter-parser-preflighted)\nfi\n./scripts/audit_gates.sh \"${args[@]}\"\n"
+        }
+      ]
+    },
+    {
+      "name": "Check Harn documentation",
+      "job_id": "harn-audit",
+      "matrix_kind": "audit-docs",
+      "proofs": ["harn-audit"],
+      "steps": [
+        {
+          "id": "release-audit-harn",
+          "condition": "",
+          "run": "args=(--phase \"${{ matrix.phase }}\" \"${{ matrix.selector }}\")\nif [ \"$TREE_SITTER_PARSER_PREFLIGHTED\" = true ]; then\n  args+=(--tree-sitter-parser-preflighted)\nfi\n./scripts/audit_gates.sh \"${args[@]}\"\n"
+        }
+      ]
+    },
+    {
+      "name": "Run Harn script tests",
+      "job_id": "harn-audit",
+      "matrix_kind": "audit-scripts",
+      "proofs": ["harn-audit"],
+      "steps": [
+        {
+          "id": "release-audit-harn",
+          "condition": "",
+          "run": "args=(--phase \"${{ matrix.phase }}\" \"${{ matrix.selector }}\")\nif [ \"$TREE_SITTER_PARSER_PREFLIGHTED\" = true ]; then\n  args+=(--tree-sitter-parser-preflighted)\nfi\n./scripts/audit_gates.sh \"${args[@]}\"\n"
+        }
       ]
     }
   ]

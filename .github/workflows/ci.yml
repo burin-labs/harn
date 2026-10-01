@@ -1354,21 +1354,57 @@ jobs:
     needs: [changes]
     if: needs.changes.outputs.rust == 'true'
     runs-on: ${{ vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true' && (github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) && 'blacksmith-8vcpu-ubuntu-2404' || 'ubuntu-latest' }}
-    # The immutable CLI producer is shared, but conformance and the independent
-    # source/grammar/generated audits use separate free hosted workers. Putting
-    # both four-way pools on one four-core runner starved conformance and kept
-    # this post-build phase near ten minutes even after the CLI was ready.
+    # The immutable CLI producer is shared, and the Harn proof work after it is
+    # spread over free hosted workers. Everything here starts only once the CLI
+    # exists (about six minutes in), so each worker must finish its share in a
+    # few minutes for the merge queue to meet its ten-minute target. On
+    # 2026-10-01 one worker ran conformance in 461s and another ran every audit
+    # gate in 824s; `scripts/audit_gates.sh` documents the measured split.
     strategy:
       fail-fast: false
       matrix:
         include:
-          - kind: conformance
-            name: Run Harn conformance tests
-            step_name: conformance tests
+          - kind: conformance-1
+            name: Run Harn conformance tests (1/4)
+            step_name: conformance tests (1/4)
+            phase: conformance
+            selector: --shard=1/4
+            fetch_depth: 1
+          - kind: conformance-2
+            name: Run Harn conformance tests (2/4)
+            step_name: conformance tests (2/4)
+            phase: conformance
+            selector: --shard=2/4
+            fetch_depth: 1
+          - kind: conformance-3
+            name: Run Harn conformance tests (3/4)
+            step_name: conformance tests (3/4)
+            phase: conformance
+            selector: --shard=3/4
+            fetch_depth: 1
+          - kind: conformance-4
+            name: Run Harn conformance tests (4/4)
+            step_name: conformance tests (4/4)
+            phase: conformance
+            selector: --shard=4/4
             fetch_depth: 1
           - kind: audit
             name: Check Harn sources and generated files
             step_name: source and generated-file checks
+            phase: audit
+            selector: --group=sources
+            fetch_depth: 0
+          - kind: audit-docs
+            name: Check Harn documentation
+            step_name: documentation checks
+            phase: audit
+            selector: --group=docs
+            fetch_depth: 0
+          - kind: audit-scripts
+            name: Run Harn script tests
+            step_name: Harn script and agent-loop suites
+            phase: audit
+            selector: --group=scripts
             fetch_depth: 0
     # Hang backstop, not a performance budget. The per-test performance ratchet
     # still owns performance regressions.
@@ -1396,7 +1432,7 @@ jobs:
           node-version: "22"
           cache-dependency-path: tree-sitter-harn/package-lock.json
       - name: Install Harn script test dependencies
-        if: matrix.kind == 'audit'
+        if: startsWith(matrix.kind, 'audit')
         uses: ./.github/actions/apt-install
         timeout-minutes: 5
         with:
@@ -1440,7 +1476,7 @@ jobs:
           HARN_EXT_SOURCE_LENGTH_BASE_REF: ${{ github.event.pull_request.base.sha || '' }}
           TREE_SITTER_PARSER_PREFLIGHTED: ${{ matrix.kind == 'audit' && 'true' || 'false' }}
         run: |
-          args=(--phase "${{ matrix.kind }}")
+          args=(--phase "${{ matrix.phase }}" "${{ matrix.selector }}")
           if [ "$TREE_SITTER_PARSER_PREFLIGHTED" = true ]; then
             args+=(--tree-sitter-parser-preflighted)
           fi

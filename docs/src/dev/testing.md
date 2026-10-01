@@ -75,9 +75,12 @@ runtime placement, worker counts, command, finish time, and result. The gate
 refuses a dirty tree, a changed PR head, or an explicit binary without source
 proof. An edit, amend, or rebase makes the old receipt invalid.
 
-Hosted CI uploads the same JSON shape as `harn-source-gate-audit` and
-`harn-source-gate-conformance` artifacts. Its downloaded binary is bound by
-the existing Rust artifact manifest before the gate runs.
+Hosted CI splits the gate across workers and uploads one receipt of the same
+JSON shape per worker, named `harn-source-gate-<kind>`: `audit`, `audit-docs`,
+and `audit-scripts` for the `--phase audit --group` slices, and
+`conformance-1` through `conformance-4` for the `--phase conformance --shard`
+slices. Each worker's downloaded binary is bound by the existing Rust artifact
+manifest before the gate runs.
 
 For a native nextest filter expression, use the shell-opaque focused target:
 
