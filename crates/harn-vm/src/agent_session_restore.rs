@@ -90,7 +90,97 @@ pub async fn load_canonical_session_replay_events_from_store(
             None => break,
         }
     }
-    Ok(Some(events))
+    Ok(Some(close_unanswered_tool_calls(session_id, events)))
+}
+
+/// What a restored call with no result reports. The store keeps a call from
+/// the moment it starts, so a call whose process died mid-run has no result.
+const UNANSWERED_TOOL_CALL_ERROR: &str = "No result: the session ended before this call finished.";
+
+/// Close every replayed tool call that has no result with a failed update,
+/// placed right after the call so a client applies it while that call is
+/// still its current one.
+///
+/// A canonical restore reads a session no process is running, so a call
+/// without a result will never get one. Replaying it as `completed` showed
+/// an interrupted call as finished (harn#9061).
+fn close_unanswered_tool_calls(
+    session_id: &str,
+    events: Vec<AgentSessionReplayEvent>,
+) -> Vec<AgentSessionReplayEvent> {
+    let answered: std::collections::HashSet<String> = events
+        .iter()
+        .filter_map(|replayed| match &replayed.event {
+            AgentEvent::ToolCallUpdate {
+                tool_call_id,
+                status: ToolCallStatus::Completed | ToolCallStatus::Failed,
+                ..
+            } => Some(tool_call_id.clone()),
+            _ => None,
+        })
+        .collect();
+    let mut last_call: std::collections::HashMap<String, (usize, String)> =
+        std::collections::HashMap::new();
+    for (index, replayed) in events.iter().enumerate() {
+        if let AgentEvent::ToolCall {
+            tool_call_id,
+            tool_name,
+            ..
+        } = &replayed.event
+        {
+            if answered.contains(tool_call_id) {
+                continue;
+            }
+            let name = last_call
+                .get(tool_call_id)
+                .map(|(_, name)| name.clone())
+                .filter(|name| name != "tool")
+                .unwrap_or_else(|| tool_name.clone());
+            last_call.insert(tool_call_id.clone(), (index, name));
+        }
+    }
+    let mut closed = Vec::with_capacity(events.len() + last_call.len());
+    for (index, replayed) in events.into_iter().enumerate() {
+        let close = match &replayed.event {
+            AgentEvent::ToolCall { tool_call_id, .. } => last_call
+                .get(tool_call_id)
+                .filter(|(last, _)| *last == index)
+                .map(|(_, name)| (tool_call_id.clone(), name.clone())),
+            _ => None,
+        };
+        let (event_id, occurred_at_ms) = (replayed.event_id, replayed.occurred_at_ms);
+        closed.push(replayed);
+        if let Some((tool_call_id, tool_name)) = close {
+            closed.push(AgentSessionReplayEvent {
+                event_id,
+                kind: "tool_result".to_string(),
+                occurred_at_ms,
+                execution_id: None,
+                event: AgentEvent::ToolCallUpdate {
+                    session_id: session_id.to_string(),
+                    tool_call_id,
+                    tool_name,
+                    status: ToolCallStatus::Failed,
+                    raw_output: Some(serde_json::Value::String(
+                        UNANSWERED_TOOL_CALL_ERROR.to_string(),
+                    )),
+                    error: Some(UNANSWERED_TOOL_CALL_ERROR.to_string()),
+                    duration_ms: None,
+                    execution_duration_ms: None,
+                    error_category: None,
+                    mutation_status: ToolMutationStatus::Unknown,
+                    changed_paths: None,
+                    data: None,
+                    executor: None,
+                    parsing: None,
+                    raw_input: None,
+                    raw_input_partial: None,
+                    audit: None,
+                },
+            });
+        }
+    }
+    closed
 }
 
 /// Project one durable row into a replay event, or `None` when the row carries

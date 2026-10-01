@@ -228,7 +228,11 @@ async fn a_replayed_tool_call_keeps_its_metadata_tool_name() {
         .await
         .expect("restore should not error")
         .expect("the store knows this session");
-    assert_eq!(restored.len(), 1, "the tool call replays: {restored:?}");
+    assert_eq!(
+        restored.len(),
+        2,
+        "the tool call and its close replay: {restored:?}"
+    );
     match &restored[0].event {
         AgentEvent::ToolCall {
             tool_call_id,
@@ -282,20 +286,35 @@ async fn an_assistant_tool_call_row_replays_with_its_provider_name() {
         .expect("restore should not error")
         .expect("the store knows this session");
     match &restored[..] {
-        [replayed] => match &replayed.event {
-            AgentEvent::ToolCall {
-                tool_call_id,
-                tool_name,
-                raw_input,
-                ..
-            } => {
-                assert_eq!(tool_call_id, "call-cut");
-                assert_eq!(tool_name, "wait_command");
-                assert_eq!(raw_input, &serde_json::json!({"handle_id": "h-1"}));
+        [call, close] => {
+            match &call.event {
+                AgentEvent::ToolCall {
+                    tool_call_id,
+                    tool_name,
+                    raw_input,
+                    ..
+                } => {
+                    assert_eq!(tool_call_id, "call-cut");
+                    assert_eq!(tool_name, "wait_command");
+                    assert_eq!(raw_input, &serde_json::json!({"handle_id": "h-1"}));
+                }
+                other => panic!("expected a replayed tool call, got {other:?}"),
             }
-            other => panic!("expected a replayed tool call, got {other:?}"),
-        },
-        other => panic!("expected one replayed event, got {other:?}"),
+            match &close.event {
+                AgentEvent::ToolCallUpdate {
+                    tool_call_id,
+                    tool_name,
+                    status,
+                    ..
+                } => {
+                    assert_eq!(tool_call_id, "call-cut");
+                    assert_eq!(tool_name, "wait_command");
+                    assert_eq!(*status, ToolCallStatus::Failed);
+                }
+                other => panic!("expected the call to close as failed, got {other:?}"),
+            }
+        }
+        other => panic!("expected the call and its close, got {other:?}"),
     }
 }
 
