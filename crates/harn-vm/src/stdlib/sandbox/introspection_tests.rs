@@ -12,7 +12,7 @@ fn unconfined_status_matches_actual_spawn_refusal_for_each_network_ceiling() {
         };
         let status = confinement_for::<UnconfinedBackend>(&policy);
         let VmValue::Dict(status) = status else {
-            panic!("confinement status must be a record");
+            panic!("confinement status must be a dict");
         };
         let error = build_std_command::<UnconfinedBackend>(
             "never-spawned",
