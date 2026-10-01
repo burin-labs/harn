@@ -1530,6 +1530,38 @@ pub fn rust_cache_reader_errors(policy: CiCachePolicy, workflows: dict) -> list<
   return errors
 }
 
+/**
+ * A writer that saves workspace crates must take part in workspace crate
+ * reuse on both ends: run the restore, which drops any inherited source
+ * record, and record its own commit only after a successful build. A writer
+ * that skipped either could save a record naming a tree its artifacts were not
+ * built from, and a later restore would pass stale crates as fresh.
+ */
+pub fn workspace_reuse_writer_errors(
+  workflow: string,
+  job: string,
+  job_doc: dict,
+  cache_step: dict,
+) -> list<string> {
+  if lowercase(trim(to_string(cache_step?.with?.["cache-workspace-crates"] ?? "false"))) != "true" {
+    return []
+  }
+  const reuses = lowercase(trim(to_string(cache_step?.with?.["reuse-workspace-crates"] ?? "false")))
+    == "true"
+  const records = (job_doc?.steps ?? []).any(
+    { step ->
+      contains(to_string(step?.run ?? ""), "scripts/ci/reuse_workspace_crates.sh record")
+        && contains(to_string(step?.if ?? ""), "success()")
+    },
+  )
+  if reuses && records {
+    return []
+  }
+  return [
+    "${workflow}:${job} saves workspace crates, so it must restore with reuse-workspace-crates and record its source only on success",
+  ]
+}
+
 pub fn ci_cache_policy_errors(
   policy: CiCachePolicy,
   action: dict,
@@ -1563,6 +1595,7 @@ pub fn ci_cache_policy_errors(
           errors = errors + [ephemeral_error]
         }
         if uses == policy.rust_cache_action && save_requested(step) {
+          errors = errors + workspace_reuse_writer_errors(workflow, job, jobs[job], step)
           const shared_key = trim(step?.with?.["shared-key"] ?? "")
           // Expand matrix.cache_key writers (rust-cache-refresh dual Linux keys).
           let expanded_keys: list<string> = [shared_key]
