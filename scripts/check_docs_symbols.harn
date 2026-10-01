@@ -442,7 +442,7 @@ pub fn generated_paths(registry: dict) -> list<string> {
 /** Whether `path` is, or lives under, one of `generated`. */
 pub fn is_generated(path: string, generated: list<string>) -> bool {
   for entry in generated {
-    if path == entry || path.starts_with(entry + "/") {
+    if path_under(path, entry) {
       return true
     }
   }
