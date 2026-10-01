@@ -1,3 +1,5 @@
+import { __agent_host_command_result } from "std/agent/host_command_result"
+import { AgentToolHandlerResult, agent_tool_handler_result } from "std/agent/tool_lifecycle"
 import { command_run, command_wait } from "std/command"
 import "std/path"
 
@@ -153,8 +155,21 @@ pub fn find_workspace(fs: HarnessFs, process: HarnessProcess, query: string?) {
 }
 
 /** Run one shell command from the sample workspace root. */
-pub fn run_workspace(fs: HarnessFs, process: HarnessProcess, command: any) {
-  return process.shell_at(workspace_root(fs), command)
+pub fn run_workspace(
+  fs: HarnessFs,
+  process: HarnessProcess,
+  command: any,
+) -> AgentToolHandlerResult<unknown> {
+  const result = process.shell_at(workspace_root(fs), command)
+  return agent_tool_handler_result(
+    to_string(result),
+    result,
+    if result.success {
+      "ok"
+    } else {
+      "error"
+    },
+  )
 }
 
 /** How much output a command may return inline before it is truncated. */
@@ -167,23 +182,29 @@ const COMMAND_INLINE_BYTES = 20000
  * `run_workspace` above blocks until the command finishes, which means a task
  * can never observe the lifecycle a slow verifier actually has. With a positive
  * `background_after_ms`, a command that outlives the budget converts to a handle
- * and returns `status: "running"` instead of an exit status -- the real outcome
- * then arrives on `wait_workspace_command`. A budget of 0 keeps the whole call
- * in the foreground, so callers that never opt in see no change.
+ * and carries `status: "running"` in the handler result's data instead of an
+ * exit status. The real outcome then arrives on `wait_workspace_command`.
+ * A budget of 0 keeps the whole call in the foreground, so callers that never
+ * opt in see no change.
  */
 pub fn run_workspace_command(
   tools: HarnessTools,
   fs: HarnessFs,
   command: any,
   background_after_ms: int = 0,
-) {
+) -> AgentToolHandlerResult<unknown> {
   const capture = {capture: {max_inline_bytes: COMMAND_INLINE_BYTES}}
   const options = if background_after_ms > 0 {
     capture + {background_after_ms: background_after_ms}
   } else {
     capture
   }
-  return command_run(tools, {mode: "shell", command: command, cwd: workspace_root(fs)}, options)
+  const result = command_run(
+    tools,
+    {mode: "shell", command: command, cwd: workspace_root(fs)},
+    options,
+  )
+  return __agent_host_command_result(to_string(result), result)
 }
 
 /**
@@ -192,8 +213,13 @@ pub fn run_workspace_command(
  * This is the only place a backgrounded command's exit status and output can
  * come from; the handle banner carries neither.
  */
-pub fn wait_workspace_command(tools: HarnessTools, handle_id: string, timeout_ms: int = 600000) {
-  return command_wait(tools, {handle_id: handle_id}, {timeout_ms: timeout_ms})
+pub fn wait_workspace_command(
+  tools: HarnessTools,
+  handle_id: string,
+  timeout_ms: int = 600000,
+) -> AgentToolHandlerResult<unknown> {
+  const result = command_wait(tools, {handle_id: handle_id}, {timeout_ms: timeout_ms})
+  return __agent_host_command_result(to_string(result), result)
 }
 
 /**

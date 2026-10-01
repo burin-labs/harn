@@ -17,10 +17,13 @@ pub type AgentToolMutationStatus = "applied" | "unchanged" | "not_applied" | "un
 /**
  * Explicit handler return for tools that need machine-readable facts beside the
  * model-visible text. The dispatcher preserves `data` on `result` and renders
- * only `text`; ordinary dict returns keep their historical display rendering.
+ * only `text`. Freeform dict returns are refused at dispatch.
  */
+pub type AgentToolHandlerOutcome = "ok" | "error" | "rejected"
+
 pub type AgentToolHandlerResult<T> = {
-  schema: "harn.agent_tool_handler_result.v1",
+  schema: "harn.agent_tool_handler_result.v2",
+  outcome: AgentToolHandlerOutcome,
   text: string,
   data: T,
 }
@@ -51,8 +54,12 @@ pub fn agent_tool_postcondition(verified_paths: list<string>) -> AgentToolPostco
  * @effects: []
  * @errors: []
  */
-pub fn agent_tool_handler_result<T>(text: string, data: T) -> AgentToolHandlerResult<T> {
-  return {schema: "harn.agent_tool_handler_result.v1", text: text, data: data}
+pub fn agent_tool_handler_result<T>(
+  text: string,
+  data: T,
+  outcome: AgentToolHandlerOutcome = "ok",
+) -> AgentToolHandlerResult<T> {
+  return {schema: "harn.agent_tool_handler_result.v2", outcome: outcome, text: text, data: data}
 }
 
 /**
@@ -64,13 +71,18 @@ pub fn agent_tool_handler_result<T>(text: string, data: T) -> AgentToolHandlerRe
 pub fn agent_tool_handler_result_normalize<T>(
   rendered: unknown,
   data: T,
+  outcome: AgentToolHandlerOutcome = "ok",
 ) -> AgentToolHandlerResult<unknown> {
   if type_of(rendered) == "dict"
-    && rendered?.schema == "harn.agent_tool_handler_result.v1"
+    && rendered?.schema == "harn.agent_tool_handler_result.v2"
     && type_of(rendered?.text) == "string" {
-    return agent_tool_handler_result(rendered.text, rendered?.data)
+    return agent_tool_handler_result(
+      rendered.text,
+      rendered?.data,
+      outcome == "ok" ? rendered.outcome : outcome,
+    )
   }
-  return agent_tool_handler_result(to_string(rendered), data)
+  return agent_tool_handler_result(to_string(rendered), data, outcome)
 }
 
 const TOOL_LIFECYCLE_ERROR_CATEGORIES = [
@@ -274,7 +286,7 @@ fn __agent_tool_result_edit_status(result: dict) -> AgentEditOutcomeStatus? {
  */
 pub fn agent_tool_handler_result_denial(result: dict) -> dict? {
   const payload = result?.result
-  if payload?.schema != "harn.agent_tool_handler_result.v1" {
+  if payload?.schema != "harn.agent_tool_handler_result.v2" || payload?.outcome != "rejected" {
     return nil
   }
   const denial = payload?.data?.denial
@@ -295,6 +307,9 @@ fn __agent_tool_result_product_error(result: dict) -> bool? {
   const payload = result?.result
   if type_of(payload) != "dict" {
     return nil
+  }
+  if payload?.schema == "harn.agent_tool_handler_result.v2" {
+    return payload.outcome != "ok"
   }
   if payload?.ok != nil {
     return payload.ok ? false : true

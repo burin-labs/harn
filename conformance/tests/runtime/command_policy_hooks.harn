@@ -1,4 +1,5 @@
 import { agent_loop } from "std/agent/loop"
+import { agent_tool_handler_result } from "std/agent/tool_lifecycle"
 import { llm_text, with_llm_script } from "std/testing"
 
 pipeline default(harness: Harness) {
@@ -256,7 +257,12 @@ pipeline default(harness: Harness) {
       parameters: {command: {type: "string"}},
       annotations: {kind: "execute", side_effect_level: "process_exec"},
       handler: { args ->
-        harness.process.run({program: "sh", args: ["-c", args.command], cwd: root})
+        const result = harness.process.run({program: "sh", args: ["-c", args.command], cwd: root})
+        agent_tool_handler_result(
+          to_string(result),
+          result,
+          result.status == "blocked" ? "rejected" : result.exit_code == 0 ? "ok" : "error",
+        )
       },
     },
   )

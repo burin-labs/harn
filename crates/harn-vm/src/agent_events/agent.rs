@@ -180,7 +180,7 @@ pub enum AgentEvent {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         changed_paths: Option<Vec<String>>,
         /// Producer-owned facts declared by an
-        /// `harn.agent_tool_handler_result.v1` envelope. The dispatcher
+        /// `harn.agent_tool_handler_result.v2` envelope. The dispatcher
         /// projects the complete map without interpreting producer-specific
         /// keys or parsing rendered output.
         #[serde(default, skip_serializing_if = "Option::is_none")]

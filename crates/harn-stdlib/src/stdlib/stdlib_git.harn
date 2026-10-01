@@ -1,3 +1,4 @@
+import { agent_tool_handler_result } from "std/agent/tool_lifecycle"
 pub import {
   GitCheckoutDirtyPolicy,
   GitCheckoutOptions,
@@ -1330,7 +1331,10 @@ fn __git_define_catalog_tool(process: HarnessProcess, tools: any, entry: dict, o
         parameters: entry.parameters,
         returns: {type: "object"},
         annotations: __git_catalog_tool_annotations(entry, opts, key),
-        handler: { args -> git_run_tool(process, entry.operation, args, run_opts) },
+        handler: { args ->
+          const result = git_run_tool(process, entry.operation, args, run_opts)
+          agent_tool_handler_result(to_string(result), result, result.success ? "ok" : "error")
+        },
       },
     ),
   )
@@ -1419,7 +1423,10 @@ pub fn git_toolbox_tools(
             key,
             {kind: "read", side_effect_level: "read_only"},
           ),
-          handler: { args -> git_find_tool(args.query, __git_toolbox_find_options(opts, args)) },
+          handler: { args ->
+            const result = git_find_tool(args.query, __git_toolbox_find_options(opts, args))
+            agent_tool_handler_result(to_string(result), result)
+          },
         },
       ),
     )
@@ -1468,7 +1475,10 @@ pub fn git_toolbox_tools(
           },
           returns: {type: "object"},
           annotations: __git_toolbox_run_annotations(opts, key),
-          handler: { args -> git_run_tool(process, args.operation, args, opts) },
+          handler: { args ->
+            const result = git_run_tool(process, args.operation, args, opts)
+            agent_tool_handler_result(to_string(result), result, result.success ? "ok" : "error")
+          },
         },
       ),
     )

@@ -1502,7 +1502,7 @@ pub(super) async fn host_agent_dispatch_tool_call(
                             category: crate::value::ErrorCategory::Cancelled,
                         }),
                         executor: None,
-                        declared_failure: None,
+                        handler_outcome: None,
                     },
                     true,
                 ),
@@ -1511,7 +1511,7 @@ pub(super) async fn host_agent_dispatch_tool_call(
         None => (dispatch_future.await, false),
     };
     let execution_duration_ms = started.elapsed().as_millis() as u64;
-    let declared_failure = outcome.declared_failure;
+    let handler_outcome = outcome.handler_outcome;
     let executor = outcome
         .executor
         .as_ref()
@@ -1600,15 +1600,11 @@ pub(super) async fn host_agent_dispatch_tool_call(
                 super::reminder_providers::options_map_to_json(options),
             ))
             .await?;
-            // A dispatch that returned `Ok(..)` can still carry a failure in its
-            // body (`{ok:false}` / `{status:"error"}` / `{error:".."}`, or an
-            // MCP-shaped `{isError:true}`). Surface those instead of laundering
-            // them into `ok:true`: the agent loop reads `ok`/`status`.
-            // Prefer the pre-coercion declaration: a dict-returning handler's
-            // coerced payload no longer parses (harn#7884).
+            // Script handlers declare their outcome before rendering. Native
+            // bridge and MCP results retain their protocol-specific adapter.
             let failure = structured_tool_result::failure_projection(
                 &raw_result,
-                declared_failure,
+                handler_outcome,
                 &rendered,
                 hook_denial.as_deref(),
             );

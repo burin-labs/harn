@@ -22,7 +22,7 @@ pub(super) fn data(
     result: &serde_json::Value,
 ) -> Option<&serde_json::Map<String, serde_json::Value>> {
     if result.get("schema").and_then(serde_json::Value::as_str)
-        != Some("harn.agent_tool_handler_result.v1")
+        != Some(super::agent_tools::handler_result::AGENT_TOOL_HANDLER_RESULT_SCHEMA)
     {
         return None;
     }
@@ -36,15 +36,18 @@ pub(super) struct FailureProjection {
 
 pub(super) fn failure_projection(
     raw_result: &serde_json::Value,
-    declared_failure: Option<&'static str>,
+    handler_outcome: Option<super::agent_tools::handler_result::HandlerOutcome>,
     rendered: &str,
     hook_denial: Option<&crate::orchestration::PostToolDenial>,
 ) -> FailureProjection {
-    let denied = super::agent_tools::is_denied_tool_result(raw_result);
-    let category = if hook_denial.is_some() || denied {
+    let category = if hook_denial.is_some() {
+        Some("tool_rejected")
+    } else if let Some(outcome) = handler_outcome {
+        outcome.failure_category()
+    } else if super::agent_tools::is_denied_tool_result(raw_result) {
         Some("tool_rejected")
     } else {
-        declared_failure.or_else(|| super::agent_tools::ok_result_failure_category(raw_result))
+        super::agent_tools::ok_result_failure_category(raw_result)
     };
     let error = hook_denial
         .map(|denial| denial.message.clone())
@@ -80,6 +83,18 @@ mod tests {
     use super::{changed_paths, data, mutation_status};
 
     #[test]
+    fn declared_handler_success_overrides_failure_like_payload_fields() {
+        use super::super::agent_tools::handler_result::HandlerOutcome;
+        let payload = serde_json::json!({"blocked": true, "status": "error", "ok": false});
+        let declared =
+            super::failure_projection(&payload, Some(HandlerOutcome::Ok), "feedback", None);
+        assert_eq!(declared.category, None);
+        assert_eq!(declared.error, None);
+        let native = super::failure_projection(&payload, None, "feedback", None);
+        assert_eq!(native.category, Some("tool_rejected"));
+    }
+
+    #[test]
     fn lifts_only_declared_mutation_outcomes() {
         assert_eq!(
             mutation_status(&serde_json::json!({"mutation_status": "applied"})),
@@ -95,7 +110,7 @@ mod tests {
         );
         assert_eq!(
             mutation_status(&serde_json::json!({
-                "schema": "harn.agent_tool_handler_result.v1",
+                "schema": "harn.agent_tool_handler_result.v2",
                 "text": "Edited src/lib.rs",
                 "data": {"mutation_status": "applied"}
             })),
@@ -103,7 +118,7 @@ mod tests {
         );
         assert_eq!(
             mutation_status(&serde_json::json!({
-                "schema": "harn.agent_tool_handler_result.v1",
+                "schema": "harn.agent_tool_handler_result.v2",
                 "mutation_status": "not_applied",
                 "data": {"mutation_status": "applied"}
             })),
@@ -134,7 +149,7 @@ mod tests {
         );
         assert_eq!(
             changed_paths(&serde_json::json!({
-                "schema": "harn.agent_tool_handler_result.v1",
+                "schema": "harn.agent_tool_handler_result.v2",
                 "text": "Edited src/lib.rs",
                 "data": {"changed_paths": ["src/lib.rs"]}
             })),
@@ -149,7 +164,7 @@ mod tests {
     #[test]
     fn exposes_only_declared_handler_data_without_key_filtering() {
         let result = serde_json::json!({
-            "schema": "harn.agent_tool_handler_result.v1",
+            "schema": "harn.agent_tool_handler_result.v2",
             "text": "Command wording is deliberately not machine-readable.",
             "data": {
                 "command_status": "succeeded",
@@ -168,7 +183,7 @@ mod tests {
                 "data": {"run_outcome": {"exit_code": 0}}
             }),
             serde_json::json!({
-                "schema": "harn.agent_tool_handler_result.v1",
+                "schema": "harn.agent_tool_handler_result.v2",
                 "data": "not-a-map"
             }),
         ] {

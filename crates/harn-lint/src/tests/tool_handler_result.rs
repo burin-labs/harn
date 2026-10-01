@@ -160,7 +160,8 @@ fn a_handler_returning_the_typed_result_envelope_is_not_reported() {
          \x20 return tool_define(tools, \"search\", \"searches\", {\n\
          \x20   handler: { args ->\n\
          \x20     return {\n\
-         \x20       schema: \"harn.agent_tool_handler_result.v1\",\n\
+         \x20       schema: \"harn.agent_tool_handler_result.v2\",\n\
+         \x20       outcome: \"ok\",\n\
          \x20       text: \"3 matches\",\n\
          \x20       data: {matches: 3},\n\
          \x20     }\n\
@@ -202,6 +203,19 @@ fn a_dict_naming_a_different_schema_is_still_reported() {
 fn the_exempt_schema_is_the_runtime_owner_string() {
     assert_eq!(
         harn_vm::llm::AGENT_TOOL_HANDLER_RESULT_SCHEMA,
-        "harn.agent_tool_handler_result.v1"
+        "harn.agent_tool_handler_result.v2"
     );
+}
+
+#[test]
+fn an_envelope_without_an_outcome_is_reported() {
+    let diagnostics = lint_source(
+        "pub fn build(tools: any) -> any {
+          return tool_define(tools, \"apply\", \"applies\", {
+            handler: { args -> {schema: \"harn.agent_tool_handler_result.v2\", text: \"feedback\", data: {}} },
+            parameters: {},
+          })
+        }",
+    );
+    assert!(has_rule(&diagnostics, RULE), "{diagnostics:?}");
 }

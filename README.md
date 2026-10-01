@@ -84,6 +84,10 @@ external systems. These hints describe intent; capability permissions enforce
 access. See the [annotated tool example](docs/src/tutorial-mcp-server.md#1-register-tools)
 and [annotation reference](docs/src/spec/language/13-functions-and-closures.md#tool-declarations).
 
+Handlers returning dictionaries must declare an outcome with
+`agent_tool_handler_result(text, data, outcome)` or a nominal outcome struct.
+See [tool results](docs/src/llm/tools.md#pattern) for the contract.
+
 ## Try Harn
 
 Install the release binary on macOS or Linux:
