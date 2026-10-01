@@ -310,7 +310,7 @@ pub fn artifact_lifecycle_errors(art: dict) -> list {
 }
 
 /**
- * Every tracked output of a `gen-*` artifact must carry a merge attribute in
+ * Every tracked output of a source-owned generator must carry a merge attribute in
  * `.gitattributes`: only `-merge` is accepted. Two pull requests that
  * each regenerate the same output otherwise merge line by line into a file no
  * generator produced, and the stale result only shows up on main (#8817).
@@ -337,7 +337,9 @@ pub fn merge_attribute_errors(artifacts: list, gitattributes: string) -> list {
   let errors = []
   for art in artifacts {
     const lifecycle = art?.lifecycle ?? "source"
-    if lifecycle != "source" || !starts_with(art?.gen ?? "", "gen-") {
+    const generator = art?.gen ?? ""
+    if lifecycle != "source"
+      || !(starts_with(generator, "gen-") || starts_with(generator, "sync-")) {
       continue
     }
     for out in art?.outputs ?? [] {

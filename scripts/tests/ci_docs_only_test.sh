@@ -22,7 +22,7 @@ check() {
 
 check true \
   README.md \
-  docs/src/SUMMARY.md \
+  docs/src/maintainer-release.md \
   website/src/App.tsx \
   website/package-lock.json \
   changelog.d/4115.fixed.md
@@ -36,6 +36,9 @@ check false Cargo.toml
 # Generated outputs marked `-merge` live under docs/ but must keep the
 # generated-file check running in a merge-queue tail.
 check false docs/src/language-spec.md
+check false docs/src/spec/language/02-grammar.md
+check false docs/src/SUMMARY.md
+check false docs/diagnostic-examples.json
 check false README.md docs/diagnostics-catalog.json
 
 echo "ci_docs_only_test: ok"
