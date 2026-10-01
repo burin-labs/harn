@@ -129,7 +129,7 @@ aws-sigv4 = { version = "1.5.1", optional = true }
 # `<1.7.0` is the whole constraint. The lower bound only keeps the range from
 # admitting ancient releases; the sibling AWS crates raise the effective floor
 # on their own, which is why the contract above declares no minimum.
-aws-smithy-types = { version = ">=1.6.3, <1.9.0", optional = true }
+aws-smithy-types = { version = ">=1.6.3, <1.7.0", optional = true }
 postcard = { version = "1.1", default-features = false, features = ["alloc"] }
 quick_cache = "0.7"
 # Persistent (immutable, structurally shared) collections backing VmValue's
@@ -231,8 +231,8 @@ brotli = { version = "9.0.0", optional = true }
 tar = { version = "0.4.46", default-features = false }
 zip = { version = "8", default-features = false, features = ["deflate-flate2"], optional = true }
 x509-parser = "0.18.1"
-wasmtime = { version = "49", optional = true, default-features = false, features = ["cranelift", "runtime"] }
-wasmtime-wasi = { version = "49", optional = true, default-features = false, features = ["p1"] }
+wasmtime = { version = "48", optional = true, default-features = false, features = ["cranelift", "runtime"] }
+wasmtime-wasi = { version = "48", optional = true, default-features = false, features = ["p1"] }
 wat = { version = "1", optional = true }
 tempfile = { version = "3", optional = true }
 wait-timeout = "0.2"
