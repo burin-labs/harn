@@ -53,12 +53,18 @@ RUST_MIN_STACK=4194304 "$script" \
 config_dir_record="$tmpdir/config-dir"
 HARN_PROVIDERS_CONFIG=/host/providers.toml \
   HARN_HOST_PROVIDERS_CONFIG=/host/host-providers.toml \
+  HARN_LLM_PROVIDER=poison-provider \
+  HARN_LLM_MODEL=poison-model \
+  HARN_DEFAULT_PROVIDER=poison-default \
   HARN_SESSION_STORE_ROOT=/host/sessions \
   XDG_CONFIG_HOME=/host/config \
   APPDATA=/host/appdata \
   "$script" bash -c '
     test -z "${HARN_PROVIDERS_CONFIG:-}" &&
     test -z "${HARN_HOST_PROVIDERS_CONFIG:-}" &&
+    test -z "${HARN_LLM_PROVIDER:-}" &&
+    test -z "${HARN_LLM_MODEL:-}" &&
+    test -z "${HARN_DEFAULT_PROVIDER:-}" &&
     test "$XDG_CONFIG_HOME" != /host/config &&
     test -d "$XDG_CONFIG_HOME" &&
     test "$APPDATA" = "$XDG_CONFIG_HOME" &&
