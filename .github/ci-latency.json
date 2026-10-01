@@ -8,8 +8,13 @@
     { "name": "Verify publishable crates", "match": "exact" },
     { "name": "Rust workspace tests", "match": "exact" },
     { "name": "Run Linux sandbox tests", "match": "exact" },
-    { "name": "Run Harn conformance tests", "match": "exact" },
+    { "name": "Run Harn conformance tests (1/4)", "match": "exact" },
+    { "name": "Run Harn conformance tests (2/4)", "match": "exact" },
+    { "name": "Run Harn conformance tests (3/4)", "match": "exact" },
+    { "name": "Run Harn conformance tests (4/4)", "match": "exact" },
     { "name": "Check Harn sources and generated files", "match": "exact" },
+    { "name": "Check Harn documentation", "match": "exact" },
+    { "name": "Run Harn script tests", "match": "exact" },
     { "name": "Check fast repository policies", "match": "exact" }
   ],
   "observed_baseline": {
