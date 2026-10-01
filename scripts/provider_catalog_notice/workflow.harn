@@ -387,7 +387,7 @@ fn __missing_native_tool_evidence(candidate: dict, tool_evidence: dict?) -> bool
  * knows; only the replacement is the notice's to supply, and it must name a
  * row the catalog can route to.
  */
-fn __resolve_retirement(candidate: dict, current, catalog: dict) -> Result<dict, string> {
+fn __resolve_retirement(candidate: dict, current: unknown, catalog: dict) -> Result<dict, string> {
   if candidate.kind != "retirement" {
     return Ok(candidate)
   }
@@ -855,16 +855,17 @@ fn __apply_retirement(
   if has_replacement {
     note = note + " Use " + candidate.replacement + "."
   }
-  let fields = [
-    ["deprecated", to_string(candidate.new_value)],
-    ["deprecation_note", json_stringify(note)],
+  let fields: list<{name: string, value: string}> = [
+    {name: "deprecated", value: to_string(candidate.new_value)},
+    {name: "deprecation_note", value: json_stringify(note)},
   ]
   // The retirement date and replacement are typed catalog fields; the note
   // alone would leave them readable only as prose.
   if candidate.new_value {
-    fields = fields + [["sunset_date", json_stringify(candidate.effective_date)]]
+    fields = fields + [{name: "sunset_date", value: json_stringify(candidate.effective_date)}]
     if has_replacement {
-      fields = fields + [["superseded_by", json_stringify(trim(candidate.replacement))]]
+      fields = fields
+        + [{name: "superseded_by", value: json_stringify(trim(candidate.replacement))}]
     }
   }
   // Insertions land at the table end, after every existing field line, so
@@ -872,11 +873,11 @@ fn __apply_retirement(
   let updated = lines
   let insertion = bounds.end
   for field in fields {
-    const existing = __optional_field_line(lines, bounds, field[0])
+    const existing = __optional_field_line(lines, bounds, field.name)
     if is_err(existing) {
       return Err(unwrap_err(existing))
     }
-    const line = field[0] + " = " + field[1]
+    const line = field.name + " = " + field.value
     if unwrap(existing) != nil {
       updated = __replace_line(updated, unwrap(existing) ?? 0, line)
     } else {

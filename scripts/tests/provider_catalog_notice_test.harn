@@ -470,8 +470,9 @@ pipeline test_canonical_catalog_shapes_validate_all_non_price_variants(
   }
   const guessed_plan = plan_notice(harness, input.notice, guessed, canonical)
   assert_eq(guessed_plan.receipt.disposition, "patch")
-  assert_eq(guessed_plan.candidate.old_value, false)
-  assert_eq(guessed_plan.candidate.replacement, "claude-haiku-4-5-20251001")
+  const resolved: dict = guessed_plan.candidate ?? {}
+  assert_eq(resolved.old_value, false)
+  assert_eq(resolved.replacement, "claude-haiku-4-5-20251001")
   const unknown_replacement = {
     classification: "candidate",
     candidate: retirement.candidate + {replacement: "claude-haiku-next"},
