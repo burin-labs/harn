@@ -20,7 +20,7 @@ use super::{
 ///
 /// Opening this is the one thing a dispatch path must do before invoking a
 /// handler. New observers belong here, not at a call site.
-pub(in crate::vm) struct BuiltinObservation<'a> {
+pub(crate) struct BuiltinObservation<'a> {
     _span: Option<ScopeSpan>,
     _timer: Option<crate::builtin_profile::BuiltinTimer<'a>>,
 }
@@ -60,7 +60,7 @@ impl Vm {
     /// `Option<Box<_>>` keeps the frame local pointer-sized (an 8-byte niche
     /// `None` on the inert hot path, with no allocation) and only touches the
     /// heap when an observer is genuinely active. See harn#4928.
-    pub(in crate::vm) fn observe_builtin_call(name: &str) -> Option<Box<BuiltinObservation<'_>>> {
+    pub(crate) fn observe_builtin_call(name: &str) -> Option<Box<BuiltinObservation<'_>>> {
         let span = Self::builtin_span_kind(name).map(|kind| ScopeSpan::new(kind, name.to_string()));
         let timer = crate::builtin_profile::BuiltinTimer::start(name);
         if span.is_none() && timer.is_none() {
@@ -787,7 +787,7 @@ impl Vm {
     /// method. The nominal capability contract is the policy/effect owner;
     /// applying the legacy builtin contract again would duplicate receipts
     /// and, for approval-gated effects, request human approval twice.
-    pub(in crate::vm) async fn call_capability_builtin(
+    pub(crate) async fn call_capability_builtin(
         &mut self,
         name: &str,
         args: Vec<VmValue>,
@@ -803,7 +803,7 @@ impl Vm {
     /// therefore preserves one contract owner and keeps deeply nested
     /// agent/tool execution from accumulating the much larger async builtin
     /// frame for ordinary filesystem operations.
-    pub(in crate::vm) fn call_capability_sync_builtin(
+    pub(crate) fn call_capability_sync_builtin(
         &mut self,
         name: &str,
         args: &[VmValue],
@@ -845,7 +845,7 @@ impl Vm {
     /// expiry that the async `tokio::select!` wrapper cannot deliver while
     /// the op future is stuck inside a synchronous handler. Returns `None`
     /// (no thread-local traffic) when nothing is armed.
-    pub(in crate::vm) fn sync_builtin_interrupt_guard(
+    pub(crate) fn sync_builtin_interrupt_guard(
         &self,
     ) -> Option<crate::op_interrupt::OpInterruptGuard> {
         // Mirror `execution.rs::next_deadline`: innermost scope deadline,
@@ -1019,7 +1019,7 @@ impl Vm {
         }
     }
 
-    pub(in crate::vm) async fn call_builtin_entry(
+    pub(crate) async fn call_builtin_entry(
         &mut self,
         name: &str,
         dispatch: VmBuiltinDispatch,

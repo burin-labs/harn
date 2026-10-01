@@ -77,6 +77,7 @@ pub mod flow;
 pub mod harness;
 pub mod harness_auth;
 pub(crate) mod harness_crypto;
+mod harness_methods;
 pub mod harness_net;
 pub mod harness_system;
 pub mod harness_tenant;
@@ -200,6 +201,7 @@ pub mod user_dirs;
 /// fallback for embedders without an explicit bootstrap phase.
 pub fn initialize_runtime_assets() {
     secret_patterns::initialize_default_secret_patterns();
+    harness_methods::install();
 }
 
 /// A startup condition that must stop the process before any work begins.

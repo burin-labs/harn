@@ -10,7 +10,7 @@
  * declare an allowlist / denylist / default action and pick what
  * happens on a violation (throw, audit-only allow, quarantine the
  * agent, or run a custom callback). The dispatcher in
- * `crates/harn-vm/src/vm/methods/harness.rs` runs the policy ahead of
+ * `crates/harn-vm/src/harness_methods.rs` runs the policy ahead of
  * the underlying `net.get` / `net.http_get` call so audit_only and
  * quarantine outcomes apply uniformly to real and mock paths.
  *

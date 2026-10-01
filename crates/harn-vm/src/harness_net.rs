@@ -3,7 +3,7 @@
 //! Issue: harn#1913 / epic #1765 — Harness explicit-capability.
 //!
 //! This module supplies the data model and matchers; the wiring into
-//! the request path lives in `crate::vm::methods::harness`. The
+//! the request path lives in `crate::harness_methods`. The
 //! constructor builtins (`__net_policy_create`,
 //! `__net_policy_domain`, …) live in `crate::stdlib::net_policy` so
 //! the Harn stdlib facade in `stdlib_net_policy.harn` can expose them
@@ -356,7 +356,7 @@ pub(crate) fn host_has_dns_suffix(host: &str, suffix: &str) -> bool {
 impl NetPolicy {
     /// Resolve the decision for a single request. The caller decides
     /// what to do with the audit + quarantine signal — see the
-    /// dispatcher in `vm::methods::harness`.
+    /// dispatcher in `harness_methods`.
     pub fn evaluate(&self, method: &str, raw_url: &str) -> Result<NetPolicyDecision, VmError> {
         let target = NetTarget::parse(raw_url)?;
         if let Some(rule) = self.deny.iter().find(|rule| rule.matches(&target)) {
