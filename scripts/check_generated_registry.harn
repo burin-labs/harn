@@ -311,7 +311,7 @@ pub fn artifact_lifecycle_errors(art: dict) -> list {
 
 /**
  * Every tracked output of a `gen-*` artifact must carry a merge attribute in
- * `.gitattributes`: `-merge`, or a named `merge=` driver. Two pull requests that
+ * `.gitattributes`: only `-merge` is accepted. Two pull requests that
  * each regenerate the same output otherwise merge line by line into a file no
  * generator produced, and the stale result only shows up on main (#8817).
  * Matching is by exact pattern: a file output needs a line naming that path,
@@ -326,7 +326,10 @@ pub fn merge_attribute_errors(artifacts: list, gitattributes: string) -> list {
       continue
     }
     for attr in fields.slice(1) {
-      if attr == "-merge" || starts_with(attr, "merge=") {
+      if attr == "merge" || attr == "!merge" || starts_with(attr, "merge=") {
+        merge_patterns = merge_patterns.filter({ pattern -> pattern != fields[0] }).to_list()
+      }
+      if attr == "-merge" {
         merge_patterns = merge_patterns + [fields[0]]
       }
     }
@@ -346,7 +349,7 @@ pub fn merge_attribute_errors(artifacts: list, gitattributes: string) -> list {
       if !merge_patterns.contains(pattern) {
         errors = errors
           + [
-            "[${art.id}] generated output `${out}` has no merge attribute; add `${pattern} -merge` to .gitattributes so two regenerations conflict instead of merging into a stale file.",
+            "[${art.id}] generated output `${out}` requires -merge; add `${pattern} -merge` to .gitattributes so two regenerations conflict instead of merging into a stale file.",
           ]
       }
     }

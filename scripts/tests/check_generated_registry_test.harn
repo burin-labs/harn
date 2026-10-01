@@ -552,9 +552,24 @@ pipeline test_merge_attribute_covers_file_and_directory_outputs(harness: Harness
 }
 
 @test
-pipeline test_merge_attribute_accepts_a_named_driver(harness: Harness, task: unknown) {
+pipeline test_merge_attribute_rejects_a_named_driver(harness: Harness, task: unknown) {
   const attrs = "spec/catalog.json merge=harn-generated eol=lf\ntree/src/** -merge\n"
-  assert_eq(merge_attribute_errors(MERGE_ARTIFACTS, attrs), [])
+  const errors = merge_attribute_errors(MERGE_ARTIFACTS, attrs)
+  assert_eq(len(errors), 1)
+  assert(contains(errors[0], "spec/catalog.json -merge"))
+}
+
+@test
+pipeline test_merge_attribute_rejects_a_later_override(harness: Harness, task: unknown) {
+  for attrs in [
+    "spec/catalog.json -merge merge=harn-generated\ntree/src/** -merge\n",
+    "spec/catalog.json -merge\nspec/catalog.json merge=harn-generated\ntree/src/** -merge\n",
+    "spec/catalog.json -merge\nspec/catalog.json !merge\ntree/src/** -merge\n",
+  ] {
+    const errors = merge_attribute_errors(MERGE_ARTIFACTS, attrs)
+    assert_eq(len(errors), 1)
+    assert(contains(errors[0], "spec/catalog.json -merge"))
+  }
 }
 
 @test

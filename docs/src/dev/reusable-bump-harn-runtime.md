@@ -24,6 +24,19 @@ declared refresh and validation commands.
 
 ## Minimal caller workflow
 
+An open bump pull request may contain consumer repair commits. Refresh replays
+non-bot repairs onto the new pin before the declared validation command runs.
+Signed bump commits retain `Harn-Repair-Commit` trailers, so later refreshes
+can replay those same repairs after the branch was flattened. Repair commits
+must remain fetchable by their recorded IDs. A missing commit fails the run.
+
+The release App's exact bot author identifies generated bump commits; other
+authors' commits are repairs. Repair merge commits are refused. A patch conflict
+returns `repair_conflict` without publishing or arming auto-merge. Publication
+also leases the inspected pull-request head, so a concurrent repair can't be
+overwritten. The receipt's `repair_commits` names the repair set, and
+`repair_conflicts` names contested paths.
+
 Drop this into the consuming repo. The only repo-specific parts are the trigger
 schedule and, when the default lock refresh is insufficient, the
 `refresh-command`, `format-command`, and `validate-command`.

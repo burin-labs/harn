@@ -1,4 +1,4 @@
-import { assert_eq } from "std/testing"
+import { assert_eq, assert_throws } from "std/testing"
 import { github_bump_auth_options, github_bump_live_adapter } from "../authentication"
 import { bump_pull_request_body, github_bump_remote } from "../github_remote"
 import { reset_token_cache } from "harn-github-connector/default"
@@ -161,6 +161,27 @@ pipeline test_long_build_renews_before_base_read_and_git_fetch(harness: Harness)
     reset_token_cache(harness.runtime)
     harness.fs.delete(fixture.dir)
   }
+}
+
+pipeline test_signed_publication_refuses_a_repair_added_after_inspection(harness: Harness) {
+  harness.testing.http_mock_clear()
+  const publication = mock_publication_branch(harness, 1)
+  const fixture = publication.fixture
+  assert_throws(
+    { ->
+      remote(harness, fixture.dir).publish_commit(
+        {
+          branch: "automation/bump-harn-runtime",
+          headline: "Bump Harn runtime",
+          base_sha: fixture.base,
+          expected_branch_oid: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          repair_commits: ["bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"],
+        },
+      )
+    },
+  )
+  assert_eq(harness.testing.http_mock_calls().map({ call -> call.method }).to_list(), ["GET"])
+  harness.testing.http_mock_clear()
 }
 
 fn remote(harness: Harness, repo_dir: string = ".") {

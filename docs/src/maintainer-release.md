@@ -1,168 +1,117 @@
-# Maintainer release workflow
+# Release Harn
 
-This page is for Harn maintainers cutting a release. User-facing CLI behavior
-lives in [CLI reference](./cli-reference.md).
+Use Harn's GitHub workflows to open a release, certify its files, and publish
+them. You need permission to dispatch workflows in `burin-labs/harn`.
 
-## Standard flow
+## Open the release pull request
 
-Live releases run from the protected hosted workflow owned by
-`burin-labs/harn-bump-fleet`. Start from an up-to-date Harn checkout, freeze the
-exact remote source SHA, and dispatch the Fleet workflow:
-
-```bash
-git fetch origin main
-HARN_RELEASE_SHA="$(git rev-parse origin/main)"
-gh workflow run hosted-release.yml \
-  --repo burin-labs/harn-bump-fleet \
-  -f bump=patch \
-  -f mode=ship-pr \
-  -f at_sha="${HARN_RELEASE_SHA}"
-```
-
-Approve the run's protected `release` environment, then follow the exact run
-until it hands off the immutable tag and release PR. Once the tag is known,
-resume Fleet's durable post-tag watcher from a `harn-bump-fleet` checkout:
+Confirm that `main` declares an `X.Y.Z-dev` workspace version and contains
+unreleased `changelog.d/<id>.<category>.md` fragments. Then run:
 
 ```bash
-scripts/watch_harn_release.sh \
-  --tag vX.Y.Z \
-  --repo ../harn \
-  --yes-live-release
+gh workflow run bump-release.yml --repo burin-labs/harn --ref main
 ```
 
-The hosted workflow owns source freezing, audits, hosted platform
-certification, the GitHub-signed release commit, immutable tag, release PR, and
-auto-merge. The watcher is resumable by exact receipt and owns missing-asset
-recovery, PR re-arming, release finalization, and transient ref cleanup. Pass
-`--warm-cache` to request the five-target cache warm; otherwise its receipt stays
-`not_requested`. A visible tag or prerelease is an intermediate state, not release
-completion.
+The opener takes no version or candidate-build inputs. It strips the declared
+`-dev` suffix, folds the fragments, regenerates derived files, and opens
+`Release vX.Y.Z`. It publishes one GitHub-signed commit and arms squash
+auto-merge through the merge queue. Required checks and review still apply.
 
-The hosted workflow's `converge_fleet` input controls downstream updates. Setting
-it to `false` leaves that work for a later explicit request or the regular fleet
-schedule. The crate publisher does not start a second update controller.
+The daily schedule runs the same decision. A stable workspace version or no
+unreleased fragments produces `action=none`, with a notice explaining why.
+An unreadable pull-request list fails instead of opening a duplicate.
 
-Do not invoke `scripts/release_ship.sh` or the local `release_harn.harn` harness
-for a normal live release. They are implementation and development surfaces;
-the hosted workflow is the authority boundary for release credentials,
-signatures, and protected-environment approval. If a run stops after the tag is
-published, rerun the watcher first: it reuses the immutable attempt and avoids
-duplicating accepted builds or publication work.
+An existing release on `release/vX.Y.Z` is refolded when main gains fragments
+it hasn't folded. A push changing `changelog.d` only refolds an existing
+release; it doesn't open one. Refolding keeps the version and pull-request
+identity but replaces the prepared commit, so inspect the new head's checks.
 
-Before cutting a release that adds a new hard preflight requirement, verify its
-user-facing documentation includes an equivalent migration note: the exact
-command for auditing data accepted by the prior release, a typed non-success
-status that cannot be mistaken for compliance, the records requiring review,
-and the exact command that returns the user to strict mode. A compatibility
-path may support review, but it must not manufacture evidence or weaken the
-final production/export gate.
+To keep an explicitly frozen candidate, use a branch other than the opener's
+`release/vX.Y.Z` branch and keep the exact `Release vX.Y.Z` title. The opener
+names that existing pull request and leaves its branch unchanged. New
+fragments remain for a later release. Don't dispatch a second version selector
+or a retired Fleet launcher to change this decision.
 
-## Rehearse release changes offline
+## Follow certification and publication
 
-Before tagging, run the fixture rehearsal with an installed Harn binary:
+Record the release pull request and the exact commit that lands on main.
+Follow the runs for that commit in
+[Harn Actions](https://github.com/burin-labs/harn/actions).
+
+1. `build-release-binaries.yml` builds the candidate in its merge group.
+   The main push reuses a successful candidate for that exact commit, or builds
+   it when no reusable queue candidate exists. Other pushes only warm caches.
+2. The candidate run builds, signs, notarizes, and attests the five platform
+   archives. It checks those files with the release audit and smoke tests.
+   The `candidate-manifest-<sha>` artifact binds the source commit, files,
+   digests, and publication metadata. Keep its exact run ID with the release.
+3. `promote-release.yml` starts after the successful main push run. It finds
+   the successful candidate run at that commit and verifies the manifest,
+   digests, and attestations. It creates the tag and GitHub release using those
+   files. Promotion doesn't rebuild them.
+4. The tag starts `publish-release.yml`, which publishes crates from the tag.
+   Promotion also packages the published Linux archives into the container
+   and opens the next patch's development-version pull request.
+
+Publication is complete only after you verify all of these:
+
+- The release pull request merged, and the signed tag selects its main commit.
+- The exact candidate and promotion runs succeeded.
+- The GitHub release has all five archives, `SHA256SUMS`, and
+  `release-assets.json`, with digests matching the candidate manifest.
+- The tag's crate publication succeeded, and the versioned container is
+  anonymously pullable.
+- The post-publication development bump reached main or reported a proved
+  no-op because main had already advanced.
+
+Read [Release assets manifest](./dev/release-assets-manifest.md) for the
+download contract. A visible tag or release page alone doesn't prove complete
+publication.
+
+## Recover a failed run
+
+Read the failing job before choosing a retry. Keep the commit, run ID, and
+candidate manifest attached to the release record.
+
+- Opener failed before publication: fix the cause and dispatch
+  `bump-release.yml` again. Its admission checks run again.
+- Candidate failed because of infrastructure: rerun the failed jobs in that
+  exact candidate run. A source defect needs a corrected pull request and
+  certification of the resulting commit.
+- Promotion failed: rerun the failed jobs in the exact promotion run. It
+  checks the existing tag's commit and refuses a conflicting tag.
+- Crate publication failed after the tag exists: rerun the failed jobs in the
+  tag's `publish-release.yml` run. Its publisher resumes remaining crates.
+- Container or development bump failed: rerun those failed promotion jobs.
+
+Don't retag a published version or start a local publisher or watcher as a
+second release controller. Retired Fleet launchers and candidate-build input
+tuples aren't recovery entry points for these workflows.
+
+## Check downstream convergence
+
+Promotion's `repin` job dispatches the registered consumers' own update
+workflows. Each consumer opens its own pull request, then follows its checks,
+review, and merge queue. Record each consumer's terminal state separately from
+Harn publication. Dispatch success doesn't prove that a consumer updated or
+that its pull request merged.
+
+## Rehearse a release change offline
+
+Run the fixture rehearsal with an installed Harn binary:
 
 ```bash
 HARN_BIN="$(command -v harn)" bash scripts/release_rehearsal.sh
 ```
 
-The rehearsal executes the same staging script used by publication jobs, then
-checks archive provenance, publication policy, and development cutover in local
-fixtures. It creates no remote tags or releases. Missing staged dependencies,
-copied or duplicated staging steps, and an unreported cutover must fail.
+The rehearsal runs publication staging and checks archive provenance,
+publication policy, and development cutover. It creates no remote release.
+CI requires it for release changes and main pushes. It doesn't prove live
+credentials or replace candidate certification.
 
-CI runs this rehearsal for release-related pull requests and every main push.
-Its verdict is required by `CI status`. This fixture proof does not replace the
-hosted platform certification or prove that live publication credentials work.
-
-## Hosted platform certification
-
-Release preparation is fail-closed on the frozen remote source SHA. Before the
-version/changelog commit is created, the release harness dispatches
-`.github/workflows/windows-nightly.yml` and
-`.github/workflows/macos-nightly.yml` for the frozen source branch while the
-local source audit runs. GitHub must return an exact run ID for each dispatch.
-The macOS run and its full-workspace job must complete successfully with the
-expected workflow path, event, SHA, URL, and unique job identity.
-
-Windows is advisory. Harn builds and runs on Windows without OS sandbox
-confinement, so the Windows nightly never decides whether a release certifies.
-The receipt carries the Windows proof when it succeeded and otherwise one
-`advisories` entry (`failure`, `missing`, or `abandoned`, with its run URL when
-one exists). Every accepted receipt prints a
-`WINDOWS_NIGHTLY_ADVISORY state=... run=...` line. A receipt that accounts for
-Windows neither way is refused.
-
-Windows certification stays off the contended Actions cache namespace.
-Successful `main` `windows-nightly` runs publish a short-retention
-`workspace-windows-warm` workflow artifact; `release-certify/<sha>` consumers
-restore that artifact read-only into a larger Dynamic Dev Drive ceiling and
-fall cold when no compatible generation exists. Cargo still owns exact-source
-invalidation after the restore. Artifact name, retention, size budget, and Dev Drive ceilings are owned by
-`.github/cache-policy.json` (`windows_workspace_warm`); the workspace
-`cargo-nextest` pin is the top-level `nextest_version` in the same document.
-`scripts/check_ci_cache_policy.harn` locks both surfaces, and CI scripts load
-them through `scripts/ci/cache_policy.sh`.
-
-The resulting `harn.release_audit_receipt.v2` records the certified source SHA,
-run/job URLs and IDs, per-lane timings, and critical path. The harness re-reads
-the remote branch after the join; movement invalidates the whole receipt. The
-release harness runs the residual checks affected by release metadata, creates
-the synthetic release commit, and then proves that commit has exactly the
-certified SHA as its sole parent.
-
-If a hosted run fails or is cancelled, fix the source or runner problem and
-restart the release from the still-unmodified source branch. If a valid exact
-run is already recorded, reuse its receipt; do not dispatch a blind duplicate.
-If the branch moved, discard both platform receipts and freeze the new SHA.
-
-### Diagnose a source audit failure
-
-Open the failed hosted release artifact and read `release-audit.json`. Find the
-`hosted-platform-certification` step. Its output ends with `RELEASE AUDIT
-FAILURE RECAP`, the failed lane, its exit status, and the last 40 log lines.
-Use that cause to choose the narrowest local check. Do not rerun a release only
-because the workflow page shows a generic `harn-audit failed` message.
-
-For a Harn conformance failure, rerun the named file with the frozen candidate
-binary and the release network environment cleared:
-
-```bash
-env -u HARN_EGRESS_ALLOW \
-  -u HARN_EGRESS_DENY \
-  -u HARN_EGRESS_DEFAULT \
-  -u HARN_EGRESS_BLOCK_PRIVATE \
-  -u HARN_EGRESS_ALLOW_LOOPBACK \
-  HARN_BIN=/path/to/frozen/harn \
-  ./scripts/harn_bin.sh -- test conformance --filter <case name>
-```
-
-If the focused test passes, replay the full conformance set more than once.
-Treat one pass as evidence of a transient failure, not proof that the cause is
-gone. Keep the failed receipt and the replay logs with the release record.
-
-## Piecewise gates
-
-Use the repository-local gates only when you need to audit or dry-run without
-opening a release PR:
+For an offline audit or dry run, use:
 
 ```bash
 ./scripts/release_gate.sh audit
 ./scripts/release_gate.sh full --bump patch --dry-run
 ```
-
-`scripts/publish.sh` is the thin entrypoint for the Harn publisher used by the
-release gate. Live publication probes each crate version, resumes the remaining
-dependency DAG, and waits with bounded backoff before publishing dependents of
-newly uploaded crates. It emits a JSON receipt separating published,
-already-present, waiting, failed, and remaining crates. Dry-run mode continues
-to use Cargo's workspace dry-run because it has no remote recovery state.
-
-## Release artifacts
-
-Every published release uploads five per-target archives, a
-coreutils-format `SHA256SUMS` manifest, and a structured
-`release-assets.json` manifest. Downstream packagers
-(downstream `fetch-harn.sh` scripts, npm CLI postinstall hooks,
-Scoop/Homebrew formula generators) should prefer the structured
-manifest. See [Release assets manifest](./dev/release-assets-manifest.md)
-for the schema and stable URLs.

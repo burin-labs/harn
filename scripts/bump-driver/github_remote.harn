@@ -48,6 +48,9 @@ pub type GithubBumpRemoteConfig = {
 
 type GithubRepo = {owner: string, name: string}
 
+/** The workflow can drive a target runtime whose commit request predates repair metadata. */
+type PublicationMetadata = {expected_branch_oid?: string, repair_commits?: list<string>, ...rest}
+
 fn __repo(value: string) -> GithubRepo {
   const parts = split(trim(value), "/")
   if len(parts) != 2 || trim(parts[0]) == "" || trim(parts[1]) == "" {
@@ -200,7 +203,7 @@ pub fn github_bump_remote(harness: Harness, config: GithubBumpRemoteConfig) -> L
             "--no-tags",
             "--force",
             "origin",
-            config.base,
+            oid,
           ],
           cwd: config.repo_dir ?? ".",
           env: {HARN_BUMP_FETCH_TOKEN: github_bump_access_token(harness, options)},
@@ -210,7 +213,7 @@ pub fn github_bump_remote(harness: Harness, config: GithubBumpRemoteConfig) -> L
       const outcome: LiveBumpFetch = {
         ok: ok,
         detail: if ok {
-          "fetched ${config.base} while adopting ${oid}"
+          "fetched commit ${oid}"
         } else {
           trim(to_string(result.stderr ?? ""))
         },
@@ -275,6 +278,7 @@ pub fn github_bump_remote(harness: Harness, config: GithubBumpRemoteConfig) -> L
       return true
     },
     publish_commit: fn(request) {
+      const metadata: PublicationMetadata = schema_expect(request, schema_of(PublicationMetadata))
       const publication: GithubWorktreeCommitRequest = {
         owner: repo.owner,
         repo: repo.name,
@@ -285,6 +289,11 @@ pub fn github_bump_remote(harness: Harness, config: GithubBumpRemoteConfig) -> L
         base_oid: request.base_sha,
         create_branch: true,
         reset_branch: true,
+        expected_branch_oid: metadata.expected_branch_oid ?? "",
+        body: join(
+          (metadata.repair_commits ?? []).map({ oid -> "Harn-Repair-Commit: ${oid}" }),
+          "\n",
+        ),
         options: options,
       }
       const receipt = __must(

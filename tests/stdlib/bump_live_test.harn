@@ -1,6 +1,167 @@
 import { LiveBumpRemote, live_bump_adapter } from "std/bump/live"
+import { BumpPrState, bump_options, run_bump } from "std/bump/runtime"
 import { command_run } from "std/command"
+import { strip_v } from "std/semver"
 import { assert_eq, assert_throws } from "std/testing"
+
+fn repair_fixture(harness: {fs: HarnessFs, tools: HarnessTools}) {
+  const root = harness.fs.mkdtemp_in_workspace("harn-bump-repairs-")
+  git_ok(harness.tools, root, ["init", "--quiet"])
+  git_ok(harness.tools, root, ["config", "user.email", "harn-test@example.invalid"])
+  git_ok(harness.tools, root, ["config", "user.name", "Harn Test"])
+  git_ok(harness.tools, root, ["config", "commit.gpgsign", "false"])
+  git_ok(harness.tools, root, ["config", "core.hooksPath", ".git/no-hooks"])
+  harness.fs.write_text(path_join(root, ".harn-version"), "1.0.0\n")
+  harness.fs.write_text(path_join(root, "repair.txt"), "original\n")
+  git_ok(harness.tools, root, ["add", "--all"])
+  git_ok(harness.tools, root, ["commit", "--quiet", "-m", "base"])
+  const base = git_ok(harness.tools, root, ["rev-parse", "HEAD"])
+  harness.fs.write_text(path_join(root, ".harn-version"), "1.0.1\n")
+  git_ok(harness.tools, root, ["add", "--all"])
+  git_ok(
+    harness.tools,
+    root,
+    ["commit", "--quiet", "--author=release[bot] <bot@example.invalid>", "-m", "old bump"],
+  )
+  harness.fs.write_text(path_join(root, "repair.txt"), "repaired\n")
+  git_ok(harness.tools, root, ["add", "--all"])
+  git_ok(harness.tools, root, ["commit", "--quiet", "-m", "consumer repair"])
+  const repair = git_ok(harness.tools, root, ["rev-parse", "HEAD"])
+  git_ok(harness.tools, root, ["checkout", "--quiet", "--detach", base])
+  const existing: BumpPrState = {
+    number: 1,
+    head_oid: repair,
+    base_ref: "main",
+    base_oid: base,
+    auto_merge_enabled: false,
+    auto_merge_method: nil,
+    url: "https://example.invalid/pull/1",
+    state: "open",
+  }
+  return {root: root, base: base, repair: repair, existing: existing}
+}
+
+pipeline test_refresh_preserves_repairs_on_two_consecutive_publications(harness: Harness) {
+  const fixture = repair_fixture(pick(harness, ["fs", "tools"]))
+  let existing = fixture.existing
+  let publications = []
+  const remote = unreachable_remote()
+    + {
+      release_view: fn(_tag) { return {
+        found: true,
+        draft: false,
+        prerelease: false,
+        asset_names: ["SHA256SUMS", "release-assets.json"],
+      } },
+      base_head: fn() { return {available: true, oid: fixture.base, detail: ""} },
+      fetch_base: fn(oid) {
+        git_ok(harness.tools, fixture.root, ["cat-file", "-e", oid + "^{commit}"])
+        return {ok: true, detail: ""}
+      },
+      find_bump_pr: fn() { return existing },
+      publish_commit: fn(request) {
+        assert_eq(request.expected_branch_oid, existing.head_oid)
+        assert_eq(request.repair_commits, [fixture.repair])
+        assert_eq(harness.fs.read_text(path_join(fixture.root, "repair.txt")), "repaired\n")
+        git_ok(harness.tools, fixture.root, ["add", "--all"])
+        const body = join(request.repair_commits.map({ oid -> "Harn-Repair-Commit: ${oid}" }), "\n")
+        git_ok(
+          harness.tools,
+          fixture.root,
+          [
+            "commit",
+            "--quiet",
+            "--author=release[bot] <bot@example.invalid>",
+            "-m",
+            request.headline,
+            "-m",
+            body,
+          ],
+        )
+        const head = git_ok(harness.tools, fixture.root, ["rev-parse", "HEAD"])
+        publications = publications + [head]
+        existing = existing + {head_oid: head}
+        return {oid: head, url: "https://example.invalid/commit/" + head, branch_action: "reset"}
+      },
+      branch_matches_base: fn() { return false },
+      upsert_pr: fn(_existing, head) { return {
+        number: 1,
+        head_oid: head,
+        url: "https://example.invalid/pull/1",
+        created: false,
+      } },
+    }
+  const adapter = live_bump_adapter(
+    harness.clock,
+    harness.tools,
+    remote,
+    {
+      repo_dir: fixture.root,
+      version_file: path_join(fixture.root, ".harn-version"),
+      bot_author: "release[bot]",
+      refresh_command: "true",
+      validation_command: "test \"$(cat repair.txt)\" = repaired",
+    },
+    harness.fs,
+  )
+  for target in ["v1.0.2", "v1.0.3"] {
+    const receipt = run_bump(bump_options({tag: target, enable_auto_merge: false}), adapter)
+    assert_eq(receipt.outcome, "committed")
+    assert_eq(receipt.repair_commits, [fixture.repair])
+    assert(receipt.validation.ok)
+    assert_eq(
+      harness.fs.read_text(path_join(fixture.root, ".harn-version")),
+      strip_v(target) + "\n",
+    )
+    git_ok(harness.tools, fixture.root, ["checkout", "--quiet", "--detach", fixture.base])
+  }
+  assert_eq(len(publications), 2)
+  harness.fs.delete(fixture.root)
+}
+
+pipeline test_refresh_refuses_a_conflicting_repair_before_validation_and_publication(
+  harness: Harness,
+) {
+  const fixture = repair_fixture(pick(harness, ["fs", "tools"]))
+  harness.fs.write_text(path_join(fixture.root, "repair.txt"), "competing\n")
+  git_ok(harness.tools, fixture.root, ["add", "--all"])
+  git_ok(harness.tools, fixture.root, ["commit", "--quiet", "-m", "competing main change"])
+  const advanced = git_ok(harness.tools, fixture.root, ["rev-parse", "HEAD"])
+  const remote = unreachable_remote()
+    + {
+      release_view: fn(_tag) { return {
+        found: true,
+        draft: false,
+        prerelease: false,
+        asset_names: ["SHA256SUMS", "release-assets.json"],
+      } },
+      base_head: fn() { return {available: true, oid: advanced, detail: ""} },
+      fetch_base: fn(_oid) { return {ok: true, detail: ""} },
+      find_bump_pr: fn() { return fixture.existing },
+    }
+  const adapter = live_bump_adapter(
+    harness.clock,
+    harness.tools,
+    remote,
+    {
+      repo_dir: fixture.root,
+      version_file: path_join(fixture.root, ".harn-version"),
+      bot_author: "release[bot]",
+      refresh_command: "true",
+      validation_command: "touch validation-ran",
+    },
+    harness.fs,
+  )
+  const receipt = run_bump(bump_options({tag: "v1.0.2"}), adapter)
+  assert_eq(receipt.refresh_detail, "refresh ok")
+  assert_eq(receipt.outcome, "repair_conflict")
+  assert_eq(receipt.ok, false)
+  assert_eq(receipt.commit_oid, nil)
+  assert_eq(receipt.repair_conflicts, ["repair.txt"])
+  assert(!harness.fs.exists(path_join(fixture.root, "validation-ran")))
+  assert(contains(receipt.notes[len(receipt.notes) - 1], "repair.txt"))
+  harness.fs.delete(fixture.root)
+}
 
 fn unreachable_remote() -> LiveBumpRemote {
   const unreachable = fn() {
@@ -19,6 +180,12 @@ fn unreachable_remote() -> LiveBumpRemote {
     close_pr: fn(_number, _comment) { return unreachable() },
     enable_auto_merge: fn(_number, _head_oid) { return unreachable() },
   }
+}
+
+pipeline test_no_open_bump_skips_repair_fetch(harness: Harness) {
+  const adapter = live_bump_adapter(harness.clock, harness.tools, unreachable_remote())
+  const repairs = adapter.preserve_repairs(nil, "")
+  assert_eq(repairs, {ok: true, commits: [], conflicts: [], detail: "no open bump PR"})
 }
 
 fn adoption_remote() -> LiveBumpRemote {

@@ -1,3 +1,4 @@
+import { replay_bump_repairs } from "std/bump/repairs"
 /**
  * std/bump/live — local effects for the provider-neutral Harn bump runtime.
  *
@@ -40,9 +41,10 @@ pub type LiveBumpConfig = {
   readiness_max_attempts: int,
   readiness_interval_ms: int,
   readiness_timeout_ms: int,
+  bot_author: string,
 }
 
-/** Verdict of an authenticated fetch of the base branch into the local checkout. */
+/** Verdict of an authenticated fetch of a commit into the local checkout. */
 pub type LiveBumpFetch = {ok: bool, detail: string}
 
 /** Closed release projection needed by the readiness gate. */
@@ -96,6 +98,7 @@ pub fn live_bump_config(overrides: dict = {}) -> LiveBumpConfig {
     readiness_max_attempts: to_int(o.readiness_max_attempts ?? 1) ?? 1,
     readiness_interval_ms: to_int(o.readiness_interval_ms ?? 20000) ?? 20000,
     readiness_timeout_ms: to_int(o.readiness_timeout_ms ?? 20000) ?? 20000,
+    bot_author: to_string(o.bot_author ?? "harn-release-bot[bot]"),
   }
 }
 
@@ -481,6 +484,14 @@ pub fn live_bump_adapter(
     base_sha: fn() { return trim(__git(tools, cfg.repo_dir, ["rev-parse", "HEAD"]).stdout ?? "") },
     apply_version:
       fn(target, revision) { return __apply_version(fs, tools, cfg, target, revision) },
+    preserve_repairs: fn(existing, base) { return replay_bump_repairs(
+      tools,
+      cfg.repo_dir,
+      cfg.bot_author,
+      existing,
+      base,
+      remote.fetch_base,
+    ) },
     run_validation: fn() {
       if trim(cfg.validation_command) == "" {
         return {ok: true, steps: [], detail: "no validation command declared"}

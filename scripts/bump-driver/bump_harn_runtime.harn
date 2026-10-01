@@ -96,6 +96,7 @@ pipeline main(harness: Harness) {
       config: {
         release_repo: release_repo,
         validation_command: env_or(harness.env, "HARN_BUMP_VALIDATE", ""),
+        bot_author: env_or(harness.env, "HARN_EXT_BUMP_BOT_AUTHOR", "harn-release-bot[bot]"),
         refresh_command: env_or(
           harness.env,
           "HARN_BUMP_REFRESH",
