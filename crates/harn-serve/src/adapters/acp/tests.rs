@@ -47,9 +47,8 @@ impl Drop for EnvSnapshot {
 }
 
 async fn recv_json(rx: &mut mpsc::UnboundedReceiver<String>) -> serde_json::Value {
-    let line = tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv())
+    let line = harn_clock::test_support::within("ACP message", rx.recv())
         .await
-        .expect("timed out waiting for ACP response")
         .expect("ACP response channel closed");
     serde_json::from_str(&line).expect("ACP JSON line")
 }

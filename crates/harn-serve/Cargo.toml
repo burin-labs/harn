@@ -86,6 +86,7 @@ features = ["use_pem", "aws_lc_rs"]
 [dev-dependencies]
 async-compression = { version = "0.4", features = ["tokio", "gzip"] }
 filetime = "0.2"
+harn-clock = { path = "../harn-clock", version = "=0.10.153-dev", features = ["test-support"] }
 harn-lexer = { path = "../harn-lexer", version = "=0.10.153-dev" }
 jsonschema.workspace = true
 # harn-serve depends on harn-vm with `default-features = false` (lean embedding

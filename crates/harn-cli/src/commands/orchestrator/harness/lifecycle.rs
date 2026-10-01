@@ -784,10 +784,10 @@ mod tests {
                 tx.send(()).unwrap();
                 tx.send(()).unwrap();
 
-                let request = tokio::time::timeout(Duration::from_secs(1), reload_rx.recv())
-                    .await
-                    .expect("debouncer emitted reload")
-                    .expect("reload channel open");
+                let request =
+                    harn_clock::test_support::within("debouncer emitting reload", reload_rx.recv())
+                        .await
+                        .expect("reload channel open");
                 assert_eq!(request.source, "file_watch");
                 assert!(reload_rx.try_recv().is_err());
 

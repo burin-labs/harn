@@ -939,17 +939,13 @@ mod tests {
                 "params": {"sessionId": session_id, "modeId": "code"}
             }))
             .expect("send session/set_mode");
-        block_on(async {
-            tokio::time::timeout(std::time::Duration::from_secs(5), async {
-                loop {
-                    if recv_json(&mut responses).await["id"] == 2 {
-                        break;
-                    }
+        block_on(harn_clock::test_support::within("mode response", async {
+            loop {
+                if recv_json(&mut responses).await["id"] == 2 {
+                    break;
                 }
-            })
-            .await
-            .expect("mode response");
-        });
+            }
+        }));
 
         requests
             .send(serde_json::json!({
@@ -965,8 +961,9 @@ mod tests {
 
         // Observe the prompt's host-capability request before shutting down.
         // A test that only sends a prompt could pass while dispatch was idle.
-        block_on(async {
-            tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        block_on(harn_clock::test_support::within(
+            "prompt reaching its host capability request",
+            async {
                 loop {
                     let message = recv_json(&mut responses).await;
                     if message["method"] == "host/capabilities" {
@@ -977,18 +974,17 @@ mod tests {
                         "prompt finished before host call: {message}"
                     );
                 }
-            })
-            .await
-            .expect("prompt reached host capability request");
-        });
+            },
+        ));
         assert!(!handle.is_terminated());
 
+        // Unanswered, the host call would park for its own multi-minute
+        // timeout, so a shutdown that failed to interrupt it hangs here.
         handle.shutdown();
-        block_on(async {
-            tokio::time::timeout(std::time::Duration::from_secs(2), handle.wait_terminated())
-                .await
-                .expect("shutdown must interrupt the active dispatch");
-        });
+        block_on(harn_clock::test_support::within(
+            "shutdown interrupting the active dispatch",
+            handle.wait_terminated(),
+        ));
     }
 
     #[cfg(unix)]
@@ -1003,7 +999,10 @@ mod tests {
         std::fs::write(
             &script,
             format!(
-                "#!/bin/sh\nprintf '%s' \"$$\" > '{}'\nexec /bin/sleep 20\n",
+                // Outlives the test hang ceiling many times over, so only a
+                // shutdown that interrupts initialization and kills the child
+                // lets the waits below finish.
+                "#!/bin/sh\nprintf '%s' \"$$\" > '{}'\nexec /bin/sleep 600\n",
                 pid_file.display()
             ),
         )
@@ -1048,17 +1047,13 @@ mod tests {
                 "params": {"sessionId": session_id, "modeId": "code"}
             }))
             .expect("send session/set_mode");
-        block_on(async {
-            tokio::time::timeout(Duration::from_secs(5), async {
-                loop {
-                    if recv_json(&mut responses).await["id"] == 2 {
-                        break;
-                    }
+        block_on(harn_clock::test_support::within("mode response", async {
+            loop {
+                if recv_json(&mut responses).await["id"] == 2 {
+                    break;
                 }
-            })
-            .await
-            .expect("mode response");
-        });
+            }
+        }));
         requests
             .send(serde_json::json!({
                 "jsonrpc": "2.0",
@@ -1073,11 +1068,11 @@ mod tests {
 
         block_on(async {
             // The PID file and process state are external OS events. Polling
-            // them is bounded by named timeouts; the interval is only a probe
-            // cadence, never a delay used to order Harn tasks.
+            // them is bounded by the hang ceiling; the interval is only a
+            // probe cadence, never a delay used to order Harn tasks.
             let mut probe = tokio::time::interval(Duration::from_millis(20));
             probe.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-            tokio::time::timeout(Duration::from_secs(30), async {
+            harn_clock::test_support::within("MCP child start", async {
                 while !pid_file.exists() {
                     tokio::select! {
                         line = responses.recv() => {
@@ -1097,8 +1092,7 @@ mod tests {
                     }
                 }
             })
-            .await
-            .expect("MCP child started");
+            .await;
         });
         let pid: u32 = std::fs::read_to_string(&pid_file)
             .expect("MCP child PID")
@@ -1116,15 +1110,14 @@ mod tests {
         );
 
         handle.shutdown();
-        block_on(async {
-            tokio::time::timeout(Duration::from_secs(2), handle.wait_terminated())
-                .await
-                .expect("shutdown must interrupt MCP initialization");
-        });
+        block_on(harn_clock::test_support::within(
+            "shutdown interrupting MCP initialization",
+            handle.wait_terminated(),
+        ));
         block_on(async {
             let mut probe = tokio::time::interval(Duration::from_millis(20));
             probe.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-            tokio::time::timeout(Duration::from_secs(2), async {
+            harn_clock::test_support::within("MCP child stopping after shutdown", async {
                 loop {
                     let state = process_state();
                     if !state.status.success()
@@ -1137,8 +1130,7 @@ mod tests {
                     probe.tick().await;
                 }
             })
-            .await
-            .expect("MCP child must stop after shutdown");
+            .await;
         });
     }
 

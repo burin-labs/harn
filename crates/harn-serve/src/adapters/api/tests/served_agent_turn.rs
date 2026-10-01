@@ -103,7 +103,7 @@ async fn submit_and_wait(
     let task: Value = serde_json::from_slice(&body).expect("task json");
     let task_id = task["id"].as_str().expect("task id");
 
-    tokio::time::timeout(std::time::Duration::from_secs(10), async {
+    harn_clock::test_support::within(&format!("terminal event for task {task_id}"), async {
         loop {
             let event = events.recv().await.expect("task terminal event");
             if event.task_id.as_deref() == Some(task_id)
@@ -114,7 +114,6 @@ async fn submit_and_wait(
         }
     })
     .await
-    .unwrap_or_else(|_| panic!("timed out waiting for terminal event for task {task_id}"))
 }
 
 /// The Agents API route that reported the original failure, plus a negative

@@ -1445,6 +1445,7 @@ fn parse_host_tools_list_response(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use harn_clock::test_support::within;
     use harn_parser::diagnostic_codes::Code;
 
     fn test_bridge() -> HostBridge {
@@ -1548,9 +1549,7 @@ mod tests {
         cancelled.store(true, Ordering::SeqCst);
         bridge.cancel_notify.notify_waiters();
 
-        let result = tokio::time::timeout(Duration::from_secs(1), call)
-            .await
-            .expect("pending permission call should observe cancellation");
+        let result = within("pending permission call observing cancellation", call).await;
         assert!(matches!(
             result,
             Err(VmError::Runtime(message)) if message.contains("cancelled")

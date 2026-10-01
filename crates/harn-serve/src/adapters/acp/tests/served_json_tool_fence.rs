@@ -83,7 +83,7 @@ pipeline default(harness: Harness) {
                 .expect("send session/prompt");
 
             let mut updates = Vec::new();
-            let response = tokio::time::timeout(std::time::Duration::from_secs(30), async {
+            let response = harn_clock::test_support::within("session/prompt response", async {
                 loop {
                     let line = response_rx.recv().await.expect("ACP channel closed");
                     let message: serde_json::Value = serde_json::from_str(&line).expect("JSON");
@@ -102,8 +102,7 @@ pipeline default(harness: Harness) {
                     }
                 }
             })
-            .await
-            .expect("session/prompt response");
+            .await;
             assert!(response["error"].is_null(), "{response:#}");
 
             let shown: Vec<String> = updates

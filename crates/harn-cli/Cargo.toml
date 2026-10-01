@@ -209,6 +209,7 @@ guard-neural = ["harn-guard/neural"]
 testbench-wasi = ["harn-vm/testbench-wasi"]
 
 [dev-dependencies]
+harn-clock = { path = "../harn-clock", version = "=0.10.153-dev", features = ["test-support"] }
 harn-mcp-compat = { path = "../harn-mcp-compat" }
 syn = { version = "3", features = ["full", "visit"] }
 rcgen = "0.14"

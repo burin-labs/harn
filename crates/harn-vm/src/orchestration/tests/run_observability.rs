@@ -202,7 +202,7 @@ async fn save_run_record_publishes_action_graph_updates_to_event_log() {
     save_run_record(&run, Some(run_path.to_str().unwrap())).unwrap();
     run.status = "completed".to_string();
     save_run_record(&run, Some(run_path.to_str().unwrap())).unwrap();
-    let events = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+    let events = harn_clock::test_support::within("this run's action graph events", async {
         let mut events = Vec::new();
         while events.len() < 2 {
             let (_, event) = stream.next().await.unwrap().unwrap();
@@ -214,8 +214,7 @@ async fn save_run_record_publishes_action_graph_updates_to_event_log() {
         }
         events
     })
-    .await
-    .expect("timed out waiting for this run's action graph events");
+    .await;
     assert_eq!(events.len(), 2);
     assert!(events
         .iter()
