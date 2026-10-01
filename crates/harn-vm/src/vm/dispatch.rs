@@ -993,8 +993,10 @@ impl Vm {
             if enforce_contract {
                 crate::orchestration::enforce_current_policy_for_bridge_builtin(name)?;
             }
-            let args_json: Vec<serde_json::Value> =
-                args.iter().map(crate::llm::vm_value_to_json).collect();
+            let args_json: Vec<serde_json::Value> = args
+                .iter()
+                .map(crate::value::json::vm_value_to_json)
+                .collect();
             let result = bridge
                 .call(
                     "builtin_call",

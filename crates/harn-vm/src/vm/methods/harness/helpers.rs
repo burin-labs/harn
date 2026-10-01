@@ -73,7 +73,7 @@ async fn acknowledge_trigger(args: &[VmValue]) -> VmValue {
         return json_receipt("rejected", "acknowledge_trigger", "missing trigger id");
     };
     let receipt = acknowledge_trigger_id(&id).await;
-    crate::stdlib::json_to_vm_value(&receipt)
+    crate::value::json::json_to_vm_value(&receipt)
 }
 
 async fn defer_trigger(args: &[VmValue]) -> VmValue {
@@ -95,7 +95,7 @@ async fn defer_trigger(args: &[VmValue]) -> VmValue {
         .and_then(serde_json::Value::as_str)
         != Some("acknowledged")
     {
-        return crate::stdlib::json_to_vm_value(&serde_json::json!({
+        return crate::value::json::json_to_vm_value(&serde_json::json!({
             "status": acknowledgement
                 .get("status")
                 .and_then(serde_json::Value::as_str)
@@ -119,7 +119,7 @@ async fn defer_trigger(args: &[VmValue]) -> VmValue {
             "envelope_id": envelope.envelope_id,
         }),
     );
-    crate::stdlib::json_to_vm_value(&serde_json::json!({
+    crate::value::json::json_to_vm_value(&serde_json::json!({
         "status": "deferred",
         "method": "defer_trigger",
         "trigger_id": id,
@@ -284,7 +284,7 @@ fn acknowledge_handoff(args: &[VmValue]) -> VmValue {
     };
     let decision = args
         .get(1)
-        .map(crate::llm::vm_value_to_json)
+        .map(crate::value::json::vm_value_to_json)
         .unwrap_or(serde_json::Value::Null);
     // HARN-DRN-001 ordering enforcement (#1856 P-03): handoffs come
     // third in the drain order (after subagents, after triggers). A
@@ -295,7 +295,7 @@ fn acknowledge_handoff(args: &[VmValue]) -> VmValue {
     // is itself sync today, and only the in-memory check matters here.
     let snapshot = crate::orchestration::unsettled_state_snapshot();
     if !snapshot.suspended_subagents.is_empty() {
-        return crate::stdlib::json_to_vm_value(&serde_json::json!({
+        return crate::value::json::json_to_vm_value(&serde_json::json!({
             "status": "rejected",
             "method": "acknowledge_handoff",
             "envelope_id": envelope_id,
@@ -303,12 +303,12 @@ fn acknowledge_handoff(args: &[VmValue]) -> VmValue {
         }));
     }
     match crate::orchestration::acknowledge_partial_handoff(&envelope_id, decision) {
-        Some(envelope) => crate::stdlib::json_to_vm_value(&serde_json::json!({
+        Some(envelope) => crate::value::json::json_to_vm_value(&serde_json::json!({
             "status": "acknowledged",
             "method": "acknowledge_handoff",
             "envelope": envelope.to_json(),
         })),
-        None => crate::stdlib::json_to_vm_value(&serde_json::json!({
+        None => crate::value::json::json_to_vm_value(&serde_json::json!({
             "status": "not_found",
             "method": "acknowledge_handoff",
             "envelope_id": envelope_id,
@@ -319,14 +319,14 @@ fn acknowledge_handoff(args: &[VmValue]) -> VmValue {
 fn finalize_pipeline(args: &[VmValue]) -> VmValue {
     let disposition = args
         .first()
-        .map(crate::llm::vm_value_to_json)
+        .map(crate::value::json::vm_value_to_json)
         .unwrap_or(serde_json::Value::Null);
     let receipt = crate::orchestration::finalize_pipeline_disposition(disposition);
-    crate::stdlib::json_to_vm_value(&receipt)
+    crate::value::json::json_to_vm_value(&receipt)
 }
 
 fn json_receipt(status: &str, method: &str, reason: &str) -> VmValue {
-    crate::stdlib::json_to_vm_value(&serde_json::json!({
+    crate::value::json::json_to_vm_value(&serde_json::json!({
         "status": status,
         "method": method,
         "reason": reason,
@@ -358,7 +358,7 @@ async fn record_emit_audit_with_hooks(
         .unwrap_or_default();
     let mut payload = args
         .get(1)
-        .map(crate::llm::vm_value_to_json)
+        .map(crate::value::json::vm_value_to_json)
         .unwrap_or(serde_json::Value::Null);
     if kind == "drain_decision" {
         let hook_payload = serde_json::json!({
@@ -376,7 +376,7 @@ async fn record_emit_audit_with_hooks(
         {
             Ok(crate::orchestration::HookControl::Allow) => {}
             Ok(crate::orchestration::HookControl::Block { reason }) => {
-                return crate::stdlib::json_to_vm_value(&serde_json::json!({
+                return crate::value::json::json_to_vm_value(&serde_json::json!({
                     "status": "blocked",
                     "method": "emit_audit",
                     "kind": kind,
@@ -390,7 +390,7 @@ async fn record_emit_audit_with_hooks(
             }
             Ok(crate::orchestration::HookControl::Decision { .. }) => {}
             Err(err) => {
-                return crate::stdlib::json_to_vm_value(&serde_json::json!({
+                return crate::value::json::json_to_vm_value(&serde_json::json!({
                     "status": "error",
                     "method": "emit_audit",
                     "kind": kind,
@@ -401,7 +401,7 @@ async fn record_emit_audit_with_hooks(
         record_drain_decision_span(&payload);
     }
     let entry = crate::orchestration::record_lifecycle_audit(kind, payload);
-    crate::stdlib::json_to_vm_value(&serde_json::json!({
+    crate::value::json::json_to_vm_value(&serde_json::json!({
         "status": "recorded",
         "method": "emit_audit",
         "entry": entry.to_json(),
@@ -424,15 +424,15 @@ async fn record_spawn_settlement_agent_with_hooks(
 ) -> VmValue {
     let mut unsettled = args
         .first()
-        .map(crate::llm::vm_value_to_json)
+        .map(crate::value::json::vm_value_to_json)
         .unwrap_or(serde_json::Value::Null);
     let return_value = args
         .get(1)
-        .map(crate::llm::vm_value_to_json)
+        .map(crate::value::json::vm_value_to_json)
         .unwrap_or(serde_json::Value::Null);
     let options = args
         .get(2)
-        .map(crate::llm::vm_value_to_json)
+        .map(crate::value::json::vm_value_to_json)
         .unwrap_or(serde_json::Value::Null);
     let pre_payload = serde_json::json!({
         "event": crate::orchestration::HookEvent::PreDrain.as_str(),
@@ -449,7 +449,7 @@ async fn record_spawn_settlement_agent_with_hooks(
     {
         Ok(crate::orchestration::HookControl::Allow) => {}
         Ok(crate::orchestration::HookControl::Block { reason }) => {
-            return crate::stdlib::json_to_vm_value(&serde_json::json!({
+            return crate::value::json::json_to_vm_value(&serde_json::json!({
                 "status": "skipped",
                 "method": "spawn_settlement_agent",
                 "reason": reason,
@@ -462,7 +462,7 @@ async fn record_spawn_settlement_agent_with_hooks(
         }
         Ok(crate::orchestration::HookControl::Decision { .. }) => {}
         Err(err) => {
-            return crate::stdlib::json_to_vm_value(&serde_json::json!({
+            return crate::value::json::json_to_vm_value(&serde_json::json!({
                 "status": "error",
                 "method": "spawn_settlement_agent",
                 "error": err.to_string(),
@@ -484,7 +484,7 @@ async fn record_spawn_settlement_agent_with_hooks(
         span_links,
     );
     if span_id != 0 {
-        if let Ok(counts) = state_counts(&crate::stdlib::json_to_vm_value(&unsettled)) {
+        if let Ok(counts) = state_counts(&crate::value::json::json_to_vm_value(&unsettled)) {
             crate::tracing::span_set_metadata(span_id, "counts", counts.to_json());
         }
     }
@@ -504,7 +504,7 @@ async fn record_spawn_settlement_agent_with_hooks(
         }
         crate::tracing::span_end(span_id);
     }
-    let outcome = crate::stdlib::json_to_vm_value(&outcome_json);
+    let outcome = crate::value::json::json_to_vm_value(&outcome_json);
     let post_payload = serde_json::json!({
         "event": crate::orchestration::HookEvent::PostDrain.as_str(),
         "unsettled": unsettled,
@@ -517,7 +517,7 @@ async fn record_spawn_settlement_agent_with_hooks(
     )
     .await
     {
-        return crate::stdlib::json_to_vm_value(&serde_json::json!({
+        return crate::value::json::json_to_vm_value(&serde_json::json!({
             "status": "error",
             "method": "spawn_settlement_agent",
             "error": err.to_string(),
@@ -558,7 +558,7 @@ fn record_drain_decision_span(payload: &serde_json::Value) {
 
 fn record_handoff_envelope(args: &[VmValue]) -> VmValue {
     let Some(target_value) = args.first() else {
-        return crate::stdlib::json_to_vm_value(&serde_json::json!({
+        return crate::value::json::json_to_vm_value(&serde_json::json!({
             "status": "rejected",
             "method": "handoff_to",
             "reason": "missing target pipeline argument",
@@ -570,10 +570,10 @@ fn record_handoff_envelope(args: &[VmValue]) -> VmValue {
     };
     let payload = args
         .get(1)
-        .map(crate::llm::vm_value_to_json)
+        .map(crate::value::json::vm_value_to_json)
         .unwrap_or(serde_json::Value::Null);
     let envelope = crate::orchestration::record_partial_handoff(target, payload);
-    crate::stdlib::json_to_vm_value(&serde_json::json!({
+    crate::value::json::json_to_vm_value(&serde_json::json!({
         "status": "queued",
         "method": "handoff_to",
         "envelope": envelope.to_json(),

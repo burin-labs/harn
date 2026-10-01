@@ -5,6 +5,8 @@ mod opt_get;
 mod options;
 mod provider;
 mod transcript;
+pub(crate) use crate::value::json::vm_value_dict_to_json;
+pub use crate::value::json::vm_value_to_json;
 
 use crate::value::{VmError, VmValue};
 
@@ -69,37 +71,6 @@ pub(crate) use transcript::{
 pub(super) const TRANSCRIPT_TYPE: &str = "transcript";
 pub(super) const TRANSCRIPT_ASSET_TYPE: &str = "transcript_asset";
 pub(super) const TRANSCRIPT_VERSION: i64 = 2;
-
-/// Convert a VmValue dict to serde_json::Value for API payloads.
-pub(crate) fn vm_value_dict_to_json(dict: &crate::value::DictMap) -> serde_json::Value {
-    let mut map = serde_json::Map::new();
-    for (k, v) in dict {
-        map.insert(k.to_string(), vm_value_to_json(v));
-    }
-    serde_json::Value::Object(map)
-}
-
-pub fn vm_value_to_json(val: &VmValue) -> serde_json::Value {
-    match val {
-        VmValue::Int(i) => serde_json::json!(i),
-        VmValue::Float(f) => serde_json::json!(f),
-        // Decimal crosses the host bridge as a string to preserve exact
-        // precision (binary-float JSON numbers would corrupt money values).
-        VmValue::Decimal(d) => serde_json::json!(d.to_string()),
-        VmValue::String(s) => serde_json::json!(s.as_str()),
-        VmValue::Bytes(bytes) => crate::schema::tagged_bytes_json(bytes),
-        VmValue::Bool(b) => serde_json::json!(b),
-        VmValue::Nil => serde_json::Value::Null,
-        VmValue::List(list) => {
-            serde_json::Value::Array(list.iter().map(vm_value_to_json).collect())
-        }
-        VmValue::Dict(d) => vm_value_dict_to_json(d),
-        VmValue::StructInstance(_) => {
-            vm_value_dict_to_json(&val.struct_fields_map().unwrap_or_default())
-        }
-        _ => serde_json::json!(val.display()),
-    }
-}
 
 /// Structural JSON representation for values crossing a served-export
 /// boundary. Unlike display-oriented JSON conversion, enum variants retain

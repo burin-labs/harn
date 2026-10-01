@@ -137,7 +137,7 @@ impl Vm {
 
         let pre_payload = serde_json::json!({
             "event": HookEvent::PreFinish.as_str(),
-            "return_value": crate::llm::vm_value_to_json(&value),
+            "return_value": crate::value::json::vm_value_to_json(&value),
             "unsettled": unsettled.to_json(),
             "has_on_finish": on_finish.is_some(),
         });
@@ -168,7 +168,7 @@ impl Vm {
 
         let post_payload = serde_json::json!({
             "event": HookEvent::PostFinish.as_str(),
-            "return_value": crate::llm::vm_value_to_json(&final_value),
+            "return_value": crate::value::json::vm_value_to_json(&final_value),
             "unsettled": unsettled.to_json(),
         });
         self.fire_finish_lifecycle_event(HookEvent::PostFinish, &post_payload)
@@ -212,7 +212,7 @@ impl Vm {
         })?;
         let mut current_payload = payload.clone();
         for invocation in invocations {
-            let arg = crate::stdlib::json_to_vm_value(&current_payload);
+            let arg = crate::value::json::json_to_vm_value(&current_payload);
             let closure = invocation.resolve(self).await?;
             let raw = self
                 .call_closure_pub(&closure, &[harness.clone(), arg])

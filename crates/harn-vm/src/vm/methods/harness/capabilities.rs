@@ -165,7 +165,7 @@ impl crate::vm::Vm {
             "processes" => sys::processes_snapshot(),
             _ => return Err(method_unsupported(handle, method)),
         };
-        Ok(crate::stdlib::json_to_vm_value(&json))
+        Ok(crate::value::json::json_to_vm_value(&json))
     }
 
     async fn call_harness_secrets_method(
@@ -440,7 +440,7 @@ impl crate::vm::Vm {
                         "HarnessLlm.catalog_refresh: serialize result: {error}"
                     ))
                 })?;
-                Ok(crate::stdlib::json_to_vm_value(&json))
+                Ok(crate::value::json::json_to_vm_value(&json))
             }
             "providers" => Ok(crate::llm::config_builtins::llm_provider_status_value()),
             _ => Err(method_unsupported(handle, method)),
@@ -662,7 +662,7 @@ impl crate::vm::Vm {
                     .unwrap_or_else(|| "info".to_string());
                 let fields = obs_attrs_arg(handle, method, args.get(2))?;
                 let emitted = log_typed(message, level, fields)?;
-                Ok(crate::stdlib::json_to_vm_value(&emitted))
+                Ok(crate::value::json::json_to_vm_value(&emitted))
             }
             "counter" | "histogram" | "gauge" => {
                 let instrument = match method {
@@ -676,7 +676,7 @@ impl crate::vm::Vm {
                 let value_json = obs_number_arg(handle, method, &value_arg)?;
                 let attrs = obs_attrs_arg(handle, method, args.get(2))?;
                 let emitted = emit_instrument(instrument, name, value_json, attrs)?;
-                Ok(crate::stdlib::json_to_vm_value(&emitted))
+                Ok(crate::value::json::json_to_vm_value(&emitted))
             }
             _ => Err(method_unsupported(handle, method)),
         }

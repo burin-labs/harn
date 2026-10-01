@@ -925,7 +925,7 @@ impl crate::vm::Vm {
                     })]),
                     _ => return None,
                 };
-                Some(Ok(crate::stdlib::json_to_vm_value(&json)))
+                Some(Ok(crate::value::json::json_to_vm_value(&json)))
             }
             HarnessKind::Tenant => Self::call_harness_tenant_method_sync_fast(method, args),
             HarnessKind::Auth => Self::call_harness_auth_method_sync_fast(method, args),
