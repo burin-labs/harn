@@ -516,7 +516,20 @@ pub(super) fn default_run_capability_policy(
             // capability, so its children already write their workspace, and
             // a read-only role nested under it may keep the grant for its own.
             allow_child_workspace_write: false,
-            netns_launcher_path: grants.netns_launcher,
+            netns_launcher_path: grants.netns_launcher.or_else(|| {
+                // The installed runtime is already an exact process-read grant
+                // above. Bubblewrap uses its pre-runtime exec finalizer, not a
+                // second installed launcher or a broader directory grant.
+                #[cfg(target_os = "linux")]
+                if harn_vm::process_sandbox::active_backend_mechanism()
+                    == harn_vm::process_sandbox::SandboxMechanism::LinuxBubblewrap
+                {
+                    return std::env::current_exe()
+                        .ok()
+                        .map(|path| normalize_run_workspace_root(&path).display().to_string());
+                }
+                None
+            }),
         }),
         side_effect_level: Some(
             if grants.network {

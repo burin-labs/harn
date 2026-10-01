@@ -23,8 +23,8 @@ impl SandboxBackend for Backend {
         "openbsd"
     }
 
-    fn filesystem_mechanism() -> &'static str {
-        "openbsd_unveil"
+    fn filesystem_mechanism() -> super::SandboxMechanism {
+        super::SandboxMechanism::OpenbsdUnveil
     }
 
     fn available() -> bool {

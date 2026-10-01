@@ -52,7 +52,7 @@ else:
     signal.pause()
 "#;
 
-struct Owner(Child);
+pub(super) struct Owner(pub(super) Child);
 
 impl Drop for Owner {
     fn drop(&mut self) {
@@ -66,7 +66,7 @@ impl Drop for Owner {
     }
 }
 
-fn pidfd(pid: i32) -> OwnedFd {
+pub(super) fn pidfd(pid: i32) -> OwnedFd {
     let fd = unsafe { libc::syscall(libc::SYS_pidfd_open, pid, 0) as i32 };
     assert!(
         fd >= 0,
@@ -76,7 +76,7 @@ fn pidfd(pid: i32) -> OwnedFd {
     unsafe { OwnedFd::from_raw_fd(fd) }
 }
 
-fn await_exit(fd: &OwnedFd) {
+pub(super) fn await_exit(fd: &OwnedFd) {
     let mut event = libc::pollfd {
         fd: fd.as_raw_fd(),
         events: libc::POLLIN,

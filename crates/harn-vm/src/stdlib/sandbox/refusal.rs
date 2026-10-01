@@ -421,6 +421,7 @@ pub(crate) fn path_is_denied(candidate: &Path, denied: &[PathBuf]) -> bool {
 #[non_exhaustive]
 pub enum SandboxMechanism {
     LinuxLandlock,
+    LinuxBubblewrap,
     MacosSandboxExec,
     OpenbsdUnveil,
     /// No OS sandbox: Windows, and any platform without a backend. Serialized
@@ -433,6 +434,7 @@ impl SandboxMechanism {
     /// Every mechanism, so a table keyed by mechanism can be held complete.
     pub const ALL: &'static [SandboxMechanism] = &[
         Self::LinuxLandlock,
+        Self::LinuxBubblewrap,
         Self::MacosSandboxExec,
         Self::OpenbsdUnveil,
         Self::Unconfined,
@@ -441,6 +443,7 @@ impl SandboxMechanism {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::LinuxLandlock => "linux_landlock",
+            Self::LinuxBubblewrap => "linux_bubblewrap",
             Self::MacosSandboxExec => "macos_sandbox_exec",
             Self::OpenbsdUnveil => "openbsd_unveil",
             Self::Unconfined => "none",
@@ -452,9 +455,21 @@ impl SandboxMechanism {
     pub fn display_name(self) -> &'static str {
         match self {
             Self::LinuxLandlock => "Linux Landlock",
+            Self::LinuxBubblewrap => "Linux bubblewrap",
             Self::MacosSandboxExec => "macOS sandbox-exec",
             Self::OpenbsdUnveil => "OpenBSD unveil",
             Self::Unconfined => "No OS sandbox",
+        }
+    }
+
+    /// Legacy tool receipt spelling, projected from the selected mechanism.
+    pub fn process_kind(self) -> &'static str {
+        match self {
+            Self::LinuxLandlock => "landlock",
+            Self::LinuxBubblewrap => "bubblewrap",
+            Self::MacosSandboxExec => "sandbox-exec",
+            Self::OpenbsdUnveil => "unveil",
+            Self::Unconfined => "none",
         }
     }
 }
@@ -529,8 +544,8 @@ pub struct SandboxMechanismUnavailable {
     /// this to its own name; it must not be echoed as advice.
     pub profile: SandboxProfile,
     pub requirement: SandboxRequirement,
-    /// For [`SandboxMechanismAvailability::DoesNotConfine`], the dimensions the
-    /// profile requires and the mechanism does not hold. Empty otherwise.
+    /// Required dimensions the mechanism does not hold. An absent backend may
+    /// name every required dimension; older producers leave that list empty.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub unconfined: Vec<ConfinementDimension>,
 }

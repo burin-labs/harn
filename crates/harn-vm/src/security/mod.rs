@@ -41,7 +41,10 @@ pub mod stance_judge;
 
 pub use ambient::current_policy;
 pub(crate) use ambient::swap_security_policy_stack;
-pub use environment_policy::{lookup_env, resolve_env, resolve_env_for_command, ENV_ALLOWLIST};
+pub use environment_policy::{
+    is_trusted_setup_control, lookup_env, resolve_env, resolve_env_for_command,
+    validate_process_environment, ProcessEnvironmentBoundary, ENV_ALLOWLIST,
+};
 pub use exfil_precision::{
     args_target_endpoints, destination_is_untrusted_originated, extract_endpoints,
     precise_exfil_gate_fires,

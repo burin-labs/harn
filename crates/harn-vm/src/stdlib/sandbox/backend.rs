@@ -18,7 +18,7 @@ pub mod conformance;
 /// child process. Callers use the module-level spawn functions, not this trait.
 pub(crate) trait SandboxBackend {
     fn name() -> &'static str;
-    fn filesystem_mechanism() -> &'static str;
+    fn filesystem_mechanism() -> SandboxMechanism;
 
     /// Filesystem availability is narrower than composite backend availability.
     fn filesystem_available() -> bool {
@@ -52,6 +52,7 @@ pub(crate) trait SandboxBackend {
     ) -> Result<Output, VmError> {
         let mut command = build_std_command::<Self>(program, args, policy, profile)?;
         apply_process_config(&mut command, config, Some(policy));
+        super::launch_environment::validate_for_policy(&command, config.closed_env, Some(policy))?;
         crate::op_interrupt::capture_output_interruptible(&mut command)
             .map_err(|error| process_spawn_error(&error).unwrap_or_else(|| spawn_error(error)))
     }
@@ -68,6 +69,7 @@ pub(crate) trait SandboxBackend {
     ) -> Result<(Output, u32), VmError> {
         let mut command = build_std_command::<Self>(program, args, policy, profile)?;
         apply_process_config(&mut command, config, Some(policy));
+        super::launch_environment::validate_for_policy(&command, config.closed_env, Some(policy))?;
         crate::op_interrupt::capture_output_interruptible_in_session(&mut command)
             .map_err(|error| process_spawn_error(&error).unwrap_or_else(|| spawn_error(error)))
     }
@@ -76,6 +78,12 @@ pub(crate) trait SandboxBackend {
 /// Whether a backend prepared the original command or a wrapper invocation.
 pub(crate) enum PrepareOutcome {
     Direct,
+    #[cfg(target_os = "linux")]
+    BubblewrapExec {
+        wrapper: String,
+        args: Vec<String>,
+        descriptors: super::linux::DescriptorTransfer,
+    },
     #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     WrappedExec {
         wrapper: String,
@@ -143,8 +151,8 @@ impl SandboxBackend for UnconfinedBackend {
     fn name() -> &'static str {
         "unconfined"
     }
-    fn filesystem_mechanism() -> &'static str {
-        SandboxMechanism::Unconfined.as_str()
+    fn filesystem_mechanism() -> SandboxMechanism {
+        SandboxMechanism::Unconfined
     }
     fn available() -> bool {
         false
@@ -174,6 +182,10 @@ pub fn active_backend_name() -> &'static str {
 }
 
 pub fn active_backend_filesystem_mechanism() -> &'static str {
+    active_backend_mechanism().as_str()
+}
+
+pub fn active_backend_mechanism() -> SandboxMechanism {
     ActiveBackend::filesystem_mechanism()
 }
 

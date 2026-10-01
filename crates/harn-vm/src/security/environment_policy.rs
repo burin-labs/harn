@@ -30,10 +30,62 @@
 //! addition fails `cargo test`.
 
 use std::collections::BTreeMap;
+use std::ffi::{OsStr, OsString};
 
 use super::session_environment::{
     EnvironmentPolicyError, EnvironmentPolicyKind, SessionEnvironment,
 };
+
+/// A payload may configure its loader after confinement. A trusted setup
+/// executable must reach its confinement code before loader controls fire.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ProcessEnvironmentBoundary {
+    Payload,
+    TrustedSetup,
+}
+
+/// Linux dynamic-loader controls are one environment namespace. Their effect
+/// precedes a trusted executable's entry point, including diagnostic exits.
+pub fn is_trusted_setup_control(name: &OsStr) -> bool {
+    name.as_encoded_bytes().starts_with(b"LD_")
+}
+
+/// Validate the effective launch environment without changing payload grants.
+/// The caller supplies no inherited entries after `env_clear`; explicit
+/// removals and replacements are composed last, exactly as at exec.
+pub fn validate_process_environment(
+    boundary: ProcessEnvironmentBoundary,
+    inherited: impl IntoIterator<Item = (OsString, OsString)>,
+    explicit: impl IntoIterator<Item = (OsString, Option<OsString>)>,
+) -> Result<(), EnvironmentPolicyError> {
+    if boundary == ProcessEnvironmentBoundary::Payload {
+        return Ok(());
+    }
+    // Only loader controls need inspection; ordinary grant values are never
+    // retained by this validator or included in a diagnostic.
+    let mut controls: BTreeMap<_, _> = inherited
+        .into_iter()
+        .filter(|(name, _)| is_trusted_setup_control(name))
+        .collect();
+    for (name, value) in explicit {
+        if !is_trusted_setup_control(&name) {
+            continue;
+        }
+        if let Some(value) = value {
+            controls.insert(name, value);
+        } else {
+            controls.remove(&name);
+        }
+    }
+    for (name, value) in controls {
+        if !value.is_empty() {
+            return Err(EnvironmentPolicyError::UnsafeTrustedSetupVariable {
+                variable: name.to_string_lossy().into_owned(),
+            });
+        }
+    }
+    Ok(())
+}
 
 /// POSIX/shell/locale essentials any build or test process needs to run at all.
 /// These are workspace/user facts, never credentials.
@@ -370,6 +422,62 @@ pub fn lookup_env(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn trusted_setup_validates_inherited_and_explicit_loader_controls() {
+        let inherited = vec![(OsString::from("LD_BIND_NOW"), OsString::from("1"))];
+        let explicit = vec![(
+            OsString::from("LD_TRACE_LOADED_OBJECTS"),
+            Some(OsString::from("1")),
+        )];
+        for (parent, overlay, expected) in [
+            (inherited.clone(), vec![], "LD_BIND_NOW"),
+            (vec![], explicit.clone(), "LD_TRACE_LOADED_OBJECTS"),
+        ] {
+            assert_eq!(
+                validate_process_environment(
+                    ProcessEnvironmentBoundary::TrustedSetup,
+                    parent,
+                    overlay
+                ),
+                Err(EnvironmentPolicyError::UnsafeTrustedSetupVariable {
+                    variable: expected.into()
+                })
+            );
+        }
+        // Payload grants retain their meaning when confinement precedes exec.
+        assert_eq!(
+            validate_process_environment(ProcessEnvironmentBoundary::Payload, inherited, explicit),
+            Ok(())
+        );
+    }
+
+    #[test]
+    fn trusted_setup_honors_clear_removal_and_empty_override() {
+        let inherited = vec![(OsString::from("LD_BIND_NOW"), OsString::from("1"))];
+        for replacement in [None, Some(OsString::new())] {
+            assert_eq!(
+                validate_process_environment(
+                    ProcessEnvironmentBoundary::TrustedSetup,
+                    inherited.clone(),
+                    [(OsString::from("LD_BIND_NOW"), replacement)]
+                ),
+                Ok(())
+            );
+        }
+        // env_clear supplies no inherited entries. Ordinary grants survive.
+        assert_eq!(
+            validate_process_environment(
+                ProcessEnvironmentBoundary::TrustedSetup,
+                [],
+                [(
+                    OsString::from("ORDINARY_PROBE"),
+                    Some(OsString::from("admitted"))
+                )]
+            ),
+            Ok(())
+        );
+    }
 
     #[test]
     fn allowlist_admits_the_windows_names_a_child_cannot_start_a_program_without() {

@@ -23,13 +23,19 @@ use std::path::{Path, PathBuf};
 const ALLOWED_RAW_SPAWNS: &[(&str, usize, &str)] = &[
     (
         "harn-vm/src/stdlib/sandbox/command_for.rs",
-        6,
+        7,
         "the funnel: builds the command and closes its environment",
     ),
     (
         "harn-vm/src/stdlib/sandbox/build_command.rs",
-        6,
+        8,
         "the funnel's confined builders; command_for.rs closes their environment",
+    ),
+    (
+        "harn-vm/src/stdlib/sandbox/linux_bwrap.rs",
+        1,
+        "setup-only availability probe; clears the environment and uses absolute programs \
+         without payload grants",
     ),
     (
         "harn-vm/src/stdlib/sandbox/mod.rs",

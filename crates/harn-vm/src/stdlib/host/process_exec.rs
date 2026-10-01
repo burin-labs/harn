@@ -407,8 +407,9 @@ pub(crate) fn build_sandboxed_command(
         &mut launch.env_remove,
         launch.cwd.as_deref(),
     );
-    let mut cmd = crate::process_sandbox::tokio_command_for(&launch.program, &launch.args)
-        .map_err(|error| contextualize_process_error(label, "sandbox setup", error))?;
+    let (mut cmd, session_closed) =
+        crate::process_sandbox::tokio_command_for_with_env_state(&launch.program, &launch.args)
+            .map_err(|error| contextualize_process_error(label, "sandbox setup", error))?;
     if let Some(cwd) = launch.cwd {
         cmd.current_dir(cwd);
     }
@@ -421,6 +422,8 @@ pub(crate) fn build_sandboxed_command(
     for key in launch.env_remove {
         cmd.env_remove(key);
     }
+    let closed = launch.closed_env || session_closed;
+    crate::process_sandbox::validate_command_environment(cmd.as_std(), closed)?;
     Ok(cmd)
 }
 

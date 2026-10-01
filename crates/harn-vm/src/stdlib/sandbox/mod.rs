@@ -62,7 +62,7 @@ pub(crate) use build_command::{build_std_command, build_tokio_command};
 mod command_for;
 pub use command_for::{
     session_std_command, session_tokio_command, std_command_for, std_command_for_with_env_state,
-    tokio_command_for,
+    tokio_command_for, tokio_command_for_with_env_state,
 };
 pub mod enforcement;
 use enforcement::ensure_spawn_enforceable;
@@ -74,6 +74,8 @@ mod git_config;
 pub(crate) use git_config::process_sandbox_package_manager_config_read_roots;
 mod handler_env;
 mod introspection;
+mod launch_environment;
+pub use launch_environment::validate_command_environment;
 #[cfg(target_os = "linux")]
 pub(crate) mod linux;
 mod locked_append;
@@ -90,7 +92,8 @@ mod scope_memo;
 use backend::ActiveBackend;
 pub use backend::{
     active_backend_available, active_backend_filesystem_available,
-    active_backend_filesystem_mechanism, active_backend_name, conformance,
+    active_backend_filesystem_mechanism, active_backend_mechanism, active_backend_name,
+    conformance,
 };
 pub(crate) use backend::{PrepareOutcome, SandboxBackend};
 use process_config::apply_rustc_wrapper_decision;
@@ -125,8 +128,6 @@ mod replace;
 /// other backends put theirs in the spawn's argv, which survives on its own.
 #[cfg(target_os = "linux")]
 pub use linux::{decode_seccomp_hex, transferable_confinement, TransferableConfinement};
-#[cfg(target_os = "linux")]
-pub(crate) use refusal::mechanism_skipped_warning;
 pub(crate) use refusal::unavailable;
 pub use refusal::{
     infer_process_sandbox_mechanism, is_process_sandbox_signal, process_violation_error,

@@ -20,21 +20,31 @@ use super::{
     process_sandbox_developer_toolchain_read_roots,
     process_sandbox_package_manager_config_read_roots, process_sandbox_policy_read_roots,
     process_sandbox_policy_write_roots, process_sandbox_presets, process_sandbox_readonly_roots,
-    process_sandbox_roots, sandbox_rejection, warn_once, PrepareOutcome, SandboxBackend,
-    SandboxFallback,
+    process_sandbox_roots, sandbox_rejection, PrepareOutcome, SandboxBackend,
 };
 use crate::orchestration::{CapabilityPolicy, ProcessSandboxPreset, SandboxProfile};
 use crate::value::VmError;
 
 pub(super) struct Backend;
 
+#[path = "linux_descriptors.rs"]
+mod descriptors;
+use crate::process_sandbox::DeviceMountFinalization;
+pub use descriptors::DescriptorTransfer;
+#[path = "linux_bwrap.rs"]
+pub(super) mod bwrap;
+
 impl SandboxBackend for Backend {
     fn name() -> &'static str {
         "linux"
     }
 
-    fn filesystem_mechanism() -> &'static str {
-        "linux_landlock"
+    fn filesystem_mechanism() -> super::SandboxMechanism {
+        if landlock_available() {
+            super::SandboxMechanism::LinuxLandlock
+        } else {
+            super::SandboxMechanism::LinuxBubblewrap
+        }
     }
 
     fn available() -> bool {
@@ -44,7 +54,7 @@ impl SandboxBackend for Backend {
     fn filesystem_available() -> bool {
         // Seccomp may constrain syscalls when Landlock is absent, but it cannot
         // deny an out-of-workspace write or count as filesystem confinement.
-        landlock_abi_version() > 0
+        landlock_available() || bwrap::available()
     }
 
     fn prepare_std_command(
@@ -54,6 +64,9 @@ impl SandboxBackend for Backend {
         policy: &CapabilityPolicy,
         profile: SandboxProfile,
     ) -> Result<PrepareOutcome, VmError> {
+        if !landlock_available() {
+            return bwrap::prepare(program, args, policy, profile);
+        }
         let mut prep = profile_setup(program, policy, profile)?;
         if let Some(launcher) = resolve_netns_launcher(policy)? {
             return Ok(namespaced_outcome(launcher, program, args, &mut prep));
@@ -75,6 +88,9 @@ impl SandboxBackend for Backend {
         policy: &CapabilityPolicy,
         profile: SandboxProfile,
     ) -> Result<PrepareOutcome, VmError> {
+        if !landlock_available() {
+            return bwrap::prepare(program, args, policy, profile);
+        }
         let mut prep = profile_setup(program, policy, profile)?;
         if let Some(launcher) = resolve_netns_launcher(policy)? {
             return Ok(namespaced_outcome(launcher, program, args, &mut prep));
@@ -96,7 +112,12 @@ struct ProcessProfile {
 
 struct LandlockProfile {
     ruleset_fd: libc::c_int,
-    rules: Vec<LandlockRule>,
+    filesystem: FilesystemProfile,
+}
+
+struct FilesystemProfile {
+    rules: Vec<FilesystemRule>,
+    symlinks: std::collections::BTreeMap<PathBuf, PathBuf>,
     handled_access_fs: u64,
     /// Subtrees no grant may cover. Landlock has no deny rule, so this is
     /// enforced by never granting a path that contains one; see
@@ -104,9 +125,15 @@ struct LandlockProfile {
     read_deny_roots: Vec<PathBuf>,
 }
 
-struct LandlockRule {
+struct FilesystemRule {
     file: std::fs::File,
+    path: PathBuf,
     allowed_access: u64,
+}
+
+enum ProcessFilesystemScope {
+    Host,
+    PrivatePidNamespace,
 }
 
 impl Drop for LandlockProfile {
@@ -262,6 +289,8 @@ fn confirm_filesystem_boundary_holds() -> io::Result<()> {
 /// same answer [`super::std_command_for`] acts on. It is NOT "confinement was
 /// requested and could not be built": that is an error, and it is returned as
 /// one, so a caller can never mistake a refusal for an absent request.
+/// This Landlock-specific handover refuses when Landlock is unavailable;
+/// bubblewrap's mount descriptors travel through `command_for_reexec`.
 pub fn transferable_confinement(program: &str) -> Result<Option<TransferableConfinement>, VmError> {
     let Some((policy, profile)) = super::active_sandbox_policy() else {
         return Ok(None);
@@ -304,20 +333,16 @@ fn profile_setup(
     // bind, listen, accept — which is all a build server needs to talk to
     // itself. `unix_socket_local_ipc_grant` owns that decision; the seccomp
     // and Landlock terms below both read it so they cannot disagree.
-    // landlock_profile() returns Err under OsHardened when Landlock is
-    // unavailable (effective_fallback resolves to Enforce), so the
-    // OsHardened "must engage" contract is enforced before fork rather
-    // than racing the pre_exec callback.
+    // The selected Landlock renderer must attach a filesystem boundary; it
+    // cannot return a seccomp-only profile when that mechanism is unavailable.
     let landlock = landlock_profile(program, policy, profile)?;
-    if let Some(landlock) = landlock.as_ref() {
-        add_landlock_rules(landlock).map_err(|error| {
-            sandbox_rejection(format!(
-                "failed to populate the Linux Landlock ruleset: {error}"
-            ))
-        })?;
-    }
+    add_landlock_rules(&landlock).map_err(|error| {
+        sandbox_rejection(format!(
+            "failed to populate the Linux Landlock ruleset: {error}"
+        ))
+    })?;
     Ok(ProcessProfile {
-        landlock,
+        landlock: Some(landlock),
         seccomp: compile_seccomp_program(policy)?,
     })
 }
@@ -352,28 +377,15 @@ fn landlock_profile(
     program: &str,
     policy: &CapabilityPolicy,
     profile: SandboxProfile,
-) -> Result<Option<LandlockProfile>, VmError> {
+) -> Result<LandlockProfile, VmError> {
     let abi = landlock_abi_version();
-    if abi == 0 {
-        return match super::effective_fallback(profile) {
-            SandboxFallback::Enforce => Err(super::SandboxMechanismUnavailable::new(
-                super::SandboxMechanism::LinuxLandlock,
-                super::SandboxMechanismAvailability::AbsentOnHost,
-                profile,
-            )
-            .into_error()),
-            SandboxFallback::Warn => {
-                warn_once(
-                    "handler_sandbox_linux_landlock_unavailable",
-                    &super::mechanism_skipped_warning(
-                        super::SandboxMechanism::LinuxLandlock,
-                        super::SandboxMechanismAvailability::AbsentOnHost,
-                    ),
-                );
-                Ok(None)
-            }
-            SandboxFallback::Off => Ok(None),
-        };
+    if !landlock_available() {
+        return Err(super::SandboxMechanismUnavailable::new(
+            super::SandboxMechanism::LinuxLandlock,
+            super::SandboxMechanismAvailability::AbsentOnHost,
+            profile,
+        )
+        .into_error());
     }
 
     let handled_access_fs = landlock_handled_access(abi);
@@ -424,7 +436,33 @@ fn landlock_profile(
 
     let mut profile = LandlockProfile {
         ruleset_fd,
+        filesystem: FilesystemProfile {
+            rules: Vec::new(),
+            symlinks: std::collections::BTreeMap::new(),
+            handled_access_fs,
+            read_deny_roots: Vec::new(),
+        },
+    };
+    profile.filesystem = filesystem_profile(
+        program,
+        policy,
+        handled_access_fs,
+        ProcessFilesystemScope::Host,
+    )?;
+    Ok(profile)
+}
+
+/// Both filesystem renderers consume this one normalized, opened grant set.
+/// Credential subtraction and optional-root handling cannot drift by backend.
+fn filesystem_profile(
+    program: &str,
+    policy: &CapabilityPolicy,
+    handled_access_fs: u64,
+    process_scope: ProcessFilesystemScope,
+) -> Result<FilesystemProfile, VmError> {
+    let mut profile = FilesystemProfile {
         rules: Vec::new(),
+        symlinks: std::collections::BTreeMap::new(),
         handled_access_fs,
         read_deny_roots: super::process_sandbox_read_deny_roots(policy),
     };
@@ -453,7 +491,9 @@ fn landlock_profile(
         // lets a task inspect its neighbours the grant would hand the child
         // every process of its uid instead of its own. That is a different
         // grant from the one the field describes, so it is not issued.
-        if !proc_runtime_reads_are_contained() {
+        if matches!(process_scope, ProcessFilesystemScope::Host)
+            && !proc_runtime_reads_are_contained()
+        {
             return Err(sandbox_rejection(
                 "process self-introspection needs a kernel that keeps a sandboxed task from inspecting its neighbours; this host permits it, so the grant would widen past the process it names"
                     .to_string(),
@@ -476,7 +516,9 @@ fn landlock_profile(
             LANDLOCK_ACCESS_FS_READ_FILE | LANDLOCK_ACCESS_FS_READ_DIR,
             true,
         )?;
-    } else if proc_runtime_reads_are_contained() {
+    } else if proc_runtime_reads_are_contained()
+        || matches!(process_scope, ProcessFilesystemScope::PrivatePidNamespace)
+    {
         // Some language runtimes (notably Swift on Linux) discover argv by
         // reading their own memory map. A rule for `/proc/self/maps` cannot
         // cover grandchildren: Landlock resolves it to the immediate child's
@@ -570,7 +612,7 @@ fn landlock_profile(
             )?;
         }
     }
-    Ok(Some(profile))
+    Ok(profile)
 }
 
 fn system_read_roots() -> Vec<PathBuf> {
@@ -702,7 +744,7 @@ fn expand_around_denied(root: &Path, denied: &[PathBuf]) -> Result<Vec<PathBuf>,
                         io::ErrorKind::NotFound | io::ErrorKind::PermissionDenied
                     ) =>
                 {
-                    break
+                    break;
                 }
                 Err(error) => {
                     return Err(sandbox_rejection(format!(
@@ -763,29 +805,45 @@ fn expand_around_denied(root: &Path, denied: &[PathBuf]) -> Result<Vec<PathBuf>,
 const MAX_DENY_EXPANSION_RULES: usize = 4096;
 
 fn push_rule(
-    profile: &mut LandlockProfile,
+    profile: &mut FilesystemProfile,
     path: PathBuf,
     allowed_access: u64,
     optional: bool,
 ) -> Result<(), VmError> {
-    let path = super::normalize_for_policy(&path);
-    // Every Landlock grant funnels through here, so the subtraction lives here
-    // too: no call site can add a root and forget to exclude the denylist.
-    if !profile.read_deny_roots.is_empty() {
-        let deny_roots = profile.read_deny_roots.clone();
-        let expanded = expand_around_denied(&path, &deny_roots)?;
-        if expanded.len() != 1 || expanded[0] != path {
-            for replacement in expanded {
-                push_rule_exact(profile, replacement, allowed_access, true)?;
+    let mut pending = vec![(path, optional)];
+    let mut observed = std::collections::BTreeSet::new();
+    while let Some((path, optional)) = pending.pop() {
+        // Snapshot aliases for the mount renderer before normalizing. They
+        // expose only targets mounted from admitted handles, never host data.
+        for ancestor in path.ancestors() {
+            if let Ok(target) = std::fs::read_link(ancestor) {
+                profile.symlinks.insert(ancestor.to_path_buf(), target);
             }
-            return Ok(());
+        }
+        let path = super::normalize_for_policy(&path);
+        if !observed.insert(path.clone()) {
+            continue;
+        }
+        if observed.len() > MAX_DENY_EXPANSION_RULES {
+            return Err(sandbox_rejection(
+                "credential subtraction exceeded its grant expansion ceiling".into(),
+            ));
+        }
+        // Expanded siblings can themselves be aliases to denied paths, or
+        // back to a previously expanded root. Normalize and subtract every
+        // candidate, with a visited set so aliases cannot recurse forever.
+        let expanded = expand_around_denied(&path, &profile.read_deny_roots)?;
+        if expanded.len() == 1 && expanded[0] == path {
+            push_rule_exact(profile, path, allowed_access, optional)?;
+        } else {
+            pending.extend(expanded.into_iter().map(|path| (path, true)));
         }
     }
-    push_rule_exact(profile, path, allowed_access, optional)
+    Ok(())
 }
 
 fn push_rule_exact(
-    profile: &mut LandlockProfile,
+    profile: &mut FilesystemProfile,
     path: PathBuf,
     allowed_access: u64,
     optional: bool,
@@ -837,6 +895,22 @@ fn push_rule_exact(
             )));
         }
     };
+    // A symlink or ancestor changed between normalization and open. The
+    // descriptor is already pinned, so check its actual target before it can
+    // become authority instead of granting a substituted denied inode.
+    let opened_path =
+        std::fs::read_link(format!("/proc/self/fd/{}", file.as_raw_fd())).map_err(|error| {
+            sandbox_rejection(format!(
+                "cannot identify pinned sandbox grant {}: {error}",
+                path.display()
+            ))
+        })?;
+    if opened_path != path {
+        return Err(sandbox_rejection(format!(
+            "sandbox grant {} changed during preparation",
+            path.display()
+        )));
+    }
     // Landlock rejects (EINVAL) a PATH_BENEATH rule whose `parent_fd`
     // points at a non-directory file but whose `allowed_access` carries
     // directory-only rights (READ_DIR, the MAKE_*/REMOVE_* family,
@@ -853,8 +927,9 @@ fn push_rule_exact(
     } else {
         allowed_access & !DIRECTORY_ONLY_ACCESS_FS
     };
-    profile.rules.push(LandlockRule {
+    profile.rules.push(FilesystemRule {
         file,
+        path,
         allowed_access: allowed_access & profile.handled_access_fs,
     });
     Ok(())
@@ -868,7 +943,7 @@ fn push_rule_exact(
 /// a descriptor alone can carry, which is what lets a confinement survive being
 /// handed to another process (see [`transferable_confinement`]).
 fn add_landlock_rules(profile: &LandlockProfile) -> io::Result<()> {
-    for rule in &profile.rules {
+    for rule in &profile.filesystem.rules {
         let path_beneath = LandlockPathBeneathAttr {
             allowed_access: rule.allowed_access,
             parent_fd: rule.file.as_raw_fd(),
@@ -1353,6 +1428,64 @@ fn landlock_abi_version() -> u32 {
     } else {
         result as u32
     }
+}
+
+/// Advertise Landlock only after its current permission vocabulary and an
+/// actual child restriction hold. ABI presence alone is not enforcement.
+pub(super) fn landlock_available() -> bool {
+    static AVAILABLE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *AVAILABLE.get_or_init(|| {
+        let abi = landlock_abi_version();
+        if abi < LANDLOCK_ABI_SCOPED || std::fs::File::open("/").is_err() {
+            return false;
+        }
+        let attr = LandlockRulesetAttr {
+            handled_access_fs: landlock_handled_access(abi),
+            handled_access_net: 0,
+            scoped: 0,
+        };
+        let ruleset = unsafe {
+            libc::syscall(
+                libc::SYS_landlock_create_ruleset,
+                &raw const attr,
+                std::mem::size_of::<u64>(),
+                0,
+            ) as libc::c_int
+        };
+        if ruleset < 0 {
+            return false;
+        }
+        let ruleset = unsafe { OwnedFd::from_raw_fd(ruleset) };
+        // The child runs only raw async-signal-safe syscalls and _exit. No
+        // Rust allocator, destructor, callback, or ambient policy is touched.
+        let child = unsafe { libc::fork() };
+        if child == 0 {
+            let confined = unsafe {
+                libc::prctl(libc::PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) == 0
+                    && libc::syscall(libc::SYS_landlock_restrict_self, ruleset.as_raw_fd(), 0) == 0
+            };
+            let root = if confined {
+                unsafe { libc::open(c"/".as_ptr(), libc::O_RDONLY | libc::O_DIRECTORY) }
+            } else {
+                0
+            };
+            unsafe { libc::_exit(i32::from(!(confined && root < 0))) };
+        }
+        if child < 0 {
+            return false;
+        }
+        let mut status = 0;
+        loop {
+            let waited = unsafe { libc::waitpid(child, &raw mut status, 0) };
+            if waited == child {
+                return libc::WIFEXITED(status) && libc::WEXITSTATUS(status) == 0;
+            }
+            if waited < 0 && std::io::Error::last_os_error().kind() == io::ErrorKind::Interrupted {
+                continue;
+            }
+            return false;
+        }
+    })
 }
 
 fn landlock_handled_access(abi: u32) -> u64 {

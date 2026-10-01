@@ -3,7 +3,7 @@
 //! (`super::*` still resolves to `linux.rs`), so nothing about scope moved.
 
 use super::*;
-use crate::stdlib::sandbox::{effective_fallback, handler_sandbox_test_guard};
+use crate::stdlib::sandbox::{effective_fallback, handler_sandbox_test_guard, SandboxFallback};
 
 const WRITE_BITS: u64 = LANDLOCK_ACCESS_FS_WRITE_FILE
     | LANDLOCK_ACCESS_FS_REMOVE_DIR
@@ -42,7 +42,7 @@ enum LiveLandlock {
 
 impl LiveLandlock {
     fn probe() -> Self {
-        if landlock_abi_version() == 0 {
+        if !landlock_available() {
             return Self::AbsentOnHost;
         }
         // A worktree-profile run consults the selector, and `off` produces no
@@ -232,9 +232,9 @@ fn no_network_excludes_addressable_sockets_but_allows_local_socketpair() {
         libc::SYS_sendto,
     ] {
         assert!(
-                allowed.contains(&call),
-                "send/recv syscall {call} must be allowlisted — local socketpair IPC (Cargo jobserver) needs it",
-            );
+            allowed.contains(&call),
+            "send/recv syscall {call} must be allowlisted — local socketpair IPC (Cargo jobserver) needs it",
+        );
     }
     // The egress-capable openers stay absent: no addressable socket can be
     // created or routed, so the inherited-fd send/recv calls cannot reach the network.
@@ -552,7 +552,12 @@ fn process_self_introspection_refuses_a_host_that_cannot_contain_it() {
     let refusal = landlock_profile("/bin/ls", &policy, SandboxProfile::Worktree)
         .err()
         .map(|error| format!("{error:?}"));
-    if proc_runtime_reads_are_contained() {
+    if !landlock_available() {
+        assert!(
+            refusal.is_some(),
+            "the Landlock renderer must refuse an unavailable boundary"
+        );
+    } else if proc_runtime_reads_are_contained() {
         assert!(
             refusal.is_none(),
             "a containing host must render the grant rather than refuse it: {refusal:?}",
@@ -1310,9 +1315,9 @@ fn an_unreadable_optional_root_is_skipped_and_a_required_one_still_fails() {
     std::fs::create_dir_all(&locked).expect("mkdir");
     std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).expect("lock");
 
-    let mut profile = LandlockProfile {
-        ruleset_fd: -1,
+    let mut profile = FilesystemProfile {
         rules: Vec::new(),
+        symlinks: std::collections::BTreeMap::new(),
         handled_access_fs: 0,
         read_deny_roots: Vec::new(),
     };
