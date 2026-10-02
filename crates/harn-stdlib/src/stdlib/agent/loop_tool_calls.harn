@@ -410,6 +410,9 @@ pub fn __tool_lifecycle_session_id(envelope: dict) -> string {
  * `intent` is the batch's declared purpose label (`_purpose_label` on the
  * dispatch options). The host boundary normalizes it and drops a blank one,
  * the same way dispatch does for the approval request.
+ *
+ * @effects: [agent]
+ * @errors: []
  */
 pub fn __emit_tool_lifecycle_start(agent: HarnessAgent, envelope: dict, intent: string = "") {
   const session_id = __tool_lifecycle_session_id(envelope)
