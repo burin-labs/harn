@@ -108,13 +108,18 @@ runner_capacity_decision() {
   # each owned host leaves the job at least twice the compilers it would get
   # on a fully busy one. A census without the breakdown keeps the pool rule.
   local hosts saturated
-  hosts=$(jq -c --arg pool "$pool" '.[$pool].hosts // empty' <<< "$capacity")
-  if [[ -n $hosts ]]; then
-    if ! jq -e 'type == "object" and all(.[]; (.online | type == "number")
-        and (.busy | type == "number") and (.idle_big | type == "number"))' \
+  if jq -e --arg pool "$pool" '.[$pool] | has("hosts")' <<< "$capacity" >/dev/null; then
+    hosts=$(jq -c --arg pool "$pool" '.[$pool].hosts' <<< "$capacity")
+    if ! jq -e --arg idle "$idle" 'def count: type == "number" and . >= 0 and floor == .;
+        type == "object" and length > 0 and all(.[];
+          type == "object" and (.online | count) and (.busy | count)
+          and .online > 0 and (.idle_big | count) and .busy <= .online
+          and .idle_big <= (.online - .busy))
+        and (if ($idle | test("^[0-9]+$"))
+          then ([.[].idle_big] | add) == ($idle | tonumber) else true end)' \
         <<< "$hosts" > /dev/null 2>&1; then
       runner_capacity_fallback capacity_hosts_unreadable "$event" \
-        "pool=$pool carriers=$online idle=$idle"
+        "pool=$pool carriers=$online idle=$idle host_counts=unmeasured"
       return 0
     fi
     saturated=$(jq -r '[to_entries[] | select(.value.idle_big > 0)
