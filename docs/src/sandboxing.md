@@ -614,11 +614,13 @@ with the user's full authority.
 
 - From the CLI, pass `--confine-workspace <path>` to `harn serve acp` (stdio
   only).
-- From Rust, call `harn_serve::confine_acp_server_process(&sandbox,
-  &AcpServerConfinement { workspace_roots, state_roots })` before
-  `run_acp_server`. `sandbox` is the same `AcpSandboxConfig` the server's
-  sessions use. `state_roots` names the embedder's own directories outside
-  the workspace that the server writes. It returns `Ok(None)` without
+- From Rust, build the `AcpServerConfig`, then call
+  `harn_serve::confine_acp_server_process(&config, &AcpServerConfinement {
+  workspace_roots, state_roots })` before `run_acp_server`. The profile comes
+  from `config.sandbox`, the same config the server's sessions use.
+  `state_roots` names the embedder's own directories outside the workspace
+  that the server writes. Harn adds read access to the served pipeline's
+  package and the installed package cache. It returns `Ok(None)` without
   confining when the requested profile confines no process, such as
   `unrestricted`.
 - The primitive underneath is

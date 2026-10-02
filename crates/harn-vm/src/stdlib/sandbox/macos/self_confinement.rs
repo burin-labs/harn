@@ -35,7 +35,7 @@ pub(super) fn confine(policy: &CapabilityPolicy) -> Result<(), VmError> {
         .map_err(|_| sandbox_rejection("the rendered profile contains a NUL byte".to_string()))?;
     let mut error: *mut c_char = std::ptr::null_mut();
     // Flags 0: `profile` is profile source, not the name of a built-in one.
-    let status = unsafe { sandbox_init(profile.as_ptr(), 0, &mut error) };
+    let status = unsafe { sandbox_init(profile.as_ptr(), 0, &raw mut error) };
     if status != 0 {
         let reason = if error.is_null() {
             "no reason given".to_string()
