@@ -100,6 +100,31 @@ runner_capacity_decision() {
     echo "${CAPACITY_LABEL} event=$event route=hosted reason=pool_fully_busy pool=$pool carriers=$online idle=0"
     return 0
   fi
+  # An idle carrier is not a compile budget. A job's share of its host shrinks
+  # with every job already running there, and GitHub hands the job to any
+  # idle carrier in the pool, not to the quietest host. So when the census
+  # breaks the pool down by host, every host that could receive the job must
+  # have room: with the job added, at most half its runners busy, which on
+  # each owned host leaves the job at least twice the compilers it would get
+  # on a fully busy one. A census without the breakdown keeps the pool rule.
+  local hosts saturated
+  hosts=$(jq -c --arg pool "$pool" '.[$pool].hosts // empty' <<< "$capacity")
+  if [[ -n $hosts ]]; then
+    if ! jq -e 'type == "object" and all(.[]; (.online | type == "number")
+        and (.busy | type == "number") and (.idle_big | type == "number"))' \
+        <<< "$hosts" > /dev/null 2>&1; then
+      runner_capacity_fallback capacity_hosts_unreadable "$event" \
+        "pool=$pool carriers=$online idle=$idle"
+      return 0
+    fi
+    saturated=$(jq -r '[to_entries[] | select(.value.idle_big > 0)
+      | select((.value.busy + 1) * 2 > .value.online)
+      | "\(.key):\(.value.busy)/\(.value.online)"] | join(",")' <<< "$hosts")
+    if [[ -n $saturated ]]; then
+      echo "${CAPACITY_LABEL} event=$event route=hosted reason=owned_hosts_saturated pool=$pool carriers=$online idle=$idle busy_hosts=$saturated"
+      return 0
+    fi
+  fi
   echo "${CAPACITY_LABEL} event=$event route=owned pool=$pool carriers=$online idle=$idle"
 }
 

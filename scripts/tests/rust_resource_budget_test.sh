@@ -184,4 +184,32 @@ fi
 grep -qx '::error::E2E_RESOURCE_BUDGET_UNMEASURED reason=memory_census_empty cpu_cores=3 online_local_runners=unmeasured memory_mb=unmeasured hw_memsize=absent' "$diagnostic"
 unset -f nproc uname sysctl
 
-echo 'Rust resource budget: CPU, memory, profile ceilings, hosted Linux and macOS decisions, macOS census, removal, retired-pool, empty and failed census controls passed'
+# The owned host behind run 36987728246: 24 cores, each runner under a
+# 400% CPU quota (so nproc reads 4), 62906 MB, six listeners, two of them
+# running jobs. The old reading divided the quota by all six listeners and
+# answered one compiler; the allotment is already this job's share, and the
+# memory divides by the two running jobs.
+[[ $(rust_resource_budget "$policy" 4 6 producer 62906 2>/dev/null) == $'build_jobs=1\ntest_threads=1' ]]
+[[ $(rust_resource_budget "$policy" 4 2 producer 62906 true 2>/dev/null) == $'build_jobs=4\ntest_threads=4' ]]
+# Saturated: all six running, memory binds the allotment back down.
+[[ $(rust_resource_budget "$policy" 4 6 producer 62906 true 2>/dev/null) == $'build_jobs=1\ntest_threads=4' ]]
+
+# Running jobs are counted from Runner.Worker processes, never above the
+# listeners, and an unseen worker falls back to the listener count by name.
+ps() { printf 'Runner.Listener\nRunner.Listener\nRunner.Worker\nsshd\n'; }
+[[ $(running_local_jobs 2) == 1 ]]
+ps() { printf 'Runner.Worker\nRunner.Worker\nRunner.Worker\n'; }
+[[ $(running_local_jobs 2) == 2 ]]
+ps() { printf 'Runner.Listener\nsshd\n'; }
+[[ $(running_local_jobs 6 2>"$diagnostic") == 6 ]]
+grep -q 'RUST_RESOURCE_BUDGET_WORKERS_UNSEEN listeners=6' "$diagnostic"
+unset -f ps
+
+# The allotment is read against the host's processor count.
+uname() { echo Linux; }
+nproc() { [[ "${1:-}" == --all ]] && echo 24 || echo 4; }
+cpu_is_allotment 4
+! cpu_is_allotment 24
+unset -f uname nproc
+
+echo 'Rust resource budget: CPU, memory, profile ceilings, hosted Linux and macOS decisions, macOS census, removal, retired-pool, empty and failed census, CPU allotment and running-job controls passed'
