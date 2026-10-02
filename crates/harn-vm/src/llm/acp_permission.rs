@@ -101,6 +101,19 @@ pub(crate) fn request_params(
     if let (Some(descriptor), Some(obj)) = (tool_descriptor, harn_meta.as_object_mut()) {
         obj.insert("toolDescriptor".to_string(), descriptor);
     }
+    // The tool author's declaration of what the call will run, for a tool whose
+    // `rawInput` cannot say (a no-argument `verify`, `run({intent})`). Hosts
+    // read it here structurally; `content` carries a text rendering for hosts
+    // that only show canonical ACP content.
+    if let (Some(preview), Some(obj)) = (
+        approval_preview(&approval_request),
+        harn_meta.as_object_mut(),
+    ) {
+        obj.insert(
+            "approvalPreview".to_string(),
+            serde_json::to_value(preview).unwrap_or(JsonValue::Null),
+        );
+    }
     let content = permission_content(&approval_request);
     let locations = permission_locations(&approval_request);
     let mut tool_call = json!({
@@ -129,11 +142,7 @@ pub(crate) fn request_params(
 }
 
 fn permission_locations(approval_request: &JsonValue) -> Vec<JsonValue> {
-    approval_request
-        .get("evidence_refs")
-        .and_then(JsonValue::as_array)
-        .into_iter()
-        .flatten()
+    evidence_refs(approval_request)
         .filter(|evidence| {
             evidence.get("kind").and_then(JsonValue::as_str) == Some("file_mutation_diff")
         })
@@ -145,12 +154,35 @@ fn permission_locations(approval_request: &JsonValue) -> Vec<JsonValue> {
         .collect()
 }
 
-fn permission_content(approval_request: &JsonValue) -> Vec<JsonValue> {
+fn evidence_refs(approval_request: &JsonValue) -> impl Iterator<Item = &JsonValue> {
     approval_request
         .get("evidence_refs")
         .and_then(JsonValue::as_array)
         .into_iter()
         .flatten()
+}
+
+fn approval_preview(
+    approval_request: &JsonValue,
+) -> Option<crate::llm::approval_preview::ToolApprovalPreview> {
+    evidence_refs(approval_request)
+        .find_map(crate::llm::approval_preview::ToolApprovalPreview::from_evidence_ref)
+}
+
+/// Canonical ACP `content` block for a command preview: a text block every
+/// ACP client renders, with the structured record under `_meta.harn`.
+fn command_preview_content(
+    preview: &crate::llm::approval_preview::ToolApprovalPreview,
+) -> JsonValue {
+    json!({
+        "type": "content",
+        "content": {"type": "text", "text": preview.display_text()},
+        "_meta": {"harn": {"approval_preview": preview}},
+    })
+}
+
+fn permission_content(approval_request: &JsonValue) -> Vec<JsonValue> {
+    let diffs = evidence_refs(approval_request)
         .filter(|evidence| evidence.get("kind").and_then(JsonValue::as_str) == Some("file_mutation_diff"))
         .filter_map(|evidence| {
             let path = evidence.get("path")?.as_str()?;
@@ -172,7 +204,9 @@ fn permission_content(approval_request: &JsonValue) -> Vec<JsonValue> {
                     }
                 }
             }))
-        })
+        });
+    diffs
+        .chain(approval_preview(approval_request).map(|preview| command_preview_content(&preview)))
         .collect()
 }
 
@@ -348,6 +382,72 @@ pub(crate) fn parse_response(response: &JsonValue) -> WireOutcome {
 mod tests {
     use super::*;
     use crate::tool_annotations::ToolKind;
+
+    #[test]
+    fn command_preview_evidence_projects_to_text_content_and_structured_meta() {
+        let params = request_params(
+            Some("session-1"),
+            "tool-1",
+            "verify",
+            &json!({}),
+            json!({"id": "tool-1", "evidence_refs": [{
+                "kind": "command_preview",
+                "command": "python3 -m pytest",
+                "cwd": "/repo",
+                "summary": "Runs the project's tests",
+                "source": "approval_preview",
+            }]}),
+            &json!({"decision": "ask"}),
+            None,
+            ToolKind::Execute,
+        );
+        let tool_call = &params["toolCall"];
+        assert_eq!(
+            tool_call["rawInput"],
+            json!({}),
+            "rawInput is never rewritten"
+        );
+        assert_eq!(
+            tool_call["content"],
+            json!([{
+                "type": "content",
+                "content": {
+                    "type": "text",
+                    "text": "Command: python3 -m pytest\nWorking directory: /repo\nRuns the project's tests",
+                },
+                "_meta": {"harn": {"approval_preview": {
+                    "command": "python3 -m pytest",
+                    "cwd": "/repo",
+                    "summary": "Runs the project's tests",
+                }}},
+            }])
+        );
+        assert_eq!(
+            tool_call["_meta"]["harn"]["approvalPreview"],
+            json!({
+                "command": "python3 -m pytest",
+                "cwd": "/repo",
+                "summary": "Runs the project's tests",
+            })
+        );
+        assert!(tool_call.get("locations").is_none());
+
+        // Negative control: no preview evidence, no content and no meta key.
+        let plain = request_params(
+            Some("session-1"),
+            "tool-1",
+            "verify",
+            &json!({}),
+            json!({"id": "tool-1", "evidence_refs": []}),
+            &json!({"decision": "ask"}),
+            None,
+            ToolKind::Execute,
+        );
+        assert!(plain["toolCall"].get("content").is_none());
+        assert!(plain["toolCall"]["_meta"]["harn"]
+            .get("approvalPreview")
+            .is_none());
+    }
 
     #[test]
     fn request_params_carry_canonical_options_and_tool_call() {

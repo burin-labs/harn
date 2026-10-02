@@ -241,7 +241,10 @@ fn tool_list_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
         if let VmValue::Dict(entry) = tool {
             let mut desc = crate::value::DictMap::new();
             for (key, value) in entry.iter() {
-                if matches!(key.as_str(), "handler" | "_call_handler") {
+                if matches!(
+                    key.as_str(),
+                    "handler" | "_call_handler" | crate::llm::approval_preview::CONFIG_KEY
+                ) {
                     continue;
                 }
                 desc.insert(key.clone(), value.clone());
@@ -709,6 +712,13 @@ fn tool_define_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
         }
     }
 
+    // `approval_preview` is copied onto the entry with the other extension
+    // keys below; validate its shape once here, where the author wrote it.
+    crate::llm::approval_preview::validate_config(
+        config.get(crate::llm::approval_preview::CONFIG_KEY),
+        &name,
+    )?;
+
     let declared_schema = input_schema::declared_schema(config, &name)?;
     let output_schema = config
         .get("returns")
@@ -1025,7 +1035,10 @@ fn tool_def_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError
     if let Some(entry) = vm_find_tool_entry(registry, &name) {
         let mut desc = crate::value::DictMap::new();
         for (key, value) in entry.iter() {
-            if matches!(key.as_str(), "handler" | "_call_handler") {
+            if matches!(
+                key.as_str(),
+                "handler" | "_call_handler" | crate::llm::approval_preview::CONFIG_KEY
+            ) {
                 continue;
             }
             desc.insert(key.clone(), value.clone());

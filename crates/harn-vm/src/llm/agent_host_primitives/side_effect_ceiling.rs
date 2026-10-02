@@ -38,10 +38,7 @@ pub(super) struct SideEffectPermissionRequest<'a> {
     pub tool_args: &'a serde_json::Value,
     pub violation: SideEffectCeilingViolation,
     pub reason: String,
-    pub tool_context: (
-        Option<serde_json::Value>,
-        Option<crate::tool_annotations::ToolAnnotations>,
-    ),
+    pub tool_context: super::tool_catalog::PermissionToolContext,
 }
 
 pub(super) async fn review_or_request_side_effect_permission(
@@ -67,11 +64,12 @@ pub(super) async fn review_or_request_side_effect_permission(
     }
     (
         false,
-        request_side_effect_permission(bridge, request, review.evaluation_review).await,
+        request_side_effect_permission(Some(ctx), bridge, request, review.evaluation_review).await,
     )
 }
 
 pub(super) async fn request_side_effect_permission(
+    ctx: Option<&crate::vm::AsyncBuiltinCtx>,
     bridge: Option<&Arc<HostBridge>>,
     request: SideEffectPermissionRequest<'_>,
     evaluation_review: Option<Box<crate::orchestration::DecisionReview>>,
@@ -85,7 +83,6 @@ pub(super) async fn request_side_effect_permission(
         reason,
         tool_context,
     } = request;
-    let (tool_descriptor, tool_annotations) = tool_context;
     let approval_id = if tool_call_id.is_empty() {
         format!("tool_call_{}", uuid::Uuid::now_v7())
     } else {
@@ -122,10 +119,9 @@ pub(super) async fn request_side_effect_permission(
             "side_effect_ceiling": request_details.clone(),
         }),
         requested_capabilities: vec![format!("tool.{tool_name}")],
-        tool_descriptor,
-        tool_annotations,
+        tool_context,
     };
-    match request_host_permission(bridge, request).await {
+    match request_host_permission(ctx, bridge, request).await {
         HostPermissionOutcome::Allowed { .. } => {
             SideEffectPermissionOutcome::Allowed { policy_decision }
         }

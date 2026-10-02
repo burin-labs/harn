@@ -3063,13 +3063,18 @@ pub const HARN_PROMPT_RESULT_EXTENSION_FIELD_TERMINAL: &str = "terminal";
 /// `_meta.harn` extension keys on successful ACP prompt results.
 pub const HARN_PROMPT_RESULT_EXTENSION_FIELDS: &[&str] = &["terminal"];
 
+pub const HARN_CONTENT_EXTENSION_FIELD_APPROVAL_PREVIEW: &str = "approval_preview";
 pub const HARN_CONTENT_EXTENSION_FIELD_PERMISSION_PREVIEW: &str = "permission_preview";
 pub const HARN_CONTENT_EXTENSION_FIELD_VISIBLE_DELTA: &str = "visible_delta";
 pub const HARN_CONTENT_EXTENSION_FIELD_VISIBLE_TEXT: &str = "visible_text";
 
 /// `_meta.harn` extension keys Harn attaches to ACP content.
-pub const HARN_CONTENT_EXTENSION_FIELDS: &[&str] =
-    &["permission_preview", "visible_delta", "visible_text"];
+pub const HARN_CONTENT_EXTENSION_FIELDS: &[&str] = &[
+    "approval_preview",
+    "permission_preview",
+    "visible_delta",
+    "visible_text",
+];
 
 pub const HARN_TOOL_LIFECYCLE_EXTENSION_FIELD_AUDIT: &str = "audit";
 pub const HARN_TOOL_LIFECYCLE_EXTENSION_FIELD_CHANGEDPATHS: &str = "changedPaths";

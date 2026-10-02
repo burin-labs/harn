@@ -250,6 +250,7 @@ async fn side_effect_ceiling_rejection_stays_terminal() {
     ))
     .expect("typed review evidence");
     let outcome = request_side_effect_permission(
+        None,
         Some(&bridge),
         SideEffectPermissionRequest {
             session_id: "side-effect-reject",
@@ -258,7 +259,7 @@ async fn side_effect_ceiling_rejection_stays_terminal() {
             tool_args: &serde_json::json!({"path": "proof.txt"}),
             violation: side_effect_violation(),
             reason: "side effect blocked".to_string(),
-            tool_context: (None, None),
+            tool_context: Default::default(),
         },
         Some(Box::new(review)),
     )
@@ -326,6 +327,7 @@ async fn side_effect_ceiling_transport_failure_stays_terminal() {
         1,
     ));
     let outcome = request_side_effect_permission(
+        None,
         Some(&bridge),
         SideEffectPermissionRequest {
             session_id: "side-effect-transport",
@@ -334,7 +336,7 @@ async fn side_effect_ceiling_transport_failure_stays_terminal() {
             tool_args: &serde_json::json!({"path": "proof.txt"}),
             violation: side_effect_violation(),
             reason: "side effect blocked".to_string(),
-            tool_context: (None, None),
+            tool_context: Default::default(),
         },
         None,
     )

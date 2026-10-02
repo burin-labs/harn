@@ -120,8 +120,12 @@ pub const HARN_TOOL_LIFECYCLE_EXTENSION_FIELDS: &[&str] = &[
     "rawInputPartial",
 ];
 
-pub const HARN_CONTENT_EXTENSION_FIELDS: &[&str] =
-    &["permission_preview", "visible_delta", "visible_text"];
+pub const HARN_CONTENT_EXTENSION_FIELDS: &[&str] = &[
+    "approval_preview",
+    "permission_preview",
+    "visible_delta",
+    "visible_text",
+];
 pub const HARN_PROMPT_RESULT_EXTENSION_FIELDS: &[&str] = &["terminal"];
 pub const HARN_STAGED_WRITES_PENDING_FIELDS: &[&str] =
     &["pendingCount", "totalBytes", "pendingWrites"];

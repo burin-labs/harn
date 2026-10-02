@@ -25,25 +25,32 @@ pub(super) fn annotations_for(
         .or_else(|| crate::orchestration::current_tool_annotations(tool_name))
 }
 
+/// Everything a host permission request needs to know about the tool being
+/// asked about, resolved from the dispatch catalog in one place.
+#[derive(Default)]
+pub(super) struct PermissionToolContext {
+    pub descriptor: Option<serde_json::Value>,
+    pub annotations: Option<crate::tool_annotations::ToolAnnotations>,
+    /// The tool author's `approval_preview` closure, evaluated only when a
+    /// host is actually asked.
+    pub approval_preview: Option<std::sync::Arc<crate::value::VmClosure>>,
+}
+
 pub(super) fn permission_context_for(
     tools_val: Option<&VmValue>,
     tool_name: &str,
-) -> (
-    Option<serde_json::Value>,
-    Option<crate::tool_annotations::ToolAnnotations>,
-) {
-    (
-        descriptor_for(tools_val, tool_name),
-        annotations_for(tools_val, tool_name),
-    )
+) -> PermissionToolContext {
+    PermissionToolContext {
+        descriptor: descriptor_for(tools_val, tool_name),
+        annotations: annotations_for(tools_val, tool_name),
+        approval_preview: entry_for(tools_val, tool_name)
+            .and_then(crate::llm::approval_preview::closure_from_entry),
+    }
 }
 
 /// Resolve a tool's model-visible descriptor plus its rug-pull flag so the
 /// host can render the full tool text at approval time.
-pub(super) fn descriptor_for(
-    tools_val: Option<&VmValue>,
-    tool_name: &str,
-) -> Option<serde_json::Value> {
+fn descriptor_for(tools_val: Option<&VmValue>, tool_name: &str) -> Option<serde_json::Value> {
     let entry = entry_for(tools_val, tool_name)?;
     let mut out = serde_json::Map::new();
     for (source, target) in [
