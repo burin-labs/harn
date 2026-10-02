@@ -1,6 +1,25 @@
 use crate::value::{VmError, VmValue};
 
-use super::super::ExceptionHandler;
+/// Exception handler for try/catch.
+pub(crate) struct ExceptionHandler {
+    pub(crate) catch_ip: usize,
+    pub(crate) stack_depth: usize,
+    pub(crate) frame_depth: usize,
+    pub(crate) env_scope_depth: usize,
+    /// When present, this catch only handles errors whose enum_name matches.
+    pub(crate) error_type: Option<crate::value::HarnStr>,
+}
+
+/// The most recent error delivered to a handler. `finally`/`defer` cleanup
+/// rethrows the value it caught, and a `catch` may `throw` its binding again;
+/// either way the original error and stack trace, not a stringified copy
+/// located at the rethrow, continue to propagate.
+#[derive(Clone)]
+pub(crate) struct CaughtError {
+    pub(crate) value: VmValue,
+    pub(crate) error: VmError,
+    pub(crate) stack_trace: Vec<(String, usize, usize, Option<String>)>,
+}
 
 impl super::super::Vm {
     pub(super) fn execute_throw(&mut self) -> Result<(), VmError> {

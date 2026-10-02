@@ -61,7 +61,8 @@ pub(crate) use task_cleanup::PendingTaskCleanup;
 pub use work::{VmWork, VmWorkRecorder};
 
 pub(crate) use call_args::CallArgs;
+pub(crate) use ops::{CaughtError, ExceptionHandler};
 pub(crate) use state::{
-    CallFrame, CaughtError, ExceptionHandler, InterruptHandler, IterState, LocalSlot, ScopeSpan,
-    TaskScope, VmBuiltinDispatch, VmBuiltinEntry,
+    CallFrame, InterruptHandler, IterState, LocalSlot, ScopeSpan, TaskScope, VmBuiltinDispatch,
+    VmBuiltinEntry,
 };
