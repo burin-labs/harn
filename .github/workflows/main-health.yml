@@ -168,9 +168,19 @@ jobs:
                 --event schedule --branch main --limit 12 \
                 --json databaseId,conclusion \
                 --jq '.[] | select(.conclusion != null and .conclusion != "" and .conclusion != "cancelled") | "\(.databaseId) \(.conclusion)"'
-            )" || runs=""
+            )" || runs="unreadable"
+
+            # A history that could not be read is not an empty history: it
+            # measured nothing, so it is reported with the unknown names rather
+            # than skipped into a green verdict.
+            if [[ "$runs" == "unreadable" ]]; then
+              unknown+=("$suite")
+              echo "| $suite | — | **UNREADABLE — run history request failed** |" >> "$GITHUB_STEP_SUMMARY"
+              continue
+            fi
 
             outcomes=()
+            unreadable=0
             while read -r run_id conclusion; do
               [[ -n "$run_id" ]] || continue
               (( ${#outcomes[@]} < threshold )) || break
@@ -178,12 +188,22 @@ jobs:
                 # A run where the judged job did not run (skipped because main
                 # had not moved) measured nothing; it neither breaks nor extends
                 # a streak.
-                conclusion="$(JOB="$job" gh api "repos/$GH_REPO/actions/runs/$run_id/jobs" \
-                  --jq '[.jobs[] | select(.name == env.JOB and .conclusion != "skipped")][0].conclusion // empty')" || conclusion=""
+                # A failed request is different: it is reported as unreadable.
+                if ! conclusion="$(JOB="$job" gh api "repos/$GH_REPO/actions/runs/$run_id/jobs" \
+                  --jq '[.jobs[] | select(.name == env.JOB and .conclusion != "skipped")][0].conclusion // empty')"; then
+                  unreadable=1
+                  break
+                fi
                 [[ -n "$conclusion" ]] || continue
               fi
               outcomes+=("$conclusion")
             done <<< "$runs"
+
+            if (( unreadable )); then
+              unknown+=("$suite")
+              echo "| $suite | — | **UNREADABLE — job request failed** |" >> "$GITHUB_STEP_SUMMARY"
+              continue
+            fi
 
             if (( ${#outcomes[@]} == 0 )); then
               echo "| $suite | (no scheduled history) | skipped |" >> "$GITHUB_STEP_SUMMARY"
@@ -215,7 +235,7 @@ jobs:
 
           # A name that resolves to nothing is reported as loudly as a break:
           # it means this check is watching less than it claims to.
-          problems=("${broken[@]}" "${unknown[@]/#/no such workflow: }")
+          problems=("${broken[@]}" "${unknown[@]/#/unreadable or missing: }")
           summary="$(IFS='; '; echo "${problems[*]}")"
           post failure "$today: $summary" "$run_url"
 
