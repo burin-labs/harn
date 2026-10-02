@@ -7,7 +7,10 @@
 # on main all failed, and `health_exempt` records why a suite is not watched.
 # `health_job` judges one job by its display name instead of the whole run,
 # for a workflow whose run passes by design while a job reports the verdict;
-# runs where that job did not run are not counted either way.
+# runs where that job did not run are not counted either way. `health_events`
+# lists the run events that count (default `["schedule"]`); add
+# `workflow_dispatch` only when a manual run measures exactly the scheduled
+# claim, which the default-inputs dispatch of the live provider probe does not.
 
 [[workflow]]
 path = ".github/workflows/actions-vulnerability-audit.yml"
@@ -171,6 +174,9 @@ crons = ["17 4 * * 1"]
 cadence_reason = "Weekly refreshes the expensive full measurement without charging every pull request."
 job_ids = ["bank"]
 health_failures = 2
+# A manual dispatch runs the identical banking job on main, so it measures the
+# same claim; without it a fixed job stays red until the next Monday.
+health_events = ["schedule", "workflow_dispatch"]
 
 [[workflow]]
 path = ".github/workflows/thread-parity.yml"

@@ -102,3 +102,25 @@ pipeline test_health_job_must_name_a_real_job(harness: Harness, task: unknown) {
   assert_eq(len(errors), 1)
   assert(contains(errors[0] ?? "", "health_job names no job"))
 }
+
+@test
+pipeline test_health_events_must_be_workflow_triggers(harness: Harness, task: unknown) {
+  const documents = {".github/workflows/example.yml": document()}
+  assert_eq(health_events(record()), ["schedule"])
+  const dispatched = document({on: {schedule: [{cron: "17 11 * * *"}], workflow_dispatch: nil}})
+  assert_eq(
+    scheduled_workflow_errors(
+      [record({health_events: ["schedule", "workflow_dispatch"]})],
+      {".github/workflows/example.yml": dispatched},
+    ),
+    [],
+  )
+  const errors = scheduled_workflow_errors(
+    [record({health_events: ["schedule", "workflow_dispatch"]})],
+    documents,
+  )
+  assert_eq(len(errors), 1)
+  assert(contains(errors[0] ?? "", "not triggered by: workflow_dispatch"))
+  const empty = scheduled_workflow_errors([record({health_events: []})], documents)
+  assert(contains(empty[0] ?? "", "health_events is empty"))
+}
