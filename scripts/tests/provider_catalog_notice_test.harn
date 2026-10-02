@@ -1,3 +1,4 @@
+import { NoticeExtraction, ProviderCatalogCandidate } from "../provider_catalog_notice/types.harn"
 import "../provider_catalog_notice/workflow.harn"
 import {
   build_drift,
@@ -8,6 +9,23 @@ import {
 import { openrouter_scheduled_pricing } from "../provider_catalog_sources.harn"
 
 const FIXTURE_DIR = "../provider_catalog_notice_fixtures"
+
+@test
+pipeline test_notice_extraction_requires_nullable_candidate(harness: Harness, task: unknown) {
+  const schema = schema_of(NoticeExtraction)
+  assert(!schema_is({classification: "candidate", reason: nil}, schema))
+  assert(schema_is({classification: "irrelevant", candidate: nil}, schema))
+  const candidate: ProviderCatalogCandidate = {
+    kind: "retirement",
+    provider: "anthropic",
+    model_id: "claude-sonnet-4-5-20250929",
+    effective_date: "2026-11-30",
+    old_value: false,
+    new_value: true,
+    evidence: "Requests stop working on 2026-11-30.",
+  }
+  assert(schema_is({classification: "candidate", candidate: candidate}, schema))
+}
 
 @test
 pipeline test_pricing_structures_survive_comparison_and_candidate_roundtrip(

@@ -328,9 +328,11 @@ fn billed_noncommittal_completion_surfaces_contract_violation_after_budget_exhau
         assert_eq!(errors[0]["attempt"], 1);
         assert_eq!(errors[0]["status"], "retrying");
         assert_eq!(errors[0]["retryable"], true);
+        assert_eq!(errors[0]["kind"], "transient");
         assert_eq!(errors[1]["attempt"], 2);
         assert_eq!(errors[1]["status"], "retries_exhausted");
         assert_eq!(errors[1]["retryable"], false);
+        assert_eq!(errors[1]["kind"], "terminal");
         reset_agent_trace_state();
     });
 }
