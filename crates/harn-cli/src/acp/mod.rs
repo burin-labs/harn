@@ -5,7 +5,6 @@ use async_trait::async_trait;
 use harn_serve::{
     AcpProfileConfig, AcpRuntimeConfigurator, AcpSandboxConfig, AcpServerConfig, AuthPolicy,
 };
-use tokio::sync::mpsc;
 
 struct CliAcpRuntimeConfigurator;
 
@@ -63,16 +62,34 @@ impl AcpRuntimeConfigurator for CliAcpRuntimeConfigurator {
     }
 }
 
-pub(crate) fn server_config(pipeline: Option<String>, auth_policy: AuthPolicy) -> AcpServerConfig {
+pub(crate) fn server_config(
+    pipeline: Option<String>,
+    auth_policy: AuthPolicy,
+) -> Result<AcpServerConfig, String> {
+    let host_inference_boundary = harn_vm::llm::api::InferenceBoundary::capture_process()?;
+    Ok(server_config_with_boundary(
+        pipeline,
+        auth_policy,
+        host_inference_boundary,
+    ))
+}
+
+pub(crate) fn server_config_with_boundary(
+    pipeline: Option<String>,
+    auth_policy: AuthPolicy,
+    host_inference_boundary: Option<harn_vm::llm::api::InferenceBoundary>,
+) -> AcpServerConfig {
     let extensions = pipeline
         .as_deref()
         .map(Path::new)
         .map(crate::package::load_runtime_extensions)
         .unwrap_or_default();
-    AcpServerConfig::new(pipeline)
+    let mut config = AcpServerConfig::new(pipeline)
         .with_auth_policy(auth_policy)
         .with_runtime_configurator(Arc::new(CliAcpRuntimeConfigurator))
-        .with_llm_overrides(extensions.llm, extensions.capabilities)
+        .with_llm_overrides(extensions.llm, extensions.capabilities);
+    config.host_inference_boundary = host_inference_boundary;
+    config
 }
 
 pub(crate) fn ensure_acp_event_log(pipeline: Option<&str>) {
@@ -96,13 +113,13 @@ pub(crate) async fn run_acp_server(
     trace: bool,
     profile: AcpProfileConfig,
     sandbox: AcpSandboxConfig,
-) {
+) -> Result<(), String> {
     ensure_acp_event_log(pipeline);
     if trace {
         harn_vm::llm::enable_tracing();
     }
     harn_serve::run_acp_server(
-        server_config(pipeline.map(str::to_string), auth_policy)
+        server_config(pipeline.map(str::to_string), auth_policy)?
             .with_profile(profile)
             .with_sandbox(sandbox),
     )
@@ -110,19 +127,7 @@ pub(crate) async fn run_acp_server(
     if trace {
         eprint!("{}", crate::commands::run::render_trace_summary());
     }
-}
-
-pub(crate) async fn run_acp_channel_server(
-    pipeline: Option<String>,
-    request_rx: mpsc::UnboundedReceiver<serde_json::Value>,
-    response_tx: mpsc::UnboundedSender<String>,
-) {
-    harn_serve::run_acp_channel_server(
-        server_config(pipeline, AuthPolicy::allow_all()),
-        request_rx,
-        response_tx,
-    )
-    .await;
+    Ok(())
 }
 
 #[cfg(test)]

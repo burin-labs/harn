@@ -18,9 +18,10 @@ on:
     - cron: "17 4 * * 1"
   workflow_dispatch:
 
+# The release App publishes the signed commit and opens the pull request, so
+# the job's own token needs no write access.
 permissions:
-  contents: write
-  pull-requests: write
+  contents: read
 
 concurrency:
   group: stack-frame-banking
@@ -29,12 +30,11 @@ concurrency:
 jobs:
   bank:
     name: Bank the stack-frame budget
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 90
     env:
       CARGO_PROFILE_DEV_DEBUG: line-tables-only
       HARN_RUNNER_TIER: github-hosted
-      GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -61,5 +61,17 @@ jobs:
       # shared Harn binary for it to download. It builds the one it needs.
       - name: Build the Harn CLI
         run: cargo build --locked -p harn-cli --bin harn
+      # GitHub starts no workflows for a pull request opened with
+      # GITHUB_TOKEN, so the banking pull request is opened by the release App.
+      - name: Mint GitHub App installation token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ secrets.RELEASE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
       - name: Bank the budget
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: ./scripts/ci/bank_stack_frames.sh target/debug/harn

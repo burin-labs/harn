@@ -53,6 +53,15 @@ use std::time::Duration;
 
 use tokio::process::Command as TokioCommand;
 
+pub struct ChildGuard(pub std::process::Child);
+
+impl Drop for ChildGuard {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
+
 /// Maximum time the one-shot `harn --version` pre-warm is allowed to
 /// take before we give up and fall through to per-test timing. The
 /// happy-path warm-up on Apple Silicon dev hardware is sub-second; the

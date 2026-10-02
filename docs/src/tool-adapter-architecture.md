@@ -110,6 +110,12 @@ typed data below
 `_meta["com.harnlang/toolContract"].applicationError`. Neither adapter
 publishes error data as success `structuredContent`.
 
+The canonical versioned handler-result envelope also declares application
+failures explicitly through `"error"` or `"rejected"`. These preserve their
+portable data and disposition across adapters. An optional `errorSchema`
+constrains the failure payload; its absence leaves the shape open. This does
+not change undeclared throws or VM control failures.
+
 This contract sits below both transport formats. OpenAPI
 [Response Objects](https://spec.openapis.org/oas/v3.1.1.html#response-object)
 describe payloads attached to HTTP status codes, so an HTTP adapter can project

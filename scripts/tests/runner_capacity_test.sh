@@ -113,4 +113,84 @@ CAPACITY_LABEL=RUST_PRODUCER_CAPACITY
 [[ $(runner_capacity_decision push '' "$measured") == "RUST_PRODUCER_CAPACITY "* ]]
 CAPACITY_LABEL=RUNNER_CAPACITY_DECISION
 
-echo 'Runner capacity: owned, retired, unrouted-event, evacuation-switch, retired-routing, census-fallback, routed-event and label controls passed'
+# A hosted decision names the paid runner the ladder picks: Ubicloud unless the
+# provider variable says github. Owned routes, evacuations, and callers with no
+# vendor rung carry no paid runner at all.
+paid_line() {
+  local output
+  output="$(mktemp)"
+  GITHUB_OUTPUT="$output" GITHUB_STEP_SUMMARY='' EVENT_NAME=$1 SELFHOSTED_DISABLED='' \
+    RUNNER_CAPACITY=$2 FLEET_EVACUATION=${3:-} PAID_LINUX_PROVIDER=${4:-} \
+    CAPACITY_VENDOR_RUNNER=${5-ubicloud-standard-8} CAPACITY_HOSTED_RUNNER=ubuntu-8core \
+    runner_capacity_main 2>&1 >/dev/null
+  rm -f "$output"
+}
+[[ $(paid_line merge_group "$measured") == *"route=hosted"*" paid_runner=ubicloud-standard-8 paid_provider=ubicloud_default" ]]
+[[ $(paid_line merge_group "$measured" '' github) == *" paid_runner=ubuntu-8core paid_provider=github" ]]
+[[ $(paid_line merge_group "$measured" '' ubicloud) == *" paid_runner=ubicloud-standard-8 paid_provider=ubicloud" ]]
+[[ $(paid_line merge_group "$measured" true) != *paid_runner=* ]]
+[[ $(paid_line merge_group "$measured" '' '' '') != *paid_runner=* ]]
+CAPACITY_ROUTED_EVENT=pull_request
+[[ $(paid_line pull_request "$measured") != *paid_runner=* ]]
+CAPACITY_ROUTED_EVENT=push
+
+# With a per-host breakdown, an idle carrier on a host that is already half
+# busy is not capacity: the job could land there with a fraction of a compiler.
+# Every host that could receive the job must have room.
+quiet='{"linux_big":{"online":9,"idle":8,"hosts":{"a":{"online":6,"busy":1,"idle_big":5},"b":{"online":3,"busy":0,"idle_big":3}}}}'
+[[ $(runner_capacity_decision push '' "$quiet") == *route=owned* ]]
+# Host totals include small runners too; only idle big counts must sum to the
+# big pool's idle count, rather than requiring equal online totals.
+includes_small='{"linux_big":{"online":1,"idle":1,"hosts":{"a":{"online":3,"busy":0,"idle_big":1}}}}'
+[[ $(runner_capacity_decision push '' "$includes_small") == *route=owned* ]]
+# Host a has three of six busy, so a fourth job there would be over half.
+busy_a='{"linux_big":{"online":9,"idle":6,"hosts":{"a":{"online":6,"busy":3,"idle_big":3},"b":{"online":3,"busy":0,"idle_big":3}}}}'
+[[ $(runner_capacity_decision push '' "$busy_a") == \
+  *"route=hosted reason=owned_hosts_saturated"*"busy_hosts=a:3/6" ]]
+# A saturated host with no idle carrier cannot receive the job, so it does not
+# block the route.
+full_a='{"linux_big":{"online":9,"idle":3,"hosts":{"a":{"online":6,"busy":6,"idle_big":0},"b":{"online":3,"busy":0,"idle_big":3}}}}'
+[[ $(runner_capacity_decision push '' "$full_a") == *route=owned* ]]
+# An unreadable breakdown falls back by name rather than trusting the pool.
+[[ $(runner_capacity_decision push '' '{"linux_big":{"online":3,"idle":1,"hosts":{"a":{"online":"3"}}}}' 2>/dev/null) == \
+  *"route=hosted reason=capacity_hosts_unreadable fallback=true"* ]]
+
+# Explicitly supplied but invalid host counts are unmeasured, including null
+# and an empty object. Pool totals remain visible but cannot certify a host.
+for hosts in \
+  'null' '{}' '[]' '{"a":null}' \
+  '{"a":{"online":-4,"busy":-10,"idle_big":1}}' \
+  '{"a":{"online":3.5,"busy":0,"idle_big":1}}' \
+  '{"a":{"online":3,"busy":0.5,"idle_big":1}}' \
+  '{"a":{"online":3,"busy":0,"idle_big":1.5}}' \
+  '{"a":{"online":3,"busy":-1,"idle_big":1}}' \
+  '{"a":{"online":3,"busy":0,"idle_big":-1}}' \
+  '{"a":{"online":3,"busy":4,"idle_big":0}}' \
+  '{"a":{"online":3,"busy":2,"idle_big":2}}' \
+  '{"a":{"online":0,"busy":0,"idle_big":0}}' \
+  '{"a":{"online":3,"busy":0,"idle_big":0}}' \
+  '{"a":{"online":3,"busy":0,"idle_big":2}}'; do
+  invalid=$(jq -nc --argjson hosts "$hosts" \
+    '{linux_big: {online: 3, idle: 1, hosts: $hosts}}')
+  decision=$(runner_capacity_decision push '' "$invalid" 2>"$diagnostic")
+  [[ $decision == *"route=hosted reason=capacity_hosts_unreadable fallback=true"* ]]
+  [[ $decision == *"carriers=3 idle=1 host_counts=unmeasured"* ]]
+  grep -q 'RUNNER_CAPACITY_DECISION_FALLBACK reason=capacity_hosts_unreadable' "$diagnostic"
+done
+
+# The actual output-writing entry point carries both the refused route and
+# fallback verdict. Contrast it with a measured nonempty quiet host above.
+outputs=$(mktemp "${TMPDIR:-/tmp}/harn-capacity-invalid-outputs.XXXXXX")
+EVENT_NAME=push SELFHOSTED_DISABLED='' RUNNER_CAPACITY="$includes_small" FLEET_EVACUATION='' \
+  GITHUB_OUTPUT="$outputs" GITHUB_STEP_SUMMARY='' runner_capacity_main 2>"$diagnostic"
+grep -qx 'route=owned' "$outputs"
+grep -qx 'fallback=false' "$outputs"
+: > "$outputs"
+EVENT_NAME=push SELFHOSTED_DISABLED='' RUNNER_CAPACITY="$invalid" FLEET_EVACUATION='' \
+  GITHUB_OUTPUT="$outputs" GITHUB_STEP_SUMMARY='' runner_capacity_main 2>"$diagnostic"
+grep -qx 'route=hosted' "$outputs"
+grep -qx 'fallback=true' "$outputs"
+grep -q 'host_counts=unmeasured' "$diagnostic"
+rm -f "$outputs"
+
+echo 'Runner capacity: owned, retired, unrouted-event, evacuation-switch, retired-routing, census-fallback, routed-event, label, paid-runner and host-saturation controls passed'

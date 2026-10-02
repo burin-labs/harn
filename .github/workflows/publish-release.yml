@@ -103,7 +103,7 @@ env:
 jobs:
   detect-drift:
     name: Detect tag drift
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     outputs:
       drift: ${{ steps.check.outputs.drift }}
       cargo_version: ${{ steps.check.outputs.cargo_version }}
@@ -368,7 +368,7 @@ jobs:
   publish:
     name: Publish release
     needs: detect-drift
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     if: github.event_name == 'workflow_dispatch' || needs.detect-drift.outputs.drift == 'true'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

@@ -40,8 +40,22 @@ fn host_boundary() -> Result<Option<InferenceBoundary>, String> {
     raw.as_deref().map(parse_host_boundary).transpose()
 }
 
-fn parse_host_boundary(raw: &str) -> Result<InferenceBoundary, String> {
+pub(crate) fn parse_host_boundary(raw: &str) -> Result<InferenceBoundary, String> {
     serde_json::from_str(raw).map_err(|_| "inference_boundary.host_boundary_malformed".to_string())
+}
+
+impl InferenceBoundary {
+    /// Capture the trusted launcher's ceiling once, before accepting client
+    /// session policies. An absent ceiling preserves standalone behavior.
+    pub fn capture_process() -> Result<Option<Self>, String> {
+        match std::env::var(HOST_BOUNDARY_ENV) {
+            Ok(raw) => parse_host_boundary(&raw).map(Some),
+            Err(std::env::VarError::NotPresent) => Ok(None),
+            Err(std::env::VarError::NotUnicode(_)) => {
+                Err("inference_boundary.host_boundary_malformed".into())
+            }
+        }
+    }
 }
 
 thread_local! {

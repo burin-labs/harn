@@ -27,6 +27,8 @@ const SANDBOX_DOCUMENT_CSP: &str = "default-src 'none'; script-src 'unsafe-inlin
 pub(crate) async fn run(args: AppArgs) {
     match args.command {
         AppCommand::Run(args) => {
+            let host_boundary = harn_vm::llm::api::InferenceBoundary::capture_process()
+                .unwrap_or_else(|error| crate::command_error(&error));
             if !args.bind.ip().is_loopback() {
                 crate::command_error(
                     "harn app run only binds to loopback; use an authenticated deployment host for remote access",
@@ -40,6 +42,7 @@ pub(crate) async fn run(args: AppArgs) {
                     resource: args.resource,
                     open: args.open,
                 })),
+                host_boundary,
             )
             .await;
         }

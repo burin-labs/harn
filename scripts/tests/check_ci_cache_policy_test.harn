@@ -194,7 +194,7 @@ pipeline test_minimal_pr_capacity_policy_and_negative_controls(harness: Harness,
   self_hosted_waiter.jobs["rust-artifacts-ready"]["runs-on"] = "self-hosted"
   assert(
     minimal_pr_capacity_errors(self_hosted_waiter, publish).contains(
-      "ci.yml:rust-artifacts-ready must use GitHub-hosted ubuntu-latest",
+      "ci.yml:rust-artifacts-ready must use GitHub-hosted ubuntu-24.04",
     ),
   )
   let pr_policy = ci
@@ -293,7 +293,7 @@ pipeline test_minimal_pr_capacity_policy_and_negative_controls(harness: Harness,
     ),
   )
   let unrouted_source_checks = ci
-  unrouted_source_checks.jobs["harn-audit"]["runs-on"] = "ubuntu-latest"
+  unrouted_source_checks.jobs["harn-audit"]["runs-on"] = "ubuntu-24.04"
   assert(
     minimal_pr_capacity_errors(unrouted_source_checks, publish).contains(
       "ci.yml:harn-audit must use the shared elastic Linux runner switch",

@@ -24,6 +24,13 @@ Dispatch renders `text` and preserves `data` without reading data fields to
 decide success. Scalar and list results use successful return as their execution
 outcome; throw an error when execution fails.
 
+When a registered handler declares an output schema, successful structured
+results must match it. For an explicit outcome envelope, the schema describes `data`.
+Invalid payloads fail with `schema_validation` before dispatch reports success.
+Scalar and list results retain their agent display contract; use the explicit
+envelope to carry separately validated data beside that text.
+The same envelope works with [CLI and MCP adapters](../tool-registry-adapters.md#mcp-projection).
+
 `Result<T, E>` also declares the outcome: `Ok(data)` succeeds and `Err(error)`
 fails, regardless of keys inside the value.
 

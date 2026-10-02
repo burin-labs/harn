@@ -556,8 +556,8 @@ impl McpServer {
                 &tool.catalog.name,
                 result,
             ) {
-                Ok(crate::tool_registry::ToolInvocationOutcome::Success { value, json }) => {
-                    match successful_tool_call_result(&self.tools, tool, &value, json) {
+                Ok(crate::tool_registry::ToolInvocationOutcome::Success { value, json, text }) => {
+                    match successful_tool_call_result(&self.tools, tool, &value, json, text) {
                         Ok(result) => lease.complete_with_tool_result(result, uses_result_envelope),
                         Err(error) => lease.complete(Err(error), uses_result_envelope),
                     }
@@ -593,8 +593,8 @@ impl McpServer {
             &tool.catalog.name,
             result,
         ) {
-            Ok(crate::tool_registry::ToolInvocationOutcome::Success { value, json }) => {
-                match successful_tool_call_result(&self.tools, tool, &value, json) {
+            Ok(crate::tool_registry::ToolInvocationOutcome::Success { value, json, text }) => {
+                match successful_tool_call_result(&self.tools, tool, &value, json, text) {
                     Ok(result) => serde_json::json!({
                         "jsonrpc": "2.0",
                         "id": id,
@@ -1087,9 +1087,13 @@ fn successful_tool_call_result(
     tool: &McpToolDef,
     value: &crate::value::VmValue,
     value_json: serde_json::Value,
+    text: Option<String>,
 ) -> Result<serde_json::Value, String> {
     let mut result = serde_json::json!({
-        "content": vm_value_to_content(value),
+        "content": match text {
+            Some(text) => vec![serde_json::json!({"type": "text", "text": text})],
+            None => vm_value_to_content(value),
+        },
         "isError": false,
     });
     let entry = tools

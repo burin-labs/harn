@@ -55,13 +55,22 @@ pipeline default(harness: Harness) {
         capture: {max_inline_bytes: 32768},
       },
     )
-    require child.success, child.stderr
-    const result = json_parse(child.stdout)
-    contract_effect(
-      harness.stdio,
-      boundary.name + "_refuses_before_provider_dispatch",
-      json_stringify(result).contains(boundary.rule) && result.provider_call_count == 0,
-    )
+    if boundary.name == "malformed" {
+      contract_effect(
+        harness.stdio,
+        "malformed_refuses_at_bootstrap",
+        !child.success && child.exit_code == 125 && child.stderr.contains(boundary.rule)
+          && child.stdout.trim() == "",
+      )
+    } else {
+      require child.success, child.stderr
+      const result = json_parse(child.stdout)
+      contract_effect(
+        harness.stdio,
+        boundary.name + "_refuses_before_provider_dispatch",
+        json_stringify(result).contains(boundary.rule) && result.provider_call_count == 0,
+      )
+    }
   }
   with_llm_script(
     harness.llm,

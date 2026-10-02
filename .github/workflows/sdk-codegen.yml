@@ -38,7 +38,7 @@ concurrency:
 jobs:
   generate:
     name: Generate ${{ matrix.language }} SDK
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
@@ -80,7 +80,7 @@ jobs:
     name: Both SDK language artifacts
     if: always() && !cancelled()
     needs: generate
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -105,7 +105,7 @@ jobs:
     name: Attach SDK artifacts to the GitHub release
     if: github.event_name == 'release'
     needs: require-both
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: write
     steps:

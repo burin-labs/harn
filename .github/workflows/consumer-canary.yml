@@ -5,8 +5,8 @@ name: Consumer canary
 # consumer's own update. `scripts/ci/consumer_canary.sh` owns the procedure.
 #
 # Report-only, on a 4-hour schedule and on demand. It is not part of any pull
-# request, merge-group or main-push run: the consumer's rehearsal takes about
-# 45 minutes, a merge group lands (and cancels a still-waiting canary) as soon
+# request, merge-group or main-push run: the consumer's rehearsal takes 70 to
+# 90 minutes, a merge group lands (and cancels a still-waiting canary) as soon
 # as `CI status` passes, and a rehearsal per main commit costs more runner time
 # than a report-only signal is worth. A scheduled run whose main commit already
 # has a settled verdict is skipped, and the decide job logs the skip by name
@@ -43,7 +43,7 @@ concurrency:
 jobs:
   decide:
     name: Decide whether main moved
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
       actions: read
@@ -69,10 +69,10 @@ jobs:
     if: needs.decide.outputs.run == 'true'
     # Report-only: a red verdict shows on this job without failing the run.
     continue-on-error: true
-    runs-on: ubuntu-latest
-    # Ten minutes above the canary's 55-minute verdict deadline, which is
-    # sized to the consumer's observed ~45-minute rehearsal.
-    timeout-minutes: 65
+    runs-on: ubuntu-24.04
+    # Ten minutes above the canary's 120-minute verdict deadline, which is
+    # sized to the consumer's observed 69- to 90-minute rehearsal.
+    timeout-minutes: 130
     permissions:
       contents: read
     outputs:
@@ -113,7 +113,7 @@ jobs:
     name: Settled verdict
     needs: consumers
     if: always() && (needs.consumers.outputs.verdict == 'pass' || needs.consumers.outputs.verdict == 'fail')
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 2
     permissions: {}
     steps:

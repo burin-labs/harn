@@ -8,7 +8,7 @@
     }
   },
   "runner_registry": {
-    "ubuntu-latest": {"host_os": "linux", "host_arch": "x86_64", "glibc_version": "2.39", "provider": "github", "usd_per_minute": null},
+    "ubuntu-24.04": {"host_os": "linux", "host_arch": "x86_64", "glibc_version": "2.39", "provider": "github", "usd_per_minute": null},
     "ubuntu-22.04": {"host_os": "linux", "host_arch": "x86_64", "glibc_version": "2.35", "provider": "github", "usd_per_minute": null},
     "ubuntu-16core-release": {"host_os": "linux", "host_arch": "x86_64", "glibc_version": "2.35", "provider": "github", "usd_per_minute": 0.042},
     "ubuntu-32core-release": {"host_os": "linux", "host_arch": "x86_64", "glibc_version": "2.35", "provider": "github", "usd_per_minute": 0.082},
@@ -23,7 +23,7 @@
   "jobs": {
     "cli_aot": {
       "primary": "blacksmith-16vcpu-ubuntu-2204",
-      "standard": "ubuntu-latest"
+      "standard": "ubuntu-24.04"
     }
   },
   "targets": [

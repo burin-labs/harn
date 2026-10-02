@@ -78,6 +78,8 @@ impl From<EnvironmentPolicyArg> for EnvironmentPolicyKind {
 pub(crate) struct EnvironmentPolicyConfig {
     kind: EnvironmentPolicyKind,
     grants: Vec<GrantSpec>,
+    // Launch reports the canonical sanitized error; its source text is unused.
+    host_inference_boundary: Result<Option<harn_vm::llm::api::InferenceBoundary>, ()>,
 }
 
 impl Default for EnvironmentPolicyConfig {
@@ -85,6 +87,8 @@ impl Default for EnvironmentPolicyConfig {
         Self {
             kind: EnvironmentPolicyKind::Inherited,
             grants: Vec::new(),
+            host_inference_boundary: harn_vm::llm::api::InferenceBoundary::capture_process()
+                .map_err(|_| ()),
         }
     }
 }
@@ -111,7 +115,18 @@ impl EnvironmentPolicyConfig {
             .iter()
             .map(|spec| parse_grant_spec(spec))
             .collect::<Result<Vec<_>, _>>()?;
-        Ok(Self { kind, grants })
+        Ok(Self {
+            kind,
+            grants,
+            host_inference_boundary: harn_vm::llm::api::InferenceBoundary::capture_process()
+                .map_err(|_| ()),
+        })
+    }
+
+    /// A malformed captured ceiling must reach the normal setup-error path
+    /// without first probing a provider during CLI configuration seeding.
+    pub(crate) fn bootstrap_permitted(&self) -> bool {
+        self.host_inference_boundary.is_ok()
     }
 
     /// Resolve the configuration into a runtime [`SessionEnvironment`], snapshotting each
@@ -120,9 +135,13 @@ impl EnvironmentPolicyConfig {
     pub(crate) fn launch(
         &self,
     ) -> Result<SessionEnvironment, harn_vm::security::EnvironmentPolicyError> {
+        let host = self.host_inference_boundary.as_ref().map_err(|_| {
+            harn_vm::security::EnvironmentPolicyError::MalformedHostInferenceBoundary
+        })?;
         SessionEnvironment::launch(self.kind, self.grants.clone(), &|var| {
             std::env::var(var).ok()
         })
+        .map(|environment| environment.with_host_inference_boundary(*host))
     }
 }
 
@@ -267,6 +286,25 @@ pub(crate) fn launch_scope(
         SessionEnvironmentScope::install(environment),
         kind,
         receipts,
+    ))
+}
+
+/// Project a validated process ceiling without replacing a narrower session.
+pub(crate) fn host_environment_scope(
+    boundary: Option<harn_vm::llm::api::InferenceBoundary>,
+) -> Option<harn_vm::stdlib::process::SessionEnvironmentGuard> {
+    boundary.map(|boundary| {
+        harn_vm::stdlib::process::declare_session_environment_if_absent(
+            SessionEnvironment::inherited(),
+        )
+        .with_host_inference_boundary(Some(boundary))
+    })
+}
+
+pub(crate) fn process_host_environment_scope(
+) -> Result<Option<harn_vm::stdlib::process::SessionEnvironmentGuard>, String> {
+    Ok(host_environment_scope(
+        harn_vm::llm::api::InferenceBoundary::capture_process()?,
     ))
 }
 

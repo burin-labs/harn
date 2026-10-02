@@ -25,8 +25,15 @@ budget_refuse() {
   return 1
 }
 
+# $6 says the cores were measured inside this runner's own CPU allotment (a
+# cgroup quota narrower than the host). That allotment already is this job's
+# share, so dividing it again by the jobs on the host double-counts them: four
+# allotted cores across six listeners read as one compiler on an owned host
+# whose other five runners were idle, and the shared CLI hit its 31-minute
+# step timeout (run 36987728246).
 rust_resource_budget() {
   local policy=$1 cores=$2 runners=$3 profile=${4:-e2e} memory_mb=$5
+  local cpu_allotment=${6:-false}
   local reserved maximum share reserved_memory per_compiler memory_share
   if [[ ! "$cores" =~ ^[1-9][0-9]*$ || ! "$runners" =~ ^[1-9][0-9]*$ ]]; then
     budget_refuse census_not_positive "$cores" "$runners"
@@ -57,14 +64,18 @@ rust_resource_budget() {
   maximum=$(jq -r ".${profile}_max_compilers" "$policy")
   reserved_memory=$(jq -r .reserved_host_memory_mb "$policy")
   per_compiler=$(jq -r .memory_mb_per_compiler "$policy")
-  share=$(((cores - reserved) / runners))
+  if [[ "$cpu_allotment" == true ]]; then
+    share=$cores
+  else
+    share=$(((cores - reserved) / runners))
+  fi
   ((share >= 1)) || share=1
   memory_share=$(((memory_mb - reserved_memory) / per_compiler / runners))
   ((memory_share >= 1)) || memory_share=1
   local build=$share
   ((build <= memory_share)) || build=$memory_share
   ((build <= maximum)) || build=$maximum
-  echo "RUST_RESOURCE_BUDGET profile=$profile cores=$cores memory_mb=$memory_mb online_local_runners=$runners cpu_share=$share memory_share=$memory_share build_jobs=$build" >&2
+  echo "RUST_RESOURCE_BUDGET profile=$profile cores=$cores cpu_allotment=$cpu_allotment memory_mb=$memory_mb sharing_jobs=$runners cpu_share=$share memory_share=$memory_share build_jobs=$build" >&2
   printf 'build_jobs=%s\ntest_threads=%s\n' "$build" "$share"
 }
 
@@ -138,15 +149,49 @@ online_local_runners() {
   printf '%s\n' "$count"
 }
 
+# Jobs running on this host now, this one included: each busy runner has one
+# Runner.Worker. The budget divides by these rather than by every listener,
+# because an idle listener compiles nothing, and dividing by it handed a job on
+# a quiet six-runner host one compiler. A count of zero means the census could
+# not see this job's own worker, so it falls back to the listener count, which
+# is never smaller.
+running_local_jobs() {
+  local listeners=$1 census count
+  census=$(ps -e -o comm= 2>/dev/null) || census=""
+  count=$(awk '{ n = split($1, part, "/") } part[n] == "Runner.Worker" { count++ } END { print count+0 }' <<< "$census")
+  if ((count < 1)); then
+    echo "::warning::RUST_RESOURCE_BUDGET_WORKERS_UNSEEN listeners=$listeners; dividing by listeners" >&2
+    count=$listeners
+  fi
+  ((count <= listeners)) || count=$listeners
+  printf '%s\n' "$count"
+}
+
+# True when this process sees fewer cores than the host has: a cgroup quota or
+# CPU affinity has already given it its own allotment.
+cpu_is_allotment() {
+  local allotted=$1 total
+  [[ "$(uname -s)" != Darwin ]] || return 1
+  total=$(nproc --all 2>/dev/null) || return 1
+  [[ "$total" =~ ^[1-9][0-9]*$ ]] && ((allotted < total))
+}
+
 resource_budget_main() {
   local runners cores memory_mb policy profile=${HARN_BUDGET_PROFILE:-e2e}
+  local cpu_allotment=false listeners
   if ! cores=$(host_cpu_cores); then
     budget_refuse cpu_census_failed unmeasured unmeasured
     return 1
   fi
   case "${RUNNER_ENVIRONMENT:-}" in
     github-hosted) runners=1 ;;
-    self-hosted) runners=$(online_local_runners "$cores") || return 1 ;;
+    self-hosted)
+      listeners=$(online_local_runners "$cores") || return 1
+      runners=$(running_local_jobs "$listeners")
+      if cpu_is_allotment "$cores"; then
+        cpu_allotment=true
+      fi
+      ;;
     *)
       budget_refuse runner_environment_missing "$cores" unmeasured \
         "runner_environment=${RUNNER_ENVIRONMENT:-unset}"
@@ -157,7 +202,7 @@ resource_budget_main() {
   # unknown tier rather than as whatever the memory census happened to say.
   memory_mb=$(host_memory_mb "$cores") || return 1
   policy="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/rust-resource-policy.json"
-  rust_resource_budget "$policy" "$cores" "$runners" "$profile" "$memory_mb" \
+  rust_resource_budget "$policy" "$cores" "$runners" "$profile" "$memory_mb" "$cpu_allotment" \
     >> "${GITHUB_OUTPUT:?}"
 }
 

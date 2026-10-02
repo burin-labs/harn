@@ -139,7 +139,8 @@ async fn dispatch(subcommand: Command) {
         },
         Command::Run(args) => {
             let _operator_approval_guard = args.install_operator_approval_grant();
-            if !args.explain_cost {
+            let sandbox_options = commands::run::sandbox::sandbox_options_from_args(&args.sandbox);
+            if !args.explain_cost && sandbox_options.environment.bootstrap_permitted() {
                 match (args.eval.as_deref(), args.file.as_deref()) {
                     (Some(code), None) => {
                         provider_bootstrap::maybe_seed_ollama_for_inline(
@@ -178,7 +179,6 @@ async fn dispatch(subcommand: Command) {
                 agent_id: args.attest_agent.clone(),
             });
             let profile_options = run_profile_options(&args.profile);
-            let sandbox_options = commands::run::sandbox::sandbox_options_from_args(&args.sandbox);
             let json_options = args
                 .json
                 .then_some(commands::run::RunJsonOptions { quiet: args.quiet });
@@ -719,14 +719,6 @@ async fn dispatch(subcommand: Command) {
             }
         }
         Command::Playground(args) => {
-            provider_bootstrap::maybe_seed_ollama_for_playground(
-                Path::new(&args.host),
-                Path::new(&args.script),
-                args.yes,
-                args.llm.is_some(),
-                args.llm_mock.is_some(),
-            )
-            .await;
             let llm_mock_mode = if let Some(path) = args.llm_mock.as_ref() {
                 commands::run::CliLlmMockMode::Replay {
                     fixture_path: PathBuf::from(path),

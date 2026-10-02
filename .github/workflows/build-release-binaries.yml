@@ -124,7 +124,7 @@ env:
 jobs:
   setup:
     name: Resolve release context
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     outputs:
       ref: ${{ steps.resolve.outputs.ref }}
       version: ${{ steps.resolve.outputs.version }}
@@ -1527,7 +1527,7 @@ jobs:
     name: Assemble candidate manifest
     needs: [setup, build]
     if: needs.setup.outputs.build_mode == 'candidate' && needs.build.result == 'success'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
       actions: read
@@ -1703,7 +1703,7 @@ jobs:
     name: Release residual audit
     needs: [setup, prepare_cli_aot, collect_candidate_manifest]
     if: needs.setup.outputs.build_mode == 'candidate' && needs.collect_candidate_manifest.result == 'success'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # Hang backstop, not a performance budget.
     timeout-minutes: 45
     permissions:
@@ -1752,16 +1752,17 @@ jobs:
           "$GITHUB_ENV"
       - name: Run the release residual audit
         run: ./scripts/release_gate.sh audit --residual-only
-      # Publishing starts every consumer's runtime bump at once, and each one
-      # runs the driver from harn-bump-fleet's promoted orchestration commit,
-      # not from this candidate. A candidate that driver cannot type-check
-      # against would fail every bump after the release is public, as
-      # v0.10.153 did. Candidate-only by design: pull requests may change the
-      # driver contract, and promotion must catch up before the cut.
+      # Publishing promotes harn-bump-fleet's orchestration pin to this commit
+      # (or keeps a newer pin), and every consumer bump runs that driver. A
+      # driver that cannot type-check against the candidate would fail every
+      # bump after the release is public, as v0.10.153 did.
       - name: Check the promoted bump orchestration against the candidate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_SHA: ${{ needs.setup.outputs.candidate_source_sha }}
         run: >-
           "$HARN_BIN" run --no-sandbox scripts/check_promoted_bump_orchestration.harn --
-          --candidate "$HARN_BIN"
+          --candidate "$HARN_BIN" --candidate-commit "$CANDIDATE_SHA"
 
   # Release smoke on the candidate archives, verified against the manifest.
   release-smoke:
@@ -1782,7 +1783,7 @@ jobs:
     name: Release candidate verdict
     needs: [setup, prepare_cli_aot, build, collect_candidate_manifest, release-residual-audit, release-smoke]
     if: always()
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - name: Require every candidate job to pass
@@ -1814,7 +1815,7 @@ jobs:
     # Ordinary partial failures still report/enforce the budget: successful
     # legs saved useful generations and each failed family retains its prior one.
     if: always() && needs.setup.outputs.build_mode == 'warm' && needs.setup.outputs.should_build_binaries == 'true' && needs.build.result != 'cancelled'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
       actions: write

@@ -37,6 +37,8 @@ mod codemod_dispatch;
 mod command_probe_parent_liveness;
 mod conformance_json_cli;
 mod conformance_process_lifetime_e2e;
+#[cfg(unix)]
+mod connect_secret_store;
 mod coverage_cli;
 mod decision_route_admission;
 mod demo_cli_e2e;
@@ -113,6 +115,7 @@ mod runs_export_training_cli;
 mod runs_view_cli;
 mod scaffold_dispatch;
 mod scan_dispatch;
+mod secret_absence;
 #[cfg(unix)]
 mod sidecar_version_cli;
 mod skills_cli;
@@ -124,6 +127,7 @@ mod trace_import_dispatch;
 mod trace_prefix_stability_cli;
 mod trusted_host_dispatch_cli;
 mod try_dispatch;
+mod typed_tool_outcomes;
 mod usage_cli;
 mod user_test_cli;
 mod user_test_reports_cli;

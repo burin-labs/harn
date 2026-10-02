@@ -39,11 +39,13 @@ pub(crate) const SERVE_DEFAULT_MAX_BODY_BYTES: usize = 10 * 1024 * 1024;
 /// server adapters must consume that declaration just as `check`, `test`,
 /// `run`, and ACP do; callers may still add transport-specific policy after
 /// this shared projection.
-fn dispatch_core_config_for_source(path: &str) -> DispatchCoreConfig {
+fn dispatch_core_config_for_source(path: &str) -> Result<DispatchCoreConfig, String> {
+    let boundary = harn_vm::llm::api::InferenceBoundary::capture_process()?;
     let mut config = DispatchCoreConfig::for_script(path);
+    config.host_inference_boundary = boundary;
     config.trusted_host_dispatch =
         crate::compiler_context::trusted_host_dispatch_for_source(Path::new(path));
-    config
+    Ok(config)
 }
 
 pub(crate) async fn run_command(command: ServeCommand) {
@@ -172,8 +174,7 @@ pub(crate) async fn run_acp_server(args: &ServeAcpArgs) -> Result<(), String> {
                 profile,
                 sandbox,
             )
-            .await;
-            Ok(())
+            .await
         }
         AcpServeTransport::Websocket => {
             let tls = build_tls_config(args.tls, args.cert.as_ref(), args.key.as_ref())?;
@@ -183,7 +184,7 @@ pub(crate) async fn run_acp_server(args: &ServeAcpArgs) -> Result<(), String> {
             }
             crate::acp::ensure_acp_event_log(args.file.as_deref());
             let result = harn_serve::run_acp_websocket_server(
-                crate::acp::server_config(args.file.clone(), auth_policy)
+                crate::acp::server_config(args.file.clone(), auth_policy)?
                     .with_profile(profile)
                     .with_sandbox(sandbox),
                 AcpWebSocketServeOptions {
@@ -219,7 +220,7 @@ pub(crate) async fn run_a2a_server(args: &A2aServeArgs) -> Result<(), String> {
         .unwrap_or_else(|| SocketAddr::from(([127, 0, 0, 1], args.port)));
     guard_serve_bind_auth("a2a", bind, &auth_policy, &tls)?;
 
-    let mut config = dispatch_core_config_for_source(&args.file);
+    let mut config = dispatch_core_config_for_source(&args.file)?;
     config.auth_policy = auth_policy;
     let core = DispatchCore::new(config).map_err(|error| error.to_string())?;
     harn_serve::emit_export_diagnostics(core.catalog().diagnostics());
@@ -260,7 +261,7 @@ fn api_server_config(
         text: args.trace || args.profile.text,
         json_path: args.profile.json_path.clone(),
     };
-    let acp = crate::acp::server_config(Some(args.file.clone()), AuthPolicy::allow_all())
+    let acp = crate::acp::server_config(Some(args.file.clone()), AuthPolicy::allow_all())?
         .with_profile(profile);
     let mut config = ApiServerConfig::for_pipeline(args.file.clone())
         .with_auth_policy(auth_policy)
@@ -275,7 +276,7 @@ pub(crate) async fn run_site_server(args: &SiteServeArgs) -> Result<(), String> 
     let tls = build_tls_config(args.tls, args.cert.as_ref(), args.key.as_ref())?;
     guard_serve_bind_auth("site", args.bind, &auth_policy, &tls)?;
 
-    let mut config = dispatch_core_config_for_source(&args.file);
+    let mut config = dispatch_core_config_for_source(&args.file)?;
     config.auth_policy = auth_policy;
     // An HTTP host must run its handler on every request — caching the
     // reply to an identical second POST would skip the handler's side
@@ -293,6 +294,7 @@ pub(crate) async fn run_site_server(args: &SiteServeArgs) -> Result<(), String> 
 }
 
 pub(crate) async fn run_worker_server(args: &WorkerServeArgs) -> Result<(), String> {
+    let _environment = crate::commands::run::environment::process_host_environment_scope()?;
     apply_obs_mode(args.obs)?;
     let script_path = Path::new(&args.file).to_path_buf();
     let consumer_id = args.consumer_id.clone();
@@ -357,6 +359,7 @@ pub(crate) async fn run_worker_server(args: &WorkerServeArgs) -> Result<(), Stri
 }
 
 pub(crate) async fn run_mcp_server(args: &ServeMcpArgs) -> Result<(), String> {
+    let mut config = dispatch_core_config_for_source(&args.file)?;
     validate_obs_transport(args.obs, args.transport == McpServeTransport::Stdio, "mcp")?;
     apply_obs_mode(args.obs)?;
     if args.transport == McpServeTransport::Stdio
@@ -424,12 +427,17 @@ pub(crate) async fn run_mcp_server(args: &ServeMcpArgs) -> Result<(), String> {
                 ))
             }
         };
-        crate::commands::run::run_file_mcp_serve(&args.file, args.card.as_deref(), mode).await;
+        crate::commands::run::run_file_mcp_serve(
+            &args.file,
+            args.card.as_deref(),
+            mode,
+            config.host_inference_boundary,
+        )
+        .await;
         return Ok(());
     }
 
     let auth_policy = build_auth_policy(&args.api_key, args.hmac_secret.as_ref());
-    let mut config = dispatch_core_config_for_source(&args.file);
     config.auth_policy = auth_policy.clone();
     let core = DispatchCore::new(config).map_err(|error| error.to_string())?;
     let mut server_config = McpServerConfig::new(core);

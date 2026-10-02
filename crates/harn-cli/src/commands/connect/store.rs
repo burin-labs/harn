@@ -4,8 +4,8 @@ use serde_json::{json, Value as JsonValue};
 
 use crate::{cli::ConnectApiKeyArgs, package};
 use harn_vm::secrets::{
-    configured_secret_chain, configured_secret_namespace, ChainSecretProvider,
-    KeyringSecretProvider, SecretBytes, SecretId, SecretProvider,
+    configured_secret_chain, ChainSecretProvider, SecretAuditContext, SecretBytes, SecretChainPlan,
+    SecretDeleteRequest, SecretId, SecretProvider, SecretScope, SECRET_PROVIDER_CHAIN_ENV,
 };
 
 use super::{
@@ -43,7 +43,7 @@ pub(super) async fn run_connect_api_key(args: &ConnectApiKeyArgs) -> Result<(), 
     }
     let environment_fallbacks =
         declared_credential_environment_names(&args.connector, &secret_id.to_string());
-    let provider = connect_secret_provider()?;
+    let provider = connect_secret_writer()?;
     if let Err(error) = provider.put(&secret_id, SecretBytes::from(value)).await {
         return Err(format_store_failure(
             &secret_id.to_string(),
@@ -159,7 +159,7 @@ pub(super) async fn run_connect_revoke(
     provider_name: &str,
     json_output: bool,
 ) -> Result<(), String> {
-    let provider = connect_secret_provider()?;
+    let provider = connect_secret_writer()?;
     let indexed_secret = load_connect_index(&provider).await.ok().and_then(|index| {
         index
             .providers
@@ -167,17 +167,11 @@ pub(super) async fn run_connect_revoke(
             .find(|entry| entry.provider == provider_name)
             .and_then(|entry| parse_secret_id(&entry.secret_id))
     });
-    for id in connector_secret_ids(provider_name) {
-        provider
-            .delete(&id)
-            .await
-            .map_err(|error| format!("failed to delete {id}: {error}"))?;
-    }
-    if let Some(id) = indexed_secret {
-        provider
-            .delete(&id)
-            .await
-            .map_err(|error| format!("failed to delete {id}: {error}"))?;
+    for id in connector_secret_ids(provider_name)
+        .into_iter()
+        .chain(indexed_secret)
+    {
+        delete_connect_secret(&provider, &id).await?;
     }
     remove_index_entry(&provider, provider_name).await?;
     if json_output {
@@ -199,13 +193,45 @@ pub(crate) fn parse_secret_id(raw: &str) -> Option<harn_vm::secrets::SecretId> {
     harn_vm::secrets::parse_secret_id(raw).ok()
 }
 
-pub(crate) fn connect_secret_provider() -> Result<KeyringSecretProvider, String> {
-    Ok(KeyringSecretProvider::new(configured_secret_namespace()))
-}
-
-pub(crate) fn connect_secret_reader_provider() -> Result<ChainSecretProvider, String> {
+/// The one store `harn connect` reads: the configured provider chain, the same
+/// one `harness.secrets`, connector dispatch, and std/oauth resolve through.
+/// `HARN_SECRET_PROVIDERS` therefore selects the backend for connect and for
+/// the runs that consume what it stored.
+pub(crate) fn connect_secret_provider() -> Result<ChainSecretProvider, String> {
     configured_secret_chain()
         .map_err(|error| format!("failed to configure connector secret providers: {error}"))
+}
+
+/// The configured chain, refused when nothing in it persists. A chain of only
+/// `env` would accept a credential into this process's environment and lose
+/// it at exit, so `harn connect` says so instead of reporting success.
+pub(crate) fn connect_secret_writer() -> Result<ChainSecretProvider, String> {
+    let chain = connect_secret_provider()?;
+    if chain
+        .providers()
+        .iter()
+        .any(|provider| provider.persists_writes())
+    {
+        return Ok(chain);
+    }
+    Err(format!(
+        "harn connect stores credentials in a persistent secret provider, but the configured chain ({}) has none; unset {SECRET_PROVIDER_CHAIN_ENV} or include keyring or file",
+        SecretChainPlan::configured().display()
+    ))
+}
+
+async fn delete_connect_secret(
+    provider: &ChainSecretProvider,
+    id: &SecretId,
+) -> Result<(), String> {
+    provider
+        .delete_scoped(SecretDeleteRequest {
+            id: id.clone(),
+            scope: SecretScope::default(),
+            audit: SecretAuditContext::default(),
+        })
+        .await
+        .map_err(|error| format!("failed to delete {id}: {error}"))
 }
 
 pub(crate) async fn load_connect_secret_text(secret_id: &str) -> Result<String, String> {
@@ -222,7 +248,7 @@ pub(crate) async fn load_connect_secret_text(secret_id: &str) -> Result<String, 
 }
 
 pub(super) async fn save_connector_token(token: &StoredConnectorToken) -> Result<(), String> {
-    let provider = connect_secret_provider()?;
+    let provider = connect_secret_writer()?;
     let token_payload = serde_json::to_vec(token)
         .map_err(|error| format!("failed to encode connector token: {error}"))?;
     provider
@@ -313,7 +339,7 @@ pub(super) fn secret_error_is_not_found(error: &harn_vm::secrets::SecretError) -
 }
 
 pub(super) async fn save_connect_index(
-    provider: &KeyringSecretProvider,
+    provider: &ChainSecretProvider,
     index: &ConnectIndex,
 ) -> Result<(), String> {
     let payload = serde_json::to_vec(index)
@@ -325,7 +351,7 @@ pub(super) async fn save_connect_index(
 }
 
 pub(super) async fn upsert_index_entry(
-    provider: &KeyringSecretProvider,
+    provider: &ChainSecretProvider,
     mut entry: ConnectIndexEntry,
 ) -> Result<(), String> {
     let mut index = load_connect_index(provider).await?;
@@ -363,7 +389,7 @@ pub(super) async fn upsert_index_entry(
 }
 
 pub(super) async fn remove_index_entry(
-    provider: &KeyringSecretProvider,
+    provider: &ChainSecretProvider,
     provider_name: &str,
 ) -> Result<(), String> {
     let mut index = load_connect_index(provider).await?;

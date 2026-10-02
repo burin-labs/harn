@@ -7,10 +7,6 @@ use std::process::Command;
 use harn_vm::llm_config;
 use harn_vm::orchestration::SandboxProfile;
 use harn_vm::runtime_paths;
-use harn_vm::secrets::{
-    configured_default_chain, configured_secret_namespace, EnvSecretProvider,
-    KeyringSecretProvider, SecretId, DEFAULT_SECRET_PROVIDER_CHAIN, SECRET_PROVIDER_CHAIN_ENV,
-};
 use serde::Serialize;
 
 use super::command_probe::{self, PROBE_TIMEOUT};
@@ -25,6 +21,7 @@ mod next_step;
 mod process_sandbox;
 mod repo_checks;
 mod rust_toolchain;
+mod secret_providers;
 mod targets;
 
 use credentials::check_provider_credentials;
@@ -157,7 +154,7 @@ async fn build_report(opts: &DoctorOptions) -> DoctorReport {
     checks.extend(check_portal());
     checks.extend(check_platform_capabilities());
     checks.extend(check_provider_selection());
-    checks.extend(check_secret_providers());
+    checks.extend(secret_providers::check_secret_providers());
     checks.extend(check_provider_credentials());
     checks.extend(check_manifest().await);
     checks.extend(check_event_log());
@@ -1042,89 +1039,6 @@ fn check_provider_selection() -> Vec<DoctorCheck> {
             detail: format!("HARN_LLM_PROVIDER={provider}"),
             ..Default::default()
         });
-    }
-
-    checks
-}
-
-fn check_secret_providers() -> Vec<DoctorCheck> {
-    let namespace = configured_secret_namespace();
-    let configured = std::env::var(SECRET_PROVIDER_CHAIN_ENV)
-        .unwrap_or_else(|_| DEFAULT_SECRET_PROVIDER_CHAIN.to_string());
-    let mut checks = Vec::new();
-
-    match configured_default_chain(namespace.clone()) {
-        Ok(chain) => checks.push(DoctorCheck {
-            id: String::new(),
-            status: if chain.providers().is_empty() {
-                DoctorStatus::Fail
-            } else {
-                DoctorStatus::Ok
-            },
-            label: "secret providers".to_string(),
-            detail: format!(
-                "{} (namespace {})",
-                configured.replace(',', " -> "),
-                namespace
-            ),
-            ..Default::default()
-        }),
-        Err(error) => {
-            checks.push(DoctorCheck {
-                id: String::new(),
-                status: DoctorStatus::Fail,
-                label: "secret providers".to_string(),
-                detail: error.to_string(),
-                ..Default::default()
-            });
-            return checks;
-        }
-    }
-
-    for provider in configured
-        .split(',')
-        .map(str::trim)
-        .filter(|provider| !provider.is_empty())
-    {
-        match provider {
-            "env" => {
-                let env_provider = EnvSecretProvider::new(namespace.clone());
-                let sample = env_provider.env_var_name(&SecretId::new("sample", "token"));
-                checks.push(DoctorCheck {
-                    id: String::new(),
-                    status: DoctorStatus::Ok,
-                    label: "secret:env".to_string(),
-                    detail: format!("reads process env via {sample}"),
-                    ..Default::default()
-                });
-            }
-            "keyring" => {
-                let keyring_provider = KeyringSecretProvider::new(namespace.clone());
-                match keyring_provider.healthcheck() {
-                    Ok(detail) => checks.push(DoctorCheck {
-                        id: String::new(),
-                        status: DoctorStatus::Ok,
-                        label: "secret:keyring".to_string(),
-                        detail,
-                        ..Default::default()
-                    }),
-                    Err(error) => checks.push(DoctorCheck {
-                        id: String::new(),
-                        status: DoctorStatus::Fail,
-                        label: "secret:keyring".to_string(),
-                        detail: error.to_string(),
-                        ..Default::default()
-                    }),
-                }
-            }
-            other => checks.push(DoctorCheck {
-                id: String::new(),
-                status: DoctorStatus::Fail,
-                label: format!("secret:{other}"),
-                detail: format!("unsupported provider '{other}'"),
-                ..Default::default()
-            }),
-        }
     }
 
     checks

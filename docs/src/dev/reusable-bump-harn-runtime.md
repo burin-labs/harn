@@ -221,15 +221,17 @@ target runtime's `LiveBumpRemote` contract. The GitHub driver checks that
 contract before it can refresh or publish a branch. Older runtimes are refused
 rather than silently refreshing without authenticated repair preservation.
 
-The opposite skew is a release whose runtime the promoted driver cannot drive.
-Publishing a release starts every consumer's bump at once, and each bump runs
-the driver from the orchestration commit `harn-bump-fleet` promoted, which is
-usually older than the release. The release candidate run therefore
-type-checks that promoted driver against the candidate binary
-(`scripts/check_promoted_bump_orchestration.harn`) and refuses the candidate
-when it fails. A pull request may change a `std/bump` contract the driver
-implements; promote the orchestration to a main commit carrying the matching
-driver before cutting the release.
+The opposite skew is a release whose runtime the consumers' driver cannot
+drive. Every bump runs the driver from the orchestration commit
+`harn-bump-fleet` pins, so a release never dispatches fleet-owned bumps
+directly. Its `repin` job starts the fleet's
+`promote-released-orchestration.yml`, which moves the pin to the released
+commit, or keeps a pin that is already newer. Each consumer adapter then
+converges to that pin, and its landing starts that consumer's bump. The release
+candidate run type-checks the driver that promotion will select against the
+candidate binary (`scripts/check_promoted_bump_orchestration.harn`) and refuses
+the candidate when it fails. It warns when the current, older pin fails, since
+a bump dispatched by hand before convergence still runs that driver.
 
 ## Security boundary
 

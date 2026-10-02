@@ -312,7 +312,7 @@ echo "ok: harn warm build ($(( $(date +%s) - started ))s)"
 # `-k` (keep-going) runs every gate even when one fails, then make exits
 # non-zero — so CI sees the full verdict set, not just the first failure.
 # `-O` (--output-sync) groups each gate's output so parallel logs don't
-# interleave; it needs GNU Make >= 4.0 (ubuntu-latest ships 4.3), so it is
+# interleave; it needs GNU Make >= 4.0 (ubuntu-24.04 ships 4.3), so it is
 # added only when supported to keep the script portable to macOS's Make 3.81.
 output_sync=""
 if make --help 2>&1 | grep -q -- "--output-sync"; then
