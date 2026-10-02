@@ -25,6 +25,9 @@ today="$(date -u +%F)"
 run_url="https://github.com/$GH_REPO/actions/runs/${GITHUB_RUN_ID}"
 sha=""
 posted=0
+# Runs read per suite. The registry caps health_failures at 10 so a run-level
+# streak always fits.
+RUN_WINDOW=12
 
 post() { # state description
   gh api "repos/$GH_REPO/statuses/$sha" -X POST \
@@ -88,13 +91,14 @@ while IFS=$'\t' read -r suite threshold job; do
     continue
   fi
 
-  # `conclusion` is empty while a run is still going; drop those so an
-  # in-flight run cannot break a streak that is genuinely unbroken.
+  # Every row is kept here so the window's size is known; in-flight runs
+  # (empty conclusion, printed as `-`) and cancelled ones are passed over
+  # below so they cannot break a streak that is genuinely unbroken.
   if ! runs="$(
     gh run list --repo "$GH_REPO" --workflow "$suite" \
-      --event schedule --branch main --limit 12 \
+      --event schedule --branch main --limit "$RUN_WINDOW" \
       --json databaseId,conclusion \
-      --jq '.[] | select(.conclusion != null and .conclusion != "" and .conclusion != "cancelled") | "\(.databaseId) \(.conclusion)"'
+      --jq '.[] | "\(.databaseId) \(if (.conclusion // "") == "" then "-" else .conclusion end)"'
   )"; then
     unreadable+=("$suite")
     summary "| $suite | — | **UNREADABLE — run history request failed** |"
@@ -105,6 +109,7 @@ while IFS=$'\t' read -r suite threshold job; do
   job_read_failed=0
   while read -r run_id conclusion; do
     [[ -n "$run_id" ]] || continue
+    [[ "$conclusion" != "-" && "$conclusion" != cancelled ]] || continue
     (( ${#outcomes[@]} < threshold )) || break
     if [[ -n "$job" ]]; then
       # A run whose judged job did not run measured nothing and is passed
@@ -136,6 +141,17 @@ while IFS=$'\t' read -r suite threshold job; do
     [[ "$outcome" == "failure" ]] || break
     streak=$((streak + 1))
   done
+
+  # Every measured outcome read is red, yet there are fewer than the threshold
+  # and the window of runs was full, so older runs were never read. That
+  # happens when most runs did not measure the judged job; the streak could
+  # already be past the threshold, so the suite is unreadable, not ok.
+  window_rows="$(grep -c . <<< "$runs" || true)"
+  if (( streak < threshold && streak == ${#outcomes[@]} && window_rows >= RUN_WINDOW )); then
+    unreadable+=("$suite")
+    summary "| $suite | ${outcomes[*]} | **UNREADABLE — only ${#outcomes[@]} measured run(s) in the newest $RUN_WINDOW, all red** |"
+    continue
+  fi
 
   if (( streak >= threshold )); then
     broken+=("$suite (${streak} consecutive)")
