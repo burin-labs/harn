@@ -778,6 +778,23 @@ pub trait SecretProvider: Send + Sync {
     fn locator(&self, _id: &SecretId) -> Option<String> {
         None
     }
+
+    /// The provider kind as named in `HARN_SECRET_PROVIDERS` (`env`,
+    /// `keyring`, `file`). Write receipts name it so a caller can tell which
+    /// backend stored a value.
+    fn kind(&self) -> &str {
+        self.namespace()
+    }
+
+    /// Whether a successful `put` outlives this process.
+    ///
+    /// The environment provider only mutates the running process, so a chain
+    /// routes writes past it to the first provider that persists. Without
+    /// that, `env,keyring` would accept every write into a variable that
+    /// vanishes at exit and never reach the keyring.
+    fn persists_writes(&self) -> bool {
+        true
+    }
 }
 
 pub fn ensure_scoped_secret_access_allowed(
@@ -834,6 +851,42 @@ impl ChainSecretProvider {
 
     pub fn excluded(&self) -> &[ExcludedSecretProvider] {
         &self.excluded
+    }
+
+    /// Store `value` in the first provider whose writes persist, returning
+    /// that provider's kind. Providers that only affect this process (the
+    /// environment) are written only when the chain has no persistent
+    /// provider at all; a chain that has one never reports success for a
+    /// write that will vanish at exit.
+    async fn put_to_write_target(
+        &self,
+        id: &SecretId,
+        value: SecretBytes,
+    ) -> Result<String, SecretError> {
+        if self.providers.is_empty() {
+            return Err(SecretError::NoProviders {
+                namespace: self.namespace.clone(),
+            });
+        }
+        let persistent = self
+            .providers
+            .iter()
+            .filter(|provider| provider.persists_writes())
+            .collect::<Vec<_>>();
+        let targets = if persistent.is_empty() {
+            self.providers.iter().collect::<Vec<_>>()
+        } else {
+            persistent
+        };
+
+        let mut errors = Vec::new();
+        for provider in targets {
+            match provider.put(id, value.reborrow()).await {
+                Ok(()) => return Ok(provider.kind().to_string()),
+                Err(error) => errors.push(error),
+            }
+        }
+        Err(SecretError::All(errors))
     }
 
     /// Fold per-provider failures into one error. When every provider reported
@@ -910,32 +963,28 @@ impl SecretProvider for ChainSecretProvider {
     }
 
     async fn put(&self, id: &SecretId, value: SecretBytes) -> Result<(), SecretError> {
-        if self.providers.is_empty() {
-            return Err(SecretError::NoProviders {
-                namespace: self.namespace.clone(),
+        self.put_to_write_target(id, value).await.map(|_| ())
+    }
+
+    async fn write_scoped(
+        &self,
+        request: SecretWriteRequest,
+    ) -> Result<SecretWriteReceipt, SecretError> {
+        ensure_scoped_secret_access_allowed("write", &request.id)?;
+        if request.options.ttl.is_some() {
+            return Err(SecretError::Unsupported {
+                provider: self.namespace.clone(),
+                operation: "write_ttl",
             });
         }
-
-        let mut last_value = Some(value);
-        let mut errors = Vec::new();
-        for (index, provider) in self.providers.iter().enumerate() {
-            let attempt_value = if index + 1 == self.providers.len() {
-                last_value
-                    .take()
-                    .expect("final secret write attempt missing value")
-            } else {
-                last_value
-                    .as_ref()
-                    .expect("intermediate secret write attempt missing value")
-                    .reborrow()
-            };
-            match provider.put(id, attempt_value).await {
-                Ok(()) => return Ok(()),
-                Err(error) => errors.push(error),
-            }
-        }
-
-        Err(SecretError::All(errors))
+        let provider = self.put_to_write_target(&request.id, request.value).await?;
+        Ok(SecretWriteReceipt {
+            provider,
+            id: request.id,
+            scope: request.scope,
+            version: None,
+            expires_at_unix_ms: None,
+        })
     }
 
     async fn rotate(&self, id: &SecretId) -> Result<RotationHandle, SecretError> {
