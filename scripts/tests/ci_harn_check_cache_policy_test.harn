@@ -50,6 +50,14 @@ fn audit_job(save_step: dict, actions_permission: string = "write") -> dict {
   }
 }
 
+/** A workflow that triggers the way a writer must: its own push and schedule. */
+fn writer_doc(jobs: dict) -> dict {
+  return {
+    on: {push: {branches: ["main"]}, schedule: [{cron: "27 */3 * * *"}], workflow_dispatch: {}},
+    jobs: jobs,
+  }
+}
+
 fn save_step() -> dict {
   return {
     name: "Save Harn check cache",
@@ -70,11 +78,23 @@ pipeline test_harn_check_cache_shipped_actions_and_writers_pass(harness: Harness
   assert(is_ok(loaded))
   const policy = ci_cache_policy_parse(unwrap(loaded))
   assert(policy != nil)
-  // Non-vacuous: the shipped policy registers the sources lane, and the
-  // shipped workflow really saves it.
+  // Non-vacuous: the shipped policy registers the sources lane, the shipped
+  // refresh workflow really saves it, and ci.yml really restores it.
   assert(policy.harn_check_cache_writers.any({ writer -> writer.family == "audit" }))
-  const ci = read_yaml(harness.fs, "../../.github/workflows/ci.yml")
-  assert_eq(harn_check_cache_writer_errors(policy, {"ci.yml": ci}), [])
+  const shipped = {
+    "ci.yml": read_yaml(harness.fs, "../../.github/workflows/ci.yml"),
+    "harn-check-cache-refresh.yml": read_yaml(
+      harness.fs,
+      "../../.github/workflows/harn-check-cache-refresh.yml",
+    ),
+  }
+  assert_eq(harn_check_cache_writer_errors(policy, shipped), [])
+  // Without the refresh workflow, ci.yml's restores name families nobody saves.
+  assert(
+    harn_check_cache_writer_errors(policy, {"ci.yml": shipped["ci.yml"]}).contains(
+      "ci.yml:harn-audit:audit restores a Harn check cache family no writer saves; name a saved family or remove the step",
+    ),
+  )
 }
 
 @test
@@ -197,7 +217,7 @@ pipeline test_harn_check_cache_writers_must_be_registered_active_and_restored(
   assert_eq(
     harn_check_cache_writer_errors(
       policy(),
-      {"ci.yml": {jobs: {"harn-audit": audit_job(save_step())}}},
+      {"ci.yml": writer_doc({"harn-audit": audit_job(save_step())})},
     ),
     [],
   )
@@ -213,9 +233,8 @@ pipeline test_harn_check_cache_writers_must_be_registered_active_and_restored(
     },
   }
   assert(
-    harn_check_cache_writer_errors(policy(), {"ci.yml": {jobs: {"harn-audit": rogue}}}).contains(
-      "ci.yml:harn-audit:audit-docs is not an authorized Harn check cache writer",
-    ),
+    harn_check_cache_writer_errors(policy(), {"ci.yml": writer_doc({"harn-audit": rogue})})
+      .contains("ci.yml:harn-audit:audit-docs is not an authorized Harn check cache writer"),
   )
   // A registered writer that no workflow runs.
   assert(
@@ -230,7 +249,7 @@ pipeline test_harn_check_cache_writers_must_be_registered_active_and_restored(
     steps: [no_restore.steps[0], no_restore.steps[2], no_restore.steps[3]],
   }
   assert(
-    harn_check_cache_writer_errors(policy(), {"ci.yml": {jobs: {"harn-audit": unrestored}}})
+    harn_check_cache_writer_errors(policy(), {"ci.yml": writer_doc({"harn-audit": unrestored})})
       .contains(
         "ci.yml:harn-audit:audit must restore the same family earlier in the job, which is what points HARN_CACHE_DIR at the saved paths",
       ),
@@ -239,7 +258,7 @@ pipeline test_harn_check_cache_writers_must_be_registered_active_and_restored(
   const fatal = audit_job({...save_step(), "continue-on-error": nil}, "read")
   const fatal_errors = harn_check_cache_writer_errors(
     policy(),
-    {"ci.yml": {jobs: {"harn-audit": fatal}}},
+    {"ci.yml": writer_doc({"harn-audit": fatal})},
   )
   assert(
     fatal_errors.contains(
@@ -258,12 +277,37 @@ pipeline test_harn_check_cache_writers_must_be_registered_active_and_restored(
   assert(
     harn_check_cache_writer_errors(
       policy(),
-      {"ci.yml": {jobs: {"harn-audit": audit_job(save_step()), reader: reader}}},
+      {"ci.yml": writer_doc({"harn-audit": audit_job(save_step()), reader: reader})},
     )
       .contains(
         "ci.yml:reader:audit-renamed restores a Harn check cache family no writer saves; name a saved family or remove the step",
       ),
   )
+}
+
+@test
+pipeline test_harn_check_cache_writer_cannot_depend_on_push_routing(
+  harness: Harness,
+  task: unknown,
+) {
+  const routed =
+    "ci.yml:harn-audit must write the Harn check cache on its own push-to-main and scheduled triggers, with no merge-queue trigger, needs, or job condition that push routing could skip"
+  const job = audit_job(save_step())
+  // The first writer: an audit lane gated on the push router's verdict.
+  const gated = {...job, needs: ["changes"], if: "needs.changes.outputs.rust == 'true'"}
+  assert(
+    harn_check_cache_writer_errors(policy(), {"ci.yml": writer_doc({"harn-audit": gated})})
+      .contains(routed),
+  )
+  // No scheduled backstop: a quiet main leaves the family unwritten.
+  const unscheduled = {on: {push: {branches: ["main"]}}, jobs: {"harn-audit": job}}
+  assert(harn_check_cache_writer_errors(policy(), {"ci.yml": unscheduled}).contains(routed))
+  // Riding the merge queue: the queue is optional.
+  const queued = {
+    on: {...writer_doc({})["on"], merge_group: {types: ["checks_requested"]}},
+    jobs: {"harn-audit": job},
+  }
+  assert(harn_check_cache_writer_errors(policy(), {"ci.yml": queued}).contains(routed))
 }
 
 @test

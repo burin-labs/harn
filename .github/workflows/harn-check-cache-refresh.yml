@@ -1,0 +1,126 @@
+name: Refresh Harn check cache
+
+# The sole writer of Harn's own check cache (check results and compiled
+# modules) for the audit lanes in ci.yml, which only restore it.
+#
+# The writer used to be the audit lanes' own main-push run. Main pushes skip
+# those lanes whenever the merge-queue run already proved the same commit, so
+# that writer stopped exactly when the queue worked well, and the restored
+# entries aged until they all missed. This workflow fires on every push to
+# main, on a three-hourly backstop, and by hand, and it reaches the CLI through
+# the commit rather than through the push run, so push routing cannot turn it
+# off.
+#
+# Each family runs only the commands whose cache the audit lane reuses, cold,
+# so the saved entry is exactly one commit's working set: `make lint-harn` for
+# the sources lane, and the two script suites for the script-test lane.
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    # Minute 27 is unused by the other scheduled workflows.
+    - cron: "27 */3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  refresh:
+    name: Refresh Harn check cache (${{ matrix.family }})
+    runs-on: ubuntu-latest
+    # A running refresh is never cancelled: under a steady stream of pushes a
+    # cancelling group would kill every run before it saved. GitHub keeps the
+    # running job and the newest pending one.
+    concurrency:
+      group: harn-check-cache-refresh-${{ matrix.family }}
+      cancel-in-progress: false
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - family: audit
+            command: make -j4 lint-harn
+          - family: audit-scripts
+            command: make test-agent-scripts test-harn-scripts
+    # actions: write lets the save prune the generation it superseded and
+    # read the CLI artifact another run published.
+    permissions:
+      actions: write
+      contents: read
+    env:
+      HARN_RUNNER_TIER: github-hosted
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The CLI may belong to an older main commit than this run's head;
+          # full history lets the job switch to it without another fetch.
+          fetch-depth: 0
+          # Same reason as ci.yml's audit lanes: a persisted credential leaves
+          # an include in .git/config that the Harn sandbox cannot read.
+          persist-credentials: false
+      - uses: ./.github/actions/harn-check-cache
+        with:
+          family: ${{ matrix.family }}
+      - name: Install Harn script test dependencies
+        uses: ./.github/actions/apt-install
+        timeout-minutes: 5
+        with:
+          packages: ripgrep
+          check-command: rg
+      - name: Find the newest main commit with a shared Harn binary
+        id: cli
+        env:
+          GH_REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
+        run: ./scripts/ci/resolve_main_cli_artifact.sh "$GITHUB_OUTPUT"
+      - name: Check out the commit the binary was built from
+        env:
+          CLI_SHA: ${{ steps.cli.outputs.sha }}
+        run: git checkout --quiet --detach "$CLI_SHA"
+      - name: Download shared Harn binary
+        env:
+          GH_REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
+          CLI_ARTIFACT_ID: ${{ steps.cli.outputs.artifact_id }}
+        # The artifact is published unarchived, so the download is the file.
+        run: >-
+          gh api "repos/$GH_REPO/actions/artifacts/$CLI_ARTIFACT_ID/zip"
+          > "$RUNNER_TEMP/harn-cli.tar.zst"
+      - name: Verify shared Harn binary
+        env:
+          CLI_SHA: ${{ steps.cli.outputs.sha }}
+        run: >-
+          ./scripts/ci/rust_artifact.sh restore-cli
+          "$RUNNER_TEMP/harn-cli.tar.zst"
+          "$RUNNER_TEMP/harn-cli"
+          "$CLI_SHA"
+          "$GITHUB_ENV"
+      - name: Warm the ${{ matrix.family }} cache
+        id: warm
+        env:
+          HARN_BIN_NO_BUILD: "1"
+          CHECK_CACHE_COMMAND: ${{ matrix.command }}
+          CHECK_CACHE_FAMILY: ${{ matrix.family }}
+        run: |
+          start=$(date +%s)
+          status=0
+          $CHECK_CACHE_COMMAND || status=$?
+          echo "Harn check cache warm ($CHECK_CACHE_FAMILY) took $(( $(date +%s) - start ))s, exit $status" \
+            | tee -a "$GITHUB_STEP_SUMMARY"
+          exit "$status"
+      # Save and prune with this run's own actions and scripts, not the older
+      # commit's.
+      - name: Return to the triggering commit
+        if: always() && steps.warm.outcome != 'skipped'
+        run: git checkout --quiet --force --detach "$GITHUB_SHA"
+      # Entries are keyed on their exact inputs, so a gate that failed still
+      # leaves correct ones; save them rather than discard the work.
+      - name: Save Harn check cache
+        if: always() && steps.warm.outcome != 'skipped'
+        continue-on-error: true
+        uses: ./.github/actions/harn-check-cache-save
+        with:
+          family: ${{ matrix.family }}

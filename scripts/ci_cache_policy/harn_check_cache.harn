@@ -153,6 +153,38 @@ fn writer_site(workflow: string, job: string, family: string) -> string {
 }
 
 /**
+ * A writer must run whether or not anything else on main runs.
+ *
+ * The first writer was the audit lanes' own main-push run, and main pushes
+ * skip those lanes whenever the merge-queue run already proved the commit. A
+ * writer that only runs when push routing happens to send work its way stops
+ * silently, and its family ages until every restored entry misses. So it needs
+ * its own push trigger and a scheduled backstop, no merge-queue dependency, and
+ * no `needs` or `if` through which another job's routing could skip it.
+ */
+fn writer_routing_errors(
+  workflow_doc: dict,
+  workflow: string,
+  job: string,
+  definition: dict,
+) -> list<string> {
+  const triggers = workflow_doc["on"] ?? {}
+  const push_branches = (triggers?.push?.branches ?? []).map({ branch -> trim(to_string(branch)) })
+    .to_list()
+  const crons = (triggers?.schedule ?? []).filter({ row -> trim(to_string(row?.cron ?? "")) != "" })
+    .to_list()
+  if push_branches.contains("main") && len(crons) > 0
+    && !contains(to_string(triggers.keys()), "merge_group")
+    && definition?.needs == nil
+    && definition?.if == nil {
+    return []
+  }
+  return [
+    "${workflow}:${job} must write the Harn check cache on its own push-to-main and scheduled triggers, with no merge-queue trigger, needs, or job condition that push routing could skip",
+  ]
+}
+
+/**
  * Every save is a registered writer, every registered writer is active, every
  * restore names a family something saves, and a saving job restores first (the
  * restore is what points HARN_CACHE_DIR at the saved paths), may prune, and
@@ -213,6 +245,7 @@ pub fn harn_check_cache_writer_errors(policy: CiCachePolicy, workflows: dict) ->
               "${workflow}:${job} must grant actions: write so its save can prune the superseded generation",
             ]
         }
+        errors = errors + writer_routing_errors(workflows[workflow], workflow, job, definition)
       }
     }
   }

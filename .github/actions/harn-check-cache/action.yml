@@ -7,7 +7,8 @@ description: >
   fingerprints, the Harn version, the effective config and the filesystem
   probes the check made, so a restored entry from an older commit can only
   miss, never answer for different inputs. Pair with
-  ./.github/actions/harn-check-cache-save on main.
+  ./.github/actions/harn-check-cache-save on main; the registered writer is
+  .github/workflows/harn-check-cache-refresh.yml.
 
   Main deliberately starts cold. Nothing in the cache evicts, so a writer that
   restored first would carry every superseded entry forward forever; a cold
@@ -59,20 +60,20 @@ runs:
     - name: Report Harn check cache restore
       shell: bash
       env:
-        HARN_CHECK_CACHE_MATCHED_KEY: ${{ steps.restore.outputs.cache-matched-key }}
-        HARN_CHECK_CACHE_RESTORE_OUTCOME: ${{ steps.restore.outcome }}
+        CHECK_CACHE_MATCHED_KEY: ${{ steps.restore.outputs.cache-matched-key }}
+        CHECK_CACHE_RESTORE_OUTCOME: ${{ steps.restore.outcome }}
       run: |
         set -euo pipefail
         dir="$HOME/.cache/harn-ci"
         mkdir -p "$dir/check"
         results=$(find "$dir/check" -type f -name '*.harncheck' | wc -l | tr -d ' ')
         modules=$(find "$dir" -maxdepth 1 -type f \( -name '*.harnbc' -o -name '*.harnmod' \) | wc -l | tr -d ' ')
-        if [ "$HARN_CHECK_CACHE_RESTORE_OUTCOME" = skipped ]; then
+        if [ "$CHECK_CACHE_RESTORE_OUTCOME" = skipped ]; then
           state="cold by design: main saves the working set of this commit"
-        elif [ -n "$HARN_CHECK_CACHE_MATCHED_KEY" ]; then
-          state="restored $HARN_CHECK_CACHE_MATCHED_KEY"
+        elif [ -n "$CHECK_CACHE_MATCHED_KEY" ]; then
+          state="restored $CHECK_CACHE_MATCHED_KEY"
         else
-          state="cold: no saved generation (restore outcome: $HARN_CHECK_CACHE_RESTORE_OUTCOME)"
+          state="cold: no saved generation (restore outcome: $CHECK_CACHE_RESTORE_OUTCOME)"
         fi
         line="Harn check cache: $state; $results check results, $modules compiled modules"
         echo "$line"
