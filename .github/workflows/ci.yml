@@ -80,7 +80,9 @@ jobs:
   # `rust-check-inputs` may use the owned pool on same-repository pull requests.
   # A measured online pool queues work even when busy; zero online carriers or
   # retired owned routing selects hosted capacity. An unreadable census blocks
-  # dispatch. Merge groups and main pushes retain their hosted routing (#8334).
+  # dispatch. Merge groups may use the datacenter host's general runners
+  # (`hetzner-1`) when a second census finds one idle; the residential hosts
+  # stay pull-request-only (#6217). Main pushes retain their hosted routing.
   # The shared CLI producer is the exception: on pull requests and merge
   # groups it prefers runners reserved for it alone (`harn-ci-producer`).
 
@@ -922,6 +924,22 @@ jobs:
       RELEASE_APP_CLIENT_ID: ${{ secrets.RELEASE_APP_CLIENT_ID }}
       RELEASE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
 
+  # The datacenter host's general runners alone, for merge groups. The census
+  # counts Linux runners carrying its base tag AND its fetch tag in the fetch
+  # lane, so `harn-ci-big` plus the host label is exactly those runners: the
+  # host's reserved CLI runners lack `harn-ci-big`, and the residential hosts
+  # lack the host label. Merge groups route there only when one is idle, so a
+  # busy or absent host costs the queue nothing it did not already pay.
+  datacenter-availability:
+    if: github.event_name == 'merge_group'
+    uses: burin-labs/.github/.github/workflows/runner-availability.yml@550bff235c4bf6818ece3b27e0905bcf48aaee8b
+    with:
+      linux_runner_tag: harn-ci-big
+      linux_fetch_runner_tag: hetzner-1
+    secrets:
+      RELEASE_APP_CLIENT_ID: ${{ secrets.RELEASE_APP_CLIENT_ID }}
+      RELEASE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+
   # Say where the producer is about to land, and name a hosted fallback when
   # the census cannot be read. The routing expression below reads this job's
   # route output instead of the census, so a census outage routes the producer
@@ -930,7 +948,7 @@ jobs:
   # skipping here would skip the required producer behind it.
   rust-producer-capacity:
     name: Name the Rust producer runner capacity decision
-    needs: runner-availability
+    needs: [runner-availability, datacenter-availability]
     if: >-
       ${{ !cancelled() && (github.event_name == 'merge_group'
         || (github.event_name == 'pull_request'
@@ -942,6 +960,8 @@ jobs:
       fallback: ${{ steps.decision.outputs.fallback }}
       cli_route: ${{ steps.cli-decision.outputs.route }}
       cli_fallback: ${{ steps.cli-decision.outputs.fallback }}
+      merge_route: ${{ steps.merge-decision.outputs.route }}
+      merge_fallback: ${{ steps.merge-decision.outputs.fallback }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -983,6 +1003,24 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           SELFHOSTED_DISABLED: ${{ needs.runner-availability.outputs.selfhosted_disabled }}
           RUNNER_CAPACITY: ${{ needs.runner-availability.outputs.capacity }}
+          PAID_LINUX_PROVIDER: ${{ vars.HARN_CI_PAID_LINUX_PROVIDER }}
+          CAPACITY_VENDOR_RUNNER: ubicloud-standard-8
+          CAPACITY_HOSTED_RUNNER: ubuntu-8core
+      # The workspace test producer's merge-group decision, over the
+      # datacenter host's general runners alone. Every other event names
+      # `hosted` here without reading the count, and the pull-request
+      # decision above stays the one that routes pull requests.
+      - name: Decide where a merge group's workspace producer lands
+        id: merge-decision
+        run: bash scripts/ci/runner_capacity.sh
+        env:
+          CAPACITY_LABEL: MERGE_PRODUCER_CAPACITY
+          CAPACITY_POOL: linux_fetch
+          CAPACITY_ROUTED_EVENT: merge_group
+          EVENT_NAME: ${{ github.event_name }}
+          SELFHOSTED_DISABLED: ${{ needs.datacenter-availability.outputs.selfhosted_disabled }}
+          RUNNER_CAPACITY: ${{ needs.datacenter-availability.outputs.capacity }}
+          FLEET_EVACUATION: ${{ vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true' }}
           PAID_LINUX_PROVIDER: ${{ vars.HARN_CI_PAID_LINUX_PROVIDER }}
           CAPACITY_VENDOR_RUNNER: ubicloud-standard-8
           CAPACITY_HOSTED_RUNNER: ubuntu-8core
@@ -1181,15 +1219,22 @@ jobs:
     # The owned self-hosted rung is the same arithmetic minus the cache-save
     # reserve, with bounded cold retries: 6 setup + 24 + 26 = 56. It is a
     # hang backstop, not a claim about host core count or improved performance.
+    # A merge group's datacenter leg instead gets 20 minutes, about twice its
+    # measured 10.1-minute median: the queue waits on this job, so a runner
+    # that dies after admission should cost one short retry, not an hour.
     runs-on: >-
       ${{ (needs.rust-producer-capacity.outputs.route == 'owned'
         && fromJSON('["self-hosted", "Linux", "X64", "harn-ci-big"]'))
+        || (needs.rust-producer-capacity.outputs.merge_route == 'owned'
+        && fromJSON('["self-hosted", "Linux", "X64", "harn-ci-big", "hetzner-1"]'))
         || (vars.HARN_CI_PAID_LINUX_PROVIDER != 'github'
         && 'ubicloud-standard-8')
         || 'ubuntu-8core' }}
     timeout-minutes: >-
       ${{ (needs.rust-producer-capacity.outputs.route == 'owned'
         && 56)
+        || (needs.rust-producer-capacity.outputs.merge_route == 'owned'
+        && 20)
         || (vars.HARN_CI_PAID_LINUX_PROVIDER != 'github'
         && 60)
         || 60 }}
@@ -1220,6 +1265,8 @@ jobs:
       SCCACHE_CACHE_SIZE: 15G
       HARN_RUNNER_TIER: >-
         ${{ (needs.rust-producer-capacity.outputs.route == 'owned'
+          && 'self-hosted')
+          || (needs.rust-producer-capacity.outputs.merge_route == 'owned'
           && 'self-hosted')
           || (vars.HARN_CI_PAID_LINUX_PROVIDER != 'github'
           && 'ubicloud')

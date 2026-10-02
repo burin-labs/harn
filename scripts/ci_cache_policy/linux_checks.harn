@@ -176,14 +176,28 @@ fn hosted_ceiling_minutes(budgets: list<StepBudget>) -> int {
   return total
 }
 
+/**
+ * The merge-group datacenter rung's ceiling: about twice its measured wall.
+ * Seven successful "Rust workspace tests" runs on hetzner-1's general runners
+ * on 2026-10-02 took a median of 10.1 minutes (max 11.7), against 9.7 on
+ * `ubicloud-standard-8` (n=15, max 11.9). A merge group waits on this job, so
+ * a runner that dies after admission costs one short retry, not the owned
+ * pool's cold-build ceiling. Pull requests keep that ceiling.
+ */
+pub const DATACENTER_MERGE_GROUP_TIMEOUT_MINUTES = 20
+
 fn timeout_expression(budgets: list<StepBudget>, owned_rung: bool = true) -> string {
   // The vendor rung is a fresh VM that runs this job alone and writes the
   // main-branch cache like the hosted rung, so it carries the hosted ceiling,
   // cache-save reserve included.
+  const paid = to_string(hosted_ceiling_minutes(budgets))
   return producer_rung_expression(
-    owned_rung ? to_string(owned_ceiling_minutes(budgets)) : "",
-    to_string(hosted_ceiling_minutes(budgets)),
-    to_string(hosted_ceiling_minutes(budgets)),
+    {
+      owned: owned_rung ? to_string(owned_ceiling_minutes(budgets)) : "",
+      datacenter: owned_rung ? to_string(DATACENTER_MERGE_GROUP_TIMEOUT_MINUTES) : "",
+      vendor: paid,
+      hosted: paid,
+    },
   )
 }
 
@@ -250,7 +264,7 @@ fn producer_job_ladder(job_name: string) -> string {
     return " the reserved ${RESERVED_CLI_PRODUCER_LABEL} runners on same-repository pull requests and merge groups,"
   }
   if producer_uses_owned_pool(job_name) {
-    return " the owned ${SELFHOSTED_LINUX_BIG_POOL} pool on same-repository pull requests,"
+    return " the owned ${SELFHOSTED_LINUX_BIG_POOL} pool on same-repository pull requests, the ${DATACENTER_HOST_LABEL} runners on merge groups,"
   }
   return ""
 }
@@ -460,6 +474,8 @@ fn persistent_compile_lane_errors(
   }
   if job_name == "rust-cli" {
     errors = errors + cli_producer_reservation_errors(workflow)
+  } else if producer_uses_owned_pool(job_name) {
+    errors = errors + merge_group_datacenter_errors(workflow)
   }
   if trim(job?.env?.[RUNNER_TIER_ENV] ?? "") != producer_job_tier_expression(job_name) {
     errors = errors
@@ -470,9 +486,11 @@ fn persistent_compile_lane_errors(
   }
   if trim(to_string(job?.["timeout-minutes"] ?? ""))
     != producer_job_timeout_expression(job_name, budgets) {
+    const datacenter =
+      job_name != "rust-cli" && producer_uses_owned_pool(job_name) ? ", the ${DATACENTER_MERGE_GROUP_TIMEOUT_MINUTES}-minute merge-group datacenter ceiling" : ""
     errors = errors
       + [
-        "ci.yml:${job_name} must keep the ${owned_ceiling_minutes(budgets)}-minute owned ceiling and the ${hosted_ceiling_minutes(budgets)}-minute paid ceiling sized from its step budgets plus a cache-save reserve",
+        "ci.yml:${job_name} must keep the ${owned_ceiling_minutes(budgets)}-minute owned ceiling${datacenter} and the ${hosted_ceiling_minutes(budgets)}-minute paid ceiling sized from its step budgets plus a cache-save reserve",
       ]
   }
   errors = errors + producer_step_budget_errors(job, job_name, budgets)
