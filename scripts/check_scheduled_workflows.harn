@@ -77,7 +77,41 @@ fn health_errors(path: string, record: dict, document: dict?) -> list<string> {
   if job != "" && document != nil && !job_display_names(document).contains(job) {
     return [path + ": health_job names no job in the workflow: " + job]
   }
+  if record?.health_events != nil && len(strings(record.health_events)) == 0 {
+    return [path + ": health_events is empty"]
+  }
+  if document != nil {
+    const triggers = workflow_triggers(document)
+    for event in health_events(record) {
+      if !triggers.contains(event) {
+        return [path + ": health_events names an event the workflow is not triggered by: " + event]
+      }
+    }
+  }
   return []
+}
+
+/** The run events a watched suite is judged on; `schedule` unless the row says otherwise. */
+pub fn health_events(record: dict) -> list<string> {
+  const declared = strings(record?.health_events)
+  if len(declared) == 0 {
+    return ["schedule"]
+  }
+  return declared
+}
+
+fn workflow_triggers(document: dict) -> list<string> {
+  const on = document["on"]
+  if type_of(on) == "dict" {
+    return on.keys()
+  }
+  return strings(
+    if type_of(on) == "list" {
+      on
+    } else {
+      [on]
+    },
+  )
 }
 
 pub fn scheduled_workflow_errors(records: list, documents: dict) -> list<string> {
@@ -203,12 +237,15 @@ fn main(harness: Harness) {
   }
   // `--health-suites` is how main health learns what to watch: the same
   // validated registry, one watched suite per line as
-  // `name<TAB>health_failures<TAB>health_job`.
+  // `name<TAB>health_failures<TAB>health_events<TAB>health_job`, where
+  // health_events is comma-separated.
   if argv.contains("--health-suites") {
     for record in records {
       if record?.health_failures != nil {
         harness.stdio.println(
           trim(to_string(record.name)) + "\t" + to_string(record.health_failures) + "\t"
+            + health_events(record).join(",")
+            + "\t"
             + trim(to_string(record?.health_job ?? "")),
         )
       }

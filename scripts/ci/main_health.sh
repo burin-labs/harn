@@ -80,7 +80,7 @@ ok=0
 summary "| suite | recent scheduled runs (newest first) | verdict |"
 summary "| --- | --- | --- |"
 
-while IFS=$'\t' read -r suite threshold job; do
+while IFS=$'\t' read -r suite threshold events job; do
   [[ -n "$suite" ]] || continue
 
   # Fixed-string, whole-line match: suite names contain spaces and hyphens, so
@@ -91,14 +91,21 @@ while IFS=$'\t' read -r suite threshold job; do
     continue
   fi
 
-  # Every row is kept here so the window's size is known; in-flight runs
-  # (empty conclusion, printed as `-`) and cancelled ones are passed over
-  # below so they cannot break a streak that is genuinely unbroken.
+  # The API filters by one event, so a suite judged on several reads every
+  # event and drops the others in the filter below.
+  event_filter=()
+  [[ "$events" == *,* ]] || event_filter=(--event "$events")
+
+  # Every row is kept here so the window's size is known. A run of an event
+  # the suite is not judged on, and an in-flight run (empty conclusion), print
+  # as `-`; they and cancelled runs are passed over below, so they cannot
+  # break a streak that is genuinely unbroken.
+  # shellcheck disable=SC2016 # `$e` is a jq variable.
   if ! runs="$(
-    gh run list --repo "$GH_REPO" --workflow "$suite" \
-      --event schedule --branch main --limit "$RUN_WINDOW" \
-      --json databaseId,conclusion \
-      --jq '.[] | "\(.databaseId) \(if (.conclusion // "") == "" then "-" else .conclusion end)"'
+    EVENTS="$events" gh run list --repo "$GH_REPO" --workflow "$suite" \
+      ${event_filter[@]+"${event_filter[@]}"} --branch main --limit "$RUN_WINDOW" \
+      --json databaseId,conclusion,event \
+      --jq '.[] | "\(.databaseId) \(if (.conclusion // "") == "" or ((.event as $e | env.EVENTS | split(",") | index($e)) == null) then "-" else .conclusion end)"'
   )"; then
     unreadable+=("$suite")
     summary "| $suite | — | **UNREADABLE — run history request failed** |"
@@ -114,11 +121,13 @@ while IFS=$'\t' read -r suite threshold job; do
     if [[ -n "$job" ]]; then
       # A run whose judged job did not run measured nothing and is passed
       # over. A failed request for the job list is not that: it is unreadable.
-      if ! conclusion="$(JOB="$job" gh api "repos/$GH_REPO/actions/runs/$run_id/jobs" \
+      # Every page of the run's jobs is read and the first match wins.
+      if ! conclusion="$(JOB="$job" gh api --paginate "repos/$GH_REPO/actions/runs/$run_id/jobs?filter=latest&per_page=100" \
         --jq '[.jobs[] | select(.name == env.JOB and .conclusion != "skipped")][0].conclusion // empty')"; then
         job_read_failed=1
         break
       fi
+      conclusion="$(grep -m1 . <<< "$conclusion" || true)"
       [[ -n "$conclusion" ]] || continue
     fi
     outcomes+=("$conclusion")
