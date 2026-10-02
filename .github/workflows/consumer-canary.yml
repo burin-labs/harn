@@ -43,7 +43,7 @@ concurrency:
 jobs:
   decide:
     name: Decide whether main moved
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
       actions: read
@@ -69,7 +69,7 @@ jobs:
     if: needs.decide.outputs.run == 'true'
     # Report-only: a red verdict shows on this job without failing the run.
     continue-on-error: true
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # Ten minutes above the canary's 55-minute verdict deadline, which is
     # sized to the consumer's observed ~45-minute rehearsal.
     timeout-minutes: 65
@@ -113,7 +113,7 @@ jobs:
     name: Settled verdict
     needs: consumers
     if: always() && (needs.consumers.outputs.verdict == 'pass' || needs.consumers.outputs.verdict == 'fail')
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 2
     permissions: {}
     steps:

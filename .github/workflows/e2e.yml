@@ -72,7 +72,7 @@ jobs:
   changes:
     name: Decide whether this pull request runs the E2E suite
     if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
       contents: read
@@ -135,7 +135,7 @@ jobs:
       github.event_name == 'schedule' ||
       github.event_name == 'workflow_dispatch' ||
       (github.event_name == 'pull_request' && needs.changes.outputs.should_run != 'false'))
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     outputs:
       route: ${{ steps.decision.outputs.route }}
@@ -179,7 +179,7 @@ jobs:
         && 'blacksmith-8vcpu-ubuntu-2404')
         || (needs.e2e-capacity.outputs.route == 'owned'
         && fromJSON('["self-hosted", "Linux", "X64", "harn-ci-big"]'))
-        || 'ubuntu-latest' }}
+        || 'ubuntu-24.04' }}
     # Read `!= 'false'` rather than `== 'true'`. A detector that failed, or
     # was skipped, leaves this empty, and treating an unread decision as "do
     # not run" is exactly the silence this workflow is being fixed for. The
@@ -243,7 +243,7 @@ jobs:
   # and main cannot be called green while its last executed slow run is red.
   notify:
     name: Surface unattended result
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: e2e
     # Scheduled and main-push runs manage the tracking issue: nobody is
     # watching either one live. Label/dispatch runs are watched by whoever

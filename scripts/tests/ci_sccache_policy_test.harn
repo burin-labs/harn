@@ -45,7 +45,7 @@ const BUDGET_STEP = {
 }
 
 const E2E_SWITCH_ROUTE =
-  "vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true' && 'blacksmith-8vcpu-ubuntu-2404' || 'ubuntu-latest'"
+  "vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true' && 'blacksmith-8vcpu-ubuntu-2404' || 'ubuntu-24.04'"
 
 fn e2e_workflow(runs_on: string, evacuation_input: string) -> dict {
   return {
@@ -70,7 +70,7 @@ pipeline test_e2e_paid_override_fails_when_runner_route_drops_switch(
   task: unknown,
 ) {
   const invalid = e2e_workflow(
-    "ubuntu-latest",
+    "ubuntu-24.04",
     gha_expression("vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true'"),
   )
   const errors = e2e_elastic_capacity_errors(invalid)
@@ -217,7 +217,7 @@ fn persistent_lane(
 fn hosted_lane(cache_key: string, write_cache: bool = false) {
   const cache_inputs = {"shared-key": cache_key, "cache-workspace-crates": "true"}
   let lane = {
-    "runs-on": "ubuntu-latest",
+    "runs-on": "ubuntu-24.04",
     env: {HARN_RUNNER_TIER: "github-hosted"},
     steps: [{uses: "./.github/actions/rust-cache", with: cache_inputs}],
   }
@@ -234,7 +234,7 @@ fn hosted_lane(cache_key: string, write_cache: bool = false) {
 fn lint_lane() {
   return {
     "runs-on": gha_expression(
-      "vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true' && (github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) && 'blacksmith-8vcpu-ubuntu-2404' || 'ubuntu-latest'",
+      "vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true' && (github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) && 'blacksmith-8vcpu-ubuntu-2404' || 'ubuntu-24.04'",
     ),
     env: {
       HARN_RUNNER_TIER: gha_expression(
@@ -273,7 +273,7 @@ fn workflow() {
   )
   const rust_test = {
     env: {RUSTFLAGS: "-D warnings -Clink-arg=-fuse-ld=mold"},
-    "runs-on": "ubuntu-latest",
+    "runs-on": "ubuntu-24.04",
     needs: ["changes", "rust-check-inputs"],
     if:
       "needs.changes.outputs.rust == 'true' && needs.rust-check-inputs.result == 'success' && vars.HARN_CI_DISABLE_COLOCATED_TESTS == 'true'",
@@ -345,7 +345,7 @@ fn workflow() {
           ],
       },
       "rust-artifacts-ready": {
-        "runs-on": "ubuntu-latest",
+        "runs-on": "ubuntu-24.04",
         "timeout-minutes": 50,
         needs: ["changes"],
         permissions: {actions: "read", contents: "read"},
@@ -369,7 +369,7 @@ fn workflow() {
           ],
       },
       "rust-cache-refresh": {
-        "runs-on": "ubuntu-latest",
+        "runs-on": "ubuntu-24.04",
         if: "needs.changes.outputs.rust_cache_refresh == 'true'",
         concurrency: {group: "harn-ci-rust-cache-refresh", "cancel-in-progress": false},
         permissions: {contents: "read", actions: "write"},
@@ -429,7 +429,7 @@ fn workflow() {
         ],
       },
       "security-tests-ready": {
-        "runs-on": "ubuntu-latest",
+        "runs-on": "ubuntu-24.04",
         "timeout-minutes": 50,
         needs: ["changes"],
         if:
@@ -443,7 +443,7 @@ fn workflow() {
         ],
       },
       "rust-security": {
-        "runs-on": "ubuntu-latest",
+        "runs-on": "ubuntu-24.04",
         needs: ["changes", "security-tests-ready"],
         if:
           "needs.changes.outputs.rust == 'true' && needs.security-tests-ready.result == 'success'",
@@ -457,7 +457,7 @@ fn workflow() {
         ],
       },
       "harn-audit": {
-        "runs-on": "ubuntu-latest",
+        "runs-on": "ubuntu-24.04",
         "timeout-minutes": 65,
         needs: ["changes"],
         if:
@@ -486,7 +486,7 @@ fn workflow() {
         ],
       },
       "ci-walltime-report": {
-        "runs-on": "ubuntu-latest",
+        "runs-on": "ubuntu-24.04",
         needs: artifact_consumer_needs,
         if: artifact_consumer_if,
         steps: [
@@ -505,7 +505,7 @@ fn workflow() {
         steps: [{name: "Check source file lengths"}],
       },
       "fast-policy-gates": {
-        "runs-on": "ubuntu-latest",
+        "runs-on": "ubuntu-24.04",
         needs: artifact_consumer_needs,
         // No event term: the refusals here must be able to refuse a pull
         // request, which is the whole reason this job exists.
@@ -528,7 +528,7 @@ fn workflow() {
         ],
       },
       "audit-scripts": {
-        "runs-on": "ubuntu-latest",
+        "runs-on": "ubuntu-24.04",
         needs: artifact_consumer_needs,
         if: artifact_consumer_if,
         steps: [
@@ -543,7 +543,7 @@ fn workflow() {
         ],
       },
       "shell-gates": {
-        "runs-on": "ubuntu-latest",
+        "runs-on": "ubuntu-24.04",
         needs: ["changes"],
         if: "needs.changes.outputs.rust == 'true'",
         "timeout-minutes": 20,
@@ -1223,7 +1223,7 @@ pipeline test_rejects_unowned_runner_routing(harness: Harness, task: unknown) {
         ...valid.jobs["package-audit"],
         "runs-on": gha_expression(
           "vars.CI_DISABLE_SELFHOSTED_LINUX != 'true'"
-            + " && fromJSON('[\"self-hosted\", \"Linux\", \"X64\"]') || 'ubuntu-latest'",
+            + " && fromJSON('[\"self-hosted\", \"Linux\", \"X64\"]') || 'ubuntu-24.04'",
         ),
       },
       "rust-checks": {
@@ -1236,7 +1236,7 @@ pipeline test_rejects_unowned_runner_routing(harness: Harness, task: unknown) {
     },
   }
   const errors = ci_linux_lane_policy_errors(invalid)
-  assert(errors.contains("ci.yml:package-audit must run on ubuntu-latest"))
+  assert(errors.contains("ci.yml:package-audit must run on ubuntu-24.04"))
   assert(
     errors.contains(
       "ci.yml:rust-checks must run exactly one fail-slow matrix leg per lint leg: workspace, lean-lsp, freshness-checker",
@@ -1311,7 +1311,7 @@ pipeline test_rejects_rust_lint_runner_switch_removal(harness: Harness, task: un
   const rust_job = valid.jobs["rust-checks"]
   const invalid = {
     ...valid,
-    jobs: {...valid.jobs, "rust-checks": {...rust_job, "runs-on": "ubuntu-latest"}},
+    jobs: {...valid.jobs, "rust-checks": {...rust_job, "runs-on": "ubuntu-24.04"}},
   }
   assert(
     ci_linux_lane_policy_errors(invalid).contains(
@@ -1529,7 +1529,7 @@ pipeline test_rejects_paid_producer_outside_trusted_events_or_without_fuse(
       "rust-check-inputs": {
         ...producer,
         "runs-on": gha_expression(
-          "vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true' && 'blacksmith-8vcpu-ubuntu-2404' || 'ubuntu-latest'",
+          "vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true' && 'blacksmith-8vcpu-ubuntu-2404' || 'ubuntu-24.04'",
         ),
         "timeout-minutes": 10,
         env: {

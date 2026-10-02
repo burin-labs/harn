@@ -44,7 +44,7 @@ jobs:
       github.event.workflow_run.event == 'push' &&
       github.event.workflow_run.head_branch == 'main' &&
       github.event.workflow_run.head_repository.full_name == github.repository
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
       actions: read
@@ -121,7 +121,7 @@ jobs:
       contents: read
       actions: read
       attestations: read
-    uses: burin-labs/.github/.github/workflows/promote-release.yml@5bf8c07287382b4492ad6d50b06da60c46936ad1
+    uses: burin-labs/.github/.github/workflows/promote-release.yml@47b97f48a4862d684f54a0b8ee7aa370d8bfc126
     with:
       sha: ${{ github.event.workflow_run.head_sha }}
       run-id: ${{ needs.plan.outputs.run_id }}
@@ -137,7 +137,7 @@ jobs:
     needs: [plan, promote]
     permissions:
       contents: read
-    uses: burin-labs/.github/.github/workflows/repin.yml@d33db398eec4f00e2fee4164afeb7157005bd4ba
+    uses: burin-labs/.github/.github/workflows/repin.yml@47b97f48a4862d684f54a0b8ee7aa370d8bfc126
     with:
       released-repository: ${{ github.repository }}
       tag: ${{ needs.promote.outputs.tag }}
@@ -148,7 +148,7 @@ jobs:
   container:
     name: Publish container
     needs: [plan, promote]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
       contents: read
@@ -254,7 +254,7 @@ jobs:
   open-development-bump:
     name: Open post-publication development bump
     needs: [plan, promote]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

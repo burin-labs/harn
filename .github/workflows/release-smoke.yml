@@ -54,7 +54,7 @@ jobs:
       matrix:
         include:
           - platform: linux
-            runner: ubuntu-latest
+            runner: ubuntu-24.04
             harn_binary: target/release/harn
           - platform: linux-arm64
             # Activates the already-present `Linux-ARM64` case in the resolve
