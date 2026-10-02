@@ -2,7 +2,7 @@
 set -euo pipefail
 
 usage() {
-  echo "usage: $0 <owner/repository> <workflow-file> <commit-sha> [--require-job <job-name>]" >&2
+  echo "usage: $0 <owner/repository> <workflow-file> <commit-sha> [--require-job <job-name>] [--allow-pending-job <job-name>]" >&2
 }
 
 fail_closed() {
@@ -11,7 +11,7 @@ fail_closed() {
   exit 0
 }
 
-if [[ $# -ne 3 && $# -ne 5 ]]; then
+if [[ $# -lt 3 ]]; then
   usage
   exit 2
 fi
@@ -19,14 +19,25 @@ fi
 repository=$1
 workflow_file=$2
 commit_sha=$3
+shift 3
 required_job=""
-if [[ $# -eq 5 ]]; then
-  if [[ "$4" != "--require-job" || -z "$5" || "$5" == *$'\n'* ]]; then
+# A job the merge verdict does not wait for may still be running in an
+# otherwise proven run. Only the push router passes this: it decides whether to
+# re-run heavy lanes, and the pending job's check lands on this same commit
+# either way. Release certification never does, so its proof stays strict.
+pending_job=""
+while [[ $# -gt 0 ]]; do
+  if [[ $# -lt 2 || -z "$2" || "$2" == *$'\n'* ]]; then
     usage
     exit 2
   fi
-  required_job=$5
-fi
+  case "$1" in
+    --require-job) [[ -z "$required_job" ]] || { usage; exit 2; }; required_job=$2 ;;
+    --allow-pending-job) [[ -z "$pending_job" ]] || { usage; exit 2; }; pending_job=$2 ;;
+    *) usage; exit 2 ;;
+  esac
+  shift 2
+done
 
 if [[ ! "$repository" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]; then
   fail_closed "invalid repository identifier"
@@ -75,7 +86,6 @@ github_api_get() {
 if ! github_api_get "$runs_response" --get \
   --data-urlencode "event=merge_group" \
   --data-urlencode "head_sha=${commit_sha}" \
-  --data-urlencode "status=success" \
   --data-urlencode "per_page=100" \
   "${api_url}/repos/${repository}/actions/workflows/${workflow_file}/runs"; then
   fail_closed "GitHub Actions API request failed"
@@ -92,15 +102,18 @@ workflow_path=".github/workflows/${workflow_file}"
 # shellcheck disable=SC2016 # $sha and $path are jq variables, not shell expansions.
 "$jq_bin" -r \
   --arg sha "$commit_sha" \
-  --arg path "$workflow_path" '
+  --arg path "$workflow_path" \
+  --arg pending_job "$pending_job" '
     .workflow_runs[]
     | select(
       .head_sha == $sha
         and .path == $path
         and .event == "merge_group"
-        and .status == "completed"
-        and .conclusion == "success"
         and (.id | type == "number")
+        and (
+          (.status == "completed" and .conclusion == "success")
+            or ($pending_job != "" and (.status == "in_progress" or .status == "queued"))
+        )
     )
     | .id
   ' "$runs_response" > "$run_ids"
@@ -128,20 +141,30 @@ while IFS= read -r run_id; do
   # tails intentionally skip the expensive lanes. Reuse proof only when every
   # lane this push plans to prune actually completed successfully for this run.
   # shellcheck disable=SC2016 # $response, $required, and $name are jq variables.
-  if "$jq_bin" -e --slurpfile contract "$contract_path" --arg required_job "$required_job" '
+  # A run that is still going is accepted only through --allow-pending-job:
+  # nothing may have failed, every other required job has passed, and the
+  # pending one has passed or is still queued or running.
+  if "$jq_bin" -e --slurpfile contract "$contract_path" \
+    --arg required_job "$required_job" --arg pending_job "$pending_job" '
     . as $response
     | (($contract[0].merge_group_jobs | map(.name))
         + ["Check repository policies", "Windows cross-compile check", "Write CI timing report"]
         + (if $required_job == "" then [] else [$required_job] end))
       as $required
-    | all(
+    | ([$response.jobs[] | select(.status == "completed"
+          and (.conclusion == "failure" or .conclusion == "cancelled"
+            or .conclusion == "timed_out"))] | length == 0)
+    and all(
         $required[];
         . as $name
         | any(
             $response.jobs[];
             .name == $name
-              and .status == "completed"
-              and .conclusion == "success"
+              and (
+                (.status == "completed" and .conclusion == "success")
+                  or ($pending_job != "" and .name == $pending_job
+                    and (.status == "queued" or .status == "in_progress"))
+              )
           )
       )
   ' "$jobs_response" >/dev/null; then

@@ -3,6 +3,7 @@
   "repository": "burin-labs/harn",
   "workflow": "ci.yml",
   "event": "merge_group",
+  "verdict_job": "CI status",
   "topology_epoch": "2026-08-09T02:24:48Z",
   "full_run_jobs": [
     { "name": "Verify publishable crates", "match": "exact" },
@@ -91,7 +92,6 @@
       "changes": { "budget_ms": 30000 },
       "rust-producer-capacity": { "budget_ms": 30000 },
       "fmt": { "budget_ms": 60000 },
-      "package-audit": { "budget_ms": 590000 },
       "public-api": { "budget_ms": 420000 },
       "lint-md": { "budget_ms": 30000 },
       "release-contract": { "budget_ms": 120000 },
