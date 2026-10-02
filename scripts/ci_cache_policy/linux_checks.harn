@@ -60,7 +60,9 @@ type StepBudget = {name: string, minutes: int, cold_seconds: int}
 
 /** `rust-cli` builds the shared CLI beside the test job. */
 const CLI_PRODUCER_STEP_BUDGETS: list<StepBudget> = [
-  {name: "Build portable Harn CLI", minutes: 10, cold_seconds: 435},
+  // The ci-cli profile (opt-level 1) on hosted ubuntu-8core with no ci-cli
+  // target restored: 850s on run 36956226587, against 435s for dev.
+  {name: "Build portable Harn CLI", minutes: 19, cold_seconds: 850},
 ]
 
 /** `rust-check-inputs` builds and runs the workspace test graph. */
@@ -77,9 +79,13 @@ const PRODUCER_STEP_BUDGETS: list<StepBudget> = CLI_PRODUCER_STEP_BUDGETS
 // 679s with compiler-cache hits unmeasured; that does not replace the slower
 // canonical observation. This bounded retry clears the 900s lower bound by
 // the policy margin. It is not proof of completed cold CI or portable replay.
-const PRODUCER_OWNED_CLI_MINUTES = 20
+// Those observations were of the dev profile; the shared CLI now builds in
+// ci-cli, whose cold build measured 1.56x the dev one on the same host, so the
+// lower bound is scaled by that ratio. One owned ci-cli cold build has since
+// completed in 875s (cattrick-w3, run 36952725704), inside this bound.
+const PRODUCER_OWNED_CLI_MINUTES = 31
 
-const PRODUCER_OWNED_CLI_COLD_LOWER_BOUND_SECONDS = 900
+const PRODUCER_OWNED_CLI_COLD_LOWER_BOUND_SECONDS = 1404
 
 // The canonical owned producer reached the workspace test graph but timed out
 // at 960s before archiving it. Filtering archive contents still compiles the
@@ -94,7 +100,7 @@ pub fn producer_security_timeout_expression() -> string {
 }
 
 pub fn producer_cli_timeout_expression() -> string {
-  return "$" + "{{ env.HARN_RUNNER_TIER == 'self-hosted' && ${PRODUCER_OWNED_CLI_MINUTES} || 10 }}"
+  return "$" + "{{ env.HARN_RUNNER_TIER == 'self-hosted' && ${PRODUCER_OWNED_CLI_MINUTES} || 19 }}"
 }
 
 /**
@@ -635,7 +641,7 @@ fn rust_cache_refresh_errors(workflow: dict) -> list<string> {
     matrix_keys = matrix_keys + [cache_key]
     const expected_headroom = if cache_key == "workspace-tests" {
       "4294967296"
-    } else if cache_key == "package-audit" || cache_key == "harn-cli" {
+    } else if cache_key == "package-audit" || cache_key == "harn-ci-cli" {
       "2147483648"
     } else {
       ""
@@ -1153,6 +1159,26 @@ fn early_source_policy_errors(workflow: dict) -> list<string> {
       errors = errors + ["ci.yml:audit-scripts must not " + label + " behind the merge"]
     }
   }
+  // The hermetic shell gates refuse before the merge from their own job. Only
+  // the main-push lane ran them until a fixture missing `git init -b main`
+  // merged cleanly and turned main red. Counted on both sides for the same
+  // reason as the refusals above, and kept off the shared-CLI barrier: they
+  // need no Harn binary, and waiting for one would put about five minutes of
+  // shell tests on the merge queue's critical path.
+  const shell_job = workflow?.jobs?.["shell-gates"] ?? {}
+  const pre_warm_gates = "./scripts/tests/pr_gate_pre_warm_boundary_test.sh"
+  if command_step_count(shell_job?.steps ?? [], pre_warm_gates) != 1 {
+    errors = errors
+      + ["ci.yml:shell-gates must own exactly one invocation to run the pre-warm shell gates"]
+  }
+  if command_step_count(policy_steps, pre_warm_gates) != 0 {
+    errors = errors
+      + ["ci.yml:audit-scripts must not run the pre-warm shell gates behind the merge"]
+  }
+  if shell_job?.needs != "changes" && shell_job?.needs != ["changes"] {
+    errors = errors
+      + ["ci.yml:shell-gates must need only changes, not wait for the shared Harn binary"]
+  }
   if step_index_by_name(fast_steps, "Check no retroactive CHANGELOG edits") < 0 {
     errors = errors + ["ci.yml:fast-policy-gates must own the retroactive CHANGELOG guard"]
   }
@@ -1282,8 +1308,8 @@ pub fn ci_linux_lane_policy_errors(workflow: dict) -> list<string> {
       workflow,
       "rust-cli",
       BLACKSMITH_8CPU_RUNNER,
-      "harn-cli",
-      "harn-cli",
+      "harn-ci-cli",
+      "harn-ci-cli",
       CLI_PRODUCER_STEP_BUDGETS,
     )
     + persistent_compile_lane_errors(

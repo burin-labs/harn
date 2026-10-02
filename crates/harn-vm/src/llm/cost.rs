@@ -1,6 +1,5 @@
 use crate::value::VmDictExt;
 use rust_decimal::Decimal;
-use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::str::FromStr;
 
@@ -18,17 +17,17 @@ pub(crate) use pricing::{
     PricingDetail, PricingSource,
 };
 
-thread_local! {
-    static LLM_BUDGET: RefCell<Option<f64>> = const { RefCell::new(None) };
-    static LLM_ACCUMULATED_COST: RefCell<f64> = const { RefCell::new(0.0) };
-    static LLM_TOKEN_BUDGET: RefCell<Option<u64>> = const { RefCell::new(None) };
-    static LLM_ACCUMULATED_TOKENS: RefCell<u64> = const { RefCell::new(0) };
-    static LLM_OBSERVED_USAGE: RefCell<ObservedSessionUsage> =
-        const { RefCell::new(ObservedSessionUsage::EMPTY) };
-}
+pub(crate) mod budget;
+pub use budget::{
+    install_llm_cost_budget, install_llm_cost_budget_seeded, install_llm_token_budget,
+    install_llm_token_budget_seeded, peek_llm_cost_budget, peek_llm_token_budget, peek_total_cost,
+    peek_total_tokens, set_llm_cost_budget, set_llm_token_budget, LlmBudgetGuard,
+    LlmCostBudgetHandle, LlmTokenBudgetGuard, LlmTokenBudgetHandle,
+};
+use budget::{with_cost_budget, with_token_budget};
 
 /// Session-observed token usage, accumulated from completed calls on this
-/// thread. The pre-call budget projection reads it so the second and later
+/// execution tree. The pre-call budget projection reads it so the second and later
 /// calls of a session are priced against what this session actually costs
 /// (cache hits included) instead of the uncached worst case.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -41,14 +40,6 @@ pub(crate) struct ObservedSessionUsage {
 }
 
 impl ObservedSessionUsage {
-    const EMPTY: Self = Self {
-        calls: 0,
-        input_tokens: 0,
-        output_tokens: 0,
-        cache_read_tokens: 0,
-        cache_write_tokens: 0,
-    };
-
     /// Mean output tokens per observed call, rounded up. `None` before the
     /// first call, which is what keeps the first projection worst-case.
     fn mean_output_tokens(&self) -> Option<i64> {
@@ -59,14 +50,14 @@ impl ObservedSessionUsage {
     }
 }
 
-/// The usage this session has actually observed so far on this thread.
+/// The usage this session's execution tree has actually observed so far.
 pub(crate) fn peek_observed_session_usage() -> ObservedSessionUsage {
-    LLM_OBSERVED_USAGE.with(|usage| *usage.borrow())
+    with_cost_budget(|budget| budget.observed)
 }
 
 fn record_observed_session_usage(usage: &crate::llm::usage::LlmUsage) {
-    LLM_OBSERVED_USAGE.with(|slot| {
-        let mut slot = slot.borrow_mut();
+    with_cost_budget(|budget| {
+        let slot = &mut budget.observed;
         slot.calls = slot.calls.saturating_add(1);
         slot.input_tokens = slot.input_tokens.saturating_add(usage.input_tokens.max(0));
         slot.output_tokens = slot
@@ -84,141 +75,8 @@ fn record_observed_session_usage(usage: &crate::llm::usage::LlmUsage) {
 /// Reset thread-local cost state. Call between test runs to avoid leaking.
 pub(crate) fn reset_cost_state() {
     super::admission::reset_unscoped_state();
-    LLM_BUDGET.with(|b| *b.borrow_mut() = None);
-    LLM_ACCUMULATED_COST.with(|a| *a.borrow_mut() = 0.0);
-    LLM_TOKEN_BUDGET.with(|b| *b.borrow_mut() = None);
-    LLM_ACCUMULATED_TOKENS.with(|a| *a.borrow_mut() = 0);
-    LLM_OBSERVED_USAGE.with(|u| *u.borrow_mut() = ObservedSessionUsage::EMPTY);
-}
-
-pub fn peek_total_cost() -> f64 {
-    LLM_ACCUMULATED_COST.with(|acc| *acc.borrow())
-}
-
-/// RAII guard installed by [`install_llm_cost_budget`]. Restores the
-/// prior ceiling (and accumulated total) on drop so nested dispatches
-/// (a handler that re-enters the dispatcher) cannot leak a tighter
-/// budget into the outer scope, or a wider one back into a finished
-/// inner scope.
-#[must_use = "dropping the guard immediately restores the prior LLM cost budget"]
-pub struct LlmBudgetGuard {
-    previous_budget: Option<f64>,
-    previous_accumulated: f64,
-    previous_observed: ObservedSessionUsage,
-}
-
-impl Drop for LlmBudgetGuard {
-    fn drop(&mut self) {
-        LLM_BUDGET.with(|b| *b.borrow_mut() = self.previous_budget);
-        LLM_ACCUMULATED_COST.with(|a| *a.borrow_mut() = self.previous_accumulated);
-        LLM_OBSERVED_USAGE.with(|u| *u.borrow_mut() = self.previous_observed);
-    }
-}
-
-/// Pin the per-call LLM cost ceiling at `max_cost_usd` for the lifetime
-/// of the returned guard. Sourced from `@budget(llm_cost_usd = …)` on
-/// `.harn` handlers in `harn-serve`; mid-call exhaustion raises a
-/// `BudgetExceeded`-categorised error which adapter codecs render as
-/// HTTP 429.
-pub fn install_llm_cost_budget(max_cost_usd: f64) -> LlmBudgetGuard {
-    install_llm_cost_budget_seeded(Some(max_cost_usd), 0.0)
-}
-
-/// Install a cost scope that has already spent `spent_usd`, with an optional
-/// ceiling. A durable session spans many dispatches (one per prompt, and a new
-/// process on resume); seeding is what makes its ceiling cover the whole
-/// session instead of restarting at $0 each time. Every reader of the running
-/// total (preflight projection, post-call check, `llm_budget_remaining`) sees
-/// the seed, and [`peek_total_cost`] read before the guard drops is the new
-/// session total to carry forward.
-pub fn install_llm_cost_budget_seeded(max_cost_usd: Option<f64>, spent_usd: f64) -> LlmBudgetGuard {
-    let previous_budget = LLM_BUDGET.with(|b| b.borrow().to_owned());
-    let previous_accumulated = LLM_ACCUMULATED_COST.with(|a| *a.borrow());
-    let previous_observed = peek_observed_session_usage();
-    LLM_BUDGET.with(|b| *b.borrow_mut() = max_cost_usd.map(|max| max.max(0.0)));
-    let seed = if spent_usd.is_finite() {
-        spent_usd.max(0.0)
-    } else {
-        0.0
-    };
-    LLM_ACCUMULATED_COST.with(|a| *a.borrow_mut() = seed);
-    LLM_OBSERVED_USAGE.with(|u| *u.borrow_mut() = ObservedSessionUsage::EMPTY);
-    LlmBudgetGuard {
-        previous_budget,
-        previous_accumulated,
-        previous_observed,
-    }
-}
-
-/// RAII guard for [`install_llm_token_budget`]. Pairs the dispatch-level
-/// token cap with the cost-cap guard so `@budget(llm_tokens, llm_cost_usd)`
-/// both restore on drop.
-#[must_use = "dropping the guard immediately restores the prior LLM token budget"]
-pub struct LlmTokenBudgetGuard {
-    previous_budget: Option<u64>,
-    previous_accumulated: u64,
-}
-
-impl Drop for LlmTokenBudgetGuard {
-    fn drop(&mut self) {
-        LLM_TOKEN_BUDGET.with(|b| *b.borrow_mut() = self.previous_budget);
-        LLM_ACCUMULATED_TOKENS.with(|a| *a.borrow_mut() = self.previous_accumulated);
-    }
-}
-
-/// Pin the per-dispatch LLM token ceiling (input + output combined) at
-/// `max_tokens` for the lifetime of the returned guard. Sourced from
-/// `@budget(llm_tokens: …)` on `.harn` handlers in `harn-serve`. Like
-/// the cost-cap variant, mid-stream exhaustion raises a
-/// `BudgetExceeded`-categorised error that adapters render as HTTP 429.
-pub fn install_llm_token_budget(max_tokens: u64) -> LlmTokenBudgetGuard {
-    let previous_budget = LLM_TOKEN_BUDGET.with(|b| *b.borrow());
-    let previous_accumulated = LLM_ACCUMULATED_TOKENS.with(|a| *a.borrow());
-    LLM_TOKEN_BUDGET.with(|b| *b.borrow_mut() = Some(max_tokens));
-    LLM_ACCUMULATED_TOKENS.with(|a| *a.borrow_mut() = 0);
-    LlmTokenBudgetGuard {
-        previous_budget,
-        previous_accumulated,
-    }
-}
-
-pub fn peek_total_tokens() -> u64 {
-    LLM_ACCUMULATED_TOKENS.with(|acc| *acc.borrow())
-}
-
-/// Re-arm the live per-thread LLM **cost** ceiling in place, preserving the
-/// accumulated total. `None` clears the cap.
-///
-/// Unlike [`install_llm_cost_budget`] this returns no guard and does not reset
-/// the running total: it mutates the same `LLM_BUDGET` thread-local a dispatch
-/// already consults at preflight ([`check_llm_preflight_budget`]) and after
-/// each call ([`record_llm_usage`]). A supervisor on the dispatch
-/// thread can therefore tighten or loosen the ceiling mid-run and have the next
-/// LLM call observe it — the basis for ACP `session/set_budget` re-arm
-/// in a downstream host. Callers that want fresh per-scope accounting
-/// (HTTP `@budget`, per-turn guards) keep using `install_*` instead.
-pub fn set_llm_cost_budget(max_cost_usd: Option<f64>) {
-    LLM_BUDGET.with(|b| *b.borrow_mut() = max_cost_usd.map(|max| max.max(0.0)));
-}
-
-/// Re-arm the live per-thread LLM **token** ceiling in place, preserving the
-/// accumulated total. `None` clears the cap. The token counterpart to
-/// [`set_llm_cost_budget`] — see that function for the re-arm semantics.
-pub fn set_llm_token_budget(max_tokens: Option<u64>) {
-    LLM_TOKEN_BUDGET.with(|b| *b.borrow_mut() = max_tokens);
-}
-
-/// The live per-thread LLM cost ceiling, or `None` when uncapped. Pairs with
-/// [`peek_total_cost`] so a supervisor (or a re-arm acknowledgement) can read
-/// back the ceiling it just set.
-pub fn peek_llm_cost_budget() -> Option<f64> {
-    LLM_BUDGET.with(|b| *b.borrow())
-}
-
-/// The live per-thread LLM token ceiling, or `None` when uncapped. The token
-/// counterpart to [`peek_llm_cost_budget`].
-pub fn peek_llm_token_budget() -> Option<u64> {
-    LLM_TOKEN_BUDGET.with(|b| *b.borrow())
+    budget::swap_llm_cost_budget(Default::default());
+    budget::swap_llm_token_budget(Default::default());
 }
 
 // `Serialize` lets the typed-options parity test compare this default key set
@@ -610,8 +468,8 @@ pub(crate) fn check_llm_preflight_budget(
     if let Some(envelope) = opts.budget.as_ref() {
         check_budget_envelope(envelope, &projection)?;
     }
-    LLM_BUDGET.with(|budget| {
-        if let Some(max) = *budget.borrow() {
+    with_cost_budget(|budget| {
+        if let Some(max) = budget.max {
             if session_cost_usd + projection.projected_cost_usd > max {
                 return Err(budget_exceeded_error(
                     &projection,
@@ -785,21 +643,20 @@ pub(crate) fn accumulate_llm_usage(
         crate::step_runtime::record_step_llm_usage(model, input_tokens, output_tokens, cost);
     let total_tokens = input_tokens.max(0) as u64 + output_tokens.max(0) as u64;
     if total_tokens > 0 {
-        LLM_ACCUMULATED_TOKENS.with(|acc| {
-            let mut slot = acc.borrow_mut();
-            *slot = slot.saturating_add(total_tokens);
+        with_token_budget(|budget| {
+            budget.spent = budget.spent.saturating_add(total_tokens);
         });
     }
     // This response has already completed. Record every charge before any
     // budget error can return, while preserving step/token/cost error priority.
-    LLM_ACCUMULATED_COST.with(|acc| {
-        *acc.borrow_mut() += cost;
+    with_cost_budget(|budget| {
+        budget.spent += cost;
     });
     step_result?;
     if total_tokens > 0 {
-        LLM_TOKEN_BUDGET.with(|budget| {
-            if let Some(max) = *budget.borrow() {
-                let total = LLM_ACCUMULATED_TOKENS.with(|acc| *acc.borrow());
+        with_token_budget(|budget| {
+            if let Some(max) = budget.max {
+                let total = budget.spent;
                 if total > max {
                     return Err(categorized_error(
                         format!("LLM token budget exceeded: spent {total} of {max} tokens"),
@@ -813,9 +670,9 @@ pub(crate) fn accumulate_llm_usage(
     if cost == 0.0 {
         return Ok(());
     }
-    LLM_BUDGET.with(|budget| {
-        if let Some(max) = *budget.borrow() {
-            let total = LLM_ACCUMULATED_COST.with(|acc| *acc.borrow());
+    with_cost_budget(|budget| {
+        if let Some(max) = budget.max {
+            let total = budget.spent;
             if total > max {
                 return Err(categorized_error(
                     format!("LLM budget exceeded: spent ${total:.4} of ${max:.4} budget"),
@@ -868,8 +725,7 @@ fn llm_cost_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError
 #[harn_builtin(exposure = "privileged_wire", effects = ["state.observe@const=llm-cost-ledger"], sig = "__llm_session_cost() -> dict", category = "llm.economics")]
 fn llm_session_cost_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let summary = super::trace::peek_trace_usage_summary();
-    let budget_charged_usd = super::admission::charged_upper_usd()
-        .unwrap_or_else(|| LLM_ACCUMULATED_COST.with(|acc| *acc.borrow()));
+    let budget_charged_usd = super::admission::charged_upper_usd().unwrap_or_else(peek_total_cost);
     let measured_cost = summary
         .cost
         .cost_usd()
@@ -933,12 +789,7 @@ fn llm_budget_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
 
 #[harn_builtin(exposure = "privileged_wire", effects = ["state.observe@const=llm-cost-budget"], sig = "__llm_budget_remaining() -> float?", category = "llm.economics")]
 fn llm_budget_remaining_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    let session_remaining = LLM_BUDGET.with(|budget| {
-        budget.borrow().map(|max| {
-            let spent = LLM_ACCUMULATED_COST.with(|acc| *acc.borrow());
-            max - spent
-        })
-    });
+    let session_remaining = with_cost_budget(|budget| budget.max.map(|max| max - budget.spent));
     let execution_remaining = super::admission::execution_remaining_usd()?;
     let machine_remaining = super::admission::machine_remaining_usd()?;
     let remaining = [session_remaining, execution_remaining, machine_remaining]

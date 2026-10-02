@@ -22,7 +22,9 @@ elif [[ "$args" == *'/actions/caches?ref=refs/heads/main&per_page=100'* ]]; then
     echo "mock retention API authorization failure" >&2
     exit 1
   fi
-  if [[ "${MOCK_HARN_CHECK_CACHE:-0}" == "1" ]]; then
+  if [[ "${MOCK_CI_CLI_CACHE:-0}" == "1" ]]; then
+    printf '%s\n' '[{"actions_caches":[{"id":50,"ref":"refs/heads/main","key":"v0-rust-harn-ci-cli-Linux-x64-one"},{"id":51,"ref":"refs/heads/main","key":"v0-rust-harn-ci-cli-Linux-x64-two"},{"id":52,"ref":"refs/heads/main","key":"v0-rust-workspace-tests-Linux-x64-one"}]}]'
+  elif [[ "${MOCK_HARN_CHECK_CACHE:-0}" == "1" ]]; then
     # Two main generations of the audit family, one of audit-scripts (a
     # different family sharing the prefix up to the family name), a
     # pull-request entry, and a hand-written key without a commit suffix.
@@ -142,6 +144,28 @@ api --paginate repos/burin-labs/harn/actions/caches?ref=refs/heads/main&per_page
 cache delete 30 --repo burin-labs/harn
 EXPECTED
 diff -u "$tmp/expected-clear-linux-family-gh.log" "$tmp/clear-linux-family-gh.log"
+
+PATH="$tmp/bin:$PATH" MOCK_GH_LOG="$tmp/clear-cli-family-gh.log" \
+  MOCK_CI_CLI_CACHE=1 GITHUB_REPOSITORY=burin-labs/harn \
+  "$repo_root/scripts/prune_ci_cache_generations.sh" \
+  --clear-family-prefix v0-rust-harn-ci-cli-
+cat >"$tmp/expected-clear-cli-family-gh.log" <<'EXPECTED'
+api --paginate repos/burin-labs/harn/actions/caches?ref=refs/heads/main&per_page=100 --slurp
+cache delete 50 --repo burin-labs/harn
+cache delete 51 --repo burin-labs/harn
+EXPECTED
+diff -u "$tmp/expected-clear-cli-family-gh.log" "$tmp/clear-cli-family-gh.log"
+
+if PATH="$tmp/bin:$PATH" MOCK_GH_LOG="$tmp/unknown-clear-family-gh.log" \
+  GITHUB_REPOSITORY=burin-labs/harn \
+  "$repo_root/scripts/prune_ci_cache_generations.sh" \
+  --clear-family-prefix v0-rust-unknown- \
+  >"$tmp/unknown-clear-family.out" 2>"$tmp/unknown-clear-family.err"; then
+  echo "expected an unknown clear family to fail before any API call" >&2
+  exit 1
+fi
+grep -q -- '--clear-family-prefix' "$tmp/unknown-clear-family.err"
+test ! -s "$tmp/unknown-clear-family-gh.log"
 
 PATH="$tmp/bin:$PATH" MOCK_GH_LOG="$tmp/all-prune-gh.log" \
   GITHUB_REPOSITORY=burin-labs/harn \

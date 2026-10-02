@@ -77,6 +77,19 @@ opt-level = 3
 [profile.test]
 debug = 0
 
+# The shared CLI that CI's Harn proof lanes execute (conformance, script tests,
+# docs, policies, the release rehearsal). Those lanes are interpreter-bound,
+# and at opt-level 0 they ran four to five times slower: a conformance slice
+# took 72s against 17s at opt-level 1 on the same four cores. Everything else
+# is dev, and the assertions are pinned rather than inherited so a change to
+# dev cannot quietly drop them from the binary the proofs run on.
+[profile.ci-cli]
+inherits = "dev"
+opt-level = 1
+debug = "line-tables-only"
+debug-assertions = true
+overflow-checks = true
+
 # Default release profile mirrors the DISTRIBUTION build's shape: thin LTO +
 # 16 codegen units. This is the everyday / local "internal" release — fast to
 # build and identical in optimization to what ships (the release workflow only

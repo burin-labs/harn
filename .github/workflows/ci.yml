@@ -954,8 +954,10 @@ jobs:
     # compiled units, so in one job the test build waited 230-310s for nothing.
     # Paid minutes per run are about the same; two paid runners now overlap.
     #
-    # Hosted ceiling: 6 setup + 10 CLI budget + 12 cache-save reserve = 28.
-    # Owned ceiling: 6 setup + 20 CLI budget = 26.
+    # Hosted ceiling: 6 setup + 19 CLI budget + 12 cache-save reserve = 37.
+    # Owned ceiling: 6 setup + 31 CLI budget = 37.
+    # The CLI builds in the ci-cli profile (opt-level 1), which costs more to
+    # compile than dev and runs every Harn proof lane four to five times faster.
     runs-on: >-
       ${{ (vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true'
         && (github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository))
@@ -968,8 +970,8 @@ jobs:
         && (github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository))
         && 20)
         || (needs.rust-producer-capacity.outputs.route == 'owned'
-        && 26)
-        || 28 }}
+        && 37)
+        || 37 }}
     # The GitHub-hosted rung remains the authorized main-branch cache writer;
     # Blacksmith uses sticky sccache and never enters that step, and the owned
     # self-hosted rung is pull-request-only so it never reaches the write
@@ -1022,7 +1024,7 @@ jobs:
       - uses: ./.github/actions/sccache
         if: env.HARN_RUNNER_TIER == 'blacksmith'
         with:
-          cache-key: harn-cli
+          cache-key: harn-ci-cli
           sticky: "true"
       # Every tier gets an explicit answer, because a guard that names only
       # the tiers it knows turns a new tier into a silent skip: the first
@@ -1037,7 +1039,7 @@ jobs:
         if: env.HARN_RUNNER_TIER != 'blacksmith'
         continue-on-error: true
         with:
-          shared-key: harn-cli
+          shared-key: harn-ci-cli
           cache-on-failure: true
           cache-bin: false
           cache-workspace-crates: "true"
@@ -1049,7 +1051,7 @@ jobs:
       - name: Record the sccache baseline
         run: ./scripts/ci/sccache_baseline.sh
       - name: Build portable Harn CLI
-        timeout-minutes: ${{ env.HARN_RUNNER_TIER == 'self-hosted' && 20 || 10 }}
+        timeout-minutes: ${{ env.HARN_RUNNER_TIER == 'self-hosted' && 31 || 19 }}
         env:
           CARGO_BUILD_JOBS: ${{ steps.resource-budget.outputs.build_jobs }}
         run: >-
@@ -2168,6 +2170,37 @@ jobs:
         if: always()
         run: make repository-policies-source
 
+  # The hermetic shell gates (`make test-pr-gate-scripts`): static scans and
+  # script unit tests over fakes, refused from building or running Rust and run
+  # without HARN_BIN. They used to run only in the main-push lane below, so a
+  # test fixture missing `git init -b main` merged cleanly and turned main red
+  # on 2026-10-01. They need no shared CLI, so this job starts with the run and
+  # finishes in about five minutes, well inside the merge group's wall.
+  shell-gates:
+    name: Check repository shell gates
+    needs: [changes]
+    # No event condition, deliberately: the CI cache policy refuses one on a
+    # cheap refusal, because a gate that runs only after the merge can only
+    # turn main red.
+    if: needs.changes.outputs.rust == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Release and changelog script tests read tags and first parents.
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: ./.github/actions/node-cache
+        with:
+          node-version: "22"
+          cache-dependency-path: package-lock.json
+      - run: npm ci
+      - name: Run pre-warm shell gates without Cargo
+        run: ./scripts/tests/pr_gate_pre_warm_boundary_test.sh
+
   audit-scripts:
     name: Check repository policies
     # Consumes only the small portable CLI bundle through the same live
@@ -2243,12 +2276,10 @@ jobs:
           cache-dependency-path: package-lock.json
       - run: npm ci
         if: ${{ !cancelled() }}
-      # Not a Make target, so it keeps its own step. `if: always()` here and on
-      # every step below is the point of this job's shape: a step that fails
-      # must not skip the ones after it.
-      - name: Run pre-warm shell gates without Cargo
-        if: always()
-        run: ./scripts/tests/pr_gate_pre_warm_boundary_test.sh
+      # The pre-warm shell gates run before the merge in `shell-gates`.
+      # `if: always()` on every step below is the point of this job's shape: a
+      # step that fails must not skip the ones after it.
+      #
       # One step, every remaining policy check. `make repository-policies` owns
       # the list and runs each check in turn, continuing past a failure and
       # printing one line per check. These used to be one step per check, and a
@@ -2748,6 +2779,7 @@ jobs:
         stack-frames,
         harn-audit,
         fast-policy-gates,
+        shell-gates,
         source-length-ratchet,
         ci-walltime-report,
         audit-scripts,
@@ -2966,6 +2998,11 @@ jobs:
           echo "Fast repository policies: $fast_policy_result"
           require_result "$fast_policy_result" \
             "Fast repository policy gates failed or skipped while Rust proof was required." [ "${{ needs.changes.outputs.rust }}" != "true" ]
+
+          shell_gates_result="${{ needs['shell-gates'].result }}"
+          echo "Repository shell gates: $shell_gates_result"
+          require_result "$shell_gates_result" \
+            "Repository shell gates failed or skipped while Rust proof was required." [ "${{ needs.changes.outputs.rust }}" != "true" ]
 
           ci_walltime_report_result="${{ needs['ci-walltime-report'].result }}"
           echo "CI timing report: $ci_walltime_report_result"

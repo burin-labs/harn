@@ -473,6 +473,60 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// The falsifier from #8026, read from the archived request record: a
+    /// caller marker on a message content block names the breakpoint as
+    /// deferred, and the ordinary request beside it names the placement.
+    #[test]
+    fn provider_request_receipts_name_the_prompt_cache_breakpoint() {
+        let _guard = crate::llm::env_guard();
+        let previous_verbose = set_env_for_test("HARN_LLM_TRANSCRIPT_VERBOSE", None);
+        let dir = temp_transcript_dir("harn-prompt-cache-breakpoint");
+        let dir_string = dir.to_string_lossy().to_string();
+        super::super::push_llm_transcript_dir(&dir_string);
+
+        let mut opts = crate::llm::api::options::base_opts("anthropic");
+        opts.model = "claude-opus-4-5-20251101".to_string();
+        opts.cache = true;
+        opts.native_tools = None;
+        opts.messages = vec![serde_json::json!({"role": "user", "content": "hello"})];
+        super::super::dump_llm_request(1, "call-cache-placed", "native", &opts)
+            .expect("valid ordinary request");
+        opts.messages = vec![
+            serde_json::json!({"role": "user", "content": [{
+                "type": "text",
+                "text": "stable prefix",
+                "cache_control": {"type": "ephemeral"},
+            }]}),
+            serde_json::json!({"role": "assistant", "content": "ok"}),
+            serde_json::json!({"role": "user", "content": "hello"}),
+        ];
+        super::super::dump_llm_request(2, "call-cache-deferred", "native", &opts)
+            .expect("valid marked request");
+        super::super::pop_llm_transcript_dir();
+        restore_env_for_test("HARN_LLM_TRANSCRIPT_VERBOSE", previous_verbose);
+
+        let events = read_transcript_events(&dir);
+        let breakpoint = |call_id: &str| {
+            events
+                .iter()
+                .find(|event| {
+                    event["type"] == "provider_call_request" && event["call_id"] == call_id
+                })
+                .unwrap_or_else(|| panic!("no request receipt for {call_id}"))
+                ["prompt_cache_breakpoint"]
+                .clone()
+        };
+        assert_eq!(
+            breakpoint("call-cache-placed"),
+            serde_json::json!({"outcome": "placed", "style": "top_level"})
+        );
+        assert_eq!(
+            breakpoint("call-cache-deferred"),
+            serde_json::json!({"outcome": "deferred_to_existing_marker"})
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn provider_request_receipts_distinguish_requested_and_sent_output_schemas() {
         let _guard = crate::llm::env_guard();

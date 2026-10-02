@@ -16,7 +16,7 @@ pipeline test(harness: Harness) {
           },
         ),
       )
-        + {provider: "openai", model: "gpt-5.4-nano", input_tokens: 100, output_tokens: 30},
+        + {provider: "openai", model: "gpt-5.4-mini", input_tokens: 100, output_tokens: 30},
     ],
     { ->
       const result = harness.llm.evaluate(
@@ -30,7 +30,7 @@ pipeline test(harness: Harness) {
         {
           backend: "structured_llm",
           provider: "openai",
-          model: "gpt-5.4-nano",
+          model: "gpt-5.4-mini",
           effort: "none",
           temperature: 0.0,
           threshold: 0.0,
@@ -60,7 +60,7 @@ pipeline test(harness: Harness) {
       llm_text("malformed response")
         + {
           provider: "openai",
-          model: "gpt-5.4-nano",
+          model: "gpt-5.4-mini",
           input_tokens: 100,
           output_tokens: 30,
           simulated_cost_usd: 0.00017,
@@ -75,7 +75,7 @@ pipeline test(harness: Harness) {
         {
           backend: "structured_llm",
           provider: "openai",
-          model: "gpt-5.4-nano",
+          model: "gpt-5.4-mini",
           effort: "none",
           temperature: 0.0,
           threshold: 0.0,

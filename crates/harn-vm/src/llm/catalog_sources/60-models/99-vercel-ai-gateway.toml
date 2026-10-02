@@ -21,6 +21,12 @@ api_dialect = "openai_chat"
 context_window = 400000
 capabilities = ["tools", "vision", "files", "streaming", "thinking", "prompt_caching"]
 pricing = { input_per_mtok = 0.20, output_per_mtok = 1.25, cache_read_per_mtok = 0.02 }
+# No `superseded_by`: the gateway lists openai/gpt-6-luna, but the probe key's
+# free-tier team got HTTP 403 "Free tier users do not have access to this
+# model" on 2026-10-01, so there is no probed Vercel route to point at yet.
+deprecated = true
+deprecation_note = "OpenAI shuts down gpt-5.4-nano 2027-04-01 (announced 2026-10-01) and names gpt-6-luna as the replacement; this gateway route ends with it. Vercel lists openai/gpt-6-luna, which Harn has not yet probed on this gateway."
+sunset_date = "2027-04-01"
 tier = "small"
 open_weight = false
 strengths = ["speed", "cheap", "tool_use", "reasoning"]

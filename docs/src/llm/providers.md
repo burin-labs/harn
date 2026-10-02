@@ -1113,7 +1113,8 @@ permissions.
 - Auth: `Authorization: Bearer <AI_GATEWAY_API_KEY>`; the longer
   `VERCEL_AI_GATEWAY_API_KEY` spelling is also accepted
 - Models use creator/model wire ids. Collision-free Harn catalog ids and
-  aliases such as `vercel-gpt-5.4-nano` resolve to those ids automatically.
+  aliases such as `vercel-claude-haiku-4.5` resolve to those ids
+  automatically.
 - Model capabilities follow the routed creator/model family, so Claude,
   Gemini, OpenAI, and open-weight routes keep their distinct tool, reasoning,
   caching, multimodal, and structured-output behavior.
@@ -1123,12 +1124,12 @@ permissions.
 ```harn
 harness.llm.call("Summarize the change.", nil, {
   provider: "vercel_ai_gateway",
-  model: "vercel-gpt-5.4-nano",
+  model: "vercel-claude-haiku-4.5",
   vercel_ai_gateway: {
     providerOptions: {
       gateway: {
         sort: "cost",
-        models: ["google/gemini-3.1-flash-lite"],
+        models: ["google/gemini-3.5-flash-lite"],
       },
     },
   },
