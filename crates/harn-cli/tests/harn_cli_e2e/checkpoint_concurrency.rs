@@ -16,6 +16,92 @@ fn command(root: &Path) -> Command {
 }
 
 #[test]
+fn checkpoint_mutations_share_the_runtime_autonomy_boundary() {
+    let source = r#"fn main(harness: Harness) {
+      harness.runtime.checkpoint("existing", 7)
+      const receipt = harness.runtime.with_autonomy_policy(
+        {agent_id: "checkpoint-autonomy", autonomy_tier: argv[0]},
+        fn() {
+          harness.runtime.checkpoint("existing", 8)
+          const inserted = harness.runtime.checkpoint_insert("new", 9)
+          const updated = harness.runtime.checkpoint_get("existing")
+          harness.runtime.checkpoint_delete("existing")
+          const deleted = harness.runtime.checkpoint_get("existing")
+          harness.runtime.checkpoint_clear()
+          return {inserted: inserted, updated: updated, deleted: deleted}
+        },
+      )
+      harness.stdio.println(json_stringify({
+        receipt: receipt,
+        existing: harness.runtime.checkpoint_get("existing"),
+        new_exists: harness.runtime.checkpoint_exists("new"),
+      }))
+    }"#;
+    for tier in ["shadow", "suggest", "act_auto"] {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::write(root.path().join("autonomy.harn"), source).unwrap();
+        let output = command(root.path())
+            .args(["run", "autonomy.harn", "--", tier])
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{tier}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let receipt: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        let durable_path = root.path().join("state/checkpoints/autonomy.json");
+        if tier == "act_auto" {
+            assert_eq!(
+                receipt["receipt"]["inserted"],
+                serde_json::json!({"inserted": true, "value": 9})
+            );
+            assert_eq!(receipt["receipt"]["updated"], 8);
+            assert!(receipt["receipt"]["deleted"].is_null());
+            assert!(receipt["existing"].is_null());
+            assert!(!durable_path.exists(), "act_auto must execute the clear");
+        } else {
+            assert!(
+                receipt["receipt"]["inserted"].is_null(),
+                "{tier}: {receipt}"
+            );
+            assert_eq!(receipt["receipt"]["updated"], 7, "{tier}: {receipt}");
+            assert_eq!(receipt["receipt"]["deleted"], 7, "{tier}: {receipt}");
+            assert_eq!(receipt["existing"], 7, "{tier}: {receipt}");
+            let durable: serde_json::Value =
+                serde_json::from_slice(&std::fs::read(durable_path).unwrap()).unwrap();
+            assert_eq!(durable, serde_json::json!({"existing": 7}));
+        }
+        assert_eq!(receipt["new_exists"], false, "{tier}: {receipt}");
+    }
+    let root = tempfile::tempdir().unwrap();
+    std::fs::write(
+        root.path().join("needs_human.harn"),
+        r#"fn main(harness: Harness) {
+          harness.runtime.with_autonomy_policy(
+            {agent_id: "checkpoint-human", autonomy_tier: "act_auto", requires_human: true},
+            fn() { harness.runtime.checkpoint_insert("candidate", 42) },
+          )
+        }"#,
+    )
+    .unwrap();
+    let output = command(root.path())
+        .args(["run", "needs_human.harn"])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("HARN-AUT-NEEDS-HUMAN"),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(!root
+        .path()
+        .join("state/checkpoints/needs_human.json")
+        .exists());
+}
+
+#[test]
 fn concurrent_processes_retain_one_checkpoint_candidate() {
     let root = tempfile::tempdir().unwrap();
     let state = root.path().join("state");
