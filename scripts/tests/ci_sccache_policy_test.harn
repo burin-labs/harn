@@ -29,6 +29,8 @@ import {
   NEUTRAL_RUST_TEST_FILTER_FLAG,
 } from "../ci_cache_policy/host_bound_rust_test_filter"
 
+type CiWorkflowDocument = {jobs: dict<string, dict>}
+
 fn gha_expression(body: string) -> string {
   return "$" + "{{ " + body + " }}"
 }
@@ -457,15 +459,26 @@ fn workflow() {
       },
       "rust-security": {
         "runs-on": "ubuntu-24.04",
-        needs: ["changes", "security-tests-ready"],
+        permissions: {actions: "read", contents: "read"},
+        needs: ["changes", "rust-artifacts-ready", "security-tests-ready"],
         if:
-          "needs.changes.outputs.rust == 'true' && needs.security-tests-ready.result == 'success'",
+          "needs.changes.outputs.rust == 'true' && needs.rust-artifacts-ready.result == 'success' && needs.security-tests-ready.result == 'success'",
         steps: [
+          {
+            name: "Download shared Harn binary",
+            with: {"run-id": gha_expression("needs.rust-artifacts-ready.outputs.source_run_id")},
+          },
+          {
+            name: "Verify shared Harn binary",
+            run:
+              "./scripts/ci/rust_artifact.sh restore-cli $RUNNER_TEMP/harn-cli.tar.zst $RUNNER_TEMP/harn-cli $GITHUB_SHA $GITHUB_ENV",
+          },
           {
             name: "Run Linux sandbox tests",
             id: "release-audit-rust-security",
+            env: {HARN_CLI_E2E_BINARY: gha_expression("env.HARN_BIN")},
             run:
-              "${HOST_BOUND_RUST_TEST_FILTER_SETUP} scripts/ci/run_rust_test_lane.sh cargo nextest run --profile ci --archive-file harn-security-tests.tar.zst --workspace-remap workspace ${HOST_BOUND_RUST_TEST_FILTER_FLAG}",
+              "${HOST_BOUND_RUST_TEST_FILTER_SETUP} scripts/ci/run_rust_test_lane.sh cargo nextest run --profile ci --ignore-default-filter --archive-file harn-security-tests.tar.zst --workspace-remap workspace ${HOST_BOUND_RUST_TEST_FILTER_FLAG}",
           },
         ],
       },
@@ -893,7 +906,7 @@ pipeline test_rejects_serialized_live_artifact_handoff(harness: Harness, task: u
   assert(errors.contains("ci.yml:rust-cli must build and then publish the shared Harn CLI"))
   assert(
     errors.contains(
-      "ci.yml:rust-security must consume the exact-commit security archive through its ready barrier",
+      "ci.yml:rust-security must consume exact-commit artifacts and run CLI subprocess tests from the verified binary",
     ),
   )
   assert(
@@ -1611,16 +1624,47 @@ pipeline test_host_bound_sandbox_filter_has_one_owner(harness: Harness, task: un
   const root = path_normalize(path_join(harness.fs.cwd(), "../.."))
   const test_names = harness.fs.read_text(path_join(root, HOST_BOUND_RUST_TEST_FILTER_SOURCE))
     .split("\n")
-    .filter({ name -> trim(name) != "" })
+    .filter({ row -> trim(row) != "" })
     .to_list()
-  assert_eq(test_names.count, 11)
-  const rendered = harness.process.run(
-    {program: path_join(root, HOST_BOUND_RUST_TEST_FILTER_COMMAND), args: []},
+  assert_eq(test_names.count, 12)
+  const linux_names = test_names.filter(
+    { row -> ["all", "linux", "unix"].contains(trim(row).split(" ")[0]) },
   )
-  assert_eq(rendered.exit_code, 0)
+    .map({ row -> trim(row).split(" ")[1] })
+    .to_list()
+  const macos_names = test_names.filter(
+    { row -> ["all", "macos", "unix"].contains(trim(row).split(" ")[0]) },
+  )
+    .map({ row -> trim(row).split(" ")[1] })
+    .to_list()
+  const windows_names = test_names.filter(
+    { row -> ["all", "windows"].contains(trim(row).split(" ")[0]) },
+  )
+    .map({ row -> trim(row).split(" ")[1] })
+    .to_list()
+  const rendered_linux = harness.process.run(
+    {program: path_join(root, HOST_BOUND_RUST_TEST_FILTER_COMMAND), args: ["linux"]},
+  )
+  assert_eq(rendered_linux.exit_code, 0)
   assert_eq(
-    trim(rendered.stdout),
-    test_names.map({ name -> "test(${name})" }).to_list().join(" or "),
+    trim(rendered_linux.stdout),
+    linux_names.map({ name -> "test(/(^|::)" + name + "(::|$)/)" }).to_list().join(" or "),
+  )
+  const rendered_macos = harness.process.run(
+    {program: path_join(root, HOST_BOUND_RUST_TEST_FILTER_COMMAND), args: ["macos"]},
+  )
+  assert_eq(rendered_macos.exit_code, 0)
+  assert_eq(
+    trim(rendered_macos.stdout),
+    macos_names.map({ name -> "test(/(^|::)" + name + "(::|$)/)" }).to_list().join(" or "),
+  )
+  const rendered_windows = harness.process.run(
+    {program: path_join(root, HOST_BOUND_RUST_TEST_FILTER_COMMAND), args: ["windows"]},
+  )
+  assert_eq(rendered_windows.exit_code, 0)
+  assert_eq(
+    trim(rendered_windows.stdout),
+    windows_names.map({ name -> "test(/(^|::)" + name + "(::|$)/)" }).to_list().join(" or "),
   )
   const renderer_source = harness.fs.read_text(path_join(root, HOST_BOUND_RUST_TEST_FILTER_COMMAND))
   assert_eq(renderer_source.split(HOST_BOUND_RUST_TEST_FILTER_SOURCE).count - 1, 1)
@@ -1639,11 +1683,58 @@ pipeline test_host_bound_sandbox_filter_has_one_owner(harness: Harness, task: un
     )
     for test_name in test_names {
       assert(
-        !source.contains("test(${test_name})"),
+        !source.contains("test(/(^|::)" + test_name + "(::|$)/)"),
         projection.path + " must not copy host-bound selector " + test_name,
       )
     }
   }
+  const actual_workflow = schema_expect(
+    yaml_parse(harness.fs.read_text(path_join(root, ".github/workflows/ci.yml"))),
+    schema_of(CiWorkflowDocument),
+  )
+  assert_eq(ci_linux_lane_policy_errors(actual_workflow), [])
+  const security_job = actual_workflow.jobs["rust-security"]
+  const artifact_download = security_job.steps.find(
+    { step -> step.name == "Download shared Harn binary" },
+  )
+  const download_config = artifact_download?.with ?? {}
+  assert(
+    download_config["run-id"]
+      == gha_expression("needs.rust-artifacts-ready.outputs.source_run_id"),
+  )
+  const artifact_restore = security_job.steps.find(
+    { step -> step.name == "Verify shared Harn binary" },
+  )
+  assert(artifact_restore?.run.contains("./scripts/ci/rust_artifact.sh restore-cli"))
+  const security_step = security_job.steps.find(
+    { step -> step?.id == "release-audit-rust-security" },
+  )
+  assert(security_step?.env?.HARN_CLI_E2E_BINARY == gha_expression("env.HARN_BIN"))
+  const cli_test_source = harness.fs.read_text(
+    path_join(root, "crates/harn-cli/tests/test_util/process.rs"),
+  )
+  assert(cli_test_source.contains("std::env::var_os(\"HARN_CLI_E2E_BINARY\")"))
+  const wrong_security = {
+    ...security_job,
+    steps: security_job.steps.map(
+      { step ->
+        if step?.id != "release-audit-rust-security" {
+          return step
+        }
+        return {...step, env: {...step.env, HARN_CLI_E2E_BINARY: ""}}
+      },
+    )
+      .to_list(),
+  }
+  const wrong_workflow = {
+    ...actual_workflow,
+    jobs: {...actual_workflow.jobs, "rust-security": wrong_security},
+  }
+  assert(
+    ci_linux_lane_policy_errors(wrong_workflow).contains(
+      "ci.yml:rust-security must consume exact-commit artifacts and run CLI subprocess tests from the verified binary",
+    ),
+  )
 }
 
 @test

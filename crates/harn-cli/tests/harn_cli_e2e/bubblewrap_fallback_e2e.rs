@@ -3,16 +3,7 @@
 use std::os::unix::process::CommandExt;
 use std::process::Command;
 
-use crate::test_util::process::harn_e2e_command as cli_command;
-
-fn harn_e2e_command() -> Command {
-    let mut command = cli_command();
-    // Cargo injects its test-artifact search path into the runner. This CLI
-    // fixture has no dependency on it; explicit and inherited loader probes
-    // below supply their own controls through the actual launch environment.
-    command.env_remove("LD_LIBRARY_PATH");
-    command
-}
+use crate::test_util::process::harn_e2e_command;
 
 /// Deny only the kernel facilities under test in the launched CLI. No global
 /// kernel setting or backend selector can make a prototype pass this proof.
@@ -210,6 +201,90 @@ fn main(harness: Harness) {{
     assert_eq!(std::fs::read(root.join("marker")).unwrap(), b"inside");
     assert_eq!(std::fs::read(readonly.join("marker")).unwrap(), b"readonly");
     assert_eq!(std::fs::read(&outside).unwrap(), b"known-outside");
+}
+
+#[test]
+fn canonical_fixture_scrubs_ambient_loader_controls_without_scrubbing_explicit_controls() {
+    const CHILD: &str = "FIXTURE_LOADER_CHILD";
+    if std::env::var_os(CHILD).is_none() {
+        let output = Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "bubblewrap_fallback_e2e::canonical_fixture_scrubs_ambient_loader_controls_without_scrubbing_explicit_controls",
+                "--nocapture",
+            ])
+            .env(CHILD, "1")
+            .env("MALLOC_ARENA_MAX", "2")
+            .env("FIXTURE_LOADER_SENTINEL", "retained")
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{output:?}");
+        if String::from_utf8_lossy(&output.stdout)
+            .contains("NOT EXERCISED: functional bubblewrap namespaces unavailable")
+        {
+            eprintln!("NOT EXERCISED: functional bubblewrap namespaces unavailable");
+            assert_ne!(std::env::var("BWRAP_REQUIRE_TESTS").as_deref(), Ok("1"));
+            return;
+        }
+        assert!(String::from_utf8_lossy(&output.stdout).contains("ambient-loader-fixture-reached"));
+        return;
+    }
+    assert_eq!(std::env::var("MALLOC_ARENA_MAX").as_deref(), Ok("2"));
+    let root = tempfile::tempdir().unwrap();
+    let source = r#"
+fn main(harness: Harness) {
+  const host = harness.system.sandbox_confinement()
+  if !host.confines_processes {
+    harness.stdio.println("bubblewrap-unavailable")
+    return
+  }
+  assert_eq(host.mechanism, "linux_bubblewrap")
+  assert_eq(host.confines_processes, true)
+  const result = harness.tools.run_command({argv: ["/usr/bin/sh", "-c", "test -z \"$MALLOC_ARENA_MAX\" && test \"$FIXTURE_LOADER_SENTINEL\" = retained && printf ambient-loader-fixture-reached"]})
+  assert_eq(result.exit_code, 0)
+  assert_eq(result.stdout, "ambient-loader-fixture-reached")
+  harness.stdio.println(result.stdout)
+}
+"#;
+    let mut allowed = harn_e2e_command();
+    allowed.current_dir(root.path()).args([
+        "run",
+        "--standalone",
+        "--sandbox-allow-process-self-introspection",
+        "-e",
+        source,
+    ]);
+    deny_landlock(&mut allowed, false);
+    let output = allowed.output().unwrap();
+    assert!(output.status.success(), "{output:?}");
+    if output.stdout == b"bubblewrap-unavailable\n" {
+        println!("NOT EXERCISED: functional bubblewrap namespaces unavailable");
+        assert_ne!(std::env::var("BWRAP_REQUIRE_TESTS").as_deref(), Ok("1"));
+        return;
+    }
+    assert_eq!(output.stdout, b"ambient-loader-fixture-reached\n");
+
+    let mut denied = harn_e2e_command();
+    denied
+        .current_dir(root.path())
+        .env("MALLOC_ARENA_MAX", "2")
+        .args([
+            "run",
+            "--standalone",
+            "--sandbox-allow-process-self-introspection",
+            "-e",
+            source,
+        ]);
+    deny_landlock(&mut denied, false);
+    let output = denied.output().unwrap();
+    assert!(!output.status.success(), "{output:?}");
+    assert!(String::from_utf8_lossy(&output.stderr).contains("MALLOC_ARENA_MAX"));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("category: ToolRejected"));
+    assert!(
+        output.stdout.is_empty(),
+        "denied payload must not fire: {output:?}"
+    );
+    println!("ambient-loader-fixture-reached");
 }
 
 #[test]

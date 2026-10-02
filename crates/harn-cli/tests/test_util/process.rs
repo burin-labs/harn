@@ -80,7 +80,12 @@ const PREWARM_TIMEOUT: Duration = Duration::from_mins(1);
 /// this rather than `env!("CARGO_BIN_EXE_harn")` directly.
 pub fn harn_e2e_binary() -> &'static Path {
     static WARMED: LazyLock<PathBuf> = LazyLock::new(|| {
-        let path = PathBuf::from(env!("CARGO_BIN_EXE_harn"));
+        // The Linux security archive can execute this test on a different
+        // runner from the one that built it. Only that exact lane sets this
+        // override to the CLI artifact restored and verified by the consumer.
+        let path = std::env::var_os("HARN_CLI_E2E_BINARY")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from(env!("CARGO_BIN_EXE_harn")));
         prewarm(&path);
         path
     });
@@ -94,8 +99,15 @@ pub fn harn_e2e_binary() -> &'static Path {
 /// Nextest identity env is stripped so spawned CLI processes write state
 /// under the test's project directory instead of
 /// `/tmp/harn-nextest-state/<hash>/`.
+/// Inherited loader controls are excluded using the runtime's trusted-setup
+/// classifier. Callers can still inject deliberate controls after construction.
 pub fn harn_e2e_command() -> Command {
     let mut command = Command::new(harn_e2e_binary());
+    for (name, _) in std::env::vars_os() {
+        if harn_vm::security::environment_policy::is_trusted_setup_control(&name) {
+            command.env_remove(name);
+        }
+    }
     command
         .env_remove("NEXTEST")
         .env_remove("NEXTEST_RUN_ID")

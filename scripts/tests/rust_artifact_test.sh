@@ -4,14 +4,71 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 script="$repo_root/scripts/ci/rust_artifact.sh"
 policy_nextest="$(jq -er '.nextest_version' "$repo_root/.github/cache-policy.json")"
+expected_security_filter="$(sed -n "s/^readonly SECURITY_FILTER='\(.*\)'$/\1/p" "$script")"
+expected_host_bound_filter="$("$repo_root/scripts/ci/host_bound_rust_test_filter.sh" linux)"
+[[ -n "$expected_security_filter" ]]
+[[ "$expected_security_filter" == *'package(harn-cli) and binary(harn_cli_e2e)'* ]]
+expected_linux_tests="$("$repo_root/scripts/ci/host_bound_rust_test_filter.sh" linux names)"
+expected_macos_tests="$("$repo_root/scripts/ci/host_bound_rust_test_filter.sh" macos names)"
+grep -Fxq 'canonical_fixture_scrubs_ambient_loader_controls_without_scrubbing_explicit_controls' \
+  <<< "$expected_linux_tests"
+grep -Fxq 'local_backend_execs_inside_session_outputs' <<< "$expected_macos_tests"
+if grep -Fxq 'local_backend_execs_inside_session_outputs' <<< "$expected_linux_tests"; then
+  echo "Linux projection included the macOS-only sandbox test" >&2
+  exit 1
+fi
 tmpdir="$(mktemp -d)"
 trap 'rm -rf "$tmpdir"' EXIT
 
 mkdir -p "$tmpdir/bin" "$tmpdir/target/debug" "$tmpdir/target/ci-cli" "$tmpdir/out" "$tmpdir/receipts" "$tmpdir/work"
 cp "$repo_root/rust-toolchain.toml" "$tmpdir/work/rust-toolchain.toml"
+make_fake_security_inventory() {
+  local omitted_test=${1:-}
+  local extra_test=${2:-}
+  jq -n --arg registry "$expected_linux_tests" \
+    --arg omitted_test "$omitted_test" --arg extra_test "$extra_test" '
+    ($registry | split("\n") | map(select(length > 0 and . != $omitted_test))
+      + [$extra_test] | map(select(length > 0))) as $tests
+    | (if $omitted_test == "workspace_env_integration" then "mismatch" else "matches" end) as $module_status
+    | {"test-count": ($tests | length), "rust-suites": {
+        "fake": {
+          "status": "listed",
+          "package-name": "harn-cli",
+          "binary-name": "harn_cli_e2e",
+          "testcases": (reduce $tests[] as $name ({};
+            if $name == "workspace_env_integration" then
+              .
+            else
+              .[$name] = {"filter-match": {"status": "matches"}}
+            end
+          ))
+        },
+        "fake-vm": {
+          "status": "listed",
+          "package-name": "harn-vm",
+          "binary-name": "harn_vm",
+          "testcases": {
+            "harn_vm::stdlib::sandbox::workspace_env_integration::spawned_process_observes_workspace_toolchain_environment": {
+              "filter-match": {"status": $module_status}
+            },
+            "harn_vm::stdlib::sandbox::workspace_env_integration::safe_inherited_workspace_cache_reaches_sandboxed_child": {
+              "filter-match": {"status": $module_status}
+            }
+          }
+        },
+        "fake-skipped": {
+          "status": "skipped",
+          "package-name": "harn-vm",
+          "binary-name": "unselected-suite"
+        }
+      }}
+  '
+}
+make_fake_security_inventory > "$tmpdir/security-inventory.json"
 cat > "$tmpdir/bin/cargo" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
+printf '%s\n' "$*" >> "${CARGO_RECEIPTS:?}/cargo-calls"
 case "$1" in
   build)
     # The shared CLI bundle builds in the ci-cli profile; the test bundle's
@@ -31,14 +88,21 @@ case "$1" in
       printf 'cargo-nextest %s (fake)\n' "${FAKE_NEXTEST_VERSION:-}"
       exit 0
     fi
-    if [[ "$#" -eq 10 && "$2" == "archive" && "$3" == "--locked" && \
+    if [[ "$#" -eq 11 && "$2" == "list" && "$3" == "--profile" && \
+      "$4" == "ci" && "$5" == "--ignore-default-filter" && \
+      "$6" == "--archive-file" && -n "$7" && \
+      "$8" == "--message-format" && "$9" == "json" && "${10}" == "-E" && \
+      "${11}" == "${EXPECTED_HOST_BOUND_FILTER:?}" ]]; then
+      cat "${FAKE_NEXTTEST_INVENTORY:?}"
+      : > "${CARGO_RECEIPTS:?}/nextest-security-list"
+    elif [[ "$#" -eq 10 && "$2" == "archive" && "$3" == "--locked" && \
       "$4" == "--workspace" && "$5" == "--profile" && "$6" == "ci" && \
       "$7" == "-E" && "$8" == 'all()' && "$9" == "--archive-file" && -n "${10}" ]]; then
       printf 'tests archive\n' > "${10}"
       : > "${CARGO_RECEIPTS:?}/nextest-tests"
     elif [[ "$#" -eq 10 && "$2" == "archive" && "$3" == "--locked" && \
       "$4" == "--workspace" && "$5" == "--profile" && "$6" == "ci" && "$7" == "-E" && \
-      "$8" == '(package(harn-vm) and binary(harn_vm)) or (package(harn-hostlib) and binary(harn_hostlib))' && \
+      "$8" == "${EXPECTED_SECURITY_FILTER:?}" && \
       "$9" == "--archive-file" && -n "${10}" ]]; then
       printf 'security tests archive\n' > "${10}"
       : > "${CARGO_RECEIPTS:?}/nextest-security"
@@ -92,6 +156,9 @@ run_artifact() {
       FAKE_TARGET="$tmpdir/target" \
       FAKE_COMMIT="${FAKE_COMMIT_OVERRIDE:-$commit}" \
       FAKE_NEXTEST_VERSION="${FAKE_NEXTEST_VERSION_OVERRIDE:-$policy_nextest}" \
+      EXPECTED_SECURITY_FILTER="$expected_security_filter" \
+      EXPECTED_HOST_BOUND_FILTER="$expected_host_bound_filter" \
+      FAKE_NEXTTEST_INVENTORY="${NEXTTEST_INVENTORY_OVERRIDE:-$tmpdir/security-inventory.json}" \
       FAKE_RUSTC_IDENTITY="${FAKE_RUSTC_IDENTITY_OVERRIDE:-rustc 1.95.0 (fake)}" \
       RUSTFLAGS="${RUSTFLAGS_OVERRIDE:--D warnings -Clink-arg=-fuse-ld=mold}" \
       CARGO_PROFILE_DEV_DEBUG="${DEV_DEBUG_OVERRIDE:-line-tables-only}" \
@@ -121,6 +188,132 @@ test ! -f "$tmpdir/receipts/build"
 test ! -f "$tmpdir/receipts/nextest-tests"
 run_artifact build-security "$security_bundle" "$commit"
 test -f "$tmpdir/receipts/nextest-security"
+test -f "$tmpdir/receipts/nextest-security-list"
+
+# Missing one registered case in the archived inventory must fail publication.
+fixture_test="$(grep '^canonical_fixture_' <<< "$expected_linux_tests")"
+ci_default_filter="$(awk '
+  /^\[profile\.ci\]$/ { in_ci=1; next }
+  /^\[/ { in_ci=0 }
+  in_ci && /^default-filter = / { sub(/^default-filter = /, ""); print; exit }
+' "$repo_root/.config/nextest.toml")"
+[[ "$ci_default_filter" == *'binary(harn_cli_e2e)'* && "$ci_default_filter" == *'test(/'* ]]
+if [[ "$ci_default_filter" == *"$fixture_test"* ]]; then
+  echo "host-bound fixture unexpectedly entered the CI default allowlist" >&2
+  exit 1
+fi
+make_fake_security_inventory "$fixture_test" > "$tmpdir/security-inventory-missing-fixture.json"
+if NEXTTEST_INVENTORY_OVERRIDE="$tmpdir/security-inventory-missing-fixture.json" \
+  run_artifact build-security "$tmpdir/out/security-missing-fixture.tar.zst" "$commit" \
+  > "$tmpdir/security-missing-fixture.out" 2>&1; then
+  echo "build-security published an archive missing the registered CLI fixture" >&2
+  exit 1
+fi
+grep -Fq "host-bound registry entry is absent from archived tests: $fixture_test" \
+  "$tmpdir/security-missing-fixture.out"
+test ! -e "$tmpdir/out/security-missing-fixture.tar.zst"
+
+# Exact registry components reject both prefix and suffix lookalikes, even
+# though unanchored test-name matching would select those names.
+for lookalike in \
+  harn_vm::stdlib::sandbox::prefix_workspace_env_integration::case \
+  harn_vm::stdlib::sandbox::workspace_env_integration_suffix::case; do
+  safe_name="${lookalike//:/-}"
+  jq --arg lookalike "$lookalike" \
+    '."rust-suites"."fake-vm".testcases[$lookalike] = {"filter-match":{"status":"matches"}}' \
+    "$tmpdir/security-inventory.json" > "$tmpdir/security-inventory-module-lookalikes.json"
+  if NEXTTEST_INVENTORY_OVERRIDE="$tmpdir/security-inventory-module-lookalikes.json" \
+    run_artifact build-security "$tmpdir/out/security-module-lookalike-$safe_name.tar.zst" "$commit" \
+    > "$tmpdir/security-module-lookalike.out" 2>&1; then
+    echo "build-security accepted module lookalike $lookalike as a registered test" >&2
+    exit 1
+  fi
+  grep -Fq 'archived filter selected a test outside the host-bound registry' \
+    "$tmpdir/security-module-lookalike.out"
+  test ! -e "$tmpdir/out/security-module-lookalike-$safe_name.tar.zst"
+done
+
+# The real module path is not a vacuous registry row: its omission must fail.
+make_fake_security_inventory workspace_env_integration > \
+  "$tmpdir/security-inventory-missing-module.json"
+if NEXTTEST_INVENTORY_OVERRIDE="$tmpdir/security-inventory-missing-module.json" \
+  run_artifact build-security "$tmpdir/out/security-missing-module.tar.zst" "$commit" \
+  > "$tmpdir/security-missing-module.out" 2>&1; then
+  echo "build-security published an archive missing the registered sandbox module" >&2
+  exit 1
+fi
+grep -Fq 'host-bound registry entry is absent from archived tests: workspace_env_integration' \
+  "$tmpdir/security-missing-module.out"
+test ! -e "$tmpdir/out/security-missing-module.tar.zst"
+
+# A selected test outside the canonical registry must also block publication.
+make_fake_security_inventory "" unexpected_probe > "$tmpdir/security-inventory-extra.json"
+if NEXTTEST_INVENTORY_OVERRIDE="$tmpdir/security-inventory-extra.json" \
+  run_artifact build-security "$tmpdir/out/security-extra-test.tar.zst" "$commit" \
+  > "$tmpdir/security-extra-test.out" 2>&1; then
+  echo "build-security accepted a selected test outside the host-bound registry" >&2
+  exit 1
+fi
+grep -Fq 'archived filter selected a test outside the host-bound registry' \
+  "$tmpdir/security-extra-test.out"
+test ! -e "$tmpdir/out/security-extra-test.tar.zst"
+
+# A macOS-only case must not leak into a Linux archive's selected inventory.
+make_fake_security_inventory "" local_backend_execs_inside_session_outputs > \
+  "$tmpdir/security-inventory-wrong-platform.json"
+if NEXTTEST_INVENTORY_OVERRIDE="$tmpdir/security-inventory-wrong-platform.json" \
+  run_artifact build-security "$tmpdir/out/security-wrong-platform.tar.zst" "$commit" \
+  > "$tmpdir/security-wrong-platform.out" 2>&1; then
+  echo "build-security accepted a macOS-only test in the Linux archive inventory" >&2
+  exit 1
+fi
+grep -Fq 'archived filter selected a test outside the host-bound registry' \
+  "$tmpdir/security-wrong-platform.out"
+test ! -e "$tmpdir/out/security-wrong-platform.tar.zst"
+
+# A status outside nextest's known listed/skipped vocabulary is malformed.
+jq '."rust-suites"."fake-skipped".status = "unreported"' \
+  "$tmpdir/security-inventory.json" > "$tmpdir/security-inventory-unknown-status.json"
+if NEXTTEST_INVENTORY_OVERRIDE="$tmpdir/security-inventory-unknown-status.json" \
+  run_artifact build-security "$tmpdir/out/security-unknown-status.tar.zst" "$commit" \
+  > "$tmpdir/security-unknown-status.out" 2>&1; then
+  echo "build-security accepted an unknown nextest suite status" >&2
+  exit 1
+fi
+grep -Fq 'nextest archive inventory contains invalid or incomplete Rust suites' \
+  "$tmpdir/security-unknown-status.out"
+test ! -e "$tmpdir/out/security-unknown-status.tar.zst"
+
+# A broken host-bound registry must fail before the consumer can invoke
+# nextest, rather than reporting a successful proof with no selected tests.
+bad_filter_repo="$tmpdir/bad-filter-repo"
+mkdir -p "$bad_filter_repo/scripts/ci" "$bad_filter_repo/scripts/config" \
+  "$bad_filter_repo/scripts/lib" "$bad_filter_repo/.github" "$tmpdir/bad-filter-receipts"
+cp "$repo_root/scripts/ci/rust_artifact.sh" \
+  "$repo_root/scripts/ci/host_bound_rust_test_filter.sh" \
+  "$bad_filter_repo/scripts/ci/"
+cp "$repo_root/scripts/ci/cache_policy.sh" "$bad_filter_repo/scripts/ci/"
+cp "$repo_root/scripts/lib/sha256.sh" "$bad_filter_repo/scripts/lib/"
+cp "$repo_root/.github/cache-policy.json" "$bad_filter_repo/.github/"
+cp "$repo_root/rust-toolchain.toml" "$bad_filter_repo/"
+: > "$bad_filter_repo/scripts/config/host-bound-rust-tests.txt"
+cat > "$tmpdir/bad-filter-consumer.sh" <<SH
+#!/usr/bin/env bash
+set -euo pipefail
+host_bound_filter=\$("$bad_filter_repo/scripts/ci/host_bound_rust_test_filter.sh" linux)
+cargo nextest run -E "\$host_bound_filter"
+SH
+chmod +x "$tmpdir/bad-filter-consumer.sh"
+if (
+  env PATH="$tmpdir/bin:$PATH" \
+    CARGO_RECEIPTS="$tmpdir/bad-filter-receipts" \
+    "$tmpdir/bad-filter-consumer.sh"
+) > "$tmpdir/bad-filter.out" 2>&1; then
+  echo "Linux sandbox consumer accepted an empty host-bound test selector" >&2
+  exit 1
+fi
+grep -Fxq 'host-bound Rust test list is empty for platform linux' "$tmpdir/bad-filter.out"
+test ! -e "$tmpdir/bad-filter-receipts/cargo-calls"
 
 github_env="$tmpdir/github-env"
 VERIFY_RUNTIME_OVERRIDE=1 run_artifact restore-tests "$bundle" "$tmpdir/restored" "$commit" "$github_env"
