@@ -6,7 +6,7 @@
 pub const AGENT_TOOL_HANDLER_RESULT_SCHEMA: &str = "harn.agent_tool_handler_result.v2";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(in crate::llm) enum HandlerOutcome {
+pub(crate) enum HandlerOutcome {
     Ok,
     Error,
     Rejected,
@@ -20,6 +20,43 @@ impl HandlerOutcome {
             Self::Rejected => Some("tool_rejected"),
         }
     }
+}
+
+/// A well-formed `harn.agent_tool_handler_result.v2` envelope, borrowed from
+/// the handler's portable JSON return.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct HandlerResultEnvelope<'a> {
+    pub outcome: HandlerOutcome,
+    pub data: &'a serde_json::Value,
+}
+
+/// The one reader of the typed handler-result envelope, shared by agent
+/// dispatch and every tool-registry adapter.
+///
+/// `None` means the value does not claim the envelope schema. `Some(Err(()))`
+/// means it claims the schema but is malformed, which every caller must
+/// refuse rather than treat as freeform data.
+pub(crate) fn parse_handler_result_envelope(
+    value: &serde_json::Value,
+) -> Option<Result<HandlerResultEnvelope<'_>, ()>> {
+    let object = value.as_object()?;
+    if object.get("schema").and_then(serde_json::Value::as_str)
+        != Some(AGENT_TOOL_HANDLER_RESULT_SCHEMA)
+    {
+        return None;
+    }
+    let parsed = (|| {
+        object.get("text")?.as_str()?;
+        let data = object.get("data")?;
+        let outcome = match object.get("outcome")?.as_str()? {
+            "ok" => HandlerOutcome::Ok,
+            "error" => HandlerOutcome::Error,
+            "rejected" => HandlerOutcome::Rejected,
+            _ => return None,
+        };
+        Some(HandlerResultEnvelope { outcome, data })
+    })();
+    Some(parsed.ok_or(()))
 }
 
 pub(super) fn agent_tool_handler_result_text(value: &serde_json::Value) -> Option<&str> {
@@ -60,18 +97,8 @@ pub(super) fn coerce_and_classify_handler_result(
         .into(),
         category: ErrorCategory::SchemaValidation,
     };
-    if json.get("schema").and_then(serde_json::Value::as_str)
-        == Some(AGENT_TOOL_HANDLER_RESULT_SCHEMA)
-    {
-        if agent_tool_handler_result_text(&json).is_none() || json.get("data").is_none() {
-            return Err(invalid());
-        }
-        let outcome = match json.get("outcome").and_then(serde_json::Value::as_str) {
-            Some("ok") => HandlerOutcome::Ok,
-            Some("error") => HandlerOutcome::Error,
-            Some("rejected") => HandlerOutcome::Rejected,
-            _ => return Err(invalid()),
-        };
+    if let Some(parsed) = parse_handler_result_envelope(&json) {
+        let outcome = parsed.map_err(|()| invalid())?.outcome;
         return Ok((json, outcome));
     }
     if val.struct_data().is_some() {
