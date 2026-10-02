@@ -56,7 +56,7 @@ policy_dir="$tmpdir/policy"
 mkdir -p "$policy_dir"
 write_policy() {
   cat > "$policy_dir/cache-policy.json" <<POLICY
-{"schema_version": 6, "windows_workspace_warm": {"build_headroom_bytes": $1}}
+{"schema_version": 7, "windows_workspace_warm": {"build_headroom_bytes": $1}}
 POLICY
 }
 

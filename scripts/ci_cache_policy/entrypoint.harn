@@ -1,6 +1,7 @@
 import { read_json_result, read_yaml } from "std/fs"
 import { empty_scope_failure } from "../guard_scope.harn"
 import { scan_glob } from "../path_visibility.harn"
+import "./harn_check_cache.harn"
 import "./linux_checks.harn"
 import "./native_checks.harn"
 import "./policy_core.harn"
@@ -64,6 +65,8 @@ pub fn run_ci_cache_policy(harness: Harness) {
   const setup_harn_action = read_yaml(harness.fs, SETUP_HARN_ACTION_PATH, nil)
   const sccache_action = read_yaml(harness.fs, SCCACHE_ACTION_PATH, nil)
   const sccache_install_action = read_yaml(harness.fs, SCCACHE_INSTALL_ACTION_PATH, nil)
+  const harn_check_cache_action = read_yaml(harness.fs, HARN_CHECK_CACHE_ACTION_PATH, nil)
+  const harn_check_cache_save_action = read_yaml(harness.fs, HARN_CHECK_CACHE_SAVE_ACTION_PATH, nil)
   let workflows = {}
   for path in scan_glob(harness.fs, "check-ci-cache-policy", WORKFLOW_GLOB).sorted() {
     workflows[workflow_name(path)] = read_yaml(harness.fs, path, nil)
@@ -85,6 +88,8 @@ pub fn run_ci_cache_policy(harness: Harness) {
     setup_harn_cache_action_errors(setup_harn_action),
     sccache_action_cache_size_errors(sccache_action),
     sccache_install_action_errors(sccache_install_action),
+    harn_check_cache_action_errors(harn_check_cache_action, harn_check_cache_save_action),
+    harn_check_cache_writer_errors(policy, workflows),
     ci_workflow_concurrency_errors(workflows["ci.yml"]),
     minimal_pr_capacity_errors(workflows["ci.yml"], workflows["publish-release.yml"]),
     e2e_elastic_capacity_errors(workflows["e2e.yml"]),
@@ -110,6 +115,6 @@ pub fn run_ci_cache_policy(harness: Harness) {
     harness.runtime.exit(1)
   }
   harness.stdio.println(
-    "CI cache policy: OK (${len(workflows.keys())} workflows, ${len(policy.writers)} Rust writer)",
+    "CI cache policy: OK (${len(workflows.keys())} workflows, ${len(policy.writers)} Rust writer, ${len(policy.harn_check_cache_writers)} Harn check cache writer)",
   )
 }

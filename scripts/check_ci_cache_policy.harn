@@ -1,5 +1,9 @@
 import { run_ci_cache_policy } from "./ci_cache_policy/entrypoint.harn"
 pub import {
+  harn_check_cache_action_errors,
+  harn_check_cache_writer_errors,
+} from "./ci_cache_policy/harn_check_cache.harn"
+pub import {
   cache_refresh_trigger_errors,
   cache_refresh_workflow_errors,
   ci_linux_lane_policy_errors,
@@ -32,6 +36,7 @@ pub import {
 pub import {
   CiCachePolicy,
   CiCacheWriter,
+  HarnCheckCacheWriter,
   MacosWorkspaceWarmPolicy,
   NATIVE_CACHE_INPUTS,
   PULL_REQUEST_RESTORE_ONLY_SAVE,
