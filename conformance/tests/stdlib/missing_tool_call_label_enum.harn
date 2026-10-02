@@ -2,11 +2,9 @@ import { missing_tool_call_classifier } from "std/llm/missing_tool_call"
 import { llm_calls, llm_text, with_llm_script } from "std/testing"
 
 /**
- * The missing-tool-call classifier's `action` label set is a schema enum, so
- * the typed-output checkpoint refuses an out-of-set label instead of mapping
- * it to `ambiguous` after the fact. The refusal fails open to `ambiguous` with
- * `original_action: "error"`, which is distinguishable from a genuine
- * `ambiguous` answer.
+ * The evaluator refuses a tool label outside the current candidate registry
+ * in one physical request. The refusal fails open to `ambiguous` with
+ * `original_action: "error"`.
  */
 pipeline test(harness: Harness) {
   const request = {
@@ -21,18 +19,28 @@ pipeline test(harness: Harness) {
     harness.llm,
     [
       llm_text(
-        "{\"action\":\"maybe_later\",\"tool_name\":\"\",\"confidence\":0.99,\"evidence\":\"out of set\"}",
+        "{\"answers\":{\"intended\":{\"verdict\":true,\"confidence\":0.99,\"evidence\":\"fixture\"},\"tool\":{\"choice\":\"undeclared\",\"confidence\":0.99,\"evidence\":\"out of set\"}}}",
       ),
     ],
     { ->
-      const classify = missing_tool_call_classifier(harness, {provider: "mock"})
+      const classify = missing_tool_call_classifier(
+        harness,
+        {provider: "openai", model: "gpt-5.4-mini", effort: "none"},
+      )
       const result = classify(request)
       const schema = llm_calls(harness.llm)[0].output_format.schema
-      harness.stdio.println(json_stringify(schema.properties.action.enum))
+      harness.stdio.println(
+        json_stringify(schema.properties.answers.properties.tool.properties.choice.enum),
+      )
       harness.stdio.println(result.classifier_kind)
       harness.stdio.println(result.action)
       harness.stdio.println(result.original_action)
-      harness.stdio.println(result.typed_checkpoint.ok)
+      assert_eq(
+        len(llm_calls(harness.llm)),
+        1,
+        "a malformed answer must consume exactly one request",
+      )
+      harness.stdio.println(result.evaluation.kind)
     },
   )
 }

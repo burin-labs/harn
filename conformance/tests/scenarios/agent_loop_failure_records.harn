@@ -1,0 +1,34 @@
+import { AgentLoopFailure } from "std/agent/failures"
+
+pipeline default(harness: Harness) {
+  const callback: Result<_, AgentLoopFailure> = try {
+    throw {
+      kind: "agent_loop_terminal_callback_failed",
+      category: "internal",
+      reason: "terminal_callback_failed",
+      message: "callback failed",
+      cause: {terminal_error: "loop failed", callback_error: {message: "writer failed"}},
+    }
+  }
+  assert(is_err(callback))
+  assert_eq(unwrap_err(callback).cause.terminal_error, "loop failed")
+  assert_eq(unwrap_err(callback).cause.callback_error.message, "writer failed")
+  harness.stdio.println("callback failure retains both causes")
+  const dispatch: Result<_, AgentLoopFailure> = try {
+    throw {
+      kind: "terminal",
+      category: "agent_loop_protocol_failure",
+      reason: "empty_provider_request",
+      terminal_class: "agent_loop_protocol_failure",
+      message: "empty request refused",
+    }
+  }
+  assert(is_err(dispatch))
+  assert_eq(unwrap_err(dispatch).reason, "empty_provider_request")
+  harness.stdio.println("dispatch failure shares the named error channel")
+  const text: Result<_, AgentLoopFailure> = try {
+    throw "ordinary loop failure"
+  }
+  assert_eq(unwrap_err(text), "ordinary loop failure")
+  harness.stdio.println("string failures remain accepted")
+}

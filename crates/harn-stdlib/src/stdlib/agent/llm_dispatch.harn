@@ -1,3 +1,4 @@
+import { AgentDispatchProtocolFailure } from "std/agent/failures"
 import { agent_loop_default_retry_predicate } from "std/agent/retry"
 import { agent_emit_event } from "std/agent/state"
 import { with_retry } from "std/llm/handlers"
@@ -65,13 +66,14 @@ fn __dispatch_reject_empty_request(message: any, turn_system: any, llm_opts: dic
   if __dispatch_request_has_payload(message, turn_system, llm_opts) {
     return nil
   }
-  throw {
+  const failure: AgentDispatchProtocolFailure = {
     kind: "terminal",
     category: "agent_loop_protocol_failure",
     reason: "empty_provider_request",
     terminal_class: "agent_loop_protocol_failure",
     message: "agent_loop: refusing a structurally empty provider request",
   }
+  throw failure
 }
 
 fn __dispatch_error_field(err: any, key: string, fallback: string) {

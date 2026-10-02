@@ -1,3 +1,4 @@
+import { AgentDispatchProtocolFailure } from "std/agent/failures"
 // Run: harn test tests/agent/llm_dispatch_guard_test.harn
 //
 // A structurally empty request is a harness protocol failure and must never
@@ -25,6 +26,7 @@ pipeline test_empty_request_fails_before_provider_dispatch(harness: Harness, tas
   }
   assert(is_err(outcome), "an empty request must fail closed")
   const error = unwrap_err(outcome)
+  assert(schema_is(error, schema_of(AgentDispatchProtocolFailure)))
   assert_eq(error.category, "agent_loop_protocol_failure")
   assert_eq(error.reason, "empty_provider_request")
   assert_eq(error.terminal_class, "agent_loop_protocol_failure")

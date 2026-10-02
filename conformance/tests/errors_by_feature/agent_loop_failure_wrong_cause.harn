@@ -1,0 +1,11 @@
+import { AgentLoopFailure } from "std/agent/failures"
+
+const outcome: Result<_, AgentLoopFailure> = try {
+  throw {
+    kind: "agent_loop_terminal_callback_failed",
+    category: "internal",
+    reason: "terminal_callback_failed",
+    message: "callback failed",
+    cause: "both errors lost",
+  }
+}

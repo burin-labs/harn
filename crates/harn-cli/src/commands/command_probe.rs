@@ -118,7 +118,9 @@ mod tests {
             std::fs::write(marker, b"entered").unwrap();
         }
         match mode.as_str() {
-            "hang" => std::thread::sleep(Duration::from_secs(30)),
+            "hang" => loop {
+                std::thread::park();
+            },
             "large" => std::io::stdout()
                 .write_all(&vec![b'x'; 128 * 1024])
                 .unwrap(),

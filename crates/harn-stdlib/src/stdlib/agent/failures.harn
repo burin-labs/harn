@@ -1,0 +1,23 @@
+/** Both exceptions retained when a terminal callback also fails. */
+pub type AgentLoopCallbackCause = {terminal_error: unknown, callback_error: unknown}
+
+/** A terminal callback failed while reporting the original loop failure. */
+pub type AgentLoopCallbackFailure = {
+  kind: "agent_loop_terminal_callback_failed",
+  category: "internal",
+  reason: "terminal_callback_failed",
+  message: string,
+  cause: AgentLoopCallbackCause,
+}
+
+/** Dispatch refused a provider request with no substantive input. */
+pub type AgentDispatchProtocolFailure = {
+  kind: "terminal",
+  category: "agent_loop_protocol_failure",
+  reason: "empty_provider_request",
+  terminal_class: "agent_loop_protocol_failure",
+  message: string,
+}
+
+/** Internal failures normalized by the public agent-loop terminal boundary. */
+pub type AgentLoopFailure = string | AgentLoopCallbackFailure | AgentDispatchProtocolFailure

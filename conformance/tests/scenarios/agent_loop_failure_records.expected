@@ -1,0 +1,3 @@
+callback failure retains both causes
+dispatch failure shares the named error channel
+string failures remain accepted
