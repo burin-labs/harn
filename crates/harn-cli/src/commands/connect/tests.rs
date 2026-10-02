@@ -119,6 +119,7 @@ fn authorization_url_includes_pkce_and_resource_indicator() {
         "challenge",
         "https://api.example.com/resource",
         Some("read write"),
+        &std::collections::BTreeMap::new(),
     )
     .expect("authorization URL");
     let pairs = url
@@ -132,6 +133,51 @@ fn authorization_url_includes_pkce_and_resource_indicator() {
         "https://api.example.com/resource"
     );
     assert_eq!(pairs.get("scope").unwrap(), "read write");
+    // Negative control: a server with no known defaults gets no extra keys.
+    assert!(!pairs.contains_key("access_type"));
+    assert!(!pairs.contains_key("prompt"));
+}
+
+/// The URL `harn connect` prints or opens is the one `build_authorization_url`
+/// returns, so Google's offline-access defaults must be on it, not only on the
+/// helper that computes them.
+#[test]
+fn google_authorization_url_requests_offline_access() {
+    let url = build_authorization_url(
+        "https://accounts.google.com/o/oauth2/v2/auth",
+        "client",
+        "http://127.0.0.1:49152/oauth/callback",
+        "state",
+        "challenge",
+        "https://www.googleapis.com/",
+        Some("openid"),
+        &std::collections::BTreeMap::new(),
+    )
+    .expect("authorization URL");
+    let pairs = url
+        .query_pairs()
+        .map(|(key, value)| (key.into_owned(), value.into_owned()))
+        .collect::<std::collections::BTreeMap<_, _>>();
+    assert_eq!(
+        pairs.get("access_type").map(String::as_str),
+        Some("offline")
+    );
+    assert_eq!(pairs.get("prompt").map(String::as_str), Some("consent"));
+    assert_eq!(pairs.get("client_id").map(String::as_str), Some("client"));
+
+    let hijack = std::collections::BTreeMap::from([("state".to_string(), "x".to_string())]);
+    let error = build_authorization_url(
+        "https://accounts.google.com/o/oauth2/v2/auth",
+        "client",
+        "http://127.0.0.1:49152/oauth/callback",
+        "state",
+        "challenge",
+        "https://www.googleapis.com/",
+        None,
+        &hijack,
+    )
+    .expect_err("flow-owned parameter");
+    assert!(error.contains("`state`"), "{error}");
 }
 
 #[test]
