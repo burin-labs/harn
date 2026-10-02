@@ -83,37 +83,61 @@ fn server_ceiling(
             policy.process_sandbox.write_roots.push(root.clone());
         }
     }
-    for root in harn_read_roots(config.pipeline.as_deref()) {
-        let root = root.display().to_string();
-        if !policy.process_sandbox.read_roots.contains(&root) {
-            policy.process_sandbox.read_roots.push(root);
+    let own = own_roots(config.pipeline.as_deref());
+    for (roots, granted) in [
+        (own.read, &mut policy.process_sandbox.read_roots),
+        (own.write, &mut policy.process_sandbox.write_roots),
+    ] {
+        for root in roots {
+            let root = root.display().to_string();
+            if !granted.contains(&root) {
+                granted.push(root);
+            }
         }
     }
     Some(policy)
 }
 
-/// What the server reads for itself, outside any workspace: the package the
-/// served pipeline belongs to (its `harn.toml`, sibling modules, and assets)
-/// and the installed package cache its imports resolve from. Read-only.
-fn harn_read_roots(pipeline: Option<&str>) -> Vec<PathBuf> {
-    harn_read_roots_under(pipeline, harn_vm::user_dirs::home_dir().as_deref())
+/// What the server needs for itself outside any workspace.
+#[derive(Debug, Default, PartialEq)]
+struct OwnRoots {
+    read: Vec<PathBuf>,
+    write: Vec<PathBuf>,
 }
 
-fn harn_read_roots_under(pipeline: Option<&str>, home: Option<&Path>) -> Vec<PathBuf> {
-    let mut roots: Vec<PathBuf> = Vec::new();
+/// The package the served pipeline belongs to, readable (its `harn.toml`,
+/// sibling modules, and installed package generations), with its `.harn`
+/// package state writable for Harn's install and snapshot locks; and the
+/// installed package cache, readable.
+fn own_roots(pipeline: Option<&str>) -> OwnRoots {
+    own_roots_under(pipeline, harn_vm::user_dirs::home_dir().as_deref())
+}
+
+fn own_roots_under(pipeline: Option<&str>, home: Option<&Path>) -> OwnRoots {
+    let mut roots = OwnRoots::default();
     if let Some(dir) = pipeline.and_then(|pipeline| Path::new(pipeline).parent()) {
-        let package = harn_modules::manifest_walk::find_project_root(dir)
-            .unwrap_or_else(|| dir.to_path_buf());
+        // Harn finds a package by its manifest or by its installed package
+        // state, whichever is nearer; read the same root it will.
+        let package = [
+            harn_modules::manifest_walk::find_project_root(dir),
+            harn_modules::package_snapshot::PackageSnapshot::nearest_project_root(dir),
+        ]
+        .into_iter()
+        .flatten()
+        .max_by_key(|root| root.components().count());
         // A package rooted at or above home would make every credential
         // directory readable; fall back to the pipeline's own directory.
-        let contains_home = home.is_some_and(|home| home.starts_with(&package));
-        roots.push(if contains_home {
-            dir.to_path_buf()
-        } else {
-            package
-        });
+        match package.filter(|package| !home.is_some_and(|home| home.starts_with(package))) {
+            Some(package) => {
+                roots
+                    .write
+                    .push(harn_modules::package_snapshot::package_state_dir(&package));
+                roots.read.push(package);
+            }
+            None => roots.read.push(dir.to_path_buf()),
+        }
     }
-    roots.extend(harn_vm::user_dirs::package_cache_dir());
+    roots.read.extend(harn_vm::user_dirs::package_cache_dir());
     roots
 }
 
@@ -203,13 +227,30 @@ mod tests {
         let pipeline = package.path().join("agents/main.harn");
         let pipeline = pipeline.to_str().unwrap();
         let elsewhere = tempfile::tempdir().unwrap();
-        let roots = harn_read_roots_under(Some(pipeline), Some(elsewhere.path()));
-        assert_eq!(roots[0], package.path());
+        let roots = own_roots_under(Some(pipeline), Some(elsewhere.path()));
+        assert_eq!(roots.read[0], package.path());
+        assert_eq!(roots.write, vec![package.path().join(".harn")]);
 
         // Negative control: the same package treated as the home directory
-        // contributes only the pipeline's own directory.
-        let roots = harn_read_roots_under(Some(pipeline), Some(package.path()));
-        assert_eq!(roots[0], package.path().join("agents"));
+        // contributes only the pipeline's own directory, and nothing writable.
+        let roots = own_roots_under(Some(pipeline), Some(package.path()));
+        assert_eq!(roots.read[0], package.path().join("agents"));
+        assert!(roots.write.is_empty());
+    }
+
+    #[test]
+    fn ceiling_finds_a_package_by_its_installed_state_alone() {
+        // A staged package can carry installed generations and no manifest.
+        let package = tempfile::tempdir().unwrap();
+        let state = package.path().join(".harn");
+        std::fs::create_dir_all(&state).unwrap();
+        std::fs::write(state.join("package-current.toml"), "").unwrap();
+        std::fs::create_dir_all(package.path().join("pipelines/mode")).unwrap();
+        let pipeline = package.path().join("pipelines/mode/auto.harn");
+        let elsewhere = tempfile::tempdir().unwrap();
+        let roots = own_roots_under(pipeline.to_str(), Some(elsewhere.path()));
+        assert_eq!(roots.read[0], package.path());
+        assert_eq!(roots.write, vec![state]);
     }
 
     #[test]
