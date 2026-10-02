@@ -300,6 +300,8 @@ fn workflow() {
     env: {
       HARN_EXT_ARTIFACT_WAIT_MAX_ATTEMPTS: "270",
       HARN_EXT_ARTIFACT_WAIT_INTERVAL_SECONDS: "10",
+      HARN_EXT_ARTIFACT_WAIT_STATE_EVERY_POLLS: "6",
+      HARN_EXT_ARTIFACT_WAIT_RATE_LIMIT_MAX_SECONDS: "2400",
     },
     jobs: {
       "package-audit": package_audit,
@@ -908,6 +910,26 @@ pipeline test_source_length_budget_starts_after_cli_readiness() {
       "ci.yml:source-length-ratchet must consume live artifacts through rust-artifacts-ready, not producer completion",
     ),
   )
+}
+
+@test
+pipeline test_rejects_an_artifact_wait_that_spends_or_fails_on_the_shared_limit(
+  harness: Harness,
+  task: unknown,
+) {
+  const valid = workflow()
+  const barrier = "ci.yml:rust-artifacts-ready must be the bounded"
+    + " free-hosted immutable artifact barrier"
+  assert(!ci_linux_lane_policy_errors(valid).contains(barrier))
+  // Reading the producer's state on every poll is what spent the limit.
+  const eager = {...valid, env: {...valid.env, HARN_EXT_ARTIFACT_WAIT_STATE_EVERY_POLLS: "1"}}
+  assert(ci_linux_lane_policy_errors(eager).contains(barrier))
+  // A short rate-limit allowance turns a refused read into a red build.
+  const brittle = {
+    ...valid,
+    env: {...valid.env, HARN_EXT_ARTIFACT_WAIT_RATE_LIMIT_MAX_SECONDS: "240"},
+  }
+  assert(ci_linux_lane_policy_errors(brittle).contains(barrier))
 }
 
 @test

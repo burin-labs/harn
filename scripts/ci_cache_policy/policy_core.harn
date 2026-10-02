@@ -293,6 +293,15 @@ pub const ARTIFACT_WAIT_MAX_ATTEMPTS = "270"
 
 pub const ARTIFACT_WAIT_INTERVAL_SECONDS = "10"
 
+// About ten waiters start in every run and share one installation limit. A
+// running producer's state is re-read on every sixth poll only (the inventory
+// read between is a free 304 while nothing changes), and a rate limit is
+// waited out up to 40 minutes, inside the shortest waiter's job timeout,
+// because a refused read says nothing about the build and must not fail it.
+pub const ARTIFACT_WAIT_STATE_EVERY_POLLS = "6"
+
+pub const ARTIFACT_WAIT_RATE_LIMIT_MAX_SECONDS = "2400"
+
 pub const ARTIFACT_READY_TIMEOUT_MINUTES = "50"
 
 pub const HARN_AUDIT_TIMEOUT_MINUTES = "65"

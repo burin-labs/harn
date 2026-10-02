@@ -811,6 +811,10 @@ fn artifact_ready_barrier_errors(workflow: dict) -> list<string> {
     != ARTIFACT_WAIT_MAX_ATTEMPTS
     || trim(workflow?.env?.HARN_EXT_ARTIFACT_WAIT_INTERVAL_SECONDS ?? "")
       != ARTIFACT_WAIT_INTERVAL_SECONDS
+    || trim(workflow?.env?.HARN_EXT_ARTIFACT_WAIT_STATE_EVERY_POLLS ?? "")
+      != ARTIFACT_WAIT_STATE_EVERY_POLLS
+    || trim(workflow?.env?.HARN_EXT_ARTIFACT_WAIT_RATE_LIMIT_MAX_SECONDS ?? "")
+      != ARTIFACT_WAIT_RATE_LIMIT_MAX_SECONDS
     || trim(ready_job?.["runs-on"] ?? "") != HOSTED_LINUX_RUNNER
     || trim(to_string(ready_job?.["timeout-minutes"] ?? ""))
       != ARTIFACT_READY_TIMEOUT_MINUTES
