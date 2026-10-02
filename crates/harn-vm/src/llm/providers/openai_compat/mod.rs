@@ -394,8 +394,17 @@ impl OpenAiCompatibleProvider {
                 .expect("request body is object")
                 .remove("response_format");
         }
+        // OpenRouter silently drops a parameter the chosen endpoint does not
+        // declare, so a 200 alone cannot show that an option was honored. A
+        // provider contract probe therefore always requires parameters: an
+        // accepted request then means an endpoint declared the option, and
+        // "No endpoints found that can handle the requested parameters" means
+        // none did (provider contract probe run 37030330916 read four
+        // silently dropped GPT Luna sampling options as support).
         if opts.provider == "openrouter"
-            && (body.get("response_format").is_some() || body.get("top_k").is_some())
+            && (body.get("response_format").is_some()
+                || body.get("top_k").is_some()
+                || opts.provider_contract_probe.is_some())
         {
             ensure_openrouter_require_parameters(&mut body);
         }

@@ -19,6 +19,8 @@ pub type ProviderOptionProbeAttempt = {
   input_tokens?: int,
   output_tokens?: int,
   cost_usd?: float,
+  retried?: bool,
+  control_error?: string,
 }
 
 pub type ProviderOptionProbeReport = {

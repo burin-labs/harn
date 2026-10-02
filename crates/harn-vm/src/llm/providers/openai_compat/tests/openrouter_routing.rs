@@ -55,6 +55,27 @@ fn openrouter_builder_projects_top_k_after_admission() {
     assert_eq!(body["provider"]["require_parameters"], true);
 }
 
+/// A contract probe must not read a silently dropped option as support, so
+/// it requires parameters for every option. The same temperature request
+/// outside a probe is the control: production routing stays unchanged.
+#[test]
+fn openrouter_option_probe_requires_parameters_and_production_does_not() {
+    let mut payload = base_request_payload();
+    payload.model = "openai/gpt-6-luna".to_string();
+    payload.temperature = Some(0.2);
+
+    let production = OpenAiCompatibleProvider::build_request_body(&payload);
+    assert!(production["provider"]["require_parameters"].is_null());
+
+    payload.provider_contract_probe = Some(crate::llm::capabilities::PortableOption::Temperature);
+    let probe = OpenAiCompatibleProvider::build_request_body(&payload);
+    assert_eq!(probe["provider"]["require_parameters"], true);
+
+    payload.provider = "together".to_string();
+    let other_host = OpenAiCompatibleProvider::build_request_body(&payload);
+    assert!(other_host.get("provider").is_none());
+}
+
 #[test]
 fn route_denylist_seeds_provider_ignore_on_empty_body() {
     let mut body = json!({"model": "qwen/qwen3.6-35b-a3b"});

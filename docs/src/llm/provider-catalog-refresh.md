@@ -302,6 +302,26 @@ wire shape was rejected. The attempt owns its physical request count: a local
 gate reports zero requests and remains unmeasured, while a provider response or
 served-empty response reports one.
 
+A rejection is evidence about the option only if the same request without it
+succeeds, so every rejection is followed by one control request. When the
+control fails too, as it does on a route that refuses every call, the report is
+`unmeasured` with `failure_class: "control_failed"`. A transport timeout is
+retried once, because a scale-to-zero endpoint can spend its first request
+cold-starting.
+
+OpenRouter drops a parameter that the chosen endpoint does not declare and
+still returns 200, so an ordinary request cannot show that an option was
+honored. Probe requests to OpenRouter therefore set
+`provider.require_parameters`: acceptance means some endpoint declared the
+option, and "No endpoints found that can handle the requested parameters" is a
+rejection. A request the account's OpenRouter privacy settings exclude is
+`unmeasured` with `failure_class: "account_policy"`, and the probe campaign
+reports it as a skip with that reason.
+
+One limit remains. A single request reaches one OpenRouter endpoint, so it
+cannot see an endpoint that declares an option but rejects it. Moonshot's own
+Kimi K2.7 Code endpoint does that for the penalties.
+
 Normal calls use the catalog to reject or remove unsupported options before
 egress. A truthful negative probe must let its selected option reach the
 provider, or it can only confirm the catalog against itself. The CLI selects

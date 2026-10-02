@@ -1273,6 +1273,59 @@ pipeline test_provider_tool_probe_campaign_requires_measured_true_and_false_cont
   assert_eq(both.claim_controls.measured_unsupported_count, 1)
   assert_eq(both_with_missing_auth.claim_controls.status, "incomplete")
   assert_eq(both_with_missing_auth.claim_controls.unmeasured_count, 1)
+  // An account-policy refusal is a typed skip; an unattributed rejection is
+  // an error naming its cause. Neither may read as catalog drift.
+  const unmeasured_report = accepted_report
+    + {
+      probe: accepted_report.probe
+        + {
+          verdict: "inconclusive",
+          attempt: {
+            verdict: "inconclusive",
+            measured: false,
+            request_count: 1,
+            failure_class: "account_policy",
+          },
+        },
+      diff: {status: "unmeasured", claimed_supported: true, observed_supported: nil},
+    }
+  const policy_cell = provider_tool_probe_campaign_option_probe_cell(
+    harness.llm,
+    route,
+    behavior,
+    unmeasured_report,
+    "policy.json",
+    command,
+    2,
+  )
+  assert_eq(policy_cell.status, "skip")
+  assert_eq(policy_cell.reason, "the probing account's provider data policy excludes this endpoint")
+  const control_report = unmeasured_report
+    + {
+      probe: unmeasured_report.probe
+        + {
+          attempt: {
+            verdict: "inconclusive",
+            measured: false,
+            request_count: 2,
+            failure_class: "control_failed",
+          },
+        },
+    }
+  const control_cell = provider_tool_probe_campaign_option_probe_cell(
+    harness.llm,
+    route,
+    behavior,
+    control_report,
+    "control.json",
+    command,
+    2,
+  )
+  assert_eq(control_cell.status, "error")
+  assert_eq(
+    control_cell.reason,
+    "the provider rejected the request without the option too, so the rejection is not evidence about the option",
+  )
 }
 
 @test

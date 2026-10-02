@@ -2184,7 +2184,16 @@ harn provider option-probe anthropic \
 count without contacting the provider. A live report records `match`, `drift`,
 or `unmeasured`. Provider acceptance and provider rejection are measurements;
 authentication failures, throttling, unavailable models, and local gates are
-not. With `--fail-on-drift`, drift exits 1 and an unmeasured request exits 2.
+not. A rejection counts only when a control request without the option
+succeeds; otherwise the report is `unmeasured` with `failure_class:
+"control_failed"` and the control's error. A transport timeout is retried once,
+and the report's request count includes the retry and the control. On
+OpenRouter every probe request sets `provider.require_parameters`, so
+acceptance means an endpoint declared the option and OpenRouter's "No endpoints
+found that can handle the requested parameters" counts as a rejection. An
+OpenRouter refusal from the account's data policy is `unmeasured` with
+`failure_class: "account_policy"`. With `--fail-on-drift`, drift exits 1 and an
+unmeasured request exits 2.
 
 The command normally suspends catalog shaping for only the selected option, so
 a negative claim can be falsified at the wire. The typed authority is captured
