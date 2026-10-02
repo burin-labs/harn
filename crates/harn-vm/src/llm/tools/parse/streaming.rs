@@ -278,6 +278,7 @@ impl StreamingToolCallDetector {
                         raw_input: serde_json::json!({}),
                         parsing: Some(true),
                         audit: None,
+                        intent: None,
                     });
                     self.state = DetectorState::InTaggedBlock {
                         candidate_start: j,
@@ -320,6 +321,7 @@ impl StreamingToolCallDetector {
                                 raw_input: serde_json::json!({}),
                                 parsing: Some(true),
                                 audit: None,
+                                intent: None,
                             });
                             self.state = DetectorState::InBareCall {
                                 name_start: j,

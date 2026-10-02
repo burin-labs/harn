@@ -273,6 +273,7 @@ impl AgentEventSink for AcpAgentEventSink {
                 raw_input,
                 parsing,
                 audit,
+                intent,
             } => {
                 let mut update = serde_json::json!({
                     "sessionUpdate": "tool_call",
@@ -292,6 +293,9 @@ impl AgentEventSink for AcpAgentEventSink {
                     if let Ok(value) = serde_json::to_value(record) {
                         harn_meta.insert("audit".to_string(), value);
                     }
+                }
+                if let Some(intent) = intent {
+                    harn_meta.insert("intent".to_string(), serde_json::json!(intent));
                 }
                 Self::attach_harn_meta(&mut update, harn_meta);
                 self.write_notification(serde_json::json!({

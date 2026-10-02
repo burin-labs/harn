@@ -145,6 +145,7 @@ fn persists_text_parsing_candidates() {
         raw_input: serde_json::json!({}),
         parsing: Some(true),
         audit: None,
+        intent: None,
     });
     sink.handle_event(&AgentEvent::ToolCallUpdate {
         session_id: "s".into(),
@@ -212,6 +213,7 @@ fn persists_partial_tool_args_without_a_live_subscriber() {
         raw_input: serde_json::json!({"path": "src/lib.rs"}),
         parsing: None,
         audit: None,
+        intent: None,
     });
 
     let topic = Topic::new("observability.agent_events.headless-stream").unwrap();

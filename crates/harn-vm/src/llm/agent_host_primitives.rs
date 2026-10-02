@@ -27,7 +27,7 @@ use dispatch_policy::{tool_denial_from_policy, DispatchPolicy};
 use host_permission::{
     emit_permission_event, emit_permission_event_with_policy, emit_runtime_denied_activity,
     emit_runtime_resolved_activity, emit_runtime_unavailable_activity, record_allowed_dispatch,
-    request_host_permission, HostPermissionOutcome, HostPermissionRequest,
+    request_host_permission, tool_call_intent, HostPermissionOutcome, HostPermissionRequest,
 };
 use primitive_args::{
     option_int as agent_primitive_option_int, option_str as agent_primitive_option_str,
@@ -641,8 +641,7 @@ fn trifecta_gate_reason(
         // untrusted content was flagged as a likely injection. A benign write to
         // a user-named / configured destination (research synthesis to a doc, a
         // connector with a fixed sink) matches none of these, so it is not gated.
-        // When the flag is off this is byte-identical to the coarse "any exfil
-        // while tainted" gate.
+        // When the flag is off this is byte-identical to the coarse "any exfil while tainted" gate.
         let gate_exfil = if policy.precise_exfil_gate {
             let untrusted_endpoints: Vec<String> = taint
                 .iter()
@@ -867,6 +866,7 @@ pub(super) async fn host_agent_dispatch_tool_call(
                     violation,
                     reason: policy_denial.reason.clone(),
                     tool_context: permission_context_for(tools, &tool_name),
+                    intent: tool_call_intent(options),
                 },
             )
             .await;
@@ -1180,6 +1180,7 @@ pub(super) async fn host_agent_dispatch_tool_call(
                 requested_capabilities: vec![format!("tool.{tool_name}")],
                 tool_descriptor: tool_descriptor_for(tools, &tool_name),
                 tool_annotations: tool_annotations_for(tools, &tool_name),
+                intent: tool_call_intent(options),
             };
             match request_host_permission(bridge.as_ref(), request).await {
                 HostPermissionOutcome::Allowed {
@@ -1899,8 +1900,7 @@ async fn host_mcp_bootstrap_impl(
     })))
 }
 
-/// Disconnect all MCP clients installed for session_id and remove them
-/// from the session registry.
+/// Disconnect all MCP clients installed for session_id and drop them from the session registry.
 #[harn_builtin(
     exposure = "runtime_internal",
     effects = [],

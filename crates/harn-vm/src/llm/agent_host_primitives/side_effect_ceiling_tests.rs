@@ -13,6 +13,8 @@ use crate::bridge::HostBridge;
 use crate::orchestration::SideEffectCeilingViolation;
 use crate::tool_annotations::SideEffectLevel;
 
+mod tool_call_intent;
+
 struct HostBridgeGuard {
     previous: Option<Arc<HostBridge>>,
 }
@@ -259,6 +261,7 @@ async fn side_effect_ceiling_rejection_stays_terminal() {
             violation: side_effect_violation(),
             reason: "side effect blocked".to_string(),
             tool_context: (None, None),
+            intent: None,
         },
         Some(Box::new(review)),
     )
@@ -335,6 +338,7 @@ async fn side_effect_ceiling_transport_failure_stays_terminal() {
             violation: side_effect_violation(),
             reason: "side effect blocked".to_string(),
             tool_context: (None, None),
+            intent: None,
         },
         None,
     )
