@@ -369,7 +369,7 @@ fn registry_handler_has_generated_cli_and_mcp_parity() {
 
 fn write_handler_envelope_registry_fixture(temp: &TempDir) {
     fs::write(
-        temp.path().join("server.harn"),
+        temp.path().join("widget_tools.harn"),
         r#"
 import { tool_registry_from, ToolRegistry } from "std/tools"
 import { agent_tool_handler_result } from "std/agent/tool_lifecycle"
@@ -436,16 +436,13 @@ pub fn widget_tools() -> ToolRegistry {
   ], {info: {name: "widgets", version: "1.0.0"}})
 }
 
-fn main(harness: Harness) {
-  harness.tools.mcp_tools(widget_tools())
-}
 "#,
     )
     .unwrap();
     fs::write(
         temp.path().join("agent.harn"),
         r#"
-import { widget_tools } from "./server"
+import { widget_tools } from "./widget_tools"
 import { agent_dispatch_tool_call } from "std/agent/primitives"
 
 @test
@@ -462,7 +459,17 @@ pipeline agent_schema_parity(harness: Harness) {
   assert(!failed.ok)
   assert(failed.error_category == "tool_error")
 }
+"#,
+    )
+    .unwrap();
+    fs::write(
+        temp.path().join("server.harn"),
+        r#"
+import { widget_tools } from "./widget_tools"
 
+fn main(harness: Harness) {
+  harness.tools.mcp_tools(widget_tools())
+}
 "#,
     )
     .unwrap();
