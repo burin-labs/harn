@@ -481,7 +481,7 @@ impl SecretProvider for KeyringSecretProvider {
         false
     }
 
-    fn kind(&self) -> &str {
+    fn kind(&self) -> &'static str {
         "keyring"
     }
 

@@ -140,7 +140,7 @@ impl SecretProvider for EnvSecretProvider {
         Some(self.env_var_name(id))
     }
 
-    fn kind(&self) -> &str {
+    fn kind(&self) -> &'static str {
         "env"
     }
 
