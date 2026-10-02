@@ -2185,7 +2185,7 @@ pipeline test_merge_group_datacenter_rung_agrees_across_census_capacity_and_runs
   const cases = [
     {
       workflow: with_census(
-        {...census, with: {linux_runner_tag: "harn-ci-big", linux_fetch_runner_tag: "tornadough"}},
+        {...census, with: {linux_runner_tag: "harn-ci-big", linux_fetch_runner_tag: "other-host"}},
       ),
       error: census_error,
     },
