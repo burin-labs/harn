@@ -219,7 +219,7 @@ fn ensure_git_hooks_installed() {
 /// triggers the rerun that embeds it. Best effort: a platform that cannot set
 /// a directory's time keeps the old behavior.
 fn backdate_placeholder(root: &Path) {
-    let long_ago = std::time::UNIX_EPOCH + std::time::Duration::from_secs(86_400);
+    let long_ago = std::time::UNIX_EPOCH + std::time::Duration::from_hours(24);
     let mut pending = vec![root.to_path_buf()];
     let mut dirs = Vec::new();
     while let Some(path) = pending.pop() {
