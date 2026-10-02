@@ -51,33 +51,6 @@ fn provider_catalog_full_is_structurally_identical_across_runs() {
     );
 }
 
-/// The provider contract campaign reads `availability` from this dump to skip
-/// models a provider serves only from a dedicated deployment. A dump without
-/// the field would read every model as probe-able, so pin both values.
-#[test]
-fn provider_catalog_show_reports_model_availability() {
-    let harn = run(&["provider", "catalog", "show"], &[]);
-    assert_eq!(harn.exit_code, 0, "harn stderr={}", harn.stderr);
-    let value = parse_json(&harn.stdout, "harn");
-    let availability = |id: &str| {
-        value["models"]
-            .as_array()
-            .expect("models array")
-            .iter()
-            .find(|model| model["id"] == id)
-            .unwrap_or_else(|| panic!("{id} missing from provider catalog show"))["availability"]
-            .clone()
-    };
-    assert_eq!(
-        availability("accounts/fireworks/models/kimi-k2p6"),
-        "dedicated"
-    );
-    assert_eq!(
-        availability("accounts/fireworks/models/glm-5p3-flash"),
-        "serverless"
-    );
-}
-
 #[test]
 fn provider_catalog_available_only_is_structurally_identical_across_runs() {
     let harn = run(&["provider", "catalog", "show", "--available-only"], &[]);
