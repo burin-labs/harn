@@ -11,7 +11,8 @@ work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 mkdir -p "$work/bin"
 
-# CHANGED: newline-separated files the push changed. COMPARE_FAIL: make the
+# CHANGED: newline-separated files the push changed. COMPARE_STATUS: how the
+# pushed head relates to the replaced one (default ahead). COMPARE_FAIL: make the
 # comparison fail. STATUS: the replaced commit's main health "state<TAB>desc".
 cat > "$work/bin/gh" <<'EOF'
 #!/usr/bin/env bash
@@ -19,6 +20,7 @@ args="$*"
 case "$args" in
   *"/compare/"*)
     [[ -z "${COMPARE_FAIL:-}" ]] || exit 1
+    printf 'status %s\n' "${COMPARE_STATUS:-ahead}"
     printf 'count %s\n' "$(grep -c . <<< "${CHANGED:-}" || true)"
     printf '%b' "${CHANGED:-}" ;;
   *"/commits/"*"/statuses"*) printf '%b' "${STATUS:-}" ;;
@@ -58,6 +60,9 @@ run_case "a push changing the workflow measures" false CHANGED=$'.github/workflo
 run_case "an unlistable push measures" false CHANGED=$'src/a.rs\n' COMPARE_FAIL=1
 run_case "a push at the compare file cap measures" false \
   CHANGED="$(seq -f 'f%g.txt' 1 300)"
+run_case "a push changing any workflow measures" false CHANGED=$'.github/workflows/thread-parity.yml\n'
+run_case "a force push measures" false CHANGED=$'src/a.rs\n' COMPARE_STATUS=diverged
+run_case "a push back to an older commit measures" false CHANGED=$'src/a.rs\n' COMPARE_STATUS=behind
 run_case "a replaced commit without a status measures" false CHANGED=$'src/a.rs\n' STATUS=
 run_case "a first push measures" false REPLACED_SHA=0000000000000000000000000000000000000000
 

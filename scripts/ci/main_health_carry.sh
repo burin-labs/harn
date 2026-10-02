@@ -5,8 +5,10 @@
 #
 # It declines (writes carried=false to GITHUB_OUTPUT) when:
 #   - there is no replaced commit (first or force push) or it has no status;
-#   - the push changed what main health watches or how it judges, since a
-#     verdict made under the old rules must not stand for the new ones;
+#   - the push did not extend the replaced commit (a force push);
+#   - the push changed what main health watches or how it judges, or any
+#     workflow, since a verdict made under the old rules must not stand for
+#     the new ones;
 #   - the push's changed files cannot be listed, or the list reached GitHub's
 #     300-file cap and may be incomplete.
 #
@@ -34,15 +36,24 @@ if [[ -z "${REPLACED_SHA:-}" || "$REPLACED_SHA" == 00000000000000000000000000000
 fi
 
 if ! changed="$(gh api "repos/$GH_REPO/compare/$REPLACED_SHA...$PUSHED_SHA" \
-  --jq '(.files | length | "count \(.)"), (.files[].filename)')"; then
+  --jq '"status \(.status)", (.files | length | "count \(.)"), (.files[].filename)')"; then
   decline "the push's changed files could not be listed"
 fi
-count="$(head -n 1 <<< "$changed")"
+# Only a push whose head descends from the replaced commit may carry; a force
+# push or rewritten history (`diverged`, `behind`) is measured afresh.
+if [[ "$(sed -n 1p <<< "$changed")" != "status ahead" ]]; then
+  decline "the push did not extend the replaced commit"
+fi
+count="$(sed -n 2p <<< "$changed")"
+files="$(tail -n +3 <<< "$changed")"
 if [[ ! "$count" =~ ^count\ [0-9]+$ ]] || (( ${count#count } >= 300 )); then
   decline "the push's changed-file list is incomplete"
 fi
-if grep -Fxq -f <(printf '%s\n' "${policy_paths[@]}") <(tail -n +2 <<< "$changed"); then
-  decline "the push changed the health policy or reader"
+# Any workflow change counts: a watched suite's name and triggers feed the
+# verdict too.
+if grep -Fxq -f <(printf '%s\n' "${policy_paths[@]}") <<< "$files" \
+  || grep -q '^\.github/workflows/' <<< "$files"; then
+  decline "the push changed the health policy, reader or a workflow"
 fi
 
 previous="$(gh api "repos/$GH_REPO/commits/$REPLACED_SHA/statuses" \
