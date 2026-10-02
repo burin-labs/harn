@@ -82,6 +82,8 @@ pipeline default(harness: Harness) {
     {provider: "openai", model: "gpt-5.3-codex", temperature: 0.0},
   )
   harness.stdio.println(codex_sampling.temperature == nil)
+  // OpenRouter Kimi K2.7 Code keeps temperature and top_p but strips both
+  // penalties, which Moonshot's own endpoint rejects.
   const fixed_sampling_pair = agent_sanitize_model_options(
     harness.llm,
     {

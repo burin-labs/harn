@@ -620,6 +620,7 @@ thinking_block_style = "thinking_blocks"
 
 [[provider.openrouter]]
 model_match = "qwen/qwen3.7-plus"
+top_k_supported = true
 native_tools = true
 preferred_tool_format = "native"
 structured_output = "native"
@@ -658,6 +659,7 @@ thinking_block_style = "inline"
 # disable on every agent, verify, and code turn and get the 400 back.
 [[provider.openrouter]]
 model_match = "qwen/qwen3.8-max-0902"
+top_k_supported = true
 native_tools = true
 preferred_tool_format = "native"
 structured_output = "native"
@@ -684,6 +686,7 @@ thinking_block_style = "inline"
 
 [[provider.openrouter]]
 model_match = "qwen/qwen3.7-max"
+top_k_supported = true
 native_tools = true
 preferred_tool_format = "native"
 structured_output = "native"
@@ -707,6 +710,7 @@ thinking_block_style = "inline"
 
 [[provider.openrouter]]
 model_match = "qwen/qwen3.6-plus"
+top_k_supported = true
 native_tools = true
 preferred_tool_format = "native"
 structured_output = "native"
@@ -735,6 +739,7 @@ provider_route_denylist = ["Ambient"]
 
 [[provider.openrouter]]
 model_match = "qwen/qwen3.6-flash"
+top_k_supported = true
 native_tools = true
 preferred_tool_format = "native"
 structured_output = "native"
@@ -763,6 +768,7 @@ provider_route_denylist = ["Ambient"]
 
 [[provider.openrouter]]
 model_match = "qwen/qwen3.6*"
+top_k_supported = true
 native_tools = true
 preferred_tool_format = "native"
 structured_output = "native"
@@ -843,6 +849,7 @@ thinking_block_style = "none"
 
 [[provider.openrouter]]
 model_match = "qwen/qwen3-coder*"
+top_k_supported = true
 native_tools = true
 preferred_tool_format = "text"
 # Qwen3-Coder reserves <tool_call> as a special token and emits the wrapper on
@@ -904,6 +911,7 @@ thinking_block_style = "none"
 
 [[provider.openrouter]]
 model_match = "qwen/*"
+top_k_supported = true
 native_tools = true
 preferred_tool_format = "native"
 structured_output = "native"
