@@ -445,10 +445,23 @@ run_docs_audit() {
   time_phase "documentation contracts" make -j4 check-docs
 }
 
+# A caller that already built the AOT generator from this checkout names it in
+# HARN_RELEASE_CLI_AOT_GEN_BIN, as the CI rehearsal does after generating the
+# payload. Otherwise `make check-cli-aot` compiles the generator in this gate's
+# own target directory, which is most of the generated-files lane's time.
+release_gate_check_cli_aot() {
+  if [[ -z "${HARN_RELEASE_CLI_AOT_GEN_BIN:-}" ]]; then
+    make check-cli-aot
+    return
+  fi
+  harn_require_executable_bin "$HARN_RELEASE_CLI_AOT_GEN_BIN" || return $?
+  HARN_CLI_AOT_GEN_BIN="$HARN_RELEASE_CLI_AOT_GEN_BIN" make check-cli-aot
+}
+
 run_generated_audit() {
   time_phase "language-spec drift" make check-language-spec
   time_phase "highlight drift" make check-highlight
-  time_phase "CLI AOT drift" make check-cli-aot
+  time_phase "CLI AOT drift" release_gate_check_cli_aot
   time_phase "protocol artifact drift" make check-protocol-artifacts
   time_phase "connector schema drift" make check-connector-schemas
   time_phase "harness migration table drift" make check-harness-migrations
