@@ -1,4 +1,8 @@
 name: Provider contract probe
+# Scheduled and live manual runs carry "(live)" in their title. main health
+# counts a manual run only with that title (scripts/scheduled_workflows.toml),
+# so a default-input dispatch, which makes no provider calls, cannot clear it.
+run-name: ${{ (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.live)) && 'Provider contract probe (live)' || 'Provider contract probe' }}
 
 on:
   pull_request:

@@ -124,3 +124,24 @@ pipeline test_health_events_must_be_workflow_triggers(harness: Harness, task: un
   const empty = scheduled_workflow_errors([record({health_events: []})], documents)
   assert(contains(empty[0] ?? "", "health_events is empty"))
 }
+
+@test
+pipeline test_health_dispatch_title_must_be_a_run_name_the_workflow_renders(
+  harness: Harness,
+  task: unknown,
+) {
+  const titled = document({"run-name": "inputs.live && 'Example claim (live)' || 'Example claim'"})
+  assert_eq(
+    scheduled_workflow_errors(
+      [record({health_dispatch_title: "Example claim (live)"})],
+      {".github/workflows/example.yml": titled},
+    ),
+    [],
+  )
+  const errors = scheduled_workflow_errors(
+    [record({health_dispatch_title: "Example claim (live)"})],
+    {".github/workflows/example.yml": document()},
+  )
+  assert_eq(len(errors), 1)
+  assert(contains(errors[0] ?? "", "health_dispatch_title"))
+}
