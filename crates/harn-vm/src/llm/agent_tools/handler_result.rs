@@ -80,7 +80,7 @@ pub(super) fn coerce_and_validate_handler_result(
     if matches!(val, VmValue::Dict(_)) {
         return Err(invalid());
     }
-    validate_handler_payload(val, contract, HandlerOutcome::Ok)?;
+    // Legacy rendered results carry model-facing text; typed data is validated above.
     let payload = if json_carries_screenshot(&json) {
         json
     } else {
@@ -124,6 +124,46 @@ fn validate_handler_payload(
 mod tests {
     use super::super::render_tool_result;
     use super::coerce_and_classify_handler_result;
+
+    #[test]
+    fn legacy_text_preserves_presentation_while_explicit_data_obeys_the_schema() {
+        let registry = crate::schema::json_to_vm_value(&serde_json::json!({
+            "_type": "tool_registry", "tools": [{
+                "name": "legacy", "parameters": {}, "outputSchema": {
+                    "type": "object", "properties": {"label": {"type": "string"}},
+                    "required": ["label"], "additionalProperties": false
+                }
+            }]
+        }));
+        let prepared = crate::tool_registry::PreparedToolCatalog::prepare(
+            crate::tool_registry::tool_registry_catalog(&registry).unwrap(),
+        )
+        .unwrap();
+        let contract = Some((&prepared, "legacy"));
+        for text in ["Custom feedback", r#"{"label":"value"}"#, r#"{"ok":false}"#] {
+            let (payload, outcome) = super::coerce_and_validate_handler_result(
+                &crate::value::VmValue::string(text),
+                contract,
+            )
+            .unwrap();
+            assert_eq!(payload, serde_json::Value::String(text.into()));
+            assert_eq!(outcome, super::HandlerOutcome::Ok);
+            assert_eq!(render_tool_result(&payload), text);
+        }
+        for (data, valid) in [
+            (serde_json::json!({"label": "value"}), true),
+            (serde_json::json!({"wrong": true}), false),
+        ] {
+            let envelope = crate::schema::json_to_vm_value(&serde_json::json!({
+                "schema": super::AGENT_TOOL_HANDLER_RESULT_SCHEMA,
+                "outcome": "ok", "text": "Custom feedback", "data": data,
+            }));
+            assert_eq!(
+                super::coerce_and_validate_handler_result(&envelope, contract).is_ok(),
+                valid
+            );
+        }
+    }
 
     #[test]
     fn freeform_dicts_are_contract_errors_regardless_of_conventional_keys() {

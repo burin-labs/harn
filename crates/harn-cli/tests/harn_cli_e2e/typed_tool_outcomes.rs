@@ -144,6 +144,24 @@ pipeline agent_payload_contract(harness: Harness) {
       }
     }
   }
+  const legacy = tool_registry_from([
+    {name: "legacy_text", description: "Return rendered text", parameters: {}, returns: {type: "object"}, handler: {_ ->
+      record_call(harness, "legacy_text")
+      "Custom feedback"
+    }},
+    {name: "legacy_json", description: "Return rendered JSON", parameters: {}, returns: {type: "object"}, handler: {_ ->
+      record_call(harness, "legacy_json")
+      "{\"ok\":false}"
+    }},
+  ])
+  for tools in [legacy, agent_lifecycle_tools(harness.agent, legacy)] {
+    for name in ["legacy_text", "legacy_json"] {
+      const result = agent_dispatch_tool_call(harness.tools, {name: name, arguments: {}}, tools)
+      assert(result.ok)
+      assert(result.result == if name == "legacy_text" { "Custom feedback" } else { "{\"ok\":false}" })
+      assert(result.rendered_result == result.result)
+    }
+  }
 }
 "#;
 
@@ -189,6 +207,8 @@ fn agent_validates_payload_without_losing_the_explicit_outcome() {
         "malformed",
         "declared_error",
         "invalid_error",
+        "legacy_text",
+        "legacy_json",
     ] {
         assert_eq!(
             calls(&temp, name),
