@@ -149,7 +149,7 @@ pub(in crate::stdlib::sandbox) fn prepare(
     }
     argv.extend(["--seccomp".into(), filter.as_raw_fd().to_string()]);
     descriptors.push(filter);
-    argv.push("--".into());
+    let mut finalizer_args = Vec::new();
     if !device_descriptors.is_empty() {
         let launcher = policy.process_sandbox.netns_launcher_path.as_ref()
             .map(PathBuf::from)
@@ -175,19 +175,22 @@ pub(in crate::stdlib::sandbox) fn prepare(
                 "bubblewrap finalizer must be a regular executable".into(),
             ));
         }
-        // These binds must precede the command delimiter, like the payload grants.
-        argv.splice(argv.len() - 1..argv.len() - 1, helper_mount.argv);
+        argv.extend(helper_mount.argv);
         descriptors.extend(helper_mount.descriptors);
-        argv.push(launcher.display().to_string());
-        argv.push(crate::process_sandbox::NETNS_LAUNCH_SUBCOMMAND.into());
+        finalizer_args.push(launcher.display().to_string());
+        finalizer_args.push(crate::process_sandbox::NETNS_LAUNCH_SUBCOMMAND.into());
         for device in device_descriptors {
-            argv.extend([
+            finalizer_args.extend([
                 crate::process_sandbox::NETNS_CLOSE_FD_FLAG.into(),
                 device.to_string(),
             ]);
         }
-        argv.push("--".into());
+        finalizer_args.push("--".into());
     }
+    // Seal namespace scaffolding after every payload and helper mount. This
+    // is nonrecursive, preserving only the explicitly writable child mounts.
+    argv.extend(["--remount-ro".into(), "/".into(), "--".into()]);
+    argv.extend(finalizer_args);
     argv.push(program.into());
     argv.extend_from_slice(args);
     Ok(PrepareOutcome::BubblewrapExec {
@@ -297,9 +300,6 @@ fn mounts(filesystem: FilesystemProfile) -> Result<MountPlan, VmError> {
         }
         descriptors.push(rule.file.into());
     }
-    // The scaffolding itself is not a writable grant. This is nonrecursive,
-    // leaving only explicitly writable child mounts writable.
-    argv.extend(["--remount-ro".into(), "/".into()]);
     // Workspace scratch is a named existing writable grant, not a broad host
     // /tmp bind or an unreported extra writable tmpfs.
     Ok(MountPlan {
