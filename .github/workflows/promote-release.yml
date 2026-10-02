@@ -121,7 +121,7 @@ jobs:
       contents: read
       actions: read
       attestations: read
-    uses: burin-labs/.github/.github/workflows/promote-release.yml@5bf8c07287382b4492ad6d50b06da60c46936ad1 # promote-release
+    uses: burin-labs/.github/.github/workflows/promote-release.yml@5bf8c07287382b4492ad6d50b06da60c46936ad1
     with:
       sha: ${{ github.event.workflow_run.head_sha }}
       run-id: ${{ needs.plan.outputs.run_id }}
@@ -137,7 +137,7 @@ jobs:
     needs: [plan, promote]
     permissions:
       contents: read
-    uses: burin-labs/.github/.github/workflows/repin.yml@d33db398eec4f00e2fee4164afeb7157005bd4ba # repin
+    uses: burin-labs/.github/.github/workflows/repin.yml@d33db398eec4f00e2fee4164afeb7157005bd4ba
     with:
       released-repository: ${{ github.repository }}
       tag: ${{ needs.promote.outputs.tag }}
