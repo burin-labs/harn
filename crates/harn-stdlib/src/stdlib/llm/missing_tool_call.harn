@@ -1,3 +1,7 @@
+import {
+  AgentMissingToolCallConfigDetails,
+  AgentMissingToolCallConfigFailure,
+} from "std/agent/failures"
 pub import { MissingToolCallClassifier, MissingToolCallVerdict } from "std/agent/options_types"
 import { MissingToolCallRecoveryOptions } from "std/agent/options_types"
 import { EvaluationPolicy, boolean, choice } from "std/predicate"
@@ -24,7 +28,11 @@ fn __missing_tool_call_float(value: float?, fallback: float) {
   return parsed
 }
 
-fn __missing_tool_call_config_error(code: string, message: string, fields: dict? = {}) {
+fn __missing_tool_call_config_error(
+  code: string,
+  message: string,
+  fields: AgentMissingToolCallConfigDetails? = {},
+) -> AgentMissingToolCallConfigFailure {
   return {
     error: code,
     category: "invalid_config",

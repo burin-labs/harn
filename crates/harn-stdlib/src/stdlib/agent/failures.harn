@@ -40,8 +40,28 @@ pub fn agent_loop_cancellation_failure(error: unknown) -> AgentLoopCancellationF
   }
 }
 
+/** Optional details reported when a missing-call classifier option is invalid. */
+pub type AgentMissingToolCallConfigDetails = {
+  field?: string,
+  expected?: string,
+  actual_type?: string,
+  actual?: unknown,
+  min?: float,
+  max?: float,
+}
+
+/** Classifier configuration failures retain the option and its rejected value. */
+pub type AgentMissingToolCallConfigFailure = AgentMissingToolCallConfigDetails \
+  & {
+  error: string,
+  category: "invalid_config",
+  component: "missing_tool_call_classifier",
+  message: string,
+}
+
 /** Internal failures normalized by the public agent-loop terminal boundary. */
 pub type AgentLoopFailure = string \
   | AgentLoopCallbackFailure \
   | AgentDispatchProtocolFailure \
-  | AgentLoopCancellationFailure
+  | AgentLoopCancellationFailure \
+  | AgentMissingToolCallConfigFailure
