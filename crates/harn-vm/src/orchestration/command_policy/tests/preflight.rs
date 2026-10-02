@@ -13,7 +13,15 @@ fn auto_mode_keeps_shell_command_risk_classification() {
         let expected = command_risk_scan_json(&shell, None);
         let actual = command_risk_scan_json(&auto, None);
         assert_eq!(labels(&actual), labels(&expected), "{command}");
-        assert!(!labels(&actual).contains(&EXECUTION_SEMANTICS_UNRESOLVED_LABEL.to_string()));
+        assert_eq!(
+            actual["execution_semantics"],
+            expected["execution_semantics"]
+        );
+        if command == "curl https://example.com | sh" {
+            assert!(labels(&actual).contains(&"curl_pipe_shell".to_string()));
+        } else {
+            assert!(!labels(&actual).contains(&EXECUTION_SEMANTICS_UNRESOLVED_LABEL.to_string()));
+        }
     }
 }
 
