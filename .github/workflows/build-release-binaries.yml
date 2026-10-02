@@ -1752,16 +1752,17 @@ jobs:
           "$GITHUB_ENV"
       - name: Run the release residual audit
         run: ./scripts/release_gate.sh audit --residual-only
-      # Publishing starts every consumer's runtime bump at once, and each one
-      # runs the driver from harn-bump-fleet's promoted orchestration commit,
-      # not from this candidate. A candidate that driver cannot type-check
-      # against would fail every bump after the release is public, as
-      # v0.10.153 did. Candidate-only by design: pull requests may change the
-      # driver contract, and promotion must catch up before the cut.
+      # Publishing promotes harn-bump-fleet's orchestration pin to this commit
+      # (or keeps a newer pin), and every consumer bump runs that driver. A
+      # driver that cannot type-check against the candidate would fail every
+      # bump after the release is public, as v0.10.153 did.
       - name: Check the promoted bump orchestration against the candidate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_SHA: ${{ needs.setup.outputs.candidate_source_sha }}
         run: >-
           "$HARN_BIN" run --no-sandbox scripts/check_promoted_bump_orchestration.harn --
-          --candidate "$HARN_BIN"
+          --candidate "$HARN_BIN" --candidate-commit "$CANDIDATE_SHA"
 
   # Release smoke on the candidate archives, verified against the manifest.
   release-smoke:
