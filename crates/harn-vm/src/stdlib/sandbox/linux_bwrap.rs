@@ -107,19 +107,18 @@ pub(in crate::stdlib::sandbox) fn prepare(
             "bubblewrap cannot express the managed proxy-only egress grant".into(),
         ));
     }
-    let launcher = policy.process_sandbox.netns_launcher_path.as_ref()
-        .map(PathBuf::from)
-        .filter(|path| path.is_absolute() && path.is_file())
-        .ok_or_else(|| sandbox_rejection(
-            "bubblewrap needs the admitted Harn namespace helper to close device setup descriptors before the payload".into()
-        ))?;
-    let mut filesystem = filesystem_profile(
+    let filesystem = filesystem_profile(
         program,
         policy,
         u64::MAX,
         ProcessFilesystemScope::PrivatePidNamespace,
     )?;
-    super::push_rule(&mut filesystem, launcher.clone(), read_only_access(), false)?;
+    let mut helper_grant = FilesystemProfile {
+        rules: Vec::new(),
+        symlinks: Default::default(),
+        handled_access_fs: filesystem.handled_access_fs,
+        read_deny_roots: filesystem.read_deny_roots.clone(),
+    };
     let seccomp = TransferableConfinement {
         ruleset: None,
         seccomp: compile_seccomp_program(policy)?,
@@ -152,6 +151,33 @@ pub(in crate::stdlib::sandbox) fn prepare(
     descriptors.push(filter);
     argv.push("--".into());
     if !device_descriptors.is_empty() {
+        let launcher = policy.process_sandbox.netns_launcher_path.as_ref()
+            .map(PathBuf::from)
+            .filter(|path| path.is_absolute() && path.is_file())
+            .map(|path| super::super::normalize_for_policy(&path))
+            .ok_or_else(|| sandbox_rejection(
+                "bubblewrap needs the admitted Harn namespace helper to close device setup descriptors before the payload".into()
+            ))?;
+        super::push_rule(
+            &mut helper_grant,
+            launcher.clone(),
+            read_only_access(),
+            false,
+        )?;
+        if !helper_grant.symlinks.is_empty() {
+            return Err(sandbox_rejection(
+                "bubblewrap finalizer path changed after normalization".into(),
+            ));
+        }
+        let helper_mount = mounts(helper_grant)?;
+        if !helper_mount.device_descriptors.is_empty() {
+            return Err(sandbox_rejection(
+                "bubblewrap finalizer must be a regular executable".into(),
+            ));
+        }
+        // These binds must precede the command delimiter, like the payload grants.
+        argv.splice(argv.len() - 1..argv.len() - 1, helper_mount.argv);
+        descriptors.extend(helper_mount.descriptors);
         argv.push(launcher.display().to_string());
         argv.push(crate::process_sandbox::NETNS_LAUNCH_SUBCOMMAND.into());
         for device in device_descriptors {
@@ -562,6 +588,7 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let mut policy = policy(root.path());
         policy.process_sandbox.read_deny_roots = vec!["/dev".into()];
+        policy.process_sandbox.netns_launcher_path = None;
         let payload = vec!["-c".into(), "printf reached > marker".into()];
         let prepared = prepare("/usr/bin/sh", &payload, &policy, policy.sandbox_profile).unwrap();
         let PrepareOutcome::BubblewrapExec { args, .. } = &prepared else {
@@ -575,6 +602,31 @@ mod tests {
             std::fs::read(root.path().join("marker")).unwrap(),
             b"reached"
         );
+    }
+
+    #[test]
+    fn device_grants_without_a_finalizer_refuse_before_payload() {
+        if !live() {
+            return;
+        }
+        let root = tempfile::tempdir().unwrap();
+        let mut policy = policy(root.path());
+        policy.process_sandbox.netns_launcher_path = None;
+        let filesystem = filesystem_profile(
+            "/usr/bin/sh",
+            &policy,
+            u64::MAX,
+            ProcessFilesystemScope::PrivatePidNamespace,
+        )
+        .unwrap();
+        assert!(!mounts(filesystem).unwrap().device_descriptors.is_empty());
+        let payload = vec!["-c".into(), "printf reached > marker".into()];
+        let refused = match prepare("/usr/bin/sh", &payload, &policy, policy.sandbox_profile) {
+            Err(error) => error,
+            Ok(_) => panic!("device setup was admitted without its finalizer"),
+        };
+        assert!(refused.to_string().contains("namespace helper"));
+        assert!(!root.path().join("marker").exists());
     }
 
     #[test]
