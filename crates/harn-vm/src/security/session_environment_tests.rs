@@ -182,7 +182,7 @@ fn host_inference_reserved_name_obeys_platform_case_semantics() {
         source: GrantSourceSpec::Literal {
             value: serde_json::to_string(&host).unwrap(),
         },
-        expose_as_env: Some(lowercase.clone()),
+        expose_as_env: Some(lowercase),
         for_command: None,
         expose_to: GrantAudience::Session,
     };
