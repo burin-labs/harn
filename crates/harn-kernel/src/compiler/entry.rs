@@ -81,6 +81,8 @@ impl Compiler {
         let is_generator = body_contains_yield(body);
         compiler.seed_captured_idents(body);
         compiler.compile_block(body)?;
+        // Run pending defers before implicit return
+        compiler.drain_finallys_to_floor(0)?;
         compiler.chunk.emit(Op::Nil, 0);
         compiler.chunk.emit(Op::Return, 0);
         compiler.chunk.source_file = source_file;

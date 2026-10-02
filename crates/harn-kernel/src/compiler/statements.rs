@@ -562,20 +562,19 @@ impl Compiler {
         value: &Option<Box<SNode>>,
     ) -> Result<(), CompileError> {
         if self.has_pending_finally() {
-            // The operand must finish before a return begins. Protect its
-            // evaluation so a dynamic throw still takes the throw-unwind path.
+            // The operand must finish before a return begins. A throw from it
+            // still reaches the pending cleanups' handlers.
             if let Some(val) = value {
-                self.compile_transfer_operand(val)?;
+                self.compile_node(val)?;
             } else {
                 self.chunk.emit(Op::Nil, self.line);
             }
             self.temp_counter += 1;
             let temp_name = format!("__return_val_{}__", self.temp_counter);
             self.emit_define_binding(&temp_name, true);
-            // Innermost finally first; skip catch barriers since
-            // return transfers past local handlers. Each finally is masked
-            // while it runs, so a `return` inside a finally doesn't re-run it.
-            self.run_pending_finallys_for_transfer(0)?;
+            // Innermost finally first. Each finally is masked while it runs,
+            // so a `return` inside a finally doesn't re-run it.
+            self.run_pending_finallys_for_transfer(0, None)?;
             self.emit_get_binding(&temp_name);
             self.chunk.emit(Op::Return, self.line);
         } else {
@@ -660,10 +659,7 @@ impl Compiler {
         let handler_depth = ctx.handler_depth;
         let has_iterator = ctx.has_iterator;
         let scope_depth = ctx.scope_depth;
-        for _ in handler_depth..self.handler_depth {
-            self.chunk.emit(Op::PopHandler, self.line);
-        }
-        self.run_pending_finallys_for_transfer(finally_depth)?;
+        self.run_pending_finallys_for_transfer(finally_depth, Some(handler_depth))?;
         self.emit_scope_unwind_to(scope_depth);
         if has_iterator {
             self.chunk.emit(Op::PopIterator, self.line);
@@ -689,10 +685,7 @@ impl Compiler {
         let handler_depth = ctx.handler_depth;
         let loop_start = ctx.start_offset;
         let scope_depth = ctx.scope_depth;
-        for _ in handler_depth..self.handler_depth {
-            self.chunk.emit(Op::PopHandler, self.line);
-        }
-        self.run_pending_finallys_for_transfer(finally_depth)?;
+        self.run_pending_finallys_for_transfer(finally_depth, Some(handler_depth))?;
         self.emit_scope_unwind_to(scope_depth);
         self.chunk.emit_u16(Op::Jump, loop_start as u16, self.line);
         Ok(())
