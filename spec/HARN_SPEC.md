@@ -6646,6 +6646,7 @@ migration to another machine.
 | Function | Description |
 |---|---|
 | `checkpoint(key, value)` | Save `value` at `key`; writes to disk immediately |
+| `harness.runtime.checkpoint_insert(key, value)` | Retain the first value atomically; return `{inserted: bool, value: unknown}` |
 | `checkpoint_get(key)` | Retrieve saved value, or `nil` if absent |
 | `checkpoint_exists(key)` | Return `true` if `key` is present (even if value is `nil`) |
 | `checkpoint_delete(key)` | Remove a single key; no-op if absent |
@@ -6654,6 +6655,18 @@ migration to another machine.
 
 `checkpoint_exists` is preferable to `checkpoint_get(key) == nil` when `nil`
 is a valid checkpoint value.
+
+Runs sharing a state root and pipeline name share one checkpoint store. Mutations
+hold an exclusive sidecar-file lock and reload the current file before changing
+it, so another run's committed keys survive. Reads reload durable state on each
+call. A lock that cannot be acquired within five seconds causes an error.
+
+`harness.runtime.checkpoint_insert` returns `inserted: true` to the call that stored the initial
+value and `inserted: false` to later calls, which receive the retained value.
+An existing `nil` counts as a retained value. Checkpoint mutations share the
+`checkpoint.write` autonomy decision across runtime methods and legacy builtins.
+This operation chooses one initial
+value; it does not make a stage's external effects execute exactly once.
 
 Only an absent checkpoint file starts an empty store. If the file is
 unreadable, is not valid JSON, or is not a JSON object, every builtin except

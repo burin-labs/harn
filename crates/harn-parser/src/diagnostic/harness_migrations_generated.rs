@@ -88,6 +88,7 @@ pub(super) const HARNESS_MIGRATIONS: &[(&str, &str)] = &[
     ("checkpoint_delete", "harness.runtime.checkpoint_delete"),
     ("checkpoint_exists", "harness.runtime.checkpoint_exists"),
     ("checkpoint_get", "harness.runtime.checkpoint_get"),
+    ("checkpoint_insert", "harness.runtime.checkpoint_insert"),
     ("checkpoint_list", "harness.runtime.checkpoint_list"),
     ("circuit_breaker", "harness.runtime.circuit_breaker"),
     ("circuit_check", "harness.runtime.circuit_check"),

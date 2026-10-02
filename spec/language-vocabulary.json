@@ -201,6 +201,7 @@
     "checkpoint_delete",
     "checkpoint_exists",
     "checkpoint_get",
+    "checkpoint_insert",
     "checkpoint_list",
     "chunk",
     "circuit_breaker",

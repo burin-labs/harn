@@ -301,6 +301,9 @@ CHECKER
 esac
 SH
 chmod +x "$fake_cargo_bin/cargo"
+cp "$repo_root/scripts/tests/fixtures/harn_bin/fake_rustc.sh" "$fake_cargo_bin/rustc"
+chmod +x "$fake_cargo_bin/rustc"
+export FAKE_RUST_TOOLCHAIN_FILE="$repo_root/rust-toolchain.toml"
 
 # The production watchdog uses `sleep`, but a sub-second sleep is not a stable
 # test clock under runner load. This PATH-scoped adapter rendezvous with the
@@ -841,6 +844,8 @@ echo "no-build freshness verification invoked Cargo" >&2
 exit 97
 SH
 chmod +x "$no_cargo_bin/cargo"
+cp "$fake_cargo_bin/rustc" "$no_cargo_bin/rustc"
+chmod +x "$no_cargo_bin/rustc"
 (
   cd "$cargo_fixture"
   CARGO_TARGET_DIR="$cargo_target" PATH="$no_cargo_bin:$PATH" \
