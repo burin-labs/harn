@@ -1308,11 +1308,23 @@ fn connect_store_follows_the_configured_provider_chain() {
         "HARN_SECRET_FILE_PATH",
         path.to_str().expect("utf-8 temp path"),
     );
-    let writer = store::connect_secret_writer().expect("file persists");
-    assert!(writer
-        .providers()
-        .iter()
-        .any(|provider| provider.persists_writes()));
+    #[cfg(unix)]
+    {
+        let writer = store::connect_secret_writer().expect("file persists");
+        assert!(writer
+            .providers()
+            .iter()
+            .any(|provider| provider.persists_writes()));
+    }
+    // The file provider refuses to call a path private where it cannot check
+    // the file's permissions, so connect must refuse rather than store there.
+    #[cfg(not(unix))]
+    {
+        let Err(error) = store::connect_secret_writer() else {
+            panic!("the file provider must refuse unenforced private storage");
+        };
+        assert!(error.contains("private_file_storage"), "{error}");
+    }
 }
 
 #[test]
