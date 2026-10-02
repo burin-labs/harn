@@ -56,28 +56,57 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
+      # A push only needs the verdict already on the commit it replaced, so
+      # this step answers most runs without a checkout or a Harn install.
+      - name: Carry the verdict forward from the replaced commit
+        id: carry
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PUSHED_SHA: ${{ github.sha }}
+          REPLACED_SHA: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          # The newest `main health` status on the replaced commit, if any. A
+          # first push, a force push, or a replaced commit whose own run was
+          # superseded has none, and falls through to a full recompute rather
+          # than reading as healthy.
+          previous=""
+          if [[ -n "$REPLACED_SHA" && "$REPLACED_SHA" != 0000000000000000000000000000000000000000 ]]; then
+            previous="$(gh api "repos/$GH_REPO/commits/$REPLACED_SHA/statuses" \
+              --jq '[.[] | select(.context == "main health")][0] // empty | [.state, .description, (.target_url // "")] | @tsv')" || previous=""
+          fi
+          if [[ -z "$previous" ]]; then
+            echo "carried=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          IFS=$'\t' read -r state description target <<< "$previous"
+          gh api "repos/$GH_REPO/statuses/$PUSHED_SHA" -X POST \
+            -f state="$state" -f context="main health" -f description="$description" \
+            ${target:+-f target_url="$target"} >/dev/null
+          echo "carried=true" >> "$GITHUB_OUTPUT"
+          echo "Carried \`$state: $description\` forward from $REPLACED_SHA." >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: steps.carry.outputs.carried != 'true'
         with:
           persist-credentials: false
-          # Cone mode also brings the root files setup-harn's bootstrap reads.
-          sparse-checkout: |
-            .github
-            scripts
       # The suite list comes from the scheduled-workflow checker, which
       # validates the registry before printing it. Any recent release runs it;
       # bump the pin when convenient, as secret-scan.yml does.
       - name: Set up Harn
         id: harn
+        if: steps.carry.outputs.carried != 'true'
         uses: ./.github/actions/setup-harn
         with:
           version: "0.10.153"
       - name: Classify each scheduled suite and post main's status
+        if: steps.carry.outputs.carried != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           EVENT_NAME: ${{ github.event_name }}
           PUSHED_SHA: ${{ github.sha }}
-          REPLACED_SHA: ${{ github.event.before }}
           HARN: ${{ steps.harn.outputs.path }}
         run: |
           set -euo pipefail
@@ -90,20 +119,6 @@ jobs:
 
           if [[ "$EVENT_NAME" == "push" ]]; then
             sha="$PUSHED_SHA"
-            # The newest `main health` status on the replaced commit, if any.
-            # A first push or a force push has no usable predecessor and falls
-            # through to a full recompute rather than reading as healthy.
-            previous=""
-            if [[ -n "$REPLACED_SHA" && "$REPLACED_SHA" != 0000000000000000000000000000000000000000 ]]; then
-              previous="$(gh api "repos/$GH_REPO/commits/$REPLACED_SHA/statuses" \
-                --jq '[.[] | select(.context == "main health")][0] // empty | [.state, .description, (.target_url // "")] | @tsv')" || previous=""
-            fi
-            if [[ -n "$previous" ]]; then
-              IFS=$'\t' read -r state description target <<< "$previous"
-              post "$state" "$description" "$target"
-              echo "Carried \`$state: $description\` forward from $REPLACED_SHA." >> "$GITHUB_STEP_SUMMARY"
-              exit 0
-            fi
           else
             sha="$(gh api "repos/$GH_REPO/commits/main" --jq '.sha')"
           fi
