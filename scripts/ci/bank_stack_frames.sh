@@ -12,6 +12,7 @@
 # version of this gate shipped a baseline too low to hold.
 #
 # Usage: bank_stack_frames.sh <harn-binary>
+# Requires GH_TOKEN (a token whose pull requests start CI) and GITHUB_REPOSITORY.
 set -euo pipefail
 
 harn_bin="${1:?usage: bank_stack_frames.sh <harn-binary>}"
@@ -50,13 +51,15 @@ if git diff --quiet -- "$budget"; then
   exit 0
 fi
 
-git config user.name "harn-automation"
-git config user.email "automation@users.noreply.github.com"
-git checkout -B "$branch"
-git add "$budget"
-git commit -m "[CI] Bank the stack-frame budget from main" \
-  -m "Measured by the stack-frame banking job on main. Shrinkage and in-band movement pass the gate, so this only tightens the numbers the gate judges against."
-git push --force-with-lease origin "$branch"
+# main requires signed commits, and a local `git commit` here is unsigned: four
+# weekly runs in a row measured main, built the commit, and had the push
+# refused. Publish through the same GitHub-signed path the release opener
+# uses, under the release App's token so the pull request's CI runs.
+HARN_BRANCH_COMMIT_TOKEN="$GH_TOKEN" \
+  HARN_BRANCH_COMMIT_BRANCH="$branch" \
+  HARN_BRANCH_COMMIT_BASE_OID="$(git rev-parse HEAD)" \
+  HARN_BRANCH_COMMIT_HEADLINE="[CI] Bank the stack-frame budget from main" \
+  "$harn_bin" run --no-sandbox scripts/bump-driver/publish_branch_commit.harn
 
 if [ -z "$(gh pr list --head "$branch" --state open --json number --jq '.[0].number')" ]; then
   gh pr create \
