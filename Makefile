@@ -1489,8 +1489,12 @@ check-e2e-trigger-contract:
 	./scripts/tests/e2e_workflow_trigger_test.sh
 	./scripts/tests/e2e_pull_request_reason_test.sh
 
+# The source-only checks read committed files through the bundled CLI and
+# write nothing shared, so they run side by side: serially they were about
+# 150s of the merge queue's fast policy job, three of them near 50s each.
 repository-policies-source:
-	@$(MAKE) --no-print-directory run-policy-list POLICY_LIST="$(SOURCE_REPOSITORY_POLICIES)"
+	@$(MAKE) --no-print-directory run-policy-list POLICY_LIST="$(SOURCE_REPOSITORY_POLICIES)" \
+	  POLICY_JOBS="$$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 2)"
 
 repository-policies:
 	@$(MAKE) --no-print-directory run-policy-list \
@@ -1500,10 +1504,18 @@ repository-policies:
 # the continue-past-a-failure behaviour to diverge, and that behaviour is the
 # reason the target exists: one red used to skip nine siblings with nothing
 # saying they had not run.
+#
+# POLICY_JOBS checks run at once (default 1). Verdicts are read back per check
+# in list order, and a check that left no exit status is a failure, so a check
+# that never ran cannot read as a pass.
+POLICY_JOBS ?= 1
 run-policy-list:
 	@set -u; failures=""; passed=0; logs="$$(mktemp -d)"; \
+	printf '%s\n' $(POLICY_LIST) | xargs -P "$(POLICY_JOBS)" -I{} \
+	  sh -c '$(MAKE) --no-print-directory "$$1" >"$$2/$$1.log" 2>&1; echo $$? >"$$2/$$1.status"' \
+	  policy-check {} "$$logs"; \
 	for check in $(POLICY_LIST); do \
-	  if $(MAKE) --no-print-directory "$$check" >"$$logs/$$check.log" 2>&1; then \
+	  if [ "$$(cat "$$logs/$$check.status" 2>/dev/null)" = 0 ]; then \
 	    printf 'PASS  %s\n' "$$check"; passed=$$((passed + 1)); \
 	  else \
 	    printf 'FAIL  %s\n' "$$check"; failures="$$failures $$check"; \
