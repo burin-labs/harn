@@ -43,19 +43,21 @@ use crate::workspace_anchor::{
 };
 
 mod changed_paths;
+mod health;
 pub use changed_paths::{
     clear_all_session_changed_paths, clear_session_changed_paths, record_session_changed_path,
     session_changed_paths, take_session_changed_paths,
 };
+pub(crate) use health::observe_event;
 mod journal;
 pub mod reclaim_hooks;
+mod state;
 mod subscribers;
 pub(crate) use journal::{active_run_id, has_journal, journal_first_event_id, journal_store};
 pub(crate) use journal::{
     claim_journal_task, clear_journal, install_journal, journal_flush_lock, journal_owns_session,
     journal_sessions_for_task, next_journal_event, record_persisted_journal_event,
 };
-pub(crate) use subscribers::registered_subscribers_for;
 pub use subscribers::{append_subscriber, subscriber_count, subscribers_for, SessionSubscriber};
 const LIVE_CLIENT_EVENT_KIND: &str = "live_session_client";
 const LIVE_CLIENT_PERMISSION_EVENT_KIND: &str = "live_session_permission_route";
@@ -253,77 +255,7 @@ pub struct SessionState {
     pub(crate) transcript_journal: Option<crate::agent_session_journal::JournalState>,
     pub(crate) revoked_reminder_ids: HashSet<String>,
     pub(crate) expired_reminder_ids: HashSet<String>,
-}
-
-impl SessionState {
-    fn new(id: String) -> Self {
-        let now = Instant::now();
-        let transcript = empty_transcript(&id);
-        Self {
-            id,
-            transcript,
-            subscribers: Vec::new(),
-            created_at: crate::orchestration::now_unix_seconds_text(),
-            last_accessed: now,
-            parent_id: None,
-            child_ids: Vec::new(),
-            branched_at_event_index: None,
-            actor_chain: None,
-            active_skills: Vec::new(),
-            tool_format: None,
-            system_prompt: None,
-            pinned_model: None,
-            pinned_reasoning_policy: None,
-            last_withdrawal_reason: None,
-            workspace_policy: WorkspacePolicy::default(),
-            workspace_anchor: None,
-            scratchpad: None,
-            scratchpad_version: 0,
-            transcript_budget_policy: default_transcript_budget_policy(),
-            last_transcript_budget_action: None,
-            live_clients: BTreeMap::new(),
-            live_controller_id: None,
-            completed_turn_checkpoints: Vec::new(),
-            redo_stack: Vec::new(),
-            text_tool_call_seq: 0,
-            taint: Vec::new(),
-            transcript_journal: None,
-            revoked_reminder_ids: HashSet::new(),
-            expired_reminder_ids: HashSet::new(),
-        }
-    }
-
-    fn touch(&mut self) {
-        self.last_accessed = Instant::now();
-    }
-
-    pub(crate) fn replace_transcript(&mut self, transcript: VmValue) -> Result<(), String> {
-        self.ensure_run_accepts_mutation("replace_transcript")?;
-        if !crate::values_equal(&self.transcript, &transcript) {
-            self.redo_stack.clear();
-        }
-        self.transcript = transcript;
-        self.touch();
-        Ok(())
-    }
-
-    /// Reject mutations once this run has queued its terminal boundary.
-    /// The journal remains installed through recap projection so same-session
-    /// admission stays closed, but it is sealed against work that could be
-    /// queued behind the already-persisted terminal and then discarded.
-    pub(crate) fn ensure_run_accepts_mutation(&self, action: &str) -> Result<(), String> {
-        if self
-            .transcript_journal
-            .as_ref()
-            .is_some_and(crate::agent_session_journal::JournalState::terminal_queued)
-        {
-            return Err(format!(
-                "session '{}' is terminal; {action} cannot mutate it",
-                self.id
-            ));
-        }
-        Ok(())
-    }
+    pub(crate) health: crate::agent_events::session_health::SessionHealth,
 }
 
 pub(crate) fn push_session_taint(id: &str, record: crate::security::TaintRecord) {
@@ -1147,6 +1079,7 @@ pub fn reset_transcript(id: &str) -> bool {
         state.completed_turn_checkpoints.clear();
         state.redo_stack.clear();
         state.text_tool_call_seq = 0;
+        state.health = crate::agent_events::session_health::SessionHealth::default();
         state.touch();
         true
     })

@@ -119,6 +119,7 @@ fn standard_fixture_events() -> Vec<AgentEvent> {
             mutation_status: harn_vm::agent_events::ToolMutationStatus::Unknown,
             changed_paths: None,
             data: None,
+            health: None,
             executor: Some(ToolExecutor::HarnBuiltin),
             parsing: None,
             raw_input: None,
@@ -350,6 +351,17 @@ fn agent_event_ext_fixture_events() -> Vec<AgentEvent> {
     failed_error.duration_ms = Some(3);
 
     let mut events = vec![
+        AgentEvent::SessionHealth {
+            session_id: "session-1".to_string(),
+            fact: harn_vm::agent_events::session_health::SessionHealthFact {
+                schema_version: 1,
+                session_id: "session-1".to_string(),
+                iteration: None,
+                turn: Default::default(),
+                rolling: Default::default(),
+                heuristics: Default::default(),
+            },
+        },
         AgentEvent::IterationStart {
             session_id: "session-1".to_string(),
             iteration: 0,
@@ -1098,6 +1110,7 @@ async fn forwarded_agent_events_serialize_as_session_updates() {
             mutation_status: harn_vm::agent_events::ToolMutationStatus::Unknown,
             changed_paths: None,
             data: None,
+            health: None,
             executor: Some(ToolExecutor::HarnBuiltin),
             parsing: None,
 
@@ -1273,6 +1286,7 @@ async fn tool_call_update_serializes_error_category_in_camel_case() {
         mutation_status: harn_vm::agent_events::ToolMutationStatus::Unknown,
         changed_paths: None,
         data: None,
+        health: None,
         executor: None,
         parsing: None,
 
@@ -1311,6 +1325,7 @@ async fn tool_call_update_omits_error_category_when_none() {
         mutation_status: harn_vm::agent_events::ToolMutationStatus::Unknown,
         changed_paths: None,
         data: None,
+        health: None,
         executor: None,
         parsing: None,
 
@@ -1342,6 +1357,7 @@ async fn tool_call_update_serializes_mutation_status_under_harn_meta() {
         mutation_status: ToolMutationStatus::NotApplied,
         changed_paths: None,
         data: None,
+        health: None,
         executor: Some(ToolExecutor::HostBridge),
         parsing: None,
         raw_input: None,
@@ -1392,6 +1408,7 @@ async fn tool_call_carries_parsing_flag_through_to_acp_wire() {
         mutation_status: harn_vm::agent_events::ToolMutationStatus::Unknown,
         changed_paths: None,
         data: None,
+        health: None,
         executor: None,
         parsing: Some(false),
 
@@ -1466,6 +1483,7 @@ async fn tool_call_update_serializes_executor_per_acp_wire_format() {
             mutation_status: harn_vm::agent_events::ToolMutationStatus::Unknown,
             changed_paths: None,
             data: None,
+            health: None,
             executor: Some(executor),
             parsing: None,
 
@@ -1498,6 +1516,7 @@ async fn tool_call_update_serializes_executor_per_acp_wire_format() {
         mutation_status: harn_vm::agent_events::ToolMutationStatus::Unknown,
         changed_paths: None,
         data: None,
+        health: None,
         executor: None,
         parsing: None,
 
@@ -1533,6 +1552,7 @@ async fn tool_call_update_streams_raw_input_and_raw_input_partial_per_acp_wire_f
         mutation_status: harn_vm::agent_events::ToolMutationStatus::Unknown,
         changed_paths: None,
         data: None,
+        health: None,
         executor: None,
         raw_input: Some(serde_json::json!({"q": "hello"})),
         raw_input_partial: None,
@@ -1561,6 +1581,7 @@ async fn tool_call_update_streams_raw_input_and_raw_input_partial_per_acp_wire_f
         mutation_status: harn_vm::agent_events::ToolMutationStatus::Unknown,
         changed_paths: None,
         data: None,
+        health: None,
         executor: None,
         parsing: None,
         raw_input: None,
@@ -1590,6 +1611,7 @@ async fn tool_call_update_streams_raw_input_and_raw_input_partial_per_acp_wire_f
         mutation_status: harn_vm::agent_events::ToolMutationStatus::Unknown,
         changed_paths: None,
         data: None,
+        health: None,
         executor: None,
         parsing: None,
         raw_input: None,

@@ -527,6 +527,7 @@
         "errorCategory": { "type": "string" },
         "executionDurationMs": { "type": "number", "minimum": 0 },
         "executor": {},
+        "health": { "type": "object" },
         "mutationStatus": { "$ref": "#/$defs/ToolMutationStatus" },
         "parsing": { "type": "boolean" },
         "rawInputPartial": { "type": "string" }

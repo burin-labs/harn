@@ -82,6 +82,13 @@ impl harn_vm::agent_events::AgentEventSink for A2aWorkerSink {
                     "planDocument": document,
                 })
             }
+            harn_vm::agent_events::AgentEvent::SessionHealth { fact, .. } => {
+                json!({
+                    "type": "harn_session_health",
+                    "taskId": self.task_id,
+                    "health": fact,
+                })
+            }
             harn_vm::agent_events::AgentEvent::ProgressReported {
                 message, entries, ..
             } => {

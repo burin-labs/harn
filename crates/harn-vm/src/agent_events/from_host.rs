@@ -145,6 +145,7 @@ const HOST_EVENT_POLICIES: &[HostEventPolicy] = &[
     host_event("iteration_start", None),
     host_event("iteration_end", None),
     host_event("turn_phase_changed", ASSISTANT),
+    host_event("session_health", None),
     host_event("judge_started", None),
     host_event("judge_decision", None),
     host_event("step_judge_decision", None),
