@@ -1573,6 +1573,11 @@ pipeline test_host_bound_sandbox_filter_has_one_owner(harness: Harness, task: un
   )
     .map({ row -> trim(row).split(" ")[1] })
     .to_list()
+  const windows_names = test_names.filter(
+    { row -> ["all", "windows"].contains(trim(row).split(" ")[0]) },
+  )
+    .map({ row -> trim(row).split(" ")[1] })
+    .to_list()
   const rendered_linux = harness.process.run(
     {program: path_join(root, HOST_BOUND_RUST_TEST_FILTER_COMMAND), args: ["linux"]},
   )
@@ -1588,6 +1593,14 @@ pipeline test_host_bound_sandbox_filter_has_one_owner(harness: Harness, task: un
   assert_eq(
     trim(rendered_macos.stdout),
     macos_names.map({ name -> "test(/(^|::)" + name + "(::|$)/)" }).to_list().join(" or "),
+  )
+  const rendered_windows = harness.process.run(
+    {program: path_join(root, HOST_BOUND_RUST_TEST_FILTER_COMMAND), args: ["windows"]},
+  )
+  assert_eq(rendered_windows.exit_code, 0)
+  assert_eq(
+    trim(rendered_windows.stdout),
+    windows_names.map({ name -> "test(/(^|::)" + name + "(::|$)/)" }).to_list().join(" or "),
   )
   const renderer_source = harness.fs.read_text(path_join(root, HOST_BOUND_RUST_TEST_FILTER_COMMAND))
   assert_eq(renderer_source.split(HOST_BOUND_RUST_TEST_FILTER_SOURCE).count - 1, 1)

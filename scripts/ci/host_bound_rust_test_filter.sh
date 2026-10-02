@@ -31,13 +31,13 @@ while IFS=' ' read -r scope test_name extra || [[ -n "${scope:-}${test_name:-}${
     echo "invalid host-bound Rust test registry row: $scope $test_name ${extra:-}" >&2
     exit 1
   fi
-  case "$scope" in all|linux|macos|unix) ;; *) echo "invalid host-bound Rust test scope: $scope" >&2; exit 1 ;; esac
+  case "$scope" in all|linux|macos|unix|windows) ;; *) echo "invalid host-bound Rust test scope: $scope" >&2; exit 1 ;; esac
   if [[ ! "$test_name" =~ ^[A-Za-z0-9_]+$ ]]; then
     echo "invalid host-bound Rust test name: $test_name" >&2
     exit 1
   fi
   case "$scope:$platform" in
-    all:*|linux:linux|macos:macos|unix:linux|unix:macos) ;;
+    all:*|linux:linux|macos:macos|unix:linux|unix:macos|windows:windows) ;;
     *) continue ;;
   esac
   if [[ "$format" == names ]]; then
