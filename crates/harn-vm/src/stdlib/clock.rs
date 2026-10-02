@@ -73,11 +73,16 @@ pub fn now_wall_seconds() -> f64 {
 /// Monotonic milliseconds. Honors the active mock; otherwise returns
 /// elapsed millis since process start.
 pub fn now_monotonic_ms() -> i64 {
-    let value = clock_mock::active_clock()
-        .map(|clock| clock.monotonic_ms())
-        .unwrap_or_else(real_monotonic_ms);
+    let value = now_monotonic_ms_unrecorded();
     record_clock_read(ClockSource::Monotonic, value);
     value
+}
+
+/// Monotonic counterpart of [`now_wall_ms_unrecorded`] for runtime bookkeeping.
+pub(crate) fn now_monotonic_ms_unrecorded() -> i64 {
+    clock_mock::active_clock()
+        .map(|clock| clock.monotonic_ms())
+        .unwrap_or_else(real_monotonic_ms)
 }
 
 pub(crate) fn now_monotonic_ms_from(clock: &dyn harn_clock::Clock) -> i64 {
