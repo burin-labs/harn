@@ -832,7 +832,9 @@ fn together_routes_that_need_a_dedicated_endpoint_are_marked_dedicated() {
 /// Fireworks still lists these models in `/inference/v1/models`, but a chat
 /// call returns HTTP 404 "Model not found, inaccessible, and/or not deployed"
 /// (live sweep 2026-10-01; the weekly provider contract probe measured the same
-/// 404 on 2026-09-28). GLM 5.3 Flash answered serverless the same day and is
+/// 404 on 2026-09-28). GLM 5.2 is the odd one: its metadata still reports
+/// `supportsServerless: true`, but its only deployment is non-default, so the
+/// plain id 404s the same way. GLM 5.3 Flash answered serverless the same day and is
 /// the control that keeps this from passing on a catalog that marked every
 /// Fireworks row dedicated.
 #[test]
