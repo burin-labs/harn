@@ -1,3 +1,4 @@
+import { agent_loop_cancellation_failure } from "std/agent/failures"
 import { agent_completion_adjudicator_declared } from "std/agent/judge"
 import {
   AgentToolDispatch,
@@ -496,7 +497,7 @@ fn __classify_missing_tool_call(
   if is_err(verdict) {
     const err = unwrap_err(verdict)
     if error_category(err) == "cancelled" {
-      throw err
+      throw agent_loop_cancellation_failure(err)
     }
     return nil
   }
