@@ -342,7 +342,10 @@ The shared evaluator owns its bounded request profile. Classifier-specific
 `max_tokens`, `top_p`, `seed`, and `timeout_ms` are no longer options. Put
 cost limits in `evaluation.evaluation_cost_limit` and `evaluation.run_cost_limit`,
 and deadlines in the enclosing run's budget. Native policies omit `effort` and
-`temperature`; structured policies may supply them. Returned classifier
+`temperature`; structured policies may supply them. Native decisions require
+conservative admission. Declare `budget: {admission: "conservative",
+total_budget_usd: ...}` before the first planner call; a classifier cannot
+activate it after an unreserved call. Returned classifier
 diagnostics use `evaluation`, an `EvaluationOutcome` whose receipt identifies
 the persisted evaluation. Agent events contain the normalized verdict fields,
 while evaluation receipts carry provider usage and cost.

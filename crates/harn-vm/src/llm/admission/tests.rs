@@ -205,6 +205,33 @@ fn explicit_standard_reasoning_mode_remains_supported() {
 }
 
 #[test]
+fn transcript_audit_metadata_preserves_the_bound_without_admitting_unknown_payloads() {
+    let mut options = opts(1.0);
+    options.messages = vec![serde_json::json!({"role": "assistant", "content": "ready"})];
+    let plain = bound::AttemptBound::for_request(&LlmRequestPayload::from(&options))
+        .unwrap()
+        .total();
+    options.messages[0]["_harn"] = serde_json::json!({
+        "kind": "assistant", "tool_calls": [],
+        "effective_reasoning_effort": {"status": "not_reported"}
+    });
+    assert_eq!(
+        bound::AttemptBound::for_request(&LlmRequestPayload::from(&options))
+            .unwrap()
+            .total(),
+        plain
+    );
+    let audited = options.messages[0].clone();
+    for payload in [
+        serde_json::json!({"role": "assistant", "content": "ready", "unknown_billing": true}),
+        serde_json::json!({"role": "user", "content": [{"type": "input_image", "image_url": "https://invalid.example/image"}], "_harn": {"kind": "user"}}),
+    ] {
+        options.messages = vec![audited.clone(), payload];
+        assert!(bound::AttemptBound::for_request(&LlmRequestPayload::from(&options)).is_err());
+    }
+}
+
+#[test]
 fn missing_usage_retains_reservation_and_late_activation_is_refused() {
     swap_scope(AdmissionScope::default());
     let opts = opts(0.6);
