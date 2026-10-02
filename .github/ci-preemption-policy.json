@@ -1,5 +1,12 @@
 {
   "schema": "harn.ci_preemption_policy.v1",
   "aggregate_job_names": ["CI status"],
-  "timeout_completion_grace_seconds": 90
+  "timeout_completion_grace_seconds": 90,
+  "lost_verdict_routes": [
+    {
+      "workflow": "CI",
+      "job_names": ["Build shared Harn CLI", "Rust workspace tests", "Rust workspace tests (archive mode)", "Run Linux sandbox tests", "Check repository shell gates"],
+      "events": ["pull_request", "merge_group"]
+    }
+  ]
 }
