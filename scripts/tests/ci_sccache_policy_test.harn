@@ -82,7 +82,7 @@ pipeline test_e2e_route_refuses_a_linux_runner_that_cannot_confine_harn(
     gha_expression("vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true'"),
   )
   assert(
-    e2e_elastic_capacity_errors(invalid).contains(
+    landlock_incapable_runner_errors("e2e.yml", invalid).contains(
       "e2e.yml:e2e can resolve to blacksmith-8vcpu-ubuntu-2404, a Linux runner that cannot confine a Harn child (no Landlock or bubblewrap)",
     ),
   )

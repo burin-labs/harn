@@ -10,10 +10,12 @@ import {
   ci_workflow_concurrency_errors,
   e2e_workflow_concurrency_errors,
   event_skip_propagation_errors,
+  linux_confinement_errors,
   macos_warm_errors,
   minimal_pr_capacity_errors,
   nextest_version_errors,
   release_aot_runner_errors,
+  release_runner_policy_landlock_errors,
   release_warm_cache_concurrency_errors,
   release_warm_cache_path_matches,
   release_warm_cache_path_policy_errors,
@@ -302,7 +304,7 @@ pipeline test_minimal_pr_capacity_policy_and_negative_controls(harness: Harness,
   const blind_errors = minimal_pr_capacity_errors(confinement_blind, publish)
   assert(blind_errors.contains("ci.yml:harn-audit must use GitHub-hosted ubuntu-24.04"))
   assert(
-    blind_errors.any(
+    linux_confinement_errors({"ci.yml": confinement_blind}, {targets: []}).any(
       fn(error) { contains(error, "ci.yml:harn-audit can resolve to blacksmith-8vcpu-ubuntu-2404") },
     ),
   )
@@ -1353,5 +1355,25 @@ pipeline test_a_skipped_capacity_job_must_not_skip_the_barrier(harness: Harness,
       push_shaped_chain("!cancelled() && needs.producer.result == 'success'"),
     ),
     [],
+  )
+}
+
+@test
+pipeline test_release_runners_can_confine_a_harn_child(harness: Harness, task: unknown) {
+  // The shipped policy: every Linux runner a release can pick confines Harn
+  // children, in every mode and for the CLI AOT job.
+  const policy = json_parse(harness.fs.read_text("../../.github/release-runner-policy.json"))
+  assert_eq(release_runner_policy_landlock_errors(policy), [])
+  // Negative control: the Blacksmith Linux primary this policy used until
+  // 2026-10-02 is refused on a target and on the AOT job.
+  let blacksmith = policy
+  blacksmith.targets[2].runners.primary = "blacksmith-16vcpu-ubuntu-2204"
+  blacksmith.jobs.cli_aot.primary = "blacksmith-16vcpu-ubuntu-2204"
+  const errors = release_runner_policy_landlock_errors(blacksmith)
+  assert_eq(len(errors), 2)
+  assert(
+    errors.any(
+      fn(error) { contains(error, "cli_aot primary runner blacksmith-16vcpu-ubuntu-2204") },
+    ),
   )
 }

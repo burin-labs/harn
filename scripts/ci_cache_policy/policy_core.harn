@@ -69,6 +69,8 @@ pub const RELEASE_WARM_CACHE_PATH_POLICY = ".github/release-warm-cache-paths.yml
 
 pub const RELEASE_BINARY_WORKFLOW = "build-release-binaries.yml"
 
+pub const RELEASE_RUNNER_POLICY_PATH = ".github/release-runner-policy.json"
+
 pub const RELEASE_PATH_FILTER_ACTION = "dorny/paths-filter"
 
 pub const CHECKOUT_ACTION_PREFIX = "actions/checkout@"
@@ -1853,18 +1855,58 @@ fn job_runner_labels(job: dict) -> list<string> {
   return labels
 }
 
+fn landlock_incapable_label(label: string) -> bool {
+  return LANDLOCK_INCAPABLE_LINUX_RUNNER_PREFIXES.any({ prefix -> starts_with(label, prefix) })
+    && linux_runner_label(label)
+}
+
+/**
+ * Every Linux runner the release runner policy can hand a build: each target's
+ * runner for every mode, and the CLI AOT generator's. The release build jobs
+ * read these through `fromJSON` matrices, so the workflow scan cannot see them.
+ */
+pub fn release_runner_policy_landlock_errors(policy: dict) -> list<string> {
+  let errors: list<string> = []
+  for target in policy?.targets ?? [] {
+    for {key: mode, value: runner} in (target?.runners ?? {}) {
+      if landlock_incapable_label(to_string(runner)) {
+        errors = errors
+          + [
+            "release-runner-policy.json:${target?.target} ${mode} runner ${runner} cannot confine a Harn child (no Landlock or bubblewrap)",
+          ]
+      }
+    }
+  }
+  for {key: role, value: runner} in (policy?.jobs?.cli_aot ?? {}) {
+    if landlock_incapable_label(to_string(runner)) {
+      errors = errors
+        + [
+          "release-runner-policy.json:cli_aot ${role} runner ${runner} cannot confine a Harn child (no Landlock or bubblewrap)",
+        ]
+    }
+  }
+  return errors
+}
+
+/** Every workflow and the release runner policy, in one contract. */
+pub fn linux_confinement_errors(workflows: dict, release_runner_policy: dict) -> list<string> {
+  let errors: list<string> = []
+  for name in workflows.keys().sorted() {
+    errors = errors + landlock_incapable_runner_errors(name, workflows[name] ?? {})
+  }
+  return errors + release_runner_policy_landlock_errors(release_runner_policy)
+}
+
 /** No Linux job may resolve to a runner that cannot confine a Harn child. */
 pub fn landlock_incapable_runner_errors(workflow_name: string, workflow: dict) -> list<string> {
   let errors: list<string> = []
   for {key: job_name, value: job} in (workflow?.jobs ?? {}) {
     for label in job_runner_labels(job) {
-      for prefix in LANDLOCK_INCAPABLE_LINUX_RUNNER_PREFIXES {
-        if starts_with(label, prefix) && linux_runner_label(label) {
-          errors = errors
-            + [
-              "${workflow_name}:${job_name} can resolve to ${label}, a Linux runner that cannot confine a Harn child (no Landlock or bubblewrap)",
-            ]
-        }
+      if landlock_incapable_label(label) {
+        errors = errors
+          + [
+            "${workflow_name}:${job_name} can resolve to ${label}, a Linux runner that cannot confine a Harn child (no Landlock or bubblewrap)",
+          ]
       }
     }
   }
@@ -1976,7 +2018,6 @@ pub fn minimal_pr_capacity_errors(ci: dict, publish: dict) -> list<string> {
         "ci.yml:rust-check-inputs must ladder the owned ${SELFHOSTED_LINUX_BIG_POOL} pool on same-repository pull requests, ${PRODUCER_VENDOR_LINUX_RUNNER}, then ${PRODUCER_HOSTED_LINUX_RUNNER}",
       ]
   }
-  errors = errors + landlock_incapable_runner_errors("ci.yml", ci)
   // Stays behind the merge on COST, not on principle: fourteen minutes, most
   // of it one aggregate and two integration sweeps. It is a candidate to move
   // the day it gets cheaper, and the cheap refusals it used to strand now sit
@@ -2095,7 +2136,7 @@ pub fn e2e_elastic_capacity_errors(e2e: dict) -> list<string> {
   // The evacuation switch still moves the suite off the owned pool, through
   // the capacity decision below; it no longer names Blacksmith Linux, which
   // cannot confine the Harn children this suite spawns.
-  let errors: list<string> = landlock_incapable_runner_errors("e2e.yml", {jobs: {e2e: job}})
+  let errors: list<string> = []
   if capacity_step == nil {
     errors = errors
       + ["e2e.yml:e2e-capacity must keep the '${E2E_CAPACITY_DECISION_STEP}' step"]

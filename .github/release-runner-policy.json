@@ -22,7 +22,7 @@
   },
   "jobs": {
     "cli_aot": {
-      "primary": "blacksmith-16vcpu-ubuntu-2204",
+      "primary": "ubuntu-16core-release",
       "standard": "ubuntu-24.04"
     }
   },
@@ -63,10 +63,10 @@
       "sccache_backend": "install",
       "runners": {
         "warm": "ubuntu-22.04",
-        "primary": "blacksmith-16vcpu-ubuntu-2204",
+        "primary": "ubuntu-16core-release",
         "recovery": "ubuntu-16core-release",
         "standard": "ubuntu-22.04",
-        "fast": "blacksmith-16vcpu-ubuntu-2204"
+        "fast": "ubuntu-16core-release"
       }
     },
     {
@@ -77,10 +77,10 @@
       "sccache_backend": "install",
       "runners": {
         "warm": "ubuntu-22.04",
-        "primary": "blacksmith-16vcpu-ubuntu-2204",
+        "primary": "ubuntu-16core-release",
         "recovery": "ubuntu-16core-release",
         "standard": "ubuntu-22.04",
-        "fast": "blacksmith-16vcpu-ubuntu-2204"
+        "fast": "ubuntu-16core-release"
       }
     },
     {
