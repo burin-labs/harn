@@ -58,6 +58,8 @@ pub(super) const CAPTURED_THREAD_LOCAL_PROJECTION: &[&str] = &[
     "ACTIVE_EVENT_LOG",
     "MCP_CALL_BUDGET",
     "PG_QUERY_BUDGET",
+    "LLM_COST_BUDGET",
+    "LLM_TOKEN_BUDGET",
     "ACTIVE_TOOL_CALL_CANCELLATION_REGISTRY",
     "ACTIVE_WORKER_REGISTRY",
     "ACTIVE_DAEMON_REGISTRY",
@@ -83,6 +85,8 @@ pub(super) struct SubtaskAmbientState {
     event_log: Option<Arc<AnyEventLog>>,
     mcp_call_budget: Option<CallBudget>,
     pg_query_budget: Option<CallBudget>,
+    llm_cost_budget: Option<crate::llm::cost::budget::LlmCostBudget>,
+    llm_token_budget: Option<crate::llm::cost::budget::LlmTokenBudget>,
     tool_call_cancellations: Arc<crate::tool_call_cancellations::CancellationRegistry>,
     worker_registry: Arc<crate::stdlib::agents::agents_workers::WorkerRegistry>,
     daemon_registry: Arc<crate::stdlib::agents_daemon::DaemonRegistry>,
@@ -105,6 +109,8 @@ impl SubtaskAmbientState {
             event_log: clone_via_swap(crate::event_log::swap_active_event_log),
             mcp_call_budget: clone_via_swap(crate::call_budget::swap_mcp_call_budget),
             pg_query_budget: clone_via_swap(crate::call_budget::swap_pg_query_budget),
+            llm_cost_budget: crate::llm::cost::budget::capture_llm_cost_budget(),
+            llm_token_budget: crate::llm::cost::budget::capture_llm_token_budget(),
             tool_call_cancellations: clone_via_swap(
                 crate::tool_call_cancellations::swap_active_registry,
             ),
@@ -209,6 +215,14 @@ impl SubtaskAmbientState {
         swap_slot(
             &mut self.tool_call_cancellations,
             crate::tool_call_cancellations::swap_active_registry,
+        );
+        swap_slot(
+            &mut self.llm_cost_budget,
+            crate::llm::cost::budget::swap_llm_cost_budget,
+        );
+        swap_slot(
+            &mut self.llm_token_budget,
+            crate::llm::cost::budget::swap_llm_token_budget,
         );
         swap_slot(
             &mut self.worker_registry,

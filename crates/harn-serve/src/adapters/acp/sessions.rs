@@ -25,6 +25,8 @@ pub(super) struct SessionLlmSpend {
     /// arrived in.
     pub(super) llm_cost_usd: Option<CeilingRearm>,
     pub(super) llm_tokens: Option<CeilingRearm>,
+    active_cost: Option<harn_vm::LlmCostBudgetHandle>,
+    active_tokens: Option<harn_vm::LlmTokenBudgetHandle>,
 }
 
 /// What one `session/set_budget` field asks of its ceiling.
@@ -64,16 +66,56 @@ impl SessionLlmSpend {
 
 /// Writes the turn's cost-scope total back to the session when the turn's
 /// future is dropped, whether it finished, failed, or was cancelled. Declare it
-/// after the budget guard so it drops first, while the scope is still installed.
-pub(super) struct SessionSpendRecorder(pub(super) Arc<std::sync::Mutex<SessionLlmSpend>>);
+/// after the budget guard so it drops first. Cancellation can drop it outside
+/// the task's poll, so it reads the owned ledger rather than ambient state.
+pub(super) struct SessionSpendRecorder<'a> {
+    session: Arc<std::sync::Mutex<SessionLlmSpend>>,
+    cost: &'a harn_vm::LlmBudgetGuard,
+    record_spend: bool,
+}
 
-impl Drop for SessionSpendRecorder {
+impl<'a> SessionSpendRecorder<'a> {
+    pub(super) fn new(
+        session: Arc<std::sync::Mutex<SessionLlmSpend>>,
+        budget: &'a crate::limits::BudgetGuard,
+        record_spend: bool,
+    ) -> Self {
+        let cost = budget
+            .llm_cost_guard()
+            .expect("session turns install cost accounting");
+        {
+            let mut spend = session.lock().unwrap_or_else(|error| error.into_inner());
+            spend.active_cost = Some(cost.handle());
+            spend.active_tokens = budget.llm_token_guard().map(|guard| guard.handle());
+            if let Some(ceiling) = spend.llm_cost_usd {
+                cost.handle().set_ceiling(ceiling.cap());
+            }
+            if let (Some(ceiling), Some(tokens)) = (spend.llm_tokens, &spend.active_tokens) {
+                tokens.set_ceiling(ceiling.token_cap());
+            }
+        }
+        Self {
+            session,
+            cost,
+            record_spend,
+        }
+    }
+}
+
+impl Drop for SessionSpendRecorder<'_> {
     fn drop(&mut self) {
-        let spent = harn_vm::llm::peek_total_cost();
-        self.0
+        let spent = self.cost.total_cost();
+        let mut session = self
+            .session
             .lock()
-            .unwrap_or_else(|error| error.into_inner())
-            .spent_usd = Some(spent);
+            .unwrap_or_else(|error| error.into_inner());
+        if session.active_cost.as_ref() == Some(&self.cost.handle()) {
+            if self.record_spend {
+                session.spent_usd = Some(spent);
+            }
+            session.active_cost = None;
+            session.active_tokens = None;
+        }
     }
 }
 
@@ -145,7 +187,6 @@ impl ConcurrentSessionControls {
         let Some(rearm) = BudgetRearm::parse(msg) else {
             return false;
         };
-        rearm.apply_live();
         let session_id = msg
             .get("params")
             .and_then(|params| params.get("sessionId"))
@@ -163,11 +204,19 @@ impl ConcurrentSessionControls {
                 .lock()
                 .unwrap_or_else(|error| error.into_inner());
             if rearm.llm_cost_usd.is_some() {
+                if let (Some(ceiling), Some(cost)) = (rearm.llm_cost_usd, &spend.active_cost) {
+                    cost.set_ceiling(ceiling.cap());
+                }
                 spend.llm_cost_usd = rearm.llm_cost_usd;
             }
             if rearm.llm_tokens.is_some() {
+                if let (Some(ceiling), Some(tokens)) = (rearm.llm_tokens, &spend.active_tokens) {
+                    tokens.set_ceiling(ceiling.token_cap());
+                }
                 spend.llm_tokens = rearm.llm_tokens;
             }
+        } else if session_id.is_none() {
+            rearm.apply_live();
         }
         true
     }
@@ -870,12 +919,10 @@ pub(super) fn preempt_session_interruption(
 /// rather than guessing; an explicit `null` clears the cap; a finite number
 /// re-arms it.
 ///
-/// The router applies it out-of-band, on the same task / engine thread that
-/// drives the prompt turn, so a turn already in flight observes the new cap on
-/// its next LLM dispatch: the ceilings are per-thread thread-locals
-/// (`harn_vm::set_llm_*_budget`), and the blocked message loop would only
-/// process the frame after the turn unwinds. It mirrors how `session/cancel`
-/// preempts a running turn. The live re-arm preserves accumulated spend.
+/// The router updates the named session's owned ledgers out-of-band, so a
+/// suspended turn observes the new cap on its next LLM dispatch. The live
+/// re-arm preserves accumulated spend. Frames without a session ID retain
+/// the legacy ambient-budget behavior.
 struct BudgetRearm {
     llm_cost_usd: Option<CeilingRearm>,
     llm_tokens: Option<CeilingRearm>,
@@ -938,6 +985,75 @@ pub(super) fn prepare_session_prompt(
 mod budget_rearm_tests {
     use super::*;
     use serde_json::json;
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn named_rearm_updates_suspended_turn_without_touching_the_caller() {
+        use std::future::Future;
+        use std::task::{Context, Waker};
+
+        let controls = ConcurrentSessionControls::default();
+        let control = ConcurrentSessionControl::new();
+        controls.register("target", control.clone());
+        let _caller_cost = harn_vm::install_llm_cost_budget_seeded(Some(3.0), 0.5);
+        let _caller_tokens = harn_vm::install_llm_token_budget(30);
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let mut turn = Box::pin(harn_vm::orchestration::scope_ambient_context(async {
+            // Even an initially uncapped turn must own token accounting for
+            // a later out-of-band ceiling to reach that turn.
+            let guard = BudgetSpec::default().install_session_turn(0.25);
+            let _recorder = SessionSpendRecorder::new(control.llm_spend.clone(), &guard, true);
+            rx.await.unwrap();
+            assert_eq!(harn_vm::peek_llm_cost_budget(), Some(1.0));
+            assert_eq!(harn_vm::peek_llm_token_budget(), Some(10));
+            assert_eq!(harn_vm::llm::peek_total_cost(), 0.25);
+        }));
+        let mut cx = Context::from_waker(Waker::noop());
+        assert!(turn.as_mut().poll(&mut cx).is_pending());
+        assert!(controls.apply_budget_rearm(&set_budget_frame(json!({
+            "sessionId": "missing", "llm_cost_usd": 9.0, "llm_tokens": 90
+        }))));
+        assert!(controls.apply_budget_rearm(&set_budget_frame(json!({
+            "sessionId": "target", "llm_cost_usd": 1.0, "llm_tokens": 10
+        }))));
+        assert_eq!(harn_vm::peek_llm_cost_budget(), Some(3.0));
+        assert_eq!(harn_vm::peek_llm_token_budget(), Some(30));
+        assert_eq!(harn_vm::llm::peek_total_cost(), 0.5);
+        tx.send(()).unwrap();
+        assert!(turn.as_mut().poll(&mut cx).is_ready());
+        let spend = control.llm_spend.lock().unwrap();
+        assert_eq!(spend.spent_usd, Some(0.25));
+        assert!(spend.active_cost.is_none());
+        assert!(spend.active_tokens.is_none());
+        assert_eq!(harn_vm::peek_llm_cost_budget(), Some(3.0));
+        assert_eq!(harn_vm::peek_llm_token_budget(), Some(30));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn cancelled_prompt_records_its_own_spend_outside_the_poll_scope() {
+        use std::future::Future;
+        use std::task::{Context, Waker};
+
+        let session = Arc::new(std::sync::Mutex::new(SessionLlmSpend::default()));
+        let _caller = harn_vm::install_llm_cost_budget_seeded(Some(3.0), 0.5);
+        let mut turn = Box::pin(harn_vm::orchestration::scope_ambient_context(async {
+            let budget = BudgetSpec {
+                llm_cost_usd: Some(1.0),
+                ..Default::default()
+            };
+            let guard = budget.install_session_turn(0.25);
+            let _recorder = SessionSpendRecorder::new(session.clone(), &guard, true);
+            std::future::pending::<()>().await;
+        }));
+        assert!(turn
+            .as_mut()
+            .poll(&mut Context::from_waker(Waker::noop()))
+            .is_pending());
+        assert_eq!(harn_vm::llm::peek_total_cost(), 0.5);
+        drop(turn);
+        assert_eq!(session.lock().unwrap().spent_usd, Some(0.25));
+        assert_eq!(harn_vm::llm::peek_total_cost(), 0.5);
+        assert_eq!(harn_vm::peek_llm_cost_budget(), Some(3.0));
+    }
 
     fn apply_session_budget_rearm(msg: &serde_json::Value) -> bool {
         ConcurrentSessionControls::new(true, serde_json::Value::Null).apply_budget_rearm(msg)

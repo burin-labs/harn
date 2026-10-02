@@ -16,7 +16,7 @@
 //!     in_flight_max: 20,          //  backpressure watermark
 //! )
 //! @budget(
-//!     llm_cost_usd: 0.50,         //  pinned to harn-vm's LLM_BUDGET on dispatch
+//!     llm_cost_usd: 0.50,         // shared by this dispatch's LLM calls
 //!     llm_tokens:   10000,
 //!     pg_queries:   50,
 //!     mcp_calls:    20,
@@ -271,7 +271,7 @@ impl BudgetSpec {
                 self.llm_cost_usd,
                 llm_spent_usd,
             )),
-            _llm_tokens: self.llm_tokens.map(harn_vm::install_llm_token_budget),
+            _llm_tokens: Some(harn_vm::install_llm_token_budget_seeded(self.llm_tokens, 0)),
             _mcp_calls: self.mcp_calls.map(harn_vm::install_mcp_call_budget),
             _pg_queries: self.pg_queries.map(harn_vm::install_pg_query_budget),
         }
@@ -286,6 +286,16 @@ pub(crate) struct BudgetGuard {
     _llm_tokens: Option<harn_vm::LlmTokenBudgetGuard>,
     _mcp_calls: Option<harn_vm::McpCallBudgetGuard>,
     _pg_queries: Option<harn_vm::PgQueryBudgetGuard>,
+}
+
+impl BudgetGuard {
+    pub(crate) fn llm_cost_guard(&self) -> Option<&harn_vm::LlmBudgetGuard> {
+        self._llm_cost.as_ref()
+    }
+
+    pub(crate) fn llm_token_guard(&self) -> Option<&harn_vm::LlmTokenBudgetGuard> {
+        self._llm_tokens.as_ref()
+    }
 }
 
 /// Context the registry needs to evaluate a route's limits for one
