@@ -946,11 +946,16 @@ pub enum EnvironmentPolicyError {
     },
     /// A `secret_store` grant could not be resolved on exposure.
     MissingSecret { name: String },
+    /// A loader control would fire before trusted sandbox setup executes.
+    UnsafeTrustedSetupVariable { variable: String },
 }
 
 impl fmt::Display for EnvironmentPolicyError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            EnvironmentPolicyError::UnsafeTrustedSetupVariable { variable } => write!(
+                f, "trusted sandbox setup cannot preserve loader control {variable}; remove it from this launch environment"
+            ),
             EnvironmentPolicyError::EmptyName => write!(
                 f,
                 "[environment_policy.empty_grant_name] grant spec has an empty name"
@@ -1049,6 +1054,9 @@ impl EnvironmentPolicyError {
     /// Stable machine-readable code for CLI, ACP, and host integrations.
     pub fn code(&self) -> &'static str {
         match self {
+            Self::UnsafeTrustedSetupVariable { .. } => {
+                "environment_policy.unsafe_trusted_setup_variable"
+            }
             Self::EmptyName => "environment_policy.empty_grant_name",
             Self::EmptyEnvVar { .. } => "environment_policy.empty_source_variable",
             Self::LiteralSecretReference { .. } => "environment_policy.literal_secret_reference",
@@ -1078,6 +1086,9 @@ impl EnvironmentPolicyError {
             .as_object_mut()
             .expect("environment policy diagnostic is an object");
         match self {
+            Self::UnsafeTrustedSetupVariable { variable } => {
+                object.insert("sourceVariable".to_string(), serde_json::json!(variable));
+            }
             Self::LiteralSecretReference { name }
             | Self::EmptyEnvVar { name }
             | Self::EmptySecretRef { name }

@@ -112,6 +112,7 @@ const RULESET_FD: std::os::fd::RawFd = 3;
 enum GuardianConfinement {
     BeforeExec { seccomp: Vec<u8>, ruleset: bool },
     AfterNamespace { ruleset: bool },
+    Bubblewrap { descriptors: Vec<i32> },
 }
 
 #[cfg(unix)]
@@ -240,6 +241,9 @@ impl TransferredConfinement {
             ReexecConfinement::AfterNamespace(inner) => GuardianConfinement::AfterNamespace {
                 ruleset: inner.ruleset_fd().is_some(),
             },
+            ReexecConfinement::Bubblewrap(descriptors) => GuardianConfinement::Bubblewrap {
+                descriptors: descriptors.numbers(),
+            },
         }
     }
 
@@ -248,6 +252,10 @@ impl TransferredConfinement {
         let inner = match self.0 {
             ReexecConfinement::BeforeExec(inner) | ReexecConfinement::AfterNamespace(inner) => {
                 inner
+            }
+            ReexecConfinement::Bubblewrap(descriptors) => {
+                descriptors.attach(guardian);
+                return;
             }
         };
         let Some(ruleset) = inner.into_ruleset_fd() else {
@@ -338,6 +346,7 @@ where
         if key
             .to_str()
             .is_some_and(super::handle::is_sensitive_env_name)
+            || harn_vm::security::is_trusted_setup_control(&key)
         {
             guardian.env_remove(key);
         }
@@ -376,10 +385,10 @@ impl PreparedCommand {
                 .get_current_dir()
                 .map(|path| os_bytes(path.as_os_str())),
             env_clear,
-            env: command
-                .get_envs()
-                .map(|(key, value)| (os_bytes(key), value.map(os_bytes)))
-                .collect(),
+            // The guardian's loader must not see these inherited controls.
+            // Preserve them for the confined payload through its existing
+            // private request, then apply explicit entries and removals last.
+            env: payload_environment(command, env_clear, std::env::vars_os()),
             cleanup_token,
         }
     }
@@ -414,6 +423,24 @@ impl PreparedCommand {
     }
 }
 
+#[cfg(unix)]
+fn payload_environment(
+    command: &Command,
+    env_clear: bool,
+    inherited: impl IntoIterator<Item = (OsString, OsString)>,
+) -> Vec<(Vec<u8>, Option<Vec<u8>>)> {
+    inherited
+        .into_iter()
+        .filter(|(key, _)| !env_clear && harn_vm::security::is_trusted_setup_control(key))
+        .map(|(key, value)| (os_bytes(&key), Some(os_bytes(&value))))
+        .chain(
+            command
+                .get_envs()
+                .map(|(key, value)| (os_bytes(key), value.map(os_bytes))),
+        )
+        .collect()
+}
+
 /// Attach the transferred confinement to the payload spawn, or refuse.
 ///
 /// Built here, before the fork, because rebuilding allocates and the `pre_exec`
@@ -432,6 +459,15 @@ fn apply_confinement(
         return Ok(());
     };
     let (seccomp, ruleset) = match confinement {
+        GuardianConfinement::Bubblewrap { descriptors } => {
+            // SAFETY: the trusted prepared launch transferred each owned fd
+            // under the exact number named in its wrapper arguments. The
+            // decoder validates that all names are distinct and still open.
+            let transferred =
+                unsafe { harn_vm::process_sandbox::DescriptorTransfer::inherited(descriptors)? };
+            transferred.attach(command);
+            return Ok(());
+        }
         GuardianConfinement::BeforeExec { seccomp, ruleset } => (seccomp, ruleset),
         GuardianConfinement::AfterNamespace { ruleset } => {
             let transferable = harn_vm::process_sandbox::TransferableConfinement::from_parts(
@@ -954,6 +990,27 @@ pub fn run_if_requested() -> bool {
 
 #[cfg(all(test, unix))]
 mod tests {
+    #[test]
+    fn guardian_preserves_payload_loader_controls_without_exposing_them_to_setup() {
+        let inherited = || vec![(OsString::from("LD_BIND_NOW"), OsString::from("1"))];
+        let mut command = Command::new("/bin/true");
+        let expected = (b"LD_BIND_NOW".to_vec(), Some(b"1".to_vec()));
+        assert_eq!(
+            payload_environment(&command, false, inherited()),
+            vec![expected]
+        );
+        assert!(payload_environment(&command, true, inherited()).is_empty());
+        command.env_remove("LD_BIND_NOW");
+        let removed = payload_environment(&command, false, inherited());
+        assert_eq!(removed.last(), Some(&(b"LD_BIND_NOW".to_vec(), None)));
+        let mut guardian = Command::new("/bin/true");
+        strip_sensitive_parent_env(&mut guardian, inherited());
+        assert_eq!(
+            guardian.get_envs().collect::<Vec<_>>(),
+            vec![(std::ffi::OsStr::new("LD_BIND_NOW"), None)]
+        );
+    }
+
     use std::collections::BTreeMap;
 
     use super::*;
@@ -1019,10 +1076,13 @@ mod tests {
                     OsString::from("secret-canary"),
                 ),
                 (OsString::from("PATH"), OsString::from("/usr/bin")),
+                (OsString::from("LD_BIND_NOW"), OsString::from("1")),
             ],
         );
 
         let env = guardian.get_envs().collect::<Vec<_>>();
+        assert!(env.iter().any(|(key, value)| *key == OsStr::new("LD_BIND_NOW") && value.is_none()),
+            "trusted guardian setup removes parent loader controls while the payload environment remains in its pipe request");
         assert!(
             env.iter()
                 .any(|(key, value)| { *key == OsStr::new("EXAMPLE_API_KEY") && value.is_none() }),

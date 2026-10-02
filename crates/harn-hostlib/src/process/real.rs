@@ -362,6 +362,9 @@ pub(crate) fn prepare_command_from(
         (_, false) => Stdio::null(),
     });
 
+    process_sandbox::validate_command_environment(&command, env_cleared)
+        .map_err(ProcessError::sandbox_setup)?;
+
     Ok(PreparedSpawn {
         command,
         cleanup_token,

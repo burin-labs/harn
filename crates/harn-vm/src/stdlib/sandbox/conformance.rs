@@ -450,7 +450,7 @@ pub fn judge(
         Expectation::NotApplicable(reason) => {
             return Verdict::NotApplicable {
                 reason: reason.to_string(),
-            }
+            };
         }
         Expectation::DeclaredNotEnforced => {
             return match observed {

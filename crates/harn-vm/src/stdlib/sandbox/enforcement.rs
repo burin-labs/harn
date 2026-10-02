@@ -141,6 +141,10 @@ pub const TABLE: &[BackendEnforcement] = &[
         [Enforced, Enforced, Enforced, Enforced, Unmeasured],
     ),
     BackendEnforcement::row(
+        SandboxMechanism::LinuxBubblewrap,
+        [Enforced, Enforced, Enforced, Enforced, Unmeasured],
+    ),
+    BackendEnforcement::row(
         SandboxMechanism::MacosSandboxExec,
         [Enforced, Enforced, Enforced, Enforced, Unmeasured],
     ),
@@ -241,7 +245,7 @@ fn enforcement_for(filesystem_mechanism: &str) -> Option<&'static BackendEnforce
 pub(crate) fn ensure_spawn_enforceable<B: SandboxBackend + ?Sized>(
     policy: &CapabilityPolicy,
 ) -> Result<(), VmError> {
-    if let Some(refusal) = refusal_for_mechanism(B::filesystem_mechanism(), policy) {
+    if let Some(refusal) = refusal_for_mechanism(B::filesystem_mechanism().as_str(), policy) {
         return Err(refusal.into_error());
     }
     #[cfg(target_os = "macos")]
@@ -368,7 +372,7 @@ mod tests {
     #[test]
     fn the_active_backend_has_a_row() {
         assert!(active_enforcement().is_some());
-        assert!(enforcement_for(UnconfinedBackend::filesystem_mechanism()).is_some());
+        assert!(enforcement_for(UnconfinedBackend::filesystem_mechanism().as_str()).is_some());
     }
 
     /// Windows has no OS sandbox. This is the backend it runs, so the

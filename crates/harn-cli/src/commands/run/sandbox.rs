@@ -489,6 +489,20 @@ pub(super) fn default_run_capability_policy(
         }
     }
 
+    let netns_launcher_path = grants.netns_launcher;
+    #[cfg(target_os = "linux")]
+    let netns_launcher_path = netns_launcher_path.or_else(|| {
+        // Bubblewrap reuses the exact runtime grant above for its exec finalizer.
+        if harn_vm::process_sandbox::active_backend_mechanism()
+            == harn_vm::process_sandbox::SandboxMechanism::LinuxBubblewrap
+        {
+            return std::env::current_exe()
+                .ok()
+                .map(|path| normalize_run_workspace_root(&path).display().to_string());
+        }
+        None
+    });
+
     harn_vm::orchestration::CapabilityPolicy {
         workspace_roots,
         read_only_roots: read_only_roots
@@ -516,7 +530,7 @@ pub(super) fn default_run_capability_policy(
             // capability, so its children already write their workspace, and
             // a read-only role nested under it may keep the grant for its own.
             allow_child_workspace_write: false,
-            netns_launcher_path: grants.netns_launcher,
+            netns_launcher_path,
         }),
         side_effect_level: Some(
             if grants.network {
