@@ -193,4 +193,42 @@ grep -qx 'fallback=true' "$outputs"
 grep -q 'host_counts=unmeasured' "$diagnostic"
 rm -f "$outputs"
 
-echo 'Runner capacity: owned, retired, unrouted-event, evacuation-switch, retired-routing, census-fallback, routed-event, label, paid-runner and host-saturation controls passed'
+# The shared CLI producer: several routed events, its own reserved pool, and a
+# fully busy pool that overflows to GitHub's runner instead of the vendor rung
+# a shared quota can starve. Every other outcome stays exactly as before.
+CAPACITY_ROUTED_EVENT='pull_request merge_group'
+CAPACITY_POOL=linux_probe
+reserved_idle='{"linux_probe":{"online":2,"idle":1}}'
+reserved_busy='{"linux_probe":{"online":2,"idle":0}}'
+reserved_absent='{"linux_probe":{"online":0,"idle":0}}'
+[[ $(runner_capacity_decision merge_group '' "$reserved_idle") == *"route=owned pool=linux_probe carriers=2 idle=1" ]]
+[[ $(runner_capacity_decision pull_request '' "$reserved_idle") == *route=owned* ]]
+[[ $(runner_capacity_decision push '' "$reserved_idle") == \
+  *"route=hosted reason=event_is_not_pull_request_or_merge_group pool=linux_probe"* ]]
+# Negative control: without the overflow route, a busy pool keeps the hosted
+# route, so the overflow below is the setting's doing and not the pool's.
+[[ $(runner_capacity_decision merge_group '' "$reserved_busy") == *"route=hosted reason=pool_fully_busy"* ]]
+CAPACITY_BUSY_ROUTE=overflow
+[[ $(runner_capacity_decision merge_group '' "$reserved_busy") == \
+  *"route=overflow reason=pool_fully_busy pool=linux_probe carriers=2 idle=0" ]]
+# No reserved runner online is today's ladder, not an overflow.
+[[ $(runner_capacity_decision merge_group '' "$reserved_absent") == *"route=hosted reason=pool_reported_zero_carriers"* ]]
+[[ $(paid_line merge_group "$reserved_busy" '' ubicloud) == *"route=overflow"*" paid_runner=ubuntu-8core paid_provider=github" ]]
+[[ $(paid_line merge_group "$reserved_absent") == *" paid_runner=ubicloud-standard-8 paid_provider=ubicloud_default" ]]
+outputs=$(mktemp "${TMPDIR:-/tmp}/harn-capacity-overflow-outputs.XXXXXX")
+EVENT_NAME=merge_group SELFHOSTED_DISABLED='' RUNNER_CAPACITY="$reserved_busy" \
+  GITHUB_OUTPUT="$outputs" GITHUB_STEP_SUMMARY='' runner_capacity_main 2>/dev/null
+grep -qx 'route=overflow' "$outputs"
+grep -qx 'fallback=false' "$outputs"
+rm -f "$outputs"
+CAPACITY_BUSY_ROUTE=hosted
+CAPACITY_POOL=linux_big
+CAPACITY_ROUTED_EVENT=push
+# An unknown busy route is refused before any decision is made.
+if CAPACITY_BUSY_ROUTE=owned bash "$root/scripts/ci/runner_capacity.sh" 2>"$diagnostic"; then
+  echo 'expected an unknown CAPACITY_BUSY_ROUTE to be refused' >&2
+  exit 1
+fi
+grep -q 'CAPACITY_BUSY_ROUTE must be hosted or overflow' "$diagnostic"
+
+echo 'Runner capacity: owned, retired, unrouted-event, evacuation-switch, retired-routing, census-fallback, routed-event, label, paid-runner, host-saturation, routed-event-list and overflow controls passed'

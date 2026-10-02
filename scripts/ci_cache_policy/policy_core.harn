@@ -216,6 +216,26 @@ pub const SELFHOSTED_LINUX_BIG_RUNNER = "[\"self-hosted\", \"Linux\", \"X64\", \
 /** The census pool that answers for that label set. */
 pub const SELFHOSTED_LINUX_BIG_POOL = "linux_big"
 
+/**
+ * The label only the shared CLI producer asks for. Runners carrying it serve
+ * nothing else, so the build every Harn proof lane waits on never queues
+ * behind general work or behind the vendor quota every repository in the
+ * organization shares. That quota held it 37 minutes on 2026-10-02 (run
+ * 37042288569).
+ */
+pub const RESERVED_CLI_PRODUCER_LABEL = "harn-ci-producer"
+
+pub const RESERVED_CLI_PRODUCER_RUNNER =
+  "[\"self-hosted\", \"Linux\", \"X64\", \"${RESERVED_CLI_PRODUCER_LABEL}\"]"
+
+/** The census pool that measures the reserved label: the census's probe lane. */
+pub const RESERVED_CLI_PRODUCER_POOL = "linux_probe"
+
+/** The capacity step that routes the shared CLI producer, and its output. */
+pub const CLI_CAPACITY_DECISION_STEP = "cli-decision"
+
+pub const CLI_CAPACITY_ROUTE_OUTPUT = "cli_route"
+
 pub const BLACKSMITH_ENABLE_VAR = "HARN_CI_ENABLE_BLACKSMITH_LINUX"
 
 /** The step that names where the slow E2E suite is about to land. */
@@ -1914,14 +1934,15 @@ pub fn landlock_incapable_runner_errors(workflow_name: string, workflow: dict) -
 }
 
 /**
- * Whether a producer may land on the owned pool.
+ * Whether a producer may land on the shared owned pool.
  *
  * The shared CLI may not. Every Harn proof lane waits for it, and an owned
  * carrier shares four cores among six runners, so its compile budget is one
  * job: with no target restored and no sccache it hit its 31-minute step
  * timeout in run 36987728246, while a cold build on the vendor rung took
- * 693s. The workspace test producer keeps the owned rung; nothing waits on its
- * finish except the verdict.
+ * 693s. It has runners of its own instead, which nothing else may occupy
+ * (`RESERVED_CLI_PRODUCER_LABEL`). The workspace test producer keeps the
+ * shared owned rung; nothing waits on its finish except the verdict.
  */
 pub fn producer_uses_owned_pool(job_name: string) -> bool {
   return job_name != "rust-cli"
@@ -1941,6 +1962,118 @@ pub fn producer_tier_expression(owned_rung: bool = true) -> string {
     "'${UBICLOUD_RUNNER_TIER}'",
     "'${HOSTED_RUNNER_TIER}'",
   )
+}
+
+fn cli_route_condition(route: string) -> string {
+  return "(needs.rust-producer-capacity.outputs.${CLI_CAPACITY_ROUTE_OUTPUT} == '${route}'"
+}
+
+/**
+ * The shared CLI producer's four rungs, for `runs-on`, `timeout-minutes` and
+ * the tier mirror alike: an idle reserved runner; GitHub's runner when every
+ * reserved runner is busy; then the ladder every other paid lane has. The
+ * capacity step names `owned` or `overflow` only on events it routes, so
+ * every other event, and a census it cannot read, keeps the last two rungs.
+ */
+pub type CliProducerRungs = {reserved: string, overflow: string, vendor: string, hosted: string}
+
+pub fn cli_producer_rung_expression(rungs: CliProducerRungs) -> string {
+  const {reserved, overflow, vendor, hosted} = rungs
+  return "$"
+    + "{{ "
+    + cli_route_condition("owned")
+    + "\n  && ${reserved})"
+    + "\n  || "
+    + cli_route_condition("overflow")
+    + "\n  && ${overflow})"
+    + "\n  || "
+    + vendor_producer_condition()
+    + "\n  && ${vendor})"
+    + "\n  || ${hosted} }}"
+}
+
+pub fn cli_producer_runner_expression() -> string {
+  return cli_producer_rung_expression(
+    {
+      reserved: "fromJSON('${RESERVED_CLI_PRODUCER_RUNNER}')",
+      overflow: "'${PRODUCER_HOSTED_LINUX_RUNNER}'",
+      vendor: "'${PRODUCER_VENDOR_LINUX_RUNNER}'",
+      hosted: "'${PRODUCER_HOSTED_LINUX_RUNNER}'",
+    },
+  )
+}
+
+pub fn cli_producer_tier_expression() -> string {
+  return cli_producer_rung_expression(
+    {
+      reserved: "'${SELFHOSTED_RUNNER_TIER}'",
+      overflow: "'${HOSTED_RUNNER_TIER}'",
+      vendor: "'${UBICLOUD_RUNNER_TIER}'",
+      hosted: "'${HOSTED_RUNNER_TIER}'",
+    },
+  )
+}
+
+fn step_with_id(job: dict, id: string) {
+  for step in job?.steps ?? [] {
+    if trim(to_string(step?.id ?? "")) == id {
+      return step
+    }
+  }
+  return nil
+}
+
+/**
+ * The reserved label is named in three places that must agree: the census
+ * probe that counts its runners, the capacity step that routes over that
+ * count, and the producer's `runs-on`. A census probing another label would
+ * report the reserved pool absent forever, and the producer would never
+ * reach it while every check stayed green.
+ */
+pub fn cli_producer_reservation_errors(workflow: dict) -> list<string> {
+  let errors: list<string> = []
+  const jobs = workflow?.jobs ?? {}
+  const census = jobs["runner-availability"] ?? {}
+  if trim(to_string(census?.with?.linux_probe_runner_tag ?? "")) != RESERVED_CLI_PRODUCER_LABEL {
+    errors = errors
+      + [
+        "ci.yml:runner-availability must probe the ${RESERVED_CLI_PRODUCER_LABEL} runners the shared CLI producer reserves",
+      ]
+  }
+  if !contains(to_string(census?.if ?? ""), "merge_group") {
+    errors = errors
+      + ["ci.yml:runner-availability must measure merge groups for the shared CLI producer"]
+  }
+  const capacity = jobs["rust-producer-capacity"] ?? {}
+  if !contains(to_string(capacity?.if ?? ""), "merge_group") {
+    errors = errors
+      + [
+        "ci.yml:rust-producer-capacity must decide the shared CLI producer's route on merge groups",
+      ]
+  }
+  if trim(to_string(capacity?.outputs?.[CLI_CAPACITY_ROUTE_OUTPUT] ?? ""))
+    != "$" + "{{ steps.${CLI_CAPACITY_DECISION_STEP}.outputs.route }}" {
+    errors = errors
+      + [
+        "ci.yml:rust-producer-capacity must publish ${CLI_CAPACITY_ROUTE_OUTPUT} from its ${CLI_CAPACITY_DECISION_STEP} step",
+      ]
+  }
+  const step = step_with_id(capacity, CLI_CAPACITY_DECISION_STEP)
+  const env = step?.env ?? {}
+  const routed = trim(to_string(env?.CAPACITY_ROUTED_EVENT ?? "")).split(" ")
+  if step == nil
+    || trim(to_string(step?.run ?? "")) != "bash scripts/ci/runner_capacity.sh"
+    || trim(to_string(env?.CAPACITY_POOL ?? "")) != RESERVED_CLI_PRODUCER_POOL
+    || trim(to_string(env?.CAPACITY_BUSY_ROUTE ?? "")) != "overflow"
+    || !routed.contains("pull_request")
+    || !routed.contains("merge_group")
+    || trim(to_string(env?.CAPACITY_HOSTED_RUNNER ?? "")) != PRODUCER_HOSTED_LINUX_RUNNER {
+    errors = errors
+      + [
+        "ci.yml:rust-producer-capacity step ${CLI_CAPACITY_DECISION_STEP} must route the ${RESERVED_CLI_PRODUCER_POOL} pool on pull requests and merge groups and overflow a busy pool to ${PRODUCER_HOSTED_LINUX_RUNNER}",
+      ]
+  }
+  return errors
 }
 
 /**

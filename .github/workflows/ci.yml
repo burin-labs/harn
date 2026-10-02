@@ -81,6 +81,8 @@ jobs:
   # A measured online pool queues work even when busy; zero online carriers or
   # retired owned routing selects hosted capacity. An unreadable census blocks
   # dispatch. Merge groups and main pushes retain their hosted routing (#8334).
+  # The shared CLI producer is the exception: on pull requests and merge
+  # groups it prefers runners reserved for it alone (`harn-ci-producer`).
 
   # Decide whether the heavy Linux Rust lanes (rust-checks, audit-scripts) need
   # to run at all.
@@ -898,12 +900,24 @@ jobs:
   # fully busy pool routes hosted by name: queueing behind it cost pull
   # requests 40-60 minutes and timed out the producer's consumers (#9086).
   #
-  # Same-repository pull requests only. Fork pull requests cannot read the
-  # release-app credentials this probe needs, and they are not eligible for
-  # owned capacity anyway, so the probe is skipped rather than failed for them.
+  # Same-repository pull requests and merge groups only. Fork pull requests
+  # cannot read the release-app credentials this probe needs, and they are not
+  # eligible for owned capacity anyway, so the probe is skipped rather than
+  # failed for them. Merge groups are measured for the shared CLI producer's
+  # reserved runners alone; the workspace producer still routes them hosted.
+  #
+  # The probe label names the runners reserved for the shared CLI producer.
+  # Every Harn proof lane waits on that one build, and on 2026-10-02 it sat
+  # 37 minutes in the vendor queue behind other repositories' jobs on the same
+  # shared quota (run 37042288569).
   runner-availability:
-    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    if: >-
+      github.event_name == 'merge_group'
+      || (github.event_name == 'pull_request'
+      && github.event.pull_request.head.repo.full_name == github.repository)
     uses: burin-labs/.github/.github/workflows/runner-availability.yml@550bff235c4bf6818ece3b27e0905bcf48aaee8b
+    with:
+      linux_probe_runner_tag: harn-ci-producer
     secrets:
       RELEASE_APP_CLIENT_ID: ${{ secrets.RELEASE_APP_CLIENT_ID }}
       RELEASE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
@@ -918,13 +932,16 @@ jobs:
     name: Name the Rust producer runner capacity decision
     needs: runner-availability
     if: >-
-      ${{ !cancelled() && github.event_name == 'pull_request'
-        && github.event.pull_request.head.repo.full_name == github.repository }}
+      ${{ !cancelled() && (github.event_name == 'merge_group'
+        || (github.event_name == 'pull_request'
+        && github.event.pull_request.head.repo.full_name == github.repository)) }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     outputs:
       route: ${{ steps.decision.outputs.route }}
       fallback: ${{ steps.decision.outputs.fallback }}
+      cli_route: ${{ steps.cli-decision.outputs.route }}
+      cli_fallback: ${{ steps.cli-decision.outputs.fallback }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -946,6 +963,26 @@ jobs:
           FLEET_EVACUATION: ${{ vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true' }}
           # The paid rungs after the owned pool, and the variable that picks
           # between them, so a hosted decision names the runner it lands on.
+          PAID_LINUX_PROVIDER: ${{ vars.HARN_CI_PAID_LINUX_PROVIDER }}
+          CAPACITY_VENDOR_RUNNER: ubicloud-standard-8
+          CAPACITY_HOSTED_RUNNER: ubuntu-8core
+      # The shared CLI producer's own decision, over the runners reserved for
+      # it. An idle reserved runner takes the build. When every reserved
+      # runner is busy it overflows to GitHub's 8-core runner rather than the
+      # vendor rung, whose quota every repository in the organization shares.
+      # With no reserved runner online, or an unreadable census, the producer
+      # keeps the ladder it had.
+      - name: Decide where the shared CLI producer lands
+        id: cli-decision
+        run: bash scripts/ci/runner_capacity.sh
+        env:
+          CAPACITY_LABEL: CLI_PRODUCER_CAPACITY
+          CAPACITY_POOL: linux_probe
+          CAPACITY_ROUTED_EVENT: pull_request merge_group
+          CAPACITY_BUSY_ROUTE: overflow
+          EVENT_NAME: ${{ github.event_name }}
+          SELFHOSTED_DISABLED: ${{ needs.runner-availability.outputs.selfhosted_disabled }}
+          RUNNER_CAPACITY: ${{ needs.runner-availability.outputs.capacity }}
           PAID_LINUX_PROVIDER: ${{ vars.HARN_CI_PAID_LINUX_PROVIDER }}
           CAPACITY_VENDOR_RUNNER: ubicloud-standard-8
           CAPACITY_HOSTED_RUNNER: ubuntu-8core
@@ -971,17 +1008,33 @@ jobs:
     # The CLI builds in the ci-cli profile (opt-level 1), which costs more to
     # compile than dev and runs every Harn proof lane four to five times faster.
     #
-    # No owned rung. An owned carrier shares four cores among six runners, so
-    # this build gets one compile job there, and with no target restored and
-    # no sccache it hit its 31-minute step timeout while ten proof lanes waited
-    # on it (run 36987728246). A cold build on Ubicloud's 8 vCPU runner took
-    # 693s for about $0.10. The workspace test producer keeps the owned rung.
+    # Not the shared owned pool. An owned carrier there shares four cores
+    # among six runners, so this build gets one compile job, and with no
+    # target restored and no sccache it hit its 31-minute step timeout while
+    # ten proof lanes waited on it (run 36987728246).
+    #
+    # Its own runners instead: `harn-ci-producer` runners serve this job and
+    # nothing else, with the host's sccache. The capacity step sends the build
+    # there when one is idle, and to GitHub's 8-core runner when all are busy.
+    # Not to Ubicloud then: every repository in the organization draws on one
+    # Ubicloud vCPU quota, and on 2026-10-02 this build sat 37 minutes in that
+    # queue while all ten proof lanes gave up waiting (run 37042288569). With
+    # no reserved runner online, or on fork pull requests, the ladder is the
+    # one it had: Ubicloud, then GitHub's runner.
     runs-on: >-
-      ${{ (vars.HARN_CI_PAID_LINUX_PROVIDER != 'github'
+      ${{ (needs.rust-producer-capacity.outputs.cli_route == 'owned'
+        && fromJSON('["self-hosted", "Linux", "X64", "harn-ci-producer"]'))
+        || (needs.rust-producer-capacity.outputs.cli_route == 'overflow'
+        && 'ubuntu-8core')
+        || (vars.HARN_CI_PAID_LINUX_PROVIDER != 'github'
         && 'ubicloud-standard-8')
         || 'ubuntu-8core' }}
     timeout-minutes: >-
-      ${{ (vars.HARN_CI_PAID_LINUX_PROVIDER != 'github'
+      ${{ (needs.rust-producer-capacity.outputs.cli_route == 'owned'
+        && 37)
+        || (needs.rust-producer-capacity.outputs.cli_route == 'overflow'
+        && 37)
+        || (vars.HARN_CI_PAID_LINUX_PROVIDER != 'github'
         && 37)
         || 37 }}
     # The paid rung is Ubicloud's 8 vCPU runner (about a third of GitHub's
@@ -998,7 +1051,11 @@ jobs:
       RUSTFLAGS: "-D warnings -Clink-arg=-fuse-ld=mold"
       SCCACHE_CACHE_SIZE: 15G
       HARN_RUNNER_TIER: >-
-        ${{ (vars.HARN_CI_PAID_LINUX_PROVIDER != 'github'
+        ${{ (needs.rust-producer-capacity.outputs.cli_route == 'owned'
+          && 'self-hosted')
+          || (needs.rust-producer-capacity.outputs.cli_route == 'overflow'
+          && 'github-hosted')
+          || (vars.HARN_CI_PAID_LINUX_PROVIDER != 'github'
           && 'ubicloud')
           || 'github-hosted' }}
     steps:

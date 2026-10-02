@@ -209,8 +209,52 @@ pub fn cli_producer_hosted_ceiling_minutes() -> int {
   return hosted_ceiling_minutes(CLI_PRODUCER_STEP_BUDGETS)
 }
 
+/**
+ * A reserved runner is an owned box and carries the owned ceiling. The
+ * overflow rung is GitHub's runner and carries the paid one, like the two
+ * rungs after it.
+ */
 pub fn cli_producer_timeout_expression() -> string {
-  return timeout_expression(CLI_PRODUCER_STEP_BUDGETS, producer_uses_owned_pool("rust-cli"))
+  const paid = to_string(hosted_ceiling_minutes(CLI_PRODUCER_STEP_BUDGETS))
+  return cli_producer_rung_expression(
+    {
+      reserved: to_string(owned_ceiling_minutes(CLI_PRODUCER_STEP_BUDGETS)),
+      overflow: paid,
+      vendor: paid,
+      hosted: paid,
+    },
+  )
+}
+
+fn producer_job_runner_expression(job_name: string) -> string {
+  if job_name == "rust-cli" {
+    return cli_producer_runner_expression()
+  }
+  return producer_runner_expression(producer_uses_owned_pool(job_name))
+}
+
+fn producer_job_tier_expression(job_name: string) -> string {
+  if job_name == "rust-cli" {
+    return cli_producer_tier_expression()
+  }
+  return producer_tier_expression(producer_uses_owned_pool(job_name))
+}
+
+fn producer_job_timeout_expression(job_name: string, budgets: list<StepBudget>) -> string {
+  if job_name == "rust-cli" {
+    return cli_producer_timeout_expression()
+  }
+  return timeout_expression(budgets, producer_uses_owned_pool(job_name))
+}
+
+fn producer_job_ladder(job_name: string) -> string {
+  if job_name == "rust-cli" {
+    return " the reserved ${RESERVED_CLI_PRODUCER_LABEL} runners on same-repository pull requests and merge groups, ${PRODUCER_HOSTED_LINUX_RUNNER} when they are all busy,"
+  }
+  if producer_uses_owned_pool(job_name) {
+    return " the owned ${SELFHOSTED_LINUX_BIG_POOL} pool on same-repository pull requests,"
+  }
+  return ""
 }
 
 /** Trusted PR producers require a measured capacity decision before dispatch. */
@@ -410,26 +454,24 @@ fn persistent_compile_lane_errors(
     errors = errors
       + ["ci.yml:${job_name} must require a successful capacity decision on trusted pull requests"]
   }
-  const owned_rung = producer_uses_owned_pool(job_name)
-  if trim(job?.["runs-on"] ?? "") != producer_runner_expression(owned_rung) {
-    const owned_clause = if owned_rung {
-      " the owned ${SELFHOSTED_LINUX_BIG_POOL} pool on same-repository pull requests,"
-    } else {
-      ""
-    }
+  if trim(job?.["runs-on"] ?? "") != producer_job_runner_expression(job_name) {
     errors = errors
       + [
-        "ci.yml:${job_name} must ladder${owned_clause} ${PRODUCER_VENDOR_LINUX_RUNNER}, then ${PRODUCER_HOSTED_LINUX_RUNNER}",
+        "ci.yml:${job_name} must ladder${producer_job_ladder(job_name)} ${PRODUCER_VENDOR_LINUX_RUNNER}, then ${PRODUCER_HOSTED_LINUX_RUNNER}",
       ]
   }
-  if trim(job?.env?.[RUNNER_TIER_ENV] ?? "") != producer_tier_expression(owned_rung) {
+  if job_name == "rust-cli" {
+    errors = errors + cli_producer_reservation_errors(workflow)
+  }
+  if trim(job?.env?.[RUNNER_TIER_ENV] ?? "") != producer_job_tier_expression(job_name) {
     errors = errors
       + ["ci.yml:${job_name} must mirror every one of its runner tiers"]
   }
   if trim(to_string(job?.env?.SCCACHE_CACHE_SIZE ?? "")) != "15G" {
     errors = errors + ["ci.yml:${job_name} must bound persistent sccache at 15G"]
   }
-  if trim(to_string(job?.["timeout-minutes"] ?? "")) != timeout_expression(budgets, owned_rung) {
+  if trim(to_string(job?.["timeout-minutes"] ?? ""))
+    != producer_job_timeout_expression(job_name, budgets) {
     errors = errors
       + [
         "ci.yml:${job_name} must keep the ${owned_ceiling_minutes(budgets)}-minute owned ceiling and the ${hosted_ceiling_minutes(budgets)}-minute paid ceiling sized from its step budgets plus a cache-save reserve",

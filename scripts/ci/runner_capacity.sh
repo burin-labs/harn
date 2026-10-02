@@ -23,18 +23,42 @@
 #
 # Two callers, two shapes, one decision procedure:
 #
-#   CAPACITY_ROUTED_EVENT  the single event allowed onto owned capacity. The
-#                          slow E2E suite routes main pushes; the Rust
-#                          workspace producer routes pull requests. Every
-#                          other event is named and sent hosted.
+#   CAPACITY_ROUTED_EVENT  the events allowed onto owned capacity,
+#                          space-separated. The slow E2E suite routes main
+#                          pushes; the Rust workspace producer routes pull
+#                          requests; the shared CLI producer routes pull
+#                          requests and merge groups. Every other event is
+#                          named and sent hosted.
 #   CAPACITY_POOL          which pool of the census answers for this job.
 #   CAPACITY_LABEL         the log prefix, so two jobs in one run stay
 #                          attributable to their own decision.
+#   CAPACITY_BUSY_ROUTE    the route a measured, fully busy pool takes:
+#                          `hosted` (the default) or `overflow`. A job whose
+#                          paid rung is a shared vendor quota names `overflow`
+#                          to reach GitHub's runner, which that quota cannot
+#                          starve.
 set -euo pipefail
 
 CAPACITY_POOL=${CAPACITY_POOL:-linux_big}
 CAPACITY_ROUTED_EVENT=${CAPACITY_ROUTED_EVENT:-push}
 CAPACITY_LABEL=${CAPACITY_LABEL:-RUNNER_CAPACITY_DECISION}
+CAPACITY_BUSY_ROUTE=${CAPACITY_BUSY_ROUTE:-hosted}
+case "$CAPACITY_BUSY_ROUTE" in
+  hosted | overflow) ;;
+  *)
+    echo "CAPACITY_BUSY_ROUTE must be hosted or overflow, not '$CAPACITY_BUSY_ROUTE'" >&2
+    exit 2
+    ;;
+esac
+
+# Whether an event is one of the space-separated routed events.
+runner_capacity_routed_event() {
+  local routed
+  for routed in $CAPACITY_ROUTED_EVENT; do
+    [[ "$1" == "$routed" ]] && return 0
+  done
+  return 1
+}
 
 runner_capacity_fallback() {
   local reason=$1 event=$2
@@ -54,8 +78,9 @@ runner_capacity_decision() {
     echo "${CAPACITY_LABEL} event=$event route=hosted reason=fleet_evacuation_switch_on pool=$pool carriers=1"
     return 0
   fi
-  if [[ "$event" != "$CAPACITY_ROUTED_EVENT" ]]; then
-    echo "${CAPACITY_LABEL} event=$event route=hosted reason=event_is_not_${CAPACITY_ROUTED_EVENT} pool=$pool carriers=not_consulted"
+  if ! runner_capacity_routed_event "$event"; then
+    local routed=${CAPACITY_ROUTED_EVENT// /_or_}
+    echo "${CAPACITY_LABEL} event=$event route=hosted reason=event_is_not_${routed} pool=$pool carriers=not_consulted"
     return 0
   fi
   if [[ -n "${disabled//[[:space:]]/}" ]]; then
@@ -96,8 +121,10 @@ runner_capacity_decision() {
     # requests 40-60 minutes on 2026-10-01, long enough for the producer's
     # consumers to give up waiting, so a fully busy pool routes hosted (#9086).
     # An unreported idle count keeps the owned route: absence is not a
-    # measured zero.
-    echo "${CAPACITY_LABEL} event=$event route=hosted reason=pool_fully_busy pool=$pool carriers=$online idle=0"
+    # measured zero. A caller that names the overflow route leaves its shared
+    # vendor rung for GitHub's runner here, because a busy owned pool and a
+    # saturated vendor quota arrive together (2026-10-02, run 37042288569).
+    echo "${CAPACITY_LABEL} event=$event route=${CAPACITY_BUSY_ROUTE} reason=pool_fully_busy pool=$pool carriers=$online idle=0"
     return 0
   fi
   # An idle carrier is not a compile budget. A job's share of its host shrinks
@@ -139,6 +166,11 @@ runner_capacity_decision() {
 # Callers without CAPACITY_VENDOR_RUNNER keep the line they had.
 runner_capacity_paid_runner() {
   local route=$1
+  if [[ "$route" == overflow ]]; then
+    [[ -n "${CAPACITY_HOSTED_RUNNER:-}" ]] || return 0
+    printf ' paid_runner=%s paid_provider=github' "$CAPACITY_HOSTED_RUNNER"
+    return 0
+  fi
   [[ "$route" == hosted && -n "${CAPACITY_VENDOR_RUNNER:-}" ]] || return 0
   if [[ "${PAID_LINUX_PROVIDER:-}" == github ]]; then
     printf ' paid_runner=%s paid_provider=github' "${CAPACITY_HOSTED_RUNNER:?}"
