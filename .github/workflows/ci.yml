@@ -985,7 +985,7 @@ jobs:
       - uses: ./.github/actions/sccache
         if: env.HARN_RUNNER_TIER == 'blacksmith'
         with:
-          cache-key: harn-cli
+          cache-key: harn-ci-cli
           sticky: "true"
       # Every tier gets an explicit answer, because a guard that names only
       # the tiers it knows turns a new tier into a silent skip: the first
@@ -1000,7 +1000,7 @@ jobs:
         if: env.HARN_RUNNER_TIER != 'blacksmith'
         continue-on-error: true
         with:
-          shared-key: harn-cli
+          shared-key: harn-ci-cli
           cache-on-failure: true
           cache-bin: false
           cache-workspace-crates: "true"

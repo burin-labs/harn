@@ -641,7 +641,7 @@ fn rust_cache_refresh_errors(workflow: dict) -> list<string> {
     matrix_keys = matrix_keys + [cache_key]
     const expected_headroom = if cache_key == "workspace-tests" {
       "4294967296"
-    } else if cache_key == "package-audit" || cache_key == "harn-cli" {
+    } else if cache_key == "package-audit" || cache_key == "harn-ci-cli" {
       "2147483648"
     } else {
       ""
@@ -1288,8 +1288,8 @@ pub fn ci_linux_lane_policy_errors(workflow: dict) -> list<string> {
       workflow,
       "rust-cli",
       BLACKSMITH_8CPU_RUNNER,
-      "harn-cli",
-      "harn-cli",
+      "harn-ci-cli",
+      "harn-ci-cli",
       CLI_PRODUCER_STEP_BUDGETS,
     )
     + persistent_compile_lane_errors(

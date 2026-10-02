@@ -266,8 +266,8 @@ fn workflow() {
   )
   const cli_producer = persistent_lane(
     "blacksmith-8vcpu-ubuntu-2404",
-    "harn-cli",
-    "harn-cli",
+    "harn-ci-cli",
+    "harn-ci-cli",
     true,
     cli_producer_timeout_expression(),
   )
