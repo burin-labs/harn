@@ -39,7 +39,7 @@ path = ".github/workflows/consumer-canary.yml"
 name = "Consumer canary"
 claim = "The downstream consumer's update rehearsal still passes at main's current revision"
 crons = ["53 */4 * * *"]
-cadence_reason = "Every four hours bounds a report-only signal whose rehearsal takes about 45 minutes; a run at an unchanged main commit is skipped by name."
+cadence_reason = "Every four hours bounds a report-only signal whose rehearsal takes 70 to 90 minutes; a run at an unchanged main commit is skipped by name."
 job_ids = ["decide", "consumers", "settled"]
 
 [[workflow]]
