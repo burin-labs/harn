@@ -24,8 +24,9 @@ name: Build release binaries
 #      unless the push changed a compile or build-topology input declared in
 #      .github/release-warm-cache-paths.yml.
 #
-#   3. schedule, hourly — signed exact-main source candidates, including commits
-#      outside the warm-cache path filter. A live candidate is reused.
+#   3. schedule, daily — signed exact-main source candidates, including commits
+#      outside the warm-cache path filter. A live candidate is reused. The
+#      cadence is a spend decision; scripts/scheduled_workflows.toml records it.
 #
 #   4. workflow_dispatch — warm_cache_only, benchmark_only size gates, or an
 #      explicit source_candidate on main. Source candidates reuse the full
@@ -49,7 +50,7 @@ on:
   merge_group:
   pull_request:
   schedule:
-    - cron: '37 * * * *'
+    - cron: '17 5 * * *'
   workflow_dispatch:
     inputs:
       source_candidate:

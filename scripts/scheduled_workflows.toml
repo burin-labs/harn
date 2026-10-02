@@ -22,8 +22,8 @@ health_failures = 3
 path = ".github/workflows/build-release-binaries.yml"
 name = "Build release binaries"
 claim = "Exact main has a complete live signed candidate or passes the full candidate producer"
-crons = ["37 * * * *"]
-cadence_reason = "Hourly native tracking needs signed exact-source bundles, including commits outside the warm-cache path filter."
+crons = ["17 5 * * *"]
+cadence_reason = "Daily gives native tracking one signed exact-source bundle per day, including commits outside the warm-cache path filter, at the spend of the daily warm it replaces. A full candidate is about four runner-hours, so a faster cadence is a spend decision."
 job_ids = ["setup", "candidate-verdict"]
 health_failures = 3
 
