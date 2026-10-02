@@ -106,6 +106,13 @@ credential `harn connect` can store is one the runtime can read. `harn run`,
 name the same backend, and package scripts read canonical connector ids such as
 `google_workspace/access-token` without knowing the host keyring namespace.
 
+`harn connect` resolves through the same `HARN_SECRET_PROVIDERS` chain as
+scripts. Under `HARN_SECRET_PROVIDERS=file`, it stores credentials in the file
+that later runs read. It refuses to store into a chain with no persistent
+provider, such as `env` alone, because the value would vanish when the process
+exits. Unset the variable, or include `keyring` or `file`, before running
+`harn connect`.
+
 Automated tests and CI should not touch the OS credential store. Use
 `HARN_SECRET_PROVIDERS=env` plus test-only `HARN_SECRET_*` variables for
 secret-dependent smokes, or inject a mock `Harness`. `harn test`, `make test`,

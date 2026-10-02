@@ -6,11 +6,11 @@ use harn_vm::secrets::{SecretBytes, SecretId, SecretProvider};
 
 use super::callback::{bind_loopback_listener, wait_for_github_installation};
 use super::oauth::random_hex;
-use super::store::{connect_secret_provider, current_unix_timestamp, upsert_index_entry};
+use super::store::{connect_secret_writer, current_unix_timestamp, upsert_index_entry};
 use super::ConnectIndexEntry;
 
 pub(super) async fn run_connect_github(args: &ConnectGithubArgs) -> Result<(), String> {
-    let provider = connect_secret_provider()?;
+    let provider = connect_secret_writer()?;
     let state = random_hex(16);
     let installation_id = match args.installation_id.clone() {
         Some(id) => id,

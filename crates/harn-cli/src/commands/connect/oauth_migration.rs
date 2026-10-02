@@ -1,4 +1,4 @@
-use harn_vm::secrets::{KeyringSecretProvider, SecretId, SecretProvider};
+use harn_vm::secrets::{configured_default_chain, ChainSecretProvider, SecretId, SecretProvider};
 
 use super::{OAuthConnectRequest, DEFAULT_OAUTH_REDIRECT_URI};
 
@@ -33,10 +33,28 @@ fn legacy_secret_namespace() -> Result<String, String> {
     Ok(format!("harn/{leaf}"))
 }
 
+/// Where an older Harn release may have left this workspace's OAuth
+/// registration: the persistent providers of the configured chain, over the
+/// pre-namespace `harn/<workspace>` namespace. The environment is skipped;
+/// older releases never wrote registrations there. The keyring partitions by
+/// namespace (a separate service); the file provider has one key space, so
+/// there the legacy and current records are the same entry.
+fn legacy_registration_store() -> Result<ChainSecretProvider, String> {
+    let chain = configured_default_chain(legacy_secret_namespace()?)
+        .map_err(|error| format!("failed to configure secret providers: {error}"))?;
+    let persistent = chain
+        .providers()
+        .iter()
+        .filter(|provider| provider.persists_writes())
+        .cloned()
+        .collect();
+    Ok(ChainSecretProvider::new(chain.namespace(), persistent))
+}
+
 pub(super) async fn load_legacy_oauth_registration(
     provider_name: &str,
 ) -> Result<Option<LegacyOAuthRegistration>, String> {
-    let provider = KeyringSecretProvider::new(legacy_secret_namespace()?);
+    let provider = legacy_registration_store()?;
     let id = harn_vm::secrets::connector_oauth_token_id(provider_name);
     // Migration is opportunistic. A machine without a usable OS keyring must
     // still reach the provider's normal dynamic-registration path.
