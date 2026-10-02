@@ -61,6 +61,12 @@ static CONFINEMENT: OnceLock<ProcessConfinement> = OnceLock::new();
 pub fn confine_current_process(
     policy: &CapabilityPolicy,
 ) -> Result<&'static ProcessConfinement, VmError> {
+    confine_with::<ActiveBackend>(policy)
+}
+
+fn confine_with<B: SandboxBackend>(
+    policy: &CapabilityPolicy,
+) -> Result<&'static ProcessConfinement, VmError> {
     if CONFINEMENT.get().is_some() {
         return Err(sandbox::sandbox_rejection(
             "this process is already confined, and a confinement cannot be replaced".to_string(),
@@ -96,13 +102,20 @@ pub fn confine_current_process(
         .process_sandbox
         .write_roots
         .push(temp_dir.display().to_string());
-    let mechanism = ActiveBackend::confine_current_process(&policy)?;
+    let mechanism = match B::confine_current_process(&policy) {
+        Ok(mechanism) => mechanism,
+        Err(error) => {
+            // Nothing was applied, so nothing will use the directory.
+            let _ = std::fs::remove_dir(&temp_dir);
+            return Err(error);
+        }
+    };
     // SAFETY: called once, before the process serves its first message.
     // Runtime threads may already exist, but none is reading the environment
     // yet: they are parked until the server starts handing them work.
     unsafe { std::env::set_var("TMPDIR", &temp_dir) };
     let confinement = ProcessConfinement {
-        backend: ActiveBackend::name(),
+        backend: B::name(),
         mechanism,
         workspace_roots: sandbox::process_sandbox_roots(&policy),
         temp_dir,
@@ -188,6 +201,24 @@ mod tests {
             );
         }
         assert!(current_process_confinement().is_none());
+    }
+
+    /// A backend that cannot confine must leave the process unconfined and
+    /// say so, not report success: the caller would otherwise serve open.
+    #[test]
+    fn a_backend_failure_fails_closed() {
+        let workspace = tempfile::tempdir().unwrap();
+        let error = confine_with::<super::super::UnconfinedBackend>(&policy_for(workspace.path()))
+            .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("cannot confine a running process"),
+            "{error}"
+        );
+        assert!(current_process_confinement().is_none());
+        assert!(std::env::var_os("TMPDIR")
+            .is_none_or(|tmp| { !tmp.to_string_lossy().contains("harn-confined-") }));
     }
 
     #[test]
