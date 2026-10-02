@@ -8,6 +8,25 @@ use crate::llm::providers::openai_compat::{
 use serde_json::json;
 
 #[test]
+fn option_probes_require_parameter_support_on_openrouter_only() {
+    let mut payload = base_request_payload();
+    payload.model = "openai/gpt-6-luna".to_string();
+    payload.provider_contract_probe = Some(crate::llm::capabilities::PortableOption::Temperature);
+    let body = OpenAiCompatibleProvider::build_request_body(&payload);
+    assert_eq!(body["temperature"], 0.0);
+    assert_eq!(body["provider"]["require_parameters"], true);
+
+    payload.provider_contract_probe = None;
+    let body = OpenAiCompatibleProvider::build_request_body(&payload);
+    assert!(body.get("provider").is_none());
+
+    payload.provider = "fireworks".to_string();
+    payload.provider_contract_probe = Some(crate::llm::capabilities::PortableOption::Temperature);
+    let body = OpenAiCompatibleProvider::build_request_body(&payload);
+    assert!(body.get("provider").is_none());
+}
+
+#[test]
 fn openrouter_structured_output_requires_supported_parameters() {
     let mut payload = base_request_payload();
     payload.output_format = crate::llm::api::OutputFormat::JsonSchema {

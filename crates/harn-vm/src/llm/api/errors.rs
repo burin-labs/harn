@@ -349,7 +349,7 @@ pub(crate) fn classify_provider_http_error(
     retry_after: Option<&str>,
     body: &str,
 ) -> LlmErrorInfo {
-    let (kind, reason) = classify_http_status_and_body(status, body);
+    let (kind, reason) = classify_http_status_and_body(provider, status, body);
     let body_summary = sanitize_provider_error_body(body);
     let mut msg = format!(
         "{provider} HTTP {status} [{}]: {body_summary}",
@@ -395,7 +395,7 @@ pub(crate) fn classify_provider_stream_error(provider: &str, body: &str, partial
         None if malformed => (LlmErrorKind::Transient, LlmErrorReason::InvalidResponse),
         // No HTTP status on an in-band SSE error frame; classify from body
         // fingerprints only (neutral status avoids status-forced reasons).
-        None => classify_http_status_and_body(reqwest::StatusCode::OK, body),
+        None => classify_http_status_and_body(provider, reqwest::StatusCode::OK, body),
     };
     let body_summary = sanitize_provider_error_body(body);
     let mut message = if malformed {
@@ -733,7 +733,32 @@ pub(crate) fn is_billing_stop(body: &str, body_lower: &str) -> bool {
         .any(|marker| body_lower.contains(marker))
 }
 
+fn openrouter_rejected_parameters(body: &str) -> bool {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(body) else {
+        return false;
+    };
+    let error = value.get("error").unwrap_or(&value);
+    if let Some(step) = error
+        .pointer("/metadata/failed_routing_step")
+        .and_then(serde_json::Value::as_str)
+    {
+        // An earlier parameter filter can remove some endpoints while another
+        // constraint ultimately removes the rest. Only the final step proves
+        // that parameter support exhausted the available routes.
+        return step == "Filter by Parameters";
+    }
+    // Older responses omit routing metadata. Match the provider's explicit
+    // rejection message, never a parameter name in arbitrary response data.
+    error
+        .get("message")
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(|message| {
+            message.starts_with("No endpoints found that can handle the requested parameters.")
+        })
+}
+
 fn classify_http_status_and_body(
+    provider: &str,
     status: reqwest::StatusCode,
     body: &str,
 ) -> (LlmErrorKind, LlmErrorReason) {
@@ -759,6 +784,9 @@ fn classify_http_status_and_body(
     }
     if matches!(status.as_u16(), 408 | 504 | 522 | 524) || body_lower.contains("timeout") {
         return (LlmErrorKind::Transient, LlmErrorReason::Timeout);
+    }
+    if provider == "openrouter" && openrouter_rejected_parameters(body) {
+        return (LlmErrorKind::Terminal, LlmErrorReason::InvalidRequest);
     }
     if is_model_unavailable(&body_lower) || matches!(status.as_u16(), 404 | 410) {
         return (LlmErrorKind::Terminal, LlmErrorReason::ModelUnavailable);

@@ -2180,11 +2180,17 @@ harn provider option-probe anthropic \
   --fail-on-drift --json
 ```
 
-`--plan` reports the endpoint, exact catalog field, claim, and one-request call
-count without contacting the provider. A live report records `match`, `drift`,
+`--plan` reports the endpoint, exact catalog field, claim, initial request count,
+and maximum of three requests without contacting the provider. A live report records `match`, `drift`,
 or `unmeasured`. Provider acceptance and provider rejection are measurements;
 authentication failures, throttling, unavailable models, and local gates are
 not. With `--fail-on-drift`, drift exits 1 and an unmeasured request exits 2.
+
+A rejection counts only when a control request without the option succeeds.
+A failed control leaves the result `unmeasured` with `failure_class:
+"control_failed"`. A timeout is retried once. Request counts, usage, and priced
+costs include retries and controls; requests without prices remain explicit
+accounting gaps in campaign reports.
 
 The command normally suspends catalog shaping for only the selected option, so
 a negative claim can be falsified at the wire. The typed authority is captured
@@ -2192,6 +2198,17 @@ in the resolved call and carried through spawned transport work; it does not
 affect sibling calls or other options. `--gated` leaves normal shaping enabled
 for a confirm-only run. Acceptance proves the endpoint accepted a meaningful,
 non-default value, not that a provider necessarily honored the value.
+
+Ungated OpenRouter probes set
+[`provider.require_parameters`](https://openrouter.ai/docs/guides/routing/provider-selection#requiring-providers-to-support-all-parameters)
+to `true`, requiring an endpoint that advertises support for every requested
+parameter. An explicit parameter-routing rejection counts as a measurement.
+Missing endpoints, account privacy restrictions, and ambiguous routing failures
+remain `unmeasured`.
+An account data-policy refusal has verdict `excluded_by_account_policy` and
+`observed_supported: null`. The campaign reports it as a skip, counts it in
+`excluded_by_account_policy_count`, and excludes it from the eligible unmeasured
+count. Completion still requires measured supported and unsupported controls.
 
 ## harn provider dispatch-explain
 
