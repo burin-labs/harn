@@ -277,7 +277,7 @@ mod tests {
     #[test]
     fn lifecycle_catalog_is_reused_but_cannot_validate_a_changed_registry() {
         let entry = crate::schema::json_to_vm_value(&serde_json::json!({
-            "name": "payload", "parameters": {}, "returns": {"type": "integer"}
+            "name": "payload", "parameters": {}, "outputSchema": {"type": "integer"}
         }));
         let owned = own_lifecycle_registry(&registry(vec![entry]), AgentRegistryOrigin::Explicit)
             .expect("own catalog");
@@ -287,13 +287,16 @@ mod tests {
         first
             .validate_output("payload", &serde_json::json!(7))
             .expect("known positive");
+        assert!(first
+            .validate_output("payload", &serde_json::json!("invalid"))
+            .is_err());
 
         let mut changed = owned.as_dict().unwrap().as_ref().clone();
         changed.insert(
             "tools".into(),
             VmValue::List(Arc::new(vec![crate::schema::json_to_vm_value(
                 &serde_json::json!({
-                    "name": "payload", "parameters": {}, "returns": {"type": "string"}
+                    "name": "payload", "parameters": {}, "outputSchema": {"type": "string"}
                 }),
             )])),
         );
