@@ -219,6 +219,11 @@ fn canonical_fixture_scrubs_ambient_loader_controls_without_scrubbing_explicit_c
             .output()
             .unwrap();
         assert!(output.status.success(), "{output:?}");
+        if output.stdout == b"bubblewrap-unavailable\n" {
+            eprintln!("NOT EXERCISED: functional bubblewrap namespaces unavailable");
+            assert_ne!(std::env::var("BWRAP_REQUIRE_TESTS").as_deref(), Ok("1"));
+            return;
+        }
         assert!(String::from_utf8_lossy(&output.stdout).contains("ambient-loader-fixture-reached"));
         return;
     }
@@ -227,6 +232,10 @@ fn canonical_fixture_scrubs_ambient_loader_controls_without_scrubbing_explicit_c
     let source = r#"
 fn main(harness: Harness) {
   const host = harness.system.sandbox_confinement()
+  if !host.confines_processes {
+    harness.stdio.println("bubblewrap-unavailable")
+    return
+  }
   assert_eq(host.mechanism, "linux_bubblewrap")
   assert_eq(host.confines_processes, true)
   const result = harness.tools.run_command({argv: ["/usr/bin/sh", "-c", "test -z \"$MALLOC_ARENA_MAX\" && test \"$FIXTURE_LOADER_SENTINEL\" = retained && printf ambient-loader-fixture-reached"]})
