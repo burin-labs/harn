@@ -1,7 +1,8 @@
 //! `harn serve acp --confine-workspace` confines the server process itself.
 //!
-//! macOS only: Seatbelt confines the whole process, while Landlock confines a
-//! thread, and the CLI server already runs several when it parses the flag.
+//! macOS confines with Seatbelt, which is process-wide. Linux confines with
+//! Landlock, which covers only the calling thread and its later threads, so
+//! these tests also prove the CLI confines before its runtime threads start.
 
 use std::fs;
 use std::path::Path;
@@ -116,7 +117,7 @@ fn run_writes(
 }
 
 #[test]
-fn confine_workspace_holds_the_server_and_its_commands_to_the_workspace() {
+pub(crate) fn confine_workspace_holds_the_server_and_its_commands_to_the_workspace() {
     let temp = TempDir::new().unwrap();
     let workspace = fs::canonicalize(temp.path()).unwrap().join("workspace");
     let outside = fs::canonicalize(temp.path()).unwrap().join("outside");
@@ -126,7 +127,12 @@ fn confine_workspace_holds_the_server_and_its_commands_to_the_workspace() {
     let (init, receipt, inside, escaped) = run_writes(&workspace, &outside, true);
     let state = &init["agentCapabilities"]["_meta"]["harn"]["processConfinement"];
     assert_eq!(state["state"], "confined", "{init:#}");
-    assert_eq!(state["backend"], "macos", "{init:#}");
+    let backend = if cfg!(target_os = "linux") {
+        "linux"
+    } else {
+        "macos"
+    };
+    assert_eq!(state["backend"], backend, "{init:#}");
     // The command ran under no per-turn policy, so only the process's own
     // confinement can make its receipt report enforcement.
     assert_eq!(receipt["enforced"], true, "{receipt:#}");
@@ -140,7 +146,7 @@ fn confine_workspace_holds_the_server_and_its_commands_to_the_workspace() {
 /// Negative control: the same pipeline without the flag writes outside, so the
 /// refusal above is the confinement and not the fixture.
 #[test]
-fn without_confine_workspace_the_same_write_lands_outside() {
+pub(crate) fn without_confine_workspace_the_same_write_lands_outside() {
     let temp = TempDir::new().unwrap();
     let workspace = fs::canonicalize(temp.path()).unwrap().join("workspace");
     let outside = fs::canonicalize(temp.path()).unwrap().join("outside");

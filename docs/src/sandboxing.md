@@ -659,10 +659,11 @@ What children get differs by platform:
 - **Linux** confines with Landlock, whose domains stack, so a command's own
   ruleset still narrows it further. Landlock confines only the calling thread
   and threads it starts later, so Harn refuses to confine a process that
-  already runs more than one thread. `harn serve acp` has started its runtime
-  threads by the time it reads `--confine-workspace`, so on Linux the flag
-  refuses today; an embedder can confine before it starts any thread. Seccomp isn't applied to the server,
-  because the child syscall allowlist isn't sized for a server runtime.
+  already runs more than one thread. `harn serve acp --confine-workspace`
+  confines on its main thread before it starts its runtime; an embedder must
+  likewise confine before it starts any thread. Seccomp isn't applied to the
+  server, because the child syscall allowlist isn't sized for a server
+  runtime.
 - **Other platforms** refuse.
 
 The profile allows every Mach service lookup, as the child profile does.

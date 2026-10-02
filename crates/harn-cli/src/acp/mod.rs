@@ -122,8 +122,10 @@ pub(crate) async fn run_acp_server(
     let config = server_config(pipeline.map(str::to_string), auth_policy)?
         .with_profile(profile)
         .with_sandbox(sandbox);
-    // Confine last, once everything that reads the host has run.
-    if let Some(confinement) = confinement {
+    // Confine last, once everything that reads the host has run. On Linux
+    // the process was confined before its runtime started instead.
+    let already_confined = harn_vm::process_sandbox::current_process_confinement().is_some();
+    if let Some(confinement) = confinement.filter(|_| !already_confined) {
         harn_serve::confine_acp_server_process(&config, &confinement)
             .map_err(|error| format!("--confine-workspace: {error}"))?;
     }
