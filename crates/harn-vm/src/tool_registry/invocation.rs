@@ -2,6 +2,7 @@
 
 use serde_json::Value as JsonValue;
 
+use super::handler_result::{parse_handler_result, HandlerOutcome};
 use super::{
     result_to_json, PreparedToolCatalog, ToolApplicationError, ToolApplicationOutcome,
     ToolContractPhase, ToolContractViolation, ToolContractViolationDetail,
@@ -13,7 +14,11 @@ use crate::value::{VmError, VmValue};
 /// A portable handler result after its declared contract has accepted it.
 #[derive(Debug)]
 pub enum ToolInvocationOutcome {
-    Success { value: VmValue, json: JsonValue },
+    Success {
+        value: VmValue,
+        json: JsonValue,
+        text: Option<String>,
+    },
     ApplicationError(ToolApplicationError),
 }
 
@@ -114,6 +119,23 @@ pub fn classify_tool_result(
 ) -> Result<ToolInvocationOutcome, ToolInvocationError> {
     match result {
         Ok(value) => {
+            let (value, text) = if let Some(result) =
+                parse_handler_result(&value).map_err(ToolInvocationError::Runtime)?
+            {
+                if result.outcome != HandlerOutcome::Ok {
+                    return Err(ToolInvocationError::Runtime(VmError::CategorizedError {
+                        message: result.text.to_owned(),
+                        category: if result.outcome == HandlerOutcome::Rejected {
+                            crate::value::ErrorCategory::ToolRejected
+                        } else {
+                            crate::value::ErrorCategory::ToolError
+                        },
+                    }));
+                }
+                (result.data.clone(), Some(result.text.to_owned()))
+            } else {
+                (value, None)
+            };
             let json = portable_value(tool, ToolContractPhase::Output, &value)?;
             let (value, json) = match crate::llm::parse_handler_result_envelope(&json) {
                 None => (value, json),
@@ -147,7 +169,7 @@ pub fn classify_tool_result(
             prepared
                 .validate_output(tool, &json)
                 .map_err(ToolInvocationError::Contract)?;
-            Ok(ToolInvocationOutcome::Success { value, json })
+            Ok(ToolInvocationOutcome::Success { value, json, text })
         }
         Err(error) => match classify_tool_failure(prepared, tool, error) {
             ToolFailureClassification::Application(error) => {
@@ -446,6 +468,86 @@ mod tests {
             error,
             ToolInvocationError::Runtime(VmError::Thrown(_))
         ));
+    }
+
+    #[test]
+    fn explicit_success_projects_only_declared_data_and_preserves_feedback() {
+        let result = crate::schema::json_to_vm_value(&json!({
+            "schema": super::super::handler_result::AGENT_TOOL_HANDLER_RESULT_SCHEMA,
+            "text": "Created widget",
+            "data": 7,
+            "outcome": "ok"
+        }));
+        let outcome = classify_tool_result(&prepared(None), "widgets.create", Ok(result))
+            .expect("the integer payload satisfies the output contract");
+        assert!(
+            matches!(outcome, ToolInvocationOutcome::Success { value, json, text }
+            if value == VmValue::Int(7) && json == json!(7)
+                && text.as_deref() == Some("Created widget"))
+        );
+
+        let invalid = crate::schema::json_to_vm_value(&json!({
+            "schema": super::super::handler_result::AGENT_TOOL_HANDLER_RESULT_SCHEMA,
+            "text": "Reached handler",
+            "data": {"wrong": true},
+            "outcome": "ok"
+        }));
+        assert!(matches!(
+            classify_tool_result(&prepared(None), "widgets.create", Ok(invalid)),
+            Err(ToolInvocationError::Contract(ToolContractViolation {
+                phase: ToolContractPhase::Output,
+                ..
+            }))
+        ));
+    }
+
+    #[test]
+    fn explicit_failures_and_malformed_outcomes_cannot_be_successful_data() {
+        for (outcome, category) in [
+            ("error", ErrorCategory::ToolError),
+            ("rejected", ErrorCategory::ToolRejected),
+            ("maybe", ErrorCategory::SchemaValidation),
+        ] {
+            let result = crate::schema::json_to_vm_value(&json!({
+                "schema": super::super::handler_result::AGENT_TOOL_HANDLER_RESULT_SCHEMA,
+                "text": "Canonical feedback",
+                "data": 7,
+                "outcome": outcome
+            }));
+            assert!(
+                matches!(
+                    classify_tool_result(&prepared(Some(json!({}))), "widgets.create", Ok(result)),
+                    Err(ToolInvocationError::Runtime(VmError::CategorizedError {
+                        category: actual, ..
+                    })) if actual == category
+                ),
+                "{outcome}"
+            );
+        }
+    }
+
+    #[test]
+    fn ordinary_domain_values_do_not_inherit_agent_outcome_policy() {
+        let mut catalog = prepared(None).catalog().clone();
+        catalog.tools[0].output_schema = Some(json!({
+            "type": "object", "properties": {
+                "ok": {"const": false}, "success": {"const": false},
+                "status": {"const": "error"}
+            }, "required": ["ok", "success", "status"], "additionalProperties": false
+        }));
+        let prepared = PreparedToolCatalog::prepare(catalog).expect("prepare domain contract");
+        let json = json!({"ok": false, "success": false, "status": "error"});
+        let raw = crate::schema::json_to_vm_value(&json);
+        let nominal =
+            VmValue::struct_instance("DomainPayload", raw.as_dict().unwrap().as_ref().clone());
+        for value in [raw, nominal] {
+            let outcome = classify_tool_result(&prepared, "widgets.create", Ok(value))
+                .expect("ordinary API payload is successful domain data");
+            assert!(
+                matches!(outcome, ToolInvocationOutcome::Success { json: actual, text: None, .. }
+                if actual == json)
+            );
+        }
     }
 
     #[test]

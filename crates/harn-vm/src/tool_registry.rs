@@ -13,6 +13,8 @@ use crate::value::{VmClosure, VmDictExt, VmError, VmValue};
 
 mod cli_projection;
 mod contract;
+pub(crate) mod handler_result;
+pub use handler_result::tool_handler_output_schema;
 mod invocation;
 pub use contract::*;
 pub use invocation::{
@@ -112,6 +114,33 @@ pub fn tool_registry_catalog(registry: &VmValue) -> Result<ToolCatalog, VmError>
         .validate()
         .map_err(|error| VmError::Runtime(format!("invalid tool catalog: {error}")))?;
     Ok(catalog)
+}
+
+/// Prepare a direct agent dispatch without compiling unrelated tool entries.
+/// Lifecycle-owned registries retain their full prepared catalog instead.
+pub(crate) fn tool_registry_catalog_for_tool(
+    registry: &VmValue,
+    name: &str,
+) -> Result<ToolCatalog, VmError> {
+    // Agent primitives also accept legacy `{tools: [...]}` wrappers.
+    let registry = registry
+        .as_dict()
+        .ok_or_else(|| VmError::Runtime("expected a tool registry".into()))?;
+    let entry = registry_entries(registry)?
+        .iter()
+        .find(|entry| {
+            entry.as_dict().is_some_and(|entry| {
+            matches!(entry.get("name"), Some(VmValue::String(actual)) if actual.as_ref() == name)
+        })
+        })
+        .ok_or_else(|| VmError::Runtime(format!("tool {name:?} is not registered")))?;
+    Ok(ToolCatalog {
+        schema_version: ToolCatalogSchemaVersion::V2,
+        info: None,
+        cli: None,
+        tools: vec![catalog_entry(entry)?],
+        components: registry_components(registry)?,
+    })
 }
 
 /// Normalize and retain only tools exposed to one adapter audience.

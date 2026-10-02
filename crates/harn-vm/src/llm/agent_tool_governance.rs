@@ -9,10 +9,64 @@
 
 use super::agent_tools::ToolDispatchOutcome;
 use crate::stdlib::macros::harn_builtin;
+use crate::tool_registry::PreparedToolCatalog;
 use crate::value::{ErrorCategory, VmError, VmResourceHandle, VmValue};
 
 const REGISTRY_PROVENANCE_KEY: &str = "_agent_registry_provenance";
 const AMBIENT_PROVENANCE_LABEL: &str = "agent_registry_ambient_host";
+const PREPARED_CATALOG_KEY: &str = "_agent_prepared_catalog";
+
+#[derive(Debug)]
+struct AgentPreparedCatalog {
+    tools: VmValue,
+    components: Option<VmValue>,
+    prepared: std::sync::Arc<PreparedToolCatalog>,
+}
+
+impl AgentPreparedCatalog {
+    fn matches(&self, registry: &crate::value::DictMap) -> bool {
+        let same_tools = matches!((&self.tools, registry.get("tools")),
+            (VmValue::List(original), Some(VmValue::List(current)))
+                if std::sync::Arc::ptr_eq(original, current));
+        let same_components = match (&self.components, registry.get("components")) {
+            (None, None) => true,
+            (Some(VmValue::Dict(original)), Some(VmValue::Dict(current))) => {
+                std::sync::Arc::ptr_eq(original, current)
+            }
+            _ => false,
+        };
+        same_tools && same_components
+    }
+}
+
+pub(super) fn prepared_handler_catalog(
+    registry: &VmValue,
+    name: &str,
+) -> Result<std::sync::Arc<PreparedToolCatalog>, VmError> {
+    if let Some(registry) = registry.as_dict() {
+        if let Some(VmValue::Resource(resource)) = registry.get(PREPARED_CATALOG_KEY) {
+            if let Some(owned) = resource.downcast::<AgentPreparedCatalog>() {
+                if owned.matches(registry) {
+                    return Ok(owned.prepared.clone());
+                }
+            }
+        }
+    }
+    prepare_catalog(crate::tool_registry::tool_registry_catalog_for_tool(
+        registry, name,
+    )?)
+}
+
+fn prepare_catalog(
+    catalog: crate::tool_registry::ToolCatalog,
+) -> Result<std::sync::Arc<PreparedToolCatalog>, VmError> {
+    PreparedToolCatalog::prepare(catalog)
+        .map(std::sync::Arc::new)
+        .map_err(|error| VmError::CategorizedError {
+            message: error.to_string(),
+            category: ErrorCategory::SchemaValidation,
+        })
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum AgentRegistryOrigin {
@@ -37,12 +91,26 @@ pub(super) fn own_lifecycle_registry(
     registry: &VmValue,
     origin: AgentRegistryOrigin,
 ) -> Result<VmValue, VmError> {
-    crate::tool_registry::tool_registry_catalog(registry)?;
+    let prepared = prepare_catalog(crate::tool_registry::tool_registry_catalog(registry)?)?;
     let mut owned = registry
         .as_dict()
         .expect("validated tool registry must be a dictionary")
         .as_ref()
         .clone();
+    owned.insert(
+        PREPARED_CATALOG_KEY.into(),
+        VmValue::resource(VmResourceHandle::new(
+            "agent_prepared_catalog",
+            AgentPreparedCatalog {
+                tools: owned
+                    .get("tools")
+                    .expect("validated registry has tools")
+                    .clone(),
+                components: owned.get("components").cloned(),
+                prepared,
+            },
+        )),
+    );
     match origin {
         AgentRegistryOrigin::Explicit => {
             owned.remove(REGISTRY_PROVENANCE_KEY);
@@ -204,6 +272,40 @@ mod tests {
         registry.put_str("_type", "tool_registry");
         registry.insert("tools".into(), VmValue::List(Arc::new(entries)));
         VmValue::dict(registry)
+    }
+
+    #[test]
+    fn lifecycle_catalog_is_reused_but_cannot_validate_a_changed_registry() {
+        let entry = crate::schema::json_to_vm_value(&serde_json::json!({
+            "name": "payload", "parameters": {}, "returns": {"type": "integer"}
+        }));
+        let owned = own_lifecycle_registry(&registry(vec![entry]), AgentRegistryOrigin::Explicit)
+            .expect("own catalog");
+        let first = prepared_handler_catalog(&owned, "payload").expect("prepared catalog");
+        let second = prepared_handler_catalog(&owned, "payload").expect("reuse catalog");
+        assert!(Arc::ptr_eq(&first, &second));
+        first
+            .validate_output("payload", &serde_json::json!(7))
+            .expect("known positive");
+
+        let mut changed = owned.as_dict().unwrap().as_ref().clone();
+        changed.insert(
+            "tools".into(),
+            VmValue::List(Arc::new(vec![crate::schema::json_to_vm_value(
+                &serde_json::json!({
+                    "name": "payload", "parameters": {}, "returns": {"type": "string"}
+                }),
+            )])),
+        );
+        let current = prepared_handler_catalog(&VmValue::dict(changed), "payload")
+            .expect("changed source gets its own contract");
+        assert!(!Arc::ptr_eq(&first, &current));
+        assert!(current
+            .validate_output("payload", &serde_json::json!(7))
+            .is_err());
+        current
+            .validate_output("payload", &serde_json::json!("current"))
+            .expect("new contract reached");
     }
 
     fn responding_bridge(

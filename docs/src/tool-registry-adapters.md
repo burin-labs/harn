@@ -193,6 +193,24 @@ export-backed adapters all validate against that prepared catalog. Invalid
 arguments never reach the handler. Invalid or non-JSON results become tool
 failures and are never stored or reported as successful task results.
 
+Handlers shared with agent dispatch can return
+`agent_tool_handler_result(text, data, outcome)` from
+`std/agent/tool_lifecycle`. The explicit `harn.agent_tool_handler_result.v2`
+envelope keeps feedback separate from the API payload. The default `"ok"`
+outcome validates `data` against the declared output schema. Generated CLI
+commands return that payload; MCP returns it as `structuredContent` and uses
+`text` for its text content. Agent dispatch preserves the full envelope and
+renders the same text. `"error"` and `"rejected"` remain tool failures.
+
+Public function exports returning `AgentToolHandlerResult<T>` advertise `T` as
+their output schema. Imported aliases resolve before this projection. Exported
+MCP calls preserve the same payload and feedback, including replayed responses.
+
+Ordinary CLI and MCP results keep their existing shape. Fields such as
+`ok: false`, `success: false`, or `status: "error"` inside an API payload don't
+declare a tool failure. Agent dispatch still requires its
+[typed outcome contract](llm/tools.md#pattern).
+
 Set `error_schema` on a handwritten definition to declare the portable shape
 of values its handler deliberately throws. Public Harn functions project their
 language-level `throws E` type to the same catalog field. A matching raw throw

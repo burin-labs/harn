@@ -1,5 +1,49 @@
 use super::*;
 
+#[tokio::test]
+async fn explicit_export_payload_and_feedback_replay_without_reinvocation() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let script = dir.path().join("server.harn");
+    std::fs::write(
+        &script,
+        r#"
+import { AgentToolHandlerResult, agent_tool_handler_result } from "std/agent/tool_lifecycle"
+pub fn observe_execution() -> AgentToolHandlerResult<int> {
+  return agent_tool_handler_result("Canonical feedback", test_increment_call_count())
+}
+"#,
+    )
+    .expect("write explicit exported handler");
+    let calls = Arc::new(AtomicUsize::new(0));
+    let cache = Arc::new(TrackingReplayCache::default());
+    let mut config = DispatchCoreConfig::for_script(&script);
+    config.replay_cache = cache.clone();
+    config.vm_configurator = Arc::new(CountingVmConfigurator {
+        calls: calls.clone(),
+    });
+    let core = DispatchCore::new(config).expect("prepare typed export");
+    let first = core
+        .dispatch(replay_test_request(Some("typed-result")))
+        .await
+        .expect("first dispatch");
+    let second = core
+        .dispatch(replay_test_request(Some("typed-result")))
+        .await
+        .expect("replayed dispatch");
+    assert_eq!(first.value, serde_json::json!(1));
+    assert_eq!(first.feedback.as_deref(), Some("Canonical feedback"));
+    assert_eq!(second.value, first.value);
+    assert_eq!(second.feedback, first.feedback);
+    assert_eq!(second.printed_output, first.printed_output);
+    assert_eq!([first.cached, second.cached], [false, true]);
+    assert_eq!(
+        calls.load(Ordering::SeqCst),
+        1,
+        "actual producer ran only once"
+    );
+    assert_eq!(cache.counts(), (2, 1));
+}
+
 struct InvalidContractVmConfigurator {
     calls: Arc<AtomicUsize>,
 }
