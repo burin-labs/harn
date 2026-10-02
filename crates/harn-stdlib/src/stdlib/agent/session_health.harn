@@ -12,7 +12,13 @@ pub type AgentToolHealthTelemetry = {
   verification: AgentHealthVerification?,
 }
 
-/** Project producer facts without reading rendered tool output or chat text. */
+/**
+ * Project producer facts without reading rendered tool output or chat text.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
 pub fn __agent_tool_health_telemetry(
   agent: HarnessAgent,
   envelope: dict,
