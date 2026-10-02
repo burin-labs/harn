@@ -47,7 +47,7 @@ jobs:
     # loudly in that case; gating here keeps the job off those events
     # entirely so it can never hold up the merge queue.
     if: ${{ github.event_name == 'pull_request' }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
       pull-requests: read
@@ -59,7 +59,7 @@ jobs:
 
   public-metadata-privacy:
     name: Public metadata privacy
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -77,7 +77,7 @@ jobs:
     # The matrix value becomes the check-run name, so these render as
     # "Demo gate", "Changelog fragment", and "Breaking CLI surface".
     name: ${{ matrix.gate.name }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:

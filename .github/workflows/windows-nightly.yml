@@ -61,7 +61,7 @@ env:
 jobs:
   route:
     name: Release pull request routing
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # Don't run forks of the repo on a fork's own schedule.
     if: github.repository == 'burin-labs/harn'
     outputs:

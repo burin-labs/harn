@@ -42,7 +42,7 @@ env:
 jobs:
   rust-cache-refresh:
     name: Refresh Rust cache (${{ matrix.cache_key }})
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # Serialize this mutating tail across overlapping main pushes: GitHub
     # retains the running job and the newest pending job, avoiding concurrent
     # prune and save operations against the same cache family.

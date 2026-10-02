@@ -119,7 +119,7 @@ jobs:
   # It cannot regress the Rust build and is excluded here. When in doubt, RUN.
   changes:
     name: Detect changes
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
       actions: read
@@ -470,7 +470,7 @@ jobs:
     # smallest hosted runner is the right home.
     needs: changes
     if: needs.changes.outputs.merge_group_proven != 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/rust-toolchain
@@ -489,9 +489,9 @@ jobs:
     # It still runs for package-relevant PRs and unconditionally on merge_group
     # unless the speculative merge diff is a proven docs-only tail.
     if: needs.changes.outputs.package_audit == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # Hang tripwire, not a perf budget (check-test-case-performance owns perf).
-    # Hosted `ubuntu-latest` completes this lane in up to ~16m — the prior 20m
+    # Hosted `ubuntu-24.04` completes this lane in up to ~16m — the prior 20m
     # budget was calibrated for the faster paid runner and left ~4m of
     # headroom, one noisy neighbor away from a mid-suite timeout kill.
     timeout-minutes: 30
@@ -553,7 +553,7 @@ jobs:
     name: Check public Rust API
     needs: [changes]
     if: needs.changes.outputs.package_audit == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # Hang tripwire, not a perf budget.
     timeout-minutes: 30
     permissions:
@@ -606,7 +606,7 @@ jobs:
   lint-md:
     name: Markdown lint
     # Single ~5 s Action step; the smallest hosted runner is plenty.
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       # The action's default glob is `*.{md,markdown}`, the repository root
@@ -642,7 +642,7 @@ jobs:
     # Every main push rehearses the tail, including changes outside the PR filter.
     # The required aggregate accepts a skip only on an unrelated PR.
     if: github.event_name != 'pull_request' || needs.changes.outputs.release_contract == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     env:
       # The release orchestrator, pinned by commit. Moving this pin is a
@@ -725,7 +725,7 @@ jobs:
     name: Release residual audit
     needs: [changes]
     if: needs.changes.outputs.rust == 'true' && needs.changes.outputs.release_residual == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # Hang backstop, not a performance budget.
     timeout-minutes: 45
     permissions:
@@ -804,7 +804,7 @@ jobs:
     # on for merge_group and non-metadata pushes (see the `changes` job).
     # ci-status treats a skip here as PASS so branch protection isn't deadlocked.
     if: needs.changes.outputs.rust == 'true'
-    runs-on: ${{ vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true' && (github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) && 'blacksmith-8vcpu-ubuntu-2404' || 'ubuntu-latest' }}
+    runs-on: ${{ vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true' && (github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) && 'blacksmith-8vcpu-ubuntu-2404' || 'ubuntu-24.04' }}
     # Each leg resolves a different feature graph, so none reuses another's
     # check units. Run in sequence on one runner they summed to 15-16 minutes
     # (7m15s + 4m02s + 4m42s on 2026-10-01), the longest Rust lane in the merge
@@ -852,7 +852,7 @@ jobs:
       # Install mold and steer rustc at it via RUSTFLAGS above. apt's `mold`
       # only drops the binary in PATH; it does NOT replace /usr/bin/ld, so the
       # stock linker stays intact and rustc opts in explicitly through the
-      # `-fuse-ld=mold` link-arg. ubuntu-latest's gcc cc-driver (>=12) supports
+      # `-fuse-ld=mold` link-arg. ubuntu-24.04's gcc cc-driver (>=12) supports
       # `-fuse-ld=mold` directly.
       - name: Install mold linker
         uses: ./.github/actions/apt-install
@@ -920,7 +920,7 @@ jobs:
     if: >-
       ${{ !cancelled() && github.event_name == 'pull_request'
         && github.event.pull_request.head.repo.full_name == github.repository }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     outputs:
       route: ${{ steps.decision.outputs.route }}
@@ -1359,7 +1359,7 @@ jobs:
     name: Wait for shared Harn binary
     needs: [changes]
     if: needs.changes.outputs.rust_paths == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 50
     permissions:
       actions: read
@@ -1392,7 +1392,7 @@ jobs:
     name: Wait for Linux security tests
     needs: [changes]
     if: needs.changes.outputs.rust == 'true' && needs.changes.outputs.sprint_fast_ci != 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 50
     permissions:
       actions: read
@@ -1434,7 +1434,7 @@ jobs:
     # though the same boxes pull the GitHub release CDN at ~29 MB/s. Artifact
     # up/downloads pin this archive lane to hosted runners until the archive
     # itself shrinks or moves.
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # Hang backstop, not a performance gate (the perf gate re-measures wall
     # time separately). Worst observed hosted-runner run is ~17m on a cold
     # cache; keep ~2x headroom so a slow runner day cancels nothing.
@@ -1520,7 +1520,7 @@ jobs:
       !cancelled()
       && needs.changes.outputs.rust == 'true'
       && needs.security-tests-ready.result == 'success'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # Hang backstop, not a performance gate. The Landlock proof runs in ~2m,
     # and the single-package security archive it consumes downloads in seconds
     # (the old path pulled the full ~8.6 GB workspace test archive, whose hosted
@@ -1624,7 +1624,7 @@ jobs:
     # verifies the exact-commit binary only at the last responsible moment.
     needs: [changes]
     if: needs.changes.outputs.rust == 'true' && needs.changes.outputs.sprint_fast_ci != 'true'
-    runs-on: ${{ vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true' && (github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) && 'blacksmith-8vcpu-ubuntu-2404' || 'ubuntu-latest' }}
+    runs-on: ${{ vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true' && (github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) && 'blacksmith-8vcpu-ubuntu-2404' || 'ubuntu-24.04' }}
     # The immutable CLI producer is shared, and the Harn proof work after it is
     # spread over free hosted workers. Everything here starts only once the CLI
     # exists (about six minutes in), so each worker must finish its share in a
@@ -1792,7 +1792,7 @@ jobs:
     # The execution budget starts after the shared CLI is actually available.
     needs: [changes, rust-artifacts-ready]
     if: needs.changes.outputs.rust == 'true' && needs.rust-artifacts-ready.result == 'success'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
       actions: read
@@ -1873,7 +1873,7 @@ jobs:
     if: >-
       needs.changes.outputs.rust_paths == 'true'
       && (github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main'))
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
       actions: read
@@ -1994,7 +1994,7 @@ jobs:
     name: Stack frame budget
     needs: [changes]
     if: needs.changes.outputs.rust == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     permissions:
       actions: read
@@ -2069,7 +2069,7 @@ jobs:
       github.event_name == 'merge_group'
       && needs.changes.outputs.rust == 'true'
       && needs.rust-artifacts-ready.result == 'success'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
       actions: read
@@ -2125,7 +2125,7 @@ jobs:
     # rather than the absence of one spelling, because any event term here
     # would put these refusals back behind the merge.
     if: needs.changes.outputs.rust == 'true' && needs.rust-artifacts-ready.result == 'success'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
       actions: read
@@ -2211,7 +2211,7 @@ jobs:
     # cheap refusal, because a gate that runs only after the merge can only
     # turn main red.
     if: needs.changes.outputs.rust == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:
       contents: read
@@ -2244,7 +2244,7 @@ jobs:
     # Keep this execution-only lane on elastic capacity. It gains no compiler
     # cache benefit from a persistent worker, and merge-queue bursts otherwise
     # leave it waiting behind compile-bearing jobs on the scarce stable pool.
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # Hang backstop, not a performance budget. The post-warm integration sweep
     # plus structural checks reached the old 30m ceiling on a healthy hosted
     # runner while assertions were still progressing. Keep 1.5x headroom;
@@ -2352,7 +2352,7 @@ jobs:
       || (github.event_name == 'push'
       && github.ref == 'refs/heads/main'
       && needs.changes.outputs.rust == 'true')
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -2389,7 +2389,7 @@ jobs:
 
   macos-plan:
     name: macOS CI routing
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     outputs:
       run_macos: ${{ steps.detect.outputs.run_macos }}
     steps:
@@ -2584,7 +2584,7 @@ jobs:
     if: needs.changes.outputs.portal == 'true'
     # ~30 s npm pipeline; setup-node's cache covers the only meaningful
     # download and there's no sccache/cargo win to reclaim.
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/node-cache
@@ -2607,7 +2607,7 @@ jobs:
     # Keep editor-only changes off the unrelated Rust graph without dropping
     # their actual owner checks. This also runs when ci.yml changes so the
     # routing and required-status wiring test themselves.
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/node-cache
@@ -2628,7 +2628,7 @@ jobs:
     # Type-checks, bundles, and statically prerenders the harnlang.com site
     # (website/) into docs/dist. ~25 s npm pipeline; setup-node's cache covers
     # the only meaningful download.
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/node-cache
@@ -2673,7 +2673,7 @@ jobs:
     # change reads as docs-only on that push and runs here against a released
     # binary older than the commit — the substitution the note above rules out,
     # on the one event where the exact-commit lane has already proven the tree.
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -2705,7 +2705,7 @@ jobs:
     name: GitHub Actions hygiene
     # ~18 s job. `go install` + actionlint runs on ephemeral images quickly
     # enough; no win from a warm Go cache.
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
       actions: read
@@ -2747,6 +2747,13 @@ jobs:
         # Always-on delivery-policy gate owned by burin-labs/.github. Harn's
         # family-membership deepening stays in `make check-dependabot-groups`.
         uses: burin-labs/.github/.github/actions/check-dependabot-config@5dc4bd22107335cb29ccf8b13ca05fc5f2322468
+      - name: Check hosted runner labels
+        # Always-on org gate: reject the floating latest-Ubuntu label, which
+        # GitHub moves to a new image without a commit here. Router code that
+        # emits labels at run time is pinned by the CI cache policy tests.
+        uses: burin-labs/.github/.github/actions/hosted-runner-labels@47b97f48a4862d684f54a0b8ee7aa370d8bfc126
+        with:
+          harn-version: 0.10.133
       # Keep the required hygiene gate deterministic. Online audits such as
       # `known-vulnerable-actions` depend on the GitHub Advisories API, whose
       # transport failures are indistinguishable from audit failures to
@@ -2770,7 +2777,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [ubuntu-24.04, macos-latest, windows-latest]
     uses: ./.github/workflows/setup-harn-contract.yml
     with:
       os: ${{ matrix.os }}
@@ -2786,7 +2793,7 @@ jobs:
 
   ci-status:
     name: CI status
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     if: always()
     needs:
       [
@@ -3129,7 +3136,7 @@ jobs:
     needs: [docs-site]
     # Single `curl` to the Render deploy hook; the smallest hosted runner
     # is plenty.
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # `always()` keeps the job evaluable even if `docs-site` were ever skipped
     # (the actions/runner#2205 quirk); the explicit success check is the gate.
     if: >-

@@ -17,7 +17,7 @@ env:
 jobs:
   thread-parity:
     name: Full suite at ${{ matrix.threads }} threads
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 60
     strategy:
       # Run all thread counts even if one fails so we see the full picture.

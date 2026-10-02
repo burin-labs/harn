@@ -3,7 +3,7 @@ name: macOS workspace tests
 # Runs the full workspace nextest surface on macOS once per night, plus
 # on-demand from the Actions tab. This is the macOS analogue of
 # `windows-nightly.yml`: the per-PR Linux lanes in `ci.yml` build and test on
-# `ubuntu-latest`, but the macOS-only code paths — most notably the Seatbelt
+# `ubuntu-24.04`, but the macOS-only code paths — most notably the Seatbelt
 # sandbox profile generation in `crates/harn-vm/src/stdlib/sandbox/macos.rs`
 # and its `#[cfg(target_os = "macos")]` unit tests — compile and run nowhere
 # in CI today (only on a contributor's local Mac). This nightly closes that

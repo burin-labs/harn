@@ -52,8 +52,8 @@ jobs:
     # to the budget. This repo runs CI on hosted runners only (public
     # repo: hosted minutes are free, and self-hosted routing contends
     # with local development work), so the budget and iteration count
-    # are calibrated to the ubuntu-latest noise floor.
-    runs-on: ubuntu-latest
+    # are calibrated to the ubuntu-24.04 noise floor.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/rust-toolchain
@@ -96,7 +96,7 @@ jobs:
           HARN_EXT_CLI_COLD_START_REPORT: ${{ runner.temp }}/cold-start-measurement.json
         # `--no-build` because we already built above; `--iterations` is
         # intentionally lower on CI than the local default (20) because
-        # the ubuntu-latest noise floor makes a tighter loop misleading.
+        # the ubuntu-24.04 noise floor makes a tighter loop misleading.
         run: ./scripts/bench_cli_cold_start.sh --no-build --iterations 10
       - name: Report setup and measurement outcomes
         id: evidence

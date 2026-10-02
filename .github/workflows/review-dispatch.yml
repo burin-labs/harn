@@ -39,7 +39,7 @@ jobs:
       || github.event.pull_request.user.type == 'Bot' && 'Automatic review: skipped (bot author)'
       || (vars.REVIEW_DISPATCH_REPOSITORY == '' || vars.REVIEW_DISPATCH_WORKFLOW == '') && 'Automatic review: skipped (not configured)'
       || 'Automatic review: requested' }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions: {}
     env:

@@ -169,7 +169,7 @@ pub const COLOCATED_TESTS_DISABLE_VAR = "HARN_CI_DISABLE_COLOCATED_TESTS"
 // with it.
 pub const RUNNER_TIER_ENV = "HARN_RUNNER_TIER"
 
-pub const HOSTED_LINUX_RUNNER = "ubuntu-latest"
+pub const HOSTED_LINUX_RUNNER = "ubuntu-24.04"
 
 /**
  * The producer's hosted rung, which is deliberately not the shared one.
@@ -1920,10 +1920,10 @@ pub fn minimal_pr_capacity_errors(ci: dict, publish: dict) -> list<string> {
   let errors: list<string> = []
   const jobs = ci?.jobs ?? {}
   const elastic_runner = "$"
-    + "{{ vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true' && (github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) && 'blacksmith-8vcpu-ubuntu-2404' || 'ubuntu-latest' }}"
+    + "{{ vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true' && (github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) && 'blacksmith-8vcpu-ubuntu-2404' || '${HOSTED_LINUX_RUNNER}' }}"
   for name in [ARTIFACT_READY_JOB, SECURITY_READY_JOB] {
-    if trim(jobs[name]?.["runs-on"] ?? "") != "ubuntu-latest" {
-      errors = errors + ["ci.yml:${name} must use GitHub-hosted ubuntu-latest"]
+    if trim(jobs[name]?.["runs-on"] ?? "") != HOSTED_LINUX_RUNNER {
+      errors = errors + ["ci.yml:${name} must use GitHub-hosted ${HOSTED_LINUX_RUNNER}"]
     }
   }
   for name in ["rust-checks", "harn-audit"] {

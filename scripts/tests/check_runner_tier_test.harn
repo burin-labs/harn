@@ -7,7 +7,7 @@ fn gha_expression(body: string) -> string {
 fn cloud_job(tier: string) {
   return {
     "runs-on": gha_expression(
-      "vars.DISABLE_VENDOR == 'true' && 'ubuntu-latest' || 'blacksmith-4vcpu-ubuntu-2404'",
+      "vars.DISABLE_VENDOR == 'true' && 'ubuntu-24.04' || 'blacksmith-4vcpu-ubuntu-2404'",
     ),
     env: {HARN_RUNNER_TIER: gha_expression(tier)},
     steps: [{if: "env.HARN_RUNNER_TIER == 'blacksmith'", run: "true"}],
@@ -41,7 +41,7 @@ pipeline test_three_rung_ladder_still_requires_all_three_tiers(harness: Harness,
     ),
     "runs-on": gha_expression(
       "vars.USE_LOCAL == 'true' && fromJSON('[\"self-hosted\", \"Linux\"]') || "
-        + "(vars.DISABLE_VENDOR == 'true' && 'ubuntu-latest' || "
+        + "(vars.DISABLE_VENDOR == 'true' && 'ubuntu-24.04' || "
         + "'blacksmith-4vcpu-ubuntu-2404')",
     ),
   }
@@ -63,7 +63,7 @@ pipeline test_ladder_inputs_must_still_match(harness: Harness, task: unknown) {
  */
 fn pinned_hosted_job(tier: string) {
   return {
-    "runs-on": "ubuntu-latest",
+    "runs-on": "ubuntu-24.04",
     env: {HARN_RUNNER_TIER: tier},
     steps: [{if: "env.HARN_RUNNER_TIER != 'github-hosted'", run: "true"}],
   }
