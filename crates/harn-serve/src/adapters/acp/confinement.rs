@@ -41,6 +41,13 @@ pub fn confine_acp_server_process(
     let Some(policy) = server_ceiling(sandbox, confinement) else {
         return Ok(None);
     };
+    // With no roots the profile would fall back to the current directory,
+    // which is a confinement nobody chose.
+    if confinement.workspace_roots.is_empty() {
+        return Err(VmError::Runtime(
+            "confining the server needs at least one workspace root".to_string(),
+        ));
+    }
     harn_vm::process_sandbox::confine_current_process(&policy).map(Some)
 }
 
@@ -139,6 +146,19 @@ mod tests {
             ..AcpSandboxConfig::default()
         };
         assert!(server_ceiling(&sandbox, &confinement("/work")).is_none());
+    }
+
+    #[test]
+    fn confining_with_no_workspace_root_is_refused() {
+        // Refused before anything is applied, so this test process stays
+        // unconfined, which the next test relies on.
+        let error = confine_acp_server_process(
+            &AcpSandboxConfig::default(),
+            &AcpServerConfinement::default(),
+        )
+        .expect_err("no roots must not fall back to the current directory");
+        assert!(error.to_string().contains("at least one workspace root"));
+        assert!(harn_vm::process_sandbox::current_process_confinement().is_none());
     }
 
     #[test]

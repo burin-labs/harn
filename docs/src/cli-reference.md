@@ -4025,7 +4025,8 @@ for those roots: write the workspace, read the system and toolchain roots, no
 credential directories. The confinement lasts for the life of the process, and
 a `session/new` whose `cwd` is outside every root is refused with
 `outside_process_confinement`. The `initialize` response reports the state in
-`agentCapabilities._meta.harn.processConfinement`. See
+`agentCapabilities._meta.harn.processConfinement`. The flag works on macOS;
+on Linux it refuses, because Landlock confines one thread. See
 [Confining a server process](./sandboxing.md#confining-a-server-process).
 Use `--profile` / `HARN_PROFILE=1` to print one categorical timing rollup per
 executed `session/prompt`; use `--profile-json <path>` /

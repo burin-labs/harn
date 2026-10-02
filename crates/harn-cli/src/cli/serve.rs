@@ -100,7 +100,9 @@ pub(crate) struct ServeAcpArgs {
     /// Confine this server process to the workspace at PATH before serving,
     /// with the OS sandbox profile a confined command gets. Repeatable for
     /// several roots. The confinement lasts for the life of the process, and
-    /// sessions whose `cwd` is outside every root are refused. Stdio only.
+    /// sessions whose `cwd` is outside every root are refused. Stdio only;
+    /// macOS only today, because Linux Landlock confines one thread and this
+    /// server has started several by the time it reads the flag.
     #[arg(long = "confine-workspace", value_name = "PATH")]
     pub confine_workspace: Vec<PathBuf>,
     /// Static API keys accepted by the ACP authenticate method.

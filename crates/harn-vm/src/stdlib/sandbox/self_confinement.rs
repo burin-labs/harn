@@ -73,6 +73,20 @@ pub fn confine_current_process(
             policy.sandbox_profile.as_str()
         )));
     }
+    // A root that contains the home directory makes the profile a formality:
+    // it hands the process the user's dotfiles, shell startup files, and keys.
+    let home = crate::user_dirs::home_dir().map(|home| sandbox::normalize_for_policy(&home));
+    if let Some(root) = sandbox::process_sandbox_roots(policy)
+        .into_iter()
+        .find(|root| {
+            root.parent().is_none() || home.as_ref().is_some_and(|home| home.starts_with(root))
+        })
+    {
+        return Err(sandbox::sandbox_rejection(format!(
+            "`{}` contains the home directory, so confining to it would confine nothing",
+            root.display()
+        )));
+    }
     // The host temp dir is shared with every other process the user runs, so
     // it is not granted. The process gets a private one instead: Harn writes
     // command artifacts and scratch files through `TMPDIR`.
@@ -83,8 +97,9 @@ pub fn confine_current_process(
         .write_roots
         .push(temp_dir.display().to_string());
     let mechanism = ActiveBackend::confine_current_process(&policy)?;
-    // SAFETY: called once, before the process serves; `temp_dir()` and child
-    // environments read `TMPDIR` afterwards, and nothing reads it concurrently.
+    // SAFETY: called once, before the process serves its first message.
+    // Runtime threads may already exist, but none is reading the environment
+    // yet: they are parked until the server starts handing them work.
     unsafe { std::env::set_var("TMPDIR", &temp_dir) };
     let confinement = ProcessConfinement {
         backend: ActiveBackend::name(),
@@ -98,19 +113,17 @@ pub fn confine_current_process(
 }
 
 /// A fresh directory under the host temp dir that only this process uses.
+///
+/// Created with a random name and without following an existing entry, so a
+/// name another user planted in a shared temp dir (a symlink to somewhere
+/// they want written) is an error rather than a grant.
 fn private_temp_dir() -> Result<PathBuf, VmError> {
-    let dir = sandbox::normalize_for_policy(
-        &std::env::temp_dir().join(format!("harn-confined-{}", std::process::id())),
-    );
-    let created = std::fs::create_dir_all(&dir).and_then(|()| {
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700))?;
-        }
-        Ok(())
-    });
-    created.map_err(|error| {
+    let parent = sandbox::normalize_for_policy(&std::env::temp_dir());
+    let dir = parent.join(format!("harn-confined-{}", uuid::Uuid::new_v4().simple()));
+    let mut builder = std::fs::DirBuilder::new();
+    #[cfg(unix)]
+    std::os::unix::fs::DirBuilderExt::mode(&mut builder, 0o700);
+    builder.create(&dir).map_err(|error| {
         sandbox::sandbox_rejection(format!(
             "cannot create the private temp dir {}: {error}",
             dir.display()
@@ -147,4 +160,45 @@ fn report(confinement: &ProcessConfinement) {
         "this process is now confined by the kernel to its workspace profile",
         metadata,
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::orchestration::SandboxProfile;
+
+    fn policy_for(root: &std::path::Path) -> CapabilityPolicy {
+        CapabilityPolicy {
+            workspace_roots: vec![root.display().to_string()],
+            sandbox_profile: SandboxProfile::Worktree,
+            ..Default::default()
+        }
+    }
+
+    // Each refusal happens before anything is applied, so the test process
+    // stays unconfined.
+    #[test]
+    fn a_root_containing_home_is_refused() {
+        let home = crate::user_dirs::home_dir().expect("a home directory");
+        for root in [home.clone(), home.parent().unwrap().to_path_buf()] {
+            let error = confine_current_process(&policy_for(&root)).unwrap_err();
+            assert!(
+                error.to_string().contains("contains the home directory"),
+                "{error}"
+            );
+        }
+        assert!(current_process_confinement().is_none());
+    }
+
+    #[test]
+    fn a_profile_that_confines_nothing_is_refused() {
+        let workspace = tempfile::tempdir().unwrap();
+        let policy = CapabilityPolicy {
+            sandbox_profile: SandboxProfile::Unrestricted,
+            ..policy_for(workspace.path())
+        };
+        let error = confine_current_process(&policy).unwrap_err();
+        assert!(error.to_string().contains("confines no process"), "{error}");
+        assert!(current_process_confinement().is_none());
+    }
 }
