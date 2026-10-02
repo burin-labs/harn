@@ -213,6 +213,16 @@ tar --zstd -cf "$tmpdir/out/corrupt-cli.tar.zst" -C "$tmpdir/tampered-cli" \
 expect_failure "CLI restore accepted corrupt harn bytes" \
   run_artifact restore-cli "$tmpdir/out/corrupt-cli.tar.zst" "$tmpdir/corrupt-cli" "$commit"
 
+# The main-branch cache warmer must build the profile the producer reads, or a
+# cache hit still recompiles the whole CLI.
+shared_profile="$(sed -n "s/^readonly SHARED_CLI_PROFILE='\(.*\)'$/\1/p" "$script")"
+[[ -n "$shared_profile" ]]
+grep -Fxq "cargo build --locked --profile ${shared_profile} --bin harn" \
+  "$repo_root/scripts/ci/warm_harn_cli_cache.sh" || {
+  echo "warm_harn_cli_cache.sh does not warm the ${shared_profile} profile build-cli reads" >&2
+  exit 1
+}
+
 # A shared CLI from any other profile is refused even when its checksums are
 # consistent: the proof lanes' timing budgets assume the optimized build.
 grep -Fxq 'cargo_profile=ci-cli' "$tmpdir/restored-cli/manifest"
