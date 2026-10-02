@@ -1153,6 +1153,26 @@ fn early_source_policy_errors(workflow: dict) -> list<string> {
       errors = errors + ["ci.yml:audit-scripts must not " + label + " behind the merge"]
     }
   }
+  // The hermetic shell gates refuse before the merge from their own job. Only
+  // the main-push lane ran them until a fixture missing `git init -b main`
+  // merged cleanly and turned main red. Counted on both sides for the same
+  // reason as the refusals above, and kept off the shared-CLI barrier: they
+  // need no Harn binary, and waiting for one would put about five minutes of
+  // shell tests on the merge queue's critical path.
+  const shell_job = workflow?.jobs?.["shell-gates"] ?? {}
+  const pre_warm_gates = "./scripts/tests/pr_gate_pre_warm_boundary_test.sh"
+  if command_step_count(shell_job?.steps ?? [], pre_warm_gates) != 1 {
+    errors = errors
+      + ["ci.yml:shell-gates must own exactly one invocation to run the pre-warm shell gates"]
+  }
+  if command_step_count(policy_steps, pre_warm_gates) != 0 {
+    errors = errors
+      + ["ci.yml:audit-scripts must not run the pre-warm shell gates behind the merge"]
+  }
+  if shell_job?.needs != "changes" && shell_job?.needs != ["changes"] {
+    errors = errors
+      + ["ci.yml:shell-gates must need only changes, not wait for the shared Harn binary"]
+  }
   if step_index_by_name(fast_steps, "Check no retroactive CHANGELOG edits") < 0 {
     errors = errors + ["ci.yml:fast-policy-gates must own the retroactive CHANGELOG guard"]
   }

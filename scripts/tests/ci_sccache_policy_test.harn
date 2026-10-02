@@ -539,8 +539,19 @@ fn workflow() {
             run: "make lint-no-rust-prompt-prose",
           },
           {uses: "./.github/actions/node-cache"},
-          {name: "Run pre-warm shell gates without Cargo"},
           {run: "make test-pr-gate-post-warm-integrations"},
+        ],
+      },
+      "shell-gates": {
+        "runs-on": "ubuntu-latest",
+        needs: ["changes"],
+        if: "needs.changes.outputs.rust == 'true'",
+        "timeout-minutes": 20,
+        steps: [
+          {
+            name: "Run pre-warm shell gates without Cargo",
+            run: "./scripts/tests/pr_gate_pre_warm_boundary_test.sh",
+          },
         ],
       },
       "ci-status": {
@@ -1150,6 +1161,54 @@ pipeline test_rejects_a_cheap_refusal_moved_back_or_made_expensive(
     },
   }
   assert(ci_linux_lane_policy_errors(uncheckedout).contains(credential_message))
+}
+
+@test
+pipeline test_rejects_shell_gates_moved_behind_the_merge_or_the_cli(
+  harness: Harness,
+  task: unknown,
+) {
+  const valid = workflow()
+  assert_eq(ci_linux_lane_policy_errors(valid), [])
+  const shell_job = valid.jobs["shell-gates"]
+  const policy_job = valid.jobs["audit-scripts"]
+  const pre_warm = "./scripts/tests/pr_gate_pre_warm_boundary_test.sh"
+  // Moved back into the main-push lane, the shape that let a fixture defect
+  // merge and turn main red. Both halves are asserted.
+  const moved_back = {
+    ...valid,
+    jobs: {
+      ...valid.jobs,
+      "shell-gates": {...shell_job, steps: []},
+      "audit-scripts": {...policy_job, steps: policy_job.steps + [{run: pre_warm}]},
+    },
+  }
+  const moved_errors = ci_linux_lane_policy_errors(moved_back)
+  assert(
+    moved_errors.contains(
+      "ci.yml:shell-gates must own exactly one invocation to run the pre-warm shell gates",
+    ),
+  )
+  assert(
+    moved_errors.contains(
+      "ci.yml:audit-scripts must not run the pre-warm shell gates behind the merge",
+    ),
+  )
+  // Scoping it to main pushes is refused by the cheap-refusal rule, pinned in
+  // check_ci_cache_policy_test.harn against the real workflow.
+  // Put behind the shared-CLI barrier.
+  const barriered = {
+    ...valid,
+    jobs: {
+      ...valid.jobs,
+      "shell-gates": {...shell_job, needs: ["changes", "rust-artifacts-ready"]},
+    },
+  }
+  assert(
+    ci_linux_lane_policy_errors(barriered).contains(
+      "ci.yml:shell-gates must need only changes, not wait for the shared Harn binary",
+    ),
+  )
 }
 
 @test

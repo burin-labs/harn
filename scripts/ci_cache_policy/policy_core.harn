@@ -313,8 +313,13 @@ pub const LIVE_ARTIFACT_CONSUMERS = [
  * stranded in `audit-scripts`: they cost 24 seconds together. The rest of
  * that job is fourteen minutes and stays where it is, which is a cost
  * argument and not a claim that it should not be able to refuse.
+ *
+ * `shell-gates` carries the hermetic shell gates from the same lane: about
+ * four and a half minutes of shell tests over fakes, no build and no Harn
+ * binary, so it starts with the run on a free hosted runner and finishes
+ * inside the merge group's wall.
  */
-pub const CHEAP_PR_REFUSAL_JOBS = ["fast-policy-gates", "source-length-ratchet"]
+pub const CHEAP_PR_REFUSAL_JOBS = ["fast-policy-gates", "shell-gates", "source-length-ratchet"]
 
 /**
  * Event terms that put a job behind the merge.
