@@ -177,6 +177,13 @@ live in [Engineering principles](docs/src/dev/engineering-principles.md):
 
 ## Verification
 
+- `Verify publishable crates` runs on every pull request and merge group that
+  touches the package surface, but `CI status` does not wait for it, so a PR
+  can merge before it finishes. Its result lands on the merged commit: a red
+  one on `main` blocks the next release until it is fixed, so fix it forward
+  at once. When you change a crate's `Cargo.toml`, `include` list, build
+  script, or dependency bounds, wait for that check on the PR before
+  enqueueing.
 - Start with the narrowest check through the owning interface.
 - Run one exact Rust test without unrelated nextest discovery with
   `HARN_TEST_ONE_NAME='module::tests::case' make test-one`. Set

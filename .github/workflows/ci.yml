@@ -358,7 +358,11 @@ jobs:
           set -euo pipefail
           proven=false
           if [[ "$EVENT_NAME" == "push" ]]; then
-            if ! proven="$(./scripts/ci_merge_group_proof.sh "$REPOSITORY" ci.yml "$COMMIT_SHA")"; then
+            # Package verification no longer holds the merge verdict, so it can
+            # still be running in the merge group when this push starts. Its
+            # check lands on this same commit either way.
+            if ! proven="$(./scripts/ci_merge_group_proof.sh "$REPOSITORY" ci.yml "$COMMIT_SHA" \
+              --allow-pending-job "Verify publishable crates")"; then
               echo "::notice::merge-group proof helper failed; keeping the full push CI graph enabled"
               proven=false
             fi
@@ -2682,7 +2686,6 @@ jobs:
       [
         changes,
         fmt,
-        package-audit,
         public-api,
         lint-md,
         release-contract,
@@ -2760,25 +2763,16 @@ jobs:
             exit 1
           fi
 
-          # Publishable-crate checks are release checks, not formatting checks. They
-          # run for package-relevant PRs and merge_group events; skips are OK
-          # only when the changes job determined the package surface was not
-          # touched or when exact-SHA merge-group proof reuse is active.
-          package_audit_result="${{ needs['package-audit'].result }}"
-          package_audit_expected="${{ needs.changes.outputs.package_audit }}"
-          echo "Publishable crate checks: $package_audit_result"
-          if [ "$package_audit_result" != "success" ]; then
-            if [ "$package_audit_result" = "skipped" ] \
-              && { [ "$package_audit_expected" != "true" ] || [ "$merge_group_proven" = "true" ]; }; then
-              :
-            else
-              echo "::error::Publishable crate checks failed or skipped when required."
-              exit 1
-            fi
-          fi
+          # Publishable-crate verification still runs on every merge group, but
+          # it does not hold this verdict: at about 15 minutes it was the merge
+          # queue's long pole for a release-time property. Its check lands on
+          # the merged commit, so a failure turns main red after the merge.
+          # Release certification still requires it to have passed, so a
+          # release stops until it is fixed.
 
           # The public API check shares package verification's trigger, so the
           # same skips are the only acceptable ones.
+          package_audit_expected="${{ needs.changes.outputs.package_audit }}"
           public_api_result="${{ needs['public-api'].result }}"
           echo "Public Rust API check: $public_api_result"
           if [ "$public_api_result" != "success" ]; then
