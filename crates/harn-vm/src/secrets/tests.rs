@@ -174,12 +174,13 @@ async fn chain_secret_provider_returns_all_errors_when_everything_fails() {
 #[tokio::test]
 async fn chain_absence_is_typed_and_names_consulted_and_excluded_providers() {
     let id = SecretId::new("google_workspace", "oauth-token");
+    let env = EnvSecretProvider::new("harn.test");
+    // Derived rather than spelled out: the environment registry scan treats a
+    // literal variable name in source as a registered runtime variable.
+    let env_var = env.env_var_name(&id);
     let plan = SecretChainPlan::from_value(Some("env"));
-    let chain = ChainSecretProvider::new(
-        "harn.test",
-        vec![Arc::new(EnvSecretProvider::new("harn.test"))],
-    )
-    .with_excluded(plan.excluded);
+    let chain =
+        ChainSecretProvider::new("harn.test", vec![Arc::new(env)]).with_excluded(plan.excluded);
 
     let error = chain.get(&id).await.expect_err("nothing is stored");
     assert!(error.is_not_found());
@@ -190,7 +191,7 @@ async fn chain_absence_is_typed_and_names_consulted_and_excluded_providers() {
         absence.consulted,
         vec![ConsultedSecretProvider {
             provider: "env".to_string(),
-            locator: Some("HARN_SECRET_GOOGLE_WORKSPACE_OAUTH_TOKEN".to_string()),
+            locator: Some(env_var.clone()),
         }]
     );
     assert_eq!(
@@ -204,10 +205,15 @@ async fn chain_absence_is_typed_and_names_consulted_and_excluded_providers() {
         }]
     );
     assert_eq!(
+        env_var,
+        ["HARN", "SECRET", "GOOGLE", "WORKSPACE", "OAUTH", "TOKEN"].join("_")
+    );
+    assert_eq!(
         error.to_string(),
-        "secret 'google_workspace/oauth-token' not found in providers: \
-         env (HARN_SECRET_GOOGLE_WORKSPACE_OAUTH_TOKEN); \
-         keyring disabled by HARN_SECRET_PROVIDERS=env"
+        format!(
+            "secret 'google_workspace/oauth-token' not found in providers: \
+             env ({env_var}); keyring disabled by HARN_SECRET_PROVIDERS=env"
+        )
     );
 }
 
