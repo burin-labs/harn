@@ -94,10 +94,17 @@ pub(crate) fn apply_prompt_cache_breakpoint(
     }
 }
 
-/// A caller marker sits where providers read one: on a message, on a message
-/// content block, on a block nested in a tool result, or on a tool definition.
-/// A key named `cache_control` inside tool arguments or a JSON schema is user
-/// data and does not count.
+/// A caller marker counts only where every marker-placing adapter carries it
+/// to the provider: on a content block, on a block nested in a tool result, or
+/// on a tool definition. Two positions are excluded because egress removes
+/// them after this decision: a message-level key, which the OpenAI-compatible
+/// adapter's message-key allowlist strips, and a whitespace-only text block,
+/// which the Anthropic adapter drops. Deferring to either would leave the
+/// request with no breakpoint at all. A key named `cache_control` inside tool
+/// arguments or a JSON schema is user data and does not count either.
+///
+/// `every_counted_marker_survives_both_marker_placing_adapters` builds each
+/// counted shape through both adapters and fails if one stops carrying it.
 fn request_carries_cache_marker(request: &LlmRequestPayload) -> bool {
     request.messages.iter().any(message_carries_cache_marker)
         || request
@@ -108,24 +115,27 @@ fn request_carries_cache_marker(request: &LlmRequestPayload) -> bool {
 }
 
 fn message_carries_cache_marker(message: &serde_json::Value) -> bool {
-    message.get("cache_control").is_some()
-        || match message.get("content") {
-            Some(serde_json::Value::Array(blocks)) => blocks.iter().any(block_carries_cache_marker),
-            Some(block @ serde_json::Value::Object(_)) => block_carries_cache_marker(block),
-            _ => false,
-        }
+    match message.get("content") {
+        Some(serde_json::Value::Array(blocks)) => blocks.iter().any(block_carries_cache_marker),
+        Some(block @ serde_json::Value::Object(_)) => block_carries_cache_marker(block),
+        _ => false,
+    }
 }
 
 fn block_carries_cache_marker(block: &serde_json::Value) -> bool {
-    block.get("cache_control").is_some()
+    (block.get("cache_control").is_some() && !is_whitespace_text_block(block))
         || block
             .get("content")
             .and_then(serde_json::Value::as_array)
-            .is_some_and(|nested| {
-                nested
-                    .iter()
-                    .any(|inner| inner.get("cache_control").is_some())
-            })
+            .is_some_and(|nested| nested.iter().any(block_carries_cache_marker))
+}
+
+fn is_whitespace_text_block(block: &serde_json::Value) -> bool {
+    block.get("type").and_then(serde_json::Value::as_str) == Some("text")
+        && block
+            .get("text")
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|text| text.trim().is_empty())
 }
 
 fn insert_last_message_cache_control(
@@ -328,9 +338,6 @@ mod tests {
     #[test]
     fn caller_markers_in_every_provider_position_defer() {
         let caps = caps(CacheBreakpointStyle::LastBlock);
-        let message_level = request(vec![serde_json::json!({
-            "role": "user", "content": "hello", "cache_control": marker(),
-        })]);
         let tool_result_block = request(vec![serde_json::json!({
             "role": "user",
             "content": [{"type": "tool_result", "tool_use_id": "t1", "content": [
@@ -344,7 +351,6 @@ mod tests {
             "cache_control": marker(),
         })]);
         for (label, request) in [
-            ("message", message_level),
             ("tool_result block", tool_result_block),
             ("tool definition", tool_definition),
         ] {
@@ -379,6 +385,165 @@ mod tests {
                 style: BreakpointPlacement::LastBlock
             }
         );
+    }
+
+    /// Caller-marker shapes, each paired with whether the deferral rule must
+    /// count it. Shared by the policy test and the egress drift guard below.
+    fn marker_corpus() -> Vec<(
+        &'static str,
+        Vec<serde_json::Value>,
+        Option<serde_json::Value>,
+        bool,
+    )> {
+        let use_and_result = |result: serde_json::Value| {
+            vec![
+                serde_json::json!({"role": "user", "content": "run it"}),
+                serde_json::json!({"role": "assistant", "content": [
+                    {"type": "tool_use", "id": "toolu_1", "name": "run", "input": {}},
+                ]}),
+                serde_json::json!({"role": "user", "content": [result]}),
+            ]
+        };
+        vec![
+            (
+                "text block",
+                vec![serde_json::json!({"role": "user", "content": [
+                    {"type": "text", "text": "stable prefix", "cache_control": marker()},
+                    {"type": "text", "text": "hello"},
+                ]})],
+                None,
+                true,
+            ),
+            (
+                "tool_result block",
+                use_and_result(serde_json::json!({
+                    "type": "tool_result", "tool_use_id": "toolu_1", "content": "out",
+                    "cache_control": marker(),
+                })),
+                None,
+                true,
+            ),
+            (
+                "block nested in a tool_result",
+                use_and_result(serde_json::json!({
+                    "type": "tool_result", "tool_use_id": "toolu_1", "content": [
+                        {"type": "text", "text": "out", "cache_control": marker()},
+                    ],
+                })),
+                None,
+                true,
+            ),
+            (
+                "tool definition",
+                vec![serde_json::json!({"role": "user", "content": "hello"})],
+                Some(serde_json::json!({
+                    "type": "function",
+                    "function": {"name": "lookup", "parameters": {"type": "object"}},
+                    "cache_control": marker(),
+                })),
+                true,
+            ),
+            (
+                "message level",
+                vec![serde_json::json!({
+                    "role": "user", "content": "hello", "cache_control": marker(),
+                })],
+                None,
+                false,
+            ),
+            (
+                "whitespace-only text block",
+                vec![serde_json::json!({"role": "user", "content": [
+                    {"type": "text", "text": "  ", "cache_control": marker()},
+                    {"type": "text", "text": "hello"},
+                ]})],
+                None,
+                false,
+            ),
+        ]
+    }
+
+    fn corpus_request(
+        provider: &str,
+        model: &str,
+        messages: Vec<serde_json::Value>,
+        tool: Option<serde_json::Value>,
+        cache: bool,
+    ) -> LlmRequestPayload {
+        let mut opts = crate::llm::api::options::base_opts(provider);
+        opts.model = model.to_string();
+        opts.messages = messages;
+        opts.native_tools = tool.map(|tool| vec![tool]);
+        opts.cache = cache;
+        LlmRequestPayload::from(&opts)
+    }
+
+    #[test]
+    fn deferral_counts_only_markers_in_provider_read_positions() {
+        let caps = caps(CacheBreakpointStyle::LastBlock);
+        for (label, messages, tool, counted) in marker_corpus() {
+            let request = corpus_request(
+                "anthropic",
+                "claude-opus-4-5-20251101",
+                messages,
+                tool,
+                true,
+            );
+            let expected = if counted {
+                PromptCacheBreakpoint::DeferredToExistingMarker
+            } else {
+                PromptCacheBreakpoint::Placed {
+                    style: BreakpointPlacement::LastBlock,
+                }
+            };
+            assert_eq!(
+                PromptCacheBreakpoint::resolve(&request, &caps),
+                expected,
+                "{label}"
+            );
+        }
+    }
+
+    /// Drift guard for the deferral rule. A deferral is only truthful if the
+    /// caller marker it defers to reaches the provider, and the adapters
+    /// sanitize after the decision: the OpenAI-compatible adapter keeps only
+    /// allowlisted message keys and Anthropic drops whitespace-only blocks.
+    /// Build each counted shape through both marker-placing adapters with
+    /// caching off, so any marker in the body is the caller's, and require it
+    /// to survive. A position an adapter starts dropping fails here instead of
+    /// leaving a request with no breakpoint at all.
+    #[test]
+    fn every_counted_marker_survives_both_marker_placing_adapters() {
+        for (label, messages, tool, counted) in marker_corpus() {
+            if !counted {
+                continue;
+            }
+            let anthropic = crate::llm::providers::anthropic::AnthropicProvider::build_request_body(
+                &corpus_request(
+                    "anthropic",
+                    "claude-opus-4-5-20251101",
+                    messages.clone(),
+                    tool.clone(),
+                    false,
+                ),
+            );
+            let openai_compat =
+                crate::llm::providers::openai_compat::OpenAiCompatibleProvider::build_request_body(
+                    &corpus_request(
+                        "openrouter",
+                        "anthropic/claude-fable-5-1",
+                        messages,
+                        tool,
+                        false,
+                    ),
+                );
+            for (adapter, built) in [("anthropic", anthropic), ("openai_compat", openai_compat)] {
+                assert!(
+                    body_contains_cache_control(&built),
+                    "{label}: the {adapter} adapter dropped a marker the deferral rule counts\n{built:#}"
+                );
+            }
+        }
     }
 
     #[test]

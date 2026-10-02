@@ -549,7 +549,7 @@ prompt-cache breakpoint in `prompt_cache_breakpoint.outcome`:
 | `not_requested` | The call turned caching off. |
 | `unsupported` | The route does not declare prompt caching. |
 | `automatic` | The route caches without a request marker, so none was sent. |
-| `deferred_to_existing_marker` | A `cache_control` marker you supplied on a message, content block, or tool definition takes precedence, so Harn added none. Only the prefixes you marked are cached. |
+| `deferred_to_existing_marker` | A `cache_control` marker you supplied on a content block, a tool-result block, or a tool definition takes precedence, so Harn added none. Only the prefixes you marked are cached. A marker directly on a message, or on a whitespace-only text block, does not count, because provider egress removes it. |
 
 A provider returns `cache_read_input_tokens: 0` without an error both when no
 breakpoint was sent and when the cached prefix is below the model's minimum
