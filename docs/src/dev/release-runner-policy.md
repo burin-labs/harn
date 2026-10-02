@@ -54,9 +54,17 @@ and [Blacksmith pricing](https://www.blacksmith.sh/pricing).
 ## Current decision
 
 Release candidates build both Apple targets on `macos-15-xlarge`, including
-the x86_64 cross build. Linux targets and CLI AOT preparation use Blacksmith's
-16-vCPU Ubuntu 22.04 image. GitHub's 16-core Ubuntu 22.04 pool is the independent
-Linux recovery path. Windows remains on `windows-latest` because the measured
+the x86_64 cross build. Linux targets and CLI AOT preparation use GitHub's
+16-core Ubuntu 22.04 pool (`ubuntu-16core-release`), which is also the recovery
+runner. They used Blacksmith's 16-vCPU Ubuntu 22.04 image until 2026-10-02.
+Since harn#9068, a Harn child process on Linux refuses to start without Landlock
+or bubblewrap, and that image has neither. The x86_64 job's binary-size growth step
+runs `harn run scripts/check_binary_size.harn`, which spawns processes, so a
+candidate built there would fail. The CI cache policy now refuses any Linux
+release runner, in any mode, whose label marks it unable to confine a Harn
+child. Per the receipts below, the move costs about $0.47 more per release for
+both Linux jobs, and their builds take about five minutes longer.
+Windows remains on `windows-latest` because the measured
 47m05s Windows job fits the 75-minute release objective after the slower Apple
 jobs move off the critical path. Routine cache refreshes remain on standard
 capacity.
@@ -100,7 +108,8 @@ Windows to a follow-up asset would add manifest and consumer complexity without
 improving the stated objective, so it remains part of the candidate archive.
 
 Set `HARN_RELEASE_ENABLE_BLACKSMITH_LINUX=true` so candidate and benchmark AOT
-preparation uses the policy's Blacksmith runner. The macOS variable is retained
+preparation uses the policy's primary AOT runner rather than the standard one.
+Despite its name, that primary is now GitHub's 16-core pool. The macOS variable is retained
 for compatibility, but the selected GitHub XLarge primary does not depend on
 it. Explicit `standard` and `fast` benchmark profiles continue to honor the
 operator's selected profile.

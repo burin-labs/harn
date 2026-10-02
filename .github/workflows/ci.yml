@@ -804,7 +804,7 @@ jobs:
     # on for merge_group and non-metadata pushes (see the `changes` job).
     # ci-status treats a skip here as PASS so branch protection isn't deadlocked.
     if: needs.changes.outputs.rust == 'true'
-    runs-on: ${{ vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true' && (github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) && 'blacksmith-8vcpu-ubuntu-2404' || 'ubuntu-24.04' }}
+    runs-on: ubuntu-24.04
     # Each leg resolves a different feature graph, so none reuses another's
     # check units. Run in sequence on one runner they summed to 15-16 minutes
     # (7m15s + 4m02s + 4m42s on 2026-10-01), the longest Rust lane in the merge
@@ -836,7 +836,7 @@ jobs:
       # link-arg appended. Linux-only: the macOS job never sees this and
       # keeps the workflow-level `-D warnings`.
       RUSTFLAGS: "-D warnings -Clink-arg=-fuse-ld=mold"
-      HARN_RUNNER_TIER: ${{ vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true' && (github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) && 'blacksmith' || 'github-hosted' }}
+      HARN_RUNNER_TIER: github-hosted
     # Matrix legs share one outputs map and the last leg to finish wins each
     # key, so every leg owns a distinct key and ci-status requires all three.
     outputs:
@@ -977,17 +977,11 @@ jobs:
     # on it (run 36987728246). A cold build on Ubicloud's 8 vCPU runner took
     # 693s for about $0.10. The workspace test producer keeps the owned rung.
     runs-on: >-
-      ${{ (vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true'
-        && (github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository))
-        && 'blacksmith-8vcpu-ubuntu-2404')
-        || (vars.HARN_CI_PAID_LINUX_PROVIDER != 'github'
+      ${{ (vars.HARN_CI_PAID_LINUX_PROVIDER != 'github'
         && 'ubicloud-standard-8')
         || 'ubuntu-8core' }}
     timeout-minutes: >-
-      ${{ (vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true'
-        && (github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository))
-        && 20)
-        || (vars.HARN_CI_PAID_LINUX_PROVIDER != 'github'
+      ${{ (vars.HARN_CI_PAID_LINUX_PROVIDER != 'github'
         && 37)
         || 37 }}
     # The paid rung is Ubicloud's 8 vCPU runner (about a third of GitHub's
@@ -1004,10 +998,7 @@ jobs:
       RUSTFLAGS: "-D warnings -Clink-arg=-fuse-ld=mold"
       SCCACHE_CACHE_SIZE: 15G
       HARN_RUNNER_TIER: >-
-        ${{ (vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true'
-          && (github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository))
-          && 'blacksmith')
-          || (vars.HARN_CI_PAID_LINUX_PROVIDER != 'github'
+        ${{ (vars.HARN_CI_PAID_LINUX_PROVIDER != 'github'
           && 'ubicloud')
           || 'github-hosted' }}
     steps:
@@ -1039,11 +1030,6 @@ jobs:
           packages: mold
           check-command: mold
       - uses: ./.github/actions/rust-toolchain
-      - uses: ./.github/actions/sccache
-        if: env.HARN_RUNNER_TIER == 'blacksmith'
-        with:
-          cache-key: harn-ci-cli
-          sticky: "true"
       # Every tier gets an explicit answer, because a guard that names only
       # the tiers it knows turns a new tier into a silent skip: the first
       # self-hosted run would compile cold, report success, and say nothing.
@@ -1054,7 +1040,6 @@ jobs:
       # writes it: `save` is restore-only off `main`, and the owned rung is
       # pull-request-only, so the authorized main-branch writer is untouched.
       - uses: ./.github/actions/rust-cache
-        if: env.HARN_RUNNER_TIER != 'blacksmith'
         continue-on-error: true
         with:
           shared-key: harn-ci-cli
@@ -1143,19 +1128,13 @@ jobs:
     # reserve, with bounded cold retries: 6 setup + 24 + 26 = 56. It is a
     # hang backstop, not a claim about host core count or improved performance.
     runs-on: >-
-      ${{ (vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true'
-        && (github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository))
-        && 'blacksmith-8vcpu-ubuntu-2404')
-        || (needs.rust-producer-capacity.outputs.route == 'owned'
+      ${{ (needs.rust-producer-capacity.outputs.route == 'owned'
         && fromJSON('["self-hosted", "Linux", "X64", "harn-ci-big"]'))
         || (vars.HARN_CI_PAID_LINUX_PROVIDER != 'github'
         && 'ubicloud-standard-8')
         || 'ubuntu-8core' }}
     timeout-minutes: >-
-      ${{ (vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true'
-        && (github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository))
-        && 20)
-        || (needs.rust-producer-capacity.outputs.route == 'owned'
+      ${{ (needs.rust-producer-capacity.outputs.route == 'owned'
         && 56)
         || (vars.HARN_CI_PAID_LINUX_PROVIDER != 'github'
         && 60)
@@ -1186,10 +1165,7 @@ jobs:
       # with the host unit that starts that server.
       SCCACHE_CACHE_SIZE: 15G
       HARN_RUNNER_TIER: >-
-        ${{ (vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true'
-          && (github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository))
-          && 'blacksmith')
-          || (needs.rust-producer-capacity.outputs.route == 'owned'
+        ${{ (needs.rust-producer-capacity.outputs.route == 'owned'
           && 'self-hosted')
           || (vars.HARN_CI_PAID_LINUX_PROVIDER != 'github'
           && 'ubicloud')
@@ -1223,11 +1199,6 @@ jobs:
           packages: mold
           check-command: mold
       - uses: ./.github/actions/rust-toolchain
-      - uses: ./.github/actions/sccache
-        if: env.HARN_RUNNER_TIER == 'blacksmith'
-        with:
-          cache-key: workspace-tests
-          sticky: "true"
       # Every tier gets an explicit answer, because a guard that names only
       # the tiers it knows turns a new tier into a silent skip: the first
       # self-hosted run would compile cold, report success, and say nothing.
@@ -1238,7 +1209,6 @@ jobs:
       # writes it: `save` is restore-only off `main`, and the owned rung is
       # pull-request-only, so the authorized main-branch writer is untouched.
       - uses: ./.github/actions/rust-cache
-        if: env.HARN_RUNNER_TIER != 'blacksmith'
         continue-on-error: true
         with:
           shared-key: workspace-tests
@@ -1624,7 +1594,7 @@ jobs:
     # verifies the exact-commit binary only at the last responsible moment.
     needs: [changes]
     if: needs.changes.outputs.rust == 'true' && needs.changes.outputs.sprint_fast_ci != 'true'
-    runs-on: ${{ vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true' && (github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) && 'blacksmith-8vcpu-ubuntu-2404' || 'ubuntu-24.04' }}
+    runs-on: ubuntu-24.04
     # The immutable CLI producer is shared, and the Harn proof work after it is
     # spread over free hosted workers. Everything here starts only once the CLI
     # exists (about six minutes in), so each worker must finish its share in a

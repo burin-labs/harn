@@ -7,6 +7,7 @@ import {
   cli_producer_timeout_expression,
   consumer_canary_errors,
   e2e_elastic_capacity_errors,
+  landlock_incapable_runner_errors,
   producer_admission_expression,
   producer_cache_save_reserve_minutes,
   producer_cli_timeout_expression,
@@ -44,8 +45,11 @@ const BUDGET_STEP = {
   env: {HARN_BUDGET_PROFILE: "producer"},
 }
 
+// The slow E2E suite's route: owned capacity when the census says so, else the
+// shared hosted runner. The evacuation switch reaches it through the capacity
+// decision, never through a Blacksmith Linux rung.
 const E2E_SWITCH_ROUTE =
-  "vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true' && 'blacksmith-8vcpu-ubuntu-2404' || 'ubuntu-24.04'"
+  "needs.e2e-capacity.outputs.route == 'owned' && 'self-hosted' || 'ubuntu-24.04'"
 
 fn e2e_workflow(runs_on: string, evacuation_input: string) -> dict {
   return {
@@ -65,16 +69,45 @@ fn e2e_workflow(runs_on: string, evacuation_input: string) -> dict {
 }
 
 @test
-pipeline test_e2e_paid_override_fails_when_runner_route_drops_switch(
+pipeline test_e2e_route_refuses_a_linux_runner_that_cannot_confine_harn(
   harness: Harness,
   task: unknown,
 ) {
+  // Blacksmith Linux has neither Landlock nor bubblewrap, so every Harn child
+  // this suite spawns refuses to start there.
   const invalid = e2e_workflow(
-    "ubuntu-24.04",
+    gha_expression(
+      "vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true' && 'blacksmith-8vcpu-ubuntu-2404' || 'ubuntu-24.04'",
+    ),
     gha_expression("vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true'"),
   )
-  const errors = e2e_elastic_capacity_errors(invalid)
-  assert(errors.any(fn(error) { contains(error, "HARN_CI_ENABLE_BLACKSMITH_LINUX") }))
+  assert(
+    landlock_incapable_runner_errors("e2e.yml", invalid).contains(
+      "e2e.yml:e2e can resolve to blacksmith-8vcpu-ubuntu-2404, a Linux runner that cannot confine a Harn child (no Landlock or bubblewrap)",
+    ),
+  )
+}
+
+@test
+pipeline test_landlock_contract_keeps_vendor_windows_and_macos_runners(
+  harness: Harness,
+  task: unknown,
+) {
+  // Only Linux labels are refused: the contract is about Harn's Linux child
+  // confinement, and Blacksmith's Windows runners are not Linux.
+  const workflow = {
+    jobs: {
+      windows: {"runs-on": "blacksmith-16vcpu-windows-2025"},
+      linux: {"runs-on": "ubuntu-24.04"},
+      matrix_linux: {strategy: {matrix: {include: [{runner: "blacksmith-4vcpu-ubuntu-2404"}]}}},
+    },
+  }
+  assert_eq(
+    landlock_incapable_runner_errors("ci.yml", workflow),
+    [
+      "ci.yml:matrix_linux can resolve to blacksmith-4vcpu-ubuntu-2404, a Linux runner that cannot confine a Harn child (no Landlock or bubblewrap)",
+    ],
+  )
 }
 
 @test
@@ -165,8 +198,6 @@ pipeline test_consumer_canary_accepts_checkout_mint_and_script(harness: Harness,
 }
 
 fn persistent_lane(
-  runner: string,
-  sccache_key: string,
   rust_cache_key: string,
   write_cache: bool = false,
   timeout: string = "",
@@ -174,7 +205,7 @@ fn persistent_lane(
 ) {
   const cache_inputs = {"shared-key": rust_cache_key, "cache-workspace-crates": "true"}
   let lane = {
-    "runs-on": producer_runner_expression(runner, owned_rung),
+    "runs-on": producer_runner_expression(owned_rung),
     needs: ["changes", "runner-availability", "rust-producer-capacity"],
     if: producer_admission_expression(),
     "timeout-minutes": if timeout == "" {
@@ -184,16 +215,7 @@ fn persistent_lane(
     },
     env: {HARN_RUNNER_TIER: producer_tier_expression(owned_rung), SCCACHE_CACHE_SIZE: "15G"},
     steps: [
-      {
-        uses: "./.github/actions/sccache",
-        if: "env.HARN_RUNNER_TIER == 'blacksmith'",
-        with: {"cache-key": sccache_key, sticky: "true"},
-      },
-      {
-        uses: "./.github/actions/rust-cache",
-        if: "env.HARN_RUNNER_TIER != 'blacksmith'",
-        with: cache_inputs,
-      },
+      {uses: "./.github/actions/rust-cache", with: cache_inputs},
       {name: "Summarize and stop sccache", if: "always()", run: "./scripts/ci/finalize_sccache.sh"},
     ],
   }
@@ -234,14 +256,8 @@ fn hosted_lane(cache_key: string, write_cache: bool = false) {
 
 fn lint_lane() {
   return {
-    "runs-on": gha_expression(
-      "vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true' && (github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) && 'blacksmith-8vcpu-ubuntu-2404' || 'ubuntu-24.04'",
-    ),
-    env: {
-      HARN_RUNNER_TIER: gha_expression(
-        "vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true' && (github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) && 'blacksmith' || 'github-hosted'",
-      ),
-    },
+    "runs-on": "ubuntu-24.04",
+    env: {HARN_RUNNER_TIER: "github-hosted"},
     strategy: {
       "fail-fast": false,
       matrix: {
@@ -259,15 +275,8 @@ fn lint_lane() {
 fn workflow() {
   const package_audit = hosted_lane("package-audit", true)
   const lint = lint_lane()
-  const producer = persistent_lane(
-    "blacksmith-8vcpu-ubuntu-2404",
-    "workspace-tests",
-    "workspace-tests",
-    true,
-  )
+  const producer = persistent_lane("workspace-tests", true)
   const cli_producer = persistent_lane(
-    "blacksmith-8vcpu-ubuntu-2404",
-    "harn-ci-cli",
     "harn-ci-cli",
     true,
     cli_producer_timeout_expression(),
@@ -1330,16 +1339,27 @@ pipeline test_rust_lint_lane_runs_every_leg_without_a_build_cache(harness: Harne
 }
 
 @test
-pipeline test_rejects_rust_lint_runner_switch_removal(harness: Harness, task: unknown) {
+pipeline test_rejects_rust_lint_on_a_runner_that_cannot_confine_harn(
+  harness: Harness,
+  task: unknown,
+) {
   const valid = workflow()
   const rust_job = valid.jobs["rust-checks"]
   const invalid = {
     ...valid,
-    jobs: {...valid.jobs, "rust-checks": {...rust_job, "runs-on": "ubuntu-24.04"}},
+    jobs: {
+      ...valid.jobs,
+      "rust-checks": {
+        ...rust_job,
+        "runs-on": gha_expression(
+          "vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true' && 'blacksmith-8vcpu-ubuntu-2404' || 'ubuntu-24.04'",
+        ),
+      },
+    },
   }
   assert(
     ci_linux_lane_policy_errors(invalid).contains(
-      "ci.yml:rust-checks must route trusted PR and merge-group work through the shared Blacksmith switch",
+      "ci.yml:rust-checks must run on GitHub-hosted ubuntu-24.04",
     ),
   )
 }
@@ -1377,9 +1397,7 @@ pipeline test_rejects_a_producer_cache_guard_that_names_only_the_hosted_tier(har
   }
   const errors = ci_linux_lane_policy_errors(guarded)
   assert(
-    errors.contains(
-      "ci.yml:rust-check-inputs must restore rust-cache on every tier except Blacksmith, which has its own sticky sccache",
-    ),
+    errors.contains("ci.yml:rust-check-inputs must restore rust-cache on every tier"),
     "a guard naming only the hosted tier must be refused; got ${to_string(errors)}",
   )
 }
@@ -1540,10 +1558,7 @@ pipeline test_owned_producer_requires_measured_capacity(harness: Harness) {
   }
 }
 
-pipeline test_rejects_paid_producer_outside_trusted_events_or_without_fuse(
-  harness: Harness,
-  task: unknown,
-) {
+pipeline test_rejects_a_producer_ladder_off_its_rungs_or_ceilings(harness: Harness, task: unknown) {
   const valid = workflow()
   const producer = valid.jobs["rust-check-inputs"]
   const invalid = {
@@ -1568,7 +1583,7 @@ pipeline test_rejects_paid_producer_outside_trusted_events_or_without_fuse(
   const errors = ci_linux_lane_policy_errors(invalid)
   assert(
     errors.contains(
-      "ci.yml:rust-check-inputs must ladder paid blacksmith-8vcpu-ubuntu-2404, the owned linux_big pool on same-repository pull requests, ubicloud-standard-8, then ubuntu-8core",
+      "ci.yml:rust-check-inputs must ladder the owned linux_big pool on same-repository pull requests, ubicloud-standard-8, then ubuntu-8core",
     ),
   )
   assert(errors.contains("ci.yml:rust-check-inputs must mirror every one of its runner tiers"))
@@ -1577,22 +1592,16 @@ pipeline test_rejects_paid_producer_outside_trusted_events_or_without_fuse(
   const cli = valid.jobs["rust-cli"]
   const owned_cli = {
     ...valid,
-    jobs: {
-      ...valid.jobs,
-      "rust-cli": {
-        ...cli,
-        "runs-on": producer_runner_expression("blacksmith-8vcpu-ubuntu-2404", true),
-      },
-    },
+    jobs: {...valid.jobs, "rust-cli": {...cli, "runs-on": producer_runner_expression(true)}},
   }
   assert(
     ci_linux_lane_policy_errors(owned_cli).contains(
-      "ci.yml:rust-cli must ladder paid blacksmith-8vcpu-ubuntu-2404, ubicloud-standard-8, then ubuntu-8core",
+      "ci.yml:rust-cli must ladder ubicloud-standard-8, then ubuntu-8core",
     ),
   )
   assert(
     errors.contains(
-      "ci.yml:rust-check-inputs must keep the 20-minute paid-runner fuse, the 56-minute owned ceiling, and the 60-minute hosted ceiling sized from its step budgets plus a cache-save reserve",
+      "ci.yml:rust-check-inputs must keep the 56-minute owned ceiling and the 60-minute paid ceiling sized from its step budgets plus a cache-save reserve",
     ),
   )
 }
