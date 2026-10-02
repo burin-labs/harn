@@ -85,10 +85,10 @@ pub const RELEASE_PATH_FILTER_OUTPUT = "$"
 pub const RELEASE_PATH_FILTER_BRANCH = "[[ \"$RELEASE_BUILD_INPUTS_CHANGED\" == \"true\" ]]"
 
 pub const RELEASE_WORKFLOW_CONCURRENCY_GROUP = "build-release-binaries-$"
-  + "{{ (github.event_name == 'workflow_dispatch' && inputs.benchmark_source_sha != '' && format('benchmark-{0}-{1}', inputs.benchmark_source_sha, github.sha)) || (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.warm_cache_only)) && 'warm-main' || (github.event_name == 'push' && format('branch-{0}', github.run_id)) || github.ref_name }}"
+  + "{{ (github.event_name == 'workflow_dispatch' && inputs.benchmark_source_sha != '' && format('benchmark-{0}-{1}', inputs.benchmark_source_sha, github.sha)) || (github.event_name == 'schedule' && 'source-main') || (github.event_name == 'workflow_dispatch' && inputs.warm_cache_only && 'warm-main') || (github.event_name == 'push' && format('branch-{0}', github.run_id)) || github.ref_name }}"
 
 pub const RELEASE_WORKFLOW_CANCEL_POLICY = "$"
-  + "{{ github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.warm_cache_only) }}"
+  + "{{ github.event_name == 'workflow_dispatch' && inputs.warm_cache_only }}"
 
 pub const RELEASE_BUILD_CONCURRENCY_GROUP = "build-release-binaries-build-$"
   + "{{ (github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.setup.outputs.build_mode == 'warm' && format('warm-{0}', matrix.target)) || format('{0}-{1}', github.run_id, matrix.target) }}"
@@ -900,9 +900,7 @@ pub fn release_warm_cache_concurrency_errors(workflow: dict) -> list<string> {
   if trim(workflow?.concurrency?.["cancel-in-progress"] ?? "")
     != RELEASE_WORKFLOW_CANCEL_POLICY {
     errors = errors
-      + [
-        "${RELEASE_BINARY_WORKFLOW} must reserve workflow cancellation for full scheduled/manual warms",
-      ]
+      + ["${RELEASE_BINARY_WORKFLOW} must reserve workflow cancellation for manual warms"]
   }
   const build_concurrency = workflow?.jobs?.build?.concurrency
   if trim(workflow?.jobs?.build?.if ?? "") != RELEASE_BUILD_IF {

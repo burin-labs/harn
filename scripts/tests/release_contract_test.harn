@@ -49,6 +49,7 @@ pipeline test_source_candidate_decision_reports_admission_and_refusal(task: unkn
   assert_eq(admitted.reason, "accepted")
   assert_eq(admitted.build_mode, "candidate")
   assert_eq(admitted.candidate_purpose, "source")
+  assert_eq(source_candidate_decision(request + {event: "schedule"}), admitted)
   const invalid = [
     request + {event: "push"},
     request + {ref_name: "topic"},
