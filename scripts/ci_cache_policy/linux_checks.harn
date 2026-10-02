@@ -194,9 +194,13 @@ fn hosted_ceiling_minutes(budgets: list<StepBudget>) -> int {
 }
 
 fn timeout_expression(budgets: list<StepBudget>) -> string {
+  // The vendor rung is a fresh VM that runs this job alone and writes the
+  // main-branch cache like the hosted rung, so it carries the hosted ceiling,
+  // cache-save reserve included.
   return producer_rung_expression(
     to_string(PRODUCER_PAID_FUSE_MINUTES),
     to_string(owned_ceiling_minutes(budgets)),
+    to_string(hosted_ceiling_minutes(budgets)),
     to_string(hosted_ceiling_minutes(budgets)),
   )
 }

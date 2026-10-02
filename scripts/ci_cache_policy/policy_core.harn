@@ -182,6 +182,19 @@ pub const HOSTED_LINUX_RUNNER = "ubuntu-latest"
  */
 pub const PRODUCER_HOSTED_LINUX_RUNNER = "ubuntu-8core"
 
+/**
+ * The producers' paid rung before GitHub's: Ubicloud's 8 vCPU runner, listed
+ * at $0.008/min on its premium tier against $0.022/min for `ubuntu-8core`.
+ * Ubicloud registers each runner just in time as a self-hosted runner, so it
+ * is its own tier for the same reason Blacksmith is.
+ */
+pub const PRODUCER_VENDOR_LINUX_RUNNER = "ubicloud-standard-8"
+
+/** `github` restores GitHub's 8-core runner as the producers' paid rung. */
+pub const PAID_LINUX_PROVIDER_VAR = "HARN_CI_PAID_LINUX_PROVIDER"
+
+pub const UBICLOUD_RUNNER_TIER = "ubicloud"
+
 pub const HOSTED_RUNNER_TIER = "github-hosted"
 
 pub const BLACKSMITH_RUNNER_TIER = "blacksmith"
@@ -1778,13 +1791,30 @@ pub fn paid_producer_condition() -> string {
  * about which events reach which capacity: a mirror that drifted from its
  * `runs-on` is how a tier guard starts naming a route the job never took.
  */
-pub fn producer_rung_expression(paid: string, owned: string, hosted: string) -> string {
+/**
+ * The paid rung after the owned pool. Ubicloud's 8 vCPU runner lists at a
+ * third of GitHub's 8-core rate, so it is the default; setting
+ * `${PAID_LINUX_PROVIDER_VAR}` to `github` puts the GitHub 8-core runner back
+ * without a code change.
+ */
+pub fn vendor_producer_condition() -> string {
+  return "(vars.${PAID_LINUX_PROVIDER_VAR} != 'github'"
+}
+
+pub fn producer_rung_expression(
+  paid: string,
+  owned: string,
+  vendor: string,
+  hosted: string,
+) -> string {
   return "$"
     + "{{ (vars.${BLACKSMITH_ENABLE_VAR} == 'true'"
     + "\n  && ${paid_producer_condition()}"
     + "\n  && ${paid})"
     + "\n  || ${owned_producer_condition()}"
     + "\n  && ${owned})"
+    + "\n  || ${vendor_producer_condition()}"
+    + "\n  && ${vendor})"
     + "\n  || ${hosted} }}"
 }
 
@@ -1792,6 +1822,7 @@ pub fn producer_runner_expression(runner: string) -> string {
   return producer_rung_expression(
     "'${runner}'",
     "fromJSON('${SELFHOSTED_LINUX_BIG_RUNNER}')",
+    "'${PRODUCER_VENDOR_LINUX_RUNNER}'",
     "'${PRODUCER_HOSTED_LINUX_RUNNER}'",
   )
 }
@@ -1800,6 +1831,7 @@ pub fn producer_tier_expression() -> string {
   return producer_rung_expression(
     "'${BLACKSMITH_RUNNER_TIER}'",
     "'${SELFHOSTED_RUNNER_TIER}'",
+    "'${UBICLOUD_RUNNER_TIER}'",
     "'${HOSTED_RUNNER_TIER}'",
   )
 }

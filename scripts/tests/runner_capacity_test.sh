@@ -113,4 +113,25 @@ CAPACITY_LABEL=RUST_PRODUCER_CAPACITY
 [[ $(runner_capacity_decision push '' "$measured") == "RUST_PRODUCER_CAPACITY "* ]]
 CAPACITY_LABEL=RUNNER_CAPACITY_DECISION
 
-echo 'Runner capacity: owned, retired, unrouted-event, evacuation-switch, retired-routing, census-fallback, routed-event and label controls passed'
+# A hosted decision names the paid runner the ladder picks: Ubicloud unless the
+# provider variable says github. Owned routes, evacuations, and callers with no
+# vendor rung carry no paid runner at all.
+paid_line() {
+  local output
+  output="$(mktemp)"
+  GITHUB_OUTPUT="$output" GITHUB_STEP_SUMMARY='' EVENT_NAME=$1 SELFHOSTED_DISABLED='' \
+    RUNNER_CAPACITY=$2 FLEET_EVACUATION=${3:-} PAID_LINUX_PROVIDER=${4:-} \
+    CAPACITY_VENDOR_RUNNER=${5-ubicloud-standard-8} CAPACITY_HOSTED_RUNNER=ubuntu-8core \
+    runner_capacity_main 2>&1 >/dev/null
+  rm -f "$output"
+}
+[[ $(paid_line merge_group "$measured") == *"route=hosted"*" paid_runner=ubicloud-standard-8 paid_provider=ubicloud_default" ]]
+[[ $(paid_line merge_group "$measured" '' github) == *" paid_runner=ubuntu-8core paid_provider=github" ]]
+[[ $(paid_line merge_group "$measured" '' ubicloud) == *" paid_runner=ubicloud-standard-8 paid_provider=ubicloud" ]]
+[[ $(paid_line merge_group "$measured" true) != *paid_runner=* ]]
+[[ $(paid_line merge_group "$measured" '' '' '') != *paid_runner=* ]]
+CAPACITY_ROUTED_EVENT=pull_request
+[[ $(paid_line pull_request "$measured") != *paid_runner=* ]]
+CAPACITY_ROUTED_EVENT=push
+
+echo 'Runner capacity: owned, retired, unrouted-event, evacuation-switch, retired-routing, census-fallback, routed-event, label and paid-runner controls passed'

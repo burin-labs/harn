@@ -936,6 +936,11 @@ jobs:
           # this step would report the owned census while the job ran on
           # elastic paid capacity.
           FLEET_EVACUATION: ${{ vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true' }}
+          # The paid rungs after the owned pool, and the variable that picks
+          # between them, so a hosted decision names the runner it lands on.
+          PAID_LINUX_PROVIDER: ${{ vars.HARN_CI_PAID_LINUX_PROVIDER }}
+          CAPACITY_VENDOR_RUNNER: ubicloud-standard-8
+          CAPACITY_HOSTED_RUNNER: ubuntu-8core
 
   rust-cli:
     name: Build shared Harn CLI
@@ -964,6 +969,8 @@ jobs:
         && 'blacksmith-8vcpu-ubuntu-2404')
         || (needs.rust-producer-capacity.outputs.route == 'owned'
         && fromJSON('["self-hosted", "Linux", "X64", "harn-ci-big"]'))
+        || (vars.HARN_CI_PAID_LINUX_PROVIDER != 'github'
+        && 'ubicloud-standard-8')
         || 'ubuntu-8core' }}
     timeout-minutes: >-
       ${{ (vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true'
@@ -971,13 +978,19 @@ jobs:
         && 20)
         || (needs.rust-producer-capacity.outputs.route == 'owned'
         && 37)
+        || (vars.HARN_CI_PAID_LINUX_PROVIDER != 'github'
+        && 37)
         || 37 }}
-    # The GitHub-hosted rung remains the authorized main-branch cache writer;
+    # The paid rung after the owned pool is Ubicloud's 8 vCPU runner (about a
+    # third of GitHub's 8-core rate); HARN_CI_PAID_LINUX_PROVIDER=github puts
+    # GitHub's runner back. Whichever paid rung main pushes land on is the
+    # authorized main-branch cache writer, and Ubicloud serves actions/cache
+    # from its own store, so its first runs after a switch build cold.
     # Blacksmith uses sticky sccache and never enters that step, and the owned
     # self-hosted rung is pull-request-only so it never reaches the write
     # either. That is the reason the owned rung is scoped to pull requests
     # rather than to every event: routing main pushes there would retire the
-    # writer, and every later hosted run would pay a cold cache.
+    # writer, and every later paid run would pay a cold cache.
     permissions:
       contents: read
       actions: write
@@ -991,6 +1004,8 @@ jobs:
           && 'blacksmith')
           || (needs.rust-producer-capacity.outputs.route == 'owned'
           && 'self-hosted')
+          || (vars.HARN_CI_PAID_LINUX_PROVIDER != 'github'
+          && 'ubicloud')
           || 'github-hosted' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -1130,6 +1145,8 @@ jobs:
         && 'blacksmith-8vcpu-ubuntu-2404')
         || (needs.rust-producer-capacity.outputs.route == 'owned'
         && fromJSON('["self-hosted", "Linux", "X64", "harn-ci-big"]'))
+        || (vars.HARN_CI_PAID_LINUX_PROVIDER != 'github'
+        && 'ubicloud-standard-8')
         || 'ubuntu-8core' }}
     timeout-minutes: >-
       ${{ (vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true'
@@ -1137,13 +1154,19 @@ jobs:
         && 20)
         || (needs.rust-producer-capacity.outputs.route == 'owned'
         && 56)
+        || (vars.HARN_CI_PAID_LINUX_PROVIDER != 'github'
+        && 60)
         || 60 }}
-    # The GitHub-hosted rung remains the authorized main-branch cache writer;
+    # The paid rung after the owned pool is Ubicloud's 8 vCPU runner (about a
+    # third of GitHub's 8-core rate); HARN_CI_PAID_LINUX_PROVIDER=github puts
+    # GitHub's runner back. Whichever paid rung main pushes land on is the
+    # authorized main-branch cache writer, and Ubicloud serves actions/cache
+    # from its own store, so its first runs after a switch build cold.
     # Blacksmith uses sticky sccache and never enters that step, and the owned
     # self-hosted rung is pull-request-only so it never reaches the write
     # either. That is the reason the owned rung is scoped to pull requests
     # rather than to every event: routing main pushes there would retire the
-    # writer, and every later hosted run would pay a cold cache.
+    # writer, and every later paid run would pay a cold cache.
     permissions:
       contents: read
       actions: write
@@ -1165,6 +1188,8 @@ jobs:
           && 'blacksmith')
           || (needs.rust-producer-capacity.outputs.route == 'owned'
           && 'self-hosted')
+          || (vars.HARN_CI_PAID_LINUX_PROVIDER != 'github'
+          && 'ubicloud')
           || 'github-hosted' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

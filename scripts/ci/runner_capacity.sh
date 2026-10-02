@@ -103,11 +103,32 @@ runner_capacity_decision() {
   echo "${CAPACITY_LABEL} event=$event route=owned pool=$pool carriers=$online idle=$idle"
 }
 
+# Which paid runner a hosted route lands on, for callers whose ladder has a
+# vendor rung before GitHub's. It reads the same variable the ladder reads, so
+# the line names the runner the job takes rather than the class it falls in.
+# Callers without CAPACITY_VENDOR_RUNNER keep the line they had.
+runner_capacity_paid_runner() {
+  local route=$1
+  [[ "$route" == hosted && -n "${CAPACITY_VENDOR_RUNNER:-}" ]] || return 0
+  if [[ "${PAID_LINUX_PROVIDER:-}" == github ]]; then
+    printf ' paid_runner=%s paid_provider=github' "${CAPACITY_HOSTED_RUNNER:?}"
+  else
+    printf ' paid_runner=%s paid_provider=%s' "$CAPACITY_VENDOR_RUNNER" \
+      "${PAID_LINUX_PROVIDER:-ubicloud_default}"
+  fi
+}
+
 runner_capacity_main() {
   local line route fallback
   line=$(runner_capacity_decision \
     "${EVENT_NAME:-}" "${SELFHOSTED_DISABLED:-}" "${RUNNER_CAPACITY:-}" \
     "${FLEET_EVACUATION:-}") || return 1
+  route=${line##*route=}
+  route=${route%% *}
+  # The evacuation switch sends the job to Blacksmith, not to the paid rung.
+  if [[ "${FLEET_EVACUATION:-}" != true ]]; then
+    line+=$(runner_capacity_paid_runner "$route")
+  fi
   echo "$line" >&2
   route=${line##*route=}
   route=${route%% *}
