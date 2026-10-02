@@ -31,7 +31,7 @@ pub(super) fn coerce_and_validate_handler_result(
     contract: Option<(&crate::tool_registry::PreparedToolCatalog, &str)>,
 ) -> Result<(serde_json::Value, HandlerOutcome), crate::value::VmError> {
     use crate::tool_registry::handler_result::{invalid_handler_result, parse_handler_result};
-    use crate::value::{VmError, VmValue};
+    use crate::value::VmValue;
     let json = crate::llm::vm_value_to_json(val);
     let invalid = invalid_handler_result;
     if let Some(result) = parse_handler_result(val)? {

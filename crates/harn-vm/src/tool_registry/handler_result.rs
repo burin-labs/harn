@@ -86,7 +86,7 @@ pub(crate) fn parse_handler_result(value: &VmValue) -> Result<Option<HandlerResu
         _ => value.struct_field(name),
     };
     if !matches!(field("schema"), Some(VmValue::String(schema))
-        if schema.as_ref() == AGENT_TOOL_HANDLER_RESULT_SCHEMA)
+        if schema.as_str() == AGENT_TOOL_HANDLER_RESULT_SCHEMA)
     {
         return Ok(None);
     }

@@ -29,7 +29,7 @@ pub(crate) fn tool_registry_catalog_for_tool(
         .iter()
         .find(|entry| {
             entry.as_dict().is_some_and(|entry| {
-                matches!(entry.get("name"), Some(VmValue::String(actual)) if actual.as_ref() == name)
+                matches!(entry.get("name"), Some(VmValue::String(actual)) if actual.as_str() == name)
             })
         })
         .ok_or_else(|| VmError::Runtime(format!("tool {name:?} is not registered")))?;
@@ -366,7 +366,7 @@ mod tests {
             .expect("the integer payload satisfies the output contract");
         assert!(
             matches!(outcome, ToolInvocationOutcome::Success { value, json, text }
-            if value == VmValue::Int(7) && json == json!(7)
+            if matches!(value, VmValue::Int(7)) && json == json!(7)
                 && text.as_deref() == Some("Created widget"))
         );
 
