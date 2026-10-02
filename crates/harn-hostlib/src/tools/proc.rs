@@ -593,7 +593,7 @@ pub(crate) fn process_error_to_hostlib(
             builtin,
             kind: "not_found",
             message: format!("program not found: {program}"),
-            missing_program: Some(program),
+            missing_program: Some(program.into_boxed_str()),
             requested_cwd: requested_cwd.map(str::to_string),
             cwd: to_agent_path(effective_cwd),
         },

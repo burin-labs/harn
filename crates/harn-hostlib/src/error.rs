@@ -78,7 +78,7 @@ pub enum HostlibError {
         /// Stable kind such as `not_found` or `permission_denied`.
         kind: &'static str,
         /// Executable proven absent before spawning, if known.
-        missing_program: Option<String>,
+        missing_program: Option<Box<str>>,
         /// Human-readable OS error.
         message: String,
         /// Canonical caller-selected directory, absent when the command
@@ -219,7 +219,7 @@ impl From<HostlibError> for VmError {
         dict.put_str("builtin", builtin);
         dict.put_str("message", message);
         if let Some(program) = missing_program {
-            dict.put_str("missing_program", program);
+            dict.put_str("missing_program", program.as_ref());
         }
         if is_process_spawn {
             dict.put_str("error", "io_error");
@@ -257,7 +257,7 @@ mod tests {
         let error = HostlibError::ProcessSpawn {
             builtin: "hostlib_tools_run_command",
             kind: "not_found",
-            missing_program: Some("missing-tool".to_string()),
+            missing_program: Some("missing-tool".into()),
             message: "No such file or directory".to_string(),
             requested_cwd: Some("/workspace/project".to_string()),
             cwd: "/workspace/project".to_string(),
