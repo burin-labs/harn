@@ -55,14 +55,14 @@ async fn prepared_host_policy_reaches_live_dispatch_and_delegated_scope() {
         other => panic!("unrequested tool approval must not block preparation: {other:?}"),
     };
     let result = run.execute(lease).await;
-    let (parent, child) = match result {
+    let decisions = match result {
         ExecutionOutcome::Completed { output, .. } => output,
         ExecutionOutcome::ExecutorFailed { error, .. }
         | ExecutionOutcome::AuthorityFailed { error, .. } => {
             panic!("executor should complete: {error}")
         }
     };
-    for decision in [parent, child] {
+    for decision in <[_; 2]>::from(decisions) {
         assert!(decision.is_deny());
         assert_eq!(
             decision.denial_gate(),

@@ -72,7 +72,7 @@ pub(crate) fn scope_approval_policy<F: Future>(policy: ToolApprovalPolicy, inner
     scope_modified(inner, |scope| {
         scope
             .approval
-            .push(crate::orchestration::policy::construct_live_approval_policy(policy))
+            .push(crate::orchestration::policy::construct_live_approval_policy(policy));
     })
 }
 

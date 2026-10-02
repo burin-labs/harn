@@ -10,7 +10,7 @@ pub fn push_approval_policy(policy: ToolApprovalPolicy) {
     super::EXECUTION_APPROVAL_POLICY_STACK.with(|stack| {
         stack
             .borrow_mut()
-            .push(construct_live_approval_policy(policy))
+            .push(construct_live_approval_policy(policy));
     });
 }
 
