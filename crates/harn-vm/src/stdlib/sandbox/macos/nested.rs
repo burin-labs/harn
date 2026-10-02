@@ -137,7 +137,7 @@ pub(super) fn report_inherited() {
     );
 }
 
-fn process_is_sandboxed() -> bool {
+pub(super) fn process_is_sandboxed() -> bool {
     // A null operation asks only whether the process is sandboxed at all.
     unsafe { sandbox_check(libc::getpid(), std::ptr::null(), SANDBOX_FILTER_NONE) > 0 }
 }
@@ -145,7 +145,7 @@ fn process_is_sandboxed() -> bool {
 /// Whether the process's own profile denies `operation`, on `path` when given.
 /// An error reads as "not denied", so a probe that cannot answer never
 /// vouches for the outer profile.
-fn outer_denies(operation: &str, path: Option<&Path>) -> bool {
+pub(super) fn outer_denies(operation: &str, path: Option<&Path>) -> bool {
     let Ok(operation) = CString::new(operation) else {
         return false;
     };
