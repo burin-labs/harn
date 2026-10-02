@@ -1663,7 +1663,7 @@ pipeline test_rejects_a_producer_ladder_off_its_rungs_or_ceilings(harness: Harne
   assert(!ci_linux_lane_policy_errors(valid).contains(cli_ladder_error))
   assert(
     errors.contains(
-      "ci.yml:rust-check-inputs must keep the 56-minute owned ceiling and the 60-minute paid ceiling sized from its step budgets plus a cache-save reserve",
+      "ci.yml:rust-check-inputs must keep the 56-minute owned ceiling, the 20-minute merge-group datacenter ceiling and the 60-minute paid ceiling sized from its step budgets plus a cache-save reserve",
     ),
   )
 }
@@ -2122,6 +2122,10 @@ pipeline test_merge_group_datacenter_rung_agrees_across_census_capacity_and_runs
     ),
   )
   assert(contains(producer_tier_expression(), "merge_route == 'owned'\n  && 'self-hosted'"))
+  // A merge group waits on this job, so its datacenter leg carries a short
+  // ceiling while pull requests keep the owned pool's cold-build one.
+  assert(contains(producer_timeout_expression(), "outputs.route == 'owned'\n  && 56)"))
+  assert(contains(producer_timeout_expression(), "merge_route == 'owned'\n  && 20)"))
   const producer = valid.jobs["rust-check-inputs"]
   const pull_request_only = "$"
     + "{{ (needs.rust-producer-capacity.outputs.route == 'owned'\n  && fromJSON('[\"self-hosted\", \"Linux\", \"X64\", \"harn-ci-big\"]'))\n  || (vars.HARN_CI_PAID_LINUX_PROVIDER != 'github'\n  && 'ubicloud-standard-8')\n  || 'ubuntu-8core' }}"
@@ -2134,6 +2138,26 @@ pipeline test_merge_group_datacenter_rung_agrees_across_census_capacity_and_runs
     )
       .contains(
         "ci.yml:rust-check-inputs must ladder the owned linux_big pool on same-repository pull requests, the hetzner-1 runners on merge groups, ubicloud-standard-8, then ubuntu-8core",
+      ),
+  )
+  const owned_ceiling_everywhere = regex_replace(
+    "merge_route == 'owned'\n  && 20\\)",
+    "merge_route == 'owned'\n  && 56)",
+    producer_timeout_expression(),
+  )
+  assert(owned_ceiling_everywhere != producer_timeout_expression())
+  assert(
+    ci_linux_lane_policy_errors(
+      {
+        ...valid,
+        jobs: {
+          ...valid.jobs,
+          "rust-check-inputs": {...producer, "timeout-minutes": owned_ceiling_everywhere},
+        },
+      },
+    )
+      .contains(
+        "ci.yml:rust-check-inputs must keep the 56-minute owned ceiling, the 20-minute merge-group datacenter ceiling and the 60-minute paid ceiling sized from its step budgets plus a cache-save reserve",
       ),
   )
   const census = valid.jobs["datacenter-availability"]

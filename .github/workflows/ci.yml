@@ -1219,6 +1219,9 @@ jobs:
     # The owned self-hosted rung is the same arithmetic minus the cache-save
     # reserve, with bounded cold retries: 6 setup + 24 + 26 = 56. It is a
     # hang backstop, not a claim about host core count or improved performance.
+    # A merge group's datacenter leg instead gets 20 minutes, about twice its
+    # measured 10.1-minute median: the queue waits on this job, so a runner
+    # that dies after admission should cost one short retry, not an hour.
     runs-on: >-
       ${{ (needs.rust-producer-capacity.outputs.route == 'owned'
         && fromJSON('["self-hosted", "Linux", "X64", "harn-ci-big"]'))
@@ -1231,7 +1234,7 @@ jobs:
       ${{ (needs.rust-producer-capacity.outputs.route == 'owned'
         && 56)
         || (needs.rust-producer-capacity.outputs.merge_route == 'owned'
-        && 56)
+        && 20)
         || (vars.HARN_CI_PAID_LINUX_PROVIDER != 'github'
         && 60)
         || 60 }}
