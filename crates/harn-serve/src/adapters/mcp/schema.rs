@@ -84,7 +84,7 @@ pub(super) fn tool_call_success(
 ) -> JsonValue {
     let mut result = json!({
         "content": match response.feedback {
-            Some(text) => vec![json!({"type": "text", "text": text})],
+            Some(text) => json!([{"type": "text", "text": text}]),
             None => content_blocks(&response.value),
         },
         "isError": false,
