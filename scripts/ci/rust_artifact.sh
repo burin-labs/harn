@@ -465,6 +465,7 @@ build_security_bundle() {
     --archive-file "$staging/harn-security-tests.tar.zst"
   host_bound_filter="$("${SCRIPT_DIR}/host_bound_rust_test_filter.sh" linux)"
   cargo nextest list --profile ci \
+    --ignore-default-filter \
     --archive-file "$staging/harn-security-tests.tar.zst" \
     --message-format json -E "$host_bound_filter" \
     > "$staging/host-bound-inventory.json"

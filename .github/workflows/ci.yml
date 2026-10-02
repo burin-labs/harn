@@ -1555,6 +1555,7 @@ jobs:
           host_bound_filter="$(scripts/ci/host_bound_rust_test_filter.sh)";
           scripts/ci/run_rust_test_lane.sh
           cargo nextest run --profile ci
+          --ignore-default-filter
           --success-output immediate
           --no-tests fail
           --archive-file "$RUNNER_TEMP/harn-security/harn-security-tests.tar.zst"

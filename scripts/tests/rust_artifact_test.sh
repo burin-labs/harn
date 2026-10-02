@@ -88,10 +88,11 @@ case "$1" in
       printf 'cargo-nextest %s (fake)\n' "${FAKE_NEXTEST_VERSION:-}"
       exit 0
     fi
-    if [[ "$#" -eq 10 && "$2" == "list" && "$3" == "--profile" && \
-      "$4" == "ci" && "$5" == "--archive-file" && -n "$6" && \
-      "$7" == "--message-format" && "$8" == "json" && "$9" == "-E" && \
-      "${10}" == "${EXPECTED_HOST_BOUND_FILTER:?}" ]]; then
+    if [[ "$#" -eq 11 && "$2" == "list" && "$3" == "--profile" && \
+      "$4" == "ci" && "$5" == "--ignore-default-filter" && \
+      "$6" == "--archive-file" && -n "$7" && \
+      "$8" == "--message-format" && "$9" == "json" && "${10}" == "-E" && \
+      "${11}" == "${EXPECTED_HOST_BOUND_FILTER:?}" ]]; then
       cat "${FAKE_NEXTTEST_INVENTORY:?}"
       : > "${CARGO_RECEIPTS:?}/nextest-security-list"
     elif [[ "$#" -eq 10 && "$2" == "archive" && "$3" == "--locked" && \
@@ -191,6 +192,16 @@ test -f "$tmpdir/receipts/nextest-security-list"
 
 # Missing one registered case in the archived inventory must fail publication.
 fixture_test="$(grep '^canonical_fixture_' <<< "$expected_linux_tests")"
+ci_default_filter="$(awk '
+  /^\[profile\.ci\]$/ { in_ci=1; next }
+  /^\[/ { in_ci=0 }
+  in_ci && /^default-filter = / { sub(/^default-filter = /, ""); print; exit }
+' "$repo_root/.config/nextest.toml")"
+[[ "$ci_default_filter" == *'binary(harn_cli_e2e)'* && "$ci_default_filter" == *'test(/'* ]]
+if [[ "$ci_default_filter" == *"$fixture_test"* ]]; then
+  echo "host-bound fixture unexpectedly entered the CI default allowlist" >&2
+  exit 1
+fi
 make_fake_security_inventory "$fixture_test" > "$tmpdir/security-inventory-missing-fixture.json"
 if NEXTTEST_INVENTORY_OVERRIDE="$tmpdir/security-inventory-missing-fixture.json" \
   run_artifact build-security "$tmpdir/out/security-missing-fixture.tar.zst" "$commit" \
