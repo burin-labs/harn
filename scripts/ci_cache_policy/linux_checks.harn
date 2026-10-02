@@ -193,13 +193,13 @@ fn hosted_ceiling_minutes(budgets: list<StepBudget>) -> int {
   return total
 }
 
-fn timeout_expression(budgets: list<StepBudget>) -> string {
+fn timeout_expression(budgets: list<StepBudget>, owned_rung: bool = true) -> string {
   // The vendor rung is a fresh VM that runs this job alone and writes the
   // main-branch cache like the hosted rung, so it carries the hosted ceiling,
   // cache-save reserve included.
   return producer_rung_expression(
     to_string(PRODUCER_PAID_FUSE_MINUTES),
-    to_string(owned_ceiling_minutes(budgets)),
+    owned_rung ? to_string(owned_ceiling_minutes(budgets)) : "",
     to_string(hosted_ceiling_minutes(budgets)),
     to_string(hosted_ceiling_minutes(budgets)),
   )
@@ -228,7 +228,7 @@ pub fn cli_producer_hosted_ceiling_minutes() -> int {
 }
 
 pub fn cli_producer_timeout_expression() -> string {
-  return timeout_expression(CLI_PRODUCER_STEP_BUDGETS)
+  return timeout_expression(CLI_PRODUCER_STEP_BUDGETS, producer_uses_owned_pool("rust-cli"))
 }
 
 /** Trusted PR producers require a measured capacity decision before dispatch. */
@@ -433,20 +433,26 @@ fn persistent_compile_lane_errors(
     errors = errors
       + ["ci.yml:${job_name} must require a successful capacity decision on trusted pull requests"]
   }
-  if trim(job?.["runs-on"] ?? "") != producer_runner_expression(runner) {
+  const owned_rung = producer_uses_owned_pool(job_name)
+  if trim(job?.["runs-on"] ?? "") != producer_runner_expression(runner, owned_rung) {
+    const owned_clause = if owned_rung {
+      " the owned ${SELFHOSTED_LINUX_BIG_POOL} pool on same-repository pull requests,"
+    } else {
+      ""
+    }
     errors = errors
       + [
-        "ci.yml:${job_name} must ladder paid ${runner}, the owned ${SELFHOSTED_LINUX_BIG_POOL} pool on same-repository pull requests, then a hosted fallback",
+        "ci.yml:${job_name} must ladder paid ${runner},${owned_clause} ${PRODUCER_VENDOR_LINUX_RUNNER}, then ${PRODUCER_HOSTED_LINUX_RUNNER}",
       ]
   }
-  if trim(job?.env?.[RUNNER_TIER_ENV] ?? "") != producer_tier_expression() {
+  if trim(job?.env?.[RUNNER_TIER_ENV] ?? "") != producer_tier_expression(owned_rung) {
     errors = errors
-      + ["ci.yml:${job_name} must mirror all three of its runner tiers"]
+      + ["ci.yml:${job_name} must mirror every one of its runner tiers"]
   }
   if trim(to_string(job?.env?.SCCACHE_CACHE_SIZE ?? "")) != "15G" {
     errors = errors + ["ci.yml:${job_name} must bound persistent sccache at 15G"]
   }
-  if trim(to_string(job?.["timeout-minutes"] ?? "")) != timeout_expression(budgets) {
+  if trim(to_string(job?.["timeout-minutes"] ?? "")) != timeout_expression(budgets, owned_rung) {
     errors = errors
       + [
         "ci.yml:${job_name} must keep the ${PRODUCER_PAID_FUSE_MINUTES}-minute paid-runner fuse, the ${owned_ceiling_minutes(budgets)}-minute owned ceiling, and the ${hosted_ceiling_minutes(budgets)}-minute hosted ceiling sized from its step budgets plus a cache-save reserve",

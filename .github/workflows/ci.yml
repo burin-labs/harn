@@ -960,15 +960,18 @@ jobs:
     # Paid minutes per run are about the same; two paid runners now overlap.
     #
     # Hosted ceiling: 6 setup + 19 CLI budget + 12 cache-save reserve = 37.
-    # Owned ceiling: 6 setup + 31 CLI budget = 37.
     # The CLI builds in the ci-cli profile (opt-level 1), which costs more to
     # compile than dev and runs every Harn proof lane four to five times faster.
+    #
+    # No owned rung. An owned carrier shares four cores among six runners, so
+    # this build gets one compile job there, and with no target restored and
+    # no sccache it hit its 31-minute step timeout while ten proof lanes waited
+    # on it (run 36987728246). A cold build on Ubicloud's 8 vCPU runner took
+    # 693s for about $0.10. The workspace test producer keeps the owned rung.
     runs-on: >-
       ${{ (vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true'
         && (github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository))
         && 'blacksmith-8vcpu-ubuntu-2404')
-        || (needs.rust-producer-capacity.outputs.route == 'owned'
-        && fromJSON('["self-hosted", "Linux", "X64", "harn-ci-big"]'))
         || (vars.HARN_CI_PAID_LINUX_PROVIDER != 'github'
         && 'ubicloud-standard-8')
         || 'ubuntu-8core' }}
@@ -976,21 +979,15 @@ jobs:
       ${{ (vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true'
         && (github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository))
         && 20)
-        || (needs.rust-producer-capacity.outputs.route == 'owned'
-        && 37)
         || (vars.HARN_CI_PAID_LINUX_PROVIDER != 'github'
         && 37)
         || 37 }}
-    # The paid rung after the owned pool is Ubicloud's 8 vCPU runner (about a
-    # third of GitHub's 8-core rate); HARN_CI_PAID_LINUX_PROVIDER=github puts
-    # GitHub's runner back. Whichever paid rung main pushes land on is the
-    # authorized main-branch cache writer, and Ubicloud serves actions/cache
-    # from its own store, so its first runs after a switch build cold.
-    # Blacksmith uses sticky sccache and never enters that step, and the owned
-    # self-hosted rung is pull-request-only so it never reaches the write
-    # either. That is the reason the owned rung is scoped to pull requests
-    # rather than to every event: routing main pushes there would retire the
-    # writer, and every later paid run would pay a cold cache.
+    # The paid rung is Ubicloud's 8 vCPU runner (about a third of GitHub's
+    # 8-core rate); HARN_CI_PAID_LINUX_PROVIDER=github puts GitHub's runner
+    # back. Whichever paid rung main pushes land on is the authorized
+    # main-branch cache writer, and Ubicloud serves actions/cache from its own
+    # store, so its first runs after a switch build cold. Blacksmith uses
+    # sticky sccache and never enters that step.
     permissions:
       contents: read
       actions: write
@@ -1002,8 +999,6 @@ jobs:
         ${{ (vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true'
           && (github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository))
           && 'blacksmith')
-          || (needs.rust-producer-capacity.outputs.route == 'owned'
-          && 'self-hosted')
           || (vars.HARN_CI_PAID_LINUX_PROVIDER != 'github'
           && 'ubicloud')
           || 'github-hosted' }}

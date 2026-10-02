@@ -1807,30 +1807,50 @@ pub fn producer_rung_expression(
   vendor: string,
   hosted: string,
 ) -> string {
+  // An empty `owned` drops the owned rung: a lane that must not wait on the
+  // owned pool's per-host compile budget goes straight to paid capacity.
+  const owned_rung = if owned == "" {
+    ""
+  } else {
+    "\n  || ${owned_producer_condition()}" + "\n  && ${owned})"
+  }
   return "$"
     + "{{ (vars.${BLACKSMITH_ENABLE_VAR} == 'true'"
     + "\n  && ${paid_producer_condition()}"
     + "\n  && ${paid})"
-    + "\n  || ${owned_producer_condition()}"
-    + "\n  && ${owned})"
+    + owned_rung
     + "\n  || ${vendor_producer_condition()}"
     + "\n  && ${vendor})"
     + "\n  || ${hosted} }}"
 }
 
-pub fn producer_runner_expression(runner: string) -> string {
+/**
+ * Whether a producer may land on the owned pool.
+ *
+ * The shared CLI may not. Every Harn proof lane waits for it, and an owned
+ * carrier shares four cores among six runners, so its compile budget is one
+ * job: with no target restored and no sccache it hit its 31-minute step
+ * timeout in run 36987728246, while a cold build on the vendor rung took
+ * 693s. The workspace test producer keeps the owned rung; nothing waits on its
+ * finish except the verdict.
+ */
+pub fn producer_uses_owned_pool(job_name: string) -> bool {
+  return job_name != "rust-cli"
+}
+
+pub fn producer_runner_expression(runner: string, owned_rung: bool = true) -> string {
   return producer_rung_expression(
     "'${runner}'",
-    "fromJSON('${SELFHOSTED_LINUX_BIG_RUNNER}')",
+    owned_rung ? "fromJSON('${SELFHOSTED_LINUX_BIG_RUNNER}')" : "",
     "'${PRODUCER_VENDOR_LINUX_RUNNER}'",
     "'${PRODUCER_HOSTED_LINUX_RUNNER}'",
   )
 }
 
-pub fn producer_tier_expression() -> string {
+pub fn producer_tier_expression(owned_rung: bool = true) -> string {
   return producer_rung_expression(
     "'${BLACKSMITH_RUNNER_TIER}'",
-    "'${SELFHOSTED_RUNNER_TIER}'",
+    owned_rung ? "'${SELFHOSTED_RUNNER_TIER}'" : "",
     "'${UBICLOUD_RUNNER_TIER}'",
     "'${HOSTED_RUNNER_TIER}'",
   )
