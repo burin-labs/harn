@@ -335,6 +335,20 @@ threads-required = "num-cpus"
 filter = 'package(=harn-cli) and kind(=lib) and test(=commands::replay_offline_coding::tests::exact_replay_executes_recorded_read_edit_verify_turn)'
 threads-required = "num-test-threads"
 
+# The default-stack stop case spawns the real binary with a fresh HOME, so the
+# child compiles the agent stdlib stack into an empty bytecode cache before the
+# sub-agent starts. That compile is ~9s of single-core CPU in a debug build and
+# the rest of the run is ~1s, so its wall time is the share of a core it gets.
+# On the 2026-10-02 scheduled parity run it took 17s at 1 thread, 30s at 8, and
+# hit the 120s kill at 16 threads on a 4-core runner. Locally, 96 concurrent
+# cold copies on 18 cores all finished with the correct output in 115s-158s,
+# clustered rather than with a stalled outlier, so this is contention, not a
+# hang. The cold cache stays because a first run after install is a shipped
+# path; reserving the pool makes the 120s ceiling measure this run alone.
+[[profile.default.overrides]]
+filter = 'package(harn-cli) and binary(harn_cli_fast) and test(=stop_default_stack::stopping_a_background_sub_agent_survives_the_default_worker_stack)'
+threads-required = "num-test-threads"
+
 # ---------------------------------------------------------------------------
 # Wall-clock budget tests: reserve the runner while they measure
 # ---------------------------------------------------------------------------

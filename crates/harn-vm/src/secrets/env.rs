@@ -135,6 +135,19 @@ impl SecretProvider for EnvSecretProvider {
     fn supports_versions(&self) -> bool {
         false
     }
+
+    fn locator(&self, id: &SecretId) -> Option<String> {
+        Some(self.env_var_name(id))
+    }
+
+    fn kind(&self) -> &'static str {
+        "env"
+    }
+
+    /// `put` mutates only this process's environment.
+    fn persists_writes(&self) -> bool {
+        false
+    }
 }
 
 fn normalize_env_component(value: &str) -> String {

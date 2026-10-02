@@ -1118,12 +1118,24 @@ fn secret_lease_grant_value(
 fn secret_error_to_vm(error: crate::secrets::SecretError) -> VmError {
     use crate::secrets::SecretError;
     match error {
-        SecretError::NotFound { .. } | SecretError::NoProviders { .. } => {
+        // `not_found` means exactly "no provider holds it": callers such as
+        // `std/oauth/storage` treat it as "nothing stored yet". Every provider
+        // reporting absence is absence, not a tool failure.
+        SecretError::NotFound { .. } | SecretError::NotFoundInChain(_) => {
             VmError::CategorizedError {
                 message: error.to_string(),
                 category: ErrorCategory::NotFound,
             }
         }
+        SecretError::All(_) if error.is_not_found() => VmError::CategorizedError {
+            message: error.to_string(),
+            category: ErrorCategory::NotFound,
+        },
+        // An empty chain is a configuration error, not an absent secret.
+        SecretError::NoProviders { .. } => VmError::CategorizedError {
+            message: error.to_string(),
+            category: ErrorCategory::ToolError,
+        },
         SecretError::Unsupported { .. } | SecretError::InvalidInput(_) => {
             VmError::TypeError(error.to_string())
         }

@@ -1,17 +1,20 @@
 /**
- * Refuse a release candidate that the promoted bump orchestration cannot drive.
+ * Refuse a release candidate that the orchestration its consumers will run
+ * cannot drive.
  *
- * A published release starts every consumer's runtime bump at once. Each bump
- * installs the new release but runs the bump driver from the orchestration
- * commit that harn-bump-fleet's `fleet.toml` promoted, which is usually older
- * than the release. When the release changes a `std/bump` contract the driver
- * implements, every consumer bump fails after the release is already public.
- * v0.10.153 did this: it made `LiveBumpRemote.is_generated_commit` required
- * while the promoted driver predated the field.
+ * Every consumer bump installs the new release but runs the bump driver from
+ * the orchestration commit harn-bump-fleet's `fleet.toml` pins. A release
+ * promotes that pin to its own commit before any consumer bumps, unless the pin
+ * already names a descendant, which promotion keeps. So the driver a release's
+ * bumps run is the candidate's own, or that newer pin. When it cannot
+ * type-check against the candidate, every consumer bump fails after the release
+ * is public, as v0.10.153 did with `LiveBumpRemote.is_generated_commit`.
  *
- * This type-checks every file of the promoted driver package with the
- * candidate binary. Checking only the entry point is not enough: the adapter
- * that builds the remote record is reached through an import and passes.
+ * This type-checks every file of that driver package with the candidate
+ * binary. Checking only the entry point is not enough: the adapter that builds
+ * the remote record is reached through an import and passes. When the current
+ * pin is older, its driver is checked too, as a warning: a bump dispatched by
+ * hand before the promotion converges still runs it.
  */
 import { help_requested, parse, parser } from "std/cli/argparse"
 
@@ -42,6 +45,24 @@ pub fn promoted_orchestration_sha(manifest_text: string) -> Result<string, strin
     return Err("fleet.toml policy.bump_workflow must pin a full commit SHA, got '${sha}'")
   }
   return Ok(sha)
+}
+
+/**
+ * The orchestration commit consumers run once this candidate is promoted.
+ *
+ * `pinned_relation` is GitHub's compare status of the pin against the
+ * candidate (`candidate...pinned`). Promotion keeps a pin that is ahead of the
+ * released commit and otherwise moves it to the release.
+ */
+pub fn orchestration_after_promotion(
+  candidate: string,
+  pinned: string,
+  pinned_relation: string,
+) -> string {
+  if pinned_relation == "ahead" {
+    return pinned
+  }
+  return candidate
 }
 
 fn run_step(
@@ -85,7 +106,7 @@ fn extract_driver(process: HarnessProcess, root: string, sha: string, scratch: s
       root,
     )
   }
-  const archive = path_join(scratch, "driver.tar")
+  const archive = path_join(scratch, "driver-${sha}.tar")
   run_step(
     process,
     "archive ${DRIVER_PATH}",
@@ -93,7 +114,7 @@ fn extract_driver(process: HarnessProcess, root: string, sha: string, scratch: s
     ["archive", "-o", archive, sha, DRIVER_PATH],
     root,
   )
-  const orchestration = path_join(scratch, "orchestration")
+  const orchestration = path_join(scratch, "orchestration-${sha}")
   run_step(process, "create ${orchestration}", "mkdir", ["-p", orchestration], scratch)
   run_step(process, "extract ${DRIVER_PATH}", "tar", ["-xf", archive, "-C", orchestration], scratch)
   return path_join(orchestration, DRIVER_PATH)
@@ -105,6 +126,13 @@ fn arg_spec() {
       name: "check_promoted_bump_orchestration",
       args: [
         {kind: "flag", name: "candidate", long: "--candidate", parse: "string", required: true},
+        {
+          kind: "flag",
+          name: "candidate_commit",
+          long: "--candidate-commit",
+          parse: "string",
+          default: "",
+        },
         {kind: "flag", name: "manifest", long: "--manifest", parse: "string", default: ""},
       ],
     },
@@ -112,13 +140,50 @@ fn arg_spec() {
 }
 
 fn usage() -> string {
-  return "usage: harn run --no-sandbox scripts/check_promoted_bump_orchestration.harn -- --candidate PATH [--manifest FLEET_TOML]"
+  return "usage: harn run --no-sandbox scripts/check_promoted_bump_orchestration.harn -- --candidate PATH [--candidate-commit SHA] [--manifest FLEET_TOML]"
 }
 
-/** Check the promoted driver inside `scratch` and return the process exit code. */
+fn pin_relation(
+  process: HarnessProcess,
+  root: string,
+  candidate: string,
+  pinned: string,
+) -> string {
+  if candidate == pinned {
+    return "identical"
+  }
+  const compared = run_step(
+    process,
+    "compare ${candidate}...${pinned}",
+    "gh",
+    ["api", "repos/burin-labs/harn/compare/${candidate}...${pinned}", "--jq", ".status"],
+    root,
+  )
+  return trim(compared.stdout)
+}
+
+/** Install and type-check one driver package; the failed check's output, or nil. */
+fn driver_check_failure(
+  process: HarnessProcess,
+  root: string,
+  candidate: string,
+  sha: string,
+  scratch: string,
+) -> string? {
+  const driver = extract_driver(process, root, sha, scratch)
+  run_step(process, "install the driver at ${sha}", candidate, ["install", "--locked"], driver)
+  const checked = process.run({program: candidate, args: ["check", "."], cwd: driver})
+  if checked.success {
+    return nil
+  }
+  return checked.stdout + checked.stderr
+}
+
+/** Check the driver consumers will run, inside `scratch`, and return the exit code. */
 fn check_promoted_driver(
   harness: Harness,
   candidate: string,
+  candidate_commit: string,
   manifest: string,
   scratch: string,
 ) -> int {
@@ -132,29 +197,32 @@ fn check_promoted_driver(
     harness.stdio.eprintln("error: ${unwrap_err(promoted)}")
     return 1
   }
-  const sha = unwrap(promoted)
+  const pinned = unwrap(promoted)
   const root = path_normalize(path_join(harness.fs.source_dir(), ".."))
-  const driver = extract_driver(harness.process, root, sha, scratch)
-  run_step(
-    harness.process,
-    "install the promoted driver",
-    candidate,
-    ["install", "--locked"],
-    driver,
-  )
-  const checked = harness.process.run({program: candidate, args: ["check", "."], cwd: driver})
-  if !checked.success {
-    harness.stdio.eprint(checked.stdout)
-    harness.stdio.eprint(checked.stderr)
+  const release = if candidate_commit != "" {
+    candidate_commit
+  } else {
+    trim(run_step(harness.process, "resolve HEAD", "git", ["rev-parse", "HEAD"], root).stdout)
+  }
+  const relation = pin_relation(harness.process, root, release, pinned)
+  const effective = orchestration_after_promotion(release, pinned, relation)
+  const failure = driver_check_failure(harness.process, root, candidate, effective, scratch)
+  if failure != nil {
+    harness.stdio.eprint(failure ?? "")
     harness.stdio.eprintln(
-      "error: the bump driver at promoted orchestration ${sha} does not type-check against this candidate.",
-    )
-    harness.stdio.eprintln(
-      "Publishing it would fail every consumer's runtime bump. Promote harn-bump-fleet's bump orchestration to a main commit whose driver satisfies this runtime (promote_bump_workflow.harn), then rerun this candidate.",
+      "error: the bump driver at ${effective}, which this release's consumer bumps will run, does not type-check against this candidate.",
     )
     return 1
   }
-  harness.stdio.println("promoted bump orchestration ${sha} type-checks against the candidate")
+  harness.stdio.println("bump orchestration ${effective} type-checks against the candidate")
+  if effective != pinned {
+    const stale = driver_check_failure(harness.process, root, candidate, pinned, scratch)
+    if stale != nil {
+      harness.stdio.println(
+        "::warning title=Bump orchestration::the current pin ${pinned} does not type-check against this candidate; a bump dispatched by hand before the release's promotion converges will fail",
+      )
+    }
+  }
   return 0
 }
 
@@ -176,6 +244,7 @@ fn main(harness: Harness) {
     check_promoted_driver(
       harness,
       path_normalize(to_string(options.candidate)),
+      to_string(options.candidate_commit),
       to_string(options.manifest),
       scratch,
     )

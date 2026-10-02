@@ -744,6 +744,8 @@ impl AcpProfileConfig {
 
 #[derive(Clone)]
 pub struct AcpServerConfig {
+    /// Trusted launch authority, independent of client environment grants.
+    pub host_inference_boundary: Option<harn_vm::llm::api::InferenceBoundary>,
     pub pipeline: Option<String>,
     pub auth_policy: AuthPolicy,
     pub authenticated_principal: Option<AuthenticatedPrincipal>,
@@ -778,6 +780,7 @@ pub struct AcpSandboxConfig {
 impl AcpServerConfig {
     pub fn new(pipeline: Option<String>) -> Self {
         Self {
+            host_inference_boundary: None,
             pipeline,
             auth_policy: AuthPolicy::allow_all(),
             authenticated_principal: None,
@@ -979,6 +982,7 @@ struct VmBaselineCacheEntry {
 /// ACP server that reads JSON-RPC requests from a transport and writes
 /// responses / notifications back to that same transport.
 pub struct AcpServer {
+    host_inference_boundary: Option<harn_vm::llm::api::InferenceBoundary>,
     descriptor: AdapterDescriptor,
     /// Optional pipeline file to execute on each `session/prompt`.
     pipeline: Option<String>,

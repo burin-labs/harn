@@ -117,6 +117,19 @@ impl std::error::Error for ToolContractViolation {}
 pub struct ToolApplicationError {
     pub tool: String,
     pub data: JsonValue,
+    /// The failure disposition a handler declared through the typed
+    /// `harn.agent_tool_handler_result.v2` envelope. `None` for a declared
+    /// throw, whose disposition is always an error.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub outcome: Option<ToolApplicationOutcome>,
+}
+
+/// Failure outcomes a handler may declare in its typed result envelope.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ToolApplicationOutcome {
+    Error,
+    Rejected,
 }
 
 impl ToolApplicationError {
@@ -127,7 +140,10 @@ impl ToolApplicationError {
 
     /// Stable human summary that never reads free-form application data.
     pub fn summary(&self) -> &'static str {
-        "declared application error"
+        match self.outcome {
+            Some(ToolApplicationOutcome::Rejected) => "declared application rejection",
+            Some(ToolApplicationOutcome::Error) | None => "declared application error",
+        }
     }
 }
 
@@ -265,6 +281,24 @@ impl PreparedToolCatalog {
         self.validate(name, ToolContractPhase::Output, value)
     }
 
+    /// Validate failure data a handler returned under an explicit failure
+    /// outcome. Unlike a raw throw, the disposition is declared, so a tool
+    /// without an error schema still yields application data; a declared
+    /// error schema must accept it.
+    pub fn declared_failure(
+        &self,
+        name: &str,
+        data: &JsonValue,
+        outcome: ToolApplicationOutcome,
+    ) -> Result<ToolApplicationError, ToolContractViolation> {
+        self.validate(name, ToolContractPhase::ApplicationError, data)?;
+        Ok(ToolApplicationError {
+            tool: name.to_string(),
+            data: data.clone(),
+            outcome: Some(outcome),
+        })
+    }
+
     /// Classify one portable raw throw without depending on VM error types.
     pub fn classify_thrown_json(&self, name: &str, value: &JsonValue) -> ToolThrownClassification {
         let Some(index) = self.names.get(name).copied() else {
@@ -279,6 +313,7 @@ impl PreparedToolCatalog {
             Ok(()) => ToolThrownClassification::Application(ToolApplicationError {
                 tool: name.to_string(),
                 data: value.clone(),
+                outcome: None,
             }),
             Err(error) => ToolThrownClassification::ContractViolation(error),
         }
@@ -602,6 +637,7 @@ mod tests {
         let error = ToolApplicationError {
             tool: "lookup".to_string(),
             data: json!({"variant": "private customer\nidentifier", "message": "secret"}),
+            outcome: None,
         };
         let summary = error.summary();
         assert_eq!(summary, "declared application error");

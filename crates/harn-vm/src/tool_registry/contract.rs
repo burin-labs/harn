@@ -28,8 +28,8 @@ pub use cli::{
 };
 pub use prepared::{
     PreparedCliArgument, PreparedCliCommand, PreparedCliTree, PreparedToolCatalog,
-    PreparedToolCatalogError, ToolApplicationError, ToolContractPhase, ToolContractViolation,
-    ToolContractViolationDetail, ToolThrownClassification,
+    PreparedToolCatalogError, ToolApplicationError, ToolApplicationOutcome, ToolContractPhase,
+    ToolContractViolation, ToolContractViolationDetail, ToolThrownClassification,
 };
 
 pub const TOOL_CATALOG_SCHEMA_VERSION: &str = "harn-tools/2.0";

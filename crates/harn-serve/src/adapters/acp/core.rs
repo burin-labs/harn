@@ -53,6 +53,7 @@ impl AcpServer {
             llm_capability_overrides,
             default_budget: config.budget,
             sandbox: config.sandbox,
+            host_inference_boundary: config.host_inference_boundary,
             active_bulk_auth: std::sync::Mutex::new(None),
             known_sessions,
             _session_change_subscription: harn_vm::subscribe_session_changes(Arc::new(

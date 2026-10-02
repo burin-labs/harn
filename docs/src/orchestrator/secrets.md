@@ -141,6 +141,20 @@ The provider order is controlled with `HARN_SECRET_PROVIDERS`:
 export HARN_SECRET_PROVIDERS=env,keyring
 ```
 
+A chain that leaves out a default provider cannot see secrets stored there.
+Under `HARN_SECRET_PROVIDERS=env`, a credential that `harn connect` saved in
+the keyring reads as missing. A missing secret therefore names the providers
+that were consulted and the defaults that were left out:
+
+```text
+secret 'google_workspace/oauth-token' not found in providers: env (HARN_SECRET_GOOGLE_WORKSPACE_OAUTH_TOKEN); keyring disabled by HARN_SECRET_PROVIDERS=env
+```
+
+Scripts see this as a `not_found` error from `harness.secrets.read`. The
+`std/oauth` client adds the same detail to its "no token in storage"
+diagnostic. `harn doctor` warns about each default provider the chain leaves
+out.
+
 The doctor output also reports the namespace used for backend grouping. It is
 `harn.provider_auth` for every surface. Override it — for an isolated workspace
 or a test run — with:
@@ -200,6 +214,16 @@ export HARN_SECRET_HARN_ORCHESTRATOR_GITHUB_INSTALLATION_12345_PRIVATE_KEY="$(ca
 
 Non-alphanumeric characters are normalized to underscores and multiple
 separators collapse.
+
+The environment provider is a read-only override within a chain. A write
+through the chain (`harness.secrets.write`, `std/oauth` secrets storage) goes
+to the persistent providers, such as `keyring` or `file`, in chain order. The
+first one that accepts the value stores it. If every persistent provider
+refuses, the write fails. It never falls back to a variable that disappears
+when the process exits. The write receipt's `provider` field names
+the backend that stored the value. Only a chain with no persistent provider,
+such as `HARN_SECRET_PROVIDERS=env`, writes to the process environment, and
+its receipt says `env`.
 
 ## Keyring provider
 

@@ -814,6 +814,7 @@ mod tests {
                     "variant": "NotFound",
                     "message": "PRIVATE-CUSTOMER-DIAGNOSTIC-123456",
                 }),
+                outcome: None,
             }),
             "req_typed_error",
         );

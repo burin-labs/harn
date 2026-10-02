@@ -110,6 +110,20 @@ impl Drop for SessionEnvironmentGuard {
     }
 }
 
+impl SessionEnvironmentGuard {
+    /// Tighten the active environment without replacing its credential policy.
+    /// The guard restores the previous session on drop.
+    pub fn with_host_inference_boundary(
+        self,
+        boundary: Option<crate::llm::api::InferenceBoundary>,
+    ) -> Self {
+        if let Some(environment) = current_session_environment() {
+            set_session_environment(Some(environment.with_host_inference_boundary(boundary)));
+        }
+        self
+    }
+}
+
 /// Per-task ambient-scope swap of the session environment. Same rationale as
 /// [`swap_thread_execution_context`]: a fan-out worker holds its session's
 /// environment across `.await`s, so it must keep its own copy rather than read a
@@ -1369,10 +1383,11 @@ fn session_env_var_with(
         return Ok(std::env::var(name).ok());
     };
     let workspace_defaults = workspace_env_defaults();
-    let is_grant_target = environment
-        .grants()
-        .iter()
-        .any(|grant| grant.exposed_env_var() == Some(name));
+    let is_grant_target = environment.is_host_inference_target(name)
+        || environment
+            .grants()
+            .iter()
+            .any(|grant| grant.exposed_env_var() == Some(name));
     if !is_grant_target {
         if let Some(value) = workspace_defaults.get(name) {
             return Ok(Some(value.clone()));

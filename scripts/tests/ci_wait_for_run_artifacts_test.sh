@@ -14,9 +14,10 @@ if [[ $1 == api && $2 == rate_limit ]]; then
   echo 'rate_limit endpoint consulted' >&2
   exit 3
 fi
-if [[ $# == 3 && $1 == api && $2 == -i ]]; then
+refusal_headers() {
   # The refusing response's own headers. The reset is already past, except
   # when the limit never lifts or the refusal names none.
+  local now
   now=$(date +%s)
   printf 'HTTP/2.0 403 Forbidden\r\n'
   case "$FIXTURE_SCENARIO" in
@@ -26,10 +27,26 @@ if [[ $# == 3 && $1 == api && $2 == -i ]]; then
     *) printf 'X-Ratelimit-Reset: %s\r\n' $((now - 1)) ;;
   esac
   printf '\r\n{"message":"API rate limit exceeded"}\n'
+}
+conditional=0
+if_none_match=""
+if [[ $1 == api && $2 == -i && ${!#} == */artifacts?per_page=100 ]]; then
+  # The inventory is read as one conditional page, with its headers.
+  conditional=1
+  path=${!#}
+  if [[ $# == 5 && $3 == -H ]]; then
+    if_none_match=${4#If-None-Match: }
+  else
+    [[ $# == 3 ]]
+  fi
+elif [[ $# == 3 && $1 == api && $2 == -i ]]; then
+  refusal_headers
   exit 1
+else
+  [[ $# == 4 && $1 == api && $3 == --paginate && $4 == --slurp ]]
+  path=$2
 fi
-[[ $# == 4 && $1 == api && $3 == --paginate && $4 == --slurp ]]
-case "$2" in
+case "$path" in
   /repos/burin-labs/harn/actions/runs/123/artifacts?per_page=100) kind=artifacts ;;
   /repos/burin-labs/harn/actions/runs/123/attempts/2/jobs?per_page=100) kind=jobs ;;
   *) exit 2 ;;
@@ -45,21 +62,40 @@ fi
 if [[ $FIXTURE_SCENARIO == rate_limited_forever || $FIXTURE_SCENARIO == rate_limited_no_reset ]] \
   || { [[ $FIXTURE_SCENARIO == rate_limited || $FIXTURE_SCENARIO == rate_limited_retry_after ]] \
     && (( count <= 3 )); }; then
+  if (( conditional )); then refusal_headers; fi
   echo 'gh: API rate limit exceeded for installation ID 1. (HTTP 403)' >&2
   exit 1
 fi
 if [[ $kind == artifacts ]]; then
-  jq -cn --arg scenario "$FIXTURE_SCENARIO" --argjson count "$count" '
+  pages=$(jq -cn --arg scenario "$FIXTURE_SCENARIO" --argjson count "$count" '
     {name:"harn-cli.tar.zst", expired:false} as $cli |
     if $scenario == "malformed_artifact" then [{artifacts:[$cli + {expired:"false"}]}]
     elif $scenario == "multiple" then
       [{artifacts:[$cli]}, {artifacts:(if $count >= 3 then [{name:"harn-security.tar.zst",expired:false}] else [] end)}]
     elif $scenario == "expired" then [{artifacts:[$cli + {expired:true}]}]
     else [{artifacts:[]}, {artifacts:(
-      if $scenario == "early" or ($scenario == "delayed" and $count >= 3)
+      if $scenario == "early" or $scenario == "paged_inventory" or ($scenario == "delayed" and $count >= 3)
         or (($scenario == "rate_limited" or $scenario == "rate_limited_retry_after") and $count >= 5)
         or ($scenario == "race" and $count >= 2) or ($scenario == "queued_late" and $count >= 5)
-      then [$cli] else [] end)}] end'
+      then [$cli] else [] end)}] end')
+  if (( conditional )); then
+    # One page holding everything, unless the scenario spans pages; its ETag
+    # is its content, so an unchanged inventory answers 304.
+    page=$(jq -c --arg scenario "$FIXTURE_SCENARIO" '
+      (map(.artifacts) | add) as $all
+      | if $scenario == "paged_inventory" then {total_count: (($all | length) + 1), artifacts: $all}
+        else {total_count: ($all | length), artifacts: $all} end' <<< "$pages")
+    etag="W/\"$(printf '%s' "$page" | cksum | cut -d' ' -f1)\""
+    if [[ -n $if_none_match && $if_none_match == "$etag" ]]; then
+      printf '%s\n' "$count" > "$FIXTURE_ROOT/not_modified_$count"
+      printf 'HTTP/2.0 304 Not Modified\r\nEtag: %s\r\n\r\n' "$etag"
+      echo 'gh: HTTP 304' >&2
+      exit 1
+    fi
+    printf 'HTTP/2.0 200 OK\r\nEtag: %s\r\n\r\n%s\n' "$etag" "$page"
+  else
+    printf '%s\n' "$pages"
+  fi
 else
   jq -cn --arg scenario "$FIXTURE_SCENARIO" --argjson count "$count" '
     {id:12,name:"Rust workspace tests",status:"completed",
@@ -92,7 +128,8 @@ chmod 700 "$fixture_root/sleep"
 run_case() {
   scenario=$1
   shift
-  rm -f "$fixture_root/artifacts" "$fixture_root/jobs" "$fixture_root/sleeps"
+  rm -f "$fixture_root/artifacts" "$fixture_root/jobs" "$fixture_root/sleeps" \
+    "$fixture_root"/not_modified_*
   result=0
   PATH="$fixture_root:$PATH" FIXTURE_ROOT="$fixture_root" FIXTURE_SCENARIO="$scenario" \
     GITHUB_REPOSITORY=burin-labs/harn GITHUB_RUN_ID="${CURRENT_RUN_ID:-123}" GITHUB_RUN_ATTEMPT=2 \
@@ -104,6 +141,7 @@ run_case() {
     HARN_EXT_ARTIFACT_WAIT_MAX_INTERVAL_SECONDS="${WAIT_MAX_INTERVAL:-0}" \
     HARN_EXT_ARTIFACT_WAIT_MAX_QUEUE_SECONDS="${WAIT_MAX_QUEUE:-1800}" \
     HARN_EXT_ARTIFACT_WAIT_RATE_LIMIT_MAX_SECONDS=30 \
+    HARN_EXT_ARTIFACT_WAIT_STATE_EVERY_POLLS="${WAIT_STATE_EVERY:-1}" \
     bash "$repo_root/scripts/ci/wait_for_run_artifacts.sh" "$@" \
       > "$fixture_root/stdout" 2> "$fixture_root/stderr" || result=$?
   artifact_reads=0
@@ -235,4 +273,38 @@ assert_output stderr 'HARN_EXT_ARTIFACT_RUN_ATTEMPT must accompany HARN_EXT_ARTI
 CURRENT_RUN_ID=999 SOURCE_RUN_ID=12x SOURCE_RUN_ATTEMPT=2 run_case early harn-cli.tar.zst
 assert_result 2 0 0
 
-echo 'ci_wait_for_run_artifacts_test: 30 scenarios passed'
+# The inventory is read conditionally: an unchanged inventory answers 304,
+# which the rate limit does not count, and the wait still finds the artifact
+# when the inventory changes.
+run_case delayed harn-cli.tar.zst
+assert_result 0 3 3
+if [[ ! -f "$fixture_root/not_modified_2" ]]; then
+  echo 'delayed: the unchanged second inventory read was not answered 304' >&2
+  exit 1
+fi
+
+# A running producer's state is read on every Nth poll only: the artifact
+# lands on the third inventory read after one state read, not three.
+WAIT_STATE_EVERY=3 run_case delayed harn-cli.tar.zst
+assert_result 0 3 1
+assert_output stdout 'run artifacts ready: harn-cli.tar.zst'
+# Pacing never hides completion: a producer that finishes without the
+# artifact is still found by the paced state read.
+WAIT_STATE_EVERY=2 run_case running harn-cli.tar.zst
+assert_output stderr "producer 'Rust workspace tests' completed (success)"
+
+# An inventory larger than one page is read in full, unconditionally.
+run_case paged_inventory harn-cli.tar.zst
+assert_result 0 2 1
+assert_output stdout 'run artifacts ready: harn-cli.tar.zst'
+
+for bad in 0 x; do
+  if HARN_EXT_ARTIFACT_WAIT_STATE_EVERY_POLLS=$bad GITHUB_REPOSITORY=burin-labs/harn \
+    GITHUB_RUN_ID=123 GITHUB_RUN_ATTEMPT=2 HARN_EXT_ARTIFACT_PRODUCER_JOB=x \
+    bash "$repo_root/scripts/ci/wait_for_run_artifacts.sh" harn-cli.tar.zst 2> /dev/null; then
+    echo "a state cadence of '$bad' was accepted" >&2
+    exit 1
+  fi
+done
+
+echo 'ci_wait_for_run_artifacts_test: 35 scenarios passed'

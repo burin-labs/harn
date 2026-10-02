@@ -137,7 +137,7 @@ jobs:
     needs: [plan, promote]
     permissions:
       contents: read
-    uses: burin-labs/.github/.github/workflows/repin.yml@47b97f48a4862d684f54a0b8ee7aa370d8bfc126
+    uses: burin-labs/.github/.github/workflows/repin.yml@39720fce0707c8852cfe8787c028db393f0ce6ae
     with:
       released-repository: ${{ github.repository }}
       tag: ${{ needs.promote.outputs.tag }}

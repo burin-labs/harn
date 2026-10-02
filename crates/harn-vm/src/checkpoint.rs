@@ -57,9 +57,37 @@ impl CheckpointState {
                     e.column()
                 )
             })?,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => BTreeMap::new(),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                self.confirm_absent()?;
+                BTreeMap::new()
+            }
             Err(e) => return Err(format!("checkpoint read error: {e}")),
         };
+        Ok(())
+    }
+
+    /// Accept "not found" as an empty store only when the path is genuinely
+    /// absent beneath a directory.
+    ///
+    /// Unix reports a non-directory ancestor as `ENOTDIR`, but Windows reports
+    /// it as `ERROR_PATH_NOT_FOUND`, which std maps to `NotFound` — the same
+    /// kind a missing `checkpoints/` directory produces. Without this check a
+    /// store that cannot be reached reads as empty on Windows, and a resumed
+    /// pipeline would redo work its checkpoint had recorded as spent.
+    fn confirm_absent(&self) -> Result<(), String> {
+        for ancestor in self.path.ancestors().skip(1) {
+            match std::fs::metadata(ancestor) {
+                Ok(metadata) if metadata.is_dir() => return Ok(()),
+                Ok(_) => {
+                    return Err(format!(
+                        "checkpoint read error: {} is not a directory",
+                        ancestor.display()
+                    ))
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(e) => return Err(format!("checkpoint read error: {e}")),
+            }
+        }
         Ok(())
     }
 

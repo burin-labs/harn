@@ -205,6 +205,25 @@ records. A declared `throws` type that cannot be represented as Draft 2020-12
 JSON Schema prevents catalog publication instead of silently dropping the
 error contract.
 
+A handler can return the typed agent result envelope,
+`agent_tool_handler_result(text, data, outcome)` from
+`std/agent/tool_lifecycle`. Every adapter reads it with the same parser as
+agent dispatch, so one handler serves agent loops, `harn tool run`, and MCP:
+
+| `outcome` | Generated CLI and MCP |
+| --- | --- |
+| `"ok"` | Success. `data` is validated against the output schema and becomes the result, CLI output, and `structuredContent`. |
+| `"error"` | Declared application failure with `data`, validated against `error_schema` when one is declared. |
+| `"rejected"` | The same failure, with `outcome: "rejected"`. |
+
+Failure envelopes need no `error_schema`, because the envelope declares the
+failure explicitly. Their application-error record adds `outcome` to `{tool,
+data}`. The envelope's `text` is the rendering an agent transcript shows;
+adapters don't project it, so MCP `content` stays a serialization of `data`
+and failure text stays generic. An envelope with the right `schema` but a
+missing field or unknown outcome is a contract failure. Any other return value
+keeps its existing meaning.
+
 The `exports` surface derives its MCP tools from public Harn functions through
 the same canonical catalog entries as `harn tool schema --surface exports`.
 The `script` surface reads an explicitly published `ToolRegistry`. `auto`

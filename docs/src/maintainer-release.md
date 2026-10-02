@@ -91,8 +91,11 @@ tuples aren't recovery entry points for these workflows.
 ## Check downstream convergence
 
 Promotion's `repin` job dispatches the registered consumers' own update
-workflows. Each consumer opens its own pull request, then follows its checks,
-review, and merge queue. Record each consumer's terminal state separately from
+workflows. For the fleet-owned bump adapters that is one dispatch: the
+harn-bump-fleet `promote-released-orchestration.yml` workflow moves the
+orchestration pin to the release, and each adapter's converged landing starts
+that consumer's bump. Each consumer opens its own pull request, then follows its
+checks, review, and merge queue. Record each consumer's terminal state separately from
 Harn publication. Dispatch success doesn't prove that a consumer updated or
 that its pull request merged.
 

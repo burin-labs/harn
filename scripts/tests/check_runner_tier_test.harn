@@ -83,3 +83,33 @@ pipeline test_pinned_hosted_job_must_name_the_runner_it_actually_uses(
   assert_eq(errors.any({ error -> error.contains("never resolves to 'github-hosted'") }), true)
   assert_eq(errors.any({ error -> error.contains("impossible tier 'self-hosted'") }), true)
 }
+
+/**
+ * Ubicloud reports `self-hosted` like Blacksmith does, so a ladder that can
+ * reach it must name it, and must not branch on `runner.environment`.
+ */
+fn ubicloud_job(tier: string) {
+  return {
+    "runs-on": gha_expression(
+      "vars.HARN_CI_PAID_LINUX_PROVIDER != 'github' && 'ubicloud-standard-8' || 'ubuntu-8core'",
+    ),
+    env: {HARN_RUNNER_TIER: gha_expression(tier)},
+    steps: [{if: "env.HARN_RUNNER_TIER == 'ubicloud'", run: "true"}],
+  }
+}
+
+@test
+pipeline test_ubicloud_ladder_requires_the_ubicloud_tier(harness: Harness, task: unknown) {
+  const named = "vars.HARN_CI_PAID_LINUX_PROVIDER != 'github' && 'ubicloud' || 'github-hosted'"
+  assert_eq(runner_tier_errors({jobs: {producer: ubicloud_job(named)}}), [])
+  const unnamed = "vars.HARN_CI_PAID_LINUX_PROVIDER != 'github' && 'self-hosted' || 'github-hosted'"
+  const errors = runner_tier_errors({jobs: {producer: ubicloud_job(unnamed)}})
+  assert_eq(errors.any({ error -> error.contains("never resolves to 'ubicloud'") }), true)
+  assert_eq(errors.any({ error -> error.contains("impossible tier 'self-hosted'") }), true)
+  const env_branch = {
+    ...ubicloud_job(named),
+    steps: [{if: "runner.environment == 'self-hosted'", run: "true"}],
+  }
+  const env_errors = runner_tier_errors({jobs: {producer: env_branch}})
+  assert_eq(env_errors.any({ error -> error.contains("uses runner.environment") }), true)
+}

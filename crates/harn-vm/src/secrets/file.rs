@@ -279,6 +279,10 @@ impl SecretProvider for FileSecretProvider {
     fn supports_versions(&self) -> bool {
         false
     }
+
+    fn locator(&self, _id: &SecretId) -> Option<String> {
+        Some(self.path.display().to_string())
+    }
 }
 
 fn encode_component(value: &str, allow_slash: bool) -> String {

@@ -512,7 +512,8 @@ impl AcpServer {
                 admission: None,
                 admission_unavailable: false,
                 profile_turn: 0,
-                environment_policy: harn_vm::security::SessionEnvironment::inherited(),
+                environment_policy: harn_vm::security::SessionEnvironment::inherited()
+                    .with_host_inference_boundary(self.host_inference_boundary),
             },
         );
         #[cfg(feature = "hostlib")]

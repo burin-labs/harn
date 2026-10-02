@@ -207,3 +207,18 @@ async fn failed_save_invalidates_memory_and_reloads_persisted_value() {
         VmValue::Int(7)
     ));
 }
+
+/// Windows reports a non-directory ancestor as "not found", so a blocked
+/// store must be refused by the ancestor walk rather than by the OS error
+/// kind. Exercise the walk directly so every platform runs it.
+#[test]
+fn a_store_beneath_a_file_is_unreachable_but_a_missing_one_is_absent() {
+    let root = tempfile::tempdir().unwrap();
+    let missing = CheckpointState::at_state_root(&root.path().join("never/created"), "recovery");
+    assert_eq!(missing.confirm_absent(), Ok(()));
+
+    std::fs::write(root.path().join("checkpoints"), "blocks persistence").unwrap();
+    let blocked = CheckpointState::at_state_root(root.path(), "recovery");
+    let error = blocked.confirm_absent().unwrap_err();
+    assert!(error.contains("is not a directory"), "{error}");
+}

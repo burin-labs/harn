@@ -16,7 +16,9 @@ impl AcpServer {
         // boundary, snapshotting the server environment for env-source grants.
         // A malformed config or rejected launch fails the session loudly.
         let environment_policy = match Self::resolve_session_environment(params) {
-            Ok(environment) => environment,
+            Ok(environment) => {
+                environment.with_host_inference_boundary(self.host_inference_boundary)
+            }
             Err((message, data)) => {
                 self.send_error_with_data(id, -32602, &message, data);
                 return;

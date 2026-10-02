@@ -30,7 +30,7 @@ fn stable_meta(capabilities: JsonValue) -> JsonValue {
     })
 }
 
-fn stable_request(id: u64, method: &str, mut params: JsonValue) -> JsonValue {
+pub(super) fn stable_request(id: u64, method: &str, mut params: JsonValue) -> JsonValue {
     params["_meta"] = stable_meta(json!({
         "elicitation": {"form": {}, "url": {}},
         "roots": {},
@@ -364,6 +364,197 @@ fn registry_handler_has_generated_cli_and_mcp_parity() {
         "Hello, Harn"
     );
     assert_eq!(called["result"]["structuredContent"], cli_result);
+    client.shutdown_expect_success();
+}
+
+fn write_handler_envelope_registry_fixture(temp: &TempDir) {
+    fs::write(
+        temp.path().join("server.harn"),
+        r#"
+import { tool_registry_from } from "std/tools"
+import { agent_tool_handler_result } from "std/agent/tool_lifecycle"
+
+const WIDGET = {
+  type: "object",
+  properties: {id: {type: "integer"}, name: {type: "string"}},
+  required: ["id", "name"],
+  additionalProperties: false,
+}
+
+fn get_widget(args: dict) -> dict {
+  let r = {id: args.widget_id, name: "sprocket"}
+  return agent_tool_handler_result(json_stringify(r), r)
+}
+
+fn invalid_widget(args: dict) -> dict {
+  let r = {id: "not-an-integer", name: "sprocket"}
+  return agent_tool_handler_result(json_stringify(r), r)
+}
+
+fn fail_widget(args: dict) -> dict {
+  return agent_tool_handler_result("widget lookup failed", {code: "not_found"}, "error")
+}
+
+fn raw_widget(args: dict) -> dict {
+  return {id: args.widget_id, name: "raw"}
+}
+
+fn main(harness: Harness) {
+  const tools = tool_registry_from([
+    {
+      name: "get",
+      description: "Widget tool get.",
+      parameters: {widget_id: {schema: {type: "integer"}, required: true}},
+      returns: WIDGET,
+      cli: {command: ["widgets", "get"]},
+      handler: get_widget,
+    },
+    {
+      name: "invalid",
+      description: "Widget tool invalid.",
+      parameters: {widget_id: {schema: {type: "integer"}, required: true}},
+      returns: WIDGET,
+      cli: {command: ["widgets", "invalid"]},
+      handler: invalid_widget,
+    },
+    {
+      name: "fail",
+      description: "Widget tool fail.",
+      parameters: {widget_id: {schema: {type: "integer"}, required: true}},
+      returns: WIDGET,
+      cli: {command: ["widgets", "fail"]},
+      handler: fail_widget,
+    },
+    {
+      name: "raw",
+      description: "Widget tool raw.",
+      parameters: {widget_id: {schema: {type: "integer"}, required: true}},
+      returns: WIDGET,
+      cli: {command: ["widgets", "raw"]},
+      handler: raw_widget,
+    },
+  ], {info: {name: "widgets", version: "1.0.0"}})
+  harness.tools.mcp_tools(tools)
+}
+"#,
+    )
+    .unwrap();
+}
+
+/// A handler written to the agent-dispatch result envelope must mean the same
+/// thing on the generated CLI and on MCP: `data` is the value the declared
+/// output schema sees, and an `error` outcome is a failure.
+#[test]
+fn registry_handler_result_envelope_has_cli_and_mcp_parity() {
+    let temp = TempDir::new().unwrap();
+    write_handler_envelope_registry_fixture(&temp);
+    let script = temp.path().join("server.harn").display().to_string();
+    let cli = |command: &str| {
+        harn_e2e_command()
+            .args([
+                "tool",
+                "run",
+                &script,
+                "widgets",
+                command,
+                "--widget-id",
+                "7",
+                "--json",
+            ])
+            .output()
+            .expect("generated CLI invocation")
+    };
+
+    let ok = cli("get");
+    assert!(
+        ok.status.success(),
+        "ok envelope failed on the CLI: {}",
+        String::from_utf8_lossy(&ok.stderr)
+    );
+    let ok_json: JsonValue = serde_json::from_slice(&ok.stdout).expect("CLI JSON");
+    assert_eq!(ok_json, json!({"id": 7, "name": "sprocket"}));
+
+    let raw = cli("raw");
+    assert!(
+        raw.status.success(),
+        "{}",
+        String::from_utf8_lossy(&raw.stderr)
+    );
+    assert_eq!(
+        serde_json::from_slice::<JsonValue>(&raw.stdout).unwrap(),
+        json!({"id": 7, "name": "raw"})
+    );
+
+    let invalid = cli("invalid");
+    assert!(!invalid.status.success(), "schema-violating data succeeded");
+    let stderr = String::from_utf8_lossy(&invalid.stderr);
+    assert!(
+        stderr.contains("output violates its declared schema"),
+        "{stderr}"
+    );
+    // Validating the envelope itself would report missing `id`/`name`;
+    // validating `data` reports the wrongly typed field.
+    assert!(stderr.contains("failed type"), "{stderr}");
+    assert!(
+        !stderr.contains("required"),
+        "envelope was validated: {stderr}"
+    );
+
+    let failed = cli("fail");
+    assert!(
+        !failed.status.success(),
+        "error outcome succeeded on the CLI"
+    );
+    assert_eq!(
+        serde_json::from_slice::<JsonValue>(&failed.stdout).expect("CLI error envelope"),
+        json!({
+            "ok": false,
+            "error": {
+                "kind": "application",
+                "tool": "fail",
+                "data": {"code": "not_found"},
+                "outcome": "error",
+            },
+        })
+    );
+
+    let mut command = harn_e2e_command();
+    command
+        .current_dir(temp.path())
+        .args(["serve", "mcp", "server.harn"]);
+    let mut client = StdioJsonRpcClient::spawn("harn serve mcp", command);
+    let call = |client: &mut StdioJsonRpcClient, id: u64, name: &str| {
+        client.request(stable_request(
+            id,
+            "tools/call",
+            json!({"name": name, "arguments": {"widget_id": 7}}),
+        ))
+    };
+
+    let ok = call(&mut client, 1, "get");
+    assert_eq!(ok["result"]["isError"], false, "{ok}");
+    assert_eq!(ok["result"]["structuredContent"], ok_json, "{ok}");
+
+    let invalid = call(&mut client, 2, "invalid");
+    assert_eq!(invalid["result"]["isError"], true, "{invalid}");
+    assert!(
+        invalid["result"]["content"][0]["text"]
+            .as_str()
+            .is_some_and(|text| text.contains("output violates its declared schema")),
+        "{invalid}"
+    );
+
+    let failed = call(&mut client, 3, "fail");
+    assert_eq!(failed["result"]["isError"], true, "{failed}");
+    assert!(
+        failed["result"].get("structuredContent").is_none(),
+        "{failed}"
+    );
+    assert_eq!(
+        failed["result"]["_meta"]["com.harnlang/toolContract"]["applicationError"],
+        json!({"tool": "fail", "data": {"code": "not_found"}, "outcome": "error"}),
+        "{failed}"
+    );
     client.shutdown_expect_success();
 }
 

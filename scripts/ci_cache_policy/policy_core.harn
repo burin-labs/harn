@@ -182,6 +182,19 @@ pub const HOSTED_LINUX_RUNNER = "ubuntu-24.04"
  */
 pub const PRODUCER_HOSTED_LINUX_RUNNER = "ubuntu-8core"
 
+/**
+ * The producers' paid rung before GitHub's: Ubicloud's 8 vCPU runner, listed
+ * at $0.008/min on its premium tier against $0.022/min for `ubuntu-8core`.
+ * Ubicloud registers each runner just in time as a self-hosted runner, so it
+ * is its own tier for the same reason Blacksmith is.
+ */
+pub const PRODUCER_VENDOR_LINUX_RUNNER = "ubicloud-standard-8"
+
+/** `github` restores GitHub's 8-core runner as the producers' paid rung. */
+pub const PAID_LINUX_PROVIDER_VAR = "HARN_CI_PAID_LINUX_PROVIDER"
+
+pub const UBICLOUD_RUNNER_TIER = "ubicloud"
+
 pub const HOSTED_RUNNER_TIER = "github-hosted"
 
 pub const BLACKSMITH_RUNNER_TIER = "blacksmith"
@@ -279,6 +292,15 @@ pub const SECURITY_READY_JOB = "security-tests-ready"
 pub const ARTIFACT_WAIT_MAX_ATTEMPTS = "270"
 
 pub const ARTIFACT_WAIT_INTERVAL_SECONDS = "10"
+
+// About ten waiters start in every run and share one installation limit. A
+// running producer's state is re-read on every sixth poll only (the inventory
+// read between is a free 304 while nothing changes), and a rate limit is
+// waited out up to 40 minutes, inside the shortest waiter's job timeout,
+// because a refused read says nothing about the build and must not fail it.
+pub const ARTIFACT_WAIT_STATE_EVERY_POLLS = "6"
+
+pub const ARTIFACT_WAIT_RATE_LIMIT_MAX_SECONDS = "2400"
 
 pub const ARTIFACT_READY_TIMEOUT_MINUTES = "50"
 
@@ -1778,28 +1800,67 @@ pub fn paid_producer_condition() -> string {
  * about which events reach which capacity: a mirror that drifted from its
  * `runs-on` is how a tier guard starts naming a route the job never took.
  */
-pub fn producer_rung_expression(paid: string, owned: string, hosted: string) -> string {
+/**
+ * The paid rung after the owned pool. Ubicloud's 8 vCPU runner lists at a
+ * third of GitHub's 8-core rate, so it is the default; setting
+ * `${PAID_LINUX_PROVIDER_VAR}` to `github` puts the GitHub 8-core runner back
+ * without a code change.
+ */
+pub fn vendor_producer_condition() -> string {
+  return "(vars.${PAID_LINUX_PROVIDER_VAR} != 'github'"
+}
+
+pub fn producer_rung_expression(
+  paid: string,
+  owned: string,
+  vendor: string,
+  hosted: string,
+) -> string {
+  // An empty `owned` drops the owned rung: a lane that must not wait on the
+  // owned pool's per-host compile budget goes straight to paid capacity.
+  const owned_rung = if owned == "" {
+    ""
+  } else {
+    "\n  || ${owned_producer_condition()}" + "\n  && ${owned})"
+  }
   return "$"
     + "{{ (vars.${BLACKSMITH_ENABLE_VAR} == 'true'"
     + "\n  && ${paid_producer_condition()}"
     + "\n  && ${paid})"
-    + "\n  || ${owned_producer_condition()}"
-    + "\n  && ${owned})"
+    + owned_rung
+    + "\n  || ${vendor_producer_condition()}"
+    + "\n  && ${vendor})"
     + "\n  || ${hosted} }}"
 }
 
-pub fn producer_runner_expression(runner: string) -> string {
+/**
+ * Whether a producer may land on the owned pool.
+ *
+ * The shared CLI may not. Every Harn proof lane waits for it, and an owned
+ * carrier shares four cores among six runners, so its compile budget is one
+ * job: with no target restored and no sccache it hit its 31-minute step
+ * timeout in run 36987728246, while a cold build on the vendor rung took
+ * 693s. The workspace test producer keeps the owned rung; nothing waits on its
+ * finish except the verdict.
+ */
+pub fn producer_uses_owned_pool(job_name: string) -> bool {
+  return job_name != "rust-cli"
+}
+
+pub fn producer_runner_expression(runner: string, owned_rung: bool = true) -> string {
   return producer_rung_expression(
     "'${runner}'",
-    "fromJSON('${SELFHOSTED_LINUX_BIG_RUNNER}')",
+    owned_rung ? "fromJSON('${SELFHOSTED_LINUX_BIG_RUNNER}')" : "",
+    "'${PRODUCER_VENDOR_LINUX_RUNNER}'",
     "'${PRODUCER_HOSTED_LINUX_RUNNER}'",
   )
 }
 
-pub fn producer_tier_expression() -> string {
+pub fn producer_tier_expression(owned_rung: bool = true) -> string {
   return producer_rung_expression(
     "'${BLACKSMITH_RUNNER_TIER}'",
-    "'${SELFHOSTED_RUNNER_TIER}'",
+    owned_rung ? "'${SELFHOSTED_RUNNER_TIER}'" : "",
+    "'${UBICLOUD_RUNNER_TIER}'",
     "'${HOSTED_RUNNER_TIER}'",
   )
 }

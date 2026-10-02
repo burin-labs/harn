@@ -480,6 +480,18 @@ impl SecretProvider for KeyringSecretProvider {
     fn supports_versions(&self) -> bool {
         false
     }
+
+    fn kind(&self) -> &'static str {
+        "keyring"
+    }
+
+    fn locator(&self, id: &SecretId) -> Option<String> {
+        Some(format!(
+            "service {} account {}",
+            self.service(),
+            account_name(id)
+        ))
+    }
 }
 
 /// A read the platform refused because it wanted a person at a dialog is
