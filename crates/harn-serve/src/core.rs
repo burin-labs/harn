@@ -28,12 +28,14 @@ mod event_log;
 use event_log::install_scoped_event_log;
 mod prepared_generation;
 mod prepared_tools;
+mod response;
 use arguments::{build_vm_args, canonical_arguments_json};
 pub use config::DispatchCoreConfig;
 use error_classification::classify_vm_error;
 use prepared_generation::PreparedDispatchGeneration;
 pub use prepared_generation::{DispatchCallReceipt, DispatchGenerationReceipt};
 use prepared_tools::PreparedTools;
+pub use response::CallResponse;
 
 fn install_dispatch_vm_runtime(
     vm: &mut Vm,
@@ -210,17 +212,6 @@ fn resolve_request_actor_chain(
     Some(chain)
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct CallResponse {
-    pub function: String,
-    pub value: serde_json::Value,
-    pub printed_output: String,
-    pub trace_id: TraceId,
-    pub cached: bool,
-    pub duration_ms: u128,
-    pub dispatch: DispatchCallReceipt,
-}
-
 #[async_trait(?Send)]
 pub trait VmConfigurator: Send + Sync {
     fn configure(&self, _vm: &mut Vm) -> Result<(), DispatchError> {
@@ -375,15 +366,11 @@ impl DispatchCore {
                             "replay cache contains a value outside the current tool contract: {error}"
                         ))
                     })?;
-                return Ok(CallResponse {
-                    function: request.function.clone(),
-                    value: cached.value,
-                    printed_output: cached.printed_output,
+                return Ok(CallResponse::from_replay(
+                    request.function.clone(),
+                    cached,
                     trace_id,
-                    cached: true,
-                    duration_ms: 0,
-                    dispatch: DispatchCallReceipt::default(),
-                });
+                ));
             }
         }
 
@@ -426,7 +413,7 @@ impl DispatchCore {
                     self.prepared_tool_catalog()
                         .validate_output(&request.function, &value.0)
                         .map_err(DispatchError::Contract)?;
-                    value
+                    (value.0, value.1, None)
                 }
             };
             Ok::<_, DispatchError>(value)
@@ -435,7 +422,7 @@ impl DispatchCore {
         .await;
 
         match invocation {
-            Ok((value, printed_output)) => {
+            Ok((value, printed_output, feedback)) => {
                 let duration_ms = started.elapsed().as_millis();
                 self.record_trust(&request, &trace_id, TrustOutcome::Success, None)
                     .await?;
@@ -447,6 +434,7 @@ impl DispatchCore {
                             ReplayCacheEntry {
                                 value: value.clone(),
                                 printed_output: printed_output.clone(),
+                                feedback: feedback.clone(),
                             },
                         )
                         .await?;
@@ -455,6 +443,7 @@ impl DispatchCore {
                     function: request.function,
                     value,
                     printed_output,
+                    feedback,
                     trace_id,
                     cached: false,
                     duration_ms,
@@ -514,7 +503,7 @@ impl DispatchCore {
         &self,
         request: &CallRequest,
         function: &crate::ExportedFunction,
-    ) -> Result<(serde_json::Value, String), DispatchError> {
+    ) -> Result<(serde_json::Value, String, Option<String>), DispatchError> {
         let script_path = self.config.script_path.clone();
         let cancel_token = request
             .cancel_token
@@ -586,9 +575,9 @@ impl DispatchCore {
                             args.extend(user_args);
                             let result = vm.call_closure_pub(closure, &args).await;
 
-                            let (_, json) =
+                            let (json, feedback) =
                                 self.tools.classify_result(&request.function, result)?;
-                            Ok((json, vm.output().to_string()))
+                            Ok((json, vm.output().to_string(), feedback))
                         }),
                     ),
                 )

@@ -635,6 +635,7 @@ mod tests {
             function: "test".into(),
             value,
             printed_output: String::new(),
+            feedback: None,
             trace_id: TraceId::default(),
             cached: false,
             duration_ms: 0,

@@ -13,6 +13,7 @@ pub struct ReplayKey(pub String);
 pub struct ReplayCacheEntry {
     pub value: serde_json::Value,
     pub printed_output: String,
+    pub feedback: Option<String>,
 }
 
 #[async_trait]
