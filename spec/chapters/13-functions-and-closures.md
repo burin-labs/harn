@@ -339,7 +339,12 @@ request fields such as `argv`, `command`, `cwd`, `env`, `timeout_ms`,
 Standard deterministic risk labels include `destructive`,
 `write_intent`, `outside_workspace`, `curl_pipe_shell`,
 `credential_file_read`, `network_exfil`, `sudo`, `package_install`,
-`git_force_push`, and `process_kill`.
+`git_force_push`, `git_discard_changes`, and `process_kill`.
+`git_discard_changes` marks a git command that throws away uncommitted
+work, untracked files, or stash entries (`git restore .`, `git checkout --
+<path>`, `git switch --discard-changes`, `git clean -f`, `git stash drop`).
+It recommends approval rather than denial; `git reset --hard` and `git
+clean -fd` carry it and stay on the never-approvable floor.
 `command_llm_risk_scan(ctx, options?)` returns the same structured
 shape (`risk_labels`, `confidence`, `rationale`,
 `recommended_action`) with redacted scan options; it is safe to use in

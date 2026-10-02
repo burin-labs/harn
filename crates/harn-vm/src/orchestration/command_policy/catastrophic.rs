@@ -367,10 +367,22 @@ fn git_push_rewrite(args: &[String]) -> Option<RemoteRefRewrite> {
 /// payload or behind a wrapper such as `env` or `sudo`, is a `git push` that
 /// can overwrite or delete a remote ref.
 pub(super) fn analysis_rewrites_remote_refs(analysis: &ShellAnalysis) -> bool {
-    analysis_rewrites_remote_refs_at(analysis, 0)
+    analysis_has_git_invocation(analysis, 0, &|sub, rest| {
+        sub == "push" && git_push_rewrite(rest).is_some()
+    })
 }
 
-fn analysis_rewrites_remote_refs_at(analysis: &ShellAnalysis, depth: usize) -> bool {
+/// Whether any command in `analysis`, unwrapped the same way, discards
+/// uncommitted work: worktree edits, untracked files, or stash entries.
+pub(super) fn analysis_discards_local_changes(analysis: &ShellAnalysis) -> bool {
+    analysis_has_git_invocation(analysis, 0, &git_discards_local_changes)
+}
+
+fn analysis_has_git_invocation(
+    analysis: &ShellAnalysis,
+    depth: usize,
+    matches: &dyn Fn(&str, &[String]) -> bool,
+) -> bool {
     if depth > MAX_DEPTH {
         return false;
     }
@@ -382,14 +394,94 @@ fn analysis_rewrites_remote_refs_at(analysis: &ShellAnalysis, depth: usize) -> b
         };
         let args = &tokens[command_index + 1..];
         match command_basename(command) {
-            "git" => git_subcommand(args)
-                .is_some_and(|(sub, rest)| sub == "push" && git_push_rewrite(rest).is_some()),
+            "git" => git_subcommand(args).is_some_and(|(sub, rest)| matches(sub, rest)),
             "bash" | "sh" | "zsh" => shell_c_script(args).is_some_and(|script| {
-                analysis_rewrites_remote_refs_at(&analyze_shell(script), depth + 1)
+                analysis_has_git_invocation(&analyze_shell(script), depth + 1, matches)
             }),
             _ => false,
         }
     })
+}
+
+/// `git checkout` operands before any `--`, skipping the branch name that
+/// `-b`/`-B`/`--orphan` consume. A second operand is a pathspec: `git checkout
+/// <tree-ish> <path>` overwrites that path.
+fn checkout_operands(rest: &[String]) -> impl Iterator<Item = &String> {
+    let mut skip_next = false;
+    rest.iter()
+        .take_while(|arg| arg.as_str() != "--")
+        .filter(move |arg| {
+            if std::mem::take(&mut skip_next) {
+                return false;
+            }
+            if matches!(arg.as_str(), "-b" | "-B" | "--orphan") {
+                skip_next = true;
+            }
+            !arg.starts_with('-')
+        })
+}
+
+/// Classify a git subcommand that throws away work git cannot give back:
+/// uncommitted worktree edits, untracked files, or stash entries.
+///
+/// This is an approval label, not part of the never-approvable floor:
+/// reverting one file the agent just edited is routine, so a person decides.
+/// `git reset --hard` and `git clean -fd` also carry the label, and the floor
+/// still denies them. Stashing itself is not a discard; `git stash list`
+/// recovers it. Only the operands written in argv are visible here, so `git
+/// checkout name` is read as a branch switch unless the name is a pathspec
+/// that cannot be a branch (`.`, `./x`, `:/x`, a glob).
+fn git_discards_local_changes(subcommand: &str, rest: &[String]) -> bool {
+    let has = |long: &str, short: Option<char>| {
+        rest.iter().any(|arg| {
+            arg == long
+                || short.is_some_and(|flag| {
+                    arg.starts_with('-')
+                        && !arg.starts_with("--")
+                        && arg.chars().skip(1).any(|c| c == flag)
+                })
+        })
+    };
+    let pathspec_like = |arg: &String| {
+        arg == "."
+            || arg.starts_with("./")
+            || arg.starts_with(":/")
+            || arg.starts_with(":(")
+            || arg.contains(['*', '?', '['])
+    };
+    let after_double_dash = || {
+        rest.iter()
+            .position(|arg| arg == "--")
+            .is_some_and(|index| index + 1 < rest.len())
+    };
+    match subcommand {
+        "checkout" => {
+            has("--force", Some('f'))
+                || has("--ours", None)
+                || has("--theirs", None)
+                || rest
+                    .iter()
+                    .any(|arg| arg.starts_with("--pathspec-from-file"))
+                || after_double_dash()
+                || checkout_operands(rest).any(pathspec_like)
+                || checkout_operands(rest).count() > 1
+        }
+        // `restore` writes the worktree unless only `--staged` is given, and
+        // `--staged` alone only unstages: the edits stay on disk.
+        "restore" => {
+            let staged = has("--staged", Some('S'));
+            let worktree = has("--worktree", Some('W'));
+            !staged || worktree
+        }
+        "switch" => has("--discard-changes", None) || has("--force", Some('f')),
+        "reset" => has("--hard", None),
+        "clean" => has("--force", Some('f')),
+        "stash" => rest
+            .iter()
+            .find(|arg| !arg.starts_with('-'))
+            .is_some_and(|action| matches!(action.as_str(), "drop" | "clear")),
+        _ => false,
+    }
 }
 
 fn git_catastrophe(args: &[String]) -> Option<String> {
