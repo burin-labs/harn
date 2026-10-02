@@ -1569,7 +1569,7 @@ pipeline test_host_bound_sandbox_filter_has_one_owner(harness: Harness, task: un
   assert_eq(rendered.exit_code, 0)
   assert_eq(
     trim(rendered.stdout),
-    test_names.map({ name -> "test(${name})" }).to_list().join(" or "),
+    test_names.map({ name -> "test(/(^|::)" + name + "(::|$)/)" }).to_list().join(" or "),
   )
   const renderer_source = harness.fs.read_text(path_join(root, HOST_BOUND_RUST_TEST_FILTER_COMMAND))
   assert_eq(renderer_source.split(HOST_BOUND_RUST_TEST_FILTER_SOURCE).count - 1, 1)
@@ -1588,7 +1588,7 @@ pipeline test_host_bound_sandbox_filter_has_one_owner(harness: Harness, task: un
     )
     for test_name in test_names {
       assert(
-        !source.contains("test(${test_name})"),
+        !source.contains("test(/(^|::)" + test_name + "(::|$)/)"),
         projection.path + " must not copy host-bound selector " + test_name,
       )
     }

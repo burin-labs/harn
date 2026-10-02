@@ -16,7 +16,7 @@ while IFS= read -r test_name || [[ -n "$test_name" ]]; do
   if ((count > 0)); then
     filter+=" or "
   fi
-  filter+="test(${test_name})"
+  filter+="test(/(^|::)${test_name}(::|$)/)"
   ((count += 1))
 done < "$source_path"
 

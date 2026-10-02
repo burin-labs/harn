@@ -22,14 +22,32 @@ make_fake_security_inventory() {
     --arg omitted_test "$omitted_test" --arg extra_test "$extra_test" '
     ($registry | split("\n") | map(select(length > 0 and . != $omitted_test))
       + [$extra_test] | map(select(length > 0))) as $tests
+    | (if $omitted_test == "workspace_env_integration" then "mismatch" else "matches" end) as $module_status
     | {"test-count": ($tests | length), "rust-suites": {
         "fake": {
           "status": "listed",
           "package-name": "harn-cli",
           "binary-name": "harn_cli_e2e",
           "testcases": (reduce $tests[] as $name ({};
-            .[$name] = {"filter-match": {"status": "matches"}}
+            if $name == "workspace_env_integration" then
+              .
+            else
+              .[$name] = {"filter-match": {"status": "matches"}}
+            end
           ))
+        },
+        "fake-vm": {
+          "status": "listed",
+          "package-name": "harn-vm",
+          "binary-name": "harn_vm",
+          "testcases": {
+            "harn_vm::stdlib::sandbox::workspace_env_integration::spawned_process_observes_workspace_toolchain_environment": {
+              "filter-match": {"status": $module_status}
+            },
+            "harn_vm::stdlib::sandbox::workspace_env_integration::safe_inherited_workspace_cache_reaches_sandboxed_child": {
+              "filter-match": {"status": $module_status}
+            }
+          }
         },
         "fake-skipped": {
           "status": "skipped",
@@ -176,6 +194,39 @@ fi
 grep -Fq "host-bound registry entry is absent from archived tests: $fixture_test" \
   "$tmpdir/security-missing-fixture.out"
 test ! -e "$tmpdir/out/security-missing-fixture.tar.zst"
+
+# Exact registry components reject both prefix and suffix lookalikes, even
+# though the canonical nextest substring filter selects those names.
+for lookalike in \
+  harn_vm::stdlib::sandbox::prefix_workspace_env_integration::case \
+  harn_vm::stdlib::sandbox::workspace_env_integration_suffix::case; do
+  safe_name="${lookalike//:/-}"
+  jq --arg lookalike "$lookalike" \
+    '."rust-suites"."fake-vm".testcases[$lookalike] = {"filter-match":{"status":"matches"}}' \
+    "$tmpdir/security-inventory.json" > "$tmpdir/security-inventory-module-lookalikes.json"
+  if NEXTTEST_INVENTORY_OVERRIDE="$tmpdir/security-inventory-module-lookalikes.json" \
+    run_artifact build-security "$tmpdir/out/security-module-lookalike-$safe_name.tar.zst" "$commit" \
+    > "$tmpdir/security-module-lookalike.out" 2>&1; then
+    echo "build-security accepted module lookalike $lookalike as a registered test" >&2
+    exit 1
+  fi
+  grep -Fq 'archived filter selected a test outside the host-bound registry' \
+    "$tmpdir/security-module-lookalike.out"
+  test ! -e "$tmpdir/out/security-module-lookalike-$safe_name.tar.zst"
+done
+
+# The real module path is not a vacuous registry row: its omission must fail.
+make_fake_security_inventory workspace_env_integration > \
+  "$tmpdir/security-inventory-missing-module.json"
+if NEXTTEST_INVENTORY_OVERRIDE="$tmpdir/security-inventory-missing-module.json" \
+  run_artifact build-security "$tmpdir/out/security-missing-module.tar.zst" "$commit" \
+  > "$tmpdir/security-missing-module.out" 2>&1; then
+  echo "build-security published an archive missing the registered sandbox module" >&2
+  exit 1
+fi
+grep -Fq 'host-bound registry entry is absent from archived tests: workspace_env_integration' \
+  "$tmpdir/security-missing-module.out"
+test ! -e "$tmpdir/out/security-missing-module.tar.zst"
 
 # A selected test outside the canonical registry must also block publication.
 make_fake_security_inventory "" unexpected_probe > "$tmpdir/security-inventory-extra.json"

@@ -59,7 +59,9 @@ while IFS= read -r expected || [[ -n "$expected" ]]; do
       | select($suite.status == "listed")
       | $suite.testcases | to_entries[]
       | select(.value["filter-match"].status == "matches")
-      | select((.key | split("::") | last) == $expected)
+      # Match exact Rust name components. A registry entry may name either a
+      # test function or a test module containing several host-bound cases.
+      | select((.key | split("::") | index($expected)) != null)
     ] | length
   ' "$inventory")"
   if (( matches == 0 )); then
@@ -74,7 +76,7 @@ while IFS= read -r selected; do
   attributed=0
   while IFS= read -r expected || [[ -n "$expected" ]]; do
     [[ -n "$expected" ]] || continue
-    if [[ "$test_name" == "$expected" || "$test_name" == *"::$expected" ]]; then
+    if [[ "::$test_name::" == *"::$expected::"* ]]; then
       attributed=1
       break
     fi
