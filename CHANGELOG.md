@@ -9,6 +9,289 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.154
+
+### Breaking
+
+- `MachineSpendPolicy` gains an optional lifetime allowance alongside its daily and monthly limits.
+
+  Migration: Rust hosts constructing `MachineSpendPolicy` must add `lifetime_limit_microusd: None` to preserve
+  their existing calendar-only allowance, or set `Some(microusd)` to enforce a lifetime ceiling. Existing
+  serialized policies may omit the field.
+- `harn_vm::secrets` replaces the credential-store `healthcheck` methods.
+  `NativeKeyring::healthcheck`, `NativeKeyring::healthcheck_within`, and
+  `KeyringSecretProvider::healthcheck` are removed, because the default check
+  no longer writes to the store.
+
+  Migration: call `availability()` for the non-interactive check. It returns
+  `NativeKeyringAvailability::Available` or `NativeKeyringAvailability::Locked`,
+  or a `NativeKeyringError` whose `unavailable_reason()` names why the store
+  cannot be reached. Call `verify_round_trip()` (or `verify_round_trip_within`)
+  for the previous write, read, and delete probe; it now returns
+  `NativeKeyringError` rather than `SecretError`.
+- Linux `ReexecConfinement` has a `Bubblewrap(DescriptorTransfer)` variant so
+  supervisors can preserve the descriptors that the fallback consumes before
+  starting the payload.
+
+  Migration: Exhaustive Rust matches on `ReexecConfinement` must handle
+  `Bubblewrap`. Keep its descriptor transfer alive through spawning and call
+  `DescriptorTransfer::attach` on the child command, as Harn's guardian
+  adapter does. Existing `BeforeExec` and `AfterNamespace` handling stays intact.
+- `ProviderOAuthManifest` gains `authorization_params`, the extra
+  authorization-request query parameters declared under `[providers.oauth]`.
+
+  Migration: Rust code that constructs `ProviderOAuthManifest` with a struct
+  literal adds `authorization_params: Default::default()` (or ends the literal
+  with `..Default::default()`). Manifests without the key are unchanged.
+- Tool handlers can use the canonical explicit outcome envelope across agent
+  dispatch, generated CLI commands, and MCP. Declared output schemas validate the
+  API payload, MCP preserves the handler's human-readable feedback, and invalid
+  agent payloads fail before success is reported.
+  Explicit failures retain portable data and distinguish refusals across CLI,
+  MCP, and HTTP; declared error schemas validate their payloads.
+
+  Migration: Rust embedders constructing `ToolApplicationError` set `outcome: None`
+  for declared throws, or use the explicit failure disposition. Embedders
+  constructing `CallResponse` or `ReplayCacheEntry` set `feedback: None` when no
+  canonical text exists.
+  Matches on `ToolInvocationOutcome::Success` bind its optional `text` field or
+  use `..`. Script handlers using the canonical helper need no changes.
+- Under the default `inherited` environment policy, spawned commands, MCP stdio
+  servers, and ACP children no longer receive provider credentials: every
+  variable the provider catalog (including user overlays) declares as
+  `auth_env`, such as `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`. Harn's own model
+  calls and `harness.env` still read them, so a prompt-injected or repository
+  command can no longer read the key the run authenticates with.
+
+  Migration: a child that genuinely needs a provider key must name it in its own
+  `env`, for example `harness.process.run({program, args, env: {OPENAI_API_KEY:
+  harness.env.get("OPENAI_API_KEY")}})`, an MCP server's `env` entry, or an ACP
+  provider's `env` table.
+- `AcpServerConfig` and `DispatchCoreConfig` gain an optional typed
+  `host_inference_boundary` field. Library embedders using struct literals must
+  set it; the existing constructors initialize it to `None`. Set a validated
+  `InferenceBoundary` when the host requires a ceiling independent of client
+  session environment choices.
+
+  Migration: Set `host_inference_boundary: None` in public struct literals to
+  preserve prior behavior, or supply a validated typed floor for host policy.
+- `harn_vm::tool_registry::ToolApplicationError` has a new public field,
+  `outcome: Option<ToolApplicationOutcome>`, set to `Error` or `Rejected` when a
+  handler declared the failure through the typed result envelope and `None` for
+  a declared throw. Its serialized form adds `"outcome"` only when it is set.
+
+  Migration: add the field to Rust struct literals.
+
+  ```rust
+  ToolApplicationError { tool, data }                 // before
+  ToolApplicationError { tool, data, outcome: None }  // after
+  ```
+
+### Added
+
+- The CLI accepts a shared durable provider allowance through `--spend-policy` or `HARN_SPEND_POLICY`, including
+  script shorthand invocations. Daily, monthly, and lifetime limits use the existing machine ledger; lifetime
+  spend survives restarts and calendar resets.
+- `provider_call_request` transcript receipts now carry `prompt_cache_breakpoint`, naming whether Harn placed its
+  prompt-cache marker (and with which style), or skipped it because caching was off, the route does not support it,
+  the route caches automatically, or a caller-supplied `cache_control` marker took precedence. A request whose
+  breakpoint was never placed no longer looks the same in the record as one whose prefix was too short to cache.
+
+### Changed
+
+- Caller `cache_control` markers now defer Harn's prompt-cache breakpoint only where the provider receives them: on a
+  content block, a tool-result block, or a tool definition, on every route, including Anthropic tool definitions. A
+  marker set directly on a message or on a whitespace-only text block no longer suppresses the breakpoint, because
+  egress strips it. A key named `cache_control` inside tool arguments or a JSON schema no longer suppresses it on
+  OpenAI-compatible routes.
+- `harn connect` reads and writes credentials through the `HARN_SECRET_PROVIDERS`
+  chain, the same chain `harness.secrets` and std/oauth use. Before this change
+  it always used the OS keyring. Under `HARN_SECRET_PROVIDERS=file` it now
+  stores where later runs read, and its legacy-registration recovery reads the
+  configured persistent providers. With a chain of only `env`, `harn connect`
+  refuses to store a credential and says to unset the variable or include
+  `keyring` or `file`.
+- Calls to OpenRouter's Gemini 3.5, 3.6, 3.7, and 3.8 routes no longer fail with HTTP 400 "Reasoning
+  is mandatory" when the caller leaves thinking unset. Harn sent a reasoning-disable those endpoints
+  reject; it now omits it.
+- The OpenRouter QC default and the OpenRouter rungs of the sitrep, judge, and approval-reviewer
+  ladders move from `google/gemini-2.5-flash`, which OpenRouter retires on 2026-10-20, to
+  `google/gemini-3.5-flash-lite`.
+- The catalog adds Kimi K3 on OpenRouter, Qwen3.8 Max on OpenRouter and DeepInfra, and MiniMax M3
+  on DeepInfra, each with a capability rule from live probes. Qwen3.8 Max cannot turn reasoning
+  off, so it no longer inherits the reasoning-off agent override of the Qwen catch-all.
+- DeepInfra Qwen3.7 Max and Qwen3.8 Max validate structured output in Harn instead of sending a
+  JSON schema, which the route rejects with HTTP 500.
+- OpenRouter Qwen3.6 Max Preview (retiring 2026-10-09), Vercel AI Gateway Gemini 3.1 Flash-Lite
+  (2027-05-07), DeepInfra MiniMax M2.7 Turbo, and SambaNova MiniMax M2.7 are marked deprecated with
+  their successors. OpenRouter GPT-6.1 Sol rows gain the 272K-token long-prompt price band.
+- The `main health` commit status now appears on main's current head. Each push
+  to main carries the latest verdict forward, keeping the date of the run that
+  measured it, instead of leaving it on whichever commit was main's head at the
+  daily run. The watched suites and their failure thresholds are declared in
+  `scripts/scheduled_workflows.toml`, and every scheduled workflow must be
+  either watched or exempt with a reason. The consumer canary, the weekly
+  provider probe, stack-frame banking, the Actions vulnerability audit, and the
+  cache and release controllers are now watched.
+- A release's `repin` job now starts harn-bump-fleet's orchestration promotion instead of dispatching
+  fleet-owned bump adapters directly, so consumers bump only after their adapter runs the released
+  driver. The release candidate gate checks the driver that promotion will select, and warns when the
+  older current pin cannot drive the candidate.
+
+### Deprecated
+
+- The model catalog marks `gpt-5.4-nano`, `gpt-5.3-codex`, and `gpt-5.1` deprecated
+  with OpenAI's 2027-04-01 shutdown date and its named replacements: `gpt-6-luna` for
+  Nano and `gpt-6-sol` for the other two. `gpt-5.1` gains a catalog row so its pricing
+  and shutdown are visible, and the OpenRouter and Vercel AI Gateway Nano routes carry
+  the same sunset. Decision evaluations still refuse `gpt-6-luna`, because the
+  structured profile requires temperature 0; use `gpt-5.4-mini` for OpenAI decisions
+  after Nano retires.
+
+### Fixed
+
+- `harn doctor` no longer raises a keyring unlock prompt. The `secret:keyring`
+  check reports the store as available, locked, or unavailable without writing
+  to it; `--check-keyring-write` runs the old write, read, and delete probe. On
+  Linux, a process without a terminal now gets a typed refusal from a locked
+  Secret Service instead of an unlock dialog.
+- LLM cost and token budgets now keep their ceilings, accumulated spend, and
+  observed usage across task interleaving. Inline and delegated fan-out share the
+  owning turn's accounting; independent turns and nested budget installs remain
+  isolated, including when a suspended turn is cancelled.
+- CI can retry a lost GitHub Actions job verdict once when a named, retry-safe job
+  has contradictory terminal metadata and no log. Downstream repositories can use
+  the same recovery policy through a SHA-pinned reusable workflow.
+- Provider option probes require OpenRouter parameter support and recognize
+  explicit parameter-routing rejections. Missing endpoints remain unmeasured;
+  account privacy refusals are counted separately as exclusions without changing
+  the privacy setting or claiming option support.
+  Rejections require a passing control without the option, and timeouts are retried
+  once. Campaign receipts include control and retry costs and preserve unpriced
+  request counts.
+  Pinned OpenRouter routes now send the same upstream allowlist explicitly, so
+  parameter rejections describe the pinned route.
+- Provider error receipts now derive `kind` from the retry decision, so resampled Fireworks channel errors
+  report `transient` alongside `retryable: true`.
+- Provider notice extraction requires a nullable candidate field, preventing Anthropic from omitting
+  the catalog change in retirement notices.
+- Independent runs sharing checkpoint storage now preserve each other's committed keys and observe fresh
+  values. `harness.runtime.checkpoint_insert(key, value)` atomically retains the first value, including `nil`,
+  and returns `{inserted, value}`. Damaged stores still refuse mutations until explicitly cleared.
+  Typed checkpoint mutations now obey the same `checkpoint.write` autonomy policy as legacy calls.
+- Worker snapshots are replaced atomically, so a reader that opens `snapshot_path` while a worker persists
+  again no longer sees a truncated file.
+- `harness.secrets.write` under the default `env,keyring` chain now stores the
+  value in the keyring. Before this change the environment provider accepted
+  every write, so the value vanished when the process exited, and refreshed
+  tokens from `std/oauth` secrets storage were never persisted. Writes go to
+  the persistent providers in chain order, and the first that accepts the value
+  stores it. If every persistent provider refuses, the write fails instead of
+  falling back to the environment. The write receipt's `provider` names the
+  backend that stored the value.
+- `harn connect` now asks Google for offline access (`access_type=offline`,
+  `prompt=consent`) whenever the authorization endpoint is on
+  `accounts.google.com`. Before this change Google issued no refresh token, so
+  `harn connect --refresh` and std/oauth refresh failed after the first access
+  token expired. Provider manifests can declare or override query parameters
+  with `[providers.oauth] authorization_params`.
+- `harn connect --refresh` names the record it read, with each provider's
+  location, when that record has no refresh token. It also points to a keyring
+  service from an older Harn release that still holds one. `harn connect
+  --list` names the provider chain it read, and `--json` includes it as
+  `store`. When a provider issues no
+  refresh token, `harn connect` prints a note saying so.
+- Fireworks `glm-5p2`, `deepseek-v4-flash-0731`, `deepseek-v4-pro`,
+  `deepseek-v4-pro-0813`, `kimi-k2p6`, and `kimi-k2p7-code` are now catalogued
+  as dedicated-only. Fireworks still lists them, but a serverless chat request
+  returns HTTP 404, so equivalent-model substitution no longer picks them. The
+  provider contract campaign also skips dedicated-only routes instead of
+  recording their 404 as an unmeasured option.
+- CI treats an explicitly supplied empty or invalid host-capacity breakdown as
+  unmeasured and uses a named hosted fallback. Negative, fractional, and
+  inconsistent host counts can no longer admit an owned runner.
+- `finally` blocks, `defer` blocks, and `owned<T>` drops now run exactly once
+  when an error leaves their region from a called function, an imported
+  function, or a failing operation such as division by zero. Previously only an
+  inline `throw` in the same body ran the cleanup. Deferred cleanup at the top
+  level of an imported function now also runs on normal return.
+- Module-graph loading no longer aborts the process on deeply nested source.
+  The parallel workers that parse each import wave now request
+  `harn_parser::PARSE_STACK_SIZE` (16 MiB) instead of Rust's 2 MiB default,
+  which an unoptimized build exhausted after about a dozen nesting levels, well
+  short of the parser's own 64-level refusal. CI never saw it because its test
+  lanes set `RUST_MIN_STACK`; embedding hosts do not.
+- Runtime bumps no longer expose the driver's GitHub App identity to caller-owned refresh and
+  validation commands as `GITHUB_APP_ID` and `GITHUB_INSTALLATION_ID`. A package that reads those
+  names chose App authentication in its own tests and failed validation only inside the bump.
+- On Windows, `checkpoint_get`, `checkpoint_exists`, and `checkpoint_list`
+  now refuse a checkpoint store whose directory has been replaced by a file,
+  as they already did on Linux and macOS. Previously Windows read such a store
+  as empty, so a resumed pipeline could repeat work its checkpoints recorded.
+- `harn connect <provider>` treats an explicit `--redirect-uri` as explicit even
+  when it equals the loopback default. Before this change, recovering a legacy
+  OAuth registration without a terminal failed with "did not record its
+  redirect URI" even though the URI had been passed.
+- OAuth connect commands accept `--client-secret-from-env NAME` and
+  `--client-secret-file PATH`. When a legacy confidential client needs its
+  secret again and no terminal is attached, the error now names these flags.
+  Before this change it failed with "Device not configured".
+- Plain calls to OpenRouter's Grok 4.5, 4.6, and 4.7, GPT-5.4 Pro, GPT-5.5 Pro, and Kimi K2.7 Code no
+  longer fail with HTTP 400 "Reasoning is mandatory": Harn stopped sending a reasoning-disable those routes
+  reject.
+- OpenRouter routes no longer claim sampling options that no endpoint forwards, so a caller's temperature,
+  top_p, seed, penalty, or stop sequence on those routes is refused locally instead of silently dropped.
+  This covers the Claude, GPT-5.4 to GPT-6.1, Gemini 3.x, Grok, GLM 5.3 FlashX, GLM-5V Turbo, Seed 2.0
+  Lite, and free Nemotron rows. OpenRouter therefore cannot run GPT-5.4 Mini, GPT-5.4 Nano, or Claude
+  Fable decisions at the structured profile's temperature 0.
+- `top_k` is now admitted on the OpenRouter Qwen, Kimi, MiniMax, GLM-5, Step 3.7 Flash, Cohere North Mini
+  Code, and `openrouter/free` routes, all of which serve it. Kimi K2.7 Code on OpenRouter now admits
+  temperature and top_p, and the free Nemotron route is declared to train on prompts.
+- A release candidate is now refused when the bump driver at harn-bump-fleet's promoted
+  orchestration commit does not type-check against it. Publishing such a candidate failed
+  every consumer's runtime bump, as v0.10.153 did.
+- A missing secret now names the provider chain that was consulted and any
+  default provider the chain leaves out, for example
+  `not found in providers: env (...); keyring disabled by HARN_SECRET_PROVIDERS=env`.
+  Before this change, a keyring credential hidden by `HARN_SECRET_PROVIDERS=env`
+  read as never stored.
+- `harness.secrets.read` reports a secret that no provider in the chain holds
+  as `not_found` instead of `tool_error`. An empty provider chain now reports
+  `tool_error` instead of `not_found`, so `not_found` always means the secret
+  is absent. `std/oauth/storage.secrets` now returns `nil` for an unstored
+  token instead of throwing. The `std/oauth` client's "no token in storage"
+  diagnostic includes the chain detail.
+- `harn doctor` warns about each default secret provider that
+  `HARN_SECRET_PROVIDERS` leaves out, and no longer reports the `file` provider
+  as unsupported.
+- `harn tool run`, `harn serve mcp`, and exported-function dispatch now read the
+  `harn.agent_tool_handler_result.v2` envelope with the same parser as agent
+  dispatch. An `"ok"` envelope succeeds with its `data`, which is what the
+  declared output schema validates; `"error"` and `"rejected"` envelopes are
+  declared application failures that carry `data` and `outcome`. A handler
+  written for agent dispatch with an output schema no longer fails on the CLI
+  and MCP with "output violates its declared schema", and an error outcome is
+  no longer reported as success. Non-envelope returns are unchanged.
+
+### Security
+
+- Linux child confinement probes Landlock enforcement and falls back to
+  bubblewrap when Landlock is unavailable. Both backends use pinned filesystem
+  grants and subtract credential aliases from readable roots. Bubblewrap refuses
+  policies whose selective permissions it can't preserve.
+  Trusted Linux setup also refuses dynamic-loader environment controls before
+  the helper runs, while preserving ordinary payload grants.
+- `harn connect api-key --from-env` and `--client-secret-from-env` no longer echo
+  a credential whose value is not valid Unicode. The error names the variable
+  and the failure category only.
+- Trusted process inference ceilings now survive isolated API sessions,
+  restored and forked ACP sessions, and shared server dispatch. Harn captures
+  the ceiling at launch, meets it with tighter session limits, and withholds
+  the reserved value from ordinary child processes. Malformed launch policies
+  refuse before provider configuration seeding or server connections.
+  Script-published MCP, playground, durable-worker and orchestrator launches
+  share that validation and keep the ceiling out of ordinary child processes.
+
 ## v0.10.153
 
 ### Breaking
