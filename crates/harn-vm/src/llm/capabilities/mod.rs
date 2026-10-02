@@ -55,6 +55,8 @@ mod lookup_tests_parity;
 #[cfg(test)]
 mod lookup_tests_responses;
 #[cfg(test)]
+mod lookup_tests_routed_flagships;
+#[cfg(test)]
 mod lookup_tests_support;
 #[cfg(test)]
 mod lookup_tests_system_placement;

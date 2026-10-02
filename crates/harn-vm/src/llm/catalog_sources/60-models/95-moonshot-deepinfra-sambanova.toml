@@ -248,9 +248,32 @@ api_dialect = "openai_chat"
 context_window = 256000
 capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
 pricing = { input_per_mtok = 2.50, output_per_mtok = 7.50, cache_read_per_mtok = 0.50 }
+superseded_by = "deepinfra/Qwen/Qwen3.8-Max"
 tier = "frontier"
 open_weight = true
 strengths = ["coding", "agentic", "tool_use", "long_context", "cheap"]
+complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "deepseek", "kimi"]
+
+# Qwen3.8 Max on DeepInfra, listed in its model index (read 2026-10-01) at
+# $1.65 / $4.951 per MTok with $0.206 cached input and a 256,000-token
+# window. Alibaba's hosted flagship, not the open-weight 2.4T build: no image
+# input, and response_format json_schema is rejected upstream, so structured
+# output runs on Harn's prompt validation. Probe evidence is on the
+# `*qwen3.8-max*` DeepInfra capability rule.
+[models."deepinfra/Qwen/Qwen3.8-Max"]
+name = "Qwen3.8 Max (DeepInfra)"
+provider = "deepinfra"
+wire_model = "Qwen/Qwen3.8-Max"
+logical_model = "qwen3.8-max"
+equivalence_group = "qwen3.8-max"
+served_variant = "deepinfra"
+api_dialect = "openai_chat"
+context_window = 256000
+capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 1.65, output_per_mtok = 4.951, cache_read_per_mtok = 0.206 }
+tier = "frontier"
+open_weight = false
+strengths = ["coding", "agentic", "tool_use", "long_context", "reasoning"]
 complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "deepseek", "kimi"]
 
 [models."deepinfra/moonshotai/Kimi-K2.7-Code"]
@@ -322,6 +345,9 @@ api_dialect = "openai_chat"
 context_window = 196608
 capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
 pricing = { input_per_mtok = 0.60, output_per_mtok = 2.40, cache_read_per_mtok = 0.06, cache_write_per_mtok = 0.0 }
+deprecated = true
+deprecation_note = "Absent from SambaNova's model index (https://api.sambanova.ai/v1/models, read 2026-10-01), which lists MiniMax-M3 as its only MiniMax route. Not call-verified: the probe key was rejected with HTTP 401 that day."
+superseded_by = "sambanova/MiniMax-M3"
 tier = "frontier"
 open_weight = true
 strengths = ["speed", "coding", "agentic", "tool_use", "reasoning", "long_context"]

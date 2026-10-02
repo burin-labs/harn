@@ -685,10 +685,10 @@ serving_tiers = [
   { id = "priority", label = "Priority inference", mode = "synchronous", economics = "premium", request = { param = "service_tier", value = "priority" }, status = "research_preview", latency = "predictable low-latency serving for user-facing traffic", reliability = "traffic can gracefully downgrade to standard when dynamic priority limits are exceeded", unsuitable_workloads = ["batch"], note = "GenerateContent responses expose downgrade via x-gemini-service-tier." },
 ]
 
-# OpenRouter-routed variants of the same models — kept as distinct
-# catalog entry so the `qc_defaults.openrouter` lookup resolves to a
-# registered ID. Pricing matches the native Gemini API; OpenRouter adds
-# its own margin at request time.
+# OpenRouter-routed variants of the same models. Pricing matches the native
+# Gemini API; OpenRouter adds its own margin at request time.
+# Gemini 2.5 Flash stays catalogued through its OpenRouter retirement so
+# in-flight callers still resolve pricing; no Harn default names it.
 [models."google/gemini-2.5-flash"]
 name = "Gemini 2.5 Flash (via OpenRouter)"
 provider = "openrouter"
@@ -698,6 +698,10 @@ capabilities = ["tools", "vision", "streaming", "thinking"]
 # to write a cache entry on every Gemini Flash route. It was missing here, so
 # cache writes were estimated at zero.
 pricing = { input_per_mtok = 0.30, output_per_mtok = 2.50, cache_read_per_mtok = 0.03, cache_write_per_mtok = 0.0833333333333333 }
+deprecated = true
+deprecation_note = "OpenRouter retires this route 2026-10-20 (typed expiration_date on https://openrouter.ai/api/v1/models, read 2026-10-01; google/gemini-2.5-pro and -flash-lite expire the same day). Google's own page lists no shutdown for gemini-2.5-flash but limits 2.5 access to existing users. Use google/gemini-3.5-flash-lite."
+sunset_date = "2026-10-20"
+superseded_by = "google/gemini-3.5-flash-lite"
 tier = "mid"
 open_weight = false
 strengths = ["speed", "long_context", "vision", "cheap", "tool_use"]

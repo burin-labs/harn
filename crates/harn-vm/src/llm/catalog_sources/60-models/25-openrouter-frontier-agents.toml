@@ -24,6 +24,8 @@ capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
 # The cache-write rate moved with the headline rates and was left behind at
 # $1.5625; OpenRouter bills $1.84375 per MTok (read 2026-09-20).
 pricing = { input_per_mtok = 1.475, output_per_mtok = 4.425, cache_read_per_mtok = 0.295, cache_write_per_mtok = 1.84375 }
+# Still served with no announced shutdown.
+superseded_by = "qwen/qwen3.8-max-0902"
 
 # OpenRouter describes Max as the flagship Qwen3.7 route; keep it out of the
 # value/mid tier so price-sensitive selectors do not confuse it with Flash.
@@ -31,6 +33,27 @@ tier = "frontier"
 open_weight = false
 strengths = ["coding", "agentic", "tool_use", "long_context", "reasoning"]
 complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "qwen", "deepseek"]
+
+# Qwen3.8 Max (0902 snapshot, listed 2026-09-03), Alibaba's hosted flagship.
+# One serving endpoint (Alibaba) at $2 / $6 per MTok, $0.25 cache read and
+# $2.50 cache write (index and endpoint list read 2026-10-01). OpenRouter's
+# `qwen3.8-max-prime` is a faster SKU of the same model at 2x the price and is
+# not catalogued. Capability evidence, including mandatory reasoning, is on
+# the `qwen/qwen3.8-max-0902` OpenRouter capability rule.
+[models."qwen/qwen3.8-max-0902"]
+name = "Qwen3.8 Max (via OpenRouter)"
+provider = "openrouter"
+logical_model = "qwen3.8-max"
+equivalence_group = "qwen3.8-max"
+served_variant = "openrouter"
+released = "2026-09-03"
+context_window = 1000000
+capabilities = ["tools", "vision", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 2.00, output_per_mtok = 6.00, cache_read_per_mtok = 0.25, cache_write_per_mtok = 2.50 }
+tier = "frontier"
+open_weight = false
+strengths = ["coding", "agentic", "tool_use", "long_context", "reasoning", "vision"]
+complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "deepseek", "kimi"]
 [models."kwaipilot/kat-coder-pro-v2"]
 name = "KAT-Coder-Pro V2"
 provider = "openrouter"

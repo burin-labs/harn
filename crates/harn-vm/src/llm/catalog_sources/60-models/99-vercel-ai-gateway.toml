@@ -61,6 +61,12 @@ api_dialect = "openai_chat"
 context_window = 1000000
 capabilities = ["tools", "vision", "files", "streaming", "thinking", "prompt_caching"]
 pricing = { input_per_mtok = 0.25, output_per_mtok = 1.50, cache_read_per_mtok = 0.03 }
+# Follows Google's schedule for the model, as the direct gemini-3.1-flash-lite
+# row does. No `superseded_by`: no Vercel Gemini 3.5 Flash-Lite route has been
+# probed (the probe key's free-tier team gets HTTP 403 on Gemini routes).
+deprecated = true
+deprecation_note = "Google shuts down gemini-3.1-flash-lite 2027-05-07 and names gemini-3.5-flash-lite as the replacement (https://ai.google.dev/gemini-api/docs/deprecations, read 2026-10-01); this gateway route ends with it."
+sunset_date = "2027-05-07"
 tier = "small"
 open_weight = false
 strengths = ["speed", "cheap", "long_context", "tool_use", "reasoning", "vision"]

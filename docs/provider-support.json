@@ -2338,14 +2338,14 @@
         "OPENROUTER_API_KEY"
       ],
       "recommended": {
-        "selector": "openrouter:google/gemini-2.5-flash",
+        "selector": "openrouter:google/gemini-3.5-flash-lite",
         "provider": "openrouter",
-        "model": "google/gemini-2.5-flash",
-        "display_name": "Gemini 2.5 Flash (via OpenRouter)",
+        "model": "google/gemini-3.5-flash-lite",
+        "display_name": "Gemini 3.5 Flash-Lite (via OpenRouter)",
         "tool_format": "native",
         "harn_options": [
           "provider = \"openrouter\"",
-          "model = \"google/gemini-2.5-flash\"",
+          "model = \"google/gemini-3.5-flash-lite\"",
           "tool_format = \"native\"",
           "structured_output_mode = \"native_json\""
         ]
@@ -2359,6 +2359,7 @@
         "structured_output_mode": "native_json",
         "streaming": true,
         "reasoning_knobs": [
+          "adaptive",
           "effort",
           "enabled",
           "reasoning_effort"

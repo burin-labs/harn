@@ -6726,7 +6726,9 @@
         "cache_write_per_mtok": null
       },
       "deprecation": {
-        "status": "active"
+        "status": "deprecated",
+        "note": "Absent from DeepInfra's model index (https://api.deepinfra.com/v1/openai/models, read 2026-10-01) though a direct call still returned HTTP 200 that day; DeepInfra announced no shutdown date. Use deepinfra/MiniMaxAI/MiniMax-M3.",
+        "superseded_by": "deepinfra/MiniMaxAI/MiniMax-M3"
       },
       "availability": "serverless",
       "quality_tags": [],
@@ -6746,6 +6748,101 @@
         "tool_use",
         "reasoning",
         "long_context"
+      ]
+    },
+    {
+      "id": "deepinfra/MiniMaxAI/MiniMax-M3",
+      "name": "MiniMax M3 (DeepInfra)",
+      "operations": [
+        "text_generation",
+        "decision"
+      ],
+      "display_name": "MiniMax M3",
+      "provider": "deepinfra",
+      "aliases": [
+        "deepinfra-minimax-m3"
+      ],
+      "context_window": 524288,
+      "logical_model": "minimax-m3",
+      "equivalence_group": "minimax-m3",
+      "served_variant": "deepinfra",
+      "wire_model": "MiniMaxAI/MiniMax-M3",
+      "api_dialect": "openai_chat",
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text",
+          "decision"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "parity_source": "derived",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "inline"
+      },
+      "reasoning": {
+        "modes": [
+          "effort"
+        ],
+        "effort_supported": true,
+        "effort_levels": [
+          "none",
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ],
+        "none_supported": true,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "pricing": {
+        "input_per_mtok": 0.28,
+        "output_per_mtok": 1.1,
+        "cache_read_per_mtok": 0.056,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "prompt_caching",
+        "thinking",
+        "extended_thinking",
+        "structured_output"
+      ],
+      "family": "minimax",
+      "lineage": "minimax",
+      "tier": "frontier",
+      "open_weight": true,
+      "strengths": [
+        "coding",
+        "agentic",
+        "tool_use",
+        "reasoning",
+        "long_context",
+        "cheap"
       ]
     },
     {
@@ -7204,11 +7301,11 @@
         "parity_source": "derived",
         "tool_search": []
       },
-      "structured_output": "native",
+      "structured_output": "delimited",
       "format_preferences": {
         "prefers_xml_scaffolding": false,
         "prefers_markdown_scaffolding": true,
-        "structured_output_mode": "native_json",
+        "structured_output_mode": "delimited",
         "supports_assistant_prefill": false,
         "prefers_role_developer": false,
         "prefers_xml_tools": false,
@@ -7232,7 +7329,8 @@
         "cache_write_per_mtok": null
       },
       "deprecation": {
-        "status": "active"
+        "status": "active",
+        "superseded_by": "deepinfra/Qwen/Qwen3.8-Max"
       },
       "availability": "serverless",
       "quality_tags": [],
@@ -7357,6 +7455,106 @@
         "agentic",
         "long_context",
         "tool_use",
+        "reasoning"
+      ]
+    },
+    {
+      "id": "deepinfra/Qwen/Qwen3.8-Max",
+      "name": "Qwen3.8 Max (DeepInfra)",
+      "operations": [
+        "text_generation",
+        "decision"
+      ],
+      "display_name": "Qwen3.8 Max",
+      "provider": "deepinfra",
+      "aliases": [
+        "deepinfra-qwen3.8-max"
+      ],
+      "context_window": 256000,
+      "logical_model": "qwen3.8-max",
+      "equivalence_group": "qwen3.8-max",
+      "served_variant": "deepinfra",
+      "wire_model": "Qwen/Qwen3.8-Max",
+      "api_dialect": "openai_chat",
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text",
+          "decision"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "parity_source": "derived",
+        "tool_search": []
+      },
+      "structured_output": "delimited",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "delimited",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "inline"
+      },
+      "reasoning": {
+        "modes": [
+          "effort"
+        ],
+        "effort_supported": true,
+        "effort_levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ],
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "pricing": {
+        "input_per_mtok": 1.65,
+        "output_per_mtok": 4.951,
+        "cache_read_per_mtok": 0.206,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "prompt_caching",
+        "thinking",
+        "extended_thinking",
+        "structured_output"
+      ],
+      "family": "qwen",
+      "lineage": "qwen3",
+      "complementary_with": [
+        "anthropic-claude",
+        "openai-gpt",
+        "google-gemini",
+        "deepseek",
+        "kimi"
+      ],
+      "tier": "frontier",
+      "open_weight": false,
+      "strengths": [
+        "coding",
+        "agentic",
+        "tool_use",
+        "long_context",
         "reasoning"
       ]
     },
@@ -21971,7 +22169,10 @@
         "cache_write_per_mtok": 0.0833333333333333
       },
       "deprecation": {
-        "status": "active"
+        "status": "deprecated",
+        "note": "OpenRouter retires this route 2026-10-20 (typed expiration_date on https://openrouter.ai/api/v1/models, read 2026-10-01; google/gemini-2.5-pro and -flash-lite expire the same day). Google's own page lists no shutdown for gemini-2.5-flash but limits 2.5 access to existing users. Use google/gemini-3.5-flash-lite.",
+        "sunset_date": "2026-10-20",
+        "superseded_by": "google/gemini-3.5-flash-lite"
       },
       "availability": "serverless",
       "quality_tags": [],
@@ -23425,6 +23626,105 @@
         "video",
         "prompt_caching",
         "thinking",
+        "structured_output"
+      ],
+      "family": "kimi",
+      "lineage": "kimi",
+      "complementary_with": [
+        "anthropic-claude",
+        "openai-gpt",
+        "google-gemini",
+        "qwen",
+        "deepseek"
+      ],
+      "tier": "frontier",
+      "open_weight": true,
+      "strengths": [
+        "coding",
+        "agentic",
+        "long_context",
+        "tool_use",
+        "reasoning",
+        "vision"
+      ]
+    },
+    {
+      "id": "moonshotai/kimi-k3",
+      "name": "Kimi K3 (via OpenRouter)",
+      "operations": [
+        "text_generation",
+        "decision"
+      ],
+      "display_name": "Kimi K3",
+      "provider": "openrouter",
+      "aliases": [
+        "openrouter-kimi-k3"
+      ],
+      "context_window": 1048576,
+      "logical_model": "moonshot-kimi-k3",
+      "equivalence_group": "moonshot-kimi-k3",
+      "served_variant": "openrouter",
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text",
+          "decision"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "parity_source": "derived",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "inline"
+      },
+      "reasoning": {
+        "modes": [
+          "effort"
+        ],
+        "effort_supported": true,
+        "effort_levels": [
+          "low",
+          "high",
+          "max"
+        ],
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "pricing": {
+        "input_per_mtok": 3.0,
+        "output_per_mtok": 15.0,
+        "cache_read_per_mtok": 0.3,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "vision",
+        "prompt_caching",
+        "thinking",
+        "extended_thinking",
         "structured_output"
       ],
       "family": "kimi",
@@ -25281,7 +25581,14 @@
         "input_per_mtok": 2.0,
         "output_per_mtok": 10.0,
         "cache_read_per_mtok": 0.1,
-        "cache_write_per_mtok": 2.5
+        "cache_write_per_mtok": 2.5,
+        "input_token_bands": [
+          {
+            "minimum_input_tokens": 272000,
+            "input_multiplier": 2.0,
+            "output_multiplier": 1.5
+          }
+        ]
       },
       "deprecation": {
         "status": "active"
@@ -25373,7 +25680,14 @@
         "input_per_mtok": 2.0,
         "output_per_mtok": 10.0,
         "cache_read_per_mtok": 0.1,
-        "cache_write_per_mtok": 2.5
+        "cache_write_per_mtok": 2.5,
+        "input_token_bands": [
+          {
+            "minimum_input_tokens": 272000,
+            "input_multiplier": 2.0,
+            "output_multiplier": 1.5
+          }
+        ]
       },
       "deprecation": {
         "status": "active"
@@ -26313,7 +26627,10 @@
         ]
       },
       "deprecation": {
-        "status": "active"
+        "status": "deprecated",
+        "note": "OpenRouter retires this preview 2026-10-09 (typed expiration_date on https://openrouter.ai/api/v1/models, read 2026-10-01), together with its other Qwen3 and Qwen3.6-Max routes. Use qwen/qwen3.8-max-0902.",
+        "sunset_date": "2026-10-09",
+        "superseded_by": "qwen/qwen3.8-max-0902"
       },
       "availability": "serverless",
       "quality_tags": [],
@@ -26490,7 +26807,8 @@
         "cache_write_per_mtok": 1.84375
       },
       "deprecation": {
-        "status": "active"
+        "status": "active",
+        "superseded_by": "qwen/qwen3.8-max-0902"
       },
       "availability": "serverless",
       "quality_tags": [],
@@ -26617,6 +26935,109 @@
         "tool_use",
         "reasoning"
       ]
+    },
+    {
+      "id": "qwen/qwen3.8-max-0902",
+      "name": "Qwen3.8 Max (via OpenRouter)",
+      "operations": [
+        "text_generation",
+        "decision"
+      ],
+      "display_name": "Qwen3.8 Max",
+      "provider": "openrouter",
+      "aliases": [
+        "openrouter-qwen3.8-max",
+        "qwen3.8-max"
+      ],
+      "context_window": 1000000,
+      "logical_model": "qwen3.8-max",
+      "equivalence_group": "qwen3.8-max",
+      "served_variant": "openrouter",
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text",
+          "decision"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "parity_source": "derived",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "inline"
+      },
+      "reasoning": {
+        "modes": [
+          "effort"
+        ],
+        "effort_supported": true,
+        "effort_levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ],
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "pricing": {
+        "input_per_mtok": 2.0,
+        "output_per_mtok": 6.0,
+        "cache_read_per_mtok": 0.25,
+        "cache_write_per_mtok": 2.5
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "vision",
+        "prompt_caching",
+        "thinking",
+        "extended_thinking",
+        "structured_output"
+      ],
+      "family": "qwen",
+      "lineage": "qwen3",
+      "complementary_with": [
+        "anthropic-claude",
+        "openai-gpt",
+        "google-gemini",
+        "deepseek",
+        "kimi"
+      ],
+      "tier": "frontier",
+      "open_weight": false,
+      "strengths": [
+        "coding",
+        "agentic",
+        "tool_use",
+        "long_context",
+        "reasoning",
+        "vision"
+      ],
+      "released": "2026-09-03"
     },
     {
       "id": "stepfun/step-3.7-flash",
@@ -27846,7 +28267,9 @@
         "cache_write_per_mtok": 0.0
       },
       "deprecation": {
-        "status": "active"
+        "status": "deprecated",
+        "note": "Absent from SambaNova's model index (https://api.sambanova.ai/v1/models, read 2026-10-01), which lists MiniMax-M3 as its only MiniMax route. Not call-verified: the probe key was rejected with HTTP 401 that day.",
+        "superseded_by": "sambanova/MiniMax-M3"
       },
       "availability": "serverless",
       "quality_tags": [],
@@ -30270,7 +30693,9 @@
         "cache_write_per_mtok": null
       },
       "deprecation": {
-        "status": "active"
+        "status": "deprecated",
+        "note": "Google shuts down gemini-3.1-flash-lite 2027-05-07 and names gemini-3.5-flash-lite as the replacement (https://ai.google.dev/gemini-api/docs/deprecations, read 2026-10-01); this gateway route ends with it.",
+        "sunset_date": "2027-05-07"
       },
       "availability": "serverless",
       "quality_tags": [],
@@ -32142,10 +32567,20 @@
       "tool_format": "native"
     },
     {
+      "name": "deepinfra-minimax-m3",
+      "model_id": "deepinfra/MiniMaxAI/MiniMax-M3",
+      "provider": "deepinfra"
+    },
+    {
       "name": "deepinfra-qwen3.6",
       "model_id": "deepinfra/Qwen/Qwen3.6-35B-A3B",
       "provider": "deepinfra",
       "tool_format": "text"
+    },
+    {
+      "name": "deepinfra-qwen3.8-max",
+      "model_id": "deepinfra/Qwen/Qwen3.8-Max",
+      "provider": "deepinfra"
     },
     {
       "name": "deepseek",
@@ -32680,6 +33115,11 @@
       "provider": "openrouter"
     },
     {
+      "name": "openrouter-kimi-k3",
+      "model_id": "moonshotai/kimi-k3",
+      "provider": "openrouter"
+    },
+    {
       "name": "openrouter-qwen3-coder-next",
       "model_id": "qwen/qwen3-coder-next",
       "provider": "openrouter"
@@ -32717,6 +33157,11 @@
     {
       "name": "openrouter-qwen3.7-plus",
       "model_id": "qwen/qwen3.7-plus",
+      "provider": "openrouter"
+    },
+    {
+      "name": "openrouter-qwen3.8-max",
+      "model_id": "qwen/qwen3.8-max-0902",
       "provider": "openrouter"
     },
     {
@@ -32782,6 +33227,11 @@
     {
       "name": "qwen3.7-plus",
       "model_id": "qwen/qwen3.7-plus",
+      "provider": "openrouter"
+    },
+    {
+      "name": "qwen3.8-max",
+      "model_id": "qwen/qwen3.8-max-0902",
       "provider": "openrouter"
     },
     {
@@ -33850,18 +34300,22 @@
     },
     {
       "provider": "deepinfra",
-      "model": "MiniMaxAI/MiniMax-M2.7-Turbo",
+      "model": "MiniMaxAI/MiniMax-M3",
       "base_url": "https://api.deepinfra.com/v1/openai",
       "secret_env": "DEEPINFRA_API_KEY",
-      "label": "MiniMax M2.7 Turbo (DeepInfra)",
+      "label": "MiniMax M3 (DeepInfra)",
       "family": "minimax",
       "capabilities": [
+        "extended_thinking",
         "native_tools",
         "prefers_markdown_scaffolding",
+        "prompt_caching",
+        "reasoning_effort",
         "streaming",
         "structured_output",
         "structured_output_mode:native_json",
         "text_tools",
+        "thinking",
         "tools"
       ]
     },
@@ -33967,7 +34421,7 @@
         "prompt_caching",
         "streaming",
         "structured_output",
-        "structured_output_mode:native_json",
+        "structured_output_mode:delimited",
         "text_tools",
         "thinking",
         "tools"
@@ -33989,6 +34443,27 @@
         "streaming",
         "structured_output",
         "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools"
+      ]
+    },
+    {
+      "provider": "deepinfra",
+      "model": "Qwen/Qwen3.8-Max",
+      "base_url": "https://api.deepinfra.com/v1/openai",
+      "secret_env": "DEEPINFRA_API_KEY",
+      "label": "Qwen3.8 Max (DeepInfra)",
+      "family": "qwen",
+      "capabilities": [
+        "extended_thinking",
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "prompt_caching",
+        "reasoning_effort",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:delimited",
         "text_tools",
         "thinking",
         "tools"
@@ -36414,30 +36889,6 @@
     },
     {
       "provider": "openrouter",
-      "model": "google/gemini-2.5-flash",
-      "base_url": "https://openrouter.ai/api/v1",
-      "secret_env": "OPENROUTER_API_KEY",
-      "label": "Gemini 2.5 Flash (via OpenRouter)",
-      "family": "google-gemini",
-      "capabilities": [
-        "audio",
-        "extended_thinking",
-        "native_tools",
-        "pdf",
-        "prefers_markdown_scaffolding",
-        "prompt_caching",
-        "reasoning_effort",
-        "streaming",
-        "structured_output",
-        "structured_output_mode:native_json",
-        "text_tools",
-        "thinking",
-        "tools",
-        "vision"
-      ]
-    },
-    {
-      "provider": "openrouter",
       "model": "google/gemini-3.5-flash",
       "base_url": "https://openrouter.ai/api/v1",
       "secret_env": "OPENROUTER_API_KEY",
@@ -36737,6 +37188,28 @@
         "thinking",
         "tools",
         "video",
+        "vision"
+      ]
+    },
+    {
+      "provider": "openrouter",
+      "model": "moonshotai/kimi-k3",
+      "base_url": "https://openrouter.ai/api/v1",
+      "secret_env": "OPENROUTER_API_KEY",
+      "label": "Kimi K3 (via OpenRouter)",
+      "family": "kimi",
+      "capabilities": [
+        "extended_thinking",
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "prompt_caching",
+        "reasoning_effort",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools",
         "vision"
       ]
     },
@@ -37332,24 +37805,6 @@
     },
     {
       "provider": "openrouter",
-      "model": "qwen/qwen3.6-max-preview",
-      "base_url": "https://openrouter.ai/api/v1",
-      "secret_env": "OPENROUTER_API_KEY",
-      "label": "Qwen3.6 Max Preview (via OpenRouter)",
-      "family": "qwen",
-      "capabilities": [
-        "native_tools",
-        "prefers_markdown_scaffolding",
-        "streaming",
-        "structured_output",
-        "structured_output_mode:delimited",
-        "text_tools",
-        "thinking",
-        "tools"
-      ]
-    },
-    {
-      "provider": "openrouter",
       "model": "qwen/qwen3.6-plus",
       "base_url": "https://openrouter.ai/api/v1",
       "secret_env": "OPENROUTER_API_KEY",
@@ -37401,6 +37856,28 @@
         "streaming",
         "structured_output",
         "structured_output_mode:delimited",
+        "text_tools",
+        "thinking",
+        "tools",
+        "vision"
+      ]
+    },
+    {
+      "provider": "openrouter",
+      "model": "qwen/qwen3.8-max-0902",
+      "base_url": "https://openrouter.ai/api/v1",
+      "secret_env": "OPENROUTER_API_KEY",
+      "label": "Qwen3.8 Max (via OpenRouter)",
+      "family": "qwen",
+      "capabilities": [
+        "extended_thinking",
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "prompt_caching",
+        "reasoning_effort",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
         "text_tools",
         "thinking",
         "tools",
@@ -37672,25 +38149,6 @@
         "text_tools",
         "tools",
         "vision"
-      ]
-    },
-    {
-      "provider": "sambanova",
-      "model": "MiniMax-M2.7",
-      "base_url": "https://api.sambanova.ai/v1",
-      "secret_env": "SAMBANOVA_API_KEY",
-      "label": "MiniMax M2.7 (SambaNova)",
-      "family": "minimax",
-      "capabilities": [
-        "native_tools",
-        "prefers_markdown_scaffolding",
-        "prompt_caching",
-        "streaming",
-        "structured_output",
-        "structured_output_mode:native_json",
-        "text_tools",
-        "thinking",
-        "tools"
       ]
     },
     {
@@ -38179,29 +38637,6 @@
     },
     {
       "provider": "vercel_ai_gateway",
-      "model": "google/gemini-3.1-flash-lite",
-      "base_url": "https://ai-gateway.vercel.sh/v1",
-      "secret_env": "AI_GATEWAY_API_KEY",
-      "label": "Gemini 3.1 Flash Lite (Vercel AI Gateway)",
-      "family": "google-gemini",
-      "capabilities": [
-        "audio",
-        "extended_thinking",
-        "native_tools",
-        "pdf",
-        "prefers_markdown_scaffolding",
-        "prompt_caching",
-        "streaming",
-        "structured_output",
-        "structured_output_mode:native_json",
-        "text_tools",
-        "thinking",
-        "tools",
-        "vision"
-      ]
-    },
-    {
-      "provider": "vercel_ai_gateway",
       "model": "typesafe-ai/jev",
       "base_url": "https://ai-gateway.vercel.sh/v1",
       "secret_env": "AI_GATEWAY_API_KEY",
@@ -38564,7 +38999,7 @@
     "mistral": "mistral-small-2603",
     "ollama": "llama3.2",
     "openai": "gpt-6-luna",
-    "openrouter": "google/gemini-2.5-flash",
+    "openrouter": "google/gemini-3.5-flash-lite",
     "xai": "grok-build-0.1",
     "zai": "glm-4.6"
   }
