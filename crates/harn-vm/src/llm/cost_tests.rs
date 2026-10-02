@@ -569,14 +569,13 @@ fn token_budget_guard_restores_prior_state_on_drop() {
 
     let outer = install_llm_token_budget(100);
     assert_eq!(peek_total_tokens(), 0);
-    // Simulate accumulation by writing the thread-local directly.
-    LLM_ACCUMULATED_TOKENS.with(|a| *a.borrow_mut() = 50);
+    accumulate_llm_usage("test", 50, 0, 0.0).unwrap();
 
     // Nested guard wipes accumulation and installs a tighter cap.
     {
         let _inner = install_llm_token_budget(10);
         assert_eq!(peek_total_tokens(), 0);
-        LLM_ACCUMULATED_TOKENS.with(|a| *a.borrow_mut() = 5);
+        accumulate_llm_usage("test", 5, 0, 0.0).unwrap();
     }
 
     // Outer scope restored on inner drop.
@@ -594,26 +593,26 @@ fn set_budget_rearms_in_place_without_resetting_accumulation() {
 
     // Install a $1.00 cap and spend $0.60 against it.
     let _budget = install_llm_cost_budget(1.0);
-    LLM_ACCUMULATED_COST.with(|a| *a.borrow_mut() = 0.60);
+    accumulate_llm_usage("test", 0, 0, 0.60).unwrap();
 
     // Tighten the cap below current spend: the next preflight must trip,
     // and the already-accumulated total must be preserved (not reset).
     set_llm_cost_budget(Some(0.50));
     assert!((peek_total_cost() - 0.60).abs() < f64::EPSILON);
-    LLM_BUDGET.with(|b| assert_eq!(*b.borrow(), Some(0.50)));
+    assert_eq!(peek_llm_cost_budget(), Some(0.50));
 
     // Loosen the cap: spend stays, ceiling rises, room reopens.
     set_llm_cost_budget(Some(2.0));
     assert!((peek_total_cost() - 0.60).abs() < f64::EPSILON);
-    LLM_BUDGET.with(|b| assert_eq!(*b.borrow(), Some(2.0)));
+    assert_eq!(peek_llm_cost_budget(), Some(2.0));
 
     // Clear the cap entirely.
     set_llm_cost_budget(None);
-    LLM_BUDGET.with(|b| assert_eq!(*b.borrow(), None));
+    assert_eq!(peek_llm_cost_budget(), None);
 
     // Negative ceilings clamp to zero (a hard stop), matching `install_*`.
     set_llm_cost_budget(Some(-5.0));
-    LLM_BUDGET.with(|b| assert_eq!(*b.borrow(), Some(0.0)));
+    assert_eq!(peek_llm_cost_budget(), Some(0.0));
 
     reset_cost_state();
 }
@@ -624,15 +623,15 @@ fn set_token_budget_rearms_in_place_without_resetting_accumulation() {
     reset_cost_state();
 
     let _budget = install_llm_token_budget(100);
-    LLM_ACCUMULATED_TOKENS.with(|a| *a.borrow_mut() = 60);
+    accumulate_llm_usage("test", 60, 0, 0.0).unwrap();
 
     set_llm_token_budget(Some(50));
     assert_eq!(peek_total_tokens(), 60);
-    LLM_TOKEN_BUDGET.with(|b| assert_eq!(*b.borrow(), Some(50)));
+    assert_eq!(peek_llm_token_budget(), Some(50));
 
     set_llm_token_budget(None);
     assert_eq!(peek_total_tokens(), 60);
-    LLM_TOKEN_BUDGET.with(|b| assert_eq!(*b.borrow(), None));
+    assert_eq!(peek_llm_token_budget(), None);
 
     reset_cost_state();
 }
@@ -1058,7 +1057,10 @@ fn nested_budget_scope_cannot_pollute_the_outer_sessions_observed_usage() {
         let _inner = install_llm_cost_budget(5.0);
         // The child scope starts with no evidence, so its first call is
         // projected worst-case rather than inheriting the parent's ratio.
-        assert_eq!(peek_observed_session_usage(), ObservedSessionUsage::EMPTY);
+        assert_eq!(
+            peek_observed_session_usage(),
+            ObservedSessionUsage::default()
+        );
         let mut chatty = cached_call_result();
         chatty.output_tokens = 8_000;
         chatty.cache_read_tokens = 0;

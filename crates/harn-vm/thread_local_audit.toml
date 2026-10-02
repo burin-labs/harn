@@ -61,6 +61,8 @@ captured = [
   "ACTIVE_EVENT_LOG",
   "MCP_CALL_BUDGET",
   "PG_QUERY_BUDGET",
+  "LLM_COST_BUDGET",
+  "LLM_TOKEN_BUDGET",
   "ACTIVE_TOOL_CALL_CANCELLATION_REGISTRY",
   "ACTIVE_WORKER_REGISTRY",
   "ACTIVE_DAEMON_REGISTRY",
@@ -283,8 +285,8 @@ category = "logical_task"
 plan = "task_local_or_explicit"
 
 [[thread_local]]
-path = "src/llm/cost.rs"
-statics = ["LLM_BUDGET", "LLM_ACCUMULATED_COST", "LLM_TOKEN_BUDGET", "LLM_ACCUMULATED_TOKENS", "LLM_OBSERVED_USAGE"]
+path = "src/llm/cost/budget.rs"
+statics = ["LLM_COST_BUDGET", "LLM_TOKEN_BUDGET"]
 category = "logical_task"
 plan = "task_local_or_explicit"
 

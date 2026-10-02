@@ -1200,6 +1200,51 @@ mod tests {
         clear_execution_policy_stacks();
     }
 
+    #[tokio::test(flavor = "current_thread")]
+    async fn concurrent_prompt_turns_keep_their_own_llm_budget_and_session_spend() {
+        use std::future::Future;
+        use std::task::{Context, Poll, Wake, Waker};
+
+        struct NoopWake;
+        impl Wake for NoopWake {
+            fn wake(self: std::sync::Arc<Self>) {}
+        }
+
+        async fn turn(scope: &ModePolicyScope, max: f64, seed: f64, tokens: u64) {
+            scope
+                .run(async {
+                    // Same install and policy scope used by handle_session_prompt.
+                    let budget = crate::limits::BudgetSpec {
+                        llm_cost_usd: Some(max),
+                        llm_tokens: Some(tokens),
+                        ..Default::default()
+                    };
+                    let _guard = budget.install_session_turn(seed);
+                    tokio::task::yield_now().await;
+                    assert_eq!(harn_vm::peek_llm_cost_budget(), Some(max));
+                    assert_eq!(harn_vm::llm::peek_total_cost(), seed);
+                    assert_eq!(harn_vm::peek_llm_token_budget(), Some(tokens));
+                })
+                .await;
+        }
+
+        let first = ModePolicyScope::new("code", &AcpSandboxConfig::default());
+        let second = ModePolicyScope::new("code", &AcpSandboxConfig::default());
+        let mut first_turn = Box::pin(turn(&first, 1.0, 0.25, 10));
+        let mut second_turn = Box::pin(turn(&second, 2.0, 0.5, 20));
+        let waker = Waker::from(std::sync::Arc::new(NoopWake));
+        let mut cx = Context::from_waker(&waker);
+        assert!(first_turn.as_mut().poll(&mut cx).is_pending());
+        assert!(second_turn.as_mut().poll(&mut cx).is_pending());
+        assert_eq!(first_turn.as_mut().poll(&mut cx), Poll::Ready(()));
+        assert_eq!(harn_vm::peek_llm_cost_budget(), None);
+        assert_eq!(harn_vm::peek_llm_token_budget(), None);
+        assert_eq!(second_turn.as_mut().poll(&mut cx), Poll::Ready(()));
+        assert_eq!(harn_vm::peek_llm_cost_budget(), None);
+        assert_eq!(harn_vm::peek_llm_token_budget(), None);
+        assert_eq!(harn_vm::llm::peek_total_cost(), 0.0);
+    }
+
     // ---- an embedder may DECLINE confinement, not only arm it --------------
 
     /// Inference can only ever arm confinement. Before `requested_profile`, an

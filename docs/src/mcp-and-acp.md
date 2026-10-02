@@ -1207,10 +1207,19 @@ changes remain branch-local.
 
 `AcpServerConfig::with_budget(BudgetSpec)` installs an inherited resource
 budget for every ACP session. The guard is applied around each
-`session/prompt` turn on the same runtime thread that executes the VM, using
+`session/prompt` turn in the VM's task scope, using
 the same `BudgetSpec`/`call_budget` path as HTTP `@budget(...)` dispatch.
 Use `with_llm_cost_budget(...)` or `with_llm_token_budget(...)` when the
 embedder only needs an LLM-specific ceiling.
+
+Concurrent prompt turns keep separate LLM ceilings, spend totals, and observed
+usage. Inline subtasks and delegated workers share their owning turn's accounting
+unless they install a fresh budget scope. A fresh cost scope resets its observed
+usage; re-arming a ceiling preserves the accumulated spend. Completing or
+cancelling a turn doesn't change another turn's budget. ACP carries a cancelled
+turn's spend forward from that turn's accounting owner.
+An out-of-band `session/set_budget` frame updates the named session's active
+turn, including its inherited workers, without changing another session's cap.
 
 Clients can re-arm or disable the session budget without restarting the
 server by setting `configId: "budget"`:

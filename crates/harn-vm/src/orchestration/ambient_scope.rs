@@ -677,6 +677,9 @@ impl<F: Future> Future for Scoped<F> {
 mod cancellation_tests;
 
 #[cfg(test)]
+mod llm_budget_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::orchestration::{
