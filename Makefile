@@ -764,6 +764,7 @@ test-pr-gate-scripts:
 	./scripts/tests/release_gate_docs_proof_test.sh
 	./scripts/tests/prune_stale_targets_test.sh
 	./scripts/tests/prune_stale_targets_retention_test.sh
+	./scripts/tests/prune_stale_targets_host_policy_test.sh
 	./scripts/tests/target_gc_maintenance_test.sh
 	./scripts/tests/report_ci_cache_budget_test.sh
 	./scripts/tests/loadgen_postgres_gate_test.sh
