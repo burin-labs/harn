@@ -5,7 +5,7 @@ fn policy() {
   return {
     backend: "structured_llm",
     provider: "openai",
-    model: "gpt-5.4-nano",
+    model: "gpt-5.4-mini",
     effort: "none",
     temperature: 0.0,
     threshold: 0.8,
@@ -43,7 +43,7 @@ fn evaluate(llm: HarnessLlm, state: {command: string} = {command: "echo ready"})
     {
       backend: "structured_llm",
       provider: "openai",
-      model: "gpt-5.4-nano",
+      model: "gpt-5.4-mini",
       effort: "none",
       temperature: 0.0,
       threshold: 0.8,

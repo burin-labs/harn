@@ -17183,6 +17183,121 @@
       ]
     },
     {
+      "id": "gpt-5.1",
+      "name": "GPT-5.1",
+      "operations": [
+        "text_generation",
+        "decision"
+      ],
+      "display_name": "GPT-5.1",
+      "provider": "openai",
+      "aliases": [],
+      "context_window": 400000,
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text",
+          "decision"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "parity_source": "derived",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "reasoning_summary"
+      },
+      "reasoning": {
+        "modes": [
+          "effort"
+        ],
+        "effort_supported": true,
+        "effort_levels": [],
+        "none_supported": true,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "batch": {
+        "wire_format": "openai",
+        "input_mode": "jsonl_file",
+        "result_ordering": "custom_id_rejoin",
+        "partial_failure": "per_request",
+        "cancellation": "supported",
+        "discount_percent": 50,
+        "turnaround_hours": 24,
+        "max_requests": 50000,
+        "max_input_bytes": 209715200,
+        "result_retention_days": 30,
+        "security_notes": [
+          "Batch rate limits use a separate provider pool from synchronous model calls.",
+          "Output and error files can use a configurable expiration between 1 hour and 30 days."
+        ],
+        "operational_notes": [
+          "Input files must group requests for one model; Harn manifests group by provider, model, wire format, and tool format.",
+          "Use stable custom_id values to rejoin unordered output and error rows."
+        ]
+      },
+      "pricing": {
+        "input_per_mtok": 1.25,
+        "output_per_mtok": 10.0,
+        "cache_read_per_mtok": 0.125,
+        "cache_write_per_mtok": null,
+        "hosted_tool_fees": {
+          "file_search": {
+            "per_1k_calls": 2.5,
+            "source_url": "https://developers.openai.com/api/docs/pricing"
+          },
+          "web_search": {
+            "per_1k_calls": 10.0,
+            "source_url": "https://developers.openai.com/api/docs/pricing"
+          }
+        }
+      },
+      "deprecation": {
+        "status": "deprecated",
+        "note": "Shutdown 2027-04-01 (announced 2026-10-01) per OpenAI deprecations page and developer email. OpenAI names gpt-6-sol as the replacement.",
+        "sunset_date": "2027-04-01",
+        "superseded_by": "gpt-6-sol"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "vision",
+        "prompt_caching",
+        "thinking",
+        "extended_thinking",
+        "structured_output",
+        "batch"
+      ],
+      "family": "openai-gpt",
+      "lineage": "openai-gpt5",
+      "tier": "mid",
+      "open_weight": false,
+      "strengths": [
+        "reasoning",
+        "coding",
+        "tool_use",
+        "vision"
+      ]
+    },
+    {
       "id": "gpt-5.3-codex",
       "name": "GPT-5.3-Codex",
       "operations": [
@@ -17272,7 +17387,10 @@
         }
       },
       "deprecation": {
-        "status": "active"
+        "status": "deprecated",
+        "note": "Shutdown 2027-04-01 (announced 2026-10-01) per OpenAI deprecations page and developer email. OpenAI names gpt-6-sol as the replacement.",
+        "sunset_date": "2027-04-01",
+        "superseded_by": "gpt-6-sol"
       },
       "availability": "serverless",
       "quality_tags": [],
@@ -17642,7 +17760,10 @@
         }
       },
       "deprecation": {
-        "status": "active"
+        "status": "deprecated",
+        "note": "Shutdown 2027-04-01 (announced 2026-10-01) per OpenAI deprecations page and developer email. OpenAI names gpt-6-luna as the replacement.",
+        "sunset_date": "2027-04-01",
+        "superseded_by": "gpt-6-luna"
       },
       "availability": "serverless",
       "quality_tags": [],
@@ -23553,7 +23674,10 @@
         "cache_write_per_mtok": null
       },
       "deprecation": {
-        "status": "active"
+        "status": "deprecated",
+        "note": "OpenAI shuts down gpt-5.4-nano 2027-04-01 (announced 2026-10-01) and names gpt-6-luna as the replacement; this OpenRouter route ends with it.",
+        "sunset_date": "2027-04-01",
+        "superseded_by": "openai/gpt-6-luna"
       },
       "availability": "serverless",
       "quality_tags": [],
@@ -30241,7 +30365,9 @@
         "cache_write_per_mtok": null
       },
       "deprecation": {
-        "status": "active"
+        "status": "deprecated",
+        "note": "OpenAI shuts down gpt-5.4-nano 2027-04-01 (announced 2026-10-01) and names gpt-6-luna as the replacement; this gateway route ends with it. Vercel lists openai/gpt-6-luna, which Harn has not yet probed on this gateway.",
+        "sunset_date": "2027-04-01"
       },
       "availability": "serverless",
       "quality_tags": [],
@@ -35614,30 +35740,6 @@
     },
     {
       "provider": "openai",
-      "model": "gpt-5.3-codex",
-      "base_url": "https://api.openai.com/v1",
-      "secret_env": "OPENAI_API_KEY",
-      "label": "GPT-5.3-Codex",
-      "family": "openai-gpt",
-      "capabilities": [
-        "batch",
-        "extended_thinking",
-        "native_tools",
-        "prefers_markdown_scaffolding",
-        "prompt_caching",
-        "reasoning_effort",
-        "streaming",
-        "structured_output",
-        "structured_output_mode:native_json",
-        "text_tools",
-        "thinking",
-        "tool_search",
-        "tools",
-        "vision"
-      ]
-    },
-    {
-      "provider": "openai",
       "model": "gpt-5.4",
       "base_url": "https://api.openai.com/v1",
       "secret_env": "OPENAI_API_KEY",
@@ -35666,30 +35768,6 @@
       "base_url": "https://api.openai.com/v1",
       "secret_env": "OPENAI_API_KEY",
       "label": "GPT-5.4 Mini",
-      "family": "openai-gpt",
-      "capabilities": [
-        "batch",
-        "extended_thinking",
-        "native_tools",
-        "prefers_markdown_scaffolding",
-        "prompt_caching",
-        "reasoning_effort",
-        "streaming",
-        "structured_output",
-        "structured_output_mode:native_json",
-        "text_tools",
-        "thinking",
-        "tool_search",
-        "tools",
-        "vision"
-      ]
-    },
-    {
-      "provider": "openai",
-      "model": "gpt-5.4-nano",
-      "base_url": "https://api.openai.com/v1",
-      "secret_env": "OPENAI_API_KEY",
-      "label": "GPT-5.4 Nano",
       "family": "openai-gpt",
       "capabilities": [
         "batch",
@@ -36686,29 +36764,6 @@
       "base_url": "https://openrouter.ai/api/v1",
       "secret_env": "OPENROUTER_API_KEY",
       "label": "GPT-5.4 Mini (via OpenRouter)",
-      "family": "openai-gpt",
-      "capabilities": [
-        "extended_thinking",
-        "native_tools",
-        "prefers_markdown_scaffolding",
-        "prompt_caching",
-        "reasoning_effort",
-        "streaming",
-        "structured_output",
-        "structured_output_mode:native_json",
-        "text_tools",
-        "thinking",
-        "tool_search",
-        "tools",
-        "vision"
-      ]
-    },
-    {
-      "provider": "openrouter",
-      "model": "openai/gpt-5.4-nano",
-      "base_url": "https://openrouter.ai/api/v1",
-      "secret_env": "OPENROUTER_API_KEY",
-      "label": "GPT-5.4 Nano (via OpenRouter)",
       "family": "openai-gpt",
       "capabilities": [
         "extended_thinking",
@@ -38141,29 +38196,6 @@
         "structured_output_mode:native_json",
         "text_tools",
         "thinking",
-        "tools",
-        "vision"
-      ]
-    },
-    {
-      "provider": "vercel_ai_gateway",
-      "model": "openai/gpt-5.4-nano",
-      "base_url": "https://ai-gateway.vercel.sh/v1",
-      "secret_env": "AI_GATEWAY_API_KEY",
-      "label": "GPT-5.4 Nano (Vercel AI Gateway)",
-      "family": "openai-gpt",
-      "capabilities": [
-        "extended_thinking",
-        "native_tools",
-        "prefers_markdown_scaffolding",
-        "prompt_caching",
-        "reasoning_effort",
-        "streaming",
-        "structured_output",
-        "structured_output_mode:native_json",
-        "text_tools",
-        "thinking",
-        "tool_search",
         "tools",
         "vision"
       ]

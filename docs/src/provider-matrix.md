@@ -465,6 +465,7 @@ This section starts from the checked-in provider catalog. Recommended format fol
 | `openai` | `gpt-4.1-nano` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `openai` | `gpt-4o` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `openai` | `gpt-4o-mini` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `openai` | `gpt-5.1` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `openai` | `gpt-5.3-codex` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `openai` | `gpt-5.4` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `openai` | `gpt-5.4-mini` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
