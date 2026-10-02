@@ -1,0 +1,14 @@
+/** Throws from another module so the caller's cleanup sees a cross-module error. */
+pub fn imported_fail(message: string) {
+  throw message
+}
+
+/** Runs a deferred cleanup in an imported function body on both exits. */
+pub fn imported_defer(stdio: HarnessStdio, should_fail: bool) {
+  defer {
+    stdio.println("imported-defer:${should_fail}")
+  }
+  if should_fail {
+    throw "imported-defer-failed"
+  }
+}

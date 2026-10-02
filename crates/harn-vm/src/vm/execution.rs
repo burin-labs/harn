@@ -301,6 +301,11 @@ impl Vm {
             self.env.truncate_scopes(handler.env_scope_depth);
 
             self.stack.truncate(handler.stack_depth);
+            self.last_caught_error = Some(super::CaughtError {
+                value: thrown_value.clone(),
+                error,
+                stack_trace: std::mem::take(&mut self.error_stack_trace),
+            });
             self.stack.push(thrown_value);
 
             if let Some(frame) = self.frames.last_mut() {

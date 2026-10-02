@@ -5,6 +5,17 @@ use super::super::ExceptionHandler;
 impl super::super::Vm {
     pub(super) fn execute_throw(&mut self) -> Result<(), VmError> {
         let val = self.pop()?;
+        // Rethrowing the exact value a handler received (cleanup does this
+        // after `finally`/`defer` runs) re-raises the original error, so its
+        // kind and origin survive the cleanup instead of being restringified.
+        if let Some(caught) = self
+            .last_caught_error
+            .as_ref()
+            .filter(|caught| same_allocation(&caught.value, &val))
+        {
+            self.error_stack_trace = caught.stack_trace.clone();
+            return Err(caught.error.clone());
+        }
         Err(VmError::Thrown(val))
     }
 
@@ -62,5 +73,19 @@ impl super::super::Vm {
             }
         }
         Ok(())
+    }
+}
+
+/// Reference identity for heap values. Scalars have no identity, so a scalar
+/// rethrow is indistinguishable from a fresh throw and reports its own site.
+fn same_allocation(a: &VmValue, b: &VmValue) -> bool {
+    match (a, b) {
+        (VmValue::String(x), VmValue::String(y)) => arcstr::ArcStr::ptr_eq(x, y),
+        (VmValue::Bytes(x), VmValue::Bytes(y)) => std::sync::Arc::ptr_eq(x, y),
+        (VmValue::List(x), VmValue::List(y)) => std::sync::Arc::ptr_eq(x, y),
+        (VmValue::Dict(x), VmValue::Dict(y)) => std::sync::Arc::ptr_eq(x, y),
+        (VmValue::EnumVariant(x), VmValue::EnumVariant(y)) => std::sync::Arc::ptr_eq(x, y),
+        (VmValue::StructInstance(x), VmValue::StructInstance(y)) => std::sync::Arc::ptr_eq(x, y),
+        _ => false,
     }
 }

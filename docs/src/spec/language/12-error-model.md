@@ -138,6 +138,12 @@ try { ... } finally { ... }
 try { ... } catch e { ... }
 ```
 
+An error reaches the finally block wherever it was raised: an inline `throw`,
+a called or imported function, or a failing operation such as division by
+zero. The block runs exactly once and the original error then continues to
+propagate. A `throw` from the finally block replaces the original error, and a
+`return` from it discards the original error.
+
 `return`, `break`, and `continue` inside a try body with a finally block will
 execute the finally block before the control flow transfer completes.
 

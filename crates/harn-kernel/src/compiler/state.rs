@@ -1039,38 +1039,50 @@ impl Compiler {
         Ok(())
     }
 
-    /// Whether a pending finally lies above the innermost `CatchBarrier`.
-    /// A locally caught throw stops at the barrier, so cleanup entries below
-    /// it are not part of that throw's exit path.
-    pub(super) fn has_pending_finally_until_barrier(&self) -> bool {
-        self.finally_bodies
-            .iter()
-            .rev()
-            .take_while(|entry| !matches!(entry, FinallyEntry::CatchBarrier))
-            .any(|entry| matches!(entry, FinallyEntry::Finally(_)))
-    }
-
-    /// True if there are any pending finally bodies (not just barriers).
+    /// True if there are any pending cleanup bodies.
     pub(super) fn has_pending_finally(&self) -> bool {
-        self.finally_bodies
-            .iter()
-            .any(|e| matches!(e, FinallyEntry::Finally(_)))
+        !self.finally_bodies.is_empty()
     }
 
-    /// Save a thrown value to a temp and rethrow without running finally.
+    /// Register a cleanup body for the region that follows and install the
+    /// exception handler that runs it when an error leaves that region.
+    pub(super) fn push_cleanup(&mut self, body: Vec<SNode>) {
+        let handler_depth = self.handler_depth;
+        self.handler_depth += 1;
+        let error_jump = self.chunk.emit_jump(Op::TryCatchSetup, self.line);
+        let empty_type = self.string_constant("");
+        self.emit_type_name_extra(empty_type);
+        self.finally_bodies.push(FinallyEntry {
+            body,
+            handler_depth,
+            error_jump,
+        });
+    }
+
+    /// Close the innermost cleanup region: on the normal path pop its handler
+    /// and run the body; on the exception path run the body and rethrow.
     ///
-    /// Historically this helper also invoked `compile_finally_inline` on the
-    /// thrown path, but that produced observable double-runs: the
-    /// `Node::ThrowStmt` lowering (below) already iterates `finally_bodies`
-    /// and runs each pending finally inline *before* emitting `Op::Throw`, so
-    /// a second run here fired the same side effects twice. Finally now runs
-    /// exactly once — via the throw-emit path during unwinding.
-    pub(super) fn compile_plain_rethrow(&mut self) -> Result<(), CompileError> {
+    /// The entry is removed before either copy of the body is compiled, so a
+    /// `return`/`break`/`continue` inside the body runs only the cleanups
+    /// outside it. The runtime pops the handler before delivering an error,
+    /// so a throw from the body replaces the original error and escapes.
+    fn pop_cleanup(&mut self) -> Result<(), CompileError> {
+        let entry = self.finally_bodies.pop().expect("pending cleanup");
+        debug_assert_eq!(self.handler_depth, entry.handler_depth + 1);
+        self.handler_depth = entry.handler_depth;
+        self.chunk.emit(Op::PopHandler, self.line);
+        self.compile_finally_inline(&entry.body)?;
+        let end_jump = self.chunk.emit_jump(Op::Jump, self.line);
+
+        self.chunk.patch_jump(entry.error_jump);
         self.temp_counter += 1;
         let temp_name = format!("__finally_err_{}__", self.temp_counter);
         self.emit_define_binding(&temp_name, true);
+        self.compile_finally_inline(&entry.body)?;
         self.emit_get_binding(&temp_name);
         self.chunk.emit(Op::Throw, self.line);
+
+        self.chunk.patch_jump(end_jump);
         Ok(())
     }
 
@@ -1196,57 +1208,66 @@ impl Compiler {
         Ok(())
     }
 
-    /// Drain pending `defer` bodies down to a saved floor and run each inline
-    /// in LIFO order. Each defer body is popped *before* its code is emitted so
-    /// any `return` / `break` lowering inside the body sees the remaining
-    /// pending defers (not itself).
+    /// Close pending cleanup regions down to a saved floor in LIFO order.
+    /// See [`Self::pop_cleanup`].
     pub(super) fn drain_finallys_to_floor(&mut self, floor: usize) -> Result<(), CompileError> {
         while self.finally_bodies.len() > floor {
-            let entry = self.finally_bodies.pop().expect("non-empty by guard");
-            if let FinallyEntry::Finally(body) = entry {
-                self.compile_finally_inline(&body)?;
-            }
+            self.pop_cleanup()?;
         }
         Ok(())
     }
 
-    /// Run the pending finally/defer bodies a non-local transfer (`return`,
+    /// Run the pending cleanup bodies a non-local transfer (`return`,
     /// `break`, `continue`) crosses on its way down to `floor`, innermost
     /// first, then restore the pending stack.
     ///
-    /// Like [`Self::drain_finallys_to_floor`] each body is removed from the
-    /// stack *before* it is inlined, so a `return`/`break`/`continue` inside a
-    /// finally body runs only the finallys *outside* it instead of re-running
-    /// the one it is in — which otherwise recursed forever at compile time and
-    /// aborted the process with a stack overflow. Unlike that helper (used at
-    /// scope exit), the stack is restored afterward because a transfer is a
-    /// branch: the code the compiler emits after it still needs the pending
-    /// finallys for the fall-through and sibling paths.
+    /// Before each body runs, the handlers above it, including its own, are
+    /// popped, so a throw from the body reaches only the handlers outside it.
+    /// `handler_floor` is the handler depth the transfer lands at; `None`
+    /// leaves the remaining handlers to the frame teardown of a `return`.
+    ///
+    /// Each body is removed from the stack *before* it is inlined, so a
+    /// `return`/`break`/`continue` inside a finally body runs only the
+    /// finallys *outside* it instead of re-running the one it is in — which
+    /// otherwise recursed forever at compile time and aborted the process
+    /// with a stack overflow. The stack is restored afterward because a
+    /// transfer is a branch: the code the compiler emits after it still needs
+    /// the pending cleanups for the fall-through and sibling paths.
     pub(super) fn run_pending_finallys_for_transfer(
         &mut self,
         floor: usize,
+        handler_floor: Option<usize>,
     ) -> Result<(), CompileError> {
-        if self.finally_bodies.len() <= floor {
-            return Ok(());
-        }
-        let saved = self.finally_bodies[floor..].to_vec();
-        let result = self.drain_finallys_to_floor(floor);
-        self.finally_bodies.extend(saved);
+        let saved_entries = self.finally_bodies[floor..].to_vec();
+        let saved_handler_depth = self.handler_depth;
+        let result = self.unwind_for_transfer(floor, handler_floor);
+        self.finally_bodies.truncate(floor);
+        self.finally_bodies.extend(saved_entries);
+        self.handler_depth = saved_handler_depth;
         result
     }
 
-    /// Like [`Self::run_pending_finallys_for_transfer`] but for a `throw`: run
-    /// only the finallys between here and the innermost `CatchBarrier` (the
-    /// ones the unwind actually crosses before a local `catch` halts it),
-    /// masking each while it is inlined and restoring the stack afterward.
-    pub(super) fn run_pending_finallys_until_barrier(&mut self) -> Result<(), CompileError> {
-        let floor = self
-            .finally_bodies
-            .iter()
-            .rposition(|e| matches!(e, FinallyEntry::CatchBarrier))
-            .map(|i| i + 1)
-            .unwrap_or(0);
-        self.run_pending_finallys_for_transfer(floor)
+    fn unwind_for_transfer(
+        &mut self,
+        floor: usize,
+        handler_floor: Option<usize>,
+    ) -> Result<(), CompileError> {
+        while self.finally_bodies.len() > floor {
+            let entry = self.finally_bodies.pop().expect("non-empty by guard");
+            self.emit_pop_handlers_to(entry.handler_depth);
+            self.compile_finally_inline(&entry.body)?;
+        }
+        if let Some(handler_floor) = handler_floor {
+            self.emit_pop_handlers_to(handler_floor);
+        }
+        Ok(())
+    }
+
+    fn emit_pop_handlers_to(&mut self, depth: usize) {
+        while self.handler_depth > depth {
+            self.chunk.emit(Op::PopHandler, self.line);
+            self.handler_depth -= 1;
+        }
     }
 
     /// Register an auto-drop defer for an `owned<T>` binding. The drop runs
@@ -1284,7 +1305,7 @@ impl Compiler {
             },
             span,
         );
-        self.finally_bodies.push(FinallyEntry::Finally(vec![call]));
+        self.push_cleanup(vec![call]);
     }
 
     /// Compile a statement that appears in a value-discarding sequence —

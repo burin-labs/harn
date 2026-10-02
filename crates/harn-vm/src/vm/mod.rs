@@ -62,6 +62,6 @@ pub use work::{VmWork, VmWorkRecorder};
 
 pub(crate) use call_args::CallArgs;
 pub(crate) use state::{
-    CallFrame, ExceptionHandler, InterruptHandler, IterState, LocalSlot, ScopeSpan, TaskScope,
-    VmBuiltinDispatch, VmBuiltinEntry,
+    CallFrame, CaughtError, ExceptionHandler, InterruptHandler, IterState, LocalSlot, ScopeSpan,
+    TaskScope, VmBuiltinDispatch, VmBuiltinEntry,
 };

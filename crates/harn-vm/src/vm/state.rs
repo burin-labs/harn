@@ -174,6 +174,15 @@ pub(crate) struct ExceptionHandler {
     pub(crate) error_type: Option<crate::value::HarnStr>,
 }
 
+/// The most recent error delivered to a handler, kept so a rethrow of the
+/// same value re-raises the original error with its kind and stack trace.
+#[derive(Clone)]
+pub(crate) struct CaughtError {
+    pub(crate) value: VmValue,
+    pub(crate) error: VmError,
+    pub(crate) stack_trace: Vec<(String, usize, usize, Option<String>)>,
+}
+
 /// A structured-concurrency nursery (`scope { }`). Tasks spawned while this
 /// scope is innermost record their id here; `TaskScopeExit` joins them.
 pub(crate) struct TaskScope {
@@ -478,6 +487,10 @@ pub struct Vm {
     pub(crate) interrupt_handler_deadline: Option<Instant>,
     /// Captured stack trace from the most recent error (fn_name, line, col).
     pub(crate) error_stack_trace: Vec<(String, usize, usize, Option<String>)>,
+    /// Most recent caught error. `finally`/`defer` cleanup rethrows the value
+    /// it caught, and a `catch` may `throw` its binding again; either way the
+    /// original error, not a stringified copy, continues to propagate.
+    pub(crate) last_caught_error: Option<CaughtError>,
     /// Yield channel sender for generator execution. When set, `Op::Yield`
     /// sends values through this channel instead of being a no-op.
     pub(crate) yield_sender: Option<tokio::sync::mpsc::Sender<Result<VmValue, VmError>>>,
@@ -645,6 +658,7 @@ impl VmBaseline {
             dispatching_interrupt: false,
             interrupt_handler_deadline: None,
             error_stack_trace: Vec::new(),
+            last_caught_error: None,
             yield_sender: None,
             project_root: self.project_root.clone(),
             globals: Arc::clone(&self.globals),
@@ -922,6 +936,7 @@ impl Vm {
             dispatching_interrupt: false,
             interrupt_handler_deadline: None,
             error_stack_trace: Vec::new(),
+            last_caught_error: None,
             yield_sender: None,
             project_root: None,
             globals: Arc::new(crate::value::DictMap::new()),
@@ -1209,6 +1224,7 @@ impl Vm {
             dispatching_interrupt: false,
             interrupt_handler_deadline: None,
             error_stack_trace: Vec::new(),
+            last_caught_error: None,
             yield_sender: None,
             project_root: self.project_root.clone(),
             globals: Arc::clone(&self.globals),
