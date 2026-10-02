@@ -118,7 +118,7 @@ impl ProcessSpawner for RealSpawner {
                 None,
             );
             process.missing_program = missing_program;
-            return Ok(process);
+            return Ok(Box::new(process));
         }
 
         let PreparedSpawn {
@@ -178,7 +178,7 @@ impl ProcessSpawner for RealSpawner {
 
         let mut process = real_process(child, cleanup_token, None, None, None, None, owner_job);
         process.missing_program = missing_program;
-        Ok(process)
+        Ok(Box::new(process))
     }
 }
 
@@ -543,7 +543,7 @@ fn real_process(
     killer_pid: Option<u32>,
     #[cfg(target_os = "windows")] owner_job: Option<Arc<super::windows::KillOnCloseJob>>,
     #[cfg(not(target_os = "windows"))] _owner_job: Option<()>,
-) -> Box<RealProcess> {
+) -> RealProcess {
     let pid = reported_pid.unwrap_or_else(|| child.id());
     let pgid = child_process_group_id(pid);
     let killer: Arc<dyn ProcessKiller> = Arc::new(RealKiller {
@@ -552,7 +552,7 @@ fn real_process(
         #[cfg(target_os = "windows")]
         owner_job,
     });
-    Box::new(RealProcess {
+    RealProcess {
         missing_program: None,
         pid,
         pgid,
@@ -567,7 +567,7 @@ fn real_process(
         stdin_taken: false,
         stdout_taken: false,
         stderr_taken: false,
-    })
+    }
 }
 
 impl RealProcess {
