@@ -5,9 +5,17 @@
 //! program. This module re-exports them under the names hosts already use and
 //! carries the workspace scans that keep every crate on them.
 
-pub use harn_parser::runtime_stack::{
-    builder, on_vm_stack, scope, spawn, RuntimeScope, RUNTIME_STACK_SIZE,
-};
+pub use harn_parser::runtime_stack::{builder, scope, spawn, RuntimeScope};
+
+/// [`harn_parser::runtime_stack::RUNTIME_STACK_SIZE`], defined here as well so
+/// `harn_vm::RUNTIME_STACK_SIZE` stays a local item of this published crate.
+pub const RUNTIME_STACK_SIZE: usize = harn_parser::runtime_stack::RUNTIME_STACK_SIZE;
+
+/// [`harn_parser::runtime_stack::on_vm_stack`] under its existing
+/// `harn_vm::on_vm_stack` path.
+pub fn on_vm_stack<R: Send>(body: impl FnOnce() -> R + Send) -> R {
+    harn_parser::runtime_stack::on_vm_stack(body)
+}
 
 #[cfg(test)]
 mod tests {
