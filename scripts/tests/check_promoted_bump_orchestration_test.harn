@@ -39,3 +39,16 @@ pipeline test_refuses_a_pin_that_is_not_an_exact_commit(harness: Harness, task: 
     assert(is_err(promoted_orchestration_sha(manifest(reference))), "accepted ${reference}")
   }
 }
+
+@test
+pipeline test_promotion_moves_an_older_pin_to_the_release(harness: Harness, task: unknown) {
+  const release = "a".repeat(40)
+  for relation in ["behind", "diverged", "identical"] {
+    assert_eq(orchestration_after_promotion(release, PROMOTED, relation), release, relation)
+  }
+}
+
+@test
+pipeline test_promotion_keeps_a_pin_ahead_of_the_release(harness: Harness, task: unknown) {
+  assert_eq(orchestration_after_promotion("a".repeat(40), PROMOTED, "ahead"), PROMOTED)
+}
