@@ -243,6 +243,10 @@ pub struct ProviderAuth {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub header: Option<String>,
     pub env: Vec<String>,
+    /// Further credential-bearing environment names a platform credential
+    /// chain reads, such as Bedrock's AWS variables. Not read as the key.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub credential_env: Vec<String>,
     pub required: bool,
 }
 

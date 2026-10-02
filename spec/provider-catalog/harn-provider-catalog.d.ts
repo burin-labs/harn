@@ -96,6 +96,7 @@ export interface HarnProviderAuth {
   style: string
   header?: string
   env: string[]
+  credential_env?: string[]
   required: boolean
 }
 

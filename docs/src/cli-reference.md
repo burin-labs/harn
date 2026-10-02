@@ -193,7 +193,8 @@ Every launched Harn session has one environment policy:
   session starts. Later changes to the launcher process do not change the
   session. Spawned commands, MCP servers, and ACP children receive that
   snapshot without any provider credential (the variables the provider catalog
-  declares as `auth_env`, such as `OPENAI_API_KEY`). Harn's own model calls and
+  declares as `auth_env` or `credential_env`, such as `OPENAI_API_KEY` or
+  Bedrock's `AWS_SECRET_ACCESS_KEY`). Harn's own model calls and
   `harness.env` still read them. A child that needs a key gets it only from
   its own explicit `env`.
 - **Isolated** admits only the small set of operating-system and toolchain

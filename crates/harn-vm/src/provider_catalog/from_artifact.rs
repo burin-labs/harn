@@ -130,6 +130,7 @@ fn provider_def_from_catalog(provider: &CatalogProvider) -> llm_config::Provider
             [one] => llm_config::AuthEnv::Single(one.clone()),
             many => llm_config::AuthEnv::Multiple(many.to_vec()),
         },
+        credential_env: provider.auth.credential_env.clone(),
         extra_headers: provider.extra_headers.clone(),
         chat_endpoint: provider.endpoint.chat_endpoint.clone(),
         chat_api_adapter: provider.endpoint.chat_api_adapter,
