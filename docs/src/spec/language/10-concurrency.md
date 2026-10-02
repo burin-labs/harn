@@ -210,7 +210,8 @@ defer {
 ```
 
 Registers a block to run when the enclosing lexical scope exits — on normal
-fallthrough, on `return`, on `break` / `continue` out of an enclosing loop,
+fallthrough, on `return` (including the early return of a postfix `?`), on
+`break` / `continue` out of an enclosing loop,
 or on an error leaving the scope, including one raised by a called function
 or a failing operation. Multiple `defer` blocks in the same scope execute
 in LIFO (last-registered, first-executed) order, similar to Zig's `defer`.

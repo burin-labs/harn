@@ -897,6 +897,7 @@ impl Compiler {
             }
             Node::TryOperator { operand } => {
                 self.compile_node(operand)?;
+                self.compile_try_operator_cleanup()?;
                 self.chunk.emit(Op::TryUnwrap, self.line);
             }
             // `try* EXPR`: evaluate EXPR; on throw, run pending finally
