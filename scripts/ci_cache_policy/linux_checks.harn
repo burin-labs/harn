@@ -891,12 +891,17 @@ fn artifact_consumer_handoff_errors(workflow: dict) -> list<string> {
   const rust_security = workflow?.jobs?.["rust-security"]
   const rust_security_needs = rust_security?.needs ?? []
   const rust_security_if = trim(rust_security?.if ?? "")
+  const rust_security_run = step_by_name(rust_security?.steps ?? [], "Run Linux sandbox tests")
+  const cli_e2e_binary = rust_security_run?.env?.HARN_CLI_E2E_BINARY ?? ""
   if !rust_security_needs.contains(SECURITY_READY_JOB)
+    || !rust_security_needs.contains(ARTIFACT_READY_JOB)
     || rust_security_needs.contains("rust-check-inputs")
-    || !contains(rust_security_if, "needs.security-tests-ready.result == 'success'") {
+    || !contains(rust_security_if, "needs.security-tests-ready.result == 'success'")
+    || !contains(rust_security_if, "needs.rust-artifacts-ready.result == 'success'")
+    || cli_e2e_binary != "$" + "{{ env.HARN_BIN }}" {
     errors = errors
       + [
-        "ci.yml:rust-security must consume the exact-commit security archive through its ready barrier",
+        "ci.yml:rust-security must consume exact-commit artifacts and run CLI subprocess tests from the verified binary",
       ]
   }
   for consumer_name in LIVE_ARTIFACT_CONSUMERS {

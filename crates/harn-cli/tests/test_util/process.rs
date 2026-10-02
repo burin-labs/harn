@@ -71,7 +71,12 @@ const PREWARM_TIMEOUT: Duration = Duration::from_mins(1);
 /// this rather than `env!("CARGO_BIN_EXE_harn")` directly.
 pub fn harn_e2e_binary() -> &'static Path {
     static WARMED: LazyLock<PathBuf> = LazyLock::new(|| {
-        let path = PathBuf::from(env!("CARGO_BIN_EXE_harn"));
+        // The Linux security archive can execute this test on a different
+        // runner from the one that built it. Only that exact lane sets this
+        // override to the CLI artifact restored and verified by the consumer.
+        let path = std::env::var_os("HARN_CLI_E2E_BINARY")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from(env!("CARGO_BIN_EXE_harn")));
         prewarm(&path);
         path
     });
