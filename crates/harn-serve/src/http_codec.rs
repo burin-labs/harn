@@ -810,6 +810,7 @@ mod tests {
     fn declared_application_error_is_typed_and_human_text_is_safe() {
         let (status, payload) = dispatch_error_payload(
             DispatchError::Application(harn_vm::tool_registry::ToolApplicationError {
+                outcome: None,
                 tool: "lookup".to_string(),
                 data: json!({
                     "variant": "NotFound",

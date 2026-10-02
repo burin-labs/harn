@@ -200,7 +200,13 @@ envelope keeps feedback separate from the API payload. The default `"ok"`
 outcome validates `data` against the declared output schema. Generated CLI
 commands return that payload; MCP returns it as `structuredContent` and uses
 `text` for its text content. Agent dispatch preserves the full envelope and
-renders the same text. `"error"` and `"rejected"` remain tool failures.
+renders the same text. `"error"` and `"rejected"` declare application failures
+carrying `data` and their disposition. A declared `errorSchema` constrains that
+data; without one, the explicit envelope declares the failure but leaves its
+payload shape open. CLI JSON and MCP application-error metadata preserve the
+data and disposition. HTTP site adapters return `422`. Human failure summaries
+remain generic and never render the data. Malformed envelopes and values that
+violate a declared schema never acquire application-error metadata.
 
 Public function exports returning `AgentToolHandlerResult<T>` advertise `T` as
 their output schema. Imported aliases resolve before this projection. Exported

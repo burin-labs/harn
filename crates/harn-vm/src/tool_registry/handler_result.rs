@@ -52,6 +52,14 @@ pub(crate) enum HandlerOutcome {
 }
 
 impl HandlerOutcome {
+    pub(crate) fn application_outcome(self) -> Option<super::ToolApplicationOutcome> {
+        match self {
+            Self::Ok => None,
+            Self::Error => Some(super::ToolApplicationOutcome::Error),
+            Self::Rejected => Some(super::ToolApplicationOutcome::Rejected),
+        }
+    }
+
     pub(crate) fn failure_category(self) -> Option<&'static str> {
         match self {
             Self::Ok => None,

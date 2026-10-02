@@ -110,11 +110,11 @@ typed data below
 `_meta["com.harnlang/toolContract"].applicationError`. Neither adapter
 publishes error data as success `structuredContent`.
 
-A handler return in the `harn.agent_tool_handler_result.v2` envelope is
-classified by the same parser agent dispatch uses. Its `outcome` decides
-success or declared application failure, and its `data` is the value the output
-or error schema validates. A handler therefore has one result contract across
-agent loops, the generated CLI, MCP, and exported-function dispatch.
+The canonical versioned handler-result envelope also declares application
+failures explicitly through `"error"` or `"rejected"`. These preserve their
+portable data and disposition across adapters. An optional `errorSchema`
+constrains the failure payload; its absence leaves the shape open. This does
+not change undeclared throws or VM control failures.
 
 This contract sits below both transport formats. OpenAPI
 [Response Objects](https://spec.openapis.org/oas/v3.1.1.html#response-object)

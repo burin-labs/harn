@@ -2,7 +2,7 @@
 
 use serde_json::Value as JsonValue;
 
-use super::handler_result::{parse_handler_result, HandlerOutcome};
+use super::handler_result::parse_handler_result;
 use super::{
     PreparedToolCatalog, ToolApplicationError, ToolContractPhase, ToolContractViolation,
     ToolContractViolationDetail, ToolThrownClassification, HARN_MCP_TOOL_CONTRACT_META_KEY,
@@ -132,8 +132,9 @@ pub fn tool_runtime_error_summary(error: &VmError) -> String {
 
 /// Classify and validate a raw VM handler result exactly once.
 ///
-/// Only `VmError::Thrown` can enter a declared application-error channel.
-/// Control flow, host failures, and other VM errors remain runtime failures.
+/// Explicit typed failures carry portable data and their declared disposition.
+/// Declared error schemas constrain that data when present. Raw throws still
+/// require a matching error schema; control and host failures remain runtime.
 pub fn classify_tool_result(
     prepared: &PreparedToolCatalog,
     tool: &str,
@@ -144,15 +145,13 @@ pub fn classify_tool_result(
             let (value, text) = if let Some(result) =
                 parse_handler_result(&value).map_err(ToolInvocationError::Runtime)?
             {
-                if result.outcome != HandlerOutcome::Ok {
-                    return Err(ToolInvocationError::Runtime(VmError::CategorizedError {
-                        message: result.text.to_owned(),
-                        category: if result.outcome == HandlerOutcome::Rejected {
-                            crate::value::ErrorCategory::ToolRejected
-                        } else {
-                            crate::value::ErrorCategory::ToolError
-                        },
-                    }));
+                if let Some(outcome) = result.outcome.application_outcome() {
+                    let json =
+                        portable_value(tool, ToolContractPhase::ApplicationError, result.data)?;
+                    return prepared
+                        .declared_failure(tool, &json, outcome)
+                        .map(ToolInvocationOutcome::ApplicationError)
+                        .map_err(ToolInvocationError::Contract);
                 }
                 (result.data.clone(), Some(result.text.to_owned()))
             } else {
@@ -387,27 +386,45 @@ mod tests {
 
     #[test]
     fn explicit_failures_and_malformed_outcomes_cannot_be_successful_data() {
-        for (outcome, category) in [
-            ("error", ErrorCategory::ToolError),
-            ("rejected", ErrorCategory::ToolRejected),
-            ("maybe", ErrorCategory::SchemaValidation),
-        ] {
+        for outcome in ["error", "rejected", "maybe"] {
             let result = crate::schema::json_to_vm_value(&json!({
                 "schema": super::super::handler_result::AGENT_TOOL_HANDLER_RESULT_SCHEMA,
                 "text": "Canonical feedback",
                 "data": 7,
                 "outcome": outcome
             }));
-            assert!(
-                matches!(
-                    classify_tool_result(&prepared(Some(json!({}))), "widgets.create", Ok(result)),
+            let classified = classify_tool_result(&prepared(None), "widgets.create", Ok(result));
+            if outcome == "maybe" {
+                assert!(matches!(
+                    classified,
                     Err(ToolInvocationError::Runtime(VmError::CategorizedError {
-                        category: actual, ..
-                    })) if actual == category
-                ),
-                "{outcome}"
-            );
+                        category: ErrorCategory::SchemaValidation,
+                        ..
+                    }))
+                ));
+            } else {
+                let ToolInvocationOutcome::ApplicationError(error) = classified.unwrap() else {
+                    panic!("explicit failure must not succeed");
+                };
+                assert_eq!(error.data, json!(7));
+                assert_eq!(error.to_json()["outcome"], outcome);
+            }
         }
+        let invalid = crate::schema::json_to_vm_value(&json!({
+            "schema": super::super::handler_result::AGENT_TOOL_HANDLER_RESULT_SCHEMA,
+            "text": "Declared failure", "data": "wrong", "outcome": "error"
+        }));
+        assert!(matches!(
+            classify_tool_result(
+                &prepared(Some(json!({"type": "integer"}))),
+                "widgets.create",
+                Ok(invalid)
+            ),
+            Err(ToolInvocationError::Contract(ToolContractViolation {
+                phase: ToolContractPhase::ApplicationError,
+                ..
+            }))
+        ));
     }
 
     #[test]

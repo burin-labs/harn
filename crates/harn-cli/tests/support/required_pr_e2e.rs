@@ -1,4 +1,4 @@
-pub(crate) const CASES: [&str; 12] = [
+pub(crate) const CASES: [&str; 15] = [
     "eval_prompt_dispatch::terminal_output_is_byte_identical_across_runs",
     "models_dispatch::batch_execution::rejoin_cli_quarantines_an_artifact_without_matching_receipts",
     "models_dispatch::core::models_recommend_human_text_has_model_and_rationale",
@@ -11,4 +11,7 @@ pub(crate) const CASES: [&str; 12] = [
     "predicate_contract::predicate_census_refuses_an_invalid_imported_site",
     "predicate_contract::predicate_embedding_model_is_refused_at_check_time",
     "predicate_contract::predicate_operation_admission_invalidates_cached_success",
+    "typed_tool_outcomes::agent_validates_payload_without_losing_the_explicit_outcome",
+    "typed_tool_outcomes::cli_and_mcp_project_validated_payload_and_canonical_feedback",
+    "typed_tool_outcomes::exported_mcp_resolves_typed_payload_schema_and_preserves_feedback",
 ];

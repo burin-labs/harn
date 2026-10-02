@@ -2,7 +2,7 @@ use std::fs;
 
 use serde_json::{json, Value};
 
-use crate::test_util::process::harn_e2e_command;
+use crate::test_util::process::{harn_e2e_command, ChildGuard};
 use crate::test_util::stdio_jsonrpc::StdioJsonRpcClient;
 
 const FIXTURE: &str = r#"
@@ -43,12 +43,12 @@ fn export_result(mode: string) -> any {
   }
   return agent_tool_handler_result(
     "Export feedback for " + mode,
-    if mode == "invalid" { {wrong: true} } else { {label: "value"} },
-    if mode == "error" { "error" } else if mode == "rejected" { "rejected" } else { "ok" },
+    if mode == "invalid" || mode == "invalid_error" { {wrong: true} } else { {label: "value"} },
+    if mode == "error" || mode == "invalid_error" { "error" } else if mode == "rejected" { "rejected" } else { "ok" },
   )
 }
 
-pub fn exported_payload(harness: Harness, mode: string) -> AgentToolHandlerResult<Widget> {
+pub fn exported_payload(harness: Harness, mode: string) -> AgentToolHandlerResult<Widget> throws Widget {
   record_call(harness, "export_" + mode)
   return export_result(mode)
 }
@@ -69,8 +69,8 @@ fn registry(harness: Harness) {
     required: ["label"], additionalProperties: false,
   }
   let specs = []
-  for name in ["ok", "invalid", "error", "rejected", "malformed"] {
-    specs = specs + [{
+  for name in ["ok", "invalid", "error", "rejected", "malformed", "declared_error", "invalid_error"] {
+    let spec = {
       name: name, description: "Exercise one explicit tool result.",
       parameters: {}, returns: payload_schema,
       handler: { _ ->
@@ -80,12 +80,16 @@ fn registry(harness: Harness) {
         } else {
           agent_tool_handler_result(
             "Feedback for " + name,
-            if name == "invalid" { {wrong: true} } else { {label: "value"} },
-            if name == "error" { "error" } else if name == "rejected" { "rejected" } else { "ok" },
+            if name == "invalid" || name == "invalid_error" { {wrong: true} } else { {label: "value"} },
+            if name == "error" || name == "declared_error" || name == "invalid_error" {
+              "error"
+            } else if name == "rejected" { "rejected" } else { "ok" },
           )
         }
       },
-    }]
+    }
+    if name == "declared_error" || name == "invalid_error" { spec.error_schema = payload_schema }
+    specs = specs + [spec]
   }
   for name in ["raw", "nominal"] {
     specs = specs + [{
@@ -123,7 +127,7 @@ pipeline agent_payload_contract(harness: Harness) {
   const direct = registry(harness)
   const owned = agent_lifecycle_tools(harness.agent, direct)
   for tools in [direct, owned] {
-    for name in ["ok", "invalid", "error", "rejected", "malformed"] {
+    for name in ["ok", "invalid", "error", "rejected", "malformed", "declared_error", "invalid_error"] {
       const result = agent_dispatch_tool_call(harness.tools, {name: name, arguments: {}}, tools)
       if name == "ok" {
         assert(result.ok)
@@ -132,7 +136,7 @@ pipeline agent_payload_contract(harness: Harness) {
         assert(result.rendered_result == "Feedback for ok")
       } else {
         assert(!result.ok, name + " must fail before agent success")
-        assert(result.error_category == if name == "error" {
+        assert(result.error_category == if name == "error" || name == "declared_error" {
           "tool_error"
         } else if name == "rejected" { "tool_rejected" } else { "schema_validation" })
       }
@@ -170,7 +174,15 @@ fn agent_validates_payload_without_losing_the_explicit_outcome() {
     );
     let stdout = String::from_utf8_lossy(&result.stdout);
     assert!(stdout.contains("1 passed"), "no agent case ran: {stdout}");
-    for name in ["ok", "invalid", "error", "rejected", "malformed"] {
+    for name in [
+        "ok",
+        "invalid",
+        "error",
+        "rejected",
+        "malformed",
+        "declared_error",
+        "invalid_error",
+    ] {
         assert_eq!(
             calls(&temp, name),
             2,
@@ -198,6 +210,8 @@ fn cli_and_mcp_project_validated_payload_and_canonical_feedback() {
         "error",
         "rejected",
         "malformed",
+        "declared_error",
+        "invalid_error",
         "raw",
         "nominal",
         "application",
@@ -233,12 +247,32 @@ fn cli_and_mcp_project_validated_payload_and_canonical_feedback() {
                     domain.clone()
                 }
             );
-        } else if name == "application" {
+        } else if matches!(
+            name,
+            "application" | "error" | "rejected" | "declared_error"
+        ) {
             let payload: Value =
                 serde_json::from_slice(&result.stdout).expect("declared CLI error");
             assert_eq!(payload["ok"], false);
             assert_eq!(payload["error"]["kind"], "application");
-            assert_eq!(payload["error"]["data"], json!({"code": "conflict"}));
+            assert_eq!(
+                payload["error"]["data"],
+                if name == "application" {
+                    json!({"code": "conflict"})
+                } else {
+                    json!({"label": "value"})
+                }
+            );
+            if name != "application" {
+                assert_eq!(
+                    payload["error"]["outcome"],
+                    if name == "rejected" {
+                        "rejected"
+                    } else {
+                        "error"
+                    }
+                );
+            }
         }
         assert_eq!(calls(&temp, name), 1, "CLI must reach handler: {name}");
     }
@@ -252,7 +286,7 @@ fn cli_and_mcp_project_validated_payload_and_canonical_feedback() {
     let tools = listing["result"]["tools"]
         .as_array()
         .expect("nonempty tools/list");
-    assert_eq!(tools.len(), 8, "the real registry must be published");
+    assert_eq!(tools.len(), 10, "the real registry must be published");
     let ok = tools
         .iter()
         .find(|tool| tool["name"] == "ok")
@@ -265,6 +299,8 @@ fn cli_and_mcp_project_validated_payload_and_canonical_feedback() {
         "error",
         "rejected",
         "malformed",
+        "declared_error",
+        "invalid_error",
         "raw",
         "nominal",
         "application",
@@ -314,6 +350,21 @@ fn cli_and_mcp_project_validated_payload_and_canonical_feedback() {
                     result["_meta"]["com.harnlang/toolContract"]["applicationError"]["data"],
                     json!({"code": "conflict"})
                 );
+            } else if matches!(name, "error" | "rejected" | "declared_error") {
+                let failure = &result["_meta"]["com.harnlang/toolContract"]["applicationError"];
+                assert_eq!(failure["data"], json!({"label": "value"}));
+                assert_eq!(
+                    failure["outcome"],
+                    if name == "rejected" {
+                        "rejected"
+                    } else {
+                        "error"
+                    }
+                );
+            } else if name == "invalid_error" || name == "malformed" {
+                assert!(result["_meta"]["com.harnlang/toolContract"]
+                    .get("applicationError")
+                    .is_none());
             }
         }
         assert_eq!(calls(&temp, name), 2, "MCP must reach handler: {name}");
@@ -321,8 +372,8 @@ fn cli_and_mcp_project_validated_payload_and_canonical_feedback() {
     client.shutdown_expect_success();
 }
 
-#[test]
-fn exported_mcp_resolves_typed_payload_schema_and_preserves_feedback() {
+#[tokio::test]
+async fn exported_mcp_resolves_typed_payload_schema_and_preserves_feedback() {
     let temp = fixture();
     let mut command = harn_e2e_command();
     command
@@ -339,12 +390,23 @@ fn exported_mcp_resolves_typed_payload_schema_and_preserves_feedback() {
         .find(|tool| tool["name"] == "exported_payload")
         .expect("typed export");
     assert_eq!(payload["outputSchema"]["required"], json!(["label"]));
+    assert_eq!(
+        payload["_meta"]["com.harnlang/toolContract"]["errorSchema"]["required"],
+        json!(["label"])
+    );
     assert!(payload["outputSchema"]["properties"]
         .get("schema")
         .is_none());
-    for (offset, mode) in ["ok", "invalid", "error", "rejected", "malformed"]
-        .into_iter()
-        .enumerate()
+    for (offset, mode) in [
+        "ok",
+        "invalid",
+        "error",
+        "rejected",
+        "malformed",
+        "invalid_error",
+    ]
+    .into_iter()
+    .enumerate()
     {
         let response = client.request(request(
             offset as u64 + 2,
@@ -373,6 +435,20 @@ fn exported_mcp_resolves_typed_payload_schema_and_preserves_feedback() {
                         .contains("output violates its declared schema"),
                     "export output validator did not fire: {response}"
                 );
+            } else if mode == "error" || mode == "rejected" {
+                let failure = &result["_meta"]["com.harnlang/toolContract"]["applicationError"];
+                assert_eq!(failure["data"], json!({"label": "value"}));
+                assert_eq!(failure["outcome"], mode);
+            } else {
+                assert!(result["_meta"]["com.harnlang/toolContract"]
+                    .get("applicationError")
+                    .is_none());
+                if mode == "invalid_error" {
+                    assert!(result["content"][0]["text"]
+                        .as_str()
+                        .unwrap()
+                        .contains("application error violates its declared schema"));
+                }
             }
         }
         assert_eq!(
@@ -382,7 +458,7 @@ fn exported_mcp_resolves_typed_payload_schema_and_preserves_feedback() {
         );
     }
     let nominal = client.request(request(
-        7,
+        8,
         "tools/call",
         json!({"name": "exported_nominal", "arguments": {}}),
     ));
@@ -393,7 +469,7 @@ fn exported_mcp_resolves_typed_payload_schema_and_preserves_feedback() {
     );
     assert_eq!(calls(&temp, "export_nominal"), 1);
     let domain = client.request(request(
-        8,
+        9,
         "tools/call",
         json!({"name": "exported_domain", "arguments": {}}),
     ));
@@ -407,4 +483,73 @@ fn exported_mcp_resolves_typed_payload_schema_and_preserves_feedback() {
     );
     assert_eq!(calls(&temp, "export_domain"), 1);
     client.shutdown_expect_success();
+    fs::write(
+        temp.path().join("site.harn"),
+        r#"
+import { AgentToolHandlerResult } from "std/agent/tool_lifecycle"
+import { exported_payload } from "./tools"
+
+type Widget = {label: string}
+
+@route("GET", "/typed/{mode}")
+pub fn typed(harness: Harness, req: dict) -> AgentToolHandlerResult<Widget> throws Widget {
+  return exported_payload(harness, req.path_params.mode)
+}
+"#,
+    )
+    .expect("write actual HTTP projection");
+    let mut command = harn_e2e_command();
+    command
+        .current_dir(temp.path())
+        .args(["serve", "site", "--bind", "127.0.0.1:0", "site.harn"])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped());
+    let mut child = ChildGuard(command.spawn().expect("start actual site adapter"));
+    let (rx, _stderr) =
+        crate::test_util::stdio_jsonrpc::spawn_line_reader(child.0.stderr.take().unwrap());
+    let url = crate::test_util::stdio_jsonrpc::wait_for_child_log_suffix(
+        &mut child.0,
+        &rx,
+        "Site server ready on ",
+        std::time::Duration::from_mins(1),
+        "typed outcome site",
+    );
+    let http = reqwest::Client::new();
+    for mode in [
+        "ok",
+        "error",
+        "rejected",
+        "invalid",
+        "invalid_error",
+        "malformed",
+    ] {
+        let response = http
+            .get(format!("{url}/typed/{mode}"))
+            .send()
+            .await
+            .expect("actual HTTP request");
+        let status = response.status().as_u16();
+        let payload: Value = response.json().await.expect("HTTP JSON response");
+        if mode == "ok" {
+            assert_eq!(status, 200, "{payload}");
+            assert_eq!(payload, json!({"label": "value"}));
+        } else if mode == "error" || mode == "rejected" {
+            assert_eq!(status, 422, "{payload}");
+            assert_eq!(payload["code"], "application_error");
+            assert_eq!(payload["details"]["data"], json!({"label": "value"}));
+            assert_eq!(payload["details"]["outcome"], mode);
+        } else {
+            assert_eq!(status, 500, "{payload}");
+            assert!(
+                payload["details"].get("data").is_none(),
+                "invalid failure leaked application data: {payload}"
+            );
+        }
+        assert_eq!(
+            calls(&temp, &format!("export_{mode}")),
+            2,
+            "actual HTTP handler: {mode}"
+        );
+    }
 }

@@ -35,9 +35,7 @@ pub(super) fn coerce_and_validate_handler_result(
     let json = crate::llm::vm_value_to_json(val);
     let invalid = invalid_handler_result;
     if let Some(result) = parse_handler_result(val)? {
-        if result.outcome == HandlerOutcome::Ok {
-            validate_handler_payload(result.data, contract)?;
-        }
+        validate_handler_payload(result.data, contract, result.outcome)?;
         return Ok((json, result.outcome));
     }
     if val.struct_data().is_some() {
@@ -50,7 +48,7 @@ pub(super) fn coerce_and_validate_handler_result(
             _ => return Err(invalid()),
         };
         if declared {
-            validate_handler_payload(val, contract)?;
+            validate_handler_payload(val, contract, HandlerOutcome::Ok)?;
         }
         return Ok((
             json,
@@ -74,7 +72,7 @@ pub(super) fn coerce_and_validate_handler_result(
                 return Err(invalid());
             };
             if outcome == HandlerOutcome::Ok {
-                validate_handler_payload(val, contract)?;
+                validate_handler_payload(val, contract, HandlerOutcome::Ok)?;
             }
             return Ok((json, outcome));
         }
@@ -82,7 +80,7 @@ pub(super) fn coerce_and_validate_handler_result(
     if matches!(val, VmValue::Dict(_)) {
         return Err(invalid());
     }
-    validate_handler_payload(val, contract)?;
+    validate_handler_payload(val, contract, HandlerOutcome::Ok)?;
     let payload = if json_carries_screenshot(&json) {
         json
     } else {
@@ -94,14 +92,18 @@ pub(super) fn coerce_and_validate_handler_result(
 fn validate_handler_payload(
     value: &crate::value::VmValue,
     contract: Option<(&crate::tool_registry::PreparedToolCatalog, &str)>,
+    outcome: HandlerOutcome,
 ) -> Result<(), crate::value::VmError> {
     let Some((prepared, name)) = contract else {
         return Ok(());
     };
-    if prepared
-        .entry(name)
-        .is_none_or(|entry| entry.output_schema.is_none())
-    {
+    if prepared.entry(name).is_none_or(|entry| {
+        if outcome == HandlerOutcome::Ok {
+            entry.output_schema.is_none()
+        } else {
+            entry.error_schema.is_none()
+        }
+    }) {
         return Ok(());
     }
     let invalid = |message| crate::value::VmError::CategorizedError {
@@ -109,9 +111,13 @@ fn validate_handler_payload(
         category: crate::value::ErrorCategory::SchemaValidation,
     };
     let json = crate::tool_registry::result_to_json(value).map_err(invalid)?;
-    prepared
-        .validate_output(name, &json)
-        .map_err(|error| invalid(error.to_string()))
+    let accepted = match outcome.application_outcome() {
+        Some(disposition) => prepared
+            .declared_failure(name, &json, disposition)
+            .map(|_| ()),
+        None => prepared.validate_output(name, &json),
+    };
+    accepted.map_err(|error| invalid(error.to_string()))
 }
 
 #[cfg(test)]
