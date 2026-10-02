@@ -1,3 +1,4 @@
 callback failure retains both causes
 dispatch failure shares the named error channel
+cancellation shares the named error channel
 string failures remain accepted

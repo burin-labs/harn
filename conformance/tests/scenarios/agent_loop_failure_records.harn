@@ -26,6 +26,17 @@ pipeline default(harness: Harness) {
   assert(is_err(dispatch))
   assert_eq(unwrap_err(dispatch).reason, "empty_provider_request")
   harness.stdio.println("dispatch failure shares the named error channel")
+  const cancellation: Result<_, AgentLoopFailure> = try {
+    throw {
+      kind: "agent_loop_cancelled",
+      category: "cancelled",
+      reason: "cancelled",
+      message: "evaluation cancelled",
+      cause: {cancellation_error: "provider cancelled"},
+    }
+  }
+  assert_eq(error_category(unwrap_err(cancellation)), "cancelled")
+  harness.stdio.println("cancellation shares the named error channel")
   const text: Result<_, AgentLoopFailure> = try {
     throw "ordinary loop failure"
   }

@@ -19,5 +19,29 @@ pub type AgentDispatchProtocolFailure = {
   message: string,
 }
 
+/** Cancellation from an internal evaluator or a custom classifier. */
+pub type AgentLoopCancellationFailure = {
+  kind: "agent_loop_cancelled",
+  category: "cancelled",
+  reason: "cancelled",
+  message: string,
+  cause: {cancellation_error: unknown},
+}
+
+/** Normalize cancellation before it enters the closed loop error channel. */
+pub fn agent_loop_cancellation_failure(error: unknown) -> AgentLoopCancellationFailure {
+  const details = type_of(error) == "dict" ? error : {}
+  return {
+    kind: "agent_loop_cancelled",
+    category: "cancelled",
+    reason: "cancelled",
+    message: to_string(details?.message ?? error),
+    cause: {cancellation_error: error},
+  }
+}
+
 /** Internal failures normalized by the public agent-loop terminal boundary. */
-pub type AgentLoopFailure = string | AgentLoopCallbackFailure | AgentDispatchProtocolFailure
+pub type AgentLoopFailure = string \
+  | AgentLoopCallbackFailure \
+  | AgentDispatchProtocolFailure \
+  | AgentLoopCancellationFailure
