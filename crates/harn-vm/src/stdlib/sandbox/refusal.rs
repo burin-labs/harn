@@ -421,13 +421,13 @@ pub(crate) fn path_is_denied(candidate: &Path, denied: &[PathBuf]) -> bool {
 #[non_exhaustive]
 pub enum SandboxMechanism {
     LinuxLandlock,
-    LinuxBubblewrap,
     MacosSandboxExec,
     OpenbsdUnveil,
     /// No OS sandbox: Windows, and any platform without a backend. Serialized
     /// as `none`, the filesystem mechanism the capability report names.
     #[serde(rename = "none")]
     Unconfined,
+    LinuxBubblewrap,
 }
 
 impl SandboxMechanism {
