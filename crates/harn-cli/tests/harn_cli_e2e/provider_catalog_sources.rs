@@ -115,3 +115,38 @@ fn catalog_renderers_read_source_changes_without_rebuilding() {
         assert!(!text.contains("source-wire-route-8062"));
     }
 }
+
+/// The provider contract campaign reads `availability` from this dump to skip
+/// models a provider serves only from a dedicated deployment. A dump without
+/// the field would read every model as probe-able, so pin both values.
+#[test]
+fn provider_catalog_show_reports_model_availability() {
+    let output = harn_e2e_command()
+        .args(["provider", "catalog", "show"])
+        .output()
+        .expect("run provider catalog show");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let value: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("provider catalog show emits JSON");
+    let availability = |id: &str| {
+        value["models"]
+            .as_array()
+            .expect("models array")
+            .iter()
+            .find(|model| model["id"] == id)
+            .unwrap_or_else(|| panic!("{id} missing from provider catalog show"))["availability"]
+            .clone()
+    };
+    assert_eq!(
+        availability("accounts/fireworks/models/kimi-k2p6"),
+        "dedicated"
+    );
+    assert_eq!(
+        availability("accounts/fireworks/models/glm-5p3-flash"),
+        "serverless"
+    );
+}

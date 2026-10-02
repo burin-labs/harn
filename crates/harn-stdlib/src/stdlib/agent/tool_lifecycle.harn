@@ -16,8 +16,9 @@ pub type AgentToolMutationStatus = "applied" | "unchanged" | "not_applied" | "un
 
 /**
  * Explicit handler return for tools that need machine-readable facts beside the
- * model-visible text. The dispatcher preserves `data` on `result` and renders
- * only `text`. Freeform dict returns are refused at dispatch.
+ * model-visible text. Agent dispatch preserves the envelope and renders `text`.
+ * CLI and MCP validate and return `data`; MCP uses `text` for text content.
+ * Freeform dict returns are refused at agent dispatch.
  */
 pub type AgentToolHandlerOutcome = "ok" | "error" | "rejected"
 

@@ -345,7 +345,13 @@ count, so zero observations cannot read as healthy. Individual
 `option-probe-*.json` receipts join the same catalog hash, runtime fingerprint,
 sharding, credential-name readiness, and budget ledger as tool-call receipts.
 Credential-missing and otherwise skipped option cells count as unmeasured in a
-live campaign, so partial endpoint coverage cannot satisfy the control.
+live campaign, so partial endpoint coverage cannot satisfy the control. Pass
+`--provider` to declare the providers a run is responsible for; a declared
+provider with no credential still fails the run. The weekly `Provider contract
+probe` workflow declares its providers in `PROBE_PROVIDERS` next to the secrets
+it receives. Catalog routes marked `availability = "dedicated"` are not
+selected, because a serverless request to a model the provider serves only
+from a deployment returns not-found whatever the option.
 
 Fixture mode intentionally covers only deterministic public sources.
 Live mode adds provider-owned `/models` sources across the hosted

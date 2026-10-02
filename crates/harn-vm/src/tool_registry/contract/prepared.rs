@@ -117,14 +117,12 @@ impl std::error::Error for ToolContractViolation {}
 pub struct ToolApplicationError {
     pub tool: String,
     pub data: JsonValue,
-    /// The failure disposition a handler declared through the typed
-    /// `harn.agent_tool_handler_result.v2` envelope. `None` for a declared
-    /// throw, whose disposition is always an error.
+    /// Explicit typed failure disposition; absent for declared throws.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub outcome: Option<ToolApplicationOutcome>,
 }
 
-/// Failure outcomes a handler may declare in its typed result envelope.
+/// Failure disposition explicitly declared by a typed handler result.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ToolApplicationOutcome {
@@ -281,10 +279,8 @@ impl PreparedToolCatalog {
         self.validate(name, ToolContractPhase::Output, value)
     }
 
-    /// Validate failure data a handler returned under an explicit failure
-    /// outcome. Unlike a raw throw, the disposition is declared, so a tool
-    /// without an error schema still yields application data; a declared
-    /// error schema must accept it.
+    /// Accept portable data explicitly declared as a typed failure. A declared
+    /// error schema constrains the data; absent schemas leave its shape open.
     pub fn declared_failure(
         &self,
         name: &str,

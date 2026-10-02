@@ -263,6 +263,90 @@ fn missing_refresh_token_error_names_the_store_and_any_legacy_record() {
 }
 
 #[test]
+fn google_authorization_requests_offline_access_by_default() {
+    let none = std::collections::BTreeMap::new();
+    let google = authorization_params_for("https://accounts.google.com/o/oauth2/v2/auth", &none)
+        .expect("google params");
+    assert_eq!(
+        google,
+        vec![
+            ("access_type".to_string(), "offline".to_string()),
+            ("prompt".to_string(), "consent".to_string()),
+        ]
+    );
+
+    // Negative controls: other servers and look-alike hosts get no defaults.
+    assert!(
+        authorization_params_for("https://auth.example.com/authorize", &none)
+            .unwrap()
+            .is_empty()
+    );
+    assert!(authorization_params_for(
+        "https://accounts.google.com.example.net/o/oauth2/auth",
+        &none
+    )
+    .unwrap()
+    .is_empty());
+
+    // Declared params override defaults key by key and add new keys.
+    let declared = std::collections::BTreeMap::from([
+        ("prompt".to_string(), "select_account".to_string()),
+        ("hd".to_string(), "example.com".to_string()),
+    ]);
+    let merged =
+        authorization_params_for("https://accounts.google.com/o/oauth2/v2/auth", &declared)
+            .unwrap();
+    assert_eq!(
+        merged,
+        vec![
+            ("access_type".to_string(), "offline".to_string()),
+            ("hd".to_string(), "example.com".to_string()),
+            ("prompt".to_string(), "select_account".to_string()),
+        ]
+    );
+
+    let hijack = std::collections::BTreeMap::from([("client_id".to_string(), "x".to_string())]);
+    let error = authorization_params_for("https://auth.example.com/authorize", &hijack)
+        .expect_err("flow-owned parameter");
+    assert!(error.contains("`client_id`"), "{error}");
+}
+
+#[test]
+fn provider_manifest_declares_authorization_params() {
+    let manifest: ProviderOAuthManifest = toml::from_str(
+        r#"
+authorization_endpoint = "https://auth.example.com/authorize"
+authorization_params = { access_type = "offline" }
+"#,
+    )
+    .expect("manifest parses");
+    assert_eq!(
+        manifest
+            .authorization_params
+            .get("access_type")
+            .map(String::as_str),
+        Some("offline")
+    );
+}
+
+#[test]
+fn missing_refresh_token_error_names_the_store_and_any_legacy_record() {
+    let without_legacy = missing_refresh_token_error("acme", None);
+    assert!(
+        without_legacy.contains("secret acme/oauth-token in providers:"),
+        "{without_legacy}"
+    );
+    assert!(without_legacy.contains("harn connect acme"));
+    assert!(!without_legacy.contains("older Harn release"));
+
+    let with_legacy = missing_refresh_token_error("acme", Some("harn/acme-pkg".to_string()));
+    assert!(
+        with_legacy.contains("keyring service harn/acme-pkg"),
+        "{with_legacy}"
+    );
+}
+
+#[test]
 fn registered_provider_metadata_builds_oauth_request_with_cli_overrides() {
     let metadata = ProviderOAuthManifest {
         authorization_endpoint: Some("https://auth.example.com/authorize".to_string()),

@@ -127,6 +127,7 @@ mod trace_import_dispatch;
 mod trace_prefix_stability_cli;
 mod trusted_host_dispatch_cli;
 mod try_dispatch;
+mod typed_tool_outcomes;
 mod usage_cli;
 mod user_test_cli;
 mod user_test_reports_cli;

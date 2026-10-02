@@ -11,6 +11,17 @@ name: Scheduled suite health
 # commit status — visible on the repo home and in the commits list, which are
 # surfaces people already read. It files no issues and opens no PRs.
 #
+# A status lives on one commit, and main moves many times a day, so a verdict
+# posted only by the daily run sits on a commit nobody looks at within hours.
+# Every push to main therefore carries the verdict forward: it copies the
+# `main health` status from the commit it replaced, and recomputes it from the
+# runs when that commit has none. The copied description keeps the date of the
+# run that measured it. The status is never required, so it blocks no merge.
+#
+# Which suites are watched, and after how many consecutive failures, is read
+# from scripts/scheduled_workflows.toml. `make check-scheduled-workflows`
+# refuses a scheduled workflow that is neither watched nor exempt with a reason.
+#
 # It distinguishes a persistent break from a flake by consecutive runs only.
 # One red nightly is noise; three in a row is a bug that has been shipping.
 #
@@ -25,10 +36,13 @@ on:
   schedule:
     # After the nightlies (the latest starts 09:00 UTC) have finished.
     - cron: "23 13 * * *"
+  push:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
   actions: read
+  contents: read
   statuses: write
 
 concurrency:
@@ -42,36 +56,82 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
-      - name: Classify each scheduled suite and post main's status
+      # A push only needs the verdict already on the commit it replaced, so
+      # this step answers most runs without a checkout or a Harn install.
+      - name: Carry the verdict forward from the replaced commit
+        id: carry
+        if: github.event_name == 'push'
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          # A suite is "broken" once this many of its most recent scheduled
-          # runs on main have failed back to back.
-          #
-          # Three is a judgement, not a derived number. Over the last ~40
-          # scheduled runs of each watched suite, isolated single failures are
-          # routine (Release smoke: one in forty) while every multi-run streak
-          # was a real break somebody eventually fixed: `Windows workspace tests` ran
-          # twenty consecutive failures, `macOS workspace tests` four, `CLI cold-start
-          # budget` three. So streaks are the signal, and three trades about
-          # three days of latency for not paging on the ordinary flake.
-          STREAK: "3"
-          # CLI end-to-end behavior is deliberately excluded: it is already known-flaky, is
-          # excluded from the CI status rollup by design, and would keep this
-          # permanently red for a reason nobody would act on.
-          # One suite per line: the names contain spaces, so this list is
-          # newline-delimited and must stay a literal block.
-          SUITES: |
-            Test scheduler thread-count parity
-            Touched-test repeatability
-            macOS workspace tests
-            Windows workspace tests
-            Install channels smoke
-            CLI cold-start budget
-            Release smoke
+          PUSHED_SHA: ${{ github.sha }}
+          REPLACED_SHA: ${{ github.event.before }}
         run: |
           set -euo pipefail
+          # The newest `main health` status on the replaced commit, if any. A
+          # first push, a force push, or a replaced commit whose own run was
+          # superseded has none, and falls through to a full recompute rather
+          # than reading as healthy.
+          previous=""
+          if [[ -n "$REPLACED_SHA" && "$REPLACED_SHA" != 0000000000000000000000000000000000000000 ]]; then
+            previous="$(gh api "repos/$GH_REPO/commits/$REPLACED_SHA/statuses" \
+              --jq '[.[] | select(.context == "main health")][0] // empty | [.state, .description, (.target_url // "")] | @tsv')" || previous=""
+          fi
+          if [[ -z "$previous" ]]; then
+            echo "carried=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          IFS=$'\t' read -r state description target <<< "$previous"
+          gh api "repos/$GH_REPO/statuses/$PUSHED_SHA" -X POST \
+            -f state="$state" -f context="main health" -f description="$description" \
+            ${target:+-f target_url="$target"} >/dev/null
+          echo "carried=true" >> "$GITHUB_OUTPUT"
+          echo "Carried \`$state: $description\` forward from $REPLACED_SHA." >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: steps.carry.outputs.carried != 'true'
+        with:
+          persist-credentials: false
+      # The suite list comes from the scheduled-workflow checker, which
+      # validates the registry before printing it. Any recent release runs it;
+      # bump the pin when convenient, as secret-scan.yml does.
+      - name: Set up Harn
+        id: harn
+        if: steps.carry.outputs.carried != 'true'
+        uses: ./.github/actions/setup-harn
+        with:
+          version: "0.10.153"
+      - name: Classify each scheduled suite and post main's status
+        if: steps.carry.outputs.carried != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          EVENT_NAME: ${{ github.event_name }}
+          PUSHED_SHA: ${{ github.sha }}
+          HARN: ${{ steps.harn.outputs.path }}
+        run: |
+          set -euo pipefail
+
+          post() { # state description [target_url]
+            gh api "repos/$GH_REPO/statuses/$sha" -X POST \
+              -f state="$1" -f context="main health" -f description="${2:0:139}" \
+              ${3:+-f target_url="$3"} >/dev/null
+          }
+
+          if [[ "$EVENT_NAME" == "push" ]]; then
+            sha="$PUSHED_SHA"
+          else
+            sha="$(gh api "repos/$GH_REPO/commits/main" --jq '.sha')"
+          fi
+
+          # One suite per line: name, consecutive failures that count as
+          # broken, and the job judged instead of the whole run (may be empty).
+          # An invalid registry fails here, before anything is posted.
+          suites="$("$HARN" run scripts/check_scheduled_workflows.harn -- --health-suites)"
+          watched="$(grep -c . <<< "$suites" || true)"
+          if (( watched == 0 )); then
+            echo "::error::scripts/scheduled_workflows.toml watches no suites"
+            exit 1
+          fi
 
           broken=()
           unknown=()
@@ -89,7 +149,7 @@ jobs:
             echo "| --- | --- | --- |"
           } >> "$GITHUB_STEP_SUMMARY"
 
-          while IFS= read -r suite; do
+          while IFS=$'\t' read -r suite threshold job; do
             [[ -n "$suite" ]] || continue
 
             # Fixed-string, whole-line match: suite names contain spaces and
@@ -101,46 +161,55 @@ jobs:
               continue
             fi
 
-            # `conclusion` is null while a run is still going; drop those so an
+            # `conclusion` is empty while a run is still going; drop those so an
             # in-flight run cannot break a streak that is genuinely unbroken.
-            recent="$(
+            runs="$(
               gh run list --repo "$GH_REPO" --workflow "$suite" \
-                --event schedule --branch main --limit 10 \
-                --json conclusion \
-                --jq '[.[] | select(.conclusion != null and .conclusion != "cancelled") | .conclusion] | .[0:6] | join(" ")'
-            )" || recent=""
+                --event schedule --branch main --limit 12 \
+                --json databaseId,conclusion \
+                --jq '.[] | select(.conclusion != null and .conclusion != "" and .conclusion != "cancelled") | "\(.databaseId) \(.conclusion)"'
+            )" || runs=""
 
-            if [[ -z "$recent" ]]; then
+            outcomes=()
+            while read -r run_id conclusion; do
+              [[ -n "$run_id" ]] || continue
+              (( ${#outcomes[@]} < threshold )) || break
+              if [[ -n "$job" ]]; then
+                # A run where the judged job did not run (skipped because main
+                # had not moved) measured nothing; it neither breaks nor extends
+                # a streak.
+                conclusion="$(JOB="$job" gh api "repos/$GH_REPO/actions/runs/$run_id/jobs" \
+                  --jq '[.jobs[] | select(.name == env.JOB and .conclusion != "skipped")][0].conclusion // empty')" || conclusion=""
+                [[ -n "$conclusion" ]] || continue
+              fi
+              outcomes+=("$conclusion")
+            done <<< "$runs"
+
+            if (( ${#outcomes[@]} == 0 )); then
               echo "| $suite | (no scheduled history) | skipped |" >> "$GITHUB_STEP_SUMMARY"
               continue
             fi
 
-            # Split explicitly rather than leaning on unquoted word-splitting:
-            # under a shell that does not split (zsh), the loop below runs once
-            # on the whole string, every streak reads as zero, and the report
-            # comes back reassuringly empty.
-            read -ra outcomes <<< "$recent"
             streak=0
             for outcome in "${outcomes[@]}"; do
               [[ "$outcome" == "failure" ]] || break
               streak=$((streak + 1))
             done
 
-            if (( streak >= STREAK )); then
+            if (( streak >= threshold )); then
               broken+=("$suite (${streak} consecutive)")
-              echo "| $suite | $recent | **BROKEN — ${streak} consecutive** |" >> "$GITHUB_STEP_SUMMARY"
+              echo "| $suite | ${outcomes[*]} | **BROKEN — ${streak} consecutive** |" >> "$GITHUB_STEP_SUMMARY"
             else
-              echo "| $suite | $recent | ok |" >> "$GITHUB_STEP_SUMMARY"
+              echo "| $suite | ${outcomes[*]} | ok |" >> "$GITHUB_STEP_SUMMARY"
             fi
-          done <<< "$SUITES"
+          done <<< "$suites"
 
-          sha="$(gh api "repos/$GH_REPO/commits/main" --jq '.sha')"
+          today="$(date -u +%F)"
+          run_url="https://github.com/$GH_REPO/actions/runs/${GITHUB_RUN_ID}"
 
           if (( ${#broken[@]} == 0 && ${#unknown[@]} == 0 )); then
-            gh api "repos/$GH_REPO/statuses/$sha" -X POST \
-              -f state=success -f context="main health" \
-              -f description="all watched scheduled suites passing" >/dev/null
-            echo "All watched suites are passing." >> "$GITHUB_STEP_SUMMARY"
+            post success "$today: all $watched watched scheduled suites passing" "$run_url"
+            echo "All $watched watched suites are passing." >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
 
@@ -148,10 +217,9 @@ jobs:
           # it means this check is watching less than it claims to.
           problems=("${broken[@]}" "${unknown[@]/#/no such workflow: }")
           summary="$(IFS='; '; echo "${problems[*]}")"
-          gh api "repos/$GH_REPO/statuses/$sha" -X POST \
-            -f state=failure -f context="main health" \
-            -f description="${summary:0:139}" \
-            -f target_url="https://github.com/$GH_REPO/actions/runs/${GITHUB_RUN_ID}" >/dev/null
+          post failure "$today: $summary" "$run_url"
 
           echo "::error::main health — $summary"
-          exit 1
+          # A push only republishes the verdict; the failing status is the
+          # report, and a red push run would double it on every merge.
+          [[ "$EVENT_NAME" == "push" ]] || exit 1

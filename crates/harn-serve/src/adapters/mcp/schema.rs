@@ -83,7 +83,10 @@ pub(super) fn tool_call_success(
     catalog: &harn_vm::tool_registry::ToolCatalog,
 ) -> JsonValue {
     let mut result = json!({
-        "content": content_blocks(&response.value),
+        "content": match response.feedback {
+            Some(text) => json!([{"type": "text", "text": text}]),
+            None => content_blocks(&response.value),
+        },
         "isError": false,
     });
     let entry = catalog

@@ -11,20 +11,11 @@ use std::time::Duration;
 use futures::StreamExt;
 use serde_json::{json, Value};
 use tempfile::TempDir;
-use test_util::process::harn_e2e_command;
+use test_util::process::{harn_e2e_command, ChildGuard};
 
 const PROCESS_READY_TIMEOUT: Duration = Duration::from_mins(1);
 const TASK_TERMINAL_TIMEOUT: Duration = Duration::from_secs(30);
 const TEST_API_KEY: &str = "fixture-api-key-6799";
-
-struct ChildGuard(Child);
-
-impl Drop for ChildGuard {
-    fn drop(&mut self) {
-        let _ = self.0.kill();
-        let _ = self.0.wait();
-    }
-}
 
 fn write_privileged_project(temp: &TempDir) -> std::path::PathBuf {
     fs::create_dir(temp.path().join(".git")).expect("project boundary");
