@@ -9,7 +9,9 @@ use std::sync::Arc;
 
 use crate::value::{DictMap, VmError, VmValue};
 
+use super::trace::HostRequestTrace;
 use super::turn_cache;
+use crate::vm::AsyncBuiltinCtx;
 
 /// Boxed future returned by [`HostCallBridge::dispatch`].
 ///
@@ -37,15 +39,23 @@ pub(super) async fn dispatch_cached(
     capability: &str,
     operation: &str,
     params: &DictMap,
+    ctx: Option<&AsyncBuiltinCtx>,
 ) -> Result<Option<VmValue>, VmError> {
+    let caller = ctx.and_then(AsyncBuiltinCtx::host_call_site);
     if capability == "project" && operation == "metadata_get" {
         return turn_cache::cached_metadata_or(params, |params: DictMap| async move {
-            bridge.dispatch(capability, operation, &params).await
+            let trace = HostRequestTrace::new(caller, &params);
+            bridge
+                .dispatch_traced(capability, operation, &params, &trace)
+                .await
         })
         .await;
     }
-    turn_cache::cached_or(capability, operation, params, || {
-        bridge.dispatch(capability, operation, params)
+    turn_cache::cached_or(capability, operation, params, || async {
+        let trace = HostRequestTrace::new(caller, params);
+        bridge
+            .dispatch_traced(capability, operation, params, &trace)
+            .await
     })
     .await
 }
@@ -69,6 +79,19 @@ pub trait HostCallBridge: Send + Sync {
         operation: &'a str,
         params: &'a crate::value::DictMap,
     ) -> HostCallDispatchFuture<'a>;
+
+    /// Dispatch with runtime-owned, value-free attribution. Existing embedders
+    /// may ignore it; adapters that expose request traces preserve it separately
+    /// from the operation's arguments.
+    fn dispatch_traced<'a>(
+        &'a self,
+        capability: &'a str,
+        operation: &'a str,
+        params: &'a crate::value::DictMap,
+        _trace: &'a HostRequestTrace,
+    ) -> HostCallDispatchFuture<'a> {
+        self.dispatch(capability, operation, params)
+    }
 
     fn list_tools(&self) -> Result<Option<VmValue>, VmError> {
         Ok(None)

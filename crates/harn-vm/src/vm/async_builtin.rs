@@ -5,6 +5,13 @@ use std::time::Instant;
 
 use super::Vm;
 
+/// Source identity of the Harn frame invoking an asynchronous host operation.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct VmCallSite {
+    pub module: Option<String>,
+    pub function: String,
+}
+
 /// Explicit handle to the parent VM's execution context for the duration of one
 /// async-builtin call. Threaded into every async builtin by the dispatch loop
 /// (and the `#[harn_builtin]` macro), so context can no longer be "lost across a
@@ -20,12 +27,14 @@ use super::Vm;
 #[derive(Clone)]
 pub struct AsyncBuiltinCtx {
     child: Arc<parking_lot::Mutex<Vm>>,
+    caller: Option<VmCallSite>,
 }
 
 impl AsyncBuiltinCtx {
     fn new(vm: Vm) -> Self {
         Self {
             child: Arc::new(parking_lot::Mutex::new(vm)),
+            caller: None,
         }
     }
 
@@ -65,7 +74,16 @@ impl AsyncBuiltinCtx {
     /// `child_vm()` here would fork the outer deadline: admission could pause
     /// the fork while the real caller still timed out.
     pub(crate) fn from_inline_parent(parent: &Vm) -> Self {
-        Self::new(parent.child_vm_inline())
+        Self::new(parent.child_vm_inline()).with_host_call_site(parent.host_call_site())
+    }
+
+    pub(crate) fn with_host_call_site(mut self, caller: Option<VmCallSite>) -> Self {
+        self.caller = caller;
+        self
+    }
+
+    pub(crate) fn host_call_site(&self) -> Option<VmCallSite> {
+        self.caller.clone()
     }
 
     /// Construct a standalone ctx around `vm` for tests that drive an async
@@ -181,6 +199,19 @@ impl AsyncBuiltinCtx {
             .lock()
             .execution_deadline
             .encoded_offset_for_test()
+    }
+}
+
+impl Vm {
+    pub(crate) fn host_call_site(&self) -> Option<VmCallSite> {
+        self.frames.last().map(|frame| VmCallSite {
+            module: frame
+                .chunk
+                .source_file
+                .clone()
+                .or_else(|| self.source_file.clone()),
+            function: frame.fn_name.to_string(),
+        })
     }
 }
 
