@@ -69,7 +69,11 @@ pub fn scope_ambient_context<F: Future>(inner: F) -> impl Future<Output = F::Out
 }
 
 pub(crate) fn scope_approval_policy<F: Future>(policy: ToolApprovalPolicy, inner: F) -> Scoped<F> {
-    scope_modified(inner, |scope| scope.approval.push(policy))
+    scope_modified(inner, |scope| {
+        scope
+            .approval
+            .push(crate::orchestration::policy::construct_live_approval_policy(policy))
+    })
 }
 
 pub(crate) fn scope_command_policy<F: Future>(policy: CommandPolicy, inner: F) -> Scoped<F> {

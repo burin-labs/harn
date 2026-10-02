@@ -39,6 +39,7 @@ mod orchestrator_http;
 mod pack_cli;
 mod persona_cli;
 mod profile;
+mod run_approval_owner;
 mod stop_default_stack;
 mod test_bench_cli;
 mod trigger_replay_cli;
