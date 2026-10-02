@@ -336,3 +336,73 @@ async fn keyring_provider_round_trips_and_zeroes_on_drop() {
         .await
         .expect("mock keyring delete should succeed");
 }
+
+fn unique_write_id() -> SecretId {
+    SecretId::new(
+        "harn_chain_write_probe",
+        format!("v{}", uuid::Uuid::now_v7().simple()),
+    )
+}
+
+fn write_request(id: &SecretId) -> SecretWriteRequest {
+    SecretWriteRequest {
+        id: id.clone(),
+        scope: SecretScope::default(),
+        value: SecretBytes::from("synthetic-only"),
+        options: SecretWriteOptions::default(),
+        audit: SecretAuditContext::default(),
+    }
+}
+
+#[tokio::test]
+async fn chain_writes_skip_the_environment_when_a_persistent_provider_exists() {
+    let id = unique_write_id();
+    let env = Arc::new(EnvSecretProvider::new("harn.test"));
+    let env_var = env.env_var_name(&id);
+    let durable = Arc::new(MemorySecretProvider::new("durable-store"));
+    let chain = ChainSecretProvider::new("harn.test", vec![env, durable.clone()]);
+
+    let receipt = chain
+        .write_scoped(write_request(&id))
+        .await
+        .expect("the persistent provider accepts the write");
+
+    assert_eq!(receipt.provider, "durable-store");
+    assert!(
+        std::env::var_os(&env_var).is_none(),
+        "the write must not land only in this process's environment"
+    );
+    let stored = durable.get(&id).await.expect("value reached the store");
+    assert_eq!(stored.with_exposed(<[u8]>::to_vec), b"synthetic-only");
+}
+
+#[tokio::test]
+async fn chain_write_fails_rather_than_falling_back_to_the_environment() {
+    let id = unique_write_id();
+    let env = Arc::new(EnvSecretProvider::new("harn.test"));
+    let env_var = env.env_var_name(&id);
+    let failing = Arc::new(FakeProvider::new("unwritable", Vec::new()));
+    let chain = ChainSecretProvider::new("harn.test", vec![env, failing]);
+
+    let error = chain
+        .write_scoped(write_request(&id))
+        .await
+        .expect_err("no persistent provider accepted the write");
+    assert!(matches!(error, SecretError::All(_)), "{error:?}");
+    assert!(std::env::var_os(&env_var).is_none());
+}
+
+#[tokio::test]
+async fn env_only_chain_still_writes_to_the_environment_and_says_so() {
+    let id = unique_write_id();
+    let env = Arc::new(EnvSecretProvider::new("harn.test"));
+    let env_var = env.env_var_name(&id);
+    let chain = ChainSecretProvider::new("harn.test", vec![env]);
+
+    let receipt = chain
+        .write_scoped(write_request(&id))
+        .await
+        .expect("an env-only chain keeps its process-scoped write");
+    assert_eq!(receipt.provider, "env");
+    assert_eq!(std::env::var(&env_var).as_deref(), Ok("synthetic-only"));
+}

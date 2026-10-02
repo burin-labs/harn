@@ -481,6 +481,10 @@ impl SecretProvider for KeyringSecretProvider {
         false
     }
 
+    fn kind(&self) -> &str {
+        "keyring"
+    }
+
     fn locator(&self, id: &SecretId) -> Option<String> {
         Some(format!(
             "service {} account {}",
