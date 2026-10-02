@@ -1,0 +1,81 @@
+name: CI preemption recovery (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      orchestration-sha:
+        description: Exact Harn commit matching the caller's pinned uses SHA.
+        required: true
+        type: string
+      run-id:
+        description: Completed failed run in the caller's repository.
+        required: true
+        type: number
+      policy-json:
+        description: Typed recovery policy JSON. Empty uses Harn's policy.
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  actions: write
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: ci-preemption-recovery-${{ github.repository }}-${{ inputs.run-id }}
+  cancel-in-progress: false
+
+jobs:
+  repair:
+    name: Classify and recover runner preemption
+    if: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.id == inputs.run-id && (github.event.workflow_run.conclusion == 'failure' || github.event.workflow_run.conclusion == 'cancelled') }}
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Validate orchestration SHA
+        env:
+          ORCHESTRATION_SHA: ${{ inputs.orchestration-sha }}
+        run: |
+          set -euo pipefail
+          [[ "$ORCHESTRATION_SHA" =~ ^[0-9a-f]{40}$ ]]
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: burin-labs/harn
+          ref: ${{ inputs.orchestration-sha }}
+          persist-credentials: false
+      - name: Set up Harn
+        id: harn
+        uses: ./.github/actions/setup-harn
+        with:
+          version: "0.10.153"
+      - name: Classify failure and apply safe recovery
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HARN_BIN: ${{ steps.harn.outputs.path }}
+          TARGET_RUN_ID: ${{ inputs.run-id }}
+          TARGET_REPO: ${{ github.repository }}
+          POLICY_JSON: ${{ inputs.policy-json }}
+        run: |
+          set -euo pipefail
+          umask 077
+          policy_args=()
+          policy_file="$(mktemp)"
+          trap 'rm -f -- "$policy_file"' EXIT
+          if [[ -n "$POLICY_JSON" ]]; then
+            printf '%s\n' "$POLICY_JSON" > "$policy_file"
+            policy_args=(--policy "$policy_file")
+          fi
+          ./scripts/recover_ci_preemption.sh \
+            --repo "$TARGET_REPO" \
+            --run-id "$TARGET_RUN_ID" \
+            "${policy_args[@]}" \
+            --apply \
+            --emit-summary > "$RUNNER_TEMP/ci-recovery-receipt.json"
+          cat "$RUNNER_TEMP/ci-recovery-receipt.json"
+      - name: Preserve recovery receipt
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ci-recovery-${{ inputs.run-id }}
+          path: ${{ runner.temp }}/ci-recovery-receipt.json
+          if-no-files-found: error
