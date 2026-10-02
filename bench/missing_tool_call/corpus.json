@@ -94,5 +94,29 @@
     "text": "Would you like me to edit that file? I will wait for your answer.",
     "intended": false,
     "tool": ""
+  },
+  {
+    "id": "advice-imperative",
+    "text": "For more background, read README.md and compare the examples.",
+    "intended": false,
+    "tool": ""
+  },
+  {
+    "id": "advice-spanish",
+    "text": "Si necesitas contexto, puedes leer README.md.",
+    "intended": false,
+    "tool": ""
+  },
+  {
+    "id": "advice-french",
+    "text": "Pour plus d'informations, vous pouvez lire README.md.",
+    "intended": false,
+    "tool": ""
+  },
+  {
+    "id": "advice-german",
+    "text": "Du kannst README.md lesen, wenn du weitere Details brauchst.",
+    "intended": false,
+    "tool": ""
   }
 ]
