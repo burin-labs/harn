@@ -138,6 +138,10 @@ fn own_roots_under(pipeline: Option<&str>, home: Option<&Path>) -> OwnRoots {
         }
     }
     roots.read.extend(harn_vm::user_dirs::package_cache_dir());
+    // Landlock grants on an open handle, so a root that doesn't exist can't be
+    // granted at all; there is also nothing in it to read or lock.
+    roots.read.retain(|root| root.exists());
+    roots.write.retain(|root| root.exists());
     roots
 }
 
@@ -229,6 +233,10 @@ mod tests {
         let elsewhere = tempfile::tempdir().unwrap();
         let roots = own_roots_under(Some(pipeline), Some(elsewhere.path()));
         assert_eq!(roots.read[0], package.path());
+        // No `.harn` state yet, so nothing to grant write on.
+        assert!(roots.write.is_empty());
+        std::fs::create_dir(package.path().join(".harn")).unwrap();
+        let roots = own_roots_under(Some(pipeline), Some(elsewhere.path()));
         assert_eq!(roots.write, vec![package.path().join(".harn")]);
 
         // Negative control: the same package treated as the home directory
