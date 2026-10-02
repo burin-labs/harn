@@ -939,6 +939,7 @@ fn test_terminate_emits_terminated_event() {
     assert!(!dbg.is_running());
 }
 
+mod declared_exceptions;
 mod source_requests;
 
 #[test]

@@ -1178,8 +1178,9 @@ fn compile_synthesized_tool_closure(id: &str) -> Result<VmValue, VmError> {
             type_params,
             params,
             body,
+            throws,
             ..
-        } => Some((type_params, params, body)),
+        } => Some((type_params, params, body, throws)),
         _ => None,
     }) else {
         return Err(VmError::Runtime(
@@ -1193,6 +1194,7 @@ fn compile_synthesized_tool_closure(id: &str) -> Result<VmValue, VmError> {
             fn_node.1,
             fn_node.2,
             Some("<tool_synthesize>".to_string()),
+            fn_node.3.as_ref(),
         )
         .map_err(|error| VmError::Runtime(format!("tool_synthesize: {error}")))?;
     Ok(VmValue::Closure(Arc::new(VmClosure {

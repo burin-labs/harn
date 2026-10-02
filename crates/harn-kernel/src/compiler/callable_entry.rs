@@ -119,6 +119,7 @@ impl Compiler {
             body,
             extends,
             params,
+            throws,
             ..
         } = peel_node(target)
         else {
@@ -130,8 +131,14 @@ impl Compiler {
                 Some(harn_parser::TypeExpr::Named(name)) if name == "Harness"
             )
         });
-        let callable =
-            self.compile_pipeline_callable(program, name, params, body, extends.as_deref())?;
+        let callable = self.compile_pipeline_callable(
+            program,
+            name,
+            params,
+            body,
+            extends.as_deref(),
+            throws.as_ref(),
+        )?;
         let function_index = self.chunk.functions.len();
         self.chunk.functions.push(Arc::new(callable));
         self.chunk

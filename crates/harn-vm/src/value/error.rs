@@ -144,6 +144,8 @@ pub enum VmError {
     /// `input_required` result and re-enters the handler on retry.
     McpInputRequired(Box<crate::mcp_input::McpInputRequired>),
     Thrown(VmValue),
+    /// A source-authored throw in a callable with a declared `throws` channel.
+    DeclaredThrown(VmValue),
     /// Thrown with error category for structured error handling.
     CategorizedError {
         message: String,
@@ -237,7 +239,7 @@ impl VmError {
     /// sensibly (the dict renders both fields).
     pub fn thrown_value(&self) -> VmValue {
         match self {
-            VmError::Thrown(v) => v.clone(),
+            VmError::Thrown(v) | VmError::DeclaredThrown(v) => v.clone(),
             VmError::CategorizedError { message, category } => {
                 let mut dict = std::collections::BTreeMap::new();
                 dict.put_str("category", category.as_str());
@@ -833,7 +835,7 @@ impl std::fmt::Display for VmError {
                 "Execution future was abandoned; discard this VM and reset its exclusively owned execution context"
             ),
             VmError::McpInputRequired(_) => write!(f, "MCP client input required"),
-            VmError::Thrown(v) => write!(f, "Thrown: {}", v.display()),
+            VmError::Thrown(v) | VmError::DeclaredThrown(v) => write!(f, "Thrown: {}", v.display()),
             VmError::CategorizedError { message, category } => {
                 write!(f, "Error [{}]: {}", category.as_str(), message)
             }
