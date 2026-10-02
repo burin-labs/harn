@@ -1148,11 +1148,7 @@ pub(super) async fn host_agent_dispatch_tool_call(
         }
         Some(decision) if decision.is_deny() => {
             let unavailable = decision.is_approval_unavailable();
-            if unavailable {
-                emit_runtime_unavailable_activity(&session_id, &tool_id, &tool_name, &decision);
-            } else {
-                emit_runtime_denied_activity(&session_id, &tool_id, &tool_name, &decision);
-            }
+            emit_runtime_denied_activity(&session_id, &tool_id, &tool_name, &decision);
             // No gate is named here on purpose: the decision carries the one
             // its deciding rule chose. See `PolicyEvaluation::terminal_denial`.
             let denial = if unavailable {

@@ -6,6 +6,75 @@ use super::approval_resolver::ApprovalResolver;
 
 use super::{PolicyAction, ToolApprovalPolicy};
 
+pub fn push_approval_policy(policy: ToolApprovalPolicy) {
+    super::EXECUTION_APPROVAL_POLICY_STACK.with(|stack| {
+        stack
+            .borrow_mut()
+            .push(construct_live_approval_policy(policy))
+    });
+}
+
+pub fn pop_approval_policy() {
+    super::EXECUTION_APPROVAL_POLICY_STACK.with(|stack| {
+        stack.borrow_mut().pop();
+    });
+}
+
+/// Declaration projection for nested scopes and worker configuration. Prepared
+/// authority travels separately and is intersected exactly once at dispatch.
+pub fn current_approval_policy() -> Option<ToolApprovalPolicy> {
+    super::EXECUTION_APPROVAL_POLICY_STACK.with(|stack| {
+        stack
+            .borrow()
+            .last()
+            .map(|policy| policy.declared().clone())
+    })
+}
+
+/// The typed policy used by live dispatch. Scope transport retains declared
+/// configuration, so a reviewer installed later can still answer an ask.
+pub fn current_run_approval_policy() -> Option<RunApprovalPolicy> {
+    let declared = current_approval_policy();
+    if let Some(prepared) = super::PREPARED_APPROVAL_POLICY.with(|slot| slot.borrow().clone()) {
+        let policy = declared.map_or_else(
+            || prepared.declared().clone(),
+            |inner| prepared.declared().intersect(&inner),
+        );
+        return Some(RunApprovalPolicy::construct_with_resolver(
+            prepared.posture(),
+            prepared.resolver(),
+            |_| policy,
+        ));
+    }
+    declared.map(construct_live_approval_policy)
+}
+
+pub(crate) fn construct_live_approval_policy(policy: ToolApprovalPolicy) -> RunApprovalPolicy {
+    let available = crate::llm::current_host_bridge().is_some();
+    let resolver = if crate::orchestration::current_approval_reviewer().is_some() {
+        ApprovalResolver::AutoReview
+    } else {
+        ApprovalResolver::Host
+    };
+    RunApprovalPolicy::construct_with_resolver(
+        RunAuthorityPosture {
+            interactivity: if available {
+                RunInteractivity::Interactive
+            } else {
+                RunInteractivity::NonInteractive
+            },
+            approval_availability: if available {
+                ApprovalAvailability::Available
+            } else {
+                ApprovalAvailability::Unavailable
+            },
+            workspace_trust: WorkspaceTrust::Untrusted,
+        },
+        resolver,
+        |_| policy,
+    )
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RunInteractivity {

@@ -64,7 +64,7 @@ fn production_construction_and_dispatch_share_the_typed_owner() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../harn-vm/src");
     for (path, caller, required) in [
         (
-            "orchestration/policy/mod.rs",
+            "orchestration/policy/run_approval.rs",
             "construct_live_approval_policy",
             "RunApprovalPolicy::construct_with_resolver",
         ),

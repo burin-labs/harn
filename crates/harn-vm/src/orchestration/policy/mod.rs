@@ -72,8 +72,11 @@ pub use operator_grant::{
     current_operator_approval_grant, install_operator_approval_grant, OperatorApprovalGrant,
     OperatorApprovalGrantGuard,
 };
+pub(crate) use run_approval::construct_live_approval_policy;
 pub use run_approval::{
-    ApprovalAvailability, RunApprovalPolicy, RunAuthorityPosture, RunInteractivity, WorkspaceTrust,
+    current_approval_policy, current_run_approval_policy, pop_approval_policy,
+    push_approval_policy, ApprovalAvailability, RunApprovalPolicy, RunAuthorityPosture,
+    RunInteractivity, WorkspaceTrust,
 };
 pub(crate) use runtime_effect_state::RuntimeEffectState;
 pub use tool_enforcement::enforce_current_policy_for_tool;
@@ -121,77 +124,6 @@ pub fn current_execution_policy() -> Option<CapabilityPolicy> {
 /// [`current_execution_policy`] performs.
 pub fn execution_policy_active() -> bool {
     EXECUTION_POLICY_STACK.with(|stack| !stack.borrow().is_empty())
-}
-
-pub fn push_approval_policy(policy: ToolApprovalPolicy) {
-    EXECUTION_APPROVAL_POLICY_STACK.with(|stack| {
-        stack
-            .borrow_mut()
-            .push(construct_live_approval_policy(policy))
-    });
-}
-
-pub fn pop_approval_policy() {
-    EXECUTION_APPROVAL_POLICY_STACK.with(|stack| {
-        stack.borrow_mut().pop();
-    });
-}
-
-/// Declaration projection for nested scopes and worker configuration. The
-/// prepared authority travels separately with the ambient run scope, so it is
-/// intersected exactly once at dispatch rather than copied into each overlay.
-pub fn current_approval_policy() -> Option<ToolApprovalPolicy> {
-    EXECUTION_APPROVAL_POLICY_STACK.with(|stack| {
-        stack
-            .borrow()
-            .last()
-            .map(|policy| policy.declared().clone())
-    })
-}
-
-/// The typed policy used by live dispatch. Scope transport uses the declaration
-/// projection above, so installing a reviewer after a nested policy does not
-/// permanently turn a reviewable ask into a denial.
-pub fn current_run_approval_policy() -> Option<RunApprovalPolicy> {
-    let declared = current_approval_policy();
-    if let Some(prepared) = PREPARED_APPROVAL_POLICY.with(|slot| slot.borrow().clone()) {
-        let policy = declared.map_or_else(
-            || prepared.declared().clone(),
-            |inner| prepared.declared().intersect(&inner),
-        );
-        return Some(RunApprovalPolicy::construct_with_resolver(
-            prepared.posture(),
-            prepared.resolver(),
-            |_| policy,
-        ));
-    }
-    declared.map(construct_live_approval_policy)
-}
-
-pub(crate) fn construct_live_approval_policy(policy: ToolApprovalPolicy) -> RunApprovalPolicy {
-    let available = crate::llm::current_host_bridge().is_some();
-    let resolver = if crate::orchestration::current_approval_reviewer().is_some() {
-        ApprovalResolver::AutoReview
-    } else {
-        ApprovalResolver::Host
-    };
-    RunApprovalPolicy::construct_with_resolver(
-        RunAuthorityPosture {
-            interactivity: if available {
-                RunInteractivity::Interactive
-            } else {
-                RunInteractivity::NonInteractive
-            },
-            approval_availability: if available {
-                ApprovalAvailability::Available
-            } else {
-                ApprovalAvailability::Unavailable
-            },
-            workspace_trust: WorkspaceTrust::Untrusted,
-        },
-        resolver,
-        |_| policy,
-    )
 }
 
 // --- Per-task ambient-scope swap primitives -------------------------------
