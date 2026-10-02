@@ -864,7 +864,7 @@ fn apply_host_payload_defaults(
             // or whitespace-only label leaves no key. A non-string is left for
             // the typed payload decode to refuse.
             if let Some(normalized) = obj.get("intent").and_then(Value::as_str) {
-                match super::tool_call_intent(normalized) {
+                match crate::llm::tool_call_intent::normalize(normalized) {
                     Some(intent) => obj.insert("intent".to_string(), Value::String(intent)),
                     None => obj.remove("intent"),
                 };

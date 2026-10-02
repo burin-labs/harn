@@ -8,7 +8,7 @@ use super::*;
 fn with_label(mut options: crate::value::DictMap, label: &str) -> crate::value::DictMap {
     options.insert(
         crate::value::intern_key("_purpose_label"),
-        crate::stdlib::json_to_vm_value(&serde_json::json!(label)),
+        json_to_vm_value(&serde_json::json!(label)),
     );
     options
 }
@@ -31,7 +31,7 @@ fn only_permission_meta(captured: &Arc<StdMutex<Vec<serde_json::Value>>>) -> ser
 }
 
 async fn side_effect_ask_meta(options: crate::value::DictMap) -> serde_json::Value {
-    crate::orchestration::clear_execution_policy_stacks();
+    clear_execution_policy_stacks();
     let captured = Arc::new(StdMutex::new(Vec::new()));
     let _bridge_guard = HostBridgeGuard::replace(Some(rejecting_bridge(captured.clone())));
     let directory = tempfile::tempdir().expect("tempdir");
@@ -71,22 +71,21 @@ async fn side_effect_ask_drops_a_blank_label() {
 }
 
 async fn approval_policy_ask_meta(options: crate::value::DictMap) -> serde_json::Value {
-    crate::orchestration::clear_execution_policy_stacks();
-    crate::orchestration::clear_all_approval_policy_repeat_counts();
-    let policy: crate::orchestration::ToolApprovalPolicy =
-        serde_json::from_value(serde_json::json!({
-            "rules": [{"ask": {"tool": "read_file"}, "reason": "reads ask in this fixture"}]
-        }))
-        .expect("approval policy");
-    crate::orchestration::push_approval_policy(policy);
+    clear_execution_policy_stacks();
+    clear_all_approval_policy_repeat_counts();
+    let policy: ToolApprovalPolicy = serde_json::from_value(serde_json::json!({
+        "rules": [{"ask": {"tool": "read_file"}, "reason": "reads ask in this fixture"}]
+    }))
+    .expect("approval policy");
+    push_approval_policy(policy);
     let captured = Arc::new(StdMutex::new(Vec::new()));
     let _bridge_guard = HostBridgeGuard::replace(Some(rejecting_bridge(captured.clone())));
     let directory = tempfile::tempdir().expect("tempdir");
     let path = directory.path().join("proof.txt");
     std::fs::write(&path, "must not run before approval").expect("fixture");
     let result = dispatch_read_file(&path, &options).await;
-    crate::orchestration::pop_approval_policy();
-    crate::orchestration::clear_all_approval_policy_repeat_counts();
+    pop_approval_policy();
+    clear_all_approval_policy_repeat_counts();
     assert_eq!(result["ok"], serde_json::json!(false), "{result}");
     only_permission_meta(&captured)
 }
@@ -95,7 +94,7 @@ fn session_options(session_id: &str) -> crate::value::DictMap {
     let mut options = crate::value::DictMap::new();
     options.insert(
         crate::value::intern_key("session_id"),
-        crate::stdlib::json_to_vm_value(&serde_json::json!(session_id)),
+        json_to_vm_value(&serde_json::json!(session_id)),
     );
     options
 }
@@ -110,7 +109,7 @@ async fn approval_policy_ask_carries_a_bounded_intent() {
     assert!(intent.ends_with('\u{2026}'));
     assert_eq!(
         intent.chars().count(),
-        crate::agent_events::TOOL_CALL_INTENT_MAX_CHARS
+        crate::llm::tool_call_intent::MAX_CHARS
     );
     assert_eq!(meta["policyDecision"]["action"], serde_json::json!("ask"));
 }

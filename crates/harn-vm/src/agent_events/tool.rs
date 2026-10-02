@@ -12,32 +12,6 @@ pub struct StagedWriteSummary {
     pub snapshot_id: Option<String>,
 }
 
-/// Upper bound, in characters, on a tool call's wire `intent`.
-pub const TOOL_CALL_INTENT_MAX_CHARS: usize = 200;
-
-/// Normalize the model's declared purpose for a tool call into the one
-/// `intent` string hosts receive on both the approval request and the
-/// tool-call start event.
-///
-/// Whitespace runs collapse to one space so a heading cannot smuggle line
-/// breaks into an approval title, and the result is bounded to
-/// [`TOOL_CALL_INTENT_MAX_CHARS`], ending in an ellipsis when cut. Blank
-/// input yields `None`, which keeps the key off the wire entirely.
-pub fn tool_call_intent(raw: &str) -> Option<String> {
-    let collapsed = raw.split_whitespace().collect::<Vec<_>>().join(" ");
-    if collapsed.is_empty() {
-        return None;
-    }
-    if collapsed.chars().count() <= TOOL_CALL_INTENT_MAX_CHARS {
-        return Some(collapsed);
-    }
-    let kept: String = collapsed
-        .chars()
-        .take(TOOL_CALL_INTENT_MAX_CHARS - 1)
-        .collect();
-    Some(format!("{}\u{2026}", kept.trim_end()))
-}
-
 /// Status of a tool call. Mirrors ACP's `toolCallStatus`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

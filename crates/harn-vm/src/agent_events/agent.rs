@@ -141,7 +141,7 @@ pub enum AgentEvent {
         /// emission belonging to the same write-capable session.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         audit: Option<MutationSessionRecord>,
-        /// The batch's declared purpose label, normalized by [`super::tool_call_intent`].
+        /// The batch's declared purpose, normalized by `llm::tool_call_intent`.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         intent: Option<String>,
     },

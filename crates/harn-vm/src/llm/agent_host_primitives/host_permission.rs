@@ -54,7 +54,7 @@ pub(super) struct HostPermissionRequest {
 /// normalized by the same owner as the tool-call event's `intent`.
 pub(super) fn tool_call_intent(options: &crate::value::DictMap) -> Option<String> {
     match options.get("_purpose_label")? {
-        crate::value::VmValue::String(label) => crate::agent_events::tool_call_intent(label),
+        crate::value::VmValue::String(label) => crate::llm::tool_call_intent::normalize(label),
         _ => None,
     }
 }

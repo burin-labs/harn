@@ -44,9 +44,12 @@ fn tool_call_intent_is_bounded() {
     let intent = tool_call_intent_from(json!({
         "tool_call_id": "t1",
         "tool_name": "read_file",
-        "intent": "y".repeat(TOOL_CALL_INTENT_MAX_CHARS * 2),
+        "intent": "y".repeat(crate::llm::tool_call_intent::MAX_CHARS * 2),
     }))
     .expect("intent");
-    assert_eq!(intent.chars().count(), TOOL_CALL_INTENT_MAX_CHARS);
+    assert_eq!(
+        intent.chars().count(),
+        crate::llm::tool_call_intent::MAX_CHARS
+    );
     assert!(intent.ends_with('\u{2026}'));
 }

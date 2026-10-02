@@ -75,9 +75,8 @@ pub use terminal::{
 };
 pub use terminal_suspension::{AgentTerminalSuspension, ResumeWait};
 pub use tool::{
-    tool_call_intent, DenialGate, SideEffectCeilingDetails, SideEffectCeilingRemedy,
-    StagedWriteSummary, ToolCallErrorCategory, ToolCallStatus, ToolDenial, ToolExecutor,
-    ToolMutationStatus, TOOL_CALL_INTENT_MAX_CHARS,
+    DenialGate, SideEffectCeilingDetails, SideEffectCeilingRemedy, StagedWriteSummary,
+    ToolCallErrorCategory, ToolCallStatus, ToolDenial, ToolExecutor, ToolMutationStatus,
 };
 pub use turn_phase::AgentTurnPhase;
 pub use worker::{
