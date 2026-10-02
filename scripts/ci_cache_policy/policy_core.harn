@@ -1842,7 +1842,7 @@ fn linux_runner_label(label: string) -> bool {
  * list or expression) and its matrix `runner` values.
  */
 fn job_runner_labels(job: dict) -> list<string> {
-  let texts: list<string> = [to_string(job?.["runs-on"] ?? "")]
+  let texts: list<string> = [to_string(job["runs-on"] ?? "")]
   for row in job?.strategy?.matrix?.include ?? [] {
     texts = texts + [to_string(row?.runner ?? "")]
   }
