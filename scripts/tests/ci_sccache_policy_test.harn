@@ -170,10 +170,11 @@ fn persistent_lane(
   rust_cache_key: string,
   write_cache: bool = false,
   timeout: string = "",
+  owned_rung: bool = true,
 ) {
   const cache_inputs = {"shared-key": rust_cache_key, "cache-workspace-crates": "true"}
   let lane = {
-    "runs-on": producer_runner_expression(runner),
+    "runs-on": producer_runner_expression(runner, owned_rung),
     needs: ["changes", "runner-availability", "rust-producer-capacity"],
     if: producer_admission_expression(),
     "timeout-minutes": if timeout == "" {
@@ -181,7 +182,7 @@ fn persistent_lane(
     } else {
       timeout
     },
-    env: {HARN_RUNNER_TIER: producer_tier_expression(), SCCACHE_CACHE_SIZE: "15G"},
+    env: {HARN_RUNNER_TIER: producer_tier_expression(owned_rung), SCCACHE_CACHE_SIZE: "15G"},
     steps: [
       {
         uses: "./.github/actions/sccache",
@@ -270,6 +271,7 @@ fn workflow() {
     "harn-ci-cli",
     true,
     cli_producer_timeout_expression(),
+    false,
   )
   const rust_test = {
     env: {RUSTFLAGS: "-D warnings -Clink-arg=-fuse-ld=mold"},
@@ -1544,10 +1546,28 @@ pipeline test_rejects_paid_producer_outside_trusted_events_or_without_fuse(
   const errors = ci_linux_lane_policy_errors(invalid)
   assert(
     errors.contains(
-      "ci.yml:rust-check-inputs must ladder paid blacksmith-8vcpu-ubuntu-2404, the owned linux_big pool on same-repository pull requests, then a hosted fallback",
+      "ci.yml:rust-check-inputs must ladder paid blacksmith-8vcpu-ubuntu-2404, the owned linux_big pool on same-repository pull requests, ubicloud-standard-8, then ubuntu-8core",
     ),
   )
-  assert(errors.contains("ci.yml:rust-check-inputs must mirror all three of its runner tiers"))
+  assert(errors.contains("ci.yml:rust-check-inputs must mirror every one of its runner tiers"))
+  // The shared CLI must not wait on the owned pool's one-job compile budget:
+  // putting the owned rung back on it is refused.
+  const cli = valid.jobs["rust-cli"]
+  const owned_cli = {
+    ...valid,
+    jobs: {
+      ...valid.jobs,
+      "rust-cli": {
+        ...cli,
+        "runs-on": producer_runner_expression("blacksmith-8vcpu-ubuntu-2404", true),
+      },
+    },
+  }
+  assert(
+    ci_linux_lane_policy_errors(owned_cli).contains(
+      "ci.yml:rust-cli must ladder paid blacksmith-8vcpu-ubuntu-2404, ubicloud-standard-8, then ubuntu-8core",
+    ),
+  )
   assert(
     errors.contains(
       "ci.yml:rust-check-inputs must keep the 20-minute paid-runner fuse, the 56-minute owned ceiling, and the 60-minute hosted ceiling sized from its step budgets plus a cache-save reserve",

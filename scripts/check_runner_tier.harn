@@ -24,9 +24,13 @@ const WORKFLOW_PATH = ".github/workflows/ci.yml"
 
 const TIER_ENV = "HARN_RUNNER_TIER"
 
-const TIERS = ["self-hosted", "blacksmith", "github-hosted"]
+const TIERS = ["self-hosted", "blacksmith", "ubicloud", "github-hosted"]
 
 const BLACKSMITH_RUNNER_PREFIX = "blacksmith-"
+
+// Ubicloud registers each runner just in time as a self-hosted runner too, so
+// `runner.environment` cannot tell it from our own boxes either.
+const UBICLOUD_RUNNER_PREFIX = "ubicloud-"
 
 const GITHUB_HOSTED_RUNNER_PATTERN = "(ubuntu|macos|windows)-[A-Za-z0-9.-]+"
 
@@ -93,14 +97,16 @@ fn ladder_inputs(expression: string) -> list<string> {
   return found.unique().sorted()
 }
 
-/** True when this job's `runs-on` can select a Blacksmith runner. */
+/** True when this job's `runs-on` can select vendor capacity that reports self-hosted. */
 fn blacksmith_capable(job: dict) -> bool {
-  if contains(to_string(job["runs-on"] ?? ""), BLACKSMITH_RUNNER_PREFIX) {
-    return true
-  }
-  for row in job?.strategy?.matrix?.include ?? [] {
-    if contains(to_string(row?.runner ?? ""), BLACKSMITH_RUNNER_PREFIX) {
+  for prefix in [BLACKSMITH_RUNNER_PREFIX, UBICLOUD_RUNNER_PREFIX] {
+    if contains(to_string(job["runs-on"] ?? ""), prefix) {
       return true
+    }
+    for row in job?.strategy?.matrix?.include ?? [] {
+      if contains(to_string(row?.runner ?? ""), prefix) {
+        return true
+      }
     }
   }
   return false
@@ -118,6 +124,9 @@ fn runner_tiers(job: dict) -> list<string> {
   }
   if contains(runners, BLACKSMITH_RUNNER_PREFIX) {
     tiers = tiers + ["blacksmith"]
+  }
+  if contains(runners, UBICLOUD_RUNNER_PREFIX) {
+    tiers = tiers + ["ubicloud"]
   }
   if regex_match(GITHUB_HOSTED_RUNNER_PATTERN, runners) != nil {
     tiers = tiers + ["github-hosted"]
