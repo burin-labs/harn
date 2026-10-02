@@ -7,7 +7,8 @@ description: >
   fingerprints, the Harn version, the effective config and the filesystem
   probes the check made, so a restored entry from an older commit can only
   miss, never answer for different inputs. Pair with
-  ./.github/actions/harn-check-cache-save on main.
+  ./.github/actions/harn-check-cache-save on main; the registered writer is
+  .github/workflows/harn-check-cache-refresh.yml.
 
   Main deliberately starts cold. Nothing in the cache evicts, so a writer that
   restored first would carry every superseded entry forward forever; a cold
