@@ -187,10 +187,8 @@ impl ConcurrentSessionControls {
         let Some(rearm) = BudgetRearm::parse(msg) else {
             return false;
         };
-        let session_id = msg
-            .get("params")
-            .and_then(|params| params.get("sessionId"))
-            .and_then(serde_json::Value::as_str);
+        let session_field = msg.get("params").and_then(|params| params.get("sessionId"));
+        let session_id = session_field.and_then(serde_json::Value::as_str);
         let control = session_id.and_then(|session_id| {
             self.sessions
                 .lock()
@@ -215,7 +213,7 @@ impl ConcurrentSessionControls {
                 }
                 spend.llm_tokens = rearm.llm_tokens;
             }
-        } else if session_id.is_none() {
+        } else if session_field.is_none() {
             rearm.apply_live();
         }
         true
@@ -1012,6 +1010,11 @@ mod budget_rearm_tests {
         assert!(controls.apply_budget_rearm(&set_budget_frame(json!({
             "sessionId": "missing", "llm_cost_usd": 9.0, "llm_tokens": 90
         }))));
+        for invalid_id in [json!(null), json!(42), json!({"id": "target"})] {
+            assert!(controls.apply_budget_rearm(&set_budget_frame(json!({
+                "sessionId": invalid_id, "llm_cost_usd": 9.0, "llm_tokens": 90
+            }))));
+        }
         assert!(controls.apply_budget_rearm(&set_budget_frame(json!({
             "sessionId": "target", "llm_cost_usd": 1.0, "llm_tokens": 10
         }))));
