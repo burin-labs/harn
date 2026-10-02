@@ -44,10 +44,19 @@ pub enum ProcessEnvironmentBoundary {
     TrustedSetup,
 }
 
-/// Linux dynamic-loader controls are one environment namespace. Their effect
-/// precedes a trusted executable's entry point, including diagnostic exits.
+// The ELF loader namespace and GNU libc's tunable frontends. Glibc reads
+// GLIBC_TUNABLES and the legacy MALLOC_* aliases in elf/dl-tunables.c during
+// loader initialization, before a trusted executable reaches its entry point.
+const TRUSTED_SETUP_CONTROL_PREFIXES: &[&[u8]] = &[b"LD_", b"MALLOC_"];
+const TRUSTED_SETUP_CONTROL_NAMES: &[&[u8]] = &[b"GLIBC_TUNABLES"];
+
+/// Loader and runtime-library controls that precede trusted setup.
 pub fn is_trusted_setup_control(name: &OsStr) -> bool {
-    name.as_encoded_bytes().starts_with(b"LD_")
+    let name = name.as_encoded_bytes();
+    TRUSTED_SETUP_CONTROL_PREFIXES
+        .iter()
+        .any(|prefix| name.starts_with(prefix))
+        || TRUSTED_SETUP_CONTROL_NAMES.contains(&name)
 }
 
 /// Validate the effective launch environment without changing payload grants.
@@ -425,55 +434,76 @@ mod tests {
 
     #[test]
     fn trusted_setup_validates_inherited_and_explicit_loader_controls() {
-        let inherited = vec![(OsString::from("LD_BIND_NOW"), OsString::from("1"))];
-        let explicit = vec![(
-            OsString::from("LD_TRACE_LOADED_OBJECTS"),
-            Some(OsString::from("1")),
-        )];
-        for (parent, overlay, expected) in [
-            (inherited.clone(), vec![], "LD_BIND_NOW"),
-            (vec![], explicit.clone(), "LD_TRACE_LOADED_OBJECTS"),
+        for name in [
+            "LD_BIND_NOW",
+            "LD_TRACE_LOADED_OBJECTS",
+            "GLIBC_TUNABLES",
+            "MALLOC_CHECK_",
+            "MALLOC_TOP_PAD_",
+            "MALLOC_PERTURB_",
+            "MALLOC_MMAP_THRESHOLD_",
+            "MALLOC_TRIM_THRESHOLD_",
+            "MALLOC_MMAP_MAX_",
+            "MALLOC_ARENA_MAX",
+            "MALLOC_ARENA_TEST",
         ] {
+            let inherited = vec![(OsString::from(name), OsString::from("1"))];
+            let explicit = vec![(OsString::from(name), Some(OsString::from("1")))];
+            for (parent, overlay) in [(inherited.clone(), vec![]), (vec![], explicit.clone())] {
+                assert_eq!(
+                    validate_process_environment(
+                        ProcessEnvironmentBoundary::TrustedSetup,
+                        parent,
+                        overlay
+                    ),
+                    Err(EnvironmentPolicyError::UnsafeTrustedSetupVariable {
+                        variable: name.into()
+                    })
+                );
+            }
+            // Payload grants retain their meaning when confinement precedes exec.
             assert_eq!(
                 validate_process_environment(
-                    ProcessEnvironmentBoundary::TrustedSetup,
-                    parent,
-                    overlay
+                    ProcessEnvironmentBoundary::Payload,
+                    inherited,
+                    explicit
                 ),
-                Err(EnvironmentPolicyError::UnsafeTrustedSetupVariable {
-                    variable: expected.into()
-                })
+                Ok(())
             );
         }
-        // Payload grants retain their meaning when confinement precedes exec.
-        assert_eq!(
-            validate_process_environment(ProcessEnvironmentBoundary::Payload, inherited, explicit),
-            Ok(())
-        );
     }
 
     #[test]
     fn trusted_setup_honors_clear_removal_and_empty_override() {
-        let inherited = vec![(OsString::from("LD_BIND_NOW"), OsString::from("1"))];
-        for replacement in [None, Some(OsString::new())] {
-            assert_eq!(
-                validate_process_environment(
-                    ProcessEnvironmentBoundary::TrustedSetup,
-                    inherited.clone(),
-                    [(OsString::from("LD_BIND_NOW"), replacement)]
-                ),
-                Ok(())
-            );
+        for name in ["LD_BIND_NOW", "GLIBC_TUNABLES", "MALLOC_TRIM_THRESHOLD_"] {
+            let inherited = vec![(OsString::from(name), OsString::from("1"))];
+            for replacement in [None, Some(OsString::new())] {
+                assert_eq!(
+                    validate_process_environment(
+                        ProcessEnvironmentBoundary::TrustedSetup,
+                        inherited.clone(),
+                        [(OsString::from(name), replacement)]
+                    ),
+                    Ok(())
+                );
+            }
         }
         // env_clear supplies no inherited entries. Ordinary grants survive.
         assert_eq!(
             validate_process_environment(
                 ProcessEnvironmentBoundary::TrustedSetup,
                 [],
-                [(
-                    OsString::from("ORDINARY_PROBE"),
-                    Some(OsString::from("admitted"))
-                )]
+                [
+                    (
+                        OsString::from("ORDINARY_PROBE"),
+                        Some(OsString::from("admitted"))
+                    ),
+                    (OsString::from("LD"), Some(OsString::from("ld"))),
+                    (
+                        OsString::from("GLIBC_TUNABLES_ORDINARY"),
+                        Some(OsString::from("admitted"))
+                    )
+                ]
             ),
             Ok(())
         );

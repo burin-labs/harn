@@ -647,7 +647,8 @@ runtime path; embedders with device grants must supply
 payload directly after bubblewrap installs confinement and need no helper.
 
 Linux launches that need a trusted namespace helper or bubblewrap refuse
-nonempty `LD_*` loader controls after composing the session environment,
+nonempty loader controls (`LD_*`, `GLIBC_TUNABLES`, and legacy `MALLOC_*`
+aliases) after composing the session environment,
 caller overrides, removals, and `env_clear`. Those controls can execute before
 the helper installs confinement. Ordinary payload environment grants are
 preserved; a direct Landlock-confined payload may still configure its loader.

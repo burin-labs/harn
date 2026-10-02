@@ -214,6 +214,16 @@ fn main(harness: Harness) {{
 
 #[test]
 fn canonical_trusted_setup_refuses_loader_controls_before_payload() {
+    for (name, value) in [
+        ("LD_TRACE_LOADED_OBJECTS", "1"),
+        ("GLIBC_TUNABLES", "glibc.malloc.trim_threshold=131072"),
+        ("MALLOC_TRIM_THRESHOLD_", "131072"),
+    ] {
+        trusted_setup_refuses_control(name, value);
+    }
+}
+
+fn trusted_setup_refuses_control(name: &str, value: &str) {
     let root = tempfile::tempdir().unwrap();
     let source = r#"
 fn main(harness: Harness) {
@@ -253,18 +263,20 @@ fn main(harness: Harness) {
   assert_eq(asynchronous.stdout, "asynchronous")
   harness.stdio.println("loader-control-refused-ordinary-environment-reached")
 }
-"#;
+"#
+    .replace("LD_TRACE_LOADED_OBJECTS", name)
+    .replace("\"1\"", &serde_json::to_string(value).unwrap());
     let mut command = harn_e2e_command();
     command.current_dir(root.path()).args([
         "run",
         "--standalone",
         "--sandbox-allow-process-self-introspection",
         "-e",
-        source,
+        &source,
     ]);
     deny_landlock(&mut command, false);
     let output = command.output().unwrap();
-    assert!(output.status.success(), "{output:?}");
+    assert!(output.status.success(), "{name}: {output:?}");
     if output.stdout == b"bubblewrap-unavailable\n" {
         eprintln!("NOT EXERCISED: functional bubblewrap namespaces unavailable");
         assert_ne!(std::env::var("BWRAP_REQUIRE_TESTS").as_deref(), Ok("1"));
@@ -279,6 +291,16 @@ fn main(harness: Harness) {
 
 #[test]
 fn canonical_trusted_setup_composes_inherited_removal_and_clear() {
+    for (name, value) in [
+        ("LD_BIND_NOW", "1"),
+        ("GLIBC_TUNABLES", "glibc.malloc.trim_threshold=131072"),
+        ("MALLOC_TRIM_THRESHOLD_", "131072"),
+    ] {
+        trusted_setup_composes_control(name, value);
+    }
+}
+
+fn trusted_setup_composes_control(name: &str, value: &str) {
     let root = tempfile::tempdir().unwrap();
     let source = r#"
 fn main(harness: Harness) {
@@ -319,21 +341,19 @@ fn main(harness: Harness) {
   assert_eq(asynchronous_cleared.stdout, "cleared")
   harness.stdio.println("inherited-refused-removal-and-clear-reached")
 }
-"#;
+"#
+    .replace("LD_BIND_NOW", name);
     let mut command = harn_e2e_command();
-    command
-        .current_dir(root.path())
-        .env("LD_BIND_NOW", "1")
-        .args([
-            "run",
-            "--standalone",
-            "--sandbox-allow-process-self-introspection",
-            "-e",
-            source,
-        ]);
+    command.current_dir(root.path()).env(name, value).args([
+        "run",
+        "--standalone",
+        "--sandbox-allow-process-self-introspection",
+        "-e",
+        &source,
+    ]);
     deny_landlock(&mut command, false);
     let output = command.output().unwrap();
-    assert!(output.status.success(), "{output:?}");
+    assert!(output.status.success(), "{name}: {output:?}");
     if output.stdout == b"bubblewrap-unavailable\n" {
         eprintln!("NOT EXERCISED: functional bubblewrap namespaces unavailable");
         assert_ne!(std::env::var("BWRAP_REQUIRE_TESTS").as_deref(), Ok("1"));
@@ -356,16 +376,16 @@ fn main(harness: Harness) {
     harness.stdio.println("landlock-unavailable")
     return
   }
-  const synchronous = harness.tools.run_command({argv: ["/usr/bin/sh", "-c", "test \"$LD_BIND_NOW\" = 1 && printf synchronous"], env: {LD_BIND_NOW: "1"}})
+  const synchronous = harness.tools.run_command({argv: ["/usr/bin/sh", "-c", "test \"$LD_BIND_NOW\" = 1 && test \"$GLIBC_TUNABLES\" = glibc.malloc.trim_threshold=131072 && test \"$MALLOC_TRIM_THRESHOLD_\" = 131072 && printf synchronous"], env: {LD_BIND_NOW: "1", GLIBC_TUNABLES: "glibc.malloc.trim_threshold=131072", MALLOC_TRIM_THRESHOLD_: "131072"}})
   assert_eq(synchronous.exit_code, 0)
   assert_eq(synchronous.stdout, "synchronous")
-  const asynchronous = harness.process.run({program: "/usr/bin/sh", args: ["-c", "test \"$LD_BIND_NOW\" = 1 && printf asynchronous"], env: {LD_BIND_NOW: "1"}})
+  const asynchronous = harness.process.run({program: "/usr/bin/sh", args: ["-c", "test \"$LD_BIND_NOW\" = 1 && test \"$GLIBC_TUNABLES\" = glibc.malloc.trim_threshold=131072 && test \"$MALLOC_TRIM_THRESHOLD_\" = 131072 && printf asynchronous"], env: {LD_BIND_NOW: "1", GLIBC_TUNABLES: "glibc.malloc.trim_threshold=131072", MALLOC_TRIM_THRESHOLD_: "131072"}})
   assert_eq(asynchronous.exit_code, 0)
   assert_eq(asynchronous.stdout, "asynchronous")
-  const inherited_synchronous = harness.tools.run_command({argv: ["/usr/bin/sh", "-c", "test \"$LD_BIND_NOW\" = 1 && printf inherited-synchronous"], env_mode: "patch"})
+  const inherited_synchronous = harness.tools.run_command({argv: ["/usr/bin/sh", "-c", "test \"$LD_BIND_NOW\" = 1 && test \"$GLIBC_TUNABLES\" = glibc.malloc.trim_threshold=131072 && test \"$MALLOC_TRIM_THRESHOLD_\" = 131072 && printf inherited-synchronous"], env_mode: "patch"})
   assert_eq(inherited_synchronous.exit_code, 0)
   assert_eq(inherited_synchronous.stdout, "inherited-synchronous")
-  const inherited_asynchronous = harness.process.exec("/usr/bin/sh", "-c", "test \"$LD_BIND_NOW\" = 1 && printf inherited-asynchronous")
+  const inherited_asynchronous = harness.process.exec("/usr/bin/sh", "-c", "test \"$LD_BIND_NOW\" = 1 && test \"$GLIBC_TUNABLES\" = glibc.malloc.trim_threshold=131072 && test \"$MALLOC_TRIM_THRESHOLD_\" = 131072 && printf inherited-asynchronous")
   assert_eq(inherited_asynchronous.exit_code, 0)
   assert_eq(inherited_asynchronous.stdout, "inherited-asynchronous")
   harness.stdio.println("direct-confinement-payload-environment-reached")
@@ -374,6 +394,8 @@ fn main(harness: Harness) {
     let output = harn_e2e_command()
         .current_dir(root.path())
         .env("LD_BIND_NOW", "1")
+        .env("GLIBC_TUNABLES", "glibc.malloc.trim_threshold=131072")
+        .env("MALLOC_TRIM_THRESHOLD_", "131072")
         .args([
             "run",
             "--standalone",
