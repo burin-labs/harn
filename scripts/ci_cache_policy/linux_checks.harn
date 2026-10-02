@@ -210,16 +210,14 @@ pub fn cli_producer_hosted_ceiling_minutes() -> int {
 }
 
 /**
- * A reserved runner is an owned box and carries the owned ceiling. The
- * overflow rung is GitHub's runner and carries the paid one, like the two
- * rungs after it.
+ * A reserved runner is an owned box and carries the owned ceiling. The two
+ * paid rungs after it carry the paid one.
  */
 pub fn cli_producer_timeout_expression() -> string {
   const paid = to_string(hosted_ceiling_minutes(CLI_PRODUCER_STEP_BUDGETS))
   return cli_producer_rung_expression(
     {
       reserved: to_string(owned_ceiling_minutes(CLI_PRODUCER_STEP_BUDGETS)),
-      overflow: paid,
       vendor: paid,
       hosted: paid,
     },
@@ -249,7 +247,7 @@ fn producer_job_timeout_expression(job_name: string, budgets: list<StepBudget>) 
 
 fn producer_job_ladder(job_name: string) -> string {
   if job_name == "rust-cli" {
-    return " the reserved ${RESERVED_CLI_PRODUCER_LABEL} runners on same-repository pull requests and merge groups, ${PRODUCER_HOSTED_LINUX_RUNNER} when they are all busy,"
+    return " the reserved ${RESERVED_CLI_PRODUCER_LABEL} runners on same-repository pull requests and merge groups,"
   }
   if producer_uses_owned_pool(job_name) {
     return " the owned ${SELFHOSTED_LINUX_BIG_POOL} pool on same-repository pull requests,"

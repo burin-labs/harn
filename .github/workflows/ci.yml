@@ -967,11 +967,12 @@ jobs:
           CAPACITY_VENDOR_RUNNER: ubicloud-standard-8
           CAPACITY_HOSTED_RUNNER: ubuntu-8core
       # The shared CLI producer's own decision, over the runners reserved for
-      # it. An idle reserved runner takes the build. When every reserved
-      # runner is busy it overflows to GitHub's 8-core runner rather than the
-      # vendor rung, whose quota every repository in the organization shares.
-      # With no reserved runner online, or an unreadable census, the producer
-      # keeps the ladder it had.
+      # it. An idle reserved runner takes the build. Every other outcome (all
+      # reserved runners busy, none online, an unreadable census) keeps the
+      # paid ladder it had: Ubicloud, then GitHub's 8-core runner only when
+      # HARN_CI_PAID_LINUX_PROVIDER names it. The decision line is also a
+      # run-page annotation, so the share of builds that left the reserved
+      # runners is countable.
       - name: Decide where the shared CLI producer lands
         id: cli-decision
         run: bash scripts/ci/runner_capacity.sh
@@ -979,7 +980,6 @@ jobs:
           CAPACITY_LABEL: CLI_PRODUCER_CAPACITY
           CAPACITY_POOL: linux_probe
           CAPACITY_ROUTED_EVENT: pull_request merge_group
-          CAPACITY_BUSY_ROUTE: overflow
           EVENT_NAME: ${{ github.event_name }}
           SELFHOSTED_DISABLED: ${{ needs.runner-availability.outputs.selfhosted_disabled }}
           RUNNER_CAPACITY: ${{ needs.runner-availability.outputs.capacity }}
@@ -1015,24 +1015,23 @@ jobs:
     #
     # Its own runners instead: `harn-ci-producer` runners serve this job and
     # nothing else, with the host's sccache. The capacity step sends the build
-    # there when one is idle, and to GitHub's 8-core runner when all are busy.
-    # Not to Ubicloud then: every repository in the organization draws on one
-    # Ubicloud vCPU quota, and on 2026-10-02 this build sat 37 minutes in that
-    # queue while all ten proof lanes gave up waiting (run 37042288569). With
-    # no reserved runner online, or on fork pull requests, the ladder is the
-    # one it had: Ubicloud, then GitHub's runner.
+    # there when one is idle. When all are busy, none is online, or on fork
+    # pull requests and main pushes, the ladder is the one it had: Ubicloud,
+    # then GitHub's runner when the paid-provider switch names it. On
+    # 2026-10-02 this build sat 37 minutes in the Ubicloud queue, which every
+    # repository in the organization shares (run 37042288569). GitHub's
+    # runner bills about three times Ubicloud's rate, so it is not the
+    # default for a busy reserved pool: the capacity annotation counts how
+    # often the reserved pool was full, and the waiters name a producer that
+    # never left the queue, so a recurrence is measured before it is paid for.
     runs-on: >-
       ${{ (needs.rust-producer-capacity.outputs.cli_route == 'owned'
         && fromJSON('["self-hosted", "Linux", "X64", "harn-ci-producer"]'))
-        || (needs.rust-producer-capacity.outputs.cli_route == 'overflow'
-        && 'ubuntu-8core')
         || (vars.HARN_CI_PAID_LINUX_PROVIDER != 'github'
         && 'ubicloud-standard-8')
         || 'ubuntu-8core' }}
     timeout-minutes: >-
       ${{ (needs.rust-producer-capacity.outputs.cli_route == 'owned'
-        && 37)
-        || (needs.rust-producer-capacity.outputs.cli_route == 'overflow'
         && 37)
         || (vars.HARN_CI_PAID_LINUX_PROVIDER != 'github'
         && 37)
@@ -1053,8 +1052,6 @@ jobs:
       HARN_RUNNER_TIER: >-
         ${{ (needs.rust-producer-capacity.outputs.cli_route == 'owned'
           && 'self-hosted')
-          || (needs.rust-producer-capacity.outputs.cli_route == 'overflow'
-          && 'github-hosted')
           || (vars.HARN_CI_PAID_LINUX_PROVIDER != 'github'
           && 'ubicloud')
           || 'github-hosted' }}

@@ -1969,23 +1969,21 @@ fn cli_route_condition(route: string) -> string {
 }
 
 /**
- * The shared CLI producer's four rungs, for `runs-on`, `timeout-minutes` and
- * the tier mirror alike: an idle reserved runner; GitHub's runner when every
- * reserved runner is busy; then the ladder every other paid lane has. The
- * capacity step names `owned` or `overflow` only on events it routes, so
- * every other event, and a census it cannot read, keeps the last two rungs.
+ * The shared CLI producer's three rungs, for `runs-on`, `timeout-minutes` and
+ * the tier mirror alike: an idle reserved runner, then the ladder every other
+ * paid lane has. The capacity step names `owned` only on events it routes, so
+ * every other event, a fully busy reserved pool, and a census it cannot read
+ * all take the paid ladder: Ubicloud first, at about a third of GitHub's
+ * 8-core rate, and GitHub's runner only when the paid-provider switch names it.
  */
-pub type CliProducerRungs = {reserved: string, overflow: string, vendor: string, hosted: string}
+pub type CliProducerRungs = {reserved: string, vendor: string, hosted: string}
 
 pub fn cli_producer_rung_expression(rungs: CliProducerRungs) -> string {
-  const {reserved, overflow, vendor, hosted} = rungs
+  const {reserved, vendor, hosted} = rungs
   return "$"
     + "{{ "
     + cli_route_condition("owned")
     + "\n  && ${reserved})"
-    + "\n  || "
-    + cli_route_condition("overflow")
-    + "\n  && ${overflow})"
     + "\n  || "
     + vendor_producer_condition()
     + "\n  && ${vendor})"
@@ -1996,7 +1994,6 @@ pub fn cli_producer_runner_expression() -> string {
   return cli_producer_rung_expression(
     {
       reserved: "fromJSON('${RESERVED_CLI_PRODUCER_RUNNER}')",
-      overflow: "'${PRODUCER_HOSTED_LINUX_RUNNER}'",
       vendor: "'${PRODUCER_VENDOR_LINUX_RUNNER}'",
       hosted: "'${PRODUCER_HOSTED_LINUX_RUNNER}'",
     },
@@ -2007,7 +2004,6 @@ pub fn cli_producer_tier_expression() -> string {
   return cli_producer_rung_expression(
     {
       reserved: "'${SELFHOSTED_RUNNER_TIER}'",
-      overflow: "'${HOSTED_RUNNER_TIER}'",
       vendor: "'${UBICLOUD_RUNNER_TIER}'",
       hosted: "'${HOSTED_RUNNER_TIER}'",
     },
@@ -2064,13 +2060,13 @@ pub fn cli_producer_reservation_errors(workflow: dict) -> list<string> {
   if step == nil
     || trim(to_string(step?.run ?? "")) != "bash scripts/ci/runner_capacity.sh"
     || trim(to_string(env?.CAPACITY_POOL ?? "")) != RESERVED_CLI_PRODUCER_POOL
-    || trim(to_string(env?.CAPACITY_BUSY_ROUTE ?? "")) != "overflow"
     || !routed.contains("pull_request")
     || !routed.contains("merge_group")
+    || trim(to_string(env?.CAPACITY_VENDOR_RUNNER ?? "")) != PRODUCER_VENDOR_LINUX_RUNNER
     || trim(to_string(env?.CAPACITY_HOSTED_RUNNER ?? "")) != PRODUCER_HOSTED_LINUX_RUNNER {
     errors = errors
       + [
-        "ci.yml:rust-producer-capacity step ${CLI_CAPACITY_DECISION_STEP} must route the ${RESERVED_CLI_PRODUCER_POOL} pool on pull requests and merge groups and overflow a busy pool to ${PRODUCER_HOSTED_LINUX_RUNNER}",
+        "ci.yml:rust-producer-capacity step ${CLI_CAPACITY_DECISION_STEP} must route the ${RESERVED_CLI_PRODUCER_POOL} pool on pull requests and merge groups and name the ${PRODUCER_VENDOR_LINUX_RUNNER} then ${PRODUCER_HOSTED_LINUX_RUNNER} ladder a busy pool takes",
       ]
   }
   return errors

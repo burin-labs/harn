@@ -64,7 +64,7 @@ const CLI_RESERVATION_CAPACITY = {
       env: {
         CAPACITY_POOL: "linux_probe",
         CAPACITY_ROUTED_EVENT: "pull_request merge_group",
-        CAPACITY_BUSY_ROUTE: "overflow",
+        CAPACITY_VENDOR_RUNNER: "ubicloud-standard-8",
         CAPACITY_HOSTED_RUNNER: "ubuntu-8core",
       },
     },
@@ -1629,11 +1629,11 @@ pipeline test_rejects_a_producer_ladder_off_its_rungs_or_ceilings(harness: Harne
   )
   assert(errors.contains("ci.yml:rust-check-inputs must mirror every one of its runner tiers"))
   // The shared CLI must not wait on the owned pool's one-job compile budget,
-  // and must not lose its reserved runners or its overflow: both the shared
-  // owned rung and the old vendor-first ladder are refused.
+  // and must not lose its reserved runners: both the shared owned rung and the
+  // old vendor-only ladder are refused.
   const cli = valid.jobs["rust-cli"]
   const cli_ladder_error =
-    "ci.yml:rust-cli must ladder the reserved harn-ci-producer runners on same-repository pull requests and merge groups, ubuntu-8core when they are all busy, ubicloud-standard-8, then ubuntu-8core"
+    "ci.yml:rust-cli must ladder the reserved harn-ci-producer runners on same-repository pull requests and merge groups, ubicloud-standard-8, then ubuntu-8core"
   for runs_on in [producer_runner_expression(true), producer_runner_expression(false)] {
     const regressed = {...valid, jobs: {...valid.jobs, "rust-cli": {...cli, "runs-on": runs_on}}}
     assert(ci_linux_lane_policy_errors(regressed).contains(cli_ladder_error))
@@ -1998,7 +1998,15 @@ pipeline test_cli_producer_reservation_agrees_across_census_capacity_and_runs_on
   const valid = workflow()
   assert_eq(cli_producer_reservation_errors(valid), [])
   assert(contains(cli_producer_runner_expression(), "\"harn-ci-producer\""))
-  assert(contains(cli_producer_runner_expression(), "cli_route == 'overflow'\n  && 'ubuntu-8core'"))
+  // A busy reserved pool takes the paid ladder, Ubicloud first; there is no
+  // rung that sends it straight to GitHub's 8-core runner.
+  assert(!contains(cli_producer_runner_expression(), "overflow"))
+  assert(
+    contains(
+      cli_producer_runner_expression(),
+      "\"harn-ci-producer\"]'))\n  || (vars.HARN_CI_PAID_LINUX_PROVIDER != 'github'\n  && 'ubicloud-standard-8')",
+    ),
+  )
   assert(contains(cli_producer_tier_expression(), "cli_route == 'owned'\n  && 'self-hosted'"))
   const census = valid.jobs["runner-availability"]
   const capacity = valid.jobs["rust-producer-capacity"]
@@ -2045,21 +2053,23 @@ pipeline test_cli_producer_reservation_agrees_across_census_capacity_and_runs_on
       error: "ci.yml:rust-producer-capacity must publish cli_route from its cli-decision step",
     },
     {
-      workflow: with_capacity_step({...step, env: {...step.env, CAPACITY_BUSY_ROUTE: "hosted"}}),
+      workflow: with_capacity_step(
+        {...step, env: {...step.env, CAPACITY_VENDOR_RUNNER: "ubuntu-8core"}},
+      ),
       error:
-        "ci.yml:rust-producer-capacity step cli-decision must route the linux_probe pool on pull requests and merge groups and overflow a busy pool to ubuntu-8core",
+        "ci.yml:rust-producer-capacity step cli-decision must route the linux_probe pool on pull requests and merge groups and name the ubicloud-standard-8 then ubuntu-8core ladder a busy pool takes",
     },
     {
       workflow: with_capacity_step(
         {...step, env: {...step.env, CAPACITY_ROUTED_EVENT: "pull_request"}},
       ),
       error:
-        "ci.yml:rust-producer-capacity step cli-decision must route the linux_probe pool on pull requests and merge groups and overflow a busy pool to ubuntu-8core",
+        "ci.yml:rust-producer-capacity step cli-decision must route the linux_probe pool on pull requests and merge groups and name the ubicloud-standard-8 then ubuntu-8core ladder a busy pool takes",
     },
     {
       workflow: with_capacity_step({...step, env: {...step.env, CAPACITY_POOL: "linux_big"}}),
       error:
-        "ci.yml:rust-producer-capacity step cli-decision must route the linux_probe pool on pull requests and merge groups and overflow a busy pool to ubuntu-8core",
+        "ci.yml:rust-producer-capacity step cli-decision must route the linux_probe pool on pull requests and merge groups and name the ubicloud-standard-8 then ubuntu-8core ladder a busy pool takes",
     },
   ]
   for case in cases {
