@@ -57,6 +57,9 @@ struct OAuthConnectRequest {
     scopes: Option<String>,
     redirect_uri: String,
     token_auth_method: Option<String>,
+    /// Manifest-declared authorization query parameters; merged over the
+    /// defaults for a known authorization server at URL build time.
+    authorization_params: std::collections::BTreeMap<String, String>,
     no_open: bool,
     json: bool,
 }

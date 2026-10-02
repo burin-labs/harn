@@ -1072,6 +1072,12 @@ pub struct ProviderOAuthManifest {
     pub client_secret: Option<String>,
     #[serde(default, alias = "token_auth_method", alias = "token-auth-method")]
     pub token_endpoint_auth_method: Option<String>,
+    /// Extra query parameters for the authorization request, such as
+    /// `access_type = "offline"`. They override the defaults `harn connect`
+    /// applies for a known authorization server, and may not replace a
+    /// parameter the OAuth flow itself owns (`client_id`, `state`, ...).
+    #[serde(default, alias = "authorization-params")]
+    pub authorization_params: std::collections::BTreeMap<String, String>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
