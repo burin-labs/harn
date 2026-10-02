@@ -199,12 +199,13 @@ fn text_message(message: &serde_json::Value, anthropic: bool) -> bool {
         fields.keys().all(|key| {
             matches!(
                 key.as_str(),
-                "role" | "content" | "name" | "tool_calls" | "tool_call_id"
+                "role" | "content" | "name" | "tool_calls" | "tool_call_id" | "_harn"
             ) || (anthropic && key == "cache_control")
         })
     }) {
         return false;
     }
+    // `_harn` is durable audit metadata, excluded by provider wire adapters.
     // Function arguments/results are text; image/audio/file payloads require a
     // separate pricing contract. Reject even unknown content part kinds.
     match message.get("content") {

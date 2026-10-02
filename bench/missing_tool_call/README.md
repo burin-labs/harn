@@ -56,3 +56,51 @@ Pass `unprojected` as a fourth script argument to exercise that publication
 failure and verify the new event projection on the same path.
 This small, authored corpus cannot establish performance on arbitrary tools,
 ambiguous intent, long transcripts, or different model revisions.
+
+## Measured result, 2026-10-02
+
+The sixteen texts were run twice per backend on cattrick. Every counted run
+completed, reached the real classifier, published its verdict, and made exactly
+one physical classifier request. Labels never entered the evaluator's state.
+The baseline classifier and prompt in release v0.10.153 match main at
+`83f4889983bfc46104c74e9ff34dfeb3580b359f`. Candidate source is
+`28d50683b40f46996859709947285df0317b2118`.
+
+| Classifier | Correct intent | Correct recovery and tool | Ambiguous | Median classifier ms | Cost, 32 runs |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Baseline structured | 30/32 | 30/32 | 2 | 1,074.5 | $0.02098425 |
+| Shared structured | 30/32 | 30/32 | 3 | 2,098 | $0.02738100 |
+| Shared native | 32/32 | 32/32 | 1 | 189 | $0.00081707 |
+
+Classifier duration uses the baseline's profiled structured-call builtin and
+the candidates' persisted evaluation receipt. Total run medians were 1,423,
+4,765.5, and 2,771.5 ms respectively. Those totals compare an optimized baseline
+with a debug candidate and include CLI/import work; they do not establish an
+end-to-end speed improvement. Native's measured classifier cost was lower;
+the structured replacement's cost and measured duration increased.
+
+Both structured routes reported zero cache-read tokens in all 32 calls. The
+native endpoint did not report cache categories. Adapter-default zero counters
+are not evidence of native cache reuse. Native and structured intent answers
+agreed on 30/32 paired trials, and their action labels agreed on 26/32.
+
+The baseline missed the immediate patch commitment in both repeats. The shared
+structured classifier incorrectly treated advice to read the README as its own
+tool intent in both repeats. Equal aggregate accuracy therefore does not prove
+behavioral equivalence or certify the replacement's quality. Native's one
+ambiguous verdict was a permission question and caused no false recovery.
+The corpus has only sixteen distinct texts; repeats are not independent new
+examples. These observations are development evidence, not deployment accuracy.
+
+[`measurement.json`](measurement.json) preserves all 96 measured rows, costs,
+attempt counts, confidence, action, timing, and served-model evidence. The
+structured receipts report `gpt-5.4-mini-2026-03-17`; native reports
+`typesafe/jev-1.13-20260917`. The baseline's served revision is unavailable.
+[`calibration-rows.json`](calibration-rows.json) contains 32 intent labels and
+16 positive tool-choice labels per candidate backend, charging cost only once
+per evaluation. [`calibration-report.json`](calibration-report.json) is the
+owning `calibration_report` result over those 96 rows. Intent confidence error
+was 0.138126 for structured and 0.092813 for native; tool-choice error was
+0.0125 and zero. At the existing 0.65 threshold, intent coverage was 29/32 and
+31/32. Neither report can recommend a threshold at 5% target error because its
+calibration split is too small. The policy threshold remains unchanged.

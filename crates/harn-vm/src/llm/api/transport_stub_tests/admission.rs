@@ -24,11 +24,15 @@ fn options(ceiling: f64, stream: bool) -> super::super::LlmCallOptions {
 
 fn stub(count: Arc<AtomicUsize>, stream_response: bool, empty: bool) -> LlmStub {
     spawn_llm_stub_many("conservative admission", 3, move |_, stream| {
-        use std::io::{Read, Write};
+        use std::io::Write;
         count.fetch_add(1, Ordering::SeqCst);
-        let mut bytes = [0u8; 16_384];
-        let n = stream.read(&mut bytes).unwrap();
-        assert!(String::from_utf8_lossy(&bytes[..n]).starts_with("POST /v1/chat/completions "));
+        let (request, body) = super::ollama_openai_compat::read_http_request(stream);
+        assert!(request.starts_with("POST /v1/chat/completions "));
+        assert!(body["messages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|message| message.get("_harn").is_none()));
         let text = if empty { "" } else { "hello" };
         let usage =
             serde_json::json!({"prompt_tokens": 3, "completion_tokens": 1, "total_tokens": 4});
@@ -88,8 +92,15 @@ fn conservative_admission_denies_before_http_and_settles_real_usage() {
         assert!(error.to_string().contains("conservative"), "{error}");
         assert_eq!(count.load(Ordering::SeqCst), 0);
         swap_scope(AdmissionScope::default());
-        for _ in 0..2 {
-            let result = vm_call_llm_full(&options(0.6, false)).await.unwrap();
+        for turn in 0..2 {
+            let mut opts = options(0.6, false);
+            if turn == 1 {
+                opts.messages.push(serde_json::json!({
+                    "role": "assistant", "content": "hello",
+                    "_harn": {"kind": "assistant", "tool_calls": []}
+                }));
+            }
+            let result = vm_call_llm_full(&opts).await.unwrap();
             assert_eq!(result.text, "hello");
             assert_eq!(result.telemetry.server_prompt_tokens, Some(3));
             assert_eq!(result.telemetry.server_output_tokens, Some(1));
