@@ -11,6 +11,7 @@ use crate::llm::permissions;
 
 use crate::orchestration::{
     PolicyEvaluation, ToolPermissionActivityContext, ToolPermissionActivityRecord,
+    ToolPermissionDecider, ToolPermissionGrantScope, ToolPermissionOutcome,
     ToolPermissionPolicyFacts, ToolPermissionPolicyLayer, ToolPermissionPolicyOutcome,
     ToolPermissionResolution,
 };
@@ -31,7 +32,7 @@ pub(super) fn attribute_reviewer_refusal(
     mut resolution: ToolPermissionResolution,
 ) -> ToolPermissionResolution {
     if crate::orchestration::reviewer_refused(decision) {
-        resolution.decider = crate::orchestration::ToolPermissionDecider::AutoReviewer;
+        resolution.decider = ToolPermissionDecider::AutoReviewer;
     }
     resolution
 }
@@ -44,8 +45,7 @@ pub(super) struct HostPermissionRequest {
     pub policy_decision: serde_json::Value,
     pub request_context: serde_json::Value,
     pub requested_capabilities: Vec<String>,
-    pub tool_descriptor: Option<serde_json::Value>,
-    pub tool_annotations: Option<crate::tool_annotations::ToolAnnotations>,
+    pub tool_context: super::tool_catalog::PermissionToolContext,
 }
 
 pub(super) enum HostPermissionOutcome {
@@ -187,8 +187,8 @@ fn emit_auto_review_granted_activity(
         evaluation,
         ToolPermissionPolicyLayer::RuntimePolicy,
         ToolPermissionResolution::approved(
-            crate::orchestration::ToolPermissionDecider::AutoReviewer,
-            crate::orchestration::ToolPermissionGrantScope::Once,
+            ToolPermissionDecider::AutoReviewer,
+            ToolPermissionGrantScope::Once,
         ),
         Some(ToolPermissionPolicyOutcome::ApprovalRequired),
     );
@@ -278,8 +278,8 @@ pub(super) fn emit_runtime_auto_approved_activity(
         tool_name,
         evaluation,
         ToolPermissionResolution {
-            outcome: crate::orchestration::ToolPermissionOutcome::Approved,
-            decider: crate::orchestration::ToolPermissionDecider::RuntimePolicy,
+            outcome: ToolPermissionOutcome::Approved,
+            decider: ToolPermissionDecider::RuntimePolicy,
             grant_scope: None,
             policy_evaluations: Vec::new(),
         },
@@ -298,8 +298,8 @@ pub(super) fn emit_runtime_denied_activity(
         tool_name,
         evaluation,
         ToolPermissionResolution::terminal(
-            crate::orchestration::ToolPermissionOutcome::Denied,
-            crate::orchestration::ToolPermissionDecider::RuntimePolicy,
+            ToolPermissionOutcome::Denied,
+            ToolPermissionDecider::RuntimePolicy,
         ),
     );
 }
@@ -316,8 +316,8 @@ pub(super) fn emit_runtime_unavailable_activity(
         tool_name,
         evaluation,
         ToolPermissionResolution::terminal(
-            crate::orchestration::ToolPermissionOutcome::Denied,
-            crate::orchestration::ToolPermissionDecider::HostUnavailable,
+            ToolPermissionOutcome::Denied,
+            ToolPermissionDecider::HostUnavailable,
         ),
     );
 }
@@ -340,17 +340,38 @@ pub(super) fn emit_runtime_resolved_activity(
 }
 
 pub(super) async fn request_host_permission(
+    ctx: Option<&crate::vm::AsyncBuiltinCtx>,
     bridge: Option<&Arc<HostBridge>>,
     request: HostPermissionRequest,
 ) -> HostPermissionOutcome {
     let Some(bridge) = bridge else {
         return HostPermissionOutcome::Unavailable;
     };
-    let evidence_refs = crate::llm::permission_preview::capture(
-        request.tool_annotations.as_ref(),
+    let super::tool_catalog::PermissionToolContext {
+        descriptor: tool_descriptor,
+        annotations: tool_annotations,
+        approval_preview,
+    } = request.tool_context;
+    let mut evidence_refs = crate::llm::permission_preview::capture(
+        tool_annotations.as_ref(),
         &request.tool_name,
         &request.tool_args,
     );
+    // The author's preview is evaluated only once a person is actually being
+    // asked. It adds evidence and nothing else: the decision below comes from
+    // the host's answer, and `rawInput` stays the model's arguments.
+    if let Some(closure) = approval_preview.as_ref() {
+        if let Some(preview) = Box::pin(crate::llm::approval_preview::evaluate(
+            ctx,
+            closure,
+            &request.tool_name,
+            &request.tool_args,
+        ))
+        .await
+        {
+            evidence_refs.push(preview.evidence_ref());
+        }
+    }
     let approval_request = crate::stdlib::hitl::approval_request_for_host_permission(
         request.tool_call_id.clone(),
         request.tool_name.clone(),
@@ -362,8 +383,7 @@ pub(super) async fn request_host_permission(
     );
     let approval_request_json =
         serde_json::to_value(&approval_request).unwrap_or(serde_json::Value::Null);
-    let tool_kind = request
-        .tool_annotations
+    let tool_kind = tool_annotations
         .as_ref()
         .map(|annotations| annotations.kind)
         .unwrap_or_default();
@@ -377,7 +397,7 @@ pub(super) async fn request_host_permission(
                 &request.tool_args,
                 approval_request_json,
                 &request.policy_decision,
-                request.tool_descriptor,
+                tool_descriptor,
                 tool_kind,
             ),
         )
@@ -405,8 +425,8 @@ pub(super) async fn request_host_permission(
                 HostPermissionOutcome::Rejected {
                     reason: "cancelled by user".to_string(),
                     resolution: ToolPermissionResolution::terminal(
-                        crate::orchestration::ToolPermissionOutcome::Cancelled,
-                        crate::orchestration::ToolPermissionDecider::Person,
+                        ToolPermissionOutcome::Cancelled,
+                        ToolPermissionDecider::Person,
                     ),
                 }
             } else {
@@ -442,8 +462,7 @@ mod tests {
             policy_decision: serde_json::Value::Null,
             request_context: serde_json::Value::Null,
             requested_capabilities: Vec::new(),
-            tool_descriptor: None,
-            tool_annotations: None,
+            tool_context: Default::default(),
         }
     }
 
@@ -503,7 +522,7 @@ mod tests {
             "old_string": "old",
             "new_string": "new"
         });
-        request.tool_annotations = Some(crate::tool_annotations::ToolAnnotations {
+        request.tool_context.annotations = Some(crate::tool_annotations::ToolAnnotations {
             kind: crate::tool_annotations::ToolKind::Edit,
             arg_schema: crate::tool_annotations::ToolArgSchema {
                 path_params: vec!["path".to_string()],
@@ -512,7 +531,7 @@ mod tests {
             ..Default::default()
         });
 
-        let outcome = request_host_permission(Some(&bridge), request).await;
+        let outcome = request_host_permission(None, Some(&bridge), request).await;
         crate::stdlib::process::set_thread_execution_context(None);
 
         assert!(matches!(outcome, HostPermissionOutcome::Allowed { .. }));
@@ -543,15 +562,12 @@ mod tests {
             1,
         ));
 
-        let outcome = request_host_permission(Some(&bridge), request()).await;
+        let outcome = request_host_permission(None, Some(&bridge), request()).await;
 
         match outcome {
             HostPermissionOutcome::Rejected { reason, resolution } => {
                 assert_eq!(reason, "cancelled by user");
-                assert_eq!(
-                    resolution.outcome,
-                    crate::orchestration::ToolPermissionOutcome::Cancelled
-                );
+                assert_eq!(resolution.outcome, ToolPermissionOutcome::Cancelled);
             }
             HostPermissionOutcome::Allowed { .. } => panic!("expected Rejected, got Allowed"),
             HostPermissionOutcome::Unavailable => panic!(
@@ -563,7 +579,7 @@ mod tests {
 
     #[tokio::test(flavor = "current_thread")]
     async fn no_bridge_is_unavailable() {
-        let outcome = request_host_permission(None, request()).await;
+        let outcome = request_host_permission(None, None, request()).await;
         assert!(matches!(outcome, HostPermissionOutcome::Unavailable));
     }
 
@@ -599,8 +615,8 @@ mod tests {
             &evaluation,
             ToolPermissionPolicyLayer::UserPolicy,
             ToolPermissionResolution::approved(
-                crate::orchestration::ToolPermissionDecider::Person,
-                crate::orchestration::ToolPermissionGrantScope::Once,
+                ToolPermissionDecider::Person,
+                ToolPermissionGrantScope::Once,
             ),
         );
 

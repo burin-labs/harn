@@ -129,6 +129,12 @@ pub type ToolCatalog = {
   components?: ToolComponents,
 }
 
+/**
+ * What a tool call will actually run, declared by the tool's author for the
+ * host permission request. Returned by a tool's `approval_preview` closure.
+ */
+pub type ToolApprovalPreview = {command: string, cwd?: string, summary?: string}
+
 type ToolDefinitionConfig = {
   /** Legacy per-parameter map. Prefer inputSchema for new adapters. */
   parameters?: dict,
@@ -140,6 +146,11 @@ type ToolDefinitionConfig = {
   output_schema?: JsonSchema202012,
   error_schema?: JsonSchema202012,
   handler?: fn(dict) -> any,
+  /**
+   * Maps the call's arguments to the command a person approves, or nil.
+   * Evaluated only when a host is asked; errors show no preview.
+   */
+  approval_preview?: fn(dict) -> ToolApprovalPreview?,
   executor?: string,
   host_capability?: string,
   mcp_server?: string,
@@ -182,6 +193,11 @@ pub type ToolDefinitionSpec = {
   output_schema?: JsonSchema202012,
   error_schema?: JsonSchema202012,
   handler?: fn(dict) -> any,
+  /**
+   * Maps the call's arguments to the command a person approves, or nil.
+   * Evaluated only when a host is asked; errors show no preview.
+   */
+  approval_preview?: fn(dict) -> ToolApprovalPreview?,
   executor?: string,
   host_capability?: string,
   mcp_server?: string,

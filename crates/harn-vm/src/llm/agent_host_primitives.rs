@@ -38,10 +38,7 @@ use side_effect_ceiling::{
     review_or_request_side_effect_permission, SideEffectPermissionOutcome,
     SideEffectPermissionRequest,
 };
-use tool_catalog::{
-    annotations_for as tool_annotations_for, descriptor_for as tool_descriptor_for,
-    permission_context_for,
-};
+use tool_catalog::{annotations_for as tool_annotations_for, permission_context_for};
 
 /// Cause-named feedback for a tool call whose arguments failed validation
 /// because of an argument-DELIVERY fault — the model authored a real call, but
@@ -1178,10 +1175,9 @@ pub(super) async fn host_agent_dispatch_tool_call(
                 policy_decision: decision.receipt.clone(),
                 request_context: serde_json::json!({"policy_decision": decision.receipt.clone()}),
                 requested_capabilities: vec![format!("tool.{tool_name}")],
-                tool_descriptor: tool_descriptor_for(tools, &tool_name),
-                tool_annotations: tool_annotations_for(tools, &tool_name),
+                tool_context: permission_context_for(tools, &tool_name),
             };
-            match request_host_permission(bridge.as_ref(), request).await {
+            match request_host_permission(Some(&ctx), bridge.as_ref(), request).await {
                 HostPermissionOutcome::Allowed {
                     response,
                     resolution,
@@ -2001,6 +1997,8 @@ async fn host_agent_reminder_providers_fire_impl(
     Ok(json_to_vm_value(&report))
 }
 
+#[cfg(test)]
+mod approval_preview_tests;
 #[cfg(test)]
 mod approval_unavailable_tests;
 #[cfg(test)]

@@ -220,8 +220,8 @@ max-byte fields, and rollups by logical reminder tag, source, and rendered role,
 so operators can audit per-turn reminder pressure without scanning every
 individual `transcript.reminder.fired` event.
 
-Content extensions (`visible_text`, `visible_delta`, and
-`permission_preview`, advertised via
+Content extensions (`visible_text`, `visible_delta`, `permission_preview`,
+and `approval_preview`, advertised via
 `agentCapabilities._meta.harn.contentExtensionFields`) follow the same
 convention but ride under `content._meta.harn` because they extend the
 canonical ACP content block, not the session-update envelope. Example:
@@ -457,6 +457,43 @@ file, non-UTF-8 file, or oversized file, Harn omits the canonical diff instead
 of fabricating one and records explicit `file_preimage` evidence (including an
 unavailability reason when applicable) in
 `toolCall._meta.harn.approvalRequest.evidence_refs`.
+
+#### Command previews
+
+Some tools do not say in their arguments what they will run. A `verify` tool
+that takes no arguments and resolves `python3 -m pytest` inside its handler
+sends `rawInput: {}`. A tool defined with an `approval_preview` closure (see
+`tool_define`) declares the command instead. Harn calls the closure with the
+call's arguments when it asks the host, from either the approval-policy path
+or the side-effect-ceiling path, and adds three things to the request:
+
+- a `command_preview` evidence ref in `approvalRequest.evidence_refs`:
+  `{"kind": "command_preview", "command": ..., "cwd"?: ..., "summary"?: ..., "source": "approval_preview"}`;
+- a canonical ACP text block in `toolCall.content`, which any ACP client can
+  render:
+
+  ```json
+  {
+    "type": "content",
+    "content": {
+      "type": "text",
+      "text": "Command: python3 -m pytest\nWorking directory: /workspace"
+    },
+    "_meta": {
+      "harn": {
+        "approval_preview": {"command": "python3 -m pytest", "cwd": "/workspace"}
+      }
+    }
+  }
+  ```
+
+- the same record at `toolCall._meta.harn.approvalPreview`, for hosts that
+  render the command themselves without parsing text.
+
+`rawInput` stays the model's arguments. The preview is presentation only. If
+the closure throws, returns `nil`, or returns anything other than
+`{command: string, cwd?: string, summary?: string}`, Harn sends the request
+without a preview. A preview never changes whether the call is allowed.
 
 `approvalRequest` is the canonical Harn `ApprovalRequest` payload and
 `policyDecision` is the policy rationale. Both live under

@@ -500,6 +500,7 @@ HARN_TOOL_LIFECYCLE_EXTENSION_FIELDS: tuple = (
     "rawInputPartial",
 )
 HARN_CONTENT_EXTENSION_FIELDS: tuple = (
+    "approval_preview",
     "permission_preview",
     "visible_delta",
     "visible_text",

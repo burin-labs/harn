@@ -47,6 +47,7 @@ pub use admission::{
 pub mod api;
 #[cfg(test)]
 mod api_routing_credentials_tests;
+pub(crate) mod approval_preview;
 pub(crate) mod autonomy_budget;
 pub(crate) mod cache;
 pub mod cache_conformance;

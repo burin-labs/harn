@@ -347,6 +347,40 @@ shape (`risk_labels`, `confidence`, `rationale`,
 `recommended_action`) with redacted scan options; it is safe to use in
 tests without making a network call.
 
+#### Approval previews (`approval_preview`)
+
+A tool whose arguments do not say what it will run can declare the
+command for its permission request. `approval_preview` is a closure that
+receives the same argument dict as `handler` and returns either `nil` or
+a `ToolApprovalPreview` record from `std/tools`:
+`{command: string, cwd?: string, summary?: string}`.
+
+```harn
+fn run_checks() -> string { return "checks ran" }
+
+let registry = tool_registry()
+registry = tool_define(registry, "verify", "Run the project's checks", {
+  parameters: {},
+  handler: { _args -> run_checks() },
+  approval_preview: { _args -> {command: "python3 -m pytest", summary: "Runs the test suite"} },
+})
+```
+
+`tool_define` raises when `approval_preview` is present and is neither a
+closure nor `nil`. The runtime calls the closure only when it sends the
+host a `session/request_permission` request, on both the approval-policy
+and side-effect-ceiling paths, and only once per request. It runs before the
+call is approved, so it must not have side effects. The returned record
+becomes a `command_preview` evidence ref on the approval request, a text
+block in `toolCall.content`, and `toolCall._meta.harn.approvalPreview`.
+
+The preview is presentation only. If the closure throws, returns `nil`,
+returns any other shape, or returns a `command`, `cwd`, or `summary` longer
+than 16,384 characters, the runtime sends the request without a preview.
+The allow or deny decision and the call's arguments (`rawInput`) are never
+affected. `tool_list` and `tool_def` omit the closure, as they omit
+`handler`.
+
 #### Deferred tool loading (`defer_loading`)
 
 A tool registered through `tool_define` may set `defer_loading: true`

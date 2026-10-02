@@ -653,9 +653,12 @@ pub const SCHEMA_RECOVER_ENVELOPE: Ty = Ty::Shape(&[
 ///
 /// Keep this aligned with `ToolDefinitionConfig` in `std/tools`.
 pub const TOOL_DEFINE_CONFIG: Ty = Ty::OpenShape(
-    &[ShapeFieldDescriptor::optional(
-        "handler",
-        Ty::Fn(&[TY_DICT], &TY_ANY),
-    )],
+    &[
+        ShapeFieldDescriptor::optional("handler", Ty::Fn(&[TY_DICT], &TY_ANY)),
+        // Called with the same single argument dict as `handler`, so it carries
+        // the same arity check. Its return shape is validated at runtime and a
+        // malformed one is ignored, never an error.
+        ShapeFieldDescriptor::optional("approval_preview", Ty::Fn(&[TY_DICT], &TY_ANY)),
+    ],
     &[TY_DICT],
 );

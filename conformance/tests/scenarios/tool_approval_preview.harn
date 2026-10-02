@@ -1,0 +1,61 @@
+import { tool_define_many } from "std/tools"
+
+/**
+ * `approval_preview` declares what a tool call will run when its arguments do
+ * not say. `tool_define` keeps the closure on the registry entry for the host
+ * permission request, leaves it out of metadata projections, and rejects a
+ * value that is not a closure.
+ */
+pipeline test(harness: Harness, task: unknown) {
+  let registry = tool_registry()
+  registry = tool_define(
+    registry,
+    "verify",
+    "Run the project's checks",
+    {
+      parameters: {},
+      handler: { _args -> "verified" },
+      approval_preview: { _args -> {command: "python3 -m pytest", cwd: "/repo"} },
+    },
+  )
+  registry = tool_define_many(
+    registry,
+    [
+      {
+        name: "run",
+        description: "Run a named task",
+        parameters: {intent: {type: "string"}},
+        handler: { args -> "ran " + args.intent },
+        approval_preview: { args ->
+          if args.intent == "test" {
+            return {command: "make test", summary: "Runs the test suite"}
+          }
+          return nil
+        },
+      },
+    ],
+  )
+  const verify = tool_find(registry, "verify")
+  const preview = verify.approval_preview({})
+  assert(preview.command == "python3 -m pytest", "the closure is kept on the entry")
+  assert(preview.cwd == "/repo", "optional fields round-trip")
+  const run = tool_find(registry, "run")
+  assert(run.approval_preview({intent: "test"}).command == "make test", "args reach the preview")
+  assert(run.approval_preview({intent: "lint"}) == nil, "nil means no preview")
+  for t in tool_list(registry) {
+    assert(t.approval_preview == nil, "tool_list leaves the closure out")
+  }
+  // Typed as `any` so the runtime check, not the checker, sees the string.
+  const not_a_closure: any = "python3 -m pytest"
+  const rejected = try {
+    tool_define(
+      tool_registry(),
+      "busted",
+      "preview is not a closure",
+      {parameters: {}, handler: { _ -> "ok" }, approval_preview: not_a_closure},
+    )
+  }
+  assert(is_err(rejected), "a non-closure approval_preview is rejected")
+  assert(unwrap_err(rejected).contains("approval_preview"), "the error names the field")
+  harness.stdio.log("tool_approval_preview tests passed")
+}

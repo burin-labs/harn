@@ -599,6 +599,7 @@ var HarnToolLifecycleExtensionFields = []string{
 
 // HarnContentExtensionFields enumerates the wire values Harn currently emits.
 var HarnContentExtensionFields = []string{
+	"approval_preview",
 	"permission_preview",
 	"visible_delta",
 	"visible_text",

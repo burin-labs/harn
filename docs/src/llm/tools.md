@@ -230,6 +230,11 @@ harness.stdio.log(result.text)
 - Return structured dicts or lists with concrete schemas so the model
   (and later pipeline steps) can branch on fields instead of scraping
   prose strings.
+- When a tool decides its command inside the handler (a no-argument `verify`,
+  a `run({intent})` that maps intents to commands), add an `approval_preview`
+  closure to its `tool_define` config. The approval prompt then shows the
+  command the person is approving instead of empty arguments. See
+  [Approval previews](../spec/language/13-functions-and-closures.md#approval-previews-approval_preview).
 
 ## Host-backed tool helpers
 
