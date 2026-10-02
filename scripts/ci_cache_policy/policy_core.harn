@@ -376,8 +376,29 @@ pub const E2E_WORKFLOW_CONCURRENCY_GROUP = "$"
 pub const E2E_WORKFLOW_CANCEL_POLICY = "$"
   + "{{ github.event_name == 'pull_request' && github.event.action == 'synchronize' }}"
 
-pub const MAIN_ONLY_RUST_IF =
-  "github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.changes.outputs.rust == 'true'"
+/**
+ * Main-only lanes read `rust_paths`, the paths filter, never `rust`, the
+ * heavy-lane decision. A main push whose exact commit already passed on
+ * merge_group sets `rust` false to skip duplicate heavy lanes, and no merge
+ * group runs a main-only lane, so gating one on `rust` stops it for good the
+ * day that proof works. The proof could not succeed from 2026-09-06 until
+ * 2026-10, which hid that trap.
+ */
+pub const MAIN_ONLY_RUST_PATHS_IF =
+  "github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.changes.outputs.rust_paths == 'true'"
+
+/** ci-status reads the same paths decision the main-only policy lane runs on. */
+pub const MAIN_ONLY_POLICY_SELECTED_ENV = "$" + "{{ needs.changes.outputs.rust_paths }}"
+
+/** ci-status's skip allowance for repository policies, spelled once. */
+pub const MAIN_ONLY_POLICY_SKIP_TEST = "test \"$" + "{EVENT_NAME}:$" + "{GIT_REF}:$"
+  + "{RUST_PATHS_SELECTED}\" != \"push:refs/heads/main:true\""
+
+/**
+ * On a proven push the artifact barrier names the merge-group run whose CLI
+ * stands in for this run's, and every main-only consumer downloads from it.
+ */
+pub const ARTIFACT_SOURCE_RUN_ID = "$" + "{{ needs.rust-artifacts-ready.outputs.source_run_id }}"
 
 /**
  * The Windows cross-compile check is the one Windows admission lane: every
@@ -393,7 +414,7 @@ pub const WINDOWS_CROSS_CHECK_IF = "(github.event_name == 'merge_group' && "
 /** `ci-status` requires the cross-check exactly where the job itself must run. */
 pub const WINDOWS_CROSS_REQUIRED_ENV = "$" + "{{ " + WINDOWS_CROSS_CHECK_IF + " }}"
 
-pub const MAIN_ONLY_POLICY_IF = MAIN_ONLY_RUST_IF
+pub const MAIN_ONLY_POLICY_IF = MAIN_ONLY_RUST_PATHS_IF
   + " && needs.rust-artifacts-ready.result == 'success'"
 
 pub const CI_CACHE_REFRESH_CONCURRENCY_GROUP = "harn-ci-rust-cache-refresh"
@@ -1778,6 +1799,56 @@ pub fn producer_tier_expression() -> string {
   )
 }
 
+/**
+ * Main-only lanes on a push the merge group already proved for its exact
+ * commit: they still run, gated on `rust_paths`, and read the proving run's
+ * shared CLI, and ci-status still requires repository policies there.
+ */
+fn proven_push_main_only_errors(jobs: dict) -> list<string> {
+  let errors: list<string> = []
+  // The main-only lanes outlive the heavy-lane skip on a proven push, and use
+  // the merge group's CLI when they do. Both halves are needed: the right
+  // condition with this run's download fails on a run that built nothing.
+  if trim(jobs[ARTIFACT_READY_JOB]?.if ?? "") != "needs.changes.outputs.rust_paths == 'true'" {
+    errors = errors
+      + ["ci.yml:rust-artifacts-ready must run whenever a main-only lane needs the shared CLI"]
+  }
+  const size_if = trim(jobs["binary-size-signal"]?.if ?? "")
+  if !contains(size_if, "needs.changes.outputs.rust_paths == 'true'")
+    || contains(size_if, "needs.changes.outputs.rust == ") {
+    errors = errors
+      + ["ci.yml:binary-size-signal must record main's baseline on every Rust-changing main push"]
+  }
+  for consumer in ["audit-scripts", "binary-size-signal"] {
+    let downloads = 0
+    let sourced = 0
+    for step in jobs[consumer]?.steps ?? [] {
+      if contains(to_string(step?.uses ?? ""), "download-artifact-with-retry") {
+        downloads = downloads + 1
+        if trim(to_string(step?.with?.["run-id"] ?? "")) == ARTIFACT_SOURCE_RUN_ID {
+          sourced = sourced + 1
+        }
+      }
+    }
+    if downloads != 1 || sourced != 1 {
+      errors = errors
+        + [
+          "ci.yml:${consumer} must download the shared CLI from the run the artifact barrier names",
+        ]
+    }
+  }
+  const status_step = step_by_name(jobs["ci-status"]?.steps ?? [], "Verify required CI jobs")
+  const status_run = status_step?.run ?? ""
+  if trim(to_string(status_step?.env?.RUST_PATHS_SELECTED ?? "")) != MAIN_ONLY_POLICY_SELECTED_ENV
+    || !contains(status_run, MAIN_ONLY_POLICY_SKIP_TEST) {
+    errors = errors
+      + [
+        "ci.yml:ci-status must require repository policies on every Rust-changing main push, proven or not",
+      ]
+  }
+  return errors
+}
+
 /** Keep integration ratchets and publication tails off pull-request runners. */
 pub fn minimal_pr_capacity_errors(ci: dict, publish: dict) -> list<string> {
   let errors: list<string> = []
@@ -1815,6 +1886,7 @@ pub fn minimal_pr_capacity_errors(ci: dict, publish: dict) -> list<string> {
   if trim(jobs["audit-scripts"]?.if ?? "") != MAIN_ONLY_POLICY_IF {
     errors = errors + ["ci.yml:audit-scripts must run on Rust-changing main pushes only"]
   }
+  errors = errors + proven_push_main_only_errors(jobs)
   // Asserted PRESENT on pull requests, not merely permitted there. Without
   // this, restoring an event condition would be a silent revert to a gate
   // that can only turn the default branch red after the fact, and a gate's

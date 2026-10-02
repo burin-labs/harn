@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Wait for immutable v4 artifacts published earlier in this workflow run.
+# Wait for immutable v4 artifacts published earlier in this workflow run, or in
+# the run HARN_EXT_ARTIFACT_RUN_ID and HARN_EXT_ARTIFACT_RUN_ATTEMPT name.
 #
 # GitHub exposes v4 artifacts through the REST API as soon as their upload step
 # completes, but job dependencies are terminal-state barriers. This bounded
@@ -19,9 +20,25 @@ if [ "$#" -eq 0 ]; then
 fi
 
 repository="${GITHUB_REPOSITORY:?GITHUB_REPOSITORY must name owner/repo}"
-run_id="${GITHUB_RUN_ID:?GITHUB_RUN_ID must identify the current workflow run}"
+# A main push already proven by the merge group for its exact commit reads that
+# run's artifacts instead of rebuilding them. Both values come from the proof,
+# so they are named together or not at all.
+if [ -n "${HARN_EXT_ARTIFACT_RUN_ID:-}" ] || [ -n "${HARN_EXT_ARTIFACT_RUN_ATTEMPT:-}" ]; then
+  run_id="${HARN_EXT_ARTIFACT_RUN_ID:-}"
+  run_attempt="${HARN_EXT_ARTIFACT_RUN_ATTEMPT:-}"
+  if [ -z "$run_id" ] || [ -z "$run_attempt" ]; then
+    echo "HARN_EXT_ARTIFACT_RUN_ATTEMPT must accompany HARN_EXT_ARTIFACT_RUN_ID" >&2
+    exit 2
+  fi
+  case "$run_id" in
+    ''|*[!0-9]*) echo "HARN_EXT_ARTIFACT_RUN_ID must be a workflow run id" >&2; exit 2 ;;
+  esac
+  echo "reading artifacts from workflow run ${run_id} attempt ${run_attempt}"
+else
+  run_id="${GITHUB_RUN_ID:?GITHUB_RUN_ID must identify the current workflow run}"
+  run_attempt="${GITHUB_RUN_ATTEMPT:?GITHUB_RUN_ATTEMPT must identify the current attempt}"
+fi
 producer_job="${HARN_EXT_ARTIFACT_PRODUCER_JOB:?HARN_EXT_ARTIFACT_PRODUCER_JOB must name the producing job}"
-run_attempt="${GITHUB_RUN_ATTEMPT:?GITHUB_RUN_ATTEMPT must identify the current attempt}"
 # Retained for callers using the existing setting: this bounds consecutive
 # unreadable producer-state observations, not time spent in a measured queue.
 max_unmeasured_attempts="${HARN_EXT_ARTIFACT_WAIT_MAX_ATTEMPTS:-66}"
