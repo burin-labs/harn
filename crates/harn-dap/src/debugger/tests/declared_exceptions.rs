@@ -1,6 +1,36 @@
 use super::*;
 
 #[test]
+fn test_set_exception_breakpoints_enable() {
+    let mut dbg = Debugger::new();
+    assert!(!dbg.break_on_exceptions);
+
+    let responses = dbg.handle_message(make_request(
+        1,
+        "setExceptionBreakpoints",
+        Some(json!({"filters": ["all"]})),
+    ));
+    assert_eq!(responses.len(), 1);
+    assert_eq!(responses[0].success, Some(true));
+    assert!(dbg.break_on_exceptions);
+}
+
+#[test]
+fn test_set_exception_breakpoints_disable() {
+    let mut dbg = Debugger::new();
+    dbg.break_on_exceptions = true;
+
+    let responses = dbg.handle_message(make_request(
+        1,
+        "setExceptionBreakpoints",
+        Some(json!({"filters": []})),
+    ));
+    assert_eq!(responses.len(), 1);
+    assert_eq!(responses[0].success, Some(true));
+    assert!(!dbg.break_on_exceptions);
+}
+
+#[test]
 fn exception_breakpoints_stop_for_declared_and_legacy_throws() {
     for declaration in ["", " throws string"] {
         let source = format!("fn fail(){declaration} {{ throw \"exception-probe\" }}\nfail()");
