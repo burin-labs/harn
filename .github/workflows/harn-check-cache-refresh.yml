@@ -78,37 +78,37 @@ jobs:
         run: ./scripts/ci/resolve_main_cli_artifact.sh "$GITHUB_OUTPUT"
       - name: Check out the commit the binary was built from
         env:
-          HARN_CLI_SHA: ${{ steps.cli.outputs.sha }}
-        run: git checkout --quiet --detach "$HARN_CLI_SHA"
+          CLI_SHA: ${{ steps.cli.outputs.sha }}
+        run: git checkout --quiet --detach "$CLI_SHA"
       - name: Download shared Harn binary
         env:
           GH_REPO: ${{ github.repository }}
           GH_TOKEN: ${{ github.token }}
-          HARN_CLI_ARTIFACT_ID: ${{ steps.cli.outputs.artifact_id }}
+          CLI_ARTIFACT_ID: ${{ steps.cli.outputs.artifact_id }}
         # The artifact is published unarchived, so the download is the file.
         run: >-
-          gh api "repos/$GH_REPO/actions/artifacts/$HARN_CLI_ARTIFACT_ID/zip"
+          gh api "repos/$GH_REPO/actions/artifacts/$CLI_ARTIFACT_ID/zip"
           > "$RUNNER_TEMP/harn-cli.tar.zst"
       - name: Verify shared Harn binary
         env:
-          HARN_CLI_SHA: ${{ steps.cli.outputs.sha }}
+          CLI_SHA: ${{ steps.cli.outputs.sha }}
         run: >-
           ./scripts/ci/rust_artifact.sh restore-cli
           "$RUNNER_TEMP/harn-cli.tar.zst"
           "$RUNNER_TEMP/harn-cli"
-          "$HARN_CLI_SHA"
+          "$CLI_SHA"
           "$GITHUB_ENV"
       - name: Warm the ${{ matrix.family }} cache
         id: warm
         env:
           HARN_BIN_NO_BUILD: "1"
-          HARN_CHECK_CACHE_COMMAND: ${{ matrix.command }}
-          HARN_CHECK_CACHE_FAMILY: ${{ matrix.family }}
+          CHECK_CACHE_COMMAND: ${{ matrix.command }}
+          CHECK_CACHE_FAMILY: ${{ matrix.family }}
         run: |
           start=$(date +%s)
           status=0
-          $HARN_CHECK_CACHE_COMMAND || status=$?
-          echo "Harn check cache warm ($HARN_CHECK_CACHE_FAMILY) took $(( $(date +%s) - start ))s, exit $status" \
+          $CHECK_CACHE_COMMAND || status=$?
+          echo "Harn check cache warm ($CHECK_CACHE_FAMILY) took $(( $(date +%s) - start ))s, exit $status" \
             | tee -a "$GITHUB_STEP_SUMMARY"
           exit "$status"
       # Save and prune with this run's own actions and scripts, not the older
