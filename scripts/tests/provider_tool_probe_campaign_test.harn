@@ -531,6 +531,50 @@ pipeline test_provider_tool_probe_campaign_catalog_routes_keep_cheap_hosted_mode
 }
 
 @test
+pipeline test_provider_tool_probe_campaign_catalog_routes_skip_dedicated_only_models(
+  harness: Harness,
+  task: unknown,
+) {
+  const catalog = {
+    providers: [{id: "fireworks", classification: "hosted", auth: {env: ["FIREWORKS_API_KEY"]}}],
+    models: [
+      {
+        provider: "fireworks",
+        id: "accounts/fireworks/models/dedicated-fixture",
+        availability: "dedicated",
+        strengths: ["cheap"],
+        pricing: {input_per_mtok: 0.2, output_per_mtok: 0.6},
+      },
+      {
+        provider: "fireworks",
+        id: "accounts/fireworks/models/serverless-fixture",
+        availability: "serverless",
+        strengths: ["cheap"],
+        pricing: {input_per_mtok: 0.2, output_per_mtok: 0.6},
+      },
+    ],
+  }
+  for include_expensive in [false, true] {
+    const routes = provider_tool_probe_campaign_catalog_routes(catalog, include_expensive)
+    assert_eq(len(routes), 1)
+    assert_eq(routes[0]?.model, "accounts/fireworks/models/serverless-fixture")
+  }
+  const routed = provider_tool_probe_campaign_catalog_routes(
+    catalog
+      + {
+        routing_routes: [
+          {provider: "fireworks", model: "accounts/fireworks/models/dedicated-fixture"},
+          {provider: "fireworks", model: "accounts/fireworks/models/serverless-fixture"},
+        ],
+      },
+    false,
+  )
+  assert_eq(len(routed), 1)
+  assert_eq(routed[0]?.model, "accounts/fireworks/models/serverless-fixture")
+  assert_eq(routed[0]?.metadata.source, "routing_route")
+}
+
+@test
 pipeline test_provider_tool_probe_campaign_catalog_routes_accept_runtime_catalog_shape(
   harness: Harness,
   task: unknown,
