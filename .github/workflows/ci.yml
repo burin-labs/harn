@@ -698,8 +698,19 @@ jobs:
       # A release generates this ignored payload before its audit, and the
       # candidate build uploads it beside the archives. Generate it the same
       # way so the generated-files lane checks real bytes.
+      #
+      # The audit's generated-files lane runs `make check-cli-aot` again, and
+      # the release gate gives Cargo its own target directory, so without the
+      # override that check recompiled the generator from cold: about 250s of
+      # a 300s lane that otherwise only reads files. Hand it the generator this
+      # step just built from the same commit.
       - name: Generate the CLI AOT payload
-        run: make gen-cli-aot && make check-cli-aot
+        run: |
+          make gen-cli-aot
+          make check-cli-aot
+          generator="$PWD/target/debug/harn-cli-aot-gen"
+          test -x "$generator"
+          echo "HARN_CLI_AOT_GEN_BIN=$generator" >> "$GITHUB_ENV"
       - name: Wait for shared Harn binary
         env:
           GH_TOKEN: ${{ github.token }}
