@@ -3,7 +3,7 @@
   "candidate_source": "28d50683b40f46996859709947285df0317b2118",
   "baseline_version": "0.10.153",
   "baseline_source_equal_to_main": "83f4889983bfc46104c74e9ff34dfeb3580b359f",
-  "host": "cattrick",
+  "host_platform": "linux-x86_64",
   "corpus_sha256": "30461708c1e7f0ac0b2550aecc3ac4fa757c13b0be2b573f3693596310b90eb5",
   "trials_per_text": 2,
   "texts": 16,

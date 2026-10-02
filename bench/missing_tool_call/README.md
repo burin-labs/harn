@@ -1,7 +1,7 @@
 # Measure missing-tool-call recovery
 
 Use this driver to compare classifier versions on completing agent runs. It
-feeds the same assistant text and two candidate tools to the real classifier,
+feeds the same assistant text and declared tools to the real classifier,
 then completes with the done sentinel. Each invocation refuses to produce a
 measurement unless the run completed, the model classifier fired once, and the
 consumer published one verdict. The planner is a deterministic caller; this
@@ -59,9 +59,10 @@ ambiguous intent, long transcripts, or different model revisions.
 
 ## Measured result, 2026-10-02
 
-The sixteen texts were run twice per backend on cattrick. Every counted run
+The sixteen texts were run twice per backend on the same Linux build server. Every counted run
 completed, reached the real classifier, published its verdict, and made exactly
 one physical classifier request. Labels never entered the evaluator's state.
+The candidates include the two declared tools and the loop's built-in await tool.
 The baseline classifier and prompt in release v0.10.153 match main at
 `83f4889983bfc46104c74e9ff34dfeb3580b359f`. Candidate source is
 `28d50683b40f46996859709947285df0317b2118`.
