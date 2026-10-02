@@ -96,7 +96,7 @@ pub struct ProseToolBalance {
 }
 
 /// Reserved for explicitly identified estimates, separate from measured facts.
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct HealthHeuristics {}
 
