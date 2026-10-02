@@ -14,6 +14,25 @@ use super::{
     CONNECT_INDEX_NAMESPACE,
 };
 
+/// Read a credential from the environment variable `name`, for every
+/// `harn connect` option that names one (`--from-env`,
+/// `--client-secret-from-env`).
+///
+/// Errors name the variable and the failure category only. `VarError`'s own
+/// `Display` embeds a non-Unicode value verbatim, which would echo the secret
+/// into the terminal and any captured log.
+pub(super) fn read_named_env_secret(name: &str, what: &str) -> Result<String, String> {
+    match std::env::var(name) {
+        Ok(value) => Ok(value),
+        Err(std::env::VarError::NotPresent) => Err(format!(
+            "failed to read {what} from environment variable {name}: it is not set"
+        )),
+        Err(std::env::VarError::NotUnicode(_)) => Err(format!(
+            "failed to read {what} from environment variable {name}: its value is not valid Unicode"
+        )),
+    }
+}
+
 pub(super) async fn run_connect_api_key(args: &ConnectApiKeyArgs) -> Result<(), String> {
     let secret_id = parse_secret_id(&args.secret_id).ok_or_else(|| {
         format!(
@@ -29,11 +48,7 @@ pub(super) async fn run_connect_api_key(args: &ConnectApiKeyArgs) -> Result<(), 
         (Some(value), None, None) => value.as_bytes().to_vec(),
         (None, Some(path), None) => std::fs::read(path)
             .map_err(|error| format!("failed to read API key file {}: {error}", path.display()))?,
-        (None, None, Some(name)) => std::env::var(name)
-            .map_err(|error| {
-                format!("failed to read API key from environment variable {name}: {error}")
-            })?
-            .into_bytes(),
+        (None, None, Some(name)) => read_named_env_secret(name, "API key")?.into_bytes(),
         (None, None, None) => rpassword::prompt_password("API key: ")
             .map_err(|error| format!("failed to read API key: {error}"))?
             .into_bytes(),

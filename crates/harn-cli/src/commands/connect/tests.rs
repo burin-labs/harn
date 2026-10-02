@@ -1,3 +1,5 @@
+mod legacy_oauth;
+
 use super::oauth_migration::legacy_registration_missing_redirect;
 use super::store::load_connect_index;
 use super::*;
@@ -283,7 +285,9 @@ fn registered_provider_metadata_builds_oauth_request_with_cli_overrides() {
         auth_url: None,
         token_url: Some("https://override.example.com/token".to_string()),
         token_auth_method: None,
-        redirect_uri: "http://127.0.0.1:0/oauth/callback".to_string(),
+        redirect_uri: None,
+        client_secret_from_env: None,
+        client_secret_file: None,
         no_open: true,
         json: true,
     };
@@ -325,196 +329,6 @@ fn registered_oauth_reads_client_id_only_from_declared_configuration_environment
     assert!(!serde_json::to_string(&setup)
         .unwrap()
         .contains("fixture-public-client-id"));
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn legacy_oauth_migration_recovers_registration_without_token_material() {
-    use harn_vm::secrets::{MemorySecretProvider, SecretId};
-
-    let legacy_id = SecretId::new("acme", "oauth-token");
-    let legacy = MemorySecretProvider::new("harn/legacy-workspace").with_secret(
-        legacy_id.clone(),
-        br#"{
-            "provider":"acme",
-            "access_token":"must-not-migrate",
-            "refresh_token":"must-not-migrate-either",
-            "client_secret":"must-be-prompted-again",
-            "client_id":"legacy-client",
-            "scope":"tickets.read tickets.write",
-            "authorization_url":"https://auth.example.com/authorize",
-            "token_url":"https://auth.example.com/token",
-            "token_auth_method":"client_secret_post",
-            "redirect_uri":"http://127.0.0.1:48765/oauth/callback",
-            "resource":"https://api.example.com/"
-        }"#,
-    );
-
-    let registration = load_legacy_oauth_registration_from(&legacy, &legacy_id)
-        .await
-        .expect("legacy store is readable")
-        .expect("legacy registration is present");
-    let request = oauth_request_with_legacy_registration(
-        OAuthConnectRequest {
-            provider: "acme".to_string(),
-            resource: "https://api.example.com/".to_string(),
-            authorization_endpoint: None,
-            token_endpoint: None,
-            registration_endpoint: None,
-            client_id: None,
-            client_secret: None,
-            scopes: None,
-            redirect_uri: DEFAULT_OAUTH_REDIRECT_URI.to_string(),
-            token_auth_method: None,
-            authorization_params: Default::default(),
-            no_open: true,
-            json: false,
-        },
-        registration,
-    );
-
-    assert_eq!(request.client_id.as_deref(), Some("legacy-client"));
-    assert_eq!(
-        request.authorization_endpoint.as_deref(),
-        Some("https://auth.example.com/authorize")
-    );
-    assert_eq!(
-        request.token_endpoint.as_deref(),
-        Some("https://auth.example.com/token")
-    );
-    assert_eq!(
-        request.scopes.as_deref(),
-        Some("tickets.read tickets.write")
-    );
-    assert_eq!(
-        request.token_auth_method.as_deref(),
-        Some("client_secret_post")
-    );
-    assert_eq!(
-        request.redirect_uri,
-        "http://127.0.0.1:48765/oauth/callback"
-    );
-    assert!(
-        request.client_secret.is_none(),
-        "the old client secret is never reused"
-    );
-    assert!(
-        migrated_oauth_client_secret_required(&request),
-        "a confidential legacy client must ask for its secret again before opening a browser"
-    );
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn authentic_old_token_requires_the_registered_redirect_again() {
-    use harn_vm::secrets::{MemorySecretProvider, SecretId};
-
-    // This is the StoredConnectorToken shape written before the namespace
-    // change. That writer did not persist its authorization or redirect URI.
-    let id = SecretId::new("acme", "oauth-token");
-    let legacy = MemorySecretProvider::new("harn/legacy-workspace").with_secret(
-        id.clone(),
-        br#"{
-            "provider":"acme",
-            "access_token":"old-token",
-            "token_endpoint":"https://auth.example.com/token",
-            "client_id":"legacy-client",
-            "token_endpoint_auth_method":"none",
-            "resource":"https://api.example.com/",
-            "connected_at_unix":1
-        }"#,
-    );
-    let registration = load_legacy_oauth_registration_from(&legacy, &id)
-        .await
-        .expect("old keyring entry is readable")
-        .expect("registration fields exist");
-    let request = OAuthConnectRequest {
-        provider: "acme".to_string(),
-        resource: "https://api.example.com/".to_string(),
-        authorization_endpoint: None,
-        token_endpoint: None,
-        registration_endpoint: None,
-        client_id: None,
-        client_secret: None,
-        scopes: None,
-        redirect_uri: DEFAULT_OAUTH_REDIRECT_URI.to_string(),
-        token_auth_method: None,
-        authorization_params: Default::default(),
-        no_open: true,
-        json: false,
-    };
-    assert!(legacy_registration_missing_redirect(
-        &request,
-        &registration
-    ));
-    let explicitly_set = OAuthConnectRequest {
-        redirect_uri: "http://127.0.0.1:48765/oauth/callback".to_string(),
-        ..request.clone()
-    };
-    assert!(!legacy_registration_missing_redirect(
-        &explicitly_set,
-        &registration
-    ));
-    let merged = oauth_request_with_legacy_registration(request, registration);
-    assert_eq!(merged.client_id.as_deref(), Some("legacy-client"));
-    assert_eq!(merged.redirect_uri, DEFAULT_OAUTH_REDIRECT_URI);
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn absent_legacy_oauth_record_is_not_invented() {
-    use harn_vm::secrets::{MemorySecretProvider, SecretId};
-
-    let empty = MemorySecretProvider::new("harn/legacy-workspace");
-    let missing =
-        load_legacy_oauth_registration_from(&empty, &SecretId::new("acme", "oauth-token"))
-            .await
-            .expect("an absent legacy record is not a store outage");
-    assert!(
-        missing.is_none(),
-        "absence must not synthesize registration metadata"
-    );
-}
-
-#[test]
-fn explicit_oauth_registration_wins_over_every_legacy_field() {
-    let request = OAuthConnectRequest {
-        provider: "acme".to_string(),
-        resource: "https://current.example.com/".to_string(),
-        authorization_endpoint: Some("https://current.example.com/authorize".to_string()),
-        token_endpoint: Some("https://current.example.com/token".to_string()),
-        registration_endpoint: None,
-        client_id: Some("current-client".to_string()),
-        client_secret: None,
-        scopes: Some("current.read".to_string()),
-        redirect_uri: "http://127.0.0.1:49999/current".to_string(),
-        token_auth_method: Some("none".to_string()),
-        authorization_params: Default::default(),
-        no_open: true,
-        json: false,
-    };
-    let legacy = serde_json::from_value::<LegacyOAuthRegistration>(serde_json::json!({
-        "client_id": "legacy-client",
-        "scopes": "legacy.read",
-        "authorization_endpoint": "https://legacy.example.com/authorize",
-        "token_endpoint": "https://legacy.example.com/token",
-        "token_endpoint_auth_method": "client_secret_post",
-        "redirect_uri": "http://127.0.0.1:48888/legacy",
-        "resource": "https://legacy.example.com/"
-    }))
-    .expect("legacy registration fixture");
-    let merged = oauth_request_with_legacy_registration(request, legacy);
-
-    assert_eq!(merged.client_id.as_deref(), Some("current-client"));
-    assert_eq!(merged.scopes.as_deref(), Some("current.read"));
-    assert_eq!(
-        merged.authorization_endpoint.as_deref(),
-        Some("https://current.example.com/authorize")
-    );
-    assert_eq!(
-        merged.token_endpoint.as_deref(),
-        Some("https://current.example.com/token")
-    );
-    assert_eq!(merged.token_auth_method.as_deref(), Some("none"));
-    assert_eq!(merged.redirect_uri, "http://127.0.0.1:49999/current");
-    assert_eq!(merged.resource, "https://current.example.com/");
 }
 
 #[test]
@@ -1008,8 +822,7 @@ fn callback_request_rejects_wrong_origin() {
 
 #[test]
 fn callback_request_requires_get_method() {
-    let request =
-        "POST /oauth/callback?code=abc&state=xyz HTTP/1.1\r\nOrigin: http://127.0.0.1:49152\r\n\r\n";
+    let request = "POST /oauth/callback?code=abc&state=xyz HTTP/1.1\r\nOrigin: http://127.0.0.1:49152\r\n\r\n";
     let error = parse_callback_request(
         request,
         "/oauth/callback",
@@ -1023,8 +836,7 @@ fn callback_request_requires_get_method() {
 
 #[test]
 fn callback_request_rejects_malformed_request_line() {
-    let request =
-        "GET /oauth/callback?code=abc&state=xyz HTTP/1.1 extra\r\nOrigin: http://127.0.0.1:49152\r\n\r\n";
+    let request = "GET /oauth/callback?code=abc&state=xyz HTTP/1.1 extra\r\nOrigin: http://127.0.0.1:49152\r\n\r\n";
     let error = parse_callback_request(
         request,
         "/oauth/callback",
@@ -1275,7 +1087,7 @@ async fn generic_oauth_prefers_default_cimd_client_before_dcr() {
         client_id: None,
         client_secret: None,
         scopes: None,
-        redirect_uri: "http://127.0.0.1:49152/oauth/callback".to_string(),
+        redirect_uri: Some("http://127.0.0.1:49152/oauth/callback".to_string()),
         token_auth_method: None,
         authorization_params: Default::default(),
         no_open: true,
