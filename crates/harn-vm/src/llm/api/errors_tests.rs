@@ -558,7 +558,7 @@ fn openrouter_parameter_routing_rejection_is_not_model_unavailability() {
         "openrouter",
         reqwest::StatusCode::NOT_FOUND,
         None,
-        r#"{"error":{"message":"No endpoints found that can handle the requested parameters. To learn more about provider routing, visit: https://openrouter.ai/docs/guides/routing/provider-selection","code":404}}"#,
+        r#"{"error":{"message":"No endpoints found that can handle the requested parameters. See routing guidance.","code":404}}"#,
     );
     assert_eq!(info.kind, LlmErrorKind::Terminal);
     assert_eq!(info.reason, LlmErrorReason::InvalidRequest);

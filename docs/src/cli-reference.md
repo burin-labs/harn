@@ -2191,6 +2191,8 @@ A failed control leaves the result `unmeasured` with `failure_class:
 "control_failed"`. A timeout is retried once. Request counts, usage, and priced
 costs include retries and controls; requests without prices remain explicit
 accounting gaps in campaign reports.
+`cost_usd` sums priced requests; `observed_cost_count` below `request_count`
+means that sum is incomplete.
 
 The command normally suspends catalog shaping for only the selected option, so
 a negative claim can be falsified at the wire. The typed authority is captured
