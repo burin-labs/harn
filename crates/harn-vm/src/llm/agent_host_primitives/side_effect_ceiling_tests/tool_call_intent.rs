@@ -112,7 +112,7 @@ async fn approval_policy_ask_carries_a_bounded_intent() {
         intent.chars().count(),
         crate::agent_events::TOOL_CALL_INTENT_MAX_CHARS
     );
-    assert_eq!(meta["policyDecision"]["decision"], serde_json::json!("ask"));
+    assert_eq!(meta["policyDecision"]["action"], serde_json::json!("ask"));
 }
 
 #[tokio::test]

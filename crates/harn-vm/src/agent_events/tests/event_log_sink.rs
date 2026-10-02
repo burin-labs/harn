@@ -54,6 +54,7 @@ fn redacts_tool_payloads_before_append() {
         }),
         parsing: None,
         audit: None,
+        intent: None,
     });
 
     let topic = Topic::new("observability.agent_events.s").unwrap();

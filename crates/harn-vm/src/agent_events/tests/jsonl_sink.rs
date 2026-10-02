@@ -218,6 +218,7 @@ fn jsonl_sink_redacts_tool_payloads_before_write() {
         }),
         parsing: None,
         audit: None,
+        intent: None,
     });
     sink.handle_event(&AgentEvent::ToolCallUpdate {
         session_id: "s".into(),

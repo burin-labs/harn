@@ -458,6 +458,7 @@ mod tests {
             requested_capabilities: Vec::new(),
             tool_descriptor: None,
             tool_annotations: None,
+            intent: None,
         }
     }
 
