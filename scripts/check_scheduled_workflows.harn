@@ -77,6 +77,13 @@ fn health_errors(path: string, record: dict, document: dict?) -> list<string> {
   if job != "" && document != nil && !job_display_names(document).contains(job) {
     return [path + ": health_job names no job in the workflow: " + job]
   }
+  const title = trim(to_string(record?.health_dispatch_title ?? ""))
+  if title != "" && document != nil
+    && !trim(to_string(document["run-name"] ?? "")).contains(title) {
+    return [
+      path + ": health_dispatch_title is not a title the workflow's run-name can produce: " + title,
+    ]
+  }
   if record?.health_events != nil && len(strings(record.health_events)) == 0 {
     return [path + ": health_events is empty"]
   }
@@ -237,14 +244,21 @@ fn main(harness: Harness) {
   }
   // `--health-suites` is how main health learns what to watch: the same
   // validated registry, one watched suite per line as
-  // `name<TAB>health_failures<TAB>health_events<TAB>health_job`, where
-  // health_events is comma-separated.
+  // `name<TAB>health_failures<TAB>health_events<TAB>health_dispatch_title<TAB>health_job`,
+  // where health_events is comma-separated and an unset dispatch title prints `-`
+  // (an empty field would collapse into its neighbour when split on tabs).
   if argv.contains("--health-suites") {
     for record in records {
       if record?.health_failures != nil {
         harness.stdio.println(
           trim(to_string(record.name)) + "\t" + to_string(record.health_failures) + "\t"
             + health_events(record).join(",")
+            + "\t"
+            + if trim(to_string(record?.health_dispatch_title ?? "")) == "" {
+              "-"
+            } else {
+              trim(to_string(record.health_dispatch_title))
+            }
             + "\t"
             + trim(to_string(record?.health_job ?? "")),
         )
