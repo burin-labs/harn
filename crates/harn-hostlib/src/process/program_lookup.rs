@@ -13,6 +13,9 @@ pub(super) fn missing_program(
 ) -> Option<String> {
     let plan = harn_vm::shells::plan_invocation(&spec.program, &spec.args)?;
     let cwd = command.get_current_dir()?;
+    if !cwd.is_dir() {
+        return None;
+    }
     let value = |name: &str| -> Option<OsString> {
         if let Some(value) = plan.environment.get(name) {
             return Some(value.into());
@@ -30,6 +33,27 @@ pub(super) fn missing_program(
             None => None,
         }
     };
+    if plan.requires_clean_shell_environment {
+        let defines_function = |name: &std::ffi::OsStr| {
+            name.to_str().is_some_and(|name| {
+                value(name).is_some_and(|value| {
+                    name.starts_with("BASH_FUNC_")
+                        || value.to_string_lossy().trim_start().starts_with("()")
+                })
+            })
+        };
+        if value("BASH_ENV").is_some()
+            || value("ENV").is_some()
+            || command.get_envs().any(|(name, _)| defines_function(name))
+            || plan
+                .environment
+                .keys()
+                .any(|name| defines_function(name.as_ref()))
+            || (!env_cleared && std::env::vars_os().any(|(name, _)| defines_function(&name)))
+        {
+            return None;
+        }
+    }
     let mut extensions = if cfg!(windows) {
         value("PATHEXT")
             .unwrap_or_else(|| ".COM;.EXE;.BAT;.CMD".into())

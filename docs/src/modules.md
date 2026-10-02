@@ -1611,7 +1611,8 @@ results expose the same field when the first program was absent before spawn
 and the shell exits normally with code 127. Lookup uses the child's directory
 and final `PATH`, including static environment prefixes such as `env VAR=1`.
 An installed program that exits 127 doesn't receive this field. Dynamic program
-names, login or interactive startup, and unknown search paths omit the field
+names, zsh startup, login or interactive shells, configured shell startup files,
+imported shell functions, and unknown search paths omit the field
 because pre-spawn lookup cannot establish absence. Callers don't need to parse
 stderr to use this evidence.
 

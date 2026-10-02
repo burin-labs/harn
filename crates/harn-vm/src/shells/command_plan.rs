@@ -12,6 +12,8 @@ pub struct CommandPlan {
     pub program: String,
     pub environment: BTreeMap<String, String>,
     pub argv: Option<Vec<String>>,
+    /// Shell lookup requires ruling out startup code and imported functions.
+    pub requires_clean_shell_environment: bool,
 }
 
 /// Resolve the first program of an invocation, including a POSIX shell or
@@ -24,7 +26,14 @@ pub fn plan_invocation(program: &str, args: &[String]) -> Option<CommandPlan> {
             if args.first().map(String::as_str) != Some("-c") {
                 return None;
             }
-            plan_posix_command(args.get(1)?)
+            // zsh reads startup files even for a noninteractive `-c` invocation.
+            let name = program.rsplit(['/', '\\']).next()?.to_ascii_lowercase();
+            if name.strip_suffix(".exe").unwrap_or(&name) == "zsh" {
+                return None;
+            }
+            let mut plan = plan_posix_command(args.get(1)?)?;
+            plan.requires_clean_shell_environment = true;
+            Some(plan)
         }
         Some(_) => None,
         None => {
@@ -40,6 +49,7 @@ pub fn plan_invocation(program: &str, args: &[String]) -> Option<CommandPlan> {
                     program: program.to_string(),
                     environment: BTreeMap::new(),
                     argv: None,
+                    requires_clean_shell_environment: false,
                 });
             }
             plan_posix_command(&source)
@@ -134,6 +144,7 @@ pub fn plan_posix_command(source: &str) -> Option<CommandPlan> {
         return None;
     }
     Some(CommandPlan {
+        requires_clean_shell_environment: false,
         program,
         environment,
         argv: (plain && index == 0).then_some(argv),
@@ -326,5 +337,21 @@ mod tests {
         assert_eq!(env.program, "./relative/prog");
         assert_eq!(env.environment["PATH"], "/tools");
         assert!(env.argv.is_none());
+    }
+
+    #[test]
+    fn shell_invocation_records_startup_uncertainty() {
+        let args = vec!["-c".to_string(), "absent_8932".to_string()];
+        assert!(plan_invocation("/bin/zsh", &args).is_none());
+        assert!(
+            plan_invocation("/bin/bash", &args)
+                .unwrap()
+                .requires_clean_shell_environment
+        );
+        assert!(
+            !plan_invocation("absent_8932", &[])
+                .unwrap()
+                .requires_clean_shell_environment
+        );
     }
 }

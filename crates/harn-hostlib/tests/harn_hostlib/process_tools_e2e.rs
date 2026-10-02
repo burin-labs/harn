@@ -281,6 +281,32 @@ fn real_run_command_present_program_exit_127_is_not_missing() {
 }
 
 #[test]
+fn real_run_command_startup_function_exit_127_is_not_missing() {
+    let workspace = tempfile::tempdir().unwrap();
+    let startup = workspace.path().join("startup.sh");
+    std::fs::write(
+        &startup,
+        "present_startup_8932() { printf 'called\\n' > called; return 127; }\n",
+    )
+    .unwrap();
+    let mut req = dict();
+    req.insert("mode".into(), vstr("shell"));
+    req.insert("shell_id".into(), vstr("bash"));
+    req.insert("command".into(), vstr("present_startup_8932"));
+    req.insert("cwd".into(), vstr(workspace.path().to_str().unwrap()));
+    let mut env = dict();
+    env.insert("BASH_ENV".into(), vstr(startup.to_str().unwrap()));
+    req.insert("env".into(), VmValue::dict(env));
+    let response = require_dict(call("hostlib_tools_run_command", req).unwrap());
+    assert_eq!(
+        std::fs::read_to_string(workspace.path().join("called")).unwrap(),
+        "called\n"
+    );
+    assert_eq!(require_int(&response, "exit_code"), 127);
+    assert!(!response.contains_key("missing_program"));
+}
+
+#[test]
 fn real_run_command_auto_uses_argv_for_a_plain_command() {
     let mut req = dict();
     req.insert("mode".into(), vstr("auto"));
