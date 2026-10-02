@@ -1,6 +1,15 @@
 import { read_yaml } from "std/fs"
 import { GITHUB_BUMP_PERMISSIONS } from "../bump-driver/github_authority"
 
+const CALLER_AMBIENT_CREDENTIAL_NAMES = [
+  "GITHUB_APP_ID",
+  "GITHUB_INSTALLATION_ID",
+  "GITHUB_APP_PRIVATE_KEY",
+  "GITHUB_APP_PRIVATE_KEY_FILE",
+  "GITHUB_INSTALLATION_TOKEN",
+  "GITHUB_TOKEN",
+]
+
 fn checkout_boundary_errors(steps: list) -> list<string> {
   let errors: list<string> = []
   const package_checkout = steps.find({ step -> step?.name == "Checkout package repo" })
@@ -106,13 +115,20 @@ fn workflow_input_errors(inputs: dict) -> list<string> {
 
 fn authentication_boundary_errors(steps: list, env: dict) -> list<string> {
   let errors: list<string> = []
-  if env?.GITHUB_APP_ID != "$" + "{{ secrets.app-client-id }}"
-    || env?.GITHUB_INSTALLATION_ID != "$" + "{{ steps.app-token.outputs.installation-id }}"
-    || env?.GITHUB_APP_PRIVATE_KEY != "$" + "{{ secrets.app-private-key }}" {
+  if env?.BUMP_DRIVER_APP_ID != "$" + "{{ secrets.app-client-id }}"
+    || env?.BUMP_DRIVER_INSTALLATION_ID != "$" + "{{ steps.app-token.outputs.installation-id }}"
+    || env?.BUMP_DRIVER_APP_PRIVATE_KEY != "$" + "{{ secrets.app-private-key }}" {
     errors = errors + ["bump orchestration must receive renewable App credentials"]
   }
   if env?.GH_TOKEN != nil || env?.HARN_BUMP_TOKEN != nil {
     errors = errors + ["bump orchestration must not retain the expiring bootstrap token"]
+  }
+  // Caller-owned commands inherit this environment, and packages read these
+  // conventional names to choose their own GitHub authentication.
+  for name in CALLER_AMBIENT_CREDENTIAL_NAMES {
+    if env.get(name) != nil {
+      errors = errors + ["bump orchestration must not expose ${name} to caller-owned commands"]
+    }
   }
   const bootstrap = steps.find({ step -> step?.name == "Mint GitHub App installation token" })
   const permission_fields = bootstrap?.with?.keys().filter(
@@ -305,6 +321,31 @@ pipeline test_bump_workflow_rejects_expiring_token_or_permission_drift(harness: 
   }
 }
 
+pipeline test_bump_workflow_keeps_conventional_app_names_from_caller_commands(harness: Harness) {
+  const path = path_join(harness.fs.source_dir(), "../../.github/workflows/bump-harn.yml")
+  const text = harness.fs.read_text(path)
+  const workflow = read_yaml(harness.fs, path)
+  assert_eq(bump_workflow_errors(workflow, text), [])
+  for name in CALLER_AMBIENT_CREDENTIAL_NAMES {
+    const steps = workflow.jobs.bump.steps.map(
+      { step ->
+        if step.name == "Run bump orchestration" {
+          return step + {env: step.env + {[name]: "leaked"}}
+        }
+        return step
+      },
+    )
+      .to_list()
+    const changed = workflow + {jobs: workflow.jobs + {bump: workflow.jobs.bump + {steps: steps}}}
+    assert(
+      bump_workflow_errors(changed, text).contains(
+        "bump orchestration must not expose ${name} to caller-owned commands",
+      ),
+      "a step env exposing ${name} must be refused",
+    )
+  }
+}
+
 pipeline test_shipped_workflow_removes_private_key_before_child_launch(harness: Harness) {
   const path = path_join(harness.fs.source_dir(), "../../.github/workflows/bump-harn.yml")
   const workflow = read_yaml(harness.fs, path)
@@ -312,10 +353,10 @@ pipeline test_shipped_workflow_removes_private_key_before_child_launch(harness: 
   for remove_unset in [false, true] {
     const root = harness.fs.mkdtemp_in_workspace("bump-workflow-key-")
     const adapter =
-      "harn() { case \"$1\" in --version) : ;; run) printf '%s\\n' \"$GITHUB_APP_PRIVATE_KEY_FILE\"; bash -c 'test -z \"$"
-      + "{GITHUB_APP_PRIVATE_KEY+x}\"' ;; *) return 64 ;; esac; }; export -f harn\n"
+      "harn() { case \"$1\" in --version) : ;; run) printf '%s\\n' \"$BUMP_DRIVER_APP_PRIVATE_KEY_FILE\"; bash -c 'test -z \"$"
+      + "{BUMP_DRIVER_APP_PRIVATE_KEY+x}\"' ;; *) return 64 ;; esac; }; export -f harn\n"
     const command = if remove_unset {
-      step.run.replace("unset GITHUB_APP_PRIVATE_KEY", "true")
+      step.run.replace("unset BUMP_DRIVER_APP_PRIVATE_KEY", "true")
     } else {
       step.run
     }
@@ -325,7 +366,7 @@ pipeline test_shipped_workflow_removes_private_key_before_child_launch(harness: 
         args: ["-c", adapter + command],
         env: {
           RUNNER_TEMP: root,
-          GITHUB_APP_PRIVATE_KEY: "synthetic-key",
+          BUMP_DRIVER_APP_PRIVATE_KEY: "synthetic-key",
           HARN_BUMP_APPLY_BEHAVIOR_PRESERVING_FIXES: "true",
         },
       },
@@ -386,10 +427,10 @@ fn assert_refresh_execution(
         args: ["-c", adapter + "\n" + step.run],
         env: {
           RUNNER_TEMP: root,
-          GITHUB_APP_PRIVATE_KEY: "synthetic-app-key",
+          BUMP_DRIVER_APP_PRIVATE_KEY: "synthetic-app-key",
           PHASES: phases,
           HARN_BUMP_REFRESH_COMMAND: "test -z \"$"
-            + "{GITHUB_APP_PRIVATE_KEY+x}\"; printf 'caller\\n' >> \"$PHASES\"; "
+            + "{BUMP_DRIVER_APP_PRIVATE_KEY+x}\"; printf 'caller\\n' >> \"$PHASES\"; "
             + if caller_ok {
               "true"
             } else {
