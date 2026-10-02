@@ -88,6 +88,12 @@ jobs:
     if: github.repository == 'burin-labs/harn'
     permissions:
       contents: read
+    # Live runs read budget-capped provider keys from the `provider-probe`
+    # environment, which only protected branches may deploy to. Dry runs
+    # (pull requests and pushes) name no environment, so the branch policy never
+    # gates them and they never receive keys. Job-level `environment` cannot read
+    # `env`, so this repeats the PROVIDER_CONTRACT_PROBE_LIVE condition.
+    environment: ${{ (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.live)) && 'provider-probe' || '' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     outputs:
