@@ -371,9 +371,8 @@ fn write_handler_envelope_registry_fixture(temp: &TempDir) {
     fs::write(
         temp.path().join("server.harn"),
         r#"
-import { tool_registry_from } from "std/tools"
+import { tool_registry_from, ToolRegistry } from "std/tools"
 import { agent_tool_handler_result } from "std/agent/tool_lifecycle"
-import { agent_dispatch_tool_call } from "std/agent/primitives"
 
 const WIDGET = {
   type: "object",
@@ -400,7 +399,7 @@ fn raw_widget(args: dict) -> dict {
   return {id: args.widget_id, name: "raw"}
 }
 
-fn widget_tools() {
+pub fn widget_tools() -> ToolRegistry {
   return tool_registry_from([
     {
       name: "get",
@@ -437,6 +436,18 @@ fn widget_tools() {
   ], {info: {name: "widgets", version: "1.0.0"}})
 }
 
+fn main(harness: Harness) {
+  harness.tools.mcp_tools(widget_tools())
+}
+"#,
+    )
+    .unwrap();
+    fs::write(
+        temp.path().join("agent.harn"),
+        r#"
+import { widget_tools } from "./server"
+import { agent_dispatch_tool_call } from "std/agent/primitives"
+
 @test
 pipeline agent_schema_parity(harness: Harness) {
   const tools = widget_tools()
@@ -452,9 +463,6 @@ pipeline agent_schema_parity(harness: Harness) {
   assert(failed.error_category == "tool_error")
 }
 
-fn main(harness: Harness) {
-  harness.tools.mcp_tools(widget_tools())
-}
 "#,
     )
     .unwrap();
@@ -468,9 +476,10 @@ fn registry_handler_result_envelope_has_cli_and_mcp_parity() {
     let temp = TempDir::new().unwrap();
     write_handler_envelope_registry_fixture(&temp);
     let script = temp.path().join("server.harn").display().to_string();
+    let agent_script = temp.path().join("agent.harn").display().to_string();
     let agent = harn_e2e_command()
         .current_dir(temp.path())
-        .args(["test", &script])
+        .args(["test", &agent_script])
         .output()
         .expect("agent dispatcher invocation");
     assert!(
