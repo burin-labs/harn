@@ -219,7 +219,7 @@ async fn call_harness_method_in_scope(
     }
     if let Some(capability) = handle.kind().capability_id() {
         if harn_builtin_meta::host_capabilities::is_host_capability_method(capability, method) {
-            return call_dict_host_capability_method(handle, capability.field_name(), method, args)
+            return call_dict_host_capability_method(vm, handle, capability.field_name(), method, args)
                 .await;
         }
     }

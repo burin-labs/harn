@@ -74,6 +74,20 @@ impl HostCallBridge for AcpHostCallBridge {
         params: &'a harn_vm::value::DictMap,
     ) -> HostCallDispatchFuture<'a> {
         Box::pin(async move {
+            let trace = harn_vm::stdlib::host::trace::HostRequestTrace::new(None, params);
+            self.dispatch_traced(capability, operation, params, &trace)
+                .await
+        })
+    }
+
+    fn dispatch_traced<'a>(
+        &'a self,
+        capability: &'a str,
+        operation: &'a str,
+        params: &'a harn_vm::value::DictMap,
+        trace: &'a harn_vm::stdlib::host::trace::HostRequestTrace,
+    ) -> HostCallDispatchFuture<'a> {
+        Box::pin(async move {
             // Session prompt content is local to the ACP prompt — serve it
             // without a host round-trip, matching the pre-#5523 short-circuit.
             if capability == "runtime" && operation == "prompt_content" {
@@ -90,6 +104,7 @@ impl HostCallBridge for AcpHostCallBridge {
                         "sessionId": self.bridge.session_id,
                         "name": name,
                         "args": args_json,
+                        "_meta": {"harn": {"requestTrace": trace}},
                     }),
                 )
                 .await?;
@@ -121,23 +136,29 @@ pub(super) async fn register_acp_builtins(
     prompt_content: harn_vm::VmValue,
     host_capability_manifest: harn_vm::VmValue,
 ) {
-    let selected_shell =
-        if manifest_has_operation(&host_capability_manifest, "process", "get_default_shell") {
-            bridge
+    let selected_shell = if manifest_has_operation(
+        &host_capability_manifest,
+        "process",
+        "get_default_shell",
+    ) {
+        bridge
                 .call_client(
                     "host/call",
                     serde_json::json!({
                         "sessionId": bridge.session_id,
                         "name": "process.get_default_shell",
                         "args": {},
+                        "_meta": {"harn": {"requestTrace":
+                            harn_vm::stdlib::host::trace::HostRequestTrace::new(None, &Default::default())
+                        }},
                     }),
                 )
                 .await
                 .map(|result| harn_vm::bridge::json_result_to_vm_value(&result))
                 .unwrap_or_else(|_| harn_vm::shells::default_shell_vm_value())
-        } else {
-            harn_vm::shells::default_shell_vm_value()
-        };
+    } else {
+        harn_vm::shells::default_shell_vm_value()
+    };
 
     // Diagnostic logs must not become assistant-visible reply text.
     // Product paths call `harness.stdio.log` (capability method), not the bare
