@@ -167,6 +167,28 @@ pipeline test_provider_option_probe_reads_openrouter_parameter_refusals_as_rejec
   assert_eq(policy.verdict, "excluded_by_account_policy")
   assert_eq(policy.measured, false)
   assert_eq(policy.failure_class, "account_policy")
+  const unrelated_policy = provider_option_probe_classify(
+    Err(
+      {
+        origin: "provider",
+        kind: "terminal",
+        reason: "model_unavailable",
+        message: "another-provider HTTP 404 Not Found: guardrail restrictions and data policy",
+      },
+    ),
+  )
+  assert_eq(unrelated_policy.verdict, "inconclusive")
+  const report = provider_option_probe_report(
+    "openrouter",
+    "nvidia/nemotron-3-super-120b-a12b:free",
+    "openai:default",
+    "temperature",
+    true,
+    true,
+    policy,
+  )
+  assert_eq(report.diff.observed_supported, nil)
+  assert_eq(report.probe.measured_count, 0)
 }
 
 @test

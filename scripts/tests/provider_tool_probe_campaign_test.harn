@@ -1312,11 +1312,13 @@ pipeline test_provider_tool_probe_campaign_requires_measured_true_and_false_cont
       probe: accepted_report.probe
         + {
           verdict: "excluded_by_account_policy",
+          measured_count: 0,
           attempt: {
             verdict: "excluded_by_account_policy",
             measured: false,
             request_count: 1,
             failure_class: "account_policy",
+            cost_usd: 0.0,
           },
         },
       diff: {status: "unmeasured", claimed_supported: true, observed_supported: nil},
@@ -1368,6 +1370,7 @@ pipeline test_provider_tool_probe_campaign_requires_measured_true_and_false_cont
       probe: unmeasured_report.probe
         + {
           verdict: "inconclusive",
+          request_count: 2,
           attempt: {
             verdict: "inconclusive",
             measured: false,
