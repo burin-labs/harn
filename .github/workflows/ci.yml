@@ -1536,6 +1536,14 @@ jobs:
     # few minutes for the merge queue to meet its ten-minute target. On
     # 2026-10-01 one worker ran conformance in 461s and another ran every audit
     # gate in 824s; `scripts/audit_gates.sh` documents the measured split.
+    #
+    # `harn_check_cache` names the lanes that persist Harn's own check and
+    # compiled-module cache between runs. Measured on 4 pinned cores on
+    # 2026-10-01 with the CI binary: the whole sources lane fell from 175s cold
+    # to 94s warm (its conformance lint from 169s to 85s), and the agent-loop
+    # suite from 75-79s to 52-57s. Conformance tests (193s cold, 172s warm) and
+    # the documentation lane (127s, 120s) gained too little to be worth an
+    # entry, so they stay cold. The sources entry is about 0.5 MB compressed.
     strategy:
       fail-fast: false
       matrix:
@@ -1570,6 +1578,7 @@ jobs:
             phase: audit
             selector: --group=sources
             fetch_depth: 0
+            harn_check_cache: audit
           - kind: audit-docs
             name: Check Harn documentation
             step_name: documentation checks
@@ -1582,11 +1591,14 @@ jobs:
             phase: audit
             selector: --group=scripts
             fetch_depth: 0
+            harn_check_cache: audit-scripts
     # Hang backstop, not a performance budget. The per-test performance ratchet
     # still owns performance regressions.
     timeout-minutes: 65
+    # actions: write lets a main run prune the check-cache generation its save
+    # superseded. Every other step only reads.
     permissions:
-      actions: read
+      actions: write
       contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -1602,6 +1614,10 @@ jobs:
           # ls-files`, so it lost that cross-check entirely and still reported a
           # pass. Nothing in this lane pushes. See audit-scripts for the sibling.
           persist-credentials: false
+      - uses: ./.github/actions/harn-check-cache
+        if: matrix.harn_check_cache != ''
+        with:
+          family: ${{ matrix.harn_check_cache }}
       - uses: ./.github/actions/node-cache
         if: matrix.kind == 'audit'
         with:
@@ -1657,6 +1673,19 @@ jobs:
             args+=(--tree-sitter-parser-preflighted)
           fi
           ./scripts/audit_gates.sh "${args[@]}"
+      # Only a passing main run saves, so the entry is one commit's complete
+      # working set. A failed save or prune never fails the gate it follows.
+      #
+      # This writer exists only while main pushes run this job. If the
+      # exact-SHA merge-group proof starts skipping them, nothing saves; lanes
+      # then restore an ever-older generation, whose entries miss rather than
+      # mislead, and the restore summary line names the commit it came from.
+      - name: Save Harn check cache
+        if: matrix.harn_check_cache != ''
+        continue-on-error: true
+        uses: ./.github/actions/harn-check-cache-save
+        with:
+          family: ${{ matrix.harn_check_cache }}
       - name: Upload source gate receipt
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:

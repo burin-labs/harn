@@ -22,7 +22,12 @@ elif [[ "$args" == *'/actions/caches?ref=refs/heads/main&per_page=100'* ]]; then
     echo "mock retention API authorization failure" >&2
     exit 1
   fi
-  if [[ "${MOCK_LOCAL_SCCACHE:-0}" == "1" ]]; then
+  if [[ "${MOCK_HARN_CHECK_CACHE:-0}" == "1" ]]; then
+    # Two main generations of the audit family, one of audit-scripts (a
+    # different family sharing the prefix up to the family name), a
+    # pull-request entry, and a hand-written key without a commit suffix.
+    printf '%s\n' '[{"actions_caches":[{"id":60,"ref":"refs/heads/main","key":"harn-check-cache-v1-audit-Linux-X64-1111111111111111111111111111111111111111","created_at":"2026-01-01T00:00:00Z"},{"id":61,"ref":"refs/heads/main","key":"harn-check-cache-v1-audit-Linux-X64-2222222222222222222222222222222222222222","created_at":"2026-01-02T00:00:00Z"},{"id":62,"ref":"refs/heads/main","key":"harn-check-cache-v1-audit-scripts-Linux-X64-1111111111111111111111111111111111111111","created_at":"2026-01-01T00:00:00Z"},{"id":63,"ref":"refs/pull/9/merge","key":"harn-check-cache-v1-audit-Linux-X64-3333333333333333333333333333333333333333","created_at":"2026-01-03T00:00:00Z"},{"id":64,"ref":"refs/heads/main","key":"harn-check-cache-v1-audit-Linux-X64-manual","created_at":"2026-01-04T00:00:00Z"}]}]'
+  elif [[ "${MOCK_LOCAL_SCCACHE:-0}" == "1" ]]; then
     printf '%s\n' '[{"actions_caches":[{"id":40,"ref":"refs/heads/main","key":"burin-labs/harn-sccache-local-release-x86_64-pc-windows-msvc-Windows-X64-1111111111111111111111111111111111111111","created_at":"2026-01-01T00:00:00Z"},{"id":41,"ref":"refs/heads/main","key":"burin-labs/harn-sccache-local-release-x86_64-pc-windows-msvc-Windows-X64-2222222222222222222222222222222222222222","created_at":"2026-01-02T00:00:00Z"},{"id":42,"ref":"refs/pull/9/merge","key":"burin-labs/harn-sccache-local-release-x86_64-pc-windows-msvc-Windows-X64-3333333333333333333333333333333333333333","created_at":"2026-01-03T00:00:00Z"},{"id":43,"ref":"refs/heads/main","key":"burin-labs/harn-sccache-local-release-aarch64-apple-darwin-macOS-ARM64-1111111111111111111111111111111111111111","created_at":"2026-01-01T00:00:00Z"},{"id":44,"ref":"refs/heads/main","key":"burin-labs/harn-sccache-local-release-x86_64-pc-windows-msvc-Windows-X64-manual","created_at":"2026-01-04T00:00:00Z"}]}]'
   elif [[ "${MOCK_DUPLICATE_RELEASE:-0}" == "1" ]]; then
     printf '[{"total_count":2,"actions_caches":[{"id":1,"ref":"refs/heads/main","key":"v0-rust-release-x86_64-unknown-linux-gnu-Linux-x64-11111111-aaaaaaaa","size_in_bytes":2000,"created_at":"2026-01-01T00:00:00Z"},{"id":3,"ref":"refs/heads/main","key":"v0-rust-release-x86_64-unknown-linux-gnu-Linux-x64-22222222-bbbbbbbb","size_in_bytes":2100,"created_at":"2026-01-02T00:00:00Z"}]}]\n'
@@ -102,6 +107,31 @@ if PATH="$tmp/bin:$PATH" MOCK_GH_LOG="$tmp/invalid-local-sccache-prune-gh.log" \
 fi
 grep -q -- '--local-sccache-family-prefix' "$tmp/invalid-local-sccache-prune.err"
 test ! -s "$tmp/invalid-local-sccache-prune-gh.log"
+
+# Keep exactly the newest main generation of one Harn check-cache family. The
+# audit-scripts entry shares the `audit` prefix text but its key does not end
+# in <os>-<arch>-<sha> after that prefix, so it must survive.
+PATH="$tmp/bin:$PATH" MOCK_GH_LOG="$tmp/harn-check-cache-prune-gh.log" \
+  MOCK_HARN_CHECK_CACHE=1 GITHUB_REPOSITORY=burin-labs/harn \
+  "$repo_root/scripts/prune_ci_cache_generations.sh" \
+  --harn-check-cache-family-prefix harn-check-cache-v1-audit-Linux-X64-
+cat >"$tmp/expected-harn-check-cache-prune-gh.log" <<'EXPECTED'
+api --paginate repos/burin-labs/harn/actions/caches?ref=refs/heads/main&per_page=100 --slurp
+cache delete 60 --repo burin-labs/harn
+EXPECTED
+diff -u "$tmp/expected-harn-check-cache-prune-gh.log" "$tmp/harn-check-cache-prune-gh.log"
+
+if PATH="$tmp/bin:$PATH" MOCK_GH_LOG="$tmp/invalid-harn-check-cache-prune-gh.log" \
+  GITHUB_REPOSITORY=burin-labs/harn \
+  "$repo_root/scripts/prune_ci_cache_generations.sh" \
+  --harn-check-cache-family-prefix harn-check-cache-v1- \
+  >"$tmp/invalid-harn-check-cache-prune.out" \
+  2>"$tmp/invalid-harn-check-cache-prune.err"; then
+  echo "expected a prefix spanning every Harn check-cache family to fail" >&2
+  exit 1
+fi
+grep -q -- '--harn-check-cache-family-prefix' "$tmp/invalid-harn-check-cache-prune.err"
+test ! -s "$tmp/invalid-harn-check-cache-prune-gh.log"
 
 PATH="$tmp/bin:$PATH" MOCK_GH_LOG="$tmp/clear-linux-family-gh.log" \
   GITHUB_REPOSITORY=burin-labs/harn \
