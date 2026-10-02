@@ -51,6 +51,23 @@ fn legacy_registration_store() -> Result<ChainSecretProvider, String> {
     Ok(ChainSecretProvider::new(chain.namespace(), persistent))
 }
 
+/// The pre-namespace keyring service that still holds a refresh token for
+/// `provider_name`, if any. Presence only: no value is read, so no Keychain
+/// dialog is raised. Harn does not reuse legacy tokens; this exists so a
+/// missing-refresh-token error can say where the old one is. Only the keyring
+/// keeps the old namespace apart from the current one, so only a keyring in
+/// the configured chain is asked.
+pub(super) async fn legacy_refresh_token_service(provider_name: &str) -> Option<String> {
+    let store = legacy_registration_store().ok()?;
+    let id = harn_vm::secrets::connector_refresh_token_id(provider_name);
+    for provider in store.providers() {
+        if provider.kind() == "keyring" && matches!(provider.contains(&id).await, Ok(true)) {
+            return Some(store.namespace().to_string());
+        }
+    }
+    None
+}
+
 pub(super) async fn load_legacy_oauth_registration(
     provider_name: &str,
 ) -> Result<Option<LegacyOAuthRegistration>, String> {

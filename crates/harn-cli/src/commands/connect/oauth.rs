@@ -16,8 +16,9 @@ use crate::package::{self, ConnectorSetupConfigurationField, ProviderOAuthManife
 
 use super::callback::{bind_loopback_listener, wait_for_oauth_response, OAuthCallbackError};
 use super::oauth_migration::{
-    legacy_registration_missing_redirect, load_legacy_oauth_registration,
-    migrated_oauth_client_secret_required, oauth_request_with_legacy_registration,
+    legacy_refresh_token_service, legacy_registration_missing_redirect,
+    load_legacy_oauth_registration, migrated_oauth_client_secret_required,
+    oauth_request_with_legacy_registration,
 };
 use super::setup_events::{
     ConnectorSetupErrorCode, ConnectorSetupFailure, ConnectorSetupInteraction,
@@ -66,6 +67,7 @@ pub(super) async fn run_connect_named_oauth(
             .token_auth_method
             .clone()
             .or_else(|| Some(defaults.token_auth_method.to_string())),
+        authorization_params: Default::default(),
         no_open: args.no_open,
         json: args.json,
     })
@@ -107,6 +109,7 @@ pub(super) async fn run_connect_generic(args: &ConnectGenericArgs) -> Result<(),
         scopes: args.oauth.scope.clone(),
         redirect_uri: args.oauth.redirect_uri.clone(),
         token_auth_method: args.oauth.token_auth_method.clone(),
+        authorization_params: Default::default(),
         no_open: args.oauth.no_open,
         json: args.oauth.json,
     })
@@ -351,9 +354,67 @@ pub(super) fn oauth_request_from_provider_metadata(
             .token_auth_method
             .clone()
             .or_else(|| metadata.token_endpoint_auth_method.clone()),
+        authorization_params: metadata.authorization_params.clone(),
         no_open: args.no_open,
         json: args.json,
     })
+}
+
+/// Authorization-request parameters a known authorization server needs for
+/// `harn connect` to store a credential it can later refresh. Google issues a
+/// refresh token only for `access_type=offline`, and re-issues one to an
+/// already-consented client only with `prompt=consent`; without both,
+/// `harn connect --refresh` has nothing to refresh with.
+const AUTHORIZATION_SERVER_DEFAULT_PARAMS: &[(&str, &[(&str, &str)])] = &[(
+    "accounts.google.com",
+    &[("access_type", "offline"), ("prompt", "consent")],
+)];
+
+/// Query parameters the OAuth flow itself sets; manifest params may not
+/// replace them.
+const FLOW_OWNED_AUTHORIZATION_PARAMS: &[&str] = &[
+    "response_type",
+    "client_id",
+    "redirect_uri",
+    "state",
+    "code_challenge",
+    "code_challenge_method",
+    "resource",
+    "scope",
+];
+
+/// The extra authorization query parameters for `authorization_endpoint`:
+/// the known-server defaults, overridden key by key by the manifest's
+/// `authorization_params`.
+pub(super) fn authorization_params_for(
+    authorization_endpoint: &str,
+    declared: &std::collections::BTreeMap<String, String>,
+) -> Result<Vec<(String, String)>, String> {
+    if let Some(owned) = declared
+        .keys()
+        .find(|key| FLOW_OWNED_AUTHORIZATION_PARAMS.contains(&key.as_str()))
+    {
+        return Err(format!(
+            "OAuth authorization_params may not set `{owned}`; harn connect owns that parameter"
+        ));
+    }
+    let host = Url::parse(authorization_endpoint)
+        .ok()
+        .and_then(|url| url.host_str().map(str::to_ascii_lowercase));
+    let mut params = std::collections::BTreeMap::<String, String>::new();
+    if let Some(host) = host {
+        for (server, defaults) in AUTHORIZATION_SERVER_DEFAULT_PARAMS {
+            if host == *server {
+                for (key, value) in *defaults {
+                    params.insert((*key).to_string(), (*value).to_string());
+                }
+            }
+        }
+    }
+    for (key, value) in declared {
+        params.insert(key.clone(), value.clone());
+    }
+    Ok(params.into_iter().collect())
 }
 
 pub(super) fn oauth_provider_defaults(provider: &str) -> Option<OAuthProviderDefaults> {
@@ -390,7 +451,9 @@ pub(super) async fn run_oauth_connect(mut request: OAuthConnectRequest) -> Resul
         ConnectorSetupInteraction::None,
         "Preparing service sign-in.",
     );
-    match run_oauth_connect_inner(&mut request, &mut reporter).await {
+    // Boxed: the authorization flow's future is large, and every connect
+    // dispatcher frame would otherwise carry it inline.
+    match Box::pin(run_oauth_connect_inner(&mut request, &mut reporter)).await {
         Ok(()) => Ok(()),
         Err(failure) => {
             reporter.failed(&failure);
@@ -496,7 +559,7 @@ async fn run_oauth_connect_inner(
     })?;
     let (code_verifier, code_challenge) = generate_pkce_pair();
     let state = random_hex(16);
-    let auth_url = build_authorization_url(
+    let mut auth_url = build_authorization_url(
         &authorization_endpoint,
         &client_id,
         &redirect_uri,
@@ -512,6 +575,22 @@ async fn run_oauth_connect_inner(
             error,
         )
     })?;
+    let extra_params =
+        authorization_params_for(&authorization_endpoint, &request.authorization_params).map_err(
+            |error| {
+                setup_failure(
+                    ConnectorSetupErrorCode::ConfigurationMissing,
+                    ConnectorSetupStage::Resolving,
+                    error,
+                )
+            },
+        )?;
+    if !extra_params.is_empty() {
+        let mut query = auth_url.query_pairs_mut();
+        for (key, value) in &extra_params {
+            query.append_pair(key, value);
+        }
+    }
 
     reporter.progress(
         ConnectorSetupStage::OpeningBrowser,
@@ -632,6 +711,15 @@ async fn run_oauth_connect_inner(
             ConnectorSetupStage::Validating,
             "validation failed after saving connector credentials",
         ));
+    }
+    if stored.refresh_token.is_none() && !request.json {
+        eprintln!(
+            "note: {} did not issue a refresh token, so `harn connect --refresh {}` and \
+             std/oauth refresh will not work once the access token expires. If the provider \
+             needs a parameter for offline access, declare it under \
+             [providers.oauth] authorization_params.",
+            request.provider, request.provider
+        );
     }
 
     reporter.succeeded("The service is connected.");
@@ -796,9 +884,12 @@ pub(super) async fn run_connect_refresh(
     json_output: bool,
 ) -> Result<(), String> {
     let mut stored = load_connector_token(provider_name).await?;
-    let refresh_token = stored.refresh_token.clone().ok_or_else(|| {
-        format!("stored connector token for {provider_name} does not include a refresh token")
-    })?;
+    let Some(refresh_token) = stored.refresh_token.clone() else {
+        return Err(missing_refresh_token_error(
+            provider_name,
+            legacy_refresh_token_service(provider_name).await,
+        ));
+    };
     let mut token_endpoint = stored.token_endpoint.clone();
     if let Some(stored_issuer) = stored.issuer.as_deref() {
         let discovery = discover_oauth_server(&stored.resource).await?;
@@ -839,6 +930,28 @@ pub(super) async fn run_connect_refresh(
         println!("Refreshed OAuth token for {provider_name}.");
     }
     Ok(())
+}
+
+/// Names the record `--refresh` read and, when one exists, the legacy keyring
+/// service that still holds a refresh token, so "no refresh token" is not
+/// mistaken for "never had one".
+pub(super) fn missing_refresh_token_error(
+    provider_name: &str,
+    legacy_service: Option<String>,
+) -> String {
+    let store = super::store::connector_token_store_description(provider_name);
+    let mut message = format!(
+        "stored connector token for {provider_name} ({store}) does not include a refresh token; \
+         the provider did not issue one when it was authorized. Re-run `harn connect \
+         {provider_name}` to authorize with offline access"
+    );
+    if let Some(service) = legacy_service {
+        message.push_str(&format!(
+            ". A refresh token from an older Harn release exists in keyring service {service}; \
+             Harn does not reuse tokens from that service"
+        ));
+    }
+    message
 }
 
 pub(super) async fn discover_oauth_server(resource: &str) -> Result<OAuthDiscoveryResult, String> {

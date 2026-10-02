@@ -133,6 +133,90 @@ fn authorization_url_includes_pkce_and_resource_indicator() {
 }
 
 #[test]
+fn google_authorization_requests_offline_access_by_default() {
+    let none = std::collections::BTreeMap::new();
+    let google = authorization_params_for("https://accounts.google.com/o/oauth2/v2/auth", &none)
+        .expect("google params");
+    assert_eq!(
+        google,
+        vec![
+            ("access_type".to_string(), "offline".to_string()),
+            ("prompt".to_string(), "consent".to_string()),
+        ]
+    );
+
+    // Negative controls: other servers and look-alike hosts get no defaults.
+    assert!(
+        authorization_params_for("https://auth.example.com/authorize", &none)
+            .unwrap()
+            .is_empty()
+    );
+    assert!(authorization_params_for(
+        "https://accounts.google.com.example.net/o/oauth2/auth",
+        &none
+    )
+    .unwrap()
+    .is_empty());
+
+    // Declared params override defaults key by key and add new keys.
+    let declared = std::collections::BTreeMap::from([
+        ("prompt".to_string(), "select_account".to_string()),
+        ("hd".to_string(), "example.com".to_string()),
+    ]);
+    let merged =
+        authorization_params_for("https://accounts.google.com/o/oauth2/v2/auth", &declared)
+            .unwrap();
+    assert_eq!(
+        merged,
+        vec![
+            ("access_type".to_string(), "offline".to_string()),
+            ("hd".to_string(), "example.com".to_string()),
+            ("prompt".to_string(), "select_account".to_string()),
+        ]
+    );
+
+    let hijack = std::collections::BTreeMap::from([("client_id".to_string(), "x".to_string())]);
+    let error = authorization_params_for("https://auth.example.com/authorize", &hijack)
+        .expect_err("flow-owned parameter");
+    assert!(error.contains("`client_id`"), "{error}");
+}
+
+#[test]
+fn provider_manifest_declares_authorization_params() {
+    let manifest: ProviderOAuthManifest = toml::from_str(
+        r#"
+authorization_endpoint = "https://auth.example.com/authorize"
+authorization_params = { access_type = "offline" }
+"#,
+    )
+    .expect("manifest parses");
+    assert_eq!(
+        manifest
+            .authorization_params
+            .get("access_type")
+            .map(String::as_str),
+        Some("offline")
+    );
+}
+
+#[test]
+fn missing_refresh_token_error_names_the_store_and_any_legacy_record() {
+    let without_legacy = missing_refresh_token_error("acme", None);
+    assert!(
+        without_legacy.contains("secret acme/oauth-token in providers:"),
+        "{without_legacy}"
+    );
+    assert!(without_legacy.contains("harn connect acme"));
+    assert!(!without_legacy.contains("older Harn release"));
+
+    let with_legacy = missing_refresh_token_error("acme", Some("harn/acme-pkg".to_string()));
+    assert!(
+        with_legacy.contains("keyring service harn/acme-pkg"),
+        "{with_legacy}"
+    );
+}
+
+#[test]
 fn registered_provider_metadata_builds_oauth_request_with_cli_overrides() {
     let metadata = ProviderOAuthManifest {
         authorization_endpoint: Some("https://auth.example.com/authorize".to_string()),
@@ -143,6 +227,7 @@ fn registered_provider_metadata_builds_oauth_request_with_cli_overrides() {
         client_id: Some("manifest-client".to_string()),
         client_secret: Some("manifest-secret".to_string()),
         token_endpoint_auth_method: Some("client_secret_post".to_string()),
+        authorization_params: Default::default(),
     };
     let args = ConnectOAuthArgs {
         client_id: Some("cli-client".to_string()),
@@ -234,6 +319,7 @@ async fn legacy_oauth_migration_recovers_registration_without_token_material() {
             scopes: None,
             redirect_uri: DEFAULT_OAUTH_REDIRECT_URI.to_string(),
             token_auth_method: None,
+            authorization_params: Default::default(),
             no_open: true,
             json: false,
         },
@@ -305,6 +391,7 @@ async fn authentic_old_token_requires_the_registered_redirect_again() {
         scopes: None,
         redirect_uri: DEFAULT_OAUTH_REDIRECT_URI.to_string(),
         token_auth_method: None,
+        authorization_params: Default::default(),
         no_open: true,
         json: false,
     };
@@ -353,6 +440,7 @@ fn explicit_oauth_registration_wins_over_every_legacy_field() {
         scopes: Some("current.read".to_string()),
         redirect_uri: "http://127.0.0.1:49999/current".to_string(),
         token_auth_method: Some("none".to_string()),
+        authorization_params: Default::default(),
         no_open: true,
         json: false,
     };
@@ -1143,6 +1231,7 @@ async fn generic_oauth_prefers_default_cimd_client_before_dcr() {
         scopes: None,
         redirect_uri: "http://127.0.0.1:49152/oauth/callback".to_string(),
         token_auth_method: None,
+        authorization_params: Default::default(),
         no_open: true,
         json: false,
     };

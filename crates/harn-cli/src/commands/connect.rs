@@ -57,6 +57,9 @@ struct OAuthConnectRequest {
     scopes: Option<String>,
     redirect_uri: String,
     token_auth_method: Option<String>,
+    /// Manifest-declared authorization query parameters; merged over the
+    /// defaults for a known authorization server at URL build time.
+    authorization_params: std::collections::BTreeMap<String, String>,
     no_open: bool,
     json: bool,
 }
@@ -241,7 +244,7 @@ async fn run_connect_inner(args: ConnectArgs) -> Result<(), String> {
         return run_connect_revoke(&provider, args.json).await;
     }
     if let Some(provider) = args.refresh {
-        return run_connect_refresh(&provider, args.json).await;
+        return Box::pin(run_connect_refresh(&provider, args.json)).await;
     }
     if !args.generic.is_empty() {
         if args.generic.len() != 2 {

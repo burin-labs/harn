@@ -3008,10 +3008,18 @@ Stored OAuth tokens are written under connector-friendly secret ids:
 - `<provider>/refresh-token` when the provider returns one
 - `<provider>/oauth-token` for the full local refresh metadata
 
-`harn connect --list` reads a small keyring index and shows token expiration
-and last-used metadata when known. `--refresh <provider>` forces a refresh-token
-grant. `--revoke <provider>` removes the local OAuth token, access token,
-refresh token, and index entry.
+These ids live in the `HARN_SECRET_PROVIDERS` chain, under the namespace named
+by `HARN_SECRET_NAMESPACE` (default `harn.provider_auth`). `harness.secrets`
+and `std/oauth` secrets storage use the same chain, so the CLI and scripts
+share one record per provider.
+
+`harn connect --list` reads a small connector index and shows token expiration
+and last-used metadata when known. It names the provider chain it read, and
+`--json` reports it as `store`. `--refresh <provider>` forces a refresh-token
+grant. When the stored record has no refresh token, the error names the record
+and any keyring service from an older Harn release that still holds one. Harn
+does not reuse tokens from those older services. `--revoke <provider>` removes
+the local OAuth token, access token, refresh token, and index entry.
 
 Provider-specific OAuth flags:
 
