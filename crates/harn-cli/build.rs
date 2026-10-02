@@ -62,6 +62,7 @@ fn main() {
                 fs::write(&path, b"").expect("write placeholder portal asset");
             }
         }
+        backdate_placeholder(&portal_dist);
     }
 
     embedded_assets::emit_watches(&manifest_dir);
@@ -206,6 +207,38 @@ fn ensure_git_hooks_installed() {
     let _ = Command::new("git")
         .args(["config", "core.hooksPath", ".githooks"])
         .status();
+}
+
+/// Date a placeholder tree this build script just wrote before any build.
+///
+/// `portal-dist` is watched, and Cargo records a build script's start time as
+/// the reference for its watched paths. Files the script itself writes are
+/// newer than that, so the next Cargo command saw them as changed and
+/// recompiled `harn-cli`: once per fresh checkout, about a minute before every
+/// CI workspace test run. A real portal build writes newer files and still
+/// triggers the rerun that embeds it. Best effort: a platform that cannot set
+/// a directory's time keeps the old behavior.
+fn backdate_placeholder(root: &Path) {
+    let long_ago = std::time::UNIX_EPOCH + std::time::Duration::from_secs(86_400);
+    let mut pending = vec![root.to_path_buf()];
+    let mut dirs = Vec::new();
+    while let Some(path) = pending.pop() {
+        if path.is_dir() {
+            if let Ok(entries) = fs::read_dir(&path) {
+                pending.extend(entries.filter_map(|entry| entry.ok().map(|entry| entry.path())));
+            }
+            dirs.push(path);
+        } else if let Ok(file) = fs::File::options().write(true).open(&path) {
+            let _ = file.set_modified(long_ago);
+        }
+    }
+    // Children first: writing an entry's time does not touch its parent, but
+    // creating the entries did, so parents are dated after their contents.
+    for dir in dirs.into_iter().rev() {
+        if let Ok(handle) = fs::File::open(&dir) {
+            let _ = handle.set_modified(long_ago);
+        }
+    }
 }
 
 /// Watch the CLI AOT manifest in a way that survives its absence.
