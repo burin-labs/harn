@@ -60,7 +60,9 @@ type StepBudget = {name: string, minutes: int, cold_seconds: int}
 
 /** `rust-cli` builds the shared CLI beside the test job. */
 const CLI_PRODUCER_STEP_BUDGETS: list<StepBudget> = [
-  {name: "Build portable Harn CLI", minutes: 10, cold_seconds: 435},
+  // The ci-cli profile (opt-level 1) on hosted ubuntu-8core with no ci-cli
+  // target restored: 850s on run 36956226587, against 435s for dev.
+  {name: "Build portable Harn CLI", minutes: 19, cold_seconds: 850},
 ]
 
 /** `rust-check-inputs` builds and runs the workspace test graph. */
@@ -77,9 +79,13 @@ const PRODUCER_STEP_BUDGETS: list<StepBudget> = CLI_PRODUCER_STEP_BUDGETS
 // 679s with compiler-cache hits unmeasured; that does not replace the slower
 // canonical observation. This bounded retry clears the 900s lower bound by
 // the policy margin. It is not proof of completed cold CI or portable replay.
-const PRODUCER_OWNED_CLI_MINUTES = 20
+// Those observations were of the dev profile; the shared CLI now builds in
+// ci-cli, whose cold build measured 1.56x the dev one on the same host, so the
+// lower bound is scaled by that ratio. One owned ci-cli cold build has since
+// completed in 875s (cattrick-w3, run 36952725704), inside this bound.
+const PRODUCER_OWNED_CLI_MINUTES = 31
 
-const PRODUCER_OWNED_CLI_COLD_LOWER_BOUND_SECONDS = 900
+const PRODUCER_OWNED_CLI_COLD_LOWER_BOUND_SECONDS = 1404
 
 // The canonical owned producer reached the workspace test graph but timed out
 // at 960s before archiving it. Filtering archive contents still compiles the
@@ -94,7 +100,7 @@ pub fn producer_security_timeout_expression() -> string {
 }
 
 pub fn producer_cli_timeout_expression() -> string {
-  return "$" + "{{ env.HARN_RUNNER_TIER == 'self-hosted' && ${PRODUCER_OWNED_CLI_MINUTES} || 10 }}"
+  return "$" + "{{ env.HARN_RUNNER_TIER == 'self-hosted' && ${PRODUCER_OWNED_CLI_MINUTES} || 19 }}"
 }
 
 /**
@@ -635,7 +641,7 @@ fn rust_cache_refresh_errors(workflow: dict) -> list<string> {
     matrix_keys = matrix_keys + [cache_key]
     const expected_headroom = if cache_key == "workspace-tests" {
       "4294967296"
-    } else if cache_key == "package-audit" || cache_key == "harn-cli" {
+    } else if cache_key == "package-audit" || cache_key == "harn-ci-cli" {
       "2147483648"
     } else {
       ""
@@ -1302,8 +1308,8 @@ pub fn ci_linux_lane_policy_errors(workflow: dict) -> list<string> {
       workflow,
       "rust-cli",
       BLACKSMITH_8CPU_RUNNER,
-      "harn-cli",
-      "harn-cli",
+      "harn-ci-cli",
+      "harn-ci-cli",
       CLI_PRODUCER_STEP_BUDGETS,
     )
     + persistent_compile_lane_errors(

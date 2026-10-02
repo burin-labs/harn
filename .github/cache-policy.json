@@ -50,7 +50,7 @@
     {
       "workflow": "ci.yml",
       "job": "rust-cli",
-      "shared_key": "harn-cli"
+      "shared_key": "harn-ci-cli"
     },
     {
       "workflow": "ci.yml",
@@ -65,7 +65,7 @@
     {
       "workflow": "rust-cache-refresh.yml",
       "job": "rust-cache-refresh",
-      "shared_key": "harn-cli"
+      "shared_key": "harn-ci-cli"
     },
     {
       "workflow": "rust-cache-refresh.yml",

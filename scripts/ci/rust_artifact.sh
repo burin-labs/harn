@@ -14,6 +14,12 @@ readonly NEUTRAL_FILTER='all()'
 readonly SECURITY_FILTER='(package(harn-vm) and binary(harn_vm)) or (package(harn-hostlib) and binary(harn_hostlib))'
 readonly EXPECTED_RUSTFLAGS='-D warnings -Clink-arg=-fuse-ld=mold'
 readonly EXPECTED_DEV_DEBUG='line-tables-only'
+# The shared CLI bundle every Harn proof lane executes is built in the
+# `ci-cli` profile (Cargo.toml): dev semantics, debug assertions and overflow
+# checks included, at opt-level 1. Those lanes are interpreter-bound, and the
+# unoptimized dev build ran them four to five times slower. The test bundle's
+# CLI keeps the dev profile it shares with the test build.
+readonly SHARED_CLI_PROFILE='ci-cli'
 readonly DEFAULT_MAX_BUNDLE_BYTES=9663676416  # 9 GiB: workspace nextest archive is ~8.4 GiB today
 readonly DEFAULT_MAX_SECURITY_BUNDLE_BYTES=1073741824  # 1 GiB: filtered VM + Hostlib sandbox archive
 cleanup_dir=""
@@ -125,9 +131,11 @@ write_rust_manifest() {
   local commit=$2
   local rustc_digest=$3
   local build_freshness=$4
+  local cargo_profile=${5:-dev}
   cat > "$destination/manifest" <<EOF
 schema=harn.rust_artifact.v1
 commit=${commit}
+cargo_profile=${cargo_profile}
 nextest=${NEXTEST_VERSION}
 rustc_sha256=${rustc_digest}
 rust_toolchain_sha256=$(sha256 rust-toolchain.toml)
@@ -215,6 +223,7 @@ verify_cli_manifest() {
   local commit=$2
   require_manifest_value "$destination/manifest" schema harn.rust_artifact.v1
   require_manifest_value "$destination/manifest" commit "$commit"
+  require_manifest_value "$destination/manifest" cargo_profile "$SHARED_CLI_PROFILE"
   require_manifest_value "$destination/manifest" rust_toolchain_sha256 "$(sha256 rust-toolchain.toml)"
   require_manifest_value "$destination/manifest" rustflags_sha256 "$(printf '%s' "$EXPECTED_RUSTFLAGS" | sha256sum | cut -d ' ' -f 1)"
   require_manifest_value "$destination/manifest" dev_debug_sha256 "$(printf '%s' "$EXPECTED_DEV_DEBUG" | sha256sum | cut -d ' ' -f 1)"
@@ -253,6 +262,13 @@ prepare_harn_cli() {
   local staging=$1
   local commit=$2
   local target_dir=$3
+  local profile=${4:-dev}
+  local -a profile_args=()
+  local profile_dir=debug
+  if [[ "$profile" != dev ]]; then
+    profile_args=(--profile "$profile")
+    profile_dir=$profile
+  fi
 
   # CI builds from an exact clean commit and the artifact manifest binds the
   # resulting bytes, toolchain, and flags. Embed that commit as the hosted
@@ -260,13 +276,13 @@ prepare_harn_cli() {
   # local content receipts without pretending the producer's absolute Cargo
   # dep-info paths can survive artifact transfer.
   export HARN_BUILD_FRESHNESS_ID="$commit"
-  cargo build --locked --bin harn
-  if [[ ! -x "$target_dir/debug/harn" ]]; then
-    echo "error: build did not produce the required harn CLI at $target_dir/debug/harn" >&2
+  cargo build --locked "${profile_args[@]}" --bin harn
+  if [[ ! -x "$target_dir/$profile_dir/harn" ]]; then
+    echo "error: build did not produce the required harn CLI at $target_dir/$profile_dir/harn" >&2
     exit 1
   fi
-  install -m 0755 "$target_dir/debug/harn" "$staging/harn"
-  write_rust_manifest "$staging" "$commit" "$(rustc_identity_sha256)" "$commit"
+  install -m 0755 "$target_dir/$profile_dir/harn" "$staging/harn"
+  write_rust_manifest "$staging" "$commit" "$(rustc_identity_sha256)" "$commit" "$profile"
 }
 
 pack_cli_bundle() {
@@ -417,7 +433,7 @@ build_cli_bundle() {
   staging="$(mktemp -d "${cli_output_dir}/rust-cli-artifact.XXXXXX")"
   cleanup_dir="$staging"
 
-  prepare_harn_cli "$staging" "$commit" "$target_dir"
+  prepare_harn_cli "$staging" "$commit" "$target_dir" "$SHARED_CLI_PROFILE"
   pack_cli_bundle "$staging" "$cli_output"
   bytes="$(wc -c < "$cli_output" | tr -d ' ')"
   report_timing build "$((SECONDS - started))" "$bytes"

@@ -64,7 +64,7 @@ jobs:
             warm_script: ./scripts/ci/warm_rust_cache.sh
             save_headroom_bytes: 4294967296
           # Match rust-cli, which builds the shared Harn CLI in its own job.
-          - cache_key: harn-cli
+          - cache_key: harn-ci-cli
             rustflags: "-D warnings -Clink-arg=-fuse-ld=mold"
             install_mold: true
             install_nextest: false
