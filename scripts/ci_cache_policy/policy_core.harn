@@ -9,6 +9,15 @@ import {
 
 pub type CiCacheWriter = {workflow: string, job: string, shared_key: string}
 
+/**
+ * A job allowed to save one family of Harn's own check cache from main.
+ *
+ * Kept apart from the Rust writers because the two caches share nothing but
+ * the storage pool: a Rust writer names a Swatinem shared key, this names the
+ * lane whose gates produced the check results.
+ */
+pub type HarnCheckCacheWriter = {workflow: string, job: string, family: string}
+
 pub type WindowsWorkspaceWarmPolicy = {
   artifact_name: string,
   manifest_schema: string,
@@ -39,7 +48,7 @@ pub type MacosWorkspaceWarmPolicy = {
 }
 
 pub type CiCachePolicy = {
-  schema_version: 6,
+  schema_version: 7,
   rust_cache_action: "./.github/actions/rust-cache",
   node_cache_action: "./.github/actions/node-cache",
   persistent_ref: "refs/heads/main",
@@ -49,6 +58,7 @@ pub type CiCachePolicy = {
   windows_workspace_warm: WindowsWorkspaceWarmPolicy,
   macos_workspace_warm: MacosWorkspaceWarmPolicy,
   writers: list<CiCacheWriter>,
+  harn_check_cache_writers: list<HarnCheckCacheWriter>,
 }
 
 pub type ReleaseWarmCachePathPolicy = {release_build_inputs: list<string>}
@@ -614,7 +624,7 @@ pub fn macos_workspace_warm_schema() {
 pub fn policy_schema() {
   return schema_closed_object(
     {
-      schema_version: schema_literal(6),
+      schema_version: schema_literal(7),
       rust_cache_action: schema_literal("./.github/actions/rust-cache"),
       node_cache_action: schema_literal("./.github/actions/node-cache"),
       persistent_ref: schema_literal("refs/heads/main"),
@@ -629,6 +639,17 @@ pub fn policy_schema() {
             workflow: schema_string() + {pattern: "^[a-z0-9-]+[.]yml$"},
             job: schema_string() + {pattern: "^[a-z0-9-]+$"},
             shared_key: schema_string() + {min_length: 1},
+          },
+        ),
+      ),
+      harn_check_cache_writers: schema_list(
+        schema_closed_object(
+          {
+            workflow: schema_string() + {pattern: "^[a-z0-9-]+[.]yml$"},
+            job: schema_string() + {pattern: "^[a-z0-9-]+$"},
+            // The prune script accepts exactly this alphabet, so a family it
+            // would refuse cannot be registered.
+            family: schema_string() + {pattern: "^[a-z0-9-]+$"},
           },
         ),
       ),
@@ -896,7 +917,7 @@ pub fn policy_from_validated(value: dict) -> CiCachePolicy {
   const warm = value.windows_workspace_warm
   const macos_warm = value.macos_workspace_warm
   return {
-    schema_version: 6,
+    schema_version: 7,
     rust_cache_action: "./.github/actions/rust-cache",
     node_cache_action: "./.github/actions/node-cache",
     persistent_ref: "refs/heads/main",
@@ -929,6 +950,10 @@ pub fn policy_from_validated(value: dict) -> CiCachePolicy {
       },
     )
       .to_list(),
+    harn_check_cache_writers: value.harn_check_cache_writers.map(
+      { writer -> return {workflow: writer.workflow, job: writer.job, family: writer.family} },
+    )
+      .to_list(),
   }
 }
 
@@ -948,6 +973,12 @@ pub fn ci_cache_policy_parse(value: any) -> CiCachePolicy? {
   )
     .to_list()
   if len(writer_keys) == 0 || len(writer_keys) != len(writer_keys.unique()) {
+    return nil
+  }
+  // One writer per family: two jobs saving one family would each prune the
+  // other's generation, so the family would hold whichever finished last.
+  const check_families = policy.harn_check_cache_writers.map({ writer -> writer.family }).to_list()
+  if len(check_families) != len(check_families.unique()) {
     return nil
   }
   return policy

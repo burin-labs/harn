@@ -1085,6 +1085,7 @@ pipeline test_actions_cache_capacity_keeps_warm_artifact_below_pool(
     windows_workspace_warm: {...base.windows_workspace_warm, max_bytes: base.storage_limit_bytes},
     macos_workspace_warm: base.macos_workspace_warm,
     writers: base.writers,
+    harn_check_cache_writers: base.harn_check_cache_writers,
   }
   assert(
     actions_cache_capacity_errors(oversized_warm).contains(
@@ -1105,6 +1106,7 @@ pipeline test_actions_cache_capacity_keeps_warm_artifact_below_pool(
     },
     macos_workspace_warm: base.macos_workspace_warm,
     writers: base.writers,
+    harn_check_cache_writers: base.harn_check_cache_writers,
   }
   assert(
     actions_cache_capacity_errors(flat_drive).contains(
@@ -1124,6 +1126,7 @@ pipeline test_actions_cache_capacity_keeps_warm_artifact_below_pool(
     windows_workspace_warm: base.windows_workspace_warm,
     macos_workspace_warm: {...base.macos_workspace_warm, max_bytes: base.storage_limit_bytes},
     writers: base.writers,
+    harn_check_cache_writers: base.harn_check_cache_writers,
   }
   assert(
     actions_cache_capacity_errors(oversized_macos_warm).contains(
