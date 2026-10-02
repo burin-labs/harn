@@ -16,6 +16,8 @@ if ! jq -e '
   .["rust-suites"] as $suites
   | ($suites | type == "object" and length > 0)
     and all($suites[];
+      # Values mirror nextest_metadata::RustTestSuiteStatusSummary in the
+      # pinned cargo-nextest 0.9.x line. Unknown states must fail closed.
       ((.status == "listed") or (.status == "skipped") or (.status == "skipped-default-filter"))
       and (."package-name" | type == "string")
       and (."binary-name" | type == "string")
@@ -54,6 +56,7 @@ while IFS= read -r expected || [[ -n "$expected" ]]; do
   matches="$(jq -r --arg expected "$expected" '
     [
       .["rust-suites"] | to_entries[] | .value as $suite
+      | select($suite.status == "listed")
       | $suite.testcases | to_entries[]
       | select(.value["filter-match"].status == "matches")
       | select((.key | split("::") | last) == $expected)

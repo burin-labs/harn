@@ -34,8 +34,7 @@ make_fake_security_inventory() {
         "fake-skipped": {
           "status": "skipped",
           "package-name": "harn-vm",
-          "binary-name": "unselected-suite",
-          "testcases": {}
+          "binary-name": "unselected-suite"
         }
       }}
   '
