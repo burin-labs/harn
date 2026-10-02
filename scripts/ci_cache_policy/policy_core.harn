@@ -1936,6 +1936,7 @@ pub fn minimal_pr_capacity_errors(ci: dict, publish: dict) -> list<string> {
   for name in [
     "audit-scripts",
     "fast-policy-gates",
+    "shell-gates",
     "windows-cross-check",
     ARTIFACT_READY_JOB,
     SECURITY_READY_JOB,

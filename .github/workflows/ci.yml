@@ -2777,6 +2777,7 @@ jobs:
         stack-frames,
         harn-audit,
         fast-policy-gates,
+        shell-gates,
         source-length-ratchet,
         ci-walltime-report,
         audit-scripts,
@@ -2995,6 +2996,11 @@ jobs:
           echo "Fast repository policies: $fast_policy_result"
           require_result "$fast_policy_result" \
             "Fast repository policy gates failed or skipped while Rust proof was required." [ "${{ needs.changes.outputs.rust }}" != "true" ]
+
+          shell_gates_result="${{ needs['shell-gates'].result }}"
+          echo "Repository shell gates: $shell_gates_result"
+          require_result "$shell_gates_result" \
+            "Repository shell gates failed or skipped while Rust proof was required." [ "${{ needs.changes.outputs.rust }}" != "true" ]
 
           ci_walltime_report_result="${{ needs['ci-walltime-report'].result }}"
           echo "CI timing report: $ci_walltime_report_result"
