@@ -57,6 +57,11 @@ pub struct ProviderDef {
     /// requirement for these providers and let the shim fail on its own if
     /// credentials are truly absent, instead of hardcoding provider names.
     pub credential_resolution: String,
+    /// Further environment names that carry this provider's credentials but
+    /// are not read as its key: the variables a platform credential chain
+    /// reads (Bedrock's `AWS_ACCESS_KEY_ID` and the rest). Never required, and
+    /// withheld from spawned children exactly like `auth_env`.
+    pub credential_env: Vec<String>,
     pub extra_headers: BTreeMap<String, String>,
     pub chat_endpoint: String,
     pub completion_endpoint: Option<String>,
@@ -155,6 +160,8 @@ struct ProviderDefWire {
     #[serde(default)]
     credential_resolution: Option<String>,
     #[serde(default)]
+    credential_env: Vec<String>,
+    #[serde(default)]
     extra_headers: BTreeMap<String, String>,
     #[serde(default)]
     chat_endpoint: String,
@@ -229,6 +236,7 @@ impl<'de> Deserialize<'de> for ProviderDef {
             credential_resolution: wire
                 .credential_resolution
                 .unwrap_or_else(default_credential_resolution),
+            credential_env: wire.credential_env,
             extra_headers: wire.extra_headers,
             chat_endpoint: wire.chat_endpoint,
             completion_endpoint: wire.completion_endpoint,
@@ -275,6 +283,7 @@ impl Default for ProviderDef {
             auth_env: AuthEnv::None,
             chat_api_adapter: None,
             credential_resolution: default_credential_resolution(),
+            credential_env: Vec::new(),
             extra_headers: BTreeMap::new(),
             chat_endpoint: String::new(),
             completion_endpoint: None,
@@ -332,6 +341,7 @@ impl ProviderDef {
         if overlay.credential_resolution != default_credential_resolution() {
             self.credential_resolution = overlay.credential_resolution.clone();
         }
+        merge_vec(&mut self.credential_env, &overlay.credential_env);
         self.extra_headers.extend(overlay.extra_headers.clone());
         merge_string(&mut self.chat_endpoint, &overlay.chat_endpoint);
         merge_option(&mut self.completion_endpoint, &overlay.completion_endpoint);

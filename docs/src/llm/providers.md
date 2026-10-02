@@ -1367,6 +1367,14 @@ Each provider defines an `auth_style` and one or more environment variables:
 | Ollama | (none) | none |
 | Local | (none) | none |
 
+A provider whose platform SDK reads credentials from further variables
+declares them as `credential_env`. Bedrock declares `AWS_ACCESS_KEY_ID`,
+`AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`, `AWS_SECURITY_TOKEN`,
+`AWS_PROFILE`, and `AWS_CONTAINER_AUTHORIZATION_TOKEN`. Harn never requires
+these names. Like `auth_env`, they are withheld from every child process a
+session spawns. Catalog validation fails when a provider requires auth but
+declares neither `auth_env` nor `credential_env`.
+
 ## Model selection
 
 Set the model explicitly or via environment:
