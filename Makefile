@@ -1,4 +1,4 @@
-.PHONY: repository-policies repository-policies-source run-policy-list setup setup-rust setup-bootstrap clean-stale-targets install-hooks build build-harn build-release sign-local check fmt fmt-app-host fmt-harn fmt-harn-fix lint lint-md lint-actions lint-actions-source lint-actions-harn lint-harn check-app-host spec-lint gen-openapi-snapshot check-openapi-snapshot test test-focused test-one test-e2e test-cargo test-fast test-harn-scripts test-agent-scripts test-pr-gate-scripts conformance mechanism-contracts protocol-conformance mcp-conformance replay-oracle replay-bench eval-tool-calls bench bench-vm bench-vm-micro bench-vm-clone check-vm-rss-soak check-test-case-performance bench-llm bench-orchestration bench-cli-cold-start loadgen-postgres all release-gate release-smoke smoke-audit portal portal-check portal-demo gen-cli-aot check-cli-aot gen-highlight check-highlight gen-prompt-grammar check-prompt-grammar gen-protocol-artifacts check-protocol-artifacts gen-connector-schemas check-connector-schemas gen-harness-migrations check-harness-migrations check-downstream-protocol-artifacts check-bindings gen-session-bundle-schema check-session-bundle-schema gen-run-view-fixtures check-run-view-fixtures gen-trigger-quickref check-trigger-quickref gen-cli-surface check-cli-surface gen-provider-matrix check-provider-matrix check-provider-support check-provider-catalog check-connector-matrix check-trigger-examples check-docs-model-refs check-docs-snippets check-docs-symbols check-docs-cli-flags check-docs-links check-site-snippets check-docs-workflow-quickstart sync-language-spec check-language-spec sync-diagnostics-catalog check-diagnostics-catalog lint-test-patterns lint-diagnostic-codes check-stdlib-host-neutral check-public-product-names check-stdlib-strict-types check-stdlib-public-return-types check-schema-strict check-optional-dep-feature-contracts check-receipt-structs lint-no-rust-prompt-prose lint-cancellation-owner lint-agent-path-normalization lint-no-xfail-regression check-provider-catalog-drift check-ported-handler-loc check-harn-vm-layering check-source-file-lengths check-stack-frames check-test-target-coverage check-gate-path-visibility check-python-boundary check-harn-syntax-sensitive-scans check-agent-guidance check-crate-sibling-versions check-protocol-symbol-removals check-dependabot-groups gen-tree-sitter-keywords check-tree-sitter-keywords gen-tree-sitter-parser check-tree-sitter-parser check-grammar-keywords gen-grammar-fitness check-grammar-fitness check-loud-boundaries check-turn-end-boundary check-generated-registry gen-release-contract check-release-contract check-release-audit-contract check-ci-cache-policy check-rust-test-lane-policy check-cargo-lock-contract gen-vm-exposures check-vm-exposures check-binary-size-policy check-all-features
+.PHONY: repository-policies repository-policies-source run-policy-list setup setup-rust setup-bootstrap clean-stale-targets install-hooks build build-harn build-release sign-local check fmt fmt-app-host fmt-harn fmt-harn-fix lint lint-md lint-actions lint-actions-source lint-actions-harn lint-harn lint-harn-conformance lint-harn-scripts lint-harn-trees lint-harn-stdlib-metadata check-app-host spec-lint gen-openapi-snapshot check-openapi-snapshot test test-focused test-one test-e2e test-cargo test-fast test-harn-scripts test-agent-scripts test-pr-gate-scripts conformance mechanism-contracts protocol-conformance mcp-conformance replay-oracle replay-bench eval-tool-calls bench bench-vm bench-vm-micro bench-vm-clone check-vm-rss-soak check-test-case-performance bench-llm bench-orchestration bench-cli-cold-start loadgen-postgres all release-gate release-smoke smoke-audit portal portal-check portal-demo gen-cli-aot check-cli-aot gen-highlight check-highlight gen-prompt-grammar check-prompt-grammar gen-protocol-artifacts check-protocol-artifacts gen-connector-schemas check-connector-schemas gen-harness-migrations check-harness-migrations check-downstream-protocol-artifacts check-bindings gen-session-bundle-schema check-session-bundle-schema gen-run-view-fixtures check-run-view-fixtures gen-trigger-quickref check-trigger-quickref gen-cli-surface check-cli-surface gen-provider-matrix check-provider-matrix check-provider-support check-provider-catalog check-connector-matrix check-trigger-examples check-docs-model-refs check-docs-snippets check-docs-symbols check-docs-cli-flags check-docs-links check-site-snippets check-docs-workflow-quickstart sync-language-spec check-language-spec sync-diagnostics-catalog check-diagnostics-catalog lint-test-patterns lint-diagnostic-codes check-stdlib-host-neutral check-public-product-names check-stdlib-strict-types check-stdlib-public-return-types check-schema-strict check-optional-dep-feature-contracts check-receipt-structs lint-no-rust-prompt-prose lint-cancellation-owner lint-agent-path-normalization lint-no-xfail-regression check-provider-catalog-drift check-ported-handler-loc check-harn-vm-layering check-source-file-lengths check-stack-frames check-test-target-coverage check-gate-path-visibility check-python-boundary check-harn-syntax-sensitive-scans check-agent-guidance check-crate-sibling-versions check-protocol-symbol-removals check-dependabot-groups gen-tree-sitter-keywords check-tree-sitter-keywords gen-tree-sitter-parser check-tree-sitter-parser check-grammar-keywords gen-grammar-fitness check-grammar-fitness check-loud-boundaries check-turn-end-boundary check-generated-registry gen-release-contract check-release-contract check-release-audit-contract check-ci-cache-policy check-rust-test-lane-policy check-cargo-lock-contract gen-vm-exposures check-vm-exposures check-binary-size-policy check-all-features
 .PHONY: test-pr-gate-post-warm-integrations test-rust-lint-lane-cache gh-check-state
 .PHONY: check-docs check-docs-portable check-docs-exact check-docs-cookbook-entrypoints
 .PHONY: check-typescript-protocol-binding check-swift-protocol-binding
@@ -495,24 +495,26 @@ lint-actions-harn:
 
 lint-actions: lint-actions-source lint-actions-harn
 
+# The four parts share nothing, so `make -j` (as `scripts/audit_gates.sh` runs
+# it) checks them side by side; in sequence they were one gate's long pole.
+# Each part prints its own elapsed time, which is how a slow runner shows which
+# part to look at.
+lint-harn: lint-harn-conformance lint-harn-scripts lint-harn-trees lint-harn-stdlib-metadata
+	@echo "    Harn lint OK."
+
 # Reject unreviewed conformance diagnostics while preserving the explicitly
 # triaged baseline. Paired .error/.lint fixtures own their diagnostics in the
 # conformance runner and are excluded here.
-lint-harn:
+lint-harn-conformance:
 	@echo "=== Linting Harn conformance tests ==="
-	@HARN_BIN="$$($(HARN_BIN_PRINT_CMD))" ./scripts/check-conformance-lint-baseline.sh
-	@echo "=== Checking Harn experiment support modules ==="
-	@$(HARN_CMD) check $(EXPERIMENT_HARN_CHECK)
+	@start=$$(date +%s); \
+	HARN_BIN="$$($(HARN_BIN_PRINT_CMD))" ./scripts/check-conformance-lint-baseline.sh; \
+	rc=$$?; echo "    $@ took $$(( $$(date +%s) - start ))s"; exit $$rc
+
 # Directories, not globs. `scripts/*.harn scripts/tests/*.harn` was flat, so a
 # nested script directory had no lint gate at all and its absence of findings
-# was indistinguishable from clean code. The same omission left the whole
-# `tests/` tree and `bench/` unwalked.
-	@echo "=== Linting Harn-authored scripts ==="
-	@$(HARN_CMD) lint --strict scripts
-	@echo "=== Linting the Harn test tree ==="
-	@$(HARN_CMD) lint --strict tests
-	@echo "=== Linting Harn benchmarks ==="
-	@$(HARN_CMD) lint --strict bench
+# was indistinguishable from clean code.
+#
 # `lint --strict` does not typecheck: it reported no issues for scripts that
 # `harn run` refuses to execute. Whether a script was typed came down to
 # whether some other target happened to run that exact file, so a script only
@@ -522,19 +524,34 @@ lint-harn:
 # in scripts/harn-project.sh. It adds HARN-OWN-004, which requires a parsed
 # document to be validated at the boundary that reads it rather than
 # dereferenced on faith.
-	@echo "=== Type-checking Harn-authored scripts ==="
-	@$(HARN_CMD) check --strict-types scripts
-	@echo "=== Linting bundled demo scenarios ==="
-	@$(HARN_CMD) lint --strict crates/harn-cli/assets/demo
-# Three more roots of ordinary Harn that nothing walked. Each was measured at
-# zero findings before being adopted, so this line is a gate rather than a
-# migration: they are clean today and now have to stay that way.
-	@echo "=== Linting shipped persona templates, wasm demos and evals ==="
-	@$(HARN_CMD) lint --strict crates/harn-cli/assets/persona-templates crates/harn-wasm evals
+lint-harn-scripts:
+	@echo "=== Linting and type-checking Harn-authored scripts ==="
+	@start=$$(date +%s); \
+	$(HARN_CMD) lint --strict scripts && \
+	$(HARN_CMD) check --strict-types scripts; \
+	rc=$$?; echo "    $@ took $$(( $$(date +%s) - start ))s"; exit $$rc
+
+# The `tests/` tree and `bench/` were unwalked by the same flat-glob omission.
+# The last three roots were each measured at zero findings before being
+# adopted, so they are a gate rather than a migration: they are clean today
+# and now have to stay that way.
+lint-harn-trees:
+	@echo "=== Linting the test tree, benchmarks, experiments, demos, persona templates, wasm demos and evals ==="
+	@start=$$(date +%s); \
+	$(HARN_CMD) check $(EXPERIMENT_HARN_CHECK) && \
+	$(HARN_CMD) lint --strict tests && \
+	$(HARN_CMD) lint --strict bench && \
+	$(HARN_CMD) lint --strict crates/harn-cli/assets/demo && \
+	$(HARN_CMD) lint --strict crates/harn-cli/assets/persona-templates crates/harn-wasm evals; \
+	rc=$$?; echo "    $@ took $$(( $$(date +%s) - start ))s"; exit $$rc
+
+lint-harn-stdlib-metadata:
 	@echo "=== Checking stdlib metadata contract (HARN-STD-101) ==="
-	@harn_bin="$$($(HARN_BIN_PRINT_CMD))"; \
+	@start=$$(date +%s); \
+	harn_bin="$$($(HARN_BIN_PRINT_CMD))"; \
 	tmp=$$(mktemp); \
 	find crates/harn-stdlib/src/stdlib -name '*.harn' -print0 | xargs -0 "$$harn_bin" lint > "$$tmp" 2>&1 || true; \
+	echo "    $@ took $$(( $$(date +%s) - start ))s"; \
 	if grep -q 'HARN-STD-101' "$$tmp"; then \
 		grep -E 'HARN-STD-101' -B1 "$$tmp" | grep -v 'no issues found' | head -40; \
 		rm -f "$$tmp"; \
@@ -542,7 +559,6 @@ lint-harn:
 		exit 1; \
 	fi; \
 	rm -f "$$tmp"
-	@echo "    Harn lint OK."
 
 # Check harn formatting on canonical stdlib sources and repo test fixtures.
 #

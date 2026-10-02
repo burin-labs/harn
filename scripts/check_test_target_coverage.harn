@@ -297,6 +297,11 @@ fn recipe_line_is_echo(line: string) -> bool {
  * script hands its roots to that script, and `lint-harn` does exactly this for
  * the conformance tree, so a reader that stopped at the recipe would report the
  * largest walked root in the repository as reached by nothing.
+ *
+ * Prerequisite targets count as part of the recipe. `lint-harn` is an
+ * aggregate whose own body only prints a verdict, so a reader that stopped at
+ * the named target would report every root its parts walk as reached by
+ * nothing.
  */
 pub fn recipe_walked_paths(
   fs: HarnessFs,
@@ -307,7 +312,11 @@ pub fn recipe_walked_paths(
   let seen: list<string> = []
   let out: list<string> = []
   let scripts: list<string> = []
-  for line in makefile_target_block(makefile_text, target).lines() {
+  let lines: list<string> = []
+  for name in makefile_target_closure(makefile_text, target) {
+    lines = lines + makefile_target_block(makefile_text, name).lines()
+  }
+  for line in lines {
     // An `echo` line is the recipe narrating itself. Its words are prose, and
     // one of them is the name of a directory that exists, so reading them as
     // arguments reported three deliberately-unlinted trees as walked.
@@ -356,6 +365,45 @@ pub fn recipe_walked_paths(
     }
   }
   return out.sort()
+}
+
+/** The prerequisites named on `target`'s rule header, before any order-only `|`. */
+pub fn makefile_target_prerequisites(makefile_text: string, target: string) -> list<string> {
+  for line in makefile_text.lines() {
+    if line.starts_with(target + ":") && !line.starts_with(target + ":=") {
+      let out: list<string> = []
+      for token in split(line.substring(len(target) + 1), " ") {
+        const name = token.trim()
+        if name == "|" {
+          break
+        }
+        if name != "" {
+          out = out + [name]
+        }
+      }
+      return out
+    }
+  }
+  return []
+}
+
+/** `target` followed by every prerequisite it reaches, each named once. */
+pub fn makefile_target_closure(makefile_text: string, target: string) -> list<string> {
+  let out: list<string> = [target]
+  let frontier: list<string> = [target]
+  while len(frontier) > 0 {
+    let next: list<string> = []
+    for name in frontier {
+      for prerequisite in makefile_target_prerequisites(makefile_text, name) {
+        if !out.contains(prerequisite) {
+          out = out + [prerequisite]
+          next = next + [prerequisite]
+        }
+      }
+    }
+    frontier = next
+  }
+  return out
 }
 
 /** The tokens a `$(NAME)` reference expands to, or none when it is not a plain list. */

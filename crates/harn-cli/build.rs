@@ -225,9 +225,11 @@ fn ensure_git_hooks_installed() {
 /// payload is the exact failure this watch exists to prevent.
 fn emit_cli_aot_manifest_watches(manifest_path: &Path) {
     if let Some(generated_dir) = manifest_path.parent() {
-        // Git-ignored, and absent in a fresh checkout. Creating it is what
-        // makes it watchable; the build script already materializes
-        // `portal-dist` the same way.
+        // A tracked README keeps the directory present in every checkout, so
+        // this only creates it for a source tree that lacks it. Creating a
+        // watched path during the run makes it newer than the build script's
+        // recorded start, and Cargo then recompiled `harn-cli` on the next
+        // invocation: about 83s before every workspace test run in CI.
         if fs::create_dir_all(generated_dir).is_ok() {
             println!("cargo:rerun-if-changed={}", generated_dir.display());
         }
