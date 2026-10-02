@@ -290,6 +290,7 @@ harn doc
 harn doc --output
 harn doc <positional 1>
 harn doctor
+harn doctor --check-keyring-write
 harn doctor --check-providers
 harn doctor --check-targets
 harn doctor --json

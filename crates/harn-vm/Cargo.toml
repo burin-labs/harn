@@ -61,8 +61,11 @@ cloud-aws = ["dep:aws-config", "dep:aws-credential-types", "dep:aws-sigv4", "dep
 # lean embedders and reports no default store until the product opts in.
 native-keyring = [
     "dep:apple-native-keyring-store",
+    "dep:async-io",
+    "dep:secret-service",
     "dep:security-framework",
     "dep:windows-native-keyring-store",
+    "dep:zbus",
     "dep:zbus-secret-service-keyring-store",
 ]
 # PostgreSQL client builtins (the `pg.*` namespace + `stdlib/postgres`).
@@ -259,6 +262,11 @@ apple-native-keyring-store = { version = "1.0", features = ["protected"], option
 
 [target.'cfg(all(unix, not(any(target_os = "macos", target_os = "ios", target_os = "android"))))'.dependencies]
 zbus-secret-service-keyring-store = { version = "1.0", features = ["rt-async-io-crypto-rust"], optional = true }
+# The lock-state probe in `secrets/secret_service_lock.rs` talks to the Secret
+# Service directly, on the same versions and runtime the adapter above pins.
+secret-service = { version = "5.1", features = ["rt-async-io-crypto-rust"], optional = true }
+async-io = { version = "2.6", optional = true }
+zbus = { version = "5.17", default-features = false, features = ["async-io"], optional = true }
 
 [dev-dependencies]
 criterion = "0.8"

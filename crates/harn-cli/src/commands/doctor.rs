@@ -24,7 +24,7 @@ mod rust_toolchain;
 mod secret_providers;
 mod targets;
 
-use credentials::check_provider_credentials;
+use credentials::{check_provider_credentials, check_provider_selection};
 use next_step::next_step_suggestion;
 use process_sandbox::{process_sandbox_info, ProcessSandboxInfo};
 use repo_checks::{check_protocol_artifacts, find_harn_repo_root};
@@ -100,6 +100,8 @@ pub(crate) struct DoctorOptions {
     /// target plus the canonical Linux/macOS/Windows/WASM triples. Off by
     /// default because each probe spawns Cargo and dominates wall-clock.
     pub check_targets: bool,
+    /// When true, the keyring check also writes, reads back, and deletes a probe.
+    pub check_keyring_write: bool,
 }
 
 pub(crate) async fn run_doctor_with_options(opts: DoctorOptions) {
@@ -154,7 +156,9 @@ async fn build_report(opts: &DoctorOptions) -> DoctorReport {
     checks.extend(check_portal());
     checks.extend(check_platform_capabilities());
     checks.extend(check_provider_selection());
-    checks.extend(secret_providers::check_secret_providers());
+    checks.extend(secret_providers::check_secret_providers(
+        opts.check_keyring_write,
+    ));
     checks.extend(check_provider_credentials());
     checks.extend(check_manifest().await);
     checks.extend(check_event_log());
@@ -1005,43 +1009,6 @@ fn browser_opener() -> Option<&'static str> {
 #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
 fn browser_opener() -> Option<&'static str> {
     None
-}
-
-fn check_provider_selection() -> Vec<DoctorCheck> {
-    let mut checks = Vec::new();
-
-    if let Ok(path) = std::env::var("HARN_PROVIDERS_CONFIG") {
-        let config_path = PathBuf::from(&path);
-        let status = if config_path.is_file() {
-            DoctorStatus::Ok
-        } else {
-            DoctorStatus::Fail
-        };
-        checks.push(DoctorCheck {
-            id: String::new(),
-            status,
-            label: "providers config".to_string(),
-            detail: format!("HARN_PROVIDERS_CONFIG={path}"),
-            ..Default::default()
-        });
-    }
-
-    if let Ok(provider) = std::env::var("HARN_LLM_PROVIDER") {
-        let status = if llm_config::provider_config(&provider).is_some() {
-            DoctorStatus::Ok
-        } else {
-            DoctorStatus::Fail
-        };
-        checks.push(DoctorCheck {
-            id: String::new(),
-            status,
-            label: "selected provider".to_string(),
-            detail: format!("HARN_LLM_PROVIDER={provider}"),
-            ..Default::default()
-        });
-    }
-
-    checks
 }
 
 async fn check_manifest() -> Vec<DoctorCheck> {

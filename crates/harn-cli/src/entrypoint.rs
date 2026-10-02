@@ -518,6 +518,7 @@ async fn dispatch(subcommand: Command) {
                 json: args.json,
                 check_providers: args.check_providers,
                 check_targets: args.check_targets,
+                check_keyring_write: args.check_keyring_write,
             })
             .await;
         }
