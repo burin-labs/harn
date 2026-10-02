@@ -451,7 +451,9 @@ pub(super) async fn run_oauth_connect(mut request: OAuthConnectRequest) -> Resul
         ConnectorSetupInteraction::None,
         "Preparing service sign-in.",
     );
-    match run_oauth_connect_inner(&mut request, &mut reporter).await {
+    // Boxed: the authorization flow's future is large, and every connect
+    // dispatcher frame would otherwise carry it inline.
+    match Box::pin(run_oauth_connect_inner(&mut request, &mut reporter)).await {
         Ok(()) => Ok(()),
         Err(failure) => {
             reporter.failed(&failure);

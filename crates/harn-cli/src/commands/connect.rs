@@ -244,7 +244,7 @@ async fn run_connect_inner(args: ConnectArgs) -> Result<(), String> {
         return run_connect_revoke(&provider, args.json).await;
     }
     if let Some(provider) = args.refresh {
-        return run_connect_refresh(&provider, args.json).await;
+        return Box::pin(run_connect_refresh(&provider, args.json)).await;
     }
     if !args.generic.is_empty() {
         if args.generic.len() != 2 {
