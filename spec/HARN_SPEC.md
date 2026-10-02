@@ -6663,7 +6663,9 @@ call. A lock that cannot be acquired within five seconds causes an error.
 
 `harness.runtime.checkpoint_insert` returns `inserted: true` to the call that stored the initial
 value and `inserted: false` to later calls, which receive the retained value.
-An existing `nil` counts as a retained value. This operation chooses one initial
+An existing `nil` counts as a retained value. Checkpoint mutations share the
+`checkpoint.write` autonomy decision across runtime methods and legacy builtins.
+This operation chooses one initial
 value; it does not make a stage's external effects execute exactly once.
 
 Only an absent checkpoint file starts an empty store. If the file is
