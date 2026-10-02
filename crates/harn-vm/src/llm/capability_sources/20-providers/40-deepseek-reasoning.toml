@@ -228,6 +228,7 @@ thinking_block_style = "none"
 # while the broader moonshotai/kimi-k2* fallthrough keeps native.
 [[provider.openrouter]]
 model_match = "moonshotai/kimi-k2.7-code"
+top_k_supported = true
 native_tools = true
 preferred_tool_format = "text"
 tool_mode_parity = "native_unreliable"
@@ -246,8 +247,23 @@ supports_assistant_prefill = false
 prefers_role_developer = false
 prefers_xml_tools = false
 thinking_block_style = "inline"
-temperature_supported = false
-top_p_supported = false
+# Provider contract probe run 37030330916 (2026-10-02) found every option
+# rejected with "Reasoning is mandatory for this endpoint and cannot be
+# disabled": Harn sent a reasoning-disable whenever thinking was unset. With
+# reasoning left at its default (live re-probe 2026-10-02):
+#   temperature, top_p, top_k, seed, stop, both penalties -> 200, also with
+#     provider.require_parameters (served by CoreWeave)
+#   pinned to Moonshot AI's own endpoint (order + allow_fallbacks=false):
+#     temperature, top_p, seed -> 200 (dropped there; the endpoint does not
+#     declare them), frequency_penalty and presence_penalty -> 400 "Provider
+#     returned error", although OpenRouter lists both for that endpoint
+# Sampling is honored by 10 of 12 endpoints and silently dropped by the
+# other two, so it is supported. The penalties stay unsupported because the
+# first-party endpoint errors on them.
+reasoning_none_supported = false
+reasoning_disable_supported = false
+temperature_supported = true
+top_p_supported = true
 frequency_penalty_supported = false
 presence_penalty_supported = false
 allowed_tool_choice_modes = ["auto", "none"]
@@ -268,6 +284,7 @@ allowed_tool_choice_modes = ["auto", "none"]
 # OpenRouter accepted temperature=0.2, which shows tolerance, not support.
 [[provider.openrouter]]
 model_match = "moonshotai/kimi-k3"
+top_k_supported = true
 native_tools = true
 preferred_tool_format = "native"
 structured_output = "native"
@@ -297,6 +314,7 @@ thinking_block_style = "inline"
 
 [[provider.openrouter]]
 model_match = "moonshotai/kimi-k2*"
+top_k_supported = true
 native_tools = true
 preferred_tool_format = "native"
 structured_output = "native"

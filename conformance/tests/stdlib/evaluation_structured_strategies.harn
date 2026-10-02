@@ -3,7 +3,9 @@ import { llm_text, with_llm_script } from "std/testing"
 
 pipeline test(harness: Harness) {
   for route in [
-    {provider: "openrouter", model: "anthropic/claude-fable-5", strategy: "tool_schema"},
+    // OpenRouter forwards temperature for Sonnet 4.6 but not for Fable, and
+    // the structured profile runs at temperature 0.
+    {provider: "openrouter", model: "anthropic/claude-sonnet-4-6", strategy: "tool_schema"},
     {provider: "minimax", model: "MiniMax-M2.5-highspeed", strategy: "prompt_validation"},
     {
       provider: "fireworks",

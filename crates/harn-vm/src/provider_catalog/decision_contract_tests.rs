@@ -177,8 +177,10 @@ fn gateway_chat_decisions_are_explicitly_admitted_and_resolve_the_same_protocol(
 /// text route, but the structured decision profile requires temperature 0 and
 /// Luna's rule declares temperature unsupported (GPT-6 accepts it only at an
 /// explicit effort of `none`, harn#9157), so the profile refuses Luna before
-/// dispatch. GPT-5.4 Mini is the OpenAI route that keeps temperature and
-/// outlives Nano on both catalogs; Luna is the contrast.
+/// dispatch. Direct GPT-5.4 Mini is the OpenAI route that keeps temperature
+/// and outlives Nano; Luna is the contrast. OpenRouter's Mini and Nano rows
+/// decline temperature too, because no OpenRouter endpoint forwards it
+/// (2026-10-02 `supported_parameters` read and `require_parameters` probe).
 #[test]
 fn nano_shutdown_leaves_mini_as_the_live_openai_decision_route() {
     for id in ["gpt-5.4-nano", "openai/gpt-5.4-nano"] {
@@ -186,7 +188,7 @@ fn nano_shutdown_leaves_mini_as_the_live_openai_decision_route() {
         assert!(entry.deprecated, "{id}");
         assert_eq!(entry.sunset_date.as_deref(), Some("2027-04-01"), "{id}");
     }
-    for id in ["gpt-5.4-mini", "openai/gpt-5.4-mini"] {
+    for (id, keeps_temperature) in [("gpt-5.4-mini", true), ("openai/gpt-5.4-mini", false)] {
         let entry = llm_config::model_catalog_entry(id).expect("mini route is shipped");
         assert!(!entry.deprecated, "{id}");
         assert!(entry.sunset_date.is_none(), "{id}");
@@ -194,8 +196,9 @@ fn nano_shutdown_leaves_mini_as_the_live_openai_decision_route() {
         let contract = decision_contract_for_route(&entry.provider, id)
             .expect("mini decision contract resolves");
         assert_eq!(contract.protocol, DecisionProtocol::StructuredLlm, "{id}");
-        assert!(
+        assert_eq!(
             capabilities::lookup(&entry.provider, id).temperature_supported,
+            keeps_temperature,
             "{id}"
         );
     }

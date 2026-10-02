@@ -7479,6 +7479,17 @@ open_weight = false
 strengths = ["cheap", "tool_use", "reasoning", "long_context"]
 quality_tags = ["free_tier", "avoid_reviewer"]
 
+# OpenRouter serves this free route only to accounts that allow free-model
+# prompt training. With that privacy setting off, every request returns 404
+# "0 endpoints out of 1 requested are available matching your guardrail
+# restrictions and data policy ... Free model training violation (account
+# settings)" (provider contract probe run 37030330916, re-checked 2026-10-02).
+[models."nvidia/nemotron-3-super-120b-a12b:free".data_controls]
+training_default = "trains"
+checked_on = "2026-10-02"
+sources = ["https://openrouter.ai/settings/privacy"]
+note = "OpenRouter excludes this endpoint as a free-model training violation unless the account allows training on free models, so prompts sent here may be used for training."
+
 [models."bytedance-seed/seed-2.0-lite"]
 name = "Seed 2.0 Lite (via OpenRouter)"
 provider = "openrouter"
