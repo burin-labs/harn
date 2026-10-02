@@ -253,6 +253,13 @@ pipeline test_minimal_pr_capacity_policy_and_negative_controls(harness: Harness,
       ),
     )
   }
+  // The hermetic shell gates must refuse before the merge. Scoping them back
+  // to main pushes is the shape that let a fixture defect turn main red.
+  let main_only_shell = ci
+  main_only_shell.jobs["shell-gates"].if = "github.event_name == 'push' && needs.changes.outputs.rust == 'true'"
+  const shell_refusal = "ci.yml:shell-gates is a cheap refusal and must carry no event condition"
+  const shell_errors = minimal_pr_capacity_errors(main_only_shell, publish)
+  assert(shell_errors.any(fn(error) { contains(error, shell_refusal) }))
   // The Windows cross-compile check is required on every merge-group
   // candidate: a main-only job, a job queued behind the Linux lanes, or an
   // aggregate that tolerates a merge-group skip each reopen the gap.

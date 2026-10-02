@@ -155,7 +155,8 @@ while read -r run_id run_attempt; do
     --arg required_job "$required_job" --arg pending_job "$pending_job" '
     . as $response
     | (($contract[0].merge_group_jobs | map(.name))
-        + ["Build shared Harn CLI", "Windows cross-compile check", "Write CI timing report"]
+        + ["Build shared Harn CLI", "Check repository shell gates",
+          "Windows cross-compile check", "Write CI timing report"]
         + (if $required_job == "" then [] else [$required_job] end))
       as $required
     | ([$response.jobs[] | select(.status == "completed"
