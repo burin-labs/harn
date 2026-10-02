@@ -294,6 +294,7 @@ pub(crate) async fn run_site_server(args: &SiteServeArgs) -> Result<(), String> 
 }
 
 pub(crate) async fn run_worker_server(args: &WorkerServeArgs) -> Result<(), String> {
+    let _environment = crate::commands::run::environment::process_host_environment_scope()?;
     apply_obs_mode(args.obs)?;
     let script_path = Path::new(&args.file).to_path_buf();
     let consumer_id = args.consumer_id.clone();
@@ -358,6 +359,7 @@ pub(crate) async fn run_worker_server(args: &WorkerServeArgs) -> Result<(), Stri
 }
 
 pub(crate) async fn run_mcp_server(args: &ServeMcpArgs) -> Result<(), String> {
+    let mut config = dispatch_core_config_for_source(&args.file)?;
     validate_obs_transport(args.obs, args.transport == McpServeTransport::Stdio, "mcp")?;
     apply_obs_mode(args.obs)?;
     if args.transport == McpServeTransport::Stdio
@@ -425,12 +427,17 @@ pub(crate) async fn run_mcp_server(args: &ServeMcpArgs) -> Result<(), String> {
                 ))
             }
         };
-        crate::commands::run::run_file_mcp_serve(&args.file, args.card.as_deref(), mode).await;
+        crate::commands::run::run_file_mcp_serve(
+            &args.file,
+            args.card.as_deref(),
+            mode,
+            config.host_inference_boundary,
+        )
+        .await;
         return Ok(());
     }
 
     let auth_policy = build_auth_policy(&args.api_key, args.hmac_secret.as_ref());
-    let mut config = dispatch_core_config_for_source(&args.file)?;
     config.auth_policy = auth_policy.clone();
     let core = DispatchCore::new(config).map_err(|error| error.to_string())?;
     let mut server_config = McpServerConfig::new(core);

@@ -289,6 +289,25 @@ pub(crate) fn launch_scope(
     ))
 }
 
+/// Project a validated process ceiling without replacing a narrower session.
+pub(crate) fn host_environment_scope(
+    boundary: Option<harn_vm::llm::api::InferenceBoundary>,
+) -> Option<harn_vm::stdlib::process::SessionEnvironmentGuard> {
+    boundary.map(|boundary| {
+        harn_vm::stdlib::process::declare_session_environment_if_absent(
+            SessionEnvironment::inherited(),
+        )
+        .with_host_inference_boundary(Some(boundary))
+    })
+}
+
+pub(crate) fn process_host_environment_scope(
+) -> Result<Option<harn_vm::stdlib::process::SessionEnvironmentGuard>, String> {
+    Ok(host_environment_scope(
+        harn_vm::llm::api::InferenceBoundary::capture_process()?,
+    ))
+}
+
 /// One line naming a launched environment policy for the run's
 /// stderr — the credential-facing counterpart to the sandbox root disclosure.
 /// It names grants (their target env var and source kind) but never a value,

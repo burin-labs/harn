@@ -46,6 +46,15 @@ pub(crate) async fn run_command(
     args: PlaygroundArgs,
     llm_mock_mode: CliLlmMockMode,
 ) -> Result<(), String> {
+    let _environment = crate::commands::run::environment::process_host_environment_scope()?;
+    crate::provider_bootstrap::maybe_seed_ollama_for_playground(
+        Path::new(&args.host),
+        Path::new(&args.script),
+        args.yes,
+        args.llm.is_some(),
+        args.llm_mock.is_some(),
+    )
+    .await;
     let config = PlaygroundConfig {
         host: canonicalize_or_err(&args.host)?,
         script: canonicalize_or_err(&args.script)?,
@@ -74,6 +83,7 @@ pub(crate) async fn run_command(
 /// spawning the `harn` binary. Watch mode is not supported here — it has no
 /// terminal output contract worth asserting on.
 pub async fn execute_playground_inputs(inputs: PlaygroundInputs) -> Result<String, String> {
+    let _environment = crate::commands::run::environment::process_host_environment_scope()?;
     let llm = inputs.llm.as_deref().map(parse_llm_override).transpose()?;
     let config = PlaygroundConfig {
         host: canonicalize_or_err(inputs.host.to_string_lossy().as_ref())?,

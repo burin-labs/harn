@@ -40,6 +40,7 @@ pub(super) struct AcpWebSocketHub {
     state: Mutex<AcpWebSocketHubState>,
     event_log: Arc<AnyEventLog>,
     retention: Duration,
+    host_inference_boundary: Option<harn_vm::llm::api::InferenceBoundary>,
 }
 
 #[derive(Default)]
@@ -181,11 +182,16 @@ struct PersistedAcpReplay {
 }
 
 impl AcpWebSocketHub {
-    pub(super) fn new(event_log: Arc<AnyEventLog>, retention: Duration) -> Arc<Self> {
+    pub(super) fn new(
+        event_log: Arc<AnyEventLog>,
+        retention: Duration,
+        host_inference_boundary: Option<harn_vm::llm::api::InferenceBoundary>,
+    ) -> Arc<Self> {
         Arc::new(Self {
             state: Mutex::new(AcpWebSocketHubState::default()),
             event_log,
             retention,
+            host_inference_boundary,
         })
     }
 
@@ -193,6 +199,11 @@ impl AcpWebSocketHub {
         self: &Arc<Self>,
         pipeline: Option<String>,
     ) -> Result<Arc<AcpWorker>, OrchestratorError> {
+        let server_config = crate::acp::server_config_with_boundary(
+            pipeline,
+            harn_serve::AuthPolicy::allow_all(),
+            self.host_inference_boundary,
+        );
         let worker_id = uuid::Uuid::new_v4().to_string();
         let (to_acp_tx, to_acp_rx) = mpsc::unbounded_channel::<JsonValue>();
         let (from_acp_tx, mut from_acp_rx) = mpsc::unbounded_channel::<String>();
@@ -236,13 +247,11 @@ impl AcpWebSocketHub {
                         return;
                     }
                 };
-                if let Err(error) = runtime.block_on(crate::acp::run_acp_channel_server(
-                    pipeline,
+                runtime.block_on(harn_serve::run_acp_channel_server(
+                    server_config,
                     to_acp_rx,
                     from_acp_tx,
-                )) {
-                    eprintln!("[harn] ACP worker launch refused: {error}");
-                }
+                ));
             })
             .map_err(|error| format!("worker spawn failed: {error}"))?;
 

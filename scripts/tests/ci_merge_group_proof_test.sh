@@ -69,6 +69,39 @@ for conclusion in skipped failure cancelled; do
     || { echo "$conclusion native Windows proof did not fail closed" >&2; exit 1; }
 done
 
+# Package verification does not hold the merge verdict, so the push router may
+# accept a run whose package job is still going; nothing else may be pending,
+# nothing may have failed, and the strict mode never accepts a running run.
+pkg="Verify publishable crates"
+running_response="$tmp_root/running.json"
+write_response "$running_response" "[{\"id\":124,\"head_sha\":\"$sha\",\"path\":\".github/workflows/ci.yml\",\"event\":\"merge_group\",\"status\":\"in_progress\",\"conclusion\":null}]"
+pending_pkg_jobs="$tmp_root/pending-pkg-jobs.json"
+jq --arg pkg "$pkg" '(.jobs[] | select(.name == $pkg)) |= (.status = "in_progress" | .conclusion = null)' \
+  "$successful_jobs" > "$pending_pkg_jobs"
+[[ "$(run_proof "$running_response" "$pending_pkg_jobs" "" --allow-pending-job "$pkg")" == "true" ]] \
+  || { echo "a run waiting only on package verification was not accepted" >&2; exit 1; }
+[[ "$(run_proof "$running_response" "$pending_pkg_jobs")" == "false" ]] \
+  || { echo "strict proof accepted a run that is still in progress" >&2; exit 1; }
+[[ "$(run_proof "$success_response" "$successful_jobs" "" --allow-pending-job "$pkg")" == "true" ]] \
+  || { echo "allowing a pending job rejected an already complete proof" >&2; exit 1; }
+pending_other_jobs="$tmp_root/pending-other-jobs.json"
+jq '(.jobs[] | select(.name == "Rust workspace tests")) |= (.status = "in_progress" | .conclusion = null)' \
+  "$pending_pkg_jobs" > "$pending_other_jobs"
+[[ "$(run_proof "$running_response" "$pending_other_jobs" "" --allow-pending-job "$pkg")" == "false" ]] \
+  || { echo "a second pending job was accepted" >&2; exit 1; }
+failed_pkg_jobs="$tmp_root/failed-pkg-jobs.json"
+jq --arg pkg "$pkg" '(.jobs[] | select(.name == $pkg)) |= (.status = "completed" | .conclusion = "failure")' \
+  "$successful_jobs" > "$failed_pkg_jobs"
+[[ "$(run_proof "$running_response" "$failed_pkg_jobs" "" --allow-pending-job "$pkg")" == "false" ]] \
+  || { echo "a failed package verification was accepted as pending" >&2; exit 1; }
+failed_extra_jobs="$tmp_root/failed-extra-jobs.json"
+jq '.jobs += [{"name":"Check public Rust API","status":"completed","conclusion":"failure"}] | .total_count = 19' \
+  "$pending_pkg_jobs" > "$failed_extra_jobs"
+[[ "$(run_proof "$running_response" "$failed_extra_jobs" "" --allow-pending-job "$pkg")" == "false" ]] \
+  || { echo "a run with a failed job was accepted while another job was pending" >&2; exit 1; }
+[[ "$(run_proof "$running_response" "$pending_pkg_jobs" "" --allow-pending-job "$pkg" --allow-pending-job "$pkg" 2>&1 || true)" != "true" ]] \
+  || { echo "a repeated --allow-pending-job was accepted" >&2; exit 1; }
+
 missing_harn_jobs="$tmp_root/missing-harn-jobs.json"
 jq 'del(.jobs[] | select(.name == "Run Harn conformance tests (2/4)")) | .total_count = 17' \
   "$successful_jobs" > "$missing_harn_jobs"

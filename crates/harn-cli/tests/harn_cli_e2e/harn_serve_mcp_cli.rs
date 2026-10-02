@@ -30,7 +30,7 @@ fn stable_meta(capabilities: JsonValue) -> JsonValue {
     })
 }
 
-fn stable_request(id: u64, method: &str, mut params: JsonValue) -> JsonValue {
+pub(super) fn stable_request(id: u64, method: &str, mut params: JsonValue) -> JsonValue {
     params["_meta"] = stable_meta(json!({
         "elicitation": {"form": {}, "url": {}},
         "roots": {},

@@ -719,14 +719,6 @@ async fn dispatch(subcommand: Command) {
             }
         }
         Command::Playground(args) => {
-            provider_bootstrap::maybe_seed_ollama_for_playground(
-                Path::new(&args.host),
-                Path::new(&args.script),
-                args.yes,
-                args.llm.is_some(),
-                args.llm_mock.is_some(),
-            )
-            .await;
             let llm_mock_mode = if let Some(path) = args.llm_mock.as_ref() {
                 commands::run::CliLlmMockMode::Replay {
                     fixture_path: PathBuf::from(path),
