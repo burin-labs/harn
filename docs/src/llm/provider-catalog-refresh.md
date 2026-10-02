@@ -171,6 +171,9 @@ harn run \
 For a live extraction, omit `--extraction` and optionally choose `--provider`
 and `--model`. Without `--model`, Harn uses that provider's catalog default;
 it does not pair a cross-provider tier alias with the selected provider.
+The live extraction schema requires a `candidate` field, allowing `null` when
+the notice has no catalog change. This keeps providers from omitting the change
+record while returning classification `candidate`.
 `--max-cost-usd` caps its one model call at $0.10 by default;
 `--extraction-timeout-secs` caps that call at 90 seconds by default. By
 default the script only writes an idempotent local receipt below
