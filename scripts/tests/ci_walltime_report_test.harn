@@ -7,6 +7,7 @@ import {
   parse_ci_latency_policy,
   run_has_full_coverage,
   run_samples_from_api,
+  run_until_verdict,
 } from "../ci_walltime_report.harn"
 
 pipeline test_duration_stats_use_shared_percentile_contract(harness: Harness, task: unknown) {
@@ -242,4 +243,33 @@ pipeline test_evaluation_needs_two_breached_windows_but_hard_max_is_immediate(
   )
   assert_eq(hard.status, "hard_max_breach")
   assert(!hard.ok)
+}
+
+pipeline test_merge_latency_ends_at_the_verdict_job(harness: Harness, task: unknown) {
+  const run = {id: 7, duration_ms: 960000, url: "u", created_at: "2026-10-01T22:20:15Z"}
+  const verdict = {
+    run_id: 7,
+    name: "CI status",
+    conclusion: "success",
+    duration_ms: 4000,
+    start_delay_ms: 596000,
+    runner: "github-hosted",
+    steps: [],
+  }
+  // Package verification keeps the run open after the merge; the wait ends at
+  // the verdict.
+  assert_eq(run_until_verdict(run, [verdict], "CI status").duration_ms, 600000)
+  // No named verdict job, a failed verdict, or one from another run: the
+  // run's own end stands, which can only overstate the wait.
+  assert_eq(run_until_verdict(run, [verdict], "").duration_ms, 960000)
+  assert_eq(
+    run_until_verdict(run, [verdict + {conclusion: "failure"}], "CI status").duration_ms,
+    960000,
+  )
+  assert_eq(run_until_verdict(run, [verdict + {run_id: 8}], "CI status").duration_ms, 960000)
+  // A verdict recorded after the run's end never lengthens it.
+  assert_eq(
+    run_until_verdict(run, [verdict + {start_delay_ms: 990000}], "CI status").duration_ms,
+    960000,
+  )
 }
