@@ -219,7 +219,9 @@ fn canonical_fixture_scrubs_ambient_loader_controls_without_scrubbing_explicit_c
             .output()
             .unwrap();
         assert!(output.status.success(), "{output:?}");
-        if output.stdout == b"bubblewrap-unavailable\n" {
+        if String::from_utf8_lossy(&output.stdout)
+            .contains("NOT EXERCISED: functional bubblewrap namespaces unavailable")
+        {
             eprintln!("NOT EXERCISED: functional bubblewrap namespaces unavailable");
             assert_ne!(std::env::var("BWRAP_REQUIRE_TESTS").as_deref(), Ok("1"));
             return;
@@ -255,6 +257,11 @@ fn main(harness: Harness) {
     deny_landlock(&mut allowed, false);
     let output = allowed.output().unwrap();
     assert!(output.status.success(), "{output:?}");
+    if output.stdout == b"bubblewrap-unavailable\n" {
+        println!("NOT EXERCISED: functional bubblewrap namespaces unavailable");
+        assert_ne!(std::env::var("BWRAP_REQUIRE_TESTS").as_deref(), Ok("1"));
+        return;
+    }
     assert_eq!(output.stdout, b"ambient-loader-fixture-reached\n");
 
     let mut denied = harn_e2e_command();
