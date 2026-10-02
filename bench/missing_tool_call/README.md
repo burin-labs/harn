@@ -63,33 +63,37 @@ The sixteen texts were run twice per backend on the same Linux build server. Eve
 completed, reached the real classifier, published its verdict, and made exactly
 one physical classifier request. Labels never entered the evaluator's state.
 The candidates include the two declared tools and the loop's built-in await tool.
-The baseline classifier and prompt in release v0.10.153 match main at
+The baseline classifier and prompt match main at
 `83f4889983bfc46104c74e9ff34dfeb3580b359f`. Candidate source is
-`28d50683b40f46996859709947285df0317b2118`.
+`39dc92ecac46759f7b18acf47c735f42be9ff8c5`. Both executables are verified CI
+artifacts built with `ci-cli`, the same Rust toolchain, compiler flags, and debug
+settings. Their test-merge revisions, binary checksums, and build identities are
+recorded in `measurement.json`.
 
-| Classifier | Correct intent | Correct recovery and tool | Ambiguous | Median classifier ms | Cost, 32 runs |
+| Classifier | Correct intent | Correct recovery decision and tool | Ambiguous | Median classifier ms | Cost, 32 runs |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| Baseline structured | 30/32 | 30/32 | 2 | 1,074.5 | $0.02098425 |
-| Shared structured | 30/32 | 30/32 | 3 | 2,098 | $0.02738100 |
-| Shared native | 32/32 | 32/32 | 1 | 189 | $0.00081707 |
+| Baseline structured | 30/32 | 30/32 | 2 | 981.3 | $0.02081400 |
+| Shared structured | 30/32 | 30/32 | 2 | 1,006 | $0.02712675 |
+| Shared native | 32/32 | 32/32 | 0 | 133.5 | $0.00081707 |
 
 Classifier duration uses the baseline's profiled structured-call builtin and
-the candidates' persisted evaluation receipt. Total run medians were 1,423,
-4,765.5, and 2,771.5 ms respectively. Those totals compare an optimized baseline
-with a debug candidate and include CLI/import work; they do not establish an
-end-to-end speed improvement. Native's measured classifier cost was lower;
-the structured replacement's cost and measured duration increased.
+the candidates' persisted evaluation receipt. Total run medians were 1,384.5,
+1,310, and 401.5 ms respectively, including CLI/import work. Native's measured
+classifier cost and completing-run duration were lower on this workload. The
+structured replacement cost more; its classifier median increased slightly,
+while its completing-run median decreased slightly. Sequential API trials
+also include changing provider and network latency.
 
 Both structured routes reported zero cache-read tokens in all 32 calls. The
 native endpoint did not report cache categories. Adapter-default zero counters
 are not evidence of native cache reuse. Native and structured intent answers
-agreed on 30/32 paired trials, and their action labels agreed on 26/32.
+agreed on 30/32 paired trials, and their action labels agreed on 28/32.
 
 The baseline missed the immediate patch commitment in both repeats. The shared
 structured classifier incorrectly treated advice to read the README as its own
 tool intent in both repeats. Equal aggregate accuracy therefore does not prove
-behavioral equivalence or certify the replacement's quality. Native's one
-ambiguous verdict was a permission question and caused no false recovery.
+behavioral equivalence or certify the replacement's quality. Native caused no
+false recovery in these trials.
 The corpus has only sixteen distinct texts; repeats are not independent new
 examples. These observations are development evidence, not deployment accuracy.
 
@@ -101,7 +105,12 @@ structured receipts report `gpt-5.4-mini-2026-03-17`; native reports
 16 positive tool-choice labels per candidate backend, charging cost only once
 per evaluation. [`calibration-report.json`](calibration-report.json) is the
 owning `calibration_report` result over those 96 rows. Intent confidence error
-was 0.138126 for structured and 0.092813 for native; tool-choice error was
-0.0125 and zero. At the existing 0.65 threshold, intent coverage was 29/32 and
-31/32. Neither report can recommend a threshold at 5% target error because its
+was 0.109063 for structured and 0.087812 for native; tool-choice error was
+0.014375 and zero. At the existing 0.65 threshold, intent coverage was 30/32 and
+32/32. Neither report can recommend a threshold at 5% target error because its
 calibration split is too small. The policy threshold remains unchanged.
+
+An [earlier development study](https://github.com/burin-labs/harn/blob/b4193e494ec4d63ad7f51599a780c898da8aa4cc/bench/missing_tool_call/measurement.json)
+compared a release baseline with a debug candidate. It also found the two
+structured false recoveries. Its completing-run times mixed build profiles;
+the matched-profile study above replaces those timing comparisons.
