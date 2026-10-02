@@ -218,6 +218,19 @@ fn plan_entries_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
     Ok(json_to_vm_value(&crate::llm::plan::plan_entries(&json)))
 }
 
+/// A registry entry as `tool_list` / `tool_def` show it, without its closures.
+fn tool_metadata_entry(entry: &crate::value::DictMap) -> VmValue {
+    let mut desc = entry.clone();
+    for key in [
+        "handler",
+        "_call_handler",
+        crate::llm::approval_preview::CONFIG_KEY,
+    ] {
+        desc.remove(key);
+    }
+    VmValue::dict(desc)
+}
+
 #[harn_builtin(
     exposure = "pure",
     effects = [],
@@ -239,17 +252,7 @@ fn tool_list_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
     let mut result = Vec::new();
     for tool in tools {
         if let VmValue::Dict(entry) = tool {
-            let mut desc = crate::value::DictMap::new();
-            for (key, value) in entry.iter() {
-                if matches!(
-                    key.as_str(),
-                    "handler" | "_call_handler" | crate::llm::approval_preview::CONFIG_KEY
-                ) {
-                    continue;
-                }
-                desc.insert(key.clone(), value.clone());
-            }
-            result.push(VmValue::dict(desc));
+            result.push(tool_metadata_entry(entry));
         }
     }
     Ok(VmValue::List(std::sync::Arc::new(result)))
@@ -712,8 +715,6 @@ fn tool_define_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
         }
     }
 
-    // `approval_preview` is copied onto the entry with the other extension
-    // keys below; validate its shape once here, where the author wrote it.
     crate::llm::approval_preview::validate_config(
         config.get(crate::llm::approval_preview::CONFIG_KEY),
         &name,
@@ -1033,17 +1034,7 @@ fn tool_def_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError
     };
 
     if let Some(entry) = vm_find_tool_entry(registry, &name) {
-        let mut desc = crate::value::DictMap::new();
-        for (key, value) in entry.iter() {
-            if matches!(
-                key.as_str(),
-                "handler" | "_call_handler" | crate::llm::approval_preview::CONFIG_KEY
-            ) {
-                continue;
-            }
-            desc.insert(key.clone(), value.clone());
-        }
-        return Ok(VmValue::dict(desc));
+        return Ok(tool_metadata_entry(entry));
     }
 
     let registered = vm_registered_names(registry);
