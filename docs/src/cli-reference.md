@@ -2180,8 +2180,8 @@ harn provider option-probe anthropic \
   --fail-on-drift --json
 ```
 
-`--plan` reports the endpoint, exact catalog field, claim, initial request count,
-and maximum of three requests without contacting the provider. A live report records `match`, `drift`,
+`--plan` reports the endpoint, exact catalog field, claim, and initial request
+count without contacting the provider. A live report records `match`, `drift`,
 or `unmeasured`. Provider acceptance and provider rejection are measurements;
 authentication failures, throttling, unavailable models, and local gates are
 not. With `--fail-on-drift`, drift exits 1 and an unmeasured request exits 2.

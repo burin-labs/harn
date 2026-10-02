@@ -446,7 +446,6 @@ fn main(harness: Harness) {
       option: option,
       catalog: {field: provider_portable_option_catalog_field(option), claimed_supported: claimed},
       request_count: 1,
-      max_request_count: 3,
       ungated: ungated,
     }
     harness.stdio.println(json_stringify_pretty(plan))
