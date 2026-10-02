@@ -134,4 +134,21 @@ CAPACITY_ROUTED_EVENT=pull_request
 [[ $(paid_line pull_request "$measured") != *paid_runner=* ]]
 CAPACITY_ROUTED_EVENT=push
 
-echo 'Runner capacity: owned, retired, unrouted-event, evacuation-switch, retired-routing, census-fallback, routed-event, label and paid-runner controls passed'
+# With a per-host breakdown, an idle carrier on a host that is already half
+# busy is not capacity: the job could land there with a fraction of a compiler.
+# Every host that could receive the job must have room.
+quiet='{"linux_big":{"online":9,"idle":7,"hosts":{"a":{"online":6,"busy":1,"idle_big":5},"b":{"online":3,"busy":0,"idle_big":3}}}}'
+[[ $(runner_capacity_decision push '' "$quiet") == *route=owned* ]]
+# Host a has three of six busy, so a fourth job there would be over half.
+busy_a='{"linux_big":{"online":9,"idle":5,"hosts":{"a":{"online":6,"busy":3,"idle_big":3},"b":{"online":3,"busy":0,"idle_big":3}}}}'
+[[ $(runner_capacity_decision push '' "$busy_a") == \
+  *"route=hosted reason=owned_hosts_saturated"*"busy_hosts=a:3/6" ]]
+# A saturated host with no idle carrier cannot receive the job, so it does not
+# block the route.
+full_a='{"linux_big":{"online":9,"idle":3,"hosts":{"a":{"online":6,"busy":6,"idle_big":0},"b":{"online":3,"busy":0,"idle_big":3}}}}'
+[[ $(runner_capacity_decision push '' "$full_a") == *route=owned* ]]
+# An unreadable breakdown falls back by name rather than trusting the pool.
+[[ $(runner_capacity_decision push '' '{"linux_big":{"online":3,"idle":1,"hosts":{"a":{"online":"3"}}}}' 2>/dev/null) == \
+  *"route=hosted reason=capacity_hosts_unreadable fallback=true"* ]]
+
+echo 'Runner capacity: owned, retired, unrouted-event, evacuation-switch, retired-routing, census-fallback, routed-event, label, paid-runner and host-saturation controls passed'
