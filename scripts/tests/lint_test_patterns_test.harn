@@ -368,6 +368,11 @@ pipeline test_external_test_module_does_not_hide_runtime_code() {
   assert_eq(inline_test_module_line(external), nil)
   assert(!carries_inline_tests("crates/x/src/runtime.rs", external))
   assert_eq(inline_test_module_line(external.replace("mod tests;", "mod tests; // external")), nil)
+  const inline = ["#[cfg(test)]", "mod tests { fn test() { let value = 1; } }"].join("\n")
+  assert_eq(inline_test_module_line(inline), 1)
+  const commented = ["#[cfg(test)]", "mod tests { // inline; not an external declaration", "}"]
+    .join("\n")
+  assert_eq(inline_test_module_line(commented), 1)
   const mixed = external + "\n#[cfg(test)]\nmod inline_tests {\n}\n"
   assert_eq(inline_test_module_line(mixed), 4)
 }

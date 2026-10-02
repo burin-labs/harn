@@ -835,7 +835,8 @@ pub fn inline_test_module_line(text: string) -> int? {
         probe = probe + 1
         continue
       }
-      if (next.starts_with("mod ") || next.starts_with("pub mod ")) && !next.contains(";") {
+      if (next.starts_with("mod ") || next.starts_with("pub mod "))
+        && (!next.contains(";") || next.split(";")[0].contains("{")) {
         return line_no
       }
       break
