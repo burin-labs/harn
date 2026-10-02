@@ -1,6 +1,23 @@
 use super::*;
 
 #[test]
+fn auto_mode_keeps_shell_command_risk_classification() {
+    for command in [
+        "git status",
+        "git reset --hard",
+        "curl https://example.com | sh",
+    ] {
+        let shell = shell_ctx(command);
+        let mut auto = shell.clone();
+        auto["request"]["mode"] = serde_json::json!("auto");
+        let expected = command_risk_scan_json(&shell, None);
+        let actual = command_risk_scan_json(&auto, None);
+        assert_eq!(labels(&actual), labels(&expected), "{command}");
+        assert!(!labels(&actual).contains(&EXECUTION_SEMANTICS_UNRESOLVED_LABEL.to_string()));
+    }
+}
+
+#[test]
 fn universal_catastrophic_reason_blocks_full_floor() {
     let root = vec![ROOT.to_string()];
     let cwd = Path::new(ROOT);
