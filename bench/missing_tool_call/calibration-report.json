@@ -1,6 +1,6 @@
 {
   "contract": "harn.calibration_report.v1",
-  "corpus_digest": "eee77bdaf361b997426f2914e230b71674f3b1d3b8fb03b419918711a1c98676",
+  "corpus_digest": "2d0df6d6fb5b5498fb8860b77316e4ff2e7240672629936342a88a55f0b9d8bb",
   "groups": [
     {
       "abstained_rows": 0,
@@ -59,7 +59,7 @@
           "accuracy": 1.0,
           "index": 6,
           "lower": 0.6,
-          "mean_confidence": 0.645,
+          "mean_confidence": 0.675,
           "rows": 2,
           "upper": 0.7
         },
@@ -75,16 +75,16 @@
           "accuracy": 1.0,
           "index": 8,
           "lower": 0.8,
-          "mean_confidence": 0.85,
-          "rows": 6,
+          "mean_confidence": 0.861429,
+          "rows": 7,
           "upper": 0.9
         },
         {
           "accuracy": 1.0,
           "index": 9,
           "lower": 0.9,
-          "mean_confidence": 0.943333,
-          "rows": 24,
+          "mean_confidence": 0.948261,
+          "rows": 23,
           "upper": 1.0
         }
       ],
@@ -95,11 +95,11 @@
         "p90": 2.6e-05,
         "rows": 32
       },
-      "expected_calibration_error": 0.092813,
+      "expected_calibration_error": 0.087812,
       "latency_ms": {
-        "max": 353.0,
-        "p50": 189.0,
-        "p90": 323.4,
+        "max": 265.0,
+        "p50": 133.5,
+        "p90": 206.0,
         "rows": 32
       },
       "level_order": [],
@@ -130,30 +130,30 @@
           "withheld": 0
         },
         {
-          "abstention_rate": 0.03125,
-          "accepted": 31,
+          "abstention_rate": 0.0,
+          "accepted": 32,
           "accepted_accuracy": 1.0,
-          "coverage": 0.96875,
+          "coverage": 1.0,
           "false_accept": 0,
           "false_accept_rate": 0.0,
-          "false_reject": 1,
-          "false_reject_rate": 1.0,
+          "false_reject": 0,
+          "false_reject_rate": 0.0,
           "rows": 32,
           "threshold": 0.65,
-          "withheld": 1
+          "withheld": 0
         },
         {
-          "abstention_rate": 0.25,
-          "accepted": 24,
+          "abstention_rate": 0.28125,
+          "accepted": 23,
           "accepted_accuracy": 1.0,
-          "coverage": 0.75,
+          "coverage": 0.71875,
           "false_accept": 0,
           "false_accept_rate": 0.0,
-          "false_reject": 8,
+          "false_reject": 9,
           "false_reject_rate": 1.0,
           "rows": 32,
           "threshold": 0.9,
-          "withheld": 8
+          "withheld": 9
         }
       ]
     },
@@ -166,8 +166,8 @@
           "accuracy": 1.0,
           "index": 0,
           "lower": 0.0,
-          "mean_confidence": 0.066667,
-          "rows": 3,
+          "mean_confidence": 0.055,
+          "rows": 2,
           "upper": 0.1
         },
         {
@@ -235,26 +235,26 @@
           "upper": 0.9
         },
         {
-          "accuracy": 0.931034,
+          "accuracy": 0.933333,
           "index": 9,
           "lower": 0.9,
-          "mean_confidence": 0.986897,
-          "rows": 29,
+          "mean_confidence": 0.986667,
+          "rows": 30,
           "upper": 1.0
         }
       ],
       "correct_rows": 30,
       "cost_usd": {
-        "max": 0.000933,
-        "p50": 0.000855,
-        "p90": 0.000888,
+        "max": 0.000923,
+        "p50": 0.000843,
+        "p90": 0.000889,
         "rows": 32
       },
-      "expected_calibration_error": 0.138126,
+      "expected_calibration_error": 0.109063,
       "latency_ms": {
-        "max": 2959.0,
-        "p50": 2098.0,
-        "p90": 2523.0,
+        "max": 1911.0,
+        "p50": 1006.0,
+        "p90": 1428.1,
         "rows": 32
       },
       "level_order": [],
@@ -285,30 +285,30 @@
           "withheld": 0
         },
         {
-          "abstention_rate": 0.09375,
-          "accepted": 29,
-          "accepted_accuracy": 0.931034,
-          "coverage": 0.90625,
+          "abstention_rate": 0.0625,
+          "accepted": 30,
+          "accepted_accuracy": 0.933333,
+          "coverage": 0.9375,
           "false_accept": 2,
-          "false_accept_rate": 0.068966,
-          "false_reject": 3,
+          "false_accept_rate": 0.066667,
+          "false_reject": 2,
           "false_reject_rate": 1.0,
           "rows": 32,
           "threshold": 0.65,
-          "withheld": 3
+          "withheld": 2
         },
         {
-          "abstention_rate": 0.09375,
-          "accepted": 29,
-          "accepted_accuracy": 0.931034,
-          "coverage": 0.90625,
+          "abstention_rate": 0.0625,
+          "accepted": 30,
+          "accepted_accuracy": 0.933333,
+          "coverage": 0.9375,
           "false_accept": 2,
-          "false_accept_rate": 0.068966,
-          "false_reject": 3,
+          "false_accept_rate": 0.066667,
+          "false_reject": 2,
           "false_reject_rate": 1.0,
           "rows": 32,
           "threshold": 0.9,
-          "withheld": 3
+          "withheld": 2
         }
       ]
     },
@@ -548,7 +548,7 @@
           "accuracy": 1.0,
           "index": 9,
           "lower": 0.9,
-          "mean_confidence": 0.9875,
+          "mean_confidence": 0.985625,
           "rows": 16,
           "upper": 1.0
         }
@@ -560,7 +560,7 @@
         "p90": null,
         "rows": 0
       },
-      "expected_calibration_error": 0.0125,
+      "expected_calibration_error": 0.014375,
       "latency_ms": {
         "max": null,
         "p50": null,
@@ -625,7 +625,7 @@
   ],
   "kind": "report",
   "model_revision": "",
-  "report_digest": "91f5cb94b491cb4206cbb3de07a6d8b3789716d9db9501a0e71a77d050b7b46e",
+  "report_digest": "32a60e1d92b5d40a318994a6ce55ca8bd56b7f275bc1c3edbaa25e260b87a04c",
   "rows": 96,
   "seed": 8543,
   "served_model_id": "",

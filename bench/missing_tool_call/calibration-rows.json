@@ -6,8 +6,8 @@
     "confidence": 0.99,
     "abstained": false,
     "backend": "structured_llm",
-    "cost": 0.0008309999999999999,
-    "latency_ms": 2534.0
+    "cost": 0.0008625,
+    "latency_ms": 1894.0
   },
   {
     "question_id": "tool",
@@ -24,8 +24,8 @@
     "confidence": 0.99,
     "abstained": false,
     "backend": "structured_llm",
-    "cost": 0.00083625,
-    "latency_ms": 2496.0
+    "cost": 0.0008145,
+    "latency_ms": 1807.0
   },
   {
     "question_id": "tool",
@@ -42,8 +42,8 @@
     "confidence": 0.99,
     "abstained": false,
     "backend": "structured_llm",
-    "cost": 0.000873,
-    "latency_ms": 2221.0
+    "cost": 0.0008895,
+    "latency_ms": 937.0
   },
   {
     "question_id": "tool",
@@ -60,8 +60,8 @@
     "confidence": 0.99,
     "abstained": false,
     "backend": "structured_llm",
-    "cost": 0.0008354999999999999,
-    "latency_ms": 2526.0
+    "cost": 0.0008444999999999999,
+    "latency_ms": 1226.0
   },
   {
     "question_id": "tool",
@@ -76,112 +76,72 @@
     "expected": "true",
     "predicted": "true",
     "confidence": 0.99,
-    "abstained": false,
-    "backend": "structured_llm",
-    "cost": 0.0008647500000000001,
-    "latency_ms": 2147.0
-  },
-  {
-    "question_id": "tool",
-    "expected": "read",
-    "predicted": "read",
-    "confidence": 0.99,
-    "abstained": false,
-    "backend": "structured_llm"
-  },
-  {
-    "question_id": "intended",
-    "expected": "true",
-    "predicted": "true",
-    "confidence": 0.99,
-    "abstained": false,
-    "backend": "structured_llm",
-    "cost": 0.000888,
-    "latency_ms": 2819.0
-  },
-  {
-    "question_id": "tool",
-    "expected": "edit",
-    "predicted": "edit",
-    "confidence": 0.99,
-    "abstained": false,
-    "backend": "structured_llm"
-  },
-  {
-    "question_id": "intended",
-    "expected": "true",
-    "predicted": "true",
-    "confidence": 0.99,
-    "abstained": false,
-    "backend": "structured_llm",
-    "cost": 0.00079875,
-    "latency_ms": 1995.0
-  },
-  {
-    "question_id": "tool",
-    "expected": "read",
-    "predicted": "read",
-    "confidence": 0.99,
-    "abstained": false,
-    "backend": "structured_llm"
-  },
-  {
-    "question_id": "intended",
-    "expected": "true",
-    "predicted": "true",
-    "confidence": 0.99,
-    "abstained": false,
-    "backend": "structured_llm",
-    "cost": 0.000888,
-    "latency_ms": 2176.0
-  },
-  {
-    "question_id": "tool",
-    "expected": "edit",
-    "predicted": "edit",
-    "confidence": 0.99,
-    "abstained": false,
-    "backend": "structured_llm"
-  },
-  {
-    "question_id": "intended",
-    "expected": "false",
-    "predicted": "false",
-    "confidence": 0.98,
-    "abstained": false,
-    "backend": "structured_llm",
-    "cost": 0.0008565000000000001,
-    "latency_ms": 2269.0
-  },
-  {
-    "question_id": "intended",
-    "expected": "false",
-    "predicted": "false",
-    "confidence": 0.99,
-    "abstained": false,
-    "backend": "structured_llm",
-    "cost": 0.00083925,
-    "latency_ms": 2154.0
-  },
-  {
-    "question_id": "intended",
-    "expected": "false",
-    "predicted": "false",
-    "confidence": 0.08,
     "abstained": false,
     "backend": "structured_llm",
     "cost": 0.0008085,
-    "latency_ms": 1944.0
+    "latency_ms": 1911.0
+  },
+  {
+    "question_id": "tool",
+    "expected": "read",
+    "predicted": "read",
+    "confidence": 0.99,
+    "abstained": false,
+    "backend": "structured_llm"
   },
   {
     "question_id": "intended",
-    "expected": "false",
+    "expected": "true",
     "predicted": "true",
-    "confidence": 0.98,
+    "confidence": 0.99,
     "abstained": false,
     "backend": "structured_llm",
-    "cost": 0.0008685,
-    "latency_ms": 2959.0
+    "cost": 0.000864,
+    "latency_ms": 1384.0
+  },
+  {
+    "question_id": "tool",
+    "expected": "edit",
+    "predicted": "edit",
+    "confidence": 0.98,
+    "abstained": false,
+    "backend": "structured_llm"
+  },
+  {
+    "question_id": "intended",
+    "expected": "true",
+    "predicted": "true",
+    "confidence": 0.99,
+    "abstained": false,
+    "backend": "structured_llm",
+    "cost": 0.0008145,
+    "latency_ms": 894.0
+  },
+  {
+    "question_id": "tool",
+    "expected": "read",
+    "predicted": "read",
+    "confidence": 0.99,
+    "abstained": false,
+    "backend": "structured_llm"
+  },
+  {
+    "question_id": "intended",
+    "expected": "true",
+    "predicted": "true",
+    "confidence": 0.99,
+    "abstained": false,
+    "backend": "structured_llm",
+    "cost": 0.000921,
+    "latency_ms": 981.0
+  },
+  {
+    "question_id": "tool",
+    "expected": "edit",
+    "predicted": "edit",
+    "confidence": 0.99,
+    "abstained": false,
+    "backend": "structured_llm"
   },
   {
     "question_id": "intended",
@@ -190,8 +150,48 @@
     "confidence": 0.99,
     "abstained": false,
     "backend": "structured_llm",
-    "cost": 0.0009329999999999999,
-    "latency_ms": 2102.0
+    "cost": 0.00080775,
+    "latency_ms": 887.0
+  },
+  {
+    "question_id": "intended",
+    "expected": "false",
+    "predicted": "false",
+    "confidence": 0.99,
+    "abstained": false,
+    "backend": "structured_llm",
+    "cost": 0.0008385,
+    "latency_ms": 884.0
+  },
+  {
+    "question_id": "intended",
+    "expected": "false",
+    "predicted": "false",
+    "confidence": 0.98,
+    "abstained": false,
+    "backend": "structured_llm",
+    "cost": 0.0008107500000000001,
+    "latency_ms": 949.0
+  },
+  {
+    "question_id": "intended",
+    "expected": "false",
+    "predicted": "true",
+    "confidence": 0.98,
+    "abstained": false,
+    "backend": "structured_llm",
+    "cost": 0.0008385,
+    "latency_ms": 903.0
+  },
+  {
+    "question_id": "intended",
+    "expected": "false",
+    "predicted": "false",
+    "confidence": 0.99,
+    "abstained": false,
+    "backend": "structured_llm",
+    "cost": 0.0008415,
+    "latency_ms": 946.0
   },
   {
     "question_id": "intended",
@@ -200,8 +200,8 @@
     "confidence": 0.08,
     "abstained": false,
     "backend": "structured_llm",
-    "cost": 0.00083175,
-    "latency_ms": 1859.0
+    "cost": 0.0008295,
+    "latency_ms": 1080.0
   },
   {
     "question_id": "intended",
@@ -210,8 +210,8 @@
     "confidence": 0.98,
     "abstained": false,
     "backend": "structured_llm",
-    "cost": 0.0008879999999999999,
-    "latency_ms": 2254.0
+    "cost": 0.00088125,
+    "latency_ms": 1016.0
   },
   {
     "question_id": "intended",
@@ -220,98 +220,8 @@
     "confidence": 0.98,
     "abstained": false,
     "backend": "structured_llm",
-    "cost": 0.0008482499999999999,
-    "latency_ms": 1949.0
-  },
-  {
-    "question_id": "intended",
-    "expected": "true",
-    "predicted": "true",
-    "confidence": 0.99,
-    "abstained": false,
-    "backend": "structured_llm",
-    "cost": 0.0008347500000000001,
-    "latency_ms": 2063.0
-  },
-  {
-    "question_id": "tool",
-    "expected": "read",
-    "predicted": "read",
-    "confidence": 0.99,
-    "abstained": false,
-    "backend": "structured_llm"
-  },
-  {
-    "question_id": "intended",
-    "expected": "true",
-    "predicted": "true",
-    "confidence": 0.99,
-    "abstained": false,
-    "backend": "structured_llm",
-    "cost": 0.0008354999999999999,
-    "latency_ms": 2061.0
-  },
-  {
-    "question_id": "tool",
-    "expected": "edit",
-    "predicted": "edit",
-    "confidence": 0.99,
-    "abstained": false,
-    "backend": "structured_llm"
-  },
-  {
-    "question_id": "intended",
-    "expected": "true",
-    "predicted": "true",
-    "confidence": 0.99,
-    "abstained": false,
-    "backend": "structured_llm",
-    "cost": 0.00087075,
-    "latency_ms": 2225.0
-  },
-  {
-    "question_id": "tool",
-    "expected": "read",
-    "predicted": "read",
-    "confidence": 0.98,
-    "abstained": false,
-    "backend": "structured_llm"
-  },
-  {
-    "question_id": "intended",
-    "expected": "true",
-    "predicted": "true",
-    "confidence": 0.99,
-    "abstained": false,
-    "backend": "structured_llm",
-    "cost": 0.000843,
-    "latency_ms": 2127.0
-  },
-  {
-    "question_id": "tool",
-    "expected": "edit",
-    "predicted": "edit",
-    "confidence": 0.98,
-    "abstained": false,
-    "backend": "structured_llm"
-  },
-  {
-    "question_id": "intended",
-    "expected": "true",
-    "predicted": "true",
-    "confidence": 0.99,
-    "abstained": false,
-    "backend": "structured_llm",
-    "cost": 0.00087525,
-    "latency_ms": 2094.0
-  },
-  {
-    "question_id": "tool",
-    "expected": "read",
-    "predicted": "read",
-    "confidence": 0.99,
-    "abstained": false,
-    "backend": "structured_llm"
+    "cost": 0.0008489999999999999,
+    "latency_ms": 972.0
   },
   {
     "question_id": "intended",
@@ -321,25 +231,7 @@
     "abstained": false,
     "backend": "structured_llm",
     "cost": 0.00086175,
-    "latency_ms": 1995.0
-  },
-  {
-    "question_id": "tool",
-    "expected": "edit",
-    "predicted": "edit",
-    "confidence": 0.99,
-    "abstained": false,
-    "backend": "structured_llm"
-  },
-  {
-    "question_id": "intended",
-    "expected": "true",
-    "predicted": "true",
-    "confidence": 0.99,
-    "abstained": false,
-    "backend": "structured_llm",
-    "cost": 0.0008534999999999999,
-    "latency_ms": 2363.0
+    "latency_ms": 1316.0
   },
   {
     "question_id": "tool",
@@ -356,8 +248,116 @@
     "confidence": 0.99,
     "abstained": false,
     "backend": "structured_llm",
-    "cost": 0.000909,
-    "latency_ms": 2117.0
+    "cost": 0.00083925,
+    "latency_ms": 1082.0
+  },
+  {
+    "question_id": "tool",
+    "expected": "edit",
+    "predicted": "edit",
+    "confidence": 0.99,
+    "abstained": false,
+    "backend": "structured_llm"
+  },
+  {
+    "question_id": "intended",
+    "expected": "true",
+    "predicted": "true",
+    "confidence": 0.99,
+    "abstained": false,
+    "backend": "structured_llm",
+    "cost": 0.00087225,
+    "latency_ms": 1069.0
+  },
+  {
+    "question_id": "tool",
+    "expected": "read",
+    "predicted": "read",
+    "confidence": 0.98,
+    "abstained": false,
+    "backend": "structured_llm"
+  },
+  {
+    "question_id": "intended",
+    "expected": "true",
+    "predicted": "true",
+    "confidence": 0.98,
+    "abstained": false,
+    "backend": "structured_llm",
+    "cost": 0.0008459999999999999,
+    "latency_ms": 969.0
+  },
+  {
+    "question_id": "tool",
+    "expected": "edit",
+    "predicted": "edit",
+    "confidence": 0.97,
+    "abstained": false,
+    "backend": "structured_llm"
+  },
+  {
+    "question_id": "intended",
+    "expected": "true",
+    "predicted": "true",
+    "confidence": 0.99,
+    "abstained": false,
+    "backend": "structured_llm",
+    "cost": 0.0007905,
+    "latency_ms": 879.0
+  },
+  {
+    "question_id": "tool",
+    "expected": "read",
+    "predicted": "read",
+    "confidence": 0.99,
+    "abstained": false,
+    "backend": "structured_llm"
+  },
+  {
+    "question_id": "intended",
+    "expected": "true",
+    "predicted": "true",
+    "confidence": 0.99,
+    "abstained": false,
+    "backend": "structured_llm",
+    "cost": 0.0008625,
+    "latency_ms": 1077.0
+  },
+  {
+    "question_id": "tool",
+    "expected": "edit",
+    "predicted": "edit",
+    "confidence": 0.98,
+    "abstained": false,
+    "backend": "structured_llm"
+  },
+  {
+    "question_id": "intended",
+    "expected": "true",
+    "predicted": "true",
+    "confidence": 0.99,
+    "abstained": false,
+    "backend": "structured_llm",
+    "cost": 0.0008145,
+    "latency_ms": 996.0
+  },
+  {
+    "question_id": "tool",
+    "expected": "read",
+    "predicted": "read",
+    "confidence": 0.99,
+    "abstained": false,
+    "backend": "structured_llm"
+  },
+  {
+    "question_id": "intended",
+    "expected": "true",
+    "predicted": "true",
+    "confidence": 0.99,
+    "abstained": false,
+    "backend": "structured_llm",
+    "cost": 0.0009232499999999999,
+    "latency_ms": 1031.0
   },
   {
     "question_id": "tool",
@@ -374,8 +374,8 @@
     "confidence": 0.98,
     "abstained": false,
     "backend": "structured_llm",
-    "cost": 0.000861,
-    "latency_ms": 1817.0
+    "cost": 0.0008737500000000001,
+    "latency_ms": 1298.0
   },
   {
     "question_id": "intended",
@@ -384,8 +384,8 @@
     "confidence": 0.99,
     "abstained": false,
     "backend": "structured_llm",
-    "cost": 0.00083925,
-    "latency_ms": 1818.0
+    "cost": 0.00083775,
+    "latency_ms": 904.0
   },
   {
     "question_id": "intended",
@@ -394,8 +394,8 @@
     "confidence": 0.98,
     "abstained": false,
     "backend": "structured_llm",
-    "cost": 0.0008085,
-    "latency_ms": 1744.0
+    "cost": 0.0008092500000000001,
+    "latency_ms": 969.0
   },
   {
     "question_id": "intended",
@@ -404,8 +404,8 @@
     "confidence": 0.98,
     "abstained": false,
     "backend": "structured_llm",
-    "cost": 0.00086775,
-    "latency_ms": 1890.0
+    "cost": 0.0008272500000000001,
+    "latency_ms": 876.0
   },
   {
     "question_id": "intended",
@@ -414,18 +414,18 @@
     "confidence": 0.99,
     "abstained": false,
     "backend": "structured_llm",
-    "cost": 0.0009,
-    "latency_ms": 2022.0
+    "cost": 0.0008939999999999999,
+    "latency_ms": 1309.0
   },
   {
     "question_id": "intended",
     "expected": "false",
     "predicted": "false",
-    "confidence": 0.04,
+    "confidence": 0.03,
     "abstained": false,
     "backend": "structured_llm",
     "cost": 0.0008295,
-    "latency_ms": 1640.0
+    "latency_ms": 923.0
   },
   {
     "question_id": "intended",
@@ -434,8 +434,8 @@
     "confidence": 0.98,
     "abstained": false,
     "backend": "structured_llm",
-    "cost": 0.00085575,
-    "latency_ms": 1826.0
+    "cost": 0.00088125,
+    "latency_ms": 1105.0
   },
   {
     "question_id": "intended",
@@ -444,18 +444,18 @@
     "confidence": 0.98,
     "abstained": false,
     "backend": "structured_llm",
-    "cost": 0.00084675,
-    "latency_ms": 2020.0
+    "cost": 0.0008482499999999999,
+    "latency_ms": 1433.0
   },
   {
     "question_id": "intended",
     "expected": "true",
     "predicted": "true",
-    "confidence": 0.92,
+    "confidence": 0.91,
     "abstained": false,
     "backend": "native_decision",
     "cost": 2.5452000000000003e-05,
-    "latency_ms": 339.0
+    "latency_ms": 228.0
   },
   {
     "question_id": "tool",
@@ -469,11 +469,11 @@
     "question_id": "intended",
     "expected": "true",
     "predicted": "true",
-    "confidence": 0.94,
+    "confidence": 0.95,
     "abstained": false,
     "backend": "native_decision",
     "cost": 2.5452000000000003e-05,
-    "latency_ms": 157.0
+    "latency_ms": 178.0
   },
   {
     "question_id": "tool",
@@ -491,7 +491,7 @@
     "abstained": false,
     "backend": "native_decision",
     "cost": 2.5452000000000003e-05,
-    "latency_ms": 193.0
+    "latency_ms": 137.0
   },
   {
     "question_id": "tool",
@@ -509,7 +509,7 @@
     "abstained": false,
     "backend": "native_decision",
     "cost": 2.5368000000000002e-05,
-    "latency_ms": 211.0
+    "latency_ms": 119.0
   },
   {
     "question_id": "tool",
@@ -523,11 +523,11 @@
     "question_id": "intended",
     "expected": "true",
     "predicted": "true",
-    "confidence": 0.93,
+    "confidence": 0.94,
     "abstained": false,
     "backend": "native_decision",
     "cost": 2.541e-05,
-    "latency_ms": 175.0
+    "latency_ms": 124.0
   },
   {
     "question_id": "tool",
@@ -545,146 +545,12 @@
     "abstained": false,
     "backend": "native_decision",
     "cost": 2.5452000000000003e-05,
-    "latency_ms": 228.0
+    "latency_ms": 146.0
   },
   {
     "question_id": "tool",
     "expected": "edit",
     "predicted": "edit",
-    "confidence": 1.0,
-    "abstained": false,
-    "backend": "native_decision"
-  },
-  {
-    "question_id": "intended",
-    "expected": "true",
-    "predicted": "true",
-    "confidence": 0.93,
-    "abstained": false,
-    "backend": "native_decision",
-    "cost": 2.5494000000000004e-05,
-    "latency_ms": 164.0
-  },
-  {
-    "question_id": "tool",
-    "expected": "read",
-    "predicted": "read",
-    "confidence": 1.0,
-    "abstained": false,
-    "backend": "native_decision"
-  },
-  {
-    "question_id": "intended",
-    "expected": "true",
-    "predicted": "true",
-    "confidence": 0.81,
-    "abstained": false,
-    "backend": "native_decision",
-    "cost": 2.5746000000000004e-05,
-    "latency_ms": 332.0
-  },
-  {
-    "question_id": "tool",
-    "expected": "edit",
-    "predicted": "edit",
-    "confidence": 1.0,
-    "abstained": false,
-    "backend": "native_decision"
-  },
-  {
-    "question_id": "intended",
-    "expected": "false",
-    "predicted": "false",
-    "confidence": 0.98,
-    "abstained": false,
-    "backend": "native_decision",
-    "cost": 2.5326e-05,
-    "latency_ms": 168.0
-  },
-  {
-    "question_id": "intended",
-    "expected": "false",
-    "predicted": "false",
-    "confidence": 0.97,
-    "abstained": false,
-    "backend": "native_decision",
-    "cost": 2.5578e-05,
-    "latency_ms": 240.0
-  },
-  {
-    "question_id": "intended",
-    "expected": "false",
-    "predicted": "false",
-    "confidence": 0.97,
-    "abstained": false,
-    "backend": "native_decision",
-    "cost": 2.5452000000000003e-05,
-    "latency_ms": 257.0
-  },
-  {
-    "question_id": "intended",
-    "expected": "false",
-    "predicted": "false",
-    "confidence": 0.95,
-    "abstained": false,
-    "backend": "native_decision",
-    "cost": 2.541e-05,
-    "latency_ms": 210.0
-  },
-  {
-    "question_id": "intended",
-    "expected": "false",
-    "predicted": "false",
-    "confidence": 0.96,
-    "abstained": false,
-    "backend": "native_decision",
-    "cost": 2.5956000000000004e-05,
-    "latency_ms": 201.0
-  },
-  {
-    "question_id": "intended",
-    "expected": "false",
-    "predicted": "false",
-    "confidence": 0.9,
-    "abstained": false,
-    "backend": "native_decision",
-    "cost": 2.5830000000000002e-05,
-    "latency_ms": 184.0
-  },
-  {
-    "question_id": "intended",
-    "expected": "false",
-    "predicted": "false",
-    "confidence": 0.98,
-    "abstained": false,
-    "backend": "native_decision",
-    "cost": 2.5536e-05,
-    "latency_ms": 327.0
-  },
-  {
-    "question_id": "intended",
-    "expected": "false",
-    "predicted": "false",
-    "confidence": 0.64,
-    "abstained": false,
-    "backend": "native_decision",
-    "cost": 2.5620000000000002e-05,
-    "latency_ms": 155.0
-  },
-  {
-    "question_id": "intended",
-    "expected": "true",
-    "predicted": "true",
-    "confidence": 0.89,
-    "abstained": false,
-    "backend": "native_decision",
-    "cost": 2.5452000000000003e-05,
-    "latency_ms": 178.0
-  },
-  {
-    "question_id": "tool",
-    "expected": "read",
-    "predicted": "read",
     "confidence": 1.0,
     "abstained": false,
     "backend": "native_decision"
@@ -696,98 +562,8 @@
     "confidence": 0.94,
     "abstained": false,
     "backend": "native_decision",
-    "cost": 2.5452000000000003e-05,
-    "latency_ms": 185.0
-  },
-  {
-    "question_id": "tool",
-    "expected": "edit",
-    "predicted": "edit",
-    "confidence": 1.0,
-    "abstained": false,
-    "backend": "native_decision"
-  },
-  {
-    "question_id": "intended",
-    "expected": "true",
-    "predicted": "true",
-    "confidence": 0.9,
-    "abstained": false,
-    "backend": "native_decision",
-    "cost": 2.5452000000000003e-05,
-    "latency_ms": 204.0
-  },
-  {
-    "question_id": "tool",
-    "expected": "read",
-    "predicted": "read",
-    "confidence": 1.0,
-    "abstained": false,
-    "backend": "native_decision"
-  },
-  {
-    "question_id": "intended",
-    "expected": "true",
-    "predicted": "true",
-    "confidence": 0.85,
-    "abstained": false,
-    "backend": "native_decision",
-    "cost": 2.5368000000000002e-05,
-    "latency_ms": 157.0
-  },
-  {
-    "question_id": "tool",
-    "expected": "edit",
-    "predicted": "edit",
-    "confidence": 1.0,
-    "abstained": false,
-    "backend": "native_decision"
-  },
-  {
-    "question_id": "intended",
-    "expected": "true",
-    "predicted": "true",
-    "confidence": 0.92,
-    "abstained": false,
-    "backend": "native_decision",
-    "cost": 2.541e-05,
-    "latency_ms": 228.0
-  },
-  {
-    "question_id": "tool",
-    "expected": "read",
-    "predicted": "read",
-    "confidence": 1.0,
-    "abstained": false,
-    "backend": "native_decision"
-  },
-  {
-    "question_id": "intended",
-    "expected": "true",
-    "predicted": "true",
-    "confidence": 0.9,
-    "abstained": false,
-    "backend": "native_decision",
-    "cost": 2.5452000000000003e-05,
-    "latency_ms": 152.0
-  },
-  {
-    "question_id": "tool",
-    "expected": "edit",
-    "predicted": "edit",
-    "confidence": 1.0,
-    "abstained": false,
-    "backend": "native_decision"
-  },
-  {
-    "question_id": "intended",
-    "expected": "true",
-    "predicted": "true",
-    "confidence": 0.93,
-    "abstained": false,
-    "backend": "native_decision",
     "cost": 2.5494000000000004e-05,
-    "latency_ms": 221.0
+    "latency_ms": 125.0
   },
   {
     "question_id": "tool",
@@ -805,7 +581,7 @@
     "abstained": false,
     "backend": "native_decision",
     "cost": 2.5746000000000004e-05,
-    "latency_ms": 161.0
+    "latency_ms": 137.0
   },
   {
     "question_id": "tool",
@@ -823,7 +599,7 @@
     "abstained": false,
     "backend": "native_decision",
     "cost": 2.5326e-05,
-    "latency_ms": 165.0
+    "latency_ms": 112.0
   },
   {
     "question_id": "intended",
@@ -833,7 +609,7 @@
     "abstained": false,
     "backend": "native_decision",
     "cost": 2.5578e-05,
-    "latency_ms": 353.0
+    "latency_ms": 113.0
   },
   {
     "question_id": "intended",
@@ -843,7 +619,7 @@
     "abstained": false,
     "backend": "native_decision",
     "cost": 2.5452000000000003e-05,
-    "latency_ms": 184.0
+    "latency_ms": 130.0
   },
   {
     "question_id": "intended",
@@ -853,27 +629,27 @@
     "abstained": false,
     "backend": "native_decision",
     "cost": 2.541e-05,
-    "latency_ms": 291.0
+    "latency_ms": 162.0
   },
   {
     "question_id": "intended",
     "expected": "false",
     "predicted": "false",
-    "confidence": 0.95,
+    "confidence": 0.96,
     "abstained": false,
     "backend": "native_decision",
     "cost": 2.5956000000000004e-05,
-    "latency_ms": 233.0
+    "latency_ms": 152.0
   },
   {
     "question_id": "intended",
     "expected": "false",
     "predicted": "false",
-    "confidence": 0.91,
+    "confidence": 0.9,
     "abstained": false,
     "backend": "native_decision",
     "cost": 2.5830000000000002e-05,
-    "latency_ms": 183.0
+    "latency_ms": 265.0
   },
   {
     "question_id": "intended",
@@ -883,16 +659,240 @@
     "abstained": false,
     "backend": "native_decision",
     "cost": 2.5536e-05,
-    "latency_ms": 165.0
+    "latency_ms": 159.0
   },
   {
     "question_id": "intended",
     "expected": "false",
     "predicted": "false",
-    "confidence": 0.65,
+    "confidence": 0.69,
     "abstained": false,
     "backend": "native_decision",
     "cost": 2.5620000000000002e-05,
-    "latency_ms": 162.0
+    "latency_ms": 117.0
+  },
+  {
+    "question_id": "intended",
+    "expected": "true",
+    "predicted": "true",
+    "confidence": 0.89,
+    "abstained": false,
+    "backend": "native_decision",
+    "cost": 2.5452000000000003e-05,
+    "latency_ms": 130.0
+  },
+  {
+    "question_id": "tool",
+    "expected": "read",
+    "predicted": "read",
+    "confidence": 1.0,
+    "abstained": false,
+    "backend": "native_decision"
+  },
+  {
+    "question_id": "intended",
+    "expected": "true",
+    "predicted": "true",
+    "confidence": 0.94,
+    "abstained": false,
+    "backend": "native_decision",
+    "cost": 2.5452000000000003e-05,
+    "latency_ms": 114.0
+  },
+  {
+    "question_id": "tool",
+    "expected": "edit",
+    "predicted": "edit",
+    "confidence": 1.0,
+    "abstained": false,
+    "backend": "native_decision"
+  },
+  {
+    "question_id": "intended",
+    "expected": "true",
+    "predicted": "true",
+    "confidence": 0.92,
+    "abstained": false,
+    "backend": "native_decision",
+    "cost": 2.5452000000000003e-05,
+    "latency_ms": 121.0
+  },
+  {
+    "question_id": "tool",
+    "expected": "read",
+    "predicted": "read",
+    "confidence": 1.0,
+    "abstained": false,
+    "backend": "native_decision"
+  },
+  {
+    "question_id": "intended",
+    "expected": "true",
+    "predicted": "true",
+    "confidence": 0.84,
+    "abstained": false,
+    "backend": "native_decision",
+    "cost": 2.5368000000000002e-05,
+    "latency_ms": 118.0
+  },
+  {
+    "question_id": "tool",
+    "expected": "edit",
+    "predicted": "edit",
+    "confidence": 1.0,
+    "abstained": false,
+    "backend": "native_decision"
+  },
+  {
+    "question_id": "intended",
+    "expected": "true",
+    "predicted": "true",
+    "confidence": 0.93,
+    "abstained": false,
+    "backend": "native_decision",
+    "cost": 2.541e-05,
+    "latency_ms": 153.0
+  },
+  {
+    "question_id": "tool",
+    "expected": "read",
+    "predicted": "read",
+    "confidence": 1.0,
+    "abstained": false,
+    "backend": "native_decision"
+  },
+  {
+    "question_id": "intended",
+    "expected": "true",
+    "predicted": "true",
+    "confidence": 0.89,
+    "abstained": false,
+    "backend": "native_decision",
+    "cost": 2.5452000000000003e-05,
+    "latency_ms": 210.0
+  },
+  {
+    "question_id": "tool",
+    "expected": "edit",
+    "predicted": "edit",
+    "confidence": 1.0,
+    "abstained": false,
+    "backend": "native_decision"
+  },
+  {
+    "question_id": "intended",
+    "expected": "true",
+    "predicted": "true",
+    "confidence": 0.94,
+    "abstained": false,
+    "backend": "native_decision",
+    "cost": 2.5494000000000004e-05,
+    "latency_ms": 140.0
+  },
+  {
+    "question_id": "tool",
+    "expected": "read",
+    "predicted": "read",
+    "confidence": 1.0,
+    "abstained": false,
+    "backend": "native_decision"
+  },
+  {
+    "question_id": "intended",
+    "expected": "true",
+    "predicted": "true",
+    "confidence": 0.86,
+    "abstained": false,
+    "backend": "native_decision",
+    "cost": 2.5746000000000004e-05,
+    "latency_ms": 144.0
+  },
+  {
+    "question_id": "tool",
+    "expected": "edit",
+    "predicted": "edit",
+    "confidence": 1.0,
+    "abstained": false,
+    "backend": "native_decision"
+  },
+  {
+    "question_id": "intended",
+    "expected": "false",
+    "predicted": "false",
+    "confidence": 0.98,
+    "abstained": false,
+    "backend": "native_decision",
+    "cost": 2.5326e-05,
+    "latency_ms": 123.0
+  },
+  {
+    "question_id": "intended",
+    "expected": "false",
+    "predicted": "false",
+    "confidence": 0.97,
+    "abstained": false,
+    "backend": "native_decision",
+    "cost": 2.5578e-05,
+    "latency_ms": 179.0
+  },
+  {
+    "question_id": "intended",
+    "expected": "false",
+    "predicted": "false",
+    "confidence": 0.97,
+    "abstained": false,
+    "backend": "native_decision",
+    "cost": 2.5452000000000003e-05,
+    "latency_ms": 151.0
+  },
+  {
+    "question_id": "intended",
+    "expected": "false",
+    "predicted": "false",
+    "confidence": 0.95,
+    "abstained": false,
+    "backend": "native_decision",
+    "cost": 2.541e-05,
+    "latency_ms": 209.0
+  },
+  {
+    "question_id": "intended",
+    "expected": "false",
+    "predicted": "false",
+    "confidence": 0.96,
+    "abstained": false,
+    "backend": "native_decision",
+    "cost": 2.5956000000000004e-05,
+    "latency_ms": 118.0
+  },
+  {
+    "question_id": "intended",
+    "expected": "false",
+    "predicted": "false",
+    "confidence": 0.91,
+    "abstained": false,
+    "backend": "native_decision",
+    "cost": 2.5830000000000002e-05,
+    "latency_ms": 130.0
+  },
+  {
+    "question_id": "intended",
+    "expected": "false",
+    "predicted": "false",
+    "confidence": 0.98,
+    "abstained": false,
+    "backend": "native_decision",
+    "cost": 2.5536e-05,
+    "latency_ms": 128.0
+  },
+  {
+    "question_id": "intended",
+    "expected": "false",
+    "predicted": "false",
+    "confidence": 0.6599999999999999,
+    "abstained": false,
+    "backend": "native_decision",
+    "cost": 2.5620000000000002e-05,
+    "latency_ms": 117.0
   }
 ]
