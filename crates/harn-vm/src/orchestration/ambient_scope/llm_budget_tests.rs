@@ -95,7 +95,7 @@ async fn fanout_shares_spend_observations_and_rearmed_ceilings() {
     // executor thread. A fresh install inside either child remains independent.
     let inline = AmbientExecutionScope::capture_for_inline_subtask();
     let worker = AmbientExecutionScope::capture_inherited();
-    std::thread::spawn(move || {
+    crate::runtime_stack::on_vm_stack(move || {
         tokio::runtime::Builder::new_current_thread()
             .build()
             .unwrap()
@@ -105,9 +105,7 @@ async fn fanout_shares_spend_observations_and_rearmed_ceilings() {
                 set_llm_cost_budget(Some(0.375));
                 set_llm_token_budget(Some(5));
             }));
-    })
-    .join()
-    .unwrap();
+    });
     scope_ambient(worker, async {
         assert_eq!(peek_total_cost(), 0.375);
         assert_eq!(peek_total_tokens(), 5);
