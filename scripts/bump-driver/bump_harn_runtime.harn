@@ -48,7 +48,7 @@ pipeline main(harness: Harness) {
     harness.stdio.eprintln("bump_harn_runtime: GITHUB_REPOSITORY is required")
     return 2
   }
-  const key_file = harness.env.get_or("GITHUB_APP_PRIVATE_KEY_FILE", "")
+  const key_file = harness.env.get_or("HARN_BUMP_APP_PRIVATE_KEY_FILE", "")
   const private_key = if key_file == "" {
     ""
   } else {
@@ -59,8 +59,8 @@ pipeline main(harness: Harness) {
   }
   const auth_options = github_bump_auth_options(
     {
-      app_id: harness.env.get_or("GITHUB_APP_ID", ""),
-      installation_id: harness.env.get_or("GITHUB_INSTALLATION_ID", ""),
+      app_id: harness.env.get_or("HARN_BUMP_APP_ID", ""),
+      installation_id: harness.env.get_or("HARN_BUMP_INSTALLATION_ID", ""),
       private_key_pem: private_key,
       token: harness.env.get_or("HARN_BUMP_TOKEN", ""),
     },

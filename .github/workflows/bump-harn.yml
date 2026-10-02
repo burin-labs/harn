@@ -270,11 +270,16 @@ jobs:
 
       - name: Run bump orchestration
         working-directory: package
+        # Caller-owned refresh and validation commands inherit this step's
+        # environment. The driver's App identity therefore uses driver-owned
+        # names: under the conventional GITHUB_APP_ID/GITHUB_INSTALLATION_ID a
+        # package that reads them (the GitHub connector does) resolves App auth
+        # in its own tests, and validation fails only inside the bump.
         env:
           GITHUB_REPOSITORY: ${{ github.repository }}
-          GITHUB_APP_ID: ${{ secrets.app-client-id }}
-          GITHUB_INSTALLATION_ID: ${{ steps.app-token.outputs.installation-id }}
-          GITHUB_APP_PRIVATE_KEY: ${{ secrets.app-private-key }}
+          HARN_BUMP_APP_ID: ${{ secrets.app-client-id }}
+          HARN_BUMP_INSTALLATION_ID: ${{ steps.app-token.outputs.installation-id }}
+          HARN_BUMP_APP_PRIVATE_KEY: ${{ secrets.app-private-key }}
           HARN_EXT_BUMP_BOT_LOGIN: ${{ steps.app-token.outputs.app-slug }}[bot]
           HARN_BUMP_TARGET_TAG: ${{ steps.resolve.outputs.version }}
           HARN_BUMP_SOURCE_REVISION: ${{ inputs.source-revision }}
@@ -344,9 +349,9 @@ jobs:
           key_file="$(mktemp "${RUNNER_TEMP}/harn-bump-app-key.XXXXXX")"
           trap 'rm -f -- "$key_file"' EXIT
           chmod 600 "$key_file"
-          printf '%s' "${GITHUB_APP_PRIVATE_KEY:?}" > "$key_file"
-          unset GITHUB_APP_PRIVATE_KEY
-          export GITHUB_APP_PRIVATE_KEY_FILE="$key_file"
+          printf '%s' "${HARN_BUMP_APP_PRIVATE_KEY:?}" > "$key_file"
+          unset HARN_BUMP_APP_PRIVATE_KEY
+          export HARN_BUMP_APP_PRIVATE_KEY_FILE="$key_file"
           harn --version
           harn run --no-sandbox ../.harn-runtime/scripts/bump-driver/bump_harn_runtime.harn
 
