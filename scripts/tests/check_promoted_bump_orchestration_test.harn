@@ -1,0 +1,41 @@
+import "../check_promoted_bump_orchestration.harn"
+
+const PROMOTED = "f7ddcbefb215ef520651830f76bf266e20568ba5"
+
+fn manifest(bump_workflow: string) -> string {
+  return """
+schema_version = 1
+
+[policy]
+package_workflow = "burin-labs/.github/.github/workflows/harn-package.yml@546968aa9c3c08be94df6730f7e504fbfbe94450"
+bump_workflow = "${bump_workflow}"
+"""
+}
+
+@test
+pipeline test_reads_the_promoted_orchestration_commit(harness: Harness, task: unknown) {
+  const sha = promoted_orchestration_sha(
+    manifest("burin-labs/harn/.github/workflows/bump-harn.yml@${PROMOTED}"),
+  )
+  assert_eq(unwrap(sha), PROMOTED)
+}
+
+@test
+pipeline test_refuses_a_manifest_that_names_no_pin(harness: Harness, task: unknown) {
+  const missing = promoted_orchestration_sha("schema_version = 1\n[policy]\n")
+  assert(is_err(missing), "a manifest without a bump workflow must not read as a pin")
+  const malformed = promoted_orchestration_sha("[policy\n")
+  assert(is_err(malformed), "unparseable TOML must not read as a pin")
+}
+
+@test
+pipeline test_refuses_a_pin_that_is_not_an_exact_commit(harness: Harness, task: unknown) {
+  for reference in [
+    "burin-labs/harn/.github/workflows/bump-harn.yml@main",
+    "burin-labs/harn/.github/workflows/bump-harn.yml@${PROMOTED[0:7]}",
+    "burin-labs/harn/.github/workflows/bump-harn.yml@${uppercase(PROMOTED)}",
+    "burin-labs/other/.github/workflows/bump-harn.yml@${PROMOTED}",
+  ] {
+    assert(is_err(promoted_orchestration_sha(manifest(reference))), "accepted ${reference}")
+  }
+}

@@ -1,0 +1,192 @@
+/**
+ * Refuse a release candidate that the promoted bump orchestration cannot drive.
+ *
+ * A published release starts every consumer's runtime bump at once. Each bump
+ * installs the new release but runs the bump driver from the orchestration
+ * commit that harn-bump-fleet's `fleet.toml` promoted, which is usually older
+ * than the release. When the release changes a `std/bump` contract the driver
+ * implements, every consumer bump fails after the release is already public.
+ * v0.10.153 did this: it made `LiveBumpRemote.is_generated_commit` required
+ * while the promoted driver predated the field.
+ *
+ * This type-checks every file of the promoted driver package with the
+ * candidate binary. Checking only the entry point is not enough: the adapter
+ * that builds the remote record is reached through an import and passes.
+ */
+import { help_requested, parse, parser } from "std/cli/argparse"
+
+const FLEET_REPOSITORY_URL = "https://github.com/burin-labs/harn-bump-fleet.git"
+
+const FLEET_BRANCH = "main"
+
+const BUMP_WORKFLOW_PREFIX = "burin-labs/harn/.github/workflows/bump-harn.yml@"
+
+const DRIVER_PATH = "scripts/bump-driver"
+
+/** Read the promoted orchestration commit from a harn-bump-fleet `fleet.toml`. */
+pub fn promoted_orchestration_sha(manifest_text: string) -> Result<string, string> {
+  const manifest = try {
+    toml_parse(manifest_text)
+  }
+  if is_err(manifest) {
+    return Err("fleet.toml is not valid TOML: ${unwrap_err(manifest)}")
+  }
+  const reference = to_string(unwrap(manifest)?.policy?.bump_workflow ?? "")
+  if !reference.starts_with(BUMP_WORKFLOW_PREFIX) {
+    return Err(
+      "fleet.toml policy.bump_workflow must name ${BUMP_WORKFLOW_PREFIX}<sha>, got '${reference}'",
+    )
+  }
+  const sha = reference.substring(len(BUMP_WORKFLOW_PREFIX), len(reference))
+  if len(regex_captures("^[0-9a-f]{40}$", sha)) != 1 {
+    return Err("fleet.toml policy.bump_workflow must pin a full commit SHA, got '${sha}'")
+  }
+  return Ok(sha)
+}
+
+fn run_step(
+  process: HarnessProcess,
+  label: string,
+  program: string,
+  args: list<string>,
+  cwd: string,
+) {
+  const result = process.run({program: program, args: args, cwd: cwd})
+  if !result.success {
+    throw "${label} failed (exit ${result.exit_code}):\n${result.stdout}${result.stderr}"
+  }
+  return result
+}
+
+fn fetch_fleet_manifest(process: HarnessProcess, scratch: string) -> string {
+  const fleet = path_join(scratch, "fleet")
+  run_step(process, "git init", "git", ["init", "-q", fleet], scratch)
+  run_step(
+    process,
+    "fetch ${FLEET_REPOSITORY_URL} ${FLEET_BRANCH}",
+    "git",
+    ["fetch", "-q", "--no-tags", "--depth=1", FLEET_REPOSITORY_URL, FLEET_BRANCH],
+    fleet,
+  )
+  return run_step(process, "read fleet.toml", "git", ["show", "FETCH_HEAD:fleet.toml"], fleet)
+    .stdout
+}
+
+fn extract_driver(process: HarnessProcess, root: string, sha: string, scratch: string) -> string {
+  const present = process.run(
+    {program: "git", args: ["cat-file", "-e", "${sha}^{commit}"], cwd: root},
+  )
+  if !present.success {
+    run_step(
+      process,
+      "fetch orchestration ${sha}",
+      "git",
+      ["fetch", "-q", "--no-tags", "--depth=1", "origin", sha],
+      root,
+    )
+  }
+  const archive = path_join(scratch, "driver.tar")
+  run_step(
+    process,
+    "archive ${DRIVER_PATH}",
+    "git",
+    ["archive", "-o", archive, sha, DRIVER_PATH],
+    root,
+  )
+  const orchestration = path_join(scratch, "orchestration")
+  run_step(process, "create ${orchestration}", "mkdir", ["-p", orchestration], scratch)
+  run_step(process, "extract ${DRIVER_PATH}", "tar", ["-xf", archive, "-C", orchestration], scratch)
+  return path_join(orchestration, DRIVER_PATH)
+}
+
+fn arg_spec() {
+  return parser(
+    {
+      name: "check_promoted_bump_orchestration",
+      args: [
+        {kind: "flag", name: "candidate", long: "--candidate", parse: "string", required: true},
+        {kind: "flag", name: "manifest", long: "--manifest", parse: "string", default: ""},
+      ],
+    },
+  )
+}
+
+fn usage() -> string {
+  return "usage: harn run --no-sandbox scripts/check_promoted_bump_orchestration.harn -- --candidate PATH [--manifest FLEET_TOML]"
+}
+
+/** Check the promoted driver inside `scratch` and return the process exit code. */
+fn check_promoted_driver(
+  harness: Harness,
+  candidate: string,
+  manifest: string,
+  scratch: string,
+) -> int {
+  const manifest_text = if manifest != "" {
+    harness.fs.read_text(manifest)
+  } else {
+    fetch_fleet_manifest(harness.process, scratch)
+  }
+  const promoted = promoted_orchestration_sha(manifest_text)
+  if is_err(promoted) {
+    harness.stdio.eprintln("error: ${unwrap_err(promoted)}")
+    return 1
+  }
+  const sha = unwrap(promoted)
+  const root = path_normalize(path_join(harness.fs.source_dir(), ".."))
+  const driver = extract_driver(harness.process, root, sha, scratch)
+  run_step(
+    harness.process,
+    "install the promoted driver",
+    candidate,
+    ["install", "--locked"],
+    driver,
+  )
+  const checked = harness.process.run({program: candidate, args: ["check", "."], cwd: driver})
+  if !checked.success {
+    harness.stdio.eprint(checked.stdout)
+    harness.stdio.eprint(checked.stderr)
+    harness.stdio.eprintln(
+      "error: the bump driver at promoted orchestration ${sha} does not type-check against this candidate.",
+    )
+    harness.stdio.eprintln(
+      "Publishing it would fail every consumer's runtime bump. Promote harn-bump-fleet's bump orchestration to a main commit whose driver satisfies this runtime (promote_bump_workflow.harn), then rerun this candidate.",
+    )
+    return 1
+  }
+  harness.stdio.println("promoted bump orchestration ${sha} type-checks against the candidate")
+  return 0
+}
+
+fn main(harness: Harness) {
+  if help_requested(argv) {
+    harness.stdio.println(usage())
+    return nil
+  }
+  const parsed = parse(arg_spec(), argv)
+  if is_err(parsed) {
+    harness.stdio.eprintln(unwrap_err(parsed).message)
+    harness.stdio.eprintln(usage())
+    harness.runtime.exit(2)
+  }
+  const options = unwrap(parsed).options
+  // `exit` does not run `defer`, so the scratch directory is removed before it.
+  const scratch = harness.fs.mkdtemp_in_workspace("harn-promoted-bump-orchestration-")
+  const outcome = try {
+    check_promoted_driver(
+      harness,
+      path_normalize(to_string(options.candidate)),
+      to_string(options.manifest),
+      scratch,
+    )
+  }
+  harness.process.run({program: "rm", args: ["-rf", scratch]})
+  if is_err(outcome) {
+    harness.stdio.eprintln("error: ${unwrap_err(outcome)}")
+    harness.runtime.exit(1)
+  }
+  if unwrap(outcome) != 0 {
+    harness.runtime.exit(unwrap(outcome))
+  }
+  return nil
+}
