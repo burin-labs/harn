@@ -287,7 +287,7 @@ fn cli_and_mcp_project_validated_payload_and_canonical_feedback() {
     let mut command = harn_e2e_command();
     command
         .current_dir(temp.path())
-        .args(["serve", "mcp", "tools.harn"]);
+        .args(["serve", "mcp", "--surface", "script", "tools.harn"]);
     let mut client = StdioJsonRpcClient::spawn("typed outcome MCP", command);
     let listing = client.request(request(1, "tools/list", json!({})));
     let tools = listing["result"]["tools"]
