@@ -117,22 +117,17 @@ jobs:
         env:
           MAX_COST_USD_INPUT: ${{ inputs.max_cost_usd || '5' }}
           MAX_PROBES_INPUT: ${{ inputs.max_probes || '500' }}
+          # The providers a live run is responsible for measuring, one per
+          # credential it receives below. A live run counts every selected cell
+          # it could not measure, including a missing credential, as a failure,
+          # so this list is the scope of that claim. Add a provider here only
+          # together with its secret, and keep the secret visible to this
+          # repository: a declared provider without a key fails the run. Dry
+          # runs still plan every catalog route.
+          PROBE_PROVIDERS: anthropic fireworks openrouter
           ANTHROPIC_API_KEY: ${{ env.PROVIDER_CONTRACT_PROBE_LIVE == 'true' && secrets.ANTHROPIC_API_KEY || '' }}
-          OPENAI_API_KEY: ${{ env.PROVIDER_CONTRACT_PROBE_LIVE == 'true' && secrets.OPENAI_API_KEY || '' }}
-          GEMINI_API_KEY: ${{ env.PROVIDER_CONTRACT_PROBE_LIVE == 'true' && secrets.GEMINI_API_KEY || '' }}
-          GOOGLE_API_KEY: ${{ env.PROVIDER_CONTRACT_PROBE_LIVE == 'true' && secrets.GOOGLE_API_KEY || '' }}
-          OPENROUTER_API_KEY: ${{ env.PROVIDER_CONTRACT_PROBE_LIVE == 'true' && secrets.OPENROUTER_API_KEY || '' }}
-          MISTRAL_API_KEY: ${{ env.PROVIDER_CONTRACT_PROBE_LIVE == 'true' && secrets.MISTRAL_API_KEY || '' }}
-          COHERE_API_KEY: ${{ env.PROVIDER_CONTRACT_PROBE_LIVE == 'true' && secrets.COHERE_API_KEY || '' }}
-          XAI_API_KEY: ${{ env.PROVIDER_CONTRACT_PROBE_LIVE == 'true' && secrets.XAI_API_KEY || '' }}
-          TOGETHER_AI_API_KEY: ${{ env.PROVIDER_CONTRACT_PROBE_LIVE == 'true' && secrets.TOGETHER_AI_API_KEY || '' }}
-          GROQ_API_KEY: ${{ env.PROVIDER_CONTRACT_PROBE_LIVE == 'true' && secrets.GROQ_API_KEY || '' }}
-          CEREBRAS_API_KEY: ${{ env.PROVIDER_CONTRACT_PROBE_LIVE == 'true' && secrets.CEREBRAS_API_KEY || '' }}
-          DEEPSEEK_API_KEY: ${{ env.PROVIDER_CONTRACT_PROBE_LIVE == 'true' && secrets.DEEPSEEK_API_KEY || '' }}
           FIREWORKS_API_KEY: ${{ env.PROVIDER_CONTRACT_PROBE_LIVE == 'true' && secrets.FIREWORKS_API_KEY || '' }}
-          ZAI_API_KEY: ${{ env.PROVIDER_CONTRACT_PROBE_LIVE == 'true' && secrets.ZAI_API_KEY || '' }}
-          MOONSHOT_API_KEY: ${{ env.PROVIDER_CONTRACT_PROBE_LIVE == 'true' && secrets.MOONSHOT_API_KEY || '' }}
-          NVIDIA_API_KEY: ${{ env.PROVIDER_CONTRACT_PROBE_LIVE == 'true' && secrets.NVIDIA_API_KEY || '' }}
+          OPENROUTER_API_KEY: ${{ env.PROVIDER_CONTRACT_PROBE_LIVE == 'true' && secrets.OPENROUTER_API_KEY || '' }}
         run: |
           set -euo pipefail
           output_dir=".harn-runs/provider-contract-probe"
@@ -150,6 +145,14 @@ jobs:
             --output-dir "$output_dir"
           )
           if [[ "$live" == "true" ]]; then
+            read -r -a probe_providers <<< "$PROBE_PROVIDERS"
+            if (( ${#probe_providers[@]} == 0 )); then
+              echo "::error::PROBE_PROVIDERS names no provider"
+              exit 2
+            fi
+            for provider in "${probe_providers[@]}"; do
+              args+=(--provider "$provider")
+            done
             args+=(--live)
           fi
           set +e
@@ -166,7 +169,7 @@ jobs:
           catalog_drift_count="$(jq -er '.summary.fail | select(type == "number" and . >= 0 and floor == .)' "$report")"
           echo "catalog_drift_count=$catalog_drift_count" >> "$GITHUB_OUTPUT"
           jq -r '
-            "cells=\(.cell_count) pass=\(.summary.pass) fail=\(.summary.fail) error=\(.summary.error) skip=\(.summary.skip) pending=\(.summary.planned) controls=\(.claim_controls.status) supported=\(.claim_controls.measured_supported_count) unsupported=\(.claim_controls.measured_unsupported_count) unmeasured=\(.claim_controls.unmeasured_count)"
+            "cells=\(.cell_count) pass=\(.summary.pass) fail=\(.summary.fail) error=\(.summary.error) skip=\(.summary.skip) pending=\(.summary.planned) controls=\(.claim_controls.status) supported=\(.claim_controls.measured_supported_count) unsupported=\(.claim_controls.measured_unsupported_count) unmeasured=\(.claim_controls.unmeasured_count) missing_credentials=\((.auth_readiness.missing_env_candidates_by_provider // {}) | [.[] | join("|")] | if length == 0 then "none" else join(",") end)"
           ' "$report" | tee -a "$GITHUB_STEP_SUMMARY"
           exit "$status"
 
