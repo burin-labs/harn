@@ -344,7 +344,7 @@ if [ "$host_maintenance" -eq 1 ]; then
     *) default_max_bytes=$((fs_kib * 1024 / 8)); max_bytes_source=disk ;;
   esac
 fi
-[ -n "${HARN_TARGET_GC_MAX_BYTES:-}" ] && max_bytes_source=env
+[ -n "${HARN_TARGET_GC_MAX_BYTES:-}" ] && max_bytes_source="env"
 max_bytes="${HARN_TARGET_GC_MAX_BYTES:-$default_max_bytes}"
 case "$max_bytes" in
   ''|*[!0-9]*) echo "HARN_TARGET_GC_MAX_BYTES must be a non-negative integer: $max_bytes" >&2; exit 2 ;;
