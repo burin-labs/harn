@@ -554,6 +554,7 @@
       "errorCategory",
       "executionDurationMs",
       "executor",
+      "intent",
       "mutationStatus",
       "parsing",
       "rawInputPartial"

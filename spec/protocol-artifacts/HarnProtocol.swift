@@ -138,6 +138,7 @@ public enum HarnProtocolConstants {
         "errorCategory",
         "executionDurationMs",
         "executor",
+        "intent",
         "mutationStatus",
         "parsing",
         "rawInputPartial",
@@ -2674,6 +2675,7 @@ public struct HarnToolLifecycleMeta: Codable, Sendable, Equatable {
     public var errorCategory: HarnToolCallErrorCategory?
     public var executionDurationMs: Double?
     public var executor: HarnACPToolExecutor?
+    public var intent: String?
     public var mutationStatus: HarnToolMutationStatus?
     public var parsing: Bool?
     public var rawInputPartial: String?
