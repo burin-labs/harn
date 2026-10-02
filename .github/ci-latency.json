@@ -97,7 +97,7 @@
       "release-contract": { "budget_ms": 120000 },
       "release-residual-audit": { "budget_ms": 600000 },
       "rust-checks": { "budget_ms": 470000 },
-      "rust-cli": { "budget_ms": 540000 },
+      "rust-cli": { "budget_ms": 420000 },
       "rust-check-inputs": { "budget_ms": 600000 },
       "rust-artifacts-ready": { "budget_ms": 240000 },
       "security-tests-ready": { "budget_ms": 420000 },
