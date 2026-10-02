@@ -514,7 +514,7 @@ fn stdlib_owned_agent_aliases_declare_load_bearing_keys() {
         "enabled",
         "classifier",
         "confidence_threshold",
-        "timeout_ms",
+        "evaluation",
     ] {
         assert!(
             missing_tool.contains(key),

@@ -1,0 +1,203 @@
+import { agent_capture_events } from "std/agent/events"
+import { agent_loop } from "std/agent/loop"
+import { MissingToolCallVerdict } from "std/agent/options_types"
+import { missing_tool_call_classifier } from "std/llm/missing_tool_call"
+import { llm_calls, llm_text, with_llm_script } from "std/testing"
+
+fn request() {
+  return {
+    session_id: "missing-call-evaluation",
+    iteration: 1,
+    text: "Opaque fixture input.",
+    tools: [{name: "read", description: "Read a file"}, {name: "edit", description: "Edit a file"}],
+  }
+}
+
+fn answered(harness: Harness, intended: bool, tool_confidence: float, action: string) {
+  with_llm_script(
+    harness.llm,
+    [
+      llm_text(
+        json_stringify(
+          {
+            answers: {
+              intended: {verdict: intended, confidence: 0.96, evidence: "explicit boolean fixture"},
+              tool: {
+                choice: "edit",
+                confidence: tool_confidence,
+                evidence: "explicit choice fixture",
+              },
+            },
+          },
+        ),
+      ),
+    ],
+    { ->
+      const classify = missing_tool_call_classifier(
+        harness,
+        {provider: "openai", model: "gpt-5.4-mini", effort: "none"},
+      )
+      const result = classify(request())
+      assert_eq(result.evaluation.kind, "answered", json_stringify(result))
+      assert_eq(result.action, action)
+      assert_eq(result.tool_name, intended ? "edit" : "")
+      assert_eq(result.confidence, intended ? min(0.96, tool_confidence) : 0.96)
+      const calls = llm_calls(harness.llm)
+      assert_eq(len(calls), 1, "both questions must share one physical request")
+      assert_eq(
+        calls[0].output_format.schema.properties.answers.properties.tool.properties.choice.enum,
+        ["edit", "read"],
+      )
+    },
+  )
+}
+
+pipeline test_shared_answers_and_consumer_threshold(harness: Harness, task: unknown) {
+  answered(harness, true, 0.95, "tool_call_intended")
+  answered(harness, true, 0.2, "ambiguous")
+  answered(harness, false, 0.2, "no_tool_call_intended")
+}
+
+pipeline test_malformed_answer_refuses_once(harness: Harness, task: unknown) {
+  with_llm_script(
+    harness.llm,
+    [llm_text("malformed answer")],
+    { ->
+      const classify = missing_tool_call_classifier(
+        harness,
+        {provider: "openai", model: "gpt-5.4-mini", effort: "none"},
+      )
+      const result = classify(request())
+      assert_eq(result.evaluation.kind, "refused")
+      assert_eq(result.evaluation.reason, "schema_invalid")
+      assert_eq(result.action, "ambiguous")
+      assert_eq(result.original_action, "error")
+      assert_eq(len(llm_calls(harness.llm)), 1)
+    },
+  )
+}
+
+pipeline test_offline_fixture_negative_control(harness: Harness, task: unknown) {
+  const fixture: MissingToolCallVerdict = {
+    action: "tool_call_intended",
+    tool_name: "edit",
+    confidence: 0.96,
+    evidence: "typed fixture",
+  }
+  const enabled = missing_tool_call_classifier(
+    harness,
+    {provider: "mock", classifier: { _ -> fixture }},
+  )
+  const positive = enabled(request())
+  assert_eq(positive.action, "tool_call_intended")
+  assert_eq(positive.classifier_kind, "custom")
+  const disabled = missing_tool_call_classifier(harness, {provider: "mock"})
+  const negative = try {
+    const fallback = disabled(request())
+    assert_eq(fallback.action, "tool_call_intended", "the consumer needs its explicit fixture")
+  }
+  assert(is_err(negative), "removing the fixture must fail the same consumer assertion")
+  assert(contains(to_string(unwrap_err(negative)), "the consumer needs its explicit fixture"))
+}
+
+pipeline test_native_policy_is_admitted_as_native(harness: Harness, task: unknown) {
+  const classify = missing_tool_call_classifier(
+    harness,
+    {evaluation: {backend: "native_decision", provider: "mock", model: "fixture", threshold: 0.65}},
+  )
+  const result = classify(request())
+  assert_eq(result.action, "ambiguous")
+  assert_eq(result.evaluation.kind, "unavailable")
+  assert_eq(result.evaluation.reason, "model_unconfigured")
+  assert_eq(len(llm_calls(harness.llm)), 0, "an unsupported native route cannot fall back to chat")
+}
+
+pipeline test_custom_cancellation_propagates(harness: Harness, task: unknown) {
+  const classify = missing_tool_call_classifier(
+    harness,
+    {
+      classifier: { _ ->
+        throw {category: "cancelled", message: "fixture cancellation"}
+      },
+    },
+  )
+  const result = try {
+    classify(request())
+  }
+  assert(is_err(result))
+  assert_eq(error_category(unwrap_err(result)), "cancelled")
+}
+
+pipeline test_default_consumer_publishes_answer_and_refusal(harness: Harness, task: unknown) {
+  for malformed in [false, true] {
+    const session = "missing-call-publication-" + harness.random.uuid()
+    const tools = tool_define(
+      tool_registry(),
+      "read",
+      "Read a file",
+      {
+        handler: { _ -> "contents" },
+        parameters: {},
+        returns: {type: "string"},
+        annotations: {kind: "read"},
+      },
+    )
+    const answer = malformed ? "not json" : json_stringify(
+      {
+        answers: {
+          intended: {verdict: false, confidence: 0.96, evidence: "negative fixture"},
+          tool: {choice: "read", confidence: 0.1, evidence: "irrelevant on negative intent"},
+        },
+      },
+    )
+    const usage = {provider: "openai", model: "gpt-5.4-mini", input_tokens: 100, output_tokens: 30}
+    with_llm_script(
+      harness.llm,
+      [
+        llm_text("Opaque first turn.") + usage,
+        llm_text(answer) + usage,
+        llm_text("##DONE##") + usage,
+      ],
+      { ->
+        const captured = agent_capture_events(
+          harness.agent,
+          session,
+          { ->
+            agent_loop(
+              harness,
+              "Complete the fixture.",
+              nil,
+              {
+                session_id: session,
+                provider: "openai",
+                model: "gpt-5.4-mini",
+                tool_format: "text",
+                tools: tools,
+                loop_until_done: true,
+                max_iterations: 4,
+                missing_tool_call_recovery: {effort: "none"},
+              },
+            )
+          },
+        )
+        const verdicts = captured.events.filter(
+          { event -> event.type == "missing_tool_call_verdict" },
+        )
+          .to_list()
+        assert_eq(
+          captured.result.status,
+          "done",
+          json_stringify({result: captured.result, verdicts: verdicts}),
+        )
+        assert_eq(len(verdicts), 1, "default classifier must publish exactly one verdict")
+        assert_eq(verdicts[0].classifier_kind, "llm")
+        assert_eq(verdicts[0].action, malformed ? "ambiguous" : "no_tool_call_intended")
+        assert_eq(verdicts[0]?.evaluation, nil, "diagnostics have their own receipt")
+        assert_eq(len(llm_calls(harness.llm)), 3, "two planner calls plus one classifier request")
+        const nudges = captured.events.filter({ event -> event.type == "missing_tool_call_nudge" })
+          .to_list()
+        assert_eq(len(nudges), 0)
+      },
+    )
+  }
+}

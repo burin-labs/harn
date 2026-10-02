@@ -25,6 +25,7 @@ import {
   __turn_end_judge_due,
   agent_has_turn_end_condition,
 } from "std/agent/turn_end"
+import { omit } from "std/json"
 import { tool_fence_info_opens_call } from "std/llm/dialects"
 import { missing_tool_call_classifier } from "std/llm/missing_tool_call"
 import {
@@ -507,9 +508,9 @@ fn __classify_missing_tool_call(
     harness.agent,
     session.session_id,
     "missing_tool_call_verdict",
-    // The verdict already carries the classifier's own `evidence`; a second
-    // excerpt of the same turn text has no field to land in and was discarded.
-    result + {iteration: iteration},
+    // Evaluation diagnostics belong to the evaluator's receipt. The public
+    // classification event accepts only the verdict fields.
+    omit(result, ["evaluation", "typed_checkpoint"]) + {iteration: iteration},
   )
   const tool_name = result?.tool_name ?? ""
   if result?.action == "tool_call_intended" && tool_name != ""
