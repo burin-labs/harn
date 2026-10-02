@@ -1334,18 +1334,38 @@ fn connect_writes_where_the_runtime_resolves() {
     let runtime_namespace = harn_vm::secrets::configured_secret_namespace();
     assert_eq!(
         store::connect_secret_provider()
-            .expect("connect writer provider")
+            .expect("connect provider")
             .namespace(),
         runtime_namespace,
         "harn connect must store credentials in the namespace the runtime resolves from"
     );
-    assert_eq!(
-        store::connect_secret_reader_provider()
-            .expect("connect status reader provider")
-            .namespace(),
-        runtime_namespace,
-        "harn connect status must read the namespace the runtime resolves from"
+}
+
+/// harn#9184: `harn connect` resolves through `HARN_SECRET_PROVIDERS` like the
+/// runtime, and refuses to "store" into a chain where nothing persists.
+#[test]
+fn connect_store_follows_the_configured_provider_chain() {
+    let _env_only = crate::env_guard::ScopedEnvVar::set("HARN_SECRET_PROVIDERS", "env");
+    let Err(error) = store::connect_secret_writer() else {
+        panic!("env alone persists nothing, so connect must refuse to store");
+    };
+    assert!(error.contains("persistent secret provider"), "{error}");
+    assert!(error.contains("HARN_SECRET_PROVIDERS"), "{error}");
+    let reader = store::connect_secret_provider().expect("reads still resolve");
+    assert_eq!(reader.providers().len(), 1);
+
+    let directory = tempfile::tempdir().unwrap();
+    let _file = crate::env_guard::ScopedEnvVar::set("HARN_SECRET_PROVIDERS", "env,file");
+    let path = directory.path().join("secrets.json");
+    let _path = crate::env_guard::ScopedEnvVar::set(
+        "HARN_SECRET_FILE_PATH",
+        path.to_str().expect("utf-8 temp path"),
     );
+    let writer = store::connect_secret_writer().expect("file persists");
+    assert!(writer
+        .providers()
+        .iter()
+        .any(|provider| provider.persists_writes()));
 }
 
 #[test]
