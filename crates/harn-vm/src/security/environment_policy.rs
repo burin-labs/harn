@@ -295,13 +295,18 @@ const ALLOWLIST_LEN: usize =
 /// snapshot itself so a later exact-cased lookup (e.g. `"PATH"`) still finds
 /// a value stored under the launcher's own casing (e.g. `"Path"`).
 pub(crate) fn allowlist_admits(name: &str) -> bool {
-    if ENV_ALLOWLIST.contains(&name) {
-        return true;
-    }
-    cfg!(windows)
-        && ENV_ALLOWLIST
-            .iter()
-            .any(|allowed| allowed.eq_ignore_ascii_case(name))
+    ENV_ALLOWLIST
+        .iter()
+        .any(|allowed| environment_names_equal(allowed, name))
+}
+
+/// Environment names follow the host platform's matching semantics.
+pub(crate) fn environment_names_equal(left: &str, right: &str) -> bool {
+    environment_names_equal_for_platform(left, right, cfg!(windows))
+}
+
+pub(crate) fn environment_names_equal_for_platform(left: &str, right: &str, windows: bool) -> bool {
+    left == right || windows && left.eq_ignore_ascii_case(right)
 }
 
 /// Concatenate the base, toolchain, and Windows lists at compile time so
@@ -547,30 +552,47 @@ mod tests {
         }
     }
 
-    #[cfg(windows)]
     #[test]
     fn windows_launcher_value_folds_case_so_the_parents_path_is_found() {
         // Windows reports the search path as `Path`. Matched exactly against
         // the allowlist's `PATH`, it missed, and the child inherited no search
         // path while the allowlist still read as though it admitted one. This
-        // half of the fix is provable only on a Windows host.
+        // lookup uses the same platform matcher on every test host.
         let parent = env_from(&[]);
         let environment = SessionEnvironment::launch_from_snapshot(
-            EnvironmentPolicyKind::Isolated,
+            EnvironmentPolicyKind::Inherited,
             Vec::new(),
             BTreeMap::from([("Path".to_string(), "C:\\Windows\\System32".to_string())]),
             &parent,
         )
         .unwrap();
-        let never_secret = |_: &str, _: &str| None;
-        let env = resolve_env(&environment, &parent, &never_secret).unwrap();
         assert_eq!(
-            env.get("PATH").map(String::as_str),
+            environment.launcher_value_for_platform("PATH", true),
             Some("C:\\Windows\\System32")
         );
+        assert_eq!(environment.launcher_value_for_platform("PATH", false), None);
         // The control: folding case must not invent a value for a name the
         // parent never set.
-        assert_eq!(environment.launcher_value("ABSENT_NAME"), None);
+        assert_eq!(
+            environment.launcher_value_for_platform("ABSENT_NAME", true),
+            None
+        );
+        #[cfg(windows)]
+        {
+            let isolated = SessionEnvironment::launch_from_snapshot(
+                EnvironmentPolicyKind::Isolated,
+                Vec::new(),
+                BTreeMap::from([("Path".to_string(), "C:\\Windows\\System32".to_string())]),
+                &parent,
+            )
+            .unwrap();
+            let never_secret = |_: &str, _: &str| None;
+            let env = resolve_env(&isolated, &parent, &never_secret).unwrap();
+            assert_eq!(
+                env.get("PATH").map(String::as_str),
+                Some("C:\\Windows\\System32")
+            );
+        }
     }
 
     use crate::security::session_environment::{EnvironmentPolicyKind, GrantSourceSpec, GrantSpec};

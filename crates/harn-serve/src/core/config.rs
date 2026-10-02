@@ -8,6 +8,8 @@ use super::VmConfigurator;
 use super::{AuthPolicy, InMemoryReplayCache, LimitRegistry, NoopVmConfigurator, ReplayCache};
 
 pub struct DispatchCoreConfig {
+    /// Trusted process bootstrap ceiling, independent of export inputs.
+    pub host_inference_boundary: Option<harn_vm::llm::api::InferenceBoundary>,
     pub script_path: PathBuf,
     pub base_dir: PathBuf,
     pub service_name: String,
@@ -49,6 +51,7 @@ impl DispatchCoreConfig {
             .unwrap_or("harn-serve")
             .to_string();
         Self {
+            host_inference_boundary: None,
             script_path,
             base_dir,
             service_name,

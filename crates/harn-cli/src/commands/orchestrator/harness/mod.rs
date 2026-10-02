@@ -69,6 +69,8 @@ impl OrchestratorHarness {
     /// Start the orchestrator in-process.  Resolves once the HTTP listener
     /// is ready and the startup lifecycle event has been appended.
     pub async fn start(config: OrchestratorConfig) -> Result<Self, HarnessError> {
+        let host_inference_boundary =
+            harn_vm::llm::api::InferenceBoundary::capture_process().map_err(HarnessError)?;
         let (ready_tx, ready_rx) = oneshot::channel::<Result<ReadyState, OrchestratorError>>();
         let (shutdown_tx, shutdown_rx) = watch::channel(false);
         let shutdown_tx = Arc::new(shutdown_tx);
@@ -98,6 +100,7 @@ impl OrchestratorHarness {
                     ready_tx,
                     shutdown_rx,
                     task_pump_drain_gate,
+                    host_inference_boundary,
                 )));
             })
             .expect("spawn OrchestratorHarness thread");

@@ -71,8 +71,16 @@ pub(super) async fn orchestrator_task(
     ready_tx: oneshot::Sender<Result<ReadyState, OrchestratorError>>,
     shutdown_rx: watch::Receiver<bool>,
     pump_drain_gate: PumpDrainGate,
+    host_inference_boundary: Option<harn_vm::llm::api::InferenceBoundary>,
 ) {
-    if let Err(error) = orchestrator_lifecycle(config, ready_tx, shutdown_rx, pump_drain_gate).await
+    if let Err(error) = orchestrator_lifecycle(
+        config,
+        ready_tx,
+        shutdown_rx,
+        pump_drain_gate,
+        host_inference_boundary,
+    )
+    .await
     {
         eprintln!("[harn] orchestrator harness error: {error}");
     }
@@ -83,8 +91,11 @@ async fn orchestrator_lifecycle(
     ready_tx: oneshot::Sender<Result<ReadyState, OrchestratorError>>,
     mut shutdown_rx: watch::Receiver<bool>,
     pump_drain_gate: PumpDrainGate,
+    host_inference_boundary: Option<harn_vm::llm::api::InferenceBoundary>,
 ) -> Result<(), OrchestratorError> {
     harn_vm::reset_thread_local_state();
+    let _environment =
+        crate::commands::run::environment::host_environment_scope(host_inference_boundary);
 
     let shutdown_timeout = config.shutdown_timeout;
     let drain_config = config.drain;
@@ -383,24 +394,27 @@ async fn orchestrator_lifecycle(
     )?;
     let waitpoint_sweeper = spawn_waitpoint_sweeper(dispatcher.clone());
 
-    let listener = ListenerRuntime::start(ListenerConfig {
-        bind: config.bind,
-        tls: config.tls.clone(),
-        event_log: event_log.clone(),
-        secrets: secret_provider.clone(),
-        allowed_origins: OriginAllowList::from_manifest(&manifest.orchestrator.allowed_origins),
-        max_body_bytes: ListenerConfig::max_body_bytes_or_default(
-            manifest.orchestrator.max_body_bytes,
-        ),
-        metrics_registry: metrics_registry.clone(),
-        admin_reload: Some(admin_reload.clone()),
-        mcp_router,
-        routes: route_configs,
-        tenant_store: tenant_store.clone(),
-        acp_project_root: Some(manifest_dir.clone()),
-        session_store: Some(Arc::new(harn_vm::SessionStore::new(event_log.clone()))),
-        public_metrics: config.public_metrics,
-    })
+    let listener = ListenerRuntime::start(
+        ListenerConfig {
+            bind: config.bind,
+            tls: config.tls.clone(),
+            event_log: event_log.clone(),
+            secrets: secret_provider.clone(),
+            allowed_origins: OriginAllowList::from_manifest(&manifest.orchestrator.allowed_origins),
+            max_body_bytes: ListenerConfig::max_body_bytes_or_default(
+                manifest.orchestrator.max_body_bytes,
+            ),
+            metrics_registry: metrics_registry.clone(),
+            admin_reload: Some(admin_reload.clone()),
+            mcp_router,
+            routes: route_configs,
+            tenant_store: tenant_store.clone(),
+            acp_project_root: Some(manifest_dir.clone()),
+            session_store: Some(Arc::new(harn_vm::SessionStore::new(event_log.clone()))),
+            public_metrics: config.public_metrics,
+        },
+        host_inference_boundary,
+    )
     .await?;
     let local_bind = listener.local_addr();
     let listener_metrics = listener.trigger_metrics();
