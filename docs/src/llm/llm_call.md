@@ -540,6 +540,21 @@ must also appear in the route's `prompt_cache_ttls` list. `cache: false` is an
 opt-out, not capability intent. `cache` does not memoize full responses; use
 `with_cache` from `std/llm/handlers` for Harn-owned response caching.
 
+Every `provider_call_request` transcript receipt records what happened to the
+prompt-cache breakpoint in `prompt_cache_breakpoint.outcome`:
+
+| Outcome | Meaning |
+|---|---|
+| `placed` | Harn added its marker; `style` is `top_level` or `last_block`. |
+| `not_requested` | The call turned caching off. |
+| `unsupported` | The route does not declare prompt caching. |
+| `automatic` | The route caches without a request marker, so none was sent. |
+| `deferred_to_existing_marker` | A `cache_control` marker you supplied on a message, content block, or tool definition takes precedence, so Harn added none. Only the prefixes you marked are cached. |
+
+A provider returns `cache_read_input_tokens: 0` without an error both when no
+breakpoint was sent and when the cached prefix is below the model's minimum
+length. Read this field to tell the two apart.
+
 Streaming applies three independent limits on every SSE and NDJSON provider:
 `timeout_ms` bounds the whole request, `HARN_LLM_FIRST_TOKEN_TIMEOUT` bounds
 the wait for the first chunk, and `idle_timeout_ms` (or
