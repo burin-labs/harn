@@ -26,7 +26,7 @@ use super::setup_events::{
 };
 use super::store::{
     connector_token_summary, current_unix_timestamp, format_expiry, load_connector_token,
-    run_connect_api_key, save_connector_token,
+    read_named_env_secret, run_connect_api_key, save_connector_token,
 };
 use super::{
     DynamicClientRegistrationResponse, OAuthConnectRequest, OAuthProviderDefaults,
@@ -190,9 +190,7 @@ pub(super) fn resolve_oauth_client_secret(
         return Ok(Some(secret.clone()));
     }
     if let Some(name) = &args.client_secret_from_env {
-        let secret = std::env::var(name).map_err(|error| {
-            format!("failed to read OAuth client secret from environment variable {name}: {error}")
-        })?;
+        let secret = read_named_env_secret(name, "OAuth client secret")?;
         if secret.is_empty() {
             return Err(format!(
                 "OAuth client secret environment variable {name} is empty"
