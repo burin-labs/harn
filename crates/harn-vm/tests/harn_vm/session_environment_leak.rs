@@ -311,3 +311,47 @@ fn a_grant_naming_an_absent_variable_is_refused_by_name() {
          so an operator reads which declaration failed; got {refusal:?}"
     );
 }
+
+/// A catalogued provider credential, planted with a dummy value.
+const PROVIDER: &str = "OPENAI_API_KEY";
+
+/// The default policy, `inherited`, hands a child the launcher's environment,
+/// but never a provider credential: the key exists for Harn's own model calls.
+///
+/// The funnel has no name denylist, so only the policy can withhold the key
+/// here. The undeclared name is the direction control: an inherited child must
+/// still see an ordinary launcher variable, or the empty provider slot could
+/// come from a child that received nothing at all.
+#[test]
+fn std_command_for_withholds_a_provider_credential_from_an_inherited_child() {
+    let _lock = support::EnvironmentGuard::set(UNDECLARED, UNDECLARED_VALUE);
+    let previous = std::env::var_os(PROVIDER);
+    std::env::set_var(PROVIDER, "sk-dummy-canary");
+
+    harn_vm::reset_thread_local_state();
+    harn_vm::stdlib::process::set_session_environment(Some(SessionEnvironment::inherited()));
+    let observed = harn_vm::process_sandbox::std_command_for(
+        &support::process_helper(),
+        &[
+            "--env".to_string(),
+            PROVIDER.to_string(),
+            UNDECLARED.to_string(),
+        ],
+    )
+    .map(|mut command| {
+        let out = command.output().expect("spawn");
+        String::from_utf8_lossy(&out.stdout).to_string()
+    });
+    harn_vm::stdlib::process::set_session_environment(None);
+    match previous {
+        Some(value) => std::env::set_var(PROVIDER, value),
+        None => std::env::remove_var(PROVIDER),
+    }
+
+    assert_eq!(
+        observed.expect("building the command must not fail"),
+        format!("|{UNDECLARED_VALUE}"),
+        "an inherited child must keep ordinary launcher variables and lose the \
+         provider credential"
+    );
+}
