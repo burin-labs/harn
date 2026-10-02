@@ -902,8 +902,6 @@ impl GrantReceipt {
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum EnvironmentPolicyError {
-    /// A loader control would fire before trusted sandbox setup executes.
-    UnsafeTrustedSetupVariable { variable: String },
     /// A grant spec had an empty name.
     EmptyName,
     /// An `env` source named an empty variable.
@@ -948,6 +946,8 @@ pub enum EnvironmentPolicyError {
     },
     /// A `secret_store` grant could not be resolved on exposure.
     MissingSecret { name: String },
+    /// A loader control would fire before trusted sandbox setup executes.
+    UnsafeTrustedSetupVariable { variable: String },
 }
 
 impl fmt::Display for EnvironmentPolicyError {
