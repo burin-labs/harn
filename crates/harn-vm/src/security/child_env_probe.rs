@@ -1,11 +1,12 @@
-//! Test support: a granted session and three planted engine variables, for
+//! Test support: a granted session and four planted engine variables, for
 //! asserting what a spawned child can see.
 //!
 //! The session grants one variable to the whole session and one to Harn's own
-//! process only, and leaves a third unadmitted. A child built under it must
-//! report the session grant as set and the other two as unset; the same child
-//! built with no policy installed reports all three as set, which is the
-//! control that shows the probe can see a planted variable at all.
+//! process only, and leaves the other two unadmitted. A child built under it
+//! must report the session grant as set and the rest as unset; the same child
+//! built with no policy installed reports all four as set, which is the
+//! control that shows the probe can see a planted variable at all. Under an
+//! inherited session a child sees everything except the provider credential.
 
 use super::session_environment::{
     EnvironmentPolicyKind, GrantAudience, GrantSourceSpec, GrantSpec, SessionEnvironment,
@@ -18,12 +19,14 @@ pub(crate) const UNADMITTED: &str = "PROBE_CHILD_UNADMITTED";
 pub(crate) const IN_PROCESS: &str = "PROBE_CHILD_IN_PROCESS";
 /// Granted to the whole session.
 pub(crate) const SESSION: &str = "PROBE_CHILD_SESSION";
+/// A catalogued provider credential, planted with a dummy value.
+pub(crate) const PROVIDER: &str = "OPENAI_API_KEY";
 /// Every probed name, in report order.
-pub(crate) const NAMES: [&str; 3] = [UNADMITTED, IN_PROCESS, SESSION];
+pub(crate) const NAMES: [&str; 4] = [UNADMITTED, IN_PROCESS, SESSION, PROVIDER];
 
 /// Holds the planted variables (and the environment lock) for its lifetime.
 pub(crate) struct PlantedEngineEnvironment {
-    _vars: [ScopedEnvVar; 3],
+    _vars: [ScopedEnvVar; 4],
 }
 
 pub(crate) fn plant() -> PlantedEngineEnvironment {
@@ -32,6 +35,7 @@ pub(crate) fn plant() -> PlantedEngineEnvironment {
             ScopedEnvVar::set(UNADMITTED, "engine-only"),
             ScopedEnvVar::set(IN_PROCESS, "in-process-only"),
             ScopedEnvVar::set(SESSION, "session-wide"),
+            ScopedEnvVar::set(PROVIDER, "sk-dummy-canary"),
         ],
     }
 }
@@ -58,6 +62,16 @@ pub(crate) fn granted_session() -> SessionEnvironment {
     )
     .expect("the probe session launches")
 }
+
+/// The default inherited session, launched against the planted engine
+/// environment.
+pub(crate) fn inherited_session() -> SessionEnvironment {
+    SessionEnvironment::inherited()
+}
+
+/// What an inherited child must report: every planted name but the provider
+/// credential.
+pub(crate) const INHERITED_REPORT: [&str; 3] = [UNADMITTED, IN_PROCESS, SESSION];
 
 /// The report a child prints when every name in `set` is present and the
 /// rest are absent: `NAME=set,NAME=unset,...` in [`NAMES`] order.

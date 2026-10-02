@@ -563,8 +563,16 @@ pub(super) async fn connect_stdio_test_script(
     script: &str,
     protocol_version: String,
 ) -> VmMcpClientHandle {
+    connect_stdio_test_script_with_env(script, &BTreeMap::new(), protocol_version).await
+}
+
+async fn connect_stdio_test_script_with_env(
+    script: &str,
+    env: &BTreeMap<String, String>,
+    protocol_version: String,
+) -> VmMcpClientHandle {
     let args = vec!["-u".to_string(), "-c".to_string(), script.to_string()];
-    mcp_connect_stdio_impl("python3", &args, &BTreeMap::new(), None, protocol_version)
+    mcp_connect_stdio_impl("python3", &args, env, None, protocol_version)
         .await
         .expect("stdio test MCP server should connect")
 }
@@ -1111,4 +1119,22 @@ print(json.dumps({{
         reported(connect_stdio_test_script(&script, PROTOCOL_VERSION.to_string()).await).await
     };
     assert_eq!(governed, probe::expected_report(&[probe::SESSION]));
+
+    // An inherited session hands the server everything but the provider key.
+    let inherited = {
+        let _session = probe::InstalledSession::install(Some(probe::inherited_session()));
+        reported(connect_stdio_test_script(&script, PROTOCOL_VERSION.to_string()).await).await
+    };
+    assert_eq!(inherited, probe::expected_report(&probe::INHERITED_REPORT));
+
+    // A server whose own config declares the key still receives it.
+    let declared = {
+        let _session = probe::InstalledSession::install(Some(probe::inherited_session()));
+        let env = BTreeMap::from([(probe::PROVIDER.to_string(), "declared".to_string())]);
+        reported(
+            connect_stdio_test_script_with_env(&script, &env, PROTOCOL_VERSION.to_string()).await,
+        )
+        .await
+    };
+    assert_eq!(declared, probe::expected_report(&probe::NAMES));
 }

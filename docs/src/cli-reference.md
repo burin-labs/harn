@@ -191,7 +191,11 @@ Every launched Harn session has one environment policy:
 
 - **Inherited** (the default) captures the launcher's environment once when the
   session starts. Later changes to the launcher process do not change the
-  session.
+  session. Spawned commands, MCP servers, and ACP children receive that
+  snapshot without any provider credential (the variables the provider catalog
+  declares as `auth_env`, such as `OPENAI_API_KEY`). Harn's own model calls and
+  `harness.env` still read them. A child that needs a key gets it only from
+  its own explicit `env`.
 - **Isolated** admits only the small set of operating-system and toolchain
   values needed to run commands, such as `PATH`, temporary-directory settings,
   locale, and compiler locations. It rejects grants.
