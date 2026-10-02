@@ -45,7 +45,7 @@ write_response() {
 }
 
 successful_jobs="$tmp_root/successful-jobs.json"
-printf '%s\n' '{"total_count":19,"jobs":[{"name":"Format check","status":"completed","conclusion":"success"},{"name":"Verify publishable crates","status":"completed","conclusion":"success"},{"name":"Check Rust code","status":"completed","conclusion":"success"},{"name":"Check Rust code (lean LSP features)","status":"completed","conclusion":"success"},{"name":"Check Rust code (freshness checker)","status":"completed","conclusion":"success"},{"name":"Rust workspace tests","status":"completed","conclusion":"success"},{"name":"Rust test","status":"completed","conclusion":"success"},{"name":"Run Linux sandbox tests","status":"completed","conclusion":"success"},{"name":"Run Harn conformance tests (1/4)","status":"completed","conclusion":"success"},{"name":"Run Harn conformance tests (2/4)","status":"completed","conclusion":"success"},{"name":"Run Harn conformance tests (3/4)","status":"completed","conclusion":"success"},{"name":"Run Harn conformance tests (4/4)","status":"completed","conclusion":"success"},{"name":"Check Harn documentation","status":"completed","conclusion":"success"},{"name":"Run Harn script tests","status":"completed","conclusion":"success"},{"name":"Check Harn sources and generated files","status":"completed","conclusion":"success"},{"name":"Build shared Harn CLI","status":"completed","conclusion":"success"},{"name":"Check repository policies","status":"completed","conclusion":"skipped"},{"name":"Windows cross-compile check","status":"completed","conclusion":"success"},{"name":"Write CI timing report","status":"completed","conclusion":"success"}]}' > "$successful_jobs"
+printf '%s\n' '{"total_count":20,"jobs":[{"name":"Format check","status":"completed","conclusion":"success"},{"name":"Verify publishable crates","status":"completed","conclusion":"success"},{"name":"Check Rust code","status":"completed","conclusion":"success"},{"name":"Check Rust code (lean LSP features)","status":"completed","conclusion":"success"},{"name":"Check Rust code (freshness checker)","status":"completed","conclusion":"success"},{"name":"Rust workspace tests","status":"completed","conclusion":"success"},{"name":"Rust test","status":"completed","conclusion":"success"},{"name":"Run Linux sandbox tests","status":"completed","conclusion":"success"},{"name":"Run Harn conformance tests (1/4)","status":"completed","conclusion":"success"},{"name":"Run Harn conformance tests (2/4)","status":"completed","conclusion":"success"},{"name":"Run Harn conformance tests (3/4)","status":"completed","conclusion":"success"},{"name":"Run Harn conformance tests (4/4)","status":"completed","conclusion":"success"},{"name":"Check Harn documentation","status":"completed","conclusion":"success"},{"name":"Run Harn script tests","status":"completed","conclusion":"success"},{"name":"Check Harn sources and generated files","status":"completed","conclusion":"success"},{"name":"Build shared Harn CLI","status":"completed","conclusion":"success"},{"name":"Check repository policies","status":"completed","conclusion":"skipped"},{"name":"Check repository shell gates","status":"completed","conclusion":"success"},{"name":"Windows cross-compile check","status":"completed","conclusion":"success"},{"name":"Write CI timing report","status":"completed","conclusion":"success"}]}' > "$successful_jobs"
 
 success_response="$tmp_root/success.json"
 write_response "$success_response" "[{\"id\":123,\"run_attempt\":2,\"head_sha\":\"$sha\",\"path\":\".github/workflows/ci.yml\",\"event\":\"merge_group\",\"status\":\"completed\",\"conclusion\":\"success\"}]"
@@ -151,6 +151,14 @@ jq 'del(.jobs[] | select(.name == "Check Rust code (lean LSP features)")) | .tot
   "$successful_jobs" > "$missing_lint_leg_jobs"
 [[ "$(run_proof "$success_response" "$missing_lint_leg_jobs")" == "false" ]] \
   || { echo "merge-group proof accepted a missing Clippy leg" >&2; exit 1; }
+
+# The hermetic shell gates run before the merge; a run without them proves
+# nothing about the scripts they cover.
+missing_shell_gates_jobs="$tmp_root/missing-shell-gates-jobs.json"
+jq 'del(.jobs[] | select(.name == "Check repository shell gates")) | .total_count = (.jobs | length)' \
+  "$successful_jobs" > "$missing_shell_gates_jobs"
+[[ "$(run_proof "$success_response" "$missing_shell_gates_jobs")" == "false" ]] \
+  || { echo "merge-group proof accepted a run without the shell gates" >&2; exit 1; }
 
 invalid_contract="$tmp_root/invalid-contract.json"
 printf '%s\n' '{}' > "$invalid_contract"
