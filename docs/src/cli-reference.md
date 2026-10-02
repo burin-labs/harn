@@ -2205,6 +2205,8 @@ Ungated OpenRouter probes set
 [`provider.require_parameters`](https://openrouter.ai/docs/guides/routing/provider-selection#requiring-providers-to-support-all-parameters)
 to `true`, requiring an endpoint that advertises support for every requested
 parameter. An explicit parameter-routing rejection counts as a measurement.
+Routes pinned to specific upstream providers apply that same allowlist before
+parameter filtering.
 Missing endpoints, account privacy restrictions, and ambiguous routing failures
 remain `unmeasured`.
 An account data-policy refusal has verdict `excluded_by_account_policy` and

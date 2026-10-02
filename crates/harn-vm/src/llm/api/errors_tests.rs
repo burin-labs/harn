@@ -577,8 +577,8 @@ fn openrouter_parameter_routing_rejection_is_not_model_unavailability() {
         false,
     );
     assert_eq!(
-        classify_llm_error(&stream).reason,
-        LlmErrorReason::InvalidRequest
+        thrown_field(&stream, "reason").as_deref(),
+        Some("invalid_request")
     );
 
     let mixed_filters = classify_provider_http_error(

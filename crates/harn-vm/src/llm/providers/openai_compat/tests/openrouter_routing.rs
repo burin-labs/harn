@@ -135,6 +135,7 @@ fn provider_order_pins_closed_allowlist() {
     let mut body = json!({"model": "openai/gpt-oss-120b"});
     apply_openrouter_provider_order(&mut body, &["Cerebras".to_string(), "Groq".to_string()]);
     assert_eq!(body["provider"]["order"], json!(["Cerebras", "Groq"]));
+    assert_eq!(body["provider"]["only"], json!(["Cerebras", "Groq"]));
     assert_eq!(body["provider"]["allow_fallbacks"], json!(false));
 }
 
@@ -148,6 +149,7 @@ fn provider_order_respects_caller_order_but_forces_closed() {
     });
     apply_openrouter_provider_order(&mut body, &["Cerebras".to_string(), "Groq".to_string()]);
     assert_eq!(body["provider"]["order"], json!(["Groq"]));
+    assert_eq!(body["provider"]["only"], json!(["Groq"]));
     assert_eq!(body["provider"]["allow_fallbacks"], json!(false));
 }
 
@@ -156,6 +158,18 @@ fn provider_order_noop_for_empty() {
     let mut body = json!({"model": "openai/gpt-oss-120b"});
     apply_openrouter_provider_order(&mut body, &[]);
     assert!(body.get("provider").is_none());
+}
+
+#[test]
+fn provider_order_preserves_a_narrower_caller_allowlist() {
+    let mut body = json!({
+        "model": "openai/gpt-oss-120b",
+        "provider": {"only": ["Groq"]}
+    });
+    apply_openrouter_provider_order(&mut body, &["Cerebras".to_string(), "Groq".to_string()]);
+    assert_eq!(body["provider"]["order"], json!(["Cerebras", "Groq"]));
+    assert_eq!(body["provider"]["only"], json!(["Groq"]));
+    assert_eq!(body["provider"]["allow_fallbacks"], false);
 }
 
 #[test]
@@ -168,6 +182,7 @@ fn build_request_body_pins_gpt_oss_openrouter_to_clean_subproviders() {
     payload.provider = "openrouter".to_string();
     payload.model = "openai/gpt-oss-120b".to_string();
     let body = OpenAiCompatibleProvider::build_request_body(&payload);
+    assert_eq!(body["provider"]["only"], json!(["Cerebras", "Groq"]));
     assert_eq!(
         body["provider"]["order"],
         json!(["Cerebras", "Groq"]),
