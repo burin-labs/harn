@@ -137,7 +137,7 @@ pub(super) const STDLIB_WARM_LOCK_FILE: &str = "stdlib-warm.lock";
 /// Diagnostic bound on waiting for a sibling's warm. A cold unoptimized warm
 /// on a contended four-core runner measured about 70 s, so expiry means the
 /// holder is wedged rather than slow.
-const STDLIB_WARM_LOCK_DEADLINE: std::time::Duration = std::time::Duration::from_secs(300);
+const STDLIB_WARM_LOCK_DEADLINE: std::time::Duration = std::time::Duration::from_mins(5);
 
 /// Take the exclusive stdlib warm lock in the disk cache directory, waiting up
 /// to `deadline` for a sibling process that holds it. The lock is released
