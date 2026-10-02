@@ -4,6 +4,7 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 script="$repo_root/scripts/ci/rust_artifact.sh"
 policy_nextest="$(jq -er '.nextest_version' "$repo_root/.github/cache-policy.json")"
+expected_security_filter="$("$repo_root/scripts/ci/host_bound_rust_test_filter.sh")"
 tmpdir="$(mktemp -d)"
 trap 'rm -rf "$tmpdir"' EXIT
 
@@ -12,6 +13,7 @@ cp "$repo_root/rust-toolchain.toml" "$tmpdir/work/rust-toolchain.toml"
 cat > "$tmpdir/bin/cargo" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
+printf '%s\n' "$*" >> "${CARGO_RECEIPTS:?}/cargo-calls"
 case "$1" in
   build)
     # The shared CLI bundle builds in the ci-cli profile; the test bundle's
@@ -38,7 +40,7 @@ case "$1" in
       : > "${CARGO_RECEIPTS:?}/nextest-tests"
     elif [[ "$#" -eq 10 && "$2" == "archive" && "$3" == "--locked" && \
       "$4" == "--workspace" && "$5" == "--profile" && "$6" == "ci" && "$7" == "-E" && \
-      "$8" == '(package(harn-vm) and binary(harn_vm)) or (package(harn-hostlib) and binary(harn_hostlib))' && \
+      "$8" == "${EXPECTED_SECURITY_FILTER:?}" && \
       "$9" == "--archive-file" && -n "${10}" ]]; then
       printf 'security tests archive\n' > "${10}"
       : > "${CARGO_RECEIPTS:?}/nextest-security"
@@ -92,6 +94,7 @@ run_artifact() {
       FAKE_TARGET="$tmpdir/target" \
       FAKE_COMMIT="${FAKE_COMMIT_OVERRIDE:-$commit}" \
       FAKE_NEXTEST_VERSION="${FAKE_NEXTEST_VERSION_OVERRIDE:-$policy_nextest}" \
+      EXPECTED_SECURITY_FILTER="$expected_security_filter" \
       FAKE_RUSTC_IDENTITY="${FAKE_RUSTC_IDENTITY_OVERRIDE:-rustc 1.95.0 (fake)}" \
       RUSTFLAGS="${RUSTFLAGS_OVERRIDE:--D warnings -Clink-arg=-fuse-ld=mold}" \
       CARGO_PROFILE_DEV_DEBUG="${DEV_DEBUG_OVERRIDE:-line-tables-only}" \
@@ -121,6 +124,39 @@ test ! -f "$tmpdir/receipts/build"
 test ! -f "$tmpdir/receipts/nextest-tests"
 run_artifact build-security "$security_bundle" "$commit"
 test -f "$tmpdir/receipts/nextest-security"
+
+# A broken host-bound registry must fail before the archive producer can
+# invoke Cargo, rather than publishing an archive with an empty selector.
+bad_filter_repo="$tmpdir/bad-filter-repo"
+mkdir -p "$bad_filter_repo/scripts/ci" "$bad_filter_repo/scripts/config" \
+  "$bad_filter_repo/scripts/lib" "$bad_filter_repo/.github" "$tmpdir/bad-filter-receipts"
+cp "$repo_root/scripts/ci/rust_artifact.sh" \
+  "$repo_root/scripts/ci/host_bound_rust_test_filter.sh" \
+  "$bad_filter_repo/scripts/ci/"
+cp "$repo_root/scripts/ci/cache_policy.sh" "$bad_filter_repo/scripts/ci/"
+cp "$repo_root/scripts/lib/sha256.sh" "$bad_filter_repo/scripts/lib/"
+cp "$repo_root/.github/cache-policy.json" "$bad_filter_repo/.github/"
+cp "$repo_root/rust-toolchain.toml" "$bad_filter_repo/"
+: > "$bad_filter_repo/scripts/config/host-bound-rust-tests.txt"
+if (
+  cd "$tmpdir/work"
+  env PATH="$tmpdir/bin:$PATH" \
+    CARGO_RECEIPTS="$tmpdir/bad-filter-receipts" \
+    FAKE_COMMIT="$commit" \
+    FAKE_NEXTEST_VERSION="$policy_nextest" \
+    FAKE_RUSTC_IDENTITY='rustc 1.95.0 (fake)' \
+    RUSTFLAGS='-D warnings -Clink-arg=-fuse-ld=mold' \
+    CARGO_PROFILE_DEV_DEBUG=line-tables-only \
+    HARN_SECURITY_ARTIFACT_MAX_BYTES=1073741824 \
+    "$bad_filter_repo/scripts/ci/rust_artifact.sh" build-security \
+    "$tmpdir/out/empty-filter.tar.zst" "$commit"
+) > "$tmpdir/bad-filter.out" 2>&1; then
+  echo "build-security accepted an empty host-bound test selector" >&2
+  exit 1
+fi
+grep -Fxq 'host-bound Rust test list is empty' "$tmpdir/bad-filter.out"
+test ! -e "$tmpdir/bad-filter-receipts/cargo-calls"
+test ! -e "$tmpdir/out/empty-filter.tar.zst"
 
 github_env="$tmpdir/github-env"
 VERIFY_RUNTIME_OVERRIDE=1 run_artifact restore-tests "$bundle" "$tmpdir/restored" "$commit" "$github_env"

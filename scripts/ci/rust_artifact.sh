@@ -11,7 +11,12 @@ source "${SCRIPT_DIR}/../lib/sha256.sh"
 NEXTEST_VERSION="$(harn_cache_policy_jq '.nextest_version')"
 readonly NEXTEST_VERSION
 readonly NEUTRAL_FILTER='all()'
-readonly SECURITY_FILTER='(package(harn-vm) and binary(harn_vm)) or (package(harn-hostlib) and binary(harn_hostlib))'
+SECURITY_FILTER="$("${SCRIPT_DIR}/host_bound_rust_test_filter.sh")"
+if [[ -z "$SECURITY_FILTER" ]]; then
+  echo "error: host-bound Rust test filter is empty" >&2
+  exit 1
+fi
+readonly SECURITY_FILTER
 readonly EXPECTED_RUSTFLAGS='-D warnings -Clink-arg=-fuse-ld=mold'
 readonly EXPECTED_DEV_DEBUG='line-tables-only'
 # The shared CLI bundle every Harn proof lane executes is built in the
