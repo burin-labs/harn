@@ -11,6 +11,7 @@ import {
   consumer_canary_errors,
   e2e_elastic_capacity_errors,
   landlock_incapable_runner_errors,
+  merge_group_datacenter_errors,
   producer_admission_expression,
   producer_cache_save_reserve_minutes,
   producer_cli_timeout_expression,
@@ -42,19 +43,30 @@ fn gha_expression(body: string) -> string {
 const MEASURED_BUILD_JOBS = "$" + "{{ steps.resource-budget.outputs.build_jobs }}"
 
 // The census and capacity jobs as the workflow wires them for the shared CLI
-// producer's reserved runners.
+// producer's reserved runners and the workspace producer's merge-group host.
+const CENSUS_WORKFLOW = "burin-labs/.github/.github/workflows/runner-availability.yml@fixture"
+
 const CLI_RESERVATION_CENSUS = {
   if:
     "github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)",
+  uses: CENSUS_WORKFLOW,
   with: {linux_probe_runner_tag: "harn-ci-producer"},
+}
+
+const DATACENTER_CENSUS = {
+  if: "github.event_name == 'merge_group'",
+  uses: CENSUS_WORKFLOW,
+  with: {linux_runner_tag: "harn-ci-big", linux_fetch_runner_tag: "hetzner-1"},
 }
 
 const CLI_RESERVATION_CAPACITY = {
   if: "$"
     + "{{ !cancelled() && (github.event_name == 'merge_group' || github.event_name == 'pull_request') }}",
+  needs: ["runner-availability", "datacenter-availability"],
   outputs: {
     route: "$" + "{{ steps.decision.outputs.route }}",
     cli_route: "$" + "{{ steps.cli-decision.outputs.route }}",
+    merge_route: "$" + "{{ steps.merge-decision.outputs.route }}",
   },
   steps: [
     {id: "decision", run: "bash scripts/ci/runner_capacity.sh"},
@@ -66,6 +78,15 @@ const CLI_RESERVATION_CAPACITY = {
         CAPACITY_ROUTED_EVENT: "pull_request merge_group",
         CAPACITY_VENDOR_RUNNER: "ubicloud-standard-8",
         CAPACITY_HOSTED_RUNNER: "ubuntu-8core",
+      },
+    },
+    {
+      id: "merge-decision",
+      run: "bash scripts/ci/runner_capacity.sh",
+      env: {
+        CAPACITY_POOL: "linux_fetch",
+        CAPACITY_ROUTED_EVENT: "merge_group",
+        RUNNER_CAPACITY: "$" + "{{ needs.datacenter-availability.outputs.capacity }}",
       },
     },
   ],
@@ -349,6 +370,7 @@ fn workflow() {
     jobs: {
       "package-audit": package_audit,
       "runner-availability": CLI_RESERVATION_CENSUS,
+      "datacenter-availability": DATACENTER_CENSUS,
       "rust-producer-capacity": CLI_RESERVATION_CAPACITY,
       "rust-cli": {
         ...cli_producer,
@@ -1624,7 +1646,7 @@ pipeline test_rejects_a_producer_ladder_off_its_rungs_or_ceilings(harness: Harne
   const errors = ci_linux_lane_policy_errors(invalid)
   assert(
     errors.contains(
-      "ci.yml:rust-check-inputs must ladder the owned linux_big pool on same-repository pull requests, ubicloud-standard-8, then ubuntu-8core",
+      "ci.yml:rust-check-inputs must ladder the owned linux_big pool on same-repository pull requests, the hetzner-1 runners on merge groups, ubicloud-standard-8, then ubuntu-8core",
     ),
   )
   assert(errors.contains("ci.yml:rust-check-inputs must mirror every one of its runner tiers"))
@@ -2075,6 +2097,134 @@ pipeline test_cli_producer_reservation_agrees_across_census_capacity_and_runs_on
   for case in cases {
     assert(cli_producer_reservation_errors(case.workflow).contains(case.error))
     // The lane policy carries the reservation check, not just the helper.
+    assert(ci_linux_lane_policy_errors(case.workflow).contains(case.error))
+  }
+}
+
+/**
+ * The workspace producer's merge-group rung names the datacenter host in the
+ * second census, the merge-group capacity step and `runs-on`. Each drifting on
+ * its own is refused, and so is the pull-request-only ladder this replaced.
+ */
+@test
+pipeline test_merge_group_datacenter_rung_agrees_across_census_capacity_and_runs_on(
+  harness: Harness,
+  task: unknown,
+) {
+  const valid = workflow()
+  assert_eq(merge_group_datacenter_errors(valid), [])
+  // The residential pool stays pull-request-only: the merge-group rung names
+  // the host label, and the pull-request rung's label set does not.
+  assert(
+    contains(
+      producer_runner_expression(),
+      "merge_route == 'owned'\n  && fromJSON('[\"self-hosted\", \"Linux\", \"X64\", \"harn-ci-big\", \"hetzner-1\"]'))",
+    ),
+  )
+  assert(contains(producer_tier_expression(), "merge_route == 'owned'\n  && 'self-hosted'"))
+  const producer = valid.jobs["rust-check-inputs"]
+  const pull_request_only = "$"
+    + "{{ (needs.rust-producer-capacity.outputs.route == 'owned'\n  && fromJSON('[\"self-hosted\", \"Linux\", \"X64\", \"harn-ci-big\"]'))\n  || (vars.HARN_CI_PAID_LINUX_PROVIDER != 'github'\n  && 'ubicloud-standard-8')\n  || 'ubuntu-8core' }}"
+  assert(
+    ci_linux_lane_policy_errors(
+      {
+        ...valid,
+        jobs: {...valid.jobs, "rust-check-inputs": {...producer, "runs-on": pull_request_only}},
+      },
+    )
+      .contains(
+        "ci.yml:rust-check-inputs must ladder the owned linux_big pool on same-repository pull requests, the hetzner-1 runners on merge groups, ubicloud-standard-8, then ubuntu-8core",
+      ),
+  )
+  const census = valid.jobs["datacenter-availability"]
+  const capacity = valid.jobs["rust-producer-capacity"]
+  const step = capacity.steps[2]
+  const with_merge_step = { changed ->
+    return {
+      ...valid,
+      jobs: {
+        ...valid.jobs,
+        "rust-producer-capacity": {
+          ...capacity,
+          steps: [capacity.steps[0], capacity.steps[1], changed],
+        },
+      },
+    }
+  }
+  const with_census = { changed ->
+    return {...valid, jobs: {...valid.jobs, "datacenter-availability": changed}}
+  }
+  const census_error =
+    "ci.yml:datacenter-availability must count the hetzner-1 harn-ci-big runners on merge groups with the same census as runner-availability"
+  const step_error =
+    "ci.yml:rust-producer-capacity step merge-decision must route merge groups over the datacenter-availability linux_fetch count alone"
+  const cases = [
+    {
+      workflow: with_census(
+        {...census, with: {linux_runner_tag: "harn-ci-big", linux_fetch_runner_tag: "tornadough"}},
+      ),
+      error: census_error,
+    },
+    {
+      workflow: with_census({...census, with: {linux_fetch_runner_tag: "hetzner-1"}}),
+      error: census_error,
+    },
+    {workflow: with_census({...census, if: "github.event_name != 'push'"}), error: census_error},
+    {
+      workflow: with_census(
+        {...census, uses: "burin-labs/.github/.github/workflows/runner-availability.yml@other"},
+      ),
+      error: census_error,
+    },
+    {
+      workflow: {
+        ...valid,
+        jobs: {
+          ...valid.jobs,
+          "rust-producer-capacity": {...capacity, needs: "runner-availability"},
+        },
+      },
+      error: "ci.yml:rust-producer-capacity must wait for datacenter-availability",
+    },
+    {
+      workflow: {
+        ...valid,
+        jobs: {
+          ...valid.jobs,
+          "rust-producer-capacity": {
+            ...capacity,
+            outputs: pick(capacity.outputs, ["route", "cli_route"]),
+          },
+        },
+      },
+      error: "ci.yml:rust-producer-capacity must publish merge_route from its merge-decision step",
+    },
+    {
+      workflow: with_merge_step({...step, env: {...step.env, CAPACITY_POOL: "linux_big"}}),
+      error: step_error,
+    },
+    {
+      workflow: with_merge_step(
+        {...step, env: {...step.env, CAPACITY_ROUTED_EVENT: "pull_request merge_group"}},
+      ),
+      error: step_error,
+    },
+    {
+      workflow: with_merge_step(
+        {
+          ...step,
+          env: {
+            ...step.env,
+            RUNNER_CAPACITY: "$" + "{{ needs.runner-availability.outputs.capacity }}",
+          },
+        },
+      ),
+      error: step_error,
+    },
+  ]
+  for case in cases {
+    assert(merge_group_datacenter_errors(case.workflow).contains(case.error))
+    // The lane policy carries the datacenter check, not just the helper.
     assert(ci_linux_lane_policy_errors(case.workflow).contains(case.error))
   }
 }

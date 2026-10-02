@@ -180,11 +180,10 @@ fn timeout_expression(budgets: list<StepBudget>, owned_rung: bool = true) -> str
   // The vendor rung is a fresh VM that runs this job alone and writes the
   // main-branch cache like the hosted rung, so it carries the hosted ceiling,
   // cache-save reserve included.
-  return producer_rung_expression(
-    owned_rung ? to_string(owned_ceiling_minutes(budgets)) : "",
-    to_string(hosted_ceiling_minutes(budgets)),
-    to_string(hosted_ceiling_minutes(budgets)),
-  )
+  // The datacenter rung is an owned box and carries the owned ceiling.
+  const owned = owned_rung ? to_string(owned_ceiling_minutes(budgets)) : ""
+  const paid = to_string(hosted_ceiling_minutes(budgets))
+  return producer_rung_expression({owned: owned, datacenter: owned, vendor: paid, hosted: paid})
 }
 
 /** Ceilings of the workspace test producer, `rust-check-inputs`. */
@@ -250,7 +249,7 @@ fn producer_job_ladder(job_name: string) -> string {
     return " the reserved ${RESERVED_CLI_PRODUCER_LABEL} runners on same-repository pull requests and merge groups,"
   }
   if producer_uses_owned_pool(job_name) {
-    return " the owned ${SELFHOSTED_LINUX_BIG_POOL} pool on same-repository pull requests,"
+    return " the owned ${SELFHOSTED_LINUX_BIG_POOL} pool on same-repository pull requests, the ${DATACENTER_HOST_LABEL} runners on merge groups,"
   }
   return ""
 }
@@ -460,6 +459,8 @@ fn persistent_compile_lane_errors(
   }
   if job_name == "rust-cli" {
     errors = errors + cli_producer_reservation_errors(workflow)
+  } else if producer_uses_owned_pool(job_name) {
+    errors = errors + merge_group_datacenter_errors(workflow)
   }
   if trim(job?.env?.[RUNNER_TIER_ENV] ?? "") != producer_job_tier_expression(job_name) {
     errors = errors
