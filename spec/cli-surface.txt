@@ -1688,6 +1688,7 @@ harn serve acp
 harn serve acp --api-key
 harn serve acp --bind
 harn serve acp --cert
+harn serve acp --confine-workspace
 harn serve acp --hmac-secret
 harn serve acp --key
 harn serve acp --obs

@@ -165,8 +165,27 @@ pub(crate) async fn run_acp_server(args: &ServeAcpArgs) -> Result<(), String> {
         json_path: args.profile.json_path.clone(),
     };
     let sandbox = acp_sandbox_config(args);
+    if !args.confine_workspace.is_empty() && args.transport != AcpServeTransport::Stdio {
+        return Err(
+            "--confine-workspace confines a stdio server's own process; \
+             a WebSocket server is not supported"
+                .to_string(),
+        );
+    }
     match args.transport {
         AcpServeTransport::Stdio => {
+            if !args.confine_workspace.is_empty() {
+                let confinement = harn_serve::AcpServerConfinement {
+                    workspace_roots: args
+                        .confine_workspace
+                        .iter()
+                        .map(|root| root.display().to_string())
+                        .collect(),
+                    state_roots: Vec::new(),
+                };
+                harn_serve::confine_acp_server_process(&sandbox, &confinement)
+                    .map_err(|error| format!("--confine-workspace: {error}"))?;
+            }
             crate::acp::run_acp_server(
                 args.file.as_deref(),
                 auth_policy,

@@ -4018,6 +4018,15 @@ session must read outside its project workspace. Harn canonicalizes each path
 and adds it to the per-turn file-read policy for stdio and WebSocket ACP.
 This is additive to the existing policy; it does not enable confinement or
 change child-process permissions. Unconfined `code` mode remains unconfined.
+Pass `--confine-workspace <path>` once per workspace root to confine the stdio
+server's own process before it reads the first message. The kernel then holds
+the server, and every command it runs, to the profile a confined command gets
+for those roots: write the workspace, read the system and toolchain roots, no
+credential directories. The confinement lasts for the life of the process, and
+a `session/new` whose `cwd` is outside every root is refused with
+`outside_process_confinement`. The `initialize` response reports the state in
+`agentCapabilities._meta.harn.processConfinement`. See
+[Confining a server process](./sandboxing.md#confining-a-server-process).
 Use `--profile` / `HARN_PROFILE=1` to print one categorical timing rollup per
 executed `session/prompt`; use `--profile-json <path>` /
 `HARN_PROFILE_JSON=<path>` to append per-turn NDJSON records with

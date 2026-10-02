@@ -21,6 +21,8 @@ mod test_util;
 #[path = "../support/required_pr_e2e.rs"]
 mod required_pr_e2e;
 
+#[cfg(target_os = "macos")]
+mod acp_confinement_cli;
 mod acp_registry_manifest;
 mod acp_server_cli;
 mod agent_run_command_argv_coercion;
