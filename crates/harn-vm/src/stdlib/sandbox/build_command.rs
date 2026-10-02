@@ -28,6 +28,17 @@ pub(crate) fn build_std_command<B: SandboxBackend + ?Sized>(
     command.args(args);
     match B::prepare_std_command(program, args, &mut command, policy, profile)? {
         PrepareOutcome::Direct => Ok(command),
+        #[cfg(target_os = "linux")]
+        PrepareOutcome::BubblewrapExec {
+            wrapper,
+            args,
+            descriptors,
+        } => {
+            let mut wrapped = Command::new(wrapper);
+            wrapped.args(args);
+            descriptors.attach(&mut wrapped);
+            Ok(wrapped)
+        }
         PrepareOutcome::WrappedExec { wrapper, args } => {
             let mut wrapped = Command::new(wrapper);
             wrapped.args(args);
@@ -58,6 +69,17 @@ pub(crate) fn build_tokio_command<B: SandboxBackend + ?Sized>(
     command.args(args);
     match B::prepare_tokio_command(program, args, &mut command, policy, profile)? {
         PrepareOutcome::Direct => Ok(command),
+        #[cfg(target_os = "linux")]
+        PrepareOutcome::BubblewrapExec {
+            wrapper,
+            args,
+            descriptors,
+        } => {
+            let mut wrapped = tokio::process::Command::new(wrapper);
+            wrapped.args(args);
+            descriptors.attach_tokio(&mut wrapped);
+            Ok(wrapped)
+        }
         PrepareOutcome::WrappedExec { wrapper, args } => {
             let mut wrapped = tokio::process::Command::new(wrapper);
             wrapped.args(args);

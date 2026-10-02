@@ -39,8 +39,8 @@ impl SandboxBackend for Backend {
         "macos"
     }
 
-    fn filesystem_mechanism() -> &'static str {
-        "macos_sandbox_exec"
+    fn filesystem_mechanism() -> super::SandboxMechanism {
+        super::SandboxMechanism::MacosSandboxExec
     }
 
     fn available() -> bool {

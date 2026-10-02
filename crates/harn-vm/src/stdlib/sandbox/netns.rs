@@ -26,6 +26,9 @@ pub enum ReexecConfinement {
     BeforeExec(TransferableConfinement),
     /// The supervisor passes the ruleset to the helper without entering it.
     AfterNamespace(TransferableConfinement),
+    /// Bubblewrap installs the filter after mounts. The wrapper argv names
+    /// these pinned filter and mount descriptors, which must survive reexec.
+    Bubblewrap(super::DescriptorTransfer),
 }
 
 /// Turn a prepared profile into the helper invocation that will enter it.
@@ -160,7 +163,7 @@ pub fn decode_seccomp_hex(text: &str) -> io::Result<Vec<u8>> {
             _ => {
                 return Err(io::Error::other(
                     "transferred seccomp program is not hexadecimal",
-                ))
+                ));
             }
         }
     }

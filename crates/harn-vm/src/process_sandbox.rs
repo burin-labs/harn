@@ -19,13 +19,14 @@
 
 pub use crate::stdlib::sandbox::{
     active_backend_available, active_backend_filesystem_available,
-    active_backend_filesystem_mechanism, active_backend_name, active_workspace_process_env,
-    apply_active_rustc_wrapper_policy, check_fs_path_scope, command_output, conformance,
-    deterministic_message_locale_env, enforce_process_cwd, enforcement, host_confinement,
-    infer_process_sandbox_mechanism, is_process_sandbox_signal, process_spawn_error,
-    process_violation_error, push_process_sandbox_scope, render_policy_root, rustc_wrapper,
-    session_std_command, session_tokio_command, std_command_for, std_command_for_with_env_state,
-    tokio_command_for, workspace_local_tmpdir, FsAccess, ProcessCommandConfig,
+    active_backend_filesystem_mechanism, active_backend_mechanism, active_backend_name,
+    active_workspace_process_env, apply_active_rustc_wrapper_policy, check_fs_path_scope,
+    command_output, conformance, deterministic_message_locale_env, enforce_process_cwd,
+    enforcement, host_confinement, infer_process_sandbox_mechanism, is_process_sandbox_signal,
+    process_spawn_error, process_violation_error, push_process_sandbox_scope, render_policy_root,
+    rustc_wrapper, session_std_command, session_tokio_command, std_command_for,
+    std_command_for_with_env_state, tokio_command_for, tokio_command_for_with_env_state,
+    validate_command_environment, workspace_local_tmpdir, FsAccess, ProcessCommandConfig,
     ProcessSandboxAssessment, ProcessSandboxDenialReporting, ProcessSandboxGrants,
     ProcessSandboxMechanism, ProcessSandboxOperation, ProcessSandboxRefusal,
     ProcessSandboxReportingContext, ProcessSandboxScope, ProcessSandboxScopeGuard,
@@ -55,6 +56,46 @@ pub const NETNS_RULESET_FD_FLAG: &str = "--ruleset-fd";
 /// Flag carrying the compiled seccomp program, hex-encoded.
 pub const NETNS_SECCOMP_FLAG: &str = "--seccomp-hex";
 
+/// Inherited setup descriptor to close before an already-confined payload exec.
+pub const NETNS_CLOSE_FD_FLAG: &str = "--close-fd";
+
+/// One device source whose mounted identity must hold before payload exec.
+/// The argument contract exists on every CLI platform; Linux executes it.
+#[derive(Clone, Debug)]
+pub struct DeviceMountFinalization {
+    pub descriptor: i32,
+    pub destination: std::path::PathBuf,
+}
+
+impl std::fmt::Display for DeviceMountFinalization {
+    fn fmt(&self, out: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(out, "{}:{}", self.descriptor, self.destination.display())
+    }
+}
+
+impl std::str::FromStr for DeviceMountFinalization {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        let (descriptor, destination) = value
+            .split_once(':')
+            .ok_or("device finalization requires FD:absolute-path")?;
+        let descriptor = descriptor
+            .parse::<i32>()
+            .map_err(|_| "invalid device descriptor")?;
+        let destination = std::path::PathBuf::from(destination);
+        if descriptor < 3 || !destination.is_absolute() || value.contains('\0') {
+            return Err(
+                "device finalization requires an owned descriptor and absolute path".into(),
+            );
+        }
+        Ok(Self {
+            descriptor,
+            destination,
+        })
+    }
+}
+
 /// The hook that carries the ruleset descriptor across that `exec`, without
 /// which the helper enters no ruleset while the layer above still reports the
 /// filesystem boundary as enforced.
@@ -64,6 +105,8 @@ pub const NETNS_SECCOMP_FLAG: &str = "--seccomp-hex";
 /// name costs two lines there for no benefit to a reader.
 #[cfg(target_os = "linux")]
 pub use crate::stdlib::sandbox::linux::keep_ruleset_across_exec;
+#[cfg(target_os = "linux")]
+pub use crate::stdlib::sandbox::linux::DescriptorTransfer;
 #[cfg(target_os = "linux")]
 pub use crate::stdlib::sandbox::linux::{command_for_reexec, ReexecConfinement};
 /// Confinement an embedder builds here and enters in a process it re-execs.

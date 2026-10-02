@@ -22,10 +22,14 @@ on:
   push:
     branches: [main]
   schedule:
-    # Quiet-period backstop. Minute 43 and hour 9 are unused by the other
-    # scheduled workflows, so this does not contend with the nightly platform
-    # suites or the release warm build.
-    - cron: "43 9 * * *"
+    # Quiet-period backstop, every three hours. ci.yml's own cache writers
+    # (the shared CLI, workspace tests, and package audit lanes) no longer run
+    # on a main push the merge group already proved, so this workflow is now
+    # the main-branch writer for those keys. A run whose key already restored
+    # exactly does no compile, so the extra runs cost a few hosted minutes.
+    # Minute 43 is unused by the other scheduled workflows, so this does not
+    # contend with the nightly platform suites or the release warm build.
+    - cron: "43 */3 * * *"
   workflow_dispatch:
 
 permissions:

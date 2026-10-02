@@ -32,7 +32,7 @@ Three terms show up throughout, so it helps to pin them down first:
 Confinement then comes in two layers. Harn checks every path itself, against
 the roots in the active policy. Separately, when a script spawns a
 subprocess, the operating system confines that child using whatever mechanism
-the platform provides: Landlock on Linux, `sandbox-exec` on macOS. Windows has
+the platform provides: Landlock or bubblewrap on Linux, `sandbox-exec` on macOS. Windows has
 no OS sandbox, so a child there runs unconfined; see
 [Windows](#windows-and-other-platforms-without-a-backend).
 
@@ -194,7 +194,7 @@ A profile decides two independent questions:
   covers the `harness.fs.*` builtins scoping against `workspace_roots`
   and `read_only_roots`, plus the launch-cwd check for subprocesses. It
   is portable and deterministic, because Harn performs it itself.
-- **OS confinement** — is a platform mechanism (Linux Landlock+seccomp,
+- **OS confinement** — is a platform mechanism (Linux Landlock or bubblewrap with seccomp,
   macOS sandbox-exec) applied to spawned subprocesses? Windows has
   none. This depends on a mechanism that may be unavailable, and it is
   the only axis that can deny a child something Harn never asked about.
@@ -203,7 +203,7 @@ A profile decides two independent questions:
 |---|---|---|---|
 | `unrestricted` | skipped | skipped | only on direct OS errors |
 | `workspace_paths` | required (`workspace_roots`) | skipped | only on direct OS errors |
-| `worktree` *(default)* | required (`workspace_roots`) | best-effort | OS sandbox unavailability is logged once and ignored unless `HARN_HANDLER_SANDBOX=enforce` |
+| `worktree` *(default)* | required (`workspace_roots`) | platform-dependent | Linux refuses unusable filesystem backends; platforms without an OS backend warn unless `HARN_HANDLER_SANDBOX=enforce` |
 | `wasi` | required | not applied on the host path | testbench-only; the host spawn path is never reached |
 | `os_hardened` | required | **required** | spawn returns `tool_rejected` if the platform mechanism is missing or rejects the call, regardless of `HARN_HANDLER_SANDBOX` |
 
@@ -229,10 +229,10 @@ child request — so a lenient parent cannot weaken a child's
 `os_hardened` ask, and a child asking for `workspace_paths` cannot shed
 an OS sandbox its parent imposed.
 
-`HARN_HANDLER_SANDBOX={off,warn,enforce}` controls fallback behavior
-for the `worktree` profile. `os_hardened` ignores the env var on
-purpose: a profile that means "the OS sandbox is required" cannot be
-silently downgraded by an environment variable.
+`HARN_HANDLER_SANDBOX=off` skips OS confinement for `worktree`. On Linux,
+`warn` and `enforce` both require usable Landlock or bubblewrap confinement.
+Platforms without an OS backend warn under `warn` and refuse under `enforce`.
+`os_hardened` ignores this setting because its contract requires OS confinement.
 
 ### What each backend confines
 
@@ -252,6 +252,7 @@ the `network` ceiling. No policy term requires process confinement yet.
 | Backend | writes | reads | credential reads | network | process |
 |---|---|---|---|---|---|
 | Linux Landlock | enforced | enforced | enforced | enforced | unmeasured |
+| Linux bubblewrap | enforced | enforced | enforced | enforced | unmeasured |
 | macOS sandbox-exec | enforced | enforced | enforced | enforced | unmeasured |
 | OpenBSD unveil | unmeasured | unmeasured | unmeasured | unmeasured | unmeasured |
 | No OS sandbox | not enforced | not enforced | not enforced | not enforced | unmeasured |
@@ -629,6 +630,37 @@ small, named kernel feature, never an open-ended escape hatch.
 
 ### Linux (`crates/harn-vm/src/stdlib/sandbox/linux.rs`)
 
+Harn selects Landlock only when ABI 6 or newer supports its permission
+vocabulary and a child restriction actually denies access to the host root.
+Otherwise it probes the installed `/usr/bin/bwrap` or `/bin/bwrap` by creating
+private namespaces and checking that a known host file is hidden.
+
+Both backends use the same opened filesystem grants and credential denylist.
+Bubblewrap mounts the admitted file descriptors, so replacing a grant's path
+after preparation doesn't change its source. The process guardian carries those
+descriptors to the wrapper. Bubblewrap installs the existing seccomp filter
+after constructing the mounts and namespaces. Harn's existing pre-runtime
+helper checks each device mount against its pinned source, closes the setup
+descriptors, and executes the payload. The CLI supplies its already-admitted
+runtime path; embedders with device grants must supply
+`process_sandbox.netns_launcher_path`. Grant sets without devices execute the
+payload directly after bubblewrap installs confinement and need no helper.
+
+Linux launches that need a trusted namespace helper or bubblewrap refuse
+nonempty loader controls (`LD_*`, `GLIBC_TUNABLES`, and legacy `MALLOC_*`
+aliases) after composing the session environment,
+caller overrides, removals, and `env_clear`. Those controls can execute before
+the helper installs confinement. Ordinary payload environment grants are
+preserved; a direct Landlock-confined payload may still configure its loader.
+
+Bubblewrap supports complete read-only and writable directory grants. It
+refuses selective filesystem rights, managed proxy-only egress, and files-only
+process introspection. A run that needs a private `/proc` must explicitly grant
+process self-introspection with `--sandbox-allow-process-self-introspection`.
+The private PID namespace prevents that procfs from exposing host processes.
+An unavailable namespace facility or a failed mount stops the launch before
+the payload runs.
+
 | Capability / policy | Kernel knob | Effect |
 |---|---|---|
 | `workspace.read_text` / `workspace.list` / `workspace.exists` | Landlock LSM `LANDLOCK_ACCESS_FS_READ_FILE` + `_READ_DIR` + `_EXECUTE` | reads under `workspace_roots` and the `system_read_roots()` allowlist (`/bin`, `/lib`, `/lib64`, `/usr`, `/etc`, `/nix/store`, `/System`); at the network ceiling, exact name-service files such as `/etc/resolv.conf` are also opened before confinement so symlink targets under `/run` remain readable without granting the mutable `/run` tree |
@@ -643,10 +675,10 @@ small, named kernel feature, never an open-ended escape hatch.
 | always | seccomp-bpf default-deny allowlist omits tier-1 dangerous syscalls including `bpf`, mount/module/kexec/sysctl families, `ptrace`, `process_vm_readv`/`process_vm_writev`, `io_uring_*`, `perf_event_open`, `userfaultfd`, `fanotify_init`, and `open_by_handle_at` | unknown and dangerous syscalls fail with `EPERM` |
 | always | `prctl(PR_SET_NO_NEW_PRIVS, 1)` | no setuid escalation across `exec` |
 
-The Landlock ruleset is built lazily from `landlock_abi_version()`:
-unknown access bits are masked off so a recent userspace stays
-forward-compatible with older kernels. ABI 0 (no Landlock at all)
-falls back to the warn/enforce decision documented above.
+The Landlock ruleset is built lazily from `landlock_abi_version()`.
+Access bits are limited to the kernel's supported vocabulary. A kernel below
+the required ABI or one that cannot enforce the boundary selects bubblewrap;
+if bubblewrap cannot preserve the requested grants, the launch is refused.
 
 ### macOS (`crates/harn-vm/src/stdlib/sandbox/macos.rs`)
 
@@ -716,7 +748,7 @@ process_sandbox::{command_output, std_command_for, tokio_command_for}
   ├── if HARN_HANDLER_SANDBOX=off (Worktree only)    → direct spawn
   └── otherwise                                       → ActiveBackend
         │
-        ├── linux::Backend       (pre_exec → seccomp + Landlock)
+        ├── linux::Backend       (Landlock + seccomp, or pinned bubblewrap mounts + seccomp)
         ├── macos::Backend       (wrap with sandbox-exec)
         ├── openbsd::Backend     (pre_exec → unveil + pledge)
         └── UnconfinedBackend    (Windows and others: no OS sandbox; warn, or refuse)
@@ -766,7 +798,8 @@ The confinement record has schema `harn.process.sandbox_confinement.v1`.
 Its `backend` names the compiled backend; `mechanism` names its filesystem
 confinement mechanism. `confines_processes` reports whether that mechanism is
 available on the running host. On Linux, the backend can be available while
-Landlock is unavailable, so check `confines_processes` before promising confinement.
+both filesystem mechanisms are unavailable, so check `confines_processes`
+before promising confinement.
 
 When the mechanism is unavailable, `os_hardened_refusal` contains the exact
 structured value an `os_hardened` spawn throws under the current execution

@@ -65,14 +65,24 @@ struct Nested {
 fn run_nested(test: &str, outer_profile: impl FnOnce(&Path, &Path) -> String) -> Nested {
     let workspace = tempfile::tempdir().expect("workspace");
     let exe = std::env::current_exe().expect("test binary");
-    // Outside every root the policy writes, temp included: under the build
-    // tree, which the outer profile only reads.
-    let outside = tempfile::tempdir_in(build_root(&exe)).expect("outside");
+    // Cargo targets may be inside a granted compiler cache. Use the owning
+    // checkout's build fixtures, then prove this path is outside every grant.
+    let fixture_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.build/test-fixtures");
+    std::fs::create_dir_all(&fixture_root).expect("build fixture root");
+    let outside = tempfile::tempdir_in(&fixture_root).expect("outside");
     let workspace_path = workspace
         .path()
         .canonicalize()
         .expect("canonical workspace");
     let outside_path = outside.path().canonicalize().expect("canonical outside");
+    for root in super::writable_roots(&workspace_policy(&workspace_path)) {
+        assert!(
+            !outside_path.starts_with(&root),
+            "outside fixture {} is inside writable grant {}",
+            outside_path.display(),
+            root.display()
+        );
+    }
     let profile = outer_profile(&workspace_path, &exe);
     let output = Command::new("/usr/bin/sandbox-exec")
         .arg("-p")

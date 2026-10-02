@@ -75,13 +75,13 @@
   ],
   "harn_check_cache_writers": [
     {
-      "workflow": "ci.yml",
-      "job": "harn-audit",
+      "workflow": "harn-check-cache-refresh.yml",
+      "job": "refresh",
       "family": "audit"
     },
     {
-      "workflow": "ci.yml",
-      "job": "harn-audit",
+      "workflow": "harn-check-cache-refresh.yml",
+      "job": "refresh",
       "family": "audit-scripts"
     }
   ]

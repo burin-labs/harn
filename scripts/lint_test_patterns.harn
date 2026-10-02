@@ -229,6 +229,8 @@ const E2E_SUBPROCESS_PATHS: list<string> = [
   "crates/harn-cli/tests/harn_cli_e2e/command_probe_parent_liveness.rs",
   // Linux namespace ordering and owner-death proof runs the actual CLI.
   "crates/harn-cli/tests/harn_cli_e2e/guardian_namespace_e2e.rs",
+  // Backend selection and inherited-descriptor confinement cross real execs.
+  "crates/harn-cli/tests/harn_cli_e2e/bubblewrap_fallback_e2e.rs",
   "crates/harn-cli/tests/harn_cli_e2e/conformance_process_lifetime_e2e.rs",
   // Strictness is an exit-status contract whose text and JSON renderings must
   // stay identical to advisory checks; only the real CLI process proves all three.

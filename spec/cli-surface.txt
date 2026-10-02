@@ -959,6 +959,7 @@ harn models test --prompt
 harn models test --provider
 harn models test <positional 1>
 harn netns-launch
+harn netns-launch --close-fd
 harn netns-launch --ruleset-fd
 harn netns-launch --seccomp-hex
 harn netns-launch <positional 1>

@@ -67,7 +67,9 @@ pub fn session_tokio_command(
 }
 
 pub fn std_command_for(program: &str, args: &[String]) -> Result<Command, VmError> {
-    std_command_for_with_env_state(program, args).map(|(command, _)| command)
+    let (command, closed) = std_command_for_with_env_state(program, args)?;
+    super::validate_command_environment(&command, closed)?;
+    Ok(command)
 }
 
 /// [`std_command_for`], also reporting whether the session policy CLEARED the
@@ -77,6 +79,9 @@ pub fn std_command_for(program: &str, args: &[String]) -> Result<Command, VmErro
 /// inherited. A seam that serializes the command to spawn it in another
 /// process must carry this flag with it, or the receiving side inherits its
 /// own environment behind the explicit entries.
+/// Callers that apply overlays must validate the final command environment
+/// with that receipt before spawning; the bare constructor validates its
+/// already-composed environment before returning.
 pub fn std_command_for_with_env_state(
     program: &str,
     args: &[String],
@@ -125,6 +130,28 @@ pub fn command_for_reexec(
     use super::linux::{launcher_argv_with_ruleset, resolve_netns_launcher, ReexecConfinement};
 
     let resolved = crate::stdlib::process::resolve_program_path_for_spawn(program);
+    if let Some((policy, profile)) = active_sandbox_policy() {
+        if !super::linux::landlock_available() {
+            super::ensure_spawn_enforceable::<ActiveBackend>(&policy)?;
+            let prepared = super::linux::bwrap::prepare(&resolved, args, &policy, profile)?;
+            let super::PrepareOutcome::BubblewrapExec {
+                wrapper,
+                args,
+                descriptors,
+            } = prepared
+            else {
+                unreachable!("bubblewrap preparation always supplies a pinned launch")
+            };
+            let mut command = Command::new(wrapper);
+            command.args(args);
+            let (command, env_closed) = close_std_command_environment(command, program)?;
+            return Ok((
+                command,
+                env_closed,
+                Some(ReexecConfinement::Bubblewrap(descriptors)),
+            ));
+        }
+    }
     let mut command = Command::new(&resolved);
     command.args(args);
     let confinement = match super::linux::transferable_confinement(program)? {
@@ -153,6 +180,17 @@ pub fn tokio_command_for(
     program: &str,
     args: &[String],
 ) -> Result<tokio::process::Command, VmError> {
+    let (command, closed) = tokio_command_for_with_env_state(program, args)?;
+    super::validate_command_environment(command.as_std(), closed)?;
+    Ok(command)
+}
+
+/// The Tokio constructor with the same environment-closing receipt as the
+/// standard constructor. Validate after applying caller overlays/removals.
+pub fn tokio_command_for_with_env_state(
+    program: &str,
+    args: &[String],
+) -> Result<(tokio::process::Command, bool), VmError> {
     let resolved_program = crate::stdlib::process::resolve_program_path_for_spawn(program);
     let active = active_sandbox_policy();
     let mut command = match active.as_ref() {
@@ -165,9 +203,9 @@ pub fn tokio_command_for(
             command
         }
     };
-    close_env_for_session!(command, program);
+    let closed = close_env_for_session!(command, program);
     if let Some(proxy) = active.and_then(|(policy, _)| policy.process_network_proxy) {
         process_output::apply_managed_proxy_env_tokio(&mut command, proxy);
     }
-    Ok(command)
+    Ok((command, closed))
 }

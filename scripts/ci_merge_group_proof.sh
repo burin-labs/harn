@@ -2,7 +2,7 @@
 set -euo pipefail
 
 usage() {
-  echo "usage: $0 <owner/repository> <workflow-file> <commit-sha> [--require-job <job-name>] [--allow-pending-job <job-name>]" >&2
+  echo "usage: $0 <owner/repository> <workflow-file> <commit-sha> [--require-job <job-name>] [--allow-pending-job <job-name>] [--run-output <file>]" >&2
 }
 
 fail_closed() {
@@ -26,6 +26,11 @@ required_job=""
 # re-run heavy lanes, and the pending job's check lands on this same commit
 # either way. Release certification never does, so its proof stays strict.
 pending_job=""
+# The push router consumes the proven run's artifacts instead of rebuilding
+# them, so it needs to know which run proved the commit. On proof, the run's
+# id and attempt are appended to this file as `run_id=` and `run_attempt=`
+# lines (GitHub step-output form). Nothing is written when the proof fails.
+run_output=""
 while [[ $# -gt 0 ]]; do
   if [[ $# -lt 2 || -z "$2" || "$2" == *$'\n'* ]]; then
     usage
@@ -34,6 +39,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --require-job) [[ -z "$required_job" ]] || { usage; exit 2; }; required_job=$2 ;;
     --allow-pending-job) [[ -z "$pending_job" ]] || { usage; exit 2; }; pending_job=$2 ;;
+    --run-output) [[ -z "$run_output" ]] || { usage; exit 2; }; run_output=$2 ;;
     *) usage; exit 2 ;;
   esac
   shift 2
@@ -110,16 +116,17 @@ workflow_path=".github/workflows/${workflow_file}"
         and .path == $path
         and .event == "merge_group"
         and (.id | type == "number")
+        and (.run_attempt | type == "number")
         and (
           (.status == "completed" and .conclusion == "success")
             or ($pending_job != "" and (.status == "in_progress" or .status == "queued"))
         )
     )
-    | .id
+    | "\(.id) \(.run_attempt)"
   ' "$runs_response" > "$run_ids"
 
-while IFS= read -r run_id; do
-  [[ "$run_id" =~ ^[0-9]+$ ]] || continue
+while read -r run_id run_attempt; do
+  [[ "$run_id" =~ ^[0-9]+$ && "$run_attempt" =~ ^[1-9][0-9]*$ ]] || continue
   jobs_response="$tmp_dir/jobs-${run_id}.json"
   if ! github_api_get "$jobs_response" --get \
     --data-urlencode "filter=latest" \
@@ -148,7 +155,7 @@ while IFS= read -r run_id; do
     --arg required_job "$required_job" --arg pending_job "$pending_job" '
     . as $response
     | (($contract[0].merge_group_jobs | map(.name))
-        + ["Check repository policies", "Windows cross-compile check", "Write CI timing report"]
+        + ["Build shared Harn CLI", "Windows cross-compile check", "Write CI timing report"]
         + (if $required_job == "" then [] else [$required_job] end))
       as $required
     | ([$response.jobs[] | select(.status == "completed"
@@ -168,6 +175,9 @@ while IFS= read -r run_id; do
           )
       )
   ' "$jobs_response" >/dev/null; then
+    if [[ -n "$run_output" ]]; then
+      printf 'run_id=%s\nrun_attempt=%s\n' "$run_id" "$run_attempt" >> "$run_output"
+    fi
     printf 'true\n'
     exit 0
   fi

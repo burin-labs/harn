@@ -204,6 +204,55 @@ pipeline test_minimal_pr_capacity_policy_and_negative_controls(harness: Harness,
       "ci.yml:audit-scripts must run on Rust-changing main pushes only",
     ),
   )
+  // A main push the merge group already proved sets `rust` false. Main-only
+  // lanes gated on it would never run again, so each one reads `rust_paths`.
+  let heavy_gated_policy = ci
+  heavy_gated_policy.jobs["audit-scripts"].if = "github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.changes.outputs.rust == 'true' && needs.rust-artifacts-ready.result == 'success'"
+  assert(
+    minimal_pr_capacity_errors(heavy_gated_policy, publish).contains(
+      "ci.yml:audit-scripts must run on Rust-changing main pushes only",
+    ),
+  )
+  let heavy_gated_ready = ci
+  heavy_gated_ready.jobs["rust-artifacts-ready"].if = "needs.changes.outputs.rust == 'true'"
+  assert(
+    minimal_pr_capacity_errors(heavy_gated_ready, publish).contains(
+      "ci.yml:rust-artifacts-ready must run whenever a main-only lane needs the shared CLI",
+    ),
+  )
+  let heavy_gated_size = ci
+  heavy_gated_size.jobs["binary-size-signal"].if = "needs.changes.outputs.rust == 'true' && github.event_name == 'push'"
+  assert(
+    minimal_pr_capacity_errors(heavy_gated_size, publish).contains(
+      "ci.yml:binary-size-signal must record main's baseline on every Rust-changing main push",
+    ),
+  )
+  let heavy_gated_status = ci
+  heavy_gated_status.jobs["ci-status"].steps[0].env.RUST_PATHS_SELECTED = "$"
+    + "{{ needs.changes.outputs.rust }}"
+  assert(
+    minimal_pr_capacity_errors(heavy_gated_status, publish).contains(
+      "ci.yml:ci-status must require repository policies on every Rust-changing main push, proven or not",
+    ),
+  )
+  // A proven push built nothing, so downloading from this run would fail.
+  for consumer in ["audit-scripts", "binary-size-signal"] {
+    let own_run_download = ci
+    own_run_download.jobs[consumer].steps = own_run_download.jobs[consumer].steps.map(
+      { step ->
+        if contains(to_string(step?.uses ?? ""), "download-artifact-with-retry") {
+          return {...step, with: {...step.with, "run-id": ""}}
+        }
+        return step
+      },
+    )
+      .to_list()
+    assert(
+      minimal_pr_capacity_errors(own_run_download, publish).contains(
+        "ci.yml:${consumer} must download the shared CLI from the run the artifact barrier names",
+      ),
+    )
+  }
   // The Windows cross-compile check is required on every merge-group
   // candidate: a main-only job, a job queued behind the Linux lanes, or an
   // aggregate that tolerates a merge-group skip each reopen the gap.

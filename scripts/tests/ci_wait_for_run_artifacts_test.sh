@@ -95,7 +95,9 @@ run_case() {
   rm -f "$fixture_root/artifacts" "$fixture_root/jobs" "$fixture_root/sleeps"
   result=0
   PATH="$fixture_root:$PATH" FIXTURE_ROOT="$fixture_root" FIXTURE_SCENARIO="$scenario" \
-    GITHUB_REPOSITORY=burin-labs/harn GITHUB_RUN_ID=123 GITHUB_RUN_ATTEMPT=2 \
+    GITHUB_REPOSITORY=burin-labs/harn GITHUB_RUN_ID="${CURRENT_RUN_ID:-123}" GITHUB_RUN_ATTEMPT=2 \
+    HARN_EXT_ARTIFACT_RUN_ID="${SOURCE_RUN_ID:-}" \
+    HARN_EXT_ARTIFACT_RUN_ATTEMPT="${SOURCE_RUN_ATTEMPT:-}" \
     HARN_EXT_ARTIFACT_PRODUCER_JOB='Rust workspace tests' \
     HARN_EXT_ARTIFACT_WAIT_MAX_ATTEMPTS="${WAIT_MAX_ATTEMPTS:-3}" \
     HARN_EXT_ARTIFACT_WAIT_INTERVAL_SECONDS="${WAIT_INTERVAL:-0}" \
@@ -215,4 +217,22 @@ if [[ $(paste -sd' ' "$fixture_root/sleeps") != "1 2" ]]; then
   exit 1
 fi
 
-echo 'ci_wait_for_run_artifacts_test: 26 scenarios passed'
+# A proven main push reads the merge group's run, not its own. The fixture
+# serves only run 123 attempt 2, so reading this run (999) would fail.
+CURRENT_RUN_ID=999 SOURCE_RUN_ID=123 SOURCE_RUN_ATTEMPT=2 run_case early harn-cli.tar.zst
+assert_result 0 1 1
+assert_output stdout 'reading artifacts from workflow run 123 attempt 2'
+assert_output stdout 'run artifacts ready: harn-cli.tar.zst'
+CURRENT_RUN_ID=999 run_case early harn-cli.tar.zst
+assert_result 1 0 0
+assert_output stderr "producer 'Rust workspace tests' state unmeasured after 3 polls"
+
+# The source run and its attempt come from one proof: one without the other
+# is refused before any read.
+CURRENT_RUN_ID=999 SOURCE_RUN_ID=123 run_case early harn-cli.tar.zst
+assert_result 2 0 0
+assert_output stderr 'HARN_EXT_ARTIFACT_RUN_ATTEMPT must accompany HARN_EXT_ARTIFACT_RUN_ID'
+CURRENT_RUN_ID=999 SOURCE_RUN_ID=12x SOURCE_RUN_ATTEMPT=2 run_case early harn-cli.tar.zst
+assert_result 2 0 0
+
+echo 'ci_wait_for_run_artifacts_test: 30 scenarios passed'

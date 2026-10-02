@@ -4,9 +4,8 @@
 //! [`tokio_command_for`], and the `enforce_*` helpers. A per-OS
 //! [`SandboxBackend`] attaches the active capability ceiling:
 //!
-//! * **Linux** ([`linux::Backend`]): Landlock LSM filesystem scoping
-//!   plus a default-deny seccomp-bpf syscall allowlist installed via
-//!   `pre_exec`, gated behind `PR_SET_NO_NEW_PRIVS`.
+//! * **Linux** ([`linux::Backend`]): verified Landlock or bubblewrap filesystem
+//!   scoping with default-deny seccomp, gated by `PR_SET_NO_NEW_PRIVS`.
 //! * **macOS** ([`macos::Backend`]): a `sandbox-exec` profile rendered
 //!   from the active capability set wraps the spawn.
 //! * **OpenBSD** ([`openbsd::Backend`]): pledge/unveil applied via
@@ -19,8 +18,8 @@
 //!
 //! * `Unrestricted` — bypass everything (path enforcement and OS
 //!   confinement).
-//! * `Worktree` — workspace path enforcement; OS confinement is
-//!   best-effort (warn-and-skip when unavailable). Honors
+//! * `Worktree` — workspace path enforcement; Linux requires a usable OS
+//!   boundary, while platforms without a backend warn. Honors
 //!   `HARN_HANDLER_SANDBOX={off,warn,enforce}`.
 //! * `OsHardened` — workspace path enforcement; OS confinement is
 //!   required. Spawns fail with `tool_rejected` if the platform
@@ -62,7 +61,7 @@ pub(crate) use build_command::{build_std_command, build_tokio_command};
 mod command_for;
 pub use command_for::{
     session_std_command, session_tokio_command, std_command_for, std_command_for_with_env_state,
-    tokio_command_for,
+    tokio_command_for, tokio_command_for_with_env_state,
 };
 pub mod enforcement;
 use enforcement::ensure_spawn_enforceable;
@@ -74,6 +73,8 @@ mod git_config;
 pub(crate) use git_config::process_sandbox_package_manager_config_read_roots;
 mod handler_env;
 mod introspection;
+mod launch_environment;
+pub use launch_environment::validate_command_environment;
 #[cfg(target_os = "linux")]
 pub(crate) mod linux;
 mod locked_append;
@@ -90,7 +91,8 @@ mod scope_memo;
 use backend::ActiveBackend;
 pub use backend::{
     active_backend_available, active_backend_filesystem_available,
-    active_backend_filesystem_mechanism, active_backend_name, conformance,
+    active_backend_filesystem_mechanism, active_backend_mechanism, active_backend_name,
+    conformance,
 };
 pub(crate) use backend::{PrepareOutcome, SandboxBackend};
 use process_config::apply_rustc_wrapper_decision;
@@ -125,8 +127,6 @@ mod replace;
 /// other backends put theirs in the spawn's argv, which survives on its own.
 #[cfg(target_os = "linux")]
 pub use linux::{decode_seccomp_hex, transferable_confinement, TransferableConfinement};
-#[cfg(target_os = "linux")]
-pub(crate) use refusal::mechanism_skipped_warning;
 pub(crate) use refusal::unavailable;
 pub use refusal::{
     infer_process_sandbox_mechanism, is_process_sandbox_signal, process_violation_error,

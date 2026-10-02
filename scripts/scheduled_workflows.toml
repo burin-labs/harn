@@ -59,6 +59,14 @@ cadence_reason = "Daily gives touched tests repeated trials while bounding runne
 job_ids = ["flake-rerun"]
 
 [[workflow]]
+path = ".github/workflows/harn-check-cache-refresh.yml"
+name = "Refresh Harn check cache"
+claim = "The audit lanes' Harn check cache stays written from main, whether or not main pushes run those lanes"
+crons = ["27 */3 * * *"]
+cadence_reason = "The refresh normally rides every push to main; the three-hourly run is the backstop when a push lands before its CLI exists, so entries never lag main by more than a few hours."
+job_ids = ["refresh"]
+
+[[workflow]]
 path = ".github/workflows/install-smoke.yml"
 name = "Install channels smoke"
 claim = "Public installation channels still install a runnable Harn CLI"
@@ -118,8 +126,8 @@ job_ids = ["cancel-obsolete-runs", "check"]
 path = ".github/workflows/rust-cache-refresh.yml"
 name = "Refresh Rust cache"
 claim = "The shared Linux compile caches stay written to the persistent ref"
-crons = ["43 9 * * *"]
-cadence_reason = "The refresh normally rides every push to main; the daily run is the backstop for a quiet period, since an unwritten entry is evicted and every branch after it compiles cold."
+crons = ["43 */3 * * *"]
+cadence_reason = "The refresh rides every push to main and is the main-branch writer for these keys, since ci.yml's compile lanes skip pushes the merge group already proved; the three-hourly run is the quiet-period backstop, since an unwritten entry is evicted and every branch after it compiles cold. A run whose key already restored compiles nothing."
 job_ids = ["rust-cache-refresh"]
 
 [[workflow]]

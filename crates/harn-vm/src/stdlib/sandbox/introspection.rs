@@ -1,7 +1,7 @@
 use harn_builtin_meta::CapabilityId;
 
 use super::{
-    active_backend_available, active_backend_name, ActiveBackend, SandboxBackend, SandboxMechanism,
+    active_backend_available, active_backend_name, ActiveBackend, SandboxBackend,
     SandboxMechanismAvailability, SandboxMechanismUnavailable,
 };
 use crate::orchestration::{current_execution_policy, CapabilityPolicy, SandboxProfile};
@@ -101,16 +101,12 @@ pub fn host_confinement() -> VmValue {
 }
 
 fn confinement_for<B: SandboxBackend>(policy: &CapabilityPolicy) -> VmValue {
-    let mechanism_name = B::filesystem_mechanism();
+    let mechanism = B::filesystem_mechanism();
+    let mechanism_name = mechanism.as_str();
     let confines = B::filesystem_available();
     let refusal = if confines {
         VmValue::Nil
     } else {
-        let mechanism = SandboxMechanism::ALL
-            .iter()
-            .copied()
-            .find(|mechanism| mechanism.as_str() == mechanism_name)
-            .unwrap_or(SandboxMechanism::Unconfined);
         // Spawn checks the enforcement row before preparing the backend.
         // Preserve its policy-dependent dimensions on unconfined platforms.
         super::enforcement::refusal_for_mechanism(mechanism_name, policy)
