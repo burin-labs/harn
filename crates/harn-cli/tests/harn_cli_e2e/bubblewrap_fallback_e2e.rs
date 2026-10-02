@@ -7,10 +7,18 @@ use crate::test_util::process::harn_e2e_command as cli_command;
 
 fn harn_e2e_command() -> Command {
     let mut command = cli_command();
-    // Cargo injects its test-artifact search path into the runner. This CLI
-    // fixture has no dependency on it; explicit and inherited loader probes
-    // below supply their own controls through the actual launch environment.
-    command.env_remove("LD_LIBRARY_PATH");
+    // The launched CLI must not inherit loader controls from whatever runs the
+    // suite: Cargo injects its test-artifact search path, and some CI hosts
+    // export allocator settings such as `MALLOC_ARENA_MAX` to every job. The
+    // trusted bubblewrap setup refuses an inherited control by design, so an
+    // ambient one turns every fallback proof here into that refusal. Explicit
+    // and inherited loader probes below set their own controls on the command
+    // after this, which takes precedence over the removal.
+    for (name, _) in std::env::vars_os() {
+        if harn_vm::security::is_trusted_setup_control(&name) {
+            command.env_remove(name);
+        }
+    }
     command
 }
 
