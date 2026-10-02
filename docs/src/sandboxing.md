@@ -642,7 +642,9 @@ descriptors to the wrapper. Bubblewrap installs the existing seccomp filter
 after constructing the mounts and namespaces. Harn's existing pre-runtime
 helper checks each device mount against its pinned source, closes the setup
 descriptors, and executes the payload. The CLI supplies its already-admitted
-runtime path; embedders must supply `process_sandbox.netns_launcher_path`.
+runtime path; embedders with device grants must supply
+`process_sandbox.netns_launcher_path`. Grant sets without devices execute the
+payload directly after bubblewrap installs confinement and need no helper.
 
 Linux launches that need a trusted namespace helper or bubblewrap refuse
 nonempty `LD_*` loader controls after composing the session environment,
