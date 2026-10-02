@@ -78,7 +78,8 @@ impl From<EnvironmentPolicyArg> for EnvironmentPolicyKind {
 pub(crate) struct EnvironmentPolicyConfig {
     kind: EnvironmentPolicyKind,
     grants: Vec<GrantSpec>,
-    host_inference_boundary: Result<Option<harn_vm::llm::api::InferenceBoundary>, String>,
+    // Launch reports the canonical sanitized error; its source text is unused.
+    host_inference_boundary: Result<Option<harn_vm::llm::api::InferenceBoundary>, ()>,
 }
 
 impl Default for EnvironmentPolicyConfig {
@@ -86,7 +87,8 @@ impl Default for EnvironmentPolicyConfig {
         Self {
             kind: EnvironmentPolicyKind::Inherited,
             grants: Vec::new(),
-            host_inference_boundary: harn_vm::llm::api::InferenceBoundary::capture_process(),
+            host_inference_boundary: harn_vm::llm::api::InferenceBoundary::capture_process()
+                .map_err(|_| ()),
         }
     }
 }
@@ -116,7 +118,8 @@ impl EnvironmentPolicyConfig {
         Ok(Self {
             kind,
             grants,
-            host_inference_boundary: harn_vm::llm::api::InferenceBoundary::capture_process(),
+            host_inference_boundary: harn_vm::llm::api::InferenceBoundary::capture_process()
+                .map_err(|_| ()),
         })
     }
 
