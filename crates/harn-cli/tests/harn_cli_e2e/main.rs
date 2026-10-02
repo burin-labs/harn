@@ -111,6 +111,7 @@ mod runs_export_training_cli;
 mod runs_view_cli;
 mod scaffold_dispatch;
 mod scan_dispatch;
+mod secret_absence;
 #[cfg(unix)]
 mod sidecar_version_cli;
 mod skills_cli;
