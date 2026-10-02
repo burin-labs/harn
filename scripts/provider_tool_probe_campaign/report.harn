@@ -267,6 +267,7 @@ pub fn __claim_controls(
   let measured_supported = 0
   let measured_unsupported = 0
   let unmeasured = 0
+  let excluded_by_account_policy = 0
   for cell in cells {
     if cell.runner != "provider_option_probe" {
       continue
@@ -277,6 +278,8 @@ pub fn __claim_controls(
       measured_supported = measured_supported + 1
     } else if observed == false {
       measured_unsupported = measured_unsupported + 1
+    } else if live && cell.observed?.option_probe?.probe?.verdict == "excluded_by_account_policy" {
+      excluded_by_account_policy = excluded_by_account_policy + 1
     } else if live {
       unmeasured = unmeasured + 1
     }
@@ -294,6 +297,7 @@ pub fn __claim_controls(
   return {
     status: status,
     selected_count: selected,
+    excluded_by_account_policy_count: excluded_by_account_policy,
     measured_supported_count: measured_supported,
     measured_unsupported_count: measured_unsupported,
     unmeasured_count: unmeasured,

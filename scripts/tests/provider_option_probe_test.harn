@@ -2,7 +2,9 @@ import { assert_eq } from "std/testing"
 import {
   provider_option_probe_catalog_claim,
   provider_option_probe_classify,
+  provider_option_probe_confirm_rejection,
   provider_option_probe_report,
+  provider_option_probe_retry_result,
 } from "../../crates/harn-stdlib/src/stdlib/cli/providers/option_probe"
 
 @test
@@ -108,4 +110,174 @@ pipeline test_provider_option_probe_diff_cannot_turn_no_measurement_into_green(
   assert_eq(unmeasured.diff.status, "unmeasured")
   assert_eq(unmeasured.probe.request_count, 0)
   assert_eq(unmeasured.probe.measured_count, 0)
+  const absent = provider_option_probe_report(
+    "anthropic",
+    "claude-sonnet-5",
+    "anthropic:default",
+    "temperature",
+    true,
+    true,
+    {verdict: "accepted", measured: false, request_count: 1},
+  )
+  assert_eq(absent.diff.status, "unmeasured")
+  const no_request = provider_option_probe_report(
+    "anthropic",
+    "claude-sonnet-5",
+    "anthropic:default",
+    "temperature",
+    true,
+    true,
+    {verdict: "accepted", measured: true, request_count: 0},
+  )
+  assert_eq(no_request.diff.status, "unmeasured")
+  assert_eq(no_request.probe.measured_count, 0)
+}
+
+// Error texts below are copied from provider contract probe run 37030330916.
+@test
+pipeline test_provider_option_probe_reads_openrouter_parameter_refusals_as_rejections() {
+  const no_endpoint = provider_option_probe_classify(
+    Err(
+      {
+        origin: "provider",
+        kind: "terminal",
+        reason: "invalid_request",
+        message:
+          "openrouter HTTP 404 Not Found [invalid_request]: No endpoints found that can handle the requested parameters.",
+      },
+    ),
+  )
+  assert_eq(no_endpoint.verdict, "rejected")
+  assert_eq(no_endpoint.measured, true)
+  const filtered = provider_option_probe_classify(
+    Err(
+      {
+        origin: "provider",
+        kind: "terminal",
+        reason: "model_unavailable",
+        message:
+          "openrouter HTTP 404 Not Found [model_unavailable]: No endpoints found for openai/gpt-oss-120b. Every candidate endpoint was removed during routing: Filter by Parameters removed groq, cerebras/fp16; Filter by Fallback removed together.",
+      },
+    ),
+  )
+  assert_eq(filtered.verdict, "inconclusive")
+  assert_eq(filtered.measured, false)
+  // Negative control: an unrelated model_unavailable stays unmeasured.
+  const retired = provider_option_probe_classify(
+    Err(
+      {
+        origin: "provider",
+        kind: "terminal",
+        reason: "model_unavailable",
+        message: "deepinfra HTTP 404 Not Found [model_unavailable]: The model does not exist",
+      },
+    ),
+  )
+  assert_eq(retired.verdict, "inconclusive")
+  const policy = provider_option_probe_classify(
+    Err(
+      {
+        origin: "provider",
+        kind: "terminal",
+        reason: "model_unavailable",
+        message:
+          "openrouter HTTP 404 Not Found [model_unavailable]: 0 endpoints out of 1 requested are available matching your guardrail restrictions and data policy.",
+      },
+    ),
+  )
+  assert_eq(policy.verdict, "excluded_by_account_policy")
+  assert_eq(policy.measured, false)
+  assert_eq(policy.failure_class, "account_policy")
+  const unrelated_policy = provider_option_probe_classify(
+    Err(
+      {
+        origin: "provider",
+        kind: "terminal",
+        reason: "model_unavailable",
+        message: "another-provider HTTP 404 Not Found: guardrail restrictions and data policy",
+      },
+    ),
+  )
+  assert_eq(unrelated_policy.verdict, "inconclusive")
+  const report = provider_option_probe_report(
+    "openrouter",
+    "nvidia/nemotron-3-super-120b-a12b:free",
+    "openai:default",
+    "temperature",
+    true,
+    true,
+    policy,
+  )
+  assert_eq(report.diff.observed_supported, nil)
+  assert_eq(report.probe.measured_count, 0)
+}
+
+@test
+pipeline test_provider_option_probe_needs_a_passing_control_to_blame_the_option() {
+  const reasoning_refusal =
+    "openrouter HTTP 400 Bad Request [invalid_request]: Reasoning is mandatory for this endpoint and cannot be disabled."
+  const rejected = {
+    verdict: "rejected",
+    measured: true,
+    request_count: 1,
+    reason: "invalid_request",
+    error: reasoning_refusal,
+  }
+  const confirmed = provider_option_probe_confirm_rejection(
+    rejected,
+    {verdict: "accepted", measured: true, request_count: 1},
+  )
+  assert_eq(confirmed.verdict, "rejected")
+  assert_eq(confirmed.request_count, 2)
+  const absent_control = provider_option_probe_confirm_rejection(
+    rejected,
+    {verdict: "accepted", measured: false, request_count: 0},
+  )
+  assert_eq(absent_control.verdict, "inconclusive")
+  assert_eq(absent_control.failure_class, "control_failed")
+  const unattributed = provider_option_probe_confirm_rejection(
+    rejected,
+    {verdict: "rejected", measured: true, request_count: 1, error: reasoning_refusal},
+  )
+  assert_eq(unattributed.verdict, "inconclusive")
+  assert_eq(unattributed.measured, false)
+  assert_eq(unattributed.failure_class, "control_failed")
+  assert_eq(unattributed.request_count, 2)
+  const report = provider_option_probe_report(
+    "openrouter",
+    "moonshotai/kimi-k2.7-code",
+    "openai:default",
+    "temperature",
+    false,
+    true,
+    unattributed,
+  )
+  assert_eq(report.diff.status, "unmeasured")
+}
+
+@test
+pipeline test_provider_option_probe_retains_retry_and_control_accounting() {
+  const timeout = provider_option_probe_classify(
+    Err({origin: "provider", kind: "transient", reason: "timeout", message: "timed out"}),
+  )
+  const rejection = provider_option_probe_classify(
+    Err({origin: "provider", kind: "terminal", reason: "invalid_request", message: "unsupported"}),
+  )
+  const retried = provider_option_probe_retry_result(timeout, rejection)
+  const control = provider_option_probe_classify(
+    Ok({usage: {input_tokens: 4, output_tokens: 1, cost_usd: 0.002}}),
+  )
+  const confirmed = provider_option_probe_confirm_rejection(retried, control)
+  assert_eq(confirmed.verdict, "rejected")
+  assert_eq(confirmed.request_count, 3)
+  assert_eq(confirmed.retry_count, 1)
+  assert_eq(confirmed.observed_cost_count, 2)
+  assert_eq(confirmed.observed_usage_count, 1)
+  assert_eq(confirmed.cost_usd, 0.002)
+  assert_eq(confirmed.input_tokens, 4)
+  assert_eq(confirmed.output_tokens, 1)
+  const unknown = provider_option_probe_confirm_rejection(rejection, timeout)
+  assert_eq(unknown.measured, false)
+  assert_eq(unknown.request_count, 2)
+  assert_eq(unknown.observed_cost_count, 1)
 }

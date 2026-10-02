@@ -175,7 +175,7 @@ jobs:
           catalog_drift_count="$(jq -er '.summary.fail | select(type == "number" and . >= 0 and floor == .)' "$report")"
           echo "catalog_drift_count=$catalog_drift_count" >> "$GITHUB_OUTPUT"
           jq -r '
-            "cells=\(.cell_count) pass=\(.summary.pass) fail=\(.summary.fail) error=\(.summary.error) skip=\(.summary.skip) pending=\(.summary.planned) controls=\(.claim_controls.status) supported=\(.claim_controls.measured_supported_count) unsupported=\(.claim_controls.measured_unsupported_count) unmeasured=\(.claim_controls.unmeasured_count) missing_credentials=\((.auth_readiness.missing_env_candidates_by_provider // {}) | [.[] | join("|")] | if length == 0 then "none" else join(",") end)"
+            "cells=\(.cell_count) pass=\(.summary.pass) fail=\(.summary.fail) error=\(.summary.error) skip=\(.summary.skip) pending=\(.summary.planned) controls=\(.claim_controls.status) supported=\(.claim_controls.measured_supported_count) unsupported=\(.claim_controls.measured_unsupported_count) excluded_by_account_policy=\(.claim_controls.excluded_by_account_policy_count) unmeasured=\(.claim_controls.unmeasured_count) missing_credentials=\((.auth_readiness.missing_env_candidates_by_provider // {}) | [.[] | join("|")] | if length == 0 then "none" else join(",") end)"
           ' "$report" | tee -a "$GITHUB_STEP_SUMMARY"
           exit "$status"
 

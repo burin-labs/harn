@@ -135,25 +135,25 @@ pub fn provider_tool_probe_campaign_option_probe_telemetry(
 ) -> dict {
   const attempt = report.probe.attempt
   const cost = attempt.cost_usd
+  const observed_cost_count = attempt.observed_cost_count
+    ?? if cost == nil {
+      0
+    } else {
+      1
+    }
   return {
     request_attempt_count: report.probe.request_count,
-    retry_count: 0,
-    retry_accounting: "provider option-probe makes exactly one physical request and does not retry",
-    observed_usage_count: if attempt.input_tokens != nil || attempt.output_tokens != nil {
-      1
-    } else {
-      0
-    },
-    observed_cost_count: if cost == nil {
-      0
-    } else {
-      1
-    },
-    unpriced_case_count: if report.probe.request_count > 0 && cost == nil {
-      1
-    } else {
-      0
-    },
+    retry_count: attempt.retry_count ?? 0,
+    retry_accounting:
+      "provider option-probe includes at most one timeout retry and one rejection control in its physical request count",
+    observed_usage_count: attempt.observed_usage_count
+      ?? if attempt.input_tokens != nil || attempt.output_tokens != nil {
+        1
+      } else {
+        0
+      },
+    observed_cost_count: observed_cost_count,
+    unpriced_case_count: report.probe.request_count - observed_cost_count,
     input_tokens: attempt.input_tokens ?? 0,
     output_tokens: attempt.output_tokens ?? 0,
     actual_usd: cost ?? 0.0,
@@ -173,12 +173,19 @@ pub fn provider_tool_probe_campaign_option_probe_cell(
   const receipt_exit_matches = (diff_status == "match" && exit_code == 0)
     || (diff_status == "drift" && exit_code == 1)
     || (diff_status == "unmeasured" && exit_code == 2)
+  // The probing account's privacy settings, not the route, refused the call.
+  // Report it as a skip with that reason so it neither reads as catalog
+  // drift nor as a broken probe.
+  const account_policy = diff_status == "unmeasured"
+    && report.probe.verdict == "excluded_by_account_policy"
   const status = if !receipt_exit_matches {
     "error"
   } else if diff_status == "match" {
     "pass"
   } else if diff_status == "drift" {
     "fail"
+  } else if account_policy {
+    "skip"
   } else {
     "error"
   }
@@ -188,6 +195,11 @@ pub fn provider_tool_probe_campaign_option_probe_cell(
     "provider observation matched the endpoint catalog claim"
   } else if diff_status == "drift" {
     "provider observation contradicted the endpoint catalog claim"
+  } else if account_policy {
+    "the probing account's provider data policy excludes this endpoint"
+  } else if (report.probe.attempt.failure_class ?? "")
+    == "control_failed" {
+    "the provider rejected the request without the option too, so the rejection is not evidence about the option"
   } else {
     "the request did not produce provider evidence"
   }

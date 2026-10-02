@@ -100,6 +100,7 @@ pub type ProviderOptionClaimControlStatus = "not_selected" | "dry_run" | "comple
 pub type ProviderOptionClaimControls = {
   status: ProviderOptionClaimControlStatus,
   selected_count: int,
+  excluded_by_account_policy_count: int,
   measured_supported_count: int,
   measured_unsupported_count: int,
   unmeasured_count: int,
