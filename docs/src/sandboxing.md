@@ -653,7 +653,9 @@ What children get differs by platform:
   When a command's policy denies something the server's profile allows (for
   example, network), Harn refuses the command rather than run it with less
   confinement than it asked for. The `process_sandbox_nested` event records
-  each case.
+  each case. Narrowing beyond those probed axes is enforced only by Harn's
+  in-process checks; recovering per-command profiles needs a spawn broker
+  outside the confined process (harn#9215).
 - **Linux** confines with Landlock, whose domains stack, so a command's own
   ruleset still narrows it further. Landlock confines only the calling thread
   and threads it starts later, so Harn refuses to confine a process that
@@ -662,6 +664,11 @@ What children get differs by platform:
   refuses today; an embedder can confine before it starts any thread. Seccomp isn't applied to the server,
   because the child syscall allowlist isn't sized for a server runtime.
 - **Other platforms** refuse.
+
+The profile allows every Mach service lookup, as the child profile does.
+A process confined this way can still reach system services that an App
+Sandbox profile would deny, so it isn't a drop-in equivalent of App Sandbox
+on that axis.
 
 Only a process dedicated to serving may confine itself. An in-process
 (channel) ACP server shares its host's process, and confining it would
