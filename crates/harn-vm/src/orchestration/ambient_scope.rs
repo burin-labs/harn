@@ -71,7 +71,7 @@ use subtask_state::SubtaskAmbientState;
 pub(crate) struct AmbientExecutionScope {
     execution: Vec<CapabilityPolicy>,
     approval: Vec<RunApprovalPolicy>,
-    prepared_approval: Option<RunApprovalPolicy>,
+    prepared_approval: Option<std::sync::Arc<RunApprovalPolicy>>,
     operator_approval_grants: Vec<OperatorApprovalGrant>,
     command: Vec<CommandPolicy>,
     permissions: Vec<DynamicPermissionPolicy>,
@@ -173,7 +173,7 @@ fn clone_via_swap<T: Clone + Default>(swap: impl Fn(T) -> T) -> T {
 
 impl AmbientExecutionScope {
     pub(crate) fn with_prepared_approval(mut self, policy: RunApprovalPolicy) -> Self {
-        self.prepared_approval = Some(policy);
+        self.prepared_approval = Some(std::sync::Arc::new(policy));
         self
     }
 

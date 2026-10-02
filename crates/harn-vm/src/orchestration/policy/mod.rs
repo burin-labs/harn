@@ -93,7 +93,7 @@ pub use types::{
 thread_local! {
     static EXECUTION_POLICY_STACK: RefCell<Vec<CapabilityPolicy>> = const { RefCell::new(Vec::new()) };
     static EXECUTION_APPROVAL_POLICY_STACK: RefCell<Vec<RunApprovalPolicy>> = const { RefCell::new(Vec::new()) };
-    static PREPARED_APPROVAL_POLICY: RefCell<Option<RunApprovalPolicy>> = const { RefCell::new(None) };
+    static PREPARED_APPROVAL_POLICY: RefCell<Option<std::sync::Arc<RunApprovalPolicy>>> = const { RefCell::new(None) };
     static TRUSTED_BRIDGE_CALL_DEPTH: RefCell<usize> = const { RefCell::new(0) };
 }
 
@@ -147,8 +147,8 @@ pub(crate) fn swap_approval_policy_stack(next: Vec<RunApprovalPolicy>) -> Vec<Ru
 }
 
 pub(crate) fn swap_prepared_approval_policy(
-    next: Option<RunApprovalPolicy>,
-) -> Option<RunApprovalPolicy> {
+    next: Option<std::sync::Arc<RunApprovalPolicy>>,
+) -> Option<std::sync::Arc<RunApprovalPolicy>> {
     PREPARED_APPROVAL_POLICY.with(|slot| std::mem::replace(&mut *slot.borrow_mut(), next))
 }
 
