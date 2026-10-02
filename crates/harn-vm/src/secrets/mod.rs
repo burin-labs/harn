@@ -382,6 +382,77 @@ pub struct SecretLeaseGrant {
     pub expires_at_unix_ms: i64,
 }
 
+/// One provider a chain asked for a secret, and where it looked.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct ConsultedSecretProvider {
+    /// Provider kind as named in `HARN_SECRET_PROVIDERS` (`env`, `keyring`, ...).
+    pub provider: String,
+    /// Where that provider looked, e.g. the environment variable name or the
+    /// keyring service and account. Never contains secret material.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub locator: Option<String>,
+}
+
+/// Why a provider from the default chain was not consulted.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum SecretProviderExclusion {
+    /// An explicit provider-chain variable left this provider out.
+    ChainOverride { variable: String, value: String },
+}
+
+impl fmt::Display for SecretProviderExclusion {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::ChainOverride { variable, value } => {
+                write!(f, "disabled by {variable}={value}")
+            }
+        }
+    }
+}
+
+/// A default-chain provider that this chain does not consult.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct ExcludedSecretProvider {
+    pub provider: String,
+    pub reason: SecretProviderExclusion,
+}
+
+/// Every provider in a chain reported the secret absent.
+///
+/// Carries the consulted providers and the default providers this chain left
+/// out, so "missing" can be told apart from "stored in a provider this process
+/// was configured not to read".
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct SecretAbsence {
+    pub id: SecretId,
+    pub consulted: Vec<ConsultedSecretProvider>,
+    #[serde(default)]
+    pub excluded: Vec<ExcludedSecretProvider>,
+}
+
+impl fmt::Display for SecretAbsence {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "secret '{}' not found in providers: ", self.id)?;
+        if self.consulted.is_empty() {
+            write!(f, "(none)")?;
+        }
+        for (index, consulted) in self.consulted.iter().enumerate() {
+            if index > 0 {
+                write!(f, ", ")?;
+            }
+            write!(f, "{}", consulted.provider)?;
+            if let Some(locator) = &consulted.locator {
+                write!(f, " ({locator})")?;
+            }
+        }
+        for excluded in &self.excluded {
+            write!(f, "; {} {}", excluded.provider, excluded.reason)?;
+        }
+        Ok(())
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum SecretError {
@@ -389,6 +460,8 @@ pub enum SecretError {
         provider: String,
         id: SecretId,
     },
+    /// A provider chain consulted every provider and none held the secret.
+    NotFoundInChain(SecretAbsence),
     Unsupported {
         provider: String,
         operation: &'static str,
@@ -427,7 +500,7 @@ impl SecretError {
     /// absence only when every provider in it reported absence.
     pub fn is_not_found(&self) -> bool {
         match self {
-            Self::NotFound { .. } => true,
+            Self::NotFound { .. } | Self::NotFoundInChain(_) => true,
             Self::All(errors) => !errors.is_empty() && errors.iter().all(Self::is_not_found),
             _ => false,
         }
@@ -451,6 +524,7 @@ impl fmt::Display for SecretError {
             Self::NotFound { provider, id } => {
                 write!(f, "{provider}: secret '{id}' not found")
             }
+            Self::NotFoundInChain(absence) => write!(f, "{absence}"),
             Self::Unsupported {
                 provider,
                 operation,
@@ -697,6 +771,13 @@ pub trait SecretProvider: Send + Sync {
 
     fn namespace(&self) -> &str;
     fn supports_versions(&self) -> bool;
+
+    /// Where this provider looks for `id` — an environment variable name, a
+    /// keyring service and account, a file path. Diagnostics only; it never
+    /// contains secret material.
+    fn locator(&self, _id: &SecretId) -> Option<String> {
+        None
+    }
 }
 
 pub fn ensure_scoped_secret_access_allowed(
@@ -728,6 +809,7 @@ pub fn is_runtime_reserved_secret_namespace(namespace: &str) -> bool {
 pub struct ChainSecretProvider {
     namespace: String,
     providers: Vec<Arc<dyn SecretProvider>>,
+    excluded: Vec<ExcludedSecretProvider>,
 }
 
 impl ChainSecretProvider {
@@ -735,11 +817,49 @@ impl ChainSecretProvider {
         Self {
             namespace: namespace.into(),
             providers,
+            excluded: Vec::new(),
         }
+    }
+
+    /// Record default-chain providers this chain deliberately leaves out, so
+    /// an absence names them instead of reading as a definitive "missing".
+    pub fn with_excluded(mut self, excluded: Vec<ExcludedSecretProvider>) -> Self {
+        self.excluded = excluded;
+        self
     }
 
     pub fn providers(&self) -> &[Arc<dyn SecretProvider>] {
         &self.providers
+    }
+
+    pub fn excluded(&self) -> &[ExcludedSecretProvider] {
+        &self.excluded
+    }
+
+    /// Fold per-provider failures into one error. When every provider reported
+    /// absence the result is a typed [`SecretAbsence`] naming what was
+    /// consulted and what was excluded; any other failure keeps every error.
+    fn chain_failure(&self, id: &SecretId, errors: Vec<SecretError>) -> SecretError {
+        if errors.len() != self.providers.len() || !errors.iter().all(SecretError::is_not_found) {
+            return SecretError::All(errors);
+        }
+        let consulted = self
+            .providers
+            .iter()
+            .zip(&errors)
+            .map(|(provider, error)| ConsultedSecretProvider {
+                provider: match error {
+                    SecretError::NotFound { provider, .. } => provider.clone(),
+                    _ => provider.namespace().to_string(),
+                },
+                locator: provider.locator(id),
+            })
+            .collect();
+        SecretError::NotFoundInChain(SecretAbsence {
+            id: id.clone(),
+            consulted,
+            excluded: self.excluded.clone(),
+        })
     }
 }
 
@@ -760,7 +880,7 @@ impl SecretProvider for ChainSecretProvider {
             }
         }
 
-        Err(SecretError::All(errors))
+        Err(self.chain_failure(id, errors))
     }
 
     async fn contains(&self, id: &SecretId) -> Result<bool, SecretError> {
@@ -941,28 +1061,88 @@ pub fn configured_secret_chain() -> Result<ChainSecretProvider, SecretError> {
     configured_default_chain(configured_secret_namespace())
 }
 
+/// The provider chain this process is configured to consult, before any
+/// provider is constructed. One owner for the parse so the runtime chain,
+/// `harn doctor`, and startup banners report the same list.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct SecretChainPlan {
+    /// Provider kinds in consultation order.
+    pub providers: Vec<String>,
+    /// Default-chain providers the configuration leaves out.
+    pub excluded: Vec<ExcludedSecretProvider>,
+    /// The raw `HARN_SECRET_PROVIDERS` value when it is set.
+    pub override_value: Option<String>,
+}
+
+impl SecretChainPlan {
+    /// Plan for an explicit chain value; `None` means the default chain.
+    pub fn from_value(value: Option<&str>) -> Self {
+        let raw = value.unwrap_or(DEFAULT_SECRET_PROVIDER_CHAIN);
+        let providers = raw
+            .split(',')
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+            .map(str::to_string)
+            .collect::<Vec<_>>();
+        let excluded = match value {
+            Some(value) => DEFAULT_SECRET_PROVIDER_CHAIN
+                .split(',')
+                .filter(|default| !providers.iter().any(|name| name == default))
+                .map(|default| ExcludedSecretProvider {
+                    provider: default.to_string(),
+                    reason: SecretProviderExclusion::ChainOverride {
+                        variable: SECRET_PROVIDER_CHAIN_ENV.to_string(),
+                        value: value.to_string(),
+                    },
+                })
+                .collect(),
+            None => Vec::new(),
+        };
+        Self {
+            providers,
+            excluded,
+            override_value: value.map(str::to_string),
+        }
+    }
+
+    /// Plan for this process's `HARN_SECRET_PROVIDERS`.
+    pub fn configured() -> Self {
+        Self::from_value(std::env::var(SECRET_PROVIDER_CHAIN_ENV).ok().as_deref())
+    }
+
+    /// `env -> keyring`, plus each excluded default provider and why.
+    pub fn display(&self) -> String {
+        let mut rendered = if self.providers.is_empty() {
+            "(none)".to_string()
+        } else {
+            self.providers.join(" -> ")
+        };
+        for excluded in &self.excluded {
+            rendered.push_str(&format!("; {} {}", excluded.provider, excluded.reason));
+        }
+        rendered
+    }
+}
+
 pub fn configured_default_chain(
     namespace: impl Into<String>,
 ) -> Result<ChainSecretProvider, SecretError> {
     let namespace = namespace.into();
-    let configured = std::env::var(SECRET_PROVIDER_CHAIN_ENV)
-        .unwrap_or_else(|_| DEFAULT_SECRET_PROVIDER_CHAIN.to_string());
+    let plan = SecretChainPlan::configured();
     let mut providers: Vec<Arc<dyn SecretProvider>> = Vec::new();
 
-    for raw_name in configured.split(',') {
-        let provider_name = raw_name.trim();
-        if provider_name.is_empty() {
-            continue;
-        }
-        match provider_name {
+    for provider_name in &plan.providers {
+        match provider_name.as_str() {
             "env" => providers.push(Arc::new(EnvSecretProvider::new(namespace.clone()))),
             "keyring" => providers.push(Arc::new(KeyringSecretProvider::new(namespace.clone()))),
             "file" => {
                 let path = std::env::var_os(SECRET_FILE_PATH_ENV)
                     .filter(|path| !path.is_empty())
-                    .ok_or_else(|| SecretError::InvalidConfig(format!(
-                        "the file secret provider requires {SECRET_FILE_PATH_ENV}"
-                    )))?;
+                    .ok_or_else(|| {
+                        SecretError::InvalidConfig(format!(
+                            "the file secret provider requires {SECRET_FILE_PATH_ENV}"
+                        ))
+                    })?;
                 providers.push(Arc::new(FileSecretProvider::new(path)?));
             }
             other => {
@@ -973,7 +1153,7 @@ pub fn configured_default_chain(
         }
     }
 
-    Ok(ChainSecretProvider::new(namespace, providers))
+    Ok(ChainSecretProvider::new(namespace, providers).with_excluded(plan.excluded))
 }
 
 pub(crate) fn emit_secret_access_event(provider: &str, id: &SecretId) {
@@ -1180,6 +1360,99 @@ mod tests {
             }
             other => panic!("expected aggregated errors, got {other:?}"),
         }
+    }
+
+    #[tokio::test]
+    async fn chain_absence_is_typed_and_names_consulted_and_excluded_providers() {
+        let id = SecretId::new("google_workspace", "oauth-token");
+        let plan = SecretChainPlan::from_value(Some("env"));
+        let chain = ChainSecretProvider::new(
+            "harn.test",
+            vec![Arc::new(EnvSecretProvider::new("harn.test"))],
+        )
+        .with_excluded(plan.excluded);
+
+        let error = chain.get(&id).await.expect_err("nothing is stored");
+        assert!(error.is_not_found());
+        let SecretError::NotFoundInChain(absence) = &error else {
+            panic!("expected a typed chain absence, got {error:?}");
+        };
+        assert_eq!(
+            absence.consulted,
+            vec![ConsultedSecretProvider {
+                provider: "env".to_string(),
+                locator: Some("HARN_SECRET_GOOGLE_WORKSPACE_OAUTH_TOKEN".to_string()),
+            }]
+        );
+        assert_eq!(
+            absence.excluded,
+            vec![ExcludedSecretProvider {
+                provider: "keyring".to_string(),
+                reason: SecretProviderExclusion::ChainOverride {
+                    variable: SECRET_PROVIDER_CHAIN_ENV.to_string(),
+                    value: "env".to_string(),
+                },
+            }]
+        );
+        assert_eq!(
+            error.to_string(),
+            "secret 'google_workspace/oauth-token' not found in providers: \
+             env (HARN_SECRET_GOOGLE_WORKSPACE_OAUTH_TOKEN); \
+             keyring disabled by HARN_SECRET_PROVIDERS=env"
+        );
+    }
+
+    #[tokio::test]
+    async fn chain_keeps_every_error_when_any_provider_failed_for_another_reason() {
+        let id = SecretId::new("harn.test", "flaky");
+        let chain = ChainSecretProvider::new(
+            "harn.test",
+            vec![
+                Arc::new(FakeProvider::new(
+                    "first",
+                    vec![Err(SecretError::NotFound {
+                        provider: "first".to_string(),
+                        id: id.clone(),
+                    })],
+                )),
+                Arc::new(FakeProvider::new(
+                    "second",
+                    vec![Err(SecretError::Backend {
+                        provider: "second".to_string(),
+                        message: "locked".to_string(),
+                    })],
+                )),
+            ],
+        );
+        let error = chain.get(&id).await.expect_err("chain should fail");
+        assert!(matches!(error, SecretError::All(_)));
+        assert!(!error.is_not_found());
+    }
+
+    #[test]
+    fn chain_plan_reports_default_providers_an_override_leaves_out() {
+        let default = SecretChainPlan::from_value(None);
+        assert_eq!(default.providers, vec!["env", "keyring"]);
+        assert!(default.excluded.is_empty());
+        assert_eq!(default.display(), "env -> keyring");
+
+        let explicit_default = SecretChainPlan::from_value(Some("env, keyring"));
+        assert!(explicit_default.excluded.is_empty());
+
+        let env_only = SecretChainPlan::from_value(Some("env"));
+        assert_eq!(env_only.providers, vec!["env"]);
+        assert_eq!(
+            env_only.display(),
+            "env; keyring disabled by HARN_SECRET_PROVIDERS=env"
+        );
+
+        let file_only = SecretChainPlan::from_value(Some("file"));
+        let excluded = file_only
+            .excluded
+            .iter()
+            .map(|entry| entry.provider.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(excluded, vec!["env", "keyring"]);
     }
 
     #[tokio::test]

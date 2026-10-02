@@ -9,7 +9,7 @@ use harn_vm::orchestration::SandboxProfile;
 use harn_vm::runtime_paths;
 use harn_vm::secrets::{
     configured_default_chain, configured_secret_namespace, EnvSecretProvider,
-    KeyringSecretProvider, SecretId, DEFAULT_SECRET_PROVIDER_CHAIN, SECRET_PROVIDER_CHAIN_ENV,
+    KeyringSecretProvider, SecretChainPlan, SecretId, SECRET_FILE_PATH_ENV,
 };
 use serde::Serialize;
 
@@ -1049,8 +1049,7 @@ fn check_provider_selection() -> Vec<DoctorCheck> {
 
 fn check_secret_providers() -> Vec<DoctorCheck> {
     let namespace = configured_secret_namespace();
-    let configured = std::env::var(SECRET_PROVIDER_CHAIN_ENV)
-        .unwrap_or_else(|_| DEFAULT_SECRET_PROVIDER_CHAIN.to_string());
+    let plan = SecretChainPlan::configured();
     let mut checks = Vec::new();
 
     match configured_default_chain(namespace.clone()) {
@@ -1064,7 +1063,11 @@ fn check_secret_providers() -> Vec<DoctorCheck> {
             label: "secret providers".to_string(),
             detail: format!(
                 "{} (namespace {})",
-                configured.replace(',', " -> "),
+                if plan.providers.is_empty() {
+                    "(none)".to_string()
+                } else {
+                    plan.providers.join(" -> ")
+                },
                 namespace
             ),
             ..Default::default()
@@ -1081,12 +1084,32 @@ fn check_secret_providers() -> Vec<DoctorCheck> {
         }
     }
 
-    for provider in configured
-        .split(',')
-        .map(str::trim)
-        .filter(|provider| !provider.is_empty())
-    {
+    // A default provider left out of an explicit chain is invisible at read
+    // time: a credential stored there reads as missing. Say so here.
+    for excluded in &plan.excluded {
+        checks.push(DoctorCheck {
+            id: String::new(),
+            status: DoctorStatus::Warn,
+            label: format!("secret:{}", excluded.provider),
+            detail: format!(
+                "not consulted: {}; secrets stored there read as missing",
+                excluded.reason
+            ),
+            ..Default::default()
+        });
+    }
+
+    for provider in plan.providers.iter().map(String::as_str) {
         match provider {
+            "file" => checks.push(DoctorCheck {
+                id: String::new(),
+                status: DoctorStatus::Ok,
+                label: "secret:file".to_string(),
+                detail: std::env::var(SECRET_FILE_PATH_ENV)
+                    .map(|path| format!("reads {path}"))
+                    .unwrap_or_else(|_| format!("reads the path in {SECRET_FILE_PATH_ENV}")),
+                ..Default::default()
+            }),
             "env" => {
                 let env_provider = EnvSecretProvider::new(namespace.clone());
                 let sample = env_provider.env_var_name(&SecretId::new("sample", "token"));
