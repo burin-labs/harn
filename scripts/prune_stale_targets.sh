@@ -271,6 +271,58 @@ storage_roots() {
   printf '%s/harn/dev-setup\n' "${XDG_CACHE_HOME:-$HOME/.cache}"
 }
 
+# One run at a time per host. The daily job and a disk-pressure trigger can
+# start minutes apart, and two sweeps over one root each read back the other's
+# removals as failures. The lock is a directory beside the success receipt
+# (mkdir is atomic), holding the owner's pid and start time. A run that finds a
+# live holder reports `status=skipped` and exits 0: nothing went wrong, another
+# run is doing this work. A holder whose pid is gone, or that has held the lock
+# past HARN_TARGET_GC_LOCK_STALE_SECS (default 6h), is stale and is replaced.
+run_lock="${receipt_root}/prune-stale-targets.lock"
+run_lock_held=0
+release_run_lock() {
+  [ "$run_lock_held" -eq 1 ] || return 0
+  rm -f "$run_lock/owner"
+  rmdir "$run_lock" 2>/dev/null || true
+  run_lock_held=0
+}
+acquire_run_lock() {
+  local stale_secs="${HARN_TARGET_GC_LOCK_STALE_SECS:-21600}" holder_pid holder_epoch now attempt
+  case "$stale_secs" in
+    ''|*[!0-9]*) echo "HARN_TARGET_GC_LOCK_STALE_SECS must be a non-negative integer: $stale_secs" >&2; exit 2 ;;
+  esac
+  mkdir -p "$receipt_root"
+  for attempt in 1 2; do
+    if mkdir "$run_lock" 2>/dev/null; then
+      printf '%s %s\n' "$$" "$(date +%s)" > "$run_lock/owner"
+      run_lock_held=1
+      trap release_run_lock EXIT
+      return 0
+    fi
+    holder_pid=""; holder_epoch=""
+    if [ -f "$run_lock/owner" ]; then
+      read -r holder_pid holder_epoch < "$run_lock/owner" || true
+    fi
+    # A lock whose owner file is not written yet belongs to a run that is
+    # starting this instant; age it by the directory itself.
+    case "$holder_epoch" in
+      ''|*[!0-9]*) holder_epoch="$(file_mtime_epoch "$run_lock" 2>/dev/null || date +%s)" ;;
+    esac
+    now="$(date +%s)"
+    if [ "$attempt" -eq 1 ] && {
+      { [ -n "$holder_pid" ] && ! kill -0 "$holder_pid" 2>/dev/null; } \
+        || [ $((now - holder_epoch)) -gt "$stale_secs" ]; }; then
+      echo "harn-target GC: replacing stale run lock (holder_pid=${holder_pid:-unknown} age_secs=$((now - holder_epoch)))"
+      rm -f "$run_lock/owner"
+      rmdir "$run_lock" 2>/dev/null || true
+      continue
+    fi
+    echo "harn-target GC: policy=$gc_policy_version status=skipped reason=another-run-active holder_pid=${holder_pid:-unknown} age_secs=$((now - holder_epoch)) scanned=0 kept=0 removed=0 reclaimed_bytes=0 (lock=$run_lock)"
+    exit 0
+  done
+}
+acquire_run_lock
+
 target_roots=()
 while IFS= read -r storage_root; do
   target_root="${storage_root}/harn-target"
@@ -469,7 +521,7 @@ warm_file="$(mktemp)"
 evictable_file="$(mktemp)"
 # Print the summary from the EXIT trap so no stray failure can ever make the
 # GC die silently again.
-trap 'rm -f "$keep_file" "$release_keep_file" "$warm_file" "$evictable_file"; print_summary' EXIT
+trap 'rm -f "$keep_file" "$release_keep_file" "$warm_file" "$evictable_file"; print_summary; release_run_lock' EXIT
 
 live_worktrees() {
   discover_repo_roots | while read -r repo; do

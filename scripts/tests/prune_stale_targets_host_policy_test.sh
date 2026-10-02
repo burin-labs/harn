@@ -132,6 +132,64 @@ HARN_TARGET_GC_MAX_BYTES=1073741824 HARN_TARGET_GC_KEEP_RECENT=5 \
 grep -Fq "keep_recent=5 max_idle_secs=259200 max_bytes=1073741824 max_bytes_source=env" "$override" \
   || fail "explicit settings did not override the host policy" "$override"
 
+# 5. One run at a time. A daily run and a disk-pressure run can overlap; the
+#    second must report itself skipped and exit 0, not sweep the same root and
+#    fail its own read-back. A stale lock must not block collection forever.
+lock="$storage/prune-stale-targets.lock"
+[[ -e "$lock" ]] && fail "a completed run left its run lock behind" "$host_run"
+add_stale_entry() {
+  git -C "$repos/main" worktree add -q "$repos/$1" -b "$1"
+  mkdir -p "$targets/${repos_leaf}-$1/debug"
+  touch -t 201801010000 "$targets/${repos_leaf}-$1/debug" "$targets/${repos_leaf}-$1"
+}
+add_stale_entry stale-d
+
+# A live holder: the second run skips, removes nothing, and leaves the lock.
+sleep 600 >/dev/null 2>&1 &
+holder="$!"
+live_pids+=("$holder")
+mkdir "$lock"
+printf '%s %s\n' "$holder" "$(date +%s)" > "$lock/owner"
+skipped="$tmp_root/skipped.txt"
+run_gc --host-maintenance >"$skipped" 2>&1 \
+  || fail "a run that found another run active did not exit 0" "$skipped"
+grep -Eq "^harn-target GC: .*status=skipped reason=another-run-active holder_pid=$holder .*removed=0 " "$skipped" \
+  || fail "the overlapping run did not report itself skipped" "$skipped"
+grep -Eq 'status=(complete|partial|incomplete)' "$skipped" \
+  && fail "the overlapping run swept the root anyway" "$skipped"
+[[ -d "$targets/${repos_leaf}-stale-d" ]] || fail "the skipped run removed an entry" "$skipped"
+[[ "$(cat "$lock/owner")" == "$holder "* ]] || fail "the skipped run took or dropped the live lock" "$skipped"
+
+# A holder whose process is gone: the lock is replaced and the run does its work.
+kill "$holder" 2>/dev/null || true
+wait "$holder" 2>/dev/null || true
+dead_lock="$tmp_root/dead-lock.txt"
+run_gc --host-maintenance >"$dead_lock" 2>&1 \
+  || fail "a run behind a dead holder's lock failed" "$dead_lock"
+grep -Fq "replacing stale run lock (holder_pid=$holder" "$dead_lock" \
+  || fail "a dead holder's lock was not reported as stale" "$dead_lock"
+grep -Fq "removing cold cache: ${repos_leaf}-stale-d" "$dead_lock" \
+  || fail "the run behind a dead holder's lock did not collect" "$dead_lock"
+[[ -e "$lock" ]] && fail "the run that replaced a stale lock did not release it" "$dead_lock"
+
+# A live holder past the stale timeout is also replaced: a wedged run must not
+# block every later one.
+add_stale_entry stale-e
+sleep 600 >/dev/null 2>&1 &
+wedged="$!"
+live_pids+=("$wedged")
+mkdir "$lock"
+printf '%s %s\n' "$wedged" "1577836800" > "$lock/owner"
+wedged_out="$tmp_root/wedged.txt"
+HARN_TARGET_GC_LOCK_STALE_SECS=3600 run_gc --host-maintenance >"$wedged_out" 2>&1 \
+  || fail "a run behind a wedged holder's lock failed" "$wedged_out"
+grep -Fq "replacing stale run lock (holder_pid=$wedged" "$wedged_out" \
+  || fail "a lock held past the stale timeout was not replaced" "$wedged_out"
+grep -Fq "removing cold cache: ${repos_leaf}-stale-e" "$wedged_out" \
+  || fail "the run behind a wedged holder's lock did not collect" "$wedged_out"
+
+echo "--- overlapping run (skipped) ---"
+cat "$skipped"
 echo "--- setup defaults on a small host (the observed failure) ---"
 cat "$setup_defaults"
 echo "--- host maintenance policy ---"
