@@ -217,9 +217,10 @@ separators collapse.
 
 The environment provider is a read-only override within a chain. A write
 through the chain (`harness.secrets.write`, `std/oauth` secrets storage) goes
-to the first provider that persists, such as `keyring` or `file`. If that
-provider fails, the write fails. It never falls back to a variable that
-disappears when the process exits. The write receipt's `provider` field names
+to the persistent providers, such as `keyring` or `file`, in chain order. The
+first one that accepts the value stores it. If every persistent provider
+refuses, the write fails. It never falls back to a variable that disappears
+when the process exits. The write receipt's `provider` field names
 the backend that stored the value. Only a chain with no persistent provider,
 such as `HARN_SECRET_PROVIDERS=env`, writes to the process environment, and
 its receipt says `env`.
