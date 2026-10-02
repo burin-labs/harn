@@ -162,6 +162,10 @@ fn __missing_tool_call_evaluate(
     {
       intended: boolean(
         harness.fs.render_prompt("std/llm/prompts/missing_tool_call_classifier.harn.prompt", {}),
+        {
+          true: harness.fs.render_prompt("std/llm/prompts/missing_tool_call_intended.harn.prompt", {}),
+          false: harness.fs.render_prompt("std/llm/prompts/missing_tool_call_not_intended.harn.prompt", {}),
+        },
       ),
       tool: choice(
         harness.fs.render_prompt("std/llm/prompts/missing_tool_call_target.harn.prompt", {}),
