@@ -4,9 +4,8 @@
 //! [`tokio_command_for`], and the `enforce_*` helpers. A per-OS
 //! [`SandboxBackend`] attaches the active capability ceiling:
 //!
-//! * **Linux** ([`linux::Backend`]): Landlock LSM filesystem scoping
-//!   plus a default-deny seccomp-bpf syscall allowlist installed via
-//!   `pre_exec`, gated behind `PR_SET_NO_NEW_PRIVS`.
+//! * **Linux** ([`linux::Backend`]): verified Landlock or bubblewrap filesystem
+//!   scoping with default-deny seccomp, gated by `PR_SET_NO_NEW_PRIVS`.
 //! * **macOS** ([`macos::Backend`]): a `sandbox-exec` profile rendered
 //!   from the active capability set wraps the spawn.
 //! * **OpenBSD** ([`openbsd::Backend`]): pledge/unveil applied via
@@ -19,8 +18,8 @@
 //!
 //! * `Unrestricted` — bypass everything (path enforcement and OS
 //!   confinement).
-//! * `Worktree` — workspace path enforcement; OS confinement is
-//!   best-effort (warn-and-skip when unavailable). Honors
+//! * `Worktree` — workspace path enforcement; Linux requires a usable OS
+//!   boundary, while platforms without a backend warn. Honors
 //!   `HARN_HANDLER_SANDBOX={off,warn,enforce}`.
 //! * `OsHardened` — workspace path enforcement; OS confinement is
 //!   required. Spawns fail with `tool_rejected` if the platform

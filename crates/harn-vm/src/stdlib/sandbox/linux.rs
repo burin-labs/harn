@@ -16,11 +16,8 @@ use seccompiler::{
 };
 
 use super::{
-    policy_allows_capability, policy_allows_child_writes, policy_allows_network,
-    process_sandbox_developer_toolchain_read_roots,
-    process_sandbox_package_manager_config_read_roots, process_sandbox_policy_read_roots,
-    process_sandbox_policy_write_roots, process_sandbox_presets, process_sandbox_readonly_roots,
-    process_sandbox_roots, sandbox_rejection, PrepareOutcome, SandboxBackend,
+    policy_allows_capability, policy_allows_network, process_sandbox_presets, sandbox_rejection,
+    PrepareOutcome, SandboxBackend,
 };
 use crate::orchestration::{CapabilityPolicy, ProcessSandboxPreset, SandboxProfile};
 use crate::value::VmError;
@@ -33,6 +30,9 @@ use crate::process_sandbox::DeviceMountFinalization;
 pub use descriptors::DescriptorTransfer;
 #[path = "linux_bwrap.rs"]
 pub(super) mod bwrap;
+#[path = "linux_filesystem.rs"]
+mod filesystem;
+use filesystem::filesystem_profile;
 
 impl SandboxBackend for Backend {
     fn name() -> &'static str {
@@ -449,169 +449,6 @@ fn landlock_profile(
         handled_access_fs,
         ProcessFilesystemScope::Host,
     )?;
-    Ok(profile)
-}
-
-/// Both filesystem renderers consume this one normalized, opened grant set.
-/// Credential subtraction and optional-root handling cannot drift by backend.
-fn filesystem_profile(
-    program: &str,
-    policy: &CapabilityPolicy,
-    handled_access_fs: u64,
-    process_scope: ProcessFilesystemScope,
-) -> Result<FilesystemProfile, VmError> {
-    let mut profile = FilesystemProfile {
-        rules: Vec::new(),
-        symlinks: std::collections::BTreeMap::new(),
-        handled_access_fs,
-        read_deny_roots: super::process_sandbox_read_deny_roots(policy),
-    };
-    for (path, access) in standard_device_rules() {
-        push_rule(&mut profile, path, access, true)?;
-    }
-    for path in system_read_roots() {
-        push_rule(
-            &mut profile,
-            path,
-            LANDLOCK_ACCESS_FS_READ_FILE | LANDLOCK_ACCESS_FS_READ_DIR | LANDLOCK_ACCESS_FS_EXECUTE,
-            true,
-        )?;
-    }
-    for path in network_name_service_read_roots(policy) {
-        // `/etc/resolv.conf` is commonly a symlink into `/run` on hosted
-        // Linux. Landlock checks the resolved inode, so the broad `/etc` rule
-        // above does not cover that target. Open each exact host file before
-        // confinement and grant its canonical inode without exposing `/run`.
-        push_rule(&mut profile, path, LANDLOCK_ACCESS_FS_READ_FILE, true)?;
-    }
-    if policy.process_sandbox.allow_process_self_introspection {
-        // The grant rides on the same containment the file-read grant below
-        // requires, and refuses rather than widens when it is missing. A rule
-        // below procfs cannot be narrowed to this process, so on a host that
-        // lets a task inspect its neighbours the grant would hand the child
-        // every process of its uid instead of its own. That is a different
-        // grant from the one the field describes, so it is not issued.
-        if matches!(process_scope, ProcessFilesystemScope::Host)
-            && !proc_runtime_reads_are_contained()
-        {
-            return Err(sandbox_rejection(
-                "process self-introspection needs a kernel that keeps a sandboxed task from inspecting its neighbours; this host permits it, so the grant would widen past the process it names"
-                    .to_string(),
-            ));
-        }
-        // Directory reads below procfs, which the file-only grant below
-        // deliberately withholds. A managed runtime that identifies itself by
-        // enumerating `/proc/self/task` cannot start without this, and it
-        // fails inside a static initializer, so the child reports a build
-        // engine error rather than anything resembling a denial.
-        //
-        // The rule names `/proc` and not `/proc/self` because Landlock
-        // resolves a rule to an inode: `/proc/self` is this child's own
-        // PID directory, and the compiler drivers and shell scripts it spawns
-        // are different processes whose own directories the rule would not
-        // cover. Granting the parent is the only shape that reaches them.
-        push_rule(
-            &mut profile,
-            PathBuf::from("/proc"),
-            LANDLOCK_ACCESS_FS_READ_FILE | LANDLOCK_ACCESS_FS_READ_DIR,
-            true,
-        )?;
-    } else if proc_runtime_reads_are_contained()
-        || matches!(process_scope, ProcessFilesystemScope::PrivatePidNamespace)
-    {
-        // Some language runtimes (notably Swift on Linux) discover argv by
-        // reading their own memory map. A rule for `/proc/self/maps` cannot
-        // cover grandchildren: Landlock resolves it to the immediate child's
-        // PID-specific inode, while compiler drivers and shell scripts spawn
-        // fresh processes. Grant file reads below procfs only when Yama keeps
-        // a sandboxed descendant from reading its parent or sibling process
-        // state. READ_DIR remains denied, so procfs cannot be enumerated.
-        push_rule(
-            &mut profile,
-            PathBuf::from("/proc"),
-            LANDLOCK_ACCESS_FS_READ_FILE,
-            true,
-        )?;
-    }
-    // Naming an absolute executable is explicit authority to read and execute
-    // that file, even when it lives outside the workspace and standard system
-    // roots. This is common for verified CI/release artifacts under
-    // `$RUNNER_TEMP`. Grant only the selected file, not its parent directory.
-    let program_path = std::path::Path::new(program);
-    if program_path.is_absolute() {
-        push_rule(
-            &mut profile,
-            program_path.to_path_buf(),
-            LANDLOCK_ACCESS_FS_READ_FILE | LANDLOCK_ACCESS_FS_EXECUTE,
-            true,
-        )?;
-    }
-    for root in process_sandbox_developer_toolchain_read_roots(policy) {
-        push_rule(&mut profile, root, read_only_access(), true)?;
-    }
-    for root in developer_toolchain_system_read_roots(policy) {
-        push_rule(&mut profile, root, read_only_access(), true)?;
-    }
-    // Through `push_rule`, so the credential denylist is subtracted from these
-    // exactly as from every other grant.
-    for grant in super::read_roots::path_grants::process_sandbox_path_entry_grants(policy) {
-        push_rule(&mut profile, grant.root, read_only_access(), true)?;
-    }
-    let workspace_access = workspace_access(policy);
-    for root in process_sandbox_roots(policy) {
-        push_rule(&mut profile, root, workspace_access, false)?;
-    }
-    for root in process_sandbox_readonly_roots(policy) {
-        push_rule(&mut profile, root, read_only_access(), false)?;
-    }
-    for root in process_sandbox_policy_read_roots(policy) {
-        push_rule(&mut profile, root, read_only_access(), false)?;
-    }
-    for root in process_sandbox_package_manager_config_read_roots(policy) {
-        push_rule(&mut profile, root, read_only_access(), true)?;
-    }
-    // JVM/iOS toolchain caches (Gradle/Maven/Kotlin-Native/Xcode/CocoaPods).
-    // Grant write when the policy allows workspace writes so a sandboxed build
-    // can populate its caches; otherwise read-only so dependency resolution
-    // still works. These roots are optional — they are skipped when absent.
-    let toolchain_cache_roots = super::process_sandbox_developer_toolchain_cache_roots(policy);
-    let toolchain_cache_access = if policy_allows_child_writes(policy) {
-        workspace_access
-    } else {
-        read_only_access()
-    };
-    for root in toolchain_cache_roots {
-        push_rule(&mut profile, root, toolchain_cache_access, true)?;
-    }
-    if policy_allows_child_writes(policy) {
-        for root in process_sandbox_policy_write_roots(policy) {
-            push_rule(&mut profile, root, workspace_access, false)?;
-        }
-    }
-    // The path half of the grant. seccomp decides that the child may create a
-    // Unix socket at all; this decides where it may put one. A socket file
-    // outside every named root is refused even though the syscall was
-    // admitted, which is what makes the roots mean something rather than
-    // decorate the policy. It is installed whether or not the policy also
-    // permits networking: the network arm widens the syscall half, and it
-    // holds no filesystem authority, so tying this rule to the serve-only
-    // case left a root outside every writable root unable to take a socket
-    // file on exactly the policy that was otherwise wider.
-    if !policy.process_sandbox.unix_socket_roots.is_empty() {
-        for root in super::process_sandbox_unix_socket_roots(policy) {
-            push_rule(
-                &mut profile,
-                root,
-                LANDLOCK_ACCESS_FS_MAKE_SOCK
-                    | LANDLOCK_ACCESS_FS_READ_FILE
-                    | LANDLOCK_ACCESS_FS_READ_DIR
-                    | LANDLOCK_ACCESS_FS_WRITE_FILE
-                    | LANDLOCK_ACCESS_FS_MAKE_DIR
-                    | LANDLOCK_ACCESS_FS_REMOVE_FILE,
-                true,
-            )?;
-        }
-    }
     Ok(profile)
 }
 

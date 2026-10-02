@@ -2,12 +2,9 @@
 //!
 //! Four concerns live here:
 //!
-//!   * **Content provenance / taint** — a per-result [`TaintRecord`] tags
-//!     output that crossed a trust boundary (an external MCP server, or a
-//!     `Fetch`-kind tool reaching the open internet). The agent loop records
-//!     these on the session ledger so the dispatch gate can apply the
-//!     "lethal trifecta" rule (untrusted content in context + a tool that can
-//!     leak it outward => require confirmation).
+//!   * **Content provenance / taint** — [`TaintRecord`] tags external output
+//!     on the session ledger. The dispatch gate requires confirmation when
+//!     untrusted context meets a tool capable of leaking it outward.
 //!   * **Spotlighting** — [`spotlight_wrap`] frames untrusted observations with
 //!     a provenance banner and strict-mode datamarks, marking them as data
 //!     (Microsoft "spotlighting", arXiv 2403.14720).
