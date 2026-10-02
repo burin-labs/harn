@@ -1,6 +1,6 @@
 use harn_vm::secrets::{configured_default_chain, ChainSecretProvider, SecretId, SecretProvider};
 
-use super::{OAuthConnectRequest, DEFAULT_OAUTH_REDIRECT_URI};
+use super::OAuthConnectRequest;
 
 /// Registration metadata that may be recovered from a pre-namespace OAuth
 /// record. Token material and the old client secret are deliberately absent
@@ -120,11 +120,10 @@ pub(super) fn oauth_request_with_legacy_registration(
     request.token_auth_method = request
         .token_auth_method
         .or(registration.token_endpoint_auth_method);
-    if request.redirect_uri == DEFAULT_OAUTH_REDIRECT_URI {
+    if request.redirect_uri.is_none() {
         request.redirect_uri = registration
             .redirect_uri
-            .filter(|uri| !uri.trim().is_empty())
-            .unwrap_or_else(|| DEFAULT_OAUTH_REDIRECT_URI.to_string());
+            .filter(|uri| !uri.trim().is_empty());
     }
     if request.resource.trim().is_empty() {
         request.resource = registration.resource.unwrap_or_default();
@@ -136,7 +135,7 @@ pub(super) fn legacy_registration_missing_redirect(
     request: &OAuthConnectRequest,
     registration: &LegacyOAuthRegistration,
 ) -> bool {
-    request.redirect_uri == DEFAULT_OAUTH_REDIRECT_URI
+    request.redirect_uri.is_none()
         && registration
             .redirect_uri
             .as_deref()

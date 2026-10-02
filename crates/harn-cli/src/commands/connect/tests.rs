@@ -237,7 +237,9 @@ fn registered_provider_metadata_builds_oauth_request_with_cli_overrides() {
         auth_url: None,
         token_url: Some("https://override.example.com/token".to_string()),
         token_auth_method: None,
-        redirect_uri: "http://127.0.0.1:0/oauth/callback".to_string(),
+        redirect_uri: None,
+        client_secret_from_env: None,
+        client_secret_file: None,
         no_open: true,
         json: true,
     };
@@ -317,7 +319,7 @@ async fn legacy_oauth_migration_recovers_registration_without_token_material() {
             client_id: None,
             client_secret: None,
             scopes: None,
-            redirect_uri: DEFAULT_OAUTH_REDIRECT_URI.to_string(),
+            redirect_uri: None,
             token_auth_method: None,
             authorization_params: Default::default(),
             no_open: true,
@@ -344,8 +346,8 @@ async fn legacy_oauth_migration_recovers_registration_without_token_material() {
         Some("client_secret_post")
     );
     assert_eq!(
-        request.redirect_uri,
-        "http://127.0.0.1:48765/oauth/callback"
+        request.redirect_uri.as_deref(),
+        Some("http://127.0.0.1:48765/oauth/callback")
     );
     assert!(
         request.client_secret.is_none(),
@@ -389,7 +391,7 @@ async fn authentic_old_token_requires_the_registered_redirect_again() {
         client_id: None,
         client_secret: None,
         scopes: None,
-        redirect_uri: DEFAULT_OAUTH_REDIRECT_URI.to_string(),
+        redirect_uri: None,
         token_auth_method: None,
         authorization_params: Default::default(),
         no_open: true,
@@ -400,16 +402,92 @@ async fn authentic_old_token_requires_the_registered_redirect_again() {
         &registration
     ));
     let explicitly_set = OAuthConnectRequest {
-        redirect_uri: "http://127.0.0.1:48765/oauth/callback".to_string(),
+        redirect_uri: Some("http://127.0.0.1:48765/oauth/callback".to_string()),
         ..request.clone()
     };
     assert!(!legacy_registration_missing_redirect(
         &explicitly_set,
         &registration
     ));
+    // Passing the default value explicitly is still an explicit choice: the
+    // person registered that exact URI with the provider.
+    let explicit_default = OAuthConnectRequest {
+        redirect_uri: Some(DEFAULT_OAUTH_REDIRECT_URI.to_string()),
+        ..request.clone()
+    };
+    assert!(!legacy_registration_missing_redirect(
+        &explicit_default,
+        &registration
+    ));
     let merged = oauth_request_with_legacy_registration(request, registration);
     assert_eq!(merged.client_id.as_deref(), Some("legacy-client"));
-    assert_eq!(merged.redirect_uri, DEFAULT_OAUTH_REDIRECT_URI);
+    assert_eq!(merged.redirect_uri, None);
+    assert_eq!(merged.redirect_uri(), DEFAULT_OAUTH_REDIRECT_URI);
+}
+
+#[test]
+fn explicit_default_redirect_uri_parses_as_explicit() {
+    let parsed = super::parse_external_provider_connect(
+        vec![
+            "acme".to_string(),
+            "--redirect-uri".to_string(),
+            DEFAULT_OAUTH_REDIRECT_URI.to_string(),
+        ],
+        false,
+    )
+    .expect("parse");
+    assert_eq!(
+        parsed.oauth.redirect_uri.as_deref(),
+        Some(DEFAULT_OAUTH_REDIRECT_URI)
+    );
+    let defaulted =
+        super::parse_external_provider_connect(vec!["acme".to_string()], false).expect("parse");
+    assert_eq!(defaulted.oauth.redirect_uri, None);
+}
+
+#[test]
+fn client_secret_sources_resolve_and_name_their_failures() {
+    let directory = tempfile::tempdir().unwrap();
+    let secret_file = directory.path().join("client-secret");
+    std::fs::write(&secret_file, "file-secret\n").unwrap();
+    let parse = |extra: &[&str]| {
+        let mut raw = vec!["acme".to_string()];
+        raw.extend(extra.iter().map(|arg| arg.to_string()));
+        super::parse_external_provider_connect(raw, false)
+    };
+
+    let from_file = parse(&["--client-secret-file", secret_file.to_str().unwrap()]).unwrap();
+    assert_eq!(
+        resolve_oauth_client_secret(&from_file.oauth).unwrap(),
+        Some("file-secret".to_string()),
+        "a trailing newline from `echo > file` is not part of the secret"
+    );
+
+    let var = "HARN_TEST_CONNECT_CLIENT_SECRET_UNSET_7f3a";
+    let from_unset_env = parse(&["--client-secret-from-env", var]).unwrap();
+    let error = resolve_oauth_client_secret(&from_unset_env.oauth).unwrap_err();
+    assert!(error.contains(var), "{error}");
+
+    let empty_file = directory.path().join("empty");
+    std::fs::write(&empty_file, "\n").unwrap();
+    let from_empty_file = parse(&["--client-secret-file", empty_file.to_str().unwrap()]).unwrap();
+    assert!(resolve_oauth_client_secret(&from_empty_file.oauth)
+        .unwrap_err()
+        .contains("is empty"));
+
+    let none = parse(&[]).unwrap();
+    assert_eq!(resolve_oauth_client_secret(&none.oauth).unwrap(), None);
+
+    assert!(
+        parse(&[
+            "--client-secret",
+            "inline",
+            "--client-secret-file",
+            secret_file.to_str().unwrap(),
+        ])
+        .is_err(),
+        "secret sources are mutually exclusive"
+    );
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -438,7 +516,7 @@ fn explicit_oauth_registration_wins_over_every_legacy_field() {
         client_id: Some("current-client".to_string()),
         client_secret: None,
         scopes: Some("current.read".to_string()),
-        redirect_uri: "http://127.0.0.1:49999/current".to_string(),
+        redirect_uri: Some("http://127.0.0.1:49999/current".to_string()),
         token_auth_method: Some("none".to_string()),
         authorization_params: Default::default(),
         no_open: true,
@@ -467,7 +545,7 @@ fn explicit_oauth_registration_wins_over_every_legacy_field() {
         Some("https://current.example.com/token")
     );
     assert_eq!(merged.token_auth_method.as_deref(), Some("none"));
-    assert_eq!(merged.redirect_uri, "http://127.0.0.1:49999/current");
+    assert_eq!(merged.redirect_uri(), "http://127.0.0.1:49999/current");
     assert_eq!(merged.resource, "https://current.example.com/");
 }
 
@@ -962,8 +1040,7 @@ fn callback_request_rejects_wrong_origin() {
 
 #[test]
 fn callback_request_requires_get_method() {
-    let request =
-        "POST /oauth/callback?code=abc&state=xyz HTTP/1.1\r\nOrigin: http://127.0.0.1:49152\r\n\r\n";
+    let request = "POST /oauth/callback?code=abc&state=xyz HTTP/1.1\r\nOrigin: http://127.0.0.1:49152\r\n\r\n";
     let error = parse_callback_request(
         request,
         "/oauth/callback",
@@ -977,8 +1054,7 @@ fn callback_request_requires_get_method() {
 
 #[test]
 fn callback_request_rejects_malformed_request_line() {
-    let request =
-        "GET /oauth/callback?code=abc&state=xyz HTTP/1.1 extra\r\nOrigin: http://127.0.0.1:49152\r\n\r\n";
+    let request = "GET /oauth/callback?code=abc&state=xyz HTTP/1.1 extra\r\nOrigin: http://127.0.0.1:49152\r\n\r\n";
     let error = parse_callback_request(
         request,
         "/oauth/callback",
@@ -1229,7 +1305,7 @@ async fn generic_oauth_prefers_default_cimd_client_before_dcr() {
         client_id: None,
         client_secret: None,
         scopes: None,
-        redirect_uri: "http://127.0.0.1:49152/oauth/callback".to_string(),
+        redirect_uri: Some("http://127.0.0.1:49152/oauth/callback".to_string()),
         token_auth_method: None,
         authorization_params: Default::default(),
         no_open: true,
