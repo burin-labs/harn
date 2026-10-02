@@ -559,7 +559,7 @@ async fn run_oauth_connect_inner(
     })?;
     let (code_verifier, code_challenge) = generate_pkce_pair();
     let state = random_hex(16);
-    let mut auth_url = build_authorization_url(
+    let auth_url = build_authorization_url(
         &authorization_endpoint,
         &client_id,
         &redirect_uri,
@@ -567,6 +567,7 @@ async fn run_oauth_connect_inner(
         &code_challenge,
         &request.resource,
         request.scopes.as_deref(),
+        &request.authorization_params,
     )
     .map_err(|error| {
         setup_failure(
@@ -575,22 +576,6 @@ async fn run_oauth_connect_inner(
             error,
         )
     })?;
-    let extra_params =
-        authorization_params_for(&authorization_endpoint, &request.authorization_params).map_err(
-            |error| {
-                setup_failure(
-                    ConnectorSetupErrorCode::ConfigurationMissing,
-                    ConnectorSetupStage::Resolving,
-                    error,
-                )
-            },
-        )?;
-    if !extra_params.is_empty() {
-        let mut query = auth_url.query_pairs_mut();
-        for (key, value) in &extra_params {
-            query.append_pair(key, value);
-        }
-    }
 
     reporter.progress(
         ConnectorSetupStage::OpeningBrowser,
@@ -1026,7 +1011,9 @@ pub(super) fn build_authorization_url(
     code_challenge: &str,
     resource: &str,
     scopes: Option<&str>,
+    authorization_params: &std::collections::BTreeMap<String, String>,
 ) -> Result<Url, String> {
+    let extra_params = authorization_params_for(authorization_endpoint, authorization_params)?;
     let mut url = Url::parse(authorization_endpoint)
         .map_err(|error| format!("Invalid authorization endpoint: {error}"))?;
     {
@@ -1040,6 +1027,9 @@ pub(super) fn build_authorization_url(
         query.append_pair("resource", resource);
         if let Some(scopes) = scopes {
             query.append_pair("scope", scopes);
+        }
+        for (key, value) in &extra_params {
+            query.append_pair(key, value);
         }
     }
     Ok(url)
