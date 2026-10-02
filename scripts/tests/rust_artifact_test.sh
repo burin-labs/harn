@@ -4,12 +4,35 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 script="$repo_root/scripts/ci/rust_artifact.sh"
 policy_nextest="$(jq -er '.nextest_version' "$repo_root/.github/cache-policy.json")"
-expected_security_filter="$("$repo_root/scripts/ci/host_bound_rust_test_filter.sh")"
+expected_security_filter="$(sed -n "s/^readonly SECURITY_FILTER='\(.*\)'$/\1/p" "$script")"
+expected_host_bound_filter="$("$repo_root/scripts/ci/host_bound_rust_test_filter.sh")"
+[[ -n "$expected_security_filter" ]]
+[[ "$expected_security_filter" == *'package(harn-cli) and binary(harn_cli_e2e)'* ]]
+grep -Fxq 'canonical_fixture_scrubs_ambient_loader_controls_without_scrubbing_explicit_controls' \
+  "$repo_root/scripts/config/host-bound-rust-tests.txt"
 tmpdir="$(mktemp -d)"
 trap 'rm -rf "$tmpdir"' EXIT
 
 mkdir -p "$tmpdir/bin" "$tmpdir/target/debug" "$tmpdir/target/ci-cli" "$tmpdir/out" "$tmpdir/receipts" "$tmpdir/work"
 cp "$repo_root/rust-toolchain.toml" "$tmpdir/work/rust-toolchain.toml"
+make_fake_security_inventory() {
+  local omitted_test=${1:-}
+  jq -n --rawfile registry "$repo_root/scripts/config/host-bound-rust-tests.txt" \
+    --arg omitted_test "$omitted_test" '
+    ($registry | split("\n") | map(select(length > 0 and . != $omitted_test))) as $tests
+    | {"test-count": ($tests | length), "rust-suites": {
+        "fake": {
+          "status": "listed",
+          "package-name": "harn-cli",
+          "binary-name": "harn_cli_e2e",
+          "testcases": (reduce $tests[] as $name ({};
+            .[$name] = {"filter-match": {"status": "matches"}}
+          ))
+        }
+      }}
+  '
+}
+make_fake_security_inventory > "$tmpdir/security-inventory.json"
 cat > "$tmpdir/bin/cargo" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -33,7 +56,13 @@ case "$1" in
       printf 'cargo-nextest %s (fake)\n' "${FAKE_NEXTEST_VERSION:-}"
       exit 0
     fi
-    if [[ "$#" -eq 10 && "$2" == "archive" && "$3" == "--locked" && \
+    if [[ "$#" -eq 10 && "$2" == "list" && "$3" == "--profile" && \
+      "$4" == "ci" && "$5" == "--archive-file" && -n "$6" && \
+      "$7" == "--message-format" && "$8" == "json" && "$9" == "-E" && \
+      "${10}" == "${EXPECTED_HOST_BOUND_FILTER:?}" ]]; then
+      cat "${FAKE_NEXTTEST_INVENTORY:?}"
+      : > "${CARGO_RECEIPTS:?}/nextest-security-list"
+    elif [[ "$#" -eq 10 && "$2" == "archive" && "$3" == "--locked" && \
       "$4" == "--workspace" && "$5" == "--profile" && "$6" == "ci" && \
       "$7" == "-E" && "$8" == 'all()' && "$9" == "--archive-file" && -n "${10}" ]]; then
       printf 'tests archive\n' > "${10}"
@@ -95,6 +124,8 @@ run_artifact() {
       FAKE_COMMIT="${FAKE_COMMIT_OVERRIDE:-$commit}" \
       FAKE_NEXTEST_VERSION="${FAKE_NEXTEST_VERSION_OVERRIDE:-$policy_nextest}" \
       EXPECTED_SECURITY_FILTER="$expected_security_filter" \
+      EXPECTED_HOST_BOUND_FILTER="$expected_host_bound_filter" \
+      FAKE_NEXTTEST_INVENTORY="${NEXTTEST_INVENTORY_OVERRIDE:-$tmpdir/security-inventory.json}" \
       FAKE_RUSTC_IDENTITY="${FAKE_RUSTC_IDENTITY_OVERRIDE:-rustc 1.95.0 (fake)}" \
       RUSTFLAGS="${RUSTFLAGS_OVERRIDE:--D warnings -Clink-arg=-fuse-ld=mold}" \
       CARGO_PROFILE_DEV_DEBUG="${DEV_DEBUG_OVERRIDE:-line-tables-only}" \
@@ -124,9 +155,23 @@ test ! -f "$tmpdir/receipts/build"
 test ! -f "$tmpdir/receipts/nextest-tests"
 run_artifact build-security "$security_bundle" "$commit"
 test -f "$tmpdir/receipts/nextest-security"
+test -f "$tmpdir/receipts/nextest-security-list"
 
-# A broken host-bound registry must fail before the archive producer can
-# invoke Cargo, rather than publishing an archive with an empty selector.
+# Missing one registered case in the archived inventory must fail publication.
+fixture_test="$(grep '^canonical_fixture_' "$repo_root/scripts/config/host-bound-rust-tests.txt")"
+make_fake_security_inventory "$fixture_test" > "$tmpdir/security-inventory-missing-fixture.json"
+if NEXTTEST_INVENTORY_OVERRIDE="$tmpdir/security-inventory-missing-fixture.json" \
+  run_artifact build-security "$tmpdir/out/security-missing-fixture.tar.zst" "$commit" \
+  > "$tmpdir/security-missing-fixture.out" 2>&1; then
+  echo "build-security published an archive missing the registered CLI fixture" >&2
+  exit 1
+fi
+grep -Fq "host-bound registry entry is absent from archived tests: $fixture_test" \
+  "$tmpdir/security-missing-fixture.out"
+test ! -e "$tmpdir/out/security-missing-fixture.tar.zst"
+
+# A broken host-bound registry must fail before the consumer can invoke
+# nextest, rather than reporting a successful proof with no selected tests.
 bad_filter_repo="$tmpdir/bad-filter-repo"
 mkdir -p "$bad_filter_repo/scripts/ci" "$bad_filter_repo/scripts/config" \
   "$bad_filter_repo/scripts/lib" "$bad_filter_repo/.github" "$tmpdir/bad-filter-receipts"
@@ -138,25 +183,23 @@ cp "$repo_root/scripts/lib/sha256.sh" "$bad_filter_repo/scripts/lib/"
 cp "$repo_root/.github/cache-policy.json" "$bad_filter_repo/.github/"
 cp "$repo_root/rust-toolchain.toml" "$bad_filter_repo/"
 : > "$bad_filter_repo/scripts/config/host-bound-rust-tests.txt"
+cat > "$tmpdir/bad-filter-consumer.sh" <<SH
+#!/usr/bin/env bash
+set -euo pipefail
+host_bound_filter=\$("$bad_filter_repo/scripts/ci/host_bound_rust_test_filter.sh")
+cargo nextest run -E "\$host_bound_filter"
+SH
+chmod +x "$tmpdir/bad-filter-consumer.sh"
 if (
-  cd "$tmpdir/work"
   env PATH="$tmpdir/bin:$PATH" \
     CARGO_RECEIPTS="$tmpdir/bad-filter-receipts" \
-    FAKE_COMMIT="$commit" \
-    FAKE_NEXTEST_VERSION="$policy_nextest" \
-    FAKE_RUSTC_IDENTITY='rustc 1.95.0 (fake)' \
-    RUSTFLAGS='-D warnings -Clink-arg=-fuse-ld=mold' \
-    CARGO_PROFILE_DEV_DEBUG=line-tables-only \
-    HARN_SECURITY_ARTIFACT_MAX_BYTES=1073741824 \
-    "$bad_filter_repo/scripts/ci/rust_artifact.sh" build-security \
-    "$tmpdir/out/empty-filter.tar.zst" "$commit"
+    "$tmpdir/bad-filter-consumer.sh"
 ) > "$tmpdir/bad-filter.out" 2>&1; then
-  echo "build-security accepted an empty host-bound test selector" >&2
+  echo "Linux sandbox consumer accepted an empty host-bound test selector" >&2
   exit 1
 fi
 grep -Fxq 'host-bound Rust test list is empty' "$tmpdir/bad-filter.out"
 test ! -e "$tmpdir/bad-filter-receipts/cargo-calls"
-test ! -e "$tmpdir/out/empty-filter.tar.zst"
 
 github_env="$tmpdir/github-env"
 VERIFY_RUNTIME_OVERRIDE=1 run_artifact restore-tests "$bundle" "$tmpdir/restored" "$commit" "$github_env"

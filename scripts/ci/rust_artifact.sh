@@ -11,12 +11,9 @@ source "${SCRIPT_DIR}/../lib/sha256.sh"
 NEXTEST_VERSION="$(harn_cache_policy_jq '.nextest_version')"
 readonly NEXTEST_VERSION
 readonly NEUTRAL_FILTER='all()'
-SECURITY_FILTER="$("${SCRIPT_DIR}/host_bound_rust_test_filter.sh")"
-if [[ -z "$SECURITY_FILTER" ]]; then
-  echo "error: host-bound Rust test filter is empty" >&2
-  exit 1
-fi
-readonly SECURITY_FILTER
+# Archive filters select binaries; exact test membership comes from the
+# host-bound registry and is checked against the archived nextest inventory.
+readonly SECURITY_FILTER='(package(harn-vm) and binary(harn_vm)) or (package(harn-hostlib) and binary(harn_hostlib)) or (package(harn-cli) and binary(harn_cli_e2e))'
 readonly EXPECTED_RUSTFLAGS='-D warnings -Clink-arg=-fuse-ld=mold'
 readonly EXPECTED_DEV_DEBUG='line-tables-only'
 # The shared CLI bundle every Harn proof lane executes is built in the
@@ -26,7 +23,7 @@ readonly EXPECTED_DEV_DEBUG='line-tables-only'
 # CLI keeps the dev profile it shares with the test build.
 readonly SHARED_CLI_PROFILE='ci-cli'
 readonly DEFAULT_MAX_BUNDLE_BYTES=9663676416  # 9 GiB: workspace nextest archive is ~8.4 GiB today
-readonly DEFAULT_MAX_SECURITY_BUNDLE_BYTES=1073741824  # 1 GiB: filtered VM + Hostlib sandbox archive
+readonly DEFAULT_MAX_SECURITY_BUNDLE_BYTES=1073741824  # 1 GiB: filtered VM, Hostlib, and CLI sandbox tests
 cleanup_dir=""
 trap '[[ -z "$cleanup_dir" ]] || rm -rf "$cleanup_dir"' EXIT
 
@@ -466,6 +463,13 @@ build_security_bundle() {
   cargo nextest archive --locked --workspace --profile ci \
     -E "$SECURITY_FILTER" \
     --archive-file "$staging/harn-security-tests.tar.zst"
+  host_bound_filter="$("${SCRIPT_DIR}/host_bound_rust_test_filter.sh")"
+  cargo nextest list --profile ci \
+    --archive-file "$staging/harn-security-tests.tar.zst" \
+    --message-format json -E "$host_bound_filter" \
+    > "$staging/host-bound-inventory.json"
+  "${SCRIPT_DIR}/verify_host_bound_rust_archive.sh" \
+    "$staging/host-bound-inventory.json"
   write_security_manifest "$staging" "$commit" "$(rustc_identity_sha256)"
   (
     cd "$staging"

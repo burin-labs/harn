@@ -1,0 +1,85 @@
+#!/usr/bin/env bash
+# Verify the exact registry-driven filter against nextest's archived test inventory.
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+repo_root="$(cd "$SCRIPT_DIR/../.." && pwd -P)"
+inventory="${1:?usage: verify_host_bound_rust_archive.sh <nextest-inventory.json>}"
+registry="$repo_root/scripts/config/host-bound-rust-tests.txt"
+selected_file="$(mktemp "${TMPDIR:-/tmp}/host-bound-rust-selected.XXXXXX")"
+trap 'rm -f "$selected_file"' EXIT
+
+scripts_filter="$SCRIPT_DIR/host_bound_rust_test_filter.sh"
+"$scripts_filter" >/dev/null
+
+if ! jq -e '
+  .["rust-suites"] as $suites
+  | ($suites | type == "object" and length > 0)
+    and all($suites[];
+      (.status | type == "string")
+      and (.status != "listed" or (
+        (.testcases | type == "object")
+        and (."package-name" | type == "string")
+        and (."binary-name" | type == "string")
+      ))
+    )
+    and all([
+      $suites[] | select(.status == "listed") | .testcases | to_entries[]
+      | .value["filter-match"].status
+    ][]; . == "matches" or . == "mismatch")
+  ' "$inventory" >/dev/null; then
+  echo "error: nextest archive inventory is missing listed Rust suites" >&2
+  exit 1
+fi
+
+jq -er '
+  .["rust-suites"] as $suites
+  | [
+      $suites | to_entries[] as $entry
+      | $entry.value as $suite
+      | $suite.testcases | to_entries[]
+      | select(.value["filter-match"].status == "matches")
+      | "\($suite["package-name"])::\($suite["binary-name"])$\(.key)"
+    ]
+  | if length == 0 then error("filter selected no tests") else .[] end
+' "$inventory" > "$selected_file" || {
+  echo "error: nextest archive inventory selected no host-bound tests" >&2
+  exit 1
+}
+
+selected_count="$(wc -l < "$selected_file" | tr -d ' ')"
+expected_count=0
+while IFS= read -r expected || [[ -n "$expected" ]]; do
+  [[ -n "$expected" ]] || continue
+  matches="$(jq -r --arg expected "$expected" '
+    [
+      .["rust-suites"] | to_entries[] | .value as $suite
+      | $suite.testcases | to_entries[]
+      | select(.value["filter-match"].status == "matches")
+      | select((.key | split("::") | last) == $expected)
+    ] | length
+  ' "$inventory")"
+  if (( matches == 0 )); then
+    echo "error: host-bound registry entry is absent from archived tests: $expected" >&2
+    exit 1
+  fi
+  ((expected_count += 1))
+done < "$registry"
+
+while IFS= read -r selected; do
+  test_name="${selected#*$}"
+  attributed=0
+  while IFS= read -r expected || [[ -n "$expected" ]]; do
+    [[ -n "$expected" ]] || continue
+    if [[ "$test_name" == "$expected" || "$test_name" == *"::$expected" ]]; then
+      attributed=1
+      break
+    fi
+  done < "$registry"
+  if (( attributed == 0 )); then
+    echo "error: archived filter selected a test outside the host-bound registry: $selected" >&2
+    exit 1
+  fi
+done < "$selected_file"
+
+printf 'host_bound_archive_inventory selected=%s registry=%s\n' "$selected_count" "$expected_count"
