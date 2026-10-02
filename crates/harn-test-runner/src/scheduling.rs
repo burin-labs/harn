@@ -1,7 +1,6 @@
 use std::collections::HashSet;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
-use std::thread;
 
 use crate::{TestCase, TestResult};
 
@@ -38,7 +37,6 @@ pub struct ParallelCaseResults {
 pub struct ParallelRunOptions {
     pub workers: usize,
     pub total_tests: usize,
-    pub stack_size: usize,
     pub fail_fast: bool,
     pub progress: Option<TestRunProgress>,
 }
@@ -64,7 +62,6 @@ where
     let ParallelRunOptions {
         workers,
         total_tests,
-        stack_size,
         fail_fast,
         progress,
     } = options;
@@ -86,9 +83,8 @@ where
         let progress = progress.clone();
         let init_worker = Arc::clone(&init_worker);
         let execute = Arc::clone(&execute);
-        let handle = thread::Builder::new()
+        let handle = harn_parser::runtime_stack::builder()
             .name(format!("harn-test-worker-{worker_idx}"))
-            .stack_size(stack_size)
             .spawn(move || {
                 let mut worker = match init_worker(worker_idx) {
                     Ok(worker) => worker,
@@ -355,7 +351,6 @@ mod tests {
             ParallelRunOptions {
                 workers: 1,
                 total_tests: 2,
-                stack_size: 2 * 1024 * 1024,
                 fail_fast: true,
                 progress: Some(progress),
             },

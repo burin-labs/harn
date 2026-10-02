@@ -2191,7 +2191,7 @@ mod tests {
         // thread parks on `accept` and is reclaimed at process exit.
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let token_endpoint_url = format!("http://{}/token", listener.local_addr().unwrap());
-        std::thread::spawn(move || {
+        crate::runtime_stack::spawn(move || {
             let mut held = Vec::new();
             while let Ok((stream, _)) = listener.accept() {
                 held.push(stream);

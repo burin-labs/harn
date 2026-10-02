@@ -244,7 +244,7 @@ mod tests {
 
         let recorder = vm.enable_module_phase_timing();
         let mut child = vm.child_vm();
-        std::thread::spawn(move || child.record_module_loaded())
+        crate::runtime_stack::spawn(move || child.record_module_loaded())
             .join()
             .expect("child records from another thread");
 

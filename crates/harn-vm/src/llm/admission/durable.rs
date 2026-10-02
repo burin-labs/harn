@@ -852,7 +852,7 @@ mod tests {
                 .map(|_| {
                     let path = path.clone();
                     let policy = policy.clone();
-                    std::thread::spawn(move || {
+                    crate::runtime_stack::spawn(move || {
                         let quota = MachineSpendQuota::open(path, "person", policy).unwrap();
                         quota.reserve(Decimal::new(3, 1)).is_ok()
                     })

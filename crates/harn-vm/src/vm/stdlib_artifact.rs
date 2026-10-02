@@ -216,14 +216,11 @@ pub fn warm_embedded_stdlib(threads: usize) -> StdlibWarmReport {
     let next = std::sync::atomic::AtomicUsize::new(0);
     let warmed = std::sync::atomic::AtomicUsize::new(0);
     let failed = std::sync::Mutex::new(Vec::new());
-    std::thread::scope(|scope| {
+    crate::runtime_stack::scope(|scope| {
         for _ in 0..threads.clamp(1, sources.len().max(1)) {
             // Compiling recurses over program structure, so each warm thread
             // needs the VM stack contract, not the 2 MiB default.
-            let builder = std::thread::Builder::new()
-                .name("harn-stdlib-warm".to_owned())
-                .stack_size(crate::RUNTIME_STACK_SIZE);
-            let spawned = builder.spawn_scoped(scope, || loop {
+            let spawned = scope.spawn_named("harn-stdlib-warm", || loop {
                 let index = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 let Some(entry) = sources.get(index) else {
                     break;

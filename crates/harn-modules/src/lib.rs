@@ -426,13 +426,11 @@ fn load_wave(
     }
     let next = std::sync::atomic::AtomicUsize::new(0);
     let mut produced: Vec<(usize, (ModuleInfo, Option<ParsedModuleSource>))> =
-        std::thread::scope(|scope| {
+        harn_parser::runtime_stack::scope(|scope| {
             let handles: Vec<_> = (0..workers)
                 .map(|_| {
-                    std::thread::Builder::new()
-                        .name("harn-module-parse".to_owned())
-                        .stack_size(harn_parser::PARSE_STACK_SIZE)
-                        .spawn_scoped(scope, || {
+                    scope
+                        .spawn_named("harn-module-parse", || {
                             let mut local = Vec::new();
                             loop {
                                 let index = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);

@@ -613,28 +613,28 @@ pub fn run_guardian_from_pipe() -> io::Result<()> {
 
     if let Some(mut stdout) = stdout {
         let event_tx = event_tx.clone();
-        std::thread::spawn(move || {
+        harn_parser::runtime_stack::spawn(move || {
             let _ = io::copy(&mut stdout, &mut io::stdout());
             let _ = event_tx.send(GuardianEvent::OutputClosed);
         });
     }
     if let Some(mut stderr) = stderr {
         let event_tx = event_tx.clone();
-        std::thread::spawn(move || {
+        harn_parser::runtime_stack::spawn(move || {
             let _ = io::copy(&mut stderr, &mut io::stderr());
             let _ = event_tx.send(GuardianEvent::OutputClosed);
         });
     }
     {
         let event_tx = event_tx.clone();
-        std::thread::spawn(move || {
+        harn_parser::runtime_stack::spawn(move || {
             let status = wait_for_payload_while_reaping_adopted(payload);
             let _ = event_tx.send(GuardianEvent::PayloadExited(status));
         });
     }
     {
         let event_tx = event_tx.clone();
-        std::thread::spawn(move || {
+        harn_parser::runtime_stack::spawn(move || {
             let mut stdin = io::stdin();
             let mut sink = [0_u8; 256];
             loop {
@@ -784,7 +784,7 @@ fn run_guardian_reaper() -> ! {
             std::process::exit(1);
         })
     };
-    std::thread::spawn(move || relay_owner_liveness(owner, relay_writer));
+    harn_parser::runtime_stack::spawn(move || relay_owner_liveness(owner, relay_writer));
     match guardian.wait() {
         Ok(status) => propagate_exit(status),
         Err(error) => {

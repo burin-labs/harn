@@ -69,7 +69,7 @@ fn watch_with_deadline(
 ) -> Option<notify::RecommendedWatcher> {
     let (tx, rx) = std::sync::mpsc::channel();
     let root = project_root.to_path_buf();
-    std::thread::spawn(move || {
+    harn_parser::runtime_stack::spawn(move || {
         let registered = watcher
             .watch(&root, notify::RecursiveMode::Recursive)
             .map(|()| watcher);

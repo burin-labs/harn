@@ -33,13 +33,13 @@ pub(super) fn run_eval_pack_command(
         .spawn()
         .map_err(|e| VmError::Runtime(format!("eval pack command spawn failed: {e}")))?;
     let stdout_reader = child.stdout.take().map(|mut pipe| {
-        std::thread::spawn(move || {
+        crate::runtime_stack::spawn(move || {
             let mut bytes = Vec::new();
             pipe.read_to_end(&mut bytes).map(|_| bytes)
         })
     });
     let stderr_reader = child.stderr.take().map(|mut pipe| {
-        std::thread::spawn(move || {
+        crate::runtime_stack::spawn(move || {
             let mut bytes = Vec::new();
             pipe.read_to_end(&mut bytes).map(|_| bytes)
         })

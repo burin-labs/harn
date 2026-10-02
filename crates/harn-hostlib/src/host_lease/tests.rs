@@ -1,7 +1,6 @@
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{mpsc, Arc, Barrier, OnceLock};
-use std::thread;
 use std::time::Instant;
 
 use harn_clock::test_support::recv_within;
@@ -118,7 +117,7 @@ fn status_reports_an_admitted_worker_before_the_next_acquisition() {
     let worker = {
         let store = Arc::clone(&store);
         let run_id = run.run_id.clone();
-        thread::spawn(move || {
+        harn_parser::runtime_stack::spawn(move || {
             let mut report = |receipt: &HostLeaseAcquireReceipt| {
                 progress_tx.send(receipt.clone()).unwrap();
                 recv_within("host lease worker resumes", &resume_rx);
@@ -189,7 +188,7 @@ fn supervised_wait_projects_typed_progress_before_event_driven_handoff() {
     let waiter = {
         let store = Arc::clone(&store);
         let run_id = run.run_id;
-        thread::spawn(move || {
+        harn_parser::runtime_stack::spawn(move || {
             let mut report = |receipt: &HostLeaseAcquireReceipt| {
                 progress_tx.send(receipt.clone()).unwrap();
             };
@@ -261,7 +260,7 @@ fn immediate_transaction_allows_at_most_one_race_winner() {
         .map(|index| {
             let store = Arc::clone(&store);
             let barrier = Arc::clone(&barrier);
-            thread::spawn(move || {
+            harn_parser::runtime_stack::spawn(move || {
                 barrier.wait();
                 store
                     .try_acquire(request(&format!("worker-{index}")))
@@ -507,7 +506,7 @@ fn supervised_waiters_handoff_fifo_on_the_public_restart_path() {
             let store = Arc::clone(&store);
             let barrier = Arc::clone(&barrier);
             let run_id = b.run_id.clone();
-            thread::spawn(move || {
+            harn_parser::runtime_stack::spawn(move || {
                 barrier.wait();
                 store
                     .acquire_wait_for_run(&run_id, std::process::id())
@@ -518,7 +517,7 @@ fn supervised_waiters_handoff_fifo_on_the_public_restart_path() {
             let store = Arc::clone(&store);
             let barrier = Arc::clone(&barrier);
             let run_id = a.run_id.clone();
-            thread::spawn(move || {
+            harn_parser::runtime_stack::spawn(move || {
                 barrier.wait();
                 store
                     .acquire_wait_for_run(&run_id, std::process::id())
@@ -1088,7 +1087,7 @@ fn concurrent_metadata_replacements_never_merge_or_tear() {
             let store = Arc::clone(&store);
             let barrier = Arc::clone(&barrier);
             let handle = handle.clone();
-            thread::spawn(move || {
+            harn_parser::runtime_stack::spawn(move || {
                 barrier.wait();
                 store
                     .update_metadata_for_domain(
@@ -1238,7 +1237,7 @@ fn concurrent_fresh_stores_survive_the_wal_conversion_race() {
         .map(|worker| {
             let barrier = Arc::clone(&barrier);
             let root = temp.path().to_path_buf();
-            thread::spawn(move || {
+            harn_parser::runtime_stack::spawn(move || {
                 barrier.wait();
                 let store = HostLeaseStore::for_root(root).unwrap();
                 store
@@ -1282,7 +1281,8 @@ fn immediate_acquire_waits_for_internal_registry_writer() {
         .expect("one deterministic busy-handler test");
     let store = store.with_busy_handler(release_registry_writer_after_busy_observed);
 
-    let acquisition = thread::spawn(move || store.try_acquire(request("codex-0")).unwrap());
+    let acquisition =
+        harn_parser::runtime_stack::spawn(move || store.try_acquire(request("codex-0")).unwrap());
     let barriers = BUSY_HANDLER_BARRIERS.get().unwrap();
     barriers.0.wait();
     drop(transaction);
@@ -1323,7 +1323,9 @@ fn release_waits_for_internal_registry_writer() {
         .expect("one deterministic release busy-handler test");
     let store = store.with_busy_handler(release_registry_writer_for_release_after_busy_observed);
 
-    let release = thread::spawn(move || store.release(&handle.host, &handle.lease_id).unwrap());
+    let release = harn_parser::runtime_stack::spawn(move || {
+        store.release(&handle.host, &handle.lease_id).unwrap()
+    });
     let barriers = RELEASE_BUSY_HANDLER_BARRIERS.get().unwrap();
     barriers.0.wait();
     drop(transaction);
@@ -1341,7 +1343,7 @@ fn wait_rechecks_after_cross_thread_release_without_polling() {
     let handle = first.handle.unwrap();
     let waiter = {
         let store = Arc::clone(&store);
-        thread::spawn(move || {
+        harn_parser::runtime_stack::spawn(move || {
             store
                 .acquire_wait(request("codex-1"), Duration::from_secs(5))
                 .unwrap()

@@ -21,7 +21,7 @@
 /// trait without each adding `harn-clock` as a direct dependency.
 pub use harn_clock as clock;
 
-mod runtime_stack;
+pub mod runtime_stack;
 pub use runtime_stack::{on_vm_stack, RUNTIME_STACK_SIZE};
 
 pub mod a2a;

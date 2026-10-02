@@ -422,7 +422,7 @@ fn clearing_live_mocks_preserves_scoped_manifest_declarations() {
 
 #[tokio::test]
 async fn declared_mockable_operation_is_not_reported_as_callable() {
-    std::thread::spawn(|| {
+    crate::runtime_stack::spawn(|| {
         register_mockable_host_operation(
             "async_host_registration",
             "cross_thread",
@@ -432,7 +432,7 @@ async fn declared_mockable_operation_is_not_reported_as_callable() {
     .join()
     .expect("registration worker should finish");
 
-    std::thread::spawn(|| {
+    crate::runtime_stack::spawn(|| {
         let host_mock = HostMock {
             capability: "async_host_registration".to_string(),
             operation: "cross_thread".to_string(),

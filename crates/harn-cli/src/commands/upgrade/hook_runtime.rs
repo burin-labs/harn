@@ -549,7 +549,7 @@ mod tests {
         fs::write(&candidate_b, b"runtime-b").expect("candidate b");
         let started = Arc::new(Barrier::new(2));
         let (attempted_tx, attempted_rx) = mpsc::channel();
-        std::thread::scope(|scope| {
+        harn_parser::runtime_stack::scope(|scope| {
             let runtime_a = runtime.clone();
             let started_a = Arc::clone(&started);
             let first = scope.spawn(move || {

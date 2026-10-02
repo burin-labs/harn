@@ -189,8 +189,9 @@ mod tests {
         agent_inbox::push(&session, "tool_result", &result_for("H2"), "test");
         let wait_session = session.clone();
         let wait_handle = info.handle_id.clone();
-        let waiter =
-            std::thread::spawn(move || handle(&wait_args(&wait_session, &wait_handle, 5_000)));
+        let waiter = harn_parser::runtime_stack::spawn(move || {
+            handle(&wait_args(&wait_session, &wait_handle, 5_000))
+        });
         controller.complete_with(ExitStatus::from_code(0));
         let value = waiter
             .join()

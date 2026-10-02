@@ -1346,7 +1346,7 @@ mod tests {
     ) -> (std::net::SocketAddr, std::thread::JoinHandle<()>) {
         let listener = TcpListener::bind("127.0.0.1:0").expect("bind ollama stub");
         let addr = listener.local_addr().expect("stub addr");
-        let handle = std::thread::spawn(move || {
+        let handle = crate::runtime_stack::spawn(move || {
             for (status, body) in responses {
                 let (mut stream, _) = listener.accept().expect("accept request");
                 stream

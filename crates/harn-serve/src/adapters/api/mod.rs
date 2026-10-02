@@ -250,13 +250,16 @@ impl AcpClient {
     fn start(config: AcpServerConfig) -> (Self, mpsc::UnboundedReceiver<String>) {
         let (request_tx, request_rx) = mpsc::unbounded_channel();
         let (response_tx, response_rx) = mpsc::unbounded_channel();
-        crate::vm_thread::spawn_or_panic("harn-acp-client", move || {
-            let runtime = tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .expect("start ACP runtime");
-            runtime.block_on(run_acp_channel_server(config, request_rx, response_tx));
-        });
+        harn_parser::runtime_stack::builder()
+            .name("harn-acp-client".to_owned())
+            .spawn(move || {
+                let runtime = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .expect("start ACP runtime");
+                runtime.block_on(run_acp_channel_server(config, request_rx, response_tx));
+            })
+            .unwrap_or_else(|error| panic!("spawn harn-acp-client VM thread: {error}"));
         (
             Self {
                 request_tx,
