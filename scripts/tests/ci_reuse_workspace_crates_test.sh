@@ -12,7 +12,7 @@ if ! touch -h -d @946684800 "$probe" 2>/dev/null \
   rm -f "$probe"
   # The producer runners are Linux. Elsewhere the script refuses by name, so
   # check that refusal instead of the stamps it cannot set.
-  out=$(cd "$(mktemp -d)" && git init -q . && "$script" restore)
+  out=$(cd "$(mktemp -d)" && git init -q -b main . && "$script" restore)
   [[ "$out" == *"cannot set file times here"* ]]
   echo "ci_reuse_workspace_crates_test: ok (refusal where file times cannot be set)"
   exit 0
