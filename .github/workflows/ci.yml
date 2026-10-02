@@ -1538,6 +1538,7 @@ jobs:
         id: release-audit-rust-security
         env:
           HARN_SANDBOX_ENFORCEMENT_RECEIPT: ${{ runner.temp }}/harn-sandbox-enforcement.txt
+          BWRAP_REQUIRE_TESTS: "1"
         # No --locked: nextest rejects it alongside --archive-file. This step
         # replays prebuilt binaries and never resolves dependencies, so there is
         # no lock for the flag to hold.
