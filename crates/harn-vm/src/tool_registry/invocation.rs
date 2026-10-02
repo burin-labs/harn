@@ -4,12 +4,43 @@ use serde_json::Value as JsonValue;
 
 use super::handler_result::{parse_handler_result, HandlerOutcome};
 use super::{
-    result_to_json, PreparedToolCatalog, ToolApplicationError, ToolApplicationOutcome,
-    ToolContractPhase, ToolContractViolation, ToolContractViolationDetail,
-    ToolThrownClassification, HARN_MCP_TOOL_CONTRACT_META_KEY,
+    PreparedToolCatalog, ToolApplicationError, ToolContractPhase, ToolContractViolation,
+    ToolContractViolationDetail, ToolThrownClassification, HARN_MCP_TOOL_CONTRACT_META_KEY,
 };
-use crate::llm::HandlerOutcome;
 use crate::value::{VmError, VmValue};
+
+/// Convert a handler result to portable JSON without stringifying unsupported
+/// runtime-only values such as closures or capability handles.
+pub fn result_to_json(value: &VmValue) -> Result<JsonValue, String> {
+    crate::llm::helpers::vm_value_to_export_json_strict(value, "result")
+}
+
+/// Prepare a direct agent dispatch without compiling unrelated tool entries.
+/// Lifecycle-owned registries retain their full prepared catalog instead.
+pub(crate) fn tool_registry_catalog_for_tool(
+    registry: &VmValue,
+    name: &str,
+) -> Result<super::ToolCatalog, VmError> {
+    // Agent primitives also accept legacy `{tools: [...]}` wrappers.
+    let registry = registry
+        .as_dict()
+        .ok_or_else(|| VmError::Runtime("expected a tool registry".into()))?;
+    let entry = super::registry_entries(registry)?
+        .iter()
+        .find(|entry| {
+            entry.as_dict().is_some_and(|entry| {
+                matches!(entry.get("name"), Some(VmValue::String(actual)) if actual.as_ref() == name)
+            })
+        })
+        .ok_or_else(|| VmError::Runtime(format!("tool {name:?} is not registered")))?;
+    Ok(super::ToolCatalog {
+        schema_version: super::ToolCatalogSchemaVersion::V2,
+        info: None,
+        cli: None,
+        tools: vec![super::catalog_entry(entry)?],
+        components: super::registry_components(registry)?,
+    })
+}
 
 /// A portable handler result after its declared contract has accepted it.
 #[derive(Debug)]
@@ -101,17 +132,8 @@ pub fn tool_runtime_error_summary(error: &VmError) -> String {
 
 /// Classify and validate a raw VM handler result exactly once.
 ///
-/// A return in the typed `harn.agent_tool_handler_result.v2` envelope is read
-/// by the same parser agent dispatch uses: its `outcome` decides the
-/// disposition and its `data` is the value the declared schemas see. An `ok`
-/// envelope succeeds with `data`; an `error` or `rejected` envelope is a
-/// declared application failure carrying `data`. The envelope's `text` is the
-/// agent-transcript rendering and is not projected here. Any other return is
-/// the value itself.
-///
-/// Only `VmError::Thrown` and failure envelopes can enter the declared
-/// application-error channel. Control flow, host failures, and other VM errors
-/// remain runtime failures.
+/// Only `VmError::Thrown` can enter a declared application-error channel.
+/// Control flow, host failures, and other VM errors remain runtime failures.
 pub fn classify_tool_result(
     prepared: &PreparedToolCatalog,
     tool: &str,
@@ -137,35 +159,6 @@ pub fn classify_tool_result(
                 (value, None)
             };
             let json = portable_value(tool, ToolContractPhase::Output, &value)?;
-            let (value, json) = match crate::llm::parse_handler_result_envelope(&json) {
-                None => (value, json),
-                Some(Err(())) => {
-                    return Err(contract_failure(
-                        tool,
-                        ToolContractPhase::Output,
-                        "handlerResultEnvelope",
-                    ))
-                }
-                Some(Ok(envelope)) => {
-                    let failure = match envelope.outcome {
-                        HandlerOutcome::Ok => None,
-                        HandlerOutcome::Error => Some(ToolApplicationOutcome::Error),
-                        HandlerOutcome::Rejected => Some(ToolApplicationOutcome::Rejected),
-                    };
-                    if let Some(outcome) = failure {
-                        return prepared
-                            .declared_failure(tool, envelope.data, outcome)
-                            .map(ToolInvocationOutcome::ApplicationError)
-                            .map_err(ToolInvocationError::Contract);
-                    }
-                    let data = match &value {
-                        VmValue::Dict(fields) => fields.get("data").cloned(),
-                        _ => None,
-                    }
-                    .unwrap_or_else(|| crate::schema::json_to_vm_value(envelope.data));
-                    (data, envelope.data.clone())
-                }
-            };
             prepared
                 .validate_output(tool, &json)
                 .map_err(ToolInvocationError::Contract)?;
@@ -257,19 +250,17 @@ fn portable_value(
     phase: ToolContractPhase,
     value: &VmValue,
 ) -> Result<JsonValue, ToolInvocationError> {
-    result_to_json(value).map_err(|_| contract_failure(tool, phase, "portableJson"))
-}
-
-fn contract_failure(tool: &str, phase: ToolContractPhase, keyword: &str) -> ToolInvocationError {
-    ToolInvocationError::Contract(ToolContractViolation {
-        tool: tool.to_string(),
-        phase,
-        violations: vec![ToolContractViolationDetail {
-            structural_path: String::new(),
-            schema_path: String::new(),
-            keyword: keyword.to_string(),
-            missing_property: None,
-        }],
+    result_to_json(value).map_err(|_| {
+        ToolInvocationError::Contract(ToolContractViolation {
+            tool: tool.to_string(),
+            phase,
+            violations: vec![ToolContractViolationDetail {
+                structural_path: String::new(),
+                schema_path: String::new(),
+                keyword: "portableJson".to_string(),
+                missing_property: None,
+            }],
+        })
     })
 }
 
@@ -347,113 +338,6 @@ mod tests {
                 ..
             })
         ));
-    }
-
-    fn envelope(outcome: &str, data: JsonValue) -> VmValue {
-        crate::schema::json_to_vm_value(&json!({
-            "schema": crate::llm::AGENT_TOOL_HANDLER_RESULT_SCHEMA,
-            "outcome": outcome,
-            "text": serde_json::to_string(&data).unwrap(),
-            "data": data,
-        }))
-    }
-
-    #[test]
-    fn ok_envelope_succeeds_with_its_data_under_the_output_schema() {
-        let outcome = classify_tool_result(
-            &prepared(None),
-            "widgets.create",
-            Ok(envelope("ok", json!(42))),
-        )
-        .expect("ok envelope whose data satisfies the output schema");
-        let ToolInvocationOutcome::Success { value, json } = outcome else {
-            panic!("expected success, got {outcome:?}");
-        };
-        assert_eq!(json, json!(42));
-        assert!(matches!(value, VmValue::Int(42)), "{value:?}");
-
-        let raw = classify_tool_result(&prepared(None), "widgets.create", Ok(VmValue::Int(7)))
-            .expect("raw returns keep their meaning");
-        assert!(matches!(
-            raw,
-            ToolInvocationOutcome::Success { json, .. } if json == json!(7)
-        ));
-    }
-
-    #[test]
-    fn ok_envelope_data_that_violates_the_output_schema_fails_closed() {
-        let error = classify_tool_result(
-            &prepared(None),
-            "widgets.create",
-            Ok(envelope("ok", json!("not an integer"))),
-        )
-        .expect_err("schema-violating envelope data");
-        assert!(matches!(
-            error,
-            ToolInvocationError::Contract(ToolContractViolation {
-                phase: ToolContractPhase::Output,
-                ..
-            })
-        ));
-    }
-
-    #[test]
-    fn failure_envelopes_are_declared_application_errors() {
-        for (declared, expected) in [
-            ("error", ToolApplicationOutcome::Error),
-            ("rejected", ToolApplicationOutcome::Rejected),
-        ] {
-            // Data that would satisfy the output schema still cannot turn a
-            // declared failure into success.
-            let outcome = classify_tool_result(
-                &prepared(None),
-                "widgets.create",
-                Ok(envelope(declared, json!(42))),
-            )
-            .expect("failure envelope is application data");
-            let ToolInvocationOutcome::ApplicationError(error) = outcome else {
-                panic!("{declared} envelope succeeded: {outcome:?}");
-            };
-            assert_eq!(error.data, json!(42));
-            assert_eq!(error.outcome, Some(expected));
-            assert_eq!(error.to_json()["outcome"], json!(declared));
-        }
-
-        let schema = json!({
-            "type": "object",
-            "properties": {"code": {"const": "conflict"}},
-            "required": ["code"],
-        });
-        let error = classify_tool_result(
-            &prepared(Some(schema)),
-            "widgets.create",
-            Ok(envelope("error", json!({"code": "other"}))),
-        )
-        .expect_err("a declared error schema still governs failure data");
-        assert!(matches!(
-            error,
-            ToolInvocationError::Contract(ToolContractViolation {
-                phase: ToolContractPhase::ApplicationError,
-                ..
-            })
-        ));
-    }
-
-    #[test]
-    fn malformed_envelope_is_a_contract_failure_not_freeform_output() {
-        let malformed = crate::schema::json_to_vm_value(&json!({
-            "schema": crate::llm::AGENT_TOOL_HANDLER_RESULT_SCHEMA,
-            "outcome": "maybe",
-            "text": "42",
-            "data": 42,
-        }));
-        let error =
-            classify_tool_result(&prepared(Some(json!({}))), "widgets.create", Ok(malformed))
-                .expect_err("malformed envelope");
-        let ToolInvocationError::Contract(violation) = error else {
-            panic!("expected contract failure, got {error:?}");
-        };
-        assert_eq!(violation.violations[0].keyword, "handlerResultEnvelope");
     }
 
     #[test]

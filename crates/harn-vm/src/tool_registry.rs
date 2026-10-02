@@ -17,9 +17,10 @@ pub(crate) mod handler_result;
 pub use handler_result::tool_handler_output_schema;
 mod invocation;
 pub use contract::*;
+pub(crate) use invocation::tool_registry_catalog_for_tool;
 pub use invocation::{
     application_error_cli_envelope, application_error_mcp_result, classify_tool_failure,
-    classify_tool_result, tool_runtime_error_summary, ToolFailureClassification,
+    classify_tool_result, result_to_json, tool_runtime_error_summary, ToolFailureClassification,
     ToolInvocationError, ToolInvocationOutcome,
 };
 
@@ -116,33 +117,6 @@ pub fn tool_registry_catalog(registry: &VmValue) -> Result<ToolCatalog, VmError>
     Ok(catalog)
 }
 
-/// Prepare a direct agent dispatch without compiling unrelated tool entries.
-/// Lifecycle-owned registries retain their full prepared catalog instead.
-pub(crate) fn tool_registry_catalog_for_tool(
-    registry: &VmValue,
-    name: &str,
-) -> Result<ToolCatalog, VmError> {
-    // Agent primitives also accept legacy `{tools: [...]}` wrappers.
-    let registry = registry
-        .as_dict()
-        .ok_or_else(|| VmError::Runtime("expected a tool registry".into()))?;
-    let entry = registry_entries(registry)?
-        .iter()
-        .find(|entry| {
-            entry.as_dict().is_some_and(|entry| {
-            matches!(entry.get("name"), Some(VmValue::String(actual)) if actual.as_ref() == name)
-        })
-        })
-        .ok_or_else(|| VmError::Runtime(format!("tool {name:?} is not registered")))?;
-    Ok(ToolCatalog {
-        schema_version: ToolCatalogSchemaVersion::V2,
-        info: None,
-        cli: None,
-        tools: vec![catalog_entry(entry)?],
-        components: registry_components(registry)?,
-    })
-}
-
 /// Normalize and retain only tools exposed to one adapter audience.
 pub fn tool_registry_catalog_for_audience(
     registry: &VmValue,
@@ -208,12 +182,6 @@ fn executable_tools_matching(
         });
     }
     Ok(executable)
-}
-
-/// Convert a handler result to portable JSON without stringifying unsupported
-/// runtime-only values such as closures or capability handles.
-pub fn result_to_json(value: &VmValue) -> Result<JsonValue, String> {
-    crate::llm::helpers::vm_value_to_export_json_strict(value, "result")
 }
 
 /// Validate one definition as it enters a registry. Cross-entry invariants are

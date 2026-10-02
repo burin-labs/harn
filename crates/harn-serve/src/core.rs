@@ -28,12 +28,14 @@ mod event_log;
 use event_log::install_scoped_event_log;
 mod prepared_generation;
 mod prepared_tools;
+mod response;
 use arguments::{build_vm_args, canonical_arguments_json};
 pub use config::DispatchCoreConfig;
 use error_classification::classify_vm_error;
 use prepared_generation::PreparedDispatchGeneration;
 pub use prepared_generation::{DispatchCallReceipt, DispatchGenerationReceipt};
 use prepared_tools::PreparedTools;
+pub use response::CallResponse;
 
 fn install_dispatch_vm_runtime(
     vm: &mut Vm,
@@ -210,18 +212,6 @@ fn resolve_request_actor_chain(
     Some(chain)
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct CallResponse {
-    pub function: String,
-    pub value: serde_json::Value,
-    pub printed_output: String,
-    pub feedback: Option<String>,
-    pub trace_id: TraceId,
-    pub cached: bool,
-    pub duration_ms: u128,
-    pub dispatch: DispatchCallReceipt,
-}
-
 #[async_trait(?Send)]
 pub trait VmConfigurator: Send + Sync {
     fn configure(&self, _vm: &mut Vm) -> Result<(), DispatchError> {
@@ -376,16 +366,11 @@ impl DispatchCore {
                             "replay cache contains a value outside the current tool contract: {error}"
                         ))
                     })?;
-                return Ok(CallResponse {
-                    function: request.function.clone(),
-                    value: cached.value,
-                    printed_output: cached.printed_output,
-                    feedback: cached.feedback,
+                return Ok(CallResponse::from_replay(
+                    request.function.clone(),
+                    cached,
                     trace_id,
-                    cached: true,
-                    duration_ms: 0,
-                    dispatch: DispatchCallReceipt::default(),
-                });
+                ));
             }
         }
 
