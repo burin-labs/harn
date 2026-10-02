@@ -463,7 +463,7 @@ fn client_secret_sources_resolve_and_name_their_failures() {
         "a trailing newline from `echo > file` is not part of the secret"
     );
 
-    let var = "HARN_TEST_CONNECT_CLIENT_SECRET_UNSET_7f3a";
+    let var = "CONNECT_TEST_CLIENT_SECRET_UNSET_7F3A";
     let from_unset_env = parse(&["--client-secret-from-env", var]).unwrap();
     let error = resolve_oauth_client_secret(&from_unset_env.oauth).unwrap_err();
     assert!(error.contains(var), "{error}");
