@@ -222,8 +222,6 @@ pub const E2E_CAPACITY_DECISION_STEP = "Decide where the slow E2E suite lands"
 /** The input that carries the evacuation switch into that decision. */
 pub const E2E_EVACUATION_INPUT = "FLEET_EVACUATION"
 
-pub const BLACKSMITH_8CPU_RUNNER = "blacksmith-8vcpu-ubuntu-2404"
-
 pub const RUST_CACHE_ACTION = "./.github/actions/rust-cache"
 
 // Authorized ci.yml cache writers must grant actions: write. The workflow
@@ -1790,10 +1788,6 @@ pub fn owned_producer_condition() -> string {
   return "(needs.rust-producer-capacity.outputs.route == 'owned'"
 }
 
-pub fn paid_producer_condition() -> string {
-  return "(github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository))"
-}
-
 /**
  * Three rungs, one shape, used for `runs-on`, `timeout-minutes` and the tier
  * mirror. They are generated from one function so the three can never disagree
@@ -1810,27 +1804,71 @@ pub fn vendor_producer_condition() -> string {
   return "(vars.${PAID_LINUX_PROVIDER_VAR} != 'github'"
 }
 
-pub fn producer_rung_expression(
-  paid: string,
-  owned: string,
-  vendor: string,
-  hosted: string,
-) -> string {
+pub fn producer_rung_expression(owned: string, vendor: string, hosted: string) -> string {
   // An empty `owned` drops the owned rung: a lane that must not wait on the
   // owned pool's per-host compile budget goes straight to paid capacity.
   const owned_rung = if owned == "" {
     ""
   } else {
-    "\n  || ${owned_producer_condition()}" + "\n  && ${owned})"
+    "${owned_producer_condition()}" + "\n  && ${owned})" + "\n  || "
   }
   return "$"
-    + "{{ (vars.${BLACKSMITH_ENABLE_VAR} == 'true'"
-    + "\n  && ${paid_producer_condition()}"
-    + "\n  && ${paid})"
+    + "{{ "
     + owned_rung
-    + "\n  || ${vendor_producer_condition()}"
+    + "${vendor_producer_condition()}"
     + "\n  && ${vendor})"
     + "\n  || ${hosted} }}"
+}
+
+/**
+ * Linux runner label prefixes whose hosts cannot confine a Harn child.
+ *
+ * Since #9068 a Harn child process on Linux refuses to start without Landlock
+ * or bubblewrap, and Blacksmith's Linux image has neither ("Linux bubblewrap
+ * is not available on this host"). Every Linux lane here runs Harn or its
+ * tests, so none may resolve to these runners. Windows and macOS Blacksmith
+ * runners are not Linux and are not listed.
+ */
+pub const LANDLOCK_INCAPABLE_LINUX_RUNNER_PREFIXES = ["blacksmith-"]
+
+fn linux_runner_label(label: string) -> bool {
+  return contains(label, "ubuntu") || contains(label, "linux") || contains(label, "Linux")
+}
+
+/**
+ * Every Linux runner label a job can resolve to, from its `runs-on` (literal,
+ * list or expression) and its matrix `runner` values.
+ */
+fn job_runner_labels(job: dict) -> list<string> {
+  let texts: list<string> = [to_string(job?.["runs-on"] ?? "")]
+  for row in job?.strategy?.matrix?.include ?? [] {
+    texts = texts + [to_string(row?.runner ?? "")]
+  }
+  let labels: list<string> = []
+  for text in texts {
+    labels = labels
+      + regex_captures("[A-Za-z0-9][A-Za-z0-9._-]*", text).map({ hit -> to_string(hit.match) })
+        .to_list()
+  }
+  return labels
+}
+
+/** No Linux job may resolve to a runner that cannot confine a Harn child. */
+pub fn landlock_incapable_runner_errors(workflow_name: string, workflow: dict) -> list<string> {
+  let errors: list<string> = []
+  for {key: job_name, value: job} in (workflow?.jobs ?? {}) {
+    for label in job_runner_labels(job) {
+      for prefix in LANDLOCK_INCAPABLE_LINUX_RUNNER_PREFIXES {
+        if starts_with(label, prefix) && linux_runner_label(label) {
+          errors = errors
+            + [
+              "${workflow_name}:${job_name} can resolve to ${label}, a Linux runner that cannot confine a Harn child (no Landlock or bubblewrap)",
+            ]
+        }
+      }
+    }
+  }
+  return errors
 }
 
 /**
@@ -1847,9 +1885,8 @@ pub fn producer_uses_owned_pool(job_name: string) -> bool {
   return job_name != "rust-cli"
 }
 
-pub fn producer_runner_expression(runner: string, owned_rung: bool = true) -> string {
+pub fn producer_runner_expression(owned_rung: bool = true) -> string {
   return producer_rung_expression(
-    "'${runner}'",
     owned_rung ? "fromJSON('${SELFHOSTED_LINUX_BIG_RUNNER}')" : "",
     "'${PRODUCER_VENDOR_LINUX_RUNNER}'",
     "'${PRODUCER_HOSTED_LINUX_RUNNER}'",
@@ -1858,7 +1895,6 @@ pub fn producer_runner_expression(runner: string, owned_rung: bool = true) -> st
 
 pub fn producer_tier_expression(owned_rung: bool = true) -> string {
   return producer_rung_expression(
-    "'${BLACKSMITH_RUNNER_TIER}'",
     owned_rung ? "'${SELFHOSTED_RUNNER_TIER}'" : "",
     "'${UBICLOUD_RUNNER_TIER}'",
     "'${HOSTED_RUNNER_TIER}'",
@@ -1919,16 +1955,11 @@ fn proven_push_main_only_errors(jobs: dict) -> list<string> {
 pub fn minimal_pr_capacity_errors(ci: dict, publish: dict) -> list<string> {
   let errors: list<string> = []
   const jobs = ci?.jobs ?? {}
-  const elastic_runner = "$"
-    + "{{ vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true' && (github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) && 'blacksmith-8vcpu-ubuntu-2404' || '${HOSTED_LINUX_RUNNER}' }}"
-  for name in [ARTIFACT_READY_JOB, SECURITY_READY_JOB] {
+  // The Clippy and Harn proof lanes used to switch to Blacksmith Linux, which
+  // cannot confine a Harn child; they run on the shared hosted runner.
+  for name in [ARTIFACT_READY_JOB, SECURITY_READY_JOB, "rust-checks", "harn-audit"] {
     if trim(jobs[name]?.["runs-on"] ?? "") != HOSTED_LINUX_RUNNER {
       errors = errors + ["ci.yml:${name} must use GitHub-hosted ${HOSTED_LINUX_RUNNER}"]
-    }
-  }
-  for name in ["rust-checks", "harn-audit"] {
-    if trim(jobs[name]?.["runs-on"] ?? "") != elastic_runner {
-      errors = errors + ["ci.yml:${name} must use the shared elastic Linux runner switch"]
     }
   }
   // The Rust workspace producer carries one more rung than its siblings.
@@ -1939,12 +1970,13 @@ pub fn minimal_pr_capacity_errors(ci: dict, publish: dict) -> list<string> {
   // residential machine's health, which is the objection #6217 recorded when it
   // removed the previous ladder.
   if trim(jobs["rust-check-inputs"]?.["runs-on"] ?? "")
-    != producer_runner_expression(BLACKSMITH_8CPU_RUNNER) {
+    != producer_runner_expression() {
     errors = errors
       + [
-        "ci.yml:rust-check-inputs must ladder the elastic switch, the owned ${SELFHOSTED_LINUX_BIG_POOL} pool on same-repository pull requests, then GitHub-hosted",
+        "ci.yml:rust-check-inputs must ladder the owned ${SELFHOSTED_LINUX_BIG_POOL} pool on same-repository pull requests, ${PRODUCER_VENDOR_LINUX_RUNNER}, then ${PRODUCER_HOSTED_LINUX_RUNNER}",
       ]
   }
+  errors = errors + landlock_incapable_runner_errors("ci.yml", ci)
   // Stays behind the merge on COST, not on principle: fourteen minutes, most
   // of it one aggregate and two integration sweeps. It is a candidate to move
   // the day it gets cheaper, and the cheap refusals it used to strand now sit
@@ -2060,14 +2092,10 @@ pub fn e2e_elastic_capacity_errors(e2e: dict) -> list<string> {
   const job = e2e?.jobs?.e2e ?? {}
   const capacity_job = e2e?.jobs?.["e2e-capacity"] ?? {}
   const capacity_step = step_by_name(capacity_job?.steps ?? [], E2E_CAPACITY_DECISION_STEP)
-  let errors: list<string> = []
-  if !contains(to_string(job?.["runs-on"] ?? ""), "vars.${BLACKSMITH_ENABLE_VAR} == 'true'") {
-    errors = errors
-      + ["e2e.yml:e2e must let ${BLACKSMITH_ENABLE_VAR} override owned Linux capacity"]
-  }
-  if !contains(to_string(job?.["runs-on"] ?? ""), BLACKSMITH_8CPU_RUNNER) {
-    errors = errors + ["e2e.yml:e2e must route the paid override to ${BLACKSMITH_8CPU_RUNNER}"]
-  }
+  // The evacuation switch still moves the suite off the owned pool, through
+  // the capacity decision below; it no longer names Blacksmith Linux, which
+  // cannot confine the Harn children this suite spawns.
+  let errors: list<string> = landlock_incapable_runner_errors("e2e.yml", {jobs: {e2e: job}})
   if capacity_step == nil {
     errors = errors
       + ["e2e.yml:e2e-capacity must keep the '${E2E_CAPACITY_DECISION_STEP}' step"]

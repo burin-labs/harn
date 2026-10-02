@@ -292,11 +292,18 @@ pipeline test_minimal_pr_capacity_policy_and_negative_controls(harness: Harness,
       "publish-release.yml must not trigger on branch pushes",
     ),
   )
-  let unrouted_source_checks = ci
-  unrouted_source_checks.jobs["harn-audit"]["runs-on"] = "ubuntu-24.04"
+  // The Harn proof lanes spawn Harn children, which refuse to start on a Linux
+  // runner with neither Landlock nor bubblewrap. Routing them back through the
+  // Blacksmith Linux switch is refused twice: off the hosted runner, and onto
+  // a runner the Landlock contract names.
+  let confinement_blind = ci
+  confinement_blind.jobs["harn-audit"]["runs-on"] = "$"
+    + "{{ vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true' && 'blacksmith-8vcpu-ubuntu-2404' || 'ubuntu-24.04' }}"
+  const blind_errors = minimal_pr_capacity_errors(confinement_blind, publish)
+  assert(blind_errors.contains("ci.yml:harn-audit must use GitHub-hosted ubuntu-24.04"))
   assert(
-    minimal_pr_capacity_errors(unrouted_source_checks, publish).contains(
-      "ci.yml:harn-audit must use the shared elastic Linux runner switch",
+    blind_errors.any(
+      fn(error) { contains(error, "ci.yml:harn-audit can resolve to blacksmith-8vcpu-ubuntu-2404") },
     ),
   )
 }
