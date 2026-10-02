@@ -60,10 +60,9 @@ type StepBudget = {name: string, minutes: int, cold_seconds: int}
 
 /** `rust-cli` builds the shared CLI beside the test job. */
 const CLI_PRODUCER_STEP_BUDGETS: list<StepBudget> = [
-  // Projected, not yet observed: the dev-profile cold wall (435s) scaled by
-  // the ci-cli profile's measured cold cost, 447s against 287s for the same
-  // tree on one fleet host. Replace it with the first observed cold CI wall.
-  {name: "Build portable Harn CLI", minutes: 15, cold_seconds: 678},
+  // The ci-cli profile (opt-level 1) on hosted ubuntu-8core with no ci-cli
+  // target restored: 850s on run 36956226587, against 435s for dev.
+  {name: "Build portable Harn CLI", minutes: 19, cold_seconds: 850},
 ]
 
 /** `rust-check-inputs` builds and runs the workspace test graph. */
@@ -82,7 +81,8 @@ const PRODUCER_STEP_BUDGETS: list<StepBudget> = CLI_PRODUCER_STEP_BUDGETS
 // the policy margin. It is not proof of completed cold CI or portable replay.
 // Those observations were of the dev profile; the shared CLI now builds in
 // ci-cli, whose cold build measured 1.56x the dev one on the same host, so the
-// lower bound is scaled by that ratio.
+// lower bound is scaled by that ratio. One owned ci-cli cold build has since
+// completed in 875s (cattrick-w3, run 36952725704), inside this bound.
 const PRODUCER_OWNED_CLI_MINUTES = 31
 
 const PRODUCER_OWNED_CLI_COLD_LOWER_BOUND_SECONDS = 1404
@@ -100,7 +100,7 @@ pub fn producer_security_timeout_expression() -> string {
 }
 
 pub fn producer_cli_timeout_expression() -> string {
-  return "$" + "{{ env.HARN_RUNNER_TIER == 'self-hosted' && ${PRODUCER_OWNED_CLI_MINUTES} || 15 }}"
+  return "$" + "{{ env.HARN_RUNNER_TIER == 'self-hosted' && ${PRODUCER_OWNED_CLI_MINUTES} || 19 }}"
 }
 
 /**

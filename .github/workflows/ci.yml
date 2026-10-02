@@ -915,7 +915,7 @@ jobs:
     # compiled units, so in one job the test build waited 230-310s for nothing.
     # Paid minutes per run are about the same; two paid runners now overlap.
     #
-    # Hosted ceiling: 6 setup + 15 CLI budget + 12 cache-save reserve = 33.
+    # Hosted ceiling: 6 setup + 19 CLI budget + 12 cache-save reserve = 37.
     # Owned ceiling: 6 setup + 31 CLI budget = 37.
     # The CLI builds in the ci-cli profile (opt-level 1), which costs more to
     # compile than dev and runs every Harn proof lane four to five times faster.
@@ -932,7 +932,7 @@ jobs:
         && 20)
         || (needs.rust-producer-capacity.outputs.route == 'owned'
         && 37)
-        || 33 }}
+        || 37 }}
     # The GitHub-hosted rung remains the authorized main-branch cache writer;
     # Blacksmith uses sticky sccache and never enters that step, and the owned
     # self-hosted rung is pull-request-only so it never reaches the write
@@ -1012,7 +1012,7 @@ jobs:
       - name: Record the sccache baseline
         run: ./scripts/ci/sccache_baseline.sh
       - name: Build portable Harn CLI
-        timeout-minutes: ${{ env.HARN_RUNNER_TIER == 'self-hosted' && 31 || 15 }}
+        timeout-minutes: ${{ env.HARN_RUNNER_TIER == 'self-hosted' && 31 || 19 }}
         env:
           CARGO_BUILD_JOBS: ${{ steps.resource-budget.outputs.build_jobs }}
         run: >-
