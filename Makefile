@@ -681,6 +681,7 @@ test-pr-gate-scripts:
 	./scripts/tests/sha256_file_hex_test.sh
 	./scripts/tests/wait_for_rate_limit_reset_test.sh
 	./scripts/tests/main_health_test.sh
+	./scripts/tests/main_health_carry_test.sh
 	./scripts/tests/check_stdlib_host_neutral_test.sh
 	./scripts/tests/check_public_product_names_test.sh
 	./scripts/tests/check_pr_metadata_privacy_test.sh
