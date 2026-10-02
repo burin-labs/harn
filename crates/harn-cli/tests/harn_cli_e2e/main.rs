@@ -26,6 +26,7 @@ mod acp_server_cli;
 mod agent_run_command_argv_coercion;
 mod artifact_manifest_schema;
 mod attributed_decl_cli;
+mod bubblewrap_fallback_e2e;
 mod cache_dir_cli;
 mod canon_dispatch;
 mod check_fmt_json_cli;

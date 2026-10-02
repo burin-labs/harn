@@ -6,25 +6,27 @@
 set -euo pipefail
 script="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/ci/reuse_workspace_crates.sh"
 
-probe=$(mktemp)
+root=$(mktemp -d)
+trap 'rm -rf "$root"' EXIT
+probe="$root/probe"
+touch "$probe"
 if ! touch -h -d @946684800 "$probe" 2>/dev/null \
   || [[ "$(stat -c %Y "$probe" 2>/dev/null)" != 946684800 ]]; then
   rm -f "$probe"
   # The producer runners are Linux. Elsewhere the script refuses by name, so
   # check that refusal instead of the stamps it cannot set.
-  out=$(cd "$(mktemp -d)" && git init -q -b main . && "$script" restore)
+  out=$(cd "$root" && git init -q -b main . && "$script" restore)
   [[ "$out" == *"cannot set file times here"* ]]
   echo "ci_reuse_workspace_crates_test: ok (refusal where file times cannot be set)"
   exit 0
 fi
 rm -f "$probe"
 
-root=$(mktemp -d)
-trap 'rm -rf "$root"' EXIT
 cd "$root"
 git init -q -b main .
 git config user.email test@example.com
 git config user.name test
+git config commit.gpgsign false
 mkdir -p crates/a/src crates/b/src crates/c/src
 echo a > crates/a/src/lib.rs
 echo b > crates/b/src/lib.rs

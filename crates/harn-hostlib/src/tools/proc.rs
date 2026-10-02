@@ -895,13 +895,7 @@ fn lossy_prefix(bytes: &[u8], max_inline_bytes: usize) -> (String, bool) {
 }
 
 pub(crate) fn sandbox_kind() -> &'static str {
-    if cfg!(target_os = "linux") {
-        "landlock"
-    } else if cfg!(target_os = "macos") {
-        "sandbox-exec"
-    } else {
-        "none"
-    }
+    harn_vm::process_sandbox::active_backend_mechanism().process_kind()
 }
 
 pub(crate) fn sandbox_response(
