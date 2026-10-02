@@ -89,6 +89,16 @@ run_case "a failed job request fails" failure "${healthy[@]}" JOBS_FAIL=1
 run_case "an empty history is unjudged" pending "${healthy[@]}" HISTORY_Alpha=
 run_case "a skipped judged job is unjudged" pending "${healthy[@]}" JOB_10=
 
+window="$(for id in $(seq 10 21); do printf '%s success\n' "$id"; done)"
+run_case "a thin all-red judged-job window is unreadable" failure "${healthy[@]}" \
+  HISTORY_Beta="$window" JOB_10=failure
+run_case "a judged-job red run before a measured pass is judged" success "${healthy[@]}" \
+  HISTORY_Beta="$window" JOB_10=failure JOB_11=success
+run_case "an in-flight newest run is passed over" success "${healthy[@]}" \
+  HISTORY_Alpha=$'1 -\n2 success\n'
+run_case "an in-flight run cannot break a red streak" failure "${healthy[@]}" \
+  HISTORY_Alpha=$'1 failure\n2 -\n3 failure\n4 failure\n'
+
 if (( failures > 0 )); then
   echo "main health: $failures case(s) failed"
   exit 1
