@@ -85,8 +85,15 @@ pub fn harn_e2e_binary() -> &'static Path {
 /// Nextest identity env is stripped so spawned CLI processes write state
 /// under the test's project directory instead of
 /// `/tmp/harn-nextest-state/<hash>/`.
+/// Inherited loader controls are excluded using the runtime's trusted-setup
+/// classifier. Callers can still inject deliberate controls after construction.
 pub fn harn_e2e_command() -> Command {
     let mut command = Command::new(harn_e2e_binary());
+    for (name, _) in std::env::vars_os() {
+        if harn_vm::security::environment_policy::is_trusted_setup_control(&name) {
+            command.env_remove(name);
+        }
+    }
     command
         .env_remove("NEXTEST")
         .env_remove("NEXTEST_RUN_ID")
