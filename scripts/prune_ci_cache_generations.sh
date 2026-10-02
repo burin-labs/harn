@@ -127,7 +127,7 @@ per_commit_family_selector='
   | .id
 '
 
-usage_modes="--family-prefix v0-rust-release-<target>- | --local-sccache-family-prefix <repository>-sccache-local-<cache-key>-<os>-<arch>- | --harn-check-cache-family-prefix harn-check-cache-v<N>-<family>-<os>-<arch>- | --all-release-families | --clear-family-prefix v0-rust-{workspace-tests|package-audit}- | --to-budget <bytes-at-least-1GiB> | --ensure-headroom <positive-bytes>"
+usage_modes="--family-prefix v0-rust-release-<target>- | --local-sccache-family-prefix <repository>-sccache-local-<cache-key>-<os>-<arch>- | --harn-check-cache-family-prefix harn-check-cache-v<N>-<family>-<os>-<arch>- | --all-release-families | --clear-family-prefix v0-rust-{workspace-tests|package-audit|harn-ci-cli}- | --to-budget <bytes-at-least-1GiB> | --ensure-headroom <positive-bytes>"
 
 case "$mode" in
   --family-prefix)
@@ -200,9 +200,10 @@ case "$mode" in
   --clear-family-prefix)
     family_prefix="${2:-}"
     if [[ "$family_prefix" != "v0-rust-workspace-tests-" \
-      && "$family_prefix" != "v0-rust-package-audit-" ]] \
+      && "$family_prefix" != "v0-rust-package-audit-" \
+      && "$family_prefix" != "v0-rust-harn-ci-cli-" ]] \
       || [[ -n "${3:-}" ]]; then
-      echo "usage: $0 --clear-family-prefix v0-rust-{workspace-tests|package-audit}-" >&2
+      echo "usage: $0 --clear-family-prefix v0-rust-{workspace-tests|package-audit|harn-ci-cli}-" >&2
       exit 64
     fi
     selector='[.[].actions_caches[] | select(.key | startswith($family_prefix)) | .id] | .[]'
