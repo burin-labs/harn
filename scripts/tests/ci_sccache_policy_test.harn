@@ -1560,16 +1560,34 @@ pipeline test_host_bound_sandbox_filter_has_one_owner(harness: Harness, task: un
   const root = path_normalize(path_join(harness.fs.cwd(), "../.."))
   const test_names = harness.fs.read_text(path_join(root, HOST_BOUND_RUST_TEST_FILTER_SOURCE))
     .split("\n")
-    .filter({ name -> trim(name) != "" })
+    .filter({ row -> trim(row) != "" })
     .to_list()
   assert_eq(test_names.count, 12)
-  const rendered = harness.process.run(
-    {program: path_join(root, HOST_BOUND_RUST_TEST_FILTER_COMMAND), args: []},
+  const linux_names = test_names.filter(
+    { row -> ["all", "linux", "unix"].contains(trim(row).split(" ")[0]) },
   )
-  assert_eq(rendered.exit_code, 0)
+    .map({ row -> trim(row).split(" ")[1] })
+    .to_list()
+  const macos_names = test_names.filter(
+    { row -> ["all", "macos", "unix"].contains(trim(row).split(" ")[0]) },
+  )
+    .map({ row -> trim(row).split(" ")[1] })
+    .to_list()
+  const rendered_linux = harness.process.run(
+    {program: path_join(root, HOST_BOUND_RUST_TEST_FILTER_COMMAND), args: ["linux"]},
+  )
+  assert_eq(rendered_linux.exit_code, 0)
   assert_eq(
-    trim(rendered.stdout),
-    test_names.map({ name -> "test(/(^|::)" + name + "(::|$)/)" }).to_list().join(" or "),
+    trim(rendered_linux.stdout),
+    linux_names.map({ name -> "test(/(^|::)" + name + "(::|$)/)" }).to_list().join(" or "),
+  )
+  const rendered_macos = harness.process.run(
+    {program: path_join(root, HOST_BOUND_RUST_TEST_FILTER_COMMAND), args: ["macos"]},
+  )
+  assert_eq(rendered_macos.exit_code, 0)
+  assert_eq(
+    trim(rendered_macos.stdout),
+    macos_names.map({ name -> "test(/(^|::)" + name + "(::|$)/)" }).to_list().join(" or "),
   )
   const renderer_source = harness.fs.read_text(path_join(root, HOST_BOUND_RUST_TEST_FILTER_COMMAND))
   assert_eq(renderer_source.split(HOST_BOUND_RUST_TEST_FILTER_SOURCE).count - 1, 1)

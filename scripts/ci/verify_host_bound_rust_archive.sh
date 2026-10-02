@@ -3,14 +3,13 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
-repo_root="$(cd "$SCRIPT_DIR/../.." && pwd -P)"
 inventory="${1:?usage: verify_host_bound_rust_archive.sh <nextest-inventory.json>}"
-registry="$repo_root/scripts/config/host-bound-rust-tests.txt"
 selected_file="$(mktemp "${TMPDIR:-/tmp}/host-bound-rust-selected.XXXXXX")"
 trap 'rm -f "$selected_file"' EXIT
 
 scripts_filter="$SCRIPT_DIR/host_bound_rust_test_filter.sh"
-"$scripts_filter" >/dev/null
+"$scripts_filter" linux >/dev/null
+expected_names="$("$scripts_filter" linux names)"
 
 if ! jq -e '
   .["rust-suites"] as $suites
@@ -69,7 +68,7 @@ while IFS= read -r expected || [[ -n "$expected" ]]; do
     exit 1
   fi
   ((expected_count += 1))
-done < "$registry"
+done <<< "$expected_names"
 
 while IFS= read -r selected; do
   test_name="${selected#*$}"
@@ -80,7 +79,7 @@ while IFS= read -r selected; do
       attributed=1
       break
     fi
-  done < "$registry"
+  done <<< "$expected_names"
   if (( attributed == 0 )); then
     echo "error: archived filter selected a test outside the host-bound registry: $selected" >&2
     exit 1

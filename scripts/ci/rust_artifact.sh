@@ -463,7 +463,7 @@ build_security_bundle() {
   cargo nextest archive --locked --workspace --profile ci \
     -E "$SECURITY_FILTER" \
     --archive-file "$staging/harn-security-tests.tar.zst"
-  host_bound_filter="$("${SCRIPT_DIR}/host_bound_rust_test_filter.sh")"
+  host_bound_filter="$("${SCRIPT_DIR}/host_bound_rust_test_filter.sh" linux)"
   cargo nextest list --profile ci \
     --archive-file "$staging/harn-security-tests.tar.zst" \
     --message-format json -E "$host_bound_filter" \

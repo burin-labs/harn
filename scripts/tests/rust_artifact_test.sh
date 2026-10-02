@@ -5,11 +5,18 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 script="$repo_root/scripts/ci/rust_artifact.sh"
 policy_nextest="$(jq -er '.nextest_version' "$repo_root/.github/cache-policy.json")"
 expected_security_filter="$(sed -n "s/^readonly SECURITY_FILTER='\(.*\)'$/\1/p" "$script")"
-expected_host_bound_filter="$("$repo_root/scripts/ci/host_bound_rust_test_filter.sh")"
+expected_host_bound_filter="$("$repo_root/scripts/ci/host_bound_rust_test_filter.sh" linux)"
 [[ -n "$expected_security_filter" ]]
 [[ "$expected_security_filter" == *'package(harn-cli) and binary(harn_cli_e2e)'* ]]
+expected_linux_tests="$("$repo_root/scripts/ci/host_bound_rust_test_filter.sh" linux names)"
+expected_macos_tests="$("$repo_root/scripts/ci/host_bound_rust_test_filter.sh" macos names)"
 grep -Fxq 'canonical_fixture_scrubs_ambient_loader_controls_without_scrubbing_explicit_controls' \
-  "$repo_root/scripts/config/host-bound-rust-tests.txt"
+  <<< "$expected_linux_tests"
+grep -Fxq 'local_backend_execs_inside_session_outputs' <<< "$expected_macos_tests"
+if grep -Fxq 'local_backend_execs_inside_session_outputs' <<< "$expected_linux_tests"; then
+  echo "Linux projection included the macOS-only sandbox test" >&2
+  exit 1
+fi
 tmpdir="$(mktemp -d)"
 trap 'rm -rf "$tmpdir"' EXIT
 
@@ -18,7 +25,7 @@ cp "$repo_root/rust-toolchain.toml" "$tmpdir/work/rust-toolchain.toml"
 make_fake_security_inventory() {
   local omitted_test=${1:-}
   local extra_test=${2:-}
-  jq -n --rawfile registry "$repo_root/scripts/config/host-bound-rust-tests.txt" \
+  jq -n --arg registry "$expected_linux_tests" \
     --arg omitted_test "$omitted_test" --arg extra_test "$extra_test" '
     ($registry | split("\n") | map(select(length > 0 and . != $omitted_test))
       + [$extra_test] | map(select(length > 0))) as $tests
@@ -183,7 +190,7 @@ test -f "$tmpdir/receipts/nextest-security"
 test -f "$tmpdir/receipts/nextest-security-list"
 
 # Missing one registered case in the archived inventory must fail publication.
-fixture_test="$(grep '^canonical_fixture_' "$repo_root/scripts/config/host-bound-rust-tests.txt")"
+fixture_test="$(grep '^canonical_fixture_' <<< "$expected_linux_tests")"
 make_fake_security_inventory "$fixture_test" > "$tmpdir/security-inventory-missing-fixture.json"
 if NEXTTEST_INVENTORY_OVERRIDE="$tmpdir/security-inventory-missing-fixture.json" \
   run_artifact build-security "$tmpdir/out/security-missing-fixture.tar.zst" "$commit" \
@@ -196,7 +203,7 @@ grep -Fq "host-bound registry entry is absent from archived tests: $fixture_test
 test ! -e "$tmpdir/out/security-missing-fixture.tar.zst"
 
 # Exact registry components reject both prefix and suffix lookalikes, even
-# though the canonical nextest substring filter selects those names.
+# though unanchored test-name matching would select those names.
 for lookalike in \
   harn_vm::stdlib::sandbox::prefix_workspace_env_integration::case \
   harn_vm::stdlib::sandbox::workspace_env_integration_suffix::case; do
@@ -240,6 +247,19 @@ grep -Fq 'archived filter selected a test outside the host-bound registry' \
   "$tmpdir/security-extra-test.out"
 test ! -e "$tmpdir/out/security-extra-test.tar.zst"
 
+# A macOS-only case must not leak into a Linux archive's selected inventory.
+make_fake_security_inventory "" local_backend_execs_inside_session_outputs > \
+  "$tmpdir/security-inventory-wrong-platform.json"
+if NEXTTEST_INVENTORY_OVERRIDE="$tmpdir/security-inventory-wrong-platform.json" \
+  run_artifact build-security "$tmpdir/out/security-wrong-platform.tar.zst" "$commit" \
+  > "$tmpdir/security-wrong-platform.out" 2>&1; then
+  echo "build-security accepted a macOS-only test in the Linux archive inventory" >&2
+  exit 1
+fi
+grep -Fq 'archived filter selected a test outside the host-bound registry' \
+  "$tmpdir/security-wrong-platform.out"
+test ! -e "$tmpdir/out/security-wrong-platform.tar.zst"
+
 # A status outside nextest's known listed/skipped vocabulary is malformed.
 jq '."rust-suites"."fake-skipped".status = "unreported"' \
   "$tmpdir/security-inventory.json" > "$tmpdir/security-inventory-unknown-status.json"
@@ -269,7 +289,7 @@ cp "$repo_root/rust-toolchain.toml" "$bad_filter_repo/"
 cat > "$tmpdir/bad-filter-consumer.sh" <<SH
 #!/usr/bin/env bash
 set -euo pipefail
-host_bound_filter=\$("$bad_filter_repo/scripts/ci/host_bound_rust_test_filter.sh")
+host_bound_filter=\$("$bad_filter_repo/scripts/ci/host_bound_rust_test_filter.sh" linux)
 cargo nextest run -E "\$host_bound_filter"
 SH
 chmod +x "$tmpdir/bad-filter-consumer.sh"
@@ -281,7 +301,7 @@ if (
   echo "Linux sandbox consumer accepted an empty host-bound test selector" >&2
   exit 1
 fi
-grep -Fxq 'host-bound Rust test list is empty' "$tmpdir/bad-filter.out"
+grep -Fxq 'host-bound Rust test list is empty for platform linux' "$tmpdir/bad-filter.out"
 test ! -e "$tmpdir/bad-filter-receipts/cargo-calls"
 
 github_env="$tmpdir/github-env"

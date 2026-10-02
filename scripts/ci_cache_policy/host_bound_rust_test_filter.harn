@@ -1,5 +1,5 @@
-// Blacksmith's Ubuntu image does not expose Landlock. The source file is the
-// single owner of the tests that require OS-enforced process isolation.
+// The registry owns both host-bound test membership and the target on which
+// each case exists, so archive inventory checks match the compiled platform.
 pub const HOST_BOUND_RUST_TEST_FILTER_SOURCE = "scripts/config/host-bound-rust-tests.txt"
 
 pub const HOST_BOUND_RUST_TEST_FILTER_COMMAND = "scripts/ci/host_bound_rust_test_filter.sh"
