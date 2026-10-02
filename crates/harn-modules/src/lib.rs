@@ -429,25 +429,29 @@ fn load_wave(
         std::thread::scope(|scope| {
             let handles: Vec<_> = (0..workers)
                 .map(|_| {
-                    scope.spawn(|| {
-                        let mut local = Vec::new();
-                        loop {
-                            let index = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                            let Some(path) = paths.get(index) else {
-                                break;
-                            };
-                            local.push((
-                                index,
-                                load_module(
-                                    path,
-                                    package_snapshots,
-                                    source_overrides,
-                                    parsed_source_retention.retains(path),
-                                ),
-                            ));
-                        }
-                        local
-                    })
+                    std::thread::Builder::new()
+                        .name("harn-module-parse".to_owned())
+                        .stack_size(harn_parser::PARSE_STACK_SIZE)
+                        .spawn_scoped(scope, || {
+                            let mut local = Vec::new();
+                            loop {
+                                let index = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                                let Some(path) = paths.get(index) else {
+                                    break;
+                                };
+                                local.push((
+                                    index,
+                                    load_module(
+                                        path,
+                                        package_snapshots,
+                                        source_overrides,
+                                        parsed_source_retention.retains(path),
+                                    ),
+                                ));
+                            }
+                            local
+                        })
+                        .expect("spawn module-parse worker")
                 })
                 .collect();
             handles

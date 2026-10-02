@@ -35,6 +35,10 @@
 /// have been denied. A bound the stack cannot reach is not a bound.
 pub const RUNTIME_STACK_SIZE: usize = 32 * 1024 * 1024;
 
+// A VM thread parses imported modules on its own stack, so it must also hold
+// the parser's contract.
+const _: () = assert!(RUNTIME_STACK_SIZE >= harn_parser::PARSE_STACK_SIZE);
+
 /// Run `body` on a thread that holds the [`RUNTIME_STACK_SIZE`] contract.
 ///
 /// A caller that drives the VM from a thread it did not create borrows
