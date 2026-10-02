@@ -17,9 +17,11 @@ mkdir -p "$tmpdir/bin" "$tmpdir/target/debug" "$tmpdir/target/ci-cli" "$tmpdir/o
 cp "$repo_root/rust-toolchain.toml" "$tmpdir/work/rust-toolchain.toml"
 make_fake_security_inventory() {
   local omitted_test=${1:-}
+  local extra_test=${2:-}
   jq -n --rawfile registry "$repo_root/scripts/config/host-bound-rust-tests.txt" \
-    --arg omitted_test "$omitted_test" '
-    ($registry | split("\n") | map(select(length > 0 and . != $omitted_test))) as $tests
+    --arg omitted_test "$omitted_test" --arg extra_test "$extra_test" '
+    ($registry | split("\n") | map(select(length > 0 and . != $omitted_test))
+      + [$extra_test] | map(select(length > 0))) as $tests
     | {"test-count": ($tests | length), "rust-suites": {
         "fake": {
           "status": "listed",
@@ -28,6 +30,12 @@ make_fake_security_inventory() {
           "testcases": (reduce $tests[] as $name ({};
             .[$name] = {"filter-match": {"status": "matches"}}
           ))
+        },
+        "fake-skipped": {
+          "status": "skipped",
+          "package-name": "harn-vm",
+          "binary-name": "unselected-suite",
+          "testcases": {}
         }
       }}
   '
@@ -169,6 +177,31 @@ fi
 grep -Fq "host-bound registry entry is absent from archived tests: $fixture_test" \
   "$tmpdir/security-missing-fixture.out"
 test ! -e "$tmpdir/out/security-missing-fixture.tar.zst"
+
+# A selected test outside the canonical registry must also block publication.
+make_fake_security_inventory "" unexpected_probe > "$tmpdir/security-inventory-extra.json"
+if NEXTTEST_INVENTORY_OVERRIDE="$tmpdir/security-inventory-extra.json" \
+  run_artifact build-security "$tmpdir/out/security-extra-test.tar.zst" "$commit" \
+  > "$tmpdir/security-extra-test.out" 2>&1; then
+  echo "build-security accepted a selected test outside the host-bound registry" >&2
+  exit 1
+fi
+grep -Fq 'archived filter selected a test outside the host-bound registry' \
+  "$tmpdir/security-extra-test.out"
+test ! -e "$tmpdir/out/security-extra-test.tar.zst"
+
+# A status outside nextest's known listed/skipped vocabulary is malformed.
+jq '."rust-suites"."fake-skipped".status = "unreported"' \
+  "$tmpdir/security-inventory.json" > "$tmpdir/security-inventory-unknown-status.json"
+if NEXTTEST_INVENTORY_OVERRIDE="$tmpdir/security-inventory-unknown-status.json" \
+  run_artifact build-security "$tmpdir/out/security-unknown-status.tar.zst" "$commit" \
+  > "$tmpdir/security-unknown-status.out" 2>&1; then
+  echo "build-security accepted an unknown nextest suite status" >&2
+  exit 1
+fi
+grep -Fq 'nextest archive inventory contains invalid or incomplete Rust suites' \
+  "$tmpdir/security-unknown-status.out"
+test ! -e "$tmpdir/out/security-unknown-status.tar.zst"
 
 # A broken host-bound registry must fail before the consumer can invoke
 # nextest, rather than reporting a successful proof with no selected tests.

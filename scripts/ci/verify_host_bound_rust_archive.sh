@@ -16,19 +16,18 @@ if ! jq -e '
   .["rust-suites"] as $suites
   | ($suites | type == "object" and length > 0)
     and all($suites[];
-      (.status | type == "string")
-      and (.status != "listed" or (
-        (.testcases | type == "object")
-        and (."package-name" | type == "string")
-        and (."binary-name" | type == "string")
-      ))
+      ((.status == "listed") or (.status == "skipped") or (.status == "skipped-default-filter"))
+      and (."package-name" | type == "string")
+      and (."binary-name" | type == "string")
+      and ((.status != "listed") or (.testcases | type == "object"))
+      and ((.status == "listed") or ((.testcases // {}) | type == "object" and length == 0))
     )
     and all([
       $suites[] | select(.status == "listed") | .testcases | to_entries[]
       | .value["filter-match"].status
     ][]; . == "matches" or . == "mismatch")
   ' "$inventory" >/dev/null; then
-  echo "error: nextest archive inventory is missing listed Rust suites" >&2
+  echo "error: nextest archive inventory contains invalid or incomplete Rust suites" >&2
   exit 1
 fi
 
@@ -37,6 +36,7 @@ jq -er '
   | [
       $suites | to_entries[] as $entry
       | $entry.value as $suite
+      | select($suite.status == "listed")
       | $suite.testcases | to_entries[]
       | select(.value["filter-match"].status == "matches")
       | "\($suite["package-name"])::\($suite["binary-name"])$\(.key)"
