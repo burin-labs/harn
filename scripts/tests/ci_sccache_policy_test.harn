@@ -28,6 +28,8 @@ import {
   NEUTRAL_RUST_TEST_FILTER_FLAG,
 } from "../ci_cache_policy/host_bound_rust_test_filter"
 
+type CiWorkflowDocument = {jobs: dict<string, dict>}
+
 fn gha_expression(body: string) -> string {
   return "$" + "{{ " + body + " }}"
 }
@@ -1677,8 +1679,9 @@ pipeline test_host_bound_sandbox_filter_has_one_owner(harness: Harness, task: un
       )
     }
   }
-  const actual_workflow = yaml_parse(
-    harness.fs.read_text(path_join(root, ".github/workflows/ci.yml")),
+  const actual_workflow = schema_expect(
+    yaml_parse(harness.fs.read_text(path_join(root, ".github/workflows/ci.yml"))),
+    schema_of(CiWorkflowDocument),
   )
   assert_eq(ci_linux_lane_policy_errors(actual_workflow), [])
   const security_job = actual_workflow.jobs["rust-security"]
