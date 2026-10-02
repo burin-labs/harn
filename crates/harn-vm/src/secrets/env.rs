@@ -135,6 +135,10 @@ impl SecretProvider for EnvSecretProvider {
     fn supports_versions(&self) -> bool {
         false
     }
+
+    fn locator(&self, id: &SecretId) -> Option<String> {
+        Some(self.env_var_name(id))
+    }
 }
 
 fn normalize_env_component(value: &str) -> String {

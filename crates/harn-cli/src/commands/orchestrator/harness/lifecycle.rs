@@ -708,13 +708,7 @@ pub(crate) fn absolutize_from_cwd(path: &Path) -> Result<PathBuf, OrchestratorEr
 }
 
 fn configured_secret_chain_display() -> String {
-    std::env::var(harn_vm::secrets::SECRET_PROVIDER_CHAIN_ENV)
-        .unwrap_or_else(|_| harn_vm::secrets::DEFAULT_SECRET_PROVIDER_CHAIN.to_string())
-        .split(',')
-        .map(str::trim)
-        .filter(|segment| !segment.is_empty())
-        .collect::<Vec<_>>()
-        .join(" -> ")
+    harn_vm::secrets::SecretChainPlan::configured().display()
 }
 
 fn has_orchestrator_api_keys_configured() -> bool {

@@ -141,6 +141,20 @@ The provider order is controlled with `HARN_SECRET_PROVIDERS`:
 export HARN_SECRET_PROVIDERS=env,keyring
 ```
 
+A chain that leaves out a default provider cannot see secrets stored there.
+Under `HARN_SECRET_PROVIDERS=env`, a credential that `harn connect` saved in
+the keyring reads as missing. A missing secret therefore names the providers
+that were consulted and the defaults that were left out:
+
+```text
+secret 'google_workspace/oauth-token' not found in providers: env (HARN_SECRET_GOOGLE_WORKSPACE_OAUTH_TOKEN); keyring disabled by HARN_SECRET_PROVIDERS=env
+```
+
+Scripts see this as a `not_found` error from `harness.secrets.read`. The
+`std/oauth` client adds the same detail to its "no token in storage"
+diagnostic. `harn doctor` warns about each default provider the chain leaves
+out.
+
 The doctor output also reports the namespace used for backend grouping. It is
 `harn.provider_auth` for every surface. Override it — for an isolated workspace
 or a test run — with:
