@@ -38,6 +38,10 @@ mod command_probe_parent_liveness;
 mod conformance_json_cli;
 mod conformance_process_lifetime_e2e;
 #[cfg(unix)]
+mod connect_legacy_recovery;
+#[cfg(unix)]
+mod connect_secret_env_redaction;
+#[cfg(unix)]
 mod connect_secret_store;
 mod coverage_cli;
 mod decision_route_admission;

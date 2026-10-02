@@ -2983,7 +2983,10 @@ flow; flags such as `--client-id`, `--scope`, `--auth-url`, and `--token-url`
 override that metadata for one run. An old OAuth credential that did not record
 its registered callback prompts for the exact URI. A missing authorization URL
 can be supplied at the next prompt or discovered from the resource. Unattended
-setup supplies the callback with `--redirect-uri <uri>`.
+setup supplies the callback with `--redirect-uri <uri>`, which counts even when
+it equals the default. A confidential client recovered this way needs its
+client secret again. Unattended setup supplies it with
+`--client-secret-from-env NAME` or `--client-secret-file PATH`.
 
 For `auth_type = "api-key"` with one outbound `required_secrets` entry, the
 same command prompts without echoing the key. Inbound verification secrets do
@@ -3027,12 +3030,14 @@ Provider-specific OAuth flags:
 |---|---|
 | `--client-id <id>` | Pre-registered OAuth client id |
 | `--client-secret <secret>` | OAuth client secret |
+| `--client-secret-from-env <name>` | Read the OAuth client secret from an environment variable |
+| `--client-secret-file <path>` | Read the OAuth client secret from a file; a trailing newline is ignored |
 | `--scope <scopes>` | Requested scope string |
 | `--resource <resource>` | Override the OAuth resource indicator |
 | `--auth-url <url>` | Override the authorization endpoint |
 | `--token-url <url>` | Override the token endpoint |
 | `--token-auth-method <method>` | `none`, `client_secret_post`, or `client_secret_basic` |
-| `--redirect-uri <uri>` | Override the loopback callback URI |
+| `--redirect-uri <uri>` | Loopback callback URI; defaults to `http://127.0.0.1:0/oauth/callback` |
 | `--no-open` | Print the authorization URL instead of opening a browser |
 
 The GitHub command captures GitHub App installation metadata. If `--app-id` and

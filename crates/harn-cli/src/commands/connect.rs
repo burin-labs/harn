@@ -55,13 +55,24 @@ struct OAuthConnectRequest {
     client_id: Option<String>,
     client_secret: Option<String>,
     scopes: Option<String>,
-    redirect_uri: String,
+    /// `None` until a caller or a recovered registration supplies one; the
+    /// loopback default applies only at bind time, so an explicit
+    /// `--redirect-uri` equal to the default is still explicit.
+    redirect_uri: Option<String>,
     token_auth_method: Option<String>,
     /// Manifest-declared authorization query parameters; merged over the
     /// defaults for a known authorization server at URL build time.
     authorization_params: std::collections::BTreeMap<String, String>,
     no_open: bool,
     json: bool,
+}
+
+impl OAuthConnectRequest {
+    fn redirect_uri(&self) -> &str {
+        self.redirect_uri
+            .as_deref()
+            .unwrap_or(DEFAULT_OAUTH_REDIRECT_URI)
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -256,12 +267,14 @@ async fn run_connect_inner(args: ConnectArgs) -> Result<(), String> {
             oauth: ConnectOAuthArgs {
                 client_id: None,
                 client_secret: None,
+                client_secret_from_env: None,
+                client_secret_file: None,
                 scope: None,
                 resource: None,
                 auth_url: None,
                 token_url: None,
                 token_auth_method: None,
-                redirect_uri: "http://127.0.0.1:0/oauth/callback".to_string(),
+                redirect_uri: None,
                 no_open: false,
                 json: args.json,
             },

@@ -26,7 +26,7 @@ use super::setup_events::{
 };
 use super::store::{
     connector_token_summary, current_unix_timestamp, format_expiry, load_connector_token,
-    run_connect_api_key, save_connector_token,
+    read_named_env_secret, run_connect_api_key, save_connector_token,
 };
 use super::{
     DynamicClientRegistrationResponse, OAuthConnectRequest, OAuthProviderDefaults,
@@ -57,7 +57,7 @@ pub(super) async fn run_connect_named_oauth(
         ),
         registration_endpoint: None,
         client_id: args.client_id.clone(),
-        client_secret: args.client_secret.clone(),
+        client_secret: resolve_oauth_client_secret(args)?,
         scopes: args
             .scope
             .clone()
@@ -80,6 +80,8 @@ pub(super) async fn run_connect_linear_oauth(args: &ConnectLinearArgs) -> Result
         &ConnectOAuthArgs {
             client_id: args.client_id.clone(),
             client_secret: args.client_secret.clone(),
+            client_secret_from_env: args.client_secret_from_env.clone(),
+            client_secret_file: args.client_secret_file.clone(),
             scope: args.scope.clone(),
             resource: args.resource.clone(),
             auth_url: args.auth_url.clone(),
@@ -105,7 +107,7 @@ pub(super) async fn run_connect_generic(args: &ConnectGenericArgs) -> Result<(),
         token_endpoint: args.oauth.token_url.clone(),
         registration_endpoint: None,
         client_id: args.oauth.client_id.clone(),
-        client_secret: args.oauth.client_secret.clone(),
+        client_secret: resolve_oauth_client_secret(&args.oauth)?,
         scopes: args.oauth.scope.clone(),
         redirect_uri: args.oauth.redirect_uri.clone(),
         token_auth_method: args.oauth.token_auth_method.clone(),
@@ -137,18 +139,15 @@ pub(super) async fn run_connect_registered_provider(
                     legacy_registration_missing_redirect(&request, &registration);
                 request = oauth_request_with_legacy_registration(request, registration);
                 if missing_redirect {
-                    request.redirect_uri = prompt_legacy_redirect_uri()?;
+                    request.redirect_uri = Some(prompt_legacy_redirect_uri()?);
                 }
                 if request.authorization_endpoint.is_none() {
                     request.authorization_endpoint = prompt_legacy_authorization_url()?;
                 }
                 if migrated_oauth_client_secret_required(&request) {
-                    let secret = rpassword::prompt_password("OAuth client secret: ")
-                        .map_err(|error| format!("failed to read OAuth client secret: {error}"))?;
-                    if secret.is_empty() {
-                        return Err("OAuth client secret must not be empty".to_string());
-                    }
-                    request.client_secret = Some(secret);
+                    request.client_secret = Some(prompt_migrated_client_secret(
+                        request.token_auth_method.as_deref().unwrap_or_default(),
+                    )?);
                 }
             }
         }
@@ -177,6 +176,63 @@ pub(super) async fn run_connect_registered_provider(
     Err(format!(
         "provider '{provider}' has no supported authentication setup; declare OAuth metadata or providers.setup auth_type = \"api-key\" with exactly one outbound credential"
     ))
+}
+
+/// The client secret from whichever unattended source the command named.
+///
+/// Inline, environment, and file sources are mutually exclusive at the clap
+/// layer. A named source that is unset or empty is an error rather than
+/// "no secret", so a typo cannot silently fall through to a prompt.
+pub(super) fn resolve_oauth_client_secret(
+    args: &ConnectOAuthArgs,
+) -> Result<Option<String>, String> {
+    if let Some(secret) = &args.client_secret {
+        return Ok(Some(secret.clone()));
+    }
+    if let Some(name) = &args.client_secret_from_env {
+        let secret = read_named_env_secret(name, "OAuth client secret")?;
+        if secret.is_empty() {
+            return Err(format!(
+                "OAuth client secret environment variable {name} is empty"
+            ));
+        }
+        return Ok(Some(secret));
+    }
+    if let Some(path) = &args.client_secret_file {
+        let contents = std::fs::read_to_string(path).map_err(|error| {
+            format!(
+                "failed to read OAuth client secret file {}: {error}",
+                path.display()
+            )
+        })?;
+        let secret = contents.trim_end_matches(['\r', '\n']).to_string();
+        if secret.is_empty() {
+            return Err(format!(
+                "OAuth client secret file {} is empty",
+                path.display()
+            ));
+        }
+        return Ok(Some(secret));
+    }
+    Ok(None)
+}
+
+/// Migration never copies a legacy client secret. A confidential client
+/// therefore needs it re-supplied: interactively when a person is at a
+/// terminal, otherwise through a named unattended source.
+fn prompt_migrated_client_secret(token_auth_method: &str) -> Result<String, String> {
+    let guidance = format!(
+        "The old OAuth credential uses {token_auth_method}, and migration does not copy its client secret. Supply it with --client-secret-from-env <NAME> or --client-secret-file <PATH>."
+    );
+    if !io::stdin().is_terminal() {
+        return Err(guidance);
+    }
+    let secret = rpassword::prompt_password("OAuth client secret: ")
+        .map_err(|error| format!("failed to read OAuth client secret: {error}. {guidance}"))?;
+    if secret.is_empty() {
+        return Err(format!("OAuth client secret must not be empty. {guidance}"));
+    }
+    Ok(secret)
 }
 
 fn prompt_legacy_redirect_uri() -> Result<String, String> {
@@ -272,6 +328,8 @@ fn reject_oauth_options_for_manual_provider(
 ) -> Result<(), String> {
     if args.client_id.is_some()
         || args.client_secret.is_some()
+        || args.client_secret_from_env.is_some()
+        || args.client_secret_file.is_some()
         || args.scope.is_some()
         || args.resource.is_some()
         || args.auth_url.is_some()
@@ -344,9 +402,7 @@ pub(super) fn oauth_request_from_provider_metadata(
             .client_id
             .clone()
             .or_else(|| metadata.client_id.clone()),
-        client_secret: args
-            .client_secret
-            .clone()
+        client_secret: resolve_oauth_client_secret(args)?
             .or_else(|| metadata.client_secret.clone()),
         scopes: args.scope.clone().or_else(|| metadata.scopes.clone()),
         redirect_uri: args.redirect_uri.clone(),
@@ -536,14 +592,14 @@ async fn run_oauth_connect_inner(
     });
 
     let (listener, redirect_uri) =
-        bind_loopback_listener(&request.redirect_uri).map_err(|error| {
+        bind_loopback_listener(request.redirect_uri()).map_err(|error| {
             setup_failure(
                 ConnectorSetupErrorCode::ConfigurationMissing,
                 ConnectorSetupStage::Resolving,
                 error,
             )
         })?;
-    request.redirect_uri = redirect_uri.clone();
+    request.redirect_uri = Some(redirect_uri.clone());
     let (client_id, client_secret, token_auth_method) = resolve_oauth_client(
         request,
         discovery.as_ref(),
@@ -862,7 +918,7 @@ async fn register_dynamic_client(
 ) -> Result<(String, Option<String>, String), String> {
     let registration = dynamic_client_registration(
         registration_endpoint,
-        &request.redirect_uri,
+        request.redirect_uri(),
         request.scopes.as_deref(),
     )
     .await?;

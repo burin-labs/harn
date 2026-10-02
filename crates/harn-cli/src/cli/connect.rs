@@ -4,7 +4,7 @@ use clap::{Args, Subcommand};
 
 #[derive(Debug, Args)]
 #[command(
-    after_long_help = "Registered provider commands:\n  harn connect <provider> [OPTIONS]\n\nIf <provider> is not one of the built-in subcommands, Harn reads authentication metadata from the nearest harn.toml [[providers]] entry. OAuth providers open their authorization flow. API-key providers with one outbound credential prompt for it. Use --from-env or --value-file for unattended keyring storage. On a headless host, a manifest-declared credential environment variable can be left set instead of using a keyring."
+    after_long_help = "Registered provider commands:\n  harn connect <provider> [OPTIONS]\n\nIf <provider> is not one of the built-in subcommands, Harn reads authentication metadata from the nearest harn.toml [[providers]] entry. OAuth providers open their authorization flow. API-key providers with one outbound credential prompt for it. Use --from-env or --value-file for unattended keyring storage. OAuth providers accept --client-secret-from-env or --client-secret-file for an unattended client secret. On a headless host, a manifest-declared credential environment variable can be left set instead of using a keyring."
 )]
 pub(crate) struct ConnectArgs {
     /// Show authenticated connector tokens known to the local keyring.
@@ -167,8 +167,14 @@ pub(crate) struct ConnectLinearArgs {
     #[arg(long = "client-id")]
     pub client_id: Option<String>,
     /// Explicit OAuth client secret for guided Linear authorization.
-    #[arg(long = "client-secret")]
+    #[arg(long = "client-secret", conflicts_with_all = ["client_secret_from_env", "client_secret_file"])]
     pub client_secret: Option<String>,
+    /// Read the Linear OAuth client secret from this environment variable.
+    #[arg(long = "client-secret-from-env", value_name = "NAME", conflicts_with_all = ["client_secret", "client_secret_file"])]
+    pub client_secret_from_env: Option<String>,
+    /// Read the Linear OAuth client secret from this file.
+    #[arg(long = "client-secret-file", value_name = "PATH", conflicts_with_all = ["client_secret", "client_secret_from_env"])]
+    pub client_secret_file: Option<PathBuf>,
     /// Requested OAuth scope string for guided Linear authorization.
     #[arg(long = "scope")]
     pub scope: Option<String>,
@@ -184,12 +190,11 @@ pub(crate) struct ConnectLinearArgs {
     /// Override token endpoint auth method: none, client_secret_post, or client_secret_basic.
     #[arg(long = "token-auth-method")]
     pub token_auth_method: Option<String>,
-    /// Loopback callback URL. Port 0 binds a random localhost port.
-    #[arg(
-        long = "redirect-uri",
-        default_value = "http://127.0.0.1:0/oauth/callback"
-    )]
-    pub redirect_uri: String,
+    /// Loopback callback URL [default: http://127.0.0.1:0/oauth/callback]. Port 0 binds a
+    /// random localhost port. An explicit value always wins over a redirect URI recovered from
+    /// a legacy OAuth record.
+    #[arg(long = "redirect-uri", value_name = "URI")]
+    pub redirect_uri: Option<String>,
     /// Do not open the system browser; print the URL instead.
     #[arg(long)]
     pub no_open: bool,
@@ -203,9 +208,16 @@ pub(crate) struct ConnectOAuthArgs {
     /// Explicit OAuth client ID.
     #[arg(long = "client-id")]
     pub client_id: Option<String>,
-    /// Explicit OAuth client secret.
-    #[arg(long = "client-secret")]
+    /// Explicit OAuth client secret. Prefer --client-secret-from-env or --client-secret-file in
+    /// shared shells.
+    #[arg(long = "client-secret", conflicts_with_all = ["client_secret_from_env", "client_secret_file"])]
     pub client_secret: Option<String>,
+    /// Read the OAuth client secret from this environment variable.
+    #[arg(long = "client-secret-from-env", value_name = "NAME", conflicts_with_all = ["client_secret", "client_secret_file"])]
+    pub client_secret_from_env: Option<String>,
+    /// Read the OAuth client secret from this file.
+    #[arg(long = "client-secret-file", value_name = "PATH", conflicts_with_all = ["client_secret", "client_secret_from_env"])]
+    pub client_secret_file: Option<PathBuf>,
     /// Requested OAuth scope string.
     #[arg(long = "scope")]
     pub scope: Option<String>,
@@ -221,12 +233,11 @@ pub(crate) struct ConnectOAuthArgs {
     /// Override token endpoint auth method: none, client_secret_post, or client_secret_basic.
     #[arg(long = "token-auth-method")]
     pub token_auth_method: Option<String>,
-    /// Loopback callback URL. Port 0 binds a random localhost port.
-    #[arg(
-        long = "redirect-uri",
-        default_value = "http://127.0.0.1:0/oauth/callback"
-    )]
-    pub redirect_uri: String,
+    /// Loopback callback URL [default: http://127.0.0.1:0/oauth/callback]. Port 0 binds a
+    /// random localhost port. An explicit value always wins over a redirect URI recovered from
+    /// a legacy OAuth record.
+    #[arg(long = "redirect-uri", value_name = "URI")]
+    pub redirect_uri: Option<String>,
     /// Do not open the system browser; print the URL instead.
     #[arg(long)]
     pub no_open: bool,
