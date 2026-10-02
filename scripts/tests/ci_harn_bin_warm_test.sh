@@ -62,6 +62,14 @@ BIN
 esac
 SH
 chmod +x "$fake_bin/cargo"
+cat > "$fake_bin/rustc" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'rustc %s (fixture)\n' "$FAKE_RUSTC_VERSION"
+SH
+chmod +x "$fake_bin/rustc"
+export FAKE_RUSTC_VERSION
+FAKE_RUSTC_VERSION="$(sed -n 's/^channel[[:space:]]*=[[:space:]]*"\(.*\)"/\1/p' "$repo_root/rust-toolchain.toml")"
 export FAKE_FRESHNESS_CHECKER="$repo_root/scripts/tests/fixtures/harn_bin/fake_freshness_checker.sh"
 
 unset HARN_BIN HARN_BIN_NO_BUILD
