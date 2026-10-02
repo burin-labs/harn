@@ -1,4 +1,5 @@
 import { agent_capture_events } from "std/agent/events"
+import { AgentMissingToolCallConfigFailure } from "std/agent/failures"
 import { agent_loop } from "std/agent/loop"
 import { MissingToolCallVerdict } from "std/agent/options_types"
 import { missing_tool_call_classifier } from "std/llm/missing_tool_call"
@@ -172,6 +173,59 @@ pipeline test_consumer_cancellation_retains_its_cause(harness: Harness) {
         "the closed cancellation record retains the original exception: " + json_stringify(error),
       )
       assert_eq(len(llm_calls(harness.llm)), 1, "cancellation must prevent another planner turn")
+    },
+  )
+}
+
+pipeline test_consumer_configuration_failure_is_closed(harness: Harness) {
+  with_llm_script(
+    harness.llm,
+    [llm_text("Opaque first turn.")],
+    { ->
+      const tools = tool_define(
+        tool_registry(),
+        "read",
+        "Read a file",
+        {handler: { _ -> "contents" }, parameters: {}, returns: {type: "string"}},
+      )
+      const outcome = try {
+        agent_loop(
+          harness,
+          "Complete the fixture.",
+          nil,
+          {
+            session_id: "missing-call-configuration-" + harness.random.uuid(),
+            tools: tools,
+            tool_format: "text",
+            loop_until_done: true,
+            max_iterations: 3,
+            missing_tool_call_recovery: {confidence_threshold: 2.0},
+          },
+        )
+      }
+      assert(is_err(outcome))
+      const error = unwrap_err(outcome)
+      const failure: AgentMissingToolCallConfigFailure = schema_expect(
+        pick(
+          error,
+          [
+            "error",
+            "category",
+            "component",
+            "message",
+            "field",
+            "expected",
+            "actual",
+            "min",
+            "max",
+          ],
+        ),
+        schema_of(AgentMissingToolCallConfigFailure),
+      )
+      assert_eq(failure.category, "invalid_config")
+      assert_eq(failure.error, "missing_tool_call.invalid_confidence_threshold")
+      assert_eq(failure.actual, 2.0)
+      assert_eq(len(llm_calls(harness.llm)), 1)
     },
   )
 }
