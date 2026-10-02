@@ -133,6 +133,8 @@ fn confine_with<B: SandboxBackend>(
 fn private_temp_dir() -> Result<PathBuf, VmError> {
     let parent = sandbox::normalize_for_policy(&std::env::temp_dir());
     let dir = parent.join(format!("harn-confined-{}", uuid::Uuid::new_v4().simple()));
+    // Only Unix sets a mode, so elsewhere the builder is never mutated.
+    #[cfg_attr(not(unix), allow(unused_mut))]
     let mut builder = std::fs::DirBuilder::new();
     #[cfg(unix)]
     std::os::unix::fs::DirBuilderExt::mode(&mut builder, 0o700);
