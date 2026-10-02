@@ -351,17 +351,6 @@ fn agent_event_ext_fixture_events() -> Vec<AgentEvent> {
     failed_error.duration_ms = Some(3);
 
     let mut events = vec![
-        AgentEvent::SessionHealth {
-            session_id: "session-1".to_string(),
-            fact: harn_vm::agent_events::session_health::SessionHealthFact {
-                schema_version: 1,
-                session_id: "session-1".to_string(),
-                iteration: None,
-                turn: Default::default(),
-                rolling: Default::default(),
-                heuristics: Default::default(),
-            },
-        },
         AgentEvent::IterationStart {
             session_id: "session-1".to_string(),
             iteration: 0,
@@ -643,6 +632,17 @@ fn agent_event_ext_fixture_events() -> Vec<AgentEvent> {
                 "consent": "not_required"
             }),
             receipt: Some(fixture_tool_call_receipt()),
+        },
+        AgentEvent::SessionHealth {
+            session_id: "session-1".to_string(),
+            fact: harn_vm::agent_events::session_health::SessionHealthFact {
+                schema_version: 1,
+                session_id: "session-1".to_string(),
+                iteration: None,
+                turn: Default::default(),
+                rolling: Default::default(),
+                heuristics: Default::default(),
+            },
         },
     ];
     drop(events.splice(14..14, registration_fixtures::events()));
