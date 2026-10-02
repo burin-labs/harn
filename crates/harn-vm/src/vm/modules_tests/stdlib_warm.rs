@@ -18,6 +18,14 @@ fn warm_embedded_stdlib_leaves_the_agent_stack_on_disk() {
     assert_eq!(report.modules, harn_stdlib::STDLIB_SOURCES.len());
     assert!(report.failed.is_empty(), "{:?}", report.failed);
     assert_eq!(report.warmed, report.modules);
+    // The warm held the cache's lock and released it on return.
+    let lock_path = crate::bytecode_cache::cache_dir()
+        .expect("cache dir resolves")
+        .join(STDLIB_WARM_LOCK_FILE);
+    std::fs::File::open(&lock_path)
+        .expect("the warm created its lock file")
+        .try_lock()
+        .expect("the warm released its lock");
 
     reset_stdlib_module_artifact_cache();
     let runtime = tokio::runtime::Builder::new_current_thread()
@@ -37,6 +45,34 @@ fn warm_embedded_stdlib_leaves_the_agent_stack_on_disk() {
     assert_eq!(
         resolved, 0,
         "a warmed stdlib import must not compile anything"
+    );
+
+    match previous {
+        Some(value) => std::env::set_var(crate::bytecode_cache::CACHE_DIR_ENV, value),
+        None => std::env::remove_var(crate::bytecode_cache::CACHE_DIR_ENV),
+    }
+}
+
+#[test]
+fn a_held_stdlib_warm_lock_excludes_a_sibling_warm_until_released() {
+    // Sharded test runs start several warming processes over one disk cache.
+    // A second warm must wait for the first rather than compile the same
+    // catalog beside it; a zero deadline makes that wait observable at once.
+    let _guard = cache_test_guard();
+    let cache = tempfile::tempdir().expect("temp cache dir");
+    let previous = std::env::var_os(crate::bytecode_cache::CACHE_DIR_ENV);
+    std::env::set_var(crate::bytecode_cache::CACHE_DIR_ENV, cache.path());
+    let no_wait = std::time::Duration::ZERO;
+
+    let holder = acquire_stdlib_warm_lock(no_wait).expect("an uncontended warm takes the lock");
+    assert!(
+        acquire_stdlib_warm_lock(no_wait).is_none(),
+        "a sibling warm must not take the lock while another holds it"
+    );
+    drop(holder);
+    assert!(
+        acquire_stdlib_warm_lock(no_wait).is_some(),
+        "the lock is free once its holder drops it"
     );
 
     match previous {
