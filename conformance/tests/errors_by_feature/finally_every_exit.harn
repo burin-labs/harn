@@ -1,0 +1,248 @@
+fn fail(message: string) {
+  throw message
+}
+
+fn bad(message: string) -> Result<int, string> {
+  return Err(message)
+}
+
+fn good(value: int) -> Result<int, string> {
+  return Ok(value)
+}
+
+fn show(stdio: HarnessStdio, label: string, run: fn() -> any) {
+  const outcome = try {
+    run()
+  } catch (error) {
+    "caught:${error}"
+  }
+  stdio.println("${label} -> ${outcome}")
+}
+
+fn inline_throw(stdio: HarnessStdio) {
+  defer {
+    stdio.println("  defer")
+  }
+  try {
+    throw "inline"
+  } finally {
+    stdio.println("  finally")
+  }
+}
+
+fn callee_throw(stdio: HarnessStdio) {
+  defer {
+    stdio.println("  defer")
+  }
+  try {
+    fail("callee")
+  } finally {
+    stdio.println("  finally")
+  }
+}
+
+fn runtime_error(stdio: HarnessStdio) {
+  defer {
+    stdio.println("  defer")
+  }
+  try {
+    const zero = 0
+    stdio.println("unreachable:${1 / zero}")
+  } finally {
+    stdio.println("  finally")
+  }
+}
+
+fn try_star(stdio: HarnessStdio) {
+  defer {
+    stdio.println("  defer")
+  }
+  try {
+    try* fail("try-star")
+  } finally {
+    stdio.println("  finally")
+  }
+}
+
+fn question_err(stdio: HarnessStdio) -> Result<int, string> {
+  defer {
+    stdio.println("  defer")
+  }
+  try {
+    const value = bad("question")?
+    stdio.println("unreachable:${value}")
+  } finally {
+    stdio.println("  finally")
+  }
+  return Ok(0)
+}
+
+fn question_ok(stdio: HarnessStdio) -> Result<int, string> {
+  defer {
+    stdio.println("  defer")
+  }
+  try {
+    const value = good(7)?
+    stdio.println("  body:${value}")
+  } finally {
+    stdio.println("  finally")
+  }
+  stdio.println("  after-try")
+  return Ok(7)
+}
+
+fn question_nested(stdio: HarnessStdio) -> Result<int, string> {
+  try {
+    try {
+      const value = bad("nested")?
+      stdio.println("unreachable:${value}")
+    } finally {
+      stdio.println("  inner-finally")
+    }
+  } catch (error) {
+    stdio.println("unreachable:catch:${error}")
+  } finally {
+    stdio.println("  outer-finally")
+  }
+  return Ok(0)
+}
+
+fn question_in_loop(stdio: HarnessStdio) -> Result<int, string> {
+  for i in [1, 2] {
+    defer {
+      stdio.println("  defer:${i}")
+    }
+    try {
+      if i == 2 {
+        const value = bad("loop")?
+        stdio.println("unreachable:${value}")
+      }
+    } finally {
+      stdio.println("  finally:${i}")
+    }
+  }
+  return Ok(0)
+}
+
+fn question_from_catch(stdio: HarnessStdio) -> Result<int, string> {
+  try {
+    fail("first")
+  } catch (error) {
+    stdio.println("  catch:${error}")
+    const value = bad("from-catch")?
+    stdio.println("unreachable:${value}")
+  } finally {
+    stdio.println("  finally")
+  }
+  return Ok(0)
+}
+
+fn question_owned_drop(runtime: HarnessRuntime, ch: channel) -> Result<int, string> {
+  const owned_ch: owned<channel> = ch
+  if runtime.channel_is_closed(owned_ch) {
+    return Err("closed before the early return")
+  }
+  const value = bad("owned")?
+  return Ok(value)
+}
+
+fn question_finally_throws(stdio: HarnessStdio) -> Result<int, string> {
+  try {
+    const value = bad("pending")?
+    stdio.println("unreachable:${value}")
+  } finally {
+    stdio.println("  finally-throws")
+    throw "from-finally"
+  }
+}
+
+fn question_finally_returns(stdio: HarnessStdio) -> Result<int, string> {
+  try {
+    const value = bad("pending")?
+    stdio.println("unreachable:${value}")
+  } finally {
+    stdio.println("  finally-returns")
+    return Ok(99)
+  }
+}
+
+fn return_exit(stdio: HarnessStdio) {
+  defer {
+    stdio.println("  defer")
+  }
+  try {
+    return "returned"
+  } finally {
+    stdio.println("  finally")
+  }
+}
+
+fn return_from_catch(stdio: HarnessStdio) {
+  try {
+    fail("x")
+  } catch (error) {
+    return "from-catch"
+  } finally {
+    stdio.println("  finally")
+  }
+}
+
+fn throw_from_catch(stdio: HarnessStdio) {
+  try {
+    fail("first")
+  } catch (error) {
+    fail("from-catch")
+  } finally {
+    stdio.println("  finally")
+  }
+}
+
+fn break_and_continue(stdio: HarnessStdio) {
+  for i in [1, 2, 3] {
+    defer {
+      stdio.println("  defer:${i}")
+    }
+    try {
+      if i == 1 {
+        continue
+      }
+      if i == 2 {
+        break
+      }
+      stdio.println("unreachable:${i}")
+    } finally {
+      stdio.println("  finally:${i}")
+    }
+  }
+  return "loop-done"
+}
+
+/**
+ * Every way control can leave a `try` body runs its `finally` and the
+ * enclosing `defer` exactly once, innermost first. Errors reach cleanup
+ * through exception handlers; `return`, `break`, `continue`, and `?` reach it
+ * through the compiler's transfer lowering (harn#9189, harn#9201).
+ */
+pipeline default(harness: Harness) {
+  const stdio = harness.stdio
+  show(stdio, "inline throw", { -> inline_throw(stdio) })
+  show(stdio, "callee throw", { -> callee_throw(stdio) })
+  show(stdio, "runtime error", { -> runtime_error(stdio) })
+  show(stdio, "try*", { -> try_star(stdio) })
+  stdio.println("? err -> ${question_err(stdio)}")
+  stdio.println("? ok -> ${question_ok(stdio)}")
+  stdio.println("? nested -> ${question_nested(stdio)}")
+  stdio.println("? in loop -> ${question_in_loop(stdio)}")
+  stdio.println("? from catch -> ${question_from_catch(stdio)}")
+  const owned_channel = harness.runtime.channel("question-owned", 1)
+  const owned_outcome = question_owned_drop(harness.runtime, owned_channel)
+  stdio.println(
+    "? owned drop -> ${owned_outcome} closed=${harness.runtime.channel_is_closed(owned_channel)}",
+  )
+  show(stdio, "? then finally throws", { -> question_finally_throws(stdio) })
+  stdio.println("? then finally returns -> ${question_finally_returns(stdio)}")
+  stdio.println("return -> ${return_exit(stdio)}")
+  stdio.println("return from catch -> ${return_from_catch(stdio)}")
+  show(stdio, "throw from catch", { -> throw_from_catch(stdio) })
+  stdio.println("break/continue -> ${break_and_continue(stdio)}")
+}
