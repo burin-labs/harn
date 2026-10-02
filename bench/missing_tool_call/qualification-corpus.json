@@ -1,0 +1,18 @@
+[
+  {"id":"english-read-committed","text":"I am opening package.json next to inspect the existing dependencies.","intended":true,"tool":"read"},
+  {"id":"english-edit-committed","text":"I am updating the port in server.toml now.","intended":true,"tool":"edit"},
+  {"id":"english-advice","text":"For troubleshooting, you may want to inspect package.json yourself.","intended":false,"tool":""},
+  {"id":"english-permission","text":"Should I update server.toml, or would you prefer to leave it alone?","intended":false,"tool":""},
+  {"id":"spanish-read-committed","text":"Ahora voy a abrir package.json para revisar las dependencias actuales.","intended":true,"tool":"read"},
+  {"id":"spanish-edit-committed","text":"Estoy cambiando el puerto en server.toml ahora mismo.","intended":true,"tool":"edit"},
+  {"id":"spanish-advice","text":"Para resolver el problema, te recomiendo revisar package.json por tu cuenta.","intended":false,"tool":""},
+  {"id":"spanish-permission","text":"¿Quieres que cambie server.toml o prefieres dejarlo como está?","intended":false,"tool":""},
+  {"id":"french-read-committed","text":"Je vais ouvrir package.json tout de suite pour examiner les dépendances actuelles.","intended":true,"tool":"read"},
+  {"id":"french-edit-committed","text":"Je modifie maintenant le port dans server.toml.","intended":true,"tool":"edit"},
+  {"id":"french-advice","text":"Pour résoudre le problème, je vous conseille de consulter package.json vous-même.","intended":false,"tool":""},
+  {"id":"french-permission","text":"Souhaitez-vous que je change server.toml, ou préférez-vous le laisser tel quel ?","intended":false,"tool":""},
+  {"id":"german-read-committed","text":"Ich öffne als Nächstes package.json, um die vorhandenen Abhängigkeiten zu prüfen.","intended":true,"tool":"read"},
+  {"id":"german-edit-committed","text":"Ich ändere jetzt den Port in server.toml.","intended":true,"tool":"edit"},
+  {"id":"german-advice","text":"Zur Fehlersuche empfehle ich dir, package.json selbst anzusehen.","intended":false,"tool":""},
+  {"id":"german-permission","text":"Soll ich server.toml ändern, oder möchtest du die Datei unverändert lassen?","intended":false,"tool":""}
+]
