@@ -98,6 +98,7 @@ impl ModelResolution {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum ModelResolutionError {
     EmptyModel {
         catalog_version: String,
@@ -106,6 +107,11 @@ pub enum ModelResolutionError {
         provider: String,
         catalog_version: String,
         suggestions: Vec<String>,
+    },
+    MissingProviderDefault {
+        provider: String,
+        catalog_version: String,
+        routes: Vec<String>,
     },
     ProviderConflict {
         selector_provider: String,
@@ -141,6 +147,9 @@ impl ModelResolutionError {
         match self {
             Self::EmptyModel { catalog_version }
             | Self::UnknownProvider {
+                catalog_version, ..
+            }
+            | Self::MissingProviderDefault {
                 catalog_version, ..
             }
             | Self::ProviderConflict {
@@ -184,6 +193,19 @@ impl std::fmt::Display for ModelResolutionError {
                 f,
                 "unknown model provider '{provider}' in catalog {catalog_version}{}",
                 suggestions(near)
+            ),
+            Self::MissingProviderDefault {
+                provider,
+                catalog_version,
+                routes,
+            } => write!(
+                f,
+                "provider '{provider}' has no configured default model (catalog {catalog_version}); pass an explicit model{}",
+                if routes.is_empty() {
+                    String::new()
+                } else {
+                    format!(" such as {}", routes.join(", "))
+                }
             ),
             Self::ProviderConflict {
                 selector_provider,

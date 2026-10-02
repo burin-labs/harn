@@ -423,6 +423,43 @@ pipeline test_a_deadline_notifies_without_reopening_the_loop(harness: Harness) {
   )
 }
 
+pipeline test_configured_deadline_notifies_without_reopening_the_loop(harness: Harness) {
+  with_temp_dir(
+    harness.fs,
+    { root ->
+      const path = path_join(root, "terminal.json")
+      harness.testing.clock_set(0)
+      try {
+        const opts = terminal_spec("configured-deadline-" + harness.random.uuid())
+          + {
+            deadline_ms: 1000,
+            iteration_budget: {mode: "fixed", initial: 5, max: 5},
+            llm_caller: { _call ->
+              harness.testing.clock_advance(1500)
+              return {ok: true, value: {text: "still working", provider: "mock", model: "mock"}}
+            },
+            terminal_callback: { info ->
+              record_terminal(harness.fs, path, info)
+              return {message: "Try another turn."}
+            },
+          }
+        const result = agent_loop(harness, "Keep inspecting.", nil, opts)
+        assert_eq(result.terminal.kind, "policy_budget")
+        assert_eq(result.stop_reason, "deadline")
+        assert_eq(result.llm.iterations, 1)
+        const records = terminal_records(harness.fs, path)
+        assert_eq(len(records), 1)
+        assert_eq(records[0].status, "budget_exhausted")
+        assert_eq(records[0].reason, "deadline")
+      } catch (error) {
+        throw error
+      } finally {
+        harness.testing.clock_reset()
+      }
+    },
+  )
+}
+
 pipeline test_reserved_verification_still_reaches_terminal_notification(harness: Harness) {
   with_temp_dir(
     harness.fs,

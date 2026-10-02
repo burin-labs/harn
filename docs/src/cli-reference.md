@@ -7,6 +7,57 @@ To add a new subcommand or port an existing one off Rust, see
 machine-readable side of `--json` modes, see the
 [`harn --json` contract](./cli-json-contract.md).
 
+## Durable provider allowance
+
+`--spend-policy PATH` applies a TOML policy to provider calls in the invocation's
+execution tree. `HARN_SPEND_POLICY` supplies the path when the flag is absent.
+Subprocess invocations must receive their own policy path. Multicall LSP/DAP
+entry points don't parse this flag.
+
+```toml
+ledger_path = "/absolute/private/path/spend.sqlite"
+scope = "catalog-maintenance"
+
+[limits]
+lifetime_limit_microusd = 2000000
+```
+
+Limits use integer micro-USD, with no floating-point rounding in admission.
+The optional `daily_limit_microusd` and `monthly_limit_microusd` fields reset at
+UTC day and calendar-month boundaries. At least one nonnegative ceiling is required.
+Lifetime ceilings don't reset. Concurrent invocations share the allowance when
+they use the same ledger and scope.
+
+Harn reserves the catalog's cost bound before transport. Complete usage releases
+only the proven unused amount; interrupted calls and missing usage keep their reservations.
+Unknown pricing is refused before transport. An ordinary reopen can't change
+stored limits. Authorized host updates use `MachineSpendQuota::update_policy`
+and leave a durable audit receipt.
+
+Keep the policy and ledger outside an agent's writable roots. A host embedding
+Harn can install the same allowance through `MachineSpendQuota::scope`.
+
+## harn self
+
+Use a released Harn binary for an exact before-and-after check without
+rebuilding an old tag:
+
+```bash
+harn self install v0.10.116
+harn self run --version v0.10.116 -- version --json
+harn self list
+harn self prune --keep 3
+```
+
+`install` downloads the platform release archive and requires its SHA256SUMS
+entry before caching the binary under `~/.harn/toolchains/<version>/`.
+`run` installs on a cache miss, verifies the cached binary, and prints its
+version and full source revision on stderr before forwarding the command and
+its exit status. A second invocation uses the cache without downloading.
+`prune` retains the newest `N` verified version directories and waits for an
+active invocation of a version before removing it. It does not change the
+installed `harn` on your PATH.
+
 ## harn run
 
 Execute a `.harn` file.
@@ -161,23 +212,45 @@ other: `--no-sandbox` leaves the environment policy fully in force, and an
 environment grant gives no file, network, or tool access. Approval policy is a
 third, separate thing again.
 
-Each `--grant` is `NAME=SOURCE[,expose=ENV_VAR][,for=COMMAND]`:
+Each `--grant` is `NAME=SOURCE[,expose=ENV_VAR][,for=COMMAND][,to=in_process]`:
 
 | Part | Meaning |
 |---|---|
 | `NAME` | A unique, non-secret name used in receipts and diagnostics. |
 | `SOURCE` | `env:VAR_NAME` snapshots that launcher variable at session launch. `secret://ACCOUNT/KEY` keeps a live [secret-store](./hostlib/secret_store.md) reference, so rotation and revocation take effect without restarting the session. |
 | `,expose=ENV_VAR` | Optional. Makes the value available under this unique environment name. Without `,for=`, the exposure is session-scoped: `harness.env`, provider configuration, and every spawned command. |
-| `,for=COMMAND` | Optional. Requires `,expose=`. Binds the exposed variable to spawns whose executable basename matches `COMMAND` (for example `gh` for `/usr/bin/gh`). Command-bound grants are invisible in-process — Harn's own `harness.llm.call` is not an exec — so provider keys stay session-scoped by omitting `,for=`. |
+| `,for=COMMAND` | Optional. Requires `,expose=`. Binds the exposed variable to spawns whose executable basename matches `COMMAND` (for example `gh` for `/usr/bin/gh`). Command-bound grants are invisible in-process, because Harn's own `harness.llm.call` is not an exec. |
+| `,to=in_process` | Optional. Requires `,expose=` and rejects `,for=`. Makes the variable visible to Harn's own process only: provider credentials and configuration for `harness.llm.call`, and `harness.env`. No spawned command sees it, in value or as a secret reference. Use it for provider keys that only the run's model calls need. `,to=session` is the default. |
 
 ```bash
 # Let only `gh` see a vault-backed token; other process.exec calls do not inherit it.
 harn run --grant gh_token=secret://gh/token,expose=GH_TOKEN,for=gh open_pr.harn
 
-# Snapshot a provider key from the launcher env, exposed under the same name
-# for this run's model calls and every spawned command.
+# Snapshot a provider key for this run's own model calls. No spawned
+# command, including one the agent runs, can read it.
+harn run --grant fireworks=env:FIREWORKS_API_KEY,expose=FIREWORKS_API_KEY,to=in_process agent.harn
+
+# The same key for model calls and every spawned command.
 harn run --grant fireworks=env:FIREWORKS_API_KEY,expose=FIREWORKS_API_KEY agent.harn
 ```
+
+Each exposed grant reaches one audience:
+
+| Grant | Harn's own process | Spawned commands |
+|---|---|---|
+| `,expose=VAR` | yes | every command |
+| `,expose=VAR,for=COMMAND` | no | `COMMAND` only |
+| `,expose=VAR,to=in_process` | yes | none |
+
+"Spawned commands" means every child the session starts, not only
+`process.exec`: MCP stdio servers, ACP provider transports, and the git and
+other helper commands Harn runs itself all start with the session's resolved
+environment. An `isolated` or `granted` session therefore hands an MCP server
+or ACP provider only the runtime essentials, the grants that reach it, and the
+`env` entries in that server's or provider's own configuration.
+
+A run record's `admitted_environment` lists the names a child could see, so it
+omits in-process grants; their receipts carry `exposed_to: "in_process"`.
 
 Duplicate grant names and duplicate `expose` targets are launch errors. A child
 session inherits its parent's resolved environment by default. It may narrow
@@ -232,10 +305,12 @@ Terminology:
   ACP defines the session lifecycle; `environmentPolicy` is a Harn extension.
 - **Worker**: delegated work inside that lineage. It receives no more
   environment authority than its parent.
-- **Subprocess**: an operating-system command started by the session. It sees
-  the same resolved session environment plus explicit per-call overrides.
-- **Grant**: a named, receipted source-to-environment mapping. Grants are
-  session-wide today.
+- **Subprocess**: an operating-system command started by the session,
+  including MCP stdio servers and ACP provider transports. It sees the
+  resolved session environment minus in-process grants, plus explicit
+  per-call or per-server overrides.
+- **Grant**: a named, receipted source-to-environment mapping whose audience is
+  the whole session, one command, or Harn's own process.
 - **Sandbox**: the separate file/process/network boundary.
 - **Approval**: permission for a risky operation; it does not add environment
   values.
@@ -646,7 +721,7 @@ harn test tests/ --parallel --timing   # show progress and slowest tests/files
 harn test tests/ --parallel -j 4       # pin worker count (also via HARN_TEST_JOBS)
 harn test tests/ --affected-from origin/main --parallel # run changed modules' importer tests
 harn test tests/ --affected-from origin/main --plan # print the selection or full-suite fallback as JSON
-harn test tests/fast.harn --test-path tests/contracts.harn --parallel # one curated suite
+harn test tests/fast.harn tests/contracts.harn --parallel # one curated suite
 harn test tests/ --watch               # re-run on file changes
 harn test conformance --verbose        # show per-test timing
 harn test conformance --timing         # show timing summary without verbose failures
@@ -662,18 +737,18 @@ harn test agents-conformance --target http://localhost:8080 --api-key "$KEY"
 Watch mode keeps immutable prepared module artifacts warm between reruns. Each
 test still receives a fresh VM, module state, and persistence root.
 
-| Flag | Description |
+| Argument or flag | Description |
 |---|---|
 | `--filter <pattern>` | Only run tests matching pattern |
 | `--target <url>` | Harness base URL for `harn test agents-conformance` |
 | `--api-key <key>` | Bearer API key for `harn test agents-conformance`; also read from `HARN_AGENTS_CONFORMANCE_API_KEY` |
 | `--category <name>` | Agents conformance category to run; repeatable or comma-separated |
 | `--json` | Emit conformance results as JSON to stdout, or the agents-conformance leaderboard report |
-| `--json-out <path>` | Write user-test results (or the agents-conformance report) to a JSON file; user-test schemaVersion 4 includes typed timeout, phase, named `std/timing` spans, shard-plan, cost-regression, aggregate, latency-distribution, and captured-output data |
+| `--json-out <path>` | Write user-test results (or the agents-conformance report) to a JSON file; user-test schemaVersion 5 includes per-case `work.vm_steps`, typed timeout, phase, named `std/timing` spans, shard-plan, cost-regression, aggregate, latency-distribution, and captured-output data |
 | `--workspace-id <id>` / `--session-id <id>` | Reuse existing Harness resources for agents conformance setup |
 | `--parallel` | Run a bounded worker pool. User tests run in-process; conformance tests run in isolated processes because each worker owns process-wide runtime state. |
 | `--jobs <N>` / `-j <N>` | Maximum concurrent workers (also `HARN_TEST_JOBS`). The default follows available CPU and memory, capped at 8. |
-| `--test-path <PATH>` | Add a user-test file or directory to the same compile-once suite. Repeatable; overlapping paths are deduplicated. |
+| `[PATH]...` | User-test files or directories in one compile-once suite. Overlapping paths are deduplicated. Special suite names such as `conformance` and `protocols` select their own optional fixture grammar. |
 | `--affected-from <GIT_REF>` | Run only user-test files affected since a Git ref. Uses Harn's resolved module graph and falls back to the complete suite for any unmodelled change. One-shot user suites only. |
 | `--plan` | With `--affected-from`, print a versioned JSON plan and exit without running tests. The plan reports `selected` or `full`, the reason, and the exact test files, so CI can size its execution matrix without weakening Harn's fallback policy. |
 | `--watch` | Re-run tests on file changes (mutually exclusive with `--junit` / `--json-out`) |
@@ -686,7 +761,7 @@ test still receives a fresh VM, module state, and persistence root.
 | `--max-test-ms <ms>` | Fail a passing test whose total setup + execution wall time exceeds the budget; forces a single measurement worker |
 | `--max-execute-ms <ms>` | Fail a passing test whose measured execution phase exceeds the performance budget; forces a single measurement worker |
 | `--timing-environment <name>` | Stamp a stable enforcing-environment identity into a user-test JSON receipt; also read from `HARN_TEST_TIMING_ENVIRONMENT` |
-| `--timing-baseline <path>` | Read shard weights and absolute-cost baselines from a schema-v4 Harn user-test receipt. Requires the same `--timing-environment`; stale deleted or renamed cases fail the run. |
+| `--timing-baseline <path>` | Read shard weights and absolute-cost baselines from a schema-v5 Harn user-test receipt. Requires the same `--timing-environment`; stale deleted or renamed cases fail the run. |
 | `--max-cost-regression-percent <percent>` | Fail a case whose execution cost grows beyond this percentage of its receipt baseline (default: 25) |
 | `--record` | Record LLM responses to `.harn-fixtures/` |
 | `--replay` | Replay recorded LLM responses |
@@ -1441,6 +1516,17 @@ otherwise fail only at runtime. Source-aware lint rules run as part of
 `check`. (The `missing-harndoc` warning for undocumented `pub fn` APIs is
 opt-in via `[lint] require_docstrings = true` in `harn.toml`.)
 
+For literal model routes and options, `check` reports unsupported reasoning
+controls and tool-channel combinations as `HARN-LLM-006`, using the runtime's
+capability rules. A direct `harness.llm.call` with known nonempty tools cannot
+use a text tool channel: that channel requires the contract rendered by
+`agent_loop`. Diagnostics name the deciding catalog rule and whether it came
+from Harn or a user overlay. Each file uses its nearest project's `[llm]` and
+`[capabilities]` declarations, including when one invocation checks several
+projects. Changing those declarations invalidates cached check results.
+Dynamic expressions remain checked at runtime;
+passing this static check does not prove a provider will honor an option.
+
 `check` builds a cross-module graph from each entry file and follows
 `import` statements recursively. When every import in a file resolves,
 the typechecker knows the exact set of names that module brings into
@@ -1890,6 +1976,7 @@ consumers (IDE-host preflight, cloud-platform onboarding).
 harn doctor                # local checks; skips remote provider probes by default
 harn doctor --check-providers  # actively probe configured providers
 harn doctor --json         # versioned machine-readable output
+harn doctor sandbox        # measure which process confinement this host enforces
 ```
 
 Each check reports a red/yellow/green status (`fail` / `warn` / `ok`, plus
@@ -1909,6 +1996,40 @@ Local diagnostic subprocesses have a five-second execution deadline and a
 30-second deadline. A timed-out tool is reported as a failed probe; an
 unreadable target inventory is a warning, not an empty successful inventory.
 Process cleanup may add a short grace period after the deadline.
+
+### `harn doctor sandbox`
+
+`harn doctor` reports what the process-sandbox backend believes it can do.
+`harn doctor sandbox` measures it. It runs every case of the sandbox
+conformance contract through the same process tools an agent uses and prints
+one line per case:
+
+| Case | Holds when |
+|------|------------|
+| `fs.workspace_write_admitted` | a write inside the workspace lands |
+| `fs.outside_write_refused` | a write outside every writable root is refused |
+| `fs.outside_read_refused` | a read outside every readable root is refused |
+| `fs.session_temp_write_admitted` | a write to the child's own `TMPDIR` lands in the session temp dir |
+| `fs.sibling_temp_read_refused` | a file another process left in the host's shared temp dir is not readable |
+| `fs.atomic_replace_admitted` | a Foundation atomic write into the workspace lands (macOS only) |
+| `guardian.outside_write_refused` | a background child is confined like a direct one |
+| `env.undeclared_name_withheld` | no launcher variable the session did not declare reaches the child |
+| `guardian.undeclared_env_name_withheld` | the same, for a background child |
+| `unix_socket.bind_under_root` | a socket file binds under a named socket root |
+| `unix_socket.bind_under_root_with_network` | the same, when the policy also permits networking |
+| `unix_socket.bind_outside_root_refused` | a socket file outside every socket root is refused |
+| `read_only_role.workspace_write_refused` | under a role whose `workspace` capability only reads, with no child write grant, a workspace write is refused |
+| `read_only_role.read_only_root_read_admitted` | the same role with no child write grant: a read under a read-only root lands |
+| `child_write_grant.workspace_write_admitted` | the same role with `allow_child_workspace_write`: a workspace write lands |
+| `child_write_grant.temp_write_admitted` | the same role with the grant: a write to the child's own `TMPDIR` lands |
+| `child_write_grant.read_only_root_write_refused` | the same role with the grant: a write under a read-only root is refused |
+| `child_write_grant.outside_write_refused` | the same role with the grant: a write outside every writable root is refused |
+| `child_write_grant.read_only_root_read_admitted` | the same role with the grant: a read under a read-only root lands |
+
+A case that the backend cannot enforce on this host reads `not measured`, not
+`ok`. The command exits non-zero unless every case that applies on this
+platform was measured and holds. `--json` emits the same report in the
+standard envelope (`schemaVersion: 1`).
 
 ### What it checks
 
@@ -2172,8 +2293,12 @@ harn provider tool-probe openai --model gpt-5.4-mini --tool-format json
 
 Use `--response-fixture` to classify a saved provider response without making a
 network request. Use `--repeat` for live reliability checks; repeated summaries
-only pass when every attempted probe for that mode succeeds. `harn local switch`
-can consume the JSON with `--probe-result`. `--tool-format native|json|text`
+only pass when every attempted probe for that mode succeeds. JSON reports label
+their `evidence_source` as `live_request`, `live_raw_endpoint`, or
+`saved_response`. Only `live_request` reports from the provider adapter can
+satisfy `harn local switch --probe-result`, route-fitness, or catalog promotion
+gates. Saved responses remain useful for parser checks; raw endpoint overrides
+measure that endpoint without certifying the provider route. `--tool-format native|json|text`
 forces the live emission contract and exact parser; it does not enable the
 permissive `adaptive` parser. Probes preserve route generation defaults and
 raise only the minimum output budget when necessary to leave visible tool-call
@@ -2205,8 +2330,9 @@ global default. Snapshot recommendations can only select `native`, `json`, or
 ## harn provider tool-scorecard
 
 Aggregate one or more `harn provider tool-probe --json` reports into a stable
-route scorecard. Fixture input is offline-only: the command reads saved probe
-reports and does not call providers. The JSON report uses `schema_version: 8`
+route scorecard. The command reads saved JSON reports from live probes and does
+not call providers itself. It rejects reports classified from `--response-fixture`
+and legacy reports without live provenance. The JSON report uses `schema_version: 8`
 and includes route-level `catalog_claim`, `catalog_mismatches`, and
 `suggested_catalog_updates` fields plus a `fitness` store with exact
 provider/model/format/case observations. Suggested catalog updates remain
@@ -2219,7 +2345,7 @@ harn provider tool-scorecard --tool-probe-report ./probe.json --markdown > score
 ```
 
 Use `--plan-from-catalog` to render the fixed micro-case matrix for catalogued
-routes before probing. Plan output remains `schema_version: 1`.
+routes before probing. Plan output uses a separate versioned schema.
 
 ```bash
 harn provider tool-scorecard --plan-from-catalog --route anthropic:claude-sonnet-5
@@ -2313,6 +2439,19 @@ credentials, base URL overrides, and `HARN_LLM_CALLS_DISABLED`.
 Print resolved model metadata as JSON. For Ollama models, `--verify` probes
 `/api/tags` and checks the selected tag. `--warm` implies `--verify` and sends
 an empty `/api/generate` request to preload the matched tag.
+
+Hosted `context_window` and `catalog` metadata come from the selected provider's
+catalog entry, including aliases and wire model names. Local server discovery
+takes precedence over catalog limits; when discovery is unavailable, only an
+explicit catalog `runtime_context_window` is used for local routes. Unknown
+limits are reported as `null`.
+
+For Ollama-compatible providers, `context_window` is the `num_ctx` Harn configures
+for requests, using environment overrides and the selected provider's catalog
+defaults. It is not the architecture limit from `/api/show`. With `--verify`,
+`readiness.loaded_runner.context_length` separately reports the loaded runner's
+observed context; `readiness.context_drift` identifies a mismatch with the
+configured request limit.
 
 ```bash
 harn models info llama3.2:latest
@@ -3796,8 +3935,9 @@ the Harn `server_version`, stable `worker_id`, and `process_id`. Then call
 `max_execute_ms`, `parallel`, `fail_fast`, `jobs`, `shard`, `skill_dirs`, or
 `diagnose`. Each response includes the same worker identity, typed test
 summary, cumulative `run_count`, and cache counters before and after that run.
-The advertised `test_run.schema_version` is 2; summaries include the shared
-duration distribution plus per-case and aggregate module attribution.
+The advertised `test_run.schema_version` is 5; summaries include per-case
+`work.vm_steps` (or `work: null` when no VM was constructed) and a separate
+skipped count, the shared duration distribution, and per-case and aggregate module attribution.
 `shutdown` returns the final run and cache receipt; closing stdin also stops the
 worker. Every test still receives fresh VM and module state; only reusable
 prepared module artifacts are retained by the worker session.
@@ -3811,6 +3951,9 @@ clients share the same transcript, EventLog, replay, and host-permission paths
 as ACP hosts. Use `--api-key <key>` / `HARN_SERVE_API_KEY`,
 `--hmac-secret <secret>` / `HARN_SERVE_HMAC_SECRET`, and the shared `--tls`
 flags to protect non-discovery routes.
+New sessions default to ACP `ask` mode. Use `--default-session-mode code` to
+select coding mode for sessions that omit `mode_id`; each create request can
+override the default with `mode_id` (`ask`, `architect`, `code`, or `shadow`).
 
 `harn serve mcp` uses the shared `harn-serve` dispatch core and maps each
 exported `pub fn` in the target module to one MCP tool. Tool schemas are
@@ -3862,6 +4005,11 @@ through `session/request_permission`. Use `--api-key <key>` /
 `authenticate` before protected session methods. WebSocket clients can also
 pre-authenticate the upgrade with `Authorization: Bearer <key>` or
 `X-API-Key`.
+Pass `--read-only-root <path>` once per host-owned asset directory that a
+session must read outside its project workspace. Harn canonicalizes each path
+and adds it to the per-turn file-read policy for stdio and WebSocket ACP.
+This is additive to the existing policy; it does not enable confinement or
+change child-process permissions. Unconfined `code` mode remains unconfined.
 Use `--profile` / `HARN_PROFILE=1` to print one categorical timing rollup per
 executed `session/prompt`; use `--profile-json <path>` /
 `HARN_PROFILE_JSON=<path>` to append per-turn NDJSON records with

@@ -7,6 +7,7 @@ use harn_vm::VmValue;
 mod compile_once_tests;
 mod egress_isolation;
 mod sharding;
+mod work;
 
 struct TempTestDir {
     inner: tempfile::TempDir,
@@ -165,6 +166,14 @@ async fn execution_budget_starts_after_setup_and_stops_cpu_bound_code() {
     assert_eq!(timeout.phase, TestPhase::Execute);
     assert_eq!(timeout.limit_ms, 0);
     assert_eq!(
+        result
+            .work
+            .as_ref()
+            .expect("timeout constructed a measured VM")
+            .vm_steps,
+        0
+    );
+    assert_eq!(
         result.phases.expect("measured phases").modules,
         harn_vm::ModulePhaseStats::default()
     );
@@ -205,6 +214,38 @@ async fn run_single_case(temp: &TempTestDir, name: &str, source_body: &str) -> T
         None,
     )
     .await
+}
+
+#[tokio::test]
+async fn imported_testing_skip_is_typed_and_stops_the_case() {
+    let temp = TempTestDir::new();
+    let result = run_single_case(
+        &temp,
+        "test_typed_skip",
+        "import { skip } from \"std/testing\"\n\
+         pipeline test_typed_skip(_task) {\n\
+           skip(\"opt-in service unavailable\")\n\
+           assert(false, \"assertion after skip ran\")\n\
+         }\n",
+    )
+    .await;
+
+    assert!(
+        result
+            .work
+            .as_ref()
+            .expect("skip retains measured work")
+            .vm_steps
+            > 0
+    );
+    assert!(!result.passed);
+    assert_eq!(
+        result.skip_reason.as_deref(),
+        Some("opt-in service unavailable"),
+        "{result:?}"
+    );
+    assert!(result.error.is_none(), "{result:?}");
+    assert!(result.timeout.is_none(), "{result:?}");
 }
 
 /// `log`/`print`/`println` write into the VM's per-case output buffer
@@ -810,10 +851,12 @@ fn passing_result_with_timings(total_ms: u64, execute_ms: u64) -> TestResult {
         name: "test_budget".to_string(),
         file: "tests/test_budget.harn".to_string(),
         passed: true,
+        skip_reason: None,
         error: None,
         captured_output: None,
         timeout: None,
         duration_ms: total_ms,
+        work: None,
         phases: Some(PhaseTimings {
             setup_ms: 7,
             compile_ms: 3,

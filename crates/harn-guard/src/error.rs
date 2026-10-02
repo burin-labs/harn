@@ -4,6 +4,7 @@ use std::path::PathBuf;
 
 /// Failures from installing, resolving, or removing a guard model package.
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum GuardError {
     /// The requested catalog model name is not in the built-in catalog.
     #[error("unknown guard model `{0}`; run `harn guard list` to see available models")]

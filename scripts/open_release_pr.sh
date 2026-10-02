@@ -6,7 +6,11 @@
 #      release for it already merged and the development bump has not landed,
 #      so there is nothing to release yet.
 #   2. An open pull request titled `Release vX.Y.Z`, or from release/vX.Y.Z,
-#      stops the opener, which names it.
+#      stops the opener, which names it, unless main has gained changelog
+#      fragments since that pull request was prepared. Then the opener refolds
+#      it in place: it prepares again from current main with the same version
+#      and resets release/vX.Y.Z to that one signed commit. The pull request
+#      stays open, so a late fix rides the release without a close and reopen.
 #   3. Without unreleased changelog fragments there is nothing to release.
 # Otherwise the opener branches release/vX.Y.Z, runs
 # `release_ship.sh --prepare --materialize-candidate` (which folds the
@@ -15,10 +19,15 @@
 # arms auto-merge on it at once (scripts/lib/release_auto_merge.sh). The pull
 # request still merges only through its required checks and review.
 #
-# Usage: open_release_pr.sh [--plan]
-#   --plan  decide only. Writes action=open|existing|none to $GITHUB_OUTPUT.
+# Usage: open_release_pr.sh [--plan] [--refold-only]
+#   --plan         decide only. Writes action=open|refold|existing|none to
+#                  $GITHUB_OUTPUT.
+#   --refold-only  never open a new release pull request; only refold an open
+#                  one. A push to main runs this way, so merging a fragment
+#                  does not start a release by itself.
 # Without --plan the decision is taken again (it may be minutes newer than the
-# plan) and action=opened|existing|none is written, with version and pr_url.
+# plan) and action=opened|refolded|existing|none is written, with version and
+# pr_url.
 #
 # Requires GH_TOKEN. Opening also requires HARN_BIN (the release-source Harn
 # executable) and GITHUB_REPOSITORY.
@@ -33,14 +42,17 @@ source "$script_root/scripts/lib/release_tree_guard.sh"
 source "$script_root/scripts/lib/release_auto_merge.sh"
 
 mode=open
-case "${1:-}" in
-  --plan) mode=plan ;;
-  "") ;;
-  *)
-    echo "usage: open_release_pr.sh [--plan]" >&2
-    exit 2
-    ;;
-esac
+refold_only=0
+for arg in "$@"; do
+  case "$arg" in
+    --plan) mode=plan ;;
+    --refold-only) refold_only=1 ;;
+    *)
+      echo "usage: open_release_pr.sh [--plan] [--refold-only]" >&2
+      exit 2
+      ;;
+  esac
+done
 
 emit() {
   if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
@@ -65,24 +77,76 @@ fi
 title="Release v$version"
 branch="release/v$version"
 
-# Stop, naming it, when a release pull request for this version is open. A
-# failed lookup must not read as "no pull request": opening a second release
-# pull request for one version is the failure this check exists to prevent.
-stop_if_release_pr_open() {
-  local existing
-  if ! existing="$(gh pr list --state open --base main --limit 1000 \
+# Changelog fragment paths in one commit, filtered as unfolded_fragment_paths
+# filters the working tree.
+fragment_paths_at() {
+  local fragment name
+  git ls-tree --name-only "$1" changelog.d/ | while IFS= read -r fragment; do
+    name="${fragment##*/}"
+    [[ "$name" == README* || "$name" == _* ]] && continue
+    [[ "$name" =~ \.(breaking|added|changed|deprecated|removed|fixed|security)\.md$ ]] || continue
+    printf '%s\n' "$fragment"
+  done
+}
+
+# Find the open release pull request for this version and set existing_url and
+# existing_branch (both empty when none is open). A failed lookup must not read
+# as "no pull request": opening a second release pull request for one version
+# is the failure this check exists to prevent.
+read_release_pr() {
+  local found
+  if ! found="$(gh pr list --state open --base main --limit 1000 \
     --json url,title,headRefName \
-    --jq "[.[] | select(.title == \"$title\" or .headRefName == \"$branch\")] | .[0].url // empty")"; then
+    --jq "[.[] | select(.title == \"$title\" or .headRefName == \"$branch\")] | .[0] // empty | \"\(.url) \(.headRefName)\"")"; then
     echo "error: could not list open pull requests; refusing to open $title on unproved state" >&2
     exit 1
   fi
-  if [[ -n "$existing" ]]; then
-    echo "::notice title=Release pull request already open::$title is open: $existing"
-    emit action=existing "version=$version" "pr_url=$existing"
-    exit 0
+  existing_url=""
+  existing_branch=""
+  if [[ -n "$found" ]]; then
+    existing_url="${found%% *}"
+    existing_branch="${found#* }"
   fi
 }
-stop_if_release_pr_open
+
+# Stop, naming it, when the open release pull request already folds every
+# fragment on main, or is not on the branch this opener owns. Otherwise it is
+# due a refold: name the fragments it is missing and return.
+stop_unless_refold_due() {
+  if [[ "$existing_branch" != "$branch" ]]; then
+    echo "::notice title=Release pull request already open::$title is open: $existing_url"
+    emit action=existing "version=$version" "pr_url=$existing_url"
+    exit 0
+  fi
+  # The release branch is one commit on the main commit it was prepared from.
+  local release_base
+  if ! git fetch --quiet --depth=2 origin "refs/heads/$branch" \
+    || ! release_base="$(git rev-parse --verify --quiet 'FETCH_HEAD^')"; then
+    echo "error: could not read the base of $branch; refusing to refold $title on unproved state" >&2
+    exit 1
+  fi
+  local missing=()
+  local fragment
+  while IFS= read -r fragment; do
+    [[ -n "$fragment" ]] && missing+=("$fragment")
+  done < <(comm -23 <(unfolded_fragment_paths | sort) <(fragment_paths_at "$release_base" | sort))
+  if (( ${#missing[@]} == 0 )); then
+    echo "::notice title=Release pull request already open::$title is open and folds every fragment on main: $existing_url"
+    emit action=existing "version=$version" "pr_url=$existing_url"
+    exit 0
+  fi
+  echo "$title ($existing_url) was prepared from $release_base and misses ${#missing[@]} fragment(s) now on main:"
+  printf '  - %s\n' "${missing[@]}"
+}
+
+read_release_pr
+if [[ -n "$existing_url" ]]; then
+  stop_unless_refold_due
+elif (( refold_only )); then
+  echo "::notice title=Nothing to refold::no $title pull request is open, and this run only refolds one."
+  emit action=none "version=$version" pr_url=
+  exit 0
+fi
 
 fragments=()
 while IFS= read -r fragment; do
@@ -97,9 +161,14 @@ echo "$title: ${#fragments[@]} unreleased changelog fragment(s) on main"
 printf '  - %s\n' "${fragments[@]}"
 
 if [[ "$mode" == plan ]]; then
-  emit action=open "version=$version" pr_url=
+  if [[ -n "$existing_url" ]]; then
+    emit action=refold "version=$version" "pr_url=$existing_url"
+  else
+    emit action=open "version=$version" pr_url=
+  fi
   exit 0
 fi
+refolding_url="$existing_url"
 
 harn_bin="${HARN_BIN:-}"
 if [[ -z "$harn_bin" || ! -x "$harn_bin" ]]; then
@@ -141,8 +210,21 @@ if [[ "$main_version" != "$current" ]]; then
   emit action=none "version=$version" pr_url=
   exit 0
 fi
-stop_if_release_pr_open
+# The pull request may have merged, closed, or opened while this run prepared.
+read_release_pr
+if [[ "$existing_url" != "$refolding_url" ]]; then
+  if [[ -n "$existing_url" ]]; then
+    echo "::notice title=Release pull request already open::$title is open: $existing_url"
+    emit action=existing "version=$version" "pr_url=$existing_url"
+  else
+    echo "::notice title=Nothing to refold::$title closed while this run prepared it."
+    emit action=none "version=$version" pr_url=
+  fi
+  exit 0
+fi
 
+# Opening creates the branch; refolding resets it to this one commit on the new
+# base. Either way the branch carries exactly one release commit.
 HARN_BRANCH_COMMIT_TOKEN="$GH_TOKEN" \
   HARN_BRANCH_COMMIT_BRANCH="$branch" \
   HARN_BRANCH_COMMIT_BASE_OID="$base_oid" \
@@ -154,8 +236,16 @@ trap 'rm -f "$body_file"' EXIT
 cat > "$body_file" <<EOF
 Moves the workspace from $current to $version and folds ${#fragments[@]} changelog fragment(s) into the \`## v$version\` section of CHANGELOG.md, deleting them.
 
-When this merges, the push to main builds and checks the release candidate at that commit, and promotion publishes exactly those files. Opened by \`scripts/open_release_pr.sh\` from main at $base_oid.
+When this merges, the push to main builds and checks the release candidate at that commit, and promotion publishes exactly those files. Prepared by \`scripts/open_release_pr.sh\` from main at $base_oid.
 EOF
+if [[ -n "$refolding_url" ]]; then
+  gh pr edit "$refolding_url" --body-file "$body_file" >/dev/null
+  echo "Refolded $title onto main at $base_oid: $refolding_url"
+  emit "version=$version" "pr_url=$refolding_url"
+  release_arm_auto_merge "$refolding_url"
+  emit action=refolded
+  exit 0
+fi
 pr_url="$(gh pr create --base main --head "$branch" --title "Release v$version" --body-file "$body_file")"
 echo "Opened $title: $pr_url"
 # Arm now, before the checks settle. The URL is emitted first so a failed arm

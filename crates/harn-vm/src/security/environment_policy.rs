@@ -30,10 +30,71 @@
 //! addition fails `cargo test`.
 
 use std::collections::BTreeMap;
+use std::ffi::{OsStr, OsString};
 
 use super::session_environment::{
     EnvironmentPolicyError, EnvironmentPolicyKind, SessionEnvironment,
 };
+
+/// A payload may configure its loader after confinement. A trusted setup
+/// executable must reach its confinement code before loader controls fire.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ProcessEnvironmentBoundary {
+    Payload,
+    TrustedSetup,
+}
+
+// The ELF loader namespace and GNU libc's tunable frontends. Glibc reads
+// GLIBC_TUNABLES and the legacy MALLOC_* aliases in elf/dl-tunables.c during
+// loader initialization, before a trusted executable reaches its entry point.
+const TRUSTED_SETUP_CONTROL_PREFIXES: &[&[u8]] = &[b"LD_", b"MALLOC_"];
+const TRUSTED_SETUP_CONTROL_NAMES: &[&[u8]] = &[b"GLIBC_TUNABLES"];
+
+/// Loader and runtime-library controls that precede trusted setup.
+pub fn is_trusted_setup_control(name: &OsStr) -> bool {
+    let name = name.as_encoded_bytes();
+    TRUSTED_SETUP_CONTROL_PREFIXES
+        .iter()
+        .any(|prefix| name.starts_with(prefix))
+        || TRUSTED_SETUP_CONTROL_NAMES.contains(&name)
+}
+
+/// Validate the effective launch environment without changing payload grants.
+/// The caller supplies no inherited entries after `env_clear`; explicit
+/// removals and replacements are composed last, exactly as at exec.
+pub fn validate_process_environment(
+    boundary: ProcessEnvironmentBoundary,
+    inherited: impl IntoIterator<Item = (OsString, OsString)>,
+    explicit: impl IntoIterator<Item = (OsString, Option<OsString>)>,
+) -> Result<(), EnvironmentPolicyError> {
+    if boundary == ProcessEnvironmentBoundary::Payload {
+        return Ok(());
+    }
+    // Only loader controls need inspection; ordinary grant values are never
+    // retained by this validator or included in a diagnostic.
+    let mut controls: BTreeMap<_, _> = inherited
+        .into_iter()
+        .filter(|(name, _)| is_trusted_setup_control(name))
+        .collect();
+    for (name, value) in explicit {
+        if !is_trusted_setup_control(&name) {
+            continue;
+        }
+        if let Some(value) = value {
+            controls.insert(name, value);
+        } else {
+            controls.remove(&name);
+        }
+    }
+    for (name, value) in controls {
+        if !value.is_empty() {
+            return Err(EnvironmentPolicyError::UnsafeTrustedSetupVariable {
+                variable: name.to_string_lossy().into_owned(),
+            });
+        }
+    }
+    Ok(())
+}
 
 /// POSIX/shell/locale essentials any build or test process needs to run at all.
 /// These are workspace/user facts, never credentials.
@@ -84,6 +145,8 @@ const TOOLCHAIN_ENV_ALLOWLIST: &[&str] = &[
     "RUST_LOG",
     // SwiftPM manifest compiler modules are a relocatable build cache.
     "SWIFTPM_MODULECACHE_OVERRIDE",
+    // clang and swift-frontend's module cache, relocated the same way.
+    "CLANG_MODULE_CACHE_PATH",
     // Node / npm / pnpm: module path + cache/home roots.
     "NODE_PATH",
     "NPM_CONFIG_CACHE",
@@ -150,6 +213,7 @@ const WINDOWS_ENV_ALLOWLIST: &[&str] = &[
 /// there is no second per-language path table to drift from the allowlist.
 pub const TOOLCHAIN_PATH_ENV_VARS: &[&str] = &[
     "SWIFTPM_MODULECACHE_OVERRIDE",
+    "CLANG_MODULE_CACHE_PATH",
     // Rust / Cargo
     "CARGO_HOME",
     "CARGO_TARGET_DIR",
@@ -191,6 +255,7 @@ pub const TOOLCHAIN_PATH_ENV_VARS: &[&str] = &[
 /// jail is a provable environment/config gap, not the workload's code defect.
 pub const TOOLCHAIN_CACHE_ENV_VARS: &[&str] = &[
     "SWIFTPM_MODULECACHE_OVERRIDE",
+    "CLANG_MODULE_CACHE_PATH",
     "CARGO_HOME",
     "CARGO_TARGET_DIR",
     "CCACHE_DIR",
@@ -328,9 +393,10 @@ pub fn resolve_env_for_command(
     Ok(env)
 }
 
-/// The policy-governed value of a single environment variable — the same
-/// answer [`resolve_env`] would put in the map under `name`, without building
-/// the map.
+/// The policy-governed value of a single environment variable as Harn's own
+/// process reads it — the same answer [`resolve_env`] would put in the map
+/// under `name`, without building the map, except for an `in_process` grant,
+/// which this reader sees and no child environment ever contains.
 ///
 /// Grants win over the allowlist (matching `resolve_env`'s overlay order), so a
 /// granted policy that grants `FIREWORKS_API_KEY` sees the granted value here even though
@@ -365,6 +431,83 @@ pub fn lookup_env(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn trusted_setup_validates_inherited_and_explicit_loader_controls() {
+        for name in [
+            "LD_BIND_NOW",
+            "LD_TRACE_LOADED_OBJECTS",
+            "GLIBC_TUNABLES",
+            "MALLOC_CHECK_",
+            "MALLOC_TOP_PAD_",
+            "MALLOC_PERTURB_",
+            "MALLOC_MMAP_THRESHOLD_",
+            "MALLOC_TRIM_THRESHOLD_",
+            "MALLOC_MMAP_MAX_",
+            "MALLOC_ARENA_MAX",
+            "MALLOC_ARENA_TEST",
+        ] {
+            let inherited = vec![(OsString::from(name), OsString::from("1"))];
+            let explicit = vec![(OsString::from(name), Some(OsString::from("1")))];
+            for (parent, overlay) in [(inherited.clone(), vec![]), (vec![], explicit.clone())] {
+                assert_eq!(
+                    validate_process_environment(
+                        ProcessEnvironmentBoundary::TrustedSetup,
+                        parent,
+                        overlay
+                    ),
+                    Err(EnvironmentPolicyError::UnsafeTrustedSetupVariable {
+                        variable: name.into()
+                    })
+                );
+            }
+            // Payload grants retain their meaning when confinement precedes exec.
+            assert_eq!(
+                validate_process_environment(
+                    ProcessEnvironmentBoundary::Payload,
+                    inherited,
+                    explicit
+                ),
+                Ok(())
+            );
+        }
+    }
+
+    #[test]
+    fn trusted_setup_honors_clear_removal_and_empty_override() {
+        for name in ["LD_BIND_NOW", "GLIBC_TUNABLES", "MALLOC_TRIM_THRESHOLD_"] {
+            let inherited = vec![(OsString::from(name), OsString::from("1"))];
+            for replacement in [None, Some(OsString::new())] {
+                assert_eq!(
+                    validate_process_environment(
+                        ProcessEnvironmentBoundary::TrustedSetup,
+                        inherited.clone(),
+                        [(OsString::from(name), replacement)]
+                    ),
+                    Ok(())
+                );
+            }
+        }
+        // env_clear supplies no inherited entries. Ordinary grants survive.
+        assert_eq!(
+            validate_process_environment(
+                ProcessEnvironmentBoundary::TrustedSetup,
+                [],
+                [
+                    (
+                        OsString::from("ORDINARY_PROBE"),
+                        Some(OsString::from("admitted"))
+                    ),
+                    (OsString::from("LD"), Some(OsString::from("ld"))),
+                    (
+                        OsString::from("GLIBC_TUNABLES_ORDINARY"),
+                        Some(OsString::from("admitted"))
+                    )
+                ]
+            ),
+            Ok(())
+        );
+    }
 
     #[test]
     fn allowlist_admits_the_windows_names_a_child_cannot_start_a_program_without() {
@@ -597,6 +740,7 @@ mod tests {
                 },
                 expose_as_env: Some("FIREWORKS_API_KEY".to_string()),
                 for_command: None,
+                expose_to: Default::default(),
             },
             GrantSpec {
                 name: "gh".to_string(),
@@ -606,6 +750,7 @@ mod tests {
                 },
                 expose_as_env: Some("GH_TOKEN".to_string()),
                 for_command: None,
+                expose_to: Default::default(),
             },
         ];
         let environment =
@@ -649,6 +794,7 @@ mod tests {
                 },
                 expose_as_env: Some("FIREWORKS_API_KEY".to_string()),
                 for_command: None,
+                expose_to: Default::default(),
             },
             GrantSpec {
                 name: "log".to_string(),
@@ -657,6 +803,7 @@ mod tests {
                 },
                 expose_as_env: Some("RUST_LOG".to_string()),
                 for_command: None,
+                expose_to: Default::default(),
             },
             GrantSpec {
                 name: "gh".to_string(),
@@ -666,6 +813,7 @@ mod tests {
                 },
                 expose_as_env: Some("GH_TOKEN".to_string()),
                 for_command: None,
+                expose_to: Default::default(),
             },
         ];
         let resolve_secret = |account: &str, key: &str| {
@@ -698,6 +846,42 @@ mod tests {
     }
 
     #[test]
+    fn an_in_process_grant_is_the_one_name_the_two_readers_disagree_on() {
+        // The equivalence above holds for every grant a child may see. An
+        // in-process grant is the deliberate exception: Harn's own reader
+        // resolves it and the child resolvers leave it out, both the one that
+        // knows the program and the one that does not.
+        let parent = env_from(&[("PATH", "/usr/bin"), ("LAUNCHER_KEY", "provider-value")]);
+        let environment = SessionEnvironment::launch(
+            EnvironmentPolicyKind::Granted,
+            vec![GrantSpec {
+                name: "provider".to_string(),
+                source: GrantSourceSpec::Env {
+                    var: "LAUNCHER_KEY".to_string(),
+                },
+                expose_as_env: Some("PROVIDER_API_KEY".to_string()),
+                for_command: None,
+                expose_to: crate::security::GrantAudience::InProcess,
+            }],
+            &parent,
+        )
+        .unwrap();
+        let never_secret = |_: &str, _: &str| None;
+        assert_eq!(
+            lookup_env(&environment, "PROVIDER_API_KEY", &parent, &never_secret).unwrap(),
+            Some("provider-value".to_string())
+        );
+        let spawn = resolve_env(&environment, &parent, &never_secret).unwrap();
+        let for_program =
+            resolve_env_for_command(&environment, "/usr/bin/env", &parent, &never_secret).unwrap();
+        for child in [&spawn, &for_program] {
+            assert!(!child.contains_key("PROVIDER_API_KEY"));
+            // Direction control: the child environment is not simply empty.
+            assert_eq!(child.get("PATH").map(String::as_str), Some("/usr/bin"));
+        }
+    }
+
+    #[test]
     fn a_single_name_lookup_touches_only_its_own_grant() {
         // Resolving one variable must not drag every other secret_store grant
         // through the secret store: probing an unrelated name would otherwise
@@ -712,6 +896,7 @@ mod tests {
                 },
                 expose_as_env: Some("FIREWORKS_API_KEY".to_string()),
                 for_command: None,
+                expose_to: Default::default(),
             },
             GrantSpec {
                 name: "broken".to_string(),
@@ -721,6 +906,7 @@ mod tests {
                 },
                 expose_as_env: Some("OTHER_TOKEN".to_string()),
                 for_command: None,
+                expose_to: Default::default(),
             },
         ];
         let environment =
@@ -798,6 +984,7 @@ mod tests {
             },
             expose_as_env: Some("RUST_LOG".to_string()),
             for_command: None,
+            expose_to: Default::default(),
         }];
         let environment =
             SessionEnvironment::launch(EnvironmentPolicyKind::Granted, specs, &parent).unwrap();

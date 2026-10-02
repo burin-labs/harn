@@ -119,6 +119,58 @@ fn anthropic_sonnet_5_gets_adaptive_effort_capabilities() {
     assert_eq!(caps.thinking_block_style, "thinking_blocks");
 }
 
+/// Sonnet 5.5 narrows Sonnet 5 three ways (live API, 2026-09-29): thinking
+/// turns off with `between_tools`, forced tool choice is a 400, and the cache
+/// floor drops to 512. The `claude-sonnet-5*` glob also matches
+/// `claude-sonnet-5-5`, so Sonnet 5 is the control that proves the 5.5 row
+/// decided each value; before that row existed every default Harn call to
+/// Sonnet 5.5 sent `disabled` and failed.
+#[test]
+fn anthropic_sonnet_55_turns_thinking_off_between_tools() {
+    reset();
+    for model in ["claude-sonnet-5-5", "anthropic/claude-sonnet-5.5"] {
+        let caps = lookup("anthropic", model);
+        assert_eq!(
+            caps.thinking_off_type,
+            ThinkingOffType::BetweenTools,
+            "{model}"
+        );
+        assert!(caps.reasoning_disable_supported, "{model}");
+        assert_eq!(
+            caps.allowed_tool_choice_modes,
+            vec!["auto", "none"],
+            "{model}"
+        );
+        assert_eq!(caps.prompt_cache_min_prefix_tokens, Some(512), "{model}");
+        // The rest layers on from the Sonnet 5 row through `extends`.
+        assert_eq!(caps.thinking_modes, vec!["adaptive", "effort"], "{model}");
+        assert!(!caps.temperature_supported, "{model}");
+        assert!(caps.native_tools, "{model}");
+    }
+    for model in ["claude-sonnet-5", "anthropic/claude-sonnet-5"] {
+        let caps = lookup("anthropic", model);
+        assert_eq!(caps.thinking_off_type, ThinkingOffType::Disabled, "{model}");
+        assert!(caps.allowed_tool_choice_modes.is_empty(), "{model}");
+        assert_eq!(caps.prompt_cache_min_prefix_tokens, Some(1024), "{model}");
+    }
+}
+
+/// Through OpenRouter, Sonnet 5.5's reasoning cannot be disabled at all and a
+/// forced tool choice returns Anthropic's 400 (probed 2026-09-29). Sonnet 5
+/// on the same route keeps both.
+#[test]
+fn openrouter_sonnet_55_keeps_reasoning_on_and_tool_choice_unforced() {
+    reset();
+    let caps = lookup("openrouter", "anthropic/claude-sonnet-5.5");
+    assert!(!caps.reasoning_disable_supported);
+    assert_eq!(caps.allowed_tool_choice_modes, vec!["auto", "none"]);
+    assert!(caps.native_tools);
+
+    let sonnet5 = lookup("openrouter", "anthropic/claude-sonnet-5");
+    assert!(sonnet5.reasoning_disable_supported);
+    assert!(sonnet5.allowed_tool_choice_modes.is_empty());
+}
+
 #[test]
 fn anthropic_fable_effort_cannot_be_disabled() {
     reset();

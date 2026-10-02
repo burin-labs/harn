@@ -178,6 +178,7 @@ pub struct SessionTimelineLink {
 }
 
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum SessionTimelineError {
     EventLog(LogError),
     RunRecord(String),

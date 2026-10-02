@@ -97,6 +97,15 @@ done
 ci_workflow="$root/.github/workflows/ci.yml"
 grep -Fq 'release_published_version_for_workspace "$workspace_version"' "$ci_workflow" \
   || fail "source-only documentation checks try to install an unpublished -dev build"
+canary_workflow="$root/.github/workflows/consumer-canary.yml"
+canary_script="$root/scripts/ci/consumer_canary.sh"
+grep -Fq 'WORKSPACE_VERSION=' "$canary_workflow" \
+  || fail "consumer canary no longer passes the source workspace version"
+if grep -Fq 'TARGET_VERSION=' "$canary_workflow"; then
+  fail "consumer canary sends an unpublished workspace version as a consumer tag"
+fi
+grep -Fq 'release_published_version_for_workspace "$workspace_version"' "$canary_script" \
+  || fail "consumer canary no longer projects workspace state to a published tag"
 grep -Fq 'scripts/verify_release_tag_main_ancestry.sh --tag "$REF_NAME"' "$publish_workflow" \
   || fail "crate publication does not prove the tag selects merged main"
 

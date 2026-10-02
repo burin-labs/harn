@@ -41,6 +41,60 @@ const TY_STRING_OR_DICT_OR_NIL: Ty = Ty::Union(&[TY_STRING, TY_DICT, TY_NIL]);
 const TY_STRING_OR_LIST: Ty = Ty::Union(&[TY_STRING, TY_LIST]);
 const TY_TOOL_REGISTRY_OR_LIST: Ty = Ty::Union(&[TY_LIST, TY_DICT]);
 
+/// Closed projection of the Rust-parsed bundled approval-review policy.
+/// The runtime serialization and Harn aliases are checked by typed-options parity.
+pub const APPROVAL_REVIEW_POLICY: Ty = Ty::Shape(&[
+    ShapeFieldDescriptor::new("version", TY_INT),
+    ShapeFieldDescriptor::new(
+        "reviewer",
+        Ty::Shape(&[
+            ShapeFieldDescriptor::new("model", TY_STRING),
+            ShapeFieldDescriptor::new("effort", TY_STRING),
+            ShapeFieldDescriptor::new("timeout_ms", TY_INT),
+            ShapeFieldDescriptor::new("on_error", Ty::LitString("deny")),
+            ShapeFieldDescriptor::new("provider", TY_STRING_OR_NIL),
+        ]),
+    ),
+    ShapeFieldDescriptor::new(
+        "breaker",
+        Ty::Shape(&[
+            ShapeFieldDescriptor::new("max_consecutive_denials", TY_INT),
+            ShapeFieldDescriptor::new("max_denials_per_turn", TY_INT),
+            ShapeFieldDescriptor::new("cell_flag_denied_trial_share", super::TY_FLOAT),
+        ]),
+    ),
+    ShapeFieldDescriptor::new(
+        "floor",
+        Ty::Shape(&[ShapeFieldDescriptor::new(
+            "never_grant",
+            Ty::Apply("list", &[TY_STRING]),
+        )]),
+    ),
+    ShapeFieldDescriptor::new(
+        "denylist",
+        Ty::Shape(&[ShapeFieldDescriptor::new(
+            "categories",
+            Ty::Apply("list", &[TY_STRING]),
+        )]),
+    ),
+    ShapeFieldDescriptor::new(
+        "trust",
+        Ty::Shape(&[
+            ShapeFieldDescriptor::new("trusted_inputs", Ty::Apply("list", &[TY_STRING])),
+            ShapeFieldDescriptor::new("untrusted_inputs", Ty::Apply("list", &[TY_STRING])),
+        ]),
+    ),
+    ShapeFieldDescriptor::new(
+        "verdict",
+        Ty::Shape(&[
+            ShapeFieldDescriptor::new("risk_levels", Ty::Apply("list", &[TY_STRING])),
+            ShapeFieldDescriptor::new("authorization_levels", Ty::Apply("list", &[TY_STRING])),
+            ShapeFieldDescriptor::new("thresholds", Ty::Apply("map", &[TY_STRING, TY_STRING])),
+        ]),
+    ),
+    ShapeFieldDescriptor::new("host_guidance", TY_STRING_OR_NIL),
+]);
+
 // ---------------------------------------------------------------------------
 // Runtime synchronization records
 // ---------------------------------------------------------------------------
@@ -493,9 +547,33 @@ pub const LLM_USAGE: Ty = Ty::Shape(&[
     ShapeFieldDescriptor::optional("invalid_modality_counts", TY_BOOL),
 ]);
 
+/// Selection provenance for a provider-confirmed reasoning effort.
+pub const REASONING_EFFORT_SOURCE: Ty = Ty::Union(&[
+    Ty::LitString("operator"),
+    Ty::LitString("catalog"),
+    Ty::LitString("policy"),
+    Ty::LitString("request"),
+    Ty::LitString("provider_default"),
+    Ty::LitString("provider_adjusted"),
+]);
+
+/// Provider-confirmed effort or an explicit absence of an effort report.
+pub const EFFECTIVE_REASONING_EFFORT: Ty = Ty::Union(&[
+    Ty::Shape(&[ShapeFieldDescriptor::new(
+        "status",
+        Ty::LitString("not_reported"),
+    )]),
+    Ty::Shape(&[
+        ShapeFieldDescriptor::new("status", Ty::LitString("reported")),
+        ShapeFieldDescriptor::new("level", TY_STRING),
+        ShapeFieldDescriptor::new("source", REASONING_EFFORT_SOURCE),
+    ]),
+]);
+
 /// Harn-facing response dict assembled by `vm_build_llm_result` for
 /// `llm_call` and `llm_completion`.
 pub const LLM_CALL_RESULT: Ty = Ty::Shape(&[
+    ShapeFieldDescriptor::new("effective_reasoning_effort", EFFECTIVE_REASONING_EFFORT),
     ShapeFieldDescriptor::new("text", TY_STRING),
     ShapeFieldDescriptor::new("model", TY_STRING),
     ShapeFieldDescriptor::new("provider", TY_STRING),

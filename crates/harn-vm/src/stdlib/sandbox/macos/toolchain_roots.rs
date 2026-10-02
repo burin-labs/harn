@@ -42,6 +42,33 @@ pub(super) fn go_read_root(policy: &CapabilityPolicy, program: &str) -> Option<P
     Some(normalize_for_policy(root))
 }
 
+/// Foundation's staging directory for atomic file replacement on the boot
+/// volume: `TemporaryItems` in the per-user temp dir.
+///
+/// SwiftPM writes build files through Foundation's atomic replacement, which
+/// stages the new file here and renames it into place; without it
+/// `swift build` fails reading its own `output-file-map.json`. Foundation
+/// takes the directory from `confstr`, not `TMPDIR`, so it cannot be moved
+/// into the session. The rest of the per-user temp dir stays ungranted.
+pub(super) fn foundation_replacement_root() -> Option<PathBuf> {
+    let mut buffer = vec![0u8; libc::PATH_MAX as usize];
+    // SAFETY: the buffer is writable for its full length, which is passed.
+    let written = unsafe {
+        libc::confstr(
+            libc::_CS_DARWIN_USER_TEMP_DIR,
+            buffer.as_mut_ptr().cast(),
+            buffer.len(),
+        )
+    };
+    if written == 0 || written > buffer.len() {
+        return None;
+    }
+    buffer.truncate(written - 1);
+    let temp = PathBuf::from(String::from_utf8(buffer).ok()?);
+    temp.is_absolute()
+        .then(|| normalize_for_policy(&temp.join("TemporaryItems")))
+}
+
 #[cfg(test)]
 mod tests {
     use crate::orchestration::{CapabilityPolicy, ProcessSandboxPreset};
@@ -87,6 +114,62 @@ mod tests {
         assert!(
             !disabled_profile.contains(&root_rule),
             "the Go root grant must require the developer-toolchains preset"
+        );
+    }
+
+    /// swiftc through the `/usr/bin` shim, on the product path: xcrun keeps
+    /// its lookup cache and clang its module cache in the per-user temp and
+    /// cache dirs, which the profile does not grant. Both must follow the
+    /// child's environment into the workspace, or the compile cannot load the
+    /// standard library and every shim call reports an `xcrun_db` error.
+    #[test]
+    fn swiftc_compiles_with_its_caches_in_the_workspace() {
+        use crate::stdlib::sandbox::PrepareOutcome;
+
+        if !std::path::Path::new(super::super::SANDBOX_EXEC_PATH).exists()
+            || !std::path::Path::new("/usr/bin/swiftc").exists()
+        {
+            return;
+        }
+        let workspace = tempfile::tempdir().expect("workspace");
+        let root = workspace
+            .path()
+            .canonicalize()
+            .expect("canonical workspace");
+        std::fs::write(root.join("hello.swift"), "print(\"hi\")\n").expect("source");
+        let policy = CapabilityPolicy {
+            sandbox_profile: crate::orchestration::SandboxProfile::Worktree,
+            workspace_roots: vec![root.display().to_string()],
+            side_effect_level: Some("process_exec".to_string()),
+            ..CapabilityPolicy::default()
+        };
+        let args = ["-o", "hello", "hello.swift"].map(str::to_string);
+        let PrepareOutcome::WrappedExec { wrapper, args } = super::super::wrap_with_sandbox_exec(
+            "/usr/bin/swiftc",
+            &args,
+            &policy,
+            crate::orchestration::SandboxProfile::Worktree,
+        )
+        .expect("wrap swiftc") else {
+            panic!("macOS backend should wrap with sandbox-exec");
+        };
+        let mut env = Vec::new();
+        crate::stdlib::sandbox::inject_workspace_process_env(&mut env, &policy);
+        let output = std::process::Command::new(wrapper)
+            .args(args)
+            .envs(env)
+            .current_dir(&root)
+            .output()
+            .expect("run sandboxed swiftc");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(output.status.success(), "swiftc must compile: {stderr}");
+        assert!(
+            root.join("hello").is_file(),
+            "swiftc wrote no binary: {stderr}"
+        );
+        assert!(
+            !stderr.contains("xcrun_db"),
+            "xcrun cache refused: {stderr}"
         );
     }
 }

@@ -302,6 +302,21 @@ impl Parser {
         } else {
             self.parse_statement()?
         };
+        if let Some(sibling) = attributes
+            .iter()
+            .find(|attribute| attribute.name == "sibling")
+        {
+            if !self.at_module_scope()
+                || !sibling.args.is_empty()
+                || !matches!(&inner.node, Node::FnDecl { is_pub: false, .. })
+            {
+                return Err(ParserError::Unexpected {
+                    got: "invalid @sibling declaration".into(),
+                    expected: "@sibling with no arguments on a non-public module function".into(),
+                    span: sibling.span,
+                });
+            }
+        }
         match &inner.node {
             Node::FnDecl { .. }
             | Node::ToolDecl { .. }

@@ -18,6 +18,7 @@ use super::helpers::{
 };
 
 pub(crate) const INJECT_REMINDER_KEYS: &[&str] = &[
+    "goal_pin",
     "body",
     "tags",
     "dedupe_key",
@@ -813,6 +814,16 @@ pub(crate) fn parse_inject_reminder_options(
     context: &str,
 ) -> Result<SystemReminder, VmError> {
     Ok(SystemReminder {
+        goal_pin: options
+            .get("goal_pin")
+            .filter(|value| !matches!(value, VmValue::Nil))
+            .map(|value| {
+                crate::llm::helpers::GoalPinProjection::from_json(crate::llm::vm_value_to_json(
+                    value,
+                ))
+                .map_err(|error| reminder_code_error(context, Code::ReminderInvalidShape, error))
+            })
+            .transpose()?,
         id: uuid::Uuid::now_v7().to_string(),
         tags: reminder_tags(options, context)?,
         dedupe_key: optional_reminder_string(options, "dedupe_key", context)?,

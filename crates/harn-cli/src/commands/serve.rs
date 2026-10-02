@@ -11,12 +11,12 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::post;
 use axum::{Json, Router};
 use harn_serve::{
-    A2aHttpServeOptions, A2aServer, A2aServerConfig, AcpProfileConfig, AcpWebSocketServeOptions,
-    ApiHttpServeOptions, ApiKeyAuthConfig, ApiKeyEntry, ApiServer, ApiServerConfig,
-    AuthMethodConfig, AuthPolicy, AuthRequest, AuthorizationDecision, DispatchCore,
-    DispatchCoreConfig, ExportCatalog, ExportedCallableKind, HmacAuthConfig, HttpTlsConfig,
-    McpHttpServeOptions, McpServer, McpServerConfig, SiteHttpServeOptions, SiteServer,
-    SiteServerConfig, MCP_PROTOCOL_VERSION,
+    A2aHttpServeOptions, A2aServer, A2aServerConfig, AcpProfileConfig, AcpSandboxConfig,
+    AcpWebSocketServeOptions, ApiHttpServeOptions, ApiKeyAuthConfig, ApiKeyEntry, ApiServer,
+    ApiServerConfig, AuthMethodConfig, AuthPolicy, AuthRequest, AuthorizationDecision,
+    DispatchCore, DispatchCoreConfig, ExportCatalog, ExportedCallableKind, HmacAuthConfig,
+    HttpTlsConfig, McpHttpServeOptions, McpServer, McpServerConfig, SiteHttpServeOptions,
+    SiteServer, SiteServerConfig, MCP_PROTOCOL_VERSION,
 };
 use serde_json::Value as JsonValue;
 use time::Duration;
@@ -162,10 +162,17 @@ pub(crate) async fn run_acp_server(args: &ServeAcpArgs) -> Result<(), String> {
         text: args.profile.text,
         json_path: args.profile.json_path.clone(),
     };
+    let sandbox = acp_sandbox_config(args);
     match args.transport {
         AcpServeTransport::Stdio => {
-            crate::acp::run_acp_server(args.file.as_deref(), auth_policy, args.trace, profile)
-                .await;
+            crate::acp::run_acp_server(
+                args.file.as_deref(),
+                auth_policy,
+                args.trace,
+                profile,
+                sandbox,
+            )
+            .await;
             Ok(())
         }
         AcpServeTransport::Websocket => {
@@ -176,7 +183,9 @@ pub(crate) async fn run_acp_server(args: &ServeAcpArgs) -> Result<(), String> {
             }
             crate::acp::ensure_acp_event_log(args.file.as_deref());
             let result = harn_serve::run_acp_websocket_server(
-                crate::acp::server_config(args.file.clone(), auth_policy).with_profile(profile),
+                crate::acp::server_config(args.file.clone(), auth_policy)
+                    .with_profile(profile)
+                    .with_sandbox(sandbox),
                 AcpWebSocketServeOptions {
                     bind: args.bind,
                     path: args.path.clone(),
@@ -190,6 +199,15 @@ pub(crate) async fn run_acp_server(args: &ServeAcpArgs) -> Result<(), String> {
             result
         }
     }
+}
+
+fn acp_sandbox_config(args: &ServeAcpArgs) -> AcpSandboxConfig {
+    AcpSandboxConfig::with_read_only_roots(
+        args.read_only_root
+            .iter()
+            .map(|root| root.to_string_lossy().into_owned())
+            .collect(),
+    )
 }
 
 pub(crate) async fn run_a2a_server(args: &A2aServeArgs) -> Result<(), String> {
@@ -223,7 +241,7 @@ pub(crate) async fn run_api_server(args: &ApiServeArgs) -> Result<(), String> {
     let tls = build_tls_config(args.tls, args.cert.as_ref(), args.key.as_ref())?;
     guard_serve_bind_auth("api", args.bind, &auth_policy, &tls)?;
 
-    let config = api_server_config(args, auth_policy);
+    let config = api_server_config(args, auth_policy)?;
     let server = Arc::new(ApiServer::new(config));
     server
         .run_http(ApiHttpServeOptions {
@@ -234,16 +252,21 @@ pub(crate) async fn run_api_server(args: &ApiServeArgs) -> Result<(), String> {
         .await
 }
 
-fn api_server_config(args: &ApiServeArgs, auth_policy: AuthPolicy) -> ApiServerConfig {
+fn api_server_config(
+    args: &ApiServeArgs,
+    auth_policy: AuthPolicy,
+) -> Result<ApiServerConfig, String> {
     let profile = AcpProfileConfig {
         text: args.trace || args.profile.text,
         json_path: args.profile.json_path.clone(),
     };
     let acp = crate::acp::server_config(Some(args.file.clone()), AuthPolicy::allow_all())
         .with_profile(profile);
-    let mut config = ApiServerConfig::for_pipeline(args.file.clone()).with_auth_policy(auth_policy);
+    let mut config = ApiServerConfig::for_pipeline(args.file.clone())
+        .with_auth_policy(auth_policy)
+        .with_default_session_mode(&args.default_session_mode)?;
     config.acp = acp;
-    config
+    Ok(config)
 }
 
 pub(crate) async fn run_site_server(args: &SiteServeArgs) -> Result<(), String> {
@@ -750,7 +773,7 @@ pub fn on_tick(_event) -> nil {
         ]) else {
             panic!("expected serve api");
         };
-        let config = api_server_config(&args, AuthPolicy::allow_all());
+        let config = api_server_config(&args, AuthPolicy::allow_all())?;
         let mut vm = harn_vm::Vm::new();
         harn_vm::register_vm_stdlib(&mut vm);
         let result = async {

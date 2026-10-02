@@ -53,6 +53,12 @@
   prose=""
   answer=null
   done=null
+# uncounted body keeps a final newline from an empty line before the tag
+  calls=1 errors=0 violations=0 stray=0
+  call write_file {"content":"package main\n","path":"a.go"}
+  prose=""
+  answer=null
+  done=null
 # uncounted body carrying fences and openers
   calls=1 errors=0 violations=0 stray=0
   call write_file {"content":"```sh\necho hi\n```\n<<EOF\n}\n</tool_calls>","path":"README.md"}

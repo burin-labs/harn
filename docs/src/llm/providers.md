@@ -649,6 +649,7 @@ accepts these fields:
 | `reasoning_wire_format` | string | Non-standard OpenAI-compatible reasoning request shape: `openrouter` or `enabled`. |
 | `reasoning_effort_supported` | bool | Provider accepts a `reasoning_effort` request field for effort-capable models. |
 | `reasoning_none_supported` | bool | Provider accepts `reasoning_effort: "none"` as true reasoning-off instead of flooring at `minimal`. |
+| `thinking_off_type` | string | Anthropic `thinking.type` sent for `thinking: false` where reasoning can be disabled: `disabled` (default), or `between_tools` for Claude Sonnet 5.5, which rejects `disabled`. An unknown value fails capability loading. |
 | `interleaved_thinking_supported` | bool | `thinking: true` can request Anthropic's `interleaved-thinking-2025-05-14` beta header. |
 | `anthropic_beta_features` | list of strings | Anthropic beta feature names always requested for this provider/model route. |
 | `vision_supported` | bool | Image content accepted by the provider/model route. |
@@ -836,6 +837,26 @@ The provider files in steps 2-4 are overlays, so a starter file can set
 `default_provider` or aliases without copying every built-in provider
 definition. Project manifests can therefore configure provider adapters and
 model aliases without editing Rust-side registration code.
+
+For Ollama's OpenAI-compatible chat endpoint, declare the response adapter
+alongside the endpoint. Keep the route's `message_wire_format = "ollama"` in
+the model capability row:
+
+```toml
+[llm.providers.ollama]
+chat_endpoint = "/v1/chat/completions"
+chat_api_adapter = "ollama_openai_compat"
+```
+
+This selects OpenAI Chat Completions SSE decoding while mapping request values
+to fields the Ollama `/v1` server consumes. The adapter rejects Ollama-only
+sampling options it cannot carry. `/v1` does not carry `num_ctx` or
+`keep_alive`; use an Ollama Modelfile for context sizing and native `/api/chat`
+when those runtime controls are needed. These fields follow
+[Ollama 0.34's compatibility handler](https://github.com/ollama/ollama/blob/v0.34.0/openai/openai.go).
+
+Set `chat_api_adapter = "model_default"` with `/api/chat` to override an
+inherited compatible adapter and restore native Ollama request and response handling.
 
 ### Managed provider supply
 
@@ -1283,6 +1304,27 @@ that wants it everywhere sets it once in provider config:
 [data_controls_policy]
 default_posture = "strictest_available"
 ```
+
+## Inference destination boundaries
+
+An embedder may set `HARN_INFERENCE_BOUNDARY_JSON` in the Harn session's
+granted environment. Its value is a JSON object with `reach` and
+`allow_training_discounts`, for example
+`{"reach":"local_only","allow_training_discounts":false}`. A call or agent
+may supply the same typed `inference_boundary` option to narrow that ceiling;
+workers inherit it and cannot widen it. Without a host ceiling or call option,
+standalone Harn keeps its existing routing behavior. A malformed supplied
+ceiling refuses the call.
+
+`local_only` admits only cataloged local runtimes whose resolved endpoint is
+loopback (`localhost`, `127.0.0.0/8`, or `::1`). A provider marked local with
+a remote base URL is refused. `hosted_open_weight` also admits hosted routes
+whose model row explicitly declares `open_weight = true`; `any_hosted` admits
+other hosted routes. Hosted routes still need a cataloged no-training default,
+an applied per-request no-training control, or explicit permission for a
+cataloged training route. Unknown training behavior is refused under a supplied
+boundary. Every allowed live call includes the governing rule and the catalog
+locality and open-weight declarations in its data-controls receipt.
 
 ## Provider resolution order
 

@@ -17,7 +17,10 @@ use std::{borrow::Cow, collections::BTreeSet};
 
 use serde::Serialize;
 
-use super::{CompactionPolicy, ModelPolicy, RetryPolicy, StageContract, TurnPolicy, WorkflowNode};
+use super::{
+    ApprovalReviewPolicy, CompactionPolicy, ModelPolicy, RetryPolicy, StageContract, TurnPolicy,
+    WorkflowNode,
+};
 use crate::llm::cost::LlmBudgetEnvelope;
 
 const LLM_OPTIONS_MODULE: &str = "llm/options";
@@ -389,6 +392,63 @@ fn llm_usage_runtime_and_typed_projections_match_bidirectionally() {
         stdlib_keys, runtime_keys,
         "stdlib LlmUsage drifted from the runtime-emitted llm_call usage envelope"
     );
+}
+
+#[test]
+fn approval_review_policy_projections_match_the_rust_owner_bidirectionally() {
+    use harn_builtin_meta::{ShapeFieldDescriptor, Ty};
+
+    let source = stdlib_source("agent/approval_review_policy_types");
+    let runtime = serde_json::to_value(ApprovalReviewPolicy::bundled())
+        .expect("serialize bundled approval-review policy");
+    let runtime = runtime.as_object().expect("policy record");
+    let Ty::Shape(fields) = harn_builtin_meta::shapes::APPROVAL_REVIEW_POLICY else {
+        panic!("builtin policy must remain a closed record");
+    };
+    let shape_keys = |fields: &[ShapeFieldDescriptor]| -> BTreeSet<String> {
+        fields.iter().map(|field| field.name.to_string()).collect()
+    };
+    let runtime_keys = runtime.keys().cloned().collect();
+    assert_eq!(shape_keys(fields), runtime_keys);
+    assert_key_parity(
+        "ApprovalReviewPolicy",
+        &harn_alias_keys(source, "ApprovalReviewPolicy"),
+        &runtime_keys,
+        &[],
+        &[],
+    );
+
+    for (key, alias) in [
+        ("reviewer", "ApprovalReviewerPolicy"),
+        ("breaker", "ApprovalReviewBreakerPolicy"),
+        ("floor", "ApprovalReviewFloorPolicy"),
+        ("denylist", "ApprovalReviewDenylistPolicy"),
+        ("trust", "ApprovalReviewTrustPolicy"),
+        ("verdict", "ApprovalReviewVerdictPolicy"),
+    ] {
+        let runtime_keys = runtime[key]
+            .as_object()
+            .expect("nested policy record")
+            .keys()
+            .cloned()
+            .collect();
+        let Ty::Shape(nested) = fields
+            .iter()
+            .find(|field| field.name == key)
+            .expect("builtin nested policy field")
+            .ty
+        else {
+            panic!("{key} must remain a closed record");
+        };
+        assert_eq!(shape_keys(nested), runtime_keys, "builtin {key}");
+        assert_key_parity(
+            alias,
+            &harn_alias_keys(source, alias),
+            &runtime_keys,
+            &[],
+            &[],
+        );
+    }
 }
 
 /// Removed keys must stay out of the typed alias, and the removal table

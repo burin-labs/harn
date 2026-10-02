@@ -162,11 +162,34 @@ jobs:
           go-version: "1.26.6"
           cache: false
       - name: Install cargo-nextest
-        uses: taiki-e/install-action@3f74d7c16a4242f1c95561e98edc25d36adb4375 # v2.87.12
+        uses: taiki-e/install-action@9983c65e42da123ff25d1f78505eb6de315aa172 # v2.87.20
         with:
           tool: nextest@0.9.132
+      # The hosted runner is two machines under one label. Most runs land on a
+      # 3-core, 7 GiB M1; a few land on a 14 GiB host. Cargo's default of one
+      # compiler per core runs two or three at once on the small one, which
+      # swaps: the workspace compile took a median of 50 minutes across 111
+      # such runs against 8 on the larger host. One compiler at a time on the
+      # same 7 GiB host swapped 47 times less and built in 27 minutes instead
+      # of 58 (harn#8599). The shared budget derives that from the box's cores
+      # and memory rather than from a literal.
+      #
+      # Hosted only. Exact-source dispatches run on owned or Blacksmith hosts
+      # whose warm persistent target builds in minutes, and nothing measured
+      # there says memory binds, so they keep Cargo's default.
+      - name: Measure the hosted build budget
+        id: resource-budget
+        if: ${{ runner.environment == 'github-hosted' }}
+        run: bash scripts/ci/rust_resource_budget.sh
+        env:
+          RUNNER_ENVIRONMENT: ${{ runner.environment }}
+          HARN_BUDGET_PROFILE: producer
       - name: Run workspace nextest
         shell: bash
+        env:
+          # A skipped budget step yields an empty output, which Cargo rejects,
+          # so non-hosted runs name Cargo's own default explicitly.
+          CARGO_BUILD_JOBS: ${{ runner.environment == 'github-hosted' && steps.resource-budget.outputs.build_jobs || 'default' }}
         # The whole workspace runs, less one member that contributes nothing to
         # it. `harn-wasm` carries no `#[test]` and produces no test binary here;
         # its declared test framework is `wasm-bindgen-test`, which a native

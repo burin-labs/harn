@@ -64,6 +64,83 @@ use std::cell::RefCell;
 /// silently presenting a partial list as complete.
 pub const MAX_REASONING_RECEIPTS: usize = 1024;
 
+pub(crate) fn overflow_gap(dropped: u32) -> Option<crate::orchestration::RunEvidenceGapRecord> {
+    (dropped > 0).then(|| crate::orchestration::RunEvidenceGapRecord {
+        component: "reasoning_receipts".to_string(),
+        code: "receipt_limit_exceeded".to_string(),
+        message: format!("{dropped} reasoning receipts past the first {MAX_REASONING_RECEIPTS} were not retained"),
+    })
+}
+
+/// Request-local receipt sink, shared with provider work moved to another task.
+#[derive(Clone, Default)]
+pub(crate) struct RequestReceipts(std::sync::Arc<parking_lot::Mutex<RequestReceiptState>>);
+
+#[derive(Default)]
+struct RequestReceiptState {
+    receipts: Vec<ReasoningReceipt>,
+    journal: Option<(String, String)>,
+    journal_error: Option<String>,
+}
+
+impl RequestReceipts {
+    pub(crate) fn for_journal(session_id: Option<&str>, call_id: &str) -> Self {
+        Self(std::sync::Arc::new(parking_lot::Mutex::new(
+            RequestReceiptState {
+                journal: session_id.map(|id| (id.to_string(), call_id.to_string())),
+                ..Default::default()
+            },
+        )))
+    }
+
+    pub(crate) fn take_journal_error(&self) -> Option<String> {
+        self.0.lock().journal_error.take()
+    }
+
+    fn record(&self, receipt: ReasoningReceipt) {
+        let mut state = self.0.lock();
+        if let Some((session_id, call_id)) = state.journal.as_ref() {
+            // Enqueue before transport awaits: cancellation flushes the session
+            // journal, but cannot recover a collector in an abandoned future.
+            let result = crate::agent_sessions::append_journal_event(
+                session_id,
+                super::helpers::transcript_event(
+                    "reasoning_receipt",
+                    "system",
+                    "internal",
+                    "",
+                    Some(serde_json::json!({"receipt": receipt, "call_id": call_id})),
+                ),
+            );
+            if let Err(error) = result {
+                state.journal_error.get_or_insert(error);
+            }
+        } else {
+            state.receipts.push(receipt);
+        }
+    }
+
+    #[cfg(test)]
+    fn snapshot(&self) -> Vec<ReasoningReceipt> {
+        self.0.lock().receipts.clone()
+    }
+}
+
+tokio::task_local! {
+    static REQUEST_RECEIPTS: RequestReceipts;
+}
+
+pub(crate) fn current_request_receipts() -> Option<RequestReceipts> {
+    REQUEST_RECEIPTS.try_with(Clone::clone).ok()
+}
+
+pub(crate) async fn scope_request_receipts<F: std::future::Future>(
+    receipts: RequestReceipts,
+    future: F,
+) -> F::Output {
+    REQUEST_RECEIPTS.scope(receipts, future).await
+}
+
 /// Sent-state vocabulary. Stable strings: consumers filter on them.
 pub const SENT_CARRIED: &str = "carried";
 pub const SENT_OMITTED: &str = "omitted";
@@ -172,6 +249,25 @@ pub(crate) fn record(
         (false, Some((path, value))) => (SENT_CARRIED, Some(path), Some(value)),
         (false, None) => (SENT_OMITTED, None, None),
     };
+    let receipt = ReasoningReceipt {
+        index: 0,
+        provider: provider.to_string(),
+        model: model.to_string(),
+        wire_dialect: wire_dialect.to_string(),
+        resolved_mode: resolved_mode.to_string(),
+        resolved_level,
+        resolved_budget_tokens,
+        sent_status: sent_status.to_string(),
+        sent_field,
+        sent_value,
+        candidate_fields: candidate_fields
+            .iter()
+            .map(|path| (*path).to_string())
+            .collect(),
+    };
+    if let Some(request) = current_request_receipts() {
+        request.record(receipt.clone());
+    }
     RECEIPTS.with(|slot| {
         let mut receipts = slot.borrow_mut();
         if receipts.len() >= MAX_REASONING_RECEIPTS {
@@ -181,23 +277,9 @@ pub(crate) fn record(
             });
             return;
         }
-        let index = u32::try_from(receipts.len()).unwrap_or(u32::MAX);
-        receipts.push(ReasoningReceipt {
-            index,
-            provider: provider.to_string(),
-            model: model.to_string(),
-            wire_dialect: wire_dialect.to_string(),
-            resolved_mode: resolved_mode.to_string(),
-            resolved_level,
-            resolved_budget_tokens,
-            sent_status: sent_status.to_string(),
-            sent_field,
-            sent_value,
-            candidate_fields: candidate_fields
-                .iter()
-                .map(|path| (*path).to_string())
-                .collect(),
-        });
+        let mut receipt = receipt;
+        receipt.index = u32::try_from(receipts.len()).unwrap_or(u32::MAX);
+        receipts.push(receipt);
     });
 }
 
@@ -371,6 +453,44 @@ mod tests {
         }
         assert_eq!(peek_reasoning_receipts().len(), MAX_REASONING_RECEIPTS);
         assert_eq!(dropped_reasoning_receipts(), 3);
+    }
+
+    #[tokio::test]
+    async fn request_scope_survives_provider_task_handoff_and_thread_local_overflow() {
+        let receipts = RequestReceipts::default();
+        let provider_receipts = receipts.clone();
+        tokio::spawn(async move {
+            scope_request_receipts(provider_receipts, async {
+                let _isolated = Isolated::enter();
+                for _ in 0..(MAX_REASONING_RECEIPTS + 3) {
+                    record(
+                        "gemini",
+                        "receipt-proof",
+                        "gemini_interactions",
+                        &ThinkingConfig::Effort {
+                            level: ReasoningEffort::XHigh,
+                        },
+                        &["generation_config.thinking_level"],
+                        &serde_json::json!({"generation_config": {"thinking_level": "high"}}),
+                    );
+                }
+                assert_eq!(dropped_reasoning_receipts(), 3);
+            })
+            .await;
+        })
+        .await
+        .expect("provider task");
+        let receipts = receipts.snapshot();
+        assert_eq!(receipts.len(), MAX_REASONING_RECEIPTS + 3);
+        assert_eq!(
+            receipts.last().unwrap().resolved_level.as_deref(),
+            Some("xhigh")
+        );
+        assert_eq!(
+            receipts.last().unwrap().sent_value,
+            Some(serde_json::json!("high"))
+        );
+        assert!(current_request_receipts().is_none());
     }
 
     #[test]

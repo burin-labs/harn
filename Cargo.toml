@@ -46,7 +46,7 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "0.10.142"
+version = "0.10.154-dev"
 edition = "2021"
 rust-version = "1.95"
 license = "MIT OR Apache-2.0"
@@ -55,6 +55,9 @@ homepage = "https://harnlang.com/"
 description = "A pipeline-oriented programming language for orchestrating AI agents and workflows"
 keywords = ["ai", "agents", "pipeline", "llm", "language"]
 categories = ["compilers", "command-line-utilities"]
+
+[workspace.dependencies]
+jsonschema = { version = "0.57.0", default-features = false }
 
 # Smaller debuginfo => faster linking on macOS without losing line-level
 # backtraces. A strict win for inner-loop dev/test builds.
@@ -73,6 +76,19 @@ opt-level = 3
 # Tests rarely need debuginfo; dropping it shaves seconds off linking.
 [profile.test]
 debug = 0
+
+# The shared CLI that CI's Harn proof lanes execute (conformance, script tests,
+# docs, policies, the release rehearsal). Those lanes are interpreter-bound,
+# and at opt-level 0 they ran four to five times slower: a conformance slice
+# took 72s against 17s at opt-level 1 on the same four cores. Everything else
+# is dev, and the assertions are pinned rather than inherited so a change to
+# dev cannot quietly drop them from the binary the proofs run on.
+[profile.ci-cli]
+inherits = "dev"
+opt-level = 1
+debug = "line-tables-only"
+debug-assertions = true
+overflow-checks = true
 
 # Default release profile mirrors the DISTRIBUTION build's shape: thin LTO +
 # 16 codegen units. This is the everyday / local "internal" release — fast to

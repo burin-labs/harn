@@ -175,20 +175,24 @@ impl Vm {
     ///
     /// Calling this more than once preserves the current recording session.
     pub fn enable_module_phase_timing(&mut self) -> ModulePhaseRecorder {
-        self.module_phase_recorder
+        self.recorders
+            .get_or_insert_with(Default::default)
+            .module_phases
             .get_or_insert_with(ModulePhaseRecorder::new)
             .clone()
     }
 
+    pub(super) fn module_phase_recorder(&self) -> Option<&ModulePhaseRecorder> {
+        self.recorders.as_ref()?.module_phases.as_ref()
+    }
+
     pub(crate) fn module_compile_span(&self) -> Option<ModulePhaseSpan> {
-        self.module_phase_recorder
-            .as_ref()
+        self.module_phase_recorder()
             .map(ModulePhaseRecorder::compile_span)
     }
 
     pub(crate) fn module_load_span(&self) -> Option<ModulePhaseSpan> {
-        self.module_phase_recorder
-            .as_ref()
+        self.module_phase_recorder()
             .map(ModulePhaseRecorder::load_span)
     }
 
@@ -197,7 +201,7 @@ impl Vm {
             *count = count.saturating_add(1);
             return;
         }
-        if let Some(recorder) = &self.module_phase_recorder {
+        if let Some(recorder) = self.module_phase_recorder() {
             recorder.record_module_loaded();
         }
     }
@@ -236,7 +240,7 @@ mod tests {
     #[test]
     fn child_vms_share_recorder_but_baselines_start_disabled() {
         let mut vm = Vm::new();
-        assert!(vm.module_phase_recorder.is_none());
+        assert!(vm.module_phase_recorder().is_none());
 
         let recorder = vm.enable_module_phase_timing();
         let mut child = vm.child_vm();
@@ -245,7 +249,11 @@ mod tests {
             .expect("child records from another thread");
 
         assert_eq!(recorder.snapshot().modules_loaded, 1);
-        assert!(vm.baseline().instantiate().module_phase_recorder.is_none());
+        assert!(vm
+            .baseline()
+            .instantiate()
+            .module_phase_recorder()
+            .is_none());
     }
 
     #[test]

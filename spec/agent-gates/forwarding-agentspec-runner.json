@@ -226,7 +226,7 @@
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/loop_foundation.harn",
-    "expression": "__invoke_llm_with_autocontinue(\n    harness,\n    message,\n    turn_system,\n    llm_opts,\n    turn_opts,\n    session_id,\n    iteration_index,\n  )",
+    "expression": "__invoke_llm_with_autocontinue(\n    harness,\n    message,\n    turn_system,\n    llm_opts + {_user_visible: true},\n    turn_opts,\n    session_id,\n    iteration_index,\n  )",
     "owner": "__invoke_llm_with_autocontinue",
     "evidence": "Consumer __invoke_llm_with_autocontinue.turn_opts in crates/harn-stdlib/src/stdlib/agent/loop_foundation.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
     "consumers": [
@@ -489,7 +489,7 @@
   },
   {
     "scope": "AgentSpec",
-    "file": "crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn",
+    "file": "crates/harn-stdlib/src/stdlib/agent/loop_dispatch_options.harn",
     "expression": "__resolve_intra_turn_failure_fanout_cap(turn_opts)",
     "owner": "__resolve_intra_turn_failure_fanout_cap",
     "evidence": "Configuration passed at argument 1. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary.",
@@ -503,7 +503,7 @@
   },
   {
     "scope": "AgentSpec",
-    "file": "crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn",
+    "file": "crates/harn-stdlib/src/stdlib/agent/loop_dispatch_options.harn",
     "expression": "__resolve_intra_turn_resource_fail_fast(turn_opts)",
     "owner": "__resolve_intra_turn_resource_fail_fast",
     "evidence": "Configuration passed at argument 1. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary.",
@@ -511,6 +511,20 @@
       {
         "scope": "AgentSpec",
         "function": "__resolve_intra_turn_resource_fail_fast",
+        "parameter": "turn_opts"
+      }
+    ]
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn",
+    "expression": "__loop_dispatch_options(turn_opts, session_id, cap)",
+    "owner": "__loop_dispatch_options",
+    "evidence": "Configuration passed at argument 1. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__loop_dispatch_options",
         "parameter": "turn_opts"
       }
     ]
@@ -869,7 +883,7 @@
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/loop_run.harn",
-    "expression": "agent_step_judge(\n            harness,\n            session,\n            llm_result,\n            turn_opts,\n            iteration_index + 1,\n            stall_warning,\n            step_judge_attempts,\n            remaining_iterations,\n          )",
+    "expression": "agent_step_judge(\n            harness,\n            session,\n            llm_result,\n            turn_opts,\n            iteration_index + 1,\n            stall_warning,\n            step_judge_attempts,\n            remaining_iterations,\n            step_judge_unavailable_count,\n          )",
     "owner": "agent_step_judge",
     "evidence": "Consumer agent_step_judge.opts in crates/harn-stdlib/src/stdlib/agent/step_judge.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
     "consumers": [

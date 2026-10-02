@@ -28,8 +28,18 @@ pub(crate) fn initialize_runtime_sqlite(
     busy_timeout: Duration,
     schema: &RuntimeSqliteSchema,
 ) -> Result<(), RuntimeSqliteError> {
+    initialize_runtime_sqlite_migrating(connection, busy_timeout, schema, |_| Ok(()))
+}
+
+pub(crate) fn initialize_runtime_sqlite_migrating(
+    connection: &Connection,
+    busy_timeout: Duration,
+    schema: &RuntimeSqliteSchema,
+    migrate: impl FnOnce(&rusqlite::Transaction<'_>) -> rusqlite::Result<()>,
+) -> Result<(), RuntimeSqliteError> {
     harn_sqlite::initialize_file(connection, busy_timeout, schema.marker(), |transaction| {
-        transaction.execute_batch(schema.sql)
+        transaction.execute_batch(schema.sql)?;
+        migrate(transaction)
     })
 }
 

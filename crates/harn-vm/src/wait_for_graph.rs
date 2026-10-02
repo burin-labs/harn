@@ -85,13 +85,14 @@ impl VmWaitForGraph {
         task_ids: impl IntoIterator<Item = String>,
     ) -> Result<WaitGuard, VmError> {
         self.set_wait(task_id, WaitKind::Tasks(task_ids.into_iter().collect()))
+            .map(|wait| wait.expect("task waits are always registered"))
     }
 
     pub(crate) fn wait_for_channel_send(
         self: &Arc<Self>,
         task_id: &str,
         target: ChannelTarget,
-    ) -> Result<WaitGuard, VmError> {
+    ) -> Result<Option<WaitGuard>, VmError> {
         self.set_wait(task_id, WaitKind::ChannelSend(target))
     }
 
@@ -99,7 +100,7 @@ impl VmWaitForGraph {
         self: &Arc<Self>,
         task_id: &str,
         targets: Vec<ChannelTarget>,
-    ) -> Result<WaitGuard, VmError> {
+    ) -> Result<Option<WaitGuard>, VmError> {
         self.set_wait(task_id, WaitKind::ChannelReceive(targets))
     }
 
@@ -121,8 +122,19 @@ impl VmWaitForGraph {
         });
     }
 
-    fn set_wait(self: &Arc<Self>, task_id: &str, kind: WaitKind) -> Result<WaitGuard, VmError> {
+    fn set_wait(
+        self: &Arc<Self>,
+        task_id: &str,
+        kind: WaitKind,
+    ) -> Result<Option<WaitGuard>, VmError> {
         let mut state = self.inner.lock().expect("wait-for graph mutex poisoned");
+        // A send can race between the caller's failed try_recv/try_send and
+        // registration here. Its notification may already have run. Do not
+        // retain a wait for an operation that is ready now: after the value is
+        // consumed, that stale record could falsely deadlock a joining task.
+        if kind.is_ready() {
+            return Ok(None);
+        }
         state.next_token = state.next_token.wrapping_add(1);
         let token = state.next_token;
         let entry = state.tasks.entry(task_id.to_string()).or_default();
@@ -135,12 +147,24 @@ impl VmWaitForGraph {
             entry.wait = previous;
             return Err(VmError::Deadlock(Box::new(deadlock)));
         }
-        Ok(WaitGuard {
+        Ok(Some(WaitGuard {
             graph: Arc::clone(self),
             task_id: task_id.to_string(),
             token,
             previous,
-        })
+        }))
+    }
+}
+
+impl WaitKind {
+    fn is_ready(&self) -> bool {
+        match self {
+            Self::Tasks(_) => false,
+            Self::ChannelSend(target) => !target.send_is_blocked(),
+            Self::ChannelReceive(targets) => {
+                targets.iter().any(|target| !target.receive_is_blocked())
+            }
+        }
     }
 }
 
@@ -392,6 +416,70 @@ mod tests {
         assert!(err
             .to_string()
             .contains("receive on channel 'empty' has no sender"));
+    }
+
+    #[test]
+    fn a_ready_receive_does_not_leave_a_stale_wait_after_consumption() {
+        let graph = Arc::new(VmWaitForGraph::new());
+        let _root = graph.register_task("root");
+        let _child = graph.register_task("child");
+        let channel = target("later");
+        channel
+            .sender
+            .try_send(VmValue::Nil)
+            .expect("one free slot");
+        graph.notify_channel_send(&channel);
+
+        let _receive = graph
+            .wait_for_channel_receive("child", vec![channel.clone()])
+            .expect("buffered value can be received");
+        channel
+            ._receiver
+            .try_lock()
+            .expect("receiver is free")
+            .try_recv()
+            .expect("child consumes the buffered value");
+
+        graph
+            .wait_for_tasks("root", ["child".to_string()])
+            .expect("child is completing a ready receive, not deadlocked");
+    }
+
+    #[test]
+    fn a_ready_send_does_not_leave_a_stale_wait_after_capacity_is_taken() {
+        let graph = Arc::new(VmWaitForGraph::new());
+        let _root = graph.register_task("root");
+        let _child = graph.register_task("child");
+        let channel = target("later");
+
+        let _send = graph
+            .wait_for_channel_send("child", channel.clone())
+            .expect("channel has a free slot");
+        channel
+            .sender
+            .try_send(VmValue::Nil)
+            .expect("slot is taken");
+
+        graph
+            .wait_for_tasks("root", ["child".to_string()])
+            .expect("child can retry its send, not deadlocked");
+    }
+
+    #[test]
+    fn a_full_channel_still_reports_a_real_send_deadlock() {
+        let graph = Arc::new(VmWaitForGraph::new());
+        let _root = graph.register_task("root");
+        let _child = graph.register_task("child");
+        let channel = target("full");
+        channel.sender.try_send(VmValue::Nil).expect("fill channel");
+        let _root_wait = graph
+            .wait_for_tasks("root", ["child".to_string()])
+            .expect("child may still receive");
+
+        let err = graph
+            .wait_for_channel_send("child", channel)
+            .expect_err("no receiver can drain a full channel");
+        assert!(err.to_string().contains("HARN-ORC-012"));
     }
 
     #[test]

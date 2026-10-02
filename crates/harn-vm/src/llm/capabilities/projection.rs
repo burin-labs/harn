@@ -5,7 +5,9 @@
 //! owns what that rule means.
 
 use super::effort::rule_thinking_modes;
-use super::model::{Capabilities, LiveEndpointFamily, ProviderDefaults, WireDialect};
+use super::model::{
+    Capabilities, LiveEndpointFamily, ProviderDefaults, StructuredOutputStrategy, WireDialect,
+};
 use super::pattern::ModelPatterns;
 use super::rule::{
     rule_structured_output, rule_structured_output_mode, rule_thinking_block_style,
@@ -75,6 +77,7 @@ pub(super) fn defaults_to_caps(defaults: &ProviderDefaults) -> Capabilities {
         vision_supported: None,
         image_url_input_supported: None,
         preserve_thinking: None,
+        honors_preserve_thinking_kwarg: None,
         reasoning_round_trip: None,
         reasoning_history_wire_field: None,
         server_parser: None,
@@ -89,6 +92,7 @@ pub(super) fn defaults_to_caps(defaults: &ProviderDefaults) -> Capabilities {
         reasoning_none_supported: None,
         max_thinking_budget: None,
         reasoning_disable_supported: None,
+        thinking_off_type: None,
         reasoning_required_for_tools: None,
         reasoning_text_promotable: None,
         reasoning_wire_format: None,
@@ -104,6 +108,7 @@ pub(super) fn defaults_to_caps(defaults: &ProviderDefaults) -> Capabilities {
         allowed_tool_choice_modes: None,
         requires_tool_result_adjacency: None,
         supports_parallel_tool_calls: None,
+        requires_parallel_tool_calls_false: None,
         tools_exclude_response_format: None,
         recommended_endpoint: None,
         text_tool_wire_format_supported: None,
@@ -260,6 +265,11 @@ pub(super) fn rule_to_caps(rule: &ProviderRule, defaults: &ProviderDefaults) -> 
             .clone()
             .or_else(|| defaults.file_upload_wire_format.clone()),
         structured_output: rule_structured_output(rule),
+        structured_output_strategy: StructuredOutputStrategy::from_declaration(
+            rule.structured_output
+                .as_deref()
+                .or(rule.json_schema.as_deref()),
+        ),
         json_schema: rule_structured_output(rule),
         prefers_xml_scaffolding: rule.prefers_xml_scaffolding.unwrap_or(false),
         reserved_tool_call_token: rule.reserved_tool_call_token.unwrap_or(false),
@@ -279,6 +289,7 @@ pub(super) fn rule_to_caps(rule: &ProviderRule, defaults: &ProviderDefaults) -> 
             .or(defaults.image_url_input_supported)
             .unwrap_or(true),
         preserve_thinking: rule.preserve_thinking.unwrap_or(false),
+        honors_preserve_thinking_kwarg: rule.honors_preserve_thinking_kwarg.unwrap_or(false),
         reasoning_round_trip: rule
             .reasoning_round_trip
             .or(defaults.reasoning_round_trip)
@@ -299,6 +310,7 @@ pub(super) fn rule_to_caps(rule: &ProviderRule, defaults: &ProviderDefaults) -> 
         reasoning_none_supported: rule.reasoning_none_supported.unwrap_or(false),
         max_thinking_budget: rule.max_thinking_budget,
         reasoning_disable_supported: rule.reasoning_disable_supported.unwrap_or(true),
+        thinking_off_type: rule.thinking_off_type.unwrap_or_default(),
         reasoning_required_for_tools: rule.reasoning_required_for_tools.unwrap_or(false),
         reasoning_text_promotable: rule.reasoning_text_promotable.unwrap_or(false),
         reasoning_wire_format: rule
@@ -348,6 +360,10 @@ pub(super) fn rule_to_caps(rule: &ProviderRule, defaults: &ProviderDefaults) -> 
             .supports_parallel_tool_calls
             .or(defaults.supports_parallel_tool_calls)
             .unwrap_or(true),
+        requires_parallel_tool_calls_false: rule
+            .requires_parallel_tool_calls_false
+            .or(defaults.requires_parallel_tool_calls_false)
+            .unwrap_or(false),
         tools_exclude_response_format: rule.tools_exclude_response_format.unwrap_or(false),
         recommended_endpoint: rule.recommended_endpoint.clone(),
         text_tool_wire_format_supported: rule.text_tool_wire_format_supported.unwrap_or(true),

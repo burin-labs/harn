@@ -2,7 +2,7 @@
 //! (issue harn#1913).
 //!
 //! Each `__net_policy_*` builtin produces a tagged dict that the
-//! dispatcher in `crate::vm::methods::harness` recognises via
+//! dispatcher in `crate::harness_methods` recognises via
 //! [`crate::harness_net::parse`]. The Harn-side surface lives in
 //! `std/net_policy` (`stdlib_net_policy.harn`) and assembles them into
 //! the `NetPolicy()` namespace dict.

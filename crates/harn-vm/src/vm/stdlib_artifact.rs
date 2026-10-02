@@ -131,6 +131,130 @@ pub(super) fn stdlib_module_artifact(
     })
 }
 
+/// File name of the advisory lock that serializes stdlib warms over one cache.
+pub(super) const STDLIB_WARM_LOCK_FILE: &str = "stdlib-warm.lock";
+
+/// Diagnostic bound on waiting for a sibling's warm. A cold unoptimized warm
+/// on a contended four-core runner measured about 70 s, so expiry means the
+/// holder is wedged rather than slow.
+const STDLIB_WARM_LOCK_DEADLINE: std::time::Duration = std::time::Duration::from_mins(5);
+
+/// Take the exclusive stdlib warm lock in the disk cache directory, waiting up
+/// to `deadline` for a sibling process that holds it. The lock is released
+/// when the returned file drops.
+///
+/// Warming is an optimization, so every failure here returns `None` and the
+/// caller warms unlocked, which is exactly the behavior before the lock
+/// existed: no cache, an unwritable cache directory, or a holder past the
+/// deadline.
+pub(super) fn acquire_stdlib_warm_lock(deadline: std::time::Duration) -> Option<std::fs::File> {
+    if !bytecode_cache::cache_enabled() {
+        return None;
+    }
+    let dir = bytecode_cache::cache_dir()?;
+    let path = dir.join(STDLIB_WARM_LOCK_FILE);
+    let file = std::fs::create_dir_all(&dir).and_then(|()| {
+        std::fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .write(true)
+            .open(&path)
+    });
+    let file = match file {
+        Ok(file) => file,
+        Err(err) => {
+            stdlib_warm_lock_debug(&format!("open {}: {err}", path.display()));
+            return None;
+        }
+    };
+    match harn_flock::lock_with_deadline(&file, &path, harn_flock::LockMode::Exclusive, deadline) {
+        Ok(()) => Some(file),
+        Err(err) => {
+            stdlib_warm_lock_debug(&err.to_string());
+            None
+        }
+    }
+}
+
+fn stdlib_warm_lock_debug(reason: &str) {
+    if std::env::var_os("HARN_BYTECODE_CACHE_DEBUG").is_some() {
+        eprintln!("[harn] stdlib warm continuing without the cache lock: {reason}");
+    }
+}
+
+/// What [`warm_embedded_stdlib`] prepared.
+#[derive(Debug, Default)]
+pub struct StdlibWarmReport {
+    /// Modules in this binary's stdlib catalog.
+    pub modules: usize,
+    /// Modules now prepared. Short of `modules` when a module failed or a warm
+    /// thread could not start.
+    pub warmed: usize,
+    /// Modules that did not compile on their own, with the reason. A failure
+    /// here only means that module stays lazy; importing it still reports the
+    /// real error in the importing process.
+    pub failed: Vec<(String, String)>,
+}
+
+/// Prepare every embedded stdlib module once, across `threads` threads, so the
+/// on-disk bytecode cache is warm before this binary fans out processes.
+///
+/// Without it, every child that imports a stdlib module the cache has not seen
+/// compiles that module itself, concurrently with its siblings. An unoptimized
+/// build spends about 20 s of CPU compiling the agent stack, and a test deadline
+/// then measures that stampede instead of the test (harn#8575).
+///
+/// Processes that share one disk cache warm it one at a time. Sharded test
+/// runs start several `harn test conformance` processes together, and each one
+/// used to compile the whole catalog at once beside its siblings: four
+/// concurrent warms on a four-core host took 43 s each where one took 10 s and
+/// a warm over a populated cache took under a second. Holding the lock, the
+/// first process compiles and the rest load what it stored.
+pub fn warm_embedded_stdlib(threads: usize) -> StdlibWarmReport {
+    let _warm_lock = acquire_stdlib_warm_lock(STDLIB_WARM_LOCK_DEADLINE);
+    let sources = harn_stdlib::STDLIB_SOURCES;
+    let next = std::sync::atomic::AtomicUsize::new(0);
+    let warmed = std::sync::atomic::AtomicUsize::new(0);
+    let failed = std::sync::Mutex::new(Vec::new());
+    std::thread::scope(|scope| {
+        for _ in 0..threads.clamp(1, sources.len().max(1)) {
+            // Compiling recurses over program structure, so each warm thread
+            // needs the VM stack contract, not the 2 MiB default.
+            let builder = std::thread::Builder::new()
+                .name("harn-stdlib-warm".to_owned())
+                .stack_size(crate::RUNTIME_STACK_SIZE);
+            let spawned = builder.spawn_scoped(scope, || loop {
+                let index = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                let Some(entry) = sources.get(index) else {
+                    break;
+                };
+                let synthetic = PathBuf::from(format!("<stdlib>/{}.harn", entry.module));
+                match stdlib_module_artifact(entry.module, &synthetic, entry.source, None) {
+                    Ok(_) => {
+                        warmed.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    }
+                    Err(error) => failed
+                        .lock()
+                        .expect("stdlib warm failure list poisoned")
+                        .push((entry.module.to_string(), error.to_string())),
+                }
+            });
+            // Warming is an optimization: with fewer threads the remaining
+            // modules warm more slowly, and with none they stay lazy.
+            if spawned.is_err() {
+                break;
+            }
+        }
+    });
+    StdlibWarmReport {
+        modules: sources.len(),
+        warmed: warmed.into_inner(),
+        failed: failed
+            .into_inner()
+            .expect("stdlib warm failure list poisoned"),
+    }
+}
+
 pub(crate) fn prepare_stdlib_module_artifact(
     path: &Path,
     recorder: Option<&super::ModulePhaseRecorder>,

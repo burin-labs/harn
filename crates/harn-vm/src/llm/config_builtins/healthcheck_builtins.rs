@@ -21,11 +21,18 @@ async fn llm_healthcheck_builtin(
 ) -> Result<VmValue, VmError> {
     crate::llm::admission::check_auxiliary(None, "provider healthcheck or warm-up")?;
     let (provider_name, api_key) = parse_healthcheck_args(&args);
+    let ollama_model = healthcheck_model_arg(&args)
+        .or_else(|| crate::test_env::env_var_seamed("HARN_LLM_MODEL"))
+        .or_else(|| crate::test_env::env_var_seamed("LOCAL_LLM_MODEL"));
 
     // Ollama-specific readiness probe (issue #675): supports `model`,
     // `warm`, `base_url`, and `keep_alive` options to verify the daemon
     // and optionally pre-warm a tag before the first chat call.
-    if provider_name == "ollama" {
+    if provider_name == "ollama"
+        || crate::llm::capabilities::lookup(&provider_name, ollama_model.as_deref().unwrap_or(""))
+            .message_wire_format
+            .is_ollama()
+    {
         let options = args
             .iter()
             .filter_map(|value| value.as_dict())
@@ -37,11 +44,7 @@ async fn llm_healthcheck_builtin(
                     || dict.contains_key("url")
                     || dict.contains_key("keep_alive")
             });
-        let model = options
-            .and_then(|opts| opts.get("model"))
-            .map(|value| value.display())
-            .or_else(|| crate::test_env::env_var_seamed("HARN_LLM_MODEL"))
-            .or_else(|| crate::test_env::env_var_seamed("LOCAL_LLM_MODEL"));
+        let model = ollama_model;
         let warm = options
             .and_then(|opts| opts.get("warm").or_else(|| opts.get("preload")))
             .is_some_and(|value| matches!(value, VmValue::Bool(true)));
@@ -72,7 +75,8 @@ async fn llm_healthcheck_builtin(
                         .unwrap_or_else(|| vm_value_to_json(value)),
                     _ => vm_value_to_json(value),
                 });
-            let result = crate::llm::api::ollama_readiness(readiness).await;
+            let result =
+                crate::llm::api::ollama_readiness_for_provider(&provider_name, readiness).await;
             return Ok(json_to_vm_value(
                 &serde_json::to_value(&result).unwrap_or_else(|_| {
                     serde_json::json!({

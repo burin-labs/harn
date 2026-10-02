@@ -24,7 +24,9 @@ pub(super) fn detect_cloud_model(operation: ModelOperation) -> Option<CloudModel
         if !cloud_provider_key_available(&provider) {
             continue;
         }
-        let model_id = cloud_model_for_provider(&provider);
+        let Some(model_id) = cloud_model_for_provider(&provider) else {
+            continue;
+        };
         if !route_supports_operation(&provider, &model_id, operation) {
             continue;
         }
@@ -100,10 +102,10 @@ fn push_unique(values: &mut Vec<String>, value: String) {
     }
 }
 
-fn cloud_model_for_provider(provider: &str) -> String {
+fn cloud_model_for_provider(provider: &str) -> Option<String> {
     harn_vm::llm::selected_model_for_provider(provider)
         .or_else(|| harn_vm::llm_config::qc_default_model(provider))
-        .unwrap_or_else(|| harn_vm::llm_config::default_model_for_provider(provider))
+        .or_else(|| harn_vm::llm_config::default_model_for_provider(provider).ok())
 }
 
 fn cloud_provider_key_available(provider: &str) -> bool {

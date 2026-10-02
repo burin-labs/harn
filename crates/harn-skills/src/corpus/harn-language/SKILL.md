@@ -79,6 +79,23 @@ Pair it with [[harn-testing]] for fixtures and [[harn-diagnostics]] for user-fac
 - Watch for strict-types behavior when changing boundary APIs.
 - Update examples when public type syntax changes.
 
+## Typed decisions
+
+- Use `harness.llm.evaluate(site_id, state, questions, policy)` for bounded
+  boolean, choice, or score questions over one shared, closed serializable
+  state. Import the builders from `std/predicate`; declare question ids and
+  choice labels as literals so the checker can type every answer and record
+  the site in the predicate manifest.
+- Use `evaluate_predicate` only for its single-boolean projection. Neither
+  entry point returns a bare boolean: match the closed outcome and handle
+  uncertainty, refusal, and budget limits explicitly. An `answered` batch
+  contains every declared question, or the evaluator refuses it.
+- Name a catalog route that declares the `decision` operation in a constant
+  policy. Keep deterministic authorization rules outside the model decision,
+  and do not treat a reported confidence as measured accuracy.
+- See `docs/src/predicates.md` for the builders, outcome arms, and admission
+  contract. Pair with [[harn-testing]] for hermetic fixtures and quality reads.
+
 ## Portable execution
 
 - Treat portable execution as a deployment contract, not a second Harn

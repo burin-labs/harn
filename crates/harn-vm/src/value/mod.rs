@@ -6,6 +6,7 @@ mod error;
 mod handles;
 mod io_error;
 mod isolate;
+pub mod json;
 pub(crate) mod recursion;
 mod set;
 mod storage_json;

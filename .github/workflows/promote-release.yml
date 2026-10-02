@@ -3,13 +3,15 @@ name: Promote release
 # Publishes a release from the files the version commit's candidate run built
 # and checked. Nothing here builds a release file.
 #
-#   1. build-release-binaries.yml runs on every push to main. When the push
-#      changes the workspace version to a stable X.Y.Z it builds, signs,
-#      attests, and checks the release candidate at exactly that commit, and
-#      concludes success only when every release check passed on those files.
-#   2. This workflow starts when that run completes. `plan` repeats the
-#      build's own version decision at the run's head commit, so only a
-#      successful candidate run is promoted and a warm-cache run is a no-op.
+#   1. build-release-binaries.yml builds, signs, attests, and checks the
+#      release candidate at exactly the version commit, and concludes success
+#      only when every release check passed on those files. It builds in the
+#      release's merge group, whose commit is the one that lands on main; the
+#      push to main builds only when no queue run built that commit.
+#   2. This workflow starts when the push run completes. `plan` repeats the
+#      build's own version decision at the run's head commit, then finds the
+#      successful run that built the candidate at that commit, so only a
+#      checked candidate is promoted and a warm-cache run is a no-op.
 #   3. `promote` calls the organization's promote-release.yml, which proves
 #      the run passed at that commit, checks every file's sha256 and
 #      attestation against the candidate manifest, then creates the tag and the
@@ -43,8 +45,12 @@ jobs:
       github.event.workflow_run.head_branch == 'main' &&
       github.event.workflow_run.head_repository.full_name == github.repository
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
     outputs:
       promote: ${{ steps.plan.outputs.promote }}
+      run_id: ${{ steps.plan.outputs.run_id }}
       tag: ${{ steps.plan.outputs.tag }}
       version: ${{ steps.plan.outputs.version }}
       major_minor: ${{ steps.plan.outputs.major_minor }}
@@ -65,6 +71,8 @@ jobs:
           set -euo pipefail
           # shellcheck source=scripts/lib/release_version.sh
           source scripts/lib/release_version.sh
+          # shellcheck source=scripts/lib/release_candidate_run.sh
+          source scripts/lib/release_candidate_run.sh
           version="$(release_workspace_version < Cargo.toml)"
           previous="$(git show HEAD^:Cargo.toml | release_workspace_version)"
           if ! release_push_is_stable_version_change "$previous" "$version"; then
@@ -86,9 +94,20 @@ jobs:
               exit 0
             fi
           fi
-          echo "::notice::Promoting $tag from build run $BUILD_RUN_ID at $HEAD_SHA."
+          # The candidate was built by the release's merge group, or by this push
+          # when no queue run built it. Either way it is found by commit.
+          if ! candidate_run="$(release_candidate_run_id "$GITHUB_REPOSITORY" "$HEAD_SHA")"; then
+            echo "::error::Could not read which run built the $tag candidate at $HEAD_SHA."
+            exit 1
+          fi
+          if [[ -z "$candidate_run" ]]; then
+            echo "::error::No successful build run holds a $tag candidate at $HEAD_SHA (this push's run $BUILD_RUN_ID built none)."
+            exit 1
+          fi
+          echo "::notice::Promoting $tag from build run $candidate_run at $HEAD_SHA."
           {
             echo "promote=true"
+            echo "run_id=$candidate_run"
             echo "tag=$tag"
             echo "version=$version"
             echo "major_minor=${version%.*}"
@@ -102,10 +121,10 @@ jobs:
       contents: read
       actions: read
       attestations: read
-    uses: burin-labs/.github/.github/workflows/promote-release.yml@d5b86ef19b1a5d1d9d45e2fe55b1a82b9adf54ce # promote-release
+    uses: burin-labs/.github/.github/workflows/promote-release.yml@5bf8c07287382b4492ad6d50b06da60c46936ad1
     with:
       sha: ${{ github.event.workflow_run.head_sha }}
-      run-id: ${{ github.event.workflow_run.id }}
+      run-id: ${{ needs.plan.outputs.run_id }}
       tag: ${{ needs.plan.outputs.tag }}
     secrets:
       RELEASE_APP_CLIENT_ID: ${{ secrets.RELEASE_APP_CLIENT_ID }}
@@ -118,7 +137,7 @@ jobs:
     needs: [plan, promote]
     permissions:
       contents: read
-    uses: burin-labs/.github/.github/workflows/repin.yml@d33db398eec4f00e2fee4164afeb7157005bd4ba # repin
+    uses: burin-labs/.github/.github/workflows/repin.yml@d33db398eec4f00e2fee4164afeb7157005bd4ba
     with:
       released-repository: ${{ github.repository }}
       tag: ${{ needs.promote.outputs.tag }}
@@ -141,10 +160,10 @@ jobs:
           persist-credentials: false
 
       - name: Set up QEMU
-        uses: docker/setup-qemu-action@1f40c72289eff860ee54a304f1438e3cff362e0a # v4.3.0
+        uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
       - name: Download Linux release archives
         env:
@@ -197,7 +216,7 @@ jobs:
             type=raw,value=latest
 
       - name: Build and push container image
-        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
           file: ./Dockerfile.release

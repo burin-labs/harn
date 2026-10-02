@@ -210,6 +210,7 @@ pub struct RunReportCheck {
 }
 
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum RunReportError {
     Read(String),
     EventLog(String),
@@ -217,6 +218,7 @@ pub enum RunReportError {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum RunReportValidationError {
     Schema(String),
     Hash(String),

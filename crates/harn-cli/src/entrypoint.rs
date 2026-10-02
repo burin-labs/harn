@@ -6,7 +6,7 @@ use crate::cli::PackageRegistryCommand;
 use crate::*;
 
 #[allow(clippy::large_stack_frames)] // dispatch entrypoint owns full Args + per-feature locals.
-pub(crate) async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMode) {
+pub(crate) async fn async_main(mut raw_args: Vec<String>, runtime_mode: CliRuntimeMode) {
     // Install the OTLP exporter sink before any subcommand runs so a
     // 20+ minute autonomous session has spans streaming to the
     // configured collector from the first turn. When neither
@@ -20,19 +20,7 @@ pub(crate) async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMo
     }
 
     if raw_args.len() == 2 && raw_args[1].ends_with(".harn") {
-        provider_bootstrap::maybe_seed_ollama_for_run_file(Path::new(&raw_args[1]), false, false)
-            .await;
-        commands::run::run_file(
-            &raw_args[1],
-            false,
-            std::collections::HashSet::new(),
-            Vec::new(),
-            commands::run::CliLlmMockMode::Off,
-            None,
-            commands::run::RunProfileOptions::default(),
-        )
-        .await;
-        return;
+        raw_args.insert(1, "run".to_string());
     }
 
     let cli = match Cli::try_parse_from(&raw_args) {
@@ -66,6 +54,16 @@ pub(crate) async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMo
         cmd.print_help().ok();
         return;
     };
+    if let Err(error) =
+        crate::spend_policy::run(cli.spend_policy.as_deref(), Box::pin(dispatch(subcommand))).await
+    {
+        eprintln!("error: {error}");
+        process::exit(1);
+    }
+}
+
+#[allow(clippy::large_stack_frames)]
+async fn dispatch(subcommand: Command) {
     match subcommand {
         Command::Version(args) => {
             let exit = run_version(args).await;
@@ -79,6 +77,14 @@ pub(crate) async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMo
                 process::exit(1);
             }
         }
+        Command::SelfToolchain(args) => match commands::upgrade::toolchain::run(args).await {
+            Ok(0) => {}
+            Ok(code) => process::exit(code),
+            Err(error) => {
+                eprintln!("error: {error}");
+                process::exit(1);
+            }
+        },
         Command::Dap(_) => run_dap_adapter(),
         Command::ConformanceHelper(args) => {
             if let Err(error) = commands::conformance_helper::run(args).await {
@@ -496,6 +502,18 @@ pub(crate) async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMo
             }
         },
         Command::Doctor(args) => {
+            if let Some(crate::cli::DoctorCommand::Sandbox(sandbox)) = args.command {
+                #[cfg(feature = "hostlib")]
+                process::exit(commands::doctor_sandbox::run(sandbox.json));
+                #[cfg(not(feature = "hostlib"))]
+                {
+                    let _ = sandbox;
+                    eprintln!(
+                        "error: `harn doctor sandbox` needs a build with the hostlib feature"
+                    );
+                    process::exit(2);
+                }
+            }
             commands::doctor::run_doctor_with_options(commands::doctor::DoctorOptions {
                 json: args.json,
                 check_providers: args.check_providers,
@@ -510,6 +528,13 @@ pub(crate) async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMo
             }
         }
         Command::Models(args) => commands::models::run(args).await,
+        Command::Llm(args) => {
+            let crate::cli::LlmCommand::Evaluate(args) = args.command;
+            let exit = commands::llm_evaluate::run(args).await;
+            if exit != 0 {
+                process::exit(exit);
+            }
+        }
         Command::Local(args) => commands::local::run(args).await,
         Command::Provider(args) => match args.command {
             ProviderCommand::Capabilities(capabilities) => {
@@ -1012,6 +1037,7 @@ pub(crate) async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMo
         | Command::DumpPortableBenchmarkSchema(_)
         | Command::DumpPromptGrammar(_)
         | Command::DumpTriggerQuickref(_)
+        | Command::DumpCliSurface(_)
         | Command::DumpConnectorMatrix(_)
         | Command::DumpProtocolArtifacts(_)
         | Command::ConnectorSchemaCodegen(_)

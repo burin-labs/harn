@@ -20,6 +20,17 @@ use crate::VmError;
 use super::{sandbox_rejection, LandlockProfile, ProcessProfile, TransferableConfinement};
 use crate::stdlib::sandbox::backend::PrepareOutcome;
 
+/// Who enters a transferred Linux confinement before the payload starts.
+pub enum ReexecConfinement {
+    /// The supervisor enters confinement immediately before executing the payload.
+    BeforeExec(TransferableConfinement),
+    /// The supervisor passes the ruleset to the helper without entering it.
+    AfterNamespace(TransferableConfinement),
+    /// Bubblewrap installs the filter after mounts. The wrapper argv names
+    /// these pinned filter and mount descriptors, which must survive reexec.
+    Bubblewrap(super::DescriptorTransfer),
+}
+
 /// Turn a prepared profile into the helper invocation that will enter it.
 ///
 /// The profile is consumed rather than borrowed: the ruleset descriptor has to
@@ -50,7 +61,7 @@ pub(super) fn namespaced_outcome(
 /// one, naming the path that was looked for, because the alternative grants
 /// this backend could reach instead all leak datagram egress and a reader of
 /// the receipt could not tell which one had been applied.
-pub(super) fn resolve_netns_launcher(
+pub(in crate::stdlib::sandbox) fn resolve_netns_launcher(
     policy: &CapabilityPolicy,
 ) -> Result<Option<PathBuf>, VmError> {
     if !policy.process_sandbox.allow_tcp_loopback {
@@ -95,8 +106,22 @@ pub(super) fn namespaced_launcher_argv(
     payload_args: &[String],
     confinement: &TransferableConfinement,
 ) -> Vec<String> {
+    launcher_argv_with_ruleset(
+        payload_program,
+        payload_args,
+        confinement,
+        confinement.ruleset_fd(),
+    )
+}
+
+pub(in crate::stdlib::sandbox) fn launcher_argv_with_ruleset(
+    payload_program: &str,
+    payload_args: &[String],
+    confinement: &TransferableConfinement,
+    ruleset_fd: Option<i32>,
+) -> Vec<String> {
     let mut argv = vec![NETNS_LAUNCH_SUBCOMMAND.to_string()];
-    if let Some(fd) = confinement.ruleset_fd() {
+    if let Some(fd) = ruleset_fd {
         argv.push(NETNS_RULESET_FD_FLAG.to_string());
         argv.push(fd.to_string());
     }
@@ -138,7 +163,7 @@ pub fn decode_seccomp_hex(text: &str) -> io::Result<Vec<u8>> {
             _ => {
                 return Err(io::Error::other(
                     "transferred seccomp program is not hexadecimal",
-                ))
+                ));
             }
         }
     }

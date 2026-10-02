@@ -5,7 +5,7 @@ import { github_api_json_result } from "./github_api.harn"
  * One check name's latest resolved verdict.
  *
  * `intentional_skip` is a skip the workflow's own routing chose. A skip on a
- * check the changed paths required is classified `bad`, because a routing bug
+ * required check is classified `bad`, because a routing bug
  * that skips the lane a change breaks is indistinguishable from a pass unless
  * the reader separates the two.
  */
@@ -23,6 +23,12 @@ pub type CheckObservation = {
 }
 
 pub type ExpectationSource = "workflow_filters" | "explicit" | "unobservable"
+
+pub type CheckExpectations = {
+  source: ExpectationSource,
+  expected_names: list<string>,
+  path_required_names: list<string>,
+}
 
 pub type CheckCensus = {
   head_sha: string,
@@ -65,6 +71,8 @@ pub const PATH_GATED_CHECKS = [
 
 /** Checks that must report on every head, whatever the diff touched. */
 pub const ALWAYS_EXPECTED_CHECKS = ["CI status"]
+
+const WORKFLOW_REGISTRY_REPOSITORY = "burin-labs/harn"
 
 const EXIT_GREEN = 0
 
@@ -263,6 +271,36 @@ fn observation_covers(name: string, expected: string) -> bool {
   return name == expected || name.starts_with(expected + " (")
 }
 
+/** Bind Harn's routing registry to its owning repository, or explicit requirements. */
+pub fn check_expectations(
+  repository: string,
+  workflow_repository: string?,
+  explicit_names: list<string>,
+  filters: unknown,
+  diff: {ok: bool, paths: list<string>},
+) -> CheckExpectations {
+  if len(explicit_names) > 0 {
+    return {source: "explicit", expected_names: explicit_names, path_required_names: []}
+  }
+  if repository.lower() != WORKFLOW_REGISTRY_REPOSITORY
+    || (workflow_repository ?? "").lower() != WORKFLOW_REGISTRY_REPOSITORY
+    || type_of(filters) != "dict"
+    || !diff.ok {
+    return {source: "unobservable", expected_names: [], path_required_names: []}
+  }
+  for row in PATH_GATED_CHECKS {
+    if !keys(filters).contains(row.filter) {
+      return {source: "unobservable", expected_names: [], path_required_names: []}
+    }
+  }
+  const required = path_required_check_names(filters, diff.paths)
+  return {
+    source: "workflow_filters",
+    expected_names: ALWAYS_EXPECTED_CHECKS + required,
+    path_required_names: required,
+  }
+}
+
 fn names_covering(observations: list<CheckObservation>, expected: string) -> list<string> {
   let out: list<string> = []
   for observation in observations ?? [] {
@@ -300,7 +338,7 @@ pub fn build_census(
     observed_names = observed_names.appending(observation.name)
     let verdict = observation.verdict
     if verdict == "intentional_skip" {
-      for required in path_required_names ?? [] {
+      for required in (expected_names ?? []) + (path_required_names ?? []) {
         if observation_covers(observation.name, required) {
           verdict = "bad"
         }
@@ -461,6 +499,9 @@ fn usage() -> string {
       "                                              [--base REF] [--workflow PATH]",
       "                                              [--expect NAME ...] [--json]",
       "",
+      "Automatic expectations require Harn's repository and its own workflow.",
+      "--expect supplies required checks directly and bypasses workflow inference.",
+      "",
       "Reports the latest verdict per check name for one head commit, resolved from",
       "both the commit's check runs and its commit statuses, and refuses when an",
       "expected check never reported.",
@@ -577,6 +618,33 @@ fn read_workflow(io: {fs: HarnessFs, stdio: HarnessStdio}, path: string) -> any 
   }
 }
 
+fn workflow_repository(fs: HarnessFs, process: HarnessProcess, path: string) -> string? {
+  const canonical = fs.workspace_canonicalize_existing(path)
+  if canonical == nil {
+    return nil
+  }
+  const result = process.run(
+    {
+      program: "gh",
+      args: ["repo", "view", "--json", "nameWithOwner"],
+      cwd: dirname(canonical ?? ""),
+    },
+  )
+  if !result.success {
+    return nil
+  }
+  const identity = try {
+    json_parse(result.stdout)
+  } catch (_err) {
+    nil
+  }
+  return if type_of(identity?.nameWithOwner) == "string" {
+    to_string(identity.nameWithOwner)
+  } else {
+    nil
+  }
+}
+
 fn render(census: CheckCensus) -> string {
   let lines = [
     "head: ${census.head_sha}",
@@ -645,35 +713,33 @@ fn main(harness: Harness) {
     )
     harness.runtime.exit(EXIT_MISSING)
   }
-  let path_required: list<string> = []
-  let expectation_source: ExpectationSource = "unobservable"
-  if len(explicit_expected) > 0 {
-    expectation_source = "explicit"
-  }
-  const workflow = read_workflow(pick(harness, ["fs", "stdio"]), to_string(parsed?.workflow ?? ""))
-  if workflow != nil {
-    const filters = workflow_surface_filters(workflow, "surface_filter")
-    const diff = changed_paths(harness.process, harness.clock, repo, base, sha)
-    if filters != nil && diff.ok {
-      path_required = path_required_check_names(filters, diff.paths)
-      expectation_source = "workflow_filters"
-    }
-  }
-  let expected = explicit_expected
-  if expectation_source == "workflow_filters" {
-    expected = ALWAYS_EXPECTED_CHECKS + path_required
-    for name in explicit_expected {
-      if !expected.contains(name) {
-        expected = expected.appending(name)
+  let filters: unknown = nil
+  let workflow_owner: string? = nil
+  let diff: {ok: bool, paths: list<string>} = {ok: false, paths: []}
+  if len(explicit_expected) == 0 && repo.lower() == WORKFLOW_REGISTRY_REPOSITORY {
+    const path = to_string(parsed?.workflow ?? "")
+    const workflow = read_workflow(pick(harness, ["fs", "stdio"]), path)
+    if workflow != nil {
+      workflow_owner = workflow_repository(harness.fs, harness.process, path)
+      if (workflow_owner ?? "").lower() == WORKFLOW_REGISTRY_REPOSITORY {
+        filters = workflow_surface_filters(workflow, "surface_filter")
+        const changed = changed_paths(harness.process, harness.clock, repo, base, sha)
+        diff = {ok: changed.ok, paths: changed.paths}
       }
     }
+  }
+  const expectations = check_expectations(repo, workflow_owner, explicit_expected, filters, diff)
+  if expectations.source == "unobservable" {
+    harness.stdio.eprintln(
+      "gh_check_state: automatic expectations require Harn's own repository and workflow; supply --expect NAME",
+    )
   }
   const census = build_census(
     sha,
     collected.observations,
-    expected,
-    path_required,
-    expectation_source,
+    expectations.expected_names,
+    expectations.path_required_names,
+    expectations.source,
   )
   harness.stdio.println(
     if parsed?.json ?? false {

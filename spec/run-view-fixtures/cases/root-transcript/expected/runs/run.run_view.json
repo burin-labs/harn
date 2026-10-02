@@ -24,6 +24,7 @@
     }
   ],
   "evidence": {
+    "evaluation_receipts": null,
     "execution_id": "hxe-019c13e0-8080-7000-8000-000000000001",
     "flight_recording": {
       "byte_length": 4096,
@@ -107,8 +108,8 @@
   "projection": {
     "last_event_id": null,
     "prefix_hash": null,
-    "projection_hash": "sha256:c601c0de0b0a595294a6a0148b31c06d7550ab9164af15ec161928b4cb24cdb4",
-    "projection_id": "run_view:run_root_transcript:c601c0de0b0a"
+    "projection_hash": "sha256:a32aafcafd9b5bda2e5dd6954c80d0da95c6b67a3625176629853f5d21d7a245",
+    "projection_id": "run_view:run_root_transcript:a32aafcafd9b"
   },
   "providers": [
     {

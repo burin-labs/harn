@@ -156,7 +156,7 @@ impl super::super::Vm {
         );
         let manifest_hooks = crate::orchestration::matching_vm_lifecycle_hooks(
             HookEvent::PreStep,
-            &crate::llm::vm_value_to_json(&match_payload),
+            &crate::value::json::vm_value_to_json(&match_payload),
         );
         for hook in manifest_hooks {
             let payload = Self::step_hook_payload(
@@ -254,7 +254,7 @@ impl super::super::Vm {
         let result = async {
             let manifest_hooks = crate::orchestration::matching_vm_lifecycle_hooks(
                 HookEvent::PostStep,
-                &crate::llm::vm_value_to_json(&Self::step_hook_payload(
+                &crate::value::json::vm_value_to_json(&Self::step_hook_payload(
                     HookEvent::PostStep,
                     persona.as_deref(),
                     &step.definition.name,

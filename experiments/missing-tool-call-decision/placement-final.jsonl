@@ -1,0 +1,12 @@
+{"row_id":"en-open-commit","language":"en","assistant_text":"The relevant details are in package.json. I am opening that file now to check the scripts.","intended":true,"tool":"read"}
+{"row_id":"en-test-commit","language":"en","assistant_text":"The edit is saved. Next I am executing the focused test command in the terminal.","intended":true,"tool":"shell"}
+{"row_id":"en-edit-question","language":"en","assistant_text":"Before changing the timeout setting, do you want me to increase it or leave the current value? I will wait for your choice.","intended":false,"tool":""}
+{"row_id":"en-quoted-run","language":"en","assistant_text":"The README says, 'Run the migration command before starting the server.' That is the instruction you asked me to explain; I have not started a migration.","intended":false,"tool":""}
+{"row_id":"es-edit-commit","language":"es","assistant_text":"Ya autorizaste el cambio. Ahora modifico la configuración para desactivar esa opción.","intended":true,"tool":"edit"}
+{"row_id":"es-read-commit","language":"es","assistant_text":"Para comprobar el valor exacto, mi siguiente acción es abrir y leer el archivo de configuración.","intended":true,"tool":"read"}
+{"row_id":"es-run-hypothetical","language":"es","assistant_text":"Si más adelante decidimos actualizar la base de datos, ejecutaremos la migración. Por ahora solo estamos revisando el plan.","intended":false,"tool":""}
+{"row_id":"es-completed-edit","language":"es","assistant_text":"El archivo ya quedó actualizado y la prueba pasó. No hace falta realizar ningún otro cambio.","intended":false,"tool":""}
+{"row_id":"fr-run-commit","language":"fr","assistant_text":"La commande a été approuvée. Je lance maintenant les tests ciblés dans le terminal.","intended":true,"tool":"shell"}
+{"row_id":"fr-edit-commit","language":"fr","assistant_text":"La cause est identifiée. Je vais maintenant remplacer la valeur incorrecte dans le fichier source.","intended":true,"tool":"edit"}
+{"row_id":"fr-read-permission","language":"fr","assistant_text":"Souhaitez-vous que je consulte aussi le journal privé ? J'attends votre autorisation avant de l'ouvrir.","intended":false,"tool":""}
+{"row_id":"fr-explanation","language":"fr","assistant_text":"Lire le fichier sert à connaître la configuration ; le modifier change le comportement. Cette explication ne nécessite aucune opération supplémentaire.","intended":false,"tool":""}

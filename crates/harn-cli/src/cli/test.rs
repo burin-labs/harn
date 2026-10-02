@@ -68,6 +68,10 @@ pub(crate) struct TestArgs {
     /// running under --parallel finish and remain in the report.
     #[arg(long)]
     pub fail_fast: bool,
+    /// Fail a user-test run if any case reports a typed skip. Useful for CI
+    /// suites that require every discovered case to exercise its assertions.
+    #[arg(long = "fail-on-skip")]
+    pub fail_on_skip: bool,
     /// Accept a run that executes no tests.
     ///
     /// By default a selection that matches nothing exits non-zero, because an
@@ -159,13 +163,17 @@ pub(crate) struct TestArgs {
     /// conformance fixtures so bundled `skills/` dirs are picked up.
     #[arg(long = "skill-dir", value_name = "PATH")]
     pub skill_dir: Vec<String>,
-    /// User test path, `conformance`, or `protocols`.
+    /// User-test files or directories, or a special suite and its selection.
+    #[arg(value_name = "PATH", num_args = 0..)]
+    pub paths: Vec<String>,
+    /// First positional, classified once by the test command boundary.
+    #[arg(skip)]
     pub target: Option<String>,
-    /// Optional file or directory under conformance/ or conformance/protocols/.
+    /// Optional selection for a special suite.
+    #[arg(skip)]
     pub selection: Option<String>,
-    /// Additional user-test file or directory. Repeat to run a curated suite
-    /// in one compile-once scheduler invocation.
-    #[arg(long = "test-path", value_name = "PATH")]
+    /// Remaining user-test paths, or extra special-suite positionals to refuse.
+    #[arg(skip)]
     pub test_paths: Vec<String>,
     /// Run only user-test files affected by changes since this Git ref.
     ///

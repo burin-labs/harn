@@ -1312,6 +1312,7 @@ fn provider_request_usage(provider: &str) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use harn_clock::test_support::within;
 
     #[test]
     fn typed_200k_tpm_receipt_paces_growing_requests_before_provider() {
@@ -1657,9 +1658,8 @@ mod tests {
             assert_eq!(provider_request_usage("queue"), 1);
 
             drop(first);
-            let second = tokio::time::timeout(std::time::Duration::from_secs(2), second)
+            let second = within("second task acquiring after the first permit drops", second)
                 .await
-                .expect("second task should acquire after first permit drops")
                 .expect("second task completed")
                 .expect("second permit");
             assert_eq!(provider_request_usage("queue"), 2);
@@ -1706,9 +1706,8 @@ mod tests {
             assert_eq!(durable_usage(&state_path, "llm:provider:queue:rpm"), 1);
 
             drop(first);
-            let second = tokio::time::timeout(std::time::Duration::from_secs(2), second)
+            let second = within("second task acquiring after the first permit drops", second)
                 .await
-                .expect("second task should acquire after first permit drops")
                 .expect("second task completed")
                 .expect("second permit");
             assert_eq!(durable_usage(&state_path, "llm:provider:queue:rpm"), 2);
@@ -1962,9 +1961,8 @@ mod tests {
             );
 
             drop(first);
-            let second = tokio::time::timeout(std::time::Duration::from_secs(2), second)
+            let second = within("second task acquiring after the first permit drops", second)
                 .await
-                .expect("second task should acquire after first permit drops")
                 .expect("second task completed")
                 .expect("second permit");
             assert_eq!(provider_request_usage("queue"), 2);

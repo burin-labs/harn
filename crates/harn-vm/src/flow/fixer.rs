@@ -91,6 +91,7 @@ pub struct FixerReceipt {
 }
 
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum FixerError {
     InvalidRemediation(String),
     MissingBlockedAtom(AtomId),

@@ -1063,3 +1063,52 @@ async fn write_http_empty(stream: &mut TcpStream, status: &str) -> Result<(), st
     stream.write_all(response.as_bytes()).await?;
     stream.flush().await
 }
+
+/// An MCP stdio server is a child of the session, so it starts under the
+/// session's environment policy: it sees the session-wide grant and neither
+/// the engine variable the policy never admitted nor the in-process-only
+/// grant. The control starts the same server with no policy installed and
+/// reads all three, which proves the server can report a planted variable.
+#[tokio::test(flavor = "current_thread")]
+async fn stdio_server_starts_under_the_session_environment_policy() {
+    use crate::security::child_env_probe as probe;
+    let _planted = probe::plant();
+    let script = format!(
+        r#"
+import json, os, sys
+request = json.loads(sys.stdin.readline())
+print(json.dumps({{
+    "jsonrpc": "2.0",
+    "id": request["id"],
+    "result": {{
+        "resultType": "complete",
+        "supportedVersions": ["2026-07-28"],
+        "capabilities": {{"tools": {{}}}},
+        "ttlMs": 0,
+        "cacheScope": "private",
+        "_meta": {{"io.modelcontextprotocol/serverInfo": {{"name": {report}, "version": "1.0.0"}}}}
+    }}
+}}), flush=True)
+"#,
+        report = probe::python_report()
+    );
+    let reported = |handle: VmMcpClientHandle| async move {
+        let discovery = handle.discovery_result.lock().await.clone().unwrap();
+        discovery["serverInfo"]["name"]
+            .as_str()
+            .expect("server name carries the report")
+            .to_string()
+    };
+
+    let control = {
+        let _session = probe::InstalledSession::install(None);
+        reported(connect_stdio_test_script(&script, PROTOCOL_VERSION.to_string()).await).await
+    };
+    assert_eq!(control, probe::expected_report(&probe::NAMES));
+
+    let governed = {
+        let _session = probe::InstalledSession::install(Some(probe::granted_session()));
+        reported(connect_stdio_test_script(&script, PROTOCOL_VERSION.to_string()).await).await
+    };
+    assert_eq!(governed, probe::expected_report(&[probe::SESSION]));
+}

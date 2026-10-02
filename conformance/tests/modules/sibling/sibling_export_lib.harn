@@ -1,0 +1,8 @@
+@sibling
+fn hidden() -> string {
+  return "ok"
+}
+
+pub fn visible() -> string {
+  return "public"
+}

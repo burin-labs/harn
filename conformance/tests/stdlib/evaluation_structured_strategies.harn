@@ -1,0 +1,82 @@
+import { boolean } from "std/predicate"
+import { llm_text, with_llm_script } from "std/testing"
+
+pipeline test(harness: Harness) {
+  for route in [
+    {provider: "openrouter", model: "anthropic/claude-fable-5", strategy: "tool_schema"},
+    {provider: "minimax", model: "MiniMax-M2.5-highspeed", strategy: "prompt_validation"},
+    {
+      provider: "fireworks",
+      model: "accounts/fireworks/models/gpt-oss-120b",
+      strategy: "prompt_validation",
+    },
+  ] {
+    with_llm_script(
+      harness.llm,
+      [
+        llm_text(
+          json_stringify(
+            {answers: {safe: {verdict: true, confidence: 0.1, evidence: "uncertain true"}}},
+          ),
+        ),
+      ],
+      { ->
+        const result = harness.llm.evaluate_request(
+          "strategy-compatibility.v1",
+          {text: "fixture"},
+          {safe: boolean("Safe?")},
+          {
+            backend: "structured_llm",
+            provider: route.provider,
+            model: route.model,
+            effort: if route.provider == "fireworks" {
+              "low"
+            } else {
+              "none"
+            },
+            temperature: 0.0,
+            threshold: 0.0,
+            evaluation_cost_limit: 1.0,
+          },
+        )
+        assert_eq(result.kind, "answered")
+        match result.kind {
+          "answered" -> {
+            assert_eq(result.value.safe.verdict, true)
+            assert_eq(result.value.safe.confidence, 0.1)
+          }
+          _ -> {
+            throw "structured route did not answer"
+          }
+        }
+        assert_eq(len(harness.llm.mock_calls()), 1)
+      },
+    )
+  }
+  with_llm_script(
+    harness.llm,
+    [],
+    { ->
+      const denied = harness.llm.evaluate_request(
+        "strategy-explicit-unsupported.v1",
+        {text: "fixture"},
+        {safe: boolean("Safe?")},
+        {
+          backend: "structured_llm",
+          provider: "groq",
+          model: "groq/compound",
+          effort: "none",
+          temperature: 0.0,
+          threshold: 0.0,
+          evaluation_cost_limit: 1.0,
+          run_cost_limit: 1.0,
+        },
+      )
+      assert_eq(denied.kind, "unavailable")
+      assert_eq(len(harness.llm.mock_calls()), 0)
+    },
+  )
+  harness.stdio.log(
+    "catalog tool-schema and prompt-validation routes answered once; unsupported route refused",
+  )
+}

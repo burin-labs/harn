@@ -227,6 +227,7 @@ auto_reasoning_overrides = { agent = "off", verify = "off", code = "off" }
 preserve_thinking = true
 server_parser = "none"
 honors_chat_template_kwargs = true
+honors_preserve_thinking_kwarg = true
 recommended_endpoint = "/v1/chat/completions"
 text_tool_wire_format_supported = true
 thinking_disable_directive = "/no_think"
@@ -330,6 +331,7 @@ auto_reasoning_overrides = { agent = "off", verify = "off", code = "off" }
 preserve_thinking = true
 server_parser = "none"
 honors_chat_template_kwargs = true
+honors_preserve_thinking_kwarg = true
 recommended_endpoint = "/v1/chat/completions"
 text_tool_wire_format_supported = true
 thinking_disable_directive = "/no_think"
@@ -418,6 +420,7 @@ auto_reasoning_overrides = { agent = "off", verify = "off", code = "off" }
 preserve_thinking = true
 server_parser = "none"
 honors_chat_template_kwargs = true
+honors_preserve_thinking_kwarg = true
 recommended_endpoint = "/v1/chat/completions"
 text_tool_wire_format_supported = true
 thinking_disable_directive = "/no_think"

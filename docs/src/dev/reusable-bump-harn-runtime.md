@@ -24,9 +24,31 @@ declared refresh and validation commands.
 
 ## Minimal caller workflow
 
+An open bump pull request may contain consumer repair commits. Refresh replays
+non-bot repairs onto the new pin before the declared validation command runs.
+Signed bump commits retain `Harn-Repair-Commit` trailers, so later refreshes
+can replay those same repairs after the branch was flattened. Repair commits
+must remain fetchable by their recorded IDs. A missing commit fails the run.
+
+The GitHub adapter identifies generated commits by the configured publisher's
+GitHub login and a valid GitHub signature. A local Git author name is not
+identity evidence. Unsigned, unknown, or other publishers' commits are repairs;
+an unavailable identity lookup fails the run. Repair merge commits are refused.
+A patch conflict
+returns `repair_conflict` without publishing or arming auto-merge. Publication
+also rechecks the inspected pull-request head and refuses an observed change
+before replacing it. The receipt's `repair_commits` names the repair set, and
+`repair_conflicts` names contested paths.
+
 Drop this into the consuming repo. The only repo-specific parts are the trigger
 schedule and, when the default lock refresh is insufficient, the
-`refresh-command`, `format-command`, and `validate-command`.
+`refresh-command`, `format-command`, `finalize-refresh-command`, and `validate-command`.
+
+Set `finalize-refresh-command` when generated artifacts depend on Harn source files.
+It runs after compatibility migrations, repairs, and formatting, before validation.
+For example, use `pnpm run codegen` to regenerate bytecode from the final source tree.
+The default is empty. A failed finalizer refuses refresh success.
+With the default `publish-failure-for-repair: false`, the bump stops before validation or publication.
 
 ```yaml
 name: Bump Harn Runtime
@@ -35,6 +57,10 @@ on:
     inputs:
       version:
         description: "Optional Harn tag (vX.Y.Z). Defaults to latest release."
+        required: false
+        type: string
+      source_revision:
+        description: "Optional full Harn commit SHA descended from the selected tag."
         required: false
         type: string
   schedule:
@@ -52,6 +78,7 @@ jobs:
       # The reusable workflow rejects non-SHA refs before checkout.
       orchestration-sha: <pinned-sha>
       version: ${{ inputs.version }}
+      source-revision: ${{ inputs.source_revision }}
       # Optional repository-owned materialization. The target tag is inherited
       # as HARN_BUMP_TARGET_TAG. The reusable workflow first applies the target
       # runtime's deterministic capability migrations, then runs this refresh,
@@ -89,7 +116,7 @@ jobs:
       # head lease. Ordinary callers should keep the default false.
       publish-failure-for-repair: false
       # Optional. The shared workflow applies `harn fix --safety
-      # behavior-preserving` to your sources before your refresh command, so a
+      # behavior-preserving` to your sources after your refresh command, so a
       # bump can normalize its own fallout. Set false to decline that pass and
       # keep the bump limited to the version change plus mandatory compatibility
       # migrations and your own commands. The implicit-any compatibility
@@ -113,6 +140,15 @@ arbitrary orchestration ref.
 
 - Already current: the pin already matches the resolved target → clean no-op,
   zero mutation.
+- Commit-targeted bumps: when `source-revision` is supplied, the workflow reads
+  `.harn-revision` as well as `.harn-version`. An equal tag advances when the
+  requested commit descends from the current commit. An equal commit is a no-op;
+  an older or divergent commit fails without mutation. The workflow checks the
+  requested commit against the release tag and Harn main in its full checkout before
+  changing either pin. The caller's refresh command must materialize the
+  requested source commit using `HARN_BUMP_SOURCE_REVISION`. The installed
+  release CLI owns this state machine, so commit-targeted bumps require a
+  release whose embedded `std/bump` supports the input.
 - Old implicit parameters: before caller regeneration or strict validation,
   the target runtime translates each checker-owned omitted annotation to
   explicit `any`. The printed typed census names scanned, changed, pending,
@@ -136,7 +172,9 @@ arbitrary orchestration ref.
   before this command existed record `package_test_inventory_unsupported`;
   they never report an unmeasured suite as zero.
 - Stale heads: an open bump PR with auto-merge armed is disarmed only under its
-  exact PR-head and base-head leases before refresh begins. The runtime checks
+  exact PR-head and the freshly observed base-branch head before refresh begins.
+  The PR's historical base snapshot does not identify the current branch head;
+  an unavailable current head prevents disarming. The runtime checks
   the checkout's exact base against the remote branch before refresh, after
   validation, and again immediately before arming. The connector derives and
   publishes a GitHub-signed commit only while the measured lease is current.
@@ -178,12 +216,29 @@ The driver package declares the runtime floor it needs in
 of its runtime gets that floor as a diagnostic rather than a missing-capability
 failure part-way through a bump.
 
+Repair preservation also requires the `is_generated_commit` method in the
+target runtime's `LiveBumpRemote` contract. The GitHub driver checks that
+contract before it can refresh or publish a branch. Older runtimes are refused
+rather than silently refreshing without authenticated repair preservation.
+
+The opposite skew is a release whose runtime the promoted driver cannot drive.
+Publishing a release starts every consumer's bump at once, and each bump runs
+the driver from the orchestration commit `harn-bump-fleet` promoted, which is
+usually older than the release. The release candidate run therefore
+type-checks that promoted driver against the candidate binary
+(`scripts/check_promoted_bump_orchestration.harn`) and refuses the candidate
+when it fails. A pull request may change a `std/bump` contract the driver
+implements; promote the orchestration to a main commit carrying the matching
+driver before cutting the release.
+
 ## Security boundary
 
-- **Least privilege, short-lived credentials.** The workflow mints a GitHub App
-  installation token scoped to `contents: write` + `pull-requests: write` for
-  the run only. The caller passes the App client id and private key as
-  `secrets`; no long-lived PAT is used.
+- **Least privilege, renewable credentials.** The caller passes its App client
+  id and private key as `secrets`. The driver mints tokens for only the calling
+  repository, with `contents: write` and `pull_requests: write`. The locked
+  connector retains these restrictions across expiry and 401 renewal. Git
+  fetches and each new refresh callback obtain a current token. A child making
+  GitHub calls beyond its token's lifetime must manage its own renewal.
 - **Signed commits.** The bump commit is created through GitHub's
   `createCommitOnBranch` GraphQL mutation under the App identity, so GitHub
   signs it and an org `required_signatures` ruleset is satisfied. A local
@@ -201,10 +256,13 @@ failure part-way through a bump.
 - **One package-contract owner.** The shared workflow invokes Harn's structural
   test-discovery inventory but encodes none of a package's code-generation or
   build/test commands. Repositories expose those owner commands through
-  `refresh-command`, `format-command`, and `validate-command`; consumers copy
+  `refresh-command`, `format-command`, `finalize-refresh-command`, and
+  `validate-command`; consumers copy
   no orchestration, release-readiness, signing, branch, or PR machinery.
 - **Sandbox posture.** The orchestration runs under `harn run --no-sandbox`
   because it must reach git, the GitHub API through the connector, and the
-  caller's refresh and validation commands. It carries no secret beyond the
-  scoped installation token, which is passed via the environment and never
-  written to the repo.
+  caller's refresh and validation commands. The workflow removes the raw App
+  key from its environment before starting Harn. A mode-600 runner temporary
+  file hands the key to the driver, which reads and deletes that exact file
+  before any child runs. The driver retains the key in memory; caller refresh
+  commands receive only a scoped token through `GH_TOKEN`.

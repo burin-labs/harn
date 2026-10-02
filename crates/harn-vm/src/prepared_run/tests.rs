@@ -752,16 +752,87 @@ fn policy_denial_is_attributed_before_endpoint_health_or_eperm() {
     let mut intent = intent();
     intent.network = vec![network("blocked.example.test")];
     match run.prepare(intent, host_facts()) {
-        PreparationOutcome::Blocked { diagnostics, .. } => {
+        PreparationOutcome::Blocked {
+            diagnostics,
+            receipt: Some(receipt),
+        } => {
             let diagnostic = diagnostics
                 .iter()
                 .find(|diagnostic| diagnostic.code == "policy_denied")
                 .expect("network policy diagnostic");
             assert!(diagnostic.message.contains("before endpoint health"));
             assert!(!diagnostic.message.contains("unreachable"));
+            let decision = receipt
+                .policy_decisions
+                .iter()
+                .find(|decision| !decision.denied_network_targets.is_empty())
+                .expect("denied network decision in canonical receipt");
+            assert_eq!(decision.denial_gate.unwrap().as_str(), "network_policy");
+            assert_eq!(
+                decision.denied_network_targets,
+                ["https://blocked.example.test:443"]
+            );
+            assert_eq!(
+                decision.policy_decision["matched_rule"]["source"],
+                "harn.net_policy"
+            );
         }
         other => panic!("network policy must block before I/O, got {other:?}"),
     }
+}
+
+#[test]
+fn network_policy_refusal_has_its_own_gate() {
+    let target = AuthorityRequirement::Network(network("blocked.example.test"));
+    let decision =
+        evaluate_requirement(&approval_policy(), &net_policy(), &target).expect("network decision");
+    assert!(decision.is_deny());
+    assert_eq!(decision.denial_gate().as_str(), "network_policy");
+    assert_eq!(
+        decision
+            .matched_rule
+            .as_ref()
+            .map(|rule| rule.source.as_str()),
+        Some("harn.net_policy")
+    );
+    assert_eq!(
+        decision.denied_network_targets,
+        ["https://blocked.example.test:443"]
+    );
+    let denial = decision.terminal_denial();
+    assert_eq!(denial.gate.as_str(), "network_policy");
+    assert!(denial.reason.starts_with("Network policy denial:"));
+    assert_eq!(
+        denial.denied_network_targets,
+        decision.denied_network_targets
+    );
+    let replayed: crate::agent_events::ToolDenial =
+        serde_json::from_value(denial.to_json()).expect("typed denial replay");
+    assert_eq!(
+        replayed.denied_network_targets,
+        denial.denied_network_targets
+    );
+
+    // A configured approval deny for an allowed destination retains its own gate.
+    let configured = ToolApprovalPolicy {
+        auto_deny: vec!["prepared_run.network".to_string()],
+        allow_sensitive_paths: true,
+        allow_external_paths: true,
+        ..Default::default()
+    };
+    let approval_decision = evaluate_requirement(
+        &configured,
+        &net_policy(),
+        &AuthorityRequirement::Network(network("api.example.test")),
+    )
+    .expect("configured approval decision");
+    assert!(approval_decision.is_deny());
+    assert_eq!(approval_decision.denial_gate().as_str(), "approval_policy");
+    assert!(approval_decision.denied_network_targets.is_empty());
+    assert!(approval_decision
+        .terminal_denial()
+        .reason
+        .starts_with("Approval policy denial:"));
 }
 
 #[test]

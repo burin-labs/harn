@@ -1,0 +1,112 @@
+/** One success criterion, optionally checked by a host-fact callback. */
+pub type GoalCriterion = {id?: string, description: string, check?: any}
+
+/** Normalized goal, with retired criteria kept separate from active criteria. */
+pub type GoalSpec = {
+  objective: string,
+  success_criteria?: list<GoalCriterion>,
+  constraints?: list<string>,
+  budget?: dict,
+  retired_criteria?: list<GoalCriterion>,
+}
+
+fn __goal_pin_criteria(criteria: list<GoalCriterion>) -> list<GoalCriterion> {
+  let out = []
+  let index = 0
+  for criterion in criteria {
+    out = out.appending(
+      {id: criterion.id ?? ("sc_" + to_string(index)), description: criterion.description},
+    )
+    index = index + 1
+  }
+  return out
+}
+
+/**
+ * Serializable pin projection. Machine checks stay with the caller.
+ * @effects: []
+ * @errors: []
+ * @api_stability: internal
+ */
+pub fn __goal_pin_spec(g: GoalSpec) -> GoalSpec {
+  return {
+    objective: g.objective,
+    success_criteria: __goal_pin_criteria(g.success_criteria ?? []),
+    retired_criteria: __goal_pin_criteria(g.retired_criteria ?? []),
+    constraints: g.constraints ?? [],
+    budget: g.budget ?? {},
+  }
+}
+
+/**
+ * Project a goal under the latest recorded operator retarget. Retired criteria
+ * remain distinguishable from satisfied criteria; constraints and budget stand.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn goal_under_obligations(g: GoalSpec, obligations: any = nil) -> GoalSpec {
+  const objective = trim(to_string(obligations?.retarget?.objective ?? ""))
+  if objective == "" {
+    return g
+  }
+  return g
+    + {
+      objective: objective,
+      success_criteria: [],
+      retired_criteria: (g.retired_criteria ?? []) + (g.success_criteria ?? []),
+    }
+}
+
+/**
+ * Render the active objective and explicitly retired criteria.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: internal
+ */
+pub fn __render_goal_text(g: GoalSpec) -> string {
+  let lines = ["## Goal", "Objective: " + g.objective]
+  if len(g.success_criteria ?? []) > 0 {
+    lines = lines.appending("Success criteria:")
+    for crit in g.success_criteria {
+      lines = lines.appending("- " + crit.description)
+    }
+  }
+  const retired = g.retired_criteria ?? []
+  if len(retired) > 0 {
+    lines = lines.appending("Retired by the operator's retarget (no longer owed, not met):")
+    for crit in retired {
+      lines = lines.appending("- " + crit.description)
+    }
+  }
+  if len(g.constraints ?? []) > 0 {
+    lines = lines.appending("Constraints:")
+    for c in g.constraints {
+      lines = lines.appending("- " + c)
+    }
+  }
+  if len((g.budget ?? {}).keys()) > 0 {
+    lines = lines.appending("Budget: " + json_stringify(g.budget))
+  }
+  return join(lines, "\n")
+}
+
+/**
+ * Goal judge prompt shared by construction and live projection.
+ * @effects: []
+ * @errors: []
+ * @api_stability: internal
+ */
+pub fn __goal_judge_system(g: GoalSpec) -> string {
+  return join(
+    [
+      "You are the goal completion judge. Decide whether the stated goal is fully met by the work so far.",
+      "Return `action: \"accept\"` only if every success criterion is satisfied. Otherwise return `action: \"continue\"` with one concrete repair and the remaining specific gaps.",
+      "",
+      __render_goal_text(g),
+    ],
+    "\n",
+  )
+}

@@ -8,6 +8,9 @@
 //!
 //! See `docs/src/dev/testing.md` for usage patterns.
 
+#[cfg(any(test, feature = "test-support"))]
+pub mod test_support;
+
 use std::fmt;
 use std::sync::Arc;
 use std::time::Duration;

@@ -13,6 +13,7 @@ mod imports;
 mod lint;
 mod lint_json_contract;
 mod lint_report;
+mod llm_context;
 mod mock_host;
 mod outcome;
 mod predicate_manifest;

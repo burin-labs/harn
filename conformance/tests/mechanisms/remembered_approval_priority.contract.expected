@@ -1,0 +1,4 @@
+remembered_allow_executes=true
+receipt_names_user_source=true
+mode_ask_without_memory_does_not_execute=true
+remembered_allow_does_not_bypass_sensitive_path=true

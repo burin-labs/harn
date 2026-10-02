@@ -66,6 +66,9 @@ pub(crate) fn elapsed_ms(started: std::time::Instant) -> u64 {
 /// "not reported by this provider", not "zero".
 #[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ProviderTelemetry {
+    /// Provider-confirmed effort; never inferred from the requested setting.
+    #[serde(default)]
+    pub effective_reasoning_effort: crate::llm::EffectiveReasoningEffort,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub billing: Option<Box<crate::llm::usage::BillingUsage>>,
     /// Wire format the values came from (`ollama_chat`, `openai_usage`, ...).
@@ -114,6 +117,10 @@ pub struct ProviderTelemetry {
     /// ceiling, and an inline receipt pushes that frame over it. The box is
     /// serde-transparent, so the wire and VM shapes are unchanged.
     pub data_controls: Option<Box<crate::llm::api::data_controls::DataControlsReceipt>>,
+    /// The catalog rule admitting this concrete route under the caller's
+    /// inference boundary. Missing means no boundary was requested.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inference_boundary_rule: Option<String>,
     /// Total server-side wall clock (Ollama `total_duration`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub server_total_ms: Option<u64>,
@@ -230,6 +237,12 @@ pub struct ProviderTelemetry {
     /// Harn does not hard-code one router's schema.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub provider_metadata: Option<serde_json::Value>,
+    /// Whether a recorded fixture entry or the configured provider answered
+    /// this call, present only while a `liveAfterCalls` mock fixture is
+    /// installed. The replay/live handoff is the first call marked `live`.
+    /// Boxed for the same stack-frame reason as `data_controls`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub llm_mock_prefix: Option<Box<crate::llm::mock::LlmMockPrefixMarker>>,
 }
 
 impl ProviderTelemetry {
@@ -264,12 +277,14 @@ impl ProviderTelemetry {
     /// per-call latency even for providers that report nothing else.
     pub fn is_empty(&self) -> bool {
         let Self {
+            effective_reasoning_effort,
             billing,
             source,
             serving_base_url,
             serving_fingerprint,
             cache_accounting_declared,
             data_controls,
+            inference_boundary_rule,
             server_total_ms,
             server_load_ms,
             server_prompt_eval_ms,
@@ -293,13 +308,16 @@ impl ProviderTelemetry {
             request_id,
             provider_cost_usd,
             provider_metadata,
+            llm_mock_prefix,
         } = self;
         source.is_empty()
+            && *effective_reasoning_effort == crate::llm::EffectiveReasoningEffort::NotReported
             && billing.is_none()
             && serving_base_url.is_none()
             && serving_fingerprint.is_none()
             && cache_accounting_declared.is_none()
             && data_controls.is_none()
+            && inference_boundary_rule.is_none()
             && server_total_ms.is_none()
             && server_load_ms.is_none()
             && server_prompt_eval_ms.is_none()
@@ -323,6 +341,7 @@ impl ProviderTelemetry {
             && request_id.is_none()
             && provider_cost_usd.is_none()
             && provider_metadata.is_none()
+            && llm_mock_prefix.is_none()
     }
 
     /// Convert nanoseconds (Ollama's reporting unit) to milliseconds with
@@ -561,6 +580,13 @@ impl ProviderTelemetry {
             return None;
         }
         let mut dict: crate::value::DictMap = crate::value::DictMap::new();
+        dict.insert(
+            "effective_reasoning_effort".into(),
+            crate::schema::json_to_vm_value(
+                &serde_json::to_value(&self.effective_reasoning_effort)
+                    .expect("effort observation serializes"),
+            ),
+        );
         if let Some(billing) = &self.billing {
             dict.insert(
                 "billing".into(),
@@ -583,6 +609,9 @@ impl ProviderTelemetry {
                 arcstr::ArcStr::from("data_controls"),
                 data_controls.as_vm_dict(),
             );
+        }
+        if let Some(ref rule) = self.inference_boundary_rule {
+            dict.put_str("inference_boundary_rule", rule);
         }
         insert_opt_u64(&mut dict, "server_total_ms", self.server_total_ms);
         insert_opt_u64(&mut dict, "server_load_ms", self.server_load_ms);
@@ -654,6 +683,12 @@ impl ProviderTelemetry {
             dict.insert(
                 crate::value::intern_key("provider_metadata"),
                 crate::stdlib::json_to_vm_value(provider_metadata),
+            );
+        }
+        if let Some(ref marker) = self.llm_mock_prefix {
+            dict.put(
+                "llm_mock_prefix",
+                crate::stdlib::json_to_vm_value(&serde_json::json!(marker)),
             );
         }
         Some(VmValue::dict(dict))
@@ -983,6 +1018,7 @@ mod tests {
     #[test]
     fn as_vm_dict_serializes_all_present_fields() {
         let telemetry = ProviderTelemetry {
+            effective_reasoning_effort: crate::llm::EffectiveReasoningEffort::NotReported,
             source: source::OLLAMA_CHAT.to_string(),
             serving_base_url: Some("https://provider.example/v1".to_string()),
             server_total_ms: Some(100),
@@ -1045,11 +1081,16 @@ mod tests {
     #[test]
     fn as_vm_dict_projects_every_serialized_field() {
         let telemetry = ProviderTelemetry {
+            effective_reasoning_effort: crate::llm::EffectiveReasoningEffort::Reported {
+                level: "medium".into(),
+                source: crate::llm::ReasoningEffortSource::ProviderDefault,
+            },
             billing: Some(Box::new(crate::llm::usage::BillingUsage {
                 hosted_tool_calls: std::collections::BTreeMap::from([("web_search".into(), 1)]),
                 ..Default::default()
             })),
             data_controls: None,
+            inference_boundary_rule: Some("inference_boundary.local_runtime".to_string()),
             source: source::OLLAMA_CHAT.to_string(),
             serving_base_url: Some("https://provider.example/v1".to_string()),
             serving_fingerprint: Some("build-1".to_string()),
@@ -1080,6 +1121,11 @@ mod tests {
             request_id: Some("req-1".to_string()),
             provider_cost_usd: Some(0.5),
             provider_metadata: Some(serde_json::json!({"tier": "standard"})),
+            llm_mock_prefix: Some(Box::new(crate::llm::mock::LlmMockPrefixMarker {
+                served_by: crate::llm::mock::LlmMockPrefixServedBy::Live,
+                call: 3,
+                live_after_calls: 2,
+            })),
         };
 
         let encoded = serde_json::to_value(&telemetry).expect("telemetry serializes");

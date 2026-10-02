@@ -111,10 +111,35 @@ const SYSTEM_TIME_ALLOWLIST: list<string> = [
   "crates/harn-hostlib/tests/harn_hostlib/scanner_e2e.rs",
 ]
 
-// recv_timeout with an explicit sub-second Duration literal.
-// Named-constant variants are not caught here because the constant value
-// cannot be resolved by a static text search.
-const RECV_TIMEOUT_MILLIS_ALLOWLIST: list<string> = []
+// `tokio::time::timeout(Duration::…)` / `.recv_timeout(Duration::…)` with a
+// literal duration. A wait on an event that arrives by construction takes the
+// one shared hang ceiling (`harn_clock::test_support::within` /
+// `recv_within`); a hand-picked literal turns hang detection into a latency
+// assertion that fails under load. Named-constant variants are not caught
+// because a static text search cannot resolve the constant.
+//
+// A two-sided RATCHET, read by `report_pattern` like INLINE_TEST_GRANDFATHER:
+// each row pins the exact count of literal waits a file keeps, so a new one is
+// refused and a fixed one fails until its row is lowered or deleted. Every row
+// says why its waits are not hang detectors.
+const LITERAL_TIMEOUT_BASELINE = [
+  // The CLI case waits on a real Cargo child process.
+  {rule: "literal_timeout", path: "crates/harn-cli/tests/harn_cli_e2e/host_lease_cli.rs", count: 1},
+  // Runtime code, not a test wait: the inline-module split scans everything
+  // below a file's first `#[cfg(test)] mod`, and these files declare one
+  // above runtime code. The durations are user-supplied budgets.
+  {rule: "literal_timeout", path: "crates/harn-cli/src/commands/test/mod.rs", count: 1},
+  {rule: "literal_timeout", path: "crates/harn-vm/src/composition/mod.rs", count: 1},
+  // Real subprocess JSON-RPC harness: a short drain of the child's stderr
+  // after exit. Expiry means "nothing more buffered", not a failure.
+  {rule: "literal_timeout", path: "crates/harn-cli/tests/test_util/stdio_jsonrpc.rs", count: 1},
+  // Deliberate expiry: each asserts a second acquire is STILL parked behind a
+  // held permit after 100ms. The timeout firing is the behavior under test.
+  {rule: "literal_timeout", path: "crates/harn-vm/src/llm/rate_limit.rs", count: 3},
+  // Deliberate quiescence: after the first OTLP export arrives, drain
+  // whatever else is already buffered. Expiry ends the drain, not the test.
+  {rule: "literal_timeout", path: "crates/harn-vm/tests/harn_vm/otel_sink_export.rs", count: 1},
+]
 
 // Conformance tests that exercise real subprocesses should share the bounded
 // polling helpers from `conformance/tests/_common.harn` instead of copying
@@ -167,6 +192,12 @@ const E2E_SUBPROCESS_PATHS: list<string> = [
   "crates/harn-cli/tests/harn_cli_fast/file_secrets.rs",
   // Source edits must reach catalog output and drift exit status without rebuilding.
   "crates/harn-cli/tests/harn_cli_e2e/provider_catalog_sources.rs",
+  // Model metadata must follow effective overlays and actual local discovery through the CLI.
+  "crates/harn-cli/tests/harn_cli_e2e/model_context.rs",
+  // A `to=in_process` grant must authenticate the run's own model call and
+  // reach no spawned child. Only a real `harn run` with its launch-time grant
+  // parsing, session install, provider auth, and process funnel proves both.
+  "crates/harn-cli/tests/harn_cli_e2e/in_process_grant.rs",
   "crates/harn-cli/tests/harn_cli_e2e/attributed_decl_cli.rs",
   "crates/harn-cli/tests/harn_cli_e2e/acp_server_cli.rs",
   // The cache-directory contract is enforced in `initialize_runtime`, which
@@ -174,6 +205,8 @@ const E2E_SUBPROCESS_PATHS: list<string> = [
   // cannot be honored stops startup instead of degrading silently, and that
   // a rejected relative override writes no cache beside the caller.
   "crates/harn-cli/tests/harn_cli_e2e/cache_dir_cli.rs",
+  // Shared spend admission must cross concurrent CLI processes and a restart.
+  "crates/harn-cli/tests/harn_cli_e2e/durable_spend_policy.rs",
   "crates/harn-cli/tests/harn_cli_fast/burin_mini_playground.rs",
   "crates/harn-cli/tests/harn_cli_e2e/check_result_cache.rs",
   // Imported-site manifests and their persisted cache must survive fresh CLI processes.
@@ -183,6 +216,9 @@ const E2E_SUBPROCESS_PATHS: list<string> = [
   // process proves clap parsing, embedded-script dispatch and rendering
   // agree on the status the caller scripts against.
   "crates/harn-cli/tests/harn_cli_e2e/eval_calibrate_cli.rs",
+  // Saved-receipt verification checks the actual CLI's exit codes and a
+  // credential-free process against a receipt emitted by canonical evaluation.
+  "crates/harn-cli/tests/harn_cli_e2e/evaluation_receipt_verification.rs",
   // The decision-route operation gate fires inside `harn run`, before credential
   // resolution, against a script file on disk. Only a real process in a scratch
   // working directory shows the refusal a script author would see; an in-process
@@ -191,6 +227,10 @@ const E2E_SUBPROCESS_PATHS: list<string> = [
   // Cancellation poisoning crosses the async hostlib/VM/CLI boundary. A real
   // CLI process proves a caught launch error leaves the parent execution live.
   "crates/harn-cli/tests/harn_cli_e2e/command_probe_parent_liveness.rs",
+  // Linux namespace ordering and owner-death proof runs the actual CLI.
+  "crates/harn-cli/tests/harn_cli_e2e/guardian_namespace_e2e.rs",
+  // Backend selection and inherited-descriptor confinement cross real execs.
+  "crates/harn-cli/tests/harn_cli_e2e/bubblewrap_fallback_e2e.rs",
   "crates/harn-cli/tests/harn_cli_e2e/conformance_process_lifetime_e2e.rs",
   // Strictness is an exit-status contract whose text and JSON renderings must
   // stay identical to advisory checks; only the real CLI process proves all three.
@@ -244,6 +284,11 @@ const E2E_SUBPROCESS_PATHS: list<string> = [
   // Install and a nested sandboxed run must cross real CLI, package-cache,
   // environment-forwarding, and process-authority boundaries.
   "crates/harn-cli/tests/harn_cli_e2e/package_cache_sandbox_cli.rs",
+  // Global/system Git config and an external hook cross the CLI and OS
+  // confinement boundary; an in-process test cannot prove the write refusal.
+  "crates/harn-cli/tests/harn_cli_e2e/git_config_sandbox_cli.rs",
+  // Preset grants and credential denials require the real CLI and OS sandbox.
+  "crates/harn-cli/tests/harn_cli_e2e/package_manager_roots_cli.rs",
   // Path-metadata persistence and session import must spawn a real CLI so
   // Nextest identity cannot redirect `.harn` / `.harn-runs` away from the
   // tempfile project.
@@ -854,8 +899,17 @@ pub fn system_time_pattern() -> string {
   return r"SystemTime::now\(\)"
 }
 
-pub fn recv_timeout_pattern() -> string {
-  return r"recv_timeout\(Duration::from_(millis|nanos|micros)"
+/**
+ * A timeout whose duration is written as a `Duration` literal: a free
+ * `timeout(` (usually `tokio::time::timeout`) or a `.recv_timeout(` method,
+ * with the first argument spelled `[path::]*XDuration::from_*(`, possibly on
+ * the next line. A method `.timeout(` (an HTTP client builder) is not a wait
+ * and is not matched, nor is any `*_timeout(` helper.
+ */
+pub fn literal_timeout_pattern() -> string {
+  // `\n` excluded from the lead class for the same line-attribution reason as
+  // `literal_sleep_pattern`.
+  return r"(?:(?:^|[^.\w\n])timeout|\.recv_timeout)\(\s*(?:[A-Za-z_]+::)*[A-Za-z_]*Duration::from_[a-z]+\("
 }
 
 /**
@@ -1003,8 +1057,6 @@ const INLINE_TEST_GRANDFATHER = [
   {rule: "ignore_attr", path: "crates/harn-vm/src/security/behavioral.rs", count: 1},
   {rule: "ignore_attr", path: "crates/harn-vm/src/security/stance_judge.rs", count: 1},
   {rule: "instant_now_deadline", path: "crates/harn-vm/src/op_interrupt.rs", count: 1},
-  {rule: "recv_timeout_millis", path: "crates/harn-vm/src/stdlib/session_wal_watch.rs", count: 1},
-  {rule: "system_time", path: "crates/harn-hostlib/src/code_index/rename.rs", count: 1},
   {rule: "system_time", path: "crates/harn-hostlib/src/fs.rs", count: 1},
   {rule: "system_time", path: "crates/harn-vm/src/agent_events/sinks.rs", count: 2},
   {rule: "system_time", path: "crates/harn-vm/src/event_log/util.rs", count: 1},
@@ -1028,7 +1080,7 @@ const INLINE_TEST_GRANDFATHER = [
 
 /** The pinned finding count for `rule` in `rel`, or nil when not pinned. */
 pub fn grandfather_count(rule: string, rel: string) -> int? {
-  for row in INLINE_TEST_GRANDFATHER {
+  for row in INLINE_TEST_GRANDFATHER + LITERAL_TIMEOUT_BASELINE {
     if row.rule == rule && row.path == rel {
       return row.count
     }
@@ -1040,7 +1092,7 @@ pub fn grandfather_count(rule: string, rel: string) -> int? {
 pub fn grandfather_duplicates() -> list<string> {
   let seen: list<string> = []
   let dupes: list<string> = []
-  for row in INLINE_TEST_GRANDFATHER {
+  for row in INLINE_TEST_GRANDFATHER + LITERAL_TIMEOUT_BASELINE {
     const key = row.rule + ":" + row.path
     if seen.contains(key) && !dupes.contains(key) {
       dupes = dupes + [key]
@@ -1214,16 +1266,16 @@ pipeline main(harness: Harness, task: unknown) {
       system_time_pattern(),
       ["    hint: Inject a MockClock or use the stdlib clock() builtin via a test harness."],
     )
-  harness.stdio.println("--- recv_timeout with explicit sub-second Duration ---")
+  harness.stdio.println("--- timeout / recv_timeout with a literal Duration ---")
   violations = violations
     + report_pattern(
       harness.stdio,
-      "recv_timeout_millis",
+      "literal_timeout",
       test_files,
-      { rel -> RECV_TIMEOUT_MILLIS_ALLOWLIST.contains(rel) },
-      recv_timeout_pattern(),
+      { rel -> false },
+      literal_timeout_pattern(),
       [
-        "    hint: Use an event-driven wait (channel recv with tokio::time::timeout) instead of busy-polling.",
+        "    hint: Wait on an event that arrives by construction with harn_clock::test_support::within(label, fut) or recv_within(label, &rx): one hang ceiling, never a latency budget. If expiry is the behavior under test, use a paused clock, or pin the file in LITERAL_TIMEOUT_BASELINE with the reason.",
       ],
     )
   harness.stdio.println("--- wall-clock millisecond budget asserted in a test ---")

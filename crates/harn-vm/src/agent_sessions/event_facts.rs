@@ -14,6 +14,10 @@
 
 use serde_json::Value;
 
+pub(crate) const REASONING_RECEIPTS_REPORTED: &str =
+    "/transcript_event/metadata/reasoning_receipts_reported";
+pub(crate) const REASONING_RECEIPT: &str = "/transcript_event/metadata/receipt";
+
 /// Canonical journal identity, with fallbacks for older transcript envelopes.
 pub(crate) fn tool_call_id(event: &harn_session_store::StoredEvent) -> Option<String> {
     event
@@ -153,6 +157,9 @@ pub(crate) const TOOL_IS_ERROR_ANY: [&str; 2] = [TOOL_IS_ERROR, "/raw_message/is
 /// Provider-neutral tool-result facts are storage-only and stripped before
 /// provider egress.
 pub(crate) const TOOL_RESULT_FACT_CALL_ID: &str = "/raw_message/_harn/tool_call_id";
+/// Producer-owned facts the dispatcher projected onto a tool result, including
+/// its declared `mutation_status` and `changed_paths`.
+pub(crate) const TOOL_RESULT_DATA: &str = "/raw_message/_harn/data";
 /// The only verification fact this projection accepts: a typed deterministic
 /// postcondition emitted by the tool producer.
 pub(crate) const TOOL_VERIFICATION: &str = "/raw_message/_harn/data/verification";

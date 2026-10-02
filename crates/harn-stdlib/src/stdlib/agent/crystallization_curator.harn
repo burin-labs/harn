@@ -11,6 +11,7 @@ import {
   pattern_learning_pending,
   pattern_learning_record_curated_batch,
 } from "std/agent/pattern_knowledge"
+import { agent_tool_handler_result } from "std/agent/tool_lifecycle"
 import { command_run } from "std/command"
 import { tool_registry_from } from "std/tools"
 
@@ -414,7 +415,8 @@ fn cc_tools(harness: Harness, evidence: list, options: any = nil) {
         returns: {type: "object"},
         handler: { args ->
           const session_id = cc_allowed_session(args, allowed_sessions)
-          return harness.agent.snapshot(session_id)
+          const result = harness.agent.snapshot(session_id)
+          return agent_tool_handler_result(to_string(result), result)
         },
         annotations: {kind: "lookup", readOnlyHint: true, side_effect_level: "read_only"},
       },
@@ -437,11 +439,12 @@ fn cc_tools(harness: Harness, evidence: list, options: any = nil) {
         },
         returns: {type: "object"},
         handler: { args ->
-          cc_lookup_skill(
+          const result = cc_lookup_skill(
             {env: harness.env, fs: harness.fs, tools: harness.tools},
             args?.name,
             options,
           )
+          agent_tool_handler_result(to_string(result), result, result.success ? "ok" : "error")
         },
         annotations: {kind: "lookup", readOnlyHint: true, side_effect_level: "process"},
       },
@@ -452,12 +455,13 @@ fn cc_tools(harness: Harness, evidence: list, options: any = nil) {
         parameters: {name: {type: "string"}, description: {type: "string"}},
         returns: {type: "object"},
         handler: { args ->
-          cc_scaffold_tool(
+          const result = cc_scaffold_tool(
             {env: harness.env, fs: harness.fs, tools: harness.tools},
             args?.name,
             args?.description,
             options,
           )
+          agent_tool_handler_result(to_string(result), result, result.success ? "ok" : "error")
         },
         annotations: {kind: "read", side_effect_level: "read_only"},
       },
@@ -474,11 +478,12 @@ fn cc_tools(harness: Harness, evidence: list, options: any = nil) {
         },
         returns: {type: "object"},
         handler: { args ->
-          cc_search_builtins(
+          const result = cc_search_builtins(
             {env: harness.env, fs: harness.fs, tools: harness.tools},
             args?.query,
             options,
           )
+          agent_tool_handler_result(to_string(result), result, result.success ? "ok" : "error")
         },
         annotations: {kind: "read", side_effect_level: "read_only"},
       },
@@ -492,7 +497,14 @@ fn cc_tools(harness: Harness, evidence: list, options: any = nil) {
           test_source: {type: "string"},
         },
         returns: {type: "object"},
-        handler: { args -> cc_validate_artifact(harness, args, options) },
+        handler: { args ->
+          const result = cc_validate_artifact(harness, args, options)
+          agent_tool_handler_result(
+            to_string(result),
+            result,
+            result.outcome == "pass" ? "ok" : "error",
+          )
+        },
         annotations: {kind: "verification", readOnlyHint: true, side_effect_level: "process"},
       },
       {
@@ -544,12 +556,13 @@ fn cc_tools(harness: Harness, evidence: list, options: any = nil) {
         returns: {type: "object"},
         handler: { args ->
           const proposals = cc_prepare_valid_proposals(harness, args?.proposals ?? [], options)
-          return pattern_learning_record_curated_batch(
+          const result = pattern_learning_record_curated_batch(
             harness,
             args + {proposals: proposals},
             evidence,
             options,
           )
+          return agent_tool_handler_result(to_string(result), result)
         },
         annotations: {kind: "record", side_effect_level: "store_write"},
       },

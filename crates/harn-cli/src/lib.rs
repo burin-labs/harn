@@ -1,5 +1,15 @@
 #![recursion_limit = "256"]
 
+// The CLI requires hostlib. Without it the build fails with over a hundred
+// resolution errors, so this one comes first and names the cause (harn#7665).
+// Lean embedding is supported on `harn-serve` and `harn-vm` instead.
+#[cfg(not(feature = "hostlib"))]
+compile_error!(
+    "harn-cli requires the `hostlib` feature. Build with default features, or with \
+     `--no-default-features --features hostlib` to drop only mimalloc. For a build \
+     without hostlib, embed `harn-serve` or `harn-vm` instead."
+);
+
 pub mod acp;
 mod bootstrap;
 pub mod cli;
@@ -30,6 +40,7 @@ mod runtime;
 pub mod skill_loader;
 pub mod skill_provenance;
 mod source_exec;
+mod spend_policy;
 pub mod test_report;
 pub mod test_runner;
 pub mod test_timing {

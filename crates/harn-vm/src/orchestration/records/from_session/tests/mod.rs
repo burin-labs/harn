@@ -7,5 +7,6 @@ mod cost;
 mod lifecycle;
 mod lineage;
 mod projection;
+mod reasoning_receipts;
 mod tool_calls;
 mod transcript;

@@ -20,7 +20,7 @@ use crate::test_runner::{
 };
 use crate::test_timing::DurationSummary;
 
-pub const USER_TEST_REPORT_SCHEMA_VERSION: u32 = 4;
+pub const USER_TEST_REPORT_SCHEMA_VERSION: u32 = 5;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -52,6 +52,7 @@ pub struct TestCaseReport {
     pub timeout: Option<TestTimeout>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub phases: Option<PhaseTimings>,
+    pub work: Option<harn_vm::VmWork>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub timing_spans: Vec<TestTimingSpan>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -388,6 +389,7 @@ mod tests {
             classname: "suite/a.harn".into(),
             outcome: TestOutcome::Passed,
             duration_ms: 12,
+            work: Some(harn_vm::VmWork { vm_steps: 10 }),
             timeout: None,
             phases: None,
             timing_spans: vec![TestTimingSpan {
@@ -407,6 +409,7 @@ mod tests {
             classname: "suite/b.harn".into(),
             outcome: TestOutcome::Failed,
             duration_ms: 34,
+            work: Some(harn_vm::VmWork { vm_steps: 0 }),
             timeout: None,
             phases: None,
             timing_spans: Vec::new(),
@@ -419,6 +422,7 @@ mod tests {
             classname: "suite/c.harn".into(),
             outcome: TestOutcome::TimedOut,
             duration_ms: 30_000,
+            work: Some(harn_vm::VmWork { vm_steps: 42 }),
             timeout: Some(TestTimeout {
                 phase: crate::test_runner::TestPhase::Execute,
                 limit_ms: 30_000,
@@ -437,6 +441,7 @@ mod tests {
             classname: "suite/d.harn".into(),
             outcome: TestOutcome::Skipped,
             duration_ms: 0,
+            work: None,
             timeout: None,
             phases: None,
             timing_spans: Vec::new(),
@@ -501,6 +506,11 @@ mod tests {
         assert_eq!(cases[2]["phases"]["execute_ms"], 30_000);
         assert_eq!(cases[0]["timing_spans"][0]["name"], "sweep.expensive_case");
         assert_eq!(cases[3]["outcome"], "skipped");
+        assert_eq!(value["schemaVersion"], 5);
+        assert_eq!(cases[0]["work"]["vm_steps"], 10);
+        assert_eq!(cases[1]["work"]["vm_steps"], 0);
+        assert_eq!(cases[2]["work"]["vm_steps"], 42);
+        assert!(cases[3].get("work").unwrap().is_null());
     }
 
     #[test]

@@ -2,7 +2,9 @@ use std::path::Path;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use harn_serve::{AcpProfileConfig, AcpRuntimeConfigurator, AcpServerConfig, AuthPolicy};
+use harn_serve::{
+    AcpProfileConfig, AcpRuntimeConfigurator, AcpSandboxConfig, AcpServerConfig, AuthPolicy,
+};
 use tokio::sync::mpsc;
 
 struct CliAcpRuntimeConfigurator;
@@ -93,13 +95,16 @@ pub(crate) async fn run_acp_server(
     auth_policy: AuthPolicy,
     trace: bool,
     profile: AcpProfileConfig,
+    sandbox: AcpSandboxConfig,
 ) {
     ensure_acp_event_log(pipeline);
     if trace {
         harn_vm::llm::enable_tracing();
     }
     harn_serve::run_acp_server(
-        server_config(pipeline.map(str::to_string), auth_policy).with_profile(profile),
+        server_config(pipeline.map(str::to_string), auth_policy)
+            .with_profile(profile)
+            .with_sandbox(sandbox),
     )
     .await;
     if trace {

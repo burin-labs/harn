@@ -33,6 +33,7 @@ async fn execute_sub_agent_persists_one_stop_with_lineage() {
     crate::agent_sessions::inject_message(&parent, assistant_message("parent context")).unwrap();
     crate::agent_sessions::claim_tool_format(&parent, "text").unwrap();
     push_llm_mock(LlmMock {
+        effective_reasoning_effort: Default::default(),
         text: "child result".to_string(),
         tool_calls: Vec::new(),
         raw_tool_calls: Vec::new(),

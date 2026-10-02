@@ -18,7 +18,7 @@ use std::path::Path;
 
 use harn_parser::{Node, SNode, TypeExpr, TypePredicate, TypedParam};
 
-use crate::{normalize_path, ModuleGraph};
+use crate::{callable_decl_name, normalize_path, ModuleGraph};
 
 /// Depth cap for inlining a named type into a parameter position.
 ///
@@ -111,13 +111,26 @@ impl ModuleGraph {
     /// checker used to accept for reasons it cannot actually see.
     pub(crate) fn namespace_member_signatures(
         &self,
+        importer: &Path,
         module_path: &Path,
         member_names: &[String],
     ) -> BTreeMap<String, NamespaceMemberSignature> {
         let mut out = BTreeMap::new();
         for name in member_names {
             let mut visited = HashSet::new();
-            let Some(decl) = self.find_exported_callable_decl(module_path, name, &mut visited)
+            let sibling_decl = crate::sibling_module_access(importer, module_path)
+                .then(|| self.modules.get(&normalize_path(module_path)))
+                .flatten()
+                .filter(|module| module.sibling_exports.contains(name))
+                .and_then(|module| {
+                    module
+                        .callable_declarations
+                        .iter()
+                        .find(|decl| callable_decl_name(decl) == Some(name.as_str()))
+                        .cloned()
+                });
+            let Some(decl) = sibling_decl
+                .or_else(|| self.find_exported_callable_decl(module_path, name, &mut visited))
             else {
                 continue;
             };

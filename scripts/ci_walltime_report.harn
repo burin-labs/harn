@@ -39,6 +39,7 @@ type CiLatencyPolicy = {
   topology_epoch: string,
   full_run_jobs: list<CiSentinel>,
   slo: CiLatencySlo,
+  verdict_job?: string,
 }
 
 type CiStepSample = {run_id: int, job: string, name: string, duration_ms: int}
@@ -273,6 +274,10 @@ pub fn parse_ci_latency_policy(text: string) -> CiLatencyPolicy {
   if slo.min_samples > slo.window_samples {
     throw "CI latency policy min_samples cannot exceed window_samples"
   }
+  const verdict_job = raw.verdict_job ?? ""
+  if raw.verdict_job != nil && verdict_job.trim() == "" {
+    throw "CI latency policy verdict_job must name a job when present"
+  }
   return {
     schema_version: 1,
     repository: repository,
@@ -281,7 +286,36 @@ pub fn parse_ci_latency_policy(text: string) -> CiLatencyPolicy {
     topology_epoch: topology_epoch,
     full_run_jobs: sentinels,
     slo: slo,
+    verdict_job: verdict_job,
   }
+}
+
+/**
+ * The run as a merge waits on it: from creation to the verdict job's success.
+ *
+ * Work the verdict does not wait for (package verification) can keep a run
+ * open well after the merge, so the run's own end overstates merge latency.
+ * Without a named verdict job, or when this run has no successful one, the
+ * run's own end stands, which can only overstate the wait, never hide it.
+ */
+pub fn run_until_verdict(
+  run: CiDetailedRunSample,
+  jobs: list<CiDetailedJobSample>,
+  verdict_job: string,
+) -> CiDetailedRunSample {
+  if verdict_job == "" {
+    return run
+  }
+  for job in jobs {
+    if job.run_id == run.id && job.name == verdict_job && job.conclusion == "success" {
+      const until_verdict = job.start_delay_ms + job.duration_ms
+      if until_verdict < run.duration_ms {
+        return run + {duration_ms: until_verdict}
+      }
+      return run
+    }
+  }
+  return run
 }
 
 fn detailed_run_samples_from_api(data: any, topology_epoch: string) -> list<CiDetailedRunSample> {
@@ -438,9 +472,11 @@ fn build_latency_report(
   candidates: list<CiDetailedRunSample>,
   all_jobs: list<CiDetailedJobSample>,
 ) -> CiLatencyReport {
+  const verdict_job = policy.verdict_job ?? ""
   const qualifying = candidates.filter(
     { run -> run_has_full_coverage(run.id, all_jobs, policy.full_run_jobs) },
   )
+    .map({ run -> run_until_verdict(run, all_jobs, verdict_job) })
     .to_list()
   const qualifying_ids = qualifying.map({ run -> run.id }).to_list()
   const jobs = all_jobs.filter(

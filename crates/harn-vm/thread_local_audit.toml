@@ -48,6 +48,7 @@ captured = [
   "SCOPE",
   "LLM_RUNTIME_PROVIDER_ENDPOINTS_CONTEXT",
   "LLM_CAPABILITY_OVERRIDES_CONTEXT",
+  "AMBIENT_BOUNDARY",
   "LLM_MOCK_CONTEXT",
   "EGRESS_POLICY_CONTEXT",
   "ACTIVE_EXECUTION_SCOPE_STACK",
@@ -217,7 +218,7 @@ plan = "arc_registry_scope"
 
 [[thread_local]]
 path = "src/llm/agent_observe/transcript_ambient.rs"
-statics = ["LAST_SYSTEM_PROMPT_HASH", "LAST_CONTEXT_MANIFEST_HASH", "LAST_TOOL_SCHEMAS_HASH", "EMITTED_CAPABILITY_SNAPSHOT_IDS", "EMITTED_SERVED_MESSAGE_IDS", "TRANSCRIPT_DIR_STACK"]
+statics = ["LAST_SYSTEM_PROMPT_HASH", "LAST_CONTEXT_MANIFEST_HASH", "LAST_TOOL_SCHEMAS_HASH", "EMITTED_CAPABILITY_SNAPSHOT_IDS", "EMITTED_SERVED_MESSAGE_IDS", "EMITTED_OUTPUT_SCHEMA_IDS", "TRANSCRIPT_DIR_STACK"]
 category = "logical_task"
 plan = "task_local_or_explicit"
 
@@ -264,6 +265,12 @@ category = "logical_task"
 plan = "task_local_or_explicit"
 
 [[thread_local]]
+path = "src/llm/api/inference_boundary.rs"
+statics = ["AMBIENT_BOUNDARY"]
+category = "logical_task"
+plan = "task_local_or_explicit"
+
+[[thread_local]]
 path = "src/llm/call.rs"
 statics = ["IN_FLIGHT_LLM_CALLS"]
 category = "logical_task"
@@ -288,6 +295,12 @@ category = "thread_private"
 plan = "thread_private_cache"
 
 [[thread_local]]
+path = "src/llm/hash_replay.rs"
+statics = ["LLM_REPLAY_MODE", "LLM_FIXTURE_DIR"]
+category = "logical_task"
+plan = "task_local_or_explicit"
+
+[[thread_local]]
 path = "src/llm/introspection.rs"
 statics = ["LAST_RESOLVED_LLM_CALL"]
 category = "logical_task"
@@ -295,7 +308,7 @@ plan = "task_local_or_explicit"
 
 [[thread_local]]
 path = "src/llm/mock.rs"
-statics = ["LLM_REPLAY_MODE", "LLM_FIXTURE_DIR", "TOOL_RECORDINGS", "LLM_MOCK_CONTEXT", "LLM_MOCK_STREAM_CHUNKS"]
+statics = ["TOOL_RECORDINGS", "LLM_MOCK_CONTEXT", "LLM_MOCK_STREAM_CHUNKS"]
 category = "logical_task"
 plan = "task_local_or_explicit"
 
@@ -342,12 +355,6 @@ category = "thread_private"
 plan = "thread_private_test"
 
 [[thread_local]]
-path = "src/llm/trace.rs"
-statics = ["LLM_TRACE", "LLM_TRACING_ENABLED"]
-category = "logical_task"
-plan = "task_local_or_explicit"
-
-[[thread_local]]
 path = "src/llm/reasoning_receipt.rs"
 statics = ["RECEIPTS", "DROPPED"]
 category = "logical_task"
@@ -382,7 +389,7 @@ plan = "arc_registry_scope"
 
 [[thread_local]]
 path = "src/mcp_server/register.rs"
-statics = ["MCP_SERVE_REGISTRY", "MCP_SERVE_RESOURCES", "MCP_SERVE_RESOURCE_TEMPLATES", "MCP_SERVE_PROMPTS", "MCP_SERVE_METADATA"]
+statics = ["MCP_SERVE_REGISTRY", "MCP_SERVE_RESOURCES", "MCP_SERVE_RESOURCE_TEMPLATES", "MCP_SERVE_PROMPTS", "MCP_SERVE_METADATA", "MCP_SERVE_REJECTION"]
 category = "runtime_registry"
 plan = "arc_registry_scope"
 
@@ -723,6 +730,20 @@ plan = "thread_private_test"
 [[thread_local]]
 path = "src/stdlib/sandbox/mod.rs"
 statics = ["WARNED_KEYS"]
+category = "thread_private"
+plan = "thread_private_cache"
+
+[[thread_local]]
+path = "src/stdlib/sandbox/scope_memo.rs"
+statics = ["MEMO", "DERIVATIONS"]
+category = "thread_private"
+plan = "thread_private_cache"
+
+# A re-entrancy guard set and cleared around the wrapper probe's own
+# synchronous `cargo` spawn on the same thread; nothing else reads it.
+[[thread_local]]
+path = "src/stdlib/sandbox/rustc_wrapper.rs"
+statics = ["PROBING"]
 category = "thread_private"
 plan = "thread_private_cache"
 

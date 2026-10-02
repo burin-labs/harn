@@ -112,6 +112,23 @@ prune_to_listed_ceiling() {
   printf '%s\n' "$plan"
 }
 
+# A family keyed by the full commit SHA keeps only its newest main generation.
+per_commit_family_selector='
+  [.[].actions_caches[]
+    | select(
+        .ref == "refs/heads/main"
+        and (.key | startswith($family_prefix))
+        and (.key | test("-[0-9a-f]{40}$"))
+      )
+  ]
+  | sort_by(.created_at, .id)
+  | reverse
+  | .[1:][]
+  | .id
+'
+
+usage_modes="--family-prefix v0-rust-release-<target>- | --local-sccache-family-prefix <repository>-sccache-local-<cache-key>-<os>-<arch>- | --harn-check-cache-family-prefix harn-check-cache-v<N>-<family>-<os>-<arch>- | --all-release-families | --clear-family-prefix v0-rust-{workspace-tests|package-audit}- | --to-budget <bytes-at-least-1GiB> | --ensure-headroom <positive-bytes>"
+
 case "$mode" in
   --family-prefix)
     family_prefix="${2:-}"
@@ -144,19 +161,18 @@ case "$mode" in
       echo "usage: $0 --local-sccache-family-prefix <repository>-sccache-local-<cache-key>-<os>-<arch>-" >&2
       exit 64
     fi
-    selector='
-      [.[].actions_caches[]
-        | select(
-            .ref == "refs/heads/main"
-            and (.key | startswith($family_prefix))
-            and (.key | test("-[0-9a-f]{40}$"))
-          )
-      ]
-      | sort_by(.created_at, .id)
-      | reverse
-      | .[1:][]
-      | .id
-    '
+    selector="$per_commit_family_selector"
+    ;;
+  --harn-check-cache-family-prefix)
+    # Keys are harn-check-cache-v<N>-<family>-<os>-<arch>-<commit>, written by
+    # .github/actions/harn-check-cache-save.
+    family_prefix="${2:-}"
+    if [[ ! "$family_prefix" =~ ^harn-check-cache-v[0-9]+-[a-z0-9-]+-(Linux|Windows|macOS)-(X64|ARM64)-$ \
+      || -n "${3:-}" ]]; then
+      echo "usage: $0 --harn-check-cache-family-prefix harn-check-cache-v<N>-<family>-<os>-<arch>-" >&2
+      exit 64
+    fi
+    selector="$per_commit_family_selector"
     ;;
   --all-release-families)
     if [[ -n "${2:-}" ]]; then
@@ -217,7 +233,7 @@ case "$mode" in
     exit 0
     ;;
   *)
-    echo "usage: $0 --family-prefix v0-rust-release-<target>- | --local-sccache-family-prefix <repository>-sccache-local-<cache-key>-<os>-<arch>- | --all-release-families | --clear-family-prefix v0-rust-{workspace-tests|package-audit}- | --to-budget <bytes-at-least-1GiB> | --ensure-headroom <positive-bytes>" >&2
+    echo "usage: $0 $usage_modes" >&2
     exit 64
     ;;
 esac

@@ -318,6 +318,28 @@ prefers_role_developer = false
 prefers_xml_tools = true
 thinking_block_style = "thinking_blocks"
 
+# Sonnet 5.5 (2026-09-28) narrows the Sonnet 5 surface in three wire-visible
+# ways, each probed against the live API on 2026-09-29 with Sonnet 5 as the
+# control:
+#   * the off switch is `{"type":"between_tools"}`; `{"type":"disabled"}` is a
+#     400 (Sonnet 5 accepts it). Like `disabled`, it caps effort at `high`:
+#     `xhigh` and `max` with it are 400s;
+#   * forced tool choice is gone — `tool_choice` `any` / `tool` are 400s,
+#     `auto` and `none` return 200 (Sonnet 5 accepts `tool`);
+#   * the minimum cacheable prefix is 512 tokens: a 522-token prefix wrote a
+#     cache entry, while a 776-token prefix on Sonnet 5 wrote none.
+# The `claude-sonnet-5*` glob below matches `claude-sonnet-5-5` too, so without
+# this row Sonnet 5.5 silently inherited Sonnet 5's `disabled` switch and every
+# default Harn call to it failed with a 400.
+[[provider.anthropic]]
+model_match = "claude-sonnet-*"
+version_min = [5, 5]
+extends = true
+native_tools = true
+prompt_cache_min_prefix_tokens = 512
+thinking_off_type = "between_tools"
+allowed_tool_choice_modes = ["auto", "none"]
+
 [[provider.anthropic]]
 model_match = "claude-sonnet-5*"
 prompt_cache_min_prefix_tokens = 1024
@@ -473,6 +495,12 @@ prefers_xml_tools = true
 thinking_block_style = "thinking_blocks"
 
 # Sonnet 4.6 rejects assistant prefill while keeping the 4.x tool surface.
+# It accepts `output_config.effort` at low/medium/high/max (no xhigh; high is
+# the API default) and adaptive thinking, with `enabled` + `budget_tokens`
+# still accepted but deprecated. Source: platform.claude.com/docs/en/
+# build-with-claude/effort (supportedModels lists claude-sonnet-4-6), read
+# 2026-09-27. Before this row declared effort, the portable `effort` option
+# was refused on Sonnet 4.6 as unsupported.
 [[provider.anthropic]]
 model_match = "claude-sonnet-*"
 version_min = [4, 6]
@@ -490,7 +518,9 @@ audio_supported = true
 pdf_supported = true
 files_api_supported = true
 structured_output = "native"
-thinking_modes = ["enabled"]
+thinking_modes = ["enabled", "adaptive", "effort"]
+reasoning_effort_supported = true
+reasoning_effort_levels = ["low", "medium", "high", "max"]
 vision_supported = true
 prefers_xml_scaffolding = true
 prefers_markdown_scaffolding = false
@@ -616,6 +646,16 @@ top_k_supported = false
 prefers_role_developer = false
 prefers_xml_tools = true
 thinking_block_style = "thinking_blocks"
+
+# Prefixed Sonnet 5.5 ids mirror the direct 5.5 row above.
+[[provider.anthropic]]
+model_match = "anthropic/claude-sonnet-*"
+version_min = [5, 5]
+extends = true
+native_tools = true
+prompt_cache_min_prefix_tokens = 512
+thinking_off_type = "between_tools"
+allowed_tool_choice_modes = ["auto", "none"]
 
 [[provider.anthropic]]
 model_match = "anthropic/claude-sonnet-5*"
@@ -784,7 +824,9 @@ audio_supported = true
 pdf_supported = true
 files_api_supported = true
 structured_output = "native"
-thinking_modes = ["enabled"]
+thinking_modes = ["enabled", "adaptive", "effort"]
+reasoning_effort_supported = true
+reasoning_effort_levels = ["low", "medium", "high", "max"]
 vision_supported = true
 prefers_xml_scaffolding = true
 prefers_markdown_scaffolding = false

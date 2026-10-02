@@ -323,6 +323,7 @@ usage() {
   cat <<'EOF'
 Usage:
   ./scripts/release_gate.sh audit [--receipt path | --source-only | --residual-only] [--validate-only]
+                                 [--docs-contracts-proven-by JOB]
   ./scripts/release_gate.sh prepare --bump patch
   ./scripts/release_gate.sh publish [--dry-run]
   ./scripts/release_gate.sh notes [--version vX.Y.Z] [--output file]
@@ -330,7 +331,10 @@ Usage:
 
 Commands:
   audit    Run the full audit, source-only lanes, or the residual lanes (receipt-authorized,
-           or --residual-only to rehearse them before a cut).
+           or --residual-only to rehearse them before a cut). In GitHub Actions only, a
+           --residual-only rehearsal may pass --docs-contracts-proven-by JOB to name the
+           sibling CI job that runs `make check-docs` on the same commit instead of
+           repeating it.
   prepare  Bump the workspace version locally and print next tag/release steps.
   publish  Publish crates with scripts/publish.sh and print tag/release follow-up.
   notes    Render GitHub release notes for a version from CHANGELOG.md.
@@ -418,18 +422,14 @@ harn_cmd() {
 }
 
 file_sha256() {
-  local path="$1"
-  if command -v sha256sum >/dev/null 2>&1; then
-    sha256sum "$path" | awk '{print $1}'
-    return 0
-  fi
-  if command -v shasum >/dev/null 2>&1; then
-    shasum -a 256 "$path" | awk '{print $1}'
-    return 0
-  fi
-  echo "error: sha256sum or shasum is required to validate the warmed Harn binary" >&2
-  return 1
+  sha256_file_hex "$1"
 }
+
+# Set only by `audit --residual-only --docs-contracts-proven-by JOB` inside
+# GitHub Actions: the CI rehearsal names the sibling job that runs
+# `make check-docs` on the same commit and binary. A release, and a local
+# rehearsal before a cut, never set it and always run the contracts here.
+DOCS_CONTRACTS_PROVEN_BY=""
 
 run_docs_audit() {
   if ! command -v npm >/dev/null 2>&1; then
@@ -438,13 +438,30 @@ run_docs_audit() {
   fi
   time_phase "markdownlint" npx markdownlint-cli2 "**/*.md"
   time_phase "docs site build" ./scripts/build_docs_site.sh
+  if [[ -n "$DOCS_CONTRACTS_PROVEN_BY" ]]; then
+    echo "  -- documentation contracts: proven on this commit by CI job '${DOCS_CONTRACTS_PROVEN_BY}'; not repeated in the rehearsal"
+    return 0
+  fi
   time_phase "documentation contracts" make -j4 check-docs
+}
+
+# A caller that already built the AOT generator from this checkout names it in
+# HARN_RELEASE_CLI_AOT_GEN_BIN, as the CI rehearsal does after generating the
+# payload. Otherwise `make check-cli-aot` compiles the generator in this gate's
+# own target directory, which is most of the generated-files lane's time.
+release_gate_check_cli_aot() {
+  if [[ -z "${HARN_RELEASE_CLI_AOT_GEN_BIN:-}" ]]; then
+    make check-cli-aot
+    return
+  fi
+  harn_require_executable_bin "$HARN_RELEASE_CLI_AOT_GEN_BIN" || return $?
+  HARN_CLI_AOT_GEN_BIN="$HARN_RELEASE_CLI_AOT_GEN_BIN" make check-cli-aot
 }
 
 run_generated_audit() {
   time_phase "language-spec drift" make check-language-spec
   time_phase "highlight drift" make check-highlight
-  time_phase "CLI AOT drift" make check-cli-aot
+  time_phase "CLI AOT drift" release_gate_check_cli_aot
   time_phase "protocol artifact drift" make check-protocol-artifacts
   time_phase "connector schema drift" make check-connector-schemas
   time_phase "harness migration table drift" make check-harness-migrations
@@ -719,6 +736,14 @@ cmd_audit() {
         residual_only=1
         shift
         ;;
+      --docs-contracts-proven-by)
+        if [[ $# -lt 2 || -z "${2:-}" ]]; then
+          echo "error: audit --docs-contracts-proven-by requires a CI job name" >&2
+          exit 1
+        fi
+        DOCS_CONTRACTS_PROVEN_BY="$2"
+        shift 2
+        ;;
       *)
         echo "error: unknown audit arg: $1" >&2
         usage
@@ -732,6 +757,13 @@ cmd_audit() {
   fi
   if [[ "$selected_scopes" -gt 1 ]]; then
     echo "error: audit --receipt, --source-only, and --residual-only are mutually exclusive" >&2
+    exit 1
+  fi
+  # Only the CI rehearsal may lean on a sibling job's proof: it runs in the
+  # same workflow run as that job, and the aggregate requires both.
+  if [[ -n "$DOCS_CONTRACTS_PROVEN_BY" ]] \
+    && { [[ "$residual_only" -ne 1 ]] || [[ "${GITHUB_ACTIONS:-}" != "true" ]]; }; then
+    echo "error: --docs-contracts-proven-by is only valid with --residual-only inside GitHub Actions" >&2
     exit 1
   fi
   local plan_scope="full"

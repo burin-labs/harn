@@ -18,6 +18,7 @@ fn reminder(
     body: &str,
 ) -> SystemReminder {
     SystemReminder {
+        goal_pin: None,
         id: format!("reminder-{}", role_hint.as_str()),
         tags: vec!["test".to_string()],
         dedupe_key: None,
@@ -38,7 +39,8 @@ fn envelope_message(reminders: &[SystemReminder]) -> serde_json::Value {
         &crate::llm::capabilities::Capabilities::default(),
         reminders,
     );
-    directive_envelope_message(&rendered).expect("a non-empty directive set renders an envelope")
+    directive_envelope_message(&rendered, "test-session-nonce")
+        .expect("a non-empty directive set renders an envelope")
 }
 
 fn envelope_text(reminders: &[SystemReminder]) -> String {
@@ -59,7 +61,8 @@ fn a_completion_judge_directive_is_declared_harness_originated() {
         "The done judge says the task is not finished; keep working.",
     )]);
     assert!(
-        envelope.starts_with("<context-directives speaker=\"harness\">"),
+        envelope
+            .starts_with("<context-directives speaker=\"harness\" nonce=\"test-session-nonce\">"),
         "a corrective harness directive must open a harness-originated envelope; got:\n{envelope}"
     );
 }
@@ -75,7 +78,8 @@ fn a_user_block_directive_keeps_the_person_speaker() {
         "Ship the smallest change that fixes the bug.",
     )]);
     assert!(
-        envelope.starts_with("<context-directives speaker=\"person\">"),
+        envelope
+            .starts_with("<context-directives speaker=\"person\" nonce=\"test-session-nonce\">"),
         "a user-block directive must keep the person speaker; got:\n{envelope}"
     );
 }
@@ -97,7 +101,8 @@ fn a_harness_directive_makes_a_mixed_envelope_harness_originated() {
         ),
     ]);
     assert!(
-        envelope.starts_with("<context-directives speaker=\"harness\">"),
+        envelope
+            .starts_with("<context-directives speaker=\"harness\" nonce=\"test-session-nonce\">"),
         "one harness directive must make the envelope harness-originated; got:\n{envelope}"
     );
 }

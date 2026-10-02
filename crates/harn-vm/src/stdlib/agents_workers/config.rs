@@ -340,8 +340,17 @@ pub(in super::super) fn persist_worker_state_snapshot(state: &WorkerState) -> Re
     }
     let json = serde_json::to_string_pretty(&payload)
         .map_err(|e| VmError::Runtime(format!("worker snapshot encode error: {e}")))?;
-    std::fs::write(&path, json)
-        .map_err(|e| VmError::Runtime(format!("worker snapshot write error: {e}")))?;
+    // Replace, never rewrite in place. Callers read `snapshot_path` without
+    // the worker's lock, and a background worker can persist again while a
+    // reader copies the file; an in-place write let that reader see a
+    // truncated snapshot. Namespace durability keeps the write as cheap as
+    // the `fs::write` it replaces.
+    crate::atomic_io::atomic_write_with_durability(
+        &path,
+        json.as_bytes(),
+        crate::atomic_io::AtomicWriteDurability::Namespace,
+    )
+    .map_err(|e| VmError::Runtime(format!("worker snapshot write error: {e}")))?;
     Ok(())
 }
 

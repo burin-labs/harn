@@ -18,6 +18,10 @@ on:
         description: "Optional Harn tag to bump to (vX.Y.Z). Defaults to the latest published release."
         required: false
         type: string
+      source-revision:
+        description: "Optional exact Harn commit descended from the selected release tag. Advances an equal-tag source pin."
+        required: false
+        type: string
       orchestration-sha:
         description: "Exact Harn commit that owns this reusable workflow, setup action, and bump driver. Must match the caller's pinned uses SHA."
         required: true
@@ -34,6 +38,11 @@ on:
         default: "harn fmt ."
       node-version:
         description: "Optional Node.js version installed before refresh and validation commands."
+        required: false
+        type: string
+        default: ""
+      finalize-refresh-command:
+        description: "Optional repository-owned generation command run after source migrations and formatting. Failure refuses refresh success."
         required: false
         type: string
         default: ""
@@ -107,7 +116,7 @@ jobs:
           # ref. The declared PR base, not the caller ref, owns bump ancestry.
           ref: ${{ inputs.base }}
           token: ${{ steps.app-token.outputs.token }}
-          # The Harn driver owns signed publication through HARN_BUMP_TOKEN.
+          # The Harn driver renews restricted credentials for signed publication.
           # Persisted checkout credentials leave a runner-temporary includeIf
           # in .git/config that caller-owned git probes cannot safely traverse.
           persist-credentials: false
@@ -173,6 +182,7 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           INPUT_VERSION: ${{ inputs.version }}
+          INPUT_SOURCE_REVISION: ${{ inputs.source-revision }}
         shell: bash
         # Bootstrap only: resolve which Harn to INSTALL. The target release
         # embeds std/bump/*, so the orchestration (including the already-current
@@ -189,6 +199,11 @@ jobs:
             echo "Expected tag like vX.Y.Z, got '${VERSION}'" >&2
             exit 1
           fi
+          if [ -n "${INPUT_SOURCE_REVISION}" ] \
+            && [[ ! "${INPUT_SOURCE_REVISION}" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "source-revision must be an exact lowercase 40-character commit SHA" >&2
+            exit 1
+          fi
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
 
       # The orchestration script and checksum-verifying setup-harn action come
@@ -201,6 +216,7 @@ jobs:
           repository: burin-labs/harn
           ref: ${{ inputs.orchestration-sha }}
           path: .harn-runtime
+          fetch-depth: 0
           persist-credentials: false
 
       # Install the TARGET Harn through the checksum-verifying setup-harn
@@ -256,10 +272,15 @@ jobs:
         working-directory: package
         env:
           GITHUB_REPOSITORY: ${{ github.repository }}
-          HARN_BUMP_TOKEN: ${{ steps.app-token.outputs.token }}
+          GITHUB_APP_ID: ${{ secrets.app-client-id }}
+          GITHUB_INSTALLATION_ID: ${{ steps.app-token.outputs.installation-id }}
+          GITHUB_APP_PRIVATE_KEY: ${{ secrets.app-private-key }}
+          HARN_EXT_BUMP_BOT_LOGIN: ${{ steps.app-token.outputs.app-slug }}[bot]
           HARN_BUMP_TARGET_TAG: ${{ steps.resolve.outputs.version }}
+          HARN_BUMP_SOURCE_REVISION: ${{ inputs.source-revision }}
           HARN_BUMP_REFRESH_COMMAND: ${{ inputs.refresh-command }}
           HARN_BUMP_FORMAT_COMMAND: ${{ inputs.format-command }}
+          BUMP_REFRESH_FINALIZE_COMMAND: ${{ inputs.finalize-refresh-command }}
           HARN_BUMP_VALIDATE_COMMAND: ${{ inputs.validate-command }}
           HARN_BUMP_REFRESH_SENTINEL: ${{ runner.temp }}/harn-bump-refresh-${{ github.run_id }}-${{ github.run_attempt }}.ok
           HARN_BUMP_BRANCH: ${{ inputs.branch }}
@@ -306,15 +327,26 @@ jobs:
           # the success sentinel.
           # shellcheck disable=SC2016 # expand in the child shell, not here
           refresh_format='test -n "$HARN_BUMP_FORMAT_COMMAND"; eval "$HARN_BUMP_FORMAT_COMMAND"; '
+          # Regenerate source-derived artifacts only after every source mutation.
+          # shellcheck disable=SC2016 # expand in the child shell, not here
+          refresh_finalize='if [ -n "$BUMP_REFRESH_FINALIZE_COMMAND" ]; then eval "$BUMP_REFRESH_FINALIZE_COMMAND"; fi; '
           # shellcheck disable=SC2016 # expand in the child shell, not here
           refresh_complete='printf "ok\n" > "$HARN_BUMP_REFRESH_SENTINEL"'
           if [ "${HARN_BUMP_APPLY_BEHAVIOR_PRESERVING_FIXES}" != "true" ]; then
             refresh_behavior_preserving=''
             echo "::notice::Skipping the unattended behavior-preserving fix pass; capability migrations still applied."
           fi
-          export HARN_BUMP_REFRESH="${refresh_caller}${refresh_implicit_any}${refresh_migrations}${refresh_behavior_preserving}${refresh_format}${refresh_complete}"
+          export HARN_BUMP_REFRESH="${refresh_caller}${refresh_implicit_any}${refresh_migrations}${refresh_behavior_preserving}${refresh_format}${refresh_finalize}${refresh_complete}"
           # shellcheck disable=SC2016 # expand in the child shell, not here
           export HARN_BUMP_VALIDATE='set -euo pipefail; test -f "$HARN_BUMP_REFRESH_SENTINEL"; eval "$HARN_BUMP_VALIDATE_COMMAND"'
+          # Consume the key into driver memory, then delete its disposable file.
+          # Raw key material must not be inherited by caller-owned commands.
+          key_file="$(mktemp "${RUNNER_TEMP}/harn-bump-app-key.XXXXXX")"
+          trap 'rm -f -- "$key_file"' EXIT
+          chmod 600 "$key_file"
+          printf '%s' "${GITHUB_APP_PRIVATE_KEY:?}" > "$key_file"
+          unset GITHUB_APP_PRIVATE_KEY
+          export GITHUB_APP_PRIVATE_KEY_FILE="$key_file"
           harn --version
           harn run --no-sandbox ../.harn-runtime/scripts/bump-driver/bump_harn_runtime.harn
 

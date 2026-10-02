@@ -61,6 +61,8 @@ mod released_row_kind_tests;
 mod remote;
 mod schema;
 #[cfg(test)]
+mod schema_shape_tests;
+#[cfg(test)]
 mod supersession_tests;
 #[cfg(test)]
 mod tests;
@@ -253,6 +255,7 @@ fn catalog_provider(id: String, provider: ProviderDef) -> CatalogProvider {
                 })
                 .collect(),
             chat_endpoint: provider.chat_endpoint.clone(),
+            chat_api_adapter: provider.chat_api_adapter,
             completion_endpoint: provider.completion_endpoint.clone(),
             embeddings_endpoint: provider.embeddings_endpoint.clone(),
         },
@@ -425,7 +428,7 @@ fn catalog_model(
         capability_tags.push("batch".to_string());
     }
     let batch = catalog_batch_support(batch_api, &caps);
-    let operations = model.normalized_operations();
+    let operations = decision_contract::resolved_operations(&id, &model, &caps);
     let text_generation = operations.contains(&llm_config::ModelOperation::TextGeneration);
     CatalogModel {
         aliases,

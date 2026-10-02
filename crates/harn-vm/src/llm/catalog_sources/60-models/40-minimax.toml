@@ -106,7 +106,7 @@ name = "MiniMax M2.7 (via OpenRouter)"
 provider = "openrouter"
 context_window = 204800
 capabilities = ["tools", "streaming"]
-pricing = { input_per_mtok = 0.30, output_per_mtok = 1.20, cache_read_per_mtok = 0.06 }
+pricing = { input_per_mtok = 0.21, output_per_mtok = 0.84, cache_read_per_mtok = 0.042 }
 tier = "frontier"
 open_weight = true
 strengths = ["coding", "agentic", "tool_use", "reasoning", "long_context"]
@@ -124,7 +124,7 @@ name = "MiniMax M2 (via OpenRouter)"
 provider = "openrouter"
 context_window = 204800
 capabilities = ["tools", "streaming"]
-pricing = { input_per_mtok = 0.255, output_per_mtok = 1.02 }
+pricing = { input_per_mtok = 0.3, output_per_mtok = 1.2 }
 # Inline metadata keeps this row independent of fragment-order defaults.
 tier = "frontier"
 open_weight = true

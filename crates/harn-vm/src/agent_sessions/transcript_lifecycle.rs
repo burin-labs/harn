@@ -21,8 +21,8 @@ pub fn append_event(id: &str, event: VmValue) -> Result<(), String> {
 ///
 /// Persistence can fail after the mutation has entered the journal. A retry
 /// must flush that exact queued mutation rather than append a second terminal
-/// record for the same run.
-pub(crate) fn append_terminal_event_once(id: &str, event: VmValue) -> Result<(), String> {
+/// record for the same run. Returns that retained record, including on retry.
+pub(crate) fn append_terminal_event_once(id: &str, event: VmValue) -> Result<VmValue, String> {
     validate_session_event(&event, "agent_session_append_terminal_event")?;
     SESSIONS.with(|sessions| {
         let mut sessions = sessions.borrow_mut();
@@ -35,15 +35,25 @@ pub(crate) fn append_terminal_event_once(id: &str, event: VmValue) -> Result<(),
             ));
         };
         if journal.terminal_queued() {
-            return Ok(());
+            return state
+                .transcript
+                .as_dict()
+                .and_then(|transcript| transcript.get("events"))
+                .and_then(|events| match events {
+                    VmValue::List(events) => events.last().cloned(),
+                    _ => None,
+                })
+                .ok_or_else(|| {
+                    format!("agent_session_append_terminal_event: session '{id}' lost its terminal record")
+                });
         }
-        append_event_to_state(state, event, "append_terminal_event")?;
+        append_event_to_state(state, event.clone(), "append_terminal_event")?;
         state
             .transcript_journal
             .as_mut()
             .expect("terminal append keeps the active journal installed")
             .mark_terminal_queued();
-        Ok(())
+        Ok(event)
     })
 }
 
@@ -630,6 +640,7 @@ fn same_provider_reminder(
         && existing.source == candidate.source
         && existing.body == candidate.body
         && existing.originating_agent_id == candidate.originating_agent_id
+        && existing.goal_pin == candidate.goal_pin
 }
 
 /// Stop future projection of a live session reminder.
@@ -680,4 +691,32 @@ pub fn revoke_reminder(id: &str, reminder_id: &str) -> Result<&'static str, Stri
         }
         Ok("unknown_reminder_id")
     })
+}
+
+/// Retire the goal pins frozen under the previous objective. The delivered
+/// retarget's contract directive becomes the durable replacement goal pin.
+pub(crate) fn retire_goal_pins(id: &str) -> Result<(), String> {
+    let reminders = super::snapshot(id)
+        .and_then(|snapshot| snapshot.as_dict().cloned())
+        .and_then(|snapshot| snapshot.get("events").cloned())
+        .and_then(|events| match events {
+            VmValue::List(events) => Some(events),
+            _ => None,
+        })
+        .map(|events| {
+            events
+                .iter()
+                .filter_map(crate::llm::helpers::reminder_from_event)
+                .filter(|reminder| {
+                    reminder.goal_pin.is_none()
+                        && reminder.tags.iter().any(|tag| tag == "pin")
+                        && reminder.tags.iter().any(|tag| tag == "goal")
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    for reminder in reminders {
+        revoke_reminder(id, &reminder.id)?;
+    }
+    Ok(())
 }

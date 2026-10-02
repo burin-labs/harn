@@ -183,16 +183,52 @@ pipeline test_instant_deadline_pattern(harness: Harness, task: unknown) {
 }
 
 @test
-pipeline test_recv_timeout_pattern(harness: Harness, task: unknown) {
+pipeline test_literal_timeout_pattern_matches_literal_waits(harness: Harness, task: unknown) {
+  const p = literal_timeout_pattern()
+  assert_eq(find_hits("rx.recv_timeout(Duration::from_millis(10))\n", p).count, 1)
+  assert_eq(find_hits("rx.recv_timeout(Duration::from_secs(1))\n", p).count, 1)
   assert_eq(
-    find_hits("rx.recv_timeout(Duration::from_millis(10))\n", recv_timeout_pattern()).count,
+    find_hits("tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv())\n", p).count,
     1,
   )
+  assert_eq(find_hits("timeout(Duration::from_millis(10), rx.recv())\n", p).count, 1)
+  assert_eq(find_hits("tokio::time::timeout(StdDuration::from_secs(5), async {\n", p).count, 1)
+}
+
+@test
+pipeline test_literal_timeout_pattern_spans_a_line_break(harness: Harness, task: unknown) {
+  const text =
+    "let a = 1;\nlet v = tokio::time::timeout(\n    Duration::from_secs(5),\n    fut,\n)\n"
+  const hits = find_hits(text, literal_timeout_pattern())
+  assert_eq(hits.count, 1)
+  // Reported on the line the call starts, not the line before it.
+  assert_eq(hits[0].line_no, 2)
+}
+
+@test
+pipeline test_literal_timeout_pattern_rejections(harness: Harness, task: unknown) {
+  const p = literal_timeout_pattern()
+  // The shared hang ceiling is the approved form.
+  assert_eq(find_hits("harn_clock::test_support::within(\"reply\", rx.recv())\n", p).count, 0)
+  assert_eq(find_hits("recv_within(\"reply\", &rx)\n", p).count, 0)
+  // A named budget cannot be resolved statically and is out of scope.
+  assert_eq(find_hits("tokio::time::timeout(CHILD_TIMEOUT, child.wait())\n", p).count, 0)
+  assert_eq(find_hits("rx.recv_timeout(STARTUP_BUDGET)\n", p).count, 0)
+  // An HTTP client builder's `.timeout(...)` is not a wait.
+  assert_eq(find_hits("builder.timeout(Duration::from_secs(2))\n", p).count, 0)
+  assert_eq(find_hits("    .timeout(std::time::Duration::from_secs(2))\n", p).count, 0)
+  // Nor is a differently named helper.
+  assert_eq(find_hits("close_with_timeout(Duration::from_secs(1))\n", p).count, 0)
+}
+
+@test
+pipeline test_literal_timeout_baseline_is_a_ratchet(harness: Harness, task: unknown) {
+  assert_eq(grandfather_count("literal_timeout", "crates/harn-vm/src/llm/rate_limit.rs"), 3)
   assert_eq(
-    find_hits("rx.recv_timeout(Duration::from_micros(10))\n", recv_timeout_pattern()).count,
-    1,
+    grandfather_count("literal_timeout", "crates/harn-serve/src/adapters/acp/tests.rs"),
+    nil,
   )
-  assert_eq(find_hits("rx.recv_timeout(Duration::from_secs(1))\n", recv_timeout_pattern()).count, 0)
+  assert_eq(grandfather_duplicates(), [])
 }
 
 @test

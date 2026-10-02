@@ -41,9 +41,13 @@ const EVIDENCE_KIND: Ty = Ty::Union(&[
 
 // -- Questions ---------------------------------------------------------------
 
+pub const BOOLEAN_CRITERIA: Ty =
+    Ty::Shape(&[Field::new("true", STRING), Field::new("false", STRING)]);
+
 pub const BOOLEAN_QUESTION: Ty = Ty::Shape(&[
     Field::new("kind", Ty::LitString("boolean")),
     Field::new("instructions", STRING),
+    Field::optional("criteria", BOOLEAN_CRITERIA),
 ]);
 
 pub const CHOICE_QUESTION: Ty = Ty::Shape(&[
@@ -162,6 +166,7 @@ const UNAVAILABLE: Ty = Ty::Shape(&[
             Ty::LitString("unsupported_options"),
             Ty::LitString("transport_failed"),
             Ty::LitString("authority_denied"),
+            Ty::LitString("admission_refused"),
             Ty::LitString("producer_cancelled"),
             Ty::LitString("cache_miss"),
         ]),
@@ -202,6 +207,10 @@ const QUESTION_INVALID: Ty = Ty::Shape(&[
         "reason",
         Ty::Union(&[
             Ty::LitString("too_many_options"),
+            Ty::LitString("empty_questions"),
+            Ty::LitString("empty_options"),
+            Ty::LitString("empty_identifier"),
+            Ty::LitString("duplicate_labels"),
             Ty::LitString("too_few_levels"),
             Ty::LitString("too_many_levels"),
             Ty::LitString("empty_instructions"),
@@ -293,11 +302,11 @@ pub const POLICY: Ty = Ty::Shape(&[
     ),
     Field::new("provider", STRING),
     Field::new("model", STRING),
-    Field::new("effort", STRING),
-    Field::new("temperature", FLOAT),
+    Field::optional("effort", STRING),
+    Field::optional("temperature", FLOAT),
     Field::new("threshold", FLOAT),
-    Field::new("evaluation_cost_limit", FLOAT),
-    Field::new("run_cost_limit", FLOAT),
+    Field::optional("evaluation_cost_limit", FLOAT),
+    Field::optional("run_cost_limit", FLOAT),
 ]);
 
 pub const EVALUATE: BuiltinSignature = BuiltinSignature::simple(
@@ -306,6 +315,19 @@ pub const EVALUATE: BuiltinSignature = BuiltinSignature::simple(
         Param::new("id", STRING),
         // The checker infers and records the closed type at each call site.
         // `any` here is not permission to pass gradual or opaque inputs.
+        Param::new("state", Ty::Any),
+        Param::new("questions", DICT_STRING_QUESTION),
+        Param::new("policy", POLICY),
+    ],
+    EVALUATION_OUTCOME,
+);
+
+/// Runtime vocabulary and route; checking still requires a closed input and
+/// policy while execution owns question, route, authority and limit admission.
+pub const EVALUATE_REQUEST: BuiltinSignature = BuiltinSignature::simple(
+    "__cap_llm_evaluate_request",
+    &[
+        Param::new("id", STRING),
         Param::new("state", Ty::Any),
         Param::new("questions", DICT_STRING_QUESTION),
         Param::new("policy", POLICY),

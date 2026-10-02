@@ -1,0 +1,72 @@
+import "std/eval/selective_risk"
+
+fn corpus(correct: int, wrong: int, wrong_confidence: float) -> list {
+  let rows = []
+  for i in range(0, correct + wrong) {
+    rows = rows
+      + [
+        {
+          question_id: "action",
+          expected: "yes",
+          predicted: if i < correct {
+            "yes"
+          } else {
+            "no"
+          },
+          confidence: if i < correct {
+            0.9
+          } else {
+            wrong_confidence
+          },
+        },
+      ]
+  }
+  return rows
+}
+
+pipeline main(harness: Harness, task: unknown) {
+  const rows = corpus(100, 100, 0.2)
+  const options = {thresholds: [0.1, 0.5, 0.95], target_error: 0.05, delta: 0.05}
+  const report = selective_risk_report(rows, options)
+  assert_eq(report.kind, "report")
+  assert_eq(report.family_size, 3)
+  const group = report.groups[0]
+  assert_eq(group.recommendation.kind, "threshold")
+  assert_eq(group.recommendation.threshold, 0.5)
+  assert_eq(group.recommendation.accepted, 100)
+  assert_eq(group.recommendation.errors, 0)
+  assert_eq(group.recommendation.coverage, 0.5)
+  // Independent 60-digit Decimal/binomial-sum inversion reference values.
+  assert_eq(abs(group.candidates[0].error_upper_bound - 0.5771788333678562) < 0.00000000001, true)
+  assert_eq(abs(group.candidates[1].error_upper_bound - 0.04011658597799618) < 0.00000000001, true)
+  assert_eq(group.candidates[2].accepted, 0)
+  assert_eq(group.candidates[2].certified, false)
+  assert_eq(group.candidates[2].error_upper_bound, 1.0)
+  const loose = selective_risk_report(rows, options + {target_error: 0.6})
+  assert_eq(loose.groups[0].recommendation.threshold, 0.1)
+  assert_eq(loose.groups[0].candidates[0].error_upper_bound, group.candidates[0].error_upper_bound)
+  const wrong = selective_risk_report(corpus(0, 100, 0.9), options)
+  assert_eq(wrong.groups[0].recommendation.kind, "no_threshold")
+  assert_eq(wrong.groups[0].recommendation.reason, "risk_not_certified")
+  const empty = selective_risk_report(rows, options + {thresholds: [0.99]})
+  assert_eq(empty.groups[0].recommendation.reason, "no_accepted_rows")
+  assert_eq(selective_risk_report(rows, options + {thresholds: []}).reason, "empty_family")
+  assert_eq(selective_risk_report(rows, options + {delta: 1.0}).reason, "invalid_options")
+  const insufficient = selective_risk_report(corpus(2, 0, 0.2), options)
+  assert_eq(insufficient.groups[0].recommendation.reason, "risk_not_certified")
+  const interior = selective_risk_report(corpus(95, 5, 0.9), {thresholds: [0.5], target_error: 0.2})
+  assert_eq(
+    abs(interior.groups[0].candidates[0].error_upper_bound - 0.10225337764327451) < 0.00000000001,
+    true,
+  )
+  const wide = selective_risk_report(
+    rows + rows.map({ row -> row + {question_id: "verify"} }),
+    options,
+  )
+  assert_eq(wide.family_size, 6)
+  assert_eq(
+    wide.groups[0].candidates[1].error_upper_bound > group.candidates[1].error_upper_bound,
+    true,
+  )
+  harness.stdio.log("selective risk report ok")
+}

@@ -195,6 +195,22 @@ where
         .await
 }
 
+/// Whether the current prepared lease declares an identity for `provider`,
+/// answered without consuming it. `None` outside a prepared context, where the
+/// provider's ambient discovery applies; inside one, ambient discovery is
+/// unreachable and only a declared identity can authenticate the provider.
+pub(crate) fn prepared_identity_declares_provider(provider: &str) -> Option<bool> {
+    PREPARED_IDENTITY_CONTEXT
+        .try_with(|context| {
+            context
+                .authority
+                .identity_requirements()
+                .iter()
+                .any(|requirement| requirement.binding.provider == provider)
+        })
+        .ok()
+}
+
 /// Consume the exact prepared identity bound to a platform-managed provider.
 /// `Ok(None)` is the explicit non-prepared compatibility path. When a prepared
 /// context is present, every mismatch fails closed and ambient provider

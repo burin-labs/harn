@@ -89,6 +89,50 @@ pipeline test_scheduled_pricing_normalizes_peak_and_weekend(harness: Harness, ta
 }
 
 @test
+pipeline test_prompt_size_overrides_become_input_token_bands(harness: Harness, task: unknown) {
+  const pricing = openrouter_scheduled_pricing(
+    {
+      overrides: [
+        {
+          min_prompt_tokens: 272000,
+          prompt: "0.000004",
+          completion: "0.000015",
+          input_cache_read: "0.0000004",
+        },
+      ],
+    },
+    {input_per_mtok: 2.0, output_per_mtok: 10.0},
+  )
+  assert_eq(pricing.input_per_mtok, 2.0)
+  assert_eq(pricing.output_per_mtok, 10.0)
+  assert_eq(pricing?.schedules, nil)
+  assert_eq(
+    pricing.input_token_bands,
+    [{minimum_input_tokens: 272000, input_multiplier: 2.0, output_multiplier: 1.5}],
+  )
+}
+
+@test
+pipeline test_time_window_without_days_applies_every_day(harness: Harness, task: unknown) {
+  const pricing = openrouter_scheduled_pricing(
+    {
+      overrides: [
+        {utc_start: 0, utc_end: 1600, prompt: "0.000002", completion: "0.000006"},
+        {utc_start: 1600, utc_end: 0, prompt: "0.000001", completion: "0.000003"},
+      ],
+    },
+    {input_per_mtok: 2.0, output_per_mtok: 6.0},
+  )
+  assert_eq(pricing.input_per_mtok, 2.0)
+  assert_eq(len(pricing.schedules), 7)
+  for window in pricing.schedules {
+    assert_eq(window.start, "16:00")
+    assert_eq(window.end, "24:00")
+    assert_eq(window.input_multiplier, 0.5)
+  }
+}
+
+@test
 pipeline test_scheduled_pricing_rejects_overlapping_wire_windows(harness: Harness, task: unknown) {
   let rejected = false
   try {
@@ -148,6 +192,70 @@ pipeline test_carried_update_prepares_patch(harness: Harness, task: unknown) {
 }
 
 @test
+pipeline test_live_extraction_uses_provider_catalog_identity(harness: Harness, task: unknown) {
+  const input = fixture(harness.fs, "carried-update")
+  const rows = catalog_model_context(BASE_CATALOG, input.notice)
+  assert_eq(len(rows), 1)
+  assert_eq(rows[0].id, input.extraction.candidate.model_id)
+  assert_eq(rows[0].pricing.input_per_mtok, input.extraction.candidate.old_value)
+}
+
+@test
+pipeline test_unresolved_existing_model_cannot_become_addition(harness: Harness, task: unknown) {
+  const input = fixture(harness.fs, "carried-update")
+  const candidate = input.extraction.candidate + {model_id: "Claude Haiku"}
+  const plan = plan_notice(
+    harness,
+    input.notice,
+    {classification: "candidate", candidate: candidate},
+    BASE_CATALOG,
+  )
+  assert_eq(plan.receipt.disposition, "rejected")
+  assert_eq(plan.receipt.change_kind, "price")
+  assert_eq(plan.patch, nil)
+}
+
+@test
+pipeline test_existing_new_price_on_wrong_model_cannot_hide_identity_error(
+  harness: Harness,
+  task: unknown,
+) {
+  const input = fixture(harness.fs, "carried-update")
+  const catalog = BASE_CATALOG
+    + {
+      models: BASE_CATALOG.models
+        + [
+          {
+            provider: "anthropic",
+            id: "claude-3-5-haiku-20241022",
+            name: "Claude Haiku 3.5",
+            pricing: {input_per_mtok: 0.8, output_per_mtok: 4.0},
+          },
+        ],
+    }
+  const candidate = input.extraction.candidate + {model_id: "claude-3-5-haiku-20241022"}
+  const plan = plan_notice(
+    harness,
+    input.notice,
+    {classification: "candidate", candidate: candidate},
+    catalog,
+  )
+  assert_eq(plan.receipt.disposition, "rejected")
+  assert_eq(plan.patch, nil)
+  const exact_notice = input.notice
+    + {text: input.notice.text + " Model id claude-3-5-haiku-20241022."}
+  assert_eq(
+    plan_notice(
+      harness,
+      exact_notice,
+      {classification: "candidate", candidate: candidate},
+      catalog,
+    ).receipt.disposition,
+    "no_op",
+  )
+}
+
+@test
 pipeline test_irrelevant_notice_records_no_op(harness: Harness, task: unknown) {
   const input = fixture(harness.fs, "irrelevant")
   const plan = plan_notice(harness, input.notice, input.extraction, BASE_CATALOG)
@@ -161,6 +269,30 @@ pipeline test_new_model_on_supported_provider_is_incomplete_add(harness: Harness
   const plan = plan_notice(harness, input.notice, input.extraction, BASE_CATALOG)
   assert_eq(plan.receipt.disposition, "incomplete_add")
   assert_eq(len(plan.receipt.unresolved_verification), 4)
+}
+
+@test
+pipeline test_model_addition_notice_is_reviewable_without_a_release_date(
+  harness: Harness,
+  task: unknown,
+) {
+  const notice = fixture(harness.fs, "new-model").notice
+  const candidate = {
+    kind: "addition",
+    provider: "anthropic",
+    model_id: "claude-haiku-next",
+    evidence: "Claude Haiku Next launches.",
+  }
+  const extraction = {classification: "candidate", candidate: candidate}
+  const planned = plan_notice(harness, notice, extraction, BASE_CATALOG)
+  assert_eq(planned.receipt.disposition, "incomplete_add")
+  assert_eq(planned.receipt.model_id, candidate.model_id)
+  assert_eq(planned.receipt.effective_date, nil)
+  const existing = BASE_CATALOG
+    + {models: BASE_CATALOG.models + [{provider: "anthropic", id: candidate.model_id}]}
+  const replay = plan_notice(harness, notice, extraction, existing)
+  assert_eq(replay.receipt.disposition, "no_op")
+  assert_eq(replay.receipt.reason, "model is already in the catalog")
 }
 
 @test
@@ -228,6 +360,16 @@ capabilities = ["tools", "streaming"]
   const retirement_out = unwrap(apply_candidate_to_source(source, retirement))
   assert(contains(retirement_out, "deprecated = true"))
   assert(contains(retirement_out, "Use claude-haiku-next"))
+  assert(contains(retirement_out, "sunset_date = \"" + price.effective_date + "\""))
+  assert(contains(retirement_out, "superseded_by = \"claude-haiku-next\""))
+  const followed = "[models.\"claude-haiku-4-5-20251001\"]\nname = \"Claude Haiku\"\n\n"
+    + "# Next model.\n[models.\"claude-haiku-next\"]\nname = \"Next\"\n"
+  const followed_out = unwrap(
+    apply_candidate_to_source(followed, retirement + {evidence: "Retired by notice."}),
+  )
+  assert(contains(followed_out, "name = \"Claude Haiku\"\ndeprecated = true\n"))
+  assert(contains(followed_out, "superseded_by = \"claude-haiku-next\"\n\n# Next model.\n"))
+  assert(contains(followed_out, "per Retired by notice. Use"))
   const capability = price
     + {kind: "capability", capability: "vision", old_value: false, new_value: true}
   const capability_source = """
@@ -322,6 +464,23 @@ pipeline test_canonical_catalog_shapes_validate_all_non_price_variants(
     candidate: common + {kind: "retirement", old_value: false, new_value: true},
   }
   assert_eq(plan_notice(harness, input.notice, retirement, canonical).receipt.disposition, "patch")
+  const guessed = {
+    classification: "candidate",
+    candidate: retirement.candidate + {old_value: true, replacement: "claude-haiku-4-5-20251001."},
+  }
+  const guessed_plan = plan_notice(harness, input.notice, guessed, canonical)
+  assert_eq(guessed_plan.receipt.disposition, "patch")
+  const resolved: dict = guessed_plan.candidate ?? {}
+  assert_eq(resolved.old_value, false)
+  assert_eq(resolved.replacement, "claude-haiku-4-5-20251001")
+  const unknown_replacement = {
+    classification: "candidate",
+    candidate: retirement.candidate + {replacement: "claude-haiku-next"},
+  }
+  assert_eq(
+    plan_notice(harness, input.notice, unknown_replacement, canonical).receipt.disposition,
+    "rejected",
+  )
   const capability = {
     classification: "candidate",
     candidate: common

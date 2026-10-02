@@ -1,0 +1,71 @@
+import { agent_loop } from "std/agent/loop"
+import { llm_text, with_llm_script } from "std/testing"
+
+pipeline default(harness: Harness) {
+  const sid = "blank-message-content-" + harness.random.uuid()
+  const opts = {provider: "mock", session_id: sid, max_iterations: 1, auto_context_profile: false}
+  with_llm_script(
+    harness.llm,
+    [
+      llm_text("First answer."),
+      llm_text("Second answer."),
+      llm_text("Third answer."),
+      llm_text("Fourth answer."),
+    ],
+    { ->
+      let _ = agent_loop(harness, "First task.", nil, opts)
+      const second = agent_loop(
+        harness,
+        "",
+        nil,
+        opts + {initial_user_content: "Second task from structured content."},
+      )
+      const calls = harness.llm.mock_calls()
+      assert_eq(len(calls), 2)
+      const second_users = calls[1].messages.filter({ message -> message.role == "user" }).to_list()
+      assert_eq(len(second_users), 2)
+      assert_eq(second_users[1].content, "Second task from structured content.")
+      assert_eq(
+        len(
+          transcript_events(second.transcript).filter(
+            { event -> event.kind == "agent_user_turn_omitted" },
+          ),
+        ),
+        0,
+      )
+      const third = agent_loop(
+        harness,
+        "",
+        nil,
+        opts + {initial_user_content: [{type: "text", text: "Third task from content blocks."}]},
+      )
+      const third_calls = harness.llm.mock_calls()
+      assert_eq(len(third_calls), 3)
+      const third_users = third_calls[2].messages.filter({ message -> message.role == "user" })
+        .to_list()
+      assert_eq(len(third_users), 3)
+      assert_eq(third_users[2].content[0].text, "Third task from content blocks.")
+      assert_eq(
+        len(
+          transcript_events(third.transcript).filter(
+            { event -> event.kind == "agent_user_turn_omitted" },
+          ),
+        ),
+        0,
+      )
+      const continued = agent_loop(harness, "", nil, opts)
+      const after = harness.llm.mock_calls()
+      assert_eq(len(after), 4)
+      const continued_users = after[3].messages.filter({ message -> message.role == "user" })
+        .to_list()
+      assert_eq(len(continued_users), 3)
+      const omitted = transcript_events(continued.transcript).filter(
+        { event -> event.kind == "agent_user_turn_omitted" },
+      )
+        .to_list()
+      assert_eq(len(omitted), 1)
+      assert_eq(omitted[0].metadata.reason, "empty_continuation")
+    },
+  )
+  harness.stdio.println("blank message content passed")
+}

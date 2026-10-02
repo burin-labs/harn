@@ -1,0 +1,1496 @@
+{
+  "completed_records": 70,
+  "expected_records": 70,
+  "failed_commands": [
+    "control/refused",
+    "corepack_pnpm/readable",
+    "corepack_pnpm/refused",
+    "corepack_yarn/readable",
+    "corepack_yarn/refused",
+    "dotnet/readable",
+    "go/refused",
+    "rustfmt/refused",
+    "sbt/refused",
+    "swift/refused",
+    "uv/refused",
+    "yarn/refused"
+  ],
+  "pending_records": 0,
+  "records": [
+    {
+      "argv": [
+        "/bin/cat",
+        "$HOME/.config/unknown-census/token"
+      ],
+      "diagnostic": "",
+      "exit": 0,
+      "mode": "readable",
+      "paths": {
+        "$HOME/.config/unknown-census/token": [
+          "success"
+        ]
+      },
+      "timed_out": false,
+      "tool": "control"
+    },
+    {
+      "argv": [
+        "/bin/cat",
+        "$HOME/.config/unknown-census/token"
+      ],
+      "diagnostic": "cat: $HOME/.config/unknown-census/token: Permission denied\n",
+      "exit": 1,
+      "mode": "refused",
+      "paths": {
+        "$HOME/.config/unknown-census/token": [
+          "success",
+          "-1 EACCES"
+        ]
+      },
+      "timed_out": false,
+      "tool": "control"
+    },
+    {
+      "argv": [
+        "black",
+        "--check",
+        "main.py"
+      ],
+      "diagnostic": "",
+      "exit": 0,
+      "mode": "readable",
+      "paths": {
+        "$HOME/.cache/black": [
+          "-1 ENOENT",
+          "success"
+        ],
+        "$HOME/.config": [
+          "success"
+        ],
+        "$HOME/.config/black": [
+          "-1 ENOENT"
+        ]
+      },
+      "timed_out": false,
+      "tool": "black"
+    },
+    {
+      "argv": [
+        "black",
+        "--check",
+        "main.py"
+      ],
+      "diagnostic": "",
+      "exit": 0,
+      "mode": "refused",
+      "paths": {
+        "$HOME/.cache/black": [
+          "-1 EACCES"
+        ],
+        "$HOME/.config": [
+          "success"
+        ],
+        "$HOME/.config/black": [
+          "-1 EACCES"
+        ]
+      },
+      "timed_out": false,
+      "tool": "black"
+    },
+    {
+      "argv": [
+        "bun",
+        "run",
+        "check"
+      ],
+      "diagnostic": "",
+      "exit": 0,
+      "mode": "readable",
+      "paths": {},
+      "timed_out": false,
+      "tool": "bun"
+    },
+    {
+      "argv": [
+        "bun",
+        "run",
+        "check"
+      ],
+      "diagnostic": "",
+      "exit": 0,
+      "mode": "refused",
+      "paths": {},
+      "timed_out": false,
+      "tool": "bun"
+    },
+    {
+      "argv": [
+        "bundle",
+        "check"
+      ],
+      "diagnostic": "",
+      "exit": 0,
+      "mode": "readable",
+      "paths": {},
+      "timed_out": false,
+      "tool": "bundler"
+    },
+    {
+      "argv": [
+        "bundle",
+        "check"
+      ],
+      "diagnostic": "",
+      "exit": 0,
+      "mode": "refused",
+      "paths": {},
+      "timed_out": false,
+      "tool": "bundler"
+    },
+    {
+      "argv": [
+        "cargo",
+        "check",
+        "--offline"
+      ],
+      "diagnostic": "",
+      "exit": 0,
+      "mode": "readable",
+      "paths": {
+        "$HOME/.config/git/config": [
+          "success"
+        ]
+      },
+      "timed_out": false,
+      "tool": "cargo"
+    },
+    {
+      "argv": [
+        "cargo",
+        "check",
+        "--offline"
+      ],
+      "diagnostic": "",
+      "exit": 0,
+      "mode": "refused",
+      "paths": {
+        "$HOME/.config/git/config": [
+          "-1 EACCES"
+        ]
+      },
+      "timed_out": false,
+      "tool": "cargo"
+    },
+    {
+      "argv": [
+        "clang",
+        "-c",
+        "main.c",
+        "-o",
+        "main.o"
+      ],
+      "diagnostic": "",
+      "exit": 0,
+      "mode": "readable",
+      "paths": {},
+      "timed_out": false,
+      "tool": "clang"
+    },
+    {
+      "argv": [
+        "clang",
+        "-c",
+        "main.c",
+        "-o",
+        "main.o"
+      ],
+      "diagnostic": "",
+      "exit": 0,
+      "mode": "refused",
+      "paths": {},
+      "timed_out": false,
+      "tool": "clang"
+    },
+    {
+      "argv": [
+        "cargo",
+        "clippy",
+        "--offline"
+      ],
+      "diagnostic": "",
+      "exit": 0,
+      "mode": "readable",
+      "paths": {
+        "$HOME/.config/git/config": [
+          "success"
+        ]
+      },
+      "timed_out": false,
+      "tool": "clippy"
+    },
+    {
+      "argv": [
+        "cargo",
+        "clippy",
+        "--offline"
+      ],
+      "diagnostic": "",
+      "exit": 0,
+      "mode": "refused",
+      "paths": {
+        "$HOME/.config/git/config": [
+          "-1 EACCES"
+        ]
+      },
+      "timed_out": false,
+      "tool": "clippy"
+    },
+    {
+      "argv": [
+        "cmake",
+        "-S",
+        ".",
+        "-B",
+        "cmake-build"
+      ],
+      "diagnostic": "",
+      "exit": 0,
+      "mode": "readable",
+      "paths": {
+        "$HOME/.config/cmake/api/v1/query": [
+          "-1 ENOENT"
+        ],
+        "$HOME/.config/cmake/instrumentation-ec7aa2dc-b87f-45a3-8022-fe01c5f59984/v1/query": [
+          "-1 ENOENT"
+        ]
+      },
+      "timed_out": false,
+      "tool": "cmake"
+    },
+    {
+      "argv": [
+        "cmake",
+        "-S",
+        ".",
+        "-B",
+        "cmake-build"
+      ],
+      "diagnostic": "",
+      "exit": 0,
+      "mode": "refused",
+      "paths": {
+        "$HOME/.config/cmake/api/v1/query": [
+          "-1 EACCES"
+        ],
+        "$HOME/.config/cmake/instrumentation-ec7aa2dc-b87f-45a3-8022-fe01c5f59984/v1/query": [
+          "-1 EACCES"
+        ]
+      },
+      "timed_out": false,
+      "tool": "cmake"
+    },
+    {
+      "argv": [
+        "composer",
+        "validate",
+        "--no-check-publish"
+      ],
+      "diagnostic": "",
+      "exit": 0,
+      "mode": "readable",
+      "paths": {
+        "$HOME/.cache": [
+          "success"
+        ],
+        "$HOME/.cache/composer": [
+          "-1 ENOENT",
+          "success"
+        ],
+        "$HOME/.config": [
+          "success"
+        ],
+        "$HOME/.config/composer": [
+          "success"
+        ],
+        "$HOME/.config/composer/.htaccess": [
+          "-1 ENOENT",
+          "success"
+        ],
+        "$HOME/.config/composer/auth.json": [
+          "-1 ENOENT"
+        ],
+        "$HOME/.config/composer/composer.json": [
+          "-1 ENOENT"
+        ],
+        "$HOME/.config/composer/config.json": [
+          "success"
+        ],
+        "$HOME/.config/git/config": [
+          "success"
+        ]
+      },
+      "timed_out": false,
+      "tool": "composer"
+    },
+    {
+      "argv": [
+        "composer",
+        "validate",
+        "--no-check-publish"
+      ],
+      "diagnostic": "",
+      "exit": 0,
+      "mode": "refused",
+      "paths": {
+        "$HOME/.cache": [
+          "success"
+        ],
+        "$HOME/.cache/composer": [
+          "-1 EACCES"
+        ],
+        "$HOME/.config": [
+          "success"
+        ],
+        "$HOME/.config/composer": [
+          "-1 EACCES"
+        ],
+        "$HOME/.config/composer/.htaccess": [
+          "-1 EACCES"
+        ],
+        "$HOME/.config/composer/auth.json": [
+          "-1 EACCES"
+        ],
+        "$HOME/.config/composer/composer.json": [
+          "-1 EACCES"
+        ],
+        "$HOME/.config/composer/config.json": [
+          "-1 EACCES"
+        ],
+        "$HOME/.config/git/config": [
+          "-1 EACCES"
+        ]
+      },
+      "timed_out": false,
+      "tool": "composer"
+    },
+    {
+      "argv": [
+        "/usr/bin/pnpm",
+        "run",
+        "check"
+      ],
+      "diagnostic": "Internal Error: Error when performing the request to https://registry.npmjs.org/pnpm; for troubleshooting help, see https://github.com/nodejs/corepack#troubleshooting\n    at ClientRequest.<anonymous> (/usr/share/nodejs/corepack/dist/lib/corepack.cjs:42253:16)\n    at ClientRequest.emit (node:events:519:28)\n    at emitErrorEvent (node:_http_client:108:11)\n    at TLSSocket.socketErrorListener (node:_http_client:575:5)\n    at TLSSocket.emit (node:events:519:28)\n    at emitErrorNT (node:internal/streams/destroy:170:8)\n    at emitErrorCloseNT (node:internal/streams/destroy:129:3)\n    at process.processTicksAndRejections (node:internal/process/task_queues:89:21)\n",
+      "exit": 1,
+      "mode": "readable",
+      "paths": {
+        "$HOME/.cache/node": [
+          "-1 ENOENT"
+        ]
+      },
+      "timed_out": false,
+      "tool": "corepack_pnpm"
+    },
+    {
+      "argv": [
+        "/usr/bin/pnpm",
+        "run",
+        "check"
+      ],
+      "diagnostic": "Internal Error: Error when performing the request to https://registry.npmjs.org/pnpm; for troubleshooting help, see https://github.com/nodejs/corepack#troubleshooting\n    at ClientRequest.<anonymous> (/usr/share/nodejs/corepack/dist/lib/corepack.cjs:42253:16)\n    at ClientRequest.emit (node:events:519:28)\n    at emitErrorEvent (node:_http_client:108:11)\n    at TLSSocket.socketErrorListener (node:_http_client:575:5)\n    at TLSSocket.emit (node:events:519:28)\n    at emitErrorNT (node:internal/streams/destroy:170:8)\n    at emitErrorCloseNT (node:internal/streams/destroy:129:3)\n    at process.processTicksAndRejections (node:internal/process/task_queues:89:21)\n",
+      "exit": 1,
+      "mode": "refused",
+      "paths": {
+        "$HOME/.cache/node": [
+          "-1 EACCES"
+        ]
+      },
+      "timed_out": false,
+      "tool": "corepack_pnpm"
+    },
+    {
+      "argv": [
+        "/usr/bin/yarn",
+        "run",
+        "check"
+      ],
+      "diagnostic": "Internal Error: Error when performing the request to https://registry.npmjs.org/yarn; for troubleshooting help, see https://github.com/nodejs/corepack#troubleshooting\n    at ClientRequest.<anonymous> (/usr/share/nodejs/corepack/dist/lib/corepack.cjs:42253:16)\n    at ClientRequest.emit (node:events:519:28)\n    at emitErrorEvent (node:_http_client:108:11)\n    at TLSSocket.socketErrorListener (node:_http_client:575:5)\n    at TLSSocket.emit (node:events:519:28)\n    at emitErrorNT (node:internal/streams/destroy:170:8)\n    at emitErrorCloseNT (node:internal/streams/destroy:129:3)\n    at process.processTicksAndRejections (node:internal/process/task_queues:89:21)\n",
+      "exit": 1,
+      "mode": "readable",
+      "paths": {
+        "$HOME/.cache/node": [
+          "-1 ENOENT"
+        ]
+      },
+      "timed_out": false,
+      "tool": "corepack_yarn"
+    },
+    {
+      "argv": [
+        "/usr/bin/yarn",
+        "run",
+        "check"
+      ],
+      "diagnostic": "Internal Error: Error when performing the request to https://registry.npmjs.org/yarn; for troubleshooting help, see https://github.com/nodejs/corepack#troubleshooting\n    at ClientRequest.<anonymous> (/usr/share/nodejs/corepack/dist/lib/corepack.cjs:42253:16)\n    at ClientRequest.emit (node:events:519:28)\n    at emitErrorEvent (node:_http_client:108:11)\n    at TLSSocket.socketErrorListener (node:_http_client:575:5)\n    at TLSSocket.emit (node:events:519:28)\n    at emitErrorNT (node:internal/streams/destroy:170:8)\n    at emitErrorCloseNT (node:internal/streams/destroy:129:3)\n    at process.processTicksAndRejections (node:internal/process/task_queues:89:21)\n",
+      "exit": 1,
+      "mode": "refused",
+      "paths": {
+        "$HOME/.cache/node": [
+          "-1 EACCES"
+        ]
+      },
+      "timed_out": false,
+      "tool": "corepack_yarn"
+    },
+    {
+      "argv": [
+        "/bin/sh",
+        "-c",
+        "dotnet restore --configfile NuGet.Config App.csproj && dotnet build --no-restore App.csproj"
+      ],
+      "diagnostic": "\nWelcome to .NET 10.0!\n---------------------\nSDK Version: 10.0.112\n\n----------------\nInstalled an ASP.NET Core HTTPS development certificate.\nTo trust the certificate, run 'dotnet dev-certs https --trust'\nLearn about HTTPS: https://aka.ms/dotnet-https\n\n----------------\nWrite your first app: https://aka.ms/dotnet-hello-world\nFind out what's new: https://aka.ms/dotnet-whats-new\nExplore documentation: https://aka.ms/dotnet-docs\nReport issues and find source on GitHub: https://github.com/dotnet/core\nUse 'dotnet --help' to see available commands or visit: https://aka.ms/dotnet-cli\n--------------------------------------------------------------------------------------\n  Determining projects to restore...\n  Restored $CENSUS/work/App.csproj (in 47 ms).\n  App -> $CENSUS/work/bin/Debug/net10.0/App.dll\n\nBuild succeeded.\n    0 Warning(s)\n    0 Error(s)\n\nTime Elapsed 00:00:02.00\n",
+      "exit": -1,
+      "mode": "readable",
+      "paths": {
+        "$HOME/.config": [
+          "success"
+        ],
+        "$HOME/.config/NuGet": [
+          "success",
+          "-1 ENOENT"
+        ],
+        "$HOME/.config/git/config": [
+          "success"
+        ]
+      },
+      "timed_out": true,
+      "tool": "dotnet"
+    },
+    {
+      "argv": [
+        "/bin/sh",
+        "-c",
+        "dotnet restore --configfile NuGet.Config App.csproj && dotnet build --no-restore App.csproj"
+      ],
+      "diagnostic": "",
+      "exit": 0,
+      "mode": "refused",
+      "paths": {
+        "$HOME/.config/git/config": [
+          "-1 EACCES"
+        ]
+      },
+      "timed_out": false,
+      "tool": "dotnet"
+    },
+    {
+      "argv": [
+        "eslint",
+        "main.js"
+      ],
+      "diagnostic": "",
+      "exit": 0,
+      "mode": "readable",
+      "paths": {},
+      "timed_out": false,
+      "tool": "eslint"
+    },
+    {
+      "argv": [
+        "eslint",
+        "main.js"
+      ],
+      "diagnostic": "",
+      "exit": 0,
+      "mode": "refused",
+      "paths": {},
+      "timed_out": false,
+      "tool": "eslint"
+    },
+    {
+      "argv": [
+        "gcc",
+        "-c",
+        "main.c",
+        "-o",
+        "main.o"
+      ],
+      "diagnostic": "",
+      "exit": 0,
+      "mode": "readable",
+      "paths": {},
+      "timed_out": false,
+      "tool": "gcc"
+    },
+    {
+      "argv": [
+        "gcc",
+        "-c",
+        "main.c",
+        "-o",
+        "main.o"
+      ],
+      "diagnostic": "",
+      "exit": 0,
+      "mode": "refused",
+      "paths": {},
+      "timed_out": false,
+      "tool": "gcc"
+    },
+    {
+      "argv": [
+        "gem",
+        "list",
+        "--local"
+      ],
+      "diagnostic": "",
+      "exit": 0,
+      "mode": "readable",
+      "paths": {
+        "$HOME/.config/gem/gemrc": [
+          "-1 ENOENT"
+        ]
+      },
+      "timed_out": false,
+      "tool": "gem"
+    },
+    {
+      "argv": [
+        "gem",
+        "list",
+        "--local"
+      ],
+      "diagnostic": "",
+      "exit": 0,
+      "mode": "refused",
+      "paths": {
+        "$HOME/.config/gem/gemrc": [
+          "-1 EACCES"
+        ]
+      },
+      "timed_out": false,
+      "tool": "gem"
+    },
+    {
+      "argv": [
+        "git",
+        "status",
+        "--porcelain"
+      ],
+      "diagnostic": "",
+      "exit": 0,
+      "mode": "readable",
+      "paths": {
+        "$HOME/.config/git/config": [
+          "success"
+        ],
+        "$HOME/.config/git/ignore": [
+          "-1 ENOENT"
+        ]
+      },
+      "timed_out": false,
+      "tool": "git"
+    },
+    {
+      "argv": [
+        "git",
+        "status",
+        "--porcelain"
+      ],
+      "diagnostic": "",
+      "exit": 0,
+      "mode": "refused",
+      "paths": {
+        "$HOME/.config/git/config": [
+          "-1 EACCES"
+        ],
+        "$HOME/.config/git/ignore": [
+          "-1 EACCES"
+        ]
+      },
+      "timed_out": false,
+      "tool": "git"
+    },
+    {
+      "argv": [
+        "go",
+        "test",
+        "./goproject/..."
+      ],
+      "diagnostic": "",
+      "exit": 0,
+      "mode": "readable",
+      "paths": {
+        "$HOME/.cache/go-build": [
+          "success",
+          "-1 ENOENT"
+        ],
+        "$HOME/.config/go": [
+          "success"
+        ],
+        "$HOME/.config/go/env": [
+          "success"
+        ],
+        "$HOME/.config/go/telemetry": [
+          "-1 ENOENT",
+          "success"
+        ],
+        "$HOME/.config/go/telemetry/debug": [
+          "-1 ENOENT"
+        ],
+        "$HOME/.config/go/telemetry/local": [
+          "-1 ENOENT",
+          "success"
+        ],
+        "$HOME/.config/go/telemetry/local/asm@go1.26.1-go1.26.1-linux-amd64-2026-09-30.v1.count": [
+          "success"
+        ],
+        "$HOME/.config/go/telemetry/local/compile@go1.26.1-go1.26.1-linux-amd64-2026-09-30.v1.count": [
+          "success"
+        ],
+        "$HOME/.config/go/telemetry/local/go@go1.26.1-go1.26.1-linux-amd64-2026-09-30.v1.count": [
+          "success"
+        ],
+        "$HOME/.config/go/telemetry/local/upload.token": [
+          "-1 ENOENT",
+          "success"
+        ],
+        "$HOME/.config/go/telemetry/local/vet@go1.26.1-go1.26.1-linux-amd64-2026-09-30.v1.count": [
+          "success"
+        ],
+        "$HOME/.config/go/telemetry/local/weekends": [
+          "-1 ENOENT",
+          "success"
+        ],
+        "$HOME/.config/go/telemetry/mode": [
+          "-1 ENOENT"
+        ]
+      },
+      "timed_out": false,
+      "tool": "go"
+    },
+    {
+      "argv": [
+        "go",
+        "test",
+        "./goproject/..."
+      ],
+      "diagnostic": "failed to initialize build cache at $HOME/.cache/go-build: mkdir $HOME/.cache/go-build: permission denied\n",
+      "exit": 1,
+      "mode": "refused",
+      "paths": {
+        "$HOME/.cache": [
+          "success"
+        ],
+        "$HOME/.cache/go-build": [
+          "-1 EACCES"
+        ],
+        "$HOME/.config": [
+          "success"
+        ],
+        "$HOME/.config/go": [
+          "-1 EACCES"
+        ],
+        "$HOME/.config/go/env": [
+          "-1 EACCES"
+        ],
+        "$HOME/.config/go/telemetry": [
+          "-1 EACCES"
+        ],
+        "$HOME/.config/go/telemetry/local": [
+          "-1 EACCES"
+        ],
+        "$HOME/.config/go/telemetry/local/weekends": [
+          "-1 EACCES"
+        ],
+        "$HOME/.config/go/telemetry/mode": [
+          "-1 EACCES"
+        ]
+      },
+      "timed_out": false,
+      "tool": "go"
+    },
+    {
+      "argv": [
+        "gradle",
+        "--offline",
+        "--no-daemon",
+        "tasks"
+      ],
+      "diagnostic": "",
+      "exit": 0,
+      "mode": "readable",
+      "paths": {},
+      "timed_out": false,
+      "tool": "gradle"
+    },
+    {
+      "argv": [
+        "gradle",
+        "--offline",
+        "--no-daemon",
+        "tasks"
+      ],
+      "diagnostic": "",
+      "exit": 0,
+      "mode": "refused",
+      "paths": {},
+      "timed_out": false,
+      "tool": "gradle"
+    },
+    {
+      "argv": [
+        "javac",
+        "Main.java"
+      ],
+      "diagnostic": "",
+      "exit": 0,
+      "mode": "readable",
+      "paths": {},
+      "timed_out": false,
+      "tool": "java"
+    },
+    {
+      "argv": [
+        "javac",
+        "Main.java"
+      ],
+      "diagnostic": "",
+      "exit": 0,
+      "mode": "refused",
+      "paths": {},
+      "timed_out": false,
+      "tool": "java"
+    },
+    {
+      "argv": [
+        "julia",
+        "--project=.",
+        "-e",
+        "using Pkg; Pkg.offline(true); Pkg.status()"
+      ],
+      "diagnostic": "",
+      "exit": 0,
+      "mode": "readable",
+      "paths": {},
+      "timed_out": false,
+      "tool": "julia"
+    },
+    {
+      "argv": [
+        "julia",
+        "--project=.",
+        "-e",
+        "using Pkg; Pkg.offline(true); Pkg.status()"
+      ],
+      "diagnostic": "",
+      "exit": 0,
+      "mode": "refused",
+      "paths": {},
+      "timed_out": false,
+      "tool": "julia"
+    },
+    {
+      "argv": [
+        "make"
+      ],
+      "diagnostic": "",
+      "exit": 0,
+      "mode": "readable",
+      "paths": {},
+      "timed_out": false,
+      "tool": "make"
+    },
+    {
+      "argv": [
+        "make"
+      ],
+      "diagnostic": "",
+      "exit": 0,
+      "mode": "refused",
+      "paths": {},
+      "timed_out": false,
+      "tool": "make"
+    },
+    {
+      "argv": [
+        "mvn",
+        "--offline",
+        "validate"
+      ],
+      "diagnostic": "",
+      "exit": 0,
+      "mode": "readable",
+      "paths": {},
+      "timed_out": false,
+      "tool": "maven"
+    },
+    {
+      "argv": [
+        "mvn",
+        "--offline",
+        "validate"
+      ],
+      "diagnostic": "",
+      "exit": 0,
+      "mode": "refused",
+      "paths": {},
+      "timed_out": false,
+      "tool": "maven"
+    },
+    {
+      "argv": [
+        "mise",
+        "ls",
+        "--offline"
+      ],
+      "diagnostic": "",
+      "exit": 0,
+      "mode": "readable",
+      "paths": {
+        "$HOME/.cache/mise": [
+          "-1 ENOENT"
+        ],
+        "$HOME/.config": [
+          "-1 EINVAL"
+        ],
+        "$HOME/.config/mise": [
+          "-1 EINVAL"
+        ],
+        "$HOME/.config/mise/conf.d": [
+          "-1 ENOENT"
+        ],
+        "$HOME/.config/mise/config.local.toml": [
+          "-1 ENOENT"
+        ],
+        "$HOME/.config/mise/config.toml": [
+          "success",
+          "-1 EINVAL"
+        ],
+        "$HOME/.config/mise/mise.local.toml": [
+          "-1 ENOENT"
+        ],
+        "$HOME/.config/mise/mise.toml": [
+          "-1 ENOENT"
+        ],
+        "$HOME/.config/mise/miserc.toml": [
+          "-1 ENOENT"
+        ],
+        "$HOME/.config/mise/trusted-configs": [
+          "-1 ENOENT"
+        ]
+      },
+      "timed_out": false,
+      "tool": "mise"
+    },
+    {
+      "argv": [
+        "mise",
+        "ls",
+        "--offline"
+      ],
+      "diagnostic": "",
+      "exit": 0,
+      "mode": "refused",
+      "paths": {
+        "$HOME/.cache/mise": [
+          "-1 EACCES"
+        ],
+        "$HOME/.config/mise/conf.d": [
+          "-1 EACCES"
+        ],
+        "$HOME/.config/mise/config.local.toml": [
+          "-1 EACCES"
+        ],
+        "$HOME/.config/mise/config.toml": [
+          "-1 EACCES"
+        ],
+        "$HOME/.config/mise/mise.local.toml": [
+          "-1 EACCES"
+        ],
+        "$HOME/.config/mise/mise.toml": [
+          "-1 EACCES"
+        ],
+        "$HOME/.config/mise/miserc.toml": [
+          "-1 EACCES"
+        ],
+        "$HOME/.config/mise/trusted-configs": [
+          "-1 EACCES"
+        ]
+      },
+      "timed_out": false,
+      "tool": "mise"
+    },
+    {
+      "argv": [
+        "ninja"
+      ],
+      "diagnostic": "",
+      "exit": 0,
+      "mode": "readable",
+      "paths": {},
+      "timed_out": false,
+      "tool": "ninja"
+    },
+    {
+      "argv": [
+        "ninja"
+      ],
+      "diagnostic": "",
+      "exit": 0,
+      "mode": "refused",
+      "paths": {},
+      "timed_out": false,
+      "tool": "ninja"
+    },
+    {
+      "argv": [
+        "npm",
+        "run",
+        "check",
+        "--offline"
+      ],
+      "diagnostic": "",
+      "exit": 0,
+      "mode": "readable",
+      "paths": {},
+      "timed_out": false,
+      "tool": "npm"
+    },
+    {
+      "argv": [
+        "npm",
+        "run",
+        "check",
+        "--offline"
+      ],
+      "diagnostic": "",
+      "exit": 0,
+      "mode": "refused",
+      "paths": {},
+      "timed_out": false,
+      "tool": "npm"
+    },
+    {
+      "argv": [
+        "python3",
+        "-m",
+        "pip",
+        "list",
+        "--disable-pip-version-check"
+      ],
+      "diagnostic": "",
+      "exit": 0,
+      "mode": "readable",
+      "paths": {
+        "$HOME/.cache": [
+          "success"
+        ],
+        "$HOME/.cache/pip": [
+          "success"
+        ],
+        "$HOME/.config/pip/pip.conf": [
+          "success"
+        ]
+      },
+      "timed_out": false,
+      "tool": "pip"
+    },
+    {
+      "argv": [
+        "python3",
+        "-m",
+        "pip",
+        "list",
+        "--disable-pip-version-check"
+      ],
+      "diagnostic": "",
+      "exit": 0,
+      "mode": "refused",
+      "paths": {
+        "$HOME/.cache": [
+          "success",
+          "-1 EACCES"
+        ],
+        "$HOME/.cache/pip": [
+          "-1 EACCES"
+        ],
+        "$HOME/.config/pip/pip.conf": [
+          "-1 EACCES"
+        ]
+      },
+      "timed_out": false,
+      "tool": "pip"
+    },
+    {
+      "argv": [
+        "pnpm",
+        "run",
+        "check"
+      ],
+      "diagnostic": "",
+      "exit": 0,
+      "mode": "readable",
+      "paths": {
+        "$HOME/.config/pnpm/rc": [
+          "success"
+        ]
+      },
+      "timed_out": false,
+      "tool": "pnpm"
+    },
+    {
+      "argv": [
+        "pnpm",
+        "run",
+        "check"
+      ],
+      "diagnostic": "",
+      "exit": 0,
+      "mode": "refused",
+      "paths": {
+        "$HOME/.config/pnpm/rc": [
+          "-1 EACCES"
+        ]
+      },
+      "timed_out": false,
+      "tool": "pnpm"
+    },
+    {
+      "argv": [
+        "prettier",
+        "--check",
+        "main.js"
+      ],
+      "diagnostic": "",
+      "exit": 0,
+      "mode": "readable",
+      "paths": {},
+      "timed_out": false,
+      "tool": "prettier"
+    },
+    {
+      "argv": [
+        "prettier",
+        "--check",
+        "main.js"
+      ],
+      "diagnostic": "",
+      "exit": 0,
+      "mode": "refused",
+      "paths": {},
+      "timed_out": false,
+      "tool": "prettier"
+    },
+    {
+      "argv": [
+        "ruby",
+        "-c",
+        "main.rb"
+      ],
+      "diagnostic": "",
+      "exit": 0,
+      "mode": "readable",
+      "paths": {},
+      "timed_out": false,
+      "tool": "ruby"
+    },
+    {
+      "argv": [
+        "ruby",
+        "-c",
+        "main.rb"
+      ],
+      "diagnostic": "",
+      "exit": 0,
+      "mode": "refused",
+      "paths": {},
+      "timed_out": false,
+      "tool": "ruby"
+    },
+    {
+      "argv": [
+        "ruff",
+        "check",
+        "main.py"
+      ],
+      "diagnostic": "",
+      "exit": 0,
+      "mode": "readable",
+      "paths": {
+        "$HOME/.config/git/config": [
+          "success"
+        ],
+        "$HOME/.config/git/ignore": [
+          "-1 ENOENT"
+        ],
+        "$HOME/.config/ruff/.ruff.toml": [
+          "-1 ENOENT"
+        ],
+        "$HOME/.config/ruff/pyproject.toml": [
+          "-1 ENOENT"
+        ],
+        "$HOME/.config/ruff/ruff.toml": [
+          "-1 ENOENT"
+        ]
+      },
+      "timed_out": false,
+      "tool": "ruff"
+    },
+    {
+      "argv": [
+        "ruff",
+        "check",
+        "main.py"
+      ],
+      "diagnostic": "",
+      "exit": 0,
+      "mode": "refused",
+      "paths": {
+        "$HOME/.config/git/config": [
+          "-1 EACCES"
+        ],
+        "$HOME/.config/git/ignore": [
+          "-1 EACCES"
+        ],
+        "$HOME/.config/ruff/.ruff.toml": [
+          "-1 EACCES"
+        ],
+        "$HOME/.config/ruff/pyproject.toml": [
+          "-1 EACCES"
+        ],
+        "$HOME/.config/ruff/ruff.toml": [
+          "-1 EACCES"
+        ]
+      },
+      "timed_out": false,
+      "tool": "ruff"
+    },
+    {
+      "argv": [
+        "rustfmt",
+        "--check",
+        "src/main.rs"
+      ],
+      "diagnostic": "",
+      "exit": 0,
+      "mode": "readable",
+      "paths": {
+        "$HOME/.config/rustfmt/.rustfmt.toml": [
+          "-1 ENOENT"
+        ],
+        "$HOME/.config/rustfmt/rustfmt.toml": [
+          "-1 ENOENT"
+        ]
+      },
+      "timed_out": false,
+      "tool": "rustfmt"
+    },
+    {
+      "argv": [
+        "rustfmt",
+        "--check",
+        "src/main.rs"
+      ],
+      "diagnostic": "Failed to get metadata for config file \"$HOME/.config/rustfmt/.rustfmt.toml\": Permission denied (os error 13)\n",
+      "exit": 1,
+      "mode": "refused",
+      "paths": {
+        "$HOME/.config/rustfmt/.rustfmt.toml": [
+          "-1 EACCES"
+        ]
+      },
+      "timed_out": false,
+      "tool": "rustfmt"
+    },
+    {
+      "argv": [
+        "sbt",
+        "--server",
+        "-Dsbt.offline=true",
+        "about"
+      ],
+      "diagnostic": "",
+      "exit": 0,
+      "mode": "readable",
+      "paths": {
+        "$HOME/.cache": [
+          "-1 EINVAL"
+        ],
+        "$HOME/.cache/JNA": [
+          "-1 ENOENT",
+          "success",
+          "-1 EINVAL"
+        ],
+        "$HOME/.cache/coursier": [
+          "-1 EEXIST",
+          "success",
+          "-1 EINVAL",
+          "-1 EACCES"
+        ],
+        "$HOME/.cache/sbt": [
+          "success",
+          "-1 EINVAL",
+          "-1 ENOENT",
+          "-1 EEXIST"
+        ],
+        "$HOME/.config": [
+          "-1 EINVAL"
+        ],
+        "$HOME/.config/coursier/credentials": [
+          "-1 ENOENT"
+        ],
+        "$HOME/.config/coursier/mirror.properties": [
+          "-1 ENOENT"
+        ],
+        "$HOME/.config/sbt": [
+          "-1 ENOENT",
+          "success"
+        ],
+        "$HOME/.config/sbt/2": [
+          "-1 ENOENT",
+          "success"
+        ],
+        "$HOME/.config/sbt/2/dependency": [
+          "-1 ENOENT"
+        ],
+        "$HOME/.config/sbt/2/plugins": [
+          "-1 ENOENT"
+        ],
+        "$HOME/.config/sbt/2/staging": [
+          "-1 ENOENT",
+          "success"
+        ],
+        "$HOME/.config/sbt/preloaded/org/scala-sbt/sbt/2.0.8/": [
+          "-1 ENOENT"
+        ],
+        "$HOME/.config/sbt/sbtopts": [
+          "-1 ENOENT"
+        ]
+      },
+      "timed_out": false,
+      "tool": "sbt"
+    },
+    {
+      "argv": [
+        "sbt",
+        "--server",
+        "-Dsbt.offline=true",
+        "about"
+      ],
+      "diagnostic": "mkdir: Permission denied\nmkdir: Permission denied\ncat: $HOME/.cache/sbt/boot/sbt-launch/2.0.8/sbt-launch-2.0.8.jar.sha1: Permission denied\nshasum: standard input: no properly formatted SHA checksum lines found\nfailed to download launcher jar: https://repo1.maven.org/maven2/org/scala-sbt/sbt-launch/2.0.8/sbt-launch-2.0.8.jar (shasum mismatch)\n",
+      "exit": 2,
+      "mode": "refused",
+      "paths": {
+        "$HOME/.cache": [
+          "success"
+        ],
+        "$HOME/.cache/sbt": [
+          "-1 EACCES",
+          "success"
+        ],
+        "$HOME/.config/sbt/preloaded/org/scala-sbt/sbt/2.0.8/": [
+          "-1 EACCES"
+        ],
+        "$HOME/.config/sbt/sbtopts": [
+          "-1 EACCES"
+        ]
+      },
+      "timed_out": false,
+      "tool": "sbt"
+    },
+    {
+      "argv": [
+        "swift",
+        "build"
+      ],
+      "diagnostic": "",
+      "exit": 0,
+      "mode": "readable",
+      "paths": {
+        "$HOME/.cache": [
+          "-1 EINVAL",
+          "success"
+        ],
+        "$HOME/.cache/clang": [
+          "-1 ENOENT",
+          "success",
+          "-1 EEXIST"
+        ],
+        "$HOME/.cache/org.swift.foundation.URLCache": [
+          "-1 ENOENT",
+          "success"
+        ],
+        "$HOME/.cache/org.swift.swiftpm": [
+          "-1 ENOENT",
+          "success",
+          "-1 EINVAL"
+        ],
+        "$HOME/.config": [
+          "success",
+          "-1 EINVAL"
+        ],
+        "$HOME/.config/git/config": [
+          "success"
+        ],
+        "$HOME/.config/swiftpm": [
+          "-1 ENOENT",
+          "success"
+        ],
+        "$HOME/.config/swiftpm/cache": [
+          "-1 ENOENT",
+          "success"
+        ],
+        "$HOME/.config/swiftpm/config": [
+          "-1 ENOENT"
+        ],
+        "$HOME/.config/swiftpm/configuration": [
+          "-1 ENOENT",
+          "success"
+        ],
+        "$HOME/.config/swiftpm/configuration/mirrors.json": [
+          "-1 ENOENT"
+        ],
+        "$HOME/.config/swiftpm/configuration/registries.json": [
+          "-1 ENOENT"
+        ],
+        "$HOME/.config/swiftpm/security": [
+          "-1 ENOENT",
+          "success"
+        ]
+      },
+      "timed_out": false,
+      "tool": "swift"
+    },
+    {
+      "argv": [
+        "swift",
+        "build"
+      ],
+      "diagnostic": "er\", \"-rpath\", \"-Xlinker\", \"/opt/swift/swift-6.3/usr/lib/swift/pm/ManifestAPI\", \"-swift-version\", \"6\", \"-I\", \"/opt/swift/swift-6.3/usr/lib/swift/pm/ManifestAPI\", \"-package-description-version\", \"6.0.0\", \"$CENSUS/work/Package.swift\", \"-o\", \"$CENSUS/TemporaryDirectory.SsruVR/work-manifest\"])\n<unknown>:0: error: unable to open output file '$HOME/.cache/clang/ModuleCache/XXHTDPP46C16/SwiftShims-4IR17D1XW7O5.pcm': 'Permission denied'\n<unknown>:0: error: could not build C module 'SwiftShims'\nwarning: 'work': failed loading cached manifest for 'work': invalid access to $HOME/.cache/org.swift.swiftpm/manifests\nwarning: 'work': failed closing manifest db cache: invalid access to $HOME/.cache/org.swift.swiftpm/manifests\nerror: 'work': Invalid manifest (compiled with: [\"/opt/swift/swift-6.3/usr/bin/swiftc\", \"-vfsoverlay\", \"$CENSUS/TemporaryDirectory.j1TPEX/vfs.yaml\", \"-L\", \"/opt/swift/swift-6.3/usr/lib/swift/pm/ManifestAPI\", \"-lPackageDescription\", \"-Xlinker\", \"-rpath\", \"-Xlinker\", \"/opt/swift/swift-6.3/usr/lib/swift/pm/ManifestAPI\", \"-swift-version\", \"6\", \"-I\", \"/opt/swift/swift-6.3/usr/lib/swift/pm/ManifestAPI\", \"-package-description-version\", \"6.0.0\", \"$CENSUS/work/Package.swift\", \"-o\", \"$CENSUS/TemporaryDirectory.GLU0Rs/work-manifest\"])\n<unknown>:0: error: unable to open output file '$HOME/.cache/clang/ModuleCache/XXHTDPP46C16/SwiftShims-4IR17D1XW7O5.pcm': 'Permission denied'\n<unknown>:0: error: could not build C module 'SwiftShims'\nerror: ExitCode(rawValue: 1)\n[0/1] Planning build\n",
+      "exit": 1,
+      "mode": "refused",
+      "paths": {
+        "$HOME/.cache": [
+          "-1 EINVAL",
+          "success"
+        ],
+        "$HOME/.cache/clang": [
+          "-1 EACCES"
+        ],
+        "$HOME/.cache/org.swift.foundation.URLCache": [
+          "-1 EACCES"
+        ],
+        "$HOME/.cache/org.swift.swiftpm": [
+          "-1 EACCES"
+        ],
+        "$HOME/.config": [
+          "success"
+        ],
+        "$HOME/.config/swiftpm": [
+          "-1 EACCES"
+        ],
+        "$HOME/.config/swiftpm/configuration": [
+          "-1 EACCES"
+        ],
+        "$HOME/.config/swiftpm/security": [
+          "-1 EACCES"
+        ]
+      },
+      "timed_out": false,
+      "tool": "swift"
+    },
+    {
+      "argv": [
+        "uv",
+        "pip",
+        "list",
+        "--python",
+        "/usr/bin/python3"
+      ],
+      "diagnostic": "",
+      "exit": 0,
+      "mode": "readable",
+      "paths": {
+        "$HOME/.cache/uv": [
+          "success",
+          "-1 EEXIST",
+          "-1 ENOENT"
+        ],
+        "$HOME/.config/uv/uv.toml": [
+          "success"
+        ]
+      },
+      "timed_out": false,
+      "tool": "uv"
+    },
+    {
+      "argv": [
+        "uv",
+        "pip",
+        "list",
+        "--python",
+        "/usr/bin/python3"
+      ],
+      "diagnostic": "error: Failed to initialize cache at `$HOME/.cache/uv`\n  Caused by: failed to create directory `$HOME/.cache/uv`: Permission denied (os error 13)\n",
+      "exit": 2,
+      "mode": "refused",
+      "paths": {
+        "$HOME/.cache/uv": [
+          "-1 EACCES"
+        ],
+        "$HOME/.config/uv/uv.toml": [
+          "-1 EACCES"
+        ]
+      },
+      "timed_out": false,
+      "tool": "uv"
+    },
+    {
+      "argv": [
+        "yarn",
+        "run",
+        "check"
+      ],
+      "diagnostic": "",
+      "exit": 0,
+      "mode": "readable",
+      "paths": {
+        "$HOME/.cache/yarn": [
+          "success"
+        ],
+        "$HOME/.config/yarn": [
+          "success"
+        ],
+        "$HOME/.config/yarn/config": [
+          "success"
+        ],
+        "$HOME/.config/yarn/link": [
+          "-1 ENOENT"
+        ]
+      },
+      "timed_out": false,
+      "tool": "yarn"
+    },
+    {
+      "argv": [
+        "yarn",
+        "run",
+        "check"
+      ],
+      "diagnostic": "Error: EACCES: permission denied, open '$HOME/.config/yarn'\n    at Object.openSync (node:fs:560:18)\n    at readFileSync (node:fs:444:35)\n    at /tmp/harn-9035-tools/node_modules/yarn/lib/cli.js:97915:58\n    at Array.map (<anonymous>)\n    at parseRcPaths (/tmp/harn-9035-tools/node_modules/yarn/lib/cli.js:97913:78)\n    at Object.findRc (/tmp/harn-9035-tools/node_modules/yarn/lib/cli.js:97927:10)\n    at getRcConfigForCwd (/tmp/harn-9035-tools/node_modules/yarn/lib/cli.js:57500:74)\n    at /tmp/harn-9035-tools/node_modules/yarn/lib/cli.js:89251:56\n    at Generator.next (<anonymous>)\n    at step (/tmp/harn-9035-tools/node_modules/yarn/lib/cli.js:310:30)\n",
+      "exit": 1,
+      "mode": "refused",
+      "paths": {
+        "$HOME/.config/yarn": [
+          "-1 EACCES"
+        ]
+      },
+      "timed_out": false,
+      "tool": "yarn"
+    }
+  ],
+  "schema": "harn.config_census.v1",
+  "timed_out_commands": [
+    "dotnet/readable"
+  ]
+}

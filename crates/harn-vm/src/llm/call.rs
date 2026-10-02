@@ -516,17 +516,98 @@ pub(crate) async fn execute_llm_call(
     bridge: Option<&Arc<crate::bridge::HostBridge>>,
     delta_sink: Option<api::DeltaSender>,
 ) -> Result<VmValue, VmError> {
+    // Keep the large dispatch future off the stack of this wrapper, which
+    // every ordinary chat caller awaits.
+    let outcome = Box::pin(execute_llm_call_outcome(
+        ctx, opts, options, bridge, delta_sink,
+    ))
+    .await?;
+    finish_llm_call(outcome)
+}
+
+/// The same dispatch owner with its paid usage retained on schema failure.
+/// Evaluation receipts consume this outcome instead of discarding settlement
+/// when strict validation rejects a completed provider response.
+pub(crate) async fn execute_llm_call_outcome(
+    ctx: Option<&crate::vm::AsyncBuiltinCtx>,
+    opts: api::LlmCallOptions,
+    options: Option<crate::value::DictMap>,
+    bridge: Option<&Arc<crate::bridge::HostBridge>>,
+    delta_sink: Option<api::DeltaSender>,
+) -> Result<SchemaLoopOutcome, VmError> {
     // Publish the resolved provider/model facts for the introspection
     // tool surface (current_model() / current_provider() / ...). All
     // llm_call code paths funnel through this function — the bridged
     // `llm_call_with_bridge`, structured variants, and the plain
     // `llm_call_impl` — so recording here is the single DRY point.
     super::introspection::record_resolved_llm_call(&opts.provider, &opts.model);
-    let outcome = if let Some(policy) = opts.routing_policy.clone() {
-        execute_routing_schema_retry_loop(ctx, policy, opts, options, bridge, delta_sink).await?
+    if let Some(policy) = opts.routing_policy.clone() {
+        execute_routing_schema_retry_loop(ctx, policy, opts, options, bridge, delta_sink).await
     } else {
-        execute_schema_retry_loop(ctx, opts, options, bridge, delta_sink).await?
+        execute_schema_retry_loop(ctx, opts, options, bridge, delta_sink).await
+    }
+}
+
+/// Make one observed call and project its visible text to `bridge` as
+/// `call_progress` deltas while it streams.
+///
+/// The deltas are forwarded inline, in the same task that awaits the call, so
+/// this needs no `spawn_local` forwarder and works on whatever runtime the call
+/// runs on: an ACP prompt's local set, or a daemon or sub-agent worker that
+/// carried the ambient bridge onto a multi-thread runtime.
+async fn observed_call_streaming_to(
+    bridge: &Arc<crate::bridge::HostBridge>,
+    opts: &api::LlmCallOptions,
+    tool_format: Option<&str>,
+    delta_sink: Option<api::DeltaSender>,
+) -> Result<api::LlmResult, VmError> {
+    let (delta_tx, mut delta_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+    let call_id = uuid::Uuid::now_v7().to_string();
+    let mut call = Box::pin(agent_observe::observed_llm_call(
+        opts,
+        tool_format,
+        None,
+        None,
+        false,
+        false,
+        None,
+        Some(delta_tx),
+    ));
+    let mut forwarded: u64 = 0;
+    let mut forward = |delta: String| {
+        forwarded += 1;
+        bridge.send_call_progress(&call_id, &delta, forwarded, true);
+        if let Some(sink) = delta_sink.as_ref() {
+            let _ = sink.send(delta);
+        }
     };
+    let mut deltas_open = true;
+    let result = loop {
+        tokio::select! {
+            delta = delta_rx.recv(), if deltas_open => match delta {
+                Some(delta) => forward(delta),
+                None => deltas_open = false,
+            },
+            result = &mut call => break result,
+        }
+    };
+    while let Ok(delta) = delta_rx.try_recv() {
+        forward(delta);
+    }
+    bridge.finish_call_progress(&call_id);
+    result
+}
+
+/// Whether a call asked for its visible text to stream to the host.
+///
+/// `_user_visible` is the host-plumbing spelling `llm_call_options` keeps, and
+/// the agent loop sets it on the turn request a person is waiting to read.
+/// `user_visible` is the direct `llm_call` option the bridge builtin reads.
+fn requests_user_visible_stream(options: &Option<crate::value::DictMap>) -> bool {
+    helpers::opt_bool(options, "user_visible") || helpers::opt_bool(options, "_user_visible")
+}
+
+fn finish_llm_call(outcome: SchemaLoopOutcome) -> Result<VmValue, VmError> {
     if outcome.errors.is_empty() {
         return Ok(outcome.vm_result);
     }
@@ -752,8 +833,20 @@ pub(crate) async fn execute_schema_retry_loop(
     let nudge_mode = parse_schema_nudge(&options);
 
     let tool_format = helpers::opt_str(&options, "tool_format");
+    // A call that reached `llm_call` without the bridge-registered builtin (a
+    // `harness.llm.call` on a VM an ACP server set up, for example) still
+    // projects its progress through the host bridge that server installed.
     let bridged = bridge.is_some();
-    let user_visible = bridged && helpers::opt_bool(&options, "user_visible");
+    let user_visible = bridged && requests_user_visible_stream(&options);
+    // A user-visible request that reached `llm_call` without the bridge-
+    // registered builtin (a `harness.llm.call` on a VM an ACP server set up,
+    // for example) still streams its visible text through the host bridge that
+    // server installed. Side calls never take this path.
+    let ambient_stream_bridge = if !bridged && requests_user_visible_stream(&options) {
+        super::agent_runtime::current_host_bridge()
+    } else {
+        None
+    };
     let output_validation_mode = output_validation_mode(&opts).to_string();
     let expects_structured = helpers::expects_structured_output(&opts);
     // Snapshot the caller's original messages once. Each schema retry
@@ -768,21 +861,34 @@ pub(crate) async fn execute_schema_retry_loop(
         // state machine. Keep that large future behind one pointer so the
         // schema loop composes with Harness dispatch on ordinary 2 MiB
         // embedder and test-worker stacks.
-        let call_result = Box::pin(agent_observe::observed_llm_call(
-            &opts,
-            tool_format.as_deref(),
-            bridge,
-            None,
-            user_visible,
-            bridged, // offthread=true on the bridge path, local set otherwise
-            // Top-level `llm_call` host calls don't have a session in the
-            // sense the streaming detector needs (no agent loop, no
-            // session_id), so skip candidate detection here. The agent
-            // loop's `run_llm_call` is the integration point that owns it.
-            None,
-            delta_sink.clone(),
-        ))
-        .await;
+        let call_result = match ambient_stream_bridge.as_ref() {
+            Some(ambient) => {
+                Box::pin(observed_call_streaming_to(
+                    ambient,
+                    &opts,
+                    tool_format.as_deref(),
+                    delta_sink.clone(),
+                ))
+                .await
+            }
+            None => {
+                Box::pin(agent_observe::observed_llm_call(
+                    &opts,
+                    tool_format.as_deref(),
+                    bridge,
+                    None,
+                    user_visible,
+                    bridged, // offthread=true on the bridge path, local set otherwise
+                    // Top-level `llm_call` host calls don't have a session in the
+                    // sense the streaming detector needs (no agent loop, no
+                    // session_id), so skip candidate detection here. The agent
+                    // loop's `run_llm_call` is the integration point that owns it.
+                    None,
+                    delta_sink.clone(),
+                ))
+                .await
+            }
+        };
 
         // A mid-stream schema abort short-circuits the provider call but
         // is otherwise equivalent to a normal schema-validation failure:
@@ -1094,3 +1200,5 @@ pub(crate) fn structured_safe_envelope_err(err: &VmError) -> VmValue {
 
 #[cfg(test)]
 mod schema_stream_abort_retry_tests;
+#[cfg(test)]
+mod stream_visibility_tests;

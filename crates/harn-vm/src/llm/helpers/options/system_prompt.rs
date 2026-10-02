@@ -311,7 +311,27 @@ pub(crate) fn assemble_system_prompt(
     use crate::llm::prompt::{assemble, FragmentBucket, PromptFragment};
 
     let call_role = context_call_role(options)?;
-    if let Some(replacement) = replacement_system_prompt(options)? {
+    let directive_authority = options
+        .and_then(|options| options.get("session_id"))
+        .and_then(|value| match value {
+            VmValue::String(value) if !value.is_empty() => Some(value.as_str()),
+            _ => None,
+        })
+        .map(str::to_string)
+        .or_else(crate::agent_sessions::current_session_id)
+        .filter(|session_id| crate::agent_sessions::exists(session_id))
+        .map(|session_id| {
+            let nonce = super::reminders::directive_nonce_for_session(&session_id);
+            super::reminders::directive_nonce_instructions(&nonce)
+        });
+    if let Some(mut replacement) = replacement_system_prompt(options)? {
+        if let Some(directive_authority) = directive_authority
+            .as_deref()
+            .filter(|authority| !replacement.contains(authority))
+        {
+            replacement.push_str("\n\n");
+            replacement.push_str(directive_authority);
+        }
         let mut assembled = crate::llm::prompt::replace(replacement);
         assembled.set_call_role(call_role);
         assembled.set_actor_chain(current_actor_chain_json());
@@ -365,6 +385,30 @@ pub(crate) fn assemble_system_prompt(
     // tool's own presence. Tool and instruction share one source of truth and
     // cannot drift. Dormant until a tool actually carries `guidance`.
     append_tool_guidance_fragments(&mut fragments, options);
+
+    if let Some(directive_authority) = directive_authority.filter(|authority| {
+        !fragments
+            .iter()
+            .any(|fragment| fragment.body.contains(authority))
+    }) {
+        // Session reentry carries the saved primary prompt, including this
+        // declaration, as one primary fragment. Insert it next to that same
+        // primary text on the first turn so later tool guidance cannot move
+        // across it and change the provider-visible prompt bytes.
+        let index = fragments
+            .iter()
+            .position(|fragment| fragment.id == "primary" || fragment.id == "primary:system")
+            .map_or(0, |index| index + 1);
+        fragments.insert(
+            index,
+            PromptFragment::new(
+                "directive-authority",
+                "harn-runtime",
+                FragmentBucket::Before,
+                directive_authority,
+            ),
+        );
+    }
 
     // Directives are intentionally NOT folded into the system fragments here.
     // The one context envelope is appended at the trailing user slot so the

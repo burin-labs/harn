@@ -1,5 +1,6 @@
 # Rust and local Cargo build outputs.
 /target/
+/.harn-workspace-source/
 .target-*/
 .cargo/config.toml
 .cargo/harn-target-dir

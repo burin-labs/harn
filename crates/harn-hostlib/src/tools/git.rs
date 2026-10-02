@@ -6,7 +6,6 @@
 //! `schemas/tools/git.{request,response}.json`.
 
 use std::path::PathBuf;
-use std::process::Command;
 use std::sync::Arc;
 
 use harn_vm::VmValue;
@@ -361,7 +360,12 @@ fn validate_rev(rev: &str) -> Result<(), HostlibError> {
 }
 
 fn run_git(repo: &PathBuf, args: &[&str]) -> Result<String, HostlibError> {
-    let mut cmd = Command::new("git");
+    let mut cmd = harn_vm::process_sandbox::session_std_command("git").map_err(|err| {
+        HostlibError::Backend {
+            builtin: BUILTIN,
+            message: format!("git session environment: {err:?}"),
+        }
+    })?;
     // Strip ambient `GIT_*` environment variables so that being invoked
     // from inside a parent `git` process (e.g. a pre-push hook running
     // tests, or a git alias) doesn't leak `GIT_DIR` / `GIT_INDEX_FILE` /
@@ -400,6 +404,7 @@ fn run_git(repo: &PathBuf, args: &[&str]) -> Result<String, HostlibError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::process::Command;
 
     #[test]
     fn validate_rev_rejects_flag_lookalikes() {

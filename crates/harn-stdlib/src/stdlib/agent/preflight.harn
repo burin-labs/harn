@@ -1,3 +1,6 @@
+import { __render_goal_text } from "std/agent/goal_contract"
+import { __agent_goal_projection } from "std/agent/goal_projection"
+import { agent_completion_obligations } from "std/agent/obligations"
 import { agent_tool_format } from "std/agent/options"
 import { __validate_done_sentinel } from "std/agent/options_validation"
 import { loop_until_done_system_prompt, render_agent_prompt_id } from "std/agent/prompts"
@@ -652,11 +655,22 @@ pub fn __with_prompt_fragment(agent_options: any, fragment: any) {
   return opts + {context_profile: profile + {prompt_fragments: existing + [fragment]}}
 }
 
-fn __agent_context_profile_fragments(opts: dict) {
+fn __agent_context_profile_fragments(agent: HarnessAgent, session: dict, opts: dict) {
   let fragments = []
   const profile = opts?.context_profile ?? opts?.project_context_profile ?? {}
   for fragment in profile?.prompt_fragments ?? [] {
-    const body = trim(fragment?.body ?? fragment?.content ?? "")
+    const body = if fragment?.goal != nil {
+      __render_goal_text(
+        __agent_goal_projection(
+          agent,
+          session.session_id,
+          fragment.goal,
+          agent_completion_obligations(agent, session.session_id, session?.task ?? ""),
+        ),
+      )
+    } else {
+      trim(fragment?.body ?? fragment?.content ?? "")
+    }
     if body == "" {
       continue
     }
@@ -673,8 +687,14 @@ fn __agent_context_profile_fragments(opts: dict) {
   return fragments
 }
 
-fn __agent_primary_system_text(agent: HarnessAgent, session: dict, opts: dict) {
-  if opts?._primary_system != nil && opts._primary_system != "" {
+/**
+ * Resolve the caller's base prompt before turn fragments are assembled.
+ * @effects: [agent]
+ * @errors: []
+ * @api_stability: internal
+ */
+pub fn __agent_primary_system_text(agent: HarnessAgent, session: dict, opts: dict) -> string {
+  if opts?._primary_system != nil {
     return opts._primary_system
   }
   if type_of(opts?.system) == "string" && opts.system != "" {
@@ -704,13 +724,13 @@ fn __agent_primary_system_text(agent: HarnessAgent, session: dict, opts: dict) {
  * The native/json/text tool-call contract (the prose that teaches the model
  * HOW to emit `name({ key: value })` calls in the resolved format) is injected
  * here, in the agent_loop preflight, and NOWHERE else. The bare `llm_call`
- * builtin renders native tool wire definitions and PARSES whatever text/json
- * tool calls come back (via `parse_text_tool_calls_with_tools`), but it never
- * injects the format contract — so a tool caller that bypasses `agent_loop`
- * and drives tools through a bare `llm_call` at `tool_format` json/text would
- * have the model guess the format and parse 0 calls. That is acceptable
- * because nothing does: `agent_loop` is Harn's only tool driver, and embedding
- * hosts project that same driver
+ * builtin renders native tool wire definitions and parses whatever text/json
+ * tool calls come back, but it never injects the format contract. A bare
+ * `llm_call` with tools at `tool_format` json/text would therefore reach the
+ * wire with nothing tool-related on it, so `llm_call` REFUSES that call unless
+ * `agent_direct_llm_options` marked it `_tool_contract_rendered`.
+ * `agent_loop` is Harn's only tool driver, and embedding hosts project that
+ * same driver
  * (the lone bare-`llm_call`-with-tools seam, `std/agents::run_stage` with
  * `mode: "llm"` / `loop_until_done: false`, is a public stdlib entrypoint with
  * no in-tree consumer that passes `tools`). If a future caller needs format-
@@ -738,7 +758,7 @@ pub fn agent_build_turn_system_fragments(
     "mcp_advisory",
     __agent_mcp_initialize_advisory_prompt(opts),
   )
-  fragments = fragments + __agent_context_profile_fragments(opts)
+  fragments = fragments + __agent_context_profile_fragments(harness.agent, session, opts)
   fragments = __agent_push_system_fragment(
     fragments,
     "active_skills",

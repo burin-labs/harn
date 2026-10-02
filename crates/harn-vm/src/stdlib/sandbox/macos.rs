@@ -16,7 +16,7 @@ use std::process::{Command, Output};
 
 use self::swiftpm::compatible_args as macos_sandbox_compatible_args;
 use super::{
-    normalized_process_roots, policy_allows_network, policy_allows_workspace_write,
+    normalized_process_roots, policy_allows_child_writes, policy_allows_network,
     process_sandbox_developer_toolchain_read_roots,
     process_sandbox_package_manager_config_read_roots, process_sandbox_policy_read_roots,
     process_sandbox_policy_write_roots, process_sandbox_presets, process_sandbox_readonly_roots,
@@ -26,6 +26,7 @@ use super::{
 use crate::orchestration::{CapabilityPolicy, ProcessSandboxPreset, SandboxProfile};
 use crate::value::VmError;
 
+mod nested;
 pub(super) mod swiftpm;
 mod toolchain_roots;
 
@@ -38,8 +39,8 @@ impl SandboxBackend for Backend {
         "macos"
     }
 
-    fn filesystem_mechanism() -> &'static str {
-        "macos_sandbox_exec"
+    fn filesystem_mechanism() -> super::SandboxMechanism {
+        super::SandboxMechanism::MacosSandboxExec
     }
 
     fn available() -> bool {
@@ -73,16 +74,29 @@ impl SandboxBackend for Backend {
         policy: &CapabilityPolicy,
         profile: SandboxProfile,
     ) -> Result<Output, VmError> {
+        Self::run_to_output_in_session(program, args, config, policy, profile)
+            .map(|(output, _)| output)
+    }
+
+    fn run_to_output_in_session(
+        program: &str,
+        args: &[String],
+        config: &ProcessCommandConfig,
+        policy: &CapabilityPolicy,
+        profile: SandboxProfile,
+    ) -> Result<(Output, u32), VmError> {
         let mut command = super::build_std_command::<Self>(program, args, policy, profile)?;
         super::apply_process_config(&mut command, config, Some(policy));
-        let output = crate::op_interrupt::capture_output_interruptible(&mut command)
-            .map_err(|error| process_spawn_error(&error).unwrap_or_else(|| spawn_error(error)))?;
+        let (output, session) = crate::op_interrupt::capture_output_interruptible_in_session(
+            &mut command,
+        )
+        .map_err(|error| process_spawn_error(&error).unwrap_or_else(|| spawn_error(error)))?;
         match crate::process_sandbox::macos_wrapped_spawn_io_error(
             output.status.code().unwrap_or(-1),
             &output.stderr,
         ) {
             Some(error) => Err(spawn_error(error)),
-            None => Ok(output),
+            None => Ok((output, session)),
         }
     }
 }
@@ -100,6 +114,28 @@ fn wrap_with_sandbox_exec(
             profile,
         );
     }
+    match nested::nesting(policy) {
+        nested::Nesting::NotNested => {}
+        // Already confined at least as strictly: macOS would refuse a second
+        // profile, so the child runs under this process's own. The program
+        // still gets the arguments that adapt it to confinement.
+        nested::Nesting::Inherit => {
+            nested::report_inherited();
+            return Ok(PrepareOutcome::WrappedExec {
+                wrapper: program.to_string(),
+                args: macos_sandbox_compatible_args(program, args),
+            });
+        }
+        nested::Nesting::Unenforceable(narrowing) => {
+            nested::report_unenforceable(&narrowing);
+            return Err(super::sandbox_rejection(format!(
+                "this process is already inside another sandbox, which allows {}; this run's \
+                 policy denies that, and macOS cannot apply a second sandbox to enforce it, so \
+                 the child was not started",
+                narrowing.describe()
+            )));
+        }
+    }
     let mut wrapped_args = vec![
         "-p".to_string(),
         render_profile_for_program(policy, program),
@@ -116,6 +152,13 @@ fn wrap_with_sandbox_exec(
 fn render_profile_for_program(policy: &CapabilityPolicy, program: &str) -> String {
     let mut developer_toolchain_read_roots = process_sandbox_developer_toolchain_read_roots(policy);
     developer_toolchain_read_roots.extend(toolchain_roots::go_read_root(policy, program));
+    // Rendered with the other toolchain reads, so the read denylist emitted at
+    // the end of the profile beats these grants too (last match wins).
+    developer_toolchain_read_roots.extend(
+        super::read_roots::path_grants::process_sandbox_path_entry_grants(policy)
+            .into_iter()
+            .map(|grant| grant.root),
+    );
     developer_toolchain_read_roots.sort_unstable();
     developer_toolchain_read_roots.dedup();
 
@@ -206,11 +249,11 @@ fn render_profile_with_extra_read_roots(
             sandbox_profile_escape(&root.display().to_string())
         ));
     }
-    if policy_allows_workspace_write(policy) {
+    if policy_allows_child_writes(policy) {
         for root in preset_write_roots(policy) {
             profile.push_str(&format!(
                 "(allow file-read* (subpath \"{}\"))\n",
-                sandbox_profile_escape(root)
+                sandbox_profile_escape(&root.display().to_string())
             ));
         }
         for root in &policy_write_roots {
@@ -219,20 +262,25 @@ fn render_profile_with_extra_read_roots(
                 sandbox_profile_escape(&root.display().to_string())
             ));
         }
-        profile.push_str("(allow file-write*");
-        for root in preset_write_roots(policy) {
-            profile.push_str(&format!(" (subpath \"{}\")", sandbox_profile_escape(root)));
+        // `(allow file-write*)` with no filter is an unqualified grant, so the
+        // aggregate rule is emitted only when it names at least one root. A
+        // policy with no preset, policy, or cache write roots can still write
+        // its workspace roots below, and nothing else.
+        let aggregate_write_roots: Vec<_> = preset_write_roots(policy)
+            .into_iter()
+            .chain(policy_write_roots.iter().cloned())
+            .chain(developer_toolchain_cache_roots.iter().cloned())
+            .collect();
+        if !aggregate_write_roots.is_empty() {
+            profile.push_str("(allow file-write*");
+            for root in &aggregate_write_roots {
+                profile.push_str(&format!(
+                    " (subpath \"{}\")",
+                    sandbox_profile_escape(&root.display().to_string())
+                ));
+            }
+            profile.push_str(")\n");
         }
-        for root in policy_write_roots
-            .iter()
-            .chain(developer_toolchain_cache_roots.iter())
-        {
-            profile.push_str(&format!(
-                " (subpath \"{}\")",
-                sandbox_profile_escape(&root.display().to_string())
-            ));
-        }
-        profile.push_str(")\n");
         for root in &roots {
             profile.push_str(&format!(
                 "(allow file-write* (subpath \"{}\"))\n",
@@ -335,12 +383,11 @@ fn render_profile_with_extra_read_roots(
     // bare EPERM. Both spellings of a `/tmp`- or `/var`-rooted path are
     // emitted for the same reason the write denies emit them.
     //
-    // A non-empty grant also admits sockets under the UserTemp write roots.
-    // sbt's boot server binds `/tmp/bsbt/<hash>/sock`; MSBuild and Gradle
-    // daemons do the same under `/var/folders`. Those directories are already
-    // writable when UserTemp is on — a socket file is a file — so pairing the
-    // write with the bind is the grant, not a widening. A policy that opts
-    // out of UserTemp still has to name every socket root itself.
+    // A non-empty grant also admits sockets under the session temp dir, which
+    // is already writable when UserTemp is on — a socket file is a file — so
+    // pairing the write with the bind is the grant, not a widening. A daemon
+    // that binds under the host's shared temp dirs instead (sbt's boot server
+    // under `/tmp/bsbt`) needs that root named in the grant.
     //
     // Binding creates the socket file, which is a file-write the bind rule
     // does not carry. A root outside every writable root therefore also gets
@@ -363,8 +410,8 @@ fn render_profile_with_extra_read_roots(
     // `sandbox-exec` is last-match-wins, so position is the enforcement: a deny
     // written here beats the preset allows, the workspace and read-only allows,
     // the policy read roots, and the write block's read re-grants. That ordering
-    // is the requirement, not an optimization — `PackageManagerConfig` grants
-    // `~/.config`, `~/.cache`, and `~/.netrc` wholesale, so a denial that
+    // is the requirement, not an optimization: `PackageManagerConfig` grants
+    // credential-bearing roots such as `~/.config/composer`, so a denial that
     // competed with presets instead of beating them would never fire on the
     // paths it exists for.
     //
@@ -431,32 +478,31 @@ fn granted_write_roots(
 ) -> Vec<std::path::PathBuf> {
     let mut granted = workspace_roots.to_vec();
     granted.extend(policy_write_roots.iter().cloned());
-    granted.extend(
-        preset_write_roots(policy)
-            .into_iter()
-            .map(std::path::PathBuf::from),
-    );
+    granted.extend(preset_write_roots(policy));
     granted.sort();
     granted.dedup();
     granted
 }
 
-fn preset_write_roots(policy: &CapabilityPolicy) -> Vec<&'static str> {
-    let mut roots = Vec::new();
+fn preset_write_roots(policy: &CapabilityPolicy) -> Vec<std::path::PathBuf> {
     if process_sandbox_presets(policy).contains(&ProcessSandboxPreset::UserTemp) {
-        roots.extend(user_temp_roots());
+        user_temp_roots(policy)
+    } else {
+        Vec::new()
     }
-    roots
 }
 
-fn user_temp_roots() -> &'static [&'static str] {
-    &[
-        "/private/tmp",
-        "/private/var/folders",
-        "/tmp",
-        "/var/folders",
-        "/var/tmp",
-    ]
+/// The session's own temp dir, which the child's `TMPDIR`, `TMP`, and `TEMP`
+/// name, and Foundation's atomic-replacement staging dir. Not the host's
+/// shared temp dirs: `/tmp` and `/var/folders` hold every other process's
+/// files, so granting them lets a confined child read and overwrite its
+/// neighbours'. Caches that default there are moved into the workspace by
+/// the child's environment instead.
+fn user_temp_roots(policy: &CapabilityPolicy) -> Vec<std::path::PathBuf> {
+    super::workspace_local_tmpdir(policy)
+        .into_iter()
+        .chain(toolchain_roots::foundation_replacement_root())
+        .collect()
 }
 
 /// Socket-file roots the profile will admit: the explicit grant, plus the
@@ -466,7 +512,11 @@ fn unix_socket_profile_roots(policy: &CapabilityPolicy) -> Vec<std::path::PathBu
     if !roots.is_empty()
         && process_sandbox_presets(policy).contains(&ProcessSandboxPreset::UserTemp)
     {
-        roots.extend(user_temp_roots().iter().map(|root| (*root).to_string()));
+        roots.extend(
+            user_temp_roots(policy)
+                .iter()
+                .map(|root| root.display().to_string()),
+        );
     }
     normalized_process_roots(&roots)
 }
@@ -517,3 +567,11 @@ fn standard_device_profile_rules() -> &'static str {
 #[cfg(test)]
 #[path = "macos_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "macos/write_roots_tests.rs"]
+mod write_roots_tests;
+
+#[cfg(test)]
+#[path = "macos/external_root_tests.rs"]
+mod external_root_tests;

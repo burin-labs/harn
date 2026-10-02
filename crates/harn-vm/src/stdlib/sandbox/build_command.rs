@@ -13,7 +13,7 @@ use crate::orchestration::{CapabilityPolicy, SandboxProfile};
 use crate::VmError;
 
 use super::backend::{PrepareOutcome, SandboxBackend};
-use super::ensure_managed_process_egress_supported;
+use super::ensure_spawn_enforceable;
 #[cfg(target_os = "linux")]
 use super::linux;
 
@@ -23,11 +23,22 @@ pub(crate) fn build_std_command<B: SandboxBackend + ?Sized>(
     policy: &CapabilityPolicy,
     profile: SandboxProfile,
 ) -> Result<Command, VmError> {
-    ensure_managed_process_egress_supported::<B>(policy)?;
+    ensure_spawn_enforceable::<B>(policy)?;
     let mut command = Command::new(program);
     command.args(args);
     match B::prepare_std_command(program, args, &mut command, policy, profile)? {
         PrepareOutcome::Direct => Ok(command),
+        #[cfg(target_os = "linux")]
+        PrepareOutcome::BubblewrapExec {
+            wrapper,
+            args,
+            descriptors,
+        } => {
+            let mut wrapped = Command::new(wrapper);
+            wrapped.args(args);
+            descriptors.attach(&mut wrapped);
+            Ok(wrapped)
+        }
         PrepareOutcome::WrappedExec { wrapper, args } => {
             let mut wrapped = Command::new(wrapper);
             wrapped.args(args);
@@ -53,11 +64,22 @@ pub(crate) fn build_tokio_command<B: SandboxBackend + ?Sized>(
     policy: &CapabilityPolicy,
     profile: SandboxProfile,
 ) -> Result<tokio::process::Command, VmError> {
-    ensure_managed_process_egress_supported::<B>(policy)?;
+    ensure_spawn_enforceable::<B>(policy)?;
     let mut command = tokio::process::Command::new(program);
     command.args(args);
     match B::prepare_tokio_command(program, args, &mut command, policy, profile)? {
         PrepareOutcome::Direct => Ok(command),
+        #[cfg(target_os = "linux")]
+        PrepareOutcome::BubblewrapExec {
+            wrapper,
+            args,
+            descriptors,
+        } => {
+            let mut wrapped = tokio::process::Command::new(wrapper);
+            wrapped.args(args);
+            descriptors.attach_tokio(&mut wrapped);
+            Ok(wrapped)
+        }
         PrepareOutcome::WrappedExec { wrapper, args } => {
             let mut wrapped = tokio::process::Command::new(wrapper);
             wrapped.args(args);

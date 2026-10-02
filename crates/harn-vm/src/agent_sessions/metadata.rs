@@ -114,6 +114,70 @@ pub fn system_prompt(id: &str) -> Option<String> {
     })
 }
 
+const DIRECTIVE_NONCE_METADATA_KEY: &str = "_harn_directive_nonce";
+
+/// Read the durable authority nonce owned by this session's transcript.
+pub fn directive_nonce(id: &str) -> Option<String> {
+    SESSIONS.with(|sessions| {
+        let sessions = sessions.borrow();
+        let state = sessions.get(id)?;
+        state
+            .transcript
+            .as_dict()?
+            .get("metadata")?
+            .as_dict()?
+            .get(DIRECTIVE_NONCE_METADATA_KEY)
+            .and_then(|value| match value {
+                VmValue::String(value) if !value.is_empty() => Some(value.to_string()),
+                _ => None,
+            })
+    })
+}
+
+/// Persist a nonce in typed session metadata without turning it into a replay
+/// message. Existing values win so reentry and imported snapshots cannot
+/// silently rotate the authority marker.
+pub fn record_directive_nonce(id: &str, nonce: &str) -> Result<Option<String>, String> {
+    SESSIONS.with(|sessions| {
+        let mut sessions = sessions.borrow_mut();
+        let Some(state) = sessions.get_mut(id) else {
+            return Ok(None);
+        };
+        if let Some(existing) = state
+            .transcript
+            .as_dict()
+            .and_then(|transcript| transcript.get("metadata"))
+            .and_then(VmValue::as_dict)
+            .and_then(|metadata| metadata.get(DIRECTIVE_NONCE_METADATA_KEY))
+            .and_then(|value| match value {
+                VmValue::String(value) if !value.is_empty() => Some(value.to_string()),
+                _ => None,
+            })
+        {
+            return Ok(Some(existing));
+        }
+
+        let mut transcript = state
+            .transcript
+            .as_dict()
+            .cloned()
+            .unwrap_or_else(crate::value::DictMap::new);
+        let mut metadata = transcript
+            .get("metadata")
+            .and_then(VmValue::as_dict)
+            .map(|metadata| metadata.as_ref().clone())
+            .unwrap_or_else(crate::value::DictMap::new);
+        metadata.put_str(DIRECTIVE_NONCE_METADATA_KEY, nonce);
+        transcript.insert(
+            crate::value::intern_key("metadata"),
+            VmValue::dict(metadata),
+        );
+        apply_transcript_with_budget(state, VmValue::dict(transcript), "record_directive_nonce")?;
+        state.touch();
+        Ok(Some(nonce.to_string()))
+    })
+}
+
 #[cfg(debug_assertions)]
 pub(super) fn forbidden_workspace_prompt_token(system_prompt: &str) -> Option<&'static str> {
     let mut remaining = system_prompt;

@@ -794,25 +794,32 @@ if grep -Fq 'rust-toolchain.toml pins rustc' "$missing_nextest_stderr"; then
   exit 1
 fi
 
-for variable in \
-  HARN_EGRESS_ALLOW \
-  HARN_EGRESS_DENY \
-  HARN_EGRESS_DEFAULT \
-  HARN_EGRESS_BLOCK_PRIVATE \
-  HARN_EGRESS_ALLOW_LOOPBACK
-do
-  if ! grep -Fq -- "-u $variable" "$make_targets"; then
-    echo "Makefile Rust test targets did not clear ambient $variable" >&2
-    cat "$make_targets" >&2
+# Test environment policy belongs to harn_test_env.sh, not inline Make recipes.
+# Require every discovered Rust test invocation to cross that boundary.
+rust_test_commands="$tmp_root/rust-test-commands.txt"
+grep -E 'cargo_with_worktree_build_dir\.sh (nextest run|test)' "$make_targets" > "$rust_test_commands"
+if grep -vF 'bash ./scripts/harn_test_env.sh --per-test-state ' "$rust_test_commands"; then
+  echo "Makefile Rust test target bypassed the shared test environment" >&2
+  exit 1
+fi
+cat > "$tmp_root/assert-test-environment" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+for variable in HARN_EGRESS_ALLOW HARN_EGRESS_DENY HARN_EGRESS_DEFAULT \
+  HARN_EGRESS_BLOCK_PRIVATE HARN_EGRESS_ALLOW_LOOPBACK; do
+  if [[ -n "${!variable+x}" ]]; then
+    echo "test process inherited $variable" >&2
     exit 1
   fi
 done
-
-if ! grep -Fq 'RUST_MIN_STACK="${RUST_MIN_STACK:-16777216}"' "$make_targets"; then
-  echo "Makefile Rust test targets did not set the production CLI stack default" >&2
-  cat "$make_targets" >&2
-  exit 1
-fi
+[[ "$RUST_MIN_STACK" = 16777216 ]]
+SH
+chmod +x "$tmp_root/assert-test-environment"
+env -u RUST_MIN_STACK HARN_EGRESS_ALLOW=poison HARN_EGRESS_DENY=poison \
+  HARN_EGRESS_DEFAULT=poison HARN_EGRESS_BLOCK_PRIVATE=poison \
+  HARN_EGRESS_ALLOW_LOOPBACK=poison \
+  bash "$repo_root/scripts/harn_test_env.sh" --per-test-state \
+  "$tmp_root/assert-test-environment"
 
 fake_harn="$tmp_root/fake harn"
 touch "$fake_harn"

@@ -130,6 +130,7 @@ accounting lives under `usage`. The typed contract is
 | `data` | any | Parsed and optionally schema-validated value when `output` requests JSON |
 | `thinking` | string | Reasoning trace (when `thinking` is enabled) |
 | `thinking_summary` | string | Provider-supplied summary of the reasoning trace, when available |
+| `effective_reasoning_effort` | record | Provider-confirmed effort: `{status: "reported", level: string, source: string}` or `{status: "not_reported"}`. See [Effective reasoning effort](#effective-reasoning-effort). |
 | `stop_reason` | string | Provider-native stop vocabulary (`"end_turn"`, `"max_tokens"`, `"tool_use"`, `"stop_sequence"`), kept for forensics — prefer `outcome` |
 | `tool_calls` | `list<LlmToolCall>` | Dispatchable tool calls, merged from the provider-native and text-protocol channels. Always present, possibly empty. |
 | `native_tool_calls` | `list<LlmToolCall>` | Provider-native tool calls only. Always present, possibly empty. |
@@ -147,6 +148,35 @@ The four text channels each have a distinct job — none are aliases.
 pre-projection source with protocol tags intact, `visible_text` is the
 sanitized human-visible output, and `canonical_text` is the canonical
 replay form of a tagged-protocol response.
+
+#### Effective reasoning effort
+
+`effective_reasoning_effort` is always present on a completed call. The
+Responses API supplies the level through its response's `reasoning.effort`
+field. Harn compares that echo with the final request after provider overrides.
+It doesn't infer a level from the requested effort, thinking budget, or token count.
+
+The record has `status: "reported"`, `level`, and one of these `source` values:
+
+| Source | Meaning |
+|---|---|
+| `operator` | The caller selected the echoed level. |
+| `catalog` | A catalog default selected the echoed level. |
+| `policy` | The reasoning policy selected the echoed level. |
+| `request` | The request selected the level, but its selection source is unavailable. |
+| `provider_default` | The request omitted effort and the provider echoed its default. |
+| `provider_adjusted` | The provider echoed a different level from the request. |
+
+Without a usable echo, the record is `{status: "not_reported"}`. This also
+applies to older recordings and providers without an effort echo.
+[Responses configuration updates](https://developers.openai.com/api/docs/guides/reasoning#change-reasoning-mid-conversation)
+can supersede the echoed request setting. Calls with configuration updates or
+an opaque `previous_response_id` therefore return `not_reported`.
+
+The same observation appears in provider response events, transcript
+`provider_payload` metadata, durable assistant messages under
+`_harn.effective_reasoning_effort`, and `usage.provider_telemetry`. Streaming calls
+include it on the terminal chunk.
 
 #### Usage
 
@@ -343,6 +373,7 @@ catalog source data and pass only the stable ladder name from policy code.
 | `prefill` | string | Assistant prefill where the route supports it. |
 | `previous_response_id` | string | OpenAI Responses conversation-state link. |
 | `data_controls` | string | Requested provider retention/training posture: `"default"` or `"strictest_available"`. See [Provider data controls](providers.md#provider-data-controls). |
+| `inference_boundary` | dict | Optional ceiling with `reach` (`local_only`, `hosted_open_weight`, or `any_hosted`) and `allow_training_discounts` (bool). Harn checks the resolved route before live transport and records the governing rule plus catalog evidence in the data-controls receipt. See [Inference destination boundaries](providers.md#inference-destination-boundaries). |
 
 Each system fragment has `{content, title?, position?: "before"|"after",
 enabled?}`. Use `system_before`, `system_after`, and `with_system_fragments`
@@ -911,7 +942,8 @@ harness.stdio.log("Estimated cost: $${cost}")
 
 // Check cumulative session costs
 const session = harness.llm.session_cost()
-harness.stdio.log("Total: $${session.total_cost}")
+harness.stdio.log("Measured cost (nil if unknown): ${session.total_cost}")
+harness.stdio.log("Budget charged: $${session.budget_charged_usd}")
 harness.stdio.log("Calls: ${session.call_count}")
 harness.stdio.log("Input tokens: ${session.input_tokens}")
 harness.stdio.log("Output tokens: ${session.output_tokens}")
@@ -1047,12 +1079,50 @@ Configure this before the first prompt: cold-restored sessions cannot prove
 their prior reservation state and refuse conservative admission. Start a new
 independently allocated run instead. Durable worker declarations currently
 refuse this mode before module execution; their persisted grant lifecycle is
-not yet supported. These host scopes still do not allocate across processes.
+not yet supported. These host scopes still do not allocate across processes
+unless the host installs a machine spend quota.
+
+### Machine spend quota for native hosts
+
+`harn_vm::MachineSpendQuota` provides a durable UTC daily and calendar-month
+ceiling across processes. The host opens the same private SQLite path and
+billing-scope ID for every session belonging to one person. Policy amounts are
+integer micro-USD, so `1_000_000` is one dollar. A host wraps the whole model
+execution tree in `quota.scope(future)` before its first provider attempt. A
+`ConservativeLlmBudget` created within that scope may impose a tighter
+per-session ceiling. Retries, fallbacks, streaming, and spawned calls use the
+same pre-transport reservation boundary. Unsupported billing shapes and
+unknown prices fail closed. The provider registry's self-hosted runtimes are
+known-zero and consume no monetary allowance.
+
+The quota reserves the catalog upper bound atomically before transport. A
+process crash, cancellation, or missing usage leaves that bound reserved; only
+complete provider usage can release a proven unused portion. The receipt keeps
+priced observed usage and the count of attempts without confirmed usage
+separate from the reserved allowance; neither is a provider invoice. An
+observed provider contract violation latches a durable refusal, including
+after restart, so later calls cannot rely on an invalid cost bound. A quota
+exhaustion error reports the limiting day or month,
+remaining allowance, and the UTC reset instant. Sessions in separate projects
+must use the same path and billing-scope ID to share one ceiling.
+While the scope is active, `harness.llm.session_cost().machine_spend` carries
+the same typed receipt; it is absent when no machine quota is installed.
+`harness.llm.budget_remaining()` reports the tightest remaining session,
+execution, or machine allowance that is set.
+
+The first opener records the policy. A later opener with a different policy is
+refused. An authorized host administrator can call `update_policy` with a
+nonempty approval reference; the change and previous limits are recorded in
+the same database transaction. `session/set_budget` remains a per-session
+control and cannot silently raise the durable machine ceiling. The host owns
+authentication of the administrator and the database path; scripts running in
+the VM have no direct policy-update operation. Reservations protect cataloged
+provider charges, not external connector, tool, or platform fees.
 
 | Function | Description |
 |---|---|
 | `llm_cost(model, input_tokens, output_tokens)` | Estimate USD cost from embedded pricing table |
-| `harness.llm.session_cost()` | Session totals: `{total_cost, input_tokens, output_tokens, call_count}` |
+| `harness.llm.session_cost()` | Session usage and certainty, independent of diagnostic tracing: logical `call_count`, physical `provider_call_count`, tokens, nullable measured `total_cost` and `cost_usd`, `known_cost_usd`, `unpriced_calls`, `usage_unknown_calls`. `budget_charged_usd` separately reports the admission charge, including uncertain reservations. |
 | `harness.llm.budget(max_cost)` | Set session budget in USD. LLM calls throw if exceeded |
 | `harness.llm.budget_remaining()` | Remaining budget (nil if no budget set) |
 | `tiktoken_count_tokens(text, model)` | Count text with the selected tiktoken encoder for known OpenAI/Claude/Gemini model families |

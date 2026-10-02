@@ -8,6 +8,7 @@ use crate::vm::{AsyncBuiltinCtx, Vm};
 const PREDICATE_BUILTINS: &[&VmBuiltinDef] = &[
     &EVALUATE_PREDICATE_BUILTIN_DEF,
     &EVALUATE_BUILTIN_DEF,
+    &EVALUATE_REQUEST_BUILTIN_DEF,
     &ESTIMATE_STATE_TOKENS_BUILTIN_DEF,
 ];
 
@@ -50,6 +51,22 @@ async fn evaluate_builtin(ctx: AsyncBuiltinCtx, args: Vec<VmValue>) -> Result<Vm
     Ok(outcome.into_value())
 }
 
+/// Runtime-declared questions retain the same evaluator and closed outcome.
+#[harn_builtin(
+    exposure = "harness.llm.evaluate_request",
+    effects = ["llm.write@arg3.provider", "llm.write@arg3.model"],
+    sig_expr = harn_builtin_meta::predicate::EVALUATE_REQUEST,
+    kind = "async",
+    category = "llm.predicate"
+)]
+async fn evaluate_request_builtin(
+    ctx: AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
+    let (outcome, _, _) = super::decision::evaluate(&ctx, &args).await?;
+    Ok(outcome.into_value())
+}
+
 /// What the evaluator thinks a state costs, before sending it.
 ///
 /// This is the number the `state_too_large` arm compares against a route's
@@ -83,6 +100,10 @@ mod tests {
             ("PredicateVerdict", harn_builtin_meta::predicate::VERDICT),
             ("EvaluationPolicy", harn_builtin_meta::predicate::POLICY),
             ("PredicateOutcome", harn_builtin_meta::predicate::OUTCOME),
+            (
+                "BooleanCriteria",
+                harn_builtin_meta::predicate::BOOLEAN_CRITERIA,
+            ),
             (
                 "BooleanQuestion",
                 harn_builtin_meta::predicate::BOOLEAN_QUESTION,

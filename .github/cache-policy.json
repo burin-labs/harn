@@ -1,5 +1,5 @@
 {
-  "schema_version": 6,
+  "schema_version": 7,
   "rust_cache_action": "./.github/actions/rust-cache",
   "node_cache_action": "./.github/actions/node-cache",
   "persistent_ref": "refs/heads/main",
@@ -49,6 +49,11 @@
     },
     {
       "workflow": "ci.yml",
+      "job": "rust-cli",
+      "shared_key": "harn-ci-cli"
+    },
+    {
+      "workflow": "ci.yml",
       "job": "rust-check-inputs",
       "shared_key": "workspace-tests"
     },
@@ -60,7 +65,24 @@
     {
       "workflow": "rust-cache-refresh.yml",
       "job": "rust-cache-refresh",
+      "shared_key": "harn-ci-cli"
+    },
+    {
+      "workflow": "rust-cache-refresh.yml",
+      "job": "rust-cache-refresh",
       "shared_key": "package-audit"
+    }
+  ],
+  "harn_check_cache_writers": [
+    {
+      "workflow": "harn-check-cache-refresh.yml",
+      "job": "refresh",
+      "family": "audit"
+    },
+    {
+      "workflow": "harn-check-cache-refresh.yml",
+      "job": "refresh",
+      "family": "audit-scripts"
     }
   ]
 }

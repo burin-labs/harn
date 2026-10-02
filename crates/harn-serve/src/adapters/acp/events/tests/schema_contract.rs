@@ -1,11 +1,29 @@
 use std::collections::BTreeSet;
 
 use super::{
-    agent_event_ext_fixture_events, collect_notifications, HARN_AGENT_EVENT_KINDS,
+    agent_event_ext_fixture_events, AcpAgentEventSink, AcpOutput, HARN_AGENT_EVENT_KINDS,
     HARN_AGENT_EVENT_METHOD,
 };
 use crate::adapters::acp::events::agent_event_ext_params;
 use harn_vm::agent_events::AgentEvent;
+use harn_vm::agent_events::AgentEventSink;
+
+pub(in crate::adapters::acp::events) async fn collect_notifications(
+    events: Vec<AgentEvent>,
+) -> Vec<serde_json::Value> {
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let (sink, expected_len) = (AcpAgentEventSink::new(AcpOutput::Channel(tx)), events.len());
+    for event in events {
+        sink.handle_event(&event);
+    }
+
+    let mut notifications = Vec::with_capacity(expected_len);
+    for _ in 0..expected_len {
+        let line = rx.recv().await.expect("ACP event notification");
+        notifications.push(serde_json::from_str(&line).expect("json"));
+    }
+    notifications
+}
 
 /// Append the `purpose_label` fixture, which exists so the advertised-kind
 /// contract below stays complete.

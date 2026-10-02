@@ -51,9 +51,19 @@ actor.
 4. For `force-merge` or `bypass-merge-queue`, confirm the PR merged.
 5. Prefer removing the label after the land; the audit comment remains.
 
-Organization admins can also use GitHub’s “Bypass rules and merge” UI. The
-org-wide `main protection` ruleset grants `OrganizationAdmin` bypass in
-`pull_request` mode.
+Organization admins can also use GitHub’s “Bypass rules and merge” UI for the
+`main protection` ruleset, which grants `OrganizationAdmin` bypass in
+`pull_request` mode. That bypass does not skip the merge queue. The
+`merge queue` ruleset's only bypass actor is `harn-release-bot`, so an admin's
+`gh pr merge` goes through the queue, and the labels above are the only way to
+skip it.
+
+The queue is also what keeps generated files correct. GitHub ignores the
+`-merge` attribute in `.gitattributes`, so two pull requests that each
+regenerate one output can merge into a file no generator produced. Only the
+queue's generated-file check on the combined tree catches that before it
+reaches `main` (#8817). A `bypass-merge-queue` land that touches generated
+outputs should be rebased and regenerated on current `main` first.
 
 ## Related
 

@@ -130,6 +130,41 @@ pipeline test_recipe_block_stops_at_the_next_rule(harness: Harness, task: unknow
 }
 
 @test
+pipeline test_an_aggregate_target_walks_what_its_prerequisites_walk(
+  harness: Harness,
+  task: unknown,
+) {
+  const makefile = join(
+    [
+      "lint-harn: lint-harn-a lint-harn-b",
+      "\t@echo done",
+      "",
+      "lint-harn-a: lint-harn-b",
+      "\t@harn lint --strict tests",
+      "",
+      "lint-harn-b: lint-harn-a | order-only",
+      "\t@harn lint --strict bench",
+    ],
+    "\n",
+  )
+  // Each part is named once even though the two parts name each other.
+  assert_eq(
+    makefile_target_closure(makefile, "lint-harn"),
+    ["lint-harn", "lint-harn-a", "lint-harn-b"],
+  )
+  assert_eq(makefile_target_prerequisites(makefile, "lint-harn-b"), ["lint-harn-a"])
+  assert_eq(makefile_target_prerequisites(makefile, "missing"), [])
+}
+
+@test
+pipeline test_the_live_lint_recipe_reaches_every_root(harness: Harness, task: unknown) {
+  // Guards the real tree: an aggregate lint target whose parts were not
+  // followed reported every walked root as unreached.
+  const report = check_lint_root_coverage(harness.fs)
+  assert_eq(report.violation_count, 0)
+}
+
+@test
 pipeline test_the_live_repository_lists_every_stdlib_test(harness: Harness, task: unknown) {
   // Guards the real tree, not a fixture: this is the assertion that would have
   // caught mock_scripted_usage_test.harn shipping unrun.

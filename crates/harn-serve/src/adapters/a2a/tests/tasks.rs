@@ -842,9 +842,8 @@ pub fn run(task: string) -> string {
         audit: None,
     });
 
-    let event = tokio::time::timeout(std::time::Duration::from_secs(2), subscriber.next())
+    let event = harn_clock::test_support::within("worker event", subscriber.next())
         .await
-        .expect("worker event emitted")
         .expect("subscriber stream open");
     assert_eq!(
         event.pointer("/result/type").and_then(JsonValue::as_str),

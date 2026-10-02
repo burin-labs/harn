@@ -186,6 +186,7 @@ fn scope_matches(
 
 /// Failure parsing one of the patterns when constructing a rule.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum RuleCompileError {
     Action(String),
     Target(String),

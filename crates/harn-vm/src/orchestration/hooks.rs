@@ -10,14 +10,16 @@ use serde::{Deserialize, Serialize};
 use harn_parser::diagnostic_codes::Code;
 
 use crate::agent_events::WorkerEvent;
-use crate::llm::helpers::{ReminderPropagate, ReminderRoleHint, ReminderSource, SystemReminder};
+use crate::llm::helpers::{ReminderPropagate, SystemReminder};
 use crate::value::{VmClosure, VmError, VmValue};
 
 mod post_tool;
 mod reminder_fields;
+mod reminder_spec;
 mod vm_entry;
 use post_tool::{apply_post_tool_action, parse_post_tool_result};
 pub use post_tool::{PostToolAction, PostToolDenial, PostToolHookResult};
+use reminder_spec::parse_reminder_spec;
 use vm_entry::{invoke_vm_hook_handler, invoke_vm_lifecycle_hooks};
 
 tokio::task_local! {
@@ -931,59 +933,6 @@ fn optional_reminder_spec_propagate(
             )),
         })
         .transpose()
-}
-
-fn parse_reminder_spec(value: &VmValue, context: &str) -> Result<ReminderSpec, VmError> {
-    let Some(options) = value.as_dict() else {
-        return Err(reminder_error(
-            context,
-            format!("reminder spec must be a dict, got {}", value.type_name()),
-        ));
-    };
-    const ALLOWED: &[&str] = &[
-        "body",
-        "tags",
-        "dedupe_key",
-        "ttl_turns",
-        "preserve_on_compact",
-        "propagate",
-        "role_hint",
-        "authority",
-    ];
-    let unknown = options
-        .keys()
-        .filter(|key| !ALLOWED.contains(&key.as_str()))
-        .map(|key| key.as_str())
-        .collect::<Vec<_>>();
-    if !unknown.is_empty() {
-        return Err(reminder_code_error(
-            context,
-            Code::ReminderUnknownOption,
-            format!("unknown reminder option(s): {}", unknown.join(", ")),
-        ));
-    }
-    let role_hint = optional_reminder_spec_string(options, "role_hint", context)?;
-    let role_hint = reminder_fields::role_hint(role_hint.as_deref())
-        .map_err(|message| reminder_error(context, message))?;
-    let authority = optional_reminder_spec_string(options, "authority", context)?;
-    let authority = reminder_fields::authority(authority.as_deref())
-        .map_err(|message| reminder_error(context, message))?;
-    Ok(SystemReminder {
-        id: uuid::Uuid::now_v7().to_string(),
-        tags: reminder_spec_tags(options, context)?,
-        dedupe_key: optional_reminder_spec_string(options, "dedupe_key", context)?,
-        ttl_turns: optional_reminder_spec_ttl(options, context)?,
-        preserve_on_compact: optional_reminder_spec_bool(options, "preserve_on_compact", context)?
-            .unwrap_or(false),
-        propagate: optional_reminder_spec_propagate(options, context)?
-            .unwrap_or(ReminderPropagate::Session),
-        role_hint: role_hint.unwrap_or(ReminderRoleHint::System),
-        authority: authority.unwrap_or_default(),
-        source: ReminderSource::Hook,
-        body: required_reminder_spec_string(options, "body", context)?,
-        fired_at_turn: 0,
-        originating_agent_id: None,
-    })
 }
 
 fn looks_like_reminder_spec(map: &crate::value::DictMap) -> bool {

@@ -5,6 +5,12 @@ use harn_parser::{DiagnosticCode as Code, Node, SNode};
 use super::super::harness_receiver::harness_method_receiver;
 use super::{dict_literal_field, literal_string, PreflightDiagnostic};
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum CallSurface {
+    Direct,
+    Agent,
+}
+
 /// Reject literal provider/model/option compositions that the runtime
 /// capability registry cannot represent. Dynamic routes remain runtime-
 /// checked; this pass only reports facts it can prove from the source.
@@ -30,8 +36,8 @@ fn scan_node(
     diagnostics: &mut Vec<PreflightDiagnostic>,
 ) {
     if let Node::FunctionCall { name, args, .. } = &node.node {
-        if let Some(options) = options_arg(name, args) {
-            check_literal_composition(name, options, file_path, source, diagnostics);
+        if let Some((surface, options)) = options_arg(name, args) {
+            check_literal_composition(name, surface, options, file_path, source, diagnostics);
         }
     }
     // The `llm_*` entries in `options_arg` are removed ambient globals whose
@@ -58,12 +64,13 @@ fn scan_node(
                 harn_vm::stdlib::capability_method_manifest_entry(receiver.capability, method)
                     .map(|entry| entry.canonical_name)
                     .and_then(|name| name.strip_prefix("__cap_"));
-            if let Some(options) = builtin.and_then(|name| options_arg(name, args)) {
+            if let Some((surface, options)) = builtin.and_then(|name| options_arg(name, args)) {
                 // Name the capability path rather than the registry name: it is
                 // the spelling at the call site, and the registry name is the
                 // removed global the author was told to stop writing.
                 check_literal_composition(
                     &format!("harness.{}.{method}", receiver.field),
+                    surface,
                     options,
                     file_path,
                     source,
@@ -79,27 +86,27 @@ fn scan_node(
 
 /// Return the options argument for public calls that either dispatch a
 /// tool-bearing model turn or construct canonical agent-loop options.
-fn options_arg<'a>(name: &str, args: &'a [SNode]) -> Option<&'a SNode> {
-    let index = match name {
-        "agent_options" | "agent_loop_options" | "agent_preset_options" => 0,
-        "agent_preset" | "agent_governed_preset" => 1,
-        "agent_loop"
-        | "agent_stream_call"
-        | "llm_call"
+fn options_arg<'a>(name: &str, args: &'a [SNode]) -> Option<(CallSurface, &'a SNode)> {
+    let (surface, index) = match name {
+        "agent_options" | "agent_loop_options" | "agent_preset_options" => (CallSurface::Agent, 0),
+        "agent_preset" | "agent_governed_preset" => (CallSurface::Agent, 1),
+        "agent_loop" | "agent_stream_call" => (CallSurface::Agent, 2),
+        "llm_call"
         | "llm_call_safe"
         | "llm_call_structured"
         | "llm_call_structured_safe"
         | "llm_call_structured_result"
         | "llm_stream"
-        | "llm_stream_call" => 2,
-        "llm_completion" => 3,
+        | "llm_stream_call" => (CallSurface::Direct, 2),
+        "llm_completion" => (CallSurface::Direct, 3),
         _ => return None,
     };
-    args.get(index)
+    args.get(index).map(|options| (surface, options))
 }
 
 fn check_literal_composition(
     call_name: &str,
+    surface: CallSurface,
     options: &SNode,
     file_path: &Path,
     source: &str,
@@ -156,11 +163,30 @@ fn check_literal_composition(
         });
     }
 
+    check_literal_reasoning(
+        call_name,
+        options,
+        &provider,
+        &resolved_model,
+        file_path,
+        source,
+        diagnostics,
+    );
+    check_direct_text_tools(
+        call_name,
+        surface,
+        options,
+        &provider,
+        &resolved_model,
+        file_path,
+        source,
+        diagnostics,
+    );
+
     // Raw LLM calls only care about a tool format when they offer tools.
     // Agent calls and option constructors feed the tool-bearing agent loop.
-    if call_name.starts_with("llm_")
-        && dict_literal_field(options, "tools")
-            .is_none_or(|tools| matches!(&tools.node, Node::NilLiteral))
+    if surface == CallSurface::Direct
+        && dict_literal_field(options, "tools").and_then(literal_tools_have_entries) != Some(true)
     {
         return;
     }
@@ -168,7 +194,7 @@ fn check_literal_composition(
     // Agent options expose an audited experiment seam. Raw llm_call options do
     // not, so only honor the reason on surfaces that can emit its transcript
     // event at runtime.
-    if !call_name.starts_with("llm_") {
+    if surface == CallSurface::Agent {
         if let Some(reason) = dict_literal_field(options, "tool_format_override_reason") {
             let Some(reason) = literal_string(reason) else {
                 return;
@@ -206,7 +232,7 @@ fn check_literal_composition(
         message: format!(
             "preflight: `{call_name}` requests a known-unsafe LLM composition: {reason}"
         ),
-        help: Some(if call_name.starts_with("llm_") {
+        help: Some(if surface == CallSurface::Direct {
             "use the catalog-recommended tool_format (or omit it)".to_string()
         } else {
             "use the catalog-recommended tool_format (or omit it), or add a non-empty \
@@ -215,6 +241,127 @@ fn check_literal_composition(
         }),
         tags: None,
     });
+}
+
+/// Literal `effort` / `thinking` values go through the runtime's own reasoning
+/// resolution for the literal route, so a known-bad pair (effort on a route
+/// without it) is a check-time error with the runtime's message.
+#[allow(clippy::too_many_arguments)]
+fn check_literal_reasoning(
+    call_name: &str,
+    options: &SNode,
+    provider: &str,
+    model: &str,
+    file_path: &Path,
+    source: &str,
+    diagnostics: &mut Vec<PreflightDiagnostic>,
+) {
+    let effort_node = dict_literal_field(options, "effort");
+    let thinking_node = dict_literal_field(options, "thinking");
+    let effort = effort_node.and_then(literal_string);
+    let thinking = thinking_node.and_then(|node| match node.node {
+        Node::BoolLiteral(value) => Some(value),
+        _ => None,
+    });
+    if effort.is_none() && thinking.is_none() {
+        return;
+    }
+    let Err(reason) =
+        harn_vm::llm::admit_reasoning_literals(provider, model, effort.as_deref(), thinking)
+    else {
+        return;
+    };
+    let span = effort_node
+        .filter(|_| effort.is_some())
+        .or(thinking_node)
+        .map_or(options.span, |node| node.span);
+    diagnostics.push(PreflightDiagnostic {
+        code: Code::LlmCapabilityCompositionInvalid,
+        path: file_path.display().to_string(),
+        source: source.to_string(),
+        span,
+        message: format!("preflight: `{call_name}` requests a known-unsupported reasoning option: {reason}"),
+        help: Some(
+            "use the reasoning control the route declares (see `harn provider catalog matrix`), or choose a route that supports it"
+                .to_string(),
+        ),
+        tags: None,
+    });
+}
+
+/// A direct model call (not `agent_loop`) that offers literal tools on a
+/// text-channel format sends no tools at all. Reports the runtime's refusal.
+#[allow(clippy::too_many_arguments)]
+fn check_direct_text_tools(
+    call_name: &str,
+    surface: CallSurface,
+    options: &SNode,
+    provider: &str,
+    model: &str,
+    file_path: &Path,
+    source: &str,
+    diagnostics: &mut Vec<PreflightDiagnostic>,
+) {
+    let Some(tools) = dict_literal_field(options, "tools") else {
+        return;
+    };
+    if surface != CallSurface::Direct
+        || literal_tools_have_entries(tools) != Some(true)
+        || dict_literal_field(options, "tool_search").is_some_and(|search| {
+            !matches!(search.node, Node::NilLiteral | Node::BoolLiteral(false))
+        })
+    {
+        return;
+    }
+    let requested = match dict_literal_field(options, "tool_format") {
+        Some(node) => match literal_string(node) {
+            Some(format) if format != "auto" => format,
+            Some(_) => harn_vm::llm_config::default_tool_format(model, provider),
+            _ => return,
+        },
+        None => harn_vm::llm_config::default_tool_format(model, provider),
+    };
+    let effective =
+        harn_vm::llm::capabilities::validate_tool_format(provider, model, &requested).effective;
+    // A steered format is already reported by the tool-format check, which
+    // names the requested channel and the row that forbids it.
+    if effective != requested {
+        return;
+    }
+    let Some(reason) =
+        harn_vm::llm::capabilities::direct_call_text_tools_refusal(provider, model, &effective)
+    else {
+        return;
+    };
+    diagnostics.push(PreflightDiagnostic {
+        code: Code::LlmCapabilityCompositionInvalid,
+        path: file_path.display().to_string(),
+        source: source.to_string(),
+        span: tools.span,
+        message: format!("preflight: `{call_name}` would drop its tools: {reason}"),
+        help: Some(
+            "drive the tools through agent_loop, or use tool_format \"native\" on a route that supports it"
+                .to_string(),
+        ),
+        tags: None,
+    });
+}
+
+/// Unknown expressions remain runtime-checked: they may evaluate to an empty
+/// set. Literal registries carry their tools in the same field the runtime reads.
+fn literal_tools_have_entries(tools: &SNode) -> Option<bool> {
+    match &tools.node {
+        Node::NilLiteral => Some(false),
+        Node::ListLiteral(items) => Some(!items.is_empty()),
+        Node::DictLiteral(_) => dict_literal_field(tools, "tools").and_then(|items| {
+            if let Node::ListLiteral(items) = &items.node {
+                Some(!items.is_empty())
+            } else {
+                None
+            }
+        }),
+        _ => None,
+    }
 }
 
 /// Preflight reports only caller intent visible without evaluation. Dynamic

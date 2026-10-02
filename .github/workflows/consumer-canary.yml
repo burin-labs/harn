@@ -1,0 +1,124 @@
+name: Consumer canary
+
+# Rehearse the downstream consumer's update at main's current revision, so a
+# change that breaks the consumer shows here instead of days later in the
+# consumer's own update. `scripts/ci/consumer_canary.sh` owns the procedure.
+#
+# Report-only, on a 4-hour schedule and on demand. It is not part of any pull
+# request, merge-group or main-push run: the consumer's rehearsal takes about
+# 45 minutes, a merge group lands (and cancels a still-waiting canary) as soon
+# as `CI status` passes, and a rehearsal per main commit costs more runner time
+# than a report-only signal is worth. A scheduled run whose main commit already
+# has a settled verdict is skipped, and the decide job logs the skip by name
+# with both commits.
+#
+# Graduation to required: move it into the merge queue and `CI status` only
+# after the consumer has passed at least 5 consecutive rehearsals at unreleased
+# revisions. At up to 6 settled verdicts a day, while main keeps moving, that
+# takes about a day of green rehearsals. Until then a consumer-side break
+# would block every merge.
+#
+# A `Pairs-with: consumer#N` trailer in main's head commit message rehearses
+# that consumer pull request's branch instead of the default branch.
+#
+# The consumer may be private and this workflow's output is public. Its
+# identity comes only from the `CONSUMER_CANARY_REPOSITORY` secret, which the
+# runner masks, and the script prints the verdict, the consumer run's id and
+# the wall time, never the consumer's name or a link. The job uploads no
+# artifact and writes no step summary; the CI cache policy refuses any step in
+# it beyond checkout, the credential mint and the script, and refuses reading
+# the identity from an unmasked variable.
+
+on:
+  schedule:
+    - cron: "53 */4 * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: consumer-canary
+  cancel-in-progress: false
+
+jobs:
+  decide:
+    name: Decide whether main moved
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      run: ${{ steps.decide.outputs.run }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Compare main with the last settled verdict
+        id: decide
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT_NAME: ${{ github.event_name }}
+          SOURCE_REVISION: ${{ github.sha }}
+          CURRENT_RUN_ID: ${{ github.run_id }}
+        run: bash scripts/ci/consumer_canary.sh --decide
+
+  consumers:
+    name: Consumer canary
+    needs: decide
+    if: needs.decide.outputs.run == 'true'
+    # Report-only: a red verdict shows on this job without failing the run.
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    # Ten minutes above the canary's 55-minute verdict deadline, which is
+    # sized to the consumer's observed ~45-minute rehearsal.
+    timeout-minutes: 65
+    permissions:
+      contents: read
+    outputs:
+      verdict: ${{ steps.canary.outputs.verdict }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Mint the consumer dispatch credential
+        id: consumer-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ secrets.RELEASE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ secrets.CONSUMER_CANARY_REPOSITORY }}
+          permission-actions: write
+          permission-pull-requests: read
+      - name: Rehearse the consumer update at this revision
+        id: canary
+        env:
+          GH_TOKEN: ${{ steps.consumer-token.outputs.token }}
+          CANARY_OWNER: ${{ github.repository_owner }}
+          CANARY_NAME: ${{ secrets.CONSUMER_CANARY_REPOSITORY }}
+          CANARY_WORKFLOW: ${{ vars.CONSUMER_CANARY_WORKFLOW }}
+          SOURCE_REVISION: ${{ github.sha }}
+        run: |
+          CANARY_REPOSITORY="$CANARY_OWNER/$CANARY_NAME" \
+            WORKSPACE_VERSION="$(sed -n '/^\[workspace.package\]/,/^\[/s/^version = "\(.*\)"/\1/p' Cargo.toml)" \
+            PAIRING_TEXT="$(git log -1 --format=%B HEAD)" \
+            bash scripts/ci/consumer_canary.sh
+
+  # Succeeds only when the consumer run concluded, pass or fail. The decide
+  # job reads this job's result from earlier runs to find the last commit with
+  # a settled verdict; an unmeasured run (no verdict before the deadline, a
+  # refused dispatch) leaves it skipped, so the next schedule retries.
+  settled:
+    name: Settled verdict
+    needs: consumers
+    if: always() && (needs.consumers.outputs.verdict == 'pass' || needs.consumers.outputs.verdict == 'fail')
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    permissions: {}
+    steps:
+      - name: Record the settled verdict
+        env:
+          VERDICT: ${{ needs.consumers.outputs.verdict }}
+          SOURCE_REVISION: ${{ github.sha }}
+        run: echo "CONSUMER_CANARY settled verdict=$VERDICT main=$SOURCE_REVISION"

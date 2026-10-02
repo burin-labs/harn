@@ -6,7 +6,7 @@
 //! record, and returns a PLAIN dict
 //! `{outcome, passed, total, artifact_id, artifact_hash, subject?, detail}`
 //! built from the disposition the host FROZE at execution time. The VM harness
-//! method (`crate::vm::methods::harness`) mints the opaque, non-serializable
+//! method (`harn_vm::harness_methods`) mints the opaque, non-serializable
 //! `VerdictReceipt` from this dict on a `"pass"` outcome — the receipt is never
 //! constructed here, so it never crosses the hostlib response-schema boundary.
 //!

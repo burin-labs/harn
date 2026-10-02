@@ -1,4 +1,52 @@
 use super::*;
+
+#[test]
+fn machine_and_session_remaining_project_the_tighter_limit() {
+    reset_cost_state();
+    let temp = tempfile::tempdir().unwrap();
+    let quota = crate::llm::MachineSpendQuota::open(
+        temp.path().join("spend.sqlite"),
+        "person",
+        crate::llm::MachineSpendPolicy {
+            daily_limit_microusd: Some(500_000),
+            monthly_limit_microusd: Some(700_000),
+            lifetime_limit_microusd: Some(300_000),
+        },
+    )
+    .unwrap();
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap()
+        .block_on(async {
+            quota
+                .scope(async {
+                    set_llm_cost_budget(Some(0.4));
+                    let result = llm_budget_remaining_impl(&[], &mut String::new()).unwrap();
+                    match result {
+                        VmValue::Float(value) => assert!((value - 0.3).abs() < 1e-9),
+                        other => panic!("expected the effective remaining allowance: {other:?}"),
+                    }
+                    let execution = crate::llm::ConservativeLlmBudget::new(0.2).unwrap();
+                    execution
+                        .scope(async {
+                            let result =
+                                llm_budget_remaining_impl(&[], &mut String::new()).unwrap();
+                            match result {
+                                VmValue::Float(value) => assert!((value - 0.2).abs() < 1e-9),
+                                other => {
+                                    panic!("expected the tighter execution allowance: {other:?}")
+                                }
+                            }
+                        })
+                        .await
+                        .unwrap();
+                })
+                .await
+                .unwrap();
+        });
+    reset_cost_state();
+}
 #[test]
 fn calculate_cost_uses_catalog_model_pricing() {
     let _guard = crate::llm::env_guard();
@@ -596,11 +644,11 @@ fn token_budget_raises_categorized_error_when_exhausted() {
     let _budget = install_llm_token_budget(10);
 
     // First call within budget — admits.
-    let first = accumulate_llm_usage("claude-sonnet-4-20250514", 5, 0, 0.0);
+    let first = accumulate_llm_usage("claude-sonnet-4-20250514", 5, 0, 0.001);
     assert!(first.is_ok());
 
     // Second call pushes over — raises BudgetExceeded.
-    let second = accumulate_llm_usage("claude-sonnet-4-20250514", 8, 0, 0.0);
+    let second = accumulate_llm_usage("claude-sonnet-4-20250514", 8, 0, 0.002);
     match second {
         Err(VmError::CategorizedError { category, message }) => {
             assert_eq!(category, ErrorCategory::BudgetExceeded);
@@ -608,7 +656,47 @@ fn token_budget_raises_categorized_error_when_exhausted() {
         }
         other => panic!("expected BudgetExceeded, got {other:?}"),
     }
+    assert_eq!(peek_total_tokens(), 13);
+    assert_eq!(
+        peek_total_cost(),
+        0.003,
+        "the completed response remains charged"
+    );
 
+    reset_cost_state();
+}
+
+#[test]
+fn step_budget_failure_keeps_completed_usage_and_first_error() {
+    let _guard_outer = crate::llm::env_guard();
+    reset_cost_state();
+    crate::step_runtime::reset_thread_local_state();
+    let _tokens = install_llm_token_budget(10);
+    let _cost = install_llm_cost_budget(0.001);
+    crate::step_runtime::register_step(
+        "paid",
+        crate::step_runtime::StepDefinition {
+            name: "paid".into(),
+            function: "paid".into(),
+            max_tokens: Some(5),
+            ..Default::default()
+        },
+    );
+    assert!(crate::step_runtime::maybe_push_active_step("paid", 1, &[]));
+    let error = accumulate_llm_usage("fixture", 100, 20, 0.003).unwrap_err();
+    assert!(
+        crate::step_runtime::is_step_budget_exhausted(&error),
+        "the first failure is preserved: {error:?}"
+    );
+    assert_eq!(peek_total_tokens(), 120);
+    assert_eq!(peek_total_cost(), 0.003);
+    crate::step_runtime::with_active_step(|step| {
+        assert_eq!(step.input_tokens, 100);
+        assert_eq!(step.output_tokens, 20);
+        assert_eq!(step.cost_usd, 0.003);
+    })
+    .expect("step remains active until its owning frame exits");
+    crate::step_runtime::reset_thread_local_state();
     reset_cost_state();
 }
 
@@ -984,5 +1072,48 @@ fn nested_budget_scope_cannot_pollute_the_outer_sessions_observed_usage() {
         outer,
         "the child's usage must not survive its scope"
     );
+    reset_cost_state();
+}
+
+#[test]
+fn a_seeded_cost_scope_charges_the_sessions_earlier_spend_against_its_ceiling() {
+    // A durable session installs one cost scope per prompt. Unseeded, the
+    // second prompt of a session that already spent 95c of a $1 cap starts at
+    // $0 and is admitted; seeded, the same call is refused and the refusal
+    // reports what the session actually spent.
+    let _guard = crate::llm::env_guard();
+    crate::llm_config::clear_user_overrides();
+    reset_cost_state();
+    let opts = long_transcript_opts(100.0);
+
+    {
+        let _fresh = install_llm_cost_budget(1.0);
+        check_llm_preflight_budget(&opts).expect("an unspent $1 cap admits a ~15c call");
+    }
+
+    let outer_total = peek_total_cost();
+    {
+        let _seeded = install_llm_cost_budget_seeded(Some(1.0), 0.95);
+        assert!((peek_total_cost() - 0.95).abs() < 1e-12);
+        let dict = thrown_dict(
+            check_llm_preflight_budget(&opts).expect_err("95c spent leaves no room for ~15c"),
+        );
+        assert!((dict_float(&dict, "session_cost_usd") - 0.95).abs() < 1e-12);
+        assert!(dict_str(&dict, "message").contains("spent $0.950000 of $1.000000"));
+
+        // Completed calls add to the seed, which is the total a host carries
+        // into the session's next scope.
+        accumulate_llm_usage("fixture", 10, 10, 0.01).expect("96c is under the $1 cap");
+        assert!((peek_total_cost() - 0.96).abs() < 1e-12);
+    }
+    assert_eq!(peek_total_cost(), outer_total, "the seed must not leak out");
+
+    // No ceiling still tracks spend, so an uncapped session can be capped later.
+    {
+        let _uncapped = install_llm_cost_budget_seeded(None, 0.5);
+        check_llm_preflight_budget(&opts).expect("no ceiling admits the call");
+        accumulate_llm_usage("fixture", 10, 10, 0.25).expect("no ceiling to exceed");
+        assert!((peek_total_cost() - 0.75).abs() < 1e-12);
+    }
     reset_cost_state();
 }

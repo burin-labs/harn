@@ -6,10 +6,11 @@ if [[ $# -eq 0 ]]; then
   exit 2
 fi
 
-# Harn compilation and VM setup can exceed Rust's 2 MiB spawned-thread
-# default. The production CLI deliberately uses 16 MiB; make every CI test
-# lane mirror that contract while preserving an explicit caller override.
-export RUST_MIN_STACK="${RUST_MIN_STACK:-16777216}"
+# Run the tests in the one test environment `make test` also uses
+# (scripts/harn_test_env.sh): the 16 MiB thread stack the production CLI uses,
+# no ambient egress policy or config, an empty user config directory, and a
+# fresh session store. This wrapper only adds CI resource reporting.
+test_env="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/harn_test_env.sh"
 
 report_resources() {
   local label="$1"
@@ -64,9 +65,9 @@ report_resources "Rust test resources before"
 started=$SECONDS
 status=0
 if [[ -n "${RUST_TEST_STDOUT_PATH:-}" ]]; then
-  "$@" >"$RUST_TEST_STDOUT_PATH" || status=$?
+  bash "$test_env" --per-test-state "$@" >"$RUST_TEST_STDOUT_PATH" || status=$?
 else
-  "$@" || status=$?
+  bash "$test_env" --per-test-state "$@" || status=$?
 fi
 duration=$((SECONDS - started))
 report_resources "Rust test resources after"

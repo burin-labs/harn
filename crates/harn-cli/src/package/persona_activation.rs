@@ -71,6 +71,7 @@ pub(crate) mod project_mutation_lock_test_probe {
 }
 
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum PersonaActivationError {
     #[error("{0}")]
     Catalog(String),

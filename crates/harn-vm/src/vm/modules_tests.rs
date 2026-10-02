@@ -5,6 +5,8 @@ use super::*;
 
 #[path = "modules_tests/lifecycle.rs"]
 mod lifecycle;
+#[path = "modules_tests/stdlib_warm.rs"]
+mod stdlib_warm;
 #[path = "modules_tests/tool_registry.rs"]
 mod tool_registry;
 

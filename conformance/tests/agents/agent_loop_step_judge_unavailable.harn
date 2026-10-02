@@ -1,23 +1,21 @@
 import { agent_capture_events } from "std/agent/events"
 import { agent_loop } from "std/agent/loop"
-import { llm_text, with_llm_script } from "std/testing"
+import { llm_calls, llm_text, with_llm_script } from "std/testing"
 
 /**
- * step_judge fail-open must SURFACE a swallowed judge error.
+ * An unavailable step judge must be LOUD, never a silent pass.
  *
- * When the step-judge model itself errors (provider 5xx / parse failure)
- * and `fail_open` is in effect (the default), the scrutinized turn still
- * PROCEEDS — we deliberately do not block on the judge's own flakiness.
- * But a `verdict: "pass"` here means "the adversarial reviewer was
- * UNAVAILABLE", not "the reviewer approved this turn". The fail-open record
- * must carry the distinct `judge_error: true` flag and `judge_unavailable`
- * reason so an inert review surface is distinguishable from a genuine pass
- * in the emitted `step_judge_decision` telemetry.
+ * When the step judge cannot review a turn, the turn still PROCEEDS (a
+ * reviewer outage must not block the agent), but the emitted
+ * `step_judge_decision` says `verdict: "unavailable"` with `judge_error`,
+ * a typed `unavailable_reason` and a running `unavailable_count`.
  *
- * Script: assistant turn 1 (weak, would normally be scrutinized) -> the
- * step-judge LLM call ERRORS -> fail-open lets the turn through -> the loop
- * completes on the done sentinel. We assert the emitted decision carries the
- * distinct marker, and a CONTROL run with a real `pass` verdict does NOT.
+ * Case 1: the judge model errors -> `provider_error`.
+ * Case 2 (control): a real `pass` carries no unavailable marker.
+ * Case 3: the judge is a label-only decision model (Jev). It can never fill
+ * the verdict schema, so the judge refuses before dispatch with
+ * `schema_unsupported` on step 1, spends no judge call, and the count climbs
+ * on every later step instead of reading as N silent passes.
  */
 fn events_of(events: any, kind: string) {
   return events.filter({ event -> event.type == kind })
@@ -59,6 +57,8 @@ pipeline default(harness: Harness) {
       harness.stdio.println(unavailable[0].reason)
       harness.stdio.println(unavailable[0].verdict)
       harness.stdio.println(unavailable[0].vetoed)
+      harness.stdio.println(unavailable[0].unavailable_reason)
+      harness.stdio.println(unavailable[0].unavailable_count)
     },
   )
   // --- Case 2 (control): a genuine pass carries NO judge_error marker.
@@ -93,6 +93,47 @@ pipeline default(harness: Harness) {
       const passes = decisions.filter({ d -> d.verdict == "pass" })
       harness.stdio.println(len(unavailable))
       harness.stdio.println(len(passes) > 0)
+    },
+  )
+  // --- Case 3: a label-only decision model is refused before dispatch.
+  with_llm_script(
+    harness.llm,
+    [
+      llm_text("Let me look at the arithmetic first."),
+      llm_text("<user_response>2 + 2 = 4</user_response>\n<done>##DONE##</done>"),
+    ],
+    { ->
+      const session = "step-judge-decision-only-" + harness.random.uuid()
+      const captured = agent_capture_events(
+        harness.agent,
+        session,
+        fn() { return agent_loop(
+          harness,
+          "What is 2 + 2?",
+          nil,
+          {
+            provider: "mock",
+            loop_until_done: true,
+            max_iterations: 4,
+            session_id: session,
+            step_judge: {
+              provider: "mock",
+              model: "openrouter/typesafe/jev-latest",
+              on_veto: "replace",
+            },
+          },
+        ) },
+      )
+      const decisions = judge_decisions(captured)
+      harness.stdio.println(len(decisions))
+      harness.stdio.println(decisions[0].verdict)
+      harness.stdio.println(decisions[0].unavailable_reason)
+      harness.stdio.println(decisions.map({ d -> d.unavailable_count }))
+      harness.stdio.println(len(decisions.filter({ d -> d.verdict == "pass" })))
+      const judge_calls = llm_calls(harness.llm).filter(
+        { call -> call?.output_format?.schema?.properties?.verdict != nil },
+      )
+      harness.stdio.println(len(judge_calls))
     },
   )
 }

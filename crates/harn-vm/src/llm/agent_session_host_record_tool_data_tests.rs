@@ -174,7 +174,7 @@ fn dispatched_dynamic_result_projects_nested_mutation_facts_into_typed_receipt()
         "ok": true,
         "observation": "created worker",
         "result": {
-            "schema": "harn.agent_tool_handler_result.v1",
+            "schema": "harn.agent_tool_handler_result.v2",
             "text": "created worker",
             "data": {
                 "worker": "Payment",
@@ -235,7 +235,7 @@ fn dispatched_typed_handler_result_preserves_typed_data() {
     let data = VmValue::struct_instance_from_map("HandlerEvidence", data_fields);
 
     let mut handler_fields = crate::value::DictMap::new();
-    handler_fields.put_str("schema", "harn.agent_tool_handler_result.v1");
+    handler_fields.put_str("schema", "harn.agent_tool_handler_result.v2");
     handler_fields.put_str("text", "verification passed");
     handler_fields.put("data", data);
     let handler = VmValue::struct_instance_from_map("AgentToolHandlerResult", handler_fields);

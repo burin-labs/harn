@@ -167,12 +167,14 @@ pub fn resolve_workspace_guidance(fs: HarnessFs, request: GuidanceRequest) -> Gu
     candidates = candidates + [{dir: dir, scope: "workspace", depth: 0}]
   }
   let dirs_scanned = len(candidates)
+  // Instruction files the subtree walk saw. Scoped candidates read only these.
+  let subtree_files: list<string> = []
   if request.include_subtree ?? true {
-    const subtree = __guidance_subtree_dirs(fs, working_dir, max_depth, max_dirs, skip)
-    dirs_scanned = dirs_scanned + len(subtree)
-    for entry in subtree {
-      candidates = candidates + [{dir: entry.dir, scope: "scoped", depth: entry.depth}]
-    }
+    const subtree = __guidance_subtree(fs, working_dir, max_depth, max_dirs, skip)
+    dirs_scanned = dirs_scanned + len(subtree.dirs)
+    subtree_files = subtree.files
+    candidates = candidates
+      + subtree.dirs.map({ entry -> {dir: entry.dir, scope: "scoped", depth: entry.depth} })
   }
   // Collect bodies in candidate order, deduping identical text globally so the
   // symlink convention is not paid for twice.
@@ -186,6 +188,10 @@ pub fn resolve_workspace_guidance(fs: HarnessFs, request: GuidanceRequest) -> Gu
   for candidate in candidates {
     const names = if candidate.file != nil {
       [to_string(candidate.file)]
+    } else if candidate.scope == "scoped" {
+      DIRECTORY_INSTRUCTION_FILES.filter(
+        { name -> subtree_files.contains(path_join(candidate.dir, name)) },
+      )
     } else {
       DIRECTORY_INSTRUCTION_FILES
     }
@@ -396,55 +402,63 @@ fn __guidance_chain(root: string, target: string) -> list<string> {
   return chain
 }
 
-/** Directories strictly below `root`, breadth-first, bounded. */
-fn __guidance_subtree_dirs(
+/**
+ * Directories strictly below `root`, breadth-first and bounded, plus the
+ * instruction files present in them.
+ *
+ * One ignore-aware `fs.walk` replaces a `list_dir` per directory and a `stat`
+ * per entry. Each of those calls paid a sandbox scope check, and on a large
+ * repository the walk cost seconds before the first model call. The walk also
+ * lists files, so the caller reads only instruction files that exist instead
+ * of probing every name in every directory. Entries under a skipped name or a
+ * dot-directory are dropped, as before; paths the project ignore stack
+ * excludes are no longer visited.
+ */
+fn __guidance_subtree(
   fs: HarnessFs,
   root: string,
   max_depth: int,
   max_dirs: int,
   skip: list<string>,
-) -> list<{dir: string, depth: int}> {
-  let out: list<{dir: string, depth: int}> = []
-  let frontier: list<{dir: string, depth: int}> = [{dir: root, depth: 0}]
-  let scanned = 0
-  while len(frontier) > 0 && scanned < max_dirs {
-    let next: list<{dir: string, depth: int}> = []
-    for entry in frontier {
-      if entry.depth >= max_depth || scanned >= max_dirs {
-        continue
-      }
-      const children = try {
-        fs.list_dir(entry.dir)
-      }
-      if !is_ok(children) {
-        continue
-      }
-      for name in unwrap(children).sorted() {
-        if skip.contains(name) || starts_with(name, ".") {
-          continue
-        }
-        const full = path_join(entry.dir, name)
-        const info = try {
-          fs.stat(full)
-        }
-        if !is_ok(info) {
-          continue
-        }
-        if !(unwrap(info)?.is_dir ?? false) {
-          continue
-        }
-        scanned = scanned + 1
-        const child = {dir: full, depth: entry.depth + 1}
-        out = out + [child]
-        next = next + [child]
-        if scanned >= max_dirs {
-          break
-        }
-      }
-    }
-    frontier = next
+) -> {dirs: list<{dir: string, depth: int}>, files: list<string>} {
+  // Files one level below the deepest directory still count as present.
+  const walked = try {
+    fs.walk(root, {max_depth: max_depth + 1})
   }
-  return out
+  if !is_ok(walked) {
+    return {dirs: [], files: []}
+  }
+  const prefix = root + "/"
+  const kept = unwrap(walked).filter(
+    { entry ->
+      const path = to_string(entry?.path ?? "")
+      if !starts_with(path, prefix) {
+        return false
+      }
+      const parts = split(substring(path, len(prefix), len(path)), "/")
+      return !parts.any({ part -> skip.contains(part) || starts_with(part, ".") })
+    },
+  )
+  const dirs = kept.filter(
+    { entry -> (entry?.is_dir ?? false) && to_int(entry?.depth ?? 0) <= max_depth },
+  )
+    .map({ entry -> {dir: to_string(entry.path), depth: to_int(entry.depth)} })
+    .sorted_by({ entry -> entry.depth })
+  // A symlinked instruction file (the `ln -s AGENTS.md CLAUDE.md` convention)
+  // walks as neither a file nor a directory, so match on name, not type.
+  const files = kept.filter(
+    { entry ->
+      !(entry?.is_dir ?? false)
+        && DIRECTORY_INSTRUCTION_FILES.contains(basename(to_string(entry?.path ?? "")))
+    },
+  )
+    .map({ entry -> to_string(entry.path) })
+  const bounded = if len(dirs) > max_dirs {
+    dirs[0:max_dirs]
+  } else {
+    dirs
+  }
+  return {dirs: bounded, files: files}
 }
 
 /** Read a file, returning nil when it is absent, unreadable, or empty. */

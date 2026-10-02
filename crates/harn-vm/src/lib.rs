@@ -30,6 +30,7 @@ pub mod agent_events;
 mod agent_lifecycle_cleanup;
 pub(crate) mod agent_session_journal;
 pub mod agent_session_restore;
+pub mod agent_session_spend;
 #[cfg(test)]
 mod agent_session_terminal_evidence_tests;
 pub mod agent_sessions;
@@ -76,6 +77,7 @@ pub mod flow;
 pub mod harness;
 pub mod harness_auth;
 pub(crate) mod harness_crypto;
+mod harness_methods;
 pub mod harness_net;
 pub mod harness_system;
 pub mod harness_tenant;
@@ -199,10 +201,12 @@ pub mod user_dirs;
 /// fallback for embedders without an explicit bootstrap phase.
 pub fn initialize_runtime_assets() {
     secret_patterns::initialize_default_secret_patterns();
+    harness_methods::install();
 }
 
 /// A startup condition that must stop the process before any work begins.
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum RuntimeInitError {
     /// The Harn-owned environment namespace holds an unknown or malformed key.
     Environment(environment_registry::EnvironmentValidationError),
@@ -339,9 +343,11 @@ pub use http::{register_http_builtins, reset_http_state};
 pub use llm::register_llm_builtins;
 pub use llm::trigger_predicate::TriggerPredicateBudget;
 pub use llm::{
-    current_agent_session_id, install_llm_cost_budget, install_llm_token_budget,
-    peek_llm_cost_budget, peek_llm_token_budget, register_session_end_hook, set_llm_cost_budget,
-    set_llm_token_budget, LlmBudgetGuard, LlmTokenBudgetGuard, SessionEndHookRegistration,
+    current_agent_session_id, install_llm_cost_budget, install_llm_cost_budget_seeded,
+    install_llm_token_budget, peek_llm_cost_budget, peek_llm_token_budget,
+    register_session_end_hook, set_llm_cost_budget, set_llm_token_budget, LlmBudgetGuard,
+    LlmTokenBudgetGuard, MachineSpendPolicy, MachineSpendQuota, MachineSpendReceipt,
+    SessionEndHookRegistration,
 };
 pub use mcp::{connect_mcp_server_from_json, connect_mcp_server_from_spec, register_mcp_builtins};
 pub use mcp_allowlist::{
@@ -365,10 +371,10 @@ pub use mcp_registry::{
     sweep_expired as mcp_sweep_expired, McpServerPreparation, RegisteredMcpServer, RegistryStatus,
 };
 pub use mcp_server::{
-    take_mcp_serve_metadata, take_mcp_serve_prompts, take_mcp_serve_registry,
-    take_mcp_serve_resource_templates, take_mcp_serve_resources, tool_registry_to_mcp_tools,
-    McpPromptDef, McpResourceDef, McpResourceTemplateDef, McpServer, McpServerMetadata,
-    McpServerReload, McpToolSet,
+    reset_mcp_serve_publication, take_mcp_serve_metadata, take_mcp_serve_prompts,
+    take_mcp_serve_registry, take_mcp_serve_rejection, take_mcp_serve_resource_templates,
+    take_mcp_serve_resources, tool_registry_to_mcp_tools, McpPromptDef, McpResourceDef,
+    McpResourceTemplateDef, McpServer, McpServerMetadata, McpServerReload, McpToolSet,
 };
 pub use metadata::register_metadata_builtins;
 pub use observability::audit::{audit_events as audit_obs_events, AuditFinding, AuditFindingKind};

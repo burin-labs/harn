@@ -64,6 +64,7 @@ pub fn __agent_loop_turn_setup(harness: Harness, session: dict, state: dict) -> 
     nil,
     loop_start_ms,
     current_max,
+    opts,
   )
   if boundary_exhaustion.exhausted {
     __agent_loop_emit_budget_exhausted(harness.agent, session.session_id, boundary_exhaustion)

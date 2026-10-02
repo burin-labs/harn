@@ -50,6 +50,15 @@ inputs:
     description: Request a persistent save; non-main refs remain restore-only.
     required: false
     default: "false"
+  reuse-workspace-crates:
+    description: >-
+      After restore, date unchanged tracked sources before the cached build so
+      Cargo reuses the workspace crates that did not change. Needs
+      cache-workspace-crates, and a writer that runs
+      `scripts/ci/reuse_workspace_crates.sh record` as its last step on success;
+      without that record the restore changes nothing.
+    required: false
+    default: "false"
 
 outputs:
   cache-hit:
@@ -85,13 +94,24 @@ runs:
       continue-on-error: true
       with:
         shared-key: >-
-          ${{ format('{0}{1}', inputs.source-key != '' && format('{0}-{1}', inputs.shared-key, inputs.source-key) || inputs.shared-key, inputs.cache-workspace-crates == 'true' && '-workspace-crates-v1' || '') }}
+          ${{ format('{0}{1}', inputs.source-key != '' && format('{0}-{1}', inputs.shared-key, inputs.source-key) || inputs.shared-key, inputs.cache-workspace-crates == 'true' && '-workspace-crates-v2' || '') }}
         cache-on-failure: ${{ inputs.cache-on-failure }}
         cache-bin: ${{ inputs.cache-bin }}
         cache-workspace-crates: ${{ inputs.cache-workspace-crates }}
         cache-targets: ${{ inputs.target-dir == '' }}
-        cache-directories: ${{ inputs.target-dir }}
+        # Workspace-crate entries also carry the source record that
+        # scripts/ci/reuse_workspace_crates.sh writes; the target directory
+        # cannot hold it because Swatinem deletes its top-level files on save.
+        cache-directories: ${{ format('{0} {1}', inputs.target-dir, inputs.cache-workspace-crates == 'true' && '.harn-workspace-source' || '') }}
         # Fall back to Swatinem's documented default rather than passing an
         # empty string, so existing callers keep their exact current key.
         workspaces: ${{ inputs.workspaces != '' && inputs.workspaces || '.' }}
         save-if: ${{ inputs.save == 'true' && github.ref == 'refs/heads/main' }}
+
+    # A fresh checkout stamps every source with the checkout time, so after an
+    # exact hit Cargo still rebuilt every workspace crate. This dates unchanged
+    # paths before the cached build and leaves changed ones new.
+    - name: Reuse unchanged workspace crates
+      if: inputs.reuse-workspace-crates == 'true' && inputs.cache-workspace-crates == 'true'
+      shell: bash
+      run: ./scripts/ci/reuse_workspace_crates.sh restore

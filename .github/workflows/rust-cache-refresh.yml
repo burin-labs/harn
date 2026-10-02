@@ -22,10 +22,14 @@ on:
   push:
     branches: [main]
   schedule:
-    # Quiet-period backstop. Minute 43 and hour 9 are unused by the other
-    # scheduled workflows, so this does not contend with the nightly platform
-    # suites or the release warm build.
-    - cron: "43 9 * * *"
+    # Quiet-period backstop, every three hours. ci.yml's own cache writers
+    # (the shared CLI, workspace tests, and package audit lanes) no longer run
+    # on a main push the merge group already proved, so this workflow is now
+    # the main-branch writer for those keys. A run whose key already restored
+    # exactly does no compile, so the extra runs cost a few hosted minutes.
+    # Minute 43 is unused by the other scheduled workflows, so this does not
+    # contend with the nightly platform suites or the release warm build.
+    - cron: "43 */3 * * *"
   workflow_dispatch:
 
 permissions:
@@ -59,6 +63,13 @@ jobs:
             install_nextest: true
             warm_script: ./scripts/ci/warm_rust_cache.sh
             save_headroom_bytes: 4294967296
+          # Match rust-cli, which builds the shared Harn CLI in its own job.
+          - cache_key: harn-ci-cli
+            rustflags: "-D warnings -Clink-arg=-fuse-ld=mold"
+            install_mold: true
+            install_nextest: false
+            warm_script: ./scripts/ci/warm_harn_cli_cache.sh
+            save_headroom_bytes: 2147483648
           # Match package-audit: workflow RUSTFLAGS only (no mold).
           - cache_key: package-audit
             rustflags: "-D warnings"
@@ -97,6 +108,9 @@ jobs:
           cache-on-failure: true
           cache-bin: false
           cache-workspace-crates: "true"
+          # Also drops any source record a prefix-matched older generation
+          # carried, so this save never inherits a commit it was not built from.
+          reuse-workspace-crates: "true"
           save: "true"
       # A cache miss means the immutable entry for this family is obsolete.
       # Delete it only after restore (so its contents remain available to the
@@ -114,7 +128,7 @@ jobs:
           ./scripts/prune_ci_cache_generations.sh --ensure-headroom "$HARN_CACHE_SAVE_HEADROOM_BYTES"
       - name: Install cargo-nextest
         if: matrix.install_nextest && steps.rust-cache.outputs.cache-hit != 'true'
-        uses: taiki-e/install-action@3f74d7c16a4242f1c95561e98edc25d36adb4375 # v2.87.12
+        uses: taiki-e/install-action@9983c65e42da123ff25d1f78505eb6de315aa172 # v2.87.20
         with:
           tool: nextest@0.9.132
       # Warm only after a miss. An exact-key restore means this family's entry
@@ -128,6 +142,11 @@ jobs:
         env:
           CARGO_BUILD_JOBS: "4"
         run: ${{ matrix.warm_script }}
+      # Name the commit this generation was built from, for workspace crate
+      # reuse on restore. Only a warm build that succeeded may claim it.
+      - name: Record the workspace cache source
+        if: success() && steps.rust-cache.outputs.cache-hit != 'true'
+        run: ./scripts/ci/reuse_workspace_crates.sh record
       - name: Report cache generation already current
         if: steps.rust-cache.outputs.cache-hit == 'true'
         env:
