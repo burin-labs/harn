@@ -121,7 +121,9 @@ fn registry(harness: Harness) {
 fn main(harness: Harness) {
   harness.tools.mcp_tools(registry(harness))
 }
+"#;
 
+const AGENT_TEST: &str = r#"
 @test
 pipeline agent_payload_contract(harness: Harness) {
   const direct = registry(harness)
@@ -161,6 +163,11 @@ fn calls(temp: &tempfile::TempDir, name: &str) -> usize {
 #[test]
 fn agent_validates_payload_without_losing_the_explicit_outcome() {
     let temp = fixture();
+    fs::write(
+        temp.path().join("tools.harn"),
+        format!("{FIXTURE}{AGENT_TEST}"),
+    )
+    .expect("add the agent-only test entrypoint");
     let result = harn_e2e_command()
         .current_dir(temp.path())
         .args(["test", "tools.harn"])
