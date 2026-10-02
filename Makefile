@@ -483,6 +483,15 @@ lint-actions-source:
 		echo "Pin org runner-availability workflow references to a full commit SHA." >&2; \
 		exit 1; \
 	fi
+	@# zizmor's ref-version-mismatch audit resolves a SHA pin's trailing
+	@# comment as a ref, but only online, so the required offline zizmor in
+	@# ci.yml cannot see it and only the scheduled audit fails. A comment after
+	@# a SHA pin must name a version tag; leave unversioned pins uncommented.
+	@if grep -R -n -E 'uses: [^ ]+@[0-9a-f]{40}[[:space:]]+#' .github/workflows .github/actions \
+		| grep -v -E '@[0-9a-f]{40}[[:space:]]+#[[:space:]]*v[0-9]'; then \
+		echo "A comment after a SHA-pinned action must name its version tag (e.g. '# v1.2.3'); drop it when the pin has no tag." >&2; \
+		exit 1; \
+	fi
 
 # Validate the Harn-specific runner-tier contract in a lane that already has a
 # warm, exact-commit Harn binary.
