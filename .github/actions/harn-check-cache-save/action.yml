@@ -1,0 +1,34 @@
+name: Save Harn check cache
+description: >
+  Persist the Harn check cache that ./.github/actions/harn-check-cache pointed
+  at, from main only, then prune older generations of the same family. Pruning
+  after the save leaves one entry per family; pruning first would leave two
+  under the 10 GB repository cache ceiling. If the save fails or is not listed
+  yet, the newest existing entry survives, so a family is never emptied.
+
+inputs:
+  family:
+    description: Stable lane identity matching the earlier restore.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Save Harn check cache
+      if: github.ref == 'refs/heads/main'
+      uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5
+      continue-on-error: true
+      with:
+        path: |
+          ~/.cache/harn-ci/check
+          ~/.cache/harn-ci/*.harnbc
+          ~/.cache/harn-ci/*.harnmod
+        key: harn-check-cache-v1-${{ inputs.family }}-${{ runner.os }}-${{ runner.arch }}-${{ github.sha }}
+
+    - name: Prune superseded Harn check cache generations
+      if: github.ref == 'refs/heads/main'
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        HARN_CACHE_FAMILY_PREFIX: harn-check-cache-v1-${{ inputs.family }}-${{ runner.os }}-${{ runner.arch }}-
+      run: ./scripts/prune_ci_cache_generations.sh --harn-check-cache-family-prefix "$HARN_CACHE_FAMILY_PREFIX"

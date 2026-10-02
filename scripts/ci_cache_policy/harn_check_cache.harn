@@ -1,0 +1,237 @@
+import {
+  CiCachePolicy,
+  UPSTREAM_CACHE_RESTORE_PREFIX,
+  UPSTREAM_CACHE_SAVE_PREFIX,
+  UPSTREAM_GENERIC_CACHE_PREFIX,
+  step_uses,
+} from "./policy_core.harn"
+
+/**
+ * Harn's own check cache in CI: `harn check` results and compiled modules,
+ * persisted per audit lane.
+ *
+ * The cache keys can only miss on stale input, so the risks this guards are
+ * all about storage and authorship rather than correctness: a pull request
+ * that writes, a writer that restores first and so carries superseded entries
+ * forever, a family that keeps more than one generation under the 10 GB pool,
+ * and a restore that names a family nothing saves, which misses quietly and
+ * looks exactly like a cold runner.
+ */
+pub const HARN_CHECK_CACHE_ACTION = "./.github/actions/harn-check-cache"
+
+pub const HARN_CHECK_CACHE_SAVE_ACTION = "./.github/actions/harn-check-cache-save"
+
+pub const HARN_CHECK_CACHE_ACTION_PATH = ".github/actions/harn-check-cache/action.yml"
+
+pub const HARN_CHECK_CACHE_SAVE_ACTION_PATH = ".github/actions/harn-check-cache-save/action.yml"
+
+pub const HARN_CHECK_CACHE_KEY_COMMIT = "-$" + "{{ github.sha }}"
+
+pub const HARN_CHECK_CACHE_PRUNE_COMMAND =
+  "./scripts/prune_ci_cache_generations.sh --harn-check-cache-family-prefix \"$HARN_CACHE_FAMILY_PREFIX\""
+
+const MAIN_ONLY = "github.ref == 'refs/heads/main'"
+
+const AWAY_FROM_MAIN = "github.ref != 'refs/heads/main'"
+
+fn steps_with_prefix(action: dict, prefix: string) -> list {
+  return (action?.runs?.steps ?? []).filter({ step -> step_uses(step).starts_with(prefix) })
+    .to_list()
+}
+
+fn non_fatal(step: dict) -> bool {
+  return lowercase(trim(to_string(step["continue-on-error"] ?? "false"))) == "true"
+}
+
+/**
+ * The restore and save actions must agree on one path set and one per-commit
+ * key, restore only away from main, save only on main, and prune after the
+ * save so exactly one generation per family survives.
+ */
+pub fn harn_check_cache_action_errors(restore_action: dict, save_action: dict) -> list<string> {
+  guard restore_action != nil && save_action != nil else {
+    return [
+      "${HARN_CHECK_CACHE_ACTION_PATH} and ${HARN_CHECK_CACHE_SAVE_ACTION_PATH} must both exist",
+    ]
+  }
+  const restores = steps_with_prefix(restore_action, UPSTREAM_CACHE_RESTORE_PREFIX)
+  const saves = steps_with_prefix(save_action, UPSTREAM_CACHE_SAVE_PREFIX)
+  const stray_writers = steps_with_prefix(restore_action, UPSTREAM_GENERIC_CACHE_PREFIX)
+    + steps_with_prefix(restore_action, UPSTREAM_CACHE_SAVE_PREFIX)
+    + steps_with_prefix(save_action, UPSTREAM_GENERIC_CACHE_PREFIX)
+    + steps_with_prefix(save_action, UPSTREAM_CACHE_RESTORE_PREFIX)
+  if len(restores) != 1 || len(saves) != 1 || len(stray_writers) != 0 {
+    return [
+      "${HARN_CHECK_CACHE_ACTION_PATH} must hold one restore and ${HARN_CHECK_CACHE_SAVE_ACTION_PATH} one save, and nothing else may touch the cache",
+    ]
+  }
+  const restore = restores[0]
+  const save = saves[0]
+  let errors: list<string> = []
+  if !contains(trim(to_string(restore?.if ?? "")), AWAY_FROM_MAIN) {
+    errors = errors
+      + [
+        "${HARN_CHECK_CACHE_ACTION_PATH} must not restore on main; a writer that restores first carries superseded entries forever",
+      ]
+  }
+  if !contains(trim(to_string(save?.if ?? "")), MAIN_ONLY) {
+    errors = errors + ["${HARN_CHECK_CACHE_SAVE_ACTION_PATH} must save only on refs/heads/main"]
+  }
+  if !non_fatal(restore) || !non_fatal(save) {
+    errors = errors
+      + ["Harn check cache restore and save must keep cache-service failures non-fatal"]
+  }
+  const key = trim(to_string(restore?.with?.key ?? ""))
+  const path = trim(to_string(restore?.with?.path ?? ""))
+  const prefix = if key.ends_with(HARN_CHECK_CACHE_KEY_COMMIT) {
+    key.slice(0, len(key) - len(HARN_CHECK_CACHE_KEY_COMMIT) + 1)
+  } else {
+    ""
+  }
+  if path == "" || prefix == "" || !key.starts_with("harn-check-cache-v")
+    || !contains(key, "$" + "{{ inputs.family }}")
+    || trim(to_string(save?.with?.key ?? "")) != key
+    || trim(to_string(save?.with?.path ?? "")) != path
+    || trim(to_string(restore?.with?.["restore-keys"] ?? "")) != prefix {
+    errors = errors
+      + [
+        "Harn check cache restore and save must share one path set and one versioned per-commit key whose prefix is the restore fallback",
+      ]
+  }
+  let save_index = -1
+  let prune_index = -1
+  for {index, value: step} in (save_action?.runs?.steps ?? []).enumerate() {
+    if step_uses(step).starts_with(UPSTREAM_CACHE_SAVE_PREFIX) {
+      save_index = index
+    }
+    if trim(to_string(step?.run ?? "")) == HARN_CHECK_CACHE_PRUNE_COMMAND {
+      prune_index = index
+      const prune = step
+      if !contains(trim(to_string(prune?.if ?? "")), MAIN_ONLY)
+        || trim(to_string(prune?.env?.GH_TOKEN ?? "")) != "$" + "{{ github.token }}"
+        || trim(to_string(prune?.env?.HARN_CACHE_FAMILY_PREFIX ?? "")) != prefix {
+        errors = errors
+          + [
+            "${HARN_CHECK_CACHE_SAVE_ACTION_PATH} must prune only on main, with the workflow token, the family the save wrote",
+          ]
+      }
+    }
+  }
+  if prune_index <= save_index {
+    errors = errors
+      + [
+        "${HARN_CHECK_CACHE_SAVE_ACTION_PATH} must prune superseded generations after saving, so one generation per family survives",
+      ]
+  }
+  return errors
+}
+
+/** The families a step names, expanding `${{ matrix.<field> }}` over the job's include rows. */
+fn check_cache_families(job: dict, step: dict) -> list<string> {
+  const family = trim(to_string(step?.with?.family ?? ""))
+  const matrix_field = regex_captures(r"^\$\{\{ matrix\.([A-Za-z0-9_]+) \}\}$", family)
+  if len(matrix_field) != 1 {
+    return if family == "" {
+      []
+    } else {
+      [family]
+    }
+  }
+  const field = matrix_field[0].groups[0]
+  let families: list<string> = []
+  for entry in job?.strategy?.matrix?.include ?? [] {
+    const value = trim(to_string(entry?.[field] ?? ""))
+    if value != "" {
+      families = families + [value]
+    }
+  }
+  return families
+}
+
+fn writer_site(workflow: string, job: string, family: string) -> string {
+  return workflow + ":" + job + ":" + family
+}
+
+/**
+ * Every save is a registered writer, every registered writer is active, every
+ * restore names a family something saves, and a saving job restores first (the
+ * restore is what points HARN_CACHE_DIR at the saved paths), may prune, and
+ * never lets a failed save fail its gate.
+ */
+pub fn harn_check_cache_writer_errors(policy: CiCachePolicy, workflows: dict) -> list<string> {
+  const registered = policy.harn_check_cache_writers.map(
+    { writer -> writer_site(writer.workflow, writer.job, writer.family) },
+  )
+    .to_list()
+  let errors: list<string> = []
+  let written: list<string> = []
+  let read_sites: list<string> = []
+  for workflow in workflows.keys().sorted() {
+    const jobs = workflows[workflow]?.jobs ?? {}
+    for job in jobs.keys().sorted() {
+      const definition = jobs[job] ?? {}
+      const steps = definition?.steps ?? []
+      let restore_index = -1
+      let restored: list<string> = []
+      for {index, value: step} in steps.enumerate() {
+        const uses = step_uses(step)
+        if uses == HARN_CHECK_CACHE_ACTION {
+          restore_index = index
+          restored = restored + check_cache_families(definition, step)
+          for family in check_cache_families(definition, step) {
+            read_sites = read_sites + [writer_site(workflow, job, family)]
+          }
+        }
+        if uses != HARN_CHECK_CACHE_SAVE_ACTION {
+          continue
+        }
+        const families = check_cache_families(definition, step)
+        if len(families) == 0 {
+          errors = errors
+            + ["${workflow}:${job} saves the Harn check cache without naming a family"]
+        }
+        for family in families {
+          const site = writer_site(workflow, job, family)
+          written = written + [family]
+          if !registered.contains(site) {
+            errors = errors + ["${site} is not an authorized Harn check cache writer"]
+          }
+          if restore_index < 0 || !restored.contains(family) {
+            errors = errors
+              + [
+                "${site} must restore the same family earlier in the job, which is what points HARN_CACHE_DIR at the saved paths",
+              ]
+          }
+        }
+        if !non_fatal(step) {
+          errors = errors
+            + ["${workflow}:${job} must not let a failed Harn check cache save fail the job"]
+        }
+        if trim(to_string(definition?.permissions?.actions ?? "")) != "write" {
+          errors = errors
+            + [
+              "${workflow}:${job} must grant actions: write so its save can prune the superseded generation",
+            ]
+        }
+      }
+    }
+  }
+  for writer in policy.harn_check_cache_writers {
+    if !written.contains(writer.family) {
+      errors = errors
+        + [
+          "authorized Harn check cache writer is not active: "
+            + writer_site(writer.workflow, writer.job, writer.family),
+        ]
+    }
+  }
+  for site in read_sites.sorted() {
+    if !written.contains(site.split(":")[-1]) {
+      errors = errors
+        + [
+          "${site} restores a Harn check cache family no writer saves; name a saved family or remove the step",
+        ]
+    }
+  }
+  return errors
+}

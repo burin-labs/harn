@@ -107,7 +107,7 @@ pub fn macos_warm_policy() -> MacosWorkspaceWarmPolicy {
 
 pub fn policy() -> CiCachePolicy {
   return {
-    schema_version: 6,
+    schema_version: 7,
     rust_cache_action: "./.github/actions/rust-cache",
     node_cache_action: "./.github/actions/node-cache",
     persistent_ref: "refs/heads/main",
@@ -125,6 +125,7 @@ pub fn policy() -> CiCachePolicy {
       {workflow: "windows-nightly.yml", job: "nextest", shared_key: "workspace-windows"},
       {workflow: "macos-nightly.yml", job: "nextest", shared_key: "workspace-macos"},
     ],
+    harn_check_cache_writers: [{workflow: "ci.yml", job: "harn-audit", family: "audit"}],
   }
 }
 
