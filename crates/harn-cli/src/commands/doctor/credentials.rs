@@ -1,4 +1,6 @@
-//! Provider credential rows for `harn doctor`.
+//! Provider selection and credential rows for `harn doctor`.
+
+use std::path::PathBuf;
 
 use harn_vm::llm::ProviderCredentialStatus as Cred;
 use harn_vm::llm_config;
@@ -102,6 +104,43 @@ pub(super) fn check_provider_credentials() -> Vec<DoctorCheck> {
         docs_url: Some("https://harnlang.com/llm/providers.html".to_string()),
         blocks: aggregate_blocks,
     });
+
+    checks
+}
+
+pub(super) fn check_provider_selection() -> Vec<DoctorCheck> {
+    let mut checks = Vec::new();
+
+    if let Ok(path) = std::env::var("HARN_PROVIDERS_CONFIG") {
+        let config_path = PathBuf::from(&path);
+        let status = if config_path.is_file() {
+            DoctorStatus::Ok
+        } else {
+            DoctorStatus::Fail
+        };
+        checks.push(DoctorCheck {
+            id: String::new(),
+            status,
+            label: "providers config".to_string(),
+            detail: format!("HARN_PROVIDERS_CONFIG={path}"),
+            ..Default::default()
+        });
+    }
+
+    if let Ok(provider) = std::env::var("HARN_LLM_PROVIDER") {
+        let status = if llm_config::provider_config(&provider).is_some() {
+            DoctorStatus::Ok
+        } else {
+            DoctorStatus::Fail
+        };
+        checks.push(DoctorCheck {
+            id: String::new(),
+            status,
+            label: "selected provider".to_string(),
+            detail: format!("HARN_LLM_PROVIDER={provider}"),
+            ..Default::default()
+        });
+    }
 
     checks
 }

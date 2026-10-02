@@ -15,8 +15,10 @@ The default chain is:
 env -> keyring
 ```
 
-Use `harn doctor` to inspect the active chain and to verify that the keyring
-backend is reachable on the current machine.
+Use `harn doctor` to inspect the active chain and to see whether the keyring
+backend is available, locked, or unavailable on the current machine.
+`harn doctor --check-keyring-write` also writes, reads, and deletes a probe
+credential.
 
 ## Secret model
 
@@ -123,14 +125,17 @@ worktrees can still prompt again. Long-running automation should use a stable
 signed helper, broker, or external vault instead of relying on per-build
 Keychain prompts.
 
-### Keychain dialogs
+### Keychain dialogs and unlock prompts
 
-On macOS, reading a stored value can raise a Keychain access dialog. Harn
-raises one only when a person can answer it:
+On macOS, reading a stored value can raise a Keychain access dialog. On Linux,
+any operation that meets a locked Secret Service collection raises an unlock
+prompt. Harn raises either one only when a person can answer it:
 
 - Status and availability questions (`harness.llm.providers()`,
   `harn doctor`, `harn models recommend`, routing) check whether a credential
   exists without reading it, so they never raise a dialog.
+- `harn doctor` reads a Linux collection's lock state instead of unlocking
+  it, and reports a locked store as locked rather than unavailable.
 - A process with no terminal on stdin, or one running under `CI`, never
   raises a dialog. A read that would need one fails with a typed
   needs-approval error naming the credential, and provider status reports

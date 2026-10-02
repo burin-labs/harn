@@ -22,6 +22,11 @@ pub(crate) struct DoctorArgs {
     /// by default because each probe spawns Cargo.
     #[arg(long)]
     pub check_targets: bool,
+    /// Store, read back, and delete a probe credential in the operating
+    /// system keyring. Off by default because it writes to the store; the
+    /// default check only asks whether the store is available or locked.
+    #[arg(long)]
+    pub check_keyring_write: bool,
     #[command(subcommand)]
     pub command: Option<DoctorCommand>,
 }
