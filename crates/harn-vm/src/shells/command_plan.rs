@@ -76,7 +76,7 @@ pub fn plan_posix_command(source: &str) -> Option<CommandPlan> {
             let (key, value) = text.split_once('=')?;
             // Assignment expansion can change PATH. Decline the whole probe
             // instead of searching a guessed environment.
-            if dynamic(child) || value.contains('$') {
+            if dynamic(child) || value.contains(['$', '~', '{', '}']) {
                 return None;
             }
             let words = shell_words::split(value).ok()?;
@@ -313,6 +313,7 @@ mod tests {
         for source in [
             "$PROGRAM test",
             "PATH=$OTHER cargo test",
+            "PATH=~/tools cargo test",
             "f() { absent; }; f",
             "echo hi",
             "exit 127",

@@ -250,6 +250,7 @@ fn real_run_command_present_program_exit_127_is_not_missing() {
     for (mode, command) in [
         ("argv", ""),
         ("shell", "env VAR=1 present-8932"),
+        ("shell", "PATH=~ present-8932"),
         ("auto", "env VAR=1 present-8932"),
         ("auto", "present-8932"),
     ] {
@@ -270,6 +271,7 @@ fn real_run_command_present_program_exit_127_is_not_missing() {
                 "PATH".into(),
                 vstr(&format!("{}:/usr/bin:/bin", workspace.path().display())),
             );
+            env.insert("HOME".into(), vstr(workspace.path().to_str().unwrap()));
             req.insert("env".into(), VmValue::dict(env));
         }
         let response = require_dict(call("hostlib_tools_run_command", req).unwrap());
