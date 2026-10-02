@@ -11,7 +11,7 @@ fn scoped_deadline_preserves_live_parent_cancellation() {
     let token = Arc::new(AtomicBool::new(false));
     let _parent = install(Some(token.clone()), None);
     {
-        let _operation = with_deadline(Instant::now() + Duration::from_secs(3600));
+        let _operation = with_deadline(Instant::now() + Duration::from_hours(1));
         assert!(!requested());
         token.store(true, Ordering::SeqCst);
         assert!(
@@ -28,13 +28,13 @@ fn scoped_deadline_preserves_live_parent_cancellation() {
 #[test]
 fn scoped_deadline_cannot_extend_an_expired_parent() {
     let _parent = install(None, Some(Instant::now()));
-    let _operation = with_deadline(Instant::now() + Duration::from_secs(3600));
+    let _operation = with_deadline(Instant::now() + Duration::from_hours(1));
     assert!(requested());
 }
 
 #[test]
 fn scoped_deadline_expires_and_restores_a_live_parent() {
-    let parent = install(None, Some(Instant::now() + Duration::from_secs(3600)));
+    let parent = install(None, Some(Instant::now() + Duration::from_hours(1)));
     {
         let _operation = with_deadline(Instant::now());
         assert!(requested());
