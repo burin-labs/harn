@@ -1348,7 +1348,7 @@ pipeline test_owned_ceiling_accounts_for_build_margins_without_cache_save(harnes
   )
   assert_eq(
     cli_producer_owned_ceiling_minutes(),
-    cli_producer_hosted_ceiling_minutes() - producer_cache_save_reserve_minutes() + 10,
+    cli_producer_hosted_ceiling_minutes() - producer_cache_save_reserve_minutes() + 16,
     "the owned CLI ceiling must account for the CLI margin without a cache-save reserve",
   )
 }
@@ -1385,8 +1385,8 @@ pipeline test_owned_cli_rejects_the_hosted_only_timeout(harness: Harness) {
   )
   assert_eq(producer_hosted_ceiling_minutes(), 60)
   assert_eq(producer_owned_ceiling_minutes(), 56)
-  assert_eq(cli_producer_hosted_ceiling_minutes(), 28)
-  assert_eq(cli_producer_owned_ceiling_minutes(), 26)
+  assert_eq(cli_producer_hosted_ceiling_minutes(), 33)
+  assert_eq(cli_producer_owned_ceiling_minutes(), 37)
 }
 
 pipeline test_security_wait_uses_the_shared_waiter_budget() {

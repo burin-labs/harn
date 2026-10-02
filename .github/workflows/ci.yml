@@ -915,8 +915,10 @@ jobs:
     # compiled units, so in one job the test build waited 230-310s for nothing.
     # Paid minutes per run are about the same; two paid runners now overlap.
     #
-    # Hosted ceiling: 6 setup + 10 CLI budget + 12 cache-save reserve = 28.
-    # Owned ceiling: 6 setup + 20 CLI budget = 26.
+    # Hosted ceiling: 6 setup + 15 CLI budget + 12 cache-save reserve = 33.
+    # Owned ceiling: 6 setup + 31 CLI budget = 37.
+    # The CLI builds in the ci-cli profile (opt-level 1), which costs more to
+    # compile than dev and runs every Harn proof lane four to five times faster.
     runs-on: >-
       ${{ (vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true'
         && (github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository))
@@ -929,8 +931,8 @@ jobs:
         && (github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository))
         && 20)
         || (needs.rust-producer-capacity.outputs.route == 'owned'
-        && 26)
-        || 28 }}
+        && 37)
+        || 33 }}
     # The GitHub-hosted rung remains the authorized main-branch cache writer;
     # Blacksmith uses sticky sccache and never enters that step, and the owned
     # self-hosted rung is pull-request-only so it never reaches the write
@@ -1010,7 +1012,7 @@ jobs:
       - name: Record the sccache baseline
         run: ./scripts/ci/sccache_baseline.sh
       - name: Build portable Harn CLI
-        timeout-minutes: ${{ env.HARN_RUNNER_TIER == 'self-hosted' && 20 || 10 }}
+        timeout-minutes: ${{ env.HARN_RUNNER_TIER == 'self-hosted' && 31 || 15 }}
         env:
           CARGO_BUILD_JOBS: ${{ steps.resource-budget.outputs.build_jobs }}
         run: >-

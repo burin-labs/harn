@@ -7,15 +7,20 @@ policy_nextest="$(jq -er '.nextest_version' "$repo_root/.github/cache-policy.jso
 tmpdir="$(mktemp -d)"
 trap 'rm -rf "$tmpdir"' EXIT
 
-mkdir -p "$tmpdir/bin" "$tmpdir/target/debug" "$tmpdir/out" "$tmpdir/receipts" "$tmpdir/work"
+mkdir -p "$tmpdir/bin" "$tmpdir/target/debug" "$tmpdir/target/ci-cli" "$tmpdir/out" "$tmpdir/receipts" "$tmpdir/work"
 cp "$repo_root/rust-toolchain.toml" "$tmpdir/work/rust-toolchain.toml"
 cat > "$tmpdir/bin/cargo" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
 case "$1" in
   build)
-    [[ "$*" == "build --locked --bin harn" ]] || exit 2
-    : > "${CARGO_RECEIPTS:?}/build"
+    # The shared CLI bundle builds in the ci-cli profile; the test bundle's
+    # CLI stays in dev with the test build.
+    case "$*" in
+      "build --locked --bin harn") : > "${CARGO_RECEIPTS:?}/build" ;;
+      "build --locked --profile ci-cli --bin harn") : > "${CARGO_RECEIPTS:?}/build-ci-cli" ;;
+      *) exit 2 ;;
+    esac
     ;;
   metadata)
     [[ "$*" == "metadata --format-version 1 --no-deps" ]] || exit 2
@@ -71,6 +76,8 @@ SH
 chmod +x "$tmpdir/bin/rustc"
 printf '#!/usr/bin/env bash\necho harn\n' > "$tmpdir/target/debug/harn"
 chmod +x "$tmpdir/target/debug/harn"
+printf '#!/usr/bin/env bash\necho harn\n' > "$tmpdir/target/ci-cli/harn"
+chmod +x "$tmpdir/target/ci-cli/harn"
 
 commit=0123456789abcdef0123456789abcdef01234567
 bundle="$tmpdir/out/workspace-tests.tar.zst"
@@ -109,7 +116,8 @@ test -f "$tmpdir/receipts/build"
 test -f "$tmpdir/receipts/nextest-tests"
 rm -f "$tmpdir/receipts/build" "$tmpdir/receipts/nextest-tests"
 run_artifact build-cli "$cli_bundle" "$commit"
-test -f "$tmpdir/receipts/build"
+test -f "$tmpdir/receipts/build-ci-cli"
+test ! -f "$tmpdir/receipts/build"
 test ! -f "$tmpdir/receipts/nextest-tests"
 run_artifact build-security "$security_bundle" "$commit"
 test -f "$tmpdir/receipts/nextest-security"
@@ -204,6 +212,22 @@ tar --zstd -cf "$tmpdir/out/corrupt-cli.tar.zst" -C "$tmpdir/tampered-cli" \
   harn manifest CLI_SHA256SUMS
 expect_failure "CLI restore accepted corrupt harn bytes" \
   run_artifact restore-cli "$tmpdir/out/corrupt-cli.tar.zst" "$tmpdir/corrupt-cli" "$commit"
+
+# A shared CLI from any other profile is refused even when its checksums are
+# consistent: the proof lanes' timing budgets assume the optimized build.
+grep -Fxq 'cargo_profile=ci-cli' "$tmpdir/restored-cli/manifest"
+mkdir "$tmpdir/dev-profile-cli"
+tar --zstd -xf "$cli_bundle" -C "$tmpdir/dev-profile-cli"
+sed -i.bak 's/^cargo_profile=ci-cli$/cargo_profile=dev/' "$tmpdir/dev-profile-cli/manifest"
+rm "$tmpdir/dev-profile-cli/manifest.bak"
+(
+  cd "$tmpdir/dev-profile-cli"
+  sha256sum harn manifest > CLI_SHA256SUMS
+)
+tar --zstd -cf "$tmpdir/out/dev-profile-cli.tar.zst" -C "$tmpdir/dev-profile-cli" \
+  harn manifest CLI_SHA256SUMS
+expect_failure "CLI restore accepted a bundle built outside the ci-cli profile" \
+  run_artifact restore-cli "$tmpdir/out/dev-profile-cli.tar.zst" "$tmpdir/dev-profile-restored" "$commit"
 
 printf 'corrupt\n' >> "$tmpdir/tampered/harn-tests.tar.zst"
 tar --zstd -cf "$tmpdir/out/corrupt-member.tar.zst" -C "$tmpdir/tampered" \
