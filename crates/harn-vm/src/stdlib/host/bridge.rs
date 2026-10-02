@@ -11,7 +11,7 @@ use crate::value::{DictMap, VmError, VmValue};
 
 use super::trace::HostRequestTrace;
 use super::turn_cache;
-use crate::vm::VmCallSite;
+use crate::vm::AsyncBuiltinCtx;
 
 /// Boxed future returned by [`HostCallBridge::dispatch`].
 ///
@@ -39,8 +39,9 @@ pub(super) async fn dispatch_cached(
     capability: &str,
     operation: &str,
     params: &DictMap,
-    caller: Option<VmCallSite>,
+    ctx: Option<&AsyncBuiltinCtx>,
 ) -> Result<Option<VmValue>, VmError> {
+    let caller = ctx.and_then(AsyncBuiltinCtx::host_call_site);
     if capability == "project" && operation == "metadata_get" {
         return turn_cache::cached_metadata_or(params, |params: DictMap| async move {
             let trace = HostRequestTrace::new(caller, &params);

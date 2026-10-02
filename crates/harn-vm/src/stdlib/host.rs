@@ -857,9 +857,8 @@ pub async fn dispatch_host_operation_with_ctx(
     if let Some(bridge) = bridge {
         // Turn-stable reads share a memo; metadata writes invalidate it on both
         // sides of dispatch. harn#5190, harn#6914, harn#7172.
-        let caller = ctx.and_then(AsyncBuiltinCtx::host_call_site);
         let dispatched =
-            bridge::dispatch_cached(bridge, capability, operation, params, caller).await?;
+            bridge::dispatch_cached(bridge, capability, operation, params, ctx).await?;
         if let Some(value) = dispatched {
             return Ok(value);
         }

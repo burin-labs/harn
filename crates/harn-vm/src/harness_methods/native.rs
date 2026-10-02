@@ -714,8 +714,15 @@ async fn dispatch_host_from_vm(
     params: &crate::value::DictMap,
 ) -> Result<VmValue, VmError> {
     let ctx = crate::vm::AsyncBuiltinCtx::from_inline_parent(vm);
-    crate::stdlib::host::dispatch_host_operation_with_ctx(Some(&ctx), capability, operation, params)
-        .await
+    // Boxed so each typed Harness method does not inline the dispatcher's
+    // state machine into its own stack frame.
+    Box::pin(crate::stdlib::host::dispatch_host_operation_with_ctx(
+        Some(&ctx),
+        capability,
+        operation,
+        params,
+    ))
+    .await
 }
 
 async fn call_project_capability_method(
