@@ -471,8 +471,7 @@ impl OpenAiCompatibleProvider {
         }
         crate::llm::prompt_cache::apply_prompt_cache_breakpoint(
             &mut body,
-            opts.cache,
-            caps,
+            crate::llm::prompt_cache::PromptCacheBreakpoint::resolve(opts, caps),
             serde_json::json!({"type": "ephemeral"}),
         );
         crate::llm::serving_tiers::apply_fast_request_knob(&mut body, &opts.model, opts.fast);

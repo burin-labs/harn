@@ -288,7 +288,7 @@ fn openai_routes_that_cache_declare_prompt_caching() {
 }
 
 /// Declaring `prompt_caching` must NOT start emitting a request marker on
-/// OpenAI routes. `apply_prompt_cache_breakpoint` is gated on
+/// OpenAI routes. `PromptCacheBreakpoint::resolve` is gated on
 /// `caps.prompt_caching`, so before this flag was set the OpenAI branch was
 /// unreachable and the breakpoint style never mattered. It matters now.
 ///
