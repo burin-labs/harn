@@ -59,8 +59,18 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          sparse-checkout: scripts/scheduled_workflows.toml
-          sparse-checkout-cone-mode: false
+          # Cone mode also brings the root files setup-harn's bootstrap reads.
+          sparse-checkout: |
+            .github
+            scripts
+      # The suite list comes from the scheduled-workflow checker, which
+      # validates the registry before printing it. Any recent release runs it;
+      # bump the pin when convenient, as secret-scan.yml does.
+      - name: Set up Harn
+        id: harn
+        uses: ./.github/actions/setup-harn
+        with:
+          version: "0.10.153"
       - name: Classify each scheduled suite and post main's status
         env:
           GH_TOKEN: ${{ github.token }}
@@ -68,6 +78,7 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           PUSHED_SHA: ${{ github.sha }}
           REPLACED_SHA: ${{ github.event.before }}
+          HARN: ${{ steps.harn.outputs.path }}
         run: |
           set -euo pipefail
 
@@ -99,15 +110,8 @@ jobs:
 
           # One suite per line: name, consecutive failures that count as
           # broken, and the job judged instead of the whole run (may be empty).
-          suites="$(python3 - <<'PY'
-          import tomllib
-          with open("scripts/scheduled_workflows.toml", "rb") as f:
-              rows = tomllib.load(f)["workflow"]
-          for row in rows:
-              if "health_failures" in row:
-                  print(f'{row["name"]}\t{row["health_failures"]}\t{row.get("health_job", "")}')
-          PY
-          )"
+          # An invalid registry fails here, before anything is posted.
+          suites="$("$HARN" run scripts/check_scheduled_workflows.harn -- --health-suites)"
           watched="$(grep -c . <<< "$suites" || true)"
           if (( watched == 0 )); then
             echo "::error::scripts/scheduled_workflows.toml watches no suites"

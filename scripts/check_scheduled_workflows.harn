@@ -201,6 +201,20 @@ fn main(harness: Harness) {
     }
     harness.runtime.exit(1)
   }
+  // `--health-suites` is how main health learns what to watch: the same
+  // validated registry, one watched suite per line as
+  // `name<TAB>health_failures<TAB>health_job`.
+  if argv.contains("--health-suites") {
+    for record in records {
+      if record?.health_failures != nil {
+        harness.stdio.println(
+          trim(to_string(record.name)) + "\t" + to_string(record.health_failures) + "\t"
+            + trim(to_string(record?.health_job ?? "")),
+        )
+      }
+    }
+    return nil
+  }
   harness.stdio.println(
     CHECK_NAME + ": OK (" + to_string(scanned) + " scheduled workflows, "
       + to_string(len(records))
