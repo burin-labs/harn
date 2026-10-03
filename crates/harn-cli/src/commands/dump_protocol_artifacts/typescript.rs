@@ -380,6 +380,8 @@ export interface HarnACPPromptErrorData {
   category?: string
   kind?: string
   reason?: string
+  origin?: string
+  rule?: string
   code?: string
   retryable?: boolean
   retryAfterMs?: number

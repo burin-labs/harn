@@ -452,7 +452,8 @@
       "empty_generation",
       "billing_limit",
       "output_budget_exhausted",
-      "unknown"
+      "unknown",
+      "policy_denied"
     ],
     "promptErrorTerminalClasses": [
       "context_overflow",

@@ -412,6 +412,8 @@ class HarnACPPromptErrorData(_HarnDataclass):
     category: Optional[str] = None
     kind: Optional[str] = None
     reason: Optional[str] = None
+    origin: Optional[str] = None
+    rule: Optional[str] = None
     code: Optional[str] = None
     retryable: Optional[bool] = None
     retryAfterMs: Optional[int] = None

@@ -4,9 +4,46 @@
 use serde::{Deserialize, Serialize};
 
 use crate::llm_config::TrainingDefault;
-use crate::value::{VmError, VmValue};
+use crate::value::{ErrorCategory, VmDictExt, VmError, VmValue};
 
 use super::data_controls::DataControlsReceipt;
+use super::errors::{LlmErrorKind, LlmErrorReason};
+
+#[derive(Clone, Copy)]
+enum DenialRule {
+    LocalOnly,
+    HostedOpenWeight,
+    TrainingDefault,
+    TrainingUnknown,
+    UnknownProvider,
+    UntrustedLocalEndpoint,
+}
+
+impl DenialRule {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::LocalOnly => "inference_boundary.local_only",
+            Self::HostedOpenWeight => "inference_boundary.hosted_open_weight",
+            Self::TrainingDefault => "inference_boundary.training_default",
+            Self::TrainingUnknown => "inference_boundary.training_unknown",
+            Self::UnknownProvider => "inference_boundary.catalog_provider_unknown",
+            Self::UntrustedLocalEndpoint => "inference_boundary.local_endpoint_untrusted",
+        }
+    }
+
+    fn refuse(self, message: String) -> VmError {
+        let mut fields = std::collections::BTreeMap::new();
+        fields.put_str("category", ErrorCategory::EgressBlocked.as_str());
+        fields.put_str("kind", LlmErrorKind::Terminal.as_str());
+        fields.put_str("reason", LlmErrorReason::PolicyDenied.as_str());
+        fields.put_str("origin", "local");
+        fields.put_str("rule", self.as_str());
+        fields.put_str("code", self.as_str());
+        fields.put_str("message", format!("{}: {message}", self.as_str()));
+        fields.put_bool("retryable", false);
+        VmError::Thrown(VmValue::dict(fields))
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -131,7 +168,7 @@ pub(crate) fn governing_rule(
     provider: &str,
     model: &str,
     controls: &DataControlsReceipt,
-) -> Result<&'static str, String> {
+) -> Result<&'static str, VmError> {
     let evidence = catalog_evidence(provider, model)?;
     let facts = RouteFacts {
         local: evidence.local_runtime,
@@ -148,15 +185,15 @@ pub(crate) fn governing_rule(
 pub(crate) fn catalog_evidence(
     provider: &str,
     model: &str,
-) -> Result<InferenceCatalogEvidence, String> {
+) -> Result<InferenceCatalogEvidence, VmError> {
     let provider_def = crate::llm_config::provider_config(provider)
-        .ok_or_else(|| format!("inference_boundary.catalog_provider_unknown: {provider}"))?;
+        .ok_or_else(|| DenialRule::UnknownProvider.refuse(provider.to_string()))?;
     if provider_def.local_runtime.is_some()
         && !is_loopback_endpoint(&crate::llm_config::resolve_base_url(&provider_def))
     {
-        return Err(format!(
-            "inference_boundary.local_endpoint_untrusted: {provider}/{model} does not resolve to a loopback endpoint"
-        ));
+        return Err(DenialRule::UntrustedLocalEndpoint.refuse(format!(
+            "{provider}/{model} does not resolve to a loopback endpoint"
+        )));
     }
     Ok(InferenceCatalogEvidence {
         local_runtime: provider_def.local_runtime.is_some(),
@@ -185,21 +222,20 @@ fn decide(
     provider: &str,
     model: &str,
     facts: RouteFacts,
-) -> Result<&'static str, String> {
+) -> Result<&'static str, VmError> {
     let rule = if facts.local {
         "inference_boundary.local_runtime"
     } else {
         match boundary.reach {
             InferenceReach::LocalOnly => {
-                return Err(format!(
-                    "inference_boundary.local_only: hosted route {provider}/{model} refused"
-                ));
+                return Err(DenialRule::LocalOnly
+                    .refuse(format!("hosted route {provider}/{model} refused")));
             }
             InferenceReach::HostedOpenWeight => {
                 if facts.open_weight != Some(true) {
-                    return Err(format!(
-                        "inference_boundary.hosted_open_weight: {provider}/{model} is not cataloged as open-weight"
-                    ));
+                    return Err(DenialRule::HostedOpenWeight.refuse(format!(
+                        "{provider}/{model} is not cataloged as open-weight"
+                    )));
                 }
                 "inference_boundary.hosted_open_weight"
             }
@@ -213,15 +249,13 @@ fn decide(
     match facts.training_default {
         Some(TrainingDefault::DoesNotTrain) => Ok(rule),
         Some(TrainingDefault::Trains) if boundary.allow_training_discounts => Ok(rule),
-        Some(TrainingDefault::Trains) if facts.training_control_applied => {
-            Ok(rule)
-        }
-        Some(TrainingDefault::Trains) => Err(format!(
-            "inference_boundary.training_default: {provider}/{model} trains on API traffic without an applied training control"
-        )),
-        _ => Err(format!(
-            "inference_boundary.training_unknown: no verified no-training fact for {provider}/{model}"
-        )),
+        Some(TrainingDefault::Trains) if facts.training_control_applied => Ok(rule),
+        Some(TrainingDefault::Trains) => Err(DenialRule::TrainingDefault.refuse(format!(
+            "{provider}/{model} trains on API traffic without an applied training control"
+        ))),
+        _ => Err(DenialRule::TrainingUnknown.refuse(format!(
+            "no verified no-training fact for {provider}/{model}"
+        ))),
     }
 }
 
@@ -233,10 +267,10 @@ pub(crate) fn preflight(
     provider: &str,
     model: &str,
     controls: &DataControlsReceipt,
-) -> Result<Option<&'static str>, String> {
+) -> Result<Option<&'static str>, VmError> {
     // An explicitly supplied but malformed host ceiling is a refusal even
     // when the resolved model is local; no fallback may mask bad authority.
-    host_boundary()?;
+    host_boundary().map_err(VmError::Runtime)?;
     let Some(boundary) = effective(boundary) else {
         return Ok(None);
     };
@@ -245,7 +279,7 @@ pub(crate) fn preflight(
 
 pub(crate) fn preflight_chat(
     request: &super::options::LlmRequestPayload,
-) -> Result<Option<&'static str>, String> {
+) -> Result<Option<&'static str>, VmError> {
     // The shared HTTP transports apply the resolved data-control plan again
     // at send time. Native/ACP adapters do not, so never credit a planned
     // no-training control to one of those routes.
@@ -342,7 +376,7 @@ mod tests {
                 training_control_applied: false,
             },
         );
-        assert!(result.unwrap_err().contains("local_only"));
+        assert!(result.unwrap_err().to_string().contains("local_only"));
     }
 
     #[test]
@@ -361,7 +395,7 @@ mod tests {
                 training_control_applied: false,
             },
         );
-        assert!(result.unwrap_err().contains("training_unknown"));
+        assert!(result.unwrap_err().to_string().contains("training_unknown"));
     }
 
     #[test]
@@ -378,6 +412,7 @@ mod tests {
         };
         assert!(decide(boundary, "hosted", "model", facts)
             .unwrap_err()
+            .to_string()
             .contains("hosted_open_weight"));
         assert_eq!(
             decide(
@@ -388,8 +423,9 @@ mod tests {
                     open_weight: Some(true),
                     ..facts
                 }
-            ),
-            Ok("inference_boundary.hosted_open_weight")
+            )
+            .unwrap(),
+            "inference_boundary.hosted_open_weight"
         );
     }
 
@@ -407,6 +443,7 @@ mod tests {
         };
         assert!(decide(boundary, "hosted", "model", facts)
             .unwrap_err()
+            .to_string()
             .contains("training_default"));
         assert_eq!(
             decide(
@@ -417,8 +454,9 @@ mod tests {
                 "hosted",
                 "model",
                 facts,
-            ),
-            Ok("inference_boundary.any_hosted")
+            )
+            .unwrap(),
+            "inference_boundary.any_hosted"
         );
     }
 

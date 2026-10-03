@@ -2949,7 +2949,7 @@ impl std::fmt::Display for HarnLlmErrorKind {
     }
 }
 
-/// Canonical provider-failure reason carried in `reason` on the `harn.acp.prompt_error.v1` envelope. Owned by `harn_vm`'s `LlmErrorReason`. The sibling `code` field is a PROVIDER PASSTHROUGH with no closed set: it is opaque diagnostic text, and a host must never branch on it. Branch on `reason` instead.
+/// Canonical LLM failure reason carried in `reason` on the `harn.acp.prompt_error.v1` envelope. Owned by `harn_vm`'s `LlmErrorReason`. Includes local policy refusals before provider I/O. The sibling `code` field is opaque diagnostic text with no closed set; branch on `reason` instead.
 /// Open vocabulary: unit variants are the values this binding was generated from, and `Unrecognized` carries any other string verbatim so a newer Harn never breaks an older consumer.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(from = "String", into = "String")]
@@ -2968,6 +2968,7 @@ pub enum HarnLlmErrorReason {
     BillingLimit,
     OutputBudgetExhausted,
     Unknown,
+    PolicyDenied,
     /// A wire value outside the vocabulary this binding was generated from. Preserved verbatim.
     Unrecognized(String),
 }
@@ -2990,6 +2991,7 @@ impl HarnLlmErrorReason {
         Self::BillingLimit,
         Self::OutputBudgetExhausted,
         Self::Unknown,
+        Self::PolicyDenied,
     ];
 
     /// The JSON wire string for this value.
@@ -3009,6 +3011,7 @@ impl HarnLlmErrorReason {
             Self::BillingLimit => "billing_limit",
             Self::OutputBudgetExhausted => "output_budget_exhausted",
             Self::Unknown => "unknown",
+            Self::PolicyDenied => "policy_denied",
             Self::Unrecognized(value) => value.as_str(),
         }
     }
@@ -3030,6 +3033,7 @@ impl HarnLlmErrorReason {
             "billing_limit" => Self::BillingLimit,
             "output_budget_exhausted" => Self::OutputBudgetExhausted,
             "unknown" => Self::Unknown,
+            "policy_denied" => Self::PolicyDenied,
             other => Self::Unrecognized(other.to_string()),
         }
     }

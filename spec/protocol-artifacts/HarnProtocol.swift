@@ -1954,10 +1954,10 @@ public struct HarnLlmErrorKind: RawRepresentable, Codable, Sendable, Hashable, C
     public var description: String { rawValue }
 }
 
-/// Canonical provider-failure reason carried in `reason` on the
+/// Canonical LLM failure reason carried in `reason` on the
 ///          `harn.acp.prompt_error.v1` envelope. Owned by `harn_vm`'s `LlmErrorReason`.
-///          The sibling `code` field is a PROVIDER PASSTHROUGH with no closed set: it is
-///          opaque diagnostic text, and a host must never branch on it. Branch on `reason`.
+///          Includes local policy refusals before provider I/O. The sibling `code`
+///          field is opaque diagnostic text with no closed set; branch on `reason`.
 /// Open vocabulary: the static members are the values this binding was generated
 /// from, and any other wire string is preserved verbatim so a newer Harn never
 /// breaks an older consumer.
@@ -1991,6 +1991,7 @@ public struct HarnLlmErrorReason: RawRepresentable, Codable, Sendable, Hashable,
     public static let billingLimit = Self(rawValue: "billing_limit")
     public static let outputBudgetExhausted = Self(rawValue: "output_budget_exhausted")
     public static let unknown = Self(rawValue: "unknown")
+    public static let policyDenied = Self(rawValue: "policy_denied")
 
     /// Every value this binding was generated from, in wire order. A value
     /// outside it is valid and preserved; it is simply not listed here.
@@ -2009,6 +2010,7 @@ public struct HarnLlmErrorReason: RawRepresentable, Codable, Sendable, Hashable,
         "billing_limit",
         "output_budget_exhausted",
         "unknown",
+        "policy_denied",
     ].map { Self(rawValue: $0) }
 
     /// Whether this value is part of the vocabulary this binding was generated from.
@@ -2036,8 +2038,10 @@ public struct HarnACPPromptErrorData: Codable, Sendable, Equatable {
     public var kind: String?
     /// Wire string for `HarnLlmErrorReason`.
     public var reason: String?
-    /// PROVIDER PASSTHROUGH. Opaque diagnostic text with no closed set and no
-    /// Harn-owned vocabulary. Never branch on it; branch on `reason`.
+    public var origin: String?
+    public var rule: String?
+    /// Opaque provider or local diagnostic text with no closed set.
+    /// Never branch on it; branch on `reason`.
     public var code: String?
     public var retryable: Bool?
     public var retryAfterMs: Int?

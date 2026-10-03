@@ -275,11 +275,11 @@ pub(super) fn generate_rust(
     ));
     out.push_str(&rust_open_string_enum(
         "HarnLlmErrorReason",
-        "Canonical provider-failure reason carried in `reason` on the \
+        "Canonical LLM failure reason carried in `reason` on the \
          `harn.acp.prompt_error.v1` envelope. Owned by `harn_vm`'s \
-         `LlmErrorReason`. The sibling `code` field is a PROVIDER PASSTHROUGH \
-         with no closed set: it is opaque diagnostic text, and a host must \
-         never branch on it. Branch on `reason` instead.",
+         `LlmErrorReason`. Includes local policy refusals before provider I/O. \
+         The sibling `code` field is opaque diagnostic text with no closed set; \
+         branch on `reason` instead.",
         &llm_error_reason_values(),
     ));
     out.push_str(&rust_const_group(

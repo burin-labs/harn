@@ -224,6 +224,7 @@ export const LLM_ERROR_REASONS = [
   "billing_limit",
   "output_budget_exhausted",
   "unknown",
+  "policy_denied",
 ] as const
 export type LlmErrorReason = (typeof LLM_ERROR_REASONS)[number]
 
@@ -1065,6 +1066,8 @@ export interface HarnACPPromptErrorData {
   category?: string
   kind?: string
   reason?: string
+  origin?: string
+  rule?: string
   code?: string
   retryable?: boolean
   retryAfterMs?: number

@@ -467,6 +467,7 @@ var LlmErrorReasons = []LlmErrorReason{
 	"billing_limit",
 	"output_budget_exhausted",
 	"unknown",
+	"policy_denied",
 }
 
 // ToolCallReceiptStatus is the named string type for the ToolCallReceiptStatuses wire vocabulary.
@@ -829,6 +830,8 @@ type HarnACPPromptErrorData struct {
 	Category      *string            `json:"category,omitempty"`
 	Kind          *string            `json:"kind,omitempty"`
 	Reason        *string            `json:"reason,omitempty"`
+	Origin        *string            `json:"origin,omitempty"`
+	Rule          *string            `json:"rule,omitempty"`
 	Code          *string            `json:"code,omitempty"`
 	Retryable     *bool              `json:"retryable,omitempty"`
 	RetryAfterMs  *int64             `json:"retryAfterMs,omitempty"`

@@ -14,6 +14,30 @@ use harn_vm::llm::AgentTerminalClass;
 use super::generated_rust_binding::{HarnLlmErrorCategory, HarnLlmErrorKind, HarnLlmErrorReason};
 use super::*;
 
+#[test]
+fn local_policy_denial_survives_the_native_protocol_projection() {
+    let facts = AcpPromptFailureFacts::from_thrown(&serde_json::json!({
+        "category": "egress_blocked",
+        "kind": "terminal",
+        "reason": "policy_denied",
+        "origin": "local",
+        "rule": "inference_boundary.local_only",
+        "retryable": false,
+    }));
+    let envelope = serde_json::to_value(AcpPromptErrorData::with_facts(
+        AgentTerminalClass::ToolPolicyRejected,
+        facts,
+    ))
+    .expect("policy envelope serializes");
+    let reason: HarnLlmErrorReason =
+        serde_json::from_value(envelope["reason"].clone()).expect("typed reason decodes");
+    assert_eq!(reason, HarnLlmErrorReason::PolicyDenied);
+    assert_eq!(envelope["origin"], "local");
+    assert_eq!(envelope["rule"], "inference_boundary.local_only");
+    assert_eq!(envelope["retryable"], false);
+    assert_eq!(envelope["terminalClass"], "tool_policy_rejected");
+}
+
 /// The generated binding must carry exactly the owner's vocabulary. If this
 /// drifts, the artifact is stale and every consumer of it is guessing.
 #[test]

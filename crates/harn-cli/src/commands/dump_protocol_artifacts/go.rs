@@ -464,6 +464,8 @@ type HarnACPPromptErrorData struct {
 	Category *string `json:"category,omitempty"`
 	Kind *string `json:"kind,omitempty"`
 	Reason *string `json:"reason,omitempty"`
+	Origin *string `json:"origin,omitempty"`
+	Rule *string `json:"rule,omitempty"`
 	Code *string `json:"code,omitempty"`
 	Retryable *bool `json:"retryable,omitempty"`
 	RetryAfterMs *int64 `json:"retryAfterMs,omitempty"`

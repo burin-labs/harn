@@ -755,6 +755,7 @@ class LlmErrorReason(str, Enum):
     BILLING_LIMIT = "billing_limit"
     OUTPUT_BUDGET_EXHAUSTED = "output_budget_exhausted"
     UNKNOWN = "unknown"
+    POLICY_DENIED = "policy_denied"
 
 
 class ACPPromptErrorSchema(str, Enum):
@@ -1055,6 +1056,8 @@ class HarnACPPromptErrorData(_HarnDataclass):
     category: Optional[str] = None
     kind: Optional[str] = None
     reason: Optional[str] = None
+    origin: Optional[str] = None
+    rule: Optional[str] = None
     code: Optional[str] = None
     retryable: Optional[bool] = None
     retryAfterMs: Optional[int] = None
