@@ -74,7 +74,7 @@ async fn native_tool_narration_stays_private_and_tool_progress_survives_result_m
     let root_literal =
         serde_json::to_string(root.path().to_str().expect("UTF-8 root")).expect("root literal");
     let source = format!(
-        r###"
+        r#"
 import {{ agent_loop }} from "std/agent/loop"
 
 pipeline main(harness: Harness, task: unknown) {{
@@ -98,7 +98,7 @@ pipeline main(harness: Harness, task: unknown) {{
   }})
   harness.stdio.println(result.status)
 }}
-"###,
+"#,
     );
     let chunk = crate::compile_source(&source).expect("compile agent loop");
     let local = tokio::task::LocalSet::new();

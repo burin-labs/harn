@@ -1494,9 +1494,6 @@ pub fn replace_messages_with_summary(
     })
 }
 
-/// Persist the set of active skill names for session resume. Called at
-/// the end of an agent_loop run; the next `open_or_create` for this id
-/// reads them back via [`active_skills`].
 #[cfg(test)]
 #[path = "agent_sessions_tests.rs"]
 mod tests;
