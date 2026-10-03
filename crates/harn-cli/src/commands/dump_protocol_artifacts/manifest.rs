@@ -71,6 +71,14 @@ pub(super) fn generate_manifest_with_vocabularies(
         })
         .collect::<Result<Vec<_>, String>>()?;
     let receipt_schema = tool_call_receipt_schema();
+    for (name, _) in super::inference_admission::schemas() {
+        schemas.push(json!({
+            "protocol": "harn",
+            "source": "crates/harn-vm/src/llm/api/inference_boundary/admission.rs",
+            "artifact": format!("schemas/{}.schema.json", super::records::snake_ident(name).replace('_', "-")),
+            "provenance": {"owner": "harn-vm::llm::api::inference_boundary", "schema_version": 1},
+        }));
+    }
     schemas.push(json!({
         "protocol": "harn",
         "source": "crates/harn-vm/src/agent_events/session_health.rs",

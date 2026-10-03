@@ -14,6 +14,68 @@ use harn_vm::llm::AgentTerminalClass;
 use super::generated_rust_binding::{HarnLlmErrorCategory, HarnLlmErrorKind, HarnLlmErrorReason};
 use super::*;
 
+#[test]
+fn admission_snapshot_round_trips_through_schema_generated_host_records() {
+    use super::generated_rust_binding::{
+        HarnInferenceAdmissionSnapshot, HarnInferenceAdmissionStatus,
+    };
+    use harn_vm::llm::api::{
+        preview_inference_admission, InferenceAdmissionRequest, InferenceBoundary, InferenceReach,
+    };
+    let _guard = crate::tests::common::harn_state_lock::lock_harn_state();
+    let _host = crate::env_guard::ScopedEnvVar::unset("HARN_INFERENCE_BOUNDARY_JSON");
+    let _endpoint = crate::env_guard::ScopedEnvVar::set("OLLAMA_HOST", "http://127.0.0.1:9");
+    for (provider, expected) in [
+        ("ollama", HarnInferenceAdmissionStatus::Admitted),
+        ("openai", HarnInferenceAdmissionStatus::Denied),
+        (
+            "unresearched-provider",
+            HarnInferenceAdmissionStatus::Unknown,
+        ),
+    ] {
+        let request = InferenceAdmissionRequest {
+            provider: provider.into(),
+            model: "projection-fixture-model".into(),
+            boundary: Some(InferenceBoundary {
+                reach: InferenceReach::LocalOnly,
+                allow_training_discounts: false,
+            }),
+            data_controls: None,
+        };
+        let wire = serde_json::to_value(preview_inference_admission(&request)).unwrap();
+        let decoded: HarnInferenceAdmissionSnapshot = serde_json::from_value(wire.clone()).unwrap();
+        assert_eq!(decoded.status, expected);
+        assert_eq!(serde_json::to_value(decoded).unwrap(), wire);
+        let mut absent = wire;
+        absent.as_object_mut().unwrap().remove("status");
+        assert!(serde_json::from_value::<HarnInferenceAdmissionSnapshot>(absent).is_err());
+    }
+}
+
+#[test]
+fn local_policy_denial_survives_the_native_protocol_projection() {
+    let facts = AcpPromptFailureFacts::from_thrown(&serde_json::json!({
+        "category": "egress_blocked",
+        "kind": "terminal",
+        "reason": "policy_denied",
+        "origin": "local",
+        "rule": "inference_boundary.local_only",
+        "retryable": false,
+    }));
+    let envelope = serde_json::to_value(AcpPromptErrorData::with_facts(
+        AgentTerminalClass::ToolPolicyRejected,
+        facts,
+    ))
+    .expect("policy envelope serializes");
+    let reason: HarnLlmErrorReason =
+        serde_json::from_value(envelope["reason"].clone()).expect("typed reason decodes");
+    assert_eq!(reason, HarnLlmErrorReason::PolicyDenied);
+    assert_eq!(envelope["origin"], "local");
+    assert_eq!(envelope["rule"], "inference_boundary.local_only");
+    assert_eq!(envelope["retryable"], false);
+    assert_eq!(envelope["terminalClass"], "tool_policy_rejected");
+}
+
 /// The generated binding must carry exactly the owner's vocabulary. If this
 /// drifts, the artifact is stale and every consumer of it is guessing.
 #[test]

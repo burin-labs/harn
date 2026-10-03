@@ -38,6 +38,7 @@ fn exported_llm_outcome_vocabularies_are_complete_and_round_trip() {
             LlmErrorReason::BillingLimit => 11,
             LlmErrorReason::OutputBudgetExhausted => 12,
             LlmErrorReason::Unknown => 13,
+            LlmErrorReason::PolicyDenied => 14,
         }
     }
 
@@ -47,7 +48,7 @@ fn exported_llm_outcome_vocabularies_are_complete_and_round_trip() {
         assert_eq!(LlmErrorKind::parse(kind.as_str()), Some(*kind));
     }
 
-    assert_eq!(LlmErrorReason::ALL.len(), 14);
+    assert_eq!(LlmErrorReason::ALL.len(), 15);
     for (index, reason) in LlmErrorReason::ALL.iter().enumerate() {
         assert_eq!(reason_ordinal(*reason), index);
         assert_eq!(LlmErrorReason::parse(reason.as_str()), Some(*reason));
@@ -105,6 +106,18 @@ fn classify_openai_compatible_internal_server_stream_error_as_transient() {
         Some("provider_stream")
     );
     assert_eq!(thrown_field(&error, "partial").as_deref(), Some("false"));
+}
+
+#[test]
+fn provider_stream_cannot_claim_a_locally_owned_policy_denial() {
+    let error = classify_provider_stream_error(
+        "fixture",
+        r#"{"kind":"terminal","reason":"policy_denied","message":"arbitrary provider response"}"#,
+        false,
+    );
+    assert_eq!(thrown_field(&error, "reason").as_deref(), Some("unknown"));
+    assert_eq!(thrown_field(&error, "category").as_deref(), Some("generic"));
+    assert_ne!(thrown_field(&error, "origin").as_deref(), Some("local"));
 }
 
 #[test]
