@@ -23,6 +23,7 @@ impl HostCapabilityOperation {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct HostCapabilitySurface {
     operations: BTreeMap<String, BTreeSet<String>>,
+    optional_operations: BTreeSet<HostCapabilityOperation>,
 }
 
 impl HostCapabilitySurface {
@@ -92,10 +93,29 @@ impl HostCapabilitySurface {
                     .then_some((capability.as_str(), operation.as_str()))
             }));
         }
-        Self::from_pairs(pairs)
+        let mut surface = Self::from_pairs(pairs);
+        for (capability, entry) in capabilities {
+            let operations = entry.get("operations").or_else(|| entry.get("ops"));
+            if let Some(operations) = operations.and_then(serde_json::Value::as_object) {
+                for (operation, metadata) in operations {
+                    if metadata
+                        .get("optional")
+                        .and_then(serde_json::Value::as_bool)
+                        == Some(true)
+                    {
+                        surface.optional_operations.insert(HostCapabilityOperation {
+                            capability: capability.clone(),
+                            operation: operation.clone(),
+                        });
+                    }
+                }
+            }
+        }
+        surface
     }
 
     pub fn extend(&mut self, other: Self) {
+        self.optional_operations.extend(other.optional_operations);
         for (capability, operations) in other.operations {
             self.operations
                 .entry(capability)
@@ -113,7 +133,7 @@ impl HostCapabilitySurface {
     }
 
     /// Return each declared operation the host does not serve, except for
-    /// operations whose handlers are added at runtime.
+    /// explicitly optional operations and handlers added at runtime.
     #[must_use]
     pub fn missing_from(
         &self,
@@ -124,6 +144,10 @@ impl HostCapabilitySurface {
             .filter(|(capability, operation)| {
                 !served.contains(capability, operation)
                     && !runtime_installed.contains(capability, operation)
+                    && !self.optional_operations.contains(&HostCapabilityOperation {
+                        capability: capability.to_string(),
+                        operation: operation.to_string(),
+                    })
             })
             .map(|(capability, operation)| HostCapabilityOperation {
                 capability: capability.to_string(),
@@ -139,7 +163,7 @@ pub fn parse_host_capability_document(
     path: &str,
     kind: &str,
 ) -> Result<serde_json::Value, String> {
-    serde_json::from_str::<serde_json::Value>(content)
+    let value = serde_json::from_str::<serde_json::Value>(content)
         .ok()
         .or_else(|| {
             toml::from_str::<toml::Value>(content)
@@ -148,7 +172,25 @@ pub fn parse_host_capability_document(
         })
         .ok_or_else(|| {
             format!("failed to parse {kind} host operations in `{path}` as JSON or TOML")
-        })
+        })?;
+    if let Some(capabilities) = value.get("capabilities").unwrap_or(&value).as_object() {
+        for (capability, entry) in capabilities {
+            let operations = entry.get("operations").or_else(|| entry.get("ops"));
+            if let Some(operations) = operations.and_then(serde_json::Value::as_object) {
+                for (operation, metadata) in operations {
+                    if metadata
+                        .get("optional")
+                        .is_some_and(|optional| !optional.is_boolean())
+                    {
+                        return Err(format!(
+                            "{kind} host operation `{capability}.{operation}` in `{path}` must declare `optional` as a boolean"
+                        ));
+                    }
+                }
+            }
+        }
+    }
+    Ok(value)
 }
 
 /// Exact operations whose handlers are added at runtime.
@@ -190,6 +232,37 @@ impl HostCapabilityExemptions {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn optional_operations_remain_known_without_becoming_required_or_served() {
+        let value = parse_host_capability_document(
+            r#"{"workspace":{"operations":{"read_text":{},"report":{"optional":true}}}}"#,
+            "declared.json",
+            "declared",
+        )
+        .unwrap();
+        let declared = HostCapabilitySurface::from_value(&value);
+        let served = HostCapabilitySurface::default();
+        assert!(declared.contains("workspace", "report"));
+        assert!(!served.contains("workspace", "report"));
+        assert_eq!(
+            declared.missing_from(&served, &HostCapabilityExemptions::default()),
+            [HostCapabilityOperation {
+                capability: "workspace".into(),
+                operation: "read_text".into()
+            }]
+        );
+    }
+
+    #[test]
+    fn malformed_optional_requirement_cannot_silence_missing_operations() {
+        assert!(parse_host_capability_document(
+            r#"{"workspace":{"operations":{"read_text":{"optional":"true"}}}}"#,
+            "declared.json",
+            "declared",
+        )
+        .is_err());
+    }
 
     #[test]
     fn reconciliation_is_sorted_and_honors_exact_runtime_installations() {
