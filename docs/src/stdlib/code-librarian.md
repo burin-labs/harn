@@ -26,6 +26,8 @@ equivalent), then talk to the librarian.
 | `code_librarian_freshness(harness.code_index, path)` | `LibrarianFreshness` | `harness.code_index.freshness` |
 | `code_librarian_file_hash_snapshot(harness.code_index, paths)` | `LibrarianFileHashSnapshot` | `std/verification::verification_file_hash_snapshot` |
 | `code_librarian_branch_overlay(harness.code_index, branch)` | `LibrarianOverlay` | `harness.code_index.branch_overlay` |
+| `code_librarian_module_graph(harness.code_index, options = {})` | `ModuleGraph` | `harness.code_index.module_graph` |
+| `architecture_graph_diff(actual, target)` | `ArchitectureDiff` | pure; no index access |
 
 The Cypher executor that backs `code_librarian_query` and
 `code_librarian_who_calls` is documented at
@@ -120,6 +122,77 @@ name. A missing definition or a common same-named declaration produces `false`.
 The full walk-through lives at
 [`examples/code_librarian_explore.harn`](https://github.com/burin-labs/harn/blob/main/examples/code_librarian_explore.harn).
 
+## Compare the code with a target architecture
+
+`code_librarian_module_graph` rolls the import graph up from files to
+directories or modules in one call. `architecture_graph_diff` compares that
+graph with a target architecture and reports where they disagree.
+
+```harn
+import "std/code_librarian"
+
+pipeline default(harness: Harness) {
+  const _ = harness.code_index.rebuild({root: "."})
+  const graph = code_librarian_module_graph(
+    harness.code_index,
+    {granularity: "dir", depth: 2},
+  )
+  const diff = architecture_graph_diff(
+    graph,
+    {
+      nodes: [
+        {id: "ui", paths: ["src/ui/**"]},
+        {id: "data", paths: ["src/data/**"]},
+        {id: "core", paths: ["src/core/**"]},
+      ],
+      edges: [
+        {from: "ui", to: "data", kind: "required"},
+        {from: "data", to: "core"},
+        {from: "core", to: "ui", kind: "forbidden"},
+      ],
+      strict: true,
+    },
+  )
+  for v in diff.forbidden_present {
+    const pairs = json_stringify(v.sample)
+    harness.stdio.println(v.from + " -> " + v.to + ": " + pairs)
+  }
+}
+```
+
+Module graph options:
+
+| Option | Default | Meaning |
+|---|---|---|
+| `granularity` | `"module"` | `"dir"` groups files by directory. `"module"` uses the Swift target or Go package when the index knows one, else the nearest directory holding a package manifest (`Cargo.toml`, `package.json`, `pyproject.toml`, `Package.swift`, and others), else the directory. |
+| `depth` | none | Keep at most this many leading path segments of each node id, merging deeper nodes. |
+| `roots` | whole workspace | Path prefixes. Files outside them are not nodes; edges into them are dropped. |
+| `include_external` | `false` | Fill `external` with unresolved imports per node. |
+| `min_weight` | `1` | Drop edges with fewer import links. |
+
+An edge's `weight` counts distinct import links from files in `from` into
+`to`, and `sample` holds up to three `[importer, imported]` pairs. The node
+id for the workspace root is `.`. Every list is sorted, so one index state
+always yields the same graph; `index_seq` names that state.
+
+The diff maps each actual node to the first target node, in declaration
+order, with a glob matching the node id. `**` crosses directories, `*` and
+`?` stay within one, and a trailing `/**` also matches the directory itself.
+Dependencies between actual nodes in the same target node are ignored.
+
+| Field | Contents |
+|---|---|
+| `missing_required` | `required` edges with no code behind them |
+| `forbidden_present` | `forbidden` edges the code has |
+| `unexpected` | with `strict`, dependencies the target does not declare |
+| `unmatched_nodes` | target node ids no actual node maps to |
+| `unmapped_actual` | actual nodes no target glob matches |
+
+Each reported dependency carries its total `weight`, up to five sample file
+pairs, and the `actual` node edges behind it. `conforms` is true when the
+first three lists are empty. A target edge naming an undeclared node, a
+duplicate node id, or a duplicate edge throws.
+
 ## Defaults and limitations
 
 - `depth` on `code_librarian_outline` is reserved for upcoming graph-aware
@@ -145,6 +218,12 @@ The full walk-through lives at
   field is the direct path-to-hash map accepted by
   `verification_diagnostic_classify`, and its `files` field preserves
   per-path index/readability metadata for HUDs and diagnostics.
+- `code_librarian_module_graph` builds edges from explicit import statements
+  only. Files in one Swift target or Go package see each other with no import,
+  but that visibility is not an edge. Only files of languages with an import
+  rule are nodes; documentation, config, and other languages are not. Imports
+  the resolver cannot map, including dynamic and aliased ones, appear in
+  `unresolved_count` and `external`, never as edges.
 - The library does not rebuild the index; consumers must call
   `harness.code_index.rebuild` before the first query (and after
   large workspace mutations) themselves.

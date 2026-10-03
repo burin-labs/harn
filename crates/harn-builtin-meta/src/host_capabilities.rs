@@ -217,6 +217,7 @@ pub const HOST_CAPABILITY_GROUPS: &[HostCapabilityGroup] = &[
             "id_to_path",
             "importers_of",
             "imports_for",
+            "module_graph",
             "outline_get",
             "path_to_id",
             "query",

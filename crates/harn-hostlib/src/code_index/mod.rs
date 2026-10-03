@@ -44,6 +44,8 @@
 //!   rebuild.
 //! - **`repo_map`**: personalized PageRank over the typed graph, rendered
 //!   as a token-budgeted symbol map for agent grounding.
+//! - **`module_graph`**: the import graph rolled up from files to
+//!   directories or modules, for architecture views and diffs.
 //!
 //! ### Cross-file safe rename (added in #2508)
 //!
@@ -71,6 +73,7 @@ mod graph;
 mod imports;
 mod imports_go;
 mod imports_swift;
+mod module_graph;
 mod module_index;
 mod overlay;
 mod readonly;
@@ -557,6 +560,13 @@ impl HostlibCapability for CodeIndexCapability {
             builtins::BUILTIN_FRESHNESS,
             "freshness",
             builtins::run_freshness,
+        );
+        register(
+            registry,
+            self.index.clone(),
+            module_graph::BUILTIN,
+            "module_graph",
+            module_graph::run,
         );
 
         // Cross-file safe rename (issue #2508). Builds on the typed
