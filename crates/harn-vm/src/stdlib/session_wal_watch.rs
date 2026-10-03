@@ -391,7 +391,7 @@ mod tests {
         );
     }
 
-    /// A foreign metadata commit reaches the owning poll without a title change.
+    /// Independent database copies may carry the same session id and metadata.
     #[tokio::test]
     async fn identical_session_ids_in_distinct_databases_publish_independently() {
         let _bus = crate::stdlib::session_change::test_support::exclusive_bus().await;
@@ -407,6 +407,9 @@ mod tests {
                 })
                 .await
                 .expect("create");
+            let writer = rusqlite::Connection::open(store.path()).unwrap();
+            writer.execute("UPDATE sessions SET created_at_ms = 1, created_at = '1970-01-01T00:00:00.001Z', updated_at_ms = 1, updated_at = '1970-01-01T00:00:00.001Z'", [])
+                .expect("equal timestamps in independent databases");
             let reader =
                 harn_session_store::wal_watch::open_watch_reader(store.path()).expect("reader");
             let version = harn_session_store::wal_watch::data_version(&reader).unwrap();
@@ -414,6 +417,11 @@ mod tests {
         }
         let (tx, rx) = mpsc::channel();
         let _subscription = subscribe_session_changes(Arc::new(Recording(tx)));
+        assert_eq!(
+            harn_session_store::wal_watch::describe_session(&readers[0].1, "shared-id").unwrap(),
+            harn_session_store::wal_watch::describe_session(&readers[1].1, "shared-id").unwrap(),
+            "the metadata must be identical or a full-snapshot cache can pass vacuously"
+        );
         for (_, reader, _) in &readers {
             super::seed_session_memory(reader);
         }
