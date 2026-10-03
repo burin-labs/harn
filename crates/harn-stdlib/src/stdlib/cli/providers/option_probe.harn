@@ -482,8 +482,8 @@ fn main(harness: Harness) {
   let attempt = provider_option_probe_classify(
     __attempt(harness.llm, provider, model, option, args.max_tokens),
   )
-  // The provider error contract has no Retry-After field. Use a short bounded
-  // backoff for rate limits and retain the existing immediate timeout retry.
+  // Honor the provider's bounded Retry-After hint for rate limits and retain
+  // the existing immediate timeout retry.
   const retry_delay_ms = provider_option_probe_retry_delay_ms(attempt)
   if retry_delay_ms != nil {
     if retry_delay_ms > 0 {
