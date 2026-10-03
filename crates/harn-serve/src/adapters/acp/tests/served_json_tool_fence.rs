@@ -59,7 +59,7 @@ pipeline default(harness: Harness) {
     returns: {type: "string"},
     annotations: {kind: "read", side_effect_level: "read_only"},
   })
-  agent_loop(harness, prompt, nil, {
+  const result = agent_loop(harness, prompt, nil, {
     provider: "mock",
     model: "fence-proof",
     tool_format: "json",
@@ -68,6 +68,11 @@ pipeline default(harness: Harness) {
     max_nudges: 2,
     tools: tools,
   })
+  const calls = harness.llm.mock_calls()
+  assert(len(calls) >= 2, "both actor turns must reach the provider boundary")
+  assert(contains(calls[0].system, "Agent completion contract"), "completion contract was injected")
+  assert(contains(calls[0].system, "include `##DONE##` exactly once"), "JSON route explicitly requires the completion marker")
+  return result
 }
 "#,
             )
