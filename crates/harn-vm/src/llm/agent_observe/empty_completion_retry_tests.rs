@@ -81,6 +81,7 @@ fn parent_call_waits_for_network_recovery_after_child_failures() {
         async {
             let mut opts = fake_opts();
             opts.model = "parent-child-network-recovery".to_string();
+            opts.timeout = Some(30);
             for _ in 0..4 {
                 crate::llm::rate_limit::observe_network_outcome_for_llm_call(&opts, true);
             }
@@ -117,11 +118,7 @@ fn network_recovery_deadline_refuses_dispatch_without_spending_a_provider_call()
             for _ in 0..4 {
                 crate::llm::rate_limit::observe_network_outcome_for_llm_call(&opts, true);
             }
-            let _script =
-                install_fake_llm_script(FakeLlmScript::new().push(FakeLlmTurn::stream(vec![
-                    FakeLlmEvent::Token("must not dispatch".into()),
-                    FakeLlmEvent::Done(FakeStopReason::EndTurn),
-                ])));
+            let _script = install_fake_llm_script(FakeLlmScript::new());
             let before = crate::clock_mock::instant_now();
             let error = observed_llm_call(&opts, None, None, None, false, false, None, None)
                 .await
@@ -149,10 +146,7 @@ async fn network_recovery_remains_interruptible_before_provider_dispatch() {
     for _ in 0..4 {
         crate::llm::rate_limit::observe_network_outcome_for_llm_call(&opts, true);
     }
-    let _script = install_fake_llm_script(FakeLlmScript::new().push(FakeLlmTurn::stream(vec![
-        FakeLlmEvent::Token("must not dispatch".into()),
-        FakeLlmEvent::Done(FakeStopReason::EndTurn),
-    ])));
+    let _script = install_fake_llm_script(FakeLlmScript::new());
     tokio::time::timeout(
         std::time::Duration::from_millis(1),
         observed_llm_call(&opts, None, None, None, false, false, None, None),

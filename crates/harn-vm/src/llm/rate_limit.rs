@@ -2226,6 +2226,42 @@ mod tests {
     }
 
     #[test]
+    fn network_recovery_reserves_probes_only_when_every_route_key_is_ready() {
+        let _env = crate::llm::env_guard();
+        let _clock =
+            crate::clock_mock::install_override(crate::clock_mock::MockClock::at_wall_ms(1_000));
+        let mut opts = crate::llm::api::options::base_opts("atomic-network-probe");
+        opts.model = "delayed-model".into();
+        let keys = limiter_keys(&opts.provider, &opts.model);
+        let fail = |key: &str| {
+            let mut registry = registry().lock().expect("registry");
+            let breaker = &mut limiter_for_key(&mut registry.limiters, key).breaker;
+            for _ in 0..NETWORK_BREAKER_FAILURE_THRESHOLD {
+                breaker.record_network_failure(crate::clock_mock::instant_now().as_millis());
+            }
+        };
+        fail(&keys[0]);
+        crate::clock_mock::advance(Duration::from_millis(NETWORK_BREAKER_OPEN_MS));
+        fail(&keys[1]);
+        assert!(network_breaker_admission(&opts).is_some());
+        assert!(
+            matches!(
+                registry().lock().expect("registry").limiters[&keys[0]]
+                    .breaker
+                    .state,
+                BreakerState::Open { .. }
+            ),
+            "a blocked model must not strand a provider probe reservation"
+        );
+        crate::clock_mock::advance(Duration::from_millis(NETWORK_BREAKER_OPEN_MS));
+        assert!(network_breaker_admission(&opts).is_none());
+        assert!(
+            network_breaker_admission(&opts).is_some(),
+            "only one probe is admitted"
+        );
+    }
+
+    #[test]
     fn breaker_fails_fast_while_open_then_half_opens_then_closes_on_probe_success() {
         let mut b = NetworkBreaker::default();
         let open_at = 1_000u128;
