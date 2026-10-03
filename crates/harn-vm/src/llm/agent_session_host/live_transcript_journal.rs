@@ -335,7 +335,9 @@ async fn host_agent_emit_event(
     else {
         return Ok(VmValue::Nil);
     };
-    publish_agent_event(&ctx, &session_id, &event_type, payload, event).await?;
+    event
+        .publish_host_event(&ctx, &session_id, &event_type, payload)
+        .await?;
     Ok(VmValue::Nil)
 }
 
@@ -396,53 +398,14 @@ async fn host_agent_emit_tool_outcome(
         )
         .await?;
     let measurement = super::vm_to_json(&normalized);
-    if let crate::agent_events::AgentEvent::ToolCallUpdate { health, .. } = &mut event {
-        *health = Some(Box::new(
-            serde_json::from_value(measurement.clone()).map_err(|error| {
-                VmError::Runtime(format!("invalid normalized tool outcome: {error}"))
-            })?,
-        ));
-    }
+    event.attach_normalized_tool_health(measurement.clone())?;
     // The canonical journal keeps the same normalized measurement as the live
     // event. It is added only after rejecting generic payload-supplied health.
     payload["health"] = measurement;
-    publish_agent_event(&ctx, &session_id, "tool_call_update", payload, event).await?;
+    event
+        .publish_host_event(&ctx, &session_id, "tool_call_update", payload)
+        .await?;
     Ok(VmValue::Nil)
-}
-
-async fn publish_agent_event(
-    ctx: &crate::vm::AsyncBuiltinCtx,
-    session_id: &str,
-    event_type: &str,
-    payload: serde_json::Value,
-    event: crate::agent_events::AgentEvent,
-) -> Result<(), VmError> {
-    if let Some(role) = crate::agent_events::AgentEvent::host_transcript_role(event_type) {
-        let transcript_event = super::super::helpers::transcript_event(
-            event_type,
-            role.as_str(),
-            "internal",
-            "",
-            Some(payload),
-        );
-        if crate::agent_sessions::exists(session_id) {
-            crate::agent_sessions::append_event(session_id, transcript_event)
-                .map_err(VmError::Runtime)?;
-        }
-    }
-    // A call about to run must be on disk first. Otherwise a process killed
-    // mid-call restores a session with no trace of the call (harn#9061).
-    if matches!(
-        event,
-        crate::agent_events::AgentEvent::ToolCallUpdate {
-            status: crate::agent_events::ToolCallStatus::InProgress,
-            ..
-        }
-    ) {
-        crate::agent_session_journal::flush(session_id).await?;
-    }
-    crate::llm::agent_runtime::emit_agent_event_with_ctx(Some(ctx), &event).await;
-    Ok(())
 }
 
 const LIVE_TRANSCRIPT_JOURNAL_BUILTINS: &[&VmBuiltinDef] = &[

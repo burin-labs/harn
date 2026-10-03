@@ -514,6 +514,42 @@ impl AgentEvent {
     pub(crate) fn host_transcript_role(event_type: &str) -> Option<HostTranscriptRole> {
         host_event_policy(event_type).and_then(|policy| policy.transcript_role)
     }
+
+    /// Journal and publish a decoded host event through one typed owner.
+    pub(crate) async fn publish_host_event(
+        &self,
+        ctx: &crate::vm::AsyncBuiltinCtx,
+        session_id: &str,
+        event_type: &str,
+        payload: Value,
+    ) -> Result<(), VmError> {
+        if let Some(role) = Self::host_transcript_role(event_type) {
+            let transcript_event = crate::llm::helpers::transcript_event(
+                event_type,
+                role.as_str(),
+                "internal",
+                "",
+                Some(payload),
+            );
+            if crate::agent_sessions::exists(session_id) {
+                crate::agent_sessions::append_event(session_id, transcript_event)
+                    .map_err(VmError::Runtime)?;
+            }
+        }
+        // A call about to run must be on disk first. Otherwise a process
+        // killed mid-call restores a session with no trace of it (harn#9061).
+        if matches!(
+            self,
+            Self::ToolCallUpdate {
+                status: super::ToolCallStatus::InProgress,
+                ..
+            }
+        ) {
+            crate::agent_session_journal::flush(session_id).await?;
+        }
+        crate::llm::agent_runtime::emit_agent_event_with_ctx(Some(ctx), self).await;
+        Ok(())
+    }
 }
 
 /// Arms whose host payload is not a 1:1 field mapping onto the variant:

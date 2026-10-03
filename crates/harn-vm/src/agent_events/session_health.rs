@@ -9,6 +9,25 @@ pub(crate) use reducer::SessionHealth;
 pub const SESSION_HEALTH_SCHEMA_VERSION: u32 = 1;
 pub const SESSION_HEALTH_SCHEMA_ARTIFACT: &str = "schemas/session-health.schema.json";
 
+impl super::AgentEvent {
+    /// Attach the stdlib owner's normalized outcome to its typed tool event.
+    /// Generic host ingress never calls this runtime-only attachment path.
+    pub(crate) fn attach_normalized_tool_health(
+        &mut self,
+        measurement: serde_json::Value,
+    ) -> Result<(), crate::value::VmError> {
+        let Self::ToolCallUpdate { health, .. } = self else {
+            return Err(crate::value::VmError::Runtime(
+                "tool health requires a tool-call update".into(),
+            ));
+        };
+        *health = Some(Box::new(serde_json::from_value(measurement).map_err(
+            |_| crate::value::VmError::Runtime("invalid normalized tool outcome".into()),
+        )?));
+        Ok(())
+    }
+}
+
 /// A rate retains its population so a measured zero cannot hide missing data.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
