@@ -462,6 +462,74 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn watcher_first_local_commit_publishes_once_and_preserves_other_metadata() {
+        let _bus = crate::stdlib::session_change::test_support::exclusive_bus().await;
+        let root = TempDir::new().expect("root");
+        let store = open_canonical_store(root.path()).expect("canonical store");
+        store
+            .create(CreateSession {
+                id: Some("watcher-first".into()),
+                title: Some("before".into()),
+                ..CreateSession::default()
+            })
+            .await
+            .expect("create");
+        let (tx, rx) = mpsc::channel();
+        let _subscription = subscribe_session_changes(Arc::new(Recording(tx)));
+        super::flush_watcher(store.path());
+
+        struct WatcherFirst {
+            path: std::path::PathBuf,
+            fanout: harn_session_store::SharedSessionChangeObserver,
+        }
+        impl SessionChangeObserver for WatcherFirst {
+            fn session_updated(&self, meta: &SessionMeta) {
+                // Exercise the actual commit-to-hook window deterministically.
+                // The writer has released SQLite's lock before this callback.
+                super::flush_watcher(&self.path);
+                self.fanout.session_updated(meta);
+            }
+        }
+        let writer = harn_session_store::SqliteSessionStore::open_with_hooks(
+            store.path(),
+            harn_session_store::StoreHooks {
+                change_observer: Some(Arc::new(WatcherFirst {
+                    path: store.path().to_owned(),
+                    fanout: crate::stdlib::session_change::current_observer().expect("live fanout"),
+                })),
+                ..Default::default()
+            },
+        )
+        .expect("writer sharing canonical database");
+        writer
+            .update(
+                "watcher-first",
+                UpdateSession {
+                    title: Some("after".into()),
+                    ..Default::default()
+                },
+            )
+            .await
+            .expect("rename");
+        assert_eq!(rx.try_recv().as_deref(), Ok("after"));
+        assert_eq!(rx.try_recv(), Err(mpsc::TryRecvError::Empty));
+
+        let updated = writer
+            .update(
+                "watcher-first",
+                UpdateSession {
+                    usage_input: Some(7),
+                    ..Default::default()
+                },
+            )
+            .await
+            .expect("usage update with unchanged title");
+        assert_eq!(updated.usage_input, 7);
+        assert_eq!(rx.try_recv().as_deref(), Ok("after"));
+        assert_eq!(rx.try_recv(), Err(mpsc::TryRecvError::Empty));
+    }
+
+    #[tokio::test]
     async fn local_update_does_not_double_publish_through_the_watcher() {
         let _bus = crate::stdlib::session_change::test_support::exclusive_bus().await;
         let root = TempDir::new().expect("root");

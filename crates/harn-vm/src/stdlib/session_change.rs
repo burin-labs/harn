@@ -32,8 +32,12 @@ use super::session_wal_watch;
 static OBSERVERS: RwLock<Vec<(u64, SharedSessionChangeObserver)>> = RwLock::new(Vec::new());
 static NEXT_SUBSCRIPTION: AtomicU64 = AtomicU64::new(1);
 type TitleFingerprint = (Option<String>, bool);
-type RememberedTitles = Vec<(String, TitleFingerprint)>;
-static TITLES: RwLock<RememberedTitles> = RwLock::new(Vec::new());
+struct RememberedSession {
+    id: String,
+    title: TitleFingerprint,
+    last_publication: Option<SessionMeta>,
+}
+static SESSION_MEMORY: RwLock<Vec<RememberedSession>> = RwLock::new(Vec::new());
 
 fn observers() -> RwLockWriteGuard<'static, Vec<(u64, SharedSessionChangeObserver)>> {
     OBSERVERS
@@ -41,8 +45,8 @@ fn observers() -> RwLockWriteGuard<'static, Vec<(u64, SharedSessionChangeObserve
         .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
-fn titles() -> RwLockWriteGuard<'static, RememberedTitles> {
-    TITLES
+fn session_memory() -> RwLockWriteGuard<'static, Vec<RememberedSession>> {
+    SESSION_MEMORY
         .write()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
@@ -60,7 +64,7 @@ impl Drop for SessionChangeSubscription {
         observers().retain(|(id, _)| *id != self.id);
         let live = subscriber_count() > 0;
         if !live {
-            titles().clear();
+            session_memory().clear();
         }
         session_wal_watch::sync_watchers(live);
     }
@@ -115,20 +119,43 @@ pub(super) fn remember_title(
     title_pinned: bool,
 ) -> TitleMemory {
     let next = (title.map(str::to_string), title_pinned);
-    let mut titles = titles();
-    if let Some((_, previous)) = titles.iter_mut().find(|(id, _)| id == session_id) {
-        if *previous == next {
+    let mut sessions = session_memory();
+    if let Some(previous) = sessions.iter_mut().find(|seen| seen.id == session_id) {
+        if previous.title == next {
             return TitleMemory::Unchanged;
         }
-        *previous = next;
+        previous.title = next;
         return TitleMemory::Changed;
     }
-    titles.push((session_id.to_string(), next));
+    sessions.push(RememberedSession {
+        id: session_id.to_owned(),
+        title: next,
+        last_publication: None,
+    });
     TitleMemory::New
 }
 
 /// Fans one committed change out to every live subscriber.
 pub(super) fn dispatch(meta: &SessionMeta) {
+    // Either the local post-commit hook or the WAL reader can arrive first.
+    // Claim the whole committed snapshot once, not just its title: model,
+    // usage and other metadata changes still notify when the title is stable.
+    {
+        let mut sessions = session_memory();
+        if let Some(seen) = sessions.iter_mut().find(|seen| seen.id == meta.id) {
+            if seen.last_publication.as_ref() == Some(meta) {
+                return;
+            }
+            seen.title = (meta.title.clone(), meta.title_pinned);
+            seen.last_publication = Some(meta.clone());
+        } else {
+            sessions.push(RememberedSession {
+                id: meta.id.clone(),
+                title: (meta.title.clone(), meta.title_pinned),
+                last_publication: Some(meta.clone()),
+            });
+        }
+    }
     let observers: Vec<SharedSessionChangeObserver> = OBSERVERS
         .read()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
@@ -146,7 +173,6 @@ struct SessionChangeFanout;
 
 impl harn_session_store::SessionChangeObserver for SessionChangeFanout {
     fn session_updated(&self, meta: &SessionMeta) {
-        remember_title(&meta.id, meta.title.as_deref(), meta.title_pinned);
         dispatch(meta);
     }
 }
