@@ -27,6 +27,7 @@ use crate::orchestration::{CapabilityPolicy, ProcessSandboxPreset, SandboxProfil
 use crate::value::VmError;
 
 mod nested;
+mod self_confinement;
 pub(super) mod swiftpm;
 mod toolchain_roots;
 
@@ -45,6 +46,13 @@ impl SandboxBackend for Backend {
 
     fn available() -> bool {
         Path::new(SANDBOX_EXEC_PATH).exists()
+    }
+
+    fn confine_current_process(
+        policy: &CapabilityPolicy,
+    ) -> Result<super::SandboxMechanism, VmError> {
+        self_confinement::confine(policy)?;
+        Ok(Self::filesystem_mechanism())
     }
 
     fn prepare_std_command(

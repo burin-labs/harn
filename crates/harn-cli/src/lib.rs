@@ -117,6 +117,12 @@ pub fn run() {
 
     ensure_builtin_signatures_installed();
 
+    #[cfg(target_os = "linux")]
+    if let Err(error) = commands::serve::confine_before_runtime(&raw_args) {
+        eprintln!("error: {error}");
+        process::exit(1);
+    }
+
     let handle = thread::Builder::new()
         .name("harn-cli".to_string())
         .stack_size(CLI_RUNTIME_STACK_SIZE)

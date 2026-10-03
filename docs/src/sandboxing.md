@@ -605,6 +605,76 @@ let policy = CapabilityPolicy {
 push_execution_policy(policy);
 ```
 
+## Confining a server process
+
+Everything above confines a child when Harn spawns it. An agent server that
+runs as its own process can also confine itself, so that a flaw in the VM, a
+pipeline, or a tool is held by the kernel to the workspace instead of running
+with the user's full authority.
+
+- From the CLI, pass `--confine-workspace <path>` to `harn serve acp` (stdio
+  only).
+- From Rust, build the `AcpServerConfig`, then call
+  `harn_serve::confine_acp_server_process(&config, &AcpServerConfinement {
+  workspace_roots, state_roots })` before `run_acp_server`. The profile comes
+  from `config.sandbox`, the same config the server's sessions use.
+  `state_roots` names the embedder's own directories outside the workspace
+  that the server writes. Harn adds read access to the served pipeline's
+  package and the installed package cache. It returns `Ok(None)` without
+  confining when the requested profile confines no process, such as
+  `unrestricted`.
+- The primitive underneath is
+  `harn_vm::process_sandbox::confine_current_process(&policy)`, and
+  `current_process_confinement()` reads the result back.
+
+The profile is the one the backend renders for a child under the same
+policy, so the server gets exactly what a confined command gets: its
+workspace roots writable, system and toolchain roots readable, credential
+directories and `read_deny_roots` denied. The ceiling uses the `act_auto`
+autonomy tier, because a session can switch modes but the process profile
+cannot change. Network stays allowed because the server makes model calls.
+The host temp dir is shared with every other process you run, so it isn't
+granted: the process gets a private `harn-confined-<pid>` directory under it,
+and `TMPDIR` names that directory from then on.
+
+Confinement is permanent and fails closed. An error means the process isn't
+confined and must not serve. The ACP `initialize` response reports the state
+as `agentCapabilities._meta.harn.processConfinement`: `{"state": "confined", "backend",
+"mechanism", "workspaceRoots"}` or `{"state": "unconfined"}`. The
+`process_sandbox_self` log event records the same facts. A command that the
+confined process runs reports `"enforced": true` in its sandbox receipt even
+when no per-turn policy confines it, and a permission error from it is
+recorded as a `harn.process.sandbox_refusal.v1` denial.
+
+What children get differs by platform:
+
+- **macOS** can't stack Seatbelt profiles, so commands the confined server
+  runs inherit its profile instead of getting a narrower one of their own.
+  When a command's policy denies something the server's profile allows (for
+  example, network), Harn refuses the command rather than run it with less
+  confinement than it asked for. The `process_sandbox_nested` event records
+  each case. Narrowing beyond those probed axes is enforced only by Harn's
+  in-process checks; recovering per-command profiles needs a spawn broker
+  outside the confined process (harn#9215).
+- **Linux** confines with Landlock, whose domains stack, so a command's own
+  ruleset still narrows it further. Landlock confines only the calling thread
+  and threads it starts later, so Harn refuses to confine a process that
+  already runs more than one thread. `harn serve acp --confine-workspace`
+  confines on its main thread before it starts its runtime; an embedder must
+  likewise confine before it starts any thread. Seccomp isn't applied to the
+  server, because the child syscall allowlist isn't sized for a server
+  runtime.
+- **Other platforms** refuse.
+
+The profile allows every Mach service lookup, as the child profile does.
+A process confined this way can still reach system services that an App
+Sandbox profile would deny, so it isn't a drop-in equivalent of App Sandbox
+on that axis.
+
+Only a process dedicated to serving may confine itself. An in-process
+(channel) ACP server shares its host's process, and confining it would
+confine the host.
+
 ## Workspace-local temp dir (`TMPDIR`/`TMP`/`TEMP`)
 
 Every sandboxed child spawned under a restricted profile gets `TMPDIR`,
@@ -845,6 +915,7 @@ mechanism.
 - Destination-level network egress allow/deny — use `harness.net.egress_policy(...)`
   or `HARN_EGRESS_*` once a host policy allows network side effects.
 - Sandboxing for in-process work (LLM calls, deterministic Harn
-  evaluation). Capability ceilings and the approval policy are the
-  enforcement layers there; the OS sandbox only kicks in when Harn
-  spawns a subprocess.
+  evaluation) in a process that hasn't confined itself. Capability ceilings
+  and the approval policy are the enforcement layers there; the OS sandbox
+  applies when Harn spawns a subprocess, or to the whole process after
+  [Confining a server process](#confining-a-server-process).

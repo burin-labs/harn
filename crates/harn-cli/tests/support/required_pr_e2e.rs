@@ -1,4 +1,4 @@
-pub(crate) const CASES: [&str; 15] = [
+pub(crate) const CASES: [&str; 17] = [
     "eval_prompt_dispatch::terminal_output_is_byte_identical_across_runs",
     "models_dispatch::batch_execution::rejoin_cli_quarantines_an_artifact_without_matching_receipts",
     "models_dispatch::core::models_recommend_human_text_has_model_and_rationale",
@@ -14,4 +14,7 @@ pub(crate) const CASES: [&str; 15] = [
     "typed_tool_outcomes::agent_validates_payload_without_losing_the_explicit_outcome",
     "typed_tool_outcomes::cli_and_mcp_project_validated_payload_and_canonical_feedback",
     "typed_tool_outcomes::exported_mcp_resolves_typed_payload_schema_and_preserves_feedback",
+    // A confined server's own process and its commands, on macOS and Linux.
+    "acp_confinement_cli::confine_workspace_holds_the_server_and_its_commands_to_the_workspace",
+    "acp_confinement_cli::without_confine_workspace_the_same_write_lands_outside",
 ];

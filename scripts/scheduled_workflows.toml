@@ -10,7 +10,8 @@
 # runs where that job did not run are not counted either way. `health_events`
 # lists the run events that count (default `["schedule"]`); add
 # `workflow_dispatch` only when a manual run measures exactly the scheduled
-# claim, which the default-inputs dispatch of the live provider probe does not.
+# claim. `health_dispatch_title` further limits judged manual runs to those
+# whose run-name rendered exactly that title.
 
 [[workflow]]
 path = ".github/workflows/actions-vulnerability-audit.yml"
@@ -65,7 +66,11 @@ claim = "Slow subprocess CLI behavior remains functional outside the pull-reques
 crons = ["0 3 * * *"]
 cadence_reason = "Daily covers expensive subprocess paths without putting their known noise on every pull request."
 job_ids = ["e2e", "notify"]
-health_exempt = "Known-flaky by design and excluded from the CI status rollup, so a streak here would keep main health red for a reason nobody acts on."
+# Every main push runs the suite too, so pushes are its main evidence; the
+# required CI status excludes it, so nothing else surfaces a red streak.
+health_failures = 3
+health_events = ["schedule", "push"]
+health_job = "Slow E2E suite"
 
 [[workflow]]
 path = ".github/workflows/flake-detection.yml"
@@ -120,6 +125,12 @@ crons = ["17 11 * * 1"]
 cadence_reason = "Weekly limits paid provider calls while detecting upstream API drift."
 job_ids = ["probe", "notify-live-failure"]
 health_failures = 2
+# A manual run counts only when it was live: the workflow's run-name marks a
+# live run "(live)", and a default-input dispatch, which makes no provider
+# calls, keeps the plain title and is passed over. Scheduled runs are always
+# live.
+health_events = ["schedule", "workflow_dispatch"]
+health_dispatch_title = "Provider contract probe (live)"
 
 [[workflow]]
 path = ".github/workflows/release-size-watch.yml"

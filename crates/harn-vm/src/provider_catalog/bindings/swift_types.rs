@@ -254,6 +254,15 @@ public struct HarnProviderAuth: Codable, Sendable, Equatable {
     public let header: String?
     public let env: [String]
     public let required: Bool
+    public var credentialEnv: [String]? = nil
+
+    enum CodingKeys: String, CodingKey {
+        case style
+        case header
+        case env
+        case required
+        case credentialEnv = "credential_env"
+    }
 }
 
 public struct HarnCatalogAlias: Codable, Sendable, Equatable {
