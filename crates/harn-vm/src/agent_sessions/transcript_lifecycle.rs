@@ -218,6 +218,44 @@ pub fn store_transcript(id: &str, transcript: VmValue) -> Result<(), String> {
     })
 }
 
+/// Commit a transcript metadata change and its audit receipt atomically.
+/// Publication must not masquerade as compaction or rewrite provider history.
+pub(crate) fn settle_assistant_publication(
+    id: &str,
+    admitted: bool,
+) -> Result<Option<String>, String> {
+    SESSIONS.with(|sessions| {
+        let mut sessions = sessions.borrow_mut();
+        let state = sessions
+            .get_mut(id)
+            .ok_or_else(|| format!("unknown session '{id}'"))?;
+        let settled = crate::llm::assistant_publication::settle(&state.transcript, admitted);
+        let Some((transcript, event)) = settled.mutation else {
+            return Ok(settled.reply);
+        };
+        validate_session_event(&event, "assistant_publication")?;
+        let mut next = transcript_with_session_metadata(transcript, state)
+            .as_dict()
+            .cloned()
+            .ok_or_else(|| "transcript must be a dict".to_string())?;
+        let mut events = match next.get("events") {
+            Some(VmValue::List(events)) => events.as_ref().clone(),
+            _ => Vec::new(),
+        };
+        events.push(event.clone());
+        next.insert(
+            crate::value::intern_key("events"),
+            VmValue::List(Arc::new(events)),
+        );
+        apply_transcript_with_budget(state, VmValue::dict(next), "assistant_publication")?;
+        crate::agent_session_journal::enqueue_audit_event(
+            &mut state.transcript_journal,
+            crate::llm::helpers::vm_value_to_json(&event),
+        );
+        Ok(settled.reply)
+    })
+}
+
 fn checkpoint_summary(checkpoint: &SessionTurnCheckpoint) -> SessionCheckpointSummary {
     SessionCheckpointSummary {
         checkpoint_id: checkpoint.checkpoint_id.clone(),

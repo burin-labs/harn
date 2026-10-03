@@ -1,0 +1,21 @@
+import { __judge_completion_admission } from "std/agent/judge_internals"
+
+pipeline default(harness: Harness) {
+  // The measured #9352 late completion still has a bounded judge window.
+  const late = __judge_completion_admission(0, 15581, 60000, 5000)
+  assert(late.admitted)
+  assert(late.operation_budget_ms == 10581)
+  assert(late.requested_operation_budget_ms == 60000)
+  assert(to_int(late.operation_budget_ms) + to_int(late.deadline_reserve_ms) == late.remaining_ms)
+  // A maximum remains a maximum when the deadline has ample time.
+  const ample = __judge_completion_admission(0, 90000, 60000, 5000)
+  assert(ample.admitted && ample.operation_budget_ms == 60000)
+  const unlimited = __judge_completion_admission(0, nil, 60000, 5000)
+  assert(unlimited.admitted && unlimited.operation_budget_ms == 60000)
+  // Exhausting the reserve refuses the call; no zero-time request is launched.
+  const exhausted = __judge_completion_admission(100, 5100, 60000, 5000)
+  assert(!exhausted.admitted && exhausted.operation_budget_ms == 0)
+  const expired = __judge_completion_admission(100, 99, 60000, 5000)
+  assert(!expired.admitted && expired.operation_budget_ms == 0)
+  harness.stdio.println("completion judge remaining budget: ok")
+}
