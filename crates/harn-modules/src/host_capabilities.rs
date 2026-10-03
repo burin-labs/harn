@@ -5,6 +5,13 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+fn operation_entries(entry: &serde_json::Value) -> &serde_json::Value {
+    entry
+        .get("operations")
+        .or_else(|| entry.get("ops"))
+        .unwrap_or(entry)
+}
+
 /// One namespaced host operation.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct HostCapabilityOperation {
@@ -61,7 +68,8 @@ impl HostCapabilitySurface {
         };
         let mut pairs = Vec::new();
         for (capability, entry) in capabilities {
-            if let Some(operations) = entry.as_array() {
+            let operations = operation_entries(entry);
+            if let Some(operations) = operations.as_array() {
                 pairs.extend(
                     operations
                         .iter()
@@ -70,22 +78,9 @@ impl HostCapabilitySurface {
                 );
                 continue;
             }
-            let Some(entry) = entry.as_object() else {
+            let Some(operation_map) = operations.as_object() else {
                 continue;
             };
-            let operations = entry
-                .get("operations")
-                .or_else(|| entry.get("ops"))
-                .unwrap_or(&serde_json::Value::Null);
-            if let Some(list) = operations.as_array() {
-                pairs.extend(
-                    list.iter()
-                        .filter_map(serde_json::Value::as_str)
-                        .map(|operation| (capability.as_str(), operation)),
-                );
-                continue;
-            }
-            let operation_map = operations.as_object().unwrap_or(entry);
             pairs.extend(operation_map.iter().filter_map(|(operation, metadata)| {
                 metadata
                     .as_bool()
@@ -95,8 +90,8 @@ impl HostCapabilitySurface {
         }
         let mut surface = Self::from_pairs(pairs);
         for (capability, entry) in capabilities {
-            let operations = entry.get("operations").or_else(|| entry.get("ops"));
-            if let Some(operations) = operations.and_then(serde_json::Value::as_object) {
+            let operations = operation_entries(entry);
+            if let Some(operations) = operations.as_object() {
                 for (operation, metadata) in operations {
                     if metadata
                         .get("optional")
@@ -175,8 +170,8 @@ pub fn parse_host_capability_document(
         })?;
     if let Some(capabilities) = value.get("capabilities").unwrap_or(&value).as_object() {
         for (capability, entry) in capabilities {
-            let operations = entry.get("operations").or_else(|| entry.get("ops"));
-            if let Some(operations) = operations.and_then(serde_json::Value::as_object) {
+            let operations = operation_entries(entry);
+            if let Some(operations) = operations.as_object() {
                 for (operation, metadata) in operations {
                     if metadata
                         .get("optional")
@@ -262,6 +257,32 @@ mod tests {
             "declared",
         )
         .is_err());
+        assert!(parse_host_capability_document(
+            r#"{"workspace":{"read_text":{"optional":"true"}}}"#,
+            "declared.json",
+            "declared",
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn direct_operation_metadata_has_the_same_optional_contract() {
+        let value = parse_host_capability_document(
+            r#"{"workspace":{"read_text":{},"report":{"optional":true}}}"#,
+            "declared.json",
+            "declared",
+        )
+        .unwrap();
+        let declared = HostCapabilitySurface::from_value(&value);
+        let served = HostCapabilitySurface::default();
+        assert!(declared.contains("workspace", "report"));
+        assert_eq!(
+            declared.missing_from(&served, &HostCapabilityExemptions::default()),
+            [HostCapabilityOperation {
+                capability: "workspace".into(),
+                operation: "read_text".into()
+            }]
+        );
     }
 
     #[test]
