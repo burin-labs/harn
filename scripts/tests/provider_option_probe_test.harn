@@ -293,6 +293,18 @@ pipeline test_provider_option_probe_bounds_rate_limit_recovery() {
   )
   assert_eq(with_deadline.retry_after_ms, 60000)
   assert_eq(provider_option_probe_retry_delay_ms(with_deadline), 60000)
+  const beyond_runtime_cap = provider_option_probe_classify(
+    Err(
+      {
+        reason: "rate_limit",
+        retry_after_ms: 60000,
+        retry_after_exceeds_cap: true,
+        message: "HTTP 429",
+      },
+    ),
+  )
+  assert_eq(beyond_runtime_cap.retry_after_exceeds_cap, true)
+  assert_eq(provider_option_probe_retry_delay_ms(beyond_runtime_cap), nil)
   assert_eq(provider_option_probe_retry_delay_ms(with_deadline + {retry_after_ms: 60001}), nil)
   assert_eq(provider_option_probe_retry_delay_ms(with_deadline + {retry_after_ms: -1}), nil)
   assert_eq(provider_option_probe_retry_delay_ms(with_deadline + {retry_after_ms: 0}), 0)

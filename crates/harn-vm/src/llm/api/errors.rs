@@ -5,6 +5,7 @@
 use crate::value::{ErrorCategory, VmError, VmValue};
 
 const MAX_PROVIDER_ERROR_BODY_CHARS: usize = 2048;
+const MAX_PROVIDER_RETRY_AFTER_MS: u64 = 60_000;
 
 /// HTTP 500 bodies that report a deterministic response-shape failure rather
 /// than transient provider unavailability. Each entry is a conjunction; the
@@ -234,7 +235,10 @@ pub(crate) fn retry_after_header(headers: &reqwest::header::HeaderMap) -> Option
 
 /// Parse an RFC 7231 Retry-After field value into a bounded delay.
 pub(crate) fn parse_retry_after_value(value: &str) -> Option<u64> {
-    const MAX_MS: u64 = 60_000;
+    parse_retry_after_requested_ms(value).map(|ms| ms.min(MAX_PROVIDER_RETRY_AFTER_MS))
+}
+
+fn parse_retry_after_requested_ms(value: &str) -> Option<u64> {
     let value = value.trim();
     let numeric_prefix = value
         .chars()
@@ -244,15 +248,14 @@ pub(crate) fn parse_retry_after_value(value: &str) -> Option<u64> {
         if !seconds.is_finite() || seconds < 0.0 {
             return None;
         }
-        return Some(((seconds * 1000.0) as u64).min(MAX_MS));
+        return Some((seconds * 1000.0) as u64);
     }
     let target = httpdate::parse_http_date(value).ok()?;
     Some(
         target
             .duration_since(std::time::SystemTime::now())
             .map(|duration| duration.as_millis() as u64)
-            .unwrap_or(0)
-            .min(MAX_MS),
+            .unwrap_or(0),
     )
 }
 
@@ -280,8 +283,15 @@ fn provider_http_error_value(
     fields.put_str("kind", classified.kind.as_str());
     fields.put_str("reason", classified.reason.as_str());
     fields.put_str("message", classified.message);
-    if let Some(ms) = retry_after.and_then(parse_retry_after_value) {
-        fields.insert("retry_after_ms".to_string(), VmValue::Int(ms as i64));
+    if let Some(ms) = retry_after.and_then(parse_retry_after_requested_ms) {
+        fields.insert(
+            "retry_after_ms".to_string(),
+            VmValue::Int(ms.min(MAX_PROVIDER_RETRY_AFTER_MS) as i64),
+        );
+        fields.insert(
+            "retry_after_exceeds_cap".to_string(),
+            VmValue::Bool(ms > MAX_PROVIDER_RETRY_AFTER_MS),
+        );
     }
     let quota = quota.and_then(|quota| {
         Some((
