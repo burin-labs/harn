@@ -132,7 +132,13 @@ case "$*" in
     ;;
   "diff --name-only -z --no-renames --diff-filter=ACMR base...HEAD -- *.md")
     ;;
-  "rev-list base..HEAD")
+  "cat-file -t "*)
+    printf '%s\n' commit
+    ;;
+  "rev-parse --verify "*"^{commit}")
+    printf '%s\n' cafebabecafebabecafebabecafebabecafebabe
+    ;;
+  "ls-remote --symref -- "*|"rev-list --stdin")
     ;;
   "rev-parse --abbrev-ref HEAD")
     printf '%s\n' agent-gate-census-test
@@ -172,7 +178,7 @@ run_prepush() {
       CARGO_TARGET_DIR="$work/target" \
       CARGO_BUILD_BUILD_DIR="$tmp_root/build" \
       PATH="$fake_bin:$PATH" \
-      ./.githooks/pre-push > "$output" 2>&1
+      ./.githooks/pre-push origin git@example.com:burin-labs/harn.git > "$output" 2>&1
   )
   status=$?
   set -e
