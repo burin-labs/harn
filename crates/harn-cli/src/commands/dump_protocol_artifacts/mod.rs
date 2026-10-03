@@ -16,6 +16,7 @@ mod connector_setup;
 mod constants;
 mod external_action;
 mod harn_records;
+mod inference_admission;
 mod manifest;
 mod plan_records;
 mod prepared_session;
@@ -209,6 +210,15 @@ fn generate_artifacts(source: &ProtocolArtifactSource) -> Result<Vec<Artifact>, 
         ),
     ];
 
+    for (name, schema) in inference_admission::schemas() {
+        artifacts.push(Artifact::new(
+            format!(
+                "schemas/{}.schema.json",
+                records::snake_ident(name).replace('_', "-")
+            ),
+            serde_json::to_string_pretty(&schema).map_err(|error| error.to_string())?,
+        ));
+    }
     for schema in SCHEMA_COPIES {
         artifacts.push(Artifact::new(
             schema.artifact,

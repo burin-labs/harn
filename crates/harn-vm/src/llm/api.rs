@@ -51,7 +51,10 @@ pub(crate) use errors::{
 /// envelope. Public so the protocol-artifact generator can project them into
 /// every host binding rather than leaving `kind`/`reason` as bare strings.
 pub use errors::{LlmErrorKind, LlmErrorReason};
-pub use inference_boundary::{InferenceBoundary, InferenceReach};
+pub use inference_boundary::{
+    inference_admission_schemas, preview_inference_admission, InferenceAdmissionRequest,
+    InferenceAdmissionSnapshot, InferenceAdmissionStatus, InferenceBoundary, InferenceReach,
+};
 pub(crate) use ollama::apply_ollama_runtime_settings;
 pub(crate) use ollama::ollama_unload_grace_duration_from_env;
 pub use ollama::{
@@ -488,7 +491,7 @@ async fn vm_call_llm_full_inner_request(
     }
 
     super::ensure_real_llm_allowed(&request.provider)?;
-    let boundary_rule = inference_boundary::preflight_chat(request).map_err(VmError::Runtime)?;
+    let boundary_rule = inference_boundary::preflight_chat(request)?;
     request.emit_reminder_lifecycle();
     observed.record_provider_dispatch();
 
@@ -554,8 +557,8 @@ async fn vm_call_llm_full_inner_offthread(
     }
 
     super::ensure_real_llm_allowed(&request.provider).map_err(OffthreadLlmError::from_vm_error)?;
-    let boundary_rule = inference_boundary::preflight_chat(request)
-        .map_err(OffthreadLlmError::from_display_message)?;
+    let boundary_rule =
+        inference_boundary::preflight_chat(request).map_err(OffthreadLlmError::from_vm_error)?;
     observed.record_provider_dispatch();
 
     // Keep the off-thread transport primitive single-route as well. The caller

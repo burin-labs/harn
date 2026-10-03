@@ -275,11 +275,11 @@ pub(super) fn generate_rust(
     ));
     out.push_str(&rust_open_string_enum(
         "HarnLlmErrorReason",
-        "Canonical provider-failure reason carried in `reason` on the \
+        "Canonical LLM failure reason carried in `reason` on the \
          `harn.acp.prompt_error.v1` envelope. Owned by `harn_vm`'s \
-         `LlmErrorReason`. The sibling `code` field is a PROVIDER PASSTHROUGH \
-         with no closed set: it is opaque diagnostic text, and a host must \
-         never branch on it. Branch on `reason` instead.",
+         `LlmErrorReason`. Includes local policy refusals before provider I/O. \
+         The sibling `code` field is opaque diagnostic text with no closed set; \
+         branch on `reason` instead.",
         &llm_error_reason_values(),
     ));
     out.push_str(&rust_const_group(
@@ -306,6 +306,7 @@ pub(super) fn generate_rust(
     append_rust_prepared_session_types(&mut out);
     append_rust_session_recap_types(&mut out);
     super::plan_records::append(&mut out, super::records::Target::Rust);
+    super::inference_admission::append(&mut out, super::records::Target::Rust);
 
     // Consumers vendor this artifact verbatim, sometimes as a new file. Keep
     // one POSIX final newline without a trailing blank line so their
@@ -375,7 +376,7 @@ pub(super) fn format_rust_source(source: String, repo_root: &Path) -> Result<Str
 /// exported vocabulary (`HarnLlmErrorReason`) carries a literal `unknown` wire
 /// value, and "Harn classified this as unknown" is a different fact from "this
 /// binding does not recognize this string".
-fn rust_open_string_enum(name: &str, doc: &str, values: &[String]) -> String {
+pub(super) fn rust_open_string_enum(name: &str, doc: &str, values: &[String]) -> String {
     for value in values {
         assert!(
             rust_type_name(value) != "Unrecognized",

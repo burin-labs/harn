@@ -12,6 +12,8 @@ pub(crate) struct ProviderArgs {
 
 #[derive(Debug, Subcommand)]
 pub(crate) enum ProviderCommand {
+    /// Preview inference admission without network calls or credentials.
+    Admission(ProviderAdmissionArgs),
     /// Inspect provider/model capability metadata.
     Capabilities(ProviderCapabilitiesArgs),
     /// Validate and generate provider/model catalog artifacts, or print the
@@ -70,6 +72,14 @@ pub(crate) enum ProviderCommand {
     /// provider being throttled right now, and how is the governor reacting?" —
     /// the sibling of `dispatch-explain`.
     Limits(ProviderLimitsArgs),
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct ProviderAdmissionArgs {
+    /// Value-free JSON request: concrete provider/model, optional boundary and
+    /// data_controls. The result reports admitted, denied, or unknown.
+    #[arg(long)]
+    pub request: String,
 }
 
 #[derive(Debug, Args)]

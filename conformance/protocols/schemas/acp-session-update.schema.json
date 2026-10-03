@@ -375,6 +375,8 @@
         "category": { "type": "string" },
         "kind": { "type": "string" },
         "reason": { "type": "string" },
+        "origin": { "type": "string" },
+        "rule": { "type": "string" },
         "code": { "type": "string" },
         "retryable": { "type": "boolean" },
         "retryAfterMs": { "type": "integer" },

@@ -84,6 +84,9 @@ pub enum LlmErrorReason {
     /// a larger cap or a smaller request, never a byte-identical replay.
     OutputBudgetExhausted,
     Unknown,
+    /// Harn refused inference under its host/session policy before provider I/O.
+    /// Provider response bodies cannot claim this locally owned reason.
+    PolicyDenied,
 }
 
 impl LlmErrorReason {
@@ -104,6 +107,7 @@ impl LlmErrorReason {
         Self::BillingLimit,
         Self::OutputBudgetExhausted,
         Self::Unknown,
+        Self::PolicyDenied,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -122,6 +126,7 @@ impl LlmErrorReason {
             Self::BillingLimit => "billing_limit",
             Self::OutputBudgetExhausted => "output_budget_exhausted",
             Self::Unknown => "unknown",
+            Self::PolicyDenied => "policy_denied",
         }
     }
 
@@ -141,6 +146,7 @@ impl LlmErrorReason {
             "billing_limit" => Some(Self::BillingLimit),
             "output_budget_exhausted" => Some(Self::OutputBudgetExhausted),
             "unknown" => Some(Self::Unknown),
+            "policy_denied" => Some(Self::PolicyDenied),
             _ => None,
         }
     }
@@ -169,6 +175,7 @@ impl LlmErrorReason {
             | Self::BillingLimit
             | Self::OutputBudgetExhausted
             | Self::Unknown => LlmErrorKind::Terminal,
+            Self::PolicyDenied => LlmErrorKind::Terminal,
         }
     }
 }
@@ -411,7 +418,9 @@ fn explicit_stream_error_taxonomy(
 ) -> Option<(LlmErrorKind, LlmErrorReason)> {
     let json = json?;
     let kind = json_taxonomy_str(json, "kind").and_then(LlmErrorKind::parse);
-    let reason = json_taxonomy_str(json, "reason").and_then(LlmErrorReason::parse);
+    let reason = json_taxonomy_str(json, "reason")
+        .and_then(LlmErrorReason::parse)
+        .filter(|reason| *reason != LlmErrorReason::PolicyDenied);
     match (kind, reason) {
         (Some(kind), Some(reason)) => Some((kind, reason)),
         (None, Some(reason)) => Some((reason.default_kind(), reason)),
