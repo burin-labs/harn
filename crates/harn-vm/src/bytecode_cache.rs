@@ -1414,7 +1414,7 @@ fn walk_import_graph_fingerprinted(
     let mut canonical_hasher = Sha256::new();
     seed_entry_context_hasher(&mut canonical_hasher, codegen_fingerprint);
     let mut relocatable_hasher = Sha256::new();
-    relocatable_hasher.update(b"relocatable-entry-graph-v1\0");
+    relocatable_hasher.update(b"relocatable-entry-graph-v2\0");
     seed_entry_context_hasher(&mut relocatable_hasher, codegen_fingerprint);
 
     let entry_identity = module_source::canonical_identity(source_path);
@@ -1426,6 +1426,15 @@ fn walk_import_graph_fingerprinted(
         hash_import_node(&mut canonical_hasher, node);
         canonical_hasher.update(b"\0");
 
+        // A package file is labelled by its place in the packages tree, not by
+        // a path through the generation id that every install mints afresh.
+        // Its bytes are hashed below, so equal package content keeps the key
+        // across reinstalls and changed content still invalidates it.
+        if let Some(within) = harn_modules::package_snapshot::path_within_package_generation(path) {
+            let label = format!("@packages/{}", within.to_string_lossy().replace('\\', "/"));
+            relocatable_nodes.push((label, node));
+            continue;
+        }
         let Some(label) = relative_path_label(entry_dir, path) else {
             // A dependency on another filesystem root cannot be moved as one
             // closed tree. Preserve fail-closed behavior by retaining its
