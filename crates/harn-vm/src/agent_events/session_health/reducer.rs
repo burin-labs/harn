@@ -28,6 +28,7 @@ struct Counts {
 #[derive(Clone, Debug, Default)]
 pub(crate) struct SessionHealth {
     iteration: Option<u64>,
+    turn_closed: bool,
     turn: Counts,
     rolling: Counts,
     completed_calls: HashSet<String>,
@@ -43,6 +44,7 @@ pub(crate) struct SessionHealth {
 impl SessionHealth {
     pub(crate) fn start_turn(&mut self, iteration: u64) {
         self.iteration = Some(iteration);
+        self.turn_closed = false;
         self.turn = Counts::default();
         self.completed_calls.clear();
         self.turn_started_ms = None;
@@ -162,13 +164,15 @@ impl SessionHealth {
                     *status == ToolCallStatus::Completed,
                     *mutation_status == ToolMutationStatus::Applied,
                     health.as_deref(),
-                ) {
+                ) && self.turn_closed
+                {
                     // Closeout can resolve a streamed call after the turn's
                     // final snapshot. Publish the updated population there too.
                     return Some(self.fact(event.session_id()));
                 }
             }
             AgentEvent::IterationEnd { iteration_info, .. } => {
+                self.turn_closed = true;
                 self.finish_turn(
                     self.turn_started_ms
                         .and_then(|start| u64::try_from(now_ms - start).ok()),
@@ -182,6 +186,7 @@ impl SessionHealth {
                 phase: AgentTurnPhase::Terminal { outcome, .. },
                 ..
             } => {
+                self.turn_closed = true;
                 self.stop(outcome.kind);
                 return Some(self.fact(event.session_id()));
             }

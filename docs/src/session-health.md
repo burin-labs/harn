@@ -1,7 +1,8 @@
 # Session health reference
 
 The agent loop emits `session_health` after each model iteration and when it
-publishes a terminal outcome. The version 1 fact contains `session_id`,
+publishes a terminal outcome. A tool call resolved after that snapshot emits an
+updated fact, including calls abandoned during closeout. The version 1 fact contains `session_id`,
 `iteration`, `turn`, `rolling`, and `heuristics`. It observes execution and does
 not change loop policy. A health measurement is not an evaluation verdict.
 
