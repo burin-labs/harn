@@ -1,7 +1,7 @@
-//! Cross-process session-title watch via WAL + `PRAGMA data_version`.
+//! Cross-process session-metadata watch via WAL + `PRAGMA data_version`.
 //!
 //! One thread per database path. The thread keeps its own reader so it never
-//! takes the store mutex, and it only publishes when a title or pin actually
+//! takes the store mutex, and it only publishes when a metadata snapshot
 //! moved. Local writes still go through [`super::session_change`]; the
 //! fingerprint cache there drops the duplicate when this thread later sees
 //! the same commit.
@@ -17,8 +17,6 @@ use harn_session_store::wal_watch::{
     data_version, describe_session, list_title_snapshots, open_watch_reader, wal_sidecar_path,
 };
 use notify::{RecursiveMode, Watcher};
-
-use super::session_change::{remember_title, TitleMemory};
 
 const POLL: Duration = Duration::from_millis(250);
 
@@ -208,16 +206,14 @@ pub(super) fn flush_watcher(path: &Path) {
     harn_clock::test_support::recv_within("session WAL watcher flush", &acked);
 }
 
-/// Record every current title and pin as already seen, so the first poll
+/// Record every current metadata snapshot as already seen, so the first poll
 /// publishes only what moves after this point.
-fn seed_title_memory(reader: &rusqlite::Connection) {
+fn seed_session_memory(path: &Path, reader: &rusqlite::Connection) {
     if let Ok(snapshots) = list_title_snapshots(reader) {
         for snapshot in snapshots {
-            remember_title(
-                &snapshot.id,
-                snapshot.title.as_deref(),
-                snapshot.title_pinned,
-            );
+            if let Ok(meta) = describe_session(reader, &snapshot.id) {
+                super::session_change::remember_snapshot(path, &meta);
+            }
         }
     }
 }
@@ -233,7 +229,7 @@ fn start_watcher(path: PathBuf) {
     let Ok(initial_version) = data_version(&reader) else {
         return;
     };
-    seed_title_memory(&reader);
+    seed_session_memory(&path, &reader);
 
     let stop = Arc::new(AtomicBool::new(false));
     let thread_stop = Arc::clone(&stop);
@@ -284,7 +280,7 @@ fn watch_loop(
             Err(RecvTimeoutError::Timeout) => None,
             Err(RecvTimeoutError::Disconnected) => break,
         };
-        poll_once(&reader, &mut last_version);
+        poll_once(&path, &reader, &mut last_version);
         if let Some(signal) = signal {
             signal.polled();
         }
@@ -292,12 +288,12 @@ fn watch_loop(
 }
 
 /// One watch step, with no thread or timer: read `data_version` and, when
-/// another connection has committed since `last_version`, publish every title
-/// or pin that moved. Returns whether a new commit was observed.
+/// another connection has committed since `last_version`, publish every
+/// metadata snapshot that moved. Returns whether a new commit was observed.
 ///
 /// `data_version` is per connection, so `last_version` is only meaningful
 /// against the same `reader`.
-fn poll_once(reader: &rusqlite::Connection, last_version: &mut i64) -> bool {
+fn poll_once(path: &Path, reader: &rusqlite::Connection, last_version: &mut i64) -> bool {
     let Ok(version) = data_version(reader) else {
         return false;
     };
@@ -305,25 +301,19 @@ fn poll_once(reader: &rusqlite::Connection, last_version: &mut i64) -> bool {
         return false;
     }
     *last_version = version;
-    publish_title_changes(reader);
+    publish_session_changes(path, reader);
     true
 }
 
-fn publish_title_changes(reader: &rusqlite::Connection) {
+fn publish_session_changes(path: &Path, reader: &rusqlite::Connection) {
     let Ok(snapshots) = list_title_snapshots(reader) else {
         return;
     };
     for snapshot in snapshots {
-        if remember_title(
-            &snapshot.id,
-            snapshot.title.as_deref(),
-            snapshot.title_pinned,
-        ) != TitleMemory::Changed
-        {
-            continue;
-        }
         if let Ok(meta) = describe_session(reader, &snapshot.id) {
-            super::session_change::dispatch(&meta);
+            // Keep the store owner's identity. SQLite can return a different
+            // spelling for this same file, such as /private/var on macOS.
+            super::session_change::dispatch_foreign(path, &meta);
         }
     }
 }
@@ -379,9 +369,9 @@ mod tests {
             harn_session_store::wal_watch::open_watch_reader(&database).expect("watch reader");
         let mut last_version =
             harn_session_store::wal_watch::data_version(&reader).expect("data version");
-        super::seed_title_memory(&reader);
+        super::seed_session_memory(&database, &reader);
         assert!(
-            !super::poll_once(&reader, &mut last_version),
+            !super::poll_once(&database, &reader, &mut last_version),
             "no commit since the baseline"
         );
 
@@ -393,14 +383,114 @@ mod tests {
             )
             .expect("foreign rename");
 
-        assert!(super::poll_once(&reader, &mut last_version));
+        assert!(super::poll_once(&database, &reader, &mut last_version));
         assert_eq!(rx.try_recv().as_deref(), Ok("after"));
-        assert!(!super::poll_once(&reader, &mut last_version));
+        assert!(!super::poll_once(&database, &reader, &mut last_version));
         assert_eq!(
             rx.try_recv(),
             Err(mpsc::TryRecvError::Empty),
             "a quiet poll publishes nothing"
         );
+    }
+
+    /// Independent database copies may carry the same session id and metadata.
+    #[tokio::test]
+    async fn identical_session_ids_in_distinct_databases_publish_independently() {
+        let _bus = crate::stdlib::session_change::test_support::exclusive_bus().await;
+        let roots = [TempDir::new().unwrap(), TempDir::new().unwrap()];
+        let mut readers = Vec::new();
+        for root in &roots {
+            let store = open_canonical_store(root.path()).expect("canonical store");
+            store
+                .create(CreateSession {
+                    id: Some("shared-id".into()),
+                    title: Some("stable".into()),
+                    ..Default::default()
+                })
+                .await
+                .expect("create");
+            let writer = rusqlite::Connection::open(store.path()).unwrap();
+            writer.execute("UPDATE sessions SET created_at_ms = 1, created_at = '1970-01-01T00:00:00.001Z', updated_at_ms = 1, updated_at = '1970-01-01T00:00:00.001Z'", [])
+                .expect("equal timestamps in independent databases");
+            let reader =
+                harn_session_store::wal_watch::open_watch_reader(store.path()).expect("reader");
+            let version = harn_session_store::wal_watch::data_version(&reader).unwrap();
+            readers.push((store.path().to_owned(), reader, version));
+        }
+        let (tx, rx) = mpsc::channel();
+        let _subscription = subscribe_session_changes(Arc::new(Recording(tx)));
+        assert_eq!(
+            harn_session_store::wal_watch::describe_session(&readers[0].1, "shared-id").unwrap(),
+            harn_session_store::wal_watch::describe_session(&readers[1].1, "shared-id").unwrap(),
+            "the metadata must be identical or a full-snapshot cache can pass vacuously"
+        );
+        for (database, reader, _) in &readers {
+            super::seed_session_memory(database, reader);
+        }
+        for (database, reader, version) in &mut readers {
+            let foreign = rusqlite::Connection::open(&*database).expect("foreign writer");
+            foreign
+                .execute(
+                    "UPDATE sessions SET usage_input = 7 WHERE id = 'shared-id'",
+                    [],
+                )
+                .expect("foreign commit");
+            assert!(
+                super::poll_once(database, reader, version),
+                "the database committed"
+            );
+            assert_eq!(
+                rx.try_recv().as_deref(),
+                Ok("stable"),
+                "each database must publish its own identical metadata change"
+            );
+            assert!(!super::poll_once(database, reader, version));
+            assert_eq!(rx.try_recv(), Err(mpsc::TryRecvError::Empty));
+        }
+    }
+
+    /// A foreign metadata commit reaches the owning poll without a title change.
+    #[tokio::test]
+    async fn foreign_usage_change_publishes_once_when_title_is_unchanged() {
+        let _bus = crate::stdlib::session_change::test_support::exclusive_bus().await;
+        let root = TempDir::new().expect("root");
+        let database = {
+            let store = open_canonical_store(root.path()).expect("canonical store");
+            store
+                .create(CreateSession {
+                    id: Some("foreign-usage".into()),
+                    title: Some("stable".into()),
+                    ..Default::default()
+                })
+                .await
+                .expect("create");
+            store.path().to_owned()
+        };
+        struct Metadata(mpsc::Sender<SessionMeta>);
+        impl SessionChangeObserver for Metadata {
+            fn session_updated(&self, meta: &SessionMeta) {
+                let _ = self.0.send(meta.clone());
+            }
+        }
+        let (tx, rx) = mpsc::channel();
+        let _subscription = subscribe_session_changes(Arc::new(Metadata(tx)));
+        let reader = harn_session_store::wal_watch::open_watch_reader(&database).expect("reader");
+        let mut version = harn_session_store::wal_watch::data_version(&reader).expect("version");
+        super::seed_session_memory(&database, &reader);
+        assert_eq!(rx.try_recv(), Err(mpsc::TryRecvError::Empty));
+        let foreign = rusqlite::Connection::open(&database).expect("foreign writer");
+        foreign
+            .execute(
+                "UPDATE sessions SET usage_input = 7 WHERE id = 'foreign-usage'",
+                [],
+            )
+            .expect("foreign metadata commit");
+        assert!(super::poll_once(&database, &reader, &mut version));
+        let delivered = rx.try_recv().expect("same-title foreign change delivered");
+        assert_eq!(delivered.title.as_deref(), Some("stable"));
+        assert_eq!(delivered.usage_input, 7);
+        assert!(!super::poll_once(&database, &reader, &mut version));
+        assert_eq!(rx.try_recv(), Err(mpsc::TryRecvError::Empty));
     }
 
     /// The same path through the real watcher thread and filesystem watcher.
@@ -462,12 +552,91 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn watcher_first_local_commit_publishes_once_and_preserves_other_metadata() {
+        let _bus = crate::stdlib::session_change::test_support::exclusive_bus().await;
+        let root = TempDir::new().expect("root");
+        let store = open_canonical_store(root.path()).expect("canonical store");
+        store
+            .create(CreateSession {
+                id: Some("watcher-first".into()),
+                title: Some("before".into()),
+                ..CreateSession::default()
+            })
+            .await
+            .expect("create");
+        let (tx, rx) = mpsc::channel();
+        let _subscription = subscribe_session_changes(Arc::new(Recording(tx)));
+        super::flush_watcher(store.path());
+
+        struct WatcherFirst {
+            path: std::path::PathBuf,
+            fanout: harn_session_store::SharedSessionChangeObserver,
+        }
+        impl SessionChangeObserver for WatcherFirst {
+            fn session_updated(&self, meta: &SessionMeta) {
+                // Exercise the actual commit-to-hook window deterministically.
+                // The writer has released SQLite's lock before this callback.
+                super::flush_watcher(&self.path);
+                self.fanout.session_updated(meta);
+            }
+        }
+        let writer = harn_session_store::SqliteSessionStore::open_with_hooks(
+            store.path(),
+            harn_session_store::StoreHooks {
+                change_observer: Some(Arc::new(WatcherFirst {
+                    path: store.path().to_owned(),
+                    fanout: crate::stdlib::session_change::current_observer(Some(store.path()))
+                        .expect("live fanout"),
+                })),
+                ..Default::default()
+            },
+        )
+        .expect("writer sharing canonical database");
+        writer
+            .update(
+                "watcher-first",
+                UpdateSession {
+                    title: Some("after".into()),
+                    ..Default::default()
+                },
+            )
+            .await
+            .expect("rename");
+        assert_eq!(rx.try_recv().as_deref(), Ok("after"));
+        assert_eq!(rx.try_recv(), Err(mpsc::TryRecvError::Empty));
+
+        let updated = writer
+            .update(
+                "watcher-first",
+                UpdateSession {
+                    usage_input: Some(7),
+                    ..Default::default()
+                },
+            )
+            .await
+            .expect("usage update with unchanged title");
+        assert_eq!(updated.usage_input, 7);
+        assert_eq!(rx.try_recv().as_deref(), Ok("after"));
+        assert_eq!(rx.try_recv(), Err(mpsc::TryRecvError::Empty));
+    }
+
+    #[tokio::test]
     async fn local_update_does_not_double_publish_through_the_watcher() {
         let _bus = crate::stdlib::session_change::test_support::exclusive_bus().await;
         let root = TempDir::new().expect("root");
+        #[cfg(unix)]
+        let alias_parent = TempDir::new().expect("alias parent");
+        #[cfg(unix)]
+        let root_path = {
+            let alias = alias_parent.path().join("store-root");
+            std::os::unix::fs::symlink(root.path(), &alias).expect("aliased store root");
+            alias
+        };
+        #[cfg(not(unix))]
+        let root_path = root.path().to_owned();
         let (tx, rx) = mpsc::channel();
         let _subscription = subscribe_session_changes(Arc::new(Recording(tx)));
-        let store = open_canonical_store(root.path()).expect("open canonical store");
+        let store = open_canonical_store(&root_path).expect("open canonical store");
         store
             .create(CreateSession {
                 id: Some("local".to_string()),

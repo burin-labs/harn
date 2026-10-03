@@ -9,6 +9,7 @@
 pub mod handle;
 pub mod mock;
 pub mod owner_death;
+mod program_lookup;
 pub mod real;
 
 #[cfg(target_os = "windows")]
