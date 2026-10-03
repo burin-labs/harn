@@ -21,7 +21,7 @@ use crate::stdlib::register_vm_stdlib;
 #[cfg(test)]
 use crate::triggers::dispatcher::InboxEnvelope;
 use crate::triggers::test_util::clock;
-use crate::value::{VmClosure, VmError, VmValue};
+use crate::value::{VmClosure, VmValue};
 use crate::vm::Vm;
 use crate::{
     postprocess_normalized_event, redact_headers, ClientError, Connector, ConnectorClient,
