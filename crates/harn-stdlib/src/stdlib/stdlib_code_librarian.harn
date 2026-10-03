@@ -571,7 +571,8 @@ type ArchitectureDiff = {
 const __ARCHITECTURE_SAMPLE_CAP = 5
 
 /**
- * Anchored regex for a path glob. A double star crosses directories, a
+ * Anchored regex for a path glob. A double star crosses directories (and
+ * a double star followed by a slash may match no directory at all), a
  * single star and `?` stay inside one, and a pattern ending in slash and
  * double star also matches the directory itself.
  */
@@ -581,6 +582,11 @@ fn __architecture_glob_regex(glob: string) -> string {
   let i = 0
   while i < len(chars) {
     const c = chars[i]
+    if c == "*" && i + 2 < len(chars) && chars[i + 1] == "*" && chars[i + 2] == "/" {
+      out = out + "(?:.*/)?"
+      i = i + 3
+      continue
+    }
     if c == "*" && i + 1 < len(chars) && chars[i + 1] == "*" {
       out = out + ".*"
       i = i + 2
@@ -690,7 +696,9 @@ fn __architecture_lift(edges: list<ModuleGraphEdge>, owner: dict) -> dict {
  * forbidden ones the code has, and, when `strict`, dependencies the
  * target never declared. Every reported dependency carries its weight,
  * sample file pairs, and the actual edges behind it. `conforms` is true
- * when all three lists are empty. Pure: no index or file access.
+ * when all three lists are empty and, under `strict`, every actual node
+ * has an owner. A graph that measured nothing (not indexed, or no nodes)
+ * throws rather than conforming vacuously. Pure: no index or file access.
  *
  * @effects: []
  * @errors: [invalid_argument]
@@ -701,8 +709,14 @@ pub fn architecture_graph_diff(
   actual: ModuleGraph,
   target: ArchitectureTarget,
 ) -> ArchitectureDiff {
+  if !actual.indexed || len(actual.nodes) == 0 {
+    throw "architecture_graph_diff: the actual graph measured nothing (indexed: "
+      + to_string(actual.indexed)
+      + ", nodes: 0); rebuild the index or check the roots"
+  }
   const index = __architecture_index_target(target)
   const kinds = index.kinds
+  const strict = target.strict ?? false
   let owner: dict = {}
   let unmapped_actual: list<ModuleGraphNode> = []
   for node in actual.nodes {
@@ -727,7 +741,7 @@ pub fn architecture_graph_diff(
     }
   }
   let unexpected: list<ArchitectureViolation> = []
-  if target.strict ?? false {
+  if strict {
     for key in lift.order {
       if kinds[key] == nil {
         unexpected = unexpected + [lifted[key]]
@@ -742,7 +756,10 @@ pub fn architecture_graph_diff(
     }
   }
   return {
-    conforms: len(missing_required) == 0 && len(forbidden_present) == 0 && len(unexpected) == 0,
+    conforms: len(missing_required) == 0
+      && len(forbidden_present) == 0
+      && len(unexpected) == 0
+      && !(strict && len(unmapped_actual) > 0),
     missing_required: missing_required,
     forbidden_present: forbidden_present,
     unexpected: unexpected,

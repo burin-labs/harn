@@ -281,6 +281,10 @@ pub(super) fn build(state: &IndexState, options: &Options) -> ModuleGraph {
                 ),
             );
         }
+        // Two roots of one import (same-named targets) can land in one
+        // node; the file still links to that node once. Roots arrive
+        // sorted, so the sample names the smallest.
+        let mut module_targets: BTreeMap<&str, &str> = BTreeMap::new();
         for root in state.deps.module_imports_of(*id) {
             let targets = root_nodes.entry(root.as_str()).or_insert_with(|| {
                 state
@@ -291,12 +295,11 @@ pub(super) fn build(state: &IndexState, options: &Options) -> ModuleGraph {
                     .collect()
             });
             for to in targets.iter() {
-                add_edge(
-                    from,
-                    to,
-                    (file.relative_path.clone(), display_root(root).to_string()),
-                );
+                module_targets.entry(to).or_insert(display_root(root));
             }
+        }
+        for (to, root) in module_targets {
+            add_edge(from, to, (file.relative_path.clone(), root.to_string()));
         }
         let unresolved = state.deps.unresolved_imports(*id);
         unresolved_count += unresolved.len() as u64;
@@ -708,6 +711,34 @@ mod tests {
         assert_eq!(g.edges[0].weight, 5);
         let sources: Vec<&str> = g.edges[0].sample.iter().map(|(s, _)| s.as_str()).collect();
         assert_eq!(sources, ["src/ui/a.ts", "src/ui/b.ts", "src/ui/c.ts"]);
+    }
+
+    #[test]
+    fn same_named_targets_merged_by_depth_count_once() {
+        let dir = tempdir().unwrap();
+        // Two packages each declare a `Utils` target, so `import Utils`
+        // resolves to both roots. At depth 1 they share the `pkgs` node.
+        write(dir.path(), "pkgs/a/Sources/Utils/A.swift", "struct A {}\n");
+        write(dir.path(), "pkgs/b/Sources/Utils/B.swift", "struct B {}\n");
+        write(dir.path(), "app/Sources/App/Main.swift", "import Utils\n");
+        let (state, _) = IndexState::build_from_root(dir.path());
+        let main = state.path_to_id["app/Sources/App/Main.swift"];
+        assert_eq!(state.deps.module_imports_of(main).len(), 2);
+        let g = build(
+            &state,
+            &Options {
+                depth: Some(1),
+                ..Options::default()
+            },
+        );
+        assert_eq!(edge_keys(&g), [edge("app", "pkgs", 1)]);
+        assert_eq!(
+            g.edges[0].sample,
+            [(
+                "app/Sources/App/Main.swift".to_string(),
+                "pkgs/a/Sources/Utils".to_string()
+            )]
+        );
     }
 
     #[test]

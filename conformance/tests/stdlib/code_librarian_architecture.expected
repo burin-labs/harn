@@ -13,4 +13,6 @@ unexpected: [{"actual":[{"from":"src/ui","to":"src/data","weight":1}],"from":"ui
 unmatched_nodes: ["billing"]
 unmapped_actual: [{"files":1,"id":"tools","languages":["typescript"]}]
 lenient unexpected: 0
+unowned code: strict conforms false, lenient conforms true
 architecture_graph_diff: edge ui -> ghost names an undeclared target node
+architecture_graph_diff: the actual graph measured nothing (indexed: false, nodes: 0); rebuild the index or check the roots

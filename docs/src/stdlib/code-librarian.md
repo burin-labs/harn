@@ -176,8 +176,9 @@ id for the workspace root is `.`. Every list is sorted, so one index state
 always yields the same graph; `index_seq` names that state.
 
 The diff maps each actual node to the first target node, in declaration
-order, with a glob matching the node id. `**` crosses directories, `*` and
-`?` stay within one, and a trailing `/**` also matches the directory itself.
+order, with a glob matching the node id. `**` crosses directories (so
+`src/**/core` also matches `src/core`), `*` and `?` stay within one, and a
+trailing `/**` also matches the directory itself.
 Dependencies between actual nodes in the same target node are ignored.
 
 | Field | Contents |
@@ -190,8 +191,11 @@ Dependencies between actual nodes in the same target node are ignored.
 
 Each reported dependency carries its total `weight`, up to five sample file
 pairs, and the `actual` node edges behind it. `conforms` is true when the
-first three lists are empty. A target edge naming an undeclared node, a
-duplicate node id, or a duplicate edge throws.
+first three lists are empty and, under `strict`, `unmapped_actual` is empty
+too: a strict target must own all the code. A target edge naming an
+undeclared node, a duplicate node id, or a duplicate edge throws, and so
+does an actual graph that measured nothing (`indexed: false` or no nodes),
+so an unbuilt index cannot read as a conforming one.
 
 ## Defaults and limitations
 

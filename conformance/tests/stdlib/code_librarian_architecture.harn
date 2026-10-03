@@ -61,11 +61,13 @@ pipeline default(harness: Harness) {
     "deterministic: " + to_string(json_stringify(again) == json_stringify(graph)),
   )
   // Negative control: a target the code already satisfies reports nothing.
+  // `src/**/data` and `**/core` must match with zero directories in place
+  // of the double star, or those nodes would fall out unowned.
   const layered: ArchitectureTarget = {
     nodes: [
       {id: "ui", paths: ["src/ui/**"]},
-      {id: "data", paths: ["src/data/**"]},
-      {id: "core", paths: ["src/core/**"]},
+      {id: "data", paths: ["src/**/data"]},
+      {id: "core", paths: ["**/core"]},
       {id: "tools", paths: ["tools"]},
     ],
     edges: [
@@ -103,6 +105,22 @@ pipeline default(harness: Harness) {
   // Without strict, an undeclared dependency is allowed.
   const lenient: ArchitectureDiff = architecture_graph_diff(graph, drawn + {strict: false})
   harness.stdio.println("lenient unexpected: " + to_string(len(lenient.unexpected)))
+  // Under strict, code no target node owns breaks conformance by itself;
+  // without strict it is only listed.
+  let owned_nodes: list<ArchitectureNode> = []
+  for node in layered.nodes {
+    if node.id != "tools" {
+      owned_nodes = owned_nodes + [node]
+    }
+  }
+  const partial = layered + {nodes: owned_nodes}
+  const strict_partial: ArchitectureDiff = architecture_graph_diff(graph, partial)
+  const loose_partial: ArchitectureDiff = architecture_graph_diff(graph, partial + {strict: false})
+  harness.stdio.println(
+    "unowned code: strict conforms " + to_string(strict_partial.conforms)
+      + ", lenient conforms "
+      + to_string(loose_partial.conforms),
+  )
   const bad = try {
     architecture_graph_diff(
       graph,
@@ -110,5 +128,10 @@ pipeline default(harness: Harness) {
     )
   }
   harness.stdio.println(unwrap_err(bad))
+  // A graph that measured nothing never conforms vacuously.
+  const unmeasured = try {
+    architecture_graph_diff(before, layered)
+  }
+  harness.stdio.println(unwrap_err(unmeasured))
   harness.fs.delete(root)
 }
