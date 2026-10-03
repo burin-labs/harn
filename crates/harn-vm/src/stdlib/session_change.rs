@@ -31,13 +31,7 @@ use super::session_wal_watch;
 /// evict the first.
 static OBSERVERS: RwLock<Vec<(u64, SharedSessionChangeObserver)>> = RwLock::new(Vec::new());
 static NEXT_SUBSCRIPTION: AtomicU64 = AtomicU64::new(1);
-type TitleFingerprint = (Option<String>, bool);
-struct RememberedSession {
-    id: String,
-    title: TitleFingerprint,
-    last_publication: Option<SessionMeta>,
-}
-static SESSION_MEMORY: RwLock<Vec<RememberedSession>> = RwLock::new(Vec::new());
+static SESSION_MEMORY: RwLock<Vec<SessionMeta>> = RwLock::new(Vec::new());
 
 fn observers() -> RwLockWriteGuard<'static, Vec<(u64, SharedSessionChangeObserver)>> {
     OBSERVERS
@@ -45,7 +39,7 @@ fn observers() -> RwLockWriteGuard<'static, Vec<(u64, SharedSessionChangeObserve
         .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
-fn session_memory() -> RwLockWriteGuard<'static, Vec<RememberedSession>> {
+fn session_memory() -> RwLockWriteGuard<'static, Vec<SessionMeta>> {
     SESSION_MEMORY
         .write()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
@@ -105,34 +99,18 @@ fn subscriber_count() -> usize {
         .len()
 }
 
-/// Whether a title/pin pair is new to this process, unchanged, or moved.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum TitleMemory {
-    New,
-    Unchanged,
-    Changed,
-}
-
-pub(super) fn remember_title(
-    session_id: &str,
-    title: Option<&str>,
-    title_pinned: bool,
-) -> TitleMemory {
-    let next = (title.map(str::to_string), title_pinned);
+/// One comparison owner for local commits, foreign commits, and watch baselines.
+pub(super) fn remember_snapshot(meta: &SessionMeta) -> bool {
     let mut sessions = session_memory();
-    if let Some(previous) = sessions.iter_mut().find(|seen| seen.id == session_id) {
-        if previous.title == next {
-            return TitleMemory::Unchanged;
+    if let Some(previous) = sessions.iter_mut().find(|seen| seen.id == meta.id) {
+        if previous == meta {
+            return false;
         }
-        previous.title = next;
-        return TitleMemory::Changed;
+        *previous = meta.clone();
+    } else {
+        sessions.push(meta.clone());
     }
-    sessions.push(RememberedSession {
-        id: session_id.to_owned(),
-        title: next,
-        last_publication: None,
-    });
-    TitleMemory::New
+    true
 }
 
 /// Fans one committed change out to every live subscriber.
@@ -140,21 +118,8 @@ pub(super) fn dispatch(meta: &SessionMeta) {
     // Either the local post-commit hook or the WAL reader can arrive first.
     // Claim the whole committed snapshot once, not just its title: model,
     // usage and other metadata changes still notify when the title is stable.
-    {
-        let mut sessions = session_memory();
-        if let Some(seen) = sessions.iter_mut().find(|seen| seen.id == meta.id) {
-            if seen.last_publication.as_ref() == Some(meta) {
-                return;
-            }
-            seen.title = (meta.title.clone(), meta.title_pinned);
-            seen.last_publication = Some(meta.clone());
-        } else {
-            sessions.push(RememberedSession {
-                id: meta.id.clone(),
-                title: (meta.title.clone(), meta.title_pinned),
-                last_publication: Some(meta.clone()),
-            });
-        }
+    if !remember_snapshot(meta) {
+        return;
     }
     let observers: Vec<SharedSessionChangeObserver> = OBSERVERS
         .read()

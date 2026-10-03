@@ -1,7 +1,7 @@
-//! Cross-process session-title watch via WAL + `PRAGMA data_version`.
+//! Cross-process session-metadata watch via WAL + `PRAGMA data_version`.
 //!
 //! One thread per database path. The thread keeps its own reader so it never
-//! takes the store mutex, and it only publishes when a title or pin actually
+//! takes the store mutex, and it only publishes when a metadata snapshot
 //! moved. Local writes still go through [`super::session_change`]; the
 //! fingerprint cache there drops the duplicate when this thread later sees
 //! the same commit.
@@ -17,8 +17,6 @@ use harn_session_store::wal_watch::{
     data_version, describe_session, list_title_snapshots, open_watch_reader, wal_sidecar_path,
 };
 use notify::{RecursiveMode, Watcher};
-
-use super::session_change::{remember_title, TitleMemory};
 
 const POLL: Duration = Duration::from_millis(250);
 
@@ -208,16 +206,14 @@ pub(super) fn flush_watcher(path: &Path) {
     harn_clock::test_support::recv_within("session WAL watcher flush", &acked);
 }
 
-/// Record every current title and pin as already seen, so the first poll
+/// Record every current metadata snapshot as already seen, so the first poll
 /// publishes only what moves after this point.
-fn seed_title_memory(reader: &rusqlite::Connection) {
+fn seed_session_memory(reader: &rusqlite::Connection) {
     if let Ok(snapshots) = list_title_snapshots(reader) {
         for snapshot in snapshots {
-            remember_title(
-                &snapshot.id,
-                snapshot.title.as_deref(),
-                snapshot.title_pinned,
-            );
+            if let Ok(meta) = describe_session(reader, &snapshot.id) {
+                super::session_change::remember_snapshot(&meta);
+            }
         }
     }
 }
@@ -233,7 +229,7 @@ fn start_watcher(path: PathBuf) {
     let Ok(initial_version) = data_version(&reader) else {
         return;
     };
-    seed_title_memory(&reader);
+    seed_session_memory(&reader);
 
     let stop = Arc::new(AtomicBool::new(false));
     let thread_stop = Arc::clone(&stop);
@@ -292,8 +288,8 @@ fn watch_loop(
 }
 
 /// One watch step, with no thread or timer: read `data_version` and, when
-/// another connection has committed since `last_version`, publish every title
-/// or pin that moved. Returns whether a new commit was observed.
+/// another connection has committed since `last_version`, publish every
+/// metadata snapshot that moved. Returns whether a new commit was observed.
 ///
 /// `data_version` is per connection, so `last_version` is only meaningful
 /// against the same `reader`.
@@ -305,23 +301,15 @@ fn poll_once(reader: &rusqlite::Connection, last_version: &mut i64) -> bool {
         return false;
     }
     *last_version = version;
-    publish_title_changes(reader);
+    publish_session_changes(reader);
     true
 }
 
-fn publish_title_changes(reader: &rusqlite::Connection) {
+fn publish_session_changes(reader: &rusqlite::Connection) {
     let Ok(snapshots) = list_title_snapshots(reader) else {
         return;
     };
     for snapshot in snapshots {
-        if remember_title(
-            &snapshot.id,
-            snapshot.title.as_deref(),
-            snapshot.title_pinned,
-        ) != TitleMemory::Changed
-        {
-            continue;
-        }
         if let Ok(meta) = describe_session(reader, &snapshot.id) {
             super::session_change::dispatch(&meta);
         }
@@ -379,7 +367,7 @@ mod tests {
             harn_session_store::wal_watch::open_watch_reader(&database).expect("watch reader");
         let mut last_version =
             harn_session_store::wal_watch::data_version(&reader).expect("data version");
-        super::seed_title_memory(&reader);
+        super::seed_session_memory(&reader);
         assert!(
             !super::poll_once(&reader, &mut last_version),
             "no commit since the baseline"
@@ -401,6 +389,50 @@ mod tests {
             Err(mpsc::TryRecvError::Empty),
             "a quiet poll publishes nothing"
         );
+    }
+
+    /// A foreign metadata commit reaches the owning poll without a title change.
+    #[tokio::test]
+    async fn foreign_usage_change_publishes_once_when_title_is_unchanged() {
+        let _bus = crate::stdlib::session_change::test_support::exclusive_bus().await;
+        let root = TempDir::new().expect("root");
+        let database = {
+            let store = open_canonical_store(root.path()).expect("canonical store");
+            store
+                .create(CreateSession {
+                    id: Some("foreign-usage".into()),
+                    title: Some("stable".into()),
+                    ..Default::default()
+                })
+                .await
+                .expect("create");
+            store.path().to_owned()
+        };
+        struct Metadata(mpsc::Sender<SessionMeta>);
+        impl SessionChangeObserver for Metadata {
+            fn session_updated(&self, meta: &SessionMeta) {
+                let _ = self.0.send(meta.clone());
+            }
+        }
+        let (tx, rx) = mpsc::channel();
+        let _subscription = subscribe_session_changes(Arc::new(Metadata(tx)));
+        let reader = harn_session_store::wal_watch::open_watch_reader(&database).expect("reader");
+        let mut version = harn_session_store::wal_watch::data_version(&reader).expect("version");
+        super::seed_session_memory(&reader);
+        assert_eq!(rx.try_recv(), Err(mpsc::TryRecvError::Empty));
+        let foreign = rusqlite::Connection::open(&database).expect("foreign writer");
+        foreign
+            .execute(
+                "UPDATE sessions SET usage_input = 7 WHERE id = 'foreign-usage'",
+                [],
+            )
+            .expect("foreign metadata commit");
+        assert!(super::poll_once(&reader, &mut version));
+        let delivered = rx.try_recv().expect("same-title foreign change delivered");
+        assert_eq!(delivered.title.as_deref(), Some("stable"));
+        assert_eq!(delivered.usage_input, 7);
+        assert!(!super::poll_once(&reader, &mut version));
+        assert_eq!(rx.try_recv(), Err(mpsc::TryRecvError::Empty));
     }
 
     /// The same path through the real watcher thread and filesystem watcher.
