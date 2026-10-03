@@ -6,7 +6,7 @@
  * prose, canonical replay, and the rule that every consumed non-call is
  * recorded as dropped.
  */
-import { tool_call_shape, tool_call_syntax_named } from "std/llm/call_shape"
+import { tool_call_json_error, tool_call_shape, tool_call_syntax_named } from "std/llm/call_shape"
 import {
   BACKTICK_FENCE,
   TAGGED_DIALECT,
@@ -1022,7 +1022,7 @@ fn __tool_parse_json(text: string, tools: dict? = nil, recover_heredoc: bool = t
           + "end-of-output with an incomplete JSON object. Re-emit the whole call inside "
           + "a ```tool ... ``` block and close it with a line that is exactly ```."
       } else {
-        __tool_parse_json_error(
+        tool_call_json_error(
           to_string(stream?.error ?? "Tool JSON block did not contain an object.")
             + " (near `"
             + source.slice(0, 80)
@@ -1095,14 +1095,6 @@ fn __tool_parse_json(text: string, tools: dict? = nil, recover_heredoc: bool = t
       prose: chunked.prose,
       dropped: dropped,
     }
-}
-
-fn __tool_parse_json_error(detail: string) -> string {
-  return "The ```tool block is not valid JSON: "
-    + detail
-    + ". Pass multi-line or code-bearing fields as ordinary JSON string values "
-    + "(escape newlines as \\n, quotes as \\\", backslashes as \\\\); "
-    + "backticks need no escaping."
 }
 
 /**
