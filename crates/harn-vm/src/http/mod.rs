@@ -10,25 +10,19 @@ use crate::vm::Vm;
 mod client;
 pub(crate) mod framing;
 mod mock;
+mod retry_after;
 mod sigv4;
 mod streaming;
 #[cfg(test)]
 mod tests;
 
 pub(crate) use mock::HttpMockRegistry;
-pub(crate) fn retry_after_hint(value: &str) -> Option<(u64, bool)> {
-    let requested = client::parse_retry_after_requested_at(value, std::time::SystemTime::now())?;
-    let millis = requested.as_millis();
-    Some((
-        millis.min(u128::from(MAX_RETRY_DELAY_MS)) as u64,
-        millis > u128::from(MAX_RETRY_DELAY_MS),
-    ))
-}
 use mock::{
     clear_http_mocks, http_mock_calls_value, parse_mock_responses, register_http_mock,
     reset_http_mocks,
 };
 pub use mock::{http_mock_calls_snapshot, push_http_mock, HttpMockCallSnapshot, HttpMockResponse};
+pub(crate) use retry_after::hint as retry_after_hint;
 
 /// Route a Harn HTTP request through the standard verb pipeline.
 ///
@@ -756,6 +750,7 @@ async fn run_http_server_request(
 
 /// Register HTTP builtins on a VM.
 pub fn register_http_builtins(vm: &mut Vm) {
+    retry_after::register(vm);
     register_http_tls_builtins(vm);
     register_http_server_builtins(vm);
     register_http_mock_builtins(vm);

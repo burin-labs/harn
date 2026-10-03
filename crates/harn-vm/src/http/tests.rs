@@ -42,8 +42,8 @@ fn parses_retry_after_delta_seconds() {
 fn parses_retry_after_http_date() {
     let now = UNIX_EPOCH + Duration::from_secs(1_700_000_000);
     let header = httpdate::fmt_http_date(now + Duration::from_secs(2));
-    let parsed =
-        super::client::parse_retry_after_value_at(&header, now).expect("http-date should parse");
+    let parsed = super::retry_after::parse_retry_after_value_at(&header, now)
+        .expect("http-date should parse");
     assert_eq!(parsed, Duration::from_secs(2));
 }
 
