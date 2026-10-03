@@ -1093,7 +1093,9 @@ fn breaker_open_error(
 mod network_recovery;
 pub(crate) use network_recovery::await_network_breaker_for_llm_call;
 #[cfg(test)]
-use network_recovery::{check_network_breaker_for_llm_call, network_breaker_admission};
+pub(crate) use network_recovery::check_network_breaker_for_llm_call;
+#[cfg(test)]
+use network_recovery::network_breaker_admission;
 
 /// Feed a terminal unproductive completion (a served turn that delivered no
 /// content, reasoning, or tool call — the zero-token empty completion or the

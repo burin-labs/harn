@@ -5,7 +5,7 @@ use crate::llm::api::LlmCallOptions;
 
 /// Preserve direct fail-fast checks of the breaker state machine.
 #[cfg(test)]
-pub(super) fn check_network_breaker_for_llm_call(
+pub(crate) fn check_network_breaker_for_llm_call(
     opts: &LlmCallOptions,
 ) -> Result<(), crate::value::VmError> {
     match network_breaker_admission(opts) {
