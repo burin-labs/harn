@@ -330,7 +330,7 @@ pub fn provider_option_probe_retry_delay_ms(attempt: ProviderOptionProbeAttempt)
   if attempt.reason == "timeout" {
     return 0
   }
-  if attempt.reason == "rate_limited" {
+  if attempt.reason == "rate_limit" {
     return 1000
   }
   return nil

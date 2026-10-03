@@ -285,7 +285,7 @@ pipeline test_provider_option_probe_retains_retry_and_control_accounting() {
 
 pipeline test_provider_option_probe_bounds_rate_limit_recovery() {
   const limited = provider_option_probe_classify(
-    Err({origin: "provider", kind: "transient", reason: "rate_limited", message: "HTTP 429"}),
+    Err({origin: "provider", kind: "transient", reason: "rate_limit", message: "HTTP 429"}),
   )
   assert_eq(provider_option_probe_retry_delay_ms(limited), 1000)
   const persistent = provider_option_probe_retry_result(limited, limited)
