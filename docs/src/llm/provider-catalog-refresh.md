@@ -308,8 +308,9 @@ served-empty response reports one.
 Every rejection needs a successful control request without the selected option.
 If that control also fails, the option remains unmeasured with
 `failure_class: "control_failed"`. A timeout gets one immediate retry; a rate limit
-gets one retry after the provider's `retry_after_ms`, or one second when it is
-absent. A provider delay above 60 seconds remains unmeasured without an early
+gets one retry after the runtime's `retry_after_ms`, or one second when it is
+absent. The HTTP error owner caps that hint at 60 seconds; the probe honors this
+bounded contract. A typed delay above that bound remains unmeasured without a
 retry. A persistent rate limit remains
 unmeasured. Receipts include
 the retry and control in request, usage, and cost counts; an unpriced request
