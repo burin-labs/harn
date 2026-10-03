@@ -207,7 +207,7 @@ jobs:
         # Tests gated to `#![cfg(unix)]` still run here (macOS is Unix); the
         # macOS-specific surface is exactly what this nightly exists to
         # exercise.
-        run: scripts/ci/run_rust_test_lane.sh cargo nextest run --locked --workspace --exclude harn-wasm --profile ci
+        run: scripts/ci/run_rust_test_lane.sh cargo-nextest nextest run --locked --workspace --exclude harn-wasm --profile ci
       - name: Smoke test harn run
         shell: bash
         run: |

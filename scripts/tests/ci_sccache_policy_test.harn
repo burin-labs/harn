@@ -353,7 +353,7 @@ fn workflow() {
       {
         name: "Run Rust workspace tests",
         run:
-          "${HOST_BOUND_RUST_TEST_FILTER_SETUP} scripts/ci/run_rust_test_lane.sh cargo nextest run --profile ci --archive-file harn-tests.tar.zst --workspace-remap workspace ${NEUTRAL_RUST_TEST_FILTER_FLAG}",
+          "${HOST_BOUND_RUST_TEST_FILTER_SETUP} scripts/ci/run_rust_test_lane.sh cargo-nextest nextest run --profile ci --archive-file harn-tests.tar.zst --workspace-remap workspace ${NEUTRAL_RUST_TEST_FILTER_FLAG}",
       },
     ],
   }
@@ -416,7 +416,7 @@ fn workflow() {
               if: "vars.HARN_CI_DISABLE_COLOCATED_TESTS != 'true'",
               env: {HARN_LLM_CALLS_DISABLED: "1"},
               run:
-                "${HOST_BOUND_RUST_TEST_FILTER_SETUP} scripts/ci/run_rust_test_lane.sh cargo nextest run --locked --workspace --profile ci ${NEUTRAL_RUST_TEST_FILTER_FLAG}",
+                "${HOST_BOUND_RUST_TEST_FILTER_SETUP} scripts/ci/run_rust_test_lane.sh cargo-nextest nextest run --locked --workspace --profile ci ${NEUTRAL_RUST_TEST_FILTER_FLAG}",
             },
           ],
       },
@@ -528,7 +528,7 @@ fn workflow() {
             name: "Run Linux sandbox tests",
             id: "release-audit-rust-security",
             run:
-              "${HOST_BOUND_RUST_TEST_FILTER_SETUP} scripts/ci/run_rust_test_lane.sh cargo nextest run --profile ci --archive-file harn-security-tests.tar.zst --workspace-remap workspace ${HOST_BOUND_RUST_TEST_FILTER_FLAG}",
+              "${HOST_BOUND_RUST_TEST_FILTER_SETUP} scripts/ci/run_rust_test_lane.sh cargo-nextest nextest run --profile ci --archive-file harn-security-tests.tar.zst --workspace-remap workspace ${HOST_BOUND_RUST_TEST_FILTER_FLAG}",
           },
         ],
       },
@@ -853,7 +853,7 @@ pipeline test_rejects_recompiling_workspace_test_consumer(harness: Harness, task
           {
             name: "Run Rust workspace tests",
             env: {CARGO_BUILD_JOBS: "4"},
-            run: "cargo nextest run --workspace --profile ci",
+            run: "cargo-nextest nextest run --workspace --profile ci",
           },
         ],
       },
@@ -1750,7 +1750,7 @@ pipeline test_rejects_host_bound_sandbox_coverage_drift(harness: Harness, task: 
             if step?.name != "Run Rust workspace tests" {
               return step
             }
-            return {...step, run: "cargo nextest run --locked --workspace --profile ci"}
+            return {...step, run: "cargo-nextest nextest run --locked --workspace --profile ci"}
           },
         )
           .to_list(),
@@ -1759,7 +1759,7 @@ pipeline test_rejects_host_bound_sandbox_coverage_drift(harness: Harness, task: 
         ...security,
         "runs-on": "blacksmith-8vcpu-ubuntu-2404",
         steps: security.steps.map(
-          { step -> return {...step, run: "cargo nextest run -E 'test(only_one_case)'"} },
+          { step -> return {...step, run: "cargo-nextest nextest run -E 'test(only_one_case)'"} },
         )
           .to_list(),
       },

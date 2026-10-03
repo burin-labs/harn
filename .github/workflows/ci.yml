@@ -1385,7 +1385,7 @@ jobs:
           set -euo pipefail;
           host_bound_filter="$(scripts/ci/host_bound_rust_test_filter.sh)";
           scripts/ci/run_rust_test_lane.sh
-          cargo nextest run --locked --workspace --profile ci
+          cargo-nextest nextest run --locked --workspace --profile ci
           -E "not (${host_bound_filter})"
       - name: Upload workspace test archive
         if: vars.HARN_CI_DISABLE_COLOCATED_TESTS == 'true'
@@ -1576,7 +1576,7 @@ jobs:
           set -euo pipefail;
           host_bound_filter="$(scripts/ci/host_bound_rust_test_filter.sh)";
           scripts/ci/run_rust_test_lane.sh
-          cargo nextest run --profile ci
+          cargo-nextest nextest run --profile ci
           --archive-file "$RUNNER_TEMP/harn-workspace-tests/harn-tests.tar.zst"
           --workspace-remap "$GITHUB_WORKSPACE"
           -E "not (${host_bound_filter})"
@@ -1652,7 +1652,7 @@ jobs:
           set -euo pipefail;
           host_bound_filter="$(scripts/ci/host_bound_rust_test_filter.sh)";
           scripts/ci/run_rust_test_lane.sh
-          cargo nextest run --profile ci
+          cargo-nextest nextest run --profile ci
           --success-output immediate
           --no-tests fail
           --archive-file "$RUNNER_TEMP/harn-security/harn-security-tests.tar.zst"
