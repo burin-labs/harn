@@ -1,6 +1,26 @@
 use super::*;
 
 #[test]
+fn host_payloads_cannot_supply_runtime_measured_session_health() {
+    use crate::agent_events::session_health::{
+        HealthHeuristics, HealthMeasurements, SessionHealthFact, SESSION_HEALTH_SCHEMA_VERSION,
+    };
+    let session_id = "health-runtime-authority";
+    let fact = SessionHealthFact {
+        schema_version: SESSION_HEALTH_SCHEMA_VERSION,
+        session_id: session_id.to_owned(),
+        iteration: Some(1),
+        turn: HealthMeasurements::default(),
+        rolling: HealthMeasurements::default(),
+        heuristics: HealthHeuristics::default(),
+    };
+    let payload = json!({"fact": fact});
+    let event = AgentEvent::from_host_payload(session_id, "session_health", &payload)
+        .expect("unregistered host events follow the existing drop policy");
+    assert!(event.is_none(), "only the session owner may measure health");
+}
+
+#[test]
 fn a_dropped_payload_key_rejects_the_entire_event_before_publication() {
     let captured = crate::boundary::tests::CapturedEvents::install();
     let payload = json!({"iteration": 2, "trigger": "turn_end", "confidence_floor": 0.4});
