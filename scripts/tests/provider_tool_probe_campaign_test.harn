@@ -1273,6 +1273,8 @@ pipeline test_provider_tool_probe_campaign_requires_measured_true_and_false_cont
   assert_eq(both.claim_controls.measured_unsupported_count, 1)
   assert_eq(both_with_missing_auth.claim_controls.status, "incomplete")
   assert_eq(both_with_missing_auth.claim_controls.unmeasured_count, 1)
+  assert_eq(both_with_missing_auth.spend.executable_probe_count, 2)
+  assert_eq(both_with_missing_auth.spend.unaccounted_probe_count, 0)
   const retried_report = rejected_report
     + {
       probe: rejected_report.probe
@@ -1352,6 +1354,11 @@ pipeline test_provider_tool_probe_campaign_requires_measured_true_and_false_cont
   assert_eq(with_exclusion.claim_controls.measured_unsupported_count, 1)
   assert_eq(with_exclusion.claim_controls.excluded_by_account_policy_count, 1)
   assert_eq(with_exclusion.claim_controls.unmeasured_count, 0)
+  assert_eq(with_exclusion.spend.executable_probe_count, 3)
+  assert_eq(with_exclusion.spend.request_attempt_count, 3)
+  assert_eq(with_exclusion.spend.unaccounted_probe_count, 0)
+  assert_eq(with_exclusion.spend.actual_usd_known, true)
+  assert_eq(with_exclusion.spend.budget_status, "within_cap")
   const exclusions_only = provider_tool_probe_campaign_report(
     [route],
     [behavior],
@@ -1365,6 +1372,8 @@ pipeline test_provider_tool_probe_campaign_requires_measured_true_and_false_cont
     verified_catalog(),
   )
   assert_eq(exclusions_only.claim_controls.status, "incomplete")
+  assert_eq(exclusions_only.spend.executable_probe_count, 1)
+  assert_eq(exclusions_only.spend.unaccounted_probe_count, 0)
   const control_report = unmeasured_report
     + {
       probe: unmeasured_report.probe

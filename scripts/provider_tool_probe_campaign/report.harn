@@ -318,14 +318,13 @@ pub fn __estimated_spend(
     }
     if !live && cell.status == "planned" {
       executable_probe_count = executable_probe_count + repeat
-    } else if live && (cell.status == "pass" || cell.status == "fail" || cell.status == "error") {
+    } else if live {
       const observed_attempts = cell.observed?.telemetry?.request_attempt_count ?? 0
-      executable_probe_count = executable_probe_count
-        + if observed_attempts > 0 {
-          observed_attempts
-        } else {
-          1
-        }
+      if observed_attempts > 0 {
+        executable_probe_count = executable_probe_count + observed_attempts
+      } else if cell.status == "pass" || cell.status == "fail" || cell.status == "error" {
+        executable_probe_count = executable_probe_count + 1
+      }
     }
   }
   const base = {
