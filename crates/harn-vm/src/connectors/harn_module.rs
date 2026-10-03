@@ -1017,8 +1017,11 @@ fn client_error_from_message(message: String) -> ClientError {
 
 fn vm_error_message(error: VmError) -> String {
     match error {
-        VmError::Thrown(VmValue::String(message)) => message.to_string(),
-        VmError::Thrown(value) => vm_value_to_json(&value).to_string(),
+        VmError::Thrown(VmValue::String(message))
+        | VmError::DeclaredThrown(VmValue::String(message)) => message.to_string(),
+        VmError::Thrown(value) | VmError::DeclaredThrown(value) => {
+            vm_value_to_json(&value).to_string()
+        }
         other => other.to_string(),
     }
 }
