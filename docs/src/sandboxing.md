@@ -653,6 +653,16 @@ caller overrides, removals, and `env_clear`. Those controls can execute before
 the helper installs confinement. Ordinary payload environment grants are
 preserved; a direct Landlock-confined payload may still configure its loader.
 
+The glibc allocator sizing knobs (`MALLOC_ARENA_MAX`, `MALLOC_ARENA_TEST`,
+`MALLOC_MMAP_MAX_`, `MALLOC_MMAP_THRESHOLD_`, `MALLOC_TOP_PAD_`, and
+`MALLOC_TRIM_THRESHOLD_`) are the exception under bubblewrap. Harn keeps them
+out of bubblewrap's environment and re-applies them to the confined payload, so
+a host that exports `MALLOC_ARENA_MAX`, as Heroku and many container images do,
+still runs sandboxed commands. A `process_sandbox_environment` log event names
+what was re-applied. `MALLOC_CHECK_` and `MALLOC_PERTURB_` change allocator
+behavior rather than its sizing and stay refused, as does every control under
+the namespace helper, which has no way to re-apply them.
+
 Bubblewrap supports complete read-only and writable directory grants. It
 refuses selective filesystem rights, managed proxy-only egress, and files-only
 process introspection. A run that needs a private `/proc` must explicitly grant

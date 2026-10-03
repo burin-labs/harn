@@ -149,6 +149,20 @@ pub(in crate::stdlib::sandbox) fn prepare(
     }
     argv.extend(["--seccomp".into(), filter.as_raw_fd().to_string()]);
     descriptors.push(filter);
+    // Allocator tuning the launch environment carries is kept out of
+    // bubblewrap's own environment and re-applied to the payload through
+    // these arguments, written once the final environment is known
+    // (`launch_environment`). Empty until then, which adds nothing.
+    let payload_env = payload_env_args().map_err(|error| {
+        sandbox_rejection(format!(
+            "could not create the bubblewrap payload environment descriptor: {error}"
+        ))
+    })?;
+    argv.extend([
+        PAYLOAD_ENV_ARGS_FLAG.into(),
+        payload_env.as_raw_fd().to_string(),
+    ]);
+    descriptors.push(payload_env);
     let mut finalizer_args = Vec::new();
     if !device_descriptors.is_empty() {
         let launcher = policy.process_sandbox.netns_launcher_path.as_ref()
@@ -309,6 +323,18 @@ fn mounts(filesystem: FilesystemProfile) -> Result<MountPlan, VmError> {
     })
 }
 
+/// Bubblewrap reads NUL-separated options from the descriptor given here, at
+/// the point in its argv where the flag appears.
+pub(in crate::stdlib::sandbox) const PAYLOAD_ENV_ARGS_FLAG: &str = "--args";
+
+pub(in crate::stdlib::sandbox) fn payload_env_args() -> std::io::Result<OwnedFd> {
+    let raw = unsafe { libc::memfd_create(c"harn-bwrap-env".as_ptr(), libc::MFD_CLOEXEC) };
+    if raw < 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    Ok(unsafe { OwnedFd::from_raw_fd(raw) })
+}
+
 fn sealed_filter(bytes: &[u8]) -> std::io::Result<OwnedFd> {
     let raw = unsafe {
         libc::memfd_create(
@@ -398,6 +424,54 @@ mod tests {
         command.args(args).current_dir(cwd);
         descriptors.attach(&mut command);
         command.output().unwrap()
+    }
+
+    /// Proven on a real bubblewrap launch: inherited allocator tuning reaches
+    /// the confined payload, bubblewrap itself never carries it, and a
+    /// behavior-changing control is still refused.
+    #[test]
+    fn allocator_tuning_reaches_the_payload_and_not_bubblewrap() {
+        if !live() {
+            return;
+        }
+        let root = tempfile::tempdir().unwrap();
+        let policy = policy(root.path());
+        let script = vec![
+            "-c".into(),
+            "printf '%s|%s' \"$MALLOC_ARENA_MAX\" \"${MALLOC_CHECK_-unset}\"".into(),
+        ];
+        let PrepareOutcome::BubblewrapExec {
+            wrapper,
+            args,
+            descriptors,
+        } = prepare("/usr/bin/sh", &script, &policy, policy.sandbox_profile).unwrap()
+        else {
+            panic!("the bubblewrap owner did not prepare a pinned launch")
+        };
+        let mut command = Command::new(wrapper);
+        command
+            .args(args)
+            .current_dir(root.path())
+            .env_clear()
+            .env("PATH", "/usr/bin:/bin")
+            .env("MALLOC_ARENA_MAX", "2");
+        descriptors.attach(&mut command);
+        crate::stdlib::sandbox::launch_environment::reapply_allocator_tuning(&mut command, true)
+            .unwrap();
+        assert!(!command
+            .get_envs()
+            .any(|(name, value)| name == "MALLOC_ARENA_MAX" && value.is_some()));
+        let output = command.output().unwrap();
+        assert!(output.status.success(), "{output:?}");
+        assert_eq!(String::from_utf8_lossy(&output.stdout), "2|unset");
+
+        // Negative control: the validator still refuses a loader control.
+        assert!(crate::security::validate_process_environment(
+            crate::security::ProcessEnvironmentBoundary::TrustedSetup,
+            std::iter::empty(),
+            [("GLIBC_TUNABLES".into(), Some("glibc.malloc.check=3".into()))],
+        )
+        .is_err());
     }
 
     #[test]

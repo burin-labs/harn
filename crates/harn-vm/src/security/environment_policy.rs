@@ -54,6 +54,32 @@ pub enum ProcessEnvironmentBoundary {
 const TRUSTED_SETUP_CONTROL_PREFIXES: &[&[u8]] = &[b"LD_", b"MALLOC_"];
 const TRUSTED_SETUP_CONTROL_NAMES: &[&[u8]] = &[b"GLIBC_TUNABLES"];
 
+/// glibc allocator tuning that only sizes arenas, thresholds, and padding.
+///
+/// Like every `MALLOC_*` name these are read during loader initialization, so a
+/// trusted setup executable still never sees them. Unlike the rest, they can't
+/// change what is loaded or how it runs, and production environments commonly
+/// set them (Heroku and many container images export `MALLOC_ARENA_MAX`). A
+/// launcher that can configure its payload's environment after setup therefore
+/// keeps them out of setup and re-applies them to the payload instead of
+/// refusing the launch. `MALLOC_CHECK_` and `MALLOC_PERTURB_` stay refused: they
+/// change allocator behavior, not just its sizing.
+pub const REAPPLIED_ALLOCATOR_TUNING: &[&str] = &[
+    "MALLOC_ARENA_MAX",
+    "MALLOC_ARENA_TEST",
+    "MALLOC_MMAP_MAX_",
+    "MALLOC_MMAP_THRESHOLD_",
+    "MALLOC_TOP_PAD_",
+    "MALLOC_TRIM_THRESHOLD_",
+];
+
+/// Whether `name` is allocator tuning a launcher may re-apply after setup.
+pub fn is_reapplied_allocator_tuning(name: &OsStr) -> bool {
+    REAPPLIED_ALLOCATOR_TUNING
+        .iter()
+        .any(|tuning| tuning.as_bytes() == name.as_encoded_bytes())
+}
+
 /// Loader and runtime-library controls that precede trusted setup.
 pub fn is_trusted_setup_control(name: &OsStr) -> bool {
     let name = name.as_encoded_bytes();

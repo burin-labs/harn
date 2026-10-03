@@ -52,7 +52,11 @@ pub(crate) trait SandboxBackend {
     ) -> Result<Output, VmError> {
         let mut command = build_std_command::<Self>(program, args, policy, profile)?;
         apply_process_config(&mut command, config, Some(policy));
-        super::launch_environment::validate_for_policy(&command, config.closed_env, Some(policy))?;
+        super::launch_environment::validate_for_policy(
+            &mut command,
+            config.closed_env,
+            Some(policy),
+        )?;
         crate::op_interrupt::capture_output_interruptible(&mut command)
             .map_err(|error| process_spawn_error(&error).unwrap_or_else(|| spawn_error(error)))
     }
@@ -69,7 +73,11 @@ pub(crate) trait SandboxBackend {
     ) -> Result<(Output, u32), VmError> {
         let mut command = build_std_command::<Self>(program, args, policy, profile)?;
         apply_process_config(&mut command, config, Some(policy));
-        super::launch_environment::validate_for_policy(&command, config.closed_env, Some(policy))?;
+        super::launch_environment::validate_for_policy(
+            &mut command,
+            config.closed_env,
+            Some(policy),
+        )?;
         crate::op_interrupt::capture_output_interruptible_in_session(&mut command)
             .map_err(|error| process_spawn_error(&error).unwrap_or_else(|| spawn_error(error)))
     }
