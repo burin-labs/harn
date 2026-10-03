@@ -28,7 +28,11 @@ pub type AgentLoopCancellationFailure = {
   cause: {cancellation_error: unknown},
 }
 
-/** Normalize cancellation before it enters the closed loop error channel. */
+/**
+ * Normalize cancellation before it enters the closed loop error channel.
+ * @effects: []
+ * @errors: []
+ */
 pub fn agent_loop_cancellation_failure(error: unknown) -> AgentLoopCancellationFailure {
   const details = type_of(error) == "dict" ? error : {}
   return {
