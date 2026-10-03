@@ -335,6 +335,11 @@ fn acp_reconciles_declared_operations_with_one_host_handshake() {
         "agent.harn",
         "pub pipeline main(harness: Harness) { harness.stdio.println(\"complete\") }\n",
     );
+    write_file(
+        temp.path(),
+        "declared.json",
+        r#"{"synthetic":{"operations":{"optional":{"optional":true}}}}"#,
+    );
     let write_manifest = |fail_closed: bool| {
         write_file(
             temp.path(),
@@ -343,6 +348,7 @@ fn acp_reconciles_declared_operations_with_one_host_handshake() {
                 r#"
 [check]
 host_capabilities.synthetic = ["served", "missing", "runtime_only"]
+host_capabilities_path = "declared.json"
 runtime_installed_host_operations = ["synthetic.runtime_only"]
 require_declared_operations_served = {fail_closed}
 "#,
@@ -393,6 +399,7 @@ require_declared_operations_served = {fail_closed}
         .unwrap();
     assert!(message.contains("synthetic.missing"));
     assert!(!message.contains("synthetic.runtime_only"));
+    assert!(!message.contains("synthetic.optional"));
 
     write_manifest(true);
     let (_, response, capability_requests) = send_request_with_host_capabilities(
@@ -414,6 +421,25 @@ require_declared_operations_served = {fail_closed}
         .is_some_and(|message| {
             message.contains("HARN-CAP-008") && message.contains("synthetic.missing")
         }));
+
+    write_file(
+        temp.path(),
+        "harn.toml",
+        "[check]\nhost_capabilities_path = \"declared.json\"\nrequire_declared_operations_served = true\n",
+    );
+    let (notifications, response, capability_requests) = send_request_with_host_capabilities(
+        &mut client,
+        json!({
+            "jsonrpc":"2.0", "id":5, "method":"session/prompt",
+            "params":{"sessionId":session_id,"prompt":[{"type":"text","text":"optional only"}]}
+        }),
+        json!({"synthetic":["served"]}),
+    );
+    assert_eq!(capability_requests, 1);
+    assert_eq!(response["result"]["stopReason"], "end_turn");
+    assert!(notifications.iter().all(|notification| {
+        notification["params"]["update"]["_meta"]["harn"]["fields"]["code"] != "HARN-CAP-008"
+    }));
 }
 
 #[ignore = "binary surface — moves to slow E2E/smoke job (issue #1069)"]

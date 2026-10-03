@@ -1,0 +1,172 @@
+import { agent_capture_events } from "std/agent/events"
+import { agent_loop } from "std/agent/loop"
+import { AgentSpec } from "std/agent/options"
+import { agent_emit_event, agent_session_finalize, agent_session_init } from "std/agent/state"
+import { agent_tool_handler_result } from "std/agent/tool_lifecycle"
+import { llm_text, with_llm_script } from "std/testing"
+
+fn check_call(id: string, diagnostics: list<string>) {
+  return {
+    text: "checking",
+    tool_calls: [{id: id, name: "verify", arguments: {diagnostics: diagnostics}}],
+  }
+}
+
+fn main(harness: Harness) {
+  harness.testing.clock_set(0)
+  const empty_session = "health-empty-" + harness.random.uuid()
+  const empty_capture = agent_capture_events(
+    harness.agent,
+    empty_session,
+    { ->
+      agent_session_init(harness.agent, "", nil, {session_id: empty_session, provider: "mock"})
+      const supplied_health = {
+        tool_call_id: "supplied-health",
+        tool_name: "verify",
+        status: "completed",
+        mutation_status: "unknown",
+        health: {
+          command_id: "supplied-command",
+          command_exit_code: 0,
+          verification: {diagnostics: {set_fingerprint: "supplied", count: 0}},
+        },
+      }
+      const generic_rejected = try {
+        agent_emit_event(harness.agent, empty_session, "tool_call_update", supplied_health)
+        false
+      } catch (error) {
+        contains(to_string(error), "health")
+      }
+      require generic_rejected, "generic event ingress must reject supplied health"
+      const outcome_rejected = try {
+        harness.agent.emit_tool_outcome(empty_session, supplied_health, {}, {})
+        false
+      } catch (error) {
+        contains(to_string(error), "health")
+      }
+      require outcome_rejected, "tool outcome ingress must derive health instead of accepting it"
+      agent_emit_event(
+        harness.agent,
+        empty_session,
+        "iteration_end",
+        {iteration: 0, iteration_info: {}},
+      )
+      return agent_session_finalize(harness.agent, empty_session, "done")
+    },
+  )
+  const empty_facts = empty_capture.events.filter({ event -> event.type == "session_health" })
+  require len(empty_facts) > 0, "an empty session must emit an unmeasured fact"
+  for field in [
+    "tool_call_success_rate",
+    "nonzero_command_exit_rate",
+    "edits_since_verification",
+    "diagnostic_trend",
+    "turn_wall_time",
+    "prose_to_tool_balance",
+    "last_stop_class",
+  ] {
+    require empty_facts[0].fact.turn[field] == nil && empty_facts[0].fact.rolling[field] == nil,
+      "missing measurement must not become zero: "
+      + field
+  }
+  let tools = tool_define(
+    tool_registry(),
+    "verify",
+    "Report structured verification diagnostics.",
+    {
+      inputSchema: {
+        type: "object",
+        properties: {diagnostics: {type: "array", items: {type: "string"}}},
+        required: ["diagnostics"],
+      },
+      returns: {type: "object"},
+      annotations: {kind: "execute", completion_evidence_role: "verification"},
+      handler: { args ->
+        harness.testing.clock_advance(10)
+        const diagnostics = args.diagnostics.map(
+          { code -> {code: code, message: code, severity: "error"} },
+        )
+        const failed = len(diagnostics) > 0
+        return agent_tool_handler_result(
+          "Feedback wording does not determine health.",
+          {
+            run_outcome: {exit_code: failed ? 1 : 0},
+            diagnostics: diagnostics,
+            diagnostics_complete: true,
+          },
+          failed ? "error" : "ok",
+        )
+      },
+    },
+  )
+  tools = tool_define(
+    tools,
+    "edit",
+    "Report one applied mutation.",
+    {
+      inputSchema: {type: "object", properties: {}},
+      returns: {type: "object"},
+      annotations: {kind: "edit", side_effect_level: "workspace_write"},
+      handler: { _ ->
+        harness.testing.clock_advance(10)
+        return agent_tool_handler_result(
+          "Edited.",
+          {mutation_status: "applied", changed_paths: ["probe.harn"]},
+        )
+      },
+    },
+  )
+  with_llm_script(
+    harness.llm,
+    [
+      check_call("v1", ["A", "B", "C"]),
+      check_call("v2", ["A"]),
+      check_call("v3", ["A"]),
+      check_call("v4", ["B"]),
+      check_call("v5", ["A"]),
+      {text: "editing", tool_calls: [{id: "e1", name: "edit", arguments: {}}]},
+      check_call("v6", []),
+      llm_text("Finished. ##DONE##"),
+    ],
+    { ->
+      const session = "health-" + harness.random.uuid()
+      const options: AgentSpec = {
+        session_id: session,
+        provider: "mock",
+        tools: tools,
+        tool_format: "native",
+        loop_until_done: true,
+        max_iterations: 12,
+        done_sentinel: "##DONE##",
+      }
+      const capture = agent_capture_events(
+        harness.agent,
+        session,
+        { -> return agent_loop(harness, "Run the scripted checks.", nil, options) },
+      )
+      const facts = capture.events.filter({ event -> event.type == "session_health" })
+      require len(facts) >= 8, "the live loop must emit health facts"
+      require facts[1].fact.turn.diagnostic_trend == "improving", "decreasing diagnostics"
+      require facts[2].fact.turn.diagnostic_trend == "flat", "unchanged diagnostics"
+      require facts[4].fact.turn.diagnostic_trend == "oscillating", "A-B-A diagnostics"
+      require facts[5].fact.turn.edits_since_verification == 1, "edit after verification"
+      require facts[6].fact.turn.edits_since_verification == 0, "verification resets edit count"
+      const last = facts[len(facts) - 1].fact
+      require last.schema_version == 1, "versioned fact"
+      require last.rolling.tool_call_success_rate.denominator == 7, "all dispatched tools counted"
+      require last.rolling.nonzero_command_exit_rate.denominator == 6,
+        "only measured commands counted"
+      require last.rolling.nonzero_command_exit_rate.numerator == 5, "failed command exits counted"
+      require last.rolling.tool_call_success_rate.numerator == 2,
+        "successful edit and final verification"
+      require facts[1].fact.turn.turn_wall_time.actual_to_expected == 1.0,
+        "measured time expectation"
+      require last.rolling.prose_to_tool_balance.prose_characters > 0, "prose emission telemetry"
+      require last.turn.last_stop_class == "natural", "canonical stop classification"
+      harness.stdio.println(
+        "session health: progress, stall, oscillation, rates, edits, timing, prose, stop",
+      )
+    },
+  )
+  harness.testing.clock_reset()
+}

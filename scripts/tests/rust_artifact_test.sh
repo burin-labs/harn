@@ -27,6 +27,23 @@ case "$1" in
     printf '{"target_directory":"%s"}\n' "${FAKE_TARGET:?}"
     ;;
   nextest)
+    # Cargo's scoped bin directory wins over PATH. A successful CI fixture
+    # must bypass this stale subcommand, just like the installed runner.
+    printf 'cargo-nextest 0.9.146 (stale scoped Cargo binary)\n'
+    exit 0
+    ;;
+  *)
+    echo "unexpected cargo invocation: $*" >&2
+    exit 2
+    ;;
+esac
+SH
+chmod +x "$tmpdir/bin/cargo"
+cat > "$tmpdir/bin/cargo-nextest" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+case "$1" in
+  nextest)
     if [[ "$#" -eq 2 && "$2" == "--version" ]]; then
       printf 'cargo-nextest %s (fake)\n' "${FAKE_NEXTEST_VERSION:-}"
       exit 0
@@ -55,7 +72,7 @@ case "$1" in
     ;;
 esac
 SH
-chmod +x "$tmpdir/bin/cargo"
+chmod +x "$tmpdir/bin/cargo-nextest"
 cat > "$tmpdir/bin/git" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail

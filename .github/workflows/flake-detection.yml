@@ -211,7 +211,7 @@ jobs:
             iter=$(( completed + 1 ))
             printf -- '--- Iteration %d/%d (%ds budget left) ---\n' "$iter" "$ceiling" "$remaining"
             start=$(date +%s)
-            if ! cargo nextest run --locked \
+            if ! cargo-nextest nextest run --locked \
               --workspace \
               --profile flake-detection \
               --test-threads 8 \

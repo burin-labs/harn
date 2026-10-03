@@ -1522,6 +1522,7 @@ pub enum HarnAgentEventKind {
     HostToolResult,
     InputGuardrailVerdict,
     IterationEnd,
+    SessionHealth,
     IterationStart,
     JudgeDecision,
     JudgeStarted,
@@ -1574,6 +1575,7 @@ impl HarnAgentEventKind {
             Self::HostToolResult => "host_tool_result",
             Self::InputGuardrailVerdict => "input_guardrail_verdict",
             Self::IterationEnd => "iteration_end",
+            Self::SessionHealth => "session_health",
             Self::IterationStart => "iteration_start",
             Self::JudgeDecision => "judge_decision",
             Self::JudgeStarted => "judge_started",
@@ -1641,6 +1643,7 @@ impl<'de> Deserialize<'de> for HarnAgentEventKind {
             "host_tool_result" => Self::HostToolResult,
             "input_guardrail_verdict" => Self::InputGuardrailVerdict,
             "iteration_end" => Self::IterationEnd,
+            "session_health" => Self::SessionHealth,
             "iteration_start" => Self::IterationStart,
             "judge_decision" => Self::JudgeDecision,
             "judge_started" => Self::JudgeStarted,
@@ -2320,6 +2323,7 @@ pub const HARN_AGENT_EVENT_KIND_HOST_ATTACHMENT: &str = "host_attachment";
 pub const HARN_AGENT_EVENT_KIND_HOST_TOOL_RESULT: &str = "host_tool_result";
 pub const HARN_AGENT_EVENT_KIND_INPUT_GUARDRAIL_VERDICT: &str = "input_guardrail_verdict";
 pub const HARN_AGENT_EVENT_KIND_ITERATION_END: &str = "iteration_end";
+pub const HARN_AGENT_EVENT_KIND_SESSION_HEALTH: &str = "session_health";
 pub const HARN_AGENT_EVENT_KIND_ITERATION_START: &str = "iteration_start";
 pub const HARN_AGENT_EVENT_KIND_JUDGE_DECISION: &str = "judge_decision";
 pub const HARN_AGENT_EVENT_KIND_JUDGE_STARTED: &str = "judge_started";
@@ -2372,6 +2376,7 @@ pub const HARN_AGENT_EVENT_KINDS: &[&str] = &[
     "host_tool_result",
     "input_guardrail_verdict",
     "iteration_end",
+    "session_health",
     "iteration_start",
     "judge_decision",
     "judge_started",
@@ -3079,6 +3084,7 @@ pub const HARN_TOOL_LIFECYCLE_EXTENSION_FIELD_ERROR: &str = "error";
 pub const HARN_TOOL_LIFECYCLE_EXTENSION_FIELD_ERRORCATEGORY: &str = "errorCategory";
 pub const HARN_TOOL_LIFECYCLE_EXTENSION_FIELD_EXECUTIONDURATIONMS: &str = "executionDurationMs";
 pub const HARN_TOOL_LIFECYCLE_EXTENSION_FIELD_EXECUTOR: &str = "executor";
+pub const HARN_TOOL_LIFECYCLE_EXTENSION_FIELD_HEALTH: &str = "health";
 pub const HARN_TOOL_LIFECYCLE_EXTENSION_FIELD_MUTATIONSTATUS: &str = "mutationStatus";
 pub const HARN_TOOL_LIFECYCLE_EXTENSION_FIELD_PARSING: &str = "parsing";
 pub const HARN_TOOL_LIFECYCLE_EXTENSION_FIELD_RAWINPUTPARTIAL: &str = "rawInputPartial";
@@ -3093,6 +3099,7 @@ pub const HARN_TOOL_LIFECYCLE_EXTENSION_FIELDS: &[&str] = &[
     "errorCategory",
     "executionDurationMs",
     "executor",
+    "health",
     "mutationStatus",
     "parsing",
     "rawInputPartial",

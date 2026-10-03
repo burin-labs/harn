@@ -1,0 +1,27 @@
+{
+  "provenance": {
+    "binary_sha256": "d73f6108ba0d51e60a18fbe0664c004b4e34d7a5b32b7775c25c96b051984ed4",
+    "tenant": "ae31cc88-0b1a-4f13-8477-808645d7ce4c",
+    "evidence_sha256": "83d1f45d72ead277fac92a0be408fff08270b7cc07a761d96d5b5c8f9e24ed59"
+  },
+  "native": {
+    "passed": true,
+    "status": "done",
+    "cost_usd": 0.0025936,
+    "known_cost_usd": 0.0025936,
+    "model_call_count": 6,
+    "usage_unknown_calls": 0,
+    "unpriced_calls": 0,
+    "llm": {"iterations": 6, "input_tokens": 9472, "output_tokens": 213}
+  },
+  "text": {
+    "passed": true,
+    "status": "done",
+    "cost_usd": 0.0031984,
+    "known_cost_usd": 0.0031984,
+    "model_call_count": 6,
+    "usage_unknown_calls": 0,
+    "unpriced_calls": 0,
+    "llm": {"iterations": 6, "input_tokens": 16792, "output_tokens": 177}
+  }
+}

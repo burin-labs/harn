@@ -71,6 +71,7 @@ pub(crate) struct SpawnOutcome {
     pub(crate) started_at: String,
     pub(crate) ended_at: Option<String>,
     pub(crate) exit_code: i32,
+    pub(crate) missing_program: Option<String>,
     pub(crate) signal: Option<String>,
     pub(crate) stdout: String,
     pub(crate) stdout_truncated: bool,
@@ -181,6 +182,7 @@ pub(crate) fn run(req: SpawnRequest) -> Result<SpawnOutcome, HostlibError> {
     })?;
 
     let pid = handle.pid();
+    let missing_program = handle.missing_program().map(str::to_string);
     let process_group_id = handle.process_group_id();
     let killer = handle.killer();
 
@@ -312,14 +314,22 @@ pub(crate) fn run(req: SpawnRequest) -> Result<SpawnOutcome, HostlibError> {
         if let Some(error) =
             harn_vm::process_sandbox::wrapped_spawn_io_error(exit_code, &stderr_bytes)
         {
+            let error = match missing_program.as_ref() {
+                Some(program) if error.kind() == std::io::ErrorKind::NotFound => {
+                    ProcessError::ProgramNotFound {
+                        program: program.clone(),
+                    }
+                }
+                _ => ProcessError::SpawnIo {
+                    kind: harn_vm::value::io_error_kind_str(&error),
+                    message: error.to_string(),
+                },
+            };
             return Err(process_error_to_hostlib(
                 req.builtin,
                 requested_cwd.as_deref(),
                 &effective_cwd,
-                ProcessError::SpawnIo {
-                    kind: harn_vm::value::io_error_kind_str(&error),
-                    message: error.to_string(),
-                },
+                error,
             ));
         }
     }
@@ -346,6 +356,7 @@ pub(crate) fn run(req: SpawnRequest) -> Result<SpawnOutcome, HostlibError> {
         started_at,
         ended_at,
         exit_code,
+        missing_program: missing_program.filter(|_| exit_code == 127 && signal.is_none()),
         signal,
         stdout: inline.stdout,
         stdout_truncated: inline.stdout_truncated,
@@ -573,7 +584,16 @@ pub(crate) fn process_error_to_hostlib(
         ProcessError::SpawnIo { kind, message } => HostlibError::ProcessSpawn {
             builtin,
             kind,
+            missing_program: None,
             message,
+            requested_cwd: requested_cwd.map(str::to_string),
+            cwd: to_agent_path(effective_cwd),
+        },
+        ProcessError::ProgramNotFound { program } => HostlibError::ProcessSpawn {
+            builtin,
+            kind: "not_found",
+            message: format!("program not found: {program}"),
+            missing_program: Some(program.into_boxed_str()),
             requested_cwd: requested_cwd.map(str::to_string),
             cwd: to_agent_path(effective_cwd),
         },
@@ -616,6 +636,9 @@ pub(crate) fn build_response(
         .str("output_sha256", outcome.output_sha256)
         .str("started_at", outcome.started_at)
         .str("audit_id", format!("audit_{}", outcome.command_id));
+    if let Some(program) = outcome.missing_program {
+        builder = builder.str("missing_program", program);
+    }
     builder = match outcome.ended_at {
         Some(ended_at) => builder.str("ended_at", ended_at),
         None => builder.nil("ended_at"),

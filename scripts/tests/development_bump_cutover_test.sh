@@ -26,6 +26,7 @@ git -C "$fixture" config user.email "development-cutover-test@example.com"
 git -C "$fixture" config commit.gpgsign false
 git -C "$fixture" add .
 git -C "$fixture" commit --quiet -m initial
+git -C "$fixture" tag v1.2.3
 
 # The opener re-reads origin/main before it opens anything, so the fixture needs
 # a real remote rather than a detached working copy.
@@ -72,7 +73,11 @@ cat > "$bin_dir/gh" <<'EOF'
 set -euo pipefail
 printf 'gh\t%s\n' "$*" >> "$CUTOVER_RECORD"
 case "$1 $2" in
-  "pr list") ;;
+  "release view")
+    [[ "${CUTOVER_RELEASE_LOOKUP_FAIL:-0}" != 1 ]] || exit 1
+    cat "$CUTOVER_PUBLICATION_FILE"
+    ;;
+  "pr list") printf '%s' "${CUTOVER_EXISTING_PR:-}" ;;
   "pr create") printf 'https://example.invalid/pull/42\n' ;;
   "pr edit"|"pr merge") ;;
   *) echo "unexpected fake gh invocation: $*" >&2; exit 2 ;;
@@ -90,12 +95,68 @@ fi
 EOF
 chmod +x "$bin_dir/harn" "$bin_dir/cargo" "$bin_dir/gh" "$bin_dir/make"
 
+# Execute the reusable/manual workflow's real planning command before reaching
+# the opener. Only actual stable publication can authorize a development bump.
+workflow="$repo_root/.github/workflows/open-development-bump.yml"
+plan_command=$(awk '/        id: development$/{found=1} found && /        run: /{sub(/^        run: /, ""); print; exit}' "$workflow")
+[[ -n "$plan_command" ]] || { echo "missing dispatchable cutover plan" >&2; exit 1; }
+publication="$tmp_root/publication.json"
+printf '%s\n' '{"tagName":"v1.2.3","isDraft":false,"isPrerelease":false,"publishedAt":"2026-10-03T00:00:00Z"}' > "$publication"
+run_plan() {
+  local name="$1"
+  shift
+  plan_outputs="$tmp_root/$name.outputs"
+  plan_record="$tmp_root/$name.record"
+  : > "$plan_outputs"
+  set +e
+  env CUTOVER_RECORD="$plan_record" CUTOVER_PUBLICATION_FILE="$publication" \
+    HARN_RELEASE_ROOT="$fixture" GITHUB_REPOSITORY=example/harn \
+    PUBLISHED_TAG=v1.2.3 GITHUB_OUTPUT="$plan_outputs" PATH="$bin_dir:$PATH" \
+    "$@" bash -c "cd \"$repo_root\"; $plan_command" > "$tmp_root/$name.log" 2>&1
+  plan_status=$?
+  set -e
+}
+run_plan promoted
+[[ "$plan_status" == 0 ]] || { cat "$tmp_root/promoted.log" >&2; exit 1; }
+grep -Fxq 'required=true' "$plan_outputs"
+grep -Fxq 'version=1.2.4-dev' "$plan_outputs"
+grep -Fxq 'published_tag=v1.2.3' "$plan_outputs"
+run_plan manual-latest PUBLISHED_TAG=
+[[ "$plan_status" == 0 ]] || { cat "$tmp_root/manual-latest.log" >&2; exit 1; }
+grep -Fxq 'required=true' "$plan_outputs"
+grep -Fxq 'published_tag=v1.2.3' "$plan_outputs"
+run_plan unreadable CUTOVER_RELEASE_LOOKUP_FAIL=1
+[[ "$plan_status" != 0 && ! -s "$plan_outputs" ]] || { echo "unreadable publication authorized cutover" >&2; exit 1; }
+
+for invalid in \
+  '{}' \
+  '{"tagName":"v1.2.3","isDraft":true,"isPrerelease":false,"publishedAt":"now"}' \
+  '{"tagName":"v1.2.3","isDraft":false,"isPrerelease":true,"publishedAt":"now"}' \
+  '{"tagName":"v1.2.3","isDraft":false,"isPrerelease":false,"publishedAt":null}' \
+  '{"tagName":"v1.2.3","isDraft":false,"publishedAt":"now"}' \
+  '{"tagName":"v1.2.2","isDraft":false,"isPrerelease":false,"publishedAt":"now"}' \
+  'not-json'; do
+  printf '%s\n' "$invalid" > "$publication"
+  run_plan invalid-publication
+  [[ "$plan_status" != 0 && ! -s "$plan_outputs" ]] \
+    || { echo "unproved publication authorized cutover: $invalid" >&2; exit 1; }
+done
+printf '%s\n' '{"tagName":"v1.2.3","isDraft":false,"isPrerelease":false,"publishedAt":"2026-10-03T00:00:00Z"}' > "$publication"
+run_plan invalid-tag PUBLISHED_TAG=v1.2.3-rc.1
+[[ "$plan_status" != 0 && ! -s "$plan_outputs" ]] || { echo "prerelease authorized cutover" >&2; exit 1; }
+
+# Feed the proved plan's exact identity through the existing owning opener.
+run_plan proved
+expected_version=$(sed -n 's/^version=//p' "$plan_outputs")
+published_tag=$(sed -n 's/^published_tag=//p' "$plan_outputs")
+
 record="$tmp_root/cutover.record"
 outputs="$tmp_root/github.outputs"
 CUTOVER_RECORD="$record" \
 HARN_RELEASE_ROOT="$fixture" \
 HARN_BIN="$bin_dir/harn" \
-EXPECTED_DEVELOPMENT_VERSION=1.2.4-dev \
+EXPECTED_DEVELOPMENT_VERSION="$expected_version" \
+RELEASE_PUBLISHED_VERSION="$published_tag" \
 GH_TOKEN=fixture-token \
 GITHUB_OUTPUT="$outputs" \
 PATH="$bin_dir:$PATH" \
@@ -105,6 +166,23 @@ grep -Fq 'version = "1.2.4-dev"' "$fixture/Cargo.toml"
 grep -Fq $'gh\tpr create ' "$record"
 grep -Fq 'pr_url=https://example.invalid/pull/42' "$outputs"
 grep -Fq 'skipped=false' "$outputs"
+
+# A manual repair reuses a still-open cutover instead of replacing its branch.
+open_fixture="$tmp_root/open-workspace"
+cp -R "$fixture" "$open_fixture"
+git -C "$open_fixture" checkout --quiet -- Cargo.toml Cargo.lock
+open_record="$tmp_root/open.record"
+open_outputs="$tmp_root/open.outputs"
+CUTOVER_RECORD="$open_record" CUTOVER_EXISTING_PR=https://example.invalid/pull/42 \
+HARN_RELEASE_ROOT="$open_fixture" HARN_BIN="$bin_dir/harn" \
+EXPECTED_DEVELOPMENT_VERSION="$expected_version" RELEASE_PUBLISHED_VERSION="$published_tag" \
+GH_TOKEN=fixture-token GITHUB_OUTPUT="$open_outputs" PATH="$bin_dir:$PATH" \
+  "$repo_root/scripts/open_development_bump.sh"
+grep -Fxq 'pr_url=https://example.invalid/pull/42' "$open_outputs"
+if grep -Eq 'publish_branch_commit|pr create' "$open_record"; then
+  echo "repair replaced an already-open cutover" >&2
+  exit 1
+fi
 
 # Falsifier for the duplicate this script used to open. The drift decision was
 # taken while main was still on the released version, the bump it was about
@@ -123,6 +201,15 @@ sed 's/version = "1.2.3"/version = "1.2.4-dev"/' "$merged/Cargo.toml" > "$merged
 mv "$merged/Cargo.toml.next" "$merged/Cargo.toml"
 git -C "$merged" commit --quiet -am "Start 1.2.4-dev development"
 git -C "$merged" push --quiet origin HEAD:refs/heads/main
+
+# Repeated repair after cutover is a measured no-op through the same planner.
+plan_fixture="$fixture"
+fixture="$merged"
+run_plan repaired
+[[ "$plan_status" == 0 ]] || { cat "$tmp_root/repaired.log" >&2; exit 1; }
+grep -Fxq 'required=false' "$plan_outputs"
+grep -Fxq 'reason=workspace_does_not_match_latest_stable' "$plan_outputs"
+fixture="$plan_fixture"
 
 stale_record="$tmp_root/stale.record"
 stale_outputs="$tmp_root/stale.outputs"

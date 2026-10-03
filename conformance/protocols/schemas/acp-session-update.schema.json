@@ -192,6 +192,7 @@
                 "scope_classifier_verdict",
                 "self_consistency_tie",
                 "session_closed",
+                "session_health",
                 "structural_validator_decision",
                 "subagent_join",
                 "subagent_stop",
@@ -527,6 +528,7 @@
         "errorCategory": { "type": "string" },
         "executionDurationMs": { "type": "number", "minimum": 0 },
         "executor": {},
+        "health": { "type": "object" },
         "mutationStatus": { "$ref": "#/$defs/ToolMutationStatus" },
         "parsing": { "type": "boolean" },
         "rawInputPartial": { "type": "string" }

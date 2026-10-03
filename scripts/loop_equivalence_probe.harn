@@ -47,7 +47,9 @@ import { llm_done, llm_text, with_llm_script } from "std/testing"
 pub fn loop_equivalence_normalize(line: string) -> string {
   let out = regex_replace("[0-9a-f]{64}", "HASH", line)
   out = regex_replace("[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", "UUID", out)
-  return regex_replace("_ms\":[-0-9.eE]+", "_ms\":0", out)
+  out = regex_replace("_ms\":[-0-9.eE]+", "_ms\":0", out)
+  out = regex_replace("\"milliseconds\":[-0-9.eE]+", "\"milliseconds\":0", out)
+  return regex_replace("\"actual_to_expected\":[-0-9.eE]+", "\"actual_to_expected\":0", out)
 }
 
 fn probe_edit_tools() {

@@ -497,7 +497,7 @@ pub fn __emit_tool_lifecycle_finish(agent: HarnessAgent, envelope: dict, result:
   if result?.data != nil {
     payload = payload + {data: result.data}
   }
-  let _ = agent_emit_event(agent, session_id, "tool_call_update", payload)
+  let _ = agent.emit_tool_outcome(session_id, payload, envelope, result)
 }
 
 pub fn __emit_synthetic_tool_lifecycle_finish(

@@ -219,9 +219,13 @@ declare a tool failure. Agent dispatch still requires its
 
 Set `error_schema` on a handwritten definition to declare the portable shape
 of values its handler deliberately throws. Public Harn functions project their
-language-level `throws E` type to the same catalog field. A matching raw throw
-is typed application data; an undeclared throw remains a runtime failure, and
-a declared throw that does not match is a contract failure. Harn never treats
+language-level `throws E` type to the same catalog field. A source-authored throw
+inside a callable declaring `throws E` carries the application-error channel.
+It becomes typed application data only after its value validates against the
+error schema. A dependency's undeclared throw remains a runtime failure even
+when its value matches that schema; a declared throw that does not match is a
+contract failure. Handwritten handlers must declare `throws E` as well as
+publishing `error_schema`. Harn never treats
 `Result<T, E>` as a throw declaration. Runtime summaries classify undeclared
 throws without rendering their values, so a legacy string or object cannot
 leak through CLI stderr, MCP content, HTTP messages, A2A history, or trust
