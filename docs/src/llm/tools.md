@@ -541,19 +541,20 @@ Accepted shapes:
 | OpenRouter / Together / Groq / DeepSeek / Fireworks / HuggingFace / local | ✓ when routed model matches `gpt-5.4+` upstream | hosted forwarded; escape hatch below for proxies |
 | Gemini, Ollama, mock (default model) | ✗ | client fallback works today |
 
-The OpenAI native path emits a flat `{"type": "tool_search",
-"mode": "hosted"}` meta-tool at the front of the tools array, alongside
-`defer_loading: true` on the wrapper of each user tool. The server runs
+The OpenAI native path emits the documented `{"type": "tool_search"}`
+meta-tool at the front of the tools array, alongside `defer_loading: true`
+on each deferred user tool. The Responses API rejects any other field on
+the meta-tool with HTTP 400. The server runs
 the search and replies with `tool_search_call` / `tool_search_output`
 entries that Harn parses into the same transcript event shape as the
 Anthropic path (replays are indistinguishable across providers).
 
-#### Namespace grouping
+#### Namespace tags
 
-OpenAI's `tool_search` can group deferred tools into namespaces; pass
-`namespace: "<label>"` on `tool_define(...)` to tag a tool. Harn collects
-the distinct set into the meta-tool's `namespaces` field. Anthropic
-ignores the label — harmless passthrough for replay fidelity.
+`namespace: "<label>"` on `tool_define(...)` tags a tool in the registry,
+where skills can select tools by `namespace:<label>`. The tag is Harn-side
+metadata: provider requests strip it, because OpenAI rejects a `namespace`
+field on a function tool and Anthropic has no such field.
 
 ```harn
 tool_define(registry, "deploy_api", "Deploy the API", {
