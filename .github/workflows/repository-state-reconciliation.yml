@@ -17,11 +17,11 @@ permissions:
   contents: read
 
 concurrency:
-  # A scheduled reconciliation and a merge-group cancellation establish
-  # different claims. Let each supersede only older work of its own event type
-  # so one controller cannot cancel the other before its proof runs.
-  group: repository-state-reconciliation-${{ github.repository }}-${{ github.event_name }}
-  cancel-in-progress: true
+  # Scheduled and manual cutover checks share one reservation owner. Never
+  # cancel that owner between its durable reservation and workflow dispatch.
+  # Merge-group cancellation remains independent and may supersede itself.
+  group: repository-state-reconciliation-${{ github.repository }}-${{ github.event_name == 'merge_group' && 'merge_group' || 'cutover' }}
+  cancel-in-progress: ${{ github.event_name == 'merge_group' }}
 
 jobs:
   cancel-obsolete-runs:
@@ -84,6 +84,16 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: ./scripts/check_development_cutover.sh
+
+      - name: Reserve and dispatch one owed development repair
+        if: steps.cutover.outputs.repair_owed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          MEASURED_REPAIR_OWED: ${{ steps.cutover.outputs.repair_owed }}
+          MEASURED_DEVELOPMENT_VERSION: ${{ steps.cutover.outputs.repair_version }}
+          MEASURED_PUBLISHED_TAG: ${{ steps.cutover.outputs.repair_published_tag }}
+        run: node scripts/repair_development_cutover.mjs
 
       - name: Publish development cutover status
         if: always()
