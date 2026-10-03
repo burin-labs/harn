@@ -23,7 +23,7 @@ use std::path::Path;
 use harn_parser::DiagnosticSeverity;
 use harn_vm::module_artifact::{ModuleArtifact, ModuleCompilationContext};
 
-use crate::cli::PrecompileArgs;
+use crate::cli::{PrecompileArgs, PRECOMPILE_JOBS_ENV};
 use crate::command_error;
 use crate::commands::collect_harn_files;
 use crate::compiler_context::{ensure_builtin_signatures_installed, SourceCompilerAuthority};
@@ -87,6 +87,7 @@ pub async fn run(args: PrecompileArgs) {
     } else {
         None
     };
+    let _jobs = ScopedEnvVar::set(PRECOMPILE_JOBS_ENV, &args.resolved_jobs().to_string());
 
     let target = args
         .target
