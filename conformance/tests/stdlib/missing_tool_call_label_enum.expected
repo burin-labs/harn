@@ -1,4 +1,4 @@
-["edit"]
+["call:edit","no_tool_call_intended"]
 llm
 ambiguous
 error

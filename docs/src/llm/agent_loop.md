@@ -330,11 +330,11 @@ records use typed request and verdict records rather than untyped dictionaries.
 `MissingToolCallRecoveryOptions.evaluation` selects a shared evaluator route.
 Set `backend: "native_decision"` with a served decision provider and model, or
 `backend: "structured_llm"` for structured chat. Without this policy, the
-classifier uses structured chat on the loop's provider and model. It asks one
-boolean question about intent and one choice over the current tool names in
-one request. `confidence_threshold` overrides the policy threshold; both
-default to `0.65` when omitted. An intended call needs both answers to meet
-that threshold. A negative intent answer ignores the tool choice's confidence.
+classifier uses structured chat on the loop's provider and model. One request
+chooses between no intent and an explicitly intended call to each current tool.
+The chosen label projects both intent and the tool name into the classification
+contract. `confidence_threshold` overrides the policy threshold; both default to
+`0.65` when omitted. The one answer must meet that threshold.
 Refused, unavailable, and budget-cut evaluations produce `ambiguous`; an
 unsupported native route does not silently switch backends.
 

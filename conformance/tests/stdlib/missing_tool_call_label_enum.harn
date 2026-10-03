@@ -19,7 +19,7 @@ pipeline test(harness: Harness) {
     harness.llm,
     [
       llm_text(
-        "{\"answers\":{\"intended\":{\"verdict\":true,\"confidence\":0.99,\"evidence\":\"fixture\"},\"tool\":{\"choice\":\"undeclared\",\"confidence\":0.99,\"evidence\":\"out of set\"}}}",
+        "{\"answers\":{\"tool\":{\"choice\":\"undeclared\",\"confidence\":0.99,\"evidence\":\"out of set\"}}}",
       ),
     ],
     { ->
