@@ -63,7 +63,7 @@ use crate::module_source::{self, ModuleSource};
 mod graph;
 pub(crate) use graph::derive_interface as module_compilation_context_with_manifest;
 pub use graph::prepare_entry_store;
-use graph::relative_path_label;
+use graph::relocatable_label;
 
 /// Header magic for all bytecode-cache artifact families.
 pub const MAGIC: &[u8; 8] = b"HARNBC\0\0";
@@ -1414,7 +1414,7 @@ fn walk_import_graph_fingerprinted(
     let mut canonical_hasher = Sha256::new();
     seed_entry_context_hasher(&mut canonical_hasher, codegen_fingerprint);
     let mut relocatable_hasher = Sha256::new();
-    relocatable_hasher.update(b"relocatable-entry-graph-v1\0");
+    relocatable_hasher.update(b"relocatable-entry-graph-v2\0");
     seed_entry_context_hasher(&mut relocatable_hasher, codegen_fingerprint);
 
     let entry_identity = module_source::canonical_identity(source_path);
@@ -1426,7 +1426,7 @@ fn walk_import_graph_fingerprinted(
         hash_import_node(&mut canonical_hasher, node);
         canonical_hasher.update(b"\0");
 
-        let Some(label) = relative_path_label(entry_dir, path) else {
+        let Some(label) = relocatable_label(entry_dir, path) else {
             // A dependency on another filesystem root cannot be moved as one
             // closed tree. Preserve fail-closed behavior by retaining its
             // canonical identity in the packaged key.
