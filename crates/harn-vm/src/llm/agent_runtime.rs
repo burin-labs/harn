@@ -283,7 +283,7 @@ impl Drop for LoopSinkGuard {
 /// observation surface only.
 pub(crate) fn emit_agent_event_sync(event: &AgentEvent) {
     let (health, _) = agent_events::observe_event(event);
-    for event in std::iter::once(event).chain(health.as_ref()) {
+    for event in std::iter::once(event).chain(health.as_deref()) {
         publish_observed_event(event);
     }
 }
@@ -329,7 +329,7 @@ pub(crate) async fn emit_agent_event_with_ctx(
     event: &AgentEvent,
 ) {
     let (health, subscribers) = agent_events::observe_event(event);
-    for event in std::iter::once(event).chain(health.as_ref()) {
+    for event in std::iter::once(event).chain(health.as_deref()) {
         publish_observed_event(event);
 
         if subscribers.is_empty() {

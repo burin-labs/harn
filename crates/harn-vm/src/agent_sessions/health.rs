@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 /// Observe an event and snapshot the callbacks for its derived facts together.
 pub(crate) fn observe_event(
     event: &AgentEvent,
-) -> (Option<AgentEvent>, Vec<super::SessionSubscriber>) {
+) -> (Option<Box<AgentEvent>>, Vec<super::SessionSubscriber>) {
     // Read the clock without recording a script-visible tape read, and without
     // reaching up into stdlib from the session layer.
     static CLOCK: OnceLock<harn_clock::RealClock> = OnceLock::new();
@@ -21,13 +21,12 @@ pub(crate) fn observe_event(
         let Some(state) = sessions.get_mut(event.session_id()) else {
             return (None, Vec::new());
         };
-        let health = state
-            .health
-            .observe(event, now_ms)
-            .map(|fact| AgentEvent::SessionHealth {
+        let health = state.health.observe(event, now_ms).map(|fact| {
+            Box::new(AgentEvent::SessionHealth {
                 session_id: event.session_id().to_owned(),
                 fact: Box::new(fact),
-            });
+            })
+        });
         (health, state.subscribers.clone())
     })
 }
