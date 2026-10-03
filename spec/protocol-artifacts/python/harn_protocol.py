@@ -2289,7 +2289,7 @@ class HarnInferenceAdmissionBoundary(_HarnDataclass):
 class HarnInferenceAdmissionRequest(_HarnDataclass):
     provider: str
     model: str
-    boundary: Optional[Optional[HarnInferenceAdmissionBoundary]] = None
+    boundary: Optional[HarnInferenceAdmissionBoundary] = None
     data_controls: Optional[HarnInferenceAdmissionDataPosture] = None
 
 @dataclass
@@ -2299,8 +2299,8 @@ class HarnInferenceAdmissionSnapshot(_HarnDataclass):
     model: str
     status: HarnInferenceAdmissionStatus
     training_control_planned: bool
-    effective_boundary: Optional[Optional[HarnInferenceAdmissionBoundary]] = None
-    governing_rule: Optional[Optional[str]] = None
-    local_runtime: Optional[Optional[bool]] = None
-    open_weight: Optional[Optional[bool]] = None
-    training_default: Optional[Optional[str]] = None
+    effective_boundary: Optional[HarnInferenceAdmissionBoundary] = None
+    governing_rule: Optional[str] = None
+    local_runtime: Optional[bool] = None
+    open_weight: Optional[bool] = None
+    training_default: Optional[str] = None

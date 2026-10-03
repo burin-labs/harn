@@ -4839,7 +4839,7 @@ pub struct HarnInferenceAdmissionRequest {
     pub provider: String,
     pub model: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub boundary: Option<Option<HarnInferenceAdmissionBoundary>>,
+    pub boundary: Option<HarnInferenceAdmissionBoundary>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub data_controls: Option<HarnInferenceAdmissionDataPosture>,
 }
@@ -4852,13 +4852,13 @@ pub struct HarnInferenceAdmissionSnapshot {
     pub status: HarnInferenceAdmissionStatus,
     pub training_control_planned: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub effective_boundary: Option<Option<HarnInferenceAdmissionBoundary>>,
+    pub effective_boundary: Option<HarnInferenceAdmissionBoundary>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub governing_rule: Option<Option<String>>,
+    pub governing_rule: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub local_runtime: Option<Option<bool>>,
+    pub local_runtime: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub open_weight: Option<Option<bool>>,
+    pub open_weight: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub training_default: Option<Option<String>>,
+    pub training_default: Option<String>,
 }

@@ -4897,7 +4897,7 @@ public struct HarnInferenceAdmissionBoundary: Codable, Sendable, Equatable {
 public struct HarnInferenceAdmissionRequest: Codable, Sendable, Equatable {
     public let provider: String
     public let model: String
-    public let boundary: HarnInferenceAdmissionBoundary??
+    public let boundary: HarnInferenceAdmissionBoundary?
     public let dataControls: HarnInferenceAdmissionDataPosture?
 
     enum CodingKeys: String, CodingKey {
@@ -4914,11 +4914,11 @@ public struct HarnInferenceAdmissionSnapshot: Codable, Sendable, Equatable {
     public let model: String
     public let status: HarnInferenceAdmissionStatus
     public let trainingControlPlanned: Bool
-    public let effectiveBoundary: HarnInferenceAdmissionBoundary??
-    public let governingRule: String??
-    public let localRuntime: Bool??
-    public let openWeight: Bool??
-    public let trainingDefault: String??
+    public let effectiveBoundary: HarnInferenceAdmissionBoundary?
+    public let governingRule: String?
+    public let localRuntime: Bool?
+    public let openWeight: Bool?
+    public let trainingDefault: String?
 
     enum CodingKeys: String, CodingKey {
         case schema

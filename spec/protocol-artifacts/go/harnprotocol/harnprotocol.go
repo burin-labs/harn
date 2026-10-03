@@ -2095,19 +2095,19 @@ type HarnInferenceAdmissionBoundary struct {
 type HarnInferenceAdmissionRequest struct {
 	Provider     string                             `json:"provider"`
 	Model        string                             `json:"model"`
-	Boundary     **HarnInferenceAdmissionBoundary   `json:"boundary,omitempty"`
+	Boundary     *HarnInferenceAdmissionBoundary    `json:"boundary,omitempty"`
 	DataControls *HarnInferenceAdmissionDataPosture `json:"data_controls,omitempty"`
 }
 
 type HarnInferenceAdmissionSnapshot struct {
-	Schema                 string                           `json:"schema"`
-	Provider               string                           `json:"provider"`
-	Model                  string                           `json:"model"`
-	Status                 HarnInferenceAdmissionStatus     `json:"status"`
-	TrainingControlPlanned bool                             `json:"training_control_planned"`
-	EffectiveBoundary      **HarnInferenceAdmissionBoundary `json:"effective_boundary,omitempty"`
-	GoverningRule          **string                         `json:"governing_rule,omitempty"`
-	LocalRuntime           **bool                           `json:"local_runtime,omitempty"`
-	OpenWeight             **bool                           `json:"open_weight,omitempty"`
-	TrainingDefault        **string                         `json:"training_default,omitempty"`
+	Schema                 string                          `json:"schema"`
+	Provider               string                          `json:"provider"`
+	Model                  string                          `json:"model"`
+	Status                 HarnInferenceAdmissionStatus    `json:"status"`
+	TrainingControlPlanned bool                            `json:"training_control_planned"`
+	EffectiveBoundary      *HarnInferenceAdmissionBoundary `json:"effective_boundary,omitempty"`
+	GoverningRule          *string                         `json:"governing_rule,omitempty"`
+	LocalRuntime           *bool                           `json:"local_runtime,omitempty"`
+	OpenWeight             *bool                           `json:"open_weight,omitempty"`
+	TrainingDefault        *string                         `json:"training_default,omitempty"`
 }
