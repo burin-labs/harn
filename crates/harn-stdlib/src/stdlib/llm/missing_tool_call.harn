@@ -4,7 +4,7 @@ import {
 } from "std/agent/failures"
 pub import { MissingToolCallClassifier, MissingToolCallVerdict } from "std/agent/options_types"
 import { MissingToolCallRecoveryOptions } from "std/agent/options_types"
-import { EvaluationPolicy, boolean, choice } from "std/predicate"
+import { EvaluationPolicy, choice } from "std/predicate"
 
 type MissingToolCallAction = "tool_call_intended" | "no_tool_call_intended" | "ambiguous"
 
@@ -147,9 +147,20 @@ fn __missing_tool_call_evaluate(
   candidates: list<MissingToolCallTool>,
   threshold: float,
 ) -> MissingToolCallVerdict {
-  let criteria: dict<string, string> = {}
+  const intended_criterion = harness.fs.render_prompt(
+    "std/llm/prompts/missing_tool_call_intended.harn.prompt",
+    {},
+  )
+  let criteria: dict<string, string> = {
+    no_tool_call_intended: harness.fs.render_prompt(
+      "std/llm/prompts/missing_tool_call_not_intended.harn.prompt",
+      {},
+    ),
+  }
   for entry in candidates {
-    criteria[entry.name] = entry.description ?? ""
+    criteria["call:" + entry.name] = intended_criterion + " Intended candidate: " + entry.name
+      + ": "
+      + (entry.description ?? "")
   }
   const state: {assistant_text: string, candidate_tools: list<MissingToolCallTool>} = {
     assistant_text: __missing_tool_call_string(payload?.text ?? payload?.visible_text),
@@ -160,15 +171,8 @@ fn __missing_tool_call_evaluate(
     "agent.missing_tool_call.v1",
     state,
     {
-      intended: boolean(
-        harness.fs.render_prompt("std/llm/prompts/missing_tool_call_classifier.harn.prompt", {}),
-        {
-          true: harness.fs.render_prompt("std/llm/prompts/missing_tool_call_intended.harn.prompt", {}),
-          false: harness.fs.render_prompt("std/llm/prompts/missing_tool_call_not_intended.harn.prompt", {}),
-        },
-      ),
       tool: choice(
-        harness.fs.render_prompt("std/llm/prompts/missing_tool_call_target.harn.prompt", {}),
+        harness.fs.render_prompt("std/llm/prompts/missing_tool_call_classifier.harn.prompt", {}),
         criteria,
       ),
     },
@@ -182,18 +186,19 @@ fn __missing_tool_call_evaluate(
     return __missing_tool_call_fail_open(evaluation.kind + ": " + evaluation.receipt, threshold)
       + metadata
   }
-  const intended = evaluation.value.intended
   const target = evaluation.value.tool
-  if intended.kind != "boolean" || target.kind != "choice" {
-    return __missing_tool_call_fail_open("invalid evaluation answer shape", threshold) + metadata
+  if target.kind != "choice" {
+    return __missing_tool_call_fail_open("invalid target evaluation answer shape", threshold)
+      + metadata
   }
+  const intended = target.choice != "no_tool_call_intended"
+  const tool_name = intended ? target.choice[5:] : ""
   return __missing_tool_call_normalize(
     {
-      action: intended.verdict ? "tool_call_intended" : "no_tool_call_intended",
-      tool_name: intended.verdict ? target.choice : "",
-      confidence: intended.verdict ? min(intended.confidence, target.confidence) : intended
-        .confidence,
-      evidence: intended.evidence + (intended.verdict ? " " + target.evidence : ""),
+      action: intended ? "tool_call_intended" : "no_tool_call_intended",
+      tool_name: tool_name,
+      confidence: target.confidence,
+      evidence: target.evidence,
     },
     candidates,
     threshold,
@@ -275,9 +280,9 @@ fn __missing_tool_call_fail_open(error: any, threshold: float) -> MissingToolCal
  * config overrides them. Pass `missing_tool_call_recovery: false` to disable it
  * or `missing_tool_call_recovery: { ... }` to configure classifier-specific
  * settings. Mock/custom-caller tests can pass `classifier` inside that config
- * for deterministic behavior. The live path asks one boolean and one tool
- * choice through the shared evaluator, using an explicit evaluation policy or
- * the loop's structured route, and fails open to `ambiguous`.
+ * for deterministic behavior. The live path evaluates one closed choice over
+ * no intent and each candidate's explicit intent criterion. One shared
+ * evaluator request owns both decisions. Unanswered calls fail open to `ambiguous`.
  *
  * @effects: [llm.call]
  * @errors: []

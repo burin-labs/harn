@@ -15,24 +15,24 @@ fn request() {
 }
 
 fn answered(harness: Harness, intended: bool, tool_confidence: float, action: string) {
-  with_llm_script(
-    harness.llm,
-    [
-      llm_text(
-        json_stringify(
-          {
-            answers: {
-              intended: {verdict: intended, confidence: 0.96, evidence: "explicit boolean fixture"},
-              tool: {
-                choice: "edit",
-                confidence: tool_confidence,
-                evidence: "explicit choice fixture",
-              },
+  const responses = [
+    llm_text(
+      json_stringify(
+        {
+          answers: {
+            tool: {
+              choice: intended ? "call:edit" : "no_tool_call_intended",
+              confidence: intended ? tool_confidence : 0.96,
+              evidence: "explicit classification fixture",
             },
           },
-        ),
+        },
       ),
-    ],
+    ),
+  ]
+  with_llm_script(
+    harness.llm,
+    responses,
     { ->
       const classify = missing_tool_call_classifier(
         harness,
@@ -42,21 +42,18 @@ fn answered(harness: Harness, intended: bool, tool_confidence: float, action: st
       assert_eq(result.evaluation.kind, "answered", json_stringify(result))
       assert_eq(result.action, action)
       assert_eq(result.tool_name, intended ? "edit" : "")
-      assert_eq(result.confidence, intended ? min(0.96, tool_confidence) : 0.96)
+      assert_eq(result.confidence, intended ? tool_confidence : 0.96)
       const calls = llm_calls(harness.llm)
-      assert_eq(len(calls), 1, "both questions must share one physical request")
-      const intent = calls[0].output_format.schema.properties.answers.properties.intended
-      assert(contains(intent.description, "Criteria: true = "))
-      assert(contains(intent.description, "; false = "))
+      assert_eq(len(calls), 1, "classification must consume one physical request")
       assert_eq(
         calls[0].output_format.schema.properties.answers.properties.tool.properties.choice.enum,
-        ["edit", "read"],
+        ["call:edit", "call:read", "no_tool_call_intended"],
       )
     },
   )
 }
 
-pipeline test_shared_answers_and_consumer_threshold(harness: Harness, task: unknown) {
+pipeline test_closed_classification_and_consumer_threshold(harness: Harness, task: unknown) {
   answered(harness, true, 0.95, "tool_call_intended")
   answered(harness, true, 0.2, "ambiguous")
   answered(harness, false, 0.2, "no_tool_call_intended")
@@ -250,8 +247,7 @@ pipeline test_default_consumer_publishes_answer_and_refusal(harness: Harness, ta
     const answer = malformed ? "not json" : json_stringify(
       {
         answers: {
-          intended: {verdict: false, confidence: 0.96, evidence: "negative fixture"},
-          tool: {choice: "read", confidence: 0.1, evidence: "irrelevant on negative intent"},
+          tool: {choice: "no_tool_call_intended", confidence: 0.96, evidence: "negative fixture"},
         },
       },
     )
