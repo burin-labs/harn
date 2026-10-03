@@ -1034,9 +1034,9 @@ fn __tool_parse_json(text: string, tools: dict? = nil, recover_heredoc: bool = t
       errors = errors.appending(
         tool_call_json_error(
           to_string(stream.error)
-          + " (near `"
-          + source.slice(0, 80)
-          + "`)",
+            + " (near `"
+            + source.slice(0, 80)
+            + "`)",
         ),
       )
     } else if stream?.eof ?? false {

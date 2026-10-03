@@ -1,3 +1,4 @@
+import { tool_call_json_error } from "std/llm/call_shape"
 /**
  * JSON-fence normalization and counted-verbatim binding for tool parsing.
  *
@@ -13,7 +14,6 @@ import {
   tool_fence_info_opens_call,
 } from "std/llm/dialects"
 import { protocol_violation } from "std/llm/tool_parse_result"
-import { tool_call_json_error } from "std/llm/call_shape"
 
 fn __tool_parse_json_name(value: dict) -> string {
   for key in NAME_ALIASES {
