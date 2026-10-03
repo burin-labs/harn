@@ -158,18 +158,18 @@ impl SessionHealth {
                 health,
                 parsing: None,
                 ..
-            } if matches!(status, ToolCallStatus::Completed | ToolCallStatus::Failed) => {
-                if self.observe_tool(
+            } if matches!(status, ToolCallStatus::Completed | ToolCallStatus::Failed)
+                && self.observe_tool(
                     tool_call_id,
                     *status == ToolCallStatus::Completed,
                     *mutation_status == ToolMutationStatus::Applied,
                     health.as_deref(),
-                ) && self.turn_closed
-                {
-                    // Closeout can resolve a streamed call after the turn's
-                    // final snapshot. Publish the updated population there too.
-                    return Some(self.fact(event.session_id()));
-                }
+                )
+                && self.turn_closed =>
+            {
+                // Observe all real completions, but publish an additional fact
+                // only when closeout changes an already-closed turn's population.
+                return Some(self.fact(event.session_id()));
             }
             AgentEvent::IterationEnd { iteration_info, .. } => {
                 self.turn_closed = true;
