@@ -1,0 +1,34 @@
+name: Smart Ship
+
+# Hands pull requests labeled `ship` to the Smart Ship shepherd, which lands
+# them and reports each step on the PR. The shared runner lives in
+# burin-labs/.github; see burin-labs/burin-code docs/design/smart-ship.md.
+
+on:
+  pull_request_target:
+    types: [labeled, unlabeled, synchronize, ready_for_review, dequeued, closed]
+  pull_request_review:
+    types: [submitted]
+  schedule:
+    - cron: "7,22,37,52 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ship:
+    # A sweep or a manual run looks at every labeled PR; any event about one
+    # PR wakes the shepherd only when that PR carries the label, or just lost it.
+    if: >-
+      github.event_name == 'schedule'
+      || github.event_name == 'workflow_dispatch'
+      || contains(github.event.pull_request.labels.*.name, 'ship')
+      || (github.event.action == 'unlabeled' && github.event.label.name == 'ship')
+    uses: burin-labs/.github/.github/workflows/smart-ship.yml@main
+    with:
+      # Land-only until repair has been proven in this repository.
+      repair: false
+    secrets:
+      RELEASE_APP_CLIENT_ID: ${{ secrets.RELEASE_APP_CLIENT_ID }}
+      RELEASE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
