@@ -547,7 +547,7 @@ impl AgentEvent {
         ) {
             crate::agent_session_journal::flush(session_id).await?;
         }
-        crate::llm::agent_runtime::emit_agent_event_with_ctx(Some(ctx), self).await;
+        crate::llm::emit_live_agent_event_with_ctx(Some(ctx), self).await;
         Ok(())
     }
 }
