@@ -2230,6 +2230,7 @@ mod tests {
         let _env = crate::llm::env_guard();
         let _clock =
             crate::clock_mock::install_override(crate::clock_mock::MockClock::at_wall_ms(1_000));
+        ensure_initialized_from_config();
         let mut opts = crate::llm::api::options::base_opts("atomic-network-probe");
         opts.model = "delayed-model".into();
         let keys = limiter_keys(&opts.provider, &opts.model);
