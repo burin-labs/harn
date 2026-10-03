@@ -252,6 +252,7 @@ export const HARN_AGENT_EVENT_KINDS = [
   "host_tool_result",
   "input_guardrail_verdict",
   "iteration_end",
+  "session_health",
   "iteration_start",
   "judge_decision",
   "judge_started",

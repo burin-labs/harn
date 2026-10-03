@@ -5,6 +5,9 @@ use std::path::{Path, PathBuf};
 
 use crate::value::{VmError, VmValue};
 
+mod command_plan;
+pub use command_plan::{plan_invocation, plan_posix_command, CommandPlan};
+
 thread_local! {
     static SELECTED_DEFAULT_SHELL_ID: RefCell<Option<String>> = const { RefCell::new(None) };
 }

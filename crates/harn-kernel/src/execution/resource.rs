@@ -91,6 +91,10 @@ pub(super) fn validate_runtime_value(root: &RuntimeValue) -> Result<ResourceUsag
                 reserve_children(value.fields.len(), depth, &mut nodes, "runtime value")?;
                 stack.extend(value.fields.iter().map(|value| (value, depth + 1)));
             }
+            RuntimeValue::Exception(error) => {
+                reserve_children(1, depth, &mut nodes, "runtime value")?;
+                stack.push((&error.value, depth + 1));
+            }
             RuntimeValue::Nil
             | RuntimeValue::Bool(_)
             | RuntimeValue::Int(_)

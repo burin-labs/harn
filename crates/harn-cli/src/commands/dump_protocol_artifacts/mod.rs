@@ -208,6 +208,13 @@ fn generate_artifacts(source: &ProtocolArtifactSource) -> Result<Vec<Artifact>, 
             harn_vm::prepared_run::PREPARED_SESSION_SCHEMA_ARTIFACT,
             harn_vm::prepared_run::PREPARED_SESSION_V1_SCHEMA_JSON,
         ),
+        Artifact::new(
+            harn_vm::agent_events::session_health::SESSION_HEALTH_SCHEMA_ARTIFACT,
+            serde_json::to_string_pretty(
+                &harn_vm::agent_events::session_health::session_health_schema(),
+            )
+            .map_err(|error| format!("failed to encode session health schema: {error}"))?,
+        ),
     ];
 
     for (name, schema) in inference_admission::schemas() {

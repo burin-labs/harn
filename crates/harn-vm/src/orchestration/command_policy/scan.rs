@@ -327,7 +327,7 @@ fn security_command_analysis_with_metadata(
                 );
             }
         },
-        Some("shell") => {}
+        Some("shell" | "auto") => {}
         _ => {
             return (
                 super::catastrophic::ShellAnalysis::unresolved(),

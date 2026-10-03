@@ -346,6 +346,7 @@
       "host_tool_result",
       "input_guardrail_verdict",
       "iteration_end",
+      "session_health",
       "iteration_start",
       "judge_decision",
       "judge_started",
@@ -555,6 +556,7 @@
       "errorCategory",
       "executionDurationMs",
       "executor",
+      "health",
       "mutationStatus",
       "parsing",
       "rawInputPartial"
@@ -989,6 +991,15 @@
         "schema_version": 1
       },
       "source": "crates/harn-vm/src/llm/api/inference_boundary/admission.rs"
+    },
+    {
+      "artifact": "schemas/session-health.schema.json",
+      "protocol": "harn",
+      "provenance": {
+        "owner": "harn-vm::agent_events::session_health",
+        "schema_version": 1
+      },
+      "source": "crates/harn-vm/src/agent_events/session_health.rs"
     },
     {
       "artifact": "schemas/tool-call-receipt.schema.json",

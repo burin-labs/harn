@@ -16,7 +16,6 @@
     "crates/harn-serve/src/core.rs",
     "crates/harn-vm/src/bridge.rs",
     "crates/harn-vm/src/channels/mod.rs",
-    "crates/harn-vm/src/connectors/harn_module.rs",
     "crates/harn-vm/src/connectors/hmac.rs",
     "crates/harn-vm/src/connectors/mod.rs",
     "crates/harn-vm/src/http/client.rs",

@@ -248,6 +248,7 @@
 - [Portable kernel contract](./portable-kernel-reference.md)
 - [Bridge protocol](./bridge-protocol.md)
 - [Generated protocol artifacts](./protocol-artifacts.md)
+- [Session health reference](./session-health.md)
 - [Host tools over the bridge](./bridge/host-tools.md)
 - [ACP over WebSocket](./acp/websocket.md)
 - [Remote session control](./remote-session-control.md)

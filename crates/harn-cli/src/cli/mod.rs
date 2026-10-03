@@ -207,7 +207,7 @@ pub(crate) use portable::{
     PortableResumeArgs, PortableStartArgs,
 };
 pub(crate) use portal::PortalArgs;
-pub use precompile::PrecompileArgs;
+pub use precompile::{PrecompileArgs, PRECOMPILE_JOBS_ENV};
 pub(crate) use profile::ProfileArgs;
 pub(crate) use provider::ProviderToolProbeFormatArg;
 pub(crate) use provider::{

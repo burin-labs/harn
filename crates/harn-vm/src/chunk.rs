@@ -599,7 +599,10 @@ fn op_stack_delta(op: Op, count: u16) -> Option<i32> {
         | Return
         | TailCall
         | Throw
+        | ThrowDeclared
+        | Rethrow
         | TryCatchSetup
+        | TryCatchPreserve
         | Spawn
         | Pipe
         | Parallel

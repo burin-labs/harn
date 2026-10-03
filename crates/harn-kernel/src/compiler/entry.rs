@@ -64,8 +64,10 @@ impl Compiler {
         params: &[TypedParam],
         body: &[SNode],
         source_file: Option<String>,
+        throws: Option<&harn_parser::TypeExpr>,
     ) -> Result<CompiledFunction, CompileError> {
         let mut compiler = self.nested_body();
+        compiler.declared_throw = throws.is_some();
         compiler.enum_names = self.enum_names.clone();
         compiler.enum_variant_owners = self.enum_variant_owners.clone();
         compiler.imported_enum_candidates = self.imported_enum_candidates.clone();
@@ -112,8 +114,9 @@ impl Compiler {
         params: &[TypedParam],
         body: &[SNode],
         source_file: Option<String>,
+        throws: Option<&harn_parser::TypeExpr>,
     ) -> Result<CompiledFunction, CompileError> {
-        let mut function = self.compile_fn_body(type_params, params, body, source_file)?;
+        let mut function = self.compile_fn_body(type_params, params, body, source_file, throws)?;
         function.name = name.to_string();
         Ok(function)
     }

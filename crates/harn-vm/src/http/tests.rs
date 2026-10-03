@@ -42,14 +42,17 @@ fn parses_retry_after_delta_seconds() {
 fn parses_retry_after_http_date() {
     let now = UNIX_EPOCH + Duration::from_secs(1_700_000_000);
     let header = httpdate::fmt_http_date(now + Duration::from_secs(2));
-    let parsed =
-        super::client::parse_retry_after_value_at(&header, now).expect("http-date should parse");
+    let parsed = super::retry_after::parse_retry_after_value_at(&header, now)
+        .expect("http-date should parse");
     assert_eq!(parsed, Duration::from_secs(2));
 }
 
 #[test]
 fn malformed_retry_after_returns_none() {
     assert_eq!(parse_retry_after_value("soon-ish"), None);
+    assert_eq!(parse_retry_after_value("2seconds"), None);
+    assert_eq!(super::retry_after_hint("2seconds"), None);
+    assert_eq!(super::retry_after_hint("61"), Some((60_000, true)));
 }
 
 #[test]

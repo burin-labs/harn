@@ -153,6 +153,7 @@ impl Compiler {
             interface_methods: std::collections::HashMap::new(),
             loop_stack: Vec::new(),
             handler_depth: 0,
+            declared_throw: false,
             finally_bodies: Vec::new(),
             temp_counter: 0,
             scope_depth: 0,
@@ -178,6 +179,7 @@ impl Compiler {
 
     pub(super) fn nested_body(&self) -> Self {
         let mut nested = Self::for_nested_body(self.options);
+        nested.declared_throw = self.declared_throw;
         nested.source_callable_names = self.source_callable_names.clone();
         nested
     }
@@ -509,6 +511,7 @@ impl Compiler {
                 params,
                 body,
                 extends,
+                throws,
                 ..
             } = peel_node(sn)
             {
@@ -518,6 +521,8 @@ impl Compiler {
                     extends.as_deref(),
                     |compiler| {
                         let saved = std::mem::replace(&mut compiler.module_level, false);
+                        let saved_throw =
+                            std::mem::replace(&mut compiler.declared_throw, throws.is_some());
                         if let Some(harness) = params.first().filter(|param| {
                             matches!(
                                 param.type_expr.as_ref(),
@@ -532,6 +537,7 @@ impl Compiler {
                         }
                         let result = compiler.compile_block(body);
                         compiler.module_level = saved;
+                        compiler.declared_throw = saved_throw;
                         result
                     },
                 )?;
@@ -618,6 +624,7 @@ impl Compiler {
                 body,
                 extends,
                 params,
+                throws,
                 ..
             } = peel_node(sn)
             {
@@ -627,6 +634,8 @@ impl Compiler {
                     extends.as_deref(),
                     |compiler| {
                         let saved = std::mem::replace(&mut compiler.module_level, false);
+                        let saved_throw =
+                            std::mem::replace(&mut compiler.declared_throw, throws.is_some());
                         if let Some(harness) = params.first().filter(|param| {
                             matches!(
                                 param.type_expr.as_ref(),
@@ -641,6 +650,7 @@ impl Compiler {
                         }
                         let result = compiler.compile_block(body);
                         compiler.module_level = saved;
+                        compiler.declared_throw = saved_throw;
                         result
                     },
                 )?;
@@ -1022,23 +1032,6 @@ impl Compiler {
         Ok(())
     }
 
-    /// Compile finally body inline, discarding its result value.
-    /// `compile_scoped_block` always leaves exactly one value on the stack
-    /// (Nil for non-value tail statements), so the trailing Pop is
-    /// unconditional — otherwise a finally ending in e.g. `x = x + 1`
-    /// would leave a stray Nil that corrupts the surrounding expression
-    /// when the enclosing try/finally is used in expression position.
-    pub(super) fn compile_finally_inline(
-        &mut self,
-        finally_body: &[SNode],
-    ) -> Result<(), CompileError> {
-        if !finally_body.is_empty() {
-            self.compile_scoped_block(finally_body)?;
-            self.chunk.emit(Op::Pop, self.line);
-        }
-        Ok(())
-    }
-
     /// True if there are any pending cleanup bodies.
     pub(super) fn has_pending_finally(&self) -> bool {
         !self.finally_bodies.is_empty()
@@ -1049,12 +1042,13 @@ impl Compiler {
     pub(super) fn push_cleanup(&mut self, body: Vec<SNode>) {
         let handler_depth = self.handler_depth;
         self.handler_depth += 1;
-        let error_jump = self.chunk.emit_jump(Op::TryCatchSetup, self.line);
+        let error_jump = self.chunk.emit_jump(Op::TryCatchPreserve, self.line);
         let empty_type = self.string_constant("");
         self.emit_type_name_extra(empty_type);
         self.finally_bodies.push(FinallyEntry {
             body,
             handler_depth,
+            declared_throw: self.declared_throw,
             error_jump,
         });
     }
@@ -1071,16 +1065,16 @@ impl Compiler {
         debug_assert_eq!(self.handler_depth, entry.handler_depth + 1);
         self.handler_depth = entry.handler_depth;
         self.chunk.emit(Op::PopHandler, self.line);
-        self.compile_finally_inline(&entry.body)?;
+        self.compile_finally_inline(&entry.body, entry.declared_throw)?;
         let end_jump = self.chunk.emit_jump(Op::Jump, self.line);
 
         self.chunk.patch_jump(entry.error_jump);
         self.temp_counter += 1;
         let temp_name = format!("__finally_err_{}__", self.temp_counter);
         self.emit_define_binding(&temp_name, true);
-        self.compile_finally_inline(&entry.body)?;
+        self.compile_finally_inline(&entry.body, entry.declared_throw)?;
         self.emit_get_binding(&temp_name);
-        self.chunk.emit(Op::Throw, self.line);
+        self.chunk.emit(Op::Rethrow, self.line);
 
         self.chunk.patch_jump(end_jump);
         Ok(())
@@ -1255,7 +1249,7 @@ impl Compiler {
         while self.finally_bodies.len() > floor {
             let entry = self.finally_bodies.pop().expect("non-empty by guard");
             self.emit_pop_handlers_to(entry.handler_depth);
-            self.compile_finally_inline(&entry.body)?;
+            self.compile_finally_inline(&entry.body, entry.declared_throw)?;
         }
         if let Some(handler_floor) = handler_floor {
             self.emit_pop_handlers_to(handler_floor);

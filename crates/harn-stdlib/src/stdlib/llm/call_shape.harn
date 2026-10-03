@@ -68,7 +68,17 @@ const __JSON_SHAPE: ToolCallShape = {
   call_syntax: "a ```tool fenced block wrapping one JSON object with `name` and `args` keys",
   final_answer: "as plain text",
   body_hint:
-    "For a multi-line or code-bearing field (file contents, replacement text, exact-match strings), set its JSON value to `\"<<BODY\"`, put the raw bytes after the JSON object inside the same ```tool fence, and end them with a line that is exactly `BODY`. The line break before `BODY` closes the value and is not part of it, so a value that must end with a newline (a whole file) leaves one empty line before `BODY`. Nothing in that verbatim body is escaped. Use `\"<<BODY:N\"`, where N is the exact body-line count, only when the body itself contains a line that is exactly `BODY`. Short scalar values stay ordinary JSON strings.",
+    "For a multi-line or code-bearing field (file contents, replacement text, exact-match strings), set its JSON value to `\"<<BODY\"`. After the complete JSON object, write a separate opening line that is exactly `<<BODY`, then the raw body lines, then a closing line that is exactly `BODY`, all inside the same ```tool fence. The JSON value declares the body; it does not replace the opening line. The line break before `BODY` closes the value and is not part of it, so a value that must end with a newline (a whole file) leaves one empty line before `BODY`. Nothing in that verbatim body is escaped. Use `\"<<BODY:N\"`, where N is the exact body-line count, only when the body itself contains a line that is exactly `BODY`; the opening line must then be exactly `<<BODY:N`. Short scalar values stay ordinary JSON strings (escape newlines as \\n, quotes as \\\", backslashes as \\\\); backticks need no escaping.",
+}
+
+/**
+ * Repair guidance for rejected JSON calls uses the same body contract as the
+ * initial instructions, regardless of which parser stage rejected the call.
+ * @effects: []
+ * @errors: []
+ */
+pub fn tool_call_json_error(detail: string) -> string {
+  return "The ```tool block is not valid JSON: " + detail + ". " + __JSON_SHAPE.body_hint
 }
 
 const __TEXT_SHAPE: ToolCallShape = {
