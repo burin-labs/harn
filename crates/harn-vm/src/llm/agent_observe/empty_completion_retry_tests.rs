@@ -103,6 +103,41 @@ fn parent_call_waits_for_network_recovery_after_child_failures() {
 }
 
 #[test]
+fn network_recovery_deadline_refuses_dispatch_without_spending_a_provider_call() {
+    let _env = crate::llm::env_guard();
+    let _clock =
+        crate::clock_mock::install_override(crate::clock_mock::MockClock::at_wall_ms(1_000));
+    current_thread_runtime().block_on(async {
+        let mut opts = fake_opts();
+        opts.model = "network-recovery-deadline".to_string();
+        opts.timeout = Some(2);
+        for _ in 0..4 {
+            crate::llm::rate_limit::observe_network_outcome_for_llm_call(&opts, true);
+        }
+        let _script =
+            install_fake_llm_script(FakeLlmScript::new().push(FakeLlmTurn::stream(vec![
+                FakeLlmEvent::Token("must not dispatch".into()),
+                FakeLlmEvent::Done(FakeStopReason::EndTurn),
+            ])));
+        let before = crate::clock_mock::instant_now();
+        let error = observed_llm_call(&opts, None, None, None, false, false, None, None)
+            .await
+            .expect_err("the open window exceeds the call's available time");
+        assert_eq!(
+            crate::value::error_to_category(&error),
+            crate::value::ErrorCategory::Timeout
+        );
+        assert!(fake_llm_captured_calls().is_empty());
+        assert_eq!(
+            crate::clock_mock::instant_now()
+                .duration_since(before)
+                .as_millis(),
+            2_000
+        );
+    });
+}
+
+#[test]
 fn empty_completion_retries_then_succeeds_on_second_attempt() {
     current_thread_runtime().block_on(async {
         reset_agent_trace_state();
