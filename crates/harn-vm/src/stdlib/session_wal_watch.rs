@@ -311,7 +311,7 @@ fn publish_session_changes(reader: &rusqlite::Connection) {
     };
     for snapshot in snapshots {
         if let Ok(meta) = describe_session(reader, &snapshot.id) {
-            super::session_change::dispatch(&meta);
+            super::session_change::dispatch_foreign(&meta);
         }
     }
 }

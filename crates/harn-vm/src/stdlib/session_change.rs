@@ -99,26 +99,43 @@ fn subscriber_count() -> usize {
         .len()
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum SnapshotChange {
+    New,
+    Unchanged,
+    Changed,
+}
+
 /// One comparison owner for local commits, foreign commits, and watch baselines.
-pub(super) fn remember_snapshot(meta: &SessionMeta) -> bool {
+pub(super) fn remember_snapshot(meta: &SessionMeta) -> SnapshotChange {
     let mut sessions = session_memory();
     if let Some(previous) = sessions.iter_mut().find(|seen| seen.id == meta.id) {
         if previous == meta {
-            return false;
+            return SnapshotChange::Unchanged;
         }
         *previous = meta.clone();
-    } else {
-        sessions.push(meta.clone());
+        return SnapshotChange::Changed;
     }
-    true
+    sessions.push(meta.clone());
+    SnapshotChange::New
 }
 
 /// Fans one committed change out to every live subscriber.
 pub(super) fn dispatch(meta: &SessionMeta) {
+    dispatch_snapshot(meta, true);
+}
+
+/// A watcher's first encounter establishes its baseline, not an update.
+pub(super) fn dispatch_foreign(meta: &SessionMeta) {
+    dispatch_snapshot(meta, false);
+}
+
+fn dispatch_snapshot(meta: &SessionMeta, publish_new: bool) {
     // Either the local post-commit hook or the WAL reader can arrive first.
     // Claim the whole committed snapshot once, not just its title: model,
     // usage and other metadata changes still notify when the title is stable.
-    if !remember_snapshot(meta) {
+    let change = remember_snapshot(meta);
+    if change == SnapshotChange::Unchanged || (change == SnapshotChange::New && !publish_new) {
         return;
     }
     let observers: Vec<SharedSessionChangeObserver> = OBSERVERS
