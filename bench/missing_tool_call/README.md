@@ -1,5 +1,24 @@
 # Measure missing-tool-call recovery
 
+The current classifier makes one closed-choice evaluation: either
+`no_tool_call_intended` or `call:<declared tool name>`. The intent criterion and
+each tool criterion share that request. The calibration files and measured
+result below describe the earlier two-question design and remain historical
+evidence; they do not qualify the current classifier.
+
+The current development build answered all 80 structured qualification cases
+correctly. Native answered 79 correctly and refused one request after a rate
+limit. That refusal is unmeasured, with unknown usage and cost. Known cost was
+$0.0605085 for structured and $0.002426046 for native, excluding the unpriced
+native request. Neither result establishes statistical equivalence. The owning
+calibration report over these saved receipts scores 80 structured answers and
+79 native answers, retaining one native abstention. Expected confidence error
+is 0.021375 and 0.050127 respectively. Its suggested thresholds are descriptive:
+repeats of the same authored examples do not establish exchangeable deployment
+data, and the policy threshold remains unchanged. The current matched-profile
+baseline comparison is pending; historical timing and confidence results must
+not be carried across this design change.
+
 Use this driver to compare classifier versions on completing agent runs. It
 feeds the same assistant text and declared tools to the real classifier,
 then completes with the done sentinel. Each invocation refuses to produce a
@@ -57,7 +76,7 @@ failure and verify the new event projection on the same path.
 This small, authored corpus cannot establish performance on arbitrary tools,
 ambiguous intent, long transcripts, or different model revisions.
 
-## Measured result, 2026-10-02
+## Historical two-question result, 2026-10-02
 
 The sixteen texts were run twice per backend on the same Linux build server. Every counted run
 completed, reached the real classifier, published its verdict, and made exactly
