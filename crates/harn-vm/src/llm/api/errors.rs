@@ -234,26 +234,7 @@ pub(crate) fn retry_after_header(headers: &reqwest::header::HeaderMap) -> Option
 
 /// Parse an RFC 7231 Retry-After field value into a bounded delay.
 pub(crate) fn parse_retry_after_value(value: &str) -> Option<u64> {
-    const MAX_MS: u64 = 60_000;
-    let value = value.trim();
-    let numeric_prefix = value
-        .chars()
-        .take_while(|character| character.is_ascii_digit() || *character == '.')
-        .collect::<String>();
-    if let Ok(seconds) = numeric_prefix.parse::<f64>() {
-        if !seconds.is_finite() || seconds < 0.0 {
-            return None;
-        }
-        return Some(((seconds * 1000.0) as u64).min(MAX_MS));
-    }
-    let target = httpdate::parse_http_date(value).ok()?;
-    Some(
-        target
-            .duration_since(std::time::SystemTime::now())
-            .map(|duration| duration.as_millis() as u64)
-            .unwrap_or(0)
-            .min(MAX_MS),
-    )
+    crate::http::retry_after_hint(value).map(|(millis, _)| millis)
 }
 
 fn provider_http_error_value(
@@ -280,8 +261,12 @@ fn provider_http_error_value(
     fields.put_str("kind", classified.kind.as_str());
     fields.put_str("reason", classified.reason.as_str());
     fields.put_str("message", classified.message);
-    if let Some(ms) = retry_after.and_then(parse_retry_after_value) {
+    if let Some((ms, exceeds_cap)) = retry_after.and_then(crate::http::retry_after_hint) {
         fields.insert("retry_after_ms".to_string(), VmValue::Int(ms as i64));
+        fields.insert(
+            "retry_after_exceeds_cap".to_string(),
+            VmValue::Bool(exceeds_cap),
+        );
     }
     let quota = quota.and_then(|quota| {
         Some((

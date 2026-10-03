@@ -192,6 +192,49 @@ fn classify_tags_opaque_500_as_http_error() {
 }
 
 #[test]
+fn typed_retry_after_retains_over_cap_deadlines() {
+    for (header, expected_ms, exceeds_cap) in [
+        ("2", 2000, false),
+        ("60", 60000, false),
+        ("61", 60000, true),
+    ] {
+        let mut headers = reqwest::header::HeaderMap::new();
+        headers.insert("retry-after", header.parse().unwrap());
+        let error = provider_http_error(
+            None,
+            "mistral",
+            reqwest::StatusCode::TOO_MANY_REQUESTS,
+            &headers,
+            "rate limited",
+        );
+        let VmError::Thrown(VmValue::Dict(error)) = error else {
+            panic!("provider error must retain a typed envelope");
+        };
+        assert_eq!(
+            error.get("retry_after_ms").map(VmValue::display),
+            Some(expected_ms.to_string())
+        );
+        assert_eq!(
+            error.get("retry_after_exceeds_cap").map(VmValue::display),
+            Some(exceeds_cap.to_string())
+        );
+    }
+    let mut headers = reqwest::header::HeaderMap::new();
+    headers.insert("retry-after", "2seconds".parse().unwrap());
+    let VmError::Thrown(VmValue::Dict(error)) = provider_http_error(
+        None,
+        "mistral",
+        reqwest::StatusCode::TOO_MANY_REQUESTS,
+        &headers,
+        "rate limited",
+    ) else {
+        panic!("typed provider envelope");
+    };
+    assert!(error.get("retry_after_ms").is_none());
+    assert!(error.get("retry_after_exceeds_cap").is_none());
+}
+
+#[test]
 fn classify_decode_format_500_as_terminal_invalid_response() {
     let info = classify_provider_http_error(
         "llamacpp",

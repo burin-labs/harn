@@ -5,12 +5,15 @@
 import { http_retry_after_ms } from "std/net"
 
 pipeline default(harness: Harness) {
+  assert_eq(http_retry_after_ms(harness.clock, "2seconds"), nil)
+  assert_eq(http_retry_after_ms(harness.clock, "61"), 61000)
+  assert_eq(http_retry_after_ms(harness.clock, "Fri, 01 Jan 2999 00:00:00 GMT"), nil)
   harness.stdio.println(http_retry_after_ms(harness.clock, "2") == 2000)
   harness.stdio.println(http_retry_after_ms(harness.clock, "0.5") == 500)
   harness.stdio.println(http_retry_after_ms(harness.clock, "0") == 0)
   harness.stdio.println(http_retry_after_ms(harness.clock, 3) == 3000)
   harness.stdio.println(http_retry_after_ms(harness.clock, "Wed, 21 Oct 2015 07:28:00 GMT") == 0)
-  const far_future = http_retry_after_ms(harness.clock, "Fri, 01 Jan 2999 00:00:00 GMT")
+  const far_future = http_retry_after_ms(harness.clock, "Tue, 01 Jan 2999 00:00:00 GMT")
   harness.stdio.println(far_future != nil && far_future > 0)
   harness.stdio.println(http_retry_after_ms(harness.clock, "not-a-delay") == nil)
   harness.stdio.println(http_retry_after_ms(harness.clock, "") == nil)
