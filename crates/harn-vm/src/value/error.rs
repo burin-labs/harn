@@ -666,11 +666,13 @@ pub fn error_to_category(err: &VmError) -> ErrorCategory {
         VmError::CategorizedError { category, .. } => category.clone(),
         VmError::ProviderStreamFailure(failure) => failure.category(),
         VmError::SchemaStreamAbort(abort) => abort.category(),
-        VmError::Thrown(VmValue::Dict(d)) => d
+        VmError::Thrown(VmValue::Dict(d)) | VmError::DeclaredThrown(VmValue::Dict(d)) => d
             .get("category")
             .map(|v| ErrorCategory::parse(&v.display()))
             .unwrap_or(ErrorCategory::Generic),
-        VmError::Thrown(VmValue::String(s)) => classify_error_message(s),
+        VmError::Thrown(VmValue::String(s)) | VmError::DeclaredThrown(VmValue::String(s)) => {
+            classify_error_message(s)
+        }
         VmError::Runtime(msg) => classify_error_message(msg),
         // Engine/wiring bugs: an undefined builtin (declared but not installed,
         // or a typo in stdlib/host code) or corrupt bytecode. No retry or model
@@ -923,6 +925,28 @@ impl std::error::Error for VmError {}
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn declared_provenance_preserves_existing_error_categories() {
+        for category in ["cancelled", "budget_exceeded", "rate_limit"] {
+            let mut value = super::super::DictMap::new();
+            value.put_str("category", category);
+            let value = VmValue::dict(value);
+            assert_eq!(
+                error_to_category(&VmError::DeclaredThrown(value.clone())),
+                error_to_category(&VmError::Thrown(value)),
+            );
+        }
+        let value = VmValue::String("HTTP 429 rate limited".into());
+        assert_eq!(
+            error_to_category(&VmError::DeclaredThrown(value.clone())),
+            error_to_category(&VmError::Thrown(value))
+        );
+        assert_eq!(
+            error_to_category(&VmError::DeclaredThrown(VmValue::Int(7))),
+            ErrorCategory::Generic
+        );
+    }
 
     /// A new variant must be added to [`ErrorCategory::ALL`], or the guards below
     /// silently stop covering it. This match is the tripwire: it fails to
