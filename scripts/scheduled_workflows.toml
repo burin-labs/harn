@@ -25,10 +25,10 @@ health_failures = 3
 [[workflow]]
 path = ".github/workflows/build-release-binaries.yml"
 name = "Build release binaries"
-claim = "The main branch can still produce every supported release artifact and warm cache"
+claim = "Exact main has a complete live signed candidate or passes the full candidate producer"
 crons = ["17 5 * * *"]
-cadence_reason = "Daily keeps release-platform compiler caches usable between infrequent releases."
-job_ids = ["setup", "prepare_cli_aot", "build", "collect_candidate_manifest", "release-residual-audit", "release-smoke", "cache_budget"]
+cadence_reason = "Daily gives native tracking one signed exact-source bundle per day, including commits outside the warm-cache path filter, at the spend of the daily warm it replaces. A full candidate is about four runner-hours, so a faster cadence is a spend decision."
+job_ids = ["setup", "candidate-verdict"]
 health_failures = 3
 
 [[workflow]]

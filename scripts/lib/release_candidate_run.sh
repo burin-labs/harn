@@ -25,6 +25,35 @@ release_candidate_run_id() {
   done
 }
 
+# A scheduled source build may reuse only a complete, unexpired artifact set.
+# Target names come from the producer's resolved matrix, not a parallel list.
+source_candidate_live_run_id() {
+  local repository="${1:?repository required}"
+  local sha="${2:?commit required}"
+  local matrix="${3:?build matrix required}"
+  local runs run_id artifacts expected
+  expected="$(jq -cer --arg sha "$sha" '
+    if type == "array" and length > 0 and all(.[]; .target | type == "string" and length > 0)
+    then [.[].target | "harn-" + .] + ["candidate-manifest-" + $sha, "harn-release-files"]
+    else error("empty or invalid candidate matrix") end' <<< "$matrix")" || return 1
+  runs="$(gh api \
+    "repos/${repository}/actions/workflows/build-release-binaries.yml/runs?head_sha=${sha}&status=success&per_page=30" \
+    --jq ".workflow_runs[] | select(.head_sha == \"${sha}\" and .head_branch == \"main\") | .id")" || return 1
+  for run_id in $runs; do
+    artifacts="$(gh api "repos/${repository}/actions/runs/${run_id}/artifacts?per_page=100")" || return 1
+    if jq -e --argjson expected "$expected" '
+      . as $response |
+      (.artifacts | type == "array") and
+      (.total_count == (.artifacts | length)) and
+      all($expected[]; . as $name |
+        [$response.artifacts[] | select(.name == $name and .expired == false and .size_in_bytes > 0)] | length == 1)
+    ' <<< "$artifacts" >/dev/null; then
+      printf '%s\n' "$run_id"
+      return 0
+    fi
+  done
+}
+
 # Resolves an exact-SHA merge-group candidate for the push workflow. A release
 # can reach main while its candidate is still running, so a success-only read
 # makes "still building" indistinguishable from "absent" and starts a duplicate

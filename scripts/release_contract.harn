@@ -43,12 +43,12 @@ pub type SourceCandidateDecision = {
 }
 
 /**
- * Which dispatch may build a signed source candidate. Only this repository's
+ * Which events may build a signed source candidate. Only this repository's
  * producer reads it, so it is not part of the projected cross-repository
  * contract below.
  */
 pub type SourceCandidatePolicy = {
-  event: "workflow_dispatch",
+  events: list<"workflow_dispatch" | "schedule">,
   ref_type: "branch",
   ref_name: "main",
   runner_profile: "policy",
@@ -65,7 +65,7 @@ pub type ReleaseContract = {
 
 pub fn source_candidate_policy() -> SourceCandidatePolicy {
   return {
-    event: "workflow_dispatch",
+    events: ["workflow_dispatch", "schedule"],
     ref_type: "branch",
     ref_name: "main",
     runner_profile: "policy",
@@ -96,7 +96,7 @@ pub fn release_contract() -> ReleaseContract {
 pub fn source_candidate_decision(request: SourceCandidateRequest) -> SourceCandidateDecision {
   const policy = source_candidate_policy()
   let reason = "accepted"
-  if request.event != policy.event {
+  if !policy.events.contains(request.event) {
     reason = "wrong_event"
   } else if request.ref_type != policy.ref_type || request.ref_name != policy.ref_name {
     reason = "wrong_ref"
