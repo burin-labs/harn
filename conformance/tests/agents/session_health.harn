@@ -20,6 +20,31 @@ fn main(harness: Harness) {
     empty_session,
     { ->
       agent_session_init(harness.agent, "", nil, {session_id: empty_session, provider: "mock"})
+      const supplied_health = {
+        tool_call_id: "supplied-health",
+        tool_name: "verify",
+        status: "completed",
+        mutation_status: "unknown",
+        health: {
+          command_id: "supplied-command",
+          command_exit_code: 0,
+          verification: {diagnostics: {set_fingerprint: "supplied", count: 0}},
+        },
+      }
+      const generic_rejected = try {
+        agent_emit_event(harness.agent, empty_session, "tool_call_update", supplied_health)
+        false
+      } catch (error) {
+        contains(to_string(error), "health")
+      }
+      require generic_rejected, "generic event ingress must reject supplied health"
+      const outcome_rejected = try {
+        harness.agent.emit_tool_outcome(empty_session, supplied_health, {}, {})
+        false
+      } catch (error) {
+        contains(to_string(error), "health")
+      }
+      require outcome_rejected, "tool outcome ingress must derive health instead of accepting it"
       agent_emit_event(
         harness.agent,
         empty_session,

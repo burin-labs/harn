@@ -12,7 +12,6 @@ import "std/agent/loop_foundation"
 import "std/agent/loop_result_status"
 import "std/agent/loop_support"
 import { agent_purpose_label_config, agent_purpose_label_extract } from "std/agent/purpose_labels"
-import { __agent_tool_health_telemetry } from "std/agent/session_health"
 import { tool_call_history_text } from "std/llm/call_shape"
 import { protocol_violation_messages, violation_reports_lost_call } from "std/llm/tool_parse_result"
 
@@ -474,7 +473,6 @@ pub fn __emit_tool_lifecycle_finish(agent: HarnessAgent, envelope: dict, result:
     status: __tool_terminal_status(result),
     raw_output: raw_output,
     mutation_status: agent_tool_mutation_status(result?.mutation_status),
-    health: __agent_tool_health_telemetry(agent, envelope, result),
   }
   if result?.error != nil {
     payload = payload + {error: result.error}
@@ -499,7 +497,7 @@ pub fn __emit_tool_lifecycle_finish(agent: HarnessAgent, envelope: dict, result:
   if result?.data != nil {
     payload = payload + {data: result.data}
   }
-  let _ = agent_emit_event(agent, session_id, "tool_call_update", payload)
+  let _ = agent.emit_tool_outcome(session_id, payload, envelope, result)
 }
 
 pub fn __emit_synthetic_tool_lifecycle_finish(

@@ -499,6 +499,11 @@ impl AgentEvent {
                 {
                     dropped.push("audit".to_string());
                 }
+                if event_type == "tool_call_update"
+                    && payload.get("health").is_some_and(|value| !value.is_null())
+                {
+                    dropped.push("health".to_string());
+                }
                 (event, dropped)
             }
         };
