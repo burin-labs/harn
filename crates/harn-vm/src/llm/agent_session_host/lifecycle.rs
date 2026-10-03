@@ -545,7 +545,9 @@ pub(super) async fn host_agent_session_finalize(
             status_dict.get("publication_admitted"),
             Some(VmValue::Bool(false))
         );
-    let published = super::super::assistant_publication::settle(&session_id, publication_admitted)?;
+    let published =
+        crate::agent_sessions::settle_assistant_publication(&session_id, publication_admitted)
+            .map_err(VmError::Runtime)?;
     if finalization_stage < super::AgentFinalizationStage::TranscriptMarkerWritten {
         if let Some(dir) = session.transcript_dir.as_deref() {
             crate::llm::agent_session_transcript::append_finalized_marker(

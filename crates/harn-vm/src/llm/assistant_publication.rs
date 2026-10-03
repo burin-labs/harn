@@ -2,8 +2,8 @@
 //! the existing terminal turn phase owns the accepted user-facing reply.
 
 use super::agent_session_host::{dict_get, list_items};
-use crate::stdlib::json_to_vm_value as json_to_vm;
-use crate::value::{VmError, VmValue};
+use crate::schema::json_to_vm_value as json_to_vm;
+use crate::value::VmValue;
 
 const KEY: &str = "harn_assistant_publication";
 const SCHEMA: &str = "harn.assistant_publication.v1";
@@ -55,7 +55,7 @@ pub(crate) fn replay(
 
 /// The loop requests deferred visibility after parsing, rather than a provider
 /// inventing a publication decision in its response text.
-pub(super) fn defer(message: &mut VmValue, result: &VmValue) {
+pub(crate) fn defer(message: &mut VmValue, result: &VmValue) {
     if !matches!(
         dict_get(result, "_defer_visible"),
         Some(VmValue::Bool(true))
@@ -87,14 +87,16 @@ pub(crate) fn is_visible(message: &VmValue) -> bool {
     }
 }
 
-/// Settle drafts in place without another assistant turn or another usage
-/// record. Only the trailing assistant answer can be accepted; tool-batch
-/// prose never becomes a completion report after its effects execute.
-pub(super) fn settle(session_id: &str, admitted: bool) -> Result<Option<String>, VmError> {
-    let Some(snapshot) = crate::agent_sessions::transcript(session_id) else {
-        return Ok(None);
-    };
-    let mut messages: Vec<serde_json::Value> = dict_get(&snapshot, "messages")
+pub(crate) struct PublicationSettlement {
+    pub reply: Option<String>,
+    pub mutation: Option<(VmValue, VmValue)>,
+}
+
+/// Compute the source-bound patch without reaching into live session state.
+/// Only the trailing assistant answer can be accepted; tool-batch prose never
+/// becomes a completion report after its effects execute.
+pub(crate) fn settle(snapshot: &VmValue, admitted: bool) -> PublicationSettlement {
+    let mut messages: Vec<serde_json::Value> = dict_get(snapshot, "messages")
         .map(list_items)
         .unwrap_or_default()
         .iter()
@@ -137,7 +139,7 @@ pub(super) fn settle(session_id: &str, admitted: bool) -> Result<Option<String>,
             accepted = super::agent_result_projection::visible_assistant_text(&json_to_vm(message));
         }
     }
-    if !changes.is_empty() {
+    let mutation = if !changes.is_empty() {
         let event = super::helpers::transcript_event(
             "assistant_publication",
             "assistant",
@@ -149,80 +151,21 @@ pub(super) fn settle(session_id: &str, admitted: bool) -> Result<Option<String>,
             accepted.as_deref().unwrap_or("Actor drafts settled"),
             Some(serde_json::json!({"schema": SCHEMA, "changes": changes})),
         );
-        let mut next = super::agent_session_host::vm_to_json(&snapshot);
+        let mut next = super::agent_session_host::vm_to_json(snapshot);
         next["messages"] = serde_json::Value::Array(messages);
-        crate::agent_sessions::store_transcript_with_audit(session_id, json_to_vm(&next), event)
-            .map_err(VmError::Runtime)?;
+        Some((json_to_vm(&next), event))
+    } else {
+        None
+    };
+    PublicationSettlement {
+        reply: accepted,
+        mutation,
     }
-    Ok(accepted)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::value::VmDictExt;
-
-    #[tokio::test]
-    async fn admitted_publication_survives_canonical_journal_hydration() {
-        crate::agent_sessions::reset_session_store();
-        let root = tempfile::tempdir().expect("journal root");
-        let session_id = "publication-journal-round-trip";
-        let mut options = crate::value::DictMap::new();
-        options.put_str("root", root.path().to_string_lossy().as_ref());
-        let prepared = crate::agent_session_journal::prepare(
-            session_id,
-            &options,
-            "run-first".into(),
-            "turn-first".into(),
-        )
-        .await
-        .expect("prepare canonical journal");
-        crate::agent_sessions::open_or_create_for_test(Some(session_id.into()));
-        crate::agent_sessions::install_journal(session_id, prepared.state)
-            .expect("install journal");
-        let mut message =
-            json_to_vm(&serde_json::json!({"role":"assistant", "content":"Accepted answer"}));
-        defer(
-            &mut message,
-            &json_to_vm(&serde_json::json!({"_defer_visible":true})),
-        );
-        crate::agent_sessions::inject_message(session_id, message).expect("record actor draft");
-        assert_eq!(
-            super::super::agent_result_projection::last_assistant_text(
-                &crate::agent_sessions::transcript(session_id).expect("session")
-            ),
-            None
-        );
-        assert_eq!(
-            settle(session_id, true).expect("admit"),
-            Some("Accepted answer".into())
-        );
-        assert_eq!(settle(session_id, true).expect("idempotent settle"), None);
-        crate::agent_session_journal::flush(session_id)
-            .await
-            .expect("persist admission");
-        crate::agent_sessions::clear_journal(session_id);
-        let hydrated = crate::agent_session_journal::prepare(
-            session_id,
-            &options,
-            "run-second".into(),
-            "turn-second".into(),
-        )
-        .await
-        .expect("hydrate canonical journal");
-        assert_eq!(hydrated.transcript.messages.len(), 1);
-        let message = json_to_vm(&hydrated.transcript.messages[0]);
-        assert_eq!(
-            super::super::agent_result_projection::visible_assistant_text(&message),
-            Some("Accepted answer".into())
-        );
-        assert_eq!(
-            dict_get(&message, "content").map(VmValue::display),
-            Some("Accepted answer".into())
-        );
-        drop(hydrated);
-        crate::agent_sessions::reset_session_store();
-    }
 
     #[test]
     fn publication_receipts_are_source_bound_and_idempotent() {

@@ -17,7 +17,7 @@ pipeline test(harness: Harness) {
         model: "mock",
         output_tokens: 0,
         provider: "mock",
-        text: "SYS[" + to_string(call.system ?? "") + "]",
+        text: "SYS[" + to_string(call.system ?? "") + "] ##DONE##",
       },
     }
   }
@@ -25,6 +25,7 @@ pipeline test(harness: Harness) {
     {
       llm_caller: caller,
       max_iterations: 1,
+      done_sentinel: "##DONE##",
       provider: "mock",
       session_id: "goal-fragment-conformance",
     },

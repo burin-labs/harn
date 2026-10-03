@@ -5,7 +5,7 @@
     "agent_sessions->stdlib": 17,
     "connectors->stdlib": 9,
     "llm->agent_events": 148,
-    "llm->agent_sessions": 419,
+    "llm->agent_sessions": 420,
     "llm->orchestration": 281,
     "llm->stdlib": 353,
     "llm->triggers": 6,

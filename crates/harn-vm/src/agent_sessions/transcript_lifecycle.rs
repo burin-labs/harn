@@ -220,17 +220,20 @@ pub fn store_transcript(id: &str, transcript: VmValue) -> Result<(), String> {
 
 /// Commit a transcript metadata change and its audit receipt atomically.
 /// Publication must not masquerade as compaction or rewrite provider history.
-pub(crate) fn store_transcript_with_audit(
+pub(crate) fn settle_assistant_publication(
     id: &str,
-    transcript: VmValue,
-    event: VmValue,
-) -> Result<(), String> {
-    validate_session_event(&event, "store_transcript_with_audit")?;
+    admitted: bool,
+) -> Result<Option<String>, String> {
     SESSIONS.with(|sessions| {
         let mut sessions = sessions.borrow_mut();
         let state = sessions
             .get_mut(id)
             .ok_or_else(|| format!("unknown session '{id}'"))?;
+        let settled = crate::llm::assistant_publication::settle(&state.transcript, admitted);
+        let Some((transcript, event)) = settled.mutation else {
+            return Ok(settled.reply);
+        };
+        validate_session_event(&event, "assistant_publication")?;
         let mut next = transcript_with_session_metadata(transcript, state)
             .as_dict()
             .cloned()
@@ -249,7 +252,7 @@ pub(crate) fn store_transcript_with_audit(
             &mut state.transcript_journal,
             crate::llm::helpers::vm_value_to_json(&event),
         );
-        Ok(())
+        Ok(settled.reply)
     })
 }
 

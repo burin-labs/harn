@@ -48,6 +48,8 @@ pub use changed_paths::{
     session_changed_paths, take_session_changed_paths,
 };
 mod journal;
+#[cfg(test)]
+mod publication_tests;
 pub mod reclaim_hooks;
 mod subscribers;
 pub(crate) use journal::{active_run_id, has_journal, journal_first_event_id, journal_store};
@@ -416,7 +418,7 @@ use runtime_store::{
 };
 pub use scratchpad::*;
 pub(crate) use transcript_lifecycle::append_event_to_state;
-pub(crate) use transcript_lifecycle::store_transcript_with_audit;
+pub(crate) use transcript_lifecycle::settle_assistant_publication;
 pub use transcript_lifecycle::*;
 pub use types::*;
 

@@ -1,6 +1,6 @@
 import { agent_capture_events } from "std/agent/events"
 import { agent_loop } from "std/agent/loop"
-import { llm_stream_text, llm_text, with_llm_script } from "std/testing"
+import { llm_stream_text, with_llm_script } from "std/testing"
 
 pipeline default(harness: Harness) {
   const callbacks = harness.runtime.atomic(0)
