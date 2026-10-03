@@ -34,6 +34,13 @@ pub use crate::stdlib::sandbox::{
     SandboxRequirement, SandboxViolation, MESSAGE_LOCALE_OVERRIDE_ENV, SANDBOX_CONFINEMENT_SCHEMA,
 };
 
+/// Confine the running process, not a child, under a capability policy. An
+/// agent server calls this once before it serves; see the module for what a
+/// confined process's children inherit on each platform.
+pub use crate::stdlib::sandbox::self_confinement::{
+    confine_current_process, current_process_confinement, ProcessConfinement,
+};
+
 /// The subcommand the namespace helper is invoked as, and the flags that
 /// carry the confinement to it.
 ///

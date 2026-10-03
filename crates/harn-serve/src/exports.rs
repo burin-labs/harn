@@ -359,7 +359,8 @@ impl ExportCatalog {
                     input_schema: schema_resolver.json_schema_for_typed_params(public_params),
                     output_schema: return_type
                         .as_ref()
-                        .and_then(|type_expr| schema_resolver.json_schema_for_type_expr(type_expr)),
+                        .and_then(|type_expr| schema_resolver.json_schema_for_type_expr(type_expr))
+                        .map(harn_vm::tool_registry::tool_handler_output_schema),
                     error_schema: throws
                         .as_ref()
                         .and_then(|type_expr| schema_resolver.json_schema_for_type_expr(type_expr)),

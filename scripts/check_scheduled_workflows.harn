@@ -12,6 +12,10 @@ const REGISTRY_PATH = "scripts/scheduled_workflows.toml"
 
 const WORKFLOW_GLOB = ".github/workflows/*.yml"
 
+// main health reads a bounded window of recent runs, so a threshold above it
+// could never be reached and would watch nothing.
+const MAX_HEALTH_FAILURES = 10
+
 fn repo_relative(path: string) -> string {
   const marker = "/./"
   const index = path.index_of(marker)
@@ -34,6 +38,87 @@ fn scheduled_crons(document: dict) -> list<string> {
     }
   }
   return result.sorted()
+}
+
+fn job_display_names(document: dict) -> list<string> {
+  let names: list<string> = []
+  const jobs = document?.jobs ?? {}
+  for id in jobs.keys() {
+    names = names + [trim(to_string(jobs[id]?.name ?? id))]
+  }
+  return names
+}
+
+/**
+ * Every scheduled suite is either watched by main health or exempt with a
+ * reason, so adding a suite cannot quietly leave it unwatched.
+ */
+fn health_errors(path: string, record: dict, document: dict?) -> list<string> {
+  const failures = record?.health_failures
+  const exempt = trim(to_string(record?.health_exempt ?? ""))
+  const job = trim(to_string(record?.health_job ?? ""))
+  if failures == nil && exempt == "" {
+    return [path + ": registry row sets neither health_failures nor health_exempt"]
+  }
+  if failures != nil && exempt != "" {
+    return [path + ": registry row sets both health_failures and health_exempt"]
+  }
+  if failures == nil {
+    if job != "" {
+      return [path + ": health_job is set on a suite main health does not watch"]
+    }
+    return []
+  }
+  if type_of(failures) != "int" || failures < 1 || failures > MAX_HEALTH_FAILURES {
+    return [
+      path + ": health_failures must be an integer from 1 to " + to_string(MAX_HEALTH_FAILURES),
+    ]
+  }
+  if job != "" && document != nil && !job_display_names(document).contains(job) {
+    return [path + ": health_job names no job in the workflow: " + job]
+  }
+  const title = trim(to_string(record?.health_dispatch_title ?? ""))
+  if title != "" && document != nil
+    && !trim(to_string(document["run-name"] ?? "")).contains(title) {
+    return [
+      path + ": health_dispatch_title is not a title the workflow's run-name can produce: " + title,
+    ]
+  }
+  if record?.health_events != nil && len(strings(record.health_events)) == 0 {
+    return [path + ": health_events is empty"]
+  }
+  if document != nil {
+    const triggers = workflow_triggers(document)
+    for event in health_events(record) {
+      if !triggers.contains(event) {
+        return [path + ": health_events names an event the workflow is not triggered by: " + event]
+      }
+    }
+  }
+  return []
+}
+
+/** The run events a watched suite is judged on; `schedule` unless the row says otherwise. */
+pub fn health_events(record: dict) -> list<string> {
+  const declared = strings(record?.health_events)
+  if len(declared) == 0 {
+    return ["schedule"]
+  }
+  return declared
+}
+
+fn workflow_triggers(document: dict) -> list<string> {
+  const on = document["on"]
+  if type_of(on) == "dict" {
+    return on.keys()
+  }
+  return strings(
+    if type_of(on) == "list" {
+      on
+    } else {
+      [on]
+    },
+  )
 }
 
 pub fn scheduled_workflow_errors(records: list, documents: dict) -> list<string> {
@@ -80,6 +165,7 @@ pub fn scheduled_workflow_errors(records: list, documents: dict) -> list<string>
       errors = errors + [path + ": registry names no stable job identifiers"]
     }
     const document = documents[path]
+    errors = errors + health_errors(path, record, document)
     if document == nil {
       errors = errors + [path + ": registered workflow was not readable"]
       continue
@@ -155,6 +241,30 @@ fn main(harness: Harness) {
       harness.stdio.eprintln("  " + error)
     }
     harness.runtime.exit(1)
+  }
+  // `--health-suites` is how main health learns what to watch: the same
+  // validated registry, one watched suite per line as
+  // `name<TAB>health_failures<TAB>health_events<TAB>health_dispatch_title<TAB>health_job`,
+  // where health_events is comma-separated and an unset dispatch title prints `-`
+  // (an empty field would collapse into its neighbour when split on tabs).
+  if argv.contains("--health-suites") {
+    for record in records {
+      if record?.health_failures != nil {
+        harness.stdio.println(
+          trim(to_string(record.name)) + "\t" + to_string(record.health_failures) + "\t"
+            + health_events(record).join(",")
+            + "\t"
+            + if trim(to_string(record?.health_dispatch_title ?? "")) == "" {
+              "-"
+            } else {
+              trim(to_string(record.health_dispatch_title))
+            }
+            + "\t"
+            + trim(to_string(record?.health_job ?? "")),
+        )
+      }
+    }
+    return nil
   }
   harness.stdio.println(
     CHECK_NAME + ": OK (" + to_string(scanned) + " scheduled workflows, "

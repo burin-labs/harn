@@ -27,6 +27,7 @@ mod collections;
 mod comparison;
 mod control_flow;
 mod exception;
+pub(crate) use exception::{CaughtError, ExceptionHandler};
 mod imports;
 mod iter;
 mod logical;

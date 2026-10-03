@@ -829,5 +829,20 @@ mod tests {
             report(&runtime).await
         };
         assert_eq!(governed, probe::expected_report(&[probe::SESSION]));
+
+        let _session = probe::InstalledSession::install(Some(probe::inherited_session()));
+        assert_eq!(
+            report(&runtime).await,
+            probe::expected_report(&probe::INHERITED_REPORT)
+        );
+        // A provider runtime whose own config declares the key still gets it.
+        let declared = AcpProviderRuntime {
+            env: BTreeMap::from([(probe::PROVIDER.to_string(), "declared".to_string())]),
+            ..runtime
+        };
+        assert_eq!(
+            report(&declared).await,
+            probe::expected_report(&probe::NAMES)
+        );
     }
 }

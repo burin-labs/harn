@@ -29,7 +29,7 @@ permissions:
 jobs:
   refresh:
     name: Refresh Harn check cache (${{ matrix.family }})
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # A running refresh is never cancelled: under a steady stream of pushes a
     # cancelling group would kill every run before it saved. GitHub keeps the
     # running job and the newest pending one.

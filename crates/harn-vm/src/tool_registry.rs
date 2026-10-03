@@ -13,11 +13,14 @@ use crate::value::{VmClosure, VmDictExt, VmError, VmValue};
 
 mod cli_projection;
 mod contract;
+pub(crate) mod handler_result;
+pub use handler_result::tool_handler_output_schema;
 mod invocation;
 pub use contract::*;
+pub(crate) use invocation::tool_registry_catalog_for_tool;
 pub use invocation::{
     application_error_cli_envelope, application_error_mcp_result, classify_tool_failure,
-    classify_tool_result, tool_runtime_error_summary, ToolFailureClassification,
+    classify_tool_result, result_to_json, tool_runtime_error_summary, ToolFailureClassification,
     ToolInvocationError, ToolInvocationOutcome,
 };
 
@@ -179,12 +182,6 @@ fn executable_tools_matching(
         });
     }
     Ok(executable)
-}
-
-/// Convert a handler result to portable JSON without stringifying unsupported
-/// runtime-only values such as closures or capability handles.
-pub fn result_to_json(value: &VmValue) -> Result<JsonValue, String> {
-    crate::llm::helpers::vm_value_to_export_json_strict(value, "result")
 }
 
 /// Validate one definition as it enters a registry. Cross-entry invariants are

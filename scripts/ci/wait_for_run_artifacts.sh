@@ -8,11 +8,28 @@
 # without weakening the producer's fail-closed result.
 #
 # The wait spends the workflow token's API budget, which every job in the
-# repository shares. So it reads only the producer's state until the producer
-# has started (no artifact can exist before then), backs off exponentially,
-# gives up by name when the producer never starts, and waits out a rate limit
-# for as long as the refusing response itself says, never guessing.
+# repository shares, and a run starts about ten of these waits at once. On
+# 2026-10-02 a slow producer kept ten of them reading two endpoints every 15s
+# for 25 minutes, and the installation limit failed all ten together (run
+# 36987728246). So the inventory is read as a conditional request, which
+# GitHub answers with a 304 that the limit does not count while nothing has
+# been uploaded, and the producer's state, which changes with every job in the
+# run and so always costs a request, is read on only every Nth poll once the
+# producer is running. The wait reads only the producer's state until the
+# producer has started (no artifact can exist before then), backs off
+# exponentially, gives up by name when the producer never starts, and waits
+# out a rate limit for as long as the refusing response itself says, never
+# guessing.
+#
+# A producer that never leaves the queue exits 3, not 1, with a
+# "Producer never started" error annotation that names the runner labels it
+# queued on. Starvation is a capacity fact about a runner pool, not a defect in
+# the commit, and on 2026-10-02 ten consumers reported it only in their own
+# logs while the run's verdict named an unrelated lane (run 37042288569).
 set -euo pipefail
+
+# The exit status reserved for a producer that never started.
+producer_never_started_status=3
 
 if [ "$#" -eq 0 ]; then
   echo "usage: $0 ARTIFACT [ARTIFACT ...]" >&2
@@ -52,6 +69,11 @@ max_rate_limit_seconds="${HARN_EXT_ARTIFACT_WAIT_RATE_LIMIT_MAX_SECONDS:-240}"
 max_interval_seconds="${HARN_EXT_ARTIFACT_WAIT_MAX_INTERVAL_SECONDS:-60}"
 # A producer still queued after this long is starved, not slow.
 max_queue_seconds="${HARN_EXT_ARTIFACT_WAIT_MAX_QUEUE_SECONDS:-1800}"
+# Once the producer is running, its state is re-read on every Nth poll only.
+# The inventory read on the polls between is conditional and normally free;
+# the state read is what tells a producer that finished without the artifact
+# from one still building, so it is paced rather than dropped.
+state_every_polls="${HARN_EXT_ARTIFACT_WAIT_STATE_EVERY_POLLS:-1}"
 
 case "$run_attempt" in
   ''|*[!0-9]*|0) echo "GITHUB_RUN_ATTEMPT must be a positive integer" >&2; exit 2 ;;
@@ -70,6 +92,9 @@ case "$max_interval_seconds" in
 esac
 case "$max_queue_seconds" in
   ''|*[!0-9]*) echo "HARN_EXT_ARTIFACT_WAIT_MAX_QUEUE_SECONDS must be a non-negative integer" >&2; exit 2 ;;
+esac
+case "$state_every_polls" in
+  ''|*[!0-9]*|0) echo "HARN_EXT_ARTIFACT_WAIT_STATE_EVERY_POLLS must be a positive integer" >&2; exit 2 ;;
 esac
 
 artifacts=("$@")
@@ -107,22 +132,89 @@ gh_read() {
   return 1
 }
 
+# The inventory's last ETag and the names it listed. A 304 against that ETag
+# means the same names, read without spending the limit.
+artifacts_etag=""
+artifact_names=""
+# The headers of the last refused inventory read, which name its own reset.
+refused_headers=""
+
+# One conditional read of the inventory's first page. Sets `artifact_names`
+# and returns 0 on a 200 that holds the whole inventory or on a 304; returns
+# 2 when the inventory spans pages, and 1 when the read failed.
+read_artifacts_conditionally() {
+  local response status body headers
+  local -a request=(api -i)
+  if [[ -n $artifacts_etag ]]; then
+    request+=(-H "If-None-Match: ${artifacts_etag}")
+  fi
+  request+=("$api_path")
+  response=$(gh "${request[@]}" 2> "$error_file" | tr -d '\r') || true
+  status=$(sed -n '1s/^HTTP\/[0-9.]* \([0-9][0-9]*\).*/\1/p' <<< "$response")
+  headers=$(sed '/^$/q' <<< "$response")
+  case "$status" in
+    304)
+      [[ -n $artifacts_etag ]] || return 1
+      return 0
+      ;;
+    200)
+      body=$(sed '1,/^$/d' <<< "$response")
+      if ! jq -e '(.total_count | type) == "number" and (.artifacts | type) == "array"' \
+        <<< "$body" > /dev/null 2>&1; then
+        api_error="unreadable artifact inventory"
+        return 1
+      fi
+      if ! jq -e '.total_count <= (.artifacts | length)' <<< "$body" > /dev/null; then
+        return 2
+      fi
+      if ! artifact_names=$(jq -er '
+        .artifacts
+        | map(if (.name | type) != "string" or (.expired | type) != "boolean"
+              then error("invalid artifact") else . end)
+        | map(select(.expired == false) | .name) | join("\n")
+      ' <<< "$body" 2>/dev/null); then
+        api_error="invalid artifact in inventory"
+        artifacts_etag=""
+        return 1
+      fi
+      artifacts_etag=$(sed -n 's/^[Ee][Tt]ag:[[:space:]]*//p' <<< "$headers" | head -n 1)
+      return 0
+      ;;
+  esac
+  api_error=$(head -n 3 "$error_file" | tr '\n' ' ')
+  if grep -qi 'rate limit' "$error_file" || grep -qi 'rate limit' <<< "$response"; then
+    rate_limited=1
+    rate_limited_path=$api_path
+    refused_headers=$headers
+  fi
+  return 1
+}
+
 # An unreadable page is uncertainty, never an empty inventory or completion.
 read_artifacts() {
-  local pages names
+  local pages names read_status=0
   missing=("${artifacts[@]}")
-  if ! gh_read "$api_path"; then
+  read_artifacts_conditionally || read_status=$?
+  if [ "$read_status" -eq 1 ]; then
     return 1
   fi
-  if ! names=$(jq -er '
-    if type != "array" or length == 0 then error("missing artifact pages") else . end
-    | map(if (.artifacts | type) != "array" then error("invalid artifact page") else .artifacts end)
-    | add
-    | map(if (.name | type) != "string" or (.expired | type) != "boolean"
-          then error("invalid artifact") else . end)
-    | map(select(.expired == false) | .name) | join("\n")
-  ' <<< "$pages" 2>/dev/null); then
-    return 1
+  names=$artifact_names
+  if [ "$read_status" -eq 2 ]; then
+    # More artifacts than one page holds: read every page, unconditionally.
+    artifacts_etag=""
+    if ! gh_read "$api_path"; then
+      return 1
+    fi
+    if ! names=$(jq -er '
+      if type != "array" or length == 0 then error("missing artifact pages") else . end
+      | map(if (.artifacts | type) != "array" then error("invalid artifact page") else .artifacts end)
+      | add
+      | map(if (.name | type) != "string" or (.expired | type) != "boolean"
+            then error("invalid artifact") else . end)
+      | map(select(.expired == false) | .name) | join("\n")
+    ' <<< "$pages" 2>/dev/null); then
+      return 1
+    fi
   fi
   missing=()
   for artifact in "${artifacts[@]}"; do
@@ -156,7 +248,25 @@ read_producer_state() {
             or .status == "pending" or .status == "requested") and .conclusion == null
       then .status
       else error("unknown producer status") end
-  ' <<< "$pages" 2>/dev/null)
+  ' <<< "$pages" 2>/dev/null) || return 1
+  # The labels the producer asked for, which name the pool it queues on.
+  producer_labels=$(jq -r --arg name "$producer_job" '
+    map(.jobs) | add | map(select(.name == $name)) | .[0].labels
+    | if type == "array" and length > 0 then join(",") else "unreported" end
+  ' <<< "$pages" 2>/dev/null) || producer_labels=unreported
+}
+
+# Fail as starved: a distinct status, an annotation the run page shows, and
+# the same line in the job summary.
+fail_producer_never_started() {
+  local message
+  message="producer '${producer_job}' never started: still ${state} on runner labels [${producer_labels}] after $1s, beyond the ${max_queue_seconds}s this wait allows; missing artifacts: ${artifacts[*]}"
+  echo "$message" >&2
+  echo "::error title=Producer never started::${message}"
+  if [[ -n ${GITHUB_STEP_SUMMARY:-} ]]; then
+    printf '### Producer never started\n\n%s\n' "$message" >> "$GITHUB_STEP_SUMMARY" || true
+  fi
+  exit "$producer_never_started_status"
 }
 
 # Seconds until the limit that refused the read lifts, from that refusal's own
@@ -167,7 +277,13 @@ read_producer_state() {
 # names no reset, so the caller can say so instead of guessing.
 seconds_to_reset() {
   local headers retry_after reset now
-  headers=$(gh api -i "$rate_limited_path" 2> /dev/null | tr -d '\r' || true)
+  # A refused inventory read already carries its headers; re-asking would
+  # spend another request against the limit that refused it.
+  if [[ -n $refused_headers ]]; then
+    headers=$refused_headers
+  else
+    headers=$(gh api -i "$rate_limited_path" 2> /dev/null | tr -d '\r' || true)
+  fi
   retry_after=$(sed -n 's/^[Rr]etry-[Aa]fter:[[:space:]]*\([0-9][0-9]*\)$/\1/p' <<< "$headers" | head -n 1)
   if [[ -n $retry_after ]]; then
     echo "$retry_after"
@@ -200,11 +316,27 @@ rate_limit_seconds=0
 queued_since=""
 wait_seconds=$interval_seconds
 missing=("${artifacts[@]}")
+state=""
+producer_labels=unreported
+polls_since_state_read=0
+# True when this poll may reuse a running producer's last observed state
+# instead of reading it again. A queued or completed producer is always
+# re-read: the first bounds starvation, the second ends the wait.
+reuse_running_state() {
+  [[ $state == in_progress ]] || return 1
+  polls_since_state_read=$((polls_since_state_read + 1))
+  if (( polls_since_state_read >= state_every_polls )); then
+    polls_since_state_read=0
+    return 1
+  fi
+  return 0
+}
 while :; do
   attempt=$((attempt + 1))
   api_error=""
   rate_limited=0
-  if read_producer_state; then
+  refused_headers=""
+  if reuse_running_state || read_producer_state; then
     unmeasured_attempts=0
     unmeasured_seconds=0
     case "$state" in
@@ -213,8 +345,7 @@ while :; do
         now=$(date +%s)
         [[ -z $queued_since ]] && queued_since=$now
         if (( now - queued_since > max_queue_seconds )); then
-          echo "producer '${producer_job}' never started: still ${state} after $((now - queued_since))s, beyond the ${max_queue_seconds}s this wait allows; missing artifacts: ${artifacts[*]}" >&2
-          exit 1
+          fail_producer_never_started "$((now - queued_since))"
         fi
         missing=("${artifacts[@]}")
         ;;

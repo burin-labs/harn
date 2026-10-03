@@ -342,6 +342,52 @@ fn detailed_run_samples_from_api(data: any, topology_epoch: string) -> list<CiDe
   return samples
 }
 
+/**
+ * Which capacity class ran a job, read from its runner name and `runs-on`
+ * labels.
+ *
+ * Vendor runners are classified by their label prefix before anything else.
+ * Blacksmith and Ubicloud both register just in time as self-hosted runners,
+ * so `runner.environment` and a `self-hosted` label cannot tell their paid
+ * minutes from the owned pool's free ones. GitHub's larger runners carry
+ * their size label (`ubuntu-8core`) and their own runner name, not the
+ * `GitHub Actions` name of the standard ones.
+ */
+pub fn runner_class(runner_name: string, labels: list) -> string {
+  const names = labels.map({ label -> to_string(label) }).to_list()
+  if runner_name.starts_with("blacksmith-")
+    || names.any({ label -> label.starts_with("blacksmith-") }) {
+    return "blacksmith"
+  }
+  if names.any({ label -> label.starts_with("ubicloud-") }) {
+    return "ubicloud"
+  }
+  if names.contains("self-hosted") {
+    return "self-hosted"
+  }
+  const hosted_labels = names.filter(
+    { label ->
+      label.starts_with("ubuntu-") || label.starts_with("macos-")
+        || label.starts_with("windows-")
+    },
+  )
+    .to_list()
+  // Larger runners bill per minute even on a public repository; the
+  // standard-size ones do not.
+  if hosted_labels.any({ label -> regex_match("-([0-9]+-?cores?|x?large)$", label) != nil }) {
+    return "github-larger"
+  }
+  if runner_name.starts_with("GitHub Actions ") || len(hosted_labels) > 0 {
+    return "github-hosted"
+  }
+  return "unassigned"
+}
+
+/** True when a runner class bills per minute for this public repository. */
+pub fn runner_class_is_paid(class: string) -> bool {
+  return ["blacksmith", "ubicloud", "github-larger"].contains(class)
+}
+
 fn detailed_job_samples_from_api(
   run_id: int,
   run_created_at: string,
@@ -364,21 +410,7 @@ fn detailed_job_samples_from_api(
           + [{run_id: run_id, job: name, name: step_name, duration_ms: step_duration_ms}]
       }
     }
-    const runner_name = to_string(raw?.runner_name ?? "")
-    const labels = raw?.labels ?? []
-    const runner = if runner_name.starts_with("blacksmith-")
-      || labels.any({ label -> to_string(label).starts_with("blacksmith-") }) {
-      "blacksmith"
-    } else if labels.contains("self-hosted") {
-      "self-hosted"
-    } else if runner_name.starts_with("GitHub Actions ")
-      || labels.contains("ubuntu-latest")
-      || labels.contains("macos-latest")
-      || labels.contains("windows-latest") {
-      "github-hosted"
-    } else {
-      "unassigned"
-    }
+    const runner = runner_class(to_string(raw?.runner_name ?? ""), raw?.labels ?? [])
     samples = samples
       + [
         {

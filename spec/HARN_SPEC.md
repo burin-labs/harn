@@ -1769,8 +1769,10 @@ defer {
 ```
 
 Registers a block to run when the enclosing lexical scope exits — on normal
-fallthrough, on `return`, on `break` / `continue` out of an enclosing loop,
-or on an uncaught throw. Multiple `defer` blocks in the same scope execute
+fallthrough, on `return` (including the early return of a postfix `?`), on
+`break` / `continue` out of an enclosing loop,
+or on an error leaving the scope, including one raised by a called function
+or a failing operation. Multiple `defer` blocks in the same scope execute
 in LIFO (last-registered, first-executed) order, similar to Zig's `defer`.
 The deferred block runs in the scope where it was declared.
 
@@ -3163,8 +3165,16 @@ try { ... } finally { ... }
 try { ... } catch e { ... }
 ```
 
-`return`, `break`, and `continue` inside a try body with a finally block will
-execute the finally block before the control flow transfer completes.
+An error reaches the finally block wherever it was raised: an inline `throw`,
+a called or imported function, or a failing operation such as division by
+zero. The block runs exactly once and the original error then continues to
+propagate. A `throw` from the finally block replaces the original error, and a
+`return` from it discards the original error.
+
+`return`, `break`, `continue`, and the early return of a postfix `?` inside a
+try body with a finally block will execute the finally block before the
+control flow transfer completes. A `throw` from that finally block replaces the
+transfer, and a `return` from it replaces the returned value.
 
 The finally block's return value is discarded — the overall expression value
 comes from the try or catch body.
@@ -6646,6 +6656,7 @@ migration to another machine.
 | Function | Description |
 |---|---|
 | `checkpoint(key, value)` | Save `value` at `key`; writes to disk immediately |
+| `harness.runtime.checkpoint_insert(key, value)` | Retain the first value atomically; return `{inserted: bool, value: unknown}` |
 | `checkpoint_get(key)` | Retrieve saved value, or `nil` if absent |
 | `checkpoint_exists(key)` | Return `true` if `key` is present (even if value is `nil`) |
 | `checkpoint_delete(key)` | Remove a single key; no-op if absent |
@@ -6654,6 +6665,18 @@ migration to another machine.
 
 `checkpoint_exists` is preferable to `checkpoint_get(key) == nil` when `nil`
 is a valid checkpoint value.
+
+Runs sharing a state root and pipeline name share one checkpoint store. Mutations
+hold an exclusive sidecar-file lock and reload the current file before changing
+it, so another run's committed keys survive. Reads reload durable state on each
+call. A lock that cannot be acquired within five seconds causes an error.
+
+`harness.runtime.checkpoint_insert` returns `inserted: true` to the call that stored the initial
+value and `inserted: false` to later calls, which receive the retained value.
+An existing `nil` counts as a retained value. Checkpoint mutations share the
+`checkpoint.write` autonomy decision across runtime methods and legacy builtins.
+This operation chooses one initial
+value; it does not make a stage's external effects execute exactly once.
 
 Only an absent checkpoint file starts an empty store. If the file is
 unreadable, is not valid JSON, or is not a JSON object, every builtin except

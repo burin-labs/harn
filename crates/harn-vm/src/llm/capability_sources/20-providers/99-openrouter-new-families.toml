@@ -3,9 +3,22 @@
 # overrides only need to set `native_tools` + `preferred_tool_format`.
 # The audit test trips on missing entries because provider_family
 # inheritance does not cover specific OR slugs by itself.
+#
+# `top_k_supported = true` on OpenRouter rows (here and in
+# 30-qwen-routed.toml and 40-deepseek-reasoning.toml) is set only where every
+# catalogued route under the rule answered a `top_k` request. Harn always
+# sends `top_k` with `provider.require_parameters`, so OpenRouter routes it
+# only to endpoints that declare it and returns 404 "No endpoints found that
+# can handle the requested parameters" when none do. Evidence: provider
+# contract probe run 37030330916 plus re-probes on 2026-10-02, cross-checked
+# against each model's `supported_parameters` in OpenRouter's /models index.
+# Negative controls that stay unsupported: x-ai/grok-4.7, the openai/gpt-*
+# Luna and Mini rows, google/gemini-3.5-flash-lite, and
+# mistralai/mistral-small-2603 all returned that 404.
 
 [[provider.openrouter]]
 model_match = "minimax/minimax-m3*"
+top_k_supported = true
 native_tools = true
 preferred_tool_format = "native"
 text_tool_wire_format_supported = true
@@ -25,6 +38,7 @@ thinking_block_style = "inline"
 
 [[provider.openrouter]]
 model_match = "minimax/minimax-m2.7*"
+top_k_supported = true
 native_tools = true
 preferred_tool_format = "native"
 text_tool_wire_format_supported = true
@@ -32,6 +46,7 @@ structured_output = "delimited"
 
 [[provider.openrouter]]
 model_match = "minimax/minimax-m2*"
+top_k_supported = true
 native_tools = true
 preferred_tool_format = "native"
 text_tool_wire_format_supported = true
@@ -65,6 +80,7 @@ reasoning_disable_supported = false
 
 [[provider.openrouter]]
 model_match = "z-ai/glm-5*"
+top_k_supported = true
 native_tools = true
 preferred_tool_format = "native"
 tool_mode_parity_notes = "2026-08-15 cross-host native re-probe: single clean `message.tool_calls`, empty content, no `<tool_call>` markup. OpenRouter z-ai/glm-5.2 verified on tool_choice=auto and required, sync and streaming."
@@ -169,6 +185,7 @@ serving_precision = "trusted"
 
 [[provider.openrouter]]
 model_match = "stepfun/step-3.7-flash"
+top_k_supported = true
 native_tools = true
 preferred_tool_format = "native"
 tool_mode_parity = "interchangeable"
@@ -190,12 +207,20 @@ thinking_block_style = "inline"
 # family-specific capability rows through the OpenAI-compatible transport
 # fallback. Keep them explicit so the catalog audit can catch future rows that
 # need a real tool contract decision.
+#
+# Every Grok route answers `reasoning: {enabled: false}` with 400 "Reasoning is
+# mandatory for this endpoint and cannot be disabled" (plain Harn calls with
+# thinking unset on 4.5, 4.6, and 4.7, 2026-10-02; the provider contract
+# probe's control request surfaced it). Declaring that reasoning cannot be
+# disabled makes Harn omit the directive.
 [[provider.openrouter]]
 model_match = "x-ai/grok-*"
 native_tools = true
 preferred_tool_format = "native"
 structured_output = "native"
 thinking_modes = ["adaptive"]
+reasoning_none_supported = false
+reasoning_disable_supported = false
 prompt_caching = true
 vision_supported = true
 text_tool_wire_format_supported = true
@@ -227,6 +252,7 @@ thinking_block_style = "inline"
 
 [[provider.openrouter]]
 model_match = "cohere/north-mini-code:free"
+top_k_supported = true
 native_tools = true
 preferred_tool_format = "native"
 structured_output = "native"
@@ -257,6 +283,7 @@ thinking_block_style = "inline"
 
 [[provider.openrouter]]
 model_match = "openrouter/free"
+top_k_supported = true
 native_tools = true
 preferred_tool_format = "native"
 structured_output = "native"

@@ -1,175 +1,151 @@
 //! The native stack contract for threads that drive the Harn VM.
 //!
-//! Harn has two independent stack hazards, each with its own owner:
-//!
-//! * Walking an arbitrarily deep *value* — `x = [x]` in a loop — is made
-//!   stack-size independent by [`crate::value::recursion`], which grows the
-//!   native stack on demand and tears values down iteratively.
-//! * Walking an arbitrarily deep *program* — parse, type-check, compile, and
-//!   evaluate all recurse over nested syntax — is not. It relies on the thread
-//!   simply having enough stack, and that is what [`RUNTIME_STACK_SIZE`] is.
-//!
-//! The second contract lives entirely in the hosts: it holds only if every
-//! thread that ends up running the VM asks for the size. Getting it wrong is
-//! unusually expensive, because a stack overflow aborts the process instead of
-//! failing one request, so this module also carries the structural check that
-//! keeps new hosts honest.
+//! The contract and the only sanctioned ways to create such a thread live in
+//! [`harn_parser::runtime_stack`], the lowest crate that recurses over a
+//! program. This module re-exports them under the names hosts already use and
+//! carries the workspace scans that keep every crate on them.
 
-/// Native stack size a thread needs in order to drive the Harn VM.
-///
-/// Compilation and execution walk nested program structure with recursive
-/// frames, which can exceed Rust's 2 MiB default thread stack. A host that
-/// runs the VM on a thread it spawns must request this size explicitly.
-///
-/// Relying on the ambient default is not safe, and neither is relying on
-/// `RUST_MIN_STACK`: that variable is set by the CI test lanes but not by any
-/// shipped binary, so a host that depends on it passes its own tests and then
-/// aborts the whole process — a stack overflow is not a catchable panic — the
-/// first time a customer runs a deep enough script.
-///
-/// The size is set by the deepest descent the runtime promises to *refuse*
-/// rather than the deepest it expects to run. A nested agent descent costs
-/// roughly 2 MiB of native stack per level, so the previous 16 MiB could carry
-/// only seven levels while the nested-execution budget declares eight: the
-/// refusal was undeliverable, and the process aborted on the level that should
-/// have been denied. A bound the stack cannot reach is not a bound.
-pub const RUNTIME_STACK_SIZE: usize = 32 * 1024 * 1024;
+pub use harn_parser::runtime_stack::{builder, scope, spawn, RuntimeScope};
 
-/// Run `body` on a thread that holds the [`RUNTIME_STACK_SIZE`] contract.
-///
-/// A caller that drives the VM from a thread it did not create borrows
-/// whatever stack that thread was given. The test harness is where this keeps
-/// happening: a case that builds a Tokio runtime on the libtest thread creates
-/// no thread of its own, so it runs the VM on libtest's stack. That stack is
-/// large enough only because every CI lane exports `RUST_MIN_STACK`, and a
-/// developer machine without it aborts the whole test binary on one ordinary
-/// agent loop (harn#7962). An abort is not a failed case: every later case in
-/// the binary silently never runs.
-///
-/// Naming the thread the contract binds is the fix. A host that already spawns
-/// its own VM thread with [`RUNTIME_STACK_SIZE`] does not need this; it exists
-/// so a caller running on a borrowed stack can state the size once, at the
-/// entry point, instead of depending on an environment variable no shipped
-/// binary sets.
-///
-/// Panics propagate to the caller unchanged, so a failing assertion inside
-/// `body` still fails its own test.
+/// [`harn_parser::runtime_stack::RUNTIME_STACK_SIZE`], defined here as well so
+/// `harn_vm::RUNTIME_STACK_SIZE` stays a local item of this published crate.
+pub const RUNTIME_STACK_SIZE: usize = harn_parser::runtime_stack::RUNTIME_STACK_SIZE;
+
+/// [`harn_parser::runtime_stack::on_vm_stack`] under its existing
+/// `harn_vm::on_vm_stack` path.
 pub fn on_vm_stack<R: Send>(body: impl FnOnce() -> R + Send) -> R {
-    std::thread::scope(|scope| {
-        std::thread::Builder::new()
-            .name("harn-vm-contract-stack".to_owned())
-            .stack_size(RUNTIME_STACK_SIZE)
-            .spawn_scoped(scope, body)
-            .expect("spawn a thread holding the VM stack contract")
-            .join()
-            .unwrap_or_else(|payload| std::panic::resume_unwind(payload))
-    })
+    harn_parser::runtime_stack::on_vm_stack(body)
 }
 
 #[cfg(test)]
 mod tests {
-    /// How much source to read past a spawn before deciding what it does.
+    /// How much source to read past a runtime builder before deciding.
     const WINDOW: usize = 600;
 
-    /// Spawning forms that create a thread with the ambient default stack
-    /// unless the call site says otherwise.
-    const SPAWNS: [&str; 2] = ["std::thread::spawn(", "thread::Builder::new()"];
+    /// The file allowed to create a thread directly, and this scanner, whose
+    /// negative-control fixtures spell out every bypass.
+    const EXEMPT: [&str; 2] = [
+        "harn-parser/src/runtime_stack.rs",
+        "harn-vm/src/runtime_stack.rs",
+    ];
 
-    /// Building a current-thread Tokio runtime on a freshly spawned thread is
-    /// what "this thread is about to drive the VM" looks like across the
-    /// workspace: it is how every serve transport, the orchestrator's ACP
-    /// worker, and the CLI's scaffold and test workers are shaped.
-    const DRIVES_VM: &str = "tokio::runtime::Builder";
+    /// Ways to create a thread that bypass the owner: `std::thread::spawn`,
+    /// `std::thread::scope` (whose `Scope::spawn` always takes the default
+    /// stack), and `std::thread::Builder`, imported or called by path; plus a
+    /// `stack_size` call anywhere else, which would give the size a second
+    /// author.
+    fn bare_thread_creations(source: &str) -> Vec<usize> {
+        let by_path = regex::Regex::new(r"\bthread::(spawn|scope|Builder)\b").expect("regex");
+        let by_import =
+            regex::Regex::new(r"\bthread::\{[^}]*\b(spawn|scope|Builder)\b").expect("regex");
 
-    /// Either idiom for honoring the contract: the inline
-    /// `.stack_size(..._STACK_SIZE)` that `harn-cli` uses, or a helper such as
-    /// `harn-serve`'s `vm_thread` that applies it centrally (those call sites
-    /// match neither spawn form, so they never reach this check).
-    const HONORS_CONTRACT: &str = "stack_size(";
-
-    /// The source a spawn is judged on: everything from the spawn up to the
-    /// next attributed item, at any indentation.
-    ///
-    /// Without the cut, a one-line spawn reads the runtime built by the
-    /// *following* function and reports a thread that does no VM work.
-    #[expect(
-        clippy::string_slice,
-        reason = "len is a sum of whole split_inclusive line lengths"
-    )]
-    fn spawn_body(window: &str) -> &str {
-        match window
-            .split_inclusive('\n')
-            .take_while(|line| !line.trim_start().starts_with("#["))
-            .map(str::len)
-            .sum::<usize>()
-        {
-            0 => "",
-            len => &window[..len],
+        let mut lines = Vec::new();
+        let mut in_import = String::new();
+        for (index, line) in source.lines().enumerate() {
+            let code = line.split("//").next().unwrap_or_default();
+            // A brace import can span lines; judge it once it closes.
+            if !in_import.is_empty() || code.contains("thread::{") {
+                in_import.push_str(code);
+                if !code.contains('}') {
+                    continue;
+                }
+                let import = std::mem::take(&mut in_import);
+                if by_import.is_match(&import) {
+                    lines.push(index + 1);
+                }
+                continue;
+            }
+            if by_path.is_match(code) || code.contains(".stack_size(") {
+                lines.push(index + 1);
+            }
         }
+        lines
     }
 
-    /// Every thread in the workspace that builds a Tokio runtime to drive the
-    /// VM must ask for [`super::RUNTIME_STACK_SIZE`].
+    /// Workspace crates whose normal dependencies reach `harn-parser`: every
+    /// one of them can parse or run Harn code on a thread it creates.
+    fn crates_that_reach_the_parser(crates_dir: &std::path::Path) -> Vec<String> {
+        let mut deps = std::collections::BTreeMap::<String, Vec<String>>::new();
+        for entry in std::fs::read_dir(crates_dir).expect("read crates dir") {
+            let dir = entry.expect("crate entry").path();
+            let Ok(manifest) = std::fs::read_to_string(dir.join("Cargo.toml")) else {
+                continue;
+            };
+            let manifest: toml::Table = toml::from_str(&manifest).expect("parse Cargo.toml");
+            let name = dir
+                .file_name()
+                .expect("crate dir")
+                .to_string_lossy()
+                .into_owned();
+            let normal = manifest
+                .get("dependencies")
+                .and_then(toml::Value::as_table)
+                .map(|table| table.keys().cloned().collect())
+                .unwrap_or_default();
+            deps.insert(name, normal);
+        }
+        let mut reaching = std::collections::BTreeSet::from(["harn-parser".to_owned()]);
+        loop {
+            let before = reaching.len();
+            for (name, normal) in &deps {
+                if normal.iter().any(|dep| reaching.contains(dep)) {
+                    reaching.insert(name.clone());
+                }
+            }
+            if reaching.len() == before {
+                break;
+            }
+        }
+        reaching.into_iter().collect()
+    }
+
+    /// Every thread a parser-reaching crate creates goes through
+    /// `harn_parser::runtime_stack`.
     ///
-    /// This is deliberately a *workspace* scan rather than a per-crate one.
-    /// The same defect shipped simultaneously in `harn-serve`, `harn-cli`, and
-    /// `harn-vm` (harn#6165) precisely because each crate's own tests could
-    /// only see that crate — and because every Rust test lane here exports
-    /// `RUST_MIN_STACK=16777216`, which makes an unsized spawn large enough in
-    /// CI and nowhere else.
-    ///
-    /// Scope is `crates/`, which is every workspace member and so every shipped
-    /// host. `bench/` is out, and builds its runtimes on the current thread
-    /// rather than a spawned one, so there is nothing there to catch.
-    ///
-    /// What this does *not* catch, so nobody over-trusts it: a thread that
-    /// drives the VM without building a Tokio runtime on itself. Of the ~76
-    /// non-test spawn sites in the workspace this judges only the ~10 shaped
-    /// like a transport or worker. `run_dap_adapter`, the counterfactual plan
-    /// runner, and the connector worker loop all drive the VM through a plain
-    /// function call and were found by reading, not by this scan. Deciding
-    /// those needs a call graph; recognizing the idiom that actually recurs
-    /// does not, and that idiom is where every instance so far has lived.
+    /// The scan used to judge only threads that built a Tokio runtime. A worker
+    /// pool that only parses was invisible to it, and `harn_modules`'s parallel
+    /// import loader shipped on 2 MiB stacks that overflowed on a dozen nesting
+    /// levels (harn#9218). Deciding which threads reach the parser needs a call
+    /// graph; refusing every other way to create a thread does not. Test code
+    /// under `src/` is in scope too, because a test that runs Harn on a default
+    /// stack passes only under the lanes' `RUST_MIN_STACK`.
     #[test]
-    fn vm_driving_threads_ask_for_the_runtime_stack() {
+    fn parser_reaching_crates_create_threads_only_through_the_owner() {
         let crates_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .parent()
             .expect("harn-vm lives below crates");
+        let reaching = crates_that_reach_the_parser(crates_dir);
+        for expected in ["harn-modules", "harn-vm", "harn-cli", "harn-serve"] {
+            assert!(
+                reaching.iter().any(|name| name == expected),
+                "{expected} reaches the parser but the dependency walk missed it: {reaching:?}"
+            );
+        }
 
         let mut offenders = Vec::new();
         let mut scanned = 0usize;
-        for entry in walkdir::WalkDir::new(crates_dir)
-            .into_iter()
-            .filter_map(Result::ok)
-            .filter(|entry| {
-                entry.file_type().is_file()
-                    && entry.path().extension().and_then(std::ffi::OsStr::to_str) == Some("rs")
-                    && entry
-                        .path()
-                        .components()
-                        .any(|component| component.as_os_str() == "src")
-                    && entry.file_name() != "runtime_stack.rs"
-            })
-        {
-            scanned += 1;
-            let source = std::fs::read_to_string(entry.path()).expect("read Rust source");
-            for pattern in SPAWNS {
-                for (offset, _) in source.match_indices(pattern) {
-                    let end = (offset + WINDOW).min(source.len());
-                    // A window can land mid-codepoint; the next match still
-                    // covers this file and every marker here is ASCII.
-                    let Some(window) = source.get(offset..end) else {
-                        continue;
-                    };
-                    let window = spawn_body(window);
-                    if window.contains(DRIVES_VM) && !window.contains(HONORS_CONTRACT) {
-                        #[expect(
-                            clippy::string_slice,
-                            reason = "offset is a match_indices offset on source"
-                        )]
-                        let line = 1 + source[..offset].matches('\n').count();
-                        offenders.push(format!("{}:{line}", entry.path().display()));
-                    }
+        for name in &reaching {
+            for entry in walkdir::WalkDir::new(crates_dir.join(name).join("src"))
+                .into_iter()
+                .filter_map(Result::ok)
+                .filter(|entry| {
+                    entry.file_type().is_file()
+                        && entry.path().extension().and_then(std::ffi::OsStr::to_str) == Some("rs")
+                })
+            {
+                let relative = entry
+                    .path()
+                    .strip_prefix(crates_dir)
+                    .expect("scan stays under crates")
+                    .to_string_lossy()
+                    .replace('\\', "/");
+                if EXEMPT.contains(&relative.as_str()) {
+                    continue;
+                }
+                scanned += 1;
+                let source = std::fs::read_to_string(entry.path()).expect("read Rust source");
+                for line in bare_thread_creations(&source) {
+                    offenders.push(format!("{relative}:{line}"));
                 }
             }
         }
@@ -177,13 +153,49 @@ mod tests {
         assert!(scanned > 100, "scan found only {scanned} sources to check");
         assert!(
             offenders.is_empty(),
-            "these threads build a Tokio runtime to drive the VM but take Rust's \
-             2 MiB default stack, so a deep script aborts the process instead of \
-             failing one request. Give them harn_vm::RUNTIME_STACK_SIZE — inline \
-             via `.stack_size(..)`, or through a helper like harn-serve's \
-             `vm_thread`:\n  {}",
+            "these sites create a thread in a crate that can parse or run Harn code \
+             without `harn_parser::runtime_stack`, so it gets Rust's 2 MiB default \
+             and a deep program aborts the process. Use `runtime_stack::spawn`, \
+             `runtime_stack::builder()`, or `runtime_stack::scope`:\n  {}",
             offenders.join("\n  ")
         );
+    }
+
+    /// The negative control: the matcher flags every bypass and none of the
+    /// sanctioned forms, so a clean scan means clean sources.
+    #[test]
+    fn bare_thread_matcher_flags_bypasses_and_spares_the_owner_api() {
+        let flagged = [
+            "let h = std::thread::spawn(move || run());",
+            "    thread::spawn(f);",
+            "std::thread::scope(|s| { s.spawn(|| 1); });",
+            "let b = std::thread::Builder::new();",
+            "use std::thread::{Builder, JoinHandle};",
+            "use std::thread::spawn;",
+            "builder().stack_size(4096)",
+            "use std::thread::{\n    JoinHandle,\n    Builder,\n};",
+        ];
+        for source in flagged {
+            assert!(
+                !bare_thread_creations(source).is_empty(),
+                "missed a bypass: {source}"
+            );
+        }
+        let spared = [
+            "harn_parser::runtime_stack::spawn(move || run());",
+            "runtime_stack::scope(|scope| { scope.spawn(|| 1); });",
+            "runtime_stack::builder().name(n).spawn(f)",
+            "tokio::runtime::Builder::new_multi_thread().thread_stack_size(RUNTIME_STACK_SIZE)",
+            "tokio::task::spawn_blocking(f);",
+            "use std::thread::{JoinHandle, ScopedJoinHandle};",
+            "let id = std::thread::current().id(); // not std::thread::spawn here",
+        ];
+        for source in spared {
+            assert!(
+                bare_thread_creations(source).is_empty(),
+                "flagged a sanctioned form: {source}"
+            );
+        }
     }
 
     /// A multi-thread Tokio runtime spawns its own worker threads, and those

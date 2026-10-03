@@ -96,7 +96,7 @@ mod tests {
 
         let owner_a_ready = Arc::clone(&owners_ready);
         let owner_a_reset = Arc::clone(&owner_b_reset);
-        let owner_a = std::thread::spawn(move || {
+        let owner_a = crate::runtime_stack::spawn(move || {
             super::super::open_or_create_for_test(Some(owner_a_session.clone()));
             record_session_changed_path(&owner_a_session, "src/owner-a.rs");
             owner_a_ready.wait();
@@ -112,7 +112,7 @@ mod tests {
 
         let owner_b_ready = Arc::clone(&owners_ready);
         let owner_b_reset = Arc::clone(&owner_b_reset);
-        let owner_b = std::thread::spawn(move || {
+        let owner_b = crate::runtime_stack::spawn(move || {
             super::super::open_or_create_for_test(Some(owner_b_session));
             owner_b_ready.wait();
             super::super::reset_session_store();

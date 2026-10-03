@@ -33,8 +33,8 @@ git -C "$source_repo" archive refs/remotes/origin/main \
   scripts/prune_stale_targets.sh scripts/lib/file_time.sh \
   | tar -x -C "$scratch"
 
-# The ordinary setup path avoids the full size walk. This once-daily path can
-# afford it and caps each managed target root at 128 GiB unless configured
-# otherwise. A live compiler and the calling entry still outrank this ceiling.
-export HARN_TARGET_GC_MAX_BYTES="${HARN_TARGET_GC_MAX_BYTES:-137438953472}"
-"$scratch/scripts/prune_stale_targets.sh" --measure-bytes "$@"
+# The host policy (retention cap, size ceiling, full size walk) lives in the
+# fetched collector, not here, so a policy change reaches every host on its next
+# run without reinstalling this wrapper. Disk-pressure triggers call this same
+# wrapper. A live compiler and the calling entry still outrank every bound.
+"$scratch/scripts/prune_stale_targets.sh" --host-maintenance "$@"

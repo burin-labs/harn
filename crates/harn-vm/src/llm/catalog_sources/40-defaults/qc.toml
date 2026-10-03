@@ -5,7 +5,10 @@
 [qc_defaults]
 anthropic = "claude-haiku-4-5-20251001"
 openai = "gpt-6-luna"
-openrouter = "google/gemini-2.5-flash"
+# OpenRouter retires google/gemini-2.5-flash on 2026-10-20 (typed
+# `expiration_date` on its /models index, read 2026-10-01). Gemini 3.5
+# Flash-Lite is the direct Gemini QC default and the 2.5 row's successor.
+openrouter = "google/gemini-3.5-flash-lite"
 ollama = "llama3.2"
 # `local` previously pointed at gpt-4o, a hosted OpenAI model that the
 # bundled local server does not serve. Use the

@@ -21,6 +21,8 @@ mod test_util;
 #[path = "../support/required_pr_e2e.rs"]
 mod required_pr_e2e;
 
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+mod acp_confinement_cli;
 mod acp_registry_manifest;
 mod acp_server_cli;
 mod agent_run_command_argv_coercion;
@@ -32,10 +34,17 @@ mod canon_dispatch;
 mod check_fmt_json_cli;
 mod check_result_cache;
 mod check_strict_cli;
+mod checkpoint_concurrency;
 mod codemod_dispatch;
 mod command_probe_parent_liveness;
 mod conformance_json_cli;
 mod conformance_process_lifetime_e2e;
+#[cfg(unix)]
+mod connect_legacy_recovery;
+#[cfg(unix)]
+mod connect_secret_env_redaction;
+#[cfg(unix)]
+mod connect_secret_store;
 mod coverage_cli;
 mod decision_route_admission;
 mod demo_cli_e2e;
@@ -112,6 +121,7 @@ mod runs_export_training_cli;
 mod runs_view_cli;
 mod scaffold_dispatch;
 mod scan_dispatch;
+mod secret_absence;
 #[cfg(unix)]
 mod sidecar_version_cli;
 mod skills_cli;
@@ -123,6 +133,7 @@ mod trace_import_dispatch;
 mod trace_prefix_stability_cli;
 mod trusted_host_dispatch_cli;
 mod try_dispatch;
+mod typed_tool_outcomes;
 mod usage_cli;
 mod user_test_cli;
 mod user_test_reports_cli;
@@ -130,6 +141,18 @@ mod version_dispatch;
 mod workflow_authoring_eval;
 mod workflow_cli;
 mod workflow_patch_cli;
+
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+const _: [(&str, fn()); 2] = [
+    (
+        required_pr_e2e::CASES[15],
+        acp_confinement_cli::confine_workspace_holds_the_server_and_its_commands_to_the_workspace,
+    ),
+    (
+        required_pr_e2e::CASES[16],
+        acp_confinement_cli::without_confine_workspace_the_same_write_lands_outside,
+    ),
+];
 
 const _: [(&str, fn()); 12] = [
     (

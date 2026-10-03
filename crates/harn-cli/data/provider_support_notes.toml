@@ -359,6 +359,10 @@ id = "together"
 catalog_provider = "together"
 recommended_model = "MiniMaxAI/MiniMax-M3"
 
+# GPT-5.4 Nano shuts down 2027-04-01. It stays the recommendation until a
+# replacement is probed: on 2026-10-01 the probe key's free-tier team got
+# HTTP 403 on openai/gpt-6-luna, google/gemini-3.1-flash-lite, and
+# anthropic/claude-haiku-4.5, and only this route answered.
 [[entry]]
 id = "vercel_ai_gateway"
 catalog_provider = "vercel_ai_gateway"

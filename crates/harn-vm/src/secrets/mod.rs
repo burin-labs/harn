@@ -12,12 +12,18 @@ mod env;
 mod file;
 mod keyring;
 mod memory;
+#[cfg(all(
+    feature = "native-keyring",
+    unix,
+    not(any(target_os = "macos", target_os = "ios", target_os = "android"))
+))]
+mod secret_service_lock;
 
 pub use env::EnvSecretProvider;
 pub use file::{FileSecretProvider, SECRET_FILE_PATH_ENV};
 pub use keyring::{
-    keychain_interaction_allowed, KeyringSecretProvider, NativeKeyring, NativeKeyringError,
-    NativeKeyringUnavailable, SECRET_INTERACTIVE_ENV,
+    keychain_interaction_allowed, KeyringSecretProvider, NativeKeyring, NativeKeyringAvailability,
+    NativeKeyringError, NativeKeyringUnavailable, SECRET_INTERACTIVE_ENV,
 };
 pub use memory::MemorySecretProvider;
 
@@ -382,6 +388,77 @@ pub struct SecretLeaseGrant {
     pub expires_at_unix_ms: i64,
 }
 
+/// One provider a chain asked for a secret, and where it looked.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct ConsultedSecretProvider {
+    /// Provider kind as named in `HARN_SECRET_PROVIDERS` (`env`, `keyring`, ...).
+    pub provider: String,
+    /// Where that provider looked, e.g. the environment variable name or the
+    /// keyring service and account. Never contains secret material.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub locator: Option<String>,
+}
+
+/// Why a provider from the default chain was not consulted.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum SecretProviderExclusion {
+    /// An explicit provider-chain variable left this provider out.
+    ChainOverride { variable: String, value: String },
+}
+
+impl fmt::Display for SecretProviderExclusion {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::ChainOverride { variable, value } => {
+                write!(f, "disabled by {variable}={value}")
+            }
+        }
+    }
+}
+
+/// A default-chain provider that this chain does not consult.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct ExcludedSecretProvider {
+    pub provider: String,
+    pub reason: SecretProviderExclusion,
+}
+
+/// Every provider in a chain reported the secret absent.
+///
+/// Carries the consulted providers and the default providers this chain left
+/// out, so "missing" can be told apart from "stored in a provider this process
+/// was configured not to read".
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct SecretAbsence {
+    pub id: SecretId,
+    pub consulted: Vec<ConsultedSecretProvider>,
+    #[serde(default)]
+    pub excluded: Vec<ExcludedSecretProvider>,
+}
+
+impl fmt::Display for SecretAbsence {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "secret '{}' not found in providers: ", self.id)?;
+        if self.consulted.is_empty() {
+            write!(f, "(none)")?;
+        }
+        for (index, consulted) in self.consulted.iter().enumerate() {
+            if index > 0 {
+                write!(f, ", ")?;
+            }
+            write!(f, "{}", consulted.provider)?;
+            if let Some(locator) = &consulted.locator {
+                write!(f, " ({locator})")?;
+            }
+        }
+        for excluded in &self.excluded {
+            write!(f, "; {} {}", excluded.provider, excluded.reason)?;
+        }
+        Ok(())
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum SecretError {
@@ -389,6 +466,8 @@ pub enum SecretError {
         provider: String,
         id: SecretId,
     },
+    /// A provider chain consulted every provider and none held the secret.
+    NotFoundInChain(SecretAbsence),
     Unsupported {
         provider: String,
         operation: &'static str,
@@ -427,7 +506,7 @@ impl SecretError {
     /// absence only when every provider in it reported absence.
     pub fn is_not_found(&self) -> bool {
         match self {
-            Self::NotFound { .. } => true,
+            Self::NotFound { .. } | Self::NotFoundInChain(_) => true,
             Self::All(errors) => !errors.is_empty() && errors.iter().all(Self::is_not_found),
             _ => false,
         }
@@ -451,6 +530,7 @@ impl fmt::Display for SecretError {
             Self::NotFound { provider, id } => {
                 write!(f, "{provider}: secret '{id}' not found")
             }
+            Self::NotFoundInChain(absence) => write!(f, "{absence}"),
             Self::Unsupported {
                 provider,
                 operation,
@@ -697,6 +777,30 @@ pub trait SecretProvider: Send + Sync {
 
     fn namespace(&self) -> &str;
     fn supports_versions(&self) -> bool;
+
+    /// Where this provider looks for `id` — an environment variable name, a
+    /// keyring service and account, a file path. Diagnostics only; it never
+    /// contains secret material.
+    fn locator(&self, _id: &SecretId) -> Option<String> {
+        None
+    }
+
+    /// The provider kind as named in `HARN_SECRET_PROVIDERS` (`env`,
+    /// `keyring`, `file`). Write receipts name it so a caller can tell which
+    /// backend stored a value.
+    fn kind(&self) -> &str {
+        self.namespace()
+    }
+
+    /// Whether a successful `put` outlives this process.
+    ///
+    /// The environment provider only mutates the running process, so a chain
+    /// routes writes past it to the first provider that persists. Without
+    /// that, `env,keyring` would accept every write into a variable that
+    /// vanishes at exit and never reach the keyring.
+    fn persists_writes(&self) -> bool {
+        true
+    }
 }
 
 pub fn ensure_scoped_secret_access_allowed(
@@ -728,6 +832,7 @@ pub fn is_runtime_reserved_secret_namespace(namespace: &str) -> bool {
 pub struct ChainSecretProvider {
     namespace: String,
     providers: Vec<Arc<dyn SecretProvider>>,
+    excluded: Vec<ExcludedSecretProvider>,
 }
 
 impl ChainSecretProvider {
@@ -735,11 +840,85 @@ impl ChainSecretProvider {
         Self {
             namespace: namespace.into(),
             providers,
+            excluded: Vec::new(),
         }
+    }
+
+    /// Record default-chain providers this chain deliberately leaves out, so
+    /// an absence names them instead of reading as a definitive "missing".
+    pub fn with_excluded(mut self, excluded: Vec<ExcludedSecretProvider>) -> Self {
+        self.excluded = excluded;
+        self
     }
 
     pub fn providers(&self) -> &[Arc<dyn SecretProvider>] {
         &self.providers
+    }
+
+    pub fn excluded(&self) -> &[ExcludedSecretProvider] {
+        &self.excluded
+    }
+
+    /// Store `value` in the first provider whose writes persist, returning
+    /// that provider's kind. Providers that only affect this process (the
+    /// environment) are written only when the chain has no persistent
+    /// provider at all; a chain that has one never reports success for a
+    /// write that will vanish at exit.
+    async fn put_to_write_target(
+        &self,
+        id: &SecretId,
+        value: SecretBytes,
+    ) -> Result<String, SecretError> {
+        if self.providers.is_empty() {
+            return Err(SecretError::NoProviders {
+                namespace: self.namespace.clone(),
+            });
+        }
+        let persistent = self
+            .providers
+            .iter()
+            .filter(|provider| provider.persists_writes())
+            .collect::<Vec<_>>();
+        let targets = if persistent.is_empty() {
+            self.providers.iter().collect::<Vec<_>>()
+        } else {
+            persistent
+        };
+
+        let mut errors = Vec::new();
+        for provider in targets {
+            match provider.put(id, value.reborrow()).await {
+                Ok(()) => return Ok(provider.kind().to_string()),
+                Err(error) => errors.push(error),
+            }
+        }
+        Err(SecretError::All(errors))
+    }
+
+    /// Fold per-provider failures into one error. When every provider reported
+    /// absence the result is a typed [`SecretAbsence`] naming what was
+    /// consulted and what was excluded; any other failure keeps every error.
+    fn chain_failure(&self, id: &SecretId, errors: Vec<SecretError>) -> SecretError {
+        if errors.len() != self.providers.len() || !errors.iter().all(SecretError::is_not_found) {
+            return SecretError::All(errors);
+        }
+        let consulted = self
+            .providers
+            .iter()
+            .zip(&errors)
+            .map(|(provider, error)| ConsultedSecretProvider {
+                provider: match error {
+                    SecretError::NotFound { provider, .. } => provider.clone(),
+                    _ => provider.namespace().to_string(),
+                },
+                locator: provider.locator(id),
+            })
+            .collect();
+        SecretError::NotFoundInChain(SecretAbsence {
+            id: id.clone(),
+            consulted,
+            excluded: self.excluded.clone(),
+        })
     }
 }
 
@@ -760,7 +939,7 @@ impl SecretProvider for ChainSecretProvider {
             }
         }
 
-        Err(SecretError::All(errors))
+        Err(self.chain_failure(id, errors))
     }
 
     async fn contains(&self, id: &SecretId) -> Result<bool, SecretError> {
@@ -790,32 +969,28 @@ impl SecretProvider for ChainSecretProvider {
     }
 
     async fn put(&self, id: &SecretId, value: SecretBytes) -> Result<(), SecretError> {
-        if self.providers.is_empty() {
-            return Err(SecretError::NoProviders {
-                namespace: self.namespace.clone(),
+        self.put_to_write_target(id, value).await.map(|_| ())
+    }
+
+    async fn write_scoped(
+        &self,
+        request: SecretWriteRequest,
+    ) -> Result<SecretWriteReceipt, SecretError> {
+        ensure_scoped_secret_access_allowed("write", &request.id)?;
+        if request.options.ttl.is_some() {
+            return Err(SecretError::Unsupported {
+                provider: self.namespace.clone(),
+                operation: "write_ttl",
             });
         }
-
-        let mut last_value = Some(value);
-        let mut errors = Vec::new();
-        for (index, provider) in self.providers.iter().enumerate() {
-            let attempt_value = if index + 1 == self.providers.len() {
-                last_value
-                    .take()
-                    .expect("final secret write attempt missing value")
-            } else {
-                last_value
-                    .as_ref()
-                    .expect("intermediate secret write attempt missing value")
-                    .reborrow()
-            };
-            match provider.put(id, attempt_value).await {
-                Ok(()) => return Ok(()),
-                Err(error) => errors.push(error),
-            }
-        }
-
-        Err(SecretError::All(errors))
+        let provider = self.put_to_write_target(&request.id, request.value).await?;
+        Ok(SecretWriteReceipt {
+            provider,
+            id: request.id,
+            scope: request.scope,
+            version: None,
+            expires_at_unix_ms: None,
+        })
     }
 
     async fn rotate(&self, id: &SecretId) -> Result<RotationHandle, SecretError> {
@@ -941,28 +1116,88 @@ pub fn configured_secret_chain() -> Result<ChainSecretProvider, SecretError> {
     configured_default_chain(configured_secret_namespace())
 }
 
+/// The provider chain this process is configured to consult, before any
+/// provider is constructed. One owner for the parse so the runtime chain,
+/// `harn doctor`, and startup banners report the same list.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct SecretChainPlan {
+    /// Provider kinds in consultation order.
+    pub providers: Vec<String>,
+    /// Default-chain providers the configuration leaves out.
+    pub excluded: Vec<ExcludedSecretProvider>,
+    /// The raw `HARN_SECRET_PROVIDERS` value when it is set.
+    pub override_value: Option<String>,
+}
+
+impl SecretChainPlan {
+    /// Plan for an explicit chain value; `None` means the default chain.
+    pub fn from_value(value: Option<&str>) -> Self {
+        let raw = value.unwrap_or(DEFAULT_SECRET_PROVIDER_CHAIN);
+        let providers = raw
+            .split(',')
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+            .map(str::to_string)
+            .collect::<Vec<_>>();
+        let excluded = match value {
+            Some(value) => DEFAULT_SECRET_PROVIDER_CHAIN
+                .split(',')
+                .filter(|default| !providers.iter().any(|name| name == default))
+                .map(|default| ExcludedSecretProvider {
+                    provider: default.to_string(),
+                    reason: SecretProviderExclusion::ChainOverride {
+                        variable: SECRET_PROVIDER_CHAIN_ENV.to_string(),
+                        value: value.to_string(),
+                    },
+                })
+                .collect(),
+            None => Vec::new(),
+        };
+        Self {
+            providers,
+            excluded,
+            override_value: value.map(str::to_string),
+        }
+    }
+
+    /// Plan for this process's `HARN_SECRET_PROVIDERS`.
+    pub fn configured() -> Self {
+        Self::from_value(std::env::var(SECRET_PROVIDER_CHAIN_ENV).ok().as_deref())
+    }
+
+    /// `env -> keyring`, plus each excluded default provider and why.
+    pub fn display(&self) -> String {
+        let mut rendered = if self.providers.is_empty() {
+            "(none)".to_string()
+        } else {
+            self.providers.join(" -> ")
+        };
+        for excluded in &self.excluded {
+            rendered.push_str(&format!("; {} {}", excluded.provider, excluded.reason));
+        }
+        rendered
+    }
+}
+
 pub fn configured_default_chain(
     namespace: impl Into<String>,
 ) -> Result<ChainSecretProvider, SecretError> {
     let namespace = namespace.into();
-    let configured = std::env::var(SECRET_PROVIDER_CHAIN_ENV)
-        .unwrap_or_else(|_| DEFAULT_SECRET_PROVIDER_CHAIN.to_string());
+    let plan = SecretChainPlan::configured();
     let mut providers: Vec<Arc<dyn SecretProvider>> = Vec::new();
 
-    for raw_name in configured.split(',') {
-        let provider_name = raw_name.trim();
-        if provider_name.is_empty() {
-            continue;
-        }
-        match provider_name {
+    for provider_name in &plan.providers {
+        match provider_name.as_str() {
             "env" => providers.push(Arc::new(EnvSecretProvider::new(namespace.clone()))),
             "keyring" => providers.push(Arc::new(KeyringSecretProvider::new(namespace.clone()))),
             "file" => {
                 let path = std::env::var_os(SECRET_FILE_PATH_ENV)
                     .filter(|path| !path.is_empty())
-                    .ok_or_else(|| SecretError::InvalidConfig(format!(
-                        "the file secret provider requires {SECRET_FILE_PATH_ENV}"
-                    )))?;
+                    .ok_or_else(|| {
+                        SecretError::InvalidConfig(format!(
+                            "the file secret provider requires {SECRET_FILE_PATH_ENV}"
+                        ))
+                    })?;
                 providers.push(Arc::new(FileSecretProvider::new(path)?));
             }
             other => {
@@ -973,7 +1208,7 @@ pub fn configured_default_chain(
         }
     }
 
-    Ok(ChainSecretProvider::new(namespace, providers))
+    Ok(ChainSecretProvider::new(namespace, providers).with_excluded(plan.excluded))
 }
 
 pub(crate) fn emit_secret_access_event(provider: &str, id: &SecretId) {
@@ -1005,249 +1240,4 @@ pub(crate) fn emit_secret_access_event(provider: &str, id: &SecretId) {
 }
 
 #[cfg(test)]
-mod tests {
-    use std::sync::{Arc, Mutex};
-
-    use async_trait::async_trait;
-
-    use super::*;
-
-    struct FakeProvider {
-        namespace: String,
-        result: Mutex<Vec<Result<SecretBytes, SecretError>>>,
-    }
-
-    impl FakeProvider {
-        fn new(
-            namespace: impl Into<String>,
-            result: Vec<Result<SecretBytes, SecretError>>,
-        ) -> Self {
-            Self {
-                namespace: namespace.into(),
-                result: Mutex::new(result),
-            }
-        }
-    }
-
-    #[async_trait]
-    impl SecretProvider for FakeProvider {
-        async fn get(&self, _id: &SecretId) -> Result<SecretBytes, SecretError> {
-            self.result
-                .lock()
-                .expect("fake provider poisoned")
-                .remove(0)
-        }
-
-        async fn put(&self, _id: &SecretId, _value: SecretBytes) -> Result<(), SecretError> {
-            Err(SecretError::Unsupported {
-                provider: self.namespace.clone(),
-                operation: "put",
-            })
-        }
-
-        async fn rotate(&self, _id: &SecretId) -> Result<RotationHandle, SecretError> {
-            Err(SecretError::Unsupported {
-                provider: self.namespace.clone(),
-                operation: "rotate",
-            })
-        }
-
-        async fn list(&self, _prefix: &SecretId) -> Result<Vec<SecretMeta>, SecretError> {
-            Err(SecretError::Unsupported {
-                provider: self.namespace.clone(),
-                operation: "list",
-            })
-        }
-
-        fn namespace(&self) -> &str {
-            &self.namespace
-        }
-
-        fn supports_versions(&self) -> bool {
-            false
-        }
-    }
-
-    #[test]
-    fn secret_bytes_debug_is_redacted() {
-        let secret = SecretBytes::from("abcd");
-        assert_eq!(format!("{secret:?}"), "SecretBytes { redacted: 4 bytes }");
-    }
-
-    #[test]
-    fn parse_secret_ref_accepts_namespace_name_and_version() {
-        let id = parse_secret_ref("harn-secret://provider/anthropic-api-key@7")
-            .expect("parse should succeed")
-            .expect("secret ref should be detected");
-        assert_eq!(id.namespace, "provider");
-        assert_eq!(id.name, "anthropic-api-key");
-        assert_eq!(id.version, SecretVersion::Exact(7));
-    }
-
-    #[test]
-    fn parse_secret_ref_ignores_non_refs_and_rejects_malformed_refs() {
-        assert!(parse_secret_ref("plain-api-key")
-            .expect("non-ref should be accepted")
-            .is_none());
-        assert!(parse_secret_ref("harn-secret://missing-name")
-            .expect_err("missing slash should fail")
-            .to_string()
-            .contains("invalid secret reference"));
-    }
-
-    #[test]
-    fn parse_secret_id_accepts_canonical_and_ref_forms() {
-        let canonical = parse_secret_id("google_workspace/access-token@2").expect("canonical id");
-        assert_eq!(canonical.namespace, "google_workspace");
-        assert_eq!(canonical.name, "access-token");
-        assert_eq!(canonical.version, SecretVersion::Exact(2));
-
-        let reference =
-            parse_secret_id("harn-secret://google_workspace/refresh-token").expect("ref id");
-        assert_eq!(reference, connector_refresh_token_id("google_workspace"));
-
-        assert_eq!(
-            connector_oauth_token_id("google_workspace").name,
-            CONNECTOR_OAUTH_TOKEN_SECRET_NAME
-        );
-        assert_eq!(
-            connector_access_token_id("google_workspace").name,
-            CONNECTOR_ACCESS_TOKEN_SECRET_NAME
-        );
-    }
-
-    #[test]
-    fn secret_bytes_zeroes_on_drop() {
-        let probe = Arc::new(Mutex::new(None));
-        let mut secret = SecretBytes::from("super-secret");
-        secret.attach_drop_probe(probe.clone());
-        drop(secret);
-
-        let dropped = probe
-            .lock()
-            .expect("drop probe poisoned")
-            .clone()
-            .expect("probe should capture bytes");
-        assert!(dropped.iter().all(|byte| *byte == 0));
-    }
-
-    #[tokio::test]
-    async fn chain_secret_provider_falls_through_to_next_hit() {
-        let id = SecretId::new("harn.test", "api-key");
-        let first = Arc::new(FakeProvider::new(
-            "first",
-            vec![Err(SecretError::NotFound {
-                provider: "first".to_string(),
-                id: id.clone(),
-            })],
-        ));
-        let second = Arc::new(FakeProvider::new(
-            "second",
-            vec![Ok(SecretBytes::from("value"))],
-        ));
-        let chain = ChainSecretProvider::new("harn/test", vec![first, second]);
-
-        let secret = chain.get(&id).await.expect("chain should resolve");
-        let exposed = secret.with_exposed(|bytes| bytes.to_vec());
-        assert_eq!(exposed, b"value");
-    }
-
-    #[tokio::test]
-    async fn chain_secret_provider_returns_all_errors_when_everything_fails() {
-        let id = SecretId::new("harn.test", "missing");
-        let first = Arc::new(FakeProvider::new(
-            "first",
-            vec![Err(SecretError::NotFound {
-                provider: "first".to_string(),
-                id: id.clone(),
-            })],
-        ));
-        let second = Arc::new(FakeProvider::new(
-            "second",
-            vec![Err(SecretError::Backend {
-                provider: "second".to_string(),
-                message: "boom".to_string(),
-            })],
-        ));
-        let chain = ChainSecretProvider::new("harn/test", vec![first, second]);
-
-        let error = chain.get(&id).await.expect_err("chain should fail");
-        match error {
-            SecretError::All(errors) => {
-                assert_eq!(errors.len(), 2);
-                assert!(matches!(errors[0], SecretError::NotFound { .. }));
-                assert!(matches!(errors[1], SecretError::Backend { .. }));
-            }
-            other => panic!("expected aggregated errors, got {other:?}"),
-        }
-    }
-
-    #[tokio::test]
-    async fn scoped_secret_access_denies_runtime_reserved_namespaces() {
-        let chain = ChainSecretProvider::new(
-            "harn/test",
-            vec![Arc::new(FakeProvider::new("unused", Vec::new()))],
-        );
-
-        for namespace in ["provenance", "harn.provenance", "harn.provenance.agent"] {
-            let id = SecretId::new(namespace, "harn-cli.ed25519.seed");
-            let error = chain
-                .read_scoped(SecretReadRequest {
-                    id: id.clone(),
-                    scope: SecretScope::custom("provenance", None),
-                    audit: SecretAuditContext::default(),
-                })
-                .await
-                .expect_err("reserved namespace should be denied before backend access");
-            match error {
-                SecretError::AccessDenied {
-                    operation,
-                    id: denied_id,
-                    message,
-                } => {
-                    assert_eq!(operation, "read");
-                    assert_eq!(denied_id, id);
-                    assert!(message.contains("reserved for Harn runtime provenance signing"));
-                }
-                other => panic!("expected access-denied error, got {other:?}"),
-            }
-        }
-    }
-
-    #[tokio::test]
-    async fn keyring_provider_round_trips_and_zeroes_on_drop() {
-        let provider = KeyringSecretProvider::with_store(
-            "harn.test",
-            keyring_core::mock::Store::new().unwrap(),
-        );
-        let id = SecretId::new("", format!("mock-{}", uuid::Uuid::now_v7()));
-        provider
-            .put(&id, SecretBytes::from("round-trip-secret"))
-            .await
-            .expect("mock keyring write should succeed");
-
-        let probe = Arc::new(Mutex::new(None));
-        let mut secret = provider
-            .get(&id)
-            .await
-            .expect("mock keyring read should succeed");
-        assert_eq!(
-            secret.with_exposed(|bytes| bytes.to_vec()),
-            b"round-trip-secret"
-        );
-        secret.attach_drop_probe(probe.clone());
-        drop(secret);
-
-        let dropped = probe
-            .lock()
-            .expect("drop probe poisoned")
-            .clone()
-            .expect("probe should capture bytes");
-        assert!(dropped.iter().all(|byte| *byte == 0));
-
-        provider
-            .delete(&id)
-            .await
-            .expect("mock keyring delete should succeed");
-    }
-}
+mod tests;

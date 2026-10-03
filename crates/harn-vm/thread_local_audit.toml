@@ -19,6 +19,7 @@ thread_private_test = "Test harness state. Safe to keep thread-local because tes
 captured = [
   "EXECUTION_POLICY_STACK",
   "EXECUTION_APPROVAL_POLICY_STACK",
+  "PREPARED_APPROVAL_POLICY",
   "OPERATOR_APPROVAL_GRANT_STACK",
   "COMMAND_POLICY_STACK",
   "DYNAMIC_PERMISSION_STACK",
@@ -61,6 +62,8 @@ captured = [
   "ACTIVE_EVENT_LOG",
   "MCP_CALL_BUDGET",
   "PG_QUERY_BUDGET",
+  "LLM_COST_BUDGET",
+  "LLM_TOKEN_BUDGET",
   "ACTIVE_TOOL_CALL_CANCELLATION_REGISTRY",
   "ACTIVE_WORKER_REGISTRY",
   "ACTIVE_DAEMON_REGISTRY",
@@ -283,8 +286,8 @@ category = "logical_task"
 plan = "task_local_or_explicit"
 
 [[thread_local]]
-path = "src/llm/cost.rs"
-statics = ["LLM_BUDGET", "LLM_ACCUMULATED_COST", "LLM_TOKEN_BUDGET", "LLM_ACCUMULATED_TOKENS", "LLM_OBSERVED_USAGE"]
+path = "src/llm/cost/budget.rs"
+statics = ["LLM_COST_BUDGET", "LLM_TOKEN_BUDGET"]
 category = "logical_task"
 plan = "task_local_or_explicit"
 
@@ -485,7 +488,7 @@ plan = "task_local_or_explicit"
 
 [[thread_local]]
 path = "src/orchestration/policy/mod.rs"
-statics = ["EXECUTION_POLICY_STACK", "EXECUTION_APPROVAL_POLICY_STACK", "TRUSTED_BRIDGE_CALL_DEPTH"]
+statics = ["EXECUTION_POLICY_STACK", "EXECUTION_APPROVAL_POLICY_STACK", "PREPARED_APPROVAL_POLICY", "TRUSTED_BRIDGE_CALL_DEPTH"]
 category = "logical_task"
 plan = "task_local_or_explicit"
 

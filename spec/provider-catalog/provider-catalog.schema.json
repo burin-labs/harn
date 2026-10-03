@@ -98,6 +98,12 @@
     "auth": {
       "additionalProperties": false,
       "properties": {
+        "credential_env": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
         "env": {
           "items": {
             "type": "string"

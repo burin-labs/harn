@@ -26,7 +26,7 @@ name: CI
 on: [push]
 jobs:
   noop:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - run: "true"
 EOF
@@ -44,7 +44,7 @@ lint-actions:
 EOF
 cat >> "$work/.github/workflows/ci.yml" <<'EOF'
   lint:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - run: "true"
 EOF

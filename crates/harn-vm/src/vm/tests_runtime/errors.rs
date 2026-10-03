@@ -231,3 +231,27 @@ try {
 }
 
 // --- Concurrency tests ---
+
+/// harn#9189: cleanup that runs while a callee's runtime error unwinds must
+/// rethrow the original error, not a `Thrown` string copy located at the
+/// cleanup. Before cleanup ran on callee errors this surfaced unchanged; the
+/// regression to guard is cleanup restringifying it.
+#[test]
+fn cleanup_rethrow_preserves_original_runtime_error() {
+    for cleanup in [
+        "defer { harness.stdio.log(\"cleanup\") }\ndivide(0)",
+        "try { divide(0) } finally { harness.stdio.log(\"cleanup\") }",
+    ] {
+        let source = format!(
+            "pipeline t(harness: Harness, task: unknown) {{\n\
+             fn divide(divisor: int) -> int {{ return 1 / divisor }}\n\
+             {cleanup}\n\
+             }}"
+        );
+        let err = run_harn_result(&source).unwrap_err();
+        assert!(
+            matches!(&err, VmError::Runtime(message) if message == "Division by zero (line 2)"),
+            "{cleanup}: {err:?}"
+        );
+    }
+}

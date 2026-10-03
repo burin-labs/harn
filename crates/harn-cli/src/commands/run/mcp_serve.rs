@@ -230,9 +230,11 @@ pub(crate) async fn run_file_mcp_serve(
     path: &str,
     card_source: Option<&str>,
     mode: RunFileMcpServeMode,
+    host_boundary: Option<harn_vm::llm::api::InferenceBoundary>,
 ) {
     use std::process;
 
+    let _environment = super::environment::host_environment_scope(host_boundary);
     let watch = matches!(&mode, RunFileMcpServeMode::Stdio { watch: true });
     let loaded = match load_mcp_runtime(path, card_source, watch).await {
         Ok(runtime) => runtime,

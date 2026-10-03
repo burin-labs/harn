@@ -319,6 +319,73 @@ pub const PURE_CASES: &[PureCase] = &[
         input_json: "3",
         expected_json: "3.0",
     },
+    PureCase {
+        // harn#9189: cleanup runs once for errors raised by a callee, not
+        // only for an inline `throw`. Runtime failures such as division by
+        // zero are terminal in the portable kernel, so only throws appear.
+        id: "cleanup-runs-once-for-callee-errors",
+        source: r#"
+            fn fail(message: string) -> int { throw message }
+            fn relay(message: string) -> int { return fail(message) + 1 }
+            fn reduce(input: list<string>) -> {finally_runs: int, defer_runs: int, caught: list<string>} {
+              let finally_runs = 0
+              let defer_runs = 0
+              let caught = []
+              for label in input {
+                try {
+                  defer { defer_runs = defer_runs + 1 }
+                  try {
+                    if label == "direct" {
+                      fail(label)
+                    } else {
+                      relay(label)
+                    }
+                  } finally {
+                    finally_runs = finally_runs + 1
+                  }
+                } catch (error) {
+                  caught = caught + [error]
+                }
+              }
+              return {finally_runs: finally_runs, defer_runs: defer_runs, caught: caught}
+            }
+        "#,
+        entry: "reduce",
+        input_json: r#"["direct","relayed"]"#,
+        expected_json: r#"{"finally_runs":2,"defer_runs":2,"caught":["direct","relayed"]}"#,
+    },
+    PureCase {
+        // harn#9201: `?` returns an `Err` through pending cleanup. The
+        // `finally` overrides the early return, so the result only reads
+        // `cleanup` when that cleanup ran.
+        id: "try-operator-runs-pending-finally",
+        source: r#"
+            fn check(value: int) -> Result<int, string> {
+              if value < 0 { return Result.Err("negative") }
+              return Result.Ok(value)
+            }
+            fn guarded(value: int) -> Result<int, string> {
+              try {
+                const checked = check(value)?
+                return Result.Ok(checked + 1)
+              } finally {
+                if value < 0 { return Result.Err("cleanup") }
+              }
+              return Result.Err("fell through")
+            }
+            fn reduce(input: list<int>) -> list<list<any>> {
+              let rendered = []
+              for value in input {
+                const result = guarded(value)
+                rendered = rendered + [[result.variant, result.fields]]
+              }
+              return rendered
+            }
+        "#,
+        entry: "reduce",
+        input_json: "[-1,4]",
+        expected_json: r#"[["Err",["cleanup"]],["Ok",[5]]]"#,
+    },
 ];
 
 /// Runtime failures that every portable executor must agree on.

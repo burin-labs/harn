@@ -7,7 +7,7 @@ fn concurrent_native_calls_share_one_reservation_and_unknown_usage_keeps_it() {
     let scope = AdmissionScope::default();
     let release = Arc::new(std::sync::Barrier::new(3));
     let (sent, received) = std::sync::mpsc::channel();
-    std::thread::scope(|threads| {
+    crate::runtime_stack::scope(|threads| {
         for _ in 0..2 {
             let scope = scope.clone();
             let release = release.clone();

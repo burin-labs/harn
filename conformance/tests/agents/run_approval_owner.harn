@@ -1,0 +1,83 @@
+import { agent_dispatch_tool_call } from "std/agent/primitives"
+
+struct ApprovalProbe {
+  success: bool
+  marker: string
+}
+
+fn main(harness: Harness) {
+  const tools = tool_define(
+    tool_registry(),
+    "probe",
+    "Approval probe",
+    {
+      handler: { _ ->
+        ApprovalProbe {success: true, marker: "executed"}
+      },
+      parameters: {},
+      returns: {
+        type: "object",
+        properties: {success: {type: "boolean"}, marker: {type: "string"}},
+        required: ["success", "marker"],
+      },
+    },
+  )
+  const call = {id: "probe", name: "probe", arguments: {}}
+  const asking = {require_approval: ["probe"]}
+  const unavailable = agent_dispatch_tool_call(
+    harness.tools,
+    call,
+    tools,
+    {approval_policy: asking},
+  )
+  assert(unavailable.ok == false, "an unanswered ask must refuse dispatch")
+  assert(unavailable.denial.gate == "approval_unavailable", "the unavailable gate must be explicit")
+  const reviewed = agent_dispatch_tool_call(
+    harness.tools,
+    call,
+    tools,
+    {
+      approval_policy: asking,
+      approval_reviewer: { _ ->
+        {approved: true, reviewer_answered: true, rationale: "probe is authorized"}
+      },
+    },
+  )
+  assert(
+    reviewed.ok == true && contains(reviewed.rendered_result, "executed"),
+    "review must reach the tool",
+  )
+  const granted = agent_dispatch_tool_call(
+    harness.tools,
+    call,
+    tools,
+    {
+      approval_policy: {
+        rules: [
+          {source: "mode", action: "ask", match: {tool: "probe"}},
+          {source: "user", action: "allow", match: {tool: "probe"}},
+        ],
+      },
+    },
+  )
+  assert(
+    granted.ok == true && contains(granted.rendered_result, "executed"),
+    "explicit grants must survive",
+  )
+  const denied = agent_dispatch_tool_call(
+    harness.tools,
+    call,
+    tools,
+    {approval_policy: {auto_deny: ["probe"]}},
+  )
+  assert(
+    denied.ok == false && denied.denial.gate == "approval_policy",
+    "authored denials retain their gate",
+  )
+  const untouched = agent_dispatch_tool_call(harness.tools, call, tools)
+  assert(
+    untouched.ok == true && contains(untouched.rendered_result, "executed"),
+    "untouched calls must execute",
+  )
+  harness.stdio.println("ok")
+}

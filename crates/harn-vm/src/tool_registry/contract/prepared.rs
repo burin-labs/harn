@@ -117,6 +117,17 @@ impl std::error::Error for ToolContractViolation {}
 pub struct ToolApplicationError {
     pub tool: String,
     pub data: JsonValue,
+    /// Explicit typed failure disposition; absent for declared throws.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub outcome: Option<ToolApplicationOutcome>,
+}
+
+/// Failure disposition explicitly declared by a typed handler result.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ToolApplicationOutcome {
+    Error,
+    Rejected,
 }
 
 impl ToolApplicationError {
@@ -127,7 +138,10 @@ impl ToolApplicationError {
 
     /// Stable human summary that never reads free-form application data.
     pub fn summary(&self) -> &'static str {
-        "declared application error"
+        match self.outcome {
+            Some(ToolApplicationOutcome::Rejected) => "declared application rejection",
+            Some(ToolApplicationOutcome::Error) | None => "declared application error",
+        }
     }
 }
 
@@ -265,6 +279,22 @@ impl PreparedToolCatalog {
         self.validate(name, ToolContractPhase::Output, value)
     }
 
+    /// Accept portable data explicitly declared as a typed failure. A declared
+    /// error schema constrains the data; absent schemas leave its shape open.
+    pub fn declared_failure(
+        &self,
+        name: &str,
+        data: &JsonValue,
+        outcome: ToolApplicationOutcome,
+    ) -> Result<ToolApplicationError, ToolContractViolation> {
+        self.validate(name, ToolContractPhase::ApplicationError, data)?;
+        Ok(ToolApplicationError {
+            tool: name.to_string(),
+            data: data.clone(),
+            outcome: Some(outcome),
+        })
+    }
+
     /// Classify one portable raw throw without depending on VM error types.
     pub fn classify_thrown_json(&self, name: &str, value: &JsonValue) -> ToolThrownClassification {
         let Some(index) = self.names.get(name).copied() else {
@@ -279,6 +309,7 @@ impl PreparedToolCatalog {
             Ok(()) => ToolThrownClassification::Application(ToolApplicationError {
                 tool: name.to_string(),
                 data: value.clone(),
+                outcome: None,
             }),
             Err(error) => ToolThrownClassification::ContractViolation(error),
         }
@@ -602,6 +633,7 @@ mod tests {
         let error = ToolApplicationError {
             tool: "lookup".to_string(),
             data: json!({"variant": "private customer\nidentifier", "message": "secret"}),
+            outcome: None,
         };
         let summary = error.summary();
         assert_eq!(summary, "declared application error");

@@ -395,7 +395,9 @@ impl OpenAiCompatibleProvider {
                 .remove("response_format");
         }
         if opts.provider == "openrouter"
-            && (body.get("response_format").is_some() || body.get("top_k").is_some())
+            && (opts.provider_contract_probe.is_some()
+                || body.get("response_format").is_some()
+                || body.get("top_k").is_some())
         {
             ensure_openrouter_require_parameters(&mut body);
         }
@@ -471,8 +473,7 @@ impl OpenAiCompatibleProvider {
         }
         crate::llm::prompt_cache::apply_prompt_cache_breakpoint(
             &mut body,
-            opts.cache,
-            caps,
+            crate::llm::prompt_cache::PromptCacheBreakpoint::resolve(opts, caps),
             serde_json::json!({"type": "ephemeral"}),
         );
         crate::llm::serving_tiers::apply_fast_request_knob(&mut body, &opts.model, opts.fast);

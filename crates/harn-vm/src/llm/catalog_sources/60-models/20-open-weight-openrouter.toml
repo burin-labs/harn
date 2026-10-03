@@ -73,6 +73,25 @@ tier = "mid"
 open_weight = true
 strengths = ["coding", "tool_use", "cheap"]
 complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "qwen", "kimi"]
+# Kimi K3 on OpenRouter (listed since 2026-07-16; catalogued 2026-10-01, when
+# it was the only K3 host without a row). The index headline of $2.70 /
+# $13.50 is one endpoint's rate; every probe call that day was routed to a
+# $3 / $15 endpoint and billed at that rate, which is also Moonshot's list
+# price, so the row records it. Capability evidence is on the
+# `moonshotai/kimi-k3` OpenRouter capability rule.
+[models."moonshotai/kimi-k3"]
+name = "Kimi K3 (via OpenRouter)"
+provider = "openrouter"
+logical_model = "moonshot-kimi-k3"
+equivalence_group = "moonshot-kimi-k3"
+served_variant = "openrouter"
+context_window = 1048576
+capabilities = ["tools", "vision", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 3.00, output_per_mtok = 15.00, cache_read_per_mtok = 0.30 }
+tier = "frontier"
+open_weight = true
+strengths = ["coding", "agentic", "long_context", "tool_use", "reasoning", "vision"]
+complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "qwen", "deepseek"]
 [models."moonshotai/kimi-k2.6"]
 name = "Kimi K2.6"
 provider = "openrouter"

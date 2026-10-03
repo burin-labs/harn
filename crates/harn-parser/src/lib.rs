@@ -11,6 +11,7 @@ pub mod lexical;
 mod namespace_demand;
 pub mod param_annotations;
 mod parser;
+pub mod runtime_stack;
 pub mod stdlib_metadata;
 pub mod typechecker;
 pub mod visit;
@@ -22,6 +23,7 @@ pub use diagnostic_codes::{
 };
 pub use namespace_demand::{namespace_import_demands, NamespaceDemand};
 pub use parser::*;
+pub use runtime_stack::{PARSE_STACK_SIZE, RUNTIME_STACK_SIZE};
 pub use stdlib_metadata::{
     parse_for_span as parse_stdlib_metadata, synthesize_example, StdlibMetadata,
 };

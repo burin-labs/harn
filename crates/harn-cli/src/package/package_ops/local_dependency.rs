@@ -368,7 +368,6 @@ fn current_generation(project_root: &Path) -> Result<Option<String>, PackageErro
 mod tests {
     use super::*;
     use std::sync::mpsc;
-    use std::thread;
 
     #[test]
     fn failed_generation_removes_owned_dependency_and_republishes() {
@@ -621,7 +620,7 @@ mod tests {
             install_local_package(&PackageWorkspace::from_manifest_dir(&root), &package).unwrap();
         let (attempted_tx, attempted_rx) = mpsc::channel();
         let add_root = root.clone();
-        let add = thread::spawn(move || {
+        let add = harn_parser::runtime_stack::spawn(move || {
             project_mutation_lock_test_probe::install(move || {
                 attempted_tx.send(()).unwrap();
             });

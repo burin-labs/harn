@@ -26,8 +26,12 @@ async fn run_tool_handler(
     handler: &VmClosure,
     tool_name: &str,
     tool_args: &serde_json::Value,
+    registry: Option<&VmValue>,
     handler_outcome: &mut Option<handler_result::HandlerOutcome>,
 ) -> Result<serde_json::Value, VmError> {
+    let prepared = registry
+        .map(|registry| super::agent_tool_governance::prepared_handler_catalog(registry, tool_name))
+        .transpose()?;
     let args_vm = crate::stdlib::json_to_vm_value(tool_args);
     let _trusted_bridge_guard = crate::orchestration::allow_trusted_bridge_calls();
     let outcome = crate::tool_handler_scope::scope(vm.call_closure_pub(handler, &[args_vm])).await;
@@ -37,7 +41,10 @@ async fn run_tool_handler(
     }
     match outcome {
         Ok(val) => {
-            let (payload, outcome) = handler_result::coerce_and_classify_handler_result(&val)?;
+            let (payload, outcome) = handler_result::coerce_and_validate_handler_result(
+                &val,
+                prepared.as_deref().map(|prepared| (prepared, tool_name)),
+            )?;
             *handler_outcome = Some(outcome);
             Ok(payload)
         }
@@ -612,6 +619,7 @@ pub(super) async fn dispatch_tool_execution_with_mcp(
                     &handler,
                     tool_name,
                     tool_args,
+                    tools_val,
                     &mut handler_outcome,
                 )
                 .await
@@ -677,6 +685,7 @@ pub(super) async fn dispatch_tool_execution_with_mcp(
                 &handler,
                 tool_name,
                 tool_args,
+                tools_val,
                 &mut handler_outcome,
             )
             .await

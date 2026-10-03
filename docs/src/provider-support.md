@@ -100,7 +100,7 @@ A star marks the short list Harn names first in setup messages and pickers. The 
 | `Nvidia` | OpenAI-compatible chat completions | `nvidia:nvidia/kimi-k3` | `native` | yes | yes | `native` / `native_json` | none | no | No | none | `provider_default` | `not_recorded` |
 | `Ollama` | Ollama native chat API | `devstral-small-2` | `text` | no | yes | `format_kw` / `delimited` | none | no | No | none | `high` | `not_recorded` |
 | `OpenAI` | OpenAI chat completions / Responses-compatible routes | `openai:gpt-5.4-mini` | `native` | yes | yes | `native` / `native_json` | `effort,reasoning_effort,reasoning_none` | yes | Yes (50%) | `fast:premium`, `flex:discounted` | `high` | `not_recorded` |
-| `OpenRouter` | OpenAI-compatible chat completions | `openrouter:google/gemini-2.5-flash` | `native` | yes | yes | `native` / `native_json` | `effort,enabled,reasoning_effort` | yes | No | none | `high` | `not_recorded` |
+| `OpenRouter` | OpenAI-compatible chat completions | `openrouter:google/gemini-3.5-flash-lite` | `native` | yes | yes | `native` / `native_json` | `adaptive,effort,enabled,reasoning_effort` | yes | No | none | `high` | `not_recorded` |
 | `Parasail` | OpenAI-compatible chat completions | `parasail` | `text` | no | yes | `none` / `none` | none | no | Yes | none | `provider_default` | `not_recorded` |
 | `Qianfan` | OpenAI-compatible chat completions | `qianfan` | `text` | no | yes | `none` / `none` | none | no | No | none | `provider_default` | `not_recorded` |
 | `Sambanova` | OpenAI-compatible chat completions | `sambanova:sambanova/gpt-oss-120b` | `text` | no | yes | `native` / `native_json` | `effort,reasoning_effort` | no | No | none | `high` | `not_recorded` |

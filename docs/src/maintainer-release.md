@@ -41,6 +41,11 @@ Follow the runs for that commit in
 1. `build-release-binaries.yml` builds the candidate in its merge group.
    The main push reuses a successful candidate for that exact commit, or builds
    it when no reusable queue candidate exists. Other pushes only warm caches.
+   Daily scheduled runs build signed source candidates at their exact main
+   commit, including commits outside the warm-cache path filter. They reuse a
+   successful candidate only while its manifest, release files, and every
+   target archive remain available and unexpired. These runs do not publish a
+   release.
 2. The candidate run builds, signs, notarizes, and attests the five platform
    archives. It checks those files with the release audit and smoke tests.
    The `candidate-manifest-<sha>` artifact binds the source commit, files,
@@ -91,8 +96,11 @@ tuples aren't recovery entry points for these workflows.
 ## Check downstream convergence
 
 Promotion's `repin` job dispatches the registered consumers' own update
-workflows. Each consumer opens its own pull request, then follows its checks,
-review, and merge queue. Record each consumer's terminal state separately from
+workflows. For the fleet-owned bump adapters that is one dispatch: the
+harn-bump-fleet `promote-released-orchestration.yml` workflow moves the
+orchestration pin to the release, and each adapter's converged landing starts
+that consumer's bump. Each consumer opens its own pull request, then follows its
+checks, review, and merge queue. Record each consumer's terminal state separately from
 Harn publication. Dispatch success doesn't prove that a consumer updated or
 that its pull request merged.
 

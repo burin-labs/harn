@@ -29,7 +29,8 @@ use super::command_policy::{
 };
 use super::policy::{
     swap_approval_policy_stack, swap_execution_policy_stack, swap_operator_approval_grant_stack,
-    swap_trusted_bridge_depth, CapabilityPolicy, OperatorApprovalGrant, ToolApprovalPolicy,
+    swap_prepared_approval_policy, swap_trusted_bridge_depth, CapabilityPolicy,
+    OperatorApprovalGrant, RunApprovalPolicy,
 };
 use super::tool_precheck::{swap_tool_precheck_depth, swap_tool_precheck_stack};
 use super::{swap_mutation_session, MutationSessionRecord, RunExecutionRecord};
@@ -69,7 +70,8 @@ use subtask_state::SubtaskAmbientState;
 #[derive(Default, Clone)]
 pub(crate) struct AmbientExecutionScope {
     execution: Vec<CapabilityPolicy>,
-    approval: Vec<ToolApprovalPolicy>,
+    approval: Vec<RunApprovalPolicy>,
+    prepared_approval: Option<std::sync::Arc<RunApprovalPolicy>>,
     operator_approval_grants: Vec<OperatorApprovalGrant>,
     command: Vec<CommandPolicy>,
     permissions: Vec<DynamicPermissionPolicy>,
@@ -170,6 +172,11 @@ fn clone_via_swap<T: Clone + Default>(swap: impl Fn(T) -> T) -> T {
 }
 
 impl AmbientExecutionScope {
+    pub(crate) fn with_prepared_approval(mut self, policy: RunApprovalPolicy) -> Self {
+        self.prepared_approval = Some(std::sync::Arc::new(policy));
+        self
+    }
+
     /// Snapshot the ambient context a child inherits from its parent at spawn
     /// time: the command-policy stack, dynamic-permission stack, and the
     /// runtime-context overlay (so the child's events keep the parent's
@@ -198,6 +205,7 @@ impl AmbientExecutionScope {
     /// byte-identical while giving each fan-out child its own isolated copy.
     pub(crate) fn capture_inherited() -> Self {
         Self {
+            prepared_approval: clone_via_swap(swap_prepared_approval_policy),
             operator_approval_grants: clone_via_swap(swap_operator_approval_grant_stack),
             command: clone_via_swap(swap_command_policy_stack),
             precheck: clone_via_swap(swap_tool_precheck_stack),
@@ -262,6 +270,7 @@ impl AmbientExecutionScope {
     /// the thread-local there.
     pub(crate) fn capture_for_inline_subtask() -> Self {
         Self {
+            prepared_approval: clone_via_swap(swap_prepared_approval_policy),
             execution: clone_via_swap(swap_execution_policy_stack),
             approval: clone_via_swap(swap_approval_policy_stack),
             operator_approval_grants: clone_via_swap(swap_operator_approval_grant_stack),
@@ -325,6 +334,7 @@ impl AmbientExecutionScope {
             *slot = swap(std::mem::take(slot));
         }
 
+        swap_slot(&mut self.prepared_approval, swap_prepared_approval_policy);
         swap_slot(&mut self.execution, swap_execution_policy_stack);
         swap_slot(&mut self.approval, swap_approval_policy_stack);
         swap_slot(
@@ -675,6 +685,9 @@ impl<F: Future> Future for Scoped<F> {
 
 #[cfg(test)]
 mod cancellation_tests;
+
+#[cfg(test)]
+mod llm_budget_tests;
 
 #[cfg(test)]
 mod tests {

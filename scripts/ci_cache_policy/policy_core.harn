@@ -69,6 +69,8 @@ pub const RELEASE_WARM_CACHE_PATH_POLICY = ".github/release-warm-cache-paths.yml
 
 pub const RELEASE_BINARY_WORKFLOW = "build-release-binaries.yml"
 
+pub const RELEASE_RUNNER_POLICY_PATH = ".github/release-runner-policy.json"
+
 pub const RELEASE_PATH_FILTER_ACTION = "dorny/paths-filter"
 
 pub const CHECKOUT_ACTION_PREFIX = "actions/checkout@"
@@ -83,10 +85,10 @@ pub const RELEASE_PATH_FILTER_OUTPUT = "$"
 pub const RELEASE_PATH_FILTER_BRANCH = "[[ \"$RELEASE_BUILD_INPUTS_CHANGED\" == \"true\" ]]"
 
 pub const RELEASE_WORKFLOW_CONCURRENCY_GROUP = "build-release-binaries-$"
-  + "{{ (github.event_name == 'workflow_dispatch' && inputs.benchmark_source_sha != '' && format('benchmark-{0}-{1}', inputs.benchmark_source_sha, github.sha)) || (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.warm_cache_only)) && 'warm-main' || (github.event_name == 'push' && format('branch-{0}', github.run_id)) || github.ref_name }}"
+  + "{{ (github.event_name == 'workflow_dispatch' && inputs.benchmark_source_sha != '' && format('benchmark-{0}-{1}', inputs.benchmark_source_sha, github.sha)) || (github.event_name == 'schedule' && 'source-main') || (github.event_name == 'workflow_dispatch' && inputs.warm_cache_only && 'warm-main') || (github.event_name == 'push' && format('branch-{0}', github.run_id)) || github.ref_name }}"
 
 pub const RELEASE_WORKFLOW_CANCEL_POLICY = "$"
-  + "{{ github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.warm_cache_only) }}"
+  + "{{ github.event_name == 'workflow_dispatch' && inputs.warm_cache_only }}"
 
 pub const RELEASE_BUILD_CONCURRENCY_GROUP = "build-release-binaries-build-$"
   + "{{ (github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.setup.outputs.build_mode == 'warm' && format('warm-{0}', matrix.target)) || format('{0}-{1}', github.run_id, matrix.target) }}"
@@ -169,7 +171,7 @@ pub const COLOCATED_TESTS_DISABLE_VAR = "HARN_CI_DISABLE_COLOCATED_TESTS"
 // with it.
 pub const RUNNER_TIER_ENV = "HARN_RUNNER_TIER"
 
-pub const HOSTED_LINUX_RUNNER = "ubuntu-latest"
+pub const HOSTED_LINUX_RUNNER = "ubuntu-24.04"
 
 /**
  * The producer's hosted rung, which is deliberately not the shared one.
@@ -181,6 +183,19 @@ pub const HOSTED_LINUX_RUNNER = "ubuntu-latest"
  * workflow onto paid capacity.
  */
 pub const PRODUCER_HOSTED_LINUX_RUNNER = "ubuntu-8core"
+
+/**
+ * The producers' paid rung before GitHub's: Ubicloud's 8 vCPU runner, listed
+ * at $0.008/min on its premium tier against $0.022/min for `ubuntu-8core`.
+ * Ubicloud registers each runner just in time as a self-hosted runner, so it
+ * is its own tier for the same reason Blacksmith is.
+ */
+pub const PRODUCER_VENDOR_LINUX_RUNNER = "ubicloud-standard-8"
+
+/** `github` restores GitHub's 8-core runner as the producers' paid rung. */
+pub const PAID_LINUX_PROVIDER_VAR = "HARN_CI_PAID_LINUX_PROVIDER"
+
+pub const UBICLOUD_RUNNER_TIER = "ubicloud"
 
 pub const HOSTED_RUNNER_TIER = "github-hosted"
 
@@ -201,6 +216,53 @@ pub const SELFHOSTED_LINUX_BIG_RUNNER = "[\"self-hosted\", \"Linux\", \"X64\", \
 /** The census pool that answers for that label set. */
 pub const SELFHOSTED_LINUX_BIG_POOL = "linux_big"
 
+/**
+ * The label only the shared CLI producer asks for. Runners carrying it serve
+ * nothing else, so the build every Harn proof lane waits on never queues
+ * behind general work or behind the vendor quota every repository in the
+ * organization shares. That quota held it 37 minutes on 2026-10-02 (run
+ * 37042288569).
+ */
+pub const RESERVED_CLI_PRODUCER_LABEL = "harn-ci-producer"
+
+pub const RESERVED_CLI_PRODUCER_RUNNER =
+  "[\"self-hosted\", \"Linux\", \"X64\", \"${RESERVED_CLI_PRODUCER_LABEL}\"]"
+
+/** The census pool that measures the reserved label: the census's probe lane. */
+pub const RESERVED_CLI_PRODUCER_POOL = "linux_probe"
+
+/** The capacity step that routes the shared CLI producer, and its output. */
+pub const CLI_CAPACITY_DECISION_STEP = "cli-decision"
+
+pub const CLI_CAPACITY_ROUTE_OUTPUT = "cli_route"
+
+/**
+ * The owned host merge groups may use: a datacenter machine, not one of the
+ * residential boxes whose health #6217 kept out of merge throughput. Its
+ * general runners carry the shared pool's label plus the host's identity
+ * label; the host's reserved CLI runners do not carry the pool's label, so
+ * the pair names exactly the general runners.
+ */
+pub const DATACENTER_HOST_LABEL = "hetzner-1"
+
+pub const DATACENTER_LINUX_BIG_RUNNER =
+  "[\"self-hosted\", \"Linux\", \"X64\", \"harn-ci-big\", \"${DATACENTER_HOST_LABEL}\"]"
+
+/**
+ * The second census that measures those runners alone. It reuses the
+ * census's fetch lane, which counts Linux runners carrying its base tag AND
+ * its fetch tag: with `harn-ci-big` as the base and the host label as the
+ * fetch tag, that lane is the datacenter host's general runners.
+ */
+pub const DATACENTER_CENSUS_JOB = "datacenter-availability"
+
+pub const DATACENTER_POOL = "linux_fetch"
+
+/** The capacity step that routes merge groups, and its output. */
+pub const MERGE_CAPACITY_DECISION_STEP = "merge-decision"
+
+pub const MERGE_CAPACITY_ROUTE_OUTPUT = "merge_route"
+
 pub const BLACKSMITH_ENABLE_VAR = "HARN_CI_ENABLE_BLACKSMITH_LINUX"
 
 /** The step that names where the slow E2E suite is about to land. */
@@ -208,8 +270,6 @@ pub const E2E_CAPACITY_DECISION_STEP = "Decide where the slow E2E suite lands"
 
 /** The input that carries the evacuation switch into that decision. */
 pub const E2E_EVACUATION_INPUT = "FLEET_EVACUATION"
-
-pub const BLACKSMITH_8CPU_RUNNER = "blacksmith-8vcpu-ubuntu-2404"
 
 pub const RUST_CACHE_ACTION = "./.github/actions/rust-cache"
 
@@ -279,6 +339,15 @@ pub const SECURITY_READY_JOB = "security-tests-ready"
 pub const ARTIFACT_WAIT_MAX_ATTEMPTS = "270"
 
 pub const ARTIFACT_WAIT_INTERVAL_SECONDS = "10"
+
+// About ten waiters start in every run and share one installation limit. A
+// running producer's state is re-read on every sixth poll only (the inventory
+// read between is a free 304 while nothing changes), and a rate limit is
+// waited out up to 40 minutes, inside the shortest waiter's job timeout,
+// because a refused read says nothing about the build and must not fail it.
+pub const ARTIFACT_WAIT_STATE_EVERY_POLLS = "6"
+
+pub const ARTIFACT_WAIT_RATE_LIMIT_MAX_SECONDS = "2400"
 
 pub const ARTIFACT_READY_TIMEOUT_MINUTES = "50"
 
@@ -878,9 +947,7 @@ pub fn release_warm_cache_concurrency_errors(workflow: dict) -> list<string> {
   if trim(workflow?.concurrency?.["cancel-in-progress"] ?? "")
     != RELEASE_WORKFLOW_CANCEL_POLICY {
     errors = errors
-      + [
-        "${RELEASE_BINARY_WORKFLOW} must reserve workflow cancellation for full scheduled/manual warms",
-      ]
+      + ["${RELEASE_BINARY_WORKFLOW} must reserve workflow cancellation for manual warms"]
   }
   const build_concurrency = workflow?.jobs?.build?.concurrency
   if trim(workflow?.jobs?.build?.if ?? "") != RELEASE_BUILD_IF {
@@ -1768,40 +1835,343 @@ pub fn owned_producer_condition() -> string {
   return "(needs.rust-producer-capacity.outputs.route == 'owned'"
 }
 
-pub fn paid_producer_condition() -> string {
-  return "(github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository))"
-}
-
 /**
  * Three rungs, one shape, used for `runs-on`, `timeout-minutes` and the tier
  * mirror. They are generated from one function so the three can never disagree
  * about which events reach which capacity: a mirror that drifted from its
  * `runs-on` is how a tier guard starts naming a route the job never took.
  */
-pub fn producer_rung_expression(paid: string, owned: string, hosted: string) -> string {
+/**
+ * The paid rung after the owned pool. Ubicloud's 8 vCPU runner lists at a
+ * third of GitHub's 8-core rate, so it is the default; setting
+ * `${PAID_LINUX_PROVIDER_VAR}` to `github` puts the GitHub 8-core runner back
+ * without a code change.
+ */
+pub fn vendor_producer_condition() -> string {
+  return "(vars.${PAID_LINUX_PROVIDER_VAR} != 'github'"
+}
+
+/** The merge-group rung reads its own capacity decision, like the owned one. */
+pub fn datacenter_producer_condition() -> string {
+  return "(needs.rust-producer-capacity.outputs.${MERGE_CAPACITY_ROUTE_OUTPUT} == 'owned'"
+}
+
+/**
+ * The workspace producer's rungs. An empty `owned` or `datacenter` drops that
+ * rung; `vendor` and `hosted` are the paid ladder every producer keeps.
+ */
+pub type ProducerRungs = {owned: string, datacenter: string, vendor: string, hosted: string}
+
+pub fn producer_rung_expression(rungs: ProducerRungs) -> string {
+  const {owned, datacenter, vendor, hosted} = rungs
+  // An empty `owned` drops the owned rung: a lane that must not wait on the
+  // owned pool's per-host compile budget goes straight to paid capacity.
+  const owned_rung = if owned == "" {
+    ""
+  } else {
+    "${owned_producer_condition()}" + "\n  && ${owned})" + "\n  || "
+  }
+  // The datacenter rung serves merge groups only; its decision step never
+  // names `owned` on any other event.
+  const datacenter_rung = if datacenter == "" {
+    ""
+  } else {
+    "${datacenter_producer_condition()}" + "\n  && ${datacenter})" + "\n  || "
+  }
   return "$"
-    + "{{ (vars.${BLACKSMITH_ENABLE_VAR} == 'true'"
-    + "\n  && ${paid_producer_condition()}"
-    + "\n  && ${paid})"
-    + "\n  || ${owned_producer_condition()}"
-    + "\n  && ${owned})"
+    + "{{ "
+    + owned_rung
+    + datacenter_rung
+    + "${vendor_producer_condition()}"
+    + "\n  && ${vendor})"
     + "\n  || ${hosted} }}"
 }
 
-pub fn producer_runner_expression(runner: string) -> string {
+/**
+ * Linux runner label prefixes whose hosts cannot confine a Harn child.
+ *
+ * Since #9068 a Harn child process on Linux refuses to start without Landlock
+ * or bubblewrap, and Blacksmith's Linux image has neither ("Linux bubblewrap
+ * is not available on this host"). Every Linux lane here runs Harn or its
+ * tests, so none may resolve to these runners. Windows and macOS Blacksmith
+ * runners are not Linux and are not listed.
+ */
+pub const LANDLOCK_INCAPABLE_LINUX_RUNNER_PREFIXES = ["blacksmith-"]
+
+fn linux_runner_label(label: string) -> bool {
+  return contains(label, "ubuntu") || contains(label, "linux") || contains(label, "Linux")
+}
+
+/**
+ * Every Linux runner label a job can resolve to, from its `runs-on` (literal,
+ * list or expression) and its matrix `runner` values.
+ */
+fn job_runner_labels(job: dict) -> list<string> {
+  let texts: list<string> = [to_string(job["runs-on"] ?? "")]
+  for row in job?.strategy?.matrix?.include ?? [] {
+    texts = texts + [to_string(row?.runner ?? "")]
+  }
+  let labels: list<string> = []
+  for text in texts {
+    labels = labels
+      + regex_captures("[A-Za-z0-9][A-Za-z0-9._-]*", text).map({ hit -> to_string(hit.match) })
+        .to_list()
+  }
+  return labels
+}
+
+fn landlock_incapable_label(label: string) -> bool {
+  return LANDLOCK_INCAPABLE_LINUX_RUNNER_PREFIXES.any({ prefix -> starts_with(label, prefix) })
+    && linux_runner_label(label)
+}
+
+/**
+ * Every Linux runner the release runner policy can hand a build: each target's
+ * runner for every mode, and the CLI AOT generator's. The release build jobs
+ * read these through `fromJSON` matrices, so the workflow scan cannot see them.
+ */
+pub fn release_runner_policy_landlock_errors(policy: dict) -> list<string> {
+  let errors: list<string> = []
+  for target in policy?.targets ?? [] {
+    for {key: mode, value: runner} in (target?.runners ?? {}) {
+      if landlock_incapable_label(to_string(runner)) {
+        errors = errors
+          + [
+            "release-runner-policy.json:${target?.target} ${mode} runner ${runner} cannot confine a Harn child (no Landlock or bubblewrap)",
+          ]
+      }
+    }
+  }
+  for {key: role, value: runner} in (policy?.jobs?.cli_aot ?? {}) {
+    if landlock_incapable_label(to_string(runner)) {
+      errors = errors
+        + [
+          "release-runner-policy.json:cli_aot ${role} runner ${runner} cannot confine a Harn child (no Landlock or bubblewrap)",
+        ]
+    }
+  }
+  return errors
+}
+
+/** Every workflow and the release runner policy, in one contract. */
+pub fn linux_confinement_errors(workflows: dict, release_runner_policy: dict) -> list<string> {
+  let errors: list<string> = []
+  for name in workflows.keys().sorted() {
+    errors = errors + landlock_incapable_runner_errors(name, workflows[name] ?? {})
+  }
+  return errors + release_runner_policy_landlock_errors(release_runner_policy)
+}
+
+/** No Linux job may resolve to a runner that cannot confine a Harn child. */
+pub fn landlock_incapable_runner_errors(workflow_name: string, workflow: dict) -> list<string> {
+  let errors: list<string> = []
+  for {key: job_name, value: job} in (workflow?.jobs ?? {}) {
+    for label in job_runner_labels(job) {
+      if landlock_incapable_label(label) {
+        errors = errors
+          + [
+            "${workflow_name}:${job_name} can resolve to ${label}, a Linux runner that cannot confine a Harn child (no Landlock or bubblewrap)",
+          ]
+      }
+    }
+  }
+  return errors
+}
+
+/**
+ * Whether a producer may land on the shared owned pool.
+ *
+ * The shared CLI may not. Every Harn proof lane waits for it, and an owned
+ * carrier shares four cores among six runners, so its compile budget is one
+ * job: with no target restored and no sccache it hit its 31-minute step
+ * timeout in run 36987728246, while a cold build on the vendor rung took
+ * 693s. It has runners of its own instead, which nothing else may occupy
+ * (`RESERVED_CLI_PRODUCER_LABEL`). The workspace test producer keeps the
+ * shared owned rung; nothing waits on its finish except the verdict.
+ */
+pub fn producer_uses_owned_pool(job_name: string) -> bool {
+  return job_name != "rust-cli"
+}
+
+pub fn producer_runner_expression(owned_rung: bool = true) -> string {
   return producer_rung_expression(
-    "'${runner}'",
-    "fromJSON('${SELFHOSTED_LINUX_BIG_RUNNER}')",
-    "'${PRODUCER_HOSTED_LINUX_RUNNER}'",
+    {
+      owned: owned_rung ? "fromJSON('${SELFHOSTED_LINUX_BIG_RUNNER}')" : "",
+      datacenter: owned_rung ? "fromJSON('${DATACENTER_LINUX_BIG_RUNNER}')" : "",
+      vendor: "'${PRODUCER_VENDOR_LINUX_RUNNER}'",
+      hosted: "'${PRODUCER_HOSTED_LINUX_RUNNER}'",
+    },
   )
 }
 
-pub fn producer_tier_expression() -> string {
+pub fn producer_tier_expression(owned_rung: bool = true) -> string {
   return producer_rung_expression(
-    "'${BLACKSMITH_RUNNER_TIER}'",
-    "'${SELFHOSTED_RUNNER_TIER}'",
-    "'${HOSTED_RUNNER_TIER}'",
+    {
+      owned: owned_rung ? "'${SELFHOSTED_RUNNER_TIER}'" : "",
+      datacenter: owned_rung ? "'${SELFHOSTED_RUNNER_TIER}'" : "",
+      vendor: "'${UBICLOUD_RUNNER_TIER}'",
+      hosted: "'${HOSTED_RUNNER_TIER}'",
+    },
   )
+}
+
+fn cli_route_condition(route: string) -> string {
+  return "(needs.rust-producer-capacity.outputs.${CLI_CAPACITY_ROUTE_OUTPUT} == '${route}'"
+}
+
+/**
+ * The shared CLI producer's three rungs, for `runs-on`, `timeout-minutes` and
+ * the tier mirror alike: an idle reserved runner, then the ladder every other
+ * paid lane has. The capacity step names `owned` only on events it routes, so
+ * every other event, a fully busy reserved pool, and a census it cannot read
+ * all take the paid ladder: Ubicloud first, at about a third of GitHub's
+ * 8-core rate, and GitHub's runner only when the paid-provider switch names it.
+ */
+pub type CliProducerRungs = {reserved: string, vendor: string, hosted: string}
+
+pub fn cli_producer_rung_expression(rungs: CliProducerRungs) -> string {
+  const {reserved, vendor, hosted} = rungs
+  return "$"
+    + "{{ "
+    + cli_route_condition("owned")
+    + "\n  && ${reserved})"
+    + "\n  || "
+    + vendor_producer_condition()
+    + "\n  && ${vendor})"
+    + "\n  || ${hosted} }}"
+}
+
+pub fn cli_producer_runner_expression() -> string {
+  return cli_producer_rung_expression(
+    {
+      reserved: "fromJSON('${RESERVED_CLI_PRODUCER_RUNNER}')",
+      vendor: "'${PRODUCER_VENDOR_LINUX_RUNNER}'",
+      hosted: "'${PRODUCER_HOSTED_LINUX_RUNNER}'",
+    },
+  )
+}
+
+pub fn cli_producer_tier_expression() -> string {
+  return cli_producer_rung_expression(
+    {
+      reserved: "'${SELFHOSTED_RUNNER_TIER}'",
+      vendor: "'${UBICLOUD_RUNNER_TIER}'",
+      hosted: "'${HOSTED_RUNNER_TIER}'",
+    },
+  )
+}
+
+fn step_with_id(job: dict, id: string) {
+  for step in job?.steps ?? [] {
+    if trim(to_string(step?.id ?? "")) == id {
+      return step
+    }
+  }
+  return nil
+}
+
+/**
+ * The reserved label is named in three places that must agree: the census
+ * probe that counts its runners, the capacity step that routes over that
+ * count, and the producer's `runs-on`. A census probing another label would
+ * report the reserved pool absent forever, and the producer would never
+ * reach it while every check stayed green.
+ */
+pub fn cli_producer_reservation_errors(workflow: dict) -> list<string> {
+  let errors: list<string> = []
+  const jobs = workflow?.jobs ?? {}
+  const census = jobs["runner-availability"] ?? {}
+  if trim(to_string(census?.with?.linux_probe_runner_tag ?? "")) != RESERVED_CLI_PRODUCER_LABEL {
+    errors = errors
+      + [
+        "ci.yml:runner-availability must probe the ${RESERVED_CLI_PRODUCER_LABEL} runners the shared CLI producer reserves",
+      ]
+  }
+  if !contains(to_string(census?.if ?? ""), "merge_group") {
+    errors = errors
+      + ["ci.yml:runner-availability must measure merge groups for the shared CLI producer"]
+  }
+  const capacity = jobs["rust-producer-capacity"] ?? {}
+  if !contains(to_string(capacity?.if ?? ""), "merge_group") {
+    errors = errors
+      + [
+        "ci.yml:rust-producer-capacity must decide the shared CLI producer's route on merge groups",
+      ]
+  }
+  if trim(to_string(capacity?.outputs?.[CLI_CAPACITY_ROUTE_OUTPUT] ?? ""))
+    != "$" + "{{ steps.${CLI_CAPACITY_DECISION_STEP}.outputs.route }}" {
+    errors = errors
+      + [
+        "ci.yml:rust-producer-capacity must publish ${CLI_CAPACITY_ROUTE_OUTPUT} from its ${CLI_CAPACITY_DECISION_STEP} step",
+      ]
+  }
+  const step = step_with_id(capacity, CLI_CAPACITY_DECISION_STEP)
+  const env = step?.env ?? {}
+  const routed = trim(to_string(env?.CAPACITY_ROUTED_EVENT ?? "")).split(" ")
+  if step == nil
+    || trim(to_string(step?.run ?? "")) != "bash scripts/ci/runner_capacity.sh"
+    || trim(to_string(env?.CAPACITY_POOL ?? "")) != RESERVED_CLI_PRODUCER_POOL
+    || !routed.contains("pull_request")
+    || !routed.contains("merge_group")
+    || trim(to_string(env?.CAPACITY_VENDOR_RUNNER ?? "")) != PRODUCER_VENDOR_LINUX_RUNNER
+    || trim(to_string(env?.CAPACITY_HOSTED_RUNNER ?? "")) != PRODUCER_HOSTED_LINUX_RUNNER {
+    errors = errors
+      + [
+        "ci.yml:rust-producer-capacity step ${CLI_CAPACITY_DECISION_STEP} must route the ${RESERVED_CLI_PRODUCER_POOL} pool on pull requests and merge groups and name the ${PRODUCER_VENDOR_LINUX_RUNNER} then ${PRODUCER_HOSTED_LINUX_RUNNER} ladder a busy pool takes",
+      ]
+  }
+  return errors
+}
+
+/**
+ * The merge-group rung of the workspace test producer names its host in three
+ * places that must agree: the second census that counts that host's general
+ * runners, the capacity step that routes merge groups over that count, and
+ * the producer's `runs-on`. A census counting another label set would report
+ * the host idle while the job queued on a busy one, or never route there at
+ * all, and every other check would stay green.
+ */
+pub fn merge_group_datacenter_errors(workflow: dict) -> list<string> {
+  let errors: list<string> = []
+  const jobs = workflow?.jobs ?? {}
+  const census = jobs[DATACENTER_CENSUS_JOB] ?? {}
+  const primary = jobs["runner-availability"] ?? {}
+  if trim(to_string(census?.uses ?? "")) == ""
+    || trim(to_string(census?.uses ?? "")) != trim(to_string(primary?.uses ?? ""))
+    || trim(to_string(census?.with?.linux_runner_tag ?? "")) != "harn-ci-big"
+    || trim(to_string(census?.with?.linux_fetch_runner_tag ?? "")) != DATACENTER_HOST_LABEL
+    || trim(to_string(census?.if ?? "")) != "github.event_name == 'merge_group'" {
+    errors = errors
+      + [
+        "ci.yml:${DATACENTER_CENSUS_JOB} must count the ${DATACENTER_HOST_LABEL} harn-ci-big runners on merge groups with the same census as runner-availability",
+      ]
+  }
+  const capacity = jobs["rust-producer-capacity"] ?? {}
+  if !contains(to_string(capacity?.needs ?? ""), DATACENTER_CENSUS_JOB) {
+    errors = errors
+      + ["ci.yml:rust-producer-capacity must wait for ${DATACENTER_CENSUS_JOB}"]
+  }
+  if trim(to_string(capacity?.outputs?.[MERGE_CAPACITY_ROUTE_OUTPUT] ?? ""))
+    != "$" + "{{ steps.${MERGE_CAPACITY_DECISION_STEP}.outputs.route }}" {
+    errors = errors
+      + [
+        "ci.yml:rust-producer-capacity must publish ${MERGE_CAPACITY_ROUTE_OUTPUT} from its ${MERGE_CAPACITY_DECISION_STEP} step",
+      ]
+  }
+  const step = step_with_id(capacity, MERGE_CAPACITY_DECISION_STEP)
+  const env = step?.env ?? {}
+  if step == nil
+    || trim(to_string(step?.run ?? "")) != "bash scripts/ci/runner_capacity.sh"
+    || trim(to_string(env?.CAPACITY_POOL ?? "")) != DATACENTER_POOL
+    || trim(to_string(env?.CAPACITY_ROUTED_EVENT ?? "")) != "merge_group"
+    || trim(to_string(env?.RUNNER_CAPACITY ?? ""))
+      != "$" + "{{ needs.${DATACENTER_CENSUS_JOB}.outputs.capacity }}" {
+    errors = errors
+      + [
+        "ci.yml:rust-producer-capacity step ${MERGE_CAPACITY_DECISION_STEP} must route merge groups over the ${DATACENTER_CENSUS_JOB} ${DATACENTER_POOL} count alone",
+      ]
+  }
+  return errors
 }
 
 /**
@@ -1858,30 +2228,26 @@ fn proven_push_main_only_errors(jobs: dict) -> list<string> {
 pub fn minimal_pr_capacity_errors(ci: dict, publish: dict) -> list<string> {
   let errors: list<string> = []
   const jobs = ci?.jobs ?? {}
-  const elastic_runner = "$"
-    + "{{ vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true' && (github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) && 'blacksmith-8vcpu-ubuntu-2404' || 'ubuntu-latest' }}"
-  for name in [ARTIFACT_READY_JOB, SECURITY_READY_JOB] {
-    if trim(jobs[name]?.["runs-on"] ?? "") != "ubuntu-latest" {
-      errors = errors + ["ci.yml:${name} must use GitHub-hosted ubuntu-latest"]
+  // The Clippy and Harn proof lanes used to switch to Blacksmith Linux, which
+  // cannot confine a Harn child; they run on the shared hosted runner.
+  for name in [ARTIFACT_READY_JOB, SECURITY_READY_JOB, "rust-checks", "harn-audit"] {
+    if trim(jobs[name]?.["runs-on"] ?? "") != HOSTED_LINUX_RUNNER {
+      errors = errors + ["ci.yml:${name} must use GitHub-hosted ${HOSTED_LINUX_RUNNER}"]
     }
   }
-  for name in ["rust-checks", "harn-audit"] {
-    if trim(jobs[name]?.["runs-on"] ?? "") != elastic_runner {
-      errors = errors + ["ci.yml:${name} must use the shared elastic Linux runner switch"]
-    }
-  }
-  // The Rust workspace producer carries one more rung than its siblings.
+  // The Rust workspace producer carries more rungs than its siblings.
   // A same-repository pull request prefers the owned pool when its census
   // reports an idle carrier; a fully busy pool routes hosted (#9086).
-  // Merge groups and main pushes are deliberately NOT eligible: main pushes are
-  // the authorized cache writer, and merge throughput must not depend on a
-  // residential machine's health, which is the objection #6217 recorded when it
-  // removed the previous ladder.
+  // A merge group prefers only the datacenter host's general runners, and only
+  // when they are idle: merge throughput must not depend on a residential
+  // machine's health, which is the objection #6217 recorded when it removed
+  // the previous ladder, and the residential boxes stay pull-request-only.
+  // Main pushes are NOT eligible: they are the authorized cache writer.
   if trim(jobs["rust-check-inputs"]?.["runs-on"] ?? "")
-    != producer_runner_expression(BLACKSMITH_8CPU_RUNNER) {
+    != producer_runner_expression() {
     errors = errors
       + [
-        "ci.yml:rust-check-inputs must ladder the elastic switch, the owned ${SELFHOSTED_LINUX_BIG_POOL} pool on same-repository pull requests, then GitHub-hosted",
+        "ci.yml:rust-check-inputs must ladder the owned ${SELFHOSTED_LINUX_BIG_POOL} pool on same-repository pull requests, the ${DATACENTER_HOST_LABEL} runners on merge groups, ${PRODUCER_VENDOR_LINUX_RUNNER}, then ${PRODUCER_HOSTED_LINUX_RUNNER}",
       ]
   }
   // Stays behind the merge on COST, not on principle: fourteen minutes, most
@@ -1999,14 +2365,10 @@ pub fn e2e_elastic_capacity_errors(e2e: dict) -> list<string> {
   const job = e2e?.jobs?.e2e ?? {}
   const capacity_job = e2e?.jobs?.["e2e-capacity"] ?? {}
   const capacity_step = step_by_name(capacity_job?.steps ?? [], E2E_CAPACITY_DECISION_STEP)
+  // The evacuation switch still moves the suite off the owned pool, through
+  // the capacity decision below; it no longer names Blacksmith Linux, which
+  // cannot confine the Harn children this suite spawns.
   let errors: list<string> = []
-  if !contains(to_string(job?.["runs-on"] ?? ""), "vars.${BLACKSMITH_ENABLE_VAR} == 'true'") {
-    errors = errors
-      + ["e2e.yml:e2e must let ${BLACKSMITH_ENABLE_VAR} override owned Linux capacity"]
-  }
-  if !contains(to_string(job?.["runs-on"] ?? ""), BLACKSMITH_8CPU_RUNNER) {
-    errors = errors + ["e2e.yml:e2e must route the paid override to ${BLACKSMITH_8CPU_RUNNER}"]
-  }
   if capacity_step == nil {
     errors = errors
       + ["e2e.yml:e2e-capacity must keep the '${E2E_CAPACITY_DECISION_STEP}' step"]

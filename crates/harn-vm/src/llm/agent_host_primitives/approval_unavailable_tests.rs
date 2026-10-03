@@ -126,3 +126,61 @@ async fn dispatch_exec(command: &str, options: &crate::value::DictMap) -> serde_
     .expect("approval-unavailable denial is a normal dispatch result");
     crate::llm::helpers::vm_value_to_json(&result)
 }
+
+#[tokio::test(flavor = "current_thread")]
+async fn live_dispatch_uses_typed_run_approval_in_both_directions() {
+    use crate::orchestration::*;
+    use std::sync::{Arc, Mutex};
+
+    clear_execution_policy_stacks();
+    clear_approval_reviewers();
+    crate::llm::clear_current_host_bridge();
+    let policy = ToolApprovalPolicy {
+        require_approval: vec!["exec".to_string()],
+        ..ToolApprovalPolicy::default()
+    };
+    push_approval_policy(policy.clone());
+    let options = crate::value::DictMap::new();
+    let typed = current_run_approval_policy().expect("live typed policy");
+    assert_eq!(
+        typed.posture().approval_availability,
+        ApprovalAvailability::Unavailable
+    );
+    let denied = typed.evaluate_detailed_with_repeat("exec", &serde_json::json!({}), 0);
+    assert!(denied.is_deny());
+    let dispatched = dispatch_exec("printf hello", &options).await;
+    assert_eq!(
+        dispatched["result"]["denial"]["gate"],
+        "approval_unavailable"
+    );
+    assert_eq!(
+        denied.matched_rule.as_ref().unwrap().source,
+        "approval_unavailable"
+    );
+    // Transport preserves the declaration; a host installed after the policy
+    // must still receive the ask rather than inherit an irreversible denial.
+    assert_eq!(current_approval_policy(), Some(policy));
+
+    let seen = Arc::new(Mutex::new(0));
+    crate::llm::install_current_host_bridge(super::auto_review_decider_tests::rejecting_bridge(
+        seen.clone(),
+    ));
+    let typed = current_run_approval_policy().expect("live typed policy with host");
+    assert_eq!(
+        typed.posture().approval_availability,
+        ApprovalAvailability::Available
+    );
+    assert!(typed
+        .evaluate_detailed_with_repeat("exec", &serde_json::json!({}), 0)
+        .is_ask());
+    let dispatched = dispatch_exec("printf hello", &options).await;
+    assert_eq!(dispatched["result"]["denial"]["gate"], "host_rejected");
+    assert_eq!(
+        *seen.lock().unwrap(),
+        1,
+        "the available host was actually asked"
+    );
+    crate::llm::clear_current_host_bridge();
+    pop_approval_policy();
+    clear_all_approval_policy_repeat_counts();
+}

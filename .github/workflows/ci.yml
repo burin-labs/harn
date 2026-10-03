@@ -36,13 +36,21 @@ env:
   #
   # Every Harn proof lane starts its real work when its waiter sees the CLI, so
   # the cap is merge-queue latency: at 60s a consumer noticed the artifact
-  # about 30s late on average. On the organization's Enterprise plan the token
-  # allows 15,000 requests an hour per repository; nine waiters at two reads
-  # per poll spend about 450 of them in a six-minute wait.
+  # about 30s late on average.
+  #
+  # Every waiter in a run shares one installation limit. Ten of them reading
+  # two endpoints every 15s behind a slow producer spent it in 25 minutes and
+  # failed together (run 36987728246). The inventory is now a conditional
+  # read, which the limit does not count while nothing has been uploaded; a
+  # running producer's state is re-read on every sixth poll; and a rate limit
+  # is waited out for up to 40 minutes rather than failing a build it says
+  # nothing about.
   HARN_EXT_ARTIFACT_WAIT_MAX_ATTEMPTS: "270"
   HARN_EXT_ARTIFACT_WAIT_INTERVAL_SECONDS: "10"
   HARN_EXT_ARTIFACT_WAIT_MAX_INTERVAL_SECONDS: "15"
   HARN_EXT_ARTIFACT_WAIT_MAX_QUEUE_SECONDS: "1800"
+  HARN_EXT_ARTIFACT_WAIT_STATE_EVERY_POLLS: "6"
+  HARN_EXT_ARTIFACT_WAIT_RATE_LIMIT_MAX_SECONDS: "2400"
   # The shared CLI's producer. The Linux sandbox barrier overrides this with
   # the test job, which produces the security archive.
   HARN_EXT_ARTIFACT_PRODUCER_JOB: "Build shared Harn CLI"
@@ -72,7 +80,11 @@ jobs:
   # `rust-check-inputs` may use the owned pool on same-repository pull requests.
   # A measured online pool queues work even when busy; zero online carriers or
   # retired owned routing selects hosted capacity. An unreadable census blocks
-  # dispatch. Merge groups and main pushes retain their hosted routing (#8334).
+  # dispatch. Merge groups may use the datacenter host's general runners
+  # (`hetzner-1`) when a second census finds one idle; the residential hosts
+  # stay pull-request-only (#6217). Main pushes retain their hosted routing.
+  # The shared CLI producer is the exception: on pull requests and merge
+  # groups it prefers runners reserved for it alone (`harn-ci-producer`).
 
   # Decide whether the heavy Linux Rust lanes (rust-checks, audit-scripts) need
   # to run at all.
@@ -111,7 +123,7 @@ jobs:
   # It cannot regress the Rust build and is excluded here. When in doubt, RUN.
   changes:
     name: Detect changes
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
       actions: read
@@ -462,7 +474,7 @@ jobs:
     # smallest hosted runner is the right home.
     needs: changes
     if: needs.changes.outputs.merge_group_proven != 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/rust-toolchain
@@ -481,9 +493,9 @@ jobs:
     # It still runs for package-relevant PRs and unconditionally on merge_group
     # unless the speculative merge diff is a proven docs-only tail.
     if: needs.changes.outputs.package_audit == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # Hang tripwire, not a perf budget (check-test-case-performance owns perf).
-    # Hosted `ubuntu-latest` completes this lane in up to ~16m — the prior 20m
+    # Hosted `ubuntu-24.04` completes this lane in up to ~16m — the prior 20m
     # budget was calibrated for the faster paid runner and left ~4m of
     # headroom, one noisy neighbor away from a mid-suite timeout kill.
     timeout-minutes: 30
@@ -545,7 +557,7 @@ jobs:
     name: Check public Rust API
     needs: [changes]
     if: needs.changes.outputs.package_audit == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # Hang tripwire, not a perf budget.
     timeout-minutes: 30
     permissions:
@@ -598,7 +610,7 @@ jobs:
   lint-md:
     name: Markdown lint
     # Single ~5 s Action step; the smallest hosted runner is plenty.
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       # The action's default glob is `*.{md,markdown}`, the repository root
@@ -634,7 +646,7 @@ jobs:
     # Every main push rehearses the tail, including changes outside the PR filter.
     # The required aggregate accepts a skip only on an unrelated PR.
     if: github.event_name != 'pull_request' || needs.changes.outputs.release_contract == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     env:
       # The release orchestrator, pinned by commit. Moving this pin is a
@@ -717,7 +729,7 @@ jobs:
     name: Release residual audit
     needs: [changes]
     if: needs.changes.outputs.rust == 'true' && needs.changes.outputs.release_residual == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # Hang backstop, not a performance budget.
     timeout-minutes: 45
     permissions:
@@ -796,7 +808,7 @@ jobs:
     # on for merge_group and non-metadata pushes (see the `changes` job).
     # ci-status treats a skip here as PASS so branch protection isn't deadlocked.
     if: needs.changes.outputs.rust == 'true'
-    runs-on: ${{ vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true' && (github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) && 'blacksmith-8vcpu-ubuntu-2404' || 'ubuntu-latest' }}
+    runs-on: ubuntu-24.04
     # Each leg resolves a different feature graph, so none reuses another's
     # check units. Run in sequence on one runner they summed to 15-16 minutes
     # (7m15s + 4m02s + 4m42s on 2026-10-01), the longest Rust lane in the merge
@@ -828,7 +840,7 @@ jobs:
       # link-arg appended. Linux-only: the macOS job never sees this and
       # keeps the workflow-level `-D warnings`.
       RUSTFLAGS: "-D warnings -Clink-arg=-fuse-ld=mold"
-      HARN_RUNNER_TIER: ${{ vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true' && (github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) && 'blacksmith' || 'github-hosted' }}
+      HARN_RUNNER_TIER: github-hosted
     # Matrix legs share one outputs map and the last leg to finish wins each
     # key, so every leg owns a distinct key and ci-status requires all three.
     outputs:
@@ -844,7 +856,7 @@ jobs:
       # Install mold and steer rustc at it via RUSTFLAGS above. apt's `mold`
       # only drops the binary in PATH; it does NOT replace /usr/bin/ld, so the
       # stock linker stays intact and rustc opts in explicitly through the
-      # `-fuse-ld=mold` link-arg. ubuntu-latest's gcc cc-driver (>=12) supports
+      # `-fuse-ld=mold` link-arg. ubuntu-24.04's gcc cc-driver (>=12) supports
       # `-fuse-ld=mold` directly.
       - name: Install mold linker
         uses: ./.github/actions/apt-install
@@ -890,12 +902,40 @@ jobs:
   # fully busy pool routes hosted by name: queueing behind it cost pull
   # requests 40-60 minutes and timed out the producer's consumers (#9086).
   #
-  # Same-repository pull requests only. Fork pull requests cannot read the
-  # release-app credentials this probe needs, and they are not eligible for
-  # owned capacity anyway, so the probe is skipped rather than failed for them.
+  # Same-repository pull requests and merge groups only. Fork pull requests
+  # cannot read the release-app credentials this probe needs, and they are not
+  # eligible for owned capacity anyway, so the probe is skipped rather than
+  # failed for them. Merge groups are measured for the shared CLI producer's
+  # reserved runners alone; the workspace producer still routes them hosted.
+  #
+  # The probe label names the runners reserved for the shared CLI producer.
+  # Every Harn proof lane waits on that one build, and on 2026-10-02 it sat
+  # 37 minutes in the vendor queue behind other repositories' jobs on the same
+  # shared quota (run 37042288569).
   runner-availability:
-    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    if: >-
+      github.event_name == 'merge_group'
+      || (github.event_name == 'pull_request'
+      && github.event.pull_request.head.repo.full_name == github.repository)
     uses: burin-labs/.github/.github/workflows/runner-availability.yml@550bff235c4bf6818ece3b27e0905bcf48aaee8b
+    with:
+      linux_probe_runner_tag: harn-ci-producer
+    secrets:
+      RELEASE_APP_CLIENT_ID: ${{ secrets.RELEASE_APP_CLIENT_ID }}
+      RELEASE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+
+  # The datacenter host's general runners alone, for merge groups. The census
+  # counts Linux runners carrying its base tag AND its fetch tag in the fetch
+  # lane, so `harn-ci-big` plus the host label is exactly those runners: the
+  # host's reserved CLI runners lack `harn-ci-big`, and the residential hosts
+  # lack the host label. Merge groups route there only when one is idle, so a
+  # busy or absent host costs the queue nothing it did not already pay.
+  datacenter-availability:
+    if: github.event_name == 'merge_group'
+    uses: burin-labs/.github/.github/workflows/runner-availability.yml@550bff235c4bf6818ece3b27e0905bcf48aaee8b
+    with:
+      linux_runner_tag: harn-ci-big
+      linux_fetch_runner_tag: hetzner-1
     secrets:
       RELEASE_APP_CLIENT_ID: ${{ secrets.RELEASE_APP_CLIENT_ID }}
       RELEASE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
@@ -908,15 +948,20 @@ jobs:
   # skipping here would skip the required producer behind it.
   rust-producer-capacity:
     name: Name the Rust producer runner capacity decision
-    needs: runner-availability
+    needs: [runner-availability, datacenter-availability]
     if: >-
-      ${{ !cancelled() && github.event_name == 'pull_request'
-        && github.event.pull_request.head.repo.full_name == github.repository }}
-    runs-on: ubuntu-latest
+      ${{ !cancelled() && (github.event_name == 'merge_group'
+        || (github.event_name == 'pull_request'
+        && github.event.pull_request.head.repo.full_name == github.repository)) }}
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     outputs:
       route: ${{ steps.decision.outputs.route }}
       fallback: ${{ steps.decision.outputs.fallback }}
+      cli_route: ${{ steps.cli-decision.outputs.route }}
+      cli_fallback: ${{ steps.cli-decision.outputs.fallback }}
+      merge_route: ${{ steps.merge-decision.outputs.route }}
+      merge_fallback: ${{ steps.merge-decision.outputs.fallback }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -936,6 +981,49 @@ jobs:
           # this step would report the owned census while the job ran on
           # elastic paid capacity.
           FLEET_EVACUATION: ${{ vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true' }}
+          # The paid rungs after the owned pool, and the variable that picks
+          # between them, so a hosted decision names the runner it lands on.
+          PAID_LINUX_PROVIDER: ${{ vars.HARN_CI_PAID_LINUX_PROVIDER }}
+          CAPACITY_VENDOR_RUNNER: ubicloud-standard-8
+          CAPACITY_HOSTED_RUNNER: ubuntu-8core
+      # The shared CLI producer's own decision, over the runners reserved for
+      # it. An idle reserved runner takes the build. Every other outcome (all
+      # reserved runners busy, none online, an unreadable census) keeps the
+      # paid ladder it had: Ubicloud, then GitHub's 8-core runner only when
+      # HARN_CI_PAID_LINUX_PROVIDER names it. The decision line is also a
+      # run-page annotation, so the share of builds that left the reserved
+      # runners is countable.
+      - name: Decide where the shared CLI producer lands
+        id: cli-decision
+        run: bash scripts/ci/runner_capacity.sh
+        env:
+          CAPACITY_LABEL: CLI_PRODUCER_CAPACITY
+          CAPACITY_POOL: linux_probe
+          CAPACITY_ROUTED_EVENT: pull_request merge_group
+          EVENT_NAME: ${{ github.event_name }}
+          SELFHOSTED_DISABLED: ${{ needs.runner-availability.outputs.selfhosted_disabled }}
+          RUNNER_CAPACITY: ${{ needs.runner-availability.outputs.capacity }}
+          PAID_LINUX_PROVIDER: ${{ vars.HARN_CI_PAID_LINUX_PROVIDER }}
+          CAPACITY_VENDOR_RUNNER: ubicloud-standard-8
+          CAPACITY_HOSTED_RUNNER: ubuntu-8core
+      # The workspace test producer's merge-group decision, over the
+      # datacenter host's general runners alone. Every other event names
+      # `hosted` here without reading the count, and the pull-request
+      # decision above stays the one that routes pull requests.
+      - name: Decide where a merge group's workspace producer lands
+        id: merge-decision
+        run: bash scripts/ci/runner_capacity.sh
+        env:
+          CAPACITY_LABEL: MERGE_PRODUCER_CAPACITY
+          CAPACITY_POOL: linux_fetch
+          CAPACITY_ROUTED_EVENT: merge_group
+          EVENT_NAME: ${{ github.event_name }}
+          SELFHOSTED_DISABLED: ${{ needs.datacenter-availability.outputs.selfhosted_disabled }}
+          RUNNER_CAPACITY: ${{ needs.datacenter-availability.outputs.capacity }}
+          FLEET_EVACUATION: ${{ vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true' }}
+          PAID_LINUX_PROVIDER: ${{ vars.HARN_CI_PAID_LINUX_PROVIDER }}
+          CAPACITY_VENDOR_RUNNER: ubicloud-standard-8
+          CAPACITY_HOSTED_RUNNER: ubuntu-8core
 
   rust-cli:
     name: Build shared Harn CLI
@@ -955,29 +1043,43 @@ jobs:
     # Paid minutes per run are about the same; two paid runners now overlap.
     #
     # Hosted ceiling: 6 setup + 19 CLI budget + 12 cache-save reserve = 37.
-    # Owned ceiling: 6 setup + 31 CLI budget = 37.
     # The CLI builds in the ci-cli profile (opt-level 1), which costs more to
     # compile than dev and runs every Harn proof lane four to five times faster.
+    #
+    # Not the shared owned pool. An owned carrier there shares four cores
+    # among six runners, so this build gets one compile job, and with no
+    # target restored and no sccache it hit its 31-minute step timeout while
+    # ten proof lanes waited on it (run 36987728246).
+    #
+    # Its own runners instead: `harn-ci-producer` runners serve this job and
+    # nothing else, with the host's sccache. The capacity step sends the build
+    # there when one is idle. When all are busy, none is online, or on fork
+    # pull requests and main pushes, the ladder is the one it had: Ubicloud,
+    # then GitHub's runner when the paid-provider switch names it. On
+    # 2026-10-02 this build sat 37 minutes in the Ubicloud queue, which every
+    # repository in the organization shares (run 37042288569). GitHub's
+    # runner bills about three times Ubicloud's rate, so it is not the
+    # default for a busy reserved pool: the capacity annotation counts how
+    # often the reserved pool was full, and the waiters name a producer that
+    # never left the queue, so a recurrence is measured before it is paid for.
     runs-on: >-
-      ${{ (vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true'
-        && (github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository))
-        && 'blacksmith-8vcpu-ubuntu-2404')
-        || (needs.rust-producer-capacity.outputs.route == 'owned'
-        && fromJSON('["self-hosted", "Linux", "X64", "harn-ci-big"]'))
+      ${{ (needs.rust-producer-capacity.outputs.cli_route == 'owned'
+        && fromJSON('["self-hosted", "Linux", "X64", "harn-ci-producer"]'))
+        || (vars.HARN_CI_PAID_LINUX_PROVIDER != 'github'
+        && 'ubicloud-standard-8')
         || 'ubuntu-8core' }}
     timeout-minutes: >-
-      ${{ (vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true'
-        && (github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository))
-        && 20)
-        || (needs.rust-producer-capacity.outputs.route == 'owned'
+      ${{ (needs.rust-producer-capacity.outputs.cli_route == 'owned'
+        && 37)
+        || (vars.HARN_CI_PAID_LINUX_PROVIDER != 'github'
         && 37)
         || 37 }}
-    # The GitHub-hosted rung remains the authorized main-branch cache writer;
-    # Blacksmith uses sticky sccache and never enters that step, and the owned
-    # self-hosted rung is pull-request-only so it never reaches the write
-    # either. That is the reason the owned rung is scoped to pull requests
-    # rather than to every event: routing main pushes there would retire the
-    # writer, and every later hosted run would pay a cold cache.
+    # The paid rung is Ubicloud's 8 vCPU runner (about a third of GitHub's
+    # 8-core rate); HARN_CI_PAID_LINUX_PROVIDER=github puts GitHub's runner
+    # back. Whichever paid rung main pushes land on is the authorized
+    # main-branch cache writer, and Ubicloud serves actions/cache from its own
+    # store, so its first runs after a switch build cold. Blacksmith uses
+    # sticky sccache and never enters that step.
     permissions:
       contents: read
       actions: write
@@ -986,11 +1088,10 @@ jobs:
       RUSTFLAGS: "-D warnings -Clink-arg=-fuse-ld=mold"
       SCCACHE_CACHE_SIZE: 15G
       HARN_RUNNER_TIER: >-
-        ${{ (vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true'
-          && (github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository))
-          && 'blacksmith')
-          || (needs.rust-producer-capacity.outputs.route == 'owned'
+        ${{ (needs.rust-producer-capacity.outputs.cli_route == 'owned'
           && 'self-hosted')
+          || (vars.HARN_CI_PAID_LINUX_PROVIDER != 'github'
+          && 'ubicloud')
           || 'github-hosted' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -1021,11 +1122,6 @@ jobs:
           packages: mold
           check-command: mold
       - uses: ./.github/actions/rust-toolchain
-      - uses: ./.github/actions/sccache
-        if: env.HARN_RUNNER_TIER == 'blacksmith'
-        with:
-          cache-key: harn-ci-cli
-          sticky: "true"
       # Every tier gets an explicit answer, because a guard that names only
       # the tiers it knows turns a new tier into a silent skip: the first
       # self-hosted run would compile cold, report success, and say nothing.
@@ -1036,7 +1132,6 @@ jobs:
       # writes it: `save` is restore-only off `main`, and the owned rung is
       # pull-request-only, so the authorized main-branch writer is untouched.
       - uses: ./.github/actions/rust-cache
-        if: env.HARN_RUNNER_TIER != 'blacksmith'
         continue-on-error: true
         with:
           shared-key: harn-ci-cli
@@ -1124,26 +1219,35 @@ jobs:
     # The owned self-hosted rung is the same arithmetic minus the cache-save
     # reserve, with bounded cold retries: 6 setup + 24 + 26 = 56. It is a
     # hang backstop, not a claim about host core count or improved performance.
+    # A merge group's datacenter leg instead gets 20 minutes, about twice its
+    # measured 10.1-minute median: the queue waits on this job, so a runner
+    # that dies after admission should cost one short retry, not an hour.
     runs-on: >-
-      ${{ (vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true'
-        && (github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository))
-        && 'blacksmith-8vcpu-ubuntu-2404')
-        || (needs.rust-producer-capacity.outputs.route == 'owned'
+      ${{ (needs.rust-producer-capacity.outputs.route == 'owned'
         && fromJSON('["self-hosted", "Linux", "X64", "harn-ci-big"]'))
+        || (needs.rust-producer-capacity.outputs.merge_route == 'owned'
+        && fromJSON('["self-hosted", "Linux", "X64", "harn-ci-big", "hetzner-1"]'))
+        || (vars.HARN_CI_PAID_LINUX_PROVIDER != 'github'
+        && 'ubicloud-standard-8')
         || 'ubuntu-8core' }}
     timeout-minutes: >-
-      ${{ (vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true'
-        && (github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository))
-        && 20)
-        || (needs.rust-producer-capacity.outputs.route == 'owned'
+      ${{ (needs.rust-producer-capacity.outputs.route == 'owned'
         && 56)
+        || (needs.rust-producer-capacity.outputs.merge_route == 'owned'
+        && 20)
+        || (vars.HARN_CI_PAID_LINUX_PROVIDER != 'github'
+        && 60)
         || 60 }}
-    # The GitHub-hosted rung remains the authorized main-branch cache writer;
+    # The paid rung after the owned pool is Ubicloud's 8 vCPU runner (about a
+    # third of GitHub's 8-core rate); HARN_CI_PAID_LINUX_PROVIDER=github puts
+    # GitHub's runner back. Whichever paid rung main pushes land on is the
+    # authorized main-branch cache writer, and Ubicloud serves actions/cache
+    # from its own store, so its first runs after a switch build cold.
     # Blacksmith uses sticky sccache and never enters that step, and the owned
     # self-hosted rung is pull-request-only so it never reaches the write
     # either. That is the reason the owned rung is scoped to pull requests
     # rather than to every event: routing main pushes there would retire the
-    # writer, and every later hosted run would pay a cold cache.
+    # writer, and every later paid run would pay a cold cache.
     permissions:
       contents: read
       actions: write
@@ -1160,11 +1264,12 @@ jobs:
       # with the host unit that starts that server.
       SCCACHE_CACHE_SIZE: 15G
       HARN_RUNNER_TIER: >-
-        ${{ (vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true'
-          && (github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository))
-          && 'blacksmith')
-          || (needs.rust-producer-capacity.outputs.route == 'owned'
+        ${{ (needs.rust-producer-capacity.outputs.route == 'owned'
           && 'self-hosted')
+          || (needs.rust-producer-capacity.outputs.merge_route == 'owned'
+          && 'self-hosted')
+          || (vars.HARN_CI_PAID_LINUX_PROVIDER != 'github'
+          && 'ubicloud')
           || 'github-hosted' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -1195,11 +1300,6 @@ jobs:
           packages: mold
           check-command: mold
       - uses: ./.github/actions/rust-toolchain
-      - uses: ./.github/actions/sccache
-        if: env.HARN_RUNNER_TIER == 'blacksmith'
-        with:
-          cache-key: workspace-tests
-          sticky: "true"
       # Every tier gets an explicit answer, because a guard that names only
       # the tiers it knows turns a new tier into a silent skip: the first
       # self-hosted run would compile cold, report success, and say nothing.
@@ -1210,7 +1310,6 @@ jobs:
       # writes it: `save` is restore-only off `main`, and the owned rung is
       # pull-request-only, so the authorized main-branch writer is untouched.
       - uses: ./.github/actions/rust-cache
-        if: env.HARN_RUNNER_TIER != 'blacksmith'
         continue-on-error: true
         with:
           shared-key: workspace-tests
@@ -1331,7 +1430,7 @@ jobs:
     name: Wait for shared Harn binary
     needs: [changes]
     if: needs.changes.outputs.rust_paths == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 50
     permissions:
       actions: read
@@ -1364,7 +1463,7 @@ jobs:
     name: Wait for Linux security tests
     needs: [changes]
     if: needs.changes.outputs.rust == 'true' && needs.changes.outputs.sprint_fast_ci != 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 50
     permissions:
       actions: read
@@ -1406,7 +1505,7 @@ jobs:
     # though the same boxes pull the GitHub release CDN at ~29 MB/s. Artifact
     # up/downloads pin this archive lane to hosted runners until the archive
     # itself shrinks or moves.
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # Hang backstop, not a performance gate (the perf gate re-measures wall
     # time separately). Worst observed hosted-runner run is ~17m on a cold
     # cache; keep ~2x headroom so a slow runner day cancels nothing.
@@ -1492,7 +1591,7 @@ jobs:
       !cancelled()
       && needs.changes.outputs.rust == 'true'
       && needs.security-tests-ready.result == 'success'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # Hang backstop, not a performance gate. The Landlock proof runs in ~2m,
     # and the single-package security archive it consumes downloads in seconds
     # (the old path pulled the full ~8.6 GB workspace test archive, whose hosted
@@ -1596,7 +1695,7 @@ jobs:
     # verifies the exact-commit binary only at the last responsible moment.
     needs: [changes]
     if: needs.changes.outputs.rust == 'true' && needs.changes.outputs.sprint_fast_ci != 'true'
-    runs-on: ${{ vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true' && (github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) && 'blacksmith-8vcpu-ubuntu-2404' || 'ubuntu-latest' }}
+    runs-on: ubuntu-24.04
     # The immutable CLI producer is shared, and the Harn proof work after it is
     # spread over free hosted workers. Everything here starts only once the CLI
     # exists (about six minutes in), so each worker must finish its share in a
@@ -1764,7 +1863,7 @@ jobs:
     # The execution budget starts after the shared CLI is actually available.
     needs: [changes, rust-artifacts-ready]
     if: needs.changes.outputs.rust == 'true' && needs.rust-artifacts-ready.result == 'success'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
       actions: read
@@ -1845,7 +1944,7 @@ jobs:
     if: >-
       needs.changes.outputs.rust_paths == 'true'
       && (github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main'))
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
       actions: read
@@ -1966,7 +2065,7 @@ jobs:
     name: Stack frame budget
     needs: [changes]
     if: needs.changes.outputs.rust == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     permissions:
       actions: read
@@ -2041,7 +2140,7 @@ jobs:
       github.event_name == 'merge_group'
       && needs.changes.outputs.rust == 'true'
       && needs.rust-artifacts-ready.result == 'success'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
       actions: read
@@ -2097,7 +2196,7 @@ jobs:
     # rather than the absence of one spelling, because any event term here
     # would put these refusals back behind the merge.
     if: needs.changes.outputs.rust == 'true' && needs.rust-artifacts-ready.result == 'success'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
       actions: read
@@ -2183,7 +2282,7 @@ jobs:
     # cheap refusal, because a gate that runs only after the merge can only
     # turn main red.
     if: needs.changes.outputs.rust == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:
       contents: read
@@ -2216,7 +2315,7 @@ jobs:
     # Keep this execution-only lane on elastic capacity. It gains no compiler
     # cache benefit from a persistent worker, and merge-queue bursts otherwise
     # leave it waiting behind compile-bearing jobs on the scarce stable pool.
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # Hang backstop, not a performance budget. The post-warm integration sweep
     # plus structural checks reached the old 30m ceiling on a healthy hosted
     # runner while assertions were still progressing. Keep 1.5x headroom;
@@ -2324,7 +2423,7 @@ jobs:
       || (github.event_name == 'push'
       && github.ref == 'refs/heads/main'
       && needs.changes.outputs.rust == 'true')
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -2361,7 +2460,7 @@ jobs:
 
   macos-plan:
     name: macOS CI routing
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     outputs:
       run_macos: ${{ steps.detect.outputs.run_macos }}
     steps:
@@ -2556,7 +2655,7 @@ jobs:
     if: needs.changes.outputs.portal == 'true'
     # ~30 s npm pipeline; setup-node's cache covers the only meaningful
     # download and there's no sccache/cargo win to reclaim.
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/node-cache
@@ -2579,7 +2678,7 @@ jobs:
     # Keep editor-only changes off the unrelated Rust graph without dropping
     # their actual owner checks. This also runs when ci.yml changes so the
     # routing and required-status wiring test themselves.
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/node-cache
@@ -2600,7 +2699,7 @@ jobs:
     # Type-checks, bundles, and statically prerenders the harnlang.com site
     # (website/) into docs/dist. ~25 s npm pipeline; setup-node's cache covers
     # the only meaningful download.
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/node-cache
@@ -2645,7 +2744,7 @@ jobs:
     # change reads as docs-only on that push and runs here against a released
     # binary older than the commit — the substitution the note above rules out,
     # on the one event where the exact-commit lane has already proven the tree.
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -2677,7 +2776,7 @@ jobs:
     name: GitHub Actions hygiene
     # ~18 s job. `go install` + actionlint runs on ephemeral images quickly
     # enough; no win from a warm Go cache.
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
       actions: read
@@ -2719,6 +2818,13 @@ jobs:
         # Always-on delivery-policy gate owned by burin-labs/.github. Harn's
         # family-membership deepening stays in `make check-dependabot-groups`.
         uses: burin-labs/.github/.github/actions/check-dependabot-config@5dc4bd22107335cb29ccf8b13ca05fc5f2322468
+      - name: Check hosted runner labels
+        # Always-on org gate: reject the floating latest-Ubuntu label, which
+        # GitHub moves to a new image without a commit here. Router code that
+        # emits labels at run time is pinned by the CI cache policy tests.
+        uses: burin-labs/.github/.github/actions/hosted-runner-labels@47b97f48a4862d684f54a0b8ee7aa370d8bfc126
+        with:
+          harn-version: 0.10.133
       # Keep the required hygiene gate deterministic. Online audits such as
       # `known-vulnerable-actions` depend on the GitHub Advisories API, whose
       # transport failures are indistinguishable from audit failures to
@@ -2742,7 +2848,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [ubuntu-24.04, macos-latest, windows-latest]
     uses: ./.github/workflows/setup-harn-contract.yml
     with:
       os: ${{ matrix.os }}
@@ -2758,7 +2864,7 @@ jobs:
 
   ci-status:
     name: CI status
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     if: always()
     needs:
       [
@@ -3101,7 +3207,7 @@ jobs:
     needs: [docs-site]
     # Single `curl` to the Render deploy hook; the smallest hosted runner
     # is plenty.
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # `always()` keeps the job evaluable even if `docs-site` were ever skipped
     # (the actions/runner#2205 quirk); the explicit success check is the gate.
     if: >-

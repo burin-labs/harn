@@ -1,6 +1,7 @@
 import { help_requested, parse, parser } from "std/cli/argparse"
 
 pub type RecoveryClassification = "runner_preemption" \
+  | "lost_job_verdict" \
   | "configured_timeout" \
   | "transient_ci_failure" \
   | "job_failure" \
@@ -13,6 +14,7 @@ pub type RecoveryClassification = "runner_preemption" \
   | "run_not_failed"
 
 pub type JobFailureKind = "runner_preemption" \
+  | "lost_job_verdict" \
   | "configured_timeout" \
   | "job_failure" \
   | "evidence_unavailable" \
@@ -29,6 +31,7 @@ pub type RecoveryPolicy = {
   schema: "harn.ci_preemption_policy.v1",
   aggregate_job_names: list<string>,
   timeout_completion_grace_seconds: int,
+  lost_verdict_routes?: list<{workflow: string, job_names: list<string>, events: list<string>}>,
 }
 
 pub type GitHubJobStep = {
@@ -98,7 +101,7 @@ pub type RecoveryReceipt = {
 }
 
 fn timestamp_seconds(raw: string?) -> int? {
-  if raw == nil || raw == "" {
+  if missing_timestamp(raw) {
     return nil
   }
   const parsed = try {
@@ -196,7 +199,76 @@ fn find_log(logs: list<JobLogEvidence>, job_id: int) -> JobLogEvidence? {
   return logs.find({ evidence -> evidence.job_id == job_id })
 }
 
+/** GitHub's CLI encodes absent API timestamps as Go's zero time. */
+fn missing_timestamp(raw: string?) -> bool {
+  return raw == nil || raw == "" || raw == "0001-01-01T00:00:00Z"
+}
+
+fn missing_verdict(raw: string?) -> bool {
+  return raw == nil || raw == ""
+}
+
+fn pending_step(step: GitHubJobStep) -> bool {
+  return step.status == "pending" && missing_verdict(step.conclusion)
+    && missing_timestamp(step.startedAt)
+    && missing_timestamp(step.completedAt)
+}
+
+fn finished_prefix_step(step: GitHubJobStep) -> bool {
+  if step.status != "completed" {
+    return false
+  }
+  if step.conclusion == "skipped" {
+    return missing_timestamp(step.startedAt) && missing_timestamp(step.completedAt)
+  }
+  const started = timestamp_seconds(step.startedAt)
+  const completed = timestamp_seconds(step.completedAt)
+  return step.conclusion == "success" && started != nil && completed != nil && completed >= started
+}
+
+/**
+ * A missing log alone is never evidence. Require a complete ordered step
+ * prefix, one running step, and a nonempty pending suffix with no verdicts.
+ */
+fn has_lost_verdict(run: GitHubRun, policy: RecoveryPolicy, job: GitHubJob) -> bool {
+  const allowed = (policy.lost_verdict_routes ?? []).any(
+    { route ->
+      route.workflow == run.workflowName && route.job_names.contains(job.name)
+        && route.events.contains(run.event)
+    },
+  )
+  if !allowed || job.status != "completed" || job.conclusion != "failure"
+    || elapsed_seconds(job) == nil {
+    return false
+  }
+  let running = false
+  let pending = 0
+  let prior_number = 0
+  for step in job.steps ?? [] {
+    if step.number == nil || step.number <= prior_number {
+      return false
+    }
+    prior_number = step.number
+    if !running && finished_prefix_step(step) {
+      continue
+    }
+    if !running && step.status == "in_progress" && missing_verdict(step.conclusion)
+      && timestamp_seconds(step.startedAt) != nil
+      && missing_timestamp(step.completedAt) {
+      running = true
+      continue
+    }
+    if running && pending_step(step) {
+      pending += 1
+      continue
+    }
+    return false
+  }
+  return running && pending > 0
+}
+
 fn classify_job(
+  run: GitHubRun,
   workflow: dict,
   policy: RecoveryPolicy,
   job: GitHubJob,
@@ -207,13 +279,18 @@ fn classify_job(
   const text = log?.text ?? ""
   const elapsed = elapsed_seconds(job)
   if !available {
+    const lost = has_lost_verdict(run, policy, job)
     return schema_expect(
       {
         job_id: job.databaseId,
         job_name: job.name,
         conclusion: job.conclusion ?? "",
-        kind: "evidence_unavailable",
-        retry_safe: false,
+        kind: if lost {
+          "lost_job_verdict"
+        } else {
+          "evidence_unavailable"
+        },
+        retry_safe: lost,
         log_available: false,
         elapsed_seconds: elapsed,
       },
@@ -293,6 +370,12 @@ fn overall_classification(jobs: list<JobFailureReceipt>) -> RecoveryClassificati
   if jobs.all({ job -> job.kind == "configured_timeout" }) {
     return "configured_timeout"
   }
+  if jobs.all({ job -> job.kind == "lost_job_verdict" }) {
+    return "lost_job_verdict"
+  }
+  if jobs.any({ job -> job.kind == "lost_job_verdict" }) {
+    return "mixed_failure"
+  }
   if jobs.all({ job -> job.retry_safe }) {
     return "transient_ci_failure"
   }
@@ -314,6 +397,10 @@ fn merge_group_pr_number(head_branch: string) -> int? {
     return nil
   }
   return to_int(matches[0].groups[1] ?? "")
+}
+
+fn unknown_failure(receipt: JobFailureReceipt) -> bool {
+  return receipt.kind == "evidence_unavailable" || receipt.kind == "cancellation_unknown"
 }
 
 pub fn classify_recovery(
@@ -338,20 +425,22 @@ pub fn classify_recovery(
         },
       )
         .to_list()
-      receipts = failed_jobs.map({ job -> classify_job(workflow, policy, job, logs) }).to_list()
+      const rows = failed_jobs.map({ job -> classify_job(run, workflow, policy, job, logs) })
+      receipts = rows.to_list()
       classification = overall_classification(receipts)
     }
   }
   const retry_safe_count = receipts.filter({ receipt -> receipt.retry_safe }).count
   const terminal_failure_count = receipts.filter({ receipt -> receipt.kind == "job_failure" }).count
-  const unknown_count = receipts.filter(
-    { receipt -> receipt.kind == "evidence_unavailable" || receipt.kind == "cancellation_unknown" },
-  ).count
+  const unknown_count = receipts.filter(unknown_failure).count
   const exact_transient = receipts.count > 0 && retry_safe_count == receipts.count
+    && classification != "mixed_failure"
   let action: RecoveryAction = "none"
   if exact_transient {
-    if run.attempt > max_attempts {
+    if run.attempt > max_attempts || (classification == "lost_job_verdict" && run.attempt != 1) {
       action = "none_max_attempts_reached"
+    } else if classification == "lost_job_verdict" {
+      action = "rerun_failed_jobs"
     } else if run.event == "pull_request" {
       action = "rerun_failed_jobs"
     } else if run.event == "merge_group" && pr_number != nil {
@@ -379,7 +468,7 @@ pub fn classify_recovery(
       terminal_failure_job_count: terminal_failure_count,
       unknown_job_count: unknown_count,
       evidence_complete: receipts.count > 0
-        && receipts.all({ receipt -> receipt.log_available }),
+        && receipts.all({ receipt -> receipt.log_available || receipt.kind == "lost_job_verdict" }),
       jobs: receipts,
       planned_action: action,
       run_url: run.url ?? "",

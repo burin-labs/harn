@@ -620,6 +620,7 @@ thinking_block_style = "thinking_blocks"
 
 [[provider.openrouter]]
 model_match = "qwen/qwen3.7-plus"
+top_k_supported = true
 native_tools = true
 preferred_tool_format = "native"
 structured_output = "native"
@@ -643,8 +644,49 @@ prefers_role_developer = false
 prefers_xml_tools = false
 thinking_block_style = "inline"
 
+# Qwen3.8 Max (0902) on OpenRouter, served by Alibaba. Unlike Qwen3.7 Max
+# below and the `qwen/*` catch-all, reasoning cannot be turned off. Live probe
+# 2026-10-01 on /chat/completions:
+#   reasoning_effort none -> 400 "Reasoning is mandatory for this endpoint and
+#     cannot be disabled." (qwen/qwen3.7-max at none -> 200, 0 reasoning tokens)
+#   reasoning_effort low/medium/high/xhigh/max -> 200; reasoning arrives in
+#     the `reasoning` field
+#   tool_choice auto and required -> one native tool call each
+#   temperature=0.2 -> 200; a PNG image was read correctly
+#   strict json_schema -> 200 with schema-valid JSON
+#   a repeated 3.2K-token prefix reported 3072 cached tokens on the second call
+# Without this row the catch-all's reasoning-off agent override would send a
+# disable on every agent, verify, and code turn and get the 400 back.
+[[provider.openrouter]]
+model_match = "qwen/qwen3.8-max-0902"
+top_k_supported = true
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+thinking_modes = ["effort"]
+reasoning_effort_supported = true
+reasoning_effort_levels = ["low", "medium", "high", "xhigh", "max"]
+reasoning_none_supported = false
+reasoning_disable_supported = false
+prompt_caching = true
+cache_breakpoint_style = "last_block"
+vision = true
+vision_supported = true
+server_parser = "none"
+honors_chat_template_kwargs = false
+recommended_endpoint = "/v1/chat/completions"
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
+
 [[provider.openrouter]]
 model_match = "qwen/qwen3.7-max"
+top_k_supported = true
 native_tools = true
 preferred_tool_format = "native"
 structured_output = "native"
@@ -668,6 +710,7 @@ thinking_block_style = "inline"
 
 [[provider.openrouter]]
 model_match = "qwen/qwen3.6-plus"
+top_k_supported = true
 native_tools = true
 preferred_tool_format = "native"
 structured_output = "native"
@@ -696,6 +739,7 @@ provider_route_denylist = ["Ambient"]
 
 [[provider.openrouter]]
 model_match = "qwen/qwen3.6-flash"
+top_k_supported = true
 native_tools = true
 preferred_tool_format = "native"
 structured_output = "native"
@@ -724,6 +768,7 @@ provider_route_denylist = ["Ambient"]
 
 [[provider.openrouter]]
 model_match = "qwen/qwen3.6*"
+top_k_supported = true
 native_tools = true
 preferred_tool_format = "native"
 structured_output = "native"
@@ -804,6 +849,7 @@ thinking_block_style = "none"
 
 [[provider.openrouter]]
 model_match = "qwen/qwen3-coder*"
+top_k_supported = true
 native_tools = true
 preferred_tool_format = "text"
 # Qwen3-Coder reserves <tool_call> as a special token and emits the wrapper on
@@ -865,6 +911,7 @@ thinking_block_style = "none"
 
 [[provider.openrouter]]
 model_match = "qwen/*"
+top_k_supported = true
 native_tools = true
 preferred_tool_format = "native"
 structured_output = "native"

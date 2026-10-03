@@ -398,9 +398,11 @@ impl AcpServer {
         let result = mode_policy
             .run(Box::pin(async {
                 let _budget_guard = turn_budget.install_session_turn(llm_spent_usd.unwrap_or(0.0));
-                let _spend_recorder = llm_spent_usd
-                    .is_some()
-                    .then(|| SessionSpendRecorder(llm_spend.clone()));
+                let _spend_recorder = SessionSpendRecorder::new(
+                    llm_spend.clone(),
+                    &_budget_guard,
+                    llm_spent_usd.is_some(),
+                );
                 execute::execute_chunk(
                     chunk,
                     bridge.clone(),

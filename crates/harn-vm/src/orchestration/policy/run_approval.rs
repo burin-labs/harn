@@ -6,6 +6,75 @@ use super::approval_resolver::ApprovalResolver;
 
 use super::{PolicyAction, ToolApprovalPolicy};
 
+pub fn push_approval_policy(policy: ToolApprovalPolicy) {
+    super::EXECUTION_APPROVAL_POLICY_STACK.with(|stack| {
+        stack
+            .borrow_mut()
+            .push(construct_live_approval_policy(policy));
+    });
+}
+
+pub fn pop_approval_policy() {
+    super::EXECUTION_APPROVAL_POLICY_STACK.with(|stack| {
+        stack.borrow_mut().pop();
+    });
+}
+
+/// Declaration projection for nested scopes and worker configuration. Prepared
+/// authority travels separately and is intersected exactly once at dispatch.
+pub fn current_approval_policy() -> Option<ToolApprovalPolicy> {
+    super::EXECUTION_APPROVAL_POLICY_STACK.with(|stack| {
+        stack
+            .borrow()
+            .last()
+            .map(|policy| policy.declared().clone())
+    })
+}
+
+/// The typed policy used by live dispatch. Scope transport retains declared
+/// configuration, so a reviewer installed later can still answer an ask.
+pub fn current_run_approval_policy() -> Option<RunApprovalPolicy> {
+    let declared = current_approval_policy();
+    if let Some(prepared) = super::PREPARED_APPROVAL_POLICY.with(|slot| slot.borrow().clone()) {
+        let policy = declared.map_or_else(
+            || prepared.declared().clone(),
+            |inner| prepared.declared().intersect(&inner),
+        );
+        return Some(RunApprovalPolicy::construct_with_resolver(
+            prepared.posture(),
+            prepared.resolver(),
+            |_| policy,
+        ));
+    }
+    declared.map(construct_live_approval_policy)
+}
+
+pub(crate) fn construct_live_approval_policy(policy: ToolApprovalPolicy) -> RunApprovalPolicy {
+    let available = crate::llm::current_host_bridge().is_some();
+    let resolver = if crate::orchestration::current_approval_reviewer().is_some() {
+        ApprovalResolver::AutoReview
+    } else {
+        ApprovalResolver::Host
+    };
+    RunApprovalPolicy::construct_with_resolver(
+        RunAuthorityPosture {
+            interactivity: if available {
+                RunInteractivity::Interactive
+            } else {
+                RunInteractivity::NonInteractive
+            },
+            approval_availability: if available {
+                ApprovalAvailability::Available
+            } else {
+                ApprovalAvailability::Unavailable
+            },
+            workspace_trust: WorkspaceTrust::Untrusted,
+        },
+        resolver,
+        |_| policy,
+    )
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RunInteractivity {
@@ -78,7 +147,7 @@ impl RunAuthorityPosture {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RunApprovalPolicy {
     posture: RunAuthorityPosture,
-    effective: ToolApprovalPolicy,
+    declared: ToolApprovalPolicy,
     resolver: ApprovalResolver,
 }
 
@@ -108,13 +177,10 @@ impl RunApprovalPolicy {
         resolver: ApprovalResolver,
         build: impl FnOnce(RunAuthorityPosture) -> ToolApprovalPolicy,
     ) -> Self {
-        let mut effective = build(posture);
-        if posture.approval_is_unsatisfiable(resolver) {
-            deny_unsatisfiable_approval(&mut effective);
-        }
+        let declared = build(posture);
         Self {
             posture,
-            effective,
+            declared,
             resolver,
         }
     }
@@ -128,32 +194,81 @@ impl RunApprovalPolicy {
         self.resolver
     }
 
-    pub fn effective(&self) -> &ToolApprovalPolicy {
-        &self.effective
+    /// The effective evaluator retains the run facts. Use `declared` only to
+    /// transport configuration into another scope.
+    pub fn effective(&self) -> &Self {
+        self
     }
-}
 
-fn deny_unsatisfiable_approval(policy: &mut ToolApprovalPolicy) {
-    for rule in &mut policy.rules {
-        if rule.action == PolicyAction::Ask {
-            rule.action = PolicyAction::Deny;
-            rule.reason = Some(match rule.reason.take() {
-                Some(reason) => format!("approval unavailable: {reason}"),
-                None => "approval unavailable: the matched rule requires approval".to_string(),
+    /// Configuration projection for nested scopes and delegated workers.
+    /// Availability is resolved again when the receiving scope dispatches.
+    pub fn declared(&self) -> &ToolApprovalPolicy {
+        &self.declared
+    }
+
+    pub fn evaluate_detailed_with_repeat(
+        &self,
+        tool: &str,
+        args: &serde_json::Value,
+        repeat_count: u64,
+    ) -> super::PolicyEvaluation {
+        let decision = self
+            .declared
+            .evaluate_detailed_with_repeat(tool, args, repeat_count);
+        self.resolve(decision)
+    }
+
+    pub fn evaluate_detailed(
+        &self,
+        tool: &str,
+        args: &serde_json::Value,
+    ) -> super::PolicyEvaluation {
+        self.resolve(self.declared.evaluate_detailed(tool, args))
+    }
+
+    pub fn evaluate_request(
+        &self,
+        request: &super::ToolApprovalRequest,
+    ) -> super::PolicyEvaluation {
+        self.resolve(self.declared.evaluate_request(request))
+    }
+
+    pub fn evaluate(&self, tool: &str, args: &serde_json::Value) -> super::ToolApprovalDecision {
+        let decision = self.evaluate_detailed(tool, args);
+        if decision.is_deny() {
+            super::ToolApprovalDecision::AutoDenied {
+                reason: decision.reason,
+            }
+        } else if decision.is_ask() {
+            super::ToolApprovalDecision::RequiresHostApproval
+        } else {
+            super::ToolApprovalDecision::AutoApproved
+        }
+    }
+
+    fn resolve(&self, mut decision: super::PolicyEvaluation) -> super::PolicyEvaluation {
+        // Select the winning rule before resolving its ask. Rewriting rule
+        // actions first can change precedence against an explicit grant.
+        if decision.is_ask() && self.posture.approval_is_unsatisfiable(self.resolver) {
+            decision.receipt["requested_rule"] = serde_json::json!(decision.matched_rule);
+            decision.action = PolicyAction::Deny.as_str().to_string();
+            decision.reason = format!("approval unavailable: {}", decision.reason);
+            decision.required_approval = None;
+            decision.matched_rule = Some(super::PolicyMatchedRule {
+                source: "approval_unavailable".to_string(),
+                action: PolicyAction::Deny.as_str().to_string(),
+                id: decision
+                    .matched_rule
+                    .as_ref()
+                    .and_then(|rule| rule.id.clone()),
+                index: decision.matched_rule.as_ref().and_then(|rule| rule.index),
             });
+            decision.receipt["action"] = serde_json::json!(decision.action);
+            decision.receipt["reason"] = serde_json::json!(decision.reason);
+            decision.receipt["matched_rule"] = serde_json::json!(decision.matched_rule);
+            decision.receipt["required_approval"] = serde_json::Value::Null;
         }
-    }
-
-    for pattern in std::mem::take(&mut policy.require_approval) {
-        if !policy.auto_deny.contains(&pattern) {
-            policy.auto_deny.push(pattern);
-        }
-    }
-
-    if policy.repeat_limit.is_some()
-        && matches!(policy.repeat_action, None | Some(PolicyAction::Ask))
-    {
-        policy.repeat_action = Some(PolicyAction::Deny);
+        decision
     }
 }
 
@@ -169,6 +284,35 @@ mod tests {
             approval_availability: ApprovalAvailability::Unavailable,
             workspace_trust,
         }
+    }
+
+    #[test]
+    fn unavailable_approval_preserves_grants_denials_and_untouched_calls() {
+        let policy: ToolApprovalPolicy = serde_json::from_value(json!({
+            "rules": [
+                {"source": "mode", "action": "ask", "match": {"tool": "granted"}},
+                {"source": "user", "action": "allow", "match": {"tool": "granted"}},
+                {"action": "deny", "match": {"tool": "denied"}},
+                {"action": "ask", "match": {"tool": "ask"}}
+            ]
+        }))
+        .unwrap();
+        let run =
+            RunApprovalPolicy::construct(posture(WorkspaceTrust::Untrusted), |_| policy.clone());
+        for tool in ["granted", "denied", "untouched"] {
+            assert_eq!(
+                run.evaluate_detailed(tool, &json!({})),
+                policy.evaluate_detailed(tool, &json!({})),
+                "{tool}"
+            );
+        }
+        let ask = run.evaluate_detailed("ask", &json!({}));
+        assert!(ask.is_deny());
+        assert_eq!(
+            ask.denial_gate(),
+            crate::agent_events::DenialGate::ApprovalUnavailable
+        );
+        assert_eq!(ask.receipt["requested_rule"]["action"], "ask");
     }
 
     #[test]

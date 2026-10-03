@@ -183,6 +183,8 @@ pub(crate) async fn scope_prepared_identity<F>(
 where
     F: Future,
 {
+    let scope = crate::orchestration::AmbientExecutionScope::capture_for_inline_subtask()
+        .with_prepared_approval(authority.lease().approval_policy.clone());
     PREPARED_IDENTITY_CONTEXT
         .scope(
             PreparedIdentityContext {
@@ -190,7 +192,7 @@ where
                 brokers,
                 consumer,
             },
-            future,
+            crate::orchestration::scope_ambient(scope, future),
         )
         .await
 }

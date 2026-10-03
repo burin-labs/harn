@@ -164,16 +164,6 @@ impl CallFrame {
     }
 }
 
-/// Exception handler for try/catch.
-pub(crate) struct ExceptionHandler {
-    pub(crate) catch_ip: usize,
-    pub(crate) stack_depth: usize,
-    pub(crate) frame_depth: usize,
-    pub(crate) env_scope_depth: usize,
-    /// When present, this catch only handles errors whose enum_name matches.
-    pub(crate) error_type: Option<crate::value::HarnStr>,
-}
-
 /// A structured-concurrency nursery (`scope { }`). Tasks spawned while this
 /// scope is innermost record their id here; `TaskScopeExit` joins them.
 pub(crate) struct TaskScope {
@@ -299,7 +289,7 @@ pub struct Vm {
     /// Call frame stack.
     pub(crate) frames: Vec<CallFrame>,
     /// Exception handler stack.
-    pub(crate) exception_handlers: Vec<ExceptionHandler>,
+    pub(crate) exception_handlers: Vec<super::ExceptionHandler>,
     /// Spawned async task handles.
     pub(crate) spawned_tasks: BTreeMap<String, VmTaskHandle>,
     /// Force-cancelled tasks whose durable agent terminalization failed.
@@ -478,6 +468,8 @@ pub struct Vm {
     pub(crate) interrupt_handler_deadline: Option<Instant>,
     /// Captured stack trace from the most recent error (fn_name, line, col).
     pub(crate) error_stack_trace: Vec<(String, usize, usize, Option<String>)>,
+    /// Most recent error delivered to a handler; see [`super::CaughtError`].
+    pub(crate) last_caught_error: Option<Box<super::CaughtError>>,
     /// Yield channel sender for generator execution. When set, `Op::Yield`
     /// sends values through this channel instead of being a no-op.
     pub(crate) yield_sender: Option<tokio::sync::mpsc::Sender<Result<VmValue, VmError>>>,
@@ -645,6 +637,7 @@ impl VmBaseline {
             dispatching_interrupt: false,
             interrupt_handler_deadline: None,
             error_stack_trace: Vec::new(),
+            last_caught_error: None,
             yield_sender: None,
             project_root: self.project_root.clone(),
             globals: Arc::clone(&self.globals),
@@ -922,6 +915,7 @@ impl Vm {
             dispatching_interrupt: false,
             interrupt_handler_deadline: None,
             error_stack_trace: Vec::new(),
+            last_caught_error: None,
             yield_sender: None,
             project_root: None,
             globals: Arc::new(crate::value::DictMap::new()),
@@ -1209,6 +1203,7 @@ impl Vm {
             dispatching_interrupt: false,
             interrupt_handler_deadline: None,
             error_stack_trace: Vec::new(),
+            last_caught_error: None,
             yield_sender: None,
             project_root: self.project_root.clone(),
             globals: Arc::clone(&self.globals),

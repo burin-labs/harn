@@ -829,6 +829,52 @@ fn together_routes_that_need_a_dedicated_endpoint_are_marked_dedicated() {
     assert_ne!(control.availability, ModelAvailability::Dedicated);
 }
 
+/// Fireworks still lists these models in `/inference/v1/models`, but a chat
+/// call returns HTTP 404 "Model not found, inaccessible, and/or not deployed"
+/// (live sweep 2026-10-01; the weekly provider contract probe measured the same
+/// 404 on 2026-09-28). GLM 5.2 is the odd one: its metadata still reports
+/// `supportsServerless: true`, but its only deployment is non-default, so the
+/// plain id 404s the same way. GLM 5.3 Flash answered serverless the same day and is
+/// the control that keeps this from passing on a catalog that marked every
+/// Fireworks row dedicated.
+#[test]
+fn fireworks_routes_that_need_a_dedicated_deployment_are_marked_dedicated() {
+    for id in [
+        "accounts/fireworks/models/glm-5p2",
+        "accounts/fireworks/models/deepseek-v4-flash-0731",
+        "accounts/fireworks/models/deepseek-v4-pro",
+        "accounts/fireworks/models/deepseek-v4-pro-0813",
+        "accounts/fireworks/models/kimi-k2p6",
+        "accounts/fireworks/models/kimi-k2p7-code",
+    ] {
+        let model = model_catalog_entry(id).unwrap_or_else(|| panic!("{id} must be catalogued"));
+        assert_eq!(model.provider, "fireworks", "{id}");
+        assert_eq!(model.availability, ModelAvailability::Dedicated, "{id}");
+    }
+    let control = model_catalog_entry("accounts/fireworks/models/glm-5p3-flash")
+        .expect("Fireworks GLM 5.3 Flash row");
+    assert_eq!(control.provider, "fireworks");
+    assert_ne!(control.availability, ModelAvailability::Dedicated);
+}
+
+/// Fireworks lists Nemotron 3.5 Lightning as serverless, but on 2026-10-02 every
+/// serverless request to it (two non-streaming, one streaming) returned 0 bytes
+/// in 150 s, and the hosted provider contract probe timed out on it on
+/// 2026-09-28 and 2026-10-02. DeepSeek V4.1 Flash answered on the same key in
+/// 1.4 s and is the control that keeps this from passing on a catalog that
+/// marked every Fireworks row dedicated.
+#[test]
+fn fireworks_routes_whose_serverless_endpoint_hangs_are_marked_dedicated() {
+    let id = "accounts/fireworks/models/nemotron-lightning-3p5-30b-a3b";
+    let model = model_catalog_entry(id).unwrap_or_else(|| panic!("{id} must be catalogued"));
+    assert_eq!(model.provider, "fireworks");
+    assert_eq!(model.availability, ModelAvailability::Dedicated);
+    let control = model_catalog_entry("accounts/fireworks/models/deepseek-v4p1-flash")
+        .expect("Fireworks DeepSeek V4.1 Flash row");
+    assert_eq!(control.provider, "fireworks");
+    assert_ne!(control.availability, ModelAvailability::Dedicated);
+}
+
 /// A provider's default model is its own authored `runtime` entry, whichever
 /// provider is the default. Before this, a user overlay naming another default
 /// provider left `provider: "anthropic"` with no default, and a provider with

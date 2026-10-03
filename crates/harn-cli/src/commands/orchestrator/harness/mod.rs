@@ -69,6 +69,8 @@ impl OrchestratorHarness {
     /// Start the orchestrator in-process.  Resolves once the HTTP listener
     /// is ready and the startup lifecycle event has been appended.
     pub async fn start(config: OrchestratorConfig) -> Result<Self, HarnessError> {
+        let host_inference_boundary =
+            harn_vm::llm::api::InferenceBoundary::capture_process().map_err(HarnessError)?;
         let (ready_tx, ready_rx) = oneshot::channel::<Result<ReadyState, OrchestratorError>>();
         let (shutdown_tx, shutdown_rx) = watch::channel(false);
         let shutdown_tx = Arc::new(shutdown_tx);
@@ -76,9 +78,8 @@ impl OrchestratorHarness {
         let task_pump_drain_gate = pump_drain_gate.clone();
 
         // The orchestrator task drives the VM on this thread.
-        let join = std::thread::Builder::new()
+        let join = harn_parser::runtime_stack::builder()
             .name("harn-orchestrator".to_string())
-            .stack_size(crate::CLI_RUNTIME_STACK_SIZE)
             .spawn(move || {
                 // Use a multi-thread runtime so that blocking I/O (e.g. the
                 // OTEL SimpleSpanProcessor calling futures::executor::block_on
@@ -98,6 +99,7 @@ impl OrchestratorHarness {
                     ready_tx,
                     shutdown_rx,
                     task_pump_drain_gate,
+                    host_inference_boundary,
                 )));
             })
             .expect("spawn OrchestratorHarness thread");

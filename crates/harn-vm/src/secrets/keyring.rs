@@ -28,6 +28,24 @@ pub enum NativeKeyringError {
         .timeout.as_millis()
     )]
     Unresponsive { timeout: Duration },
+    #[error(
+        "credential store is locked, and this process does not raise unlock prompts; unlock \
+         it, or set {SECRET_INTERACTIVE_ENV}=1 when a person can answer one"
+    )]
+    Locked,
+}
+
+/// What a non-interactive probe learned about the credential store.
+///
+/// A store that cannot be reached at all is an error, classified by
+/// [`NativeKeyringError::unavailable_reason`]. These are the two states of a
+/// store that answered.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum NativeKeyringAvailability {
+    /// The store can serve a credential without raising a prompt.
+    Available,
+    /// The store is present, but serving a credential needs an unlock prompt.
+    Locked,
 }
 
 /// A stable reason that the operating-system credential store cannot service
@@ -90,7 +108,9 @@ impl NativeKeyringError {
             // A store that never answers is the same fact the macOS arm
             // reports as an error code: the platform wants a human at a
             // prompt this process cannot present.
-            Self::Unresponsive { .. } => Some(NativeKeyringUnavailable::InteractionRequired),
+            Self::Unresponsive { .. } | Self::Locked => {
+                Some(NativeKeyringUnavailable::InteractionRequired)
+            }
             _ => None,
         }
     }
@@ -170,15 +190,9 @@ impl NativeKeyring {
     }
 
     pub fn list(&self) -> Result<Vec<String>, NativeKeyringError> {
-        let store = self.store()?;
-        #[cfg(target_os = "windows")]
-        let pattern = format!(r"\.{}$", regex::escape(&self.service));
-        #[cfg(target_os = "windows")]
-        let spec = HashMap::from([("pattern", pattern.as_str())]);
-        #[cfg(not(target_os = "windows"))]
-        let spec = HashMap::from([("service", self.service.as_str())]);
-        let mut users = store
-            .search(&spec)?
+        self.refuse_prompt_when_unattended()?;
+        let mut users = self
+            .search_service()?
             .into_iter()
             .filter_map(|entry| entry.get_specifiers())
             .filter_map(|(service, user)| (service == self.service).then_some(user))
@@ -199,60 +213,109 @@ impl NativeKeyring {
         Ok(self.list()?.iter().any(|entry| entry == user))
     }
 
-    /// How long [`Self::healthcheck`] waits for the platform store.
+    /// How long [`Self::availability`] and [`Self::verify_round_trip`] wait for
+    /// the platform store.
     ///
     /// Matches the deadline the CLI's diagnostic subprocess probes use, so a
     /// caller that runs several checks sees one consistent worst case.
     pub const HEALTHCHECK_TIMEOUT: Duration = Duration::from_secs(5);
 
-    /// Prove the credential store round-trips a probe, within a deadline.
+    /// Whether the store can serve a credential, asked without any chance of
+    /// an interactive prompt and without writing anything.
     ///
-    /// The deadline is the whole point. On Linux the Secret Service answers a
-    /// locked collection by raising an interactive unlock prompt and blocking
-    /// until somebody types a password, so on a headless host this call used
-    /// to never return; the caller had no way to tell an unavailable store
-    /// from one that simply had not answered yet. The probe now runs on its
-    /// own thread and is abandoned when the deadline passes, which keeps the
-    /// process able to finish and report.
+    /// On Linux this searches every Secret Service collection for the
+    /// service's items and reads the default collection's lock flag; a
+    /// locked match in any collection, or a locked default collection,
+    /// reports [`NativeKeyringAvailability::Locked`]. The keyring adapter
+    /// cannot be used for it: every adapter call that
+    /// meets a locked item asks the desktop to unlock it and waits for an
+    /// answer, which on a headless host never comes. The read runs on the
+    /// calling thread under [`Self::HEALTHCHECK_TIMEOUT`], and a timeout
+    /// drops the connection, so no thread outlives the call.
     ///
-    /// Abandoning it leaks that thread, still parked on the prompt, for the
-    /// life of the process. That is deliberate: the blocking call lives
-    /// inside the platform client and cannot be cancelled from here, and a
-    /// parked thread costs a stack while a hung process costs the run.
-    pub fn healthcheck(&self) -> Result<String, NativeKeyringError> {
-        self.healthcheck_within(Self::HEALTHCHECK_TIMEOUT)
+    /// Elsewhere it is an attribute search, which reads no item data. macOS
+    /// answers a locked keychain with an interaction error once dialogs are
+    /// off for the process (see [`keychain_interaction_allowed`]), and that
+    /// error is reported as [`NativeKeyringAvailability::Locked`]. Windows
+    /// Credential Manager has no lock to report.
+    ///
+    /// This proves the store is reachable, not that it is writable;
+    /// [`Self::verify_round_trip`] proves that.
+    pub fn availability(&self) -> Result<NativeKeyringAvailability, NativeKeyringError> {
+        #[cfg(all(
+            feature = "native-keyring",
+            unix,
+            not(any(target_os = "macos", target_os = "ios", target_os = "android"))
+        ))]
+        if self.store.is_none() {
+            return super::secret_service_lock::secret_service_availability(
+                &self.service,
+                Self::HEALTHCHECK_TIMEOUT,
+            );
+        }
+        match self.search_service() {
+            Ok(_) => Ok(NativeKeyringAvailability::Available),
+            Err(error)
+                if error.unavailable_reason()
+                    == Some(NativeKeyringUnavailable::InteractionRequired) =>
+            {
+                Ok(NativeKeyringAvailability::Locked)
+            }
+            Err(error) => Err(error),
+        }
     }
 
-    /// [`Self::healthcheck`] with an explicit deadline, for tests.
-    pub fn healthcheck_within(&self, timeout: Duration) -> Result<String, NativeKeyringError> {
+    /// Prove the store round-trips a credential: write a probe, read it back,
+    /// and delete it, within [`Self::HEALTHCHECK_TIMEOUT`].
+    ///
+    /// This is the opt-in check. It runs [`Self::availability`] first and returns
+    /// [`NativeKeyringError::Locked`] for a locked store without writing, so
+    /// it does not raise the Secret Service unlock prompt either. The write
+    /// still runs on its own thread under a deadline, because a store can
+    /// lock between the two calls. A thread abandoned at the deadline stays
+    /// parked inside the platform client for the life of the process: that
+    /// call has no cancellation, and a parked thread costs a stack while a
+    /// hung process costs the run.
+    pub fn verify_round_trip(&self) -> Result<String, NativeKeyringError> {
+        self.verify_round_trip_within(Self::HEALTHCHECK_TIMEOUT)
+    }
+
+    /// [`Self::verify_round_trip`] with an explicit deadline, for tests.
+    pub fn verify_round_trip_within(
+        &self,
+        timeout: Duration,
+    ) -> Result<String, NativeKeyringError> {
         use std::sync::mpsc::RecvTimeoutError;
 
+        if self.availability()? == NativeKeyringAvailability::Locked {
+            return Err(NativeKeyringError::Locked);
+        }
         let probe = Self {
             service: self.service.clone(),
             entries: Mutex::new(HashMap::new()),
             store: self.store.clone(),
         };
         let (sender, receiver) = std::sync::mpsc::channel();
-        std::thread::Builder::new()
-            .name("harn-keyring-healthcheck".to_string())
+        crate::runtime_stack::builder()
+            .name("harn-keyring-round-trip".to_string())
             .spawn(move || {
                 let user = format!("__harn_probe__:{}", uuid::Uuid::now_v7().simple());
-                let _ = sender.send(probe.healthcheck_with_user(&user));
+                let _ = sender.send(probe.round_trip_with_user(&user));
             })
             .map_err(|_| {
-                NativeKeyringError::Verification("could not start the healthcheck probe")
+                NativeKeyringError::Verification("could not start the round-trip probe")
             })?;
 
         match receiver.recv_timeout(timeout) {
             Ok(result) => result,
             Err(RecvTimeoutError::Timeout) => Err(NativeKeyringError::Unresponsive { timeout }),
             Err(RecvTimeoutError::Disconnected) => Err(NativeKeyringError::Verification(
-                "the healthcheck probe ended without reporting a result",
+                "the round-trip probe ended without reporting a result",
             )),
         }
     }
 
-    fn healthcheck_with_user(&self, user: &str) -> Result<String, NativeKeyringError> {
+    fn round_trip_with_user(&self, user: &str) -> Result<String, NativeKeyringError> {
         const PROBE_VALUE: &[u8] = b"harn-keyring-healthcheck";
 
         self.set(user, PROBE_VALUE)?;
@@ -278,7 +341,43 @@ impl NativeKeyring {
         }
     }
 
+    fn search_service(&self) -> Result<Vec<Entry>, NativeKeyringError> {
+        let store = self.store()?;
+        #[cfg(target_os = "windows")]
+        let pattern = format!(r"\.{}$", regex::escape(&self.service));
+        #[cfg(target_os = "windows")]
+        let spec = HashMap::from([("pattern", pattern.as_str())]);
+        #[cfg(not(target_os = "windows"))]
+        let spec = HashMap::from([("service", self.service.as_str())]);
+        Ok(store.search(&spec)?)
+    }
+
+    /// Refuse, rather than prompt, when this process may not raise a dialog
+    /// and the Linux Secret Service is locked.
+    ///
+    /// macOS gets the same refusal from the platform once dialogs are off
+    /// for the process. The Secret Service has no such switch: the adapter
+    /// unlocks whatever locked item an operation meets, and the unlock is a
+    /// dialog. So the lock is checked first, through [`Self::availability`], which
+    /// never asks for one. Only a confirmed lock refuses; when the probe
+    /// itself fails, the operation runs and reports its own error.
+    fn refuse_prompt_when_unattended(&self) -> Result<(), NativeKeyringError> {
+        #[cfg(all(
+            feature = "native-keyring",
+            unix,
+            not(any(target_os = "macos", target_os = "ios", target_os = "android"))
+        ))]
+        if self.store.is_none()
+            && !keychain_interaction_allowed()
+            && matches!(self.availability(), Ok(NativeKeyringAvailability::Locked))
+        {
+            return Err(NativeKeyringError::Locked);
+        }
+        Ok(())
+    }
+
     fn entry(&self, user: &str) -> Result<Arc<Entry>, NativeKeyringError> {
+        self.refuse_prompt_when_unattended()?;
         let mut entries = self.entries.lock().expect("keyring cache poisoned");
         if let Some(entry) = entries.get(user) {
             return Ok(entry.clone());
@@ -333,11 +432,12 @@ fn platform_store() -> Result<Arc<CredentialStore>, NativeKeyringError> {
     Err(KeyringError::NoDefaultStore.into())
 }
 
-/// Opts a process with no terminal back into Keychain dialogs, for a host that
-/// launches Harn without one while a person is at the machine.
+/// Opts a process with no terminal back into credential-store dialogs, for a
+/// host that launches Harn without one while a person is at the machine.
 pub const SECRET_INTERACTIVE_ENV: &str = "HARN_SECRET_INTERACTIVE";
 
-/// Whether this process may raise a macOS Keychain access dialog.
+/// Whether this process may raise a credential-store dialog: a macOS Keychain
+/// access dialog, or a Linux Secret Service unlock prompt.
 ///
 /// A dialog needs someone to answer it. A test run, an eval, an agent's
 /// subprocess or a scheduled job has no terminal and nobody watching, so a
@@ -349,7 +449,9 @@ pub const SECRET_INTERACTIVE_ENV: &str = "HARN_SECRET_INTERACTIVE";
 /// So a process prompts only when it has a terminal on stdin and is not
 /// running under CI, or when [`SECRET_INTERACTIVE_ENV`] says a person is
 /// present. Everywhere else a read that would prompt fails as
-/// [`SecretError::NeedsUserApproval`].
+/// [`SecretError::NeedsUserApproval`]. On Linux the refusal comes from
+/// checking the collection's lock first; see
+/// `NativeKeyring::refuse_prompt_when_unattended`.
 pub fn keychain_interaction_allowed() -> bool {
     use std::io::IsTerminal;
     match std::env::var(SECRET_INTERACTIVE_ENV).ok().as_deref() {
@@ -408,10 +510,15 @@ impl KeyringSecretProvider {
             .map_err(|error| backend_error("delete", error))
     }
 
-    pub fn healthcheck(&self) -> Result<String, SecretError> {
-        self.keyring
-            .healthcheck()
-            .map_err(|error| backend_error("access", error))
+    /// See [`NativeKeyring::availability`]. The error keeps its
+    /// [`NativeKeyringError::unavailable_reason`] for the caller to report.
+    pub fn availability(&self) -> Result<NativeKeyringAvailability, NativeKeyringError> {
+        self.keyring.availability()
+    }
+
+    /// See [`NativeKeyring::verify_round_trip`].
+    pub fn verify_round_trip(&self) -> Result<String, NativeKeyringError> {
+        self.keyring.verify_round_trip()
     }
 }
 
@@ -479,6 +586,18 @@ impl SecretProvider for KeyringSecretProvider {
 
     fn supports_versions(&self) -> bool {
         false
+    }
+
+    fn kind(&self) -> &'static str {
+        "keyring"
+    }
+
+    fn locator(&self, id: &SecretId) -> Option<String> {
+        Some(format!(
+            "service {} account {}",
+            self.service(),
+            account_name(id)
+        ))
     }
 }
 
@@ -557,14 +676,14 @@ mod tests {
     }
 
     #[test]
-    fn healthcheck_proves_write_read_delete_and_leaves_no_probe() {
+    fn round_trip_proves_write_read_delete_and_leaves_no_probe() {
         let keyring = NativeKeyring::with_store(
             "harn.healthcheck-test",
             keyring_core::mock::Store::new().unwrap(),
         );
 
         let detail = keyring
-            .healthcheck_with_user("__harn_probe__:test")
+            .round_trip_with_user("__harn_probe__:test")
             .expect("writable mock keyring");
 
         assert!(detail.contains("passed write, read, and delete checks"));
@@ -670,7 +789,7 @@ mod tests {
     }
 
     #[test]
-    fn healthcheck_rejects_a_store_that_is_reachable_but_not_writable() {
+    fn round_trip_rejects_a_store_that_is_reachable_but_not_writable() {
         let store = keyring_core::mock::Store::new().unwrap();
         let credential_store: Arc<CredentialStore> = store;
         let entry = credential_store
@@ -687,8 +806,8 @@ mod tests {
         let keyring = NativeKeyring::with_store("harn.healthcheck-read-only", credential_store);
 
         let error = keyring
-            .healthcheck_with_user("__harn_probe__:test")
-            .expect_err("read-only store must fail the healthcheck");
+            .round_trip_with_user("__harn_probe__:test")
+            .expect_err("read-only store must fail the round trip");
 
         assert!(error.to_string().contains("mock read-only store"));
     }
@@ -760,13 +879,19 @@ mod tests {
             )))
         }
 
+        /// Searching answers, so the availability probe passes and the write is
+        /// what stops answering.
+        fn search(&self, _spec: &HashMap<&str, &str>) -> keyring_core::Result<Vec<Entry>> {
+            Ok(Vec::new())
+        }
+
         fn as_any(&self) -> &dyn std::any::Any {
             self
         }
     }
 
     #[test]
-    fn healthcheck_gives_up_on_a_store_that_does_not_answer() {
+    fn round_trip_gives_up_on_a_store_that_does_not_answer() {
         // Positive control first: the same call against a store that does
         // answer passes, so the refusal below is the deadline firing and not
         // the probe failing for some other reason.
@@ -774,7 +899,7 @@ mod tests {
             "harn.healthcheck-deadline",
             keyring_core::mock::Store::new().unwrap(),
         )
-        .healthcheck_within(Duration::from_secs(5))
+        .verify_round_trip_within(Duration::from_secs(5))
         .expect("a responsive store passes within the deadline");
 
         let store = NeverAnswersStore::new();
@@ -782,7 +907,7 @@ mod tests {
         let keyring = NativeKeyring::with_store("harn.healthcheck-deadline", blocking);
 
         let error = keyring
-            .healthcheck_within(Duration::from_millis(50))
+            .verify_round_trip_within(Duration::from_millis(50))
             .expect_err("a store that never answers must not report a healthy store");
 
         assert!(
@@ -800,5 +925,120 @@ mod tests {
         );
 
         store.release();
+    }
+
+    /// A store whose search answers with a fixed result and whose every
+    /// entry build fails, so any attempt to write is visible as an error.
+    #[derive(Debug)]
+    struct SearchOnlyStore {
+        search: fn() -> keyring_core::Result<Vec<Entry>>,
+    }
+
+    impl SearchOnlyStore {
+        fn credential_store(
+            search: fn() -> keyring_core::Result<Vec<Entry>>,
+        ) -> Arc<CredentialStore> {
+            Arc::new(Self { search })
+        }
+    }
+
+    impl keyring_core::api::CredentialStoreApi for SearchOnlyStore {
+        fn vendor(&self) -> String {
+            "harn-test/search-only".to_string()
+        }
+
+        fn id(&self) -> String {
+            "search-only".to_string()
+        }
+
+        fn build(
+            &self,
+            _service: &str,
+            _user: &str,
+            _modifiers: Option<&HashMap<&str, &str>>,
+        ) -> keyring_core::Result<Entry> {
+            Err(KeyringError::Invalid(
+                "entry".to_string(),
+                "write attempted".to_string(),
+            ))
+        }
+
+        fn search(&self, _spec: &HashMap<&str, &str>) -> keyring_core::Result<Vec<Entry>> {
+            (self.search)()
+        }
+
+        fn as_any(&self) -> &dyn std::any::Any {
+            self
+        }
+    }
+
+    /// The default diagnostic answers from a search and writes nothing.
+    ///
+    /// The store fails every write, so an availability probe that wrote would fail
+    /// here. The round trip against the same store is the control: it does
+    /// write, and does fail.
+    #[test]
+    fn availability_answers_without_writing() {
+        let keyring = NativeKeyring::with_store(
+            "harn.availability-test",
+            SearchOnlyStore::credential_store(|| Ok(Vec::new())),
+        );
+
+        assert_eq!(
+            keyring.availability().unwrap(),
+            NativeKeyringAvailability::Available
+        );
+        let error = keyring
+            .verify_round_trip()
+            .expect_err("the opt-in round trip writes, and this store refuses writes");
+        assert!(error.to_string().contains("write attempted"), "{error}");
+    }
+
+    /// The negative control: the probe can fail, and says why.
+    #[test]
+    fn availability_reports_an_unreachable_store_as_unavailable_with_its_reason() {
+        let keyring = NativeKeyring::with_store(
+            "harn.availability-unreachable",
+            SearchOnlyStore::credential_store(|| {
+                Err(KeyringError::NoStorageAccess(Box::new(
+                    std::io::Error::other("no session bus"),
+                )))
+            }),
+        );
+
+        let error = keyring
+            .availability()
+            .expect_err("a store that cannot be reached is not available");
+        assert_eq!(
+            error.unavailable_reason(),
+            Some(NativeKeyringUnavailable::StorageInaccessible)
+        );
+        assert!(error.to_string().contains("no session bus"), "{error}");
+    }
+
+    /// A locked keychain is reported as locked, distinct from unavailable,
+    /// and the opt-in round trip refuses it without attempting a write.
+    #[cfg(all(feature = "native-keyring", target_os = "macos"))]
+    #[test]
+    fn availability_reports_a_locked_keychain_as_locked() {
+        let keyring = NativeKeyring::with_store(
+            "harn.availability-locked",
+            SearchOnlyStore::credential_store(|| {
+                // errSecInteractionNotAllowed: the keychain needs unlocking
+                // and dialogs are off for this process.
+                Err(KeyringError::PlatformFailure(Box::new(
+                    security_framework::base::Error::from_code(-25308),
+                )))
+            }),
+        );
+
+        assert_eq!(
+            keyring.availability().unwrap(),
+            NativeKeyringAvailability::Locked
+        );
+        assert!(matches!(
+            keyring.verify_round_trip(),
+            Err(NativeKeyringError::Locked)
+        ));
     }
 }

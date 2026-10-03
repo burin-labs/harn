@@ -576,11 +576,28 @@ fn __refresh_needed(stored: dict, now_s: int, reason: string, observed_token: an
   return __token_is_stale(stored, now_s)
 }
 
+fn __no_stored_token_error(cfg: dict) -> string {
+  // Storage backends that can say why nothing was found (the secrets backend
+  // names the providers it consulted and any it was configured to skip)
+  // contribute that detail, so a disabled keyring is not read as "never
+  // authorized".
+  const base = __DIAGNOSTIC_REFRESH_EXPIRED
+    + ": std/oauth/client: no token in storage; run authorization first"
+  const describe = cfg.storage?.describe_absence
+  if type_of(describe) != "closure" && type_of(describe) != "builtin" {
+    return base
+  }
+  const detail = describe(cfg.storage_key)
+  if detail == nil || to_string(detail) == "" {
+    return base
+  }
+  return base + " (" + to_string(detail) + ")"
+}
+
 fn __maybe_refresh(harness: Harness, cfg: dict, reason: string, observed_token: any = nil) {
   const observed = cfg.storage.get(cfg.storage_key)
   if observed == nil {
-    throw __DIAGNOSTIC_REFRESH_EXPIRED
-      + ": std/oauth/client: no token in storage; run authorization first"
+    throw __no_stored_token_error(cfg)
   }
   const now_s = __now_seconds(harness.clock)
   if !__refresh_needed(observed, now_s, reason, observed_token) {
@@ -591,8 +608,7 @@ fn __maybe_refresh(harness: Harness, cfg: dict, reason: string, observed_token: 
     { ->
       const stored = cfg.storage.get(cfg.storage_key)
       if stored == nil {
-        throw __DIAGNOSTIC_REFRESH_EXPIRED
-          + ": std/oauth/client: no token in storage; run authorization first"
+        throw __no_stored_token_error(cfg)
       }
       const locked_now_s = __now_seconds(harness.clock)
       if !__refresh_needed(stored, locked_now_s, reason, observed_token) {

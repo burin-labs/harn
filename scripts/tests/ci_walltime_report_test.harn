@@ -8,7 +8,32 @@ import {
   run_has_full_coverage,
   run_samples_from_api,
   run_until_verdict,
+  runner_class,
+  runner_class_is_paid,
 } from "../ci_walltime_report.harn"
+
+pipeline test_vendor_runners_classify_by_label_and_bill(harness: Harness, task: unknown) {
+  // Observed job records: Ubicloud's random runner name plus its size label
+  // (run 36966984345), GitHub's 8-core runner (run 36956226587), and the
+  // owned pool.
+  const ubicloud = runner_class("grs1sf2tav7a5g6cxnx1e7azpz", ["ubicloud-standard-8"])
+  assert_eq(ubicloud, "ubicloud")
+  assert_eq(runner_class_is_paid(ubicloud), true)
+  // A vendor runner that also carries the self-hosted label is still paid.
+  const reported_self_hosted = runner_class("vm-1", ["self-hosted", "ubicloud-standard-8"])
+  assert_eq(reported_self_hosted, "ubicloud")
+  assert_eq(runner_class_is_paid(reported_self_hosted), true)
+  const larger = runner_class("ubuntu-8core-1000598056", ["ubuntu-8core"])
+  assert_eq(larger, "github-larger")
+  assert_eq(runner_class_is_paid(larger), true)
+  const owned = runner_class("tornadough-w2", ["self-hosted", "Linux", "X64", "harn-ci-big"])
+  assert_eq(owned, "self-hosted")
+  assert_eq(runner_class_is_paid(owned), false)
+  const standard = runner_class("GitHub Actions 1000600127", ["ubuntu-latest"])
+  assert_eq(standard, "github-hosted")
+  assert_eq(runner_class_is_paid(standard), false)
+  assert_eq(runner_class("blacksmith-8vcpu-x", ["blacksmith-8vcpu-ubuntu-2404"]), "blacksmith")
+}
 
 pipeline test_duration_stats_use_shared_percentile_contract(harness: Harness, task: unknown) {
   assert_eq(

@@ -285,7 +285,7 @@ mod tests {
             .map(|worker| {
                 let chunk = Arc::clone(&chunk);
                 let recorder = Arc::clone(&recorder);
-                std::thread::spawn(move || {
+                crate::runtime_stack::spawn(move || {
                     let task = format!("task-{worker}");
                     for _ in 0..1_000 {
                         recorder.record_instruction(

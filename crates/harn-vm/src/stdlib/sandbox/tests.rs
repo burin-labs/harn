@@ -660,7 +660,7 @@ fn scoped_parent_autocreate_tolerates_concurrent_creators() {
     let threads: Vec<_> = (0..4)
         .map(|_| {
             let target = target.clone();
-            std::thread::spawn(move || {
+            crate::runtime_stack::spawn(move || {
                 for _ in 0..64 {
                     // Each call re-walks from the root; the EEXIST branch is
                     // the one under contention.

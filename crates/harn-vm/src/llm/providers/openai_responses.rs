@@ -819,7 +819,7 @@ mod tests {
     async fn responses_connection_closed_before_reply_is_typed_transient() {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
         let addr = listener.local_addr().expect("addr");
-        let server = std::thread::spawn(move || {
+        let server = crate::runtime_stack::spawn(move || {
             let (mut stream, _) = listener.accept().expect("accept");
             let mut buffer = [0_u8; 1024];
             let _ = std::io::Read::read(&mut stream, &mut buffer);

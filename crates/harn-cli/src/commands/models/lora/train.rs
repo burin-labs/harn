@@ -744,7 +744,7 @@ fn tee_backend_stream<R: Read + Send + 'static>(
     mirror: bool,
     tail: Arc<Mutex<OutputTail>>,
 ) -> thread::JoinHandle<Result<(), String>> {
-    thread::spawn(move || {
+    harn_parser::runtime_stack::spawn(move || {
         if !mirror {
             return capture_backend_stream(stream, &mut std::io::sink(), tail, "stdout");
         }

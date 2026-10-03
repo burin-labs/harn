@@ -14,10 +14,14 @@
 //! such as `harness.env` and model providers:
 //!
 //! ```text
-//! inherited = launcher_snapshot
+//! inherited = launcher_snapshot - provider_credentials
 //! isolated  = allowlist(launcher_snapshot)
 //! granted   = allowlist(launcher_snapshot) + grants
 //! ```
+//!
+//! Under `inherited`, [`lookup_env`] still reads the provider credentials, so
+//! Harn's own model calls authenticate; only children lose them. A spawn that
+//! genuinely needs one names it in its own explicit `env`, which layers on top.
 //!
 //! Every spawn seam routes through [`crate::stdlib::process::session_env`].
 //!
@@ -295,13 +299,18 @@ const ALLOWLIST_LEN: usize =
 /// snapshot itself so a later exact-cased lookup (e.g. `"PATH"`) still finds
 /// a value stored under the launcher's own casing (e.g. `"Path"`).
 pub(crate) fn allowlist_admits(name: &str) -> bool {
-    if ENV_ALLOWLIST.contains(&name) {
-        return true;
-    }
-    cfg!(windows)
-        && ENV_ALLOWLIST
-            .iter()
-            .any(|allowed| allowed.eq_ignore_ascii_case(name))
+    ENV_ALLOWLIST
+        .iter()
+        .any(|allowed| environment_names_equal(allowed, name))
+}
+
+/// Environment names follow the host platform's matching semantics.
+pub(crate) fn environment_names_equal(left: &str, right: &str) -> bool {
+    environment_names_equal_for_platform(left, right, cfg!(windows))
+}
+
+pub(crate) fn environment_names_equal_for_platform(left: &str, right: &str, windows: bool) -> bool {
+    left == right || windows && left.eq_ignore_ascii_case(right)
 }
 
 /// Concatenate the base, toolchain, and Windows lists at compile time so
@@ -336,6 +345,39 @@ const fn const_concat() -> [&'static str; ALLOWLIST_LEN] {
     out
 }
 
+/// Every variable name a catalogued provider declares as its credential.
+///
+/// The catalog, including user overlays, is the single owner of that mapping,
+/// so a provider added with a novel key name is covered without a list here.
+pub fn provider_credential_env_names() -> std::collections::BTreeSet<String> {
+    let mut names = std::collections::BTreeSet::new();
+    for provider in crate::llm_config::provider_names() {
+        if let Some(definition) = crate::llm_config::provider_config(&provider) {
+            names.extend(crate::llm_config::auth_env_names(&definition.auth_env));
+            names.extend(definition.credential_env.iter().cloned());
+        }
+    }
+    names
+}
+
+/// What an inherited policy hands a child: the launcher snapshot without any
+/// provider credential. The key exists for Harn's own provider calls, which
+/// read it in-process through [`lookup_env`]; a command the agent runs, an MCP
+/// server, or an ACP child has no claim on it merely by being spawned.
+fn inherited_child_env(environment: &SessionEnvironment) -> BTreeMap<String, String> {
+    let withheld = provider_credential_env_names();
+    environment
+        .launcher_snapshot()
+        .iter()
+        .filter(|(name, _)| {
+            !withheld
+                .iter()
+                .any(|credential| environment_names_equal(credential, name))
+        })
+        .map(|(name, value)| (name.clone(), value.clone()))
+        .collect()
+}
+
 /// Build the environment for a policy-governed child process, closed by
 /// construction: the allowlisted subset of the parent environment plus the
 /// environment's granted exposure. The one resolver both policies flow through —
@@ -351,7 +393,7 @@ pub fn resolve_env(
     resolve_secret: &dyn Fn(&str, &str) -> Option<String>,
 ) -> Result<BTreeMap<String, String>, EnvironmentPolicyError> {
     if matches!(environment.kind(), EnvironmentPolicyKind::Inherited) {
-        return Ok(environment.launcher_snapshot().clone());
+        return Ok(inherited_child_env(environment));
     }
     let mut env = BTreeMap::new();
     for name in ENV_ALLOWLIST {
@@ -379,7 +421,7 @@ pub fn resolve_env_for_command(
     resolve_secret: &dyn Fn(&str, &str) -> Option<String>,
 ) -> Result<BTreeMap<String, String>, EnvironmentPolicyError> {
     if matches!(environment.kind(), EnvironmentPolicyKind::Inherited) {
-        return Ok(environment.launcher_snapshot().clone());
+        return Ok(inherited_child_env(environment));
     }
     let mut env = BTreeMap::new();
     for name in ENV_ALLOWLIST {
@@ -547,30 +589,47 @@ mod tests {
         }
     }
 
-    #[cfg(windows)]
     #[test]
     fn windows_launcher_value_folds_case_so_the_parents_path_is_found() {
         // Windows reports the search path as `Path`. Matched exactly against
         // the allowlist's `PATH`, it missed, and the child inherited no search
         // path while the allowlist still read as though it admitted one. This
-        // half of the fix is provable only on a Windows host.
+        // lookup uses the same platform matcher on every test host.
         let parent = env_from(&[]);
         let environment = SessionEnvironment::launch_from_snapshot(
-            EnvironmentPolicyKind::Isolated,
+            EnvironmentPolicyKind::Inherited,
             Vec::new(),
             BTreeMap::from([("Path".to_string(), "C:\\Windows\\System32".to_string())]),
             &parent,
         )
         .unwrap();
-        let never_secret = |_: &str, _: &str| None;
-        let env = resolve_env(&environment, &parent, &never_secret).unwrap();
         assert_eq!(
-            env.get("PATH").map(String::as_str),
+            environment.launcher_value_for_platform("PATH", true),
             Some("C:\\Windows\\System32")
         );
+        assert_eq!(environment.launcher_value_for_platform("PATH", false), None);
         // The control: folding case must not invent a value for a name the
         // parent never set.
-        assert_eq!(environment.launcher_value("ABSENT_NAME"), None);
+        assert_eq!(
+            environment.launcher_value_for_platform("ABSENT_NAME", true),
+            None
+        );
+        #[cfg(windows)]
+        {
+            let isolated = SessionEnvironment::launch_from_snapshot(
+                EnvironmentPolicyKind::Isolated,
+                Vec::new(),
+                BTreeMap::from([("Path".to_string(), "C:\\Windows\\System32".to_string())]),
+                &parent,
+            )
+            .unwrap();
+            let never_secret = |_: &str, _: &str| None;
+            let env = resolve_env(&isolated, &parent, &never_secret).unwrap();
+            assert_eq!(
+                env.get("PATH").map(String::as_str),
+                Some("C:\\Windows\\System32")
+            );
+        }
     }
 
     use crate::security::session_environment::{EnvironmentPolicyKind, GrantSourceSpec, GrantSpec};
@@ -652,17 +711,12 @@ mod tests {
         // The catalog is the single owner of that mapping, so adding a provider
         // with a novel key name — one the prefix list above would not
         // recognize — cannot silently open the door.
-        for provider in crate::llm_config::provider_names() {
-            let Some(definition) = crate::llm_config::provider_config(&provider) else {
-                continue;
-            };
-            for auth_env in crate::llm_config::auth_env_names(&definition.auth_env) {
-                assert!(
-                    !ENV_ALLOWLIST.contains(&auth_env.as_str()),
-                    "allowlist admits '{auth_env}', the credential variable provider \
-                     '{provider}' declares — a credential must cross via a grant"
-                );
-            }
+        for credential in provider_credential_env_names() {
+            assert!(
+                !ENV_ALLOWLIST.contains(&credential.as_str()),
+                "allowlist admits '{credential}', a credential variable the provider \
+                 catalog declares — a credential must cross via a grant"
+            );
         }
         // Base essentials present: without these a child cannot resolve tools or
         // its home/temp, so an isolated build would fail for a trivial reason.
@@ -993,5 +1047,48 @@ mod tests {
         // Same value here, but it flows through the grant, not the allowlist
         // pull — proving the overlay order without a second source of truth.
         assert_eq!(env.get("RUST_LOG").map(String::as_str), Some("from_parent"));
+    }
+
+    /// An inherited child keeps the launcher's environment except a catalogued
+    /// provider credential, which Harn's own process still reads.
+    #[test]
+    fn inherited_children_never_receive_a_provider_credential() {
+        let withheld = provider_credential_env_names();
+        for name in [
+            "OPENAI_API_KEY",
+            "ANTHROPIC_API_KEY",
+            "GOOGLE_APPLICATION_CREDENTIALS",
+        ] {
+            assert!(withheld.contains(name), "catalog no longer declares {name}");
+        }
+        let snapshot = BTreeMap::from([
+            ("OPENAI_API_KEY".to_string(), "sk-dummy-canary".to_string()),
+            (
+                "ANTHROPIC_API_KEY".to_string(),
+                "harn-secret://probe/anthropic".to_string(),
+            ),
+            ("UNRELATED_VAR".to_string(), "kept".to_string()),
+        ]);
+        let lookup = |name: &str| snapshot.get(name).cloned();
+        let environment = SessionEnvironment::launch_from_snapshot(
+            EnvironmentPolicyKind::Inherited,
+            Vec::new(),
+            snapshot.clone(),
+            &lookup,
+        )
+        .unwrap();
+        let never_secret = |_: &str, _: &str| None;
+        for child in [
+            resolve_env(&environment, &lookup, &never_secret).unwrap(),
+            resolve_env_for_command(&environment, "sh", &lookup, &never_secret).unwrap(),
+        ] {
+            assert_eq!(child.get("UNRELATED_VAR").map(String::as_str), Some("kept"));
+            assert!(!child.contains_key("OPENAI_API_KEY"), "{child:?}");
+            assert!(!child.contains_key("ANTHROPIC_API_KEY"), "{child:?}");
+        }
+        assert_eq!(
+            lookup_env(&environment, "OPENAI_API_KEY", &lookup, &never_secret).unwrap(),
+            Some("sk-dummy-canary".to_string())
+        );
     }
 }

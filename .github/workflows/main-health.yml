@@ -11,6 +11,17 @@ name: Scheduled suite health
 # commit status — visible on the repo home and in the commits list, which are
 # surfaces people already read. It files no issues and opens no PRs.
 #
+# A status lives on one commit, and main moves many times a day, so a verdict
+# posted only by the daily run sits on a commit nobody looks at within hours.
+# Every push to main therefore carries the verdict forward: it copies the
+# `main health` status from the commit it replaced, and recomputes it from the
+# runs when that commit has none. The copied description keeps the date of the
+# run that measured it. The status is never required, so it blocks no merge.
+#
+# Which suites are watched, and after how many consecutive failures, is read
+# from scripts/scheduled_workflows.toml. `make check-scheduled-workflows`
+# refuses a scheduled workflow that is neither watched nor exempt with a reason.
+#
 # It distinguishes a persistent break from a flake by consecutive runs only.
 # One red nightly is noise; three in a row is a bug that has been shipping.
 #
@@ -25,10 +36,13 @@ on:
   schedule:
     # After the nightlies (the latest starts 09:00 UTC) have finished.
     - cron: "23 13 * * *"
+  push:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
   actions: read
+  contents: read
   statuses: write
 
 concurrency:
@@ -39,119 +53,39 @@ jobs:
   report:
     name: Report persistently failing suites
     if: github.repository == 'burin-labs/harn'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
-      - name: Classify each scheduled suite and post main's status
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # A push usually only needs the verdict already on the commit it
+      # replaced, so most runs end here without installing Harn. The script
+      # declines when the push changed the health policy or reader.
+      - name: Carry the verdict forward from the replaced commit
+        id: carry
+        if: github.event_name == 'push'
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          # A suite is "broken" once this many of its most recent scheduled
-          # runs on main have failed back to back.
-          #
-          # Three is a judgement, not a derived number. Over the last ~40
-          # scheduled runs of each watched suite, isolated single failures are
-          # routine (Release smoke: one in forty) while every multi-run streak
-          # was a real break somebody eventually fixed: `Windows workspace tests` ran
-          # twenty consecutive failures, `macOS workspace tests` four, `CLI cold-start
-          # budget` three. So streaks are the signal, and three trades about
-          # three days of latency for not paging on the ordinary flake.
-          STREAK: "3"
-          # CLI end-to-end behavior is deliberately excluded: it is already known-flaky, is
-          # excluded from the CI status rollup by design, and would keep this
-          # permanently red for a reason nobody would act on.
-          # One suite per line: the names contain spaces, so this list is
-          # newline-delimited and must stay a literal block.
-          SUITES: |
-            Test scheduler thread-count parity
-            Touched-test repeatability
-            macOS workspace tests
-            Windows workspace tests
-            Install channels smoke
-            CLI cold-start budget
-            Release smoke
-        run: |
-          set -euo pipefail
-
-          broken=()
-          unknown=()
-
-          # `gh run list --workflow` returns nothing both for a workflow that
-          # does not exist and for one that has simply never run on a schedule.
-          # Without this list the two are indistinguishable, so renaming a
-          # watched suite would quietly drop it from monitoring and leave the
-          # report looking healthy — the same silent decay this check exists to
-          # catch. Resolve the names once and treat a miss as an error.
-          known="$(gh api "repos/$GH_REPO/actions/workflows" --paginate --jq '.workflows[].name')"
-
-          {
-            echo "| suite | recent scheduled runs (newest first) | verdict |"
-            echo "| --- | --- | --- |"
-          } >> "$GITHUB_STEP_SUMMARY"
-
-          while IFS= read -r suite; do
-            [[ -n "$suite" ]] || continue
-
-            # Fixed-string, whole-line match: suite names contain spaces and
-            # hyphens, so a substring or regex match would happily accept a
-            # renamed neighbour.
-            if ! grep -Fxq "$suite" <<< "$known"; then
-              unknown+=("$suite")
-              echo "| $suite | — | **UNKNOWN — no such workflow** |" >> "$GITHUB_STEP_SUMMARY"
-              continue
-            fi
-
-            # `conclusion` is null while a run is still going; drop those so an
-            # in-flight run cannot break a streak that is genuinely unbroken.
-            recent="$(
-              gh run list --repo "$GH_REPO" --workflow "$suite" \
-                --event schedule --branch main --limit 10 \
-                --json conclusion \
-                --jq '[.[] | select(.conclusion != null and .conclusion != "cancelled") | .conclusion] | .[0:6] | join(" ")'
-            )" || recent=""
-
-            if [[ -z "$recent" ]]; then
-              echo "| $suite | (no scheduled history) | skipped |" >> "$GITHUB_STEP_SUMMARY"
-              continue
-            fi
-
-            # Split explicitly rather than leaning on unquoted word-splitting:
-            # under a shell that does not split (zsh), the loop below runs once
-            # on the whole string, every streak reads as zero, and the report
-            # comes back reassuringly empty.
-            read -ra outcomes <<< "$recent"
-            streak=0
-            for outcome in "${outcomes[@]}"; do
-              [[ "$outcome" == "failure" ]] || break
-              streak=$((streak + 1))
-            done
-
-            if (( streak >= STREAK )); then
-              broken+=("$suite (${streak} consecutive)")
-              echo "| $suite | $recent | **BROKEN — ${streak} consecutive** |" >> "$GITHUB_STEP_SUMMARY"
-            else
-              echo "| $suite | $recent | ok |" >> "$GITHUB_STEP_SUMMARY"
-            fi
-          done <<< "$SUITES"
-
-          sha="$(gh api "repos/$GH_REPO/commits/main" --jq '.sha')"
-
-          if (( ${#broken[@]} == 0 && ${#unknown[@]} == 0 )); then
-            gh api "repos/$GH_REPO/statuses/$sha" -X POST \
-              -f state=success -f context="main health" \
-              -f description="all watched scheduled suites passing" >/dev/null
-            echo "All watched suites are passing." >> "$GITHUB_STEP_SUMMARY"
-            exit 0
-          fi
-
-          # A name that resolves to nothing is reported as loudly as a break:
-          # it means this check is watching less than it claims to.
-          problems=("${broken[@]}" "${unknown[@]/#/no such workflow: }")
-          summary="$(IFS='; '; echo "${problems[*]}")"
-          gh api "repos/$GH_REPO/statuses/$sha" -X POST \
-            -f state=failure -f context="main health" \
-            -f description="${summary:0:139}" \
-            -f target_url="https://github.com/$GH_REPO/actions/runs/${GITHUB_RUN_ID}" >/dev/null
-
-          echo "::error::main health — $summary"
-          exit 1
+          PUSHED_SHA: ${{ github.sha }}
+          REPLACED_SHA: ${{ github.event.before }}
+        run: ./scripts/ci/main_health_carry.sh
+      # The suite list comes from the scheduled-workflow checker, which
+      # validates the registry before printing it. Any recent release runs it;
+      # bump the pin when convenient, as secret-scan.yml does.
+      - name: Set up Harn
+        id: harn
+        if: steps.carry.outputs.carried != 'true'
+        uses: ./.github/actions/setup-harn
+        with:
+          version: "0.10.153"
+      - name: Classify each scheduled suite and post main's status
+        if: steps.carry.outputs.carried != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          EVENT_NAME: ${{ github.event_name }}
+          PUSHED_SHA: ${{ github.sha }}
+          HARN: ${{ steps.harn.outputs.path }}
+        run: ./scripts/ci/main_health.sh

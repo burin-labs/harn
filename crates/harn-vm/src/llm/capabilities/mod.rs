@@ -51,9 +51,13 @@ mod lookup_tests_open_weight_families;
 #[cfg(test)]
 mod lookup_tests_openai_models;
 #[cfg(test)]
+mod lookup_tests_openrouter_sampling;
+#[cfg(test)]
 mod lookup_tests_parity;
 #[cfg(test)]
 mod lookup_tests_responses;
+#[cfg(test)]
+mod lookup_tests_routed_flagships;
 #[cfg(test)]
 mod lookup_tests_support;
 #[cfg(test)]

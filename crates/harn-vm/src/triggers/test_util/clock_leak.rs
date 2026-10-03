@@ -268,7 +268,6 @@ mod tests {
     use super::*;
     use crate::clock_mock::{install_override, MockClock};
     use std::sync::{Arc, Barrier};
-    use std::thread;
 
     fn isolated_registry<F: FnOnce()>(f: F) {
         let _scope = install_scope();
@@ -345,7 +344,7 @@ mod tests {
 
         let barrier = Arc::new(Barrier::new(2));
         let worker_barrier = Arc::clone(&barrier);
-        let worker = thread::spawn(move || {
+        let worker = crate::runtime_stack::spawn(move || {
             let _beta = enter_scope(beta_scope);
             worker_barrier.wait();
             crate::reset_thread_local_state();

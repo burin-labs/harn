@@ -52,6 +52,11 @@ fi
 # Installation preserves unrelated jobs and does not duplicate its own entry
 # when setup is repeated. The fake crontab keeps this test off the host timer.
 mkdir -p "$test_root/fake-bin"
+cat > "$test_root/fake-bin/uname" <<'UNAME'
+#!/usr/bin/env bash
+printf '%s\n' "${HARN_TARGET_GC_TEST_PLATFORM:-Linux}"
+UNAME
+chmod +x "$test_root/fake-bin/uname"
 cat > "$test_root/fake-bin/crontab" <<'CRONTAB'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -106,10 +111,6 @@ done
 
 # Fake only the scheduler boundary. A macOS user session can read cron yet be
 # forbidden to write it, while its launchd user domain accepts a LaunchAgent.
-cat > "$test_root/fake-bin/uname" <<'UNAME'
-#!/usr/bin/env bash
-printf '%s\n' "${HARN_TARGET_GC_TEST_PLATFORM:-Linux}"
-UNAME
 cat > "$test_root/fake-bin/plutil" <<'PLUTIL'
 #!/usr/bin/env bash
 test "$1" = -lint

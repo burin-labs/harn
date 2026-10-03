@@ -4,14 +4,34 @@ use serde_json::{json, Value as JsonValue};
 
 use crate::{cli::ConnectApiKeyArgs, package};
 use harn_vm::secrets::{
-    configured_secret_chain, configured_secret_namespace, ChainSecretProvider,
-    KeyringSecretProvider, SecretBytes, SecretId, SecretProvider,
+    configured_secret_chain, configured_secret_namespace, ChainSecretProvider, SecretAuditContext,
+    SecretBytes, SecretChainPlan, SecretDeleteRequest, SecretId, SecretProvider, SecretScope,
+    SECRET_PROVIDER_CHAIN_ENV,
 };
 
 use super::{
     ConnectIndex, ConnectIndexEntry, StoredConnectorToken, CONNECT_INDEX_NAME,
     CONNECT_INDEX_NAMESPACE,
 };
+
+/// Read a credential from the environment variable `name`, for every
+/// `harn connect` option that names one (`--from-env`,
+/// `--client-secret-from-env`).
+///
+/// Errors name the variable and the failure category only. `VarError`'s own
+/// `Display` embeds a non-Unicode value verbatim, which would echo the secret
+/// into the terminal and any captured log.
+pub(super) fn read_named_env_secret(name: &str, what: &str) -> Result<String, String> {
+    match std::env::var(name) {
+        Ok(value) => Ok(value),
+        Err(std::env::VarError::NotPresent) => Err(format!(
+            "failed to read {what} from environment variable {name}: it is not set"
+        )),
+        Err(std::env::VarError::NotUnicode(_)) => Err(format!(
+            "failed to read {what} from environment variable {name}: its value is not valid Unicode"
+        )),
+    }
+}
 
 pub(super) async fn run_connect_api_key(args: &ConnectApiKeyArgs) -> Result<(), String> {
     let secret_id = parse_secret_id(&args.secret_id).ok_or_else(|| {
@@ -28,11 +48,7 @@ pub(super) async fn run_connect_api_key(args: &ConnectApiKeyArgs) -> Result<(), 
         (Some(value), None, None) => value.as_bytes().to_vec(),
         (None, Some(path), None) => std::fs::read(path)
             .map_err(|error| format!("failed to read API key file {}: {error}", path.display()))?,
-        (None, None, Some(name)) => std::env::var(name)
-            .map_err(|error| {
-                format!("failed to read API key from environment variable {name}: {error}")
-            })?
-            .into_bytes(),
+        (None, None, Some(name)) => read_named_env_secret(name, "API key")?.into_bytes(),
         (None, None, None) => rpassword::prompt_password("API key: ")
             .map_err(|error| format!("failed to read API key: {error}"))?
             .into_bytes(),
@@ -43,7 +59,7 @@ pub(super) async fn run_connect_api_key(args: &ConnectApiKeyArgs) -> Result<(), 
     }
     let environment_fallbacks =
         declared_credential_environment_names(&args.connector, &secret_id.to_string());
-    let provider = connect_secret_provider()?;
+    let provider = connect_secret_writer()?;
     if let Err(error) = provider.put(&secret_id, SecretBytes::from(value)).await {
         return Err(format_store_failure(
             &secret_id.to_string(),
@@ -126,15 +142,30 @@ pub(super) async fn run_connect_list(json_output: bool) -> Result<(), String> {
     index
         .providers
         .sort_by(|left, right| left.provider.cmp(&right.provider));
+    let store = connect_store_display();
     if json_output {
+        let mut value = serde_json::to_value(&index)
+            .map_err(|error| format!("failed to encode JSON output: {error}"))?;
+        if let Some(object) = value.as_object_mut() {
+            let plan = SecretChainPlan::configured();
+            object.insert(
+                "store".to_string(),
+                json!({
+                    "providers": plan.providers,
+                    "excluded": plan.excluded,
+                    "namespace": configured_secret_namespace(),
+                }),
+            );
+        }
         println!(
             "{}",
-            serde_json::to_string_pretty(&index)
+            serde_json::to_string_pretty(&value)
                 .map_err(|error| format!("failed to encode JSON output: {error}"))?
         );
     } else if index.providers.is_empty() {
-        println!("No connector OAuth tokens stored in this workspace keyring.");
+        println!("No connector OAuth tokens stored in secret providers {store}.");
     } else {
+        println!("Connector credentials in secret providers {store}:");
         for entry in &index.providers {
             println!(
                 "{}\t{}\t{}\texpires={}\tlast_used={}",
@@ -159,7 +190,7 @@ pub(super) async fn run_connect_revoke(
     provider_name: &str,
     json_output: bool,
 ) -> Result<(), String> {
-    let provider = connect_secret_provider()?;
+    let provider = connect_secret_writer()?;
     let indexed_secret = load_connect_index(&provider).await.ok().and_then(|index| {
         index
             .providers
@@ -167,17 +198,11 @@ pub(super) async fn run_connect_revoke(
             .find(|entry| entry.provider == provider_name)
             .and_then(|entry| parse_secret_id(&entry.secret_id))
     });
-    for id in connector_secret_ids(provider_name) {
-        provider
-            .delete(&id)
-            .await
-            .map_err(|error| format!("failed to delete {id}: {error}"))?;
-    }
-    if let Some(id) = indexed_secret {
-        provider
-            .delete(&id)
-            .await
-            .map_err(|error| format!("failed to delete {id}: {error}"))?;
+    for id in connector_secret_ids(provider_name)
+        .into_iter()
+        .chain(indexed_secret)
+    {
+        delete_connect_secret(&provider, &id).await?;
     }
     remove_index_entry(&provider, provider_name).await?;
     if json_output {
@@ -199,13 +224,45 @@ pub(crate) fn parse_secret_id(raw: &str) -> Option<harn_vm::secrets::SecretId> {
     harn_vm::secrets::parse_secret_id(raw).ok()
 }
 
-pub(crate) fn connect_secret_provider() -> Result<KeyringSecretProvider, String> {
-    Ok(KeyringSecretProvider::new(configured_secret_namespace()))
-}
-
-pub(crate) fn connect_secret_reader_provider() -> Result<ChainSecretProvider, String> {
+/// The one store `harn connect` reads: the configured provider chain, the same
+/// one `harness.secrets`, connector dispatch, and std/oauth resolve through.
+/// `HARN_SECRET_PROVIDERS` therefore selects the backend for connect and for
+/// the runs that consume what it stored.
+pub(crate) fn connect_secret_provider() -> Result<ChainSecretProvider, String> {
     configured_secret_chain()
         .map_err(|error| format!("failed to configure connector secret providers: {error}"))
+}
+
+/// The configured chain, refused when nothing in it persists. A chain of only
+/// `env` would accept a credential into this process's environment and lose
+/// it at exit, so `harn connect` says so instead of reporting success.
+pub(crate) fn connect_secret_writer() -> Result<ChainSecretProvider, String> {
+    let chain = connect_secret_provider()?;
+    if chain
+        .providers()
+        .iter()
+        .any(|provider| provider.persists_writes())
+    {
+        return Ok(chain);
+    }
+    Err(format!(
+        "harn connect stores credentials in a persistent secret provider, but the configured chain ({}) has none; unset {SECRET_PROVIDER_CHAIN_ENV} or include keyring or file",
+        SecretChainPlan::configured().display()
+    ))
+}
+
+async fn delete_connect_secret(
+    provider: &ChainSecretProvider,
+    id: &SecretId,
+) -> Result<(), String> {
+    provider
+        .delete_scoped(SecretDeleteRequest {
+            id: id.clone(),
+            scope: SecretScope::default(),
+            audit: SecretAuditContext::default(),
+        })
+        .await
+        .map_err(|error| format!("failed to delete {id}: {error}"))
 }
 
 pub(crate) async fn load_connect_secret_text(secret_id: &str) -> Result<String, String> {
@@ -222,7 +279,7 @@ pub(crate) async fn load_connect_secret_text(secret_id: &str) -> Result<String, 
 }
 
 pub(super) async fn save_connector_token(token: &StoredConnectorToken) -> Result<(), String> {
-    let provider = connect_secret_provider()?;
+    let provider = connect_secret_writer()?;
     let token_payload = serde_json::to_vec(token)
         .map_err(|error| format!("failed to encode connector token: {error}"))?;
     provider
@@ -264,6 +321,37 @@ pub(super) async fn save_connector_token(token: &StoredConnectorToken) -> Result
     .await
 }
 
+/// Where `harn connect` keeps a provider's OAuth record: the configured
+/// provider chain shared with `harness.secrets` and std/oauth secrets storage,
+/// so every surface reads and writes the same `<provider>/oauth-token` entry.
+/// Names each provider and where it looks (environment variable, keyring
+/// service and account, file path).
+pub(super) fn connector_token_store_description(provider_name: &str) -> String {
+    let id = connector_oauth_token_id(provider_name);
+    let Ok(chain) = connect_secret_provider() else {
+        return format!("secret {id}");
+    };
+    let located = chain
+        .providers()
+        .iter()
+        .map(|provider| match provider.locator(&id) {
+            Some(locator) => format!("{} ({locator})", provider.kind()),
+            None => provider.kind().to_string(),
+        })
+        .collect::<Vec<_>>();
+    format!("secret {id} in providers: {}", located.join(", "))
+}
+
+/// The configured chain, for `--list` output: `env -> keyring`, plus any
+/// default provider the chain leaves out.
+fn connect_store_display() -> String {
+    format!(
+        "{} (namespace {})",
+        SecretChainPlan::configured().display(),
+        configured_secret_namespace()
+    )
+}
+
 pub(super) async fn load_connector_token(
     provider_name: &str,
 ) -> Result<StoredConnectorToken, String> {
@@ -272,7 +360,10 @@ pub(super) async fn load_connector_token(
         .get(&connector_oauth_token_id(provider_name))
         .await
         .map_err(|error| {
-            format!("failed to load connector OAuth token for {provider_name}: {error}")
+            format!(
+                "failed to load connector OAuth token for {provider_name} from {}: {error}",
+                connector_token_store_description(provider_name)
+            )
         })?;
     secret
         .with_exposed(|bytes| serde_json::from_slice::<StoredConnectorToken>(bytes))
@@ -313,7 +404,7 @@ pub(super) fn secret_error_is_not_found(error: &harn_vm::secrets::SecretError) -
 }
 
 pub(super) async fn save_connect_index(
-    provider: &KeyringSecretProvider,
+    provider: &ChainSecretProvider,
     index: &ConnectIndex,
 ) -> Result<(), String> {
     let payload = serde_json::to_vec(index)
@@ -325,7 +416,7 @@ pub(super) async fn save_connect_index(
 }
 
 pub(super) async fn upsert_index_entry(
-    provider: &KeyringSecretProvider,
+    provider: &ChainSecretProvider,
     mut entry: ConnectIndexEntry,
 ) -> Result<(), String> {
     let mut index = load_connect_index(provider).await?;
@@ -363,7 +454,7 @@ pub(super) async fn upsert_index_entry(
 }
 
 pub(super) async fn remove_index_entry(
-    provider: &KeyringSecretProvider,
+    provider: &ChainSecretProvider,
     provider_name: &str,
 ) -> Result<(), String> {
     let mut index = load_connect_index(provider).await?;

@@ -3,6 +3,26 @@
 Harn's stdio bridge uses JSON-RPC 2.0 notifications and requests for
 host/runtime coordination below ACP session semantics.
 
+## Host request attribution
+
+ACP `host/call` requests carry `_meta.harn.requestTrace` alongside `name` and
+`args`. The trace contains `caller` and `arguments`:
+
+- `caller` contains the invoking Harn `module` and `function`. It is `null`
+  when the request originates outside a Harn call frame. `module` is nullable
+  for source without a filename.
+- `arguments` maps each argument key to its `value_type`. List arguments also
+  carry `list_length`, including zero for an empty list.
+
+The trace excludes argument values, object members, and list elements. Equal
+shapes identify repeated structure; they don't prove identical argument values.
+Calls answered by the runtime's read cache don't produce another host request.
+
+Rust embedders receive this metadata through
+`HostCallBridge::dispatch_traced`. Its default implementation delegates to
+`dispatch`, so existing bridges continue to work. Typed Harness methods and
+privileged `host_call` invocations use the same attribution path.
+
 ## Native hypothesis attestation
 
 `harness.obs.hypothesis_event_authority_request` sends a `host/call` request

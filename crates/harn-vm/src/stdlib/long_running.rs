@@ -72,7 +72,7 @@ where
     let worker_started_at = started_at.clone();
     let worker_operation = operation.clone();
     let worker_descriptor = descriptor.clone();
-    std::thread::Builder::new()
+    crate::runtime_stack::builder()
         .name(format!("hso-worker-{worker_handle_id}"))
         .spawn(move || {
             let started = Instant::now();

@@ -193,7 +193,9 @@ strengths = ["coding", "agentic", "tool_use", "reasoning", "vision", "long_conte
 # slug is the same model with pro reasoning mode, priced identically per
 # token. Probed 2026-09-29: function tools over chat completions return a
 # tool call (OpenRouter routes to Responses), and `reasoning.effort = "none"`
-# is a 400 ("Reasoning is mandatory"), as on the direct route.
+# is a 400 ("Reasoning is mandatory"), as on the direct route. The index read
+# 2026-10-01 adds a 272K-token override at 2x input and cache and 1.5x
+# output, the same long-prompt band as the direct row, on both slugs.
 [models."openai/gpt-6.1-sol"]
 name = "GPT-6.1 Sol (via OpenRouter)"
 provider = "openrouter"
@@ -203,7 +205,7 @@ equivalence_group = "gpt-6.1-sol"
 served_variant = "openrouter"
 released = "2026-09-29"
 capabilities = ["tools", "vision", "files", "streaming", "thinking", "prompt_caching"]
-pricing = { input_per_mtok = 2.00, output_per_mtok = 10.00, cache_read_per_mtok = 0.10, cache_write_per_mtok = 2.50 }
+pricing = { input_per_mtok = 2.00, output_per_mtok = 10.00, cache_read_per_mtok = 0.10, cache_write_per_mtok = 2.50, input_token_bands = [{ minimum_input_tokens = 272000, input_multiplier = 2.0, output_multiplier = 1.5 }] }
 tier = "mid"
 open_weight = false
 strengths = ["coding", "agentic", "tool_use", "reasoning", "vision", "long_context"]
@@ -217,7 +219,7 @@ equivalence_group = "gpt-6.1-sol"
 served_variant = "openrouter_pro"
 released = "2026-09-29"
 capabilities = ["tools", "vision", "files", "streaming", "thinking", "prompt_caching"]
-pricing = { input_per_mtok = 2.00, output_per_mtok = 10.00, cache_read_per_mtok = 0.10, cache_write_per_mtok = 2.50 }
+pricing = { input_per_mtok = 2.00, output_per_mtok = 10.00, cache_read_per_mtok = 0.10, cache_write_per_mtok = 2.50, input_token_bands = [{ minimum_input_tokens = 272000, input_multiplier = 2.0, output_multiplier = 1.5 }] }
 tier = "mid"
 open_weight = false
 strengths = ["coding", "agentic", "tool_use", "reasoning", "vision", "long_context"]
@@ -365,6 +367,8 @@ tier = "mid"
 open_weight = false
 strengths = ["coding", "agentic", "tool_use", "reasoning", "vision", "cheap"]
 
+# OpenRouter still listed this slug with a null `expiration_date` on
+# 2026-10-01; it follows OpenAI's shutdown of the underlying model.
 [models."openai/gpt-5.4-nano"]
 name = "GPT-5.4 Nano (via OpenRouter)"
 provider = "openrouter"
@@ -372,6 +376,10 @@ operations = ["text_generation", "decision"]
 context_window = 400000
 capabilities = ["tools", "vision", "streaming", "thinking", "prompt_caching"]
 pricing = { input_per_mtok = 0.20, output_per_mtok = 1.25, cache_read_per_mtok = 0.02 }
+deprecated = true
+deprecation_note = "OpenAI shuts down gpt-5.4-nano 2027-04-01 (announced 2026-10-01) and names gpt-6-luna as the replacement; this OpenRouter route ends with it."
+sunset_date = "2027-04-01"
+superseded_by = "openai/gpt-6-luna"
 tier = "small"
 open_weight = false
 strengths = ["speed", "cheap", "tool_use", "reasoning"]
@@ -413,6 +421,17 @@ open_weight = false
 strengths = ["cheap", "tool_use", "reasoning", "long_context"]
 quality_tags = ["free_tier", "avoid_reviewer"]
 
+# OpenRouter serves this free route only to accounts that allow free-model
+# prompt training. With that privacy setting off, every request returns 404
+# "0 endpoints out of 1 requested are available matching your guardrail
+# restrictions and data policy ... Free model training violation (account
+# settings)" (provider contract probe run 37030330916, re-checked 2026-10-02).
+[models."nvidia/nemotron-3-super-120b-a12b:free".data_controls]
+training_default = "trains"
+checked_on = "2026-10-02"
+sources = ["https://openrouter.ai/settings/privacy"]
+note = "OpenRouter excludes this endpoint as a free-model training violation unless the account allows training on free models, so prompts sent here may be used for training."
+
 [models."bytedance-seed/seed-2.0-lite"]
 name = "Seed 2.0 Lite (via OpenRouter)"
 provider = "openrouter"
@@ -439,6 +458,10 @@ provider = "openrouter"
 context_window = 262144
 capabilities = ["tools", "vision", "video", "streaming", "thinking", "prompt_caching"]
 pricing = { input_per_mtok = 1.027, output_per_mtok = 6.162, cache_write_per_mtok = 1.28375, input_token_bands = [{ minimum_input_tokens = 128000, input_multiplier = 1.538462, output_multiplier = 1.538462 }] }
+deprecated = true
+deprecation_note = "OpenRouter retires this preview 2026-10-09 (typed expiration_date on https://openrouter.ai/api/v1/models, read 2026-10-01), together with its other Qwen3 and Qwen3.6-Max routes. Use qwen/qwen3.8-max-0902."
+sunset_date = "2026-10-09"
+superseded_by = "qwen/qwen3.8-max-0902"
 tier = "frontier"
 open_weight = false
 strengths = ["coding", "agentic", "tool_use", "reasoning", "vision", "long_context"]
@@ -623,9 +646,37 @@ api_dialect = "openai_chat"
 context_window = 196608
 capabilities = ["tools", "streaming", "thinking"]
 pricing = { input_per_mtok = 0.38, output_per_mtok = 1.70, cache_read_per_mtok = 0.07 }
+deprecated = true
+deprecation_note = "Absent from DeepInfra's model index (https://api.deepinfra.com/v1/openai/models, read 2026-10-01) though a direct call still returned HTTP 200 that day; DeepInfra announced no shutdown date. Use deepinfra/MiniMaxAI/MiniMax-M3."
+superseded_by = "deepinfra/MiniMaxAI/MiniMax-M3"
 tier = "frontier"
 open_weight = true
 strengths = ["speed", "coding", "agentic", "tool_use", "reasoning", "long_context"]
+
+# MiniMax M3 on DeepInfra, listed in its model index (read 2026-10-01) at
+# $0.28 / $1.10 per MTok with $0.056 cached input and a 524,288-token
+# window. Live probe 2026-10-01 on /v1/openai/chat/completions:
+#   tool_choice auto and required -> one native tool call each
+#   reasoning_effort none/low/high and temperature=0.2 -> 200; reasoning
+#     arrives in `reasoning_content`
+#   strict json_schema -> 200 with schema-valid JSON
+#   repeated prompts reported 128-384 cached input tokens
+#   a solid red PNG was answered "Brown", so vision is not claimed here
+#     although the index tags the model `vision`.
+[models."deepinfra/MiniMaxAI/MiniMax-M3"]
+name = "MiniMax M3 (DeepInfra)"
+provider = "deepinfra"
+wire_model = "MiniMaxAI/MiniMax-M3"
+logical_model = "minimax-m3"
+equivalence_group = "minimax-m3"
+served_variant = "deepinfra"
+api_dialect = "openai_chat"
+context_window = 524288
+capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 0.28, output_per_mtok = 1.10, cache_read_per_mtok = 0.056 }
+tier = "frontier"
+open_weight = true
+strengths = ["coding", "agentic", "tool_use", "reasoning", "long_context", "cheap"]
 
 [models."deepinfra/zai-org/GLM-4.6"]
 name = "GLM 4.6 (DeepInfra)"

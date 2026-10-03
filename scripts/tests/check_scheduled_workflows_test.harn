@@ -8,6 +8,7 @@ fn record(overrides: dict = {}) -> dict {
     crons: ["17 11 * * *"],
     cadence_reason: "Daily detects upstream drift.",
     job_ids: ["check"],
+    health_failures: 3,
   }
     + overrides
 }
@@ -66,4 +67,81 @@ pipeline test_duplicate_claim_and_cadence_are_rejected(harness: Harness, task: u
   assert_eq(len(errors), 2)
   assert(errors.any({ error -> return contains(error, "duplicate claim") }))
   assert(errors.any({ error -> return contains(error, "cadence duplicates") }))
+}
+
+@test
+pipeline test_unwatched_suite_needs_a_reason(harness: Harness, task: unknown) {
+  const documents = {".github/workflows/example.yml": document()}
+  let silent = record()
+  silent.health_failures = nil
+  const errors = scheduled_workflow_errors([silent], documents)
+  assert_eq(len(errors), 1)
+  assert(contains(errors[0] ?? "", "neither health_failures nor health_exempt"))
+  let exempt = record({health_exempt: "Known-flaky by design."})
+  exempt.health_failures = nil
+  assert_eq(scheduled_workflow_errors([exempt], documents), [])
+  const both = record({health_exempt: "Known-flaky by design."})
+  assert(contains(scheduled_workflow_errors([both], documents)[0] ?? "", "both"))
+}
+
+@test
+pipeline test_health_threshold_must_be_reachable(harness: Harness, task: unknown) {
+  const documents = {".github/workflows/example.yml": document()}
+  for bad in [0, 11, "3"] {
+    const errors = scheduled_workflow_errors([record({health_failures: bad})], documents)
+    assert_eq(len(errors), 1)
+    assert(contains(errors[0] ?? "", "health_failures must be"))
+  }
+}
+
+@test
+pipeline test_health_job_must_name_a_real_job(harness: Harness, task: unknown) {
+  const documents = {".github/workflows/example.yml": document()}
+  assert_eq(scheduled_workflow_errors([record({health_job: "Stable check name"})], documents), [])
+  const errors = scheduled_workflow_errors([record({health_job: "Renamed check"})], documents)
+  assert_eq(len(errors), 1)
+  assert(contains(errors[0] ?? "", "health_job names no job"))
+}
+
+@test
+pipeline test_health_events_must_be_workflow_triggers(harness: Harness, task: unknown) {
+  const documents = {".github/workflows/example.yml": document()}
+  assert_eq(health_events(record()), ["schedule"])
+  const dispatched = document({on: {schedule: [{cron: "17 11 * * *"}], workflow_dispatch: nil}})
+  assert_eq(
+    scheduled_workflow_errors(
+      [record({health_events: ["schedule", "workflow_dispatch"]})],
+      {".github/workflows/example.yml": dispatched},
+    ),
+    [],
+  )
+  const errors = scheduled_workflow_errors(
+    [record({health_events: ["schedule", "workflow_dispatch"]})],
+    documents,
+  )
+  assert_eq(len(errors), 1)
+  assert(contains(errors[0] ?? "", "not triggered by: workflow_dispatch"))
+  const empty = scheduled_workflow_errors([record({health_events: []})], documents)
+  assert(contains(empty[0] ?? "", "health_events is empty"))
+}
+
+@test
+pipeline test_health_dispatch_title_must_be_a_run_name_the_workflow_renders(
+  harness: Harness,
+  task: unknown,
+) {
+  const titled = document({"run-name": "inputs.live && 'Example claim (live)' || 'Example claim'"})
+  assert_eq(
+    scheduled_workflow_errors(
+      [record({health_dispatch_title: "Example claim (live)"})],
+      {".github/workflows/example.yml": titled},
+    ),
+    [],
+  )
+  const errors = scheduled_workflow_errors(
+    [record({health_dispatch_title: "Example claim (live)"})],
+    {".github/workflows/example.yml": document()},
+  )
+  assert_eq(len(errors), 1)
+  assert(contains(errors[0] ?? "", "health_dispatch_title"))
 }

@@ -7,10 +7,6 @@ use std::process::Command;
 use harn_vm::llm_config;
 use harn_vm::orchestration::SandboxProfile;
 use harn_vm::runtime_paths;
-use harn_vm::secrets::{
-    configured_default_chain, configured_secret_namespace, EnvSecretProvider,
-    KeyringSecretProvider, SecretId, DEFAULT_SECRET_PROVIDER_CHAIN, SECRET_PROVIDER_CHAIN_ENV,
-};
 use serde::Serialize;
 
 use super::command_probe::{self, PROBE_TIMEOUT};
@@ -25,9 +21,10 @@ mod next_step;
 mod process_sandbox;
 mod repo_checks;
 mod rust_toolchain;
+mod secret_providers;
 mod targets;
 
-use credentials::check_provider_credentials;
+use credentials::{check_provider_credentials, check_provider_selection};
 use next_step::next_step_suggestion;
 use process_sandbox::{process_sandbox_info, ProcessSandboxInfo};
 use repo_checks::{check_protocol_artifacts, find_harn_repo_root};
@@ -103,6 +100,8 @@ pub(crate) struct DoctorOptions {
     /// target plus the canonical Linux/macOS/Windows/WASM triples. Off by
     /// default because each probe spawns Cargo and dominates wall-clock.
     pub check_targets: bool,
+    /// When true, the keyring check also writes, reads back, and deletes a probe.
+    pub check_keyring_write: bool,
 }
 
 pub(crate) async fn run_doctor_with_options(opts: DoctorOptions) {
@@ -157,7 +156,9 @@ async fn build_report(opts: &DoctorOptions) -> DoctorReport {
     checks.extend(check_portal());
     checks.extend(check_platform_capabilities());
     checks.extend(check_provider_selection());
-    checks.extend(check_secret_providers());
+    checks.extend(secret_providers::check_secret_providers(
+        opts.check_keyring_write,
+    ));
     checks.extend(check_provider_credentials());
     checks.extend(check_manifest().await);
     checks.extend(check_event_log());
@@ -1008,126 +1009,6 @@ fn browser_opener() -> Option<&'static str> {
 #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
 fn browser_opener() -> Option<&'static str> {
     None
-}
-
-fn check_provider_selection() -> Vec<DoctorCheck> {
-    let mut checks = Vec::new();
-
-    if let Ok(path) = std::env::var("HARN_PROVIDERS_CONFIG") {
-        let config_path = PathBuf::from(&path);
-        let status = if config_path.is_file() {
-            DoctorStatus::Ok
-        } else {
-            DoctorStatus::Fail
-        };
-        checks.push(DoctorCheck {
-            id: String::new(),
-            status,
-            label: "providers config".to_string(),
-            detail: format!("HARN_PROVIDERS_CONFIG={path}"),
-            ..Default::default()
-        });
-    }
-
-    if let Ok(provider) = std::env::var("HARN_LLM_PROVIDER") {
-        let status = if llm_config::provider_config(&provider).is_some() {
-            DoctorStatus::Ok
-        } else {
-            DoctorStatus::Fail
-        };
-        checks.push(DoctorCheck {
-            id: String::new(),
-            status,
-            label: "selected provider".to_string(),
-            detail: format!("HARN_LLM_PROVIDER={provider}"),
-            ..Default::default()
-        });
-    }
-
-    checks
-}
-
-fn check_secret_providers() -> Vec<DoctorCheck> {
-    let namespace = configured_secret_namespace();
-    let configured = std::env::var(SECRET_PROVIDER_CHAIN_ENV)
-        .unwrap_or_else(|_| DEFAULT_SECRET_PROVIDER_CHAIN.to_string());
-    let mut checks = Vec::new();
-
-    match configured_default_chain(namespace.clone()) {
-        Ok(chain) => checks.push(DoctorCheck {
-            id: String::new(),
-            status: if chain.providers().is_empty() {
-                DoctorStatus::Fail
-            } else {
-                DoctorStatus::Ok
-            },
-            label: "secret providers".to_string(),
-            detail: format!(
-                "{} (namespace {})",
-                configured.replace(',', " -> "),
-                namespace
-            ),
-            ..Default::default()
-        }),
-        Err(error) => {
-            checks.push(DoctorCheck {
-                id: String::new(),
-                status: DoctorStatus::Fail,
-                label: "secret providers".to_string(),
-                detail: error.to_string(),
-                ..Default::default()
-            });
-            return checks;
-        }
-    }
-
-    for provider in configured
-        .split(',')
-        .map(str::trim)
-        .filter(|provider| !provider.is_empty())
-    {
-        match provider {
-            "env" => {
-                let env_provider = EnvSecretProvider::new(namespace.clone());
-                let sample = env_provider.env_var_name(&SecretId::new("sample", "token"));
-                checks.push(DoctorCheck {
-                    id: String::new(),
-                    status: DoctorStatus::Ok,
-                    label: "secret:env".to_string(),
-                    detail: format!("reads process env via {sample}"),
-                    ..Default::default()
-                });
-            }
-            "keyring" => {
-                let keyring_provider = KeyringSecretProvider::new(namespace.clone());
-                match keyring_provider.healthcheck() {
-                    Ok(detail) => checks.push(DoctorCheck {
-                        id: String::new(),
-                        status: DoctorStatus::Ok,
-                        label: "secret:keyring".to_string(),
-                        detail,
-                        ..Default::default()
-                    }),
-                    Err(error) => checks.push(DoctorCheck {
-                        id: String::new(),
-                        status: DoctorStatus::Fail,
-                        label: "secret:keyring".to_string(),
-                        detail: error.to_string(),
-                        ..Default::default()
-                    }),
-                }
-            }
-            other => checks.push(DoctorCheck {
-                id: String::new(),
-                status: DoctorStatus::Fail,
-                label: format!("secret:{other}"),
-                detail: format!("unsupported provider '{other}'"),
-                ..Default::default()
-            }),
-        }
-    }
-
-    checks
 }
 
 async fn check_manifest() -> Vec<DoctorCheck> {

@@ -969,6 +969,16 @@ base_url = "https://bedrock-runtime.{region}.amazonaws.com"
 base_url_env = "BEDROCK_BASE_URL"
 auth_style = "aws_sigv4"
 credential_resolution = "platform_managed"
+# The AWS credential chain's secret-bearing variables, plus the profile that
+# selects stored credentials. Declared so no child process inherits them.
+credential_env = [
+  "AWS_ACCESS_KEY_ID",
+  "AWS_SECRET_ACCESS_KEY",
+  "AWS_SESSION_TOKEN",
+  "AWS_SECURITY_TOKEN",
+  "AWS_PROFILE",
+  "AWS_CONTAINER_AUTHORIZATION_TOKEN",
+]
 chat_endpoint = "/model/{model}/converse"
 features = ["native_tools"]
 latency_p50_ms = 2600
@@ -2068,6 +2078,27 @@ provider = "openrouter"
 id = "Qwen/Qwen3.7-Max"
 provider = "together"
 
+# Qwen 3.8 Max. OpenRouter publishes only the dated 0902 snapshot.
+[aliases."qwen3.8-max"]
+id = "qwen/qwen3.8-max-0902"
+provider = "openrouter"
+
+[aliases."openrouter-qwen3.8-max"]
+id = "qwen/qwen3.8-max-0902"
+provider = "openrouter"
+
+[aliases."deepinfra-qwen3.8-max"]
+id = "deepinfra/Qwen/Qwen3.8-Max"
+provider = "deepinfra"
+
+[aliases."openrouter-kimi-k3"]
+id = "moonshotai/kimi-k3"
+provider = "openrouter"
+
+[aliases."deepinfra-minimax-m3"]
+id = "deepinfra/MiniMaxAI/MiniMax-M3"
+provider = "deepinfra"
+
 # Qwen 3.6 via OpenRouter. These route through Harn capability rows that keep
 # provider-native tools, disable Qwen reasoning automatically for tool-bearing
 # turns, and deny the OpenRouter Ambient upstream for structured tool calls.
@@ -2686,7 +2717,10 @@ portal = "Qwen/Qwen3.5-9B"
 [qc_defaults]
 anthropic = "claude-haiku-4-5-20251001"
 openai = "gpt-6-luna"
-openrouter = "google/gemini-2.5-flash"
+# OpenRouter retires google/gemini-2.5-flash on 2026-10-20 (typed
+# `expiration_date` on its /models index, read 2026-10-01). Gemini 3.5
+# Flash-Lite is the direct Gemini QC default and the 2.5 row's successor.
+openrouter = "google/gemini-3.5-flash-lite"
 ollama = "llama3.2"
 # `local` previously pointed at gpt-4o, a hosted OpenAI model that the
 # bundled local server does not serve. Use the
@@ -3363,10 +3397,11 @@ strengths = ["reasoning", "coding", "long_context", "agentic"]
 # (platform.openai.com now redirects to developers.openai.com), and the GPT-6
 # Astra row verified 2026-09-04 against the live API. Current
 # lineup: gpt-6-astra, the GPT-5.6 family (Sol/Terra/Luna), gpt-5.5 / gpt-5.5-pro,
-# the gpt-5.4 tier family, and gpt-5.3-codex for agentic coding. The entire
-# GPT-4/o-series legacy exits by 2026-10-23 (announced 2026-04-22), and
+# and the gpt-5.4 tier family. The entire
+# GPT-4/o-series legacy exits by 2026-10-23 (announced 2026-04-22),
 # the gpt-5 dated snapshots plus o3/o3-pro shut down 2026-12-11
-# (announced 2026-06-11).
+# (announced 2026-06-11), and gpt-5.1, gpt-5.3-codex, and gpt-5.4-nano shut
+# down 2027-04-01 (announced 2026-10-01).
 
 # GPT-6 Astra — OpenAI's frontier release of 2026-09-03, verified against the
 # live API on 2026-09-04. One id only (`gpt-6-astra`); OpenAI publishes no
@@ -3476,6 +3511,12 @@ reasoning_modes = [
   { id = "pro", label = "Pro mode", economics = "premium", request = { param_path = ["reasoning", "mode"], value = "pro", response_values = ["pro"] }, token_multiplier = 6.0, status = "ga", latency = "multi-minute for hard prompts; far slower than standard mode at the same effort", suitable_workloads = ["hard_planning", "architecture_review", "oracle_consult"], unsuitable_workloads = ["interactive_chat", "agent_inner_loop", "bulk_judge", "corpus"], note = "Pro mode is Responses-API only and independent of `reasoning.effort`; it bills at this row's standard token rates and its extra work shows up as token volume, mostly on the input side. The GPT-6.1 Responses API accepts `reasoning.mode = \"pro\"` (live probe 2026-09-29). `token_multiplier` is carried over from the GPT-5.6 Sol measurement and has not been re-measured on GPT-6.1. OpenRouter's `-pro` slugs sell this knob, not a separate model." },
 ]
 
+# OpenAI names this as GPT-5.4 Nano's replacement, and a strict `json_schema`
+# response_format returned HTTP 200 with schema-valid JSON (live probe
+# 2026-10-01, default effort and `none`). Decision evaluations still refuse it
+# before dispatch: the structured profile requires temperature 0, which GPT-6
+# accepts only at an explicit effort of `none`, and the capability rule cannot
+# express that condition (harn#9157). gpt-5.4-mini serves decisions meanwhile.
 [models."gpt-6-luna"]
 name = "GPT-6 Luna"
 blurb = "Fastest and lowest-cost GPT-6 option for routine edits, summaries, and extraction."
@@ -3624,8 +3665,8 @@ complementary_with = ["anthropic-claude", "google-gemini", "qwen", "deepseek", "
 
 # GPT-5.4 tier family — the current cost ladder below gpt-5.5. All are
 # reasoning models (reasoning_effort) with vision input and cached-input
-# pricing at 0.1x. gpt-5.4-mini is the modern `mid` tier default;
-# gpt-5.4-nano is the cheapest current OpenAI model.
+# pricing at 0.1x. gpt-5.4-nano shuts down 2027-04-01; gpt-6-luna replaces
+# it as the cheapest OpenAI model.
 [models."gpt-5.4"]
 name = "GPT-5.4"
 provider = "openai"
@@ -3661,6 +3702,8 @@ strengths = ["speed", "cheap", "coding", "tool_use", "summarization"]
 complementary_with = ["anthropic-claude", "google-gemini", "qwen", "deepseek", "kimi"]
 # Also serves the `decision` operation through strict JSON-schema structured
 # output; the protocol binding is in capability_sources/10-decisions/00-decision-contracts.toml.
+# Calls still dispatch until the shutdown; GET /v1/models listed it with a
+# null `shutdown_date` on 2026-10-01, the day of the announcement.
 [models."gpt-5.4-nano"]
 name = "GPT-5.4 Nano"
 provider = "openai"
@@ -3668,22 +3711,53 @@ operations = ["text_generation", "decision"]
 context_window = 400000
 capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
 pricing = { input_per_mtok = 0.20, output_per_mtok = 1.25, cache_read_per_mtok = 0.02, hosted_tool_fees = { web_search = { per_1k_calls = 10.0, source_url = "https://developers.openai.com/api/docs/pricing" }, file_search = { per_1k_calls = 2.50, source_url = "https://developers.openai.com/api/docs/pricing" } } }
+deprecated = true
+deprecation_note = "Shutdown 2027-04-01 (announced 2026-10-01) per OpenAI deprecations page and developer email. OpenAI names gpt-6-luna as the replacement."
+sunset_date = "2027-04-01"
+superseded_by = "gpt-6-luna"
 tier = "small"
 open_weight = false
 strengths = ["speed", "cheap", "summarization", "tool_use"]
 
-# GPT-5.3-Codex — agentic-coding tune (released 2026-02-05). OpenAI now
-# recommends gpt-5.5 for most Codex tasks; kept for cost-sensitive
-# coding loops.
+# GPT-5.3-Codex — agentic-coding tune (released 2026-02-05). Shutdown
+# announced 2026-10-01; OpenAI names gpt-6-sol rather than gpt-6.1-sol, and
+# gpt-6-sol is also the GPT-6 route that keeps function tools on Chat
+# Completions (at effort `none`).
 [models."gpt-5.3-codex"]
 name = "GPT-5.3-Codex"
 provider = "openai"
 context_window = 400000
 capabilities = ["tools", "streaming", "prompt_caching", "thinking"]
 pricing = { input_per_mtok = 1.75, output_per_mtok = 14.00, cache_read_per_mtok = 0.175, hosted_tool_fees = { web_search = { per_1k_calls = 10.0, source_url = "https://developers.openai.com/api/docs/pricing" }, file_search = { per_1k_calls = 2.50, source_url = "https://developers.openai.com/api/docs/pricing" } } }
+deprecated = true
+deprecation_note = "Shutdown 2027-04-01 (announced 2026-10-01) per OpenAI deprecations page and developer email. OpenAI names gpt-6-sol as the replacement."
+sunset_date = "2027-04-01"
+superseded_by = "gpt-6-sol"
 tier = "frontier"
 open_weight = false
 strengths = ["coding", "tool_use", "agentic"]
+
+# GPT-5.1 — listed so callers still on the bare id resolve pricing and see the
+# shutdown before it lands; Harn never routes to it by default. Model page
+# (read 2026-10-01): 400K context, $1.25 / $10 per MTok, $0.125 cached input.
+# Live probe 2026-10-01 on /v1/chat/completions: a one-tool request returned a
+# native tool call; a PNG image was read correctly; reasoning_effort
+# none/low/high -> 200 and minimal/xhigh -> 400 ("Supported values are:
+# 'none', 'low', 'medium', and 'high'"); a repeated 2.7K-token prefix
+# reported 2560 cached tokens on the second call.
+[models."gpt-5.1"]
+name = "GPT-5.1"
+provider = "openai"
+context_window = 400000
+capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
+pricing = { input_per_mtok = 1.25, output_per_mtok = 10.00, cache_read_per_mtok = 0.125, hosted_tool_fees = { web_search = { per_1k_calls = 10.0, source_url = "https://developers.openai.com/api/docs/pricing" }, file_search = { per_1k_calls = 2.50, source_url = "https://developers.openai.com/api/docs/pricing" } } }
+deprecated = true
+deprecation_note = "Shutdown 2027-04-01 (announced 2026-10-01) per OpenAI deprecations page and developer email. OpenAI names gpt-6-sol as the replacement."
+sunset_date = "2027-04-01"
+superseded_by = "gpt-6-sol"
+tier = "mid"
+open_weight = false
+strengths = ["reasoning", "coding", "tool_use", "vision"]
 
 # The `chatgpt-4o-latest` API alias was retired
 # on 2026-02-17. The API model `gpt-4o` remains available.
@@ -4004,10 +4078,10 @@ serving_tiers = [
   { id = "priority", label = "Priority inference", mode = "synchronous", economics = "premium", request = { param = "service_tier", value = "priority" }, status = "research_preview", latency = "predictable low-latency serving for user-facing traffic", reliability = "traffic can gracefully downgrade to standard when dynamic priority limits are exceeded", unsuitable_workloads = ["batch"], note = "GenerateContent responses expose downgrade via x-gemini-service-tier." },
 ]
 
-# OpenRouter-routed variants of the same models — kept as distinct
-# catalog entry so the `qc_defaults.openrouter` lookup resolves to a
-# registered ID. Pricing matches the native Gemini API; OpenRouter adds
-# its own margin at request time.
+# OpenRouter-routed variants of the same models. Pricing matches the native
+# Gemini API; OpenRouter adds its own margin at request time.
+# Gemini 2.5 Flash stays catalogued through its OpenRouter retirement so
+# in-flight callers still resolve pricing; no Harn default names it.
 [models."google/gemini-2.5-flash"]
 name = "Gemini 2.5 Flash (via OpenRouter)"
 provider = "openrouter"
@@ -4017,6 +4091,10 @@ capabilities = ["tools", "vision", "streaming", "thinking"]
 # to write a cache entry on every Gemini Flash route. It was missing here, so
 # cache writes were estimated at zero.
 pricing = { input_per_mtok = 0.30, output_per_mtok = 2.50, cache_read_per_mtok = 0.03, cache_write_per_mtok = 0.0833333333333333 }
+deprecated = true
+deprecation_note = "OpenRouter retires this route 2026-10-20 (typed expiration_date on https://openrouter.ai/api/v1/models, read 2026-10-01; google/gemini-2.5-pro and -flash-lite expire the same day). Google's own page lists no shutdown for gemini-2.5-flash but limits 2.5 access to existing users. Use google/gemini-3.5-flash-lite."
+sunset_date = "2026-10-20"
+superseded_by = "google/gemini-3.5-flash-lite"
 tier = "mid"
 open_weight = false
 strengths = ["speed", "long_context", "vision", "cheap", "tool_use"]
@@ -4389,6 +4467,25 @@ tier = "mid"
 open_weight = true
 strengths = ["coding", "tool_use", "cheap"]
 complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "qwen", "kimi"]
+# Kimi K3 on OpenRouter (listed since 2026-07-16; catalogued 2026-10-01, when
+# it was the only K3 host without a row). The index headline of $2.70 /
+# $13.50 is one endpoint's rate; every probe call that day was routed to a
+# $3 / $15 endpoint and billed at that rate, which is also Moonshot's list
+# price, so the row records it. Capability evidence is on the
+# `moonshotai/kimi-k3` OpenRouter capability rule.
+[models."moonshotai/kimi-k3"]
+name = "Kimi K3 (via OpenRouter)"
+provider = "openrouter"
+logical_model = "moonshot-kimi-k3"
+equivalence_group = "moonshot-kimi-k3"
+served_variant = "openrouter"
+context_window = 1048576
+capabilities = ["tools", "vision", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 3.00, output_per_mtok = 15.00, cache_read_per_mtok = 0.30 }
+tier = "frontier"
+open_weight = true
+strengths = ["coding", "agentic", "long_context", "tool_use", "reasoning", "vision"]
+complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "qwen", "deepseek"]
 [models."moonshotai/kimi-k2.6"]
 name = "Kimi K2.6"
 provider = "openrouter"
@@ -4458,6 +4555,8 @@ capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
 # The cache-write rate moved with the headline rates and was left behind at
 # $1.5625; OpenRouter bills $1.84375 per MTok (read 2026-09-20).
 pricing = { input_per_mtok = 1.475, output_per_mtok = 4.425, cache_read_per_mtok = 0.295, cache_write_per_mtok = 1.84375 }
+# Still served with no announced shutdown.
+superseded_by = "qwen/qwen3.8-max-0902"
 
 # OpenRouter describes Max as the flagship Qwen3.7 route; keep it out of the
 # value/mid tier so price-sensitive selectors do not confuse it with Flash.
@@ -4465,6 +4564,27 @@ tier = "frontier"
 open_weight = false
 strengths = ["coding", "agentic", "tool_use", "long_context", "reasoning"]
 complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "qwen", "deepseek"]
+
+# Qwen3.8 Max (0902 snapshot, listed 2026-09-03), Alibaba's hosted flagship.
+# One serving endpoint (Alibaba) at $2 / $6 per MTok, $0.25 cache read and
+# $2.50 cache write (index and endpoint list read 2026-10-01). OpenRouter's
+# `qwen3.8-max-prime` is a faster SKU of the same model at 2x the price and is
+# not catalogued. Capability evidence, including mandatory reasoning, is on
+# the `qwen/qwen3.8-max-0902` OpenRouter capability rule.
+[models."qwen/qwen3.8-max-0902"]
+name = "Qwen3.8 Max (via OpenRouter)"
+provider = "openrouter"
+logical_model = "qwen3.8-max"
+equivalence_group = "qwen3.8-max"
+served_variant = "openrouter"
+released = "2026-09-03"
+context_window = 1000000
+capabilities = ["tools", "vision", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 2.00, output_per_mtok = 6.00, cache_read_per_mtok = 0.25, cache_write_per_mtok = 2.50 }
+tier = "frontier"
+open_weight = false
+strengths = ["coding", "agentic", "tool_use", "long_context", "reasoning", "vision"]
+complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "deepseek", "kimi"]
 [models."kwaipilot/kat-coder-pro-v2"]
 name = "KAT-Coder-Pro V2"
 provider = "openrouter"
@@ -5682,9 +5802,17 @@ tier = "mid"
 open_weight = true
 strengths = ["speed", "cheap", "tool_use", "reasoning"]
 
+# Unlike the other Fireworks rows marked dedicated here, this model's metadata
+# reports `supportsServerless: true`. Its only deployment is a public but
+# non-default one, so this plain id returns HTTP 404 "Model not found,
+# inaccessible, and/or not deployed" (2026-10-01 and 2026-10-02), while the
+# deployment-qualified id
+# `accounts/fireworks/models/glm-5p2#accounts/fireworks/deployments/jpmnep80`
+# answers 200. The plain id is therefore not routable on the API-key path.
 [models."accounts/fireworks/models/glm-5p2"]
 name = "GLM 5.2 (Fireworks)"
 provider = "fireworks"
+availability = "dedicated"
 context_window = 1048576
 logical_model = "glm-5.2"
 equivalence_group = "glm-5.2"
@@ -5750,9 +5878,13 @@ tier = "mid"
 open_weight = true
 strengths = ["speed", "cheap", "tool_use", "reasoning", "long_context", "vision"]
 
+# Fireworks lists this model but a 2026-10-01 chat call returned HTTP 404
+# "Model not found, inaccessible, and/or not deployed"; it needs a dedicated
+# deployment.
 [models."accounts/fireworks/models/deepseek-v4-flash-0731"]
 name = "DeepSeek V4 Flash 0731 (Fireworks)"
 provider = "fireworks"
+availability = "dedicated"
 context_window = 1048576
 logical_model = "deepseek-v4-flash-0731"
 equivalence_group = "deepseek-v4-flash"
@@ -5765,9 +5897,13 @@ tier = "mid"
 open_weight = true
 strengths = ["speed", "cheap", "tool_use", "reasoning", "long_context"]
 
+# Fireworks lists this model but a 2026-10-01 chat call returned HTTP 404
+# "Model not found, inaccessible, and/or not deployed"; it needs a dedicated
+# deployment.
 [models."accounts/fireworks/models/deepseek-v4-pro-0813"]
 name = "DeepSeek V4 Pro 0813 (Fireworks)"
 provider = "fireworks"
+availability = "dedicated"
 context_window = 1048576
 logical_model = "deepseek-v4-pro-0813"
 equivalence_group = "deepseek-v4-pro-0813"
@@ -5795,9 +5931,16 @@ tier = "frontier"
 open_weight = true
 strengths = ["coding", "agentic", "long_context", "tool_use", "reasoning", "vision"]
 
+# Fireworks lists this model READY with `supportsServerless: true`, but its
+# serverless chat endpoint does not answer. On 2026-10-02 two non-streaming
+# requests and one streaming request each returned 0 bytes in 150 s, while
+# `deepseek-v4p1-flash` on the same key answered in 1.4 s; the hosted provider
+# contract probe timed out on every request to it on 2026-09-28 and 2026-10-02.
+# Until a serverless request answers again it needs a dedicated deployment.
 [models."accounts/fireworks/models/nemotron-lightning-3p5-30b-a3b"]
 name = "Nemotron 3.5 Lightning 30B A3B (Fireworks)"
 provider = "fireworks"
+availability = "dedicated"
 context_window = 262144
 logical_model = "nemotron-3.5-lightning-30b-a3b"
 equivalence_group = "nemotron-3.5-lightning-30b-a3b"
@@ -5810,9 +5953,13 @@ tier = "mid"
 open_weight = true
 strengths = ["speed", "coding", "agentic", "reasoning", "tool_use", "long_context"]
 
+# Fireworks lists this model but a 2026-10-01 chat call returned HTTP 404
+# "Model not found, inaccessible, and/or not deployed"; it needs a dedicated
+# deployment.
 [models."accounts/fireworks/models/deepseek-v4-pro"]
 name = "DeepSeek V4 Pro (Fireworks)"
 provider = "fireworks"
+availability = "dedicated"
 context_window = 1048576
 logical_model = "deepseek-v4-pro"
 equivalence_group = "deepseek-v4-pro"
@@ -5827,9 +5974,13 @@ tier = "frontier"
 open_weight = true
 strengths = ["coding", "agentic", "tool_use", "reasoning", "long_context"]
 
+# Fireworks lists this model but a 2026-10-01 chat call returned HTTP 404
+# "Model not found, inaccessible, and/or not deployed"; it needs a dedicated
+# deployment.
 [models."accounts/fireworks/models/kimi-k2p6"]
 name = "Kimi K2.6 (Fireworks)"
 provider = "fireworks"
+availability = "dedicated"
 context_window = 262144
 logical_model = "moonshot-kimi-k2.6"
 equivalence_group = "moonshot-kimi-k2.6"
@@ -5844,9 +5995,13 @@ tier = "frontier"
 open_weight = true
 strengths = ["coding", "agentic", "long_context", "tool_use", "reasoning", "vision"]
 
+# Fireworks lists this model but a 2026-10-01 chat call returned HTTP 404
+# "Model not found, inaccessible, and/or not deployed"; it needs a dedicated
+# deployment.
 [models."accounts/fireworks/models/kimi-k2p7-code"]
 name = "Kimi K2.7 Code (Fireworks)"
 provider = "fireworks"
+availability = "dedicated"
 context_window = 262144
 logical_model = "moonshot-kimi-k2.7-code"
 equivalence_group = "moonshot-kimi-k2.7-code"
@@ -6238,9 +6393,32 @@ api_dialect = "openai_chat"
 context_window = 256000
 capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
 pricing = { input_per_mtok = 2.50, output_per_mtok = 7.50, cache_read_per_mtok = 0.50 }
+superseded_by = "deepinfra/Qwen/Qwen3.8-Max"
 tier = "frontier"
 open_weight = true
 strengths = ["coding", "agentic", "tool_use", "long_context", "cheap"]
+complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "deepseek", "kimi"]
+
+# Qwen3.8 Max on DeepInfra, listed in its model index (read 2026-10-01) at
+# $1.65 / $4.951 per MTok with $0.206 cached input and a 256,000-token
+# window. Alibaba's hosted flagship, not the open-weight 2.4T build: no image
+# input, and response_format json_schema is rejected upstream, so structured
+# output runs on Harn's prompt validation. Probe evidence is on the
+# `*qwen3.8-max*` DeepInfra capability rule.
+[models."deepinfra/Qwen/Qwen3.8-Max"]
+name = "Qwen3.8 Max (DeepInfra)"
+provider = "deepinfra"
+wire_model = "Qwen/Qwen3.8-Max"
+logical_model = "qwen3.8-max"
+equivalence_group = "qwen3.8-max"
+served_variant = "deepinfra"
+api_dialect = "openai_chat"
+context_window = 256000
+capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 1.65, output_per_mtok = 4.951, cache_read_per_mtok = 0.206 }
+tier = "frontier"
+open_weight = false
+strengths = ["coding", "agentic", "tool_use", "long_context", "reasoning"]
 complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "deepseek", "kimi"]
 
 [models."deepinfra/moonshotai/Kimi-K2.7-Code"]
@@ -6312,6 +6490,9 @@ api_dialect = "openai_chat"
 context_window = 196608
 capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
 pricing = { input_per_mtok = 0.60, output_per_mtok = 2.40, cache_read_per_mtok = 0.06, cache_write_per_mtok = 0.0 }
+deprecated = true
+deprecation_note = "Absent from SambaNova's model index (https://api.sambanova.ai/v1/models, read 2026-10-01), which lists MiniMax-M3 as its only MiniMax route. Not call-verified: the probe key was rejected with HTTP 401 that day."
+superseded_by = "sambanova/MiniMax-M3"
 tier = "frontier"
 open_weight = true
 strengths = ["speed", "coding", "agentic", "tool_use", "reasoning", "long_context"]
@@ -7087,7 +7268,9 @@ strengths = ["coding", "agentic", "tool_use", "reasoning", "vision", "long_conte
 # slug is the same model with pro reasoning mode, priced identically per
 # token. Probed 2026-09-29: function tools over chat completions return a
 # tool call (OpenRouter routes to Responses), and `reasoning.effort = "none"`
-# is a 400 ("Reasoning is mandatory"), as on the direct route.
+# is a 400 ("Reasoning is mandatory"), as on the direct route. The index read
+# 2026-10-01 adds a 272K-token override at 2x input and cache and 1.5x
+# output, the same long-prompt band as the direct row, on both slugs.
 [models."openai/gpt-6.1-sol"]
 name = "GPT-6.1 Sol (via OpenRouter)"
 provider = "openrouter"
@@ -7097,7 +7280,7 @@ equivalence_group = "gpt-6.1-sol"
 served_variant = "openrouter"
 released = "2026-09-29"
 capabilities = ["tools", "vision", "files", "streaming", "thinking", "prompt_caching"]
-pricing = { input_per_mtok = 2.00, output_per_mtok = 10.00, cache_read_per_mtok = 0.10, cache_write_per_mtok = 2.50 }
+pricing = { input_per_mtok = 2.00, output_per_mtok = 10.00, cache_read_per_mtok = 0.10, cache_write_per_mtok = 2.50, input_token_bands = [{ minimum_input_tokens = 272000, input_multiplier = 2.0, output_multiplier = 1.5 }] }
 tier = "mid"
 open_weight = false
 strengths = ["coding", "agentic", "tool_use", "reasoning", "vision", "long_context"]
@@ -7111,7 +7294,7 @@ equivalence_group = "gpt-6.1-sol"
 served_variant = "openrouter_pro"
 released = "2026-09-29"
 capabilities = ["tools", "vision", "files", "streaming", "thinking", "prompt_caching"]
-pricing = { input_per_mtok = 2.00, output_per_mtok = 10.00, cache_read_per_mtok = 0.10, cache_write_per_mtok = 2.50 }
+pricing = { input_per_mtok = 2.00, output_per_mtok = 10.00, cache_read_per_mtok = 0.10, cache_write_per_mtok = 2.50, input_token_bands = [{ minimum_input_tokens = 272000, input_multiplier = 2.0, output_multiplier = 1.5 }] }
 tier = "mid"
 open_weight = false
 strengths = ["coding", "agentic", "tool_use", "reasoning", "vision", "long_context"]
@@ -7259,6 +7442,8 @@ tier = "mid"
 open_weight = false
 strengths = ["coding", "agentic", "tool_use", "reasoning", "vision", "cheap"]
 
+# OpenRouter still listed this slug with a null `expiration_date` on
+# 2026-10-01; it follows OpenAI's shutdown of the underlying model.
 [models."openai/gpt-5.4-nano"]
 name = "GPT-5.4 Nano (via OpenRouter)"
 provider = "openrouter"
@@ -7266,6 +7451,10 @@ operations = ["text_generation", "decision"]
 context_window = 400000
 capabilities = ["tools", "vision", "streaming", "thinking", "prompt_caching"]
 pricing = { input_per_mtok = 0.20, output_per_mtok = 1.25, cache_read_per_mtok = 0.02 }
+deprecated = true
+deprecation_note = "OpenAI shuts down gpt-5.4-nano 2027-04-01 (announced 2026-10-01) and names gpt-6-luna as the replacement; this OpenRouter route ends with it."
+sunset_date = "2027-04-01"
+superseded_by = "openai/gpt-6-luna"
 tier = "small"
 open_weight = false
 strengths = ["speed", "cheap", "tool_use", "reasoning"]
@@ -7307,6 +7496,17 @@ open_weight = false
 strengths = ["cheap", "tool_use", "reasoning", "long_context"]
 quality_tags = ["free_tier", "avoid_reviewer"]
 
+# OpenRouter serves this free route only to accounts that allow free-model
+# prompt training. With that privacy setting off, every request returns 404
+# "0 endpoints out of 1 requested are available matching your guardrail
+# restrictions and data policy ... Free model training violation (account
+# settings)" (provider contract probe run 37030330916, re-checked 2026-10-02).
+[models."nvidia/nemotron-3-super-120b-a12b:free".data_controls]
+training_default = "trains"
+checked_on = "2026-10-02"
+sources = ["https://openrouter.ai/settings/privacy"]
+note = "OpenRouter excludes this endpoint as a free-model training violation unless the account allows training on free models, so prompts sent here may be used for training."
+
 [models."bytedance-seed/seed-2.0-lite"]
 name = "Seed 2.0 Lite (via OpenRouter)"
 provider = "openrouter"
@@ -7333,6 +7533,10 @@ provider = "openrouter"
 context_window = 262144
 capabilities = ["tools", "vision", "video", "streaming", "thinking", "prompt_caching"]
 pricing = { input_per_mtok = 1.027, output_per_mtok = 6.162, cache_write_per_mtok = 1.28375, input_token_bands = [{ minimum_input_tokens = 128000, input_multiplier = 1.538462, output_multiplier = 1.538462 }] }
+deprecated = true
+deprecation_note = "OpenRouter retires this preview 2026-10-09 (typed expiration_date on https://openrouter.ai/api/v1/models, read 2026-10-01), together with its other Qwen3 and Qwen3.6-Max routes. Use qwen/qwen3.8-max-0902."
+sunset_date = "2026-10-09"
+superseded_by = "qwen/qwen3.8-max-0902"
 tier = "frontier"
 open_weight = false
 strengths = ["coding", "agentic", "tool_use", "reasoning", "vision", "long_context"]
@@ -7517,9 +7721,37 @@ api_dialect = "openai_chat"
 context_window = 196608
 capabilities = ["tools", "streaming", "thinking"]
 pricing = { input_per_mtok = 0.38, output_per_mtok = 1.70, cache_read_per_mtok = 0.07 }
+deprecated = true
+deprecation_note = "Absent from DeepInfra's model index (https://api.deepinfra.com/v1/openai/models, read 2026-10-01) though a direct call still returned HTTP 200 that day; DeepInfra announced no shutdown date. Use deepinfra/MiniMaxAI/MiniMax-M3."
+superseded_by = "deepinfra/MiniMaxAI/MiniMax-M3"
 tier = "frontier"
 open_weight = true
 strengths = ["speed", "coding", "agentic", "tool_use", "reasoning", "long_context"]
+
+# MiniMax M3 on DeepInfra, listed in its model index (read 2026-10-01) at
+# $0.28 / $1.10 per MTok with $0.056 cached input and a 524,288-token
+# window. Live probe 2026-10-01 on /v1/openai/chat/completions:
+#   tool_choice auto and required -> one native tool call each
+#   reasoning_effort none/low/high and temperature=0.2 -> 200; reasoning
+#     arrives in `reasoning_content`
+#   strict json_schema -> 200 with schema-valid JSON
+#   repeated prompts reported 128-384 cached input tokens
+#   a solid red PNG was answered "Brown", so vision is not claimed here
+#     although the index tags the model `vision`.
+[models."deepinfra/MiniMaxAI/MiniMax-M3"]
+name = "MiniMax M3 (DeepInfra)"
+provider = "deepinfra"
+wire_model = "MiniMaxAI/MiniMax-M3"
+logical_model = "minimax-m3"
+equivalence_group = "minimax-m3"
+served_variant = "deepinfra"
+api_dialect = "openai_chat"
+context_window = 524288
+capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 0.28, output_per_mtok = 1.10, cache_read_per_mtok = 0.056 }
+tier = "frontier"
+open_weight = true
+strengths = ["coding", "agentic", "tool_use", "reasoning", "long_context", "cheap"]
 
 [models."deepinfra/zai-org/GLM-4.6"]
 name = "GLM 4.6 (DeepInfra)"
@@ -7728,6 +7960,12 @@ api_dialect = "openai_chat"
 context_window = 400000
 capabilities = ["tools", "vision", "files", "streaming", "thinking", "prompt_caching"]
 pricing = { input_per_mtok = 0.20, output_per_mtok = 1.25, cache_read_per_mtok = 0.02 }
+# No `superseded_by`: the gateway lists openai/gpt-6-luna, but the probe key's
+# free-tier team got HTTP 403 "Free tier users do not have access to this
+# model" on 2026-10-01, so there is no probed Vercel route to point at yet.
+deprecated = true
+deprecation_note = "OpenAI shuts down gpt-5.4-nano 2027-04-01 (announced 2026-10-01) and names gpt-6-luna as the replacement; this gateway route ends with it. Vercel lists openai/gpt-6-luna, which Harn has not yet probed on this gateway."
+sunset_date = "2027-04-01"
 tier = "small"
 open_weight = false
 strengths = ["speed", "cheap", "tool_use", "reasoning"]
@@ -7762,6 +8000,12 @@ api_dialect = "openai_chat"
 context_window = 1000000
 capabilities = ["tools", "vision", "files", "streaming", "thinking", "prompt_caching"]
 pricing = { input_per_mtok = 0.25, output_per_mtok = 1.50, cache_read_per_mtok = 0.03 }
+# Follows Google's schedule for the model, as the direct gemini-3.1-flash-lite
+# row does. No `superseded_by`: no Vercel Gemini 3.5 Flash-Lite route has been
+# probed (the probe key's free-tier team gets HTTP 403 on Gemini routes).
+deprecated = true
+deprecation_note = "Google shuts down gemini-3.1-flash-lite 2027-05-07 and names gemini-3.5-flash-lite as the replacement (https://ai.google.dev/gemini-api/docs/deprecations, read 2026-10-01); this gateway route ends with it."
+sunset_date = "2027-05-07"
 tier = "small"
 open_weight = false
 strengths = ["speed", "cheap", "long_context", "tool_use", "reasoning", "vision"]
@@ -7809,7 +8053,7 @@ steps = [
   { provider = "anthropic", model = "claude-haiku-4-5-20251001" },
   { provider = "openai", model = "gpt-4o-mini" },
   { provider = "gemini", model = "gemini-3.5-flash-lite" },
-  { provider = "openrouter", model = "google/gemini-2.5-flash" },
+  { provider = "openrouter", model = "google/gemini-3.5-flash-lite" },
   { provider = "deepseek", model = "deepseek-flash" },
   { provider = "groq", model = "qwen/qwen3.8-27b" },
   { provider = "cerebras", model = "gpt-oss-120b" },
@@ -7838,7 +8082,7 @@ steps = [
   { provider = "anthropic", model = "claude-haiku-4-5-20251001", label = "anthropic" },
   { provider = "openai", model = "gpt-4o-mini", label = "openai" },
   { provider = "gemini", model = "gemini-3.5-flash-lite", label = "gemini" },
-  { provider = "openrouter", model = "google/gemini-2.5-flash", label = "openrouter" },
+  { provider = "openrouter", model = "google/gemini-3.5-flash-lite", label = "openrouter" },
   { provider = "deepseek", model = "deepseek-flash", label = "deepseek" },
   { provider = "groq", model = "qwen/qwen3.8-27b", label = "groq" },
   { provider = "cerebras", model = "gpt-oss-120b", label = "cerebras" },
@@ -7862,7 +8106,7 @@ steps = [
   { provider = "anthropic", model = "claude-haiku-4-5-20251001", label = "anthropic" },
   { provider = "openai", model = "gpt-4o-mini", label = "openai" },
   { provider = "gemini", model = "gemini-3.5-flash-lite", label = "gemini" },
-  { provider = "openrouter", model = "google/gemini-2.5-flash", label = "openrouter" },
+  { provider = "openrouter", model = "google/gemini-3.5-flash-lite", label = "openrouter" },
   { provider = "fireworks", model = "accounts/fireworks/models/gpt-oss-120b", label = "fireworks" },
   { provider = "deepseek", model = "deepseek-flash", label = "deepseek" },
   { provider = "groq", model = "qwen/qwen3.8-27b", label = "groq" },

@@ -574,7 +574,7 @@ fn search_receipt(
     let matcher = Arc::new(matcher);
     let next = AtomicUsize::new(0);
     let (sender, receiver) = mpsc::channel();
-    std::thread::scope(|scope| {
+    crate::runtime_stack::scope(|scope| {
         for _ in 0..options.threads.min(roots.len()).max(1) {
             let sender = sender.clone();
             let roots = Arc::clone(&roots);

@@ -73,6 +73,80 @@ fn wave_parallel_build_matches_serial_semantics() {
     assert_eq!(importers.len(), seeds.len());
 }
 
+/// Set on the re-exec'd child so it parses instead of forking again.
+const DEEP_WAVE_CHILD: &str = "HARN_MODULES_DEEP_WAVE_CHILD";
+
+/// A wave of modules nested close to the parser's limit loads on the worker
+/// threads without overflowing them.
+///
+/// The parser spends about 140 KiB of stack per nesting level in a test build,
+/// so this source needs several times Rust's 2 MiB default thread stack. It
+/// runs in a re-exec'd child with `RUST_MIN_STACK` cleared because every Rust
+/// test lane exports that variable, which makes an unsized worker big enough in
+/// CI and nowhere else. An embedding host's AddressSanitizer build overflowed
+/// a worker on 11 levels of nested dict literals (harn#9218).
+#[test]
+fn deeply_nested_wave_parses_on_workers_without_ambient_stack() {
+    if std::env::var_os(DEEP_WAVE_CHILD).is_some() {
+        let tmp = tempfile::tempdir().unwrap();
+        // Leave headroom under the limit for the fn body and `return`.
+        let depth = harn_parser::MAX_NESTING_DEPTH - 8;
+        let nested = format!("{}1{}", "(".repeat(depth), ")".repeat(depth));
+        let mut paths: Vec<PathBuf> = (0..12)
+            .map(|i| {
+                write_file(
+                    tmp.path(),
+                    &format!("deep{i}.harn"),
+                    &format!("pub fn deep{i}() {{ return {nested} }}\n"),
+                )
+            })
+            .collect();
+        // Past the limit: the stack must also carry the parser to its refusal.
+        let over = harn_parser::MAX_NESTING_DEPTH + 1;
+        let too_deep = format!("{}1{}", "(".repeat(over), ")".repeat(over));
+        paths.push(write_file(
+            tmp.path(),
+            "too_deep.harn",
+            &format!("pub fn too_deep() {{ return {too_deep} }}\n"),
+        ));
+
+        let loaded = load_wave(&paths, &[], ParsedSourceRetention::None, None);
+
+        let (refused, accepted) = loaded.split_last().expect("one module per path");
+        for (i, (module, _)) in accepted.iter().enumerate() {
+            assert!(
+                module.own_exports.contains(&format!("deep{i}")),
+                "deep{i}.harn did not parse: own exports {:?}",
+                module.own_exports
+            );
+        }
+        assert!(
+            !refused.0.own_exports.contains("too_deep"),
+            "source past MAX_NESTING_DEPTH must be refused, not parsed"
+        );
+        return;
+    }
+
+    let status = std::process::Command::new(std::env::current_exe().expect("test executable"))
+        .args([
+            "--exact",
+            "tests::deeply_nested_wave_parses_on_workers_without_ambient_stack",
+            "--test-threads=1",
+        ])
+        .env(DEEP_WAVE_CHILD, "1")
+        .env(MODULE_GRAPH_JOBS_ENV, "4")
+        .env_remove("RUST_MIN_STACK")
+        .status()
+        .expect("re-exec the deep wave without RUST_MIN_STACK");
+
+    assert!(
+        status.success(),
+        "loading a deeply nested wave failed with RUST_MIN_STACK unset ({status}); \
+         a module-parse worker took Rust's 2 MiB default stack instead of \
+         harn_parser::PARSE_STACK_SIZE"
+    );
+}
+
 #[test]
 fn graph_only_wave_never_retains_parsed_sources() {
     let tmp = tempfile::tempdir().unwrap();

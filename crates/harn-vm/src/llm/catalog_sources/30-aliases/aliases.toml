@@ -388,6 +388,27 @@ provider = "openrouter"
 id = "Qwen/Qwen3.7-Max"
 provider = "together"
 
+# Qwen 3.8 Max. OpenRouter publishes only the dated 0902 snapshot.
+[aliases."qwen3.8-max"]
+id = "qwen/qwen3.8-max-0902"
+provider = "openrouter"
+
+[aliases."openrouter-qwen3.8-max"]
+id = "qwen/qwen3.8-max-0902"
+provider = "openrouter"
+
+[aliases."deepinfra-qwen3.8-max"]
+id = "deepinfra/Qwen/Qwen3.8-Max"
+provider = "deepinfra"
+
+[aliases."openrouter-kimi-k3"]
+id = "moonshotai/kimi-k3"
+provider = "openrouter"
+
+[aliases."deepinfra-minimax-m3"]
+id = "deepinfra/MiniMaxAI/MiniMax-M3"
+provider = "deepinfra"
+
 # Qwen 3.6 via OpenRouter. These route through Harn capability rows that keep
 # provider-native tools, disable Qwen reasoning automatically for tool-bearing
 # turns, and deny the OpenRouter Ambient upstream for structured tool calls.

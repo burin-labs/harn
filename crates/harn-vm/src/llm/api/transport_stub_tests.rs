@@ -117,7 +117,7 @@ where
     let addr = listener.local_addr().expect("stub addr");
     let shutdown = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     let shutdown_thread = shutdown.clone();
-    let handle = std::thread::spawn(move || {
+    let handle = crate::runtime_stack::spawn(move || {
         let Some(mut stream) = accept_with_shutdown(&listener, label, &shutdown_thread) else {
             return;
         };
@@ -140,7 +140,7 @@ where
     let addr = listener.local_addr().expect("stub addr");
     let shutdown = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     let shutdown_thread = shutdown.clone();
-    let handle = std::thread::spawn(move || {
+    let handle = crate::runtime_stack::spawn(move || {
         for attempt in 0..connections {
             let Some(mut stream) = accept_with_shutdown(&listener, label, &shutdown_thread) else {
                 return;

@@ -1113,7 +1113,8 @@ permissions.
 - Auth: `Authorization: Bearer <AI_GATEWAY_API_KEY>`; the longer
   `VERCEL_AI_GATEWAY_API_KEY` spelling is also accepted
 - Models use creator/model wire ids. Collision-free Harn catalog ids and
-  aliases such as `vercel-gpt-5.4-nano` resolve to those ids automatically.
+  aliases such as `vercel-claude-haiku-4.5` resolve to those ids
+  automatically.
 - Model capabilities follow the routed creator/model family, so Claude,
   Gemini, OpenAI, and open-weight routes keep their distinct tool, reasoning,
   caching, multimodal, and structured-output behavior.
@@ -1123,12 +1124,12 @@ permissions.
 ```harn
 harness.llm.call("Summarize the change.", nil, {
   provider: "vercel_ai_gateway",
-  model: "vercel-gpt-5.4-nano",
+  model: "vercel-claude-haiku-4.5",
   vercel_ai_gateway: {
     providerOptions: {
       gateway: {
         sort: "cost",
-        models: ["google/gemini-3.1-flash-lite"],
+        models: ["google/gemini-3.5-flash-lite"],
       },
     },
   },
@@ -1307,14 +1308,26 @@ default_posture = "strictest_available"
 
 ## Inference destination boundaries
 
-An embedder may set `HARN_INFERENCE_BOUNDARY_JSON` in the Harn session's
-granted environment. Its value is a JSON object with `reach` and
+An embedder may set `HARN_INFERENCE_BOUNDARY_JSON` in the trusted Harn process
+launch environment. Its value is a closed JSON object with `reach` and
 `allow_training_discounts`, for example
 `{"reach":"local_only","allow_training_discounts":false}`. A call or agent
 may supply the same typed `inference_boundary` option to narrow that ceiling;
 workers inherit it and cannot widen it. Without a host ceiling or call option,
 standalone Harn keeps its existing routing behavior. A malformed supplied
-ceiling refuses the call.
+ceiling refuses activation before provider configuration seeding or accepting
+server connections. CLI run and server launch capture that value once. New,
+loaded, and forked sessions retain it even when their environment is isolated.
+Ordinary child processes never receive the reserved variable; unrelated
+environment values still follow the selected environment policy.
+
+Library embedders set the typed `host_inference_boundary` field on
+`AcpServerConfig` or `DispatchCoreConfig`; both constructors default to no host
+ceiling. `InferenceBoundary::capture_process()` validates a process launch
+value for that field. A session may also grant the variable with an
+`in_process` audience. Its ceiling meets the trusted host ceiling and may
+tighten it, never remove or widen it. Receipts record one effective host
+exposure as `literal` and `in_process`, without its value.
 
 `local_only` admits only cataloged local runtimes whose resolved endpoint is
 loopback (`localhost`, `127.0.0.0/8`, or `::1`). A provider marked local with
@@ -1353,6 +1366,14 @@ Each provider defines an `auth_style` and one or more environment variables:
 | Vertex AI | `VERTEX_AI_ACCESS_TOKEN`, `GOOGLE_APPLICATION_CREDENTIALS` | bearer |
 | Ollama | (none) | none |
 | Local | (none) | none |
+
+A provider whose platform SDK reads credentials from further variables
+declares them as `credential_env`. Bedrock declares `AWS_ACCESS_KEY_ID`,
+`AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`, `AWS_SECURITY_TOKEN`,
+`AWS_PROFILE`, and `AWS_CONTAINER_AUTHORIZATION_TOKEN`. Harn never requires
+these names. Like `auth_env`, they are withheld from every child process a
+session spawns. Catalog validation fails when a provider requires auth but
+declares neither `auth_env` nor `credential_env`.
 
 ## Model selection
 
