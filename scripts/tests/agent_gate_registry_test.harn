@@ -554,8 +554,6 @@ pipeline test_repository_selectors_reject_new_keys(harness: Harness, task: unkno
     "runner-environment-constants": "const EXAMPLE_ENV: &str = \"__TEST_KEY__\";",
     "judge-override-key-domain": "const __JUDGE_LLM_OVERRIDE_KEYS = [\"__TEST_KEY__\"]",
     "judge-model-key-domain": "const __JUDGE_MODEL_SETTING = \"__TEST_KEY__\"",
-    "missing-tool-recovery-key-domain":
-      "fn example() { for key in [\"__TEST_KEY__\"] { let value = key } }",
   }
   assert_eq(len(config.scopes), len(fixtures))
   const dir = harness.fs.mkdtemp_in_workspace("gate-environment-selectors")

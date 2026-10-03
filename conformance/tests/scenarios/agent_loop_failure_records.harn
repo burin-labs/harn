@@ -1,0 +1,60 @@
+import { AgentLoopFailure } from "std/agent/failures"
+
+pipeline default(harness: Harness) {
+  const callback: Result<_, AgentLoopFailure> = try {
+    throw {
+      kind: "agent_loop_terminal_callback_failed",
+      category: "internal",
+      reason: "terminal_callback_failed",
+      message: "callback failed",
+      cause: {terminal_error: "loop failed", callback_error: {message: "writer failed"}},
+    }
+  }
+  assert(is_err(callback))
+  assert_eq(unwrap_err(callback).cause.terminal_error, "loop failed")
+  assert_eq(unwrap_err(callback).cause.callback_error.message, "writer failed")
+  harness.stdio.println("callback failure retains both causes")
+  const dispatch: Result<_, AgentLoopFailure> = try {
+    throw {
+      kind: "terminal",
+      category: "agent_loop_protocol_failure",
+      reason: "empty_provider_request",
+      terminal_class: "agent_loop_protocol_failure",
+      message: "empty request refused",
+    }
+  }
+  assert(is_err(dispatch))
+  assert_eq(unwrap_err(dispatch).reason, "empty_provider_request")
+  harness.stdio.println("dispatch failure shares the named error channel")
+  const cancellation: Result<_, AgentLoopFailure> = try {
+    throw {
+      kind: "agent_loop_cancelled",
+      category: "cancelled",
+      reason: "cancelled",
+      message: "evaluation cancelled",
+      cause: {cancellation_error: "provider cancelled"},
+    }
+  }
+  assert_eq(error_category(unwrap_err(cancellation)), "cancelled")
+  harness.stdio.println("cancellation shares the named error channel")
+  const configuration: Result<_, AgentLoopFailure> = try {
+    throw {
+      error: "missing_tool_call.invalid_confidence_threshold",
+      category: "invalid_config",
+      component: "missing_tool_call_classifier",
+      message: "invalid threshold",
+      field: "confidence_threshold",
+      expected: "0.0..1.0",
+      actual: 2.0,
+      min: 0.0,
+      max: 1.0,
+    }
+  }
+  assert_eq(unwrap_err(configuration).actual, 2.0)
+  harness.stdio.println("configuration shares the named error channel")
+  const text: Result<_, AgentLoopFailure> = try {
+    throw "ordinary loop failure"
+  }
+  assert_eq(unwrap_err(text), "ordinary loop failure")
+  harness.stdio.println("string failures remain accepted")
+}

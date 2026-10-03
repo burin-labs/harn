@@ -327,6 +327,34 @@ Nested policy dictionaries have named contracts too. Use
 accepts one policy in isolation. Classifier and consent callbacks on those
 records use typed request and verdict records rather than untyped dictionaries.
 
+`MissingToolCallRecoveryOptions.evaluation` selects a shared evaluator route.
+Set `backend: "native_decision"` with a served decision provider and model, or
+`backend: "structured_llm"` for structured chat. Without this policy, the
+classifier uses structured chat on the loop's provider and model. One request
+chooses between no intent and an explicitly intended call to each current tool.
+The chosen label projects both intent and the tool name into the classification
+contract. `confidence_threshold` overrides the policy threshold; both default to
+`0.65` when omitted. The one answer must meet that threshold.
+Refused, unavailable, and budget-cut evaluations produce `ambiguous`; an
+unsupported native route does not silently switch backends.
+
+The shared evaluator owns its bounded request profile. Classifier-specific
+`max_tokens`, `top_p`, `seed`, and `timeout_ms` are no longer options. Put
+cost limits in `evaluation.evaluation_cost_limit` and `evaluation.run_cost_limit`,
+and deadlines in the enclosing run's budget. Native policies omit `effort` and
+`temperature`; structured policies may supply them. Native decisions require
+conservative admission. Declare `budget: {admission: "conservative",
+total_budget_usd: ...}` before the first planner call; a classifier cannot
+activate it after an unreserved call. Returned classifier
+diagnostics use `evaluation`, an `EvaluationOutcome` whose receipt identifies
+the persisted evaluation. Agent events contain the normalized verdict fields,
+while evaluation receipts carry provider usage and cost.
+
+Offline tests can supply `classifier`, a callback returning an explicit
+`MissingToolCallVerdict`. Its answer is normalized against the same current
+tools and threshold as a model answer. Measure model quality separately with
+[`calibration_report`](../eval-calibration-reference.md).
+
 Same as `harness.llm.call`, plus additional options:
 
 | Key | Type | Default | Description |

@@ -724,7 +724,7 @@ mod tests {
             let chat = FakeLlmProvider.chat_impl(&request, None);
             tokio::pin!(chat);
 
-            // The chat future is parked on `tokio::time::sleep(60s)`. With
+            // The chat future is parked on its virtual 60-second timer. With
             // a paused clock and no advance, polling once should leave it
             // pending — proving real wall-clock is not required.
             let polled = futures::poll!(&mut chat);

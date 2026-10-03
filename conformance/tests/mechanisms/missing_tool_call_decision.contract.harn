@@ -6,7 +6,7 @@ import { agent_loop } from "std/agent/loop"
 import { MissingToolCallVerdict } from "std/agent/options_types"
 import { llm_text, llm_tool_call, with_llm_script } from "std/testing"
 
-fn run_case(harness: Harness, intended: bool) {
+fn run_case(harness: Harness, intended: bool, use_fixture: bool = true) {
   const session_id = "missing-call-contract-" + harness.random.uuid()
   const calls_key = session_id + ".classifier_calls"
   harness.runtime.store_set(calls_key, 0)
@@ -62,13 +62,17 @@ fn run_case(harness: Harness, intended: bool) {
               max_iterations: 4,
               max_nudges: 2,
               missing_tool_call_recovery: {
-                classifier: { payload ->
-                  harness.runtime.store_set(calls_key, harness.runtime.store_get(calls_key) + 1)
-                  return if intended && payload.iteration == 0 {
-                    yes
-                  } else {
-                    no
+                classifier: if use_fixture {
+                  { payload ->
+                    harness.runtime.store_set(calls_key, harness.runtime.store_get(calls_key) + 1)
+                    return if intended && payload.iteration == 0 {
+                      yes
+                    } else {
+                      no
+                    }
                   }
+                } else {
+                  nil
                 },
               },
             },
@@ -127,4 +131,10 @@ pipeline default(harness: Harness) {
   harness.stdio.log("missing-call trigger emitted classification and recovered the tool")
   run_case(harness, false)
   harness.stdio.log("missing-call negative completed without recovering a tool")
+  const no_fixture = try {
+    run_case(harness, false, false)
+  }
+  assert(is_err(no_fixture), "the consumer contract must fail without its typed fixture")
+  assert(contains(to_string(unwrap_err(no_fixture)), "typed fixture must be reached"))
+  harness.stdio.log("missing-call consumer contract rejected an absent fixture")
 }

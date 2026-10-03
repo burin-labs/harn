@@ -223,12 +223,12 @@ pipeline test_literal_timeout_pattern_rejections(harness: Harness, task: unknown
 
 @test
 pipeline test_literal_timeout_baseline_is_a_ratchet(harness: Harness, task: unknown) {
-  assert_eq(grandfather_count("literal_timeout", "crates/harn-vm/src/llm/rate_limit.rs"), 3)
+  assert_eq(literal_timeout_count("literal_timeout", "crates/harn-vm/src/llm/rate_limit.rs"), 3)
   assert_eq(
-    grandfather_count("literal_timeout", "crates/harn-serve/src/adapters/acp/tests.rs"),
+    literal_timeout_count("literal_timeout", "crates/harn-serve/src/adapters/acp/tests.rs"),
     nil,
   )
-  assert_eq(grandfather_duplicates(), [])
+  assert_eq(literal_timeout_duplicates(), [])
 }
 
 @test
@@ -349,6 +349,34 @@ pipeline test_has_mock_time_requires_line_start(harness: Harness, task: unknown)
 }
 
 // --- inline test module selection -------------------------------------------
+@test
+pipeline test_live_provider_exemption_is_bound_to_one_ignored_function() {
+  const path = "crates/harn-vm/src/security/behavioral.rs"
+  const source =
+    "#[ignore = \"calls a live model provider; run on demand with a key\"]\nfn baseline_openai_compat() {\n}"
+  assert(is_live_provider_probe(path, source, 1))
+  assert(
+    !is_live_provider_probe(path, source.replace("baseline_openai_compat", "new_ignored_test"), 1),
+  )
+  assert(!is_live_provider_probe(path, source.replace("run on demand with a key", "flaky test"), 1))
+  assert(!is_live_provider_probe("crates/x/src/runtime.rs", source, 1))
+}
+
+@test
+pipeline test_external_test_module_does_not_hide_runtime_code() {
+  const external = ["#[cfg(test)]", "mod tests;", "fn runtime() { SystemTime::now(); }"].join("\n")
+  assert_eq(inline_test_module_line(external), nil)
+  assert(!carries_inline_tests("crates/x/src/runtime.rs", external))
+  assert_eq(inline_test_module_line(external.replace("mod tests;", "mod tests; // external")), nil)
+  const inline = ["#[cfg(test)]", "mod tests { fn test() { let value = 1; } }"].join("\n")
+  assert_eq(inline_test_module_line(inline), 1)
+  const commented = ["#[cfg(test)]", "mod tests { // inline; not an external declaration", "}"]
+    .join("\n")
+  assert_eq(inline_test_module_line(commented), 1)
+  const mixed = external + "\n#[cfg(test)]\nmod inline_tests {\n}\n"
+  assert_eq(inline_test_module_line(mixed), 4)
+}
+
 @test
 pipeline test_a_cfg_test_helper_is_not_the_test_module(harness: Harness, task: unknown) {
   // The marker that ends the runtime region is `#[cfg(test)]` before a `mod`.

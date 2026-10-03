@@ -1,7 +1,7 @@
 import { agent_capture_events } from "std/agent/events"
 import { agent_loop } from "std/agent/loop"
 import { missing_tool_call_classifier } from "std/llm/missing_tool_call"
-import { llm_text, llm_tool_call, with_llm_script } from "std/testing"
+import { llm_calls, llm_text, llm_tool_call, with_llm_script } from "std/testing"
 
 fn edit_tools() {
   const tools = tool_registry()
@@ -110,16 +110,19 @@ pipeline default(harness: Harness) {
       )
     },
   )
-  // Remaining classifier calls put every stable byte before assistant text.
+  // The shared evaluator owns the closed choice and request shape.
   with_llm_script(
     harness.llm,
     [
       llm_text(
-        "{\"action\":\"tool_call_intended\",\"tool_name\":\"edit\",\"confidence\":0.9,\"evidence\":\"explicit intent\",\"language\":\"en\"}",
+        "{\"answers\":{\"tool\":{\"choice\":\"call:edit\",\"confidence\":0.9,\"evidence\":\"explicit intent\"}}}",
       ),
     ],
     { ->
-      const classify = missing_tool_call_classifier(harness, {provider: "mock"})
+      const classify = missing_tool_call_classifier(
+        harness,
+        {provider: "openai", model: "gpt-5.4-mini", effort: "none"},
+      )
       const verdict = classify(
         {
           session_id: "prefix-order",
@@ -131,16 +134,16 @@ pipeline default(harness: Harness) {
           tool_format: "native",
         },
       )
-      const prompt = harness.llm.mock_calls()[0].messages[0].content
-      const rules_at = prompt.index_of("Rules:")
-      const tools_at = prompt.index_of("Candidate tools JSON:")
-      const text_at = prompt.index_of("VARIABLE_ASSISTANT_TAIL")
-      require rules_at >= 0 && tools_at > rules_at && text_at > tools_at,
-        "stable rules and candidate tools must precede assistant text"
-      require harness.llm.mock_calls()[0].mock_scope == "agent.missing_tool_call",
-        "the classifier call must declare its purpose, not borrow the main turn's bucket"
+      const calls = llm_calls(harness.llm)
+      require len(calls) == 1 && verdict.evaluation.kind == "answered",
+        "the classifier must reach one answered shared evaluation"
+      assert_eq(
+        calls[0].output_format.schema.properties.answers.properties.tool.properties.choice.enum,
+        ["call:edit", "no_tool_call_intended"],
+      )
+      assert_eq(verdict.action, "tool_call_intended")
       harness.stdio.println("prefix.action=" + verdict.action)
-      harness.stdio.println("prefix.stable_first=true")
+      harness.stdio.println("prefix.closed_choice=true")
     },
   )
 }

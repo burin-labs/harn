@@ -1,0 +1,92 @@
+import { agent_capture_events } from "std/agent/events"
+import { agent_loop } from "std/agent/loop"
+import { omit } from "std/json"
+import { missing_tool_call_classifier } from "std/llm/missing_tool_call"
+
+/**
+ * Run the same driver with the baseline and candidate executables. Labels stay
+ * in the measurement driver, outside the classifier's request state.
+ */
+fn main(harness: Harness) {
+  const corpus = json_parse(harness.fs.read_text(argv[0]))
+  const item = corpus[to_int(argv[1])]
+  const config = json_parse(harness.fs.read_text(argv[2]))
+  const session = "missing-call-measurement-" + harness.random.uuid()
+  const calls = harness.runtime.shared_cell({scope: "task_group", key: session, initial: 0})
+  const classify = missing_tool_call_classifier(harness, config)
+  let tools = tool_registry()
+  for name in ["read", "edit"] {
+    tools = tool_define(
+      tools,
+      name,
+      name == "read" ? "Read an existing file" : "Edit an existing file",
+      {
+        handler: { _ -> "fixture tool result" },
+        parameters: {},
+        returns: {type: "string"},
+        annotations: {kind: name == "read" ? "read" : "edit"},
+      },
+    )
+  }
+  const captured = agent_capture_events(
+    harness.agent,
+    session,
+    { ->
+      agent_loop(
+        harness,
+        "Complete this fixture and report its result.",
+        nil,
+        {
+          session_id: session,
+          provider: "mock",
+          model: "mock",
+          tool_format: "text",
+          tools: tools,
+          loop_until_done: true,
+          max_iterations: 2,
+          llm_caller: { call ->
+            {
+              ok: true,
+              value: {
+                text: call.turn.iteration <= 1 ? item.text : "##DONE##",
+                provider: "mock",
+                model: "mock",
+              },
+            }
+          },
+          missing_tool_call_recovery: {
+            classifier: { payload ->
+              const snapshot = harness.runtime.shared_snapshot(calls)
+              harness.runtime.shared_cas(calls, snapshot, snapshot.value + 1)
+              const raw = classify(payload)
+              require raw != nil, "the model classifier must return a verdict"
+              harness.runtime.store_set(session + ".verdict", json_parse(json_stringify(raw)))
+              if len(argv) > 3 && argv[3] == "unprojected" {
+                return raw
+              }
+              return omit(raw, ["typed_checkpoint", "evaluation"])
+            },
+          },
+        },
+      )
+    },
+  )
+  const verdicts = captured.events.filter({ event -> event.type == "missing_tool_call_verdict" })
+    .to_list()
+  const raw = harness.runtime.store_get(session + ".verdict")
+  require captured.result.status == "done", "measurement must complete"
+  require harness.runtime.shared_snapshot(calls).value == 1, "classifier must fire exactly once"
+  require len(verdicts) == 1, "the consumer must publish its verdict"
+  require raw.classifier_kind == "llm", "measure the model, not a fixture classification"
+  harness.stdio.println(
+    json_stringify(
+      {
+        id: item.id,
+        status: captured.result.status,
+        classifier_calls: 1,
+        verdict_events: len(verdicts),
+        raw: raw,
+      },
+    ),
+  )
+}

@@ -1,0 +1,10 @@
+import { AgentLoopFailure } from "std/agent/failures"
+
+const outcome: Result<_, AgentLoopFailure> = try {
+  throw {
+    error: "missing_tool_call.invalid_enabled",
+    category: "invalid_config",
+    componet: "missing_tool_call_classifier",
+    message: "invalid option",
+  }
+}

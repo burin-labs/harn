@@ -768,8 +768,9 @@ pipeline test(harness: Harness, task: unknown) {
                 reset_thread_local_state();
                 let log = install_memory_for_current_thread(MONITOR_EVENT_LOG_QUEUE_DEPTH);
                 let push_log = log.clone();
+                let (wake, ready) = tokio::sync::oneshot::channel();
                 tokio::task::spawn_local(async move {
-                    tokio::time::sleep(StdDuration::from_millis(20)).await;
+                    ready.await.expect("push stimulus released");
                     let topic = Topic::new(TRIGGER_INBOX_ENVELOPES_TOPIC).unwrap();
                     push_log
                         .append(
@@ -824,7 +825,7 @@ pipeline test(harness: Harness, task: unknown) {
                         .map(|_| vm.output().trim_end().to_string())
                 });
                 tokio::task::yield_now().await;
-                tokio::time::advance(StdDuration::from_millis(20)).await;
+                wake.send(()).expect("push stimulus receiver alive");
                 let output = task
                     .await
                     .expect("monitor task joins")

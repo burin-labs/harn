@@ -1,0 +1,122 @@
+[
+  {
+    "id": "read-now",
+    "text": "I will read README.md now to check the setup instructions.",
+    "intended": true,
+    "tool": "read"
+  },
+  {
+    "id": "edit-now",
+    "text": "Next I will edit config.json to set retries to three.",
+    "intended": true,
+    "tool": "edit"
+  },
+  {
+    "id": "read-promised",
+    "text": "Let me open the source file and inspect its current contents.",
+    "intended": true,
+    "tool": "read"
+  },
+  {
+    "id": "edit-promised",
+    "text": "I'll apply that patch to main.py now.",
+    "intended": true,
+    "tool": "edit"
+  },
+  {
+    "id": "read-spanish",
+    "text": "Voy a leer README.md ahora para comprobar las instrucciones.",
+    "intended": true,
+    "tool": "read"
+  },
+  {
+    "id": "edit-french",
+    "text": "Je vais modifier config.json maintenant pour corriger cette valeur.",
+    "intended": true,
+    "tool": "edit"
+  },
+  {
+    "id": "read-german",
+    "text": "Ich werde jetzt die Datei main.py lesen und ihren Inhalt prüfen.",
+    "intended": true,
+    "tool": "read"
+  },
+  {
+    "id": "edit-plain",
+    "text": "Use the edit tool to replace the old timeout in settings.json with 5000.",
+    "intended": true,
+    "tool": "edit"
+  },
+  {
+    "id": "done",
+    "text": "All checks passed. The work is complete.",
+    "intended": false,
+    "tool": ""
+  },
+  {
+    "id": "past-edit",
+    "text": "I edited config.json and verified the result. No further changes are needed.",
+    "intended": false,
+    "tool": ""
+  },
+  {
+    "id": "past-read",
+    "text": "I read README.md earlier. It documents the correct command.",
+    "intended": false,
+    "tool": ""
+  },
+  {
+    "id": "advice",
+    "text": "You can read the README if you want more background.",
+    "intended": false,
+    "tool": ""
+  },
+  {
+    "id": "quoted",
+    "text": "The test fixture contains the string 'I will edit the file now'. This is quoted data, not my next action.",
+    "intended": false,
+    "tool": ""
+  },
+  {
+    "id": "hypothetical",
+    "text": "If the file were missing, I would edit the configuration. It exists, so no action is necessary.",
+    "intended": false,
+    "tool": ""
+  },
+  {
+    "id": "spanish-done",
+    "text": "He terminado el trabajo. Todas las comprobaciones han pasado.",
+    "intended": false,
+    "tool": ""
+  },
+  {
+    "id": "permission",
+    "text": "Would you like me to edit that file? I will wait for your answer.",
+    "intended": false,
+    "tool": ""
+  },
+  {
+    "id": "advice-imperative",
+    "text": "For more background, read README.md and compare the examples.",
+    "intended": false,
+    "tool": ""
+  },
+  {
+    "id": "advice-spanish",
+    "text": "Si necesitas contexto, puedes leer README.md.",
+    "intended": false,
+    "tool": ""
+  },
+  {
+    "id": "advice-french",
+    "text": "Pour plus d'informations, vous pouvez lire README.md.",
+    "intended": false,
+    "tool": ""
+  },
+  {
+    "id": "advice-german",
+    "text": "Du kannst README.md lesen, wenn du weitere Details brauchst.",
+    "intended": false,
+    "tool": ""
+  }
+]

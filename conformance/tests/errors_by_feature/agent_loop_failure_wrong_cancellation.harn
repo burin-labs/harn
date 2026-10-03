@@ -1,0 +1,11 @@
+import { AgentLoopFailure } from "std/agent/failures"
+
+const outcome: Result<_, AgentLoopFailure> = try {
+  throw {
+    kind: "agent_loop_cancelled",
+    category: "cancelled",
+    reason: "cancelled",
+    message: 42,
+    cause: {cancellation_error: "provider cancelled"},
+  }
+}

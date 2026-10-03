@@ -320,12 +320,15 @@ mod tests {
     }
 
     #[test]
-    fn unmocked_real_time_progresses() {
+    fn unmock_restores_host_clock() {
+        push_mock(0);
+        assert_eq!(now_wall_ms(), 0);
         reset_clock_state();
-        let a = now_wall_ms();
-        std::thread::sleep(Duration::from_millis(2));
-        let b = now_wall_ms();
-        assert!(b >= a, "wall clock should not go backwards");
+        assert!(!is_mocked());
+        assert!(
+            now_wall_ms() > 0,
+            "unmock must restore the host epoch clock"
+        );
     }
 
     #[test]

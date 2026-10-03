@@ -1,5 +1,12 @@
 [
   {
+    "scope": "MissingToolCallRecoveryOptions",
+    "file": "crates/harn-stdlib/src/stdlib/llm/missing_tool_call.harn",
+    "expression": "cfg?.evaluation?.threshold",
+    "owner": "missing_tool_call_classifier",
+    "evidence": "The declared evaluation field is an EvaluationPolicy. Its threshold is the consumer's fallback when confidence_threshold is absent; the evaluator validates the policy contract."
+  },
+  {
     "scope": "AgentBudget",
     "file": "crates/harn-stdlib/src/stdlib/agent/budget.harn",
     "expression": "agent.budget_pre_call_blocked(session.session_id, envelope)",
@@ -486,13 +493,6 @@
     "expression": "{enabled: true, options: options}",
     "owner": "__missing_tool_call_recovery_config",
     "evidence": "The recovery normalizer returns enabled plus options; the options path is an explicit normalization origin."
-  },
-  {
-    "scope": "MissingToolCallRecoveryOptions",
-    "file": "crates/harn-stdlib/src/stdlib/llm/missing_tool_call.harn",
-    "expression": "cfg[key]",
-    "owner": "missing_tool_call_classifier",
-    "evidence": "The key iterates the literal override list; missing-tool-recovery-key-domain independently audits every list member and requires a nonempty domain."
   },
   {
     "scope": "MonologueActuationConfig",

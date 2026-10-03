@@ -1697,17 +1697,10 @@ mod tests {
         assert!(!glob_match("missing", "src/nested/main.rs"));
     }
 
-    fn temp_path(name: &str) -> PathBuf {
-        let unique = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_nanos();
-        std::env::temp_dir().join(format!("harn-metadata-{name}-{unique}"))
-    }
-
     #[test]
     fn metadata_resolve_preserves_namespace_structure() {
-        let base = temp_path("resolve");
+        let dir = tempfile::tempdir().expect("metadata fixture directory");
+        let base = dir.path().to_owned();
         let mut state = MetadataState::new(&base);
         state.set_namespace(
             "",
@@ -1731,7 +1724,8 @@ mod tests {
 
     #[test]
     fn metadata_save_writes_namespace_shards() {
-        let base = temp_path("save");
+        let dir = tempfile::tempdir().expect("metadata fixture directory");
+        let base = dir.path().to_owned();
         let mut state = MetadataState::new(&base);
         state.set_namespace(
             ".",
@@ -1777,7 +1771,8 @@ mod tests {
 
     #[test]
     fn metadata_load_merges_legacy_and_namespace_shards() {
-        let base = temp_path("load");
+        let dir = tempfile::tempdir().expect("metadata fixture directory");
+        let base = dir.path().to_owned();
         let metadata_root = crate::runtime_paths::metadata_dir(&base);
         std::fs::create_dir_all(metadata_root.join("facts")).unwrap();
         std::fs::write(
@@ -1834,7 +1829,8 @@ mod tests {
 
     #[test]
     fn path_metadata_file_round_trip_does_not_inherit() {
-        let base = temp_path("path_file_roundtrip");
+        let dir = tempfile::tempdir().expect("metadata fixture directory");
+        let base = dir.path().to_owned();
         let mut state = MetadataState::new(&base);
 
         // Dir-level fact set on a parent — should not leak into file lookup.
@@ -1867,7 +1863,8 @@ mod tests {
 
     #[test]
     fn path_metadata_persists_files_alongside_dirs() {
-        let base = temp_path("path_persist");
+        let dir = tempfile::tempdir().expect("metadata fixture directory");
+        let base = dir.path().to_owned();
         let mut state = MetadataState::new(&base);
         state.set_namespace(
             ".",
@@ -1920,7 +1917,8 @@ mod tests {
 
     #[test]
     fn path_metadata_load_tolerates_stale_snapshot_without_files_section() {
-        let base = temp_path("path_stale");
+        let dir = tempfile::tempdir().expect("metadata fixture directory");
+        let base = dir.path().to_owned();
         let metadata_root = crate::runtime_paths::metadata_dir(&base);
         std::fs::create_dir_all(metadata_root.join("facts")).unwrap();
         // Pre-v2 shard with only `entries`, no `files` — must still load.
@@ -1970,7 +1968,8 @@ mod tests {
 
     #[test]
     fn scan_options_filter_hidden_and_depth() {
-        let base = temp_path("scan");
+        let dir = tempfile::tempdir().expect("metadata fixture directory");
+        let base = dir.path().to_owned();
         std::fs::create_dir_all(base.join("project/deep")).unwrap();
         std::fs::write(base.join("project/root.txt"), "root").unwrap();
         std::fs::write(base.join("project/.hidden.txt"), "hidden").unwrap();

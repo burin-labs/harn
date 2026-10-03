@@ -1,0 +1,638 @@
+{
+  "contract": "harn.calibration_report.v1",
+  "corpus_digest": "2d0df6d6fb5b5498fb8860b77316e4ff2e7240672629936342a88a55f0b9d8bb",
+  "groups": [
+    {
+      "abstained_rows": 0,
+      "accuracy": 1.0,
+      "backend": "native_decision",
+      "bins": [
+        {
+          "accuracy": 0.0,
+          "index": 0,
+          "lower": 0.0,
+          "mean_confidence": 0.0,
+          "rows": 0,
+          "upper": 0.1
+        },
+        {
+          "accuracy": 0.0,
+          "index": 1,
+          "lower": 0.1,
+          "mean_confidence": 0.0,
+          "rows": 0,
+          "upper": 0.2
+        },
+        {
+          "accuracy": 0.0,
+          "index": 2,
+          "lower": 0.2,
+          "mean_confidence": 0.0,
+          "rows": 0,
+          "upper": 0.3
+        },
+        {
+          "accuracy": 0.0,
+          "index": 3,
+          "lower": 0.3,
+          "mean_confidence": 0.0,
+          "rows": 0,
+          "upper": 0.4
+        },
+        {
+          "accuracy": 0.0,
+          "index": 4,
+          "lower": 0.4,
+          "mean_confidence": 0.0,
+          "rows": 0,
+          "upper": 0.5
+        },
+        {
+          "accuracy": 0.0,
+          "index": 5,
+          "lower": 0.5,
+          "mean_confidence": 0.0,
+          "rows": 0,
+          "upper": 0.6
+        },
+        {
+          "accuracy": 1.0,
+          "index": 6,
+          "lower": 0.6,
+          "mean_confidence": 0.675,
+          "rows": 2,
+          "upper": 0.7
+        },
+        {
+          "accuracy": 0.0,
+          "index": 7,
+          "lower": 0.7,
+          "mean_confidence": 0.0,
+          "rows": 0,
+          "upper": 0.8
+        },
+        {
+          "accuracy": 1.0,
+          "index": 8,
+          "lower": 0.8,
+          "mean_confidence": 0.861429,
+          "rows": 7,
+          "upper": 0.9
+        },
+        {
+          "accuracy": 1.0,
+          "index": 9,
+          "lower": 0.9,
+          "mean_confidence": 0.948261,
+          "rows": 23,
+          "upper": 1.0
+        }
+      ],
+      "correct_rows": 32,
+      "cost_usd": {
+        "max": 2.6e-05,
+        "p50": 2.5e-05,
+        "p90": 2.6e-05,
+        "rows": 32
+      },
+      "expected_calibration_error": 0.087812,
+      "latency_ms": {
+        "max": 265.0,
+        "p50": 133.5,
+        "p90": 206.0,
+        "rows": 32
+      },
+      "level_order": [],
+      "mean_absolute_level_error": null,
+      "question_id": "intended",
+      "recommendation": {
+        "calibration_rows": 16,
+        "detail": "a target error of 0.05 needs at least 17 calibration rows; this split has 16",
+        "holdout_rows": 16,
+        "kind": "no_threshold",
+        "reason": "target_unreachable",
+        "target_error": 0.05
+      },
+      "rows": 32,
+      "scored_rows": 32,
+      "thresholds": [
+        {
+          "abstention_rate": 0.0,
+          "accepted": 32,
+          "accepted_accuracy": 1.0,
+          "coverage": 1.0,
+          "false_accept": 0,
+          "false_accept_rate": 0.0,
+          "false_reject": 0,
+          "false_reject_rate": 0.0,
+          "rows": 32,
+          "threshold": 0.0,
+          "withheld": 0
+        },
+        {
+          "abstention_rate": 0.0,
+          "accepted": 32,
+          "accepted_accuracy": 1.0,
+          "coverage": 1.0,
+          "false_accept": 0,
+          "false_accept_rate": 0.0,
+          "false_reject": 0,
+          "false_reject_rate": 0.0,
+          "rows": 32,
+          "threshold": 0.65,
+          "withheld": 0
+        },
+        {
+          "abstention_rate": 0.28125,
+          "accepted": 23,
+          "accepted_accuracy": 1.0,
+          "coverage": 0.71875,
+          "false_accept": 0,
+          "false_accept_rate": 0.0,
+          "false_reject": 9,
+          "false_reject_rate": 1.0,
+          "rows": 32,
+          "threshold": 0.9,
+          "withheld": 9
+        }
+      ]
+    },
+    {
+      "abstained_rows": 0,
+      "accuracy": 0.9375,
+      "backend": "structured_llm",
+      "bins": [
+        {
+          "accuracy": 1.0,
+          "index": 0,
+          "lower": 0.0,
+          "mean_confidence": 0.055,
+          "rows": 2,
+          "upper": 0.1
+        },
+        {
+          "accuracy": 0.0,
+          "index": 1,
+          "lower": 0.1,
+          "mean_confidence": 0.0,
+          "rows": 0,
+          "upper": 0.2
+        },
+        {
+          "accuracy": 0.0,
+          "index": 2,
+          "lower": 0.2,
+          "mean_confidence": 0.0,
+          "rows": 0,
+          "upper": 0.3
+        },
+        {
+          "accuracy": 0.0,
+          "index": 3,
+          "lower": 0.3,
+          "mean_confidence": 0.0,
+          "rows": 0,
+          "upper": 0.4
+        },
+        {
+          "accuracy": 0.0,
+          "index": 4,
+          "lower": 0.4,
+          "mean_confidence": 0.0,
+          "rows": 0,
+          "upper": 0.5
+        },
+        {
+          "accuracy": 0.0,
+          "index": 5,
+          "lower": 0.5,
+          "mean_confidence": 0.0,
+          "rows": 0,
+          "upper": 0.6
+        },
+        {
+          "accuracy": 0.0,
+          "index": 6,
+          "lower": 0.6,
+          "mean_confidence": 0.0,
+          "rows": 0,
+          "upper": 0.7
+        },
+        {
+          "accuracy": 0.0,
+          "index": 7,
+          "lower": 0.7,
+          "mean_confidence": 0.0,
+          "rows": 0,
+          "upper": 0.8
+        },
+        {
+          "accuracy": 0.0,
+          "index": 8,
+          "lower": 0.8,
+          "mean_confidence": 0.0,
+          "rows": 0,
+          "upper": 0.9
+        },
+        {
+          "accuracy": 0.933333,
+          "index": 9,
+          "lower": 0.9,
+          "mean_confidence": 0.986667,
+          "rows": 30,
+          "upper": 1.0
+        }
+      ],
+      "correct_rows": 30,
+      "cost_usd": {
+        "max": 0.000923,
+        "p50": 0.000843,
+        "p90": 0.000889,
+        "rows": 32
+      },
+      "expected_calibration_error": 0.109063,
+      "latency_ms": {
+        "max": 1911.0,
+        "p50": 1006.0,
+        "p90": 1428.1,
+        "rows": 32
+      },
+      "level_order": [],
+      "mean_absolute_level_error": null,
+      "question_id": "intended",
+      "recommendation": {
+        "calibration_rows": 16,
+        "detail": "a target error of 0.05 needs at least 17 calibration rows; this split has 16",
+        "holdout_rows": 16,
+        "kind": "no_threshold",
+        "reason": "target_unreachable",
+        "target_error": 0.05
+      },
+      "rows": 32,
+      "scored_rows": 32,
+      "thresholds": [
+        {
+          "abstention_rate": 0.0,
+          "accepted": 32,
+          "accepted_accuracy": 0.9375,
+          "coverage": 1.0,
+          "false_accept": 2,
+          "false_accept_rate": 0.0625,
+          "false_reject": 0,
+          "false_reject_rate": 0.0,
+          "rows": 32,
+          "threshold": 0.0,
+          "withheld": 0
+        },
+        {
+          "abstention_rate": 0.0625,
+          "accepted": 30,
+          "accepted_accuracy": 0.933333,
+          "coverage": 0.9375,
+          "false_accept": 2,
+          "false_accept_rate": 0.066667,
+          "false_reject": 2,
+          "false_reject_rate": 1.0,
+          "rows": 32,
+          "threshold": 0.65,
+          "withheld": 2
+        },
+        {
+          "abstention_rate": 0.0625,
+          "accepted": 30,
+          "accepted_accuracy": 0.933333,
+          "coverage": 0.9375,
+          "false_accept": 2,
+          "false_accept_rate": 0.066667,
+          "false_reject": 2,
+          "false_reject_rate": 1.0,
+          "rows": 32,
+          "threshold": 0.9,
+          "withheld": 2
+        }
+      ]
+    },
+    {
+      "abstained_rows": 0,
+      "accuracy": 1.0,
+      "backend": "native_decision",
+      "bins": [
+        {
+          "accuracy": 0.0,
+          "index": 0,
+          "lower": 0.0,
+          "mean_confidence": 0.0,
+          "rows": 0,
+          "upper": 0.1
+        },
+        {
+          "accuracy": 0.0,
+          "index": 1,
+          "lower": 0.1,
+          "mean_confidence": 0.0,
+          "rows": 0,
+          "upper": 0.2
+        },
+        {
+          "accuracy": 0.0,
+          "index": 2,
+          "lower": 0.2,
+          "mean_confidence": 0.0,
+          "rows": 0,
+          "upper": 0.3
+        },
+        {
+          "accuracy": 0.0,
+          "index": 3,
+          "lower": 0.3,
+          "mean_confidence": 0.0,
+          "rows": 0,
+          "upper": 0.4
+        },
+        {
+          "accuracy": 0.0,
+          "index": 4,
+          "lower": 0.4,
+          "mean_confidence": 0.0,
+          "rows": 0,
+          "upper": 0.5
+        },
+        {
+          "accuracy": 0.0,
+          "index": 5,
+          "lower": 0.5,
+          "mean_confidence": 0.0,
+          "rows": 0,
+          "upper": 0.6
+        },
+        {
+          "accuracy": 0.0,
+          "index": 6,
+          "lower": 0.6,
+          "mean_confidence": 0.0,
+          "rows": 0,
+          "upper": 0.7
+        },
+        {
+          "accuracy": 0.0,
+          "index": 7,
+          "lower": 0.7,
+          "mean_confidence": 0.0,
+          "rows": 0,
+          "upper": 0.8
+        },
+        {
+          "accuracy": 0.0,
+          "index": 8,
+          "lower": 0.8,
+          "mean_confidence": 0.0,
+          "rows": 0,
+          "upper": 0.9
+        },
+        {
+          "accuracy": 1.0,
+          "index": 9,
+          "lower": 0.9,
+          "mean_confidence": 1.0,
+          "rows": 16,
+          "upper": 1.0
+        }
+      ],
+      "correct_rows": 16,
+      "cost_usd": {
+        "max": null,
+        "p50": null,
+        "p90": null,
+        "rows": 0
+      },
+      "expected_calibration_error": 0.0,
+      "latency_ms": {
+        "max": null,
+        "p50": null,
+        "p90": null,
+        "rows": 0
+      },
+      "level_order": [],
+      "mean_absolute_level_error": null,
+      "question_id": "tool",
+      "recommendation": {
+        "calibration_rows": 8,
+        "detail": "a target error of 0.05 needs at least 9 calibration rows; this split has 8",
+        "holdout_rows": 8,
+        "kind": "no_threshold",
+        "reason": "target_unreachable",
+        "target_error": 0.05
+      },
+      "rows": 16,
+      "scored_rows": 16,
+      "thresholds": [
+        {
+          "abstention_rate": 0.0,
+          "accepted": 16,
+          "accepted_accuracy": 1.0,
+          "coverage": 1.0,
+          "false_accept": 0,
+          "false_accept_rate": 0.0,
+          "false_reject": 0,
+          "false_reject_rate": 0.0,
+          "rows": 16,
+          "threshold": 0.0,
+          "withheld": 0
+        },
+        {
+          "abstention_rate": 0.0,
+          "accepted": 16,
+          "accepted_accuracy": 1.0,
+          "coverage": 1.0,
+          "false_accept": 0,
+          "false_accept_rate": 0.0,
+          "false_reject": 0,
+          "false_reject_rate": 0.0,
+          "rows": 16,
+          "threshold": 0.65,
+          "withheld": 0
+        },
+        {
+          "abstention_rate": 0.0,
+          "accepted": 16,
+          "accepted_accuracy": 1.0,
+          "coverage": 1.0,
+          "false_accept": 0,
+          "false_accept_rate": 0.0,
+          "false_reject": 0,
+          "false_reject_rate": 0.0,
+          "rows": 16,
+          "threshold": 0.9,
+          "withheld": 0
+        }
+      ]
+    },
+    {
+      "abstained_rows": 0,
+      "accuracy": 1.0,
+      "backend": "structured_llm",
+      "bins": [
+        {
+          "accuracy": 0.0,
+          "index": 0,
+          "lower": 0.0,
+          "mean_confidence": 0.0,
+          "rows": 0,
+          "upper": 0.1
+        },
+        {
+          "accuracy": 0.0,
+          "index": 1,
+          "lower": 0.1,
+          "mean_confidence": 0.0,
+          "rows": 0,
+          "upper": 0.2
+        },
+        {
+          "accuracy": 0.0,
+          "index": 2,
+          "lower": 0.2,
+          "mean_confidence": 0.0,
+          "rows": 0,
+          "upper": 0.3
+        },
+        {
+          "accuracy": 0.0,
+          "index": 3,
+          "lower": 0.3,
+          "mean_confidence": 0.0,
+          "rows": 0,
+          "upper": 0.4
+        },
+        {
+          "accuracy": 0.0,
+          "index": 4,
+          "lower": 0.4,
+          "mean_confidence": 0.0,
+          "rows": 0,
+          "upper": 0.5
+        },
+        {
+          "accuracy": 0.0,
+          "index": 5,
+          "lower": 0.5,
+          "mean_confidence": 0.0,
+          "rows": 0,
+          "upper": 0.6
+        },
+        {
+          "accuracy": 0.0,
+          "index": 6,
+          "lower": 0.6,
+          "mean_confidence": 0.0,
+          "rows": 0,
+          "upper": 0.7
+        },
+        {
+          "accuracy": 0.0,
+          "index": 7,
+          "lower": 0.7,
+          "mean_confidence": 0.0,
+          "rows": 0,
+          "upper": 0.8
+        },
+        {
+          "accuracy": 0.0,
+          "index": 8,
+          "lower": 0.8,
+          "mean_confidence": 0.0,
+          "rows": 0,
+          "upper": 0.9
+        },
+        {
+          "accuracy": 1.0,
+          "index": 9,
+          "lower": 0.9,
+          "mean_confidence": 0.985625,
+          "rows": 16,
+          "upper": 1.0
+        }
+      ],
+      "correct_rows": 16,
+      "cost_usd": {
+        "max": null,
+        "p50": null,
+        "p90": null,
+        "rows": 0
+      },
+      "expected_calibration_error": 0.014375,
+      "latency_ms": {
+        "max": null,
+        "p50": null,
+        "p90": null,
+        "rows": 0
+      },
+      "level_order": [],
+      "mean_absolute_level_error": null,
+      "question_id": "tool",
+      "recommendation": {
+        "calibration_rows": 8,
+        "detail": "a target error of 0.05 needs at least 9 calibration rows; this split has 8",
+        "holdout_rows": 8,
+        "kind": "no_threshold",
+        "reason": "target_unreachable",
+        "target_error": 0.05
+      },
+      "rows": 16,
+      "scored_rows": 16,
+      "thresholds": [
+        {
+          "abstention_rate": 0.0,
+          "accepted": 16,
+          "accepted_accuracy": 1.0,
+          "coverage": 1.0,
+          "false_accept": 0,
+          "false_accept_rate": 0.0,
+          "false_reject": 0,
+          "false_reject_rate": 0.0,
+          "rows": 16,
+          "threshold": 0.0,
+          "withheld": 0
+        },
+        {
+          "abstention_rate": 0.0,
+          "accepted": 16,
+          "accepted_accuracy": 1.0,
+          "coverage": 1.0,
+          "false_accept": 0,
+          "false_accept_rate": 0.0,
+          "false_reject": 0,
+          "false_reject_rate": 0.0,
+          "rows": 16,
+          "threshold": 0.65,
+          "withheld": 0
+        },
+        {
+          "abstention_rate": 0.0,
+          "accepted": 16,
+          "accepted_accuracy": 1.0,
+          "coverage": 1.0,
+          "false_accept": 0,
+          "false_accept_rate": 0.0,
+          "false_reject": 0,
+          "false_reject_rate": 0.0,
+          "rows": 16,
+          "threshold": 0.9,
+          "withheld": 0
+        }
+      ]
+    }
+  ],
+  "kind": "report",
+  "model_revision": "",
+  "report_digest": "32a60e1d92b5d40a318994a6ce55ca8bd56b7f275bc1c3edbaa25e260b87a04c",
+  "rows": 96,
+  "seed": 8543,
+  "served_model_id": "",
+  "target_error": 0.05,
+  "thresholds": [
+    0.0,
+    0.65,
+    0.9
+  ]
+}

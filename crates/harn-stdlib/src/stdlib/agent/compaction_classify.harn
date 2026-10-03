@@ -1,3 +1,4 @@
+import { agent_loop_cancellation_failure } from "std/agent/failures"
 import {
   ConfidenceKind,
   EvaluationPolicy,
@@ -106,7 +107,9 @@ pub fn classify_compaction_round(
     )
     match outcome.kind {
       "cancelled" -> {
-        throw {category: "cancelled", message: "compaction classification cancelled"}
+        throw agent_loop_cancellation_failure(
+          {category: "cancelled", message: "compaction classification cancelled"},
+        )
       }
       "answered" -> {
         for item in items {

@@ -9,6 +9,7 @@ import {
   agent_event_value,
   agent_feedback_injected_event_schema,
 } from "std/agent/events"
+import { AgentLoopCallbackFailure } from "std/agent/failures"
 import { agent_loop } from "std/agent/loop"
 import { AgentSpec } from "std/agent/options"
 import { llm_text, llm_tool_call, with_llm_script, with_temp_dir } from "std/testing"
@@ -377,6 +378,11 @@ pipeline test_callback_failure_preserves_the_original_loop_error(harness: Harnes
           assert(is_err(outcome))
           const error = unwrap_err(outcome)
           assert_eq(error.kind, "agent_loop_terminal_callback_failed")
+          const failure: AgentLoopCallbackFailure = schema_expect(
+            pick(error, ["kind", "category", "reason", "message", "cause"]),
+            schema_of(AgentLoopCallbackFailure),
+          )
+          assert_eq(failure.cause, error.cause)
           assert(contains(to_string(error.cause.terminal_error), "original loop failure"))
           assert(contains(to_string(error.cause.callback_error), "terminal writer failure"))
           assert_eq(len(terminal_records(harness.fs, path)), 1)
