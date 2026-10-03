@@ -122,10 +122,7 @@ fn eval_ledger_sqlite_backend_preserves_flat_file_semantics() {
     )
     .is_err());
     assert_eq!(
-        eval_ledger_read_report(Some(options.clone()))
-            .unwrap()
-            .rows
-            .len(),
+        eval_ledger_read_report(Some(options)).unwrap().rows.len(),
         2
     );
     assert_eq!(read.rows[0].case_name, "case-a");
