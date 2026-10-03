@@ -31,7 +31,7 @@ async fn served_tool_fence(tool: &str, accepted: bool) {
         .run_until(async {
             let mocks = [
                 format!("Checking first.\n\n```tool\n{{\"name\":\"{tool}\",\"args\":{{\"path\":\"a\"}}}}\n```"),
-                "Done.".to_string(),
+                if accepted { "Done. ##DONE##" } else { "Done." }.to_string(),
             ]
             .into_iter()
             .map(|text| {
