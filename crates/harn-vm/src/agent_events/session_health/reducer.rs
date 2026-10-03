@@ -59,9 +59,9 @@ impl SessionHealth {
         succeeded: bool,
         applied_edit: bool,
         telemetry: Option<&ToolOutcomeTelemetry>,
-    ) {
+    ) -> bool {
         if !self.completed_calls.insert(call_id.to_owned()) {
-            return;
+            return false;
         }
         let mut duplicate_command = false;
         let command_exit = telemetry.and_then(|value| {
@@ -94,6 +94,7 @@ impl SessionHealth {
                 self.observe_diagnostics(current);
             }
         }
+        true
     }
 
     fn observe_diagnostics(&mut self, current: &DiagnosticMeasurement) {
@@ -156,12 +157,16 @@ impl SessionHealth {
                 parsing: None,
                 ..
             } if matches!(status, ToolCallStatus::Completed | ToolCallStatus::Failed) => {
-                self.observe_tool(
+                if self.observe_tool(
                     tool_call_id,
                     *status == ToolCallStatus::Completed,
                     *mutation_status == ToolMutationStatus::Applied,
                     health.as_deref(),
-                );
+                ) {
+                    // Closeout can resolve a streamed call after the turn's
+                    // final snapshot. Publish the updated population there too.
+                    return Some(self.fact(event.session_id()));
+                }
             }
             AgentEvent::IterationEnd { iteration_info, .. } => {
                 self.finish_turn(

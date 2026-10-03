@@ -282,6 +282,13 @@ impl Drop for LoopSinkGuard {
 /// via `emit_agent_event` — this sync path is for the streaming-args
 /// observation surface only.
 pub(crate) fn emit_agent_event_sync(event: &AgentEvent) {
+    let (health, _) = crate::agent_sessions::observe_event(event);
+    for event in std::iter::once(event).chain(health.as_ref()) {
+        publish_observed_event(event);
+    }
+}
+
+fn publish_observed_event(event: &AgentEvent) {
     if observe_tool_lifecycle(event) {
         agent_events::emit_event(event);
         let loop_sink = CURRENT_LOOP_SINKS.with(|stack| stack.borrow().last().cloned());
@@ -323,14 +330,7 @@ pub(crate) async fn emit_agent_event_with_ctx(
 ) {
     let (health, subscribers) = crate::agent_sessions::observe_event(event);
     for event in std::iter::once(event).chain(health.as_ref()) {
-        if observe_tool_lifecycle(event) {
-            agent_events::emit_event(event);
-
-            let loop_sink = CURRENT_LOOP_SINKS.with(|stack| stack.borrow().last().cloned());
-            if let Some(sink) = loop_sink {
-                sink.handle_event(event);
-            }
-        }
+        publish_observed_event(event);
 
         if subscribers.is_empty() {
             continue;
@@ -706,6 +706,8 @@ mod tests {
     async fn loop_exit_resolves_every_in_flight_call_to_a_terminal_update() {
         const SESSION_ID: &str = "loop-exit-abandon-test";
         const OTHER_SESSION: &str = "loop-exit-abandon-other";
+        crate::agent_sessions::open_session(Some(SESSION_ID.to_owned()), None, None)
+            .expect("open the measured session");
         if let Ok(mut starts) = TOOL_LIFECYCLE_STARTS.lock() {
             starts.clear_session(SESSION_ID);
             starts.clear_session(OTHER_SESSION);
@@ -723,6 +725,16 @@ mod tests {
         ));
         emit_agent_event_sync(&start(SESSION_ID, "call-b"));
         emit_agent_event_sync(&start(OTHER_SESSION, "call-c"));
+
+        emit_agent_event_with_ctx(
+            None,
+            &AgentEvent::IterationEnd {
+                session_id: SESSION_ID.to_owned(),
+                iteration: 1,
+                iteration_info: json!({}),
+            },
+        )
+        .await;
 
         fire_session_end_hooks(SESSION_ID, true);
 
@@ -793,6 +805,25 @@ mod tests {
             "a different session's in-flight call is not swept"
         );
 
+        {
+            let events = sink.events.lock().expect("recorded events");
+            let fact = events
+                .iter()
+                .rev()
+                .find_map(|event| match event {
+                    AgentEvent::SessionHealth { fact, .. } => Some(fact),
+                    _ => None,
+                })
+                .expect("closeout must publish measured health");
+            let rate = fact
+                .rolling
+                .tool_call_success_rate
+                .as_ref()
+                .expect("the two abandoned calls must be measured");
+            assert_eq!((rate.numerator, rate.denominator), (0, 2));
+            assert!(fact.rolling.nonzero_command_exit_rate.is_none());
+        }
+
         // Idempotent: re-finalizing the now-drained session emits nothing more.
         let before = sink.events.lock().expect("recorded events").len();
         fire_session_end_hooks(SESSION_ID, true);
@@ -803,6 +834,7 @@ mod tests {
         if let Ok(mut starts) = TOOL_LIFECYCLE_STARTS.lock() {
             starts.clear_session(OTHER_SESSION);
         }
+        crate::agent_sessions::close(SESSION_ID);
     }
 
     /// A call that already reached a terminal `Completed`/`Failed` update is
