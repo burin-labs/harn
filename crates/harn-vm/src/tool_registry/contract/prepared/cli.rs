@@ -779,6 +779,7 @@ mod tests {
     async fn binder_intent_parameter_prepares_without_changing_its_json_name() {
         let source = r#"
 import { natural_language_executor_schema_transform } from "std/llm/tool_binder"
+import { tool_inject_param } from "std/llm/tool_middleware"
 pipeline main(harness: Harness) {
   let tools = tool_registry()
   tools = tool_define(tools, "create_widget", "Create", {
@@ -791,7 +792,10 @@ pipeline main(harness: Harness) {
     returns: {type: "string"},
   })
   const transformed = natural_language_executor_schema_transform()(tools.tools[0])
-  harness.stdio.println(json_stringify(transformed.inputSchema))
+  const nested = tool_inject_param(transformed, "nested", {
+    type: "object", properties: {value: {type: "string"}}, required: ["value"],
+  }, {required: false})
+  harness.stdio.println(json_stringify(nested.inputSchema))
 }
 "#;
         let chunk = crate::compile_source(source).expect("compile real binder projection");
@@ -817,6 +821,25 @@ pipeline main(harness: Harness) {
             .find(|arg| arg.property() == "_nl_intent")
             .expect("intent parameter retained");
         assert_eq!(intent.long(), Some("nl-intent"));
+        assert!(prepared
+            .validate_input(
+                "create_widget",
+                &json!({
+                    "widget_id": 1, "_nl_intent": "create one", "nested": {"value": "actual"},
+                })
+            )
+            .is_ok());
+        assert!(
+            prepared
+                .validate_input(
+                    "create_widget",
+                    &json!({
+                        "widget_id": 1, "nested": {},
+                    })
+                )
+                .is_err(),
+            "a nested required array must retain its validation effect"
+        );
     }
 
     #[test]
