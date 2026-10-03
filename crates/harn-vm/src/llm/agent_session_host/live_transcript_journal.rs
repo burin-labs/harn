@@ -419,14 +419,14 @@ async fn publish_agent_event(
 ) -> Result<(), VmError> {
     if let Some(role) = crate::agent_events::AgentEvent::host_transcript_role(event_type) {
         let transcript_event = super::super::helpers::transcript_event(
-            &event_type,
+            event_type,
             role.as_str(),
             "internal",
             "",
             Some(payload),
         );
-        if crate::agent_sessions::exists(&session_id) {
-            crate::agent_sessions::append_event(&session_id, transcript_event)
+        if crate::agent_sessions::exists(session_id) {
+            crate::agent_sessions::append_event(session_id, transcript_event)
                 .map_err(VmError::Runtime)?;
         }
     }
@@ -439,7 +439,7 @@ async fn publish_agent_event(
             ..
         }
     ) {
-        crate::agent_session_journal::flush(&session_id).await?;
+        crate::agent_session_journal::flush(session_id).await?;
     }
     crate::llm::agent_runtime::emit_agent_event_with_ctx(Some(ctx), &event).await;
     Ok(())
