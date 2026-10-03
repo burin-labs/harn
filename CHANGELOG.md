@@ -9,6 +9,34 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.156
+
+### Breaking
+
+- **`CodeIndexCapability::warm_session` restores the on-disk snapshot on the
+  background warm thread and returns `Building` at once.** A stale snapshot on
+  a large repository no longer blocks the embedder's session start for
+  minutes. `SessionWarmOutcome::Restored` is removed because the restore never
+  completes before the call returns.
+
+  Migration: replace a match on `SessionWarmOutcome::Restored` with
+  `SessionWarmOutcome::Building`, and call `wait_until_idle()` when the code
+  needs the restored index before continuing.
+
+### Added
+
+- `harness.code_index.module_graph` rolls the workspace import graph up from
+  files to directories or modules in one deterministic call, and
+  `std/code_librarian` adds `code_librarian_module_graph` plus a pure
+  `architecture_graph_diff` that compares the graph with a target architecture
+  of required, allowed, and forbidden dependencies (#9281).
+
+### Fixed
+
+- Declared host operations can carry explicit `optional: true` metadata.
+  Static and ACP reconciliation keep these operations known without warning
+  that an optional callback is absent; missing required operations still warn or fail closed.
+
 ## v0.10.155
 
 ### Breaking
