@@ -27,7 +27,7 @@ mod agent_config;
 mod agent_host_primitives;
 mod agent_host_tool_dispatch;
 pub(crate) mod agent_observe;
-mod agent_result_projection;
+pub(crate) mod agent_result_projection;
 mod agent_runtime;
 pub(crate) mod agent_session_host;
 mod agent_session_transcript;

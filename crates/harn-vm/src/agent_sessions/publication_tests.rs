@@ -60,7 +60,10 @@ async fn admitted_publication_survives_canonical_journal_hydration() {
         Some("Accepted answer".into())
     );
     assert_eq!(
-        crate::llm::agent_session_host::dict_get(&message, "content").map(VmValue::display),
+        message
+            .as_dict()
+            .and_then(|dict| dict.get("content"))
+            .map(VmValue::display),
         Some("Accepted answer".into())
     );
     drop(hydrated);
