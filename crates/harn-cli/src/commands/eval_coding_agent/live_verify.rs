@@ -273,7 +273,8 @@ fn live_verify_outcome_from_run_report(report: &RunReport) -> EvalPackLiveVerify
         passed: Some(report.passed),
         timed_out: false,
         wall_time_seconds: report.elapsed_ms as f64 / 1000.0,
-        cost_usd: report.cost_usd,
+        // Eval-pack facts carry the known subtotal; exact totals stay nullable in reports.
+        cost_usd: report.usage.known_cost_usd.unwrap_or(0.0),
         produced_paths: ["summary.json", "result.json", "transcript_events.jsonl"]
             .into_iter()
             .filter(|path| Path::new(&report.output_dir).join(path).exists())
@@ -286,6 +287,11 @@ fn live_verify_outcome_from_run_report(report: &RunReport) -> EvalPackLiveVerify
             "successful": report.successful_tools.clone(),
         }),
         failures,
+        warnings: if report.usage.cost_usd.is_none() {
+            vec!["Exact provider cost is unmeasured; eval-pack cost records only the available known subtotal".to_string()]
+        } else {
+            Vec::new()
+        },
         run_id: Some(report.run_id.clone()),
         workflow_id: Some(CODING_AGENT_EVAL_PACK_ID.to_string()),
         source_path: Some(report.transcript_events_path.clone()),
@@ -403,7 +409,7 @@ pub(super) fn tool_format_override_warning_line(stderr: &str) -> Option<&str> {
         .find(|line| line.starts_with(TOOL_FORMAT_OVERRIDE_WARNING_PREFIX))
 }
 
-fn report_from_existing_summary(
+pub(super) fn report_from_existing_summary(
     run_id: String,
     fixture: EvalPackCase,
     selector: ModelSelector,
@@ -460,16 +466,7 @@ fn report_from_summary(ctx: RunSummaryContext, summary: JsonValue) -> RunReport 
         .pointer("/llm/output_tokens")
         .and_then(JsonValue::as_i64)
         .unwrap_or(0);
-    // Priced through the usage-aware helper so a long-context run bills at the
-    // catalog's input-token band rather than the base rate.
-    let cost = harn_vm::llm::pricing_aware_call_cost(
-        &ctx.selector.provider,
-        &ctx.selector.model,
-        input_tokens.max(0),
-        output_tokens.max(0),
-        harn_vm::llm_config::pricing_clock_now(),
-    );
-    let cost_usd = cost.unwrap_or(0.0);
+    let usage = super::MeasuredUsage::from_summary(&summary);
     let status = if passed {
         "passed".to_string()
     } else if ctx.exit_code == 0 {
@@ -513,8 +510,7 @@ fn report_from_summary(ctx: RunSummaryContext, summary: JsonValue) -> RunReport 
             .unwrap_or(0),
         input_tokens,
         output_tokens,
-        cost_usd,
-        pricing_known: cost.is_some(),
+        usage,
         tool_calls: summary
             .pointer("/tools/calls")
             .and_then(JsonValue::as_array)
@@ -708,8 +704,7 @@ fn empty_run_report(
         iterations: 0,
         input_tokens: 0,
         output_tokens: 0,
-        cost_usd: 0.0,
-        pricing_known: false,
+        usage: super::MeasuredUsage::default(),
         tool_calls: 0,
         rejected_tool_calls: 0,
         tool_sequence: Vec::new(),

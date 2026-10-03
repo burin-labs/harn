@@ -29,6 +29,15 @@ Artifacts are written to `.harn-runs/coding-agent-bench/latest/` by default:
 Run ids include the fixture id, model selector, and tool format, for example
 `python-add__mock_mock__native`.
 
+Schema version 4 projects usage from the agent result. `model_call_count` counts
+physical provider requests; `iterations` counts accepted agent turns. Costs use
+the measured per-call accounting, including cache usage, instead of repricing
+aggregate tokens. `cost_usd` and aggregate `total_cost_usd` are nullable:
+missing usage or an unpriced call leaves the total unknown. `known_cost_usd`
+retains the available subtotal, and `usage_unknown_calls` and `unpriced_calls`
+retain the missing-measurement counts. Absent legacy facts remain null; an empty
+run set has no measured total. Markdown displays unknown totals as `unknown`.
+
 ## Fixtures
 
 Use `--fixture <id>` for tight local debugging, or `--fixture all` for the full

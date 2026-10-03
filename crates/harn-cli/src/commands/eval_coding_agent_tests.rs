@@ -1,5 +1,84 @@
 use super::*;
 
+#[test]
+fn measured_usage_replays_real_provider_costs_and_preserves_missing_data() {
+    let fixture: serde_json::Value = serde_json::from_str(include_str!(
+        "../../assets/evals/measured-usage-openrouter.json"
+    ))
+    .expect("saved real usage fixture");
+    let case = resolve_fixtures(&["python-add".to_string()], "python3")
+        .expect("owning fixture")
+        .remove(0);
+    let root = tempfile::tempdir().expect("replay root");
+    let mut measured_costs = Vec::new();
+    for mode in ["native", "text"] {
+        let dir = root.path().join(mode);
+        std::fs::create_dir(&dir).expect("replay directory");
+        std::fs::write(
+            dir.join("summary.json"),
+            serde_json::to_vec(&fixture[mode]).unwrap(),
+        )
+        .expect("saved summary");
+        let report = live_verify::report_from_existing_summary(
+            mode.to_string(),
+            case.clone(),
+            ModelSelector {
+                selector: "provider=openrouter,model=openai/gpt-4.1-mini".to_string(),
+                provider: "openrouter".to_string(),
+                model: "openai/gpt-4.1-mini".to_string(),
+            },
+            mode.to_string(),
+            dir,
+        );
+        assert!(
+            report.passed,
+            "actual replay reached the successful fixture result"
+        );
+        assert_eq!(report.usage.model_call_count, Some(6));
+        assert_eq!(report.usage.cost_usd, fixture[mode]["cost_usd"].as_f64());
+        measured_costs.push(report.usage.cost_usd);
+    }
+    assert!((sum_complete_costs(measured_costs).unwrap() - 0.005792).abs() < 1e-12);
+
+    let missing = MeasuredUsage::from_summary(&serde_json::json!({
+        "llm": {"input_tokens": 9472, "output_tokens": 213},
+    }));
+    assert_eq!(
+        missing.cost_usd, None,
+        "token counts do not establish spend"
+    );
+    assert_eq!(missing.known_cost_usd, None);
+    assert_eq!(missing.model_call_count, None);
+    let unsupported_zero = MeasuredUsage::from_summary(&serde_json::json!({
+        "cost_usd": 0.0, "known_cost_usd": 0.0,
+    }));
+    assert_eq!(
+        unsupported_zero.cost_usd, None,
+        "a zero without a census is not measured"
+    );
+    let mut partial = fixture["native"].clone();
+    partial["usage_unknown_calls"] = serde_json::json!(1);
+    partial["cost_usd"] = serde_json::Value::Null;
+    let partial = MeasuredUsage::from_summary(&partial);
+    assert_eq!(partial.cost_usd, None);
+    assert_eq!(partial.known_cost_usd, Some(0.0025936));
+    assert_eq!(
+        sum_complete_costs([Some(0.0025936), partial.cost_usd]),
+        None
+    );
+    assert_eq!(sum_known_costs([Some(0.0025936), None]), Some(0.0025936));
+    assert_eq!(
+        sum_complete_costs([]),
+        None,
+        "no observations are not measured zero"
+    );
+    let zero = MeasuredUsage::from_summary(&serde_json::json!({
+        "cost_usd": 0.0, "known_cost_usd": 0.0, "model_call_count": 0,
+        "usage_unknown_calls": 0, "unpriced_calls": 0,
+    }));
+    assert_eq!(zero.cost_usd, Some(0.0), "explicit measured zero survives");
+}
+
 fn format_comparison_for_test(
     fixture_id: &str,
     native_status: &str,
@@ -94,7 +173,8 @@ fn write_json_artifacts_emits_tool_mode_parity_overlay() {
         failed_runs: 1,
         skipped_runs: 0,
         diverged_comparisons: 1,
-        total_cost_usd: 0.0,
+        total_cost_usd: None,
+        known_cost_usd: None,
         rollups: EvalRollups {
             by_fixture: Vec::new(),
             by_provider: Vec::new(),
@@ -122,8 +202,7 @@ fn write_json_artifacts_emits_tool_mode_parity_overlay() {
                 iterations: 1,
                 input_tokens: 1,
                 output_tokens: 1,
-                cost_usd: 0.0,
-                pricing_known: false,
+                usage: MeasuredUsage::default(),
                 tool_calls: 0,
                 rejected_tool_calls: 0,
                 tool_sequence: Vec::new(),
@@ -154,8 +233,7 @@ fn write_json_artifacts_emits_tool_mode_parity_overlay() {
                 iterations: 1,
                 input_tokens: 1,
                 output_tokens: 1,
-                cost_usd: 0.0,
-                pricing_known: false,
+                usage: MeasuredUsage::default(),
                 tool_calls: 0,
                 rejected_tool_calls: 0,
                 tool_sequence: Vec::new(),
@@ -327,8 +405,7 @@ fn baseline_comparison_reports_regressions_and_recoveries() {
             iterations: 0,
             input_tokens: 0,
             output_tokens: 0,
-            cost_usd: 0.0,
-            pricing_known: false,
+            usage: MeasuredUsage::default(),
             tool_calls: 0,
             rejected_tool_calls: 0,
             tool_sequence: Vec::new(),
@@ -359,8 +436,7 @@ fn baseline_comparison_reports_regressions_and_recoveries() {
             iterations: 0,
             input_tokens: 0,
             output_tokens: 0,
-            cost_usd: 0.0,
-            pricing_known: false,
+            usage: MeasuredUsage::default(),
             tool_calls: 0,
             rejected_tool_calls: 0,
             tool_sequence: Vec::new(),
@@ -391,8 +467,7 @@ fn baseline_comparison_reports_regressions_and_recoveries() {
             iterations: 0,
             input_tokens: 0,
             output_tokens: 0,
-            cost_usd: 0.0,
-            pricing_known: false,
+            usage: MeasuredUsage::default(),
             tool_calls: 0,
             rejected_tool_calls: 0,
             tool_sequence: Vec::new(),
