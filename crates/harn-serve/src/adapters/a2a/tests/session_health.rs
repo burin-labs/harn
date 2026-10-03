@@ -4,6 +4,7 @@ use harn_vm::agent_events::session_health::{
     session_health_schema, HealthHeuristics, HealthMeasurements, SessionHealthFact,
     SESSION_HEALTH_SCHEMA_VERSION,
 };
+use harn_vm::agent_events::AgentEventSink as _;
 
 #[test]
 fn session_health_uses_the_checked_task_event_without_changing_task_state() {
