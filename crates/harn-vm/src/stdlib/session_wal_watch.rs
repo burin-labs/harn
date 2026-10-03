@@ -428,7 +428,7 @@ mod tests {
             super::seed_session_memory(database, reader);
         }
         for (database, reader, version) in &mut readers {
-            let foreign = rusqlite::Connection::open(database).expect("foreign writer");
+            let foreign = rusqlite::Connection::open(&*database).expect("foreign writer");
             foreign
                 .execute(
                     "UPDATE sessions SET usage_input = 7 WHERE id = 'shared-id'",
