@@ -809,8 +809,9 @@ pipeline main(harness: Harness) {
         assert_eq!(schema["properties"]["_nl_intent"]["type"], "string");
         let mut entry = tool();
         entry.input_schema = schema;
-        let prepared = PreparedCliTree::prepare(&catalog(entry)).expect("prepare binder CLI");
-        let intent = prepared.commands()[0].children()[0]
+        let prepared = super::super::PreparedToolCatalog::prepare(catalog(entry))
+            .expect("prepare complete binder contract");
+        let intent = prepared.cli_tree().commands()[0].children()[0]
             .arguments()
             .iter()
             .find(|arg| arg.property() == "_nl_intent")
