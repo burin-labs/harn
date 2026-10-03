@@ -9,6 +9,125 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.156
+
+### Breaking
+
+- **`CodeIndexCapability::warm_session` restores the on-disk snapshot on the
+  background warm thread and returns `Building` at once.** A stale snapshot on
+  a large repository no longer blocks the embedder's session start for
+  minutes. `SessionWarmOutcome::Restored` is removed because the restore never
+  completes before the call returns.
+
+  Migration: replace a match on `SessionWarmOutcome::Restored` with
+  `SessionWarmOutcome::Building`, and call `wait_until_idle()` when the code
+  needs the restored index before continuing.
+
+### Added
+
+- `harness.code_index.module_graph` rolls the workspace import graph up from
+  files to directories or modules in one deterministic call, and
+  `std/code_librarian` adds `code_librarian_module_graph` plus a pure
+  `architecture_graph_diff` that compares the graph with a target architecture
+  of required, allowed, and forbidden dependencies (#9281).
+
+### Fixed
+
+- Declared host operations can carry explicit `optional: true` metadata.
+  Static and ACP reconciliation keep these operations known without warning
+  that an optional callback is absent; missing required operations still warn or fail closed.
+
+## v0.10.155
+
+### Breaking
+
+- **Shared run-approval evaluation (#7610).** Live tool dispatch and prepared
+  runs now share the typed evaluator. Unavailable approvals fail closed while
+  explicit grants, denials, automatic review, and worker scope inheritance retain
+  their policy meaning.
+
+  Migration: for Rust embedders, `RunApprovalPolicy::effective()` now returns the
+  typed evaluator rather than a detached `ToolApprovalPolicy`. Use `declared()`
+  to copy configuration and `current_run_approval_policy()` for live decisions.
+- Agent dispatch checks a handler envelope's `data` against the tool's declared
+  `returns` schema, matching CLI and MCP validation. Rendered `text` remains
+  separate from the validated payload.
+
+  Migration: replace schemas describing rendered text with schemas describing
+  `data`. For example, a handler returning
+  `agent_tool_handler_result("Done", {count: 1})` needs an object schema rather
+  than `returns: {type: "string"}`. Omit `returns` when the data is freeform.
+- Provider catalogs can declare `credential_env`: the environment names a
+  platform credential chain reads besides the provider's key. Bedrock now
+  declares its AWS credential variables (`AWS_ACCESS_KEY_ID`,
+  `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`, `AWS_SECURITY_TOKEN`,
+  `AWS_PROFILE`, `AWS_CONTAINER_AUTHORIZATION_TOKEN`). Like `auth_env`, these
+  names are withheld from every spawned child under the `inherited` policy and
+  can never be allowlisted. Catalog validation now rejects a provider that
+  requires auth but declares no credential names. Before this, Bedrock passed
+  through an exemption for its auth style.
+
+  Migration: under the `inherited` policy, a command that relied on inheriting
+  `AWS_PROFILE` or AWS keys must now pass them in its own `env`. Rust code that
+  builds `harn_provider_catalog::ProviderAuth` or `harn_vm::llm_config::ProviderDef`
+  with a struct literal must set the new `credential_env` field, for example
+  `credential_env: Vec::new()`, or finish the literal with `..Default::default()`
+  for `ProviderDef`.
+
+### Added
+
+- Host requests now carry the calling Harn module and function, argument key
+  names and types, and list lengths through the embedder bridge and ACP
+  `_meta.harn.requestTrace`. Argument values remain excluded from this trace.
+- An ACP server can confine its own process with Harn's OS sandbox before it serves. Use
+  `harn serve acp --confine-workspace <path>`, or `harn_serve::confine_acp_server_process` from an embedder. The kernel
+  then holds the server, and the commands it runs, to the profile a confined command gets.
+  `harn_vm::process_sandbox::confine_current_process` is the underlying primitive, and `initialize` reports the state
+  in `agentCapabilities._meta.harn.processConfinement`. The sandboxing guide covers what children inherit on each
+  platform.
+- Hosts can bound blocking process setup with `op_interrupt::with_deadline` while preserving parent cancellation and
+  earlier deadlines.
+
+### Changed
+
+- Main source candidates are built daily through the existing signed release
+  producer. The producer reuses a candidate only while its complete artifact set
+  remains available and unexpired.
+- OpenRouter Kimi K2.7 Code no longer routes to Moonshot AI's own endpoints, which drop temperature, top_p,
+  and seed and reject the frequency and presence penalties they advertise. The route now forwards all
+  four options.
+
+### Fixed
+
+- The postfix `?` operator now runs pending `finally` blocks, `defer` blocks, and
+  `owned<T>` drops before it returns `Result.Err(...)` early, the same as an
+  explicit `return`. Previously the early return skipped that cleanup.
+- Linux hosts without Landlock that export glibc allocator tuning such as `MALLOC_ARENA_MAX` (Heroku's default, and
+  common in container images) no longer have every sandboxed command refused. Bubblewrap launches keep the allocator
+  sizing knobs out of the sandbox setup and re-apply them to the confined command. `LD_*`, `GLIBC_TUNABLES`,
+  `MALLOC_CHECK_`, and `MALLOC_PERTURB_` are still refused.
+- Keep shell-guard decision-file cleanup in the adapter process so a watchdog exit cannot erase a decision before it is read.
+- CI latency reports apply the declared topology date to GitHub's run query,
+  preventing historical results from hiding current full acceptance runs.
+- Provider contract campaigns include requests refused by account privacy policy in spend accounting, so executed
+  exclusions no longer produce a negative unaccounted-request count.
+- Fireworks `nemotron-lightning-3p5-30b-a3b` is now catalogued as
+  dedicated-only. Fireworks still lists it as serverless, but serverless chat
+  requests to it return nothing for 150 seconds or more, so equivalent-model
+  substitution no longer picks it and the provider contract campaign no longer
+  counts its timeouts as unmeasured options. The NVIDIA route for the same model
+  is unchanged.
+- Every thread Harn creates in a crate that can parse or run Harn code now gets
+  the runtime stack (32 MiB) from one owner, `harn_parser::runtime_stack`
+  (re-exported as `harn_vm::runtime_stack`), instead of Rust's 2 MiB default.
+  The check driver's parallel parse workers, the stdlib warm, I/O helpers, and
+  test threads previously relied on `RUST_MIN_STACK`, which CI sets and shipped
+  binaries do not. A workspace scan now refuses any other way to create a
+  thread in those crates.
+- `harn serve` on Windows no longer overflows the 1 MiB main-thread stack
+  before it answers: the CLI recognizes serve transports on its sized runtime
+  thread, and `harn.exe` links an 8 MiB main-thread stack to match Unix.
+
 ## v0.10.154
 
 ### Breaking

@@ -46,7 +46,7 @@ impl ProcessSpawner for RealSpawner {
                 ));
             }
             let cleanup_token = harn_vm::op_interrupt::new_process_cleanup_token();
-            let (mut command, request) =
+            let (mut command, request, missing_program) =
                 super::owner_death::prepare_guardian(&spec, cleanup_token.clone())?;
             let mut child = match spawn_retrying_executable_busy(|| command.spawn(), thread::sleep)
             {
@@ -94,10 +94,21 @@ impl ProcessSpawner for RealSpawner {
                         );
                         let _ = child.wait();
                         harn_vm::op_interrupt::remove_process_owner_group_journal(&cleanup_token);
+                        if matches!(
+                            error,
+                            ProcessError::SpawnIo {
+                                kind: "not_found",
+                                ..
+                            }
+                        ) {
+                            if let Some(program) = missing_program {
+                                return Err(ProcessError::ProgramNotFound { program });
+                            }
+                        }
                         return Err(error);
                     }
                 };
-            return Ok(real_process(
+            let mut process = real_process(
                 child,
                 cleanup_token,
                 Some(liveness),
@@ -105,14 +116,17 @@ impl ProcessSpawner for RealSpawner {
                 Some(guardian_pid),
                 Some(payload_pid),
                 None,
-            ));
+            );
+            process.missing_program = missing_program;
+            return Ok(Box::new(process));
         }
 
         let PreparedSpawn {
             mut command,
             cleanup_token,
-            ..
+            env_cleared,
         } = prepare_command(&spec, None)?;
+        let missing_program = super::program_lookup::missing_program(&spec, &command, env_cleared);
         #[cfg(target_os = "windows")]
         let owner_job = if spec.owner_death == super::OwnerDeathPolicy::KillContainment
             || spec.configure_process_group
@@ -127,8 +141,17 @@ impl ProcessSpawner for RealSpawner {
         };
         #[cfg(not(target_os = "windows"))]
         let owner_job = None;
-        let mut child = spawn_retrying_executable_busy(|| command.spawn(), thread::sleep)
-            .map_err(map_spawn_error)?;
+        let mut child =
+            spawn_retrying_executable_busy(|| command.spawn(), thread::sleep).map_err(|error| {
+                if error.kind() == io::ErrorKind::NotFound {
+                    if let Some(program) = missing_program.as_ref() {
+                        return ProcessError::ProgramNotFound {
+                            program: program.clone(),
+                        };
+                    }
+                }
+                map_spawn_error(error)
+            })?;
         if let Err(error) = harn_vm::op_interrupt::record_current_process_owner_group(child.id()) {
             let _ = harn_vm::op_interrupt::signal_pid_tree_and_group_with_report(child.id(), 9);
             let _ = child.wait();
@@ -153,15 +176,9 @@ impl ProcessSpawner for RealSpawner {
             }
         }
 
-        Ok(real_process(
-            child,
-            cleanup_token,
-            None,
-            None,
-            None,
-            None,
-            owner_job,
-        ))
+        let mut process = real_process(child, cleanup_token, None, None, None, None, owner_job);
+        process.missing_program = missing_program;
+        Ok(Box::new(process))
     }
 }
 
@@ -362,7 +379,7 @@ pub(crate) fn prepare_command_from(
         (_, false) => Stdio::null(),
     });
 
-    process_sandbox::validate_command_environment(&command, env_cleared)
+    process_sandbox::validate_command_environment(&mut command, env_cleared)
         .map_err(ProcessError::sandbox_setup)?;
 
     Ok(PreparedSpawn {
@@ -501,6 +518,7 @@ pub fn replace_current_process(spec: SpawnSpec) -> Result<std::convert::Infallib
 }
 
 struct RealProcess {
+    missing_program: Option<String>,
     pid: u32,
     pgid: Option<u32>,
     #[cfg(not(target_os = "windows"))]
@@ -525,7 +543,7 @@ fn real_process(
     killer_pid: Option<u32>,
     #[cfg(target_os = "windows")] owner_job: Option<Arc<super::windows::KillOnCloseJob>>,
     #[cfg(not(target_os = "windows"))] _owner_job: Option<()>,
-) -> Box<dyn ProcessHandle> {
+) -> RealProcess {
     let pid = reported_pid.unwrap_or_else(|| child.id());
     let pgid = child_process_group_id(pid);
     let killer: Arc<dyn ProcessKiller> = Arc::new(RealKiller {
@@ -534,7 +552,8 @@ fn real_process(
         #[cfg(target_os = "windows")]
         owner_job,
     });
-    Box::new(RealProcess {
+    RealProcess {
+        missing_program: None,
         pid,
         pgid,
         #[cfg(not(target_os = "windows"))]
@@ -548,7 +567,7 @@ fn real_process(
         stdin_taken: false,
         stdout_taken: false,
         stderr_taken: false,
-    })
+    }
 }
 
 impl RealProcess {
@@ -568,6 +587,10 @@ impl RealProcess {
 }
 
 impl ProcessHandle for RealProcess {
+    fn missing_program(&self) -> Option<&str> {
+        self.missing_program.as_deref()
+    }
+
     fn pid(&self) -> Option<u32> {
         Some(self.pid)
     }

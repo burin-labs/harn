@@ -9,6 +9,7 @@
 set -euo pipefail
 
 repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
+opener="${OPENER_SCRIPT:-$repo_root/scripts/open_release_pr.sh}"
 real_harn="${HARN_RELEASE_METADATA_BIN:-${HARN_BIN:-}}"
 if [[ -z "$real_harn" || ! -x "$real_harn" ]]; then
   echo "open_release_pr_test requires HARN_RELEASE_METADATA_BIN or HARN_BIN" >&2
@@ -32,6 +33,17 @@ cat > "$bin_dir/gh" <<'SH'
 set -euo pipefail
 printf 'gh %s\n' "$*" >> "$OPENER_RECORD"
 case "$1 $2" in
+  "api --method")
+    [[ "${FAKE_ATTEMPT_WRITE_FAIL:-0}" != 1 ]] || exit 1
+    ref=""; sha=""
+    for arg in "$@"; do
+      case "$arg" in ref=*) ref="${arg#ref=}" ;; sha=*) sha="${arg#sha=}" ;; esac
+    done
+    if [[ "${FAKE_ATTEMPT_WRONG_TARGET:-0}" == 1 ]]; then
+      sha="$(git rev-parse HEAD^)"
+    fi
+    git push --quiet origin "$sha:$ref"
+    ;;
   "pr list")
     if [[ "${FAKE_GH_LIST_FAIL:-0}" == 1 ]]; then
       echo "HTTP 502: Bad Gateway" >&2
@@ -101,6 +113,13 @@ case "$*" in
       printf 'publish token=%s\n' "$HARN_BRANCH_COMMIT_TOKEN"
     } >> "$OPENER_RECORD"
     git status --porcelain=v1 > "$OPENER_STATE/status-at-publish.txt"
+    git commit --quiet -m "$HARN_BRANCH_COMMIT_HEADLINE"
+    oid="$(git rev-parse HEAD)"
+    git push --quiet origin "HEAD:refs/heads/$HARN_BRANCH_COMMIT_BRANCH"
+    if [[ "${FAKE_PUBLICATION_WRONG_RECEIPT:-0}" == 1 ]]; then
+      oid="$HARN_BRANCH_COMMIT_BASE_OID"
+    fi
+    jq -n --arg oid "$oid" '{oid: $oid, url: "fixture", branch_action: "created"}'
     ;;
   *)
     echo "unexpected publisher invocation: $*" >&2
@@ -137,6 +156,7 @@ new_fixture() {
   local fixture="$tmp_root/$name"
   mkdir -p \
     "$fixture/.github" \
+    "$fixture/scripts" \
     "$fixture/crates/example" \
     "$fixture/changelog.d" \
     "$fixture/crates/harn-hostlib/data/grammar-fitness" \
@@ -148,6 +168,7 @@ new_fixture() {
     > "$fixture/crates/example/Cargo.toml"
   printf '# fake lock\n' > "$fixture/Cargo.lock"
   printf '{"schema_version":1,"releases":[]}\n' > "$fixture/.github/release-withdrawals.json"
+  cp "$repo_root/scripts/release_contract.json" "$fixture/scripts/release_contract.json"
   printf '# Changelog\n\n## v1.2.3\n\n- **Older fix (#10).**\n' > "$fixture/CHANGELOG.md"
   printf '# fragments\n' > "$fixture/changelog.d/README.md"
   : > "$fixture/changelog.d/.gitkeep"
@@ -162,12 +183,14 @@ new_fixture() {
   git -C "$fixture" config commit.gpgsign false
   git -C "$fixture" add -A
   git -C "$fixture" commit --quiet -m initial
+  git -C "$fixture" tag v1.2.3
   # The opener re-reads origin/main before publishing, so each fixture has a
   # real remote. Its HEAD names main explicitly: a bare repository otherwise
   # follows the host's init.defaultBranch, and a clone of it checks out nothing.
   git init --quiet --bare -b main "$fixture.origin.git"
   git -C "$fixture" remote add origin "$fixture.origin.git"
   git -C "$fixture" push --quiet origin HEAD:refs/heads/main
+  git -C "$fixture" push --quiet origin v1.2.3
   printf '%s\n' "$fixture"
 }
 
@@ -204,6 +227,9 @@ open_release_branch_on_origin() {
   git -C "$fixture" rm --quiet -- 'changelog.d/*.added.md' 'changelog.d/*.fixed.md'
   git -C "$fixture" commit --quiet -m "Release v1.2.4"
   git -C "$fixture" push --quiet origin HEAD:refs/heads/release/v1.2.4
+  local oid
+  oid="$(git -C "$fixture" rev-parse HEAD)"
+  git -C "$fixture" push --quiet origin "HEAD:refs/heads/release-attempt/v1.2.4/$oid"
   git -C "$fixture" switch --quiet main
   git -C "$fixture" branch --quiet -D release/v1.2.4
 }
@@ -247,7 +273,7 @@ run_opener() {
     OPENER_STATE="$case_state" \
     PATH="$bin_dir:$PATH" \
     "$@" \
-    "$repo_root/scripts/open_release_pr.sh" ${opener_args[@]+"${opener_args[@]}"} \
+    "$opener" ${opener_args[@]+"${opener_args[@]}"} \
     > "$case_output" 2>&1
   case_status=$?
   set -e
@@ -256,7 +282,7 @@ run_opener() {
 assert_no_side_effects() {
   local label="$1"
   local fixture="$2"
-  if grep -Eq '^(make|gate|publish) |^gh pr (create|merge)' "$case_record"; then
+  if grep -Eq '^(make|gate|publish) |^gh api |^gh pr (create|edit|merge)' "$case_record"; then
     cat "$case_record" >&2
     fail "$label: prepared, published, or opened a pull request"
   fi
@@ -307,6 +333,86 @@ merge_line=$(grep -n -Fx 'gh pr merge https://github.com/example/harn/pull/9001 
 [[ "$merge_line" -gt "$create_line" ]] || fail "auto-merge was armed before the pull request existed"
 [[ "$(grep '^gh ' "$case_record" | tail -n 1)" == "gh pr merge https://github.com/example/harn/pull/9001 --auto --squash" ]] \
   || { cat "$case_record" >&2; fail "arming is not the opening run's last GitHub call"; }
+
+# Follow the opener's actual published receipt through remote acquisition and
+# the production fragment guard, with a late fragment merged ahead of release.
+published_oid=$(git --git-dir="$opens.origin.git" rev-parse release/v1.2.4)
+[[ "$(git --git-dir="$opens.origin.git" rev-parse "release-attempt/v1.2.4/$published_oid")" == "$published_oid" ]] \
+  || fail "attempt ref does not identify the published candidate"
+git -C "$opens" switch --quiet main
+add_late_fragment "$opens"
+FAKE_GH_PRS="$open_release_pr" OPENER_ARGS=--existing-only run_opener "$opens"
+[[ "$case_status" -eq 0 ]] || { cat "$case_output" >&2; fail "published attempt could not be reused"; }
+assert_no_side_effects "published attempt with late fragment" "$opens"
+git -C "$opens" merge --quiet --no-ff release/v1.2.4 -m 'release after late fragment'
+git -C "$opens" update-ref -d "refs/remotes/origin/release-attempt/v1.2.4/$published_oid"
+scope=$(bash "$repo_root/scripts/lib/release_fragment_scope.sh" --repo "$opens" --version 1.2.4)
+jq -e '.resolved == false and (.owned | length) == 1 and (.deferred | length) == 0' <<< "$scope" >/dev/null \
+  || fail "missing local attempt evidence did not refuse deferral"
+git -C "$opens" fetch --quiet --no-tags origin 'refs/heads/release-attempt/*:refs/remotes/origin/release-attempt/*'
+scope=$(bash "$repo_root/scripts/lib/release_fragment_scope.sh" --repo "$opens" --version 1.2.4)
+jq -e --arg oid "$published_oid" '.resolved == true and .candidate_commit == $oid and (.owned | length) == 0 and .deferred == ["changelog.d/8900.fixed.md"]' <<< "$scope" >/dev/null \
+  || fail "opener attempt did not defer precisely the late fragment"
+
+# The release-contract CI job supplies its exact pinned orchestrator checkout.
+# Ordinary local opener runs prove only the production shell guard above.
+if [[ -n "${OPENER_ORCHESTRATOR_ROOT:-}" ]]; then
+  orchestrator=$(cd "$OPENER_ORCHESTRATOR_ROOT" && pwd)
+  mkdir "$tmp_root/orchestrator"
+  cp "$orchestrator/check_release_contract.harn" "$orchestrator/harn.toml" "$orchestrator/harn.lock" "$tmp_root/orchestrator/"
+  cp -R "$orchestrator/lib" "$tmp_root/orchestrator/lib"
+  contract_driver="$tmp_root/orchestrator/check-opener-contract.harn"
+  cat > "$contract_driver" <<HARN
+import { run_release_contract_check } from "./check_release_contract"
+fn main(harness: Harness) {
+  return run_release_contract_check(
+    harness.process,
+    harness.fs,
+    {
+      fs: harness.fs,
+      println: fn(line) { return harness.stdio.println(line) },
+      latest_published_release_tag: fn(_repo) { return "v1.2.3" },
+    },
+    ["--repo", "$opens", "--base", "main", "--contract-ref", "HEAD"],
+  )
+}
+HARN
+  git -C "$opens" update-ref -d "refs/remotes/origin/release-attempt/v1.2.4/$published_oid"
+  if "$real_harn" run --no-sandbox "$contract_driver" > "$tmp_root/contract-negative.log" 2>&1; then
+    fail "pinned orchestrator accepted the late fragment without an attempt"
+  fi
+  grep -Fq 'candidate range : unresolved' "$tmp_root/contract-negative.log" \
+    || { cat "$tmp_root/contract-negative.log" >&2; fail "negative did not reach the candidate range gate"; }
+  git -C "$opens" fetch --quiet --no-tags origin 'refs/heads/release-attempt/*:refs/remotes/origin/release-attempt/*'
+  "$real_harn" run --no-sandbox "$contract_driver" > "$tmp_root/contract-positive.log" 2>&1 \
+    || { cat "$tmp_root/contract-positive.log" >&2; fail "pinned orchestrator rejected the recorded attempt"; }
+  grep -Fq "candidate range : $published_oid" "$tmp_root/contract-positive.log" \
+    || fail "pinned orchestrator did not resolve the opener's published identity"
+  cat "$tmp_root/contract-negative.log" "$tmp_root/contract-positive.log"
+else
+  echo 'Pinned orchestrator not supplied: opener and shell guard evidence only.'
+fi
+
+# Failed recording must leave no pull request and no queue arm.
+unrecorded=$(new_fixture unrecorded 1.2.4-dev)
+add_fragments "$unrecorded"
+FAKE_ATTEMPT_WRITE_FAIL=1 run_opener "$unrecorded"
+[[ "$case_status" -ne 0 ]] || fail "failed recording was accepted"
+if grep -Eq '^gh pr (create|merge)' "$case_record"; then
+  fail "failed recording opened or armed a release"
+fi
+
+for fault in FAKE_ATTEMPT_WRONG_TARGET FAKE_PUBLICATION_WRONG_RECEIPT; do
+  incorrect=$(new_fixture "$fault" 1.2.4-dev)
+  add_fragments "$incorrect"
+  run_opener "$incorrect" "$fault=1"
+  [[ "$case_status" -ne 0 ]] || fail "$fault was accepted"
+  if grep -Eq '^gh pr (create|merge)' "$case_record"; then
+    fail "$fault opened or armed a release"
+  fi
+  grep -Fq 'read-back did not match' "$case_output" \
+    || { cat "$case_output" >&2; fail "$fault did not reach the identity read-back"; }
+done
 
 # --- A failed arm fails the run loudly and names the unarmed pull request ----
 unarmed=$(new_fixture unarmed 1.2.4-dev)
@@ -383,11 +489,13 @@ assert_no_side_effects "no fragments" "$empty"
 # --- An open Release v1.2.4 pull request: stop and name it --------------------
 by_title=$(new_fixture by-title 1.2.4-dev)
 add_fragments "$by_title"
+open_release_branch_on_origin "$by_title"
+git --git-dir="$by_title.origin.git" branch someone/else release/v1.2.4
 FAKE_GH_PRS='[{"url":"https://github.com/example/harn/pull/77","title":"Release v1.2.4","headRefName":"someone/else"}]' \
   run_opener "$by_title"
 [[ "$case_status" -eq 0 ]] || { cat "$case_output" >&2; fail "existing-title case failed"; }
 grep -Fxq "action=existing" "$case_outputs" || fail "existing-title case did not report action=existing"
-grep -Fq "Release v1.2.4 is open: https://github.com/example/harn/pull/77" "$case_output" \
+grep -Fq "https://github.com/example/harn/pull/77. Later fragments wait for the next release." "$case_output" \
   || { cat "$case_output" >&2; fail "existing-title case did not name the open pull request"; }
 assert_no_side_effects "existing title" "$by_title"
 
@@ -425,66 +533,56 @@ if grep -q '^gh ' "$case_record"; then
   fail "stable-version case queried GitHub before deciding there is nothing to release"
 fi
 
-# --- A fragment lands while the release PR is open: refold it in place --------
-refold=$(new_fixture refold 1.2.4-dev)
-add_fragments "$refold"
-open_release_branch_on_origin "$refold"
-add_late_fragment "$refold"
-refold_base=$(git -C "$refold" rev-parse HEAD)
-FAKE_GH_PRS="$open_release_pr" OPENER_ARGS=--refold-only run_opener "$refold"
-[[ "$case_status" -eq 0 ]] || { cat "$case_output" >&2; fail "refold failed"; }
-grep -Fxq "action=refolded" "$case_outputs" || { cat "$case_output" >&2; fail "refold did not report action=refolded"; }
-grep -Fxq "pr_url=https://github.com/example/harn/pull/77" "$case_outputs" || fail "refold did not name the pull request"
-grep -Fq "misses 1 fragment(s) now on main" "$case_output" || { cat "$case_output" >&2; fail "refold did not name the missing fragment"; }
-grep -Fxq "publish branch=release/v1.2.4" "$case_record" || fail "refold published to the wrong branch"
-grep -Fxq "publish base=$refold_base" "$case_record" || fail "refold is not based on main's new head"
-if grep -q '^gh pr create' "$case_record"; then
-  fail "refold opened a second pull request"
-fi
-grep -Fq 'gh pr edit https://github.com/example/harn/pull/77 --body-file' "$case_record" \
-  || { cat "$case_record" >&2; fail "refold did not update the pull request body"; }
-grep -Fq "folds 3 changelog fragment(s)" "$case_state/body.md" || fail "refold body does not count every fragment"
-grep -Fq -- '- **Late fix rides the release (#8900).**' "$case_state/changelog-at-edit.md" \
-  || fail "refold did not fold the late fragment"
-grep -Fxq "D  changelog.d/8900.fixed.md" "$case_state/status-at-publish.txt" \
-  || { cat "$case_state/status-at-publish.txt" >&2; fail "refolded tree does not delete the late fragment"; }
-[[ "$(grep '^gh ' "$case_record" | tail -n 1)" == "gh pr merge https://github.com/example/harn/pull/77 --auto --squash" ]] \
-  || { cat "$case_record" >&2; fail "refold did not keep the pull request armed"; }
+# --- Late fragments leave the recorded release and its checks unchanged ------
+frozen=$(new_fixture frozen 1.2.4-dev)
+add_fragments "$frozen"
+open_release_branch_on_origin "$frozen"
+frozen_oid=$(git --git-dir="$frozen.origin.git" rev-parse release/v1.2.4)
+add_late_fragment "$frozen"
+FAKE_GH_PRS="$open_release_pr" OPENER_ARGS=--existing-only run_opener "$frozen"
+[[ "$case_status" -eq 0 ]] || { cat "$case_output" >&2; fail "frozen attempt failed"; }
+grep -Fxq "action=existing" "$case_outputs" || fail "late fragment replaced the attempt"
+assert_no_side_effects "frozen attempt" "$frozen"
+[[ "$(git --git-dir="$frozen.origin.git" rev-parse release/v1.2.4)" == "$frozen_oid" ]] \
+  || fail "late fragment changed the release head"
+[[ -f "$frozen/changelog.d/8900.fixed.md" ]] || fail "late fragment was consumed"
 
-# --- The plan names a due refold ---------------------------------------------
-planned_refold=$(new_fixture planned-refold 1.2.4-dev)
-add_fragments "$planned_refold"
-open_release_branch_on_origin "$planned_refold"
-add_late_fragment "$planned_refold"
-FAKE_GH_PRS="$open_release_pr" OPENER_ARGS=--plan run_opener "$planned_refold"
-[[ "$case_status" -eq 0 ]] || { cat "$case_output" >&2; fail "refold plan failed"; }
-grep -Fxq "action=refold" "$case_outputs" || fail "plan did not decide to refold"
-assert_no_side_effects "refold plan" "$planned_refold"
+# --- A missing immutable record refuses instead of rebuilding ----------------
+git --git-dir="$frozen.origin.git" update-ref -d "refs/heads/release-attempt/v1.2.4/$frozen_oid"
+FAKE_GH_PRS="$open_release_pr" OPENER_ARGS=--plan run_opener "$frozen"
+[[ "$case_status" -ne 0 ]] || fail "an unrecorded release was accepted"
+grep -Fq 'no matching immutable release attempt' "$case_output" || fail "missing record refusal was not named"
+assert_no_side_effects "unrecorded attempt" "$frozen"
+git --git-dir="$frozen.origin.git" update-ref "refs/heads/release-attempt/v1.2.4/$frozen_oid" \
+  "$(git --git-dir="$frozen.origin.git" rev-parse main)"
+FAKE_GH_PRS="$open_release_pr" run_opener "$frozen"
+[[ "$case_status" -ne 0 ]] || fail "a mismatched immutable target was accepted"
+assert_no_side_effects "mismatched attempt" "$frozen"
 
 # --- A release PR that folds everything on main is left alone -----------------
 current=$(new_fixture current 1.2.4-dev)
 add_fragments "$current"
 open_release_branch_on_origin "$current"
-FAKE_GH_PRS="$open_release_pr" OPENER_ARGS=--refold-only run_opener "$current"
+FAKE_GH_PRS="$open_release_pr" OPENER_ARGS=--existing-only run_opener "$current"
 [[ "$case_status" -eq 0 ]] || { cat "$case_output" >&2; fail "current release PR case failed"; }
 grep -Fxq "action=existing" "$case_outputs" || fail "a current release pull request was not left alone"
 assert_no_side_effects "current release PR" "$current"
 
-# --- An unreadable release branch refuses; it is not "nothing to refold" ------
+# --- An unreadable release branch refuses ------------------------------------
 lost_branch=$(new_fixture lost-branch 1.2.4-dev)
 add_fragments "$lost_branch"
 FAKE_GH_PRS="$open_release_pr" run_opener "$lost_branch"
 [[ "$case_status" -ne 0 ]] || fail "opener proceeded without reading the release branch"
-grep -Fq "refusing to refold Release v1.2.4 on unproved state" "$case_output" \
+grep -Fq "refusing to reuse Release v1.2.4 on unproved state" "$case_output" \
   || { cat "$case_output" >&2; fail "unreadable release branch did not explain the refusal"; }
 assert_no_side_effects "unreadable release branch" "$lost_branch"
 
-# --- A push never opens a release: refold-only with none open is a no-op ------
+# --- A push never opens a release --------------------------------------------
 push_only=$(new_fixture push-only 1.2.4-dev)
 add_fragments "$push_only"
-OPENER_ARGS=--refold-only run_opener "$push_only"
-[[ "$case_status" -eq 0 ]] || { cat "$case_output" >&2; fail "refold-only case failed"; }
-grep -Fxq "action=none" "$case_outputs" || fail "refold-only opened or planned a release"
-assert_no_side_effects "refold-only without a release PR" "$push_only"
+OPENER_ARGS=--existing-only run_opener "$push_only"
+[[ "$case_status" -eq 0 ]] || { cat "$case_output" >&2; fail "existing-only case failed"; }
+grep -Fxq "action=none" "$case_outputs" || fail "existing-only opened or planned a release"
+assert_no_side_effects "existing-only without a release PR" "$push_only"
 
 echo "open_release_pr_test: ok"

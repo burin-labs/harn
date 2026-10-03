@@ -312,23 +312,30 @@ fn tool_registry_cli_emits_typed_application_errors_without_raw_human_data() {
 fn tool_registry_cli_does_not_render_a_top_level_thrown_value() {
     let temp = tempfile::tempdir().expect("tempdir");
     let script = temp.path().join("startup-failure.harn");
-    fs::write(
-        &script,
+    for source in [
         r#"throw {message: "PRIVATE-CUSTOMER-DIAGNOSTIC-123456"}"#,
-    )
-    .expect("write startup failure");
-
-    let output = harn_e2e_command()
-        .args(["tool", "run", &script.display().to_string()])
-        .output()
-        .expect("startup failure");
-    assert!(!output.status.success());
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        stderr.contains("tool threw an undeclared value"),
-        "{stderr}"
-    );
-    assert!(!stderr.contains("PRIVATE-CUSTOMER-DIAGNOSTIC"), "{stderr}");
+        r#"fn main(harness: Harness) throws string { throw "PRIVATE-CUSTOMER-DIAGNOSTIC-123456" }"#,
+    ] {
+        fs::write(&script, source).expect("write startup failure");
+        for prefix in [
+            vec!["tool", "run"],
+            vec!["serve", "mcp", "--surface", "script"],
+        ] {
+            let output = harn_e2e_command()
+                .args(prefix)
+                .arg(&script)
+                .output()
+                .expect("startup failure");
+            assert_eq!(output.status.code(), Some(1));
+            assert!(output.stdout.is_empty(), "{output:?}");
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            assert!(
+                stderr.contains("tool threw an undeclared value"),
+                "{stderr}"
+            );
+            assert!(!stderr.contains("PRIVATE-CUSTOMER-DIAGNOSTIC"), "{stderr}");
+        }
+    }
 }
 
 #[test]

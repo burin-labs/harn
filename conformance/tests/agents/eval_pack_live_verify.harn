@@ -1,19 +1,21 @@
-fn python_executor_source() -> string {
+fn python_executor_source(costs: dict = {cost_usd: 0.02, known_cost_usd: 0.02}) -> string {
   return "import json\n"
     + "import pathlib\n"
     + "import sys\n"
     + "\n"
     + "request = json.load(sys.stdin)\n"
+    + "usage = json.loads("
+    + json_stringify(json_stringify(costs))
+    + ")\n"
     + "workspace = pathlib.Path(request[\"case\"][\"workspace\"])\n"
     + "output = workspace / \"answer.txt\"\n"
     + "output.write_text(\"steel thread output\\n\", encoding=\"utf-8\")\n"
     + "print(json.dumps({\n"
     + "  \"verification\": \"PASS\",\n"
     + "  \"wallTimeSeconds\": 1.25,\n"
-    + "  \"costUsd\": 0.02,\n"
     + "  \"producedPaths\": [\"answer.txt\"],\n"
     + "  \"toolCallSummary\": {\"total\": 1, \"byTool\": {\"edit\": 1}}\n"
-    + "}))\n"
+    + "} | usage))\n"
 }
 
 fn verify_file_command(name: string) -> dict {
@@ -78,10 +80,13 @@ pipeline test_live_verify(harness: Harness) {
   assert_eq(report.cases[0].trials[0].produced_paths[0], "answer.txt")
   assert_eq(report.cases[0].trials[0].tool_call_summary.byTool.edit, 1)
   assert_eq(report.stats.reliability.all_pass_cases, 1)
+  assert_eq(report.cases[0].stats_row.cost_usd, 0.04)
+  assert_eq(report.cases[0].stats_row.known_cost_usd, 0.04)
   const resume = harness.runtime.eval_pack_run(manifest, ledger_options)
   assert_eq(resume.run_state.all_skipped, true)
   assert_eq(resume.run_state.skipped_cells, 2)
   assert_eq(resume.cases[0].reliability.status, "all-pass")
+  assert_eq(resume.cases[0].stats_row.cost_usd, 0.04)
   const broken = harness.runtime.eval_pack_run(
     eval_pack_manifest(live_pack(root, workspace, executor_path, "missing.txt")),
     ledger_options + {namespace: "live-verify-broken-" + harness.random.uuid()},
@@ -89,5 +94,27 @@ pipeline test_live_verify(harness: Harness) {
   assert_eq(broken.cases[0].reliability.status, "all-fail")
   assert_eq(broken.cases[0].stats_row.fails, 2)
   assert_eq(broken.pass, false)
+  for control in [
+    {name: "missing", fields: {}, exact: nil, known: nil},
+    {name: "empty", fields: {cost_usd: nil, known_cost_usd: nil}, exact: nil, known: nil},
+    {name: "partial", fields: {cost_usd: nil, known_cost_usd: 0.01}, exact: nil, known: 0.02},
+    {name: "zero", fields: {cost_usd: 0.0, known_cost_usd: 0.0}, exact: 0.0, known: 0.0},
+  ] {
+    harness.fs.write_text(executor_path, python_executor_source(control.fields))
+    const options = ledger_options + {namespace: "cost-" + control.name + harness.random.uuid()}
+    const cost_manifest = eval_pack_manifest(
+      live_pack(root, workspace, executor_path, "answer.txt"),
+    )
+    const costs = harness.runtime.eval_pack_run(cost_manifest, options)
+    assert_eq(costs.trial_count, 2)
+    assert_eq(costs.cases[0].reliability.status, "all-pass")
+    assert_eq(costs.cases[0].stats_row.cost_usd, control.exact)
+    assert_eq(costs.cases[0].stats_row.total_cost_usd, control.exact)
+    assert_eq(costs.cases[0].stats_row.known_cost_usd, control.known)
+    const reread = harness.runtime.eval_pack_run(cost_manifest, options)
+    assert_eq(reread.run_state.skipped_cells, 2)
+    assert_eq(reread.cases[0].stats_row.cost_usd, control.exact)
+    assert_eq(reread.cases[0].stats_row.known_cost_usd, control.known)
+  }
   harness.stdio.log("eval pack live verify ok")
 }

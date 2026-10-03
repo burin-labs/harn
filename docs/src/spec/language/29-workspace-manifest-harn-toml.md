@@ -64,6 +64,13 @@ workspace = ["read_text", "write_text"]
   When present, `harn check` fails with `HARN-CAP-008` for each declared
   operation missing from the served list. The check ignores built-in preflight
   defaults because the project did not declare them.
+- An operation metadata entry may declare `"optional": true`, for example
+  `{"runtime":{"operations":{"report":{"optional":true}}}}`.
+  Optional operations remain known to static checking but need not be served
+  by every host. Their absence produces no `HARN-CAP-008` finding, including
+  under strict ACP reconciliation. This declaration does not install a handler
+  or advertise the operation as served; callers must check `host.has` before
+  invoking it. The `optional` value must be a boolean.
 - `runtime_installed_host_operations` lists exact `capability.operation` pairs
   whose handlers are added at runtime. The static check skips these operations.
   Wildcards and malformed names are not allowed.

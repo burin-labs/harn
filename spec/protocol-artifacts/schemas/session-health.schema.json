@@ -1,0 +1,324 @@
+{
+  "$defs": {
+    "AgentTerminalKind": {
+      "description": "Coarse, typed classification of why an agent-loop session terminated.\nSerialized `snake_case`. The vocabulary is deliberately extensible —\n[`Self::Unknown`] is the honest fallback when no rule matched or the\nsupplied terminal evidence conflicts.",
+      "oneOf": [
+        {
+          "const": "natural",
+          "description": "The model/agent finished naturally — a clean completion or a verified\n`done` judgement, with no policy stop and no error.",
+          "type": "string"
+        },
+        {
+          "const": "user_cancelled",
+          "description": "A user or host explicitly cancelled the in-flight turn.",
+          "type": "string"
+        },
+        {
+          "const": "policy_budget",
+          "description": "A budget/cap policy stopped the loop: max iterations, a token/cost\nbudget, or a circuit breaker.",
+          "type": "string"
+        },
+        {
+          "const": "completion_unverified",
+          "description": "Completion was proposed but could not be verified before a judge\ndeadline or policy limit. This is a failed completion, not a cancel.",
+          "type": "string"
+        },
+        {
+          "const": "policy_no_progress",
+          "description": "The text-only nudge budget stopped a loop that did not issue actions.",
+          "type": "string"
+        },
+        {
+          "const": "policy_thrash",
+          "description": "The stall governor stopped a loop after repeated equivalent actions or\nobservations crossed its hard-stop threshold.",
+          "type": "string"
+        },
+        {
+          "const": "policy_guardrail",
+          "description": "A guardrail policy stopped the loop: an input tripwire or an\nout-of-scope alert.",
+          "type": "string"
+        },
+        {
+          "const": "policy_stop",
+          "description": "A custom post-turn / terminal callback requested a stop that is not one\nof the specific policy kinds above. The raw `reason` names it; a future\ntyped callback contract can attribute a finer owner.",
+          "type": "string"
+        },
+        {
+          "const": "provider_error",
+          "description": "The provider/transport failed terminally: rate limit, timeout, context\noverflow, or provider misconfiguration.",
+          "type": "string"
+        },
+        {
+          "const": "runtime_error",
+          "description": "The harness/runtime failed terminally: a host-bridge gap, an internal\nprotocol failure, an uncaught throw, or a turn that made no LLM call.",
+          "type": "string"
+        },
+        {
+          "const": "suspended",
+          "description": "The session suspended at a waitpoint and may resume later — its work is\nnot finished and was not abandoned.",
+          "type": "string"
+        },
+        {
+          "const": "unknown",
+          "description": "No rule matched, or the supplied terminal evidence conflicts.",
+          "type": "string"
+        }
+      ]
+    },
+    "DiagnosticTrend": {
+      "enum": [
+        "improving",
+        "flat",
+        "regressing",
+        "oscillating"
+      ],
+      "type": "string"
+    },
+    "HealthHeuristics": {
+      "additionalProperties": false,
+      "description": "Reserved for explicitly identified estimates, separate from measured facts.",
+      "type": "object"
+    },
+    "HealthMeasurements": {
+      "additionalProperties": false,
+      "properties": {
+        "diagnostic_trend": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DiagnosticTrend"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "edits_since_verification": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "last_stop_class": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AgentTerminalKind"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "nonzero_command_exit_rate": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HealthRate"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "prose_to_tool_balance": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ProseToolBalance"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "tool_call_success_rate": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HealthRate"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "turn_wall_time": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TurnTimeMeasurement"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "HealthRate": {
+      "additionalProperties": false,
+      "description": "A rate retains its population so a measured zero cannot hide missing data.",
+      "properties": {
+        "denominator": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "numerator": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "value": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "numerator",
+        "denominator",
+        "value"
+      ],
+      "type": "object"
+    },
+    "ProseToolBalance": {
+      "additionalProperties": false,
+      "description": "Counts come from emission telemetry, never from interpretation of prose.",
+      "properties": {
+        "characters_per_tool_call": {
+          "description": "Absent when no tool call supplies a denominator.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "prose_characters": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "tool_calls": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "prose_characters",
+        "tool_calls"
+      ],
+      "type": "object"
+    },
+    "TimeExpectation": {
+      "additionalProperties": false,
+      "properties": {
+        "milliseconds": {
+          "format": "double",
+          "type": "number"
+        },
+        "sample_count": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "source": {
+          "$ref": "#/$defs/TimeExpectationSource"
+        }
+      },
+      "required": [
+        "milliseconds",
+        "source",
+        "sample_count"
+      ],
+      "type": "object"
+    },
+    "TimeExpectationSource": {
+      "enum": [
+        "prior_measured_turns"
+      ],
+      "type": "string"
+    },
+    "TurnTimeMeasurement": {
+      "additionalProperties": false,
+      "properties": {
+        "actual_to_expected": {
+          "description": "Absent when there is no positive expectation from prior measured turns.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "expected": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TimeExpectation"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "milliseconds": {
+          "description": "Mean elapsed time of the measured turns in this population.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "sample_count": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "milliseconds",
+        "sample_count"
+      ],
+      "type": "object"
+    }
+  },
+  "$id": "https://harnlang.com/schemas/session-health.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "heuristics": {
+      "$ref": "#/$defs/HealthHeuristics"
+    },
+    "iteration": {
+      "format": "uint64",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "rolling": {
+      "$ref": "#/$defs/HealthMeasurements"
+    },
+    "schema_version": {
+      "format": "uint32",
+      "maximum": 1,
+      "minimum": 1,
+      "type": "integer"
+    },
+    "session_id": {
+      "type": "string"
+    },
+    "turn": {
+      "$ref": "#/$defs/HealthMeasurements"
+    }
+  },
+  "required": [
+    "schema_version",
+    "session_id",
+    "turn",
+    "rolling",
+    "heuristics"
+  ],
+  "title": "SessionHealthFact",
+  "type": "object",
+  "x-harn-provenance": {
+    "owner": "harn-vm::agent_events::session_health",
+    "schema_version": 1
+  }
+}

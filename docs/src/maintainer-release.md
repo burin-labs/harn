@@ -21,16 +21,45 @@ The daily schedule runs the same decision. A stable workspace version or no
 unreleased fragments produces `action=none`, with a notice explaining why.
 An unreadable pull-request list fails instead of opening a duplicate.
 
-An existing release on `release/vX.Y.Z` is refolded when main gains fragments
-it hasn't folded. A push changing `changelog.d` only refolds an existing
-release; it doesn't open one. Refolding keeps the version and pull-request
-identity but replaces the prepared commit, so inspect the new head's checks.
+The signed commit is recorded at `release-attempt/vX.Y.Z/<commit>` before the
+pull request opens. An existing release stays frozen at that attempt. Later
+fragments remain for the next release, including when their changes merge ahead
+of this release. A push changing `changelog.d` checks the existing attempt
+without rebuilding or opening a release.
 
-To keep an explicitly frozen candidate, use a branch other than the opener's
-`release/vX.Y.Z` branch and keep the exact `Release vX.Y.Z` title. The opener
-names that existing pull request and leaves its branch unchanged. New
-fragments remain for a later release. Don't dispatch a second version selector
-or a retired Fleet launcher to change this decision.
+An existing `release/vX.Y.Z` branch without a matching attempt fails closed.
+To replace an unrecorded stale attempt, close its pull request and dispatch the
+opener explicitly. Inspect the replacement head's required checks and review.
+Do not reset an attempt ref or dispatch a second version selector.
+
+## Repair a failed development bump
+
+If publication completed but the post-publication development bump failed,
+repair it through the same opener:
+
+```bash
+gh workflow run open-development-bump.yml --repo burin-labs/harn --ref main -f published_tag=vX.Y.Z
+```
+
+Omit `published_tag` to use the latest published stable release. The workflow
+verifies publication before minting the release App token, derives the next
+development identity, opens or reuses its pull request, validates its grammar
+receipt, and arms the normal merge queue. A repeated repair after the cutover
+lands is a no-op. Draft, prerelease, unreadable, and incomplete publication
+records refuse the repair.
+
+The five-minute repository-state controller automatically dispatches the same
+opener once for an owed development version when no open cutover PR exists.
+It verifies publication and reserves the attempt on the fixed commit in
+`scripts/development_cutover_repair.json` before dispatch. Scheduled and manual
+controller checks share that reservation owner. Existing PRs, including red
+ones, remain their owner's work.
+
+If reservation or dispatch fails, inspect the controller run and use the manual
+repair command above. The reservation deliberately prevents another automatic
+attempt, including after a crash. Missing or incomplete reservation history
+refuses automatic repair. Do not change the fixed anchor or seed to clear a
+reservation, and do not infer completed integration from a reserved attempt.
 
 ## Follow certification and publication
 

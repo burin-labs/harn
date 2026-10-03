@@ -73,6 +73,15 @@ pub(super) fn generate_manifest_with_vocabularies(
     let receipt_schema = tool_call_receipt_schema();
     schemas.push(json!({
         "protocol": "harn",
+        "source": "crates/harn-vm/src/agent_events/session_health.rs",
+        "artifact": harn_vm::agent_events::session_health::SESSION_HEALTH_SCHEMA_ARTIFACT,
+        "provenance": {
+            "owner": "harn-vm::agent_events::session_health",
+            "schema_version": harn_vm::agent_events::session_health::SESSION_HEALTH_SCHEMA_VERSION,
+        },
+    }));
+    schemas.push(json!({
+        "protocol": "harn",
         "source": "crates/harn-vm/src/llm/receipts.rs",
         "artifact": TOOL_CALL_RECEIPT_SCHEMA_ARTIFACT,
         "provenance": receipt_schema
@@ -319,6 +328,8 @@ pub(super) fn generate_readme() -> String {
            (`{MCP_PROTOCOL_VERSION}`).\n\
          - `schemas/tool-call-receipt.schema.json`: Harn's typed, privacy-preserving\n\
            `ToolCallReceipt` schema for audited tool calls.\n\
+         - `schemas/session-health.schema.json`: versioned observational per-turn\n\
+           and rolling agent health measurements.\n\
          - `schemas/session-recap-v1.schema.json`: closed write contract for Harn's\n\
            deterministic session recap availability and snapshot types.\n\
          - `schemas/plan-document-v1.schema.json`: Harn's canonical collaborative\n\

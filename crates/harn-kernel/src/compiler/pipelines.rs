@@ -28,8 +28,10 @@ impl Compiler {
         params: &[TypedParam],
         body: &[SNode],
         extends: Option<&str>,
+        throws: Option<&harn_parser::TypeExpr>,
     ) -> Result<CompiledFunction, CompileError> {
         let mut pipeline_compiler = self.nested_body();
+        pipeline_compiler.declared_throw = throws.is_some();
         pipeline_compiler.imported_enum_candidates = self.imported_enum_candidates.clone();
         pipeline_compiler.imported_enum_candidates_authoritative =
             self.imported_enum_candidates_authoritative;
@@ -115,7 +117,13 @@ impl Compiler {
         let Some(parent) = parent else {
             return Ok(());
         };
-        let Node::Pipeline { body, extends, .. } = peel_node(parent) else {
+        let Node::Pipeline {
+            body,
+            extends,
+            throws,
+            ..
+        } = peel_node(parent)
+        else {
             return Ok(());
         };
 
@@ -123,6 +131,7 @@ impl Compiler {
         // catalog. Inheritance sequences runtime statements, but a parent's
         // source-order enum shadowing must not change how its child is lowered.
         let saved_catalog = self.enum_catalog_snapshot();
+        let saved_throw = std::mem::replace(&mut self.declared_throw, throws.is_some());
         let result: Result<(), CompileError> = (|| {
             if let Some(grandparent) = extends {
                 self.compile_parent_pipeline(program, grandparent)?;
@@ -133,6 +142,7 @@ impl Compiler {
             Ok(())
         })();
         self.restore_enum_catalog(saved_catalog);
+        self.declared_throw = saved_throw;
         result
     }
 

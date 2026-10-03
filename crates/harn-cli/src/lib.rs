@@ -108,14 +108,14 @@ pub(crate) fn install_default_hostlib(_vm: &mut harn_vm::Vm) {}
 pub fn run() {
     install_broken_pipe_panic_hook();
     harn_vm::initialize_runtime_assets();
-    let raw_args = normalize_serve_args(bootstrap::args_after_pre_runtime_command());
+    // Pre-runtime commands stay on the main thread: the namespace helper must
+    // run while the process still has exactly one thread.
+    let raw_args = bootstrap::args_after_pre_runtime_command();
     // Defeat rlib dead-code stripping of `#[harn_builtin]`-emitted statics
     // (linkme issue #36). Without this touch the linker can drop every
     // builtin's distributed-slice entry, leaving `ALL_BUILTIN_DEFS` empty
     // and surfacing as a swarm of `HARN-NAM-002` errors at first call.
     harn_vm::stdlib::force_link();
-
-    ensure_builtin_signatures_installed();
 
     #[cfg(target_os = "linux")]
     if let Err(error) = commands::serve::confine_before_runtime(&raw_args) {
@@ -126,10 +126,13 @@ pub fn run() {
     let handle = harn_parser::runtime_stack::builder()
         .name("harn-cli".to_string())
         .spawn(move || {
-            // Parsing `Cli` materializes the largest command variant on the
-            // current stack. Keep both bootstrap parsing passes on the CLI's
-            // explicitly sized thread; the default Windows process stack is
-            // smaller and can overflow as the command surface grows.
+            // Building or parsing `Cli` materializes the whole command tree
+            // on the current stack, and `harn serve` builds it to recognize
+            // its transport names. Keep every pass over the command surface
+            // on the CLI's explicitly sized thread; the 1 MiB Windows main
+            // thread overflowed on `harn serve mcp`.
+            ensure_builtin_signatures_installed();
+            let raw_args = normalize_serve_args(raw_args);
             let runtime_mode = cli_runtime_mode(&raw_args);
             let runtime = build_cli_runtime(runtime_mode);
             runtime.block_on(async_main(raw_args, runtime_mode));

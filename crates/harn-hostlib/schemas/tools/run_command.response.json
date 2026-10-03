@@ -28,6 +28,7 @@
     "ended_at": { "type": ["string", "null"], "format": "date-time" },
     "duration_ms": { "type": "integer", "minimum": 0 },
     "exit_code": { "type": ["integer", "null"] },
+    "missing_program": { "type": "string", "description": "First program proven absent against the child environment before a normal exit 127. Omitted when no such evidence exists." },
     "signal": { "type": ["string", "null"] },
     "timed_out": { "type": "boolean" },
     "stdout": { "type": "string" },

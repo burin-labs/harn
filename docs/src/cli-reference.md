@@ -3175,6 +3175,7 @@ and `<name>.harnmod` for a module, unless `--out` redirects them.
 |---|---|
 | `--out <DIR>` | Write artifacts under `DIR`, mirroring the source tree, instead of beside each source. |
 | `--keep-going` | Continue after a source fails to compile. The exit code still reports the failure. |
+| `-j`, `--jobs <N>` | Compile up to `N` sources at once when walking a directory. Defaults to the machine's available parallelism. Output, artifacts, and the summary are identical for every `N`. |
 | `--artifact-contract` | Print the machine-readable adjacent-artifact compatibility contract. |
 
 ### Regenerating artifacts, and what cannot go stale
