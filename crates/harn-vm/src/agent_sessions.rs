@@ -416,6 +416,7 @@ use runtime_store::{
 };
 pub use scratchpad::*;
 pub(crate) use transcript_lifecycle::append_event_to_state;
+pub(crate) use transcript_lifecycle::store_transcript_with_audit;
 pub use transcript_lifecycle::*;
 pub use types::*;
 

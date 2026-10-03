@@ -467,7 +467,12 @@ pub(crate) fn transcript_event_from_message(message: &VmValue) -> VmValue {
         // the harness. Keep both event and block visibility internal.
         return transcript_event("message", &role, "internal", &text, None);
     }
-    let visibility = overall_visibility(&blocks, default_visibility_for_role(&role));
+    let visibility =
+        if role == "assistant" && !crate::llm::assistant_publication::is_visible(message) {
+            "internal".to_string()
+        } else {
+            overall_visibility(&blocks, default_visibility_for_role(&role))
+        };
     let kind = if matches!(role.as_str(), "tool" | "tool_result") {
         "tool_result"
     } else {

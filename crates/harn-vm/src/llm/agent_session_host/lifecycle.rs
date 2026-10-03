@@ -539,6 +539,13 @@ pub(super) async fn host_agent_session_finalize(
     } else {
         final_status.clone()
     };
+    let publication_admitted = canonical_status == "done"
+        && terminal_error.is_none()
+        && !matches!(
+            status_dict.get("publication_admitted"),
+            Some(VmValue::Bool(false))
+        );
+    let published = super::super::assistant_publication::settle(&session_id, publication_admitted)?;
     if finalization_stage < super::AgentFinalizationStage::TranscriptMarkerWritten {
         if let Some(dir) = session.transcript_dir.as_deref() {
             crate::llm::agent_session_transcript::append_finalized_marker(
@@ -693,6 +700,12 @@ pub(super) async fn host_agent_session_finalize(
         )
     };
     crate::llm::agent_runtime::emit_agent_event_with_ctx(Some(&ctx), &terminal_phase).await;
+    if let Some(content) = published {
+        emit_event(&AgentEvent::AgentMessageChunk {
+            session_id: session_id.clone(),
+            content,
+        });
+    }
     let mut session = finalization.commit();
     permissions::clear_session_grants(&session_id);
     crate::orchestration::clear_approval_policy_repeat_counts(&session_id);

@@ -32,6 +32,7 @@ mod agent_runtime;
 pub(crate) mod agent_session_host;
 mod agent_session_transcript;
 mod agent_terminal_class;
+pub(crate) mod assistant_publication;
 /// The run-record projector maps a loop's terminal status onto a run status,
 /// and this is the owner of what those status strings mean.
 pub(crate) use agent_terminal_class::session_status_indicates_error;
