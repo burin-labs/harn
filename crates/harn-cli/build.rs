@@ -24,6 +24,7 @@ const CLI_BYTECODE_MAGIC: &[u8; 8] = b"HARNBC\0\0";
 const CLI_AOT_REQUIRED_ENV: &str = "HARN_REQUIRE_CLI_AOT";
 
 fn main() {
+    emit_windows_main_stack();
     build_revision::emit();
     ensure_git_hooks_installed();
     emit_cli_script_bytecode();
@@ -544,4 +545,15 @@ fn escape_str(s: &str) -> String {
         }
     }
     out
+}
+
+/// Give the MSVC `harn.exe` main thread the 8 MiB stack Unix main threads get.
+///
+/// `lib::run` moves the command surface onto its sized thread, but `main`
+/// still initializes the runtime and answers pre-runtime commands on the
+/// process's main thread, which MSVC links at 1 MiB by default.
+fn emit_windows_main_stack() {
+    if std::env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("msvc") {
+        println!("cargo:rustc-link-arg-bins=/STACK:8388608");
+    }
 }
