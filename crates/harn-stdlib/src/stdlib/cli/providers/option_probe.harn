@@ -318,7 +318,11 @@ pub fn provider_option_probe_retry_result(
   return combined + {retry_count: (combined.retry_count ?? 0) + 1}
 }
 
-/** One recovery request per option; persistent rate limits remain unmeasured. */
+/**
+ * One recovery request per option; persistent rate limits remain unmeasured.
+ * @effects: []
+ * @errors: []
+ */
 pub fn provider_option_probe_retry_delay_ms(attempt: ProviderOptionProbeAttempt) -> int? {
   if attempt.verdict != "inconclusive" || (attempt.retry_count ?? 0) > 0 {
     return nil
