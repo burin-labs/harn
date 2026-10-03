@@ -38,6 +38,13 @@ retains the available subtotal, and `usage_unknown_calls` and `unpriced_calls`
 retain the missing-measurement counts. Absent legacy facts remain null; an empty
 run set has no measured total. Markdown displays unknown totals as `unknown`.
 
+Generic eval-pack live outcomes, trial reports, ledger rows, and statistics
+preserve the same nullable exact cost and separate known subtotal. Ledger rows
+use `harn.eval.ledger.row.v2`; reading or appending an unsupported schema fails
+explicitly and preserves its stored data. An incomplete
+cost census leaves cost per solved case unknown. A replay cost threshold fails
+as unmeasured when exact accounting is absent.
+
 ## Fixtures
 
 Use `--fixture <id>` for tight local debugging, or `--fixture all` for the full

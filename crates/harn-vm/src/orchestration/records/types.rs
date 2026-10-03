@@ -49,7 +49,7 @@ pub struct LlmUsageRecord {
     pub unpriced_calls: i64,
     /// Calls whose provider did not report token/cost accounting facts.
     pub usage_unknown_calls: i64,
-    /// Exact total when every call is priced; unknown for a mixed/unpriced run.
+    /// Exact total when every call has accounting and pricing; otherwise unknown.
     pub cost_usd: Option<f64>,
     /// Sum of priced calls, retained as a lower bound for mixed runs.
     pub known_cost_usd: f64,
@@ -85,7 +85,9 @@ impl From<LlmUsageRecordWire> for LlmUsageRecord {
             call_count: wire.call_count,
             unpriced_calls: wire.unpriced_calls,
             usage_unknown_calls: wire.usage_unknown_calls,
-            cost_usd: wire.cost_usd,
+            cost_usd: wire
+                .cost_usd
+                .filter(|_| wire.unpriced_calls == 0 && wire.usage_unknown_calls == 0),
             known_cost_usd: wire.known_cost_usd.unwrap_or(wire.total_cost),
             total_cost: wire.total_cost,
             models: wire.models,
@@ -804,7 +806,8 @@ pub struct EvalPackTrialReport {
     pub comparison: Option<RunDiffReport>,
     pub timed_out: bool,
     pub wall_time_seconds: f64,
-    pub cost_usd: f64,
+    pub cost_usd: Option<f64>,
+    pub known_cost_usd: Option<f64>,
     #[serde(default, alias = "producedPaths")]
     pub produced_paths: Vec<String>,
     #[serde(default, alias = "toolCallSummary", alias = "tool_summary")]
@@ -844,10 +847,11 @@ pub struct EvalPackStatsRow {
     pub status: String,
     pub majority: Option<String>,
     pub wall_time_seconds: f64,
-    pub cost_usd: f64,
+    pub cost_usd: Option<f64>,
+    pub known_cost_usd: Option<f64>,
     pub mean_wall_time_seconds: f64,
     pub stdev_wall_time_seconds: f64,
-    pub total_cost_usd: f64,
+    pub total_cost_usd: Option<f64>,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
@@ -940,10 +944,11 @@ pub struct EvalLedgerRow {
     pub verification: String,
     pub skipped: bool,
     pub wall_time_seconds: f64,
-    pub cost_usd: f64,
+    pub cost_usd: Option<f64>,
+    pub known_cost_usd: Option<f64>,
     pub mean_wall_time_seconds: f64,
     pub stdev_wall_time_seconds: f64,
-    pub total_cost_usd: f64,
+    pub total_cost_usd: Option<f64>,
     pub run_id: String,
     pub workflow_id: String,
     pub source_path: Option<String>,

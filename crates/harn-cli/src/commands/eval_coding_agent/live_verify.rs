@@ -248,7 +248,7 @@ impl EvalPackLiveExecutor for CodingAgentLiveExecutor<'_> {
     }
 }
 
-fn live_verify_outcome_from_run_report(report: &RunReport) -> EvalPackLiveVerifyOutcome {
+pub(super) fn live_verify_outcome_from_run_report(report: &RunReport) -> EvalPackLiveVerifyOutcome {
     let mut failures = Vec::new();
     if !report.passed && !report.skipped {
         failures.push(
@@ -273,8 +273,8 @@ fn live_verify_outcome_from_run_report(report: &RunReport) -> EvalPackLiveVerify
         passed: Some(report.passed),
         timed_out: false,
         wall_time_seconds: report.elapsed_ms as f64 / 1000.0,
-        // Eval-pack facts carry the known subtotal; exact totals stay nullable in reports.
-        cost_usd: report.usage.known_cost_usd.unwrap_or(0.0),
+        cost_usd: report.usage.cost_usd,
+        known_cost_usd: report.usage.known_cost_usd,
         produced_paths: ["summary.json", "result.json", "transcript_events.jsonl"]
             .into_iter()
             .filter(|path| Path::new(&report.output_dir).join(path).exists())
@@ -287,11 +287,6 @@ fn live_verify_outcome_from_run_report(report: &RunReport) -> EvalPackLiveVerify
             "successful": report.successful_tools.clone(),
         }),
         failures,
-        warnings: if report.usage.cost_usd.is_none() {
-            vec!["Exact provider cost is unmeasured; eval-pack cost records only the available known subtotal".to_string()]
-        } else {
-            Vec::new()
-        },
         run_id: Some(report.run_id.clone()),
         workflow_id: Some(CODING_AGENT_EVAL_PACK_ID.to_string()),
         source_path: Some(report.transcript_events_path.clone()),

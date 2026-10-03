@@ -36,6 +36,9 @@ fn measured_usage_replays_real_provider_costs_and_preserves_missing_data() {
         );
         assert_eq!(report.usage.model_call_count, Some(6));
         assert_eq!(report.usage.cost_usd, fixture[mode]["cost_usd"].as_f64());
+        let bridge = live_verify::live_verify_outcome_from_run_report(&report);
+        assert_eq!(bridge.cost_usd, report.usage.cost_usd);
+        assert_eq!(bridge.known_cost_usd, report.usage.known_cost_usd);
         measured_costs.push(report.usage.cost_usd);
     }
     assert!((sum_complete_costs(measured_costs).unwrap() - 0.005792).abs() < 1e-12);
@@ -77,6 +80,48 @@ fn measured_usage_replays_real_provider_costs_and_preserves_missing_data() {
         "usage_unknown_calls": 0, "unpriced_calls": 0,
     }));
     assert_eq!(zero.cost_usd, Some(0.0), "explicit measured zero survives");
+    for (name, summary, known) in [
+        (
+            "missing",
+            serde_json::json!({"llm": {"input_tokens": 9472}}),
+            None,
+        ),
+        ("empty", serde_json::json!({}), None),
+        (
+            "partial",
+            serde_json::json!({"cost_usd": null, "known_cost_usd": 0.0025936,
+            "model_call_count": 6, "usage_unknown_calls": 1, "unpriced_calls": 0}),
+            Some(0.0025936),
+        ),
+    ] {
+        let dir = root.path().join(name);
+        std::fs::create_dir(&dir).unwrap();
+        std::fs::write(
+            dir.join("summary.json"),
+            serde_json::to_vec(&summary).unwrap(),
+        )
+        .unwrap();
+        let report = live_verify::report_from_existing_summary(
+            name.to_string(),
+            case.clone(),
+            ModelSelector {
+                selector: "mock:mock".to_string(),
+                provider: "mock".to_string(),
+                model: "mock".to_string(),
+            },
+            "native".to_string(),
+            dir,
+        );
+        let bridge = live_verify::live_verify_outcome_from_run_report(&report);
+        assert_eq!(
+            bridge.cost_usd, None,
+            "{name} bridge must preserve unknown exact cost"
+        );
+        assert_eq!(bridge.known_cost_usd, known);
+        let wire = serde_json::to_value(bridge).unwrap();
+        assert!(wire["cost_usd"].is_null());
+        assert_eq!(wire["known_cost_usd"].as_f64(), known);
+    }
 }
 
 fn format_comparison_for_test(

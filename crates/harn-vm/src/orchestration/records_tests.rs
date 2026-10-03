@@ -105,9 +105,29 @@ fn eval_ledger_sqlite_backend_preserves_flat_file_semantics() {
     assert_eq!(appended.duplicates, 1);
     assert!(!appended.all_skipped);
 
-    let read = eval_ledger_read_report(Some(options)).unwrap();
+    let read = eval_ledger_read_report(Some(options.clone())).unwrap();
 
     assert_eq!(read.rows.len(), 2);
+    assert_eq!(read.rows[0].schema, "harn.eval.ledger.row.v2");
+    assert_eq!(read.rows[0].cost_usd, None);
+    assert_eq!(read.rows[0].known_cost_usd, None);
+    let mut unsupported = ledger_row_json("unsupported", "PASS", 1);
+    unsupported["schema"] = serde_json::json!("harn.eval.ledger.row.v1");
+    assert!(eval_ledger_append_rows_report(
+        serde_json::json!([
+            ledger_row_json("not-partially-inserted", "PASS", 1),
+            unsupported
+        ]),
+        Some(options.clone())
+    )
+    .is_err());
+    assert_eq!(
+        eval_ledger_read_report(Some(options.clone()))
+            .unwrap()
+            .rows
+            .len(),
+        2
+    );
     assert_eq!(read.rows[0].case_name, "case-a");
     assert_eq!(read.rows[1].case_name, "case-b");
     assert_eq!(read.rows[0].provenance.commit, "commit-b");
@@ -131,6 +151,26 @@ fn eval_ledger_sqlite_backend_preserves_flat_file_semantics() {
     .unwrap();
 
     assert!(all_skip.all_skipped);
+    {
+        use crate::event_log::EventLog;
+        let log = crate::event_log::active_event_log().unwrap();
+        let topic = crate::event_log::Topic::new("eval.ledger.unsupported-read").unwrap();
+        let mut legacy = ledger_row_json("old-cost-contract", "PASS", 1);
+        legacy["schema"] = serde_json::json!("harn.eval.ledger.row.v1");
+        futures::executor::block_on(log.append(
+            &topic,
+            crate::event_log::LogEvent::new("eval.ledger.row", legacy),
+        ))
+        .unwrap();
+        let Err(crate::value::VmError::Runtime(message)) =
+            eval_ledger_read_report(Some(serde_json::json!({
+                "namespace": "unsupported-read"
+            })))
+        else {
+            panic!("unsupported stored rows must fail explicitly, not read as zero rows");
+        };
+        assert_eq!(message, "unsupported eval ledger row schema \"harn.eval.ledger.row.v1\"; expected harn.eval.ledger.row.v2");
+    }
     crate::event_log::reset_active_event_log();
 }
 
