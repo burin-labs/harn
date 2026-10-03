@@ -68,7 +68,9 @@ pub(super) fn reapply_allocator_tuning(command: &mut Command, closed: bool) -> R
         read_setenv_args(descriptor).map_err(|error| payload_env_error(&error))?;
     let explicit: BTreeMap<OsString, Option<OsString>> = command
         .get_envs()
-        .filter(|(name, _)| crate::security::is_reapplied_allocator_tuning(name))
+        .filter(|(name, _)| {
+            crate::security::environment_policy::is_reapplied_allocator_tuning(name)
+        })
         .map(|(name, value)| (name.to_owned(), value.map(ToOwned::to_owned)))
         .collect();
     let inherited = (!closed)
@@ -76,7 +78,8 @@ pub(super) fn reapply_allocator_tuning(command: &mut Command, closed: bool) -> R
         .into_iter()
         .flatten()
         .filter(|(name, _)| {
-            crate::security::is_reapplied_allocator_tuning(name) && !explicit.contains_key(name)
+            crate::security::environment_policy::is_reapplied_allocator_tuning(name)
+                && !explicit.contains_key(name)
         });
     let present: Vec<(OsString, OsString)> = explicit
         .iter()
