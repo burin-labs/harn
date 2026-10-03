@@ -2427,3 +2427,47 @@ export interface HarnPlanDocument {
   created_at: string
   updated_at: string
 }
+export const HARN_INFERENCE_ADMISSION_STATUS_VALUES = [
+  "admitted",
+  "denied",
+  "unknown",
+] as const
+export type HarnInferenceAdmissionStatus = (typeof HARN_INFERENCE_ADMISSION_STATUS_VALUES)[number]
+
+export const HARN_INFERENCE_ADMISSION_REACH_VALUES = [
+  "local_only",
+  "hosted_open_weight",
+  "any_hosted",
+] as const
+export type HarnInferenceAdmissionReach = (typeof HARN_INFERENCE_ADMISSION_REACH_VALUES)[number]
+
+export const HARN_INFERENCE_ADMISSION_DATA_POSTURE_VALUES = [
+  "default",
+  "strictest_available",
+] as const
+export type HarnInferenceAdmissionDataPosture = (typeof HARN_INFERENCE_ADMISSION_DATA_POSTURE_VALUES)[number]
+
+export interface HarnInferenceAdmissionBoundary {
+  reach: HarnInferenceAdmissionReach
+  allow_training_discounts: boolean
+}
+
+export interface HarnInferenceAdmissionRequest {
+  provider: string
+  model: string
+  boundary?: HarnInferenceAdmissionBoundary | null
+  data_controls?: HarnInferenceAdmissionDataPosture
+}
+
+export interface HarnInferenceAdmissionSnapshot {
+  schema: string
+  provider: string
+  model: string
+  status: HarnInferenceAdmissionStatus
+  training_control_planned: boolean
+  effective_boundary?: HarnInferenceAdmissionBoundary | null
+  governing_rule?: string | null
+  local_runtime?: boolean | null
+  open_weight?: boolean | null
+  training_default?: string | null
+}

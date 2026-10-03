@@ -2057,3 +2057,57 @@ type HarnPlanDocument struct {
 	CreatedAt          string                             `json:"created_at"`
 	UpdatedAt          string                             `json:"updated_at"`
 }
+
+// HarnInferenceAdmissionStatus is the named string type for the HarnInferenceAdmissionStatusValues wire vocabulary.
+type HarnInferenceAdmissionStatus string
+
+// HarnInferenceAdmissionStatusValues enumerates every wire value Harn currently emits for HarnInferenceAdmissionStatus.
+var HarnInferenceAdmissionStatusValues = []HarnInferenceAdmissionStatus{
+	"admitted",
+	"denied",
+	"unknown",
+}
+
+// HarnInferenceAdmissionReach is the named string type for the HarnInferenceAdmissionReachValues wire vocabulary.
+type HarnInferenceAdmissionReach string
+
+// HarnInferenceAdmissionReachValues enumerates every wire value Harn currently emits for HarnInferenceAdmissionReach.
+var HarnInferenceAdmissionReachValues = []HarnInferenceAdmissionReach{
+	"local_only",
+	"hosted_open_weight",
+	"any_hosted",
+}
+
+// HarnInferenceAdmissionDataPosture is the named string type for the HarnInferenceAdmissionDataPostureValues wire vocabulary.
+type HarnInferenceAdmissionDataPosture string
+
+// HarnInferenceAdmissionDataPostureValues enumerates every wire value Harn currently emits for HarnInferenceAdmissionDataPosture.
+var HarnInferenceAdmissionDataPostureValues = []HarnInferenceAdmissionDataPosture{
+	"default",
+	"strictest_available",
+}
+
+type HarnInferenceAdmissionBoundary struct {
+	Reach                  HarnInferenceAdmissionReach `json:"reach"`
+	AllowTrainingDiscounts bool                        `json:"allow_training_discounts"`
+}
+
+type HarnInferenceAdmissionRequest struct {
+	Provider     string                             `json:"provider"`
+	Model        string                             `json:"model"`
+	Boundary     **HarnInferenceAdmissionBoundary   `json:"boundary,omitempty"`
+	DataControls *HarnInferenceAdmissionDataPosture `json:"data_controls,omitempty"`
+}
+
+type HarnInferenceAdmissionSnapshot struct {
+	Schema                 string                           `json:"schema"`
+	Provider               string                           `json:"provider"`
+	Model                  string                           `json:"model"`
+	Status                 HarnInferenceAdmissionStatus     `json:"status"`
+	TrainingControlPlanned bool                             `json:"training_control_planned"`
+	EffectiveBoundary      **HarnInferenceAdmissionBoundary `json:"effective_boundary,omitempty"`
+	GoverningRule          **string                         `json:"governing_rule,omitempty"`
+	LocalRuntime           **bool                           `json:"local_runtime,omitempty"`
+	OpenWeight             **bool                           `json:"open_weight,omitempty"`
+	TrainingDefault        **string                         `json:"training_default,omitempty"`
+}

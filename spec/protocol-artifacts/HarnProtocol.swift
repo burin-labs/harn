@@ -4850,3 +4850,86 @@ public struct HarnPlanDocument: Codable, Sendable, Equatable {
         case updatedAt = "updated_at"
     }
 }
+public enum HarnInferenceAdmissionStatus: String, Codable, Sendable, CaseIterable {
+    case admitted = "admitted"
+    case denied = "denied"
+    case unknown = "unknown"
+
+    public static let allCases: [Self] = [
+        "admitted",
+        "denied",
+        "unknown",
+    ].map { Self(rawValue: $0)! }
+}
+
+public enum HarnInferenceAdmissionReach: String, Codable, Sendable, CaseIterable {
+    case localOnly = "local_only"
+    case hostedOpenWeight = "hosted_open_weight"
+    case anyHosted = "any_hosted"
+
+    public static let allCases: [Self] = [
+        "local_only",
+        "hosted_open_weight",
+        "any_hosted",
+    ].map { Self(rawValue: $0)! }
+}
+
+public enum HarnInferenceAdmissionDataPosture: String, Codable, Sendable, CaseIterable {
+    case `default` = "default"
+    case strictestAvailable = "strictest_available"
+
+    public static let allCases: [Self] = [
+        "default",
+        "strictest_available",
+    ].map { Self(rawValue: $0)! }
+}
+
+public struct HarnInferenceAdmissionBoundary: Codable, Sendable, Equatable {
+    public let reach: HarnInferenceAdmissionReach
+    public let allowTrainingDiscounts: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case reach
+        case allowTrainingDiscounts = "allow_training_discounts"
+    }
+}
+
+public struct HarnInferenceAdmissionRequest: Codable, Sendable, Equatable {
+    public let provider: String
+    public let model: String
+    public let boundary: HarnInferenceAdmissionBoundary??
+    public let dataControls: HarnInferenceAdmissionDataPosture?
+
+    enum CodingKeys: String, CodingKey {
+        case provider
+        case model
+        case boundary
+        case dataControls = "data_controls"
+    }
+}
+
+public struct HarnInferenceAdmissionSnapshot: Codable, Sendable, Equatable {
+    public let schema: String
+    public let provider: String
+    public let model: String
+    public let status: HarnInferenceAdmissionStatus
+    public let trainingControlPlanned: Bool
+    public let effectiveBoundary: HarnInferenceAdmissionBoundary??
+    public let governingRule: String??
+    public let localRuntime: Bool??
+    public let openWeight: Bool??
+    public let trainingDefault: String??
+
+    enum CodingKeys: String, CodingKey {
+        case schema
+        case provider
+        case model
+        case status
+        case trainingControlPlanned = "training_control_planned"
+        case effectiveBoundary = "effective_boundary"
+        case governingRule = "governing_rule"
+        case localRuntime = "local_runtime"
+        case openWeight = "open_weight"
+        case trainingDefault = "training_default"
+    }
+}

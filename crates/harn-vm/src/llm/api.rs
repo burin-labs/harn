@@ -51,7 +51,10 @@ pub(crate) use errors::{
 /// envelope. Public so the protocol-artifact generator can project them into
 /// every host binding rather than leaving `kind`/`reason` as bare strings.
 pub use errors::{LlmErrorKind, LlmErrorReason};
-pub use inference_boundary::{InferenceBoundary, InferenceReach};
+pub use inference_boundary::{
+    inference_admission_schemas, preview_inference_admission, InferenceAdmissionRequest,
+    InferenceAdmissionSnapshot, InferenceAdmissionStatus, InferenceBoundary, InferenceReach,
+};
 pub(crate) use ollama::apply_ollama_runtime_settings;
 pub(crate) use ollama::ollama_unload_grace_duration_from_env;
 pub use ollama::{

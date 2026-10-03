@@ -9,6 +9,12 @@ use crate::value::{ErrorCategory, VmDictExt, VmError, VmValue};
 use super::data_controls::DataControlsReceipt;
 use super::errors::{LlmErrorKind, LlmErrorReason};
 
+mod admission;
+pub use admission::{
+    inference_admission_schemas, preview_inference_admission, InferenceAdmissionRequest,
+    InferenceAdmissionSnapshot, InferenceAdmissionStatus,
+};
+
 #[derive(Clone, Copy)]
 enum DenialRule {
     LocalOnly,
@@ -31,21 +37,47 @@ impl DenialRule {
         }
     }
 
-    fn refuse(self, message: String) -> VmError {
+    fn refuse(self, message: String) -> BoundaryDenial {
+        BoundaryDenial {
+            rule: self,
+            message,
+        }
+    }
+}
+
+pub(crate) struct BoundaryDenial {
+    rule: DenialRule,
+    message: String,
+}
+
+impl std::fmt::Display for BoundaryDenial {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}: {}", self.rule.as_str(), self.message)
+    }
+}
+
+impl std::fmt::Debug for BoundaryDenial {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Display::fmt(self, f)
+    }
+}
+
+impl From<BoundaryDenial> for VmError {
+    fn from(denial: BoundaryDenial) -> Self {
         let mut fields = std::collections::BTreeMap::new();
         fields.put_str("category", ErrorCategory::EgressBlocked.as_str());
         fields.put_str("kind", LlmErrorKind::Terminal.as_str());
         fields.put_str("reason", LlmErrorReason::PolicyDenied.as_str());
         fields.put_str("origin", "local");
-        fields.put_str("rule", self.as_str());
-        fields.put_str("code", self.as_str());
-        fields.put_str("message", format!("{}: {message}", self.as_str()));
+        fields.put_str("rule", denial.rule.as_str());
+        fields.put_str("code", denial.rule.as_str());
+        fields.put_str("message", denial.to_string());
         fields.put_bool("retryable", false);
         VmError::Thrown(VmValue::dict(fields))
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum InferenceReach {
     LocalOnly,
@@ -53,7 +85,7 @@ pub enum InferenceReach {
     AnyHosted,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct InferenceBoundary {
     pub reach: InferenceReach,
@@ -136,11 +168,17 @@ pub(crate) fn meet(
 }
 
 pub(crate) fn effective(requested: Option<InferenceBoundary>) -> Option<InferenceBoundary> {
-    let host = host_boundary().unwrap_or(Some(InferenceBoundary {
+    effective_result(requested).unwrap_or(Some(InferenceBoundary {
         reach: InferenceReach::LocalOnly,
         allow_training_discounts: false,
-    }));
-    meet(meet(host, current_ambient_boundary()), requested)
+    }))
+}
+
+fn effective_result(
+    requested: Option<InferenceBoundary>,
+) -> Result<Option<InferenceBoundary>, String> {
+    let host = host_boundary()?;
+    Ok(meet(meet(host, current_ambient_boundary()), requested))
 }
 
 pub(crate) fn parse_vm_value(value: &VmValue) -> Result<InferenceBoundary, VmError> {
@@ -168,7 +206,7 @@ pub(crate) fn governing_rule(
     provider: &str,
     model: &str,
     controls: &DataControlsReceipt,
-) -> Result<&'static str, VmError> {
+) -> Result<&'static str, BoundaryDenial> {
     let evidence = catalog_evidence(provider, model)?;
     let facts = RouteFacts {
         local: evidence.local_runtime,
@@ -185,7 +223,7 @@ pub(crate) fn governing_rule(
 pub(crate) fn catalog_evidence(
     provider: &str,
     model: &str,
-) -> Result<InferenceCatalogEvidence, VmError> {
+) -> Result<InferenceCatalogEvidence, BoundaryDenial> {
     let provider_def = crate::llm_config::provider_config(provider)
         .ok_or_else(|| DenialRule::UnknownProvider.refuse(provider.to_string()))?;
     if provider_def.local_runtime.is_some()
@@ -222,7 +260,7 @@ fn decide(
     provider: &str,
     model: &str,
     facts: RouteFacts,
-) -> Result<&'static str, VmError> {
+) -> Result<&'static str, BoundaryDenial> {
     let rule = if facts.local {
         "inference_boundary.local_runtime"
     } else {
@@ -270,42 +308,48 @@ pub(crate) fn preflight(
 ) -> Result<Option<&'static str>, VmError> {
     // An explicitly supplied but malformed host ceiling is a refusal even
     // when the resolved model is local; no fallback may mask bad authority.
-    host_boundary().map_err(VmError::Runtime)?;
-    let Some(boundary) = effective(boundary) else {
+    let Some(boundary) = effective_result(boundary).map_err(VmError::Runtime)? else {
         return Ok(None);
     };
-    governing_rule(boundary, provider, model, controls).map(Some)
+    governing_rule(boundary, provider, model, controls)
+        .map(Some)
+        .map_err(VmError::from)
 }
 
 pub(crate) fn preflight_chat(
     request: &super::options::LlmRequestPayload,
 ) -> Result<Option<&'static str>, VmError> {
-    // The shared HTTP transports apply the resolved data-control plan again
-    // at send time. Native/ACP adapters do not, so never credit a planned
-    // no-training control to one of those routes.
-    let shared_transport =
-        !matches!(
-            request.provider.as_str(),
-            "bedrock" | "azure_openai" | "vertex" | "gemini"
-        ) && !crate::llm::providers::AcpProvider::is_configured_acp(&request.provider);
-    let posture = if shared_transport {
-        request.data_controls
-    } else {
-        crate::llm_config::DataPosture::Default
-    };
-    let controls = super::data_controls::resolve(
-        &request.provider,
-        &request.model,
-        super::data_controls::dialect_of(
-            super::DialectContract::for_request(request).stream_protocol(),
-        ),
-        posture,
-    );
+    let controls = chat_controls(&request.provider, &request.model, request.data_controls);
     preflight(
         request.inference_boundary,
         &request.provider,
         &request.model,
         &controls.receipt,
+    )
+}
+
+fn chat_controls(
+    provider: &str,
+    model: &str,
+    requested_posture: crate::llm_config::DataPosture,
+) -> super::data_controls::DataControlsPlan {
+    // The shared HTTP transports apply the resolved data-control plan again
+    // at send time. Native/ACP adapters do not, so never credit a planned
+    // no-training control to one of those routes.
+    let shared_transport = !matches!(provider, "bedrock" | "azure_openai" | "vertex" | "gemini")
+        && !crate::llm::providers::AcpProvider::is_configured_acp(provider);
+    let posture = if shared_transport {
+        requested_posture
+    } else {
+        crate::llm_config::DataPosture::Default
+    };
+    super::data_controls::resolve(
+        provider,
+        model,
+        super::data_controls::dialect_of(
+            super::DialectContract::for_route(provider, model).stream_protocol(),
+        ),
+        posture,
     )
 }
 

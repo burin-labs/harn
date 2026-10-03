@@ -282,6 +282,7 @@ fn generate_go_with_payloads(payloads: &SessionUpdatePayloads) -> String {
     append_go_prepared_session_types(&mut out);
     append_go_session_recap_types(&mut out);
     super::plan_records::append(&mut out, super::records::Target::Go);
+    super::inference_admission::append(&mut out, super::records::Target::Go);
     out
 }
 

@@ -89,3 +89,56 @@ fn assert_local_policy_denial(error: &crate::value::VmError) {
         Some(crate::llm::AgentTerminalClass::ToolPolicyRejected),
     );
 }
+
+#[test]
+fn admission_preview_never_sends_and_the_same_listener_has_a_non_null_control() {
+    use crate::llm::api::{
+        preview_inference_admission, InferenceAdmissionRequest, InferenceAdmissionStatus,
+    };
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+
+    let _guard = env_guard();
+    let _allow = allow_stubbed_llm_transport();
+    let counter = Arc::new(AtomicUsize::new(0));
+    let server = spawn_ollama_empty_then_success_stub(counter.clone());
+    let _endpoint = ScopedEnvVar::set("OLLAMA_HOST", format!("http://{}", server.addr()));
+    let _boundary = ScopedEnvVar::set(
+        super::super::inference_boundary::HOST_BOUNDARY_ENV,
+        r#"{"reach":"local_only","allow_training_discounts":false}"#,
+    );
+    let opts = base_opts("ollama");
+    let request = InferenceAdmissionRequest {
+        provider: opts.provider.clone(),
+        model: opts.model.clone(),
+        boundary: None,
+        data_controls: None,
+    };
+    assert_eq!(
+        preview_inference_admission(&request).status,
+        InferenceAdmissionStatus::Admitted
+    );
+    assert_eq!(counter.load(Ordering::SeqCst), 0);
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    let result = runtime
+        .block_on(vm_call_llm_full(&opts))
+        .expect("the real route must reach the listener");
+    assert_eq!(result.text, "retried");
+    let observed = counter.load(Ordering::SeqCst);
+    assert!(
+        observed > 0,
+        "a measured zero needs the same counter's non-null control"
+    );
+    assert_eq!(
+        preview_inference_admission(&request).status,
+        InferenceAdmissionStatus::Admitted
+    );
+    assert_eq!(
+        counter.load(Ordering::SeqCst),
+        observed,
+        "preview must not send another request"
+    );
+}

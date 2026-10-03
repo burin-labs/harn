@@ -15,6 +15,44 @@ use super::generated_rust_binding::{HarnLlmErrorCategory, HarnLlmErrorKind, Harn
 use super::*;
 
 #[test]
+fn admission_snapshot_round_trips_through_schema_generated_host_records() {
+    use super::generated_rust_binding::{
+        HarnInferenceAdmissionSnapshot, HarnInferenceAdmissionStatus,
+    };
+    use harn_vm::llm::api::{
+        preview_inference_admission, InferenceAdmissionRequest, InferenceBoundary, InferenceReach,
+    };
+    let _guard = crate::tests::common::harn_state_lock::lock_harn_state();
+    let _host = crate::env_guard::ScopedEnvVar::unset("HARN_INFERENCE_BOUNDARY_JSON");
+    let _endpoint = crate::env_guard::ScopedEnvVar::set("OLLAMA_HOST", "http://127.0.0.1:9");
+    for (provider, expected) in [
+        ("ollama", HarnInferenceAdmissionStatus::Admitted),
+        ("openai", HarnInferenceAdmissionStatus::Denied),
+        (
+            "unresearched-provider",
+            HarnInferenceAdmissionStatus::Unknown,
+        ),
+    ] {
+        let request = InferenceAdmissionRequest {
+            provider: provider.into(),
+            model: "projection-fixture-model".into(),
+            boundary: Some(InferenceBoundary {
+                reach: InferenceReach::LocalOnly,
+                allow_training_discounts: false,
+            }),
+            data_controls: None,
+        };
+        let wire = serde_json::to_value(preview_inference_admission(&request)).unwrap();
+        let decoded: HarnInferenceAdmissionSnapshot = serde_json::from_value(wire.clone()).unwrap();
+        assert_eq!(decoded.status, expected);
+        assert_eq!(serde_json::to_value(decoded).unwrap(), wire);
+        let mut absent = wire;
+        absent.as_object_mut().unwrap().remove("status");
+        assert!(serde_json::from_value::<HarnInferenceAdmissionSnapshot>(absent).is_err());
+    }
+}
+
+#[test]
 fn local_policy_denial_survives_the_native_protocol_projection() {
     let facts = AcpPromptFailureFacts::from_thrown(&serde_json::json!({
         "category": "egress_blocked",

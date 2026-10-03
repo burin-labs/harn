@@ -1373,6 +1373,8 @@ harn precompile --relocatable
 harn precompile -q
 harn precompile <positional 1>
 harn provider
+harn provider admission
+harn provider admission --request
 harn provider cache-probe
 harn provider cache-probe --json
 harn provider cache-probe --model

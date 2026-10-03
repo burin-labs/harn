@@ -306,6 +306,7 @@ pub(super) fn generate_rust(
     append_rust_prepared_session_types(&mut out);
     append_rust_session_recap_types(&mut out);
     super::plan_records::append(&mut out, super::records::Target::Rust);
+    super::inference_admission::append(&mut out, super::records::Target::Rust);
 
     // Consumers vendor this artifact verbatim, sometimes as a new file. Keep
     // one POSIX final newline without a trailing blank line so their
@@ -375,7 +376,7 @@ pub(super) fn format_rust_source(source: String, repo_root: &Path) -> Result<Str
 /// exported vocabulary (`HarnLlmErrorReason`) carries a literal `unknown` wire
 /// value, and "Harn classified this as unknown" is a different fact from "this
 /// binding does not recognize this string".
-fn rust_open_string_enum(name: &str, doc: &str, values: &[String]) -> String {
+pub(super) fn rust_open_string_enum(name: &str, doc: &str, values: &[String]) -> String {
     for value in values {
         assert!(
             rust_type_name(value) != "Unrecognized",
