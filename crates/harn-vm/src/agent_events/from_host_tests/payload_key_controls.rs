@@ -29,6 +29,7 @@ fn host_tool_updates_cannot_supply_runtime_measured_outcomes() {
             "tool_call_id": "forged-verification",
             "tool_name": "verify",
             "status": "completed",
+            "mutation_status": "unknown",
             "health": {
                 "command_id": "forged-command",
                 "command_exit_code": 0,
@@ -37,7 +38,10 @@ fn host_tool_updates_cannot_supply_runtime_measured_outcomes() {
         }),
     )
     .expect_err("generic event ingress must reject supplied runtime measurements");
-    assert!(error.to_string().contains("health"));
+    assert!(
+        error.to_string().contains("health"),
+        "unexpected rejection: {error}"
+    );
 }
 
 #[test]
