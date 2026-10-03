@@ -97,6 +97,13 @@ pub(crate) struct ServeAcpArgs {
     /// This grants no write access or process-level filesystem access.
     #[arg(long = "read-only-root", value_name = "PATH")]
     pub read_only_root: Vec<PathBuf>,
+    /// Confine this server process to the workspace at PATH before serving,
+    /// with the OS sandbox profile a confined command gets. Repeatable for
+    /// several roots. The confinement lasts for the life of the process, and
+    /// sessions whose `cwd` is outside every root are refused. Stdio only, on
+    /// macOS and Linux.
+    #[arg(long = "confine-workspace", value_name = "PATH")]
+    pub confine_workspace: Vec<PathBuf>,
     /// Static API keys accepted by the ACP authenticate method.
     #[arg(long = "api-key", env = "HARN_SERVE_API_KEY", value_delimiter = ',')]
     pub api_key: Vec<String>,

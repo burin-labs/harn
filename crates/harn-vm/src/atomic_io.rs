@@ -537,7 +537,7 @@ mod tests {
         let mut handles = Vec::new();
         for i in 0..16 {
             let path = std::sync::Arc::clone(&path);
-            handles.push(std::thread::spawn(move || {
+            handles.push(crate::runtime_stack::spawn(move || {
                 let payload = format!("writer-{i}");
                 atomic_write(&path, payload.as_bytes()).unwrap();
             }));

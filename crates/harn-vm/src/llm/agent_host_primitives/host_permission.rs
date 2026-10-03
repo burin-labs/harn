@@ -292,6 +292,10 @@ pub(super) fn emit_runtime_denied_activity(
     tool_name: &str,
     evaluation: &PolicyEvaluation,
 ) {
+    if evaluation.is_approval_unavailable() {
+        emit_runtime_unavailable_activity(session_id, tool_call_id, tool_name, evaluation);
+        return;
+    }
     emit_runtime_resolved_activity(
         session_id,
         tool_call_id,

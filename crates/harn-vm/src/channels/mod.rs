@@ -1501,7 +1501,7 @@ fn emit_channel_transcript_event(kind: &'static str, payload: serde_json::Value)
     };
     let event = LogEvent::new(kind, payload);
     if tokio::runtime::Handle::try_current().is_ok() {
-        if let Ok(join) = std::thread::Builder::new()
+        if let Ok(join) = crate::runtime_stack::builder()
             .name("harn-channel-transcript".to_string())
             .spawn(move || {
                 let _ = futures::executor::block_on(log.append(&topic, event));

@@ -69,7 +69,7 @@ pub(crate) use self::source_exec::*;
 use clap::{error::ErrorKind, CommandFactory, Parser as ClapParser};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Once};
-use std::{env, fs, panic, process, thread};
+use std::{env, fs, panic, process};
 
 use cli::{
     Cli, Command, CompletionShell, EvalCommand, GuardCommand, MergeCaptainCommand,
@@ -117,9 +117,14 @@ pub fn run() {
 
     ensure_builtin_signatures_installed();
 
-    let handle = thread::Builder::new()
+    #[cfg(target_os = "linux")]
+    if let Err(error) = commands::serve::confine_before_runtime(&raw_args) {
+        eprintln!("error: {error}");
+        process::exit(1);
+    }
+
+    let handle = harn_parser::runtime_stack::builder()
         .name("harn-cli".to_string())
-        .stack_size(CLI_RUNTIME_STACK_SIZE)
         .spawn(move || {
             // Parsing `Cli` materializes the largest command variant on the
             // current stack. Keep both bootstrap parsing passes on the CLI's

@@ -354,6 +354,38 @@ pub const PURE_CASES: &[PureCase] = &[
         input_json: r#"["direct","relayed"]"#,
         expected_json: r#"{"finally_runs":2,"defer_runs":2,"caught":["direct","relayed"]}"#,
     },
+    PureCase {
+        // harn#9201: `?` returns an `Err` through pending cleanup. The
+        // `finally` overrides the early return, so the result only reads
+        // `cleanup` when that cleanup ran.
+        id: "try-operator-runs-pending-finally",
+        source: r#"
+            fn check(value: int) -> Result<int, string> {
+              if value < 0 { return Result.Err("negative") }
+              return Result.Ok(value)
+            }
+            fn guarded(value: int) -> Result<int, string> {
+              try {
+                const checked = check(value)?
+                return Result.Ok(checked + 1)
+              } finally {
+                if value < 0 { return Result.Err("cleanup") }
+              }
+              return Result.Err("fell through")
+            }
+            fn reduce(input: list<int>) -> list<list<any>> {
+              let rendered = []
+              for value in input {
+                const result = guarded(value)
+                rendered = rendered + [[result.variant, result.fields]]
+              }
+              return rendered
+            }
+        "#,
+        entry: "reduce",
+        input_json: "[-1,4]",
+        expected_json: r#"[["Err",["cleanup"]],["Ok",[5]]]"#,
+    },
 ];
 
 /// Runtime failures that every portable executor must agree on.

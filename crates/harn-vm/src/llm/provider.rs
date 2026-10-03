@@ -415,7 +415,7 @@ mod registration_tests {
     /// that condition.
     #[test]
     fn builtin_providers_resolve_on_a_thread_that_never_ran_vm_startup() {
-        let unresolved: Vec<&str> = std::thread::spawn(|| {
+        let unresolved: Vec<&str> = crate::runtime_stack::spawn(|| {
             [
                 "gemini",
                 "vertex",
@@ -442,7 +442,7 @@ mod registration_tests {
     /// unregistered for its whole life.
     #[test]
     fn a_custom_provider_registered_first_does_not_suppress_the_builtins() {
-        let (custom, builtin) = std::thread::spawn(|| {
+        let (custom, builtin) = crate::runtime_stack::spawn(|| {
             register_provider_name("acme-proxy");
             (
                 is_provider_registered("acme-proxy"),

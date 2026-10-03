@@ -51,12 +51,25 @@ and scrubbed from the process environment before workload execution. Durable
 secrets remain behind a host broker outside the workload sandbox.
 
 When a run is both non-interactive and unable to obtain approval,
-`RunApprovalPolicy::construct` resolves every rule, legacy pattern, and repeat
-guard whose disposition is `ask` to a deterministic denial. The resulting
-policy can therefore never defer to a human who does not exist. The host's
+`RunApprovalPolicy` resolves a winning `ask` from any rule, legacy pattern, or
+repeat guard to a deterministic denial, unless an installed resolver can
+answer it. Rule selection happens first, preserving explicit grants and
+denials. The host's
 construction callback receives the same posture and selects its workspace
 policy layers from `workspace_trust`; it must not infer this fact from a path
 layout.
+
+Prepared execution installs this evaluator for live tool dispatch and inherited
+worker scopes. Nested approval declarations intersect with the prepared
+policy. Outside prepared execution, Harn constructs the same evaluator from
+the active host bridge and approval reviewer. An unavailable approval is
+reported with the `approval_unavailable` denial gate and its original rule in
+the decision receipt.
+
+Rust callers use `current_run_approval_policy` for decisions. The compatibility
+reader `current_approval_policy` projects declarations for nested scopes and
+worker transport. `RunApprovalPolicy::effective` retains the typed evaluator;
+use `declared` when a `ToolApprovalPolicy` configuration value is needed.
 
 `discover_toolchain` is the only command-derived root path. Preparation reviews
 the exact command and a read-root ceiling, then persists readiness. Only after

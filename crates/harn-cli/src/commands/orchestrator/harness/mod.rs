@@ -78,9 +78,8 @@ impl OrchestratorHarness {
         let task_pump_drain_gate = pump_drain_gate.clone();
 
         // The orchestrator task drives the VM on this thread.
-        let join = std::thread::Builder::new()
+        let join = harn_parser::runtime_stack::builder()
             .name("harn-orchestrator".to_string())
-            .stack_size(crate::CLI_RUNTIME_STACK_SIZE)
             .spawn(move || {
                 // Use a multi-thread runtime so that blocking I/O (e.g. the
                 // OTEL SimpleSpanProcessor calling futures::executor::block_on

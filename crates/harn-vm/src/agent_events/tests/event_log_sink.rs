@@ -413,7 +413,7 @@ async fn flush_drains_concurrent_producers_without_scheduler_polling() {
     let mut producers = Vec::with_capacity(PRODUCERS);
     for producer in 0..PRODUCERS {
         let sink = sink.clone();
-        producers.push(std::thread::spawn(move || {
+        producers.push(crate::runtime_stack::spawn(move || {
             for event in 0..EVENTS_PER_PRODUCER {
                 sink.handle_event(&AgentEvent::AgentMessageChunk {
                     session_id: session_id.into(),

@@ -102,7 +102,7 @@ else
      conclusion:(if $scenario | startswith("terminal_") then $scenario | ltrimstr("terminal_") else "success" end)} |
     if (["delayed","multiple","running","rate_limited","rate_limited_retry_after"] | index($scenario)) != null
       then . + {status:"in_progress",conclusion:null} else . end |
-    if $scenario == "starved" then . + {status:"queued",conclusion:null} else . end |
+    if $scenario == "starved" then . + {status:"queued",conclusion:null,labels:["ubicloud-standard-8"]} else . end |
     if $scenario == "queued_late" then . + {status:(if $count <= 3 then "queued" else "in_progress" end),conclusion:null} else . end |
     if $scenario == "running" and $count >= 4 then . + {status:"completed",conclusion:"success"} else . end |
     if $scenario == "unknown_status" then .status = "future_terminal" else . end |
@@ -247,9 +247,12 @@ assert_output stderr "producer 'Rust workspace tests' completed (success)"
 
 # A producer that never leaves the queue fails by name once the queue bound
 # passes, having read only its state, on an interval that doubled to its cap.
+# It exits with the status reserved for starvation and annotates the run with
+# the runner labels the producer queued on, so the pool is named, not guessed.
 WAIT_INTERVAL=1 WAIT_MAX_INTERVAL=2 WAIT_MAX_QUEUE=2 run_case starved harn-cli.tar.zst
-assert_result 1 0 3
-assert_output stderr "producer 'Rust workspace tests' never started: still queued after"
+assert_result 3 0 3
+assert_output stderr "producer 'Rust workspace tests' never started: still queued on runner labels [ubicloud-standard-8] after"
+assert_output stdout "::error title=Producer never started::producer 'Rust workspace tests' never started"
 if [[ $(paste -sd' ' "$fixture_root/sleeps") != "1 2" ]]; then
   printf 'starved: sleeps were %s; expected 1 2\n' "$(paste -sd' ' "$fixture_root/sleeps")" >&2
   exit 1

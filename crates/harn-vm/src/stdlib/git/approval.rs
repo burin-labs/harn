@@ -15,8 +15,8 @@ pub(super) async fn enforce_git_approval(
         "cwd": display_path(&command.cwd),
         "affected_paths": command.affected_paths,
     });
-    let policy_decision = crate::orchestration::current_approval_policy()
-        .map(|policy| policy.evaluate_detailed(command.operation, &args));
+    let policy_decision = crate::orchestration::current_run_approval_policy()
+        .map(|policy| policy.evaluate_detailed_with_repeat(command.operation, &args, 0));
     if let Some(decision) = policy_decision
         .as_ref()
         .filter(|decision| decision.is_deny())

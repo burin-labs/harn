@@ -32,6 +32,8 @@ pub use descriptors::DescriptorTransfer;
 pub(super) mod bwrap;
 #[path = "linux_filesystem.rs"]
 mod filesystem;
+#[path = "linux_self_confinement.rs"]
+mod self_confinement;
 use filesystem::filesystem_profile;
 
 impl SandboxBackend for Backend {
@@ -45,6 +47,13 @@ impl SandboxBackend for Backend {
         } else {
             super::SandboxMechanism::LinuxBubblewrap
         }
+    }
+
+    fn confine_current_process(
+        policy: &CapabilityPolicy,
+    ) -> Result<super::SandboxMechanism, VmError> {
+        self_confinement::confine(policy)?;
+        Ok(super::SandboxMechanism::LinuxLandlock)
     }
 
     fn available() -> bool {

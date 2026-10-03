@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::sync::{Arc, RwLock};
-use std::thread::{self, JoinHandle};
+use std::thread::JoinHandle;
 use std::time::Duration;
 
 use harn_session_store::wal_watch::{
@@ -240,7 +240,7 @@ fn start_watcher(path: PathBuf) {
     let thread_path = path.clone();
     let (wake, events) = mpsc::channel();
     let thread_wake = wake.clone();
-    let thread = thread::Builder::new()
+    let thread = crate::runtime_stack::builder()
         .name("harn-session-wal-watch".to_string())
         .spawn(move || {
             watch_loop(

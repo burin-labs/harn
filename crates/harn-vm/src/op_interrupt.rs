@@ -455,6 +455,23 @@ pub fn install(cancel: Option<Arc<AtomicBool>>, deadline: Option<Instant>) -> Op
     OpInterruptGuard { prev: Some(prev) }
 }
 
+/// Bound a blocking operation, including synchronous process setup, without
+/// replacing its caller's cancellation token or extending an earlier deadline.
+/// Dropping the guard restores the previous interrupt context.
+pub fn with_deadline(deadline: Instant) -> OpInterruptGuard {
+    let parent = CURRENT
+        .with(|slot| slot.borrow().clone())
+        .unwrap_or_default();
+    install(
+        parent.cancel,
+        Some(
+            parent
+                .deadline
+                .map_or(deadline, |earlier| earlier.min(deadline)),
+        ),
+    )
+}
+
 /// Returns `true` when an interrupt context is installed on this thread.
 ///
 /// This is separate from [`requested`] so blocking operations can decide
@@ -1064,7 +1081,7 @@ pub(crate) fn spawn_pipe_drain<R: std::io::Read + Send + 'static>(
     mut reader: R,
 ) -> std::sync::mpsc::Receiver<Vec<u8>> {
     let (tx, rx) = std::sync::mpsc::channel::<Vec<u8>>();
-    std::thread::spawn(move || {
+    crate::runtime_stack::spawn(move || {
         let mut buf = Vec::new();
         let _ = reader.read_to_end(&mut buf);
         let _ = tx.send(buf);

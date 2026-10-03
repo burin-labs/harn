@@ -1209,7 +1209,7 @@ pub fn exercise(value: any) -> string {
             let source_path = Arc::clone(&source_path);
             let validation = validation.clone();
             let start = Arc::clone(&start);
-            handles.push(std::thread::spawn(move || {
+            handles.push(crate::runtime_stack::spawn(move || {
                 let recorder = ModulePhaseRecorder::new();
                 start.wait();
                 let artifact = cache

@@ -41,6 +41,11 @@ Follow the runs for that commit in
 1. `build-release-binaries.yml` builds the candidate in its merge group.
    The main push reuses a successful candidate for that exact commit, or builds
    it when no reusable queue candidate exists. Other pushes only warm caches.
+   Daily scheduled runs build signed source candidates at their exact main
+   commit, including commits outside the warm-cache path filter. They reuse a
+   successful candidate only while its manifest, release files, and every
+   target archive remain available and unexpired. These runs do not publish a
+   release.
 2. The candidate run builds, signs, notarizes, and attests the five platform
    archives. It checks those files with the release audit and smoke tests.
    The `candidate-manifest-<sha>` artifact binds the source commit, files,

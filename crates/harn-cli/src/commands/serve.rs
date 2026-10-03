@@ -165,14 +165,23 @@ pub(crate) async fn run_acp_server(args: &ServeAcpArgs) -> Result<(), String> {
         json_path: args.profile.json_path.clone(),
     };
     let sandbox = acp_sandbox_config(args);
+    if !args.confine_workspace.is_empty() && args.transport != AcpServeTransport::Stdio {
+        return Err(
+            "--confine-workspace confines a stdio server's own process; \
+             a WebSocket server is not supported"
+                .to_string(),
+        );
+    }
     match args.transport {
         AcpServeTransport::Stdio => {
+            let confinement = acp_server_confinement(args);
             crate::acp::run_acp_server(
                 args.file.as_deref(),
                 auth_policy,
                 args.trace,
                 profile,
                 sandbox,
+                confinement,
             )
             .await
         }
@@ -200,6 +209,51 @@ pub(crate) async fn run_acp_server(args: &ServeAcpArgs) -> Result<(), String> {
             result
         }
     }
+}
+
+/// What `--confine-workspace` asks for, or `None` when it wasn't passed.
+fn acp_server_confinement(args: &ServeAcpArgs) -> Option<harn_serve::AcpServerConfinement> {
+    (!args.confine_workspace.is_empty()).then(|| harn_serve::AcpServerConfinement {
+        workspace_roots: args
+            .confine_workspace
+            .iter()
+            .map(|root| root.display().to_string())
+            .collect(),
+        state_roots: Vec::new(),
+    })
+}
+
+/// Confine `harn serve acp --confine-workspace` before the CLI starts any
+/// other thread.
+///
+/// Landlock confines the calling thread and the threads it starts later,
+/// never threads that already exist, so on Linux this has to run on the main
+/// thread before the CLI thread and its Tokio runtime exist; afterwards Harn
+/// refuses to confine at all. macOS Seatbelt is process-wide, so there the
+/// server confines later, once its config has finished reading the host.
+#[cfg(target_os = "linux")]
+pub(crate) fn confine_before_runtime(raw_args: &[String]) -> Result<(), String> {
+    use clap::Parser as _;
+    let Ok(cli) = crate::cli::Cli::try_parse_from(raw_args) else {
+        return Ok(());
+    };
+    let Some(crate::cli::Command::Serve(crate::cli::ServeArgs {
+        command: ServeCommand::Acp(args),
+    })) = cli.command
+    else {
+        return Ok(());
+    };
+    // A WebSocket server with the flag is refused once the command runs.
+    let Some(confinement) =
+        acp_server_confinement(&args).filter(|_| args.transport == AcpServeTransport::Stdio)
+    else {
+        return Ok(());
+    };
+    let config =
+        harn_serve::AcpServerConfig::new(args.file.clone()).with_sandbox(acp_sandbox_config(&args));
+    harn_serve::confine_acp_server_process(&config, &confinement)
+        .map(|_| ())
+        .map_err(|error| format!("--confine-workspace: {error}"))
 }
 
 fn acp_sandbox_config(args: &ServeAcpArgs) -> AcpSandboxConfig {

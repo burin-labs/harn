@@ -1243,7 +1243,7 @@ fn provenance_mismatch(
 }
 
 pub(super) fn evaluate_requirement(
-    approval_policy: &crate::orchestration::ToolApprovalPolicy,
+    approval_policy: &crate::orchestration::RunApprovalPolicy,
     net_policy: &crate::harness_net::NetPolicy,
     requirement: &AuthorityRequirement,
 ) -> Result<PolicyEvaluation, String> {

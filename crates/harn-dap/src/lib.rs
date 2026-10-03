@@ -16,7 +16,6 @@ use std::io;
 use std::sync::atomic::AtomicI64;
 use std::sync::mpsc::{channel, Sender};
 use std::sync::{Arc, Mutex};
-use std::thread;
 
 use debugger::Debugger;
 use framing::SharedWriter;
@@ -50,7 +49,7 @@ pub fn run() {
     // reverse-request replies without starving the read loop.
     let (request_tx, request_rx) = channel::<DapMessage>();
     let pending_for_reader = Arc::clone(&pending);
-    thread::spawn(move || stdin_reader(request_tx, pending_for_reader));
+    harn_parser::runtime_stack::spawn(move || stdin_reader(request_tx, pending_for_reader));
 
     let bridge = Arc::new(DapHostBridge::new(
         Arc::clone(&seq),

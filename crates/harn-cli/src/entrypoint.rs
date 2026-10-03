@@ -1106,9 +1106,8 @@ pub(crate) const VERSION_SCHEMA_VERSION: u32 = 2;
 /// does not inherit that thread's stack — it needs the VM stack in its own
 /// right, exactly like the standalone `harn-dap` binary.
 pub(crate) fn run_dap_adapter() {
-    thread::Builder::new()
+    harn_parser::runtime_stack::builder()
         .name("harn-dap".to_string())
-        .stack_size(CLI_RUNTIME_STACK_SIZE)
         .spawn(harn_dap::run)
         .expect("spawn harn-dap adapter thread")
         .join()

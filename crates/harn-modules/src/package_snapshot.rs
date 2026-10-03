@@ -627,7 +627,7 @@ mod tests {
         let started = Arc::new(Barrier::new(2));
         let reader_started = Arc::clone(&started);
         let reader_root = root.clone();
-        let reader = std::thread::spawn(move || {
+        let reader = harn_parser::runtime_stack::spawn(move || {
             reader_started.wait();
             PackageSnapshot::acquire(&reader_root).unwrap().unwrap()
         });

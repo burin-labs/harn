@@ -285,7 +285,12 @@ impl ProcessSandboxReportingContext {
         let reporting = match policy {
             Some(_) if ActiveBackend::available() => ProcessSandboxDenialReporting::InferredOnly,
             Some(_) => ProcessSandboxDenialReporting::BackendUnavailable,
-            _ => ProcessSandboxDenialReporting::NotEnforced,
+            // A child of a confined process runs under that process's
+            // profile, so its permission errors are the kernel's too.
+            None if super::self_confinement::current_process_confinement().is_some() => {
+                ProcessSandboxDenialReporting::InferredOnly
+            }
+            None => ProcessSandboxDenialReporting::NotEnforced,
         };
         Self {
             backend: super::active_backend_filesystem_mechanism().to_string(),

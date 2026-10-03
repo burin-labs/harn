@@ -96,7 +96,7 @@ fn cli_llm_mock_replay_scope_survives_provider_worker_thread() {
     assert!(request.cli_llm_mock_scope.is_some());
     assert!(crate::llm::providers::MockProvider::should_intercept_request(&request));
 
-    let result = std::thread::spawn(move || {
+    let result = crate::runtime_stack::spawn(move || {
         assert!(crate::llm::providers::MockProvider::should_intercept_request(&request));
         mock_llm_response(&request)
     })
@@ -121,7 +121,7 @@ fn cli_llm_mock_record_scope_collects_provider_worker_thread_results() {
     result.telemetry.effective_reasoning_effort = effort.clone();
 
     assert!(request.cli_llm_mock_scope.is_some());
-    std::thread::spawn(move || record_cli_llm_result(&request, &result))
+    crate::runtime_stack::spawn(move || record_cli_llm_result(&request, &result))
         .join()
         .expect("provider worker thread");
 
@@ -206,7 +206,7 @@ fn inline_mock_scope_survives_a_deterministic_executor_thread_hop() {
     let mut cx = std::task::Context::from_waker(&waker);
     assert!(matches!(scoped.as_mut().poll(&mut cx), Poll::Pending));
 
-    let observed = std::thread::spawn(move || {
+    let observed = crate::runtime_stack::spawn(move || {
         let waker = futures::task::noop_waker();
         let mut cx = std::task::Context::from_waker(&waker);
         match scoped.as_mut().poll(&mut cx) {

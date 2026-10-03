@@ -1529,7 +1529,7 @@ mod tests {
         let stale_initializer = {
             let candidate_ready = std::sync::Arc::clone(&candidate_ready);
             let resume_stale_initializer = std::sync::Arc::clone(&resume_stale_initializer);
-            std::thread::spawn(move || {
+            crate::runtime_stack::spawn(move || {
                 ensure_initialized_from_config_with(|| {
                     let candidate = limiters_from_config_and_runtime_overrides();
                     candidate_ready.wait();

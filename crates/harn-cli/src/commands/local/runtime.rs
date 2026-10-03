@@ -592,7 +592,7 @@ mod tests {
     async fn tgi_snapshot_uses_openai_models_route_without_ollama_enrichment() {
         let listener = TcpListener::bind("127.0.0.1:0").expect("bind TGI stub");
         let addr = listener.local_addr().expect("TGI stub address");
-        let handle = std::thread::spawn(move || {
+        let handle = harn_parser::runtime_stack::spawn(move || {
             let (mut stream, _) = listener.accept().expect("TGI stub accepts request");
             let mut bytes = [0_u8; 4096];
             let read = stream.read(&mut bytes).expect("TGI stub reads request");

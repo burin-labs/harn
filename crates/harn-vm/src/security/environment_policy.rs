@@ -354,6 +354,7 @@ pub fn provider_credential_env_names() -> std::collections::BTreeSet<String> {
     for provider in crate::llm_config::provider_names() {
         if let Some(definition) = crate::llm_config::provider_config(&provider) {
             names.extend(crate::llm_config::auth_env_names(&definition.auth_env));
+            names.extend(definition.credential_env.iter().cloned());
         }
     }
     names
@@ -710,17 +711,12 @@ mod tests {
         // The catalog is the single owner of that mapping, so adding a provider
         // with a novel key name — one the prefix list above would not
         // recognize — cannot silently open the door.
-        for provider in crate::llm_config::provider_names() {
-            let Some(definition) = crate::llm_config::provider_config(&provider) else {
-                continue;
-            };
-            for auth_env in crate::llm_config::auth_env_names(&definition.auth_env) {
-                assert!(
-                    !ENV_ALLOWLIST.contains(&auth_env.as_str()),
-                    "allowlist admits '{auth_env}', the credential variable provider \
-                     '{provider}' declares — a credential must cross via a grant"
-                );
-            }
+        for credential in provider_credential_env_names() {
+            assert!(
+                !ENV_ALLOWLIST.contains(&credential.as_str()),
+                "allowlist admits '{credential}', a credential variable the provider \
+                 catalog declares — a credential must cross via a grant"
+            );
         }
         // Base essentials present: without these a child cannot resolve tools or
         // its home/temp, so an isolated build would fail for a trivial reason.

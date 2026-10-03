@@ -578,7 +578,7 @@ pipeline test_release_warm_cache_concurrency_rejects_setup_only_preemption(
     release_warm_cache_concurrency_errors(invalid),
     [
       "build-release-binaries.yml must give branch pushes run-qualified workflow lanes",
-      "build-release-binaries.yml must reserve workflow cancellation for full scheduled/manual warms",
+      "build-release-binaries.yml must reserve workflow cancellation for manual warms",
       "build-release-binaries.yml:build must instantiate only after setup selects a real build",
       "build-release-binaries.yml:build must share one warm lane per target and qualify every other run",
       "build-release-binaries.yml:build must let only real main-branch warms supersede a target warm",

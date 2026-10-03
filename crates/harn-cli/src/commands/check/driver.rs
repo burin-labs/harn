@@ -29,7 +29,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use harn_parser::analysis::{AnalysisDatabase, SourceId};
 
-use crate::{package, CLI_RUNTIME_STACK_SIZE};
+use crate::package;
 
 use super::check_cmd::{
     check_file_report_inner, CheckDiagnostic, CheckFileReport, CheckFileStatus, CheckTextOutput,
@@ -284,13 +284,11 @@ fn run_ordered_checks<State>(
             merged[index] = Some(checked);
         }
     } else {
-        let produced = std::thread::scope(|scope| {
+        let produced = harn_parser::runtime_stack::scope(|scope| {
             let handles: Vec<_> = (0..workers)
                 .map(|index| {
-                    std::thread::Builder::new()
-                        .name(format!("harn-check-{index}"))
-                        .stack_size(CLI_RUNTIME_STACK_SIZE)
-                        .spawn_scoped(scope, run_worker)
+                    scope
+                        .spawn_named(format!("harn-check-{index}"), run_worker)
                         .expect("failed to spawn harn check worker")
                 })
                 .collect();

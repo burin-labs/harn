@@ -239,7 +239,7 @@ impl CodeIndexCapability {
         let index = self.index.clone();
         let resolver = self.harn_reference_resolver.clone();
         let thread_root = root.clone();
-        match thread::Builder::new()
+        match harn_parser::runtime_stack::builder()
             .name("harn-code-index-warm".to_string())
             .spawn(move || {
                 let _flight = flight;
@@ -549,7 +549,7 @@ mod tests {
     #[cfg(target_os = "linux")]
     #[test]
     fn the_warm_thread_runs_below_normal_priority() {
-        let nice = std::thread::spawn(|| {
+        let nice = harn_parser::runtime_stack::spawn(|| {
             super::lower_to_background_priority();
             // SAFETY: reads the calling thread's own nice value.
             unsafe {

@@ -165,7 +165,7 @@ pub fn run_wasm_module(
     // The sync WASIp1 shim in wasmtime-wasi uses its own Tokio runtime.
     // Running it on a fresh host thread keeps it out of Harn's runtime while
     // sharing the testbench clock and overlay through their Arc-backed guards.
-    let worker = std::thread::Builder::new()
+    let worker = crate::runtime_stack::builder()
         .name("harn-wasi".to_string())
         .spawn(move || {
             let _clock_guard = clock.map(crate::clock_mock::install_override);

@@ -77,6 +77,7 @@ case "$2" in
     fi
     ;;
   */artifacts\?name=candidate-manifest-*) printf '%s\n' "${FAKE_CANDIDATE_MANIFEST_COUNT:-1}" ;;
+  */artifacts\?per_page=100) printf '%s\n' "${FAKE_SOURCE_ARTIFACTS:?source artifact fixture required}" ;;
   *) exit 2 ;;
 esac
 EOF
@@ -168,6 +169,37 @@ resolve source EVENT_NAME=workflow_dispatch INPUT_SOURCE_CANDIDATE=true
   || fail "source candidate does not cover the existing full matrix"
 [[ "$(output source source_candidate_decision | jq -er '.accepted and .reason == "accepted"')" == true ]] \
   || fail "actual source resolver did not emit its typed admission receipt"
+
+# Scheduled candidates cover even main commits excluded by warm-cache paths.
+resolve scheduled EVENT_NAME=schedule INPUT_SOURCE_CANDIDATE=true
+[[ "$(output scheduled build_mode)" == candidate &&
+   "$(output scheduled should_package_archives)" == true &&
+   "$(output scheduled candidate_source_sha)" == "$(git -C "$repo" rev-parse HEAD)" ]] \
+  || fail "schedule did not package the exact main commit"
+source_artifacts="$(matrix_targets scheduled | jq -R --arg sha "$(git -C "$repo" rev-parse HEAD)" '
+  (split(",") | map("harn-" + .)) + ["candidate-manifest-" + $sha, "harn-release-files"] |
+  map({name:.,expired:false,size_in_bytes:100}) | {total_count:length,artifacts:.}')"
+resolve scheduled_reuse EVENT_NAME=schedule INPUT_SOURCE_CANDIDATE=true \
+  FAKE_QUEUE_RUN=4242 FAKE_SOURCE_ARTIFACTS="$source_artifacts"
+[[ "$(output scheduled_reuse build_mode)" == queued &&
+   "$(output scheduled_reuse should_build_binaries)" == false &&
+   "$(output scheduled_reuse reused_source_run_id)" == 4242 ]] \
+  || fail "a complete live candidate was not reused"
+for missing_proof in expired empty missing partial; do
+  case "$missing_proof" in
+    expired) filter='.artifacts[0].expired = true' ;;
+    empty) filter='.artifacts[0].size_in_bytes = 0' ;;
+    missing) filter='.artifacts = .artifacts[1:] | .total_count = (.artifacts | length)' ;;
+    partial) filter='.total_count += 1' ;;
+  esac
+  resolve "scheduled_$missing_proof" EVENT_NAME=schedule INPUT_SOURCE_CANDIDATE=true \
+    FAKE_QUEUE_RUN=4242 FAKE_SOURCE_ARTIFACTS="$(jq "$filter" <<< "$source_artifacts")"
+  [[ "$(output "scheduled_$missing_proof" should_build_binaries)" == true ]] \
+    || fail "schedule reused $missing_proof candidate evidence"
+done
+if run_resolver scheduled_unread EVENT_NAME=schedule INPUT_SOURCE_CANDIDATE=true FAKE_GH_FAIL=1; then
+  fail "unread candidate inventory passed scheduled admission"
+fi
 for invalid_source in branch tag conflict benchmark profile targets event source_ref source_sha bloat; do
   case "$invalid_source" in
     branch) invalid_args=(REF_NAME=topic) ;;

@@ -1769,7 +1769,8 @@ defer {
 ```
 
 Registers a block to run when the enclosing lexical scope exits — on normal
-fallthrough, on `return`, on `break` / `continue` out of an enclosing loop,
+fallthrough, on `return` (including the early return of a postfix `?`), on
+`break` / `continue` out of an enclosing loop,
 or on an error leaving the scope, including one raised by a called function
 or a failing operation. Multiple `defer` blocks in the same scope execute
 in LIFO (last-registered, first-executed) order, similar to Zig's `defer`.
@@ -3170,8 +3171,10 @@ zero. The block runs exactly once and the original error then continues to
 propagate. A `throw` from the finally block replaces the original error, and a
 `return` from it discards the original error.
 
-`return`, `break`, and `continue` inside a try body with a finally block will
-execute the finally block before the control flow transfer completes.
+`return`, `break`, `continue`, and the early return of a postfix `?` inside a
+try body with a finally block will execute the finally block before the
+control flow transfer completes. A `throw` from that finally block replaces the
+transfer, and a `return` from it replaces the returned value.
 
 The finally block's return value is discarded — the overall expression value
 comes from the try or catch body.

@@ -180,7 +180,7 @@ mod tests {
     #[test]
     fn current_returns_none_when_nothing_pushed() {
         // A fresh thread has no owning execution.
-        std::thread::spawn(|| {
+        crate::runtime_stack::spawn(|| {
             assert_eq!(current_execution_scope(), None);
         })
         .join()
@@ -189,7 +189,7 @@ mod tests {
 
     #[test]
     fn guard_pops_on_drop_and_inner_shadows_outer() {
-        std::thread::spawn(|| {
+        crate::runtime_stack::spawn(|| {
             let outer = mint_execution_scope();
             let inner = mint_execution_scope();
             assert_ne!(outer, inner);

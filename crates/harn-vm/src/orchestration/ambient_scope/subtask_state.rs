@@ -16,6 +16,7 @@ use crate::vm::subtask::{swap_subtask_placement_context, SubtaskPlacement};
 pub(super) const CAPTURED_THREAD_LOCAL_PROJECTION: &[&str] = &[
     "EXECUTION_POLICY_STACK",
     "EXECUTION_APPROVAL_POLICY_STACK",
+    "PREPARED_APPROVAL_POLICY",
     "OPERATOR_APPROVAL_GRANT_STACK",
     "COMMAND_POLICY_STACK",
     "DYNAMIC_PERMISSION_STACK",

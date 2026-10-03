@@ -15,6 +15,7 @@ use super::*;
 
 mod executor_failures;
 mod identity_session;
+mod live_approval;
 
 const NOW_MS: u64 = 1_000;
 const DEADLINE_MS: u64 = 61_000;
@@ -784,8 +785,13 @@ fn policy_denial_is_attributed_before_endpoint_health_or_eperm() {
 #[test]
 fn network_policy_refusal_has_its_own_gate() {
     let target = AuthorityRequirement::Network(network("blocked.example.test"));
+    let run_policy = run_approval_policy(
+        RunInteractivity::Interactive,
+        ApprovalAvailability::Available,
+        WorkspaceTrust::Trusted,
+    );
     let decision =
-        evaluate_requirement(&approval_policy(), &net_policy(), &target).expect("network decision");
+        evaluate_requirement(&run_policy, &net_policy(), &target).expect("network decision");
     assert!(decision.is_deny());
     assert_eq!(decision.denial_gate().as_str(), "network_policy");
     assert_eq!(
@@ -821,7 +827,7 @@ fn network_policy_refusal_has_its_own_gate() {
         ..Default::default()
     };
     let approval_decision = evaluate_requirement(
-        &configured,
+        &RunApprovalPolicy::construct(run_policy.posture(), |_| configured),
         &net_policy(),
         &AuthorityRequirement::Network(network("api.example.test")),
     )

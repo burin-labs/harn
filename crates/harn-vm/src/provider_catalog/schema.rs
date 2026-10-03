@@ -200,6 +200,7 @@ pub fn schema_value() -> Value {
                     "style": {"type": "string"},
                     "header": {"type": "string"},
                     "env": {"type": "array", "items": {"type": "string"}},
+                    "credential_env": {"type": "array", "items": {"type": "string"}},
                     "required": {"type": "boolean"}
                 },
                 "additionalProperties": false
