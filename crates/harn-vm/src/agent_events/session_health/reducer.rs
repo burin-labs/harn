@@ -42,6 +42,25 @@ pub(crate) struct SessionHealth {
 }
 
 impl SessionHealth {
+    /// Only these runtime events carry health measurements. In particular,
+    /// transcript-storage notifications must not reacquire the session lock.
+    pub(crate) fn observes(event: &AgentEvent) -> bool {
+        matches!(
+            event,
+            AgentEvent::IterationStart { .. }
+                | AgentEvent::IterationEnd { .. }
+                | AgentEvent::ToolCallUpdate {
+                    status: ToolCallStatus::Completed | ToolCallStatus::Failed,
+                    parsing: None,
+                    ..
+                }
+                | AgentEvent::TurnPhaseChanged {
+                    phase: AgentTurnPhase::Terminal { .. },
+                    ..
+                }
+        )
+    }
+
     pub(crate) fn start_turn(&mut self, iteration: u64) {
         self.iteration = Some(iteration);
         self.turn_closed = false;

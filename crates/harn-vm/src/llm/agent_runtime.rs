@@ -282,7 +282,7 @@ impl Drop for LoopSinkGuard {
 /// via `emit_agent_event` — this sync path is for the streaming-args
 /// observation surface only.
 pub(crate) fn emit_agent_event_sync(event: &AgentEvent) {
-    let (health, _) = agent_events::observe_event(event);
+    let (health, _) = agent_events::observe_event(event, false);
     for event in std::iter::once(event).chain(health.as_deref()) {
         publish_observed_event(event);
     }
@@ -328,7 +328,7 @@ pub(crate) async fn emit_agent_event_with_ctx(
     ctx: Option<&crate::vm::AsyncBuiltinCtx>,
     event: &AgentEvent,
 ) {
-    let (health, subscribers) = agent_events::observe_event(event);
+    let (health, subscribers) = agent_events::observe_event(event, true);
     for event in std::iter::once(event).chain(health.as_deref()) {
         publish_observed_event(event);
 

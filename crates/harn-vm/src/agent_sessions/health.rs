@@ -5,7 +5,15 @@ use std::sync::OnceLock;
 /// Observe an event and snapshot the callbacks for its derived facts together.
 pub(crate) fn observe_event(
     event: &AgentEvent,
+    include_subscribers: bool,
 ) -> (Option<Box<AgentEvent>>, Vec<super::SessionSubscriber>) {
+    let measures_health = crate::agent_events::session_health::SessionHealth::observes(event);
+    // Synchronous emission never invokes VM-bound closure subscribers. Avoid
+    // the store entirely for notifications that cannot change health, including
+    // compaction emitted while a transcript mutation owns the store lock.
+    if !measures_health && !include_subscribers {
+        return (None, Vec::new());
+    }
     // Read the clock without recording a script-visible tape read, and without
     // reaching up into stdlib from the session layer.
     static CLOCK: OnceLock<harn_clock::RealClock> = OnceLock::new();
@@ -21,13 +29,21 @@ pub(crate) fn observe_event(
         let Some(state) = sessions.get_mut(event.session_id()) else {
             return (None, Vec::new());
         };
-        let health = state.health.observe(event, now_ms).map(|fact| {
-            Box::new(AgentEvent::SessionHealth {
-                session_id: event.session_id().to_owned(),
-                fact: Box::new(fact),
-            })
-        });
-        (health, state.subscribers.clone())
+        let health = measures_health
+            .then(|| state.health.observe(event, now_ms))
+            .flatten()
+            .map(|fact| {
+                Box::new(AgentEvent::SessionHealth {
+                    session_id: event.session_id().to_owned(),
+                    fact: Box::new(fact),
+                })
+            });
+        let subscribers = if include_subscribers {
+            state.subscribers.clone()
+        } else {
+            Vec::new()
+        };
+        (health, subscribers)
     })
 }
 
