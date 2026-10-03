@@ -1032,14 +1032,12 @@ fn __tool_parse_json(text: string, tools: dict? = nil, recover_heredoc: bool = t
       errors = errors.appending(missing_error)
     } else if stream?.error != nil && !starts_with(trailing, "<<") {
       errors = errors.appending(
-        "The ```tool block is not valid JSON: "
-          + to_string(stream.error)
+        tool_call_json_error(
+          to_string(stream.error)
           + " (near `"
           + source.slice(0, 80)
-          + "`)"
-          + ". Pass multi-line or code-bearing fields as ordinary JSON string values "
-          + "(escape newlines as \\n, quotes as \\\", backslashes as \\\\); "
-          + "backticks need no escaping.",
+          + "`)",
+        ),
       )
     } else if stream?.eof ?? false {
       errors = errors.appending(
