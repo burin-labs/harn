@@ -66,26 +66,51 @@ source_candidate_live_run_id() {
 #   missing_manifest|RUN_ID|
 #   timed_out|RUN_ID|STATUS
 #
-# GitHub read failures return nonzero so callers cannot confuse an unread
-# result with absence. The current push run is excluded explicitly because it
-# has the same head SHA and is necessarily in progress during setup.
+# After observing a live run, direct reads preserve its identity through
+# discovery loss. Read or identity failures return nonzero; the push caller
+# refuses a duplicate build for unread custody and pending timeout. The current
+# push run is excluded explicitly because it has the same head SHA.
 release_candidate_run_resolution() {
   local repository="${1:?repository required}"
   local sha="${2:?commit required}"
   local excluded_run_id="${3:-}"
   local max_attempts="${4:-60}"
   local poll_seconds="${5:-60}"
-  local attempt runs rows run_id status conclusion count
+  local attempt runs rows run_id status conclusion count observed_count known_run_id=""
   local in_flight_id in_flight_status terminal_state terminal_id terminal_detail
 
   [[ "$max_attempts" =~ ^[1-9][0-9]*$ ]] || return 1
   [[ "$poll_seconds" =~ ^[0-9]+$ ]] || return 1
 
   for ((attempt = 1; attempt <= max_attempts; attempt++)); do
-    runs="$(gh api \
+    if [[ -n "$known_run_id" ]]; then
+      runs="$(gh api "repos/${repository}/actions/runs/${known_run_id}")" || {
+        echo "::error::Known candidate run $known_run_id is unreadable; its pending state is not absence." >&2
+        return 1
+      }
+      if ! jq -e --arg sha "$sha" --arg id "$known_run_id" --arg repository "$repository" '
+        (.id | tostring) == $id and .head_sha == $sha and .event == "merge_group"
+        and .path == ".github/workflows/build-release-binaries.yml"
+        and .head_repository.full_name == $repository
+        and (.status | IN("queued", "requested", "waiting", "pending", "in_progress", "completed"))
+        and (if .status == "completed" then (.conclusion | type == "string" and length > 0) else true end)
+      ' <<< "$runs" >/dev/null; then
+        echo "::error::Known candidate run $known_run_id failed identity or status validation." >&2
+        return 1
+      fi
+      rows="$(jq -r '[.id, .status, (.conclusion // "")] | @tsv' <<< "$runs")" || return 1
+    else
+      runs="$(gh api \
       "repos/${repository}/actions/workflows/build-release-binaries.yml/runs?head_sha=${sha}&per_page=30")" \
       || return 1
-    rows="$(jq -r \
+      jq -e '(.workflow_runs | type == "array")
+        and (.total_count | type == "number" and . >= 0)
+        and .total_count == (.workflow_runs | length)' <<< "$runs" >/dev/null || {
+        echo "::error::Candidate discovery is incomplete; absence is unmeasured." >&2
+        return 1
+      }
+      observed_count="$(jq -r '.total_count' <<< "$runs")" || return 1
+      rows="$(jq -r \
       --arg sha "$sha" \
       --arg excluded "$excluded_run_id" \
       '.workflow_runs[]
@@ -93,6 +118,7 @@ release_candidate_run_resolution() {
        | select((.id | tostring) != $excluded)
        | [.id, .status, (.conclusion // "")] | @tsv' \
       <<< "$runs")" || return 1
+    fi
 
     in_flight_id=""
     in_flight_status=""
@@ -101,10 +127,16 @@ release_candidate_run_resolution() {
     terminal_detail=""
     while IFS=$'\t' read -r run_id status conclusion; do
       [[ -n "$run_id" ]] || continue
+      [[ "$run_id" =~ ^[1-9][0-9]*$ ]] || return 1
+      case "$status" in
+        queued|requested|waiting|pending|in_progress|completed) ;;
+        *) return 1 ;;
+      esac
       if [[ "$status" == completed && "$conclusion" == success ]]; then
         count="$(gh api \
           "repos/${repository}/actions/runs/${run_id}/artifacts?name=candidate-manifest-${sha}" \
           --jq '.total_count')" || return 1
+        [[ "$count" =~ ^[0-9]+$ ]] || return 1
         if [[ "$count" =~ ^[1-9][0-9]*$ ]]; then
           printf 'success|%s|\n' "$run_id"
           return 0
@@ -124,11 +156,12 @@ release_candidate_run_resolution() {
     done <<< "$rows"
 
     if [[ -n "$in_flight_id" ]]; then
+      known_run_id="$in_flight_id"
       if ((attempt == max_attempts)); then
         printf 'timed_out|%s|%s\n' "$in_flight_id" "$in_flight_status"
         return 0
       fi
-      echo "::notice::Exact-SHA merge-group candidate run $in_flight_id is $in_flight_status; waiting before read $((attempt + 1))/$max_attempts." >&2
+      echo "::notice::Exact-SHA merge-group candidate run $in_flight_id is $in_flight_status; pending=1 known_run_id=$known_run_id; waiting before read $((attempt + 1))/$max_attempts." >&2
       ((poll_seconds == 0)) || sleep "$poll_seconds"
       continue
     fi
@@ -136,6 +169,7 @@ release_candidate_run_resolution() {
       printf '%s|%s|%s\n' "$terminal_state" "$terminal_id" "$terminal_detail"
       return 0
     fi
+    echo "::notice::Candidate discovery observed_runs=$observed_count excluded_run=${excluded_run_id:-none}; pending=0 candidate_runs=0 known_run_id=none." >&2
     printf 'absent||\n'
     return 0
   done
