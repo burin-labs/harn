@@ -58,12 +58,13 @@ pub(crate) use adapter::DispatchRuntime;
 pub use adapter::{AdapterDescriptor, TransportAdapter};
 pub use adapters::a2a::{A2aHttpServeOptions, A2aServer, A2aServerConfig, A2A_PROTOCOL_VERSION};
 pub use adapters::acp::{
-    acp_persisted_session_item, resolve_acp_session_project_root, run_acp_channel_server,
-    run_acp_channel_server_with_handle, run_acp_server, run_acp_websocket_server, AcpChannelHandle,
-    AcpContentBlock, AcpEmbeddedResource, AcpHarnMeta, AcpJsonRpcError, AcpJsonRpcErrorResponse,
-    AcpJsonRpcId, AcpJsonRpcRequest, AcpJsonRpcResponse, AcpMeta, AcpOutput, AcpProfileConfig,
-    AcpPromptErrorData, AcpPromptErrorSchema, AcpRuntimeConfigurator, AcpSandboxConfig, AcpServer,
-    AcpServerConfig, AcpSessionCancelToolCallParams, AcpSessionIdParams, AcpSessionInjectContent,
+    acp_persisted_session_item, confine_acp_server_process, resolve_acp_session_project_root,
+    run_acp_channel_server, run_acp_channel_server_with_handle, run_acp_server,
+    run_acp_websocket_server, AcpChannelHandle, AcpContentBlock, AcpEmbeddedResource, AcpHarnMeta,
+    AcpJsonRpcError, AcpJsonRpcErrorResponse, AcpJsonRpcId, AcpJsonRpcRequest, AcpJsonRpcResponse,
+    AcpMeta, AcpOutput, AcpProfileConfig, AcpPromptErrorData, AcpPromptErrorSchema,
+    AcpRuntimeConfigurator, AcpSandboxConfig, AcpServer, AcpServerConfig, AcpServerConfinement,
+    AcpSessionCancelToolCallParams, AcpSessionIdParams, AcpSessionInjectContent,
     AcpSessionInjectMode, AcpSessionInjectParams, AcpSessionMessageIdParams, AcpSessionNewParams,
     AcpSessionProjectRootError, AcpSessionPromptParams, AcpSessionPromptResult,
     AcpSessionReplaceInjectParams, AcpSessionRestoreResult, AcpWebSocketServeOptions,

@@ -385,6 +385,59 @@ fn validation_rejects_missing_required_metadata() {
     );
 }
 
+/// Every provider that requires auth names its credential variables, so the
+/// environment policy can keep them out of child processes. Bedrock is the
+/// case that once passed by exemption: removing its `credential_env` must now
+/// fail validation.
+#[test]
+fn every_authenticated_provider_declares_its_credential_env() {
+    let catalog = artifact();
+    assert!(validate_artifact(&catalog).errors.is_empty());
+    let bedrock = catalog
+        .providers
+        .iter()
+        .find(|provider| provider.id == "bedrock")
+        .expect("catalog has bedrock");
+    for name in [
+        "AWS_ACCESS_KEY_ID",
+        "AWS_SECRET_ACCESS_KEY",
+        "AWS_SESSION_TOKEN",
+        "AWS_PROFILE",
+    ] {
+        assert!(
+            bedrock
+                .auth
+                .credential_env
+                .iter()
+                .any(|declared| declared == name),
+            "bedrock no longer declares {name}"
+        );
+    }
+    let names = crate::security::environment_policy::provider_credential_env_names();
+    assert!(names.contains("AWS_SECRET_ACCESS_KEY"));
+    assert!(names.contains("GOOGLE_APPLICATION_CREDENTIALS"));
+    assert!(names.contains("AZURE_OPENAI_API_KEY"));
+    assert!(
+        !names.contains("AWS_REGION"),
+        "a region is not a credential"
+    );
+
+    let mut stripped = catalog.clone();
+    let bedrock = stripped
+        .providers
+        .iter_mut()
+        .find(|provider| provider.id == "bedrock")
+        .expect("catalog has bedrock");
+    bedrock.auth.credential_env.clear();
+    assert!(
+        validate_artifact(&stripped)
+            .errors
+            .iter()
+            .any(|message| message.contains("provider bedrock requires auth but declares no")),
+        "a provider with auth and no declared credential names must fail validation"
+    );
+}
+
 #[test]
 fn validation_rejects_unknown_lora_module_value_format() {
     let mut catalog = artifact();

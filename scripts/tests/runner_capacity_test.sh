@@ -193,4 +193,31 @@ grep -qx 'fallback=true' "$outputs"
 grep -q 'host_counts=unmeasured' "$diagnostic"
 rm -f "$outputs"
 
-echo 'Runner capacity: owned, retired, unrouted-event, evacuation-switch, retired-routing, census-fallback, routed-event, label, paid-runner and host-saturation controls passed'
+# The shared CLI producer: several routed events and its own reserved pool. A
+# fully busy reserved pool takes the paid ladder like every other producer:
+# Ubicloud first, GitHub's 8-core runner only when the paid-provider switch
+# names it.
+CAPACITY_ROUTED_EVENT='pull_request merge_group'
+CAPACITY_POOL=linux_probe
+reserved_idle='{"linux_probe":{"online":2,"idle":1}}'
+reserved_busy='{"linux_probe":{"online":2,"idle":0}}'
+reserved_absent='{"linux_probe":{"online":0,"idle":0}}'
+[[ $(runner_capacity_decision merge_group '' "$reserved_idle") == *"route=owned pool=linux_probe carriers=2 idle=1" ]]
+[[ $(runner_capacity_decision pull_request '' "$reserved_idle") == *route=owned* ]]
+[[ $(runner_capacity_decision push '' "$reserved_idle") == \
+  *"route=hosted reason=event_is_not_pull_request_or_merge_group pool=linux_probe"* ]]
+[[ $(runner_capacity_decision merge_group '' "$reserved_busy") == *"route=hosted reason=pool_fully_busy"* ]]
+[[ $(paid_line merge_group "$reserved_busy") == \
+  *"route=hosted reason=pool_fully_busy"*" paid_runner=ubicloud-standard-8 paid_provider=ubicloud_default" ]]
+[[ $(paid_line merge_group "$reserved_busy" '' github) == \
+  *"route=hosted reason=pool_fully_busy"*" paid_runner=ubuntu-8core paid_provider=github" ]]
+[[ $(paid_line merge_group "$reserved_absent") == *" paid_runner=ubicloud-standard-8 paid_provider=ubicloud_default" ]]
+# Every decision is also a run-page annotation naming the paid runner, so the
+# share of producers that left the reserved pool is countable from annotations.
+[[ $(paid_line merge_group "$reserved_busy") == \
+  *"::notice title=RUNNER_CAPACITY_DECISION::RUNNER_CAPACITY_DECISION event=merge_group route=hosted reason=pool_fully_busy"*"paid_runner=ubicloud-standard-8"* ]]
+[[ $(paid_line merge_group "$reserved_idle") == *"::notice title=RUNNER_CAPACITY_DECISION::"*"route=owned pool=linux_probe"* ]]
+CAPACITY_POOL=linux_big
+CAPACITY_ROUTED_EVENT=push
+
+echo 'Runner capacity: owned, retired, unrouted-event, evacuation-switch, retired-routing, census-fallback, routed-event, label, paid-runner, host-saturation, routed-event-list, reserved-pool and annotation controls passed'

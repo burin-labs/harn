@@ -142,6 +142,8 @@ pub(super) fn harn_acp_extension_meta() -> serde_json::Value {
             "sandboxConfinement": harn_vm::llm::vm_value_to_json(
                 &harn_vm::process_sandbox::host_confinement(),
             ),
+            // Whether this server's own process is confined, and to what.
+            "processConfinement": super::confinement::initialize_meta(),
             // ACP `ExtNotification` methods this server emits beyond the
             // canonical `session/update` stream. Clients that recognize
             // the method consume the payload; clients that don't MUST

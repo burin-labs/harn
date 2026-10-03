@@ -182,6 +182,14 @@
       "auth": {
         "style": "aws_sigv4",
         "env": [],
+        "credential_env": [
+          "AWS_ACCESS_KEY_ID",
+          "AWS_SECRET_ACCESS_KEY",
+          "AWS_SESSION_TOKEN",
+          "AWS_SECURITY_TOKEN",
+          "AWS_PROFILE",
+          "AWS_CONTAINER_AUTHORIZATION_TOKEN"
+        ],
         "required": true
       },
       "data_controls": {
@@ -10195,7 +10203,7 @@
       "deprecation": {
         "status": "active"
       },
-      "availability": "serverless",
+      "availability": "dedicated",
       "quality_tags": [],
       "capability_tags": [
         "streaming",

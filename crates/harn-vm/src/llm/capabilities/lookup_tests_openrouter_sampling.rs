@@ -114,21 +114,27 @@ fn openrouter_mandatory_reasoning_routes_never_receive_a_disable() {
 }
 
 #[test]
-fn openrouter_kimi_k27_code_keeps_reasoning_on_and_rejects_penalties() {
+fn openrouter_kimi_k27_code_keeps_reasoning_on_and_routes_around_moonshot() {
     reset();
     let caps = lookup("openrouter", "moonshotai/kimi-k2.7-code");
     assert!(!caps.reasoning_disable_supported);
     assert!(!caps.reasoning_none_supported);
+    // Moonshot AI's endpoints reject the penalties they list and drop
+    // sampling; with them ignored, every option is forwarded.
+    assert_eq!(
+        caps.provider_route_denylist,
+        vec!["Moonshot AI".to_string()]
+    );
     assert!(caps.temperature_supported);
     assert!(caps.top_p_supported);
-    assert!(
-        !caps.frequency_penalty_supported,
-        "Moonshot's own endpoint returns 400"
-    );
-    assert!(!caps.presence_penalty_supported);
+    assert!(caps.frequency_penalty_supported);
+    assert!(caps.presence_penalty_supported);
 
-    // Contrast: the K2 rule that K2.6 resolves to still accepts a disable.
-    assert!(lookup("openrouter", "moonshotai/kimi-k2.6").reasoning_disable_supported);
+    // Contrast: K2.6 accepts a reasoning-disable (0 reasoning tokens on
+    // 2026-10-02, while K2.7 Code returned 400) and keeps Moonshot routable.
+    let k26 = lookup("openrouter", "moonshotai/kimi-k2.6");
+    assert!(k26.reasoning_disable_supported);
+    assert!(k26.provider_route_denylist.is_empty());
 }
 
 #[test]

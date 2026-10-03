@@ -240,9 +240,16 @@ tier = "frontier"
 open_weight = true
 strengths = ["coding", "agentic", "long_context", "tool_use", "reasoning", "vision"]
 
+# Fireworks lists this model READY with `supportsServerless: true`, but its
+# serverless chat endpoint does not answer. On 2026-10-02 two non-streaming
+# requests and one streaming request each returned 0 bytes in 150 s, while
+# `deepseek-v4p1-flash` on the same key answered in 1.4 s; the hosted provider
+# contract probe timed out on every request to it on 2026-09-28 and 2026-10-02.
+# Until a serverless request answers again it needs a dedicated deployment.
 [models."accounts/fireworks/models/nemotron-lightning-3p5-30b-a3b"]
 name = "Nemotron 3.5 Lightning 30B A3B (Fireworks)"
 provider = "fireworks"
+availability = "dedicated"
 context_window = 262144
 logical_model = "nemotron-3.5-lightning-30b-a3b"
 equivalence_group = "nemotron-3.5-lightning-30b-a3b"

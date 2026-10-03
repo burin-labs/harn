@@ -455,6 +455,23 @@ pub fn install(cancel: Option<Arc<AtomicBool>>, deadline: Option<Instant>) -> Op
     OpInterruptGuard { prev: Some(prev) }
 }
 
+/// Bound a blocking operation, including synchronous process setup, without
+/// replacing its caller's cancellation token or extending an earlier deadline.
+/// Dropping the guard restores the previous interrupt context.
+pub fn with_deadline(deadline: Instant) -> OpInterruptGuard {
+    let parent = CURRENT
+        .with(|slot| slot.borrow().clone())
+        .unwrap_or_default();
+    install(
+        parent.cancel,
+        Some(
+            parent
+                .deadline
+                .map_or(deadline, |earlier| earlier.min(deadline)),
+        ),
+    )
+}
+
 /// Returns `true` when an interrupt context is installed on this thread.
 ///
 /// This is separate from [`requested`] so blocking operations can decide

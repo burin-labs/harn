@@ -222,6 +222,12 @@ jobs:
           tool: nextest@0.9.132
       - run: make test-e2e
         env:
+          # Some self-hosted runners export this allocator control to every
+          # job, and the bubblewrap fallback refuses an inherited loader
+          # control in its trusted setup. Setting it on every runner keeps the
+          # suite proving it is hermetic against ambient loader controls
+          # instead of passing only on hosts that happen not to set one.
+          MALLOC_ARENA_MAX: "2"
           NEXTEST_PROFILE: e2e
           NEXTEST_TEST_THREADS: ${{ steps.resource-budget.outputs.test_threads }}
           CARGO_BUILD_JOBS: ${{ steps.resource-budget.outputs.build_jobs }}
