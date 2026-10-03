@@ -625,9 +625,19 @@ mod tests {
     async fn local_update_does_not_double_publish_through_the_watcher() {
         let _bus = crate::stdlib::session_change::test_support::exclusive_bus().await;
         let root = TempDir::new().expect("root");
+        #[cfg(unix)]
+        let alias_parent = TempDir::new().expect("alias parent");
+        #[cfg(unix)]
+        let root_path = {
+            let alias = alias_parent.path().join("store-root");
+            std::os::unix::fs::symlink(root.path(), &alias).expect("aliased store root");
+            alias
+        };
+        #[cfg(not(unix))]
+        let root_path = root.path().to_owned();
         let (tx, rx) = mpsc::channel();
         let _subscription = subscribe_session_changes(Arc::new(Recording(tx)));
-        let store = open_canonical_store(root.path()).expect("open canonical store");
+        let store = open_canonical_store(&root_path).expect("open canonical store");
         store
             .create(CreateSession {
                 id: Some("local".to_string()),
