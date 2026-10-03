@@ -117,7 +117,7 @@ pub fn plan_posix_command(source: &str) -> Option<CommandPlan> {
     });
     let plain = single && environment.is_empty() && all_literal && only_words;
     let mut index = 0;
-    if argv[0] == "env" || argv[0].ends_with("/env") {
+    if argv.len() > 1 && (argv[0] == "env" || argv[0].ends_with("/env")) {
         // Do not interpret unknown env options (notably -S or -i) using a
         // partial argv or the enclosing shell's environment.
         if !all_literal {

@@ -307,6 +307,54 @@ fn real_run_command_startup_function_exit_127_is_not_missing() {
 }
 
 #[test]
+fn real_run_command_auto_bare_env_bypasses_shell_startup() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let workspace = tempfile::tempdir().unwrap();
+    let program = workspace.path().join("env");
+    std::fs::write(&program, "#!/bin/sh\nprintf argv\n").unwrap();
+    std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let startup = workspace.path().join("startup.sh");
+    std::fs::write(
+        &startup,
+        "printf startup > called\nenv() { printf shell; }\n",
+    )
+    .unwrap();
+    for (mode, command, expected, startup_ran) in [
+        ("shell", "env", Some("shell"), true),
+        ("auto", "env", None, false),
+        ("auto", program.to_str().unwrap(), Some("argv"), false),
+    ] {
+        let mut req = dict();
+        req.insert("mode".into(), vstr(mode));
+        req.insert("shell_id".into(), vstr("bash"));
+        req.insert("command".into(), vstr(command));
+        req.insert("cwd".into(), vstr(workspace.path().to_str().unwrap()));
+        let mut env = dict();
+        env.insert("PATH".into(), vstr(workspace.path().to_str().unwrap()));
+        env.insert("BASH_ENV".into(), vstr(startup.to_str().unwrap()));
+        req.insert("env".into(), VmValue::dict(env));
+        let response = require_dict(call("hostlib_tools_run_command", req).unwrap());
+        assert_eq!(require_int(&response, "exit_code"), 0);
+        let stdout = require_str(&response, "stdout");
+        if let Some(expected) = expected {
+            assert_eq!(stdout, expected);
+        } else {
+            // The argv resolver selects the system env before child overrides
+            // apply. Read only the fixture's explicit marker, never dump the
+            // child's complete environment in an assertion failure.
+            assert!(stdout
+                .lines()
+                .any(|line| { line == format!("BASH_ENV={}", startup.display()) }));
+        }
+        assert_eq!(workspace.path().join("called").exists(), startup_ran);
+        if startup_ran {
+            std::fs::remove_file(workspace.path().join("called")).unwrap();
+        }
+    }
+}
+
+#[test]
 fn real_run_command_auto_uses_argv_for_a_plain_command() {
     let mut req = dict();
     req.insert("mode".into(), vstr("auto"));
