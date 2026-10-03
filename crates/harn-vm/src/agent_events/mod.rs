@@ -32,6 +32,7 @@ mod host_injection;
 mod lifecycle;
 mod registry;
 pub mod session_health;
+pub(crate) use crate::agent_sessions::observe_event;
 mod sinks;
 mod terminal;
 mod terminal_suspension;
