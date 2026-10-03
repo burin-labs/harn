@@ -35,7 +35,7 @@ impl SessionState {
             transcript_journal: None,
             revoked_reminder_ids: HashSet::new(),
             expired_reminder_ids: HashSet::new(),
-            health: crate::agent_events::session_health::SessionHealth::default(),
+            health: Box::default(),
         }
     }
 

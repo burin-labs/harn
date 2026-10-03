@@ -255,7 +255,7 @@ pub struct SessionState {
     pub(crate) transcript_journal: Option<crate::agent_session_journal::JournalState>,
     pub(crate) revoked_reminder_ids: HashSet<String>,
     pub(crate) expired_reminder_ids: HashSet<String>,
-    pub(crate) health: crate::agent_events::session_health::SessionHealth,
+    pub(crate) health: Box<crate::agent_events::session_health::SessionHealth>,
 }
 
 pub(crate) fn push_session_taint(id: &str, record: crate::security::TaintRecord) {
@@ -1079,7 +1079,7 @@ pub fn reset_transcript(id: &str) -> bool {
         state.completed_turn_checkpoints.clear();
         state.redo_stack.clear();
         state.text_tool_call_seq = 0;
-        state.health = crate::agent_events::session_health::SessionHealth::default();
+        state.health = Box::default();
         state.touch();
         true
     })
