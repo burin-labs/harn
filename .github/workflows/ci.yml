@@ -1225,9 +1225,10 @@ jobs:
     # The owned self-hosted rung is the same arithmetic minus the cache-save
     # reserve, with bounded cold retries: 6 setup + 24 + 26 = 56. It is a
     # hang backstop, not a claim about host core count or improved performance.
-    # A merge group's datacenter leg instead gets 20 minutes, about twice its
-    # measured 10.1-minute median: the queue waits on this job, so a runner
-    # that dies after admission should cost one short retry, not an hour.
+    # A merge group's datacenter leg runs the same workload and carries the
+    # same ceiling. On 2026-10-03 a cold security archive took 19m49s, and the
+    # former 20-minute job limit cancelled its upload before any tests ran.
+    # The ten-minute performance budget remains unchanged.
     runs-on: >-
       ${{ (needs.rust-producer-capacity.outputs.route == 'owned'
         && fromJSON('["self-hosted", "Linux", "X64", "harn-ci-big"]'))
@@ -1240,7 +1241,7 @@ jobs:
       ${{ (needs.rust-producer-capacity.outputs.route == 'owned'
         && 56)
         || (needs.rust-producer-capacity.outputs.merge_route == 'owned'
-        && 20)
+        && 56)
         || (vars.HARN_CI_PAID_LINUX_PROVIDER != 'github'
         && 60)
         || 60 }}
@@ -1391,7 +1392,7 @@ jobs:
           set -euo pipefail;
           host_bound_filter="$(scripts/ci/host_bound_rust_test_filter.sh)";
           scripts/ci/run_rust_test_lane.sh
-          cargo nextest run --locked --workspace --profile ci
+          cargo-nextest nextest run --locked --workspace --profile ci
           -E "not (${host_bound_filter})"
       - name: Upload workspace test archive
         if: vars.HARN_CI_DISABLE_COLOCATED_TESTS == 'true'
@@ -1582,7 +1583,7 @@ jobs:
           set -euo pipefail;
           host_bound_filter="$(scripts/ci/host_bound_rust_test_filter.sh)";
           scripts/ci/run_rust_test_lane.sh
-          cargo nextest run --profile ci
+          cargo-nextest nextest run --profile ci
           --archive-file "$RUNNER_TEMP/harn-workspace-tests/harn-tests.tar.zst"
           --workspace-remap "$GITHUB_WORKSPACE"
           -E "not (${host_bound_filter})"
@@ -1658,7 +1659,7 @@ jobs:
           set -euo pipefail;
           host_bound_filter="$(scripts/ci/host_bound_rust_test_filter.sh)";
           scripts/ci/run_rust_test_lane.sh
-          cargo nextest run --profile ci
+          cargo-nextest nextest run --profile ci
           --success-output immediate
           --no-tests fail
           --archive-file "$RUNNER_TEMP/harn-security/harn-security-tests.tar.zst"

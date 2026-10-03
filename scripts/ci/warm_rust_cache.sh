@@ -14,10 +14,10 @@ set -euo pipefail
 
 cargo build --locked --bin harn
 host_bound_filter="$(scripts/ci/host_bound_rust_test_filter.sh)"
-cargo nextest run --locked --workspace --profile ci --no-run \
+cargo-nextest nextest run --locked --workspace --profile ci --no-run \
   -E "not (${host_bound_filter})"
 # Match rust-check-inputs' exact GitHub-owned security archive compile shape.
-cargo nextest run --locked --workspace --profile ci --no-run \
+cargo-nextest nextest run --locked --workspace --profile ci --no-run \
   -E '(package(harn-vm) and binary(harn_vm)) or (package(harn-hostlib) and binary(harn_hostlib))'
 
 # Workspace-crate cache canary touch for #5003 hosted wall-time sampling.
