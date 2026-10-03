@@ -1,4 +1,6 @@
 use super::*;
+#[path = "tests/declared_client_errors.rs"]
+mod declared_client_errors;
 #[path = "tests/egress_context.rs"]
 mod egress_context;
 use tempfile::TempDir;
