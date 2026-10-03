@@ -276,16 +276,12 @@ fn __row_axis_value(row: dict, axis: string) -> string? {
   return normalized
 }
 
-fn __row_total_cost_usd(row: dict) -> float {
+fn __row_total_cost_usd(row: dict) -> float? {
   const total = __field(row, ["total_cost_usd", "totalCostUsd", "costUsd", "cost_usd"])
   if total != nil {
     return __float(total)
   }
-  const mean = __field(row, ["mean_cost_usd", "meanCostUsd"])
-  if mean != nil {
-    return __float(mean) * __float(__row_trials(row))
-  }
-  return 0.0
+  return nil
 }
 
 fn __row_solved(row: dict) -> bool {
@@ -419,6 +415,8 @@ pub fn aggregate_trials(name: string, outcomes: list, metadata: dict = {}) -> di
   let wall_seconds = []
   let costs = []
   let total_cost = 0.0
+  let known_cost = 0.0
+  let known_cost_rows = 0
   for outcome in outcomes {
     const verification = __outcome_verification(outcome)
     if verification == "PASS" {
@@ -434,6 +432,11 @@ pub fn aggregate_trials(name: string, outcomes: list, metadata: dict = {}) -> di
     wall_seconds = wall_seconds
       + [__float(__outcome_number(outcome, ["wallTimeSeconds", "wall_time_seconds"]))]
     const cost = __outcome_number(outcome, ["costUsd", "cost_usd"])
+    const known = outcome?.known_cost_usd ?? cost
+    if known != nil {
+      known_cost = known_cost + __float(known)
+      known_cost_rows = known_cost_rows + 1
+    }
     if cost != nil {
       const cost_float = __float(cost)
       costs = costs + [cost_float]
@@ -458,6 +461,12 @@ pub fn aggregate_trials(name: string, outcomes: list, metadata: dict = {}) -> di
     }
   }
   const trials = len(outcomes)
+  const costs_complete = trials > 0 && len(costs) == trials
+  const measured_total = if costs_complete {
+    __round_digits(total_cost, 6)
+  } else {
+    nil
+  }
   const pass_rate = if trials <= 0 {
     0.0
   } else {
@@ -465,8 +474,16 @@ pub fn aggregate_trials(name: string, outcomes: list, metadata: dict = {}) -> di
   }
   const mean_wall = __round_digits(__mean(wall_seconds), 2)
   const stdev_wall = __round_digits(__stdev(wall_seconds), 2)
-  const mean_cost = __mean_or_nil(costs)
-  const stdev_cost = __stdev_or_nil(costs)
+  const mean_cost = if costs_complete {
+    __mean_or_nil(costs)
+  } else {
+    nil
+  }
+  const stdev_cost = if costs_complete {
+    __stdev_or_nil(costs)
+  } else {
+    nil
+  }
   const group = __text(metadata?.group ?? metadata?.language ?? "")
   const case_fingerprint = metadata?.caseFingerprint ?? metadata?.case_fingerprint
   const harness_config_fingerprint = metadata?.harnessConfigFingerprint
@@ -488,7 +505,12 @@ pub fn aggregate_trials(name: string, outcomes: list, metadata: dict = {}) -> di
     status: status,
     majority: majority,
     wallTimeSeconds: mean_wall,
-    costUsd: __round_digits(total_cost, 6),
+    cost_usd: measured_total,
+    known_cost_usd: if known_cost_rows > 0 {
+      __round_digits(known_cost, 6)
+    } else {
+      nil
+    },
     mean_wall_time_seconds: mean_wall,
     stdev_wall_time_seconds: stdev_wall,
     mean_cost_usd: if mean_cost == nil {
@@ -501,7 +523,7 @@ pub fn aggregate_trials(name: string, outcomes: list, metadata: dict = {}) -> di
     } else {
       __round_digits(stdev_cost, 6)
     },
-    total_cost_usd: __round_digits(total_cost, 6),
+    total_cost_usd: measured_total,
     metadata: metadata,
     outcomes: outcomes,
   }
@@ -718,7 +740,11 @@ pub fn cost_per_solved(rows: list) -> float? {
   let solved_cases = 0
   let total_cost = 0.0
   for row in rows {
-    total_cost = total_cost + __row_total_cost_usd(row)
+    const cost = __row_total_cost_usd(row)
+    if cost == nil {
+      return nil
+    }
+    total_cost = total_cost + cost
     if __row_solved(row) {
       solved_cases = solved_cases + 1
     }

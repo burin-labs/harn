@@ -739,7 +739,8 @@ fn assemble(
     let known_cost_usd = fold.total_cost.to_f64().unwrap_or_default();
     let usage = LlmUsageRecord {
         models: fold.models.clone(),
-        cost_usd: (fold.usage.unpriced_calls == 0).then_some(known_cost_usd),
+        cost_usd: (fold.usage.unpriced_calls == 0 && fold.usage.usage_unknown_calls == 0)
+            .then_some(known_cost_usd),
         known_cost_usd,
         total_cost: known_cost_usd,
         ..fold.usage

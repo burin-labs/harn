@@ -5,12 +5,9 @@
 #   1. main must declare X.Y.Z-dev. Any other workspace version means the
 #      release for it already merged and the development bump has not landed,
 #      so there is nothing to release yet.
-#   2. An open pull request titled `Release vX.Y.Z`, or from release/vX.Y.Z,
-#      stops the opener, which names it, unless main has gained changelog
-#      fragments since that pull request was prepared. Then the opener refolds
-#      it in place: it prepares again from current main with the same version
-#      and resets release/vX.Y.Z to that one signed commit. The pull request
-#      stays open, so a late fix rides the release without a close and reopen.
+#   2. An open release pull request stops the opener. Its published commit
+#      must match its immutable release-attempt record; later fragments wait
+#      for the next version instead of replacing the prepared commit.
 #   3. Without unreleased changelog fragments there is nothing to release.
 # Otherwise the opener branches release/vX.Y.Z, runs
 # `release_ship.sh --prepare --materialize-candidate` (which folds the
@@ -19,14 +16,14 @@
 # arms auto-merge on it at once (scripts/lib/release_auto_merge.sh). The pull
 # request still merges only through its required checks and review.
 #
-# Usage: open_release_pr.sh [--plan] [--refold-only]
-#   --plan         decide only. Writes action=open|refold|existing|none to
+# Usage: open_release_pr.sh [--plan] [--existing-only]
+#   --plan         decide only. Writes action=open|existing|none to
 #                  $GITHUB_OUTPUT.
-#   --refold-only  never open a new release pull request; only refold an open
-#                  one. A push to main runs this way, so merging a fragment
+#   --existing-only never open a new release pull request. A push to main
+#                  runs this way, so merging a fragment
 #                  does not start a release by itself.
 # Without --plan the decision is taken again (it may be minutes newer than the
-# plan) and action=opened|refolded|existing|none is written, with version and
+# plan) and action=opened|existing|none is written, with version and
 # pr_url.
 #
 # Requires GH_TOKEN. Opening also requires HARN_BIN (the release-source Harn
@@ -42,13 +39,13 @@ source "$script_root/scripts/lib/release_tree_guard.sh"
 source "$script_root/scripts/lib/release_auto_merge.sh"
 
 mode=open
-refold_only=0
+existing_only=0
 for arg in "$@"; do
   case "$arg" in
     --plan) mode=plan ;;
-    --refold-only) refold_only=1 ;;
+    --existing-only) existing_only=1 ;;
     *)
-      echo "usage: open_release_pr.sh [--plan] [--refold-only]" >&2
+      echo "usage: open_release_pr.sh [--plan] [--existing-only]" >&2
       exit 2
       ;;
   esac
@@ -77,18 +74,6 @@ fi
 title="Release v$version"
 branch="release/v$version"
 
-# Changelog fragment paths in one commit, filtered as unfolded_fragment_paths
-# filters the working tree.
-fragment_paths_at() {
-  local fragment name
-  git ls-tree --name-only "$1" changelog.d/ | while IFS= read -r fragment; do
-    name="${fragment##*/}"
-    [[ "$name" == README* || "$name" == _* ]] && continue
-    [[ "$name" =~ \.(breaking|added|changed|deprecated|removed|fixed|security)\.md$ ]] || continue
-    printf '%s\n' "$fragment"
-  done
-}
-
 # Find the open release pull request for this version and set existing_url and
 # existing_branch (both empty when none is open). A failed lookup must not read
 # as "no pull request": opening a second release pull request for one version
@@ -109,41 +94,35 @@ read_release_pr() {
   fi
 }
 
-# Stop, naming it, when the open release pull request already folds every
-# fragment on main, or is not on the branch this opener owns. Otherwise it is
-# due a refold: name the fragments it is missing and return.
-stop_unless_refold_due() {
-  if [[ "$existing_branch" != "$branch" ]]; then
-    echo "::notice title=Release pull request already open::$title is open: $existing_url"
-    emit action=existing "version=$version" "pr_url=$existing_url"
-    exit 0
-  fi
-  # The release branch is one commit on the main commit it was prepared from.
-  local release_base
-  if ! git fetch --quiet --depth=2 origin "refs/heads/$branch" \
-    || ! release_base="$(git rev-parse --verify --quiet 'FETCH_HEAD^')"; then
-    echo "error: could not read the base of $branch; refusing to refold $title on unproved state" >&2
+# An existing release is frozen by its immutable attempt, not by whichever
+# fragments happen to be on main today. Unrecorded branches require an explicit
+# restart; silently rebuilding them would establish a second release policy.
+stop_for_existing_attempt() {
+  local release_oid attempt_ref attempt_record
+  if ! git fetch --quiet origin "refs/heads/$existing_branch" \
+    || ! release_oid="$(git rev-parse --verify FETCH_HEAD)"; then
+    echo "error: could not read $existing_branch; refusing to reuse $title on unproved state" >&2
     exit 1
   fi
-  local missing=()
-  local fragment
-  while IFS= read -r fragment; do
-    [[ -n "$fragment" ]] && missing+=("$fragment")
-  done < <(comm -23 <(unfolded_fragment_paths | sort) <(fragment_paths_at "$release_base" | sort))
-  if (( ${#missing[@]} == 0 )); then
-    echo "::notice title=Release pull request already open::$title is open and folds every fragment on main: $existing_url"
-    emit action=existing "version=$version" "pr_url=$existing_url"
-    exit 0
+  attempt_ref="refs/heads/release-attempt/v$version/$release_oid"
+  if ! attempt_record="$(git ls-remote --refs origin "$attempt_ref")"; then
+    echo "error: could not read $attempt_ref; refusing to reuse $title on unproved state" >&2
+    exit 1
   fi
-  echo "$title ($existing_url) was prepared from $release_base and misses ${#missing[@]} fragment(s) now on main:"
-  printf '  - %s\n' "${missing[@]}"
+  if [[ "$attempt_record" != "$release_oid"$'\t'"$attempt_ref" ]]; then
+    echo "error: $existing_branch has no matching immutable release attempt; close the unrecorded pull request and restart the opener explicitly" >&2
+    exit 1
+  fi
+  echo "::notice title=Release pull request already open::$title is frozen at $release_oid: $existing_url. Later fragments wait for the next release."
+  emit action=existing "version=$version" "pr_url=$existing_url"
+  exit 0
 }
 
 read_release_pr
 if [[ -n "$existing_url" ]]; then
-  stop_unless_refold_due
-elif (( refold_only )); then
-  echo "::notice title=Nothing to refold::no $title pull request is open, and this run only refolds one."
+  stop_for_existing_attempt
+elif (( existing_only )); then
+  echo "::notice title=Nothing to release::no $title pull request is open, and this run only checks existing releases."
   emit action=none "version=$version" pr_url=
   exit 0
 fi
@@ -161,14 +140,9 @@ echo "$title: ${#fragments[@]} unreleased changelog fragment(s) on main"
 printf '  - %s\n' "${fragments[@]}"
 
 if [[ "$mode" == plan ]]; then
-  if [[ -n "$existing_url" ]]; then
-    emit action=refold "version=$version" "pr_url=$existing_url"
-  else
-    emit action=open "version=$version" pr_url=
-  fi
+  emit action=open "version=$version" pr_url=
   exit 0
 fi
-refolding_url="$existing_url"
 
 harn_bin="${HARN_BIN:-}"
 if [[ -z "$harn_bin" || ! -x "$harn_bin" ]]; then
@@ -212,24 +186,37 @@ if [[ "$main_version" != "$current" ]]; then
 fi
 # The pull request may have merged, closed, or opened while this run prepared.
 read_release_pr
-if [[ "$existing_url" != "$refolding_url" ]]; then
-  if [[ -n "$existing_url" ]]; then
-    echo "::notice title=Release pull request already open::$title is open: $existing_url"
-    emit action=existing "version=$version" "pr_url=$existing_url"
-  else
-    echo "::notice title=Nothing to refold::$title closed while this run prepared it."
-    emit action=none "version=$version" pr_url=
-  fi
+if [[ -n "$existing_url" ]]; then
+  echo "::notice title=Release pull request already open::$title is open: $existing_url"
+  emit action=existing "version=$version" "pr_url=$existing_url"
   exit 0
 fi
 
-# Opening creates the branch; refolding resets it to this one commit on the new
-# base. Either way the branch carries exactly one release commit.
-HARN_BRANCH_COMMIT_TOKEN="$GH_TOKEN" \
+# Publish one signed release commit and freeze its identity.
+publication="$(HARN_BRANCH_COMMIT_TOKEN="$GH_TOKEN" \
   HARN_BRANCH_COMMIT_BRANCH="$branch" \
   HARN_BRANCH_COMMIT_BASE_OID="$base_oid" \
   HARN_BRANCH_COMMIT_HEADLINE="$title" \
-  "$harn_bin" run --no-sandbox "$script_root/scripts/bump-driver/publish_branch_commit.harn"
+  "$harn_bin" run --no-sandbox "$script_root/scripts/bump-driver/publish_branch_commit.harn")"
+published_oid="$(jq -er '.oid | select(type == "string" and test("^[0-9a-f]{40}$"))' <<< "$publication")"
+published_record="$(git ls-remote --refs origin "refs/heads/$branch")"
+if [[ "$published_record" != "$published_oid"$'\t'"refs/heads/$branch" ]]; then
+  echo "error: published branch read-back did not match the signed publisher receipt" >&2
+  exit 1
+fi
+attempt_ref="refs/heads/release-attempt/v$version/$published_oid"
+# Record the signed published commit before a pull request can enter the queue.
+# The suffix and target are the existing release orchestrator's contract.
+attempt_record="$(git ls-remote --refs origin "$attempt_ref")"
+if [[ -z "$attempt_record" ]]; then
+  gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" \
+    -f "ref=$attempt_ref" -f "sha=$published_oid" >/dev/null
+  attempt_record="$(git ls-remote --refs origin "$attempt_ref")"
+fi
+if [[ "$attempt_record" != "$published_oid"$'\t'"$attempt_ref" ]]; then
+  echo "error: immutable release attempt read-back did not match the published commit" >&2
+  exit 1
+fi
 
 body_file="$(mktemp)"
 trap 'rm -f "$body_file"' EXIT
@@ -238,14 +225,6 @@ Moves the workspace from $current to $version and folds ${#fragments[@]} changel
 
 When this merges, the push to main builds and checks the release candidate at that commit, and promotion publishes exactly those files. Prepared by \`scripts/open_release_pr.sh\` from main at $base_oid.
 EOF
-if [[ -n "$refolding_url" ]]; then
-  gh pr edit "$refolding_url" --body-file "$body_file" >/dev/null
-  echo "Refolded $title onto main at $base_oid: $refolding_url"
-  emit "version=$version" "pr_url=$refolding_url"
-  release_arm_auto_merge "$refolding_url"
-  emit action=refolded
-  exit 0
-fi
 pr_url="$(gh pr create --base main --head "$branch" --title "Release v$version" --body-file "$body_file")"
 echo "Opened $title: $pr_url"
 # Arm now, before the checks settle. The URL is emitted first so a failed arm

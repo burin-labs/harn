@@ -1,15 +1,17 @@
 use crate::value::VmDictExt;
-use std::{cell::RefCell, collections::BTreeMap, sync::Arc};
+use std::{cell::RefCell, collections::BTreeMap};
 
 use crate::llm::tools::{TEXT_TOOL_CALL_CLOSE, TEXT_TOOL_CALL_OPEN};
 use crate::schema::json_to_vm_value;
 use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
-use crate::value::{VmClosure, VmEnv, VmError, VmValue};
+use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
 mod input_schema;
 mod registry;
+mod synthesized_closure;
 use registry::TOOL_REGISTRY_IMPL_DEF;
+use synthesized_closure::compile_synthesized_tool_closure;
 
 thread_local! {
     /// Execution-scoped registry read by agent loops, `tool_bind`, `tool_ref`, and `tool_def`.
@@ -1164,45 +1166,6 @@ fn synthesize_tool_spec(input: Option<&VmValue>) -> Result<SynthesizedToolSpec, 
     };
     spec.id = synthesized_tool_hash(&spec);
     Ok(spec)
-}
-
-fn compile_synthesized_tool_closure(id: &str) -> Result<VmValue, VmError> {
-    let source = format!(
-        "fn __harn_synthesized_tool(args: unknown) {{ return tool_synth_invoke(\"{id}\", args) }}"
-    );
-    let program = harn_parser::check_source_strict(&source).map_err(|error| {
-        VmError::Runtime(format!("tool_synthesize: internal compile failed: {error}"))
-    })?;
-    let Some(fn_node) = program.iter().find_map(|node| match &node.node {
-        harn_parser::Node::FnDecl {
-            type_params,
-            params,
-            body,
-            ..
-        } => Some((type_params, params, body)),
-        _ => None,
-    }) else {
-        return Err(VmError::Runtime(
-            "tool_synthesize: internal closure source had no function".to_string(),
-        ));
-    };
-    let mut compiler = crate::Compiler::new_runtime_owned_source();
-    let func = compiler
-        .compile_fn_body(
-            fn_node.0,
-            fn_node.1,
-            fn_node.2,
-            Some("<tool_synthesize>".to_string()),
-        )
-        .map_err(|error| VmError::Runtime(format!("tool_synthesize: {error}")))?;
-    Ok(VmValue::Closure(Arc::new(VmClosure {
-        func: Arc::new(func),
-        env: VmEnv::new(),
-        source_dir: None,
-        module_functions: None,
-        module_state: None,
-        retained_module_scope: None,
-    })))
 }
 
 async fn invoke_synthesized_tool(id: &str, call_args: VmValue) -> Result<VmValue, VmError> {

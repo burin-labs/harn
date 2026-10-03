@@ -553,36 +553,6 @@ fn test_source_reference_reads_vm_generated_source() {
 }
 
 #[test]
-fn test_set_exception_breakpoints_enable() {
-    let mut dbg = Debugger::new();
-    assert!(!dbg.break_on_exceptions);
-
-    let responses = dbg.handle_message(make_request(
-        1,
-        "setExceptionBreakpoints",
-        Some(json!({"filters": ["all"]})),
-    ));
-    assert_eq!(responses.len(), 1);
-    assert_eq!(responses[0].success, Some(true));
-    assert!(dbg.break_on_exceptions);
-}
-
-#[test]
-fn test_set_exception_breakpoints_disable() {
-    let mut dbg = Debugger::new();
-    dbg.break_on_exceptions = true;
-
-    let responses = dbg.handle_message(make_request(
-        1,
-        "setExceptionBreakpoints",
-        Some(json!({"filters": []})),
-    ));
-    assert_eq!(responses.len(), 1);
-    assert_eq!(responses[0].success, Some(true));
-    assert!(!dbg.break_on_exceptions);
-}
-
-#[test]
 fn test_initialize_has_exception_breakpoint_filters() {
     let mut dbg = Debugger::new();
     let responses = dbg.handle_message(make_request(1, "initialize", None));
@@ -939,6 +909,7 @@ fn test_terminate_emits_terminated_event() {
     assert!(!dbg.is_running());
 }
 
+mod declared_exceptions;
 mod source_requests;
 
 #[test]

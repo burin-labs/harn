@@ -144,6 +144,8 @@ pub enum VmError {
     /// `input_required` result and re-enters the handler on retry.
     McpInputRequired(Box<crate::mcp_input::McpInputRequired>),
     Thrown(VmValue),
+    /// A source-authored throw in a callable with a declared `throws` channel.
+    DeclaredThrown(VmValue),
     /// Thrown with error category for structured error handling.
     CategorizedError {
         message: String,
@@ -237,7 +239,7 @@ impl VmError {
     /// sensibly (the dict renders both fields).
     pub fn thrown_value(&self) -> VmValue {
         match self {
-            VmError::Thrown(v) => v.clone(),
+            VmError::Thrown(v) | VmError::DeclaredThrown(v) => v.clone(),
             VmError::CategorizedError { message, category } => {
                 let mut dict = std::collections::BTreeMap::new();
                 dict.put_str("category", category.as_str());
@@ -664,11 +666,13 @@ pub fn error_to_category(err: &VmError) -> ErrorCategory {
         VmError::CategorizedError { category, .. } => category.clone(),
         VmError::ProviderStreamFailure(failure) => failure.category(),
         VmError::SchemaStreamAbort(abort) => abort.category(),
-        VmError::Thrown(VmValue::Dict(d)) => d
+        VmError::Thrown(VmValue::Dict(d)) | VmError::DeclaredThrown(VmValue::Dict(d)) => d
             .get("category")
             .map(|v| ErrorCategory::parse(&v.display()))
             .unwrap_or(ErrorCategory::Generic),
-        VmError::Thrown(VmValue::String(s)) => classify_error_message(s),
+        VmError::Thrown(VmValue::String(s)) | VmError::DeclaredThrown(VmValue::String(s)) => {
+            classify_error_message(s)
+        }
         VmError::Runtime(msg) => classify_error_message(msg),
         // Engine/wiring bugs: an undefined builtin (declared but not installed,
         // or a typo in stdlib/host code) or corrupt bytecode. No retry or model
@@ -833,7 +837,7 @@ impl std::fmt::Display for VmError {
                 "Execution future was abandoned; discard this VM and reset its exclusively owned execution context"
             ),
             VmError::McpInputRequired(_) => write!(f, "MCP client input required"),
-            VmError::Thrown(v) => write!(f, "Thrown: {}", v.display()),
+            VmError::Thrown(v) | VmError::DeclaredThrown(v) => write!(f, "Thrown: {}", v.display()),
             VmError::CategorizedError { message, category } => {
                 write!(f, "Error [{}]: {}", category.as_str(), message)
             }
@@ -921,6 +925,28 @@ impl std::error::Error for VmError {}
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn declared_provenance_preserves_existing_error_categories() {
+        for category in ["cancelled", "budget_exceeded", "rate_limit"] {
+            let mut value = super::super::DictMap::new();
+            value.put_str("category", category);
+            let value = VmValue::dict(value);
+            assert_eq!(
+                error_to_category(&VmError::DeclaredThrown(value.clone())),
+                error_to_category(&VmError::Thrown(value)),
+            );
+        }
+        let value = VmValue::String("HTTP 429 rate limited".into());
+        assert_eq!(
+            error_to_category(&VmError::DeclaredThrown(value.clone())),
+            error_to_category(&VmError::Thrown(value))
+        );
+        assert_eq!(
+            error_to_category(&VmError::DeclaredThrown(VmValue::Int(7))),
+            ErrorCategory::Generic
+        );
+    }
 
     /// A new variant must be added to [`ErrorCategory::ALL`], or the guards below
     /// silently stop covering it. This match is the tripwire: it fails to

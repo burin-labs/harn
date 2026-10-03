@@ -185,6 +185,10 @@ pub(super) fn tool_kind_participates_in_write_allowlist(tool_name: &str) -> bool
 
 pub struct TrustedBridgeCallGuard;
 
+fn trusted_bridge_call_is_active() -> bool {
+    TRUSTED_BRIDGE_CALL_DEPTH.with(|depth| *depth.borrow() > 0)
+}
+
 pub fn allow_trusted_bridge_calls() -> TrustedBridgeCallGuard {
     TRUSTED_BRIDGE_CALL_DEPTH.with(|depth| {
         *depth.borrow_mut() += 1;
@@ -598,6 +602,13 @@ pub fn enforce_current_policy_for_builtin(name: &str, args: &[VmValue]) -> Resul
                     "host_call '{name}' must use capability.operation naming"
                 ));
             };
+            // Registered VM hooks have the same runtime-selected authority
+            // for native host calls as for typed Harness and bridged calls.
+            // The host dispatcher still owns command safety, and the native
+            // builtin independently refuses calls inside tool handlers.
+            if trusted_bridge_call_is_active() {
+                return Ok(());
+            }
             // The VM's own policy machinery may ask for consent regardless of
             // the calling tool's ceiling; `consent_capability` owns that rule
             // and explains why. Everything below is unchanged, including the
@@ -642,8 +653,7 @@ pub fn enforce_current_policy_for_capability(
     // migrated from ambient `store_get` / `agent_session_current_id` to
     // `harness.runtime.store_get` / `harness.agent.current_id` silently loses
     // state:read under the tool's effect ceiling (observed downstream).
-    let trusted = TRUSTED_BRIDGE_CALL_DEPTH.with(|depth| *depth.borrow() > 0);
-    if trusted {
+    if trusted_bridge_call_is_active() {
         return Ok(());
     }
     let Some(policy) = current_execution_policy() else {
@@ -669,8 +679,7 @@ pub fn enforce_current_policy_for_capability(
 }
 
 pub fn enforce_current_policy_for_bridge_builtin(name: &str) -> Result<(), VmError> {
-    let trusted = TRUSTED_BRIDGE_CALL_DEPTH.with(|depth| *depth.borrow() > 0);
-    if trusted {
+    if trusted_bridge_call_is_active() {
         return Ok(());
     }
     if current_execution_policy().is_some() {

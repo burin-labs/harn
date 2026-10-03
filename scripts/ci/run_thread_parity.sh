@@ -17,7 +17,7 @@ trap cleanup EXIT
 inventory="$tmpdir/inventory.json"
 events="$tmpdir/events.jsonl"
 inventory_status=0
-cargo nextest list --locked --workspace --profile ci --message-format json \
+cargo-nextest nextest list --locked --workspace --profile ci --message-format json \
   >"$inventory" || inventory_status=$?
 if [[ "$inventory_status" -ne 0 ]]; then
   echo "thread_parity_receipt reason=inventory-error threads=$threads inventory_status=$inventory_status" >&2
@@ -28,7 +28,7 @@ runner_status=0
 RUST_TEST_STDOUT_PATH="$events" \
 NEXTEST_EXPERIMENTAL_LIBTEST_JSON=1 \
   "$repo_root/scripts/ci/run_rust_test_lane.sh" \
-  cargo nextest run --locked --workspace --profile ci \
+  cargo-nextest nextest run --locked --workspace --profile ci \
   --test-threads="$threads" --message-format libtest-json-plus \
   --message-format-version 0.1 \
   || runner_status=$?

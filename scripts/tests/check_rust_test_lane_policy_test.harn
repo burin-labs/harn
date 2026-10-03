@@ -92,12 +92,19 @@ pipeline test_logical_commands_keeps_separate_lines_separate(harness: Harness, t
 @test
 pipeline test_executes_rust_tests_recognizes_both_runners(harness: Harness, task: unknown) {
   assert_eq(executes_rust_tests("cargo nextest run --workspace"), true)
+  assert_eq(executes_rust_tests("cargo-nextest nextest run --workspace"), true)
+  assert_eq(
+    len(step_violations("w.yml", "j", {run: "cargo-nextest nextest run --workspace"}, {}, {})),
+    1,
+  )
   assert_eq(executes_rust_tests("cargo test -p harn-modules some_case"), true)
 }
 
 @test
 pipeline test_executes_rust_tests_ignores_build_only_and_prose(harness: Harness, task: unknown) {
   assert_eq(executes_rust_tests("cargo test --no-run --workspace"), false)
+  assert_eq(executes_rust_tests("cargo-nextest nextest run --no-run --workspace"), false)
+  assert_eq(executes_rust_tests("# cargo-nextest nextest run --workspace"), false)
   assert_eq(executes_rust_tests("# cargo nextest run --workspace"), false)
   assert_eq(executes_rust_tests("make test"), false)
   assert_eq(executes_rust_tests("cargo build -p harn-cli"), false)

@@ -224,7 +224,7 @@ jobs:
         # `wasm-bindgen-test` as its framework, and has no workspace dependents,
         # so it was pure compile cost. Its own wasm32 workflow and the Linux
         # workspace lane keep it covered.
-        run: cargo nextest run --locked --workspace --exclude harn-wasm --profile ci
+        run: cargo-nextest nextest run --locked --workspace --exclude harn-wasm --profile ci
       - name: Smoke test harn run
         shell: bash
         run: |

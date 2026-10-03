@@ -21,7 +21,7 @@ use crate::stdlib::register_vm_stdlib;
 #[cfg(test)]
 use crate::triggers::dispatcher::InboxEnvelope;
 use crate::triggers::test_util::clock;
-use crate::value::{ErrorCategory, VmClosure, VmError, VmValue};
+use crate::value::{VmClosure, VmValue};
 use crate::vm::Vm;
 use crate::{
     postprocess_normalized_event, redact_headers, ClientError, Connector, ConnectorClient,
@@ -33,7 +33,9 @@ use crate::{
 
 pub mod abi;
 mod contract;
+mod errors;
 pub use contract::{load_contract, HarnConnectorContract};
+use errors::{connector_error_to_client, vm_error_to_connector, vm_error_to_connector_for_export};
 
 thread_local! {
     static ACTIVE_HARN_CONNECTOR_CTX: RefCell<Vec<ConnectorCtx>> = const { RefCell::new(Vec::new()) };
@@ -976,50 +978,6 @@ impl Drop for ActiveHarnConnectorCtxGuard {
         ACTIVE_HARN_CONNECTOR_CTX.with(|slot| {
             slot.borrow_mut().pop();
         });
-    }
-}
-
-fn vm_error_to_connector(error: VmError) -> ConnectorError {
-    ConnectorError::HarnRuntime(vm_error_message(error))
-}
-
-fn vm_error_to_connector_for_export(export: &str, error: VmError) -> ConnectorError {
-    match &error {
-        VmError::CategorizedError {
-            category: ErrorCategory::ToolRejected,
-            message,
-        } => ConnectorError::HarnRuntime(format!(
-            "connector export '{export}' violated effect policy: {message}"
-        )),
-        _ => vm_error_to_connector(error),
-    }
-}
-
-fn connector_error_to_client(error: ConnectorError) -> ClientError {
-    match error {
-        ConnectorError::HarnRuntime(message) => client_error_from_message(message),
-        other => ClientError::Other(other.to_string()),
-    }
-}
-
-fn client_error_from_message(message: String) -> ClientError {
-    if let Some(detail) = message.strip_prefix("method_not_found:") {
-        return ClientError::MethodNotFound(detail.trim().to_string());
-    }
-    if let Some(detail) = message.strip_prefix("invalid_args:") {
-        return ClientError::InvalidArgs(detail.trim().to_string());
-    }
-    if let Some(detail) = message.strip_prefix("rate_limited:") {
-        return ClientError::RateLimited(detail.trim().to_string());
-    }
-    ClientError::Other(message)
-}
-
-fn vm_error_message(error: VmError) -> String {
-    match error {
-        VmError::Thrown(VmValue::String(message)) => message.to_string(),
-        VmError::Thrown(value) => vm_value_to_json(&value).to_string(),
-        other => other.to_string(),
     }
 }
 
