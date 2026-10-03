@@ -138,7 +138,11 @@ const LITERAL_TIMEOUT_BASELINE = [
   {rule: "literal_timeout", path: "crates/harn-vm/src/llm/rate_limit.rs", count: 3},
   // Deliberate expiry under paused Tokio time: an outer deadline must interrupt
   // network recovery before any provider dispatch. No wall-clock latency claim.
-  {rule: "literal_timeout", path: "crates/harn-vm/src/llm/agent_observe/empty_completion_retry_tests.rs", count: 1},
+  {
+    rule: "literal_timeout",
+    path: "crates/harn-vm/src/llm/agent_observe/empty_completion_retry_tests.rs",
+    count: 1,
+  },
   // Deliberate quiescence: after the first OTLP export arrives, drain
   // whatever else is already buffered. Expiry ends the drain, not the test.
   {rule: "literal_timeout", path: "crates/harn-vm/tests/harn_vm/otel_sink_export.rs", count: 1},
