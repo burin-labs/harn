@@ -109,7 +109,9 @@ pipeline default(harness: Harness) {
   const optional_full_entry = optional_full.tools[0]
   harness.stdio.println(contains(optional_full_entry.inputSchema.properties.keys(), "note"))
   harness.stdio.println(contains(optional_full_entry.inputSchema.required, "note"))
-  harness.stdio.println(contains(optional_full_entry.inputSchema.properties.note.keys(), "required"))
+  harness.stdio.println(
+    contains(optional_full_entry.inputSchema.properties.note.keys(), "required"),
+  )
   let tools3 = tool_registry()
   tools3 = tool_define(
     tools3,
