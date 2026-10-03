@@ -25,7 +25,16 @@
  *   HARN_PRECOMPILE_OUT — output directory (optional; mirrors source tree)
  *   HARN_PRECOMPILE_KEEP_GOING — "1" to continue after a per-file error
  *   HARN_PRECOMPILE_QUIET      — "1" to suppress per-file progress
+ *   HARN_PRECOMPILE_JOBS       — maximum concurrent children (>= 1); the
+ *                                shim always sets it, defaulting to the
+ *                                machine's available parallelism
+ *
+ * Children run concurrently up to that bound, but every line of output is
+ * rendered afterwards in sorted source order, so stdout, stderr, the summary,
+ * and the exit status do not depend on the bound or on completion order.
  */
+import { settle_with_abort } from "std/abort"
+
 fn __walk_harn_files(fs: HarnessFs, root: string) -> dict {
   // walk_dir returns a flat list of {path, is_dir, is_file, depth}. We
   // only emit `.harn` files. Walk order is stable per the builtin
@@ -204,15 +213,22 @@ fn main(harness: Harness) {
     harness.stdio.eprintln("error: no .harn files found under " + target)
     harness.runtime.exit(1)
   }
-  let compiled = 0
-  let reused = 0
-  let failed = 0
+  const jobs_raw = harness.env.get_or("HARN_PRECOMPILE_JOBS", "1")
+  const jobs = to_int(jobs_raw) ?? 0
+  if jobs < 1 {
+    harness.stdio.eprintln(
+      "internal error: HARN_PRECOMPILE_JOBS must be a positive integer, got " + jobs_raw,
+    )
+    harness.runtime.exit(70)
+  }
+  // Place every source before launching any child. Destinations are pure path
+  // arithmetic, so an unplaceable source is refused before any work starts,
+  // and the parent directories exist before children race to write into them.
+  let plans = []
   for source in sources {
-    // For each source, pre-compute the destination dir so the child --out
-    // points at the exact directory the .harnbc should land in. This
-    // preserves the source-tree mirroring the Rust output_path() does;
-    // without this, the child (which sees a single-file target) would
-    // collapse everything into out_root with no subdirectories.
+    // The child sees a single-file target, so --out must name the exact
+    // directory the .harnbc lands in; otherwise every artifact would collapse
+    // into out_root with no subdirectories.
     const placed = __destination_path(source, source_root, out_root, "harnbc")
     if placed == nil {
       harness.stdio.eprintln(source + ": cannot place under --out: not relative to " + source_root)
@@ -227,23 +243,64 @@ fn main(harness: Harness) {
       __ensure_parent(harness.fs, mirrored)
       path_parent(mirrored)
     }
-    const child = __spawn_precompile(harness.process, bin, source, per_file_out, source_root)
-    const exit_code = child["exit_code"] ?? -1
-    if exit_code == 0 {
+    plans = plans.appending({source: source, mirrored: mirrored, per_file_out: per_file_out})
+  }
+  // Without --keep-going the first failure stops children that have not
+  // started yet; children already running finish, and their results past the
+  // first failure in source order are discarded below, exactly as the serial
+  // walk never ran them.
+  const settle_options = if keep_going {
+    {max_concurrent: jobs}
+  } else {
+    {max_concurrent: jobs, max_failures: 1}
+  }
+  const process = harness.process
+  const outcome = settle_with_abort(
+    harness.random,
+    harness.runtime,
+    plans,
+    { plan ->
+      const child = __spawn_precompile(process, bin, plan.source, plan.per_file_out, source_root)
+      if (child["exit_code"] ?? -1) == 0 {
+        return Ok(child)
+      }
+      return Err(child)
+    },
+    settle_options,
+  )
+  let compiled = 0
+  let reused = 0
+  let failed = 0
+  for (index, result) in iter(outcome.results).enumerate() {
+    const plan = plans[index]
+    if is_ok(result) {
+      const child = unwrap(result)
       if __child_reused(child) {
         reused = reused + 1
       } else {
         compiled = compiled + 1
       }
       if !quiet {
-        harness.stdio.println(source + " -> " + mirrored)
+        harness.stdio.println(plan.source + " -> " + plan.mirrored)
       }
+      continue
+    }
+    if outcome.abandoned_indexes.contains(index) {
+      // Branches start in source order, so a skipped source always follows
+      // the failure that stopped the walk and the break below reaches it first.
+      harness.stdio.eprintln("internal error: " + plan.source + " was skipped before any failure")
+      harness.runtime.exit(70)
+    }
+    const error = unwrap_err(result)
+    failed = failed + 1
+    if type_of(error) == "dict" && error["exit_code"] != nil {
+      harness.stdio.eprintln(__render_failure(plan.source, error))
     } else {
-      failed = failed + 1
-      harness.stdio.eprintln(__render_failure(source, child))
-      if !keep_going {
-        break
-      }
+      // A thrown spawn error rather than a child that exited nonzero.
+      harness.stdio.eprintln(plan.source + ": " + to_string(error))
+    }
+    if !keep_going {
+      break
     }
   }
   if !quiet {
