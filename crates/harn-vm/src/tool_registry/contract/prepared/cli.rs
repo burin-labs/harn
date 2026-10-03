@@ -565,7 +565,7 @@ fn prepare_argument(
         Some(
             projection
                 .long
-                .unwrap_or_else(|| property.replace('_', "-")),
+                .unwrap_or_else(|| property.trim_start_matches('_').replace('_', "-")),
         )
     };
     for spelling in long.iter().chain(projection.aliases.iter()) {
