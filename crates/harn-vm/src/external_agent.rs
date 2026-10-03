@@ -1088,7 +1088,7 @@ mod tests {
             let shutdown = Arc::new(AtomicBool::new(false));
             let thread_state = Arc::clone(&state);
             let thread_shutdown = Arc::clone(&shutdown);
-            let handle = thread::spawn(move || {
+            let handle = crate::runtime_stack::spawn(move || {
                 while !thread_shutdown.load(Ordering::SeqCst) {
                     let Ok((mut stream, _)) = listener.accept() else {
                         break;

@@ -7,7 +7,7 @@ mod statements;
 mod types;
 
 pub use error::ParserError;
-pub use state::{Parser, MAX_NESTING_DEPTH, PARSE_STACK_SIZE};
+pub use state::{Parser, MAX_NESTING_DEPTH};
 
 #[cfg(test)]
 mod tests {

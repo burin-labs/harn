@@ -836,7 +836,7 @@ mod tests {
         // delivered the SYN that the client had already sent.
         // Blocking accept is deterministic; the test invariably
         // sends a request, so it returns promptly.
-        let handle = std::thread::spawn(move || {
+        let handle = crate::runtime_stack::spawn(move || {
             let (mut stream, _) = listener
                 .accept()
                 .unwrap_or_else(|e| panic!("models stub: accept failed: {e}"));

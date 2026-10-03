@@ -118,7 +118,7 @@ fn subscribe(args: &[VmValue]) -> Result<VmValue, HostlibError> {
         kinds: request.kinds,
     };
     let debounce = Duration::from_millis(request.debounce_ms);
-    let worker = thread::Builder::new()
+    let worker = harn_parser::runtime_stack::builder()
         .name(format!("harn-fs-watch-{subscription_id}"))
         .spawn(move || watch_worker(rx, debounce, filter))
         .map_err(|err| HostlibError::Backend {

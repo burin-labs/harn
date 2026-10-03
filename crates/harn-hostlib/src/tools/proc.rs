@@ -435,7 +435,7 @@ fn spawn_reader_thread(
         drop(tx);
         return (rx, None);
     };
-    let handle = thread::spawn(move || {
+    let handle = harn_parser::runtime_stack::spawn(move || {
         let mut buf = Vec::new();
         let _ = reader.read_to_end(&mut buf);
         let _ = tx.send(buf);

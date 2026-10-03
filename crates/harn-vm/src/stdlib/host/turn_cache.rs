@@ -674,7 +674,9 @@ mod tests {
             "same-turn read must hit"
         );
 
-        std::thread::spawn(reset).join().expect("reset thread");
+        crate::runtime_stack::spawn(reset)
+            .join()
+            .expect("reset thread");
 
         assert!(
             super::lookup("runtime", "pipeline_input", &params).is_none(),

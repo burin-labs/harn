@@ -176,14 +176,14 @@ fn env_seeding_is_honored() {
 fn policy_context_propagates_only_to_bound_worker_threads() {
     let _scope = scope_egress_policy_for_current_thread();
     let _guard = install(&[("default", VmValue::String(arcstr::ArcStr::from("deny")))]);
-    let inherited = std::thread::spawn(bind_policy_context(|| {
+    let inherited = crate::runtime_stack::spawn(bind_policy_context(|| {
         check_url("connector", "https://blocked.example.test")
             .unwrap()
             .is_some()
     }))
     .join()
     .unwrap();
-    let unrelated = std::thread::spawn(|| {
+    let unrelated = crate::runtime_stack::spawn(|| {
         let _guard = test_env_guard();
         check_url("connector", "https://blocked.example.test")
             .unwrap()
@@ -213,7 +213,7 @@ async fn reqwest_redirect_policy_blocks_https_to_http_downgrade() {
             )
             .expect("build tls config"),
     );
-    let thread = std::thread::spawn(move || {
+    let thread = crate::runtime_stack::spawn(move || {
         let (tcp, _) = listener.accept().expect("accept tls client");
         let conn = ServerConnection::new(server_config).expect("server connection");
         let mut stream = StreamOwned::new(conn, tcp);

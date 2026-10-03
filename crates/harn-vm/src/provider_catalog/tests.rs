@@ -131,7 +131,7 @@ fn remote_catalog_with_extra_model() -> ProviderCatalogArtifact {
 fn spawn_catalog_stub(body: String) -> (String, std::thread::JoinHandle<()>) {
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind catalog stub");
     let url = format!("http://{}/catalog.json", listener.local_addr().unwrap());
-    let handle = std::thread::spawn(move || {
+    let handle = crate::runtime_stack::spawn(move || {
         let (mut stream, _) = listener.accept().expect("accept catalog request");
         let mut request = [0; 1024];
         let _ = stream.read(&mut request);

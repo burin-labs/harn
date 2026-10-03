@@ -29,7 +29,7 @@ fn independent_checkpoint_owners_preserve_other_keys_and_observe_updates() {
 fn concurrent_insert_retains_one_candidate_and_reports_one_winner() {
     let root = tempfile::tempdir().unwrap();
     let ready = std::sync::Arc::new(std::sync::Barrier::new(8));
-    let receipts = std::thread::scope(|scope| {
+    let receipts = crate::runtime_stack::scope(|scope| {
         let workers: Vec<_> = (0..8)
             .map(|candidate| {
                 let ready = ready.clone();

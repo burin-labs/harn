@@ -11,9 +11,8 @@ fn main() {
     // thread to escape the CLI's Tokio runtime and therefore inherits nothing
     // from it); this standalone entry point would otherwise run the VM on the
     // process main thread — 8 MiB on Unix, 1 MiB on Windows.
-    std::thread::Builder::new()
+    harn_parser::runtime_stack::builder()
         .name("harn-dap".to_string())
-        .stack_size(harn_vm::RUNTIME_STACK_SIZE)
         .spawn(harn_dap::run)
         .expect("spawn harn-dap runtime thread")
         .join()

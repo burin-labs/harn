@@ -138,7 +138,7 @@ pub(crate) fn read_registry_source(source: &str) -> Result<String, PackageError>
     // OS thread so the blocking client's lifetime is fully outside any
     // ambient runtime.
     let source_owned = source.to_string();
-    std::thread::scope(|scope| {
+    harn_parser::runtime_stack::scope(|scope| {
         scope
             .spawn(move || fetch_registry_blocking(url, &source_owned))
             .join()
@@ -199,7 +199,7 @@ pub(crate) fn read_package_archive_bytes(source: &str) -> Result<Vec<u8>, Packag
         other => return Err(format!("unsupported package archive URL scheme: {other}").into()),
     }
     let source_owned = source.to_string();
-    std::thread::scope(|scope| {
+    harn_parser::runtime_stack::scope(|scope| {
         scope
             .spawn(move || fetch_package_archive_blocking(url, &source_owned))
             .join()

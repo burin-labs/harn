@@ -61,29 +61,32 @@ impl DispatchRuntime {
         for index in 0..worker_count {
             let (tx, mut rx) = mpsc::channel::<DispatchJob>(1);
             let worker_core = Arc::clone(&core);
-            crate::vm_thread::spawn(format!("{name}-{index}"), move || {
-                let runtime = tokio::runtime::Builder::new_current_thread()
-                    .enable_all()
-                    .build()
-                    .unwrap_or_else(|error| panic!("build dispatch runtime: {error}"));
-                let local = LocalSet::new();
-                local.block_on(&runtime, async move {
-                    while let Some(job) = rx.recv().await {
-                        let core = Arc::clone(&worker_core);
-                        tokio::task::spawn_local(async move {
-                            let queue_ms = job.queued_at.elapsed().as_millis() as u64;
-                            let result = core.dispatch(job.request).await.map(|mut response| {
-                                response.dispatch.queue_ms = Some(queue_ms);
-                                response
-                            });
-                            let _ = job.response_tx.send(result);
-                        })
-                        .await
-                        .expect("dispatch worker task panicked");
-                    }
-                });
-            })
-            .unwrap_or_else(|error| panic!("spawn {name} VM worker {index}: {error}"));
+            harn_parser::runtime_stack::builder()
+                .name(format!("{name}-{index}"))
+                .spawn(move || {
+                    let runtime = tokio::runtime::Builder::new_current_thread()
+                        .enable_all()
+                        .build()
+                        .unwrap_or_else(|error| panic!("build dispatch runtime: {error}"));
+                    let local = LocalSet::new();
+                    local.block_on(&runtime, async move {
+                        while let Some(job) = rx.recv().await {
+                            let core = Arc::clone(&worker_core);
+                            tokio::task::spawn_local(async move {
+                                let queue_ms = job.queued_at.elapsed().as_millis() as u64;
+                                let result =
+                                    core.dispatch(job.request).await.map(|mut response| {
+                                        response.dispatch.queue_ms = Some(queue_ms);
+                                        response
+                                    });
+                                let _ = job.response_tx.send(result);
+                            })
+                            .await
+                            .expect("dispatch worker task panicked");
+                        }
+                    });
+                })
+                .unwrap_or_else(|error| panic!("spawn {name} VM worker {index}: {error}"));
             workers.push(tx);
             idle_tx
                 .send(index)

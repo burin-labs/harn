@@ -1509,7 +1509,7 @@ mod tests {
         let cancel = Arc::new(AtomicBool::new(false));
         let cancel_from_thread = Arc::clone(&cancel);
         let _guard = crate::op_interrupt::install(Some(cancel), None);
-        let interrupter = std::thread::spawn(move || {
+        let interrupter = crate::runtime_stack::spawn(move || {
             // No fixed "wait for the reader to park" sleep: the reader re-checks
             // the cancel flag every `READ_LINE_INTERRUPT_POLL` heartbeat, so it
             // observes this store within one interval regardless of ordering.

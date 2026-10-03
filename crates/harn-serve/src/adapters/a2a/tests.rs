@@ -507,7 +507,7 @@ async fn push_delivery_loads_mtls_client_cert_and_key() {
     );
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind mtls server");
     let port = listener.local_addr().expect("addr").port();
-    let thread = std::thread::spawn(move || {
+    let thread = harn_parser::runtime_stack::spawn(move || {
         use std::io::{Read as _, Write as _};
 
         let (tcp, _) = listener.accept().expect("accept mtls");

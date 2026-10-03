@@ -296,7 +296,7 @@ impl NativeKeyring {
             store: self.store.clone(),
         };
         let (sender, receiver) = std::sync::mpsc::channel();
-        std::thread::Builder::new()
+        crate::runtime_stack::builder()
             .name("harn-keyring-round-trip".to_string())
             .spawn(move || {
                 let user = format!("__harn_probe__:{}", uuid::Uuid::now_v7().simple());

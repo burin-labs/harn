@@ -10,7 +10,6 @@ use std::time::Instant;
 use crate::env_guard::ScopedEnvVar;
 use crate::package;
 use crate::test_timing::DurationSummary;
-use crate::CLI_RUNTIME_STACK_SIZE;
 use harn_vm::IsolateValue;
 
 mod execution;
@@ -1214,7 +1213,6 @@ async fn execute_cases(
         harn_test_runner::ParallelRunOptions {
             workers,
             total_tests,
-            stack_size: CLI_RUNTIME_STACK_SIZE,
             fail_fast: options.fail_fast,
             progress: options.progress.clone(),
         },
