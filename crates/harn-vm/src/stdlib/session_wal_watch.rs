@@ -393,6 +393,51 @@ mod tests {
 
     /// A foreign metadata commit reaches the owning poll without a title change.
     #[tokio::test]
+    async fn identical_session_ids_in_distinct_databases_publish_independently() {
+        let _bus = crate::stdlib::session_change::test_support::exclusive_bus().await;
+        let roots = [TempDir::new().unwrap(), TempDir::new().unwrap()];
+        let mut readers = Vec::new();
+        for root in &roots {
+            let store = open_canonical_store(root.path()).expect("canonical store");
+            store
+                .create(CreateSession {
+                    id: Some("shared-id".into()),
+                    title: Some("stable".into()),
+                    ..Default::default()
+                })
+                .await
+                .expect("create");
+            let reader =
+                harn_session_store::wal_watch::open_watch_reader(store.path()).expect("reader");
+            let version = harn_session_store::wal_watch::data_version(&reader).unwrap();
+            readers.push((store.path().to_owned(), reader, version));
+        }
+        let (tx, rx) = mpsc::channel();
+        let _subscription = subscribe_session_changes(Arc::new(Recording(tx)));
+        for (_, reader, _) in &readers {
+            super::seed_session_memory(reader);
+        }
+        for (database, reader, version) in &mut readers {
+            let foreign = rusqlite::Connection::open(database).expect("foreign writer");
+            foreign
+                .execute(
+                    "UPDATE sessions SET usage_input = 7 WHERE id = 'shared-id'",
+                    [],
+                )
+                .expect("foreign commit");
+            assert!(super::poll_once(reader, version), "the database committed");
+            assert_eq!(
+                rx.try_recv().as_deref(),
+                Ok("stable"),
+                "each database must publish its own identical metadata change"
+            );
+            assert!(!super::poll_once(reader, version));
+            assert_eq!(rx.try_recv(), Err(mpsc::TryRecvError::Empty));
+        }
+    }
+
+    /// A foreign metadata commit reaches the owning poll without a title change.
+    #[tokio::test]
     async fn foreign_usage_change_publishes_once_when_title_is_unchanged() {
         let _bus = crate::stdlib::session_change::test_support::exclusive_bus().await;
         let root = TempDir::new().expect("root");
