@@ -288,6 +288,14 @@ pipeline test_provider_option_probe_bounds_rate_limit_recovery() {
     Err({origin: "provider", kind: "transient", reason: "rate_limit", message: "HTTP 429"}),
   )
   assert_eq(provider_option_probe_retry_delay_ms(limited), 1000)
+  const with_deadline = provider_option_probe_classify(
+    Err({reason: "rate_limit", retry_after_ms: 60000, message: "HTTP 429"}),
+  )
+  assert_eq(with_deadline.retry_after_ms, 60000)
+  assert_eq(provider_option_probe_retry_delay_ms(with_deadline), 60000)
+  assert_eq(provider_option_probe_retry_delay_ms(with_deadline + {retry_after_ms: 60001}), nil)
+  assert_eq(provider_option_probe_retry_delay_ms(with_deadline + {retry_after_ms: -1}), nil)
+  assert_eq(provider_option_probe_retry_delay_ms(with_deadline + {retry_after_ms: 0}), 0)
   const persistent = provider_option_probe_retry_result(limited, limited)
   assert_eq(provider_option_probe_retry_delay_ms(persistent), nil)
   assert_eq(persistent.measured, false)

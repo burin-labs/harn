@@ -239,6 +239,7 @@ pub fn provider_option_probe_classify(outcome: unknown) -> ProviderOptionProbeAt
     } else {
       ""
     },
+    retry_after_ms: to_int(raw?.retry_after_ms),
     error: message,
   }
 }
@@ -331,7 +332,12 @@ pub fn provider_option_probe_retry_delay_ms(attempt: ProviderOptionProbeAttempt)
     return 0
   }
   if attempt.reason == "rate_limit" {
-    return 1000
+    const delay = attempt.retry_after_ms ?? 1000
+    // Do not retry before the provider's deadline or hold a probe indefinitely.
+    if delay < 0 || delay > 60000 {
+      return nil
+    }
+    return delay
   }
   return nil
 }

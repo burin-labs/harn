@@ -24,6 +24,7 @@ pub type ProviderOptionProbeAttempt = {
   output_tokens?: int,
   cost_usd?: float,
   retry_count?: int,
+  retry_after_ms?: int,
   observed_cost_count?: int,
   observed_usage_count?: int,
   control_error?: string,
