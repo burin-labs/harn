@@ -219,6 +219,19 @@ fn typed_retry_after_retains_over_cap_deadlines() {
             Some(exceeds_cap.to_string())
         );
     }
+    let mut headers = reqwest::header::HeaderMap::new();
+    headers.insert("retry-after", "2seconds".parse().unwrap());
+    let VmError::Thrown(VmValue::Dict(error)) = provider_http_error(
+        None,
+        "mistral",
+        reqwest::StatusCode::TOO_MANY_REQUESTS,
+        &headers,
+        "rate limited",
+    ) else {
+        panic!("typed provider envelope");
+    };
+    assert!(error.get("retry_after_ms").is_none());
+    assert!(error.get("retry_after_exceeds_cap").is_none());
 }
 
 #[test]

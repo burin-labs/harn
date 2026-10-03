@@ -16,6 +16,14 @@ mod streaming;
 mod tests;
 
 pub(crate) use mock::HttpMockRegistry;
+pub(crate) fn retry_after_hint(value: &str) -> Option<(u64, bool)> {
+    let requested = client::parse_retry_after_requested_at(value, std::time::SystemTime::now())?;
+    let millis = requested.as_millis();
+    Some((
+        millis.min(u128::from(MAX_RETRY_DELAY_MS)) as u64,
+        millis > u128::from(MAX_RETRY_DELAY_MS),
+    ))
+}
 use mock::{
     clear_http_mocks, http_mock_calls_value, parse_mock_responses, register_http_mock,
     reset_http_mocks,

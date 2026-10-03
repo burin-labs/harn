@@ -50,6 +50,9 @@ fn parses_retry_after_http_date() {
 #[test]
 fn malformed_retry_after_returns_none() {
     assert_eq!(parse_retry_after_value("soon-ish"), None);
+    assert_eq!(parse_retry_after_value("2seconds"), None);
+    assert_eq!(super::retry_after_hint("2seconds"), None);
+    assert_eq!(super::retry_after_hint("61"), Some((60_000, true)));
 }
 
 #[test]
