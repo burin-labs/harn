@@ -369,7 +369,9 @@ async fn session_store_database_path_impl(
 }
 
 fn open_store(state_dir: &SessionStoreDir) -> Result<CanonicalStore, VmError> {
-    let store = SqliteSessionStore::open_with_hooks(store_path(state_dir), store_hooks())
+    let path = harn_session_store::sqlite::stable_file_path(&store_path(state_dir))
+        .map_err(store_error)?;
+    let store = SqliteSessionStore::open_with_hooks(&path, store_hooks(Some(&path)))
         .map_err(store_error)?;
     Ok(CanonicalStore::new(store))
 }
@@ -377,15 +379,16 @@ fn open_store(state_dir: &SessionStoreDir) -> Result<CanonicalStore, VmError> {
 fn open_maintenance_store(
     state_dir: &SessionStoreDir,
 ) -> harn_session_store::StoreResult<CanonicalStore> {
+    let path = harn_session_store::sqlite::stable_file_path(&store_path(state_dir))?;
     let store =
-        SqliteSessionStore::open_for_maintenance_with_hooks(store_path(state_dir), store_hooks())?;
+        SqliteSessionStore::open_for_maintenance_with_hooks(&path, store_hooks(Some(&path)))?;
     Ok(CanonicalStore::new(store))
 }
 
-fn store_hooks() -> StoreHooks {
+fn store_hooks(path: Option<&Path>) -> StoreHooks {
     StoreHooks {
         redaction: Some(Arc::new(crate::redact::current_policy())),
-        change_observer: super::session_change::current_observer(),
+        change_observer: super::session_change::current_observer(path),
         ..StoreHooks::default()
     }
 }
@@ -419,11 +422,12 @@ fn store_read_present_value(value: VmValue) -> VmValue {
 }
 
 fn open_read_store(state_dir: &SessionStoreDir) -> Result<StoreRead<SqliteSessionStore>, VmError> {
-    let path = store_path(state_dir);
+    let path = harn_session_store::sqlite::stable_file_path(&store_path(state_dir))
+        .map_err(store_error)?;
     if !path.is_file() {
         return Ok(StoreRead::Absent);
     }
-    SqliteSessionStore::open_read_only_with_hooks(path, store_hooks())
+    SqliteSessionStore::open_read_only_with_hooks(&path, store_hooks(Some(&path)))
         .map(StoreRead::Present)
         .map_err(store_error)
 }
@@ -460,7 +464,7 @@ async fn open_read_session(
         return Ok(StoreRead::Present(None));
     }
     let store =
-        SqliteSessionStore::open_in_memory_with_hooks(store_hooks()).map_err(store_error)?;
+        SqliteSessionStore::open_in_memory_with_hooks(store_hooks(None)).map_err(store_error)?;
     import_legacy_events(&store, session_id, source, tenant_id.as_deref()).await?;
     Ok(StoreRead::Present(Some(store)))
 }

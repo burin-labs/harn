@@ -212,7 +212,10 @@ fn seed_session_memory(reader: &rusqlite::Connection) {
     if let Ok(snapshots) = list_title_snapshots(reader) {
         for snapshot in snapshots {
             if let Ok(meta) = describe_session(reader, &snapshot.id) {
-                super::session_change::remember_snapshot(&meta);
+                super::session_change::remember_snapshot(
+                    Path::new(reader.path().expect("file watch reader")),
+                    &meta,
+                );
             }
         }
     }
@@ -311,7 +314,10 @@ fn publish_session_changes(reader: &rusqlite::Connection) {
     };
     for snapshot in snapshots {
         if let Ok(meta) = describe_session(reader, &snapshot.id) {
-            super::session_change::dispatch_foreign(&meta);
+            super::session_change::dispatch_foreign(
+                Path::new(reader.path().expect("file watch reader")),
+                &meta,
+            );
         }
     }
 }
@@ -580,7 +586,8 @@ mod tests {
             harn_session_store::StoreHooks {
                 change_observer: Some(Arc::new(WatcherFirst {
                     path: store.path().to_owned(),
-                    fanout: crate::stdlib::session_change::current_observer().expect("live fanout"),
+                    fanout: crate::stdlib::session_change::current_observer(Some(store.path()))
+                        .expect("live fanout"),
                 })),
                 ..Default::default()
             },

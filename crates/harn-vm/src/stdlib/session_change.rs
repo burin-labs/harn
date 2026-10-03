@@ -9,7 +9,7 @@
 //! notices those via WAL + `PRAGMA data_version` and publishes through the
 //! same fanout.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, RwLock, RwLockWriteGuard};
 
@@ -31,7 +31,7 @@ use super::session_wal_watch;
 /// evict the first.
 static OBSERVERS: RwLock<Vec<(u64, SharedSessionChangeObserver)>> = RwLock::new(Vec::new());
 static NEXT_SUBSCRIPTION: AtomicU64 = AtomicU64::new(1);
-static SESSION_MEMORY: RwLock<Vec<SessionMeta>> = RwLock::new(Vec::new());
+static SESSION_MEMORY: RwLock<Vec<(PathBuf, SessionMeta)>> = RwLock::new(Vec::new());
 
 fn observers() -> RwLockWriteGuard<'static, Vec<(u64, SharedSessionChangeObserver)>> {
     OBSERVERS
@@ -39,7 +39,7 @@ fn observers() -> RwLockWriteGuard<'static, Vec<(u64, SharedSessionChangeObserve
         .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
-fn session_memory() -> RwLockWriteGuard<'static, Vec<SessionMeta>> {
+fn session_memory() -> RwLockWriteGuard<'static, Vec<(PathBuf, SessionMeta)>> {
     SESSION_MEMORY
         .write()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
@@ -107,37 +107,44 @@ pub(super) enum SnapshotChange {
 }
 
 /// One comparison owner for local commits, foreign commits, and watch baselines.
-pub(super) fn remember_snapshot(meta: &SessionMeta) -> SnapshotChange {
+pub(super) fn remember_snapshot(path: &Path, meta: &SessionMeta) -> SnapshotChange {
     let mut sessions = session_memory();
-    if let Some(previous) = sessions.iter_mut().find(|seen| seen.id == meta.id) {
+    if let Some((_, previous)) = sessions
+        .iter_mut()
+        .find(|(database, seen)| database == path && seen.id == meta.id)
+    {
         if previous == meta {
             return SnapshotChange::Unchanged;
         }
         *previous = meta.clone();
         return SnapshotChange::Changed;
     }
-    sessions.push(meta.clone());
+    sessions.push((path.to_owned(), meta.clone()));
     SnapshotChange::New
 }
 
 /// Fans one committed change out to every live subscriber.
-pub(super) fn dispatch(meta: &SessionMeta) {
-    dispatch_snapshot(meta, true);
+pub(super) fn dispatch(path: &Path, meta: &SessionMeta) {
+    dispatch_snapshot(path, meta, true);
 }
 
 /// A watcher's first encounter establishes its baseline, not an update.
-pub(super) fn dispatch_foreign(meta: &SessionMeta) {
-    dispatch_snapshot(meta, false);
+pub(super) fn dispatch_foreign(path: &Path, meta: &SessionMeta) {
+    dispatch_snapshot(path, meta, false);
 }
 
-fn dispatch_snapshot(meta: &SessionMeta, publish_new: bool) {
+fn dispatch_snapshot(path: &Path, meta: &SessionMeta, publish_new: bool) {
     // Either the local post-commit hook or the WAL reader can arrive first.
     // Claim the whole committed snapshot once, not just its title: model,
     // usage and other metadata changes still notify when the title is stable.
-    let change = remember_snapshot(meta);
+    let change = remember_snapshot(path, meta);
     if change == SnapshotChange::Unchanged || (change == SnapshotChange::New && !publish_new) {
         return;
     }
+    publish(meta);
+}
+
+fn publish(meta: &SessionMeta) {
     let observers: Vec<SharedSessionChangeObserver> = OBSERVERS
         .read()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
@@ -151,19 +158,29 @@ fn dispatch_snapshot(meta: &SessionMeta, publish_new: bool) {
     }
 }
 
-struct SessionChangeFanout;
+struct SessionChangeFanout {
+    database: Option<PathBuf>,
+}
 
 impl harn_session_store::SessionChangeObserver for SessionChangeFanout {
     fn session_updated(&self, meta: &SessionMeta) {
-        dispatch(meta);
+        if let Some(path) = self.database.as_deref() {
+            dispatch(path, meta);
+        } else {
+            // In-memory imports have no file watcher and no shared database
+            // identity, so they do not participate in file deduplication.
+            publish(meta);
+        }
     }
 }
 
-pub(crate) fn current_observer() -> Option<SharedSessionChangeObserver> {
+pub(crate) fn current_observer(database: Option<&Path>) -> Option<SharedSessionChangeObserver> {
     if subscriber_count() == 0 {
         return None;
     }
-    Some(Arc::new(SessionChangeFanout))
+    Some(Arc::new(SessionChangeFanout {
+        database: database.map(Path::to_owned),
+    }))
 }
 
 #[cfg(test)]
