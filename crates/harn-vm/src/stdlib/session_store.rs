@@ -13,7 +13,7 @@ use harn_session_store::{
     AppendEvent, CreateSession, EventId, EventIdentity, EventIdentityField, ImportSession,
     ListFilter, ListOrder, ListSortKey, ReadRange, SearchFilter, SearchMode, SearchQuery,
     SessionEventKind, SessionImporter, SessionLeaseError, SessionStatus, SessionStore, SessionType,
-    SqliteSessionStore, StoreError, StoreHooks, StoredEvent, VerifyReport, MAX_READ_BATCH,
+    SqliteSessionStore, StoreError, StoredEvent, VerifyReport, MAX_READ_BATCH,
 };
 use serde::Deserialize;
 use serde_json::{json, Value as JsonValue};
@@ -21,7 +21,7 @@ use sha2::{Digest, Sha256};
 
 use crate::llm::vm_value_to_json;
 use crate::stdlib::args::{ArgError, Args, ErrorKind, Expected, Options};
-use crate::stdlib::canonical_store::CanonicalStore;
+use crate::stdlib::canonical_store::{store_hooks, CanonicalStore};
 use crate::stdlib::json_to_vm_value;
 use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
 use crate::value::{categorized_error, DictMap, ErrorCategory, VmError, VmValue};
@@ -383,14 +383,6 @@ fn open_maintenance_store(
     let store =
         SqliteSessionStore::open_for_maintenance_with_hooks(&path, store_hooks(Some(&path)))?;
     Ok(CanonicalStore::new(store))
-}
-
-fn store_hooks(path: Option<&Path>) -> StoreHooks {
-    StoreHooks {
-        redaction: Some(Arc::new(crate::redact::current_policy())),
-        change_observer: super::session_change::current_observer(path),
-        ..StoreHooks::default()
-    }
 }
 
 enum StoreRead<T> {

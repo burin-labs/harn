@@ -208,14 +208,11 @@ pub(super) fn flush_watcher(path: &Path) {
 
 /// Record every current metadata snapshot as already seen, so the first poll
 /// publishes only what moves after this point.
-fn seed_session_memory(reader: &rusqlite::Connection) {
+fn seed_session_memory(path: &Path, reader: &rusqlite::Connection) {
     if let Ok(snapshots) = list_title_snapshots(reader) {
         for snapshot in snapshots {
             if let Ok(meta) = describe_session(reader, &snapshot.id) {
-                super::session_change::remember_snapshot(
-                    Path::new(reader.path().expect("file watch reader")),
-                    &meta,
-                );
+                super::session_change::remember_snapshot(path, &meta);
             }
         }
     }
@@ -232,7 +229,7 @@ fn start_watcher(path: PathBuf) {
     let Ok(initial_version) = data_version(&reader) else {
         return;
     };
-    seed_session_memory(&reader);
+    seed_session_memory(&path, &reader);
 
     let stop = Arc::new(AtomicBool::new(false));
     let thread_stop = Arc::clone(&stop);
@@ -283,7 +280,7 @@ fn watch_loop(
             Err(RecvTimeoutError::Timeout) => None,
             Err(RecvTimeoutError::Disconnected) => break,
         };
-        poll_once(&reader, &mut last_version);
+        poll_once(&path, &reader, &mut last_version);
         if let Some(signal) = signal {
             signal.polled();
         }
@@ -296,7 +293,7 @@ fn watch_loop(
 ///
 /// `data_version` is per connection, so `last_version` is only meaningful
 /// against the same `reader`.
-fn poll_once(reader: &rusqlite::Connection, last_version: &mut i64) -> bool {
+fn poll_once(path: &Path, reader: &rusqlite::Connection, last_version: &mut i64) -> bool {
     let Ok(version) = data_version(reader) else {
         return false;
     };
@@ -304,20 +301,19 @@ fn poll_once(reader: &rusqlite::Connection, last_version: &mut i64) -> bool {
         return false;
     }
     *last_version = version;
-    publish_session_changes(reader);
+    publish_session_changes(path, reader);
     true
 }
 
-fn publish_session_changes(reader: &rusqlite::Connection) {
+fn publish_session_changes(path: &Path, reader: &rusqlite::Connection) {
     let Ok(snapshots) = list_title_snapshots(reader) else {
         return;
     };
     for snapshot in snapshots {
         if let Ok(meta) = describe_session(reader, &snapshot.id) {
-            super::session_change::dispatch_foreign(
-                Path::new(reader.path().expect("file watch reader")),
-                &meta,
-            );
+            // Keep the store owner's identity. SQLite can return a different
+            // spelling for this same file, such as /private/var on macOS.
+            super::session_change::dispatch_foreign(path, &meta);
         }
     }
 }
@@ -373,9 +369,9 @@ mod tests {
             harn_session_store::wal_watch::open_watch_reader(&database).expect("watch reader");
         let mut last_version =
             harn_session_store::wal_watch::data_version(&reader).expect("data version");
-        super::seed_session_memory(&reader);
+        super::seed_session_memory(&database, &reader);
         assert!(
-            !super::poll_once(&reader, &mut last_version),
+            !super::poll_once(&database, &reader, &mut last_version),
             "no commit since the baseline"
         );
 
@@ -387,9 +383,9 @@ mod tests {
             )
             .expect("foreign rename");
 
-        assert!(super::poll_once(&reader, &mut last_version));
+        assert!(super::poll_once(&database, &reader, &mut last_version));
         assert_eq!(rx.try_recv().as_deref(), Ok("after"));
-        assert!(!super::poll_once(&reader, &mut last_version));
+        assert!(!super::poll_once(&database, &reader, &mut last_version));
         assert_eq!(
             rx.try_recv(),
             Err(mpsc::TryRecvError::Empty),
@@ -428,8 +424,8 @@ mod tests {
             harn_session_store::wal_watch::describe_session(&readers[1].1, "shared-id").unwrap(),
             "the metadata must be identical or a full-snapshot cache can pass vacuously"
         );
-        for (_, reader, _) in &readers {
-            super::seed_session_memory(reader);
+        for (database, reader, _) in &readers {
+            super::seed_session_memory(database, reader);
         }
         for (database, reader, version) in &mut readers {
             let foreign = rusqlite::Connection::open(database).expect("foreign writer");
@@ -439,13 +435,16 @@ mod tests {
                     [],
                 )
                 .expect("foreign commit");
-            assert!(super::poll_once(reader, version), "the database committed");
+            assert!(
+                super::poll_once(database, reader, version),
+                "the database committed"
+            );
             assert_eq!(
                 rx.try_recv().as_deref(),
                 Ok("stable"),
                 "each database must publish its own identical metadata change"
             );
-            assert!(!super::poll_once(reader, version));
+            assert!(!super::poll_once(database, reader, version));
             assert_eq!(rx.try_recv(), Err(mpsc::TryRecvError::Empty));
         }
     }
@@ -477,7 +476,7 @@ mod tests {
         let _subscription = subscribe_session_changes(Arc::new(Metadata(tx)));
         let reader = harn_session_store::wal_watch::open_watch_reader(&database).expect("reader");
         let mut version = harn_session_store::wal_watch::data_version(&reader).expect("version");
-        super::seed_session_memory(&reader);
+        super::seed_session_memory(&database, &reader);
         assert_eq!(rx.try_recv(), Err(mpsc::TryRecvError::Empty));
         let foreign = rusqlite::Connection::open(&database).expect("foreign writer");
         foreign
@@ -486,11 +485,11 @@ mod tests {
                 [],
             )
             .expect("foreign metadata commit");
-        assert!(super::poll_once(&reader, &mut version));
+        assert!(super::poll_once(&database, &reader, &mut version));
         let delivered = rx.try_recv().expect("same-title foreign change delivered");
         assert_eq!(delivered.title.as_deref(), Some("stable"));
         assert_eq!(delivered.usage_input, 7);
-        assert!(!super::poll_once(&reader, &mut version));
+        assert!(!super::poll_once(&database, &reader, &mut version));
         assert_eq!(rx.try_recv(), Err(mpsc::TryRecvError::Empty));
     }
 
