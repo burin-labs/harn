@@ -699,11 +699,12 @@ jobs:
       # The check reads the prior-fold evidence from `origin/<base>` and the
       # contract from the exact integrated checkout at HEAD. A PR checkout does
       # not necessarily carry the base branch as a local ref.
-      - name: Fetch the base branch and release tags
+      - name: Fetch the base branch and immutable release attempts
         env:
           BASE_REF: ${{ github.event.pull_request.base.ref || 'main' }}
         run: |
           git fetch --no-tags origin "+refs/heads/${BASE_REF}:refs/remotes/origin/${BASE_REF}"
+          git fetch --no-tags origin 'refs/heads/release-attempt/*:refs/remotes/origin/release-attempt/*'
 
       - name: Evaluate the release contract
         env:
@@ -713,6 +714,11 @@ jobs:
           harn run --no-sandbox \
             .release-orchestrator/check_release_contract.harn \
             -- --repo "${GITHUB_WORKSPACE}" --base "${BASE_REF}" --contract-ref HEAD
+
+      - name: Verify the opener against the pinned release contract
+        env:
+          OPENER_ORCHESTRATOR_ROOT: .release-orchestrator
+        run: HARN_RELEASE_METADATA_BIN="$(command -v harn)" bash scripts/tests/open_release_pr_test.sh
 
       - name: Rehearse release staging and development cutover offline
         run: bash scripts/release_rehearsal.sh
