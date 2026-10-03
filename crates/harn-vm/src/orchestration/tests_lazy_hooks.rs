@@ -4,6 +4,121 @@ use crate::orchestration::{
 use crate::{register_vm_stdlib, AsyncBuiltinCtx, LazyVmCallable, Vm};
 
 #[tokio::test(flavor = "current_thread")]
+async fn registered_host_hook_reaches_bridge_without_granting_the_tool_host_authority() {
+    use crate::orchestration::{
+        allow_trusted_bridge_calls, pop_execution_policy, push_execution_policy,
+        run_post_tool_hooks_with_ctx, CapabilityPolicy,
+    };
+    use crate::value::{DictMap, VmValue};
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
+
+    struct HookBridge(Arc<AtomicUsize>);
+    impl crate::HostCallBridge for HookBridge {
+        fn dispatch<'a>(
+            &'a self,
+            capability: &'a str,
+            operation: &'a str,
+            params: &'a DictMap,
+        ) -> crate::HostCallDispatchFuture<'a> {
+            assert_eq!((capability, operation), ("runtime", "execute_hook"));
+            assert_eq!(
+                params.get("event").map(VmValue::display).as_deref(),
+                Some("PostToolUse")
+            );
+            self.0.fetch_add(1, Ordering::SeqCst);
+            crate::host_call_ready(Ok(Some(VmValue::dict([(
+                "text",
+                VmValue::string("host-hook:original"),
+            )]))))
+        }
+    }
+
+    crate::reset_thread_local_state();
+    let calls = Arc::new(AtomicUsize::new(0));
+    let _bridge = crate::install_host_call_bridge(Arc::new(HookBridge(calls.clone())));
+    let dir = tempfile::tempdir().expect("tempdir");
+    let module = dir.path().join("host_hook.harn");
+    std::fs::write(
+        &module,
+        r#"
+pub fn handle(_harness: Harness, _event: dict) {
+  const response = host_call("runtime.execute_hook", {event: "PostToolUse"})
+  return {result: response.text}
+}
+"#,
+    )
+    .expect("write hook module");
+    let mut vm = Vm::new();
+    register_vm_stdlib(&mut vm);
+    vm.enable_trusted_host_dispatch()
+        .expect("host-selected module authority");
+    let exports = vm
+        .load_module_exports(&module)
+        .await
+        .expect("load host module");
+    let handle = exports.get("handle").expect("hook export");
+    let args = [
+        vm.root_harness_value().expect("root Harness"),
+        VmValue::dict(DictMap::new()),
+    ];
+    let mut policy = CapabilityPolicy::default();
+    policy.restrict_capabilities(std::collections::BTreeMap::new());
+    policy.side_effects = vec!["read_only".to_string()];
+    push_execution_policy(policy);
+    let denied = vm
+        .call_closure_pub(handle, &args)
+        .await
+        .expect_err("ordinary call denied");
+    assert!(
+        denied.to_string().contains("exceeds capability ceiling"),
+        "{denied}"
+    );
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
+
+    register_vm_hook_lazy(
+        HookEvent::PostToolUse,
+        "*",
+        "handle",
+        LazyVmCallable::new(module, "handle"),
+    );
+    let ctx = AsyncBuiltinCtx::for_test(vm);
+    let result =
+        run_post_tool_hooks_with_ctx(Some(&ctx), "look", &serde_json::json!({}), "original")
+            .await
+            .expect("runtime-selected hook reaches host despite tool ceiling");
+    assert_eq!(result.text, "host-hook:original");
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+
+    let mut child = ctx.child_vm();
+    let denied = child
+        .call_closure_pub(handle, &args)
+        .await
+        .expect_err("hook authority unwinds");
+    assert!(
+        denied.to_string().contains("exceeds capability ceiling"),
+        "{denied}"
+    );
+    {
+        let _trusted = allow_trusted_bridge_calls();
+        let denied = crate::tool_handler_scope::scope(child.call_closure_pub(handle, &args))
+            .await
+            .expect_err("tool-handler host-call boundary remains closed");
+        assert!(
+            denied
+                .to_string()
+                .contains("unavailable inside a tool handler"),
+            "{denied}"
+        );
+    }
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    pop_execution_policy();
+    clear_runtime_hooks();
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn lazy_hook_module_state_survives_repeated_child_invocations() {
     crate::reset_thread_local_state();
     clear_runtime_hooks();
