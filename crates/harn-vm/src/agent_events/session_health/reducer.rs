@@ -160,7 +160,7 @@ impl SessionHealth {
                     tool_call_id,
                     *status == ToolCallStatus::Completed,
                     *mutation_status == ToolMutationStatus::Applied,
-                    health.as_ref(),
+                    health.as_deref(),
                 );
             }
             AgentEvent::IterationEnd { iteration_info, .. } => {

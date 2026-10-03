@@ -187,7 +187,7 @@ pub enum AgentEvent {
         data: Option<serde_json::Value>,
         /// Typed outcome telemetry, normalized by the tool execution owner.
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        health: Option<super::session_health::ToolOutcomeTelemetry>,
+        health: Option<Box<super::session_health::ToolOutcomeTelemetry>>,
         /// Where the tool actually ran. `None` only for events emitted
         /// from sites that pre-date the dispatch decision (e.g. the
         /// pending → in-progress transition the loop emits before the
@@ -1384,7 +1384,7 @@ pub enum AgentEvent {
     /// Measured session progress. This event never changes execution policy.
     SessionHealth {
         session_id: String,
-        fact: super::session_health::SessionHealthFact,
+        fact: Box<super::session_health::SessionHealthFact>,
     },
 }
 

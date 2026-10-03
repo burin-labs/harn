@@ -26,7 +26,7 @@ pub(crate) fn observe_event(
             .observe(event, now_ms)
             .map(|fact| AgentEvent::SessionHealth {
                 session_id: event.session_id().to_owned(),
-                fact,
+                fact: Box::new(fact),
             });
         (health, state.subscribers.clone())
     })

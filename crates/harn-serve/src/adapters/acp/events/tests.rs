@@ -23,6 +23,7 @@ mod budget_exhausted;
 mod compaction_events;
 mod mcp_events;
 mod mutation_audit;
+mod observation_fixtures;
 mod plan_document;
 mod registration_fixtures;
 mod repair_claim;
@@ -598,11 +599,7 @@ fn agent_event_ext_fixture_events() -> Vec<AgentEvent> {
             last_iteration: 4,
             tail_excerpt: "still thinking...".to_string(),
         },
-        AgentEvent::DaemonWatchdogTripped {
-            session_id: "session-1".to_string(),
-            attempts: 5,
-            elapsed_ms: 12_000,
-        },
+        observation_fixtures::fixture_watchdog(),
         AgentEvent::LoopControlDecision {
             session_id: "session-1".to_string(),
             iteration: 6,
@@ -612,17 +609,7 @@ fn agent_event_ext_fixture_events() -> Vec<AgentEvent> {
             reason: "verification still running".to_string(),
             status: "working".to_string(),
         },
-        AgentEvent::ToolFormatOverride {
-            session_id: "session-1".to_string(),
-            provider: "openrouter".to_string(),
-            model: "qwen/qwen3-coder".to_string(),
-            requested_format: "native".to_string(),
-            recommended_format: "text".to_string(),
-            catalog_parity: "native_unreliable".to_string(),
-            override_reason: Some("cross-check provider regression".to_string()),
-            applied_format: Some("text".to_string()),
-            steered: Some(true),
-        },
+        observation_fixtures::fixture_tool_format_override(),
         AgentEvent::ToolCallAudit {
             session_id: "session-1".to_string(),
             tool_call_id: "tool-1".to_string(),
@@ -633,17 +620,7 @@ fn agent_event_ext_fixture_events() -> Vec<AgentEvent> {
             }),
             receipt: Some(fixture_tool_call_receipt()),
         },
-        AgentEvent::SessionHealth {
-            session_id: "session-1".to_string(),
-            fact: harn_vm::agent_events::session_health::SessionHealthFact {
-                schema_version: 1,
-                session_id: "session-1".to_string(),
-                iteration: None,
-                turn: Default::default(),
-                rolling: Default::default(),
-                heuristics: Default::default(),
-            },
-        },
+        observation_fixtures::fixture_session_health(),
     ];
     drop(events.splice(14..14, registration_fixtures::events()));
     let mut events = schema_contract::with_purpose_label(events);
