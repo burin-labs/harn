@@ -687,6 +687,7 @@ internal-freshness-checker = []
 blake3 = "1.8.7"
 buildid = "=1.0.5"
 hex = "0.4"
+harn-parser = { path = "runtime-stack-owner" }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61.2", features = [
@@ -694,6 +695,19 @@ windows-sys = { version = "0.61.2", features = [
     "Win32_Storage_FileSystem",
 ] }
 TOML
+# This fixture compiles the production freshness owner, including its shared
+# stack dependency. Copy the actual dependency module into a minimal crate so
+# the fixture remains self-contained without duplicating the stack policy.
+mkdir -p "$cargo_fixture/runtime-stack-owner/src"
+cat > "$cargo_fixture/runtime-stack-owner/Cargo.toml" <<'TOML'
+[package]
+name = "harn-parser"
+version = "0.0.0"
+edition = "2021"
+TOML
+printf 'pub mod runtime_stack;\n' > "$cargo_fixture/runtime-stack-owner/src/lib.rs"
+cp "$repo_root/crates/harn-parser/src/runtime_stack.rs" \
+  "$cargo_fixture/runtime-stack-owner/src/runtime_stack.rs"
 mkdir -p "$cargo_fixture/src/bin" "$cargo_fixture/src/bootstrap"
 cp "$repo_root/crates/harn-cli/src/bin/harn-freshness-check.rs" \
   "$cargo_fixture/src/bin/harn-freshness-check.rs"

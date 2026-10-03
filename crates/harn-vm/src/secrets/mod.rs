@@ -12,12 +12,18 @@ mod env;
 mod file;
 mod keyring;
 mod memory;
+#[cfg(all(
+    feature = "native-keyring",
+    unix,
+    not(any(target_os = "macos", target_os = "ios", target_os = "android"))
+))]
+mod secret_service_lock;
 
 pub use env::EnvSecretProvider;
 pub use file::{FileSecretProvider, SECRET_FILE_PATH_ENV};
 pub use keyring::{
-    keychain_interaction_allowed, KeyringSecretProvider, NativeKeyring, NativeKeyringError,
-    NativeKeyringUnavailable, SECRET_INTERACTIVE_ENV,
+    keychain_interaction_allowed, KeyringSecretProvider, NativeKeyring, NativeKeyringAvailability,
+    NativeKeyringError, NativeKeyringUnavailable, SECRET_INTERACTIVE_ENV,
 };
 pub use memory::MemorySecretProvider;
 

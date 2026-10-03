@@ -553,6 +553,66 @@ fn provider_http_errors_surface_numeric_codes_and_request_ids() {
 }
 
 #[test]
+fn openrouter_parameter_routing_rejection_is_not_model_unavailability() {
+    let info = classify_provider_http_error(
+        "openrouter",
+        reqwest::StatusCode::NOT_FOUND,
+        None,
+        r#"{"error":{"message":"No endpoints found that can handle the requested parameters. See routing guidance.","code":404}}"#,
+    );
+    assert_eq!(info.kind, LlmErrorKind::Terminal);
+    assert_eq!(info.reason, LlmErrorReason::InvalidRequest);
+
+    let structured = classify_provider_http_error(
+        "openrouter",
+        reqwest::StatusCode::NOT_FOUND,
+        None,
+        r#"{"error":{"message":"No endpoints found for openai/gpt-oss-120b","code":404,"metadata":{"failed_routing_step":"Filter by Parameters"}}}"#,
+    );
+    assert_eq!(structured.reason, LlmErrorReason::InvalidRequest);
+
+    let stream = classify_provider_stream_error(
+        "openrouter",
+        r#"{"error":{"message":"No endpoints found","code":404,"metadata":{"failed_routing_step":"Filter by Parameters"}}}"#,
+        false,
+    );
+    assert_eq!(
+        thrown_field(&stream, "reason").as_deref(),
+        Some("invalid_request")
+    );
+
+    let mixed_filters = classify_provider_http_error(
+        "openrouter",
+        reqwest::StatusCode::NOT_FOUND,
+        None,
+        r#"{"error":{"message":"Filter by Parameters removed some endpoints; Filter by Fallback removed the rest","code":404,"metadata":{"failed_routing_step":"Filter by Fallback"}}}"#,
+    );
+    assert_eq!(mixed_filters.reason, LlmErrorReason::ModelUnavailable);
+
+    let other_provider = classify_provider_http_error(
+        "fireworks",
+        reqwest::StatusCode::NOT_FOUND,
+        None,
+        r#"{"error":{"message":"No endpoints found that can handle the requested parameters.","code":404}}"#,
+    );
+    assert_eq!(other_provider.reason, LlmErrorReason::ModelUnavailable);
+
+    for message in [
+        "No endpoints found for example/missing-model",
+        "0 endpoints out of 1 requested are available matching your guardrail restrictions and data policy.",
+    ] {
+        let body = serde_json::json!({"error": {"message": message, "code": 404}});
+        let info = classify_provider_http_error(
+            "openrouter",
+            reqwest::StatusCode::NOT_FOUND,
+            None,
+            &body.to_string(),
+        );
+        assert_eq!(info.reason, LlmErrorReason::ModelUnavailable);
+    }
+}
+
+#[test]
 fn provider_http_errors_surface_openrouter_previous_errors_tail() {
     let body = concat!(
         r#"{"error":{"message":"No endpoints could satisfy the request","code":502,"metadata":{"#,

@@ -549,7 +549,6 @@ fn materialized_persona_name(package_root: &Path) -> Result<String, String> {
 mod tests {
     use std::fs;
     use std::sync::{mpsc, Arc, Mutex};
-    use std::thread;
 
     use harn_modules::package_snapshot::PackageSnapshot;
 
@@ -659,9 +658,8 @@ mod tests {
                 Some(&manifest),
                 &first_args,
                 move |_, _, _| {
-                    let handle = thread::Builder::new()
+                    let handle = harn_parser::runtime_stack::builder()
                         .name("concurrent-persona-apply-test".into())
-                        .stack_size(crate::CLI_RUNTIME_STACK_SIZE)
                         .spawn(move || {
                             package::project_mutation_lock_test_probe::install(move || {
                                 attempted_tx.send(()).unwrap();

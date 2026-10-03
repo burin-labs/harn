@@ -559,7 +559,8 @@ async fn call_harness_process_method(
             .await
         }
         "default_shell" => {
-            crate::stdlib::host::dispatch_host_operation(
+            dispatch_host_from_vm(
+                vm,
                 "process",
                 "get_default_shell",
                 &crate::value::DictMap::new(),
@@ -567,7 +568,8 @@ async fn call_harness_process_method(
             .await
         }
         "list_shells" => {
-            crate::stdlib::host::dispatch_host_operation(
+            dispatch_host_from_vm(
+                vm,
                 "process",
                 "list_shells",
                 &crate::value::DictMap::new(),
@@ -576,7 +578,7 @@ async fn call_harness_process_method(
         }
         "shell_invocation" => {
             let params = required_dict_arg(args, 0, "HarnessProcess.shell_invocation")?;
-            crate::stdlib::host::dispatch_host_operation("process", "shell_invocation", params)
+            dispatch_host_from_vm(vm, "process", "shell_invocation", params)
                 .await
         }
         _ => Err(method_unsupported(handle, method)),
@@ -637,7 +639,7 @@ async fn call_runtime_capability_method(
         }
         crate::value::DictMap::new()
     };
-    crate::stdlib::host::dispatch_host_operation("runtime", method, &params).await
+    dispatch_host_from_vm(vm, "runtime", method, &params).await
 }
 
 async fn call_interaction_capability_method(
@@ -668,7 +670,7 @@ async fn call_interaction_capability_method(
     if let Some(kind) = args.get(1) {
         params.insert(crate::value::intern_key("type"), kind.clone());
     }
-    crate::stdlib::host::dispatch_host_operation("interaction", "ask", &params).await
+    dispatch_host_from_vm(vm, "interaction", "ask", &params).await
 }
 
 async fn call_tools_capability_method(
@@ -695,13 +697,32 @@ async fn call_tools_capability_method(
 }
 
 async fn call_dict_host_capability_method(
+    vm: &Vm,
     handle: &VmHarness,
     capability: &str,
     method: &str,
     args: &[VmValue],
 ) -> Result<VmValue, VmError> {
     let params = required_dict_arg(args, 0, handle.type_name())?;
-    crate::stdlib::host::dispatch_host_operation(capability, method, params).await
+    dispatch_host_from_vm(vm, capability, method, params).await
+}
+
+async fn dispatch_host_from_vm(
+    vm: &Vm,
+    capability: &str,
+    operation: &str,
+    params: &crate::value::DictMap,
+) -> Result<VmValue, VmError> {
+    let ctx = crate::vm::AsyncBuiltinCtx::from_inline_parent(vm);
+    // Boxed so each typed Harness method does not inline the dispatcher's
+    // state machine into its own stack frame.
+    Box::pin(crate::stdlib::host::dispatch_host_operation_with_ctx(
+        Some(&ctx),
+        capability,
+        operation,
+        params,
+    ))
+    .await
 }
 
 async fn call_project_capability_method(
@@ -795,7 +816,7 @@ async fn call_project_capability_method(
     if let Some(builtin) = builtin {
         return vm.call_capability_builtin(builtin, args.to_vec()).await;
     }
-    call_dict_host_capability_method(handle, "project", method, args).await
+    call_dict_host_capability_method(vm, handle, "project", method, args).await
 }
 
 async fn call_testing_capability_method(

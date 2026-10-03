@@ -7,7 +7,11 @@ pub type ProviderPortableProbeOption = "temperature" \
   | "presence_penalty" \
   | "stop"
 
-pub type ProviderOptionProbeVerdict = "accepted" | "rejected" | "inconclusive" | "gated_locally"
+pub type ProviderOptionProbeVerdict = "accepted" \
+  | "rejected" \
+  | "inconclusive" \
+  | "gated_locally" \
+  | "excluded_by_account_policy"
 
 pub type ProviderOptionProbeAttempt = {
   verdict: ProviderOptionProbeVerdict,
@@ -19,6 +23,10 @@ pub type ProviderOptionProbeAttempt = {
   input_tokens?: int,
   output_tokens?: int,
   cost_usd?: float,
+  retry_count?: int,
+  observed_cost_count?: int,
+  observed_usage_count?: int,
+  control_error?: string,
 }
 
 pub type ProviderOptionProbeReport = {

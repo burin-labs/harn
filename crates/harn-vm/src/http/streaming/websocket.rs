@@ -264,7 +264,7 @@ pub(super) fn vm_websocket_server(
     let running = Arc::new(AtomicBool::new(true));
     let server_routes = routes.clone();
     let server_running = running.clone();
-    thread::Builder::new()
+    crate::runtime_stack::builder()
         .name(format!("harn-ws-{id}"))
         .spawn(move || websocket_server_loop(listener, server_routes, event_tx, server_running))
         .map_err(|error| vm_error(format!("websocket_server: spawn failed: {error}")))?;
@@ -427,7 +427,7 @@ fn websocket_server_loop(
                 let event_tx = event_tx.clone();
                 let running = running.clone();
                 let peer = peer.to_string();
-                let _ = thread::Builder::new()
+                let _ = crate::runtime_stack::builder()
                     .name("harn-ws-conn".to_string())
                     .spawn(move || {
                         websocket_connection_thread(stream, peer, routes, event_tx, running);

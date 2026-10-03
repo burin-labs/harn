@@ -263,6 +263,7 @@ fn catalog_provider(id: String, provider: ProviderDef) -> CatalogProvider {
             style: provider.auth_style.clone(),
             header: provider.auth_header.clone(),
             env: llm_config::auth_env_names(&provider.auth_env),
+            credential_env: provider.credential_env.clone(),
             required: provider.auth_style != "none",
         },
         extra_headers: provider.extra_headers.clone(),

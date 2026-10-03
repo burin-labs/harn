@@ -442,7 +442,7 @@ pub(super) fn policy_for_mode(
 
 /// Add embedder sandbox config to the per-turn policy, skipping duplicate
 /// Harn read roots and delegating process-only merging to the VM policy type.
-fn apply_sandbox_config(policy: &mut CapabilityPolicy, sandbox: &AcpSandboxConfig) {
+pub(super) fn apply_sandbox_config(policy: &mut CapabilityPolicy, sandbox: &AcpSandboxConfig) {
     for root in &sandbox.read_only_roots {
         if !policy
             .read_only_roots

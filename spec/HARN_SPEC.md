@@ -1769,8 +1769,10 @@ defer {
 ```
 
 Registers a block to run when the enclosing lexical scope exits — on normal
-fallthrough, on `return`, on `break` / `continue` out of an enclosing loop,
-or on an uncaught throw. Multiple `defer` blocks in the same scope execute
+fallthrough, on `return` (including the early return of a postfix `?`), on
+`break` / `continue` out of an enclosing loop,
+or on an error leaving the scope, including one raised by a called function
+or a failing operation. Multiple `defer` blocks in the same scope execute
 in LIFO (last-registered, first-executed) order, similar to Zig's `defer`.
 The deferred block runs in the scope where it was declared.
 
@@ -3163,8 +3165,16 @@ try { ... } finally { ... }
 try { ... } catch e { ... }
 ```
 
-`return`, `break`, and `continue` inside a try body with a finally block will
-execute the finally block before the control flow transfer completes.
+An error reaches the finally block wherever it was raised: an inline `throw`,
+a called or imported function, or a failing operation such as division by
+zero. The block runs exactly once and the original error then continues to
+propagate. A `throw` from the finally block replaces the original error, and a
+`return` from it discards the original error.
+
+`return`, `break`, `continue`, and the early return of a postfix `?` inside a
+try body with a finally block will execute the finally block before the
+control flow transfer completes. A `throw` from that finally block replaces the
+transfer, and a `return` from it replaces the returned value.
 
 The finally block's return value is discarded — the overall expression value
 comes from the try or catch body.
@@ -7302,6 +7312,13 @@ workspace = ["read_text", "write_text"]
   When present, `harn check` fails with `HARN-CAP-008` for each declared
   operation missing from the served list. The check ignores built-in preflight
   defaults because the project did not declare them.
+- An operation metadata entry may declare `"optional": true`, for example
+  `{"runtime":{"operations":{"report":{"optional":true}}}}`.
+  Optional operations remain known to static checking but need not be served
+  by every host. Their absence produces no `HARN-CAP-008` finding, including
+  under strict ACP reconciliation. This declaration does not install a handler
+  or advertise the operation as served; callers must check `host.has` before
+  invoking it. The `optional` value must be a boolean.
 - `runtime_installed_host_operations` lists exact `capability.operation` pairs
   whose handlers are added at runtime. The static check skips these operations.
   Wildcards and malformed names are not allowed.

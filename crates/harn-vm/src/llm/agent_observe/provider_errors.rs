@@ -765,7 +765,11 @@ pub(super) fn append_provider_call_error_observability(
         ("category".to_string(), serde_json::json!(category.as_str())),
         (
             "kind".to_string(),
-            serde_json::json!(classified.kind.as_str()),
+            serde_json::json!(if retryable {
+                super::api::LlmErrorKind::Transient.as_str()
+            } else {
+                super::api::LlmErrorKind::Terminal.as_str()
+            }),
         ),
         (
             "reason".to_string(),
@@ -834,6 +838,58 @@ pub(super) fn append_provider_call_error_observability(
 #[cfg(test)]
 mod stream_failure_observability_tests {
     use super::*;
+
+    #[test]
+    fn provider_error_receipt_kind_agrees_with_stream_retry_decision() {
+        for (frame, expected_kind, expected_retryable) in [
+            (
+                r#"{"error":{"message":"Invalid channel: tool","type":"invalid_request_error","code":"invalid_request_error"}}"#,
+                "transient",
+                true,
+            ),
+            (
+                r#"{"error":{"message":"Unknown parameter: foo","type":"invalid_request_error","code":"invalid_request_error"}}"#,
+                "terminal",
+                false,
+            ),
+        ] {
+            let error = crate::llm::api::classify_provider_stream_error("fireworks", frame, false);
+            let retryable = is_retryable_llm_error(&error);
+            assert_eq!(retryable, expected_retryable);
+            let category = crate::value::error_to_category(&error);
+            let message = error.to_string();
+            let classified = crate::llm::api::classify_llm_error(category.clone(), &message);
+            let opts = crate::llm::api::options::base_opts("fireworks");
+            let transcript_dir = tempfile::tempdir().expect("transcript tempdir");
+            push_llm_transcript_dir(transcript_dir.path().to_str().expect("utf8 tempdir"));
+            append_provider_call_error_observability(ProviderCallErrorObservation {
+                iteration: 1,
+                call_id: "call-fireworks-stream",
+                attempt: 1,
+                status: if retryable { "retrying" } else { "error" },
+                opts: &opts,
+                category: &category,
+                classified: &classified,
+                message: &message,
+                stream_failure: error.provider_stream_failure(),
+                schema_failure: None,
+                usage: None,
+                retryable,
+                failover_eligible: false,
+                attempt_count: None,
+            });
+            pop_llm_transcript_dir();
+            let receipt: serde_json::Value = serde_json::from_str(
+                std::fs::read_to_string(transcript_dir.path().join("llm_transcript.jsonl"))
+                    .expect("provider error receipt")
+                    .trim(),
+            )
+            .expect("valid provider error receipt");
+            assert_eq!(receipt["type"], "provider_call_error");
+            assert_eq!(receipt["kind"], expected_kind);
+            assert_eq!(receipt["retryable"], expected_retryable);
+        }
+    }
 
     #[test]
     fn provider_error_receipt_projects_stream_phase_and_deadline() {

@@ -72,8 +72,11 @@ pub use operator_grant::{
     current_operator_approval_grant, install_operator_approval_grant, OperatorApprovalGrant,
     OperatorApprovalGrantGuard,
 };
+pub(crate) use run_approval::construct_live_approval_policy;
 pub use run_approval::{
-    ApprovalAvailability, RunApprovalPolicy, RunAuthorityPosture, RunInteractivity, WorkspaceTrust,
+    current_approval_policy, current_run_approval_policy, pop_approval_policy,
+    push_approval_policy, ApprovalAvailability, RunApprovalPolicy, RunAuthorityPosture,
+    RunInteractivity, WorkspaceTrust,
 };
 pub(crate) use runtime_effect_state::RuntimeEffectState;
 pub use tool_enforcement::enforce_current_policy_for_tool;
@@ -89,7 +92,8 @@ pub use types::{
 
 thread_local! {
     static EXECUTION_POLICY_STACK: RefCell<Vec<CapabilityPolicy>> = const { RefCell::new(Vec::new()) };
-    static EXECUTION_APPROVAL_POLICY_STACK: RefCell<Vec<ToolApprovalPolicy>> = const { RefCell::new(Vec::new()) };
+    static EXECUTION_APPROVAL_POLICY_STACK: RefCell<Vec<RunApprovalPolicy>> = const { RefCell::new(Vec::new()) };
+    static PREPARED_APPROVAL_POLICY: RefCell<Option<std::sync::Arc<RunApprovalPolicy>>> = const { RefCell::new(None) };
     static TRUSTED_BRIDGE_CALL_DEPTH: RefCell<usize> = const { RefCell::new(0) };
 }
 
@@ -122,20 +126,6 @@ pub fn execution_policy_active() -> bool {
     EXECUTION_POLICY_STACK.with(|stack| !stack.borrow().is_empty())
 }
 
-pub fn push_approval_policy(policy: ToolApprovalPolicy) {
-    EXECUTION_APPROVAL_POLICY_STACK.with(|stack| stack.borrow_mut().push(policy));
-}
-
-pub fn pop_approval_policy() {
-    EXECUTION_APPROVAL_POLICY_STACK.with(|stack| {
-        stack.borrow_mut().pop();
-    });
-}
-
-pub fn current_approval_policy() -> Option<ToolApprovalPolicy> {
-    EXECUTION_APPROVAL_POLICY_STACK.with(|stack| stack.borrow().last().cloned())
-}
-
 // --- Per-task ambient-scope swap primitives -------------------------------
 //
 // The policy/approval/trusted stacks are thread-locals managed as LIFO scopes.
@@ -152,8 +142,14 @@ pub(crate) fn swap_execution_policy_stack(next: Vec<CapabilityPolicy>) -> Vec<Ca
     EXECUTION_POLICY_STACK.with(|stack| std::mem::replace(&mut *stack.borrow_mut(), next))
 }
 
-pub(crate) fn swap_approval_policy_stack(next: Vec<ToolApprovalPolicy>) -> Vec<ToolApprovalPolicy> {
+pub(crate) fn swap_approval_policy_stack(next: Vec<RunApprovalPolicy>) -> Vec<RunApprovalPolicy> {
     EXECUTION_APPROVAL_POLICY_STACK.with(|stack| std::mem::replace(&mut *stack.borrow_mut(), next))
+}
+
+pub(crate) fn swap_prepared_approval_policy(
+    next: Option<std::sync::Arc<RunApprovalPolicy>>,
+) -> Option<std::sync::Arc<RunApprovalPolicy>> {
+    PREPARED_APPROVAL_POLICY.with(|slot| std::mem::replace(&mut *slot.borrow_mut(), next))
 }
 
 pub(crate) fn swap_trusted_bridge_depth(next: usize) -> usize {
@@ -188,6 +184,10 @@ pub(super) fn tool_kind_participates_in_write_allowlist(tool_name: &str) -> bool
 }
 
 pub struct TrustedBridgeCallGuard;
+
+fn trusted_bridge_call_is_active() -> bool {
+    TRUSTED_BRIDGE_CALL_DEPTH.with(|depth| *depth.borrow() > 0)
+}
 
 pub fn allow_trusted_bridge_calls() -> TrustedBridgeCallGuard {
     TRUSTED_BRIDGE_CALL_DEPTH.with(|depth| {
@@ -602,6 +602,13 @@ pub fn enforce_current_policy_for_builtin(name: &str, args: &[VmValue]) -> Resul
                     "host_call '{name}' must use capability.operation naming"
                 ));
             };
+            // Registered VM hooks have the same runtime-selected authority
+            // for native host calls as for typed Harness and bridged calls.
+            // The host dispatcher still owns command safety, and the native
+            // builtin independently refuses calls inside tool handlers.
+            if trusted_bridge_call_is_active() {
+                return Ok(());
+            }
             // The VM's own policy machinery may ask for consent regardless of
             // the calling tool's ceiling; `consent_capability` owns that rule
             // and explains why. Everything below is unchanged, including the
@@ -646,8 +653,7 @@ pub fn enforce_current_policy_for_capability(
     // migrated from ambient `store_get` / `agent_session_current_id` to
     // `harness.runtime.store_get` / `harness.agent.current_id` silently loses
     // state:read under the tool's effect ceiling (observed downstream).
-    let trusted = TRUSTED_BRIDGE_CALL_DEPTH.with(|depth| *depth.borrow() > 0);
-    if trusted {
+    if trusted_bridge_call_is_active() {
         return Ok(());
     }
     let Some(policy) = current_execution_policy() else {
@@ -673,8 +679,7 @@ pub fn enforce_current_policy_for_capability(
 }
 
 pub fn enforce_current_policy_for_bridge_builtin(name: &str) -> Result<(), VmError> {
-    let trusted = TRUSTED_BRIDGE_CALL_DEPTH.with(|depth| *depth.borrow() > 0);
-    if trusted {
+    if trusted_bridge_call_is_active() {
         return Ok(());
     }
     if current_execution_policy().is_some() {

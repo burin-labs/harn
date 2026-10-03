@@ -48,7 +48,7 @@ mod tests_typed_op_fallback;
 mod tests_value_calls;
 
 pub(crate) use async_builtin::run_async_builtin_with;
-pub use async_builtin::AsyncBuiltinCtx;
+pub use async_builtin::{AsyncBuiltinCtx, VmCallSite};
 pub use builtin::{VmBuiltinArity, VmBuiltinKind, VmBuiltinMetadata};
 pub use debug::{DebugAction, DebugState};
 pub(crate) use harness_seam::{install_harness_methods, HarnessMethodFuture, HarnessMethods};
@@ -61,7 +61,8 @@ pub(crate) use task_cleanup::PendingTaskCleanup;
 pub use work::{VmWork, VmWorkRecorder};
 
 pub(crate) use call_args::CallArgs;
+pub(crate) use ops::{CaughtError, ExceptionHandler};
 pub(crate) use state::{
-    CallFrame, ExceptionHandler, InterruptHandler, IterState, LocalSlot, ScopeSpan, TaskScope,
-    VmBuiltinDispatch, VmBuiltinEntry,
+    CallFrame, InterruptHandler, IterState, LocalSlot, ScopeSpan, TaskScope, VmBuiltinDispatch,
+    VmBuiltinEntry,
 };

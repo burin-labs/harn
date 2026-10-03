@@ -78,7 +78,7 @@ fn harness_http_mocks_follow_the_harness_across_threads_without_leaking() {
     assert!(!isolated.has_match("POST", "https://api.example.test/jobs"));
 
     let moved = Arc::clone(&registry);
-    let response = std::thread::spawn(move || {
+    let response = crate::runtime_stack::spawn(move || {
         moved.consume(
             "POST",
             "https://api.example.test/jobs",
@@ -430,7 +430,7 @@ async fn http_download_oversize_stream_preserves_existing_file() {
 
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind listener");
     let port = listener.local_addr().expect("listener addr").port();
-    let thread = std::thread::spawn(move || {
+    let thread = crate::runtime_stack::spawn(move || {
         let (mut stream, _) = listener.accept().expect("accept client");
         let request = read_http_request_generic(&mut stream);
         assert!(request.starts_with("GET /oversize HTTP/1.1\r\n"));
@@ -534,7 +534,7 @@ async fn custom_tls_ca_bundle_and_pin_allow_request() {
             )
             .expect("build tls config"),
     );
-    let thread = std::thread::spawn(move || {
+    let thread = crate::runtime_stack::spawn(move || {
         let (tcp, _) = listener.accept().expect("accept tls client");
         let conn = ServerConnection::new(server_config).expect("server connection");
         let mut stream = StreamOwned::new(conn, tcp);
@@ -595,7 +595,7 @@ async fn custom_tls_pin_mismatch_is_rejected() {
             )
             .expect("build tls config"),
     );
-    let thread = std::thread::spawn(move || {
+    let thread = crate::runtime_stack::spawn(move || {
         let (tcp, _) = listener.accept().expect("accept tls client");
         let conn = ServerConnection::new(server_config).expect("server connection");
         let mut stream = StreamOwned::new(conn, tcp);

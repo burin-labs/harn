@@ -11,20 +11,6 @@ fn strings_of(values: any) -> list<string> {
   return (values ?? []).map({ value -> return trim(to_string(value)) }).to_list()
 }
 
-fn blacksmith_runner_expression(runner: string) -> string {
-  const paid_event =
-    "(github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository))"
-  return "$"
-    + "{{ vars.${BLACKSMITH_ENABLE_VAR} == 'true' && ${paid_event} && '${runner}' || '${HOSTED_LINUX_RUNNER}' }}"
-}
-
-fn blacksmith_tier_expression() -> string {
-  const paid_event =
-    "(github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository))"
-  return "$"
-    + "{{ vars.${BLACKSMITH_ENABLE_VAR} == 'true' && ${paid_event} && '${BLACKSMITH_RUNNER_TIER}' || '${HOSTED_RUNNER_TIER}' }}"
-}
-
 /**
  * The hosted producer's budget is owned by its workload, not by a round number.
  *
@@ -157,9 +143,6 @@ const PRODUCER_SETUP_OVERHEAD_MINUTES = 6
 /** A full cache generation save, not a near-hit. Measured at 8m35s. */
 const PRODUCER_CACHE_SAVE_RESERVE_MINUTES = 12
 
-/** Paid Blacksmith capacity keeps its hard cost fuse; it never saves a cache. */
-const PRODUCER_PAID_FUSE_MINUTES = 20
-
 /** The reserve a full cache generation save may spend without cancelling. */
 pub fn producer_cache_save_reserve_minutes() -> int {
   return PRODUCER_CACHE_SAVE_RESERVE_MINUTES
@@ -197,11 +180,16 @@ fn timeout_expression(budgets: list<StepBudget>, owned_rung: bool = true) -> str
   // The vendor rung is a fresh VM that runs this job alone and writes the
   // main-branch cache like the hosted rung, so it carries the hosted ceiling,
   // cache-save reserve included.
+  const paid = to_string(hosted_ceiling_minutes(budgets))
   return producer_rung_expression(
-    to_string(PRODUCER_PAID_FUSE_MINUTES),
-    owned_rung ? to_string(owned_ceiling_minutes(budgets)) : "",
-    to_string(hosted_ceiling_minutes(budgets)),
-    to_string(hosted_ceiling_minutes(budgets)),
+    {
+      owned: owned_rung ? to_string(owned_ceiling_minutes(budgets)) : "",
+      // A merge group runs the same archive and complete test suite. Its
+      // ceiling must contain those step budgets even when the runner is cold.
+      datacenter: owned_rung ? to_string(owned_ceiling_minutes(budgets)) : "",
+      vendor: paid,
+      hosted: paid,
+    },
   )
 }
 
@@ -227,8 +215,50 @@ pub fn cli_producer_hosted_ceiling_minutes() -> int {
   return hosted_ceiling_minutes(CLI_PRODUCER_STEP_BUDGETS)
 }
 
+/**
+ * A reserved runner is an owned box and carries the owned ceiling. The two
+ * paid rungs after it carry the paid one.
+ */
 pub fn cli_producer_timeout_expression() -> string {
-  return timeout_expression(CLI_PRODUCER_STEP_BUDGETS, producer_uses_owned_pool("rust-cli"))
+  const paid = to_string(hosted_ceiling_minutes(CLI_PRODUCER_STEP_BUDGETS))
+  return cli_producer_rung_expression(
+    {
+      reserved: to_string(owned_ceiling_minutes(CLI_PRODUCER_STEP_BUDGETS)),
+      vendor: paid,
+      hosted: paid,
+    },
+  )
+}
+
+fn producer_job_runner_expression(job_name: string) -> string {
+  if job_name == "rust-cli" {
+    return cli_producer_runner_expression()
+  }
+  return producer_runner_expression(producer_uses_owned_pool(job_name))
+}
+
+fn producer_job_tier_expression(job_name: string) -> string {
+  if job_name == "rust-cli" {
+    return cli_producer_tier_expression()
+  }
+  return producer_tier_expression(producer_uses_owned_pool(job_name))
+}
+
+fn producer_job_timeout_expression(job_name: string, budgets: list<StepBudget>) -> string {
+  if job_name == "rust-cli" {
+    return cli_producer_timeout_expression()
+  }
+  return timeout_expression(budgets, producer_uses_owned_pool(job_name))
+}
+
+fn producer_job_ladder(job_name: string) -> string {
+  if job_name == "rust-cli" {
+    return " the reserved ${RESERVED_CLI_PRODUCER_LABEL} runners on same-repository pull requests and merge groups,"
+  }
+  if producer_uses_owned_pool(job_name) {
+    return " the owned ${SELFHOSTED_LINUX_BIG_POOL} pool on same-repository pull requests, the ${DATACENTER_HOST_LABEL} runners on merge groups,"
+  }
+  return ""
 }
 
 /** Trusted PR producers require a measured capacity decision before dispatch. */
@@ -388,14 +418,11 @@ fn rust_lint_lane_errors(workflow: dict) -> list<string> {
     return ["ci.yml:${job_name} must define the strict Clippy lane"]
   }
   let errors: list<string> = []
-  if trim(job?.["runs-on"] ?? "") != blacksmith_runner_expression(BLACKSMITH_8CPU_RUNNER) {
-    errors = errors
-      + [
-        "ci.yml:${job_name} must route trusted PR and merge-group work through the shared Blacksmith switch",
-      ]
+  if trim(job?.["runs-on"] ?? "") != HOSTED_LINUX_RUNNER {
+    errors = errors + ["ci.yml:${job_name} must run on GitHub-hosted ${HOSTED_LINUX_RUNNER}"]
   }
-  if trim(job?.env?.[RUNNER_TIER_ENV] ?? "") != blacksmith_tier_expression() {
-    errors = errors + ["ci.yml:${job_name} must mirror its Blacksmith/hosted runner tier"]
+  if trim(to_string(job?.env?.[RUNNER_TIER_ENV] ?? "")) != HOSTED_RUNNER_TIER {
+    errors = errors + ["ci.yml:${job_name} must declare its ${HOSTED_RUNNER_TIER} runner tier"]
   }
   if len(matching_steps(job, PERSISTENT_SCCACHE_ACTION)) > 0 {
     errors = errors + ["ci.yml:${job_name} must not claim the producer's persistent sccache"]
@@ -414,12 +441,10 @@ fn rust_lint_lane_errors(workflow: dict) -> list<string> {
   return errors
 }
 
-/** Hold a compile lane to one Blacksmith tier with a cold-safe hosted fallback. */
+/** Hold a compile lane to its owned, vendor and hosted rungs with a cold-safe cache. */
 fn persistent_compile_lane_errors(
   workflow: dict,
   job_name: string,
-  runner: string,
-  sccache_key: string,
   rust_cache_key: string,
   budgets: list<StepBudget>,
 ) -> list<string> {
@@ -433,57 +458,47 @@ fn persistent_compile_lane_errors(
     errors = errors
       + ["ci.yml:${job_name} must require a successful capacity decision on trusted pull requests"]
   }
-  const owned_rung = producer_uses_owned_pool(job_name)
-  if trim(job?.["runs-on"] ?? "") != producer_runner_expression(runner, owned_rung) {
-    const owned_clause = if owned_rung {
-      " the owned ${SELFHOSTED_LINUX_BIG_POOL} pool on same-repository pull requests,"
-    } else {
-      ""
-    }
+  if trim(job?.["runs-on"] ?? "") != producer_job_runner_expression(job_name) {
     errors = errors
       + [
-        "ci.yml:${job_name} must ladder paid ${runner},${owned_clause} ${PRODUCER_VENDOR_LINUX_RUNNER}, then ${PRODUCER_HOSTED_LINUX_RUNNER}",
+        "ci.yml:${job_name} must ladder${producer_job_ladder(job_name)} ${PRODUCER_VENDOR_LINUX_RUNNER}, then ${PRODUCER_HOSTED_LINUX_RUNNER}",
       ]
   }
-  if trim(job?.env?.[RUNNER_TIER_ENV] ?? "") != producer_tier_expression(owned_rung) {
+  if job_name == "rust-cli" {
+    errors = errors + cli_producer_reservation_errors(workflow)
+  } else if producer_uses_owned_pool(job_name) {
+    errors = errors + merge_group_datacenter_errors(workflow)
+  }
+  if trim(job?.env?.[RUNNER_TIER_ENV] ?? "") != producer_job_tier_expression(job_name) {
     errors = errors
       + ["ci.yml:${job_name} must mirror every one of its runner tiers"]
   }
   if trim(to_string(job?.env?.SCCACHE_CACHE_SIZE ?? "")) != "15G" {
     errors = errors + ["ci.yml:${job_name} must bound persistent sccache at 15G"]
   }
-  if trim(to_string(job?.["timeout-minutes"] ?? "")) != timeout_expression(budgets, owned_rung) {
+  if trim(to_string(job?.["timeout-minutes"] ?? ""))
+    != producer_job_timeout_expression(job_name, budgets) {
+    const datacenter =
+      job_name != "rust-cli" && producer_uses_owned_pool(job_name) ? ", the ${owned_ceiling_minutes(budgets)}-minute merge-group datacenter ceiling" : ""
     errors = errors
       + [
-        "ci.yml:${job_name} must keep the ${PRODUCER_PAID_FUSE_MINUTES}-minute paid-runner fuse, the ${owned_ceiling_minutes(budgets)}-minute owned ceiling, and the ${hosted_ceiling_minutes(budgets)}-minute hosted ceiling sized from its step budgets plus a cache-save reserve",
+        "ci.yml:${job_name} must keep the ${owned_ceiling_minutes(budgets)}-minute owned ceiling${datacenter} and the ${hosted_ceiling_minutes(budgets)}-minute paid ceiling sized from its step budgets plus a cache-save reserve",
       ]
   }
   errors = errors + producer_step_budget_errors(job, job_name, budgets)
-  const persistent = matching_steps(job, PERSISTENT_SCCACHE_ACTION)
-  if len(persistent) != 1 {
-    errors = errors + ["ci.yml:${job_name} must configure persistent sccache exactly once"]
-  } else {
-    if trim(persistent[0]?.if ?? "") != "env.${RUNNER_TIER_ENV} == '${BLACKSMITH_RUNNER_TIER}'" {
-      errors = errors + ["ci.yml:${job_name} must mount persistent sccache only on Blacksmith"]
-    }
-    if trim(to_string(persistent[0]?.with?.["cache-key"] ?? "")) != sccache_key
-      || trim(to_string(persistent[0]?.with?.sticky ?? ""))
-        != "true" {
-      errors = errors + ["ci.yml:${job_name} must mount sticky sccache key ${sccache_key}"]
-    }
+  // The sticky sccache mount only ever ran on Blacksmith Linux, which this
+  // lane no longer reaches; a leftover mount would be a step that never runs.
+  if len(matching_steps(job, PERSISTENT_SCCACHE_ACTION)) > 0 {
+    errors = errors + ["ci.yml:${job_name} must not mount the Blacksmith sticky sccache"]
   }
   const caches = matching_steps(job, RUST_CACHE_ACTION)
   if len(caches) != 1 {
     errors = errors + ["ci.yml:${job_name} must configure ${RUST_CACHE_ACTION} exactly once"]
-  } else if trim(caches[0]?.if ?? "")
-    != "env.${RUNNER_TIER_ENV} != '${BLACKSMITH_RUNNER_TIER}'" {
-    // Named by what it excludes, not by what it includes. A guard that lists
-    // the tiers it knows makes a new tier skip in silence, which on this step
+  } else if trim(caches[0]?.if ?? "") != "" {
+    // Every tier this lane reaches restores the cache. A guard that lists the
+    // tiers it knows makes a new tier skip in silence, which on this step
     // means a cold compile reported as a clean pass.
-    errors = errors
-      + [
-        "ci.yml:${job_name} must restore rust-cache on every tier except Blacksmith, which has its own sticky sccache",
-      ]
+    errors = errors + ["ci.yml:${job_name} must restore rust-cache on every tier"]
   } else if trim(to_string(caches[0]?.with?.["shared-key"] ?? "")) != rust_cache_key
     || trim(to_string(caches[0]?.with?.[WORKSPACE_CACHE_INPUT] ?? ""))
       != "true" {
@@ -1069,7 +1084,7 @@ fn colocated_rust_proof_errors(workflow: dict) -> list<string> {
       != "vars.${COLOCATED_TESTS_DISABLE_VAR} != 'true'"
     || trim(colocated_step?.env?.HARN_LLM_CALLS_DISABLED ?? "")
       != "1"
-    || !contains(colocated_command, "cargo nextest run --locked --workspace --profile ci")
+    || !contains(colocated_command, "cargo-nextest nextest run --locked --workspace --profile ci")
     || !contains(colocated_command, HOST_BOUND_RUST_TEST_FILTER_SETUP)
     || !contains(colocated_command, NEUTRAL_RUST_TEST_FILTER_FLAG)
     || contains(colocated_command, "--archive-file") {
@@ -1323,19 +1338,10 @@ fn residual_docs_proof_errors(workflow: dict) -> list<string> {
 pub fn ci_linux_lane_policy_errors(workflow: dict) -> list<string> {
   let errors = hosted_compile_lane_errors(workflow, "package-audit", "package-audit")
     + rust_lint_lane_errors(workflow)
-    + persistent_compile_lane_errors(
-      workflow,
-      "rust-cli",
-      BLACKSMITH_8CPU_RUNNER,
-      "harn-ci-cli",
-      "harn-ci-cli",
-      CLI_PRODUCER_STEP_BUDGETS,
-    )
+    + persistent_compile_lane_errors(workflow, "rust-cli", "harn-ci-cli", CLI_PRODUCER_STEP_BUDGETS)
     + persistent_compile_lane_errors(
       workflow,
       "rust-check-inputs",
-      BLACKSMITH_8CPU_RUNNER,
-      "workspace-tests",
       "workspace-tests",
       TEST_PRODUCER_STEP_BUDGETS,
     )

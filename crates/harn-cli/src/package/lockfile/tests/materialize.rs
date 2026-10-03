@@ -41,7 +41,7 @@ acme-lib = {{ git = "{git}", tag = "v1.0.0" }}
             let workspace_env = workspace_env.clone();
             let ctx = ctx.clone();
             let lock = lock.clone();
-            std::thread::spawn(move || {
+            harn_parser::runtime_stack::spawn(move || {
                 materialize_dependencies_from_lock(&workspace_env, &ctx, &lock, None, false)
             })
         })
@@ -97,7 +97,7 @@ beta = { path = "./vendor/beta" }
     let handles = ["alpha", "beta"].map(|alias| {
         let entry = entry.clone();
         let barrier = barrier.clone();
-        std::thread::spawn(move || {
+        harn_parser::runtime_stack::spawn(move || {
             barrier.wait();
             ensure_dependency_alias_materialized_for_test(&entry, alias)
         })
@@ -203,7 +203,7 @@ fn demand_cannot_republish_lock_authority_replaced_by_an_install() {
     let ready = std::sync::Arc::new(std::sync::Barrier::new(2));
     let demand = {
         let ready = ready.clone();
-        std::thread::spawn(move || {
+        harn_parser::runtime_stack::spawn(move || {
             ensure_dependency_alias_materialized_after_barrier_for_test(&entry, "dep", &ready)
         })
     };

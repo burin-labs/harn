@@ -58,15 +58,15 @@ pub(crate) fn apply_openrouter_route_denylist(body: &mut serde_json::Value, deny
 }
 
 /// Pin the OpenRouter request body to a closed, ordered allowlist of upstream
-/// providers: sets `provider.order` to `order` and `provider.allow_fallbacks`
-/// to `false`, so OpenRouter routes the model only to those upstreams (in
-/// preference order) and never silently falls back to one not on the list.
+/// providers: sets `provider.order` and `provider.only` to `order`, and
+/// `provider.allow_fallbacks` to `false`, so OpenRouter routes only to those
+/// upstreams in preference order and never falls back to one not on the list.
 /// This is the wire materialization of the capability-row
 /// `openrouter_provider_order` — provider-agnostic data plumbing with no
 /// model-specific logic; the caller decides whether a pin applies by consulting
 /// the capability matrix. A pre-existing `provider.order` (e.g. a caller
-/// override) is left untouched; `allow_fallbacks` is always forced to `false`
-/// so the pin is genuinely closed. No-op when `order` is empty.
+/// override) and `provider.only` are left untouched; `allow_fallbacks` is always
+/// forced to `false` so the pin is closed. No-op when `order` is empty.
 pub(crate) fn apply_openrouter_provider_order(body: &mut serde_json::Value, order: &[String]) {
     if order.is_empty() {
         return;
@@ -95,6 +95,14 @@ pub(crate) fn apply_openrouter_provider_order(body: &mut serde_json::Value, orde
             ),
         );
     }
+    // Apply the closed set before parameter filtering. With order/fallbacks
+    // alone, OpenRouter can discard the pinned endpoints for unsupported
+    // parameters, then report an unrelated fallback failure for the rest.
+    let pinned = provider_obj
+        .get("order")
+        .expect("provider order was set")
+        .clone();
+    provider_obj.entry("only".to_string()).or_insert(pinned);
     // A closed allowlist must not fall back off-list.
     provider_obj.insert(
         "allow_fallbacks".to_string(),

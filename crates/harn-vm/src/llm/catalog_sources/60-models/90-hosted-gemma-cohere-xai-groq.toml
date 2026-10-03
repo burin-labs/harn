@@ -111,9 +111,17 @@ tier = "mid"
 open_weight = true
 strengths = ["speed", "cheap", "tool_use", "reasoning"]
 
+# Unlike the other Fireworks rows marked dedicated here, this model's metadata
+# reports `supportsServerless: true`. Its only deployment is a public but
+# non-default one, so this plain id returns HTTP 404 "Model not found,
+# inaccessible, and/or not deployed" (2026-10-01 and 2026-10-02), while the
+# deployment-qualified id
+# `accounts/fireworks/models/glm-5p2#accounts/fireworks/deployments/jpmnep80`
+# answers 200. The plain id is therefore not routable on the API-key path.
 [models."accounts/fireworks/models/glm-5p2"]
 name = "GLM 5.2 (Fireworks)"
 provider = "fireworks"
+availability = "dedicated"
 context_window = 1048576
 logical_model = "glm-5.2"
 equivalence_group = "glm-5.2"
@@ -179,9 +187,13 @@ tier = "mid"
 open_weight = true
 strengths = ["speed", "cheap", "tool_use", "reasoning", "long_context", "vision"]
 
+# Fireworks lists this model but a 2026-10-01 chat call returned HTTP 404
+# "Model not found, inaccessible, and/or not deployed"; it needs a dedicated
+# deployment.
 [models."accounts/fireworks/models/deepseek-v4-flash-0731"]
 name = "DeepSeek V4 Flash 0731 (Fireworks)"
 provider = "fireworks"
+availability = "dedicated"
 context_window = 1048576
 logical_model = "deepseek-v4-flash-0731"
 equivalence_group = "deepseek-v4-flash"
@@ -194,9 +206,13 @@ tier = "mid"
 open_weight = true
 strengths = ["speed", "cheap", "tool_use", "reasoning", "long_context"]
 
+# Fireworks lists this model but a 2026-10-01 chat call returned HTTP 404
+# "Model not found, inaccessible, and/or not deployed"; it needs a dedicated
+# deployment.
 [models."accounts/fireworks/models/deepseek-v4-pro-0813"]
 name = "DeepSeek V4 Pro 0813 (Fireworks)"
 provider = "fireworks"
+availability = "dedicated"
 context_window = 1048576
 logical_model = "deepseek-v4-pro-0813"
 equivalence_group = "deepseek-v4-pro-0813"
@@ -224,9 +240,16 @@ tier = "frontier"
 open_weight = true
 strengths = ["coding", "agentic", "long_context", "tool_use", "reasoning", "vision"]
 
+# Fireworks lists this model READY with `supportsServerless: true`, but its
+# serverless chat endpoint does not answer. On 2026-10-02 two non-streaming
+# requests and one streaming request each returned 0 bytes in 150 s, while
+# `deepseek-v4p1-flash` on the same key answered in 1.4 s; the hosted provider
+# contract probe timed out on every request to it on 2026-09-28 and 2026-10-02.
+# Until a serverless request answers again it needs a dedicated deployment.
 [models."accounts/fireworks/models/nemotron-lightning-3p5-30b-a3b"]
 name = "Nemotron 3.5 Lightning 30B A3B (Fireworks)"
 provider = "fireworks"
+availability = "dedicated"
 context_window = 262144
 logical_model = "nemotron-3.5-lightning-30b-a3b"
 equivalence_group = "nemotron-3.5-lightning-30b-a3b"
@@ -239,9 +262,13 @@ tier = "mid"
 open_weight = true
 strengths = ["speed", "coding", "agentic", "reasoning", "tool_use", "long_context"]
 
+# Fireworks lists this model but a 2026-10-01 chat call returned HTTP 404
+# "Model not found, inaccessible, and/or not deployed"; it needs a dedicated
+# deployment.
 [models."accounts/fireworks/models/deepseek-v4-pro"]
 name = "DeepSeek V4 Pro (Fireworks)"
 provider = "fireworks"
+availability = "dedicated"
 context_window = 1048576
 logical_model = "deepseek-v4-pro"
 equivalence_group = "deepseek-v4-pro"
@@ -256,9 +283,13 @@ tier = "frontier"
 open_weight = true
 strengths = ["coding", "agentic", "tool_use", "reasoning", "long_context"]
 
+# Fireworks lists this model but a 2026-10-01 chat call returned HTTP 404
+# "Model not found, inaccessible, and/or not deployed"; it needs a dedicated
+# deployment.
 [models."accounts/fireworks/models/kimi-k2p6"]
 name = "Kimi K2.6 (Fireworks)"
 provider = "fireworks"
+availability = "dedicated"
 context_window = 262144
 logical_model = "moonshot-kimi-k2.6"
 equivalence_group = "moonshot-kimi-k2.6"
@@ -273,9 +304,13 @@ tier = "frontier"
 open_weight = true
 strengths = ["coding", "agentic", "long_context", "tool_use", "reasoning", "vision"]
 
+# Fireworks lists this model but a 2026-10-01 chat call returned HTTP 404
+# "Model not found, inaccessible, and/or not deployed"; it needs a dedicated
+# deployment.
 [models."accounts/fireworks/models/kimi-k2p7-code"]
 name = "Kimi K2.7 Code (Fireworks)"
 provider = "fireworks"
+availability = "dedicated"
 context_window = 262144
 logical_model = "moonshot-kimi-k2.7-code"
 equivalence_group = "moonshot-kimi-k2.7-code"

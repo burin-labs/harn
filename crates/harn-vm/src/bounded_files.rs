@@ -79,7 +79,7 @@ mod tests {
             .map(|index| {
                 let parent = parent.clone();
                 let barrier = Arc::clone(&barrier);
-                std::thread::spawn(move || {
+                crate::runtime_stack::spawn(move || {
                     barrier.wait();
                     let path = parent.join(format!("hxe-{index:02}.json"));
                     with_retention_transaction(&parent, || {

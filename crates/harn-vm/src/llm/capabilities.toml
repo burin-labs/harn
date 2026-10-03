@@ -1712,6 +1712,185 @@ prefers_role_developer = false
 prefers_xml_tools = true
 thinking_block_style = "thinking_blocks"
 
+# --- source: 20-providers/02-openrouter-unforwarded-parameters.toml ---
+# ---------- OpenRouter: sampling parameters no endpoint serves ----------------
+#
+# OpenRouter-only overlays for parameters these routes never honor: sampling
+# options no endpoint forwards, and (near the end) a reasoning-disable that
+# mandatory-reasoning routes reject.
+#
+# OpenRouter forwards a request parameter only to endpoints that declare it in
+# `supported_parameters` and silently drops it everywhere else. A route that
+# lists no endpoint for a parameter therefore never honors it, while a plain
+# request still returns 200. Claiming support there let a caller's
+# temperature, seed, penalty, or stop sequence vanish without an error, which
+# the portable-option contract forbids.
+#
+# Evidence (2026-10-02): OpenRouter's /models `supported_parameters` for every
+# catalogued, non-deprecated OpenRouter route, compared with each route's
+# claim. Every row below lists only parameters that index omits. A live
+# `provider.require_parameters: true` spot check returned 404 "No endpoints
+# found that can handle the requested parameters" for 11 of 11 sampled
+# omissions across these families (Fable temperature, Opus 5.5 seed and top_p,
+# Haiku 4.5 frequency_penalty, Sonnet 5.5 presence_penalty, Gemini 3.8 Flash
+# frequency_penalty, Gemini 3.5 Flash-Lite presence_penalty, Grok 4.7
+# presence_penalty, GPT-5.5 stop, GPT-6.1 Sol frequency_penalty, Seed 2.0
+# Lite seed), and 200 for listed controls (Haiku 4.5 and Gemini 3.8 Flash
+# temperature). Provider contract probe run 37030330916 could not see this:
+# without require_parameters a dropped option reads as accepted.
+#
+# The rows are `extends` overlays naming exact catalogued routes, so each
+# contributes only these fields and the family rule still decides the rest.
+# The file sorts before every OpenRouter base rule, which an overlay must do
+# to apply. A new route needs its own evidence rather than inheriting these.
+
+# Anthropic. The Claude 5-generation rows take no top_p on any endpoint; Fable
+# and Sonnet 5 take neither temperature nor top_p. No Claude route serves
+# seed or the penalties.
+[[provider.openrouter]]
+model_match = ["anthropic/claude-fable-5", "anthropic/claude-fable-5.1", "anthropic/claude-sonnet-5"]
+extends = true
+temperature_supported = false
+top_p_supported = false
+seed_supported = false
+frequency_penalty_supported = false
+presence_penalty_supported = false
+
+[[provider.openrouter]]
+model_match = [
+  "anthropic/claude-opus-4.8",
+  "anthropic/claude-opus-5",
+  "anthropic/claude-opus-5.5",
+  "anthropic/claude-sonnet-5.5",
+]
+extends = true
+top_p_supported = false
+seed_supported = false
+frequency_penalty_supported = false
+presence_penalty_supported = false
+
+[[provider.openrouter]]
+model_match = ["anthropic/claude-haiku-4.5", "anthropic/claude-sonnet-4.6"]
+extends = true
+seed_supported = false
+frequency_penalty_supported = false
+presence_penalty_supported = false
+
+# OpenAI GPT-5.4 to GPT-6.1. These route to OpenAI's reasoning endpoints,
+# which take neither penalties nor stop sequences. GPT-5.4 and GPT-5.5 also
+# take no temperature or top_p, and GPT-5.6 no top_p (GPT-5.6 and GPT-6
+# already decline temperature in the shared `openai/gpt-*` family rules).
+# OpenRouter therefore cannot run GPT-5.4 Mini or Nano at the decision
+# profile's temperature 0.
+[[provider.openrouter]]
+model_match = [
+  "openai/gpt-5.4-mini",
+  "openai/gpt-5.4-nano",
+  "openai/gpt-5.4-pro",
+  "openai/gpt-5.5",
+  "openai/gpt-5.5-pro",
+]
+extends = true
+temperature_supported = false
+top_p_supported = false
+frequency_penalty_supported = false
+presence_penalty_supported = false
+stop_supported = false
+
+[[provider.openrouter]]
+model_match = [
+  "openai/gpt-5.6-luna",
+  "openai/gpt-5.6-luna-pro",
+  "openai/gpt-5.6-sol",
+  "openai/gpt-5.6-sol-pro",
+  "openai/gpt-5.6-terra",
+  "openai/gpt-5.6-terra-pro",
+]
+extends = true
+top_p_supported = false
+frequency_penalty_supported = false
+presence_penalty_supported = false
+stop_supported = false
+
+[[provider.openrouter]]
+model_match = [
+  "openai/gpt-6-astra",
+  "openai/gpt-6-astra-pro",
+  "openai/gpt-6-luna",
+  "openai/gpt-6-luna-pro",
+  "openai/gpt-6-sol",
+  "openai/gpt-6-sol-pro",
+  "openai/gpt-6.1-sol",
+  "openai/gpt-6.1-sol-pro",
+]
+extends = true
+frequency_penalty_supported = false
+presence_penalty_supported = false
+stop_supported = false
+
+# Google Gemini 3.x: no endpoint takes the penalties.
+[[provider.openrouter]]
+model_match = [
+  "google/gemini-3.5-flash",
+  "google/gemini-3.5-flash-lite",
+  "google/gemini-3.6-flash",
+  "google/gemini-3.7-flash",
+  "google/gemini-3.8-flash",
+]
+extends = true
+frequency_penalty_supported = false
+presence_penalty_supported = false
+
+# xAI Grok: no endpoint takes the penalties; only Grok 4.6 takes stop.
+[[provider.openrouter]]
+model_match = "x-ai/grok-4.6"
+extends = true
+frequency_penalty_supported = false
+presence_penalty_supported = false
+
+[[provider.openrouter]]
+model_match = ["x-ai/grok-4.5", "x-ai/grok-4.7"]
+extends = true
+frequency_penalty_supported = false
+presence_penalty_supported = false
+stop_supported = false
+
+# Z.ai GLM 5.3 FlashX and GLM-5V Turbo: no endpoint takes seed, the
+# penalties, or stop (the other GLM-5 rows do).
+[[provider.openrouter]]
+model_match = ["z-ai/glm-5.3-flashx", "z-ai/glm-5v-turbo"]
+extends = true
+seed_supported = false
+frequency_penalty_supported = false
+presence_penalty_supported = false
+stop_supported = false
+
+[[provider.openrouter]]
+model_match = "bytedance-seed/seed-2.0-lite"
+extends = true
+seed_supported = false
+presence_penalty_supported = false
+
+# GPT-5.4 Pro and GPT-5.5 Pro reason on every request. A plain Harn call with
+# thinking unset sent `reasoning: {enabled: false}` and got 400 "Reasoning is
+# mandatory for this endpoint and cannot be disabled" (2026-10-02), so every
+# default call failed. This is OpenRouter's contract for these slugs; the
+# shared `openai/gpt-*` family rule stays as it is for other gateways.
+[[provider.openrouter]]
+model_match = ["openai/gpt-5.4-pro", "openai/gpt-5.5-pro"]
+extends = true
+reasoning_none_supported = false
+reasoning_disable_supported = false
+
+# The free Nemotron route is index-only evidence: it cannot be called from an
+# account that forbids free-model training (see its catalog row).
+[[provider.openrouter]]
+model_match = "nvidia/nemotron-3-super-120b-a12b:free"
+extends = true
+frequency_penalty_supported = false
+presence_penalty_supported = false
+stop_supported = false
+
 # --- source: 20-providers/05-downstream-contributed.toml ---
 # Exact routes contributed from a downstream project's `harn.toml`
 # `[capabilities]` section.
@@ -3672,6 +3851,7 @@ thinking_block_style = "thinking_blocks"
 
 [[provider.openrouter]]
 model_match = "qwen/qwen3.7-plus"
+top_k_supported = true
 native_tools = true
 preferred_tool_format = "native"
 structured_output = "native"
@@ -3710,6 +3890,7 @@ thinking_block_style = "inline"
 # disable on every agent, verify, and code turn and get the 400 back.
 [[provider.openrouter]]
 model_match = "qwen/qwen3.8-max-0902"
+top_k_supported = true
 native_tools = true
 preferred_tool_format = "native"
 structured_output = "native"
@@ -3736,6 +3917,7 @@ thinking_block_style = "inline"
 
 [[provider.openrouter]]
 model_match = "qwen/qwen3.7-max"
+top_k_supported = true
 native_tools = true
 preferred_tool_format = "native"
 structured_output = "native"
@@ -3759,6 +3941,7 @@ thinking_block_style = "inline"
 
 [[provider.openrouter]]
 model_match = "qwen/qwen3.6-plus"
+top_k_supported = true
 native_tools = true
 preferred_tool_format = "native"
 structured_output = "native"
@@ -3787,6 +3970,7 @@ provider_route_denylist = ["Ambient"]
 
 [[provider.openrouter]]
 model_match = "qwen/qwen3.6-flash"
+top_k_supported = true
 native_tools = true
 preferred_tool_format = "native"
 structured_output = "native"
@@ -3815,6 +3999,7 @@ provider_route_denylist = ["Ambient"]
 
 [[provider.openrouter]]
 model_match = "qwen/qwen3.6*"
+top_k_supported = true
 native_tools = true
 preferred_tool_format = "native"
 structured_output = "native"
@@ -3895,6 +4080,7 @@ thinking_block_style = "none"
 
 [[provider.openrouter]]
 model_match = "qwen/qwen3-coder*"
+top_k_supported = true
 native_tools = true
 preferred_tool_format = "text"
 # Qwen3-Coder reserves <tool_call> as a special token and emits the wrapper on
@@ -3956,6 +4142,7 @@ thinking_block_style = "none"
 
 [[provider.openrouter]]
 model_match = "qwen/*"
+top_k_supported = true
 native_tools = true
 preferred_tool_format = "native"
 structured_output = "native"
@@ -5326,6 +5513,7 @@ thinking_block_style = "none"
 # while the broader moonshotai/kimi-k2* fallthrough keeps native.
 [[provider.openrouter]]
 model_match = "moonshotai/kimi-k2.7-code"
+top_k_supported = true
 native_tools = true
 preferred_tool_format = "text"
 tool_mode_parity = "native_unreliable"
@@ -5344,10 +5532,31 @@ supports_assistant_prefill = false
 prefers_role_developer = false
 prefers_xml_tools = false
 thinking_block_style = "inline"
-temperature_supported = false
-top_p_supported = false
-frequency_penalty_supported = false
-presence_penalty_supported = false
+# Provider contract probe run 37030330916 (2026-10-02) found every option
+# rejected with "Reasoning is mandatory for this endpoint and cannot be
+# disabled": Harn sent a reasoning-disable whenever thinking was unset. With
+# reasoning left at its default (live re-probe 2026-10-02):
+#   temperature, top_p, top_k, seed, stop, both penalties -> 200, also with
+#     provider.require_parameters (served by CoreWeave)
+#   pinned to Moonshot AI's own endpoint (order + allow_fallbacks=false):
+#     temperature, top_p, seed -> 200 (dropped there; the endpoint does not
+#     declare them), frequency_penalty and presence_penalty -> 400 "Provider
+#     returned error", although OpenRouter lists both for that endpoint
+# Moonshot AI's two endpoints are the only ones that mishandle these
+# parameters: they drop sampling silently and reject the penalties they list.
+# Routing around them (OpenRouter `provider.ignore`, as the Qwen 3.6 rows do
+# for Ambient) leaves ten endpoints, and with Moonshot ignored and no
+# require_parameters, frequency_penalty, presence_penalty, both together, and
+# temperature each returned 200 in 3 of 3 calls (2026-10-02). Both are then
+# supported, and a one-request option probe can no longer land on the
+# endpoint that disagrees with OpenRouter's own parameter list.
+provider_route_denylist = ["Moonshot AI"]
+reasoning_none_supported = false
+reasoning_disable_supported = false
+temperature_supported = true
+top_p_supported = true
+frequency_penalty_supported = true
+presence_penalty_supported = true
 allowed_tool_choice_modes = ["auto", "none"]
 
 # Kimi K3 on OpenRouter. The K2 rule below does not match it, so without this
@@ -5366,6 +5575,7 @@ allowed_tool_choice_modes = ["auto", "none"]
 # OpenRouter accepted temperature=0.2, which shows tolerance, not support.
 [[provider.openrouter]]
 model_match = "moonshotai/kimi-k3"
+top_k_supported = true
 native_tools = true
 preferred_tool_format = "native"
 structured_output = "native"
@@ -5395,6 +5605,7 @@ thinking_block_style = "inline"
 
 [[provider.openrouter]]
 model_match = "moonshotai/kimi-k2*"
+top_k_supported = true
 native_tools = true
 preferred_tool_format = "native"
 structured_output = "native"
@@ -7236,9 +7447,22 @@ thinking_block_style = "inline"
 # overrides only need to set `native_tools` + `preferred_tool_format`.
 # The audit test trips on missing entries because provider_family
 # inheritance does not cover specific OR slugs by itself.
+#
+# `top_k_supported = true` on OpenRouter rows (here and in
+# 30-qwen-routed.toml and 40-deepseek-reasoning.toml) is set only where every
+# catalogued route under the rule answered a `top_k` request. Harn always
+# sends `top_k` with `provider.require_parameters`, so OpenRouter routes it
+# only to endpoints that declare it and returns 404 "No endpoints found that
+# can handle the requested parameters" when none do. Evidence: provider
+# contract probe run 37030330916 plus re-probes on 2026-10-02, cross-checked
+# against each model's `supported_parameters` in OpenRouter's /models index.
+# Negative controls that stay unsupported: x-ai/grok-4.7, the openai/gpt-*
+# Luna and Mini rows, google/gemini-3.5-flash-lite, and
+# mistralai/mistral-small-2603 all returned that 404.
 
 [[provider.openrouter]]
 model_match = "minimax/minimax-m3*"
+top_k_supported = true
 native_tools = true
 preferred_tool_format = "native"
 text_tool_wire_format_supported = true
@@ -7258,6 +7482,7 @@ thinking_block_style = "inline"
 
 [[provider.openrouter]]
 model_match = "minimax/minimax-m2.7*"
+top_k_supported = true
 native_tools = true
 preferred_tool_format = "native"
 text_tool_wire_format_supported = true
@@ -7265,6 +7490,7 @@ structured_output = "delimited"
 
 [[provider.openrouter]]
 model_match = "minimax/minimax-m2*"
+top_k_supported = true
 native_tools = true
 preferred_tool_format = "native"
 text_tool_wire_format_supported = true
@@ -7298,6 +7524,7 @@ reasoning_disable_supported = false
 
 [[provider.openrouter]]
 model_match = "z-ai/glm-5*"
+top_k_supported = true
 native_tools = true
 preferred_tool_format = "native"
 tool_mode_parity_notes = "2026-08-15 cross-host native re-probe: single clean `message.tool_calls`, empty content, no `<tool_call>` markup. OpenRouter z-ai/glm-5.2 verified on tool_choice=auto and required, sync and streaming."
@@ -7402,6 +7629,7 @@ serving_precision = "trusted"
 
 [[provider.openrouter]]
 model_match = "stepfun/step-3.7-flash"
+top_k_supported = true
 native_tools = true
 preferred_tool_format = "native"
 tool_mode_parity = "interchangeable"
@@ -7423,12 +7651,20 @@ thinking_block_style = "inline"
 # family-specific capability rows through the OpenAI-compatible transport
 # fallback. Keep them explicit so the catalog audit can catch future rows that
 # need a real tool contract decision.
+#
+# Every Grok route answers `reasoning: {enabled: false}` with 400 "Reasoning is
+# mandatory for this endpoint and cannot be disabled" (plain Harn calls with
+# thinking unset on 4.5, 4.6, and 4.7, 2026-10-02; the provider contract
+# probe's control request surfaced it). Declaring that reasoning cannot be
+# disabled makes Harn omit the directive.
 [[provider.openrouter]]
 model_match = "x-ai/grok-*"
 native_tools = true
 preferred_tool_format = "native"
 structured_output = "native"
 thinking_modes = ["adaptive"]
+reasoning_none_supported = false
+reasoning_disable_supported = false
 prompt_caching = true
 vision_supported = true
 text_tool_wire_format_supported = true
@@ -7460,6 +7696,7 @@ thinking_block_style = "inline"
 
 [[provider.openrouter]]
 model_match = "cohere/north-mini-code:free"
+top_k_supported = true
 native_tools = true
 preferred_tool_format = "native"
 structured_output = "native"
@@ -7490,6 +7727,7 @@ thinking_block_style = "inline"
 
 [[provider.openrouter]]
 model_match = "openrouter/free"
+top_k_supported = true
 native_tools = true
 preferred_tool_format = "native"
 structured_output = "native"

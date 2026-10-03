@@ -3,7 +3,9 @@ use harn_lexer::{Span, Token, TokenKind};
 
 use super::error::ParserError;
 
-pub(crate) const MAX_NESTING_DEPTH: usize = 64;
+/// Deepest syntax nesting the parser descends into before refusing the source
+/// with a "nesting depth exceeded" error.
+pub const MAX_NESTING_DEPTH: usize = 64;
 
 /// Recursive descent parser for Harn.
 pub struct Parser {

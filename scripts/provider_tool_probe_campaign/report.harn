@@ -267,6 +267,7 @@ pub fn __claim_controls(
   let measured_supported = 0
   let measured_unsupported = 0
   let unmeasured = 0
+  let excluded_by_account_policy = 0
   for cell in cells {
     if cell.runner != "provider_option_probe" {
       continue
@@ -277,6 +278,8 @@ pub fn __claim_controls(
       measured_supported = measured_supported + 1
     } else if observed == false {
       measured_unsupported = measured_unsupported + 1
+    } else if live && cell.observed?.option_probe?.probe?.verdict == "excluded_by_account_policy" {
+      excluded_by_account_policy = excluded_by_account_policy + 1
     } else if live {
       unmeasured = unmeasured + 1
     }
@@ -294,6 +297,7 @@ pub fn __claim_controls(
   return {
     status: status,
     selected_count: selected,
+    excluded_by_account_policy_count: excluded_by_account_policy,
     measured_supported_count: measured_supported,
     measured_unsupported_count: measured_unsupported,
     unmeasured_count: unmeasured,
@@ -314,14 +318,13 @@ pub fn __estimated_spend(
     }
     if !live && cell.status == "planned" {
       executable_probe_count = executable_probe_count + repeat
-    } else if live && (cell.status == "pass" || cell.status == "fail" || cell.status == "error") {
+    } else if live {
       const observed_attempts = cell.observed?.telemetry?.request_attempt_count ?? 0
-      executable_probe_count = executable_probe_count
-        + if observed_attempts > 0 {
-          observed_attempts
-        } else {
-          1
-        }
+      if observed_attempts > 0 {
+        executable_probe_count = executable_probe_count + observed_attempts
+      } else if cell.status == "pass" || cell.status == "fail" || cell.status == "error" {
+        executable_probe_count = executable_probe_count + 1
+      }
     }
   }
   const base = {

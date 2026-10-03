@@ -21,16 +21,16 @@ The daily schedule runs the same decision. A stable workspace version or no
 unreleased fragments produces `action=none`, with a notice explaining why.
 An unreadable pull-request list fails instead of opening a duplicate.
 
-An existing release on `release/vX.Y.Z` is refolded when main gains fragments
-it hasn't folded. A push changing `changelog.d` only refolds an existing
-release; it doesn't open one. Refolding keeps the version and pull-request
-identity but replaces the prepared commit, so inspect the new head's checks.
+The signed commit is recorded at `release-attempt/vX.Y.Z/<commit>` before the
+pull request opens. An existing release stays frozen at that attempt. Later
+fragments remain for the next release, including when their changes merge ahead
+of this release. A push changing `changelog.d` checks the existing attempt
+without rebuilding or opening a release.
 
-To keep an explicitly frozen candidate, use a branch other than the opener's
-`release/vX.Y.Z` branch and keep the exact `Release vX.Y.Z` title. The opener
-names that existing pull request and leaves its branch unchanged. New
-fragments remain for a later release. Don't dispatch a second version selector
-or a retired Fleet launcher to change this decision.
+An existing `release/vX.Y.Z` branch without a matching attempt fails closed.
+To replace an unrecorded stale attempt, close its pull request and dispatch the
+opener explicitly. Inspect the replacement head's required checks and review.
+Do not reset an attempt ref or dispatch a second version selector.
 
 ## Follow certification and publication
 
@@ -41,6 +41,11 @@ Follow the runs for that commit in
 1. `build-release-binaries.yml` builds the candidate in its merge group.
    The main push reuses a successful candidate for that exact commit, or builds
    it when no reusable queue candidate exists. Other pushes only warm caches.
+   Daily scheduled runs build signed source candidates at their exact main
+   commit, including commits outside the warm-cache path filter. They reuse a
+   successful candidate only while its manifest, release files, and every
+   target archive remain available and unexpired. These runs do not publish a
+   release.
 2. The candidate run builds, signs, notarizes, and attests the five platform
    archives. It checks those files with the release audit and smoke tests.
    The `candidate-manifest-<sha>` artifact binds the source commit, files,

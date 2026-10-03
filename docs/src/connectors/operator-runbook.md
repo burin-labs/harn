@@ -60,8 +60,10 @@ keyring. If that write fails, Harn names any environment variables declared for
 the same secret. It never prints their values.
 
 Run `harn doctor` when keyring storage should work. The `secret:keyring` check
-writes, reads, and deletes a unique scratch entry. A locked or read-only store
-therefore fails the check instead of appearing healthy.
+reports the store as available, locked, or unavailable with a reason. It writes
+nothing and never raises an unlock prompt. Add `--check-keyring-write` to also
+write, read, and delete a unique scratch entry, so a read-only store fails the
+check instead of appearing healthy.
 
 ### GitHub App and user OAuth
 

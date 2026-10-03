@@ -44,6 +44,7 @@ pub type HarnProviderCatalogArchitecture = {
 }
 
 pub type HarnProviderCatalogAuth = {
+  credential_env?: list<string>,
   env: list<string>,
   header?: string,
   required: bool,

@@ -130,7 +130,9 @@ fn existing_file_without_git_is_not_the_never_approvable_floor() {
 
 #[tokio::test]
 async fn policy_present_floor_blocks_full_set_including_workflow() {
-    // With a policy on the stack the same floor applies before approval.
+    // Runtime-selected hooks bypass the model's tool ceiling, but the same
+    // command floor still applies before approval or execution.
+    let _trusted_hook = crate::orchestration::allow_trusted_bridge_calls();
     clear_command_policies();
     push_command_policy(CommandPolicy::default());
     assert_floor_blocked(

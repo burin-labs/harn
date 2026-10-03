@@ -1,0 +1,137 @@
+import "std/code_librarian"
+
+/**
+ * A three-layer TypeScript app plus a tools directory no target owns:
+ * ui -> data, ui -> core, data -> core.
+ */
+fn seed_corpus(fs: HarnessFs, root: string) {
+  fs.mkdir(root)
+  for dir in ["src", "src/ui", "src/data", "src/core", "tools"] {
+    fs.mkdir(path_join(root, dir))
+  }
+  fs.write_text(
+    path_join(root, "src/ui/App.ts"),
+    "import { load } from \"../data/store\";\nimport { Model } from \"../core/model\";\nimport React from \"react\";\n",
+  )
+  fs.write_text(
+    path_join(root, "src/data/store.ts"),
+    "import { Model } from \"../core/model\";\nexport function load() {}\n",
+  )
+  fs.write_text(path_join(root, "src/core/model.ts"), "export class Model {}\n")
+  fs.write_text(path_join(root, "tools/gen.ts"), "export const gen = 1;\n")
+}
+
+fn ids(items: list) -> list<string> {
+  let out: list<string> = []
+  for item in items {
+    out = out + [item.from + "->" + item.to]
+  }
+  return out
+}
+
+pipeline default(harness: Harness) {
+  // An empty index says so instead of reading as a workspace with no
+  // dependencies.
+  const before: ModuleGraph = code_librarian_module_graph(harness.code_index)
+  harness.stdio.println("indexed before rebuild: " + to_string(before.indexed))
+  const root = path_join(
+    harness.fs.workspace_temp_dir(),
+    "harn_code_librarian_arch_" + to_string(harness.random.range(100000, 999999)),
+  )
+  seed_corpus(harness.fs, root)
+  const _ = harness.code_index.rebuild({root: root})
+  const graph: ModuleGraph = code_librarian_module_graph(
+    harness.code_index,
+    {granularity: "dir", include_external: true},
+  )
+  harness.stdio.println("indexed: " + to_string(graph.indexed))
+  let node_ids: list<string> = []
+  for node in graph.nodes {
+    node_ids = node_ids + [node.id]
+  }
+  harness.stdio.println("nodes: " + join(node_ids, ","))
+  harness.stdio.println("edges: " + join(ids(graph.edges), ","))
+  harness.stdio.println("sample: " + json_stringify(graph.edges[0]?.sample))
+  harness.stdio.println("external: " + json_stringify(graph.external))
+  const again: ModuleGraph = code_librarian_module_graph(
+    harness.code_index,
+    {granularity: "dir", include_external: true},
+  )
+  harness.stdio.println(
+    "deterministic: " + to_string(json_stringify(again) == json_stringify(graph)),
+  )
+  // Negative control: a target the code already satisfies reports nothing.
+  // `src/**/data` and `**/core` must match with zero directories in place
+  // of the double star, or those nodes would fall out unowned.
+  const layered: ArchitectureTarget = {
+    nodes: [
+      {id: "ui", paths: ["src/ui/**"]},
+      {id: "data", paths: ["src/**/data"]},
+      {id: "core", paths: ["**/core"]},
+      {id: "tools", paths: ["tools"]},
+    ],
+    edges: [
+      {from: "ui", to: "data", kind: "required"},
+      {from: "ui", to: "core"},
+      {from: "data", to: "core", kind: "allowed"},
+      {from: "core", to: "ui", kind: "forbidden"},
+    ],
+    strict: true,
+  }
+  const clean: ArchitectureDiff = architecture_graph_diff(graph, layered)
+  harness.stdio.println("clean: " + json_stringify(clean))
+  // Every outcome class at once.
+  const drawn: ArchitectureTarget = {
+    nodes: [
+      {id: "ui", paths: ["src/ui", "src/ui/**"]},
+      {id: "data", paths: ["src/d?ta"]},
+      {id: "core", paths: ["src/core/**"]},
+      {id: "billing", paths: ["src/billing/**"]},
+    ],
+    edges: [
+      {from: "ui", to: "billing", kind: "required"},
+      {from: "ui", to: "core", kind: "forbidden"},
+      {from: "data", to: "core", kind: "allowed"},
+    ],
+    strict: true,
+  }
+  const diff: ArchitectureDiff = architecture_graph_diff(graph, drawn)
+  harness.stdio.println("conforms: " + to_string(diff.conforms))
+  harness.stdio.println("missing_required: " + json_stringify(diff.missing_required))
+  harness.stdio.println("forbidden_present: " + json_stringify(diff.forbidden_present))
+  harness.stdio.println("unexpected: " + json_stringify(diff.unexpected))
+  harness.stdio.println("unmatched_nodes: " + json_stringify(diff.unmatched_nodes))
+  harness.stdio.println("unmapped_actual: " + json_stringify(diff.unmapped_actual))
+  // Without strict, an undeclared dependency is allowed.
+  const lenient: ArchitectureDiff = architecture_graph_diff(graph, drawn + {strict: false})
+  harness.stdio.println("lenient unexpected: " + to_string(len(lenient.unexpected)))
+  // Under strict, code no target node owns breaks conformance by itself;
+  // without strict it is only listed.
+  let owned_nodes: list<ArchitectureNode> = []
+  for node in layered.nodes {
+    if node.id != "tools" {
+      owned_nodes = owned_nodes + [node]
+    }
+  }
+  const partial = layered + {nodes: owned_nodes}
+  const strict_partial: ArchitectureDiff = architecture_graph_diff(graph, partial)
+  const loose_partial: ArchitectureDiff = architecture_graph_diff(graph, partial + {strict: false})
+  harness.stdio.println(
+    "unowned code: strict conforms " + to_string(strict_partial.conforms)
+      + ", lenient conforms "
+      + to_string(loose_partial.conforms),
+  )
+  const bad = try {
+    architecture_graph_diff(
+      graph,
+      {nodes: [{id: "ui", paths: ["src/ui"]}], edges: [{from: "ui", to: "ghost"}]},
+    )
+  }
+  harness.stdio.println(unwrap_err(bad))
+  // A graph that measured nothing never conforms vacuously.
+  const unmeasured = try {
+    architecture_graph_diff(before, layered)
+  }
+  harness.stdio.println(unwrap_err(unmeasured))
+  harness.fs.delete(root)
+}

@@ -70,7 +70,7 @@ fn session_scoped_sink_routing_crosses_worker_threads() {
     register_sink(&session_id, Arc::new(CountingSink(delivered.clone())));
 
     let emit_session_id = session_id.clone();
-    std::thread::spawn(move || {
+    crate::runtime_stack::spawn(move || {
         emit_event(&AgentEvent::IterationStart {
             session_id: emit_session_id,
             iteration: 0,

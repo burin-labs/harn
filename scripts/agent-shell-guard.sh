@@ -16,7 +16,15 @@ payload_file="$(mktemp "${TMPDIR:-/tmp}/agent-shell-guard.XXXXXX")"
 decision_file="$(mktemp "${TMPDIR:-/tmp}/agent-shell-guard-decision.XXXXXX")"
 deadline_marker="${decision_file}.deadline"
 fault_file="${decision_file}.fault"
-trap 'rm -f "$payload_file" "$decision_file" "$deadline_marker" "$fault_file"' EXIT
+# Only the adapter owns these files. A watchdog exiting between policy
+# completion and the parent's read must never unlink the decision.
+adapter_pid=$$
+cleanup_adapter_files() {
+  local self="${BASHPID:-$(exec sh -c 'echo "$PPID"')}"
+  [[ "$self" == "$adapter_pid" ]] || return 0
+  rm -f "$payload_file" "$decision_file" "$deadline_marker" "$fault_file"
+}
+trap cleanup_adapter_files EXIT
 cat >"$payload_file"
 
 # Never build from a hook. Prefer an explicit binary, then a repository wrapper
@@ -230,6 +238,7 @@ run_with_deadline() {
   "$@" <"$payload_file" &
   policy_pid=$!
   (
+    trap - EXIT
     sleep "$deadline_seconds"
     : >"$deadline_marker"
     kill -TERM -- "-$policy_pid" 2>/dev/null || true

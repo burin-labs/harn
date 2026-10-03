@@ -14,6 +14,10 @@ use super::{
 #[path = "conformance.rs"]
 pub mod conformance;
 
+/// Confining the calling process itself, rather than a child.
+#[path = "self_confinement.rs"]
+pub mod self_confinement;
+
 /// One platform implementation attaches the active capability ceiling to each
 /// child process. Callers use the module-level spawn functions, not this trait.
 pub(crate) trait SandboxBackend {
@@ -26,6 +30,20 @@ pub(crate) trait SandboxBackend {
     }
 
     fn available() -> bool;
+
+    /// Confine the calling process under `policy`, returning the mechanism
+    /// that now enforces it. Reached only through
+    /// [`self_confinement::confine_current_process`], which owns the
+    /// once-per-process record. A backend that cannot confine a running
+    /// process refuses, so the caller never serves believing it is confined.
+    fn confine_current_process(policy: &CapabilityPolicy) -> Result<SandboxMechanism, VmError> {
+        Err(super::sandbox_rejection(format!(
+            "the {} sandbox backend cannot confine a running process; requested under the `{}` \
+             profile",
+            Self::name(),
+            policy.sandbox_profile.as_str()
+        )))
+    }
 
     fn prepare_std_command(
         program: &str,
@@ -52,7 +70,11 @@ pub(crate) trait SandboxBackend {
     ) -> Result<Output, VmError> {
         let mut command = build_std_command::<Self>(program, args, policy, profile)?;
         apply_process_config(&mut command, config, Some(policy));
-        super::launch_environment::validate_for_policy(&command, config.closed_env, Some(policy))?;
+        super::launch_environment::validate_for_policy(
+            &mut command,
+            config.closed_env,
+            Some(policy),
+        )?;
         crate::op_interrupt::capture_output_interruptible(&mut command)
             .map_err(|error| process_spawn_error(&error).unwrap_or_else(|| spawn_error(error)))
     }
@@ -69,7 +91,11 @@ pub(crate) trait SandboxBackend {
     ) -> Result<(Output, u32), VmError> {
         let mut command = build_std_command::<Self>(program, args, policy, profile)?;
         apply_process_config(&mut command, config, Some(policy));
-        super::launch_environment::validate_for_policy(&command, config.closed_env, Some(policy))?;
+        super::launch_environment::validate_for_policy(
+            &mut command,
+            config.closed_env,
+            Some(policy),
+        )?;
         crate::op_interrupt::capture_output_interruptible_in_session(&mut command)
             .map_err(|error| process_spawn_error(&error).unwrap_or_else(|| spawn_error(error)))
     }

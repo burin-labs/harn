@@ -16,8 +16,9 @@ use crate::package::{self, ConnectorSetupConfigurationField, ProviderOAuthManife
 
 use super::callback::{bind_loopback_listener, wait_for_oauth_response, OAuthCallbackError};
 use super::oauth_migration::{
-    legacy_registration_missing_redirect, load_legacy_oauth_registration,
-    migrated_oauth_client_secret_required, oauth_request_with_legacy_registration,
+    legacy_refresh_token_service, legacy_registration_missing_redirect,
+    load_legacy_oauth_registration, migrated_oauth_client_secret_required,
+    oauth_request_with_legacy_registration,
 };
 use super::setup_events::{
     ConnectorSetupErrorCode, ConnectorSetupFailure, ConnectorSetupInteraction,
@@ -25,7 +26,7 @@ use super::setup_events::{
 };
 use super::store::{
     connector_token_summary, current_unix_timestamp, format_expiry, load_connector_token,
-    run_connect_api_key, save_connector_token,
+    read_named_env_secret, run_connect_api_key, save_connector_token,
 };
 use super::{
     DynamicClientRegistrationResponse, OAuthConnectRequest, OAuthProviderDefaults,
@@ -56,7 +57,7 @@ pub(super) async fn run_connect_named_oauth(
         ),
         registration_endpoint: None,
         client_id: args.client_id.clone(),
-        client_secret: args.client_secret.clone(),
+        client_secret: resolve_oauth_client_secret(args)?,
         scopes: args
             .scope
             .clone()
@@ -66,6 +67,7 @@ pub(super) async fn run_connect_named_oauth(
             .token_auth_method
             .clone()
             .or_else(|| Some(defaults.token_auth_method.to_string())),
+        authorization_params: Default::default(),
         no_open: args.no_open,
         json: args.json,
     })
@@ -78,6 +80,8 @@ pub(super) async fn run_connect_linear_oauth(args: &ConnectLinearArgs) -> Result
         &ConnectOAuthArgs {
             client_id: args.client_id.clone(),
             client_secret: args.client_secret.clone(),
+            client_secret_from_env: args.client_secret_from_env.clone(),
+            client_secret_file: args.client_secret_file.clone(),
             scope: args.scope.clone(),
             resource: args.resource.clone(),
             auth_url: args.auth_url.clone(),
@@ -103,10 +107,11 @@ pub(super) async fn run_connect_generic(args: &ConnectGenericArgs) -> Result<(),
         token_endpoint: args.oauth.token_url.clone(),
         registration_endpoint: None,
         client_id: args.oauth.client_id.clone(),
-        client_secret: args.oauth.client_secret.clone(),
+        client_secret: resolve_oauth_client_secret(&args.oauth)?,
         scopes: args.oauth.scope.clone(),
         redirect_uri: args.oauth.redirect_uri.clone(),
         token_auth_method: args.oauth.token_auth_method.clone(),
+        authorization_params: Default::default(),
         no_open: args.oauth.no_open,
         json: args.oauth.json,
     })
@@ -134,18 +139,15 @@ pub(super) async fn run_connect_registered_provider(
                     legacy_registration_missing_redirect(&request, &registration);
                 request = oauth_request_with_legacy_registration(request, registration);
                 if missing_redirect {
-                    request.redirect_uri = prompt_legacy_redirect_uri()?;
+                    request.redirect_uri = Some(prompt_legacy_redirect_uri()?);
                 }
                 if request.authorization_endpoint.is_none() {
                     request.authorization_endpoint = prompt_legacy_authorization_url()?;
                 }
                 if migrated_oauth_client_secret_required(&request) {
-                    let secret = rpassword::prompt_password("OAuth client secret: ")
-                        .map_err(|error| format!("failed to read OAuth client secret: {error}"))?;
-                    if secret.is_empty() {
-                        return Err("OAuth client secret must not be empty".to_string());
-                    }
-                    request.client_secret = Some(secret);
+                    request.client_secret = Some(prompt_migrated_client_secret(
+                        request.token_auth_method.as_deref().unwrap_or_default(),
+                    )?);
                 }
             }
         }
@@ -174,6 +176,63 @@ pub(super) async fn run_connect_registered_provider(
     Err(format!(
         "provider '{provider}' has no supported authentication setup; declare OAuth metadata or providers.setup auth_type = \"api-key\" with exactly one outbound credential"
     ))
+}
+
+/// The client secret from whichever unattended source the command named.
+///
+/// Inline, environment, and file sources are mutually exclusive at the clap
+/// layer. A named source that is unset or empty is an error rather than
+/// "no secret", so a typo cannot silently fall through to a prompt.
+pub(super) fn resolve_oauth_client_secret(
+    args: &ConnectOAuthArgs,
+) -> Result<Option<String>, String> {
+    if let Some(secret) = &args.client_secret {
+        return Ok(Some(secret.clone()));
+    }
+    if let Some(name) = &args.client_secret_from_env {
+        let secret = read_named_env_secret(name, "OAuth client secret")?;
+        if secret.is_empty() {
+            return Err(format!(
+                "OAuth client secret environment variable {name} is empty"
+            ));
+        }
+        return Ok(Some(secret));
+    }
+    if let Some(path) = &args.client_secret_file {
+        let contents = std::fs::read_to_string(path).map_err(|error| {
+            format!(
+                "failed to read OAuth client secret file {}: {error}",
+                path.display()
+            )
+        })?;
+        let secret = contents.trim_end_matches(['\r', '\n']).to_string();
+        if secret.is_empty() {
+            return Err(format!(
+                "OAuth client secret file {} is empty",
+                path.display()
+            ));
+        }
+        return Ok(Some(secret));
+    }
+    Ok(None)
+}
+
+/// Migration never copies a legacy client secret. A confidential client
+/// therefore needs it re-supplied: interactively when a person is at a
+/// terminal, otherwise through a named unattended source.
+fn prompt_migrated_client_secret(token_auth_method: &str) -> Result<String, String> {
+    let guidance = format!(
+        "The old OAuth credential uses {token_auth_method}, and migration does not copy its client secret. Supply it with --client-secret-from-env <NAME> or --client-secret-file <PATH>."
+    );
+    if !io::stdin().is_terminal() {
+        return Err(guidance);
+    }
+    let secret = rpassword::prompt_password("OAuth client secret: ")
+        .map_err(|error| format!("failed to read OAuth client secret: {error}. {guidance}"))?;
+    if secret.is_empty() {
+        return Err(format!("OAuth client secret must not be empty. {guidance}"));
+    }
+    Ok(secret)
 }
 
 fn prompt_legacy_redirect_uri() -> Result<String, String> {
@@ -269,6 +328,8 @@ fn reject_oauth_options_for_manual_provider(
 ) -> Result<(), String> {
     if args.client_id.is_some()
         || args.client_secret.is_some()
+        || args.client_secret_from_env.is_some()
+        || args.client_secret_file.is_some()
         || args.scope.is_some()
         || args.resource.is_some()
         || args.auth_url.is_some()
@@ -341,9 +402,7 @@ pub(super) fn oauth_request_from_provider_metadata(
             .client_id
             .clone()
             .or_else(|| metadata.client_id.clone()),
-        client_secret: args
-            .client_secret
-            .clone()
+        client_secret: resolve_oauth_client_secret(args)?
             .or_else(|| metadata.client_secret.clone()),
         scopes: args.scope.clone().or_else(|| metadata.scopes.clone()),
         redirect_uri: args.redirect_uri.clone(),
@@ -351,9 +410,67 @@ pub(super) fn oauth_request_from_provider_metadata(
             .token_auth_method
             .clone()
             .or_else(|| metadata.token_endpoint_auth_method.clone()),
+        authorization_params: metadata.authorization_params.clone(),
         no_open: args.no_open,
         json: args.json,
     })
+}
+
+/// Authorization-request parameters a known authorization server needs for
+/// `harn connect` to store a credential it can later refresh. Google issues a
+/// refresh token only for `access_type=offline`, and re-issues one to an
+/// already-consented client only with `prompt=consent`; without both,
+/// `harn connect --refresh` has nothing to refresh with.
+const AUTHORIZATION_SERVER_DEFAULT_PARAMS: &[(&str, &[(&str, &str)])] = &[(
+    "accounts.google.com",
+    &[("access_type", "offline"), ("prompt", "consent")],
+)];
+
+/// Query parameters the OAuth flow itself sets; manifest params may not
+/// replace them.
+const FLOW_OWNED_AUTHORIZATION_PARAMS: &[&str] = &[
+    "response_type",
+    "client_id",
+    "redirect_uri",
+    "state",
+    "code_challenge",
+    "code_challenge_method",
+    "resource",
+    "scope",
+];
+
+/// The extra authorization query parameters for `authorization_endpoint`:
+/// the known-server defaults, overridden key by key by the manifest's
+/// `authorization_params`.
+pub(super) fn authorization_params_for(
+    authorization_endpoint: &str,
+    declared: &std::collections::BTreeMap<String, String>,
+) -> Result<Vec<(String, String)>, String> {
+    if let Some(owned) = declared
+        .keys()
+        .find(|key| FLOW_OWNED_AUTHORIZATION_PARAMS.contains(&key.as_str()))
+    {
+        return Err(format!(
+            "OAuth authorization_params may not set `{owned}`; harn connect owns that parameter"
+        ));
+    }
+    let host = Url::parse(authorization_endpoint)
+        .ok()
+        .and_then(|url| url.host_str().map(str::to_ascii_lowercase));
+    let mut params = std::collections::BTreeMap::<String, String>::new();
+    if let Some(host) = host {
+        for (server, defaults) in AUTHORIZATION_SERVER_DEFAULT_PARAMS {
+            if host == *server {
+                for (key, value) in *defaults {
+                    params.insert((*key).to_string(), (*value).to_string());
+                }
+            }
+        }
+    }
+    for (key, value) in declared {
+        params.insert(key.clone(), value.clone());
+    }
+    Ok(params.into_iter().collect())
 }
 
 pub(super) fn oauth_provider_defaults(provider: &str) -> Option<OAuthProviderDefaults> {
@@ -390,7 +507,9 @@ pub(super) async fn run_oauth_connect(mut request: OAuthConnectRequest) -> Resul
         ConnectorSetupInteraction::None,
         "Preparing service sign-in.",
     );
-    match run_oauth_connect_inner(&mut request, &mut reporter).await {
+    // Boxed: the authorization flow's future is large, and every connect
+    // dispatcher frame would otherwise carry it inline.
+    match Box::pin(run_oauth_connect_inner(&mut request, &mut reporter)).await {
         Ok(()) => Ok(()),
         Err(failure) => {
             reporter.failed(&failure);
@@ -473,14 +592,14 @@ async fn run_oauth_connect_inner(
     });
 
     let (listener, redirect_uri) =
-        bind_loopback_listener(&request.redirect_uri).map_err(|error| {
+        bind_loopback_listener(request.redirect_uri()).map_err(|error| {
             setup_failure(
                 ConnectorSetupErrorCode::ConfigurationMissing,
                 ConnectorSetupStage::Resolving,
                 error,
             )
         })?;
-    request.redirect_uri = redirect_uri.clone();
+    request.redirect_uri = Some(redirect_uri.clone());
     let (client_id, client_secret, token_auth_method) = resolve_oauth_client(
         request,
         discovery.as_ref(),
@@ -504,6 +623,7 @@ async fn run_oauth_connect_inner(
         &code_challenge,
         &request.resource,
         request.scopes.as_deref(),
+        &request.authorization_params,
     )
     .map_err(|error| {
         setup_failure(
@@ -632,6 +752,15 @@ async fn run_oauth_connect_inner(
             ConnectorSetupStage::Validating,
             "validation failed after saving connector credentials",
         ));
+    }
+    if stored.refresh_token.is_none() && !request.json {
+        eprintln!(
+            "note: {} did not issue a refresh token, so `harn connect --refresh {}` and \
+             std/oauth refresh will not work once the access token expires. If the provider \
+             needs a parameter for offline access, declare it under \
+             [providers.oauth] authorization_params.",
+            request.provider, request.provider
+        );
     }
 
     reporter.succeeded("The service is connected.");
@@ -774,7 +903,7 @@ async fn register_dynamic_client(
 ) -> Result<(String, Option<String>, String), String> {
     let registration = dynamic_client_registration(
         registration_endpoint,
-        &request.redirect_uri,
+        request.redirect_uri(),
         request.scopes.as_deref(),
     )
     .await?;
@@ -796,9 +925,12 @@ pub(super) async fn run_connect_refresh(
     json_output: bool,
 ) -> Result<(), String> {
     let mut stored = load_connector_token(provider_name).await?;
-    let refresh_token = stored.refresh_token.clone().ok_or_else(|| {
-        format!("stored connector token for {provider_name} does not include a refresh token")
-    })?;
+    let Some(refresh_token) = stored.refresh_token.clone() else {
+        return Err(missing_refresh_token_error(
+            provider_name,
+            legacy_refresh_token_service(provider_name).await,
+        ));
+    };
     let mut token_endpoint = stored.token_endpoint.clone();
     if let Some(stored_issuer) = stored.issuer.as_deref() {
         let discovery = discover_oauth_server(&stored.resource).await?;
@@ -839,6 +971,28 @@ pub(super) async fn run_connect_refresh(
         println!("Refreshed OAuth token for {provider_name}.");
     }
     Ok(())
+}
+
+/// Names the record `--refresh` read and, when one exists, the legacy keyring
+/// service that still holds a refresh token, so "no refresh token" is not
+/// mistaken for "never had one".
+pub(super) fn missing_refresh_token_error(
+    provider_name: &str,
+    legacy_service: Option<String>,
+) -> String {
+    let store = super::store::connector_token_store_description(provider_name);
+    let mut message = format!(
+        "stored connector token for {provider_name} ({store}) does not include a refresh token; \
+         the provider did not issue one when it was authorized. Re-run `harn connect \
+         {provider_name}` to authorize with offline access"
+    );
+    if let Some(service) = legacy_service {
+        message.push_str(&format!(
+            ". A refresh token from an older Harn release exists in keyring service {service}; \
+             Harn does not reuse tokens from that service"
+        ));
+    }
+    message
 }
 
 pub(super) async fn discover_oauth_server(resource: &str) -> Result<OAuthDiscoveryResult, String> {
@@ -913,7 +1067,9 @@ pub(super) fn build_authorization_url(
     code_challenge: &str,
     resource: &str,
     scopes: Option<&str>,
+    authorization_params: &std::collections::BTreeMap<String, String>,
 ) -> Result<Url, String> {
+    let extra_params = authorization_params_for(authorization_endpoint, authorization_params)?;
     let mut url = Url::parse(authorization_endpoint)
         .map_err(|error| format!("Invalid authorization endpoint: {error}"))?;
     {
@@ -927,6 +1083,9 @@ pub(super) fn build_authorization_url(
         query.append_pair("resource", resource);
         if let Some(scopes) = scopes {
             query.append_pair("scope", scopes);
+        }
+        for (key, value) in &extra_params {
+            query.append_pair(key, value);
         }
     }
     Ok(url)

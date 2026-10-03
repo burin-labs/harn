@@ -171,6 +171,9 @@ harn run \
 For a live extraction, omit `--extraction` and optionally choose `--provider`
 and `--model`. Without `--model`, Harn uses that provider's catalog default;
 it does not pair a cross-provider tier alias with the selected provider.
+The live extraction schema requires a `candidate` field, allowing `null` when
+the notice has no catalog change. This keeps providers from omitting the change
+record while returning classification `candidate`.
 `--max-cost-usd` caps its one model call at $0.10 by default;
 `--extraction-timeout-secs` caps that call at 90 seconds by default. By
 default the script only writes an idempotent local receipt below
@@ -302,6 +305,24 @@ wire shape was rejected. The attempt owns its physical request count: a local
 gate reports zero requests and remains unmeasured, while a provider response or
 served-empty response reports one.
 
+Every rejection needs a successful control request without the selected option.
+If that control also fails, the option remains unmeasured with
+`failure_class: "control_failed"`. A timeout gets one retry. Receipts include
+the retry and control in request, usage, and cost counts; an unpriced request
+remains an accounting gap even when a later request has a price.
+
+Ungated OpenRouter probes require endpoints that advertise all requested
+parameters. An explicit parameter-routing refusal is classified as
+`invalid_request`; a failure involving another routing filter remains
+unmeasured. Acceptance proves advertised support and request acceptance,
+not semantic enforcement of the option.
+
+An OpenRouter account privacy refusal produces `excluded_by_account_policy`
+with the provider message and no observed option-support value. The campaign
+counts these exclusions separately from eligible unmeasured cells. An exclusion
+cannot satisfy either measured control direction, and a campaign containing
+only exclusions remains incomplete. Preserve the account privacy settings.
+
 Normal calls use the catalog to reject or remove unsupported options before
 egress. A truthful negative probe must let its selected option reach the
 provider, or it can only confirm the catalog against itself. The CLI selects
@@ -345,7 +366,13 @@ count, so zero observations cannot read as healthy. Individual
 `option-probe-*.json` receipts join the same catalog hash, runtime fingerprint,
 sharding, credential-name readiness, and budget ledger as tool-call receipts.
 Credential-missing and otherwise skipped option cells count as unmeasured in a
-live campaign, so partial endpoint coverage cannot satisfy the control.
+live campaign, so partial endpoint coverage cannot satisfy the control. Pass
+`--provider` to declare the providers a run is responsible for; a declared
+provider with no credential still fails the run. The weekly `Provider contract
+probe` workflow declares its providers in `PROBE_PROVIDERS` next to the secrets
+it receives. Catalog routes marked `availability = "dedicated"` are not
+selected, because a serverless request to a model the provider serves only
+from a deployment returns not-found whatever the option.
 
 Fixture mode intentionally covers only deterministic public sources.
 Live mode adds provider-owned `/models` sources across the hosted

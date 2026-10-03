@@ -191,7 +191,12 @@ Every launched Harn session has one environment policy:
 
 - **Inherited** (the default) captures the launcher's environment once when the
   session starts. Later changes to the launcher process do not change the
-  session.
+  session. Spawned commands, MCP servers, and ACP children receive that
+  snapshot without any provider credential (the variables the provider catalog
+  declares as `auth_env` or `credential_env`, such as `OPENAI_API_KEY` or
+  Bedrock's `AWS_SECRET_ACCESS_KEY`). Harn's own model calls and
+  `harness.env` still read them. A child that needs a key gets it only from
+  its own explicit `env`.
 - **Isolated** admits only the small set of operating-system and toolchain
   values needed to run commands, such as `PATH`, temporary-directory settings,
   locale, and compiler locations. It rejects grants.
@@ -2176,11 +2181,19 @@ harn provider option-probe anthropic \
   --fail-on-drift --json
 ```
 
-`--plan` reports the endpoint, exact catalog field, claim, and one-request call
+`--plan` reports the endpoint, exact catalog field, claim, and initial request
 count without contacting the provider. A live report records `match`, `drift`,
 or `unmeasured`. Provider acceptance and provider rejection are measurements;
 authentication failures, throttling, unavailable models, and local gates are
 not. With `--fail-on-drift`, drift exits 1 and an unmeasured request exits 2.
+
+A rejection counts only when a control request without the option succeeds.
+A failed control leaves the result `unmeasured` with `failure_class:
+"control_failed"`. A timeout is retried once. Request counts, usage, and priced
+costs include retries and controls; requests without prices remain explicit
+accounting gaps in campaign reports.
+`cost_usd` sums priced requests; `observed_cost_count` below `request_count`
+means that sum is incomplete.
 
 The command normally suspends catalog shaping for only the selected option, so
 a negative claim can be falsified at the wire. The typed authority is captured
@@ -2188,6 +2201,19 @@ in the resolved call and carried through spawned transport work; it does not
 affect sibling calls or other options. `--gated` leaves normal shaping enabled
 for a confirm-only run. Acceptance proves the endpoint accepted a meaningful,
 non-default value, not that a provider necessarily honored the value.
+
+Ungated OpenRouter probes set
+[`provider.require_parameters`](https://openrouter.ai/docs/guides/routing/provider-selection#requiring-providers-to-support-all-parameters)
+to `true`, requiring an endpoint that advertises support for every requested
+parameter. An explicit parameter-routing rejection counts as a measurement.
+Routes pinned to specific upstream providers apply that same allowlist before
+parameter filtering.
+Missing endpoints, account privacy restrictions, and ambiguous routing failures
+remain `unmeasured`.
+An account data-policy refusal has verdict `excluded_by_account_policy` and
+`observed_supported: null`. The campaign reports it as a skip, counts it in
+`excluded_by_account_policy_count`, and excludes it from the eligible unmeasured
+count. Completion still requires measured supported and unsupported controls.
 
 ## harn provider dispatch-explain
 
@@ -2983,7 +3009,10 @@ flow; flags such as `--client-id`, `--scope`, `--auth-url`, and `--token-url`
 override that metadata for one run. An old OAuth credential that did not record
 its registered callback prompts for the exact URI. A missing authorization URL
 can be supplied at the next prompt or discovered from the resource. Unattended
-setup supplies the callback with `--redirect-uri <uri>`.
+setup supplies the callback with `--redirect-uri <uri>`, which counts even when
+it equals the default. A confidential client recovered this way needs its
+client secret again. Unattended setup supplies it with
+`--client-secret-from-env NAME` or `--client-secret-file PATH`.
 
 For `auth_type = "api-key"` with one outbound `required_secrets` entry, the
 same command prompts without echoing the key. Inbound verification secrets do
@@ -3008,10 +3037,18 @@ Stored OAuth tokens are written under connector-friendly secret ids:
 - `<provider>/refresh-token` when the provider returns one
 - `<provider>/oauth-token` for the full local refresh metadata
 
-`harn connect --list` reads a small keyring index and shows token expiration
-and last-used metadata when known. `--refresh <provider>` forces a refresh-token
-grant. `--revoke <provider>` removes the local OAuth token, access token,
-refresh token, and index entry.
+These ids live in the `HARN_SECRET_PROVIDERS` chain, under the namespace named
+by `HARN_SECRET_NAMESPACE` (default `harn.provider_auth`). `harness.secrets`
+and `std/oauth` secrets storage use the same chain, so the CLI and scripts
+share one record per provider.
+
+`harn connect --list` reads a small connector index and shows token expiration
+and last-used metadata when known. It names the provider chain it read, and
+`--json` reports it as `store`. `--refresh <provider>` forces a refresh-token
+grant. When the stored record has no refresh token, the error names the record
+and any keyring service from an older Harn release that still holds one. Harn
+does not reuse tokens from those older services. `--revoke <provider>` removes
+the local OAuth token, access token, refresh token, and index entry.
 
 Provider-specific OAuth flags:
 
@@ -3019,12 +3056,14 @@ Provider-specific OAuth flags:
 |---|---|
 | `--client-id <id>` | Pre-registered OAuth client id |
 | `--client-secret <secret>` | OAuth client secret |
+| `--client-secret-from-env <name>` | Read the OAuth client secret from an environment variable |
+| `--client-secret-file <path>` | Read the OAuth client secret from a file; a trailing newline is ignored |
 | `--scope <scopes>` | Requested scope string |
 | `--resource <resource>` | Override the OAuth resource indicator |
 | `--auth-url <url>` | Override the authorization endpoint |
 | `--token-url <url>` | Override the token endpoint |
 | `--token-auth-method <method>` | `none`, `client_secret_post`, or `client_secret_basic` |
-| `--redirect-uri <uri>` | Override the loopback callback URI |
+| `--redirect-uri <uri>` | Loopback callback URI; defaults to `http://127.0.0.1:0/oauth/callback` |
 | `--no-open` | Print the authorization URL instead of opening a browser |
 
 The GitHub command captures GitHub App installation metadata. If `--app-id` and
@@ -4010,6 +4049,16 @@ session must read outside its project workspace. Harn canonicalizes each path
 and adds it to the per-turn file-read policy for stdio and WebSocket ACP.
 This is additive to the existing policy; it does not enable confinement or
 change child-process permissions. Unconfined `code` mode remains unconfined.
+Pass `--confine-workspace <path>` once per workspace root to confine the stdio
+server's own process before it reads the first message. The kernel then holds
+the server, and every command it runs, to the profile a confined command gets
+for those roots: write the workspace, read the system and toolchain roots, no
+credential directories. The confinement lasts for the life of the process, and
+a `session/new` whose `cwd` is outside every root is refused with
+`outside_process_confinement`. The `initialize` response reports the state in
+`agentCapabilities._meta.harn.processConfinement`. The flag works on macOS
+and Linux. See
+[Confining a server process](./sandboxing.md#confining-a-server-process).
 Use `--profile` / `HARN_PROFILE=1` to print one categorical timing rollup per
 executed `session/prompt`; use `--profile-json <path>` /
 `HARN_PROFILE_JSON=<path>` to append per-turn NDJSON records with

@@ -182,6 +182,14 @@
       "auth": {
         "style": "aws_sigv4",
         "env": [],
+        "credential_env": [
+          "AWS_ACCESS_KEY_ID",
+          "AWS_SECRET_ACCESS_KEY",
+          "AWS_SESSION_TOKEN",
+          "AWS_SECURITY_TOKEN",
+          "AWS_PROFILE",
+          "AWS_CONTAINER_AUTHORIZATION_TOKEN"
+        ],
         "required": true
       },
       "data_controls": {
@@ -8963,7 +8971,7 @@
       "deprecation": {
         "status": "active"
       },
-      "availability": "serverless",
+      "availability": "dedicated",
       "quality_tags": [],
       "capability_tags": [
         "streaming",
@@ -9063,7 +9071,7 @@
       "deprecation": {
         "status": "active"
       },
-      "availability": "serverless",
+      "availability": "dedicated",
       "quality_tags": [],
       "capability_tags": [
         "streaming",
@@ -9163,7 +9171,7 @@
       "deprecation": {
         "status": "active"
       },
-      "availability": "serverless",
+      "availability": "dedicated",
       "quality_tags": [],
       "capability_tags": [
         "streaming",
@@ -9365,7 +9373,7 @@
       "deprecation": {
         "status": "active"
       },
-      "availability": "serverless",
+      "availability": "dedicated",
       "quality_tags": [],
       "capability_tags": [
         "streaming",
@@ -9783,7 +9791,7 @@
       "deprecation": {
         "status": "active"
       },
-      "availability": "serverless",
+      "availability": "dedicated",
       "quality_tags": [],
       "capability_tags": [
         "streaming",
@@ -9886,7 +9894,7 @@
       "deprecation": {
         "status": "active"
       },
-      "availability": "serverless",
+      "availability": "dedicated",
       "quality_tags": [],
       "capability_tags": [
         "streaming",
@@ -10195,7 +10203,7 @@
       "deprecation": {
         "status": "active"
       },
-      "availability": "serverless",
+      "availability": "dedicated",
       "quality_tags": [],
       "capability_tags": [
         "streaming",
@@ -23754,6 +23762,14 @@
         "text_generation",
         "decision"
       ],
+      "data_controls": {
+        "training_default": "trains",
+        "checked_on": "2026-10-02",
+        "sources": [
+          "https://openrouter.ai/settings/privacy"
+        ],
+        "note": "OpenRouter excludes this endpoint as a free-model training violation unless the account allows training on free models, so prompts sent here may be used for training."
+      },
       "display_name": "Nemotron 3 Super 120B A12B Free",
       "provider": "openrouter",
       "aliases": [],
@@ -24050,7 +24066,7 @@
         ],
         "effort_supported": true,
         "effort_levels": [],
-        "none_supported": true,
+        "none_supported": false,
         "interleaved_supported": false,
         "preserve_thinking": false
       },
@@ -24239,7 +24255,7 @@
         ],
         "effort_supported": true,
         "effort_levels": [],
-        "none_supported": true,
+        "none_supported": false,
         "interleaved_supported": false,
         "preserve_thinking": false
       },

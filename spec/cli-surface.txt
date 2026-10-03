@@ -132,6 +132,8 @@ harn connect generic
 harn connect generic --auth-url
 harn connect generic --client-id
 harn connect generic --client-secret
+harn connect generic --client-secret-file
+harn connect generic --client-secret-from-env
 harn connect generic --json
 harn connect generic --no-open
 harn connect generic --redirect-uri
@@ -162,6 +164,8 @@ harn connect linear --api-key-secret
 harn connect linear --auth-url
 harn connect linear --client-id
 harn connect linear --client-secret
+harn connect linear --client-secret-file
+harn connect linear --client-secret-from-env
 harn connect linear --config
 harn connect linear --json
 harn connect linear --label
@@ -177,6 +181,8 @@ harn connect notion
 harn connect notion --auth-url
 harn connect notion --client-id
 harn connect notion --client-secret
+harn connect notion --client-secret-file
+harn connect notion --client-secret-from-env
 harn connect notion --json
 harn connect notion --no-open
 harn connect notion --redirect-uri
@@ -191,6 +197,8 @@ harn connect slack
 harn connect slack --auth-url
 harn connect slack --client-id
 harn connect slack --client-secret
+harn connect slack --client-secret-file
+harn connect slack --client-secret-from-env
 harn connect slack --json
 harn connect slack --no-open
 harn connect slack --redirect-uri
@@ -282,6 +290,7 @@ harn doc
 harn doc --output
 harn doc <positional 1>
 harn doctor
+harn doctor --check-keyring-write
 harn doctor --check-providers
 harn doctor --check-targets
 harn doctor --json
@@ -1688,6 +1697,7 @@ harn serve acp
 harn serve acp --api-key
 harn serve acp --bind
 harn serve acp --cert
+harn serve acp --confine-workspace
 harn serve acp --hmac-secret
 harn serve acp --key
 harn serve acp --obs

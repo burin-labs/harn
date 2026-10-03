@@ -1,6 +1,6 @@
 use harn_vm::secrets::{configured_default_chain, ChainSecretProvider, SecretId, SecretProvider};
 
-use super::{OAuthConnectRequest, DEFAULT_OAUTH_REDIRECT_URI};
+use super::OAuthConnectRequest;
 
 /// Registration metadata that may be recovered from a pre-namespace OAuth
 /// record. Token material and the old client secret are deliberately absent
@@ -49,6 +49,23 @@ fn legacy_registration_store() -> Result<ChainSecretProvider, String> {
         .cloned()
         .collect();
     Ok(ChainSecretProvider::new(chain.namespace(), persistent))
+}
+
+/// The pre-namespace keyring service that still holds a refresh token for
+/// `provider_name`, if any. Presence only: no value is read, so no Keychain
+/// dialog is raised. Harn does not reuse legacy tokens; this exists so a
+/// missing-refresh-token error can say where the old one is. Only the keyring
+/// keeps the old namespace apart from the current one, so only a keyring in
+/// the configured chain is asked.
+pub(super) async fn legacy_refresh_token_service(provider_name: &str) -> Option<String> {
+    let store = legacy_registration_store().ok()?;
+    let id = harn_vm::secrets::connector_refresh_token_id(provider_name);
+    for provider in store.providers() {
+        if provider.kind() == "keyring" && matches!(provider.contains(&id).await, Ok(true)) {
+            return Some(store.namespace().to_string());
+        }
+    }
+    None
 }
 
 pub(super) async fn load_legacy_oauth_registration(
@@ -103,11 +120,10 @@ pub(super) fn oauth_request_with_legacy_registration(
     request.token_auth_method = request
         .token_auth_method
         .or(registration.token_endpoint_auth_method);
-    if request.redirect_uri == DEFAULT_OAUTH_REDIRECT_URI {
+    if request.redirect_uri.is_none() {
         request.redirect_uri = registration
             .redirect_uri
-            .filter(|uri| !uri.trim().is_empty())
-            .unwrap_or_else(|| DEFAULT_OAUTH_REDIRECT_URI.to_string());
+            .filter(|uri| !uri.trim().is_empty());
     }
     if request.resource.trim().is_empty() {
         request.resource = registration.resource.unwrap_or_default();
@@ -119,7 +135,7 @@ pub(super) fn legacy_registration_missing_redirect(
     request: &OAuthConnectRequest,
     registration: &LegacyOAuthRegistration,
 ) -> bool {
-    request.redirect_uri == DEFAULT_OAUTH_REDIRECT_URI
+    request.redirect_uri.is_none()
         && registration
             .redirect_uri
             .as_deref()

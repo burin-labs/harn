@@ -273,12 +273,16 @@ fn peel_node(sn: &SNode) -> &Node {
     }
 }
 
-/// Entry in the compiler's pending-finally stack. See the field-level doc on
-/// `Compiler::finally_bodies` for the unwind semantics each variant encodes.
+/// A pending cleanup body (`finally`, `defer`, or an `owned<T>` drop) and
+/// the exception handler that guards its region. See
+/// `Compiler::finally_bodies` for the unwind semantics.
 #[derive(Clone, Debug)]
-enum FinallyEntry {
-    Finally(Vec<SNode>),
-    CatchBarrier,
+struct FinallyEntry {
+    body: Vec<SNode>,
+    /// Handler depth outside this cleanup's own handler.
+    handler_depth: usize,
+    /// `TryCatchSetup` operand to patch with this cleanup's exception path.
+    error_jump: usize,
 }
 
 #[derive(Clone, Debug)]
@@ -383,17 +387,13 @@ pub struct Compiler {
     loop_stack: Vec<LoopContext>,
     /// Current depth of exception handlers (for cleanup on break/continue).
     handler_depth: usize,
-    /// Stack of pending finally bodies plus catch-handler barriers for
-    /// unwind-aware lowering of `throw`, `return`, `break`, and `continue`.
+    /// Stack of pending cleanup bodies, innermost last.
     ///
-    /// A `Finally` entry is a pending finally body that must execute when
-    /// control exits its enclosing try block. A `CatchBarrier` marks the
-    /// boundary of an active `try/catch` handler: throws emitted inside
-    /// the try body are caught locally, so pre-running finallys *beyond*
-    /// the barrier would wrongly fire side effects for outer blocks the
-    /// throw never actually escapes. Throw lowering stops at the innermost
-    /// barrier; `return`/`break`/`continue`, which do transfer past local
-    /// handlers, still run every pending `Finally` up to their target.
+    /// Each entry owns a runtime exception handler installed when the
+    /// cleanup is registered. Any error leaving the region, whether thrown
+    /// inline, raised by a callee, or produced by a failing operation, lands
+    /// in that handler, which runs the body once and rethrows. Normal exit
+    /// and `return`/`break`/`continue` pop the handler and inline the body.
     finally_bodies: Vec<FinallyEntry>,
     /// Counter for unique temp variable names.
     temp_counter: usize,
@@ -824,15 +824,14 @@ impl Compiler {
             }
             Node::DeferStmt { body } => {
                 // Register the body to run on return/throw/scope-exit. The
-                // statement emits no bytecode of its own — the deferred body
-                // is inlined later by the finally-draining machinery — so it
-                // leaves the operand stack untouched, matching
+                // statement only installs the cleanup's exception handler; the
+                // deferred body is inlined later by the finally-draining
+                // machinery. It leaves the operand stack untouched, matching
                 // `produces_value` == false. Emitting a `Nil` here instead
                 // leaked an unpopped slot per execution, which in a loop body
                 // grew the operand stack without bound (surfaced by the
                 // #2622 balance assertion).
-                self.finally_bodies
-                    .push(FinallyEntry::Finally(body.clone()));
+                self.push_cleanup(body.clone());
             }
             Node::YieldExpr { value } => {
                 if let Some(val) = value {
@@ -898,6 +897,7 @@ impl Compiler {
             }
             Node::TryOperator { operand } => {
                 self.compile_node(operand)?;
+                self.compile_try_operator_cleanup()?;
                 self.chunk.emit(Op::TryUnwrap, self.line);
             }
             // `try* EXPR`: evaluate EXPR; on throw, run pending finally

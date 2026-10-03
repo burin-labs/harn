@@ -82,12 +82,16 @@ pub fn validate_artifact(artifact: &ProviderCatalogArtifact) -> ProviderCatalogV
                 provider.id
             ));
         }
+        // Every credential a provider reads must be named, so the environment
+        // policy can keep it out of child processes. A platform credential
+        // chain (Bedrock's AWS variables) declares its names as
+        // `credential_env`; there is no exemption by auth style.
         if provider.auth.required
             && provider.auth.env.is_empty()
-            && provider.auth.style != "aws_sigv4"
+            && provider.auth.credential_env.is_empty()
         {
             result.errors.push(format!(
-                "provider {} requires auth but declares no auth env keys",
+                "provider {} requires auth but declares no auth_env or credential_env names",
                 provider.id
             ));
         }

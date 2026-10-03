@@ -292,7 +292,9 @@ fn canonical_trusted_setup_refuses_loader_controls_before_payload() {
     for (name, value) in [
         ("LD_TRACE_LOADED_OBJECTS", "1"),
         ("GLIBC_TUNABLES", "glibc.malloc.trim_threshold=131072"),
-        ("MALLOC_TRIM_THRESHOLD_", "131072"),
+        // Allocator sizing knobs are re-applied instead (see below); a
+        // behavior-changing `MALLOC_*` control is still refused.
+        ("MALLOC_CHECK_", "3"),
     ] {
         trusted_setup_refuses_control(name, value);
     }
@@ -369,7 +371,7 @@ fn canonical_trusted_setup_composes_inherited_removal_and_clear() {
     for (name, value) in [
         ("LD_BIND_NOW", "1"),
         ("GLIBC_TUNABLES", "glibc.malloc.trim_threshold=131072"),
-        ("MALLOC_TRIM_THRESHOLD_", "131072"),
+        ("MALLOC_PERTURB_", "165"),
     ] {
         trusted_setup_composes_control(name, value);
     }
@@ -439,6 +441,52 @@ fn main(harness: Harness) {
         b"inherited-refused-removal-and-clear-reached\n"
     );
     assert!(!root.path().join("marker").exists());
+}
+
+/// Hosts that export allocator tuning (Heroku's `MALLOC_ARENA_MAX=2`) still
+/// run sandboxed commands: bubblewrap never carries the tuning, and the
+/// confined command receives it, inherited or set per command.
+#[test]
+fn canonical_bubblewrap_reapplies_allocator_tuning_to_the_payload() {
+    let root = tempfile::tempdir().unwrap();
+    let source = r#"
+fn main(harness: Harness) {
+  const host = harness.system.sandbox_confinement()
+  if !host.confines_processes {
+    harness.stdio.println("bubblewrap-unavailable")
+    return
+  }
+  assert_eq(host.mechanism, "linux_bubblewrap")
+  const probe = "test \"$MALLOC_ARENA_MAX\" = 2 && test \"$MALLOC_TRIM_THRESHOLD_\" = 131072 && printf "
+  const synchronous = harness.tools.run_command({argv: ["/usr/bin/sh", "-c", probe + "synchronous"], env_mode: "patch", env: {MALLOC_TRIM_THRESHOLD_: "131072"}})
+  assert_eq(synchronous.exit_code, 0)
+  assert_eq(synchronous.stdout, "synchronous")
+  const asynchronous = harness.process.run({program: "/usr/bin/sh", args: ["-c", probe + "asynchronous"], env: {MALLOC_TRIM_THRESHOLD_: "131072"}})
+  assert_eq(asynchronous.exit_code, 0)
+  assert_eq(asynchronous.stdout, "asynchronous")
+  harness.stdio.println("allocator-tuning-reached-the-payload")
+}
+"#;
+    let mut command = harn_e2e_command();
+    command
+        .current_dir(root.path())
+        .env("MALLOC_ARENA_MAX", "2")
+        .args([
+            "run",
+            "--standalone",
+            "--sandbox-allow-process-self-introspection",
+            "-e",
+            source,
+        ]);
+    deny_landlock(&mut command, false);
+    let output = command.output().unwrap();
+    assert!(output.status.success(), "{output:?}");
+    if output.stdout == b"bubblewrap-unavailable\n" {
+        eprintln!("NOT EXERCISED: functional bubblewrap namespaces unavailable");
+        assert_ne!(std::env::var("BWRAP_REQUIRE_TESTS").as_deref(), Ok("1"));
+        return;
+    }
+    assert_eq!(output.stdout, b"allocator-tuning-reached-the-payload\n");
 }
 
 #[test]

@@ -3,50 +3,14 @@ use harn_parser::SNode;
 use crate::chunk::{Constant, Op};
 
 use super::error::CompileError;
-use super::{Compiler, FinallyEntry};
+use super::Compiler;
 
 impl Compiler {
     pub(super) fn compile_throw_stmt(&mut self, value: &SNode) -> Result<(), CompileError> {
-        let has_pending_finally = self.has_pending_finally_until_barrier();
-        self.compile_transfer_operand(value)?;
-        if has_pending_finally {
-            self.temp_counter += 1;
-            let temp_name = format!("__throw_val_{}__", self.temp_counter);
-            self.emit_define_binding(&temp_name, true);
-            self.run_pending_finallys_until_barrier()?;
-            self.emit_get_binding(&temp_name);
-        }
+        // Pending cleanups run from their own exception handlers, exactly as
+        // they do for errors raised by callees and failing operations.
+        self.compile_node(value)?;
         self.chunk.emit(Op::Throw, self.line);
-        Ok(())
-    }
-    /// Evaluate a transfer operand under the pending throw-unwind cleanup path.
-    /// The temporary handler is removed before cleanup runs, so a cleanup throw
-    /// replaces the operand error instead of being caught here.
-    pub(super) fn compile_transfer_operand(&mut self, operand: &SNode) -> Result<(), CompileError> {
-        if !self.has_pending_finally_until_barrier() {
-            return self.compile_node(operand);
-        }
-
-        self.handler_depth += 1;
-        let error_jump = self.chunk.emit_jump(Op::TryCatchSetup, self.line);
-        let empty_type = self.string_constant("");
-        self.emit_type_name_extra(empty_type);
-
-        self.compile_node(operand)?;
-
-        self.handler_depth -= 1;
-        self.chunk.emit(Op::PopHandler, self.line);
-        let success_jump = self.chunk.emit_jump(Op::Jump, self.line);
-
-        self.chunk.patch_jump(error_jump);
-        self.temp_counter += 1;
-        let temp_name = format!("__transfer_err_{}__", self.temp_counter);
-        self.emit_define_binding(&temp_name, true);
-        self.run_pending_finallys_until_barrier()?;
-        self.emit_get_binding(&temp_name);
-        self.chunk.emit(Op::Throw, self.line);
-
-        self.chunk.patch_jump(success_jump);
         Ok(())
     }
 
@@ -68,17 +32,9 @@ impl Compiler {
         self.chunk.emit(Op::PopHandler, self.line);
         let end_jump = self.chunk.emit_jump(Op::Jump, self.line);
 
-        // Catch path: thrown value is on the stack. Pre-run any
-        // finallys between us and the innermost catch barrier
-        // (mirrors `Node::ThrowStmt` lowering), then rethrow.
+        // Catch path: thrown value is on the stack. Rethrow it; pending
+        // cleanups run from their own handlers.
         self.chunk.patch_jump(catch_jump);
-        if self.has_pending_finally_until_barrier() {
-            self.temp_counter += 1;
-            let temp_name = format!("__try_star_err_{}__", self.temp_counter);
-            self.emit_define_binding(&temp_name, true);
-            self.run_pending_finallys_until_barrier()?;
-            self.emit_get_binding(&temp_name);
-        }
         self.chunk.emit(Op::Throw, self.line);
 
         self.chunk.patch_jump(end_jump);
@@ -109,108 +65,20 @@ impl Compiler {
         };
 
         let has_catch = !catch_body.is_empty() || error_var.is_some();
-        let has_finally = finally_body.is_some();
 
-        if has_catch && has_finally {
-            let finally_body = finally_body.as_ref().unwrap();
-            // During the try body: install both the catch barrier
-            // (so throws don't pre-run finallys beyond our catch)
-            // and our finally (so return/break/continue in the
-            // body still run it). Order matters — barrier is below
-            // our finally so pre-running stops *at* the barrier.
-            self.finally_bodies.push(FinallyEntry::CatchBarrier);
-            self.finally_bodies
-                .push(FinallyEntry::Finally(finally_body.clone()));
-
-            self.handler_depth += 1;
-            let catch_jump = self.chunk.emit_jump(Op::TryCatchSetup, self.line);
-            self.emit_type_name_extra(type_name_idx);
-
-            self.compile_try_body(body)?;
-
-            self.handler_depth -= 1;
-            self.chunk.emit(Op::PopHandler, self.line);
-            // Drop both finally and barrier BEFORE inlining the
-            // success-path finally. If they were left on the stack, a
-            // `return`/`break`/`continue` inside the finally would call
-            // `pending_finallys_*` and re-enqueue the finally currently
-            // being inlined, recursing forever at compile time. The body
-            // was already compiled with them in place, so body throws
-            // still run the finally; the catch handler compiles without them.
-            self.finally_bodies.pop(); // Finally
-            self.finally_bodies.pop(); // CatchBarrier
-                                       // Body-success path: throw never fired, so pre-run did
-                                       // not happen. Run finally now.
-            self.compile_finally_inline(finally_body)?;
-            let end_jump = self.chunk.emit_jump(Op::Jump, self.line);
-
-            self.chunk.patch_jump(catch_jump);
-            self.begin_scope();
-            self.compile_catch_binding(error_var)?;
-
-            // Inner try around catch body so a catch-body throw
-            // lands in our `rethrow_jump` and we emit a plain
-            // rethrow (finally already fired via the body's throw).
-            self.handler_depth += 1;
-            let rethrow_jump = self.chunk.emit_jump(Op::TryCatchSetup, self.line);
-            let empty_type = self.string_constant("");
-            self.emit_type_name_extra(empty_type);
-
-            self.compile_try_body(catch_body)?;
-
-            self.handler_depth -= 1;
-            self.chunk.emit(Op::PopHandler, self.line);
-            self.end_scope();
-            let end_jump2 = self.chunk.emit_jump(Op::Jump, self.line);
-
-            // Rethrow handler: plain rethrow; finally already pre-ran
-            // via the body's Throw lowering before the outer handler
-            // delivered control into catch.
-            self.chunk.patch_jump(rethrow_jump);
-            self.compile_plain_rethrow()?;
-            self.end_scope();
-
-            self.chunk.patch_jump(end_jump);
-            self.chunk.patch_jump(end_jump2);
-        } else if has_finally {
-            let finally_body = finally_body.as_ref().unwrap();
-            // No catch: throws in the body unwind through us, so
-            // we don't install a barrier — our finally and any
-            // outer finallys are on the throw's escape path.
-            self.finally_bodies
-                .push(FinallyEntry::Finally(finally_body.clone()));
-
-            self.handler_depth += 1;
-            let error_jump = self.chunk.emit_jump(Op::TryCatchSetup, self.line);
-            let empty_type = self.string_constant("");
-            self.emit_type_name_extra(empty_type);
-
-            self.compile_try_body(body)?;
-
-            self.handler_depth -= 1;
-            self.chunk.emit(Op::PopHandler, self.line);
-            // Drop our finally BEFORE inlining the success-path finally —
-            // otherwise a `return`/`break`/`continue` inside the finally
-            // re-enqueues the finally currently being inlined and recurses
-            // forever at compile time. The body was already compiled with
-            // it in place (so body throws still run it); the error path
-            // below re-throws without it (finally already pre-ran there).
-            self.finally_bodies.pop(); // Finally
-            self.compile_finally_inline(finally_body)?;
-            let end_jump = self.chunk.emit_jump(Op::Jump, self.line);
-
-            // Error path: save error, re-throw. Finally already
-            // pre-ran via the body's Throw lowering.
-            self.chunk.patch_jump(error_jump);
-            self.compile_plain_rethrow()?;
-
-            self.chunk.patch_jump(end_jump);
+        if let Some(finally_body) = finally_body {
+            // The cleanup handler sits outside the catch handler, so it sees
+            // errors from the body that the catch does not match, errors from
+            // the catch body, and errors raised anywhere below this frame.
+            let finally_floor = self.finally_bodies.len();
+            self.push_cleanup(finally_body.clone());
+            if has_catch {
+                self.compile_try_catch(body, error_var, error_type, catch_body, &None)?;
+            } else {
+                self.compile_try_body(body)?;
+            }
+            self.drain_finallys_to_floor(finally_floor)?;
         } else {
-            // try-catch without finally: install a barrier so
-            // throws in the body don't pre-run outer finallys
-            // (the throw is caught here and won't unwind past).
-            self.finally_bodies.push(FinallyEntry::CatchBarrier);
-
             self.handler_depth += 1;
             let catch_jump = self.chunk.emit_jump(Op::TryCatchSetup, self.line);
             self.emit_type_name_extra(type_name_idx);
@@ -219,7 +87,6 @@ impl Compiler {
 
             self.handler_depth -= 1;
             self.chunk.emit(Op::PopHandler, self.line);
-            self.finally_bodies.pop(); // CatchBarrier
             let end_jump = self.chunk.emit_jump(Op::Jump, self.line);
 
             self.chunk.patch_jump(catch_jump);

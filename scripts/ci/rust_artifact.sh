@@ -47,7 +47,9 @@ sha256() {
 
 require_nextest_version() {
   local actual first_line program version
-  actual="$(cargo nextest --version)"
+  # Cargo prefers CARGO_HOME/bin for subcommands, ahead of the installer PATH.
+  # Invoke the installed executable so the version check and archive agree.
+  actual="$(cargo-nextest nextest --version)"
   first_line="${actual%%$'\n'*}"
   read -r program version _ <<< "$first_line"
   if [[ "$program" != "cargo-nextest" || "$version" != "$NEXTEST_VERSION" ]]; then
@@ -316,7 +318,7 @@ build_test_bundle() {
   cleanup_dir="$staging"
 
   prepare_harn_cli "$staging" "$commit" "$target_dir"
-  cargo nextest archive --locked --workspace --profile ci \
+  cargo-nextest nextest archive --locked --workspace --profile ci \
     -E "$NEUTRAL_FILTER" \
     --archive-file "$staging/harn-tests.tar.zst"
   # The archive digest is written only after nextest creates it.
@@ -460,11 +462,11 @@ build_security_bundle() {
   # Match the following workspace test build's unified feature graph. The
   # filter limits archived binaries, not compilation, so security consumers
   # still receive only their selected tests without a second crate build.
-  cargo nextest archive --locked --workspace --profile ci \
+  cargo-nextest nextest archive --locked --workspace --profile ci \
     -E "$SECURITY_FILTER" \
     --archive-file "$staging/harn-security-tests.tar.zst"
   host_bound_filter="$("${SCRIPT_DIR}/host_bound_rust_test_filter.sh" linux)"
-  cargo nextest list --profile ci \
+  cargo-nextest nextest list --profile ci \
     --ignore-default-filter \
     --archive-file "$staging/harn-security-tests.tar.zst" \
     --message-format json -E "$host_bound_filter" \

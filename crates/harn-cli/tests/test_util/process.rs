@@ -104,7 +104,7 @@ pub fn harn_e2e_binary() -> &'static Path {
 pub fn harn_e2e_command() -> Command {
     let mut command = Command::new(harn_e2e_binary());
     for (name, _) in std::env::vars_os() {
-        if harn_vm::security::environment_policy::is_trusted_setup_control(&name) {
+        if harn_vm::security::is_trusted_setup_control(&name) {
             command.env_remove(name);
         }
     }

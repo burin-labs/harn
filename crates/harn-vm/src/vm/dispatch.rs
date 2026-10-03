@@ -1031,13 +1031,14 @@ impl Vm {
                 builtin(&args, &mut self.output)
             }
             VmBuiltinDispatch::Async(async_builtin) => {
+                let caller = self.host_call_site();
                 // Bind a fresh child VM as the async-builtin context for the
                 // duration of this future, threading the explicit ctx handle
                 // into the handler. Drain any output VM-side closures
                 // forwarded into the ctx back to the parent.
                 let (result, captured) =
                     crate::vm::run_async_builtin_with(self.child_vm_inline(), |ctx| {
-                        async_builtin(ctx, args)
+                        async_builtin(ctx.with_host_call_site(caller), args)
                     })
                     .await;
                 if !captured.is_empty() {

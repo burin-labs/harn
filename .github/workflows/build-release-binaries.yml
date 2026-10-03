@@ -24,7 +24,9 @@ name: Build release binaries
 #      unless the push changed a compile or build-topology input declared in
 #      .github/release-warm-cache-paths.yml.
 #
-#   3. schedule, daily — safety-net warm-up against GitHub's 7-day eviction.
+#   3. schedule, daily — signed exact-main source candidates, including commits
+#      outside the warm-cache path filter. A live candidate is reused. The
+#      cadence is a spend decision; scripts/scheduled_workflows.toml records it.
 #
 #   4. workflow_dispatch — warm_cache_only, benchmark_only size gates, or an
 #      explicit source_candidate on main. Source candidates reuse the full
@@ -48,9 +50,6 @@ on:
   merge_group:
   pull_request:
   schedule:
-    # Daily warm at 05:17 UTC. Staggered from release-smoke's 09:17 cron
-    # so the two release-mode workflows don't contend for runners or for
-    # the per-repo cache budget at the same minute.
     - cron: '17 5 * * *'
   workflow_dispatch:
     inputs:
@@ -105,15 +104,15 @@ permissions:
   packages: read
 
 concurrency:
-  group: build-release-binaries-${{ (github.event_name == 'workflow_dispatch' && inputs.benchmark_source_sha != '' && format('benchmark-{0}-{1}', inputs.benchmark_source_sha, github.sha)) || (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.warm_cache_only)) && 'warm-main' || (github.event_name == 'push' && format('branch-{0}', github.run_id)) || github.ref_name }}
+  group: build-release-binaries-${{ (github.event_name == 'workflow_dispatch' && inputs.benchmark_source_sha != '' && format('benchmark-{0}-{1}', inputs.benchmark_source_sha, github.sha)) || (github.event_name == 'schedule' && 'source-main') || (github.event_name == 'workflow_dispatch' && inputs.warm_cache_only && 'warm-main') || (github.event_name == 'push' && format('branch-{0}', github.run_id)) || github.ref_name }}
   # Candidate runs are push runs, so they get a run-qualified lane and a later
   # main push can never cancel a release candidate. An immutable-source
   # benchmark has a source-qualified lane. Setup may resolve a push to a no-op;
   # the build job below gives only real per-target warms a shared, preemptible
-  # lane, so a docs-only push cannot destroy useful cache work. Scheduled and
-  # explicit manual full warms share `warm-main` and safely supersede an older
-  # full warm.
-  cancel-in-progress: ${{ github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.warm_cache_only) }}
+  # lane, so a docs-only push cannot destroy useful cache work. Scheduled source
+  # candidates serialize without cancellation. Manual warms may supersede an
+  # older manual warm in their separate group.
+  cancel-in-progress: ${{ github.event_name == 'workflow_dispatch' && inputs.warm_cache_only }}
 
 env:
   CARGO_TERM_COLOR: always
@@ -160,7 +159,7 @@ jobs:
           fetch-depth: 0
 
       - name: Install the source candidate decision runtime
-        if: inputs.source_candidate
+        if: inputs.source_candidate || github.event_name == 'schedule'
         uses: ./.github/actions/setup-harn
         with:
           version-file: .harn-bootstrap-version
@@ -195,7 +194,7 @@ jobs:
       - name: Resolve release context
         id: resolve
         env:
-          INPUT_SOURCE_CANDIDATE: ${{ inputs.source_candidate && 'true' || 'false' }}
+          INPUT_SOURCE_CANDIDATE: ${{ (inputs.source_candidate || github.event_name == 'schedule') && 'true' || 'false' }}
           INPUT_WARM_CACHE_ONLY: ${{ inputs.warm_cache_only && 'true' || 'false' }}
           INPUT_TARGETS: ${{ inputs.targets }}
           INPUT_BENCHMARK_ONLY: ${{ inputs.benchmark_only && 'true' || 'false' }}
@@ -276,7 +275,17 @@ jobs:
             BUILD_MATRIX="$(resolve_runner_matrix "$BUILD_MODE" "$RUNNER_PROFILE")"
             SHOULD_BUILD_BINARIES=true
             SHOULD_PACKAGE_ARCHIVES=true
-            echo "::notice::Building signed source candidate $GITHUB_SHA with the existing full candidate producer. This dispatch cannot publish a release."
+            if [[ "$EVENT_NAME" == schedule ]]; then
+              LIVE_CANDIDATE_RUN="$(source_candidate_live_run_id "$GITHUB_REPOSITORY" "$GITHUB_SHA" "$BUILD_MATRIX")"
+              if [[ -n "$LIVE_CANDIDATE_RUN" ]]; then
+                BUILD_MODE=queued
+                SHOULD_BUILD_BINARIES=false
+                SHOULD_PACKAGE_ARCHIVES=false
+                echo "reused_source_run_id=$LIVE_CANDIDATE_RUN" >> "$GITHUB_OUTPUT"
+                echo "::notice::Reusing live source candidate run $LIVE_CANDIDATE_RUN at $GITHUB_SHA."
+              fi
+            fi
+            echo "::notice::Signed source candidate $GITHUB_SHA uses the existing full candidate producer. Source candidate events cannot publish a release."
           elif [[ "$INPUT_BENCHMARK_ONLY" == "true" ]]; then
             if [[ "$EVENT_NAME" != "workflow_dispatch" ]]; then
               echo "::error::benchmark_only is only valid for workflow_dispatch"
@@ -323,14 +332,6 @@ jobs:
             BUILD_MATRIX="$(resolve_runner_matrix "$BUILD_MODE" policy)"
             SHOULD_BUILD_BINARIES=true
             echo "::notice::Warm-cache-only workflow_dispatch on main. Building release binaries to refresh default-branch Swatinem rust-cache entries. No sign/notarize/package/upload."
-          elif [[ "$EVENT_NAME" == "schedule" ]]; then
-            # Cron-driven warm-cache run: refresh the cache against GitHub's
-            # 7-day eviction.
-            BUILD_MODE=warm
-            RUNNER_PROFILE=policy
-            BUILD_MATRIX="$(resolve_runner_matrix "$BUILD_MODE" policy)"
-            SHOULD_BUILD_BINARIES=true
-            echo "::notice::Warm-cache-only run (schedule). Building release binaries to populate the per-target Swatinem rust-cache on main. No sign/notarize/package/upload."
           elif [[ "$EVENT_NAME" == "push" && "$REF_NAME" == "main" ]]; then
             RUNNER_PROFILE=policy
             # The version commit is the release: a push whose workspace version

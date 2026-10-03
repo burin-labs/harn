@@ -1522,7 +1522,9 @@ standalone CLI reuse. Treat that as durable delegated access:
   A stdio server starts with the session's resolved environment, so under an
   `isolated` or `granted` policy it sees a credential only through the
   server's own `env` configuration or a grant that reaches it (session-wide,
-  or `for_command` naming the server's executable)
+  or `for_command` naming the server's executable). Under every policy,
+  including `inherited`, a server receives a provider credential such as
+  `OPENAI_API_KEY` only when its own `env` configuration names it
 - review remote MCP capabilities before wiring them into autonomous workflows
 
 ### Safer write defaults

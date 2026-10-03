@@ -42,6 +42,9 @@ fn __probe_verdict(value: string) -> ProviderOptionProbeVerdict {
   if value == "gated_locally" {
     return "gated_locally"
   }
+  if value == "excluded_by_account_policy" {
+    return "excluded_by_account_policy"
+  }
   throw "invalid provider option probe verdict: ${value}"
 }
 
@@ -140,8 +143,16 @@ fn __failure_class(error: unknown) -> string {
   }
   const kind = to_string(error?.kind ?? "")
   const reason = to_string(error?.reason ?? "")
+  const message = to_string(error?.message ?? "")
   if reason == "auth_failure" {
     return "unauthorized"
+  }
+  // OpenRouter refuses every endpoint the account's privacy settings exclude.
+  // That is account state, not evidence about the option or the catalog.
+  if reason == "model_unavailable"
+    && starts_with(message, "openrouter HTTP 404 ")
+    && contains(message, "guardrail restrictions and data policy") {
+    return "account_policy"
   }
   if kind == "transient" {
     return "transient"
@@ -188,6 +199,17 @@ pub fn provider_option_probe_classify(outcome: unknown) -> ProviderOptionProbeAt
     to_string(raw)
   }
   const class = __failure_class(raw)
+  if class == "account_policy" {
+    return {
+      verdict: __probe_verdict("excluded_by_account_policy"),
+      measured: false,
+      request_count: 1,
+      failure_class: class,
+      reason: to_string(raw?.reason ?? ""),
+      error: message,
+      cost_usd: 0.0,
+    }
+  }
   if class == "local" {
     return {
       verdict: __probe_verdict("gated_locally"),
@@ -221,6 +243,109 @@ pub fn provider_option_probe_classify(outcome: unknown) -> ProviderOptionProbeAt
   }
 }
 
+fn __control(llm: HarnessLlm, provider: string, model: string, max_tokens: int) -> unknown {
+  return try {
+    llm.call(
+      "Reply with the single word: ok",
+      nil,
+      {provider: provider, model: model, max_tokens: max_tokens, stream: false},
+    )
+  }
+}
+
+fn __append_accounting(
+  attempt: ProviderOptionProbeAttempt,
+  added: ProviderOptionProbeAttempt,
+) -> ProviderOptionProbeAttempt {
+  const priced = (attempt.observed_cost_count
+      ?? if attempt.cost_usd != nil {
+        1
+      } else {
+        0
+      })
+    + (added.observed_cost_count ?? if added.cost_usd != nil {
+      1
+    } else {
+      0
+    })
+  const usage = (attempt.observed_usage_count
+      ?? if attempt.input_tokens != nil || attempt.output_tokens != nil {
+        1
+      } else {
+        0
+      })
+    + (added.observed_usage_count
+      ?? if added.input_tokens != nil || added.output_tokens != nil {
+        1
+      } else {
+        0
+      })
+  return attempt
+    + {
+      request_count: attempt.request_count + added.request_count,
+      retry_count: (attempt.retry_count ?? 0) + (added.retry_count ?? 0),
+      observed_cost_count: priced,
+      observed_usage_count: usage,
+      cost_usd: if priced > 0 {
+        (attempt.cost_usd ?? 0.0) + (added.cost_usd ?? 0.0)
+      } else {
+        nil
+      },
+      input_tokens: if usage > 0 {
+        (attempt.input_tokens ?? 0) + (added.input_tokens ?? 0)
+      } else {
+        nil
+      },
+      output_tokens: if usage > 0 {
+        (attempt.output_tokens ?? 0) + (added.output_tokens ?? 0)
+      } else {
+        nil
+      },
+    }
+}
+
+/**
+ * Combines a retry result with the first request's accounting.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn provider_option_probe_retry_result(
+  first: ProviderOptionProbeAttempt,
+  second: ProviderOptionProbeAttempt,
+) -> ProviderOptionProbeAttempt {
+  const combined = __append_accounting(second, first)
+  return combined + {retry_count: (combined.retry_count ?? 0) + 1}
+}
+
+/**
+ * Attributes a rejection to the probed option only when the same request without the option succeeds.
+ *
+ * A route that refuses every request (mandatory reasoning, a retired model,
+ * a bad key) would otherwise turn each option into a confident "unsupported".
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn provider_option_probe_confirm_rejection(
+  attempt: ProviderOptionProbeAttempt,
+  control: ProviderOptionProbeAttempt,
+) -> ProviderOptionProbeAttempt {
+  const combined = __append_accounting(attempt, control)
+  if control.verdict == "accepted" && control.measured && control.request_count > 0 {
+    return combined
+  }
+  return combined
+    + {
+      verdict: __probe_verdict("inconclusive"),
+      measured: false,
+      failure_class: "control_failed",
+      reason: attempt.reason ?? "",
+      error: attempt.error ?? "",
+      control_error: control.error ?? to_string(control.verdict),
+    }
+}
+
 /**
  * Builds the endpoint-keyed claim, observation, and drift receipt for one measured request.
  *
@@ -236,7 +361,9 @@ pub fn provider_option_probe_report(
   ungated: bool,
   attempt: ProviderOptionProbeAttempt,
 ) -> ProviderOptionProbeReport {
-  const observed = if attempt.verdict == "accepted" {
+  const observed = if !attempt.measured || attempt.request_count == 0 {
+    nil
+  } else if attempt.verdict == "accepted" {
     true
   } else if attempt.verdict == "rejected" {
     false
@@ -258,7 +385,7 @@ pub fn provider_option_probe_report(
     probe: {
       ungated: ungated,
       request_count: attempt.request_count,
-      measured_count: if attempt.measured {
+      measured_count: if observed != nil {
         1
       } else {
         0
@@ -324,7 +451,24 @@ fn main(harness: Harness) {
     harness.stdio.println(json_stringify_pretty(plan))
     return
   }
-  const outcome = __attempt(harness.llm, provider, model, option, args.max_tokens)
+  let attempt = provider_option_probe_classify(
+    __attempt(harness.llm, provider, model, option, args.max_tokens),
+  )
+  // One retry after a transport timeout: a scale-to-zero endpoint can spend
+  // the whole first request cold-starting (Fireworks Nemotron Lightning timed
+  // out at ~120 s, then answered every option within seconds).
+  if attempt.verdict == "inconclusive" && (attempt.reason ?? "") == "timeout" {
+    const second = provider_option_probe_classify(
+      __attempt(harness.llm, provider, model, option, args.max_tokens),
+    )
+    attempt = provider_option_probe_retry_result(attempt, second)
+  }
+  if attempt.verdict == "rejected" {
+    attempt = provider_option_probe_confirm_rejection(
+      attempt,
+      provider_option_probe_classify(__control(harness.llm, provider, model, args.max_tokens)),
+    )
+  }
   const report = provider_option_probe_report(
     provider,
     model,
@@ -332,7 +476,7 @@ fn main(harness: Harness) {
     option,
     claimed,
     ungated,
-    provider_option_probe_classify(outcome),
+    attempt,
   )
   if harness.env.get_or("HARN_OUTPUT_JSON", "0") == "1" {
     harness.stdio.println(json_stringify_pretty(report))

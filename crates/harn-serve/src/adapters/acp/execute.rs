@@ -434,7 +434,10 @@ pub(super) async fn load_host_mcp_clients(
             "host/call",
             serde_json::json!({
                 "name": "project.mcp_config",
-                "args": {}
+                "args": {},
+                "_meta": {"harn": {"requestTrace":
+                    harn_vm::stdlib::host::trace::HostRequestTrace::new(None, &Default::default())
+                }},
             }),
         )
         .await

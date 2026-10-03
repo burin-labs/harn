@@ -818,6 +818,16 @@ mod scheduler_tests {
 
     type Branch = Pin<Box<dyn Future<Output = Result<(), VmError>> + Send>>;
 
+    fn prepare_branches(
+        branches: Vec<Branch>,
+    ) -> Vec<subtask::PreparedSubtask<impl Future<Output = Result<(), VmError>>>> {
+        let registry = crate::stdlib::pool::new_pool_registry();
+        branches
+            .into_iter()
+            .map(|branch| subtask::prepare(Arc::clone(&registry), branch))
+            .collect()
+    }
+
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn admitted_lower_index_remains_visible_when_higher_index_starts_first() {
         let graph = Arc::new(VmWaitForGraph::new());
@@ -849,11 +859,7 @@ mod scheduler_tests {
             let _wait = wait?;
             Ok(())
         });
-        let registry = crate::stdlib::pool::new_pool_registry();
-        let futures = vec![
-            subtask::prepare(Arc::clone(&registry), first),
-            subtask::prepare(registry, second),
-        ];
+        let futures = prepare_branches(vec![first, second]);
 
         run_capped_ordered_fail_fast(
             futures,
@@ -865,6 +871,37 @@ mod scheduler_tests {
         )
         .await
         .expect("the admitted lower-index branch is runnable even before its body starts");
+    }
+
+    /// When several branches have already failed by the time the join loop
+    /// observes the first failure, the lowest-index error propagates. A
+    /// script cannot arrange that both errors are joined before the loop
+    /// wakes, so this contract is pinned here rather than in conformance.
+    /// The higher branch completes first and, in the same scheduler pass,
+    /// releases the lower branch, which fails before the loop runs again.
+    #[tokio::test(flavor = "current_thread")]
+    async fn fail_fast_prefers_lowest_index_among_already_failed_branches() {
+        let (release_lower, lower_released) = tokio::sync::oneshot::channel::<()>();
+        let lower: Branch = Box::pin(async move {
+            let _ = lower_released.await;
+            Err(VmError::Runtime("lower-index failure".to_string()))
+        });
+        let higher: Branch = Box::pin(async move {
+            let _ = release_lower.send(());
+            Err(VmError::Runtime("higher-index failure".to_string()))
+        });
+        let error = run_capped_ordered_fail_fast(
+            prepare_branches(vec![lower, higher]),
+            None,
+            Arc::new(VmWaitForGraph::new()),
+            vec!["child:0".to_string(), "child:1".to_string()],
+            Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            "test parallel error",
+        )
+        .await
+        .unwrap_err();
+
+        assert_eq!(error.to_string(), "Runtime error: lower-index failure");
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -899,13 +936,9 @@ mod scheduler_tests {
                 "initiating semantic error",
             ))))
         });
-        let registry = crate::stdlib::pool::new_pool_registry();
         let graph = Arc::new(VmWaitForGraph::new());
         let error = run_capped_ordered_fail_fast(
-            vec![
-                subtask::prepare(Arc::clone(&registry), lower),
-                subtask::prepare(registry, higher),
-            ],
+            prepare_branches(vec![lower, higher]),
             None,
             graph,
             vec!["child:0".to_string(), "child:1".to_string()],

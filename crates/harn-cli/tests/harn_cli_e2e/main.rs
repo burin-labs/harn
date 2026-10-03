@@ -21,6 +21,8 @@ mod test_util;
 #[path = "../support/required_pr_e2e.rs"]
 mod required_pr_e2e;
 
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+mod acp_confinement_cli;
 mod acp_registry_manifest;
 mod acp_server_cli;
 mod agent_run_command_argv_coercion;
@@ -37,6 +39,10 @@ mod codemod_dispatch;
 mod command_probe_parent_liveness;
 mod conformance_json_cli;
 mod conformance_process_lifetime_e2e;
+#[cfg(unix)]
+mod connect_legacy_recovery;
+#[cfg(unix)]
+mod connect_secret_env_redaction;
 #[cfg(unix)]
 mod connect_secret_store;
 mod coverage_cli;
@@ -135,6 +141,18 @@ mod version_dispatch;
 mod workflow_authoring_eval;
 mod workflow_cli;
 mod workflow_patch_cli;
+
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+const _: [(&str, fn()); 2] = [
+    (
+        required_pr_e2e::CASES[15],
+        acp_confinement_cli::confine_workspace_holds_the_server_and_its_commands_to_the_workspace,
+    ),
+    (
+        required_pr_e2e::CASES[16],
+        acp_confinement_cli::without_confine_workspace_the_same_write_lands_outside,
+    ),
+];
 
 const _: [(&str, fn()); 12] = [
     (

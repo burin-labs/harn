@@ -19,6 +19,7 @@ thread_private_test = "Test harness state. Safe to keep thread-local because tes
 captured = [
   "EXECUTION_POLICY_STACK",
   "EXECUTION_APPROVAL_POLICY_STACK",
+  "PREPARED_APPROVAL_POLICY",
   "OPERATOR_APPROVAL_GRANT_STACK",
   "COMMAND_POLICY_STACK",
   "DYNAMIC_PERMISSION_STACK",
@@ -487,7 +488,7 @@ plan = "task_local_or_explicit"
 
 [[thread_local]]
 path = "src/orchestration/policy/mod.rs"
-statics = ["EXECUTION_POLICY_STACK", "EXECUTION_APPROVAL_POLICY_STACK", "TRUSTED_BRIDGE_CALL_DEPTH"]
+statics = ["EXECUTION_POLICY_STACK", "EXECUTION_APPROVAL_POLICY_STACK", "PREPARED_APPROVAL_POLICY", "TRUSTED_BRIDGE_CALL_DEPTH"]
 category = "logical_task"
 plan = "task_local_or_explicit"
 

@@ -65,6 +65,26 @@ if [[ "$blocked" != *'"permissionDecision":"deny"'* ]] \
   exit 1
 fi
 
+# A fast policy and its cancelled watchdog race over the decision file. Every
+# invocation here must forward a known nonempty denial, unlike a real allow
+# whose intentionally empty output cannot expose premature file cleanup.
+cat >"$fixture_root/fast-deny-harn" <<'STUB'
+#!/usr/bin/env bash
+printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"custody probe"}}'
+STUB
+chmod +x "$fixture_root/fast-deny-harn"
+custody_runs=100
+custody_failures=0
+for ((custody_run = 0; custody_run < custody_runs; custody_run++)); do
+  custody_output="$(printf '%s' "$payload" \
+    | HARN_BIN="$fixture_root/fast-deny-harn" "$fixture_root/scripts/agent-shell-guard.sh")"
+  if [[ "$custody_output" != *'"permissionDecisionReason":"custody probe"'* ]]; then
+    custody_failures=$((custody_failures + 1))
+  fi
+done
+printf 'decision custody: runs=%s missing_or_changed=%s\n' "$custody_runs" "$custody_failures"
+[[ "$custody_failures" == 0 ]] || exit 1
+
 allowed="$(
   printf '%s' '{"tool_name":"Bash","tool_input":{"command":"make check"}}' \
     | HARN_BIN="$HARN_BIN" "$fixture_root/scripts/agent-shell-guard.sh"

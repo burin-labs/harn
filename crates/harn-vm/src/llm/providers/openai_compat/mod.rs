@@ -395,7 +395,9 @@ impl OpenAiCompatibleProvider {
                 .remove("response_format");
         }
         if opts.provider == "openrouter"
-            && (body.get("response_format").is_some() || body.get("top_k").is_some())
+            && (opts.provider_contract_probe.is_some()
+                || body.get("response_format").is_some()
+                || body.get("top_k").is_some())
         {
             ensure_openrouter_require_parameters(&mut body);
         }
