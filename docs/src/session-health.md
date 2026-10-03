@@ -47,8 +47,9 @@ default steering rule.
 
 Harn event subscribers receive `SessionHealth` with its `fact`. ACP emits
 `_harn/agentEvent` with kind `session_health`; its payload is the fact. A2A task
-streams expose `harn_session_health` with a `health` field containing the same
-fact. Durable agent-event sinks retain the event for offline readers.
+streams carry the same fact in `metadata.harn.sessionHealth` on a standard
+status update, preserving the current task state. Durable agent-event sinks
+retain the event for offline readers.
 
 The generated contract is
 [`session-health.schema.json`](https://github.com/burin-labs/harn/blob/main/spec/protocol-artifacts/schemas/session-health.schema.json).
