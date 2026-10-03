@@ -137,6 +137,20 @@ pipeline default(harness: Harness) {
             );
             if accepted {
                 assert_eq!(shown, ["Done."], "publish the accepted answer exactly once");
+                let completed = updates
+                    .iter()
+                    .position(|update| {
+                        update["sessionUpdate"] == "tool_call_update"
+                            && update["title"] == "inspect"
+                            && update["status"] == "completed"
+                            && update["rawOutput"] == "observed a"
+                    })
+                    .expect("declared inspection executed and returned its actual result");
+                let published = updates
+                    .iter()
+                    .position(|update| update["sessionUpdate"] == "agent_message_chunk")
+                    .expect("accepted answer callback");
+                assert!(completed < published, "the actual tool result precedes publication");
             } else {
                 assert!(shown.is_empty(), "a failed task has no accepted answer: {shown:?}");
             }
