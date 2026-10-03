@@ -220,6 +220,9 @@ fn in_roots(path: &str, roots: &[String]) -> bool {
         })
 }
 
+/// Running weight and smallest sample pairs for one node-to-node edge.
+type EdgeAcc = (u64, BTreeSet<(String, String)>);
+
 /// Build the rolled-up graph. Pure over `state`; the caller holds the
 /// index lock.
 pub(super) fn build(state: &IndexState, options: &Options) -> ModuleGraph {
@@ -243,7 +246,7 @@ pub(super) fn build(state: &IndexState, options: &Options) -> ModuleGraph {
         node_of.insert(*id, node);
     }
 
-    let mut edges: BTreeMap<(String, String), (u64, BTreeSet<(String, String)>)> = BTreeMap::new();
+    let mut edges: BTreeMap<(String, String), EdgeAcc> = BTreeMap::new();
     let mut add_edge = |from: &str, to: &str, pair: (String, String)| {
         if from == to {
             return;
