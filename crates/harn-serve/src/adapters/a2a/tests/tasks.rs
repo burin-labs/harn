@@ -1498,4 +1498,3 @@ fn agent_artifact_manifest_event_emits_bundle_artifact_update() {
 }
 
 mod plan_document;
-mod session_health;
