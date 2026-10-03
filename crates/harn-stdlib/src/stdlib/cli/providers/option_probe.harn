@@ -318,6 +318,20 @@ pub fn provider_option_probe_retry_result(
   return combined + {retry_count: (combined.retry_count ?? 0) + 1}
 }
 
+/** One recovery request per option; persistent rate limits remain unmeasured. */
+pub fn provider_option_probe_retry_delay_ms(attempt: ProviderOptionProbeAttempt) -> int? {
+  if attempt.verdict != "inconclusive" || (attempt.retry_count ?? 0) > 0 {
+    return nil
+  }
+  if attempt.reason == "timeout" {
+    return 0
+  }
+  if attempt.reason == "rate_limited" {
+    return 1000
+  }
+  return nil
+}
+
 /**
  * Attributes a rejection to the probed option only when the same request without the option succeeds.
  *
@@ -454,10 +468,13 @@ fn main(harness: Harness) {
   let attempt = provider_option_probe_classify(
     __attempt(harness.llm, provider, model, option, args.max_tokens),
   )
-  // One retry after a transport timeout: a scale-to-zero endpoint can spend
-  // the whole first request cold-starting (Fireworks Nemotron Lightning timed
-  // out at ~120 s, then answered every option within seconds).
-  if attempt.verdict == "inconclusive" && (attempt.reason ?? "") == "timeout" {
+  // The provider error contract has no Retry-After field. Use a short bounded
+  // backoff for rate limits and retain the existing immediate timeout retry.
+  const retry_delay_ms = provider_option_probe_retry_delay_ms(attempt)
+  if retry_delay_ms != nil {
+    if retry_delay_ms > 0 {
+      harness.clock.sleep_ms(retry_delay_ms)
+    }
     const second = provider_option_probe_classify(
       __attempt(harness.llm, provider, model, option, args.max_tokens),
     )

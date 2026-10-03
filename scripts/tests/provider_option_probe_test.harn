@@ -4,6 +4,7 @@ import {
   provider_option_probe_classify,
   provider_option_probe_confirm_rejection,
   provider_option_probe_report,
+  provider_option_probe_retry_delay_ms,
   provider_option_probe_retry_result,
 } from "../../crates/harn-stdlib/src/stdlib/cli/providers/option_probe"
 
@@ -280,4 +281,41 @@ pipeline test_provider_option_probe_retains_retry_and_control_accounting() {
   assert_eq(unknown.measured, false)
   assert_eq(unknown.request_count, 2)
   assert_eq(unknown.observed_cost_count, 1)
+}
+
+pipeline test_provider_option_probe_bounds_rate_limit_recovery() {
+  const limited = provider_option_probe_classify(
+    Err({origin: "provider", kind: "transient", reason: "rate_limited", message: "HTTP 429"}),
+  )
+  assert_eq(provider_option_probe_retry_delay_ms(limited), 1000)
+  const persistent = provider_option_probe_retry_result(limited, limited)
+  assert_eq(provider_option_probe_retry_delay_ms(persistent), nil)
+  assert_eq(persistent.measured, false)
+  assert_eq(persistent.request_count, 2)
+  assert_eq(persistent.retry_count, 1)
+  const accepted = provider_option_probe_classify(
+    Ok({usage: {input_tokens: 4, output_tokens: 1, cost_usd: 0.002}}),
+  )
+  const recovered = provider_option_probe_retry_result(limited, accepted)
+  assert_eq(recovered.measured, true)
+  assert_eq(recovered.request_count, 2)
+  assert_eq(recovered.retry_count, 1)
+  assert_eq(recovered.cost_usd, 0.002)
+  assert_eq(provider_option_probe_retry_delay_ms(accepted), nil)
+  assert_eq(
+    provider_option_probe_retry_delay_ms(
+      provider_option_probe_classify(
+        Err({origin: "provider", kind: "transient", reason: "timeout", message: "timeout"}),
+      ),
+    ),
+    0,
+  )
+  assert_eq(
+    provider_option_probe_retry_delay_ms(
+      provider_option_probe_classify(
+        Err({origin: "provider", kind: "terminal", reason: "auth_failure", message: "HTTP 401"}),
+      ),
+    ),
+    nil,
+  )
 }

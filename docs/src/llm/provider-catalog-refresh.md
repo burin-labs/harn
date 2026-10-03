@@ -307,7 +307,9 @@ served-empty response reports one.
 
 Every rejection needs a successful control request without the selected option.
 If that control also fails, the option remains unmeasured with
-`failure_class: "control_failed"`. A timeout gets one retry. Receipts include
+`failure_class: "control_failed"`. A timeout gets one immediate retry; a rate limit
+gets one retry after a one-second backoff. A persistent rate limit remains
+unmeasured. Receipts include
 the retry and control in request, usage, and cost counts; an unpriced request
 remains an accounting gap even when a later request has a price.
 
