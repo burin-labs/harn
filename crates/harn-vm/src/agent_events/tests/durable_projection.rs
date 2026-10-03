@@ -105,6 +105,7 @@ fn settled_tool_call(session_id: &str) -> AgentEvent {
         raw_input: serde_json::json!({"body": "abcde"}),
         parsing: None,
         audit: None,
+        intent: None,
     }
 }
 
@@ -421,6 +422,7 @@ fn projector_contains_abandoned_calls_and_evicts_exact_lifecycles() {
         raw_input: serde_json::json!({"body": "x"}),
         parsing: None,
         audit: None,
+        intent: None,
     }));
     assert_eq!(projector.tracked_stream_count(), 0);
 

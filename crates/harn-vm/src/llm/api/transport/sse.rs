@@ -164,6 +164,7 @@ fn emit_stream_tool_call_start(
         status: ToolCallStatus::Pending,
         raw_input,
         audit: crate::orchestration::current_mutation_session(),
+        intent: None,
         parsing: None,
     });
 }

@@ -115,6 +115,7 @@ pub const HARN_TOOL_LIFECYCLE_EXTENSION_FIELDS: &[&str] = &[
     "errorCategory",
     "executionDurationMs",
     "executor",
+    "intent",
     "mutationStatus",
     "parsing",
     "rawInputPartial",

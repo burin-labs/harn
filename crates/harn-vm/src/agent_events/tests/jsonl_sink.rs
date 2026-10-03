@@ -218,6 +218,7 @@ fn jsonl_sink_redacts_tool_payloads_before_write() {
         }),
         parsing: None,
         audit: None,
+        intent: None,
     });
     sink.handle_event(&AgentEvent::ToolCallUpdate {
         session_id: "s".into(),
@@ -282,6 +283,7 @@ fn jsonl_sink_persists_text_parsing_candidates() {
         raw_input: serde_json::json!({}),
         parsing: Some(true),
         audit: None,
+        intent: None,
     });
     sink.handle_event(&AgentEvent::ToolCallUpdate {
         session_id: "s".into(),
@@ -311,6 +313,7 @@ fn jsonl_sink_persists_text_parsing_candidates() {
         raw_input: serde_json::json!({"path": "README.md"}),
         parsing: None,
         audit: None,
+        intent: None,
     });
     sink.flush().unwrap();
 

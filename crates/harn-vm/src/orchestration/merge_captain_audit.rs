@@ -231,8 +231,7 @@ pub struct MergeCaptainGolden {
     /// Maximum acceptable repeated-read run length (default 1 — any
     /// repetition beyond that triggers a finding).
     pub max_repeat: Option<u32>,
-    /// Tool patterns that must always be preceded by an approval
-    /// gate.
+    /// Tool patterns that must always be preceded by an approval gate.
     pub require_approval_for: Vec<ToolPattern>,
     /// Tool patterns that may never appear in this scenario.
     pub forbidden_actions: Vec<ToolPattern>,
@@ -1214,6 +1213,7 @@ mod tests {
                 raw_input: args,
                 parsing: None,
                 audit: None,
+                intent: None,
             },
         )
     }
