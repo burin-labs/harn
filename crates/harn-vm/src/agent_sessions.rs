@@ -1079,7 +1079,7 @@ pub fn reset_transcript(id: &str) -> bool {
         state.completed_turn_checkpoints.clear();
         state.redo_stack.clear();
         state.text_tool_call_seq = 0;
-        state.health = Box::default();
+        *state.health = Default::default();
         state.touch();
         true
     })
