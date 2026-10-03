@@ -66,7 +66,7 @@ pub fn handle(_harness: Harness, _event: dict) {
     ];
     let mut policy = CapabilityPolicy::default();
     policy.restrict_capabilities(std::collections::BTreeMap::new());
-    policy.side_effects = vec!["read_only".to_string()];
+    policy.side_effect_level = Some("read_only".to_string());
     push_execution_policy(policy);
     let denied = vm
         .call_closure_pub(handle, &args)
