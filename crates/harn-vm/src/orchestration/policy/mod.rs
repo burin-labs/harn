@@ -1183,17 +1183,14 @@ mod approval_policy_tests {
     }
 
     #[test]
-    fn write_path_allowlist_matches_recovered_workspace_relative_path() {
+    fn write_path_allowlist_refuses_root_drift_and_accepts_contained_paths() {
         let temp = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(temp.path().join("packages/demo")).unwrap();
         std::fs::write(temp.path().join("packages/demo/file.txt"), "ok").unwrap();
         crate::stdlib::process::set_thread_execution_context(Some(
             crate::orchestration::RunExecutionRecord {
                 cwd: Some(temp.path().to_string_lossy().into_owned()),
-                project_root: None,
                 source_dir: Some(temp.path().to_string_lossy().into_owned()),
-                // Only the three paths above matter to this test; the rest of
-                // the record is whatever a default run carries.
                 ..Default::default()
             },
         ));
@@ -1223,7 +1220,12 @@ mod approval_policy_tests {
             "write_file",
             &serde_json::json!({"path": "/packages/demo/file.txt"}),
         );
-        assert_eq!(decision, ToolApprovalDecision::AutoApproved);
+        assert!(matches!(decision, ToolApprovalDecision::AutoDenied { .. }));
+        let relative = serde_json::json!({"path": "packages/demo/file.txt"});
+        assert_eq!(
+            policy.evaluate("write_file", &relative),
+            ToolApprovalDecision::AutoApproved
+        );
 
         pop_execution_policy();
         crate::stdlib::process::set_thread_execution_context(None);
@@ -1237,10 +1239,7 @@ mod approval_policy_tests {
         crate::stdlib::process::set_thread_execution_context(Some(
             crate::orchestration::RunExecutionRecord {
                 cwd: Some(temp.path().to_string_lossy().into_owned()),
-                project_root: None,
                 source_dir: Some(temp.path().to_string_lossy().into_owned()),
-                // Only the three paths above matter to this test; the rest of
-                // the record is whatever a default run carries.
                 ..Default::default()
             },
         ));
@@ -1268,7 +1267,7 @@ mod approval_policy_tests {
         };
         let decision = policy.evaluate(
             "read_file",
-            &serde_json::json!({"path": "/packages/demo/context.txt"}),
+            &serde_json::json!({"path": "packages/demo/context.txt"}),
         );
         assert_eq!(decision, ToolApprovalDecision::AutoApproved);
 
