@@ -1779,28 +1779,15 @@ mod tests {
 
     #[test]
     fn token_store_account_is_stable_and_dimension_sensitive() {
-        let first = token_store_account(
-            "https://mcp.wiki.example",
-            "https://auth.example",
-            "client-a",
-        );
-        let second = token_store_account(
-            "https://mcp.wiki.example",
-            "https://auth.example",
-            "client-a",
-        );
-        let other_issuer = token_store_account(
-            "https://mcp.wiki.example",
-            "https://other.example",
-            "client-a",
-        );
+        let first = token_store_account("https://wiki.example", "https://auth.example", "client-a");
+        let second =
+            token_store_account("https://wiki.example", "https://auth.example", "client-a");
+        let other_issuer =
+            token_store_account("https://wiki.example", "https://other.example", "client-a");
         let other_resource =
             token_store_account("https://mcp.linear.app", "https://auth.example", "client-a");
-        let other_client = token_store_account(
-            "https://mcp.wiki.example",
-            "https://auth.example",
-            "client-b",
-        );
+        let other_client =
+            token_store_account("https://wiki.example", "https://auth.example", "client-b");
         assert_eq!(first, second);
         assert_ne!(first, other_issuer);
         assert_ne!(first, other_resource);
