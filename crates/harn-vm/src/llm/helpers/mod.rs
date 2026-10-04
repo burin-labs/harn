@@ -30,6 +30,7 @@ pub(crate) use options::{
     project_agent_tools, project_llm_options, render_pending_reminders,
     resolve_catalog_thinking_config, resolve_thinking_config, system_prompt_event_metadata,
     system_prompt_metadata, turn_boundary_directives, validate_llm_option_keys, validate_options,
+    EnvelopeNonce,
 };
 #[cfg(test)]
 pub(crate) use options::{strip_internal_message_metadata, tracked_directive_envelope_message};

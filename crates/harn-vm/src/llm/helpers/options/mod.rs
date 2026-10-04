@@ -33,7 +33,7 @@ pub(crate) use directive_placement::turn_boundary_directives;
 pub(crate) use reminders::{
     apply_rendered_reminder_messages, directive_envelope_message, directive_nonce_for_session,
     has_directive_commit_metadata, pending_reminders_from_session, render_pending_reminders,
-    DIRECTIVE_IDS_KEY,
+    EnvelopeNonce, DIRECTIVE_IDS_KEY,
 };
 #[cfg(test)]
 pub(crate) use reminders::{strip_internal_message_metadata, tracked_directive_envelope_message};

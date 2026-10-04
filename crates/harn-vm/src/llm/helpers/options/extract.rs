@@ -410,10 +410,7 @@ pub(crate) fn extract_llm_options(
     } else {
         vec![serde_json::json!({"role": "user", "content": prompt})]
     };
-    let directive_nonce = session_id
-        .as_deref()
-        .map(super::reminders::directive_nonce_for_session)
-        .unwrap_or_else(|| "no-agent-session".to_string());
+    let directive_nonce = super::reminders::EnvelopeNonce::for_session(session_id.as_deref());
     let mut messages = if opt_bool(&options, "_directives_rendered") {
         messages
     } else {

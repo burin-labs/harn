@@ -41,7 +41,7 @@ pub(crate) fn visible_messages_with_lineage(
         &crate::llm::capabilities::Capabilities::default(),
         &reminders,
     );
-    let directive_nonce = crate::llm::helpers::directive_nonce_for_session(session_id);
+    let directive_nonce = crate::llm::helpers::EnvelopeNonce::for_session(Some(session_id));
     let source_count = messages.len();
     let mut visible = crate::llm::helpers::apply_rendered_reminder_messages(
         messages,
@@ -170,7 +170,7 @@ fn host_agent_session_commit_directives_builtin(
         &reminders,
         withdrawal_reason.as_deref(),
     );
-    let nonce = crate::llm::helpers::directive_nonce_for_session(&session_id);
+    let nonce = crate::llm::helpers::EnvelopeNonce::for_session(Some(&session_id));
     let Some(message) = crate::llm::helpers::directive_envelope_message(&pending, &nonce) else {
         return Ok(VmValue::Int(0));
     };

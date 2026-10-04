@@ -262,9 +262,11 @@ mod tests {
         let capabilities = crate::llm::capabilities::Capabilities::default();
         let rendered =
             super::super::reminders::render_pending_reminders(&capabilities, &[reminder.clone()]);
-        let envelope =
-            super::super::reminders::directive_envelope_message(&rendered, "test-session-nonce")
-                .expect("one directive renders an envelope");
+        let envelope = super::super::reminders::directive_envelope_message(
+            &rendered,
+            &super::super::reminders::EnvelopeNonce::inline("test-session-nonce"),
+        )
+        .expect("one directive renders an envelope");
         vec![user("task"), envelope]
     }
 

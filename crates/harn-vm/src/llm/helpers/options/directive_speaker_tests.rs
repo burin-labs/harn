@@ -39,8 +39,11 @@ fn envelope_message(reminders: &[SystemReminder]) -> serde_json::Value {
         &crate::llm::capabilities::Capabilities::default(),
         reminders,
     );
-    directive_envelope_message(&rendered, "test-session-nonce")
-        .expect("a non-empty directive set renders an envelope")
+    directive_envelope_message(
+        &rendered,
+        &super::reminders::EnvelopeNonce::inline("test-session-nonce"),
+    )
+    .expect("a non-empty directive set renders an envelope")
 }
 
 fn envelope_text(reminders: &[SystemReminder]) -> String {
