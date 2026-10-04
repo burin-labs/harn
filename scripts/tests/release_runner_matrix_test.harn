@@ -62,20 +62,10 @@ pipeline test_release_runner_policy_pins_every_mode(harness: Harness, task: unkn
     "x86_64-pc-windows-msvc=windows-latest",
   ]
   assert_eq(runners(matrix(harness.fs, harness.process, "--mode warm")), standard)
-  const primary = [
-    "x86_64-apple-darwin=macos-15-xlarge",
-    "aarch64-apple-darwin=macos-15-xlarge",
-    "x86_64-unknown-linux-gnu=ubuntu-16core-release",
-    "aarch64-unknown-linux-gnu=ubuntu-16core-release",
-    "x86_64-pc-windows-msvc=windows-latest",
-  ]
-  const recovery = [
-    "x86_64-apple-darwin=macos-15-xlarge",
-    "aarch64-apple-darwin=macos-15-xlarge",
-    "x86_64-unknown-linux-gnu=ubuntu-16core-release",
-    "aarch64-unknown-linux-gnu=ubuntu-16core-release",
-    "x86_64-pc-windows-msvc=windows-latest",
-  ]
+  // Public repository: every release mode runs on GitHub's free standard
+  // runners (harn#9370). No larger, Ubicloud or Blacksmith runner bills.
+  const primary = standard
+  const recovery = standard
   assert_eq(runners(matrix(harness.fs, harness.process, "--mode primary")), primary)
   assert_eq(runners(matrix(harness.fs, harness.process, "--mode candidate")), primary)
   assert_eq(runners(matrix(harness.fs, harness.process, "--mode recovery")), recovery)
@@ -126,7 +116,7 @@ pipeline test_release_runner_policy_selects_targeted_fast_capacity(
       {
         target: "x86_64-apple-darwin",
         glibc_max: nil,
-        runner: "macos-15-xlarge",
+        runner: "macos-15-intel",
         rust_cache_broad_restore_prefix: "v0-rust-release-x86_64-apple-darwin-Darwin-x64-",
         release_codegen_units: 16,
         use_sccache: "true",
@@ -142,7 +132,7 @@ pipeline test_release_runner_policy_selects_targeted_fast_capacity(
         "--mode recovery --profile fast --targets aarch64-apple-darwin",
       ),
     ),
-    ["aarch64-apple-darwin=macos-15-xlarge"],
+    ["aarch64-apple-darwin=macos-latest"],
   )
 }
 

@@ -174,26 +174,13 @@ pub const RUNNER_TIER_ENV = "HARN_RUNNER_TIER"
 pub const HOSTED_LINUX_RUNNER = "ubuntu-24.04"
 
 /**
- * The producer's hosted rung, which is deliberately not the shared one.
+ * The producers' rung after the owned pool: GitHub's free standard runner.
  *
- * The persistent compile lane is the only job whose work is bounded by the
- * box rather than by waiting, so it is the only one worth paying a larger
- * vendor runner for. Every other hosted Linux job stays on the shared
- * default, which is what keeps a change here from quietly moving the whole
- * workflow onto paid capacity.
+ * This repository is public, and public-repository CI runs only on free
+ * standard runners or owned machines (harn#9370): no larger GitHub runner,
+ * Ubicloud or Blacksmith, even though the producers build slower on 4 vCPU.
  */
-pub const PRODUCER_HOSTED_LINUX_RUNNER = "ubuntu-8core"
-
-/**
- * The producers' paid rung before GitHub's: Ubicloud's 8 vCPU runner, listed
- * at $0.008/min on its premium tier against $0.022/min for `ubuntu-8core`.
- * Ubicloud registers each runner just in time as a self-hosted runner, so it
- * is its own tier for the same reason Blacksmith is.
- */
-pub const PRODUCER_VENDOR_LINUX_RUNNER = "ubicloud-standard-8"
-
-/** `github` restores GitHub's 8-core runner as the producers' paid rung. */
-pub const PAID_LINUX_PROVIDER_VAR = "HARN_CI_PAID_LINUX_PROVIDER"
+pub const PRODUCER_HOSTED_LINUX_RUNNER = "ubuntu-latest"
 
 pub const UBICLOUD_RUNNER_TIER = "ubicloud"
 
@@ -1841,16 +1828,6 @@ pub fn owned_producer_condition() -> string {
  * about which events reach which capacity: a mirror that drifted from its
  * `runs-on` is how a tier guard starts naming a route the job never took.
  */
-/**
- * The paid rung after the owned pool. Ubicloud's 8 vCPU runner lists at a
- * third of GitHub's 8-core rate, so it is the default; setting
- * `${PAID_LINUX_PROVIDER_VAR}` to `github` puts the GitHub 8-core runner back
- * without a code change.
- */
-pub fn vendor_producer_condition() -> string {
-  return "(vars.${PAID_LINUX_PROVIDER_VAR} != 'github'"
-}
-
 /** The merge-group rung reads its own capacity decision, like the owned one. */
 pub fn datacenter_producer_condition() -> string {
   return "(needs.rust-producer-capacity.outputs.${MERGE_CAPACITY_ROUTE_OUTPUT} == 'owned'"
@@ -1858,12 +1835,12 @@ pub fn datacenter_producer_condition() -> string {
 
 /**
  * The workspace producer's rungs. An empty `owned` or `datacenter` drops that
- * rung; `vendor` and `hosted` are the paid ladder every producer keeps.
+ * rung; `hosted`, the free standard runner, is the rung every producer keeps.
  */
-pub type ProducerRungs = {owned: string, datacenter: string, vendor: string, hosted: string}
+pub type ProducerRungs = {owned: string, datacenter: string, hosted: string}
 
 pub fn producer_rung_expression(rungs: ProducerRungs) -> string {
-  const {owned, datacenter, vendor, hosted} = rungs
+  const {owned, datacenter, hosted} = rungs
   // An empty `owned` drops the owned rung: a lane that must not wait on the
   // owned pool's per-host compile budget goes straight to paid capacity.
   const owned_rung = if owned == "" {
@@ -1882,9 +1859,8 @@ pub fn producer_rung_expression(rungs: ProducerRungs) -> string {
     + "{{ "
     + owned_rung
     + datacenter_rung
-    + "${vendor_producer_condition()}"
-    + "\n  && ${vendor})"
-    + "\n  || ${hosted} }}"
+    + hosted
+    + " }}"
 }
 
 /**
@@ -1998,7 +1974,6 @@ pub fn producer_runner_expression(owned_rung: bool = true) -> string {
     {
       owned: owned_rung ? "fromJSON('${SELFHOSTED_LINUX_BIG_RUNNER}')" : "",
       datacenter: owned_rung ? "fromJSON('${DATACENTER_LINUX_BIG_RUNNER}')" : "",
-      vendor: "'${PRODUCER_VENDOR_LINUX_RUNNER}'",
       hosted: "'${PRODUCER_HOSTED_LINUX_RUNNER}'",
     },
   )
@@ -2009,7 +1984,6 @@ pub fn producer_tier_expression(owned_rung: bool = true) -> string {
     {
       owned: owned_rung ? "'${SELFHOSTED_RUNNER_TIER}'" : "",
       datacenter: owned_rung ? "'${SELFHOSTED_RUNNER_TIER}'" : "",
-      vendor: "'${UBICLOUD_RUNNER_TIER}'",
       hosted: "'${HOSTED_RUNNER_TIER}'",
     },
   )
@@ -2027,17 +2001,14 @@ fn cli_route_condition(route: string) -> string {
  * all take the paid ladder: Ubicloud first, at about a third of GitHub's
  * 8-core rate, and GitHub's runner only when the paid-provider switch names it.
  */
-pub type CliProducerRungs = {reserved: string, vendor: string, hosted: string}
+pub type CliProducerRungs = {reserved: string, hosted: string}
 
 pub fn cli_producer_rung_expression(rungs: CliProducerRungs) -> string {
-  const {reserved, vendor, hosted} = rungs
+  const {reserved, hosted} = rungs
   return "$"
     + "{{ "
     + cli_route_condition("owned")
     + "\n  && ${reserved})"
-    + "\n  || "
-    + vendor_producer_condition()
-    + "\n  && ${vendor})"
     + "\n  || ${hosted} }}"
 }
 
@@ -2045,7 +2016,6 @@ pub fn cli_producer_runner_expression() -> string {
   return cli_producer_rung_expression(
     {
       reserved: "fromJSON('${RESERVED_CLI_PRODUCER_RUNNER}')",
-      vendor: "'${PRODUCER_VENDOR_LINUX_RUNNER}'",
       hosted: "'${PRODUCER_HOSTED_LINUX_RUNNER}'",
     },
   )
@@ -2053,11 +2023,7 @@ pub fn cli_producer_runner_expression() -> string {
 
 pub fn cli_producer_tier_expression() -> string {
   return cli_producer_rung_expression(
-    {
-      reserved: "'${SELFHOSTED_RUNNER_TIER}'",
-      vendor: "'${UBICLOUD_RUNNER_TIER}'",
-      hosted: "'${HOSTED_RUNNER_TIER}'",
-    },
+    {reserved: "'${SELFHOSTED_RUNNER_TIER}'", hosted: "'${HOSTED_RUNNER_TIER}'"},
   )
 }
 
@@ -2113,11 +2079,10 @@ pub fn cli_producer_reservation_errors(workflow: dict) -> list<string> {
     || trim(to_string(env?.CAPACITY_POOL ?? "")) != RESERVED_CLI_PRODUCER_POOL
     || !routed.contains("pull_request")
     || !routed.contains("merge_group")
-    || trim(to_string(env?.CAPACITY_VENDOR_RUNNER ?? "")) != PRODUCER_VENDOR_LINUX_RUNNER
-    || trim(to_string(env?.CAPACITY_HOSTED_RUNNER ?? "")) != PRODUCER_HOSTED_LINUX_RUNNER {
+    || trim(to_string(env?.CAPACITY_VENDOR_RUNNER ?? "")) != "" {
     errors = errors
       + [
-        "ci.yml:rust-producer-capacity step ${CLI_CAPACITY_DECISION_STEP} must route the ${RESERVED_CLI_PRODUCER_POOL} pool on pull requests and merge groups and name the ${PRODUCER_VENDOR_LINUX_RUNNER} then ${PRODUCER_HOSTED_LINUX_RUNNER} ladder a busy pool takes",
+        "ci.yml:rust-producer-capacity step ${CLI_CAPACITY_DECISION_STEP} must route the ${RESERVED_CLI_PRODUCER_POOL} pool on pull requests and merge groups and name no paid vendor runner for a busy pool",
       ]
   }
   return errors
@@ -2247,7 +2212,7 @@ pub fn minimal_pr_capacity_errors(ci: dict, publish: dict) -> list<string> {
     != producer_runner_expression() {
     errors = errors
       + [
-        "ci.yml:rust-check-inputs must ladder the owned ${SELFHOSTED_LINUX_BIG_POOL} pool on same-repository pull requests, the ${DATACENTER_HOST_LABEL} runners on merge groups, ${PRODUCER_VENDOR_LINUX_RUNNER}, then ${PRODUCER_HOSTED_LINUX_RUNNER}",
+        "ci.yml:rust-check-inputs must ladder the owned ${SELFHOSTED_LINUX_BIG_POOL} pool on same-repository pull requests, the ${DATACENTER_HOST_LABEL} runners on merge groups, then ${PRODUCER_HOSTED_LINUX_RUNNER}",
       ]
   }
   // Stays behind the merge on COST, not on principle: fourteen minutes, most

@@ -47,13 +47,18 @@ type StepBudget = {name: string, minutes: int, cold_seconds: int}
 /** `rust-cli` builds the shared CLI beside the test job. */
 const CLI_PRODUCER_STEP_BUDGETS: list<StepBudget> = [
   // The ci-cli profile (opt-level 1) on hosted ubuntu-8core with no ci-cli
-  // target restored: 850s on run 36956226587, against 435s for dev.
-  {name: "Build portable Harn CLI", minutes: 19, cold_seconds: 850},
+  // target restored: 850s on run 36956226587, against 435s for dev. The
+  // hosted rung is now the free 4 vCPU `ubuntu-latest` (harn#9370): half the
+  // cores puts a cold build near 1700s, so it gets the owned rung's 31 minutes
+  // until a cold run there is measured.
+  {name: "Build portable Harn CLI", minutes: 31, cold_seconds: 850},
 ]
 
 /** `rust-check-inputs` builds and runs the workspace test graph. */
 const TEST_PRODUCER_STEP_BUDGETS: list<StepBudget> = [
-  {name: "Build security test archive", minutes: 16, cold_seconds: 720},
+  // 720s cold on 8 vCPU; the free 4 vCPU rung (harn#9370) takes the owned
+  // rung's 24 minutes for the same reason as the CLI build above.
+  {name: "Build security test archive", minutes: 24, cold_seconds: 720},
   {name: "Run Rust workspace tests", minutes: 26, cold_seconds: 496},
 ]
 
@@ -80,13 +85,26 @@ const PRODUCER_OWNED_SECURITY_MINUTES = 24
 
 const PRODUCER_OWNED_SECURITY_COLD_LOWER_BOUND_SECONDS = 960
 
+fn step_budget_minutes(budgets: list<StepBudget>, name: string) -> int {
+  for budget in budgets {
+    if budget.name == name {
+      return budget.minutes
+    }
+  }
+  throw "no step budget named " + name
+}
+
+// The hosted step fuse is the hosted step budget, so the two cannot drift.
 pub fn producer_security_timeout_expression() -> string {
+  const hosted = step_budget_minutes(TEST_PRODUCER_STEP_BUDGETS, "Build security test archive")
   return "$"
-    + "{{ env.HARN_RUNNER_TIER == 'self-hosted' && ${PRODUCER_OWNED_SECURITY_MINUTES} || 16 }}"
+    + "{{ env.HARN_RUNNER_TIER == 'self-hosted' && ${PRODUCER_OWNED_SECURITY_MINUTES} || ${hosted} }}"
 }
 
 pub fn producer_cli_timeout_expression() -> string {
-  return "$" + "{{ env.HARN_RUNNER_TIER == 'self-hosted' && ${PRODUCER_OWNED_CLI_MINUTES} || 19 }}"
+  const hosted = step_budget_minutes(CLI_PRODUCER_STEP_BUDGETS, "Build portable Harn CLI")
+  return "$"
+    + "{{ env.HARN_RUNNER_TIER == 'self-hosted' && ${PRODUCER_OWNED_CLI_MINUTES} || ${hosted} }}"
 }
 
 /**
@@ -177,9 +195,8 @@ fn hosted_ceiling_minutes(budgets: list<StepBudget>) -> int {
 }
 
 fn timeout_expression(budgets: list<StepBudget>, owned_rung: bool = true) -> string {
-  // The vendor rung is a fresh VM that runs this job alone and writes the
-  // main-branch cache like the hosted rung, so it carries the hosted ceiling,
-  // cache-save reserve included.
+  // The hosted rung writes the main-branch cache, so it carries the hosted
+  // ceiling, cache-save reserve included.
   const paid = to_string(hosted_ceiling_minutes(budgets))
   return producer_rung_expression(
     {
@@ -187,7 +204,6 @@ fn timeout_expression(budgets: list<StepBudget>, owned_rung: bool = true) -> str
       // A merge group runs the same archive and complete test suite. Its
       // ceiling must contain those step budgets even when the runner is cold.
       datacenter: owned_rung ? to_string(owned_ceiling_minutes(budgets)) : "",
-      vendor: paid,
       hosted: paid,
     },
   )
@@ -216,17 +232,13 @@ pub fn cli_producer_hosted_ceiling_minutes() -> int {
 }
 
 /**
- * A reserved runner is an owned box and carries the owned ceiling. The two
- * paid rungs after it carry the paid one.
+ * A reserved runner is an owned box and carries the owned ceiling. The hosted
+ * rung after it carries the hosted one.
  */
 pub fn cli_producer_timeout_expression() -> string {
   const paid = to_string(hosted_ceiling_minutes(CLI_PRODUCER_STEP_BUDGETS))
   return cli_producer_rung_expression(
-    {
-      reserved: to_string(owned_ceiling_minutes(CLI_PRODUCER_STEP_BUDGETS)),
-      vendor: paid,
-      hosted: paid,
-    },
+    {reserved: to_string(owned_ceiling_minutes(CLI_PRODUCER_STEP_BUDGETS)), hosted: paid},
   )
 }
 
@@ -461,7 +473,7 @@ fn persistent_compile_lane_errors(
   if trim(job?.["runs-on"] ?? "") != producer_job_runner_expression(job_name) {
     errors = errors
       + [
-        "ci.yml:${job_name} must ladder${producer_job_ladder(job_name)} ${PRODUCER_VENDOR_LINUX_RUNNER}, then ${PRODUCER_HOSTED_LINUX_RUNNER}",
+        "ci.yml:${job_name} must ladder${producer_job_ladder(job_name)} then ${PRODUCER_HOSTED_LINUX_RUNNER}",
       ]
   }
   if job_name == "rust-cli" {
