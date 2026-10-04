@@ -92,7 +92,7 @@ jobs:
   # SAFETY PRINCIPLE — prune for PR fast feedback, run comprehensive on the
   # merge-queue speculative commit. Coarse
   # path-filtering is sound for `pull_request` events: a PR that touches only
-  # docs/website/markdown cannot regress the Rust build, so the ~45 paid
+  # docs/website/markdown cannot regress the Rust build, so the ~45 hosted
   # Linux-min those four matrix lanes cost are pure waste. But the merge queue
   # (`merge_group`) builds a speculative merge commit (target + earlier-queued
   # PRs + this PR) and is the ONLY place a cross-PR interaction regression is
@@ -985,7 +985,7 @@ jobs:
           RUNNER_CAPACITY: ${{ needs.runner-availability.outputs.capacity }}
           # The same switch the routing expression below reads. Without it here
           # this step would report the owned census while the job ran on
-          # elastic paid capacity.
+          # free hosted capacity.
           FLEET_EVACUATION: ${{ vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true' }}
       # The shared CLI producer's own decision, over the runners reserved for
       # it. An idle reserved runner takes the build. Every other outcome (all
@@ -1034,9 +1034,9 @@ jobs:
     # producer's runner ladder and capacity decision, and runs beside
     # `rust-check-inputs` instead of before it: the two builds never shared
     # compiled units, so in one job the test build waited 230-310s for nothing.
-    # Paid minutes per run are about the same; two paid runners now overlap.
+    # Hosted minutes per run are about the same; two free runners now overlap.
     #
-    # Hosted ceiling: 6 setup + 19 CLI budget + 12 cache-save reserve = 37.
+    # Hosted ceiling: 6 setup + 31 CLI budget + 12 cache-save reserve = 49.
     # The CLI builds in the ci-cli profile (opt-level 1), which costs more to
     # compile than dev and runs every Harn proof lane four to five times faster.
     #
@@ -1179,10 +1179,9 @@ jobs:
         && (needs.rust-producer-capacity.result == 'success'
         || github.event_name != 'pull_request'
         || github.event.pull_request.head.repo.full_name != github.repository) }}
-    # Public-repository CI defaults to GitHub-hosted capacity, which is free.
-    # Paid capacity requires the explicit repository opt-in below. At $0.016/min
-    # every paid run has a hard 20-minute/$0.32 fuse, and Blacksmith never saves
-    # a cache.
+    # Public-repository CI uses GitHub's free standard hosted capacity after the
+    # owned rungs. The hosted job still has a hard timeout so a stuck compile
+    # cannot consume the lane indefinitely.
     #
     # The shared CLI is built by `rust-cli`, a sibling job on the same ladder
     # that starts at the same time. The two builds never shared compiled units
@@ -1190,7 +1189,7 @@ jobs:
     # sequence for nothing: 230-310s of CLI before 283-372s of test build.
     #
     # The hosted ceiling is owned by the workload rather than chosen as a round
-    # number: it is the sum of the hosted step budgets below (16 + 26), plus
+    # number: it is the sum of the hosted step budgets below (24 + 26), plus
     # six minutes of setup and cache restore, plus a twelve-minute reserve for
     # this job's main-branch cache save. The save is a post step, so before the
     # reserve existed it ran inside whatever margin the tests happened to leave;
@@ -1226,7 +1225,7 @@ jobs:
     # self-hosted rung is pull-request-only so it never reaches the write
     # either. That is the reason the owned rung is scoped to pull requests
     # rather than to every event: routing main pushes there would retire the
-    # writer, and every later paid run would pay a cold cache.
+    # writer, and every later hosted run would pay a cold cache.
     permissions:
       contents: read
       actions: write

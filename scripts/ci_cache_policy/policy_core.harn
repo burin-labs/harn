@@ -1842,7 +1842,7 @@ pub type ProducerRungs = {owned: string, datacenter: string, hosted: string}
 pub fn producer_rung_expression(rungs: ProducerRungs) -> string {
   const {owned, datacenter, hosted} = rungs
   // An empty `owned` drops the owned rung: a lane that must not wait on the
-  // owned pool's per-host compile budget goes straight to paid capacity.
+  // owned pool's per-host compile budget goes straight to free hosted capacity.
   const owned_rung = if owned == "" {
     ""
   } else {
@@ -1995,11 +1995,10 @@ fn cli_route_condition(route: string) -> string {
 
 /**
  * The shared CLI producer's three rungs, for `runs-on`, `timeout-minutes` and
- * the tier mirror alike: an idle reserved runner, then the ladder every other
- * paid lane has. The capacity step names `owned` only on events it routes, so
+ * the tier mirror alike: an idle reserved runner, then the free hosted rung.
+ * The capacity step names `owned` only on events it routes, so
  * every other event, a fully busy reserved pool, and a census it cannot read
- * all take the paid ladder: Ubicloud first, at about a third of GitHub's
- * 8-core rate, and GitHub's runner only when the paid-provider switch names it.
+ * all take GitHub's free standard runner.
  */
 pub type CliProducerRungs = {reserved: string, hosted: string}
 

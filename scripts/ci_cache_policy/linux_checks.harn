@@ -94,7 +94,7 @@ fn step_budget_minutes(budgets: list<StepBudget>, name: string) -> int {
   throw "no step budget named " + name
 }
 
-// The hosted step fuse is the hosted step budget, so the two cannot drift.
+/** The hosted step fuse is the hosted step budget, so the two cannot drift. */
 pub fn producer_security_timeout_expression() -> string {
   const hosted = step_budget_minutes(TEST_PRODUCER_STEP_BUDGETS, "Build security test archive")
   return "$"
@@ -197,14 +197,14 @@ fn hosted_ceiling_minutes(budgets: list<StepBudget>) -> int {
 fn timeout_expression(budgets: list<StepBudget>, owned_rung: bool = true) -> string {
   // The hosted rung writes the main-branch cache, so it carries the hosted
   // ceiling, cache-save reserve included.
-  const paid = to_string(hosted_ceiling_minutes(budgets))
+  const hosted = to_string(hosted_ceiling_minutes(budgets))
   return producer_rung_expression(
     {
       owned: owned_rung ? to_string(owned_ceiling_minutes(budgets)) : "",
       // A merge group runs the same archive and complete test suite. Its
       // ceiling must contain those step budgets even when the runner is cold.
       datacenter: owned_rung ? to_string(owned_ceiling_minutes(budgets)) : "",
-      hosted: paid,
+      hosted: hosted,
     },
   )
 }
@@ -236,9 +236,9 @@ pub fn cli_producer_hosted_ceiling_minutes() -> int {
  * rung after it carries the hosted one.
  */
 pub fn cli_producer_timeout_expression() -> string {
-  const paid = to_string(hosted_ceiling_minutes(CLI_PRODUCER_STEP_BUDGETS))
+  const hosted = to_string(hosted_ceiling_minutes(CLI_PRODUCER_STEP_BUDGETS))
   return cli_producer_rung_expression(
-    {reserved: to_string(owned_ceiling_minutes(CLI_PRODUCER_STEP_BUDGETS)), hosted: paid},
+    {reserved: to_string(owned_ceiling_minutes(CLI_PRODUCER_STEP_BUDGETS)), hosted: hosted},
   )
 }
 
@@ -453,7 +453,7 @@ fn rust_lint_lane_errors(workflow: dict) -> list<string> {
   return errors
 }
 
-/** Hold a compile lane to its owned, vendor and hosted rungs with a cold-safe cache. */
+/** Hold a compile lane to its owned and free hosted rungs with a cold-safe cache. */
 fn persistent_compile_lane_errors(
   workflow: dict,
   job_name: string,
@@ -494,7 +494,7 @@ fn persistent_compile_lane_errors(
       job_name != "rust-cli" && producer_uses_owned_pool(job_name) ? ", the ${owned_ceiling_minutes(budgets)}-minute merge-group datacenter ceiling" : ""
     errors = errors
       + [
-        "ci.yml:${job_name} must keep the ${owned_ceiling_minutes(budgets)}-minute owned ceiling${datacenter} and the ${hosted_ceiling_minutes(budgets)}-minute paid ceiling sized from its step budgets plus a cache-save reserve",
+        "ci.yml:${job_name} must keep the ${owned_ceiling_minutes(budgets)}-minute owned ceiling${datacenter} and the ${hosted_ceiling_minutes(budgets)}-minute hosted ceiling sized from its step budgets plus a cache-save reserve",
       ]
   }
   errors = errors + producer_step_budget_errors(job, job_name, budgets)
