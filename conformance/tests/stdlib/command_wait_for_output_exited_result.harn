@@ -31,15 +31,15 @@ fn exited_event(exit_code: int) -> dict {
   }
 }
 
-fn wait_exited(harness: Harness, exit_code: int) -> dict {
-  harness.testing.clear()
-  harness.testing.respond("tools", "wait_command_output", exited_event(exit_code))
-  return command_wait_for_output(harness.tools, SPAWNED, "never-printed", {timeout_ms: 1000})
+fn wait_exited(caps: {testing: HarnessTesting, tools: HarnessTools}, exit_code: int) -> dict {
+  caps.testing.clear()
+  caps.testing.respond("tools", "wait_command_output", exited_event(exit_code))
+  return command_wait_for_output(caps.tools, SPAWNED, "never-printed", {timeout_ms: 1000})
 }
 
 pipeline default(harness: Harness) {
   require !SPAWNED.success
-  const passed = wait_exited(harness, 0)
+  const passed = wait_exited(pick(harness, ["testing", "tools"]), 0)
   require passed.status == "exited"
   require passed.result.success
   require passed.result.ok
@@ -48,8 +48,7 @@ pipeline default(harness: Harness) {
   require passed.result.stderr == "err\n"
   require passed.result.combined == "out\nerr\n"
   require passed.result.command_id == "cmd-exit-1"
-
-  const failed = wait_exited(harness, 3)
+  const failed = wait_exited(pick(harness, ["testing", "tools"]), 3)
   require !failed.result.success
   require failed.result.exit_code == 3
   harness.stdio.println("ok")
