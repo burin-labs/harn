@@ -90,7 +90,7 @@ pub(crate) fn visible_assistant_text(message: &VmValue) -> Option<String> {
     let role = dict_get(message, "role")
         .map(VmValue::display)
         .unwrap_or_default();
-    if role != "assistant" {
+    if role != "assistant" || !super::assistant_publication::is_visible(message) {
         return None;
     }
     let visible = dict_get(message, "content")

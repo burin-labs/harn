@@ -12,7 +12,7 @@ import { cidr, create } from "std/net_policy"
 fn main(harness: Harness) {
   const policy = create({allow: [cidr("10.0.0.0/8")], default: "deny"})
   const restricted = harness.with_net_policy(policy)
-  const inside = restricted.net.get("http://10.5.5.5/probe")
+  const inside = restricted.net.get("http://10.5.5.5/probe").body
   harness.stdio.println("inside=" + inside)
   let outside_err = nil
   try {

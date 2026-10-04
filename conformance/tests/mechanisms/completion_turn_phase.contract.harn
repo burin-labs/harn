@@ -84,6 +84,10 @@ pipeline test(harness: Harness) {
   assert_eq(phases[4].reply, captured.result.visible_text)
   assert_eq(phases[4].reply, "Accepted")
   assert_eq(phases[4].outcome.kind, "natural")
+  const published = captured.events.filter({ event -> event.type == "agent_message_chunk" })
+    .to_list()
+  assert_eq(len(published), 1, "the rejected candidate must never publish")
+  assert_eq(published[0].content, "Accepted")
   assert_eq(len(captured.events.filter({ event -> event.type == "judge_started" }).to_list()), 0)
   const failed_sid = "completion-phase-error-" + harness.random.uuid()
   const failed = agent_capture_events(
@@ -124,6 +128,11 @@ pipeline test(harness: Harness) {
     .to_list()
   assert_eq(failed_phases.map({ event -> event.phase }), ["generating", "verifying", "terminal"])
   assert_eq(failed_phases[2].outcome.kind, "runtime_error")
+  assert_eq(failed_phases[2].reply, "")
+  assert_eq(
+    len(failed.events.filter({ event -> event.type == "agent_message_chunk" }).to_list()),
+    0,
+  )
   const unchecked_sid = "completion-phase-unchecked-" + harness.random.uuid()
   const unchecked = agent_capture_events(
     harness.agent,
@@ -157,6 +166,10 @@ pipeline test(harness: Harness) {
     .to_list()
   assert_eq(unchecked_phases.map({ event -> event.phase }), ["generating", "terminal"])
   assert_eq(unchecked_phases[1].reply, "No check")
+  assert_eq(
+    len(unchecked.events.filter({ event -> event.type == "agent_message_chunk" }).to_list()),
+    1,
+  )
   const judged_sid = "completion-phase-judged-" + harness.random.uuid()
   const judged = agent_capture_events(
     harness.agent,

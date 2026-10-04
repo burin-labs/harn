@@ -145,8 +145,8 @@ pipeline default(harness: Harness) {
     PY
     """
   const result = harness.process.shell(script)
-  assert(result?.success, result?.stderr)
-  const summary = json_parse(result?.stdout)
+  assert(result.success, result.stderr)
+  const summary = json_parse(result.stdout)
   assert(summary.status == 200, "new route accepts after add reload")
   assert(summary.version == 1, "added binding starts at version 1")
   harness.stdio.log("orchestrator hot reload add status: " + to_string(summary.status))

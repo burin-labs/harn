@@ -636,6 +636,7 @@ pub fn render_type_diagnostic(
     let severity = match diag.severity {
         crate::typechecker::DiagnosticSeverity::Error => "error",
         crate::typechecker::DiagnosticSeverity::Warning => "warning",
+        crate::typechecker::DiagnosticSeverity::Info => "info",
     };
     let related = diag
         .related

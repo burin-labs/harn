@@ -656,7 +656,7 @@ fn range_internal_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
 #[harn_builtin(
     exposure = "pure",
     effects = [],
-    sig = "range(...args: any) -> list", category = "math"
+    sig = "range(...args: any) -> range", category = "math"
 )]
 fn range_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let bounds = Args::new("range", args);
