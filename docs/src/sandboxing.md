@@ -766,6 +766,8 @@ An inherited sandbox that prevents namespace setup produces a typed mechanism
 refusal; a descendant retaining the probe's output cannot indefinitely delay
 command preparation. This does not grant additional syscalls or extend the
 calling command's deadline.
+Caller cancellation and setup deadline expiry are not cached as host
+unavailability; a later command can retry the functional probe.
 
 ### macOS (`crates/harn-vm/src/stdlib/sandbox/macos.rs`)
 

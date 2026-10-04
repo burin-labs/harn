@@ -36,8 +36,29 @@ fn executable() -> Option<PathBuf> {
 /// A known nonempty host file must disappear through the same real wrapper
 /// path. A binary that merely exists, or a probe that observes nothing, fails.
 pub(super) fn available() -> bool {
-    static AVAILABLE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *AVAILABLE.get_or_init(probe)
+    static AVAILABLE: std::sync::Mutex<Option<bool>> = std::sync::Mutex::new(None);
+    cached_availability(&AVAILABLE, probe)
+}
+
+fn cached_availability(
+    cache: &std::sync::Mutex<Option<bool>>,
+    probe: impl FnOnce() -> probe::ProbeOutcome,
+) -> bool {
+    // Keep one setup probe in flight, as the original once initializer did.
+    // Interrupted attempts leave the environment observation uninitialized.
+    let mut cached = cache
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if let Some(available) = *cached {
+        return available;
+    }
+    match probe() {
+        probe::ProbeOutcome::Completed(available) => {
+            *cached = Some(available);
+            available
+        }
+        probe::ProbeOutcome::Interrupted => false,
+    }
 }
 
 pub(in crate::stdlib::sandbox) fn prepare(
@@ -335,7 +356,7 @@ mod tests {
 
     #[test]
     fn functional_probe_requires_the_confinement_marker_not_loader_exit_zero() {
-        if !probe() {
+        if !matches!(probe(), probe::ProbeOutcome::Completed(true)) {
             eprintln!("[linux-bwrap] exercised=0: functional namespace/mount probe unavailable");
             assert_ne!(std::env::var("BWRAP_REQUIRE_TESTS").as_deref(), Ok("1"));
             return;

@@ -9,12 +9,20 @@ use std::time::{Duration, Instant};
 
 use super::{executable, sealed_filter, DescriptorTransfer};
 
-pub(super) fn probe() -> bool {
+pub(super) enum ProbeOutcome {
+    Completed(bool),
+    Interrupted,
+}
+
+pub(super) fn probe() -> ProbeOutcome {
+    if crate::op_interrupt::requested() {
+        return ProbeOutcome::Interrupted;
+    }
     if !std::fs::read("/etc/passwd").is_ok_and(|bytes| !bytes.is_empty()) {
-        return false;
+        return ProbeOutcome::Completed(false);
     }
     let Some(executable) = executable() else {
-        return false;
+        return ProbeOutcome::Completed(false);
     };
     let mut command = Command::new(executable);
     // This setup-only probe uses absolute programs and no payload grants.
@@ -30,7 +38,7 @@ pub(super) fn probe() -> bool {
     for path in ["/usr", "/lib", "/lib64", "/bin"] {
         if Path::new(path).exists() {
             let Ok(file) = std::fs::File::open(path) else {
-                return false;
+                return ProbeOutcome::Completed(false);
             };
             command.args(["--ro-bind-fd", &file.as_raw_fd().to_string(), path]);
             descriptors.push(file.into());
@@ -38,7 +46,7 @@ pub(super) fn probe() -> bool {
     }
     // Probe the same fd-based mounts and filter installation the launch needs.
     let Ok(filter) = sealed_filter(&[0x06, 0, 0, 0, 0, 0, 0xff, 0x7f]) else {
-        return false;
+        return ProbeOutcome::Completed(false);
     };
     command.args(["--seccomp", &filter.as_raw_fd().to_string()]);
     descriptors.push(filter);
@@ -49,12 +57,20 @@ pub(super) fn probe() -> bool {
         "-c",
         "test ! -e /etc/passwd && printf harn-bwrap-boundary",
     ]);
+    capture_probe(&mut command)
+}
+
+fn capture_probe(command: &mut Command) -> ProbeOutcome {
     // A failed wrapper may leave a descendant retaining stdout. Preparation
     // precedes the command timeout, so observe cancellation and bound this
     // setup operation without replacing an earlier caller deadline.
     let _deadline = crate::op_interrupt::with_deadline(Instant::now() + Duration::from_secs(1));
-    crate::op_interrupt::capture_output_interruptible(&mut command)
-        .is_ok_and(|output| probe_output_is_available(&output))
+    let output = crate::op_interrupt::capture_output_interruptible(command);
+    if crate::op_interrupt::requested() {
+        ProbeOutcome::Interrupted
+    } else {
+        ProbeOutcome::Completed(output.is_ok_and(|output| probe_output_is_available(&output)))
+    }
 }
 
 pub(super) fn probe_output_is_available(output: &std::process::Output) -> bool {
@@ -67,6 +83,38 @@ mod tests {
     use crate::orchestration::{CapabilityPolicy, ProcessSandboxPolicy, SandboxProfile};
 
     const CHILD_ROOT: &str = "HARN_NESTED_BWRAP_PROBE_ROOT";
+
+    #[test]
+    fn cancelled_setup_does_not_cache_unavailability() {
+        let cache = std::sync::Mutex::new(None);
+        let cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
+        let interrupted = crate::op_interrupt::install(Some(cancel), None);
+        let mut first = Command::new("/usr/bin/printf");
+        first.env_clear().arg("harn-bwrap-boundary");
+        assert!(!super::super::cached_availability(
+            &cache,
+            || capture_probe(&mut first)
+        ));
+        assert!(crate::op_interrupt::requested());
+        assert!(
+            cache.lock().unwrap().is_none(),
+            "caller cancellation is not a host fact"
+        );
+        drop(interrupted);
+
+        // A real nonempty successful process on the same capture and cache
+        // path proves that cancellation did not poison this process's memo.
+        // It does not claim this host can create Bubblewrap namespaces.
+        let mut next = Command::new("/usr/bin/printf");
+        next.env_clear().arg("harn-bwrap-boundary");
+        assert!(super::super::cached_availability(&cache, || capture_probe(
+            &mut next
+        )));
+        assert_eq!(*cache.lock().unwrap(), Some(true));
+        assert!(super::super::cached_availability(&cache, || panic!(
+            "completed host fact must be reused"
+        )));
+    }
 
     fn policy(root: &Path) -> CapabilityPolicy {
         CapabilityPolicy {
