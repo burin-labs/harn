@@ -91,7 +91,7 @@ impl crate::vm::Vm {
             ))),
             "pad_left" | "pad_right" => {
                 let left = method == "pad_left";
-                let width = args.first().and_then(|a| a.as_int()).unwrap_or(0) as usize;
+                let width = args.first().and_then(|a| a.as_int()).unwrap_or(0).max(0) as usize;
                 let pad_char = args
                     .get(1)
                     .map(|a| a.display())

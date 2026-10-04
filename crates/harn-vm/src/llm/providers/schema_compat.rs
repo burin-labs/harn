@@ -646,16 +646,12 @@ fn type_includes_object(value: &Value) -> bool {
 }
 
 fn value_summary(value: &Value) -> String {
-    let mut text = match value {
+    let text = match value {
         Value::String(value) => format!("{value:?}"),
         _ => value.to_string(),
     };
     const MAX_LEN: usize = 160;
-    if text.len() > MAX_LEN {
-        text.truncate(MAX_LEN);
-        text.push_str("...");
-    }
-    text
+    crate::text::truncate::truncate_end_bytes(&text, MAX_LEN)
 }
 
 fn child_path(parent: &str, child: &str) -> String {
@@ -669,6 +665,15 @@ fn escape_json_pointer(value: &str) -> String {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+
+    #[test]
+    fn value_summary_truncates_multibyte_text_on_a_char_boundary() {
+        // The leading quote puts every `é` on an odd byte, so byte 160 lands
+        // mid-character; a raw byte truncate panicked here.
+        let summary = value_summary(&Value::String("é".repeat(120)));
+        assert!(summary.len() <= 160, "{summary}");
+        assert!(summary.ends_with('…'), "{summary}");
+    }
 
     pub(crate) fn closed_discriminated_union_schema(
         combinator: &str,

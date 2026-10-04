@@ -6,6 +6,12 @@ pipeline test(harness: Harness, task: unknown) {
   harness.stdio.log(sign(decimal("0")))
   harness.stdio.log(sign(decimal("4.2")))
   harness.stdio.log(round(decimal("2.4")))
+  // abs/floor/ceil accept decimals, and min/max promote an int operand.
+  harness.stdio.log(abs(decimal("-2.50")))
+  harness.stdio.log(floor(decimal("-2.5")))
+  harness.stdio.log(ceil(decimal("2.1")))
+  harness.stdio.log(min(decimal("2.50"), 3))
+  harness.stdio.log(max(1, decimal("0.75")))
   // sum() accumulates decimals exactly, promoting int operands.
   harness.stdio.log([decimal("1.50"), decimal("2.50"), decimal("0.99")].sum())
   harness.stdio.log([decimal("10"), 5, decimal("0.50")].sum())
