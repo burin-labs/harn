@@ -5,6 +5,8 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 # shellcheck source=scripts/lib/package_verify_bootstrap.sh
 source "$ROOT_DIR/scripts/lib/package_verify_bootstrap.sh"
+# shellcheck source=scripts/lib/package_verify_dependency_resolution.sh
+source "$ROOT_DIR/scripts/lib/package_verify_dependency_resolution.sh"
 # shellcheck source=scripts/lib/sha256.sh
 source "$ROOT_DIR/scripts/lib/sha256.sh"
 
@@ -119,71 +121,6 @@ sha256_file() {
   sha256_file_hex "$1"
 }
 
-resolved_dependency_version() {
-  local metadata_path="$1"
-  local package="$2"
-  local package_version="$3"
-  local resolution_name="$4"
-  jq -er \
-    --arg package "$package" \
-    --arg package_version "$package_version" \
-    --arg resolution_name "$resolution_name" \
-    -f "$ROOT_DIR/scripts/verify_crate_dependency_resolution.jq" \
-    "$metadata_path"
-}
-
-emit_dependency_resolution_receipts() {
-  local phase="$1"
-  local metadata_path="$2"
-  local require_minimum="$3"
-  local row package package_version dependency requirement minimum resolution_name resolved
-  for row in "${dependency_contract_rows[@]}"; do
-    IFS=$'\t' read -r package package_version dependency requirement minimum resolution_name <<<"$row"
-    resolved="$(resolved_dependency_version \
-      "$metadata_path" "$package" "$package_version" "$resolution_name")"
-    # A contract with no declared minimum has no floor to assert. It is a
-    # ceiling: the requirement names the first version that breaks, and the
-    # resolver-latest build is its whole proof. Keep emitting its receipt so
-    # the resolved version stays visible in both phases. `none` is the plan's
-    # absent-field token; the row never carries an empty field, because tab is
-    # IFS whitespace and an empty one would shift every later field left.
-    if [[ "$require_minimum" == "1" && "$minimum" != "none" && "$resolved" != "$minimum" ]]; then
-      echo "error: $phase resolved $package dependency $dependency to $resolved, expected minimum $minimum" >&2
-      return 1
-    fi
-    printf 'dependency_resolution phase=%s package=%s@%s dependency=%s requirement=%s minimum=%s resolved=%s\n' \
-      "$phase" "$package" "$package_version" "$dependency" "$requirement" "$minimum" "$resolved"
-  done
-}
-
-select_dependency_minimums() {
-  local row _package _package_version dependency _requirement minimum _resolution_name
-  local selected=()
-  local entry selected_dependency selected_minimum found
-  for row in "${dependency_contract_rows[@]}"; do
-    IFS=$'\t' read -r _package _package_version dependency _requirement minimum _resolution_name <<<"$row"
-    # No declared minimum means no declared-minimum pin for this dependency.
-    if [[ "$minimum" == "none" ]]; then
-      continue
-    fi
-    found=0
-    for entry in "${selected[@]}"; do
-      IFS=$'\t' read -r selected_dependency selected_minimum <<<"$entry"
-      if [[ "$selected_dependency" == "$dependency" ]]; then
-        found=1
-        if [[ "$selected_minimum" != "$minimum" ]]; then
-          echo "error: dependency contracts disagree on minimum for $dependency: $selected_minimum vs $minimum" >&2
-          return 1
-        fi
-      fi
-    done
-    if [[ "$found" -eq 0 ]]; then
-      selected+=("$dependency"$'\t'"$minimum")
-    fi
-  done
-  printf '%s\n' "${selected[@]}"
-}
-
 stdlib_version="$(package_version harn-stdlib)"
 modules_version="$(package_version harn-modules)"
 vm_version="$(package_version harn-vm)"
@@ -268,13 +205,13 @@ check_packaged_workspace() {
 
   cargo metadata --locked --format-version 1 --manifest-path "$workspace_manifest" \
     >"$resolver_metadata"
-  emit_dependency_resolution_receipts resolver-latest "$resolver_metadata" 0
+  emit_dependency_resolution_receipts resolver-latest "$resolver_metadata" 0 "${dependency_contract_rows[@]}"
 
   if [[ "${#dependency_contract_rows[@]}" -eq 0 ]]; then
     return
   fi
 
-  minimum_rows="$(select_dependency_minimums)"
+  minimum_rows="$(select_dependency_minimums "$resolver_metadata" "${dependency_contract_rows[@]}")"
   while IFS=$'\t' read -r dependency minimum; do
     [[ -n "$dependency" ]] || continue
     cargo update --manifest-path "$workspace_manifest" -p "$dependency" --precise "$minimum"
@@ -287,7 +224,7 @@ check_packaged_workspace() {
     cargo check --locked --workspace --manifest-path "$workspace_manifest"
   cargo metadata --locked --format-version 1 --manifest-path "$workspace_manifest" \
     >"$minimum_metadata"
-  emit_dependency_resolution_receipts declared-minimum "$minimum_metadata" 1
+  emit_dependency_resolution_receipts declared-minimum "$minimum_metadata" 1 "${dependency_contract_rows[@]}"
 }
 
 package_and_inspect_no_verify() {
