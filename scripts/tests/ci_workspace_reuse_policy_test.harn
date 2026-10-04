@@ -8,6 +8,17 @@ import {
 const MESSAGE =
   "ci.yml:producer saves workspace crates, so it must restore with reuse-workspace-crates and record its source only on success"
 
+type CacheSourceManifest = {
+  package: {
+    name: string,
+    version: string,
+    edition: string,
+    publish: bool,
+    metadata: {harn: {source: string}},
+  },
+  workspace: dict,
+}
+
 fn cache_step(reuse: bool) {
   let inputs = {"shared-key": "workspace-tests", "cache-workspace-crates": "true", save: "true"}
   if reuse {
@@ -168,9 +179,12 @@ pipeline test_cache_identity_executes_precise_generation_and_upstream_archive_pa
       + " -> target\nharn-cache-workspaces\n",
   )
   const manifest = path_join(root, "harn-cache-source-key/Cargo.toml")
-  const parsed = toml_parse(harness.fs.read_text(manifest))
-  assert_eq(parsed?.package?.metadata?.harn?.source, "sourcehash")
-  assert_eq(parsed?.workspace, {})
+  const parsed = schema_expect(
+    toml_parse(harness.fs.read_text(manifest)),
+    schema_of(CacheSourceManifest),
+  )
+  assert_eq(parsed.package.metadata.harn.source, "sourcehash")
+  assert_eq(parsed.workspace, {})
   const changed = run_cache_identity(
     pick(harness, ["fs", "process"]),
     env + {CACHE_SOURCE_KEY: "nextsource"},
