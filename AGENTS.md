@@ -282,27 +282,19 @@ live in [Engineering principles](docs/src/dev/engineering-principles.md):
 
 ## Ecosystem working agreement
 
-- Pursue the ambitious product outcome; make the seams boring with small typed
-  interfaces, explicit invariants, and deterministic projections.
-- Give each behavior one semantic owner. Generate or parity-test other surfaces
-  instead of maintaining competing implementations.
-- Work autonomously inside approved scope. Pause for destructive, production,
-  high-spend, ambiguous, or authority-expanding actions—not routine reversible work.
-- Treat stop, wait, stand down, and pivot as control events for long-lived work.
-- Match evidence to the claim. Use the smallest owning product-path check;
-  add a falsifier for contested, load-bearing, or potentially vacuous claims.
-  Record relevant controls, recovery, and blind spots without repeating proof.
-- Evidence follows source and artifact identity, not the branch name. Reuse
-  verified branch or merge-candidate evidence after landing when relevant code,
-  build inputs, and dependencies are unchanged. Repeat affected checks only
-  for a relevant change, observed failure, deployment, or packaging difference.
-- "Ship" means integrated on owning main with terminal integration checks and
-  applicable release or deployment checks complete. Confirm the landed change
-  and merge result; do not rebuild or recapture screenshots solely for main.
-- Ship a ready PR by adding the `ship` label when the repo has a Smart Ship
-  caller (`.github/workflows/smart-ship.yml`); otherwise land through the merge
-  queue with `gh pr merge --squash --auto`. Never `gh pr merge --admin`.
-  Incidents use the org override labels `bypass-ci`, `bypass-merge-queue`, or
-  `force-merge`.
+- Build ambitious outcomes behind small typed interfaces; give behavior one owner
+  and generate or parity-test projections instead of duplicating policy.
+- Work autonomously within approved scope. Pause for destructive or production effects,
+  exceptional spend, material ambiguity, or new authority.
+- Treat stop, wait, stand down, pivot, and steer as control events.
+- Use the smallest owning product-path check. Add a falsifier for contested, load-bearing,
+  or potentially vacuous claims; record controls, recovery, and blind spots.
+- Evidence follows source/artifact identity. Reuse proof when relevant code, build inputs,
+  and dependencies are unchanged. Repeat affected checks for relevant changes, failures,
+  deployment, or packaging differences. Do not rebuild or recapture solely for main.
+- Ship means owning-main integration with terminal merge and applicable release/deploy
+  checks. Confirm landed content and result; an open PR is incomplete.
+- Use `ship` with a deployed Smart Ship caller; otherwise use `gh pr merge --squash --auto`.
+  Never use `--admin`; incidents use `bypass-ci`, `bypass-merge-queue`, or `force-merge`.
 
 <!-- END HARN SHARED AGENT CONTRACT -->
