@@ -761,10 +761,10 @@ fn host_request_declared_schema_owns_paths_and_tool_effects() {
     let policy = ToolApprovalPolicy::from_host_json(serde_json::json!({
         "allow_sensitive_paths": true,
         "rules": [
-            {"id": "actual", "identity_match": "literal", "allow": {
+            {"id": "actual", "source": "user", "identity_match": "literal", "allow": {
                 "tool": "custom_edit", "tool_kind": "edit", "side_effect": "workspace_write", "path": "actual.txt"
             }},
-            {"id": "ask", "ask": {"tool": "custom_edit"}}
+            {"id": "ask", "source": "mode", "ask": {"tool": "custom_edit"}}
         ]
     })).unwrap();
     let decision = policy.evaluate_request(&request);
