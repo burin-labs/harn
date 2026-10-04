@@ -115,15 +115,11 @@ pub(crate) fn elide_envelope_contract_stated_in_system(
         if !content.starts_with("<context-directives ") {
             continue;
         }
-        if let Some(open_end) = content.find('>') {
-            if content[open_end + 1..].starts_with(&inline) {
-                let elided = format!(
-                    "{}\n{}",
-                    &content[..=open_end],
-                    &content[open_end + 1 + inline.len()..]
-                );
-                message["content"] = serde_json::Value::String(elided);
-            }
+        let Some((open_tag, rest)) = content.split_once('>') else {
+            continue;
+        };
+        if let Some(directives) = rest.strip_prefix(inline.as_str()) {
+            message["content"] = serde_json::Value::String(format!("{open_tag}>\n{directives}"));
         }
     }
 }
