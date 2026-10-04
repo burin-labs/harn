@@ -106,6 +106,12 @@ Streak escalation decisions also carry `escalation_recommended` and, when
 configured, `escalation_target`. Consumers read the same fields from the
 session's `judge_decision` events.
 
+`requirement_report` preserves the validated requirement ledger when the
+decision has one: row IDs, evidence references, statuses, pending count and
+pending names. An absent report remains `nil`; it does not mean every
+requirement passed. The completion checkpoint carries the boundary report in
+`requirements`, including the combined reports from its adjudicators.
+
 `feedback_decorator` runs only after the ladder and veto budget resolve a veto
 that will actually be delivered. It receives `(reason, feedback, verdict)`;
 the verdict includes any escalation fields, so a host can attach

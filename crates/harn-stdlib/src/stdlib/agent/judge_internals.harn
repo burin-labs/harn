@@ -111,6 +111,9 @@ pub fn __judge_emit_decision(
       escalation_target: verdict?.escalation_target,
       judge_outcome: verdict?.judge_outcome,
       terminal_evidence_preserved: verdict?.terminal_evidence_preserved ?? false,
+      // The owning validator already bound requirement IDs to evidence.
+      // Preserve that decision; consumers must not reconstruct it from prose.
+      requirement_report: verdict?.requirement_report,
       // The judge's own answer beside the answer of record, and the typed
       // override when the two differ. Without the pair a reader cannot tell an
       // override from the judge's word, which is how a record came to report
