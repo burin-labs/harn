@@ -416,13 +416,17 @@ fn failed_queue_run(
   if !child.success {
     return Err(child.stderr)
   }
-  const decoded = json_decode(child.stdout, schema_of(WorkflowRuns))
-  if is_err(decoded) {
-    return Err(unwrap_err(decoded).message)
-  }
-  for run in unwrap(decoded) {
-    if run.headBranch.starts_with(prefix) && run.conclusion == "failure" {
-      return Ok(run.url)
+  match json_decode(child.stdout, schema_of(WorkflowRuns)) {
+    Result.Err(error) -> {
+      return Err(error.message)
+    }
+    Result.Ok(runs) -> {
+      for run in runs {
+        const failed = run.conclusion == "failure"
+        if failed && run.headBranch.starts_with(prefix) {
+          return Ok(run.url)
+        }
+      }
     }
   }
   return Ok(nil)
@@ -440,8 +444,10 @@ The pieces:
   returning a `Result`.
 - The error record has `message` (the first issue), `errors` (every issue as
   text), and `issues` (`{path, message, code}` for each).
-- In a function whose error type matches, postfix `?` unwraps the `Ok` or
-  returns the `Err`: `const runs = json_decode(text, schema_of(WorkflowRuns))?`.
+- `match` on the `Result` or postfix `?` keeps `T`; in a function whose error
+  type matches, `const runs = json_decode(text, schema_of(WorkflowRuns))?`
+  unwraps the `Ok` or returns the `Err`. `unwrap` and `unwrap_err` return a
+  dynamic value, so reach for them only when the type does not matter.
 
 How decoding treats fields:
 

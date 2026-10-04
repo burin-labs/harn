@@ -31,15 +31,18 @@ type PullRequest = {headRefOid: string, isDraft: bool, mergedAt: string?}
 type Snapshot = {repository: {pullRequest: PullRequest?}}
 
 fn head_of(raw: unknown) -> Result<string, string> {
-  const decoded = schema_parse(raw, schema_of(Snapshot))
-  if is_err(decoded) {
-    return Err(unwrap_err(decoded).message)
+  match schema_parse(raw, schema_of(Snapshot)) {
+    Result.Err(error) -> {
+      return Err(error.message)
+    }
+    Result.Ok(snapshot) -> {
+      const pr = snapshot.repository.pullRequest
+      if pr == nil {
+        return Err("pull request not found")
+      }
+      return Ok(pr.headRefOid)
+    }
   }
-  const pr = unwrap(decoded).repository.pullRequest
-  if pr == nil {
-    return Err("pull request not found")
-  }
-  return Ok(pr.headRefOid)
 }
 ```
 

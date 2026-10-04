@@ -74,8 +74,8 @@ const pr = schema_parse(payload, schema_of(Snapshot))?             // a value
 ```
 
 - `json_decode` and `schema_parse` return `Result<T, {message, errors,
-  issues}>`; postfix `?` propagates the `Err`. Use `schema_expect` to throw
-  instead.
+  issues}>`. `match` or postfix `?` keeps `T`; `unwrap` returns a dynamic
+  value. Use `schema_expect` to throw instead.
 - Unknown fields pass. `name: T?` may be `null`; `name?: T` may be absent.
 - Declare a GraphQL response type next to its query and decode
   `payload.data` with it.

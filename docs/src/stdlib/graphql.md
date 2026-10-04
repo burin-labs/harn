@@ -70,11 +70,14 @@ type IssuesData = {
 }
 
 fn issue_titles(data: unknown) -> Result<list<string>, string> {
-  const decoded = schema_parse(data, schema_of(IssuesData))
-  if is_err(decoded) {
-    return Err(unwrap_err(decoded).message)
+  match schema_parse(data, schema_of(IssuesData)) {
+    Result.Ok(issues) -> {
+      return Ok(issues.issues.nodes.map({ issue -> issue.title }))
+    }
+    Result.Err(error) -> {
+      return Err(error.message)
+    }
   }
-  return Ok(unwrap(decoded).issues.nodes.map({ issue -> issue.title }))
 }
 ```
 

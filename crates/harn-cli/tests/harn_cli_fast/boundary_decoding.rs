@@ -36,13 +36,19 @@ fn decoded_values_keep_their_type_through_each_spelling() {
 type Run = {headBranch: string, url: string}
 
 fn decode(raw: unknown) -> Result<int, any> {
-  const via_try = schema_parse(raw, schema_of(Run))?
-  const a: int = via_try.url
-  const b: int = unwrap(schema_parse(raw, schema_of(Run))).url
-  const c: int = unwrap(json_decode("{}", schema_of(Run))).headBranch
-  const d: int = unwrap_err(schema_check(raw, schema_of(Run))).message
-  const e: int = unwrap_or(schema_parse(raw, schema_of(Run)), nil)
-  return Ok(a + b + c + d + e)
+  const parsed = schema_parse(raw, schema_of(Run))?
+  const a: int = parsed.url
+  const decoded = json_decode("{}", schema_of(Run))?
+  const b: int = decoded.headBranch
+  match schema_check(raw, schema_of(Run)) {
+    Result.Ok(run) -> {
+      const c: int = run.url
+    }
+    Result.Err(error) -> {
+      const d: int = error.message
+    }
+  }
+  return Ok(a + b)
 }
 "#,
     );
@@ -52,7 +58,7 @@ fn decode(raw: unknown) -> Result<int, any> {
         .collect();
     assert_eq!(
         mismatches.len(),
-        5,
+        4,
         "every decode spelling must stay typed, got: {found:#?}"
     );
 }
