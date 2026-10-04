@@ -86,6 +86,13 @@ pub(crate) fn schema_result_value(
     }
 }
 
+/// The `Err` that `schema_parse` returns, for a value that never reached
+/// validation. `json_decode` uses it so a malformed document and a mistyped
+/// one fail with the same record.
+pub(crate) fn schema_result_err(path: &str, message: impl Into<String>) -> VmValue {
+    result_err_value(vec![ValidationIssue::new(path, message)], None)
+}
+
 /// Return the first typed validation issue without projecting it through the
 /// public `Result` value. Incremental validators use this boundary so their
 /// machine-readable cause and human detail come from the same schema pass.
