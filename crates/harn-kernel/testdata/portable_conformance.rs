@@ -403,6 +403,32 @@ pub struct RuntimeFailureCase {
 
 pub const RUNTIME_FAILURE_CASES: &[RuntimeFailureCase] = &[
     RuntimeFailureCase {
+        id: "declared-error-survives-transparent-rethrows",
+        source: r"
+            fn fail(input: int) -> any throws int { throw input }
+            fn reduce(input: int) -> any throws int {
+                try { return retry 2 { try* fail(input) } }
+                finally { try { throw 8 } catch (_ignored) {} }
+            }
+        ",
+        entry: "reduce",
+        input_json: "7",
+        expected_code: "harn_declared_throw",
+    },
+    RuntimeFailureCase {
+        id: "legacy-error-stays-runtime-under-declared-wrapper",
+        source: r"
+            fn fail(input: int) -> any { throw input }
+            fn reduce(input: int) -> any throws int {
+                try { return retry 2 { try* fail(input) } }
+                finally { try { throw 8 } catch (_ignored) {} }
+            }
+        ",
+        entry: "reduce",
+        input_json: "7",
+        expected_code: "harn_throw",
+    },
+    RuntimeFailureCase {
         id: "pick-rejects-non-record-source",
         source: r#"fn project(input: any) { return pick(input, ["name"]) }"#,
         entry: "project",

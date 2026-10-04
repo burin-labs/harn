@@ -312,6 +312,7 @@ impl AgentEventSink for AcpAgentEventSink {
                 mutation_status,
                 changed_paths,
                 data,
+                health,
                 executor,
                 parsing,
                 raw_input,
@@ -325,6 +326,9 @@ impl AgentEventSink for AcpAgentEventSink {
                     "status": Self::status_str(*status),
                 });
                 let mut harn_meta = serde_json::Map::new();
+                if let Some(health) = health {
+                    harn_meta.insert("health".to_string(), serde_json::json!(health));
+                }
                 if let Some(out) = raw_output {
                     update["rawOutput"] = out.clone();
                 }
@@ -1001,6 +1005,9 @@ impl AgentEventSink for AcpAgentEventSink {
                         "metadata": metadata,
                     }),
                 );
+            }
+            AgentEvent::SessionHealth { session_id, fact } => {
+                self.emit_agent_event_ext("session_health", session_id, serde_json::json!(fact));
             }
             AgentEvent::AnchorChanged {
                 session_id,

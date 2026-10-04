@@ -100,9 +100,11 @@ harn tool run server.harn widgets get --help
 harn tool completions server.harn --shell zsh > _widgets
 ```
 
-Each input property becomes a long flag by default. Underscores become hyphens
-in the flag spelling and retain their original names in the handler argument
-object. `cli.arguments` can make a property positional, change its long flag,
+Each input property becomes a long flag by default. Leading underscores are
+omitted and remaining underscores become hyphens in the flag spelling. The
+handler argument object retains the original property name: `_nl_intent`
+becomes `--nl-intent`. Explicit spellings remain unchanged and must be valid;
+ambiguous or reserved flags are rejected. `cli.arguments` can make a property positional, change its long flag,
 add one short flag and long aliases, group and order help, mark an array as a
 repeatable flag, or attach a portable completion hint. These settings change
 presentation only; the input JSON Schema remains the validation owner.
@@ -219,9 +221,13 @@ declare a tool failure. Agent dispatch still requires its
 
 Set `error_schema` on a handwritten definition to declare the portable shape
 of values its handler deliberately throws. Public Harn functions project their
-language-level `throws E` type to the same catalog field. A matching raw throw
-is typed application data; an undeclared throw remains a runtime failure, and
-a declared throw that does not match is a contract failure. Harn never treats
+language-level `throws E` type to the same catalog field. A source-authored throw
+inside a callable declaring `throws E` carries the application-error channel.
+It becomes typed application data only after its value validates against the
+error schema. A dependency's undeclared throw remains a runtime failure even
+when its value matches that schema; a declared throw that does not match is a
+contract failure. Handwritten handlers must declare `throws E` as well as
+publishing `error_schema`. Harn never treats
 `Result<T, E>` as a throw declaration. Runtime summaries classify undeclared
 throws without rendering their values, so a legacy string or object cannot
 leak through CLI stderr, MCP content, HTTP messages, A2A history, or trust

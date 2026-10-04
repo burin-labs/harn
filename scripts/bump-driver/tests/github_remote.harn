@@ -1,9 +1,16 @@
 import { assert_eq, assert_throws } from "std/testing"
 import { github_bump_auth_options, github_bump_live_adapter } from "../authentication"
-import { bump_pull_request_body, github_bump_remote } from "../github_remote"
+import {
+  bump_pull_request_body,
+  bump_pull_request_labels,
+  github_bump_remote,
+} from "../github_remote"
 import { reset_token_cache } from "harn-github-connector/default"
 
 const API = "https://api.github.com"
+
+/** The headline std/bump/runtime gives every refresh publication. */
+const HEADLINE = "chore: bump Harn runtime to v0.10.114"
 
 pipeline test_each_refresh_callback_receives_a_current_scoped_token(harness: Harness) {
   const root = harness.fs.mkdtemp_in_workspace("bump-refresh-token-")
@@ -158,6 +165,7 @@ pipeline test_long_build_renews_before_base_read_fetch_and_repair_identity(harne
               repository: {
                 commit: {
                   oid: fixture.base,
+                  messageHeadline: HEADLINE,
                   author: {user: {login: "harn-release-bot[bot]"}},
                   signature: {isValid: true, wasSignedByGitHub: true},
                 },
@@ -221,6 +229,24 @@ pipeline test_generated_commit_requires_verified_github_publisher_identity(harne
       expected: false,
     },
     {name: "unknown author", login: nil, valid: true, signed: true, expected: false},
+    {
+      // A repair tool holding the same App credentials signs through the same
+      // API, so only the refresh headline separates its commit from ours.
+      name: "same-App repair",
+      login: "harn-release-bot[bot]",
+      valid: true,
+      signed: true,
+      headline: "Resolve conflicts with main",
+      expected: false,
+    },
+    {
+      name: "repair quoting the refresh headline",
+      login: "harn-release-bot[bot]",
+      valid: true,
+      signed: true,
+      headline: "Fix: chore: bump Harn runtime to v0.10.114",
+      expected: false,
+    },
   ]
   for case in cases {
     harness.testing.http_mock_clear()
@@ -235,6 +261,7 @@ pipeline test_generated_commit_requires_verified_github_publisher_identity(harne
               repository: {
                 commit: {
                   oid: oid,
+                  messageHeadline: case?.headline ?? HEADLINE,
                   author: {
                     name: "harn-release-bot[bot]",
                     user: if case.login == nil {
@@ -320,7 +347,41 @@ pipeline test_signed_publication_refuses_a_repair_added_after_inspection(harness
   harness.testing.http_mock_clear()
 }
 
-fn remote(harness: Harness, repo_dir: string = ".") {
+pipeline test_refresh_publication_requires_the_headline_repair_replay_recognizes(harness: Harness) {
+  harness.testing.http_mock_clear()
+  const fixture = mock_publication_branch(harness, 1).fixture
+  const commit_oid = "cccccccccccccccccccccccccccccccccccccccc"
+  harness.testing.http_mock(
+    "POST",
+    API + "/graphql",
+    {status: 200, body: signed_commit_body(commit_oid)},
+  )
+  const adapter = github_bump_live_adapter(
+    harness,
+    {
+      remote: remote(harness, fixture.dir),
+      authentication: {installation_token: "github-app-installation-token"},
+      config: {repo_dir: fixture.dir},
+    },
+  )
+  const branch = "automation/bump-harn-runtime"
+  assert_throws(
+    { ->
+      adapter.publish_commit(
+        {branch: branch, headline: "Bump Harn runtime", base_sha: fixture.base},
+      )
+    },
+  )
+  assert_eq(len(harness.testing.http_mock_calls()), 0, "refusal precedes every request")
+  const receipt = adapter.publish_commit(
+    {branch: branch, headline: HEADLINE, base_sha: fixture.base},
+  )
+  assert_eq(receipt.oid, commit_oid, "the refresh headline reaches signed publication")
+  harness.testing.http_mock_clear()
+  harness.fs.delete(fixture.dir)
+}
+
+fn remote(harness: Harness, repo_dir: string = ".", labels: list<string> = []) {
   return github_bump_remote(
     harness,
     {
@@ -330,6 +391,7 @@ fn remote(harness: Harness, repo_dir: string = ".") {
       branch: "automation/bump-harn-runtime",
       base: "main",
       repo_dir: repo_dir,
+      labels: labels,
     },
   )
 }
@@ -562,6 +624,75 @@ pipeline test_open_pull_projection_retains_publication_leases(harness: Harness, 
     harness.testing.http_mock_calls().map({ call -> {method: call.method, url: call.url} })
       .to_list(),
     [{method: "GET", url: url}],
+  )
+  harness.testing.http_mock_clear()
+}
+
+pipeline test_label_input_normalizes_once_at_the_driver_boundary(task: unknown) {
+  assert_eq(bump_pull_request_labels(""), [])
+  assert_eq(bump_pull_request_labels(" , ,"), [])
+  assert_eq(bump_pull_request_labels(" ship , needs-review,Ship,"), ["ship", "needs-review"])
+  const too_long = "harn-runtime-bump-label-that-is-longer-than-fifty-1"
+  assert_eq(len(too_long), 51)
+  assert_throws({ -> bump_pull_request_labels("ship," + too_long) })
+}
+
+/** Refresh the open bump PR through a remote that labels it, answering with `applied`. */
+fn upsert_with_labels(harness: Harness, labels: list<string>, applied: list<string>) {
+  harness.testing.http_mock_clear()
+  const previous_head_oid = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  const expected_head_oid = "cccccccccccccccccccccccccccccccccccccccc"
+  harness.testing.http_mock(
+    "GET",
+    API
+      + "/repos/octo-org/octo-repo/pulls?state=open&head=octo-org%3Aautomation%2Fbump-harn-runtime&base=main&per_page=2",
+    {
+      responses: [
+        {status: 200, body: json_stringify([pull(previous_head_oid)])},
+        {status: 200, body: json_stringify([pull(expected_head_oid)])},
+      ],
+    },
+  )
+  harness.testing.http_mock(
+    "PATCH",
+    API + "/repos/octo-org/octo-repo/pulls/42",
+    {status: 200, body: json_stringify(pull(expected_head_oid))},
+  )
+  harness.testing.http_mock(
+    "POST",
+    API + "/repos/octo-org/octo-repo/issues/42/labels",
+    {status: 200, body: json_stringify(applied.map({ name -> {name: name} }).to_list())},
+  )
+  const existing = {
+    number: 42,
+    head_oid: previous_head_oid,
+    base_ref: "main",
+    base_oid: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    auto_merge_enabled: false,
+    auto_merge_method: nil,
+    url: "https://github.com/octo-org/octo-repo/pull/42",
+    state: "open",
+  }
+  return try {
+    remote(harness, ".", labels).upsert_pr(existing, expected_head_oid)
+  }
+}
+
+pipeline test_pull_upsert_applies_and_reads_back_requested_labels(harness: Harness) {
+  const labeled = upsert_with_labels(harness, ["ship"], ["dependencies", "Ship"])
+  assert(is_ok(labeled), "labels GitHub reports applied must not fail the refresh")
+  const posts =
+    harness.testing.http_mock_calls().filter({ call -> call.method == "POST" }).to_list()
+  assert_eq(len(posts), 1, "labeling must fire once after the upsert")
+  assert_eq(json_parse(posts[0].body), {labels: ["ship"]})
+  const dropped = upsert_with_labels(harness, ["ship"], ["dependencies"])
+  assert(is_err(dropped), "a label GitHub did not report applied must not read as labeled")
+  const unlabeled = upsert_with_labels(harness, [], [])
+  assert(is_ok(unlabeled))
+  assert_eq(
+    harness.testing.http_mock_calls().filter({ call -> call.method == "POST" }).to_list(),
+    [],
+    "an empty label input must make no labeling request",
   )
   harness.testing.http_mock_clear()
 }

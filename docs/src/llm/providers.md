@@ -11,6 +11,33 @@ harn models list --provider anthropic
 harn models info <model>
 ```
 
+### Inference admission preview
+
+`harn provider admission --request '<JSON>'` returns a policy decision for a
+concrete provider and model without resolving credentials or contacting the
+provider. For example:
+
+```bash
+harn provider admission --request '{"provider":"ollama","model":"selected-model","boundary":{"reach":"local_only","allow_training_discounts":false}}'
+```
+
+The request accepts `provider`, `model`, an optional `boundary`, and optional
+`data_controls`. The boundary meets the process and inherited inference
+ceilings; it cannot widen them. Data controls use the selected chat transport's
+actual control plan.
+
+Read the required `status` field: `admitted`, `denied`, or `unknown`. A valid
+snapshot exits successfully for all three decisions. Missing catalog facts or
+malformed host authority remain `unknown`. The snapshot contains rule names and
+route facts, never credentials, endpoint URLs, or request-control values.
+`training_control_planned` describes a control the transport can apply. The
+preview does not apply it or establish model readiness. Inference enforces its
+boundary again at dispatch.
+
+Embedders can call `harn_vm::llm::api::preview_inference_admission`. Request and
+snapshot schemas and host records are generated from those owning types in
+the published protocol artifacts.
+
 Set the provider credential in the environment. The complete list of providers
 and the variables each one reads is in
 [credential variables](../provider-support.md#credential-variables), generated

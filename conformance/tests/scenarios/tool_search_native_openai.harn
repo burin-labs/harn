@@ -5,8 +5,8 @@ import { llm_text, with_llm_script } from "std/testing"
  * `tool_search` payload emission for GPT 5.4+. Verifies that:
  *   1. Opting into `tool_search` routes auto-resolution to native
  *      mode when the provider+model supports it.
- *   2. The payload prepends the OpenAI-shape meta-tool
- *      `{"type": "tool_search", "mode": "hosted"}` to the tools
+ *   2. The payload prepends the documented OpenAI meta-tool
+ *      `{"type": "tool_search"}` to the tools
  *      array (distinct from Anthropic's versioned
  *      `tool_search_tool_*_20251119`).
  *   3. `defer_loading: true` flows to the OpenAI-shape wrapper so
@@ -74,7 +74,7 @@ pipeline test(harness: Harness, task: unknown) {
       assert(len(tools) == 4, "meta-tool + 3 user tools = 4")
       const meta = tools[0]
       assert(meta.type == "tool_search", "OpenAI meta-tool uses the `tool_search` type")
-      assert(meta.mode == "hosted", "native path defaults to hosted mode")
+      assert(meta.mode == nil, "hosted search is the default; OpenAI rejects a `mode` field")
       assert(meta.name == nil, "OpenAI meta-tool has no `name` field")
       let saw_deploy_deferred = false
       let saw_metrics_deferred = false

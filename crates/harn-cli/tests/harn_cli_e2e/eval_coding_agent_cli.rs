@@ -76,7 +76,14 @@ fn mock_matrix_writes_artifacts_for_native_and_text_tools() {
     );
     let summary: serde_json::Value =
         serde_json::from_str(&summary_raw).expect("summary parses as JSON");
-    assert_eq!(summary["schema_version"], 3);
+    assert_eq!(summary["schema_version"], 4);
+    assert_eq!(summary["total_cost_usd"], 0.0);
+    assert_eq!(summary["known_cost_usd"], 0.0);
+    for run in summary["runs"].as_array().expect("measured run census") {
+        assert!(run["model_call_count"].as_u64().is_some());
+        assert_eq!(run["usage_unknown_calls"], 0);
+        assert_eq!(run["unpriced_calls"], 0);
+    }
     assert_eq!(summary["fixture_ids"].as_array().map(Vec::len), Some(6));
     assert_eq!(summary["total_runs"], 24);
     assert_eq!(summary["passed_runs"], 24);

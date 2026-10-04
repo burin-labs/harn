@@ -495,6 +495,12 @@ fn hydrate_events(events: Vec<harn_session_store::StoredEvent>) -> HydratedTrans
             }
         }
         match &event.kind {
+            SessionEventKind::Custom { custom_type } if custom_type == "assistant_publication" => {
+                crate::llm::assistant_publication::replay(
+                    &mut messages,
+                    &event.payload["transcript_event"]["metadata"],
+                );
+            }
             SessionEventKind::Compaction => {
                 if let Some(replaced) = event
                     .payload

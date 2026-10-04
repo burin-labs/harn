@@ -101,8 +101,9 @@ harness.stdio.log(unwrap_err(bad))         // something went wrong
 | `toml_parse(str)` | str: string | value | Parse TOML string into Harn values. Throws on invalid TOML |
 | `toml_stringify(value)` | value: any | string | Serialize Harn value to TOML |
 | `json_validate(data, schema)` | data: any, schema: dict | bool | Validate data against a schema. Returns `true` if valid, throws with details if not |
-| `schema_check(data, schema)` | data: any, schema: dict | Result | Validate data against an extended schema and return `Result.Ok(data)` or `Result.Err({message, errors, issues, value?})` |
-| `schema_parse(data, schema)` | data: any, schema: dict | Result | Validate data and return `Result.Ok(data)` with `default` values applied recursively, or `Result.Err({message, errors, issues, value?})` |
+| `schema_check(data, schema)` | data: unknown, schema: dict or `schema_of(T)` | `Result<T, ...>` | Validate data against an extended schema and return `Result.Ok(data)` or `Result.Err({message, errors, issues, value?})` |
+| `schema_parse(data, schema)` | data: unknown, schema: dict or `schema_of(T)` | `Result<T, ...>` | Validate data and return `Result.Ok(data)` with `default` values applied recursively, or `Result.Err({message, errors, issues, value?})`. With `schema_of(T)` the `Ok` value is typed `T` |
+| `json_decode(text, schema)` | text: string, schema: dict or `schema_of(T)` | `Result<T, ...>` | Parse JSON and validate it in one step. Malformed JSON is an `Err` with the same record as a schema failure. See [Decode at the boundary](error-handling.md#decode-at-the-boundary) |
 | `schema_report(data, schema, apply_defaults?)` | data: any, schema: dict, bool (optional) | dict | Validate data and return `{ok, message, errors, issues, value?}` without wrapping in `Result` or throwing |
 | `schema_is(data, schema)` | data: any, schema: dict | bool | Validate data against a schema and return `true`/`false` without throwing |
 | `schema_expect(data, schema, apply_defaults?)` | data: any, schema: dict, bool (optional) | any | Validate data and return the normalized value, throwing on failure |
