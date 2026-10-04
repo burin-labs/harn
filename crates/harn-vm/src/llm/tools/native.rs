@@ -238,30 +238,28 @@ pub(crate) fn apply_tool_search_native_injection_typed(
             prepend_meta_tool(native_tools, meta);
         }
         NativeToolSearchShape::OpenAi => {
-            // OpenAI Responses-API shape. The meta-tool goes at the
-            // front of the tools array and carries a `mode`
-            // field ("hosted"/"client"). Deferred tools get
-            // `defer_loading: true` set at the wrapper level in
-            // `vm_tools_to_native`; the model sees only stub schemas
-            // until a `tool_search_call` surfaces them. See
-            // <https://developers.openai.com/api/docs/guides/tools-tool-search>.
-            let resolved_mode = if mode == "client" { "client" } else { "hosted" };
-            let mut meta = serde_json::json!({
-                "type": "tool_search",
-                "mode": resolved_mode,
-            });
-            // Collect any `namespace` values declared on user tools so
-            // OpenAI can group deferred tools into searchable buckets.
-            // Omit the field when no tool declared a namespace — keeps
-            // the payload minimal for the common case.
-            if let Some(tools) = native_tools.as_ref() {
-                let mut namespaces: Vec<String> = tools.iter().filter_map(tool_namespace).collect();
-                namespaces.sort();
-                namespaces.dedup();
-                if !namespaces.is_empty() {
-                    meta["namespaces"] = serde_json::json!(namespaces);
-                }
-            }
+            // OpenAI Responses-API shape, exactly as documented: `type` plus
+            // an optional `execution` ("server" by default, or "client", which
+            // requires a `parameters` schema). Deferred tools carry
+            // `defer_loading: true` on their own entry (`vm_tools_to_native`).
+            // The API rejects any other field with HTTP 400, including the
+            // `mode` and `namespaces` keys this once sent (harn#9314); OpenAI
+            // namespaces are separate `{"type": "namespace"}` tool entries.
+            // See <https://developers.openai.com/api/docs/guides/tools-tool-search>.
+            let meta = if mode == "client" {
+                serde_json::json!({
+                    "type": "tool_search",
+                    "execution": "client",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {"query": {"type": "string"}},
+                        "required": ["query"],
+                        "additionalProperties": false,
+                    },
+                })
+            } else {
+                serde_json::json!({"type": "tool_search"})
+            };
             prepend_meta_tool(native_tools, meta);
         }
     }
@@ -272,18 +270,4 @@ fn prepend_meta_tool(native_tools: &mut Option<Vec<serde_json::Value>>, meta: se
         Some(list) => list.insert(0, meta),
         None => *native_tools = Some(vec![meta]),
     }
-}
-
-/// Extract the user-declared namespace from a native tool JSON, if any.
-/// Anthropic shape keeps the field at the top level; OpenAI shape nests
-/// it inside `function`. Either location is honoured.
-pub(crate) fn tool_namespace(tool: &serde_json::Value) -> Option<String> {
-    tool.get("namespace")
-        .and_then(|value| value.as_str())
-        .or_else(|| {
-            tool.get("function")
-                .and_then(|function| function.get("namespace"))
-                .and_then(|value| value.as_str())
-        })
-        .map(|value| value.to_string())
 }
