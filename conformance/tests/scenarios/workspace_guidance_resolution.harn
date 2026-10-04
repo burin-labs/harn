@@ -1,4 +1,8 @@
-import { guidance_prompt_fragments, resolve_workspace_guidance } from "std/agent/workspace_guidance"
+import {
+  PEER_AGENT_USER_SCOPE_FILES,
+  guidance_prompt_fragments,
+  resolve_workspace_guidance,
+} from "std/agent/workspace_guidance"
 
 /**
  * A fixture workspace covering every tier the resolver claims to own, plus one
@@ -144,6 +148,28 @@ pipeline test(harness: Harness) {
   assert(
     !plain_deps.contains(path_join(root, "shared/style.md")),
     "an import-free workspace names nothing from another resolution",
+  )
+  // A host that names its own user file reads that file and no peer agent's.
+  harness.fs.mkdir(path_join(home, ".host"))
+  harness.fs.write_text(path_join(home, ".host/AGENTS.md"), "Host user rule.")
+  const host_scoped = resolve_workspace_guidance(
+    harness.fs,
+    {
+      workspace_root: plain,
+      home_dir: home,
+      include_ancestors: false,
+      user_scope_files: [".host/AGENTS.md"],
+    },
+  )
+  const host_paths = host_scoped.sources.map({ entry -> return entry.path }).to_list()
+  assert(host_paths.contains(path_join(home, ".host/AGENTS.md")), "the host's own user file loads")
+  assert(
+    !host_paths.contains(path_join(home, ".claude/CLAUDE.md")),
+    "a peer agent's user file is not read unless the host names it",
+  )
+  assert(
+    PEER_AGENT_USER_SCOPE_FILES.contains(".claude/CLAUDE.md"),
+    "the peer list is exported for an opt-in",
   )
   harness.stdio.log("workspace_guidance_resolution passed")
 }

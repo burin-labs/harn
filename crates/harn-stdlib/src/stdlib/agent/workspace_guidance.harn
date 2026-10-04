@@ -66,6 +66,12 @@ pub type GuidanceRequest = {
   max_dirs?: int,
   max_import_hops?: int,
   include_user_scope?: bool,
+  /**
+   * Home-relative user-scope files to read, in order. Defaults to
+   * `PEER_AGENT_USER_SCOPE_FILES`. A host that keeps its own user file names
+   * it here and offers the peer files as an explicit opt-in.
+   */
+  user_scope_files?: list<string>,
   include_ancestors?: bool,
   include_subtree?: bool,
   editor_packs?: list<string>,
@@ -85,9 +91,12 @@ const DIRECTORY_INSTRUCTION_FILES: list<string> = [
   "CLAUDE.local.md",
 ]
 
-// User-scope files, checked under the home directory. These are the files a
-// person writes once and expects every agent on the machine to honor.
-const USER_SCOPE_FILES: list<string> = [
+/**
+ * The user-scope files other coding agents write under the home directory: the
+ * default `user_scope_files`, and the list a host offers when a person opts in
+ * to sharing their personal rules across agents.
+ */
+pub const PEER_AGENT_USER_SCOPE_FILES: list<string> = [
   ".codex/AGENTS.override.md",
   ".codex/AGENTS.md",
   ".agents/AGENTS.md",
@@ -151,7 +160,7 @@ pub fn resolve_workspace_guidance(fs: HarnessFs, request: GuidanceRequest) -> Gu
   if request.include_user_scope ?? true {
     const home = request.home_dir ?? ""
     if home != "" {
-      for rel in USER_SCOPE_FILES {
+      for rel in request.user_scope_files ?? PEER_AGENT_USER_SCOPE_FILES {
         candidates = candidates
           + [{dir: __guidance_norm(home), scope: "user", depth: -1, file: rel}]
       }
