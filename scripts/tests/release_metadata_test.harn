@@ -12,6 +12,7 @@ import {
   stable_version_from_development,
   verify_changelog_top,
   workspace_package_manifests,
+  workspace_version_from_doc,
 } from "../release_metadata.harn"
 
 type DependencyProjection = {path: string, version: string}
@@ -21,6 +22,37 @@ type RootManifestProjection = {workspace: {dependencies: dict<string, Dependency
 type MemberManifestProjection = {dependencies: dict<string, DependencyProjection>}
 
 type AgentProjection = {version: string, distribution: {binary: {linux: {archive: string}}}}
+
+@test
+pipeline test_workspace_version_projection_validates_at_boundary() {
+  assert_eq(
+    workspace_version_from_doc(
+      {workspace: {package: {version: "1.2.3", edition: "2024"}, members: []}},
+    ),
+    "1.2.3",
+  )
+  assert_eq(workspace_version_from_doc({workspace: {version: "1.2.4"}}), "1.2.4")
+  assert_eq(
+    workspace_version_from_doc({workspace: {package: {version: "1.2.3"}, version: "1.2.4"}}),
+    "1.2.3",
+  )
+  assert_throws_eq(
+    { -> workspace_version_from_doc({workspace: {package: {version: 123}}}) },
+    "missing workspace version",
+  )
+  assert_throws_eq(
+    { -> workspace_version_from_doc({workspace: "invalid"}) },
+    "missing workspace version",
+  )
+  assert_throws_eq(
+    { -> workspace_version_from_doc({workspace: {package: {}}}) },
+    "missing workspace version",
+  )
+  assert_throws_eq(
+    { -> workspace_version_from_doc({workspace: {package: {version: "bad"}}}) },
+    "workspace version is not release SemVer: bad",
+  )
+}
 
 fn dependency_schema() -> Schema<DependencyProjection> {
   return schema_refine(
