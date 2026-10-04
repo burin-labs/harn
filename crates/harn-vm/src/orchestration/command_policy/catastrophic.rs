@@ -414,9 +414,39 @@ fn analysis_runs_git(
 /// discard when it is only a path, which argv alone cannot tell. It is
 /// labelled when the operand is unambiguously a path (`.`, `./x`, `:/`, a
 /// glob) and left unlabelled otherwise; a caller that means a branch should
-/// say `git switch`.
+/// say `git checkout name --` or `git switch`. Two or more operands without a
+/// branch-creating option are always `<tree-ish> <pathspec>...`.
+///
+/// Long options match any unambiguous prefix, as git accepts them, and a
+/// short option that takes a value ends its cluster (`-bfix` is `-b fix`).
 fn git_discards_worktree(subcommand: &str, args: &[String]) -> bool {
+    let value_flags: &[char] = match subcommand {
+        "checkout" => &['b', 'B'],
+        "switch" => &['c', 'C'],
+        "restore" => &['s'],
+        _ => return false,
+    };
     let options = || args.iter().take_while(|arg| *arg != "--");
+    let has_short = |flag: char| {
+        options().any(|arg| {
+            arg.starts_with('-')
+                && !arg.starts_with("--")
+                && arg
+                    .chars()
+                    .skip(1)
+                    .take_while(|c| !value_flags.contains(c))
+                    .chain(arg.chars().skip(1).find(|c| value_flags.contains(c)))
+                    .any(|c| c == flag)
+        })
+    };
+    let has_long = |names: &[&str]| {
+        options().any(|arg| {
+            let name = arg.split_once('=').map_or(arg.as_str(), |(name, _)| name);
+            name.len() > 2
+                && name.starts_with("--")
+                && names.iter().any(|option| option.starts_with(name))
+        })
+    };
     let operands = || {
         let mut after_separator = false;
         args.iter().filter(move |arg| {
@@ -427,24 +457,15 @@ fn git_discards_worktree(subcommand: &str, args: &[String]) -> bool {
             after_separator || !arg.starts_with('-')
         })
     };
-    let has_short = |flag: char| {
-        options().any(|arg| {
-            arg.starts_with('-') && !arg.starts_with("--") && arg.chars().skip(1).any(|c| c == flag)
-        })
-    };
-    let has_long = |names: &[&str]| {
-        options().any(|arg| {
-            let name = arg.split_once('=').map_or(arg.as_str(), |(name, _)| name);
-            names.contains(&name)
-        })
-    };
     match subcommand {
         "checkout" => {
-            let separated = args.iter().any(|arg| arg == "--")
-                && args.iter().skip_while(|arg| *arg != "--").nth(1).is_some();
+            let creates_branch = has_short('b') || has_short('B') || has_long(&["--orphan"]);
+            let separated = args.iter().skip_while(|arg| *arg != "--").nth(1).is_some();
             separated
                 || has_short('f')
                 || has_long(&["--force", "--pathspec-from-file"])
+                || (!creates_branch && operands().count() >= 2)
+                || (has_long(&["--ours", "--theirs"]) && operands().next().is_some())
                 || operands().any(|operand| is_unambiguous_pathspec(operand))
         }
         "restore" => {
@@ -452,8 +473,7 @@ fn git_discards_worktree(subcommand: &str, args: &[String]) -> bool {
                 && !(has_short('W') || has_long(&["--worktree"]));
             !staged_only && (operands().next().is_some() || has_long(&["--pathspec-from-file"]))
         }
-        "switch" => has_short('f') || has_long(&["--force", "--discard-changes"]),
-        _ => false,
+        _ => has_short('f') || has_long(&["--force", "--discard-changes"]),
     }
 }
 
