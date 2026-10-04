@@ -77,7 +77,7 @@ impl TypeChecker {
     /// with `nil`. A `dict<string, T>` with typed values is a real map, and
     /// `m?.key?.field` over it is ordinary nil handling.
     ///
-    /// An open record (`{name: string, ...dict}`) is untyped for a key it does
+    /// An open record (`{name: string, ...dict}` or `{name: string, ...R}`) is untyped for a key it does
     /// not declare, since that read lands in the untyped tail, and typed for
     /// one it does.
     fn type_is_untyped_record(
@@ -98,7 +98,7 @@ impl TypeChecker {
                 !declared
                     && rests
                         .iter()
-                        .all(|rest| self.type_is_untyped_record(rest, None, scope))
+                        .all(|rest| self.open_row_tail_is_untyped(rest, scope))
             }
             TypeExpr::Union(members) => {
                 let mut saw_untyped = false;
@@ -115,5 +115,11 @@ impl TypeChecker {
             }
             _ => false,
         }
+    }
+
+    /// A row tail that is an untyped dict or a still-generic row variable.
+    fn open_row_tail_is_untyped(&self, rest: &TypeExpr, scope: &TypeScope) -> bool {
+        matches!(rest, TypeExpr::Named(name) if scope.is_generic_type_param(name))
+            || self.type_is_untyped_record(rest, None, scope)
     }
 }

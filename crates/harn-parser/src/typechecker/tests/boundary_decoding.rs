@@ -46,6 +46,11 @@ fn untyped_optional_chain_splits_an_open_row_by_declared_field() {
         "untyped-optional-chain",
     );
     assert_eq!((undeclared, declared), (1, 0));
+    let generic_tail = rule_count(
+        "fn read<R>(row: {name: string, ...R}) -> any {\n  return row?.extra?.value\n}\n",
+        "untyped-optional-chain",
+    );
+    assert_eq!(generic_tail, 1, "a still-generic row tail is untyped");
 }
 
 #[test]
