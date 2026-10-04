@@ -771,7 +771,7 @@ fn host_request_declared_schema_owns_paths_and_tool_effects() {
     assert!(decision.is_allow(), "{decision:?}");
     assert_eq!(decision.receipt["matched_rule"]["id"], "actual");
     assert_eq!(decision.receipt["context"]["tool_kind"], "edit");
-    let mut different = request.clone();
+    let mut different = request;
     different.arguments["filename"] = serde_json::json!("different.txt");
     let refusal = policy.evaluate_request(&different);
     assert!(refusal.is_ask(), "{refusal:?}");
