@@ -3600,7 +3600,7 @@ harn orchestrator replay <event-id>
 harn orchestrator replay-oracle
 
 # Inspect the dead-letter queue.
-harn orchestrator dlq list
+harn orchestrator dlq --list
 harn orchestrator dlq --replay <event-id>
 
 # Inspect the pending-queue head.
