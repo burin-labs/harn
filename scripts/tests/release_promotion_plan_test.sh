@@ -29,7 +29,8 @@ grep -Fq 'release_range_release_commits "$PUSH_BASE" "$GITHUB_SHA"' \
 
 repo="$tmp/repo"
 mkdir -p "$repo/scripts/lib" "$tmp/bin"
-cp "$root/scripts/lib/release_version.sh" "$root/scripts/lib/release_candidate_run.sh" "$repo/scripts/lib/"
+cp "$root/scripts/lib/release_version.sh" "$root/scripts/lib/release_candidate_run.sh" \
+  "$root/scripts/lib/release_consumer_verdict.sh" "$repo/scripts/lib/"
 cp "$root/scripts/release_contract.env" "$repo/scripts/"
 git -C "$repo" init -b main --quiet
 git -C "$repo" config user.name "Release Promotion Test"
@@ -42,6 +43,18 @@ git -C "$repo" config commit.gpgsign false
 # FAKE_RUNS_FAIL=1 makes the run listing unreadable.
 cat > "$tmp/bin/gh" <<'EOF'
 #!/usr/bin/env bash
+if [[ "$*" == *"/jobs?filter=latest"* ]]; then
+  if [[ "${FAKE_CONSUMER:-success}" == missing ]]; then
+    printf '[{"total_count":0,"jobs":[]}]\n'
+  else
+    status=completed
+    conclusion="${FAKE_CONSUMER:-success}"
+    [[ "$conclusion" != pending ]] || { status=in_progress; conclusion=null; }
+    [[ "$conclusion" == null ]] || conclusion="\"$conclusion\""
+    printf '[{"total_count":1,"jobs":[{"name":"Consumer release rehearsal / Consumer canary","status":"%s","conclusion":%s}]}]\n' "$status" "$conclusion"
+  fi
+  exit 0
+fi
 case "$1 $2" in
   "api "*/commits/*) [[ -n "${FAKE_TAG_SHA:-}" ]] || exit 1; printf '%s\n' "$FAKE_TAG_SHA" ;;
   "api "*/build-release-binaries.yml/runs\?*)
@@ -49,6 +62,9 @@ case "$1 $2" in
     run="${FAKE_CANDIDATE_RUN-9001}"
     [[ -z "$run" ]] || printf '%s\n' "$run" ;;
   "api "*/artifacts\?name=candidate-manifest-*) printf '1\n' ;;
+  "api "*/actions/runs/*)
+    printf '{"id":%s,"head_sha":"%s","status":"completed","conclusion":"success"}\n' \
+      "${FAKE_CANDIDATE_RUN-9001}" "${FAKE_RUN_SHA:-$HEAD_SHA}" ;;
   "release "*) [[ "${FAKE_RELEASE:-0}" == 1 ]] ;;
   *) exit 2 ;;
 esac
@@ -94,6 +110,20 @@ plan candidate
 [[ "$(output candidate tag)" == v0.10.142 && "$(output candidate version)" == 0.10.142 &&
    "$(output candidate major_minor)" == 0.10 && "$(output candidate run_id)" == 9001 ]] \
   || fail "wrong release identity: $(cat "$tmp/candidate.outputs")"
+
+# The workflow run itself is green in every fixture, including a legacy
+# tolerated consumer failure. Promotion must read the real job before arming.
+for verdict in missing pending failure cancelled; do
+  plan "consumer_$verdict" "FAKE_CONSUMER=$verdict"
+  [[ "$(cat "$tmp/consumer_$verdict.status")" != 0 &&
+     "$(output "consumer_$verdict" promote)" != true ]] \
+    || fail "consumer $verdict authorized publication"
+  grep -Fq 'Consumer release rehearsal' "$tmp/consumer_$verdict.log" \
+    || fail "consumer $verdict refusal did not name its owner"
+done
+plan wrong_consumer_source FAKE_RUN_SHA=1111111111111111111111111111111111111111
+[[ "$(cat "$tmp/wrong_consumer_source.status")" != 0 ]] \
+  || fail "another source's consumer verdict authorized publication"
 
 # The release's merge group built the candidate, so this push's run built
 # nothing: the queue's run is the one promoted.
