@@ -76,6 +76,7 @@ pub const HARN_AGENT_EVENT_KINDS: &[&str] = &[
     "host_tool_result",
     "input_guardrail_verdict",
     "iteration_end",
+    "session_health",
     "iteration_start",
     "judge_decision",
     "judge_started",
@@ -115,6 +116,7 @@ pub const HARN_TOOL_LIFECYCLE_EXTENSION_FIELDS: &[&str] = &[
     "errorCategory",
     "executionDurationMs",
     "executor",
+    "health",
     "intent",
     "mutationStatus",
     "parsing",
@@ -143,6 +145,8 @@ pub(super) fn harn_acp_extension_meta() -> serde_json::Value {
             "sandboxConfinement": harn_vm::llm::vm_value_to_json(
                 &harn_vm::process_sandbox::host_confinement(),
             ),
+            // Whether this server's own process is confined, and to what.
+            "processConfinement": super::confinement::initialize_meta(),
             // ACP `ExtNotification` methods this server emits beyond the
             // canonical `session/update` stream. Clients that recognize
             // the method consume the payload; clients that don't MUST

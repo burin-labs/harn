@@ -540,7 +540,7 @@ pub(crate) fn spawn_long_running_with_options(
     };
     let waiter_thread_name = waiter_context.handle_id.clone();
     let capture = options.capture;
-    std::thread::Builder::new()
+    harn_parser::runtime_stack::builder()
         .name(format!("hto-waiter-{waiter_thread_name}"))
         .spawn(move || {
             waiter_thread(waiter_context, cancel_state, capture);
@@ -645,6 +645,7 @@ fn waiter_thread(context: WaiterContext, cancel_state: Arc<CancelState>, capture
             })
         });
 
+    let missing_program = handle.missing_program().map(str::to_string);
     let status = handle.wait().ok();
 
     if let Some(thread) = stdout_thread {
@@ -756,6 +757,11 @@ fn waiter_thread(context: WaiterContext, cancel_state: Arc<CancelState>, capture
         serde_json::Value::Number(exit_code.into()),
     );
     payload.insert("timed_out".into(), serde_json::Value::Bool(timed_out));
+    if exit_code == 127 && signal_name.is_none() && !cancelled {
+        if let Some(program) = missing_program {
+            payload.insert("missing_program".into(), serde_json::Value::String(program));
+        }
+    }
     payload.insert("stdout".into(), serde_json::Value::String(inline.stdout));
     payload.insert(
         "stdout_truncated".into(),
@@ -863,7 +869,7 @@ fn spawn_output_drain(
     combined_file: Option<Arc<Mutex<std::fs::File>>>,
     stdout: bool,
 ) -> std::thread::JoinHandle<()> {
-    std::thread::spawn(move || {
+    harn_parser::runtime_stack::spawn(move || {
         let mut file = std::fs::File::create(path).ok();
         let mut buf = [0_u8; 8192];
         loop {
@@ -902,7 +908,7 @@ fn next_progress_interval(current: Duration, max: Duration) -> Duration {
 }
 
 fn spawn_progress_thread(context: ProgressThreadContext) -> std::thread::JoinHandle<()> {
-    std::thread::spawn(move || {
+    harn_parser::runtime_stack::spawn(move || {
         // Exponential backoff: wait `interval`, emit a snapshot, then double the
         // wait after each snapshot up to `max_interval`. Progress is frequent
         // while the model most wants to know whether the command is moving, and
@@ -1342,7 +1348,7 @@ mod tests {
         let (started_tx, started_rx) = mpsc::sync_channel(1);
         let (snapshot_tx, snapshot_rx) = mpsc::sync_channel(1);
         let waiter_state = state.clone();
-        let waiter = std::thread::spawn(move || {
+        let waiter = harn_parser::runtime_stack::spawn(move || {
             started_tx.send(()).expect("test waiter start receiver");
             snapshot_tx
                 .send(waiter_state.complete_wait())

@@ -20,6 +20,7 @@ fn flags_invalid_structured_output_from_failed_tool_update() {
                 mutation_status: crate::agent_events::ToolMutationStatus::Unknown,
                 changed_paths: None,
                 data: None,
+                health: None,
                 executor: None,
                 parsing: None,
                 raw_input: None,

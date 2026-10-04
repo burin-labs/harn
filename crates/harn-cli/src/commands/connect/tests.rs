@@ -895,7 +895,7 @@ fn github_install_callback_captures_installation_id() {
     let redirect_uri_for_server = redirect_uri;
     let server_ready = Arc::new(Barrier::new(2));
     let client_ready = Arc::clone(&server_ready);
-    let server = thread::spawn(move || {
+    let server = harn_parser::runtime_stack::spawn(move || {
         // The barrier rendezvous happens just before the call into
         // wait_for_github_installation, which immediately calls
         // listener.accept(). The kernel queues a connect() that races
@@ -905,7 +905,7 @@ fn github_install_callback_captures_installation_id() {
         server_ready.wait();
         wait_for_github_installation(listener, &redirect_uri_for_server, Some("state-ok"))
     });
-    let client = thread::spawn(move || {
+    let client = harn_parser::runtime_stack::spawn(move || {
         client_ready.wait();
         let mut stream = TcpStream::connect(("127.0.0.1", port)).expect("connect callback");
         stream
@@ -945,11 +945,11 @@ fn github_install_callback_ignores_invalid_request_before_valid_callback() {
     let redirect_uri_for_server = redirect_uri;
     let server_ready = Arc::new(Barrier::new(2));
     let client_ready = Arc::clone(&server_ready);
-    let server = thread::spawn(move || {
+    let server = harn_parser::runtime_stack::spawn(move || {
         client_ready.wait();
         wait_for_github_installation(listener, &redirect_uri_for_server, Some("state-ok"))
     });
-    let client = thread::spawn(move || {
+    let client = harn_parser::runtime_stack::spawn(move || {
         server_ready.wait();
         let mut invalid =
             TcpStream::connect(("127.0.0.1", port)).expect("connect invalid callback");
@@ -1138,7 +1138,7 @@ where
 {
     let listener = TcpListener::bind(("127.0.0.1", 0)).expect("mock token listener");
     let port = listener.local_addr().unwrap().port();
-    thread::spawn(move || {
+    harn_parser::runtime_stack::spawn(move || {
         let (mut stream, _) = listener.accept().expect("token request");
         let request = read_http_request(&mut stream);
         let body = request.split("\r\n\r\n").nth(1).unwrap_or_default();
@@ -1158,7 +1158,7 @@ fn spawn_dynamic_registration_only_server() -> (String, thread::JoinHandle<()>) 
     let listener = TcpListener::bind(("127.0.0.1", 0)).expect("mock dcr listener");
     let port = listener.local_addr().unwrap().port();
     let base_url = format!("http://127.0.0.1:{port}");
-    let handle = thread::spawn(move || {
+    let handle = harn_parser::runtime_stack::spawn(move || {
         let (mut stream, _) = listener.accept().expect("registration request");
         let request = read_http_request(&mut stream);
         assert!(request.contains("http://127.0.0.1:49152/oauth/callback"));
@@ -1175,7 +1175,7 @@ fn spawn_generic_mcp_oauth_server() -> (String, thread::JoinHandle<()>) {
     let port = listener.local_addr().unwrap().port();
     let base_url = format!("http://127.0.0.1:{port}");
     let server_base_url = base_url.clone();
-    let handle = thread::spawn(move || {
+    let handle = harn_parser::runtime_stack::spawn(move || {
         for _ in 0..4 {
             let (mut stream, _) = listener.accept().expect("oauth request");
             let request = read_http_request(&mut stream);
@@ -1308,11 +1308,23 @@ fn connect_store_follows_the_configured_provider_chain() {
         "HARN_SECRET_FILE_PATH",
         path.to_str().expect("utf-8 temp path"),
     );
-    let writer = store::connect_secret_writer().expect("file persists");
-    assert!(writer
-        .providers()
-        .iter()
-        .any(|provider| provider.persists_writes()));
+    #[cfg(unix)]
+    {
+        let writer = store::connect_secret_writer().expect("file persists");
+        assert!(writer
+            .providers()
+            .iter()
+            .any(|provider| provider.persists_writes()));
+    }
+    // The file provider refuses to call a path private where it cannot check
+    // the file's permissions, so connect must refuse rather than store there.
+    #[cfg(not(unix))]
+    {
+        let Err(error) = store::connect_secret_writer() else {
+            panic!("the file provider must refuse unenforced private storage");
+        };
+        assert!(error.contains("private_file_storage"), "{error}");
+    }
 }
 
 #[test]

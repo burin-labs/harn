@@ -1891,6 +1891,19 @@ frequency_penalty_supported = false
 presence_penalty_supported = false
 stop_supported = false
 
+# Native tool search. OpenRouter forwards function tools but has no Responses
+# skin for OpenAI's `tool_search` meta-tool, so a request carrying one fails
+# with HTTP 400 "unknown tool type "tool_search" requires a matching Responses
+# skin to forward verbatim" (live probe, `openai/gpt-5.4`, 2026-10-03,
+# harn#9338). The routes inherit the claim from the OpenAI family rows; this
+# overlay withdraws it so `tool_search: "auto"` resolves to the client search,
+# which completed on the same probe through `anthropic/claude-sonnet-4.5`.
+[[provider.openrouter]]
+model_match = "openai/gpt-*"
+extends = true
+defer_loading = false
+tool_search = []
+
 # --- source: 20-providers/05-downstream-contributed.toml ---
 # Exact routes contributed from a downstream project's `harn.toml`
 # `[capabilities]` section.
@@ -5542,15 +5555,21 @@ thinking_block_style = "inline"
 #     temperature, top_p, seed -> 200 (dropped there; the endpoint does not
 #     declare them), frequency_penalty and presence_penalty -> 400 "Provider
 #     returned error", although OpenRouter lists both for that endpoint
-# Sampling is honored by 10 of 12 endpoints and silently dropped by the
-# other two, so it is supported. The penalties stay unsupported because the
-# first-party endpoint errors on them.
+# Moonshot AI's two endpoints are the only ones that mishandle these
+# parameters: they drop sampling silently and reject the penalties they list.
+# Routing around them (OpenRouter `provider.ignore`, as the Qwen 3.6 rows do
+# for Ambient) leaves ten endpoints, and with Moonshot ignored and no
+# require_parameters, frequency_penalty, presence_penalty, both together, and
+# temperature each returned 200 in 3 of 3 calls (2026-10-02). Both are then
+# supported, and a one-request option probe can no longer land on the
+# endpoint that disagrees with OpenRouter's own parameter list.
+provider_route_denylist = ["Moonshot AI"]
 reasoning_none_supported = false
 reasoning_disable_supported = false
 temperature_supported = true
 top_p_supported = true
-frequency_penalty_supported = false
-presence_penalty_supported = false
+frequency_penalty_supported = true
+presence_penalty_supported = true
 allowed_tool_choice_modes = ["auto", "none"]
 
 # Kimi K3 on OpenRouter. The K2 rule below does not match it, so without this

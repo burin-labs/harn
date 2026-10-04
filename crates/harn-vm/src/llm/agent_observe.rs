@@ -535,12 +535,14 @@ pub(crate) async fn observed_llm_call(
     // ledger so downstream schema/repair aggregation cannot lose them.
     let mut completed_retry_usage = Vec::new();
     loop {
+        // Network recovery waits share this call's transport budget. A child's
+        // temporary route failure must not terminate a recoverable parent turn.
+        if let Some(timeout) =
+            super::rate_limit::await_network_breaker_for_llm_call(working.as_ref()).await?
+        {
+            working.to_mut().timeout = Some(timeout);
+        }
         let opts: &super::api::LlmCallOptions = working.as_ref();
-        // Network-only circuit breaker: if this route has seen sustained
-        // NetworkError/Timeout failures, fail fast instead of burning the retry
-        // budget against a dead link (laptop disconnect / DNS failure). 429s do
-        // NOT trip this — they are handled by the rate-limiter cooldown below.
-        super::rate_limit::check_network_breaker_for_llm_call(opts)?;
 
         let rate_limit_permit = super::rate_limit::acquire_permit_for_llm_call(opts).await?;
 

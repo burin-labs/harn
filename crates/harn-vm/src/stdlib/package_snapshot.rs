@@ -241,7 +241,7 @@ mod tests {
                 assert!(matches!(receipt, VmValue::Dict(_)));
                 helper_checkpoint("snapshot-open");
 
-                std::thread::spawn(crate::reset_thread_local_state)
+                crate::runtime_stack::spawn(crate::reset_thread_local_state)
                     .join()
                     .unwrap();
                 helper_checkpoint("unrelated-reset");

@@ -40,13 +40,12 @@ fn openrouter_kimi27_code_records_tool_choice_and_sampling_limits() {
     assert_eq!(caps.tool_mode_parity.as_deref(), Some("native_unreliable"));
     assert_eq!(caps.thinking_modes, vec!["enabled"]);
     assert_eq!(caps.allowed_tool_choice_modes, vec!["auto", "none"]);
-    // 2026-10-02 re-probe: 10 of 12 OpenRouter endpoints honor temperature
-    // and top_p and Moonshot's own drops them without error; Moonshot's
-    // endpoint returns 400 for the penalties.
+    // 2026-10-02: the route ignores Moonshot AI's endpoints, which drop
+    // sampling and reject the penalties; the rest forward all four.
     assert!(caps.temperature_supported);
     assert!(caps.top_p_supported);
-    assert!(!caps.frequency_penalty_supported);
-    assert!(!caps.presence_penalty_supported);
+    assert!(caps.frequency_penalty_supported);
+    assert!(caps.presence_penalty_supported);
 
     let prior = lookup("openrouter", "moonshotai/kimi-k2.6");
     assert!(prior.prompt_caching);

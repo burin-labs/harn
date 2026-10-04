@@ -467,6 +467,11 @@ pub(crate) fn transcript_event_from_message(message: &VmValue) -> VmValue {
         // the harness. Keep both event and block visibility internal.
         return transcript_event("message", &role, "internal", &text, None);
     }
+    if role == "assistant" && !crate::llm::assistant_publication::is_visible(message) {
+        // Block visibility must agree with the envelope. Timeline consumers
+        // inspect blocks independently, including multi-tool narration.
+        return transcript_event("message", &role, "internal", &text, None);
+    }
     let visibility = overall_visibility(&blocks, default_visibility_for_role(&role));
     let kind = if matches!(role.as_str(), "tool" | "tool_result") {
         "tool_result"
@@ -828,7 +833,7 @@ pub(crate) fn emit_reminder_lifecycle_event(kind: &str, mut payload: JsonValue) 
     ensure_reminder_correlation(&mut payload);
     let event = LogEvent::new(kind, payload);
     if tokio::runtime::Handle::try_current().is_ok() {
-        if let Ok(join) = std::thread::Builder::new()
+        if let Ok(join) = crate::runtime_stack::builder()
             .name("harn-reminder-event-log".to_string())
             .spawn(move || {
                 let _ = futures::executor::block_on(log.append(&topic, event));

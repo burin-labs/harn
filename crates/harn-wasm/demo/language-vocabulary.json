@@ -441,6 +441,7 @@
     "join",
     "jq",
     "jq_first",
+    "json_decode",
     "json_extract",
     "json_parse",
     "json_pointer",

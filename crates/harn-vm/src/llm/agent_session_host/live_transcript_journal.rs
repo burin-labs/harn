@@ -335,36 +335,84 @@ async fn host_agent_emit_event(
     else {
         return Ok(VmValue::Nil);
     };
-    if let Some(role) = crate::agent_events::AgentEvent::host_transcript_role(event_type.as_str()) {
-        let transcript_event = super::super::helpers::transcript_event(
-            &event_type,
-            role.as_str(),
-            "internal",
-            "",
-            Some(payload),
-        );
-        if crate::agent_sessions::exists(&session_id) {
-            crate::agent_sessions::append_event(&session_id, transcript_event)
-                .map_err(VmError::Runtime)?;
-        }
-    }
-    // A call about to run must be on disk first. Otherwise a process killed
-    // mid-call restores a session with no trace of the call (harn#9061).
-    if matches!(
-        event,
-        crate::agent_events::AgentEvent::ToolCallUpdate {
-            status: crate::agent_events::ToolCallStatus::InProgress,
-            ..
-        }
-    ) {
-        crate::agent_session_journal::flush(&session_id).await?;
-    }
-    crate::llm::agent_runtime::emit_agent_event_with_ctx(Some(&ctx), &event).await;
+    event
+        .publish_host_event(&ctx, &session_id, &event_type, payload)
+        .await?;
     Ok(VmValue::Nil)
 }
 
-const LIVE_TRANSCRIPT_JOURNAL_BUILTINS: &[&VmBuiltinDef] =
-    &[&HOST_AGENT_SESSION_FLUSH_DEF, &HOST_AGENT_EMIT_EVENT_DEF];
+/// Observe a tool outcome through the existing stdlib verification owner.
+/// Generic event ingress cannot supply its own normalized health measurement.
+#[harn_builtin(
+    exposure = "harness.agent.emit_tool_outcome",
+    effects = [],
+    sig = "__host_agent_emit_tool_outcome(session_id: string, payload: dict, envelope: dict, result: dict) -> nil",
+    kind = "async",
+    category = "agent.host"
+)]
+async fn host_agent_emit_tool_outcome(
+    ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
+    let session_id = match args.first() {
+        Some(VmValue::String(value)) if !value.is_empty() => value.to_string(),
+        _ => {
+            return Err(VmError::Runtime(
+                "tool outcome requires a session_id".into(),
+            ))
+        }
+    };
+    let mut payload = super::vm_to_json(args.get(1).unwrap_or(&VmValue::Nil));
+    let Some(mut event) = crate::agent_events::AgentEvent::from_host_payload(
+        &session_id,
+        "tool_call_update",
+        &payload,
+    )?
+    else {
+        return Err(VmError::Runtime(
+            "tool outcome event was not decoded".into(),
+        ));
+    };
+    let mut vm = ctx.child_vm();
+    let agent = vm
+        .harness()
+        .and_then(|root| root.sub_handle("agent"))
+        .map(VmValue::harness)
+        .ok_or_else(|| {
+            VmError::Runtime("tool outcome requires the execution's agent capability".into())
+        })?;
+    let exports = vm
+        .load_module_exports_from_import("std/agent/session_health")
+        .await?;
+    let normalizer = exports
+        .get("__agent_tool_health_telemetry")
+        .ok_or_else(|| VmError::Runtime("stdlib tool outcome normalizer is not exported".into()))?;
+    let normalized = vm
+        .call_closure_pub(
+            normalizer,
+            &[
+                agent,
+                args.get(2).cloned().unwrap_or(VmValue::Nil),
+                args.get(3).cloned().unwrap_or(VmValue::Nil),
+            ],
+        )
+        .await?;
+    let measurement = super::vm_to_json(&normalized);
+    event.attach_normalized_tool_health(measurement.clone())?;
+    // The canonical journal keeps the same normalized measurement as the live
+    // event. It is added only after rejecting generic payload-supplied health.
+    payload["health"] = measurement;
+    event
+        .publish_host_event(&ctx, &session_id, "tool_call_update", payload)
+        .await?;
+    Ok(VmValue::Nil)
+}
+
+const LIVE_TRANSCRIPT_JOURNAL_BUILTINS: &[&VmBuiltinDef] = &[
+    &HOST_AGENT_SESSION_FLUSH_DEF,
+    &HOST_AGENT_EMIT_EVENT_DEF,
+    &HOST_AGENT_EMIT_TOOL_OUTCOME_DEF,
+];
 
 pub(super) fn register_live_transcript_journal_primitives(vm: &mut Vm) {
     register_builtin_defs(vm, LIVE_TRANSCRIPT_JOURNAL_BUILTINS);

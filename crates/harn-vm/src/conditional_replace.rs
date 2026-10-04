@@ -402,7 +402,7 @@ mod tests {
             let barrier = Arc::clone(&barrier);
             let expected = expected.clone();
             let lock_root = Arc::clone(&lock_root);
-            workers.push(std::thread::spawn(move || {
+            workers.push(crate::runtime_stack::spawn(move || {
                 let _locks = scope_conditional_replace_lock_root(lock_root.as_ref());
                 let payload = format!("writer-{index}");
                 let options = ConditionalReplaceOptions {

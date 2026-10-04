@@ -1079,7 +1079,7 @@ pub(super) async fn host_agent_dispatch_tool_call(
         }
     }
 
-    let mut approval = crate::orchestration::current_approval_policy().map(|policy| {
+    let mut approval = crate::orchestration::current_run_approval_policy().map(|policy| {
         let repeat_count = crate::orchestration::next_approval_policy_repeat_count(
             &session_id,
             &tool_name,
@@ -1147,10 +1147,15 @@ pub(super) async fn host_agent_dispatch_tool_call(
             record_allowed_dispatch(&session_id, &tool_id, &tool_name, &tool_args, &decision);
         }
         Some(decision) if decision.is_deny() => {
+            let unavailable = decision.is_approval_unavailable();
             emit_runtime_denied_activity(&session_id, &tool_id, &tool_name, &decision);
             // No gate is named here on purpose: the decision carries the one
             // its deciding rule chose. See `PolicyEvaluation::terminal_denial`.
-            let denial = decision.terminal_denial();
+            let denial = if unavailable {
+                decision.approval_unavailable_denial(&session_id, decision.reason.clone())
+            } else {
+                decision.terminal_denial()
+            };
             return Ok(deny_tool_call_value(
                 Some(&ctx),
                 &session_id,
@@ -1244,21 +1249,14 @@ pub(super) async fn host_agent_dispatch_tool_call(
                         &tool_name,
                         &decision,
                     );
-                    let (denial_class, repeat_count) =
-                        crate::orchestration::next_approval_unavailable_class_repeat_count(
-                            &session_id,
-                            &decision.risk_labels,
-                        );
-                    let denial = crate::agent_events::ToolDenial::terminal(
-                        crate::agent_events::DenialGate::ApprovalUnavailable,
-                        None,
+                    let denial = decision.approval_unavailable_denial(
+                        &session_id,
                         if no_host_bridge {
                             "approval required but no host bridge is available"
                         } else {
                             "approval request failed or host does not implement session/request_permission"
                         },
-                    )
-                    .with_denial_class(denial_class, repeat_count);
+                    );
                     return Ok(deny_tool_call_value(
                         Some(&ctx),
                         &session_id,

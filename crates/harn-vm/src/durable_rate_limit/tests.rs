@@ -189,7 +189,7 @@ fn concurrent_threads_do_not_over_reserve_shared_bucket() {
         let path = path.clone();
         let buckets = buckets.clone();
         let barrier = barrier.clone();
-        handles.push(std::thread::spawn(move || {
+        handles.push(crate::runtime_stack::spawn(move || {
             barrier.wait();
             try_reserve_once(&path, &buckets, 1_000).expect("reserve")
         }));
@@ -358,7 +358,7 @@ fn transient_sqlite_write_lock_retries_instead_of_erroring() {
     let path_for_thread = path.clone();
     let buckets = vec![bucket("provider:rpm", 1, 1, 60_000)];
     let (busy_tx, busy_rx) = mpsc::channel();
-    let handle = std::thread::spawn(move || {
+    let handle = crate::runtime_stack::spawn(move || {
         try_reserve_once_with_options(
             &path_for_thread,
             &buckets,
@@ -518,9 +518,8 @@ pipeline main(harness: Harness, task: unknown) {
         let source = source.clone();
         let barrier = barrier.clone();
         handles.push(
-            std::thread::Builder::new()
+            crate::runtime_stack::builder()
                 .name("durable-rate-limit-probe".to_string())
-                .stack_size(crate::RUNTIME_STACK_SIZE)
                 .spawn(move || {
                     let runtime = tokio::runtime::Builder::new_current_thread()
                         .enable_time()

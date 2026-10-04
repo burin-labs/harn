@@ -177,7 +177,7 @@ jobs:
             harn-vm) scope_args=(-p harn-vm --lib --tests) ;;
             *) scope_args=(-p harn-cli --test harn_cli_fast --features internal-freshness-checker) ;;
           esac
-          cargo nextest run --locked "${scope_args[@]}" \
+          cargo-nextest nextest run --locked "${scope_args[@]}" \
             --profile ci \
             --success-output "${NEXTEST_SUCCESS_OUTPUT}" \
             -E "${NEXTEST_FILTER}" --no-tests=fail 2>&1 | tee "${log}"

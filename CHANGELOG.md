@@ -9,6 +9,237 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.157
+
+### Breaking
+
+- **Declared exception provenance (#7782).** Typed tool errors now require a
+  source-authored throw in a callable with `throws E`. Legacy dependency throws
+  remain runtime failures even when their values match the tool's error schema.
+  Automatic cleanup and retry rethrows preserve the original error channel,
+  including scalar errors and nested catches.
+
+  Migration: portable program artifacts use version 5 for the new exception
+  opcodes. Recompile older artifacts. Rust compiler entry points now accept the
+  callable's optional declared throws type. Rust embedders matching `VmError`
+  must handle `DeclaredThrown` separately from legacy `Thrown`; only the declared
+  variant is eligible for application-error schema validation.
+- **Missing-command evidence (#8932).** Command results identify statically
+  missing programs with `missing_program`, including shell commands, environment
+  prefixes, and relative paths. The opt-in `auto` mode runs plain POSIX commands
+  as argv and preserves shell execution when shell syntax is needed.
+
+  Migration: Rust embedders constructing `HostlibError::ProcessSpawn` must supply
+  `missing_program: None`, or `Some(program.into())` when the executable is proven
+  absent. Matches listing every field must include `missing_program` or `..`.
+- Agent events now carry typed session health facts and optional tool outcome
+  telemetry. Payloads are boxed so observations do not enlarge every event's
+  native stack footprint. The serialized event contract remains generated from
+  the owning types.
+
+  Migration: Rust consumers constructing `AgentEvent::ToolCallUpdate` must supply
+  `health: None` when no telemetry is measured, or `Some(Box::new(telemetry))`.
+  Exhaustive `AgentEvent` matches must handle `SessionHealth { session_id, fact }`;
+  the fact is a boxed `SessionHealthFact`. Wire consumers may accept the new
+  `session_health` event and optional `health` field through regenerated bindings.
+- Eval reports now preserve measured cost and known subtotals through coding-agent
+  results, generic live execution, saved trial rows, and statistics. Unknown total
+  cost stays unknown; coding-agent reports no longer reprice aggregate tokens.
+
+  Migration: consumers of eval trial, live verification, statistics, and ledger
+  cost fields must handle `Option<f64>` and JSON null as unknown. Use
+  `known_cost_usd` for the measured lower bound rather than replacing unknown
+  totals with zero. Ledger writes use `harn.eval.ledger.row.v2`; retain older
+  ledgers separately and start a v2 ledger, because v1 rows are explicitly refused.
+- **`harn_cli::cli::PrecompileArgs` gains a `jobs: Option<u32>` field for
+  `harn precompile --jobs`.** A struct literal that builds the arguments in
+  Rust no longer compiles without it.
+
+  Migration: add `jobs: None` to every `PrecompileArgs { .. }` literal. `None`
+  keeps the default bound, the machine's available parallelism.
+
+  ```rust
+  PrecompileArgs { target, artifact_contract: false, relocatable: false, out: None, keep_going: false, quiet: true }             // before
+  PrecompileArgs { target, artifact_contract: false, relocatable: false, out: None, keep_going: false, quiet: true, jobs: None } // after
+  ```
+- **Typed inference refusals expose their local authority (#9296).**
+  `LlmErrorReason` adds `PolicyDenied`; `AcpPromptFailureFacts` adds `origin`
+  and `rule` so hosts can distinguish a local policy refusal from a provider
+  failure.
+
+  Migration: update `AcpPromptFailureFacts` struct literals with
+  `origin: None` and `rule: None` when no local authority applies. Regenerate
+  vendored protocol bindings with `harn dump-protocol-artifacts`; handle
+  `policy_denied` as a non-retryable local refusal rather than matching text.
+  Exhaustive Rust matches on `LlmErrorReason` must handle `PolicyDenied`.
+
+### Added
+
+- Agent sessions emit versioned health facts with turn and rolling tool outcomes,
+  command exits, edit and verification progress, diagnostic trends, timing,
+  prose counts, and terminal classification. Missing measurements remain distinct
+  from measured zero; health facts do not change loop policy.
+- `harn provider admission --request '<JSON>'` previews a concrete chat route as
+  admitted, denied, or unknown under the effective inference boundary. The preview
+  uses Harn's enforcement rules without provider I/O or credential resolution;
+  generated host records come from the owning request and snapshot schemas.
+- `harn precompile <dir>` compiles sources concurrently, up to `-j`/`--jobs N`
+  at once (default: the machine's available parallelism). Per-file lines,
+  failures, the summary, the exit status, and `--keep-going` behave exactly as
+  the serial walk did, in sorted source order.
+
+### Fixed
+
+- **Failed post-release development bumps have an explicit repair entry point (#8380).** Promotion and manual repair use
+  the same workflow and opener. Publication must be proved before the release App can open or queue the cutover.
+- Session metadata notifications no longer repeat a rename when the database
+  watcher reaches a local commit before its callback. Changes to usage, model,
+  and other metadata still publish when the title stays the same.
+- **Prepared releases retain their signed candidate identity (#9225).** The release opener records an immutable attempt
+  before queueing. Later changelog fragments wait for the next release without replacing the candidate or restarting its
+  checks.
+- Provider option probes retry a rate-limited request once after the runtime's
+  bounded retry hint, falling back to one second. Provider deadlines beyond the
+  runtime's minute cap decline recovery. Persistent limits remain
+  unmeasured, with physical request accounting preserved.
+- Registered runtime hooks can call advertised host operations under an agent's restricted tool ceiling.
+  Ordinary tool calls remain ceiling-checked, and tool handlers cannot acquire hook authority.
+- CI runs the installed nextest directly so an older Cargo cache binary cannot override the pinned test runner.
+- JSON tool-call instructions now teach the required opening line for verbatim
+  bodies. Parser repair messages use that same contract, preserving strict body
+  binding and literal code content.
+- Inference refusals retain a typed, non-retryable `policy_denied` reason and the
+  local governing rule through chat, streaming, and completion errors. Provider
+  responses cannot claim this locally owned reason.
+- Pre-push signature checks now inspect every ref being pushed, deduplicate shared commits, and exclude freshly
+  advertised destination history instead of using the checked-out branch's stale upstream.
+- Relocatable bytecode keys (`harn precompile` output and adjacent artifacts)
+  now name a package file by its place in the packages tree instead of by a
+  path through the install's generation id. Reinstalling identical packages no
+  longer invalidates prepared bytecode for every source that imports a
+  package; changed package content still does.
+- Automatically attempt an owed post-release development cutover once, using
+  the existing repair workflow and a durable reservation before dispatch.
+
+## v0.10.156
+
+### Breaking
+
+- **`CodeIndexCapability::warm_session` restores the on-disk snapshot on the
+  background warm thread and returns `Building` at once.** A stale snapshot on
+  a large repository no longer blocks the embedder's session start for
+  minutes. `SessionWarmOutcome::Restored` is removed because the restore never
+  completes before the call returns.
+
+  Migration: replace a match on `SessionWarmOutcome::Restored` with
+  `SessionWarmOutcome::Building`, and call `wait_until_idle()` when the code
+  needs the restored index before continuing.
+
+### Added
+
+- `harness.code_index.module_graph` rolls the workspace import graph up from
+  files to directories or modules in one deterministic call, and
+  `std/code_librarian` adds `code_librarian_module_graph` plus a pure
+  `architecture_graph_diff` that compares the graph with a target architecture
+  of required, allowed, and forbidden dependencies (#9281).
+
+### Fixed
+
+- Declared host operations can carry explicit `optional: true` metadata.
+  Static and ACP reconciliation keep these operations known without warning
+  that an optional callback is absent; missing required operations still warn or fail closed.
+
+## v0.10.155
+
+### Breaking
+
+- **Shared run-approval evaluation (#7610).** Live tool dispatch and prepared
+  runs now share the typed evaluator. Unavailable approvals fail closed while
+  explicit grants, denials, automatic review, and worker scope inheritance retain
+  their policy meaning.
+
+  Migration: for Rust embedders, `RunApprovalPolicy::effective()` now returns the
+  typed evaluator rather than a detached `ToolApprovalPolicy`. Use `declared()`
+  to copy configuration and `current_run_approval_policy()` for live decisions.
+- Agent dispatch checks a handler envelope's `data` against the tool's declared
+  `returns` schema, matching CLI and MCP validation. Rendered `text` remains
+  separate from the validated payload.
+
+  Migration: replace schemas describing rendered text with schemas describing
+  `data`. For example, a handler returning
+  `agent_tool_handler_result("Done", {count: 1})` needs an object schema rather
+  than `returns: {type: "string"}`. Omit `returns` when the data is freeform.
+- Provider catalogs can declare `credential_env`: the environment names a
+  platform credential chain reads besides the provider's key. Bedrock now
+  declares its AWS credential variables (`AWS_ACCESS_KEY_ID`,
+  `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`, `AWS_SECURITY_TOKEN`,
+  `AWS_PROFILE`, `AWS_CONTAINER_AUTHORIZATION_TOKEN`). Like `auth_env`, these
+  names are withheld from every spawned child under the `inherited` policy and
+  can never be allowlisted. Catalog validation now rejects a provider that
+  requires auth but declares no credential names. Before this, Bedrock passed
+  through an exemption for its auth style.
+
+  Migration: under the `inherited` policy, a command that relied on inheriting
+  `AWS_PROFILE` or AWS keys must now pass them in its own `env`. Rust code that
+  builds `harn_provider_catalog::ProviderAuth` or `harn_vm::llm_config::ProviderDef`
+  with a struct literal must set the new `credential_env` field, for example
+  `credential_env: Vec::new()`, or finish the literal with `..Default::default()`
+  for `ProviderDef`.
+
+### Added
+
+- Host requests now carry the calling Harn module and function, argument key
+  names and types, and list lengths through the embedder bridge and ACP
+  `_meta.harn.requestTrace`. Argument values remain excluded from this trace.
+- An ACP server can confine its own process with Harn's OS sandbox before it serves. Use
+  `harn serve acp --confine-workspace <path>`, or `harn_serve::confine_acp_server_process` from an embedder. The kernel
+  then holds the server, and the commands it runs, to the profile a confined command gets.
+  `harn_vm::process_sandbox::confine_current_process` is the underlying primitive, and `initialize` reports the state
+  in `agentCapabilities._meta.harn.processConfinement`. The sandboxing guide covers what children inherit on each
+  platform.
+- Hosts can bound blocking process setup with `op_interrupt::with_deadline` while preserving parent cancellation and
+  earlier deadlines.
+
+### Changed
+
+- Main source candidates are built daily through the existing signed release
+  producer. The producer reuses a candidate only while its complete artifact set
+  remains available and unexpired.
+- OpenRouter Kimi K2.7 Code no longer routes to Moonshot AI's own endpoints, which drop temperature, top_p,
+  and seed and reject the frequency and presence penalties they advertise. The route now forwards all
+  four options.
+
+### Fixed
+
+- The postfix `?` operator now runs pending `finally` blocks, `defer` blocks, and
+  `owned<T>` drops before it returns `Result.Err(...)` early, the same as an
+  explicit `return`. Previously the early return skipped that cleanup.
+- Linux hosts without Landlock that export glibc allocator tuning such as `MALLOC_ARENA_MAX` (Heroku's default, and
+  common in container images) no longer have every sandboxed command refused. Bubblewrap launches keep the allocator
+  sizing knobs out of the sandbox setup and re-apply them to the confined command. `LD_*`, `GLIBC_TUNABLES`,
+  `MALLOC_CHECK_`, and `MALLOC_PERTURB_` are still refused.
+- Keep shell-guard decision-file cleanup in the adapter process so a watchdog exit cannot erase a decision before it is read.
+- CI latency reports apply the declared topology date to GitHub's run query,
+  preventing historical results from hiding current full acceptance runs.
+- Provider contract campaigns include requests refused by account privacy policy in spend accounting, so executed
+  exclusions no longer produce a negative unaccounted-request count.
+- Fireworks `nemotron-lightning-3p5-30b-a3b` is now catalogued as
+  dedicated-only. Fireworks still lists it as serverless, but serverless chat
+  requests to it return nothing for 150 seconds or more, so equivalent-model
+  substitution no longer picks it and the provider contract campaign no longer
+  counts its timeouts as unmeasured options. The NVIDIA route for the same model
+  is unchanged.
+- Every thread Harn creates in a crate that can parse or run Harn code now gets
+  the runtime stack (32 MiB) from one owner, `harn_parser::runtime_stack`
+  (re-exported as `harn_vm::runtime_stack`), instead of Rust's 2 MiB default.
+  The check driver's parallel parse workers, the stdlib warm, I/O helpers, and
+  test threads previously relied on `RUST_MIN_STACK`, which CI sets and shipped
+  binaries do not. A workspace scan now refuses any other way to create a
+  thread in those crates.
+- `harn serve` on Windows no longer overflows the 1 MiB main-thread stack
+  before it answers: the CLI recognizes serve transports on its sized runtime
+  thread, and `harn.exe` links an 8 MiB main-thread stack to match Unix.
+
 ## v0.10.154
 
 ### Breaking

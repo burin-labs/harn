@@ -1,10 +1,12 @@
 //! Non-blocking session warm for the code index.
 //!
 //! Embedders call [`CodeIndexCapability::warm_session`] at session start so a
-//! cold workspace can restore a snapshot or begin a background rebuild without
-//! stalling the model's first turn. Sync [`hostlib_code_index_rebuild`] joins
-//! the same single-flight gate so `ensure_initialised` does not start a second
-//! full walk while the warm is still running. Once the slot is live, a later
+//! workspace can restore a snapshot or rebuild in the background without
+//! stalling the model's first turn. Both paths run on the warm thread: a stale
+//! snapshot's reconcile can cost as much as a cold build on a large repo. Sync
+//! [`hostlib_code_index_rebuild`] joins the same single-flight gate so
+//! `ensure_initialised` does not start a second full walk while the warm is
+//! still running. Once the slot is live, a later
 //! sync rebuild still re-walks disk — join only applies to an in-flight build.
 
 use std::path::{Path, PathBuf};
@@ -26,9 +28,8 @@ use crate::HarnReferenceResolver;
 pub enum SessionWarmOutcome {
     /// In-memory index was already populated.
     AlreadyLive,
-    /// Snapshot restore succeeded; the index is live now.
-    Restored,
-    /// A background rebuild is in flight (started now or already running).
+    /// A background restore or rebuild is in flight (started now or already
+    /// running).
     Building,
     /// The background thread could not be spawned; callers may sync-rebuild.
     SpawnFailed,
@@ -196,16 +197,17 @@ fn emit_wait_progress(root: &Path, waited: Duration) {
 }
 
 impl CodeIndexCapability {
-    /// Warm the shared index for `workspace_root` without blocking on a full
-    /// cold rebuild.
+    /// Warm the shared index for `workspace_root` without blocking the
+    /// caller on disk or parse work.
     ///
-    /// Order:
-    /// 1. If the in-memory slot is already populated, return
-    ///    [`SessionWarmOutcome::AlreadyLive`].
-    /// 2. Try [`Self::restore_from_disk`].
-    /// 3. Otherwise start (or join) a single-flight background
-    ///    [`IndexState::build_from_root`], install it into the shared slot, and
-    ///    [`Self::persist_to_disk`].
+    /// If the in-memory slot is already populated, returns
+    /// [`SessionWarmOutcome::AlreadyLive`]. Otherwise starts (or joins) a
+    /// single-flight background flight that tries [`Self::restore_from_disk`]
+    /// and, when no usable snapshot exists, runs
+    /// [`IndexState::build_from_root`], installs it into the shared slot, and
+    /// persists it. Restore stays off the caller's thread because reconciling
+    /// a stale snapshot refreshes every changed file and rebuilds its call
+    /// graph, which takes minutes on a large repo (harn#9272).
     ///
     /// Sync `hostlib_code_index_rebuild` joins the same gate, so a reader that
     /// calls `ensure_initialised` while the warm is running waits for the
@@ -219,19 +221,6 @@ impl CodeIndexCapability {
             }
         }
 
-        match self.restore_from_disk(&root) {
-            Ok(true) => return SessionWarmOutcome::Restored,
-            Ok(false) => {}
-            Err(error) => {
-                tracing::debug!(
-                    target: "harn_hostlib::code_index",
-                    %error,
-                    root = %root.display(),
-                    "code-index snapshot restore failed; falling back to background rebuild",
-                );
-            }
-        }
-
         let Some(flight) = self.warm.try_begin(&root) else {
             return SessionWarmOutcome::Building;
         };
@@ -239,12 +228,32 @@ impl CodeIndexCapability {
         let index = self.index.clone();
         let resolver = self.harn_reference_resolver.clone();
         let thread_root = root.clone();
-        match thread::Builder::new()
+        match harn_parser::runtime_stack::builder()
             .name("harn-code-index-warm".to_string())
             .spawn(move || {
                 let _flight = flight;
                 lower_to_background_priority();
                 let started = Instant::now();
+                match super::restore_shared(&index, resolver.as_ref(), &thread_root) {
+                    Ok(true) => {
+                        tracing::info!(
+                            target: "harn_hostlib::code_index",
+                            root = %thread_root.display(),
+                            elapsed_ms = started.elapsed().as_millis() as u64,
+                            "code-index background restore complete",
+                        );
+                        return;
+                    }
+                    Ok(false) => {}
+                    Err(error) => {
+                        tracing::debug!(
+                            target: "harn_hostlib::code_index",
+                            %error,
+                            root = %thread_root.display(),
+                            "code-index snapshot restore failed; falling back to rebuild",
+                        );
+                    }
+                }
                 let (mut state, outcome) = IndexState::build_from_root(&thread_root);
                 state.relink_harn_references(resolver.as_ref());
                 {
@@ -549,7 +558,7 @@ mod tests {
     #[cfg(target_os = "linux")]
     #[test]
     fn the_warm_thread_runs_below_normal_priority() {
-        let nice = std::thread::spawn(|| {
+        let nice = harn_parser::runtime_stack::spawn(|| {
             super::lower_to_background_priority();
             // SAFETY: reads the calling thread's own nice value.
             unsafe {
@@ -606,10 +615,45 @@ mod tests {
         seed.persist_to_disk().unwrap();
 
         let cold = CodeIndexCapability::new();
-        assert_eq!(cold.warm_session(dir.path()), SessionWarmOutcome::Restored);
+        assert_eq!(cold.warm_session(dir.path()), SessionWarmOutcome::Building);
+        cold.wait_until_idle();
         let shared = cold.shared();
         let guard = shared.lock().unwrap();
         assert_eq!(guard.as_ref().map(|s| s.files.len()), Some(2));
+    }
+
+    /// harn#9272: a stale snapshot used to be reconciled on the caller's
+    /// thread, so the session's first prompt waited minutes for the refresh.
+    /// The warm must hand back `Building` before any snapshot work, then
+    /// install and persist the reconciled index from the background flight.
+    #[test]
+    fn warm_session_reconciles_stale_snapshot_off_the_caller_thread() {
+        let dir = fixture_tree();
+        let (state, _) = IndexState::build_from_root(dir.path());
+        let mut snap = state.snapshot();
+        snap.meta.git_head = Some("ffffffffffffffff".to_string());
+        snap.save(dir.path()).unwrap();
+        fs::write(
+            dir.path().join("src/gamma.rs"),
+            "pub fn gamma() -> i32 { 3 }\n",
+        )
+        .unwrap();
+
+        let cap = CodeIndexCapability::new();
+        assert_eq!(cap.warm_session(dir.path()), SessionWarmOutcome::Building);
+        cap.wait_until_idle();
+
+        let shared = cap.shared();
+        let guard = shared.lock().unwrap();
+        assert_eq!(guard.as_ref().map(|s| s.files.len()), Some(3));
+        drop(guard);
+        let persisted = CodeIndexSnapshot::load(dir.path())
+            .unwrap()
+            .expect("reconciled snapshot");
+        assert_eq!(
+            persisted.meta.file_count, 3,
+            "the background restore must persist the reconciled index"
+        );
     }
 
     #[test]

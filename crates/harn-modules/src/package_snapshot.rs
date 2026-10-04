@@ -411,6 +411,29 @@ pub fn generation_root(project_root: &Path, generation: &str) -> PathBuf {
     package_generations_dir(project_root).join(generation)
 }
 
+/// The location of `path` inside a published generation's packages tree:
+/// `<project>/.harn/package-generations/<id>/packages/<rest>` yields `<rest>`.
+///
+/// Every install publishes a freshly minted generation id, so an identity that
+/// must survive reinstalling identical package bytes names a package file by
+/// this location rather than by a path that runs through the id.
+pub fn path_within_package_generation(path: &Path) -> Option<PathBuf> {
+    let components = path.components().collect::<Vec<_>>();
+    let layout = [PACKAGE_STATE_DIR, PACKAGE_GENERATIONS_DIR];
+    let start = components.windows(4).rposition(|window| {
+        window[0].as_os_str() == layout[0]
+            && window[1].as_os_str() == layout[1]
+            && matches!(window[2], Component::Normal(id)
+                if id.to_str().is_some_and(|id| validate_generation_id(id).is_ok()))
+            && window[3].as_os_str() == GENERATION_PACKAGES_DIR
+    })?;
+    let rest = &components[start + 4..];
+    if rest.is_empty() || !rest.iter().all(|c| matches!(c, Component::Normal(_))) {
+        return None;
+    }
+    Some(rest.iter().collect())
+}
+
 pub fn open_lock_file(path: &Path) -> Result<File, PackageSnapshotError> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
@@ -627,7 +650,7 @@ mod tests {
         let started = Arc::new(Barrier::new(2));
         let reader_started = Arc::clone(&started);
         let reader_root = root.clone();
-        let reader = std::thread::spawn(move || {
+        let reader = harn_parser::runtime_stack::spawn(move || {
             reader_started.wait();
             PackageSnapshot::acquire(&reader_root).unwrap().unwrap()
         });

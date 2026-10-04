@@ -1600,6 +1600,22 @@ the spawn was attempted. A missing executable has `kind: "not_found"` in both
 sandboxed and unsandboxed execution. Other spawn failures and ordinary nonzero
 exit results remain distinct.
 
+For a verification command supplied as text, pass
+`{mode: "auto", command: "cargo test"}`. A plain POSIX external command runs
+as argv. Pipes, redirects, environment prefixes, expansions, shell builtins,
+and other shell dialects retain shell execution. Explicit `argv` and `shell`
+modes keep their existing behavior.
+
+An absent executable adds `missing_program` to the typed spawn error. Shell
+results expose the same field when the first program was absent before spawn
+and the shell exits normally with code 127. Lookup uses the child's directory
+and final `PATH`, including static environment prefixes such as `env VAR=1`.
+An installed program that exits 127 doesn't receive this field. Dynamic program
+names, zsh startup, login or interactive shells, configured shell startup files,
+imported shell functions, and unknown search paths omit the field
+because pre-spawn lookup cannot establish absence. Callers don't need to parse
+stderr to use this evidence.
+
 `CommandResult` names the common normalized result fields,
 `CommandOutputMatch` names the matched range and latest command state, and
 `CommandStepReceipt` names the portable command-step fields used by durable

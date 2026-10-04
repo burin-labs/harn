@@ -932,6 +932,16 @@ base_url = "https://bedrock-runtime.{region}.amazonaws.com"
 base_url_env = "BEDROCK_BASE_URL"
 auth_style = "aws_sigv4"
 credential_resolution = "platform_managed"
+# The AWS credential chain's secret-bearing variables, plus the profile that
+# selects stored credentials. Declared so no child process inherits them.
+credential_env = [
+  "AWS_ACCESS_KEY_ID",
+  "AWS_SECRET_ACCESS_KEY",
+  "AWS_SESSION_TOKEN",
+  "AWS_SECURITY_TOKEN",
+  "AWS_PROFILE",
+  "AWS_CONTAINER_AUTHORIZATION_TOKEN",
+]
 chat_endpoint = "/model/{model}/converse"
 features = ["native_tools"]
 latency_p50_ms = 2600

@@ -1769,7 +1769,8 @@ defer {
 ```
 
 Registers a block to run when the enclosing lexical scope exits — on normal
-fallthrough, on `return`, on `break` / `continue` out of an enclosing loop,
+fallthrough, on `return` (including the early return of a postfix `?`), on
+`break` / `continue` out of an enclosing loop,
 or on an error leaving the scope, including one raised by a called function
 or a failing operation. Multiple `defer` blocks in the same scope execute
 in LIFO (last-registered, first-executed) order, similar to Zig's `defer`.
@@ -3170,8 +3171,10 @@ zero. The block runs exactly once and the original error then continues to
 propagate. A `throw` from the finally block replaces the original error, and a
 `return` from it discards the original error.
 
-`return`, `break`, and `continue` inside a try body with a finally block will
-execute the finally block before the control flow transfer completes.
+`return`, `break`, `continue`, and the early return of a postfix `?` inside a
+try body with a finally block will execute the finally block before the
+control flow transfer completes. A `throw` from that finally block replaces the
+transfer, and a `return` from it replaces the returned value.
 
 The finally block's return value is discarded — the overall expression value
 comes from the try or catch body.
@@ -5332,8 +5335,12 @@ wrappers pick up the same narrowing.
   is true for either success; `repair_tier` is `"local"` or `"llm"`
   when a repair produced the payload and `nil` otherwise. Transport
   failures skip both repair tiers.
-- `schema_parse<T>(value: unknown, schema: Schema<T>) -> Result<T, string>`
-- `schema_check<T>(value: unknown, schema: Schema<T>) -> Result<T, string>`
+- `schema_parse<T>(value: unknown, schema: Schema<T>) -> Result<T, SchemaError>`
+- `schema_check<T>(value: unknown, schema: Schema<T>) -> Result<T, SchemaError>`
+- `json_decode<T>(text: string, schema: Schema<T>) -> Result<T, SchemaError>`.
+  Parses and validates in one step; malformed JSON is an `Err`.
+  `SchemaError` is `{message: string, errors: list<string>, issues:
+  list<{path: string, message: string, code: string}>, value?: any}`.
 - `schema_expect<T>(value: unknown, schema: Schema<T>) -> T`
 - `schema_recover<T>(text: string, schema: Schema<T>, options?:
   {repair?: bool | dict, apply_defaults?: bool,
@@ -7309,6 +7316,13 @@ workspace = ["read_text", "write_text"]
   When present, `harn check` fails with `HARN-CAP-008` for each declared
   operation missing from the served list. The check ignores built-in preflight
   defaults because the project did not declare them.
+- An operation metadata entry may declare `"optional": true`, for example
+  `{"runtime":{"operations":{"report":{"optional":true}}}}`.
+  Optional operations remain known to static checking but need not be served
+  by every host. Their absence produces no `HARN-CAP-008` finding, including
+  under strict ACP reconciliation. This declaration does not install a handler
+  or advertise the operation as served; callers must check `host.has` before
+  invoking it. The `optional` value must be a boolean.
 - `runtime_installed_host_operations` lists exact `capability.operation` pairs
   whose handlers are added at runtime. The static check skips these operations.
   Wildcards and malformed names are not allowed.

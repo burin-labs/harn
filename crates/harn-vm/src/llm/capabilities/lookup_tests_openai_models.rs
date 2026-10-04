@@ -356,3 +356,25 @@ fn cerebras_inherits_openai_family() {
     assert!(caps.native_tools);
     assert_eq!(caps.preferred_tool_format.as_deref(), Some("native"));
 }
+
+/// harn#9338: OpenRouter has no Responses skin for OpenAI's `tool_search`
+/// meta-tool and 400s it, so its OpenAI routes must not claim native search.
+/// Direct OpenAI is the control: it keeps the claim the overlay withdraws.
+#[test]
+fn openrouter_openai_routes_do_not_claim_native_tool_search() {
+    reset();
+    for model in ["openai/gpt-5.4", "openai/gpt-6-sol", "openai/gpt-6.1-sol"] {
+        let caps = lookup("openrouter", model);
+        assert!(
+            !caps.defer_loading,
+            "{model} claims defer_loading on OpenRouter"
+        );
+        assert!(
+            caps.tool_search.is_empty(),
+            "{model} claims native tool search on OpenRouter"
+        );
+    }
+    let direct = lookup("openai", "gpt-6-sol");
+    assert!(direct.defer_loading);
+    assert_eq!(direct.tool_search, vec!["hosted", "client"]);
+}

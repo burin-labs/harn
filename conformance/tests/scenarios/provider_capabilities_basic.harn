@@ -142,13 +142,12 @@ pipeline test(harness: Harness, task: unknown) {
   assert(kimi27.thinking_modes[0] == "enabled", "Kimi K2.7 Code always thinks")
   assert(kimi27.allowed_tool_choice_modes[0] == "auto", "Kimi K2.7 Code allows auto tool choice")
   assert(kimi27.allowed_tool_choice_modes[1] == "none", "Kimi K2.7 Code allows none tool choice")
-  // 2026-10-02: most OpenRouter endpoints honor temperature and top_p, and
-  // Moonshot's own drops them without error; Moonshot's endpoint rejects the
-  // penalties with 400.
+  // 2026-10-02: the route ignores Moonshot AI's endpoints, the only ones that
+  // drop sampling or reject the penalties, so all four are forwarded.
   assert(kimi27.temperature_supported, "Kimi K2.7 Code forwards temperature")
   assert(kimi27.top_p_supported, "Kimi K2.7 Code forwards top_p")
-  assert(!kimi27.frequency_penalty_supported, "Kimi K2.7 Code has fixed penalties")
-  assert(!kimi27.presence_penalty_supported, "Kimi K2.7 Code has fixed penalties")
+  assert(kimi27.frequency_penalty_supported, "Kimi K2.7 Code forwards frequency_penalty")
+  assert(kimi27.presence_penalty_supported, "Kimi K2.7 Code forwards presence_penalty")
   const qwen37_plus = harness.llm.provider_capabilities("openrouter", "qwen/qwen3.7-plus")
   assert(qwen37_plus.native_tools, "OpenRouter Qwen3.7 Plus exposes native tools")
   assert(qwen37_plus.prompt_caching, "OpenRouter Qwen3.7 Plus exposes prompt caching")

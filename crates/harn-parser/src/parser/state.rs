@@ -7,21 +7,6 @@ use super::error::ParserError;
 /// with a "nesting depth exceeded" error.
 pub const MAX_NESTING_DEPTH: usize = 64;
 
-/// Native stack a thread needs to parse any source the parser accepts.
-///
-/// The parser recurses once per nesting level, and an unoptimized build spends
-/// about 140 KiB of stack on each level of nested expressions. Rust's 2 MiB
-/// default thread stack is exhausted after about a dozen levels, long before
-/// [`MAX_NESTING_DEPTH`] refuses the source, and a stack overflow aborts the
-/// whole process rather than failing one parse. Any thread that runs the parser
-/// and was not created with at least this much stack must ask for it, as
-/// `harn_modules`' parallel module loader does.
-///
-/// The size follows the refusal, not the typical program: the parser must be
-/// able to reach [`MAX_NESTING_DEPTH`] and report it. `RUST_MIN_STACK` does
-/// not substitute: CI test lanes export it and no shipped binary does.
-pub const PARSE_STACK_SIZE: usize = 16 * 1024 * 1024;
-
 /// Recursive descent parser for Harn.
 pub struct Parser {
     pub(super) tokens: Vec<Token>,

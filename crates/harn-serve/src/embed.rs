@@ -95,20 +95,22 @@ impl EmbeddedAgent {
         let handle = AcpChannelHandle::default();
         let worker_handle = handle.clone();
 
-        let thread = crate::vm_thread::spawn(thread_name, move || {
-            let runtime = tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .expect("EmbeddedAgent: build current-thread tokio runtime");
-            let server_future = run_acp_channel_server_with_existing_handle(
-                config,
-                request_rx,
-                response_tx,
-                worker_handle,
-            );
-            runtime.block_on(server_future);
-        })
-        .expect("EmbeddedAgent: spawn ACP worker thread");
+        let thread = harn_parser::runtime_stack::builder()
+            .name(thread_name.into())
+            .spawn(move || {
+                let runtime = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .expect("EmbeddedAgent: build current-thread tokio runtime");
+                let server_future = run_acp_channel_server_with_existing_handle(
+                    config,
+                    request_rx,
+                    response_tx,
+                    worker_handle,
+                );
+                runtime.block_on(server_future);
+            })
+            .expect("EmbeddedAgent: spawn ACP worker thread");
 
         Self {
             request_tx: Some(request_tx),
@@ -1001,8 +1003,9 @@ mod tests {
             format!(
                 // Outlives the test hang ceiling many times over, so only a
                 // shutdown that interrupts initialization and kills the child
-                // lets the waits below finish.
-                "#!/bin/sh\nprintf '%s' \"$$\" > '{}'\nexec /bin/sleep 600\n",
+                // lets the waits below finish. The PID is renamed into place
+                // so the file never exists before it holds the whole PID.
+                "#!/bin/sh\nprintf '%s' \"$$\" > '{0}.tmp'\n/bin/mv '{0}.tmp' '{0}'\nexec /bin/sleep 600\n",
                 pid_file.display()
             ),
         )

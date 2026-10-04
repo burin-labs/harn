@@ -327,7 +327,6 @@ mod tests {
     use super::*;
     use std::io::Cursor;
     use std::net::TcpStream;
-    use std::thread;
 
     #[test]
     fn matching_user_denial_is_terminal_without_waiting_for_timeout() {
@@ -335,7 +334,7 @@ mod tests {
             bind_loopback_listener("http://127.0.0.1:0/oauth/callback").unwrap();
         let parsed = Url::parse(&redirect_uri).unwrap();
         let address = format!("127.0.0.1:{}", parsed.port().unwrap());
-        let waiter = thread::spawn(move || {
+        let waiter = harn_parser::runtime_stack::spawn(move || {
             wait_for_oauth_response(listener, &redirect_uri, "expected-state")
         });
 

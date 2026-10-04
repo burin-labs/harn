@@ -40,6 +40,7 @@ pub const SOURCE_NET_POLICY: &str = "harn.net_policy";
 pub fn denial_gate_for_source(source: Option<&str>) -> crate::agent_events::DenialGate {
     use crate::agent_events::DenialGate;
     match source {
+        Some("approval_unavailable") => DenialGate::ApprovalUnavailable,
         Some(SOURCE_DEFAULT_SENSITIVE_PATH) => DenialGate::SensitivePath,
         Some(SOURCE_NET_POLICY) => DenialGate::NetworkPolicy,
         Some(SOURCE_DEFAULT_PATH_GUARD) | Some(SOURCE_DEFAULT_EXTERNAL_PATH) => {
@@ -175,5 +176,24 @@ impl PolicyEvaluation {
         denial.denied_paths = self.denied_paths.clone();
         denial.denied_network_targets = self.denied_network_targets.clone();
         denial
+    }
+
+    pub fn is_approval_unavailable(&self) -> bool {
+        self.denial_gate() == crate::agent_events::DenialGate::ApprovalUnavailable
+    }
+
+    pub fn approval_unavailable_denial(
+        &self,
+        session: &str,
+        reason: impl Into<String>,
+    ) -> crate::agent_events::ToolDenial {
+        let (class, repeat_count) =
+            super::next_approval_unavailable_class_repeat_count(session, &self.risk_labels);
+        crate::agent_events::ToolDenial::terminal(
+            crate::agent_events::DenialGate::ApprovalUnavailable,
+            None,
+            reason,
+        )
+        .with_denial_class(class, repeat_count)
     }
 }

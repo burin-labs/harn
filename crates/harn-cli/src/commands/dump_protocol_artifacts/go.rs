@@ -282,6 +282,7 @@ fn generate_go_with_payloads(payloads: &SessionUpdatePayloads) -> String {
     append_go_prepared_session_types(&mut out);
     append_go_session_recap_types(&mut out);
     super::plan_records::append(&mut out, super::records::Target::Go);
+    super::inference_admission::append(&mut out, super::records::Target::Go);
     out
 }
 
@@ -464,6 +465,8 @@ type HarnACPPromptErrorData struct {
 	Category *string `json:"category,omitempty"`
 	Kind *string `json:"kind,omitempty"`
 	Reason *string `json:"reason,omitempty"`
+	Origin *string `json:"origin,omitempty"`
+	Rule *string `json:"rule,omitempty"`
 	Code *string `json:"code,omitempty"`
 	Retryable *bool `json:"retryable,omitempty"`
 	RetryAfterMs *int64 `json:"retryAfterMs,omitempty"`

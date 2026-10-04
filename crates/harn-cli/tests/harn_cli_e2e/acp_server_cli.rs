@@ -69,6 +69,102 @@ fn spawn_acp(temp: &TempDir, fixture: &str) -> StdioJsonRpcClient {
     StdioJsonRpcClient::spawn("harn serve acp", command)
 }
 
+#[test]
+fn acp_cli_host_requests_attribute_imported_callers_without_argument_values() {
+    let _guard = lock_acp_cli_tests();
+    let temp = TempDir::new().unwrap();
+    write_file(
+        temp.path(),
+        "helpers.harn",
+        r#"
+pub fn repeated(workspace: HarnessWorkspace) {
+    for item in [1, 2] {
+        workspace.search({query: "private-query-sentinel", paths: ["private-path-sentinel"]})
+    }
+}
+pub fn distinct(workspace: HarnessWorkspace) {
+    workspace.search({query: "other-private-query", paths: []})
+}
+"#,
+    );
+    write_file(
+        temp.path(),
+        "trace.harn",
+        r#"
+import { repeated, distinct } from "./helpers"
+pub pipeline main(harness: Harness) {
+    repeated(harness.workspace)
+    distinct(harness.workspace)
+}
+"#,
+    );
+    let mut client = spawn_acp(&temp, "trace.harn");
+    let (_, created) = send_request(
+        &mut client,
+        json!({"jsonrpc": "2.0", "id": 1, "method": "session/new",
+            "params": {"cwd": temp.path(), "environmentPolicy": {"kind": "isolated", "grants": []}}}),
+    );
+    let session_id = created["result"]["sessionId"]
+        .as_str()
+        .expect("session created");
+    select_code_mode(&mut client, session_id);
+    client.send(
+        &json!({"jsonrpc": "2.0", "id": "trace-prompt", "method": "session/prompt",
+        "params": {"sessionId": session_id, "prompt": [{"type": "text", "text": "trace"}]}}),
+    );
+    let mut traces = Vec::new();
+    loop {
+        let frame = client.recv();
+        match frame["method"].as_str() {
+            Some("host/capabilities") => client.send(&json!({"jsonrpc": "2.0", "id": frame["id"],
+                "result": {"workspace": ["search"]}})),
+            Some("host/call") => {
+                assert_eq!(frame["params"]["name"], "workspace.search");
+                traces.push(frame["params"]["_meta"]["harn"]["requestTrace"].clone());
+                client.send(&json!({"jsonrpc": "2.0", "id": frame["id"], "result": {}}));
+            }
+            _ if frame["id"] == "trace-prompt" => {
+                assert!(frame["error"].is_null(), "prompt failed: {frame}");
+                assert_eq!(frame["result"]["stopReason"], "end_turn");
+                break;
+            }
+            _ => {}
+        }
+    }
+    assert_eq!(
+        traces.len(),
+        3,
+        "the repeated call must reach the host twice"
+    );
+    assert_eq!(traces[0], traces[1]);
+    for (trace, function, length) in [(&traces[0], "repeated", 1), (&traces[2], "distinct", 0)] {
+        assert_eq!(trace["caller"]["function"], function);
+        assert!(trace["caller"]["module"]
+            .as_str()
+            .unwrap()
+            .ends_with("helpers.harn"));
+        assert_eq!(
+            trace["arguments"],
+            json!({
+                "query": {"value_type": "string"},
+                "paths": {"value_type": "list", "list_length": length},
+            })
+        );
+    }
+    let serialized = serde_json::to_string(&traces).unwrap();
+    for secret in [
+        "private-query-sentinel",
+        "private-path-sentinel",
+        "other-private-query",
+    ] {
+        assert!(
+            !serialized.contains(secret),
+            "argument values must not enter requestTrace"
+        );
+    }
+    client.shutdown_expect_success();
+}
+
 fn prompt_once(client: &mut StdioJsonRpcClient, workspace: &Path) -> (Vec<JsonValue>, JsonValue) {
     let (_, init) = send_request(
         client,
@@ -239,6 +335,11 @@ fn acp_reconciles_declared_operations_with_one_host_handshake() {
         "agent.harn",
         "pub pipeline main(harness: Harness) { harness.stdio.println(\"complete\") }\n",
     );
+    write_file(
+        temp.path(),
+        "declared.json",
+        r#"{"synthetic":{"operations":{"optional":{"optional":true}}}}"#,
+    );
     let write_manifest = |fail_closed: bool| {
         write_file(
             temp.path(),
@@ -247,6 +348,7 @@ fn acp_reconciles_declared_operations_with_one_host_handshake() {
                 r#"
 [check]
 host_capabilities.synthetic = ["served", "missing", "runtime_only"]
+host_capabilities_path = "declared.json"
 runtime_installed_host_operations = ["synthetic.runtime_only"]
 require_declared_operations_served = {fail_closed}
 "#,
@@ -297,6 +399,7 @@ require_declared_operations_served = {fail_closed}
         .unwrap();
     assert!(message.contains("synthetic.missing"));
     assert!(!message.contains("synthetic.runtime_only"));
+    assert!(!message.contains("synthetic.optional"));
 
     write_manifest(true);
     let (_, response, capability_requests) = send_request_with_host_capabilities(
@@ -318,6 +421,25 @@ require_declared_operations_served = {fail_closed}
         .is_some_and(|message| {
             message.contains("HARN-CAP-008") && message.contains("synthetic.missing")
         }));
+
+    write_file(
+        temp.path(),
+        "harn.toml",
+        "[check]\nhost_capabilities_path = \"declared.json\"\nrequire_declared_operations_served = true\n",
+    );
+    let (notifications, response, capability_requests) = send_request_with_host_capabilities(
+        &mut client,
+        json!({
+            "jsonrpc":"2.0", "id":5, "method":"session/prompt",
+            "params":{"sessionId":session_id,"prompt":[{"type":"text","text":"optional only"}]}
+        }),
+        json!({"synthetic":["served"]}),
+    );
+    assert_eq!(capability_requests, 1);
+    assert_eq!(response["result"]["stopReason"], "end_turn");
+    assert!(notifications.iter().all(|notification| {
+        notification["params"]["update"]["_meta"]["harn"]["fields"]["code"] != "HARN-CAP-008"
+    }));
 }
 
 #[ignore = "binary surface — moves to slow E2E/smoke job (issue #1069)"]

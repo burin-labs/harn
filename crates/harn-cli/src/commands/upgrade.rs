@@ -1266,7 +1266,7 @@ mod tests {
 
         let started = Arc::new(Barrier::new(2));
         let (attempted_tx, attempted_rx) = mpsc::channel();
-        std::thread::scope(|scope| {
+        harn_parser::runtime_stack::scope(|scope| {
             let started_a = Arc::clone(&started);
             let install_dir_a = install_dir.clone();
             let hook_a = hook.clone();

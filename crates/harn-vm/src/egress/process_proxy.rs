@@ -11,7 +11,7 @@ use std::io::{self, Read, Write};
 use std::net::{IpAddr, Shutdown, SocketAddr, TcpListener, TcpStream, ToSocketAddrs};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
-use std::thread::{self, JoinHandle};
+use std::thread::JoinHandle;
 use std::time::Duration;
 
 use url::Url;
@@ -337,7 +337,7 @@ fn spawn_listener(
     audit: Arc<Mutex<Vec<ProcessEgressAudit>>>,
     handler: ClientHandler,
 ) -> Result<JoinHandle<()>, String> {
-    thread::Builder::new()
+    crate::runtime_stack::builder()
         .name(name.to_string())
         .spawn(move || {
             while let Ok((stream, _peer)) = listener.accept() {
@@ -357,7 +357,7 @@ fn spawn_listener(
                 let policy = Arc::clone(&policy);
                 let audit = Arc::clone(&audit);
                 let connection_count = Arc::clone(&active_connections);
-                if thread::Builder::new()
+                if crate::runtime_stack::builder()
                     .name("harn-process-egress-connection".to_string())
                     .spawn(move || {
                         let _connection = ActiveConnection(connection_count);
@@ -755,7 +755,7 @@ fn record_audit(
 fn relay(left: TcpStream, right: TcpStream) -> io::Result<()> {
     let mut left_read = left.try_clone()?;
     let mut right_write = right.try_clone()?;
-    let forward = thread::spawn(move || io::copy(&mut left_read, &mut right_write));
+    let forward = crate::runtime_stack::spawn(move || io::copy(&mut left_read, &mut right_write));
     let mut right_read = right;
     let mut left_write = left;
     let reverse = io::copy(&mut right_read, &mut left_write);
@@ -894,7 +894,7 @@ mod tests {
         let denied = TcpListener::bind(("127.0.0.1", 0)).unwrap();
         let denied_port = denied.local_addr().unwrap().port();
         denied.set_nonblocking(true).unwrap();
-        let server = thread::spawn(move || {
+        let server = crate::runtime_stack::spawn(move || {
             let (mut stream, _) = allowed.accept().unwrap();
             let request = read_http_head(&mut stream).unwrap();
             let request = String::from_utf8(request.head).unwrap();
@@ -945,7 +945,7 @@ mod tests {
     fn connect_tunnel_preserves_optimistic_bytes() {
         let destination = TcpListener::bind(("127.0.0.1", 0)).unwrap();
         let port = destination.local_addr().unwrap().port();
-        let server = thread::spawn(move || {
+        let server = crate::runtime_stack::spawn(move || {
             let (mut stream, _) = destination.accept().unwrap();
             let mut payload = [0_u8; 10];
             stream.read_exact(&mut payload).unwrap();
@@ -973,7 +973,7 @@ mod tests {
     fn socks5_connect_uses_the_same_allowlist_boundary() {
         let destination = TcpListener::bind(("127.0.0.1", 0)).unwrap();
         let port = destination.local_addr().unwrap().port();
-        let server = thread::spawn(move || {
+        let server = crate::runtime_stack::spawn(move || {
             let (mut stream, _) = destination.accept().unwrap();
             let mut payload = [0_u8; 4];
             stream.read_exact(&mut payload).unwrap();

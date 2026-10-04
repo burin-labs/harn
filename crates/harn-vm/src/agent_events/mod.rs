@@ -24,12 +24,15 @@
 //!    `crate::agent_sessions`, because sessions are the single source
 //!    of truth for session-scoped VM state.
 
+mod accessors;
 mod agent;
 mod durable_projection;
 mod from_host;
 mod host_injection;
 mod lifecycle;
 mod registry;
+pub mod session_health;
+pub(crate) use crate::agent_sessions::observe_event;
 mod sinks;
 mod terminal;
 mod terminal_suspension;

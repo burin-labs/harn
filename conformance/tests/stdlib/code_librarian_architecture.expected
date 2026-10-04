@@ -1,0 +1,18 @@
+indexed before rebuild: false
+indexed: true
+nodes: src/core,src/data,src/ui,tools
+edges: src/data->src/core,src/ui->src/core,src/ui->src/data
+sample: [["src/data/store.ts","src/core/model.ts"]]
+external: [{"count":1,"from":"src/ui","spec":"react"}]
+deterministic: true
+clean: {"conforms":true,"forbidden_present":[],"missing_required":[],"unexpected":[],"unmapped_actual":[],"unmatched_nodes":[]}
+conforms: false
+missing_required: [{"actual":[],"from":"ui","sample":[],"to":"billing","weight":0}]
+forbidden_present: [{"actual":[{"from":"src/ui","to":"src/core","weight":1}],"from":"ui","sample":[["src/ui/App.ts","src/core/model.ts"]],"to":"core","weight":1}]
+unexpected: [{"actual":[{"from":"src/ui","to":"src/data","weight":1}],"from":"ui","sample":[["src/ui/App.ts","src/data/store.ts"]],"to":"data","weight":1}]
+unmatched_nodes: ["billing"]
+unmapped_actual: [{"files":1,"id":"tools","languages":["typescript"]}]
+lenient unexpected: 0
+unowned code: strict conforms false, lenient conforms true
+architecture_graph_diff: edge ui -> ghost names an undeclared target node
+architecture_graph_diff: the actual graph measured nothing (indexed: false, nodes: 0); rebuild the index or check the roots

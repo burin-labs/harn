@@ -23,6 +23,7 @@ mod budget_exhausted;
 mod compaction_events;
 mod mcp_events;
 mod mutation_audit;
+mod observation_fixtures;
 mod plan_document;
 mod registration_fixtures;
 mod repair_claim;
@@ -121,6 +122,7 @@ fn standard_fixture_events() -> Vec<AgentEvent> {
             mutation_status: harn_vm::agent_events::ToolMutationStatus::Unknown,
             changed_paths: None,
             data: None,
+            health: None,
             executor: Some(ToolExecutor::HarnBuiltin),
             parsing: None,
             raw_input: None,
@@ -599,11 +601,7 @@ fn agent_event_ext_fixture_events() -> Vec<AgentEvent> {
             last_iteration: 4,
             tail_excerpt: "still thinking...".to_string(),
         },
-        AgentEvent::DaemonWatchdogTripped {
-            session_id: "session-1".to_string(),
-            attempts: 5,
-            elapsed_ms: 12_000,
-        },
+        observation_fixtures::fixture_watchdog(),
         AgentEvent::LoopControlDecision {
             session_id: "session-1".to_string(),
             iteration: 6,
@@ -613,17 +611,7 @@ fn agent_event_ext_fixture_events() -> Vec<AgentEvent> {
             reason: "verification still running".to_string(),
             status: "working".to_string(),
         },
-        AgentEvent::ToolFormatOverride {
-            session_id: "session-1".to_string(),
-            provider: "openrouter".to_string(),
-            model: "qwen/qwen3-coder".to_string(),
-            requested_format: "native".to_string(),
-            recommended_format: "text".to_string(),
-            catalog_parity: "native_unreliable".to_string(),
-            override_reason: Some("cross-check provider regression".to_string()),
-            applied_format: Some("text".to_string()),
-            steered: Some(true),
-        },
+        observation_fixtures::fixture_tool_format_override(),
         AgentEvent::ToolCallAudit {
             session_id: "session-1".to_string(),
             tool_call_id: "tool-1".to_string(),
@@ -634,6 +622,7 @@ fn agent_event_ext_fixture_events() -> Vec<AgentEvent> {
             }),
             receipt: Some(fixture_tool_call_receipt()),
         },
+        observation_fixtures::fixture_session_health(),
     ];
     drop(events.splice(14..14, registration_fixtures::events()));
     let mut events = schema_contract::with_purpose_label(events);
@@ -1101,6 +1090,7 @@ async fn forwarded_agent_events_serialize_as_session_updates() {
             mutation_status: harn_vm::agent_events::ToolMutationStatus::Unknown,
             changed_paths: None,
             data: None,
+            health: None,
             executor: Some(ToolExecutor::HarnBuiltin),
             parsing: None,
             raw_input: None,
@@ -1275,6 +1265,7 @@ async fn tool_call_update_serializes_error_category_in_camel_case() {
         mutation_status: harn_vm::agent_events::ToolMutationStatus::Unknown,
         changed_paths: None,
         data: None,
+        health: None,
         executor: None,
         parsing: None,
         raw_input: None,
@@ -1312,6 +1303,7 @@ async fn tool_call_update_omits_error_category_when_none() {
         mutation_status: harn_vm::agent_events::ToolMutationStatus::Unknown,
         changed_paths: None,
         data: None,
+        health: None,
         executor: None,
         parsing: None,
         raw_input: None,
@@ -1342,6 +1334,7 @@ async fn tool_call_update_serializes_mutation_status_under_harn_meta() {
         mutation_status: ToolMutationStatus::NotApplied,
         changed_paths: None,
         data: None,
+        health: None,
         executor: Some(ToolExecutor::HostBridge),
         parsing: None,
         raw_input: None,
@@ -1393,6 +1386,7 @@ async fn tool_call_carries_parsing_flag_through_to_acp_wire() {
         mutation_status: harn_vm::agent_events::ToolMutationStatus::Unknown,
         changed_paths: None,
         data: None,
+        health: None,
         executor: None,
         parsing: Some(false),
         raw_input: None,
@@ -1466,6 +1460,7 @@ async fn tool_call_update_serializes_executor_per_acp_wire_format() {
             mutation_status: harn_vm::agent_events::ToolMutationStatus::Unknown,
             changed_paths: None,
             data: None,
+            health: None,
             executor: Some(executor),
             parsing: None,
             raw_input: None,
@@ -1497,6 +1492,7 @@ async fn tool_call_update_serializes_executor_per_acp_wire_format() {
         mutation_status: harn_vm::agent_events::ToolMutationStatus::Unknown,
         changed_paths: None,
         data: None,
+        health: None,
         executor: None,
         parsing: None,
         raw_input: None,
@@ -1531,6 +1527,7 @@ async fn tool_call_update_streams_raw_input_and_raw_input_partial_per_acp_wire_f
         mutation_status: harn_vm::agent_events::ToolMutationStatus::Unknown,
         changed_paths: None,
         data: None,
+        health: None,
         executor: None,
         raw_input: Some(serde_json::json!({"q": "hello"})),
         raw_input_partial: None,
@@ -1558,6 +1555,7 @@ async fn tool_call_update_streams_raw_input_and_raw_input_partial_per_acp_wire_f
         mutation_status: harn_vm::agent_events::ToolMutationStatus::Unknown,
         changed_paths: None,
         data: None,
+        health: None,
         executor: None,
         parsing: None,
         raw_input: None,
@@ -1587,6 +1585,7 @@ async fn tool_call_update_streams_raw_input_and_raw_input_partial_per_acp_wire_f
         mutation_status: harn_vm::agent_events::ToolMutationStatus::Unknown,
         changed_paths: None,
         data: None,
+        health: None,
         executor: None,
         parsing: None,
         raw_input: None,
@@ -1751,7 +1750,7 @@ async fn bridge_progress_and_log_session_updates_namespace_vendor_fields() {
                 output: AcpOutput::Channel(tx),
                 pending: Arc::new(TokioMutex::new(HashMap::new())),
                 next_id_counter: AtomicU64::new(1),
-                cancellation: super::super::SessionCancellation::default(),
+                cancellation: super::super::SessionCancellation::default().prepare_prompt(),
                 script_name: std::sync::Mutex::new(String::new()),
                 assistant_state: std::sync::Mutex::new(
                     harn_vm::visible_text::VisibleTextState::default(),

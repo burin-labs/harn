@@ -681,6 +681,7 @@ test-pr-gate-scripts:
 	./scripts/tests/sha256_file_hex_test.sh
 	./scripts/tests/wait_for_rate_limit_reset_test.sh
 	./scripts/tests/main_health_test.sh
+	./scripts/tests/main_health_carry_test.sh
 	./scripts/tests/check_stdlib_host_neutral_test.sh
 	./scripts/tests/check_public_product_names_test.sh
 	./scripts/tests/check_pr_metadata_privacy_test.sh
@@ -712,6 +713,7 @@ test-pr-gate-scripts:
 	./scripts/tests/prepare_development_version_test.sh
 	./scripts/tests/development_bump_cutover_test.sh
 	./scripts/tests/development_cutover_monitor_test.sh
+	./scripts/tests/development_cutover_repair_test.sh
 	./scripts/tests/merge_group_path_gate_test.sh
 	./scripts/tests/affected_crate_args_test.sh
 	./scripts/tests/hook_commit_msg_session_trailer_test.sh
@@ -723,6 +725,7 @@ test-pr-gate-scripts:
 	./scripts/tests/hook_registry_harn_bin_test.sh
 	./scripts/tests/hook_agent_gate_census_test.sh
 	./scripts/tests/pre_push_validation_range_test.sh
+	./scripts/tests/pre_push_signature_census_test.sh
 	./scripts/tests/ci_rust_test_lane_test.sh
 	./scripts/tests/thread_parity_receipt_test.sh
 	./scripts/tests/macos_nightly_test_env_test.sh
@@ -797,6 +800,7 @@ test-pr-gate-post-warm-integrations: test-rust-lint-lane-cache
 	HARN_BIN="$(HARN_BIN)" ./scripts/tests/hook_generated_artifact_drift_warn_test.sh
 	HARN_BIN_RESOLVER_TEST_ALLOW_CARGO=1 ./scripts/tests/harn_bin_resolver_test.sh
 	HARN_BIN="$(HARN_BIN)" ./scripts/tests/agent_shell_guard_adapter_test.sh
+	HARN_BIN="$(HARN_BIN)" ./scripts/tests/ci_walltime_query_test.sh
 	HARN_BIN="$(HARN_BIN)" ./scripts/tests/release_prepare_env_test.sh
 	HARN_BIN="$(HARN_BIN)" ./scripts/tests/open_release_pr_test.sh
 	HARN_BIN="$(HARN_BIN)" ./scripts/tests/release_withdrawal_lineage_test.sh

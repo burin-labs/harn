@@ -418,7 +418,7 @@ fn concurrent_activation_writers_preserve_all_records() {
     );
     let barrier = Barrier::new(2);
 
-    std::thread::scope(|scope| {
+    harn_parser::runtime_stack::scope(|scope| {
         for persona_id in ["alpha/reviewer", "beta/reviewer"] {
             let manifest = &manifest;
             let barrier = &barrier;

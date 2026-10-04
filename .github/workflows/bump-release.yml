@@ -11,9 +11,8 @@ name: Open release PR
 # The schedule and a manual dispatch run the same decision. Each run is a
 # no-op with a notice when main has no unreleased fragments or is not on a
 # development version. When a `Release vX.Y.Z` pull request is already open,
-# the run names it, or refolds it in place if main has gained fragments it did
-# not fold. A push to main that changes changelog.d only refolds: merging a
-# fragment never opens a release by itself.
+# the run verifies its immutable attempt and leaves it unchanged. A push to
+# main only checks existing releases; later fragments wait for the next version.
 on:
   workflow_dispatch:
   schedule:
@@ -41,19 +40,22 @@ jobs:
           ref: main
           persist-credentials: false
 
+      - name: Set the current invocation receipt path
+        run: printf 'HARN_EXT_RELEASE_OPENER_RECEIPT=%s/release-opener-%s-%s.json\n' "$RUNNER_TEMP" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" >> "$GITHUB_ENV"
+
       # Decide before building anything: most scheduled runs end here.
       - name: Decide whether a release pull request is due
         id: plan
         env:
           GH_TOKEN: ${{ github.token }}
-          OPENER_SCOPE: ${{ github.event_name == 'push' && '--refold-only' || '' }}
+          OPENER_SCOPE: ${{ github.event_name == 'push' && '--existing-only' || '' }}
         run: ./scripts/open_release_pr.sh --plan ${OPENER_SCOPE:+"$OPENER_SCOPE"}
 
       # The release App publishes the commit and opens the pull request, so the
       # pull request's CI runs. GitHub starts no workflows for pull requests
       # opened with GITHUB_TOKEN.
       - name: Mint GitHub App installation token
-        if: steps.plan.outputs.action == 'open' || steps.plan.outputs.action == 'refold'
+        if: steps.plan.outputs.action == 'open'
         id: app-token
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
@@ -63,15 +65,23 @@ jobs:
           permission-pull-requests: write
 
       - name: Configure isolated Harn build
-        if: steps.plan.outputs.action == 'open' || steps.plan.outputs.action == 'refold'
+        if: steps.plan.outputs.action == 'open'
         run: make setup-rust
 
-      - name: Prepare and open or refold the release pull request
-        if: steps.plan.outputs.action == 'open' || steps.plan.outputs.action == 'refold'
+      - name: Prepare and open the release pull request
+        if: steps.plan.outputs.action == 'open'
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
-          OPENER_SCOPE: ${{ github.event_name == 'push' && '--refold-only' || '' }}
+          OPENER_SCOPE: ${{ github.event_name == 'push' && '--existing-only' || '' }}
         run: |
           set -euo pipefail
           harn_bin="$(HARN_BIN_NO_BUILD=1 ./scripts/harn_bin.sh --print)"
           HARN_BIN="$harn_bin" ./scripts/open_release_pr.sh ${OPENER_SCOPE:+"$OPENER_SCOPE"}
+
+      - name: Publish the observed opener outcome
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-opener-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ env.HARN_EXT_RELEASE_OPENER_RECEIPT }}
+          if-no-files-found: error

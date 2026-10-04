@@ -700,7 +700,7 @@ fn stdlib_artifact_cache_singleflights_concurrent_exact_key() {
     let owner = {
         let artifact = Arc::clone(&artifact);
         let calls = Arc::clone(&calls);
-        std::thread::spawn(move || {
+        crate::runtime_stack::spawn(move || {
             stdlib_artifact_get_or_prepare("singleflight-fixture".to_string(), || {
                 calls.fetch_add(1, Ordering::SeqCst);
                 owner_entered_tx
@@ -724,7 +724,7 @@ fn stdlib_artifact_cache_singleflights_concurrent_exact_key() {
         let artifact = Arc::clone(&artifact);
         let calls = Arc::clone(&calls);
         let waiter_ready_tx = waiter_ready_tx.clone();
-        waiters.push(std::thread::spawn(move || {
+        waiters.push(crate::runtime_stack::spawn(move || {
             waiter_ready_tx
                 .send(())
                 .expect("test coordinator observes a ready waiter");
@@ -916,9 +916,8 @@ fn stdlib_artifact_cache_is_process_wide_across_threads() {
     let _guard = cache_test_guard();
     reset_stdlib_module_artifact_cache();
 
-    let handle = std::thread::Builder::new()
+    let handle = crate::runtime_stack::builder()
         .name("stdlib-cache-probe".to_string())
-        .stack_size(crate::RUNTIME_STACK_SIZE)
         .spawn(|| {
             let runtime = tokio::runtime::Builder::new_current_thread()
                 .enable_all()

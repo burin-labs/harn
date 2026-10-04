@@ -96,7 +96,7 @@ mod tests {
         std::fs::write(&path, "const answer = 1").unwrap();
         let alias = dir.path().join("nested/../module.harn");
         let barrier = std::sync::Barrier::new(8);
-        let parsed = std::thread::scope(|scope| {
+        let parsed = harn_parser::runtime_stack::scope(|scope| {
             let workers: Vec<_> = (0..8)
                 .map(|i| {
                     let path = if i % 2 == 0 { &path } else { &alias };

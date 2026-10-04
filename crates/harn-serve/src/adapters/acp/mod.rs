@@ -15,6 +15,7 @@ mod bridge;
 mod builtins;
 mod checkpoints;
 mod commands;
+mod confinement;
 mod core;
 mod dispatch;
 mod event_projection;
@@ -47,6 +48,7 @@ pub fn is_supported_session_mode(mode_id: &str) -> bool {
 }
 use bridge::AcpBridge;
 pub use bridge::AcpOutput;
+pub use confinement::{confine_acp_server_process, AcpServerConfinement};
 use live_clients::{
     apply_live_client_operation, is_live_client_method, write_live_client_operation,
 };
@@ -68,9 +70,9 @@ pub use sessions::{
 };
 use sessions::{
     cancel_session_command_handles, lookup_session_cancellation, preempt_session_interruption,
-    prepare_session_prompt, session_project_root_for_cwd, ConcurrentSessionControl,
-    ConcurrentSessionControls, Session, SessionBudget, SessionCancellation, SessionInfo,
-    SessionSpendRecorder,
+    prepare_session_request, session_project_root_for_cwd, ConcurrentSessionControl,
+    ConcurrentSessionControls, PreparedSessionRequest, PromptCancellation, Session, SessionBudget,
+    SessionCancellation, SessionInfo, SessionSpendRecorder,
 };
 pub(crate) use transport::run_acp_channel_server_with_existing_handle;
 pub use transport::{

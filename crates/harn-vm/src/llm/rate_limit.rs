@@ -252,6 +252,14 @@ impl NetworkBreaker {
     /// the open window has elapsed. Returns `None` to admit (Closed/HalfOpen
     /// probe), or `Some((remaining, reason))` to fail fast while open.
     fn admit(&mut self, now_ms: u128) -> Option<(Duration, BreakerOpenReason)> {
+        let blocked = self.blocked(now_ms);
+        if blocked.is_none() && matches!(self.state, BreakerState::Open { .. }) {
+            self.state = BreakerState::HalfOpen;
+        }
+        blocked
+    }
+
+    fn blocked(&self, now_ms: u128) -> Option<(Duration, BreakerOpenReason)> {
         match self.state {
             BreakerState::Closed => None,
             BreakerState::HalfOpen => {
@@ -260,7 +268,6 @@ impl NetworkBreaker {
             }
             BreakerState::Open { until_ms } => {
                 if now_ms >= until_ms {
-                    self.state = BreakerState::HalfOpen;
                     None
                 } else {
                     Some((
@@ -1083,57 +1090,12 @@ fn breaker_open_error(
     }
 }
 
-/// Fail-fast if the per-route network breaker is open. Returns `Ok(())` to admit
-/// the call (Closed, or an admitted half-open probe), or a typed transient error
-/// to short-circuit the retry loop while the link is down.
-///
-/// Separate from `acquire_permit_for_llm_call` so the breaker decision is taken
-/// once per call attempt at the same seam that observes the outcome, rather than
-/// being entangled with the (durable) rate-limit wait loop.
-pub(crate) fn check_network_breaker_for_llm_call(
-    opts: &super::api::LlmCallOptions,
-) -> Result<(), crate::value::VmError> {
-    ensure_initialized_from_config();
-    let keys = limiter_keys(&opts.provider, &opts.model);
-    let now_ms = crate::clock_mock::instant_now().as_millis();
-    let mut registry = registry().lock().expect("rate limiter mutex poisoned");
-    // Use the max remaining-open across the route's keys: if any key is open, the
-    // call fails fast. `breaker_block` also performs the Open→HalfOpen
-    // transition, so probe admission is consistent across sibling callers.
-    // Max remaining-open across the route's keys: if any key is open the call
-    // fails fast. An unproductive-completion open wins the reason tie-break so
-    // its `circuit_open` category (loop degrades onto primary) is not masked by
-    // a coincidental network open on a sibling key.
-    let mut blocked: Option<(Duration, BreakerOpenReason)> = None;
-    for key in &keys {
-        let limiter = limiter_for_key(&mut registry.limiters, key);
-        if let Some((remaining, reason)) = limiter.breaker_block(now_ms) {
-            blocked = Some(match blocked {
-                Some((prev, prev_reason)) => {
-                    let reason = if prev_reason == BreakerOpenReason::UnproductiveCompletion
-                        || reason == BreakerOpenReason::UnproductiveCompletion
-                    {
-                        BreakerOpenReason::UnproductiveCompletion
-                    } else {
-                        reason
-                    };
-                    (prev.max(remaining), reason)
-                }
-                None => (remaining, reason),
-            });
-        }
-    }
-    drop(registry);
-    match blocked {
-        Some((remaining, reason)) => Err(breaker_open_error(
-            &opts.provider,
-            &opts.model,
-            remaining,
-            reason,
-        )),
-        None => Ok(()),
-    }
-}
+mod network_recovery;
+pub(crate) use network_recovery::await_network_breaker_for_llm_call;
+#[cfg(test)]
+pub(crate) use network_recovery::check_network_breaker_for_llm_call;
+#[cfg(test)]
+use network_recovery::network_breaker_admission;
 
 /// Feed a terminal unproductive completion (a served turn that delivered no
 /// content, reasoning, or tool call — the zero-token empty completion or the
@@ -1529,7 +1491,7 @@ mod tests {
         let stale_initializer = {
             let candidate_ready = std::sync::Arc::clone(&candidate_ready);
             let resume_stale_initializer = std::sync::Arc::clone(&resume_stale_initializer);
-            std::thread::spawn(move || {
+            crate::runtime_stack::spawn(move || {
                 ensure_initialized_from_config_with(|| {
                     let candidate = limiters_from_config_and_runtime_overrides();
                     candidate_ready.wait();
@@ -2156,6 +2118,43 @@ mod tests {
         assert!(
             check_network_breaker_for_llm_call(&opts).is_ok(),
             "a productive serve must close the breaker"
+        );
+    }
+
+    #[test]
+    fn network_recovery_reserves_probes_only_when_every_route_key_is_ready() {
+        let _env = crate::llm::env_guard();
+        let _clock =
+            crate::clock_mock::install_override(crate::clock_mock::MockClock::at_wall_ms(1_000));
+        ensure_initialized_from_config();
+        let mut opts = crate::llm::api::options::base_opts("atomic-network-probe");
+        opts.model = "delayed-model".into();
+        let keys = limiter_keys(&opts.provider, &opts.model);
+        let fail = |key: &str| {
+            let mut registry = registry().lock().expect("registry");
+            let breaker = &mut limiter_for_key(&mut registry.limiters, key).breaker;
+            for _ in 0..NETWORK_BREAKER_FAILURE_THRESHOLD {
+                breaker.record_network_failure(crate::clock_mock::instant_now().as_millis());
+            }
+        };
+        fail(&keys[0]);
+        crate::clock_mock::advance(Duration::from_millis(NETWORK_BREAKER_OPEN_MS));
+        fail(&keys[1]);
+        assert!(network_breaker_admission(&opts).is_some());
+        assert!(
+            matches!(
+                registry().lock().expect("registry").limiters[&keys[0]]
+                    .breaker
+                    .state,
+                BreakerState::Open { .. }
+            ),
+            "a blocked model must not strand a provider probe reservation"
+        );
+        crate::clock_mock::advance(Duration::from_millis(NETWORK_BREAKER_OPEN_MS));
+        assert!(network_breaker_admission(&opts).is_none());
+        assert!(
+            network_breaker_admission(&opts).is_some(),
+            "only one probe is admitted"
         );
     }
 

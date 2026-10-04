@@ -193,7 +193,8 @@ Every launched Harn session has one environment policy:
   session starts. Later changes to the launcher process do not change the
   session. Spawned commands, MCP servers, and ACP children receive that
   snapshot without any provider credential (the variables the provider catalog
-  declares as `auth_env`, such as `OPENAI_API_KEY`). Harn's own model calls and
+  declares as `auth_env` or `credential_env`, such as `OPENAI_API_KEY` or
+  Bedrock's `AWS_SECRET_ACCESS_KEY`). Harn's own model calls and
   `harness.env` still read them. A child that needs a key gets it only from
   its own explicit `env`.
 - **Isolated** admits only the small set of operating-system and toolchain
@@ -3174,6 +3175,7 @@ and `<name>.harnmod` for a module, unless `--out` redirects them.
 |---|---|
 | `--out <DIR>` | Write artifacts under `DIR`, mirroring the source tree, instead of beside each source. |
 | `--keep-going` | Continue after a source fails to compile. The exit code still reports the failure. |
+| `-j`, `--jobs <N>` | Compile up to `N` sources at once when walking a directory. Defaults to the machine's available parallelism. Output, artifacts, and the summary are identical for every `N`. |
 | `--artifact-contract` | Print the machine-readable adjacent-artifact compatibility contract. |
 
 ### Regenerating artifacts, and what cannot go stale
@@ -4048,6 +4050,16 @@ session must read outside its project workspace. Harn canonicalizes each path
 and adds it to the per-turn file-read policy for stdio and WebSocket ACP.
 This is additive to the existing policy; it does not enable confinement or
 change child-process permissions. Unconfined `code` mode remains unconfined.
+Pass `--confine-workspace <path>` once per workspace root to confine the stdio
+server's own process before it reads the first message. The kernel then holds
+the server, and every command it runs, to the profile a confined command gets
+for those roots: write the workspace, read the system and toolchain roots, no
+credential directories. The confinement lasts for the life of the process, and
+a `session/new` whose `cwd` is outside every root is refused with
+`outside_process_confinement`. The `initialize` response reports the state in
+`agentCapabilities._meta.harn.processConfinement`. The flag works on macOS
+and Linux. See
+[Confining a server process](./sandboxing.md#confining-a-server-process).
 Use `--profile` / `HARN_PROFILE=1` to print one categorical timing rollup per
 executed `session/prompt`; use `--profile-json <path>` /
 `HARN_PROFILE_JSON=<path>` to append per-turn NDJSON records with

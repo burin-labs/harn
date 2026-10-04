@@ -80,7 +80,8 @@ ok=0
 summary "| suite | recent scheduled runs (newest first) | verdict |"
 summary "| --- | --- | --- |"
 
-while IFS=$'\t' read -r suite threshold job; do
+while IFS=$'\t' read -r suite threshold events title job; do
+  [[ "$title" != "-" ]] || title=""
   [[ -n "$suite" ]] || continue
 
   # Fixed-string, whole-line match: suite names contain spaces and hyphens, so
@@ -91,19 +92,34 @@ while IFS=$'\t' read -r suite threshold job; do
     continue
   fi
 
-  # Every row is kept here so the window's size is known; in-flight runs
-  # (empty conclusion, printed as `-`) and cancelled ones are passed over
-  # below so they cannot break a streak that is genuinely unbroken.
-  if ! runs="$(
-    gh run list --repo "$GH_REPO" --workflow "$suite" \
-      --event schedule --branch main --limit "$RUN_WINDOW" \
-      --json databaseId,conclusion \
-      --jq '.[] | "\(.databaseId) \(if (.conclusion // "") == "" then "-" else .conclusion end)"'
-  )"; then
+  # The API filters by one event, so each judged event is read separately and
+  # the rows are merged newest first. Reading every event at once would let a
+  # workflow's other runs (main pushes, for one) fill the window. Every row is
+  # kept so the window's size is known: a manual run whose title is not the
+  # suite's declared dispatch title and an in-flight run (empty conclusion)
+  # print as `-`, and they and cancelled runs are passed over below so they
+  # cannot break a streak that is genuinely unbroken.
+  history_failed=0
+  rows=""
+  IFS=',' read -ra judged_events <<< "$events"
+  for event in "${judged_events[@]}"; do
+    if ! event_rows="$(
+      TITLE="$title" gh run list --repo "$GH_REPO" --workflow "$suite" \
+        --event "$event" --branch main --limit "$RUN_WINDOW" \
+        --json databaseId,conclusion,event,displayTitle,createdAt \
+        --jq '.[] | "\(.createdAt) \(.databaseId) \(if (.conclusion // "") == "" or (.event == "workflow_dispatch" and env.TITLE != "" and .displayTitle != env.TITLE) then "-" else .conclusion end)"'
+    )"; then
+      history_failed=1
+      break
+    fi
+    rows+="$event_rows"$'\n'
+  done
+  if (( history_failed )); then
     unreadable+=("$suite")
     summary "| $suite | — | **UNREADABLE — run history request failed** |"
     continue
   fi
+  runs="$(grep . <<< "$rows" | sort -r | head -n "$RUN_WINDOW" | cut -d' ' -f2- || true)"
 
   outcomes=()
   job_read_failed=0
@@ -114,11 +130,13 @@ while IFS=$'\t' read -r suite threshold job; do
     if [[ -n "$job" ]]; then
       # A run whose judged job did not run measured nothing and is passed
       # over. A failed request for the job list is not that: it is unreadable.
-      if ! conclusion="$(JOB="$job" gh api "repos/$GH_REPO/actions/runs/$run_id/jobs" \
+      # Every page of the run's jobs is read and the first match wins.
+      if ! conclusion="$(JOB="$job" gh api --paginate "repos/$GH_REPO/actions/runs/$run_id/jobs?filter=latest&per_page=100" \
         --jq '[.jobs[] | select(.name == env.JOB and .conclusion != "skipped")][0].conclusion // empty')"; then
         job_read_failed=1
         break
       fi
+      conclusion="$(grep -m1 . <<< "$conclusion" || true)"
       [[ -n "$conclusion" ]] || continue
     fi
     outcomes+=("$conclusion")

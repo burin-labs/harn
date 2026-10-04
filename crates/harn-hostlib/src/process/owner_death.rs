@@ -136,6 +136,8 @@ struct PreparedCommand {
 #[derive(Deserialize, Serialize)]
 struct StartupMessage {
     ok: bool,
+    #[serde(default)]
+    spawn_not_found: bool,
     error: Option<String>,
     guardian_pid: Option<u32>,
     pid: Option<u32>,
@@ -146,7 +148,7 @@ struct StartupMessage {
 pub(crate) fn prepare_guardian(
     spec: &SpawnSpec,
     cleanup_token: String,
-) -> Result<(Command, Vec<u8>), ProcessError> {
+) -> Result<(Command, Vec<u8>, Option<String>), ProcessError> {
     super::real::validate_program(spec)?;
     let mut payload_spec = spec.clone();
     payload_spec.configure_process_group = false;
@@ -170,6 +172,11 @@ pub(crate) fn prepare_guardian(
     let (prepared, confinement) = (
         super::real::prepare_command(&payload_spec, Some(cleanup_token.clone()))?,
         build_confinement(&payload_spec.program)?,
+    );
+    let missing_program = super::program_lookup::missing_program(
+        &payload_spec,
+        &prepared.command,
+        prepared.env_cleared,
     );
     let mut payload = prepared.command;
     payload.env(
@@ -216,7 +223,7 @@ pub(crate) fn prepare_guardian(
     if let Some(confinement) = confinement {
         confinement.hand_to(&mut guardian);
     }
-    Ok((guardian, request))
+    Ok((guardian, request, missing_program))
 }
 
 /// The parent's side of the handover.
@@ -551,9 +558,17 @@ pub(crate) fn await_startup(child: &mut Child) -> Result<(ChildStderr, u32, u32)
         Ok((stderr, guardian_pid, pid))
     } else {
         let _ = child.wait();
-        Err(ProcessError::Spawn(message.error.unwrap_or_else(|| {
-            "guardian could not launch payload".to_string()
-        })))
+        let error = message
+            .error
+            .unwrap_or_else(|| "guardian could not launch payload".to_string());
+        if message.spawn_not_found {
+            Err(ProcessError::SpawnIo {
+                kind: "not_found",
+                message: error,
+            })
+        } else {
+            Err(ProcessError::Spawn(error))
+        }
     }
 }
 
@@ -578,6 +593,7 @@ pub fn run_guardian_from_pipe() -> io::Result<()> {
         Err(error) => {
             write_startup(StartupMessage {
                 ok: false,
+                spawn_not_found: false,
                 error: Some(format!("guardian could not confine the payload: {error}")),
                 guardian_pid: None,
                 pid: None,
@@ -592,6 +608,7 @@ pub fn run_guardian_from_pipe() -> io::Result<()> {
         Err(error) => {
             write_startup(StartupMessage {
                 ok: false,
+                spawn_not_found: error.kind() == io::ErrorKind::NotFound,
                 error: Some(error.to_string()),
                 guardian_pid: None,
                 pid: None,
@@ -602,6 +619,7 @@ pub fn run_guardian_from_pipe() -> io::Result<()> {
     let payload_pid = payload.id();
     write_startup(StartupMessage {
         ok: true,
+        spawn_not_found: false,
         error: None,
         guardian_pid: Some(std::process::id()),
         pid: Some(payload_pid),
@@ -613,28 +631,28 @@ pub fn run_guardian_from_pipe() -> io::Result<()> {
 
     if let Some(mut stdout) = stdout {
         let event_tx = event_tx.clone();
-        std::thread::spawn(move || {
+        harn_parser::runtime_stack::spawn(move || {
             let _ = io::copy(&mut stdout, &mut io::stdout());
             let _ = event_tx.send(GuardianEvent::OutputClosed);
         });
     }
     if let Some(mut stderr) = stderr {
         let event_tx = event_tx.clone();
-        std::thread::spawn(move || {
+        harn_parser::runtime_stack::spawn(move || {
             let _ = io::copy(&mut stderr, &mut io::stderr());
             let _ = event_tx.send(GuardianEvent::OutputClosed);
         });
     }
     {
         let event_tx = event_tx.clone();
-        std::thread::spawn(move || {
+        harn_parser::runtime_stack::spawn(move || {
             let status = wait_for_payload_while_reaping_adopted(payload);
             let _ = event_tx.send(GuardianEvent::PayloadExited(status));
         });
     }
     {
         let event_tx = event_tx.clone();
-        std::thread::spawn(move || {
+        harn_parser::runtime_stack::spawn(move || {
             let mut stdin = io::stdin();
             let mut sink = [0_u8; 256];
             loop {
@@ -784,7 +802,7 @@ fn run_guardian_reaper() -> ! {
             std::process::exit(1);
         })
     };
-    std::thread::spawn(move || relay_owner_liveness(owner, relay_writer));
+    harn_parser::runtime_stack::spawn(move || relay_owner_liveness(owner, relay_writer));
     match guardian.wait() {
         Ok(status) => propagate_exit(status),
         Err(error) => {
@@ -1039,7 +1057,7 @@ mod tests {
         };
 
         let cleanup_token = harn_vm::op_interrupt::new_process_cleanup_token();
-        let (guardian, request) =
+        let (guardian, request, _) =
             prepare_guardian(&spec, cleanup_token.clone()).expect("prepare guardian");
         harn_vm::op_interrupt::remove_process_owner_group_journal(&cleanup_token);
         let decoded: PreparedCommand =

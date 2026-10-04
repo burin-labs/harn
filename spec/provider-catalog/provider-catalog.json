@@ -182,6 +182,14 @@
       "auth": {
         "style": "aws_sigv4",
         "env": [],
+        "credential_env": [
+          "AWS_ACCESS_KEY_ID",
+          "AWS_SECRET_ACCESS_KEY",
+          "AWS_SESSION_TOKEN",
+          "AWS_SECURITY_TOKEN",
+          "AWS_PROFILE",
+          "AWS_CONTAINER_AUTHORIZATION_TOKEN"
+        ],
         "required": true
       },
       "data_controls": {
@@ -10195,7 +10203,7 @@
       "deprecation": {
         "status": "active"
       },
-      "availability": "serverless",
+      "availability": "dedicated",
       "quality_tags": [],
       "capability_tags": [
         "streaming",
@@ -23862,10 +23870,7 @@
         "preferred_format": "native",
         "parity": "unknown",
         "parity_source": "derived",
-        "tool_search": [
-          "hosted",
-          "client"
-        ]
+        "tool_search": []
       },
       "structured_output": "native",
       "format_preferences": {
@@ -23902,7 +23907,6 @@
       "capability_tags": [
         "streaming",
         "tools",
-        "tool_search",
         "vision",
         "prompt_caching",
         "thinking",
@@ -23949,10 +23953,7 @@
         "preferred_format": "native",
         "parity": "unknown",
         "parity_source": "derived",
-        "tool_search": [
-          "hosted",
-          "client"
-        ]
+        "tool_search": []
       },
       "structured_output": "native",
       "format_preferences": {
@@ -23992,7 +23993,6 @@
       "capability_tags": [
         "streaming",
         "tools",
-        "tool_search",
         "vision",
         "prompt_caching",
         "thinking",
@@ -24037,10 +24037,7 @@
         "preferred_format": "native",
         "parity": "unknown",
         "parity_source": "derived",
-        "tool_search": [
-          "hosted",
-          "client"
-        ]
+        "tool_search": []
       },
       "structured_output": "native",
       "format_preferences": {
@@ -24084,7 +24081,6 @@
       "capability_tags": [
         "streaming",
         "tools",
-        "tool_search",
         "vision",
         "prompt_caching",
         "thinking",
@@ -24131,10 +24127,7 @@
         "preferred_format": "native",
         "parity": "unknown",
         "parity_source": "derived",
-        "tool_search": [
-          "hosted",
-          "client"
-        ]
+        "tool_search": []
       },
       "structured_output": "native",
       "format_preferences": {
@@ -24179,7 +24172,6 @@
       "capability_tags": [
         "streaming",
         "tools",
-        "tool_search",
         "vision",
         "prompt_caching",
         "thinking",
@@ -24226,10 +24218,7 @@
         "preferred_format": "native",
         "parity": "unknown",
         "parity_source": "derived",
-        "tool_search": [
-          "hosted",
-          "client"
-        ]
+        "tool_search": []
       },
       "structured_output": "native",
       "format_preferences": {
@@ -24273,7 +24262,6 @@
       "capability_tags": [
         "streaming",
         "tools",
-        "tool_search",
         "vision",
         "prompt_caching",
         "thinking",
@@ -30765,10 +30753,7 @@
         "preferred_format": "native",
         "parity": "unknown",
         "parity_source": "derived",
-        "tool_search": [
-          "hosted",
-          "client"
-        ]
+        "tool_search": []
       },
       "structured_output": "native",
       "format_preferences": {
@@ -30807,7 +30792,6 @@
       "capability_tags": [
         "streaming",
         "tools",
-        "tool_search",
         "vision",
         "prompt_caching",
         "thinking",
@@ -37257,7 +37241,6 @@
         "structured_output_mode:native_json",
         "text_tools",
         "thinking",
-        "tool_search",
         "tools",
         "vision"
       ]
@@ -37280,7 +37263,6 @@
         "structured_output_mode:native_json",
         "text_tools",
         "thinking",
-        "tool_search",
         "tools",
         "vision"
       ]
@@ -37303,7 +37285,6 @@
         "structured_output_mode:native_json",
         "text_tools",
         "thinking",
-        "tool_search",
         "tools",
         "vision"
       ]
@@ -37326,7 +37307,6 @@
         "structured_output_mode:native_json",
         "text_tools",
         "thinking",
-        "tool_search",
         "tools",
         "vision"
       ]

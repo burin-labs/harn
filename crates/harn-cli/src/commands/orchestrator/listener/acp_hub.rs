@@ -233,9 +233,8 @@ impl AcpWebSocketHub {
             }
         });
         let worker_name = worker_id;
-        std::thread::Builder::new()
+        harn_parser::runtime_stack::builder()
             .name(format!("harn-acp-ws-{worker_name}"))
-            .stack_size(crate::CLI_RUNTIME_STACK_SIZE)
             .spawn(move || {
                 let runtime = match tokio::runtime::Builder::new_current_thread()
                     .enable_all()

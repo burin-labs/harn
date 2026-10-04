@@ -434,7 +434,10 @@ pub(super) async fn load_host_mcp_clients(
             "host/call",
             serde_json::json!({
                 "name": "project.mcp_config",
-                "args": {}
+                "args": {},
+                "_meta": {"harn": {"requestTrace":
+                    harn_vm::stdlib::host::trace::HostRequestTrace::new(None, &Default::default())
+                }},
             }),
         )
         .await
@@ -667,7 +670,7 @@ require_declared_operations_served = true
         let chunk = harn_vm::compile_source(&source).expect("compile inline pipeline");
 
         let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
-        let cancellation = super::super::SessionCancellation::default();
+        let cancellation = super::super::SessionCancellation::default().prepare_prompt();
         // Pre-cancel: this is what a `session/cancel` that raced ahead of
         // `session/prompt` looks like on the wire, and it lets this test stay
         // synchronous instead of racing a background cancel against the turn.
@@ -749,7 +752,7 @@ require_declared_operations_served = true
         .to_string();
         let chunk = harn_vm::compile_source(&source).expect("compile importing pipeline");
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<String>();
-        let cancellation = super::super::SessionCancellation::default();
+        let cancellation = super::super::SessionCancellation::default().prepare_prompt();
         let client_pending: Arc<
             TokioMutex<
                 std::collections::HashMap<u64, tokio::sync::oneshot::Sender<serde_json::Value>>,

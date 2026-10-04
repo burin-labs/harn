@@ -958,7 +958,7 @@ fn an_unknown_host_event_warns_once_when_a_session_moves_threads() {
     fn call_on_thread(
         runtime: std::sync::Arc<crate::agent_sessions::AgentSessionRuntime>,
     ) -> Vec<crate::events::LogEvent> {
-        std::thread::spawn(move || {
+        crate::runtime_stack::spawn(move || {
             let previous = crate::agent_sessions::swap_active_session_runtime(runtime);
             let warnings = capture_host_ingest_warnings(|| {
                 let dropped =

@@ -15,6 +15,7 @@ mod operation_registry;
 pub mod process_admission;
 pub(crate) mod process_dispatch;
 mod process_exec;
+pub mod trace;
 // Public so tests and embedders can share the per-turn memo allowlist even
 // when probing host_call outside the stdlib builtin (harn#5190).
 pub mod turn_cache;
@@ -856,7 +857,8 @@ pub async fn dispatch_host_operation_with_ctx(
     if let Some(bridge) = bridge {
         // Turn-stable reads share a memo; metadata writes invalidate it on both
         // sides of dispatch. harn#5190, harn#6914, harn#7172.
-        let dispatched = bridge::dispatch_cached(bridge, capability, operation, params).await?;
+        let dispatched =
+            bridge::dispatch_cached(bridge, capability, operation, params, ctx).await?;
         if let Some(value) = dispatched {
             return Ok(value);
         }

@@ -92,7 +92,7 @@ use backend::ActiveBackend;
 pub use backend::{
     active_backend_available, active_backend_filesystem_available,
     active_backend_filesystem_mechanism, active_backend_mechanism, active_backend_name,
-    conformance,
+    conformance, self_confinement,
 };
 pub(crate) use backend::{PrepareOutcome, SandboxBackend};
 use process_config::apply_rustc_wrapper_decision;

@@ -569,14 +569,7 @@ impl Compiler {
             } else {
                 self.chunk.emit(Op::Nil, self.line);
             }
-            self.temp_counter += 1;
-            let temp_name = format!("__return_val_{}__", self.temp_counter);
-            self.emit_define_binding(&temp_name, true);
-            // Innermost finally first. Each finally is masked while it runs,
-            // so a `return` inside a finally doesn't re-run it.
-            self.run_pending_finallys_for_transfer(0, None)?;
-            self.emit_get_binding(&temp_name);
-            self.chunk.emit(Op::Return, self.line);
+            self.emit_return_through_cleanups()?;
         } else {
             // No pending finally — use tail-call optimization when possible.
             if let Some(val) = value {
@@ -625,6 +618,42 @@ impl Compiler {
         Ok(())
     }
 
+    /// Return the value on top of the stack after running every pending
+    /// cleanup, innermost first. Each cleanup is masked while it runs, so a
+    /// `return` inside a finally doesn't re-run it. This is the one lowering
+    /// for return-like exits; `?` reaches it through
+    /// [`Self::compile_try_operator_cleanup`].
+    fn emit_return_through_cleanups(&mut self) -> Result<(), CompileError> {
+        self.temp_counter += 1;
+        let temp_name = format!("__return_val_{}__", self.temp_counter);
+        self.emit_define_binding(&temp_name, true);
+        self.run_pending_finallys_for_transfer(0, None)?;
+        self.emit_get_binding(&temp_name);
+        self.chunk.emit(Op::Return, self.line);
+        Ok(())
+    }
+
+    /// Route the early return of `?` through pending cleanups. `TryUnwrap`
+    /// returns an `Err` from the frame at run time, past the compiler's
+    /// return lowering, so with cleanup pending the `Err` branch is lowered
+    /// here as an ordinary return and `TryUnwrap` only ever sees the rest.
+    /// Expects the operand on the stack and leaves it there on fall-through.
+    pub(super) fn compile_try_operator_cleanup(&mut self) -> Result<(), CompileError> {
+        if !self.has_pending_finally() {
+            return Ok(());
+        }
+        let enum_idx = self.string_constant("Result");
+        let variant_idx = self.string_constant("Err");
+        self.chunk
+            .emit_u16_operands(Op::MatchEnum, &[enum_idx, variant_idx], self.line);
+        let unwrap_jump = self.chunk.emit_jump(Op::JumpIfFalse, self.line);
+        self.chunk.emit(Op::Pop, self.line);
+        self.emit_return_through_cleanups()?;
+        self.chunk.patch_jump(unwrap_jump);
+        self.chunk.emit(Op::Pop, self.line);
+        Ok(())
+    }
+
     pub(super) fn compile_cost_route(
         &mut self,
         options: &[(String, SNode)],
@@ -641,7 +670,7 @@ impl Compiler {
         self.chunk
             .emit_u16(Op::BuildDict, options.len() as u16, self.line);
 
-        self.compile_closure(&[], body)?;
+        self.compile_closure(&[], body, self.declared_throw)?;
         self.chunk.emit_u8(Op::Call, 2, self.line);
         Ok(())
     }

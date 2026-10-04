@@ -20,7 +20,16 @@
 # exponentially, gives up by name when the producer never starts, and waits
 # out a rate limit for as long as the refusing response itself says, never
 # guessing.
+#
+# A producer that never leaves the queue exits 3, not 1, with a
+# "Producer never started" error annotation that names the runner labels it
+# queued on. Starvation is a capacity fact about a runner pool, not a defect in
+# the commit, and on 2026-10-02 ten consumers reported it only in their own
+# logs while the run's verdict named an unrelated lane (run 37042288569).
 set -euo pipefail
+
+# The exit status reserved for a producer that never started.
+producer_never_started_status=3
 
 if [ "$#" -eq 0 ]; then
   echo "usage: $0 ARTIFACT [ARTIFACT ...]" >&2
@@ -239,7 +248,25 @@ read_producer_state() {
             or .status == "pending" or .status == "requested") and .conclusion == null
       then .status
       else error("unknown producer status") end
-  ' <<< "$pages" 2>/dev/null)
+  ' <<< "$pages" 2>/dev/null) || return 1
+  # The labels the producer asked for, which name the pool it queues on.
+  producer_labels=$(jq -r --arg name "$producer_job" '
+    map(.jobs) | add | map(select(.name == $name)) | .[0].labels
+    | if type == "array" and length > 0 then join(",") else "unreported" end
+  ' <<< "$pages" 2>/dev/null) || producer_labels=unreported
+}
+
+# Fail as starved: a distinct status, an annotation the run page shows, and
+# the same line in the job summary.
+fail_producer_never_started() {
+  local message
+  message="producer '${producer_job}' never started: still ${state} on runner labels [${producer_labels}] after $1s, beyond the ${max_queue_seconds}s this wait allows; missing artifacts: ${artifacts[*]}"
+  echo "$message" >&2
+  echo "::error title=Producer never started::${message}"
+  if [[ -n ${GITHUB_STEP_SUMMARY:-} ]]; then
+    printf '### Producer never started\n\n%s\n' "$message" >> "$GITHUB_STEP_SUMMARY" || true
+  fi
+  exit "$producer_never_started_status"
 }
 
 # Seconds until the limit that refused the read lifts, from that refusal's own
@@ -290,6 +317,7 @@ queued_since=""
 wait_seconds=$interval_seconds
 missing=("${artifacts[@]}")
 state=""
+producer_labels=unreported
 polls_since_state_read=0
 # True when this poll may reuse a running producer's last observed state
 # instead of reading it again. A queued or completed producer is always
@@ -317,8 +345,7 @@ while :; do
         now=$(date +%s)
         [[ -z $queued_since ]] && queued_since=$now
         if (( now - queued_since > max_queue_seconds )); then
-          echo "producer '${producer_job}' never started: still ${state} after $((now - queued_since))s, beyond the ${max_queue_seconds}s this wait allows; missing artifacts: ${artifacts[*]}" >&2
-          exit 1
+          fail_producer_never_started "$((now - queued_since))"
         fi
         missing=("${artifacts[@]}")
         ;;

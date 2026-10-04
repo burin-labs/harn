@@ -301,7 +301,7 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let socket_path = dir.path().join("daemon.sock");
         let listener = UnixListener::bind(&socket_path).expect("bind unix listener");
-        let server = std::thread::spawn(move || {
+        let server = crate::runtime_stack::spawn(move || {
             let (mut stream, _) = listener.accept().expect("accept");
             let mut request = String::new();
             BufReader::new(stream.try_clone().expect("clone stream"))
@@ -349,7 +349,7 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let socket_path = dir.path().join("daemon.sock");
         let listener = UnixListener::bind(&socket_path).expect("bind unix listener");
-        let server = std::thread::spawn(move || {
+        let server = crate::runtime_stack::spawn(move || {
             let (mut stream, _) = listener.accept().expect("accept");
             let mut request = String::new();
             BufReader::new(stream.try_clone().expect("clone stream"))
