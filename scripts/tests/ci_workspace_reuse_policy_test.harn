@@ -1,7 +1,23 @@
-import { workspace_reuse_writer_errors } from "../ci_cache_policy/policy_core"
+import { read_yaml } from "std/fs"
+import {
+  cache_family,
+  native_source_projection_errors,
+  workspace_reuse_writer_errors,
+} from "../ci_cache_policy/policy_core"
 
 const MESSAGE =
   "ci.yml:producer saves workspace crates, so it must restore with reuse-workspace-crates and record its source only on success"
+
+type CacheSourceManifest = {
+  package: {
+    name: string,
+    version: string,
+    edition: string,
+    publish: bool,
+    metadata: {harn: {source: string}},
+  },
+  workspace: dict,
+}
 
 fn cache_step(reuse: bool) {
   let inputs = {"shared-key": "workspace-tests", "cache-workspace-crates": "true", save: "true"}
@@ -58,4 +74,189 @@ pipeline test_writer_without_workspace_crates_is_not_constrained(harness: Harnes
     with: {"shared-key": "release-x", save: "true"},
   }
   assert_eq(workspace_reuse_writer_errors("ci.yml", "release", {steps: [step]}, step), [])
+}
+
+pipeline test_workspace_generation_family_keeps_automatic_and_explicit_boundaries_distinct(
+  harness: Harness,
+  task: unknown,
+) {
+  const implicit = cache_family(
+    {with: {"shared-key": "workspace-tests", "cache-workspace-crates": "true"}},
+  )
+  const explicit = cache_family(
+    {
+      with: {
+        "shared-key": "workspace-tests",
+        "source-key": "explicit-boundary",
+        "cache-workspace-crates": "true",
+      },
+    },
+  )
+  assert_eq(implicit, "workspace-tests-workspace-crates-v3")
+  assert_eq(explicit, "workspace-tests-explicit-boundary-workspace-crates-v3")
+  assert(implicit != explicit)
+}
+
+pipeline test_workspace_source_record_projects_the_canonical_fingerprint_roots(
+  harness: Harness,
+  task: unknown,
+) {
+  const script = harness.fs.read_text("../ci/reuse_workspace_crates.sh")
+  assert_eq(native_source_projection_errors(script), [])
+  const damaged = replace(script, " crates spec ", " crates ")
+  assert_eq(len(native_source_projection_errors(damaged)), 1)
+}
+
+fn cache_identity_step(fs: HarnessFs) {
+  const action = read_yaml(fs, "../../.github/actions/rust-cache/action.yml", nil)
+  const steps = (action?.runs?.steps ?? []).filter({ step -> step?.id == "cache-paths" }).to_list()
+  assert_eq(len(steps), 1)
+  return steps[0]
+}
+
+fn run_cache_identity(capabilities: {fs: HarnessFs, process: HarnessProcess}, env: dict) {
+  const root = capabilities.fs.mkdtemp_in_workspace("rust-cache-identity-")
+  const output = path_join(root, "output")
+  const result = capabilities.process.run(
+    {
+      program: "bash",
+      args: ["-e", "-c", cache_identity_step(capabilities.fs).run],
+      env: env + {GITHUB_OUTPUT: output},
+    },
+  )
+  return {root: root, output: output, result: result}
+}
+
+pipeline test_cache_identity_executes_precise_generation_and_upstream_archive_paths(
+  harness: Harness,
+  task: unknown,
+) {
+  const root = harness.fs.mkdtemp_in_workspace("rust-cache-paths-")
+  const cargo = path_join(root, "cargo")
+  const first = path_join(root, "workspace-a")
+  const second = path_join(root, "workspace-b")
+  const env = {
+    CACHE_SHARED_KEY: "workspace-tests",
+    CACHE_EXPLICIT_SOURCE_KEY: "",
+    CACHE_SOURCE_KEY: "sourcehash",
+    CACHE_BROAD_RESTORE_PREFIX: "",
+    CACHE_WORKSPACES: first + " -> custom\n" + second,
+    CACHE_TARGET_DIR: "",
+    CACHE_BIN: "true",
+    CACHE_WORKSPACE_CRATES: "true",
+    CACHE_RUNNER_TEMP: root,
+    CARGO_HOME: cargo,
+  }
+  const run = run_cache_identity(pick(harness, ["fs", "process"]), env)
+  assert(run.result.success, run.result.stderr)
+  assert_eq(
+    harness.fs.read_text(run.output),
+    "shared-key=workspace-tests-workspace-crates-v3\n"
+      + "restore-prefix=\n"
+      + "paths<<harn-cache-paths\n"
+      + path_join(cargo, "bin")
+      + "\n"
+      + path_join(cargo, ".crates.toml")
+      + "\n"
+      + path_join(cargo, ".crates2.json")
+      + "\n"
+      + path_join(cargo, "registry")
+      + "\n"
+      + path_join(cargo, "git")
+      + "\n"
+      + path_join(first, "custom")
+      + "\n"
+      + path_join(second, "target")
+      + "\n"
+      + path_join(root, "harn-cache-source-key/target")
+      + "\n.harn-workspace-source\nharn-cache-paths\n"
+      + "workspaces<<harn-cache-workspaces\n"
+      + first
+      + " -> custom\n"
+      + second
+      + "\n"
+      + path_join(root, "harn-cache-source-key")
+      + " -> target\nharn-cache-workspaces\n",
+  )
+  const manifest = path_join(root, "harn-cache-source-key/Cargo.toml")
+  const parsed = schema_expect(
+    toml_parse(harness.fs.read_text(manifest)),
+    schema_of(CacheSourceManifest),
+  )
+  assert_eq(parsed.package.metadata.harn.source, "sourcehash")
+  assert_eq(parsed.workspace, {})
+  const changed = run_cache_identity(
+    pick(harness, ["fs", "process"]),
+    env + {CACHE_SOURCE_KEY: "nextsource"},
+  )
+  assert(changed.result.success, changed.result.stderr)
+  assert(harness.fs.read_text(manifest).contains("source = \"nextsource\""))
+}
+
+pipeline test_cache_identity_keeps_explicit_boundaries_strict_and_refuses_missing_source(
+  harness: Harness,
+  task: unknown,
+) {
+  const strict = run_cache_identity(
+    pick(harness, ["fs", "process"]),
+    {
+      CACHE_SHARED_KEY: "workspace-tests",
+      CACHE_EXPLICIT_SOURCE_KEY: "sourcehash",
+      CACHE_SOURCE_KEY: "sourcehash",
+      CACHE_BROAD_RESTORE_PREFIX: "",
+      CACHE_WORKSPACES: ".",
+      CACHE_TARGET_DIR: "/tmp/cache-target",
+      CACHE_BIN: "false",
+      CACHE_WORKSPACE_CRATES: "true",
+      CARGO_HOME: "/tmp/cache-cargo",
+    },
+  )
+  assert(strict.result.success, strict.result.stderr)
+  const strict_output = harness.fs.read_text(strict.output)
+  assert(strict_output.contains("shared-key=workspace-tests-sourcehash-workspace-crates-v3\n"))
+  assert(strict_output.contains("restore-prefix=\n"))
+  assert(strict_output.contains("/tmp/cache-target\n.harn-workspace-source\n"))
+  const missing = run_cache_identity(
+    pick(harness, ["fs", "process"]),
+    {
+      CACHE_SHARED_KEY: "workspace-tests",
+      CACHE_EXPLICIT_SOURCE_KEY: "",
+      CACHE_SOURCE_KEY: "",
+      CACHE_BROAD_RESTORE_PREFIX: "",
+      CACHE_WORKSPACES: ".",
+      CACHE_TARGET_DIR: "",
+      CACHE_BIN: "false",
+      CACHE_WORKSPACE_CRATES: "true",
+    },
+  )
+  assert(!missing.result.success)
+  assert(missing.result.stderr.contains("no measured source fingerprint"))
+}
+
+pipeline test_cache_identity_preserves_nonretained_and_explicit_fallback_contracts(
+  harness: Harness,
+  task: unknown,
+) {
+  const run = run_cache_identity(
+    pick(harness, ["fs", "process"]),
+    {
+      CACHE_SHARED_KEY: "package-audit",
+      CACHE_EXPLICIT_SOURCE_KEY: "",
+      CACHE_SOURCE_KEY: "",
+      CACHE_BROAD_RESTORE_PREFIX: "v0-rust-package-audit-custom-",
+      CACHE_WORKSPACES: ".",
+      CACHE_TARGET_DIR: "/tmp/audit-target",
+      CACHE_BIN: "false",
+      CACHE_WORKSPACE_CRATES: "false",
+      CARGO_HOME: "/tmp/audit-cargo",
+    },
+  )
+  assert(run.result.success, run.result.stderr)
+  assert_eq(
+    harness.fs.read_text(run.output),
+    "shared-key=package-audit\nrestore-prefix=v0-rust-package-audit-custom-\n"
+      + "paths<<harn-cache-paths\n/tmp/audit-cargo/registry\n/tmp/audit-cargo/git\n"
+      + "/tmp/audit-target\nharn-cache-paths\n"
+      + "workspaces<<harn-cache-workspaces\n.\nharn-cache-workspaces\n",
+  )
 }

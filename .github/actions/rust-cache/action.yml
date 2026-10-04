@@ -6,7 +6,7 @@ inputs:
     description: Stable cache identity shared by compatible jobs.
     required: true
   source-key:
-    description: Optional source fingerprint appended to the upstream cache key.
+    description: Explicit source boundary; retained workspace crates default to the canonical source fingerprint.
     required: false
     default: ""
   cache-on-failure:
@@ -39,7 +39,7 @@ inputs:
     default: ""
 
   broad-restore-prefix:
-    description: Optional same-version cache key prefix to restore before the precise Swatinem key.
+    description: Optional explicit fallback prefix for callers with a separately published compatible archive.
     required: false
     default: ""
   prune-superseded-release-generations:
@@ -64,6 +64,9 @@ outputs:
   cache-hit:
     description: Whether the exact cache key was restored.
     value: ${{ steps.cache.outputs.cache-hit }}
+  source-current:
+    description: Whether the restored workspace record names the unchanged checked-out source.
+    value: ${{ steps.reuse.outputs.source-current }}
 
 runs:
   using: composite
@@ -76,25 +79,63 @@ runs:
         HARN_CACHE_FAMILY_PREFIX: v0-rust-${{ inputs.shared-key }}-
       run: ./scripts/prune_ci_cache_generations.sh --family-prefix "$HARN_CACHE_FAMILY_PREFIX"
 
-    - name: Restore broad Rust cache fallback
-      if: inputs.broad-restore-prefix != ''
-      uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5
-      continue-on-error: true
-      with:
-        path: |
-          ${{ env.CARGO_HOME || '~/.cargo' }}/registry
-          ${{ env.CARGO_HOME || '~/.cargo' }}/git
-          ${{ env.CARGO_TARGET_DIR || format('{0}/target', github.workspace) }}
-        key: ${{ inputs.broad-restore-prefix }}${{ github.sha }}
-        restore-keys: |
-          ${{ inputs.broad-restore-prefix }}
+    # Put the measured source in a synthetic Cargo manifest. Pinned Swatinem
+    # hashes manifests after its OS, architecture and toolchain restore prefix,
+    # so an exact source miss can reuse the prior compatible generation without
+    # crossing those boundaries. A source component in shared-key would sit
+    # before them and make a safe older-source prefix impossible.
+    - name: Resolve Rust cache identity and paths
+      id: cache-paths
+      shell: bash
+      env:
+        CACHE_SHARED_KEY: ${{ inputs.shared-key }}
+        CACHE_EXPLICIT_SOURCE_KEY: ${{ inputs.source-key }}
+        CACHE_SOURCE_KEY: ${{ inputs.source-key || (inputs.cache-workspace-crates == 'true' && hashFiles('Cargo.lock', 'Cargo.toml', 'crates/**', 'spec/**', 'tree-sitter-harn/**')) || '' }}
+        CACHE_BROAD_RESTORE_PREFIX: ${{ inputs.broad-restore-prefix }}
+        CACHE_WORKSPACES: ${{ inputs.workspaces }}
+        CACHE_TARGET_DIR: ${{ inputs.target-dir }}
+        CACHE_BIN: ${{ inputs.cache-bin }}
+        CACHE_WORKSPACE_CRATES: ${{ inputs.cache-workspace-crates }}
+        CACHE_RUNNER_TEMP: ${{ runner.temp }}
+      run: |
+        node <<'NODE'
+        const fs = require('node:fs');
+        const os = require('node:os');
+        const path = require('node:path');
+        const retained = process.env.CACHE_WORKSPACE_CRATES === 'true';
+        const explicit = process.env.CACHE_EXPLICIT_SOURCE_KEY || '';
+        const source = process.env.CACHE_SOURCE_KEY || '';
+        if (retained && !explicit && !source) throw new Error('Retained workspace cache has no measured source fingerprint');
+        const shared = process.env.CACHE_SHARED_KEY;
+        const key = `${shared}${explicit ? `-${explicit}` : ''}${retained ? '-workspace-crates-v3' : ''}`;
+        const fallback = process.env.CACHE_BROAD_RESTORE_PREFIX || '';
+        const cargo = process.env.CARGO_HOME || path.join(os.homedir(), '.cargo');
+        const paths = [path.join(cargo, 'registry'), path.join(cargo, 'git')];
+        if (process.env.CACHE_BIN === 'true') {
+          paths.unshift(path.join(cargo, 'bin'), path.join(cargo, '.crates.toml'), path.join(cargo, '.crates2.json'));
+        }
+        const workspaces = (process.env.CACHE_WORKSPACES || '.').trim().split('\n');
+        if (retained && !explicit) {
+          const keyRoot = path.join(process.env.CACHE_RUNNER_TEMP || os.tmpdir(), 'harn-cache-source-key');
+          fs.mkdirSync(path.join(keyRoot, 'src'), { recursive: true });
+          fs.writeFileSync(path.join(keyRoot, 'Cargo.toml'), `[package]\nname = "harn-cache-source-key"\nversion = "0.0.0"\nedition = "2021"\npublish = false\n\n[package.metadata.harn]\nsource = "${source}"\n\n[workspace]\n`);
+          fs.writeFileSync(path.join(keyRoot, 'src/lib.rs'), '');
+          workspaces.push(`${keyRoot} -> target`);
+        }
+        if (process.env.CACHE_TARGET_DIR) paths.push(process.env.CACHE_TARGET_DIR);
+        else for (const workspace of workspaces) {
+          const [root, target = 'target'] = workspace.split('->').map(value => value.trim());
+          paths.push(path.join(path.resolve(root), target));
+        }
+        if (retained) paths.push('.harn-workspace-source');
+        fs.appendFileSync(process.env.GITHUB_OUTPUT, `shared-key=${key}\nrestore-prefix=${fallback}\npaths<<harn-cache-paths\n${paths.join('\n')}\nharn-cache-paths\nworkspaces<<harn-cache-workspaces\n${workspaces.join('\n')}\nharn-cache-workspaces\n`);
+        NODE
 
     - id: cache
       uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
       continue-on-error: true
       with:
-        shared-key: >-
-          ${{ format('{0}{1}', inputs.source-key != '' && format('{0}-{1}', inputs.shared-key, inputs.source-key) || inputs.shared-key, inputs.cache-workspace-crates == 'true' && '-workspace-crates-v2' || '') }}
+        shared-key: ${{ steps.cache-paths.outputs.shared-key }}
         cache-on-failure: ${{ inputs.cache-on-failure }}
         cache-bin: ${{ inputs.cache-bin }}
         cache-workspace-crates: ${{ inputs.cache-workspace-crates }}
@@ -105,13 +146,24 @@ runs:
         cache-directories: ${{ format('{0} {1}', inputs.target-dir, inputs.cache-workspace-crates == 'true' && '.harn-workspace-source' || '') }}
         # Fall back to Swatinem's documented default rather than passing an
         # empty string, so existing callers keep their exact current key.
-        workspaces: ${{ inputs.workspaces != '' && inputs.workspaces || '.' }}
+        workspaces: ${{ steps.cache-paths.outputs.workspaces }}
         save-if: ${{ inputs.save == 'true' && github.ref == 'refs/heads/main' }}
+
+    - name: Restore broad Rust cache fallback
+      if: steps.cache-paths.outputs.restore-prefix != '' && steps.cache.outputs.cache-hit != 'true'
+      uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5
+      continue-on-error: true
+      with:
+        path: ${{ steps.cache-paths.outputs.paths }}
+        key: ${{ steps.cache-paths.outputs.restore-prefix }}${{ github.sha }}
+        restore-keys: |
+          ${{ steps.cache-paths.outputs.restore-prefix }}
 
     # A fresh checkout stamps every source with the checkout time, so after an
     # exact hit Cargo still rebuilt every workspace crate. This dates unchanged
     # paths before the cached build and leaves changed ones new.
     - name: Reuse unchanged workspace crates
+      id: reuse
       if: inputs.reuse-workspace-crates == 'true' && inputs.cache-workspace-crates == 'true'
       shell: bash
       run: ./scripts/ci/reuse_workspace_crates.sh restore

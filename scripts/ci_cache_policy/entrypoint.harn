@@ -74,6 +74,7 @@ pub fn run_ci_cache_policy(harness: Harness) {
     harness.runtime.exit(1)
   }
   const action = read_yaml(harness.fs, ACTION_PATH, nil)
+  const workspace_reuse_script = harness.fs.read_text(WORKSPACE_REUSE_SCRIPT)
   const node_action = read_yaml(harness.fs, NODE_ACTION_PATH, nil)
   const setup_harn_action = read_yaml(harness.fs, SETUP_HARN_ACTION_PATH, nil)
   const sccache_action = read_yaml(harness.fs, SCCACHE_ACTION_PATH, nil)
@@ -91,6 +92,7 @@ pub fn run_ci_cache_policy(harness: Harness) {
   }
   const error_groups: list<list<string>> = [
     ci_cache_policy_errors(policy, action, node_action, workflows),
+    native_source_projection_errors(workspace_reuse_script),
     release_warm_cache_path_policy_errors(
       release_warm_cache_path_policy,
       workflows[RELEASE_BINARY_WORKFLOW],
