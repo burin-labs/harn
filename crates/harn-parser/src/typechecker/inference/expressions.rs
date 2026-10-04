@@ -28,6 +28,7 @@ use super::super::{is_gradual_type_name, TypeChecker};
 
 const UNNECESSARY_SAFE_NAVIGATION_RULE: &str = "unnecessary-safe-navigation";
 const UNNECESSARY_NON_NULL_ASSERT_RULE: &str = "unnecessary-non-null-assert";
+const UNTYPED_OPTIONAL_CHAIN_RULE: &str = "untyped-optional-chain";
 
 enum SafeNavigationKind<'a> {
     Subscript,
@@ -484,6 +485,9 @@ impl TypeChecker {
                         return Some(Self::apply_type_bindings(&ty, &bindings));
                     }
                     return None;
+                }
+                if let Some(unwrapped) = self.infer_result_unwrap_call(name, args, scope) {
+                    return Some(unwrapped);
                 }
                 if let std::ops::ControlFlow::Break(decided) =
                     self.infer_builtin_shape_call(name, args, scope)
@@ -1467,6 +1471,132 @@ impl TypeChecker {
             object,
             SafeNavigationKind::Property(property),
         );
+    }
+
+    /// `unwrap`, `unwrap_err`, and `unwrap_or` on a value typed `Result<T, E>`.
+    ///
+    /// The builtins are declared over `any` because at runtime they pass a
+    /// non-`Result` value through unchanged. On a typed `Result` they are as
+    /// precise as postfix `?`: `unwrap` gives `T`, `unwrap_err` gives `E`, and
+    /// `unwrap_or` gives `T` or the default's type. Without this, the
+    /// `is_err`/`unwrap` spelling of a decode erased the type `?` keeps.
+    fn infer_result_unwrap_call(
+        &self,
+        name: &str,
+        args: &[SNode],
+        scope: &TypeScope,
+    ) -> Option<TypeExpr> {
+        if !matches!(name, "unwrap" | "unwrap_err" | "unwrap_or") || self.name_is_imported(name) {
+            return None;
+        }
+        let Some(TypeExpr::Applied {
+            name: applied,
+            args: parts,
+        }) = self.infer_type(args.first()?, scope)
+        else {
+            return None;
+        };
+        if applied != "Result" || parts.len() != 2 {
+            return None;
+        }
+        // An `unknown` payload keeps the dynamic result it always had. Typing
+        // it `unknown` would demand a narrowing at every existing
+        // `unwrap(read_json_result(...))`, which is a separate migration.
+        let part = if name == "unwrap_err" {
+            &parts[1]
+        } else {
+            &parts[0]
+        };
+        if matches!(part, TypeExpr::Named(unknown) if unknown == "unknown") {
+            return None;
+        }
+        if name == "unwrap_or" {
+            let default = self.infer_type(args.get(1)?, scope)?;
+            return Some(simplify_union(vec![part.clone(), default]));
+        }
+        Some(part.clone())
+    }
+
+    /// Warn on the second `?.` link of a chain whose first optional receiver
+    /// is untyped (`any`, `unknown`, an open `dict`, or nothing inferred).
+    ///
+    /// `data?.repository?.pullRequest` hedges every field because nothing
+    /// declared the shape. Decoding once with `schema_parse(value,
+    /// schema_of(T))` validates it and leaves typed fields behind. A chain
+    /// over a typed record with optional fields is real nil handling and is
+    /// left alone. Reporting only the second link gives one warning per chain.
+    pub(in crate::typechecker) fn check_untyped_optional_chain(
+        &mut self,
+        snode: &SNode,
+        object: &SNode,
+        scope: &TypeScope,
+    ) {
+        let mut links = 0;
+        let mut innermost_receiver = None;
+        let mut cursor = object;
+        loop {
+            match &cursor.node {
+                Node::OptionalPropertyAccess { object, .. }
+                | Node::OptionalSubscriptAccess { object, .. } => {
+                    links += 1;
+                    innermost_receiver = Some(object.as_ref());
+                    cursor = object;
+                }
+                Node::PropertyAccess { object, .. } | Node::SubscriptAccess { object, .. } => {
+                    cursor = object;
+                }
+                _ => break,
+            }
+        }
+        if links != 1 {
+            return;
+        }
+        let Some(receiver) = innermost_receiver else {
+            return;
+        };
+        let receiver_type = self.infer_type(receiver, scope);
+        if receiver_type
+            .as_ref()
+            .is_some_and(|ty| !self.type_is_untyped_record(ty, scope))
+        {
+            return;
+        }
+        self.lint_info_at(
+            Code::LintUntypedOptionalChain,
+            UNTYPED_OPTIONAL_CHAIN_RULE,
+            "`?.` chain over an untyped value hedges every field".to_string(),
+            snode.span,
+            "declare a `type` for the value: decode untyped input once with \
+             `json_decode(text, schema_of(T))` or `schema_parse(value, schema_of(T))`, \
+             or annotate the parameter or return type that erased it to `dict`; then \
+             read typed fields with `.`"
+                .to_string(),
+        );
+    }
+
+    /// `any`, `unknown`, an open `dict`, or a union of those with `nil`.
+    fn type_is_untyped_record(&self, ty: &TypeExpr, scope: &TypeScope) -> bool {
+        let ty = self.resolve_alias(ty, scope);
+        match &ty {
+            TypeExpr::Named(name) => matches!(name.as_str(), "any" | "unknown" | "_" | "dict"),
+            TypeExpr::Applied { name, args } if name == "dict" => args.last().is_none_or(|value| {
+                matches!(value, TypeExpr::Named(name) if matches!(name.as_str(), "any" | "unknown" | "_"))
+            }),
+            TypeExpr::Union(members) => {
+                let mut saw_untyped = false;
+                for member in members {
+                    if matches!(member, TypeExpr::Named(name) if name == "nil") {
+                        continue;
+                    }
+                    if !self.type_is_untyped_record(member, scope) {
+                        return false;
+                    }
+                    saw_untyped = true;
+                }
+                saw_untyped
+            }
+            _ => false,
+        }
     }
 
     pub(in crate::typechecker) fn check_unnecessary_safe_method_call(

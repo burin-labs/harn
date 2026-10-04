@@ -368,6 +368,100 @@ fn process(raw) {
 }
 ```
 
+## Decode at the boundary
+
+Data that enters a script untyped (command output, an HTTP body, a GraphQL
+response, a file someone else wrote) should be decoded once, where it enters,
+into a declared `type`. Everything after that reads typed fields with `.`.
+
+The alternative hedges every read. This is a Smart Ship helper that finds the
+failed merge-queue run for a pull request:
+
+```harn,ignore
+const rows = parse_json_or_nil(to_string(child?.stdout ?? ""))
+if !command_ok(child) || type_of(rows) != "list" {
+  return ""
+}
+for row in rows {
+  const branch = to_string(row?.headBranch ?? "")
+  if branch.starts_with(prefix) && row?.conclusion == "failure" {
+    return to_string(row?.url ?? "")
+  }
+}
+return ""
+```
+
+Nothing declared what a row looks like, so every field is wrapped in `?.`,
+`??`, and `to_string`. A renamed field reads as `""` and the helper reports no
+failed run instead of an error.
+
+Declare the shape and decode it:
+
+```harn
+import { command_run } from "std/command"
+
+type WorkflowRun = {headBranch: string, conclusion: string?, url: string}
+type WorkflowRuns = list<WorkflowRun>
+
+fn failed_queue_run(
+  tools: HarnessTools,
+  repo: string,
+  prefix: string,
+) -> Result<string?, string> {
+  const fields = "headBranch,conclusion,url"
+  const child = command_run(
+    tools,
+    ["gh", "run", "list", "-R", repo, "--json", fields],
+  )
+  if !child.success {
+    return Err(child.stderr)
+  }
+  const decoded = json_decode(child.stdout, schema_of(WorkflowRuns))
+  if is_err(decoded) {
+    return Err(unwrap_err(decoded).message)
+  }
+  for run in unwrap(decoded) {
+    if run.headBranch.starts_with(prefix) && run.conclusion == "failure" {
+      return Ok(run.url)
+    }
+  }
+  return Ok(nil)
+}
+```
+
+The pieces:
+
+- `schema_of(T)` turns a `type` alias into its schema at compile time.
+- `json_decode(text, schema_of(T))` parses and validates in one step and
+  returns `Result<T, SchemaError>`. Malformed JSON and a shape mismatch are
+  both `Err`; neither throws.
+- `schema_parse(value, schema_of(T))` does the same for a value you already
+  have, such as a `dict` from another API. `schema_expect` throws instead of
+  returning a `Result`.
+- The error record has `message` (the first issue), `errors` (every issue as
+  text), and `issues` (`{path, message, code}` for each).
+- In a function whose error type matches, postfix `?` unwraps the `Ok` or
+  returns the `Err`: `const runs = json_decode(text, schema_of(WorkflowRuns))?`.
+
+How decoding treats fields:
+
+- Unknown fields pass, so a type needs only the fields the script reads.
+- `name: T?` must be present but may be `null`. GraphQL returns nullable
+  fields this way.
+- `name?: T` may also be absent.
+- Nested records, lists, and unions of records decode in one call.
+
+Typed results need no decoding. `command_run` returns `CommandResult`,
+`harness.process.exec` and `shell` return `{stdout, stderr, status, success}`,
+and every buffered `harness.net` request returns `{status, headers, body,
+final_url, ok}`. None of these fields is ever `nil`, and the checker reports
+`?.` on them as unnecessary (`HARN-LNT-051`). Only the `body` text is untrusted.
+
+The checker reports a `?.` chain over an untyped value as `HARN-LNT-080`
+(`untyped-optional-chain`). It is advisory: it appears in `harn check`,
+`harn lint`, and the editor, but does not fail `--strict`. Declaring the type
+and decoding once resolves it.
+
 ## Stack traces
 
 When a runtime error occurs, Harn displays a stack trace showing the call

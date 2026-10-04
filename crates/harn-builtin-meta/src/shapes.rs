@@ -148,6 +148,42 @@ pub const PROCESS_RESULT: Ty = Ty::Shape(&[
     ShapeFieldDescriptor::new("success", TY_BOOL),
 ]);
 
+/// Captured result of `harness.process.exec`, `shell`, `exec_at`, and
+/// `shell_at`.
+///
+/// The typed projection of `vm_output_to_value` in `harn-vm`. A non-zero exit
+/// is a result with `success: false`; a spawn failure throws instead, so no
+/// field is ever nil. `status` is the exit code, or `-1` for a signal.
+pub const EXEC_RESULT: Ty = Ty::Shape(&[
+    ShapeFieldDescriptor::new("stdout", TY_STRING),
+    ShapeFieldDescriptor::new("stderr", TY_STRING),
+    ShapeFieldDescriptor::new("status", TY_INT),
+    ShapeFieldDescriptor::new("success", TY_BOOL),
+]);
+
+/// Response of every buffered `harness.net` request.
+///
+/// The typed projection of `build_http_response` in `harn-vm`, shared by live
+/// and mocked responses. A 4xx or 5xx is a response with `ok: false`; a
+/// transport failure throws. `body` is untrusted text: decode it with
+/// `json_parse` and `schema_parse`.
+pub const HTTP_RESPONSE: Ty = Ty::Shape(&[
+    ShapeFieldDescriptor::new("status", TY_INT),
+    ShapeFieldDescriptor::new("headers", TY_DICT),
+    ShapeFieldDescriptor::new("body", TY_STRING),
+    ShapeFieldDescriptor::new("final_url", TY_STRING),
+    ShapeFieldDescriptor::new("ok", TY_BOOL),
+]);
+
+/// Response of `harness.net.download`; the typed projection of
+/// `build_http_download_response` in `harn-vm`.
+pub const HTTP_DOWNLOAD_RESPONSE: Ty = Ty::Shape(&[
+    ShapeFieldDescriptor::new("status", TY_INT),
+    ShapeFieldDescriptor::new("headers", TY_DICT),
+    ShapeFieldDescriptor::new("bytes_written", TY_INT),
+    ShapeFieldDescriptor::new("ok", TY_BOOL),
+]);
+
 // ---------------------------------------------------------------------------
 // Agent option bags
 // ---------------------------------------------------------------------------

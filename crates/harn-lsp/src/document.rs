@@ -198,6 +198,7 @@ impl DocumentState {
             let severity = match diag.severity {
                 harn_parser::DiagnosticSeverity::Error => DiagnosticSeverity::ERROR,
                 harn_parser::DiagnosticSeverity::Warning => DiagnosticSeverity::WARNING,
+                harn_parser::DiagnosticSeverity::Info => DiagnosticSeverity::INFORMATION,
             };
             let range = if let Some(span) = &diag.span {
                 span_to_range(span)

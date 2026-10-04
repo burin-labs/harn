@@ -1000,6 +1000,28 @@ Use `json_pointer(value, ptr)` for RFC 6901 paths such as
 paths return `nil`. `json_pointer_set(value, ptr, new)` and
 `json_pointer_delete(value, ptr)` return modified copies.
 
+Decode untyped data once, where it enters, into a declared type. Then read
+typed fields with `.`, never a `?.` chain:
+
+```harn
+type User = {email: string, active: bool}
+type Users = {users: list<User>}
+
+fn active_emails(body: string) -> Result<list<string>, string> {
+  const decoded = json_decode(body, schema_of(Users))
+  if is_err(decoded) {
+    return Err(unwrap_err(decoded).message)
+  }
+  const active = unwrap(decoded).users.filter({ u -> u.active })
+  return Ok(active.map({ u -> u.email }))
+}
+```
+
+`json_decode(text, schema_of(T))` parses and validates; `schema_parse(value,
+schema_of(T))` validates a value you already hold. Both return `Result<T,
+{message, errors, issues}>`. Unknown fields pass. See "Decode at the boundary"
+in `docs/src/error-handling.md`.
+
 Use `jq(value, expr)` for a jq-like stream query; it always returns a
 list. Use `jq_first(value, expr)` when you expect one value or `nil`.
 Supported v1 forms include `.`, `.foo.bar`, `.[2]`, `.[2:5]`,

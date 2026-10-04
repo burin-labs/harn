@@ -1600,6 +1600,40 @@ mod tests {
             .contains("response body exceeded max_response_bytes"));
     }
 
+    /// The checker types `harness.net` results from these shapes, so a field
+    /// the builder stops writing would read as present and typed.
+    #[test]
+    fn response_builders_write_exactly_their_declared_shapes() {
+        fn field_names(ty: harn_builtin_meta::Ty) -> Vec<String> {
+            let harn_builtin_meta::Ty::Shape(fields) = ty else {
+                panic!("response shapes must stay closed records");
+            };
+            let mut names: Vec<_> = fields.iter().map(|field| field.name.to_string()).collect();
+            names.sort_unstable();
+            names
+        }
+        fn written(value: VmValue) -> Vec<String> {
+            let mut names: Vec<_> = value
+                .as_dict()
+                .expect("dict")
+                .keys()
+                .map(|key| key.to_string())
+                .collect();
+            names.sort_unstable();
+            names
+        }
+        let response = build_http_response(200, crate::value::DictMap::new(), String::new(), "u");
+        assert_eq!(
+            written(response),
+            field_names(harn_builtin_meta::shapes::HTTP_RESPONSE)
+        );
+        let download = build_http_download_response(200, crate::value::DictMap::new(), 0);
+        assert_eq!(
+            written(download),
+            field_names(harn_builtin_meta::shapes::HTTP_DOWNLOAD_RESPONSE)
+        );
+    }
+
     #[test]
     fn download_response_saturates_large_byte_count() {
         let response = build_http_download_response(200, crate::value::DictMap::new(), u64::MAX);

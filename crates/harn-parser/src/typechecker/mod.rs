@@ -199,6 +199,10 @@ pub enum DiagnosticDetails {
 pub enum DiagnosticSeverity {
     Error,
     Warning,
+    /// Advisory: reported everywhere a warning is, but never fails a
+    /// `--strict` run. A rule starts here while existing code still carries
+    /// the pattern it reports.
+    Info,
 }
 
 /// The static type checker.
@@ -897,6 +901,28 @@ impl TypeChecker {
             related: Vec::new(),
             fix: None,
             details: None,
+            repair: default_repair(code),
+        });
+    }
+
+    /// An advisory lint finding with no mechanical fix.
+    pub(in crate::typechecker) fn lint_info_at(
+        &mut self,
+        code: Code,
+        rule: &'static str,
+        message: String,
+        span: Span,
+        help: String,
+    ) {
+        self.diagnostics.push(TypeDiagnostic {
+            code,
+            message,
+            severity: DiagnosticSeverity::Info,
+            span: Some(span),
+            help: Some(help),
+            related: Vec::new(),
+            fix: None,
+            details: Some(DiagnosticDetails::LintRule { rule }),
             repair: default_repair(code),
         });
     }

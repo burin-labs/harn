@@ -7,6 +7,8 @@ pub type CommandResult = {
   cwd: string,
   stdout: string,
   stderr: string,
+  combined: string,
+  timed_out: bool,
   ...rest,
 }
 
@@ -27,6 +29,8 @@ pub fn command_result_ok(stdout: string = "", extra: dict? = nil) -> CommandResu
       cwd: base?.cwd ?? "",
       stdout: stdout,
       stderr: "",
+      combined: stdout,
+      timed_out: false,
     }
 }
 
@@ -51,5 +55,7 @@ pub fn command_result_fail(
       cwd: base?.cwd ?? "",
       stdout: base?.stdout ?? "",
       stderr: stderr,
+      combined: (base?.stdout ?? "") + stderr,
+      timed_out: base?.timed_out ?? false,
     }
 }

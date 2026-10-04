@@ -53,6 +53,36 @@ pipeline default(harness: Harness) {
 }
 ```
 
+## Typed responses
+
+Declare the response type next to the query and decode `data` once. Only the
+fields the script reads need to appear, and unknown fields pass. Mark a field
+GraphQL may null as `T?`; it is still present in the response.
+
+```harn
+type IssueNode = {id: string, identifier: string, title: string}
+
+type IssuesData = {
+  issues: {
+    nodes: list<IssueNode>,
+    pageInfo: {hasNextPage: bool, endCursor: string?},
+  },
+}
+
+fn issue_titles(data: unknown) -> Result<list<string>, string> {
+  const decoded = schema_parse(data, schema_of(IssuesData))
+  if is_err(decoded) {
+    return Err(unwrap_err(decoded).message)
+  }
+  return Ok(unwrap(decoded).issues.nodes.map({ issue -> issue.title }))
+}
+```
+
+An inline fragment over a union (`... on CheckRun`, `... on StatusContext`)
+decodes as a union of records that each carry a literal `__typename`, and a
+`__typename` comparison narrows it. See "Decode at the boundary" in the
+error-handling guide.
+
 `auth` accepts `{access_token}`, `{api_key}`, `{token, scheme}`, or
 `{authorization}`. Rate-limit metadata is collected from common `X-RateLimit-*`,
 Linear endpoint, and complexity headers.

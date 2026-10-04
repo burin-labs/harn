@@ -458,6 +458,7 @@ impl Compiler {
             "schema_is"
                 | "schema_expect"
                 | "schema_parse"
+                | "json_decode"
                 | "schema_check"
                 | "schema_report"
                 | "is_type"
