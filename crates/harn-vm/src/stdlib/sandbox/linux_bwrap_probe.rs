@@ -116,6 +116,47 @@ mod tests {
         )));
     }
 
+    #[test]
+    fn preparation_preserves_caller_cancellation() {
+        let root = tempfile::tempdir().unwrap();
+        let _cancel = crate::op_interrupt::install(
+            Some(std::sync::Arc::new(std::sync::atomic::AtomicBool::new(
+                true,
+            ))),
+            None,
+        );
+        let error = super::super::prepare(
+            "/usr/bin/printf",
+            &["known-child".into()],
+            &policy(root.path()),
+            SandboxProfile::OsHardened,
+        )
+        .err()
+        .expect("cancelled preparation must not launch the payload");
+        assert!(crate::cancellation::is_cancellation(&error), "{error}");
+        assert!(error.sandbox_mechanism_unavailable().is_none());
+    }
+
+    #[test]
+    fn preparation_preserves_caller_deadline() {
+        let root = tempfile::tempdir().unwrap();
+        let _deadline = crate::op_interrupt::install(None, Some(Instant::now()));
+        let error = super::super::prepare(
+            "/usr/bin/printf",
+            &["known-child".into()],
+            &policy(root.path()),
+            SandboxProfile::OsHardened,
+        )
+        .err()
+        .expect("expired preparation must not launch the payload");
+        assert!(matches!(error, crate::VmError::Thrown(_)), "{error}");
+        assert_eq!(
+            error.to_string(),
+            crate::Vm::deadline_exceeded_error().to_string()
+        );
+        assert!(error.sandbox_mechanism_unavailable().is_none());
+    }
+
     fn policy(root: &Path) -> CapabilityPolicy {
         CapabilityPolicy {
             workspace_roots: vec![root.display().to_string()],

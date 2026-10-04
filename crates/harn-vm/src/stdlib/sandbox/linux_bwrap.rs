@@ -67,7 +67,13 @@ pub(in crate::stdlib::sandbox) fn prepare(
     policy: &CapabilityPolicy,
     profile: SandboxProfile,
 ) -> Result<PrepareOutcome, VmError> {
-    if !available() {
+    let available = available();
+    // The probe's setup deadline is restored before this read. A caller's
+    // cancellation/deadline is control flow, not a missing host mechanism.
+    if let Some(error) = crate::op_interrupt::requested_error() {
+        return Err(error);
+    }
+    if !available {
         let mut refusal = super::super::SandboxMechanismUnavailable::new(
             SandboxMechanism::LinuxBubblewrap,
             SandboxMechanismAvailability::AbsentOnHost,

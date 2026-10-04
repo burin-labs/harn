@@ -484,20 +484,40 @@ pub fn installed() -> bool {
 /// fired: the cancel token is set, or the deadline has passed. Cheap enough
 /// to call from a ~20ms poll loop. Returns `false` when nothing is armed.
 pub fn requested() -> bool {
+    requested_reason().is_some()
+}
+
+enum InterruptReason {
+    Deadline,
+    Cancelled,
+}
+
+/// Preparation has no VM to dispatch through; its caller retains that owner.
+pub(crate) fn requested_error() -> Option<crate::VmError> {
+    requested_reason().map(|reason| match reason {
+        InterruptReason::Deadline => crate::Vm::deadline_exceeded_error(),
+        InterruptReason::Cancelled => crate::cancellation::cancelled_without_machine(),
+    })
+}
+
+fn requested_reason() -> Option<InterruptReason> {
     CURRENT.with(|slot| {
         let ctx = slot.borrow();
-        let Some(ctx) = ctx.as_ref() else {
-            return false;
-        };
+        let ctx = ctx.as_ref()?;
+        if ctx
+            .deadline
+            .is_some_and(|deadline| Instant::now() >= deadline)
+        {
+            return Some(InterruptReason::Deadline);
+        }
         if ctx
             .cancel
             .as_ref()
             .is_some_and(|token| token.load(Ordering::SeqCst))
         {
-            return true;
+            return Some(InterruptReason::Cancelled);
         }
-        ctx.deadline
-            .is_some_and(|deadline| Instant::now() >= deadline)
+        None
     })
 }
 
