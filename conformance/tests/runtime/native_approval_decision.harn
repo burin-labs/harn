@@ -83,4 +83,33 @@ fn main(harness: Harness) {
       {tool_name: "run", arguments: {argv: ["echo", "foo", "bar"]}},
     ).action,
   )
+  const resource = {
+    rules: [
+      {id: "ask", source: "mode", ask: "read"},
+      {
+        id: "memory",
+        source: "user",
+        identity_match: "literal",
+        allow: {tool: "read", path: "report*.txt"},
+      },
+    ],
+  }
+  harness.stdio.println(
+    harness.runtime.evaluate_approval_policy(
+      resource,
+      {tool_name: "read", arguments: {path: "report*.txt"}},
+    ).action,
+  )
+  harness.stdio.println(
+    harness.runtime.evaluate_approval_policy(
+      resource,
+      {tool_name: "read", arguments: {path: "report-2026.txt"}},
+    ).action,
+  )
+  harness.stdio.println(
+    harness.runtime.evaluate_approval_policy(
+      {rules: [{id: "authored", allow: {path: "report*.txt"}}]},
+      {tool_name: "read", arguments: {path: "report-2026.txt"}},
+    ).receipt.matched_rule.id,
+  )
 }

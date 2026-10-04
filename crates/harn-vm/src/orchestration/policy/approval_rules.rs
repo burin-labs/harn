@@ -278,13 +278,13 @@ impl PolicyRuleMatch {
         (self.tool.is_empty() || identity.matches(&self.tool, &[ctx.tool_name.clone()]))
             && (self.tool_kind.is_empty() || identity.matches(&self.tool_kind, &ctx.tool_kinds()))
             && (self.side_effect.is_empty()
-                || any_glob_matches(&self.side_effect, &ctx.side_effects()))
-            && (self.path.is_empty() || any_glob_matches(&self.path, &ctx.path_candidates))
+                || identity.matches(&self.side_effect, &ctx.side_effects()))
+            && (self.path.is_empty() || identity.matches(&self.path, &ctx.path_candidates))
             && (self.command.is_empty() || identity.matches_command(&self.command, ctx))
             && (self.command_identity.is_empty()
                 || identity.matches(&self.command_identity, &ctx.command_identities))
-            && (self.url.is_empty() || any_fragment_matches(&self.url, &ctx.urls))
-            && (self.domain.is_empty() || any_glob_matches(&self.domain, &ctx.domains))
+            && (self.url.is_empty() || identity.matches_fragment(&self.url, &ctx.urls))
+            && (self.domain.is_empty() || identity.matches(&self.domain, &ctx.domains))
             && (self.http_method.is_empty()
                 || identity.matches(
                     &normalize_patterns_upper(&self.http_method),
@@ -294,17 +294,17 @@ impl PolicyRuleMatch {
             && (self.mcp_tool.is_empty() || identity.matches(&self.mcp_tool, &ctx.mcp_tools))
             && (self.agent.is_empty()
                 || ctx.agent.as_ref().is_some_and(|agent| {
-                    any_glob_matches(&self.agent, std::slice::from_ref(agent))
+                    identity.matches(&self.agent, std::slice::from_ref(agent))
                 }))
             && (self.persona.is_empty()
                 || ctx.persona.as_ref().is_some_and(|persona| {
-                    any_glob_matches(&self.persona, std::slice::from_ref(persona))
+                    identity.matches(&self.persona, std::slice::from_ref(persona))
                 }))
             && (self.mode.is_empty()
                 || ctx
                     .mode
                     .as_ref()
-                    .is_some_and(|mode| any_glob_matches(&self.mode, std::slice::from_ref(mode))))
+                    .is_some_and(|mode| identity.matches(&self.mode, std::slice::from_ref(mode))))
             && host_request::env_modes_match(&self.env_mode, &ctx.env_modes, identity)
             && (self.capability.is_empty() || identity.matches(&self.capability, &ctx.capabilities))
             && self
@@ -321,7 +321,7 @@ pub struct PolicyRule {
     pub action: PolicyAction,
     #[serde(default, skip_serializing_if = "PolicyRuleSource::is_policy")]
     pub source: PolicyRuleSource,
-    /// Identity fields in a remembered invocation are literal, not authored patterns.
+    /// Captured values in a remembered request are literal, not authored patterns.
     #[serde(default, skip_serializing_if = "PolicyIdentityMatch::is_pattern")]
     pub identity_match: PolicyIdentityMatch,
     #[serde(rename = "match")]

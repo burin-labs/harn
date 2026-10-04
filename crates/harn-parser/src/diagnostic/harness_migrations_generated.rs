@@ -138,6 +138,7 @@ pub(super) const HARNESS_MIGRATIONS: &[(&str, &str)] = &[
     ("eval_ledger_resolve_resume_plan", "harness.runtime.eval_ledger_resolve_resume_plan"),
     ("eval_pack_run", "harness.runtime.eval_pack_run"),
     ("eval_suite_run", "harness.runtime.eval_suite_run"),
+    ("evaluate_approval_policy", "harness.runtime.evaluate_approval_policy"),
     ("event_log.describe", "harness.obs.event_log_describe"),
     ("event_log.emit", "harness.obs.event_log_emit"),
     ("event_log.emit_idempotent", "harness.obs.event_log_emit_idempotent"),

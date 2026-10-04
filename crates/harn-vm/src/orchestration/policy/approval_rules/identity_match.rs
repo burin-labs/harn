@@ -2,8 +2,8 @@ use serde::{Deserialize, Serialize};
 
 use super::{any_fragment_matches, any_glob_matches, EvaluationContext};
 
-/// Matching semantics for invocation identity fields only. Resource scopes
-/// (paths, domains and URLs) retain their authored pattern semantics.
+/// Matching semantics for captured request values, including resource scopes.
+/// Authored rules retain patterns; remembered literal grants never expand them.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PolicyIdentityMatch {
@@ -31,6 +31,13 @@ impl PolicyIdentityMatch {
                 .literal_command
                 .as_ref()
                 .is_some_and(|command| patterns.contains(command)),
+        }
+    }
+
+    pub(super) fn matches_fragment(self, patterns: &[String], candidates: &[String]) -> bool {
+        match self {
+            Self::Pattern => any_fragment_matches(patterns, candidates),
+            Self::Literal => self.matches(patterns, candidates),
         }
     }
 }
@@ -89,6 +96,61 @@ mod tests {
             evaluate(&authored, "git diff HEAD~123").receipt["matched_rule"]["id"],
             "authored"
         );
+    }
+
+    #[test]
+    fn literal_resources_do_not_expand_authored_patterns() {
+        for (field, exact, different) in [
+            ("path", "report*.txt", "report-2026.txt"),
+            (
+                "url",
+                "https://example.org/report*",
+                "https://example.org/report123",
+            ),
+            (
+                "url",
+                "https://example.org/report",
+                "https://example.org/report?secret=1",
+            ),
+            ("domain", "*.example.org", "private.example.org"),
+            ("agent", "worker*", "worker123"),
+            ("persona", "reviewer*", "reviewer123"),
+            ("mode", "edit*", "edit123"),
+        ] {
+            let policy = ToolApprovalPolicy::from_host_json(json!({
+                "rules": [
+                    {"id": "ask", "source": "mode", "ask": "read"},
+                    {"id": "memory", "source": "user", "identity_match": "literal",
+                     "allow": {"tool": "read", field: exact}}
+                ]
+            }))
+            .unwrap();
+            for (value, allow) in [(exact, true), (different, false)] {
+                let decision = policy.evaluate_request(&ToolApprovalRequest {
+                    tool_name: "read".into(),
+                    arguments: json!({field: value}),
+                    policy_decision: Some(json!({"context": {field: value}})),
+                    ..Default::default()
+                });
+                assert_eq!(decision.is_allow(), allow, "{field} {value}: {decision:?}");
+                assert_eq!(decision.is_ask(), !allow, "{field} {value}: {decision:?}");
+                assert_eq!(
+                    decision.receipt["matched_rule"]["id"],
+                    if allow { "memory" } else { "ask" }
+                );
+            }
+        }
+        let authored = ToolApprovalPolicy::from_host_json(json!({
+            "rules": [{"id": "authored", "allow": {"path": "report*.txt"}}]
+        }))
+        .unwrap();
+        let decision = authored.evaluate_request(&ToolApprovalRequest {
+            tool_name: "read".into(),
+            arguments: json!({"path": "report-2026.txt"}),
+            ..Default::default()
+        });
+        assert_eq!(decision.receipt["matched_rule"]["id"], "authored");
+        assert!(decision.is_allow(), "{decision:?}");
     }
 
     #[test]

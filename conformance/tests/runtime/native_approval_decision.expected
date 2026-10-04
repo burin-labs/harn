@@ -13,3 +13,6 @@ allow
 ask
 ask
 ask
+allow
+ask
+authored

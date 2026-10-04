@@ -2787,16 +2787,15 @@ rule and accept strings or string lists:
 | `repeat_count_gte` | Same `(session, tool, args)` call count threshold |
 
 A rule can set `identity_match: "literal"` for a remembered invocation. This
-compares `tool`, `tool_kind`, `command`, `command_identity`, `method`,
-`mcp_server`, `mcp_tool`, `env_mode`, and `capability` by exact equality after
+compares all captured string fields, including resource scopes, by exact equality after
 the evaluator's normal context normalization, except `command`, which compares
 the raw shell text without collapsing quoted whitespace. A shell-text grant
 does not match an `argv` invocation or mixed shell/argv input. Normalized
 receipt text cannot replace the raw command for a literal grant. A literal `*` in a remembered
 command is not a wildcard, and extra shell text does not match. `command`
 matches the complete command; `command_identity` matches the executable name.
-Resource scopes (`path`, `url`, `domain`), side effects, and agent/persona/mode
-constraints keep their pattern semantics. The default `identity_match:
+Literal paths, URLs, domains, side effects, and agent/persona/mode values do not
+expand wildcards or URL fragments. The default `identity_match:
 "pattern"` retains authored rule behavior. Unknown identity modes are invalid.
 Literal identity changes only matching; rule authority, refusal precedence,
 sensitive-path guards, and explicit environment-write grants still apply.
