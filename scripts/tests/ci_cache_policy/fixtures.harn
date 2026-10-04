@@ -301,6 +301,9 @@ pub fn setup_harn_action() {
 pub fn action() {
   return {
     inputs: {
+      "source-key": {default: ""},
+      "broad-restore-prefix": {default: ""},
+      "cache-bin": {default: "false"},
       "cache-workspace-crates": {default: "false"},
       "prune-superseded-release-generations": {default: "false"},
       "target-dir": {default: ""},
@@ -318,36 +321,50 @@ pub fn action() {
           },
         },
         {
-          uses: "actions/cache/restore@exact-pin",
-          if: "inputs.broad-restore-prefix != ''",
-          "continue-on-error": true,
-          with: {
-            path: gha_expression("env.CARGO_HOME || '~/.cargo'")
-              + "/registry\n"
-              + gha_expression("env.CARGO_HOME || '~/.cargo'")
-              + "/git\n"
-              + gha_expression("env.CARGO_TARGET_DIR || format('{0}/target', github.workspace)"),
-            key: gha_expression("inputs.broad-restore-prefix") + gha_expression("github.sha"),
-            "restore-keys": gha_expression("inputs.broad-restore-prefix"),
+          id: "cache-paths",
+          env: {
+            CACHE_SHARED_KEY: gha_expression("inputs.shared-key"),
+            CACHE_EXPLICIT_SOURCE_KEY: gha_expression("inputs.source-key"),
+            CACHE_SOURCE_KEY: gha_expression(
+              "inputs.source-key || (inputs.cache-workspace-crates == 'true' && hashFiles('Cargo.lock', 'Cargo.toml', 'crates/**', 'spec/**', 'tree-sitter-harn/**')) || ''",
+            ),
           },
+          run: "Retained workspace cache has no measured source fingerprint\n-workspace-crates-v3\nv0-rust-$"
+            + "{shared}-\n[package.metadata.harn]\nsource = \"$"
+            + "{source}\"\nrestore-prefix=$"
+            + "{fallback}\npaths<<harn-cache-paths\nworkspaces<<harn-cache-workspaces\n.harn-workspace-source",
         },
         {
+          id: "cache",
           uses: "Swatinem/rust-cache@exact-pin",
           "continue-on-error": true,
           with: {
-            "shared-key": gha_expression(
-              "format('{0}{1}', inputs.source-key != '' && format('{0}-{1}', inputs.shared-key, inputs.source-key) || inputs.shared-key, inputs.cache-workspace-crates == 'true' && '-workspace-crates-v2' || '')",
-            ),
+            "shared-key": gha_expression("steps.cache-paths.outputs.shared-key"),
             "cache-workspace-crates": gha_expression("inputs.cache-workspace-crates"),
             "cache-targets": gha_expression("inputs.target-dir == ''"),
             "cache-directories": gha_expression(
               "format('{0} {1}', inputs.target-dir, inputs.cache-workspace-crates == 'true' && '.harn-workspace-source' || '')",
             ),
+            workspaces: gha_expression("steps.cache-paths.outputs.workspaces"),
             "save-if": gha_expression("inputs.save == 'true' && github.ref == 'refs/heads/main'"),
           },
         },
+        {
+          uses: "actions/cache/restore@exact-pin",
+          if:
+            "steps.cache-paths.outputs.restore-prefix != '' && steps.cache.outputs.cache-hit != 'true'",
+          "continue-on-error": true,
+          with: {
+            path: gha_expression("steps.cache-paths.outputs.paths"),
+            key: gha_expression("steps.cache-paths.outputs.restore-prefix")
+              + gha_expression("github.sha"),
+            "restore-keys": gha_expression("steps.cache-paths.outputs.restore-prefix"),
+          },
+        },
+        {id: "reuse", run: "./scripts/ci/reuse_workspace_crates.sh restore"},
       ],
     },
+    outputs: {"source-current": {value: gha_expression("steps.reuse.outputs.source-current")}},
   }
 }
 

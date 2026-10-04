@@ -297,9 +297,6 @@ so callers do not re-implement them: `llm_response_is_empty`,
 
 ### Options dict
 
-This section is reference material. For a step-by-step upgrade from older
-spellings, see [Migrating to 0.10](../migrations/v0.10.md#llm-call-options).
-
 `LlmCallOptions` in `std/llm/options` is the checked authoring surface. Annotate
 a binding or use `llm_options({...})`:
 
@@ -921,8 +918,7 @@ fn(call) -> {ok: true, value: <llm dict>}
 
 `with_retry`'s `max_attempts: N` counts total attempts. Migrating
 `llm_retries: K` (removed in 0.10): pass `max_attempts: K + 1` — the
-removed option counted retries *after* the first attempt. See
-[Migrating to 0.10](../migrations/v0.10.md).
+removed option counted retries *after* the first attempt.
 
 See [Composable callers and middleware](../stdlib/llm-handlers.md)
 for the full module catalog (`handlers`, `ensemble`, `refine`,

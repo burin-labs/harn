@@ -391,7 +391,7 @@ async fn derive_server_status(server: &McpServerConfig) -> McpServerStatus {
 
     // Resolve a "logged in as …" string for connected servers that have a
     // vetted identity recipe (harn#3350). Cheap-guarded so only descriptor-
-    // bearing servers (e.g. Notion) pay for a token load.
+    // bearing servers pay for a token load.
     let display_identity = if state == "connected" {
         server_display_identity(server).await
     } else {
@@ -1115,11 +1115,11 @@ mod tests {
 
     #[test]
     fn protected_resource_candidate_prefers_path_specific_url() {
-        let url = Url::parse("https://example.com/mcp/notion").unwrap();
+        let url = Url::parse("https://example.com/mcp/wiki").unwrap();
         let candidates = protected_resource_metadata_candidates(&url);
         assert_eq!(
             candidates[0].as_str(),
-            "https://example.com/.well-known/oauth-protected-resource/mcp/notion"
+            "https://example.com/.well-known/oauth-protected-resource/mcp/wiki"
         );
         assert_eq!(
             candidates[1].as_str(),
@@ -1223,7 +1223,7 @@ deployment = "enterprise"
     #[test]
     fn oauth_server_classification() {
         let oauth = parse_server(
-            "name = \"notion\"\ntransport = \"http\"\nurl = \"https://mcp.notion.com/mcp\"\n",
+            "name = \"wiki\"\ntransport = \"http\"\nurl = \"https://mcp.wiki.example/mcp\"\n",
         );
         assert!(is_oauth_server(&oauth), "http server with a url is OAuth");
 
@@ -1269,8 +1269,8 @@ deployment = "enterprise"
     #[test]
     fn bulk_status_json_is_one_line_per_event() {
         let status = McpAuthStatus {
-            server: "Notion".to_string(),
-            server_url: "https://mcp.notion.com/mcp".to_string(),
+            server: "Wiki".to_string(),
+            server_url: "https://mcp.wiki.example/mcp".to_string(),
             phase: McpAuthPhase::Connected,
             detail: None,
         };
@@ -1278,7 +1278,7 @@ deployment = "enterprise"
         assert!(!line.contains('\n'), "one status per line");
         let value: serde_json::Value = serde_json::from_str(&line).unwrap();
         assert_eq!(value["phase"], serde_json::json!("connected"));
-        assert_eq!(value["server"], serde_json::json!("Notion"));
+        assert_eq!(value["server"], serde_json::json!("Wiki"));
     }
 
     #[tokio::test]

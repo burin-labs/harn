@@ -42,6 +42,7 @@ pub(super) struct SideEffectPermissionRequest<'a> {
         Option<serde_json::Value>,
         Option<crate::tool_annotations::ToolAnnotations>,
     ),
+    pub intent: Option<String>,
 }
 
 pub(super) async fn review_or_request_side_effect_permission(
@@ -84,6 +85,7 @@ pub(super) async fn request_side_effect_permission(
         violation,
         reason,
         tool_context,
+        intent,
     } = request;
     let (tool_descriptor, tool_annotations) = tool_context;
     let approval_id = if tool_call_id.is_empty() {
@@ -124,6 +126,7 @@ pub(super) async fn request_side_effect_permission(
         requested_capabilities: vec![format!("tool.{tool_name}")],
         tool_descriptor,
         tool_annotations,
+        intent,
     };
     match request_host_permission(bridge, request).await {
         HostPermissionOutcome::Allowed { .. } => {

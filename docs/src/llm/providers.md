@@ -1313,7 +1313,7 @@ The declarations are projected into the provider catalog, so the accurate table
 comes from the binary rather than from prose that drifts:
 
 ```sh
-harn provider catalog show --json > catalog.json
+harn provider catalog show > catalog.json
 jq -r '.providers[] | select(.data_controls) | [.id, .data_controls.control_scope, .data_controls.retention_default, .data_controls.training_default] | @tsv' catalog.json
 ```
 
