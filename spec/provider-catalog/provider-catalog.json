@@ -23870,10 +23870,7 @@
         "preferred_format": "native",
         "parity": "unknown",
         "parity_source": "derived",
-        "tool_search": [
-          "hosted",
-          "client"
-        ]
+        "tool_search": []
       },
       "structured_output": "native",
       "format_preferences": {
@@ -23910,7 +23907,6 @@
       "capability_tags": [
         "streaming",
         "tools",
-        "tool_search",
         "vision",
         "prompt_caching",
         "thinking",
@@ -23957,10 +23953,7 @@
         "preferred_format": "native",
         "parity": "unknown",
         "parity_source": "derived",
-        "tool_search": [
-          "hosted",
-          "client"
-        ]
+        "tool_search": []
       },
       "structured_output": "native",
       "format_preferences": {
@@ -24000,7 +23993,6 @@
       "capability_tags": [
         "streaming",
         "tools",
-        "tool_search",
         "vision",
         "prompt_caching",
         "thinking",
@@ -24045,10 +24037,7 @@
         "preferred_format": "native",
         "parity": "unknown",
         "parity_source": "derived",
-        "tool_search": [
-          "hosted",
-          "client"
-        ]
+        "tool_search": []
       },
       "structured_output": "native",
       "format_preferences": {
@@ -24092,7 +24081,6 @@
       "capability_tags": [
         "streaming",
         "tools",
-        "tool_search",
         "vision",
         "prompt_caching",
         "thinking",
@@ -24139,10 +24127,7 @@
         "preferred_format": "native",
         "parity": "unknown",
         "parity_source": "derived",
-        "tool_search": [
-          "hosted",
-          "client"
-        ]
+        "tool_search": []
       },
       "structured_output": "native",
       "format_preferences": {
@@ -24187,7 +24172,6 @@
       "capability_tags": [
         "streaming",
         "tools",
-        "tool_search",
         "vision",
         "prompt_caching",
         "thinking",
@@ -24234,10 +24218,7 @@
         "preferred_format": "native",
         "parity": "unknown",
         "parity_source": "derived",
-        "tool_search": [
-          "hosted",
-          "client"
-        ]
+        "tool_search": []
       },
       "structured_output": "native",
       "format_preferences": {
@@ -24281,7 +24262,6 @@
       "capability_tags": [
         "streaming",
         "tools",
-        "tool_search",
         "vision",
         "prompt_caching",
         "thinking",
@@ -30773,10 +30753,7 @@
         "preferred_format": "native",
         "parity": "unknown",
         "parity_source": "derived",
-        "tool_search": [
-          "hosted",
-          "client"
-        ]
+        "tool_search": []
       },
       "structured_output": "native",
       "format_preferences": {
@@ -30815,7 +30792,6 @@
       "capability_tags": [
         "streaming",
         "tools",
-        "tool_search",
         "vision",
         "prompt_caching",
         "thinking",
@@ -37265,7 +37241,6 @@
         "structured_output_mode:native_json",
         "text_tools",
         "thinking",
-        "tool_search",
         "tools",
         "vision"
       ]
@@ -37288,7 +37263,6 @@
         "structured_output_mode:native_json",
         "text_tools",
         "thinking",
-        "tool_search",
         "tools",
         "vision"
       ]
@@ -37311,7 +37285,6 @@
         "structured_output_mode:native_json",
         "text_tools",
         "thinking",
-        "tool_search",
         "tools",
         "vision"
       ]
@@ -37334,7 +37307,6 @@
         "structured_output_mode:native_json",
         "text_tools",
         "thinking",
-        "tool_search",
         "tools",
         "vision"
       ]
