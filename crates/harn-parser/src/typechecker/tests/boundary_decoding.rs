@@ -82,6 +82,15 @@ fn untyped_optional_chain_sees_untyped_declared_fields_and_any_untyped_tail() {
         "untyped-optional-chain",
     );
     assert_eq!(declared_any, 1, "only the chain through `data: any`");
+    let declared_in_open_field = rule_count(
+        "type Env = {meta: {id: string, ...dict}?}\n\
+         fn read(env: Env) -> any {\n  return env?.meta?.id\n}\n",
+        "untyped-optional-chain",
+    );
+    assert_eq!(
+        declared_in_open_field, 0,
+        "`id` is declared on the open field"
+    );
     let mixed_tails = rule_count(
         "type Typed = {id: string}\n\
          fn read<R>(row: {name: string, ...Typed, ...R}) -> any {\n  return row?.extra?.value\n}\n",

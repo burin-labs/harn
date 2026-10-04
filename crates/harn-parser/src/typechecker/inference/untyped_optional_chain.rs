@@ -60,10 +60,15 @@ impl TypeChecker {
             .is_some_and(|ty| !self.type_is_untyped_record(ty, innermost_property, scope));
         // `{data: any}` declares `data`, so the receiver is typed, but the
         // `?.` after it still hedges an untyped value. A first link with no
-        // inferred type is not evidence either way, so it stays quiet.
+        // inferred type is not evidence either way, so it stays quiet. The
+        // key this link reads decides an open record, as for the receiver.
+        let outer_property = match &snode.node {
+            Node::OptionalPropertyAccess { property, .. } => Some(property.as_str()),
+            _ => None,
+        };
         let first_link_typed = || {
             self.infer_type(object, scope)
-                .is_none_or(|ty| !self.type_is_untyped_record(&ty, None, scope))
+                .is_none_or(|ty| !self.type_is_untyped_record(&ty, outer_property, scope))
         };
         if receiver_typed && first_link_typed() {
             return;
