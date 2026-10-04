@@ -1,6 +1,159 @@
 use serde::{Deserialize, Serialize};
 
-use super::{any_fragment_matches, any_glob_matches, EvaluationContext};
+use super::{
+    any_fragment_matches, any_glob_matches, EvaluationContext, PolicyAction, PolicyRuleMatch,
+};
+
+pub(super) fn resources_match(
+    rule: &PolicyRuleMatch,
+    context: &EvaluationContext,
+    identity: PolicyIdentityMatch,
+    action: PolicyAction,
+) -> bool {
+    match identity {
+        PolicyIdentityMatch::Literal => context.literal_identity.as_ref().is_some_and(|raw| {
+            raw.paths_match(&rule.path, action)
+                && LiteralResourceIdentity::values_match(
+                    &rule.url,
+                    &raw.urls,
+                    raw.urls_valid,
+                    action,
+                )
+                && LiteralResourceIdentity::values_match(
+                    &rule.domain,
+                    &raw.domains,
+                    raw.domains_valid,
+                    action,
+                )
+        }),
+        PolicyIdentityMatch::Pattern => {
+            (rule.path.is_empty() || identity.matches(&rule.path, &context.path_candidates))
+                && (rule.url.is_empty() || identity.matches_fragment(&rule.url, &context.urls))
+                && (rule.domain.is_empty() || identity.matches(&rule.domain, &context.domains))
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub(super) struct LiteralResourceIdentity {
+    pub(super) paths: Vec<Vec<String>>,
+    pub(super) urls: Vec<String>,
+    pub(super) domains: Vec<String>,
+    urls_valid: bool,
+    domains_valid: bool,
+}
+
+impl LiteralResourceIdentity {
+    pub(super) fn capture(
+        context: &EvaluationContext,
+        arguments: &serde_json::Value,
+        owned_path_params: Option<&[String]>,
+    ) -> Self {
+        let mut paths = context
+            .path_entries
+            .iter()
+            .map(|entry| entry.policy_candidates())
+            .collect::<Vec<_>>();
+        for path in &context.path_candidates {
+            if !paths.iter().any(|aliases| aliases.contains(path)) {
+                paths.push(vec![path.clone()]);
+            }
+        }
+        // Raw argument objects cannot supply trusted path classifications.
+        // Keep an uncovered group rather than dropping malformed resources.
+        let annotations = super::super::current_tool_annotations(&context.tool_name);
+        let path_keys = owned_path_params
+            .map(|params| params.iter().map(String::as_str).collect())
+            .unwrap_or_else(|| {
+                annotations.as_ref().map_or_else(
+                    || {
+                        vec![
+                            "path",
+                            "file",
+                            "target",
+                            "source_path",
+                            "new_path",
+                            "target_path",
+                            "paths",
+                        ]
+                    },
+                    |annotations| {
+                        annotations
+                            .arg_schema
+                            .path_params
+                            .iter()
+                            .map(String::as_str)
+                            .collect()
+                    },
+                )
+            });
+        if !resource_values_valid(arguments, &path_keys) {
+            paths.push(Vec::new());
+        }
+        let mut strings = Vec::new();
+        super::collect_string_values(arguments, &mut strings);
+        // Literal identities retain the invocation's spelling. URL parser
+        // normalization is for authored patterns, not an extra resource.
+        let mut urls = strings
+            .into_iter()
+            .filter(|value| {
+                url::Url::parse(value).is_ok_and(|url| matches!(url.scheme(), "http" | "https"))
+            })
+            .collect::<Vec<_>>();
+        urls.extend(super::string_values(arguments, &["url", "urls"]));
+        let urls_valid = resource_values_valid(arguments, &["url", "urls"]);
+        let mut domains = context.domains.clone();
+        domains.extend(super::string_values(arguments, &["domain", "domains"]));
+        let domains_valid = resource_values_valid(arguments, &["domain", "domains"]);
+        Self {
+            paths,
+            urls,
+            domains,
+            urls_valid,
+            domains_valid,
+        }
+    }
+
+    pub(super) fn paths_match(&self, values: &[String], action: PolicyAction) -> bool {
+        if values.is_empty() {
+            return true;
+        }
+        let covered = |aliases: &Vec<String>| aliases.iter().any(|value| values.contains(value));
+        !self.paths.is_empty()
+            && if action == PolicyAction::Allow {
+                self.paths.iter().all(covered)
+            } else {
+                self.paths.iter().any(covered)
+            }
+    }
+
+    pub(super) fn values_match(
+        values: &[String],
+        resources: &[String],
+        valid: bool,
+        action: PolicyAction,
+    ) -> bool {
+        if values.is_empty() {
+            return true;
+        }
+        !resources.is_empty()
+            && if action == PolicyAction::Allow {
+                valid && resources.iter().all(|resource| values.contains(resource))
+            } else {
+                resources.iter().any(|resource| values.contains(resource))
+            }
+    }
+}
+
+fn resource_values_valid(arguments: &serde_json::Value, keys: &[&str]) -> bool {
+    let valid_string =
+        |value: &serde_json::Value| value.as_str().is_some_and(|value| !value.trim().is_empty());
+    keys.iter().all(|key| match arguments.get(*key) {
+        None => true,
+        Some(serde_json::Value::Array(values)) => values.iter().all(valid_string),
+        Some(value) => valid_string(value),
+    })
+}
 
 /// Matching semantics for captured request values, including resource scopes.
 /// Authored rules retain patterns; remembered literal grants never expand them.
@@ -151,6 +304,201 @@ mod tests {
         });
         assert_eq!(decision.receipt["matched_rule"]["id"], "authored");
         assert!(decision.is_allow(), "{decision:?}");
+    }
+
+    #[test]
+    fn literal_allow_covers_every_resource_and_deny_covers_any() {
+        for (field, argument, saved, extra) in [
+            ("path", "paths", "saved.txt", "extra.txt"),
+            (
+                "url",
+                "urls",
+                "https://saved.example/report",
+                "https://extra.example/report",
+            ),
+            ("domain", "domains", "saved.example", "extra.example"),
+        ] {
+            let allow = ToolApprovalPolicy::from_host_json(json!({"rules": [
+                {"id": "ask", "source": "mode", "ask": "read"},
+                {"id": "memory", "source": "user", "identity_match": "literal",
+                 "allow": {"tool": "read", field: [saved, extra]}},
+            ]}))
+            .unwrap();
+            for values in [json!([saved]), json!([saved, extra])] {
+                let decision = super::super::evaluate_tool_approval_policy(
+                    &allow,
+                    "read",
+                    &json!({argument: values}),
+                    None,
+                );
+                assert!(decision.is_allow(), "{field}: {decision:?}");
+                assert_eq!(decision.receipt["matched_rule"]["id"], "memory");
+            }
+            let partial = ToolApprovalPolicy::from_host_json(json!({"rules": [
+                {"id": "ask", "source": "mode", "ask": "read"},
+                {"id": "memory", "source": "user", "identity_match": "literal",
+                 "allow": {"tool": "read", field: saved}},
+            ]}))
+            .unwrap();
+            for values in [json!([saved, extra]), json!([])] {
+                let decision = partial.evaluate_request(&ToolApprovalRequest {
+                    tool_name: "read".into(),
+                    arguments: json!({argument: values}),
+                    ..Default::default()
+                });
+                assert!(decision.is_ask(), "{field}: {decision:?}");
+                assert_eq!(decision.receipt["matched_rule"]["id"], "ask");
+            }
+            let deny = ToolApprovalPolicy::from_host_json(json!({"rules": [
+                {"id": "memory", "source": "user", "identity_match": "literal",
+                 "deny": {"tool": "read", field: saved}},
+            ]}))
+            .unwrap();
+            let decision = deny.evaluate_request(&ToolApprovalRequest {
+                tool_name: "read".into(),
+                arguments: json!({argument: [saved, extra]}),
+                ..Default::default()
+            });
+            assert!(decision.is_deny(), "{field}: {decision:?}");
+            assert_eq!(decision.receipt["matched_rule"]["id"], "memory");
+        }
+    }
+
+    #[test]
+    fn caller_path_descriptors_cannot_supply_remembered_aliases() {
+        let policy = ToolApprovalPolicy::from_host_json(json!({"rules": [
+            {"id": "ask", "source": "mode", "ask": "read"},
+            {"id": "memory", "source": "user", "identity_match": "literal",
+             "allow": {"tool": "read", "path": "saved.txt"}},
+        ]}))
+        .unwrap();
+        let decision = policy.evaluate_request(&ToolApprovalRequest {
+            tool_name: "read".into(),
+            arguments: json!({"paths": [{
+                "input": "outside.txt", "workspace_path": "saved.txt",
+                "path": "outside.txt", "host_path": "/outside.txt"
+            }]}),
+            ..Default::default()
+        });
+        assert!(decision.is_ask(), "{decision:?}");
+        assert_eq!(decision.receipt["matched_rule"]["id"], "ask");
+    }
+
+    #[test]
+    fn malformed_resource_is_not_a_matchable_empty_identity() {
+        for (field, argument, saved) in [
+            ("url", "urls", "https://saved.example/report"),
+            ("domain", "domains", "saved.example"),
+        ] {
+            let policy = ToolApprovalPolicy::from_host_json(json!({"rules": [
+                {"id": "ask", "source": "mode", "ask": "read"},
+                {"id": "memory", "source": "user", "identity_match": "literal",
+                 "allow": {"tool": "read", field: [saved, ""]}},
+            ]}))
+            .unwrap();
+            let decision = policy.evaluate_request(&ToolApprovalRequest {
+                tool_name: "read".into(),
+                arguments: json!({argument: [saved, 123]}),
+                ..Default::default()
+            });
+            assert!(decision.is_ask(), "{field}: {decision:?}");
+            assert_eq!(decision.receipt["matched_rule"]["id"], "ask");
+        }
+    }
+
+    #[test]
+    fn literal_url_keeps_the_raw_invocation_spelling() {
+        for saved in ["https://example.org", "https://EXAMPLE.org:443/report"] {
+            let policy = ToolApprovalPolicy::from_host_json(json!({"rules": [
+                {"id": "ask", "source": "mode", "ask": "read"},
+                {"id": "memory", "source": "user", "identity_match": "literal",
+                 "allow": {"tool": "read", "url": saved}},
+            ]}))
+            .unwrap();
+            let decision = policy.evaluate_request(&ToolApprovalRequest {
+                tool_name: "read".into(),
+                arguments: json!({"url": saved}),
+                ..Default::default()
+            });
+            assert!(decision.is_allow(), "{saved}: {decision:?}");
+            assert_eq!(decision.receipt["matched_rule"]["id"], "memory");
+        }
+    }
+
+    #[test]
+    fn remembered_resource_cannot_grant_a_different_tool_named_by_receipt() {
+        let policy = ToolApprovalPolicy::from_host_json(json!({"rules": [
+            {"id": "ask", "source": "mode", "ask": "*"},
+            {"id": "memory", "source": "user", "identity_match": "literal",
+             "allow": {"tool": "read", "path": "saved.txt"}},
+        ]}))
+        .unwrap();
+        for (tool, allow) in [("read", true), ("write", false)] {
+            let decision = policy.evaluate_request(&ToolApprovalRequest {
+                tool_name: tool.into(),
+                arguments: json!({"path": "saved.txt"}),
+                policy_decision: Some(json!({"context": {"tool_name": "read"}})),
+                ..Default::default()
+            });
+            assert_eq!(decision.is_allow(), allow, "{tool}: {decision:?}");
+            assert_eq!(decision.is_ask(), !allow, "{tool}: {decision:?}");
+            assert_eq!(
+                decision.receipt["matched_rule"]["id"],
+                if allow { "memory" } else { "ask" }
+            );
+        }
+    }
+
+    #[test]
+    fn remembered_resources_cannot_match_stale_host_receipts() {
+        for (field, saved, different) in [
+            ("path", "saved.txt", "different.txt"),
+            (
+                "url",
+                "https://saved.example/report",
+                "https://different.example/report",
+            ),
+            ("domain", "saved.example", "different.example"),
+        ] {
+            let policy = ToolApprovalPolicy::from_host_json(json!({"rules": [
+                {"id": "ask", "source": "mode", "ask": "read"},
+                {"id": "memory", "source": "user", "identity_match": "literal",
+                 "allow": {"tool": "read", field: saved}},
+            ]}))
+            .unwrap();
+            let exact = policy.evaluate_request(&ToolApprovalRequest {
+                tool_name: "read".into(),
+                arguments: json!({field: saved}),
+                ..Default::default()
+            });
+            assert!(exact.is_allow(), "{field}: {exact:?}");
+            assert_eq!(exact.receipt["matched_rule"]["id"], "memory");
+            for context in [
+                json!({field: saved}),
+                json!({"rawInput": {field: saved}}),
+                json!({"policy_context": {field: saved}}),
+            ] {
+                let request = ToolApprovalRequest {
+                    tool_name: "read".into(),
+                    arguments: json!({field: different}),
+                    policy_decision: Some(json!({"context": context})),
+                    ..Default::default()
+                };
+                let refused = policy.evaluate_request(&request);
+                assert!(refused.is_ask(), "{field}: {refused:?}");
+                assert_eq!(refused.receipt["matched_rule"]["id"], "ask");
+                // Authored policy still consumes host facts. This correction
+                // only restricts which invocation a captured grant can name.
+                let authored = ToolApprovalPolicy::from_host_json(json!({"rules": [
+                    {"id": "authored", "allow": {field: saved}},
+                ]}))
+                .unwrap();
+                assert_eq!(
+                    authored.evaluate_request(&request).receipt["matched_rule"]["id"],
+                    "authored"
+                );
+            }
+        }
     }
 
     #[test]

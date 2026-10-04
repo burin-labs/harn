@@ -366,11 +366,6 @@ pub(super) async fn request_host_permission(
     );
     let approval_request_json =
         serde_json::to_value(&approval_request).unwrap_or(serde_json::Value::Null);
-    let tool_kind = request
-        .tool_annotations
-        .as_ref()
-        .map(|annotations| annotations.kind)
-        .unwrap_or_default();
     match bridge
         .call(
             crate::llm::acp_permission::METHOD_REQUEST_PERMISSION,
@@ -382,7 +377,7 @@ pub(super) async fn request_host_permission(
                 approval_request_json,
                 &request.policy_decision,
                 request.tool_descriptor,
-                tool_kind,
+                request.tool_annotations.as_ref(),
             ),
         )
         .await

@@ -27,7 +27,7 @@ use serde::{Deserialize, Serialize};
 use crate::runtime_limits::RuntimeLimits;
 use crate::tool_annotations::{SideEffectLevel, ToolAnnotations};
 use crate::value::{VmError, VmValue};
-use crate::workspace_path::{classify_workspace_path, WorkspacePathInfo};
+use crate::workspace_path::{classify_permission_path, WorkspacePathInfo};
 pub(crate) use capability_lattice::operation_is_covered;
 use capability_lattice::policy_allows_capability;
 
@@ -52,8 +52,9 @@ pub use approval_rules::{
     denial_gate_for_source, next_approval_policy_repeat_count,
     next_approval_unavailable_class_repeat_count, ApprovalShape, PolicyAction, PolicyEvaluation,
     PolicyIdentityMatch, PolicyMatchedRule, PolicyRule, PolicyRuleMatch, PolicyRuleSource,
-    ToolApprovalRequest, EXTERNAL_ROOT_READ_ONLY, SOURCE_DEFAULT_EXTERNAL_PATH,
-    SOURCE_DEFAULT_PATH_GUARD, SOURCE_DEFAULT_SENSITIVE_PATH, SOURCE_NET_POLICY,
+    ToolApprovalRequest, ToolApprovalWorkspaceBoundary, EXTERNAL_ROOT_READ_ONLY,
+    SOURCE_DEFAULT_EXTERNAL_PATH, SOURCE_DEFAULT_PATH_GUARD, SOURCE_DEFAULT_SENSITIVE_PATH,
+    SOURCE_NET_POLICY,
 };
 pub use effects::{
     compute_handoff_effects, effect_kind_label, effect_record_summary, effect_subset_violations,
@@ -368,12 +369,12 @@ pub fn tool_declared_path_entries(
         if let Some(value) = map.get(key) {
             match value {
                 serde_json::Value::String(path) if !path.is_empty() => {
-                    entries.push(classify_workspace_path(path, Some(&workspace_root)));
+                    entries.push(classify_permission_path(path, Some(&workspace_root)));
                 }
                 serde_json::Value::Array(items) => {
                     for item in items.iter().filter_map(|item| item.as_str()) {
                         if !item.is_empty() {
-                            entries.push(classify_workspace_path(item, Some(&workspace_root)));
+                            entries.push(classify_permission_path(item, Some(&workspace_root)));
                         }
                     }
                 }

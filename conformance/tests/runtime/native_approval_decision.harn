@@ -112,4 +112,32 @@ fn main(harness: Harness) {
       {tool_name: "read", arguments: {path: "report-2026.txt"}},
     ).receipt.matched_rule.id,
   )
+  const stale_resource = harness.runtime.evaluate_approval_policy(
+    resource,
+    {
+      tool_name: "read",
+      arguments: {path: "different.txt"},
+      policy_decision: {context: {path: "report*.txt"}},
+    },
+  )
+  harness.stdio.println(stale_resource.action)
+  harness.stdio.println(stale_resource.receipt.matched_rule.id)
+  harness.stdio.println(
+    harness.runtime.evaluate_approval_policy(
+      {
+        rules: [
+          {source: "mode", ask: "read"},
+          {
+            source: "user", identity_match: "literal",
+            allow: {url: "https://saved.example/report"},
+          },
+        ],
+      },
+      {
+        tool_name: "read",
+        arguments: {url: "https://different.example/report"},
+        policy_decision: {context: {url: "https://saved.example/report"}},
+      },
+    ).action,
+  )
 }

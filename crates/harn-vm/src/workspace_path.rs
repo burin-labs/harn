@@ -91,6 +91,91 @@ pub fn canonicalize_existing_workspace_path(path: &Path, workspace_root: &Path) 
 }
 
 pub fn classify_workspace_path(path: &str, workspace_root: Option<&Path>) -> WorkspacePathInfo {
+    classify_path(path, workspace_root, true)
+}
+
+/// Classify permission resources without interpreting an absolute path as a
+/// misspelled workspace-relative path. Display recovery cannot grant access.
+pub fn classify_permission_path(path: &str, workspace_root: Option<&Path>) -> WorkspacePathInfo {
+    let mut info = classify_path(path, workspace_root, false);
+    if info.kind == WorkspacePathKind::Invalid
+        || (is_absolute_path_syntax(path.trim()) && !Path::new(path.trim()).is_absolute())
+    {
+        return info;
+    }
+    let Some(root) = workspace_root else {
+        return info;
+    };
+    let input = Path::new(path.trim());
+    let target = if input.is_absolute() {
+        input.to_path_buf()
+    } else {
+        root.join(input)
+    };
+    let resolved = std::fs::canonicalize(root).and_then(|canonical_root| {
+        canonicalize_existing_ancestor(&target).map(|target| (canonical_root, target))
+    });
+    match resolved {
+        Ok((root, target)) => {
+            let host = normalize_host_path(&target);
+            info.workspace_path = target
+                .strip_prefix(root)
+                .ok()
+                .map(|relative| to_posix(&relative.to_string_lossy()));
+            info.host_path = Some(host.clone());
+            if info.workspace_path.is_none() {
+                info.kind = WorkspacePathKind::HostAbsolute;
+                info.normalized = host;
+                info.reason = Some("path resolves outside the workspace root".into());
+            } else {
+                info.reason = None;
+            }
+        }
+        Err(error) => {
+            info.kind = WorkspacePathKind::Invalid;
+            info.workspace_path = None;
+            info.reason = Some(format!("permission path cannot be resolved: {error}"));
+        }
+    }
+    info
+}
+
+fn canonicalize_existing_ancestor(path: &Path) -> std::io::Result<PathBuf> {
+    let mut ancestor = path;
+    let mut suffix = Vec::new();
+    loop {
+        match std::fs::canonicalize(ancestor) {
+            Ok(mut resolved) => {
+                for component in suffix.into_iter().rev() {
+                    resolved.push(component);
+                }
+                return Ok(resolved);
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                // An existing dangling symlink is an unresolved resource,
+                // not a new file under the symlink's lexical parent.
+                if std::fs::symlink_metadata(ancestor).is_ok() {
+                    return Err(error);
+                }
+                let Some(name) = ancestor.file_name() else {
+                    return Err(error);
+                };
+                suffix.push(name.to_os_string());
+                let Some(parent) = ancestor.parent() else {
+                    return Err(error);
+                };
+                ancestor = parent;
+            }
+            Err(error) => return Err(error),
+        }
+    }
+}
+
+fn classify_path(
+    path: &str,
+    workspace_root: Option<&Path>,
+    recover_workspace_drift: bool,
+) -> WorkspacePathInfo {
     let input = path.to_string();
     let trimmed = path.trim();
     if trimmed.is_empty() {
@@ -151,7 +236,7 @@ pub fn classify_workspace_path(path: &str, workspace_root: Option<&Path>) -> Wor
             };
         }
 
-        if let Some(root_path) = root_path.as_ref() {
+        if let Some(root_path) = root_path.as_ref().filter(|_| recover_workspace_drift) {
             if let Some(recovered) = recover_root_drift(trimmed, root_path) {
                 return WorkspacePathInfo {
                     input,
@@ -385,6 +470,94 @@ mod tests {
             Some("packages/app/host.harn")
         );
         assert!(info.recovered_root_drift);
+    }
+
+    #[test]
+    fn permission_path_does_not_recover_an_external_absolute_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("packages/app/host.harn");
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        std::fs::write(&file, "ok").unwrap();
+        let external = classify_permission_path("/packages/app/host.harn", Some(dir.path()));
+        assert_eq!(external.kind, WorkspacePathKind::HostAbsolute);
+        assert!(external.workspace_path.is_none());
+        assert_eq!(
+            external.host_path.as_deref(),
+            Some("/packages/app/host.harn")
+        );
+        assert!(!external.recovered_root_drift);
+        let inside = classify_permission_path(file.to_str().unwrap(), Some(dir.path()));
+        assert_eq!(
+            inside.workspace_path.as_deref(),
+            Some("packages/app/host.harn")
+        );
+        let relative = classify_permission_path("packages/app/host.harn", Some(dir.path()));
+        assert_eq!(relative.host_path, inside.host_path);
+        assert!(!relative.recovered_root_drift);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn permission_path_follows_existing_ancestors_without_admitting_symlink_escape() {
+        let workspace = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        std::os::unix::fs::symlink(outside.path(), workspace.path().join("linked")).unwrap();
+        let escaped = classify_permission_path("linked/new.txt", Some(workspace.path()));
+        assert!(escaped.workspace_path.is_none());
+        assert_eq!(escaped.kind, WorkspacePathKind::HostAbsolute);
+        assert_eq!(
+            escaped.host_path.as_deref(),
+            Some(normalize_host_path(&outside.path().join("new.txt")).as_str())
+        );
+        let inside = classify_permission_path("new/nested.txt", Some(workspace.path()));
+        assert_eq!(inside.workspace_path.as_deref(), Some("new/nested.txt"));
+        std::os::unix::fs::symlink(
+            outside.path().join("absent"),
+            workspace.path().join("dangling"),
+        )
+        .unwrap();
+        let unresolved = classify_permission_path("dangling", Some(workspace.path()));
+        assert_eq!(unresolved.kind, WorkspacePathKind::Invalid);
+        assert!(unresolved.workspace_path.is_none());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn permission_path_resolves_symlinks_before_parent_traversal() {
+        let workspace = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        std::fs::create_dir(outside.path().join("child")).unwrap();
+        std::os::unix::fs::symlink(
+            outside.path().join("child"),
+            workspace.path().join("linked"),
+        )
+        .unwrap();
+        let escaped = classify_permission_path("linked/../secret.txt", Some(workspace.path()));
+        assert_eq!(escaped.kind, WorkspacePathKind::HostAbsolute);
+        assert!(escaped.workspace_path.is_none());
+        assert_eq!(
+            escaped.host_path.as_deref(),
+            Some(normalize_host_path(&outside.path().join("secret.txt")).as_str())
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn permission_path_accepts_physical_and_declared_root_aliases() {
+        let workspace = tempfile::tempdir().unwrap();
+        let alias_parent = tempfile::tempdir().unwrap();
+        let alias = alias_parent.path().join("project");
+        std::os::unix::fs::symlink(workspace.path(), &alias).unwrap();
+        let physical = classify_permission_path(
+            workspace.path().join("new.txt").to_str().unwrap(),
+            Some(&alias),
+        );
+        let declared =
+            classify_permission_path(alias.join("new.txt").to_str().unwrap(), Some(&alias));
+        let relative = classify_permission_path("new.txt", Some(&alias));
+        assert_eq!(physical.workspace_path.as_deref(), Some("new.txt"));
+        assert_eq!(physical.host_path, declared.host_path);
+        assert_eq!(physical.host_path, relative.host_path);
     }
 
     #[test]

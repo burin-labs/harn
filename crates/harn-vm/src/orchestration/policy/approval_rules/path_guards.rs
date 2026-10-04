@@ -71,6 +71,7 @@ pub(super) fn default_guard(
                 approval: ApprovalShape::default(),
                 risk_labels: vec!["sensitive_path".to_string()],
                 denied_paths: vec![path],
+                contributing_rules: Vec::new(),
             });
         }
     }
@@ -93,6 +94,7 @@ pub(super) fn default_guard(
                 approval: ApprovalShape::default(),
                 risk_labels: vec!["invalid_path".to_string()],
                 denied_paths: vec![entry.display_path().to_string()],
+                contributing_rules: Vec::new(),
             });
         }
         if entry.workspace_path.is_some() {
@@ -122,6 +124,7 @@ pub(super) fn default_guard(
                     approval: ApprovalShape::default(),
                     risk_labels: vec![EXTERNAL_ROOT_READ_ONLY.to_string()],
                     denied_paths: vec![entry.display_path().to_string()],
+                    contributing_rules: Vec::new(),
                 });
             }
         } else if !policy.allow_external_paths {
@@ -138,6 +141,7 @@ pub(super) fn default_guard(
                 approval: ApprovalShape::default(),
                 risk_labels: vec!["external_path".to_string()],
                 denied_paths: vec![entry.display_path().to_string()],
+                contributing_rules: Vec::new(),
             });
         }
     }

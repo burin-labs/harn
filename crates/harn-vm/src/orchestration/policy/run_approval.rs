@@ -262,6 +262,7 @@ impl RunApprovalPolicy {
                     .as_ref()
                     .and_then(|rule| rule.id.clone()),
                 index: decision.matched_rule.as_ref().and_then(|rule| rule.index),
+                contributing_rules: Vec::new(),
             });
             decision.receipt["action"] = serde_json::json!(decision.action);
             decision.receipt["reason"] = serde_json::json!(decision.reason);

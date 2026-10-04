@@ -48,6 +48,11 @@ pub const TOOL_APPROVAL_REQUEST: Ty = Ty::Shape(&[
     ShapeFieldDescriptor::optional("policy_decision", TY_DICT_OR_NIL),
     ShapeFieldDescriptor::optional("approval_request", TY_DICT_OR_NIL),
     ShapeFieldDescriptor::optional("repeat_count", TY_INT_OR_NIL),
+    ShapeFieldDescriptor::optional("tool_annotations", TY_DICT_OR_NIL),
+    ShapeFieldDescriptor::optional(
+        "workspace_boundary",
+        Ty::Optional(&Ty::Shape(&[ShapeFieldDescriptor::new("root", TY_STRING)])),
+    ),
 ]);
 
 /// The existing PolicyEvaluation wire record, with its canonical audit receipt.
@@ -68,6 +73,7 @@ pub const APPROVAL_POLICY_DECISION: Ty = Ty::Shape(&[
             ShapeFieldDescriptor::new("action", TY_STRING),
             ShapeFieldDescriptor::optional("id", TY_STRING),
             ShapeFieldDescriptor::optional("index", TY_INT),
+            ShapeFieldDescriptor::optional("contributing_rules", TY_LIST),
         ]),
     ),
     ShapeFieldDescriptor::optional(

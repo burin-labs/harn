@@ -14,9 +14,11 @@ use super::ToolApprovalPolicy;
 mod host_request;
 mod identity_match;
 mod path_guards;
+mod remembered_paths;
 mod rule_source;
 mod sensitive_paths;
-pub use host_request::ToolApprovalRequest;
+pub use host_request::{ToolApprovalRequest, ToolApprovalWorkspaceBoundary};
+use identity_match::LiteralResourceIdentity;
 pub use identity_match::PolicyIdentityMatch;
 use path_guards::default_guard;
 pub use path_guards::{
@@ -274,17 +276,20 @@ impl PolicyRuleMatch {
             && self.repeat_count_at_least.is_none()
     }
 
-    fn matches(&self, ctx: &EvaluationContext, identity: PolicyIdentityMatch) -> bool {
-        (self.tool.is_empty() || identity.matches(&self.tool, &[ctx.tool_name.clone()]))
+    fn matches(
+        &self,
+        ctx: &EvaluationContext,
+        identity: PolicyIdentityMatch,
+        action: PolicyAction,
+    ) -> bool {
+        (self.tool.is_empty() || identity.matches(&self.tool, std::slice::from_ref(&ctx.tool_name)))
             && (self.tool_kind.is_empty() || identity.matches(&self.tool_kind, &ctx.tool_kinds()))
             && (self.side_effect.is_empty()
                 || identity.matches(&self.side_effect, &ctx.side_effects()))
-            && (self.path.is_empty() || identity.matches(&self.path, &ctx.path_candidates))
+            && identity_match::resources_match(self, ctx, identity, action)
             && (self.command.is_empty() || identity.matches_command(&self.command, ctx))
             && (self.command_identity.is_empty()
                 || identity.matches(&self.command_identity, &ctx.command_identities))
-            && (self.url.is_empty() || identity.matches_fragment(&self.url, &ctx.urls))
-            && (self.domain.is_empty() || identity.matches(&self.domain, &ctx.domains))
             && (self.http_method.is_empty()
                 || identity.matches(
                     &normalize_patterns_upper(&self.http_method),
@@ -466,6 +471,9 @@ pub struct PolicyMatchedRule {
     pub id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub index: Option<usize>,
+    /// Actual grants whose combined scopes authorize the complete invocation.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub contributing_rules: Vec<PolicyMatchedRule>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -552,6 +560,7 @@ struct EvaluationContext {
     path_candidates: Vec<String>,
     command_candidates: Vec<String>,
     literal_command: Option<String>,
+    literal_identity: Option<LiteralResourceIdentity>,
     command_identities: Vec<String>,
     urls: Vec<String>,
     domains: Vec<String>,
@@ -621,7 +630,7 @@ impl EvaluationContext {
             })
             .unwrap_or_default();
 
-        Self {
+        let mut context = Self {
             tool_name: tool_name.to_string(),
             tool_kind: annotations
                 .as_ref()
@@ -634,6 +643,7 @@ impl EvaluationContext {
             path_candidates,
             command_candidates,
             literal_command: identity_match::literal_command(args),
+            literal_identity: None,
             command_identities,
             urls,
             domains,
@@ -646,75 +656,13 @@ impl EvaluationContext {
             env_modes,
             repeat_count,
             external_roots: Vec::new(),
-        }
+        };
+        context.literal_identity = Some(LiteralResourceIdentity::capture(&context, args, None));
+        context
     }
 
     fn from_request(request: &ToolApprovalRequest) -> Self {
-        let mut context = Self::new(&request.tool_name, &request.arguments, request.repeat_count);
-        context.absorb_host_value(&request.arguments);
-        let policy_context = request
-            .policy_decision
-            .as_ref()
-            .and_then(|decision| decision.get("context"))
-            .or_else(|| {
-                request
-                    .approval_request
-                    .as_ref()
-                    .and_then(|approval| approval.get("undo_metadata"))
-                    .and_then(|metadata| metadata.get("policy_decision"))
-                    .and_then(|decision| decision.get("context"))
-            });
-        let nested_policy_context =
-            policy_context.and_then(|context| context.get("policy_context"));
-        if let Some(policy_context) = policy_context {
-            context.tool_name = first_string(policy_context, &["tool_name", "toolName"])
-                .unwrap_or(context.tool_name);
-            context.tool_kind =
-                first_string(policy_context, &["tool_kind", "toolKind"]).or(context.tool_kind);
-            context.side_effect = first_string(
-                policy_context,
-                &[
-                    "side_effect",
-                    "sideEffect",
-                    "requested_side_effect_level",
-                    "requestedSideEffectLevel",
-                ],
-            )
-            .or(context.side_effect);
-            context.agent = first_string(policy_context, &["agent", "agent_id"]).or(context.agent);
-            context.persona =
-                first_string(policy_context, &["persona", "persona_id"]).or(context.persona);
-            context.mode = first_string(policy_context, &["mode", "action"]).or(context.mode);
-            context.absorb_host_value(policy_context);
-        }
-        if let Some(nested_policy_context) = nested_policy_context {
-            if context.side_effect.is_none() {
-                context.side_effect = first_string(
-                    nested_policy_context,
-                    &[
-                        "side_effect",
-                        "sideEffect",
-                        "requested_side_effect_level",
-                        "requestedSideEffectLevel",
-                    ],
-                );
-            }
-            context.absorb_host_value(nested_policy_context);
-        }
-
-        for container in [policy_context, Some(&request.arguments)]
-            .into_iter()
-            .flatten()
-        {
-            for key in ["rawInput", "raw_input", "input"] {
-                if let Some(input) = container.get(key) {
-                    context.absorb_host_value(input);
-                }
-            }
-        }
-
-        context.finish_host_normalization();
-        context
+        host_request::request_context(request)
     }
 
     fn absorb_host_value(&mut self, value: &JsonValue) {
@@ -854,6 +802,7 @@ struct Candidate {
     /// reader can tell "no path was the reason" from "the path is in the
     /// prose somewhere".
     denied_paths: Vec<String>,
+    contributing_rules: Vec<PolicyMatchedRule>,
 }
 
 impl Candidate {
@@ -863,6 +812,7 @@ impl Candidate {
             action: self.action.as_str().to_string(),
             id: self.id.clone(),
             index: self.index,
+            contributing_rules: self.contributing_rules.clone(),
         }
     }
 }
@@ -944,6 +894,9 @@ pub fn evaluate_tool_approval_request(
     policy: &ToolApprovalPolicy,
     request: &ToolApprovalRequest,
 ) -> PolicyEvaluation {
+    if let Err(reason) = request.validate() {
+        return host_request::invalid_request(request, reason);
+    }
     evaluate_context(policy, EvaluationContext::from_request(request))
 }
 
@@ -957,6 +910,7 @@ fn evaluate_context(policy: &ToolApprovalPolicy, mut ctx: EvaluationContext) -> 
     let mut candidates = Vec::new();
     candidates.extend(legacy_candidates(policy, &ctx));
     candidates.extend(rule_candidates(policy, &ctx));
+    candidates.extend(remembered_paths::candidates(policy, &ctx));
     if let Some(repeat_limit) = policy.repeat_limit {
         if ctx.repeat_count.is_some_and(|count| count > repeat_limit) {
             let action = policy.repeat_action.unwrap_or(PolicyAction::Ask);
@@ -973,6 +927,7 @@ fn evaluate_context(policy: &ToolApprovalPolicy, mut ctx: EvaluationContext) -> 
                 approval: ApprovalShape::default(),
                 risk_labels: vec!["repeated_call".to_string()],
                 denied_paths: Vec::new(),
+                contributing_rules: Vec::new(),
             });
         }
     }
@@ -998,6 +953,7 @@ fn legacy_candidates(policy: &ToolApprovalPolicy, ctx: &EvaluationContext) -> Ve
                 approval: ApprovalShape::default(),
                 risk_labels: vec!["matched_deny_rule".to_string()],
                 denied_paths: Vec::new(),
+                contributing_rules: Vec::new(),
             });
         }
     }
@@ -1026,6 +982,7 @@ fn legacy_candidates(policy: &ToolApprovalPolicy, ctx: &EvaluationContext) -> Ve
                     approval: ApprovalShape::default(),
                     risk_labels: vec!["write_path_not_allowed".to_string()],
                     denied_paths: Vec::new(),
+                    contributing_rules: Vec::new(),
                 });
             }
         }
@@ -1046,6 +1003,7 @@ fn legacy_candidates(policy: &ToolApprovalPolicy, ctx: &EvaluationContext) -> Ve
                 approval: ApprovalShape::default(),
                 risk_labels: vec!["approval_required".to_string()],
                 denied_paths: Vec::new(),
+                contributing_rules: Vec::new(),
             });
         }
     }
@@ -1062,6 +1020,7 @@ fn legacy_candidates(policy: &ToolApprovalPolicy, ctx: &EvaluationContext) -> Ve
                 approval: ApprovalShape::default(),
                 risk_labels: Vec::new(),
                 denied_paths: Vec::new(),
+                contributing_rules: Vec::new(),
             });
         }
     }
@@ -1074,7 +1033,7 @@ fn rule_candidates(policy: &ToolApprovalPolicy, ctx: &EvaluationContext) -> Vec<
         .iter()
         .enumerate()
         .filter(|(_, rule)| {
-            (rule.matches.is_empty() || rule.matches.matches(ctx, rule.identity_match))
+            (rule.matches.is_empty() || rule.matches.matches(ctx, rule.identity_match, rule.action))
                 && host_request::exact_write_env_allow(rule, ctx)
         })
         .map(|(index, rule)| Candidate {
@@ -1091,6 +1050,7 @@ fn rule_candidates(policy: &ToolApprovalPolicy, ctx: &EvaluationContext) -> Vec<
             approval: rule.approval.clone(),
             risk_labels: risk_labels_for_rule(rule),
             denied_paths: Vec::new(),
+            contributing_rules: Vec::new(),
         })
         .collect()
 }

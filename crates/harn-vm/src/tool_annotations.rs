@@ -210,7 +210,7 @@ pub struct ToolDependencyRangeParams {
 #[serde(default)]
 pub struct ToolArgSchema {
     /// Argument keys whose values are workspace-relative paths.
-    /// First matching key whose value is a string wins.
+    /// Every declared key contributes its string or list-of-strings values.
     pub path_params: Vec<String>,
     /// Argument keys that refine a mutating call's dependency target inside
     /// the declared path. Schedulers use these keys to distinguish independent

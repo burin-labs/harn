@@ -1259,6 +1259,7 @@ pub(super) fn evaluate_requirement(
                     action: "deny".to_string(),
                     id: audit.matched_rule.clone(),
                     index: None,
+                    contributing_rules: Vec::new(),
                 };
                 return Ok(PolicyEvaluation {
                     action: "deny".to_string(),
