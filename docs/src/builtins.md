@@ -1748,11 +1748,21 @@ id. Mutating operations stay unavailable unless the toolbox is configured with
 | `with_autonomy_policy(policy, fn)` | policy: dict, fn: closure | whatever `fn` returns | Run `fn` with a scoped autonomy tier policy; side-effecting builtins are enforced by the VM |
 | `harness.runtime.with_execution_policy(policy, fn)` | policy: dict, fn: closure | whatever `fn` returns | Run `fn` with a scoped capability policy; the policy is popped on success or throw |
 | `with_approval_policy(policy, fn)` | policy: dict, fn: closure | whatever `fn` returns | Run `fn` with a scoped tool approval policy; the policy is popped on success or throw |
+| `harness.runtime.evaluate_approval_policy(policy, request)` | policy: explicit tool approval policy; request: tool_name, arguments, optional policy_decision, approval_request, repeat_count | Canonical approval decision and receipt | Pure evaluation through the same engine as VM tool dispatch; does not install policy or approve an execution |
 | `with_command_policy(policy, fn)` | policy: dict, fn: closure | whatever `fn` returns | Run `fn` with a scoped command policy; the policy is popped on success or throw |
 | `with_dynamic_permissions(policy, fn)` | policy: dict, fn: closure | whatever `fn` returns | Run `fn` with a scoped dynamic permission policy; the policy is popped on success or throw |
 | `command_risk_scan(ctx)` | ctx: dict | dict | Run deterministic command-risk classification and return labels, confidence, rationale, and recommended action |
 | `command_result_scan(ctx)` | ctx: dict | dict | Classify a command result envelope for unsafe output or audit annotations |
 | `command_llm_risk_scan(ctx, options?)` | ctx: dict, options: dict | dict | Return the structured risk-scan helper shape with redacted options; deterministic fallback does not make network calls |
+
+`evaluate_approval_policy` accepts an effective policy and a raw native-host
+request. It returns `action` (`allow`, `ask`, or `deny`), `reason`, optional
+`matched_rule` and `required_approval`, risk labels, optional denied paths and
+network targets, and the existing `harn.permission_policy_decision.v1` receipt.
+Missing tool names, non-object arguments, unknown policy/request fields, and
+invalid field types raise an error. Hosts must treat evaluation failure as
+unavailable permission, never as permission to execute. The call reads no
+policy file, uses no provider or credential, and changes no ambient policy.
 
 Install policies directly or pass them to `agent_loop` with
 `command_policy: policy` / `policy: {command_policy: policy}`. Active policies
@@ -2775,6 +2785,21 @@ rule and accept strings or string lists:
 | `agent` / `persona` / `mode` | Agent/persona/mode identity from args or trigger context |
 | `capability` | Annotated capability operation such as `workspace.read_text` |
 | `repeat_count_gte` | Same `(session, tool, args)` call count threshold |
+
+A rule can set `identity_match: "literal"` for a remembered invocation. This
+compares `tool`, `tool_kind`, `command`, `command_identity`, `method`,
+`mcp_server`, `mcp_tool`, `env_mode`, and `capability` by exact equality after
+the evaluator's normal context normalization, except `command`, which compares
+the raw shell text without collapsing quoted whitespace. A shell-text grant
+does not match an `argv` invocation or mixed shell/argv input. Normalized
+receipt text cannot replace the raw command for a literal grant. A literal `*` in a remembered
+command is not a wildcard, and extra shell text does not match. `command`
+matches the complete command; `command_identity` matches the executable name.
+Resource scopes (`path`, `url`, `domain`), side effects, and agent/persona/mode
+constraints keep their pattern semantics. The default `identity_match:
+"pattern"` retains authored rule behavior. Unknown identity modes are invalid.
+Literal identity changes only matching; rule authority, refusal precedence,
+sensitive-path guards, and explicit environment-write grants still apply.
 
 Deny beats ask, and ask beats allow regardless of rule order. Legacy
 `auto_deny`, `require_approval`, and `auto_approve` are evaluated through the

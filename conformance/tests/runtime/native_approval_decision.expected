@@ -1,0 +1,15 @@
+allow
+ask
+deny
+harn.permission_policy_decision.v1
+true
+allow
+allow
+remembered
+ask
+ask
+true
+allow
+ask
+ask
+ask

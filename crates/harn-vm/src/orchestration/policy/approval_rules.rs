@@ -12,10 +12,12 @@ use crate::workspace_path::{WorkspacePathInfo, WorkspacePathKind};
 use super::ToolApprovalPolicy;
 
 mod host_request;
+mod identity_match;
 mod path_guards;
 mod rule_source;
 mod sensitive_paths;
 pub use host_request::ToolApprovalRequest;
+pub use identity_match::PolicyIdentityMatch;
 use path_guards::default_guard;
 pub use path_guards::{
     denial_gate_for_source, EXTERNAL_ROOT_READ_ONLY, SOURCE_DEFAULT_EXTERNAL_PATH,
@@ -272,25 +274,24 @@ impl PolicyRuleMatch {
             && self.repeat_count_at_least.is_none()
     }
 
-    fn matches(&self, ctx: &EvaluationContext) -> bool {
-        (self.tool.is_empty() || any_glob_matches(&self.tool, &[ctx.tool_name.clone()]))
-            && (self.tool_kind.is_empty() || any_glob_matches(&self.tool_kind, &ctx.tool_kinds()))
+    fn matches(&self, ctx: &EvaluationContext, identity: PolicyIdentityMatch) -> bool {
+        (self.tool.is_empty() || identity.matches(&self.tool, &[ctx.tool_name.clone()]))
+            && (self.tool_kind.is_empty() || identity.matches(&self.tool_kind, &ctx.tool_kinds()))
             && (self.side_effect.is_empty()
                 || any_glob_matches(&self.side_effect, &ctx.side_effects()))
             && (self.path.is_empty() || any_glob_matches(&self.path, &ctx.path_candidates))
-            && (self.command.is_empty()
-                || any_fragment_matches(&self.command, &ctx.command_candidates))
+            && (self.command.is_empty() || identity.matches_command(&self.command, ctx))
             && (self.command_identity.is_empty()
-                || any_glob_matches(&self.command_identity, &ctx.command_identities))
+                || identity.matches(&self.command_identity, &ctx.command_identities))
             && (self.url.is_empty() || any_fragment_matches(&self.url, &ctx.urls))
             && (self.domain.is_empty() || any_glob_matches(&self.domain, &ctx.domains))
             && (self.http_method.is_empty()
-                || any_glob_matches(
+                || identity.matches(
                     &normalize_patterns_upper(&self.http_method),
                     &ctx.http_methods,
                 ))
-            && (self.mcp_server.is_empty() || any_glob_matches(&self.mcp_server, &ctx.mcp_servers))
-            && (self.mcp_tool.is_empty() || any_glob_matches(&self.mcp_tool, &ctx.mcp_tools))
+            && (self.mcp_server.is_empty() || identity.matches(&self.mcp_server, &ctx.mcp_servers))
+            && (self.mcp_tool.is_empty() || identity.matches(&self.mcp_tool, &ctx.mcp_tools))
             && (self.agent.is_empty()
                 || ctx.agent.as_ref().is_some_and(|agent| {
                     any_glob_matches(&self.agent, std::slice::from_ref(agent))
@@ -304,8 +305,8 @@ impl PolicyRuleMatch {
                     .mode
                     .as_ref()
                     .is_some_and(|mode| any_glob_matches(&self.mode, std::slice::from_ref(mode))))
-            && host_request::env_modes_match(&self.env_mode, &ctx.env_modes)
-            && (self.capability.is_empty() || any_glob_matches(&self.capability, &ctx.capabilities))
+            && host_request::env_modes_match(&self.env_mode, &ctx.env_modes, identity)
+            && (self.capability.is_empty() || identity.matches(&self.capability, &ctx.capabilities))
             && self
                 .repeat_count_at_least
                 .map(|threshold| ctx.repeat_count.unwrap_or(0) >= threshold)
@@ -320,6 +321,9 @@ pub struct PolicyRule {
     pub action: PolicyAction,
     #[serde(default, skip_serializing_if = "PolicyRuleSource::is_policy")]
     pub source: PolicyRuleSource,
+    /// Identity fields in a remembered invocation are literal, not authored patterns.
+    #[serde(default, skip_serializing_if = "PolicyIdentityMatch::is_pattern")]
+    pub identity_match: PolicyIdentityMatch,
     #[serde(rename = "match")]
     pub matches: PolicyRuleMatch,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -384,6 +388,12 @@ impl<'de> Visitor<'de> for PolicyRuleVisitor {
             .transpose()
             .map_err(M::Error::custom)?
             .unwrap_or_default();
+        let identity_match = raw
+            .remove("identity_match")
+            .map(serde_json::from_value)
+            .transpose()
+            .map_err(M::Error::custom)?
+            .unwrap_or_default();
 
         let mut action = match raw.remove("action") {
             Some(JsonValue::String(value)) => Some(parse_policy_action(&value).ok_or_else(|| {
@@ -440,6 +450,7 @@ impl<'de> Visitor<'de> for PolicyRuleVisitor {
             id,
             action,
             source,
+            identity_match,
             matches,
             reason,
             approval,
@@ -540,6 +551,7 @@ struct EvaluationContext {
     path_entries: Vec<WorkspacePathInfo>,
     path_candidates: Vec<String>,
     command_candidates: Vec<String>,
+    literal_command: Option<String>,
     command_identities: Vec<String>,
     urls: Vec<String>,
     domains: Vec<String>,
@@ -621,6 +633,7 @@ impl EvaluationContext {
             path_entries,
             path_candidates,
             command_candidates,
+            literal_command: identity_match::literal_command(args),
             command_identities,
             urls,
             domains,
@@ -1061,7 +1074,7 @@ fn rule_candidates(policy: &ToolApprovalPolicy, ctx: &EvaluationContext) -> Vec<
         .iter()
         .enumerate()
         .filter(|(_, rule)| {
-            (rule.matches.is_empty() || rule.matches.matches(ctx))
+            (rule.matches.is_empty() || rule.matches.matches(ctx, rule.identity_match))
                 && host_request::exact_write_env_allow(rule, ctx)
         })
         .map(|(index, rule)| Candidate {
