@@ -4,7 +4,7 @@ use crate::ast::*;
 use crate::diagnostic_codes::Code;
 
 use super::super::scope::TypeScope;
-use super::super::TypeChecker;
+use super::super::{is_gradual_type_name, TypeChecker};
 
 const RULE: &str = "untyped-optional-chain";
 
@@ -66,14 +66,17 @@ impl TypeChecker {
         );
     }
 
-    /// `any`, `unknown`, an open `dict`, or a union of those with `nil`.
+    /// `any`, `unknown`, a `dict` whose values are untyped, or a union of those
+    /// with `nil`. A `dict<string, T>` with typed values is a real map, and
+    /// `m?.key?.field` over it is ordinary nil handling.
     fn type_is_untyped_record(&self, ty: &TypeExpr, scope: &TypeScope) -> bool {
         let ty = self.resolve_alias(ty, scope);
         match &ty {
-            TypeExpr::Named(name) => matches!(name.as_str(), "any" | "unknown" | "_" | "dict"),
-            TypeExpr::Applied { name, args } if name == "dict" => args.last().is_none_or(|value| {
-                matches!(value, TypeExpr::Named(name) if matches!(name.as_str(), "any" | "unknown" | "_"))
-            }),
+            TypeExpr::Named(name) => name == "dict" || is_gradual_type_name(name),
+            TypeExpr::Applied { name, args } if name == "dict" => args
+                .last()
+                .is_none_or(|value| self.type_is_untyped_record(value, scope)),
+            TypeExpr::DictType(_, value) => self.type_is_untyped_record(value, scope),
             TypeExpr::Union(members) => {
                 let mut saw_untyped = false;
                 for member in members {

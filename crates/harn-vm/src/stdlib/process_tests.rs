@@ -525,30 +525,3 @@ fn run_captured_spawn_starts_the_child_in_a_verbatim_prefixed_directory() {
         "the child must run in the directory the caller named, not in the parent's",
     );
 }
-
-/// The checker types `harness.process.exec` and `shell` results from
-/// `EXEC_RESULT`, so a field this builder stops writing would read as present.
-#[cfg(unix)]
-#[test]
-fn exec_result_writes_exactly_its_declared_shape() {
-    use std::os::unix::process::ExitStatusExt;
-
-    let harn_builtin_meta::Ty::Shape(fields) = harn_builtin_meta::shapes::EXEC_RESULT else {
-        panic!("EXEC_RESULT must remain a closed record");
-    };
-    let mut declared: Vec<String> = fields.iter().map(|field| field.name.to_string()).collect();
-    declared.sort_unstable();
-    let value = vm_output_to_value(std::process::Output {
-        status: std::process::ExitStatus::from_raw(0),
-        stdout: Vec::new(),
-        stderr: Vec::new(),
-    });
-    let mut written: Vec<String> = value
-        .as_dict()
-        .expect("exec result is a record")
-        .keys()
-        .map(|key| key.to_string())
-        .collect();
-    written.sort_unstable();
-    assert_eq!(written, declared);
-}

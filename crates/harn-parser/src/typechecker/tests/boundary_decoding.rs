@@ -21,15 +21,16 @@ fn rule_count(source: &str, rule_name: &str) -> usize {
 fn untyped_optional_chain_reports_once_per_chain() {
     let count = rule_count(
         r"
-fn read(payload: dict, raw: any) -> any {
+fn read(payload: dict, raw: any, bag: dict<string, any>) -> any {
   const a = payload?.data?.repository?.pullRequest
   const b = raw.data?.items?.[0]?.name
-  return [a, b]
+  const c = bag?.options?.verbose
+  return [a, b, c]
 }
 ",
         "untyped-optional-chain",
     );
-    assert_eq!(count, 2);
+    assert_eq!(count, 3);
 }
 
 #[test]
@@ -38,11 +39,12 @@ fn untyped_optional_chain_ignores_typed_optional_fields_and_single_links() {
         r"
 type Author = {login: string}
 type Pr = {author: Author?, mergeCommit: {oid: string}?}
-fn read(pr: Pr?, options: dict?) -> any {
+fn read(pr: Pr?, options: dict?, authors: dict<string, Author>) -> any {
   const login = pr?.author?.login
   const oid = pr?.mergeCommit?.oid
   const flag = options?.verbose
-  return [login, oid, flag]
+  const named = authors?.ada?.login
+  return [login, oid, flag, named]
 }
 ",
         "untyped-optional-chain",

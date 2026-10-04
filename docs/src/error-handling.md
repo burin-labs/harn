@@ -458,10 +458,11 @@ How decoding treats fields:
 - Nested records, lists, and unions of records decode in one call.
 
 Typed results need no decoding. `command_run` returns `CommandResult`,
-`harness.process.exec` and `shell` return `{stdout, stderr, status, success}`,
+`harness.process.run`, `exec`, and `shell` return the same record (`stdout`,
+`stderr`, `combined`, `exit_code`, `success`, `status`, `timed_out`, ...),
 and every buffered `harness.net` request returns `{status, headers, body,
-final_url, ok}`. None of these fields is ever `nil`, and the checker reports
-`?.` on them as unnecessary (`HARN-LNT-051`). Only the `body` text is untrusted.
+final_url, ok}`. The output, exit, and status fields are never `nil`, and the
+checker reports `?.` on them as unnecessary (`HARN-LNT-051`). Only the `body` text is untrusted.
 
 The checker reports a `?.` chain over an untyped value as `HARN-LNT-080`
 (`untyped-optional-chain`). It is advisory: it appears in `harn check`,

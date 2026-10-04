@@ -123,7 +123,8 @@ pub const WAITPOINT: Ty = Ty::Shape(&[
     ShapeFieldDescriptor::new("metadata", TY_DICT_OR_NIL),
 ]);
 
-/// Stable synchronous subprocess result returned by `harness.process.run`.
+/// Stable synchronous subprocess result returned by `harness.process.run`,
+/// `exec`, `shell`, `exec_at`, and `shell_at`.
 ///
 /// This is the typed projection of `process_exec_response` in `harn-vm`.
 /// Keep every runtime field here so callers can use a narrower named record
@@ -145,19 +146,6 @@ pub const PROCESS_RESULT: Ty = Ty::Shape(&[
     ShapeFieldDescriptor::new("stdout_utf8_valid", TY_BOOL),
     ShapeFieldDescriptor::new("stderr_utf8_valid", TY_BOOL),
     ShapeFieldDescriptor::new("combined", TY_STRING),
-    ShapeFieldDescriptor::new("success", TY_BOOL),
-]);
-
-/// Captured result of `harness.process.exec`, `shell`, `exec_at`, and
-/// `shell_at`.
-///
-/// The typed projection of `vm_output_to_value` in `harn-vm`. A non-zero exit
-/// is a result with `success: false`; a spawn failure throws instead, so no
-/// field is ever nil. `status` is the exit code, or `-1` for a signal.
-pub const EXEC_RESULT: Ty = Ty::Shape(&[
-    ShapeFieldDescriptor::new("stdout", TY_STRING),
-    ShapeFieldDescriptor::new("stderr", TY_STRING),
-    ShapeFieldDescriptor::new("status", TY_INT),
     ShapeFieldDescriptor::new("success", TY_BOOL),
 ]);
 

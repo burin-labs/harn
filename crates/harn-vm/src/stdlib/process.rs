@@ -487,7 +487,7 @@ fn exit_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
 #[harn_builtin(
     exposure = "runtime_internal",
     effects = [],
-    sig = "exec(...command: string) -> @EXEC_RESULT", category = "process"
+    sig = "exec(...command: string) -> dict", category = "process"
 )]
 fn exec_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     if args.is_empty() {
@@ -504,7 +504,7 @@ fn exec_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
 #[harn_builtin(
     exposure = "runtime_internal",
     effects = [],
-    sig = "shell(command: string) -> @EXEC_RESULT", category = "process"
+    sig = "shell(command: string) -> dict", category = "process"
 )]
 fn shell_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let cmd = args.first().map(|a| a.display()).unwrap_or_default();
@@ -522,7 +522,7 @@ fn shell_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
 #[harn_builtin(
     exposure = "runtime_internal",
     effects = [],
-    sig = "exec_at(dir: string, ...command: string) -> @EXEC_RESULT",
+    sig = "exec_at(dir: string, ...command: string) -> dict",
     category = "process"
 )]
 fn exec_at_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
@@ -541,7 +541,7 @@ fn exec_at_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError>
 #[harn_builtin(
     exposure = "runtime_internal",
     effects = [],
-    sig = "shell_at(dir: string, command: string) -> @EXEC_RESULT",
+    sig = "shell_at(dir: string, command: string) -> dict",
     category = "process"
 )]
 fn shell_at_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {

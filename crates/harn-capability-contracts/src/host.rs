@@ -449,28 +449,28 @@ capability_method!(
     process_exec,
     "harness.process.exec",
     ["process.write@arg0"],
-    "__cap_process_exec(...command: string) -> @EXEC_RESULT",
+    "__cap_process_exec(...command: string) -> @PROCESS_RESULT",
     "Execute a program and argument vector."
 );
 capability_method!(
     process_shell,
     "harness.process.shell",
     ["process.write@arg0"],
-    "__cap_process_shell(command: string) -> @EXEC_RESULT",
+    "__cap_process_shell(command: string) -> @PROCESS_RESULT",
     "Execute a command through the configured shell."
 );
 capability_method!(
     process_exec_at,
     "harness.process.exec_at",
     ["fs.read@arg0", "process.write@arg1"],
-    "__cap_process_exec_at(directory: string, ...command: string) -> @EXEC_RESULT",
+    "__cap_process_exec_at(directory: string, ...command: string) -> @PROCESS_RESULT",
     "Execute a program and argument vector in a working directory."
 );
 capability_method!(
     process_shell_at,
     "harness.process.shell_at",
     ["fs.read@arg0", "process.write@arg1"],
-    "__cap_process_shell_at(directory: string, command: string) -> @EXEC_RESULT",
+    "__cap_process_shell_at(directory: string, command: string) -> @PROCESS_RESULT",
     "Execute a shell command in a working directory."
 );
 capability_method!(
