@@ -18,14 +18,13 @@ pub(crate) fn register_math_builtins(vm: &mut Vm) {
 #[harn_builtin(
     exposure = "pure",
     effects = [],
-    sig = "abs(value: number | decimal) -> number | decimal", category = "math"
+    sig = "abs(value: number) -> number", category = "math"
 )]
 fn abs_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     match args.first().unwrap_or(&VmValue::Nil) {
         VmValue::Int(i64::MIN) => Ok(VmValue::Float(9_223_372_036_854_775_808.0)),
         VmValue::Int(n) => Ok(VmValue::Int(n.abs())),
         VmValue::Float(n) => Ok(VmValue::Float(n.abs())),
-        VmValue::Decimal(d) => Ok(VmValue::decimal(d.abs())),
         _ => Ok(VmValue::Nil),
     }
 }
