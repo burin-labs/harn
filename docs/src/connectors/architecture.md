@@ -1,8 +1,8 @@
 # Connector architecture status
 
 The original Rust-side connector library plan covered shared connector traits,
-generic webhooks, cron, GitHub, Slack, Linear, Notion, OAuth helpers, catalog
-docs, and provider-specific runtime behavior. That plan has since been split
+generic webhooks, cron, GitHub, Slack, Linear, OAuth helpers, catalog docs,
+and provider-specific runtime behavior. That plan has since been split
 into a smaller core substrate plus pure-Harn provider packages.
 
 This page is the current source of truth for what belongs in this repository
@@ -47,7 +47,6 @@ The first-party package track is:
 | GitHub | <https://github.com/burin-labs/harn-github-connector> | First-party package track |
 | Slack | <https://github.com/burin-labs/harn-slack-connector> | First-party package track |
 | Linear | <https://github.com/burin-labs/harn-linear-connector> | First-party package track |
-| Notion | <https://github.com/burin-labs/harn-notion-connector> | First-party package track |
 | GitLab | <https://github.com/burin-labs/harn-gitlab-connector> | Additional forge package track |
 
 Each package should declare connector contract v1 metadata, ship deterministic
@@ -65,7 +64,7 @@ harn package verify . --run-poll-tick
 
 ## Provider packages
 
-GitHub, Slack, Linear, Notion, and additional forge integrations live in
+GitHub, Slack, Linear, and additional forge integrations live in
 pure-Harn connector package repositories. Harn core should not grow
 provider-specific transport consumers or outbound API clients unless the change
 is a reusable host transport primitive with no provider policy.

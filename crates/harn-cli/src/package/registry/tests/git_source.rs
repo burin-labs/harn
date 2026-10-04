@@ -9,7 +9,7 @@ use crate::package::*;
 
 #[test]
 fn pick_ls_remote_commit_prefers_peeled_tag_over_tag_object() {
-    // Real-world example from notion-sdk-harn v0.1.0: the tag is
+    // Example package at v0.1.0: the tag is
     // annotated, so ls-remote returns both the tag-object SHA and the
     // commit it points at.
     let output = "\

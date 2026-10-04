@@ -297,7 +297,6 @@
 - [Cron connector](./connectors/cron.md)
 - [GitHub app connector](./connectors/github.md)
 - [Linear connector](./connectors/linear.md)
-- [Notion connector](./connectors/notion.md)
 - [Slack events connector](./connectors/slack-events.md)
 - [Generic webhook connector](./connectors/webhook.md)
 - [A2A push connector](./connectors/a2a-push.md)

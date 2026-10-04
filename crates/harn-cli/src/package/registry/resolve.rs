@@ -5,9 +5,9 @@
 use crate::package::*;
 
 /// Look up a registry package by either its scoped registry name
-/// (`@burin/notion-sdk`) or any `[[package.version]].package` alias
-/// (`notion-sdk-harn`). Bare-name lookup falls back to the alias so
-/// `harn add notion-sdk-harn@0.1.0` works the same as the scoped form.
+/// (`@burin/linear-sdk`) or any `[[package.version]].package` alias
+/// (`linear-sdk-harn`). Bare-name lookup falls back to the alias so
+/// `harn add linear-sdk-harn@0.1.0` works the same as the scoped form.
 fn lookup_registry_package<'a>(
     index: &'a PackageRegistryIndex,
     name: &str,
@@ -144,7 +144,7 @@ pub(crate) fn package_registry_info_in(
 ) -> Result<RegistryPackageInfo, PackageError> {
     let Some((name, version)) = parse_registry_package_spec(spec) else {
         return Err(format!(
-            "invalid registry package name '{spec}'; use names like @burin/notion-sdk or acme-lib"
+            "invalid registry package name '{spec}'; use names like @burin/linear-sdk or acme-lib"
         )
         .into());
     };
@@ -282,8 +282,8 @@ fn registry_dependency_table(
             registry_provenance: provenance,
             package,
             registry: Some(registry_source),
-            // Store the canonical scoped registry name (e.g. `@burin/notion-sdk`)
-            // even when the user typed the bare alias (`notion-sdk-harn`) so
+            // Store the canonical scoped registry name (e.g. `@burin/linear-sdk`)
+            // even when the user typed the bare alias (`linear-sdk-harn`) so
             // re-resolves stay anchored to the same registry row.
             registry_name: Some(registry_name),
             registry_version: Some(resolved_version),

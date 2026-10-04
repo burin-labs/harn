@@ -103,8 +103,8 @@ async fn mcp_catalog_changed_allows_serverless_allowlist_update() {
 async fn mcp_auth_required_reaches_acp_as_ext_event() {
     let actual = collect_notifications(vec![AgentEvent::McpAuthRequired {
         session_id: "session-1".to_string(),
-        server: "notion".to_string(),
-        resource: "https://mcp.notion.com".to_string(),
+        server: "wiki".to_string(),
+        resource: "https://mcp.wiki.example".to_string(),
         scope: Some("read write".to_string()),
     }])
     .await;
@@ -114,8 +114,8 @@ async fn mcp_auth_required_reaches_acp_as_ext_event() {
     let params = &notification["params"];
     assert_eq!(params["kind"], "mcp_auth_required");
     assert_eq!(params["sessionId"], "session-1");
-    assert_eq!(params["server"], "notion");
-    assert_eq!(params["resource"], "https://mcp.notion.com");
+    assert_eq!(params["server"], "wiki");
+    assert_eq!(params["resource"], "https://mcp.wiki.example");
     assert_eq!(params["scope"], "read write");
     assert!(
         HARN_AGENT_EVENT_KINDS.contains(&"mcp_auth_required"),
@@ -127,8 +127,8 @@ async fn mcp_auth_required_reaches_acp_as_ext_event() {
 async fn mcp_auth_required_omits_absent_scope() {
     let actual = collect_notifications(vec![AgentEvent::McpAuthRequired {
         session_id: "session-1".to_string(),
-        server: "notion".to_string(),
-        resource: "https://mcp.notion.com".to_string(),
+        server: "wiki".to_string(),
+        resource: "https://mcp.wiki.example".to_string(),
         scope: None,
     }])
     .await;
