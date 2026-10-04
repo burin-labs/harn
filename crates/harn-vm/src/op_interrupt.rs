@@ -493,6 +493,7 @@ enum InterruptReason {
 }
 
 /// Preparation has no VM to dispatch through; its caller retains that owner.
+#[cfg(target_os = "linux")]
 pub(crate) fn requested_error() -> Option<crate::VmError> {
     requested_reason().map(|reason| match reason {
         InterruptReason::Deadline => crate::Vm::deadline_exceeded_error(),
