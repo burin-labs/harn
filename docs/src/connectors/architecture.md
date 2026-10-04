@@ -92,7 +92,7 @@ surfaces exist and are tested:
 | Git forge PR/MR lifecycle event and writeback contract | `std/connectors/shared::git_forge_pull_request_event`, `GitForgePullRequestEvent` generated from `crates/harn-stdlib/src/stdlib/stdlib_event_schemas.harn` |
 | Harn connector contract, `NormalizeResult`, `poll_tick`, and effect policy | `crates/harn-vm/src/connectors/harn_module.rs`, `crates/harn-lint/src/tests/connector_effect_policy.rs` |
 | Connector package conformance harness | `harn package verify`, `harn connector check`, and connector contract fixtures |
-| Catalog, examples, and migration guidance | `docs/src/connectors/catalog.md`, `examples/triggers/`, `docs/src/migrations/rust-connectors-to-harn-packages.md` |
+| Catalog and examples | `docs/src/connectors/catalog.md`, `examples/triggers/` |
 
 Future work should update those newer ownership surfaces, not reopen the old
 Rust-provider plugin-library plan.

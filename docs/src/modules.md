@@ -2096,8 +2096,7 @@ not own completion classification. Persistence adapters store
 
 ### std/agent/options (agent specification and model-option resolution)
 
-Model-option resolution helpers (moved here from the removed
-`std/agent/stack` in 0.10 — see [Migrating to 0.10](./migrations/v0.10.md)):
+Model-option resolution helpers:
 
 `AgentSpec` is the flat public loop contract. Its six named components are
 `AgentModelSpec`, `AgentExecutionSpec`, `AgentCapabilitySpec`,
