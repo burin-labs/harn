@@ -2037,7 +2037,7 @@ fn paid_public_runner_selector(token: string, release_runner_policy: dict) -> bo
   return contains(label, "blacksmith")
     || contains(label, "ubicloud")
     || regex_match(r"^(ubuntu|windows)-[0-9]+core", label) != nil
-    || regex_match(r"^macos-[0-9]+-(large|xlarge)$", label) != nil
+    || regex_match(r"^(macos|xcode)-[a-z0-9._-]+-(large|xlarge)$", label) != nil
     || (registered != nil
       && (registered?.usd_per_minute != nil || registered?.provider != "github"))
 }

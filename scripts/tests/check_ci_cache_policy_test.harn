@@ -352,6 +352,24 @@ pipeline test_public_runner_policy_reads_literal_matrix_input_and_release_paths(
       },
       jobs: {build: {"runs-on": gha_expression("inputs.runner")}},
     },
+    "macos.yml": {
+      jobs: {
+        build: {
+          "runs-on": gha_expression("matrix.runner"),
+          strategy: {
+            matrix: {
+              runner: [
+                "macos-latest",
+                "xcode-27",
+                "macos-latest-large",
+                "macOS-latest-xlarge",
+                "xcode-27-xlarge",
+              ],
+            },
+          },
+        },
+      },
+    },
     "capacity.yml": {
       jobs: {
         route: {
@@ -376,6 +394,9 @@ pipeline test_public_runner_policy_reads_literal_matrix_input_and_release_paths(
       "capacity.yml:route runner capacity decision must not accept paid route input PAID_LINUX_PROVIDER",
       "input.yml:build runner selection can resolve through paid token blacksmith-8vcpu-windows-2025",
       "literal.yml:build runner selection can resolve through paid token blacksmith-8vcpu-ubuntu-2404",
+      "macos.yml:build runner selection can resolve through paid token macOS-latest-xlarge",
+      "macos.yml:build runner selection can resolve through paid token macos-latest-large",
+      "macos.yml:build runner selection can resolve through paid token xcode-27-xlarge",
       "matrix.yml:build runner selection can resolve through paid token blacksmith-4vcpu-ubuntu-2404",
       "matrix.yml:build runner selection can resolve through paid token ubicloud-standard-8",
       "release-runner-policy.json:cli_aot standard runner ubuntu-16core-release is paid public-repository capacity",
