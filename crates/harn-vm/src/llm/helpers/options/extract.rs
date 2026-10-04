@@ -600,6 +600,10 @@ pub(crate) fn extract_llm_options(
     //   - dict: { variant, mode, strategy, always_loaded, name }
     // Unset / false / nil all leave tool_search absent — tools ship eagerly.
     let mut tool_search = parse_tool_search_option(options.as_ref())?;
+    // A native search meta-tool with nothing deferred has nothing to find, and
+    // on a tool-free turn (a terminal wrap-up) it would hand the model a tool
+    // the loop deliberately removed (harn#9317). Such a request ships eagerly.
+    let mut native_search_has_nothing_deferred = false;
 
     if let Some(cfg) = tool_search.as_mut() {
         // Resolve tool_search against the active provider now. Three
@@ -677,7 +681,16 @@ pub(crate) fn extract_llm_options(
             }
         }
 
+        // No native tool list at all means the caller sent no tools; a text
+        // tool format also leaves it unset, and that route keeps its meta-tool.
+        let nothing_deferred = match native_tools.as_ref() {
+            Some(tools) => extract_deferred_tool_names(tools).is_empty(),
+            None => tools_val.is_none(),
+        };
         match resolution {
+            ToolSearchResolution::Native if nothing_deferred => {
+                native_search_has_nothing_deferred = true;
+            }
             ToolSearchResolution::Native => {
                 // Classify the native wire shape for this provider so
                 // the injection and response parser agree on what to
@@ -746,6 +759,9 @@ pub(crate) fn extract_llm_options(
             }
             ToolSearchResolution::Client => {}
         }
+    }
+    if native_search_has_nothing_deferred {
+        tool_search = None;
     }
 
     refuse_dropped_text_tools(

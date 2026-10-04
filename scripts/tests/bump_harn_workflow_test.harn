@@ -110,6 +110,9 @@ fn workflow_input_errors(inputs: dict) -> list<string> {
   if inputs.get("node-version")?.type != "string" {
     errors = errors + ["node-version must remain a typed reusable-workflow input"]
   }
+  if inputs.get("labels")?.type != "string" || inputs.get("labels")?.default != "" {
+    errors = errors + ["labels must remain an optional typed empty-default input"]
+  }
   return errors
 }
 
@@ -209,6 +212,10 @@ fn bump_workflow_errors(workflow: dict, text: string) -> list<string> {
   }
   if env?.HARN_BUMP_FORMAT_COMMAND != "$" + "{{ inputs.format-command }}" {
     errors = errors + ["format-command must flow into the orchestration environment"]
+  }
+  // The driver reads this name; a target runtime refuses unregistered HARN_* names.
+  if env?.HARN_EXT_BUMP_LABELS != "$" + "{{ inputs.labels }}" {
+    errors = errors + ["labels must flow into the orchestration environment"]
   }
   if !to_string(env?.HARN_BUMP_REFRESH_SENTINEL ?? "").contains("github.run_attempt") {
     errors = errors + ["refresh success sentinel must be unique per run attempt"]

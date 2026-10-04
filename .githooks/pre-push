@@ -13,56 +13,32 @@ harn_lint_files=$(mktemp)
 markdown_files=$(mktemp)
 changed_packages=$(mktemp)
 push_updates=$(mktemp)
+push_commits=$(mktemp)
 # Combine into a single EXIT trap (a second `trap ... EXIT` would replace,
 # not stack with, this one): capture the hook's real exit code FIRST (the
 # subsequent `rm` would otherwise clobber $? with its own status), clean up
 # temp files, then let hook_timing_finish append the NDJSON timing line and
 # re-exit with the captured code.
 hook_timing_exit_code=0
-trap 'hook_timing_exit_code=$?; rm -f "$changed" "$harn_format_files" "$harn_lint_files" "$markdown_files" "$changed_packages" "$push_updates"; hook_timing_finish "$hook_timing_exit_code"' EXIT
+trap 'hook_timing_exit_code=$?; rm -f "$changed" "$harn_format_files" "$harn_lint_files" "$markdown_files" "$changed_packages" "$push_updates" "$push_commits"; hook_timing_finish "$hook_timing_exit_code"' EXIT
 
 # Git sends one four-field line per ref update on stdin. A deletion has the
 # literal local-ref marker `(delete)` plus an all-zero local object ID, so there
 # are no local commits or files to validate. Consume the stream once and fail
-# closed: empty, malformed, and mixed update sets continue through the normal
-# validation path.
+# closed: empty or malformed input is refused by the census below, while mixed
+# updates validate every nondeleted ref.
 cat > "$push_updates"
-deletion_only=0
-if [ -s "$push_updates" ] && awk '
-  function valid_oid(oid) {
-    return oid ~ /^[0-9a-f]+$/ && (length(oid) == 40 || length(oid) == 64)
-  }
-  NF != 4 || $1 != "(delete)" || !valid_oid($2) || $2 !~ /^0+$/ ||
-    !valid_oid($4) || length($2) != length($4) { malformed = 1 }
-  END { exit malformed ? 1 : 0 }
-' "$push_updates"; then
-  deletion_only=1
-  while IFS=' ' read -r _local_ref _local_oid remote_ref _remote_oid _extra ||
-    [ -n "$_local_ref$_local_oid$remote_ref$_remote_oid$_extra" ]; do
-    if [ -n "$_extra" ] || ! git check-ref-format "$remote_ref" >/dev/null 2>&1; then
-      deletion_only=0
-      break
-    fi
-  done < "$push_updates"
-fi
-if [ "$deletion_only" -eq 1 ]; then
+hook_write_push_commits "$push_commits" "$push_updates" "${2:-}"
+# The owning census validated the stream. Classification here adds no second
+# parser for the ref-update protocol.
+if awk '$1 != "(delete)" { nondeletions = 1 } END { exit nondeletions ? 1 : 0 }' "$push_updates"; then
   echo "=== Pre-push: deletion-only ref update; skipping local commit validation ==="
   exit 0
 fi
 
-push_base=$(hook_push_base)
-validation_base=$(hook_validation_base)
-# Expensive changed-file gates should validate the PR delta against the base
-# branch, not the stale upstream range used below to inspect pushed commits.
-hook_write_push_files "$changed" "$validation_base"
-if ! hook_fast_default_mode; then
-  hook_export_cargo_target_dir
-  hook_disable_cargo_incremental_if_release_bump "push $validation_base"
-  hook_export_existing_harn_bin_for_non_rust_changes "$changed"
-fi
-
-# Signature guard (cheapest gate — local, no network). main enforces the
-# required_signatures ruleset server-side; an unsigned commit is rejected at
+# Signature guard. Census the actual refs before paying changed-file gates.
+# Existing destination history is excluded by live advertised object identity.
+# main enforces the required_signatures ruleset server-side; an unsigned commit is rejected at
 # merge with the misleading "base branch policy prohibits the merge", so catch
 # it here at push-time instead. A pre-COMMIT check can't gate this: --no-verify
 # skips all hooks and no git config blocks an explicit `-c commit.gpgsign=false`.
@@ -71,12 +47,18 @@ fi
 # accepted and left for GitHub to adjudicate, so a signed-but-locally-
 # unverifiable commit (e.g. `%G?=E`, a key not in allowed_signers) is never
 # false-blocked. Intentional override: git push --no-verify.
-# `for` over rev-list + `if` (not a nested `case` inside `$(while …)`, which
-# trips a `;;`-in-command-substitution parse error in POSIX sh). Commit SHAs
-# never contain whitespace, so word-splitting the rev-list output is safe.
+candidate_count=$(wc -l < "$push_commits" | tr -d ' ')
+echo "=== Pre-push: checking signatures for $candidate_count distinct pushed commits ==="
 unsigned_found=0
-for commit in $(git rev-list "$push_base..HEAD" 2>/dev/null); do
-  sig=$(git log -1 --format='%G?' "$commit" 2>/dev/null)
+while read -r commit; do
+  if ! sig=$(git log -1 --format='%G?' "$commit" 2>/dev/null); then
+    echo "error: cannot read signature for pushed commit $commit" >&2
+    exit 1
+  fi
+  case "$sig" in
+    N|B|G|U|E|X|Y|R) ;;
+    *) echo "error: missing or invalid signature status for pushed commit $commit" >&2; exit 1 ;;
+  esac
   if [ "$sig" = "N" ] || [ "$sig" = "B" ]; then
     if [ "$unsigned_found" -eq 0 ]; then
       echo "" >&2
@@ -85,13 +67,22 @@ for commit in $(git rev-list "$push_base..HEAD" 2>/dev/null); do
     fi
     echo "  $commit (%G?=$sig) $(git log -1 --format='%s' "$commit" 2>/dev/null)" >&2
   fi
-done
+done < "$push_commits"
 if [ "$unsigned_found" -ne 0 ]; then
   echo "" >&2
   echo "  Re-sign : git commit --amend --no-edit --no-verify   (signs via commit.gpgsign=true)" >&2
   echo "  Bulk    : git rebase --exec 'git commit --amend --no-edit --no-verify' <base>" >&2
   echo "  NEVER pass -c commit.gpgsign=false. Intentional override: git push --no-verify." >&2
   exit 1
+fi
+
+validation_base=$(hook_validation_base)
+# Changed-file gates own the PR delta, independently of the signature census.
+hook_write_push_files "$changed" "$validation_base"
+if ! hook_fast_default_mode; then
+  hook_export_cargo_target_dir
+  hook_disable_cargo_incremental_if_release_bump "push $validation_base"
+  hook_export_existing_harn_bin_for_non_rust_changes "$changed"
 fi
 
 # Merge-queue guard. GitHub does not reject pushes to a PR that's already

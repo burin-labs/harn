@@ -22,7 +22,7 @@ fn pick(req: dict) {
 fn main(harness: Harness) {
   const policy = create({allow: [], default: "deny", on_violation: pick})
   const restricted = harness.with_net_policy(policy)
-  const safe = restricted.net.get("https://example.test/safe/hello")
+  const safe = restricted.net.get("https://example.test/safe/hello").body
   harness.stdio.println("safe=" + safe)
   let hostile_err = nil
   try {

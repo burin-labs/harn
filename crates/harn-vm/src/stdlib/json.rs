@@ -417,7 +417,7 @@ fn json_validate_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
 #[harn_builtin(
     exposure = "pure",
     effects = [],
-    sig = "schema_check(value: any, schema: any) -> any",
+    sig = "<T> schema_check(value: unknown, schema: dict | Schema<T>) -> Result<T, {message: string, errors: list<string>, issues: list<{path: string, message: string, code: string}>, value?: any}>",
     category = "json"
 )]
 fn schema_check_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
@@ -428,12 +428,39 @@ fn schema_check_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
 #[harn_builtin(
     exposure = "pure",
     effects = [],
-    sig = "schema_parse(value: any, schema: any) -> any",
+    sig = "<T> schema_parse(value: unknown, schema: dict | Schema<T>) -> Result<T, {message: string, errors: list<string>, issues: list<{path: string, message: string, code: string}>, value?: any}>",
     category = "json"
 )]
 fn schema_parse_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     require_args(args, 2, "schema_parse")?;
     Ok(schema::schema_result_value(&args[0], &args[1], true))
+}
+
+/// Parse JSON text and validate it in one step: the boundary decoder for
+/// command output and response bodies. A malformed document is an `Err`, not a
+/// throw, so callers handle both failures with one `?` or `is_err`.
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "<T> json_decode(text: string, schema: dict | Schema<T>) -> Result<T, {message: string, errors: list<string>, issues: list<{path: string, message: string, code: string}>, value?: any}>",
+    category = "json"
+)]
+fn json_decode_impl(args: &[VmValue], out: &mut String) -> Result<VmValue, VmError> {
+    require_args(args, 2, "json_decode")?;
+    match json_parse_impl(&args[..1], out) {
+        Ok(parsed) => Ok(schema::schema_result_value(&parsed, &args[1], true)),
+        Err(VmError::Thrown(thrown)) => {
+            let message = match &thrown {
+                VmValue::Dict(dict) => dict
+                    .get("message")
+                    .map(VmValue::display)
+                    .unwrap_or_else(|| thrown.display()),
+                other => other.display(),
+            };
+            Ok(schema::schema_result_err("root", message))
+        }
+        Err(other) => Err(other),
+    }
 }
 
 #[harn_builtin(
@@ -712,6 +739,7 @@ pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
     &JSON_VALIDATE_IMPL_DEF,
     &SCHEMA_CHECK_IMPL_DEF,
     &SCHEMA_PARSE_IMPL_DEF,
+    &JSON_DECODE_IMPL_DEF,
     &SCHEMA_REPORT_IMPL_DEF,
     &SCHEMA_IS_IMPL_DEF,
     &SCHEMA_OF_IMPL_DEF,

@@ -1193,6 +1193,7 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
       break
     }
     const final_state = {
+      successful_tools_seen: successful_tools_seen,
       opts: opts,
       final_status: final_status,
       stop_reason: stop_reason,

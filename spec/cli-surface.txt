@@ -1366,13 +1366,17 @@ harn portal --persona-state-dir
 harn portal --port
 harn precompile
 harn precompile --artifact-contract
+harn precompile --jobs
 harn precompile --keep-going
 harn precompile --out
 harn precompile --quiet
 harn precompile --relocatable
+harn precompile -j
 harn precompile -q
 harn precompile <positional 1>
 harn provider
+harn provider admission
+harn provider admission --request
 harn provider cache-probe
 harn provider cache-probe --json
 harn provider cache-probe --model

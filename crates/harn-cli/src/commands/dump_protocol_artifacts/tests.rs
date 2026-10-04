@@ -792,36 +792,7 @@ fn dispatched_acp_methods_match_artifact() {
     let dispatch = protocol_source()
         .read_text("crates/harn-serve/src/adapters/acp/dispatch.rs")
         .expect("read acp adapter");
-    let body = dispatch
-        .split_once("match method.as_str() {")
-        .expect("dispatch match block")
-        .1
-        .split_once("\n            _ => {")
-        .expect("dispatch wildcard arm")
-        .0;
-    let mut dispatched = BTreeSet::new();
-    for line in body.lines() {
-        let trimmed = line.trim();
-        // Match-arm heads look like `"method" => {` or `"a" | "b" => {`.
-        if !trimmed.contains("=>") || !trimmed.starts_with('"') {
-            if trimmed.contains("=>") {
-                let method = dispatch_arm_constant_value(trimmed).unwrap_or_else(|| {
-                    panic!(
-                        "constant-based ACP dispatch arm is not resolved by the protocol artifact guard: {trimmed}"
-                    )
-                });
-                dispatched.insert(method);
-            }
-            continue;
-        }
-        let arm = trimmed.split("=>").next().unwrap_or("");
-        for literal in arm.split('|') {
-            let name = literal.trim().trim_matches('"');
-            if !name.is_empty() {
-                dispatched.insert(name.to_string());
-            }
-        }
-    }
+    let dispatched = acp_dispatch::methods(&dispatch);
     let published: BTreeSet<String> = ACP_DISPATCHED_METHODS
         .iter()
         .map(|m| m.to_string())
@@ -836,6 +807,8 @@ fn dispatched_acp_methods_match_artifact() {
         published.difference(&dispatched).collect::<Vec<_>>(),
     );
 }
+
+mod acp_dispatch;
 
 fn dispatch_arm_constant_value(trimmed_arm: &str) -> Option<String> {
     let name = trimmed_arm.split("=>").next()?.trim();

@@ -36,7 +36,7 @@ expected_branch="automation/development-$expected_version"
 # The next stable workspace lands before its tag. Until publication catches
 # up, the preceding release's development identity is no longer a useful debt.
 # This is an unproven publication state, never a successful cutover verdict.
-if [[ "$workspace_version" == "${expected_version%-${HARN_RELEASE_DEVELOPMENT_PRERELEASE}}" ]]; then
+if [[ "$workspace_version" == "${expected_version%-"${HARN_RELEASE_DEVELOPMENT_PRERELEASE}"}" ]]; then
   description="publication pending: main $workspace_version, latest tag $latest_tag"
   echo "main_ref=$main_ref"
   echo "main_version=$workspace_version"
@@ -124,6 +124,10 @@ if [[ "$workspace_version" != "$expected_version" && "$open_count" -eq 0 ]]; the
   description="owed: main $workspace_version, expected $expected_version, no open $expected_branch PR"
   if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
     echo "description=$description" >> "$GITHUB_OUTPUT"
+    # Only this measured debt can admit automatic repair. Unreadable census
+    # and publication-pending paths never produce this typed projection.
+    printf 'repair_owed=true\nrepair_version=%s\nrepair_published_tag=%s\n' \
+      "$expected_version" "$latest_tag" >> "$GITHUB_OUTPUT"
   fi
   echo "error: development cutover is owed; $description" >&2
   exit 1

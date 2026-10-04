@@ -713,6 +713,7 @@ test-pr-gate-scripts:
 	./scripts/tests/prepare_development_version_test.sh
 	./scripts/tests/development_bump_cutover_test.sh
 	./scripts/tests/development_cutover_monitor_test.sh
+	./scripts/tests/development_cutover_repair_test.sh
 	./scripts/tests/merge_group_path_gate_test.sh
 	./scripts/tests/affected_crate_args_test.sh
 	./scripts/tests/hook_commit_msg_session_trailer_test.sh
@@ -724,6 +725,7 @@ test-pr-gate-scripts:
 	./scripts/tests/hook_registry_harn_bin_test.sh
 	./scripts/tests/hook_agent_gate_census_test.sh
 	./scripts/tests/pre_push_validation_range_test.sh
+	./scripts/tests/pre_push_signature_census_test.sh
 	./scripts/tests/ci_rust_test_lane_test.sh
 	./scripts/tests/thread_parity_receipt_test.sh
 	./scripts/tests/macos_nightly_test_env_test.sh

@@ -250,6 +250,7 @@ pub(crate) fn check_file_report_inner(
         match diag.severity {
             DiagnosticSeverity::Error => has_error = true,
             DiagnosticSeverity::Warning => has_warning = true,
+            DiagnosticSeverity::Info => {}
         }
         diagnostic_count += 1;
         if let Some(text) = text.as_mut() {
@@ -508,6 +509,7 @@ fn type_severity_label(severity: DiagnosticSeverity) -> &'static str {
     match severity {
         DiagnosticSeverity::Error => "error",
         DiagnosticSeverity::Warning => "warning",
+        DiagnosticSeverity::Info => "info",
     }
 }
 

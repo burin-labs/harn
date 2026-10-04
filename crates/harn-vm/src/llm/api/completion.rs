@@ -56,8 +56,7 @@ pub(crate) async fn vm_call_completion_full(
         &opts.provider,
         &opts.model,
         &controls.receipt,
-    )
-    .map_err(VmError::Runtime)?;
+    )?;
     crate::llm::ensure_real_llm_allowed(&opts.provider)?;
 
     let resolved = crate::llm_config::provider_config(&opts.provider);
@@ -418,6 +417,13 @@ mod inference_boundary_tests {
         let refusal = vm_call_completion_full(&opts, "prefix", None)
             .await
             .expect_err("a hosted route cannot pass the local ceiling");
-        assert!(format!("{refusal:?}").contains("inference_boundary.local_only"));
+        let VmValue::Dict(fields) = refusal.thrown_value() else {
+            panic!("completion must retain the typed policy denial");
+        };
+        let facts = crate::llm::helpers::vm_value_dict_to_json(&fields);
+        assert_eq!(facts["reason"], "policy_denied");
+        assert_eq!(facts["origin"], "local");
+        assert_eq!(facts["rule"], "inference_boundary.local_only");
+        assert_eq!(facts["retryable"], false);
     }
 }

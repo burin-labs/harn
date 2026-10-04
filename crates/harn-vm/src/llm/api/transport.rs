@@ -375,12 +375,10 @@ pub(crate) async fn vm_call_llm_api_with_body(
             &opts.provider,
             &opts.model,
             &data_controls_receipt,
-        )
-        .map_err(VmError::Runtime)?;
+        )?;
         data_controls_receipt.inference_boundary_rule = Some(rule.to_string());
         data_controls_receipt.inference_catalog_evidence = Some(
-            super::inference_boundary::catalog_evidence(&opts.provider, &opts.model)
-                .map_err(VmError::Runtime)?,
+            super::inference_boundary::catalog_evidence(&opts.provider, &opts.model)?,
         );
     }
     let mut result = vm_call_llm_api_with_body_inner(

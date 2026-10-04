@@ -25,6 +25,7 @@ pub type CompletionJudgeAdmission = {
   admitted: bool,
   remaining_ms: int?,
   operation_budget_ms: int?,
+  requested_operation_budget_ms?: int?,
   deadline_reserve_ms: int?,
   provider_timeout_ms?: int?,
   prompt_chars?: int,
@@ -138,13 +139,17 @@ pub fn __judge_completion_admission(
   } else {
     to_int(deadline_at_ms) - to_int(now_ms)
   }
-  const admitted = remaining_ms == nil
-    || remaining_ms
-      >= to_int(operation_budget_ms) + to_int(reserve_ms)
+  const allocated_budget_ms = if remaining_ms == nil {
+    operation_budget_ms
+  } else {
+    min(operation_budget_ms, max(0, remaining_ms - reserve_ms))
+  }
+  const admitted = allocated_budget_ms > 0
   return {
     admitted: admitted,
     remaining_ms: remaining_ms,
-    operation_budget_ms: operation_budget_ms,
+    operation_budget_ms: allocated_budget_ms,
+    requested_operation_budget_ms: operation_budget_ms,
     deadline_reserve_ms: reserve_ms,
     outcome: if admitted {
       "admitted"
@@ -431,18 +436,10 @@ pub fn __judge_run_checkpoint(
   } else {
     "default"
   }
-  const operation_budget_ms = if checkpoint_name == "agent.completion_judge" {
+  const requested_operation_budget_ms = if checkpoint_name == "agent.completion_judge" {
     max(1, to_int(judge_cfg?.operation_timeout_ms) ?? __COMPLETION_JUDGE_DEFAULT_TIMEOUT_MS)
   } else {
     nil
-  }
-  const provider_timeout_ms = if checkpoint_name == "agent.completion_judge" {
-    min(
-      operation_budget_ms,
-      max(1, to_int(judge_cfg?.timeout_ms ?? base?.timeout_ms) ?? operation_budget_ms),
-    )
-  } else {
-    to_int(judge_cfg?.timeout_ms ?? base?.timeout_ms)
   }
   const deadline_reserve_ms = if checkpoint_name == "agent.completion_judge" {
     max(
@@ -459,7 +456,7 @@ pub fn __judge_run_checkpoint(
     __judge_completion_admission(
       admission_now_ms,
       deadline_at_ms,
-      operation_budget_ms,
+      requested_operation_budget_ms,
       deadline_reserve_ms,
     )
   } else {
@@ -470,6 +467,15 @@ pub fn __judge_run_checkpoint(
       deadline_reserve_ms: nil,
       outcome: "not_applicable",
     }
+  }
+  const operation_budget_ms = deadline_admission.operation_budget_ms
+  const provider_timeout_ms = if checkpoint_name == "agent.completion_judge" {
+    min(
+      operation_budget_ms,
+      max(1, to_int(judge_cfg?.timeout_ms ?? base?.timeout_ms) ?? operation_budget_ms),
+    )
+  } else {
+    to_int(judge_cfg?.timeout_ms ?? base?.timeout_ms)
   }
   const admitted = deadline_admission.admitted
   const admission = deadline_admission
