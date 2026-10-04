@@ -71,3 +71,21 @@ fn read(pr: Pr?, options: dict?, authors: dict<string, Author>) -> any {
     );
     assert_eq!(count, 0);
 }
+
+/// A declared field whose type is untyped leaves the next `?.` hedging, and
+/// an undeclared key is untyped when any one of several tails is.
+#[test]
+fn untyped_optional_chain_sees_untyped_declared_fields_and_any_untyped_tail() {
+    let declared_any = rule_count(
+        "type Envelope = {data: any, meta: {id: string}?}\n\
+         fn read(env: Envelope) -> any {\n  return [env?.data?.items, env?.meta?.id]\n}\n",
+        "untyped-optional-chain",
+    );
+    assert_eq!(declared_any, 1, "only the chain through `data: any`");
+    let mixed_tails = rule_count(
+        "type Typed = {id: string}\n\
+         fn read<R>(row: {name: string, ...Typed, ...R}) -> any {\n  return row?.extra?.value\n}\n",
+        "untyped-optional-chain",
+    );
+    assert_eq!(mixed_tails, 1, "the generic tail can carry `extra`");
+}

@@ -10,7 +10,8 @@ const RULE: &str = "untyped-optional-chain";
 
 impl TypeChecker {
     /// Warn on the second `?.` link of a chain whose first optional receiver
-    /// is untyped (`any`, `unknown`, an open `dict`, or nothing inferred).
+    /// is untyped (`any`, `unknown`, an open `dict`, or nothing inferred), or
+    /// whose first link reads an untyped value out of a typed one.
     ///
     /// `data?.repository?.pullRequest` hedges every field because nothing
     /// declared the shape. Decoding once with `schema_parse(value,
@@ -54,10 +55,17 @@ impl TypeChecker {
             return;
         };
         let receiver_type = self.infer_type(receiver, scope);
-        if receiver_type
+        let receiver_typed = receiver_type
             .as_ref()
-            .is_some_and(|ty| !self.type_is_untyped_record(ty, innermost_property, scope))
-        {
+            .is_some_and(|ty| !self.type_is_untyped_record(ty, innermost_property, scope));
+        // `{data: any}` declares `data`, so the receiver is typed, but the
+        // `?.` after it still hedges an untyped value. A first link with no
+        // inferred type is not evidence either way, so it stays quiet.
+        let first_link_typed = || {
+            self.infer_type(object, scope)
+                .is_none_or(|ty| !self.type_is_untyped_record(&ty, None, scope))
+        };
+        if receiver_typed && first_link_typed() {
             return;
         }
         self.lint_info_at(
@@ -77,9 +85,9 @@ impl TypeChecker {
     /// with `nil`. A `dict<string, T>` with typed values is a real map, and
     /// `m?.key?.field` over it is ordinary nil handling.
     ///
-    /// An open record (`{name: string, ...dict}` or `{name: string, ...R}`) is untyped for a key it does
-    /// not declare, since that read lands in the untyped tail, and typed for
-    /// one it does.
+    /// An open record (`{name: string, ...dict}` or `{name: string, ...R}`) is
+    /// untyped for a key it does not declare when any tail is untyped, since
+    /// that read can land in it, and typed for a key it declares.
     fn type_is_untyped_record(
         &self,
         ty: &TypeExpr,
@@ -98,7 +106,7 @@ impl TypeChecker {
                 !declared
                     && rests
                         .iter()
-                        .all(|rest| self.open_row_tail_is_untyped(rest, scope))
+                        .any(|rest| self.open_row_tail_is_untyped(rest, scope))
             }
             TypeExpr::Union(members) => {
                 let mut saw_untyped = false;
