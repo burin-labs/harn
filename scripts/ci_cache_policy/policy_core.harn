@@ -98,17 +98,10 @@ pub const RELEASE_BUILD_CANCEL_POLICY = "$"
 
 pub const RELEASE_BUILD_IF = "needs.setup.outputs.should_build_binaries == 'true'"
 
-pub const RELEASE_AOT_PRIMARY_OUTPUT = "needs.setup.outputs.cli_aot_primary_runner"
-
 pub const RELEASE_AOT_STANDARD_OUTPUT = "needs.setup.outputs.cli_aot_standard_runner"
-
-pub const RELEASE_AOT_SETUP_PRIMARY = "$"
-  + "{{ steps.resolve.outputs.cli_aot_primary_runner }}"
 
 pub const RELEASE_AOT_SETUP_STANDARD = "$"
   + "{{ steps.resolve.outputs.cli_aot_standard_runner }}"
-
-pub const RELEASE_AOT_FALLBACK_SWITCH = "vars.HARN_RELEASE_ENABLE_BLACKSMITH_LINUX == 'true'"
 
 pub const RELEASE_CACHE_BUDGET_IF =
   "always() && needs.setup.outputs.build_mode == 'warm' && needs.setup.outputs.should_build_binaries == 'true' && needs.build.result != 'cancelled'"
@@ -182,11 +175,7 @@ pub const HOSTED_LINUX_RUNNER = "ubuntu-24.04"
  */
 pub const PRODUCER_HOSTED_LINUX_RUNNER = "ubuntu-24.04"
 
-pub const UBICLOUD_RUNNER_TIER = "ubicloud"
-
 pub const HOSTED_RUNNER_TIER = "github-hosted"
-
-pub const BLACKSMITH_RUNNER_TIER = "blacksmith"
 
 /**
  * The org's own Linux pool. Named as its own tier rather than folded into the
@@ -250,14 +239,10 @@ pub const MERGE_CAPACITY_DECISION_STEP = "merge-decision"
 
 pub const MERGE_CAPACITY_ROUTE_OUTPUT = "merge_route"
 
-pub const BLACKSMITH_ENABLE_VAR = "HARN_CI_ENABLE_BLACKSMITH_LINUX"
-
 /** The step that names where the slow E2E suite is about to land. */
 pub const E2E_CAPACITY_DECISION_STEP = "Decide where the slow E2E suite lands"
 
 /** The input that carries the evacuation switch into that decision. */
-pub const E2E_EVACUATION_INPUT = "FLEET_EVACUATION"
-
 pub const RUST_CACHE_ACTION = "./.github/actions/rust-cache"
 
 // Authorized ci.yml cache writers must grant actions: write. The workflow
@@ -606,13 +591,7 @@ pub const MACOS_WARM_PULL_REQUEST_GUARD = "$"
 pub const WINDOWS_WARM_RELEASE_CERTIFY_GUARD = "$"
   + "{{ startsWith(github.ref_name, 'release-certify/') }}"
 
-pub const WINDOWS_BLACKSMITH_ENABLE_VAR = "HARN_CI_ENABLE_BLACKSMITH_WINDOWS"
-
 pub const HOSTED_WINDOWS_RUNNER = "windows-latest"
-
-// The nightly compiles and runs the WHOLE workspace, so it is the one Windows
-// lane where core count buys real wall time.
-pub const BLACKSMITH_16CPU_WINDOWS_RUNNER = "blacksmith-16vcpu-windows-2025"
 
 pub const WINDOWS_STORAGE_REPORT_MARKER = "windows_storage_budget.sh report"
 
@@ -964,10 +943,6 @@ pub fn release_warm_cache_concurrency_errors(workflow: dict) -> list<string> {
 pub fn release_aot_runner_errors(workflow: dict) -> list<string> {
   let errors: list<string> = []
   const setup_outputs = workflow?.jobs?.setup?.outputs ?? {}
-  if setup_outputs?.cli_aot_primary_runner != RELEASE_AOT_SETUP_PRIMARY {
-    errors = errors
-      + ["${RELEASE_BINARY_WORKFLOW}:setup must project the policy-selected CLI AOT primary runner"]
-  }
   if setup_outputs?.cli_aot_standard_runner != RELEASE_AOT_SETUP_STANDARD {
     errors = errors
       + [
@@ -975,15 +950,11 @@ pub fn release_aot_runner_errors(workflow: dict) -> list<string> {
       ]
   }
   const runner = trim(workflow?.jobs?.prepare_cli_aot?.["runs-on"] ?? "")
-  for required in [
-    RELEASE_AOT_PRIMARY_OUTPUT,
-    RELEASE_AOT_STANDARD_OUTPUT,
-    RELEASE_AOT_FALLBACK_SWITCH,
-  ] {
-    if !contains(runner, required) {
-      errors = errors
-        + ["${RELEASE_BINARY_WORKFLOW}:prepare_cli_aot runner selection must include ${required}"]
-    }
+  if runner != "$" + "{{ ${RELEASE_AOT_STANDARD_OUTPUT} }}" {
+    errors = errors
+      + [
+        "${RELEASE_BINARY_WORKFLOW}:prepare_cli_aot must use only the free standard runner ${RELEASE_AOT_STANDARD_OUTPUT}",
+      ]
   }
   return errors
 }
@@ -1979,10 +1950,35 @@ fn linux_runner_label(label: string) -> bool {
  * Every Linux runner label a job can resolve to, from its `runs-on` (literal,
  * list or expression) and its matrix `runner` values.
  */
-fn job_runner_labels(job: dict) -> list<string> {
+fn job_runner_labels(workflow: dict, job: dict) -> list<string> {
   let texts: list<string> = [to_string(job["runs-on"] ?? "")]
-  for row in job?.strategy?.matrix?.include ?? [] {
-    texts = texts + [to_string(row?.runner ?? "")]
+  const runs_on = to_string(job["runs-on"] ?? "")
+  const matrix = job?.strategy?.matrix ?? {}
+  for {key: name, value: values} in matrix {
+    if name != "include" && name != "exclude" && contains(runs_on, "matrix.${name}") {
+      if type_of(values) == "list" {
+        for value in values {
+          texts = texts + [to_string(value)]
+        }
+      } else {
+        texts = texts + [to_string(values)]
+      }
+    }
+  }
+  for row in matrix?.include ?? [] {
+    for {key: name, value: value} in row {
+      if contains(runs_on, "matrix.${name}") {
+        texts = texts + [to_string(value)]
+      }
+    }
+  }
+  for {key: name, value: input} in (workflow?.["on"]?.workflow_dispatch?.inputs ?? {}) {
+    if contains(runs_on, "inputs.${name}") {
+      texts = texts + [to_string(input?.default ?? "")]
+      for option in input?.options ?? [] {
+        texts = texts + [to_string(option)]
+      }
+    }
   }
   let labels: list<string> = []
   for text in texts {
@@ -1990,7 +1986,7 @@ fn job_runner_labels(job: dict) -> list<string> {
       + regex_captures("[A-Za-z0-9][A-Za-z0-9._-]*", text).map({ hit -> to_string(hit.match) })
         .to_list()
   }
-  return labels
+  return labels.unique().sorted()
 }
 
 fn landlock_incapable_label(label: string) -> bool {
@@ -2035,11 +2031,85 @@ pub fn linux_confinement_errors(workflows: dict, release_runner_policy: dict) ->
   return errors + release_runner_policy_landlock_errors(release_runner_policy)
 }
 
+fn paid_public_runner_selector(token: string, release_runner_policy: dict) -> bool {
+  const label = lowercase(token)
+  const registered = release_runner_policy?.runner_registry?.[token]
+  return contains(label, "blacksmith")
+    || contains(label, "ubicloud")
+    || regex_match(r"^(ubuntu|windows)-[0-9]+core", label) != nil
+    || regex_match(r"^macos-[0-9]+-(large|xlarge)$", label) != nil
+    || (registered != nil
+      && (registered?.usd_per_minute != nil || registered?.provider != "github"))
+}
+
+fn active_release_runner_errors(release_runner_policy: dict) -> list<string> {
+  let errors: list<string> = []
+  for target in release_runner_policy?.targets ?? [] {
+    for {key: mode, value: runner} in (target?.runners ?? {}) {
+      if paid_public_runner_selector(to_string(runner), release_runner_policy) {
+        errors = errors
+          + [
+            "release-runner-policy.json:${target?.target} ${mode} runner ${runner} is paid public-repository capacity",
+          ]
+      }
+    }
+  }
+  for {key: role, value: runner} in (release_runner_policy?.jobs?.cli_aot ?? {}) {
+    if paid_public_runner_selector(to_string(runner), release_runner_policy) {
+      errors = errors
+        + [
+          "release-runner-policy.json:cli_aot ${role} runner ${runner} is paid public-repository capacity",
+        ]
+    }
+  }
+  return errors
+}
+
+pub const PAID_CAPACITY_ROUTE_INPUTS = [
+  "FLEET_EVACUATION",
+  "PAID_LINUX_PROVIDER",
+  "CAPACITY_VENDOR_RUNNER",
+]
+
+/** Every active workflow runner selector and capacity route must stay free or owned. */
+pub fn public_repository_runner_errors(
+  workflows: dict,
+  release_runner_policy: dict,
+) -> list<string> {
+  let errors: list<string> = []
+  for workflow_name in workflows.keys().sorted() {
+    const workflow = workflows[workflow_name] ?? {}
+    for {key: job_name, value: job} in (workflow?.jobs ?? {}) {
+      for label in job_runner_labels(workflow, job) {
+        if paid_public_runner_selector(label, release_runner_policy) {
+          errors = errors
+            + [
+              "${workflow_name}:${job_name} runner selection can resolve through paid token ${label}",
+            ]
+        }
+      }
+      for step in job?.steps ?? [] {
+        if contains(to_string(step?.run ?? ""), "runner_capacity.sh") {
+          for input in PAID_CAPACITY_ROUTE_INPUTS {
+            if step?.env?.[input] != nil {
+              errors = errors
+                + [
+                  "${workflow_name}:${job_name} runner capacity decision must not accept paid route input ${input}",
+                ]
+            }
+          }
+        }
+      }
+    }
+  }
+  return errors + active_release_runner_errors(release_runner_policy)
+}
+
 /** No Linux job may resolve to a runner that cannot confine a Harn child. */
 pub fn landlock_incapable_runner_errors(workflow_name: string, workflow: dict) -> list<string> {
   let errors: list<string> = []
   for {key: job_name, value: job} in (workflow?.jobs ?? {}) {
-    for label in job_runner_labels(job) {
+    for label in job_runner_labels(workflow, job) {
       if landlock_incapable_label(label) {
         errors = errors
           + [
@@ -2407,43 +2477,20 @@ pub fn minimal_pr_capacity_errors(ci: dict, publish: dict) -> list<string> {
 }
 
 /**
- * Keep the slow suite evacuable through the same paid-capacity switch.
+ * Keep the slow suite's capacity decision explicit.
  *
- * The switch has to reach two places, and only one of them is the routing
- * expression. The capacity job names where this suite is about to land, and a
- * name that reads the owned census while the switch sends the job to elastic
- * paid capacity is worse than no name at all: it attributes the run to a rung
- * it never touched. So the switch is required on `runs-on` and on the input
- * the capacity script actually measures the route from.
- *
- * This checks that seam rather than a specific environment variable on the
- * job. The suite derives its own compiler and thread budget on the runner it
- * lands on, so there is no longer a static budget variable to name, and a
- * rule that named one would pass by matching a string while the switch failed
- * to reach the route.
+ * Public repository jobs may use owned capacity or the standard hosted
+ * fallback. `public_repository_runner_errors` separately refuses every paid
+ * route input, including ones hidden behind this capacity decision.
  */
 pub fn e2e_elastic_capacity_errors(e2e: dict) -> list<string> {
-  const job = e2e?.jobs?.e2e ?? {}
   const capacity_job = e2e?.jobs?.["e2e-capacity"] ?? {}
   const capacity_step = step_by_name(capacity_job?.steps ?? [], E2E_CAPACITY_DECISION_STEP)
-  // The evacuation switch still moves the suite off the owned pool, through
-  // the capacity decision below; it no longer names Blacksmith Linux, which
-  // cannot confine the Harn children this suite spawns.
   let errors: list<string> = []
   if capacity_step == nil {
     errors = errors
       + ["e2e.yml:e2e-capacity must keep the '${E2E_CAPACITY_DECISION_STEP}' step"]
     return errors
-  }
-  if !contains(
-    to_string(capacity_step?.env?.[E2E_EVACUATION_INPUT] ?? ""),
-    "vars.${BLACKSMITH_ENABLE_VAR} == 'true'",
-  ) {
-    errors = errors
-      + [
-        "e2e.yml:e2e-capacity must pass ${BLACKSMITH_ENABLE_VAR} to the route it measures "
-          + "as ${E2E_EVACUATION_INPUT}",
-      ]
   }
   return errors
 }

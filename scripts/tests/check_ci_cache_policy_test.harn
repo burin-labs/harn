@@ -14,6 +14,7 @@ import {
   macos_warm_errors,
   minimal_pr_capacity_errors,
   nextest_version_errors,
+  public_repository_runner_errors,
   release_aot_runner_errors,
   release_runner_policy_landlock_errors,
   release_warm_cache_concurrency_errors,
@@ -319,6 +320,90 @@ pipeline test_cache_refresh_serializes_mutation_without_cancelling_active_save(
   assert_eq(rust_cache_refresh_concurrency_errors(job), [])
 }
 
+pipeline test_public_runner_policy_reads_literal_matrix_input_and_release_paths(
+  harness: Harness,
+  task: unknown,
+) {
+  const workflows = {
+    "literal.yml": {jobs: {build: {"runs-on": "blacksmith-8vcpu-ubuntu-2404"}}},
+    "matrix.yml": {
+      jobs: {
+        build: {
+          "runs-on": gha_expression("matrix.host"),
+          strategy: {
+            matrix: {
+              host: ["ubuntu-24.04", "ubicloud-standard-8"],
+              include: [{host: "blacksmith-4vcpu-ubuntu-2404"}],
+            },
+          },
+        },
+      },
+    },
+    "input.yml": {
+      on: {
+        workflow_dispatch: {
+          inputs: {
+            runner: {
+              default: "windows-latest",
+              options: ["windows-latest", "blacksmith-8vcpu-windows-2025"],
+            },
+          },
+        },
+      },
+      jobs: {build: {"runs-on": gha_expression("inputs.runner")}},
+    },
+    "capacity.yml": {
+      jobs: {
+        route: {
+          steps: [
+            {run: "bash scripts/ci/runner_capacity.sh", env: {PAID_LINUX_PROVIDER: "blacksmith"}},
+          ],
+        },
+      },
+    },
+  }
+  const release_policy = {
+    runner_registry: {
+      "ubuntu-24.04": {provider: "github", usd_per_minute: nil},
+      "ubuntu-16core-release": {provider: "github", usd_per_minute: 0.042},
+    },
+    jobs: {cli_aot: {standard: "ubuntu-16core-release"}},
+    targets: [],
+  }
+  assert_eq(
+    public_repository_runner_errors(workflows, release_policy),
+    [
+      "capacity.yml:route runner capacity decision must not accept paid route input PAID_LINUX_PROVIDER",
+      "input.yml:build runner selection can resolve through paid token blacksmith-8vcpu-windows-2025",
+      "literal.yml:build runner selection can resolve through paid token blacksmith-8vcpu-ubuntu-2404",
+      "matrix.yml:build runner selection can resolve through paid token blacksmith-4vcpu-ubuntu-2404",
+      "matrix.yml:build runner selection can resolve through paid token ubicloud-standard-8",
+      "release-runner-policy.json:cli_aot standard runner ubuntu-16core-release is paid public-repository capacity",
+    ],
+  )
+}
+
+pipeline test_public_runner_policy_keeps_historical_registry_rows_inert(
+  harness: Harness,
+  task: unknown,
+) {
+  const release_policy = {
+    runner_registry: {
+      "ubuntu-24.04": {provider: "github", usd_per_minute: nil},
+      "blacksmith-16vcpu-ubuntu-2204": {provider: "blacksmith", usd_per_minute: 0.032},
+    },
+    jobs: {cli_aot: {standard: "ubuntu-24.04"}},
+    targets: [{target: "x86_64-unknown-linux-gnu", runners: {standard: "ubuntu-24.04"}}],
+  }
+  assert_eq(
+    public_repository_runner_errors(
+      {"ci.yml": {jobs: {build: {"runs-on": "ubuntu-24.04"}}}},
+      release_policy,
+    ),
+    [],
+  )
+}
+
 @test
 pipeline test_cache_refresh_rejects_cross_commit_race(harness: Harness, task: unknown) {
   const job = {concurrency: {group: "per-commit", "cancel-in-progress": true}}
@@ -586,7 +671,10 @@ pipeline test_release_warm_cache_concurrency_rejects_setup_only_preemption(
   )
 }
 
-pipeline test_release_aot_runner_requires_hosted_fallback_switch(harness: Harness, task: unknown) {
+pipeline test_release_aot_runner_requires_only_the_free_standard_runner(
+  harness: Harness,
+  task: unknown,
+) {
   const workflow = release_binary_workflow()
   const invalid = {
     ...workflow,
@@ -594,16 +682,14 @@ pipeline test_release_aot_runner_requires_hosted_fallback_switch(harness: Harnes
       ...workflow.jobs,
       prepare_cli_aot: {
         ...workflow.jobs.prepare_cli_aot,
-        "runs-on": gha_expression(
-          "needs.setup.outputs.cli_aot_primary_runner || needs.setup.outputs.cli_aot_standard_runner",
-        ),
+        "runs-on": gha_expression("needs.setup.outputs.cli_aot_primary_runner"),
       },
     },
   }
   assert_eq(
     release_aot_runner_errors(invalid),
     [
-      "build-release-binaries.yml:prepare_cli_aot runner selection must include vars.HARN_RELEASE_ENABLE_BLACKSMITH_LINUX == 'true'",
+      "build-release-binaries.yml:prepare_cli_aot must use only the free standard runner needs.setup.outputs.cli_aot_standard_runner",
     ],
   )
 }
@@ -809,24 +895,20 @@ pipeline test_windows_nightly_producer_keeps_its_runner_tier_contract(
   const nightly = declared["windows-nightly.yml"]
   const producer = nightly.jobs.nextest
   const with_producer = { job -> return {...nightly, jobs: {...nightly.jobs, nextest: job}} }
-  // The 8 vCPU expression keeps the runner family, the tier, and the single
-  // opt-in variable, so it decides whether the size is genuinely pinned.
   assert_eq(
     windows_native_admission_errors(
       policy(),
       ci,
       with_producer({...producer, "runs-on": windows_runner_expression()}),
     ),
-    [
-      "windows-nightly.yml:nextest must default to windows-latest, with HARN_CI_ENABLE_BLACKSMITH_WINDOWS=true opting into blacksmith-16vcpu-windows-2025",
-    ],
+    ["windows-nightly.yml:nextest must use free standard windows-latest"],
   )
   const variable_only_drive = {
     ...producer,
     steps: producer.steps.map(
       { step ->
         if trim(step?.name ?? "") == "Set up Dev Drive" {
-          return {...step, if: gha_expression("vars.HARN_WINDOWS_DEVDRIVE == 'on'")}
+          return {...step, if: gha_expression("vars.HARN_WINDOWS_DEVDRIVE == 'on' && false")}
         }
         return step
       },
@@ -835,9 +917,7 @@ pipeline test_windows_nightly_producer_keeps_its_runner_tier_contract(
   }
   assert_eq(
     windows_native_admission_errors(policy(), ci, with_producer(variable_only_drive)),
-    [
-      "windows-nightly.yml:nextest must skip Hyper-V Dev Drive setup on Blacksmith and retain it for the github-hosted fallback",
-    ],
+    ["windows-nightly.yml:nextest must gate Hyper-V Dev Drive setup on HARN_WINDOWS_DEVDRIVE"],
   )
 }
 

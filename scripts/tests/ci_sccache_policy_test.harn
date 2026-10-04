@@ -22,6 +22,7 @@ import {
   producer_step_budget_margin_errors,
   producer_tier_expression,
   producer_timeout_expression,
+  public_repository_runner_errors,
   step_budget_margin_errors,
   windows_shared_cache_errors,
 } from "../check_ci_cache_policy"
@@ -100,7 +101,7 @@ const BUDGET_STEP = {
 const E2E_SWITCH_ROUTE =
   "needs.e2e-capacity.outputs.route == 'owned' && 'self-hosted' || 'ubuntu-24.04'"
 
-fn e2e_workflow(runs_on: string, evacuation_input: string) -> dict {
+fn e2e_workflow(runs_on: string, decision_env: dict) -> dict {
   return {
     jobs: {
       e2e: {"runs-on": runs_on},
@@ -109,7 +110,7 @@ fn e2e_workflow(runs_on: string, evacuation_input: string) -> dict {
           {
             name: "Decide where the slow E2E suite lands",
             run: "bash scripts/ci/runner_capacity.sh",
-            env: {FLEET_EVACUATION: evacuation_input},
+            env: decision_env,
           },
         ],
       },
@@ -128,7 +129,7 @@ pipeline test_e2e_route_refuses_a_linux_runner_that_cannot_confine_harn(
     gha_expression(
       "vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true' && 'blacksmith-8vcpu-ubuntu-2404' || 'ubuntu-24.04'",
     ),
-    gha_expression("vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true'"),
+    {},
   )
   assert(
     landlock_incapable_runner_errors("e2e.yml", invalid).contains(
@@ -148,7 +149,10 @@ pipeline test_landlock_contract_keeps_vendor_windows_and_macos_runners(
     jobs: {
       windows: {"runs-on": "blacksmith-16vcpu-windows-2025"},
       linux: {"runs-on": "ubuntu-24.04"},
-      matrix_linux: {strategy: {matrix: {include: [{runner: "blacksmith-4vcpu-ubuntu-2404"}]}}},
+      matrix_linux: {
+        "runs-on": gha_expression("matrix.runner"),
+        strategy: {matrix: {include: [{runner: "blacksmith-4vcpu-ubuntu-2404"}]}},
+      },
     },
   }
   assert_eq(
@@ -160,16 +164,20 @@ pipeline test_landlock_contract_keeps_vendor_windows_and_macos_runners(
 }
 
 @test
-pipeline test_e2e_paid_override_fails_when_the_switch_never_reaches_the_measured_route(
+pipeline test_public_runner_policy_refuses_a_paid_capacity_route_input(
   harness: Harness,
   task: unknown,
 ) {
-  // The switch on `runs-on` alone is the case the old rule could not see. The
-  // job evacuates while the capacity step still names the owned census, so the
-  // run is attributed to a rung it never touched.
-  const invalid = e2e_workflow(gha_expression(E2E_SWITCH_ROUTE), "")
-  const errors = e2e_elastic_capacity_errors(invalid)
-  assert(errors.any(fn(error) { contains(error, "FLEET_EVACUATION") }))
+  const invalid = e2e_workflow(
+    gha_expression(E2E_SWITCH_ROUTE),
+    {FLEET_EVACUATION: gha_expression("vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true'")},
+  )
+  const errors = public_repository_runner_errors({"e2e.yml": invalid}, {targets: []})
+  assert(
+    errors.contains(
+      "e2e.yml:e2e-capacity runner capacity decision must not accept paid route input FLEET_EVACUATION",
+    ),
+  )
 }
 
 @test
@@ -183,12 +191,13 @@ pipeline test_e2e_paid_override_fails_when_the_capacity_step_is_gone(
 }
 
 @test
-pipeline test_e2e_paid_override_accepts_the_switch_on_both_seams(harness: Harness, task: unknown) {
-  const valid = e2e_workflow(
-    gha_expression(E2E_SWITCH_ROUTE),
-    gha_expression("vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true'"),
-  )
+pipeline test_e2e_capacity_accepts_owned_or_standard_hosted_routing(
+  harness: Harness,
+  task: unknown,
+) {
+  const valid = e2e_workflow(gha_expression(E2E_SWITCH_ROUTE), {})
   assert_eq(e2e_elastic_capacity_errors(valid), [])
+  assert_eq(public_repository_runner_errors({"e2e.yml": valid}, {targets: []}), [])
 }
 
 fn consumer_canary_workflow(extra: list) -> dict {
