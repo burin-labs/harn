@@ -162,6 +162,12 @@ __all__ = [
     "is_request",
     "is_response",
     "is_notification",
+    "HarnInferenceAdmissionStatus",
+    "HarnInferenceAdmissionReach",
+    "HarnInferenceAdmissionDataPosture",
+    "HarnInferenceAdmissionBoundary",
+    "HarnInferenceAdmissionRequest",
+    "HarnInferenceAdmissionSnapshot",
     "ACPArtifactUpdateMetaHarn",
     "ACPArtifactUpdateMeta",
     "ACPArtifactUpdate",
@@ -757,6 +763,7 @@ class LlmErrorReason(str, Enum):
     BILLING_LIMIT = "billing_limit"
     OUTPUT_BUDGET_EXHAUSTED = "output_budget_exhausted"
     UNKNOWN = "unknown"
+    POLICY_DENIED = "policy_denied"
 
 
 class ACPPromptErrorSchema(str, Enum):
@@ -1057,6 +1064,8 @@ class HarnACPPromptErrorData(_HarnDataclass):
     category: Optional[str] = None
     kind: Optional[str] = None
     reason: Optional[str] = None
+    origin: Optional[str] = None
+    rule: Optional[str] = None
     code: Optional[str] = None
     retryable: Optional[bool] = None
     retryAfterMs: Optional[int] = None
@@ -2256,3 +2265,44 @@ class HarnPlanDocument(_HarnDataclass):
     resolution_receipts: List[HarnPlanCommentResolutionReceipt]
     created_at: str
     updated_at: str
+
+
+class HarnInferenceAdmissionStatus(str, Enum):
+    ADMITTED = "admitted"
+    DENIED = "denied"
+    UNKNOWN = "unknown"
+
+
+class HarnInferenceAdmissionReach(str, Enum):
+    LOCAL_ONLY = "local_only"
+    HOSTED_OPEN_WEIGHT = "hosted_open_weight"
+    ANY_HOSTED = "any_hosted"
+
+
+class HarnInferenceAdmissionDataPosture(str, Enum):
+    DEFAULT = "default"
+    STRICTEST_AVAILABLE = "strictest_available"
+@dataclass
+class HarnInferenceAdmissionBoundary(_HarnDataclass):
+    reach: HarnInferenceAdmissionReach
+    allow_training_discounts: bool
+
+@dataclass
+class HarnInferenceAdmissionRequest(_HarnDataclass):
+    provider: str
+    model: str
+    boundary: Optional[HarnInferenceAdmissionBoundary] = None
+    data_controls: Optional[HarnInferenceAdmissionDataPosture] = None
+
+@dataclass
+class HarnInferenceAdmissionSnapshot(_HarnDataclass):
+    schema: str
+    provider: str
+    model: str
+    status: HarnInferenceAdmissionStatus
+    training_control_planned: bool
+    effective_boundary: Optional[HarnInferenceAdmissionBoundary] = None
+    governing_rule: Optional[str] = None
+    local_runtime: Optional[bool] = None
+    open_weight: Optional[bool] = None
+    training_default: Optional[str] = None

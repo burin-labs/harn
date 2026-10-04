@@ -453,7 +453,8 @@
       "empty_generation",
       "billing_limit",
       "output_budget_exhausted",
-      "unknown"
+      "unknown",
+      "policy_denied"
     ],
     "promptErrorTerminalClasses": [
       "context_overflow",
@@ -972,6 +973,24 @@
         "upstream_version": "2026-07-28"
       },
       "source": "conformance/protocols/schemas/mcp-2026-07-28.schema.json"
+    },
+    {
+      "artifact": "schemas/inference-admission-request.schema.json",
+      "protocol": "harn",
+      "provenance": {
+        "owner": "harn-vm::llm::api::inference_boundary",
+        "schema_version": 1
+      },
+      "source": "crates/harn-vm/src/llm/api/inference_boundary/admission.rs"
+    },
+    {
+      "artifact": "schemas/inference-admission-snapshot.schema.json",
+      "protocol": "harn",
+      "provenance": {
+        "owner": "harn-vm::llm::api::inference_boundary",
+        "schema_version": 1
+      },
+      "source": "crates/harn-vm/src/llm/api/inference_boundary/admission.rs"
     },
     {
       "artifact": "schemas/session-health.schema.json",

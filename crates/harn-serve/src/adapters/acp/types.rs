@@ -276,6 +276,12 @@ pub struct AcpPromptFailureFacts {
     pub kind: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
+    /// Whether the failure originated locally or at the provider.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub origin: Option<String>,
+    /// Governing inference rule supplied by the local boundary owner.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rule: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub code: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -362,6 +368,8 @@ impl AcpPromptFailureFacts {
             category: string_field("category"),
             kind,
             reason: string_field("reason"),
+            origin: string_field("origin"),
+            rule: string_field("rule"),
             code: string_field("code"),
             retryable,
             retry_after_ms,
