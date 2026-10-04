@@ -1753,7 +1753,7 @@ async fn bridge_progress_and_log_session_updates_namespace_vendor_fields() {
                 output: AcpOutput::Channel(tx),
                 pending: Arc::new(TokioMutex::new(HashMap::new())),
                 next_id_counter: AtomicU64::new(1),
-                cancellation: super::super::SessionCancellation::default(),
+                cancellation: super::super::SessionCancellation::default().prepare_prompt(),
                 script_name: std::sync::Mutex::new(String::new()),
                 assistant_state: std::sync::Mutex::new(
                     harn_vm::visible_text::VisibleTextState::default(),
