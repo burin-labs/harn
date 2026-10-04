@@ -531,12 +531,12 @@ impl TypeChecker {
         let Some(raw) = self.infer_type(object, scope) else {
             return;
         };
-        // Same gate as the field-typo check: only hold annotated variables and
-        // named-contract receivers to the strict path; a bare inferred value
-        // stays gradual.
-        if !self.is_strict_access_source(object, &raw, scope) {
-            return;
-        }
+        // Unlike the field-typo check, this deliberately skips
+        // `is_strict_access_source`: that gate tolerates the dict-literal
+        // silent-nil idiom, but dicts and shapes are never existence-checked
+        // here, and an unknown method on a closed builtin always crashes at
+        // runtime. An unannotated binding's inferred type is already a binding
+        // contract (reassigning another type is HARN-TYP-005).
         let resolved = self.resolve_alias(&raw, scope);
 
         // Struct receivers: the valid set is exactly the impl-block methods.
