@@ -66,7 +66,9 @@ current_source() {
       || return 1
     git diff --quiet "$recorded" HEAD -- "${SOURCE_PATHS[@]}" || return 1
   fi
-  git diff --quiet HEAD -- && git diff --cached --quiet HEAD --
+  git diff --quiet HEAD -- \
+    && git diff --cached --quiet HEAD -- \
+    && [[ -z "$(git ls-files --others --exclude-standard -- "${SOURCE_PATHS[@]}")" ]]
 }
 
 case "$mode" in

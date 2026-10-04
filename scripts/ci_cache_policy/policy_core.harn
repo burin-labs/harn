@@ -1171,7 +1171,8 @@ pub fn cache_target_input_errors(action: dict, step: dict) -> list<string> {
 pub fn native_source_projection_errors(script: string) -> list<string> {
   const paths = join(NATIVE_SOURCE_PATHS, " ")
   if !contains(script, "SOURCE_PATHS=(${paths})")
-    || !contains(script, "git diff --quiet \"$recorded\" HEAD -- \"$" + "{SOURCE_PATHS[@]}\"") {
+    || !contains(script, "git diff --quiet \"$recorded\" HEAD -- \"$" + "{SOURCE_PATHS[@]}\"")
+    || !contains(script, "git ls-files --others --exclude-standard -- \"$" + "{SOURCE_PATHS[@]}\"") {
     return ["${WORKSPACE_REUSE_SCRIPT} must compare the canonical native source fingerprint roots"]
   }
   return []

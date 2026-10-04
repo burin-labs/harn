@@ -54,6 +54,12 @@ if "$script" current; then
 fi
 "$script" record >/dev/null
 "$script" current
+echo hidden > crates/a/src/untracked.rs
+if "$script" current; then
+  echo "source attestation accepted untracked native source" >&2
+  exit 1
+fi
+rm -f crates/a/src/untracked.rs
 echo docs > README.md
 git add README.md && git commit -q -m docs
 "$script" current
