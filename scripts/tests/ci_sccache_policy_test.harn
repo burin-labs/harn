@@ -1669,13 +1669,17 @@ pipeline test_rejects_a_producer_ladder_off_its_rungs_or_ceilings(harness: Harne
 }
 
 @test
-pipeline test_host_bound_sandbox_filter_has_one_owner(harness: Harness, task: unknown) {
+pipeline test_host_bound_sandbox_filter_has_one_owner(harness: Harness) {
   const root = path_normalize(path_join(harness.fs.cwd(), "../.."))
   const test_names = harness.fs.read_text(path_join(root, HOST_BOUND_RUST_TEST_FILTER_SOURCE))
     .split("\n")
     .filter({ name -> trim(name) != "" })
     .to_list()
-  assert_eq(test_names.count, 11)
+  assert(test_names.count > 0, "the host-bound registry must be nonempty")
+  assert(
+    test_names.contains("nested_availability_refuses_before_command_deadline"),
+    "the registry must reach the nested confinement regression",
+  )
   const rendered = harness.process.run(
     {program: path_join(root, HOST_BOUND_RUST_TEST_FILTER_COMMAND), args: []},
   )

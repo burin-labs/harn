@@ -82,7 +82,7 @@ mod tests {
     use super::*;
     use crate::orchestration::{CapabilityPolicy, ProcessSandboxPolicy, SandboxProfile};
 
-    const CHILD_ROOT: &str = "HARN_NESTED_BWRAP_PROBE_ROOT";
+    const CHILD_ROOT: &str = "HARN_TEST_NESTED_BWRAP_PROBE_ROOT";
 
     #[test]
     fn cancelled_setup_does_not_cache_unavailability() {
