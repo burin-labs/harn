@@ -271,7 +271,9 @@ live in [Engineering principles](docs/src/dev/engineering-principles.md):
   admin permission and refuses fork PRs. See
   [Merge overrides](docs/src/dev/merge-overrides.md) and the
   [`burin-labs/.github` README](https://github.com/burin-labs/.github#merge-overrides).
-- Land with `gh pr merge --squash --auto`, which enqueues. Never use
+- Ship a ready PR by adding the `ship` label (Smart Ship arms it, lands it, and
+  reports on the PR; removing the label stops it). Without Smart Ship, land with
+  `gh pr merge --squash --auto`, which enqueues. Never use
   `gh pr merge --admin`. The labels are the only supported way to skip the
   queue, and the `merge queue` ruleset allows no admin bypass. GitHub ignores
   `-merge` in `.gitattributes`, so the queue's generated-file check on the
