@@ -432,7 +432,9 @@ absence.
 - `command_wait_for_output(harness.tools, handle, pattern, opts?)` parks on background output,
   exit, or timeout without polling. Use `source: "stdout" | "stderr" |
   "combined"`, `regex: true`, and `from_offset` when needed. A match reports
-  byte offsets and leaves teardown to `command_cancel`.
+  byte offsets and leaves teardown to `command_cancel`. On `status: "exited"`,
+  `result` is the command's final result: `success`, `exit_code`, `stdout`,
+  and `stderr` match what `command_wait` returns for the same handle.
 
 ## Time, sleep, monotonic clock
 
