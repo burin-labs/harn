@@ -6,7 +6,11 @@ impl AcpServer {
     /// The same router backs stdio, WebSocket, and in-process channel
     /// transports. `msg` must be either a request/notification with `method`
     /// or a response with `id` for a pending host callback.
-    pub(super) async fn handle_incoming_message_scoped(&mut self, msg: serde_json::Value) {
+    pub(super) async fn handle_incoming_message_scoped(
+        &mut self,
+        msg: serde_json::Value,
+        cancellation: Option<Arc<PromptCancellation>>,
+    ) {
         if msg.get("method").is_none() && msg.get("id").is_some() {
             if let Some(id) = msg["id"].as_u64() {
                 let mut pending = self.pending.lock().await;
@@ -155,7 +159,7 @@ impl AcpServer {
                 if self.reject_unauthenticated(&id) {
                     return;
                 }
-                self.handle_session_prompt(&id, &params).await;
+                self.handle_session_prompt(&id, &params, cancellation).await;
             }
             "session/cancel" => {
                 // `reject_unauthenticated` only answers when `id` is non-null,

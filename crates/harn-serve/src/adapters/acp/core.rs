@@ -79,6 +79,15 @@ impl AcpServer {
     /// constructor-time thread state: two embedded servers may share a Tokio
     /// worker and suspend independently while a provider request is in flight.
     pub async fn handle_incoming_message(&mut self, msg: serde_json::Value) {
+        let cancellation = prepare_session_prompt(&self.session_cancellations, &msg);
+        self.handle_prepared_message(msg, cancellation).await;
+    }
+
+    pub(super) async fn handle_prepared_message(
+        &mut self,
+        msg: serde_json::Value,
+        cancellation: Option<Arc<PromptCancellation>>,
+    ) {
         let provider_overrides = self.llm_config_overrides.clone();
         let runtime_provider_endpoint_overrides = self.runtime_provider_endpoint_overrides.clone();
         let capability_overrides = self.llm_capability_overrides.clone();
@@ -87,7 +96,7 @@ impl AcpServer {
         // per message and virtual dispatch per poll so the wrapper's generated
         // code stays independent of the router state and drop glue.
         let dispatch: std::pin::Pin<Box<dyn std::future::Future<Output = ()> + '_>> =
-            Box::pin(self.handle_incoming_message_scoped(msg));
+            Box::pin(self.handle_incoming_message_scoped(msg, cancellation));
         harn_vm::orchestration::scope_llm_runtime_overrides_with_provider_endpoints(
             provider_overrides,
             capability_overrides,

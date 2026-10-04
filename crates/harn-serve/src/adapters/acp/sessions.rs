@@ -594,32 +594,37 @@ pub(super) enum SessionBudget {
     Custom(BudgetSpec),
 }
 
-#[derive(Clone)]
-pub(super) struct SessionCancellation {
+#[derive(Default)]
+pub(super) struct PromptCancellation {
     pub(super) cancelled: Arc<AtomicBool>,
     pub(super) notify: Arc<Notify>,
-    routed_cancel_ack_pending: Arc<AtomicBool>,
-    /// Set by the transport reader after it resets cancellation for a
-    /// prompt, so the prompt handler does not erase a cancel notification
-    /// that arrived while the prompt was queued.
-    prepared_prompt: Arc<AtomicBool>,
 }
 
-impl Default for SessionCancellation {
-    fn default() -> Self {
-        Self {
-            cancelled: Arc::new(AtomicBool::new(false)),
-            notify: Arc::new(Notify::new()),
-            routed_cancel_ack_pending: Arc::new(AtomicBool::new(false)),
-            prepared_prompt: Arc::new(AtomicBool::new(false)),
-        }
-    }
+#[derive(Default)]
+struct CancellationState {
+    prompts: Vec<std::sync::Weak<PromptCancellation>>,
+    cancelled: bool,
+}
+
+#[derive(Clone, Default)]
+pub(super) struct SessionCancellation {
+    state: Arc<std::sync::Mutex<CancellationState>>,
+    routed_cancel_ack_pending: Arc<AtomicBool>,
 }
 
 impl SessionCancellation {
     pub(super) fn cancel(&self) -> bool {
-        let already_cancelled = self.cancelled.swap(true, Ordering::SeqCst);
-        self.notify.notify_waiters();
+        let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
+        let already_cancelled = state.cancelled;
+        state.cancelled = true;
+        state.prompts.retain(|prompt| {
+            let Some(prompt) = prompt.upgrade() else {
+                return false;
+            };
+            prompt.cancelled.store(true, Ordering::SeqCst);
+            prompt.notify.notify_waiters();
+            true
+        });
         !already_cancelled
     }
 
@@ -633,21 +638,16 @@ impl SessionCancellation {
         self.routed_cancel_ack_pending.swap(false, Ordering::SeqCst)
     }
 
-    pub(super) fn reset(&self) {
-        self.cancelled.store(false, Ordering::SeqCst);
-        self.routed_cancel_ack_pending
-            .store(false, Ordering::SeqCst);
-    }
-
-    pub(super) fn prepare_prompt(&self) {
-        self.reset();
-        self.prepared_prompt.store(true, Ordering::SeqCst);
-    }
-
-    pub(super) fn begin_prompt(&self) {
-        if !self.prepared_prompt.swap(false, Ordering::SeqCst) {
-            self.reset();
-        }
+    /// Admit a fresh scope at ingress. The queued request owns it until
+    /// dispatch, then the running prompt owns it. Stop is monotonic for every
+    /// admitted scope; a later admission cannot revive an earlier prompt.
+    pub(super) fn prepare_prompt(&self) -> Arc<PromptCancellation> {
+        let prompt = Arc::new(PromptCancellation::default());
+        let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
+        state.prompts.retain(|prompt| prompt.strong_count() > 0);
+        state.prompts.push(Arc::downgrade(&prompt));
+        state.cancelled = false;
+        prompt
     }
 }
 
@@ -963,20 +963,19 @@ fn rearm_dimension(value: Option<&serde_json::Value>) -> Option<CeilingRearm> {
 pub(super) fn prepare_session_prompt(
     cancellations: &Arc<std::sync::Mutex<HashMap<String, SessionCancellation>>>,
     msg: &serde_json::Value,
-) {
+) -> Option<Arc<PromptCancellation>> {
     if msg.get("method").and_then(|value| value.as_str()) != Some("session/prompt") {
-        return;
+        return None;
     }
     let Some(session_id) = msg
         .get("params")
         .and_then(|params| params.get("sessionId"))
         .and_then(|value| value.as_str())
     else {
-        return;
+        return None;
     };
-    if let Some(cancellation) = lookup_session_cancellation(cancellations, session_id) {
-        cancellation.prepare_prompt();
-    }
+    lookup_session_cancellation(cancellations, session_id)
+        .map(|cancellation| cancellation.prepare_prompt())
 }
 
 #[cfg(test)]
