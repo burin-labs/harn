@@ -205,6 +205,16 @@ pub enum DiagnosticSeverity {
     Info,
 }
 
+impl DiagnosticSeverity {
+    /// Whether a command that executes a program (`run`, `bench`, `pack`,
+    /// `precompile`, the playground) reports this diagnostic. Advisory findings
+    /// belong to `check`, `lint`, and the editor; printing them on every run
+    /// would put lint output on a program's stderr.
+    pub fn reported_when_executing(self) -> bool {
+        !matches!(self, DiagnosticSeverity::Info)
+    }
+}
+
 /// The static type checker.
 pub struct TypeChecker {
     diagnostics: Vec<TypeDiagnostic>,

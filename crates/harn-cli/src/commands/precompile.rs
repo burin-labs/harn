@@ -235,6 +235,9 @@ fn precompile_one(
     let mut had_type_error = false;
     let mut messages = String::new();
     for diag in checker.check_with_source(&program, &source) {
+        if !diag.severity.reported_when_executing() {
+            continue;
+        }
         let rendered = harn_parser::diagnostic::render_type_diagnostic(&source, &path_str, &diag);
         if matches!(diag.severity, DiagnosticSeverity::Error) {
             had_type_error = true;
