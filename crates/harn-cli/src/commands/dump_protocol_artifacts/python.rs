@@ -541,6 +541,7 @@ class HarnToolLifecycleMeta(_HarnDataclass):
     errorCategory: Optional[str] = None
     executionDurationMs: Optional[float] = None
     executor: Optional[JsonValue] = None
+    intent: Optional[str] = None
     mutationStatus: Optional[HarnToolMutationStatus] = None
     parsing: Optional[bool] = None
     rawInputPartial: Optional[str] = None
