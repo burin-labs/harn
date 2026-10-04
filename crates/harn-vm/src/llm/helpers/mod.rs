@@ -24,10 +24,9 @@ pub(crate) use opt_get::{opt_bool, opt_float, opt_int, opt_str};
 pub use options::admit_reasoning_literals;
 pub(crate) use options::{
     apply_rendered_reminder_messages, assemble_system_prompt, compose_system_prompt,
-    directive_envelope_message, directive_nonce_for_session, expects_structured_output,
-    extract_json, extract_llm_options, has_directive_commit_metadata,
-    pending_reminders_from_session, prepare_llm_options, prepare_llm_options_safe,
-    project_agent_tools, project_llm_options, render_pending_reminders,
+    directive_envelope_message, expects_structured_output, extract_json, extract_llm_options,
+    has_directive_commit_metadata, pending_reminders_from_session, prepare_llm_options,
+    prepare_llm_options_safe, project_agent_tools, project_llm_options, render_pending_reminders,
     resolve_catalog_thinking_config, resolve_thinking_config, system_prompt_event_metadata,
     system_prompt_metadata, turn_boundary_directives, validate_llm_option_keys, validate_options,
     EnvelopeNonce,
