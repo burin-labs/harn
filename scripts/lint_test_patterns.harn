@@ -562,6 +562,9 @@ const NON_TEST_WALL_CLOCK_ALLOWLIST: list<string> = [
   // Virtual time cannot decide whether an OS subprocess has exited or whether
   // SIGTERM grace has elapsed.
   "crates/harn-vm/src/op_interrupt.rs",
+  // Bubblewrap setup waits on real OS descendants; its monotonic deadline
+  // bounds inherited pipes through the existing subprocess interrupt owner.
+  "crates/harn-vm/src/stdlib/sandbox/linux_bwrap_probe.rs",
   "crates/harn-vm/src/llm/api/partial_tool_args.rs",
   "crates/harn-vm/src/llm/api/transport.rs",
   "crates/harn-vm/src/llm/autonomy_budget.rs",

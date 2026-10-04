@@ -7,6 +7,7 @@ use std::io::{Seek, Write};
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
 use std::os::unix::fs::{FileTypeExt, PermissionsExt};
 use std::path::{Path, PathBuf};
+#[cfg(test)]
 use std::process::Command;
 
 use super::{
