@@ -151,6 +151,47 @@ pub pipeline test_ci_cache_policy_rejects_uncoupled_workspace_retention(
   )
 }
 
+pub pipeline test_ci_cache_policy_rejects_unmeasured_or_reordered_workspace_generation(
+  harness: Harness,
+  task: unknown,
+) {
+  const valid = action()
+  const identity = valid.runs.steps[1]
+  const upstream = valid.runs.steps[2]
+  const broad = valid.runs.steps[3]
+  const reuse = valid.runs.steps[4]
+  const unmeasured = {
+    ...valid,
+    runs: {
+      ...valid.runs,
+      steps: [
+        valid.runs.steps[0],
+        {
+          ...identity,
+          env: {...identity.env, CACHE_SOURCE_KEY: gha_expression("inputs.source-key")},
+        },
+        upstream,
+        broad,
+        reuse,
+      ],
+    },
+  }
+  assert(
+    ci_cache_policy_errors(policy(), unmeasured, node_action(), workflows()).contains(
+      ".github/actions/rust-cache/action.yml must derive retained workspace generations from the canonical source fingerprint",
+    ),
+  )
+  const reordered = {
+    ...valid,
+    runs: {...valid.runs, steps: [valid.runs.steps[0], identity, broad, upstream, reuse]},
+  }
+  assert(
+    ci_cache_policy_errors(policy(), reordered, node_action(), workflows()).contains(
+      ".github/actions/rust-cache/action.yml must try the precise source generation before its dependency-compatible fallback",
+    ),
+  )
+}
+
 pub pipeline test_ci_cache_policy_rejects_open_or_duplicate_config(
   harness: Harness,
   task: unknown,

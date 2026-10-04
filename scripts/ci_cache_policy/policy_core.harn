@@ -523,9 +523,10 @@ pub const CACHE_PRUNE_INPUT = "prune-superseded-release-generations"
 // deps-only entry and save.ts exits without replacing it (#5003).
 pub const WORKSPACE_CACHE_INPUT = "cache-workspace-crates"
 
-// v2: entries also carry the workspace source record directory, which changes
-// the cached path set and therefore every entry's version.
-pub const WORKSPACE_CACHE_GENERATION = "workspace-crates-v2"
+// v3: retained entries add a synthetic source manifest to Swatinem's lock hash.
+// Its restore prefix remains OS-, architecture- and toolchain-specific, so a
+// source miss can reuse the prior compatible generation without crossing them.
+pub const WORKSPACE_CACHE_GENERATION = "workspace-crates-v3"
 
 // Saved beside the target directory by every workspace-crate cache entry; see
 // scripts/ci/reuse_workspace_crates.sh for why it cannot live in the target.
@@ -664,8 +665,12 @@ pub const WINDOWS_NIGHTLY_RELEASE_ROUTE_IF = "needs.${WINDOWS_ROUTE_JOB}.outputs
 
 pub const MACOS_CACHE_KEY = "workspace-macos"
 
+pub const NATIVE_SOURCE_PATHS = ["Cargo.lock", "Cargo.toml", "crates", "spec", "tree-sitter-harn"]
+
 pub const NATIVE_SOURCE_FINGERPRINT_BODY =
   "hashFiles('Cargo.lock', 'Cargo.toml', 'crates/**', 'spec/**', 'tree-sitter-harn/**')"
+
+pub const WORKSPACE_REUSE_SCRIPT = "scripts/ci/reuse_workspace_crates.sh"
 
 pub const NATIVE_CACHE_INPUTS = [
   "CARGO_INCREMENTAL",
@@ -1154,36 +1159,45 @@ pub fn cache_target_input_errors(action: dict, step: dict) -> list<string> {
     || trim(step?.with?.["cache-targets"] ?? "")
       != expected_cache_targets
     || trim(step?.with?.["cache-directories"] ?? "")
-      != expected_cache_directories {
+      != expected_cache_directories
+    || trim(step?.with?.workspaces ?? "")
+      != "$" + "{{ steps.cache-paths.outputs.workspaces }}" {
     return ["${ACTION_PATH} must cache an explicit Cargo target directory directly"]
   }
   return []
 }
 
-pub fn cache_action_errors(policy: CiCachePolicy, action: dict) -> list<string> {
+/** Keep source-record comparison on the same roots that define the cache key. */
+pub fn native_source_projection_errors(script: string) -> list<string> {
+  const paths = join(NATIVE_SOURCE_PATHS, " ")
+  if !contains(script, "SOURCE_PATHS=(${paths})")
+    || !contains(script, "git diff --quiet \"$recorded\" HEAD -- \"$" + "{SOURCE_PATHS[@]}\"") {
+    return ["${WORKSPACE_REUSE_SCRIPT} must compare the canonical native source fingerprint roots"]
+  }
+  return []
+}
+
+fn workspace_cache_generation_errors(action: dict, steps: list) -> list<string> {
   let errors: list<string> = []
-  const steps = action?.runs?.steps ?? []
-  const upstream = steps.filter({ step -> step_uses(step).starts_with(UPSTREAM_CACHE_PREFIX) })
-    .to_list()
   const broad_restore = steps.filter(
     { step -> step_uses(step).starts_with(UPSTREAM_CACHE_RESTORE_PREFIX) },
   )
     .to_list()
-  if len(upstream) != 1 {
-    return ["${ACTION_PATH} must contain exactly one pinned upstream Rust cache step"]
-  }
+  const identities = steps.filter({ step -> trim(step?.id ?? "") == "cache-paths" }).to_list()
   if len(broad_restore) != 1 {
     errors = errors
       + ["${ACTION_PATH} must contain one pinned restore-only broad Rust cache fallback step"]
   } else {
     const restore_if = trim(broad_restore[0]?.if ?? "")
-    if !contains(restore_if, "inputs.broad-restore-prefix != ''") {
-      errors = errors + ["${ACTION_PATH} broad fallback must be opt-in per caller"]
+    if restore_if
+      != "steps.cache-paths.outputs.restore-prefix != '' && steps.cache.outputs.cache-hit != 'true'" {
+      errors = errors
+        + ["${ACTION_PATH} broad fallback must run only after the precise source generation misses"]
     }
     const restore_keys = trim(broad_restore[0]?.with?.["restore-keys"] ?? "")
     const restore_key = trim(broad_restore[0]?.with?.key ?? "")
-    if !contains(restore_keys, "inputs.broad-restore-prefix")
-      || !contains(restore_key, "inputs.broad-restore-prefix")
+    if !contains(restore_keys, "steps.cache-paths.outputs.restore-prefix")
+      || !contains(restore_key, "steps.cache-paths.outputs.restore-prefix")
       || !contains(restore_key, "github.sha") {
       errors = errors
         + ["${ACTION_PATH} broad fallback must restore by prefix without becoming a writer"]
@@ -1192,18 +1206,100 @@ pub fn cache_action_errors(policy: CiCachePolicy, action: dict) -> list<string> 
       errors = errors + ["${ACTION_PATH} broad fallback must keep cache-service failures non-fatal"]
     }
     const restore_paths = trim(broad_restore[0]?.with?.path ?? "")
-    if !contains(restore_paths, "env.CARGO_HOME")
-      || !contains(restore_paths, "env.CARGO_TARGET_DIR") {
+    if restore_paths != "$" + "{{ steps.cache-paths.outputs.paths }}" {
       errors = errors
-        + ["${ACTION_PATH} broad fallback must follow the active Cargo home and target directory"]
+        + [
+          "${ACTION_PATH} broad fallback must use the precise cache step's normalized archive paths",
+        ]
     }
   }
+  if len(identities) != 1 {
+    errors = errors + ["${ACTION_PATH} must resolve one Rust cache identity and archive path set"]
+  } else {
+    const identity = identities[0]
+    const expected_source = "$"
+      + "{{ inputs.source-key || (inputs.cache-workspace-crates == 'true' && ${NATIVE_SOURCE_FINGERPRINT_BODY}) || '' }}"
+    if trim(identity?.env?.CACHE_SOURCE_KEY ?? "") != expected_source
+      || trim(identity?.env?.CACHE_EXPLICIT_SOURCE_KEY ?? "")
+        != "$" + "{{ inputs.source-key }}"
+      || trim(identity?.env?.CACHE_SHARED_KEY ?? "")
+        != "$" + "{{ inputs.shared-key }}" {
+      errors = errors
+        + [
+          "${ACTION_PATH} must derive retained workspace generations from the canonical source fingerprint",
+        ]
+    }
+    const identity_run = to_string(identity?.run ?? "")
+    for required in [
+      "Retained workspace cache has no measured source fingerprint",
+      "-workspace-crates-v3",
+      "[package.metadata.harn]",
+      "source = \"$" + "{source}\"",
+      "restore-prefix=$" + "{fallback}",
+      "paths<<harn-cache-paths",
+      "workspaces<<harn-cache-workspaces",
+      WORKSPACE_SOURCE_RECORD_DIR,
+    ] {
+      if !contains(identity_run, required) {
+        errors = errors
+          + [
+            "${ACTION_PATH} cache identity resolver is missing required generation behavior: ${required}",
+          ]
+      }
+    }
+  }
+  let identity_index = -1
+  let upstream_index = -1
+  let broad_index = -1
+  for {index, value: candidate} in steps.enumerate() {
+    if trim(candidate?.id ?? "") == "cache-paths" {
+      identity_index = index
+    }
+    if step_uses(candidate).starts_with(UPSTREAM_CACHE_PREFIX) {
+      upstream_index = index
+    }
+    if step_uses(candidate).starts_with(UPSTREAM_CACHE_RESTORE_PREFIX) {
+      broad_index = index
+    }
+  }
+  if identity_index < 0 || upstream_index <= identity_index || broad_index <= upstream_index {
+    errors = errors
+      + [
+        "${ACTION_PATH} must try the precise source generation before its dependency-compatible fallback",
+      ]
+  }
+  const reuse_steps = steps.filter(
+    { candidate ->
+      trim(candidate?.id ?? "") == "reuse"
+        && trim(candidate?.run ?? "") == "./scripts/ci/reuse_workspace_crates.sh restore"
+    },
+  )
+    .to_list()
+  if len(reuse_steps) != 1
+    || trim(action?.outputs?.["source-current"]?.value ?? "")
+      != "$" + "{{ steps.reuse.outputs.source-current }}" {
+    errors = errors
+      + ["${ACTION_PATH} must publish measured workspace source currency from its reuse boundary"]
+  }
+  return errors
+}
+
+pub fn cache_action_errors(policy: CiCachePolicy, action: dict) -> list<string> {
+  let errors: list<string> = []
+  const steps = action?.runs?.steps ?? []
+  const upstream = steps.filter({ step -> step_uses(step).starts_with(UPSTREAM_CACHE_PREFIX) })
+    .to_list()
+  if len(upstream) != 1 {
+    return ["${ACTION_PATH} must contain exactly one pinned upstream Rust cache step"]
+  }
+  errors = errors + workspace_cache_generation_errors(action, steps)
   const step = upstream[0]
-  const expected_shared_key = "$"
-    + "{{ format('{0}{1}', inputs.source-key != '' && format('{0}-{1}', inputs.shared-key, inputs.source-key) || inputs.shared-key, inputs.cache-workspace-crates == 'true' && '-${WORKSPACE_CACHE_GENERATION}' || '') }}"
+  const expected_shared_key = "$" + "{{ steps.cache-paths.outputs.shared-key }}"
   if trim(step?.with?.["shared-key"] ?? "") != expected_shared_key
     || trim(step?.with?.key ?? "")
-      != "" {
+      != ""
+    || trim(step?.id ?? "")
+      != "cache" {
     errors = errors
       + [
         "${ACTION_PATH} must compose source-key and workspace retention into the effective upstream shared-key",

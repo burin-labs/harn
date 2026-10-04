@@ -56,6 +56,7 @@ pub import {
   linux_confinement_errors,
   merge_group_datacenter_errors,
   minimal_pr_capacity_errors,
+  native_source_projection_errors,
   producer_runner_expression,
   producer_tier_expression,
   release_aot_runner_errors,
