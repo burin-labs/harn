@@ -1049,7 +1049,7 @@ jobs:
     # nothing else, with the host's sccache. The capacity step sends the build
     # there when one is idle. When all are busy, none is online, or on fork
     # pull requests and main pushes, it runs on GitHub's free standard
-    # `ubuntu-latest` (4 vCPU on a public repository). Public-repository CI is
+    # `ubuntu-24.04` (4 vCPU on a public repository). Public-repository CI is
     # free by policy (harn#9370): no larger GitHub runner, Ubicloud or
     # Blacksmith. On 2026-10-02 this build also sat 37 minutes in the shared
     # Ubicloud queue (run 37042288569). The capacity annotation still counts
@@ -1060,7 +1060,7 @@ jobs:
     runs-on: >-
       ${{ (needs.rust-producer-capacity.outputs.cli_route == 'owned'
         && fromJSON('["self-hosted", "Linux", "X64", "harn-ci-producer"]'))
-        || 'ubuntu-latest' }}
+        || 'ubuntu-24.04' }}
     timeout-minutes: >-
       ${{ (needs.rust-producer-capacity.outputs.cli_route == 'owned'
         && 37)
@@ -1213,14 +1213,14 @@ jobs:
         && fromJSON('["self-hosted", "Linux", "X64", "harn-ci-big"]'))
         || (needs.rust-producer-capacity.outputs.merge_route == 'owned'
         && fromJSON('["self-hosted", "Linux", "X64", "harn-ci-big", "hetzner-1"]'))
-        || 'ubuntu-latest' }}
+        || 'ubuntu-24.04' }}
     timeout-minutes: >-
       ${{ (needs.rust-producer-capacity.outputs.route == 'owned'
         && 56)
         || (needs.rust-producer-capacity.outputs.merge_route == 'owned'
         && 56)
         || 68 }}
-    # The rung after the owned pool is GitHub's free standard `ubuntu-latest`
+    # The rung after the owned pool is GitHub's free standard `ubuntu-24.04`
     # (public repository, harn#9370). Main pushes land on it, so it is the
     # authorized main-branch cache writer, and the owned
     # self-hosted rung is pull-request-only so it never reaches the write

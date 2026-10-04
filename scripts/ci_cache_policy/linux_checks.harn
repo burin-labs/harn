@@ -48,7 +48,7 @@ type StepBudget = {name: string, minutes: int, cold_seconds: int}
 const CLI_PRODUCER_STEP_BUDGETS: list<StepBudget> = [
   // The ci-cli profile (opt-level 1) on hosted ubuntu-8core with no ci-cli
   // target restored: 850s on run 36956226587, against 435s for dev. The
-  // hosted rung is now the free 4 vCPU `ubuntu-latest` (harn#9370): half the
+  // hosted rung is now the free 4 vCPU `ubuntu-24.04` (harn#9370): half the
   // cores puts a cold build near 1700s, so it gets the owned rung's 31 minutes
   // until a cold run there is measured.
   {name: "Build portable Harn CLI", minutes: 31, cold_seconds: 850},

@@ -180,7 +180,7 @@ pub const HOSTED_LINUX_RUNNER = "ubuntu-24.04"
  * standard runners or owned machines (harn#9370): no larger GitHub runner,
  * Ubicloud or Blacksmith, even though the producers build slower on 4 vCPU.
  */
-pub const PRODUCER_HOSTED_LINUX_RUNNER = "ubuntu-latest"
+pub const PRODUCER_HOSTED_LINUX_RUNNER = "ubuntu-24.04"
 
 pub const UBICLOUD_RUNNER_TIER = "ubicloud"
 
