@@ -2980,15 +2980,12 @@ harn connect slack \
 harn connect linear \
   --client-id "$LINEAR_CLIENT_ID" \
   --client-secret "$LINEAR_CLIENT_SECRET"
-harn connect notion \
-  --client-id "$NOTION_CLIENT_ID" \
-  --client-secret "$NOTION_CLIENT_SECRET"
 harn connect generic acme https://mcp.example.com/mcp
 harn connect --generic acme https://mcp.example.com/mcp
 harn connect acme
 harn connect duffel --from-env DUFFEL_TEST_KEY
 harn connect --list
-harn connect --refresh notion
+harn connect --refresh linear
 harn connect --revoke slack
 ```
 
@@ -4077,11 +4074,11 @@ Manage standalone OAuth state for remote HTTP MCP servers.
 
 ```bash
 harn mcp redirect-uri
-harn mcp login notion
-harn mcp login https://mcp.notion.com/mcp
+harn mcp login linear
+harn mcp login https://mcp.linear.app/mcp
 harn mcp login my-server --url https://example.com/mcp --client-id <id> --client-secret <secret>
-harn mcp status notion
-harn mcp logout notion
+harn mcp status linear
+harn mcp logout linear
 ```
 
 `harn mcp login` resolves the server from the nearest `harn.toml` when you pass
@@ -4137,8 +4134,8 @@ Add a dependency to `harn.toml`.
 
 ```bash
 harn add github.com/burin-labs/harn-openapi@v1.2.3
-harn add @burin/notion-sdk@1.2.3
-harn add @burin/notion-sdk@1.2.3 --registry ./harn-package-index.toml
+harn add @burin/linear-sdk@1.2.3
+harn add @burin/linear-sdk@1.2.3 --registry ./harn-package-index.toml
 harn add https://github.com/user/my-lib --alias my-lib --tag v1.2.3
 harn add https://github.com/user/my-lib --alias my-lib --rev v1.2.3
 harn add https://github.com/user/my-lib --alias my-lib --branch main
@@ -4380,7 +4377,7 @@ Useful flags:
 Search the configured package registry index.
 
 ```bash
-harn package search notion
+harn package search linear
 harn package search --registry ./harn-package-index.toml --json
 ```
 
@@ -4437,8 +4434,8 @@ count, and safety summary.
 Show registry metadata for one package, optionally at a specific version.
 
 ```bash
-harn package info @burin/notion-sdk
-harn package info @burin/notion-sdk@1.2.3 --json
+harn package info @burin/linear-sdk
+harn package info @burin/linear-sdk@1.2.3 --json
 ```
 
 Metadata includes repository, license, Harn compatibility, exported

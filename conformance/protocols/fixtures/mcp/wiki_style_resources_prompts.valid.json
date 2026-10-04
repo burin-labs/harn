@@ -1,5 +1,5 @@
 {
-  "name": "mcp.notion_style.resources_prompts",
+  "name": "mcp.wiki_style.resources_prompts",
   "protocol": "mcp",
   "schema": "schemas/mcp-2026-07-28.schema.json",
   "expect": "valid",
@@ -25,10 +25,10 @@
       "result": {
         "resources": [
           {
-            "uri": "harn://connector/notion/page/page_123",
+            "uri": "harn://connector/wiki/page/page_123",
             "name": "Launch Plan",
             "title": "Launch Plan",
-            "description": "Notion page mirrored through a connector-backed Harn context resource.",
+            "description": "Wiki page mirrored through a connector-backed Harn context resource.",
             "mimeType": "application/json"
           }
         ],
@@ -40,7 +40,7 @@
       "id": 11,
       "method": "resources/read",
       "params": {
-        "uri": "harn://connector/notion/page/page_123",
+        "uri": "harn://connector/wiki/page/page_123",
         "_meta": {
           "io.modelcontextprotocol/protocolVersion": "2026-07-28",
           "io.modelcontextprotocol/clientInfo": {
@@ -57,9 +57,9 @@
       "result": {
         "contents": [
           {
-            "uri": "harn://connector/notion/page/page_123",
+            "uri": "harn://connector/wiki/page/page_123",
             "mimeType": "application/json",
-            "text": "{\"provider\":\"notion\",\"kind\":\"page\",\"id\":\"page_123\",\"title\":\"Launch Plan\",\"blocks\":[{\"type\":\"paragraph\",\"text\":\"Ship the first MCP resource slice.\"}]}"
+            "text": "{\"provider\":\"wiki\",\"kind\":\"page\",\"id\":\"page_123\",\"title\":\"Launch Plan\",\"blocks\":[{\"type\":\"paragraph\",\"text\":\"Ship the first MCP resource slice.\"}]}"
           }
         ],
         "resultType": "complete"
@@ -86,10 +86,10 @@
       "result": {
         "resourceTemplates": [
           {
-            "uriTemplate": "harn://connector/notion/database/{database_id}/page/{page_id}",
-            "name": "notion-database-page",
-            "title": "Notion Database Page",
-            "description": "Read a page-like record from a connector-backed Notion database.",
+            "uriTemplate": "harn://connector/wiki/database/{database_id}/page/{page_id}",
+            "name": "wiki-database-page",
+            "title": "Wiki Database Page",
+            "description": "Read a page-like record from a connector-backed wiki database.",
             "mimeType": "application/json"
           }
         ],
@@ -117,13 +117,13 @@
       "result": {
         "prompts": [
           {
-            "name": "notion-research-brief",
-            "title": "Notion Research Brief",
-            "description": "Summarize connector-backed Notion context for an implementation pass.",
+            "name": "wiki-research-brief",
+            "title": "Wiki Research Brief",
+            "description": "Summarize connector-backed wiki context for an implementation pass.",
             "arguments": [
               {
                 "name": "page_uri",
-                "description": "Harn MCP resource URI for the source Notion page.",
+                "description": "Harn MCP resource URI for the source wiki page.",
                 "required": true
               },
               {
@@ -142,9 +142,9 @@
       "id": 14,
       "method": "prompts/get",
       "params": {
-        "name": "notion-research-brief",
+        "name": "wiki-research-brief",
         "arguments": {
-          "page_uri": "harn://connector/notion/page/page_123",
+          "page_uri": "harn://connector/wiki/page/page_123",
           "focus": "implementation risks"
         },
         "_meta": {
@@ -166,7 +166,7 @@
             "role": "user",
             "content": {
               "type": "text",
-              "text": "Use harn://connector/notion/page/page_123 to brief implementation risks."
+              "text": "Use harn://connector/wiki/page/page_123 to brief implementation risks."
             }
           }
         ],
@@ -176,11 +176,11 @@
   ],
   "matrix": {
     "version": "2026-07-28",
-    "family": "notion_style_resources_prompts",
+    "family": "wiki_style_resources_prompts",
     "case": "success",
     "source": {
       "kind": "hand_authored",
-      "description": "Notion-style page resources, database resource templates, and prompt discovery/get envelopes for Harn MCP context surfaces."
+      "description": "Wiki-style page resources, database resource templates, and prompt discovery/get envelopes for Harn MCP context surfaces."
     }
   }
 }

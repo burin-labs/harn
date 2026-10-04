@@ -90,9 +90,9 @@ to wire the backing systems:
 
 | Persona | Expected systems |
 |---|---|
-| `merge_captain` | GitHub, CI, Linear, Notion, Slack |
-| `review_captain` | GitHub, Notion, Slack |
-| `oncall_captain` | PagerDuty, Slack, Notion, GitHub, observability via MCP |
+| `merge_captain` | GitHub, CI, Linear, Slack |
+| `review_captain` | GitHub, Slack |
+| `oncall_captain` | PagerDuty, Slack, GitHub, observability via MCP |
 
 Use placeholder or sandbox credentials while iterating. The smoke fixtures in
 this directory do not require any live credentials.

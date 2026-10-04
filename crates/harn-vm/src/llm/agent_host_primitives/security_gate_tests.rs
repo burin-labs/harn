@@ -224,19 +224,19 @@ fn precise_exfil_gate_narrows_to_attacker_named_destinations() {
     // Benign synthesis: writing to a user-named destination not present in the
     // untrusted content is NOT gated under precise mode...
     assert!(post(
-        serde_json::json!({"url": "https://notion.so/my-page"}),
+        serde_json::json!({"url": "https://wiki.example/my-page"}),
         &precise
     )
     .is_none());
     // ...but the coarse gate would nag on exactly that benign write.
     assert!(post(
-        serde_json::json!({"url": "https://notion.so/my-page"}),
+        serde_json::json!({"url": "https://wiki.example/my-page"}),
         &coarse
     )
     .is_some());
     // A secret payload gates even to a user-named sink.
     assert!(post(
-        serde_json::json!({"url": "https://notion.so/my-page", "attach": "~/.ssh/id_ed25519"}),
+        serde_json::json!({"url": "https://wiki.example/my-page", "attach": "~/.ssh/id_ed25519"}),
         &precise,
     )
     .is_some());

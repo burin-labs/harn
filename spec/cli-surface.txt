@@ -177,19 +177,6 @@ harn connect linear --team-id
 harn connect linear --token-auth-method
 harn connect linear --token-url
 harn connect linear --url
-harn connect notion
-harn connect notion --auth-url
-harn connect notion --client-id
-harn connect notion --client-secret
-harn connect notion --client-secret-file
-harn connect notion --client-secret-from-env
-harn connect notion --json
-harn connect notion --no-open
-harn connect notion --redirect-uri
-harn connect notion --resource
-harn connect notion --scope
-harn connect notion --token-auth-method
-harn connect notion --token-url
 harn connect setup-plan
 harn connect setup-plan --connector
 harn connect setup-plan --json

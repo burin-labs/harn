@@ -34,7 +34,7 @@ name = "archivist"
 version = "0.1.0"
 description = "Propose-only Flow predicate author that scans repo conventions and emits review-ready invariant proposals."
 entry_workflow = "workflows/flow_archivist.harn#run"
-tools = ["filesystem", "github", "notion", "mcp"]
+tools = ["filesystem", "github", "mcp"]
 capabilities = [
   "project.code_patterns",
   "project.scan",

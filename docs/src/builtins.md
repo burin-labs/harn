@@ -2591,7 +2591,7 @@ reuse the stored token automatically:
 
 ```bash
 harn mcp redirect-uri
-harn mcp login notion
+harn mcp login linear
 ```
 
 ### MCP server mode
