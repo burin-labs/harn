@@ -167,6 +167,23 @@ pipeline test(harness: Harness) {
     !host_paths.contains(path_join(home, ".claude/CLAUDE.md")),
     "a peer agent's user file is not read unless the host names it",
   )
+  // A user-scope entry cannot leave the home directory.
+  harness.fs.write_text(path_join(base, "escape.md"), "Outside home.")
+  const escaped = resolve_workspace_guidance(
+    harness.fs,
+    {
+      workspace_root: plain,
+      home_dir: home,
+      include_ancestors: false,
+      user_scope_files: ["../escape.md", path_join(base, "escape.md"), ".host/AGENTS.md"],
+    },
+  )
+  const escaped_paths = escaped.sources.map({ entry -> return entry.path }).to_list()
+  assert(
+    !escaped_paths.contains(path_join(base, "escape.md")),
+    "an absolute or `..` user-scope entry must not be read",
+  )
+  assert(escaped_paths.contains(path_join(home, ".host/AGENTS.md")), "a valid entry still loads")
   assert(
     PEER_AGENT_USER_SCOPE_FILES.contains(".claude/CLAUDE.md"),
     "the peer list is exported for an opt-in",

@@ -161,6 +161,11 @@ pub fn resolve_workspace_guidance(fs: HarnessFs, request: GuidanceRequest) -> Gu
     const home = request.home_dir ?? ""
     if home != "" {
       for rel in request.user_scope_files ?? PEER_AGENT_USER_SCOPE_FILES {
+        // Home-relative only: an absolute path or a `..` segment would read a
+        // file outside the home directory into model context.
+        if !__guidance_home_relative(rel) {
+          continue
+        }
         candidates = candidates
           + [{dir: __guidance_norm(home), scope: "user", depth: -1, file: rel}]
       }
@@ -293,6 +298,21 @@ pub fn resolve_workspace_guidance(fs: HarnessFs, request: GuidanceRequest) -> Gu
     request.max_bytes ?? DEFAULT_MAX_BYTES,
     dirs_scanned,
   )
+}
+
+/** True for a path that stays under the directory it is joined to. */
+fn __guidance_home_relative(rel: string) -> bool {
+  const text = trim(rel)
+  if text == "" || starts_with(text, "/") || starts_with(text, "~") || text.contains("\\")
+    || regex_match(r"^[A-Za-z]:", text) != nil {
+    return false
+  }
+  for segment in split(text, "/") {
+    if segment == ".." {
+      return false
+    }
+  }
+  return true
 }
 
 /**
