@@ -211,11 +211,11 @@ mod drift_guard_tests {
             rest = rest.strip_prefix("| ").unwrap_or(rest);
             let mut found = Vec::new();
             while let Some(after_quote) = rest.strip_prefix('"') {
-                let Some(end) = after_quote.find('"') else {
+                let Some((name, tail)) = after_quote.split_once('"') else {
                     break;
                 };
-                found.push(&after_quote[..end]);
-                rest = after_quote[end + 1..].trim_start();
+                found.push(name);
+                rest = tail.trim_start();
                 match rest.strip_prefix("| ") {
                     Some(next) => rest = next,
                     None => break,
