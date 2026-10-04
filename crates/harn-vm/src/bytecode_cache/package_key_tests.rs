@@ -6,7 +6,7 @@ use crate::bytecode_cache::CacheKey;
 
 /// Publish one `acme` package generation under `root` and point the project at
 /// it, the layout `harn install` writes.
-fn publish_acme_generation(root: &Path, generation: &str, capability_body: &str) {
+pub(super) fn publish_acme_generation(root: &Path, generation: &str, capability_body: &str) {
     use harn_modules::package_snapshot::{
         generation_root, package_current_path, package_lock_digest, package_publication_lock_path,
         PackageGenerationManifest, PackageGenerationPointer, GENERATION_LEASE_FILE,
