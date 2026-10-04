@@ -199,6 +199,9 @@ pub(crate) fn compile_or_load_chunk_with_timing(
             }
         };
     for diag in &typecheck.diagnostics {
+        if !diag.severity.reported_when_executing() {
+            continue;
+        }
         let rendered = harn_parser::diagnostic::render_type_diagnostic(&source, path, diag);
         if matches!(diag.severity, DiagnosticSeverity::Error) {
             had_type_error = true;

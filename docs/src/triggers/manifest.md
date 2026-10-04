@@ -360,6 +360,4 @@ See the example manifests under [`examples/triggers`](../../../examples/triggers
 - [`linear-sla-breach`](../../../examples/triggers/linear-sla-breach/harn.toml)
 - [`linear-cycle-planning`](../../../examples/triggers/linear-cycle-planning/harn.toml)
 - [`linear-stuck-issue-bumper`](../../../examples/triggers/linear-stuck-issue-bumper/harn.toml)
-- [`notion-content-review-scheduler`](../../../examples/triggers/notion-content-review-scheduler/harn.toml)
-- [`notion-database-watcher`](../../../examples/triggers/notion-database-watcher/harn.toml)
 - [`webhook-generic-hmac`](../../../examples/triggers/webhook-generic-hmac/harn.toml)

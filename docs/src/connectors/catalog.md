@@ -13,9 +13,9 @@ runtime split:
 For the architecture and ownership split that closes the old connector-library
 epic, see [Connector architecture status](./architecture.md).
 
-GitHub, Slack, Linear, and Notion are first-party pure-Harn packages:
-`harn-github-connector`, `harn-slack-connector`, `harn-linear-connector`, and
-`harn-notion-connector`. Configure one by setting
+GitHub, Slack, and Linear are first-party pure-Harn packages:
+`harn-github-connector`, `harn-slack-connector`, and `harn-linear-connector`.
+Configure one by setting
 `connector = { harn = "..." }` on the `[[providers]]` table. See the
 [Rust-to-Harn-package migration guide](../migrations/rust-connectors-to-harn-packages.md)
 for the cutover pattern.
@@ -90,7 +90,6 @@ Each first-party connector repo should publish:
 | GitHub | <https://github.com/burin-labs/harn-github-connector> | `harn add github.com/burin-labs/harn-github-connector@v0.4.0` | `harn package verify . --provider github` | Webhook secret; for outbound, GitHub App id, installation id, and private key. App permissions depend on methods: issues, pull requests, contents/metadata, checks, deployments. | `issues`, `pull_request`, `issue_comment`, `pull_request_review`, `push`, `workflow_run`, `deployment_status`, `check_run`, `check_suite`, `status`, `merge_group`, `installation`, `installation_repositories`; outbound REST/GraphQL escape hatches. Each event also exposes the connector's stable `github.<event>[.<action>]` topic plus normalized `repo`/`repository` fields. |
 | Slack | <https://github.com/burin-labs/harn-slack-connector> | `harn add github.com/burin-labs/harn-slack-connector@v0.2.1` | `harn package verify . --provider slack` | Signing secret; for outbound, bot token. Typical scopes: `app_mentions:read`, `channels:history`, `reactions:read`, `chat:write`, `reactions:write`, `users:read`, `files:write`. | URL verification, `message`, `app_mention`, `reaction_added`, `app_home_opened`, `assistant_thread_started`; outbound Web API calls. |
 | Linear | <https://github.com/burin-labs/harn-linear-connector> | `harn add github.com/burin-labs/harn-linear-connector` (currently unreleased, manifest `0.0.0`) | `harn package verify . --provider linear` | Webhook signing secret; optional API key/access token for outbound GraphQL. | `Issue`, `Comment`, `IssueLabel`, `Project`, `Cycle`, `Customer`, `CustomerRequest`; outbound GraphQL. |
-| Notion | <https://github.com/burin-labs/harn-notion-connector> | `harn add github.com/burin-labs/harn-notion-connector@v0.1.1` | `harn package verify . --provider notion --run-poll-tick` | Webhook verification token; outbound API token. Notion integration capabilities depend on pages/databases/comments used. | Webhook events such as subscription verification, page updates, comments, data source schema updates; `poll_tick` database/page watchers; outbound Notion API via `notion-sdk-harn`. |
 | GitLab | <https://github.com/burin-labs/harn-gitlab-connector> | `harn add github.com/burin-labs/harn-gitlab-connector@v0.1.0` | `harn package verify . --provider gitlab` | Webhook signing secret (plain shared-secret `X-Gitlab-Token`, not HMAC); for outbound, an OAuth2 access token, PAT, or project/group access token with `api` scope. | `push`, `tag_push`, `merge_request`, `note`, `issue`, `pipeline`; outbound REST (notes, MR update/changes/approve, commit status, repository files), GraphQL passthrough, OAuth2 helpers, and shared `GitForgePullRequestEvent` emission for merge requests. |
 | Forgejo | <https://github.com/burin-labs/harn-forgejo-connector> | `harn add github.com/burin-labs/harn-forgejo-connector@v0.1.0` | `harn package verify . --provider forgejo` | Webhook signing secret verified as HMAC-SHA256 from `X-Gitea-Signature`; for outbound, a user, organization, or repository access token accepted by the instance API. | `push`, `pull_request`, `issues`, `issue_comment`, `release`, `repository`, `star`; outbound REST for comments, PR updates, commit statuses, repository contents, raw API passthrough, and shared `GitForgePullRequestEvent` emission for pull requests. |
 | Gitea | <https://github.com/burin-labs/harn-gitea-connector> | `harn add github.com/burin-labs/harn-gitea-connector@v0.1.0` | `harn package verify . --provider gitea` | Webhook signing secret verified as HMAC-SHA256 from `X-Gitea-Signature`; for outbound, an access token scoped to the target self-hosted instance. | `push`, `pull_request`, `issues`, `issue_comment`, `release`, `repository`, `star`; outbound REST for comments, PR updates, commit statuses, repository contents, raw API passthrough, and shared `GitForgePullRequestEvent` emission for pull requests. |
@@ -101,7 +100,7 @@ Each first-party connector repo should publish:
 | Subversion | <https://github.com/burin-labs/harn-svn-connector> | `harn add github.com/burin-labs/harn-svn-connector@v0.1.0` | `harn package verify . --provider svn --run-poll-tick` | Optional post-commit hook HMAC secret; polling credentials are repository URL plus username/password, SSH key, or ambient host-managed credential helper. | `commit`, `branch`, `tag`, `property_change`; webhook-style post-commit normalization plus `poll_tick` revision scanning for repositories that cannot install hooks. |
 
 Direct GitHub installs are the MVP path. Registry names such as
-`@burin/notion-connector` should be used once the hosted first-party index is
+`@burin/linear-connector` should be used once the hosted first-party index is
 available.
 
 ### GitHub stale PR nudger
@@ -143,20 +142,6 @@ handler = "scan_for_sla_breaches"
 ```
 
 See `examples/triggers/linear-sla-breach`.
-
-### Notion database watcher
-
-```toml
-[[triggers]]
-id = "notion-database-watcher"
-kind = "poll"
-provider = "notion"
-handler = "on_database_change"
-poll = { interval = "5m", state_key = "notion:database:watcher", max_batch_size = 50 }
-secrets = { verification_token = "notion/verification-token" }
-```
-
-See `examples/triggers/notion-database-watcher`.
 
 ### Git forge quickstart demo
 
@@ -275,4 +260,4 @@ Start with [Connector authoring](./authoring.md), then add:
 
 The Harn-side contract is deliberately small. Keep provider SDKs or generated
 API clients in separate packages when that makes the connector easier to test
-and reuse, as with `notion-sdk-harn`.
+and reuse.

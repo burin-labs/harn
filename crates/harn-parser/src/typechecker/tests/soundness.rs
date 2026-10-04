@@ -852,6 +852,29 @@ fn unknown_method_on_list_is_rejected() {
 }
 
 #[test]
+fn unknown_method_on_inferred_builtin_binding_is_rejected() {
+    // An unannotated binding's inferred type is a binding contract, and the
+    // VM crashes on an unknown method of a closed builtin, so inference alone
+    // must hold the receiver to the method set (harn#9307).
+    let diags = nam_005(
+        r#"fn f() {
+  const xs = [1, 2, 3]
+  xs.take_last(2)
+  let s = "hi"
+  s.frobnicate()
+  const n = 5
+  n.frobnicate()
+  const d = {a: 1}
+  d.frobnicate()
+}"#,
+    );
+    assert_eq!(diags.len(), 3, "got: {diags:?}");
+    for name in ["take_last", "frobnicate"] {
+        assert!(diags.iter().any(|d| d.contains(name)), "{diags:?}");
+    }
+}
+
+#[test]
 fn legacy_collection_names_remain_accepted_during_migration() {
     let diags = nam_005(
         r#"fn f() {

@@ -226,9 +226,9 @@ Static OAuth provider records and factory helpers for auth orchestration:
 
 | Function | Description |
 |---|---|
-| `provider_names()` | Return the ten named provider keys |
+| `provider_names()` | Return the nine named provider keys |
 | `provider(name, overrides?)` | Return one provider record with optional endpoint/scope overrides |
-| `provider_catalog(overrides?)` | Return all ten provider records, with optional per-provider overrides |
+| `provider_catalog(overrides?)` | Return all nine provider records, with optional per-provider overrides |
 | `providers(overrides?)` | Return a namespace containing the ten records plus `github_enterprise` and `custom` factories |
 | `github_enterprise(base_url, overrides?)` | Build a GitHub Enterprise Server record from an instance web base URL |
 | `custom(config, overrides?)` | Build a provider record for enterprise or niche OAuth providers |
@@ -1600,6 +1600,22 @@ the spawn was attempted. A missing executable has `kind: "not_found"` in both
 sandboxed and unsandboxed execution. Other spawn failures and ordinary nonzero
 exit results remain distinct.
 
+For a verification command supplied as text, pass
+`{mode: "auto", command: "cargo test"}`. A plain POSIX external command runs
+as argv. Pipes, redirects, environment prefixes, expansions, shell builtins,
+and other shell dialects retain shell execution. Explicit `argv` and `shell`
+modes keep their existing behavior.
+
+An absent executable adds `missing_program` to the typed spawn error. Shell
+results expose the same field when the first program was absent before spawn
+and the shell exits normally with code 127. Lookup uses the child's directory
+and final `PATH`, including static environment prefixes such as `env VAR=1`.
+An installed program that exits 127 doesn't receive this field. Dynamic program
+names, zsh startup, login or interactive shells, configured shell startup files,
+imported shell functions, and unknown search paths omit the field
+because pre-spawn lookup cannot establish absence. Callers don't need to parse
+stderr to use this evidence.
+
 `CommandResult` names the common normalized result fields,
 `CommandOutputMatch` names the matched range and latest command state, and
 `CommandStepReceipt` names the portable command-step fields used by durable
@@ -2487,9 +2503,9 @@ path dependencies.
 Use registry names for discoverable first-party and community packages:
 
 ```bash
-harn package search notion
-harn package info @burin/notion-sdk
-harn add @burin/notion-sdk@1.2.3
+harn package search linear
+harn package info @burin/linear-sdk
+harn add @burin/linear-sdk@1.2.3
 ```
 
 Registry-name installs resolve through the package index and then write
@@ -2506,8 +2522,8 @@ git table by using `version`:
 url = "./harn-package-index.toml"
 
 [dependencies]
-notion-sdk-harn = { version = "^1.2" }
-notion = { version = ">=1.2,<2.0", registry_name = "@burin/notion-sdk", package = "notion-sdk-harn" }
+linear-sdk-harn = { version = "^1.2" }
+linear = { version = ">=1.2,<2.0", registry_name = "@burin/linear-sdk", package = "linear-sdk-harn" }
 ```
 
 `harn install` selects the highest unyanked semver version that matches the
@@ -2523,8 +2539,8 @@ cargo install harn-cli
 harn init connector-app
 cd connector-app
 harn add github.com/burin-labs/harn-openapi@v1.2.3
-harn add github.com/burin-labs/notion-sdk-harn@v1.2.3
-harn add github.com/burin-labs/notion-connector-harn@v1.2.3
+harn add github.com/burin-labs/linear-sdk-harn@v1.2.3
+harn add github.com/burin-labs/linear-connector-harn@v1.2.3
 harn install --frozen
 harn check main.harn
 ```
@@ -2534,8 +2550,8 @@ Equivalent manifest entries:
 ```toml
 [dependencies]
 harn-openapi = { git = "https://github.com/burin-labs/harn-openapi", tag = "v1.2.3" }
-notion-sdk-harn = { git = "https://github.com/burin-labs/notion-sdk-harn", tag = "v1.2.3" }
-notion-connector-harn = { git = "https://github.com/burin-labs/notion-connector-harn", tag = "v1.2.3" }
+linear-sdk-harn = { git = "https://github.com/burin-labs/linear-sdk-harn", tag = "v1.2.3" }
+linear-connector-harn = { git = "https://github.com/burin-labs/linear-connector-harn", tag = "v1.2.3" }
 ```
 
 Installed package code is importable, but package manifests do not

@@ -63,17 +63,12 @@ such as `issue`, `pull_request`, `comment`, `review`, `commits`,
 `repositories_removed`, plus the connector-promoted `topic`, `reaction_topics`,
 `repository`, and `repo` shared across every variant. Slack's
 payload is narrowed into `Message` (`message.*`), `AppMention`,
-`ReactionAdded`, `AppHomeOpened`, and `AssistantThreadStarted`. Notion's
-payload is narrowed around the current connector landing:
-`subscription.verification`, `page.content_updated`, `page.locked`,
-`comment.created`, `data_source.schema_updated`, plus polled fallback events
-surfaced through `payload.polled`. All providers still preserve the full outer
-envelope in `raw`:
+`ReactionAdded`, `AppHomeOpened`, and `AssistantThreadStarted`. All
+providers still preserve the full outer envelope in `raw`:
 
 - `GitHubEventPayload`
 - `SlackEventPayload`
 - `LinearEventPayload`
-- `NotionEventPayload`
 - `CronEventPayload`
 - `GenericWebhookPayload`
 - `A2aPushPayload`

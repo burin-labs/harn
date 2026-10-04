@@ -920,6 +920,7 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
               _iteration: iteration_index + 1,
               _tool_caller: opts?._tool_caller,
               _stop_reason: llm_result?.stop_reason ?? "",
+              _purpose_label: projected.purpose_label,
             },
         )
         const dispatch = dispatched.dispatch
@@ -1193,6 +1194,7 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
       break
     }
     const final_state = {
+      successful_tools_seen: successful_tools_seen,
       opts: opts,
       final_status: final_status,
       stop_reason: stop_reason,

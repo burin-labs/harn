@@ -170,37 +170,6 @@ secrets = { signing_secret = "slack/signing-secret" }
     manifest
 }
 
-pub(super) fn notion_manifest(orchestrator_block: Option<&str>) -> String {
-    let mut manifest = r#"
-[package]
-name = "fixture"
-
-[exports]
-handlers = "lib.harn"
-
-"#
-    .to_string();
-    manifest.push_str(provider_declarations());
-    manifest.push_str(
-        r#"
-[[triggers]]
-id = "notion-pages"
-kind = "webhook"
-provider = "notion"
-path = "/hooks/notion"
-match = { path = "/hooks/notion", events = ["page.content_updated"] }
-handler = "handlers::on_notion"
-secrets = { verification_token = "notion/verification-token" }
-"#,
-    );
-    if let Some(block) = orchestrator_block {
-        manifest.push('\n');
-        manifest.push_str(block);
-        manifest.push('\n');
-    }
-    manifest
-}
-
 pub(super) fn echo_manifest(orchestrator_block: Option<&str>) -> String {
     let mut manifest = r#"
 [package]
@@ -261,19 +230,6 @@ pub(super) fn slack_handler_module(marker_path: &Path) -> String {
 import "std/triggers"
 
 pub fn on_slack(harness: Harness, event: TriggerEvent) {{
-  harness.fs.write_text({marker:?}, event.kind)
-}}
-"#,
-        marker = marker_path.display().to_string()
-    )
-}
-
-pub(super) fn notion_handler_module(marker_path: &Path) -> String {
-    format!(
-        r#"
-import "std/triggers"
-
-pub fn on_notion(harness: Harness, event: TriggerEvent) {{
   harness.fs.write_text({marker:?}, event.kind)
 }}
 "#,
@@ -501,66 +457,6 @@ pub fn normalize_inbound(harness: Harness, raw) {
     event: {
       kind: kind,
       dedupe_key: "slack:" + (body.event_id ?? sha256(decoded)),
-      payload: body,
-      signature_status: {state: "verified"},
-    },
-  }
-}
-
-pub fn call(_harness: Harness, method, _args) {
-  throw "method_not_found:" + method
-}
-"#
-}
-
-pub(super) fn notion_connector_module() -> &'static str {
-    r#"
-pub fn provider_id() {
-  return "notion"
-}
-
-pub fn kinds() {
-  return ["webhook"]
-}
-
-pub fn payload_schema() {
-  return "NotionEventPayload"
-}
-
-pub fn normalize_inbound(harness: Harness, raw) {
-  const decoded = base64_decode(raw.body_base64)
-  const body = raw.body_json ?? json_parse(decoded)
-  if (body.verification_token ?? "") != "" {
-    return {
-      type: "immediate_response",
-      immediate_response: {
-        status: 200,
-        body: {
-          status: "handshake_captured",
-          verification_token: body.verification_token,
-        },
-      },
-    }
-  }
-
-  const secret = harness.secrets.read("notion/verification-token")
-  const signature = raw.headers["X-Notion-Signature"] ?? raw.headers["x-notion-signature"] ?? ""
-  const expected = "sha256=" + hmac_sha256(secret, decoded)
-  if !constant_time_eq(signature, expected) {
-    return {
-      type: "reject",
-      reject: {
-        status: 400,
-        body: {error: "invalid_signature"},
-      },
-    }
-  }
-
-  return {
-    type: "event",
-    event: {
-      kind: body.type,
-      dedupe_key: "notion:" + (body.id ?? sha256(decoded)),
       payload: body,
       signature_status: {state: "verified"},
     },
@@ -924,15 +820,5 @@ pub(super) fn slack_headers(secret: &str, timestamp: i64, body: &[u8]) -> Header
         "X-Slack-Signature",
         HeaderValue::from_str(&slack_signature(secret, timestamp, body)).unwrap(),
     );
-    headers
-}
-
-pub(super) fn notion_headers(secret: &str, body: &[u8]) -> HeaderMap {
-    let mut headers = base_json_headers();
-    headers.insert(
-        "X-Notion-Signature",
-        HeaderValue::from_str(&github_signature(secret, body)).unwrap(),
-    );
-    headers.insert("request-id", HeaderValue::from_static("req-notion-123"));
     headers
 }

@@ -27,6 +27,12 @@ impl EnumValue {
 }
 
 #[derive(Clone)]
+pub(super) struct RuntimeException {
+    pub(super) value: RuntimeValue,
+    pub(super) declared: bool,
+}
+
+#[derive(Clone)]
 pub(super) enum RuntimeValue {
     Nil,
     Bool(bool),
@@ -40,6 +46,7 @@ pub(super) enum RuntimeValue {
     Closure(Closure),
     Builtin(String),
     Harness(String),
+    Exception(Rc<RuntimeException>),
 }
 
 impl RuntimeValue {
@@ -96,6 +103,7 @@ impl RuntimeValue {
             Self::Closure(_) => "<closure>".into(),
             Self::Builtin(name) => format!("<builtin {name}>"),
             Self::Harness(name) => format!("<harness {name}>"),
+            Self::Exception(_) => "<caught exception>".into(),
         }
     }
 }
@@ -116,7 +124,9 @@ impl SemanticValue for RuntimeValue {
                 variant: &value.variant,
                 fields: &value.fields,
             },
-            Self::Closure(_) | Self::Builtin(_) | Self::Harness(_) => ValueView::Opaque,
+            Self::Closure(_) | Self::Builtin(_) | Self::Harness(_) | Self::Exception(_) => {
+                ValueView::Opaque
+            }
         }
     }
 }
@@ -192,7 +202,10 @@ impl DataValue {
                     "execution returned an enum outside the portable data contract",
                 ));
             }
-            RuntimeValue::Closure(_) | RuntimeValue::Builtin(_) | RuntimeValue::Harness(_) => {
+            RuntimeValue::Closure(_)
+            | RuntimeValue::Builtin(_)
+            | RuntimeValue::Harness(_)
+            | RuntimeValue::Exception(_) => {
                 return Err(diagnostic(
                     "non_data_result",
                     "execution returned a host or callable value",

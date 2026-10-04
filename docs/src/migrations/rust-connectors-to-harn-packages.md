@@ -1,6 +1,6 @@
 # Migrating Rust provider connectors to pure-Harn packages
 
-GitHub, Slack, Linear, and Notion provider business logic now ships in
+GitHub, Slack, and Linear provider business logic now ships in
 pure-Harn connector packages. Harn core keeps only the shared connector
 primitives, so cloud platforms and self-hosted orchestrators can adopt connector
 fixes, new event families, and provider API changes without waiting for a Harn
@@ -24,12 +24,11 @@ event shape through the connector contract v1 surface:
 | GitHub | <https://github.com/burin-labs/harn-github-connector> |
 | Slack | <https://github.com/burin-labs/harn-slack-connector> |
 | Linear | <https://github.com/burin-labs/harn-linear-connector> |
-| Notion | <https://github.com/burin-labs/harn-notion-connector> |
 
 Manifests opt into the pure-Harn replacement by declaring a
 `[[providers]]` table that points `connector = { harn = "..." }` at the
 package's connector module. Provider-specific Rust fallbacks are no longer
-registered for GitHub, Slack, Linear, or Notion, so the override is the
+registered for GitHub, Slack, or Linear, so the override is the
 canonical path for those providers.
 
 ## Cutover checklist
@@ -50,12 +49,6 @@ one provider on the pure-Harn implementation before moving the rest.
 
    ```sh
    harn connector check . --provider github
-   ```
-
-   For Notion, also exercise the poll path:
-
-   ```sh
-   harn connector check . --provider notion --run-poll-tick
    ```
 
 3. **Add a `[[providers]]` override.** Tell the orchestrator to load the
@@ -106,7 +99,7 @@ supported way to express their respective concerns:
   Webhooks-style headers (`docs/src/connectors/webhook.md`).
 - HMAC verification helpers under `harn_vm::connectors::hmac`, including
   the canonical signature-header constants used by GitHub, Slack, Linear,
-  Notion, Stripe, and Standard Webhooks.
+  Stripe, and Standard Webhooks.
 - The A2A push connector and the stream connector for queue-shaped
   ingress.
 - Raw HTTP request access (`raw_body`, headers) and signing primitives.
@@ -124,8 +117,8 @@ The Harn core prerequisites are complete:
   primitives, structured concurrency, and the connector testkit are in core.
 - The OAuth / connect CLI and package manager give connector packages a stable
   install + auth path.
-- First-party package CI owns parity fixtures for GitHub, Slack, Linear, and
-  Notion so provider payload behavior can evolve with package releases.
+- First-party package CI owns parity fixtures for GitHub, Slack, and Linear
+  so provider payload behavior can evolve with package releases.
 
 Do not add provider-specific Rust connector business logic in this repository;
 service connectors should be packages that register with

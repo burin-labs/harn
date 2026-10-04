@@ -32,6 +32,35 @@ To replace an unrecorded stale attempt, close its pull request and dispatch the
 opener explicitly. Inspect the replacement head's required checks and review.
 Do not reset an attempt ref or dispatch a second version selector.
 
+## Repair a failed development bump
+
+If publication completed but the post-publication development bump failed,
+repair it through the same opener:
+
+```bash
+gh workflow run open-development-bump.yml --repo burin-labs/harn --ref main -f published_tag=vX.Y.Z
+```
+
+Omit `published_tag` to use the latest published stable release. The workflow
+verifies publication before minting the release App token, derives the next
+development identity, opens or reuses its pull request, validates its grammar
+receipt, and arms the normal merge queue. A repeated repair after the cutover
+lands is a no-op. Draft, prerelease, unreadable, and incomplete publication
+records refuse the repair.
+
+The five-minute repository-state controller automatically dispatches the same
+opener once for an owed development version when no open cutover PR exists.
+It verifies publication and reserves the attempt on the fixed commit in
+`scripts/development_cutover_repair.json` before dispatch. Scheduled and manual
+controller checks share that reservation owner. Existing PRs, including red
+ones, remain their owner's work.
+
+If reservation or dispatch fails, inspect the controller run and use the manual
+repair command above. The reservation deliberately prevents another automatic
+attempt, including after a crash. Missing or incomplete reservation history
+refuses automatic repair. Do not change the fixed anchor or seed to clear a
+reservation, and do not infer completed integration from a reserved attempt.
+
 ## Follow certification and publication
 
 Record the release pull request and the exact commit that lands on main.

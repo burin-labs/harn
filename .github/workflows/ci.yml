@@ -2814,7 +2814,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Check CI latency policy
-        uses: burin-labs/.github/.github/actions/ci-latency-policy@9650d5116b7d5fde63cb71e7039d8ab7252dc38a
+        uses: burin-labs/.github/.github/actions/ci-latency-policy@3b88a11f04b96b9f848324a8f36a03e497bccfaa
         with:
           baseline-sha: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || '' }}
           github-token: ${{ github.token }}

@@ -248,6 +248,7 @@
 - [Portable kernel contract](./portable-kernel-reference.md)
 - [Bridge protocol](./bridge-protocol.md)
 - [Generated protocol artifacts](./protocol-artifacts.md)
+- [Session health reference](./session-health.md)
 - [Host tools over the bridge](./bridge/host-tools.md)
 - [ACP over WebSocket](./acp/websocket.md)
 - [Remote session control](./remote-session-control.md)
@@ -296,7 +297,6 @@
 - [Cron connector](./connectors/cron.md)
 - [GitHub app connector](./connectors/github.md)
 - [Linear connector](./connectors/linear.md)
-- [Notion connector](./connectors/notion.md)
 - [Slack events connector](./connectors/slack-events.md)
 - [Generic webhook connector](./connectors/webhook.md)
 - [A2A push connector](./connectors/a2a-push.md)
@@ -397,6 +397,7 @@
 
 - [Maintainer release workflow](./maintainer-release.md)
 - [Release assets manifest](./dev/release-assets-manifest.md)
+- [Release opener outcome](./dev/release-opener-receipt.md)
 - [Release runner policy](./dev/release-runner-policy.md)
 - [Release binary-size policy](./dev/release-binary-size-policy.md)
 - [Reusable bump-harn workflow](./dev/reusable-bump-harn-runtime.md)

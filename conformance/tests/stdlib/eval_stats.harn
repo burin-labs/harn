@@ -111,7 +111,26 @@ pipeline test(harness: Harness, task: unknown) {
   assert_eq(aggregate.pass_rate, 0.25)
   assert_eq(aggregate.mean_wall_time_seconds, 15.0)
   assert_eq(aggregate.stdev_wall_time_seconds, 11.18)
-  assert_eq(aggregate.total_cost_usd, 1.2)
+  assert_eq(aggregate.total_cost_usd, nil)
+  assert_eq(aggregate.known_cost_usd, 1.2)
+  assert_eq(aggregate.mean_cost_usd, nil)
+  assert_eq(aggregate.stdev_cost_usd, nil)
+  assert_eq(cost_per_solved([aggregate]), nil)
+  const measured = aggregate_trials("measured", [{verification: "PASS", cost_usd: 0.2}])
+  assert_eq(measured.total_cost_usd, 0.2)
+  assert_eq(measured.cost_usd, 0.2)
+  assert_eq(measured.known_cost_usd, 0.2)
+  assert_eq(measured.mean_cost_usd, 0.2)
+  const partial_cost = aggregate_trials(
+    "partial",
+    [{verification: "PASS", cost_usd: nil, known_cost_usd: 0.1}],
+  )
+  assert_eq(partial_cost.total_cost_usd, nil)
+  assert_eq(partial_cost.known_cost_usd, 0.1)
+  assert_eq(aggregate_trials("empty", []).total_cost_usd, nil)
+  assert_eq(aggregate_trials("empty", []).known_cost_usd, nil)
+  assert_eq(aggregate_trials("unknown", [{verification: "PASS"}]).total_cost_usd, nil)
+  assert_eq(aggregate_trials("zero", [{verification: "PASS", cost_usd: 0.0}]).total_cost_usd, 0.0)
   const aggregate_with_harness = aggregate_trials(
     "agg-harness",
     [{verification: "PASS", wallTimeSeconds: 1.0}],

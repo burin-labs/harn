@@ -84,6 +84,9 @@ pub enum LlmErrorReason {
     /// a larger cap or a smaller request, never a byte-identical replay.
     OutputBudgetExhausted,
     Unknown,
+    /// Harn refused inference under its host/session policy before provider I/O.
+    /// Provider response bodies cannot claim this locally owned reason.
+    PolicyDenied,
 }
 
 impl LlmErrorReason {
@@ -104,6 +107,7 @@ impl LlmErrorReason {
         Self::BillingLimit,
         Self::OutputBudgetExhausted,
         Self::Unknown,
+        Self::PolicyDenied,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -122,6 +126,7 @@ impl LlmErrorReason {
             Self::BillingLimit => "billing_limit",
             Self::OutputBudgetExhausted => "output_budget_exhausted",
             Self::Unknown => "unknown",
+            Self::PolicyDenied => "policy_denied",
         }
     }
 
@@ -141,6 +146,7 @@ impl LlmErrorReason {
             "billing_limit" => Some(Self::BillingLimit),
             "output_budget_exhausted" => Some(Self::OutputBudgetExhausted),
             "unknown" => Some(Self::Unknown),
+            "policy_denied" => Some(Self::PolicyDenied),
             _ => None,
         }
     }
@@ -169,6 +175,7 @@ impl LlmErrorReason {
             | Self::BillingLimit
             | Self::OutputBudgetExhausted
             | Self::Unknown => LlmErrorKind::Terminal,
+            Self::PolicyDenied => LlmErrorKind::Terminal,
         }
     }
 }
@@ -234,26 +241,7 @@ pub(crate) fn retry_after_header(headers: &reqwest::header::HeaderMap) -> Option
 
 /// Parse an RFC 7231 Retry-After field value into a bounded delay.
 pub(crate) fn parse_retry_after_value(value: &str) -> Option<u64> {
-    const MAX_MS: u64 = 60_000;
-    let value = value.trim();
-    let numeric_prefix = value
-        .chars()
-        .take_while(|character| character.is_ascii_digit() || *character == '.')
-        .collect::<String>();
-    if let Ok(seconds) = numeric_prefix.parse::<f64>() {
-        if !seconds.is_finite() || seconds < 0.0 {
-            return None;
-        }
-        return Some(((seconds * 1000.0) as u64).min(MAX_MS));
-    }
-    let target = httpdate::parse_http_date(value).ok()?;
-    Some(
-        target
-            .duration_since(std::time::SystemTime::now())
-            .map(|duration| duration.as_millis() as u64)
-            .unwrap_or(0)
-            .min(MAX_MS),
-    )
+    crate::http::retry_after_hint(value).map(|(millis, _)| millis)
 }
 
 fn provider_http_error_value(
@@ -280,8 +268,12 @@ fn provider_http_error_value(
     fields.put_str("kind", classified.kind.as_str());
     fields.put_str("reason", classified.reason.as_str());
     fields.put_str("message", classified.message);
-    if let Some(ms) = retry_after.and_then(parse_retry_after_value) {
+    if let Some((ms, exceeds_cap)) = retry_after.and_then(crate::http::retry_after_hint) {
         fields.insert("retry_after_ms".to_string(), VmValue::Int(ms as i64));
+        fields.insert(
+            "retry_after_exceeds_cap".to_string(),
+            VmValue::Bool(exceeds_cap),
+        );
     }
     let quota = quota.and_then(|quota| {
         Some((
@@ -426,7 +418,9 @@ fn explicit_stream_error_taxonomy(
 ) -> Option<(LlmErrorKind, LlmErrorReason)> {
     let json = json?;
     let kind = json_taxonomy_str(json, "kind").and_then(LlmErrorKind::parse);
-    let reason = json_taxonomy_str(json, "reason").and_then(LlmErrorReason::parse);
+    let reason = json_taxonomy_str(json, "reason")
+        .and_then(LlmErrorReason::parse)
+        .filter(|reason| *reason != LlmErrorReason::PolicyDenied);
     match (kind, reason) {
         (Some(kind), Some(reason)) => Some((kind, reason)),
         (None, Some(reason)) => Some((reason.default_kind(), reason)),

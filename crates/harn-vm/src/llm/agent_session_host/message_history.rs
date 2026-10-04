@@ -161,7 +161,8 @@ pub(super) fn host_agent_session_record_assistant_builtin(
         .iter()
         .map(vm_to_json)
         .collect::<Vec<_>>();
-    let assistant_message = assistant_message_from_llm_result(&llm_result);
+    let mut assistant_message = assistant_message_from_llm_result(&llm_result);
+    super::super::assistant_publication::defer(&mut assistant_message, &llm_result);
     let visible_text =
         crate::llm::agent_result_projection::visible_assistant_text(&assistant_message);
     crate::agent_sessions::inject_message(&session_id, assistant_message)

@@ -406,7 +406,15 @@ pub fn __tool_lifecycle_session_id(envelope: dict) -> string {
   return to_string(envelope?.turn?.session_id ?? "")
 }
 
-pub fn __emit_tool_lifecycle_start(agent: HarnessAgent, envelope: dict) {
+/**
+ * `intent` is the batch's declared purpose label (`_purpose_label` on the
+ * dispatch options). The host boundary normalizes it and drops a blank one,
+ * the same way dispatch does for the approval request.
+ *
+ * @effects: [agent]
+ * @errors: []
+ */
+pub fn __emit_tool_lifecycle_start(agent: HarnessAgent, envelope: dict, intent: string = "") {
   const session_id = __tool_lifecycle_session_id(envelope)
   if session_id == "" || to_string(envelope?.tool_name ?? "") == "" {
     return
@@ -420,6 +428,7 @@ pub fn __emit_tool_lifecycle_start(agent: HarnessAgent, envelope: dict) {
       tool_name: envelope.tool_name,
       status: "pending",
       raw_input: envelope.tool_args,
+      intent: intent,
     },
   )
   let _ = agent_emit_event(
@@ -497,7 +506,7 @@ pub fn __emit_tool_lifecycle_finish(agent: HarnessAgent, envelope: dict, result:
   if result?.data != nil {
     payload = payload + {data: result.data}
   }
-  let _ = agent_emit_event(agent, session_id, "tool_call_update", payload)
+  let _ = agent.emit_tool_outcome(session_id, payload, envelope, result)
 }
 
 pub fn __emit_synthetic_tool_lifecycle_finish(
@@ -534,7 +543,7 @@ pub fn __agent_error_must_propagate(err: any) -> bool {
 pub fn __invoke_tool(harness: Harness, call: dict, tools: dict, options: dict) {
   const caller = options?._tool_caller
   const envelope = __tool_envelope(harness.random, call, tools, options)
-  __emit_tool_lifecycle_start(harness.agent, envelope)
+  __emit_tool_lifecycle_start(harness.agent, envelope, to_string(options?._purpose_label ?? ""))
   if caller == nil {
     const direct = agent_dispatch_tool_call(
       harness.tools,
@@ -1299,7 +1308,11 @@ pub fn __agent_loop_record_parse_feedback(
     normalized
       + {tool_calls: tool_calls, text: __agent_loop_history_text(normalized, parsed, tool_calls)}
   }
-  agent_session_record_assistant(harness.agent, session_id, recorded_assistant)
+  agent_session_record_assistant(
+    harness.agent,
+    session_id,
+    recorded_assistant + {_defer_visible: true},
+  )
   const parse_dropped = __maybe_inject_parse_error_feedback(
     harness,
     session_id,

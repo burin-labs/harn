@@ -17,7 +17,6 @@ use super::ConnectorError;
 pub const SIGNATURE_VERIFY_AUDIT_TOPIC: &str = "audit.signature_verify";
 pub const DEFAULT_GITHUB_SIGNATURE_HEADER: &str = "x-hub-signature-256";
 pub const DEFAULT_LINEAR_SIGNATURE_HEADER: &str = "linear-signature";
-pub const DEFAULT_NOTION_SIGNATURE_HEADER: &str = "x-notion-signature";
 pub const DEFAULT_SLACK_SIGNATURE_HEADER: &str = "x-slack-signature";
 pub const DEFAULT_SLACK_TIMESTAMP_HEADER: &str = "x-slack-request-timestamp";
 pub const DEFAULT_STRIPE_SIGNATURE_HEADER: &str = "stripe-signature";
@@ -36,10 +35,6 @@ pub enum HmacSignatureStyle<'a> {
     },
     Linear {
         signature_header: &'a str,
-    },
-    Notion {
-        signature_header: &'a str,
-        prefix: &'a str,
     },
     Slack {
         signature_header: &'a str,
@@ -83,13 +78,6 @@ impl<'a> HmacSignatureStyle<'a> {
         }
     }
 
-    pub fn notion() -> Self {
-        Self::Notion {
-            signature_header: DEFAULT_NOTION_SIGNATURE_HEADER,
-            prefix: "sha256=",
-        }
-    }
-
     pub fn slack() -> Self {
         Self::Slack {
             signature_header: DEFAULT_SLACK_SIGNATURE_HEADER,
@@ -118,7 +106,6 @@ impl<'a> HmacSignatureStyle<'a> {
         match self {
             Self::GitHub { .. } => "github",
             Self::Linear { .. } => "linear",
-            Self::Notion { .. } => "notion",
             Self::Slack { .. } => "slack",
             Self::Stripe { .. } => "stripe",
             Self::StandardWebhooks { .. } => "standard_webhooks",
@@ -141,10 +128,6 @@ pub async fn verify_hmac_signed<L: EventLog + ?Sized>(
 ) -> Result<(), ConnectorError> {
     match style {
         HmacSignatureStyle::GitHub {
-            signature_header,
-            prefix,
-        }
-        | HmacSignatureStyle::Notion {
             signature_header,
             prefix,
         } => {

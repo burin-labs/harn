@@ -538,6 +538,12 @@ async fn dispatch(subcommand: Command) {
         }
         Command::Local(args) => commands::local::run(args).await,
         Command::Provider(args) => match args.command {
+            ProviderCommand::Admission(admission) => {
+                if let Err(error) = commands::inference_admission::run(admission) {
+                    eprintln!("{error}");
+                    process::exit(2);
+                }
+            }
             ProviderCommand::Capabilities(capabilities) => {
                 commands::provider_capabilities::run_or_exit(capabilities);
             }

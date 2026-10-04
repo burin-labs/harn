@@ -38,6 +38,7 @@ fn exported_llm_outcome_vocabularies_are_complete_and_round_trip() {
             LlmErrorReason::BillingLimit => 11,
             LlmErrorReason::OutputBudgetExhausted => 12,
             LlmErrorReason::Unknown => 13,
+            LlmErrorReason::PolicyDenied => 14,
         }
     }
 
@@ -47,7 +48,7 @@ fn exported_llm_outcome_vocabularies_are_complete_and_round_trip() {
         assert_eq!(LlmErrorKind::parse(kind.as_str()), Some(*kind));
     }
 
-    assert_eq!(LlmErrorReason::ALL.len(), 14);
+    assert_eq!(LlmErrorReason::ALL.len(), 15);
     for (index, reason) in LlmErrorReason::ALL.iter().enumerate() {
         assert_eq!(reason_ordinal(*reason), index);
         assert_eq!(LlmErrorReason::parse(reason.as_str()), Some(*reason));
@@ -105,6 +106,18 @@ fn classify_openai_compatible_internal_server_stream_error_as_transient() {
         Some("provider_stream")
     );
     assert_eq!(thrown_field(&error, "partial").as_deref(), Some("false"));
+}
+
+#[test]
+fn provider_stream_cannot_claim_a_locally_owned_policy_denial() {
+    let error = classify_provider_stream_error(
+        "fixture",
+        r#"{"kind":"terminal","reason":"policy_denied","message":"arbitrary provider response"}"#,
+        false,
+    );
+    assert_eq!(thrown_field(&error, "reason").as_deref(), Some("unknown"));
+    assert_eq!(thrown_field(&error, "category").as_deref(), Some("generic"));
+    assert_ne!(thrown_field(&error, "origin").as_deref(), Some("local"));
 }
 
 #[test]
@@ -189,6 +202,49 @@ fn classify_tags_opaque_500_as_http_error() {
     .message;
     assert!(msg.contains("[http_error]"), "msg was: {msg}");
     assert!(msg.contains("upstream exploded"));
+}
+
+#[test]
+fn typed_retry_after_retains_over_cap_deadlines() {
+    for (header, expected_ms, exceeds_cap) in [
+        ("2", 2000, false),
+        ("60", 60000, false),
+        ("61", 60000, true),
+    ] {
+        let mut headers = reqwest::header::HeaderMap::new();
+        headers.insert("retry-after", header.parse().unwrap());
+        let error = provider_http_error(
+            None,
+            "mistral",
+            reqwest::StatusCode::TOO_MANY_REQUESTS,
+            &headers,
+            "rate limited",
+        );
+        let VmError::Thrown(VmValue::Dict(error)) = error else {
+            panic!("provider error must retain a typed envelope");
+        };
+        assert_eq!(
+            error.get("retry_after_ms").map(VmValue::display),
+            Some(expected_ms.to_string())
+        );
+        assert_eq!(
+            error.get("retry_after_exceeds_cap").map(VmValue::display),
+            Some(exceeds_cap.to_string())
+        );
+    }
+    let mut headers = reqwest::header::HeaderMap::new();
+    headers.insert("retry-after", "2seconds".parse().unwrap());
+    let VmError::Thrown(VmValue::Dict(error)) = provider_http_error(
+        None,
+        "mistral",
+        reqwest::StatusCode::TOO_MANY_REQUESTS,
+        &headers,
+        "rate limited",
+    ) else {
+        panic!("typed provider envelope");
+    };
+    assert!(error.get("retry_after_ms").is_none());
+    assert!(error.get("retry_after_exceeds_cap").is_none());
 }
 
 #[test]

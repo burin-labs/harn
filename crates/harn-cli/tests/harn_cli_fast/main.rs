@@ -22,6 +22,7 @@ mod test_util;
 mod required_pr_e2e;
 
 mod batch_download_cli;
+mod boundary_decoding;
 mod burin_mini_playground;
 mod bytecode_cache;
 mod check_cli;

@@ -1,0 +1,99 @@
+{
+  "$defs": {
+    "InferenceAdmissionStatus": {
+      "enum": [
+        "admitted",
+        "denied",
+        "unknown"
+      ],
+      "type": "string"
+    },
+    "InferenceBoundary": {
+      "additionalProperties": false,
+      "properties": {
+        "allow_training_discounts": {
+          "type": "boolean"
+        },
+        "reach": {
+          "$ref": "#/$defs/InferenceReach"
+        }
+      },
+      "required": [
+        "reach",
+        "allow_training_discounts"
+      ],
+      "type": "object"
+    },
+    "InferenceReach": {
+      "enum": [
+        "local_only",
+        "hosted_open_weight",
+        "any_hosted"
+      ],
+      "type": "string"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Admission says only what the current policy and route facts permit.\nIt does not establish credentials, availability, model readiness, or future\nadmission. Actual inference resolves and enforces its boundary again.",
+  "properties": {
+    "effective_boundary": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/InferenceBoundary"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "governing_rule": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "local_runtime": {
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "model": {
+      "type": "string"
+    },
+    "open_weight": {
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "provider": {
+      "type": "string"
+    },
+    "schema": {
+      "type": "string"
+    },
+    "status": {
+      "$ref": "#/$defs/InferenceAdmissionStatus"
+    },
+    "training_control_planned": {
+      "description": "A control the selected chat transport can apply, not an assertion that\nthis preview sent a request or applied a control to live traffic.",
+      "type": "boolean"
+    },
+    "training_default": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "schema",
+    "provider",
+    "model",
+    "status",
+    "training_control_planned"
+  ],
+  "title": "InferenceAdmissionSnapshot",
+  "type": "object"
+}

@@ -4,6 +4,7 @@ import { agent_capture_events } from "std/agent/events"
 import { agent_loop } from "std/agent/loop"
 import { AgentSpec } from "std/agent/options"
 import { command_run } from "std/command"
+import { safe_call } from "std/llm/safe"
 import { llm_text, with_llm_script } from "std/testing"
 import { resolve_harn_bin } from "../_common"
 import { contract_effect, contract_negative } from "./lib/mechanism_contract"
@@ -23,6 +24,26 @@ fn hosted_probe(harness: Harness) {
     fn() { return agent_loop(harness, "Reply briefly.", nil, options) },
   )
   harness.stdio.println(json_stringify(captured.result))
+  require captured.result.provider_call_count == 0, "Refused inference must not dispatch."
+  require captured.result.error?.reason == "policy_denied",
+    "A local ceiling must retain its typed policy cause."
+  require captured.result.error?.origin == "local",
+    "A local refusal must not be attributed to the provider."
+  require captured.result.error?.rule == "inference_boundary.local_only",
+    "Retain the governing rule."
+  require captured.result.error?.retryable == false, "A policy refusal must not be retried."
+  require captured.result.terminal_class == "tool_policy_rejected",
+    "The terminal policy bucket must survive."
+  const safe = safe_call(
+    harness.llm,
+    "Reply briefly.",
+    nil,
+    {provider: options.provider, model: options.model},
+  )
+  require !safe.ok && safe.status == "policy_blocked",
+    "The safe caller must preserve the policy outcome."
+  require safe.error?.reason == "policy_denied" && safe.error?.retryable == false,
+    "A safe caller must retain the cause without retrying."
 }
 
 pipeline default(harness: Harness) {

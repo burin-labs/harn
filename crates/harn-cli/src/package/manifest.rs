@@ -901,7 +901,7 @@ pub struct DepTable {
     /// latest version.
     #[serde(default)]
     pub registry: Option<String>,
-    /// Registry-side package name (e.g. `@burin/notion-sdk`). May differ
+    /// Registry-side package name (e.g. `@burin/linear-sdk`). May differ
     /// from the alias and from the git URL's repo name.
     #[serde(default, alias = "registry-name")]
     pub registry_name: Option<String>,

@@ -8,12 +8,11 @@ pub(crate) struct ExceptionHandler {
     pub(crate) env_scope_depth: usize,
     /// When present, this catch only handles errors whose enum_name matches.
     pub(crate) error_type: Option<crate::value::HarnStr>,
+    pub(crate) preserve: bool,
 }
 
-/// The most recent error delivered to a handler. `finally`/`defer` cleanup
-/// rethrows the value it caught, and a `catch` may `throw` its binding again;
-/// either way the original error and stack trace, not a stringified copy
-/// located at the rethrow, continue to propagate.
+/// An error and its original trace. Compiler-generated handlers retain this
+/// opaque carrier directly; source catches receive its value projection.
 #[derive(Clone)]
 pub(crate) struct CaughtError {
     pub(crate) value: VmValue,
@@ -22,23 +21,41 @@ pub(crate) struct CaughtError {
 }
 
 impl super::super::Vm {
+    pub(super) fn execute_declared_throw(&mut self) -> Result<(), VmError> {
+        Err(VmError::DeclaredThrown(self.pop()?))
+    }
+
+    pub(super) fn execute_rethrow(&mut self) -> Result<(), VmError> {
+        let value = self.pop()?;
+        let VmValue::Resource(resource) = value else {
+            return Err(VmError::Runtime(
+                "rethrow requires a caught exception carrier".into(),
+            ));
+        };
+        let Some(caught) = resource.downcast::<CaughtError>() else {
+            return Err(VmError::Runtime(
+                "rethrow received an unrelated resource".into(),
+            ));
+        };
+        self.error_stack_trace = caught.stack_trace.clone();
+        Err(caught.error.clone())
+    }
+
     pub(super) fn execute_throw(&mut self) -> Result<(), VmError> {
         let val = self.pop()?;
-        // Rethrowing the exact value a handler received (cleanup does this
-        // after `finally`/`defer` runs) re-raises the original error, so its
-        // kind and origin survive the cleanup instead of being restringified.
-        if let Some(caught) = self
-            .last_caught_error
-            .as_ref()
-            .filter(|caught| same_allocation(&caught.value, &val))
-        {
+        // Preserve legacy explicit catch-and-throw identity. Compiler-generated
+        // cleanup uses the opaque carrier in execute_rethrow instead.
+        if let Some(caught) = self.last_caught_error.as_ref().filter(|caught| {
+            !matches!(caught.error, VmError::DeclaredThrown(_))
+                && same_allocation(&caught.value, &val)
+        }) {
             self.error_stack_trace = caught.stack_trace.clone();
             return Err(caught.error.clone());
         }
         Err(VmError::Thrown(val))
     }
 
-    pub(super) fn execute_try_catch_setup(&mut self) {
+    pub(super) fn execute_try_catch_setup(&mut self, preserve: bool) {
         let frame = self.frames.last_mut().unwrap();
         let catch_offset = frame.chunk.read_u16(frame.ip) as usize;
         frame.ip += 2;
@@ -54,6 +71,7 @@ impl super::super::Vm {
             frame_depth: self.frames.len(),
             env_scope_depth: self.env.scope_depth(),
             error_type,
+            preserve,
         });
     }
 

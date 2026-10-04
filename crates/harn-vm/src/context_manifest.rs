@@ -95,7 +95,15 @@ pub struct ManifestFile {
 /// real dependency without changing any recorded file's content.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct ManifestUnresolved {
+    /// The importing file as the walk spelled it, which is what resolution is
+    /// relative to.
     pub anchor: PathBuf,
+    /// The file `anchor` named when the walk ran. A manifest is shared by
+    /// every spelling of one entry, so a symlink spelling that has since been
+    /// removed or retargeted would otherwise still re-check as unresolved
+    /// while the file it named gains the import.
+    #[serde(default)]
+    pub anchor_identity: PathBuf,
     pub import: String,
 }
 
@@ -367,7 +375,12 @@ impl ManifestUnreadable {
 
 impl ManifestUnresolved {
     pub(crate) fn still_unresolved(&self) -> bool {
-        harn_modules::resolve_import_path(&self.anchor, &self.import).is_none()
+        // Not `canonical_identity`: its memo would answer for a spelling that
+        // changed since this process first resolved it.
+        self.anchor
+            .canonicalize()
+            .is_ok_and(|identity| identity == self.anchor_identity)
+            && harn_modules::resolve_import_path(&self.anchor, &self.import).is_none()
     }
 }
 
@@ -647,6 +660,7 @@ mod tests {
         write(&entry, "import \"./late\"\n");
         let manifest = ContextManifest {
             unresolved: vec![ManifestUnresolved {
+                anchor_identity: entry.canonicalize().unwrap(),
                 anchor: entry,
                 import: "./late".to_string(),
             }],
@@ -661,6 +675,38 @@ mod tests {
         assert!(
             !revalidates(&manifest),
             "an import that now resolves must invalidate the manifest"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_removed_anchor_spelling_invalidates() {
+        // Captured through a symlink, validated for the canonical entry after
+        // the link is gone: resolving from the dead spelling still finds
+        // nothing, while the real directory has gained the import.
+        let tmp = tempfile::tempdir().unwrap();
+        let real = tmp.path().join("real");
+        write(&real.join("entry.harn"), "import \"./missing\"\n");
+        let alias = tmp.path().join("alias");
+        std::os::unix::fs::symlink(&real, &alias).unwrap();
+        let manifest = ContextManifest {
+            unresolved: vec![ManifestUnresolved {
+                anchor: alias.join("entry.harn"),
+                anchor_identity: real.join("entry.harn").canonicalize().unwrap(),
+                import: "./missing".to_string(),
+            }],
+            ..ContextManifest::begin(anchor())
+        };
+        assert!(revalidates(&manifest));
+
+        std::fs::remove_file(&alias).unwrap();
+        write(
+            &real.join("missing.harn"),
+            "pub fn m() -> int { return 1 }\n",
+        );
+        assert!(
+            !revalidates(&manifest),
+            "a vanished anchor spelling must not vouch for the file it named"
         );
     }
 
