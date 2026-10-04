@@ -760,6 +760,13 @@ Access bits are limited to the kernel's supported vocabulary. A kernel below
 the required ABI or one that cannot enforce the boundary selects bubblewrap;
 if bubblewrap cannot preserve the requested grants, the launch is refused.
 
+Bubblewrap availability uses a functional confinement probe with a bounded
+setup deadline and the runtime's normal cancellation and process cleanup.
+An inherited sandbox that prevents namespace setup produces a typed mechanism
+refusal; a descendant retaining the probe's output cannot indefinitely delay
+command preparation. This does not grant additional syscalls or extend the
+calling command's deadline.
+
 ### macOS (`crates/harn-vm/src/stdlib/sandbox/macos.rs`)
 
 | Capability / policy | `sandbox-exec` rule | Effect |
