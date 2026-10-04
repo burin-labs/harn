@@ -7,7 +7,7 @@ use std::io::{Seek, Write};
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
 use std::os::unix::fs::{FileTypeExt, PermissionsExt};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Command;
 
 use super::{
     compile_seccomp_program, filesystem_profile, policy_allows_network, read_only_access,
@@ -18,6 +18,12 @@ use super::{
 use crate::orchestration::{CapabilityPolicy, SandboxProfile};
 use crate::stdlib::sandbox::{PrepareOutcome, SandboxMechanism, SandboxMechanismAvailability};
 use crate::VmError;
+
+#[path = "linux_bwrap_probe.rs"]
+mod probe;
+use probe::probe;
+#[cfg(test)]
+use probe::probe_output_is_available;
 
 fn executable() -> Option<PathBuf> {
     ["/usr/bin/bwrap", "/bin/bwrap"]
@@ -31,57 +37,6 @@ fn executable() -> Option<PathBuf> {
 pub(super) fn available() -> bool {
     static AVAILABLE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *AVAILABLE.get_or_init(probe)
-}
-
-fn probe() -> bool {
-    if !std::fs::read("/etc/passwd").is_ok_and(|bytes| !bytes.is_empty()) {
-        return false;
-    }
-    let Some(executable) = executable() else {
-        return false;
-    };
-    let mut command = Command::new(executable);
-    // This setup-only probe uses absolute programs and no payload grants.
-    // Ambient loader controls must not run before namespace setup.
-    command.env_clear();
-    command.args([
-        "--unshare-user",
-        "--unshare-pid",
-        "--unshare-ipc",
-        "--unshare-net",
-    ]);
-    let mut descriptors = Vec::new();
-    for path in ["/usr", "/lib", "/lib64", "/bin"] {
-        if Path::new(path).exists() {
-            let Ok(file) = std::fs::File::open(path) else {
-                return false;
-            };
-            command.args(["--ro-bind-fd", &file.as_raw_fd().to_string(), path]);
-            descriptors.push(file.into());
-        }
-    }
-    // Probe the same fd-based mounts and filter installation the launch
-    // needs. An older wrapper with only path-based mounts isn't adequate.
-    let Ok(filter) = sealed_filter(&[0x06, 0, 0, 0, 0, 0, 0xff, 0x7f]) else {
-        return false;
-    };
-    command.args(["--seccomp", &filter.as_raw_fd().to_string()]);
-    descriptors.push(filter);
-    DescriptorTransfer::new(descriptors).attach(&mut command);
-    command.args([
-        "--",
-        "/usr/bin/sh",
-        "-c",
-        "test ! -e /etc/passwd && printf harn-bwrap-boundary",
-    ]);
-    command
-        .stdin(Stdio::null())
-        .output()
-        .is_ok_and(|output| probe_output_is_available(&output))
-}
-
-fn probe_output_is_available(output: &std::process::Output) -> bool {
-    output.status.success() && output.stdout == b"harn-bwrap-boundary"
 }
 
 pub(in crate::stdlib::sandbox) fn prepare(
