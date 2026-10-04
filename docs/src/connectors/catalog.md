@@ -16,9 +16,7 @@ epic, see [Connector architecture status](./architecture.md).
 GitHub, Slack, and Linear are first-party pure-Harn packages:
 `harn-github-connector`, `harn-slack-connector`, and `harn-linear-connector`.
 Configure one by setting
-`connector = { harn = "..." }` on the `[[providers]]` table. See the
-[Rust-to-Harn-package migration guide](../migrations/rust-connectors-to-harn-packages.md)
-for the cutover pattern.
+`connector = { harn = "..." }` on the `[[providers]]` table.
 
 For an LLM-sized version of this page, use
 [`docs/llm/harn-triggers-quickref.md`](../../llm/harn-triggers-quickref.md).

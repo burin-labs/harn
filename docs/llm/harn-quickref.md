@@ -1486,8 +1486,7 @@ generation routes remain open-world. Explicit `cache: true` and
 `prompt_cache_ttl` instead require authored support because their wire lowering
 is provider-specific, and a TTL must be listed in `prompt_cache_ttls`.
 
-See the [complete option reference](../src/llm/llm_call.md#options-dict) and
-the [0.10 migration table](../src/migrations/v0.10.md#llm-call-options).
+See the [complete option reference](../src/llm/llm_call.md#options-dict).
 
 Provider auto-resolution precedence:
 
