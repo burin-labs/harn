@@ -240,11 +240,24 @@ fn directive_envelope_uses_the_instruction_asset_verbatim() {
 }
 
 /// A live session states the envelope contract once in its cached system
-/// prompt; every envelope it accumulates carries only directives.
+/// prompt; every envelope it accumulates afterwards carries only directives.
+/// Before the session has assembled a prompt (a preview, or re-entry under a
+/// prompt that predates the contract) the envelope still states it inline.
 #[test]
 fn a_session_states_the_envelope_contract_once_in_the_system_prompt() {
     let session_id = "envelope-contract-session";
     crate::agent_sessions::open_or_create(Some(session_id.to_string())).expect("agent session");
+    let directive = || RenderedReminder::untracked("verify once", DirectiveSpeaker::Harness);
+    let before = directive_envelope(
+        &[directive()],
+        &EnvelopeNonce::for_session(Some(session_id)),
+    )
+    .expect("envelope");
+    assert!(
+        before.contains(directive_envelope_instructions()),
+        "no prompt has stated the contract yet, so the envelope must"
+    );
+
     let options = crate::value::DictMap::from_iter([
         ("session_id".to_string(), s(session_id)),
         ("system".to_string(), s("base")),
@@ -254,11 +267,13 @@ fn a_session_states_the_envelope_contract_once_in_the_system_prompt() {
         .expect("non-empty prompt");
     assert_eq!(prompt.matches(directive_envelope_instructions()).count(), 1);
 
-    let nonce = EnvelopeNonce::for_session(Some(session_id));
-    let directive = RenderedReminder::untracked("verify once", DirectiveSpeaker::Harness);
-    let envelope = directive_envelope(&[directive], &nonce).expect("envelope");
+    let after = directive_envelope(
+        &[directive()],
+        &EnvelopeNonce::for_session(Some(session_id)),
+    )
+    .expect("envelope");
     assert_eq!(
-        envelope,
+        after,
         format!(
             "<context-directives speaker=\"harness\" nonce=\"{}\">\nverify once\n</context-directives>",
             directive_nonce_for_session(session_id)

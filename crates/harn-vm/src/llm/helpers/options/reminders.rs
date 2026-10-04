@@ -70,9 +70,36 @@ pub(crate) fn directive_nonce_for_session(session_id: &str) -> String {
         .clone()
 }
 
+/// Sessions whose assembled system prompt in this process states the envelope
+/// contract. An envelope omits the contract only for these: a session that has
+/// not yet assembled a prompt here (a preview, or re-entry whose saved prompt
+/// predates the contract) still gets it inline.
+fn contract_served_sessions() -> &'static std::sync::Mutex<std::collections::HashSet<String>> {
+    static SERVED: std::sync::OnceLock<std::sync::Mutex<std::collections::HashSet<String>>> =
+        std::sync::OnceLock::new();
+    SERVED.get_or_init(|| std::sync::Mutex::new(std::collections::HashSet::new()))
+}
+
+fn directive_contract_served(session_id: &str) -> bool {
+    contract_served_sessions()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .contains(session_id)
+}
+
 /// The session's directive contract for the cached system prompt: which nonce
 /// is authoritative, then how to read an envelope. Stated here once, it is not
-/// repeated inside every envelope the transcript accumulates.
+/// repeated inside every envelope the transcript accumulates. Rendering it
+/// records that this session's prompt carries the contract.
+pub(super) fn directive_authority_for_system_prompt(session_id: &str) -> String {
+    let instructions = directive_nonce_instructions(&directive_nonce_for_session(session_id));
+    contract_served_sessions()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .insert(session_id.to_string());
+    instructions
+}
+
 pub(super) fn directive_nonce_instructions(nonce: &str) -> String {
     let mut bindings = crate::value::DictMap::new();
     bindings.put_str("nonce", nonce);
@@ -91,11 +118,9 @@ pub(super) fn directive_nonce_instructions(nonce: &str) -> String {
 /// The nonce an envelope carries, and where the model reads the envelope
 /// contract for it.
 ///
-/// A live agent session's system prompt states the contract once (see
-/// [`directive_nonce_instructions`]), so its envelopes carry only directives.
-/// A call with no live session has no such system-prompt line, so its
-/// envelope still states the contract inline. Both decisions key off the same
-/// `agent_sessions::exists` check the system-prompt assembler uses.
+/// A live agent session whose system prompt has stated the contract (see
+/// [`directive_authority_for_system_prompt`]) gets envelopes that carry only
+/// directives. Any other call states the contract inline.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct EnvelopeNonce {
     value: String,
@@ -107,7 +132,8 @@ impl EnvelopeNonce {
         match session_id.filter(|id| !id.is_empty()) {
             Some(id) => Self {
                 value: directive_nonce_for_session(id),
-                contract_in_system_prompt: crate::agent_sessions::exists(id),
+                contract_in_system_prompt: crate::agent_sessions::exists(id)
+                    && directive_contract_served(id),
             },
             None => Self::inline("no-agent-session"),
         }
