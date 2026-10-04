@@ -1,0 +1,56 @@
+import { command_wait_for_output } from "std/command"
+import { __command_normalize_result } from "std/command/foundation"
+
+// The locator a background `command_run` returns: a normalized result whose
+// derived fields (`success`, `ok`, `combined`) describe the process at spawn.
+const SPAWNED = __command_normalize_result(
+  {handle_id: "hto-exit-1", command_id: "cmd-exit-1", status: "running", exit_code: nil},
+)
+
+fn exited_event(exit_code: int) -> dict {
+  return {
+    status: "exited",
+    handle_id: "hto-exit-1",
+    source: "combined",
+    pattern: "never-printed",
+    matched: false,
+    timed_out: false,
+    match_start: nil,
+    match_end: nil,
+    next_offset: nil,
+    match: nil,
+    result: {
+      handle_id: "hto-exit-1",
+      command_id: "cmd-exit-1",
+      status: "completed",
+      timed_out: false,
+      exit_code: exit_code,
+      stdout: "out\n",
+      stderr: "err\n",
+    },
+  }
+}
+
+fn wait_exited(harness: Harness, exit_code: int) -> dict {
+  harness.testing.clear()
+  harness.testing.respond("tools", "wait_command_output", exited_event(exit_code))
+  return command_wait_for_output(harness.tools, SPAWNED, "never-printed", {timeout_ms: 1000})
+}
+
+pipeline default(harness: Harness) {
+  require !SPAWNED.success
+  const passed = wait_exited(harness, 0)
+  require passed.status == "exited"
+  require passed.result.success
+  require passed.result.ok
+  require passed.result.status == "completed"
+  require passed.result.exit_code == 0
+  require passed.result.stderr == "err\n"
+  require passed.result.combined == "out\nerr\n"
+  require passed.result.command_id == "cmd-exit-1"
+
+  const failed = wait_exited(harness, 3)
+  require !failed.result.success
+  require failed.result.exit_code == 3
+  harness.stdio.println("ok")
+}
