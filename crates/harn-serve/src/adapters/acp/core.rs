@@ -79,7 +79,8 @@ impl AcpServer {
     /// constructor-time thread state: two embedded servers may share a Tokio
     /// worker and suspend independently while a provider request is in flight.
     pub async fn handle_incoming_message(&mut self, msg: serde_json::Value) {
-        let preparation = prepare_session_request(&self.session_cancellations, &msg);
+        let preparation =
+            prepare_session_request(&self.session_cancellations, &self.concurrent_controls, &msg);
         self.handle_prepared_message(msg, preparation).await;
     }
 

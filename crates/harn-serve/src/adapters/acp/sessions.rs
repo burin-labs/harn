@@ -838,8 +838,12 @@ pub(super) fn lookup_session_cancellation(
 
 pub(super) fn preempt_session_interruption(
     cancellations: &Arc<std::sync::Mutex<HashMap<String, SessionCancellation>>>,
+    controls: &ConcurrentSessionControls,
     msg: &serde_json::Value,
 ) -> bool {
+    if !controls.authenticated.load(Ordering::SeqCst) {
+        return false;
+    }
     let method = msg.get("method").and_then(|value| value.as_str());
     let params = msg.get("params").unwrap_or(&serde_json::Value::Null);
     match method {
@@ -943,8 +947,12 @@ fn rearm_dimension(value: Option<&serde_json::Value>) -> Option<CeilingRearm> {
 
 pub(super) fn prepare_session_request(
     cancellations: &Arc<std::sync::Mutex<HashMap<String, SessionCancellation>>>,
+    controls: &ConcurrentSessionControls,
     msg: &serde_json::Value,
 ) -> PreparedSessionRequest {
+    if !controls.authenticated.load(Ordering::SeqCst) {
+        return PreparedSessionRequest::Unprepared;
+    }
     if msg.get("method").and_then(|value| value.as_str()) == Some("session/cancel")
         && msg.get("id").is_some()
     {

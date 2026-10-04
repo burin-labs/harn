@@ -475,8 +475,9 @@ async fn run_acp_channel_server_inner(
                         continue;
                     }
 
-                    let preparation = prepare_session_request(&cancellations, &msg);
-                    if preempt_session_interruption(&cancellations, &msg) {
+                    let preparation =
+                        prepare_session_request(&cancellations, &concurrent_controls, &msg);
+                    if preempt_session_interruption(&cancellations, &concurrent_controls, &msg) {
                         continue;
                     }
                     if concurrent_controls
@@ -616,8 +617,9 @@ pub async fn run_acp_server(config: AcpServerConfig) {
                         continue;
                     }
 
-                    let preparation = prepare_session_request(&cancellations, &msg);
-                    if preempt_session_interruption(&cancellations, &msg) {
+                    let preparation =
+                        prepare_session_request(&cancellations, &concurrent_controls, &msg);
+                    if preempt_session_interruption(&cancellations, &concurrent_controls, &msg) {
                         continue;
                     }
                     if concurrent_controls
