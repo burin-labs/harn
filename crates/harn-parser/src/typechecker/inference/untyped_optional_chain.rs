@@ -25,13 +25,20 @@ impl TypeChecker {
     ) {
         let mut links = 0;
         let mut innermost_receiver = None;
+        let mut innermost_property = None;
         let mut cursor = object;
         loop {
             match &cursor.node {
-                Node::OptionalPropertyAccess { object, .. }
-                | Node::OptionalSubscriptAccess { object, .. } => {
+                Node::OptionalPropertyAccess { object, property } => {
                     links += 1;
                     innermost_receiver = Some(object.as_ref());
+                    innermost_property = Some(property.as_str());
+                    cursor = object;
+                }
+                Node::OptionalSubscriptAccess { object, .. } => {
+                    links += 1;
+                    innermost_receiver = Some(object.as_ref());
+                    innermost_property = None;
                     cursor = object;
                 }
                 Node::PropertyAccess { object, .. } | Node::SubscriptAccess { object, .. } => {
@@ -49,7 +56,7 @@ impl TypeChecker {
         let receiver_type = self.infer_type(receiver, scope);
         if receiver_type
             .as_ref()
-            .is_some_and(|ty| !self.type_is_untyped_record(ty, scope))
+            .is_some_and(|ty| !self.type_is_untyped_record(ty, innermost_property, scope))
         {
             return;
         }
@@ -69,21 +76,37 @@ impl TypeChecker {
     /// `any`, `unknown`, a `dict` whose values are untyped, or a union of those
     /// with `nil`. A `dict<string, T>` with typed values is a real map, and
     /// `m?.key?.field` over it is ordinary nil handling.
-    fn type_is_untyped_record(&self, ty: &TypeExpr, scope: &TypeScope) -> bool {
+    ///
+    /// An open record (`{name: string, ...dict}`) is untyped for a key it does
+    /// not declare, since that read lands in the untyped tail, and typed for
+    /// one it does.
+    fn type_is_untyped_record(
+        &self,
+        ty: &TypeExpr,
+        property: Option<&str>,
+        scope: &TypeScope,
+    ) -> bool {
         let ty = self.resolve_alias(ty, scope);
         match &ty {
             TypeExpr::Named(name) => name == "dict" || is_gradual_type_name(name),
             TypeExpr::Applied { name, args } if name == "dict" => args
                 .last()
-                .is_none_or(|value| self.type_is_untyped_record(value, scope)),
-            TypeExpr::DictType(_, value) => self.type_is_untyped_record(value, scope),
+                .is_none_or(|value| self.type_is_untyped_record(value, None, scope)),
+            TypeExpr::DictType(_, value) => self.type_is_untyped_record(value, None, scope),
+            TypeExpr::OpenShape { fields, rests } => {
+                let declared = property.is_some_and(|name| fields.iter().any(|f| f.name == name));
+                !declared
+                    && rests
+                        .iter()
+                        .all(|rest| self.type_is_untyped_record(rest, None, scope))
+            }
             TypeExpr::Union(members) => {
                 let mut saw_untyped = false;
                 for member in members {
                     if matches!(member, TypeExpr::Named(name) if name == "nil") {
                         continue;
                     }
-                    if !self.type_is_untyped_record(member, scope) {
+                    if !self.type_is_untyped_record(member, property, scope) {
                         return false;
                     }
                     saw_untyped = true;

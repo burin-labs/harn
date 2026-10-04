@@ -33,6 +33,21 @@ fn read(payload: dict, raw: any, bag: dict<string, any>) -> any {
     assert_eq!(count, 3);
 }
 
+/// An open row is untyped only for the keys its tail carries.
+#[test]
+fn untyped_optional_chain_splits_an_open_row_by_declared_field() {
+    let header = "type Row = {name: {first: string}?, ...dict}\n";
+    let undeclared = rule_count(
+        &format!("{header}fn read(row: Row) -> any {{\n  return row?.extra?.value\n}}\n"),
+        "untyped-optional-chain",
+    );
+    let declared = rule_count(
+        &format!("{header}fn read(row: Row) -> any {{\n  return row?.name?.first\n}}\n"),
+        "untyped-optional-chain",
+    );
+    assert_eq!((undeclared, declared), (1, 0));
+}
+
 #[test]
 fn untyped_optional_chain_ignores_typed_optional_fields_and_single_links() {
     let count = rule_count(
