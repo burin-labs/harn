@@ -1472,6 +1472,61 @@ fn stop_cancels_every_admitted_prompt_but_not_a_later_admission() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn queued_cancel_acknowledgements_cannot_cancel_a_later_prompt() {
+    for prompt_between_stops in [false, true] {
+        let dir = tempfile::tempdir().unwrap();
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let mut server =
+            AcpServer::new_with_output(AcpServerConfig::new(None), AcpOutput::Channel(tx));
+        server.handle_incoming_message(serde_json::json!({
+            "jsonrpc": "2.0", "id": 1, "method": "session/new",
+            "params": {"cwd": dir.path(), "environmentPolicy": {"kind": "isolated", "grants": []}},
+        })).await;
+        let sid = recv_json(&mut rx).await["result"]["sessionId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let cancellation =
+            lookup_session_cancellation(&server.session_cancellations, &sid).unwrap();
+        let old = cancellation.prepare_prompt();
+        let stop = |id| {
+            serde_json::json!({
+                "jsonrpc": "2.0", "id": id, "method": "session/cancel", "params": {"sessionId": sid},
+            })
+        };
+        let first = stop(20);
+        let first_state = prepare_session_request(&server.session_cancellations, &first);
+        let queued = prompt_between_stops.then(|| cancellation.prepare_prompt());
+        let second = stop(21);
+        let second_state = prepare_session_request(&server.session_cancellations, &second);
+        let fresh = cancellation.prepare_prompt();
+
+        server.handle_prepared_message(first, first_state).await;
+        server.handle_prepared_message(second, second_state).await;
+
+        assert!(old.cancelled.load(Ordering::SeqCst));
+        if let Some(queued) = queued {
+            assert!(queued.cancelled.load(Ordering::SeqCst));
+        }
+        assert!(
+            !fresh.cancelled.load(Ordering::SeqCst),
+            "a queued acknowledgement must not apply Stop again"
+        );
+        let first_ack = recv_response_with_id(&mut rx, 20).await;
+        let second_ack = recv_response_with_id(&mut rx, 21).await;
+        assert_eq!(first_ack["result"]["status"], "cancelled");
+        assert_eq!(
+            second_ack["result"]["status"],
+            if prompt_between_stops {
+                "cancelled"
+            } else {
+                "already_cancelled"
+            }
+        );
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn acp_session_cancel_kills_active_terminal() {
     let local = tokio::task::LocalSet::new();
     local

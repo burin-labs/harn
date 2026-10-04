@@ -18,7 +18,7 @@ use crate::{AuthRequest, HttpTlsConfig};
 /// Internal transport ownership, never wire metadata or inferred turn IDs.
 struct RoutedRequest {
     message: serde_json::Value,
-    cancellation: Option<Arc<PromptCancellation>>,
+    preparation: PreparedSessionRequest,
 }
 
 #[derive(Clone, Debug)]
@@ -475,7 +475,7 @@ async fn run_acp_channel_server_inner(
                         continue;
                     }
 
-                    let cancellation = prepare_session_prompt(&cancellations, &msg);
+                    let preparation = prepare_session_request(&cancellations, &msg);
                     if preempt_session_interruption(&cancellations, &msg) {
                         continue;
                     }
@@ -499,7 +499,7 @@ async fn run_acp_channel_server_inner(
 
                     let _ = routed_tx.send(RoutedRequest {
                         message: msg,
-                        cancellation,
+                        preparation,
                     });
                 }
 
@@ -616,7 +616,7 @@ pub async fn run_acp_server(config: AcpServerConfig) {
                         continue;
                     }
 
-                    let cancellation = prepare_session_prompt(&cancellations, &msg);
+                    let preparation = prepare_session_request(&cancellations, &msg);
                     if preempt_session_interruption(&cancellations, &msg) {
                         continue;
                     }
@@ -640,7 +640,7 @@ pub async fn run_acp_server(config: AcpServerConfig) {
 
                     let _ = request_tx.send(RoutedRequest {
                         message: msg,
-                        cancellation,
+                        preparation,
                     });
                 }
 
@@ -664,7 +664,7 @@ pub async fn run_acp_server(config: AcpServerConfig) {
 /// This boundary is shared by stdio and channel transports so adding a large
 /// handler cannot silently reintroduce platform-dependent stack exhaustion.
 async fn dispatch_incoming(server: &mut AcpServer, request: RoutedRequest) {
-    Box::pin(server.handle_prepared_message(request.message, request.cancellation)).await;
+    Box::pin(server.handle_prepared_message(request.message, request.preparation)).await;
 }
 
 #[cfg(test)]

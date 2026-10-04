@@ -600,6 +600,17 @@ pub(super) struct PromptCancellation {
     pub(super) notify: Arc<Notify>,
 }
 
+/// State owned by one admitted request, never shared acknowledgement state.
+#[derive(Default)]
+pub(super) enum PreparedSessionRequest {
+    #[default]
+    Unprepared,
+    Prompt(Arc<PromptCancellation>),
+    Cancel {
+        newly_cancelled: bool,
+    },
+}
+
 #[derive(Default)]
 struct CancellationState {
     prompts: Vec<std::sync::Weak<PromptCancellation>>,
@@ -609,7 +620,6 @@ struct CancellationState {
 #[derive(Clone, Default)]
 pub(super) struct SessionCancellation {
     state: Arc<std::sync::Mutex<CancellationState>>,
-    routed_cancel_ack_pending: Arc<AtomicBool>,
 }
 
 impl SessionCancellation {
@@ -626,16 +636,6 @@ impl SessionCancellation {
             true
         });
         !already_cancelled
-    }
-
-    pub(super) fn cancel_for_routed_request(&self) {
-        if self.cancel() {
-            self.routed_cancel_ack_pending.store(true, Ordering::SeqCst);
-        }
-    }
-
-    pub(super) fn take_routed_cancel_ack(&self) -> bool {
-        self.routed_cancel_ack_pending.swap(false, Ordering::SeqCst)
     }
 
     /// Admit a fresh scope at ingress. The queued request owns it until
@@ -825,24 +825,6 @@ pub(super) fn cancel_session_command_handles(session_id: &str) {
     let _ = session_id;
 }
 
-pub(super) fn mark_cancelled_session_for_routed_request(
-    cancellations: &Arc<std::sync::Mutex<HashMap<String, SessionCancellation>>>,
-    params: &serde_json::Value,
-) -> bool {
-    let Some(session_id) = params
-        .get("sessionId")
-        .or_else(|| params.get("session_id"))
-        .and_then(|value| value.as_str())
-    else {
-        return false;
-    };
-    let Some(cancellation) = lookup_session_cancellation(cancellations, session_id) else {
-        return false;
-    };
-    cancellation.cancel_for_routed_request();
-    true
-}
-
 pub(super) fn lookup_session_cancellation(
     cancellations: &Arc<std::sync::Mutex<HashMap<String, SessionCancellation>>>,
     session_id: &str,
@@ -863,7 +845,6 @@ pub(super) fn preempt_session_interruption(
     match method {
         Some("session/cancel") => {
             if msg.get("id").is_some() {
-                mark_cancelled_session_for_routed_request(cancellations, params);
                 false
             } else {
                 // Consume the frame ONLY when the cancel actually landed on a
@@ -960,22 +941,33 @@ fn rearm_dimension(value: Option<&serde_json::Value>) -> Option<CeilingRearm> {
     }
 }
 
-pub(super) fn prepare_session_prompt(
+pub(super) fn prepare_session_request(
     cancellations: &Arc<std::sync::Mutex<HashMap<String, SessionCancellation>>>,
     msg: &serde_json::Value,
-) -> Option<Arc<PromptCancellation>> {
+) -> PreparedSessionRequest {
+    if msg.get("method").and_then(|value| value.as_str()) == Some("session/cancel")
+        && msg.get("id").is_some()
+    {
+        return mark_cancelled_session(
+            cancellations,
+            msg.get("params").unwrap_or(&serde_json::Value::Null),
+        )
+        .map(|newly_cancelled| PreparedSessionRequest::Cancel { newly_cancelled })
+        .unwrap_or_default();
+    }
     if msg.get("method").and_then(|value| value.as_str()) != Some("session/prompt") {
-        return None;
+        return PreparedSessionRequest::Unprepared;
     }
     let Some(session_id) = msg
         .get("params")
         .and_then(|params| params.get("sessionId"))
         .and_then(|value| value.as_str())
     else {
-        return None;
+        return PreparedSessionRequest::Unprepared;
     };
     lookup_session_cancellation(cancellations, session_id)
-        .map(|cancellation| cancellation.prepare_prompt())
+        .map(|cancellation| PreparedSessionRequest::Prompt(cancellation.prepare_prompt()))
+        .unwrap_or_default()
 }
 
 #[cfg(test)]

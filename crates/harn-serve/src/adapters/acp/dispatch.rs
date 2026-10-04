@@ -9,7 +9,7 @@ impl AcpServer {
     pub(super) async fn handle_incoming_message_scoped(
         &mut self,
         msg: serde_json::Value,
-        cancellation: Option<Arc<PromptCancellation>>,
+        preparation: PreparedSessionRequest,
     ) {
         if msg.get("method").is_none() && msg.get("id").is_some() {
             if let Some(id) = msg["id"].as_u64() {
@@ -159,6 +159,10 @@ impl AcpServer {
                 if self.reject_unauthenticated(&id) {
                     return;
                 }
+                let cancellation = match preparation {
+                    PreparedSessionRequest::Prompt(cancellation) => Some(cancellation),
+                    _ => None,
+                };
                 self.handle_session_prompt(&id, &params, cancellation).await;
             }
             "session/cancel" => {
@@ -168,7 +172,11 @@ impl AcpServer {
                 if self.reject_unauthenticated(&id) {
                     return;
                 }
-                self.handle_session_cancel(&id, &params);
+                let cancelled = match preparation {
+                    PreparedSessionRequest::Cancel { newly_cancelled } => Some(newly_cancelled),
+                    _ => None,
+                };
+                self.handle_session_cancel(&id, &params, cancelled);
             }
             "session/cancel_tool_call" => {
                 if self.reject_unauthenticated(&id) {
