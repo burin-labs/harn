@@ -630,7 +630,7 @@ acme-lib = {{ git = "{git}", rev = "v1.0.0" }}
 #[test]
 fn install_resolves_transitive_git_dependencies_from_clean_cache() {
     let (_sdk_tmp, sdk_repo, _branch) = create_git_package_repo_with(
-        "notion-sdk-harn",
+        "linear-sdk-harn",
         "",
         "pub fn sdk_value() -> string { return \"sdk\" }\n",
     );
@@ -639,14 +639,14 @@ fn install_resolves_transitive_git_dependencies_from_clean_cache() {
         r#"
 
 [dependencies]
-notion-sdk-harn = {{ git = "{sdk_git}", rev = "v1.0.0" }}
+linear-sdk-harn = {{ git = "{sdk_git}", rev = "v1.0.0" }}
 "#
     );
     let (_connector_tmp, connector_repo, _branch) = create_git_package_repo_with(
-        "notion-connector-harn",
+        "linear-connector-harn",
         &connector_tail,
         r#"
-import "notion-sdk-harn"
+import "linear-sdk-harn"
 
 pub fn connector_value() -> string {
   return "connector"
@@ -668,7 +668,7 @@ name = "workspace"
 version = "0.1.0"
 
 [dependencies]
-notion-connector-harn = {{ git = "{connector_git}", rev = "v1.0.0" }}
+linear-connector-harn = {{ git = "{connector_git}", rev = "v1.0.0" }}
 "#
         ),
     )
@@ -678,14 +678,14 @@ notion-connector-harn = {{ git = "{connector_git}", rev = "v1.0.0" }}
     assert_eq!(installed, 2);
 
     let lock = LockFile::load(&root.join(LOCK_FILE)).unwrap().unwrap();
-    assert!(lock.find("notion-connector-harn").is_some());
-    assert!(lock.find("notion-sdk-harn").is_some());
+    assert!(lock.find("linear-connector-harn").is_some());
+    assert!(lock.find("linear-sdk-harn").is_some());
     assert!(current_packages_dir(root)
-        .join("notion-connector-harn")
+        .join("linear-connector-harn")
         .join("lib.harn")
         .is_file());
     assert!(current_packages_dir(root)
-        .join("notion-sdk-harn")
+        .join("linear-sdk-harn")
         .join("lib.harn")
         .is_file());
 
@@ -693,7 +693,7 @@ notion-connector-harn = {{ git = "{connector_git}", rev = "v1.0.0" }}
     let exports = futures::executor::block_on(
         vm.load_module_exports(
             &current_packages_dir(root)
-                .join("notion-connector-harn")
+                .join("linear-connector-harn")
                 .join("lib.harn"),
         ),
     )
@@ -709,7 +709,7 @@ fn git_packages_reject_transitive_path_dependencies() {
 local-helper = { path = "../helper" }
 "#;
     let (_connector_tmp, connector_repo, _branch) = create_git_package_repo_with(
-        "notion-connector-harn",
+        "linear-connector-harn",
         connector_tail,
         "pub fn connector_value() -> string { return \"connector\" }\n",
     );
@@ -728,7 +728,7 @@ name = "workspace"
 version = "0.1.0"
 
 [dependencies]
-notion-connector-harn = {{ git = "{connector_git}", rev = "v1.0.0" }}
+linear-connector-harn = {{ git = "{connector_git}", rev = "v1.0.0" }}
 "#
         ),
     )

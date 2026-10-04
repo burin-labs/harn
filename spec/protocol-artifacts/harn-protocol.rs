@@ -3089,6 +3089,7 @@ pub const HARN_TOOL_LIFECYCLE_EXTENSION_FIELD_ERRORCATEGORY: &str = "errorCatego
 pub const HARN_TOOL_LIFECYCLE_EXTENSION_FIELD_EXECUTIONDURATIONMS: &str = "executionDurationMs";
 pub const HARN_TOOL_LIFECYCLE_EXTENSION_FIELD_EXECUTOR: &str = "executor";
 pub const HARN_TOOL_LIFECYCLE_EXTENSION_FIELD_HEALTH: &str = "health";
+pub const HARN_TOOL_LIFECYCLE_EXTENSION_FIELD_INTENT: &str = "intent";
 pub const HARN_TOOL_LIFECYCLE_EXTENSION_FIELD_MUTATIONSTATUS: &str = "mutationStatus";
 pub const HARN_TOOL_LIFECYCLE_EXTENSION_FIELD_PARSING: &str = "parsing";
 pub const HARN_TOOL_LIFECYCLE_EXTENSION_FIELD_RAWINPUTPARTIAL: &str = "rawInputPartial";
@@ -3104,6 +3105,7 @@ pub const HARN_TOOL_LIFECYCLE_EXTENSION_FIELDS: &[&str] = &[
     "executionDurationMs",
     "executor",
     "health",
+    "intent",
     "mutationStatus",
     "parsing",
     "rawInputPartial",

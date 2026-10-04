@@ -277,6 +277,7 @@ fn replay_event_from_stored(
                     .unwrap_or(serde_json::Value::Null),
                 parsing: None,
                 audit: None,
+                intent: None,
             }
         }
         (SessionEventKind::ToolResult, _) => {

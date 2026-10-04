@@ -99,6 +99,7 @@ pub fn synthesize_sweep(
                 raw_input: json!({"repo": format!("{}/{}", state.owner, pr.repo), "pr_number": pr.number}),
                 parsing: None,
                 audit: None,
+                intent: None,
             },
         ));
         let i = bump(40, &mut now, &mut idx);
@@ -152,6 +153,7 @@ pub fn synthesize_sweep(
                 raw_input: json!({"repo": format!("{}/{}", state.owner, pr.repo), "pr_number": pr.number}),
                 parsing: None,
                 audit: None,
+                intent: None,
             },
         ));
         let i = bump(40, &mut now, &mut idx);

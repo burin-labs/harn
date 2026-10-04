@@ -1177,6 +1177,7 @@ export interface HarnToolLifecycleMeta {
   errorCategory?: HarnToolCallErrorCategory
   executionDurationMs?: number
   executor?: ACPToolExecutor
+  intent?: string
   mutationStatus?: HarnToolMutationStatus
   parsing?: boolean
   rawInputPartial?: string

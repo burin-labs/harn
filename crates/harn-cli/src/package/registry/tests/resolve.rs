@@ -186,8 +186,8 @@ version = "0.1.0"
 #[test]
 fn add_registry_dependency_accepts_bare_alias_and_semver_range() {
     // Covers the literal acceptance from the free-tier package-manager
-    // epic (harn#2157): `harn add notion-sdk-harn@^0.1` should resolve
-    // even though the registry-side name is `@burin/notion-sdk`.
+    // epic (harn#2157): `harn add linear-sdk-harn@^0.1` should resolve
+    // even though the registry-side name is `@burin/linear-sdk`.
     let (_repo_tmp, repo, _branch) = create_git_package_repo();
     let project_tmp = tempfile::tempdir().unwrap();
     let root = project_tmp.path();

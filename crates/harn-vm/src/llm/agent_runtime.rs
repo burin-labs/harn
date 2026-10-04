@@ -573,6 +573,7 @@ mod tests {
             raw_input: json!({}),
             parsing: None,
             audit: None,
+            intent: None,
         }
     }
 

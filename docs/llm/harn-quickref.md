@@ -3800,7 +3800,7 @@ const handle = trigger_register({
 
 ### Triage inbox stdlib
 
-Use `std/triage` to turn Slack, Notion, GitHub, or generic connector payloads
+Use `std/triage` to turn Slack, GitHub, or generic connector payloads
 into host-renderable inbox cards while retaining raw provider payloads for
 audit:
 
@@ -5242,7 +5242,7 @@ token-redaction catalog. The five modules under `std/oauth/*` compose
 freely — pick a provider, pick a storage, then pick a grant.
 
 ```harn,ignore
-// github, slack, linear, notion, google, microsoft, atlassian, discord,
+// github, slack, linear, google, microsoft, atlassian, discord,
 // gitlab, bitbucket, github_enterprise, custom
 import { providers } from "std/oauth/providers"
 // memory, file, harn_cloud_*, custom
