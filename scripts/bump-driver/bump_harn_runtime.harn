@@ -7,7 +7,7 @@ import {
   github_bump_read_private_key,
 } from "./authentication"
 /** Thin GitHub Actions entry point for the package-backed Harn bump driver. */
-import { github_bump_remote } from "./github_remote"
+import { bump_pull_request_labels, github_bump_remote } from "./github_remote"
 import { gha_bool_output, gha_int_output } from "./wire_outputs"
 
 fn env_or(env: HarnessEnv, name: string, fallback: string) -> string {
@@ -87,6 +87,7 @@ pipeline main(harness: Harness) {
       bot_login: env_or(harness.env, "HARN_EXT_BUMP_BOT_LOGIN", "harn-release-bot[bot]"),
       source_revision: env_or(harness.env, "HARN_BUMP_SOURCE_REVISION", ""),
       package_test_receipt: package_test_receipt(harness.fs, harness.env) ?? "",
+      labels: bump_pull_request_labels(harness.env.get_or("HARN_EXT_BUMP_LABELS", "")),
     },
   )
   const adapter = github_bump_live_adapter(
