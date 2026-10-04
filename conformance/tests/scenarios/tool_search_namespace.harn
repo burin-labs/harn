@@ -63,8 +63,10 @@ pipeline test(harness: Harness, task: unknown) {
   assert(deploy_api_ns == "ops", "namespace preserved in registry")
   assert(lookup_ns == "crm", "second namespace preserved")
   // Payload emission: for a supported gpt-5.4+ model with
-  // `mode: "native"`, the OpenAI meta-tool collects distinct
-  // namespaces into its `namespaces` field.
+  // `mode: "native"`, the namespace stays Harn-side metadata on each
+  // tool. OpenAI rejects a `namespaces` field on its meta-tool and a
+  // `namespace` field on a function (harn#9314); the provider request
+  // builder strips the per-tool tag before the wire.
   with_llm_script(
     harness.llm,
     [llm_text("ack")],
@@ -82,11 +84,7 @@ pipeline test(harness: Harness, task: unknown) {
       const calls = harness.llm.mock_calls()
       const meta = calls[0].tools[0]
       assert(meta.type == "tool_search", "meta-tool in slot 0")
-      const ns_list = meta.namespaces
-      assert(ns_list != nil, "meta-tool carries namespaces")
-      assert(len(ns_list) == 2, "two distinct namespaces")
-      assert(ns_list[0] == "crm", "crm sorts first")
-      assert(ns_list[1] == "ops", "ops second")
+      assert(meta.namespaces == nil, "meta-tool carries no namespaces field")
       let saw_deploy_api_ns = false
       for t in calls[0].tools {
         if t.type == "function" {
@@ -114,6 +112,5 @@ pipeline test(harness: Harness, task: unknown) {
     },
   )
 }
-// `namespaces` is sorted for determinism.
-// Individual user tools still carry their namespace.
+// Individual user tools still carry their namespace as Harn-side metadata.
 // Type validation: a non-string namespace is rejected by tool_define.
