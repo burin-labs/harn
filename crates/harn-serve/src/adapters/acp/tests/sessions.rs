@@ -1448,11 +1448,14 @@ fn preparing_next_prompt_cannot_revive_cancelled_work() {
     let old = session.prepare_prompt();
     assert!(session.cancel());
     let next = session.prepare_prompt();
+    let queued_next = session.prepare_prompt();
     assert!(old.cancelled.load(Ordering::SeqCst));
     assert!(!next.cancelled.load(Ordering::SeqCst));
+    assert!(!queued_next.cancelled.load(Ordering::SeqCst));
     assert!(session.cancel());
     assert!(old.cancelled.load(Ordering::SeqCst));
     assert!(next.cancelled.load(Ordering::SeqCst));
+    assert!(queued_next.cancelled.load(Ordering::SeqCst));
     assert!(!session.cancel());
 }
 
