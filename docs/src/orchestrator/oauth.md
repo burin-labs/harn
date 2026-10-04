@@ -7,7 +7,7 @@ connector configuration.
 
 ## Provider flows
 
-Built-in OAuth commands are available for Slack, Linear, and Notion:
+Built-in OAuth commands are available for Slack and Linear:
 
 ```bash
 harn connect slack \
@@ -17,9 +17,6 @@ harn connect slack \
 harn connect linear \
   --client-id "$LINEAR_CLIENT_ID" \
   --client-secret "$LINEAR_CLIENT_SECRET"
-harn connect notion \
-  --client-id "$NOTION_CLIENT_ID" \
-  --client-secret "$NOTION_CLIENT_SECRET"
 ```
 
 The generic OAuth 2.1 path targets compliant protected resources:

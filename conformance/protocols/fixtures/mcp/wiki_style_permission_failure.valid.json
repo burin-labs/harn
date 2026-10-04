@@ -1,5 +1,5 @@
 {
-  "name": "mcp.notion_style.permission_failure",
+  "name": "mcp.wiki_style.permission_failure",
   "protocol": "mcp",
   "schema": "schemas/mcp-2026-07-28.schema.json",
   "expect": "valid",
@@ -9,7 +9,7 @@
       "id": 20,
       "method": "resources/read",
       "params": {
-        "uri": "harn://connector/notion/page/private_page",
+        "uri": "harn://connector/wiki/page/private_page",
         "_meta": {
           "io.modelcontextprotocol/protocolVersion": "2026-07-28",
           "io.modelcontextprotocol/clientInfo": {
@@ -29,8 +29,8 @@
         "data": {
           "type": "mcp.permissionDenied",
           "protocolVersion": "2026-07-28",
-          "uri": "harn://connector/notion/page/private_page",
-          "provider": "notion",
+          "uri": "harn://connector/wiki/page/private_page",
+          "provider": "wiki",
           "status": "denied",
           "reason": "The caller is not authorized to read this connector-backed resource."
         }
@@ -39,11 +39,11 @@
   ],
   "matrix": {
     "version": "2026-07-28",
-    "family": "notion_style_resources_prompts",
+    "family": "wiki_style_resources_prompts",
     "case": "permission_failure",
     "source": {
       "kind": "hand_authored",
-      "description": "Permission-denied shape for connector-backed Notion resources exposed through Harn MCP."
+      "description": "Permission-denied shape for connector-backed wiki resources exposed through Harn MCP."
     }
   }
 }

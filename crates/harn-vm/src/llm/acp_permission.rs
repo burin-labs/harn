@@ -134,6 +134,21 @@ pub(crate) fn request_params(
     JsonValue::Object(params)
 }
 
+/// Attach the model's declared purpose for the call as
+/// `toolCall._meta.harn.intent`, so a host can title the approval with what
+/// the model said it is doing. `None` leaves the request without the key.
+pub(crate) fn with_intent(mut params: JsonValue, intent: Option<&str>) -> JsonValue {
+    if let (Some(intent), Some(harn)) = (
+        intent,
+        params
+            .pointer_mut("/toolCall/_meta/harn")
+            .and_then(JsonValue::as_object_mut),
+    ) {
+        harn.insert("intent".to_string(), json!(intent));
+    }
+    params
+}
+
 fn permission_locations(approval_request: &JsonValue) -> Vec<JsonValue> {
     approval_request
         .get("evidence_refs")

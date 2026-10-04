@@ -175,30 +175,6 @@ fn __triage_slack_source_url(input: dict, payload: dict) {
   return nil
 }
 
-fn __triage_notion_source_url(payload: dict) {
-  const explicit = __triage_first(
-    [
-      payload?.source_url,
-      payload?.url,
-      payload?.public_url,
-      payload?.after?.url,
-      payload?.polled?.after?.url,
-      payload?.raw?.url,
-      payload?.raw?.public_url,
-    ],
-  )
-  if explicit != nil {
-    return explicit
-  }
-  const entity_id = __triage_first(
-    [payload?.entity_id, payload?.polled?.entity_id, payload?.source_id],
-  )
-  if entity_id != nil {
-    return "https://www.notion.so/" + replace(entity_id, "-", "")
-  }
-  return nil
-}
-
 fn __triage_source_url(provider: string, input: dict, payload: dict, options: dict) {
   const explicit = __triage_first(
     [options?.source_url, input?.source_url, input?.url, input?.deep_link],
@@ -211,9 +187,6 @@ fn __triage_source_url(provider: string, input: dict, payload: dict, options: di
   }
   if provider == "slack" {
     return __triage_slack_source_url(input, payload)
-  }
-  if provider == "notion" {
-    return __triage_notion_source_url(payload)
   }
   return __triage_first([payload?.source_url, payload?.url, payload?.html_url])
 }
@@ -258,10 +231,6 @@ fn __triage_source_id(
     if event_id != nil {
       return event_id
     }
-  }
-  if provider == "notion" {
-    return __triage_first([payload?.entity_id, payload?.polled?.entity_id])
-      ?? source_url
   }
   return source_url
 }
@@ -348,33 +317,6 @@ fn __triage_slack_actors(payload: dict) {
   return actors
 }
 
-fn __triage_notion_user_id(user: unknown) {
-  return __triage_first([user?.id, user?.name, user?.email])
-}
-
-fn __triage_notion_actors(payload: dict) {
-  let actors = []
-  actors = __triage_push_actor(
-    actors,
-    "user",
-    __triage_notion_user_id(payload?.created_by),
-    payload?.created_by?.name ?? payload?.created_by?.email,
-  )
-  actors = __triage_push_actor(
-    actors,
-    "user",
-    __triage_notion_user_id(payload?.last_edited_by),
-    payload?.last_edited_by?.name ?? payload?.last_edited_by?.email,
-  )
-  actors = __triage_push_actor(
-    actors,
-    "user",
-    __triage_notion_user_id(payload?.raw?.user),
-    payload?.raw?.user?.name ?? payload?.raw?.user?.email,
-  )
-  return actors
-}
-
 fn __triage_actors(
   provider: string,
   input: dict,
@@ -392,9 +334,6 @@ fn __triage_actors(
   }
   if provider == "slack" {
     return __triage_slack_actors(payload)
-  }
-  if provider == "notion" {
-    return __triage_notion_actors(payload)
   }
   return []
 }
@@ -431,31 +370,6 @@ fn __triage_slack_summary(payload: dict) {
   return "Slack: " + text
 }
 
-fn __triage_notion_title(value: unknown) {
-  if value == nil {
-    return nil
-  }
-  if type_of(value) == "string" {
-    return value
-  }
-  return __triage_first(
-    [
-      value?.title,
-      value?.name,
-      value?.properties?.title?.title?.[0]?.plain_text,
-      value?.properties?.Name?.title?.[0]?.plain_text,
-    ],
-  )
-}
-
-fn __triage_notion_summary(payload: dict, source_kind: string) {
-  const title = __triage_notion_title(payload?.after)
-    ?? __triage_notion_title(payload?.polled?.after)
-    ?? __triage_notion_title(payload?.raw)
-    ?? __triage_text(payload?.entity_id)
-  return "Notion " + source_kind + ": " + __triage_compact(title, 110)
-}
-
 fn __triage_summary(
   provider: string,
   source_kind: string,
@@ -473,9 +387,6 @@ fn __triage_summary(
   if provider == "slack" {
     return __triage_slack_summary(payload)
   }
-  if provider == "notion" {
-    return __triage_notion_summary(payload, source_kind)
-  }
   return provider + " " + source_kind
 }
 
@@ -486,9 +397,6 @@ fn __triage_default_why(provider: string) {
   if provider == "slack" {
     return "A workspace conversation may need a response or task capture."
   }
-  if provider == "notion" {
-    return "Workspace content changed and may affect planning or execution."
-  }
   return "Connector activity may need review."
 }
 
@@ -498,9 +406,6 @@ fn __triage_default_action(provider: string) {
   }
   if provider == "slack" {
     return "Open the Slack thread and decide whether to reply or convert it."
-  }
-  if provider == "notion" {
-    return "Open the Notion source and review the change."
   }
   return "Open the source item and decide the next action."
 }

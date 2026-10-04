@@ -117,6 +117,7 @@ pub const HARN_TOOL_LIFECYCLE_EXTENSION_FIELDS: &[&str] = &[
     "executionDurationMs",
     "executor",
     "health",
+    "intent",
     "mutationStatus",
     "parsing",
     "rawInputPartial",

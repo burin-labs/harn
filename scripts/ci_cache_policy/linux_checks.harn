@@ -721,6 +721,19 @@ fn rust_cache_refresh_errors(workflow: dict) -> list<string> {
     errors = errors
       + ["${CACHE_REFRESH_WORKFLOW}:rust-cache-refresh must warm through matrix.warm_script"]
   }
+  const current = step_by_name(job?.steps ?? [], "Report cache generation already current")
+  if trim(current?.if ?? "") != "steps.rust-cache.outputs.cache-hit == 'true'"
+    || trim(current?.env?.HARN_WORKSPACE_SOURCE_CURRENT ?? "")
+      != "$" + "{{ steps.rust-cache.outputs.source-current }}"
+    || !contains(
+      trim(current?.run ?? ""),
+      "if [[ \"$HARN_WORKSPACE_SOURCE_CURRENT\" != \"true\" ]]",
+    ) {
+    errors = errors
+      + [
+        "${CACHE_REFRESH_WORKFLOW}:rust-cache-refresh exact hits must attest the current workspace source generation",
+      ]
+  }
   return errors
 }
 
