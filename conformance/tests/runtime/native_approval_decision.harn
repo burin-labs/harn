@@ -127,10 +127,7 @@ fn main(harness: Harness) {
       {
         rules: [
           {source: "mode", ask: "read"},
-          {
-            source: "user", identity_match: "literal",
-            allow: {url: "https://saved.example/report"},
-          },
+          {source: "user", identity_match: "literal", allow: {url: "https://saved.example/report"}},
         ],
       },
       {
