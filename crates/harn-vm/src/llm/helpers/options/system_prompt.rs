@@ -320,7 +320,10 @@ pub(crate) fn assemble_system_prompt(
         .map(str::to_string)
         .or_else(crate::agent_sessions::current_session_id)
         .filter(|session_id| crate::agent_sessions::exists(session_id))
-        .map(|session_id| super::reminders::directive_authority_for_system_prompt(&session_id));
+        .map(|session_id| {
+            let nonce = super::reminders::directive_nonce_for_session(&session_id);
+            super::reminders::directive_nonce_instructions(&nonce)
+        });
     if let Some(mut replacement) = replacement_system_prompt(options)? {
         if let Some(directive_authority) = directive_authority
             .as_deref()

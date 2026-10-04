@@ -410,7 +410,10 @@ pub(crate) fn extract_llm_options(
     } else {
         vec![serde_json::json!({"role": "user", "content": prompt})]
     };
-    let directive_nonce = super::reminders::EnvelopeNonce::for_session(session_id.as_deref());
+    let directive_nonce = session_id
+        .as_deref()
+        .map(super::reminders::directive_nonce_for_session)
+        .unwrap_or_else(|| "no-agent-session".to_string());
     let mut messages = if opt_bool(&options, "_directives_rendered") {
         messages
     } else {
@@ -418,6 +421,7 @@ pub(crate) fn extract_llm_options(
     };
     let message_lineage = crate::llm::message_lineage::take_from_messages(&mut messages);
     super::reminders::strip_internal_message_metadata(&mut messages);
+    super::reminders::elide_envelope_contract_stated_in_system(&mut messages, system.as_deref());
     let vision =
         opt_bool(&options, "vision") || crate::llm::content::messages_contain_images(&messages)?;
     let audio = option_is_enabled(options.as_ref(), "audio")

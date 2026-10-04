@@ -70,36 +70,10 @@ pub(crate) fn directive_nonce_for_session(session_id: &str) -> String {
         .clone()
 }
 
-/// Sessions whose assembled system prompt in this process states the envelope
-/// contract. An envelope omits the contract only for these: a session that has
-/// not yet assembled a prompt here (a preview, or re-entry whose saved prompt
-/// predates the contract) still gets it inline.
-fn contract_served_sessions() -> &'static std::sync::Mutex<std::collections::HashSet<String>> {
-    static SERVED: std::sync::OnceLock<std::sync::Mutex<std::collections::HashSet<String>>> =
-        std::sync::OnceLock::new();
-    SERVED.get_or_init(|| std::sync::Mutex::new(std::collections::HashSet::new()))
-}
-
-fn directive_contract_served(session_id: &str) -> bool {
-    contract_served_sessions()
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .contains(session_id)
-}
-
-/// The session's directive contract for the cached system prompt: which nonce
-/// is authoritative, then how to read an envelope. Stated here once, it is not
-/// repeated inside every envelope the transcript accumulates. Rendering it
-/// records that this session's prompt carries the contract.
-pub(super) fn directive_authority_for_system_prompt(session_id: &str) -> String {
-    let instructions = directive_nonce_instructions(&directive_nonce_for_session(session_id));
-    contract_served_sessions()
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .insert(session_id.to_string());
-    instructions
-}
-
+/// The session's directive contract for the system prompt: which nonce is
+/// authoritative, then how to read an envelope. A request whose system prompt
+/// states it sends its envelopes without restating it
+/// ([`elide_envelope_contract_stated_in_system`]).
 pub(super) fn directive_nonce_instructions(nonce: &str) -> String {
     let mut bindings = crate::value::DictMap::new();
     bindings.put_str("nonce", nonce);
@@ -115,40 +89,42 @@ pub(super) fn directive_nonce_instructions(nonce: &str) -> String {
     )
 }
 
-/// The nonce an envelope carries, and where the model reads the envelope
-/// contract for it.
+/// Drop the envelope contract from each directive envelope in a request whose
+/// system prompt already states it.
 ///
-/// A live agent session whose system prompt has stated the contract (see
-/// [`directive_authority_for_system_prompt`]) gets envelopes that carry only
-/// directives. Any other call states the contract inline.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct EnvelopeNonce {
-    value: String,
-    contract_in_system_prompt: bool,
-}
-
-impl EnvelopeNonce {
-    pub(crate) fn for_session(session_id: Option<&str>) -> Self {
-        match session_id.filter(|id| !id.is_empty()) {
-            Some(id) => Self {
-                value: directive_nonce_for_session(id),
-                contract_in_system_prompt: crate::agent_sessions::exists(id)
-                    && directive_contract_served(id),
-            },
-            None => Self::inline("no-agent-session"),
-        }
+/// Envelopes are rendered and persisted with the contract inline, so a
+/// transcript read anywhere stays self-describing. Every envelope a session
+/// accumulates used to restate it to the provider on every call; when this
+/// request's system prompt carries the contract, the copies are redundant.
+/// Decided per request from the two texts actually being sent, so a preview,
+/// a re-entered session, or a prompt that predates the contract can never
+/// leave an envelope without it.
+pub(crate) fn elide_envelope_contract_stated_in_system(
+    messages: &mut [serde_json::Value],
+    system: Option<&str>,
+) {
+    let instructions = directive_envelope_instructions();
+    if !system.is_some_and(|system| system.contains(instructions)) {
+        return;
     }
-
-    /// A nonce whose envelopes state the contract inline.
-    pub(crate) fn inline(value: &str) -> Self {
-        Self {
-            value: value.to_string(),
-            contract_in_system_prompt: false,
+    let inline = format!("\n{instructions}\n");
+    for message in messages.iter_mut() {
+        let Some(content) = message.get("content").and_then(serde_json::Value::as_str) else {
+            continue;
+        };
+        if !content.starts_with("<context-directives ") {
+            continue;
         }
-    }
-
-    pub(crate) fn value(&self) -> &str {
-        &self.value
+        if let Some(open_end) = content.find('>') {
+            if content[open_end + 1..].starts_with(&inline) {
+                let elided = format!(
+                    "{}\n{}",
+                    &content[..=open_end],
+                    &content[open_end + 1 + inline.len()..]
+                );
+                message["content"] = serde_json::Value::String(elided);
+            }
+        }
     }
 }
 
@@ -281,23 +257,15 @@ impl RenderedReminder {
 /// Wrap rendered directive blocks in the one model-facing envelope. Both the
 /// legacy per-request projection and append-only placement render through
 /// here, so the model-visible text is identical under either placement.
-pub(crate) fn directive_envelope(
-    rendered: &[RenderedReminder],
-    nonce: &EnvelopeNonce,
-) -> Option<String> {
+pub(crate) fn directive_envelope(rendered: &[RenderedReminder], nonce: &str) -> Option<String> {
     let blocks: Vec<&str> = rendered.iter().map(RenderedReminder::text).collect();
     if blocks.is_empty() {
         return None;
     }
-    let instructions = if nonce.contract_in_system_prompt {
-        String::new()
-    } else {
-        format!("{}\n", directive_envelope_instructions())
-    };
+    let instructions = directive_envelope_instructions();
     let speaker = envelope_speaker(rendered).as_str();
-    let nonce = nonce.value();
     Some(format!(
-        "<context-directives speaker=\"{speaker}\" nonce=\"{nonce}\">\n{instructions}{}\n</context-directives>",
+        "<context-directives speaker=\"{speaker}\" nonce=\"{nonce}\">\n{instructions}\n{}\n</context-directives>",
         blocks.join("\n")
     ))
 }
@@ -306,7 +274,7 @@ pub(crate) fn directive_envelope(
 /// role its speaker projects onto.
 pub(crate) fn directive_envelope_message(
     rendered: &[RenderedReminder],
-    nonce: &EnvelopeNonce,
+    nonce: &str,
 ) -> Option<serde_json::Value> {
     let role = envelope_speaker(rendered).transport_role();
     directive_envelope(rendered, nonce).map(|envelope| {
@@ -318,7 +286,7 @@ pub(crate) fn directive_envelope_message(
         if !reminder_ids.is_empty() {
             message[DIRECTIVE_IDS_KEY] = serde_json::json!(reminder_ids);
         }
-        message[DIRECTIVE_NONCE_KEY] = serde_json::json!(nonce.value());
+        message[DIRECTIVE_NONCE_KEY] = serde_json::json!(nonce);
         message
     })
 }
@@ -334,7 +302,7 @@ pub(crate) fn tracked_directive_envelope_message(
             text,
             DirectiveSpeaker::Harness,
         )],
-        &EnvelopeNonce::inline("test-directive-nonce"),
+        "test-directive-nonce",
     )
     .expect("tracked directive is non-empty")
 }
@@ -576,7 +544,7 @@ fn dedupe_and_order_directives(reminders: Vec<SystemReminder>) -> Vec<SystemRemi
 pub(crate) fn apply_rendered_reminder_messages(
     messages: Vec<serde_json::Value>,
     rendered: &[RenderedReminder],
-    nonce: &EnvelopeNonce,
+    nonce: &str,
 ) -> Vec<serde_json::Value> {
     let mut messages = messages;
     let pending = super::directive_placement::uncommitted_directives(&messages, rendered);
