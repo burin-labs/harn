@@ -73,12 +73,7 @@ const CLI_RESERVATION_CAPACITY = {
     {
       id: "cli-decision",
       run: "bash scripts/ci/runner_capacity.sh",
-      env: {
-        CAPACITY_POOL: "linux_probe",
-        CAPACITY_ROUTED_EVENT: "pull_request merge_group",
-        CAPACITY_VENDOR_RUNNER: "ubicloud-standard-8",
-        CAPACITY_HOSTED_RUNNER: "ubuntu-8core",
-      },
+      env: {CAPACITY_POOL: "linux_probe", CAPACITY_ROUTED_EVENT: "pull_request merge_group"},
     },
     {
       id: "merge-decision",
@@ -1500,20 +1495,21 @@ pipeline test_rejects_a_cache_summary_guard_that_names_one_tier(harness: Harness
 }
 
 /**
- * The owned ceiling is derived, not chosen. It is the hosted ceiling without
- * the cache-save reserve and adds CLI and security build margins. The owned rung is
- * pull-request-only, so it never reaches the main-only cache save.
+ * The owned ceiling is derived, not chosen. The free hosted rung now carries
+ * the same cold-safe step budgets as the owned rung, plus the cache-save
+ * reserve. The owned rung is pull-request-only, so it never reaches the
+ * main-only cache save.
  */
-pipeline test_owned_ceiling_accounts_for_build_margins_without_cache_save(harness: Harness) {
+pipeline test_owned_ceiling_uses_cold_safe_budgets_without_cache_save(harness: Harness) {
   assert_eq(
     producer_owned_ceiling_minutes(),
-    producer_hosted_ceiling_minutes() - producer_cache_save_reserve_minutes() + 8,
-    "the owned ceiling must account for the security margin without a cache-save reserve",
+    producer_hosted_ceiling_minutes() - producer_cache_save_reserve_minutes(),
+    "the owned ceiling must carry the cold-safe step budgets without a cache-save reserve",
   )
   assert_eq(
     cli_producer_owned_ceiling_minutes(),
-    cli_producer_hosted_ceiling_minutes() - producer_cache_save_reserve_minutes() + 12,
-    "the owned CLI ceiling must account for the CLI margin without a cache-save reserve",
+    cli_producer_hosted_ceiling_minutes() - producer_cache_save_reserve_minutes(),
+    "the owned CLI ceiling must carry the cold-safe step budget without a cache-save reserve",
   )
 }
 
@@ -1547,9 +1543,9 @@ pipeline test_owned_cli_rejects_the_hosted_only_timeout(harness: Harness) {
         + " budget so the cache save reserve stays reserved",
     ),
   )
-  assert_eq(producer_hosted_ceiling_minutes(), 60)
+  assert_eq(producer_hosted_ceiling_minutes(), 68)
   assert_eq(producer_owned_ceiling_minutes(), 56)
-  assert_eq(cli_producer_hosted_ceiling_minutes(), 37)
+  assert_eq(cli_producer_hosted_ceiling_minutes(), 49)
   assert_eq(cli_producer_owned_ceiling_minutes(), 37)
 }
 
@@ -1646,16 +1642,16 @@ pipeline test_rejects_a_producer_ladder_off_its_rungs_or_ceilings(harness: Harne
   const errors = ci_linux_lane_policy_errors(invalid)
   assert(
     errors.contains(
-      "ci.yml:rust-check-inputs must ladder the owned linux_big pool on same-repository pull requests, the hetzner-1 runners on merge groups, ubicloud-standard-8, then ubuntu-8core",
+      "ci.yml:rust-check-inputs must ladder the owned linux_big pool on same-repository pull requests, the hetzner-1 runners on merge groups, then ubuntu-24.04",
     ),
   )
   assert(errors.contains("ci.yml:rust-check-inputs must mirror every one of its runner tiers"))
   // The shared CLI must not wait on the owned pool's one-job compile budget,
   // and must not lose its reserved runners: both the shared owned rung and the
-  // old vendor-only ladder are refused.
+  // a hosted-only ladder are refused.
   const cli = valid.jobs["rust-cli"]
   const cli_ladder_error =
-    "ci.yml:rust-cli must ladder the reserved harn-ci-producer runners on same-repository pull requests and merge groups, ubicloud-standard-8, then ubuntu-8core"
+    "ci.yml:rust-cli must ladder the reserved harn-ci-producer runners on same-repository pull requests and merge groups, then ubuntu-24.04"
   for runs_on in [producer_runner_expression(true), producer_runner_expression(false)] {
     const regressed = {...valid, jobs: {...valid.jobs, "rust-cli": {...cli, "runs-on": runs_on}}}
     assert(ci_linux_lane_policy_errors(regressed).contains(cli_ladder_error))
@@ -1663,7 +1659,7 @@ pipeline test_rejects_a_producer_ladder_off_its_rungs_or_ceilings(harness: Harne
   assert(!ci_linux_lane_policy_errors(valid).contains(cli_ladder_error))
   assert(
     errors.contains(
-      "ci.yml:rust-check-inputs must keep the 56-minute owned ceiling, the 56-minute merge-group datacenter ceiling and the 60-minute paid ceiling sized from its step budgets plus a cache-save reserve",
+      "ci.yml:rust-check-inputs must keep the 56-minute owned ceiling, the 56-minute merge-group datacenter ceiling and the 68-minute hosted ceiling sized from its step budgets plus a cache-save reserve",
     ),
   )
 }
@@ -2020,15 +2016,15 @@ pipeline test_cli_producer_reservation_agrees_across_census_capacity_and_runs_on
   const valid = workflow()
   assert_eq(cli_producer_reservation_errors(valid), [])
   assert(contains(cli_producer_runner_expression(), "\"harn-ci-producer\""))
-  // A busy reserved pool takes the paid ladder, Ubicloud first; there is no
-  // rung that sends it straight to GitHub's 8-core runner.
+  // A busy reserved pool takes GitHub's free standard runner. Paid runner
+  // labels and the retired provider switch do not remain in the projection.
   assert(!contains(cli_producer_runner_expression(), "overflow"))
   assert(
-    contains(
-      cli_producer_runner_expression(),
-      "\"harn-ci-producer\"]'))\n  || (vars.HARN_CI_PAID_LINUX_PROVIDER != 'github'\n  && 'ubicloud-standard-8')",
-    ),
+    contains(cli_producer_runner_expression(), "\"harn-ci-producer\"]'))\n  || 'ubuntu-24.04'"),
   )
+  assert(!contains(cli_producer_runner_expression(), "ubicloud"))
+  assert(!contains(cli_producer_runner_expression(), "ubuntu-8core"))
+  assert(!contains(cli_producer_runner_expression(), "HARN_CI_PAID_LINUX_PROVIDER"))
   assert(contains(cli_producer_tier_expression(), "cli_route == 'owned'\n  && 'self-hosted'"))
   const census = valid.jobs["runner-availability"]
   const capacity = valid.jobs["rust-producer-capacity"]
@@ -2076,22 +2072,22 @@ pipeline test_cli_producer_reservation_agrees_across_census_capacity_and_runs_on
     },
     {
       workflow: with_capacity_step(
-        {...step, env: {...step.env, CAPACITY_VENDOR_RUNNER: "ubuntu-8core"}},
+        {...step, env: {...step.env, CAPACITY_VENDOR_RUNNER: "ubicloud-standard-8"}},
       ),
       error:
-        "ci.yml:rust-producer-capacity step cli-decision must route the linux_probe pool on pull requests and merge groups and name the ubicloud-standard-8 then ubuntu-8core ladder a busy pool takes",
+        "ci.yml:rust-producer-capacity step cli-decision must route the linux_probe pool on pull requests and merge groups and name no paid vendor runner for a busy pool",
     },
     {
       workflow: with_capacity_step(
         {...step, env: {...step.env, CAPACITY_ROUTED_EVENT: "pull_request"}},
       ),
       error:
-        "ci.yml:rust-producer-capacity step cli-decision must route the linux_probe pool on pull requests and merge groups and name the ubicloud-standard-8 then ubuntu-8core ladder a busy pool takes",
+        "ci.yml:rust-producer-capacity step cli-decision must route the linux_probe pool on pull requests and merge groups and name no paid vendor runner for a busy pool",
     },
     {
       workflow: with_capacity_step({...step, env: {...step.env, CAPACITY_POOL: "linux_big"}}),
       error:
-        "ci.yml:rust-producer-capacity step cli-decision must route the linux_probe pool on pull requests and merge groups and name the ubicloud-standard-8 then ubuntu-8core ladder a busy pool takes",
+        "ci.yml:rust-producer-capacity step cli-decision must route the linux_probe pool on pull requests and merge groups and name no paid vendor runner for a busy pool",
     },
   ]
   for case in cases {
@@ -2127,7 +2123,7 @@ pipeline test_merge_group_datacenter_rung_agrees_across_census_capacity_and_runs
   assert(contains(producer_timeout_expression(), "merge_route == 'owned'\n  && 56)"))
   const producer = valid.jobs["rust-check-inputs"]
   const pull_request_only = "$"
-    + "{{ (needs.rust-producer-capacity.outputs.route == 'owned'\n  && fromJSON('[\"self-hosted\", \"Linux\", \"X64\", \"harn-ci-big\"]'))\n  || (vars.HARN_CI_PAID_LINUX_PROVIDER != 'github'\n  && 'ubicloud-standard-8')\n  || 'ubuntu-8core' }}"
+    + "{{ (needs.rust-producer-capacity.outputs.route == 'owned'\n  && fromJSON('[\"self-hosted\", \"Linux\", \"X64\", \"harn-ci-big\"]'))\n  || 'ubuntu-24.04' }}"
   assert(
     ci_linux_lane_policy_errors(
       {
@@ -2136,7 +2132,7 @@ pipeline test_merge_group_datacenter_rung_agrees_across_census_capacity_and_runs
       },
     )
       .contains(
-        "ci.yml:rust-check-inputs must ladder the owned linux_big pool on same-repository pull requests, the hetzner-1 runners on merge groups, ubicloud-standard-8, then ubuntu-8core",
+        "ci.yml:rust-check-inputs must ladder the owned linux_big pool on same-repository pull requests, the hetzner-1 runners on merge groups, then ubuntu-24.04",
       ),
   )
   const truncated_merge_ceiling = regex_replace(
@@ -2156,7 +2152,7 @@ pipeline test_merge_group_datacenter_rung_agrees_across_census_capacity_and_runs
       },
     )
       .contains(
-        "ci.yml:rust-check-inputs must keep the 56-minute owned ceiling, the 56-minute merge-group datacenter ceiling and the 60-minute paid ceiling sized from its step budgets plus a cache-save reserve",
+        "ci.yml:rust-check-inputs must keep the 56-minute owned ceiling, the 56-minute merge-group datacenter ceiling and the 68-minute hosted ceiling sized from its step budgets plus a cache-save reserve",
       ),
   )
   const census = valid.jobs["datacenter-availability"]
