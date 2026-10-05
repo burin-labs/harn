@@ -231,23 +231,13 @@ async fn vm_call_llm_api_inner(
         return crate::llm::providers::OpenAiResponsesProvider::call(opts, delta_tx).await;
     }
 
-    if managed {
-        let dialect = DialectContract::for_request(opts);
-        return vm_call_llm_api_with_body(
-            opts,
-            delta_tx,
-            dialect.build_request_body(opts),
-            dialect,
-        )
-        .await;
-    }
-
-    if crate::llm::provider::is_provider_registered(provider) {
+    if !managed && crate::llm::provider::is_provider_registered(provider) {
         return dispatch_to_registered_provider(opts, delta_tx).await;
     }
 
-    // Fallback for unregistered providers: dispatch by wire dialect. A single
-    // capability lookup yields the typed dialect instead of two independent
+    // Managed routes and unregistered providers share one body/receipt funnel.
+    // Managed eligibility above restricts them to OpenAI chat completions.
+    // One capability lookup yields the typed dialect instead of two independent
     // predicate lookups that could disagree.
     //
     // Exhaustive on purpose. This used to be an `if is_ollama / else if
