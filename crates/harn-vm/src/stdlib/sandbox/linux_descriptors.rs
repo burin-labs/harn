@@ -29,13 +29,29 @@ impl DescriptorTransfer {
     /// # Safety
     /// The caller must own every named descriptor exclusively.
     pub unsafe fn inherited(numbers: Vec<RawFd>) -> io::Result<Self> {
+        // SAFETY: the caller supplies exclusive custody; no other role is reserved.
+        unsafe { Self::inherited_with_reserved(numbers, &[]) }
+    }
+
+    /// Adopt inherited handles while preserving separately owned startup roles.
+    /// Reserved handles must be open and cannot overlap the transferred set.
+    ///
+    /// # Safety
+    /// The caller must own every transferred descriptor exclusively. Reserved
+    /// descriptors must remain in the custody of their separate startup owner.
+    pub unsafe fn inherited_with_reserved(
+        numbers: Vec<RawFd>,
+        reserved: &[RawFd],
+    ) -> io::Result<Self> {
         let mut seen = std::collections::BTreeSet::new();
-        for fd in &numbers {
+        for fd in numbers.iter().chain(reserved) {
             if *fd < 3 || !seen.insert(*fd) {
                 return Err(io::Error::other(
                     "invalid or repeated confinement descriptor",
                 ));
             }
+        }
+        for fd in numbers.iter().chain(reserved) {
             if unsafe { libc::fcntl(*fd, libc::F_GETFD) } < 0 {
                 return Err(io::Error::last_os_error());
             }
@@ -73,6 +89,34 @@ impl DescriptorTransfer {
 mod tests {
     use super::*;
     use std::io::Write;
+
+    #[test]
+    fn reserved_descriptors_are_checked_without_taking_their_custody() {
+        let retained = tempfile::tempfile().unwrap();
+        let descriptor = retained.as_raw_fd();
+        // SAFETY: the empty transferred set owns nothing; the reserved handle
+        // stays exclusively owned by retained throughout validation.
+        let transfer =
+            unsafe { DescriptorTransfer::inherited_with_reserved(Vec::new(), &[descriptor]) }
+                .unwrap();
+        assert_eq!(transfer.count(), 0);
+        drop(transfer);
+        retained.metadata().unwrap();
+        // SAFETY: overlap is refused before any adoption; reserved custody stays put.
+        let error =
+            unsafe { DescriptorTransfer::inherited_with_reserved(vec![descriptor], &[descriptor]) }
+                .err()
+                .expect("startup roles cannot own the same descriptor");
+        assert!(error
+            .to_string()
+            .contains("repeated confinement descriptor"));
+        retained.metadata().unwrap();
+        // SAFETY: the closed reserved number must be rejected, with no adoption.
+        let error = unsafe { DescriptorTransfer::inherited_with_reserved(Vec::new(), &[i32::MAX]) }
+            .err()
+            .expect("closed reserved handles must be refused");
+        assert_eq!(error.raw_os_error(), Some(libc::EBADF));
+    }
 
     #[test]
     fn pinned_descriptors_survive_actual_exec_without_reusing_io_slots() {

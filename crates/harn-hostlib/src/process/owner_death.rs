@@ -477,10 +477,25 @@ impl PreparedCommand {
             if let Some(GuardianConfinement::Bubblewrap { descriptors }) = &request.confinement {
                 numbers.extend(descriptors.iter().copied());
             }
+            let reserved = if matches!(
+                &request.confinement,
+                Some(
+                    GuardianConfinement::BeforeExec { ruleset: true, .. }
+                        | GuardianConfinement::AfterNamespace { ruleset: true }
+                )
+            ) {
+                &[RULESET_FD][..]
+            } else {
+                &[]
+            };
             // SAFETY: the caller supplies exclusive startup custody. The one
             // owner validates all sets together before adopting any descriptor,
             // including overlap between confinement and verifier material.
-            unsafe { harn_vm::process_sandbox::DescriptorTransfer::inherited(numbers)? }
+            unsafe {
+                harn_vm::process_sandbox::DescriptorTransfer::inherited_with_reserved(
+                    numbers, reserved,
+                )?
+            }
         };
         #[cfg(not(target_os = "linux"))]
         if !request.pinned_verifier_descriptors.is_empty() {
@@ -1169,6 +1184,36 @@ mod tests {
         retained
             .metadata()
             .expect("refused wire input must not close an existing descriptor");
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn guardian_request_refuses_verifier_aliases_of_the_reserved_ruleset_role() {
+        for confinement in [
+            GuardianConfinement::BeforeExec {
+                seccomp: Vec::new(),
+                ruleset: true,
+            },
+            GuardianConfinement::AfterNamespace { ruleset: true },
+        ] {
+            let mut request = GuardianCommandRequest::from_command(
+                &Command::new("/usr/bin/true"),
+                true,
+                "ruleset-alias-control".to_string(),
+                Some(confinement),
+            );
+            request.pinned_verifier_descriptors = vec![RULESET_FD];
+            let request: GuardianCommandRequest =
+                serde_json::from_slice(&serde_json::to_vec(&request).unwrap()).unwrap();
+            // SAFETY: duplicate roles are rejected before inspecting or adopting
+            // the descriptor; this test supplies no accepted transfer.
+            let error = unsafe { PreparedCommand::from_inherited_request(request) }
+                .err()
+                .expect("the ruleset role cannot also be verifier material");
+            assert!(error
+                .to_string()
+                .contains("repeated confinement descriptor"));
+        }
     }
 
     #[cfg(target_os = "linux")]
