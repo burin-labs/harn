@@ -43,7 +43,7 @@ pipeline default(harness: Harness) {
     [
       llm_text("I fixed it already."),
       {tool_calls: [{id: "write_1", name: "write_note", arguments: {path: "notes.txt"}}]},
-      llm_text("<done>##DONE##</done>"),
+      llm_text("<user_response>Wrote notes.txt.</user_response><done>##DONE##</done>"),
     ],
     { ->
       const session = "structural-validator-" + harness.random.uuid()
@@ -327,7 +327,10 @@ pipeline default(harness: Harness) {
   )
   with_llm_script(
     harness.llm,
-    [llm_text(tool_text), llm_text("<done>##DONE##</done>")],
+    [
+      llm_text(tool_text),
+      llm_text("<user_response>Wrote notes.txt.</user_response><done>##DONE##</done>"),
+    ],
     { ->
       const well_formed_session = "structural-validator-well-formed-" + harness.random.uuid()
       const well_formed = agent_capture_events(
@@ -358,7 +361,10 @@ pipeline default(harness: Harness) {
   )
   with_llm_script(
     harness.llm,
-    [llm_text(stray_prose_with_call_text), llm_text("<done>##DONE##</done>")],
+    [
+      llm_text(stray_prose_with_call_text),
+      llm_text("<user_response>Wrote notes.txt.</user_response><done>##DONE##</done>"),
+    ],
     { ->
       const stray_call_session = "structural-validator-stray-prose-call-" + harness.random.uuid()
       const stray_call = agent_capture_events(
@@ -393,7 +399,7 @@ pipeline default(harness: Harness) {
     [
       {text: "", tool_calls: [{id: "write_missing", name: "write_note", arguments: {}}]},
       {text: "", tool_calls: [{id: "write_2", name: "write_note", arguments: {path: "notes.txt"}}]},
-      llm_text("<done>##DONE##</done>"),
+      llm_text("<user_response>Wrote notes.txt.</user_response><done>##DONE##</done>"),
     ],
     { ->
       const missing_arg_session = "structural-validator-native-missing-arg-" + harness.random.uuid()
@@ -504,7 +510,11 @@ pipeline default(harness: Harness) {
   )
   with_llm_script(
     harness.llm,
-    [llm_text(malformed_tool_text), llm_text(tool_text), llm_text("<done>##DONE##</done>")],
+    [
+      llm_text(malformed_tool_text),
+      llm_text(tool_text),
+      llm_text("<user_response>Wrote notes.txt.</user_response><done>##DONE##</done>"),
+    ],
     { ->
       const warn_only_session = "structural-validator-warn-only-" + harness.random.uuid()
       const warn_only = agent_capture_events(

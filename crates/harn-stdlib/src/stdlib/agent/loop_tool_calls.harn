@@ -612,7 +612,9 @@ pub fn __visible_text(parsed: dict, raw_text: any) {
   let text = raw_text
   if parsed?.user_response != nil {
     text = parsed.user_response
-  } else if parsed?.prose != nil {
+  } else if to_string(parsed?.prose ?? "") != ""
+    || (parsed?.response_body_present ?? false)
+    || parsed?.done_marker != nil {
     text = parsed.prose
   }
   return __strip_internal_verdict_json(text)

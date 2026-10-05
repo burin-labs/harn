@@ -26,7 +26,15 @@ fn visible_text_preserves_nonempty_answers_and_absent_field_fallback() {
   assert_eq(__visible_text(parsed, raw), "ready")
   assert_eq(__visible_text({}, "ordinary answer"), "ordinary answer")
   assert_eq(__visible_text({user_response: "", prose: "stale prose"}, raw), "")
-  assert_eq(__visible_text({prose: ""}, raw), "")
+  assert_eq(__visible_text({prose: "", response_body_present: true}, raw), "")
+  const structured = "```json\n{\"ready\":true,\"actions\":[]}\n```"
+  for format in ["native", "text", "json"] {
+    const answer = parse_tool_calls({text: structured, tool_format: format, tools: {}})
+    assert_eq(__visible_text(answer, structured), structured)
+    const marker = "<done>##DONE##</done>"
+    const done = parse_tool_calls({text: marker, tool_format: format, tools: {}})
+    assert_eq(__visible_text(done, marker), "")
+  }
 }
 
 pipeline main(harness: Harness) {
