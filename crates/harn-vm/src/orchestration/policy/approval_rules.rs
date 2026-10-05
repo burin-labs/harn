@@ -84,7 +84,7 @@ fn parse_policy_action(value: &str) -> Option<PolicyAction> {
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct ApprovalShape {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub prompt: Option<String>,
@@ -99,7 +99,7 @@ pub struct ApprovalShape {
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct PolicyRuleMatch {
     #[serde(
         alias = "tools",
@@ -399,9 +399,9 @@ impl<'de> Visitor<'de> for PolicyRuleVisitor {
             ("allow", PolicyAction::Allow),
         ] {
             if let Some(value) = raw.remove(key) {
-                if action.is_some() {
+                if action.is_some() || matcher_value.is_some() {
                     return Err(M::Error::custom(
-                        "policy rule must not mix action with allow/ask/deny shorthand",
+                        "policy rule must not mix action or a nested matcher with allow/ask/deny shorthand",
                     ));
                 }
                 action = Some(candidate_action);

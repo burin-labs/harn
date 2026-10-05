@@ -365,3 +365,70 @@ pub(super) fn exact_write_env_allow(rule: &PolicyRule, ctx: &EvaluationContext) 
         .filter(|mode| matches!(mode.as_str(), "patch" | "replace"))
         .all(|mode| rule.matches.env_mode.contains(mode))
 }
+
+#[cfg(test)]
+mod decoder_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn host_policy_rejects_matchers_that_shorthand_would_discard() {
+        for alias in ["match", "matches", "when"] {
+            for action in ["allow", "ask", "deny", "require_approval"] {
+                for field in ["command", "commmand"] {
+                    let rule = json!({"source": "user", (action): "run",
+                        (alias): {(field): "git push"}});
+                    let error =
+                        ToolApprovalPolicy::from_host_json(json!({"rules": [rule]})).unwrap_err();
+                    assert!(
+                        error.contains("nested matcher"),
+                        "{alias}/{action}/{field}: {error}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn host_policy_rejects_unknown_nested_matchers_without_widening_rules() {
+        for key in [
+            "allow",
+            "ask",
+            "deny",
+            "require_approval",
+            "match",
+            "matches",
+            "when",
+        ] {
+            let mut rule = json!({(key): {"tool": "run", "commmand": "git push"}});
+            if ["match", "matches", "when"].contains(&key) {
+                rule["action"] = json!("allow");
+            }
+            let error = ToolApprovalPolicy::from_host_json(json!({"rules": [rule]})).unwrap_err();
+            assert!(error.contains("commmand"), "{key}: {error}");
+        }
+        assert!(ToolApprovalPolicy::from_host_json(json!({"rules": [
+            {"action": "allow", "tool": "run", "commmand": "git push"}
+        ]}))
+        .is_err());
+        assert!(ToolApprovalPolicy::from_host_json(json!({"rules": [
+            {"allow": "run", "approval": {"grant_option": ["once"]}}
+        ]}))
+        .is_err());
+        let valid = ToolApprovalPolicy::from_host_json(json!({"rules": [
+            {"source": "mode", "ask": "run"},
+            {"source": "user", "allow": {"tools": "run", "commands": "git push"},
+             "approval": {"grant_options": ["once"], "metadata": {"custom": "retained"}}}
+        ]}))
+        .unwrap();
+        let request = ToolApprovalRequest::from_host_json(json!({
+            "tool_name": "run", "arguments": {"command": "printf unexpected"}
+        }))
+        .unwrap();
+        assert!(valid.evaluate_request(&request).is_ask());
+        assert_eq!(
+            valid.rules[1].approval.metadata,
+            Some(json!({"custom": "retained"}))
+        );
+    }
+}
