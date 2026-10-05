@@ -907,11 +907,13 @@ fn admit_linked_sessions(
     }
     for id in created {
         clear_session_changed_paths(&id);
-        if let Some(parent) = ambient_parent.as_deref() {
-            crate::agent_events::mirror_session_sinks(parent, &id);
-        }
         try_register_event_log(&id);
     }
+    // Linked lineage owns observation. A background worker has no ambient
+    // session, and an unrelated ambient session must not receive these events.
+    // Mirror after admission even when the child already existed; the event
+    // registry deduplicates sinks and preserves the child's own observers.
+    crate::agent_events::mirror_session_sinks(parent_id, child_id);
     Ok(())
 }
 
