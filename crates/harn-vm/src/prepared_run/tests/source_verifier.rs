@@ -242,6 +242,48 @@ async fn an_elf_that_ignores_python_source_cannot_mint_verifier_authority() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn prepared_source_verifier_preserves_registered_main_module_test_discovery() {
+    let fixture = SourceFixture::new();
+    std::fs::write(
+        &fixture.request.source,
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/source_verifier_unittest.py"
+        )),
+    )
+    .unwrap();
+    let mut run = source_run(fixture.request.clone());
+    run.executor.mutate_and_repair = true;
+    let (intent, host) = fixture.declaration();
+    let lease = ready(&run, intent, host);
+    match run.execute(lease).await {
+        ExecutionOutcome::Completed { output, .. } => {
+            assert_eq!(
+                output["first"]["status"], 1,
+                "the registered main module must discover the known failing test"
+            );
+            assert!(output["first"]["stderr"]
+                .as_str()
+                .unwrap()
+                .contains("KNOWN_FAILING_ASSERTION"));
+            assert!(output["first"]["stderr"]
+                .as_str()
+                .unwrap()
+                .contains("Ran 1 test"));
+            assert_eq!(output["second"]["status"], 0);
+            assert!(output["second"]["stderr"]
+                .as_str()
+                .unwrap()
+                .contains("Ran 1 test"));
+        }
+        ExecutionOutcome::ExecutorFailed { error, .. }
+        | ExecutionOutcome::AuthorityFailed { error, .. } => {
+            panic!("main-module execution must settle: {error}")
+        }
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn prepared_source_verifier_executes_original_bytes_after_interpreter_and_runner_mutation() {
     let fixture = SourceFixture::new();
     let mut run = source_run(fixture.request.clone());

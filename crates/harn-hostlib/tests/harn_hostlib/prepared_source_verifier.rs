@@ -16,6 +16,7 @@ use harn_vm::verifier_provenance::IsolatedPythonSourceVerifier;
 struct FixtureExecutor {
     request: IsolatedPythonSourceVerifier,
     ignores_source: bool,
+    unittest_runner: bool,
 }
 
 impl FixtureExecutor {
@@ -96,14 +97,29 @@ impl PreparedRunExecutor for FixtureExecutor {
                 stderr.contains("KNOWN_FAILING_ASSERTION"),
                 "actual original runner must reach the test: {stderr}"
             );
+            if self.unittest_runner {
+                assert!(
+                    stderr.contains("Ran 1 test"),
+                    "actual main-module discovery must reach the test: {stderr}"
+                );
+            }
             std::fs::write(&self.request.args[0], "assert 2 + 2 == 4\n").unwrap();
-            assert_eq!(self.invoke(mode).0, 0);
+            let (passed, stderr) = self.invoke(mode);
+            assert_eq!(passed, 0);
+            if self.unittest_runner {
+                assert!(stderr.contains("Ran 1 test"), "{stderr}");
+            }
             std::fs::write(&self.request.args[0], "raise SystemExit(127)\n").unwrap();
-            assert_eq!(
-                self.invoke(mode).0,
-                127,
-                "a real verifier exit is not missing-program evidence"
-            );
+            let (status, stderr) = self.invoke(mode);
+            if self.unittest_runner {
+                assert_eq!(status, 1);
+                assert!(stderr.contains("SystemExit: 127"), "{stderr}");
+            } else {
+                assert_eq!(
+                    status, 127,
+                    "a real verifier exit is not missing-program evidence"
+                );
+            }
             let mut adversarial = self.spec(mode);
             adversarial.env.insert(
                 "LD_PRELOAD".to_string(),
@@ -124,15 +140,21 @@ impl PreparedRunExecutor for FixtureExecutor {
 #[tokio::test]
 async fn prepared_source_verifier_direct_and_guardian_keep_original_material_and_refuse_loader_overrides(
 ) {
-    source_verifier_control(false).await;
+    source_verifier_control(false, false).await;
 }
 
 #[tokio::test]
 async fn prepared_source_verifier_direct_and_guardian_refuse_an_elf_that_ignores_source() {
-    source_verifier_control(true).await;
+    source_verifier_control(true, false).await;
 }
 
-async fn source_verifier_control(ignores_source: bool) {
+#[tokio::test]
+async fn prepared_source_verifier_direct_and_guardian_preserve_registered_main_module_test_discovery(
+) {
+    source_verifier_control(false, true).await;
+}
+
+async fn source_verifier_control(ignores_source: bool, unittest_runner: bool) {
     let _guardian = harn_hostlib::process::owner_death::install_guardian_reexec_args([
         "--exact",
         "process_tools_e2e::owner_death_guardian_fixture",
@@ -153,7 +175,14 @@ async fn source_verifier_control(ignores_source: bool) {
     let source = workspace.join("runner.py");
     std::fs::write(
         &source,
-        "import runpy, sys\nrunpy.run_path(sys.argv[1], run_name='__main__')\n",
+        if unittest_runner {
+            include_str!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../harn-vm/tests/fixtures/source_verifier_unittest.py"
+            ))
+        } else {
+            "import runpy, sys\nrunpy.run_path(sys.argv[1], run_name='__main__')\n"
+        },
     )
     .unwrap();
     let target = workspace.join("test_calc.py");
@@ -232,6 +261,7 @@ async fn source_verifier_control(ignores_source: bool) {
         FixtureExecutor {
             request,
             ignores_source,
+            unittest_runner,
         },
         Arc::new(MemoryAuthorityReceiptSink::default()),
         Arc::new(|| 1),
