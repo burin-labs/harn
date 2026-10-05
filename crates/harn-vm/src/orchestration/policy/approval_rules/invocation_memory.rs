@@ -197,7 +197,7 @@ mod tests {
     #[test]
     fn host_capture_matches_vm_dispatch_with_mixed_path_order() {
         use crate::orchestration::{pop_execution_policy, push_execution_policy, CapabilityPolicy};
-        let root = crate::stdlib::process::execution_root_path()
+        let root = crate::orchestration::execution_root_path()
             .canonicalize()
             .unwrap();
         let mut original = request(&root, json!({"paths": ["b", root.join("z")]}));

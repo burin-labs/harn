@@ -644,11 +644,8 @@ impl EvaluationContext {
             external_roots: Vec::new(),
         };
         context.literal_identity = Some(LiteralResourceIdentity::capture(&context, args, None));
-        context.invocation_sha256 = invocation_memory::digest(
-            &context,
-            args,
-            &crate::stdlib::process::execution_root_path(),
-        );
+        context.invocation_sha256 =
+            invocation_memory::digest(&context, args, &crate::orchestration::execution_root_path());
         context
     }
 

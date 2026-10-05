@@ -32,6 +32,10 @@ pub(crate) fn default_run_dir() -> PathBuf {
     crate::runtime_paths::run_root(&base)
 }
 
+mod execution_context;
+pub(crate) use execution_context::{current_execution_context, swap_thread_execution_context};
+pub use execution_context::{execution_root_path, set_thread_execution_context};
+
 mod hooks;
 pub use hooks::*;
 #[cfg(test)]
