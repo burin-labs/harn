@@ -599,6 +599,76 @@ async fn prepared_session_persists_one_approval_reuses_the_envelope_and_rejects_
 }
 
 #[tokio::test]
+async fn accepted_stop_and_pivot_persist_stopped_authority_and_retire_the_lease() {
+    for pivot in [false, true] {
+        let directory = tempfile::tempdir().expect("receipt directory");
+        let receipt_path = directory.path().join("authority.ndjson");
+        let model_calls = Arc::new(AtomicUsize::new(0));
+        let mut requested = intent();
+        requested.receipt_uri = receipt_path.to_string_lossy().into_owned();
+        let session = PreparedSession::new(
+            PreparedRun::with_clock(
+                FixtureExecutor {
+                    requirements: executor_requirements(),
+                    model_calls: model_calls.clone(),
+                },
+                Arc::new(NdjsonAuthorityReceiptSink::new(&receipt_path)),
+                Arc::new(|| NOW_MS),
+            ),
+            Arc::new(MemoryPreparedSessionLeaseStore::default()),
+        );
+        let batch = match session.prepare(prepared_session_binding(), requested, host_facts()) {
+            PreparedSessionUpdate::NeedsApproval { batch, .. } => batch,
+            other => panic!("expected approval batch, got {other:?}"),
+        };
+        let lease = match session.decide(
+            "prepared-session-1",
+            PreparedSessionApprovalDecision {
+                batch_fingerprint: batch.batch_fingerprint,
+                approved: true,
+                decider: AuthorityDecider::Person,
+            },
+        ) {
+            PreparedSessionUpdate::Ready { lease, .. } => *lease,
+            other => panic!("expected ready lease, got {other:?}"),
+        };
+        let active = session
+            .attach(lease.clone(), host_facts(), prepared_runtime_attachment())
+            .expect("attach approved lease");
+        assert_eq!(session.run_turn(&active).await.unwrap(), "completed");
+        let stopped = session
+            .stop(active, pivot)
+            .expect("persist accepted control");
+        let receipt = match stopped {
+            PreparedSessionUpdate::Stopped { receipt, .. } if !pivot => receipt,
+            PreparedSessionUpdate::Pivoted { receipt, .. } if pivot => receipt,
+            other => panic!("accepted control must preserve its kind, got {other:?}"),
+        };
+        assert_eq!(receipt.stage, AuthorityReceiptStage::Stopped);
+        assert_eq!(receipt.status, AuthorityReceiptStatus::Stopped);
+        assert_eq!(receipt.used.len(), executor_requirements().len());
+        assert_eq!(
+            receipt.used.len() + receipt.unused.len(),
+            receipt.granted.len()
+        );
+        assert!(receipt.executor_invoked);
+        let persisted = std::fs::read_to_string(&receipt_path).expect("read durable receipts");
+        assert!(!persisted.contains(SECRET_CANARY));
+        let terminal: RunAuthorityReceipt =
+            serde_json::from_str(persisted.lines().last().expect("terminal row"))
+                .expect("decode terminal receipt");
+        assert_eq!(terminal, receipt);
+        let wire = serde_json::to_value(&terminal).expect("receipt wire shape");
+        assert_eq!(wire["stage"], "stopped");
+        assert_eq!(wire["status"], "stopped");
+        assert!(session
+            .attach(lease, host_facts(), prepared_runtime_attachment())
+            .is_err());
+        assert_eq!(model_calls.load(Ordering::SeqCst), 1);
+    }
+}
+
+#[tokio::test]
 async fn prepared_session_rejects_stale_runtime_and_cross_workspace_attach_before_turns() {
     let model_calls = Arc::new(AtomicUsize::new(0));
     let session = PreparedSession::new(

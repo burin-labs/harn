@@ -19,6 +19,8 @@ pub enum AuthorityReceiptStage {
     ApprovalDecision,
     Blocked,
     Ready,
+    /// An accepted Stop or pivot ended the prepared session.
+    Stopped,
     Terminal,
 }
 
@@ -30,6 +32,7 @@ pub enum AuthorityReceiptStatus {
     Blocked,
     Ready,
     Completed,
+    Stopped,
     Failed,
 }
 
