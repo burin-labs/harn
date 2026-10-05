@@ -475,7 +475,7 @@ Sets also support method syntax: `my_set.union(other)`.
 | `trim(str)` | str: string | string | Remove leading and trailing whitespace |
 | `lowercase(str)` | str: string | string | Convert to lowercase |
 | `uppercase(str)` | str: string | string | Convert to uppercase |
-| `split(str, sep)` | str: string, sep: string | list | Split string by separator |
+| `split(str, sep)` | str: string, sep: string | list | Split string by separator. `sep` is required in both `split(str, sep)` and `str.split(sep)`; omitting it throws |
 | `starts_with(str, prefix)` | str: string, prefix: string | bool | Check if string starts with prefix |
 | `ends_with(str, suffix)` | str: string, suffix: string | bool | Check if string ends with suffix |
 | `contains(str, substr)` | str: string, substr: string | bool | Check if string contains substring. Also works on lists |
@@ -761,7 +761,10 @@ Returns a list of dicts, one per match. Each dict contains:
   consistent with `substring`/`index_of`/`len`
 - `line` -- 1-based line of the match start (the equivalent of
   `text.count("\n", 0, start) + 1`), for positional diagnostics
-- Named capture groups (from `(?P<name>...)`) appear as additional keys
+- Named capture groups (from `(?P<name>...)`) appear as additional keys.
+  The names `match`, `groups`, `start`, `end`, and `line` are reserved: a
+  pattern that names a group with one of them throws instead of overwriting
+  the built-in value
 
 ```harn
 const results = regex_captures("(\\w+)@(\\w+)", "alice@example bob@test")

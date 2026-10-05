@@ -1,0 +1,25 @@
+/**
+ * Named groups merge into each regex_captures result dict, so a group may
+ * not reuse a built-in key (match, groups, start, end, line). Reusing one is
+ * rejected instead of silently overwriting the built-in value.
+ */
+pipeline test(harness: Harness, task: unknown) {
+  for key in ["match", "groups", "start", "end", "line"] {
+    const result = try {
+      regex_captures("(?P<" + key + ">\\d+)", "10-20")
+    }
+    assert(is_err(result))
+    const message = to_string(unwrap_err(result))
+    assert(contains(message, "named group `" + key + "`"), message)
+    assert(contains(message, "reserved regex_captures key"), message)
+  }
+  // Built-in keys keep their types next to non-reserved named groups.
+  const caps = regex_captures("(?P<from>\\d+)-(?P<to>\\d+)", "x 10-20")
+  assert_eq(caps[0].start, 2)
+  assert_eq(caps[0].end, 7)
+  assert_eq(caps[0].line, 1)
+  assert_eq(caps[0].match, "10-20")
+  assert_eq(caps[0].from, "10")
+  assert_eq(caps[0].to, "20")
+  harness.stdio.log("regex captures reserved names ok")
+}
