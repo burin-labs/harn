@@ -931,6 +931,90 @@ fn host_request_unannotated_paths_require_owned_workspace_authority() {
 }
 
 #[test]
+fn host_request_path_free_annotations_do_not_require_workspace_authority() {
+    let policy = ToolApprovalPolicy::from_host_json(serde_json::json!({
+        "rules": [{"id": "review-command", "ask": {
+            "tool": "annotated_command", "tool_kind": "execute", "side_effect": "process_exec"
+        }}]
+    }))
+    .unwrap();
+    let request_json = |arguments: JsonValue, path_params: JsonValue| {
+        serde_json::json!({
+            "tool_name": "annotated_command",
+            "arguments": arguments,
+            "tool_annotations": {
+                "kind": "execute", "side_effect_level": "process_exec",
+                "arg_schema": {"path_params": path_params}
+            },
+            "policy_decision": {"context": {"tool_kind": "read", "side_effect": "read_only"}}
+        })
+    };
+    for path_params in [serde_json::json!([]), serde_json::json!(["filename"])] {
+        let request = ToolApprovalRequest::from_host_json(request_json(
+            serde_json::json!({"command": "git status"}),
+            path_params,
+        ))
+        .expect("annotations without actual paths do not require workspace authority");
+        let decision = policy.evaluate_request(&request);
+        assert!(decision.is_ask(), "{decision:?}");
+        assert_eq!(decision.receipt["matched_rule"]["id"], "review-command");
+        assert_eq!(decision.receipt["context"]["tool_kind"], "execute");
+        assert_eq!(decision.receipt["context"]["side_effect"], "process_exec");
+    }
+
+    for value in [
+        request_json(
+            serde_json::json!({"filename": "outside.txt"}),
+            serde_json::json!(["filename"]),
+        ),
+        serde_json::json!({"tool_name": "annotated_command", "arguments": {"path": "outside.txt"}}),
+        request_json(
+            serde_json::json!({"command": "cat ../outside.txt"}),
+            serde_json::json!([]),
+        ),
+    ] {
+        let refusal = ToolApprovalRequest::from_host_json(value.clone()).unwrap_err();
+        assert!(refusal.contains("explicit workspace_boundary"), "{refusal}");
+        let direct: ToolApprovalRequest = serde_json::from_value(value).unwrap();
+        let decision = policy.evaluate_request(&direct);
+        assert!(decision.is_deny(), "{decision:?}");
+        assert_eq!(
+            decision.receipt["matched_rule"]["id"],
+            "invalid_host_request"
+        );
+    }
+    for value in [
+        serde_json::json!(null),
+        serde_json::json!({}),
+        serde_json::json!([1]),
+    ] {
+        let refusal = ToolApprovalRequest::from_host_json(request_json(
+            serde_json::json!({"filename": value}),
+            serde_json::json!(["filename"]),
+        ))
+        .unwrap_err();
+        assert!(
+            refusal.contains("workspace path argument 'filename'"),
+            "{refusal}"
+        );
+    }
+
+    let workspace = tempfile::tempdir().unwrap();
+    let mut sensitive = request_json(
+        serde_json::json!({"filename": ".env"}),
+        serde_json::json!(["filename"]),
+    );
+    sensitive["workspace_boundary"] = serde_json::json!({"root": workspace.path()});
+    let sensitive = ToolApprovalRequest::from_host_json(sensitive).unwrap();
+    let refusal = policy.evaluate_request(&sensitive);
+    assert!(refusal.is_deny(), "{refusal:?}");
+    assert!(refusal
+        .risk_labels
+        .iter()
+        .any(|label| label == "sensitive_path"));
+}
+
+#[test]
 fn host_request_rejects_invalid_explicit_workspace_inputs() {
     let workspace = tempfile::tempdir().unwrap();
     let valid = serde_json::json!({

@@ -75,16 +75,12 @@ impl ToolApprovalRequest {
         let params = self.path_parameters();
         super::path_inputs::validate(&self.arguments, &params)?;
         if self.workspace_boundary.is_none()
-            && (self.tool_annotations.is_some()
-                || params
-                    .iter()
-                    .any(|param| self.arguments.get(param).is_some())
+            && (params
+                .iter()
+                .any(|param| self.arguments.get(param).is_some())
                 || !request_context(self).path_candidates.is_empty())
         {
-            return Err(
-                "path-bearing requests and tool_annotations require an explicit workspace_boundary"
-                    .into(),
-            );
+            return Err("path-bearing requests require an explicit workspace_boundary".into());
         }
         if let Some(boundary) = &self.workspace_boundary {
             if boundary.root.contains('\0')
