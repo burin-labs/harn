@@ -250,8 +250,7 @@ fn wait_for_stalled_input(mut input: Box<dyn Write + Send>) {
                     let mut fields = syscall.split_whitespace();
                     if state
                         .rsplit_once(") ")
-                        .map(|(_, tail)| tail.starts_with("S "))
-                        == Some(true)
+                        .is_some_and(|(_, tail)| tail.starts_with("S "))
                         && fields
                             .next()
                             .and_then(|value| value.parse::<libc::c_long>().ok())
