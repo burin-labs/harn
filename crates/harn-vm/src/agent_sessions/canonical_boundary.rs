@@ -56,13 +56,10 @@ impl CanonicalHistoryBoundaries {
 /// Flush the owning journal before acknowledging any canonical history row.
 pub async fn canonical_history_boundaries(
     store: &dyn SessionStore,
+    root: &std::path::Path,
     session_id: &str,
 ) -> Result<CanonicalHistoryBoundaries, VmError> {
-    crate::agent_session_journal::flush(session_id).await?;
-    store
-        .describe(session_id)
-        .await
-        .map_err(|error| VmError::Runtime(format!("canonical history boundary: {error}")))?;
+    super::durable_fork::ensure_canonical_parent(store, root, session_id).await?;
     let events = store
         .read_all(session_id)
         .await

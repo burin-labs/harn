@@ -46,31 +46,18 @@ pub async fn fork_canonical(
     if !super::exists(source) {
         return Ok(None);
     }
-    crate::agent_session_journal::flush(source).await?;
-    match store.describe(source).await {
-        Ok(_) => {}
-        Err(StoreError::NotFound(_)) if super::length(source) == Some(0) => {
-            // A newly created, unprompted parent has no context to persist.
-            // Name it in the canonical store rather than fabricate history.
-            store
-                .create(CreateSession {
-                    id: Some(source.to_string()),
-                    cwd: Some(root.to_string_lossy().into_owned()),
-                    project_scope: Some(root.to_string_lossy().into_owned()),
-                    parent_session_id: super::parent_id(source),
-                    ..CreateSession::default()
-                })
-                .await
-                .map_err(store_error)?;
-        }
-        Err(error) => return Err(store_error(error)),
-    }
+    ensure_canonical_parent(store, root, source).await?;
     let events = store.read_all(source).await.map_err(store_error)?;
     let hydrated = crate::agent_session_journal::hydrate_events(events.clone());
     // session/load registers a live transport record before the first prompt.
     // Only an active journal owns newer context than the canonical store.
     if !super::has_journal(source) {
-        super::replace_messages(source, &hydrated.messages).map_err(VmError::Runtime)?;
+        super::replace_messages_with_summary(
+            source,
+            &hydrated.messages,
+            hydrated.summary.as_deref(),
+        )
+        .map_err(VmError::Runtime)?;
         super::restore_message_event_ids(source, &hydrated.source_event_ids)
             .map_err(VmError::Runtime)?;
     }
@@ -94,8 +81,9 @@ pub async fn fork_canonical(
     );
     let child = super::fork(source, destination).map_err(CanonicalForkError::Admission)?;
     let Some(child) = child else { return Ok(None) };
-    if let Err(error) = super::replace_messages(&child, &copied.messages)
-        .and_then(|()| super::restore_message_event_ids(&child, &copied.source_event_ids))
+    if let Err(error) =
+        super::replace_messages_with_summary(&child, &copied.messages, copied.summary.as_deref())
+            .and_then(|()| super::restore_message_event_ids(&child, &copied.source_event_ids))
     {
         super::close(&child);
         return Err(VmError::Runtime(error).into());
@@ -111,6 +99,31 @@ pub async fn fork_canonical(
         session_id: child,
         source_boundary: boundary,
     }))
+}
+
+/// A boundary lookup and a fork share the same admission for a live, unprompted
+/// parent. Nonempty VM-only context must never masquerade as stored history.
+pub(super) async fn ensure_canonical_parent(
+    store: &dyn SessionStore,
+    root: &Path,
+    source: &str,
+) -> Result<(), VmError> {
+    crate::agent_session_journal::flush(source).await?;
+    let result = match store.describe(source).await {
+        Ok(_) => return Ok(()),
+        Err(StoreError::NotFound(_)) if super::length(source) == Some(0) => store
+            .create(CreateSession {
+                id: Some(source.to_string()),
+                cwd: Some(root.to_string_lossy().into_owned()),
+                project_scope: Some(root.to_string_lossy().into_owned()),
+                parent_session_id: super::parent_id(source),
+                ..CreateSession::default()
+            })
+            .await
+            .map(|_| ()),
+        Err(error) => Err(error),
+    };
+    result.map_err(|error| VmError::Runtime(format!("canonical session history: {error}")))
 }
 
 fn store_error(error: StoreError) -> CanonicalForkError {

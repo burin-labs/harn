@@ -506,7 +506,8 @@ impl AcpServer {
                 return;
             }
         };
-        match harn_vm::agent_sessions::canonical_history_boundaries(&store, &session_id).await {
+        match harn_vm::agent_sessions::canonical_history_boundaries(&store, root, &session_id).await
+        {
             Ok(boundaries) => self.send_response(
                 id,
                 serde_json::to_value(boundaries).expect("canonical boundaries serialize"),

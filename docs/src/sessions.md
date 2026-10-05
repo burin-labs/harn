@@ -101,15 +101,25 @@ the "one-shot" call shape.
 ACP `session/fork` restores a loaded parent's canonical context before copying
 it and persists the child and its parent linkage before returning success. A
 child can therefore be loaded and forked again before its first prompt.
-`keep_first: 0` creates an empty child with the same parent linkage. Other
-message prefixes must correspond to the same canonical event prefix; a prefix
-that cannot be represented after transcript replacement is refused rather than
-restored as different context.
 
-The session-store fork API takes an optional event boundary. JSON callers pass
-`at_event_id: null` for an empty prefix or an integer for an inclusive event
-prefix. Rust callers pass `None` or `Some(event_id)`. This durable operation is
-distinct from the VM-local `harness.agent.fork` primitives above.
+Hosts request `harn.session_history.boundaries` with `sessionId`. The response
+contains `tip` and `positions`, which bind each journal `source_event_id` to a
+canonical boundary. A boundary contains `schema`, `session_id`, `event_id`, and
+`record_hash`. Hosts pass that acknowledged object as `canonicalBoundary` to
+`session/fork`; omitting it selects the current full history. An empty boundary
+has schema `harn.canonical_session_boundary.v1`, the parent session ID, and null
+event ID and hash. The reply returns the selected `canonicalBoundary`.
+
+A selected historical prefix retains its original tool messages even after
+later compaction. A stale record hash, foreign session, or foreign schema is
+refused before a durable child is created. The store validates the boundary
+inside its fork transaction, so a concurrent rewrite cannot substitute another
+record with the same numeric ID. Message counts and observability event IDs do
+not identify canonical history.
+
+The session-store Rust API takes `CanonicalSessionBoundary`. JSON session-store
+callers pass `canonical_boundary` with the same shape. These durable operations
+are distinct from the VM-local `harness.agent.fork` primitives above.
 
 ### Live session clients
 
