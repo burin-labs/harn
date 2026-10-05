@@ -7,52 +7,9 @@ use serde_json::Value as JsonValue;
 use crate::tool_annotations::ToolAnnotations;
 use crate::workspace_path::{classify_permission_path, WorkspacePathInfo};
 
-pub(super) const CONVENTIONAL_PATH_PARAMETERS: &[&str] = &[
-    "path",
-    "file",
-    "target",
-    "source_path",
-    "new_path",
-    "target_path",
-    "paths",
-];
-
-pub(super) fn parameters(annotations: Option<&ToolAnnotations>) -> Vec<String> {
-    annotations
-        .map(|annotations| annotations.arg_schema.path_params.clone())
-        .unwrap_or_else(|| {
-            CONVENTIONAL_PATH_PARAMETERS
-                .iter()
-                .map(|name| (*name).to_string())
-                .collect()
-        })
-}
-
-/// A malformed supplied path must be refused rather than disappearing during
-/// classification. Hosts and VM dispatch validate through this same boundary.
-pub(super) fn validate(arguments: &JsonValue, parameters: &[String]) -> Result<(), String> {
-    for parameter in parameters {
-        if parameter.trim().is_empty() {
-            return Err(
-                "tool_annotations.arg_schema.path_params must contain nonempty field names".into(),
-            );
-        }
-        match arguments.get(parameter) {
-            None => {}
-            Some(JsonValue::String(value)) if !value.trim().is_empty() => {}
-            Some(JsonValue::Array(values))
-                if values
-                    .iter()
-                    .all(|value| value.as_str().is_some_and(|value| !value.trim().is_empty())) => {}
-            _ => {
-                return Err(format!(
-                    "workspace path argument '{parameter}' must be a string or list of strings"
-                ));
-            }
-        }
-    }
-    Ok(())
-}
+pub(super) use crate::tool_annotations::path_inputs::{
+    parameters, validate, CONVENTIONAL_PATH_PARAMETERS,
+};
 
 /// An explicit catalog entry replaces conventional field inference. Command
 /// reader paths still come from the existing semantic command-policy owner.

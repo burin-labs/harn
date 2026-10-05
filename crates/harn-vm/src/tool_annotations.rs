@@ -18,6 +18,8 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
+pub(crate) mod path_inputs;
+
 /// Canonical tool-kind vocabulary. Matches the ACP `ToolKind` enum so
 /// harn-cli's ACP server can forward the value unchanged in
 /// `sessionUpdate` variants.

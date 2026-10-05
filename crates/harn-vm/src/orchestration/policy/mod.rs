@@ -4,7 +4,7 @@ mod approval_activity;
 mod approval_resolver;
 mod approval_review_config;
 mod approval_rules;
-pub(crate) use approval_rules::validate_tool_approval_path_arguments;
+pub(crate) use approval_rules::PolicyAuthorityRequest;
 mod capability_lattice;
 mod consent_capability;
 pub(crate) use consent_capability::is_policy_machinery_consent_call;
@@ -17,8 +17,6 @@ mod run_approval;
 mod runtime_effect_state;
 pub(crate) mod tool_enforcement;
 mod types;
-
-pub(crate) use approval_rules::PolicyAuthorityRequest;
 
 use crate::value::VmDictExt;
 use std::cell::RefCell;

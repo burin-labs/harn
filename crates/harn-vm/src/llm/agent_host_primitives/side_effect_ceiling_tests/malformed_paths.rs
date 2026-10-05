@@ -141,9 +141,8 @@ async fn malformed_paths_retry_before_policy_callbacks_approval_and_effects() {
             assert_eq!(calls.effect.load(Ordering::SeqCst), 0);
             assert_eq!(captured.lock().unwrap().len(), initial_prompts);
         }
-        let path = crate::orchestration::execution_root_path().join("proof");
         let corrected = calls
-            .dispatch(serde_json::json!({(field): path}), annotated, &options)
+            .dispatch(serde_json::json!({(field): "proof"}), annotated, &options)
             .await;
         assert_eq!(corrected["ok"], true, "{corrected}");
         assert_eq!(calls.precheck.load(Ordering::SeqCst), 1);

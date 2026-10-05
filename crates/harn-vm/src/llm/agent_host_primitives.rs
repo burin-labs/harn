@@ -21,7 +21,8 @@ mod structured_tool_result;
 mod tool_catalog;
 mod tool_parse_diagnostics;
 use denial_results::{
-    agent_primitive_denied_tool, deny_tool_call, deny_tool_call_value, DenialEvidence,
+    agent_primitive_denied_tool, deny_tool_call, deny_tool_call_value,
+    schema_validation_tool_result, DenialEvidence,
 };
 use dispatch_policy::{tool_denial_from_policy, DispatchPolicy};
 use host_permission::{
@@ -120,38 +121,6 @@ fn arg_delivery_fault_feedback(
             "empty_arguments_dropped",
         ))
     }
-}
-
-fn schema_validation_tool_result(
-    tool_name: &str,
-    tool_id: &str,
-    tool_args: &serde_json::Value,
-    message: String,
-    raw_args: &serde_json::Value,
-    stop_reason: Option<&str>,
-) -> serde_json::Value {
-    let (message, cause) = match arg_delivery_fault_feedback(tool_name, raw_args, stop_reason) {
-        Some((message, cause)) => (message, Some(cause)),
-        None => (message, None),
-    };
-    // Model arguments can be corrected and retried, so this result carries no
-    // terminal ToolDenial. Delivery causes remain on both transcript surfaces.
-    let mut result = agent_primitive_denied_tool(
-        tool_name,
-        tool_id,
-        tool_args,
-        message,
-        crate::agent_events::ToolCallErrorCategory::SchemaValidation,
-        None,
-        None,
-    );
-    if let Some(cause) = cause {
-        result["cause"] = serde_json::json!(cause);
-        if let Some(inner) = result.get_mut("result") {
-            inner["cause"] = serde_json::json!(cause);
-        }
-    }
-    result
 }
 
 /// Cause-named feedback for a tool call whose arguments could not be parsed and
@@ -876,8 +845,7 @@ pub(super) async fn host_agent_dispatch_tool_call(
     // Install typed session context before resolving catalog/ambient path
     // annotations, but refuse malformed paths before any policy callback or
     // permission prompt. Full schema validation stays after hooks and routing.
-    if let Err(message) = crate::orchestration::validate_tool_approval_path_arguments(
-        &tool_name,
+    if let Err(message) = crate::tool_annotations::path_inputs::validate_arguments(
         &tool_args,
         dispatch_annotations.as_ref(),
     ) {
