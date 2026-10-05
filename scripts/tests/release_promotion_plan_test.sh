@@ -131,6 +131,20 @@ plan from_queue FAKE_CANDIDATE_RUN=4242
 [[ "$(output from_queue promote)" == true && "$(output from_queue run_id)" == 4242 ]] \
   || fail "the merge group's candidate run was not promoted: $(cat "$tmp/from_queue.log")"
 
+# Recovery retains the requested producer rather than selecting another run
+# of the same source; normal verification still reads its consumer result.
+plan recovery RECOVERY=true FAKE_RUNS_FAIL=1
+[[ "$(output recovery promote)" == true && "$(output recovery run_id)" == 9001 ]] \
+  || fail "recovery did not retain its certified run: $(cat "$tmp/recovery.log")"
+
+# Historical candidates need not contain today's publication policy helpers.
+# The controller owns those helpers; the candidate supplies only version facts.
+git clone --quiet --no-hardlinks "$repo" "$tmp/old-source"
+rm -rf "$tmp/old-source/scripts"
+plan historical_source RECOVERY=true "SOURCE_DIRECTORY=$tmp/old-source"
+[[ "$(output historical_source promote)" == true ]] \
+  || fail "historical source required current controller helpers: $(cat "$tmp/historical_source.log")"
+
 # Negative controls: no run holds a candidate, or the runs cannot be read. A
 # release with nothing to publish is a failure, never a green no-op.
 plan no_candidate FAKE_CANDIDATE_RUN=

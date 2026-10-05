@@ -8,7 +8,8 @@ name: Promote release
 #      only when every release check passed on those files. It builds in the
 #      release's merge group, whose commit is the one that lands on main; the
 #      push to main builds only when no queue run built that commit.
-#   2. This workflow starts when the push run completes. `plan` repeats the
+#   2. This workflow starts when the push run completes, or a maintainer
+#      recovers a certified run already contained in main. `plan` repeats the
 #      build's own version decision at the run's head commit, then finds the
 #      successful run that built the candidate at that commit, so only a
 #      checked candidate is promoted and a warm-cache run is a no-op.
@@ -21,9 +22,14 @@ name: Promote release
 #      `container` packages the published Linux archives into the image, and
 #      `open-development-bump` moves main to the next development version.
 on:
-  # Privileged `workflow_run` is intentional here: `plan` checks out only the
-  # completed run's head commit on main, after requiring that the run came from
-  # a push to this repository's main branch.
+  workflow_dispatch:
+    inputs:
+      candidate_run_id:
+        description: Successful candidate run whose source is already on main
+        required: true
+        type: string
+  # Privileged `workflow_run` is intentional: the resolver executes trusted
+  # main code and validates the producer before candidate source is read.
   workflow_run: # zizmor: ignore[dangerous-triggers] promotes only main push runs of this repository
     workflows: [Build release binaries]
     types: [completed]
@@ -33,22 +39,47 @@ permissions:
   contents: read
 
 concurrency:
-  group: promote-release-${{ github.event.workflow_run.head_sha }}
+  # Recovery and automatic publication share one owner, including reruns.
+  group: promote-release
   cancel-in-progress: false
 
 jobs:
-  plan:
-    name: Plan promotion
+  resolve:
+    name: Resolve certified source
     if: >-
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') || (
       github.event.workflow_run.conclusion == 'success' &&
       github.event.workflow_run.event == 'push' &&
       github.event.workflow_run.head_branch == 'main' &&
-      github.event.workflow_run.head_repository.full_name == github.repository
+      github.event.workflow_run.head_repository.full_name == github.repository)
     runs-on: ubuntu-24.04
     permissions:
       contents: read
       actions: read
     outputs:
+      source_sha: ${{ steps.source.outputs.source_sha }}
+      run_id: ${{ steps.source.outputs.run_id }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          persist-credentials: false
+      - name: Validate candidate source on main
+        id: source
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_RUN_ID: ${{ inputs.candidate_run_id || github.event.workflow_run.id }}
+        run: bash scripts/resolve-release-promotion-source.sh
+
+  plan:
+    name: Plan promotion
+    needs: resolve
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      source_sha: ${{ needs.resolve.outputs.source_sha }}
       promote: ${{ steps.plan.outputs.promote }}
       run_id: ${{ steps.plan.outputs.run_id }}
       tag: ${{ steps.plan.outputs.tag }}
@@ -57,7 +88,12 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event.workflow_run.head_sha }}
+          ref: main
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.resolve.outputs.source_sha }}
+          path: release-source
           fetch-depth: 2
           persist-credentials: false
 
@@ -65,8 +101,10 @@ jobs:
         id: plan
         env:
           GH_TOKEN: ${{ github.token }}
-          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
-          BUILD_RUN_ID: ${{ github.event.workflow_run.id }}
+          HEAD_SHA: ${{ needs.resolve.outputs.source_sha }}
+          BUILD_RUN_ID: ${{ needs.resolve.outputs.run_id }}
+          SOURCE_DIRECTORY: release-source
+          RECOVERY: ${{ github.event_name == 'workflow_dispatch' }}
         run: |
           set -euo pipefail
           # shellcheck source=scripts/lib/release_version.sh
@@ -75,8 +113,9 @@ jobs:
           source scripts/lib/release_candidate_run.sh
           # shellcheck source=scripts/lib/release_consumer_verdict.sh
           source scripts/lib/release_consumer_verdict.sh
-          version="$(release_workspace_version < Cargo.toml)"
-          previous="$(git show HEAD^:Cargo.toml | release_workspace_version)"
+          source_directory="${SOURCE_DIRECTORY:-.}"
+          version="$(release_workspace_version < "$source_directory/Cargo.toml")"
+          previous="$(git -C "$source_directory" show HEAD^:Cargo.toml | release_workspace_version)"
           if ! release_push_is_stable_version_change "$previous" "$version"; then
             echo "::notice::$HEAD_SHA keeps the workspace version at $version (was $previous); its run built no candidate, so there is nothing to promote."
             echo "promote=false" >> "$GITHUB_OUTPUT"
@@ -98,7 +137,9 @@ jobs:
           fi
           # The candidate was built by the release's merge group, or by this push
           # when no queue run built it. Either way it is found by commit.
-          if ! candidate_run="$(release_candidate_run_id "$GITHUB_REPOSITORY" "$HEAD_SHA")"; then
+          if [[ "${RECOVERY:-false}" == true ]]; then
+            candidate_run="$BUILD_RUN_ID"
+          elif ! candidate_run="$(release_candidate_run_id "$GITHUB_REPOSITORY" "$HEAD_SHA")"; then
             echo "::error::Could not read which run built the $tag candidate at $HEAD_SHA."
             exit 1
           fi
@@ -126,7 +167,7 @@ jobs:
       attestations: read
     uses: burin-labs/.github/.github/workflows/promote-release.yml@47b97f48a4862d684f54a0b8ee7aa370d8bfc126
     with:
-      sha: ${{ github.event.workflow_run.head_sha }}
+      sha: ${{ needs.plan.outputs.source_sha }}
       run-id: ${{ needs.plan.outputs.run_id }}
       tag: ${{ needs.plan.outputs.tag }}
     secrets:
@@ -159,7 +200,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event.workflow_run.head_sha }}
+          ref: ${{ needs.plan.outputs.source_sha }}
           persist-credentials: false
 
       - name: Set up QEMU

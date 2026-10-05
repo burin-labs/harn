@@ -114,6 +114,12 @@ candidate manifest attached to the release record.
   certification of the resulting commit.
 - Promotion failed: rerun the failed jobs in the exact promotion run. It
   checks the existing tag's commit and refuses a conflicting tag.
+- Candidate succeeded but no main-push event started promotion: dispatch the
+  existing promoter on main with that certified candidate's run ID:
+  `gh workflow run promote-release.yml --repo burin-labs/harn --ref main -f candidate_run_id=RUN_ID`.
+  It refuses an unsuccessful or foreign producer and a source not contained
+  in main, then applies the normal version, consumer, manifest, digest and
+  attestation checks. It publishes existing files without rebuilding them.
 - Crate publication failed after the tag exists: rerun the failed jobs in the
   tag's `publish-release.yml` run. Its publisher resumes remaining crates.
 - Container or development bump failed: rerun those failed promotion jobs.
