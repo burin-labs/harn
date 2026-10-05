@@ -1,4 +1,5 @@
 fn main(harness: Harness) {
+  const boundary = {root: harness.fs.workspace_root()}
   const request = {tool_name: "run", arguments: {command: "git status"}}
   const allowed = harness.runtime.evaluate_approval_policy({}, request)
   const asked = harness.runtime.evaluate_approval_policy({require_approval: ["run"]}, request)
@@ -97,19 +98,19 @@ fn main(harness: Harness) {
   harness.stdio.println(
     harness.runtime.evaluate_approval_policy(
       resource,
-      {tool_name: "read", arguments: {path: "report*.txt"}},
+      {tool_name: "read", arguments: {path: "report*.txt"}, workspace_boundary: boundary},
     ).action,
   )
   harness.stdio.println(
     harness.runtime.evaluate_approval_policy(
       resource,
-      {tool_name: "read", arguments: {path: "report-2026.txt"}},
+      {tool_name: "read", arguments: {path: "report-2026.txt"}, workspace_boundary: boundary},
     ).action,
   )
   harness.stdio.println(
     harness.runtime.evaluate_approval_policy(
       {rules: [{id: "authored", allow: {path: "report*.txt"}}]},
-      {tool_name: "read", arguments: {path: "report-2026.txt"}},
+      {tool_name: "read", arguments: {path: "report-2026.txt"}, workspace_boundary: boundary},
     ).receipt.matched_rule.id,
   )
   const stale_resource = harness.runtime.evaluate_approval_policy(
@@ -117,6 +118,7 @@ fn main(harness: Harness) {
     {
       tool_name: "read",
       arguments: {path: "different.txt"},
+      workspace_boundary: boundary,
       policy_decision: {context: {path: "report*.txt"}},
     },
   )
@@ -137,4 +139,15 @@ fn main(harness: Harness) {
       },
     ).action,
   )
+  const missing_boundary = try {
+    harness.runtime.evaluate_approval_policy(
+      {},
+      {tool_name: "read", arguments: {path: "../outside.txt"}},
+    )
+  }
+  harness.stdio.println(is_err(missing_boundary))
+  const malformed_path = try {
+    harness.runtime.evaluate_approval_policy({}, {tool_name: "read", arguments: {path: 123}})
+  }
+  harness.stdio.println(is_err(malformed_path))
 }
