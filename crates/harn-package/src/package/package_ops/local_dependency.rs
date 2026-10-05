@@ -157,7 +157,7 @@ fn failed_install_with_rollback(
     }
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub fn install_local_package(
     workspace: &PackageWorkspace,
     package_root: &Path,

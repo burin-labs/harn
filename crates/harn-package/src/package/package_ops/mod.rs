@@ -16,6 +16,7 @@ mod validate;
 mod workspace;
 
 pub use api_symbols::extract_api_symbols_for_module;
+#[cfg(test)]
 pub(crate) use api_symbols::*;
 pub use check::check_package_impl;
 pub(crate) use check::*;
@@ -23,11 +24,12 @@ pub use entry::*;
 pub(crate) use legacy_secrets::*;
 pub use listing::doctor_packages_in;
 pub(crate) use listing::*;
-pub(crate) use local_dependency::*;
+#[cfg(any(test, feature = "test-support"))]
+pub use local_dependency::install_local_package;
 pub use local_dependency::{
-    install_local_package, install_local_package_locked, LocalDependencyInstall,
-    LocalDependencyInstallReceipt,
+    install_local_package_locked, LocalDependencyInstall, LocalDependencyInstallReceipt,
 };
+#[cfg(test)]
 pub(crate) use pack::*;
 pub use pack::{
     collect_package_files, generate_package_docs_impl, pack_package_impl, push_api_symbol,
@@ -44,6 +46,5 @@ pub use support::{current_harn_range_example, load_manifest_context_for_anchor};
 pub use validate::safe_package_relative_path;
 pub(crate) use validate::*;
 pub use workspace::PackageWorkspace;
-pub(crate) use workspace::*;
 #[cfg(test)]
 mod tests;

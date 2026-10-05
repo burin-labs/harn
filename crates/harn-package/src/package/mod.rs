@@ -74,7 +74,6 @@ pub use lockfile::{
     PackageLockExports,
 };
 pub use manifest::*;
-pub(crate) use manifest_search::*;
 pub use manifest_search::{
     find_nearest_manifest_dir, load_nearest_manifest, nearest_manifest_or_warn, ManifestSearch,
 };

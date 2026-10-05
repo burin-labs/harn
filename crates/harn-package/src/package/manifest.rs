@@ -1038,6 +1038,11 @@ pub struct RuntimeExtensions {
 }
 
 impl RuntimeExtensions {
+    /// Identity of the root manifest bytes used to assemble these extensions.
+    pub fn root_manifest_identity(&self) -> Option<[u8; 32]> {
+        self.root_manifest_identity
+    }
+
     /// Resolved persona identities and their retained execution provenance.
     pub fn runtime_personas(&self) -> &[ResolvedRuntimePersona] {
         &self.runtime_personas
