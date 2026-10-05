@@ -213,7 +213,7 @@ fn managed_supply_missing_or_malformed_authority_never_reaches_transport() {
     }
     for protocol in ["responses", "acp"] {
         let mut definition =
-            crate::llm_config::provider_config("managed-gateway").expect("managed fixture");
+            crate::llm_config::provider_config(&opts.provider).expect("managed fixture");
         if protocol == "responses" {
             definition.features.push("responses_api".to_string());
             opts.api_mode = crate::llm::api::LlmApiMode::Responses;
@@ -222,13 +222,11 @@ fn managed_supply_missing_or_malformed_authority_never_reaches_transport() {
             opts.api_mode = crate::llm::api::LlmApiMode::ChatCompletions;
         }
         let mut overlay = crate::llm_config::ProvidersConfig::default();
-        overlay
-            .providers
-            .insert("managed-gateway".to_string(), definition);
+        overlay.providers.insert(opts.provider.clone(), definition);
         crate::llm_config::set_user_overrides(Some(overlay));
         if protocol == "acp" {
             assert!(crate::llm::providers::AcpProvider::is_configured_acp(
-                "managed-gateway"
+                &opts.provider
             ));
         }
         let error = runtime
@@ -245,7 +243,7 @@ fn managed_supply_missing_or_malformed_authority_never_reaches_transport() {
                 .contains("managed supply requires the OpenAI chat-completions transport"),
             "{error}"
         );
-        install_managed_supply_stub_provider("managed-gateway", server.addr());
+        install_managed_supply_stub_provider(&opts.provider, server.addr());
     }
     opts.api_mode = crate::llm::api::LlmApiMode::ChatCompletions;
     let allowed = runtime
