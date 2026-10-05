@@ -1,0 +1,71 @@
+{
+  "$defs": {
+    "CanonicalHistoryPosition": {
+      "additionalProperties": false,
+      "description": "Correlate a producer's opaque identity with its acknowledged stored prefix.",
+      "properties": {
+        "boundary": {
+          "$ref": "#/$defs/CanonicalSessionBoundary"
+        },
+        "source_event_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "source_event_id",
+        "boundary"
+      ],
+      "type": "object"
+    },
+    "CanonicalSessionBoundary": {
+      "additionalProperties": false,
+      "properties": {
+        "event_id": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "record_hash": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "schema": {
+          "type": "string"
+        },
+        "session_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "schema",
+        "session_id"
+      ],
+      "type": "object"
+    }
+  },
+  "$id": "harn.canonical_history_boundaries.v1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "positions": {
+      "items": {
+        "$ref": "#/$defs/CanonicalHistoryPosition"
+      },
+      "type": "array"
+    },
+    "tip": {
+      "$ref": "#/$defs/CanonicalSessionBoundary"
+    }
+  },
+  "required": [
+    "tip",
+    "positions"
+  ],
+  "title": "CanonicalHistoryBoundaries",
+  "type": "object"
+}

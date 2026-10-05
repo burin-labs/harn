@@ -2308,3 +2308,20 @@ class HarnInferenceAdmissionSnapshot(_HarnDataclass):
     local_runtime: Optional[bool] = None
     open_weight: Optional[bool] = None
     training_default: Optional[str] = None
+@dataclass
+class HarnCanonicalSessionBoundary(_HarnDataclass):
+    schema: str
+    session_id: str
+    event_id: Optional[int] = None
+    record_hash: Optional[str] = None
+
+@dataclass
+class HarnCanonicalHistoryPosition(_HarnDataclass):
+    source_event_id: str
+    boundary: HarnCanonicalSessionBoundary
+
+@dataclass
+class HarnCanonicalHistoryBoundaries(_HarnDataclass):
+    tip: HarnCanonicalSessionBoundary
+    positions: List[HarnCanonicalHistoryPosition]
+

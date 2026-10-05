@@ -2078,6 +2078,15 @@ jobs:
         run: |
           mkdir -p .harn-tmp
           ./scripts/ci/collect_stack_frames.sh .harn-tmp/stack-frame-census.json
+      - name: Preserve raw stack-frame diagnostics
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: harn-stack-frame-census-${{ github.run_attempt }}
+          path: .harn-tmp/stack-frame-census.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 3
       - name: Wait for shared Harn binary
         env:
           GH_TOKEN: ${{ github.token }}

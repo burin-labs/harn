@@ -191,6 +191,7 @@
       "harn.session_recap.query",
       "harn.session_timeline.query",
       "harn.session_view.query",
+      "harn.session_history.boundaries",
       "harn.session_timeline.subscribe",
       "harn.session_timeline.unsubscribe",
       "session/new",
@@ -263,6 +264,7 @@
       "harn.session_recap.query",
       "harn.session_timeline.query",
       "harn.session_view.query",
+      "harn.session_history.boundaries",
       "harn.session_timeline.subscribe",
       "harn.session_timeline.unsubscribe",
       "session/new",
@@ -974,6 +976,15 @@
         "upstream_version": "2026-07-28"
       },
       "source": "conformance/protocols/schemas/mcp-2026-07-28.schema.json"
+    },
+    {
+      "artifact": "schemas/canonical-history-boundaries.schema.json",
+      "protocol": "harn",
+      "provenance": {
+        "owner": "harn-vm::agent_sessions::canonical_boundary",
+        "schema_version": 1
+      },
+      "source": "crates/harn-vm/src/agent_sessions/canonical_boundary.rs"
     },
     {
       "artifact": "schemas/inference-admission-request.schema.json",

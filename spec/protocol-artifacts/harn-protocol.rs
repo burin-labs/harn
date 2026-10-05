@@ -1856,6 +1856,8 @@ pub const ACP_DISPATCHED_METHOD_HARN_PROVIDERCATALOG: &str = "_harn/providerCata
 pub const ACP_DISPATCHED_METHOD_HARN_SESSION_RECAP_QUERY: &str = "harn.session_recap.query";
 pub const ACP_DISPATCHED_METHOD_HARN_SESSION_TIMELINE_QUERY: &str = "harn.session_timeline.query";
 pub const ACP_DISPATCHED_METHOD_HARN_SESSION_VIEW_QUERY: &str = "harn.session_view.query";
+pub const ACP_DISPATCHED_METHOD_HARN_SESSION_HISTORY_BOUNDARIES: &str =
+    "harn.session_history.boundaries";
 pub const ACP_DISPATCHED_METHOD_HARN_SESSION_TIMELINE_SUBSCRIBE: &str =
     "harn.session_timeline.subscribe";
 pub const ACP_DISPATCHED_METHOD_HARN_SESSION_TIMELINE_UNSUBSCRIBE: &str =
@@ -1930,6 +1932,7 @@ pub const ACP_DISPATCHED_METHODS: &[&str] = &[
     "harn.session_recap.query",
     "harn.session_timeline.query",
     "harn.session_view.query",
+    "harn.session_history.boundaries",
     "harn.session_timeline.subscribe",
     "harn.session_timeline.unsubscribe",
     "session/new",
@@ -2007,6 +2010,8 @@ pub const ACP_HANDLED_METHOD_HARN_PROVIDERCATALOG: &str = "_harn/providerCatalog
 pub const ACP_HANDLED_METHOD_HARN_SESSION_RECAP_QUERY: &str = "harn.session_recap.query";
 pub const ACP_HANDLED_METHOD_HARN_SESSION_TIMELINE_QUERY: &str = "harn.session_timeline.query";
 pub const ACP_HANDLED_METHOD_HARN_SESSION_VIEW_QUERY: &str = "harn.session_view.query";
+pub const ACP_HANDLED_METHOD_HARN_SESSION_HISTORY_BOUNDARIES: &str =
+    "harn.session_history.boundaries";
 pub const ACP_HANDLED_METHOD_HARN_SESSION_TIMELINE_SUBSCRIBE: &str =
     "harn.session_timeline.subscribe";
 pub const ACP_HANDLED_METHOD_HARN_SESSION_TIMELINE_UNSUBSCRIBE: &str =
@@ -2082,6 +2087,7 @@ pub const ACP_HANDLED_METHODS: &[&str] = &[
     "harn.session_recap.query",
     "harn.session_timeline.query",
     "harn.session_view.query",
+    "harn.session_history.boundaries",
     "harn.session_timeline.subscribe",
     "harn.session_timeline.unsubscribe",
     "session/new",
@@ -4870,4 +4876,25 @@ pub struct HarnInferenceAdmissionSnapshot {
     pub open_weight: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub training_default: Option<String>,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnCanonicalSessionBoundary {
+    pub schema: String,
+    pub session_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub event_id: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub record_hash: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnCanonicalHistoryPosition {
+    pub source_event_id: String,
+    pub boundary: HarnCanonicalSessionBoundary,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnCanonicalHistoryBoundaries {
+    pub tip: HarnCanonicalSessionBoundary,
+    pub positions: Vec<HarnCanonicalHistoryPosition>,
 }

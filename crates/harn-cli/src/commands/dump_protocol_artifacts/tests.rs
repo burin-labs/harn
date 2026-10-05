@@ -820,6 +820,9 @@ fn dispatch_arm_constant_value(trimmed_arm: &str) -> Option<String> {
         "harn_vm::session_timeline::SESSION_TIMELINE_QUERY_METHOD" => {
             Some(SESSION_TIMELINE_QUERY_METHOD.to_string())
         }
+        "harn_vm::agent_sessions::CANONICAL_HISTORY_BOUNDARIES_METHOD" => {
+            Some(harn_vm::agent_sessions::CANONICAL_HISTORY_BOUNDARIES_METHOD.to_string())
+        }
         "harn_vm::session_timeline::SESSION_TIMELINE_SUBSCRIBE_METHOD" => {
             Some(SESSION_TIMELINE_SUBSCRIBE_METHOD.to_string())
         }

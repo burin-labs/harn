@@ -2115,3 +2115,19 @@ type HarnInferenceAdmissionSnapshot struct {
 	OpenWeight             *bool                           `json:"open_weight,omitempty"`
 	TrainingDefault        *string                         `json:"training_default,omitempty"`
 }
+type HarnCanonicalSessionBoundary struct {
+	Schema     string  `json:"schema"`
+	SessionID  string  `json:"session_id"`
+	EventID    *uint64 `json:"event_id,omitempty"`
+	RecordHash *string `json:"record_hash,omitempty"`
+}
+
+type HarnCanonicalHistoryPosition struct {
+	SourceEventID string                       `json:"source_event_id"`
+	Boundary      HarnCanonicalSessionBoundary `json:"boundary"`
+}
+
+type HarnCanonicalHistoryBoundaries struct {
+	Tip       HarnCanonicalSessionBoundary   `json:"tip"`
+	Positions []HarnCanonicalHistoryPosition `json:"positions"`
+}

@@ -1093,6 +1093,7 @@ public enum HarnACPDispatchedMethod: String, Codable, Sendable, CaseIterable {
     case harnSessionRecapQuery = "harn.session_recap.query"
     case harnSessionTimelineQuery = "harn.session_timeline.query"
     case harnSessionViewQuery = "harn.session_view.query"
+    case harnSessionHistoryBoundaries = "harn.session_history.boundaries"
     case harnSessionTimelineSubscribe = "harn.session_timeline.subscribe"
     case harnSessionTimelineUnsubscribe = "harn.session_timeline.unsubscribe"
     case sessionNew = "session/new"
@@ -1164,6 +1165,7 @@ public enum HarnACPDispatchedMethod: String, Codable, Sendable, CaseIterable {
         "harn.session_recap.query",
         "harn.session_timeline.query",
         "harn.session_view.query",
+        "harn.session_history.boundaries",
         "harn.session_timeline.subscribe",
         "harn.session_timeline.unsubscribe",
         "session/new",
@@ -1246,6 +1248,7 @@ public enum HarnACPHandledMethod: String, Codable, Sendable, CaseIterable {
     case harnSessionRecapQuery = "harn.session_recap.query"
     case harnSessionTimelineQuery = "harn.session_timeline.query"
     case harnSessionViewQuery = "harn.session_view.query"
+    case harnSessionHistoryBoundaries = "harn.session_history.boundaries"
     case harnSessionTimelineSubscribe = "harn.session_timeline.subscribe"
     case harnSessionTimelineUnsubscribe = "harn.session_timeline.unsubscribe"
     case sessionNew = "session/new"
@@ -1318,6 +1321,7 @@ public enum HarnACPHandledMethod: String, Codable, Sendable, CaseIterable {
         "harn.session_recap.query",
         "harn.session_timeline.query",
         "harn.session_view.query",
+        "harn.session_history.boundaries",
         "harn.session_timeline.subscribe",
         "harn.session_timeline.unsubscribe",
         "session/new",
@@ -4937,3 +4941,32 @@ public struct HarnInferenceAdmissionSnapshot: Codable, Sendable, Equatable {
         case trainingDefault = "training_default"
     }
 }
+public struct HarnCanonicalSessionBoundary: Codable, Sendable, Equatable {
+    public let schema: String
+    public let sessionId: String
+    public let eventId: Int64?
+    public let recordHash: String?
+
+    enum CodingKeys: String, CodingKey {
+        case schema
+        case sessionId = "session_id"
+        case eventId = "event_id"
+        case recordHash = "record_hash"
+    }
+}
+
+public struct HarnCanonicalHistoryPosition: Codable, Sendable, Equatable {
+    public let sourceEventId: String
+    public let boundary: HarnCanonicalSessionBoundary
+
+    enum CodingKeys: String, CodingKey {
+        case sourceEventId = "source_event_id"
+        case boundary
+    }
+}
+
+public struct HarnCanonicalHistoryBoundaries: Codable, Sendable, Equatable {
+    public let tip: HarnCanonicalSessionBoundary
+    public let positions: [HarnCanonicalHistoryPosition]
+}
+
