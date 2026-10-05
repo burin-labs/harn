@@ -30,6 +30,7 @@ fn physical_weight_class_is_admitted_independently_of_matching_capabilities() {
     let refusal = compatible_served_route(&open, "mistral", "codestral-2508")
         .expect_err("matching capabilities do not grant closed-weight supply");
     assert_eq!(refusal.code(), "inference_boundary.hosted_open_weight");
+    assert!(refusal.is_policy_denial());
     compatible_served_route(
         &request(InferenceReach::AnyHosted),
         "mistral",
@@ -67,7 +68,9 @@ fn request_authority_is_required_closed_and_versioned() {
     }
     let mut obsolete = request(InferenceReach::AnyHosted);
     obsolete.version = 1;
-    assert!(validate_request(&obsolete).is_err());
+    let error = validate_request(&obsolete).expect_err("version 1 authority is unsupported");
+    assert!(!error.is_policy_denial());
+    assert_eq!(error.code(), "invalid_managed_supply_contract");
 }
 
 #[test]

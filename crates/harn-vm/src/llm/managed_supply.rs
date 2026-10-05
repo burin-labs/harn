@@ -49,6 +49,11 @@ impl ManagedSupplyContractError {
             .as_ref()
             .map_or("invalid_managed_supply_contract", |denial| denial.code())
     }
+
+    /// Preserve the owning policy cause without requiring adapters to parse codes.
+    pub fn is_policy_denial(&self) -> bool {
+        self.policy_denial.is_some()
+    }
 }
 
 impl std::fmt::Display for ManagedSupplyContractError {
