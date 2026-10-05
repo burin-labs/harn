@@ -234,11 +234,10 @@ impl ParentSecretHandoff {
 
     /// Install into the existing zeroizing memory owner, without a second store.
     pub fn into_provider(self) -> impl SecretProvider {
-        let mut provider = MemorySecretProvider::new("parent-handoff");
-        for (id, value) in self.secrets {
-            value.with_exposed(|bytes| provider.insert(id, bytes));
-        }
-        ReceivedParentSecrets(provider)
+        ReceivedParentSecrets(MemorySecretProvider::from_resolved_snapshot(
+            "parent-handoff",
+            self.secrets,
+        ))
     }
 }
 

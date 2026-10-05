@@ -38,6 +38,45 @@ async fn selected_reference_survives_transport_without_an_ambient_store() {
         .with_exposed(|value| value == b"inert-parent-canary"));
 }
 
+#[tokio::test]
+async fn mixed_latest_and_exact_references_keep_their_parent_values_without_invented_versions() {
+    let latest = SecretId::new("fixture", "versioned");
+    let first = latest.clone().with_version(SecretVersion::Exact(1));
+    let second = latest.clone().with_version(SecretVersion::Exact(2));
+    let parent = MemorySecretProvider::new("parent")
+        .with_secret(first.clone(), b"inert-old")
+        .with_secret(second.clone(), b"inert-new");
+    let handoff = ParentSecretHandoff::capture(&parent, [latest.clone(), first.clone()])
+        .await
+        .unwrap();
+    let mut bytes = Vec::new();
+    handoff.write_to(&mut bytes).unwrap();
+    let child = ParentSecretHandoff::read_from(bytes.as_slice())
+        .unwrap()
+        .into_provider();
+    assert!(child
+        .get(&latest)
+        .await
+        .unwrap()
+        .with_exposed(|value| value == b"inert-new"));
+    assert!(child
+        .get(&first)
+        .await
+        .unwrap()
+        .with_exposed(|value| value == b"inert-old"));
+    assert!(
+        child.get(&second).await.unwrap_err().is_not_found(),
+        "unselected numeric versions must not be fabricated"
+    );
+    let listed = child
+        .list(&SecretId::new("fixture", "versioned"))
+        .await
+        .unwrap();
+    assert_eq!(listed.len(), 2);
+    assert!(listed.iter().any(|entry| entry.id == latest));
+    assert!(listed.iter().any(|entry| entry.id == first));
+}
+
 #[test]
 fn malformed_and_unbounded_frames_fail_without_echoing_the_payload() {
     for payload in [
