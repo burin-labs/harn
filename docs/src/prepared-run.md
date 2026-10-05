@@ -113,6 +113,14 @@ prevents VM, host-capability, and provider execution. Provider endpoint override
 preserve this configurator. The adapter still owns prompt responses, event
 flushing, and cancellation classification.
 
+`request_session_approval(&bridge, session_id, &batch)` projects a grouped batch
+through the attached ACP permission bridge. It uses Harn's canonical permission
+options and response parser; missing, malformed, and rejected answers cannot
+grant authority. Pass its decision to `PreparedSession::decide`, which verifies
+the batch fingerprint and persists the decision before attachment or execution.
+The helper rejects a bridge attached to another session before requesting any
+host decision.
+
 `PreparedRun::request_delta` remains the typed attenuation interface for a
 single prepared run. `PreparedSession::request_delta` adds the interactive
 session behavior: an identical requirement is already covered, attenuation is

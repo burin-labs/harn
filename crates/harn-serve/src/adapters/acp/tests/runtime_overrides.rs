@@ -219,7 +219,7 @@ async fn acp_runtime_provider_endpoints_are_scoped_per_live_server() {
                             invoked: invoked.clone(),
                             refuse: false,
                         })),
-                    serde_json::json!("."),
+                    serde_json::json!(std::env::current_dir().unwrap()),
                 )
                 .await;
             let (second_tx, mut second_rx, second_server, second_session) =
@@ -228,7 +228,7 @@ async fn acp_runtime_provider_endpoints_are_scoped_per_live_server() {
                         .with_llm_overrides(Some(endpoint_overlay()), None)
                         .with_runtime_provider_endpoint("fixture", &second_endpoint)
                         .expect("second endpoint override"),
-                    serde_json::json!("."),
+                    serde_json::json!(std::env::current_dir().unwrap()),
                 )
                 .await;
 
@@ -283,7 +283,7 @@ async fn acp_runtime_authority_refusal_never_polls_the_engine_future() {
                     invoked: invoked.clone(),
                     refuse: true,
                 })),
-                serde_json::json!("."),
+                serde_json::json!(std::env::current_dir().unwrap()),
             )
             .await;
             set_code_mode(&tx, &mut rx, &session, 8).await;

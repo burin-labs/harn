@@ -595,6 +595,103 @@ async fn local_turn_reuses_attached_authority_and_identity_across_an_await() {
 }
 
 #[tokio::test]
+async fn bridge_approval_grants_only_a_canonical_selected_allow_before_execution() {
+    for (response, approved) in [
+        (
+            serde_json::json!({"outcome":{"outcome":"selected","optionId":"allow"}}),
+            true,
+        ),
+        (
+            serde_json::json!({"outcome":{"outcome":"selected","optionId":"reject"}}),
+            false,
+        ),
+        (serde_json::json!({}), false),
+        (serde_json::json!({"outcome":"approved"}), false),
+    ] {
+        let model_calls = Arc::new(AtomicUsize::new(0));
+        let receipts = Arc::new(MemoryAuthorityReceiptSink::default());
+        let session = PreparedSession::new(
+            PreparedRun::with_clock(
+                FixtureExecutor {
+                    requirements: executor_requirements(),
+                    model_calls: model_calls.clone(),
+                },
+                receipts.clone(),
+                Arc::new(|| NOW_MS),
+            ),
+            Arc::new(MemoryPreparedSessionLeaseStore::default()),
+        );
+        let batch = match session.prepare(prepared_session_binding(), intent(), host_facts()) {
+            PreparedSessionUpdate::NeedsApproval { batch, .. } => batch,
+            other => panic!("expected grouped approval, got {other:?}"),
+        };
+        let pending = Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::<
+            u64,
+            tokio::sync::oneshot::Sender<serde_json::Value>,
+        >::new()));
+        let responses = pending.clone();
+        let fingerprint = batch.batch_fingerprint.clone();
+        let approval_calls = Arc::new(AtomicUsize::new(0));
+        let observed_calls = approval_calls.clone();
+        let writer = Arc::new(move |line: &str| {
+            let request: serde_json::Value = serde_json::from_str(line).unwrap();
+            assert_eq!(request["method"], "session/request_permission");
+            assert_eq!(
+                request["params"]["toolCall"]["rawInput"]["batch_fingerprint"],
+                fingerprint
+            );
+            observed_calls.fetch_add(1, Ordering::SeqCst);
+            let id = request["id"].as_u64().unwrap();
+            responses
+                .try_lock()
+                .unwrap()
+                .remove(&id)
+                .unwrap()
+                .send(serde_json::json!({"id":id,"result":response.clone()}))
+                .map_err(|_| "approval receiver closed".to_string())
+        });
+        let bridge = crate::bridge::HostBridge::from_parts_with_writer(
+            pending,
+            Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            writer,
+            1,
+        );
+        bridge.set_session_id("prepared-session-1");
+        let decision = request_session_approval(&bridge, "prepared-session-1", &batch)
+            .await
+            .unwrap();
+        assert_eq!(approval_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(model_calls.load(Ordering::SeqCst), 0);
+        match session.decide("prepared-session-1", decision) {
+            PreparedSessionUpdate::Ready { lease, .. } if approved => {
+                let active = session
+                    .attach(*lease, host_facts(), prepared_runtime_attachment())
+                    .unwrap();
+                assert_eq!(session.run_turn(&active).await.unwrap(), "completed");
+                assert_eq!(model_calls.load(Ordering::SeqCst), 1);
+                match session.finish(active, true).unwrap() {
+                    PreparedSessionUpdate::Terminal { receipt, .. } => {
+                        assert_eq!(receipt.status, AuthorityReceiptStatus::Completed);
+                        assert_eq!(receipt.used.len(), executor_requirements().len());
+                    }
+                    other => panic!("expected terminal accounting, got {other:?}"),
+                }
+            }
+            PreparedSessionUpdate::Blocked { .. } if !approved => {
+                assert_eq!(model_calls.load(Ordering::SeqCst), 0);
+            }
+            other => panic!("approval result disagrees with canonical answer: {other:?}"),
+        }
+        assert!(receipts
+            .receipts
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|receipt| receipt.stage == AuthorityReceiptStage::ApprovalDecision));
+    }
+}
+
+#[tokio::test]
 async fn prepared_session_persists_one_approval_reuses_the_envelope_and_rejects_replay() {
     let model_calls = Arc::new(AtomicUsize::new(0));
     let receipts = Arc::new(MemoryAuthorityReceiptSink::default());
