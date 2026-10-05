@@ -180,7 +180,7 @@ pub(super) fn harn_acp_extension_meta() -> serde_json::Value {
                 },
                 harn_vm::agent_sessions::CANONICAL_HISTORY_BOUNDARIES_METHOD: {
                     "description": "Acknowledge canonical history positions after the owning transcript journal flushes.",
-                    "schema": harn_vm::agent_sessions::CANONICAL_SESSION_BOUNDARY_SCHEMA,
+                    "schema": harn_vm::agent_sessions::CANONICAL_HISTORY_BOUNDARIES_SCHEMA,
                     "schemaVersion": 1,
                 },
             },

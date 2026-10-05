@@ -8,10 +8,13 @@ use crate::value::VmError;
 
 pub use harn_session_store::{CanonicalSessionBoundary, CANONICAL_SESSION_BOUNDARY_SCHEMA};
 pub const CANONICAL_HISTORY_BOUNDARIES_METHOD: &str = "harn.session_history.boundaries";
+pub const CANONICAL_HISTORY_BOUNDARIES_SCHEMA: &str = "harn.canonical_history_boundaries.v1";
 
 pub fn canonical_history_boundaries_schema() -> serde_json::Value {
-    serde_json::to_value(schemars::schema_for!(CanonicalHistoryBoundaries))
-        .expect("canonical boundary schema serializes")
+    let mut schema = serde_json::to_value(schemars::schema_for!(CanonicalHistoryBoundaries))
+        .expect("canonical boundary schema serializes");
+    schema["$id"] = serde_json::json!(CANONICAL_HISTORY_BOUNDARIES_SCHEMA);
+    schema
 }
 
 /// An event identity and its acknowledged canonical position. Consumers bind

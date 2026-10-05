@@ -1220,7 +1220,7 @@ mod durable_fork;
 pub use canonical_boundary::{
     canonical_history_boundaries, canonical_history_boundaries_schema, CanonicalHistoryBoundaries,
     CanonicalHistoryPosition, CanonicalSessionBoundary, CANONICAL_HISTORY_BOUNDARIES_METHOD,
-    CANONICAL_SESSION_BOUNDARY_SCHEMA,
+    CANONICAL_HISTORY_BOUNDARIES_SCHEMA, CANONICAL_SESSION_BOUNDARY_SCHEMA,
 };
 mod truncation;
 pub use durable_fork::{fork_canonical, CanonicalForkError, CanonicalForkResult};
