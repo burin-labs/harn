@@ -147,9 +147,10 @@ fn managed_supply_missing_or_malformed_authority_never_reaches_transport() {
     let _host = ScopedEnvVar::remove(inference_boundary::HOST_BOUNDARY_ENV);
     let server = spawn_llm_stub("managed authority counted control", move |stream| {
         use std::io::{Read, Write};
-        observed_requests.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         let mut buf = vec![0u8; 32_768];
-        stream.read(&mut buf).expect("allowed request");
+        let received = stream.read(&mut buf).expect("allowed request");
+        assert!(received > 0, "the allowed control must send request bytes");
+        observed_requests.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         let body = serde_json::json!({
             "id": "authority-control", "object": "chat.completion", "created": 0,
             "model": "mistral-large-2512",
