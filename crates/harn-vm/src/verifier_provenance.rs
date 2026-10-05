@@ -244,14 +244,19 @@ fn bounded_read(path: &Path, maximum: usize) -> Result<Vec<u8>, String> {
 
 // Source reads are positional: clones share an open-file description, so a
 // sequential read would consume the baseline for later turns or parallel runs.
+// Register a separate main module for script discovery and annotation lookup.
+// Its globals exclude the bootstrap's private source and witness descriptors.
 #[cfg(target_os = "linux")]
-const PYTHON_SOURCE_BOOTSTRAP: &str = r#"import json, os, sys
+const PYTHON_SOURCE_BOOTSTRAP: &str = r#"import json, os, sys, types
 descriptor = int(sys.argv[1])
 metadata = json.loads(sys.argv[2])
 source = os.pread(descriptor, os.fstat(descriptor).st_size, 0)
 os.close(descriptor)
 sys.argv = [metadata['origin'], *metadata['args']]
-namespace = {'__name__': '__main__', '__file__': metadata['origin'], '__package__': None, '__spec__': None, '__cached__': None}
+main_module = types.ModuleType('__main__')
+namespace = main_module.__dict__
+namespace.update({'__file__': metadata['origin'], '__package__': None, '__spec__': None, '__cached__': None})
+sys.modules['__main__'] = main_module
 witness_fd = metadata['witness_fd']
 witness = bytes(metadata['witness'])
 write_witness = os.pwrite

@@ -8,6 +8,9 @@ import unittest
 
 class Calculation(unittest.TestCase):
     def test_calculation(self):
+        self.assertIs(sys.modules["__main__"].__dict__, globals())
+        self.assertNotIn("witness_fd", globals())
+
         @dataclass
         class Result:
             value: int
