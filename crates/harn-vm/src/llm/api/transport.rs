@@ -274,15 +274,16 @@ async fn dispatch_to_registered_provider(
     opts: &LlmRequestPayload,
     delta_tx: Option<DeltaSender>,
 ) -> Result<LlmResult, VmError> {
-    use crate::llm::provider::LlmProvider;
+    use crate::llm::provider::{LlmProvider, LlmProviderChat};
 
-    // Providers are zero-cost unit structs constructed inline to avoid
-    // RefCell-across-await conflicts on a shared registry.
+    // Construct providers inline to avoid RefCell-across-await conflicts on
+    // the registry. Their boxed chat interface keeps concrete provider futures
+    // off this shared dispatch frame, which nested agent calls re-enter.
     let provider = &opts.provider;
 
     let mock = crate::llm::providers::MockProvider;
     if mock.is_mock() && provider == mock.name() {
-        return mock.chat_impl(opts, delta_tx).await;
+        return mock.chat(opts, delta_tx).await;
     }
 
     if crate::llm::fake::FakeLlmProvider::should_intercept(provider) {
@@ -293,19 +294,19 @@ async fn dispatch_to_registered_provider(
 
     if provider == "bedrock" {
         return crate::llm::providers::BedrockProvider
-            .chat_impl(opts, delta_tx)
+            .chat(opts, delta_tx)
             .await;
     }
 
     if provider == "azure_openai" {
         return crate::llm::providers::AzureOpenAiProvider
-            .chat_impl(opts, delta_tx)
+            .chat(opts, delta_tx)
             .await;
     }
 
     if provider == "vertex" {
         return crate::llm::providers::VertexProvider
-            .chat_impl(opts, delta_tx)
+            .chat(opts, delta_tx)
             .await;
     }
 
@@ -313,22 +314,22 @@ async fn dispatch_to_registered_provider(
     match dialect.stream_protocol() {
         StreamProtocol::OllamaNdjson => {
             crate::llm::providers::OllamaProvider
-                .chat_impl(opts, delta_tx)
+                .chat(opts, delta_tx)
                 .await
         }
         StreamProtocol::GeminiJson | StreamProtocol::GeminiInteractionsSse => {
             crate::llm::providers::GeminiProvider
-                .chat_impl(opts, delta_tx)
+                .chat(opts, delta_tx)
                 .await
         }
         StreamProtocol::AnthropicSse => {
             crate::llm::providers::AnthropicProvider
-                .chat_impl(opts, delta_tx)
+                .chat(opts, delta_tx)
                 .await
         }
         StreamProtocol::OpenAiSse => {
             crate::llm::providers::OpenAiCompatibleProvider::new(provider.clone())
-                .chat_impl_with_dialect(opts, delta_tx, dialect)
+                .chat(opts, delta_tx)
                 .await
         }
     }
