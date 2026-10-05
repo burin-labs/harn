@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, OnceLock, RwLock};
 
 use super::sinks::flush_all_sinks;
@@ -14,11 +14,90 @@ pub(super) struct RegisteredSink {
 #[cfg(not(test))]
 pub(super) type RegisteredSink = Arc<dyn AgentEventSink>;
 
-type ExternalSinkRegistry = RwLock<HashMap<String, Vec<RegisteredSink>>>;
+struct ParentRoute {
+    parent: String,
+    owner: std::thread::ThreadId,
+}
+
+#[derive(Default)]
+struct SessionSinkRegistry {
+    sinks: HashMap<String, Vec<RegisteredSink>>,
+    parents: HashMap<String, ParentRoute>,
+}
+
+type ExternalSinkRegistry = RwLock<SessionSinkRegistry>;
+
+fn sink_arc(entry: &RegisteredSink) -> &Arc<dyn AgentEventSink> {
+    #[cfg(test)]
+    {
+        &entry.sink
+    }
+    #[cfg(not(test))]
+    {
+        entry
+    }
+}
+
+fn registered_snapshot(reg: &SessionSinkRegistry, session_id: &str) -> Vec<RegisteredSink> {
+    let mut result = Vec::new();
+    let mut visited = HashSet::new();
+    let mut current = Some(session_id);
+    while let Some(id) = current {
+        if !visited.insert(id) {
+            break;
+        }
+        if let Some(entries) = reg.sinks.get(id) {
+            for entry in entries {
+                if !result
+                    .iter()
+                    .any(|existing| Arc::ptr_eq(sink_arc(existing), sink_arc(entry)))
+                {
+                    result.push(entry.clone());
+                }
+            }
+        }
+        current = reg.parents.get(id).map(|route| route.parent.as_str());
+    }
+    result
+}
+
+/// Replace the observer route owned by a successfully admitted lineage edge.
+/// Resolve observers on delivery and flush so descendants follow reparenting.
+pub(crate) fn link_session_sinks(parent: &str, child: &str) {
+    external_sinks()
+        .write()
+        .expect("sink registry poisoned")
+        .parents
+        .insert(
+            child.to_string(),
+            ParentRoute {
+                parent: parent.to_string(),
+                owner: std::thread::current().id(),
+            },
+        );
+}
+
+/// Release only lineage owned by this worker's retiring session store.
+/// Other workers may have local placeholders for the same declared parent.
+pub(crate) fn clear_session_parent_routes(id: &str) {
+    let mut reg = external_sinks().write().expect("sink registry poisoned");
+    reg.parents
+        .retain(|child, route| child != id || route.owner != std::thread::current().id());
+}
+
+/// Closing or reusing an actual session identity retires its observer lineage.
+/// Direct registrations survive until the transport owner clears them.
+pub(crate) fn retire_session_observer_lineage(id: &str) {
+    external_sinks()
+        .write()
+        .expect("sink registry poisoned")
+        .parents
+        .retain(|child, route| child != id && route.parent != id);
+}
 
 fn external_sinks() -> &'static ExternalSinkRegistry {
     static REGISTRY: OnceLock<ExternalSinkRegistry> = OnceLock::new();
-    REGISTRY.get_or_init(|| RwLock::new(HashMap::new()))
+    REGISTRY.get_or_init(|| RwLock::new(SessionSinkRegistry::default()))
 }
 
 pub fn register_sink(session_id: impl Into<String>, sink: Arc<dyn AgentEventSink>) {
@@ -29,27 +108,18 @@ pub fn register_sink(session_id: impl Into<String>, sink: Arc<dyn AgentEventSink
         owner: std::thread::current().id(),
         sink,
     };
-    reg.entry(session_id).or_default().push(sink);
+    reg.sinks.entry(session_id).or_default().push(sink);
 }
 
 /// Remove all external sinks registered for `session_id`. Does NOT
 /// close the session itself — subscribers and transcript survive, so a
 /// later `agent_loop` call with the same id continues the conversation.
 pub fn clear_session_sinks(session_id: &str) {
-    #[cfg(test)]
-    {
-        external_sinks()
-            .write()
-            .expect("sink registry poisoned")
-            .remove(session_id);
-    }
-    #[cfg(not(test))]
-    {
-        external_sinks()
-            .write()
-            .expect("sink registry poisoned")
-            .remove(session_id);
-    }
+    external_sinks()
+        .write()
+        .expect("sink registry poisoned")
+        .sinks
+        .remove(session_id);
 }
 
 pub fn reset_all_sinks() {
@@ -57,19 +127,21 @@ pub fn reset_all_sinks() {
     {
         let owner = std::thread::current().id();
         let mut reg = external_sinks().write().expect("sink registry poisoned");
-        reg.retain(|_, sinks| {
+        reg.sinks.retain(|_, sinks| {
             sinks.retain(|sink| sink.owner != owner);
             !sinks.is_empty()
         });
+        reg.parents.retain(|_, route| route.owner != owner);
+        drop(reg);
         crate::agent_sessions::reset_session_store();
         reset_wildcard_sinks();
     }
     #[cfg(not(test))]
     {
-        external_sinks()
-            .write()
-            .expect("sink registry poisoned")
-            .clear();
+        let mut reg = external_sinks().write().expect("sink registry poisoned");
+        reg.sinks.clear();
+        reg.parents.clear();
+        drop(reg);
         crate::agent_sessions::reset_session_store();
         wildcard_sinks()
             .write()
@@ -92,28 +164,14 @@ pub fn mirror_session_sinks(source_session_id: &str, target_session_id: &str) {
         return;
     }
     let mut reg = external_sinks().write().expect("sink registry poisoned");
-    let Some(source_sinks) = reg.get(source_session_id).cloned() else {
-        return;
-    };
-    let target = reg.entry(target_session_id.to_string()).or_default();
-    #[cfg(test)]
-    {
-        for source in source_sinks {
-            let already_present = target
-                .iter()
-                .any(|existing| Arc::ptr_eq(&existing.sink, &source.sink));
-            if !already_present {
-                target.push(source);
-            }
-        }
-    }
-    #[cfg(not(test))]
-    {
-        for source in source_sinks {
-            let already_present = target.iter().any(|existing| Arc::ptr_eq(existing, &source));
-            if !already_present {
-                target.push(source);
-            }
+    let source_sinks = registered_snapshot(&reg, source_session_id);
+    let target = reg.sinks.entry(target_session_id.to_string()).or_default();
+    for source in source_sinks {
+        if !target
+            .iter()
+            .any(|existing| Arc::ptr_eq(sink_arc(existing), sink_arc(&source)))
+        {
+            target.push(source);
         }
     }
 }
@@ -187,16 +245,10 @@ fn wildcard_sinks() -> &'static WildcardSinkRegistry {
 
 fn session_sink_snapshot(session_id: &str) -> Vec<Arc<dyn AgentEventSink>> {
     let reg = external_sinks().read().expect("sink registry poisoned");
-    #[cfg(test)]
-    {
-        reg.get(session_id)
-            .map(|sinks| sinks.iter().map(|sink| sink.sink.clone()).collect())
-            .unwrap_or_default()
-    }
-    #[cfg(not(test))]
-    {
-        reg.get(session_id).cloned().unwrap_or_default()
-    }
+    registered_snapshot(&reg, session_id)
+        .iter()
+        .map(|entry| sink_arc(entry).clone())
+        .collect()
 }
 
 fn wildcard_sink_snapshot() -> Vec<Arc<dyn AgentEventSink>> {
@@ -269,24 +321,7 @@ pub fn reset_wildcard_sinks() {
 }
 
 pub fn session_external_sink_count(session_id: &str) -> usize {
-    #[cfg(test)]
-    {
-        return external_sinks()
-            .read()
-            .expect("sink registry poisoned")
-            .get(session_id)
-            .map(Vec::len)
-            .unwrap_or(0);
-    }
-    #[cfg(not(test))]
-    {
-        external_sinks()
-            .read()
-            .expect("sink registry poisoned")
-            .get(session_id)
-            .map(|v| v.len())
-            .unwrap_or(0)
-    }
+    session_sink_snapshot(session_id).len()
 }
 
 /// Return whether `sink` is still registered for `session_id`.
@@ -296,17 +331,9 @@ pub fn session_external_sink_count(session_id: &str) -> usize {
 /// If sibling reset code clears the global registration mid-dispatch, the
 /// scoped sink can detect that absence and continue streaming live events.
 pub fn session_has_external_sink(session_id: &str, sink: &Arc<dyn AgentEventSink>) -> bool {
-    let reg = external_sinks().read().expect("sink registry poisoned");
-    #[cfg(test)]
-    {
-        reg.get(session_id)
-            .is_some_and(|sinks| sinks.iter().any(|entry| Arc::ptr_eq(&entry.sink, sink)))
-    }
-    #[cfg(not(test))]
-    {
-        reg.get(session_id)
-            .is_some_and(|sinks| sinks.iter().any(|entry| Arc::ptr_eq(entry, sink)))
-    }
+    session_sink_snapshot(session_id)
+        .iter()
+        .any(|entry| Arc::ptr_eq(entry, sink))
 }
 
 pub fn session_closure_subscriber_count(session_id: &str) -> usize {
