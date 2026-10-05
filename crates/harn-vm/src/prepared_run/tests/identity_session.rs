@@ -683,9 +683,7 @@ async fn bridge_approval_grants_only_a_canonical_selected_allow_before_execution
             other => panic!("approval result disagrees with canonical answer: {other:?}"),
         }
         assert!(receipts
-            .receipts
-            .lock()
-            .unwrap()
+            .receipts()
             .iter()
             .any(|receipt| receipt.stage == AuthorityReceiptStage::ApprovalDecision));
     }
