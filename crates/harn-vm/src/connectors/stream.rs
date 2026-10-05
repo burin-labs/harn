@@ -6,6 +6,7 @@ use serde_json::{json, Value as JsonValue};
 use sha2::{Digest, Sha256};
 use time::OffsetDateTime;
 
+use crate::connectors::hmac::header_value;
 use crate::connectors::{
     ActivationHandle, ClientError, Connector, ConnectorClient, ConnectorCtx, ConnectorError,
     ProviderPayloadSchema, RawInbound, TriggerBinding, TriggerKind,
@@ -312,13 +313,6 @@ fn stringish(raw: &JsonValue, fields: &[&str]) -> Option<String> {
             .or_else(|| value.as_i64().map(|number| number.to_string()))
             .or_else(|| value.as_u64().map(|number| number.to_string()))
     })
-}
-
-fn header_value<'a>(headers: &'a BTreeMap<String, String>, name: &str) -> Option<&'a str> {
-    headers
-        .iter()
-        .find(|(key, _)| key.eq_ignore_ascii_case(name))
-        .map(|(_, value)| value.as_str())
 }
 
 fn fallback_body_digest(body: &[u8]) -> String {

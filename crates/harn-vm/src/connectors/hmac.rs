@@ -1007,7 +1007,11 @@ fn offset_from_unix_millis(raw: i64) -> Result<OffsetDateTime, String> {
         .ok_or_else(|| "timestamp overflow".to_string())
 }
 
-fn header_value<'a>(headers: &'a BTreeMap<String, String>, name: &str) -> Option<&'a str> {
+/// The value of header `name`, matched case-insensitively.
+pub(crate) fn header_value<'a>(
+    headers: &'a BTreeMap<String, String>,
+    name: &str,
+) -> Option<&'a str> {
     headers
         .iter()
         .find(|(key, _)| key.eq_ignore_ascii_case(name))
