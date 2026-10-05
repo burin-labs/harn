@@ -17,6 +17,121 @@ const OWNER_DEATH_SUPERVISOR_ENV: &str = "HARN_TEST_OWNER_DEATH_SUPERVISOR";
 const OWNER_DEATH_REPORT_FD_ENV: &str = "HARN_TEST_OWNER_DEATH_REPORT_FD";
 const OWNER_DEATH_LEAK_LIVENESS_ENV: &str = "HARN_TEST_OWNER_DEATH_LEAK_LIVENESS";
 const OWNER_DEATH_STALLED_STDIN_ENV: &str = "HARN_TEST_OWNER_DEATH_STALLED_STDIN";
+const CLOSED_INPUT_WORK_ENV: &str = "HARN_TEST_CLOSED_INPUT_WORK";
+
+#[test]
+fn closed_input_payload_fixture() {
+    let Some(work) = std::env::var_os(CLOSED_INPUT_WORK_ENV) else {
+        return;
+    };
+    assert_eq!(unsafe { libc::close(libc::STDIN_FILENO) }, 0);
+    println!("payload-input-closed");
+    std::io::stdout().flush().unwrap();
+    let work = std::path::PathBuf::from(work);
+    tokio::runtime::Builder::new_current_thread()
+        .build()
+        .unwrap()
+        .block_on(harn_clock::test_support::within(
+            "live owner releases child work after writing to closed input",
+            async {
+                while !work.join("release").exists() {
+                    tokio::task::yield_now().await;
+                }
+            },
+        ));
+    std::fs::write(
+        work.join("completed"),
+        b"child completed after closing input",
+    )
+    .unwrap();
+}
+
+#[test]
+fn contained_child_can_close_input_and_finish_while_owner_remains_alive() {
+    use harn_hostlib::process::{
+        spawn_process, EnvMode, OutputCapture, OwnerDeathPolicy, SpawnSpec,
+    };
+    let _environment = declare_inherited();
+    let _guardian_args = harn_hostlib::process::owner_death::install_guardian_reexec_args([
+        "--exact",
+        "process_tools_e2e::owner_death_guardian_fixture",
+        "--nocapture",
+    ]);
+    let work = tempfile::tempdir().unwrap();
+    let mut child = spawn_process(SpawnSpec {
+        builtin: "closed_input_live_owner_fixture",
+        program: std::env::current_exe()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned(),
+        args: vec![
+            "--exact".into(),
+            "process_owner_death_e2e::closed_input_payload_fixture".into(),
+            "--nocapture".into(),
+        ],
+        cwd: None,
+        env: [(
+            CLOSED_INPUT_WORK_ENV.into(),
+            work.path().to_string_lossy().into_owned(),
+        )]
+        .into(),
+        env_remove: Vec::new(),
+        env_mode: EnvMode::Patch,
+        use_stdin: true,
+        configure_process_group: true,
+        owner_death: OwnerDeathPolicy::KillContainment,
+        output_capture: OutputCapture::Pipe,
+    })
+    .unwrap();
+    let _cleanup = ProcessGroupCleanup {
+        groups: vec![child.process_group_id().unwrap() as i32],
+    };
+    let mut stdout = std::io::BufReader::new(child.take_stdout().unwrap());
+    let (ready_tx, ready_rx) = std::sync::mpsc::channel();
+    harn_parser::runtime_stack::spawn(move || {
+        let mut ready_tx = Some(ready_tx);
+        for line in stdout.by_ref().lines() {
+            if line.unwrap() == "payload-input-closed" {
+                ready_tx
+                    .take()
+                    .expect("one readiness marker")
+                    .send(true)
+                    .unwrap();
+            }
+        }
+        if let Some(ready_tx) = ready_tx {
+            let _ = ready_tx.send(false);
+        }
+    });
+    assert!(harn_clock::test_support::recv_within(
+        "actual child closed stdin",
+        &ready_rx
+    ));
+    let mut input = child.take_stdin().unwrap();
+    let (written_tx, written_rx) = std::sync::mpsc::channel();
+    harn_parser::runtime_stack::spawn(move || {
+        let result = input.write_all(&[0x53; 128 * 1024]);
+        drop(input);
+        let _ = written_tx.send(result);
+    });
+    harn_clock::test_support::recv_within(
+        "guardian drains input after child closes it",
+        &written_rx,
+    )
+    .expect("child input closure must not kill its live owner containment");
+    std::fs::write(work.path().join("release"), b"finish").unwrap();
+    assert_eq!(
+        child
+            .wait_with_timeout(Some(harn_clock::test_support::HANG_CEILING), &|| false)
+            .unwrap(),
+        harn_hostlib::process::WaitOutcome::Exited(harn_hostlib::process::ExitStatus::from_code(0)),
+        "child finishes with its owner alive"
+    );
+    assert_eq!(
+        std::fs::read(work.path().join("completed")).unwrap(),
+        b"child completed after closing input"
+    );
+}
 
 #[test]
 fn owner_death_grandchild_fixture() {
