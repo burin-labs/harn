@@ -1946,32 +1946,54 @@ fn linux_runner_label(label: string) -> bool {
   return contains(label, "ubuntu") || contains(label, "linux") || contains(label, "Linux")
 }
 
-/** Every runner label a selector can resolve to through its owning job. */
-fn runner_selector_labels(workflow: dict, job: dict, selector: unknown) -> list<string> {
-  let texts: list<string> = [to_string(selector ?? "")]
+/**
+ * A selector and every job-matrix expression it references.
+ *
+ * Reusable workflows may route `runs-on` through a callee matrix whose value
+ * is itself `inputs.os`. Follow that chain here so every policy consumer sees
+ * the same selector graph. The depth bound makes malformed cyclic matrices
+ * finite while preserving substantially deeper chains than GitHub workflows
+ * use in practice.
+ */
+fn runner_selector_expressions(
+  workflow: dict,
+  job: dict,
+  selector: unknown,
+  depth: int = 0,
+) -> list<string> {
   const expression = to_string(selector ?? "")
+  let texts: list<string> = [expression]
+  if depth >= 4 {
+    return texts
+  }
   const matrix = job?.strategy?.matrix ?? {}
   for {key: name, value: values} in matrix {
     if name != "include" && name != "exclude" && contains(expression, "matrix.${name}") {
       if type_of(values) == "list" {
         for value in values {
-          texts = texts + [to_string(value)]
+          texts = texts + runner_selector_expressions(workflow, job, value, depth + 1)
         }
       } else {
-        texts = texts + [to_string(values)]
+        texts = texts + runner_selector_expressions(workflow, job, values, depth + 1)
       }
     }
   }
   for row in matrix?.include ?? [] {
     for {key: name, value: value} in row {
       if contains(expression, "matrix.${name}") {
-        texts = texts + [to_string(value)]
+        texts = texts + runner_selector_expressions(workflow, job, value, depth + 1)
       }
     }
   }
+  return texts.unique()
+}
+
+/** Every runner label a selector can resolve to through its owning job. */
+fn runner_selector_labels(workflow: dict, job: dict, selector: unknown) -> list<string> {
+  let texts = runner_selector_expressions(workflow, job, selector)
   for input_kind in ["workflow_dispatch", "workflow_call"] {
     for {key: name, value: input} in (workflow["on"]?.[input_kind]?.inputs ?? {}) {
-      if contains(expression, "inputs.${name}") {
+      if texts.any({ text -> contains(text, "inputs.${name}") }) {
         texts = texts + [to_string(input?.default ?? "")]
         for option in input?.options ?? [] {
           texts = texts + [to_string(option)]
@@ -1998,7 +2020,9 @@ fn workflow_call_runner_inputs(workflow: dict) -> list<string> {
   let names: list<string> = []
   for name in (workflow["on"]?.workflow_call?.inputs ?? {}).keys() {
     for job in (workflow?.jobs ?? {}).values() {
-      if contains(to_string(job?.["runs-on"] ?? ""), "inputs.${name}") {
+      if runner_selector_expressions(workflow, job, job?.["runs-on"]).any(
+        { text -> contains(text, "inputs.${name}") },
+      ) {
         names = names + [name]
       }
     }
@@ -2110,7 +2134,9 @@ pub fn public_repository_runner_errors(
         const callee_name = basename(reusable)
         const callee = workflows[callee_name]
         for input in workflow_call_runner_inputs(callee ?? {}) {
-          for label in runner_selector_labels(workflow, job, job?.with?.[input]) {
+          const supplied = job?.with?.[input]
+            ?? callee?.["on"]?.workflow_call?.inputs?.[input]?.default
+          for label in runner_selector_labels(workflow, job, supplied) {
             if paid_public_runner_selector(label, release_runner_policy) {
               errors = errors
                 + [

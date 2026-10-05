@@ -242,13 +242,25 @@ pipeline test_public_runner_policy_checks_reusable_workflow_call_defaults(
   harness: Harness,
   task: unknown,
 ) {
-  const invalid = {
+  const reusable = {
     on: {workflow_call: {inputs: {os: {type: "string", default: "ubuntu-8core"}}}},
-    jobs: {install: {"runs-on": gha_expression("inputs.os")}},
+    jobs: {
+      install: {
+        "runs-on": gha_expression("matrix.runner"),
+        strategy: {matrix: {runner: [gha_expression("inputs.os")]}},
+      },
+    },
   }
+  const caller = {jobs: {omitted: {uses: "./.github/workflows/setup-harn-contract.yml"}}}
   assert_eq(
-    public_repository_runner_errors({"reusable.yml": invalid}, {targets: []}),
-    ["reusable.yml:install runner selection can resolve through paid token ubuntu-8core"],
+    public_repository_runner_errors(
+      {"ci.yml": caller, "setup-harn-contract.yml": reusable},
+      {targets: []},
+    ),
+    [
+      "ci.yml:omitted passes paid runner token ubuntu-8core to setup-harn-contract.yml input os",
+      "setup-harn-contract.yml:install runner selection can resolve through paid token ubuntu-8core",
+    ],
   )
 }
 
