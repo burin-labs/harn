@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use harn_session_store::{
-    AppendEvent, CreateSession, Embedder, EventId, ListFilter, ReadRange, SearchMode, SearchQuery,
+    AppendEvent, CreateSession, Embedder, ListFilter, ReadRange, SearchMode, SearchQuery,
     SessionStore, SessionType, SqliteSessionStore, StoreError, StoreHooks, UpdateSession,
     MAX_READ_BATCH,
 };
