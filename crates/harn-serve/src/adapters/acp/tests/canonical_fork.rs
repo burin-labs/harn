@@ -321,6 +321,18 @@ async fn cold_parent_forks_persist_selected_context_and_lineage_before_prompt() 
 
     // Numeric collisions are not provenance: a foreign ID, wrong hash, or
     // observability domain must never create a live or durable child.
+    restarted
+        .handle_session_fork(
+            &serde_json::json!("count-refused"),
+            &serde_json::json!({"sessionId":parent, "id":"count-based-child", "keep_first":1}),
+        )
+        .await;
+    assert!(!restarted.sessions.contains_key("count-based-child"));
+    assert!(!harn_vm::agent_sessions::exists("count-based-child"));
+    assert!(matches!(
+        store.describe("count-based-child").await,
+        Err(harn_session_store::StoreError::NotFound(_))
+    ));
     for (name, invalid) in [
         (
             "foreign-boundary",

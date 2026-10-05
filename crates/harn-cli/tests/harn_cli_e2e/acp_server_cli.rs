@@ -541,6 +541,18 @@ fn acp_session_fork_branches_runtime_state_and_dispatches_independently() {
     let session_id = created["result"]["sessionId"].as_str().unwrap().to_string();
     select_code_mode(&mut client, &session_id);
 
+    let (_, unknown_history) = send_request(
+        &mut client,
+        json!({
+            "jsonrpc": "2.0", "id": "unknown-boundary",
+            "method": "harn.session_history.boundaries",
+            "params": {"sessionId": "unknown-canonical-parent"}
+        }),
+    );
+    assert!(
+        unknown_history.get("error").is_some(),
+        "unknown history must return an error without ending the server"
+    );
     let (_, empty_history) = send_request(
         &mut client,
         json!({

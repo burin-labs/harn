@@ -490,15 +490,11 @@ impl AcpServer {
             self.send_error(id, -32602, "Missing session_id");
             return;
         };
-        if let Err(error) = self.prompt_admission(&session_id) {
-            self.send_error(id, -32602, &error);
+        let Some(session) = self.sessions.get(&session_id) else {
+            self.send_error(id, -32602, &format!("Unknown session: {session_id}"));
             return;
-        }
-        let root = &self
-            .sessions
-            .get(&session_id)
-            .expect("admitted session")
-            .project_root;
+        };
+        let root = &session.project_root;
         let store = match harn_vm::open_canonical_store(root) {
             Ok(store) => store,
             Err(error) => {
