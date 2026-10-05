@@ -99,9 +99,16 @@ impl PreparedVerifier {
             .try_clone()
             .map_err(|error| error.to_string())?;
         let source = self.source.try_clone().map_err(|error| error.to_string())?;
+        let witness = VerifierExecutionWitness::new().map_err(|error| error.to_string())?;
+        let witness_descriptor = witness
+            .file
+            .try_clone()
+            .map_err(|error| error.to_string())?;
         let metadata = serde_json::json!({
             "origin": self.request.source,
             "args": self.request.args,
+            "witness_fd": witness_descriptor.as_raw_fd(),
+            "witness": witness.expected,
         });
         Ok(PinnedVerifierLaunch {
             program: format!("/proc/self/fd/{}", interpreter.as_raw_fd()),
@@ -116,8 +123,72 @@ impl PreparedVerifier {
             descriptors: crate::process_sandbox::DescriptorTransfer::new(vec![
                 interpreter.into(),
                 source.into(),
+                witness_descriptor.into(),
             ]),
+            witness,
         })
+    }
+}
+
+/// Proof that the pinned bootstrap reached source execution in the admitted
+/// child. Capture never executes the candidate. Completion owners check this
+/// bounded private capability after their existing confined wait.
+/// The interpreter is host-admitted material; this is execution evidence, not
+/// an attestation against a malicious interpreter that fabricates the protocol.
+pub struct VerifierExecutionWitness {
+    #[cfg(target_os = "linux")]
+    file: std::fs::File,
+    #[cfg(target_os = "linux")]
+    expected: [u8; 16],
+}
+
+impl VerifierExecutionWitness {
+    #[cfg(target_os = "linux")]
+    fn new() -> std::io::Result<Self> {
+        use std::os::fd::{AsRawFd, FromRawFd};
+        // SAFETY: static NUL-terminated name and supported memfd flags.
+        let fd = unsafe {
+            libc::memfd_create(
+                c"harn-verifier-witness".as_ptr(),
+                libc::MFD_CLOEXEC | libc::MFD_ALLOW_SEALING,
+            )
+        };
+        if fd < 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        // SAFETY: successful memfd_create returned a newly owned descriptor.
+        let file = unsafe { std::fs::File::from_raw_fd(fd) };
+        file.set_len(16)?;
+        // Only these sixteen bytes are writable; neither child nor descendants
+        // can grow this capability into an unbounded output channel.
+        // SAFETY: the owned descriptor remains open throughout this call.
+        if unsafe {
+            libc::fcntl(
+                file.as_raw_fd(),
+                libc::F_ADD_SEALS,
+                libc::F_SEAL_GROW | libc::F_SEAL_SHRINK | libc::F_SEAL_SEAL,
+            )
+        } < 0
+        {
+            return Err(std::io::Error::last_os_error());
+        }
+        Ok(Self {
+            file,
+            expected: *uuid::Uuid::new_v4().as_bytes(),
+        })
+    }
+
+    pub fn validate(&self) -> std::io::Result<()> {
+        #[cfg(target_os = "linux")]
+        {
+            use std::os::unix::fs::FileExt;
+            let mut actual = [0; 16];
+            self.file.read_exact_at(&mut actual, 0)?;
+            if actual == self.expected {
+                return Ok(());
+            }
+        }
+        Err(std::io::Error::other("isolated source verifier execution is unmeasured: pinned Python bootstrap did not witness source execution"))
     }
 }
 
@@ -128,6 +199,7 @@ pub struct PinnedVerifierLaunch {
     pub program: String,
     pub args: Vec<String>,
     pub descriptors: crate::process_sandbox::DescriptorTransfer,
+    pub witness: VerifierExecutionWitness,
 }
 
 /// Use the existing environment policy at the stricter executable boundary.
@@ -180,5 +252,14 @@ source = os.pread(descriptor, os.fstat(descriptor).st_size, 0)
 os.close(descriptor)
 sys.argv = [metadata['origin'], *metadata['args']]
 namespace = {'__name__': '__main__', '__file__': metadata['origin'], '__package__': None, '__spec__': None, '__cached__': None}
-exec(compile(source, metadata['origin'], 'exec'), namespace)
+witness_fd = metadata['witness_fd']
+witness = bytes(metadata['witness'])
+write_witness = os.pwrite
+close_witness = os.close
+compiled = compile(source, metadata['origin'], 'exec')
+try:
+    exec(compiled, namespace)
+finally:
+    write_witness(witness_fd, witness, 0)
+    close_witness(witness_fd)
 "#;

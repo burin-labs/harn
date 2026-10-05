@@ -145,6 +145,102 @@ fn ready(
     }
 }
 
+struct MultipleSourceExecutor(Vec<IsolatedPythonSourceVerifier>);
+
+#[async_trait::async_trait]
+impl PreparedRunExecutor for MultipleSourceExecutor {
+    type Output = Vec<serde_json::Value>;
+    type Error = String;
+
+    async fn execute(&self, _authority: &AuthorityUse) -> Result<Self::Output, Self::Error> {
+        self.0
+            .iter()
+            .map(|request| {
+                SourceExecutor {
+                    request: request.clone(),
+                    mutate_and_repair: false,
+                }
+                .invoke(json!({}))
+            })
+            .collect()
+    }
+}
+
+#[tokio::test]
+async fn two_admitted_invocations_sharing_a_source_execute_their_own_arguments() {
+    let fixture = SourceFixture::new();
+    let mut first = fixture.request.clone();
+    first.id = "a-first".to_string();
+    let mut second = first.clone();
+    second.id = "z-second".to_string();
+    let second_test = fixture.request.workspace.join("test_second.py");
+    std::fs::write(&second_test, "print('SECOND_ADMITTED_SOURCE_REACHED')\n").unwrap();
+    second.args = vec![second_test.display().to_string()];
+    let (mut intent, mut host) = fixture.declaration();
+    intent.isolated_source_verifiers = vec![first.clone(), second.clone()];
+    host.admitted_source_verifiers = BTreeSet::from([first.clone(), second.clone()]);
+    let run = PreparedRun::with_clock(
+        MultipleSourceExecutor(vec![first, second]),
+        Arc::new(MemoryAuthorityReceiptSink::default()),
+        Arc::new(|| NOW_MS),
+    );
+    let lease = match run.prepare(intent, host) {
+        PreparationOutcome::Ready {
+            authority_lease, ..
+        } => authority_lease,
+        other => panic!("both exact invocations must be admitted: {other:?}"),
+    };
+    match run.execute(lease).await {
+        ExecutionOutcome::Completed { output, .. } => {
+            assert_eq!(output.len(), 2);
+            assert_eq!(output[0]["source_verifier_id"], "a-first");
+            assert_eq!(output[0]["status"], 1);
+            assert!(output[0]["stderr"]
+                .as_str()
+                .unwrap()
+                .contains("KNOWN_FAILING_ASSERTION"));
+            assert_eq!(output[1]["source_verifier_id"], "z-second");
+            assert_eq!(output[1]["status"], 0);
+            assert!(output[1]["stdout"]
+                .as_str()
+                .unwrap()
+                .contains("SECOND_ADMITTED_SOURCE_REACHED"));
+        }
+        ExecutionOutcome::ExecutorFailed { error, .. }
+        | ExecutionOutcome::AuthorityFailed { error, .. } => {
+            panic!("exact admission failed: {error}")
+        }
+    }
+}
+
+#[tokio::test]
+async fn an_elf_that_ignores_python_source_cannot_mint_verifier_authority() {
+    let mut fixture = SourceFixture::new();
+    fixture.request.interpreter = Path::new("/usr/bin/true").canonicalize().unwrap();
+    let ignored = std::process::Command::new(&fixture.request.interpreter)
+        .args(fixture.request.invocation_args())
+        .status()
+        .unwrap();
+    assert!(
+        ignored.success(),
+        "the negative must demonstrate exit-zero without running the failing source"
+    );
+    let run = source_run(fixture.request.clone());
+    let (intent, host) = fixture.declaration();
+    let lease = ready(&run, intent, host);
+    match run.execute(lease).await {
+        ExecutionOutcome::ExecutorFailed { error, .. } => {
+            assert!(error.contains("execution is unmeasured"), "{error}");
+        }
+        ExecutionOutcome::AuthorityFailed { error, .. } => {
+            panic!("admission failed before negative execution: {error}")
+        }
+        ExecutionOutcome::Completed { .. } => {
+            panic!("exit-zero without source execution must not mint a verifier receipt")
+        }
+    }
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn prepared_source_verifier_executes_original_bytes_after_interpreter_and_runner_mutation() {
     let fixture = SourceFixture::new();
@@ -168,7 +264,10 @@ async fn prepared_source_verifier_executes_original_bytes_after_interpreter_and_
             assert_eq!(second["status"], 0);
             assert_eq!(second["success"], true);
         }
-        other => panic!("prepared source execution must complete: {other:?}"),
+        ExecutionOutcome::ExecutorFailed { error, .. }
+        | ExecutionOutcome::AuthorityFailed { error, .. } => {
+            panic!("prepared source execution must complete: {error}")
+        }
     }
 }
 
@@ -211,7 +310,10 @@ async fn concurrent_prepared_verifiers_keep_their_own_native_material_across_wor
                 assert_eq!(output["second"]["source_verifier_id"], "calculation");
                 assert_eq!(output["second"]["status"], 0);
             }
-            other => panic!("each prepared execution must retain its own authority: {other:?}"),
+            ExecutionOutcome::ExecutorFailed { error, .. }
+            | ExecutionOutcome::AuthorityFailed { error, .. } => {
+                panic!("each prepared execution must retain its own authority: {error}")
+            }
         }
     }
     assert!(

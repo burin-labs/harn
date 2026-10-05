@@ -835,7 +835,7 @@ fn run_captured_spawn(spec: CapturedSpawn<'_>) -> Result<CapturedRun, VmError> {
     let verifier =
         crate::prepared_run::prepared_source_verifier(&resolved_cmd, spec.args, &actual_cwd)
             .map_err(|error| VmError::Thrown(VmValue::string(format!("{label}: {error}"))))?;
-    let source_verifier_id = verifier.as_ref().map(|value| value.request().id.clone());
+    let mut source_verifier_id = verifier.as_ref().map(|value| value.request().id.clone());
     #[cfg(target_os = "linux")]
     let pinned = verifier
         .as_ref()
@@ -882,14 +882,17 @@ fn run_captured_spawn(spec: CapturedSpawn<'_>) -> Result<CapturedRun, VmError> {
     crate::op_interrupt::preserve_process_owner_token(&mut command);
 
     #[cfg(target_os = "linux")]
-    if let Some(pinned) = pinned {
+    let witness = if let Some(pinned) = pinned {
         crate::verifier_provenance::validate_pinned_environment(
             &command,
             spec.env_clear || resolved_environment.is_some(),
         )
         .map_err(|error| VmError::Thrown(VmValue::string(format!("{label}: {error}"))))?;
         pinned.descriptors.attach(&mut command);
-    }
+        Some(pinned.witness)
+    } else {
+        None
+    };
 
     let started = Instant::now();
     let cmd = spec.cmd;
@@ -956,6 +959,16 @@ fn run_captured_spawn(spec: CapturedSpawn<'_>) -> Result<CapturedRun, VmError> {
         .map(|rx| crate::op_interrupt::drain_captured_pipe(&rx, killed, child_pid))
         .unwrap_or_default();
 
+    if timed_out || interrupted {
+        source_verifier_id = None;
+    } else {
+        #[cfg(target_os = "linux")]
+        if let Some(witness) = witness {
+            witness
+                .validate()
+                .map_err(|error| VmError::Thrown(VmValue::string(format!("{label}: {error}"))))?;
+        }
+    }
     Ok(CapturedRun {
         source_verifier_id,
         output: std::process::Output {

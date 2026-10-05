@@ -593,11 +593,16 @@ impl AuthorityUse {
         if (self.now_ms)() > self.lease.expires_at_ms {
             return Err("prepared verifier authority expired".to_string());
         }
+        if let Some(verifier) = self
+            .lease
+            .source_verifiers
+            .values()
+            .find(|verifier| verifier.request().matches(program, args, cwd))
+        {
+            return Ok(Some(verifier.clone()));
+        }
         let plan = crate::shells::plan_invocation(program, args);
         for verifier in self.lease.source_verifiers.values() {
-            if verifier.request().matches(program, args, cwd) {
-                return Ok(Some(verifier.clone()));
-            }
             if args
                 .iter()
                 .any(|arg| Path::new(arg) == verifier.request().source)

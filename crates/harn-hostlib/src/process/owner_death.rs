@@ -147,10 +147,17 @@ struct StartupMessage {
 
 /// Build the guardian re-exec command and its private pipe request.
 #[cfg(unix)]
+pub(crate) struct PreparedGuardian {
+    pub(crate) command: Command,
+    pub(crate) request: Vec<u8>,
+    pub(crate) missing_program: Option<String>,
+    pub(crate) verifier_witness: Option<harn_vm::verifier_provenance::VerifierExecutionWitness>,
+}
+
 pub(crate) fn prepare_guardian(
     spec: &SpawnSpec,
     cleanup_token: String,
-) -> Result<(Command, Vec<u8>, Option<String>), ProcessError> {
+) -> Result<PreparedGuardian, ProcessError> {
     super::real::validate_program(spec)?;
     let mut payload_spec = spec.clone();
     payload_spec.configure_process_group = false;
@@ -255,10 +262,20 @@ pub(crate) fn prepare_guardian(
         confinement.hand_to(&mut guardian);
     }
     #[cfg(target_os = "linux")]
-    if let Some(pinned) = pinned {
+    let witness = if let Some(pinned) = pinned {
         pinned.descriptors.attach(&mut guardian);
-    }
-    Ok((guardian, request, missing_program))
+        Some(pinned.witness)
+    } else {
+        None
+    };
+    #[cfg(not(target_os = "linux"))]
+    let witness = None;
+    Ok(PreparedGuardian {
+        command: guardian,
+        request,
+        missing_program,
+        verifier_witness: witness,
+    })
 }
 
 /// The parent's side of the handover.
@@ -1111,8 +1128,11 @@ mod tests {
         };
 
         let cleanup_token = harn_vm::op_interrupt::new_process_cleanup_token();
-        let (guardian, request, _) =
-            prepare_guardian(&spec, cleanup_token.clone()).expect("prepare guardian");
+        let PreparedGuardian {
+            command: guardian,
+            request,
+            ..
+        } = prepare_guardian(&spec, cleanup_token.clone()).expect("prepare guardian");
         harn_vm::op_interrupt::remove_process_owner_group_journal(&cleanup_token);
         let decoded: PreparedCommand =
             serde_json::from_slice(&request).expect("decode private guardian request");

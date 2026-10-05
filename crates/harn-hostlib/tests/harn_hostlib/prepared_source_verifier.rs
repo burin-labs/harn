@@ -15,6 +15,7 @@ use harn_vm::verifier_provenance::IsolatedPythonSourceVerifier;
 
 struct FixtureExecutor {
     request: IsolatedPythonSourceVerifier,
+    ignores_source: bool,
 }
 
 impl FixtureExecutor {
@@ -65,6 +66,21 @@ impl PreparedRunExecutor for FixtureExecutor {
     type Error = String;
 
     async fn execute(&self, _authority: &AuthorityUse) -> Result<(), String> {
+        if self.ignores_source {
+            for mode in [OwnerDeathPolicy::None, OwnerDeathPolicy::KillContainment] {
+                let mut child = default_spawner()
+                    .spawn(self.spec(mode))
+                    .expect("actual negative verifier spawn");
+                let error = child
+                    .wait_with_timeout(Some(Duration::from_secs(10)), &|| false)
+                    .expect_err("exit zero without bootstrap execution must be unmeasured");
+                assert!(
+                    error.to_string().contains("execution is unmeasured"),
+                    "{error}"
+                );
+            }
+            return Ok(());
+        }
         // Mutation begins only after PreparedRun installs the native authority.
         std::fs::write(&self.request.source, "print('RUNNER_SHIM_BYPASS')\n").unwrap();
         std::fs::remove_file(&self.request.interpreter).unwrap();
@@ -108,6 +124,15 @@ impl PreparedRunExecutor for FixtureExecutor {
 #[tokio::test]
 async fn prepared_source_verifier_direct_and_guardian_keep_original_material_and_refuse_loader_overrides(
 ) {
+    source_verifier_control(false).await;
+}
+
+#[tokio::test]
+async fn prepared_source_verifier_direct_and_guardian_refuse_an_elf_that_ignores_source() {
+    source_verifier_control(true).await;
+}
+
+async fn source_verifier_control(ignores_source: bool) {
     let _guardian = harn_hostlib::process::owner_death::install_guardian_reexec_args([
         "--exact",
         "process_tools_e2e::owner_death_guardian_fixture",
@@ -116,7 +141,15 @@ async fn prepared_source_verifier_direct_and_guardian_keep_original_material_and
     let scratch = tempfile::tempdir().unwrap();
     let workspace = scratch.path().canonicalize().unwrap();
     let interpreter = workspace.join("admitted-python");
-    std::fs::copy("/usr/bin/python3", &interpreter).expect("required real Python interpreter");
+    std::fs::copy(
+        if ignores_source {
+            "/usr/bin/true"
+        } else {
+            "/usr/bin/python3"
+        },
+        &interpreter,
+    )
+    .expect("required real interpreter control");
     let source = workspace.join("runner.py");
     std::fs::write(
         &source,
@@ -196,7 +229,10 @@ async fn prepared_source_verifier_direct_and_guardian_keep_original_material_and
         provenance,
     };
     let run = PreparedRun::with_clock(
-        FixtureExecutor { request },
+        FixtureExecutor {
+            request,
+            ignores_source,
+        },
         Arc::new(MemoryAuthorityReceiptSink::default()),
         Arc::new(|| 1),
     );
@@ -208,6 +244,9 @@ async fn prepared_source_verifier_direct_and_guardian_keep_original_material_and
     };
     match run.execute(lease).await {
         ExecutionOutcome::Completed { receipt, .. } => assert!(receipt.executor_invoked),
-        other => panic!("prepared hostlib verifier execution failed: {other:?}"),
+        ExecutionOutcome::ExecutorFailed { error, .. }
+        | ExecutionOutcome::AuthorityFailed { error, .. } => {
+            panic!("prepared hostlib verifier execution failed: {error}")
+        }
     }
 }
