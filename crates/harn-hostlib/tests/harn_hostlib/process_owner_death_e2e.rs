@@ -110,7 +110,7 @@ fn contained_child_can_close_input_and_finish_while_owner_remains_alive() {
     let mut input = child.take_stdin().unwrap();
     let (written_tx, written_rx) = std::sync::mpsc::channel();
     harn_parser::runtime_stack::spawn(move || {
-        let result = input.write_all(&[0x53; 128 * 1024]);
+        let result = input.write_all(&vec![0x53; 128 * 1024]);
         drop(input);
         let _ = written_tx.send(result);
     });
