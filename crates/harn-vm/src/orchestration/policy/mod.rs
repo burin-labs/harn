@@ -17,6 +17,8 @@ mod runtime_effect_state;
 pub(crate) mod tool_enforcement;
 mod types;
 
+pub(crate) use approval_rules::PolicyAuthorityRequest;
+
 use crate::value::VmDictExt;
 use std::cell::RefCell;
 use std::collections::BTreeMap;
