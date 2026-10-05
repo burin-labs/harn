@@ -139,6 +139,14 @@ plan from_queue FAKE_CANDIDATE_RUN=4242
 plan recovery RECOVERY=true FAKE_RUNS_FAIL=1
 [[ "$(output recovery promote)" == true && "$(output recovery run_id)" == 9001 ]] \
   || fail "recovery did not retain its certified run: $(cat "$tmp/recovery.log")"
+plan recovery_missing RECOVERY=true FAKE_CONSUMER=missing
+[[ "$(output recovery_missing promote)" == true && "$(output recovery_missing requires_rehearsal)" == true ]] \
+  || fail "missing rehearsal did not require actual measurement"
+for verdict in pending failure cancelled; do
+  plan "recovery_consumer_$verdict" RECOVERY=true "FAKE_CONSUMER=$verdict"
+  [[ "$(cat "$tmp/recovery_consumer_$verdict.status")" != 0 ]] \
+    || fail "recovery replaced a measured $verdict consumer with a new rehearsal"
+done
 
 # Historical candidates need not contain today's publication policy helpers.
 # The controller owns those helpers; the candidate supplies only version facts.
