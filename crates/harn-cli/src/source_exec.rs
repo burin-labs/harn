@@ -425,16 +425,20 @@ async fn initialized_connector_clients(
 async fn connector_context() -> Result<harn_vm::ConnectorCtx, String> {
     let event_log = harn_vm::event_log::active_event_log()
         .unwrap_or_else(|| harn_vm::event_log::install_memory_for_current_thread(64));
-    connector_context_for_event_log(event_log).await
+    connector_context_for_event_log(event_log, configured_connector_secrets()?).await
+}
+
+fn configured_connector_secrets() -> Result<Arc<dyn harn_vm::secrets::SecretProvider>, String> {
+    Ok(Arc::new(
+        harn_vm::secrets::configured_secret_chain()
+            .map_err(|error| format!("failed to configure secret providers: {error}"))?,
+    ))
 }
 
 async fn connector_context_for_event_log(
     event_log: Arc<harn_vm::event_log::AnyEventLog>,
+    secrets: Arc<dyn harn_vm::secrets::SecretProvider>,
 ) -> Result<harn_vm::ConnectorCtx, String> {
-    let secrets: Arc<dyn harn_vm::secrets::SecretProvider> = Arc::new(
-        harn_vm::secrets::configured_secret_chain()
-            .map_err(|error| format!("failed to configure secret providers: {error}"))?,
-    );
     let metrics = Arc::new(harn_vm::MetricsRegistry::default());
     let inbox = Arc::new(
         harn_vm::InboxIndex::new(event_log.clone(), metrics.clone())
@@ -464,6 +468,9 @@ async fn initialized_registry_clients(
 struct ProjectConnectorResolver {
     anchor: PathBuf,
     event_log: Arc<harn_vm::event_log::AnyEventLog>,
+    // Capture at the owning launch boundary. Lazy resolution can run on a
+    // different Tokio task, where task-local parent grants do not propagate.
+    secrets: Result<Arc<dyn harn_vm::secrets::SecretProvider>, String>,
     state: tokio::sync::Mutex<ProjectConnectorState>,
 }
 
@@ -492,6 +499,7 @@ impl ProjectConnectorResolver {
             anchor: absolute.canonicalize().unwrap_or(absolute),
             event_log: harn_vm::event_log::active_event_log()
                 .unwrap_or_else(|| harn_vm::event_log::install_memory_for_current_thread(64)),
+            secrets: configured_connector_secrets(),
             state: tokio::sync::Mutex::new(ProjectConnectorState::default()),
         }
     }
@@ -599,14 +607,16 @@ impl harn_vm::ConnectorClientResolver for ProjectConnectorResolver {
             return Ok(state.clients.get(&provider).cloned());
         }
         if state.context.is_none() {
-            let context = match connector_context_for_event_log(self.event_log.clone()).await {
-                Ok(context) => context,
-                Err(error) => {
-                    let error = harn_vm::ClientError::Other(error);
-                    state.terminal_error = Some(error.clone());
-                    return Err(error);
-                }
-            };
+            let secrets = self.secrets.clone().map_err(harn_vm::ClientError::Other)?;
+            let context =
+                match connector_context_for_event_log(self.event_log.clone(), secrets).await {
+                    Ok(context) => context,
+                    Err(error) => {
+                        let error = harn_vm::ClientError::Other(error);
+                        state.terminal_error = Some(error.clone());
+                        return Err(error);
+                    }
+                };
             state.context = Some(context);
         }
 
@@ -737,7 +747,8 @@ mod tests {
     use std::sync::Arc;
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn project_connector_resolver_initializes_one_provider_once_across_tasks() {
+    async fn project_connector_resolver_preserves_parent_grants_and_initializes_once_across_tasks()
+    {
         let project = tempfile::tempdir().expect("temp project");
         std::fs::write(
             project.path().join("harn.toml"),
@@ -748,6 +759,9 @@ name = "concurrent-connector-fixture"
 [[providers]]
 id = "concurrent_valid"
 connector = { harn = "./connector.harn" }
+
+[providers.setup]
+required_secrets = [{ id = "concurrent_valid/api-token", direction = "outbound" }]
 "#,
         )
         .expect("write manifest");
@@ -757,13 +771,25 @@ connector = { harn = "./connector.harn" }
 pub fn provider_id() { return "concurrent_valid" }
 pub fn kinds() { return ["webhook"] }
 pub fn payload_schema() { return "ConcurrentValidPayload" }
-pub fn call(_harness: Harness, method, _args) { return method }
+pub fn call(_harness: Harness, method, args) {
+  return {method: method, credential_resolved: args.secrets.api_token == "inert-concurrent-canary"}
+}
 "#,
         )
         .expect("write connector");
         let entry = project.path().join("main.harn");
         std::fs::write(&entry, "pipeline main() {}\n").expect("write entry");
-        let resolver = Arc::new(ProjectConnectorResolver::new(&entry));
+        use harn_vm::secrets::{
+            with_parent_secret_handoff, MemorySecretProvider, ParentSecretHandoff, SecretId,
+        };
+        let id = SecretId::new("concurrent_valid", "api-token");
+        let parent = MemorySecretProvider::new("fixture-parent")
+            .with_secret(id.clone(), b"inert-concurrent-canary");
+        let handoff = ParentSecretHandoff::capture(&parent, [id]).await.unwrap();
+        let resolver = with_parent_secret_handoff(Some(handoff), async {
+            Arc::new(ProjectConnectorResolver::new(&entry))
+        })
+        .await;
 
         let tasks = (0..8)
             .map(|_| {
@@ -784,7 +810,7 @@ pub fn call(_harness: Harness, method, _args) { return method }
         for task in tasks {
             assert_eq!(
                 task.await.expect("task"),
-                serde_json::Value::String("ping".to_string())
+                serde_json::json!({"method": "ping", "credential_resolved": true})
             );
         }
         let state = resolver.state.lock().await;

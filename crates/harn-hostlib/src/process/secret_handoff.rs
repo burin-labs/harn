@@ -269,6 +269,35 @@ mod tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
+    async fn unresolved_writer_is_returned_as_pending_even_after_child_cleanup() {
+        let spawner = Arc::new(MockSpawner::new());
+        let controller = spawner.enqueue(MockProcessConfig::running());
+        let _guard = install_spawner(spawner.clone());
+        let mut child = spawn_process(spec()).unwrap();
+        let selected = handoff().await;
+        let (ready_tx, ready_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let writer = std::thread::spawn(move || {
+            ready_tx.send(()).unwrap();
+            release_rx.recv().unwrap();
+            drop(selected);
+        });
+        ready_rx.recv_timeout(Duration::from_secs(1)).unwrap();
+        let error = failed_transfer(&mut *child, "fixture transfer still blocked", Some(writer));
+        assert!(controller.was_killed());
+        assert!(error.to_string().contains("pending=1"));
+        let SecretHandoffSpawnError::Transfer {
+            writer: SecretHandoffWriterState::Pending(writer),
+            ..
+        } = error
+        else {
+            panic!("child cleanup must not stand in for writer reclamation");
+        };
+        release_tx.send(()).unwrap();
+        writer.join().unwrap();
+    }
+
+    #[tokio::test(flavor = "current_thread")]
     async fn cancellation_after_spawn_returns_the_existing_cleanup_and_reap_receipts() {
         let spawner = Arc::new(MockSpawner::new());
         let controller = spawner.enqueue(MockProcessConfig::running());
