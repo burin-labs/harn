@@ -43,12 +43,23 @@ async fn cold_parent_forks_persist_selected_context_and_lineage_before_prompt() 
         server.sessions.contains_key(parent),
         "cold parent must actually load"
     );
-    for (count, child) in [(2, "prefix-child"), (0, "empty-child")] {
+    let boundaries = harn_vm::agent_sessions::canonical_history_boundaries(root.path(), parent)
+        .await
+        .expect("acknowledged canonical boundaries");
+    let first_boundary = boundaries.positions[0].boundary.clone();
+    for (count, child, boundary) in [
+        (2, "prefix-child", boundaries.positions[1].boundary.clone()),
+        (
+            0,
+            "empty-child",
+            harn_vm::agent_sessions::CanonicalSessionBoundary::empty(parent),
+        ),
+    ] {
         server
             .handle_session_fork(
                 &serde_json::json!(2),
                 &serde_json::json!({
-                    "sessionId": parent, "id": child, "keep_first": count,
+                    "sessionId": parent, "id": child, "canonicalBoundary": boundary,
                     "environmentPolicy": {"kind": "isolated", "grants": []},
                 }),
             )
@@ -93,11 +104,15 @@ async fn cold_parent_forks_persist_selected_context_and_lineage_before_prompt() 
         restarted.sessions.contains_key("prefix-child"),
         "durable child must reload after restart"
     );
+    let child_boundaries =
+        harn_vm::agent_sessions::canonical_history_boundaries(root.path(), "prefix-child")
+            .await
+            .expect("child acknowledgments");
     restarted
         .handle_session_fork(
             &serde_json::json!(4),
             &serde_json::json!({
-                "sessionId": "prefix-child", "id": "grandchild", "keep_first": 1,
+                "sessionId": "prefix-child", "id": "grandchild", "canonicalBoundary": child_boundaries.positions[0].boundary,
             }),
         )
         .await;
@@ -124,9 +139,7 @@ async fn cold_parent_forks_persist_selected_context_and_lineage_before_prompt() 
         Some("prefix-child")
     );
 
-    // A replacement preserves identities but changes the context those old
-    // event boundaries would restore. Refuse that prefix instead of silently
-    // creating a child that changes its context on the next restart.
+    // A later replacement must not redefine the acknowledged historical prefix.
     store
         .append(
             parent,
@@ -153,13 +166,56 @@ async fn cold_parent_forks_persist_selected_context_and_lineage_before_prompt() 
     restarted
         .handle_session_fork(
             &serde_json::json!(6),
-            &serde_json::json!({"sessionId": parent, "id": "changed-prefix", "keep_first": 1}),
+            &serde_json::json!({"sessionId": parent, "id": "historical-prefix", "canonicalBoundary": first_boundary}),
         )
         .await;
-    assert!(!restarted.sessions.contains_key("changed-prefix"));
-    assert!(!harn_vm::agent_sessions::exists("changed-prefix"));
-    assert!(matches!(
-        store.describe("changed-prefix").await,
-        Err(harn_session_store::StoreError::NotFound(_))
-    ));
+    assert!(restarted.sessions.contains_key("historical-prefix"));
+    let historical = harn_vm::llm::vm_value_to_json(
+        &harn_vm::agent_sessions::transcript("historical-prefix").expect("historical context"),
+    );
+    assert_eq!(
+        historical["messages"],
+        serde_json::json!([{"role":"user", "content":"first"}])
+    );
+    let stored = store
+        .read("historical-prefix", ReadRange::default())
+        .await
+        .expect("durable historical prefix");
+    assert_eq!(stored.events.len(), 1);
+    assert_eq!(stored.events[0].payload["raw_message"]["content"], "first");
+
+    // Numeric collisions are not provenance: a foreign ID, wrong hash, or
+    // observability domain must never create a live or durable child.
+    for (name, invalid) in [
+        (
+            "foreign-boundary",
+            serde_json::json!({"schema":first_boundary.schema, "session_id":"another-session", "event_id":first_boundary.event_id, "record_hash":first_boundary.record_hash}),
+        ),
+        (
+            "stale-boundary",
+            serde_json::json!({"schema":first_boundary.schema, "session_id":parent, "event_id":1, "record_hash":"sha256:not-the-acknowledged-row"}),
+        ),
+        (
+            "topic-collision",
+            serde_json::json!({"schema":"observability.agent_events", "session_id":parent, "event_id":1, "record_hash":first_boundary.record_hash}),
+        ),
+    ] {
+        restarted
+            .handle_session_fork(
+                &serde_json::json!(7),
+                &serde_json::json!({
+                    "sessionId":parent, "id":name, "canonicalBoundary":invalid,
+                }),
+            )
+            .await;
+        assert!(
+            !restarted.sessions.contains_key(name),
+            "{name} must be refused"
+        );
+        assert!(!harn_vm::agent_sessions::exists(name));
+        assert!(matches!(
+            store.describe(name).await,
+            Err(harn_session_store::StoreError::NotFound(_))
+        ));
+    }
 }

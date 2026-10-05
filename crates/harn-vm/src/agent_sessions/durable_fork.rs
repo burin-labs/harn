@@ -28,13 +28,13 @@ impl std::fmt::Display for CanonicalForkError {
     }
 }
 
-/// Restore cold parent context, fork its selected message prefix, and persist
+/// Restore cold parent context, fork its acknowledged event prefix, and persist
 /// the same prefix and lineage before reporting a usable child to a host.
 pub async fn fork_canonical(
     store: &dyn SessionStore,
     root: &Path,
     source: &str,
-    keep_first: Option<usize>,
+    boundary: Option<super::CanonicalSessionBoundary>,
     destination: Option<String>,
 ) -> Result<Option<String>, CanonicalForkError> {
     if !super::exists(source) {
@@ -68,57 +68,30 @@ pub async fn fork_canonical(
         super::restore_message_event_ids(source, &hydrated.source_event_ids)
             .map_err(VmError::Runtime)?;
     }
-    let boundary = match keep_first {
-        Some(0) => None,
-        Some(count) if count < hydrated.messages.len() => {
-            let identity = hydrated.source_event_ids[count - 1]
-                .as_deref()
-                .ok_or_else(|| {
-                    VmError::Runtime("canonical fork prefix has no source event identity".into())
-                })?;
-            Some(
-                events
-                    .iter()
-                    .find(|event| {
-                        event
-                            .headers
-                            .get("source_event_id")
-                            .is_some_and(|id| id == identity)
-                    })
-                    .ok_or_else(|| {
-                        VmError::Runtime("canonical fork prefix identity is not persisted".into())
-                    })?
-                    .event_id,
-            )
+    let event_id = match boundary {
+        Some(boundary) => {
+            boundary.validate(source, &events)?;
+            boundary.event_id
         }
-        _ => events.last().map(|event| event.event_id),
+        None => events.last().map(|event| event.event_id),
     };
-    // Compaction, removals, and publication can change a message without
-    // changing its original identity. Never persist an earlier event prefix
-    // that would hydrate into different context after restarting the child.
+    // Hydrate the historical prefix itself. Later publication, removals, or
+    // compaction must not redefine what this acknowledged boundary restores.
     let copied = crate::agent_session_journal::hydrate_events(
         events
             .into_iter()
-            .filter(|event| boundary.is_some_and(|tip| event.event_id <= tip))
+            .filter(|event| event_id.is_some_and(|tip| event.event_id <= tip))
             .collect(),
     );
-    let count = keep_first
-        .unwrap_or(hydrated.messages.len())
-        .min(hydrated.messages.len());
-    if copied.messages != hydrated.messages[..count] {
-        return Err(VmError::Runtime(
-            "selected message prefix has no canonical event boundary after transcript replacement"
-                .into(),
-        )
-        .into());
-    }
-    let child = match keep_first {
-        Some(count) => super::fork_at(source, count, destination),
-        None => super::fork(source, destination),
-    }
-    .map_err(CanonicalForkError::Admission)?;
+    let child = super::fork(source, destination).map_err(CanonicalForkError::Admission)?;
     let Some(child) = child else { return Ok(None) };
-    if let Err(error) = store.fork(source, boundary, Some(child.clone())).await {
+    if let Err(error) = super::replace_messages(&child, &copied.messages)
+        .and_then(|()| super::restore_message_event_ids(&child, &copied.source_event_ids))
+    {
+        super::close(&child);
+        return Err(VmError::Runtime(error).into());
+    }
+    if let Err(error) = store.fork(source, event_id, Some(child.clone())).await {
         super::close(&child);
         return Err(store_error(error));
     }

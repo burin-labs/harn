@@ -481,6 +481,33 @@ impl AcpServer {
         }
     }
 
+    pub(super) async fn handle_canonical_history_boundaries(
+        &self,
+        id: &serde_json::Value,
+        params: &serde_json::Value,
+    ) {
+        let Some(session_id) = session_id_param(params) else {
+            self.send_error(id, -32602, "Missing session_id");
+            return;
+        };
+        if let Err(error) = self.prompt_admission(&session_id) {
+            self.send_error(id, -32602, &error);
+            return;
+        }
+        let root = &self
+            .sessions
+            .get(&session_id)
+            .expect("admitted session")
+            .project_root;
+        match harn_vm::agent_sessions::canonical_history_boundaries(root, &session_id).await {
+            Ok(boundaries) => self.send_response(
+                id,
+                serde_json::to_value(boundaries).expect("canonical boundaries serialize"),
+            ),
+            Err(error) => self.send_error(id, -32000, &error.to_string()),
+        }
+    }
+
     pub(super) async fn handle_session_fork(
         &mut self,
         id: &serde_json::Value,
@@ -511,14 +538,23 @@ impl AcpServer {
             }
         }
 
-        let keep_first =
-            match nonnegative_usize_param(params, &["keep_first", "keepFirst"], "keep_first") {
-                Ok(value) => value,
-                Err(message) => {
-                    self.send_error(id, -32602, &message);
+        if params.get("keep_first").is_some() || params.get("keepFirst").is_some() {
+            self.send_error(id, -32602, "session/fork requires an acknowledged canonical boundary; message counts are not history positions");
+            return;
+        }
+        let boundary = match params.get("canonicalBoundary") {
+            Some(value) => match serde_json::from_value::<
+                harn_vm::agent_sessions::CanonicalSessionBoundary,
+            >(value.clone())
+            {
+                Ok(boundary) => Some(boundary),
+                Err(error) => {
+                    self.send_error(id, -32602, &format!("Invalid canonicalBoundary: {error}"));
                     return;
                 }
-            };
+            },
+            None => None,
+        };
         let dst_id = params
             .get("id")
             .and_then(|value| value.as_str())
@@ -589,8 +625,7 @@ impl AcpServer {
             }
         };
         let new_session_id =
-            harn_vm::agent_sessions::fork_canonical(&store, &root, &src_id, keep_first, dst_id)
-                .await;
+            harn_vm::agent_sessions::fork_canonical(&store, &root, &src_id, boundary, dst_id).await;
         let new_session_id = match new_session_id {
             Ok(Some(new_session_id)) => new_session_id,
             Ok(None) => {
