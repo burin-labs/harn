@@ -8,14 +8,16 @@ fn empty_parsed_body_never_restores_raw_wrappers() {
     "<assistant_prose></assistant_prose>",
     "<assistant_prose>  \n </assistant_prose>",
   ] {
-    for suffix in ["", "<done>##DONE##</done>"] {
-      const raw = body + suffix
-      const parsed = parse_tool_calls({text: raw, tool_format: "text", tools: {}})
-      assert_eq(
-        to_string(__visible_text(parsed, raw)).trim(),
-        "",
-        "an empty parsed body is measured",
-      )
+    for format in ["native", "text", "json"] {
+      for suffix in ["", "<done>##DONE##</done>"] {
+        const raw = body + suffix
+        const parsed = parse_tool_calls({text: raw, tool_format: format, tools: {}})
+        assert_eq(
+          to_string(__visible_text(parsed, raw)).trim(),
+          "",
+          "an empty parsed body is measured",
+        )
+      }
     }
   }
 }
