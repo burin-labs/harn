@@ -481,35 +481,40 @@ impl AcpServer {
         }
     }
 
-    pub(super) async fn handle_canonical_history_boundaries(
-        &self,
-        id: &serde_json::Value,
-        params: &serde_json::Value,
-    ) {
-        let Some(session_id) = session_id_param(params) else {
-            self.send_error(id, -32602, "Missing session_id");
-            return;
-        };
-        let Some(session) = self.sessions.get(&session_id) else {
-            self.send_error(id, -32602, &format!("Unknown session: {session_id}"));
-            return;
-        };
-        let root = &session.project_root;
-        let store = match harn_vm::open_canonical_store(root) {
-            Ok(store) => store,
-            Err(error) => {
-                self.send_error(id, -32000, &error.to_string());
+    pub(super) fn handle_canonical_history_boundaries<'a>(
+        &'a self,
+        id: &'a serde_json::Value,
+        params: &'a serde_json::Value,
+    ) -> std::pin::Pin<Box<impl std::future::Future<Output = ()> + 'a>> {
+        // Allocate at the handler boundary: boxing at the dispatch call site
+        // still constructs this store future in the shared router's frame.
+        Box::pin(async move {
+            let Some(session_id) = session_id_param(params) else {
+                self.send_error(id, -32602, "Missing session_id");
                 return;
+            };
+            let Some(session) = self.sessions.get(&session_id) else {
+                self.send_error(id, -32602, &format!("Unknown session: {session_id}"));
+                return;
+            };
+            let root = &session.project_root;
+            let store = match harn_vm::open_canonical_store(root) {
+                Ok(store) => store,
+                Err(error) => {
+                    self.send_error(id, -32000, &error.to_string());
+                    return;
+                }
+            };
+            match harn_vm::agent_sessions::canonical_history_boundaries(&store, root, &session_id)
+                .await
+            {
+                Ok(boundaries) => self.send_response(
+                    id,
+                    serde_json::to_value(boundaries).expect("canonical boundaries serialize"),
+                ),
+                Err(error) => self.send_error(id, -32000, &error.to_string()),
             }
-        };
-        match harn_vm::agent_sessions::canonical_history_boundaries(&store, root, &session_id).await
-        {
-            Ok(boundaries) => self.send_response(
-                id,
-                serde_json::to_value(boundaries).expect("canonical boundaries serialize"),
-            ),
-            Err(error) => self.send_error(id, -32000, &error.to_string()),
-        }
+        })
     }
 
     pub(super) async fn handle_session_fork(

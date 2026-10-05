@@ -101,7 +101,7 @@ impl AcpServer {
                 if self.reject_unauthenticated(&id) {
                     return;
                 }
-                Box::pin(self.handle_canonical_history_boundaries(&id, &params)).await;
+                self.handle_canonical_history_boundaries(&id, &params).await;
             }
             "session/truncate" => {
                 if self.reject_unauthenticated(&id) {
