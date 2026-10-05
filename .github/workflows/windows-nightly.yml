@@ -94,14 +94,9 @@ jobs:
     # The name stays pinned here and the rename is a separate change that moves
     # the contract table and this string together.
     name: Workspace nextest (windows-latest)
-    # Blacksmith capacity is an explicit HARN_CI_ENABLE_BLACKSMITH_WINDOWS
-    # opt-in, because this lane compiles and runs the WHOLE workspace and core
-    # count buys real wall time. By default the public repository stays on free
-    # GitHub-hosted capacity.
-    #
     # This job is the sole writer of the shared `workspace-windows` rust-cache
     # and of the provider-neutral warm artifact below.
-    runs-on: ${{ vars.HARN_CI_ENABLE_BLACKSMITH_WINDOWS == 'true' && 'blacksmith-16vcpu-windows-2025' || 'windows-latest' }}
+    runs-on: windows-latest
     needs: route
     # The route job owns both the fork guard and the release-PR decision.
     if: needs.route.outputs.run == 'true'
@@ -111,12 +106,6 @@ jobs:
       contents: read
       actions: write
     env:
-      # Mirror the `runs-on` ladder exactly. Blacksmith runners register as
-      # ordinary self-hosted runners, so `runner.environment` reports
-      # `self-hosted` on them and any step branching on that context takes the
-      # wrong branch. One job-level tier variable is the single owner every step
-      # branches on instead.
-      HARN_RUNNER_TIER: ${{ vars.HARN_CI_ENABLE_BLACKSMITH_WINDOWS == 'true' && 'blacksmith' || 'github-hosted' }}
       # Cache WRITER half of the rust-lld experiment. RUSTFLAGS is part of
       # rust-cache's environment hash, so the restore-only consumer in
       # `windows-targeted.yml` keeps the same expression. Toggled by the single
@@ -135,11 +124,8 @@ jobs:
       # run out of space mid-link. Growth remains bounded by host free space on
       # C:. The size is owned by cache-policy.json windows_workspace_warm and
       # locked by check_ci_cache_policy.harn.
-      # Tier-gated, not just variable-gated: the Blacksmith Windows image does
-      # not expose the Hyper-V New-VHD command this action needs, so the Dev
-      # Drive experiment is reachable only on the github-hosted fallback.
       - name: Set up Dev Drive
-        if: ${{ vars.HARN_WINDOWS_DEVDRIVE == 'on' && env.HARN_RUNNER_TIER == 'github-hosted' }}
+        if: ${{ vars.HARN_WINDOWS_DEVDRIVE == 'on' }}
         uses: samypr100/setup-dev-drive@562171fe8df7401fdf582d766cd3b6ab80d5b1a0 # v4.1.0
         with:
           drive-size: 50GB
