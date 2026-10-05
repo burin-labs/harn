@@ -94,7 +94,11 @@ async fn acknowledged_tool_history_survives_compaction_and_child_restart() {
     );
     assert_eq!(
         current["messages"],
-        serde_json::json!([messages[0], messages[4]])
+        serde_json::json!([
+            {"role":"user", "content":"compacted tool exchange"},
+            messages[0], messages[4]
+        ]),
+        "the owning hydrator retains the summary in effective model context"
     );
     assert_eq!(current["summary"], "compacted tool exchange");
     let after = store

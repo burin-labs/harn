@@ -153,6 +153,7 @@ impl JournalState {
 pub(crate) struct HydratedTranscript {
     pub messages: Vec<serde_json::Value>,
     pub source_event_ids: Vec<Option<String>>,
+    pub summary: Option<String>,
 }
 
 pub(crate) struct PreparedJournal {
@@ -570,6 +571,7 @@ pub(crate) fn hydrate_events(events: Vec<harn_session_store::StoredEvent>) -> Hy
     HydratedTranscript {
         messages,
         source_event_ids,
+        summary,
     }
 }
 
