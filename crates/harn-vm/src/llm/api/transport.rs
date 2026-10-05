@@ -185,10 +185,12 @@ async fn vm_call_llm_api_inner(
     let provider = &opts.provider;
 
     let managed = crate::llm::managed_supply::is_managed_transport(provider);
+    let (capability_provider, capability_model) =
+        crate::llm::managed_supply::logical_route(provider, &opts.model)?;
     if managed
         && (crate::llm::providers::AcpProvider::is_configured_acp(provider)
             || opts.api_mode == LlmApiMode::Responses
-            || should_use_responses_transport(provider, &opts.model, false)
+            || should_use_responses_transport(&capability_provider, &capability_model, false)
             || DialectContract::for_request(opts).stream_protocol() != StreamProtocol::OpenAiSse)
     {
         return Err(crate::llm::managed_supply::ManagedSupplyContractError::new(
@@ -212,8 +214,6 @@ async fn vm_call_llm_api_inner(
     // the real transport, so it is exempt (`mock` already resolves to the
     // anthropic dialect for Claude ids and so never trips the guard).
     if !crate::llm::fake::FakeLlmProvider::should_intercept(provider) {
-        let (capability_provider, capability_model) =
-            crate::llm::managed_supply::logical_route(provider, &opts.model)?;
         crate::llm::route::Route::resolve(&capability_provider, &capability_model, &opts.thinking)
             .map_err(|err| {
                 VmError::Thrown(VmValue::String(arcstr::ArcStr::from(err.into_message())))
