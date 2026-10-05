@@ -1,4 +1,5 @@
 use super::*;
+#[cfg(test)]
 use serde::{Deserialize, Serialize};
 
 pub fn create_test_package_generation(root: &Path) -> PathBuf {
