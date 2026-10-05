@@ -31,6 +31,7 @@ impl std::fmt::Display for CanonicalForkError {
 /// Restore cold parent context, fork its selected message prefix, and persist
 /// the same prefix and lineage before reporting a usable child to a host.
 pub async fn fork_canonical(
+    store: &dyn SessionStore,
     root: &Path,
     source: &str,
     keep_first: Option<usize>,
@@ -40,7 +41,6 @@ pub async fn fork_canonical(
         return Ok(None);
     }
     crate::agent_session_journal::flush(source).await?;
-    let store = crate::stdlib::session_store::open_canonical_store(root)?;
     match store.describe(source).await {
         Ok(_) => {}
         Err(StoreError::NotFound(_)) if super::length(source) == Some(0) => {
@@ -59,7 +59,7 @@ pub async fn fork_canonical(
         }
         Err(error) => return Err(store_error(error)),
     }
-    let events = crate::stdlib::session_store::read_all_events(&store, source).await?;
+    let events = store.read_all(source).await.map_err(store_error)?;
     let hydrated = crate::agent_session_journal::hydrate_events(events.clone());
     // session/load registers a live transport record before the first prompt.
     // Only an active journal owns newer context than the canonical store.

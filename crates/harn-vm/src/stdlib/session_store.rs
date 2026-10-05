@@ -608,26 +608,7 @@ pub(crate) async fn read_all_events(
     store: &SqliteSessionStore,
     session_id: &str,
 ) -> Result<Vec<StoredEvent>, VmError> {
-    let mut events = Vec::new();
-    let mut cursor: Option<EventId> = None;
-    loop {
-        let page = store
-            .read(
-                session_id,
-                ReadRange {
-                    from_event_id: cursor,
-                    to_event_id: None,
-                    limit: Some(MAX_READ_BATCH),
-                },
-            )
-            .await
-            .map_err(store_error)?;
-        cursor = page.next_cursor;
-        events.extend(page.events);
-        if cursor.is_none() {
-            return Ok(events);
-        }
-    }
+    store.read_all(session_id).await.map_err(store_error)
 }
 
 #[derive(Debug, Deserialize)]

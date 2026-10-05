@@ -581,8 +581,16 @@ impl AcpServer {
             .expect("validated source session")
             .project_root
             .clone();
+        let store = match harn_vm::open_canonical_store(&root) {
+            Ok(store) => store,
+            Err(error) => {
+                self.send_error(id, -32000, &error.to_string());
+                return;
+            }
+        };
         let new_session_id =
-            harn_vm::agent_sessions::fork_canonical(&root, &src_id, keep_first, dst_id).await;
+            harn_vm::agent_sessions::fork_canonical(&store, &root, &src_id, keep_first, dst_id)
+                .await;
         let new_session_id = match new_session_id {
             Ok(Some(new_session_id)) => new_session_id,
             Ok(None) => {

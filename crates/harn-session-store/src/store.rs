@@ -505,6 +505,28 @@ pub trait SessionStore: Send + Sync {
     async fn list(&self, filter: ListFilter) -> StoreResult<Vec<SessionMeta>>;
     async fn append(&self, session_id: &str, event: AppendEvent) -> StoreResult<StoredEvent>;
     async fn read(&self, session_id: &str, range: ReadRange) -> StoreResult<EventPage>;
+    /// Drain the canonical event sequence using the store's cursor contract.
+    async fn read_all(&self, session_id: &str) -> StoreResult<Vec<StoredEvent>> {
+        let mut events = Vec::new();
+        let mut cursor = None;
+        loop {
+            let page = self
+                .read(
+                    session_id,
+                    ReadRange {
+                        from_event_id: cursor,
+                        limit: Some(MAX_READ_BATCH),
+                        ..ReadRange::default()
+                    },
+                )
+                .await?;
+            cursor = page.next_cursor;
+            events.extend(page.events);
+            if cursor.is_none() {
+                return Ok(events);
+            }
+        }
+    }
     /// Copy the prefix through an event, or no events when the boundary is None.
     /// Both cases retain the parent's metadata and explicit child lineage.
     async fn fork(
