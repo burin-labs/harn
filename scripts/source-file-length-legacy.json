@@ -1,13 +1,15 @@
 {
   "version": 1,
-  "legacy_path_identities": {},
+  "legacy_path_identities": {
+    "crates/harn-package/src/package/extensions_tests.rs": "crates/harn-cli/src/package/extensions_tests.rs"
+  },
   "legacy_oversized_paths": [
     "crates/harn-cli/src/commands/check/preflight.rs",
     "crates/harn-cli/src/commands/doctor.rs",
     "crates/harn-cli/src/commands/models/lora/train.rs",
     "crates/harn-cli/src/commands/orchestrator/listener/acp_hub.rs",
-    "crates/harn-cli/src/package/extensions_tests.rs",
     "crates/harn-dap/src/debugger/tests.rs",
+    "crates/harn-package/src/package/extensions_tests.rs",
     "crates/harn-parser/src/typechecker/inference/expressions.rs",
     "crates/harn-parser/src/typechecker/tests/narrowing.rs",
     "crates/harn-serve/src/adapters/acp/events/tests.rs",

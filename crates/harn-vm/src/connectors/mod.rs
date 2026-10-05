@@ -61,6 +61,7 @@ pub use hmac::{
 };
 pub use registry::ConnectorRegistry;
 pub use secret_injection::{declared_secret_ids, DeclaredConnectorSecrets};
+pub(crate) use shared::outbound_http_client;
 pub use shared::{
     paginate_cursor, resolve_jwks, verify_hmac_signature, verify_jwt_claims, verify_jwt_json,
     ConnectorBase, CursorPage, HmacSignatureAlgorithm, JwtKeySource, JwtVerificationOptions,
@@ -69,18 +70,6 @@ pub use stream::StreamConnector;
 pub use stripe::verify_stripe_signature;
 use webhook::WebhookProviderProfile;
 pub use webhook::{GenericWebhookConnector, WebhookSignatureVariant};
-
-const OUTBOUND_CONNECTOR_HTTP_TIMEOUT: StdDuration = StdDuration::from_secs(30);
-
-pub(crate) fn outbound_http_client(user_agent: &'static str) -> reqwest::Client {
-    let builder = reqwest::Client::builder()
-        .user_agent(user_agent)
-        .timeout(OUTBOUND_CONNECTOR_HTTP_TIMEOUT)
-        .redirect(crate::egress::redirect_policy("connector_redirect", 10));
-    crate::egress::install_ssrf_guard(builder)
-        .build()
-        .expect("connector HTTP client configuration should be valid")
-}
 
 /// Shared owned handle to a connector instance registered with the runtime.
 pub type ConnectorHandle = Arc<AsyncMutex<Box<dyn Connector>>>;
