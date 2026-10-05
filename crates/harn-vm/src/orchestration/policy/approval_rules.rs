@@ -7,6 +7,7 @@ use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value as JsonValue;
 use sha2::{Digest, Sha256};
 
+use crate::tool_annotations::ToolAnnotations;
 use crate::workspace_path::{WorkspacePathInfo, WorkspacePathKind};
 
 use super::ToolApprovalPolicy;
@@ -869,16 +870,32 @@ fn approval_unavailable_class(risk_labels: &[String]) -> String {
     }
 }
 
+/// Refuse malformed path inputs before dispatch can request permission. The
+/// catalog's explicit annotations take precedence over ambient annotations.
+pub(crate) fn validate_tool_approval_path_arguments(
+    tool_name: &str,
+    args: &JsonValue,
+    annotations: Option<&ToolAnnotations>,
+) -> Result<(), String> {
+    let ambient = annotations
+        .is_none()
+        .then(|| super::current_tool_annotations(tool_name))
+        .flatten();
+    let parameters = path_inputs::parameters(annotations.or(ambient.as_ref()));
+    path_inputs::validate(args, &parameters)
+}
+
 pub fn evaluate_tool_approval_policy(
     policy: &ToolApprovalPolicy,
     tool_name: &str,
     args: &JsonValue,
     repeat_count: Option<u64>,
 ) -> PolicyEvaluation {
-    evaluate_context(
-        policy,
-        EvaluationContext::new(tool_name, args, repeat_count),
-    )
+    let context = EvaluationContext::new(tool_name, args, repeat_count);
+    if let Err(reason) = validate_tool_approval_path_arguments(tool_name, args, None) {
+        return host_request::invalid_context(&context, reason);
+    }
+    evaluate_context(policy, context)
 }
 
 pub fn evaluate_tool_approval_request(

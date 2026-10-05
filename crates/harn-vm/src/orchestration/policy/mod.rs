@@ -4,6 +4,7 @@ mod approval_activity;
 mod approval_resolver;
 mod approval_review_config;
 mod approval_rules;
+pub(crate) use approval_rules::validate_tool_approval_path_arguments;
 mod capability_lattice;
 mod consent_capability;
 pub(crate) use consent_capability::is_policy_machinery_consent_call;

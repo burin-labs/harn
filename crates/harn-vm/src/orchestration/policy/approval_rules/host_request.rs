@@ -73,27 +73,7 @@ impl ToolApprovalRequest {
             return Err("policy_decision and approval_request must be objects when present".into());
         }
         let params = self.path_parameters();
-        for param in &params {
-            if param.trim().is_empty() {
-                return Err(
-                    "tool_annotations.arg_schema.path_params must contain nonempty field names"
-                        .into(),
-                );
-            }
-            match self.arguments.get(param) {
-                None => {}
-                Some(JsonValue::String(value)) if !value.trim().is_empty() => {}
-                Some(JsonValue::Array(values))
-                    if values.iter().all(|value| {
-                        value.as_str().is_some_and(|value| !value.trim().is_empty())
-                    }) => {}
-                _ => {
-                    return Err(format!(
-                        "workspace path argument '{param}' must be a string or list of strings"
-                    ))
-                }
-            }
-        }
+        super::path_inputs::validate(&self.arguments, &params)?;
         if self.workspace_boundary.is_none()
             && (self.tool_annotations.is_some()
                 || params
@@ -153,6 +133,10 @@ impl ToolApprovalPolicy {
 pub(super) fn invalid_request(request: &ToolApprovalRequest, reason: String) -> PolicyEvaluation {
     let context =
         EvaluationContext::new(&request.tool_name, &request.arguments, request.repeat_count);
+    invalid_context(&context, reason)
+}
+
+pub(super) fn invalid_context(context: &EvaluationContext, reason: String) -> PolicyEvaluation {
     super::evaluation_from_candidate(
         super::Candidate {
             source: "invalid_host_request".into(),
@@ -166,7 +150,7 @@ pub(super) fn invalid_request(request: &ToolApprovalRequest, reason: String) -> 
             denied_paths: Vec::new(),
             contributing_rules: Vec::new(),
         },
-        &context,
+        context,
     )
 }
 
