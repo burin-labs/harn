@@ -527,6 +527,20 @@ pub trait SessionStore: Send + Sync {
             }
         }
     }
+    /// Acknowledge durable rows through the same contract on every transport.
+    /// This read makes no claim about pending producer journals; their owner
+    /// must flush before requiring an acknowledgement for a newly emitted event.
+    async fn history_boundaries(
+        &self,
+        session_id: &str,
+    ) -> StoreResult<crate::CanonicalHistoryBoundaries> {
+        // A missing session must never look like an acknowledged empty history.
+        self.describe(session_id).await?;
+        let events = self.read_all(session_id).await?;
+        Ok(crate::CanonicalHistoryBoundaries::from_events(
+            session_id, &events,
+        ))
+    }
     /// Copy an acknowledged event prefix, or no events for an explicit empty boundary.
     /// Both cases retain the parent's metadata and explicit child lineage.
     async fn fork(

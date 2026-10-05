@@ -6,6 +6,45 @@ use serde::{Deserialize, Serialize};
 use crate::{StoreError, StoreResult, StoredEvent};
 
 pub const CANONICAL_SESSION_BOUNDARY_SCHEMA: &str = "harn.canonical_session_boundary.v1";
+pub const CANONICAL_HISTORY_BOUNDARIES_SCHEMA: &str = "harn.canonical_history_boundaries.v1";
+
+/// Correlate a producer's opaque identity with its acknowledged stored prefix.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct CanonicalHistoryPosition {
+    pub source_event_id: String,
+    pub boundary: CanonicalSessionBoundary,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct CanonicalHistoryBoundaries {
+    pub tip: CanonicalSessionBoundary,
+    pub positions: Vec<CanonicalHistoryPosition>,
+}
+
+impl CanonicalHistoryBoundaries {
+    pub(crate) fn from_events(session_id: &str, events: &[StoredEvent]) -> Self {
+        Self {
+            tip: events.last().map_or_else(
+                || CanonicalSessionBoundary::empty(session_id),
+                CanonicalSessionBoundary::acknowledged,
+            ),
+            positions: events
+                .iter()
+                .filter_map(|event| {
+                    event
+                        .headers
+                        .get("source_event_id")
+                        .map(|identity| CanonicalHistoryPosition {
+                            source_event_id: identity.clone(),
+                            boundary: CanonicalSessionBoundary::acknowledged(event),
+                        })
+                })
+                .collect(),
+        }
+    }
+}
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]

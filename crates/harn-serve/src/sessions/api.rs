@@ -36,6 +36,7 @@ pub fn sessions_router(store: SharedSessionStore) -> Router {
         )
         .route("/sessions/{id}/view", get(session_view))
         .route("/sessions/{id}/timeline", get(session_timeline))
+        .route("/sessions/{id}/boundaries", get(session_history_boundaries))
         .route("/sessions/{id}/recap", get(session_recap))
         .route("/sessions/{id}/events", post(append_event).get(read_events))
         .route("/sessions/{id}/fork", post(fork_session))
@@ -361,6 +362,21 @@ async fn session_timeline(
         Ok(Some(snapshot)) => (StatusCode::OK, Json(json!(snapshot))).into_response(),
         Ok(None) => map_error(StoreError::NotFound("session".to_string())).into_response(),
         Err(error) => map_error(StoreError::Backend(error.to_string())).into_response(),
+    }
+}
+
+#[tracing::instrument(
+    name = "harn.session.history_boundaries",
+    skip_all,
+    fields(harn.session.id = %id),
+)]
+async fn session_history_boundaries(
+    State(state): State<SessionsState>,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
+    match state.store.history_boundaries(&id).await {
+        Ok(boundaries) => (StatusCode::OK, Json(json!(boundaries))).into_response(),
+        Err(error) => map_error(error).into_response(),
     }
 }
 

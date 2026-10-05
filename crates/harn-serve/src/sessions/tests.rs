@@ -11,6 +11,144 @@ use serde_json::json;
 use super::api;
 
 #[tokio::test]
+async fn http_boundary_read_drives_an_acknowledged_fork() {
+    use axum::body::Body;
+    use axum::http::{Request, StatusCode};
+    use harn_session_store::{CanonicalHistoryBoundaries, CanonicalSessionBoundary, ReadRange};
+    use tower::ServiceExt as _;
+
+    let directory = tempfile::tempdir().unwrap();
+    let database = directory.path().join("saved-session.sqlite");
+    let store: SharedSessionStore =
+        Arc::new(harn_session_store::SqliteSessionStore::open(&database).unwrap());
+    let router = api::sessions_router(store.clone());
+    let get_boundaries = |id: &str| {
+        Request::builder()
+            .uri(format!("/sessions/{id}/boundaries"))
+            .body(Body::empty())
+            .unwrap()
+    };
+    let missing = router
+        .clone()
+        .oneshot(get_boundaries("missing"))
+        .await
+        .unwrap();
+    assert_eq!(missing.status(), StatusCode::NOT_FOUND);
+
+    let parent = store.create(CreateSession::default()).await.unwrap();
+    let response = router
+        .clone()
+        .oneshot(get_boundaries(&parent.id))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let bytes = axum::body::to_bytes(response.into_body(), 1 << 20)
+        .await
+        .unwrap();
+    let empty: CanonicalHistoryBoundaries = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(empty.tip, CanonicalSessionBoundary::empty(&parent.id));
+    assert!(empty.positions.is_empty());
+
+    let mut message = AppendEvent::new(
+        SessionEventKind::Message,
+        json!({"raw_message":{"role":"user","content":"first context"}}),
+    );
+    message
+        .headers
+        .insert("source_event_id".into(), "opaque-source-first".into());
+    let first = store.append(&parent.id, message).await.unwrap();
+    let receipt = store
+        .append(
+            &parent.id,
+            AppendEvent::new(SessionEventKind::Receipt, json!({"status":"completed"})),
+        )
+        .await
+        .unwrap();
+    // Reopen the saved session without an active producer or in-memory journal.
+    drop(router);
+    drop(store);
+    let store: SharedSessionStore =
+        Arc::new(harn_session_store::SqliteSessionStore::open(&database).unwrap());
+    let router = api::sessions_router(store.clone());
+    let response = router
+        .clone()
+        .oneshot(get_boundaries(&parent.id))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let bytes = axum::body::to_bytes(response.into_body(), 1 << 20)
+        .await
+        .unwrap();
+    let acknowledged: CanonicalHistoryBoundaries = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(
+        acknowledged.tip,
+        CanonicalSessionBoundary::acknowledged(&receipt)
+    );
+    assert_eq!(acknowledged.positions.len(), 1);
+    assert_eq!(
+        acknowledged.positions[0].source_event_id,
+        "opaque-source-first"
+    );
+    assert_eq!(
+        acknowledged.positions[0].boundary,
+        CanonicalSessionBoundary::acknowledged(&first)
+    );
+
+    let fork_request = |child: &str, boundary: CanonicalSessionBoundary| {
+        Request::builder()
+            .method("POST")
+            .uri(format!("/sessions/{}/fork", parent.id))
+            .header("content-type", "application/json")
+            .body(Body::from(
+                json!({"canonical_boundary":boundary,"child_session_id":child}).to_string(),
+            ))
+            .unwrap()
+    };
+    let mut wrong_hash = acknowledged.positions[0].boundary.clone();
+    wrong_hash.record_hash = Some("unacknowledged-hash".into());
+    let refused = router
+        .clone()
+        .oneshot(fork_request("refused-child", wrong_hash))
+        .await
+        .unwrap();
+    assert_eq!(refused.status(), StatusCode::CONFLICT);
+    assert!(matches!(
+        store.describe("refused-child").await,
+        Err(harn_session_store::StoreError::NotFound(_))
+    ));
+
+    let mut foreign = acknowledged.positions[0].boundary.clone();
+    foreign.session_id = "foreign-parent".into();
+    let refused = router
+        .clone()
+        .oneshot(fork_request("foreign-child", foreign))
+        .await
+        .unwrap();
+    assert_eq!(refused.status(), StatusCode::CONFLICT);
+    assert!(matches!(
+        store.describe("foreign-child").await,
+        Err(harn_session_store::StoreError::NotFound(_))
+    ));
+
+    let response = router
+        .oneshot(fork_request(
+            "acknowledged-child",
+            acknowledged.positions[0].boundary.clone(),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let child = store.describe("acknowledged-child").await.unwrap();
+    assert_eq!(child.parent_session_id.as_deref(), Some(parent.id.as_str()));
+    let copied = store.read(&child.id, ReadRange::default()).await.unwrap();
+    assert_eq!(copied.events.len(), 1);
+    assert_eq!(
+        copied.events[0].payload["raw_message"]["content"],
+        "first context"
+    );
+}
+
+#[tokio::test]
 async fn http_router_round_trips_events() {
     use axum::body::Body;
     use axum::http::{Request, StatusCode};
