@@ -18,6 +18,7 @@ fn request(reach: InferenceReach) -> ManagedSupplyRequest {
 
 #[test]
 fn physical_weight_class_is_admitted_independently_of_matching_capabilities() {
+    let _guard = crate::llm::env_guard();
     assert_eq!(
         capability_fingerprint("mistral", "mistral-large-2512"),
         capability_fingerprint("mistral", "codestral-2508"),
@@ -71,17 +72,24 @@ fn request_authority_is_required_closed_and_versioned() {
 
 #[test]
 fn unknown_weight_and_training_facts_never_become_default_grants() {
+    let _guard = crate::llm::env_guard();
     let boundary = request(InferenceReach::HostedOpenWeight).inference_boundary;
-    let model = "accounts/fireworks/models/qwen3-coder-480b-a35b-instruct";
-    assert!(crate::llm_config::model_catalog_entry(model).is_some());
+    let (model, catalog) = crate::llm_config::model_catalog_entries()
+        .into_iter()
+        .find(|(_, row)| {
+            row.open_weight.is_none()
+                && crate::llm_config::provider_config(&row.provider)
+                    .is_some_and(|provider| provider.local_runtime.is_none())
+        })
+        .expect("a real cataloged hosted model with unverified weight class");
     assert_eq!(
-        crate::llm_config::model_catalog_entry(model)
+        crate::llm_config::model_catalog_entry(&model)
             .unwrap()
             .open_weight,
         None,
         "the negative reaches a cataloged model with unverified weight class"
     );
-    let error = validate_served_admission(boundary, "fireworks", model).unwrap_err();
+    let error = validate_served_admission(boundary, &catalog.provider, &model).unwrap_err();
     assert_eq!(error.code(), "inference_boundary.hosted_open_weight");
     let hosted = request(InferenceReach::AnyHosted).inference_boundary;
     let error = validate_served_admission(hosted, "deepseek", "deepseek-flash").unwrap_err();
