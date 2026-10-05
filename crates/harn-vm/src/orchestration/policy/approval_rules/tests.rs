@@ -967,11 +967,22 @@ fn each_deciding_source_names_its_own_gate() {
     ));
     policy_with_path_annotation("read_file", ToolKind::Read);
 
+    // A real external directory keeps this independent of temporary-directory
+    // aliases such as macOS /tmp -> /private/tmp.
+    let external = tempfile::tempdir().unwrap();
+    let outside_path = external.path().join("outside.txt");
+    let reported_outside = external
+        .path()
+        .canonicalize()
+        .unwrap()
+        .join("outside.txt")
+        .to_string_lossy()
+        .replace('\\', "/");
     // The workspace path boundary: outside the workspace, no external root.
     let outside = evaluate_tool_approval_policy(
         &ToolApprovalPolicy::default(),
         "read_file",
-        &serde_json::json!({"path": "/tmp/outside.txt"}),
+        &serde_json::json!({"path": outside_path}),
         None,
     );
     assert!(outside.is_deny());
@@ -1033,7 +1044,7 @@ fn each_deciding_source_names_its_own_gate() {
     // The subject is a typed value, not only prose. A configured deny that
     // did not refuse ON a path declares none, so "empty" keeps meaning
     // "no path was the reason" instead of "nobody filled this in".
-    assert_eq!(rendered[0].1, vec!["/tmp/outside.txt".to_string()]);
+    assert_eq!(rendered[0].1, vec![reported_outside.clone()]);
     // The sensitive-path guard reports the path it resolved and matched on,
     // which for a workspace-relative argument is the absolute form.
     assert_eq!(rendered[1].1.len(), 1, "{:?}", rendered[1].1);
@@ -1057,7 +1068,7 @@ fn each_deciding_source_names_its_own_gate() {
         "{rendered:?}"
     );
     // The subject the boundary refused is named, not only described.
-    assert!(rendered[0].contains("/tmp/outside.txt"), "{rendered:?}");
+    assert!(rendered[0].contains(&reported_outside), "{rendered:?}");
 
     pop_execution_policy();
     crate::stdlib::process::set_thread_execution_context(None);
@@ -1130,7 +1141,16 @@ fn a_path_refusal_names_the_path_that_refused_not_every_path_declared() {
 
     // `from` is inside the workspace and unobjectionable; `to` is what the
     // boundary refuses.
-    let args = serde_json::json!({"from": "src/main.rs", "to": "/tmp/outside.txt"});
+    let external = tempfile::tempdir().unwrap();
+    let outside_path = external.path().join("outside.txt");
+    let reported_outside = external
+        .path()
+        .canonicalize()
+        .unwrap()
+        .join("outside.txt")
+        .to_string_lossy()
+        .replace('\\', "/");
+    let args = serde_json::json!({"from": "src/main.rs", "to": outside_path});
     let decision =
         evaluate_tool_approval_policy(&ToolApprovalPolicy::default(), "move_file", &args, None);
     assert!(decision.is_deny());
@@ -1144,7 +1164,7 @@ fn a_path_refusal_names_the_path_that_refused_not_every_path_declared() {
     let denial = decision.terminal_denial();
     assert_eq!(
         denial.denied_paths,
-        vec!["/tmp/outside.txt".to_string()],
+        vec![reported_outside],
         "the refusal must name the path that refused, not the declared set {declared:?}"
     );
 
@@ -1162,9 +1182,16 @@ fn with_workspace_and_external_root<T>(run: impl FnOnce(&str, &str) -> T) -> T {
             ..Default::default()
         },
     ));
-    let external_root = external.path().to_string_lossy().into_owned();
+    let external_root = external
+        .path()
+        .canonicalize()
+        .unwrap()
+        .to_string_lossy()
+        .into_owned();
     let inside = external
         .path()
+        .canonicalize()
+        .unwrap()
         .join("notes.txt")
         .to_string_lossy()
         .into_owned();

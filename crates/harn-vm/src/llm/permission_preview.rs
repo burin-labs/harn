@@ -729,7 +729,7 @@ mod tests {
         assert_eq!(evidence.len(), 1);
         assert_eq!(
             std::path::Path::new(evidence[0]["path"].as_str().expect("captured path")),
-            directory.path().join("src.rs")
+            directory.path().join("src.rs").canonicalize().unwrap()
         );
         assert_eq!(evidence[0]["oldText"], "old\n");
         assert_eq!(evidence[0]["newText"], "new\n");

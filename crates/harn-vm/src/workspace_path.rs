@@ -507,7 +507,10 @@ mod tests {
         assert_eq!(escaped.kind, WorkspacePathKind::HostAbsolute);
         assert_eq!(
             escaped.host_path.as_deref(),
-            Some(normalize_host_path(&outside.path().join("new.txt")).as_str())
+            Some(
+                normalize_host_path(&outside.path().canonicalize().unwrap().join("new.txt"))
+                    .as_str()
+            )
         );
         let inside = classify_permission_path("new/nested.txt", Some(workspace.path()));
         assert_eq!(inside.workspace_path.as_deref(), Some("new/nested.txt"));
@@ -537,7 +540,10 @@ mod tests {
         assert!(escaped.workspace_path.is_none());
         assert_eq!(
             escaped.host_path.as_deref(),
-            Some(normalize_host_path(&outside.path().join("secret.txt")).as_str())
+            Some(
+                normalize_host_path(&outside.path().canonicalize().unwrap().join("secret.txt"))
+                    .as_str()
+            )
         );
     }
 
