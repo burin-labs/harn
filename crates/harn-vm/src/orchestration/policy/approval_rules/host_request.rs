@@ -237,6 +237,11 @@ pub(super) fn request_context(request: &ToolApprovalRequest) -> EvaluationContex
             declared_params,
         ));
     }
+    // Capture only current arguments and host-owned facts. Historical receipt
+    // aliases absorbed below cannot enlarge a remembered invocation.
+    context.invocation_sha256 = request.workspace_boundary.as_ref().and_then(|boundary| {
+        super::invocation_memory::digest(&context, &request.arguments, Path::new(&boundary.root))
+    });
     context.absorb_host_value(&request.arguments);
     let policy_context = request
         .policy_decision
@@ -360,7 +365,15 @@ pub(super) fn exact_write_env_allow(rule: &PolicyRule, ctx: &EvaluationContext) 
     if rule.action != PolicyAction::Allow {
         return true;
     }
-    normalized_env_modes(&ctx.env_modes)
+    let modes = if rule.identity_match == PolicyIdentityMatch::Literal {
+        let Some(original) = &ctx.literal_identity else {
+            return false;
+        };
+        &original.constraints.env_mode
+    } else {
+        &ctx.env_modes
+    };
+    normalized_env_modes(modes)
         .iter()
         .filter(|mode| matches!(mode.as_str(), "patch" | "replace"))
         .all(|mode| rule.matches.env_mode.contains(mode))

@@ -13,6 +13,7 @@ use super::ToolApprovalPolicy;
 
 mod host_request;
 mod identity_match;
+mod invocation_memory;
 mod path_guards;
 mod remembered_paths;
 mod rule_source;
@@ -101,6 +102,9 @@ pub struct ApprovalShape {
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct PolicyRuleMatch {
+    /// Opaque exact-invocation scope constructed by Harn, never a glob.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub invocation_sha256: Option<String>,
     #[serde(
         alias = "tools",
         deserialize_with = "deserialize_string_list",
@@ -207,6 +211,7 @@ pub struct PolicyRuleMatch {
 impl PolicyRuleMatch {
     /// Canonical persisted matcher names exposed to native host projections.
     pub const KEYS: &'static [&'static str] = &[
+        "invocation_sha256",
         "tool",
         "tool_kind",
         "side_effect",
@@ -274,6 +279,7 @@ impl PolicyRuleMatch {
             && self.env_mode.is_empty()
             && self.capability.is_empty()
             && self.repeat_count_at_least.is_none()
+            && self.invocation_sha256.is_none()
     }
 
     fn matches(
@@ -283,6 +289,10 @@ impl PolicyRuleMatch {
         action: PolicyAction,
     ) -> bool {
         (self.tool.is_empty() || identity.matches(&self.tool, std::slice::from_ref(&ctx.tool_name)))
+            && self
+                .invocation_sha256
+                .as_ref()
+                .is_none_or(|digest| ctx.invocation_sha256.as_ref() == Some(digest))
             && identity_match::resources_match(self, ctx, identity, action)
             && (self.command.is_empty() || identity.matches_command(&self.command, ctx))
             && identity_match::invocation_match(self, ctx, identity, action)
@@ -526,6 +536,7 @@ impl PolicyEvaluation {
 
 #[derive(Clone, Debug)]
 struct EvaluationContext {
+    invocation_sha256: Option<String>,
     tool_name: String,
     tool_kind: Option<String>,
     side_effect: Option<String>,
@@ -605,6 +616,7 @@ impl EvaluationContext {
             .unwrap_or_default();
 
         let mut context = Self {
+            invocation_sha256: None,
             tool_name: tool_name.to_string(),
             tool_kind: annotations
                 .as_ref()
@@ -632,6 +644,11 @@ impl EvaluationContext {
             external_roots: Vec::new(),
         };
         context.literal_identity = Some(LiteralResourceIdentity::capture(&context, args, None));
+        context.invocation_sha256 = invocation_memory::digest(
+            &context,
+            args,
+            &crate::stdlib::process::execution_root_path(),
+        );
         context
     }
 

@@ -78,7 +78,7 @@ pub(super) struct LiteralResourceIdentity {
     pub(super) paths: Vec<Vec<String>>,
     pub(super) urls: Vec<String>,
     pub(super) domains: Vec<String>,
-    constraints: PolicyRuleMatch,
+    pub(super) constraints: PolicyRuleMatch,
     urls_valid: bool,
     domains_valid: bool,
 }
