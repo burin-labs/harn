@@ -126,6 +126,8 @@ struct PreparedCommand {
     env_clear: bool,
     env: Vec<(Vec<u8>, Option<Vec<u8>>)>,
     cleanup_token: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pinned_verifier_descriptors: Vec<i32>,
     /// Absent means this run confines no child process at all, which is the
     /// same answer the direct spawn path acts on. It never means "confinement
     /// was wanted and could not be built": that is an error at the seam that
@@ -156,10 +158,18 @@ pub(crate) fn prepare_guardian(
     payload_spec.configure_process_group = false;
     payload_spec.owner_death = super::OwnerDeathPolicy::None;
     #[cfg(target_os = "linux")]
+    let pinned = super::program_lookup::pinned_verifier(&payload_spec)?;
+    #[cfg(target_os = "linux")]
     let (prepared, confinement) = {
         let (command, env_closed, confinement) = harn_vm::process_sandbox::command_for_reexec(
-            &payload_spec.program,
-            &payload_spec.args,
+            pinned
+                .as_ref()
+                .map_or(payload_spec.program.as_str(), |value| {
+                    value.program.as_str()
+                }),
+            pinned
+                .as_ref()
+                .map_or(payload_spec.args.as_slice(), |value| value.args.as_slice()),
             RULESET_FD,
         )
         .map_err(ProcessError::sandbox_setup)?;
@@ -175,11 +185,19 @@ pub(crate) fn prepare_guardian(
         super::real::prepare_command(&payload_spec, Some(cleanup_token.clone()))?,
         build_confinement(&payload_spec.program)?,
     );
-    let missing_program = super::program_lookup::missing_program(
-        &payload_spec,
-        &prepared.command,
-        prepared.env_cleared,
-    );
+    #[cfg(target_os = "linux")]
+    let source_verifier_bound = pinned.is_some();
+    #[cfg(not(target_os = "linux"))]
+    let source_verifier_bound = false;
+    let missing_program = if source_verifier_bound {
+        None
+    } else {
+        super::program_lookup::missing_program(
+            &payload_spec,
+            &prepared.command,
+            prepared.env_cleared,
+        )
+    };
     let mut payload = prepared.command;
     payload.env(
         harn_vm::op_interrupt::PROCESS_OWNER_TOKEN_ENV,
@@ -197,6 +215,19 @@ pub(crate) fn prepare_guardian(
         confinement.as_ref().map(TransferredConfinement::request),
         spec.use_stdin,
     );
+    #[cfg(target_os = "linux")]
+    let mut request = request;
+    #[cfg(target_os = "linux")]
+    if let Some(pinned) = pinned.as_ref() {
+        if payload.get_program() != std::ffi::OsStr::new(&pinned.program) {
+            return Err(ProcessError::Spawn(
+                "isolated source verifier guardian wrapping is unmeasured".to_string(),
+            ));
+        }
+        harn_vm::verifier_provenance::validate_pinned_environment(&payload, prepared.env_cleared)
+            .map_err(ProcessError::Spawn)?;
+        request.pinned_verifier_descriptors = pinned.descriptors.numbers();
+    }
     let request = serde_json::to_vec(&request)
         .map_err(|error| ProcessError::Spawn(format!("encode guardian request: {error}")))?;
 
@@ -225,6 +256,10 @@ pub(crate) fn prepare_guardian(
         .process_group(0);
     if let Some(confinement) = confinement {
         confinement.hand_to(&mut guardian);
+    }
+    #[cfg(target_os = "linux")]
+    if let Some(pinned) = pinned {
+        pinned.descriptors.attach(&mut guardian);
     }
     Ok((guardian, request, missing_program))
 }
@@ -390,6 +425,7 @@ impl PreparedCommand {
     ) -> Self {
         Self {
             payload_stdin,
+            pinned_verifier_descriptors: Vec::new(),
             confinement,
             program: os_bytes(command.get_program()),
             args: command.get_args().map(os_bytes).collect(),
@@ -435,6 +471,24 @@ impl PreparedCommand {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
         apply_confinement(&mut command, self.confinement)?;
+        if !self.pinned_verifier_descriptors.is_empty() {
+            #[cfg(target_os = "linux")]
+            {
+                harn_vm::verifier_provenance::validate_pinned_environment(&command, self.env_clear)
+                    .map_err(io::Error::other)?;
+                // The existing host-only request pipe transfers ownership of these descriptors.
+                unsafe {
+                    harn_vm::process_sandbox::DescriptorTransfer::inherited(
+                        self.pinned_verifier_descriptors,
+                    )?
+                }
+                .attach(&mut command);
+            }
+            #[cfg(not(target_os = "linux"))]
+            return Err(io::Error::other(
+                "isolated source verifier descriptor transport is unmeasured on this platform",
+            ));
+        }
         Ok((command, self.cleanup_token))
     }
 }

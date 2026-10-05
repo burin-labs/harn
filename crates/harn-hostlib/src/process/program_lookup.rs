@@ -6,6 +6,22 @@ use std::process::Command;
 
 use super::SpawnSpec;
 
+#[cfg(target_os = "linux")]
+pub(super) fn pinned_verifier(
+    spec: &SpawnSpec,
+) -> Result<Option<harn_vm::verifier_provenance::PinnedVerifierLaunch>, super::ProcessError> {
+    let cwd = spec
+        .cwd
+        .clone()
+        .map_or_else(std::env::current_dir, Ok)
+        .map_err(|error| {
+            super::ProcessError::Spawn(format!("verifier working directory: {error}"))
+        })?;
+    harn_vm::prepared_run::prepared_source_verifier(&spec.program, &spec.args, &cwd)
+        .and_then(|verifier| verifier.map(|value| value.launch()).transpose())
+        .map_err(super::ProcessError::Spawn)
+}
+
 pub(super) fn missing_program(
     spec: &SpawnSpec,
     command: &Command,
