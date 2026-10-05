@@ -170,7 +170,7 @@ async fn source_verifier_control(ignores_source: bool) {
         ..Default::default()
     };
     let budget = RunBudget {
-        spend_microusd: None,
+        spend_microusd: Some(0),
         time_ms: Some(10000),
         turns: Some(2),
     };
