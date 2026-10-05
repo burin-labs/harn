@@ -344,7 +344,7 @@ async fn concurrent_prepared_verifiers_keep_their_own_native_material_across_wor
         first_run.execute(first_lease),
         second_run.execute(second_lease)
     );
-    for result in [results.0, results.1] {
+    for result in <[_; 2]>::from(results) {
         match result {
             ExecutionOutcome::Completed { output, .. } => {
                 assert_eq!(output["first"]["source_verifier_id"], "calculation");
@@ -412,12 +412,12 @@ async fn prepared_source_verifier_session_turns_keep_original_material_and_resta
     let claims = Arc::new(MemoryPreparedSessionLeaseStore::default());
     let before_restart = PreparedSession::new(source_run(original.request.clone()), claims.clone());
     let binding = super::identity_session::prepared_session_binding();
-    let lease = match before_restart.prepare(binding.clone(), intent, host.clone()) {
+    let lease = match before_restart.prepare(binding, intent, host.clone()) {
         PreparedSessionUpdate::Ready { lease, .. } => *lease,
         other => panic!("original session must be ready: {other:?}"),
     };
     std::fs::write(&original.request.source, "print('RUNNER_SHIM_BYPASS')\n").unwrap();
-    let restarted = PreparedSession::new(source_run(original.request.clone()), claims);
+    let restarted = PreparedSession::new(source_run(original.request), claims);
     assert!(
         matches!(restarted.attach(lease, host, attachment), Err(PreparedSessionUpdate::Blocked { diagnostics, .. })
         if diagnostics.iter().any(|item| item.code == "verifier_baseline_unmeasured"))

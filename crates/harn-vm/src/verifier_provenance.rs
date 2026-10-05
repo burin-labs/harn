@@ -247,7 +247,7 @@ fn bounded_read(path: &Path, maximum: usize) -> Result<Vec<u8>, String> {
 // Register a separate main module for script discovery and annotation lookup.
 // Its globals exclude the bootstrap's private source and witness descriptors.
 #[cfg(target_os = "linux")]
-const PYTHON_SOURCE_BOOTSTRAP: &str = r#"import json, os, sys, types
+const PYTHON_SOURCE_BOOTSTRAP: &str = r"import json, os, sys, types
 descriptor = int(sys.argv[1])
 metadata = json.loads(sys.argv[2])
 source = os.pread(descriptor, os.fstat(descriptor).st_size, 0)
@@ -267,4 +267,4 @@ try:
 finally:
     write_witness(witness_fd, witness, 0)
     close_witness(witness_fd)
-"#;
+";
