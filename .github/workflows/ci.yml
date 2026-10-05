@@ -923,7 +923,7 @@ jobs:
       github.event_name == 'merge_group'
       || (github.event_name == 'pull_request'
       && github.event.pull_request.head.repo.full_name == github.repository)
-    uses: burin-labs/.github/.github/workflows/runner-availability.yml@d59d828bd5d2dc226111498e51ab5d41da76d62f
+    uses: burin-labs/.github/.github/workflows/runner-availability.yml@bebed855b0067821ca1466300a687759cf04b29d
     with:
       linux_probe_runner_tag: harn-ci-producer
     secrets:
@@ -938,7 +938,7 @@ jobs:
   # busy or absent host costs the queue nothing it did not already pay.
   datacenter-availability:
     if: github.event_name == 'merge_group'
-    uses: burin-labs/.github/.github/workflows/runner-availability.yml@d59d828bd5d2dc226111498e51ab5d41da76d62f
+    uses: burin-labs/.github/.github/workflows/runner-availability.yml@bebed855b0067821ca1466300a687759cf04b29d
     with:
       linux_runner_tag: harn-ci-big
       linux_fetch_runner_tag: hetzner-1
