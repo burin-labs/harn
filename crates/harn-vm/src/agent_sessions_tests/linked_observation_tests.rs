@@ -241,14 +241,24 @@ fn worker_placeholders_and_cleanup_preserve_other_workers_parent_lineage() {
 fn assert_observation_survives_unowned_close(parent_reference: bool) {
     reset_all_sinks();
     reset_session_store();
-    let parent = observed_session("linked-close-owner-parent");
+    let (parent_id, child_id, other_id) = if parent_reference {
+        (
+            "linked-close-reference-parent",
+            "linked-close-reference-child",
+            "linked-close-reference-other",
+        )
+    } else {
+        (
+            "linked-close-absent-parent",
+            "linked-close-absent-child",
+            "linked-close-absent-other",
+        )
+    };
+    let parent = observed_session(parent_id);
     let (ready_tx, ready_rx) = std::sync::mpsc::channel();
     let (resume_tx, resume_rx) = std::sync::mpsc::channel();
     let worker_b = crate::runtime_stack::spawn(move || {
-        let child = open_child_session(
-            "linked-close-owner-parent",
-            Some("linked-close-owner-child".into()),
-        );
+        let child = open_child_session(parent_id, Some(child_id.into()));
         ready_tx.send(()).unwrap();
         resume_rx.recv().unwrap();
         emit_child_request(&child);
@@ -256,14 +266,11 @@ fn assert_observation_survives_unowned_close(parent_reference: bool) {
     });
     ready_rx.recv().unwrap();
     let worker_a = crate::runtime_stack::spawn(move || {
-        open_child_session(
-            "linked-close-owner-parent",
-            Some("linked-close-other-child".into()),
-        );
+        open_child_session(parent_id, Some(other_id.into()));
         let id = if parent_reference {
-            "linked-close-owner-parent"
+            parent_id
         } else {
-            "linked-close-owner-child"
+            child_id
         };
         let status_closed =
             super::super::close_with_status(id, "fixture", "completed", serde_json::json!({}))
@@ -330,4 +337,58 @@ fn a_parent_reference_becomes_closable_only_after_successful_explicit_admission(
         super::super::close("linked-open-reference"),
         "public explicit open is admission, unlike an internal lineage placeholder"
     );
+}
+
+fn assert_late_open_preserves_live_observation(ancestor: bool) {
+    reset_all_sinks();
+    reset_session_store();
+    let parent_id = if ancestor {
+        "linked-late-ancestor-parent"
+    } else {
+        "linked-late-direct-parent"
+    };
+    let observer_id = if ancestor {
+        "linked-late-ancestor"
+    } else {
+        parent_id
+    };
+    let observed = Arc::new(Mutex::new(Vec::new()));
+    register_sink(observer_id, Arc::new(CapturingSink(observed.clone())));
+    assert_eq!(session_external_sink_count(observer_id), 1);
+    let (ready_tx, ready_rx) = std::sync::mpsc::channel();
+    let (resume_tx, resume_rx) = std::sync::mpsc::channel();
+    let worker = crate::runtime_stack::spawn(move || {
+        let child = if ancestor {
+            open_child_session("linked-late-ancestor", Some(parent_id.into()))
+        } else {
+            open_child_session(parent_id, Some("linked-late-direct-child".into()))
+        };
+        ready_tx.send(()).unwrap();
+        resume_rx.recv().unwrap();
+        emit_child_request(&child);
+        reset_session_store();
+    });
+    ready_rx.recv().unwrap();
+    assert!(
+        !super::super::exists(parent_id),
+        "a local store's absence does not retire the already registered global identity"
+    );
+    open_or_create(Some(parent_id.into()));
+    resume_tx.send(()).unwrap();
+    worker.join().unwrap();
+    assert_eq!(
+        observed.lock().unwrap().len(),
+        1,
+        "late local admission must preserve live worker observation"
+    );
+}
+
+#[test]
+fn late_parent_admission_preserves_its_already_registered_transport() {
+    assert_late_open_preserves_live_observation(false);
+}
+
+#[test]
+fn late_local_admission_preserves_another_workers_existing_ancestor_route() {
+    assert_late_open_preserves_live_observation(true);
 }

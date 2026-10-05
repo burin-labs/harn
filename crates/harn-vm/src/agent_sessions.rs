@@ -797,10 +797,10 @@ pub fn open_or_create_with_actor_chain(
         crate::agent_events::clear_session_parent_routes(&evicted);
     }
     if was_new {
-        // A prior owner may have been abandoned before its receipt drained.
-        // Opening a fresh session with the same id starts a fresh receipt.
+        // Local admission can follow global observer registration. Only an
+        // explicit close retires that identity and its incoming child routes.
         clear_session_changed_paths(&resolved);
-        crate::agent_events::retire_session_observer_lineage(&resolved);
+        crate::agent_events::clear_session_parent_routes(&resolved);
         if let Some(parent) = parent_session.as_deref() {
             crate::agent_events::mirror_session_sinks(parent, &resolved);
         }
@@ -925,7 +925,7 @@ fn admit_linked_sessions(
         clear_session_changed_paths(&id);
         // A parent placeholder in a fresh worker is not a new global parent.
         if id == child_id {
-            crate::agent_events::retire_session_observer_lineage(&id);
+            crate::agent_events::clear_session_parent_routes(&id);
         }
         try_register_event_log(&id);
     }
@@ -1209,7 +1209,7 @@ pub fn fork(src_id: &str, dst_id: Option<String>) -> Result<Option<String>, Sess
         crate::agent_events::clear_session_parent_routes(&id);
     }
     clear_session_changed_paths(&dst);
-    crate::agent_events::retire_session_observer_lineage(&dst);
+    crate::agent_events::clear_session_parent_routes(&dst);
     crate::agent_events::link_session_sinks(src_id, &dst);
     try_register_event_log(&dst);
     publish_transcript_budget_event(budget_event);
