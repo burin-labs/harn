@@ -46,11 +46,11 @@ pub(super) fn scan_static_tool_surface_preflight(
             let candidates = resolve_preflight_target(file_path, &prompt_target, config);
             let Some(existing) = candidates
                 .iter()
-                .find(|path| super::result_cache::probe_exists(path))
+                .find(|path| super::super::result_cache::probe_exists(path))
             else {
                 continue;
             };
-            super::result_cache::probe_read_to_string(existing).ok()
+            super::super::result_cache::probe_read_to_string(existing).ok()
         };
         let Some(body) = body else { continue };
         for reference in harn_vm::tool_surface::prompt_tool_references(&body) {

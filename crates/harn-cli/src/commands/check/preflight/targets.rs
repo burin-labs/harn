@@ -31,7 +31,7 @@ pub(in super::super) fn resolve_preflight_target(
             Ok(path) => vec![path],
             Err(_) => vec![PathBuf::from(target)],
         };
-        super::result_cache::record_resolve_target(current_file, target, &candidates);
+        super::super::result_cache::record_resolve_target(current_file, target, &candidates);
         return candidates;
     }
     let mut candidates = vec![resolve_source_relative(current_file, target)];
@@ -44,7 +44,7 @@ pub(in super::super) fn resolve_preflight_target(
         });
     }
     candidates.dedup();
-    super::result_cache::record_resolve_target(current_file, target, &candidates);
+    super::super::result_cache::record_resolve_target(current_file, target, &candidates);
     candidates
 }
 
@@ -161,7 +161,7 @@ pub(in super::super) fn find_unique_basename(root: &Path, basename: &str) -> Opt
     let mut matches: Vec<PathBuf> = Vec::with_capacity(2);
     walk_for_basename(root, basename, 0, 8, &mut matches);
     let result = (matches.len() == 1).then(|| matches.into_iter().next().expect("len == 1"));
-    super::result_cache::record_walk_unique(root, basename, result.as_deref());
+    super::super::result_cache::record_walk_unique(root, basename, result.as_deref());
     result
 }
 

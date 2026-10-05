@@ -142,7 +142,7 @@ pub(super) fn scan_spawn_agent_preflight(
     };
     if let Some(cwd) = dict_literal_field(execution, "cwd").and_then(literal_string) {
         let resolved = resolve_source_relative(file_path, &cwd);
-        if !super::result_cache::probe_is_dir(&resolved) {
+        if !super::super::result_cache::probe_is_dir(&resolved) {
             diagnostics.push(PreflightDiagnostic {
                 code: Code::ExecutionTargetMissing,
                 path: file_path.display().to_string(),
@@ -166,7 +166,7 @@ pub(super) fn scan_spawn_agent_preflight(
     };
     if let Some(repo) = dict_literal_field(worktree, "repo").and_then(literal_string) {
         let resolved = resolve_source_relative(file_path, &repo);
-        if !super::result_cache::probe_is_dir(&resolved) {
+        if !super::super::result_cache::probe_is_dir(&resolved) {
             diagnostics.push(PreflightDiagnostic {
                 code: Code::ExecutionTargetMissing,
                 path: file_path.display().to_string(),
