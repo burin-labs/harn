@@ -43,7 +43,7 @@ async fn cold_parent_forks_persist_selected_context_and_lineage_before_prompt() 
         server.sessions.contains_key(parent),
         "cold parent must actually load"
     );
-    let boundaries = harn_vm::agent_sessions::canonical_history_boundaries(root.path(), parent)
+    let boundaries = harn_vm::agent_sessions::canonical_history_boundaries(&store, parent)
         .await
         .expect("acknowledged canonical boundaries");
     let first_boundary = boundaries.positions[0].boundary.clone();
@@ -105,7 +105,7 @@ async fn cold_parent_forks_persist_selected_context_and_lineage_before_prompt() 
         "durable child must reload after restart"
     );
     let child_boundaries =
-        harn_vm::agent_sessions::canonical_history_boundaries(root.path(), "prefix-child")
+        harn_vm::agent_sessions::canonical_history_boundaries(&store, "prefix-child")
             .await
             .expect("child acknowledgments");
     restarted

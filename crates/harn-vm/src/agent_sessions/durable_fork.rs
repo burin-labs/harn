@@ -13,6 +13,12 @@ pub enum CanonicalForkError {
     Persistence(VmError),
 }
 
+#[derive(Clone, Debug)]
+pub struct CanonicalForkResult {
+    pub session_id: String,
+    pub source_boundary: super::CanonicalSessionBoundary,
+}
+
 impl From<VmError> for CanonicalForkError {
     fn from(error: VmError) -> Self {
         Self::Persistence(error)
@@ -36,7 +42,7 @@ pub async fn fork_canonical(
     source: &str,
     boundary: Option<super::CanonicalSessionBoundary>,
     destination: Option<String>,
-) -> Result<Option<String>, CanonicalForkError> {
+) -> Result<Option<CanonicalForkResult>, CanonicalForkError> {
     if !super::exists(source) {
         return Ok(None);
     }
@@ -68,13 +74,16 @@ pub async fn fork_canonical(
         super::restore_message_event_ids(source, &hydrated.source_event_ids)
             .map_err(VmError::Runtime)?;
     }
-    let event_id = match boundary {
-        Some(boundary) => {
-            boundary.validate(source, &events)?;
-            boundary.event_id
-        }
-        None => events.last().map(|event| event.event_id),
-    };
+    let boundary = boundary.unwrap_or_else(|| {
+        events.last().map_or_else(
+            || super::CanonicalSessionBoundary::empty(source),
+            super::CanonicalSessionBoundary::acknowledged,
+        )
+    });
+    // Refuse before live admission, then revalidate inside the store's atomic
+    // fork. A concurrent truncate/rewrite cannot substitute another prefix.
+    boundary.validate(source, &events).map_err(store_error)?;
+    let event_id = boundary.event_id;
     // Hydrate the historical prefix itself. Later publication, removals, or
     // compaction must not redefine what this acknowledged boundary restores.
     let copied = crate::agent_session_journal::hydrate_events(
@@ -91,11 +100,17 @@ pub async fn fork_canonical(
         super::close(&child);
         return Err(VmError::Runtime(error).into());
     }
-    if let Err(error) = store.fork(source, event_id, Some(child.clone())).await {
+    if let Err(error) = store
+        .fork(source, boundary.clone(), Some(child.clone()))
+        .await
+    {
         super::close(&child);
         return Err(store_error(error));
     }
-    Ok(Some(child))
+    Ok(Some(CanonicalForkResult {
+        session_id: child,
+        source_boundary: boundary,
+    }))
 }
 
 fn store_error(error: StoreError) -> CanonicalForkError {

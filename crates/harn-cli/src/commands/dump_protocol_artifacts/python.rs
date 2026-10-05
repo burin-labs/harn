@@ -273,6 +273,7 @@ pub(super) fn generate_python_with_payloads(payloads: &SessionUpdatePayloads) ->
     append_python_session_recap_types(&mut out);
     super::plan_records::append(&mut out, super::records::Target::Python);
     super::inference_admission::append(&mut out, super::records::Target::Python);
+    super::canonical_history::append(&mut out, super::records::Target::Python);
     out
 }
 

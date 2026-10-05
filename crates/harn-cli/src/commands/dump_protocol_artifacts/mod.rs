@@ -12,6 +12,7 @@
 //! target language owns that language's emitter.
 
 mod activity;
+mod canonical_history;
 mod connector_setup;
 mod constants;
 mod external_action;
@@ -217,6 +218,11 @@ fn generate_artifacts(source: &ProtocolArtifactSource) -> Result<Vec<Artifact>, 
         ),
     ];
 
+    artifacts.push(Artifact::new(
+        "schemas/canonical-history-boundaries.schema.json",
+        serde_json::to_string_pretty(&canonical_history::schema())
+            .map_err(|error| error.to_string())?,
+    ));
     for (name, schema) in inference_admission::schemas() {
         artifacts.push(Artifact::new(
             format!(

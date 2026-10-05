@@ -527,12 +527,12 @@ pub trait SessionStore: Send + Sync {
             }
         }
     }
-    /// Copy the prefix through an event, or no events when the boundary is None.
+    /// Copy an acknowledged event prefix, or no events for an explicit empty boundary.
     /// Both cases retain the parent's metadata and explicit child lineage.
     async fn fork(
         &self,
         session_id: &str,
-        at_event_id: Option<EventId>,
+        boundary: crate::CanonicalSessionBoundary,
         child_id: Option<SessionId>,
     ) -> StoreResult<ForkResult>;
     async fn truncate(&self, session_id: &str, at_event_id: EventId)

@@ -1285,6 +1285,25 @@ fn every_registered_builtin_has_request_and_response_schemas() {
 
 #[test]
 fn schemas_and_typed_capability_contracts_cannot_drift() {
+    let (_, _, _, fork_schema) = schemas::SCHEMAS
+        .iter()
+        .find(|(module, method, kind, _)| {
+            *module == "session" && *method == "fork" && *kind == schemas::SchemaKind::Request
+        })
+        .expect("canonical fork schema");
+    let fork_schema: serde_json::Value =
+        serde_json::from_str(fork_schema).expect("fork schema JSON");
+    let history_schema = harn_vm::agent_sessions::canonical_history_boundaries_schema();
+    let mut boundary = history_schema["$defs"]["CanonicalSessionBoundary"]
+        .as_object()
+        .expect("owning canonical boundary schema")
+        .clone();
+    boundary.remove("title");
+    assert_eq!(
+        fork_schema["properties"]["canonical_boundary"],
+        serde_json::Value::Object(boundary),
+        "hostlib must project the store-owned boundary contract exactly"
+    );
     let schema_methods: BTreeSet<_> = schemas::SCHEMAS
         .iter()
         .filter(|(_, _, kind, _)| *kind == schemas::SchemaKind::Request)

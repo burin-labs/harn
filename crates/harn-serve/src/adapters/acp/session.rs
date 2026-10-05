@@ -499,7 +499,14 @@ impl AcpServer {
             .get(&session_id)
             .expect("admitted session")
             .project_root;
-        match harn_vm::agent_sessions::canonical_history_boundaries(root, &session_id).await {
+        let store = match harn_vm::open_canonical_store(root) {
+            Ok(store) => store,
+            Err(error) => {
+                self.send_error(id, -32000, &error.to_string());
+                return;
+            }
+        };
+        match harn_vm::agent_sessions::canonical_history_boundaries(&store, &session_id).await {
             Ok(boundaries) => self.send_response(
                 id,
                 serde_json::to_value(boundaries).expect("canonical boundaries serialize"),
@@ -626,8 +633,8 @@ impl AcpServer {
         };
         let new_session_id =
             harn_vm::agent_sessions::fork_canonical(&store, &root, &src_id, boundary, dst_id).await;
-        let new_session_id = match new_session_id {
-            Ok(Some(new_session_id)) => new_session_id,
+        let (new_session_id, source_boundary) = match new_session_id {
+            Ok(Some(fork)) => (fork.session_id, fork.source_boundary),
             Ok(None) => {
                 self.send_error(id, -32000, &format!("Failed to fork session: {src_id}"));
                 return;
@@ -642,18 +649,13 @@ impl AcpServer {
             }
         };
 
-        let snapshot = harn_vm::agent_sessions::snapshot(&new_session_id)
-            .and_then(|value| serde_json::to_value(harn_vm::llm::vm_value_to_json(&value)).ok())
-            .unwrap_or_else(|| serde_json::json!({}));
-        let branched_at = snapshot
-            .get("branched_at_event_index")
-            .cloned()
-            .unwrap_or(serde_json::Value::Null);
-
         let mut meta = serde_json::Map::new();
         meta.insert("state".to_string(), serde_json::json!("forked"));
         meta.insert("parent_id".to_string(), serde_json::json!(src_id));
-        meta.insert("branched_at".to_string(), branched_at.clone());
+        meta.insert(
+            "canonical_boundary".to_string(),
+            serde_json::json!(source_boundary),
+        );
         if let Some(branch_name) = &branch_name {
             meta.insert("branch_name".to_string(), serde_json::json!(branch_name));
         }
@@ -718,7 +720,7 @@ impl AcpServer {
                 "sessionId": new_session_id,
                 "state": "forked",
                 "parent_id": src_id,
-                "branched_at": branched_at,
+                "canonicalBoundary": source_boundary,
                 "modes": modes::session_mode_state(&parent_mode_id),
                 "configOptions": self.config_options_for_session(&new_session_id, &parent_mode_id),
             }),

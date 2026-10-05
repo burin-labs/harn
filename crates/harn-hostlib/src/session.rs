@@ -194,7 +194,7 @@ impl SessionCapability {
             .store(FORK_BUILTIN, &root)?
             .fork(
                 &request.session_id,
-                request.at_event_id,
+                request.canonical_boundary,
                 request.child_session_id,
             )
             .await
@@ -330,7 +330,7 @@ struct ListRequest {
 struct ForkRequest {
     root: String,
     session_id: String,
-    at_event_id: Option<EventId>,
+    canonical_boundary: harn_session_store::CanonicalSessionBoundary,
     #[serde(default)]
     child_session_id: Option<String>,
 }

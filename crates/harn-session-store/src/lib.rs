@@ -21,6 +21,7 @@
 //! - [`wal_watch`] - read-only data_version + title snapshots for cross-process watchers
 //! - [`retention`] - declarative per-tenant retention policy
 
+pub mod boundary;
 pub mod change;
 pub mod control;
 pub mod event;
@@ -36,6 +37,7 @@ pub mod sqlite;
 pub mod store;
 pub mod wal_watch;
 
+pub use boundary::{CanonicalSessionBoundary, CANONICAL_SESSION_BOUNDARY_SCHEMA};
 pub use change::{SessionChangeObserver, SharedSessionChangeObserver};
 pub use control::{
     ControlAction, ControlEvent, ControlGoal, ControlProvenance, CONTROL_EVENT_KIND,

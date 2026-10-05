@@ -307,6 +307,7 @@ pub(super) fn generate_rust(
     append_rust_session_recap_types(&mut out);
     super::plan_records::append(&mut out, super::records::Target::Rust);
     super::inference_admission::append(&mut out, super::records::Target::Rust);
+    super::canonical_history::append(&mut out, super::records::Target::Rust);
 
     // Consumers vendor this artifact verbatim, sometimes as a new file. Keep
     // one POSIX final newline without a trailing blank line so their

@@ -323,7 +323,7 @@ impl SessionStore for MemorySessionStore {
     async fn fork(
         &self,
         session_id: &str,
-        at_event_id: Option<EventId>,
+        boundary: crate::CanonicalSessionBoundary,
         child_id: Option<SessionId>,
     ) -> StoreResult<ForkResult> {
         let mut guard = lock(&self.inner);
@@ -331,13 +331,8 @@ impl SessionStore for MemorySessionStore {
             .sessions
             .get(session_id)
             .ok_or_else(|| StoreError::NotFound(session_id.to_string()))?;
-        if let Some(boundary) = at_event_id {
-            if !parent.events.iter().any(|event| event.event_id == boundary) {
-                return Err(StoreError::InvalidInput(format!(
-                    "event {boundary} not found in session '{session_id}'"
-                )));
-            }
-        }
+        boundary.validate(session_id, &parent.events)?;
+        let at_event_id = boundary.event_id;
         let new_id = child_id.unwrap_or_else(|| Uuid::now_v7().to_string());
         if guard.sessions.contains_key(&new_id) {
             return Err(StoreError::AlreadyExists(new_id));

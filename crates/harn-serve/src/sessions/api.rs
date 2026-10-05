@@ -70,7 +70,7 @@ struct AppendRequest {
 
 #[derive(Debug, Deserialize)]
 struct ForkRequest {
-    at_event_id: Option<EventId>,
+    canonical_boundary: harn_session_store::CanonicalSessionBoundary,
     #[serde(default)]
     child_session_id: Option<SessionId>,
 }
@@ -435,7 +435,7 @@ fn session_status_string(status: SessionStatus) -> String {
     skip_all,
     fields(
         harn.session.id = %id,
-        harn.session.fork_at_event_id = ?body.at_event_id,
+        harn.session.fork_at_event_id = ?body.canonical_boundary.event_id,
     ),
 )]
 async fn fork_session(
@@ -445,7 +445,7 @@ async fn fork_session(
 ) -> impl IntoResponse {
     match state
         .store
-        .fork(&id, body.at_event_id, body.child_session_id)
+        .fork(&id, body.canonical_boundary, body.child_session_id)
         .await
     {
         Ok(result) => (StatusCode::CREATED, Json(json!(result))).into_response(),

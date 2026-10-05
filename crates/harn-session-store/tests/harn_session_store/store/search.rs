@@ -85,7 +85,13 @@ async fn fork_copies_history_up_to_event_id() {
                 .expect("append");
         }
         let result = store
-            .fork(&meta.id, Some(3), Some("child".into()))
+            .fork(
+                &meta.id,
+                harn_session_store::CanonicalSessionBoundary::acknowledged(
+                    &store.read_all(&meta.id).await.expect("canonical events")[2],
+                ),
+                Some("child".into()),
+            )
             .await
             .expect("fork");
         assert_eq!(result.child_session_id, "child");
@@ -113,6 +119,74 @@ async fn fork_copies_history_up_to_event_id() {
 }
 
 #[tokio::test]
+async fn fork_refuses_a_rewritten_event_with_the_same_numeric_id() {
+    run_with_hooks(StoreHooks::default(), |store| async move {
+        let parent = store
+            .create(CreateSession::default())
+            .await
+            .expect("parent");
+        let first = store
+            .append(
+                &parent.id,
+                AppendEvent::new(SessionEventKind::Message, json!({"text": "first"})),
+            )
+            .await
+            .expect("first");
+        let original = store
+            .append(
+                &parent.id,
+                AppendEvent::new(SessionEventKind::Message, json!({"text": "original"})),
+            )
+            .await
+            .expect("original");
+        let stale = harn_session_store::CanonicalSessionBoundary::acknowledged(&original);
+        store
+            .truncate(&parent.id, first.event_id)
+            .await
+            .expect("truncate");
+        let replacement = store
+            .append(
+                &parent.id,
+                AppendEvent::new(SessionEventKind::Message, json!({"text": "replacement"})),
+            )
+            .await
+            .expect("replacement");
+        assert_eq!(replacement.event_id, original.event_id);
+        assert_ne!(
+            replacement.source_record_hash(),
+            original.source_record_hash()
+        );
+        assert!(matches!(
+            store
+                .fork(&parent.id, stale, Some("stale-child".into()))
+                .await,
+            Err(StoreError::Conflict(_))
+        ));
+        assert!(store.describe("stale-child").await.is_err());
+        let current = harn_session_store::CanonicalSessionBoundary::acknowledged(&replacement);
+        let fork = store
+            .fork(&parent.id, current, Some("current-child".into()))
+            .await
+            .expect("current acknowledged boundary");
+        assert_eq!(fork.copied_event_count, 2);
+        let child = store.read_all("current-child").await.expect("child events");
+        assert_eq!(
+            child.last().expect("nonempty child").payload,
+            replacement.payload
+        );
+        assert_eq!(
+            store
+                .describe("current-child")
+                .await
+                .expect("child")
+                .parent_session_id,
+            Some(parent.id)
+        );
+    })
+    .await;
+}
+
+#[tokio::test]
 async fn empty_fork_retains_lineage_without_copying_an_event() {
     run_with_hooks(StoreHooks::default(), |store| async move {
         let parent = store
@@ -127,7 +201,11 @@ async fn empty_fork_retains_lineage_without_copying_an_event() {
             .await
             .expect("parent message");
         let fork = store
-            .fork(&parent.id, None, Some("empty-child".into()))
+            .fork(
+                &parent.id,
+                harn_session_store::CanonicalSessionBoundary::empty(&parent.id),
+                Some("empty-child".into()),
+            )
             .await
             .expect("empty fork");
         assert_eq!(fork.forked_from_event_id, None);
@@ -142,8 +220,18 @@ async fn empty_fork_retains_lineage_without_copying_an_event() {
             .events
             .is_empty());
         assert!(matches!(
-            store.fork(&parent.id, Some(99), None).await,
-            Err(StoreError::InvalidInput(_))
+            store
+                .fork(
+                    &parent.id,
+                    harn_session_store::CanonicalSessionBoundary {
+                        event_id: Some(99),
+                        record_hash: Some("sha256:missing".into()),
+                        ..harn_session_store::CanonicalSessionBoundary::empty(&parent.id)
+                    },
+                    None
+                )
+                .await,
+            Err(StoreError::Conflict(_))
         ));
         let added = store
             .append(
@@ -495,7 +583,11 @@ async fn retrieval_reapplies_redaction_to_stored_data_and_marks_projection() {
             assert!(matches!(verify_error, VerifyError::InvalidShape(_)));
 
             let forked = store
-                .fork(&meta.id, Some(1), Some("redacted-child".to_string()))
+                .fork(
+                    &meta.id,
+                    harn_session_store::CanonicalSessionBoundary::acknowledged(&page.events[0]),
+                    Some("redacted-child".to_string()),
+                )
                 .await
                 .expect("fork");
             let child_page = store
@@ -1087,7 +1179,13 @@ async fn fork_produces_self_contained_verifiable_chain() {
                 .expect("append");
         }
         let _ = store
-            .fork(&meta.id, Some(3), Some("forked-child".into()))
+            .fork(
+                &meta.id,
+                harn_session_store::CanonicalSessionBoundary::acknowledged(
+                    &store.read_all(&meta.id).await.expect("canonical events")[2],
+                ),
+                Some("forked-child".into()),
+            )
             .await
             .expect("fork");
 

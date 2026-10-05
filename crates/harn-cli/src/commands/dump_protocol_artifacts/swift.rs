@@ -1201,5 +1201,6 @@ public struct HarnMCPOAuthDynamicClientRegistrationRequest: Codable, Sendable, E
     append_swift_session_recap_types(&mut out);
     super::plan_records::append(&mut out, super::records::Target::Swift);
     super::inference_admission::append(&mut out, super::records::Target::Swift);
+    super::canonical_history::append(&mut out, super::records::Target::Swift);
     out
 }

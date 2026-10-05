@@ -70,6 +70,12 @@ pub(super) fn generate_manifest_with_vocabularies(
             }))
         })
         .collect::<Result<Vec<_>, String>>()?;
+    schemas.push(json!({
+        "protocol": "harn",
+        "source": "crates/harn-vm/src/agent_sessions/canonical_boundary.rs",
+        "artifact": "schemas/canonical-history-boundaries.schema.json",
+        "provenance": {"owner": "harn-vm::agent_sessions::canonical_boundary", "schema_version": 1},
+    }));
     let receipt_schema = tool_call_receipt_schema();
     for (name, _) in super::inference_admission::schemas() {
         schemas.push(json!({

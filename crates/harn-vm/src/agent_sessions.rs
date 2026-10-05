@@ -1223,7 +1223,7 @@ pub use canonical_boundary::{
     CANONICAL_SESSION_BOUNDARY_SCHEMA,
 };
 mod truncation;
-pub use durable_fork::{fork_canonical, CanonicalForkError};
+pub use durable_fork::{fork_canonical, CanonicalForkError, CanonicalForkResult};
 use truncation::truncate_state;
 pub use truncation::{trim, truncate};
 

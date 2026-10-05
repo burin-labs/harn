@@ -130,10 +130,10 @@ impl SessionStore for CanonicalStore {
     async fn fork(
         &self,
         session_id: &str,
-        at_event_id: Option<EventId>,
+        boundary: harn_session_store::CanonicalSessionBoundary,
         child_id: Option<harn_session_store::SessionId>,
     ) -> harn_session_store::StoreResult<harn_session_store::ForkResult> {
-        self.store.fork(session_id, at_event_id, child_id).await
+        self.store.fork(session_id, boundary, child_id).await
     }
 
     async fn truncate(
