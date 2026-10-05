@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
@@ -20,6 +20,43 @@ pub struct ProviderManifestEntry {
     pub service: Option<ConnectorServiceManifest>,
     #[serde(default)]
     pub capabilities: ConnectorCapabilities,
+}
+
+impl ProviderManifestEntry {
+    /// Resolve a declaration after its owning package has selected the
+    /// manifest directory and connector contract version.
+    pub fn resolve(
+        &self,
+        manifest_dir: &Path,
+        connector_contract_version: u32,
+    ) -> ResolvedProviderConnectorConfig {
+        let connector = match (
+            self.connector.harn.as_deref(),
+            self.connector.rust.as_deref(),
+        ) {
+            (Some(module), None) => ResolvedProviderConnectorKind::Harn {
+                module: module.to_string(),
+            },
+            (None, Some("builtin")) | (None, None) => ResolvedProviderConnectorKind::RustBuiltin,
+            (None, Some(other)) => ResolvedProviderConnectorKind::Invalid(format!(
+                "provider '{}' uses unsupported connector.rust value '{other}'",
+                self.id.as_str()
+            )),
+            (Some(_), Some(_)) => ResolvedProviderConnectorKind::Invalid(format!(
+                "provider '{}' cannot set both connector.harn and connector.rust",
+                self.id.as_str()
+            )),
+        };
+        ResolvedProviderConnectorConfig {
+            id: self.id.clone(),
+            manifest_dir: manifest_dir.to_path_buf(),
+            connector,
+            oauth: self.oauth.clone(),
+            setup: self.setup.clone(),
+            service: self.service.clone(),
+            connector_contract_version,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]

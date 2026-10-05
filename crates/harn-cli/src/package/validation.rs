@@ -240,34 +240,10 @@ pub(crate) fn resolved_provider_connectors_from_manifest(
         .providers
         .iter()
         .map(|provider| {
-            let connector = match (
-                provider.connector.harn.as_deref(),
-                provider.connector.rust.as_deref(),
-            ) {
-                (Some(module), None) => ResolvedProviderConnectorKind::Harn {
-                    module: module.to_string(),
-                },
-                (None, Some("builtin")) | (None, None) => {
-                    ResolvedProviderConnectorKind::RustBuiltin
-                }
-                (None, Some(other)) => ResolvedProviderConnectorKind::Invalid(format!(
-                    "provider '{}' uses unsupported connector.rust value '{other}'",
-                    provider.id.as_str()
-                )),
-                (Some(_), Some(_)) => ResolvedProviderConnectorKind::Invalid(format!(
-                    "provider '{}' cannot set both connector.harn and connector.rust",
-                    provider.id.as_str()
-                )),
-            };
-            ResolvedProviderConnectorConfig {
-                id: provider.id.clone(),
-                manifest_dir: manifest_dir.to_path_buf(),
-                connector,
-                oauth: provider.oauth.clone(),
-                setup: provider.setup.clone(),
-                service: provider.service.clone(),
-                connector_contract_version: manifest.connector_contract.version.unwrap_or(1),
-            }
+            provider.resolve(
+                manifest_dir,
+                manifest.connector_contract.version.unwrap_or(1),
+            )
         })
         .collect()
 }
