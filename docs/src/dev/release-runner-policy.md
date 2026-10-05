@@ -53,21 +53,15 @@ and [Blacksmith pricing](https://www.blacksmith.sh/pricing).
 
 ## Current decision
 
-Release candidates build both Apple targets on `macos-15-xlarge`, including
-the x86_64 cross build. Linux targets and CLI AOT preparation use GitHub's
-16-core Ubuntu 22.04 pool (`ubuntu-16core-release`), which is also the recovery
-runner. They used Blacksmith's 16-vCPU Ubuntu 22.04 image until 2026-10-02.
-Since harn#9068, a Harn child process on Linux refuses to start without Landlock
-or bubblewrap, and that image has neither. The x86_64 job's binary-size growth step
-runs `harn run scripts/check_binary_size.harn`, which spawns processes, so a
-candidate built there would fail. The CI cache policy now refuses any Linux
-release runner, in any mode, whose label marks it unable to confine a Harn
-child. Per the receipts below, the move costs about $0.47 more per release for
-both Linux jobs, and their builds take about five minutes longer.
-Windows remains on `windows-latest` because the measured
-47m05s Windows job fits the 75-minute release objective after the slower Apple
-jobs move off the critical path. Routine cache refreshes remain on standard
-capacity.
+Release candidates, recovery runs, warm-cache refreshes, and benchmarks use
+GitHub's free standard runners: `macos-15-intel`, `macos-latest`,
+`ubuntu-22.04`, and `windows-latest`. CLI AOT preparation uses
+`ubuntu-24.04`. The resolver refuses a paid runner in any active policy role,
+and the workflow policy rejects paid-provider switches before they can route a
+job. Historical runner and pricing rows remain below so earlier measurements
+stay interpretable. Marginal vendor spend for the current routes is $0. No
+terminal release-candidate cohort has measured the slower free-only policy yet,
+so there is no replacement release-latency claim.
 
 The v0.10.144 release is the baseline. Its candidate started at 23:01:22Z,
 completed at 00:31:15Z, and published at 00:32:37Z, for 91m15s from candidate
@@ -99,20 +93,12 @@ rejected. Runner operating system, architecture, glibc version, provider, and
 rate now live in the policy registry. The matrix resolver rejects a target
 whose runner OS or glibc floor is incompatible before dispatch.
 
-The chosen target jobs add about $3.50 per release: $2.96 for both Apple jobs
-and $0.54 for both Linux jobs. A measured Blacksmith 16-vCPU AOT job adds about
-$0.10, keeping the projected increment below $3.60. The unchanged Windows job
-therefore owns the expected critical path at about 47 minutes, with more than
-25 minutes of release-tail allowance under the 75-minute objective. Moving
-Windows to a follow-up asset would add manifest and consumer complexity without
-improving the stated objective, so it remains part of the candidate archive.
-
-Set `HARN_RELEASE_ENABLE_BLACKSMITH_LINUX=true` so candidate and benchmark AOT
-preparation uses the policy's primary AOT runner rather than the standard one.
-Despite its name, that primary is now GitHub's 16-core pool. The macOS variable is retained
-for compatibility, but the selected GitHub XLarge primary does not depend on
-it. Explicit `standard` and `fast` benchmark profiles continue to honor the
-operator's selected profile.
+Those paid-runner measurements are retained as historical evidence only. The
+current target and AOT jobs incur no marginal vendor charge. Windows remains
+part of the candidate archive; changing artifact topology would add a second
+release path and is unrelated to capacity selection. Explicit `standard` and
+`fast` benchmark profiles still select their declared policy roles, and every
+active role is free standard capacity.
 
 ## Compiler-cache backends
 
@@ -144,9 +130,7 @@ the intended steady-state Intel release path. The later cache-hit pair showed a
 36.1% Intel Large advantage and justified the first paid default; the controlled
 ARM pair above supersedes it with a faster and cheaper primary.
 
-Update this table and any `primary` label change only from an observed
-workflow/job receipt. Force standard capacity if Blacksmith has two consecutive
-runner/platform failures, if the primary job p95 exceeds 10 minutes over five
-releases, or if projected release-runner spend exceeds $150 per month without a
-matching release cadence. Do not infer a capacity win from runner
+Update this table and any active runner label only from an observed workflow or
+job receipt. Paid registry rows are historical data and cannot become an active
+role in a public repository. Do not infer a capacity or latency win from runner
 specifications alone.

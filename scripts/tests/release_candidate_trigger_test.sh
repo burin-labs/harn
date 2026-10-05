@@ -110,7 +110,6 @@ run_resolver() {
       INPUT_WARM_CACHE_ONLY=false INPUT_TARGETS='' INPUT_BENCHMARK_ONLY=false \
       INPUT_BENCHMARK_SOURCE_REF='' INPUT_BENCHMARK_SOURCE_SHA='' \
       INPUT_BENCHMARK_CARGO_BLOAT=false INPUT_RUNNER_PROFILE=policy \
-      HARN_RELEASE_ENABLE_BLACKSMITH_MACOS=false \
       RELEASE_BUILD_INPUTS_CHANGED=false "$@" \
       bash -eu "$tmp/resolve.sh" > "$tmp/$name.log" 2>&1
   )

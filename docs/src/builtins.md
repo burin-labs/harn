@@ -481,7 +481,7 @@ Sets also support method syntax: `my_set.union(other)`.
 | `contains(str, substr)` | str: string, substr: string | bool | Check if string contains substring. Also works on lists |
 | `replace(str, old, new)` | str: string, old: string, new: string | string | Replace all occurrences |
 | `join(list, sep)` | list: list, sep: string | string | Join list elements with separator |
-| `substring(str, start, end?)` | str: string, start: int, end: int | string | Extract the character range `[start, end)`; `end` defaults to the string length. Matches `.substring`, `s[a:b]`, and `list.slice` |
+| `substring(str, start, end?)` | str: string, start: int, end: int | string | Extract the character range `[start, end)`; `end` defaults to the string length. Out-of-range offsets clamp, and a negative offset clamps to `0`; use `s[a:b]` or `.slice` to count from the end |
 | `chars(str)` | str: string | list | Materialize a string into a list of single-character strings in one linear pass (ASCII chars are interned). Use this for cursor-style source scanning — see [Scanning large text](#scanning-large-text) — instead of repeated `substring`/`s[i]`, which are O(n) per call |
 | `unicode_normalize(str, form)` | str: string, form: `"NFC"\|"NFD"\|"NFKC"\|"NFKD"` | string | Normalize Unicode into the requested form |
 | `unicode_graphemes(str)` | str: string | list | Split a string into extended grapheme clusters |

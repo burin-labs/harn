@@ -442,8 +442,8 @@ fn join_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
 /// `start`/`end` are character offsets, not byte offsets. Both are clamped
 /// to `[0, len]`; a negative offset clamps to `0`; an `end` below `start`
 /// (after clamping) yields the empty string. Omitting `end` runs to the end
-/// of the string. This matches the documented spec `substring(start, end?)`,
-/// the `s[a:b]` slice operator, `list.slice`, and `bytes_slice`.
+/// of the string. This is the documented `substring(start, end?)` contract;
+/// unlike `s[a:b]` and `.slice`, a negative offset does not count from the end.
 #[expect(
     clippy::string_slice,
     reason = "char_range_to_byte_range returns clamped char-boundary offsets"
