@@ -258,6 +258,23 @@ fn managed_supply_missing_or_malformed_authority_never_reaches_transport() {
         install_managed_supply_stub_provider(&opts.provider, server.addr());
     }
     opts.api_mode = crate::llm::api::LlmApiMode::ChatCompletions;
+    opts.model = "gpt-5.3-codex".to_string();
+    assert!(should_use_responses_transport("openai", &opts.model, false));
+    let error = runtime
+        .block_on(vm_call_llm_full(&opts))
+        .expect_err("Responses-only logical model cannot use managed Chat Completions");
+    assert_eq!(
+        requests.load(std::sync::atomic::Ordering::SeqCst),
+        0,
+        "logical transport eligibility must be checked before HTTP: {error}"
+    );
+    assert!(
+        error
+            .to_string()
+            .contains("managed supply requires the OpenAI chat-completions transport"),
+        "{error}"
+    );
+    opts.model = "mistral-large-2512".to_string();
     let allowed = runtime
         .block_on(vm_call_llm_full(&opts))
         .expect("same listener positive control");
