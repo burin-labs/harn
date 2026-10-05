@@ -491,11 +491,7 @@ impl PreparedCommand {
             // SAFETY: the caller supplies exclusive startup custody. The one
             // owner validates all sets together before adopting any descriptor,
             // including overlap between confinement and verifier material.
-            unsafe {
-                harn_vm::process_sandbox::DescriptorTransfer::inherited_with_reserved(
-                    numbers, reserved,
-                )?
-            }
+            unsafe { harn_vm::process_sandbox::DescriptorTransfer::inherited(numbers, reserved)? }
         };
         #[cfg(not(target_os = "linux"))]
         if !request.pinned_verifier_descriptors.is_empty() {
