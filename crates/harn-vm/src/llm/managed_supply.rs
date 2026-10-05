@@ -10,9 +10,13 @@
 
 use serde::{Deserialize, Serialize};
 
+use super::api::{data_controls, inference_boundary, InferenceBoundary};
 use crate::value::{VmError, VmValue};
 
 mod provider_wire;
+
+#[cfg(test)]
+mod admission_tests;
 
 pub use provider_wire::{
     hosted_openai_request, HostedAudioFormat, HostedChatMessage, HostedChatRequest, HostedContent,
@@ -23,18 +27,27 @@ pub use provider_wire::{
 };
 
 pub const MANAGED_SUPPLY_WIRE_KEY: &str = "harn_managed_supply";
-pub const MANAGED_SUPPLY_VERSION: u32 = 1;
+pub const MANAGED_SUPPLY_VERSION: u32 = 2;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ManagedSupplyContractError {
     message: String,
+    policy_denial: Option<inference_boundary::BoundaryDenial>,
 }
 
 impl ManagedSupplyContractError {
     fn new(message: impl Into<String>) -> Self {
         Self {
             message: message.into(),
+            policy_denial: None,
         }
+    }
+
+    /// Bounded classification for gateway attempt receipts, independent of prose.
+    pub fn code(&self) -> &'static str {
+        self.policy_denial
+            .as_ref()
+            .map_or("invalid_managed_supply_contract", |denial| denial.code())
     }
 }
 
@@ -45,6 +58,15 @@ impl std::fmt::Display for ManagedSupplyContractError {
 }
 
 impl std::error::Error for ManagedSupplyContractError {}
+
+impl From<ManagedSupplyContractError> for VmError {
+    fn from(error: ManagedSupplyContractError) -> Self {
+        match error.policy_denial {
+            Some(denial) => denial.into(),
+            None => invalid(error.message),
+        }
+    }
+}
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -59,6 +81,8 @@ pub struct ManagedSupplyLogicalRoute {
 pub struct ManagedSupplyRequest {
     pub version: u32,
     pub logical_route: ManagedSupplyLogicalRoute,
+    /// Resolved caller ceiling. Missing authority is not a hosted grant.
+    pub inference_boundary: InferenceBoundary,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -218,7 +242,29 @@ pub fn compatible_served_route(
             request.logical_route.model
         )));
     }
+    validate_served_admission(request.inference_boundary, provider, model)?;
     Ok(served)
+}
+
+fn validate_served_admission(
+    boundary: InferenceBoundary,
+    provider: &str,
+    model: &str,
+) -> Result<(), ManagedSupplyContractError> {
+    // The hosted wire adapter sends no opt-out controls. A planned control
+    // cannot establish admission; use the default plan's actual empty writes.
+    let controls = data_controls::resolve(
+        provider,
+        model,
+        crate::llm_config::DataControlDialect::OpenAiSse,
+        crate::llm_config::DataPosture::Default,
+    );
+    inference_boundary::governing_rule(boundary, provider, model, &controls.receipt)
+        .map(|_| ())
+        .map_err(|denial| ManagedSupplyContractError {
+            message: denial.to_string(),
+            policy_denial: Some(denial),
+        })
 }
 
 pub fn is_managed_transport(provider: &str) -> bool {
@@ -294,13 +340,18 @@ pub(crate) fn capabilities_for(
 pub fn request_for(
     transport_provider: &str,
     model: &str,
+    boundary: Option<InferenceBoundary>,
 ) -> Result<Option<ManagedSupplyRequest>, VmError> {
     if !is_managed_transport(transport_provider) {
         return Ok(None);
     }
     let (provider, model) = logical_route(transport_provider, model)?;
+    let inference_boundary = inference_boundary::effective_result(boundary)
+        .map_err(VmError::Runtime)?
+        .ok_or_else(|| invalid("managed supply requires an explicit inference boundary"))?;
     Ok(Some(ManagedSupplyRequest {
         version: MANAGED_SUPPLY_VERSION,
+        inference_boundary,
         logical_route: ManagedSupplyLogicalRoute {
             capability_fingerprint: capability_fingerprint(&provider, &model),
             provider,
@@ -311,10 +362,9 @@ pub fn request_for(
 
 pub(crate) fn attach_request_extension(
     body: &mut serde_json::Value,
-    transport_provider: &str,
-    model: &str,
+    request: Option<&ManagedSupplyRequest>,
 ) -> Result<(), VmError> {
-    let Some(request) = request_for(transport_provider, model)? else {
+    let Some(request) = request else {
         return Ok(());
     };
     let object = body
@@ -407,6 +457,11 @@ pub fn validate_receipt(
             request.logical_route.model
         )));
     }
+    validate_served_admission(
+        request.inference_boundary,
+        &receipt.served_route.provider,
+        &receipt.served_route.model,
+    )?;
     Ok(())
 }
 
@@ -415,17 +470,14 @@ pub fn validate_receipt(
 /// without it is not accepted as an authoritative completion.
 pub(crate) fn apply_terminal_receipt(
     result: &mut crate::llm::api::LlmResult,
-    transport_provider: &str,
-    requested_model: &str,
+    request: Option<&ManagedSupplyRequest>,
 ) -> Result<(), VmError> {
-    if !is_managed_transport(transport_provider) {
+    let Some(request) = request else {
         return Ok(());
-    }
+    };
     let receipt = receipt_from_metadata(result.telemetry.provider_metadata.as_ref())?
         .ok_or_else(|| invalid("managed supply response is missing its terminal receipt"))?;
-    let request = request_for(transport_provider, requested_model)?
-        .expect("managed transport produces a managed-supply request");
-    validate_receipt(&request, &receipt).map_err(invalid)?;
+    validate_receipt(request, &receipt).map_err(VmError::from)?;
     result.provider = receipt.served_route.provider.clone();
     result.model = receipt.served_route.model.clone();
     result.input_tokens = receipt.input_tokens;
@@ -455,12 +507,11 @@ mod tests {
             ("openai".to_string(), "gpt-4o-mini".to_string())
         );
         assert_eq!(
-            request_for("openai", "gpt-4o-mini").expect("direct request"),
+            request_for("openai", "gpt-4o-mini", None).expect("direct request"),
             None
         );
         let mut body = serde_json::json!({"model": "gpt-4o-mini"});
-        attach_request_extension(&mut body, "openai", "gpt-4o-mini")
-            .expect("direct request remains unchanged");
+        attach_request_extension(&mut body, None).expect("direct request remains unchanged");
         assert!(body.get(MANAGED_SUPPLY_WIRE_KEY).is_none());
     }
 
@@ -479,6 +530,10 @@ mod tests {
     fn gateway_validator_owns_canonical_request_and_route_compatibility() {
         let request = ManagedSupplyRequest {
             version: MANAGED_SUPPLY_VERSION,
+            inference_boundary: InferenceBoundary {
+                reach: crate::llm::api::InferenceReach::AnyHosted,
+                allow_training_discounts: false,
+            },
             logical_route: ManagedSupplyLogicalRoute {
                 provider: "groq".to_string(),
                 model: "qwen/qwen3.8-27b".to_string(),
@@ -499,6 +554,10 @@ mod tests {
     fn gateway_validator_rejects_copied_or_stale_capability_fingerprint() {
         let request = ManagedSupplyRequest {
             version: MANAGED_SUPPLY_VERSION,
+            inference_boundary: InferenceBoundary {
+                reach: crate::llm::api::InferenceReach::AnyHosted,
+                allow_training_discounts: false,
+            },
             logical_route: ManagedSupplyLogicalRoute {
                 provider: "groq".to_string(),
                 model: "qwen/qwen3.8-27b".to_string(),
@@ -516,7 +575,7 @@ mod tests {
 [providers.gateway]
 base_url = "https://gateway.example.invalid/v1"
 chat_endpoint = "/chat/completions"
-managed_supply = { version = 1 }
+managed_supply = { version = 2 }
 "#,
         )
         .expect("managed-supply provider config");
@@ -524,7 +583,9 @@ managed_supply = { version = 1 }
         merged.merge_from(&parsed);
         assert_eq!(
             merged.providers["gateway"].managed_supply,
-            Some(crate::llm_config::ManagedSupplyProviderDef { version: 1 })
+            Some(crate::llm_config::ManagedSupplyProviderDef {
+                version: MANAGED_SUPPLY_VERSION
+            })
         );
     }
 
@@ -533,7 +594,7 @@ managed_supply = { version = 1 }
         let error = crate::llm_config::parse_config_toml(
             r"
 [providers.gateway]
-managed_supply = { version = 1, copied_capability_table = true }
+managed_supply = { version = 2, copied_capability_table = true }
 ",
         )
         .expect_err("managed-supply shape must remain a closed typed contract");

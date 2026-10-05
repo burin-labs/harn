@@ -336,6 +336,11 @@ pub(crate) async fn vm_call_llm_api_with_body(
     dialect: DialectContract,
 ) -> Result<LlmResult, VmError> {
     dialect.validate_request(opts)?;
+    let managed_request = crate::llm::managed_supply::request_for(
+        &opts.provider,
+        &opts.model,
+        opts.inference_boundary,
+    )?;
     let started = Instant::now();
     // Absolute counterpart of `started`. `Instant` is monotonic and carries no
     // date, and settlement needs a date to pick a promotion or a time-of-day
@@ -388,6 +393,7 @@ pub(crate) async fn vm_call_llm_api_with_body(
         dialect,
         request_origin,
         &data_controls,
+        managed_request.as_ref(),
     )
     .await;
     // The receipt describes what Harn sent, so it must survive a provider
@@ -411,7 +417,7 @@ pub(crate) async fn vm_call_llm_api_with_body(
         }
     }
     let mut result = result?;
-    crate::llm::managed_supply::apply_terminal_receipt(&mut result, &opts.provider, &opts.model)?;
+    crate::llm::managed_supply::apply_terminal_receipt(&mut result, managed_request.as_ref())?;
     // Reserved-token tool-call delimiter remap (single boundary).
     //
     // For models that reserve `<tool_call>`/`</tool_call>` as special tokens
@@ -474,11 +480,12 @@ async fn vm_call_llm_api_with_body_inner(
     dialect: DialectContract,
     request_origin: tokio::time::Instant,
     data_controls: &crate::llm::api::data_controls::DataControlsPlan,
+    managed_request: Option<&crate::llm::managed_supply::ManagedSupplyRequest>,
 ) -> Result<LlmResult, VmError> {
     let stream_protocol = dialect.stream_protocol();
     let provider = &opts.provider;
     let model = &opts.model;
-    crate::llm::managed_supply::attach_request_extension(&mut body, provider, model)?;
+    crate::llm::managed_supply::attach_request_extension(&mut body, managed_request)?;
     let raw_capture_context = crate::llm::agent_observe::current_raw_provider_capture_context();
     // `stream` selects the provider transport. A delta receiver only decides
     // whether a caller observes incremental text; probe calls intentionally
