@@ -9,7 +9,7 @@ use serde_json::{json, Value as JsonValue};
 use sha2::{Digest, Sha256};
 use time::Duration;
 
-use crate::connectors::hmac::header_value;
+use crate::connectors::headers::header_value;
 use crate::connectors::{
     ActivationHandle, ClientError, Connector, ConnectorClient, ConnectorCtx, ConnectorError,
     ProviderPayloadSchema, RawInbound, TriggerBinding, TriggerKind,

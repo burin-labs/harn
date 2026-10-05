@@ -12,6 +12,7 @@ use time::{Duration, OffsetDateTime};
 use crate::event_log::{EventLog, LogEvent, Topic};
 use crate::triggers::ProviderId;
 
+use super::headers::header_value;
 use super::ConnectorError;
 
 pub const SIGNATURE_VERIFY_AUDIT_TOPIC: &str = "audit.signature_verify";
@@ -1005,17 +1006,6 @@ fn offset_from_unix_millis(raw: i64) -> Result<OffsetDateTime, String> {
     timestamp
         .checked_add(Duration::milliseconds(millis))
         .ok_or_else(|| "timestamp overflow".to_string())
-}
-
-/// The value of header `name`, matched case-insensitively.
-pub(crate) fn header_value<'a>(
-    headers: &'a BTreeMap<String, String>,
-    name: &str,
-) -> Option<&'a str> {
-    headers
-        .iter()
-        .find(|(key, _)| key.eq_ignore_ascii_case(name))
-        .map(|(_, value)| value.as_str())
 }
 
 fn decode_standard_webhooks_secret(secret: &str) -> Result<Vec<u8>, ConnectorError> {

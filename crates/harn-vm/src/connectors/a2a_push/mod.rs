@@ -9,7 +9,7 @@ use serde_json::Value as JsonValue;
 use subtle::ConstantTimeEq;
 use time::OffsetDateTime;
 
-use crate::connectors::hmac::header_value;
+use crate::connectors::headers::header_value;
 use crate::connectors::{
     ActivationHandle, ClientError, Connector, ConnectorClient, ConnectorCtx, ConnectorError,
     JwtKeySource, JwtVerificationOptions, ProviderPayloadSchema, RawInbound, TriggerBinding,
