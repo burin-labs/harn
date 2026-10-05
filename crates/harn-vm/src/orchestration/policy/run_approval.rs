@@ -233,6 +233,14 @@ impl RunApprovalPolicy {
         self.resolve(self.declared.evaluate_request(request))
     }
 
+    pub(crate) fn evaluate_authority_request(
+        &self,
+        request: &super::PolicyAuthorityRequest,
+    ) -> Result<super::PolicyEvaluation, String> {
+        super::approval_rules::evaluate_authority_request(&self.declared, request)
+            .map(|decision| self.resolve(decision))
+    }
+
     pub fn evaluate(&self, tool: &str, args: &serde_json::Value) -> super::ToolApprovalDecision {
         let decision = self.evaluate_detailed(tool, args);
         if decision.is_deny() {
@@ -262,6 +270,7 @@ impl RunApprovalPolicy {
                     .as_ref()
                     .and_then(|rule| rule.id.clone()),
                 index: decision.matched_rule.as_ref().and_then(|rule| rule.index),
+                contributing_rules: Vec::new(),
             });
             decision.receipt["action"] = serde_json::json!(decision.action);
             decision.receipt["reason"] = serde_json::json!(decision.reason);

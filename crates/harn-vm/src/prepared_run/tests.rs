@@ -717,6 +717,128 @@ fn capability_root_outside_the_host_ceiling_blocks_during_preparation() {
 }
 
 #[test]
+fn requested_external_root_reaches_batched_approval_without_granting_access() {
+    let model_calls = Arc::new(AtomicUsize::new(0));
+    let run = PreparedRun::with_clock(
+        FixtureExecutor {
+            requirements: executor_requirements(),
+            model_calls: model_calls.clone(),
+        },
+        Arc::new(MemoryAuthorityReceiptSink::default()),
+        Arc::new(|| NOW_MS),
+    );
+    let mut host = host_facts();
+    host.approval_policy = RunApprovalPolicy::construct(host.approval_policy.posture(), |_| {
+        let mut policy = approval_policy();
+        policy.allow_external_paths = false;
+        policy
+    });
+    let root = AuthorityRequirement::FilesystemRead {
+        root: "/toolchains".to_string(),
+    };
+    match run.prepare(intent(), host) {
+        PreparationOutcome::NeedsApproval {
+            batched_requests,
+            receipt,
+        } => {
+            let decision = receipt
+                .policy_decisions
+                .iter()
+                .find(|decision| decision.requirement_fingerprint == requirement_fingerprint(&root))
+                .expect("the requested root reached the canonical policy evaluator");
+            assert_eq!(decision.action, "ask");
+            assert_eq!(
+                decision.matched_rule_id.as_deref(),
+                Some("review-prepared-run")
+            );
+            assert!(batched_requests
+                .groups
+                .iter()
+                .flat_map(|group| &group.requirement_fingerprints)
+                .any(|fingerprint| *fingerprint == requirement_fingerprint(&root)));
+            assert!(receipt.granted.is_empty());
+            assert!(!receipt.executor_invoked);
+        }
+        other => panic!("requested authority must be reviewed before access exists: {other:?}"),
+    }
+    assert_eq!(model_calls.load(Ordering::SeqCst), 0);
+}
+
+#[test]
+fn requested_root_preserves_authored_path_denial_and_sensitive_path_refusal() {
+    for sensitive in [false, true] {
+        let model_calls = Arc::new(AtomicUsize::new(0));
+        let run = PreparedRun::with_clock(
+            FixtureExecutor {
+                requirements: executor_requirements(),
+                model_calls: model_calls.clone(),
+            },
+            Arc::new(MemoryAuthorityReceiptSink::default()),
+            Arc::new(|| NOW_MS),
+        );
+        let root = if sensitive {
+            "/toolchains/.env"
+        } else {
+            "/toolchains"
+        };
+        let mut request = intent();
+        request.capability_policy.read_only_roots = vec![root.to_string()];
+        let mut host = host_facts();
+        host.approval_policy = RunApprovalPolicy::construct(host.approval_policy.posture(), |_| {
+            serde_json::from_value(json!({
+                "allow_sensitive_paths": !sensitive,
+                "allow_external_paths": false,
+                "rules": [{
+                    "id": "deny-requested-root", "action": "deny",
+                    "match": {"tool": "prepared_run.filesystem", "path": "/toolchains"}
+                }, {
+                    "id": "review-prepared-run", "action": "ask",
+                    "match": {"tool": "prepared_run.*"}
+                }]
+            }))
+            .expect("root authority policy")
+        });
+        let requirement = AuthorityRequirement::FilesystemRead {
+            root: root.to_string(),
+        };
+        match run.prepare(request, host) {
+            PreparationOutcome::Blocked {
+                diagnostics,
+                receipt: Some(receipt),
+            } => {
+                let fingerprint = requirement_fingerprint(&requirement);
+                assert!(diagnostics.iter().any(|diagnostic| {
+                    diagnostic.code == "policy_denied"
+                        && diagnostic.requirement_fingerprint.as_deref()
+                            == Some(fingerprint.as_str())
+                }));
+                let decision = receipt
+                    .policy_decisions
+                    .iter()
+                    .find(|decision| decision.requirement_fingerprint == fingerprint)
+                    .expect("owning refusal receipt");
+                assert_eq!(decision.action, "deny");
+                if sensitive {
+                    assert!(decision
+                        .risk_labels
+                        .iter()
+                        .any(|label| label == "sensitive_path"));
+                } else {
+                    assert_eq!(
+                        decision.matched_rule_id.as_deref(),
+                        Some("deny-requested-root")
+                    );
+                }
+                assert!(receipt.granted.is_empty());
+                assert!(!receipt.executor_invoked);
+            }
+            other => panic!("requested root must retain its owning refusal: {other:?}"),
+        }
+        assert_eq!(model_calls.load(Ordering::SeqCst), 0);
+    }
+}
+
+#[test]
 fn noninteractive_gui_capable_keyring_is_structurally_rejected() {
     let receipts = Arc::new(MemoryAuthorityReceiptSink::default());
     let executor = FixtureExecutor {

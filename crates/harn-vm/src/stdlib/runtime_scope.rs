@@ -32,6 +32,42 @@ pub(crate) fn register_runtime_scope_builtins(vm: &mut Vm) {
 }
 
 #[harn_builtin(
+    exposure = "harness.runtime.evaluate_approval_policy",
+    effects = [],
+    sig = "evaluate_approval_policy(policy: dict, request: @TOOL_APPROVAL_REQUEST) -> @APPROVAL_POLICY_DECISION",
+    category = "runtime_scope"
+)]
+fn evaluate_approval_policy_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let policy_value = args
+        .first()
+        .ok_or_else(|| VmError::Runtime("evaluate_approval_policy: policy is required".into()))?;
+    let policy = crate::orchestration::ToolApprovalPolicy::from_host_json(
+        crate::llm::helpers::vm_value_to_json(policy_value),
+    )
+    .map_err(|error| {
+        VmError::Runtime(format!("evaluate_approval_policy: invalid policy: {error}"))
+    })?;
+    let request_value = args
+        .get(1)
+        .ok_or_else(|| VmError::Runtime("evaluate_approval_policy: request is required".into()))?;
+    let request = crate::orchestration::ToolApprovalRequest::from_host_json(
+        crate::llm::helpers::vm_value_to_json(request_value),
+    )
+    .map_err(|error| {
+        VmError::Runtime(format!(
+            "evaluate_approval_policy: invalid request: {error}"
+        ))
+    })?;
+    let decision = policy.evaluate_request(&request);
+    let json = serde_json::to_value(decision).map_err(|error| {
+        VmError::Runtime(format!(
+            "evaluate_approval_policy: serialize decision failed: {error}"
+        ))
+    })?;
+    Ok(crate::stdlib::json_to_vm_value(&json))
+}
+
+#[harn_builtin(
     exposure = "harness.runtime.current_policy",
     effects = ["state.read@const=runtime-policy"],
     sig = "current_policy() -> any", category = "runtime_scope"
@@ -208,6 +244,7 @@ async fn with_dynamic_permissions_impl(
 }
 
 pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
+    &EVALUATE_APPROVAL_POLICY_IMPL_DEF,
     &CURRENT_POLICY_IMPL_DEF,
     &WITH_AUTONOMY_POLICY_IMPL_DEF,
     &WITH_EXECUTION_POLICY_IMPL_DEF,
@@ -216,3 +253,94 @@ pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
     &WITH_COMMAND_POLICY_IMPL_DEF,
     &WITH_DYNAMIC_PERMISSIONS_IMPL_DEF,
 ];
+
+#[cfg(test)]
+mod approval_decision_tests {
+    use super::*;
+    use serde_json::{json, Value};
+
+    fn evaluate(policy: Value, request: Value) -> Result<Value, VmError> {
+        let args = [
+            crate::stdlib::json_to_vm_value(&policy),
+            crate::stdlib::json_to_vm_value(&request),
+        ];
+        evaluate_approval_policy_impl(&args, &mut String::new())
+            .map(|value| crate::llm::helpers::vm_value_to_json(&value))
+    }
+
+    #[test]
+    fn host_entry_point_preserves_canonical_decisions_and_receipts() {
+        let workspace = tempfile::tempdir().unwrap();
+        for (policy, request, expected) in [
+            (
+                json!({}),
+                json!({"tool_name":"run", "arguments":{}}),
+                "allow",
+            ),
+            (
+                json!({"auto_deny":["run"]}),
+                json!({"tool_name":"run", "arguments":{}}),
+                "deny",
+            ),
+            (
+                json!({"require_approval":["run"]}),
+                json!({"tool_name":"run", "arguments":{}}),
+                "ask",
+            ),
+            (
+                json!({}),
+                json!({"tool_name":"read_file", "arguments":{"path":".env"},
+                    "workspace_boundary":{"root":workspace.path()}}),
+                "deny",
+            ),
+            (
+                json!({"rules":[{"id":"deny-command", "action":"deny", "match":{"command":"danger"}}]}),
+                json!({"tool_name":"run", "arguments":{"command":"danger"}, "policy_decision":{"context":{"rawInput":{"command":"danger"}}}}),
+                "deny",
+            ),
+        ] {
+            let actual = evaluate(policy.clone(), request.clone()).expect("valid explicit input");
+            let canonical = crate::orchestration::ToolApprovalPolicy::from_host_json(policy)
+                .unwrap()
+                .evaluate_request(
+                    &crate::orchestration::ToolApprovalRequest::from_host_json(request).unwrap(),
+                );
+            assert_eq!(
+                actual["action"], expected,
+                "known allow, ask and deny controls must differ"
+            );
+            assert_eq!(actual, serde_json::to_value(canonical).unwrap());
+            assert_eq!(
+                actual["receipt"]["type"],
+                "harn.permission_policy_decision.v1"
+            );
+        }
+    }
+
+    #[test]
+    fn malformed_host_input_never_defaults_to_allow() {
+        let request = json!({"tool_name":"run", "arguments":{}});
+        for policy in [
+            json!(null),
+            json!([]),
+            json!({"auto_denyy":["run"]}),
+            json!({"rules":"deny"}),
+        ] {
+            assert!(evaluate(policy, request.clone()).is_err());
+        }
+        for request in [
+            json!([]),
+            json!(["run", {}]),
+            json!({}),
+            json!({"tool_name":"", "arguments":{}}),
+            json!({"tool_name":"run", "arguments":null}),
+            json!({"tool_name":"run", "arguments":{}, "repeat_count":-1}),
+            json!({"tool_name":"run", "arguments":{}, "policy_decison":{}}),
+            json!({"tool_name":"run", "arguments":{}, "policy_decision":true}),
+            json!({"tool_name":"read_file", "arguments":{"path":"../outside.txt"}}),
+            json!({"tool_name":"read_file", "arguments":{"path":null}}),
+        ] {
+            assert!(evaluate(json!({}), request).is_err());
+        }
+    }
+}

@@ -33,7 +33,9 @@ use super::policy::{
     OperatorApprovalGrant, RunApprovalPolicy,
 };
 use super::tool_precheck::{swap_tool_precheck_depth, swap_tool_precheck_stack};
-use super::{swap_mutation_session, MutationSessionRecord, RunExecutionRecord};
+use super::{
+    swap_mutation_session, swap_thread_execution_context, MutationSessionRecord, RunExecutionRecord,
+};
 use crate::agent_sessions::swap_current_session_stack;
 use crate::autonomy::{swap_autonomy_policy_stack, AutonomyPolicy};
 use crate::connectors::harn_module::swap_active_harn_connector_ctx;
@@ -55,9 +57,7 @@ use crate::runtime_context::{swap_runtime_context_overlay_stack, RuntimeContextO
 use crate::stdlib::host::process_admission::{
     swap_process_admission_context, ProcessAdmissionContext,
 };
-use crate::stdlib::process::{
-    swap_session_environment, swap_source_dir, swap_thread_execution_context,
-};
+use crate::stdlib::process::{swap_session_environment, swap_source_dir};
 use crate::stdlib::template::llm_context::{swap_llm_render_stack, LlmRenderContextFrame};
 pub(crate) mod blocking;
 mod subtask_state;
@@ -1308,7 +1308,7 @@ mod tests {
     /// write-capable fan-out cross-wire.
     #[tokio::test]
     async fn scoped_tasks_do_not_cross_wire_execution_context() {
-        use crate::stdlib::process::{current_execution_context, set_thread_execution_context};
+        use crate::orchestration::{current_execution_context, set_thread_execution_context};
         let local = tokio::task::LocalSet::new();
         local
             .run_until(async {
@@ -1349,7 +1349,7 @@ mod tests {
             })
             .await;
         // The outer thread is left clean — neither task's context leaked out.
-        assert!(crate::stdlib::process::current_execution_context().is_none());
+        assert!(crate::orchestration::current_execution_context().is_none());
     }
 
     /// F2 regression: two cooperatively-scheduled tasks install DISTINCT

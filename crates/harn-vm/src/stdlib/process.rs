@@ -6,7 +6,8 @@ use std::path::PathBuf;
 use std::process::Stdio;
 use std::time::{Duration, Instant};
 
-use crate::orchestration::RunExecutionRecord;
+pub(crate) use crate::orchestration::current_execution_context;
+pub use crate::orchestration::{execution_root_path, set_thread_execution_context};
 use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
@@ -15,7 +16,6 @@ const HARN_REPLAY_ENV: &str = "HARN_REPLAY";
 
 thread_local! {
     pub(crate) static VM_SOURCE_DIR: RefCell<Option<PathBuf>> = const { RefCell::new(None) };
-    static VM_EXECUTION_CONTEXT: RefCell<Option<RunExecutionRecord>> = const { RefCell::new(None) };
     /// The resolved environment for the current launched session. `None` means
     /// this thread is outside a session boundary. Held across a worker's `.await`s and
     /// so swapped per-task by the ambient scope; its `_CONTEXT` suffix enrolls it
@@ -42,14 +42,6 @@ pub(crate) fn normalize_context_path(path: &std::path::Path) -> PathBuf {
     std::env::current_dir()
         .map(|cwd| cwd.join(path))
         .unwrap_or_else(|_| path.to_path_buf())
-}
-
-pub fn set_thread_execution_context(context: Option<RunExecutionRecord>) {
-    VM_EXECUTION_CONTEXT.with(|current| *current.borrow_mut() = context);
-}
-
-pub(crate) fn current_execution_context() -> Option<RunExecutionRecord> {
-    VM_EXECUTION_CONTEXT.with(|current| current.borrow().clone())
 }
 
 /// Install (or clear) the environment policy the current session runs under.
@@ -125,7 +117,7 @@ impl SessionEnvironmentGuard {
 }
 
 /// Per-task ambient-scope swap of the session environment. Same rationale as
-/// [`swap_thread_execution_context`]: a fan-out worker holds its session's
+/// [`crate::orchestration::swap_thread_execution_context`]: a fan-out worker holds its session's
 /// environment across `.await`s, so it must keep its own copy rather than read a
 /// cooperatively-scheduled sibling's. `pub(crate)` — only the ambient combinator
 /// moves whole environments; launch code uses [`set_session_environment`].
@@ -135,21 +127,8 @@ pub(crate) fn swap_session_environment(
     SESSION_ENVIRONMENT_CONTEXT.with(|current| std::mem::replace(&mut *current.borrow_mut(), next))
 }
 
-/// Per-task ambient-scope swap of the thread execution context. See
-/// `orchestration::ambient_scope`: the execution context carries the running
-/// task's cwd/env/source-dir AND anchors the capability path-scope workspace
-/// root, so a worker holding it across an `.await` must keep its OWN copy rather
-/// than read whatever a cooperatively-scheduled fan-out sibling left behind. The
-/// helper is `pub(crate)` — only the ambient combinator moves whole contexts;
-/// ordinary code uses `set_thread_execution_context`/`current_execution_context`.
-pub(crate) fn swap_thread_execution_context(
-    next: Option<RunExecutionRecord>,
-) -> Option<RunExecutionRecord> {
-    VM_EXECUTION_CONTEXT.with(|current| std::mem::replace(&mut *current.borrow_mut(), next))
-}
-
 /// Per-task ambient-scope swap of the VM source directory. Same rationale as
-/// [`swap_thread_execution_context`]: it anchors source-relative path
+/// [`crate::orchestration::swap_thread_execution_context`]: it anchors source-relative path
 /// resolution for the running task, so it must follow that task across `.await`.
 pub(crate) fn swap_source_dir(next: Option<PathBuf>) -> Option<PathBuf> {
     VM_SOURCE_DIR.with(|current| std::mem::replace(&mut *current.borrow_mut(), next))
@@ -209,14 +188,7 @@ impl Drop for SourceDirGuard {
 /// Reset thread-local process state (for test isolation).
 pub(crate) fn reset_process_state() {
     VM_SOURCE_DIR.with(|sd| *sd.borrow_mut() = None);
-    VM_EXECUTION_CONTEXT.with(|current| *current.borrow_mut() = None);
-}
-
-pub fn execution_root_path() -> PathBuf {
-    current_execution_context()
-        .and_then(|context| context.cwd.map(PathBuf::from))
-        .or_else(|| std::env::current_dir().ok())
-        .unwrap_or_else(|| PathBuf::from("."))
+    set_thread_execution_context(None);
 }
 
 /// The form of `path` a child process can actually be started in.

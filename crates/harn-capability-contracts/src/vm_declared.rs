@@ -212,6 +212,7 @@ pub static VM_DECLARED_CAPABILITY_METHODS: &[(&str, &str)] = &[
     ("runtime", "eval_ledger_resolve_resume_plan"),
     ("runtime", "eval_pack_run"),
     ("runtime", "eval_suite_run"),
+    ("runtime", "evaluate_approval_policy"),
     ("runtime", "handler_context"),
     ("runtime", "introspection"),
     ("runtime", "json_stream_validate_create"),

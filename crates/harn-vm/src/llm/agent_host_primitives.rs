@@ -21,7 +21,8 @@ mod structured_tool_result;
 mod tool_catalog;
 mod tool_parse_diagnostics;
 use denial_results::{
-    agent_primitive_denied_tool, deny_tool_call, deny_tool_call_value, DenialEvidence,
+    agent_primitive_denied_tool, deny_tool_call, deny_tool_call_value,
+    schema_validation_tool_result, DenialEvidence,
 };
 use dispatch_policy::{tool_denial_from_policy, DispatchPolicy};
 use host_permission::{
@@ -816,7 +817,6 @@ pub(super) async fn host_agent_dispatch_tool_call(
         .unwrap_or(1000)
         .max(1) as u64;
     let bridge = current_host_bridge();
-    let dispatch_annotations = tool_annotations_for(tools, &tool_name);
     // Happy-path fast path: when NO policy/permission machinery is
     // configured, the three blocks below — session policy guard install,
     // execution-policy enforcement, and the dynamic-permission check — are
@@ -841,6 +841,25 @@ pub(super) async fn host_agent_dispatch_tool_call(
     } else {
         None
     };
+    let dispatch_annotations = tool_annotations_for(tools, &tool_name);
+    // Install typed session context before resolving catalog/ambient path
+    // annotations, but refuse malformed paths before any policy callback or
+    // permission prompt. Full schema validation stays after hooks and routing.
+    if let Err(message) = crate::tool_annotations::path_inputs::validate_arguments(
+        &tool_args,
+        dispatch_annotations.as_ref(),
+    ) {
+        let stop_reason = agent_primitive_option_str(options, "_stop_reason");
+        let result = schema_validation_tool_result(
+            &tool_name,
+            &tool_id,
+            &tool_args,
+            message,
+            &raw_args_json(),
+            stop_reason.as_deref().filter(|reason| !reason.is_empty()),
+        );
+        return Ok(json_to_vm_value(&result));
+    }
     let dispatch_policy =
         DispatchPolicy::new(policy_machinery_active, dispatch_annotations.as_ref());
 
@@ -1394,37 +1413,16 @@ pub(super) async fn host_agent_dispatch_tool_call(
         // threaded in by the agent loop as `_stop_reason`). See
         // `arg_delivery_fault_feedback`.
         let turn_stop_reason = agent_primitive_option_str(options, "_stop_reason");
-        let cause_named = arg_delivery_fault_feedback(
+        let denied = schema_validation_tool_result(
             &tool_name,
+            &tool_id,
+            &tool_args,
+            message,
             // Re-derive the pre-normalization JSON args lazily: this failure
             // path is the only late consumer, and `call` is still in scope.
             &raw_args_json(),
             turn_stop_reason.as_deref().filter(|s| !s.is_empty()),
         );
-        let (message, cause) = match cause_named {
-            Some((cause_message, cause)) => (cause_message, Some(cause)),
-            None => (message, None),
-        };
-        // Schema validation is not a policy denial — the model can fix the
-        // arguments and retry — so no structured `ToolDenial` is attached.
-        let mut denied = agent_primitive_denied_tool(
-            &tool_name,
-            &tool_id,
-            &tool_args,
-            message,
-            crate::agent_events::ToolCallErrorCategory::SchemaValidation,
-            None,
-            None,
-        );
-        if let Some(cause) = cause {
-            // Machine-readable cause on both the envelope (for host harnesses
-            // reading the dispatch outcome) and the inner model-facing result
-            // (so it rides the transcript).
-            denied["cause"] = serde_json::json!(cause);
-            if let Some(result) = denied.get_mut("result") {
-                result["cause"] = serde_json::json!(cause);
-            }
-        }
         let denied = attach_hook_reminder_audit(denied, hook_reminder_reports);
         return Ok(json_to_vm_value(&denied));
     }

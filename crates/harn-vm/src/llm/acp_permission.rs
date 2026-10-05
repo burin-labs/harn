@@ -83,7 +83,7 @@ pub(crate) fn request_params(
     approval_request: JsonValue,
     policy_decision: &JsonValue,
     tool_descriptor: Option<JsonValue>,
-    tool_kind: crate::tool_annotations::ToolKind,
+    tool_annotations: Option<&crate::tool_annotations::ToolAnnotations>,
 ) -> JsonValue {
     let mut params = serde_json::Map::new();
     if let Some(session_id) = session_id {
@@ -101,13 +101,19 @@ pub(crate) fn request_params(
     if let (Some(descriptor), Some(obj)) = (tool_descriptor, harn_meta.as_object_mut()) {
         obj.insert("toolDescriptor".to_string(), descriptor);
     }
+    if let Some(annotations) = tool_annotations {
+        harn_meta
+            .as_object_mut()
+            .expect("Harn metadata object")
+            .insert("toolAnnotations".to_string(), json!(annotations));
+    }
     let content = permission_content(&approval_request);
     let locations = permission_locations(&approval_request);
     let mut tool_call = json!({
         "sessionUpdate": "tool_call_update",
         "toolCallId": tool_call_id,
         "title": tool_name,
-        "kind": tool_kind,
+        "kind": tool_annotations.map(|annotations| annotations.kind).unwrap_or_default(),
         "rawInput": raw_input,
         "_meta": { "harn": harn_meta }
     });
@@ -374,7 +380,7 @@ mod tests {
             json!({"id": "tool-1", "action": "edit"}),
             &json!({"decision": "ask"}),
             None,
-            ToolKind::Other,
+            None,
         );
         assert_eq!(params["sessionId"], "session-1");
         assert_eq!(params["toolCall"]["sessionUpdate"], "tool_call_update");
@@ -443,7 +449,10 @@ mod tests {
             }),
             &json!({"decision": "ask"}),
             None,
-            ToolKind::Edit,
+            Some(&crate::tool_annotations::ToolAnnotations {
+                kind: ToolKind::Edit,
+                ..Default::default()
+            }),
         );
 
         let diff = &params["toolCall"]["content"][0];
@@ -476,7 +485,10 @@ mod tests {
             json!({"id": "tool-1", "evidence_refs": []}),
             &json!({"decision": "ask"}),
             None,
-            ToolKind::Execute,
+            Some(&crate::tool_annotations::ToolAnnotations {
+                kind: ToolKind::Execute,
+                ..Default::default()
+            }),
         );
 
         assert!(params["toolCall"].get("locations").is_none());
@@ -484,6 +496,15 @@ mod tests {
 
     #[test]
     fn request_params_use_the_declared_acp_tool_kind() {
+        let annotations = crate::tool_annotations::ToolAnnotations {
+            kind: ToolKind::Edit,
+            side_effect_level: crate::tool_annotations::SideEffectLevel::WorkspaceWrite,
+            arg_schema: crate::tool_annotations::ToolArgSchema {
+                path_params: vec!["filename".into(), "destinations".into()],
+                ..Default::default()
+            },
+            ..Default::default()
+        };
         let params = request_params(
             Some("session-1"),
             "tool-1",
@@ -492,10 +513,14 @@ mod tests {
             json!({"id": "tool-1", "evidence_refs": []}),
             &json!({"decision": "ask"}),
             None,
-            ToolKind::Edit,
+            Some(&annotations),
         );
 
         assert_eq!(params["toolCall"]["kind"], "edit");
+        assert_eq!(
+            params["toolCall"]["_meta"]["harn"]["toolAnnotations"],
+            json!(annotations)
+        );
     }
 
     #[test]
