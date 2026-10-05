@@ -190,23 +190,27 @@ pub(crate) fn add_test_persona_package(
     write_test_generation_lock(root, &body);
 }
 
+#[cfg(test)]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) struct TriggerTables {
     #[serde(default)]
     pub(crate) triggers: Vec<TriggerManifestEntry>,
 }
 
+#[cfg(test)]
 pub(crate) fn test_vm() -> harn_vm::Vm {
     let mut vm = harn_vm::Vm::new();
     harn_vm::register_vm_stdlib(&mut vm);
     vm
 }
 
+#[cfg(test)]
 #[derive(Debug, Clone)]
 pub(crate) struct TestWorkspace {
     env: PackageWorkspace,
 }
 
+#[cfg(test)]
 impl TestWorkspace {
     pub(crate) fn new(root: &Path) -> Self {
         Self {
@@ -301,6 +305,7 @@ pub fn test_git_command(repo: &Path) -> process::Command {
     command
 }
 
+#[cfg(test)]
 pub(crate) fn create_git_package_repo_with(
     name: &str,
     manifest_tail: &str,
@@ -343,6 +348,7 @@ version = "0.1.0"
     (tmp, repo, branch)
 }
 
+#[cfg(test)]
 pub(crate) fn create_git_package_repo() -> (tempfile::TempDir, PathBuf, String) {
     create_git_package_repo_with(
         "acme-lib",
@@ -351,6 +357,7 @@ pub(crate) fn create_git_package_repo() -> (tempfile::TempDir, PathBuf, String) 
     )
 }
 
+#[cfg(test)]
 pub(crate) fn write_package_registry_index(
     path: &Path,
     registry_name: &str,
@@ -395,6 +402,7 @@ provenance = "{git}"
     .unwrap();
 }
 
+#[cfg(test)]
 pub(crate) fn test_harn_connector_source(provider_id: &str) -> String {
     test_harn_connector_source_with_schema(provider_id, "EchoEventPayload")
 }
@@ -405,6 +413,7 @@ pub(crate) fn test_harn_connector_source(provider_id: &str) -> String {
 /// schema name as a real disagreement about what that id means, so
 /// tests about catalog isolation need to vary the name independently of
 /// the id.
+#[cfg(test)]
 pub(crate) fn test_harn_connector_source_with_schema(
     provider_id: &str,
     harn_schema_name: &str,
@@ -432,6 +441,7 @@ json_schema: {{
     )
 }
 
+#[cfg(test)]
 pub(crate) fn write_publishable_package(root: &Path) {
     fs::create_dir_all(root.join("lib")).unwrap();
     fs::create_dir_all(root.join("docs")).unwrap();

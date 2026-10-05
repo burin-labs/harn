@@ -348,7 +348,7 @@ fn deactivate_persona_locked(
     })
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub fn restore_persona_activation(
     manifest: Option<&Path>,
     expected: &PersonaActivationRecord,

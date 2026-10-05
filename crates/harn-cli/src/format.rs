@@ -10,8 +10,7 @@ use std::time::Duration as StdDuration;
 use time::OffsetDateTime;
 
 pub(crate) use harn_package::format::{
-    escape_toml_basic_string, looks_like_windows_drive_path, shell_quote_path,
-    toml_basic_string_literal,
+    escape_toml_basic_string, looks_like_windows_drive_path, toml_basic_string_literal,
 };
 
 /// Render a UTC instant as RFC3339. Thin alias over the workspace-wide

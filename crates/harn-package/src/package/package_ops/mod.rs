@@ -29,8 +29,6 @@ pub use local_dependency::install_local_package;
 pub use local_dependency::{
     install_local_package_locked, LocalDependencyInstall, LocalDependencyInstallReceipt,
 };
-#[cfg(test)]
-pub(crate) use pack::*;
 pub use pack::{
     collect_package_files, generate_package_docs_impl, pack_package_impl, push_api_symbol,
 };
