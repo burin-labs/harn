@@ -96,6 +96,21 @@ the "one-shot" call shape.
 | `harness.agent.list_roots(id)` | `dict` | Returns `{primary, additional}` for the session's current mounted roots. |
 | `harness.agent.close(id, status?)` | `nil` | Evicts immediately and records an `agent_session_closed` event. `status` may be a string reason or a dict such as `{reason: "timeout"}`. |
 
+### Canonical ACP forks
+
+ACP `session/fork` restores a loaded parent's canonical context before copying
+it and persists the child and its parent linkage before returning success. A
+child can therefore be loaded and forked again before its first prompt.
+`keep_first: 0` creates an empty child with the same parent linkage. Other
+message prefixes must correspond to the same canonical event prefix; a prefix
+that cannot be represented after transcript replacement is refused rather than
+restored as different context.
+
+The session-store fork API takes an optional event boundary. JSON callers pass
+`at_event_id: null` for an empty prefix or an integer for an inclusive event
+prefix. Rust callers pass `None` or `Some(event_id)`. This durable operation is
+distinct from the VM-local `harness.agent.fork` primitives above.
+
 ### Live session clients
 
 Live attach state belongs to the Harn session, not to a particular UI. A

@@ -19,7 +19,7 @@ pub type SessionId = String;
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ForkResult {
     pub child_session_id: SessionId,
-    pub forked_from_event_id: EventId,
+    pub forked_from_event_id: Option<EventId>,
     pub copied_event_count: usize,
 }
 
@@ -505,10 +505,12 @@ pub trait SessionStore: Send + Sync {
     async fn list(&self, filter: ListFilter) -> StoreResult<Vec<SessionMeta>>;
     async fn append(&self, session_id: &str, event: AppendEvent) -> StoreResult<StoredEvent>;
     async fn read(&self, session_id: &str, range: ReadRange) -> StoreResult<EventPage>;
+    /// Copy the prefix through an event, or no events when the boundary is None.
+    /// Both cases retain the parent's metadata and explicit child lineage.
     async fn fork(
         &self,
         session_id: &str,
-        at_event_id: EventId,
+        at_event_id: Option<EventId>,
         child_id: Option<SessionId>,
     ) -> StoreResult<ForkResult>;
     async fn truncate(&self, session_id: &str, at_event_id: EventId)

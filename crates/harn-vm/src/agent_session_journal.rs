@@ -481,7 +481,7 @@ fn apply_identity(
     Ok(())
 }
 
-fn hydrate_events(events: Vec<harn_session_store::StoredEvent>) -> HydratedTranscript {
+pub(crate) fn hydrate_events(events: Vec<harn_session_store::StoredEvent>) -> HydratedTranscript {
     let mut messages: Vec<(Option<String>, serde_json::Value)> = Vec::new();
     let mut summary = None;
     for event in events {

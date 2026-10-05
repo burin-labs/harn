@@ -481,7 +481,7 @@ impl AcpServer {
         }
     }
 
-    pub(super) fn handle_session_fork(
+    pub(super) async fn handle_session_fork(
         &mut self,
         id: &serde_json::Value,
         params: &serde_json::Value,
@@ -575,18 +575,26 @@ impl AcpServer {
             }
         };
 
-        let new_session_id = match keep_first {
-            Some(keep_first) => harn_vm::agent_sessions::fork_at(&src_id, keep_first, dst_id),
-            None => harn_vm::agent_sessions::fork(&src_id, dst_id),
-        };
+        let root = self
+            .sessions
+            .get(&src_id)
+            .expect("validated source session")
+            .project_root
+            .clone();
+        let new_session_id =
+            harn_vm::agent_sessions::fork_canonical(&root, &src_id, keep_first, dst_id).await;
         let new_session_id = match new_session_id {
             Ok(Some(new_session_id)) => new_session_id,
             Ok(None) => {
                 self.send_error(id, -32000, &format!("Failed to fork session: {src_id}"));
                 return;
             }
-            Err(error) => {
+            Err(harn_vm::agent_sessions::CanonicalForkError::Admission(error)) => {
                 self.send_session_open_error(id, &error);
+                return;
+            }
+            Err(error) => {
+                self.send_error(id, -32000, &error.to_string());
                 return;
             }
         };

@@ -280,7 +280,11 @@ async fn canonical_search_index_tracks_fork_truncate_and_delete() {
             .await
             .expect("append removable");
         let child = store
-            .fork(&parent.id, removable.event_id, Some("search-child".into()))
+            .fork(
+                &parent.id,
+                Some(removable.event_id),
+                Some("search-child".into()),
+            )
             .await
             .expect("fork");
 

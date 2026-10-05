@@ -93,7 +93,7 @@ impl AcpServer {
                 if self.reject_unauthenticated(&id) {
                     return;
                 }
-                self.handle_session_fork(&id, &params);
+                self.handle_session_fork(&id, &params).await;
             }
             "session/truncate" => {
                 if self.reject_unauthenticated(&id) {
