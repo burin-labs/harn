@@ -1,5 +1,6 @@
 //! Command-line projection of the shared package owner.
 
+#[doc(inline)]
 pub use harn_package::package::*;
 
 pub fn artifacts_manifest(output: Option<&std::path::Path>) {
