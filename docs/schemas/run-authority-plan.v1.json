@@ -23,6 +23,21 @@
       "type": "string",
       "minLength": 1
     },
+    "isolated_source_verifiers": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "interpreter", "source", "workspace", "args"],
+        "properties": {
+          "id": {"type": "string", "minLength": 1},
+          "interpreter": {"type": "string", "minLength": 1},
+          "source": {"type": "string", "minLength": 1},
+          "workspace": {"type": "string", "minLength": 1},
+          "args": {"type": "array", "items": {"type": "string"}}
+        }
+      }
+    },
     "capability_policy": {
       "$ref": "#/$defs/capabilityPolicy"
     },

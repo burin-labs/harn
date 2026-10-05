@@ -133,6 +133,31 @@ impl<E> PreparedRun<E> {
         }
 
         let mut diagnostics = validate_host_facts(&plan, &host_facts, now_ms);
+        let mut source_verifiers = BTreeMap::new();
+        for request in &plan.isolated_source_verifiers {
+            let captured = if !host_facts.admitted_source_verifiers.contains(request) {
+                Err("isolated source verifier has no exact host admission".to_string())
+            } else {
+                crate::verifier_provenance::PreparedVerifier::capture(request.clone())
+            };
+            match captured {
+                Ok(verifier) if !source_verifiers.contains_key(&request.id) => {
+                    source_verifiers.insert(request.id.clone(), Arc::new(verifier));
+                }
+                Ok(_) => diagnostics.push(diagnostic(
+                    "verifier_duplicate_id",
+                    "isolated source verifier id is repeated",
+                    None,
+                    "Declare each host-admitted verifier exactly once.",
+                )),
+                Err(error) => diagnostics.push(diagnostic(
+                    "verifier_unmeasured",
+                    error,
+                    None,
+                    "Admit a supported isolated source verifier before executor mutation.",
+                )),
+            }
+        }
         let mut policy_decisions = Vec::new();
         let mut approval_candidates = Vec::new();
         let mut deciders = BTreeMap::new();
@@ -260,6 +285,7 @@ impl<E> PreparedRun<E> {
         )
         .expect("authority lease inputs are serializable");
         let lease = AuthorityLease {
+            source_verifiers,
             lease_fingerprint: lease_fingerprint.clone(),
             plan_fingerprint,
             plan,
@@ -558,6 +584,39 @@ impl AuthorityUse {
             .executor_invoked = true;
     }
 
+    pub(crate) fn source_verifier(
+        &self,
+        program: &str,
+        args: &[String],
+        cwd: &Path,
+    ) -> Result<Option<Arc<crate::verifier_provenance::PreparedVerifier>>, String> {
+        if (self.now_ms)() > self.lease.expires_at_ms {
+            return Err("prepared verifier authority expired".to_string());
+        }
+        let plan = crate::shells::plan_invocation(program, args);
+        for verifier in self.lease.source_verifiers.values() {
+            if verifier.request().matches(program, args, cwd) {
+                return Ok(Some(verifier.clone()));
+            }
+            if args
+                .iter()
+                .any(|arg| Path::new(arg) == verifier.request().source)
+                || plan
+                    .as_ref()
+                    .and_then(|plan| plan.literal_argv.as_ref())
+                    .is_some_and(|args| {
+                        args.iter()
+                            .any(|arg| Path::new(arg) == verifier.request().source)
+                    })
+            {
+                return Err(
+                    "declared isolated verifier invocation changed after preparation".to_string(),
+                );
+            }
+        }
+        Ok(None)
+    }
+
     pub(crate) fn identity_requirements(&self) -> Vec<IdentityBrokerRequirement> {
         let mut requirements = self
             .lease
@@ -687,7 +746,8 @@ impl AuthorityUse {
     }
 }
 
-fn plan_from_intent(mut intent: RunIntent) -> RunAuthorityPlanV1 {
+pub(super) fn plan_from_intent(mut intent: RunIntent) -> RunAuthorityPlanV1 {
+    intent.isolated_source_verifiers.sort();
     normalize_policy(&mut intent.capability_policy);
     intent.network.sort();
     intent.network.dedup();
@@ -762,6 +822,7 @@ fn plan_from_intent(mut intent: RunIntent) -> RunAuthorityPlanV1 {
     RunAuthorityPlanV1 {
         schema: RUN_AUTHORITY_PLAN_SCHEMA.to_string(),
         intent_id: intent.intent_id.trim().to_string(),
+        isolated_source_verifiers: intent.isolated_source_verifiers,
         capability_policy: intent.capability_policy,
         requirements,
         budget: intent.budget,

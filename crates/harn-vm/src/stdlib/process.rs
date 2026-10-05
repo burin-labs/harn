@@ -782,6 +782,7 @@ struct CapturedSpawn<'a> {
 
 /// Result of [`run_captured_spawn`].
 struct CapturedRun {
+    source_verifier_id: Option<String>,
     output: std::process::Output,
     timed_out: bool,
     interrupted: bool,
@@ -822,8 +823,35 @@ fn run_captured_spawn(spec: CapturedSpawn<'_>) -> Result<CapturedRun, VmError> {
     // the child is about to receive, searched here in the parent (harn#7993).
     let resolved_cmd =
         resolve_program_path(spec.cmd, &resolved_environment, spec.env_clear, spec.env);
-    let mut command = std::process::Command::new(&resolved_cmd);
-    command.args(spec.args);
+    let actual_cwd = spec
+        .cwd
+        .map(PathBuf::from)
+        .map_or_else(std::env::current_dir, Ok)
+        .map_err(|error| {
+            VmError::Thrown(VmValue::string(format!(
+                "{label}: verifier cwd unavailable: {error}"
+            )))
+        })?;
+    let verifier =
+        crate::prepared_run::prepared_source_verifier(&resolved_cmd, spec.args, &actual_cwd)
+            .map_err(|error| VmError::Thrown(VmValue::string(format!("{label}: {error}"))))?;
+    let source_verifier_id = verifier.as_ref().map(|value| value.request().id.clone());
+    #[cfg(target_os = "linux")]
+    let pinned = verifier
+        .as_ref()
+        .map(|value| value.launch())
+        .transpose()
+        .map_err(|error| VmError::Thrown(VmValue::string(format!("{label}: {error}"))))?;
+    #[cfg(target_os = "linux")]
+    let (program, arguments) = pinned
+        .as_ref()
+        .map_or((&resolved_cmd, spec.args), |launch| {
+            (&launch.program, launch.args.as_slice())
+        });
+    #[cfg(not(target_os = "linux"))]
+    let (program, arguments) = (&resolved_cmd, spec.args);
+    let mut command = std::process::Command::new(program);
+    command.args(arguments);
     if let Some(cwd) = spec.cwd {
         // Every child-process seam starts the child through `child_process_cwd`
         // so a canonicalized (verbatim-prefixed) directory from `cwd()` or
@@ -852,6 +880,16 @@ fn run_captured_spawn(spec: CapturedSpawn<'_>) -> Result<CapturedRun, VmError> {
         &cleanup_token,
     );
     crate::op_interrupt::preserve_process_owner_token(&mut command);
+
+    #[cfg(target_os = "linux")]
+    if let Some(pinned) = pinned {
+        crate::verifier_provenance::validate_pinned_environment(
+            &command,
+            spec.env_clear || resolved_environment.is_some(),
+        )
+        .map_err(|error| VmError::Thrown(VmValue::string(format!("{label}: {error}"))))?;
+        pinned.descriptors.attach(&mut command);
+    }
 
     let started = Instant::now();
     let cmd = spec.cmd;
@@ -919,6 +957,7 @@ fn run_captured_spawn(spec: CapturedSpawn<'_>) -> Result<CapturedRun, VmError> {
         .unwrap_or_default();
 
     Ok(CapturedRun {
+        source_verifier_id,
         output: std::process::Output {
             status,
             stdout,
@@ -1027,6 +1066,9 @@ fn captured_run_to_value(run: &CapturedRun) -> VmValue {
     result.insert("success".to_string(), VmValue::Bool(success));
     result.insert("timed_out".to_string(), VmValue::Bool(run.timed_out));
     result.insert("duration_ms".to_string(), VmValue::Int(run.duration_ms));
+    if let Some(id) = &run.source_verifier_id {
+        result.put_str("source_verifier_id", id);
+    }
     VmValue::dict(result)
 }
 

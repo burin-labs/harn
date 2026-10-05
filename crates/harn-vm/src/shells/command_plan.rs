@@ -12,6 +12,9 @@ pub struct CommandPlan {
     pub program: String,
     pub environment: BTreeMap<String, String>,
     pub argv: Option<Vec<String>>,
+    /// Observed literal invocation, including env prefixes. This is evidence
+    /// for inspection only; it never authorizes shell-to-direct conversion.
+    pub literal_argv: Option<Vec<String>>,
     /// Shell lookup requires ruling out startup code and imported functions.
     pub requires_clean_shell_environment: bool,
 }
@@ -49,6 +52,11 @@ pub fn plan_invocation(program: &str, args: &[String]) -> Option<CommandPlan> {
                     program: program.to_string(),
                     environment: BTreeMap::new(),
                     argv: None,
+                    literal_argv: Some(
+                        std::iter::once(program.to_string())
+                            .chain(args.iter().cloned())
+                            .collect(),
+                    ),
                     requires_clean_shell_environment: false,
                 });
             }
@@ -147,6 +155,7 @@ pub fn plan_posix_command(source: &str) -> Option<CommandPlan> {
         requires_clean_shell_environment: false,
         program,
         environment,
+        literal_argv: (single && all_literal).then(|| argv[index..].to_vec()),
         argv: (plain && index == 0).then_some(argv),
     })
 }

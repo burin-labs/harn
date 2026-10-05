@@ -485,6 +485,18 @@ impl<E> PreparedSession<E> {
                 "prepared-session lease fingerprint is invalid",
             ));
         }
+        let intent_plan = super::engine::plan_from_intent(lease.intent.clone());
+        let intent_fingerprint =
+            fingerprint("harn prepared-run plan v1", &intent_plan).map_err(|error| {
+                blocked_update(&lease.session_id, "prepared_session_intent", &error)
+            })?;
+        if intent_fingerprint != lease.plan_fingerprint {
+            return Err(blocked_update(
+                &lease.session_id,
+                "prepared_session_intent_drift",
+                "serialized intent does not match the original prepared authority plan",
+            ));
+        }
         if attachment.session_id != lease.binding.session_id
             || attachment.workspace_fingerprint != lease.binding.workspace_fingerprint
             || attachment.runtime != lease.binding.runtime
@@ -516,6 +528,13 @@ impl<E> PreparedSession<E> {
         let authority_lease = if let Some(authority_lease) = local {
             authority_lease
         } else {
+            if !lease.intent.isolated_source_verifiers.is_empty() {
+                return Err(blocked_update(
+                    &lease.session_id,
+                    "verifier_baseline_unmeasured",
+                    "the original host-owned verifier material is unavailable; attach cannot recapture it after mutation",
+                ));
+            }
             if let Some(approval) = &lease.approval {
                 if approval.approved {
                     host_facts

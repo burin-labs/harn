@@ -1,5 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
+use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
@@ -374,6 +375,8 @@ pub enum AuthorityRequirement {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct RunIntent {
     pub intent_id: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub isolated_source_verifiers: Vec<crate::verifier_provenance::IsolatedPythonSourceVerifier>,
     pub capability_policy: CapabilityPolicy,
     #[serde(default)]
     pub network: Vec<NetworkRequirement>,
@@ -399,6 +402,8 @@ pub struct RunIntent {
 #[derive(Clone, Debug)]
 pub struct HostFacts {
     pub capability_ceiling: CapabilityPolicy,
+    pub admitted_source_verifiers:
+        BTreeSet<crate::verifier_provenance::IsolatedPythonSourceVerifier>,
     pub approval_policy: RunApprovalPolicy,
     pub approved_batches: BTreeMap<String, AuthorityDecider>,
     pub net_policy: crate::harness_net::NetPolicy,
@@ -417,6 +422,8 @@ pub struct HostFacts {
 pub struct RunAuthorityPlanV1 {
     pub schema: String,
     pub intent_id: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub isolated_source_verifiers: Vec<crate::verifier_provenance::IsolatedPythonSourceVerifier>,
     pub capability_policy: CapabilityPolicy,
     pub requirements: Vec<AuthorityRequirement>,
     pub budget: RunBudget,
@@ -517,6 +524,8 @@ pub enum ToolchainDiscoveryOutcome {
 
 #[derive(Debug)]
 pub struct AuthorityLease {
+    pub(crate) source_verifiers:
+        BTreeMap<String, Arc<crate::verifier_provenance::PreparedVerifier>>,
     pub(crate) lease_fingerprint: String,
     pub(crate) plan_fingerprint: String,
     pub(crate) plan: RunAuthorityPlanV1,

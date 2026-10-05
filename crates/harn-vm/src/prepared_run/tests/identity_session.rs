@@ -485,7 +485,7 @@ fn platform_identity_reference_rejects_values_and_ambiguous_paths() {
     assert!(serde_json::from_value::<PlatformIdentityReference>(json!(SECRET_CANARY)).is_err());
 }
 
-fn prepared_session_binding() -> PreparedSessionBindingV1 {
+pub(super) fn prepared_session_binding() -> PreparedSessionBindingV1 {
     PreparedSessionBindingV1 {
         session_id: "prepared-session-1".to_string(),
         workspace_fingerprint: "blake3:workspace-a".to_string(),

@@ -335,7 +335,7 @@ pub(in crate::stdlib::sandbox) fn payload_env_args() -> std::io::Result<OwnedFd>
     Ok(unsafe { OwnedFd::from_raw_fd(raw) })
 }
 
-fn sealed_filter(bytes: &[u8]) -> std::io::Result<OwnedFd> {
+pub(crate) fn sealed_filter(bytes: &[u8]) -> std::io::Result<OwnedFd> {
     let raw = unsafe {
         libc::memfd_create(
             c"harn-seccomp".as_ptr(),

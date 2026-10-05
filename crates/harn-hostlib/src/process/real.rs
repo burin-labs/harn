@@ -125,8 +125,13 @@ impl ProcessSpawner for RealSpawner {
             mut command,
             cleanup_token,
             env_cleared,
+            source_verifier_bound,
         } = prepare_command(&spec, None)?;
-        let missing_program = super::program_lookup::missing_program(&spec, &command, env_cleared);
+        let missing_program = if source_verifier_bound {
+            None
+        } else {
+            super::program_lookup::missing_program(&spec, &command, env_cleared)
+        };
         #[cfg(target_os = "windows")]
         let owner_job = if spec.owner_death == super::OwnerDeathPolicy::KillContainment
             || spec.configure_process_group
@@ -186,6 +191,7 @@ impl ProcessSpawner for RealSpawner {
 /// report back: whether its environment was cleared, so that `get_envs()` is
 /// the child's WHOLE environment rather than a patch over an inherited one.
 pub(crate) struct PreparedSpawn {
+    pub(crate) source_verifier_bound: bool,
     pub(crate) command: Command,
     pub(crate) cleanup_token: String,
     /// Read only by the Unix process-owner guardian; Windows contains a
@@ -199,9 +205,37 @@ pub(crate) fn prepare_command(
     cleanup_token: Option<String>,
 ) -> Result<PreparedSpawn, ProcessError> {
     validate_program(spec)?;
-    let command = process_sandbox::std_command_for_with_env_state(&spec.program, &spec.args)
+    #[cfg(target_os = "linux")]
+    let pinned = super::program_lookup::pinned_verifier(spec)?;
+    #[cfg(target_os = "linux")]
+    let (program, args) = pinned
+        .as_ref()
+        .map_or((&spec.program, spec.args.as_slice()), |value| {
+            (&value.program, value.args.as_slice())
+        });
+    #[cfg(not(target_os = "linux"))]
+    let (program, args) = (&spec.program, spec.args.as_slice());
+    let command = process_sandbox::std_command_for_with_env_state(program, args)
         .map_err(ProcessError::sandbox_setup)?;
-    prepare_command_from(spec, cleanup_token, command)
+    let prepared = prepare_command_from(spec, cleanup_token, command)?;
+    #[cfg(target_os = "linux")]
+    let mut prepared = prepared;
+    #[cfg(target_os = "linux")]
+    if let Some(pinned) = pinned {
+        if prepared.command.get_program() != std::ffi::OsStr::new(&pinned.program) {
+            return Err(ProcessError::Spawn(
+                "isolated source verifier launcher wrapping is unmeasured".to_string(),
+            ));
+        }
+        harn_vm::verifier_provenance::validate_pinned_environment(
+            &prepared.command,
+            prepared.env_cleared,
+        )
+        .map_err(ProcessError::Spawn)?;
+        pinned.descriptors.attach(&mut prepared.command);
+        prepared.source_verifier_bound = true;
+    }
+    Ok(prepared)
 }
 
 pub(crate) fn validate_program(spec: &SpawnSpec) -> Result<(), ProcessError> {
@@ -383,6 +417,7 @@ pub(crate) fn prepare_command_from(
         .map_err(ProcessError::sandbox_setup)?;
 
     Ok(PreparedSpawn {
+        source_verifier_bound: false,
         command,
         cleanup_token,
         env_cleared,

@@ -170,8 +170,18 @@ pub(crate) struct PreparedIdentityContext {
     consumer: SecretConsumerBinding,
 }
 
-tokio::task_local! {
-    static PREPARED_IDENTITY_CONTEXT: PreparedIdentityContext;
+thread_local! {
+    static PREPARED_IDENTITY_CONTEXT: std::cell::RefCell<Option<PreparedIdentityContext>> = const { std::cell::RefCell::new(None) };
+}
+
+pub(crate) fn swap_prepared_identity_context(
+    context: Option<PreparedIdentityContext>,
+) -> Option<PreparedIdentityContext> {
+    PREPARED_IDENTITY_CONTEXT.with(|slot| slot.replace(context))
+}
+
+fn current_prepared_identity_context() -> Option<PreparedIdentityContext> {
+    PREPARED_IDENTITY_CONTEXT.with(|slot| slot.borrow().clone())
 }
 
 pub(crate) async fn scope_prepared_identity<F>(
@@ -184,17 +194,26 @@ where
     F: Future,
 {
     let scope = crate::orchestration::AmbientExecutionScope::capture_for_inline_subtask()
-        .with_prepared_approval(authority.lease().approval_policy.clone());
-    PREPARED_IDENTITY_CONTEXT
-        .scope(
-            PreparedIdentityContext {
-                authority,
-                brokers,
-                consumer,
-            },
-            crate::orchestration::scope_ambient(scope, future),
-        )
-        .await
+        .with_prepared_approval(authority.lease().approval_policy.clone())
+        .with_prepared_identity(PreparedIdentityContext {
+            authority,
+            brokers,
+            consumer,
+        });
+    crate::orchestration::scope_ambient(scope, future).await
+}
+
+/// Resolve only original native material in the active host-owned authority.
+/// `None` supplies no verifier qualification or accepted execution evidence.
+pub fn prepared_source_verifier(
+    program: &str,
+    args: &[String],
+    cwd: &std::path::Path,
+) -> Result<Option<Arc<crate::verifier_provenance::PreparedVerifier>>, String> {
+    match current_prepared_identity_context() {
+        Some(context) => context.authority.source_verifier(program, args, cwd),
+        None => Ok(None),
+    }
 }
 
 /// Whether the current prepared lease declares an identity for `provider`,
@@ -202,15 +221,13 @@ where
 /// provider's ambient discovery applies; inside one, ambient discovery is
 /// unreachable and only a declared identity can authenticate the provider.
 pub(crate) fn prepared_identity_declares_provider(provider: &str) -> Option<bool> {
-    PREPARED_IDENTITY_CONTEXT
-        .try_with(|context| {
-            context
-                .authority
-                .identity_requirements()
-                .iter()
-                .any(|requirement| requirement.binding.provider == provider)
-        })
-        .ok()
+    current_prepared_identity_context().map(|context| {
+        context
+            .authority
+            .identity_requirements()
+            .iter()
+            .any(|requirement| requirement.binding.provider == provider)
+    })
 }
 
 /// Consume the exact prepared identity bound to a platform-managed provider.
@@ -223,9 +240,9 @@ pub(crate) async fn consume_provider_identity<R>(
     tenant: Option<&str>,
     consume: impl Fn(IdentityMaterial<'_>) -> Result<R, IdentityBrokerError>,
 ) -> Result<Option<R>, IdentityBrokerError> {
-    let context = match PREPARED_IDENTITY_CONTEXT.try_with(Clone::clone) {
-        Ok(context) => context,
-        Err(_) => return Ok(None),
+    let context = match current_prepared_identity_context() {
+        Some(context) => context,
+        None => return Ok(None),
     };
     let requirements = context.authority.identity_requirements();
     let mut matches = requirements.iter().filter(|requirement| {

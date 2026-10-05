@@ -113,6 +113,8 @@ impl std::str::FromStr for DeviceMountFinalization {
 #[cfg(target_os = "linux")]
 pub use crate::stdlib::sandbox::linux::keep_ruleset_across_exec;
 #[cfg(target_os = "linux")]
+pub(crate) use crate::stdlib::sandbox::linux::sealed_launch_bytes;
+#[cfg(target_os = "linux")]
 pub use crate::stdlib::sandbox::linux::DescriptorTransfer;
 #[cfg(target_os = "linux")]
 pub use crate::stdlib::sandbox::linux::{command_for_reexec, ReexecConfinement};

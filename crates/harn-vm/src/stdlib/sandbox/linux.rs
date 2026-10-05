@@ -30,6 +30,7 @@ use crate::process_sandbox::DeviceMountFinalization;
 pub use descriptors::DescriptorTransfer;
 #[path = "linux_bwrap.rs"]
 pub(super) mod bwrap;
+pub(crate) use bwrap::sealed_filter as sealed_launch_bytes;
 #[path = "linux_filesystem.rs"]
 mod filesystem;
 #[path = "linux_self_confinement.rs"]

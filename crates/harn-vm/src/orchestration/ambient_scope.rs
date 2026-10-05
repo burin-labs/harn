@@ -72,6 +72,9 @@ pub(crate) struct AmbientExecutionScope {
     execution: Vec<CapabilityPolicy>,
     approval: Vec<RunApprovalPolicy>,
     prepared_approval: Option<std::sync::Arc<RunApprovalPolicy>>,
+    /// Native prepared authority follows the same execution tree as approval,
+    /// including spawned subtasks and blocking host operations.
+    prepared_identity: Option<crate::prepared_run::PreparedIdentityContext>,
     operator_approval_grants: Vec<OperatorApprovalGrant>,
     command: Vec<CommandPolicy>,
     permissions: Vec<DynamicPermissionPolicy>,
@@ -177,6 +180,14 @@ impl AmbientExecutionScope {
         self
     }
 
+    pub(crate) fn with_prepared_identity(
+        mut self,
+        context: crate::prepared_run::PreparedIdentityContext,
+    ) -> Self {
+        self.prepared_identity = Some(context);
+        self
+    }
+
     /// Snapshot the ambient context a child inherits from its parent at spawn
     /// time: the command-policy stack, dynamic-permission stack, and the
     /// runtime-context overlay (so the child's events keep the parent's
@@ -206,6 +217,7 @@ impl AmbientExecutionScope {
     pub(crate) fn capture_inherited() -> Self {
         Self {
             prepared_approval: clone_via_swap(swap_prepared_approval_policy),
+            prepared_identity: clone_via_swap(crate::prepared_run::swap_prepared_identity_context),
             operator_approval_grants: clone_via_swap(swap_operator_approval_grant_stack),
             command: clone_via_swap(swap_command_policy_stack),
             precheck: clone_via_swap(swap_tool_precheck_stack),
@@ -271,6 +283,7 @@ impl AmbientExecutionScope {
     pub(crate) fn capture_for_inline_subtask() -> Self {
         Self {
             prepared_approval: clone_via_swap(swap_prepared_approval_policy),
+            prepared_identity: clone_via_swap(crate::prepared_run::swap_prepared_identity_context),
             execution: clone_via_swap(swap_execution_policy_stack),
             approval: clone_via_swap(swap_approval_policy_stack),
             operator_approval_grants: clone_via_swap(swap_operator_approval_grant_stack),
@@ -335,6 +348,10 @@ impl AmbientExecutionScope {
         }
 
         swap_slot(&mut self.prepared_approval, swap_prepared_approval_policy);
+        swap_slot(
+            &mut self.prepared_identity,
+            crate::prepared_run::swap_prepared_identity_context,
+        );
         swap_slot(&mut self.execution, swap_execution_policy_stack);
         swap_slot(&mut self.approval, swap_approval_policy_stack);
         swap_slot(
