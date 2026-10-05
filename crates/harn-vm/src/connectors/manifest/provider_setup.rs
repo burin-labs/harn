@@ -743,6 +743,29 @@ required_secrets = [
             ]
         );
         assert_eq!(setup.outbound_credentials().count(), 1);
+        let config = ResolvedProviderConnectorConfig {
+            id: crate::ProviderId::from("github"),
+            manifest_dir: PathBuf::from("fixture"),
+            connector: ResolvedProviderConnectorKind::RustBuiltin,
+            oauth: None,
+            setup: Some(setup),
+            service: None,
+            connector_contract_version: 1,
+        };
+        assert_eq!(
+            config.outbound_secret_ids(),
+            vec![crate::secrets::SecretId::new("github", "app-token")],
+            "linked hosts must select the same outbound credential as connector dispatch"
+        );
+        assert!(
+            !config
+                .outbound_secret_ids()
+                .contains(&crate::secrets::SecretId::new(
+                    "github",
+                    "webhook-signing-secret"
+                )),
+            "an inbound verification secret must never enter a child credential handoff"
+        );
     }
 
     /// A package mid-migration writes both spellings in one list. Neither

@@ -50,7 +50,7 @@ pub(crate) struct LegacySecretFinding {
 /// Scan the raw manifest text for legacy bare-string `required_secrets`.
 ///
 /// This reads the TOML rather than the parsed [`Manifest`] on purpose. The
-/// deserializer at `package/manifest/provider_setup.rs` maps a bare string to
+/// deserializer at `harn_vm::connectors::manifest` maps a bare string to
 /// `{ id, direction: outbound }`, so by the time a `Manifest` exists the
 /// spelling is erased and the two forms are indistinguishable. Recovering it
 /// from the typed value would need a provenance field on
