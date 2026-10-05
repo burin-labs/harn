@@ -513,7 +513,8 @@ fn prepared_runtime_attachment() -> PreparedRuntimeAttachment {
 
 #[tokio::test(flavor = "current_thread")]
 async fn local_turn_reuses_attached_authority_and_identity_across_an_await() {
-    let identity = identity_requirement();
+    let mut identity = identity_requirement();
+    identity.binding.consumer = prepared_session_binding().consumer;
     let mut run_intent = intent();
     run_intent.identity_brokers = vec![identity.clone()];
     let mut host = host_facts();
