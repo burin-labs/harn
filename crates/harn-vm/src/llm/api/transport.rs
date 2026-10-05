@@ -549,8 +549,6 @@ async fn vm_call_llm_api_with_body_inner(
             opts.provider_overrides.as_ref(),
         );
     }
-    // Provider escape hatches cannot replace captured caller authority.
-    crate::llm::managed_supply::attach_request_extension(&mut body, managed_request)?;
     if dialect.is_ollama_openai_compat() {
         DialectContract::project_ollama_openai_request(&mut body);
     }
@@ -582,6 +580,9 @@ async fn vm_call_llm_api_with_body_inner(
     // must survive the caller's `provider_overrides` escape hatch, or the
     // receipt would claim a control the wire does not carry.
     data_controls.write_body(&mut body);
+    // Keep captured authority after every provider/body projection, including
+    // finite-field adapters and optional data-control writes.
+    crate::llm::managed_supply::attach_request_extension(&mut body, managed_request)?;
 
     let client = if use_stream_transport {
         crate::llm::streaming_client_for_base_url(&resolved.base_url)
