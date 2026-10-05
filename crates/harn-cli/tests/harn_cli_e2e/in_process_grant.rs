@@ -26,6 +26,10 @@ struct Case {
 }
 
 async fn run_case(grant_suffix: &'static str) -> Case {
+    run_case_with_source(grant_suffix, false).await
+}
+
+async fn run_case_with_source(grant_suffix: &'static str, parent_store: bool) -> Case {
     let root = tempfile::tempdir().unwrap();
     let authorized = Arc::new(AtomicUsize::new(0));
     let counter = authorized.clone();
@@ -111,24 +115,73 @@ context_window = 8192
     )
     .unwrap();
     let path = root.path().to_path_buf();
-    let grant = format!("probe=env:{LAUNCHER_VAR},expose={EXPOSED_VAR}{grant_suffix}");
-    let output = tokio::task::spawn_blocking(move || {
-        harn_e2e_command()
+    let source = if parent_store {
+        "secret://fixture/provider".to_string()
+    } else {
+        format!("env:{LAUNCHER_VAR}")
+    };
+    let grant = format!("probe={source},expose={EXPOSED_VAR}{grant_suffix}");
+    let output = if parent_store {
+        use harn_vm::secrets::{
+            MemorySecretProvider, ParentSecretHandoff, SecretId, PARENT_SECRET_HANDOFF_OPTION,
+        };
+        use std::process::Stdio;
+        use tokio::io::AsyncWriteExt;
+        let id = SecretId::new("fixture", "provider");
+        let parent =
+            MemorySecretProvider::new("fixture-parent").with_secret(id.clone(), CREDENTIAL);
+        let handoff = ParentSecretHandoff::capture(&parent, [id]).await.unwrap();
+        let mut bytes = Vec::new();
+        handoff.write_to(&mut bytes).unwrap();
+        let mut command = harn_e2e_command();
+        command
+            .env_clear()
             .current_dir(&path)
+            .env("PATH", std::env::var_os("PATH").unwrap_or_default())
+            .env("HOME", &path)
+            .env("USERPROFILE", &path)
             .env("HARN_PROVIDERS_CONFIG", path.join("providers.toml"))
-            .env("HARN_SECRET_PROVIDERS", "env")
-            // The model call goes to the local fixture above, never a paid
-            // provider; the suite-wide kill switch would refuse it.
-            .env_remove("HARN_LLM_CALLS_DISABLED")
-            .env(LAUNCHER_VAR, CREDENTIAL)
-            .env_remove(EXPOSED_VAR)
-            .args(["run", "--grant", &grant])
+            // A received store must bypass ambient backend construction entirely.
+            .env("HARN_SECRET_PROVIDERS", "must-not-be-consulted")
+            .args([
+                format!("--{PARENT_SECRET_HANDOFF_OPTION}"),
+                "run".into(),
+                "--grant".into(),
+                grant,
+            ])
             .arg(path.join("probe.harn"))
-            .output()
-            .unwrap()
-    })
-    .await
-    .unwrap();
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        if let Some(system_root) = std::env::var_os("SystemRoot") {
+            command.env("SystemRoot", system_root);
+        }
+        let mut command = tokio::process::Command::from(command);
+        command.kill_on_drop(true);
+        let mut child = command.spawn().unwrap();
+        let mut stdin = child.stdin.take().unwrap();
+        stdin.write_all(&bytes).await.unwrap();
+        drop(stdin);
+        child.wait_with_output().await.unwrap()
+    } else {
+        tokio::task::spawn_blocking(move || {
+            harn_e2e_command()
+                .current_dir(&path)
+                .env("HARN_PROVIDERS_CONFIG", path.join("providers.toml"))
+                .env("HARN_SECRET_PROVIDERS", "env")
+                // The model call goes to the local fixture above, never a paid
+                // provider; the suite-wide kill switch would refuse it.
+                .env_remove("HARN_LLM_CALLS_DISABLED")
+                .env(LAUNCHER_VAR, CREDENTIAL)
+                .env_remove(EXPOSED_VAR)
+                .args(["run", "--grant", &grant])
+                .arg(path.join("probe.harn"))
+                .output()
+                .unwrap()
+        })
+        .await
+        .unwrap()
+    };
     server.abort();
     let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
     assert!(
@@ -171,6 +224,45 @@ async fn a_session_provider_grant_reaches_the_child_as_the_control() {
     assert!(
         case.stdout
             .contains(&format!("child_sees_{EXPOSED_VAR}=true")),
+        "{}",
+        case.stdout
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn parent_store_authenticates_real_in_process_call_without_child_environment_leak() {
+    let case = run_case_with_source(",to=in_process", true).await;
+    assert_eq!(case.authorized_calls, 1, "{}", case.stdout);
+    assert!(
+        case.stdout.contains("llm_call=completed"),
+        "{}",
+        case.stdout
+    );
+    assert!(
+        case.stdout
+            .contains(&format!("child_sees_{EXPOSED_VAR}=false")),
+        "{}",
+        case.stdout
+    );
+    assert!(
+        case.stdout.contains("child_sees_credential_value=false"),
+        "{}",
+        case.stdout
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn parent_store_session_grant_is_the_positive_child_exposure_control() {
+    let case = run_case_with_source("", true).await;
+    assert_eq!(case.authorized_calls, 1, "{}", case.stdout);
+    assert!(
+        case.stdout
+            .contains(&format!("child_sees_{EXPOSED_VAR}=true")),
+        "{}",
+        case.stdout
+    );
+    assert!(
+        case.stdout.contains("child_sees_credential_value=true"),
         "{}",
         case.stdout
     );
