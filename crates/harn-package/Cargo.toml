@@ -1,0 +1,50 @@
+[package]
+name = "harn-package"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Authoritative Harn package resolution, materialization and connector discovery"
+include = ["src/**/*", "Cargo.toml"]
+
+[dependencies]
+harn-flock = { path = "../harn-flock", version = "=0.10.158" }
+harn-fmt = { path = "../harn-fmt", version = "=0.10.158" }
+harn-kernel = { path = "../harn-kernel", version = "=0.10.158" }
+harn-lexer = { path = "../harn-lexer", version = "=0.10.158" }
+harn-modules = { path = "../harn-modules", version = "=0.10.158" }
+harn-parser = { path = "../harn-parser", version = "=0.10.158" }
+harn-vm = { path = "../harn-vm", version = "=0.10.158", default-features = false }
+harn-rules = { path = "../harn-rules", version = "=0.10.158", optional = true }
+base64 = "0.23"
+chrono-tz = "0.10.4"
+croner = "4.0.0"
+hex = "0.4"
+jmespath = "0.5.0"
+regex = "1"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "blocking"] }
+semver = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+shell-words = "1.1"
+sha2 = "0.11"
+tar = { version = "0.4", default-features = false }
+tempfile = "3"
+thiserror = "2"
+time = { version = "0.3", features = ["formatting", "parsing"] }
+tokio = { version = "1", features = ["rt", "sync", "time", "macros"] }
+toml = "1.1"
+toml_edit = "0.25.12"
+url = "2"
+uuid = { version = "1", features = ["v4", "v7"] }
+which = "8"
+
+[features]
+default = []
+hostlib = ["dep:harn-rules"]
+test-support = []
+
+[lints]
+workspace = true

@@ -68,6 +68,7 @@ harn-rules = { path = "../harn-rules", version = "=0.10.158", optional = true }
 harn-rules-hostlib = { path = "../harn-rules-hostlib", version = "=0.10.158", optional = true }
 harn-lint = { path = "../harn-lint", version = "=0.10.158" }
 harn-modules = { path = "../harn-modules", version = "=0.10.158" }
+harn-package = { path = "../harn-package", version = "=0.10.158" }
 harn-fmt = { path = "../harn-fmt", version = "=0.10.158" }
 # Management layer for downloadable injection-detection models (Layer 2). Light
 # (no model runtime); the heavy neural backend is behind `harn-guard/neural`,
@@ -191,6 +192,7 @@ mimalloc = ["dep:mimalloc"]
 # without hostlib is supported one layer down, on `harn-serve` and `harn-vm`;
 # `scripts/measure_lean_embedding.sh` guards that configuration.
 hostlib = [
+    "harn-package/hostlib",
     "dep:harn-hostlib",
     "dep:harn-rules",
     "dep:harn-rules-hostlib",
@@ -209,6 +211,7 @@ guard-neural = ["harn-guard/neural"]
 testbench-wasi = ["harn-vm/testbench-wasi"]
 
 [dev-dependencies]
+harn-package = { path = "../harn-package", version = "=0.10.158", features = ["test-support"] }
 harn-clock = { path = "../harn-clock", version = "=0.10.158", features = ["test-support"] }
 harn-mcp-compat = { path = "../harn-mcp-compat" }
 syn = { version = "3", features = ["full", "visit"] }

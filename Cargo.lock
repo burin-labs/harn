@@ -3413,6 +3413,7 @@ dependencies = [
  "harn-lsp",
  "harn-mcp-compat",
  "harn-modules",
+ "harn-package",
  "harn-parser",
  "harn-rules",
  "harn-rules-hostlib",
@@ -3777,6 +3778,42 @@ dependencies = [
 ]
 
 [[package]]
+name = "harn-package"
+version = "0.10.158"
+dependencies = [
+ "base64 0.23.1",
+ "chrono-tz",
+ "croner",
+ "harn-flock",
+ "harn-fmt",
+ "harn-kernel",
+ "harn-lexer",
+ "harn-modules",
+ "harn-parser",
+ "harn-rules",
+ "harn-vm",
+ "hex",
+ "jmespath",
+ "regex",
+ "reqwest 0.12.28",
+ "semver",
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
+ "shell-words",
+ "tar",
+ "tempfile",
+ "thiserror 2.0.21",
+ "time",
+ "tokio",
+ "toml",
+ "toml_edit",
+ "url",
+ "uuid",
+ "which",
+]
+
+[[package]]
 name = "harn-parser"
 version = "0.10.158"
 dependencies = [
@@ -3865,6 +3902,7 @@ dependencies = [
  "harn-hostlib",
  "harn-lexer",
  "harn-modules",
+ "harn-package",
  "harn-parser",
  "harn-session-store",
  "harn-vm",

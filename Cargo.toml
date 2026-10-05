@@ -25,6 +25,7 @@ members = [
     "crates/harn-skills",
     "crates/harn-lsp",
     "crates/harn-modules",
+    "crates/harn-package",
     "crates/harn-stdlib",
     "crates/harn-vm",
     "crates/harn-wasm",
