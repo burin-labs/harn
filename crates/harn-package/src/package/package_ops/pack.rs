@@ -186,7 +186,7 @@ pub(crate) fn render_package_api_docs(report: &PackageCheckReport) -> String {
     out
 }
 
-/// Render one public symbol as a Markdown section: a `### <kind> `<name>``
+/// Render one public symbol as a Markdown section with its kind and name,
 /// heading, its HarnDoc description (which already carries any `@effects` /
 /// `@errors` / parameter lines the author wrote), and a fenced `harn`
 /// signature block. Shared by `harn package docs` and the top-level
