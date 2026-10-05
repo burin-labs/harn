@@ -44,14 +44,18 @@ git -C "$repo" config commit.gpgsign false
 cat > "$tmp/bin/gh" <<'EOF'
 #!/usr/bin/env bash
 if [[ "$*" == *"/jobs?filter=latest"* ]]; then
+  if [[ -n "${FAKE_JOB_CENSUS:-}" ]]; then
+    printf '%s\n' "$FAKE_JOB_CENSUS"
+    exit 0
+  fi
   if [[ "${FAKE_CONSUMER:-success}" == missing ]]; then
-    printf '[{"total_count":0,"jobs":[]}]\n'
+    printf '[{"total_count":1,"jobs":[{"id":41,"name":"Build","status":"completed","conclusion":"success"}]}]\n'
   else
     status=completed
     conclusion="${FAKE_CONSUMER:-success}"
     [[ "$conclusion" != pending ]] || { status=in_progress; conclusion=null; }
     [[ "$conclusion" == null ]] || conclusion="\"$conclusion\""
-    printf '[{"total_count":1,"jobs":[{"name":"Consumer release rehearsal / Consumer canary","status":"%s","conclusion":%s}]}]\n' "$status" "$conclusion"
+    printf '[{"total_count":1,"jobs":[{"id":42,"name":"Consumer release rehearsal / Consumer canary","status":"%s","conclusion":%s}]}]\n' "$status" "$conclusion"
   fi
   exit 0
 fi
@@ -146,6 +150,36 @@ for verdict in pending failure cancelled; do
   plan "recovery_consumer_$verdict" RECOVERY=true "FAKE_CONSUMER=$verdict"
   [[ "$(cat "$tmp/recovery_consumer_$verdict.status")" != 0 ]] \
     || fail "recovery replaced a measured $verdict consumer with a new rehearsal"
+done
+
+# A complete page count is not a complete measurement when records cannot
+# identify the jobs. Exercise the actual recovery decision, not just a parser.
+census='[{"total_count":2,"jobs":[{"id":41,"name":"Build","status":"completed","conclusion":"success"},{"id":42,"name":"Consumer release rehearsal / Consumer canary","status":"completed","conclusion":"success"}]}]'
+plan valid_census RECOVERY=true "FAKE_JOB_CENSUS=$census"
+[[ "$(output valid_census promote)" == true && "$(output valid_census requires_rehearsal)" == false ]] \
+  || fail 'complete named job census refused'
+for defect in missing_name empty_name whitespace_name numeric_name missing_id zero_id fractional_id string_id duplicate_id missing_status missing_conclusion partial_page empty_census; do
+  case "$defect" in
+    missing_name) filter='del(.[0].jobs[1].name) | .[0].jobs[1].conclusion = "failure"' ;;
+    empty_name) filter='.[0].jobs[1].name = ""' ;;
+    whitespace_name) filter='.[0].jobs[1].name = "  "' ;;
+    numeric_name) filter='.[0].jobs[1].name = 42' ;;
+    missing_id) filter='del(.[0].jobs[1].id)' ;;
+    zero_id) filter='.[0].jobs[1].id = 0' ;;
+    fractional_id) filter='.[0].jobs[1].id = 42.5' ;;
+    string_id) filter='.[0].jobs[1].id = "42"' ;;
+    duplicate_id) filter='.[0].jobs[1].id = 41' ;;
+    missing_status) filter='del(.[0].jobs[0].status)' ;;
+    missing_conclusion) filter='del(.[0].jobs[0].conclusion)' ;;
+    partial_page) filter='.[0].total_count = 3' ;;
+    empty_census) filter='.[0] = {total_count:0,jobs:[]}' ;;
+  esac
+  malformed="$(jq -c "$filter" <<< "$census")"
+  plan "malformed_$defect" RECOVERY=true "FAKE_JOB_CENSUS=$malformed"
+  [[ "$(cat "$tmp/malformed_$defect.status")" != 0 &&
+     "$(output "malformed_$defect" promote)" != true &&
+     "$(output "malformed_$defect" requires_rehearsal)" != true ]] \
+    || fail "malformed $defect census authorized recovery"
 done
 
 # Historical candidates need not contain today's publication policy helpers.

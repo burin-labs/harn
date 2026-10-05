@@ -18,11 +18,24 @@ release_consumer_verdict() {
   pages="$(gh api --paginate --slurp "repos/$repository/actions/runs/$run_id/jobs?filter=latest&per_page=100")" || return 1
   verdict="$(jq -cer '
     if type != "array" or length == 0 or
-       any(.[]; (.jobs | type) != "array" or (.total_count | type) != "number")
+       any(.[]; (.jobs | type) != "array" or (.total_count | type) != "number"
+         or .total_count < 0 or .total_count != (.total_count | floor))
     then error("missing consumer job census") else . end |
     . as $pages | [.[].jobs[]] as $jobs |
     if all($pages[]; .total_count == ($jobs | length)) then $jobs
     else error("partial consumer job census") end |
+    # Absence of the consumer is meaningful only among actual identified jobs.
+    if length == 0 or any(.[];
+      type != "object" or
+      (.id | type) != "number" or .id <= 0 or .id != (.id | floor) or
+      (.name | type) != "string" or (.name | test("\\S") | not) or
+      (.status | type) != "string" or (.status | test("\\S") | not) or
+      (has("conclusion") | not) or
+      (.conclusion != null and (.conclusion | type) != "string") or
+      (.status == "completed" and (.conclusion == null or .conclusion == "")))
+    then error("unreported consumer job identity or verdict") else . end |
+    if ([.[].id] | unique | length) != length
+    then error("duplicate consumer job identity") else . end |
     [.[] | select(.name == "Consumer release rehearsal / Consumer canary")] |
     {count:length, pending:map(select(.status != "completed")) | length,
      jobs:map({name,status,conclusion})}
