@@ -39,9 +39,8 @@ import { agent_session_init, agent_session_flush } from "std/agent/state"
 pub pipeline main(harness: Harness) {
   const sid = harness.agent.current_id()
   guard sid != nil else { throw "ACP prompt installs the current session id" }
-  agent_session_init(harness.agent, nil, nil, {root: ".", session_id: sid})
   if prompt != "snapshot" {
-    harness.agent.inject(sid, {role: "user", content: prompt})
+    agent_session_init(harness.agent, prompt, nil, {root: ".", session_id: sid})
   }
   agent_session_flush(harness.agent, sid)
   const snap = harness.agent.snapshot(sid)
