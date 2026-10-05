@@ -108,7 +108,7 @@ pub fn spawn_harn_with_parent_secrets(
     let (sender, receiver) = mpsc::channel();
     // Blocking pipe writes must not hold the supervising caller indefinitely.
     // Closing/killing the existing containment releases an ordinary blocked pipe.
-    let writer = std::thread::Builder::new()
+    let writer = harn_parser::runtime_stack::builder()
         .name("harn-parent-secret-handoff".into())
         .spawn(move || {
             let result = handoff.write_to(pipe).is_ok();
@@ -277,7 +277,7 @@ mod tests {
         let selected = handoff().await;
         let (ready_tx, ready_rx) = mpsc::channel();
         let (release_tx, release_rx) = mpsc::channel();
-        let writer = std::thread::spawn(move || {
+        let writer = harn_parser::runtime_stack::spawn(move || {
             ready_tx.send(()).unwrap();
             release_rx.recv().unwrap();
             drop(selected);
