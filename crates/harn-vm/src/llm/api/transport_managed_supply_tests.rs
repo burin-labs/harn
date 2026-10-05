@@ -117,6 +117,16 @@ fn managed_supply_json_uses_logical_capabilities_and_authoritative_receipt() {
     let mut opts = managed_opts("managed-gateway");
     opts.model = "qwen/qwen3.8-27b".to_string();
     opts.stream = false;
+    opts.provider_overrides = Some(serde_json::json!({
+        "harn_managed_supply": {
+            "version": crate::llm::managed_supply::MANAGED_SUPPLY_VERSION,
+            "logical_route": {
+                "provider": "groq", "model": "qwen/qwen3.8-27b",
+                "capability_fingerprint": logical_fingerprint,
+            },
+            "inference_boundary": {"reach":"any_hosted", "allow_training_discounts":true},
+        }
+    }));
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -201,6 +211,43 @@ fn managed_supply_missing_or_malformed_authority_never_reaches_transport() {
         assert!(!error.to_string().contains("private-malformed-canary"));
         assert_eq!(requests.load(std::sync::atomic::Ordering::SeqCst), 0);
     }
+    for protocol in ["responses", "acp"] {
+        let mut definition =
+            crate::llm_config::provider_config("managed-gateway").expect("managed fixture");
+        if protocol == "responses" {
+            definition.features.push("responses_api".to_string());
+            opts.api_mode = crate::llm::api::LlmApiMode::Responses;
+        } else {
+            definition.protocol = Some("acp".to_string());
+            opts.api_mode = crate::llm::api::LlmApiMode::ChatCompletions;
+        }
+        let mut overlay = crate::llm_config::ProvidersConfig::default();
+        overlay
+            .providers
+            .insert("managed-gateway".to_string(), definition);
+        crate::llm_config::set_user_overrides(Some(overlay));
+        if protocol == "acp" {
+            assert!(crate::llm::providers::AcpProvider::is_configured_acp(
+                "managed-gateway"
+            ));
+        }
+        let error = runtime
+            .block_on(vm_call_llm_full(&opts))
+            .expect_err("unsupported managed transport");
+        assert_eq!(
+            requests.load(std::sync::atomic::Ordering::SeqCst),
+            0,
+            "{protocol} must be refused before dispatch: {error}"
+        );
+        assert!(
+            error
+                .to_string()
+                .contains("managed supply requires the OpenAI chat-completions transport"),
+            "{error}"
+        );
+        install_managed_supply_stub_provider("managed-gateway", server.addr());
+    }
+    opts.api_mode = crate::llm::api::LlmApiMode::ChatCompletions;
     let allowed = runtime
         .block_on(vm_call_llm_full(&opts))
         .expect("same listener positive control");
