@@ -226,6 +226,9 @@ pub(super) fn request_context(request: &ToolApprovalRequest) -> EvaluationContex
             })
             .collect::<Vec<_>>()
     });
+    if let Some(annotations) = &request.tool_annotations {
+        set_owned_annotations(&mut context, annotations);
+    }
     if let Some(paths) = &owned_paths {
         set_owned_paths(&mut context, paths);
         context.literal_identity = Some(super::LiteralResourceIdentity::capture(
@@ -298,21 +301,28 @@ pub(super) fn request_context(request: &ToolApprovalRequest) -> EvaluationContex
         set_owned_paths(&mut context, paths);
     }
     if let Some(annotations) = &request.tool_annotations {
-        context.tool_kind = Some(super::tool_kind_string(annotations.kind).to_string());
-        context.side_effect = Some(annotations.side_effect_level.as_str().to_string());
-        context.capabilities = annotations
-            .capabilities
-            .iter()
-            .flat_map(|(capability, operations)| {
-                operations
-                    .iter()
-                    .map(move |operation| format!("{capability}.{operation}"))
-            })
-            .collect();
+        set_owned_annotations(&mut context, annotations);
         // The literal identity is captured before historical receipts are absorbed.
         // Its path declarations must come from this same catalog entry.
     }
     context
+}
+
+fn set_owned_annotations(
+    context: &mut EvaluationContext,
+    annotations: &crate::tool_annotations::ToolAnnotations,
+) {
+    context.tool_kind = Some(super::tool_kind_string(annotations.kind).to_string());
+    context.side_effect = Some(annotations.side_effect_level.as_str().to_string());
+    context.capabilities = annotations
+        .capabilities
+        .iter()
+        .flat_map(|(capability, operations)| {
+            operations
+                .iter()
+                .map(move |operation| format!("{capability}.{operation}"))
+        })
+        .collect();
 }
 
 fn set_owned_paths(

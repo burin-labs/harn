@@ -283,35 +283,9 @@ impl PolicyRuleMatch {
         action: PolicyAction,
     ) -> bool {
         (self.tool.is_empty() || identity.matches(&self.tool, std::slice::from_ref(&ctx.tool_name)))
-            && (self.tool_kind.is_empty() || identity.matches(&self.tool_kind, &ctx.tool_kinds()))
-            && (self.side_effect.is_empty()
-                || identity.matches(&self.side_effect, &ctx.side_effects()))
             && identity_match::resources_match(self, ctx, identity, action)
             && (self.command.is_empty() || identity.matches_command(&self.command, ctx))
-            && (self.command_identity.is_empty()
-                || identity.matches(&self.command_identity, &ctx.command_identities))
-            && (self.http_method.is_empty()
-                || identity.matches(
-                    &normalize_patterns_upper(&self.http_method),
-                    &ctx.http_methods,
-                ))
-            && (self.mcp_server.is_empty() || identity.matches(&self.mcp_server, &ctx.mcp_servers))
-            && (self.mcp_tool.is_empty() || identity.matches(&self.mcp_tool, &ctx.mcp_tools))
-            && (self.agent.is_empty()
-                || ctx.agent.as_ref().is_some_and(|agent| {
-                    identity.matches(&self.agent, std::slice::from_ref(agent))
-                }))
-            && (self.persona.is_empty()
-                || ctx.persona.as_ref().is_some_and(|persona| {
-                    identity.matches(&self.persona, std::slice::from_ref(persona))
-                }))
-            && (self.mode.is_empty()
-                || ctx
-                    .mode
-                    .as_ref()
-                    .is_some_and(|mode| identity.matches(&self.mode, std::slice::from_ref(mode))))
-            && host_request::env_modes_match(&self.env_mode, &ctx.env_modes, identity)
-            && (self.capability.is_empty() || identity.matches(&self.capability, &ctx.capabilities))
+            && identity_match::invocation_match(self, ctx, identity, action)
             && self
                 .repeat_count_at_least
                 .map(|threshold| ctx.repeat_count.unwrap_or(0) >= threshold)
@@ -737,14 +711,6 @@ impl EvaluationContext {
                 }
             }
         }
-        if let Some(rest) = self.tool_name.strip_prefix("mcp.") {
-            if let Some((server, tool)) = rest.split_once('.') {
-                if !server.is_empty() && !tool.is_empty() {
-                    self.mcp_servers.push(server.to_string());
-                    self.mcp_tools.push(tool.to_string());
-                }
-            }
-        }
         dedup(&mut self.capabilities);
         dedup(&mut self.path_candidates);
         dedup(&mut self.command_candidates);
@@ -759,6 +725,23 @@ impl EvaluationContext {
 
     fn tool_kinds(&self) -> Vec<String> {
         self.tool_kind.iter().cloned().collect()
+    }
+
+    fn invocation_constraints(&self) -> PolicyRuleMatch {
+        PolicyRuleMatch {
+            tool_kind: self.tool_kinds(),
+            side_effect: self.side_effects(),
+            command_identity: self.command_identities.clone(),
+            http_method: self.http_methods.clone(),
+            mcp_server: self.mcp_servers.clone(),
+            mcp_tool: self.mcp_tools.clone(),
+            agent: self.agent.iter().cloned().collect(),
+            persona: self.persona.iter().cloned().collect(),
+            mode: self.mode.iter().cloned().collect(),
+            capability: self.capabilities.clone(),
+            env_mode: self.env_modes.clone(),
+            ..Default::default()
+        }
     }
 
     fn side_effects(&self) -> Vec<String> {
@@ -1245,6 +1228,15 @@ fn http_method_candidates(args: &JsonValue) -> Vec<String> {
 fn mcp_candidates(tool_name: &str, args: &JsonValue) -> (Vec<String>, Vec<String>) {
     let mut servers = Vec::new();
     let mut tools = Vec::new();
+    if let Some((server, tool)) = tool_name
+        .strip_prefix("mcp.")
+        .and_then(|name| name.split_once('.'))
+    {
+        if !server.is_empty() && !tool.is_empty() {
+            servers.push(server.to_string());
+            tools.push(tool.to_string());
+        }
+    }
     if let Some((server, tool)) = tool_name.split_once("__") {
         if !server.is_empty() && !tool.is_empty() {
             servers.push(server.to_string());

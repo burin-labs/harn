@@ -34,11 +34,51 @@ pub(super) fn resources_match(
     }
 }
 
+pub(super) fn invocation_match(
+    rule: &PolicyRuleMatch,
+    context: &EvaluationContext,
+    identity: PolicyIdentityMatch,
+    action: PolicyAction,
+) -> bool {
+    let normalized;
+    let actual = if identity == PolicyIdentityMatch::Literal {
+        let Some(raw) = &context.literal_identity else {
+            return false;
+        };
+        &raw.constraints
+    } else {
+        normalized = context.invocation_constraints();
+        &normalized
+    };
+    let methods = super::normalize_patterns_upper(&rule.http_method);
+    [
+        (&rule.tool_kind, &actual.tool_kind),
+        (&rule.side_effect, &actual.side_effect),
+        (&rule.command_identity, &actual.command_identity),
+        (&methods, &actual.http_method),
+        (&rule.mcp_server, &actual.mcp_server),
+        (&rule.mcp_tool, &actual.mcp_tool),
+        (&rule.agent, &actual.agent),
+        (&rule.persona, &actual.persona),
+        (&rule.mode, &actual.mode),
+        (&rule.capability, &actual.capability),
+    ]
+    .into_iter()
+    .all(|(patterns, values)| {
+        if identity == PolicyIdentityMatch::Literal {
+            LiteralResourceIdentity::values_match(patterns, values, true, action)
+        } else {
+            patterns.is_empty() || identity.matches(patterns, values)
+        }
+    }) && super::host_request::env_modes_match(&rule.env_mode, &actual.env_mode, identity)
+}
+
 #[derive(Clone, Debug)]
 pub(super) struct LiteralResourceIdentity {
     pub(super) paths: Vec<Vec<String>>,
     pub(super) urls: Vec<String>,
     pub(super) domains: Vec<String>,
+    constraints: PolicyRuleMatch,
     urls_valid: bool,
     domains_valid: bool,
 }
@@ -109,6 +149,7 @@ impl LiteralResourceIdentity {
             paths,
             urls,
             domains,
+            constraints: context.invocation_constraints(),
             urls_valid,
             domains_valid,
         }
@@ -576,5 +617,107 @@ mod tests {
             ..Default::default()
         });
         assert!(decision.is_ask(), "{decision:?}");
+    }
+
+    #[test]
+    fn literal_http_grants_ignore_stale_receipt_methods() {
+        let policy = ToolApprovalPolicy::from_host_json(json!({
+            "rules": [
+                {"source": "mode", "ask": "fetch"},
+                {"source": "user", "identity_match": "literal",
+                 "allow": {"tool": "fetch", "url": "https://example.org/report", "method": "GET"}}
+            ]
+        }))
+        .unwrap();
+        for (method, stale, expected_allow) in [
+            ("GET", false, true),
+            ("POST", false, false),
+            ("POST", true, false),
+        ] {
+            let request = ToolApprovalRequest::from_host_json(json!({
+                "tool_name": "fetch",
+                "arguments": {"url": "https://example.org/report", "method": method},
+                "policy_decision": {"context": {"http_methods": if stale { vec!["GET"] } else { vec![] }}}
+            })).unwrap();
+            let decision = policy.evaluate_request(&request);
+            assert_eq!(decision.is_allow(), expected_allow, "{decision:?}");
+            assert_eq!(decision.is_ask(), !expected_allow, "{decision:?}");
+        }
+    }
+
+    #[test]
+    fn literal_invocation_constraints_do_not_absorb_receipt_aliases() {
+        for (matcher, argument, receipt_key, original, changed) in [
+            ("method", "method", "http_methods", "GET", "POST"),
+            ("mcp_server", "mcp_server", "mcp_servers", "saved", "other"),
+            ("mcp_tool", "mcp_tool", "mcp_tools", "read", "write"),
+            ("env_mode", "env_mode", "env_modes", "inherit_clean", "none"),
+            ("agent", "agent", "agent", "saved", "other"),
+            ("persona", "persona", "persona", "saved", "other"),
+            ("mode", "mode", "mode", "saved", "other"),
+        ] {
+            let policy = ToolApprovalPolicy::from_host_json(json!({
+                "rules": [
+                    {"source": "mode", "ask": "invoke"},
+                    {"source": "user", "identity_match": "literal", "allow": {"tool": "invoke", (matcher): original}}
+                ]
+            })).unwrap();
+            for (value, expected_allow) in [(original, true), (changed, false)] {
+                let request = ToolApprovalRequest::from_host_json(json!({
+                    "tool_name": "invoke", "arguments": {(argument): value},
+                    "policy_decision": {"context": {(receipt_key): if ["agent", "persona", "mode"].contains(&receipt_key) { json!(original) } else { json!([original]) }}}
+                }))
+                .unwrap();
+                let decision = policy.evaluate_request(&request);
+                assert_eq!(
+                    decision.is_allow(),
+                    expected_allow,
+                    "{matcher}: {decision:?}"
+                );
+                assert_eq!(
+                    decision.is_ask(),
+                    !expected_allow,
+                    "{matcher}: {decision:?}"
+                );
+            }
+        }
+        let policy = ToolApprovalPolicy::from_host_json(json!({"rules": [
+            {"source": "mode", "ask": "fetch"},
+            {"source": "user", "identity_match": "literal", "allow": {"method": "GET"}}
+        ]}))
+        .unwrap();
+        let mixed = ToolApprovalRequest::from_host_json(json!({
+            "tool_name": "fetch", "arguments": {"method": "GET", "http_method": "POST"}
+        }))
+        .unwrap();
+        assert!(policy.evaluate_request(&mixed).is_ask());
+    }
+
+    #[test]
+    fn literal_mcp_names_are_captured_before_receipt_normalization() {
+        for tool_name in ["mcp.saved.read", "saved__read"] {
+            let policy = ToolApprovalPolicy::from_host_json(json!({"rules": [
+                {"source": "mode", "ask": tool_name},
+                {"source": "user", "identity_match": "literal", "allow": {"mcp_server": "saved", "mcp_tool": "read"}}
+            ]})).unwrap();
+            let request = ToolApprovalRequest::from_host_json(
+                json!({"tool_name": tool_name, "arguments": {}}),
+            )
+            .unwrap();
+            assert!(policy.evaluate_request(&request).is_allow());
+        }
+        for field in ["capability", "tool_kind", "side_effect"] {
+            let policy = ToolApprovalPolicy::from_host_json(json!({"rules": [
+                {"source": "mode", "ask": "unknown_invocation"},
+                {"source": "user", "identity_match": "literal", "allow": {(field): "saved"}}
+            ]}))
+            .unwrap();
+            let request = ToolApprovalRequest::from_host_json(json!({
+                "tool_name": "unknown_invocation", "arguments": {},
+                "policy_decision": {"context": {(field): "saved"}}
+            }))
+            .unwrap();
+            assert!(policy.evaluate_request(&request).is_ask(), "{field}");
+        }
     }
 }
