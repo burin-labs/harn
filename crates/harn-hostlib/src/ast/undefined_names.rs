@@ -151,12 +151,9 @@ fn clip(text: &str, max_bytes: usize) -> String {
     if max_bytes == 0 || text.len() <= max_bytes {
         return text.to_string();
     }
-    let bytes = text.as_bytes();
-    let mut end = max_bytes;
-    while end > 0 && (bytes[end] & 0xC0) == 0x80 {
-        end -= 1;
-    }
-    String::from_utf8_lossy(&bytes[..end]).into_owned()
+    text.get(..text.floor_char_boundary(max_bytes))
+        .unwrap_or_default()
+        .to_string()
 }
 
 /// Whether we ship a language profile for `language`.

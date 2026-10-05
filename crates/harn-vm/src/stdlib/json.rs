@@ -175,10 +175,7 @@ fn malformed_json_error(error: serde_json::Error) -> VmError {
     reason = "offset is snapped back to a char boundary; line_start follows a 1-byte '\\n'"
 )]
 fn byte_offset_location(text: &str, byte_offset: usize) -> (usize, usize) {
-    let mut offset = byte_offset.min(text.len());
-    while !text.is_char_boundary(offset) {
-        offset -= 1;
-    }
+    let offset = text.floor_char_boundary(byte_offset);
     let prefix = &text[..offset];
     let line = prefix.bytes().filter(|byte| *byte == b'\n').count() + 1;
     let line_start = prefix.rfind('\n').map_or(0, |index| index + 1);
