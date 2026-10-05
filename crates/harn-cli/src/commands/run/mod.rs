@@ -435,7 +435,8 @@ pub fn execute_explain_cost(path: &str) -> RunOutcome {
             };
         }
     };
-    for diag in &typecheck.diagnostics {
+    let reported = typecheck.diagnostics.iter();
+    for diag in reported.filter(|diag| diag.severity.reported_when_executing()) {
         let rendered = harn_parser::diagnostic::render_type_diagnostic(&source, path, diag);
         if matches!(diag.severity, DiagnosticSeverity::Error) {
             had_type_error = true;

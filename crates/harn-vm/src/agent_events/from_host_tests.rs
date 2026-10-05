@@ -2,6 +2,7 @@
 
 mod payload_key_controls;
 mod repaired_emitters;
+mod tool_call_intent;
 
 use super::*;
 use serde_json::json;

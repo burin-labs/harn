@@ -759,7 +759,7 @@ fn main(harness: Harness) {
   harness.stdio.println(harness.fs.read_text("/x"))
   harness.stdio.println(harness.fs.exists("/missing"))
   harness.stdio.println(harness.random.u64())
-  harness.stdio.println(harness.net.get("https://example.test"))
+  harness.stdio.println(harness.net.get("https://example.test").body)
   harness.stdio.println(sha256_hex(""))
   harness.stdio.println(len(harness.llm.catalog()) > 0)
 }

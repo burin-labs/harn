@@ -1910,7 +1910,7 @@ fn main(harness: Harness) {
     "state:customer-42", 250ms,
   )
   const slot = harness.runtime.sync_semaphore_acquire(
-    "connector:notion", 4, 1, 2s,
+    "connector:linear", 4, 1, 2s,
   )
   const gate = harness.runtime.sync_gate_acquire(
     "workflow-runner", 8, 5s,
@@ -5335,8 +5335,12 @@ wrappers pick up the same narrowing.
   is true for either success; `repair_tier` is `"local"` or `"llm"`
   when a repair produced the payload and `nil` otherwise. Transport
   failures skip both repair tiers.
-- `schema_parse<T>(value: unknown, schema: Schema<T>) -> Result<T, string>`
-- `schema_check<T>(value: unknown, schema: Schema<T>) -> Result<T, string>`
+- `schema_parse<T>(value: unknown, schema: Schema<T>) -> Result<T, SchemaError>`
+- `schema_check<T>(value: unknown, schema: Schema<T>) -> Result<T, SchemaError>`
+- `json_decode<T>(text: string, schema: Schema<T>) -> Result<T, SchemaError>`.
+  Parses and validates in one step; malformed JSON is an `Err`.
+  `SchemaError` is `{message: string, errors: list<string>, issues:
+  list<{path: string, message: string, code: string}>, value?: any}`.
 - `schema_expect<T>(value: unknown, schema: Schema<T>) -> T`
 - `schema_recover<T>(text: string, schema: Schema<T>, options?:
   {repair?: bool | dict, apply_defaults?: bool,
@@ -6041,7 +6045,7 @@ are not required to be present.
 | `empty` | `.empty` (property) | bool -- true if empty |
 | `contains(sub)` | string | bool |
 | `replace(old, new)` | string, string | string |
-| `split(sep)` | string | list of strings |
+| `split(sep)` | string | list of strings; `sep` is required |
 | `trim()` | (none) | string -- whitespace stripped |
 | `starts_with(prefix)` | string | bool |
 | `ends_with(suffix)` | string | bool |
@@ -7388,7 +7392,7 @@ name = "merge_captain"
 version = "0.1.0"
 description = "Owns pull request readiness, CI triage, merge approvals, and receipts."
 entry_workflow = "workflows/merge_captain.harn#run"
-tools = ["github", "ci", "linear", "notion", "slack"]
+tools = ["github", "ci", "linear", "slack"]
 capabilities = ["git.get_diff", "project.test_commands", "process.exec"]
 autonomy_tier = "act_with_approval"
 receipt_policy = "required"
@@ -7419,11 +7423,11 @@ leases, and `disable` records later events as dead-lettered.
 
 ```toml
 [dependencies]
-sdk = { version = "^1.2", registry_name = "@burin/notion-sdk", package = "notion-sdk-harn" }
+sdk = { version = "^1.2", registry_name = "@burin/linear-sdk", package = "linear-sdk-harn" }
 harn-openapi = { git = "https://github.com/burin-labs/harn-openapi", tag = "v1.2.3" }
-notion-sdk-harn = { git = "https://github.com/burin-labs/notion-sdk-harn", tag = "v1.2.3" }
-notion-connector-harn = { git = "https://github.com/burin-labs/notion-connector-harn", tag = "v1.2.3" }
-notion = { git = "https://github.com/burin-labs/notion-sdk-harn", tag = "v1.2.3", package = "notion-sdk-harn" }
+linear-sdk-harn = { git = "https://github.com/burin-labs/linear-sdk-harn", tag = "v1.2.3" }
+linear-connector-harn = { git = "https://github.com/burin-labs/linear-connector-harn", tag = "v1.2.3" }
+linear = { git = "https://github.com/burin-labs/linear-sdk-harn", tag = "v1.2.3", package = "linear-sdk-harn" }
 openapi = { git = "https://github.com/burin-labs/harn-openapi", branch = "main" }
 local-fixture = { path = "../fixture-lib" }
 ```
@@ -7431,7 +7435,7 @@ local-fixture = { path = "../fixture-lib" }
 `harn install` resolves `[dependencies]` into an immutable package generation
 under `.harn/package-generations/<generation>/packages/`, then atomically
 publishes `.harn/package-current.toml`. Imports like
-`import "notion-sdk-harn"` or `import "notion/providers"` resolve through one
+`import "linear-sdk-harn"` or `import "linear/providers"` resolve through one
 leased snapshot of that generation, never through a directory being mutated.
 Each generation contains its exact `harn.lock`, `generation.toml`, and
 `lease.lock`; readers hold a shared lease for their full operation, and
@@ -7465,7 +7469,7 @@ succeeds.
 Transitive package dependencies are resolved from installed package
 manifests and flattened into the published generation's `packages/`
 directory. For example, a connector package can depend on
-`notion-sdk-harn`, and that SDK can depend on `harn-openapi` helpers;
+`linear-sdk-harn`, and that SDK can depend on `harn-openapi` helpers;
 `harn install` records all reachable packages in `harn.lock` and
 materializes them from a clean cache. Git-installed packages cannot
 declare transitive `path` dependencies, because publishable package
@@ -7785,14 +7789,14 @@ filesystem path; relative manifest registry paths resolve from the
 manifest directory.
 
 Registry package names are either unscoped names such as `acme-lib` or
-scoped names such as `@burin/notion-sdk`. Segments must start with an
+scoped names such as `@burin/linear-sdk`. Segments must start with an
 ASCII alphanumeric character and may then contain ASCII alphanumerics,
 `-`, `_`, or `.`. First-party packages should use the `@burin/`
 namespace.
 
 Registry entries map discovery names to the existing git-backed package
 manager path; they do not introduce a second package install mechanism.
-For example, `harn add @burin/notion-sdk@1.2.3` reads the index entry,
+For example, `harn add @burin/linear-sdk@1.2.3` reads the index entry,
 writes the equivalent `[dependencies]` git table, updates `harn.lock`,
 and publishes the same immutable package generation that a direct GitHub
 install would use.
@@ -7801,8 +7805,8 @@ Manifests may also keep a registry dependency semantic:
 
 ```toml
 [dependencies]
-notion-sdk-harn = { version = "^1.2" }
-notion = { version = ">=1.2,<2.0", registry_name = "@burin/notion-sdk", package = "notion-sdk-harn" }
+linear-sdk-harn = { version = "^1.2" }
+linear = { version = ">=1.2,<2.0", registry_name = "@burin/linear-sdk", package = "linear-sdk-harn" }
 ```
 
 `harn install` records the selected exact registry version, resolved git tag
@@ -7826,24 +7830,24 @@ Registry index format:
 version = 2
 
 [[package]]
-name = "@burin/notion-sdk"
-description = "Notion SDK package for Harn connectors"
-repository = "https://github.com/burin-labs/notion-sdk-harn"
+name = "@burin/linear-sdk"
+description = "Linear SDK package for Harn connectors"
+repository = "https://github.com/burin-labs/linear-sdk-harn"
 license = "MIT OR Apache-2.0"
 harn = ">=0.7,<0.8"
 exports = ["client", "schema"]
 connector_contract = "v1"
-docs_url = "https://docs.harnlang.com/connectors/notion"
+docs_url = "https://docs.harnlang.com/connectors/linear"
 checksum = "sha256:..."
-provenance = "https://github.com/burin-labs/notion-sdk-harn/releases/tag/v1.2.3"
+provenance = "https://github.com/burin-labs/linear-sdk-harn/releases/tag/v1.2.3"
 
 [[package.version]]
 version = "1.2.3"
-git = "https://github.com/burin-labs/notion-sdk-harn"
+git = "https://github.com/burin-labs/linear-sdk-harn"
 tag = "v1.2.3"
 rev = "0123456789abcdef0123456789abcdef01234567"
-package = "notion-sdk-harn"
-provenance = "https://github.com/burin-labs/notion-sdk-harn/releases/tag/v1.2.3"
+package = "linear-sdk-harn"
+provenance = "https://github.com/burin-labs/linear-sdk-harn/releases/tag/v1.2.3"
 ```
 
 Package-level metadata includes the registry name, version list,

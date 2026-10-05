@@ -22,7 +22,8 @@ grep -Fq 'release_range_release_commits' "$tmp/resolve.sh" \
 
 repo="$tmp/repo"
 mkdir -p "$repo/scripts/lib" "$repo/.github"
-cp "$root/scripts/lib/release_version.sh" "$root/scripts/lib/release_candidate_run.sh" "$repo/scripts/lib/"
+cp "$root/scripts/lib/release_version.sh" "$root/scripts/lib/release_candidate_run.sh" \
+  "$root/scripts/lib/release_consumer_verdict.sh" "$repo/scripts/lib/"
 cp "$root/scripts/release_contract.env" "$root/scripts/release_runner_matrix.sh" "$repo/scripts/"
 cp "$root/scripts/release_contract.harn" "$root/scripts/path_visibility.harn" "$repo/scripts/"
 cp "$root/.github/release-runner-policy.json" "$repo/.github/"
@@ -104,11 +105,11 @@ run_resolver() {
       PATH="$tmp/bin:$PATH" GITHUB_REPOSITORY=burin-labs/harn \
       EVENT_NAME=push REF_TYPE=branch REF_NAME=main \
       GITHUB_SHA="$(git rev-parse HEAD)" PUSH_BEFORE='' MERGE_GROUP_BASE='' \
+      PR_HEAD_SHA="$(git rev-parse HEAD)" PR_BASE_SHA="$(git rev-parse HEAD^)" \
       GITHUB_OUTPUT="$tmp/$name.outputs" GITHUB_STEP_SUMMARY="$tmp/$name.summary" \
       INPUT_WARM_CACHE_ONLY=false INPUT_TARGETS='' INPUT_BENCHMARK_ONLY=false \
       INPUT_BENCHMARK_SOURCE_REF='' INPUT_BENCHMARK_SOURCE_SHA='' \
       INPUT_BENCHMARK_CARGO_BLOAT=false INPUT_RUNNER_PROFILE=policy \
-      HARN_RELEASE_ENABLE_BLACKSMITH_MACOS=false \
       RELEASE_BUILD_INPUTS_CHANGED=false "$@" \
       bash -eu "$tmp/resolve.sh" > "$tmp/$name.log" 2>&1
   )
@@ -153,6 +154,12 @@ resolve candidate
 [[ "$(output candidate should_build_binaries)" == true && "$(output candidate should_package_archives)" == true ]] \
   || fail "the candidate does not sign and package"
 [[ "$(output candidate version)" == 0.10.142 ]] || fail "candidate version is $(output candidate version)"
+[[ "$(output candidate rehearsal_source_sha)" == "$head_sha" ]] \
+  || fail "release candidate did not request an exact-source consumer rehearsal"
+resolve release_pull_request EVENT_NAME=pull_request REF_NAME=8861/merge
+[[ "$(output release_pull_request rehearsal_source_sha)" == "$head_sha" &&
+   "$(output release_pull_request should_build_binaries)" == false ]] \
+  || fail "release PR must rehearse its exact head without building archives"
 [[ "$(matrix_targets candidate)" == "aarch64-apple-darwin,aarch64-unknown-linux-gnu,x86_64-apple-darwin,x86_64-pc-windows-msvc,x86_64-unknown-linux-gnu" ]] \
   || fail "the candidate does not build all five targets: $(matrix_targets candidate)"
 

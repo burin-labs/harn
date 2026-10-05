@@ -31,6 +31,7 @@
 # Usage:
 #   scripts/ci/reuse_workspace_crates.sh restore
 #   scripts/ci/reuse_workspace_crates.sh record
+#   scripts/ci/reuse_workspace_crates.sh current
 set -euo pipefail
 
 # Keep in step with the rust-cache action's cache-directories, which saves
@@ -38,9 +39,11 @@ set -euo pipefail
 RECORD_DIR=".harn-workspace-source"
 # 2000-01-01T00:00:00Z, written as an epoch so no implementation reads a zone.
 BEFORE_ANY_BUILD="@946684800"
+# Projected from NATIVE_SOURCE_PATHS in scripts/ci_cache_policy/policy_core.harn.
+SOURCE_PATHS=(Cargo.lock Cargo.toml crates spec tree-sitter-harn)
 
 usage() {
-  echo "usage: $0 restore|record" >&2
+  echo "usage: $0 restore|record|current" >&2
   exit 2
 }
 
@@ -49,7 +52,30 @@ mode=$1
 cd "$(git rev-parse --show-toplevel)"
 record="$RECORD_DIR/commit"
 
+current_source() {
+  [[ -f "$record" ]] || return 1
+  local recorded head
+  recorded=$(cat "$record")
+  [[ "$recorded" =~ ^[0-9a-f]{40}$ ]] || return 1
+  head=$(git rev-parse --verify HEAD) || return 1
+  # These are the canonical native-source fingerprint roots. The owning cache
+  # policy checks this projection against NATIVE_SOURCE_FINGERPRINT_BODY.
+  if [[ "$recorded" != "$head" ]]; then
+    git cat-file -e "${recorded}^{tree}" 2>/dev/null \
+      || git fetch --quiet --no-tags --depth=1 origin "$recorded" 2>/dev/null \
+      || return 1
+    git diff --quiet "$recorded" HEAD -- "${SOURCE_PATHS[@]}" || return 1
+  fi
+  git diff --quiet HEAD -- \
+    && git diff --cached --quiet HEAD -- \
+    && [[ -z "$(git ls-files --others --exclude-standard -- "${SOURCE_PATHS[@]}")" ]]
+}
+
 case "$mode" in
+  current)
+    current_source
+    exit $?
+    ;;
   record)
     mkdir -p "$RECORD_DIR"
     git rev-parse --verify HEAD > "$record"
@@ -59,6 +85,17 @@ case "$mode" in
   restore) ;;
   *) usage ;;
 esac
+
+# An exact dependency key says nothing about which workspace source was built.
+# Capture this fact before restore consumes the record. An absent or invalid
+# record stays false, including on platforms that cannot back-date files.
+if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
+  if current_source; then
+    echo "source-current=true" >> "$GITHUB_OUTPUT"
+  else
+    echo "source-current=false" >> "$GITHUB_OUTPUT"
+  fi
+fi
 
 # Probe the capability, not the brand: GNU and uutils both accept these flags,
 # BSD touch does not.

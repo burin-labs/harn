@@ -184,6 +184,21 @@ async fn vm_call_llm_api_inner(
 ) -> Result<LlmResult, VmError> {
     let provider = &opts.provider;
 
+    let managed = crate::llm::managed_supply::is_managed_transport(provider);
+    let (capability_provider, capability_model) =
+        crate::llm::managed_supply::logical_route(provider, &opts.model)?;
+    if managed
+        && (crate::llm::providers::AcpProvider::is_configured_acp(provider)
+            || opts.api_mode == LlmApiMode::Responses
+            || should_use_responses_transport(&capability_provider, &capability_model, false)
+            || DialectContract::for_request(opts).stream_protocol() != StreamProtocol::OpenAiSse)
+    {
+        return Err(crate::llm::managed_supply::ManagedSupplyContractError::new(
+            "managed supply requires the OpenAI chat-completions transport",
+        )
+        .into());
+    }
+
     if crate::llm::providers::AcpProvider::is_configured_acp(provider) {
         return crate::llm::providers::AcpProvider::new(provider.clone())
             .chat_impl(opts, delta_tx)
@@ -199,8 +214,6 @@ async fn vm_call_llm_api_inner(
     // the real transport, so it is exempt (`mock` already resolves to the
     // anthropic dialect for Claude ids and so never trips the guard).
     if !crate::llm::fake::FakeLlmProvider::should_intercept(provider) {
-        let (capability_provider, capability_model) =
-            crate::llm::managed_supply::logical_route(provider, &opts.model)?;
         crate::llm::route::Route::resolve(&capability_provider, &capability_model, &opts.thinking)
             .map_err(|err| {
                 VmError::Thrown(VmValue::String(arcstr::ArcStr::from(err.into_message())))
@@ -218,12 +231,13 @@ async fn vm_call_llm_api_inner(
         return crate::llm::providers::OpenAiResponsesProvider::call(opts, delta_tx).await;
     }
 
-    if crate::llm::provider::is_provider_registered(provider) {
+    if !managed && crate::llm::provider::is_provider_registered(provider) {
         return dispatch_to_registered_provider(opts, delta_tx).await;
     }
 
-    // Fallback for unregistered providers: dispatch by wire dialect. A single
-    // capability lookup yields the typed dialect instead of two independent
+    // Managed routes and unregistered providers share one body/receipt funnel.
+    // Managed eligibility above restricts them to OpenAI chat completions.
+    // One capability lookup yields the typed dialect instead of two independent
     // predicate lookups that could disagree.
     //
     // Exhaustive on purpose. This used to be an `if is_ollama / else if
@@ -260,15 +274,16 @@ async fn dispatch_to_registered_provider(
     opts: &LlmRequestPayload,
     delta_tx: Option<DeltaSender>,
 ) -> Result<LlmResult, VmError> {
-    use crate::llm::provider::LlmProvider;
+    use crate::llm::provider::{LlmProvider, LlmProviderChat};
 
-    // Providers are zero-cost unit structs constructed inline to avoid
-    // RefCell-across-await conflicts on a shared registry.
+    // Construct providers inline to avoid RefCell-across-await conflicts on
+    // the registry. Their boxed chat interface keeps concrete provider futures
+    // off this shared dispatch frame, which nested agent calls re-enter.
     let provider = &opts.provider;
 
     let mock = crate::llm::providers::MockProvider;
     if mock.is_mock() && provider == mock.name() {
-        return mock.chat_impl(opts, delta_tx).await;
+        return mock.chat(opts, delta_tx).await;
     }
 
     if crate::llm::fake::FakeLlmProvider::should_intercept(provider) {
@@ -279,19 +294,19 @@ async fn dispatch_to_registered_provider(
 
     if provider == "bedrock" {
         return crate::llm::providers::BedrockProvider
-            .chat_impl(opts, delta_tx)
+            .chat(opts, delta_tx)
             .await;
     }
 
     if provider == "azure_openai" {
         return crate::llm::providers::AzureOpenAiProvider
-            .chat_impl(opts, delta_tx)
+            .chat(opts, delta_tx)
             .await;
     }
 
     if provider == "vertex" {
         return crate::llm::providers::VertexProvider
-            .chat_impl(opts, delta_tx)
+            .chat(opts, delta_tx)
             .await;
     }
 
@@ -299,22 +314,22 @@ async fn dispatch_to_registered_provider(
     match dialect.stream_protocol() {
         StreamProtocol::OllamaNdjson => {
             crate::llm::providers::OllamaProvider
-                .chat_impl(opts, delta_tx)
+                .chat(opts, delta_tx)
                 .await
         }
         StreamProtocol::GeminiJson | StreamProtocol::GeminiInteractionsSse => {
             crate::llm::providers::GeminiProvider
-                .chat_impl(opts, delta_tx)
+                .chat(opts, delta_tx)
                 .await
         }
         StreamProtocol::AnthropicSse => {
             crate::llm::providers::AnthropicProvider
-                .chat_impl(opts, delta_tx)
+                .chat(opts, delta_tx)
                 .await
         }
         StreamProtocol::OpenAiSse => {
             crate::llm::providers::OpenAiCompatibleProvider::new(provider.clone())
-                .chat_impl_with_dialect(opts, delta_tx, dialect)
+                .chat(opts, delta_tx)
                 .await
         }
     }
@@ -336,6 +351,11 @@ pub(crate) async fn vm_call_llm_api_with_body(
     dialect: DialectContract,
 ) -> Result<LlmResult, VmError> {
     dialect.validate_request(opts)?;
+    let managed_request = crate::llm::managed_supply::request_for(
+        &opts.provider,
+        &opts.model,
+        opts.inference_boundary,
+    )?;
     let started = Instant::now();
     // Absolute counterpart of `started`. `Instant` is monotonic and carries no
     // date, and settlement needs a date to pick a promotion or a time-of-day
@@ -388,6 +408,7 @@ pub(crate) async fn vm_call_llm_api_with_body(
         dialect,
         request_origin,
         &data_controls,
+        managed_request.as_ref(),
     )
     .await;
     // The receipt describes what Harn sent, so it must survive a provider
@@ -411,7 +432,7 @@ pub(crate) async fn vm_call_llm_api_with_body(
         }
     }
     let mut result = result?;
-    crate::llm::managed_supply::apply_terminal_receipt(&mut result, &opts.provider, &opts.model)?;
+    crate::llm::managed_supply::apply_terminal_receipt(&mut result, managed_request.as_ref())?;
     // Reserved-token tool-call delimiter remap (single boundary).
     //
     // For models that reserve `<tool_call>`/`</tool_call>` as special tokens
@@ -474,11 +495,11 @@ async fn vm_call_llm_api_with_body_inner(
     dialect: DialectContract,
     request_origin: tokio::time::Instant,
     data_controls: &crate::llm::api::data_controls::DataControlsPlan,
+    managed_request: Option<&crate::llm::managed_supply::ManagedSupplyRequest>,
 ) -> Result<LlmResult, VmError> {
     let stream_protocol = dialect.stream_protocol();
     let provider = &opts.provider;
     let model = &opts.model;
-    crate::llm::managed_supply::attach_request_extension(&mut body, provider, model)?;
     let raw_capture_context = crate::llm::agent_observe::current_raw_provider_capture_context();
     // `stream` selects the provider transport. A delta receiver only decides
     // whether a caller observes incremental text; probe calls intentionally
@@ -550,6 +571,9 @@ async fn vm_call_llm_api_with_body_inner(
     // must survive the caller's `provider_overrides` escape hatch, or the
     // receipt would claim a control the wire does not carry.
     data_controls.write_body(&mut body);
+    // Keep captured authority after every provider/body projection, including
+    // finite-field adapters and optional data-control writes.
+    crate::llm::managed_supply::attach_request_extension(&mut body, managed_request)?;
 
     let client = if use_stream_transport {
         crate::llm::streaming_client_for_base_url(&resolved.base_url)

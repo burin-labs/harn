@@ -9,6 +9,108 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.158
+
+### Breaking
+
+- `agent_loop` publishes actor text and calls `on_delta` only after completion
+  admission, once with the accepted reply. Provisional provider deltas remain
+  private; typed tool events still provide live progress. Direct LLM streaming
+  keeps its existing behavior.
+
+  Migration: Treat `agent_loop`'s `on_delta` callback as delivery of one accepted
+  answer, rather than incremental provider tokens. Use typed tool events for live
+  work progress. Consumers that require raw token streaming should use the direct
+  LLM streaming interface.
+- `schema_parse` and `schema_check` are generic: with `schema_of(T)` they return `Result<T, SchemaError>`
+  instead of `any`, as the language spec already stated. Code that read fields the type does not declare now
+  fails type checking.
+- `harness.process.exec`, `shell`, `exec_at`, and `shell_at` are typed as the closed record they already
+  returned, the one `harness.process.run` declares (`stdout`, `stderr`, `combined`, `exit_code`, `success`,
+  string `status`, ...). Buffered `harness.net` requests return
+  `{status, headers, body, final_url, ok}`, and `harness.net.download` returns
+  `{status, headers, bytes_written, ok}`. None of these fields is nil, so `?.` on them is reported as
+  unnecessary (`HARN-LNT-051`). They are no longer untyped boundary values; only the response `body` text is.
+- `harn_parser::DiagnosticSeverity` gains an `Info` variant for advisory type-checker lints.
+
+  Migration: decode a value whose fields you read with the type that declares them:
+
+  ```harn
+  const pr = schema_parse(raw, schema_of(Pr))?           // Pr, not any; read only declared fields
+  const child = harness.process.exec("git", "status")
+  harness.stdio.println(child.stdout)                    // was child?.stdout ?? ""
+  ```
+
+  Rust embedders matching `DiagnosticSeverity` exhaustively add an `Info` arm; treat it like a warning that
+  never fails a strict run.
+
+### Added
+
+- `json_decode(text, schema_of(T))` parses JSON and validates it against `T` in one step, returning
+  `Result<T, SchemaError>`. Malformed JSON is an `Err` with the same record as a shape mismatch, so command
+  output and response bodies decode with one `?`.
+- `HARN-LNT-080` (`untyped-optional-chain`) reports a `?.` chain over an untyped value (`any`, `unknown`, an
+  open `dict`, or nothing inferred) and points at decoding once with `schema_parse` or `json_decode`, or at
+  annotating the erased parameter. It is advisory (`info`) and never fails `--strict`.
+- Type-checker lints can report at `info` severity, shown in `harn check`, `harn lint`, and the editor
+  without failing a strict run.
+- The `harn-language` skill, the quick reference, and the error-handling guide gain a "Decode at the
+  boundary" section.
+- **Bump PR labels.** The reusable `bump-harn` workflow accepts a `labels`
+  input: comma-separated labels added to the bump PR each time it is created or
+  refreshed. The run fails if GitHub does not report every label applied.
+
+### Fixed
+
+- Agent prose stays provisional until tool and completion admission finishes.
+  Completion checks use the actual remaining deadline after reserving terminal
+  bookkeeping time, rather than requiring their entire configured maximum to fit.
+  Tool parameters with leading underscores, including the natural-language
+  binder's intent field, derive valid CLI flags while preserving their JSON keys.
+- Provider calls wait within their deadline for a network circuit's half-open
+  probe. A child agent's temporary transport failures no longer end a recoverable
+  parent turn before the provider can be reached again. Recovery wait time is
+  deducted from the transport budget; unproductive-response quarantine still
+  fails over immediately.
+- `command_wait_for_output` now reports an exited command's real outcome. A
+  background command that exited 0 no longer reads `result.success: false` and
+  an empty `result.combined` carried over from the handle returned at spawn.
+- OpenAI native `tool_search` now sends the documented `{"type": "tool_search"}` meta-tool and no `namespace`
+  field on functions. The previous `mode` and `namespaces` fields made every OpenAI request with a deferred tool
+  fail with HTTP 400.
+- Native tool search no longer adds its meta-tool to a request with nothing deferred, so a tool-free turn such as
+  a terminal wrap-up stays tool-free.
+- **Relocatable bytecode keys ignore how the tree is spelled (#9323).** A
+  source tree with an import that resolves nowhere keyed its precompiled
+  artifacts by the caller's spelling of the importing file, so a tree reached
+  through a symlink, a relative path, or a non-canonical temp directory missed
+  its prepared bytecode, and an unresolved `../` import inside a package leaked
+  the install generation back into the key. Unresolved imports are now keyed
+  by their canonical anchor. The relocatable hash domain moves to v3, so
+  existing relocatable artifacts rebuild once.
+- CI latency checks use the shared typed baseline contract to reject missing or
+  altered job measurements while preserving the existing time budget.
+- OpenRouter OpenAI routes no longer claim native `tool_search`, which OpenRouter rejects with HTTP 400; `auto`
+  falls back to the client search there.
+- **Release opener outcomes are observable (#9344).** The official workflow
+  publishes an exact-run outcome receipt so release controllers can distinguish
+  a measured no-op from missing evidence without parsing logs.
+- The `untyped-optional-chain` lint (HARN-LNT-080) also reports a `?.` chain through a declared field typed `any`,
+  and treats an undeclared key on an open record as untyped when any of its row tails is untyped.
+- An accepted ACP Stop keeps running and queued prompts cancelled when the next prompt is submitted immediately.
+  Each prompt carries its own cancellation scope from transport admission through execution, so a later prompt
+  cannot revive stopped tools or assistant output.
+- The `shutdown_releases_child_during_mcp_initialization` test no longer reads an empty PID file:
+  its fake MCP child renames the PID file into place after writing it.
+- `harn run`, `bench`, `pack`, `precompile`, and the playground no longer print advisory (`info`) type-checker
+  findings such as `HARN-LNT-080`; they stay in `harn check`, `harn lint`, and the editor.
+- **Same-App repairs survive a bump refresh.** The bump driver treated any
+  commit signed by GitHub for its own App as its refresh output, so a repair
+  created through the same App credentials was discarded on the next refresh.
+  A commit is now refresh output only when it also carries the exact
+  `chore: bump Harn runtime to vX.Y.Z` headline, and a refresh refuses to
+  publish under any other headline.
+
 ## v0.10.157
 
 ### Breaking

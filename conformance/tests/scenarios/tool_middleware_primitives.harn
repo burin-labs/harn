@@ -100,8 +100,8 @@ pipeline default(harness: Harness) {
   harness.stdio.println(contains(edit_entry.inputSchema.required, "reason"))
   // (5) Optional injected params must remain optional in both the full
   // JSON-schema shape and the bare shorthand shape. Provider-facing schema
-  // projection reads the param fragment's `required` bit, so the injection
-  // helper must reflect opts.required there as well as in object.required.
+  // projection reads the shorthand required bit; full JSON Schema carries
+  // required names only in the containing object's required array.
   const optional_full = tools_use_middleware(
     tools2,
     { entry -> tool_inject_param(entry, "note", {type: "string"}, {required: false}) },
@@ -109,7 +109,9 @@ pipeline default(harness: Harness) {
   const optional_full_entry = optional_full.tools[0]
   harness.stdio.println(contains(optional_full_entry.inputSchema.properties.keys(), "note"))
   harness.stdio.println(contains(optional_full_entry.inputSchema.required, "note"))
-  harness.stdio.println(optional_full_entry.inputSchema.properties.note.required)
+  harness.stdio.println(
+    contains(optional_full_entry.inputSchema.properties.note.keys(), "required"),
+  )
   let tools3 = tool_registry()
   tools3 = tool_define(
     tools3,

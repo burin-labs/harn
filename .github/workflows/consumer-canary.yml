@@ -4,19 +4,14 @@ name: Consumer canary
 # change that breaks the consumer shows here instead of days later in the
 # consumer's own update. `scripts/ci/consumer_canary.sh` owns the procedure.
 #
-# Report-only, on a 4-hour schedule and on demand. It is not part of any pull
-# request, merge-group or main-push run: the consumer's rehearsal takes 70 to
-# 90 minutes, a merge group lands (and cancels a still-waiting canary) as soon
-# as `CI status` passes, and a rehearsal per main commit costs more runner time
-# than a report-only signal is worth. A scheduled run whose main commit already
+# Scheduled on main and reusable by release candidates. Ordinary changes do
+# not dispatch a release rehearsal. A scheduled run whose main commit already
 # has a settled verdict is skipped, and the decide job logs the skip by name
 # with both commits.
 #
-# Graduation to required: move it into the merge queue and `CI status` only
-# after the consumer has passed at least 5 consecutive rehearsals at unreleased
-# revisions. At up to 6 settled verdicts a day, while main keeps moving, that
-# takes about a day of green rehearsals. Until then a consumer-side break
-# would block every merge.
+# Release callers provide the exact candidate revision. A failed consumer job
+# fails this workflow, including scheduled runs; a settled verdict is evidence
+# of measurement, not evidence of success.
 #
 # A `Pairs-with: consumer#N` trailer in main's head commit message rehearses
 # that consumer pull request's branch instead of the default branch.
@@ -33,11 +28,23 @@ on:
   schedule:
     - cron: "53 */4 * * *"
   workflow_dispatch:
+  workflow_call:
+    inputs:
+      source_revision:
+        required: true
+        type: string
+    secrets:
+      RELEASE_APP_CLIENT_ID:
+        required: true
+      RELEASE_APP_PRIVATE_KEY:
+        required: true
+      CONSUMER_CANARY_REPOSITORY:
+        required: true
 
 permissions: {}
 
 concurrency:
-  group: consumer-canary
+  group: consumer-canary-${{ inputs.source_revision || 'scheduled-main' }}
   cancel-in-progress: false
 
 jobs:
@@ -53,13 +60,14 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ inputs.source_revision || github.sha }}
           persist-credentials: false
       - name: Compare main with the last settled verdict
         id: decide
         env:
           GH_TOKEN: ${{ github.token }}
           EVENT_NAME: ${{ github.event_name }}
-          SOURCE_REVISION: ${{ github.sha }}
+          SOURCE_REVISION: ${{ inputs.source_revision || github.sha }}
           CURRENT_RUN_ID: ${{ github.run_id }}
         run: bash scripts/ci/consumer_canary.sh --decide
 
@@ -67,8 +75,6 @@ jobs:
     name: Consumer canary
     needs: decide
     if: needs.decide.outputs.run == 'true'
-    # Report-only: a red verdict shows on this job without failing the run.
-    continue-on-error: true
     runs-on: ubuntu-24.04
     # Ten minutes above the canary's 120-minute verdict deadline, which is
     # sized to the consumer's observed 69- to 90-minute rehearsal.
@@ -80,6 +86,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ inputs.source_revision || github.sha }}
           persist-credentials: false
       - name: Mint the consumer dispatch credential
         id: consumer-token
@@ -98,7 +105,7 @@ jobs:
           CANARY_OWNER: ${{ github.repository_owner }}
           CANARY_NAME: ${{ secrets.CONSUMER_CANARY_REPOSITORY }}
           CANARY_WORKFLOW: ${{ vars.CONSUMER_CANARY_WORKFLOW }}
-          SOURCE_REVISION: ${{ github.sha }}
+          SOURCE_REVISION: ${{ inputs.source_revision || github.sha }}
         run: |
           CANARY_REPOSITORY="$CANARY_OWNER/$CANARY_NAME" \
             WORKSPACE_VERSION="$(sed -n '/^\[workspace.package\]/,/^\[/s/^version = "\(.*\)"/\1/p' Cargo.toml)" \
@@ -120,5 +127,5 @@ jobs:
       - name: Record the settled verdict
         env:
           VERDICT: ${{ needs.consumers.outputs.verdict }}
-          SOURCE_REVISION: ${{ github.sha }}
+          SOURCE_REVISION: ${{ inputs.source_revision || github.sha }}
         run: echo "CONSUMER_CANARY settled verdict=$VERDICT main=$SOURCE_REVISION"

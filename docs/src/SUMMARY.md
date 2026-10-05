@@ -68,21 +68,6 @@
 - [Use Harn from ACP editor hosts](./acp-editor-hosts.md)
 - [Run a portable reducer in a browser](./portable-kernel-browser.md)
 
-## Migrations
-
-- [Portable kernel artifacts](./migrations/portable-kernel-v1.md)
-- [Agent plane cutover](./migrations/agent-plane-cutover.md)
-
-- [0.6.x → 0.7.0](./migrations/v0.7.md)
-- [Migrating to 0.10](./migrations/v0.10.md)
-- [`const`/`let` keyword scheme](./migrations/const-let.md)
-- [Pure collection method names](./migrations/pure-collection-methods.md)
-- [Prompt templates: v2](./migrations/template-engine-v2.md)
-- [Package-root prompt assets](./migrations/package-root-prompt-assets.md)
-- [Schema-as-type](./migrations/schema-as-type.md)
-- [Rust connectors → Harn packages](./migrations/rust-connectors-to-harn-packages.md)
-- [harn-hostlib host contracts](./migrations/harn-hostlib-host-contracts.md)
-
 # Reference
 
 ## Language
@@ -297,7 +282,6 @@
 - [Cron connector](./connectors/cron.md)
 - [GitHub app connector](./connectors/github.md)
 - [Linear connector](./connectors/linear.md)
-- [Notion connector](./connectors/notion.md)
 - [Slack events connector](./connectors/slack-events.md)
 - [Generic webhook connector](./connectors/webhook.md)
 - [A2A push connector](./connectors/a2a-push.md)
@@ -398,6 +382,7 @@
 
 - [Maintainer release workflow](./maintainer-release.md)
 - [Release assets manifest](./dev/release-assets-manifest.md)
+- [Release opener outcome](./dev/release-opener-receipt.md)
 - [Release runner policy](./dev/release-runner-policy.md)
 - [Release binary-size policy](./dev/release-binary-size-policy.md)
 - [Reusable bump-harn workflow](./dev/reusable-bump-harn-runtime.md)

@@ -18,11 +18,11 @@ Stages are part of the persona manifest. They can live in `harn.toml`:
 ```toml
 [[personas]]
 name = "merge_captain"
-tools = ["github", "ci", "linear", "notion", "slack", "mcp"]
+tools = ["github", "ci", "linear", "slack", "mcp"]
 # ...
 stages = [
   { name = "classify", allowed_tools = ["github", "ci"], side_effect_level = "read_only" },
-  { name = "plan_repair", allowed_tools = ["github", "ci", "linear", "notion"], side_effect_level = "read_only" },
+  { name = "plan_repair", allowed_tools = ["github", "ci", "linear"], side_effect_level = "read_only" },
   { name = "apply_repair", allowed_tools = ["github", "ci"], side_effect_level = "process_exec", on_exit = { on_complete = "classify", on_failure = "plan_repair" } },
 ]
 ```

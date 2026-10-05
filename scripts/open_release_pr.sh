@@ -40,6 +40,10 @@ source "$script_root/scripts/lib/release_auto_merge.sh"
 
 mode=open
 existing_only=0
+receipt_path="${HARN_EXT_RELEASE_OPENER_RECEIPT:-}"
+if [[ -n "$receipt_path" ]]; then
+  rm -f -- "$receipt_path"
+fi
 for arg in "$@"; do
   case "$arg" in
     --plan) mode=plan ;;
@@ -51,7 +55,57 @@ for arg in "$@"; do
   esac
 done
 
+# An outcome is an observation of this invocation, never permission to publish.
+# The workflow exports it so consumers need not infer decisions from notices.
+receipt_action=pending
+receipt_version=""
+receipt_pr_url=""
+receipt_release_source=""
+receipt_source="$(git rev-parse HEAD)"
+if [[ -n "$receipt_path" ]]; then
+  if [[ -z "${GITHUB_REPOSITORY:-}" ]] \
+    || ! [[ "${GITHUB_RUN_ID:-}" =~ ^[1-9][0-9]*$ ]] \
+    || ! [[ "${GITHUB_RUN_ATTEMPT:-}" =~ ^[1-9][0-9]*$ ]]; then
+    echo "error: an opener receipt requires repository, run ID and attempt" >&2
+    exit 1
+  fi
+fi
+
+write_outcome() {
+  local exit_code=$? temporary
+  trap - EXIT
+  if [[ -n "${body_file:-}" ]]; then
+    rm -f -- "$body_file"
+  fi
+  if [[ -n "$receipt_path" ]]; then
+    mkdir -p "$(dirname "$receipt_path")"
+    temporary="$(mktemp "${receipt_path}.XXXXXX")"
+    jq -n --arg repository "$GITHUB_REPOSITORY" \
+      --argjson run_id "$GITHUB_RUN_ID" --argjson run_attempt "$GITHUB_RUN_ATTEMPT" \
+      --arg source_sha "$receipt_source" --arg phase "$mode" \
+      --arg decision "$receipt_action" --arg version "$receipt_version" \
+      --arg pr_url "$receipt_pr_url" --arg release_source_sha "$receipt_release_source" \
+      --argjson exit_code "$exit_code" \
+      '{schema:"harn.release-opener.v1", repository:$repository,
+        workflow:"bump-release.yml", run_id:$run_id, run_attempt:$run_attempt,
+        source_sha:$source_sha, phase:$phase, decision:$decision,
+        version:$version, pr_url:$pr_url, release_source_sha:$release_source_sha,
+        exit_code:$exit_code}' > "$temporary"
+    mv -- "$temporary" "$receipt_path"
+  fi
+  exit "$exit_code"
+}
+trap write_outcome EXIT
+
 emit() {
+  local field
+  for field in "$@"; do
+    case "$field" in
+      action=*) receipt_action="${field#action=}" ;;
+      version=*) receipt_version="${field#version=}" ;;
+      pr_url=*) receipt_pr_url="${field#pr_url=}" ;;
+    esac
+  done
   if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
     printf '%s\n' "$@" >> "$GITHUB_OUTPUT"
   fi
@@ -65,6 +119,7 @@ fi
 current="$(release_workspace_version < Cargo.toml)"
 development_suffix="-$HARN_RELEASE_DEVELOPMENT_PRERELEASE"
 version="${current%"$development_suffix"}"
+receipt_version="$version"
 if [[ "$version" == "$current" ]] \
   || ! [[ "$version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
   echo "::notice title=Nothing to release::main declares ${current:-no workspace version}, not an X.Y.Z$development_suffix development version. The next release starts once the development bump lands."
@@ -114,6 +169,7 @@ stop_for_existing_attempt() {
     exit 1
   fi
   echo "::notice title=Release pull request already open::$title is frozen at $release_oid: $existing_url. Later fragments wait for the next release."
+  receipt_release_source="$release_oid"
   emit action=existing "version=$version" "pr_url=$existing_url"
   exit 0
 }
@@ -187,9 +243,7 @@ fi
 # The pull request may have merged, closed, or opened while this run prepared.
 read_release_pr
 if [[ -n "$existing_url" ]]; then
-  echo "::notice title=Release pull request already open::$title is open: $existing_url"
-  emit action=existing "version=$version" "pr_url=$existing_url"
-  exit 0
+  stop_for_existing_attempt
 fi
 
 # Publish one signed release commit and freeze its identity.
@@ -199,6 +253,7 @@ publication="$(HARN_BRANCH_COMMIT_TOKEN="$GH_TOKEN" \
   HARN_BRANCH_COMMIT_HEADLINE="$title" \
   "$harn_bin" run --no-sandbox "$script_root/scripts/bump-driver/publish_branch_commit.harn")"
 published_oid="$(jq -er '.oid | select(type == "string" and test("^[0-9a-f]{40}$"))' <<< "$publication")"
+receipt_release_source="$published_oid"
 published_record="$(git ls-remote --refs origin "refs/heads/$branch")"
 if [[ "$published_record" != "$published_oid"$'\t'"refs/heads/$branch" ]]; then
   echo "error: published branch read-back did not match the signed publisher receipt" >&2
@@ -219,7 +274,6 @@ if [[ "$attempt_record" != "$published_oid"$'\t'"$attempt_ref" ]]; then
 fi
 
 body_file="$(mktemp)"
-trap 'rm -f "$body_file"' EXIT
 cat > "$body_file" <<EOF
 Moves the workspace from $current to $version and folds ${#fragments[@]} changelog fragment(s) into the \`## v$version\` section of CHANGELOG.md, deleting them.
 

@@ -98,17 +98,10 @@ pub const RELEASE_BUILD_CANCEL_POLICY = "$"
 
 pub const RELEASE_BUILD_IF = "needs.setup.outputs.should_build_binaries == 'true'"
 
-pub const RELEASE_AOT_PRIMARY_OUTPUT = "needs.setup.outputs.cli_aot_primary_runner"
-
 pub const RELEASE_AOT_STANDARD_OUTPUT = "needs.setup.outputs.cli_aot_standard_runner"
-
-pub const RELEASE_AOT_SETUP_PRIMARY = "$"
-  + "{{ steps.resolve.outputs.cli_aot_primary_runner }}"
 
 pub const RELEASE_AOT_SETUP_STANDARD = "$"
   + "{{ steps.resolve.outputs.cli_aot_standard_runner }}"
-
-pub const RELEASE_AOT_FALLBACK_SWITCH = "vars.HARN_RELEASE_ENABLE_BLACKSMITH_LINUX == 'true'"
 
 pub const RELEASE_CACHE_BUDGET_IF =
   "always() && needs.setup.outputs.build_mode == 'warm' && needs.setup.outputs.should_build_binaries == 'true' && needs.build.result != 'cancelled'"
@@ -174,32 +167,15 @@ pub const RUNNER_TIER_ENV = "HARN_RUNNER_TIER"
 pub const HOSTED_LINUX_RUNNER = "ubuntu-24.04"
 
 /**
- * The producer's hosted rung, which is deliberately not the shared one.
+ * The producers' rung after the owned pool: GitHub's free standard runner.
  *
- * The persistent compile lane is the only job whose work is bounded by the
- * box rather than by waiting, so it is the only one worth paying a larger
- * vendor runner for. Every other hosted Linux job stays on the shared
- * default, which is what keeps a change here from quietly moving the whole
- * workflow onto paid capacity.
+ * This repository is public, and public-repository CI runs only on free
+ * standard runners or owned machines (harn#9370): no larger GitHub runner,
+ * Ubicloud or Blacksmith, even though the producers build slower on 4 vCPU.
  */
-pub const PRODUCER_HOSTED_LINUX_RUNNER = "ubuntu-8core"
-
-/**
- * The producers' paid rung before GitHub's: Ubicloud's 8 vCPU runner, listed
- * at $0.008/min on its premium tier against $0.022/min for `ubuntu-8core`.
- * Ubicloud registers each runner just in time as a self-hosted runner, so it
- * is its own tier for the same reason Blacksmith is.
- */
-pub const PRODUCER_VENDOR_LINUX_RUNNER = "ubicloud-standard-8"
-
-/** `github` restores GitHub's 8-core runner as the producers' paid rung. */
-pub const PAID_LINUX_PROVIDER_VAR = "HARN_CI_PAID_LINUX_PROVIDER"
-
-pub const UBICLOUD_RUNNER_TIER = "ubicloud"
+pub const PRODUCER_HOSTED_LINUX_RUNNER = "ubuntu-24.04"
 
 pub const HOSTED_RUNNER_TIER = "github-hosted"
-
-pub const BLACKSMITH_RUNNER_TIER = "blacksmith"
 
 /**
  * The org's own Linux pool. Named as its own tier rather than folded into the
@@ -263,14 +239,10 @@ pub const MERGE_CAPACITY_DECISION_STEP = "merge-decision"
 
 pub const MERGE_CAPACITY_ROUTE_OUTPUT = "merge_route"
 
-pub const BLACKSMITH_ENABLE_VAR = "HARN_CI_ENABLE_BLACKSMITH_LINUX"
-
 /** The step that names where the slow E2E suite is about to land. */
 pub const E2E_CAPACITY_DECISION_STEP = "Decide where the slow E2E suite lands"
 
 /** The input that carries the evacuation switch into that decision. */
-pub const E2E_EVACUATION_INPUT = "FLEET_EVACUATION"
-
 pub const RUST_CACHE_ACTION = "./.github/actions/rust-cache"
 
 // Authorized ci.yml cache writers must grant actions: write. The workflow
@@ -523,9 +495,10 @@ pub const CACHE_PRUNE_INPUT = "prune-superseded-release-generations"
 // deps-only entry and save.ts exits without replacing it (#5003).
 pub const WORKSPACE_CACHE_INPUT = "cache-workspace-crates"
 
-// v2: entries also carry the workspace source record directory, which changes
-// the cached path set and therefore every entry's version.
-pub const WORKSPACE_CACHE_GENERATION = "workspace-crates-v2"
+// v3: retained entries add a synthetic source manifest to Swatinem's lock hash.
+// Its restore prefix remains OS-, architecture- and toolchain-specific, so a
+// source miss can reuse the prior compatible generation without crossing them.
+pub const WORKSPACE_CACHE_GENERATION = "workspace-crates-v3"
 
 // Saved beside the target directory by every workspace-crate cache entry; see
 // scripts/ci/reuse_workspace_crates.sh for why it cannot live in the target.
@@ -618,13 +591,7 @@ pub const MACOS_WARM_PULL_REQUEST_GUARD = "$"
 pub const WINDOWS_WARM_RELEASE_CERTIFY_GUARD = "$"
   + "{{ startsWith(github.ref_name, 'release-certify/') }}"
 
-pub const WINDOWS_BLACKSMITH_ENABLE_VAR = "HARN_CI_ENABLE_BLACKSMITH_WINDOWS"
-
 pub const HOSTED_WINDOWS_RUNNER = "windows-latest"
-
-// The nightly compiles and runs the WHOLE workspace, so it is the one Windows
-// lane where core count buys real wall time.
-pub const BLACKSMITH_16CPU_WINDOWS_RUNNER = "blacksmith-16vcpu-windows-2025"
 
 pub const WINDOWS_STORAGE_REPORT_MARKER = "windows_storage_budget.sh report"
 
@@ -664,8 +631,12 @@ pub const WINDOWS_NIGHTLY_RELEASE_ROUTE_IF = "needs.${WINDOWS_ROUTE_JOB}.outputs
 
 pub const MACOS_CACHE_KEY = "workspace-macos"
 
+pub const NATIVE_SOURCE_PATHS = ["Cargo.lock", "Cargo.toml", "crates", "spec", "tree-sitter-harn"]
+
 pub const NATIVE_SOURCE_FINGERPRINT_BODY =
   "hashFiles('Cargo.lock', 'Cargo.toml', 'crates/**', 'spec/**', 'tree-sitter-harn/**')"
+
+pub const WORKSPACE_REUSE_SCRIPT = "scripts/ci/reuse_workspace_crates.sh"
 
 pub const NATIVE_CACHE_INPUTS = [
   "CARGO_INCREMENTAL",
@@ -972,10 +943,6 @@ pub fn release_warm_cache_concurrency_errors(workflow: dict) -> list<string> {
 pub fn release_aot_runner_errors(workflow: dict) -> list<string> {
   let errors: list<string> = []
   const setup_outputs = workflow?.jobs?.setup?.outputs ?? {}
-  if setup_outputs?.cli_aot_primary_runner != RELEASE_AOT_SETUP_PRIMARY {
-    errors = errors
-      + ["${RELEASE_BINARY_WORKFLOW}:setup must project the policy-selected CLI AOT primary runner"]
-  }
   if setup_outputs?.cli_aot_standard_runner != RELEASE_AOT_SETUP_STANDARD {
     errors = errors
       + [
@@ -983,15 +950,11 @@ pub fn release_aot_runner_errors(workflow: dict) -> list<string> {
       ]
   }
   const runner = trim(workflow?.jobs?.prepare_cli_aot?.["runs-on"] ?? "")
-  for required in [
-    RELEASE_AOT_PRIMARY_OUTPUT,
-    RELEASE_AOT_STANDARD_OUTPUT,
-    RELEASE_AOT_FALLBACK_SWITCH,
-  ] {
-    if !contains(runner, required) {
-      errors = errors
-        + ["${RELEASE_BINARY_WORKFLOW}:prepare_cli_aot runner selection must include ${required}"]
-    }
+  if runner != "$" + "{{ ${RELEASE_AOT_STANDARD_OUTPUT} }}" {
+    errors = errors
+      + [
+        "${RELEASE_BINARY_WORKFLOW}:prepare_cli_aot must use only the free standard runner ${RELEASE_AOT_STANDARD_OUTPUT}",
+      ]
   }
   return errors
 }
@@ -1154,36 +1117,46 @@ pub fn cache_target_input_errors(action: dict, step: dict) -> list<string> {
     || trim(step?.with?.["cache-targets"] ?? "")
       != expected_cache_targets
     || trim(step?.with?.["cache-directories"] ?? "")
-      != expected_cache_directories {
+      != expected_cache_directories
+    || trim(step?.with?.workspaces ?? "")
+      != "$" + "{{ steps.cache-paths.outputs.workspaces }}" {
     return ["${ACTION_PATH} must cache an explicit Cargo target directory directly"]
   }
   return []
 }
 
-pub fn cache_action_errors(policy: CiCachePolicy, action: dict) -> list<string> {
+/** Keep source-record comparison on the same roots that define the cache key. */
+pub fn native_source_projection_errors(script: string) -> list<string> {
+  const paths = join(NATIVE_SOURCE_PATHS, " ")
+  if !contains(script, "SOURCE_PATHS=(${paths})")
+    || !contains(script, "git diff --quiet \"$recorded\" HEAD -- \"$" + "{SOURCE_PATHS[@]}\"")
+    || !contains(script, "git ls-files --others --exclude-standard -- \"$" + "{SOURCE_PATHS[@]}\"") {
+    return ["${WORKSPACE_REUSE_SCRIPT} must compare the canonical native source fingerprint roots"]
+  }
+  return []
+}
+
+fn workspace_cache_generation_errors(action: dict, steps: list) -> list<string> {
   let errors: list<string> = []
-  const steps = action?.runs?.steps ?? []
-  const upstream = steps.filter({ step -> step_uses(step).starts_with(UPSTREAM_CACHE_PREFIX) })
-    .to_list()
   const broad_restore = steps.filter(
     { step -> step_uses(step).starts_with(UPSTREAM_CACHE_RESTORE_PREFIX) },
   )
     .to_list()
-  if len(upstream) != 1 {
-    return ["${ACTION_PATH} must contain exactly one pinned upstream Rust cache step"]
-  }
+  const identities = steps.filter({ step -> trim(step?.id ?? "") == "cache-paths" }).to_list()
   if len(broad_restore) != 1 {
     errors = errors
       + ["${ACTION_PATH} must contain one pinned restore-only broad Rust cache fallback step"]
   } else {
     const restore_if = trim(broad_restore[0]?.if ?? "")
-    if !contains(restore_if, "inputs.broad-restore-prefix != ''") {
-      errors = errors + ["${ACTION_PATH} broad fallback must be opt-in per caller"]
+    if restore_if
+      != "steps.cache-paths.outputs.restore-prefix != '' && steps.cache.outputs.cache-hit != 'true'" {
+      errors = errors
+        + ["${ACTION_PATH} broad fallback must run only after the precise source generation misses"]
     }
     const restore_keys = trim(broad_restore[0]?.with?.["restore-keys"] ?? "")
     const restore_key = trim(broad_restore[0]?.with?.key ?? "")
-    if !contains(restore_keys, "inputs.broad-restore-prefix")
-      || !contains(restore_key, "inputs.broad-restore-prefix")
+    if !contains(restore_keys, "steps.cache-paths.outputs.restore-prefix")
+      || !contains(restore_key, "steps.cache-paths.outputs.restore-prefix")
       || !contains(restore_key, "github.sha") {
       errors = errors
         + ["${ACTION_PATH} broad fallback must restore by prefix without becoming a writer"]
@@ -1192,18 +1165,100 @@ pub fn cache_action_errors(policy: CiCachePolicy, action: dict) -> list<string> 
       errors = errors + ["${ACTION_PATH} broad fallback must keep cache-service failures non-fatal"]
     }
     const restore_paths = trim(broad_restore[0]?.with?.path ?? "")
-    if !contains(restore_paths, "env.CARGO_HOME")
-      || !contains(restore_paths, "env.CARGO_TARGET_DIR") {
+    if restore_paths != "$" + "{{ steps.cache-paths.outputs.paths }}" {
       errors = errors
-        + ["${ACTION_PATH} broad fallback must follow the active Cargo home and target directory"]
+        + [
+          "${ACTION_PATH} broad fallback must use the precise cache step's normalized archive paths",
+        ]
     }
   }
+  if len(identities) != 1 {
+    errors = errors + ["${ACTION_PATH} must resolve one Rust cache identity and archive path set"]
+  } else {
+    const identity = identities[0]
+    const expected_source = "$"
+      + "{{ inputs.source-key || (inputs.cache-workspace-crates == 'true' && ${NATIVE_SOURCE_FINGERPRINT_BODY}) || '' }}"
+    if trim(identity?.env?.CACHE_SOURCE_KEY ?? "") != expected_source
+      || trim(identity?.env?.CACHE_EXPLICIT_SOURCE_KEY ?? "")
+        != "$" + "{{ inputs.source-key }}"
+      || trim(identity?.env?.CACHE_SHARED_KEY ?? "")
+        != "$" + "{{ inputs.shared-key }}" {
+      errors = errors
+        + [
+          "${ACTION_PATH} must derive retained workspace generations from the canonical source fingerprint",
+        ]
+    }
+    const identity_run = to_string(identity?.run ?? "")
+    for required in [
+      "Retained workspace cache has no measured source fingerprint",
+      "-workspace-crates-v3",
+      "[package.metadata.harn]",
+      "source = \"$" + "{source}\"",
+      "restore-prefix=$" + "{fallback}",
+      "paths<<harn-cache-paths",
+      "workspaces<<harn-cache-workspaces",
+      WORKSPACE_SOURCE_RECORD_DIR,
+    ] {
+      if !contains(identity_run, required) {
+        errors = errors
+          + [
+            "${ACTION_PATH} cache identity resolver is missing required generation behavior: ${required}",
+          ]
+      }
+    }
+  }
+  let identity_index = -1
+  let upstream_index = -1
+  let broad_index = -1
+  for {index, value: candidate} in steps.enumerate() {
+    if trim(candidate?.id ?? "") == "cache-paths" {
+      identity_index = index
+    }
+    if step_uses(candidate).starts_with(UPSTREAM_CACHE_PREFIX) {
+      upstream_index = index
+    }
+    if step_uses(candidate).starts_with(UPSTREAM_CACHE_RESTORE_PREFIX) {
+      broad_index = index
+    }
+  }
+  if identity_index < 0 || upstream_index <= identity_index || broad_index <= upstream_index {
+    errors = errors
+      + [
+        "${ACTION_PATH} must try the precise source generation before its dependency-compatible fallback",
+      ]
+  }
+  const reuse_steps = steps.filter(
+    { candidate ->
+      trim(candidate?.id ?? "") == "reuse"
+        && trim(candidate?.run ?? "") == "./scripts/ci/reuse_workspace_crates.sh restore"
+    },
+  )
+    .to_list()
+  if len(reuse_steps) != 1
+    || trim(action?.outputs?.["source-current"]?.value ?? "")
+      != "$" + "{{ steps.reuse.outputs.source-current }}" {
+    errors = errors
+      + ["${ACTION_PATH} must publish measured workspace source currency from its reuse boundary"]
+  }
+  return errors
+}
+
+pub fn cache_action_errors(policy: CiCachePolicy, action: dict) -> list<string> {
+  let errors: list<string> = []
+  const steps = action?.runs?.steps ?? []
+  const upstream = steps.filter({ step -> step_uses(step).starts_with(UPSTREAM_CACHE_PREFIX) })
+    .to_list()
+  if len(upstream) != 1 {
+    return ["${ACTION_PATH} must contain exactly one pinned upstream Rust cache step"]
+  }
+  errors = errors + workspace_cache_generation_errors(action, steps)
   const step = upstream[0]
-  const expected_shared_key = "$"
-    + "{{ format('{0}{1}', inputs.source-key != '' && format('{0}-{1}', inputs.shared-key, inputs.source-key) || inputs.shared-key, inputs.cache-workspace-crates == 'true' && '-${WORKSPACE_CACHE_GENERATION}' || '') }}"
+  const expected_shared_key = "$" + "{{ steps.cache-paths.outputs.shared-key }}"
   if trim(step?.with?.["shared-key"] ?? "") != expected_shared_key
     || trim(step?.with?.key ?? "")
-      != "" {
+      != ""
+    || trim(step?.id ?? "")
+      != "cache" {
     errors = errors
       + [
         "${ACTION_PATH} must compose source-key and workspace retention into the effective upstream shared-key",
@@ -1841,16 +1896,6 @@ pub fn owned_producer_condition() -> string {
  * about which events reach which capacity: a mirror that drifted from its
  * `runs-on` is how a tier guard starts naming a route the job never took.
  */
-/**
- * The paid rung after the owned pool. Ubicloud's 8 vCPU runner lists at a
- * third of GitHub's 8-core rate, so it is the default; setting
- * `${PAID_LINUX_PROVIDER_VAR}` to `github` puts the GitHub 8-core runner back
- * without a code change.
- */
-pub fn vendor_producer_condition() -> string {
-  return "(vars.${PAID_LINUX_PROVIDER_VAR} != 'github'"
-}
-
 /** The merge-group rung reads its own capacity decision, like the owned one. */
 pub fn datacenter_producer_condition() -> string {
   return "(needs.rust-producer-capacity.outputs.${MERGE_CAPACITY_ROUTE_OUTPUT} == 'owned'"
@@ -1858,14 +1903,14 @@ pub fn datacenter_producer_condition() -> string {
 
 /**
  * The workspace producer's rungs. An empty `owned` or `datacenter` drops that
- * rung; `vendor` and `hosted` are the paid ladder every producer keeps.
+ * rung; `hosted`, the free standard runner, is the rung every producer keeps.
  */
-pub type ProducerRungs = {owned: string, datacenter: string, vendor: string, hosted: string}
+pub type ProducerRungs = {owned: string, datacenter: string, hosted: string}
 
 pub fn producer_rung_expression(rungs: ProducerRungs) -> string {
-  const {owned, datacenter, vendor, hosted} = rungs
+  const {owned, datacenter, hosted} = rungs
   // An empty `owned` drops the owned rung: a lane that must not wait on the
-  // owned pool's per-host compile budget goes straight to paid capacity.
+  // owned pool's per-host compile budget goes straight to free hosted capacity.
   const owned_rung = if owned == "" {
     ""
   } else {
@@ -1882,9 +1927,8 @@ pub fn producer_rung_expression(rungs: ProducerRungs) -> string {
     + "{{ "
     + owned_rung
     + datacenter_rung
-    + "${vendor_producer_condition()}"
-    + "\n  && ${vendor})"
-    + "\n  || ${hosted} }}"
+    + hosted
+    + " }}"
 }
 
 /**
@@ -1903,13 +1947,59 @@ fn linux_runner_label(label: string) -> bool {
 }
 
 /**
- * Every Linux runner label a job can resolve to, from its `runs-on` (literal,
- * list or expression) and its matrix `runner` values.
+ * A selector and every job-matrix expression it references.
+ *
+ * Reusable workflows may route `runs-on` through a callee matrix whose value
+ * is itself `inputs.os`. Follow that chain here so every policy consumer sees
+ * the same selector graph. The depth bound makes malformed cyclic matrices
+ * finite while preserving substantially deeper chains than GitHub workflows
+ * use in practice.
  */
-fn job_runner_labels(job: dict) -> list<string> {
-  let texts: list<string> = [to_string(job["runs-on"] ?? "")]
-  for row in job?.strategy?.matrix?.include ?? [] {
-    texts = texts + [to_string(row?.runner ?? "")]
+fn runner_selector_expressions(
+  workflow: dict,
+  job: dict,
+  selector: unknown,
+  depth: int = 0,
+) -> list<string> {
+  const expression = to_string(selector ?? "")
+  let texts: list<string> = [expression]
+  if depth >= 4 {
+    return texts
+  }
+  const matrix = job?.strategy?.matrix ?? {}
+  for {key: name, value: values} in matrix {
+    if name != "include" && name != "exclude" && contains(expression, "matrix.${name}") {
+      if type_of(values) == "list" {
+        for value in values {
+          texts = texts + runner_selector_expressions(workflow, job, value, depth + 1)
+        }
+      } else {
+        texts = texts + runner_selector_expressions(workflow, job, values, depth + 1)
+      }
+    }
+  }
+  for row in matrix?.include ?? [] {
+    for {key: name, value: value} in row {
+      if contains(expression, "matrix.${name}") {
+        texts = texts + runner_selector_expressions(workflow, job, value, depth + 1)
+      }
+    }
+  }
+  return texts.unique()
+}
+
+/** Every runner label a selector can resolve to through its owning job. */
+fn runner_selector_labels(workflow: dict, job: dict, selector: unknown) -> list<string> {
+  let texts = runner_selector_expressions(workflow, job, selector)
+  for input_kind in ["workflow_dispatch", "workflow_call"] {
+    for {key: name, value: input} in (workflow["on"]?.[input_kind]?.inputs ?? {}) {
+      if texts.any({ text -> contains(text, "inputs.${name}") }) {
+        texts = texts + [to_string(input?.default ?? "")]
+        for option in input?.options ?? [] {
+          texts = texts + [to_string(option)]
+        }
+      }
+    }
   }
   let labels: list<string> = []
   for text in texts {
@@ -1917,7 +2007,27 @@ fn job_runner_labels(job: dict) -> list<string> {
       + regex_captures("[A-Za-z0-9][A-Za-z0-9._-]*", text).map({ hit -> to_string(hit.match) })
         .to_list()
   }
-  return labels
+  return labels.unique().sorted()
+}
+
+/** Every Linux runner label a job can resolve to from its `runs-on`. */
+fn job_runner_labels(workflow: dict, job: dict) -> list<string> {
+  return runner_selector_labels(workflow, job, job["runs-on"])
+}
+
+/** `workflow_call` inputs that select a runner anywhere in the reusable workflow. */
+fn workflow_call_runner_inputs(workflow: dict) -> list<string> {
+  let names: list<string> = []
+  for name in (workflow["on"]?.workflow_call?.inputs ?? {}).keys() {
+    for job in (workflow?.jobs ?? {}).values() {
+      if runner_selector_expressions(workflow, job, job?.["runs-on"]).any(
+        { text -> contains(text, "inputs.${name}") },
+      ) {
+        names = names + [name]
+      }
+    }
+  }
+  return names.unique().sorted()
 }
 
 fn landlock_incapable_label(label: string) -> bool {
@@ -1962,11 +2072,102 @@ pub fn linux_confinement_errors(workflows: dict, release_runner_policy: dict) ->
   return errors + release_runner_policy_landlock_errors(release_runner_policy)
 }
 
+fn paid_public_runner_selector(token: string, release_runner_policy: dict) -> bool {
+  const label = lowercase(token)
+  const registered = release_runner_policy?.runner_registry?.[token]
+  return contains(label, "blacksmith")
+    || contains(label, "ubicloud")
+    || regex_match(r"^(ubuntu|windows)-[0-9]+core", label) != nil
+    || regex_match(r"^(macos|xcode)-[a-z0-9._-]+-(large|xlarge)$", label) != nil
+    || (registered != nil
+      && (registered?.usd_per_minute != nil || registered?.provider != "github"))
+}
+
+fn active_release_runner_errors(release_runner_policy: dict) -> list<string> {
+  let errors: list<string> = []
+  for target in release_runner_policy?.targets ?? [] {
+    for {key: mode, value: runner} in (target?.runners ?? {}) {
+      if paid_public_runner_selector(to_string(runner), release_runner_policy) {
+        errors = errors
+          + [
+            "release-runner-policy.json:${target?.target} ${mode} runner ${runner} is paid public-repository capacity",
+          ]
+      }
+    }
+  }
+  for {key: role, value: runner} in (release_runner_policy?.jobs?.cli_aot ?? {}) {
+    if paid_public_runner_selector(to_string(runner), release_runner_policy) {
+      errors = errors
+        + [
+          "release-runner-policy.json:cli_aot ${role} runner ${runner} is paid public-repository capacity",
+        ]
+    }
+  }
+  return errors
+}
+
+pub const PAID_CAPACITY_ROUTE_INPUTS = [
+  "FLEET_EVACUATION",
+  "PAID_LINUX_PROVIDER",
+  "CAPACITY_VENDOR_RUNNER",
+]
+
+/** Every active workflow runner selector and capacity route must stay free or owned. */
+pub fn public_repository_runner_errors(
+  workflows: dict,
+  release_runner_policy: dict,
+) -> list<string> {
+  let errors: list<string> = []
+  for workflow_name in workflows.keys().sorted() {
+    const workflow = workflows[workflow_name] ?? {}
+    for {key: job_name, value: job} in (workflow?.jobs ?? {}) {
+      for label in job_runner_labels(workflow, job) {
+        if paid_public_runner_selector(label, release_runner_policy) {
+          errors = errors
+            + [
+              "${workflow_name}:${job_name} runner selection can resolve through paid token ${label}",
+            ]
+        }
+      }
+      const reusable = trim(to_string(job?.uses ?? ""))
+      if starts_with(reusable, "./.github/workflows/") {
+        const callee_name = basename(reusable)
+        const callee = workflows[callee_name]
+        for input in workflow_call_runner_inputs(callee ?? {}) {
+          const supplied = job?.with?.[input]
+            ?? callee?.["on"]?.workflow_call?.inputs?.[input]?.default
+          for label in runner_selector_labels(workflow, job, supplied) {
+            if paid_public_runner_selector(label, release_runner_policy) {
+              errors = errors
+                + [
+                  "${workflow_name}:${job_name} passes paid runner token ${label} to ${callee_name} input ${input}",
+                ]
+            }
+          }
+        }
+      }
+      for step in job?.steps ?? [] {
+        if contains(to_string(step?.run ?? ""), "runner_capacity.sh") {
+          for input in PAID_CAPACITY_ROUTE_INPUTS {
+            if step?.env?.[input] != nil || effective_job_env(workflow, job, input) != "<unset>" {
+              errors = errors
+                + [
+                  "${workflow_name}:${job_name} runner capacity decision must not accept paid route input ${input}",
+                ]
+            }
+          }
+        }
+      }
+    }
+  }
+  return errors + active_release_runner_errors(release_runner_policy)
+}
+
 /** No Linux job may resolve to a runner that cannot confine a Harn child. */
 pub fn landlock_incapable_runner_errors(workflow_name: string, workflow: dict) -> list<string> {
   let errors: list<string> = []
   for {key: job_name, value: job} in (workflow?.jobs ?? {}) {
-    for label in job_runner_labels(job) {
+    for label in job_runner_labels(workflow, job) {
       if landlock_incapable_label(label) {
         errors = errors
           + [
@@ -1998,7 +2199,6 @@ pub fn producer_runner_expression(owned_rung: bool = true) -> string {
     {
       owned: owned_rung ? "fromJSON('${SELFHOSTED_LINUX_BIG_RUNNER}')" : "",
       datacenter: owned_rung ? "fromJSON('${DATACENTER_LINUX_BIG_RUNNER}')" : "",
-      vendor: "'${PRODUCER_VENDOR_LINUX_RUNNER}'",
       hosted: "'${PRODUCER_HOSTED_LINUX_RUNNER}'",
     },
   )
@@ -2009,7 +2209,6 @@ pub fn producer_tier_expression(owned_rung: bool = true) -> string {
     {
       owned: owned_rung ? "'${SELFHOSTED_RUNNER_TIER}'" : "",
       datacenter: owned_rung ? "'${SELFHOSTED_RUNNER_TIER}'" : "",
-      vendor: "'${UBICLOUD_RUNNER_TIER}'",
       hosted: "'${HOSTED_RUNNER_TIER}'",
     },
   )
@@ -2021,23 +2220,19 @@ fn cli_route_condition(route: string) -> string {
 
 /**
  * The shared CLI producer's three rungs, for `runs-on`, `timeout-minutes` and
- * the tier mirror alike: an idle reserved runner, then the ladder every other
- * paid lane has. The capacity step names `owned` only on events it routes, so
+ * the tier mirror alike: an idle reserved runner, then the free hosted rung.
+ * The capacity step names `owned` only on events it routes, so
  * every other event, a fully busy reserved pool, and a census it cannot read
- * all take the paid ladder: Ubicloud first, at about a third of GitHub's
- * 8-core rate, and GitHub's runner only when the paid-provider switch names it.
+ * all take GitHub's free standard runner.
  */
-pub type CliProducerRungs = {reserved: string, vendor: string, hosted: string}
+pub type CliProducerRungs = {reserved: string, hosted: string}
 
 pub fn cli_producer_rung_expression(rungs: CliProducerRungs) -> string {
-  const {reserved, vendor, hosted} = rungs
+  const {reserved, hosted} = rungs
   return "$"
     + "{{ "
     + cli_route_condition("owned")
     + "\n  && ${reserved})"
-    + "\n  || "
-    + vendor_producer_condition()
-    + "\n  && ${vendor})"
     + "\n  || ${hosted} }}"
 }
 
@@ -2045,7 +2240,6 @@ pub fn cli_producer_runner_expression() -> string {
   return cli_producer_rung_expression(
     {
       reserved: "fromJSON('${RESERVED_CLI_PRODUCER_RUNNER}')",
-      vendor: "'${PRODUCER_VENDOR_LINUX_RUNNER}'",
       hosted: "'${PRODUCER_HOSTED_LINUX_RUNNER}'",
     },
   )
@@ -2053,11 +2247,7 @@ pub fn cli_producer_runner_expression() -> string {
 
 pub fn cli_producer_tier_expression() -> string {
   return cli_producer_rung_expression(
-    {
-      reserved: "'${SELFHOSTED_RUNNER_TIER}'",
-      vendor: "'${UBICLOUD_RUNNER_TIER}'",
-      hosted: "'${HOSTED_RUNNER_TIER}'",
-    },
+    {reserved: "'${SELFHOSTED_RUNNER_TIER}'", hosted: "'${HOSTED_RUNNER_TIER}'"},
   )
 }
 
@@ -2113,11 +2303,10 @@ pub fn cli_producer_reservation_errors(workflow: dict) -> list<string> {
     || trim(to_string(env?.CAPACITY_POOL ?? "")) != RESERVED_CLI_PRODUCER_POOL
     || !routed.contains("pull_request")
     || !routed.contains("merge_group")
-    || trim(to_string(env?.CAPACITY_VENDOR_RUNNER ?? "")) != PRODUCER_VENDOR_LINUX_RUNNER
-    || trim(to_string(env?.CAPACITY_HOSTED_RUNNER ?? "")) != PRODUCER_HOSTED_LINUX_RUNNER {
+    || trim(to_string(env?.CAPACITY_VENDOR_RUNNER ?? "")) != "" {
     errors = errors
       + [
-        "ci.yml:rust-producer-capacity step ${CLI_CAPACITY_DECISION_STEP} must route the ${RESERVED_CLI_PRODUCER_POOL} pool on pull requests and merge groups and name the ${PRODUCER_VENDOR_LINUX_RUNNER} then ${PRODUCER_HOSTED_LINUX_RUNNER} ladder a busy pool takes",
+        "ci.yml:rust-producer-capacity step ${CLI_CAPACITY_DECISION_STEP} must route the ${RESERVED_CLI_PRODUCER_POOL} pool on pull requests and merge groups and name no paid vendor runner for a busy pool",
       ]
   }
   return errors
@@ -2247,7 +2436,7 @@ pub fn minimal_pr_capacity_errors(ci: dict, publish: dict) -> list<string> {
     != producer_runner_expression() {
     errors = errors
       + [
-        "ci.yml:rust-check-inputs must ladder the owned ${SELFHOSTED_LINUX_BIG_POOL} pool on same-repository pull requests, the ${DATACENTER_HOST_LABEL} runners on merge groups, ${PRODUCER_VENDOR_LINUX_RUNNER}, then ${PRODUCER_HOSTED_LINUX_RUNNER}",
+        "ci.yml:rust-check-inputs must ladder the owned ${SELFHOSTED_LINUX_BIG_POOL} pool on same-repository pull requests, the ${DATACENTER_HOST_LABEL} runners on merge groups, then ${PRODUCER_HOSTED_LINUX_RUNNER}",
       ]
   }
   // Stays behind the merge on COST, not on principle: fourteen minutes, most
@@ -2346,43 +2535,20 @@ pub fn minimal_pr_capacity_errors(ci: dict, publish: dict) -> list<string> {
 }
 
 /**
- * Keep the slow suite evacuable through the same paid-capacity switch.
+ * Keep the slow suite's capacity decision explicit.
  *
- * The switch has to reach two places, and only one of them is the routing
- * expression. The capacity job names where this suite is about to land, and a
- * name that reads the owned census while the switch sends the job to elastic
- * paid capacity is worse than no name at all: it attributes the run to a rung
- * it never touched. So the switch is required on `runs-on` and on the input
- * the capacity script actually measures the route from.
- *
- * This checks that seam rather than a specific environment variable on the
- * job. The suite derives its own compiler and thread budget on the runner it
- * lands on, so there is no longer a static budget variable to name, and a
- * rule that named one would pass by matching a string while the switch failed
- * to reach the route.
+ * Public repository jobs may use owned capacity or the standard hosted
+ * fallback. `public_repository_runner_errors` separately refuses every paid
+ * route input, including ones hidden behind this capacity decision.
  */
 pub fn e2e_elastic_capacity_errors(e2e: dict) -> list<string> {
-  const job = e2e?.jobs?.e2e ?? {}
   const capacity_job = e2e?.jobs?.["e2e-capacity"] ?? {}
   const capacity_step = step_by_name(capacity_job?.steps ?? [], E2E_CAPACITY_DECISION_STEP)
-  // The evacuation switch still moves the suite off the owned pool, through
-  // the capacity decision below; it no longer names Blacksmith Linux, which
-  // cannot confine the Harn children this suite spawns.
   let errors: list<string> = []
   if capacity_step == nil {
     errors = errors
       + ["e2e.yml:e2e-capacity must keep the '${E2E_CAPACITY_DECISION_STEP}' step"]
     return errors
-  }
-  if !contains(
-    to_string(capacity_step?.env?.[E2E_EVACUATION_INPUT] ?? ""),
-    "vars.${BLACKSMITH_ENABLE_VAR} == 'true'",
-  ) {
-    errors = errors
-      + [
-        "e2e.yml:e2e-capacity must pass ${BLACKSMITH_ENABLE_VAR} to the route it measures "
-          + "as ${E2E_EVACUATION_INPUT}",
-      ]
   }
   return errors
 }

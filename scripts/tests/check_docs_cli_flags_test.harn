@@ -204,9 +204,16 @@ pipeline test_analyze_known_flags_ok(harness: Harness, task: unknown) {
 }
 
 @test
-pipeline test_analyze_parent_flags_accepted_in_subcommand(harness: Harness, task: unknown) {
-  // Root-level flags stay accepted below (union over path prefixes).
+pipeline test_analyze_parent_flag_rejected_after_subcommand(harness: Harness, task: unknown) {
+  // clap rejects a parent's non-global flag once a subcommand is named;
+  // global flags would appear in the subcommand's own help.
   const res = analyze_harn_args(fresh_state(), ["run", "--json", "x.harn"], fake_fetch)
+  assert_eq(res.missing, ["--json"])
+}
+
+@test
+pipeline test_analyze_help_always_accepted(harness: Harness, task: unknown) {
+  const res = analyze_harn_args(fresh_state(), ["run", "x.harn", "--help"], fake_fetch)
   assert_eq(res.missing, [])
 }
 

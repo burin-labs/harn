@@ -712,14 +712,14 @@ mod authorize_batch_tests {
     fn parse_servers_reads_name_url_and_client_fields() {
         let params = serde_json::json!({
             "servers": [
-                { "name": "Notion", "url": "https://mcp.notion.com/mcp" },
+                { "name": "Wiki", "url": "https://mcp.wiki.example/mcp" },
                 { "url": "https://mcp.linear.app/mcp", "scope": "read", "clientId": "abc" },
             ]
         });
         let servers = parse_bulk_auth_servers(&params).expect("valid");
         assert_eq!(servers.len(), 2);
-        assert_eq!(servers[0].name, "Notion");
-        assert_eq!(servers[0].server_url, "https://mcp.notion.com/mcp");
+        assert_eq!(servers[0].name, "Wiki");
+        assert_eq!(servers[0].server_url, "https://mcp.wiki.example/mcp");
         // name defaults to the URL when omitted.
         assert_eq!(servers[1].name, "https://mcp.linear.app/mcp");
         assert_eq!(servers[1].scopes.as_deref(), Some("read"));
@@ -807,13 +807,13 @@ mod authorize_batch_tests {
     #[test]
     fn status_params_are_camelcase() {
         let params = authorize_status_params(&McpAuthStatus {
-            server: "Notion".to_string(),
-            server_url: "https://mcp.notion.com/mcp".to_string(),
+            server: "Wiki".to_string(),
+            server_url: "https://mcp.wiki.example/mcp".to_string(),
             phase: McpAuthPhase::AwaitingConsent,
             detail: None,
         });
-        assert_eq!(params["server"], "Notion");
-        assert_eq!(params["serverUrl"], "https://mcp.notion.com/mcp");
+        assert_eq!(params["server"], "Wiki");
+        assert_eq!(params["serverUrl"], "https://mcp.wiki.example/mcp");
         assert_eq!(params["phase"], "awaiting_consent");
         assert!(params.get("detail").is_none());
 
@@ -830,9 +830,9 @@ mod authorize_batch_tests {
     #[test]
     fn mcp_status_report_projects_camelcase_identity_fields() {
         let report = mcp_status_report(vec![McpHostStatus {
-            name: "Notion".to_string(),
+            name: "Wiki".to_string(),
             transport: "http".to_string(),
-            url: Some("https://mcp.notion.com/mcp".to_string()),
+            url: Some("https://mcp.wiki.example/mcp".to_string()),
             active: true,
             lazy: false,
             ref_count: 2,
@@ -845,9 +845,9 @@ mod authorize_batch_tests {
         }]);
         assert_eq!(report["schemaVersion"], 1);
         let server = &report["servers"][0];
-        assert_eq!(server["name"], "Notion");
+        assert_eq!(server["name"], "Wiki");
         assert_eq!(server["transport"], "http");
-        assert_eq!(server["url"], "https://mcp.notion.com/mcp");
+        assert_eq!(server["url"], "https://mcp.wiki.example/mcp");
         assert_eq!(server["refCount"], 2);
         assert_eq!(server["restartCount"], 1);
         assert_eq!(server["consecutiveFailures"], 0);

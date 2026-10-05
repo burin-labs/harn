@@ -92,7 +92,6 @@ fn _effect_rules() -> list {
     ["\\bagent_spawn\\(", "agent"],
     ["\\b__agent_", "agent"],
     ["\\bharness\\.agent\\.", "agent"],
-    ["\\bnotion_", "net"],
     ["\\bslack_", "net"],
     ["\\blinear_", "net"],
     ["\\bgithub_", "net"],

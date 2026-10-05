@@ -172,9 +172,6 @@ function descriptionFromHtml(html: string, fallback: string): string {
 // built rather than teaching a reader the concepts they need to use it. The
 // concept material has its own part, folded into Introduction.
 //
-// Migrations has no tab. Version-upgrade instructions are how-to material, and
-// they sit under How-to guides rather than claiming a tab of their own.
-//
 // Deploy and Contributing were one "Operating Harn" part, which mixed two
 // audiences: someone running Harn somewhere, and someone working on the Harn
 // repo. Splitting them means a reader hosting a pipeline never scrolls past

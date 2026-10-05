@@ -50,6 +50,8 @@ pub use changed_paths::{
 };
 pub(crate) use health::observe_event;
 mod journal;
+#[cfg(test)]
+mod publication_tests;
 pub mod reclaim_hooks;
 mod state;
 mod subscribers;
@@ -348,6 +350,7 @@ use runtime_store::{
 };
 pub use scratchpad::*;
 pub(crate) use transcript_lifecycle::append_event_to_state;
+pub(crate) use transcript_lifecycle::settle_assistant_publication;
 pub use transcript_lifecycle::*;
 pub use types::*;
 
@@ -1424,9 +1427,6 @@ pub fn replace_messages_with_summary(
     })
 }
 
-/// Persist the set of active skill names for session resume. Called at
-/// the end of an agent_loop run; the next `open_or_create` for this id
-/// reads them back via [`active_skills`].
 #[cfg(test)]
 #[path = "agent_sessions_tests.rs"]
 mod tests;
