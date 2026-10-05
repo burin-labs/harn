@@ -97,7 +97,7 @@ const RULESET_FD: std::os::fd::RawFd = 3;
 
 /// The confinement the guardian must enter on the payload's behalf.
 ///
-/// The rest of [`PreparedCommand`] is a lossy projection of a `Command`: it
+/// The rest of [`GuardianCommandRequest`] is a lossy projection of a `Command`: it
 /// keeps what a program, its arguments, a directory and an environment can say,
 /// and drops everything else. Confinement used to be in the "everything else",
 /// because this backend installs it from a `pre_exec` callback and a callback
@@ -117,7 +117,7 @@ enum GuardianConfinement {
 
 #[cfg(unix)]
 #[derive(Deserialize, Serialize)]
-struct PreparedCommand {
+struct GuardianCommandRequest {
     program: Vec<u8>,
     args: Vec<Vec<u8>>,
     cwd: Option<Vec<u8>>,
@@ -132,6 +132,15 @@ struct PreparedCommand {
     /// built it, and it is returned as one.
     #[serde(default)]
     confinement: Option<GuardianConfinement>,
+}
+
+/// A decoded request gains descriptor ownership only at guardian startup.
+/// Deserializing the wire shape cannot construct this owning command.
+#[cfg(unix)]
+struct PreparedCommand {
+    request: GuardianCommandRequest,
+    #[cfg(target_os = "linux")]
+    inherited_descriptors: harn_vm::process_sandbox::DescriptorTransfer,
 }
 
 #[cfg(unix)]
@@ -213,7 +222,7 @@ pub(crate) fn prepare_guardian(
     // from the session's resolved set; sending the mode instead dropped that
     // clear in transfer, and the guardian's own environment reached the child
     // behind the explicit entries.
-    let request = PreparedCommand::from_command(
+    let request = GuardianCommandRequest::from_command(
         &payload,
         prepared.env_cleared,
         cleanup_token.clone(),
@@ -429,7 +438,7 @@ pub(crate) fn write_request(pipe: &mut ChildStdin, request: &[u8]) -> Result<(),
 }
 
 #[cfg(unix)]
-impl PreparedCommand {
+impl GuardianCommandRequest {
     fn from_command(
         command: &Command,
         env_clear: bool,
@@ -452,17 +461,51 @@ impl PreparedCommand {
             cleanup_token,
         }
     }
+}
+
+#[cfg(unix)]
+impl PreparedCommand {
+    /// Admit the private startup request without claiming any descriptor twice.
+    ///
+    /// # Safety
+    /// Every accepted descriptor must have been transferred exclusively to this
+    /// guardian by the host launch. Shape/open checks cannot establish custody.
+    unsafe fn from_inherited_request(request: GuardianCommandRequest) -> io::Result<Self> {
+        #[cfg(target_os = "linux")]
+        let inherited_descriptors = {
+            let mut numbers = request.pinned_verifier_descriptors.clone();
+            if let Some(GuardianConfinement::Bubblewrap { descriptors }) = &request.confinement {
+                numbers.extend(descriptors.iter().copied());
+            }
+            // SAFETY: the caller supplies exclusive startup custody. The one
+            // owner validates all sets together before adopting any descriptor,
+            // including overlap between confinement and verifier material.
+            unsafe { harn_vm::process_sandbox::DescriptorTransfer::inherited(numbers)? }
+        };
+        #[cfg(not(target_os = "linux"))]
+        if !request.pinned_verifier_descriptors.is_empty() {
+            return Err(io::Error::other(
+                "isolated source verifier descriptor transport is unmeasured on this platform",
+            ));
+        }
+        Ok(Self {
+            request,
+            #[cfg(target_os = "linux")]
+            inherited_descriptors,
+        })
+    }
 
     fn into_command(self) -> io::Result<(Command, String)> {
-        let mut command = Command::new(OsString::from_vec(self.program));
-        command.args(self.args.into_iter().map(OsString::from_vec));
-        if let Some(cwd) = self.cwd {
+        let request = self.request;
+        let mut command = Command::new(OsString::from_vec(request.program));
+        command.args(request.args.into_iter().map(OsString::from_vec));
+        if let Some(cwd) = request.cwd {
             command.current_dir(PathBuf::from(OsString::from_vec(cwd)));
         }
-        if self.env_clear {
+        if request.env_clear {
             command.env_clear();
         }
-        for (key, value) in self.env {
+        for (key, value) in request.env {
             let key = OsString::from_vec(key);
             match value {
                 Some(value) => {
@@ -478,26 +521,17 @@ impl PreparedCommand {
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
-        apply_confinement(&mut command, self.confinement)?;
-        if !self.pinned_verifier_descriptors.is_empty() {
-            #[cfg(target_os = "linux")]
-            {
-                harn_vm::verifier_provenance::validate_pinned_environment(&command, self.env_clear)
-                    .map_err(io::Error::other)?;
-                // The existing host-only request pipe transfers ownership of these descriptors.
-                unsafe {
-                    harn_vm::process_sandbox::DescriptorTransfer::inherited(
-                        self.pinned_verifier_descriptors,
-                    )?
-                }
-                .attach(&mut command);
-            }
-            #[cfg(not(target_os = "linux"))]
-            return Err(io::Error::other(
-                "isolated source verifier descriptor transport is unmeasured on this platform",
-            ));
+        apply_confinement(&mut command, request.confinement)?;
+        #[cfg(target_os = "linux")]
+        if !request.pinned_verifier_descriptors.is_empty() {
+            harn_vm::verifier_provenance::validate_pinned_environment(&command, request.env_clear)
+                .map_err(io::Error::other)?;
         }
-        Ok((command, self.cleanup_token))
+        #[cfg(target_os = "linux")]
+        if self.inherited_descriptors.count() != 0 {
+            self.inherited_descriptors.attach(&mut command);
+        }
+        Ok((command, request.cleanup_token))
     }
 }
 
@@ -537,13 +571,9 @@ fn apply_confinement(
         return Ok(());
     };
     let (seccomp, ruleset) = match confinement {
-        GuardianConfinement::Bubblewrap { descriptors } => {
-            // SAFETY: the trusted prepared launch transferred each owned fd
-            // under the exact number named in its wrapper arguments. The
-            // decoder validates that all names are distinct and still open.
-            let transferred =
-                unsafe { harn_vm::process_sandbox::DescriptorTransfer::inherited(descriptors)? };
-            transferred.attach(command);
+        GuardianConfinement::Bubblewrap { .. } => {
+            // PreparedCommand already admitted this set together with pinned
+            // verifier material. Its single owner attaches both after setup.
             return Ok(());
         }
         GuardianConfinement::BeforeExec { seccomp, ruleset } => (seccomp, ruleset),
@@ -657,9 +687,14 @@ pub fn run_guardian_from_pipe() -> io::Result<()> {
         return Err(io::Error::other("guardian request pipe is not active"));
     }
     let raw = read_request()?;
-    let request: PreparedCommand = serde_json::from_slice(&raw)
+    let request: GuardianCommandRequest = serde_json::from_slice(&raw)
         .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
-    let (mut payload_command, cleanup_token) = match request.into_command() {
+    // SAFETY: this is the re-executed guardian's private host request pipe.
+    // The prepared parent launch retained the owning transfers through exec;
+    // their named descriptors now belong exclusively to this startup process.
+    let prepared = unsafe { PreparedCommand::from_inherited_request(request) }
+        .and_then(PreparedCommand::into_command);
+    let (mut payload_command, cleanup_token) = match prepared {
         Ok(prepared) => prepared,
         Err(error) => {
             write_startup(StartupMessage {
@@ -1105,6 +1140,64 @@ mod tests {
     use super::*;
     use crate::process::{EnvMode, OutputCapture, OwnerDeathPolicy};
 
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn guardian_request_refuses_overlapping_descriptor_custody_without_closing_the_descriptor() {
+        use std::os::fd::AsRawFd;
+
+        let retained = tempfile::tempfile().unwrap();
+        let descriptor = retained.as_raw_fd();
+        let mut request = GuardianCommandRequest::from_command(
+            &Command::new("/usr/bin/true"),
+            true,
+            "duplicate-descriptor-control".to_string(),
+            Some(GuardianConfinement::Bubblewrap {
+                descriptors: vec![descriptor],
+            }),
+        );
+        request.pinned_verifier_descriptors = vec![descriptor];
+        let request: GuardianCommandRequest =
+            serde_json::from_slice(&serde_json::to_vec(&request).unwrap()).unwrap();
+        // SAFETY: repeated numbers are rejected before adoption. No accepted
+        // descriptor is supplied, and the retained file keeps its custody.
+        let Err(error) = (unsafe { PreparedCommand::from_inherited_request(request) }) else {
+            panic!("a cross-set duplicate must never construct a payload command");
+        };
+        assert!(error
+            .to_string()
+            .contains("repeated confinement descriptor"));
+        retained
+            .metadata()
+            .expect("refused wire input must not close an existing descriptor");
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn guardian_request_refuses_invalid_inherited_descriptors() {
+        for descriptor in [-1, 0, 1, 2, i32::MAX] {
+            for verifier in [false, true] {
+                let mut request = GuardianCommandRequest::from_command(
+                    &Command::new("/usr/bin/true"),
+                    true,
+                    "invalid-descriptor-control".to_string(),
+                    None,
+                );
+                if verifier {
+                    request.pinned_verifier_descriptors = vec![descriptor];
+                } else {
+                    request.confinement = Some(GuardianConfinement::Bubblewrap {
+                        descriptors: vec![descriptor],
+                    });
+                }
+                let request: GuardianCommandRequest =
+                    serde_json::from_slice(&serde_json::to_vec(&request).unwrap()).unwrap();
+                // SAFETY: I/O slots and negative/closed numbers are refused
+                // before any ownership is taken; no accepted fd is supplied.
+                assert!(unsafe { PreparedCommand::from_inherited_request(request) }.is_err());
+            }
+        }
+    }
+
     #[test]
     fn guardian_request_keeps_explicit_credentials_out_of_argv_and_env() {
         // What this asserts is that an explicit credential travels over the
@@ -1134,7 +1227,7 @@ mod tests {
             ..
         } = prepare_guardian(&spec, cleanup_token.clone()).expect("prepare guardian");
         harn_vm::op_interrupt::remove_process_owner_group_journal(&cleanup_token);
-        let decoded: PreparedCommand =
+        let decoded: GuardianCommandRequest =
             serde_json::from_slice(&request).expect("decode private guardian request");
         assert!(
             decoded.env.iter().any(|(key, value)| {
