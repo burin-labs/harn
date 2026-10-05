@@ -15,6 +15,7 @@ mod host_request;
 mod identity_match;
 mod invocation_memory;
 mod path_guards;
+mod path_inputs;
 mod remembered_paths;
 mod rule_source;
 mod sensitive_paths;
@@ -565,22 +566,15 @@ struct EvaluationContext {
 impl EvaluationContext {
     fn new(tool_name: &str, args: &JsonValue, repeat_count: Option<u64>) -> Self {
         let annotations = super::current_tool_annotations(tool_name);
-        let path_entries = super::current_tool_declared_path_entries(tool_name, args);
+        let path_entries = path_inputs::classify(
+            args,
+            annotations.as_ref(),
+            &crate::orchestration::execution_root_path(),
+        );
         let mut path_candidates = Vec::new();
         for entry in &path_entries {
             path_candidates.extend(entry.policy_candidates());
         }
-        // The public ToolApprovalPolicy API predates tool annotations. Preserve
-        // its narrow compatibility contract for conventional path fields when
-        // no typed schema is in scope; annotated tools always use their
-        // declared path parameters instead of guessing from argument names.
-        if annotations.is_none() {
-            path_candidates.extend(path_values(args));
-        }
-        // Commands are parsed by command_policy, the sole shell/argv owner.
-        // Approval consumes only its semantic reader-path projection, never
-        // flattened command prose or arbitrary argument strings.
-        path_candidates.extend(super::super::command_policy::credential_read_path_candidates(args));
         dedup(&mut path_candidates);
 
         let mut string_candidates = Vec::new();
@@ -1309,17 +1303,7 @@ fn string_values(value: &JsonValue, keys: &[&str]) -> Vec<String> {
 }
 
 fn path_values(value: &JsonValue) -> Vec<String> {
-    let mut paths = string_values(
-        value,
-        &[
-            "path",
-            "file",
-            "target",
-            "source_path",
-            "new_path",
-            "target_path",
-        ],
-    );
+    let mut paths = string_values(value, path_inputs::CONVENTIONAL_PATH_PARAMETERS);
     if let Some(entries) = value.get("paths").and_then(JsonValue::as_array) {
         for entry in entries {
             if let Some(path) = first_string(
@@ -1327,8 +1311,6 @@ fn path_values(value: &JsonValue) -> Vec<String> {
                 &["workspace_path", "path", "host_absolute_path", "host_path"],
             ) {
                 paths.push(path);
-            } else if let Some(path) = entry.as_str() {
-                paths.push(path.to_string());
             }
         }
     }

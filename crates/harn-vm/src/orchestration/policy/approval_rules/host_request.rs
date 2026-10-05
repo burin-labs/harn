@@ -120,36 +120,11 @@ impl ToolApprovalRequest {
     }
 
     fn path_parameters(&self) -> Vec<String> {
-        self.tool_annotations
+        let annotations = self
+            .tool_annotations
             .clone()
-            .or_else(|| super::super::current_tool_annotations(&self.tool_name))
-            .map(|value| value.arg_schema.path_params)
-            .unwrap_or_else(|| {
-                [
-                    "path",
-                    "file",
-                    "target",
-                    "source_path",
-                    "new_path",
-                    "target_path",
-                    "paths",
-                ]
-                .into_iter()
-                .map(String::from)
-                .collect()
-            })
-    }
-
-    fn path_inputs(&self) -> Vec<String> {
-        let params = self.path_parameters();
-        let names = params.iter().map(String::as_str).collect::<Vec<_>>();
-        let mut paths = super::string_values(&self.arguments, &names);
-        paths.extend(
-            super::super::super::command_policy::credential_read_path_candidates(&self.arguments),
-        );
-        paths.sort();
-        paths.dedup();
-        paths
+            .or_else(|| super::super::current_tool_annotations(&self.tool_name));
+        super::path_inputs::parameters(annotations.as_ref())
     }
 }
 
@@ -203,16 +178,15 @@ pub(super) fn request_context(request: &ToolApprovalRequest) -> EvaluationContex
         .as_ref()
         .map(|value| value.arg_schema.path_params.as_slice());
     let owned_paths = request.workspace_boundary.as_ref().map(|boundary| {
-        let paths = request.path_inputs();
-        paths
-            .iter()
-            .map(|path| {
-                crate::workspace_path::classify_permission_path(
-                    path,
-                    Some(Path::new(&boundary.root)),
-                )
-            })
-            .collect::<Vec<_>>()
+        let annotations = request
+            .tool_annotations
+            .clone()
+            .or_else(|| super::super::current_tool_annotations(&request.tool_name));
+        super::path_inputs::classify(
+            &request.arguments,
+            annotations.as_ref(),
+            Path::new(&boundary.root),
+        )
     });
     if let Some(annotations) = &request.tool_annotations {
         set_owned_annotations(&mut context, annotations);

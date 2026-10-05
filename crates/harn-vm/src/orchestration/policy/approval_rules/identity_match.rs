@@ -106,17 +106,7 @@ impl LiteralResourceIdentity {
             .map(|params| params.iter().map(String::as_str).collect())
             .unwrap_or_else(|| {
                 annotations.as_ref().map_or_else(
-                    || {
-                        vec![
-                            "path",
-                            "file",
-                            "target",
-                            "source_path",
-                            "new_path",
-                            "target_path",
-                            "paths",
-                        ]
-                    },
+                    || super::path_inputs::CONVENTIONAL_PATH_PARAMETERS.to_vec(),
                     |annotations| {
                         annotations
                             .arg_schema

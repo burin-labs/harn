@@ -200,6 +200,78 @@ mod tests {
     }
 
     #[test]
+    fn rootless_path_free_evaluation_has_no_remembered_identity() {
+        let root = crate::orchestration::execution_root_path()
+            .canonicalize()
+            .unwrap();
+        let original = request(&root, json!({"command": "echo safe"}));
+        let saved = policy(original.capture_decision(PolicyAction::Allow).unwrap());
+        let rootless = ToolApprovalRequest::from_host_json(json!({
+            "tool_name": "run", "arguments": original.arguments
+        }))
+        .unwrap();
+        let context = super::super::host_request::request_context(&rootless);
+        assert!(context.invocation_sha256.is_none());
+        assert!(saved.evaluate_request(&rootless).is_ask());
+        assert!(rootless.capture_decision(PolicyAction::Allow).is_err());
+    }
+
+    #[test]
+    fn unannotated_path_projection_retains_workspace_refusal() {
+        let root = crate::orchestration::execution_root_path()
+            .canonicalize()
+            .unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let saved = ToolApprovalPolicy::from_host_json(json!({
+            "rules": [{"source": "mode", "allow": "run"}]
+        }))
+        .unwrap();
+        let original = request(&root, json!({"path": outside.path().join("outside.txt")}));
+        let result =
+            super::super::evaluate_tool_approval_policy(&saved, "run", &original.arguments, None);
+        assert!(result.is_deny(), "{result:?}");
+        assert!(saved.evaluate_request(&original).is_deny());
+        assert!(ToolApprovalRequest::from_host_json(json!({
+            "tool_name": "run", "arguments": {"path": 42},
+            "workspace_boundary": {"root": root}
+        }))
+        .is_err());
+    }
+
+    #[test]
+    fn host_capture_matches_vm_dispatch_without_tool_annotations() {
+        use crate::orchestration::{pop_execution_policy, push_execution_policy, CapabilityPolicy};
+        let root = crate::orchestration::execution_root_path()
+            .canonicalize()
+            .unwrap();
+        for arguments in [
+            json!({"path": "reference.txt"}),
+            json!({"paths": ["b", root.join("z")]}),
+            json!({"source_path": "before.txt", "new_path": "after.txt"}),
+            json!({"command": "cat reference.txt"}),
+        ] {
+            let original = request(&root, arguments);
+            push_execution_policy(CapabilityPolicy::default());
+            let saved = policy(original.capture_decision(PolicyAction::Allow).unwrap());
+            let host_result = saved.evaluate_request(&original);
+            let result = super::super::evaluate_tool_approval_policy(
+                &saved,
+                "run",
+                &original.arguments,
+                None,
+            );
+            let mut changed = original.arguments.clone();
+            changed["changed_invocation"] = json!(true);
+            let changed_result =
+                super::super::evaluate_tool_approval_policy(&saved, "run", &changed, None);
+            pop_execution_policy();
+            assert!(host_result.is_allow(), "{host_result:?}");
+            assert!(result.is_allow(), "{result:?}");
+            assert!(changed_result.is_ask(), "{changed_result:?}");
+        }
+    }
+
+    #[test]
     fn host_capture_matches_vm_dispatch_with_mixed_path_order() {
         use crate::orchestration::{pop_execution_policy, push_execution_policy, CapabilityPolicy};
         let root = crate::orchestration::execution_root_path()
