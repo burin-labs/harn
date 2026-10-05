@@ -259,7 +259,11 @@ fn managed_supply_missing_or_malformed_authority_never_reaches_transport() {
     }
     opts.api_mode = crate::llm::api::LlmApiMode::ChatCompletions;
     opts.model = "gpt-5.3-codex".to_string();
-    assert!(should_use_responses_transport("openai", &opts.model, false));
+    assert!(crate::llm::capabilities::should_use_responses_transport(
+        "openai",
+        &opts.model,
+        false
+    ));
     let error = runtime
         .block_on(vm_call_llm_full(&opts))
         .expect_err("Responses-only logical model cannot use managed Chat Completions");
