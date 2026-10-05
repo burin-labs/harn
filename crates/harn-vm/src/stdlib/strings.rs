@@ -223,18 +223,25 @@ fn uppercase_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
     Ok(VmValue::String(arcstr::ArcStr::from(s.to_uppercase())))
 }
 
+/// `split(text, sep)` and `text.split(sep)` share this error so neither form
+/// silently picks a default separator.
+pub(crate) fn split_separator_required() -> VmError {
+    VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+        "split: separator is required (use split(text, sep) or text.split(sep))",
+    )))
+}
+
 #[harn_builtin(
     exposure = "pure",
     effects = [],
-    sig = "split(text: string?, separator?: string) -> list",
+    sig = "split(text: string?, separator: string) -> list",
     category = "strings"
 )]
 fn split_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let s = args.first().map(|a| a.display()).unwrap_or_default();
-    let sep = args
-        .get(1)
-        .map(|a| a.display())
-        .unwrap_or_else(|| " ".to_string());
+    let Some(sep) = args.get(1).map(|a| a.display()) else {
+        return Err(split_separator_required());
+    };
     let parts: Vec<VmValue> = s
         .split(&sep)
         .map(|p| VmValue::String(arcstr::ArcStr::from(p)))
