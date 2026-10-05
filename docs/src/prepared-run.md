@@ -98,6 +98,13 @@ Schema is `schemas/prepared-session-v1.schema.json`; generated Rust,
 TypeScript, Swift, Python, and Go protocol artifacts expose the same states and
 commands.
 
+Embedded runtimes whose turn futures are not `Send` use
+`PreparedSession::run_turn_with(&active, turn)`. The future runs in the same
+attached authority and identity scope as `run_turn`; the embedder calls
+`active.authorize` before each material operation. Returning from a turn keeps
+the session attached. Its accepted lifecycle event calls `finish` or `stop` to
+persist terminal accounting and retire the lease.
+
 `PreparedRun::request_delta` remains the typed attenuation interface for a
 single prepared run. `PreparedSession::request_delta` adds the interactive
 session behavior: an identical requirement is already covered, attenuation is

@@ -252,6 +252,28 @@ impl<E> PreparedSession<E> {
         }
     }
 
+    /// Run an embedded turn in the attached session's authority and identity
+    /// scope. Local runtimes may pass a non-Send future; no extra executor or
+    /// thread is required. Each material operation must still call
+    /// `active.authorize` immediately before its side effect.
+    ///
+    /// Turn completion does not retire the session. The owner calls `finish`
+    /// or `stop` after its accepted lifecycle event.
+    pub async fn run_turn_with<F: std::future::Future>(
+        &self,
+        active: &ActivePreparedSession,
+        turn: F,
+    ) -> F::Output {
+        active.authority.mark_executor_invoked();
+        scope_prepared_identity(
+            active.authority.clone(),
+            self.run.identity_brokers.clone(),
+            self.run.identity_consumer.clone(),
+            turn,
+        )
+        .await
+    }
+
     pub fn prepare(
         &self,
         binding: PreparedSessionBindingV1,
@@ -694,16 +716,13 @@ impl<E> PreparedSession<E> {
     }
 }
 
-impl<E: PreparedRunExecutor> PreparedSession<E> {
-    pub async fn run_turn(&self, active: &ActivePreparedSession) -> Result<E::Output, E::Error> {
-        active.authority.mark_executor_invoked();
-        scope_prepared_identity(
-            active.authority.clone(),
-            self.run.identity_brokers.clone(),
-            self.run.identity_consumer.clone(),
-            self.run.executor.execute(&active.authority),
-        )
-        .await
+impl<E> PreparedSession<E> {
+    pub async fn run_turn(&self, active: &ActivePreparedSession) -> Result<E::Output, E::Error>
+    where
+        E: PreparedRunExecutor,
+    {
+        self.run_turn_with(active, self.run.executor.execute(&active.authority))
+            .await
     }
 
     pub fn finish(

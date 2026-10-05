@@ -511,6 +511,88 @@ fn prepared_runtime_attachment() -> PreparedRuntimeAttachment {
     }
 }
 
+#[tokio::test(flavor = "current_thread")]
+async fn local_turn_reuses_attached_authority_and_identity_across_an_await() {
+    let identity = identity_requirement();
+    let mut run_intent = intent();
+    run_intent.identity_brokers = vec![identity.clone()];
+    let mut host = host_facts();
+    host.identity_brokers
+        .insert(identity.broker_id.clone(), identity_facts(&identity));
+    let mut brokers = IdentityBrokerRegistry::default();
+    brokers.insert(
+        identity.broker_id.clone(),
+        Arc::new(FixtureIdentityBroker {
+            requirement: identity.clone(),
+        }),
+    );
+    let receipts = Arc::new(MemoryAuthorityReceiptSink::default());
+    let session = PreparedSession::new(
+        PreparedRun::with_clock((), receipts.clone(), Arc::new(|| NOW_MS))
+            .with_identity_brokers(brokers, prepared_session_binding().consumer),
+        Arc::new(MemoryPreparedSessionLeaseStore::default()),
+    );
+    let batch = match session.prepare(prepared_session_binding(), run_intent, host.clone()) {
+        PreparedSessionUpdate::NeedsApproval { batch, .. } => batch,
+        other => panic!("local turn requires the same approval, got {other:?}"),
+    };
+    let lease = match session.decide(
+        "prepared-session-1",
+        PreparedSessionApprovalDecision {
+            batch_fingerprint: batch.batch_fingerprint,
+            approved: true,
+            decider: AuthorityDecider::Person,
+        },
+    ) {
+        PreparedSessionUpdate::Ready { lease, .. } => *lease,
+        other => panic!("approved local turn must become ready, got {other:?}"),
+    };
+    let active = session
+        .attach(lease, host, prepared_runtime_attachment())
+        .expect("attach the approved session");
+    // Retaining Rc across an await makes this future genuinely non-Send.
+    let reached = std::rc::Rc::new(std::cell::Cell::new(false));
+    let turn_reached = reached.clone();
+    let material_len = session
+        .run_turn_with(&active, async {
+            tokio::task::yield_now().await;
+            for requirement in executor_requirements() {
+                active.authorize(&requirement).unwrap();
+            }
+            assert!(active
+                .authorize(&AuthorityRequirement::Network(network(
+                    "undeclared.example.test"
+                )))
+                .is_err());
+            let len = consume_provider_identity(
+                &identity.binding.provider,
+                &identity.binding.audience,
+                identity.binding.tenant.as_deref(),
+                |material| Ok(material.as_ref().len()),
+            )
+            .await
+            .expect("identity scope survives the local await")
+            .expect("the brokered identity was actually consumed");
+            turn_reached.set(true);
+            len
+        })
+        .await;
+    assert!(reached.get());
+    assert_eq!(material_len, SECRET_CANARY.len());
+    let receipt = match session.finish(active, true).unwrap() {
+        PreparedSessionUpdate::Terminal { receipt, .. } => receipt,
+        other => panic!("local turn must retain terminal accounting, got {other:?}"),
+    };
+    assert!(receipt.executor_invoked);
+    assert_eq!(receipt.status, AuthorityReceiptStatus::Completed);
+    assert!(!receipt.used.is_empty());
+    assert!(!receipt.denied.is_empty());
+    assert_eq!(receipts.receipts().last(), Some(&receipt));
+    assert!(!serde_json::to_string(&receipt)
+        .unwrap()
+        .contains(SECRET_CANARY));
+}
+
 #[tokio::test]
 async fn prepared_session_persists_one_approval_reuses_the_envelope_and_rejects_replay() {
     let model_calls = Arc::new(AtomicUsize::new(0));
