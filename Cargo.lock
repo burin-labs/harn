@@ -3784,6 +3784,8 @@ dependencies = [
  "base64 0.23.1",
  "chrono-tz",
  "croner",
+ "flate2",
+ "futures",
  "harn-flock",
  "harn-fmt",
  "harn-kernel",

@@ -5,7 +5,7 @@ use crate::net;
 
 use crate::package::*;
 
-pub(crate) fn path_source_uri(path: &Path) -> Result<String, PackageError> {
+pub fn path_source_uri(path: &Path) -> Result<String, PackageError> {
     let url = Url::from_file_path(path)
         .map_err(|_| format!("failed to convert {} to file:// URL", path.display()))?;
     Ok(format!("path+{url}"))

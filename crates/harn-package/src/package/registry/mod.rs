@@ -36,4 +36,5 @@ pub use self::commands::{
 };
 pub use self::content_hash::compute_content_hash;
 pub use self::resolve::try_resolve_installed_package;
+pub use self::source::path_source_uri;
 pub use self::verify::verify_package_registry;

@@ -21,6 +21,7 @@ harn-rules = { path = "../harn-rules", version = "=0.10.158", optional = true }
 base64 = "0.23"
 chrono-tz = "0.10.4"
 croner = "4.0.0"
+flate2 = "1"
 hex = "0.4"
 jmespath = "0.5.0"
 regex = "1"
@@ -40,6 +41,9 @@ toml_edit = "0.25.12"
 url = "2"
 uuid = { version = "1", features = ["v4", "v7"] }
 which = "8"
+
+[dev-dependencies]
+futures = "0.3"
 
 [features]
 default = []

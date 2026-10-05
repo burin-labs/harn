@@ -258,7 +258,7 @@ pub fn credential_environment_names(setup: &ProviderSetupManifest) -> Vec<String
     names
 }
 
-pub(crate) fn credential_environment_names_for_secret(
+pub fn credential_environment_names_for_secret(
     sources: &[ConnectorCredentialEnvironmentManifest],
     secret: &str,
 ) -> Vec<String> {

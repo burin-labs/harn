@@ -94,9 +94,9 @@ pub use persona_runtime::{
 };
 pub(crate) use registry::*;
 pub use registry::{
-    clean_package_cache, compute_content_hash, list_package_cache, search_package_registry,
-    search_rule_package_registry, show_package_registry_info, try_resolve_installed_package,
-    verify_package_cache, verify_package_registry,
+    clean_package_cache, compute_content_hash, list_package_cache, path_source_uri,
+    search_package_registry, search_rule_package_registry, show_package_registry_info,
+    try_resolve_installed_package, verify_package_cache, verify_package_registry,
 };
 pub use skills::*;
 pub(crate) use validation::*;
