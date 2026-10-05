@@ -25,10 +25,12 @@ async fn acknowledged_tool_history_survives_compaction_and_child_restart() {
     ]);
     for (index, message) in messages.as_array().expect("messages").iter().enumerate() {
         let identity = format!("tool-message-{index}");
-        let mut event = AppendEvent::new(
-            SessionEventKind::Message,
-            serde_json::json!({"raw_message":message}),
-        );
+        let kind = match index {
+            1 => SessionEventKind::ToolCall,
+            2 => SessionEventKind::ToolResult,
+            _ => SessionEventKind::Message,
+        };
+        let mut event = AppendEvent::new(kind, serde_json::json!({"raw_message":message}));
         event.headers.insert("source_event_id".into(), identity);
         store
             .append(parent, event)
