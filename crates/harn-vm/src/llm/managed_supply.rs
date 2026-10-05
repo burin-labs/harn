@@ -36,7 +36,7 @@ pub struct ManagedSupplyContractError {
 }
 
 impl ManagedSupplyContractError {
-    fn new(message: impl Into<String>) -> Self {
+    pub(crate) fn new(message: impl Into<String>) -> Self {
         Self {
             message: message.into(),
             policy_denial: None,

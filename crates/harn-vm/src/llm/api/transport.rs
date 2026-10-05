@@ -184,6 +184,19 @@ async fn vm_call_llm_api_inner(
 ) -> Result<LlmResult, VmError> {
     let provider = &opts.provider;
 
+    let managed = crate::llm::managed_supply::is_managed_transport(provider);
+    if managed
+        && (crate::llm::providers::AcpProvider::is_configured_acp(provider)
+            || opts.api_mode == LlmApiMode::Responses
+            || should_use_responses_transport(provider, &opts.model, false)
+            || DialectContract::for_request(opts).stream_protocol() != StreamProtocol::OpenAiSse)
+    {
+        return Err(crate::llm::managed_supply::ManagedSupplyContractError::new(
+            "managed supply requires the OpenAI chat-completions transport",
+        )
+        .into());
+    }
+
     if crate::llm::providers::AcpProvider::is_configured_acp(provider) {
         return crate::llm::providers::AcpProvider::new(provider.clone())
             .chat_impl(opts, delta_tx)
@@ -216,6 +229,17 @@ async fn vm_call_llm_api_inner(
         opts.api_mode == LlmApiMode::Responses,
     ) {
         return crate::llm::providers::OpenAiResponsesProvider::call(opts, delta_tx).await;
+    }
+
+    if managed {
+        let dialect = DialectContract::for_request(opts);
+        return vm_call_llm_api_with_body(
+            opts,
+            delta_tx,
+            dialect.build_request_body(opts),
+            dialect,
+        )
+        .await;
     }
 
     if crate::llm::provider::is_provider_registered(provider) {
@@ -485,7 +509,6 @@ async fn vm_call_llm_api_with_body_inner(
     let stream_protocol = dialect.stream_protocol();
     let provider = &opts.provider;
     let model = &opts.model;
-    crate::llm::managed_supply::attach_request_extension(&mut body, managed_request)?;
     let raw_capture_context = crate::llm::agent_observe::current_raw_provider_capture_context();
     // `stream` selects the provider transport. A delta receiver only decides
     // whether a caller observes incremental text; probe calls intentionally
@@ -526,6 +549,8 @@ async fn vm_call_llm_api_with_body_inner(
             opts.provider_overrides.as_ref(),
         );
     }
+    // Provider escape hatches cannot replace captured caller authority.
+    crate::llm::managed_supply::attach_request_extension(&mut body, managed_request)?;
     if dialect.is_ollama_openai_compat() {
         DialectContract::project_ollama_openai_request(&mut body);
     }

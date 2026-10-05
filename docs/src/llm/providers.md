@@ -931,7 +931,11 @@ requiring products to copy capability tables.
 Version 2 requires the caller's resolved inference boundary. Harn captures the
 trusted host ceiling and any tighter call scope once, and retains that same
 request for terminal receipt validation. Missing, malformed, and version 1
-authority are refused; there is no implicit hosted grant. The managed relay
+authority are refused; there is no implicit hosted grant. Managed supply uses
+the OpenAI chat-completions transport; ACP, Responses and other wire adapters
+are refused before dispatch. Every declared managed provider enters the same
+request and receipt wrapper. Provider wire overrides cannot replace the
+captured `harn_managed_supply` authority. The managed relay
 must also declare its own researched data policy. A model's physical provider
 policy does not establish how the relay handles prompts.
 
