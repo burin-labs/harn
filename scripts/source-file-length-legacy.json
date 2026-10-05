@@ -44,8 +44,6 @@
     "crates/harn-vm/src/stdlib/pool/mod.rs",
     "crates/harn-vm/src/stdlib/postgres/mod.rs",
     "crates/harn-vm/src/stdlib/postgres/tests.rs",
-    "crates/harn-vm/src/stdlib/project/scan.rs",
-    "crates/harn-vm/src/stdlib/project_enrich.rs",
     "crates/harn-vm/src/stdlib/records.rs",
     "crates/harn-vm/src/stdlib/sandbox/mod.rs",
     "crates/harn-vm/src/stdlib/tool_hooks.rs",
