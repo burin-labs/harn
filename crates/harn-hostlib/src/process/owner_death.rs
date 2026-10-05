@@ -118,6 +118,8 @@ enum GuardianConfinement {
 #[cfg(unix)]
 #[derive(Deserialize, Serialize)]
 struct PreparedCommand {
+    #[serde(default)]
+    payload_stdin: bool,
     program: Vec<u8>,
     args: Vec<Vec<u8>>,
     cwd: Option<Vec<u8>>,
@@ -193,6 +195,7 @@ pub(crate) fn prepare_guardian(
         prepared.env_cleared,
         cleanup_token.clone(),
         confinement.as_ref().map(TransferredConfinement::request),
+        spec.use_stdin,
     );
     let request = serde_json::to_vec(&request)
         .map_err(|error| ProcessError::Spawn(format!("encode guardian request: {error}")))?;
@@ -383,8 +386,10 @@ impl PreparedCommand {
         env_clear: bool,
         cleanup_token: String,
         confinement: Option<GuardianConfinement>,
+        payload_stdin: bool,
     ) -> Self {
         Self {
+            payload_stdin,
             confinement,
             program: os_bytes(command.get_program()),
             args: command.get_args().map(os_bytes).collect(),
@@ -422,7 +427,11 @@ impl PreparedCommand {
         }
         command
             .env_remove(MODE_ENV)
-            .stdin(Stdio::null())
+            .stdin(if self.payload_stdin {
+                Stdio::piped()
+            } else {
+                Stdio::null()
+            })
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
         apply_confinement(&mut command, self.confinement)?;
@@ -627,6 +636,7 @@ pub fn run_guardian_from_pipe() -> io::Result<()> {
 
     let stdout = payload.stdout.take();
     let stderr = payload.stderr.take();
+    let payload_stdin = payload.stdin.take();
     let (event_tx, event_rx) = std::sync::mpsc::channel();
 
     if let Some(mut stdout) = stdout {
@@ -654,13 +664,7 @@ pub fn run_guardian_from_pipe() -> io::Result<()> {
         let event_tx = event_tx.clone();
         harn_parser::runtime_stack::spawn(move || {
             let mut stdin = io::stdin();
-            let mut sink = [0_u8; 256];
-            loop {
-                match stdin.read(&mut sink) {
-                    Ok(0) | Err(_) => break,
-                    Ok(_) => {}
-                }
-            }
+            let _ = relay_payload_stdin(&mut stdin, payload_stdin);
             let _ = event_tx.send(GuardianEvent::OwnerClosed);
         });
     }
@@ -747,6 +751,86 @@ pub fn run_guardian_from_pipe() -> io::Result<()> {
 #[deprecated(note = "use run_guardian_from_pipe")]
 pub fn run_guardian_from_env() -> io::Result<()> {
     run_guardian_from_pipe()
+}
+
+/// Payload input shares the private guardian channel, but closing payload
+/// stdin must never close the supervisor's liveness lease. Frames carry only
+/// a byte count; a zero count closes payload stdin and leaves owner monitoring
+/// active. Only this writer writes after the prepared command is delivered.
+#[cfg(unix)]
+const MAX_INPUT_FRAME_BYTES: usize = 64 * 1024;
+
+#[cfg(unix)]
+pub(crate) struct PayloadStdin(std::fs::File);
+
+#[cfg(unix)]
+pub(crate) fn payload_stdin(liveness: &ChildStdin) -> io::Result<PayloadStdin> {
+    use std::os::fd::AsFd;
+    Ok(PayloadStdin(std::fs::File::from(
+        liveness.as_fd().try_clone_to_owned()?,
+    )))
+}
+
+#[cfg(unix)]
+impl Write for PayloadStdin {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        let count = bytes.len().min(MAX_INPUT_FRAME_BYTES);
+        if count == 0 {
+            return Ok(0);
+        }
+        self.0.write_all(&(count as u32).to_be_bytes())?;
+        self.0.write_all(&bytes[..count])?;
+        Ok(count)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.0.flush()
+    }
+}
+
+#[cfg(unix)]
+impl Drop for PayloadStdin {
+    fn drop(&mut self) {
+        let _ = self.0.write_all(&0_u32.to_be_bytes());
+    }
+}
+
+#[cfg(unix)]
+fn relay_payload_stdin(owner: &mut impl Read, mut payload: Option<impl Write>) -> io::Result<()> {
+    let mut buffer = [0_u8; 4096];
+    if payload.is_none() {
+        // Existing no-stdin spawns use the channel only as a liveness lease.
+        while owner.read(&mut buffer)? != 0 {}
+        return Ok(());
+    }
+    loop {
+        let mut header = [0_u8; 4];
+        owner.read_exact(&mut header)?;
+        let count = u32::from_be_bytes(header) as usize;
+        if count == 0 {
+            drop(payload.take());
+            continue;
+        }
+        if count > MAX_INPUT_FRAME_BYTES || payload.is_none() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "invalid guardian payload input frame",
+            ));
+        }
+        let mut remaining = count;
+        while remaining != 0 {
+            let count = remaining.min(buffer.len());
+            let result = owner.read_exact(&mut buffer[..count]).and_then(|()| {
+                payload
+                    .as_mut()
+                    .expect("checked payload stdin")
+                    .write_all(&buffer[..count])
+            });
+            buffer[..count].fill(0);
+            result?;
+            remaining -= count;
+        }
+    }
 }
 
 #[cfg(unix)]
