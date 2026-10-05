@@ -14,6 +14,9 @@ use crate::vm::Vm;
 
 const HARN_REPLAY_ENV: &str = "HARN_REPLAY";
 
+mod captured_result;
+use captured_result::captured_run_to_value;
+
 thread_local! {
     pub(crate) static VM_SOURCE_DIR: RefCell<Option<PathBuf>> = const { RefCell::new(None) };
     /// The resolved environment for the current launched session. `None` means
@@ -1054,35 +1057,6 @@ fn exec_options(label: &str, options: Option<&VmValue>) -> Result<ExecOptions, V
         cwd,
         timeout,
     })
-}
-
-/// Build the `exec`-shaped result dict (`stdout`/`stderr`/`status`/`success`)
-/// and additionally surface `timed_out` so options-form callers can detect a
-/// timeout kill without inspecting the exit status.
-fn captured_run_to_value(run: &CapturedRun) -> VmValue {
-    let status = if run.timed_out || run.interrupted {
-        -1
-    } else {
-        run.output.status.code().unwrap_or(-1) as i64
-    };
-    let success = !run.timed_out && !run.interrupted && run.output.status.success();
-    let mut result = BTreeMap::new();
-    result.put_str(
-        "stdout",
-        String::from_utf8_lossy(&run.output.stdout).as_ref(),
-    );
-    result.put_str(
-        "stderr",
-        String::from_utf8_lossy(&run.output.stderr).as_ref(),
-    );
-    result.insert("status".to_string(), VmValue::Int(status));
-    result.insert("success".to_string(), VmValue::Bool(success));
-    result.insert("timed_out".to_string(), VmValue::Bool(run.timed_out));
-    result.insert("duration_ms".to_string(), VmValue::Int(run.duration_ms));
-    if let Some(id) = &run.source_verifier_id {
-        result.put_str("source_verifier_id", id);
-    }
-    VmValue::dict(result)
 }
 
 #[harn_builtin(

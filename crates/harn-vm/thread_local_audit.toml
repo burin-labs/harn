@@ -20,6 +20,7 @@ captured = [
   "EXECUTION_POLICY_STACK",
   "EXECUTION_APPROVAL_POLICY_STACK",
   "PREPARED_APPROVAL_POLICY",
+  "PREPARED_IDENTITY_CONTEXT",
   "OPERATOR_APPROVAL_GRANT_STACK",
   "COMMAND_POLICY_STACK",
   "DYNAMIC_PERMISSION_STACK",
@@ -92,6 +93,12 @@ path = "src/atomic_io.rs"
 statics = ["TEST_FAILURE_STAGE"]
 category = "thread_private"
 plan = "thread_private_test"
+
+[[thread_local]]
+path = "src/prepared_run/identity.rs"
+statics = ["PREPARED_IDENTITY_CONTEXT"]
+category = "logical_task"
+plan = "task_local_or_explicit"
 
 [[thread_local]]
 path = "src/conditional_replace.rs"

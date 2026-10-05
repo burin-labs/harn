@@ -20,6 +20,14 @@ const SKIP_SEGMENTS = [
 
 const PYTHON_ALLOWLIST = [
   {
+    kind: "exact",
+    pattern: "crates/harn-vm/tests/fixtures/source_verifier_unittest.py",
+    category: "fixture",
+    owner: "Prepared source verifier",
+    reason:
+      "VM and hostlib execute this shared Python unittest fixture to prove source-loader test discovery and module identity.",
+  },
+  {
     kind: "prefix",
     pattern: "crates/harn-cli/assets/demo/",
     category: "fixture",

@@ -74,7 +74,7 @@ pub(crate) struct AmbientExecutionScope {
     prepared_approval: Option<std::sync::Arc<RunApprovalPolicy>>,
     /// Native prepared authority follows the same execution tree as approval,
     /// including spawned subtasks and blocking host operations.
-    prepared_identity: Option<crate::prepared_run::PreparedIdentityContext>,
+    prepared_identity: Option<std::sync::Arc<crate::prepared_run::PreparedIdentityContext>>,
     operator_approval_grants: Vec<OperatorApprovalGrant>,
     command: Vec<CommandPolicy>,
     permissions: Vec<DynamicPermissionPolicy>,
@@ -184,7 +184,7 @@ impl AmbientExecutionScope {
         mut self,
         context: crate::prepared_run::PreparedIdentityContext,
     ) -> Self {
-        self.prepared_identity = Some(context);
+        self.prepared_identity = Some(std::sync::Arc::new(context));
         self
     }
 

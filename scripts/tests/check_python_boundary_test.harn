@@ -51,6 +51,15 @@ pipeline test_allowlist_exact_and_prefix_rules(harness: Harness, task: unknown) 
   assert_eq(python_boundary_rule_for("scripts/_bench_cli_cold_start.py").allowed, false)
   assert_eq(python_boundary_rule_for("scripts/verify_tree_sitter_parse.py").allowed, false)
   assert_eq(python_boundary_rule_for("scripts/new_orchestration.py").allowed, false)
+  const verifier_rule = python_boundary_rule_for(
+    "crates/harn-vm/tests/fixtures/source_verifier_unittest.py",
+  )
+  assert_eq(verifier_rule.allowed, true)
+  assert_eq(verifier_rule.owner, "Prepared source verifier")
+  assert_eq(
+    python_boundary_rule_for("crates/harn-vm/tests/fixtures/new_orchestration.py").allowed,
+    false,
+  )
 }
 
 @test

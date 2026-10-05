@@ -171,16 +171,16 @@ pub(crate) struct PreparedIdentityContext {
 }
 
 thread_local! {
-    static PREPARED_IDENTITY_CONTEXT: std::cell::RefCell<Option<PreparedIdentityContext>> = const { std::cell::RefCell::new(None) };
+    static PREPARED_IDENTITY_CONTEXT: std::cell::RefCell<Option<Arc<PreparedIdentityContext>>> = const { std::cell::RefCell::new(None) };
 }
 
 pub(crate) fn swap_prepared_identity_context(
-    context: Option<PreparedIdentityContext>,
-) -> Option<PreparedIdentityContext> {
+    context: Option<Arc<PreparedIdentityContext>>,
+) -> Option<Arc<PreparedIdentityContext>> {
     PREPARED_IDENTITY_CONTEXT.with(|slot| slot.replace(context))
 }
 
-fn current_prepared_identity_context() -> Option<PreparedIdentityContext> {
+fn current_prepared_identity_context() -> Option<Arc<PreparedIdentityContext>> {
     PREPARED_IDENTITY_CONTEXT.with(|slot| slot.borrow().clone())
 }
 
