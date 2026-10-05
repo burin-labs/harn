@@ -17,11 +17,15 @@ use super::EnvironmentPolicyConfig;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
+#[cfg(unix)]
+mod command_grant_diagnostic;
 mod eval_source;
 mod evidence;
 mod exit_status;
 mod host_dispatch;
 mod network;
+#[cfg(unix)]
+use command_grant_diagnostic::COMMAND_GRANT_FAILURE_DIAGNOSTIC;
 
 fn write_manifest_trigger_project(root: &Path, main_source: &str) -> PathBuf {
     std::fs::write(
@@ -769,43 +773,6 @@ pipeline main(harness: Harness) {{
     assert_eq!(outcome.exit_code, 0, "stderr:\n{}", outcome.stderr);
     harn_vm::reset_thread_local_state();
 }
-
-// Keep both grant controls' failure reports useful without including child
-// output, environment, denial command/resource text, or cleanup command names.
-#[cfg(unix)]
-const COMMAND_GRANT_FAILURE_DIAGNOSTIC: &str = r#"
-fn command_grant_failure(result: dict) -> dict {
-  return {
-    status: result?.status,
-    exit_code: result?.exit_code,
-    timed_out: result?.timed_out,
-    signal: result?.signal,
-    duration_ms: result?.duration_ms,
-    denial: result?.denial == nil ? nil : {
-      schema: result.denial?.schema,
-      gate: result.denial?.gate,
-      backend: result.denial?.backend,
-      operation: result.denial?.operation,
-      mechanism: result.denial?.mechanism,
-      observability: result.denial?.observability,
-      count: result.denial?.count,
-      retryable: result.denial?.retryable,
-    },
-    sandbox: result?.sandbox == nil ? nil : {
-      kind: result.sandbox?.kind,
-      enforced: result.sandbox?.enforced,
-      denial_reporting: result.sandbox?.denial_reporting,
-    },
-    process_cleanup: result?.process_cleanup == nil ? nil : {
-      root_pid: result.process_cleanup?.root_pid,
-      attempted_signals: result.process_cleanup?.attempted_signals,
-      observed_child_count: result.process_cleanup?.observed_child_count,
-      reaped_child_count: result.process_cleanup?.reaped_child_count,
-      survivor_count: result.process_cleanup?.survivor_count,
-    },
-  }
-}
-"#;
 
 /// A command-bound grant injects its snapshotted value into the matching child.
 /// The parent holds SRC but not CHILD, so the child's value proves injection.
