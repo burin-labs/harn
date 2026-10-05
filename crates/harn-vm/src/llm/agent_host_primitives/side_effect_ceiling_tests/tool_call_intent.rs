@@ -80,13 +80,15 @@ async fn approval_policy_ask_meta(options: crate::value::DictMap) -> serde_json:
     push_approval_policy(policy);
     let captured = Arc::new(StdMutex::new(Vec::new()));
     let _bridge_guard = HostBridgeGuard::replace(Some(rejecting_bridge(captured.clone())));
-    let directory = tempfile::tempdir().expect("tempdir");
+    let directory = tempfile::tempdir_in(crate::orchestration::execution_root_path())
+        .expect("fixture inside the execution workspace");
     let path = directory.path().join("proof.txt");
     std::fs::write(&path, "must not run before approval").expect("fixture");
     let result = dispatch_read_file(&path, &options).await;
     pop_approval_policy();
     clear_all_approval_policy_repeat_counts();
     assert_eq!(result["ok"], serde_json::json!(false), "{result}");
+    assert_eq!(result["denial"]["gate"], "host_rejected", "{result}");
     only_permission_meta(&captured)
 }
 

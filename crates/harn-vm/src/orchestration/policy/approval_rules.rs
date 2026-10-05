@@ -32,6 +32,15 @@ pub use rule_source::PolicyRuleSource;
 
 const POLICY_RECEIPT_TYPE: &str = "harn.permission_policy_decision.v1";
 
+/// A request to acquire authority, not permission to perform a concrete effect.
+/// PreparedRun still intersects host ceilings and requires a fingerprinted
+/// approved lease before any use. This Rust-only seam is unavailable to host
+/// invocation transport, which must use ToolApprovalRequest.
+pub(crate) struct PolicyAuthorityRequest {
+    pub authority_name: String,
+    pub arguments: JsonValue,
+}
+
 thread_local! {
     static APPROVAL_CALL_COUNTS: RefCell<BTreeMap<String, u64>> = const { RefCell::new(BTreeMap::new()) };
     static APPROVAL_UNAVAILABLE_CLASS_COUNTS: RefCell<BTreeMap<String, u64>> = const { RefCell::new(BTreeMap::new()) };
@@ -906,6 +915,24 @@ pub fn evaluate_tool_approval_request(
         return host_request::invalid_request(request, reason);
     }
     evaluate_context(policy, EvaluationContext::from_request(request))
+}
+
+pub(crate) fn evaluate_authority_request(
+    policy: &ToolApprovalPolicy,
+    request: &PolicyAuthorityRequest,
+) -> Result<PolicyEvaluation, String> {
+    if request.authority_name.trim().is_empty() || !request.arguments.is_object() {
+        return Err("authority policy request requires a name and object arguments".into());
+    }
+    let mut context = EvaluationContext::new(&request.authority_name, &request.arguments, None);
+    // Requested roots are matcher facts, not already-admitted concrete effect
+    // paths. Keep path_candidates for authored and sensitive-path refusals,
+    // while omitting effect-only workspace admission and captured invocation
+    // memory. No caller-provided flag can weaken concrete effect validation.
+    context.path_entries.clear();
+    context.literal_identity = None;
+    context.invocation_sha256 = None;
+    Ok(evaluate_context(policy, context))
 }
 
 fn evaluate_context(policy: &ToolApprovalPolicy, mut ctx: EvaluationContext) -> PolicyEvaluation {
