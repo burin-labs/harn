@@ -770,12 +770,45 @@ pipeline main(harness: Harness) {{
     harn_vm::reset_thread_local_state();
 }
 
-/// A `--grant NAME=env:SRC,expose=CHILD,for=sh` granted policy must inject the
-/// snapshotted value into a matching subprocess only — the least-privilege
-/// surface that lets a headless lane open its PR (`GH_TOKEN` for `gh`) without
-/// ambient exposure to every `process.exec`. The parent process holds `SRC`
-/// but not `CHILD`, so the child seeing `CHILD` proves the grant injected it
-/// rather than ambient inheritance.
+// Keep both grant controls' failure reports useful without including child
+// output, environment, denial command/resource text, or cleanup command names.
+#[cfg(unix)]
+const COMMAND_GRANT_FAILURE_DIAGNOSTIC: &str = r#"
+fn command_grant_failure(result: dict) -> dict {
+  return {
+    status: result?.status,
+    exit_code: result?.exit_code,
+    timed_out: result?.timed_out,
+    signal: result?.signal,
+    duration_ms: result?.duration_ms,
+    denial: result?.denial == nil ? nil : {
+      schema: result.denial?.schema,
+      gate: result.denial?.gate,
+      backend: result.denial?.backend,
+      operation: result.denial?.operation,
+      mechanism: result.denial?.mechanism,
+      observability: result.denial?.observability,
+      count: result.denial?.count,
+      retryable: result.denial?.retryable,
+    },
+    sandbox: result?.sandbox == nil ? nil : {
+      kind: result.sandbox?.kind,
+      enforced: result.sandbox?.enforced,
+      denial_reporting: result.sandbox?.denial_reporting,
+    },
+    process_cleanup: result?.process_cleanup == nil ? nil : {
+      root_pid: result.process_cleanup?.root_pid,
+      attempted_signals: result.process_cleanup?.attempted_signals,
+      observed_child_count: result.process_cleanup?.observed_child_count,
+      reaped_child_count: result.process_cleanup?.reaped_child_count,
+      survivor_count: result.process_cleanup?.survivor_count,
+    },
+  }
+}
+"#;
+
+/// A command-bound grant injects its snapshotted value into the matching child.
+/// The parent holds SRC but not CHILD, so the child's value proves injection.
 #[cfg(unix)]
 #[tokio::test]
 async fn execute_run_granted_policy_injects_into_subprocess_env() {
@@ -793,7 +826,9 @@ async fn execute_run_granted_policy_injects_into_subprocess_env() {
     let script = project.join("main.harn");
     std::fs::write(
         &script,
-        r#"
+        [
+            COMMAND_GRANT_FAILURE_DIAGNOSTIC,
+            r#"
 import { command_run } from "std/command"
 
 pipeline main(harness: Harness) {
@@ -803,11 +838,13 @@ pipeline main(harness: Harness) {
     {capture: {max_inline_bytes: 64}, timeout_ms: 5000},
   )
   if !result.success {
-    throw "command_run failed: exit_code=${result.exit_code} stderr=${result.stderr}"
+    throw "command_run failed: ${json_stringify(command_grant_failure(result))}"
   }
   harness.stdio.println(result.stdout)
 }
 "#,
+        ]
+        .concat(),
     )
     .expect("write script");
 
@@ -861,7 +898,9 @@ async fn execute_run_command_bound_grant_skips_non_matching_exec() {
     let script = project.join("main.harn");
     std::fs::write(
         &script,
-        r#"
+        [
+            COMMAND_GRANT_FAILURE_DIAGNOSTIC,
+            r#"
 import { command_run } from "std/command"
 
 pipeline main(harness: Harness) {
@@ -871,11 +910,13 @@ pipeline main(harness: Harness) {
     {capture: {max_inline_bytes: 65536}, timeout_ms: 5000},
   )
   if !result.success {
-    throw "command_run failed: exit_code=${result.exit_code} stderr=${result.stderr}"
+    throw "command_run failed: ${json_stringify(command_grant_failure(result))}"
   }
   harness.stdio.println(result.stdout.contains("HARN_TEST_CHILD_VAR=") ? "leaked" : "absent")
 }
 "#,
+        ]
+        .concat(),
     )
     .expect("write script");
 
