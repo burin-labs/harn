@@ -1,7 +1,7 @@
 import { __visible_text } from "std/agent/loop_tool_calls"
 import { parse_tool_calls } from "std/llm/tool_parse"
 
-pipeline test_empty_parsed_body_never_restores_raw_wrappers() {
+fn empty_parsed_body_never_restores_raw_wrappers() {
   for body in [
     "<user_response></user_response>",
     "<user_response>  \n </user_response>",
@@ -20,11 +20,17 @@ pipeline test_empty_parsed_body_never_restores_raw_wrappers() {
   }
 }
 
-pipeline test_visible_text_preserves_nonempty_answers_and_absent_field_fallback() {
+fn visible_text_preserves_nonempty_answers_and_absent_field_fallback() {
   const raw = "<user_response>ready</user_response><done>##DONE##</done>"
   const parsed = parse_tool_calls({text: raw, tool_format: "text", tools: {}})
   assert_eq(__visible_text(parsed, raw), "ready")
   assert_eq(__visible_text({}, "ordinary answer"), "ordinary answer")
   assert_eq(__visible_text({user_response: "", prose: "stale prose"}, raw), "")
   assert_eq(__visible_text({prose: ""}, raw), "")
+}
+
+pipeline main(harness: Harness) {
+  empty_parsed_body_never_restores_raw_wrappers()
+  visible_text_preserves_nonempty_answers_and_absent_field_fallback()
+  harness.stdio.println("visible body controls passed")
 }
