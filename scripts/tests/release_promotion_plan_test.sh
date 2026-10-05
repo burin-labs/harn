@@ -101,6 +101,9 @@ commit_version 0.10.142-dev "Change something"
 plan warm
 [[ "$(cat "$tmp/warm.status")" == 0 && "$(output warm promote)" == false ]] \
   || fail "a development push was promoted: $(cat "$tmp/warm.log")"
+plan recovery_warm RECOVERY=true
+[[ "$(cat "$tmp/recovery_warm.status")" != 0 && -z "$(output recovery_warm promote)" ]] \
+  || fail "manual recovery accepted a warm run"
 
 commit_version 0.10.142 "Bump the workspace version"
 head_sha="$(git -C "$repo" rev-parse HEAD)"
@@ -178,5 +181,8 @@ plan release_subject
 commit_version 0.10.143-rc.1 "Prerelease"
 plan prerelease
 [[ "$(output prerelease promote)" == false ]] || fail "a prerelease was promoted"
+plan recovery_prerelease RECOVERY=true
+[[ "$(cat "$tmp/recovery_prerelease.status")" != 0 ]] \
+  || fail "manual recovery accepted a prerelease run"
 
 echo "release_promotion_plan_test: ok"

@@ -28,6 +28,10 @@ on:
         description: Successful candidate run whose source is already on main
         required: true
         type: string
+      candidate_sha:
+        description: Full source SHA certified by the candidate run
+        required: true
+        type: string
   # Privileged `workflow_run` is intentional: the resolver executes trusted
   # main code and validates the producer before candidate source is read.
   workflow_run: # zizmor: ignore[dangerous-triggers] promotes only main push runs of this repository
@@ -39,8 +43,9 @@ permissions:
   contents: read
 
 concurrency:
-  # Recovery and automatic publication share one owner, including reruns.
-  group: promote-release
+  # Recovery and automatic publication of one source share the existing key.
+  # Warm pushes must not replace a pending release for another source.
+  group: promote-release-${{ github.event.workflow_run.head_sha || inputs.candidate_sha }}
   cancel-in-progress: false
 
 jobs:
@@ -69,6 +74,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           CANDIDATE_RUN_ID: ${{ inputs.candidate_run_id || github.event.workflow_run.id }}
+          EXPECTED_SOURCE_SHA: ${{ inputs.candidate_sha || github.event.workflow_run.head_sha }}
         run: bash scripts/resolve-release-promotion-source.sh
 
   plan:
@@ -117,6 +123,10 @@ jobs:
           version="$(release_workspace_version < "$source_directory/Cargo.toml")"
           previous="$(git -C "$source_directory" show HEAD^:Cargo.toml | release_workspace_version)"
           if ! release_push_is_stable_version_change "$previous" "$version"; then
+            if [[ "${RECOVERY:-false}" == true ]]; then
+              echo "::error::Requested recovery source is not a stable release version transition."
+              exit 1
+            fi
             echo "::notice::$HEAD_SHA keeps the workspace version at $version (was $previous); its run built no candidate, so there is nothing to promote."
             echo "promote=false" >> "$GITHUB_OUTPUT"
             exit 0

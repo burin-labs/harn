@@ -25,6 +25,7 @@ resolve() {
   : > "$tmp/output"
   env PATH="$tmp/bin:$PATH" FIXTURE="$tmp" GITHUB_REPOSITORY=burin-labs/harn \
     CANDIDATE_RUN_ID="${1:-4242}" GITHUB_OUTPUT="$tmp/output" \
+    EXPECTED_SOURCE_SHA="${2:-$sha}" \
     bash "$root/scripts/resolve-release-promotion-source.sh" > "$tmp/log" 2>&1
 }
 fail() { echo "FAIL: $*" >&2; exit 1; }
@@ -64,4 +65,9 @@ refuse 'empty producer'
 cp "$tmp/good-run.json" "$tmp/run.json"
 if resolve '4242/../../other'; then fail 'invalid run accepted'; fi
 [[ ! -s "$tmp/output" ]] || fail 'invalid run emitted output'
+if resolve 4242 0000000000000000000000000000000000000000; then
+  fail 'producer differing from publication key accepted'
+fi
+[[ ! -s "$tmp/output" ]] || fail 'mismatched publication key emitted output'
+if resolve 4242 abc; then fail 'invalid publication key accepted'; fi
 echo 'release_promotion_source_test: ok'
