@@ -1,11 +1,12 @@
-// `split(text, sep)` and `text.split(sep)` both require a separator; neither
-// form silently picks a default.
+/**
+ * `split(text, sep)` and `text.split(sep)` both require a separator; neither
+ * form silently picks a default.
+ */
 pipeline test(harness: Harness, task: unknown) {
   assert_eq(split("a b", " "), ["a", "b"])
   assert_eq("a b".split(" "), ["a", "b"])
   assert_eq(split("a,b", ","), "a,b".split(","))
   assert_eq(split("a b", ","), ["a b"])
-
   const text: any = "a b"
   const builtin_form = try {
     split(text)
@@ -14,7 +15,6 @@ pipeline test(harness: Harness, task: unknown) {
   // The builtin's signature declares the separator required, so the call is
   // refused at the arity guard.
   assert(contains(to_string(unwrap_err(builtin_form)), "'split' expects 2 arguments"))
-
   const method_form = try {
     text.split()
   }

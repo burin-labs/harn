@@ -1,6 +1,8 @@
-// Named groups merge into each regex_captures result dict, so a group may
-// not reuse a built-in key (match, groups, start, end, line). Reusing one is
-// rejected instead of silently overwriting the built-in value.
+/**
+ * Named groups merge into each regex_captures result dict, so a group may
+ * not reuse a built-in key (match, groups, start, end, line). Reusing one is
+ * rejected instead of silently overwriting the built-in value.
+ */
 pipeline test(harness: Harness, task: unknown) {
   for key in ["match", "groups", "start", "end", "line"] {
     const result = try {
