@@ -639,6 +639,16 @@ pub fn run_guardian_from_pipe() -> io::Result<()> {
     let payload_stdin = payload.stdin.take();
     let (event_tx, event_rx) = std::sync::mpsc::channel();
 
+    if payload_stdin.is_some() {
+        let event_tx = event_tx.clone();
+        harn_parser::runtime_stack::spawn(move || {
+            // Payload input may block while the child is not reading. Observe
+            // pipe hangup independently, without consuming its input bytes.
+            let _ = wait_for_owner_pipe_close();
+            let _ = event_tx.send(GuardianEvent::OwnerClosed);
+        });
+    }
+
     if let Some(mut stdout) = stdout {
         let event_tx = event_tx.clone();
         harn_parser::runtime_stack::spawn(move || {
@@ -834,6 +844,29 @@ fn relay_payload_stdin(owner: &mut impl Read, mut payload: Option<impl Write>) -
 }
 
 #[cfg(unix)]
+fn wait_for_owner_pipe_close() -> io::Result<()> {
+    loop {
+        let mut pipe = libc::pollfd {
+            fd: libc::STDIN_FILENO,
+            // Hangup/error are reported even when no readable event is
+            // requested. Unconsumed payload bytes must not make us spin.
+            events: 0,
+            revents: 0,
+        };
+        if unsafe { libc::poll(&raw mut pipe, 1, -1) } < 0 {
+            let error = io::Error::last_os_error();
+            if error.kind() == io::ErrorKind::Interrupted {
+                continue;
+            }
+            return Err(error);
+        }
+        if pipe.revents & (libc::POLLHUP | libc::POLLERR | libc::POLLNVAL) != 0 {
+            return Ok(());
+        }
+    }
+}
+
+#[cfg(unix)]
 fn read_request() -> io::Result<Vec<u8>> {
     let mut stdin = io::stdin();
     let mut request = Vec::new();
@@ -908,6 +941,12 @@ fn run_guardian_reaper() -> ! {
 /// can hide and a reused pid cannot fake.
 #[cfg(unix)]
 fn relay_owner_liveness(owner: libc::pid_t, mut guardian: io::PipeWriter) {
+    use std::os::fd::AsRawFd;
+    let fd = guardian.as_raw_fd();
+    let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
+    if flags < 0 || unsafe { libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK) } < 0 {
+        return;
+    }
     let mut buffer = [0_u8; 4096];
     while unsafe { libc::getppid() } == owner {
         let mut poll_fd = libc::pollfd {
@@ -930,7 +969,10 @@ fn relay_owner_liveness(owner: libc::pid_t, mut guardian: io::PipeWriter) {
         match read {
             0 => return,
             read if read > 0 => {
-                if guardian.write_all(&buffer[..read as usize]).is_err() {
+                let copied =
+                    write_relay_while_owner_alive(owner, &mut guardian, &buffer[..read as usize]);
+                buffer.fill(0);
+                if !matches!(copied, Ok(true)) {
                     return;
                 }
             }
@@ -942,6 +984,61 @@ fn relay_owner_liveness(owner: libc::pid_t, mut guardian: io::PipeWriter) {
             }
         }
     }
+}
+
+/// Backpressure must not stop the reaper checking whether its parent died.
+/// This writer owns the relay's nonblocking descriptor; its drop delivers
+/// hangup to the guardian even while payload delivery is stalled.
+#[cfg(unix)]
+fn write_relay_while_owner_alive(
+    owner: libc::pid_t,
+    guardian: &mut io::PipeWriter,
+    mut bytes: &[u8],
+) -> io::Result<bool> {
+    use std::os::fd::AsRawFd;
+    while !bytes.is_empty() {
+        if unsafe { libc::getppid() } != owner {
+            return Ok(false);
+        }
+        let mut pipe = libc::pollfd {
+            fd: guardian.as_raw_fd(),
+            events: libc::POLLOUT,
+            revents: 0,
+        };
+        match unsafe { libc::poll(&raw mut pipe, 1, OWNER_POLL_INTERVAL_MS) } {
+            0 => continue,
+            ready if ready < 0 => {
+                let error = io::Error::last_os_error();
+                if error.kind() == io::ErrorKind::Interrupted {
+                    continue;
+                }
+                return Err(error);
+            }
+            _ => {}
+        }
+        if pipe.revents & (libc::POLLHUP | libc::POLLERR | libc::POLLNVAL) != 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::BrokenPipe,
+                "guardian relay closed",
+            ));
+        }
+        match guardian.write(bytes) {
+            Ok(0) => {
+                return Err(io::Error::new(
+                    io::ErrorKind::WriteZero,
+                    "guardian relay stopped",
+                ))
+            }
+            Ok(written) => bytes = &bytes[written..],
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    io::ErrorKind::Interrupted | io::ErrorKind::WouldBlock
+                ) => {}
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(true)
 }
 
 #[cfg(target_os = "linux")]

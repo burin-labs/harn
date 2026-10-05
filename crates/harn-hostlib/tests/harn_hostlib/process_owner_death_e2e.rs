@@ -16,6 +16,7 @@ use super::process_tools_e2e::{declare_inherited, lock_env};
 const OWNER_DEATH_SUPERVISOR_ENV: &str = "HARN_TEST_OWNER_DEATH_SUPERVISOR";
 const OWNER_DEATH_REPORT_FD_ENV: &str = "HARN_TEST_OWNER_DEATH_REPORT_FD";
 const OWNER_DEATH_LEAK_LIVENESS_ENV: &str = "HARN_TEST_OWNER_DEATH_LEAK_LIVENESS";
+const OWNER_DEATH_STALLED_STDIN_ENV: &str = "HARN_TEST_OWNER_DEATH_STALLED_STDIN";
 
 #[test]
 fn owner_death_grandchild_fixture() {
@@ -78,22 +79,80 @@ fn owner_death_supervisor_fixture() {
         "process_tools_e2e::owner_death_guardian_fixture",
         "--nocapture",
     ]);
-    let info = harn_hostlib::tools::long_running::spawn_long_running(
-        "owner_death_supervisor_fixture",
-        std::env::current_exe()
-            .expect("resolve process-tools test executable")
-            .to_string_lossy()
-            .into_owned(),
-        vec![
-            "--exact".to_string(),
-            "process_owner_death_e2e::owner_death_payload_fixture".to_string(),
-            "--nocapture".to_string(),
-        ],
-        None,
-        std::collections::BTreeMap::new(),
-        format!("owner-death-supervisor-{}", std::process::id()),
-    )
-    .expect("spawn managed background payload");
+    let mut input_owner = None;
+    let (worker_pid, worker_pgid) = if std::env::var_os(OWNER_DEATH_STALLED_STDIN_ENV).is_some() {
+        use harn_hostlib::process::{
+            spawn_process, EnvMode, OutputCapture, OwnerDeathPolicy, SpawnSpec,
+        };
+        let mut child = spawn_process(SpawnSpec {
+            builtin: "owner_death_stalled_input_fixture",
+            program: std::env::current_exe()
+                .unwrap()
+                .to_string_lossy()
+                .into_owned(),
+            args: vec![
+                "--exact".into(),
+                "process_owner_death_e2e::owner_death_payload_fixture".into(),
+                "--nocapture".into(),
+            ],
+            cwd: None,
+            env: std::collections::BTreeMap::new(),
+            env_remove: Vec::new(),
+            env_mode: EnvMode::Patch,
+            use_stdin: true,
+            configure_process_group: true,
+            owner_death: OwnerDeathPolicy::KillContainment,
+            output_capture: OutputCapture::Pipe,
+        })
+        .expect("spawn actual contained child with application stdin");
+        let pid = child.pid().expect("payload pid");
+        let pgid = child.process_group_id().expect("payload group");
+        let mut input = child.take_stdin().expect("payload input");
+        let (started_tx, started_rx) = std::sync::mpsc::channel();
+        let (done_tx, done_rx) = std::sync::mpsc::channel();
+        harn_parser::runtime_stack::spawn(move || {
+            let bytes = [0_u8; 4096];
+            input.write_all(&bytes).expect("first actual input write");
+            started_tx.send(()).unwrap();
+            // The payload never reads stdin. More than any ordinary pipe
+            // capacity ensures both forwarding stages encounter backpressure.
+            let result = (0..16_384).try_for_each(|_| input.write_all(&bytes));
+            let _ = done_tx.send(result.is_ok());
+        });
+        started_rx
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .expect("writer reached the actual pipe");
+        assert!(
+            matches!(
+                done_rx.recv_timeout(std::time::Duration::from_secs(1)),
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout)
+            ),
+            "input must be stalled before owner death"
+        );
+        input_owner = Some(child);
+        (pid, pgid)
+    } else {
+        let info = harn_hostlib::tools::long_running::spawn_long_running(
+            "owner_death_supervisor_fixture",
+            std::env::current_exe()
+                .expect("resolve process-tools test executable")
+                .to_string_lossy()
+                .into_owned(),
+            vec![
+                "--exact".to_string(),
+                "process_owner_death_e2e::owner_death_payload_fixture".to_string(),
+                "--nocapture".to_string(),
+            ],
+            None,
+            std::collections::BTreeMap::new(),
+            format!("owner-death-supervisor-{}", std::process::id()),
+        )
+        .expect("spawn managed background payload");
+        (
+            info.pid,
+            info.process_group_id.expect("worker process group"),
+        )
+    };
     // A sibling forked without exec keeps every descriptor this process holds,
     // including the write end of the guardian's liveness pipe. It stands in
     // for a process another thread spawned while that pipe was still
@@ -130,11 +189,13 @@ fn owner_death_supervisor_fixture() {
         "supervisor={} supervisor_pgid={} worker={} worker_pgid={} holder={}",
         std::process::id(),
         unsafe { libc::getpgrp() },
-        info.pid,
-        info.process_group_id.expect("worker process group"),
+        worker_pid,
+        worker_pgid,
         leaked_liveness_holder,
     );
     std::io::stdout().flush().expect("flush supervisor report");
+    // Retain the real process handle, including its owner-liveness writer.
+    std::hint::black_box(&input_owner);
     loop {
         unsafe {
             libc::pause();
@@ -161,7 +222,14 @@ impl Drop for ProcessGroupCleanup {
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 #[test]
 fn managed_background_group_dies_when_its_supervisor_is_sigkilled() {
-    assert_managed_background_group_dies_with_supervisor(false);
+    assert_managed_background_group_dies_with_supervisor(false, false);
+}
+
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[test]
+fn contained_group_dies_when_payload_stdin_is_stalled_and_owner_is_sigkilled() {
+    assert_managed_background_group_dies_with_supervisor(false, true);
+    assert_managed_background_group_dies_with_supervisor(true, true);
 }
 
 /// The liveness pipe's EOF is not the only owner-death signal: a leaked copy
@@ -173,14 +241,17 @@ fn managed_background_group_dies_when_its_supervisor_is_sigkilled() {
 #[test]
 fn managed_background_group_dies_when_a_sibling_holds_the_liveness_pipe() {
     for _ in 0..OWNER_EXIT_STRESS_TRIALS {
-        assert_managed_background_group_dies_with_supervisor(true);
+        assert_managed_background_group_dies_with_supervisor(true, false);
     }
 }
 
 const OWNER_EXIT_STRESS_TRIALS: usize = 20;
 
 #[cfg(any(target_os = "macos", target_os = "linux"))]
-fn assert_managed_background_group_dies_with_supervisor(leak_liveness_pipe: bool) {
+fn assert_managed_background_group_dies_with_supervisor(
+    leak_liveness_pipe: bool,
+    stalled_stdin: bool,
+) {
     // Held for the whole trial. Each trial's report pipe is inheritable on
     // purpose, so a concurrent trial's supervisor would hold a copy of it, and
     // a test that rewrites TMPDIR while the supervisor spawns hands it a
@@ -213,6 +284,9 @@ fn assert_managed_background_group_dies_with_supervisor(leak_liveness_pipe: bool
         .process_group(0);
     if leak_liveness_pipe {
         supervisor.env(OWNER_DEATH_LEAK_LIVENESS_ENV, "1");
+    }
+    if stalled_stdin {
+        supervisor.env(OWNER_DEATH_STALLED_STDIN_ENV, "1");
     }
     let mut supervisor = supervisor.spawn().expect("spawn isolated supervisor");
     unsafe {
