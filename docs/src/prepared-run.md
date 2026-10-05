@@ -105,6 +105,13 @@ attached authority and identity scope as `run_turn`; the embedder calls
 the session attached. Its accepted lifecycle event calls `finish` or `stop` to
 persist terminal accounting and retire the lease.
 
+ACP embedders implement `AcpRuntimeConfigurator::run_prompt` to scope that
+future on the server's engine executor. The context identifies the session and
+workspace and exposes accepted cancellation. Refusing before polling the future
+prevents VM, host-capability, and provider execution. Provider endpoint overrides
+preserve this configurator. The adapter still owns prompt responses, event
+flushing, and cancellation classification.
+
 `PreparedRun::request_delta` remains the typed attenuation interface for a
 single prepared run. `PreparedSession::request_delta` adds the interactive
 session behavior: an identical requirement is already covered, attenuation is
