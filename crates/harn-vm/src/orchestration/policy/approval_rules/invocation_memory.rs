@@ -139,7 +139,12 @@ mod tests {
         assert!(saved.evaluate_request(&other_workspace).is_ask());
         let mut no_boundary = original.clone();
         no_boundary.workspace_boundary = None;
-        assert!(saved.evaluate_request(&no_boundary).is_ask());
+        let refused = saved.evaluate_request(&no_boundary);
+        assert!(refused.is_deny());
+        assert_eq!(
+            refused.receipt["matched_rule"]["id"],
+            "invalid_host_request"
+        );
         assert!(no_boundary.capture_decision(PolicyAction::Allow).is_err());
         assert!(original.capture_decision(PolicyAction::Ask).is_err());
         let denied = policy(original.capture_decision(PolicyAction::Deny).unwrap());
