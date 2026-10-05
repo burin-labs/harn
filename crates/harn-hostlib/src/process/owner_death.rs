@@ -644,8 +644,11 @@ pub fn run_guardian_from_pipe() -> io::Result<()> {
         harn_parser::runtime_stack::spawn(move || {
             // Payload input may block while the child is not reading. Observe
             // pipe hangup independently, without consuming its input bytes.
-            let _ = wait_for_owner_pipe_close();
-            let _ = event_tx.send(GuardianEvent::OwnerClosed);
+            let event = match wait_for_owner_pipe_close() {
+                Ok(()) => GuardianEvent::OwnerClosed,
+                Err(error) => GuardianEvent::InputFailed(error),
+            };
+            let _ = event_tx.send(event);
         });
     }
 
@@ -674,8 +677,14 @@ pub fn run_guardian_from_pipe() -> io::Result<()> {
         let event_tx = event_tx.clone();
         harn_parser::runtime_stack::spawn(move || {
             let mut stdin = io::stdin();
-            let _ = relay_payload_stdin(&mut stdin, payload_stdin);
-            let _ = event_tx.send(GuardianEvent::OwnerClosed);
+            let event = match relay_payload_stdin(&mut stdin, payload_stdin) {
+                Ok(()) => GuardianEvent::OwnerClosed,
+                Err(error) if error.kind() == io::ErrorKind::UnexpectedEof => {
+                    GuardianEvent::OwnerClosed
+                }
+                Err(error) => GuardianEvent::InputFailed(error),
+            };
+            let _ = event_tx.send(event);
         });
     }
     drop(event_tx);
@@ -684,7 +693,10 @@ pub fn run_guardian_from_pipe() -> io::Result<()> {
     let mut open_outputs = 2_u8;
     while let Ok(event) = event_rx.recv() {
         match event {
-            GuardianEvent::OwnerClosed => {
+            event @ (GuardianEvent::OwnerClosed | GuardianEvent::InputFailed(_)) => {
+                if let GuardianEvent::InputFailed(error) = event {
+                    eprintln!("guardian input failed: {error}");
+                }
                 let _ =
                     harn_vm::op_interrupt::signal_pid_tree_and_token_preserving_group_with_report(
                         payload_pid,
@@ -813,15 +825,17 @@ fn relay_payload_stdin(owner: &mut impl Read, mut payload: Option<impl Write>) -
         while owner.read(&mut buffer)? != 0 {}
         return Ok(());
     }
+    let mut closed_by_owner = false;
     loop {
         let mut header = [0_u8; 4];
         owner.read_exact(&mut header)?;
         let count = u32::from_be_bytes(header) as usize;
         if count == 0 {
             drop(payload.take());
+            closed_by_owner = true;
             continue;
         }
-        if count > MAX_INPUT_FRAME_BYTES || payload.is_none() {
+        if count > MAX_INPUT_FRAME_BYTES || closed_by_owner {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 "invalid guardian payload input frame",
@@ -831,13 +845,23 @@ fn relay_payload_stdin(owner: &mut impl Read, mut payload: Option<impl Write>) -
         while remaining != 0 {
             let count = remaining.min(buffer.len());
             let result = owner.read_exact(&mut buffer[..count]).and_then(|()| {
-                payload
-                    .as_mut()
-                    .expect("checked payload stdin")
-                    .write_all(&buffer[..count])
+                if let Some(payload) = payload.as_mut() {
+                    payload.write_all(&buffer[..count])
+                } else {
+                    Ok(())
+                }
             });
             buffer[..count].fill(0);
-            result?;
+            match result {
+                Err(error) if error.kind() == io::ErrorKind::BrokenPipe => {
+                    // The child may finish without accepting more input. Keep
+                    // draining the private frames so its live owner can finish
+                    // sending, while the independent hangup watcher remains
+                    // responsible for owner death under backpressure.
+                    drop(payload.take());
+                }
+                result => result?,
+            }
             remaining -= count;
         }
     }
@@ -1088,7 +1112,11 @@ fn wait_for_payload_exit(
     while payload_status.is_none() {
         match events.recv() {
             Ok(GuardianEvent::PayloadExited(status)) => *payload_status = Some(status?),
-            Ok(GuardianEvent::OutputClosed | GuardianEvent::OwnerClosed) => {}
+            Ok(
+                GuardianEvent::OutputClosed
+                | GuardianEvent::OwnerClosed
+                | GuardianEvent::InputFailed(_),
+            ) => {}
             Err(_) => {
                 return Err(io::Error::other(
                     "guardian events closed before payload exit",
@@ -1140,6 +1168,7 @@ impl Drop for OwnerJournalCleanup {
 #[cfg(unix)]
 enum GuardianEvent {
     OwnerClosed,
+    InputFailed(io::Error),
     PayloadExited(io::Result<ExitStatus>),
     OutputClosed,
 }
