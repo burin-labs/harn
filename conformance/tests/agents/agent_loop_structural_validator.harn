@@ -477,7 +477,10 @@ pipeline default(harness: Harness) {
     harness.llm,
     [
       {text: "Brief update.", output_tokens: 94},
-      {text: "<done>##DONE##</done>", output_tokens: 10},
+      {
+        text: "<user_response>Finished the update.</user_response><done>##DONE##</done>",
+        output_tokens: 10,
+      },
     ],
     { ->
       const under_cap_session = "structural-validator-output-under-cap-" + harness.random.uuid()
