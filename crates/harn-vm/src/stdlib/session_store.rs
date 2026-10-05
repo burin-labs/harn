@@ -11,9 +11,9 @@ use std::sync::Arc;
 
 use harn_session_store::{
     AppendEvent, CreateSession, EventId, EventIdentity, EventIdentityField, ImportSession,
-    ListFilter, ListOrder, ListSortKey, ReadRange, SearchFilter, SearchMode, SearchQuery,
-    SessionEventKind, SessionImporter, SessionLeaseError, SessionStatus, SessionStore, SessionType,
-    SqliteSessionStore, StoreError, StoredEvent, VerifyReport, MAX_READ_BATCH,
+    ListFilter, ListOrder, ListSortKey, SearchFilter, SearchMode, SearchQuery, SessionEventKind,
+    SessionImporter, SessionLeaseError, SessionStatus, SessionStore, SessionType,
+    SqliteSessionStore, StoreError, StoredEvent, VerifyReport,
 };
 use serde::Deserialize;
 use serde_json::{json, Value as JsonValue};
