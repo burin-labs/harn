@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
 use async_trait::async_trait;
@@ -326,6 +326,8 @@ fn fallback_body_digest(body: &[u8]) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
+
     use super::*;
     use crate::connectors::{RateLimiterFactory, TriggerBinding};
     use crate::event_log::{install_memory_for_current_thread, reset_active_event_log};

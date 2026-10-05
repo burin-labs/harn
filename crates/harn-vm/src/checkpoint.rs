@@ -213,7 +213,7 @@ fn with_state<R>(
     })
 }
 
-use crate::value::json_to_vm_value;
+use crate::json_to_vm_value;
 use crate::value::vm_to_storage_json as vm_to_json;
 
 /// Sanitize a pipeline name for use as a filename.

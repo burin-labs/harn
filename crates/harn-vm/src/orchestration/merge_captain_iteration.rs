@@ -20,7 +20,7 @@ use super::{
     MergeCaptainDriverOptions, MergeCaptainRunSummary,
 };
 use crate::orchestration::artifact_files::{
-    resolve_manifest_path, safe_path_segment, write_bytes_file, write_json_file, write_text_file,
+    resolve_manifest_path, safe_path_segment, write_json_file, write_text_file,
 };
 
 const MANIFEST_TYPE: &str = "merge_captain_iteration_manifest";

@@ -97,7 +97,7 @@ impl StoreState {
     }
 }
 
-use crate::value::json_to_vm_value;
+use crate::json_to_vm_value;
 use crate::value::vm_to_storage_json as vm_to_json;
 
 /// Register persistent key-value store builtins on a VM.
