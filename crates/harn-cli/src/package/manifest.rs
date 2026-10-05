@@ -1,9 +1,7 @@
 use super::errors::PackageError;
 use super::*;
 mod check_config;
-mod connector_capabilities;
 mod connector_module;
-mod provider_setup;
 pub(crate) use check_config::absolutize_check_config_paths;
 pub use check_config::{load_check_config, CheckConfig, PreflightSeverity};
 pub use connector_capabilities::{normalize_connector_capability, ConnectorCapabilities};
@@ -11,6 +9,11 @@ pub use connector_module::is_declared_connector_module;
 pub use harn_modules::personas::{
     PersonaAutonomyTier, PersonaManifestEntry, PersonaStageDecl, PersonaStageExit,
     PersonaValidationError, ResolvedPersonaManifest,
+};
+use harn_vm::connectors::manifest as connector_capabilities;
+use harn_vm::connectors::manifest as provider_setup;
+pub use harn_vm::connectors::manifest::{
+    ProviderConnectorManifest, ProviderOAuthManifest, ResolvedProviderConnectorKind,
 };
 pub use provider_setup::{
     connector_service_issues, ConnectorConditionalProfileRequirement,
@@ -1044,42 +1047,6 @@ impl RuntimeExtensions {
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ProviderConnectorManifest {
-    #[serde(default)]
-    pub harn: Option<String>,
-    #[serde(default)]
-    pub rust: Option<String>,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ProviderOAuthManifest {
-    #[serde(default, alias = "auth_url", alias = "authorization-endpoint")]
-    pub authorization_endpoint: Option<String>,
-    #[serde(default, alias = "token_url", alias = "token-endpoint")]
-    pub token_endpoint: Option<String>,
-    #[serde(default, alias = "registration_url", alias = "registration-endpoint")]
-    pub registration_endpoint: Option<String>,
-    #[serde(default)]
-    pub resource: Option<String>,
-    #[serde(default, alias = "scope")]
-    pub scopes: Option<String>,
-    #[serde(default, alias = "client-id")]
-    pub client_id: Option<String>,
-    #[serde(default, alias = "client-secret")]
-    pub client_secret: Option<String>,
-    #[serde(default, alias = "token_auth_method", alias = "token-auth-method")]
-    pub token_endpoint_auth_method: Option<String>,
-    /// Extra query parameters for the authorization request, such as
-    /// `access_type = "offline"`. They override the defaults `harn connect`
-    /// applies for a known authorization server, and may not replace a
-    /// parameter the OAuth flow itself owns (`client_id`, `state`, ...).
-    #[serde(default, alias = "authorization-params")]
-    pub authorization_params: std::collections::BTreeMap<String, String>,
-}
-
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct ConnectorContractConfig {
     #[serde(default)]
@@ -1123,13 +1090,6 @@ pub struct ConnectorContractFixture {
     pub expect_event_count: Option<usize>,
     #[serde(default)]
     pub expect_error_contains: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ResolvedProviderConnectorKind {
-    Harn { module: String },
-    RustBuiltin,
-    Invalid(String),
 }
 
 #[derive(Debug, Clone)]

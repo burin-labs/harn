@@ -10,7 +10,7 @@ use super::{
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ProviderManifestEntry {
-    pub id: harn_vm::ProviderId,
+    pub id: crate::ProviderId,
     pub connector: ProviderConnectorManifest,
     #[serde(default)]
     pub oauth: Option<ProviderOAuthManifest>,
@@ -24,13 +24,28 @@ pub struct ProviderManifestEntry {
 
 #[derive(Debug, Clone)]
 pub struct ResolvedProviderConnectorConfig {
-    pub id: harn_vm::ProviderId,
+    pub id: crate::ProviderId,
     pub manifest_dir: PathBuf,
     pub connector: ResolvedProviderConnectorKind,
     pub oauth: Option<ProviderOAuthManifest>,
     pub setup: Option<ProviderSetupManifest>,
     pub service: Option<ConnectorServiceManifest>,
     pub connector_contract_version: u32,
+}
+
+impl ResolvedProviderConnectorConfig {
+    /// Credentials sent on connector calls. Inbound verification secrets are
+    /// excluded by the same manifest contract used by every host projection.
+    pub fn outbound_secret_ids(&self) -> Vec<crate::secrets::SecretId> {
+        let Some(setup) = self.setup.as_ref() else {
+            return Vec::new();
+        };
+        crate::declared_secret_ids(
+            setup
+                .outbound_credentials()
+                .map(|requirement| requirement.id.as_str()),
+        )
+    }
 }
 
 /// Product-facing connector metadata shared by every host projection.

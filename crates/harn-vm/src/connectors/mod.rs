@@ -25,6 +25,7 @@ pub mod effect_policy;
 pub mod harn_module;
 pub mod hmac;
 mod llm_metrics;
+pub mod manifest;
 mod registry;
 mod secret_injection;
 pub mod shared;
