@@ -237,12 +237,24 @@ fn managed_supply_missing_or_malformed_authority_never_reaches_transport() {
             0,
             "{protocol} must be refused before dispatch: {error}"
         );
-        assert!(
-            error
-                .to_string()
-                .contains("managed supply requires the OpenAI chat-completions transport"),
-            "{error}"
-        );
+        if protocol == "acp" {
+            // ACP admission requires catalog facts before the transport funnel.
+            let crate::value::VmError::Thrown(crate::value::VmValue::Dict(fields)) = error else {
+                panic!("expected typed ACP admission refusal: {error}");
+            };
+            let facts = crate::llm::helpers::vm_value_dict_to_json(&fields);
+            assert_eq!(facts["code"], "inference_boundary.catalog_provider_unknown");
+            assert_eq!(facts["category"], "egress_blocked");
+            assert_eq!(facts["reason"], "policy_denied");
+            assert_eq!(facts["retryable"], false);
+        } else {
+            assert!(
+                error
+                    .to_string()
+                    .contains("managed supply requires the OpenAI chat-completions transport"),
+                "{error}"
+            );
+        }
         install_managed_supply_stub_provider(&opts.provider, server.addr());
     }
     opts.api_mode = crate::llm::api::LlmApiMode::ChatCompletions;
