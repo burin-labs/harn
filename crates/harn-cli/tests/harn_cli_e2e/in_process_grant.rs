@@ -23,6 +23,8 @@ const CREDENTIAL: &str = "probe-credential-value";
 struct Case {
     authorized_calls: usize,
     stdout: String,
+    #[cfg(target_os = "linux")]
+    raw_child_environment_contains_credential: Option<bool>,
 }
 
 async fn run_case(grant_suffix: &'static str) -> Case {
@@ -33,6 +35,12 @@ async fn run_case_with_source(grant_suffix: &'static str, parent_store: bool) ->
     let root = tempfile::tempdir().unwrap();
     let authorized = Arc::new(AtomicUsize::new(0));
     let counter = authorized.clone();
+    #[cfg(target_os = "linux")]
+    let child_pid = Arc::new(std::sync::atomic::AtomicU32::new(0));
+    #[cfg(target_os = "linux")]
+    let observed_environment = Arc::new(std::sync::Mutex::new(None));
+    #[cfg(target_os = "linux")]
+    let environment_probe = (child_pid.clone(), observed_environment.clone());
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
     let app = axum::Router::new().route(
@@ -40,6 +48,8 @@ async fn run_case_with_source(grant_suffix: &'static str, parent_store: bool) ->
         axum::routing::post(
             move |headers: axum::http::HeaderMap, axum::Json(body): axum::Json<serde_json::Value>| {
                 let counter = counter.clone();
+                #[cfg(target_os = "linux")]
+                let environment_probe = environment_probe.clone();
                 async move {
                     let authorized = headers
                         .get("authorization")
@@ -51,6 +61,17 @@ async fn run_case_with_source(grant_suffix: &'static str, parent_store: bool) ->
                             [("content-type", "application/json")],
                             r#"{"error":{"message":"unauthorized"}}"#.to_string(),
                         );
+                    }
+                    #[cfg(target_os = "linux")]
+                    if parent_store {
+                        let pid = environment_probe.0.load(Ordering::SeqCst);
+                        assert!(pid > 0, "the environment probe must identify the actual CLI child");
+                        let bytes = std::fs::read(format!("/proc/{pid}/environ")).unwrap();
+                        assert!(bytes.split(|byte| *byte == 0).any(|entry| entry.starts_with(b"PATH=")),
+                            "a known non-null child environment read is required");
+                        let contains_credential = bytes.windows(CREDENTIAL.len())
+                            .any(|window| window == CREDENTIAL.as_bytes());
+                        *environment_probe.1.lock().unwrap() = Some(contains_credential);
                     }
                     counter.fetch_add(1, Ordering::SeqCst);
                     let model = body["model"].clone();
@@ -159,6 +180,8 @@ context_window = 8192
         let mut command = tokio::process::Command::from(command);
         command.kill_on_drop(true);
         let mut child = command.spawn().unwrap();
+        #[cfg(target_os = "linux")]
+        child_pid.store(child.id().unwrap(), Ordering::SeqCst);
         let mut stdin = child.stdin.take().unwrap();
         stdin.write_all(&bytes).await.unwrap();
         drop(stdin);
@@ -189,9 +212,13 @@ context_window = 8192
         "stdout: {stdout}\nstderr: {}",
         String::from_utf8_lossy(&output.stderr)
     );
+    #[cfg(target_os = "linux")]
+    let raw_child_environment_contains_credential = *observed_environment.lock().unwrap();
     Case {
         authorized_calls: authorized.load(Ordering::SeqCst),
         stdout,
+        #[cfg(target_os = "linux")]
+        raw_child_environment_contains_credential,
     }
 }
 
@@ -249,6 +276,11 @@ async fn parent_store_authenticates_real_in_process_call_without_child_environme
         "{}",
         case.stdout
     );
+    #[cfg(target_os = "linux")]
+    assert!(
+        case.raw_child_environment_contains_credential == Some(false),
+        "the actual CLI process environment must be measured and contain no credential"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -265,5 +297,10 @@ async fn parent_store_session_grant_is_the_positive_child_exposure_control() {
         case.stdout.contains("child_sees_credential_value=true"),
         "{}",
         case.stdout
+    );
+    #[cfg(target_os = "linux")]
+    assert!(
+        case.raw_child_environment_contains_credential == Some(false),
+        "an explicit grandchild grant must not put the credential in the CLI environment"
     );
 }

@@ -1,6 +1,7 @@
 //! Send a selected parent store through the existing contained-process owner.
 
 use std::sync::mpsc;
+use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use harn_vm::secrets::{ParentSecretHandoff, PARENT_SECRET_HANDOFF_OPTION};
@@ -23,7 +24,7 @@ pub enum SecretHandoffSpawnError {
         reason: &'static str,
     },
     /// The child started, but its parent store could not be handed over.
-    #[error("parent secret handoff failed: {reason}")]
+    #[error("parent secret handoff failed: {reason}; writer {writer}")]
     Transfer {
         /// Value-free diagnostic naming the transfer failure.
         reason: &'static str,
@@ -31,7 +32,33 @@ pub enum SecretHandoffSpawnError {
         cleanup: Box<ProcessCleanupReport>,
         /// Bounded wait result after reclamation, never assumed successful.
         reap: Box<std::io::Result<WaitOutcome>>,
+        /// Pending ownership is returned explicitly, never counted as cleanup.
+        writer: SecretHandoffWriterState,
     },
+}
+
+/// Ownership of the pipe writer after a failed handoff.
+#[derive(Debug)]
+pub enum SecretHandoffWriterState {
+    /// No writer was started.
+    NotStarted,
+    /// The writer exited and dropped its selected secret snapshot.
+    Finished,
+    /// The writer panicked and unwound its selected snapshot.
+    Panicked,
+    /// Cleanup has not proven release of the selected snapshot.
+    Pending(JoinHandle<()>),
+}
+
+impl std::fmt::Display for SecretHandoffWriterState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NotStarted => f.write_str("not started; pending=0"),
+            Self::Finished => f.write_str("finished; pending=0"),
+            Self::Panicked => f.write_str("panicked; pending=0"),
+            Self::Pending(_) => f.write_str("unresolved pipe writer ownership; pending=1"),
+        }
+    }
 }
 
 /// Start Harn with a closed, process-local store. The explicit one-shot stdin
@@ -72,7 +99,11 @@ pub fn spawn_harn_with_parent_secrets(
         })?;
     let mut child = spawn_process(spec)?;
     let Some(pipe) = child.take_stdin() else {
-        return Err(failed_transfer(&mut *child, "child stdin pipe unavailable"));
+        return Err(failed_transfer(
+            &mut *child,
+            "child stdin pipe unavailable",
+            None,
+        ));
     };
     let (sender, receiver) = mpsc::channel();
     // Blocking pipe writes must not hold the supervising caller indefinitely.
@@ -81,42 +112,79 @@ pub fn spawn_harn_with_parent_secrets(
         .name("harn-parent-secret-handoff".into())
         .spawn(move || {
             let result = handoff.write_to(pipe).is_ok();
+            drop(handoff);
             let _ = sender.send(result);
         });
     let Ok(writer) = writer else {
-        return Err(failed_transfer(&mut *child, "cannot start pipe writer"));
+        return Err(failed_transfer(
+            &mut *child,
+            "cannot start pipe writer",
+            None,
+        ));
     };
     loop {
         if interrupted() {
-            return Err(failed_transfer(&mut *child, "transfer cancelled"));
+            return Err(failed_transfer(
+                &mut *child,
+                "transfer cancelled",
+                Some(writer),
+            ));
         }
         let remaining = deadline.saturating_duration_since(Instant::now());
         if remaining.is_zero() {
-            return Err(failed_transfer(&mut *child, "transfer deadline reached"));
+            return Err(failed_transfer(
+                &mut *child,
+                "transfer deadline reached",
+                Some(writer),
+            ));
         }
         match receiver.recv_timeout(remaining.min(Duration::from_millis(10))) {
             Ok(true) => {
                 // Receipt is sent only after the write and stdin close complete.
                 if writer.join().is_err() {
-                    return Err(failed_transfer(&mut *child, "pipe writer failed"));
+                    let mut failure = failed_transfer(&mut *child, "pipe writer failed", None);
+                    if let SecretHandoffSpawnError::Transfer { writer, .. } = &mut failure {
+                        *writer = SecretHandoffWriterState::Panicked;
+                    }
+                    return Err(failure);
                 }
                 return Ok(child);
             }
             Ok(false) | Err(mpsc::RecvTimeoutError::Disconnected) => {
-                return Err(failed_transfer(&mut *child, "frame delivery failed"));
+                return Err(failed_transfer(
+                    &mut *child,
+                    "frame delivery failed",
+                    Some(writer),
+                ));
             }
             Err(mpsc::RecvTimeoutError::Timeout) => {}
         }
     }
 }
 
-fn failed_transfer(child: &mut dyn ProcessHandle, reason: &'static str) -> SecretHandoffSpawnError {
+fn failed_transfer(
+    child: &mut dyn ProcessHandle,
+    reason: &'static str,
+    writer: Option<JoinHandle<()>>,
+) -> SecretHandoffSpawnError {
     let cleanup = child.killer().kill();
     let reap = child.wait_with_timeout(Some(Duration::ZERO), &|| false);
+    let writer = match writer {
+        None => SecretHandoffWriterState::NotStarted,
+        Some(writer) if writer.is_finished() => {
+            if writer.join().is_ok() {
+                SecretHandoffWriterState::Finished
+            } else {
+                SecretHandoffWriterState::Panicked
+            }
+        }
+        Some(writer) => SecretHandoffWriterState::Pending(writer),
+    };
     SecretHandoffSpawnError::Transfer {
         reason,
         cleanup: Box::new(cleanup),
         reap: Box::new(reap),
+        writer,
     }
 }
 

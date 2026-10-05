@@ -2,9 +2,7 @@ use crate::test_util::process::harn_e2e_command;
 
 use std::fs;
 
-#[test]
-fn one_shot_worker_calls_a_manifest_connector_with_its_declared_secret() {
-    let project = tempfile::tempdir().expect("temp project");
+fn write_worker_fixture(project: &tempfile::TempDir) -> (std::path::PathBuf, std::path::PathBuf) {
     fs::write(
         project.path().join("harn.toml"),
         r#"
@@ -28,6 +26,52 @@ pub fn provider_id() { return "worker-echo" }
 pub fn kinds() { return ["job"] }
 pub fn payload_schema() {
   return {harn_schema_name: "WorkerEchoPayload", json_schema: {type: "object", additionalProperties: true}}
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn actual_one_shot_connector_worker_consumes_parent_grants_without_ambient_fallback() {
+    use harn_vm::secrets::{MemorySecretProvider, ParentSecretHandoff, SecretId, PARENT_SECRET_HANDOFF_OPTION};
+    use std::process::Stdio;
+    use tokio::io::AsyncWriteExt;
+
+    let project = tempfile::tempdir().unwrap();
+    let (script, request) = write_worker_fixture(&project);
+    let id = SecretId::new("worker-echo", "api-token");
+    let parent = MemorySecretProvider::new("parent").with_secret(id.clone(), b"inert-worker-canary");
+    for selected in [true, false] {
+        let ids = if selected { vec![id.clone()] } else { Vec::new() };
+        let handoff = ParentSecretHandoff::capture(&parent, ids).await.unwrap();
+        let mut bytes = Vec::new();
+        handoff.write_to(&mut bytes).unwrap();
+        let mut command = harn_e2e_command();
+        command.env_clear().current_dir(project.path())
+            .env("PATH", std::env::var_os("PATH").unwrap_or_default())
+            .env("HOME", project.path()).env("USERPROFILE", project.path())
+            .env("HARN_SECRET_PROVIDERS", "must-not-be-consulted")
+            .arg(format!("--{PARENT_SECRET_HANDOFF_OPTION}"))
+            .arg("run").arg(&script)
+            .args(["--as-job", "--job", "connector_smoke", "--request"])
+            .arg(&request)
+            .stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
+        if let Some(system_root) = std::env::var_os("SystemRoot") { command.env("SystemRoot", system_root); }
+        let mut command = tokio::process::Command::from(command);
+        command.kill_on_drop(true);
+        let mut child = command.spawn().unwrap();
+        let mut stdin = child.stdin.take().unwrap();
+        stdin.write_all(&bytes).await.unwrap();
+        drop(stdin);
+        let output = child.wait_with_output().await.unwrap();
+        assert!(!output.stdout.windows(b"inert-worker-canary".len()).any(|window| window == b"inert-worker-canary"));
+        assert!(!output.stderr.windows(b"inert-worker-canary".len()).any(|window| window == b"inert-worker-canary"));
+        if selected {
+            assert!(output.status.success(), "selected parent grant must reach the actual connector worker");
+            let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+            assert_eq!(report["method"], "ping");
+            assert_eq!(report["credential_resolved"], true);
+        } else {
+            assert!(!output.status.success(), "missing selected grant must not be replaced by ambient credentials");
+        }
+    }
 }
 pub fn init(_harness: Harness, _ctx) {}
 pub fn activate(_harness: Harness, _bindings) {}
@@ -62,6 +106,13 @@ pub fn cross_tenant(harness: Harness, _event: TriggerEvent) -> dict {
     .expect("job source");
     let request = project.path().join("request.json");
     fs::write(&request, "{}").expect("request");
+    (script, request)
+}
+
+#[test]
+fn one_shot_worker_calls_a_manifest_connector_with_its_declared_secret() {
+    let project = tempfile::tempdir().expect("temp project");
+    let (script, request) = write_worker_fixture(&project);
 
     let run = |credential: Option<&str>| {
         let mut command = harn_e2e_command();

@@ -26,6 +26,16 @@ async fn selected_reference_survives_transport_without_an_ambient_store() {
         .await
         .unwrap_err()
         .is_not_found());
+    assert!(child
+        .put(&id, SecretBytes::from("replacement"))
+        .await
+        .is_err());
+    assert!(!child.persists_writes());
+    assert!(child
+        .get(&id)
+        .await
+        .unwrap()
+        .with_exposed(|value| value == b"inert-parent-canary"));
 }
 
 #[test]

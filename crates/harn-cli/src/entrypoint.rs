@@ -54,9 +54,6 @@ pub(crate) async fn async_main(mut raw_args: Vec<String>, runtime_mode: CliRunti
         cmd.print_help().ok();
         return;
     };
-    if cli.parent_secret_stdin && matches!(&subcommand, Command::Run(args) if args.as_job) {
-        command_error("parent secret handoff cannot outlive its process through --as-job");
-    }
     let parent_handoff = if cli.parent_secret_stdin {
         Some(
             harn_vm::secrets::ParentSecretHandoff::read_from(std::io::stdin().lock())

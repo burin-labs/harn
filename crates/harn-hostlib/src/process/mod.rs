@@ -25,7 +25,9 @@ pub use mock::{MockHandleController, MockProcess, MockProcessConfig, MockSpawner
 pub use real::default_spawner;
 #[cfg(unix)]
 pub use real::replace_current_process;
-pub use secret_handoff::{spawn_harn_with_parent_secrets, SecretHandoffSpawnError};
+pub use secret_handoff::{
+    spawn_harn_with_parent_secrets, SecretHandoffSpawnError, SecretHandoffWriterState,
+};
 #[cfg(target_os = "windows")]
 pub use windows::KillOnCloseJob;
 

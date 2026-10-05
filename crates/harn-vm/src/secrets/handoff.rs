@@ -10,7 +10,10 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 use zeroize::{Zeroize, Zeroizing};
 
-use super::{MemorySecretProvider, SecretBytes, SecretError, SecretId, SecretProvider};
+use super::{
+    MemorySecretProvider, RotationHandle, SecretBytes, SecretError, SecretId, SecretMeta,
+    SecretProvider,
+};
 
 const MAX_FRAME_BYTES: usize = 1_048_576;
 const MAX_SECRETS: usize = 256;
@@ -67,6 +70,45 @@ pub async fn with_parent_secret_handoff<T>(
 /// Receiving it creates a closed memory store, without ambient backend fallback.
 pub struct ParentSecretHandoff {
     secrets: BTreeMap<SecretId, SecretBytes>,
+}
+
+/// Received grants convey read authority, never authority to mutate the parent.
+struct ReceivedParentSecrets(MemorySecretProvider);
+
+#[async_trait::async_trait]
+impl SecretProvider for ReceivedParentSecrets {
+    async fn get(&self, id: &SecretId) -> Result<SecretBytes, SecretError> {
+        self.0.get(id).await
+    }
+
+    async fn put(&self, _id: &SecretId, _value: SecretBytes) -> Result<(), SecretError> {
+        Err(SecretError::Unsupported {
+            provider: self.namespace().into(),
+            operation: "write_parent_grant",
+        })
+    }
+
+    async fn rotate(&self, _id: &SecretId) -> Result<RotationHandle, SecretError> {
+        Err(SecretError::Unsupported {
+            provider: self.namespace().into(),
+            operation: "rotate_parent_grant",
+        })
+    }
+
+    async fn list(&self, prefix: &SecretId) -> Result<Vec<SecretMeta>, SecretError> {
+        self.0.list(prefix).await
+    }
+
+    fn namespace(&self) -> &str {
+        self.0.namespace()
+    }
+    fn supports_versions(&self) -> bool {
+        self.0.supports_versions()
+    }
+
+    fn persists_writes(&self) -> bool {
+        false
+    }
 }
 
 impl fmt::Debug for ParentSecretHandoff {
@@ -191,12 +233,12 @@ impl ParentSecretHandoff {
     }
 
     /// Install into the existing zeroizing memory owner, without a second store.
-    pub fn into_provider(self) -> MemorySecretProvider {
+    pub fn into_provider(self) -> impl SecretProvider {
         let mut provider = MemorySecretProvider::new("parent-handoff");
         for (id, value) in self.secrets {
             value.with_exposed(|bytes| provider.insert(id, bytes));
         }
-        provider
+        ReceivedParentSecrets(provider)
     }
 }
 
