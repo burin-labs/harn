@@ -135,7 +135,7 @@ const LITERAL_TIMEOUT_BASELINE = [
   {rule: "literal_timeout", path: "crates/harn-cli/tests/test_util/stdio_jsonrpc.rs", count: 1},
   // Deliberate expiry: each asserts a second acquire is STILL parked behind a
   // held permit after 100ms. The timeout firing is the behavior under test.
-  {rule: "literal_timeout", path: "crates/harn-vm/src/llm/rate_limit.rs", count: 3},
+  {rule: "literal_timeout", path: "crates/harn-vm/src/llm/rate_limit/tests.rs", count: 3},
   // Deliberate expiry under paused Tokio time: an outer deadline must interrupt
   // network recovery before any provider dispatch. No wall-clock latency claim.
   {
