@@ -12,7 +12,7 @@ use time::{Duration, OffsetDateTime};
 use crate::event_log::{EventLog, LogEvent, Topic};
 use crate::triggers::ProviderId;
 
-use super::headers::header_value;
+use super::shared::header_value;
 use super::ConnectorError;
 
 pub const SIGNATURE_VERIFY_AUDIT_TOPIC: &str = "audit.signature_verify";

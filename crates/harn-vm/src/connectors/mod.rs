@@ -23,7 +23,6 @@ pub mod cron;
 mod defaults;
 pub mod effect_policy;
 pub mod harn_module;
-mod headers;
 pub mod hmac;
 mod llm_metrics;
 mod registry;
