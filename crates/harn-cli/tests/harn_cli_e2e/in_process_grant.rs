@@ -311,6 +311,9 @@ fn contained_parent_output(
 #[test]
 #[ignore = "private guardian entrypoint exercised by the real containment control"]
 fn contained_parent_guardian_fixture() {
+    if !harn_hostlib::process::owner_death::guardian_requested() {
+        return;
+    }
     harn_hostlib::process::owner_death::run_guardian_from_pipe().unwrap();
 }
 

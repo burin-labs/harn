@@ -111,11 +111,12 @@ async fn actual_one_shot_connector_worker_consumes_parent_grants_without_ambient
         let mut stdin = child.stdin.take().unwrap();
         stdin.write_all(&bytes).await.unwrap();
         drop(stdin);
-        let output =
-            tokio::time::timeout(std::time::Duration::from_secs(30), child.wait_with_output())
-                .await
-                .expect("one-shot connector worker must terminate")
-                .unwrap();
+        let output = harn_clock::test_support::within(
+            "one-shot connector worker terminates",
+            child.wait_with_output(),
+        )
+        .await
+        .unwrap();
         assert!(!output
             .stdout
             .windows(b"inert-worker-canary".len())

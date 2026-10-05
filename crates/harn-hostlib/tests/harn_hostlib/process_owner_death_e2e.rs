@@ -107,28 +107,7 @@ fn owner_death_supervisor_fixture() {
         .expect("spawn actual contained child with application stdin");
         let pid = child.pid().expect("payload pid");
         let pgid = child.process_group_id().expect("payload group");
-        let mut input = child.take_stdin().expect("payload input");
-        let (started_tx, started_rx) = std::sync::mpsc::channel();
-        let (done_tx, done_rx) = std::sync::mpsc::channel();
-        harn_parser::runtime_stack::spawn(move || {
-            let bytes = [0_u8; 4096];
-            input.write_all(&bytes).expect("first actual input write");
-            started_tx.send(()).unwrap();
-            // The payload never reads stdin. More than any ordinary pipe
-            // capacity ensures both forwarding stages encounter backpressure.
-            let result = (0..16_384).try_for_each(|_| input.write_all(&bytes));
-            let _ = done_tx.send(result.is_ok());
-        });
-        started_rx
-            .recv_timeout(std::time::Duration::from_secs(5))
-            .expect("writer reached the actual pipe");
-        assert!(
-            matches!(
-                done_rx.recv_timeout(std::time::Duration::from_secs(1)),
-                Err(std::sync::mpsc::RecvTimeoutError::Timeout)
-            ),
-            "input must be stalled before owner death"
-        );
+        wait_for_stalled_input(child.take_stdin().expect("payload input"));
         input_owner = Some(child);
         (pid, pgid)
     } else {
@@ -225,11 +204,76 @@ fn managed_background_group_dies_when_its_supervisor_is_sigkilled() {
     assert_managed_background_group_dies_with_supervisor(false, false);
 }
 
-#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[cfg(target_os = "linux")]
 #[test]
 fn contained_group_dies_when_payload_stdin_is_stalled_and_owner_is_sigkilled() {
     assert_managed_background_group_dies_with_supervisor(false, true);
     assert_managed_background_group_dies_with_supervisor(true, true);
+}
+
+/// Observe a sleeping write syscall on the actual pipe, rather than assuming
+/// that a quiet period means the forwarding stages have filled. The payload
+/// never reads stdin, so backpressure persists until the supervisor is killed.
+/// Linux exposes the necessary thread and descriptor state through procfs.
+#[cfg(target_os = "linux")]
+fn wait_for_stalled_input(mut input: Box<dyn Write + Send>) {
+    let (started_tx, started_rx) = std::sync::mpsc::channel();
+    let (done_tx, done_rx) = std::sync::mpsc::channel();
+    harn_parser::runtime_stack::spawn(move || {
+        let bytes = [0_u8; 4096];
+        input.write_all(&bytes).expect("first actual input write");
+        started_tx
+            .send(unsafe { libc::syscall(libc::SYS_gettid) })
+            .unwrap();
+        let result = (0..16_384).try_for_each(|_| input.write_all(&bytes));
+        let _ = done_tx.send(result.is_ok());
+    });
+    let tid = harn_clock::test_support::recv_within("writer reached the actual pipe", &started_rx);
+    tokio::runtime::Builder::new_current_thread()
+        .build()
+        .unwrap()
+        .block_on(harn_clock::test_support::within(
+            "application input writer sleeps in a kernel pipe write",
+            async {
+                loop {
+                    assert!(
+                        matches!(
+                            done_rx.try_recv(),
+                            Err(std::sync::mpsc::TryRecvError::Empty)
+                        ),
+                        "input writer finished before owner death"
+                    );
+                    let state = std::fs::read_to_string(format!("/proc/self/task/{tid}/stat"))
+                        .expect("read actual writer thread state");
+                    let syscall = std::fs::read_to_string(format!("/proc/self/task/{tid}/syscall"))
+                        .expect("read actual writer syscall");
+                    let mut fields = syscall.split_whitespace();
+                    if state
+                        .rsplit_once(") ")
+                        .map(|(_, tail)| tail.starts_with("S "))
+                        == Some(true)
+                        && fields
+                            .next()
+                            .and_then(|value| value.parse::<libc::c_long>().ok())
+                            == Some(libc::SYS_write)
+                    {
+                        let fd = fields.next().expect("write syscall descriptor");
+                        let fd = u32::from_str_radix(fd.trim_start_matches("0x"), 16)
+                            .expect("parse write syscall descriptor");
+                        let pipe = std::fs::read_link(format!("/proc/self/fd/{fd}"))
+                            .expect("resolve actual writer descriptor");
+                        assert!(pipe.to_string_lossy().starts_with("pipe:["));
+                        break;
+                    }
+                    tokio::task::yield_now().await;
+                }
+            },
+        ));
+}
+
+#[cfg(not(target_os = "linux"))]
+fn wait_for_stalled_input(_input: Box<dyn Write + Send>) {
+    panic!("stalled-input qualification requires Linux kernel pipe-write evidence");
 }
 
 /// The liveness pipe's EOF is not the only owner-death signal: a leaked copy

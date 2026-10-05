@@ -282,7 +282,7 @@ mod tests {
             release_rx.recv().unwrap();
             drop(selected);
         });
-        ready_rx.recv_timeout(Duration::from_secs(1)).unwrap();
+        harn_clock::test_support::recv_within("handoff writer retains unresolved grant", &ready_rx);
         let error = failed_transfer(&mut *child, "fixture transfer still blocked", Some(writer));
         assert!(controller.was_killed());
         assert!(error.to_string().contains("pending=1"));
