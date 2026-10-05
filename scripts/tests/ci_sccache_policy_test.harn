@@ -181,6 +181,78 @@ pipeline test_public_runner_policy_refuses_a_paid_capacity_route_input(
 }
 
 @test
+pipeline test_public_runner_policy_refuses_inherited_paid_capacity_route_inputs(
+  harness: Harness,
+  task: unknown,
+) {
+  const base = e2e_workflow(gha_expression(E2E_SWITCH_ROUTE), {})
+  const workflow_env = {...base, env: {PAID_LINUX_PROVIDER: "blacksmith"}}
+  const capacity = base.jobs["e2e-capacity"]
+  const job_env = {
+    ...base,
+    jobs: {
+      ...base.jobs,
+      "e2e-capacity": {...capacity, env: {CAPACITY_VENDOR_RUNNER: "blacksmith-8vcpu-ubuntu-2404"}},
+    },
+  }
+  assert_eq(
+    public_repository_runner_errors(
+      {"workflow-env.yml": workflow_env, "job-env.yml": job_env},
+      {targets: []},
+    ),
+    [
+      "job-env.yml:e2e-capacity runner capacity decision must not accept paid route input CAPACITY_VENDOR_RUNNER",
+      "workflow-env.yml:e2e-capacity runner capacity decision must not accept paid route input PAID_LINUX_PROVIDER",
+    ],
+  )
+}
+
+@test
+pipeline test_public_runner_policy_checks_reusable_workflow_callers(
+  harness: Harness,
+  task: unknown,
+) {
+  const reusable = {
+    on: {workflow_call: {inputs: {os: {required: true, type: "string"}}}},
+    jobs: {install: {"runs-on": gha_expression("inputs.os")}},
+  }
+  const caller = {
+    jobs: {
+      direct: {uses: "./.github/workflows/setup-harn-contract.yml", with: {os: "ubuntu-24.04"}},
+      matrix: {
+        uses: "./.github/workflows/setup-harn-contract.yml",
+        strategy: {matrix: {os: ["ubuntu-24.04", "blacksmith-8vcpu-ubuntu-2404"]}},
+        with: {os: gha_expression("matrix.os")},
+      },
+    },
+  }
+  assert_eq(
+    public_repository_runner_errors(
+      {"ci.yml": caller, "setup-harn-contract.yml": reusable},
+      {targets: []},
+    ),
+    [
+      "ci.yml:matrix passes paid runner token blacksmith-8vcpu-ubuntu-2404 to setup-harn-contract.yml input os",
+    ],
+  )
+}
+
+@test
+pipeline test_public_runner_policy_checks_reusable_workflow_call_defaults(
+  harness: Harness,
+  task: unknown,
+) {
+  const invalid = {
+    on: {workflow_call: {inputs: {os: {type: "string", default: "ubuntu-8core"}}}},
+    jobs: {install: {"runs-on": gha_expression("inputs.os")}},
+  }
+  assert_eq(
+    public_repository_runner_errors({"reusable.yml": invalid}, {targets: []}),
+    ["reusable.yml:install runner selection can resolve through paid token ubuntu-8core"],
+  )
+}
+
+@test
 pipeline test_e2e_paid_override_fails_when_the_capacity_step_is_gone(
   harness: Harness,
   task: unknown,

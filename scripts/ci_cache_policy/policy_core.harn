@@ -1946,16 +1946,13 @@ fn linux_runner_label(label: string) -> bool {
   return contains(label, "ubuntu") || contains(label, "linux") || contains(label, "Linux")
 }
 
-/**
- * Every Linux runner label a job can resolve to, from its `runs-on` (literal,
- * list or expression) and its matrix `runner` values.
- */
-fn job_runner_labels(workflow: dict, job: dict) -> list<string> {
-  let texts: list<string> = [to_string(job["runs-on"] ?? "")]
-  const runs_on = to_string(job["runs-on"] ?? "")
+/** Every runner label a selector can resolve to through its owning job. */
+fn runner_selector_labels(workflow: dict, job: dict, selector: unknown) -> list<string> {
+  let texts: list<string> = [to_string(selector ?? "")]
+  const expression = to_string(selector ?? "")
   const matrix = job?.strategy?.matrix ?? {}
   for {key: name, value: values} in matrix {
-    if name != "include" && name != "exclude" && contains(runs_on, "matrix.${name}") {
+    if name != "include" && name != "exclude" && contains(expression, "matrix.${name}") {
       if type_of(values) == "list" {
         for value in values {
           texts = texts + [to_string(value)]
@@ -1967,16 +1964,18 @@ fn job_runner_labels(workflow: dict, job: dict) -> list<string> {
   }
   for row in matrix?.include ?? [] {
     for {key: name, value: value} in row {
-      if contains(runs_on, "matrix.${name}") {
+      if contains(expression, "matrix.${name}") {
         texts = texts + [to_string(value)]
       }
     }
   }
-  for {key: name, value: input} in (workflow?.["on"]?.workflow_dispatch?.inputs ?? {}) {
-    if contains(runs_on, "inputs.${name}") {
-      texts = texts + [to_string(input?.default ?? "")]
-      for option in input?.options ?? [] {
-        texts = texts + [to_string(option)]
+  for input_kind in ["workflow_dispatch", "workflow_call"] {
+    for {key: name, value: input} in (workflow["on"]?.[input_kind]?.inputs ?? {}) {
+      if contains(expression, "inputs.${name}") {
+        texts = texts + [to_string(input?.default ?? "")]
+        for option in input?.options ?? [] {
+          texts = texts + [to_string(option)]
+        }
       }
     }
   }
@@ -1987,6 +1986,24 @@ fn job_runner_labels(workflow: dict, job: dict) -> list<string> {
         .to_list()
   }
   return labels.unique().sorted()
+}
+
+/** Every Linux runner label a job can resolve to from its `runs-on`. */
+fn job_runner_labels(workflow: dict, job: dict) -> list<string> {
+  return runner_selector_labels(workflow, job, job["runs-on"])
+}
+
+/** `workflow_call` inputs that select a runner anywhere in the reusable workflow. */
+fn workflow_call_runner_inputs(workflow: dict) -> list<string> {
+  let names: list<string> = []
+  for name in (workflow["on"]?.workflow_call?.inputs ?? {}).keys() {
+    for job in (workflow?.jobs ?? {}).values() {
+      if contains(to_string(job?.["runs-on"] ?? ""), "inputs.${name}") {
+        names = names + [name]
+      }
+    }
+  }
+  return names.unique().sorted()
 }
 
 fn landlock_incapable_label(label: string) -> bool {
@@ -2088,10 +2105,25 @@ pub fn public_repository_runner_errors(
             ]
         }
       }
+      const reusable = trim(to_string(job?.uses ?? ""))
+      if starts_with(reusable, "./.github/workflows/") {
+        const callee_name = basename(reusable)
+        const callee = workflows[callee_name]
+        for input in workflow_call_runner_inputs(callee ?? {}) {
+          for label in runner_selector_labels(workflow, job, job?.with?.[input]) {
+            if paid_public_runner_selector(label, release_runner_policy) {
+              errors = errors
+                + [
+                  "${workflow_name}:${job_name} passes paid runner token ${label} to ${callee_name} input ${input}",
+                ]
+            }
+          }
+        }
+      }
       for step in job?.steps ?? [] {
         if contains(to_string(step?.run ?? ""), "runner_capacity.sh") {
           for input in PAID_CAPACITY_ROUTE_INPUTS {
-            if step?.env?.[input] != nil {
+            if step?.env?.[input] != nil || effective_job_env(workflow, job, input) != "<unset>" {
               errors = errors
                 + [
                   "${workflow_name}:${job_name} runner capacity decision must not accept paid route input ${input}",
