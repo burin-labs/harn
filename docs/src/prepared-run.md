@@ -107,7 +107,8 @@ persist terminal accounting and retire the lease.
 
 ACP embedders implement `AcpRuntimeConfigurator::run_prompt` to scope that
 future on the server's engine executor. The context identifies the session and
-workspace and exposes accepted cancellation. Refusing before polling the future
+workspace, exposes Harn's resolved capability policy and the existing host
+bridge, and reports accepted cancellation. Refusing before polling the future
 prevents VM, host-capability, and provider execution. Provider endpoint overrides
 preserve this configurator. The adapter still owns prompt responses, event
 flushing, and cancellation classification.

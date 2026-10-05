@@ -403,6 +403,8 @@ impl AcpServer {
                     session_id: &session_id,
                     cwd: &cwd,
                     project_root: &project_root,
+                    capability_policy: mode_policy.policy(),
+                    host_bridge: &host_bridge_for_response,
                     cancelled: &cancellation.cancelled,
                 },
                 Box::pin(mode_policy.run(Box::pin(async {
