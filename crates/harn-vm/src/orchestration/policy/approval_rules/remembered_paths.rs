@@ -162,7 +162,12 @@ mod tests {
             arguments: json!({"paths": ["first.txt", "second.txt", 123]}),
             ..Default::default()
         };
-        assert!(evaluate(rules.clone(), &malformed).is_ask());
+        let malformed_decision = evaluate(rules.clone(), &malformed);
+        assert!(malformed_decision.is_deny());
+        assert_eq!(
+            malformed_decision.receipt["matched_rule"]["id"],
+            "invalid_host_request"
+        );
         let mut constrained = rules.clone();
         constrained
             .as_array_mut()

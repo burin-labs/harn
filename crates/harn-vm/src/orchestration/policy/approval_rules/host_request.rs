@@ -61,9 +61,6 @@ impl ToolApprovalRequest {
         if !self.arguments.is_object() {
             return Err("arguments must be an object".into());
         }
-        if self.tool_annotations.is_some() && self.workspace_boundary.is_none() {
-            return Err("tool_annotations require an explicit workspace_boundary".into());
-        }
         if self
             .policy_decision
             .as_ref()
@@ -75,6 +72,40 @@ impl ToolApprovalRequest {
         {
             return Err("policy_decision and approval_request must be objects when present".into());
         }
+        let params = self.path_parameters();
+        for param in &params {
+            if param.trim().is_empty() {
+                return Err(
+                    "tool_annotations.arg_schema.path_params must contain nonempty field names"
+                        .into(),
+                );
+            }
+            match self.arguments.get(param) {
+                None => {}
+                Some(JsonValue::String(value)) if !value.trim().is_empty() => {}
+                Some(JsonValue::Array(values))
+                    if values.iter().all(|value| {
+                        value.as_str().is_some_and(|value| !value.trim().is_empty())
+                    }) => {}
+                _ => {
+                    return Err(format!(
+                        "workspace path argument '{param}' must be a string or list of strings"
+                    ))
+                }
+            }
+        }
+        if self.workspace_boundary.is_none()
+            && (self.tool_annotations.is_some()
+                || params
+                    .iter()
+                    .any(|param| self.arguments.get(param).is_some())
+                || !request_context(self).path_candidates.is_empty())
+        {
+            return Err(
+                "path-bearing requests and tool_annotations require an explicit workspace_boundary"
+                    .into(),
+            );
+        }
         if let Some(boundary) = &self.workspace_boundary {
             if boundary.root.contains('\0')
                 || !Path::new(&boundary.root).is_absolute()
@@ -84,51 +115,41 @@ impl ToolApprovalRequest {
                     "workspace_boundary.root must name an existing absolute directory".into(),
                 );
             }
-            let annotations = self
-                .tool_annotations
-                .clone()
-                .or_else(|| super::super::current_tool_annotations(&self.tool_name));
-            let params = annotations
-                .map(|value| value.arg_schema.path_params)
-                .unwrap_or_else(|| {
-                    [
-                        "path",
-                        "file",
-                        "target",
-                        "source_path",
-                        "new_path",
-                        "target_path",
-                        "paths",
-                    ]
-                    .into_iter()
-                    .map(String::from)
-                    .collect()
-                });
-            {
-                for param in &params {
-                    if param.trim().is_empty() {
-                        return Err(
-                            "tool_annotations.arg_schema.path_params must contain nonempty field names"
-                                .into(),
-                        );
-                    }
-                    match self.arguments.get(param) {
-                        None => {}
-                        Some(JsonValue::String(value)) if !value.trim().is_empty() => {}
-                        Some(JsonValue::Array(values))
-                            if values.iter().all(|value| {
-                                value.as_str().is_some_and(|value| !value.trim().is_empty())
-                            }) => {}
-                        _ => {
-                            return Err(format!(
-                            "workspace path argument '{param}' must be a string or list of strings"
-                        ))
-                        }
-                    }
-                }
-            }
         }
         Ok(())
+    }
+
+    fn path_parameters(&self) -> Vec<String> {
+        self.tool_annotations
+            .clone()
+            .or_else(|| super::super::current_tool_annotations(&self.tool_name))
+            .map(|value| value.arg_schema.path_params)
+            .unwrap_or_else(|| {
+                [
+                    "path",
+                    "file",
+                    "target",
+                    "source_path",
+                    "new_path",
+                    "target_path",
+                    "paths",
+                ]
+                .into_iter()
+                .map(String::from)
+                .collect()
+            })
+    }
+
+    fn path_inputs(&self) -> Vec<String> {
+        let params = self.path_parameters();
+        let names = params.iter().map(String::as_str).collect::<Vec<_>>();
+        let mut paths = super::string_values(&self.arguments, &names);
+        paths.extend(
+            super::super::super::command_policy::credential_read_path_candidates(&self.arguments),
+        );
+        paths.sort();
+        paths.dedup();
+        paths
     }
 }
 
@@ -182,40 +203,7 @@ pub(super) fn request_context(request: &ToolApprovalRequest) -> EvaluationContex
         .as_ref()
         .map(|value| value.arg_schema.path_params.as_slice());
     let owned_paths = request.workspace_boundary.as_ref().map(|boundary| {
-        let mut paths = if declared_params.is_some() {
-            Vec::new()
-        } else {
-            context
-                .path_entries
-                .iter()
-                .map(|entry| entry.input.clone())
-                .collect::<Vec<_>>()
-        };
-        let params =
-            declared_params.map(|params| params.iter().map(String::as_str).collect::<Vec<_>>());
-        if let Some(params) = params {
-            paths.extend(super::string_values(&request.arguments, &params));
-        } else if super::super::current_tool_annotations(&request.tool_name).is_none() {
-            paths.extend(super::string_values(
-                &request.arguments,
-                &[
-                    "path",
-                    "file",
-                    "target",
-                    "source_path",
-                    "new_path",
-                    "target_path",
-                    "paths",
-                ],
-            ));
-        }
-        paths.extend(
-            super::super::super::command_policy::credential_read_path_candidates(
-                &request.arguments,
-            ),
-        );
-        paths.sort();
-        paths.dedup();
+        let paths = request.path_inputs();
         paths
             .iter()
             .map(|path| {

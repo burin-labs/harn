@@ -15,18 +15,6 @@ pub fn windows_runner_expression() -> string {
   )
 }
 
-pub fn windows_nightly_runner_expression() -> string {
-  return gha_expression(
-    "vars.HARN_CI_ENABLE_BLACKSMITH_WINDOWS == 'true' && 'blacksmith-16vcpu-windows-2025' || 'windows-latest'",
-  )
-}
-
-pub fn windows_tier_expression() -> string {
-  return gha_expression(
-    "vars.HARN_CI_ENABLE_BLACKSMITH_WINDOWS == 'true' && 'blacksmith' || 'github-hosted'",
-  )
-}
-
 pub fn ci_concurrency() {
   return {
     group: gha_expression("github.workflow")
@@ -154,7 +142,7 @@ pub fn release_warm_cache_path_policy() -> ReleaseWarmCachePathPolicy {
 
 /** Address setup steps by id so inserting one cannot silently shift a fixture. */
 pub fn setup_step_by_id(workflow: dict, id: string) {
-  return (workflow?.jobs?.setup?.steps ?? []).filter({ step -> step?.id == id }).to_list()[0]
+  return (workflow.jobs.setup.steps ?? []).filter({ step -> step.id == id }).to_list()[0]
 }
 
 /**
@@ -208,11 +196,7 @@ pub fn release_binary_workflow() {
           },
         ],
       },
-      prepare_cli_aot: {
-        "runs-on": gha_expression(
-          "vars.HARN_RELEASE_ENABLE_BLACKSMITH_LINUX == 'true' && needs.setup.outputs.cli_aot_primary_runner || needs.setup.outputs.cli_aot_standard_runner",
-        ),
-      },
+      prepare_cli_aot: {"runs-on": gha_expression("needs.setup.outputs.cli_aot_standard_runner")},
       build: {
         if: "needs.setup.outputs.should_build_binaries == 'true'",
         concurrency: {
@@ -469,15 +453,12 @@ pub fn workflows() {
           needs: "route",
           if: "needs.route.outputs.run == 'true'",
           permissions: {contents: "read", actions: "write"},
-          "runs-on": windows_nightly_runner_expression(),
-          env: {HARN_RUNNER_TIER: windows_tier_expression()},
+          "runs-on": "windows-latest",
           steps: [
             {uses: "actions/checkout@exact-pin"},
             {
               name: "Set up Dev Drive",
-              if: gha_expression(
-                "vars.HARN_WINDOWS_DEVDRIVE == 'on' && env.HARN_RUNNER_TIER == 'github-hosted'",
-              ),
+              if: gha_expression("vars.HARN_WINDOWS_DEVDRIVE == 'on'"),
               uses: "samypr100/setup-dev-drive@exact-pin",
               with: {"drive-size": "50GB"},
             },

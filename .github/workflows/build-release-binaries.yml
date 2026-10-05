@@ -117,8 +117,6 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: "0"
-  # Paid release capacity is disabled unless explicitly enabled by an owner.
-  HARN_RELEASE_ENABLE_BLACKSMITH_MACOS: ${{ vars.HARN_RELEASE_ENABLE_BLACKSMITH_MACOS || 'false' }}
 
 jobs:
   setup:
@@ -504,11 +502,9 @@ jobs:
     # merely because this release/benchmark payload job had no work to do.
     if: needs.setup.outputs.should_build_binaries == 'true'
     # The generator compiles the complete Rust workspace and sits on every
-    # shipping target's critical path. Use bounded paid capacity only when it
-    # has real work; warm-cache runs retain the standard public runner. The
-    # repository opt-in enables paid capacity without changing release source
-    # or credentials; the public repository otherwise uses free hosted capacity.
-    runs-on: ${{ vars.HARN_RELEASE_ENABLE_BLACKSMITH_LINUX == 'true' && (needs.setup.outputs.build_mode == 'benchmark' || needs.setup.outputs.build_mode == 'candidate') && needs.setup.outputs.cli_aot_primary_runner || needs.setup.outputs.cli_aot_standard_runner }}
+    # shipping target's critical path. Public-repository release work always
+    # uses the standard free runner selected by the release policy.
+    runs-on: ${{ needs.setup.outputs.cli_aot_standard_runner }}
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

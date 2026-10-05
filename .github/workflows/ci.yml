@@ -923,7 +923,7 @@ jobs:
       github.event_name == 'merge_group'
       || (github.event_name == 'pull_request'
       && github.event.pull_request.head.repo.full_name == github.repository)
-    uses: burin-labs/.github/.github/workflows/runner-availability.yml@550bff235c4bf6818ece3b27e0905bcf48aaee8b
+    uses: burin-labs/.github/.github/workflows/runner-availability.yml@d59d828bd5d2dc226111498e51ab5d41da76d62f
     with:
       linux_probe_runner_tag: harn-ci-producer
     secrets:
@@ -938,7 +938,7 @@ jobs:
   # busy or absent host costs the queue nothing it did not already pay.
   datacenter-availability:
     if: github.event_name == 'merge_group'
-    uses: burin-labs/.github/.github/workflows/runner-availability.yml@550bff235c4bf6818ece3b27e0905bcf48aaee8b
+    uses: burin-labs/.github/.github/workflows/runner-availability.yml@d59d828bd5d2dc226111498e51ab5d41da76d62f
     with:
       linux_runner_tag: harn-ci-big
       linux_fetch_runner_tag: hetzner-1
@@ -986,7 +986,6 @@ jobs:
           # The same switch the routing expression below reads. Without it here
           # this step would report the owned census while the job ran on
           # free hosted capacity.
-          FLEET_EVACUATION: ${{ vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true' }}
       # The shared CLI producer's own decision, over the runners reserved for
       # it. An idle reserved runner takes the build. Every other outcome (all
       # reserved runners busy, none online, an unreadable census) lands on
@@ -1017,7 +1016,6 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           SELFHOSTED_DISABLED: ${{ needs.datacenter-availability.outputs.selfhosted_disabled }}
           RUNNER_CAPACITY: ${{ needs.datacenter-availability.outputs.capacity }}
-          FLEET_EVACUATION: ${{ vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true' }}
 
   rust-cli:
     name: Build shared Harn CLI

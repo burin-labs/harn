@@ -270,6 +270,7 @@ mod approval_decision_tests {
 
     #[test]
     fn host_entry_point_preserves_canonical_decisions_and_receipts() {
+        let workspace = tempfile::tempdir().unwrap();
         for (policy, request, expected) in [
             (
                 json!({}),
@@ -288,7 +289,8 @@ mod approval_decision_tests {
             ),
             (
                 json!({}),
-                json!({"tool_name":"read_file", "arguments":{"path":".env"}}),
+                json!({"tool_name":"read_file", "arguments":{"path":".env"},
+                    "workspace_boundary":{"root":workspace.path()}}),
                 "deny",
             ),
             (
@@ -335,6 +337,8 @@ mod approval_decision_tests {
             json!({"tool_name":"run", "arguments":{}, "repeat_count":-1}),
             json!({"tool_name":"run", "arguments":{}, "policy_decison":{}}),
             json!({"tool_name":"run", "arguments":{}, "policy_decision":true}),
+            json!({"tool_name":"read_file", "arguments":{"path":"../outside.txt"}}),
+            json!({"tool_name":"read_file", "arguments":{"path":null}}),
         ] {
             assert!(evaluate(json!({}), request).is_err());
         }

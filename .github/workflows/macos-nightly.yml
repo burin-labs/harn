@@ -8,8 +8,8 @@ name: macOS workspace tests
 # and its `#[cfg(target_os = "macos")]` unit tests — compile and run nowhere
 # in CI today (only on a contributor's local Mac). This nightly closes that
 # gap. Scheduled cache-warming runs use GitHub's Apple Silicon runner; exact
-# source dispatches use the proven Blacksmith M4 class. Both give arm64
-# coverage through this one workflow and job identity.
+# source dispatches use the organization's Apple Silicon runners. Both give
+# arm64 coverage through this one workflow and job identity.
 #
 # Scheduled failures are informational and do not gate `ci-status`.
 # Release-certification dispatches are blocking exact-source proof. When a
@@ -70,18 +70,13 @@ jobs:
     name: Workspace nextest (macos-latest)
     # A pull-request run is cache-warming class, not exact-source proof, so it
     # takes the same hosted runner and the same generous budget as the nightly.
-    # The paid M4 class requires an explicit release-incident opt-in. The 30
-    # minute budget would have timed out the hosted lane's p90 of 47 minutes,
-    # which the evidence reader would then have read as red rather than slow.
     # Exact-source dispatches (release certification) run on the organization's
     # own Apple Silicon runners (label `macos-arm64`), which keep a persistent
     # workspace target between runs so the lane pays a warm build instead of
-    # the hosted runner's cold one. The paid M4 class stays available as an
-    # explicit opt-in for when those runners are offline. Scheduled and
-    # pull-request runs stay on the hosted runner, which is also the sole
-    # writer of the hosted warm cache.
-    runs-on: ${{ github.event_name == 'workflow_dispatch' && (vars.HARN_CI_ENABLE_BLACKSMITH_MACOS == 'true' && 'blacksmith-12vcpu-macos-15' || 'macos-arm64') || 'macos-latest' }}
-    timeout-minutes: ${{ github.event_name == 'workflow_dispatch' && (vars.HARN_CI_ENABLE_BLACKSMITH_MACOS == 'true' && 30 || 45) || 75 }}
+    # the hosted runner's cold one. Scheduled and pull-request runs stay on the
+    # hosted runner, which is also the sole writer of the hosted warm cache.
+    runs-on: ${{ github.event_name == 'workflow_dispatch' && 'macos-arm64' || 'macos-latest' }}
+    timeout-minutes: ${{ github.event_name == 'workflow_dispatch' && 45 || 75 }}
     # Don't run forks of the repo on a fork's own schedule.
     if: github.repository == 'burin-labs/harn'
     steps:
@@ -174,9 +169,9 @@ jobs:
       # of 58 (harn#8599). The shared budget derives that from the box's cores
       # and memory rather than from a literal.
       #
-      # Hosted only. Exact-source dispatches run on owned or Blacksmith hosts
-      # whose warm persistent target builds in minutes, and nothing measured
-      # there says memory binds, so they keep Cargo's default.
+      # Hosted only. Exact-source dispatches run on owned hosts whose warm
+      # persistent target builds in minutes, and nothing measured there says
+      # memory binds, so they keep Cargo's default.
       - name: Measure the hosted build budget
         id: resource-budget
         if: ${{ runner.environment == 'github-hosted' }}

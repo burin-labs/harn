@@ -248,7 +248,7 @@ pub(super) fn literal_command(args: &serde_json::Value) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::super::{ToolApprovalPolicy, ToolApprovalRequest};
+    use super::super::{ToolApprovalPolicy, ToolApprovalRequest, ToolApprovalWorkspaceBoundary};
     use serde_json::json;
 
     fn evaluate(policy: &ToolApprovalPolicy, command: &str) -> super::super::PolicyEvaluation {
@@ -294,6 +294,10 @@ mod tests {
 
     #[test]
     fn literal_resources_do_not_expand_authored_patterns() {
+        let workspace = tempfile::tempdir().unwrap();
+        let boundary = ToolApprovalWorkspaceBoundary {
+            root: workspace.path().to_str().unwrap().into(),
+        };
         for (field, exact, different) in [
             ("path", "report*.txt", "report-2026.txt"),
             (
@@ -324,6 +328,7 @@ mod tests {
                     tool_name: "read".into(),
                     arguments: json!({field: value}),
                     policy_decision: Some(json!({"context": {field: value}})),
+                    workspace_boundary: Some(boundary.clone()),
                     ..Default::default()
                 });
                 assert_eq!(decision.is_allow(), allow, "{field} {value}: {decision:?}");
@@ -341,6 +346,7 @@ mod tests {
         let decision = authored.evaluate_request(&ToolApprovalRequest {
             tool_name: "read".into(),
             arguments: json!({"path": "report-2026.txt"}),
+            workspace_boundary: Some(boundary),
             ..Default::default()
         });
         assert_eq!(decision.receipt["matched_rule"]["id"], "authored");
@@ -349,6 +355,10 @@ mod tests {
 
     #[test]
     fn literal_allow_covers_every_resource_and_deny_covers_any() {
+        let workspace = tempfile::tempdir().unwrap();
+        let boundary = ToolApprovalWorkspaceBoundary {
+            root: workspace.path().to_str().unwrap().into(),
+        };
         for (field, argument, saved, extra) in [
             ("path", "paths", "saved.txt", "extra.txt"),
             (
@@ -385,6 +395,7 @@ mod tests {
                 let decision = partial.evaluate_request(&ToolApprovalRequest {
                     tool_name: "read".into(),
                     arguments: json!({argument: values}),
+                    workspace_boundary: Some(boundary.clone()),
                     ..Default::default()
                 });
                 assert!(decision.is_ask(), "{field}: {decision:?}");
@@ -398,6 +409,7 @@ mod tests {
             let decision = deny.evaluate_request(&ToolApprovalRequest {
                 tool_name: "read".into(),
                 arguments: json!({argument: [saved, extra]}),
+                workspace_boundary: Some(boundary.clone()),
                 ..Default::default()
             });
             assert!(decision.is_deny(), "{field}: {decision:?}");
@@ -421,8 +433,11 @@ mod tests {
             }]}),
             ..Default::default()
         });
-        assert!(decision.is_ask(), "{decision:?}");
-        assert_eq!(decision.receipt["matched_rule"]["id"], "ask");
+        assert!(decision.is_deny(), "{decision:?}");
+        assert_eq!(
+            decision.receipt["matched_rule"]["id"],
+            "invalid_host_request"
+        );
     }
 
     #[test]
@@ -468,6 +483,10 @@ mod tests {
 
     #[test]
     fn remembered_resource_cannot_grant_a_different_tool_named_by_receipt() {
+        let workspace = tempfile::tempdir().unwrap();
+        let boundary = ToolApprovalWorkspaceBoundary {
+            root: workspace.path().to_str().unwrap().into(),
+        };
         let policy = ToolApprovalPolicy::from_host_json(json!({"rules": [
             {"id": "ask", "source": "mode", "ask": "*"},
             {"id": "memory", "source": "user", "identity_match": "literal",
@@ -479,6 +498,7 @@ mod tests {
                 tool_name: tool.into(),
                 arguments: json!({"path": "saved.txt"}),
                 policy_decision: Some(json!({"context": {"tool_name": "read"}})),
+                workspace_boundary: Some(boundary.clone()),
                 ..Default::default()
             });
             assert_eq!(decision.is_allow(), allow, "{tool}: {decision:?}");
@@ -492,6 +512,10 @@ mod tests {
 
     #[test]
     fn remembered_resources_cannot_match_stale_host_receipts() {
+        let workspace = tempfile::tempdir().unwrap();
+        let boundary = ToolApprovalWorkspaceBoundary {
+            root: workspace.path().to_str().unwrap().into(),
+        };
         for (field, saved, different) in [
             ("path", "saved.txt", "different.txt"),
             (
@@ -510,6 +534,7 @@ mod tests {
             let exact = policy.evaluate_request(&ToolApprovalRequest {
                 tool_name: "read".into(),
                 arguments: json!({field: saved}),
+                workspace_boundary: Some(boundary.clone()),
                 ..Default::default()
             });
             assert!(exact.is_allow(), "{field}: {exact:?}");
@@ -523,6 +548,7 @@ mod tests {
                     tool_name: "read".into(),
                     arguments: json!({field: different}),
                     policy_decision: Some(json!({"context": context})),
+                    workspace_boundary: Some(boundary.clone()),
                     ..Default::default()
                 };
                 let refused = policy.evaluate_request(&request);
@@ -534,10 +560,15 @@ mod tests {
                     {"id": "authored", "allow": {field: saved}},
                 ]}))
                 .unwrap();
-                assert_eq!(
-                    authored.evaluate_request(&request).receipt["matched_rule"]["id"],
-                    "authored"
-                );
+                let authored_decision = authored.evaluate_request(&request);
+                if field == "path" {
+                    // Workspace-classified raw paths own authorization; a
+                    // historical receipt cannot introduce another path.
+                    assert!(authored_decision.is_allow());
+                    assert!(authored_decision.matched_rule.is_none());
+                } else {
+                    assert_eq!(authored_decision.receipt["matched_rule"]["id"], "authored");
+                }
             }
         }
     }
