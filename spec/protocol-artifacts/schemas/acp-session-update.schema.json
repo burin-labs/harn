@@ -316,7 +316,8 @@
             "host_bridge_unimplemented",
             "agent_loop_protocol_failure",
             "parse_dropped",
-            "generic_throw"
+            "generic_throw",
+            "managed_spend_paused"
           ]
         },
         "message": { "type": "string" },
@@ -370,7 +371,8 @@
             "host_bridge_unimplemented",
             "agent_loop_protocol_failure",
             "parse_dropped",
-            "generic_throw"
+            "generic_throw",
+            "managed_spend_paused"
           ]
         },
         "category": { "type": "string" },

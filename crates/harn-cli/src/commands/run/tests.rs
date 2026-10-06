@@ -17,11 +17,15 @@ use super::EnvironmentPolicyConfig;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
+#[cfg(unix)]
+mod command_grant_diagnostic;
 mod eval_source;
 mod evidence;
 mod exit_status;
 mod host_dispatch;
 mod network;
+#[cfg(unix)]
+use command_grant_diagnostic::COMMAND_GRANT_FAILURE_DIAGNOSTIC;
 
 fn write_manifest_trigger_project(root: &Path, main_source: &str) -> PathBuf {
     std::fs::write(
@@ -770,12 +774,8 @@ pipeline main(harness: Harness) {{
     harn_vm::reset_thread_local_state();
 }
 
-/// A `--grant NAME=env:SRC,expose=CHILD,for=sh` granted policy must inject the
-/// snapshotted value into a matching subprocess only — the least-privilege
-/// surface that lets a headless lane open its PR (`GH_TOKEN` for `gh`) without
-/// ambient exposure to every `process.exec`. The parent process holds `SRC`
-/// but not `CHILD`, so the child seeing `CHILD` proves the grant injected it
-/// rather than ambient inheritance.
+/// A command-bound grant injects its snapshotted value into the matching child.
+/// The parent holds SRC but not CHILD, so the child's value proves injection.
 #[cfg(unix)]
 #[tokio::test]
 async fn execute_run_granted_policy_injects_into_subprocess_env() {
@@ -793,7 +793,9 @@ async fn execute_run_granted_policy_injects_into_subprocess_env() {
     let script = project.join("main.harn");
     std::fs::write(
         &script,
-        r#"
+        [
+            COMMAND_GRANT_FAILURE_DIAGNOSTIC,
+            r#"
 import { command_run } from "std/command"
 
 pipeline main(harness: Harness) {
@@ -803,11 +805,13 @@ pipeline main(harness: Harness) {
     {capture: {max_inline_bytes: 64}, timeout_ms: 5000},
   )
   if !result.success {
-    throw "command_run failed: exit_code=${result.exit_code} stderr=${result.stderr}"
+    throw "command_run failed: ${json_stringify(command_grant_failure(result))}"
   }
   harness.stdio.println(result.stdout)
 }
 "#,
+        ]
+        .concat(),
     )
     .expect("write script");
 
@@ -861,7 +865,9 @@ async fn execute_run_command_bound_grant_skips_non_matching_exec() {
     let script = project.join("main.harn");
     std::fs::write(
         &script,
-        r#"
+        [
+            COMMAND_GRANT_FAILURE_DIAGNOSTIC,
+            r#"
 import { command_run } from "std/command"
 
 pipeline main(harness: Harness) {
@@ -871,11 +877,13 @@ pipeline main(harness: Harness) {
     {capture: {max_inline_bytes: 65536}, timeout_ms: 5000},
   )
   if !result.success {
-    throw "command_run failed: exit_code=${result.exit_code} stderr=${result.stderr}"
+    throw "command_run failed: ${json_stringify(command_grant_failure(result))}"
   }
   harness.stdio.println(result.stdout.contains("HARN_TEST_CHILD_VAR=") ? "leaked" : "absent")
 }
 "#,
+        ]
+        .concat(),
     )
     .expect("write script");
 

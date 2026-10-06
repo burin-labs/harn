@@ -934,6 +934,9 @@ extraction needs a per-language extractor.
 | `apply_node`, `insert_at_anchor` | **all** registered grammars |
 | `rename_symbol` | Rust, TypeScript/TSX, JavaScript/JSX, Python, Go, Swift |
 | `symbols` / `outline` | every general-purpose language (not the data/markup grammars) |
+| `extract_function` | Rust, TypeScript/TSX, JavaScript/JSX, Python |
+| `change_signature` | Rust, TypeScript/TSX, Python |
+| `move_symbol` | none yet; reserved for graph-grounded refactorings |
 
 Registered grammars fall into two groups:
 
@@ -965,7 +968,8 @@ pipeline default(harness: Harness) {
 ```
 
 Each row is `{language, extension, apply_node, insert_at_anchor,
-rename_symbol, symbols}`. A `language` filter that names no grammar
+rename_symbol, symbols, move_symbol, extract_function, change_signature,
+health}`. A `language` filter that names no grammar
 returns `result == "unsupported_language"` plus a `fallback_suggestion`.
 
 ### Graceful degradation
@@ -1027,13 +1031,23 @@ All require the `tools:deterministic` capability.
 | Function | Key params | Languages |
 |---|---|---|
 | `edit_extract_variable` | `path`, `range{start_line,start_col,end_line,end_col}`, `new_name` | rust, python, ts/tsx, js/jsx, go, swift, ruby |
-| `edit_extract_function` | `path`, `range{start_line,end_line}`, `new_name`, `target_scope?`, `params_order?` | python, js/jsx, ts/tsx, ruby |
-| `edit_change_signature` | `path`, `symbol`, `new_params`, `callsite_strategy?` (`strict \| default_fill \| manual`), `fill?` | rust, python, ts/tsx, js/jsx, go |
-| `edit_add_parameter` | `path`, `symbol`, `param`, `index?`, `default?`, `callsite_strategy?` | rust, python, ts/tsx, js/jsx, go |
-| `edit_reorder_parameters` | `path`, `symbol`, `order` (permutation of param indices) | rust, python, ts/tsx, js/jsx, go |
+| `edit_extract_function` | `code_index`, then `path`, `start_line`/`end_line` or `region`, `new_name`, `signature?`, `helper?`, `all_occurrences?` | rust, python, ts/tsx, js/jsx |
+| `edit_change_signature` | `symbol_ref{name,path,line?}`, `params` (complete new list of `{name, from?, type?, default?, call_value?}`) | rust, python, ts/tsx |
+| `edit_add_parameter` | `symbol_ref`, `param{name, type?, default?, call_value?}`, `index?` | rust, python, ts/tsx |
+| `edit_reorder_parameters` | `symbol_ref`, `order` (permutation of param indices) | rust, python, ts/tsx |
 | `edit_change_return_type` | `path`, `symbol`, `new_type` | rust, python, ts/tsx, go |
 | `edit_inline` | `path`, `symbol` (zero-param, single-`return` body) | rust, python, ts/tsx, js/jsx, go |
 | `edit_move_decl` | `path`, `symbol`, `target_file`, `target_position?` (`end \| start`) | follows `harness.ast.symbol_extract` |
+
+The three parameter refactorings take `harness.code_index` instead of the
+`fs`/`random`/`ast` handles: they are thin wrappers over
+`code_index.change_signature`, which rewrites the declaration and every call
+site across the indexed workspace and returns its own tagged result
+in `rename_symbol`'s envelope (`applied` with `dry_run`, `no_match`,
+`ambiguous_symbol`, plus `parameter_in_use | value_reference |
+unsupported_call_site | overrides_present`) with the rewritten or blocking
+`sites`. Rebuild the index (`harness.code_index.rebuild`)
+before calling them.
 
 `symbol` accepts `{name}` or a bare name string. A language outside a
 refactoring's matrix returns `result: "unsupported"` with a reason rather than
