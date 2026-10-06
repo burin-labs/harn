@@ -22,6 +22,8 @@ pub type AuthorityDecider = crate::orchestration::ToolPermissionDecider;
 
 #[derive(Clone, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub struct RunBudget {
+    /// An absent interactive dimension is unbounded. Unattended preparation
+    /// requires every dimension; no host may substitute an invented limit.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub spend_microusd: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -61,7 +63,11 @@ impl RunBudget {
 }
 
 fn exceeds(requested: Option<u64>, ceiling: Option<u64>) -> bool {
-    matches!((requested, ceiling), (Some(requested), Some(ceiling)) if requested > ceiling)
+    match (requested, ceiling) {
+        (Some(requested), Some(ceiling)) => requested > ceiling,
+        (None, Some(_)) => true,
+        (_, None) => false,
+    }
 }
 
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]

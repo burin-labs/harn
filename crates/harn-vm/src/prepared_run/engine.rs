@@ -974,7 +974,7 @@ fn validate_host_facts(
         ));
     }
     let missing_budget = plan.budget.missing_dimensions();
-    if !missing_budget.is_empty() {
+    if plan.interactivity == RunInteractivity::NonInteractive && !missing_budget.is_empty() {
         diagnostics.push(diagnostic(
             "incomplete_run_budget",
             format!("run budget is missing: {}", missing_budget.join(", ")),
