@@ -194,7 +194,8 @@ pub(crate) fn extract_llm_options(
         .as_ref()
         .and_then(|o| o.get("_dispatch_provenance"))
         .and_then(crate::llm::resolved_dispatch::DispatchProvenance::from_vm_value);
-    let pending_reminders = pending_reminders_from_session(session_id.as_deref());
+    let directive_session_id = directive_session_id(options.as_ref())?;
+    let pending_reminders = pending_reminders_from_session(directive_session_id.as_deref());
     let rendered_reminders = render_pending_reminders(&caps, &pending_reminders);
     let reminder_lifecycle = rendered_reminder_lifecycle(
         session_id.as_deref(),
