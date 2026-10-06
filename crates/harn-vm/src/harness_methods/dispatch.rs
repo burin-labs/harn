@@ -36,6 +36,10 @@ async fn call_harness_method_in_scope(
 ) -> Result<VmValue, VmError> {
     if let Some(capability) = handle.kind().capability_id() {
         let declared = crate::stdlib::capability_method_manifest_entry(capability, method);
+        crate::llm::agent_tool_preparation::enforce_contract(
+            method,
+            declared.map(|entry| &entry.contract),
+        )?;
         let host_method =
             harn_builtin_meta::host_capabilities::is_host_capability_method(capability, method);
         if declared.is_none() && !host_method {

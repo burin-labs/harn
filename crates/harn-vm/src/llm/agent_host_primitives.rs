@@ -1240,6 +1240,17 @@ pub(super) async fn host_agent_dispatch_tool_call(
                     // arguments: their exact exception was approved for the
                     // original dispatch and is rechecked before execution.
                     if let Some(new_args) = response.get("args") {
+                        if prepared_invocation.is_some() && new_args != &tool_args {
+                            return Ok(json_to_vm_value(&agent_primitive_denied_tool(
+                                &tool_name,
+                                &tool_id,
+                                &tool_args,
+                                "Prepared tool arguments changed during approval; request new approval",
+                                crate::agent_events::ToolCallErrorCategory::PermissionDenied,
+                                None,
+                                None,
+                            )));
+                        }
                         tool_args = new_args.clone();
                     }
                     approval_status = Some("host_granted");

@@ -73,7 +73,8 @@ async fn resolve(
         .expect("literal read-only preparation policy");
     let ceiling = crate::orchestration::current_execution_policy()
         .unwrap_or_default()
-        .intersect(&overlay);
+        .intersect(&overlay)
+        .map_err(rejected)?;
     let value = INVOCATION
         .scope(
             None,
