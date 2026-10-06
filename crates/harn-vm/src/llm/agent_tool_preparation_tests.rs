@@ -155,7 +155,7 @@ async fn prepared_verify_consent_matches_the_actual_process_command_and_root() {
         false,
     )
     .await;
-    assert_eq!(requests.len(), 1);
+    assert_eq!(requests.len(), 1, "{outcome}");
     assert_eq!(
         requests[0]["params"]["toolCall"]["rawInput"],
         fixture.facts["operation"]
@@ -183,7 +183,7 @@ async fn prepared_verify_refusal_runs_no_process() {
         false,
     )
     .await;
-    assert_eq!(requests.len(), 1);
+    assert_eq!(requests.len(), 1, "{outcome}");
     assert_eq!(outcome["ok"], false);
     fixture.no_effect();
 }
@@ -206,7 +206,7 @@ async fn prepared_verify_rejects_changed_goal_command_or_root_after_consent() {
             false,
         )
         .await;
-        assert_eq!(requests.len(), 1);
+        assert_eq!(requests.len(), 1, "{key}: {outcome}");
         assert_eq!(
             requests[0]["params"]["toolCall"]["rawInput"],
             fixture.facts["operation"]

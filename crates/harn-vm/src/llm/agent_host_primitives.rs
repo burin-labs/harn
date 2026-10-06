@@ -910,9 +910,11 @@ pub(super) async fn host_agent_dispatch_tool_call(
                             "side-effect approval missing its policy violation".to_string(),
                         ));
                     };
-                    if let Err(recheck_denial) =
-                        dispatch_policy.enforce(&tool_name, &tool_args, Some(&grant))
-                    {
+                    if let Err(recheck_denial) = dispatch_policy.enforce(
+                        &tool_name,
+                        approval_args.as_ref().unwrap_or(&tool_args),
+                        Some(&grant),
+                    ) {
                         let denial = tool_denial_from_policy(recheck_denial, &tool_name);
                         return Ok(deny_tool_call_value(
                             Some(&ctx),
