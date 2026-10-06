@@ -150,6 +150,7 @@ pub fn agent_stance_default_consent_check(
     + {
       output: {schema: schema, strict: true, validation: "error"},
       temperature: 0,
+      mock_scope: "agent.stance_consent",
       _call_stage: "guard",
     }
   const outcome = try {

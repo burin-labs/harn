@@ -285,6 +285,7 @@ pub fn edit_fast_apply(
   llm_opts = llm_opts.merging(
     {
       model_role: opts?.model_role ?? llm_opts?.model_role ?? "merge",
+      mock_scope: llm_opts?.mock_scope ?? llm_opts?.call_role ?? "edit.fast_apply",
       output: {schema: __edit_fast_apply_schema(), strict: true, validation: "error"},
       schema_retries: opts?.schema_retries ?? llm_opts?.schema_retries ?? 1,
       stream: false,
