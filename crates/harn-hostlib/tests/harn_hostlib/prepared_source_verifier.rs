@@ -17,6 +17,7 @@ struct FixtureExecutor {
     request: IsolatedPythonSourceVerifier,
     ignores_source: bool,
     unittest_runner: bool,
+    background_only: bool,
 }
 
 impl FixtureExecutor {
@@ -36,7 +37,7 @@ impl FixtureExecutor {
         }
     }
 
-    fn invoke(&self, mode: OwnerDeathPolicy) -> (i32, String) {
+    fn invoke(&self, mode: OwnerDeathPolicy, blocking: bool) -> (i32, String) {
         let mut child = default_spawner()
             .spawn(self.spec(mode))
             .expect("actual hostlib verifier spawn");
@@ -44,12 +45,16 @@ impl FixtureExecutor {
             child.missing_program().is_none(),
             "sealed executable cannot be classified by a removed origin"
         );
-        let outcome = child
-            .wait_with_timeout(Some(Duration::from_secs(10)), &|| false)
-            .unwrap();
-        let code = match outcome {
-            WaitOutcome::Exited(status) => status.code.expect("normal verifier exit"),
-            other => panic!("verifier did not settle: {other:?}"),
+        let code = if blocking {
+            child.wait().unwrap().code.expect("normal verifier exit")
+        } else {
+            match child
+                .wait_with_timeout(Some(Duration::from_secs(10)), &|| false)
+                .unwrap()
+            {
+                WaitOutcome::Exited(status) => status.code.expect("normal verifier exit"),
+                other => panic!("verifier did not settle: {other:?}"),
+            }
         };
         let mut stderr = String::new();
         child
@@ -58,6 +63,52 @@ impl FixtureExecutor {
             .read_to_string(&mut stderr)
             .unwrap();
         (code, stderr)
+    }
+
+    fn background_result(&self) -> serde_json::Value {
+        let session_id = format!("source-witness-{}", uuid::Uuid::now_v7());
+        let info = harn_hostlib::tools::long_running::spawn_long_running(
+            "prepared_source_verifier_test",
+            self.request.interpreter.display().to_string(),
+            self.request.invocation_args(),
+            Some(self.request.workspace.clone()),
+            BTreeMap::new(),
+            session_id.clone(),
+        )
+        .expect("actual background verifier spawn");
+        let result = harn_hostlib::tools::long_running::register_result_notifier(&info.handle_id)
+            .expect("live or retained terminal handle")
+            .recv_timeout(Duration::from_secs(10))
+            .expect("actual background verifier terminal result");
+        let schema = harn_hostlib::schemas::lookup(
+            "tools",
+            "wait_command",
+            harn_hostlib::schemas::SchemaKind::Response,
+        )
+        .expect("canonical background wait response schema");
+        let schema: serde_json::Value = serde_json::from_str(schema).unwrap();
+        harn_vm::schema::validate_value_against_schema(
+            &result,
+            &harn_vm::schema::json_to_vm_value(&schema),
+            false,
+        )
+        .expect("actual terminal result conforms to the public wait contract");
+        let feedback = harn_vm::orchestration::agent_inbox::drain(&session_id);
+        assert_eq!(feedback.len(), 1, "background terminal feedback must fire");
+        let payload: serde_json::Value = serde_json::from_str(&feedback[0].content).unwrap();
+        let terminal = result.as_dict().expect("retained terminal payload");
+        for key in ["status", "stderr"] {
+            let Some(harn_vm::VmValue::String(value)) = terminal.get(key) else {
+                panic!("missing terminal string {key}")
+            };
+            assert_eq!(payload[key].as_str(), Some(value.as_str()));
+        }
+        match terminal.get("exit_code") {
+            Some(harn_vm::VmValue::Int(code)) => assert_eq!(payload["exit_code"], *code),
+            Some(harn_vm::VmValue::Nil) => assert!(payload["exit_code"].is_null()),
+            other => panic!("missing terminal exit observation: {other:?}"),
+        }
+        payload
     }
 }
 
@@ -68,71 +119,96 @@ impl PreparedRunExecutor for FixtureExecutor {
 
     async fn execute(&self, _authority: &AuthorityUse) -> Result<(), String> {
         if self.ignores_source {
-            for mode in [OwnerDeathPolicy::None, OwnerDeathPolicy::KillContainment] {
-                let mut child = default_spawner()
-                    .spawn(self.spec(mode))
-                    .expect("actual negative verifier spawn");
-                let error = child
-                    .wait_with_timeout(Some(Duration::from_secs(10)), &|| false)
-                    .expect_err("exit zero without bootstrap execution must be unmeasured");
-                assert!(
-                    error.to_string().contains("execution is unmeasured"),
-                    "{error}"
-                );
+            for mode in [OwnerDeathPolicy::None, OwnerDeathPolicy::KillContainment]
+                .into_iter()
+                .filter(|_| !self.background_only)
+            {
+                for blocking in [false, true] {
+                    let mut child = default_spawner()
+                        .spawn(self.spec(mode))
+                        .expect("actual negative verifier spawn");
+                    let error = if blocking {
+                        child
+                            .wait()
+                            .expect_err("blocking wait must require the witness")
+                    } else {
+                        child
+                            .wait_with_timeout(Some(Duration::from_secs(10)), &|| false)
+                            .expect_err("exit zero without bootstrap execution must be unmeasured")
+                    };
+                    assert!(
+                        error.to_string().contains("execution is unmeasured"),
+                        "{error}"
+                    );
+                }
             }
+            let result = self.background_result();
+            assert_eq!(result["status"], "blocked");
+            assert!(result["exit_code"].is_null());
+            assert!(result["signal"].is_null());
+            assert!(result["stderr"]
+                .as_str()
+                .unwrap()
+                .contains("execution is unmeasured"));
             return Ok(());
         }
         // Mutation begins only after PreparedRun installs the native authority.
         std::fs::write(&self.request.source, "print('RUNNER_SHIM_BYPASS')\n").unwrap();
         std::fs::remove_file(&self.request.interpreter).unwrap();
         for mode in [OwnerDeathPolicy::None, OwnerDeathPolicy::KillContainment] {
-            std::fs::write(
-                &self.request.args[0],
-                "assert False, 'KNOWN_FAILING_ASSERTION'\n",
-            )
-            .unwrap();
-            let (failed, stderr) = self.invoke(mode);
-            assert_eq!(failed, 1);
-            assert!(
-                stderr.contains("KNOWN_FAILING_ASSERTION"),
-                "actual original runner must reach the test: {stderr}"
-            );
-            if self.unittest_runner {
+            for blocking in [false, true] {
+                std::fs::write(
+                    &self.request.args[0],
+                    "assert False, 'KNOWN_FAILING_ASSERTION'\n",
+                )
+                .unwrap();
+                let (failed, stderr) = self.invoke(mode, blocking);
+                assert_eq!(failed, 1);
                 assert!(
-                    stderr.contains("Ran 1 test"),
-                    "actual main-module discovery must reach the test: {stderr}"
+                    stderr.contains("KNOWN_FAILING_ASSERTION"),
+                    "actual original runner must reach the test: {stderr}"
                 );
-            }
-            std::fs::write(&self.request.args[0], "assert 2 + 2 == 4\n").unwrap();
-            let (passed, stderr) = self.invoke(mode);
-            assert_eq!(passed, 0);
-            if self.unittest_runner {
-                assert!(stderr.contains("Ran 1 test"), "{stderr}");
-            }
-            std::fs::write(&self.request.args[0], "raise SystemExit(127)\n").unwrap();
-            let (status, stderr) = self.invoke(mode);
-            if self.unittest_runner {
-                assert_eq!(status, 1);
-                assert!(stderr.contains("SystemExit: 127"), "{stderr}");
-            } else {
-                assert_eq!(
-                    status, 127,
-                    "a real verifier exit is not missing-program evidence"
+                if self.unittest_runner {
+                    assert!(
+                        stderr.contains("Ran 1 test"),
+                        "actual main-module discovery must reach the test: {stderr}"
+                    );
+                }
+                std::fs::write(&self.request.args[0], "assert 2 + 2 == 4\n").unwrap();
+                let (passed, stderr) = self.invoke(mode, blocking);
+                assert_eq!(passed, 0);
+                if self.unittest_runner {
+                    assert!(stderr.contains("Ran 1 test"), "{stderr}");
+                }
+                std::fs::write(&self.request.args[0], "raise SystemExit(127)\n").unwrap();
+                let (status, stderr) = self.invoke(mode, blocking);
+                if self.unittest_runner {
+                    assert_eq!(status, 1);
+                    assert!(stderr.contains("SystemExit: 127"), "{stderr}");
+                } else {
+                    assert_eq!(
+                        status, 127,
+                        "a real verifier exit is not missing-program evidence"
+                    );
+                }
+                let mut adversarial = self.spec(mode);
+                adversarial.env.insert(
+                    "LD_PRELOAD".to_string(),
+                    "/nonexistent/adversarial-loader.so".to_string(),
                 );
-            }
-            let mut adversarial = self.spec(mode);
-            adversarial.env.insert(
-                "LD_PRELOAD".to_string(),
-                "/nonexistent/adversarial-loader.so".to_string(),
-            );
-            match default_spawner().spawn(adversarial) {
-                Err(error) => assert!(
-                    error.to_string().contains("LD_PRELOAD"),
-                    "loader refusal must be explicit: {error}"
-                ),
-                Ok(_) => panic!("agent-controlled loader must not reach the sealed verifier"),
+                match default_spawner().spawn(adversarial) {
+                    Err(error) => assert!(
+                        error.to_string().contains("LD_PRELOAD"),
+                        "loader refusal must be explicit: {error}"
+                    ),
+                    Ok(_) => panic!("agent-controlled loader must not reach the sealed verifier"),
+                }
             }
         }
+        std::fs::write(&self.request.args[0], "assert 2 + 2 == 4\n").unwrap();
+        let result = self.background_result();
+        assert_eq!(result["status"], "completed");
+        assert_eq!(result["exit_code"], 0);
         Ok(())
     }
 }
@@ -140,21 +216,30 @@ impl PreparedRunExecutor for FixtureExecutor {
 #[tokio::test]
 async fn prepared_source_verifier_direct_and_guardian_keep_original_material_and_refuse_loader_overrides(
 ) {
-    source_verifier_control(false, false).await;
+    source_verifier_control(false, false, false).await;
 }
 
 #[tokio::test]
 async fn prepared_source_verifier_direct_and_guardian_refuse_an_elf_that_ignores_source() {
-    source_verifier_control(true, false).await;
+    source_verifier_control(true, false, false).await;
+}
+
+#[tokio::test]
+async fn prepared_source_verifier_background_refuses_an_elf_that_ignores_source() {
+    source_verifier_control(true, false, true).await;
 }
 
 #[tokio::test]
 async fn prepared_source_verifier_direct_and_guardian_preserve_registered_main_module_test_discovery(
 ) {
-    source_verifier_control(false, true).await;
+    source_verifier_control(false, true, false).await;
 }
 
-async fn source_verifier_control(ignores_source: bool, unittest_runner: bool) {
+async fn source_verifier_control(
+    ignores_source: bool,
+    unittest_runner: bool,
+    background_only: bool,
+) {
     let _guardian = harn_hostlib::process::owner_death::install_guardian_reexec_args([
         "--exact",
         "process_tools_e2e::owner_death_guardian_fixture",
@@ -262,6 +347,7 @@ async fn source_verifier_control(ignores_source: bool, unittest_runner: bool) {
             request,
             ignores_source,
             unittest_runner,
+            background_only,
         },
         Arc::new(MemoryAuthorityReceiptSink::default()),
         Arc::new(|| 1),

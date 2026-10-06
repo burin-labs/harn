@@ -1,11 +1,30 @@
+use std::path::Path;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use std::time::Instant;
 
 use harn_vm::{PreparedModuleCache, Vm, VmBaseline};
 
-use super::{classify_vm_error, install_dispatch_vm_runtime, DispatchCore, DispatchCoreConfig};
+use super::{classify_vm_error, DispatchCore, DispatchCoreConfig};
 use crate::{DispatchError, ExportCatalog};
+
+fn install_dispatch_vm_runtime(
+    vm: &mut Vm,
+    script_path: &Path,
+    source: &str,
+    cancel_token: Arc<AtomicBool>,
+) {
+    harn_vm::register_vm_stdlib(vm);
+    #[cfg(feature = "hostlib")]
+    crate::install_dispatch_hostlib(vm);
+    let store_base = script_path.parent().unwrap_or(Path::new("."));
+    harn_vm::register_store_builtins(vm, store_base);
+    harn_vm::register_metadata_builtins(vm, store_base);
+    vm.set_source_info(&script_path.display().to_string(), source);
+    vm.set_source_dir(store_base);
+    vm.install_cancel_token(cancel_token);
+    vm.set_harness(harn_vm::Harness::real());
+}
 
 /// Measured work used to construct one immutable dispatch generation.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]

@@ -124,6 +124,7 @@ pub(crate) enum CommandStatus {
     Running,
     TimedOut,
     Killed,
+    Blocked,
 }
 
 impl CommandStatus {
@@ -133,6 +134,7 @@ impl CommandStatus {
             CommandStatus::Running => "running",
             CommandStatus::TimedOut => "timed_out",
             CommandStatus::Killed => "killed",
+            CommandStatus::Blocked => "blocked",
         }
     }
 }

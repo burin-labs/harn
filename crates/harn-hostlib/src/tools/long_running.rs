@@ -646,7 +646,8 @@ fn waiter_thread(context: WaiterContext, cancel_state: Arc<CancelState>, capture
         });
 
     let missing_program = handle.missing_program().map(str::to_string);
-    let status = handle.wait().ok();
+    let waited = handle.wait();
+    let status = waited.as_ref().ok().copied();
 
     if let Some(thread) = stdout_thread {
         let _ = thread.join();
@@ -656,7 +657,7 @@ fn waiter_thread(context: WaiterContext, cancel_state: Arc<CancelState>, capture
     }
     done.store(true, Ordering::Release);
     drop(progress_thread);
-    let (stdout, stderr) = {
+    let (stdout, mut stderr) = {
         let state = context
             .output_feed
             .state
@@ -664,6 +665,10 @@ fn waiter_thread(context: WaiterContext, cancel_state: Arc<CancelState>, capture
             .unwrap_or_else(|poison| poison.into_inner());
         (state.stdout.clone(), state.stderr.clone())
     };
+    if let Err(error) = waited.as_ref() {
+        stderr
+            .extend_from_slice(format!("\nharn: process completion refused: {error}\n").as_bytes());
+    }
 
     let cancellation = cancel_state.complete_wait();
     let cancelled = cancellation.cancelled;
@@ -674,13 +679,15 @@ fn waiter_thread(context: WaiterContext, cancel_state: Arc<CancelState>, capture
         .is_some_and(|status| harn_vm::process_sandbox::is_process_sandbox_signal(status.signal));
     let (exit_code, signal_name) = match status {
         Some(status) => decode_exit_status(status),
-        // wait() itself failed — treat as killed (extremely unusual).
-        None => (-1, Some("SIGKILL".to_string())),
+        // No observed exit is neither a successful run nor proof of a signal.
+        None => (-1, None),
     };
     let command_status = if timed_out {
         CommandStatus::TimedOut
     } else if cancelled {
         CommandStatus::Killed
+    } else if waited.is_err() {
+        CommandStatus::Blocked
     } else {
         CommandStatus::Completed
     };
@@ -754,7 +761,11 @@ fn waiter_thread(context: WaiterContext, cancel_state: Arc<CancelState>, capture
     );
     payload.insert(
         "exit_code".into(),
-        serde_json::Value::Number(exit_code.into()),
+        if waited.is_err() {
+            serde_json::Value::Null
+        } else {
+            serde_json::Value::Number(exit_code.into())
+        },
     );
     payload.insert("timed_out".into(), serde_json::Value::Bool(timed_out));
     if exit_code == 127 && signal_name.is_none() && !cancelled {

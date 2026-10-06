@@ -618,6 +618,13 @@ fn real_process(
 }
 
 impl RealProcess {
+    fn witnessed_exit(&self, status: std::process::ExitStatus) -> io::Result<ExitStatus> {
+        if let Some(witness) = self.verifier_witness.as_ref() {
+            witness.validate()?;
+        }
+        Ok(decode_status(status))
+    }
+
     fn ensure_pipes_taken(&mut self) {
         if let Some(child) = self.child.as_mut() {
             if self.owner_liveness.is_none() && self.stdin.is_none() && !self.stdin_taken {
@@ -688,10 +695,7 @@ impl ProcessHandle for RealProcess {
         loop {
             match child.try_wait()? {
                 Some(status) => {
-                    if let Some(witness) = self.verifier_witness.as_ref() {
-                        witness.validate()?;
-                    }
-                    return Ok(WaitOutcome::Exited(decode_status(status)));
+                    return self.witnessed_exit(status).map(WaitOutcome::Exited);
                 }
                 None => {
                     if interrupt() {
@@ -755,7 +759,7 @@ impl ProcessHandle for RealProcess {
             .as_mut()
             .ok_or_else(|| io::Error::other("child already reaped"))?;
         let status = child.wait()?;
-        Ok(decode_status(status))
+        self.witnessed_exit(status)
     }
 }
 
