@@ -23,7 +23,7 @@ mod sensitive_paths;
 pub use host_request::{ToolApprovalRequest, ToolApprovalWorkspaceBoundary};
 use identity_match::LiteralResourceIdentity;
 pub use identity_match::PolicyIdentityMatch;
-use path_guards::default_guard;
+pub(super) use path_guards::evaluate_invocation_guards;
 pub use path_guards::{
     denial_gate_for_source, EXTERNAL_ROOT_READ_ONLY, SOURCE_DEFAULT_EXTERNAL_PATH,
     SOURCE_DEFAULT_PATH_GUARD, SOURCE_DEFAULT_SENSITIVE_PATH, SOURCE_NET_POLICY,
@@ -957,10 +957,8 @@ pub(crate) fn evaluate_authority_request(
 }
 
 fn evaluate_context(policy: &ToolApprovalPolicy, mut ctx: EvaluationContext) -> PolicyEvaluation {
-    ctx.external_roots =
-        super::external_roots::governing_roots(&policy.external_roots, &ctx.path_entries);
-    if let Some(default) = default_guard(policy, &ctx) {
-        return evaluation_from_candidate(default, &ctx);
+    if let Some(default) = path_guards::evaluate_context(policy, &mut ctx) {
+        return default;
     }
 
     let mut candidates = Vec::new();

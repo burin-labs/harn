@@ -24,6 +24,30 @@ pub const EXTERNAL_ROOT_READ_ONLY: &str = "external_root_read_only";
 /// The prepared-run network policy, evaluated before endpoint health.
 pub const SOURCE_NET_POLICY: &str = "harn.net_policy";
 
+/// Re-resolve effect paths without reopening a granted approval question.
+/// A hook may change a symlink while preserving the invocation's JSON.
+pub(in crate::orchestration::policy) fn evaluate_invocation_guards(
+    policy: &ToolApprovalPolicy,
+    tool: &str,
+    args: &JsonValue,
+    annotations: Option<&ToolAnnotations>,
+) -> Option<PolicyEvaluation> {
+    let mut context = EvaluationContext::new(tool, args, None, annotations);
+    if let Err(reason) = validate_tool_approval_path_arguments(tool, args, annotations) {
+        return Some(host_request::invalid_context(&context, reason));
+    }
+    evaluate_context(policy, &mut context)
+}
+
+pub(super) fn evaluate_context(
+    policy: &ToolApprovalPolicy,
+    ctx: &mut EvaluationContext,
+) -> Option<PolicyEvaluation> {
+    ctx.external_roots =
+        super::super::external_roots::governing_roots(&policy.external_roots, &ctx.path_entries);
+    default_guard(policy, ctx).map(|candidate| evaluation_from_candidate(candidate, ctx))
+}
+
 /// Which refusing mechanism a deciding rule belongs to.
 ///
 /// Three of the sources this module produces are not approval decisions.

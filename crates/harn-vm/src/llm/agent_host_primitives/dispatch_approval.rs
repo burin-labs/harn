@@ -95,12 +95,13 @@ impl DispatchApproval {
         tool: &str,
         args: &Value,
         tools: Option<&crate::value::VmValue>,
+        initial_annotations: Option<&ToolAnnotations>,
     ) -> Option<PolicyEvaluation> {
         let (initial_tool, initial_args) = self.initial.as_ref()?;
-        if initial_tool == tool && initial_args == args {
-            return None;
-        }
         let policy = self.policy.as_ref()?;
+        if initial_tool == tool && initial_args == args {
+            return policy.recheck_dispatch_boundary(tool, args, initial_annotations);
+        }
         let annotations = super::tool_catalog::annotations_for(tools, tool);
         // The same evaluator judges the final facts without consuming another
         // repeat count. An exact host replacement may retain ask approval, but

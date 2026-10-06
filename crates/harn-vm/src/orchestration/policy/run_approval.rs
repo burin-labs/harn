@@ -236,6 +236,15 @@ impl RunApprovalPolicy {
         )
     }
 
+    pub(crate) fn recheck_dispatch_boundary(
+        &self,
+        tool: &str,
+        args: &serde_json::Value,
+        annotations: Option<&crate::tool_annotations::ToolAnnotations>,
+    ) -> Option<super::PolicyEvaluation> {
+        super::approval_rules::evaluate_invocation_guards(&self.declared, tool, args, annotations)
+    }
+
     pub fn evaluate_detailed(
         &self,
         tool: &str,
