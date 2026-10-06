@@ -11,6 +11,10 @@ cat > "$tmp_root/bin/rustup" <<'SCRIPT'
 #!/usr/bin/env bash
 set -euo pipefail
 printf 'rustup %s\n' "$*" >> "${TOOLCHAIN_TEST_STATE:?}/calls"
+case "$*" in
+  'show active-toolchain') echo '1.95.0-x86_64-unknown-linux-gnu (overridden by rust-toolchain.toml)' ;;
+  'toolchain list --quiet') printf '%s\n' 'stable-x86_64-unknown-linux-gnu (default)' '1.95.0-x86_64-unknown-linux-gnu (active)' ;;
+esac
 SCRIPT
 
 cat > "$tmp_root/bin/rustc" <<'SCRIPT'
@@ -60,6 +64,7 @@ run_case() {
   mkdir -p "$state"
   local status=0
   PATH="$tmp_root/bin:$PATH" \
+    RUNNER_ENVIRONMENT="${CASE_RUNNER_ENVIRONMENT:-self-hosted}" \
     TOOLCHAIN_TEST_STATE="$state" \
     TOOLCHAIN_TEST_MODE="$mode" \
     EXTRA_COMPONENTS='rustfmt, clippy' \
@@ -103,5 +108,21 @@ run_case permanent always-fail 1
 [[ "$(paste -sd, "$tmp_root/permanent/sleeps")" == '2,4,8' ]]
 grep -Fq 'Rust toolchain command failed after 4 attempts: cargo -V' \
   "$tmp_root/permanent/output"
+
+# A hosted runner keeps only the pinned toolchain, so the Rust cache key does
+# not depend on which image's floating stable the runner shipped (#9430).
+CASE_RUNNER_ENVIRONMENT=github-hosted run_case hosted cargo-transient 0
+diff -u - <(grep '^rustup' "$tmp_root/hosted/calls") <<'EXPECTED'
+rustup show
+rustup component add rustfmt clippy
+rustup target add x86_64-pc-windows-msvc
+rustup show active-toolchain
+rustup default 1.95.0-x86_64-unknown-linux-gnu
+rustup toolchain list --quiet
+rustup toolchain uninstall stable-x86_64-unknown-linux-gnu
+rustup toolchain list --quiet
+EXPECTED
+# An owned runner's shared rustup home is never touched.
+! grep -Eq 'rustup (default|toolchain uninstall)' "$tmp_root/cargo-transient/calls"
 
 echo 'rust toolchain action tests passed'
