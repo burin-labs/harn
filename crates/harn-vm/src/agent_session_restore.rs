@@ -22,8 +22,8 @@ use crate::agent_sessions::event_facts as facts;
 use crate::orchestration::AgentSessionReplayEvent;
 use crate::value::VmError;
 use harn_session_store::{
-    chain_root_hash, EventId, ReadRange, SessionEventKind, SessionMeta, SessionStore, StoreError,
-    StoredEvent,
+    chain_root_fold, chain_root_init, EventId, ReadRange, SessionEventKind, SessionMeta,
+    SessionStore, StoreError, StoredEvent,
 };
 
 /// One page of stored events per round trip. The store caps reads at its own
@@ -45,7 +45,7 @@ pub struct CanonicalSessionReplay {
 /// which a caller may report an unknown session. A replay with an
 /// empty event vector is a real session that simply has no transcript yet, which is
 /// still restorable.
-pub async fn load_canonical_session_replay_events(
+pub async fn load_canonical_session_replay(
     project_root: &Path,
     session_id: &str,
 ) -> Result<Option<CanonicalSessionReplay>, VmError> {
@@ -56,18 +56,8 @@ pub async fn load_canonical_session_replay_events(
     load_canonical_session_replay_from_store(&store, session_id).await
 }
 
-/// Store-injected form of [`load_canonical_session_replay_events`], so tests
-/// and non-SQLite hosts can exercise the projection without a project layout.
-pub async fn load_canonical_session_replay_events_from_store(
-    store: &dyn SessionStore,
-    session_id: &str,
-) -> Result<Option<Vec<AgentSessionReplayEvent>>, VmError> {
-    Ok(load_canonical_session_replay_from_store(store, session_id)
-        .await?
-        .map(|replay| replay.events))
-}
-
-/// Capture the durable checkpoint before reading and validate that exact prefix.
+/// Store-injected form of [`load_canonical_session_replay`]. Capture the
+/// durable checkpoint before reading and validate that exact prefix.
 pub async fn load_canonical_session_replay_from_store(
     store: &dyn SessionStore,
     session_id: &str,
@@ -110,7 +100,10 @@ async fn read_canonical_session_prefix(
         });
     }
 
-    let mut stored_events = Vec::new();
+    let mut events = Vec::new();
+    let mut event_count = 0;
+    let mut last_event_id = None;
+    let mut chain_root = chain_root_init();
     let mut from = None;
     loop {
         let page = store
@@ -129,23 +122,29 @@ async fn read_canonical_session_prefix(
                     "canonical session store read {session_id}: {error}"
                 ))
             })?;
-        if page.events.iter().any(|event| {
-            event.session_id != session_id
-                || Some(event.event_id) > checkpoint.last_event_id
-                || stored_events
-                    .last()
-                    .is_some_and(|previous: &StoredEvent| previous.event_id >= event.event_id)
-        }) {
-            return Err(invalid_prefix());
+        for stored in page.events {
+            if stored.session_id != session_id
+                || Some(stored.event_id) > checkpoint.last_event_id
+                || last_event_id.is_some_and(|previous| previous >= stored.event_id)
+            {
+                return Err(invalid_prefix());
+            }
+            event_count += 1;
+            if event_count > checkpoint.event_count {
+                return Err(invalid_prefix());
+            }
+            last_event_id = Some(stored.event_id);
+            chain_root = chain_root_fold(&chain_root, stored.source_record_hash());
+            // Projection remains private until the complete prefix is validated.
+            if let Some(event) = replay_event_from_stored(session_id, &stored) {
+                events.push(event);
+            }
         }
-        stored_events.extend(page.events);
         match page.next_cursor {
             Some(cursor) => {
                 if from.is_some_and(|previous| cursor <= previous)
                     || Some(cursor) > checkpoint.last_event_id
-                    || stored_events
-                        .last()
-                        .is_none_or(|event| cursor <= event.event_id)
+                    || last_event_id.is_none_or(|event_id| cursor <= event_id)
                 {
                     return Err(invalid_prefix());
                 }
@@ -154,19 +153,12 @@ async fn read_canonical_session_prefix(
             None => break,
         }
     }
-    if stored_events.len() != checkpoint.event_count
-        || stored_events.last().map(|event| event.event_id) != checkpoint.last_event_id
-        || checkpoint.chain_root_hash.as_deref() != Some(chain_root_hash(&stored_events).as_str())
-        || stored_events
-            .windows(2)
-            .any(|pair| pair[0].event_id >= pair[1].event_id)
+    if event_count != checkpoint.event_count
+        || last_event_id != checkpoint.last_event_id
+        || checkpoint.chain_root_hash.as_deref() != Some(chain_root.as_str())
     {
         return Err(invalid_prefix());
     }
-    let events = stored_events
-        .iter()
-        .filter_map(|stored| replay_event_from_stored(session_id, stored))
-        .collect();
     Ok(CanonicalSessionReplay {
         events: close_unanswered_tool_calls(session_id, events),
         last_event_id: checkpoint.last_event_id,

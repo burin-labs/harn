@@ -243,7 +243,7 @@ impl AcpServer {
                     return;
                 }
             };
-            match harn_vm::agent_session_restore::load_canonical_session_replay_events(
+            match harn_vm::agent_session_restore::load_canonical_session_replay(
                 &project_root,
                 &session_id,
             )
