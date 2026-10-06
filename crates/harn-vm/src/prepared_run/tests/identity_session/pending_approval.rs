@@ -143,10 +143,13 @@ fn dropping_an_unpolled_old_wait_cannot_retire_an_identical_successor() {
         .unwrap()
         .wait();
     let successor = prepare(&session, intent());
-    assert_eq!(
-        earlier, successor,
-        "identity must distinguish identical batches"
-    );
+    assert_eq!(earlier.batch_fingerprint, successor.batch_fingerprint);
+    assert_eq!(earlier.plan_fingerprint, successor.plan_fingerprint);
+    assert_eq!(earlier.groups, successor.groups);
+    assert_ne!(earlier.request_id, successor.request_id);
+    assert!(session
+        .pending_approval(&bridge, "prepared-session-1", &earlier)
+        .is_err());
     drop(old_wait);
     assert_eq!(
         receipts.receipts().last().unwrap().status,
