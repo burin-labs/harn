@@ -112,6 +112,59 @@ async fn pending_permission_calls_return_when_cancellation_arrives() {
 }
 
 #[tokio::test(flavor = "current_thread", start_paused = true)]
+async fn dropped_permission_waits_release_rpc_senders_before_the_next_turn() {
+    let pending = Arc::new(Mutex::new(HashMap::new()));
+    let cancelled = Arc::new(AtomicBool::new(false));
+    let bridge = HostBridge::from_parts_with_writer(
+        pending.clone(),
+        cancelled.clone(),
+        Arc::new(|_| Ok(())),
+        1,
+    );
+    for id in 1..=3 {
+        let mut call = Box::pin(bridge.call(
+            crate::llm::acp_permission::METHOD_REQUEST_PERMISSION,
+            serde_json::json!({}),
+        ));
+        wait_for_pending(&pending, id, call.as_mut()).await;
+        assert_eq!(
+            pending.lock().await.len(),
+            1,
+            "the real request must register once"
+        );
+        cancelled.store(true, Ordering::SeqCst);
+        bridge.cancel_notify.notify_waiters();
+        drop(call);
+        assert!(
+            pending.lock().await.is_empty(),
+            "dropped Stop {id} retained a pending RPC sender"
+        );
+        cancelled.store(false, Ordering::SeqCst);
+    }
+    let mut next = Box::pin(bridge.call(
+        crate::llm::acp_permission::METHOD_REQUEST_PERMISSION,
+        serde_json::json!({}),
+    ));
+    wait_for_pending(&pending, 4, next.as_mut()).await;
+    let mut requests = pending.lock().await;
+    assert_eq!(
+        requests.len(),
+        1,
+        "new work cannot inherit stopped requests"
+    );
+    requests
+        .remove(&4)
+        .unwrap()
+        .send(serde_json::json!({
+            "id":4, "result":crate::llm::acp_permission::allow_response(),
+        }))
+        .unwrap();
+    drop(requests);
+    assert!(next.await.is_ok());
+    assert!(pending.lock().await.is_empty());
+}
+
+#[tokio::test(flavor = "current_thread", start_paused = true)]
 async fn registered_cancel_wait_survives_notification_before_first_poll() {
     let notify = Notify::new();
     let wait = notify.notified();
