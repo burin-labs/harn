@@ -707,6 +707,8 @@ test-pr-gate-scripts:
 	./scripts/tests/release_tag_main_ancestry_test.sh
 	./scripts/tests/candidate_manifest_test.sh
 	./scripts/tests/release_promotion_plan_test.sh
+	bash ./scripts/tests/release_promotion_source_test.sh
+	bash ./scripts/tests/release_rehearsal_authorization_test.sh
 	bash ./scripts/tests/release_consumer_candidate_verdict_test.sh
 	./scripts/tests/check_linux_glibc_floor_test.sh
 	./scripts/tests/release_version_test.sh
