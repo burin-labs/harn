@@ -5,6 +5,99 @@ use super::{
 };
 
 #[test]
+fn retired_deepinfra_qwen_cannot_reach_active_provider_dispatch() {
+    let retired = "deepinfra/Qwen/Qwen3.8-2.4T-A95B";
+    for (selector, provider) in [
+        (retired, Some("deepinfra")),
+        ("deepinfra:deepinfra/Qwen/Qwen3.8-2.4T-A95B", None),
+        ("Qwen/Qwen3.8-2.4T-A95B", Some("deepinfra")),
+        ("deepinfra:Qwen/Qwen3.8-2.4T-A95B", None),
+        (retired, None),
+    ] {
+        let error = resolve_model_request_for_active_call(selector, provider)
+            .expect_err("retired route must refuse before provider dispatch");
+        assert!(
+            matches!(error, ModelResolutionError::RetiredModel { ref provider, .. }
+            if provider == "deepinfra"),
+            "{selector}: {error}"
+        );
+        assert!(error
+            .to_string()
+            .contains("select a different model explicitly"));
+        assert!(error.to_string().contains(MODEL_CATALOG_VERSION));
+    }
+}
+
+#[test]
+fn retired_routes_preserve_other_providers_and_private_models() {
+    let config = effective_config();
+    for model in [
+        "Qwen/Qwen3.8-2.4T-A95B",
+        "accounts/fireworks/models/kimi-k3",
+    ] {
+        assert!(
+            config.models.contains_key(model),
+            "positive catalog row reached"
+        );
+    }
+    for (model, provider) in [
+        ("Qwen/Qwen3.8-2.4T-A95B", "together"),
+        ("accounts/fireworks/models/kimi-k3", "fireworks"),
+        ("new-private-model", "deepinfra"),
+        ("Qwen/Qwen3.8-2.4T-A95B-private", "deepinfra"),
+    ] {
+        let resolution = resolve_model_request_for_active_call(model, Some(provider))
+            .expect("unretired route remains extensible");
+        assert_eq!(resolution.resolved_provider, provider);
+        assert_eq!(resolution.resolved_model, model);
+    }
+}
+
+#[test]
+fn retired_routes_cannot_be_reintroduced_by_alias_or_wire_model_overlay() {
+    let mut config = (*effective_config()).clone();
+    config.aliases.insert(
+        "saved-qwen".to_string(),
+        AliasDef {
+            id: "deepinfra/Qwen/Qwen3.8-2.4T-A95B".to_string(),
+            provider: "deepinfra".to_string(),
+            tool_format: None,
+        },
+    );
+    let mut renamed = config.models["Qwen/Qwen3.8-2.4T-A95B"].clone();
+    renamed.provider = "deepinfra".to_string();
+    config.models.insert("renamed-qwen".to_string(), renamed);
+    for selector in ["saved-qwen", "renamed-qwen"] {
+        let error = resolve_model_request_with_config(
+            &config,
+            selector,
+            None,
+            ProviderResolutionScope::ActiveCall,
+        )
+        .expect_err("aliases and model overlays cannot revive a retired wire route");
+        assert!(
+            matches!(error, ModelResolutionError::RetiredModel { .. }),
+            "{selector}: {error}"
+        );
+    }
+}
+
+#[test]
+fn later_routing_policy_cannot_select_retired_deepinfra_qwen() {
+    let mut resolution = resolve_model_request("new-private-model", Some("deepinfra"))
+        .expect("initial private route resolves");
+    let original = resolution.clone();
+    let error = resolution
+        .resolve_route("deepinfra", "Qwen/Qwen3.8-2.4T-A95B")
+        .expect_err("later routing must apply the same retirement policy");
+    assert!(matches!(error, ModelResolutionError::RetiredModel { .. }));
+    assert_eq!(
+        resolution, original,
+        "refused routing must not mutate receipt"
+    );
+}
+
+#[test]
 fn registered_provider_selector_normalizes_to_native_model_id() {
     let model = resolve_model_info("openai:o3");
     assert_eq!(model.provider, "openai");
