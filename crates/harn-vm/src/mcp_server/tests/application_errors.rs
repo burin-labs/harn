@@ -49,7 +49,7 @@ async fn prepared_tool_is_refused_before_mcp_handler_or_task_execution() {
             );
         }
         tool.insert(
-            "error_schema".into(),
+            "errorSchema".into(),
             crate::schema::json_to_vm_value(&serde_json::json!({
                 "type": "object",
                 "properties": {"variant": {"const": "NotFound"}, "message": {"type": "string"}},
