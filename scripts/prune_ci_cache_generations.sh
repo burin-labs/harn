@@ -10,7 +10,10 @@ mode="${1:-}"
 # Release artifacts and the Linux merge-gate compile caches share the 10 GiB
 # GitHub Actions cache pool. Windows/macOS workspace test graphs are valuable but must
 # yield when the pool is full — otherwise the #5003 workspace-tests writer is
-# evicted before the next merge_group can restore it.
+# evicted before the next merge_group can restore it. The shared CLI family
+# is a merge-gate cache too: every Harn proof lane waits on its build, and when
+# it was unprotected each sibling refresh leg's headroom step deleted it as the
+# largest eligible entry, so that build compiled cold (#9430).
 
 list_main_cache_pages() {
   gh api --paginate \
@@ -42,7 +45,8 @@ prune_to_listed_ceiling() {
     '
       def linux_merge_gate_key:
         (.key | startswith("v0-rust-workspace-tests"))
-        or (.key | startswith("v0-rust-package-audit"));
+        or (.key | startswith("v0-rust-package-audit"))
+        or (.key | startswith("v0-rust-harn-ci-cli"));
       def protected_key:
         linux_merge_gate_key
         or (

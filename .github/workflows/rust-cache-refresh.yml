@@ -105,7 +105,14 @@ jobs:
         continue-on-error: true
         with:
           shared-key: ${{ matrix.cache_key }}
-          cache-on-failure: true
+          # A failed leg must not save. The exact key names this commit's
+          # source, so saving a target whose warm build never ran (a refused
+          # headroom step, a failed compile) publishes a generation that every
+          # consumer restores and rebuilds from nothing, and that the next
+          # refresh restores exactly and refuses for its missing source record
+          # (#9430). Without a save, the next run restores the prior
+          # generation by prefix and warms it.
+          cache-on-failure: false
           cache-bin: false
           cache-workspace-crates: "true"
           # Also drops any source record a prefix-matched older generation
