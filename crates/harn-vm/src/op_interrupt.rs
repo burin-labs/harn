@@ -1120,7 +1120,7 @@ mod tests {
         let _all = install_for_vm(Some(cancel.clone()), Some(expired), Some(expired));
         assert_eq!(thrown(), "kind:interrupted:handler_timeout");
         // An operation bound keeps the caller's handler window.
-        let _bounded = with_deadline(Instant::now() + Duration::from_secs(60));
+        let _bounded = with_deadline(Instant::now() + Duration::from_mins(1));
         assert_eq!(thrown(), "kind:interrupted:handler_timeout");
         let _cancel_and_scope = install_for_vm(Some(cancel), Some(expired), None);
         assert!(requested_error().is_some_and(|error| crate::cancellation::is_cancellation(&error)));

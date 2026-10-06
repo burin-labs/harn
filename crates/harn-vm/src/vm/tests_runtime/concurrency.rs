@@ -384,11 +384,11 @@ pipeline t(harness: Harness) {
     );
 
     let scope = interrupt_error_seen_by_sync_builtin(
-        r#"
+        "
 pipeline t(harness: Harness) {
   try { deadline 50ms { observe_interrupt() } } catch (e) { }
 }
-"#,
+",
     );
     assert_eq!(scope.as_deref(), Some("Deadline exceeded"));
 }
