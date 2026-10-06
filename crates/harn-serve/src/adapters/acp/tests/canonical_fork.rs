@@ -5,6 +5,16 @@ use harn_session_store::{AppendEvent, CreateSession, ReadRange, SessionEventKind
 
 #[tokio::test(flavor = "current_thread")]
 async fn cold_parent_forks_persist_selected_context_and_lineage_before_prompt() {
+    use super::session_environment::{child_sees_restore_canary, RESTORE_CANARY};
+
+    let _lock = acp_env_lock()
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    let _environment = EnvSnapshot::capture(&[RESTORE_CANARY]);
+    std::env::set_var(RESTORE_CANARY, "synthetic-not-a-credential");
+    assert!(child_sees_restore_canary(
+        &harn_vm::security::SessionEnvironment::inherited()
+    ));
     harn_vm::reset_thread_local_state();
     let root = tempfile::tempdir().expect("root");
     let store = harn_vm::open_canonical_store(root.path()).expect("store");
@@ -36,6 +46,7 @@ async fn cold_parent_forks_persist_selected_context_and_lineage_before_prompt() 
             &serde_json::json!(1),
             &serde_json::json!({
                 "sessionId": parent, "cwd": root.path(),
+                "environmentPolicy": {"kind": "isolated", "grants": []},
             }),
         )
         .await;
@@ -86,6 +97,7 @@ async fn cold_parent_forks_persist_selected_context_and_lineage_before_prompt() 
             &serde_json::json!(3),
             &serde_json::json!({
                 "sessionId": "prefix-child", "cwd": root.path(),
+                "environmentPolicy": {"kind": "isolated", "grants": []},
             }),
         )
         .await;
@@ -93,6 +105,9 @@ async fn cold_parent_forks_persist_selected_context_and_lineage_before_prompt() 
         restarted.sessions.contains_key("prefix-child"),
         "durable child must reload after restart"
     );
+    assert!(!child_sees_restore_canary(
+        &restarted.sessions["prefix-child"].environment_policy
+    ));
     restarted
         .handle_session_fork(
             &serde_json::json!(4),
@@ -147,7 +162,10 @@ async fn cold_parent_forks_persist_selected_context_and_lineage_before_prompt() 
     restarted
         .handle_session_load(
             &serde_json::json!(5),
-            &serde_json::json!({"sessionId": parent, "cwd": root.path()}),
+            &serde_json::json!({
+                "sessionId": parent, "cwd": root.path(),
+                "environmentPolicy": {"kind": "isolated", "grants": []},
+            }),
         )
         .await;
     restarted

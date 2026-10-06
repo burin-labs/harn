@@ -73,8 +73,8 @@ impl AcpServer {
         self.emit_available_commands(&session_id);
     }
 
-    /// Parse and launch the `environmentPolicy` block of a `session/new`
-    /// request. Omission is refused. Env-source grants are snapshotted from
+    /// Parse and launch the `environmentPolicy` block at a runnable session
+    /// admission boundary. Omission is refused. Env-source grants are snapshotted from
     /// the server environment here, at the launch boundary.
     ///
     /// Omission once selected `inherited`, which returns the launcher snapshot
@@ -101,7 +101,7 @@ impl AcpServer {
     /// client says nothing.
     ///
     /// [`ENV_ALLOWLIST`]: harn_vm::security::ENV_ALLOWLIST
-    fn resolve_session_environment(
+    pub(super) fn resolve_session_environment(
         params: &serde_json::Value,
     ) -> Result<harn_vm::security::SessionEnvironment, (String, serde_json::Value)> {
         let Some(raw) = params.get("environmentPolicy") else {
@@ -127,7 +127,7 @@ impl AcpServer {
         Ok(environment)
     }
 
-    /// The refusal for a `session/new` that names no environment policy.
+    /// The refusal for a runnable session admission with no environment policy.
     ///
     /// It names the field and every accepted value, because the client that
     /// hits this is by definition one that never thought about the field, and
@@ -147,7 +147,7 @@ impl AcpServer {
         ];
         let names: Vec<&'static str> = accepted.iter().map(|kind| kind.as_str()).collect();
         let message = format!(
-            "[environment_policy.missing] session/new requires `environmentPolicy`: \
+            "[environment_policy.missing] runnable session admission requires `environmentPolicy`: \
              state `kind` as one of {}. Omission is refused rather than defaulted, \
              so that what a session's children can read never depends on this \
              server's default.",
