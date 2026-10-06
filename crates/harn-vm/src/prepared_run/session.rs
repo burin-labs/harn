@@ -9,6 +9,9 @@ use serde::{Deserialize, Serialize};
 use super::evidence::{approval_batch, fingerprint};
 use super::*;
 
+mod pending_approval;
+pub use pending_approval::PendingSessionApproval;
+
 pub const PREPARED_SESSION_SCHEMA: &str = "harn.prepared_session.v1";
 pub const PREPARED_SESSION_SCHEMA_ARTIFACT: &str = "schemas/prepared-session-v1.schema.json";
 pub const PREPARED_SESSION_V1_SCHEMA_JSON: &str =
@@ -205,7 +208,15 @@ impl PreparedSessionLeaseStore for FilePreparedSessionLeaseStore {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum PendingPreparationState {
+    Waiting,
+    Decided,
+    Retired,
+}
+
 struct PendingPreparedSession {
+    identity: Arc<Mutex<PendingPreparationState>>,
     intent: RunIntent,
     host_facts: HostFacts,
     binding: PreparedSessionBindingV1,
@@ -315,6 +326,7 @@ impl<E> PreparedSession<E> {
                     .insert(
                         binding.session_id.clone(),
                         PendingPreparedSession {
+                            identity: Arc::new(Mutex::new(PendingPreparationState::Waiting)),
                             intent,
                             host_facts,
                             binding: binding.clone(),
@@ -348,6 +360,15 @@ impl<E> PreparedSession<E> {
         session_id: &str,
         decision: PreparedSessionApprovalDecision,
     ) -> PreparedSessionUpdate {
+        self.decide_bound(session_id, decision, None)
+    }
+
+    fn decide_bound(
+        &self,
+        session_id: &str,
+        decision: PreparedSessionApprovalDecision,
+        identity: Option<&Arc<Mutex<PendingPreparationState>>>,
+    ) -> PreparedSessionUpdate {
         let mut pending_sessions = self
             .pending
             .lock()
@@ -360,7 +381,9 @@ impl<E> PreparedSession<E> {
                 None,
             );
         };
-        if decision.batch_fingerprint != pending.batch.batch_fingerprint {
+        if decision.batch_fingerprint != pending.batch.batch_fingerprint
+            || identity.is_some_and(|identity| !Arc::ptr_eq(identity, &pending.identity))
+        {
             return blocked(
                 session_id.to_string(),
                 "prepared_session_approval_binding",
@@ -371,6 +394,10 @@ impl<E> PreparedSession<E> {
         let mut pending = pending_sessions
             .remove(session_id)
             .expect("validated pending session is held under the same lock");
+        *pending
+            .identity
+            .lock()
+            .expect("pending preparation state poisoned") = PendingPreparationState::Decided;
         drop(pending_sessions);
         let mut decision_receipt = pending.receipt.clone();
         decision_receipt.stage = AuthorityReceiptStage::ApprovalDecision;

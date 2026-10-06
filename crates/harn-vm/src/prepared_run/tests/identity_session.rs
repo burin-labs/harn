@@ -1,5 +1,7 @@
 use super::*;
 
+mod pending_approval;
+
 #[derive(Clone)]
 struct FixtureIdentityBroker {
     requirement: IdentityBrokerRequirement,
@@ -657,12 +659,15 @@ async fn bridge_approval_grants_only_a_canonical_selected_allow_before_execution
             1,
         );
         bridge.set_session_id("prepared-session-1");
-        let decision = request_session_approval(&bridge, "prepared-session-1", &batch)
+        let update = session
+            .pending_approval(&bridge, "prepared-session-1", &batch)
+            .unwrap()
+            .wait()
             .await
             .unwrap();
         assert_eq!(approval_calls.load(Ordering::SeqCst), 1);
         assert_eq!(model_calls.load(Ordering::SeqCst), 0);
-        match session.decide("prepared-session-1", decision) {
+        match update {
             PreparedSessionUpdate::Ready { lease, .. } if approved => {
                 let active = session
                     .attach(*lease, host_facts(), prepared_runtime_attachment())
