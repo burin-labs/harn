@@ -9,7 +9,7 @@
 //! notices those via WAL + `PRAGMA data_version` and publishes through the
 //! same fanout.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, RwLock, RwLockWriteGuard};
 
@@ -31,13 +31,7 @@ use super::session_wal_watch;
 /// evict the first.
 static OBSERVERS: RwLock<Vec<(u64, SharedSessionChangeObserver)>> = RwLock::new(Vec::new());
 static NEXT_SUBSCRIPTION: AtomicU64 = AtomicU64::new(1);
-type TitleFingerprint = (Option<String>, bool);
-struct RememberedSession {
-    id: String,
-    title: TitleFingerprint,
-    last_publication: Option<SessionMeta>,
-}
-static SESSION_MEMORY: RwLock<Vec<RememberedSession>> = RwLock::new(Vec::new());
+static SESSION_MEMORY: RwLock<Vec<(PathBuf, SessionMeta)>> = RwLock::new(Vec::new());
 
 fn observers() -> RwLockWriteGuard<'static, Vec<(u64, SharedSessionChangeObserver)>> {
     OBSERVERS
@@ -45,7 +39,7 @@ fn observers() -> RwLockWriteGuard<'static, Vec<(u64, SharedSessionChangeObserve
         .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
-fn session_memory() -> RwLockWriteGuard<'static, Vec<RememberedSession>> {
+fn session_memory() -> RwLockWriteGuard<'static, Vec<(PathBuf, SessionMeta)>> {
     SESSION_MEMORY
         .write()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
@@ -105,57 +99,52 @@ fn subscriber_count() -> usize {
         .len()
 }
 
-/// Whether a title/pin pair is new to this process, unchanged, or moved.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum TitleMemory {
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum SnapshotChange {
     New,
     Unchanged,
     Changed,
 }
 
-pub(super) fn remember_title(
-    session_id: &str,
-    title: Option<&str>,
-    title_pinned: bool,
-) -> TitleMemory {
-    let next = (title.map(str::to_string), title_pinned);
+/// One comparison owner for local commits, foreign commits, and watch baselines.
+pub(super) fn remember_snapshot(path: &Path, meta: &SessionMeta) -> SnapshotChange {
     let mut sessions = session_memory();
-    if let Some(previous) = sessions.iter_mut().find(|seen| seen.id == session_id) {
-        if previous.title == next {
-            return TitleMemory::Unchanged;
+    if let Some((_, previous)) = sessions
+        .iter_mut()
+        .find(|(database, seen)| database == path && seen.id == meta.id)
+    {
+        if previous == meta {
+            return SnapshotChange::Unchanged;
         }
-        previous.title = next;
-        return TitleMemory::Changed;
+        *previous = meta.clone();
+        return SnapshotChange::Changed;
     }
-    sessions.push(RememberedSession {
-        id: session_id.to_owned(),
-        title: next,
-        last_publication: None,
-    });
-    TitleMemory::New
+    sessions.push((path.to_owned(), meta.clone()));
+    SnapshotChange::New
 }
 
 /// Fans one committed change out to every live subscriber.
-pub(super) fn dispatch(meta: &SessionMeta) {
+pub(super) fn dispatch(path: &Path, meta: &SessionMeta) {
+    dispatch_snapshot(path, meta, true);
+}
+
+/// A watcher's first encounter establishes its baseline, not an update.
+pub(super) fn dispatch_foreign(path: &Path, meta: &SessionMeta) {
+    dispatch_snapshot(path, meta, false);
+}
+
+fn dispatch_snapshot(path: &Path, meta: &SessionMeta, publish_new: bool) {
     // Either the local post-commit hook or the WAL reader can arrive first.
     // Claim the whole committed snapshot once, not just its title: model,
     // usage and other metadata changes still notify when the title is stable.
-    {
-        let mut sessions = session_memory();
-        if let Some(seen) = sessions.iter_mut().find(|seen| seen.id == meta.id) {
-            if seen.last_publication.as_ref() == Some(meta) {
-                return;
-            }
-            seen.title = (meta.title.clone(), meta.title_pinned);
-            seen.last_publication = Some(meta.clone());
-        } else {
-            sessions.push(RememberedSession {
-                id: meta.id.clone(),
-                title: (meta.title.clone(), meta.title_pinned),
-                last_publication: Some(meta.clone()),
-            });
-        }
+    let change = remember_snapshot(path, meta);
+    if change == SnapshotChange::Unchanged || (change == SnapshotChange::New && !publish_new) {
+        return;
     }
+    publish(meta);
+}
+
+fn publish(meta: &SessionMeta) {
     let observers: Vec<SharedSessionChangeObserver> = OBSERVERS
         .read()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
@@ -169,19 +158,29 @@ pub(super) fn dispatch(meta: &SessionMeta) {
     }
 }
 
-struct SessionChangeFanout;
+struct SessionChangeFanout {
+    database: Option<PathBuf>,
+}
 
 impl harn_session_store::SessionChangeObserver for SessionChangeFanout {
     fn session_updated(&self, meta: &SessionMeta) {
-        dispatch(meta);
+        if let Some(path) = self.database.as_deref() {
+            dispatch(path, meta);
+        } else {
+            // In-memory imports have no file watcher and no shared database
+            // identity, so they do not participate in file deduplication.
+            publish(meta);
+        }
     }
 }
 
-pub(crate) fn current_observer() -> Option<SharedSessionChangeObserver> {
+pub(crate) fn current_observer(database: Option<&Path>) -> Option<SharedSessionChangeObserver> {
     if subscriber_count() == 0 {
         return None;
     }
-    Some(Arc::new(SessionChangeFanout))
+    Some(Arc::new(SessionChangeFanout {
+        database: database.map(Path::to_owned),
+    }))
 }
 
 #[cfg(test)]

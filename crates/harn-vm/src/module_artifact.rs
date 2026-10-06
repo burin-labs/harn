@@ -567,6 +567,7 @@ fn compile_module_artifact_with_options(
             params,
             body,
             extends,
+            throws,
             ..
         } = &inner.node
         {
@@ -575,7 +576,14 @@ fn compile_module_artifact_with_options(
             compiler
                 .add_imported_source_callable_names(imported_source_callable_names.iter().cloned());
             let pipeline = compiler
-                .compile_pipeline_callable(program, name, params, body, extends.as_deref())
+                .compile_pipeline_callable(
+                    program,
+                    name,
+                    params,
+                    body,
+                    extends.as_deref(),
+                    throws.as_ref(),
+                )
                 .map_err(|error| VmError::Runtime(format!("Import compile error: {error}")))?;
             functions.insert(name.clone(), pipeline.freeze_for_cache());
             continue;
@@ -585,6 +593,7 @@ fn compile_module_artifact_with_options(
             type_params,
             params,
             body,
+            throws,
             ..
         } = &inner.node
         else {
@@ -596,7 +605,14 @@ fn compile_module_artifact_with_options(
         compiler.add_imported_source_callable_names(imported_source_callable_names.iter().cloned());
         compiler.prepare_module_context(program);
         let func_chunk = compiler
-            .compile_named_fn_body(name, type_params, params, body, module_source_file.clone())
+            .compile_named_fn_body(
+                name,
+                type_params,
+                params,
+                body,
+                module_source_file.clone(),
+                throws.as_ref(),
+            )
             .map_err(|e| VmError::Runtime(format!("Import compile error: {e}")))?;
         functions.insert(name.clone(), func_chunk.freeze_for_cache());
     }
@@ -695,6 +711,8 @@ pub(crate) fn compile_embedded_stdlib_module_artifact_from_source(
 #[cfg(test)]
 thread_local! {
     pub(crate) static INTERFACE_RESOLUTIONS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+    /// Every module parse this crate performs, whatever asked for it.
+    pub(crate) static MODULE_PARSES: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
 }
 
 /// Resolve the exact imported interface consulted while lowering `source`.
@@ -919,6 +937,8 @@ fn parse_module_source(
     source_path: &Path,
     source: &str,
 ) -> Result<Vec<harn_parser::SNode>, VmError> {
+    #[cfg(test)]
+    MODULE_PARSES.with(|count| count.set(count.get() + 1));
     let mut lexer = harn_lexer::Lexer::new(source);
     let tokens = lexer.tokenize().map_err(|e| {
         VmError::Runtime(format!(

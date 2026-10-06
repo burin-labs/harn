@@ -79,12 +79,13 @@ pipeline test_completion_judge_admission_has_exact_budget_boundary(
   harness: Harness,
   task: unknown,
 ) {
-  const refused = __judge_completion_admission(1000, 65999, 60000, 5000)
-  const admitted = __judge_completion_admission(1000, 66000, 60000, 5000)
+  const refused = __judge_completion_admission(1000, 6000, 60000, 5000)
+  const admitted = __judge_completion_admission(1000, 6001, 60000, 5000)
   assert(!refused.admitted)
-  assert_eq(refused.remaining_ms, 64999)
+  assert_eq(refused.remaining_ms, 5000)
   assert(admitted.admitted)
-  assert_eq(admitted.remaining_ms, 65000)
+  assert_eq(admitted.remaining_ms, 5001)
+  assert_eq(admitted.operation_budget_ms, 1)
 }
 
 pipeline test_agent_loop_deadline_uses_earliest_duration_in_one_clock_domain(
@@ -663,7 +664,7 @@ pipeline test_completion_judge_transports_veto_and_repair_from_compact_packet(
   )
 }
 
-pipeline test_completion_judge_refuses_request_that_cannot_fit_terminal_deadline(
+pipeline test_completion_judge_refuses_when_terminal_reserve_exhausts_deadline(
   harness: Harness,
   task: unknown,
 ) {
@@ -691,7 +692,7 @@ pipeline test_completion_judge_refuses_request_that_cannot_fit_terminal_deadline
                 provider: "mock",
                 max_invocations: 1,
                 operation_timeout_ms: 10000,
-                deadline_reserve_ms: 0,
+                deadline_reserve_ms: 5000,
               },
               turn_end_condition: {provider: "mock", max_invocations: 1},
             },

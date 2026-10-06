@@ -122,10 +122,10 @@ use types::{
 use util::{
     accepted_at_ms, binding_key_from_parts, build_batched_event, cancelled_dispatch_outcome,
     current_unix_ms, decrement_in_flight, decrement_retry_queue_depth, dispatch_cancel_requested,
-    dispatch_result_cost_usd_micros, dispatch_result_status, duration_between_ms, event_headers,
-    extract_event_path, extracted_key_value, extracted_priority_value, json_value_to_gate,
-    maybe_fail_before_outbox, now_rfc3339, now_unix_ms, queue_appended_at_ms, recv_cancel,
-    sleep_or_cancel_or_request, tenant_id, unix_ms, worker_queue_priority,
+    dispatch_result_known_cost_usd_micros, dispatch_result_status, duration_between_ms,
+    event_headers, extract_event_path, extracted_key_value, extracted_priority_value,
+    json_value_to_gate, maybe_fail_before_outbox, now_rfc3339, now_unix_ms, queue_appended_at_ms,
+    recv_cancel, sleep_or_cancel_or_request, tenant_id, unix_ms, worker_queue_priority,
 };
 
 pub const TRIGGER_ACCEPTED_AT_MS_HEADER: &str = "harn_trigger_accepted_at_ms";

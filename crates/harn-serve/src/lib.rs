@@ -9,6 +9,14 @@ mod dispatch_environment;
 pub mod embed;
 mod error;
 mod exports;
+
+/// Package-backed outbound credential discovery shared with the Harn CLI.
+/// Keep the returned value alive through grant selection and initialization
+/// so its immutable package generation remains leased.
+pub use harn_package::{
+    try_load_provider_connectors, try_load_root_provider_connectors, PackageError,
+    ResolvedProviderConnectors,
+};
 #[cfg(feature = "hostlib-full")]
 mod harn_reference_resolver;
 pub mod http_codec;

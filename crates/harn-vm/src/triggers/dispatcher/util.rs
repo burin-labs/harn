@@ -25,62 +25,57 @@ use super::{
 };
 use crate::triggers::registry::{usd_to_micros, TriggerBinding};
 
-pub(super) fn dispatch_result_cost_usd_micros(result: &serde_json::Value) -> u64 {
-    for field in ["cost_usd", "costUsd", "total_cost_usd", "totalCostUsd"] {
+/// Budget accounting charges the known lower bound even when the exact total
+/// is unknown. Absence remains distinct from a measured zero.
+pub(super) fn dispatch_result_known_cost_usd_micros(result: &serde_json::Value) -> Option<u64> {
+    for field in [
+        "known_cost_usd",
+        "cost_usd",
+        "costUsd",
+        "total_cost_usd",
+        "totalCostUsd",
+    ] {
         if let Some(cost) = result.get(field).and_then(json_usd_micros) {
-            return cost;
+            return Some(cost);
         }
     }
 
     if let Some(nested) = result.get("result") {
-        let nested_cost = dispatch_result_cost_usd_micros(nested);
-        if nested_cost > 0 {
-            return nested_cost;
+        if let Some(cost) = dispatch_result_known_cost_usd_micros(nested) {
+            return Some(cost);
         }
     }
 
     let stats_rows_cost = result
         .get("stats_rows")
         .and_then(|rows| rows.as_array())
-        .map(|rows| {
-            rows.iter().fold(0_u64, |acc, row| {
-                acc.saturating_add(
-                    row.get("total_cost_usd")
-                        .or_else(|| row.get("totalCostUsd"))
-                        .and_then(json_usd_micros)
-                        .unwrap_or_default(),
-                )
-            })
-        })
-        .unwrap_or_default();
-    if stats_rows_cost > 0 {
+        .and_then(|rows| {
+            rows.iter()
+                .filter_map(dispatch_result_known_cost_usd_micros)
+                .reduce(u64::saturating_add)
+        });
+    if stats_rows_cost.is_some() {
         return stats_rows_cost;
     }
 
     result
         .get("cases")
         .and_then(|cases| cases.as_array())
-        .map(|cases| {
-            cases.iter().fold(0_u64, |case_acc, case| {
-                let trial_cost = case
-                    .get("trials")
-                    .and_then(|trials| trials.as_array())
-                    .map(|trials| {
-                        trials.iter().fold(0_u64, |trial_acc, trial| {
-                            trial_acc.saturating_add(
-                                trial
-                                    .get("cost_usd")
-                                    .or_else(|| trial.get("costUsd"))
-                                    .and_then(json_usd_micros)
-                                    .unwrap_or_default(),
-                            )
+        .and_then(|cases| {
+            cases
+                .iter()
+                .filter_map(|case| {
+                    case.get("trials")
+                        .and_then(|trials| trials.as_array())
+                        .and_then(|trials| {
+                            trials
+                                .iter()
+                                .filter_map(dispatch_result_known_cost_usd_micros)
+                                .reduce(u64::saturating_add)
                         })
-                    })
-                    .unwrap_or_default();
-                case_acc.saturating_add(trial_cost)
-            })
+                })
+                .reduce(u64::saturating_add)
         })
-        .unwrap_or_default()
 }
 
 fn json_usd_micros(value: &serde_json::Value) -> Option<u64> {

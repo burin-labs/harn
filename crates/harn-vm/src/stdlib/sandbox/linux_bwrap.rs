@@ -7,7 +7,8 @@ use std::io::{Seek, Write};
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
 use std::os::unix::fs::{FileTypeExt, PermissionsExt};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+#[cfg(test)]
+use std::process::Command;
 
 use super::{
     compile_seccomp_program, filesystem_profile, policy_allows_network, read_only_access,
@@ -19,6 +20,12 @@ use crate::orchestration::{CapabilityPolicy, SandboxProfile};
 use crate::stdlib::sandbox::{PrepareOutcome, SandboxMechanism, SandboxMechanismAvailability};
 use crate::VmError;
 
+#[path = "linux_bwrap_probe.rs"]
+mod probe;
+use probe::probe;
+#[cfg(test)]
+use probe::probe_output_is_available;
+
 fn executable() -> Option<PathBuf> {
     ["/usr/bin/bwrap", "/bin/bwrap"]
         .into_iter()
@@ -29,59 +36,29 @@ fn executable() -> Option<PathBuf> {
 /// A known nonempty host file must disappear through the same real wrapper
 /// path. A binary that merely exists, or a probe that observes nothing, fails.
 pub(super) fn available() -> bool {
-    static AVAILABLE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *AVAILABLE.get_or_init(probe)
+    static AVAILABLE: std::sync::Mutex<Option<bool>> = std::sync::Mutex::new(None);
+    cached_availability(&AVAILABLE, probe)
 }
 
-fn probe() -> bool {
-    if !std::fs::read("/etc/passwd").is_ok_and(|bytes| !bytes.is_empty()) {
-        return false;
+fn cached_availability(
+    cache: &std::sync::Mutex<Option<bool>>,
+    probe: impl FnOnce() -> probe::ProbeOutcome,
+) -> bool {
+    // Keep one setup probe in flight, as the original once initializer did.
+    // Interrupted attempts leave the environment observation uninitialized.
+    let mut cached = cache
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if let Some(available) = *cached {
+        return available;
     }
-    let Some(executable) = executable() else {
-        return false;
-    };
-    let mut command = Command::new(executable);
-    // This setup-only probe uses absolute programs and no payload grants.
-    // Ambient loader controls must not run before namespace setup.
-    command.env_clear();
-    command.args([
-        "--unshare-user",
-        "--unshare-pid",
-        "--unshare-ipc",
-        "--unshare-net",
-    ]);
-    let mut descriptors = Vec::new();
-    for path in ["/usr", "/lib", "/lib64", "/bin"] {
-        if Path::new(path).exists() {
-            let Ok(file) = std::fs::File::open(path) else {
-                return false;
-            };
-            command.args(["--ro-bind-fd", &file.as_raw_fd().to_string(), path]);
-            descriptors.push(file.into());
+    match probe() {
+        probe::ProbeOutcome::Completed(available) => {
+            *cached = Some(available);
+            available
         }
+        probe::ProbeOutcome::Interrupted | probe::ProbeOutcome::Incomplete => false,
     }
-    // Probe the same fd-based mounts and filter installation the launch
-    // needs. An older wrapper with only path-based mounts isn't adequate.
-    let Ok(filter) = sealed_filter(&[0x06, 0, 0, 0, 0, 0, 0xff, 0x7f]) else {
-        return false;
-    };
-    command.args(["--seccomp", &filter.as_raw_fd().to_string()]);
-    descriptors.push(filter);
-    DescriptorTransfer::new(descriptors).attach(&mut command);
-    command.args([
-        "--",
-        "/usr/bin/sh",
-        "-c",
-        "test ! -e /etc/passwd && printf harn-bwrap-boundary",
-    ]);
-    command
-        .stdin(Stdio::null())
-        .output()
-        .is_ok_and(|output| probe_output_is_available(&output))
-}
-
-fn probe_output_is_available(output: &std::process::Output) -> bool {
-    output.status.success() && output.stdout == b"harn-bwrap-boundary"
 }
 
 pub(in crate::stdlib::sandbox) fn prepare(
@@ -90,7 +67,14 @@ pub(in crate::stdlib::sandbox) fn prepare(
     policy: &CapabilityPolicy,
     profile: SandboxProfile,
 ) -> Result<PrepareOutcome, VmError> {
-    if !available() {
+    let available = available();
+    // A caller's cancellation or deadline is control flow, not a missing host
+    // mechanism. The probe's own setup budget is never reported here: an
+    // incomplete probe falls through to the typed refusal below.
+    if let Some(error) = crate::op_interrupt::requested_error() {
+        return Err(error);
+    }
+    if !available {
         let mut refusal = super::super::SandboxMechanismUnavailable::new(
             SandboxMechanism::LinuxBubblewrap,
             SandboxMechanismAvailability::AbsentOnHost,
@@ -149,6 +133,20 @@ pub(in crate::stdlib::sandbox) fn prepare(
     }
     argv.extend(["--seccomp".into(), filter.as_raw_fd().to_string()]);
     descriptors.push(filter);
+    // Allocator tuning the launch environment carries is kept out of
+    // bubblewrap's own environment and re-applied to the payload through
+    // these arguments, written once the final environment is known
+    // (`launch_environment`). Empty until then, which adds nothing.
+    let payload_env = payload_env_args().map_err(|error| {
+        sandbox_rejection(format!(
+            "could not create the bubblewrap payload environment descriptor: {error}"
+        ))
+    })?;
+    argv.extend([
+        PAYLOAD_ENV_ARGS_FLAG.into(),
+        payload_env.as_raw_fd().to_string(),
+    ]);
+    descriptors.push(payload_env);
     let mut finalizer_args = Vec::new();
     if !device_descriptors.is_empty() {
         let launcher = policy.process_sandbox.netns_launcher_path.as_ref()
@@ -309,6 +307,18 @@ fn mounts(filesystem: FilesystemProfile) -> Result<MountPlan, VmError> {
     })
 }
 
+/// Bubblewrap reads NUL-separated options from the descriptor given here, at
+/// the point in its argv where the flag appears.
+pub(in crate::stdlib::sandbox) const PAYLOAD_ENV_ARGS_FLAG: &str = "--args";
+
+pub(in crate::stdlib::sandbox) fn payload_env_args() -> std::io::Result<OwnedFd> {
+    let raw = unsafe { libc::memfd_create(c"harn-bwrap-env".as_ptr(), libc::MFD_CLOEXEC) };
+    if raw < 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    Ok(unsafe { OwnedFd::from_raw_fd(raw) })
+}
+
 fn sealed_filter(bytes: &[u8]) -> std::io::Result<OwnedFd> {
     let raw = unsafe {
         libc::memfd_create(
@@ -353,7 +363,7 @@ mod tests {
 
     #[test]
     fn functional_probe_requires_the_confinement_marker_not_loader_exit_zero() {
-        if !probe() {
+        if !matches!(probe(), probe::ProbeOutcome::Completed(true)) {
             eprintln!("[linux-bwrap] exercised=0: functional namespace/mount probe unavailable");
             assert_ne!(std::env::var("BWRAP_REQUIRE_TESTS").as_deref(), Ok("1"));
             return;
@@ -398,6 +408,54 @@ mod tests {
         command.args(args).current_dir(cwd);
         descriptors.attach(&mut command);
         command.output().unwrap()
+    }
+
+    /// Proven on a real bubblewrap launch: inherited allocator tuning reaches
+    /// the confined payload, bubblewrap itself never carries it, and a
+    /// behavior-changing control is still refused.
+    #[test]
+    fn allocator_tuning_reaches_the_payload_and_not_bubblewrap() {
+        if !live() {
+            return;
+        }
+        let root = tempfile::tempdir().unwrap();
+        let policy = policy(root.path());
+        let script = vec![
+            "-c".into(),
+            "printf '%s|%s' \"$MALLOC_ARENA_MAX\" \"${MALLOC_CHECK_-unset}\"".into(),
+        ];
+        let PrepareOutcome::BubblewrapExec {
+            wrapper,
+            args,
+            descriptors,
+        } = prepare("/usr/bin/sh", &script, &policy, policy.sandbox_profile).unwrap()
+        else {
+            panic!("the bubblewrap owner did not prepare a pinned launch")
+        };
+        let mut command = Command::new(wrapper);
+        command
+            .args(args)
+            .current_dir(root.path())
+            .env_clear()
+            .env("PATH", "/usr/bin:/bin")
+            .env("MALLOC_ARENA_MAX", "2");
+        descriptors.attach(&mut command);
+        crate::stdlib::sandbox::launch_environment::reapply_allocator_tuning(&mut command, true)
+            .unwrap();
+        assert!(!command
+            .get_envs()
+            .any(|(name, value)| name == "MALLOC_ARENA_MAX" && value.is_some()));
+        let output = command.output().unwrap();
+        assert!(output.status.success(), "{output:?}");
+        assert_eq!(String::from_utf8_lossy(&output.stdout), "2|unset");
+
+        // Negative control: the validator still refuses a loader control.
+        assert!(crate::security::validate_process_environment(
+            crate::security::ProcessEnvironmentBoundary::TrustedSetup,
+            std::iter::empty(),
+            [("GLIBC_TUNABLES".into(), Some("glibc.malloc.check=3".into()))],
+        )
+        .is_err());
     }
 
     #[test]

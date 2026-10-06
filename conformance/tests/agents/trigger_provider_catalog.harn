@@ -83,7 +83,7 @@ pipeline test(harness: Harness, task: unknown) {
     (a2a_push?.kinds ?? []).any({ kind -> kind == "a2a-push" }),
     "a2a-push should publish its trigger kind",
   )
-  for package_provider in ["github", "slack", "linear", "notion"] {
+  for package_provider in ["github", "slack", "linear"] {
     assert(
       providers.find({ provider -> provider.provider == package_provider }) == nil,
       package_provider + " must be registered by its package",

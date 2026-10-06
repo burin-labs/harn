@@ -35,12 +35,9 @@ pipeline default(harness: Harness) {
     )
     agent_loop(harness, "cancel during registered session setup", nil, cancelled_options)
   }
-  const entered_receipt = harness.runtime.channel_select([entered], 1000)
-  if entered_receipt == nil {
-    const prestart = try {
-      await(handle)
-    }
-    throw "agent task ended before session_start hook: " + to_string(prestart)
+  const entered_receipt = harness.runtime.receive(entered)
+  if entered_receipt != true {
+    throw "session_start hook did not confirm entry"
   }
   cancel(handle)
   harness.stdio.println(harness.agent.current_id() == nil)

@@ -132,7 +132,7 @@ fn make_registry_diagnostic(key: &str, fix: &str, span: Span) -> LintDiagnostic 
 
 fn make_diagnostic(key: &str, span: Span) -> LintDiagnostic {
     let message = format!(
-        "`{key}` was removed in v0.10 and is no longer read; use `with_retry(default_llm_caller(), {{...}})` from `std/llm/handlers`. Note the off-by-one: `llm_retries: K` retried K times after the first attempt, so pass `with_retry(..., {{max_attempts: K + 1}})`. See docs/src/migrations/v0.10.md."
+        "`{key}` was removed in v0.10 and is no longer read; use `with_retry(default_llm_caller(), {{...}})` from `std/llm/handlers`. Note the off-by-one: `llm_retries: K` retried K times after the first attempt, so pass `with_retry(..., {{max_attempts: K + 1}})`."
     );
     let suggestion = Some(format!(
         "remove `{key}` from this options dict and wrap the call with `with_retry(default_llm_caller(), {{max_attempts: K + 1}})` from `std/llm/handlers` (K = the old `llm_retries` value)."

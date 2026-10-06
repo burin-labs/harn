@@ -148,7 +148,10 @@ harn_opcode_macros::define_opcodes! {
 
     // === Error handling ===
     Throw { sync(self.execute_throw()), disasm: bare("THROW") };
-    TryCatchSetup { sync_void(self.execute_try_catch_setup()), disasm: try_catch_setup("TRY_CATCH_SETUP") };
+    ThrowDeclared { sync(self.execute_declared_throw()), disasm: bare("THROW_DECLARED") };
+    Rethrow { sync(self.execute_rethrow()), disasm: bare("RETHROW") };
+    TryCatchSetup { sync_void(self.execute_try_catch_setup(false)), disasm: try_catch_setup("TRY_CATCH_SETUP") };
+    TryCatchPreserve { sync_void(self.execute_try_catch_setup(true)), disasm: try_catch_setup("TRY_CATCH_PRESERVE") };
     PopHandler { sync_void(self.execute_pop_handler()), disasm: bare("POP_HANDLER") };
 
     // === Concurrency ===

@@ -655,6 +655,7 @@ pub fn __verification_command_fact(value: dict) -> dict {
       success: nil,
       exit: nil,
       exit_code: exit,
+      handle_id: command?.handle_id ?? value?.handle_id,
       status: passed ? "passed" : failed ? "failed" : "pending",
       diagnostics_complete: __verification_delta_complete(
         value + data + command + {status: status, exit_code: exit},

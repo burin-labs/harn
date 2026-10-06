@@ -172,7 +172,7 @@ pub fn resolves_dependencies(fragment: string) -> bool {
     return false
   }
   const program = fragment_program(fragment)
-  if program != "cargo" && program != "cross" {
+  if program != "cargo" && program != "cross" && program != "cargo-nextest" {
     return false
   }
   const subcommand = fragment_subcommand(fragment)

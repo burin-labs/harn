@@ -158,7 +158,7 @@ fn package_cannot_displace_a_core_provider() {
 #[test]
 fn default_catalog_contains_only_core_provider_schemas() {
     let entries = registered_provider_metadata();
-    for provider in ["github", "linear", "notion", "slack"] {
+    for provider in ["github", "linear", "slack"] {
         assert!(
             entries.iter().all(|entry| entry.provider != provider),
             "{provider} must be registered only by its Harn package"

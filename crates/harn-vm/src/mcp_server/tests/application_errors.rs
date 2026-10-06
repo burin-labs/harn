@@ -2,7 +2,7 @@ use super::*;
 
 fn throwing_closure(name: &str) -> VmClosure {
     let source = format!(
-        "fn {name}(input: dict) {{ throw {{variant: \"NotFound\", message: \"PRIVATE-CUSTOMER-DIAGNOSTIC-123456\"}} }}"
+        "type LookupError = {{variant: \"NotFound\", message: string}}\nfn {name}(input: dict) throws LookupError {{ throw {{variant: \"NotFound\", message: \"PRIVATE-CUSTOMER-DIAGNOSTIC-123456\"}} }}"
     );
     let program = harn_parser::check_source_strict(&source).expect("valid throwing function");
     let chunk = crate::compiler::Compiler::new()

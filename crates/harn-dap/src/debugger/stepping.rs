@@ -578,8 +578,10 @@ impl Debugger {
             Err(e) => {
                 self.running = false;
                 self.end_progress(&mut responses);
-                if self.break_on_exceptions && matches!(&e, VmError::Thrown(_)) {
-                    // #111 per-kind filter gate: a VmError::Thrown
+                if self.break_on_exceptions
+                    && matches!(&e, VmError::Thrown(_) | VmError::DeclaredThrown(_))
+                {
+                    // #111 per-kind filter gate: a thrown error
                     // whose message starts with "kind:<name>:" lets
                     // the exception filter narrow to a specific
                     // AgentEvent kind. When the active filter set

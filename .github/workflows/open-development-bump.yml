@@ -1,0 +1,92 @@
+name: Open development bump
+
+# One owner for post-publication cutover and explicit repair. No scheduled
+# controller receives write authority through this entry point.
+on:
+  workflow_call:
+    inputs:
+      published_tag:
+        description: Stable release whose publication completed
+        required: true
+        type: string
+    secrets:
+      RELEASE_APP_CLIENT_ID:
+        required: true
+      RELEASE_APP_PRIVATE_KEY:
+        required: true
+  workflow_dispatch:
+    inputs:
+      published_tag:
+        description: Published stable tag to repair; empty selects the latest published release
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: open-development-bump-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  open-development-bump:
+    name: Open post-publication development bump
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          ref: main
+          persist-credentials: false
+
+      - name: Plan development identity after published release
+        id: development
+        env:
+          PUBLISHED_TAG: ${{ inputs.published_tag }}
+          GH_TOKEN: ${{ github.token }}
+        run: bash scripts/plan_development_bump.sh
+
+      - name: Mint GitHub App installation token
+        if: steps.development.outputs.required == 'true'
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ secrets.RELEASE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: steps.development.outputs.required == 'true'
+        with:
+          fetch-depth: 0
+          ref: main
+          token: ${{ steps.app-token.outputs.token }}
+
+      - name: Configure isolated Harn build
+        if: steps.development.outputs.required == 'true'
+        run: make setup-rust
+
+      - name: Prepare and open development bump
+        if: steps.development.outputs.required == 'true'
+        id: development-bump
+        env:
+          EXPECTED_DEVELOPMENT_VERSION: ${{ steps.development.outputs.version }}
+          RELEASE_PUBLISHED_VERSION: ${{ steps.development.outputs.published_tag }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          set -euo pipefail
+          harn_bin="$(HARN_BIN_NO_BUILD=1 ./scripts/harn_bin.sh --print)"
+          HARN_BIN="$harn_bin" ./scripts/open_development_bump.sh
+
+      - name: Validate grammar receipt and arm development bump
+        if: >-
+          steps.development.outputs.required == 'true' &&
+          steps.development-bump.outputs.skipped != 'true'
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          DEVELOPMENT_BUMP_PR_URL: ${{ steps.development-bump.outputs.pr_url }}
+        run: |
+          set -euo pipefail
+          ./scripts/validate_development_bump.sh

@@ -24,6 +24,7 @@ const CLI_BYTECODE_MAGIC: &[u8; 8] = b"HARNBC\0\0";
 const CLI_AOT_REQUIRED_ENV: &str = "HARN_REQUIRE_CLI_AOT";
 
 fn main() {
+    emit_windows_main_stack();
     build_revision::emit();
     ensure_git_hooks_installed();
     emit_cli_script_bytecode();
@@ -70,7 +71,7 @@ fn main() {
 
 /// Fingerprint the check pipeline's own sources — `harn-lint`, this crate's
 /// `commands/check` (typecheck driver, lint bridge, preflight scans, the
-/// result cache itself), and `package` (CheckConfig parsing) — and bake the
+/// result cache itself), and the shared package owner (CheckConfig parsing) — and bake the
 /// digest in as `HARN_CHECK_FINGERPRINT`. The check-result cache folds it
 /// into every key, so a within-version edit to lint or preflight logic
 /// invalidates stale cached diagnostics automatically, exactly like
@@ -88,7 +89,8 @@ fn emit_check_fingerprint() {
     let roots = [
         crates_dir.join("harn-lint").join("src"),
         manifest_dir.join("src").join("commands").join("check"),
-        manifest_dir.join("src").join("package"),
+        manifest_dir.join("src").join("package.rs"),
+        crates_dir.join("harn-package").join("src"),
     ];
     let mut files: Vec<PathBuf> = Vec::new();
     for root in &roots {
@@ -121,6 +123,12 @@ fn emit_check_fingerprint() {
 }
 
 fn collect_rs_files(dir: &Path, out: &mut Vec<PathBuf>) {
+    if dir.is_file() {
+        if dir.extension().is_some_and(|ext| ext == "rs") {
+            out.push(dir.to_path_buf());
+        }
+        return;
+    }
     let Ok(entries) = fs::read_dir(dir) else {
         return;
     };
@@ -544,4 +552,15 @@ fn escape_str(s: &str) -> String {
         }
     }
     out
+}
+
+/// Give the MSVC `harn.exe` main thread the 8 MiB stack Unix main threads get.
+///
+/// `lib::run` moves the command surface onto its sized thread, but `main`
+/// still initializes the runtime and answers pre-runtime commands on the
+/// process's main thread, which MSVC links at 1 MiB by default.
+fn emit_windows_main_stack() {
+    if std::env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("msvc") {
+        println!("cargo:rustc-link-arg-bins=/STACK:8388608");
+    }
 }

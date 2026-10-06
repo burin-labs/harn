@@ -1,0 +1,36 @@
+// The taught JSON body contract and both parser correction paths agree.
+import { tool_call_shape } from "std/llm/call_shape"
+import { parse_tool_calls } from "std/llm/tool_parse"
+
+pipeline main(harness: Harness) {
+  const hint = tool_call_shape("json").body_hint
+  assert(contains(hint, "a separate opening line that is exactly `<<BODY`"))
+  harness.stdio.println("ok explicit opening line taught")
+  const missing = """```tool
+{"name":"edit","args":{"content":"<<BODY"}}
+literal "quoted" code
+BODY
+```"""
+  const rejected = parse_tool_calls({text: missing, tool_format: "json"})
+  assert(len(rejected.calls) == 0)
+  assert(len(rejected.tool_parse_errors) > 0)
+  assert(rejected.tool_parse_errors.all({ error -> contains(error, hint) }))
+  harness.stdio.println("ok missing opener rejected with canonical guidance")
+  const malformed = parse_tool_calls({text: "```tool\n{broken JSON}\n```", tool_format: "json"})
+  assert(len(malformed.calls) == 0)
+  assert(len(malformed.tool_parse_errors) > 0)
+  assert(malformed.tool_parse_errors.all({ error -> contains(error, hint) }))
+  harness.stdio.println("ok malformed JSON uses canonical guidance")
+  const complete = """```tool
+{"name":"edit","args":{"content":"<<BODY"}}
+<<BODY
+literal "quoted" code
+BODY
+```"""
+  const accepted = parse_tool_calls({text: complete, tool_format: "json"})
+  assert(len(accepted.calls) == 1)
+  assert(len(accepted.tool_parse_errors) == 0)
+  assert(len(accepted.protocol_violations) == 0)
+  assert(accepted.calls[0].arguments.content == "literal \"quoted\" code")
+  harness.stdio.println("ok complete body preserves literal bytes")
+}

@@ -423,7 +423,7 @@ pub(crate) fn build_sandboxed_command(
         cmd.env_remove(key);
     }
     let closed = launch.closed_env || session_closed;
-    crate::process_sandbox::validate_command_environment(cmd.as_std(), closed)?;
+    crate::process_sandbox::validate_command_environment(cmd.as_std_mut(), closed)?;
     Ok(cmd)
 }
 

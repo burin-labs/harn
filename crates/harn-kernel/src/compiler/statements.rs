@@ -670,7 +670,7 @@ impl Compiler {
         self.chunk
             .emit_u16(Op::BuildDict, options.len() as u16, self.line);
 
-        self.compile_closure(&[], body)?;
+        self.compile_closure(&[], body, self.declared_throw)?;
         self.chunk.emit_u8(Op::Call, 2, self.line);
         Ok(())
     }

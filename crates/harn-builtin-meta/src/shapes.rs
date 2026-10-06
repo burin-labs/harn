@@ -123,7 +123,8 @@ pub const WAITPOINT: Ty = Ty::Shape(&[
     ShapeFieldDescriptor::new("metadata", TY_DICT_OR_NIL),
 ]);
 
-/// Stable synchronous subprocess result returned by `harness.process.run`.
+/// Stable synchronous subprocess result returned by `harness.process.run`,
+/// `exec`, `shell`, `exec_at`, and `shell_at`.
 ///
 /// This is the typed projection of `process_exec_response` in `harn-vm`.
 /// Keep every runtime field here so callers can use a narrower named record
@@ -146,6 +147,29 @@ pub const PROCESS_RESULT: Ty = Ty::Shape(&[
     ShapeFieldDescriptor::new("stderr_utf8_valid", TY_BOOL),
     ShapeFieldDescriptor::new("combined", TY_STRING),
     ShapeFieldDescriptor::new("success", TY_BOOL),
+]);
+
+/// Response of every buffered `harness.net` request.
+///
+/// The typed projection of `build_http_response` in `harn-vm`, shared by live
+/// and mocked responses. A 4xx or 5xx is a response with `ok: false`; a
+/// transport failure throws. `body` is untrusted text: decode it with
+/// `json_parse` and `schema_parse`.
+pub const HTTP_RESPONSE: Ty = Ty::Shape(&[
+    ShapeFieldDescriptor::new("status", TY_INT),
+    ShapeFieldDescriptor::new("headers", TY_DICT),
+    ShapeFieldDescriptor::new("body", TY_STRING),
+    ShapeFieldDescriptor::new("final_url", TY_STRING),
+    ShapeFieldDescriptor::new("ok", TY_BOOL),
+]);
+
+/// Response of `harness.net.download`; the typed projection of
+/// `build_http_download_response` in `harn-vm`.
+pub const HTTP_DOWNLOAD_RESPONSE: Ty = Ty::Shape(&[
+    ShapeFieldDescriptor::new("status", TY_INT),
+    ShapeFieldDescriptor::new("headers", TY_DICT),
+    ShapeFieldDescriptor::new("bytes_written", TY_INT),
+    ShapeFieldDescriptor::new("ok", TY_BOOL),
 ]);
 
 // ---------------------------------------------------------------------------

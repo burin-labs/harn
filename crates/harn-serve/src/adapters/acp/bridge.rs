@@ -99,7 +99,7 @@ pub(super) struct AcpBridge {
     pub(super) output: AcpOutput,
     pub(super) pending: Arc<Mutex<HashMap<u64, oneshot::Sender<serde_json::Value>>>>,
     pub(super) next_id_counter: AtomicU64,
-    pub(super) cancellation: SessionCancellation,
+    pub(super) cancellation: Arc<PromptCancellation>,
     /// Name of the currently executing Harn script (without .harn suffix).
     pub(super) script_name: std::sync::Mutex<String>,
     pub(super) assistant_state: std::sync::Mutex<VisibleTextState>,

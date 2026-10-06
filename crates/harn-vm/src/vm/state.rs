@@ -1226,18 +1226,14 @@ impl Vm {
     /// host adapter must install on its worker thread. The values are cloned
     /// once at the async-boundary; the token remains shared with the owning VM
     /// so `parallel` aborts and host cancellation reach an in-flight wait.
-    pub(crate) fn interrupt_sources(
-        &self,
-    ) -> (
-        Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
-        Option<std::time::Instant>,
-    ) {
-        let scope_deadline = self.deadlines.last().map(|(deadline, _)| *deadline);
-        let deadline = match (scope_deadline, self.interrupt_handler_deadline) {
-            (Some(scope), Some(interrupt)) => Some(scope.min(interrupt)),
-            (scope, interrupt) => scope.or(interrupt),
-        };
-        (self.cancel_token.clone(), deadline)
+    /// The scope deadline and the handler window stay separate so the worker
+    /// reports the same interrupt kind the VM would.
+    pub(crate) fn interrupt_sources(&self) -> crate::op_interrupt::InterruptSources {
+        crate::op_interrupt::InterruptSources {
+            cancel: self.cancel_token.clone(),
+            scope_deadline: self.deadlines.last().map(|(deadline, _)| *deadline),
+            handler_deadline: self.interrupt_handler_deadline,
+        }
     }
 
     pub(crate) fn request_process_exit(&self, code: i32) {
@@ -1469,6 +1465,10 @@ impl Vm {
         let mut child = self.child_vm();
         child.inherited_held_keys = Arc::new(self.combined_held_keys());
         child.execution_deadline = Arc::clone(&self.execution_deadline);
+        // Inline work runs inside the caller's `on_interrupt` window, like the
+        // scope deadlines `child_vm` already carries; host adapters read both
+        // through `interrupt_sources`.
+        child.interrupt_handler_deadline = self.interrupt_handler_deadline;
         child
     }
 }

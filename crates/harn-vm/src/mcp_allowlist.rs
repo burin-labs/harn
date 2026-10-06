@@ -21,8 +21,8 @@
 //!   "defaultEnabled": true,          // items absent from `items` use this
 //!   "items": [
 //!     { "server": "github", "kind": "tool",     "name": "create_issue", "enabled": false },
-//!     { "server": "notion", "kind": "resource", "name": "page://root",  "enabled": true  },
-//!     { "server": "notion", "kind": "prompt",   "name": "summarize",    "enabled": false }
+//!     { "server": "wiki",   "kind": "resource", "name": "page://root",  "enabled": true  },
+//!     { "server": "wiki",   "kind": "prompt",   "name": "summarize",    "enabled": false }
 //!   ]
 //! }
 //! ```
@@ -340,10 +340,10 @@ mod tests {
         let allowlist = McpAllowlist {
             schema_version: 1,
             default_enabled: false,
-            items: vec![item("notion", McpItemKind::Prompt, "summarize", true)],
+            items: vec![item("wiki", McpItemKind::Prompt, "summarize", true)],
         };
-        assert!(allowlist.is_enabled("notion", McpItemKind::Prompt, "summarize"));
-        assert!(!allowlist.is_enabled("notion", McpItemKind::Prompt, "other"));
+        assert!(allowlist.is_enabled("wiki", McpItemKind::Prompt, "summarize"));
+        assert!(!allowlist.is_enabled("wiki", McpItemKind::Prompt, "other"));
     }
 
     #[test]
@@ -353,7 +353,7 @@ mod tests {
             default_enabled: false,
             items: vec![
                 item("github", McpItemKind::Tool, "create_issue", false),
-                item("notion", McpItemKind::Resource, "page://root", true),
+                item("wiki", McpItemKind::Resource, "page://root", true),
             ],
         };
         let json = allowlist.to_json();
@@ -407,7 +407,7 @@ mod tests {
     fn advertised() -> BTreeMap<String, Vec<AdvertisedItem>> {
         let mut map = BTreeMap::new();
         map.insert(
-            "notion".to_string(),
+            "wiki".to_string(),
             vec![AdvertisedItem {
                 kind: McpItemKind::Prompt,
                 name: "summarize".to_string(),
@@ -445,16 +445,16 @@ mod tests {
         let catalog = build_catalog(&allowlist, &advertised());
         assert_eq!(catalog.schema_version, MCP_ALLOWLIST_SCHEMA_VERSION);
         assert!(catalog.default_enabled);
-        // Servers sorted by name: github before notion.
+        // Servers sorted by name: github before wiki.
         assert_eq!(catalog.servers[0].name, "github");
-        assert_eq!(catalog.servers[1].name, "notion");
+        assert_eq!(catalog.servers[1].name, "wiki");
         // github items sorted by (kind, name): create_issue before list_issues.
         let github = &catalog.servers[0];
         assert_eq!(github.items[0].name, "create_issue");
         assert!(!github.items[0].enabled);
         assert_eq!(github.items[1].name, "list_issues");
         assert!(github.items[1].enabled);
-        // notion prompt follows default (enabled).
+        // wiki prompt follows default (enabled).
         assert!(catalog.servers[1].items[0].enabled);
     }
 

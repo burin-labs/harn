@@ -424,13 +424,15 @@ fn responses_function_tool(
             ),
         );
     }
-    // Strict endpoints reject tool-search-only fields on ordinary function
-    // tools. Preserve the Harn-side metadata and gate only this outbound shape.
+    // Strict endpoints reject `defer_loading` on ordinary function tools, so
+    // only a tool-search route carries it. Harn's `namespace` tag never goes
+    // out: the API rejects it on a function (harn#9314).
     if tool_search_extensions {
-        for key in ["defer_loading", "namespace", "namespaces"] {
-            if let Some(value) = tool.get(key).or_else(|| function.get(key)) {
-                out.insert(key.to_string(), value.clone());
-            }
+        if let Some(value) = tool
+            .get("defer_loading")
+            .or_else(|| function.get("defer_loading"))
+        {
+            out.insert("defer_loading".to_string(), value.clone());
         }
     }
     serde_json::Value::Object(out)
@@ -886,11 +888,7 @@ mod tests {
 
     fn tool_search_native_tools() -> Vec<serde_json::Value> {
         vec![
-            serde_json::json!({
-                "type": "tool_search",
-                "mode": "hosted",
-                "namespaces": ["ops"],
-            }),
+            serde_json::json!({"type": "tool_search"}),
             serde_json::json!({
                 "type": "function",
                 "namespace": "ops",
@@ -1308,10 +1306,9 @@ mod tests {
 
         let body = OpenAiResponsesProvider::build_request_body(&payload);
 
-        assert_eq!(body["tools"][0]["type"], "tool_search");
-        assert_eq!(body["tools"][0]["namespaces"], serde_json::json!(["ops"]));
+        assert_eq!(body["tools"][0], serde_json::json!({"type": "tool_search"}));
         assert_eq!(body["tools"][1]["name"], "deploy");
-        assert_eq!(body["tools"][1]["namespace"], "ops");
+        assert!(body["tools"][1].get("namespace").is_none());
         assert_eq!(body["tools"][1]["defer_loading"], true);
     }
 
@@ -1346,7 +1343,7 @@ mod tests {
         let body = OpenAiResponsesProvider::build_request_body(&payload);
 
         assert_eq!(body["tools"][0]["type"], "tool_search");
-        assert_eq!(body["tools"][1]["namespace"], "ops");
+        assert!(body["tools"][1].get("namespace").is_none());
         assert_eq!(body["tools"][1]["defer_loading"], true);
     }
 

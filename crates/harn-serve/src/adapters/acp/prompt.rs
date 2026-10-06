@@ -74,6 +74,7 @@ impl AcpServer {
         &mut self,
         id: &serde_json::Value,
         params: &serde_json::Value,
+        cancellation: Option<Arc<PromptCancellation>>,
     ) {
         let admission = match params.get("sessionId").and_then(|value| value.as_str()) {
             Some(session_id) => match self.prompt_admission(session_id) {
@@ -85,7 +86,7 @@ impl AcpServer {
             },
             None => None,
         };
-        let inner = Box::pin(self.handle_session_prompt_scoped(id, params));
+        let inner = Box::pin(self.handle_session_prompt_scoped(id, params, cancellation));
         let scope_error = match admission {
             Some(budget) => budget
                 .scope(inner)
@@ -106,6 +107,7 @@ impl AcpServer {
         &mut self,
         id: &serde_json::Value,
         params: &serde_json::Value,
+        prepared_cancellation: Option<Arc<PromptCancellation>>,
     ) {
         let session_id = match params.get("sessionId").and_then(|v| v.as_str()) {
             Some(s) => s.to_string(),
@@ -133,10 +135,9 @@ impl AcpServer {
             llm_spend,
         ) = match self.sessions.get_mut(&session_id) {
             Some(s) => {
-                s.cancellation.begin_prompt();
                 s.host_bridge = None;
                 (
-                    s.cancellation.clone(),
+                    prepared_cancellation.unwrap_or_else(|| s.cancellation.prepare_prompt()),
                     s.current_mode_id.clone(),
                     s.inject_state.clone(),
                     s.concurrent_control.tool_call_cancellations.clone(),
@@ -395,37 +396,49 @@ impl AcpServer {
         let id_owned = id.clone();
         let send_output = self.output.clone();
         let host_bridge_for_response = host_bridge.clone();
-        let result = mode_policy
-            .run(Box::pin(async {
-                let _budget_guard = turn_budget.install_session_turn(llm_spent_usd.unwrap_or(0.0));
-                let _spend_recorder = SessionSpendRecorder::new(
-                    llm_spend.clone(),
-                    &_budget_guard,
-                    llm_spent_usd.is_some(),
-                );
-                execute::execute_chunk(
-                    chunk,
-                    bridge.clone(),
-                    host_bridge,
-                    execute::PromptGlobals {
-                        text: &prompt_text,
-                        content: &prompt.content,
-                        messages: &prompt.messages,
-                    },
-                    execute::VmSetup {
-                        source: &source,
-                        baseline: vm_baseline.as_ref(),
-                        baseline_cache_hit: vm_baseline_cache_hit,
-                        baseline_prepare_ms: vm_baseline_prepare_ms,
-                        source_path: source_path.as_deref(),
-                        cwd: &cwd,
-                        project_root: Some(&project_root),
-                        runtime_configurator: self.runtime_configurator.clone(),
-                        session_environment: environment_policy.clone(),
-                    },
-                )
-                .await
-            }))
+        let runtime_configurator = self.runtime_configurator.clone();
+        let result = runtime_configurator
+            .run_prompt(
+                AcpPromptExecutionContext {
+                    session_id: &session_id,
+                    cwd: &cwd,
+                    project_root: &project_root,
+                    capability_policy: mode_policy.policy(),
+                    host_bridge: &host_bridge_for_response,
+                    cancelled: &cancellation.cancelled,
+                },
+                Box::pin(mode_policy.run(Box::pin(async {
+                    let _budget_guard =
+                        turn_budget.install_session_turn(llm_spent_usd.unwrap_or(0.0));
+                    let _spend_recorder = SessionSpendRecorder::new(
+                        llm_spend.clone(),
+                        &_budget_guard,
+                        llm_spent_usd.is_some(),
+                    );
+                    execute::execute_chunk(
+                        chunk,
+                        bridge.clone(),
+                        host_bridge,
+                        execute::PromptGlobals {
+                            text: &prompt_text,
+                            content: &prompt.content,
+                            messages: &prompt.messages,
+                        },
+                        execute::VmSetup {
+                            source: &source,
+                            baseline: vm_baseline.as_ref(),
+                            baseline_cache_hit: vm_baseline_cache_hit,
+                            baseline_prepare_ms: vm_baseline_prepare_ms,
+                            source_path: source_path.as_deref(),
+                            cwd: &cwd,
+                            project_root: Some(&project_root),
+                            runtime_configurator: self.runtime_configurator.clone(),
+                            session_environment: environment_policy.clone(),
+                        },
+                    )
+                    .await
+                }))),
+            )
             .await;
         self.finish_profile_turn(&session_id, profile_turn);
         let sink_flush_error = self.clear_active_prompt_transport(&session_id).await.err();

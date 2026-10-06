@@ -1,0 +1,4 @@
+ok explicit opening line taught
+ok missing opener rejected with canonical guidance
+ok malformed JSON uses canonical guidance
+ok complete body preserves literal bytes

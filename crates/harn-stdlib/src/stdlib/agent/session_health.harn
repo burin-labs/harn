@@ -1,0 +1,87 @@
+import { __tool_result_dispatch_rejection } from "std/agent/loop_result_status"
+import { verification_diagnostic_delta } from "std/verification"
+import { __verification_command_fact } from "std/verification_core"
+
+pub type AgentHealthDiagnostics = {set_fingerprint: string, count: int}
+
+pub type AgentHealthVerification = {diagnostics: AgentHealthDiagnostics?}
+
+pub type AgentToolHealthTelemetry = {
+  command_id: string?,
+  command_exit_code: int?,
+  verification: AgentHealthVerification?,
+}
+
+/**
+ * Project producer facts without reading rendered tool output or chat text.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn __agent_tool_health_telemetry(
+  agent: HarnessAgent,
+  envelope: dict,
+  result: dict,
+) -> AgentToolHealthTelemetry {
+  const command = __verification_command_fact(result)
+  const exit = if command?.status != "pending" && type_of(command?.exit_code) == "int" {
+    command.exit_code
+  } else {
+    nil
+  }
+  const declared = envelope?.annotations?.completion_evidence_role == "verification"
+  const executed = (result?.dispatch_receipt?.disposition ?? "executed") == "executed"
+    && result?.status != "running"
+    && command?.status != "pending"
+    && !__tool_result_dispatch_rejection(result)
+  let verification: AgentHealthVerification? = nil
+  if declared && executed {
+    const reported = if type_of(result?.data) == "dict" {
+      result.data
+    } else if type_of(result?.result) == "dict" {
+      result.result
+    } else {
+      result
+    }
+    const collection = command?.diagnostics ?? command?.errors
+      ?? reported?.diagnostics
+      ?? reported?.errors
+    let diagnostics: AgentHealthDiagnostics? = nil
+    // An explicit collection, including [], measures a set. Successful command
+    // status alone does not establish that diagnostics were reported.
+    if type_of(collection) == "list" {
+      const delta = verification_diagnostic_delta(
+        agent,
+        nil,
+        {
+          diagnostics: collection,
+          diagnostics_complete: reported?.diagnostics_complete ?? command?.diagnostics_complete
+            ?? false,
+          status: command?.status,
+          ok: command?.ok,
+          exit_code: exit,
+          timed_out: reported?.timed_out,
+          truncated: reported?.truncated,
+          feeds_gates: reported?.feeds_gates ?? reported?.feedsGates
+            ?? command?.feeds_gates
+            ?? command?.feedsGates
+            ?? true,
+        },
+      )
+      if delta.current.complete && delta.current.feeds_gates {
+        diagnostics = {
+          set_fingerprint: sha256(json_stringify(delta.current.signatures)),
+          count: delta.current.count,
+        }
+      }
+    }
+    verification = {diagnostics: diagnostics}
+  }
+  const command_id = if type_of(command?.handle_id) == "string" && command.handle_id != "" {
+    command.handle_id
+  } else {
+    nil
+  }
+  return {command_id: command_id, command_exit_code: exit, verification: verification}
+}

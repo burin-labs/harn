@@ -219,18 +219,18 @@
       }
     },
     {
-      "name": "notion_search",
-      "description": "Search Notion workspace pages, databases, and connected docs for planning or research context.",
+      "name": "wiki_search",
+      "description": "Search wiki workspace pages, databases, and connected docs for planning or research context.",
       "parameters": {
         "properties": {
           "query": { "description": "Semantic search query" },
-          "teamspace": { "description": "Optional Notion teamspace filter" }
+          "teamspace": { "description": "Optional wiki teamspace filter" }
         }
       }
     },
     {
-      "name": "notion_create_page",
-      "description": "Create or update a structured Notion page with markdown content and properties.",
+      "name": "wiki_create_page",
+      "description": "Create or update a structured wiki page with markdown content and properties.",
       "parameters": {
         "properties": {
           "parent": { "description": "Parent page or database" },

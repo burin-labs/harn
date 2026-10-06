@@ -1,2 +1,20 @@
 /** Repository automation retains the bootstrap workflow's permission ceiling. */
 pub const GITHUB_BUMP_PERMISSIONS = {contents: "write", pull_requests: "write"}
+
+/**
+ * The headline std/bump/runtime gives every refresh publication. The App
+ * identity and GitHub signature alone do not mark a commit as refresh output:
+ * a repair tool holding the same App credentials produces identical evidence
+ * through `createCommitOnBranch`, and its repair would be discarded as ours.
+ */
+const REFRESH_HEADLINE = "^chore: bump Harn runtime to v?[0-9]+\\.[0-9]+\\.[0-9]+$"
+
+/**
+ * True for the headline that marks a bump refresh publication.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn bump_refresh_headline(headline: string) -> bool {
+  return regex_match(REFRESH_HEADLINE, headline) != nil
+}

@@ -50,7 +50,8 @@ fn host_local_ceiling_refuses_hosted_chat_before_transport() {
         r#"{"reach":"local_only","allow_training_discounts":false}"#,
     );
     let _openai_base = ScopedEnvVar::set("OPENAI_BASE_URL", "http://127.0.0.1:9");
-    let runtime = tokio::runtime::Builder::new_current_thread()
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(1)
         .enable_all()
         .build()
         .expect("runtime");
@@ -59,5 +60,85 @@ fn host_local_ceiling_refuses_hosted_chat_before_transport() {
     let error = runtime
         .block_on(vm_call_llm_full(&opts))
         .expect_err("host ceiling must refuse this hosted route");
-    assert!(format!("{error:?}").contains("inference_boundary.local_only"));
+    assert_local_policy_denial(&error);
+
+    let local = tokio::task::LocalSet::new();
+    let offthread = runtime.block_on(local.run_until(async {
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+        vm_call_llm_full_streaming_offthread(&opts, tx)
+            .await
+            .expect_err("off-thread dispatch must retain the host refusal")
+    }));
+    assert_local_policy_denial(&offthread);
+}
+
+fn assert_local_policy_denial(error: &crate::value::VmError) {
+    let projected = crate::llm::call::build_llm_error_dict(error, "openai", "test-model");
+    let crate::value::VmValue::Dict(fields) = projected else {
+        panic!("the real call must project a structured denial");
+    };
+    let facts = crate::llm::helpers::vm_value_dict_to_json(&fields);
+    assert_eq!(facts["reason"], "policy_denied");
+    assert_eq!(facts["category"], "egress_blocked");
+    assert_eq!(facts["origin"], "local");
+    assert_eq!(facts["rule"], "inference_boundary.local_only");
+    assert_eq!(facts["code"], "inference_boundary.local_only");
+    assert_eq!(facts["retryable"], false);
+    assert_eq!(
+        crate::llm::agent_terminal_class("provider_error", "provider_error", Some(&facts)),
+        Some(crate::llm::AgentTerminalClass::ToolPolicyRejected),
+    );
+}
+
+#[test]
+fn admission_preview_never_sends_and_the_same_listener_has_a_non_null_control() {
+    use crate::llm::api::{
+        preview_inference_admission, InferenceAdmissionRequest, InferenceAdmissionStatus,
+    };
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+
+    let _guard = env_guard();
+    let _allow = allow_stubbed_llm_transport();
+    let counter = Arc::new(AtomicUsize::new(0));
+    let server = spawn_ollama_empty_then_success_stub(counter.clone());
+    let _endpoint = ScopedEnvVar::set("OLLAMA_HOST", format!("http://{}", server.addr()));
+    let _boundary = ScopedEnvVar::set(
+        super::super::inference_boundary::HOST_BOUNDARY_ENV,
+        r#"{"reach":"local_only","allow_training_discounts":false}"#,
+    );
+    let opts = base_opts("ollama");
+    let request = InferenceAdmissionRequest {
+        provider: opts.provider.clone(),
+        model: opts.model.clone(),
+        boundary: None,
+        data_controls: None,
+    };
+    assert_eq!(
+        preview_inference_admission(&request).status,
+        InferenceAdmissionStatus::Admitted
+    );
+    assert_eq!(counter.load(Ordering::SeqCst), 0);
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    let result = runtime
+        .block_on(vm_call_llm_full(&opts))
+        .expect("the real route must reach the listener");
+    assert_eq!(result.text, "retried");
+    let observed = counter.load(Ordering::SeqCst);
+    assert!(
+        observed > 0,
+        "a measured zero needs the same counter's non-null control"
+    );
+    assert_eq!(
+        preview_inference_admission(&request).status,
+        InferenceAdmissionStatus::Admitted
+    );
+    assert_eq!(
+        counter.load(Ordering::SeqCst),
+        observed,
+        "preview must not send another request"
+    );
 }

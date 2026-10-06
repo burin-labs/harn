@@ -88,6 +88,7 @@ pub(crate) async fn run_bench(path: &str, iterations: usize, profile: RunProfile
                 let rendered = harn_parser::diagnostic::render_type_diagnostic(&source, path, diag);
                 eprint!("{rendered}");
             }
+            DiagnosticSeverity::Info => {}
         }
     }
     if had_type_error {

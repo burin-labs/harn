@@ -1003,8 +1003,9 @@ mod tests {
             format!(
                 // Outlives the test hang ceiling many times over, so only a
                 // shutdown that interrupts initialization and kills the child
-                // lets the waits below finish.
-                "#!/bin/sh\nprintf '%s' \"$$\" > '{}'\nexec /bin/sleep 600\n",
+                // lets the waits below finish. The PID is renamed into place
+                // so the file never exists before it holds the whole PID.
+                "#!/bin/sh\nprintf '%s' \"$$\" > '{0}.tmp'\n/bin/mv '{0}.tmp' '{0}'\nexec /bin/sleep 600\n",
                 pid_file.display()
             ),
         )

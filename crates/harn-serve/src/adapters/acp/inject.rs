@@ -31,6 +31,7 @@ impl AcpServer {
         &mut self,
         id: &serde_json::Value,
         params: &serde_json::Value,
+        prepared_cancellation: Option<bool>,
     ) {
         let Some(session_id) = session_id_param(params) else {
             if !id.is_null() {
@@ -67,17 +68,16 @@ impl AcpServer {
         };
 
         let actor = control_actor_from_params(params);
-        let newly_cancelled = if cancellation.take_routed_cancel_ack() {
-            true
-        } else {
-            cancellation.cancel()
-        };
-        if newly_cancelled {
-            // A stop has to reach the processes the session started, not just
-            // its loop. Backgrounded command handles outlive the tool call by
-            // design, so unwinding the loop never reaches them.
-            cancel_session_command_handles(&session_id);
-        }
+        let newly_cancelled = prepared_cancellation.unwrap_or_else(|| {
+            let newly_cancelled = cancellation.cancel();
+            if newly_cancelled {
+                // A stop has to reach the processes the session started, not just
+                // its loop. Backgrounded command handles outlive the tool call by
+                // design, so unwinding the loop never reaches them.
+                cancel_session_command_handles(&session_id);
+            }
+            newly_cancelled
+        });
         let status = if newly_cancelled {
             "cancelled"
         } else {

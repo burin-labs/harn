@@ -25,6 +25,7 @@ pub static VM_DECLARED_CAPABILITY_METHODS: &[(&str, &str)] = &[
     ("agent", "daemon_spawn"),
     ("agent", "daemon_stop"),
     ("agent", "daemon_trigger"),
+    ("agent", "emit_tool_outcome"),
     ("agent", "external_agent_delegate"),
     ("agent", "inject_feedback"),
     ("agent", "inject_host_event"),

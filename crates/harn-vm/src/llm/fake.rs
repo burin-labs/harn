@@ -336,7 +336,7 @@ impl LlmProviderChat for FakeLlmProvider {
         &'a self,
         request: &'a LlmRequestPayload,
         delta_tx: Option<DeltaSender>,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<LlmResult, VmError>> + 'a>> {
+    ) -> crate::llm::provider::ProviderChatFuture<'a> {
         Box::pin(self.chat_impl(request, delta_tx))
     }
 }
@@ -724,7 +724,7 @@ mod tests {
             let chat = FakeLlmProvider.chat_impl(&request, None);
             tokio::pin!(chat);
 
-            // The chat future is parked on its virtual 60-second timer. With
+            // The chat future is parked on `tokio::time::sleep(60s)`. With
             // a paused clock and no advance, polling once should leave it
             // pending — proving real wall-clock is not required.
             let polled = futures::poll!(&mut chat);

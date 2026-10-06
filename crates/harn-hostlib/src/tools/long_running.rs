@@ -645,6 +645,7 @@ fn waiter_thread(context: WaiterContext, cancel_state: Arc<CancelState>, capture
             })
         });
 
+    let missing_program = handle.missing_program().map(str::to_string);
     let status = handle.wait().ok();
 
     if let Some(thread) = stdout_thread {
@@ -756,6 +757,11 @@ fn waiter_thread(context: WaiterContext, cancel_state: Arc<CancelState>, capture
         serde_json::Value::Number(exit_code.into()),
     );
     payload.insert("timed_out".into(), serde_json::Value::Bool(timed_out));
+    if exit_code == 127 && signal_name.is_none() && !cancelled {
+        if let Some(program) = missing_program {
+            payload.insert("missing_program".into(), serde_json::Value::String(program));
+        }
+    }
     payload.insert("stdout".into(), serde_json::Value::String(inline.stdout));
     payload.insert(
         "stdout_truncated".into(),

@@ -54,8 +54,19 @@ pub(crate) async fn async_main(mut raw_args: Vec<String>, runtime_mode: CliRunti
         cmd.print_help().ok();
         return;
     };
-    if let Err(error) =
-        crate::spend_policy::run(cli.spend_policy.as_deref(), Box::pin(dispatch(subcommand))).await
+    let parent_handoff = if cli.parent_secret_stdin {
+        Some(
+            harn_vm::secrets::ParentSecretHandoff::read_from(std::io::stdin().lock())
+                .unwrap_or_else(|error| command_error(&error.to_string())),
+        )
+    } else {
+        None
+    };
+    if let Err(error) = harn_vm::secrets::with_parent_secret_handoff(
+        parent_handoff,
+        crate::spend_policy::run(cli.spend_policy.as_deref(), Box::pin(dispatch(subcommand))),
+    )
+    .await
     {
         eprintln!("error: {error}");
         process::exit(1);
@@ -538,6 +549,12 @@ async fn dispatch(subcommand: Command) {
         }
         Command::Local(args) => commands::local::run(args).await,
         Command::Provider(args) => match args.command {
+            ProviderCommand::Admission(admission) => {
+                if let Err(error) = commands::inference_admission::run(admission) {
+                    eprintln!("{error}");
+                    process::exit(2);
+                }
+            }
             ProviderCommand::Capabilities(capabilities) => {
                 commands::provider_capabilities::run_or_exit(capabilities);
             }

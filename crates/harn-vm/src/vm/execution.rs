@@ -301,12 +301,21 @@ impl Vm {
             self.env.truncate_scopes(handler.env_scope_depth);
 
             self.stack.truncate(handler.stack_depth);
-            self.last_caught_error = Some(Box::new(super::CaughtError {
+            let caught = super::CaughtError {
                 value: thrown_value.clone(),
                 error,
                 stack_trace: std::mem::take(&mut self.error_stack_trace),
-            }));
-            self.stack.push(thrown_value);
+            };
+            if handler.preserve {
+                self.stack
+                    .push(VmValue::resource(crate::value::VmResourceHandle::new(
+                        "caught_exception",
+                        caught,
+                    )));
+            } else {
+                self.last_caught_error = Some(Box::new(caught));
+                self.stack.push(thrown_value);
+            }
 
             if let Some(frame) = self.frames.last_mut() {
                 frame.ip = handler.catch_ip;

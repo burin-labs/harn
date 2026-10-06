@@ -18,7 +18,7 @@ node, workflow, and host policies before execution. That layer is real
 but reactive — it cannot reject programs at `harn check` time, only
 when they run.
 
-[Strategic Positioning V1 §"Deeper moats" #5][positioning] called out
+Strategic Positioning V1 §"Deeper moats" #5 called out
 "formal methods / invariants over agent behavior" as a structural moat
 that vendor platforms are unlikely to build for their customers.
 Harn is a typed DSL with a single AST and a single check pass, so
@@ -37,7 +37,6 @@ linear types for `Approval<T>` so approval tokens are consumed exactly
 once. That epic was deliberately closed in favor of the narrow scope
 captured here.
 
-[positioning]: https://www.notion.so/3477d224c632809c8959cb4985016cf6
 [epic]: https://github.com/burin-labs/harn/issues/285
 
 ## Survey

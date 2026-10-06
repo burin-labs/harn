@@ -23,8 +23,10 @@ git -C "$fixture" update-ref refs/remotes/origin/main HEAD
 : > "$rows"
 
 bare_log="$tmp_root/bare.log"
+bare_output="$tmp_root/bare-output"
 if HARN_DEVELOPMENT_CUTOVER_ROOT="$fixture" \
   HARN_DEVELOPMENT_CUTOVER_PR_ROWS_FILE="$rows" \
+  GITHUB_OUTPUT="$bare_output" \
     "$repo_root/scripts/check_development_cutover.sh" >"$bare_log" 2>&1; then
   echo "bare released main without a remediation PR did not alarm" >&2
   exit 1
@@ -37,6 +39,9 @@ grep -Fq 'remediation_pr_count=0' "$bare_log"
 grep -Fq 'open_pr_count=0' "$bare_log"
 grep -Fq 'merged_pr_count=0' "$bare_log"
 grep -Fq 'development cutover is owed' "$bare_log"
+grep -Fxq 'repair_owed=true' "$bare_output"
+grep -Fxq 'repair_version=1.2.4-dev' "$bare_output"
+grep -Fxq 'repair_published_tag=v1.2.3' "$bare_output"
 
 # A correctly cut-over main is a known non-null negative control: the same
 # probe must report its measured version and remain silent.
@@ -65,6 +70,10 @@ HARN_DEVELOPMENT_CUTOVER_PR_ROWS_FILE="$rows" \
 GITHUB_OUTPUT="$pending_output" \
   "$repo_root/scripts/check_development_cutover.sh" >"$pending_log"
 grep -Fxq 'state=pending' "$pending_output"
+if grep -Fq 'repair_owed=true' "$pending_output"; then
+  echo "unpublished main admitted automatic repair" >&2
+  exit 1
+fi
 grep -Fq 'publication pending: main 1.2.4, latest tag v1.2.3' "$pending_log"
 
 # Publishing that exact version changes the same observation into a real debt.
@@ -228,7 +237,7 @@ for case_row in success:success:success success:pending:pending success:missing:
 done
 grep -Fq 'name: Cancel obsolete speculative workflows' "$workflow"
 grep -Fq "if: github.event_name == 'merge_group'" "$workflow"
-grep -Fq 'group: repository-state-reconciliation-${{ github.repository }}-${{ github.event_name }}' "$workflow"
+grep -Fq "github.event_name == 'merge_group' && 'merge_group' || 'cutover'" "$workflow"
 grep -Fq 'run: ./scripts/cancel_superseded_merge_groups.sh --repo "$TARGET_REPO" --apply' "$workflow"
 
 echo "development_cutover_monitor_test: ok"

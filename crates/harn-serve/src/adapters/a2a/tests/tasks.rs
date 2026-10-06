@@ -1284,6 +1284,7 @@ fn tool_call_completed_emits_artifact_update_event() {
         mutation_status: harn_vm::agent_events::ToolMutationStatus::Unknown,
         changed_paths: None,
         data: None,
+        health: None,
         executor: None,
         parsing: None,
         raw_input: None,

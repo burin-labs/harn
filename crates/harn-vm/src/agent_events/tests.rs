@@ -125,6 +125,7 @@ fn tool_call_update_durations_serialize_when_present_and_skip_when_absent() {
         mutation_status: crate::agent_events::ToolMutationStatus::Unknown,
         changed_paths: None,
         data: Some(serde_json::json!({"run_outcome": {"exit_code": 0}})),
+        health: None,
         executor: None,
         parsing: None,
 
@@ -153,6 +154,7 @@ fn tool_call_update_durations_serialize_when_present_and_skip_when_absent() {
         mutation_status: crate::agent_events::ToolMutationStatus::Unknown,
         changed_paths: None,
         data: None,
+        health: None,
         executor: None,
         parsing: None,
 
@@ -251,6 +253,7 @@ fn tool_mutation_status_serde_and_terminal_update_round_trip() {
             mutation_status: status,
             changed_paths: None,
             data: None,
+            health: None,
             executor: None,
             parsing: None,
             raw_input: None,
@@ -302,6 +305,7 @@ fn tool_call_update_event_omits_error_category_when_none() {
         mutation_status: crate::agent_events::ToolMutationStatus::Unknown,
         changed_paths: None,
         data: None,
+        health: None,
         executor: None,
         parsing: None,
 
@@ -329,6 +333,7 @@ fn tool_call_update_event_serializes_error_category_when_set() {
         mutation_status: crate::agent_events::ToolMutationStatus::Unknown,
         changed_paths: None,
         data: None,
+        health: None,
         executor: None,
         parsing: None,
 
@@ -359,6 +364,7 @@ fn tool_call_update_omits_executor_when_absent() {
         mutation_status: crate::agent_events::ToolMutationStatus::Unknown,
         changed_paths: None,
         data: None,
+        health: None,
         executor: None,
         parsing: None,
 
@@ -568,6 +574,7 @@ fn tool_call_update_includes_executor_when_present() {
         mutation_status: crate::agent_events::ToolMutationStatus::Unknown,
         changed_paths: None,
         data: None,
+        health: None,
         executor: Some(ToolExecutor::McpServer {
             server_name: "github".into(),
         }),
@@ -597,6 +604,7 @@ fn tool_call_update_omits_audit_when_absent() {
         mutation_status: crate::agent_events::ToolMutationStatus::Unknown,
         changed_paths: None,
         data: None,
+        health: None,
         executor: None,
         parsing: None,
         raw_input: None,
@@ -629,6 +637,7 @@ fn tool_call_update_includes_audit_when_present() {
         mutation_status: crate::agent_events::ToolMutationStatus::Unknown,
         changed_paths: None,
         data: None,
+        health: None,
         executor: Some(ToolExecutor::HostBridge),
         parsing: None,
         raw_input: None,

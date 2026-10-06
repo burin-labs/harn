@@ -126,10 +126,12 @@ fn sanitize_openai_tool_for_request(
     };
 
     object.remove("x-harn-output-schema");
+    // OpenAI rejects Harn's `namespace` tag on a tool (harn#9314); only
+    // `defer_loading` survives, and only on a tool-search route.
+    object.remove("namespace");
+    object.remove("namespaces");
     if !supports_openai_tool_search_extensions {
         object.remove("defer_loading");
-        object.remove("namespace");
-        object.remove("namespaces");
     }
 
     if let Some(function) = object

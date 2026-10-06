@@ -1,0 +1,135 @@
+import { tool_registry_from } from "std/tools"
+import { declared, declared_pipeline, legacy } from "./typed_error_dependency.harn"
+
+fn direct(_args: dict) -> any throws string {
+  throw "application-probe"
+}
+
+fn dependency(args: dict) -> any throws string {
+  return legacy(args)
+}
+
+fn direct_finally(args: dict) -> any throws string {
+  try {
+    return direct(args)
+  } finally {
+    try {
+      throw "nested cleanup exception"
+    } catch (_error) {
+    }
+  }
+}
+
+fn dependency_finally(args: dict) -> any throws string {
+  try {
+    return legacy(args)
+  } finally {
+    try {
+      throw "nested cleanup exception"
+    } catch (_error) {
+    }
+  }
+}
+
+fn direct_try_star(args: dict) -> any throws string {
+  return try* direct(args)
+}
+
+fn dependency_try_star(args: dict) -> any throws string {
+  return try* legacy(args)
+}
+
+fn direct_retry(args: dict) -> any throws string {
+  return retry 2 {
+    direct(args)
+  }
+}
+
+fn dependency_retry(args: dict) -> any throws string {
+  return retry 2 {
+    legacy(args)
+  }
+}
+
+fn explicit_catch(args: dict) -> any throws string {
+  try {
+    return legacy(args)
+  } catch (_error) {
+    throw "application-probe"
+  }
+}
+
+fn undeclared_catch(args: dict) -> any {
+  try {
+    return direct(args)
+  } catch (error) {
+    throw error
+  }
+}
+
+fn scalar_finally(_args: dict) -> any throws int {
+  try {
+    throw 7
+  } finally {
+    try {
+      throw 8
+    } catch (_error) {
+    }
+  }
+}
+
+fn wrong_shape(_args: dict) -> any throws string {
+  const wrong: any = {secret: "private-contract-detail-7782"}
+  throw wrong
+}
+
+fn main(harness: Harness) {
+  const declared_closure = fn(_args: dict) -> any throws string {
+    throw "application-probe"
+  }
+  let specs = []
+  for entry in [
+    {name: "direct", handler: direct},
+    {name: "imported", handler: declared},
+    {name: "imported_pipeline", handler: declared_pipeline},
+    {name: "declared_closure", handler: declared_closure},
+    {name: "dependency", handler: dependency},
+    {name: "direct_finally", handler: direct_finally},
+    {name: "dependency_finally", handler: dependency_finally},
+    {name: "direct_try_star", handler: direct_try_star},
+    {name: "dependency_try_star", handler: dependency_try_star},
+    {name: "direct_retry", handler: direct_retry},
+    {name: "dependency_retry", handler: dependency_retry},
+    {name: "explicit_catch", handler: explicit_catch},
+    {name: "undeclared_catch", handler: undeclared_catch},
+    {name: "scalar_finally", handler: scalar_finally},
+    {name: "wrong_shape", handler: wrong_shape},
+  ] {
+    specs = specs
+      + [
+        {
+          name: entry.name,
+          description: "Exercise exception provenance.",
+          parameters: {},
+          error_schema: {
+            type: if entry.name == "scalar_finally" {
+              "integer"
+            } else {
+              "string"
+            },
+          },
+          handler: { args ->
+            const path = entry.name + ".calls"
+            const previous = if harness.fs.exists(path) {
+              harness.fs.read_text(path)
+            } else {
+              ""
+            }
+            harness.fs.write_text(path, previous + "called\n")
+            entry.handler(args)
+          },
+        },
+      ]
+  }
+  harness.tools.mcp_tools(tool_registry_from(specs))
+}

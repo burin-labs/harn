@@ -903,3 +903,64 @@ fn context_manifest_carries_the_current_delegated_actor_chain() {
         Some(&chain.to_json_value())
     );
 }
+
+/// A session's system prompt states the envelope contract once. A request
+/// whose system prompt carries the session's complete directive contract
+/// sends that session's envelopes without restating it. Every other request
+/// keeps the contract inline, so no envelope ever reaches a model unexplained:
+/// a prompt without it (a preview, a prompt that predates the contract), a
+/// caller prompt that quotes the envelope text without the nonce authority,
+/// and an envelope stamped with a different nonce.
+#[test]
+fn the_envelope_contract_is_sent_once_when_the_system_prompt_states_it() {
+    let session_id = "envelope-contract-session";
+    crate::agent_sessions::open_or_create(Some(session_id.to_string())).expect("agent session");
+    let nonce = directive_nonce_for_session(session_id);
+    let options = crate::value::DictMap::from_iter([
+        ("session_id".to_string(), s(session_id)),
+        ("system".to_string(), s("base")),
+    ]);
+    let system = compose_system_prompt(None, Some(&options))
+        .expect("system prompt")
+        .expect("non-empty prompt");
+    assert_eq!(system.matches(directive_envelope_instructions()).count(), 1);
+    assert!(system.contains(&directive_nonce_instructions(&nonce)));
+
+    let envelope = |nonce: &str| {
+        directive_envelope_message(
+            &[RenderedReminder::untracked(
+                "verify once",
+                DirectiveSpeaker::Harness,
+            )],
+            nonce,
+        )
+        .expect("envelope")
+    };
+    let kept_inline = |system: &str, envelope_nonce: &str| {
+        let mut messages = vec![envelope(envelope_nonce)];
+        elide_envelope_contract_stated_in_system(&mut messages, Some(system), &nonce);
+        messages == vec![envelope(envelope_nonce)]
+    };
+    assert!(
+        kept_inline("base", &nonce),
+        "no contract in the system prompt: keep it inline"
+    );
+    let quoted = format!("base\n{}", directive_envelope_instructions());
+    assert!(
+        kept_inline(&quoted, &nonce),
+        "envelope text without the session's nonce authority: keep it inline"
+    );
+    assert!(
+        kept_inline(&system, TEST_NONCE),
+        "envelope under a different nonce: keep it inline"
+    );
+
+    let mut with_contract = vec![envelope(&nonce)];
+    elide_envelope_contract_stated_in_system(&mut with_contract, Some(&system), &nonce);
+    assert_eq!(
+        with_contract[0]["content"],
+        format!(
+            "<context-directives speaker=\"harness\" nonce=\"{nonce}\">\nverify once\n</context-directives>"
+        )
+    );
+}

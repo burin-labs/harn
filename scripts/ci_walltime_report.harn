@@ -617,10 +617,17 @@ pipeline main(harness: Harness, task: unknown) {
   const workflow = policy?.workflow ?? to_string(parsed.workflow)
   const event = policy?.event ?? to_string(parsed.event)
   const limit = min(100, max(1, to_int(parsed.limit) ?? DEFAULT_LIMIT))
+  // GitHub's unbounded success filter can return historical runs. The
+  // policy already owns the admissible epoch; apply it to the API query too.
+  const created_bound = if policy == nil {
+    ""
+  } else {
+    "&created=%3E%3D${policy.topology_epoch}"
+  }
   const runs_data = github_api_json(
     harness.process,
     harness.clock,
-    "/repos/${repository}/actions/workflows/${workflow}/runs?event=${event}&status=success&per_page=${limit}",
+    "/repos/${repository}/actions/workflows/${workflow}/runs?event=${event}&status=success&per_page=${limit}${created_bound}",
   )
   if policy == nil {
     const runs = run_samples_from_api(runs_data)

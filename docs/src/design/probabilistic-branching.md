@@ -865,7 +865,7 @@ sites, not executed evaluations or billed requests.
 [sk-planning]: https://learn.microsoft.com/en-us/semantic-kernel/concepts/planning
 [sk-tests]: https://github.com/microsoft/semantic-kernel/blob/main/dotnet/src/Connectors/Connectors.Google.UnitTests/Core/Gemini/Clients/GeminiChatClientFunctionCallingTests.cs
 [harn-call]: ../llm/llm_call.md
-[harn-schema]: ../migrations/schema-as-type.md
+[harn-schema]: ../spec/language/19-type-annotations.md#type-aliases
 [harn-checkpoint]: https://github.com/burin-labs/harn/blob/fb8d82ed5a3da77ea420118fdbdb0f77e9fd3a00/crates/harn-stdlib/src/stdlib/stdlib_checkpoint.harn
 [harn-judge]: ../stdlib/agent-judge.md
 [harn-requirements]: https://github.com/burin-labs/harn/blob/fb8d82ed5a3da77ea420118fdbdb0f77e9fd3a00/crates/harn-stdlib/src/stdlib/agent/completion_requirements.harn

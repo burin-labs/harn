@@ -6,11 +6,35 @@ use super::error::CompileError;
 use super::Compiler;
 
 impl Compiler {
+    /// Compile cleanup under its source callable's channel. The scoped body
+    /// leaves one value, which cleanup discards even for a non-value tail.
+    pub(super) fn compile_finally_inline(
+        &mut self,
+        finally_body: &[SNode],
+        declared_throw: bool,
+    ) -> Result<(), CompileError> {
+        if !finally_body.is_empty() {
+            let saved = std::mem::replace(&mut self.declared_throw, declared_throw);
+            let result = self.compile_scoped_block(finally_body);
+            self.declared_throw = saved;
+            result?;
+            self.chunk.emit(Op::Pop, self.line);
+        }
+        Ok(())
+    }
+
     pub(super) fn compile_throw_stmt(&mut self, value: &SNode) -> Result<(), CompileError> {
         // Pending cleanups run from their own exception handlers, exactly as
         // they do for errors raised by callees and failing operations.
         self.compile_node(value)?;
-        self.chunk.emit(Op::Throw, self.line);
+        self.chunk.emit(
+            if self.declared_throw {
+                Op::ThrowDeclared
+            } else {
+                Op::Throw
+            },
+            self.line,
+        );
         Ok(())
     }
 
@@ -22,7 +46,7 @@ impl Compiler {
             });
         }
         self.handler_depth += 1;
-        let catch_jump = self.chunk.emit_jump(Op::TryCatchSetup, self.line);
+        let catch_jump = self.chunk.emit_jump(Op::TryCatchPreserve, self.line);
         let empty_type = self.string_constant("");
         self.emit_type_name_extra(empty_type);
 
@@ -35,7 +59,7 @@ impl Compiler {
         // Catch path: thrown value is on the stack. Rethrow it; pending
         // cleanups run from their own handlers.
         self.chunk.patch_jump(catch_jump);
-        self.chunk.emit(Op::Throw, self.line);
+        self.chunk.emit(Op::Rethrow, self.line);
 
         self.chunk.patch_jump(end_jump);
         Ok(())
@@ -148,7 +172,7 @@ impl Compiler {
         let loop_start = self.chunk.current_offset();
 
         self.handler_depth += 1;
-        let catch_jump = self.chunk.emit_jump(Op::TryCatchSetup, self.line);
+        let catch_jump = self.chunk.emit_jump(Op::TryCatchPreserve, self.line);
         // Empty type name → untyped catch.
         let empty_type = self.string_constant("");
         let hi = (empty_type >> 8) as u8;
@@ -189,7 +213,7 @@ impl Compiler {
         self.chunk.patch_jump(retry_jump);
         self.chunk.emit(Op::Pop, self.line);
         self.emit_get_binding(err_name);
-        self.chunk.emit(Op::Throw, self.line);
+        self.chunk.emit(Op::Rethrow, self.line);
 
         // Body-success path lands here with the body's value on the stack —
         // that value IS the value of the `retry` expression (mirroring `if`,

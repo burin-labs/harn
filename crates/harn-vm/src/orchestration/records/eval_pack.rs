@@ -37,6 +37,7 @@ use super::types::{
 };
 use crate::value::{VmError, VmValue};
 
+use crate::orchestration::artifact_files::resolve_manifest_path;
 use ledger::eval_pack_manifest_model;
 pub use ledger::{
     eval_ledger_append_rows_report, eval_ledger_prior_commit_rows_report, eval_ledger_read_report,
@@ -47,7 +48,7 @@ use replay::*;
 pub use replay::{evaluate_run_against_fixture, evaluate_run_suite, replay_fixture_from_run};
 use report::*;
 
-const EVAL_LEDGER_ROW_SCHEMA: &str = "harn.eval.ledger.row.v1";
+const EVAL_LEDGER_ROW_SCHEMA: &str = "harn.eval.ledger.row.v2";
 const EVAL_LEDGER_RUN_STATE_SCHEMA: &str = "harn.eval.run-state.v1";
 const EVAL_LEDGER_RESUME_PLAN_SCHEMA: &str = "harn.eval.resume-plan.v1";
 const EVAL_LEDGER_ROW_KIND: &str = "eval.ledger.row";
@@ -97,7 +98,8 @@ pub struct EvalPackLiveVerifyOutcome {
     #[serde(alias = "wallTimeSeconds")]
     pub wall_time_seconds: f64,
     #[serde(alias = "costUsd")]
-    pub cost_usd: f64,
+    pub cost_usd: Option<f64>,
+    pub known_cost_usd: Option<f64>,
     #[serde(default, alias = "producedPaths")]
     pub produced_paths: Vec<String>,
     #[serde(default, alias = "toolCallSummary", alias = "tool_summary")]
@@ -642,17 +644,6 @@ fn load_replay_fixture_from_ref(
     load_replay_fixture(&resolve_manifest_path(base_dir, path))
 }
 
-fn resolve_manifest_path(base_dir: Option<&Path>, path: &str) -> PathBuf {
-    let path_buf = PathBuf::from(path);
-    if path_buf.is_absolute() {
-        path_buf
-    } else if let Some(base_dir) = base_dir {
-        base_dir.join(path_buf)
-    } else {
-        path_buf
-    }
-}
-
 pub fn evaluate_run_suite_manifest(
     manifest: &EvalSuiteManifest,
 ) -> Result<ReplayEvalSuiteReport, VmError> {
@@ -1079,6 +1070,7 @@ fn evaluate_eval_pack_live_verify_trial(
         outcome.timed_out,
         outcome.wall_time_seconds,
         outcome.cost_usd,
+        outcome.known_cost_usd,
         failures,
         warnings,
         informational,
@@ -1158,10 +1150,8 @@ fn evaluate_eval_pack_run_trial(
             .as_ref()
             .map(|usage| usage.total_duration_ms as f64 / 1000.0)
             .unwrap_or_default(),
-        run.usage
-            .as_ref()
-            .map(|usage| usage.total_cost)
-            .unwrap_or_default(),
+        run.usage.as_ref().and_then(|usage| usage.cost_usd),
+        run.usage.as_ref().map(|usage| usage.known_cost_usd),
         failures,
         warnings,
         informational,
@@ -1211,7 +1201,8 @@ fn evaluate_eval_pack_friction_trial(
         events.len(),
         false,
         0.0,
-        0.0,
+        Some(0.0),
+        Some(0.0),
         failures,
         warnings,
         informational,

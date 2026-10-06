@@ -200,8 +200,9 @@ fn restored_index_keeps_the_typed_symbol_graph() {
     let (reader_registry, reader) = registry();
     assert_eq!(
         reader.warm_session(dir.path()),
-        harn_hostlib::code_index::SessionWarmOutcome::Restored
+        harn_hostlib::code_index::SessionWarmOutcome::Building
     );
+    reader.wait_until_idle();
     assert_eq!(
         modules(&reader_registry),
         2,

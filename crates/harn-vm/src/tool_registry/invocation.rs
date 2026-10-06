@@ -125,7 +125,9 @@ pub fn tool_runtime_error_summary(error: &VmError) -> String {
         crate::value::ErrorCategory::BudgetExceeded => "tool execution budget exceeded".to_string(),
         crate::value::ErrorCategory::Cancelled => "tool execution cancelled".to_string(),
         crate::value::ErrorCategory::RateLimit => "tool execution was rate limited".to_string(),
-        _ if matches!(error, VmError::Thrown(_)) => "tool threw an undeclared value".to_string(),
+        _ if matches!(error, VmError::Thrown(_) | VmError::DeclaredThrown(_)) => {
+            "tool threw an undeclared value".to_string()
+        }
         _ => error.to_string(),
     }
 }
@@ -133,8 +135,8 @@ pub fn tool_runtime_error_summary(error: &VmError) -> String {
 /// Classify and validate a raw VM handler result exactly once.
 ///
 /// Explicit typed failures carry portable data and their declared disposition.
-/// Declared error schemas constrain that data when present. Raw throws still
-/// require a matching error schema; control and host failures remain runtime.
+/// Declared error schemas constrain source-declared failure data. Ordinary
+/// dependency throws, control signals, and host failures remain runtime.
 pub fn classify_tool_result(
     prepared: &PreparedToolCatalog,
     tool: &str,
@@ -181,14 +183,14 @@ pub fn classify_tool_failure(
     if is_reserved_control_error(&error) {
         return ToolFailureClassification::Runtime(error);
     }
-    let VmError::Thrown(value) = error else {
+    let VmError::DeclaredThrown(value) = error else {
         return ToolFailureClassification::Runtime(error);
     };
     if prepared
         .entry(tool)
         .is_none_or(|entry| entry.error_schema.is_none())
     {
-        return ToolFailureClassification::Runtime(VmError::Thrown(value));
+        return ToolFailureClassification::Runtime(VmError::DeclaredThrown(value));
     }
     let json = match portable_value(tool, ToolContractPhase::ApplicationError, &value) {
         Ok(json) => json,
@@ -202,7 +204,7 @@ pub fn classify_tool_failure(
             ToolFailureClassification::Application(error)
         }
         ToolThrownClassification::Undeclared => {
-            ToolFailureClassification::Runtime(VmError::Thrown(value))
+            ToolFailureClassification::Runtime(VmError::DeclaredThrown(value))
         }
         ToolThrownClassification::ContractViolation(error) => {
             ToolFailureClassification::Contract(error)
@@ -317,9 +319,12 @@ mod tests {
             "additionalProperties": false
         })));
         let value = crate::schema::json_to_vm_value(&json!({"code": "conflict"}));
-        let outcome =
-            classify_tool_result(&prepared, "widgets.create", Err(VmError::Thrown(value)))
-                .expect("declared application error");
+        let outcome = classify_tool_result(
+            &prepared,
+            "widgets.create",
+            Err(VmError::DeclaredThrown(value)),
+        )
+        .expect("declared application error");
         assert!(matches!(
             outcome,
             ToolInvocationOutcome::ApplicationError(ToolApplicationError { data, .. })
@@ -327,9 +332,12 @@ mod tests {
         ));
 
         let invalid = crate::schema::json_to_vm_value(&json!({"code": "missing"}));
-        let error =
-            classify_tool_result(&prepared, "widgets.create", Err(VmError::Thrown(invalid)))
-                .expect_err("wrong thrown shape must fail closed");
+        let error = classify_tool_result(
+            &prepared,
+            "widgets.create",
+            Err(VmError::DeclaredThrown(invalid)),
+        )
+        .expect_err("wrong thrown shape must fail closed");
         assert!(matches!(
             error,
             ToolInvocationError::Contract(ToolContractViolation {
@@ -350,6 +358,22 @@ mod tests {
         assert!(matches!(
             error,
             ToolInvocationError::Runtime(VmError::Thrown(_))
+        ));
+    }
+
+    #[test]
+    fn matching_legacy_throw_does_not_acquire_declared_provenance() {
+        let schema = Some(json!({"type": "string"}));
+        let result = classify_tool_result(
+            &prepared(schema),
+            "widgets.create",
+            Err(VmError::Thrown(VmValue::String(
+                "matching but undeclared".into(),
+            ))),
+        );
+        assert!(matches!(
+            result,
+            Err(ToolInvocationError::Runtime(VmError::Thrown(_)))
         ));
     }
 
@@ -521,7 +545,7 @@ mod tests {
             ToolInvocationError::Runtime(inner) if crate::cancellation::is_cancellation(inner)
         ));
 
-        let business = VmError::Thrown(VmValue::String("customer cancelled order".into()));
+        let business = VmError::DeclaredThrown(VmValue::String("customer cancelled order".into()));
         let outcome = classify_tool_result(
             &prepared(Some(json!({"type": "string"}))),
             "widgets.create",
@@ -541,7 +565,7 @@ mod tests {
         let outcome = classify_tool_result(
             &prepared(Some(json!({"type": "object"}))),
             "widgets.create",
-            Err(VmError::Thrown(business)),
+            Err(VmError::DeclaredThrown(business)),
         )
         .expect(
             "a category-shaped business error without the control sentinel is application data",

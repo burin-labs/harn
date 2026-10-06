@@ -426,6 +426,15 @@ fn parse_datetime_auto(input: &str) -> Result<DateTime<Utc>, VmError> {
         return Ok(dt.with_timezone(&Utc));
     }
 
+    // RFC 3339 requires seconds; ISO 8601 lets a minute-precision time carry
+    // an offset too. Without these the digit fallback below would read the
+    // offset hour as seconds and drop the offset.
+    for fmt in ["%Y-%m-%dT%H:%M%:z", "%Y-%m-%d %H:%M%:z", "%Y-%m-%dT%H:%M%z"] {
+        if let Ok(dt) = DateTime::parse_from_str(trimmed, fmt) {
+            return Ok(dt.with_timezone(&Utc));
+        }
+    }
+
     for fmt in [
         "%Y-%m-%d %H:%M:%S%.f",
         "%Y-%m-%dT%H:%M:%S%.f",

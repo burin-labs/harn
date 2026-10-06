@@ -2,7 +2,7 @@ capability_method!(
     net_get,
     "harness.net.get",
     ["network.read@arg0"],
-    "__cap_net_get(url: string, options?: dict) -> dict",
+    "__cap_net_get(url: string, options?: dict) -> @HTTP_RESPONSE",
     "Send an HTTP GET request."
 );
 capability_method!(
@@ -44,42 +44,42 @@ capability_method!(
     net_post,
     "harness.net.post",
     ["network.write@arg0"],
-    "__cap_net_post(url: string, body?: any, options?: dict) -> dict",
+    "__cap_net_post(url: string, body?: any, options?: dict) -> @HTTP_RESPONSE",
     "Send an HTTP POST request."
 );
 capability_method!(
     net_put,
     "harness.net.put",
     ["network.write@arg0"],
-    "__cap_net_put(url: string, body?: any, options?: dict) -> dict",
+    "__cap_net_put(url: string, body?: any, options?: dict) -> @HTTP_RESPONSE",
     "Send an HTTP PUT request."
 );
 capability_method!(
     net_patch,
     "harness.net.patch",
     ["network.write@arg0"],
-    "__cap_net_patch(url: string, body?: any, options?: dict) -> dict",
+    "__cap_net_patch(url: string, body?: any, options?: dict) -> @HTTP_RESPONSE",
     "Send an HTTP PATCH request."
 );
 capability_method!(
     net_delete,
     "harness.net.delete",
     ["network.write@arg0"],
-    "__cap_net_delete(url: string, options?: dict) -> dict",
+    "__cap_net_delete(url: string, options?: dict) -> @HTTP_RESPONSE",
     "Send an HTTP DELETE request."
 );
 capability_method!(
     net_request,
     "harness.net.request",
     ["network.mutate@arg1"],
-    "__cap_net_request(method: string, url: string, options?: dict) -> dict",
+    "__cap_net_request(method: string, url: string, options?: dict) -> @HTTP_RESPONSE",
     "Send a structured HTTP request."
 );
 capability_method!(
     net_download,
     "harness.net.download",
     ["network.read@arg0", "fs.write@arg1"],
-    "__cap_net_download(url: string, destination: string, options?: dict) -> dict",
+    "__cap_net_download(url: string, destination: string, options?: dict) -> @HTTP_DOWNLOAD_RESPONSE",
     "Download an HTTP response to a file."
 );
 capability_method!(
@@ -121,7 +121,7 @@ capability_method!(
     net_session_request,
     "harness.net.session_request",
     ["network.mutate@arg2"],
-    "__cap_net_session_request(session: string, method: string, url: string, options?: dict) -> dict",
+    "__cap_net_session_request(session: string, method: string, url: string, options?: dict) -> @HTTP_RESPONSE",
     "Send an HTTP request through a reusable session."
 );
 capability_method!(
@@ -449,28 +449,28 @@ capability_method!(
     process_exec,
     "harness.process.exec",
     ["process.write@arg0"],
-    "__cap_process_exec(...command: string) -> dict",
+    "__cap_process_exec(...command: string) -> @PROCESS_RESULT",
     "Execute a program and argument vector."
 );
 capability_method!(
     process_shell,
     "harness.process.shell",
     ["process.write@arg0"],
-    "__cap_process_shell(command: string) -> dict",
+    "__cap_process_shell(command: string) -> @PROCESS_RESULT",
     "Execute a command through the configured shell."
 );
 capability_method!(
     process_exec_at,
     "harness.process.exec_at",
     ["fs.read@arg0", "process.write@arg1"],
-    "__cap_process_exec_at(directory: string, ...command: string) -> dict",
+    "__cap_process_exec_at(directory: string, ...command: string) -> @PROCESS_RESULT",
     "Execute a program and argument vector in a working directory."
 );
 capability_method!(
     process_shell_at,
     "harness.process.shell_at",
     ["fs.read@arg0", "process.write@arg1"],
-    "__cap_process_shell_at(directory: string, command: string) -> dict",
+    "__cap_process_shell_at(directory: string, command: string) -> @PROCESS_RESULT",
     "Execute a shell command in a working directory."
 );
 capability_method!(

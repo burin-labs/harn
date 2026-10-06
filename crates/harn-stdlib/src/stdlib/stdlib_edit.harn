@@ -15,12 +15,17 @@ pub import {
 import {
   __refactor_conflict,
   __refactor_invalid,
-  __refactor_member,
-  __refactor_result,
   __refactor_run,
   __refactor_unsupported,
 } from "std/edit/refactor_runtime"
-pub import { edit_dry_run, edit_rename_symbol, edit_safe_text_patch } from "std/edit/safe_patch"
+pub import {
+  edit_add_parameter,
+  edit_change_signature,
+  edit_dry_run,
+  edit_rename_symbol,
+  edit_reorder_parameters,
+  edit_safe_text_patch,
+} from "std/edit/safe_patch"
 
 /**
  * Structured refactorings (B.8, issue #2520).
@@ -326,26 +331,6 @@ fn __refactor_split_top_level(text: string?) {
   return segs
 }
 
-fn __refactor_insert_at(
-  list: string | bytes | list | dict | set | range | nil,
-  index: any,
-  item: any,
-) {
-  const n = len(list)
-  const idx = max(0, min(index, n))
-  const head = if idx > 0 {
-    list[:idx]
-  } else {
-    []
-  }
-  const tail = if idx < n {
-    list[idx:]
-  } else {
-    []
-  }
-  return head + [item] + tail
-}
-
 fn __refactor_def_query(spec: dict, fn_name: any) {
   return "(" + spec.fn_node + " name: (identifier) @__n parameters: (" + spec.params_node
     + ") @target (#eq? @__n \""
@@ -412,334 +397,6 @@ fn __refactor_call_sites(ast: HarnessAst, spec: dict, path: any, fn_name: any, s
     return {count: r.match_count, originals: r.edits.map({ e -> e.original })}
   }
   return {count: 0, originals: []}
-}
-
-fn __refactor_call_op(spec: dict, path: any, fn_name: any, nth: any, new_args: string) {
-  return {
-    kind: "node_apply",
-    path: path,
-    params: {
-      path: path,
-      query: __refactor_call_query(spec, fn_name),
-      replacement: "(" + new_args + ")",
-      select: "nth",
-      nth: nth,
-    },
-  }
-}
-
-fn __refactor_def_op(spec: dict, path: any, fn_name: any, new_inner: string) {
-  return {
-    kind: "node_apply",
-    path: path,
-    params: {
-      path: path,
-      query: __refactor_def_query(spec, fn_name),
-      replacement: "(" + new_inner + ")",
-      select: "unique",
-    },
-  }
-}
-
-/**
- * Replace a function's entire parameter list with `new_params` (the inner
- * text, without the enclosing parens), updating call sites per
- * `callsite_strategy`:
- *
- * - `"strict"` (default) — refuse with `result: "conflict"` if any call
- *   site exists, since an arbitrary signature change cannot be reconciled
- *   automatically.
- * - `"default_fill"` — append `fill` (required) to every call site's
- *   argument list, for the common "added a trailing parameter" case.
- * - `"manual"` — rewrite the definition only and report the untouched call
- *   sites in `warnings` for the agent to fix.
- *
- * Languages: rust, python, typescript, tsx, javascript, jsx, go.
- *
- * @effects: [host, fs]
- * @errors: [backend]
- * @api_stability: experimental
- * @example: edit_change_signature({path: "src/lib.rs", symbol: {name: "add"}, new_params: "a: i64, b: i64, c: i64", callsite_strategy: "strict"})
- */
-pub fn edit_change_signature(fs: HarnessFs, random: HarnessRandom, ast: HarnessAst, params: dict?) {
-  const p = params ?? {}
-  const language = __refactor_detect_language(p)
-  const spec = __refactor_lang_spec(language)
-  if spec == nil {
-    return __refactor_unsupported(
-      "change_signature",
-      language,
-      "no signature grammar for language `" + language + "`",
-    )
-  }
-  const path = p?.path ?? ""
-  const fn_name = __refactor_symbol_name(p)
-  const new_params = p?.new_params
-  if path == "" || fn_name == "" || new_params == nil {
-    return __refactor_invalid(
-      "change_signature",
-      language,
-      "`path`, `symbol`/`name`, and `new_params` are required",
-    )
-  }
-  const strategy = p?.callsite_strategy ?? "strict"
-  const probe_session = if p?.dry_run ?? false {
-    nil
-  } else {
-    p?.session_id
-  }
-  const def_op = __refactor_def_op(spec, path, fn_name, new_params)
-  const calls = __refactor_call_sites(ast, spec, path, fn_name, probe_session)
-  if strategy == "strict" {
-    if calls.count > 0 {
-      return __refactor_conflict(
-        "change_signature",
-        language,
-        [
-          {
-            code: "has_call_sites",
-            message: "change_signature(strict) refuses: " + to_string(calls.count)
-              + " call site(s) would be left inconsistent; use callsite_strategy `default_fill`/`manual`, or reorder_parameters/add_parameter",
-            path: path,
-            call_count: calls.count,
-          },
-        ],
-      )
-    }
-    return __refactor_run(fs, random, ast, "change_signature", language, [def_op], p, [])
-  }
-  if strategy == "manual" {
-    const warns = if calls.count > 0 {
-      [
-        {
-          code: "call_sites_unchanged",
-          message: to_string(calls.count) + " call site(s) left for manual update",
-        },
-      ]
-    } else {
-      []
-    }
-    return __refactor_run(fs, random, ast, "change_signature", language, [def_op], p, warns)
-  }
-  if strategy == "default_fill" {
-    const fill = p?.fill
-    if fill == nil {
-      return __refactor_invalid(
-        "change_signature",
-        language,
-        "callsite_strategy `default_fill` requires `fill` (text appended to each call's arguments)",
-      )
-    }
-    let ops = [def_op]
-    let i = 0
-    while i < calls.count {
-      const inner = __refactor_paren_inner(calls.originals[i])
-      const new_args = if trim(inner) == "" {
-        fill
-      } else {
-        inner + ", " + fill
-      }
-      ops = ops + [__refactor_call_op(spec, path, fn_name, i + 1, new_args)]
-      i = i + 1
-    }
-    return __refactor_run(fs, random, ast, "change_signature", language, ops, p, [])
-  }
-  return __refactor_unsupported(
-    "change_signature",
-    language,
-    "callsite_strategy `" + strategy + "` is not supported (use strict | default_fill | manual)",
-  )
-}
-
-/**
- * Insert one `param` into a function's parameter list at `index` (0-based;
- * default appends), then reconcile call sites per `callsite_strategy`:
- *
- * - `"default_fill"` (default) — insert `default` (required) at the same
- *   index in every call's argument list.
- * - `"strict"` — refuse with `result: "conflict"` when call sites exist.
- *
- * `param` is the full declaration text (e.g. `"c: i64"`, `"c"`, `"c int"`).
- * Languages: rust, python, typescript, tsx, javascript, jsx, go.
- *
- * @effects: [host, fs]
- * @errors: [backend]
- * @api_stability: experimental
- * @example: edit_add_parameter({path: "src/lib.rs", symbol: {name: "add"}, param: "c: i64", default: "0"})
- */
-pub fn edit_add_parameter(fs: HarnessFs, random: HarnessRandom, ast: HarnessAst, params: dict?) {
-  const p = params ?? {}
-  const language = __refactor_detect_language(p)
-  const spec = __refactor_lang_spec(language)
-  if spec == nil {
-    return __refactor_unsupported(
-      "add_parameter",
-      language,
-      "no signature grammar for language `" + language + "`",
-    )
-  }
-  const path = p?.path ?? ""
-  const fn_name = __refactor_symbol_name(p)
-  const param = p?.param
-  if path == "" || fn_name == "" || param == nil || param == "" {
-    return __refactor_invalid(
-      "add_parameter",
-      language,
-      "`path`, `symbol`/`name`, and `param` are required",
-    )
-  }
-  const probe_session = if p?.dry_run ?? false {
-    nil
-  } else {
-    p?.session_id
-  }
-  const def = __refactor_read_def_params(ast, spec, path, fn_name, probe_session)
-  if !def.ok {
-    return __refactor_conflict(
-      "add_parameter",
-      language,
-      [{code: def.result, message: "could not locate definition of `" + fn_name + "`", path: path}],
-    )
-  }
-  const index = p?.index ?? len(def.params)
-  const new_inner = join(__refactor_insert_at(def.params, index, param), ", ")
-  const def_op = __refactor_def_op(spec, path, fn_name, new_inner)
-  const calls = __refactor_call_sites(ast, spec, path, fn_name, probe_session)
-  if calls.count == 0 {
-    return __refactor_run(fs, random, ast, "add_parameter", language, [def_op], p, [])
-  }
-  const strategy = p?.callsite_strategy ?? "default_fill"
-  if strategy == "strict" {
-    return __refactor_conflict(
-      "add_parameter",
-      language,
-      [
-        {
-          code: "has_call_sites",
-          message: to_string(calls.count)
-            + " call site(s); pass callsite_strategy `default_fill` with a `default` value",
-          path: path,
-          call_count: calls.count,
-        },
-      ],
-    )
-  }
-  const default_val = p?.default
-  if default_val == nil {
-    return __refactor_invalid(
-      "add_parameter",
-      language,
-      "callsite_strategy `default_fill` requires `default` (value inserted at each call site)",
-    )
-  }
-  let ops = [def_op]
-  let i = 0
-  while i < calls.count {
-    const arg_list = __refactor_split_top_level(__refactor_paren_inner(calls.originals[i]))
-    const new_args = join(__refactor_insert_at(arg_list, index, default_val), ", ")
-    ops = ops + [__refactor_call_op(spec, path, fn_name, i + 1, new_args)]
-    i = i + 1
-  }
-  return __refactor_run(fs, random, ast, "add_parameter", language, ops, p, [])
-}
-
-/**
- * Permute a function's parameters by `order` (a list of 0-based source
- * indices that is a permutation of the current parameters) and apply the
- * same permutation to every call site's arguments. A call whose argument
- * count differs from the parameter count (variadics, omitted defaults)
- * is reported as `result: "conflict"` rather than reordered blindly.
- *
- * Languages: rust, python, typescript, tsx, javascript, jsx, go.
- *
- * @effects: [host, fs]
- * @errors: [backend]
- * @api_stability: experimental
- * @example: edit_reorder_parameters({path: "src/lib.rs", symbol: {name: "add"}, order: [1, 0]})
- */
-pub fn edit_reorder_parameters(
-  fs: HarnessFs,
-  random: HarnessRandom,
-  ast: HarnessAst,
-  params: dict?,
-) {
-  const p = params ?? {}
-  const language = __refactor_detect_language(p)
-  const spec = __refactor_lang_spec(language)
-  if spec == nil {
-    return __refactor_unsupported(
-      "reorder_parameters",
-      language,
-      "no signature grammar for language `" + language + "`",
-    )
-  }
-  const path = p?.path ?? ""
-  const fn_name = __refactor_symbol_name(p)
-  const order = p?.order
-  if path == "" || fn_name == "" || order == nil {
-    return __refactor_invalid(
-      "reorder_parameters",
-      language,
-      "`path`, `symbol`/`name`, and `order` are required",
-    )
-  }
-  const probe_session = if p?.dry_run ?? false {
-    nil
-  } else {
-    p?.session_id
-  }
-  const def = __refactor_read_def_params(ast, spec, path, fn_name, probe_session)
-  if !def.ok {
-    return __refactor_conflict(
-      "reorder_parameters",
-      language,
-      [{code: def.result, message: "could not locate definition of `" + fn_name + "`", path: path}],
-    )
-  }
-  const arity = len(def.params)
-  if len(order) != arity {
-    return __refactor_invalid(
-      "reorder_parameters",
-      language,
-      "`order` must be a permutation of the " + to_string(arity) + " current parameter(s)",
-    )
-  }
-  for oi in order {
-    if oi < 0 || oi >= arity {
-      return __refactor_invalid(
-        "reorder_parameters",
-        language,
-        "`order` index " + to_string(oi) + " is out of range",
-      )
-    }
-  }
-  const new_inner = join(order.map({ oi -> def.params[oi] }), ", ")
-  let ops = [__refactor_def_op(spec, path, fn_name, new_inner)]
-  const calls = __refactor_call_sites(ast, spec, path, fn_name, probe_session)
-  let i = 0
-  while i < calls.count {
-    const arg_list = __refactor_split_top_level(__refactor_paren_inner(calls.originals[i]))
-    if len(arg_list) != arity {
-      return __refactor_conflict(
-        "reorder_parameters",
-        language,
-        [
-          {
-            code: "arity_mismatch",
-            message: "call site #" + to_string(i + 1) + " has " + to_string(len(arg_list))
-              + " argument(s) but the signature has "
-              + to_string(arity)
-              + "; cannot reorder safely",
-            path: path,
-          },
-        ],
-      )
-    }
-    const new_args = join(order.map({ oi -> arg_list[oi] }), ", ")
-    ops = ops + [__refactor_call_op(spec, path, fn_name, i + 1, new_args)]
-    i = i + 1
-  }
-  return __refactor_run(fs, random, ast, "reorder_parameters", language, ops, p, [])
 }
 
 /**
@@ -814,260 +471,34 @@ pub fn edit_change_return_type(
   return __refactor_run(fs, random, ast, "change_return_type", language, [op], p, warns)
 }
 
-/** --- extract_function ------------------------------------------------------- */
-fn __refactor_fn_synth_kind(language: any) {
-  const table = {
-    javascript: "brace",
-    jsx: "brace",
-    python: "python",
-    ruby: "ruby",
-    tsx: "brace",
-    typescript: "brace",
-  }
-  return table.get(language, nil)
-}
-
-fn __refactor_min_indent(lines: list) {
-  let smallest = -1
-  for line in lines {
-    if trim(line ?? "") == "" {
-      continue
-    }
-    const body = regex_replace("^[ \\t]+", "", line)
-    const n = len(line) - len(body)
-    if smallest == -1 || n < smallest {
-      smallest = n
-    }
-  }
-  if smallest == -1 {
-    return 0
-  }
-  return smallest
-}
-
-fn __refactor_strip_n(line: string?, n: int) {
-  const raw = line ?? ""
-  if len(raw) >= n {
-    return raw.substring(n)
-  }
-  return ""
-}
-
-fn __refactor_indent_lines(lines: any, prefix: string) {
-  return lines.map(
-    { l ->
-      if trim(l) == "" {
-        ""
-      } else {
-        prefix + l
-      }
-    },
-  )
-}
-
 /**
- * Free names in an extracted snippet, which become the extracted function's
- * parameters.
+ * --- extract_function -------------------------------------------------------
+ * Extract an expression, a run of statements, or a closure body into a new
+ * function `new_name`, replacing it and every same-file copy with a call.
  *
- * This deliberately ignores the response's `resolution` field. That field
- * answers "can this FILE's names be resolved", which is the right question for
- * reporting a defect and the wrong one here: `src` is a fragment, so it is
- * expected not to parse standalone and expected to reference names bound by its
- * surrounding scope. Those free names are exactly what we want as parameters.
- */
-fn __refactor_undef_names(ast: HarnessAst, src: any, language: any) {
-  const r = ast.undefined_names({content: src, language: language})
-  if !(r?.supported ?? false) {
-    return []
-  }
-  let names = []
-  for d in r?.diagnostics ?? [] {
-    if (d?.kind ?? "identifier") == "identifier" && !__refactor_member(names, d.name) {
-      names = names + [d.name]
-    }
-  }
-  return names
-}
-
-fn __refactor_enclosing_fn(symbols: list?, start_line: any, end_line: any) {
-  let best = nil
-  for sym in symbols ?? [] {
-    if sym.kind != "function" || sym.container != nil {
-      continue
-    }
-    if sym.start_row <= start_line && sym.end_row >= end_line {
-      if best == nil || sym.end_row - sym.start_row < best.end_row - best.start_row {
-        best = sym
-      }
-    }
-  }
-  return best
-}
-
-fn __refactor_synth_fn(kind: string, name: string, params: list, body_lines: any) {
-  const signature = name + "(" + join(params, ", ") + ")"
-  if kind == "python" {
-    return ["def " + signature + ":"] + __refactor_indent_lines(body_lines, "    ")
-  }
-  if kind == "ruby" {
-    return ["def " + signature] + __refactor_indent_lines(body_lines, "  ") + ["end"]
-  }
-  return ["function " + signature + " {"] + __refactor_indent_lines(body_lines, "  ") + ["}"]
-}
-
-fn __refactor_wrap_probe(kind: string, body_lines: any) {
-  if kind == "python" {
-    return join(["def __harn_probe__():"] + __refactor_indent_lines(body_lines, "    "), "\n")
-  }
-  if kind == "ruby" {
-    return join(["def __harn_probe__"] + __refactor_indent_lines(body_lines, "  ") + ["end"], "\n")
-  }
-  return join(
-    ["function __harn_probe__() {"] + __refactor_indent_lines(body_lines, "  ") + ["}"],
-    "\n",
-  )
-}
-
-/**
- * Extract a contiguous range of statements (`range`{start_line, end_line},
- * 0-based inclusive) out of an enclosing top-level function into a new
- * function `new_name`, replacing the range with a call to it.
+ * A thin wrapper over `code_index.extract_function`, which owns the analysis:
+ * the region's free names bound in the enclosing function become parameters,
+ * names it assigns and the caller reads afterwards become the return value
+ * (a tuple in Rust and Python, an object in TypeScript and JavaScript), and a
+ * closure body becomes a function over the closure's parameters.
  *
- * Captured free variables become parameters: the selection's free names
- * (computed via `ast.undefined_names` over the block) minus the
- * enclosing function's free names (so module-level / imported names stay
- * referenced, not parameterized). Pass `params_order` to fix the order.
- *
- * The new definition is placed at module scope after the enclosing
- * function (`target_scope: "after"`, default) or before it
- * (`target_scope: "before"`). Only top-level functions are supported as
- * the enclosing scope (methods/nested return `result: "unsupported"`),
- * which keeps the placement and indentation correct.
- *
- * v1 produces a `void` function: if the block computes values used after
- * the selection, the generated call will not thread them back — adjust the
- * call by hand or select a self-contained block. Languages: python,
- * javascript, jsx, typescript, tsx, ruby (the set with both capture
- * analysis and a parameter form that needs no inferred types).
+ * Name the region with `start_line`/`end_line` (1-based, inclusive) or its
+ * exact text in `region`. Rust and strict TypeScript need `signature`, the
+ * typed header; without it the result is `types_required` with the computed
+ * `inputs` and `outputs`. `helper` inserts a complete function verbatim.
+ * Refusals (`control_flow_escapes`, `signature_mismatch`, `name_conflict`,
+ * ...) leave the file byte-identical. Languages: rust, typescript, tsx,
+ * javascript, jsx, python.
  *
  * @effects: [host, fs]
  * @errors: [backend]
  * @api_stability: experimental
- * @example: edit_extract_function({path: "app.py", range: {start_line: 3, end_line: 5}, new_name: "summarize"})
+ * @example: edit_extract_function(harness.code_index, {path: "app.py", start_line: 4, end_line: 6, new_name: "summarize"})
  */
-pub fn edit_extract_function(fs: HarnessFs, random: HarnessRandom, ast: HarnessAst, params: dict?) {
-  const p = params ?? {}
-  const language = __refactor_detect_language(p)
-  const kind = __refactor_fn_synth_kind(language)
-  if kind == nil {
-    return __refactor_unsupported(
-      "extract_function",
-      language,
-      "extract_function supports python/javascript/jsx/typescript/tsx/ruby",
-    )
-  }
-  const {path = "", new_name = "", range = {}} = p ?? {}
-  const start_line = range?.start_line
-  const end_line = range?.end_line ?? start_line
-  if path == "" || new_name == "" || start_line == nil || end_line == nil {
-    return __refactor_invalid(
-      "extract_function",
-      language,
-      "`path`, `new_name`, and `range`{start_line, end_line} are required",
-    )
-  }
-  const probe_session = if p?.dry_run ?? false {
-    nil
-  } else {
-    p?.session_id
-  }
-  const read = fs.staged_read_text({path: path, session_id: probe_session})
-  const content = read?.content ?? ""
-  const lines = split(content, "\n")
-  if start_line < 0 || end_line >= len(lines) || end_line < start_line {
-    return __refactor_invalid("extract_function", language, "`range` is outside the file")
-  }
-  const block_lines = lines[start_line:end_line + 1]
-  const dedent = __refactor_min_indent(block_lines)
-  const dedented = block_lines.map({ l -> __refactor_strip_n(l, dedent) })
-  const symbols = ast.symbols({path: path, language: language})?.symbols ?? []
-  const enclosing = __refactor_enclosing_fn(symbols, start_line, end_line)
-  if enclosing == nil {
-    return __refactor_result(
-      "extract_function",
-      language,
-      {
-        result: "unsupported",
-        details: "selected range is not inside a top-level function",
-        errors: [
-          {code: "no_enclosing_function", message: "range is not inside a top-level function"},
-        ],
-      },
-    )
-  }
-  const block_undef = __refactor_undef_names(ast, __refactor_wrap_probe(kind, dedented), language)
-  const enclosing_lines = lines[enclosing.start_row:enclosing.end_row + 1]
-  const enclosing_dedent = __refactor_min_indent(enclosing_lines)
-  const enclosing_src = join(
-    enclosing_lines.map({ l -> __refactor_strip_n(l, enclosing_dedent) }),
-    "\n",
-  )
-  const enclosing_undef = __refactor_undef_names(ast, enclosing_src, language)
-  let captures = []
-  for nm in block_undef {
-    if !__refactor_member(enclosing_undef, nm) && nm != new_name
-      && !__refactor_member(captures, nm) {
-      captures = captures + [nm]
-    }
-  }
-  const final_params = p?.params_order ?? captures
-  const def_lines = __refactor_synth_fn(kind, new_name, final_params, dedented)
-  const orig_indent = __refactor_leading_ws(lines[start_line])
-  const term = if kind == "brace" {
-    ";"
-  } else {
-    ""
-  }
-  const call_line = orig_indent + new_name + "(" + join(final_params, ", ") + ")" + term
-  const head = if start_line > 0 {
-    lines[:start_line]
-  } else {
-    []
-  }
-  const tail = if end_line + 1 < len(lines) {
-    lines[end_line + 1:]
-  } else {
-    []
-  }
-  const replaced = head + [call_line] + tail
-  const target_scope = p?.target_scope ?? "after"
-  const new_lines = if target_scope == "before" {
-    const pre = if enclosing.start_row > 0 {
-      replaced[:enclosing.start_row]
-    } else {
-      []
-    }
-    pre + def_lines + [""] + replaced[enclosing.start_row:]
-  } else {
-    const insert_idx = enclosing.end_row + (1 - (end_line - start_line + 1)) + 1
-    const suffix = if insert_idx < len(replaced) {
-      replaced[insert_idx:]
-    } else {
-      []
-    }
-    replaced[:insert_idx] + [""] + def_lines + suffix
-  }
-  const after = join(new_lines, "\n")
-  return __refactor_run(
-    fs,
-    random,
-    ast,
-    "extract_function",
-    language,
-    [{kind: "content", path: path, after: after}],
-    p,
-    [],
-  )
+pub fn edit_extract_function(code_index: HarnessCodeIndex, params: dict?) {
+  const payload = code_index.extract_function(params ?? {}) ?? {}
+  return payload
+    + {ok: payload?.result == "applied" && len(payload?.failed_paths_with_reasons ?? []) == 0}
 }
 
 /** --- inline + move_decl ----------------------------------------------------- */

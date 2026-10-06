@@ -1169,15 +1169,15 @@ impl Dispatcher {
         result: &serde_json::Value,
         metadata: &mut BTreeMap<String, serde_json::Value>,
     ) {
-        let cost_usd_micros = dispatch_result_cost_usd_micros(result);
-        if cost_usd_micros == 0 {
+        let known_cost = dispatch_result_known_cost_usd_micros(result);
+        metadata.insert(
+            "known_cost_usd".to_string(),
+            serde_json::json!(known_cost.map(micros_to_usd)),
+        );
+        let Some(cost_usd_micros) = known_cost else {
             return;
-        }
+        };
         note_binding_budget_cost(binding, cost_usd_micros);
         note_orchestrator_budget_cost(cost_usd_micros);
-        metadata.insert(
-            "cost_usd".to_string(),
-            serde_json::json!(micros_to_usd(cost_usd_micros)),
-        );
     }
 }

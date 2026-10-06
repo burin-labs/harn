@@ -11,7 +11,8 @@ pub(super) fn eval_pack_trial_report(
     stage_count: usize,
     timed_out: bool,
     wall_time_seconds: f64,
-    cost_usd: f64,
+    cost_usd: Option<f64>,
+    known_cost_usd: Option<f64>,
     mut failures: Vec<String>,
     mut warnings: Vec<String>,
     mut informational: Vec<String>,
@@ -43,6 +44,7 @@ pub(super) fn eval_pack_trial_report(
         timed_out,
         wall_time_seconds,
         cost_usd,
+        known_cost_usd: known_cost_usd.or(cost_usd),
         produced_paths: Vec::new(),
         tool_call_summary: serde_json::Value::Null,
     }
@@ -86,6 +88,7 @@ pub(super) fn eval_ledger_row_from_trial(
         skipped: false,
         wall_time_seconds: trial.wall_time_seconds,
         cost_usd: trial.cost_usd,
+        known_cost_usd: trial.known_cost_usd,
         mean_wall_time_seconds: trial.wall_time_seconds,
         total_cost_usd: trial.cost_usd,
         run_id: trial.run_id.clone(),
@@ -132,6 +135,7 @@ pub(super) fn eval_pack_trial_report_from_ledger_row(
         timed_out: row.timeouts > 0,
         wall_time_seconds: row.wall_time_seconds,
         cost_usd: row.cost_usd,
+        known_cost_usd: row.known_cost_usd,
         produced_paths: Vec::new(),
         tool_call_summary: serde_json::Value::Null,
     }
@@ -273,6 +277,17 @@ fn eval_pack_stats_row(
         .iter()
         .map(|trial| trial.cost_usd)
         .collect::<Vec<_>>();
+    let total_cost = if costs.is_empty() {
+        None
+    } else {
+        costs
+            .iter()
+            .try_fold(0.0, |total, cost| cost.map(|cost| total + cost))
+    };
+    let known_cost = trials
+        .iter()
+        .filter_map(|trial| trial.known_cost_usd)
+        .reduce(|a, b| a + b);
     let group = case
         .metadata
         .get("group")
@@ -304,10 +319,11 @@ fn eval_pack_stats_row(
         .to_string(),
         majority: reliability.majority.clone(),
         wall_time_seconds: mean(&wall_times),
-        cost_usd: costs.iter().sum(),
+        cost_usd: total_cost,
+        known_cost_usd: known_cost,
         mean_wall_time_seconds: mean(&wall_times),
         stdev_wall_time_seconds: stdev(&wall_times),
-        total_cost_usd: costs.iter().sum(),
+        total_cost_usd: total_cost,
     }
 }
 

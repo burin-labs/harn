@@ -46,6 +46,17 @@ pub(super) struct HostPermissionRequest {
     pub requested_capabilities: Vec<String>,
     pub tool_descriptor: Option<serde_json::Value>,
     pub tool_annotations: Option<crate::tool_annotations::ToolAnnotations>,
+    /// The model's declared purpose for the batch, already normalized.
+    pub intent: Option<String>,
+}
+
+/// The intent the agent loop threaded into dispatch as `_purpose_label`,
+/// normalized by the same owner as the tool-call event's `intent`.
+pub(super) fn tool_call_intent(options: &crate::value::DictMap) -> Option<String> {
+    match options.get("_purpose_label")? {
+        crate::value::VmValue::String(label) => crate::llm::tool_call_intent::normalize(label),
+        _ => None,
+    }
 }
 
 pub(super) enum HostPermissionOutcome {
@@ -374,15 +385,18 @@ pub(super) async fn request_host_permission(
     match bridge
         .call(
             crate::llm::acp_permission::METHOD_REQUEST_PERMISSION,
-            crate::llm::acp_permission::request_params(
-                Some(&request.session_id),
-                &request.tool_call_id,
-                &request.tool_name,
-                &request.tool_args,
-                approval_request_json,
-                &request.policy_decision,
-                request.tool_descriptor,
-                tool_kind,
+            crate::llm::acp_permission::with_intent(
+                crate::llm::acp_permission::request_params(
+                    Some(&request.session_id),
+                    &request.tool_call_id,
+                    &request.tool_name,
+                    &request.tool_args,
+                    approval_request_json,
+                    &request.policy_decision,
+                    request.tool_descriptor,
+                    tool_kind,
+                ),
+                request.intent.as_deref(),
             ),
         )
         .await
@@ -448,6 +462,7 @@ mod tests {
             requested_capabilities: Vec::new(),
             tool_descriptor: None,
             tool_annotations: None,
+            intent: None,
         }
     }
 

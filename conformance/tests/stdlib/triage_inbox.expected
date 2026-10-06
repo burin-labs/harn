@@ -3,13 +3,12 @@ github:issues.opened
 true
 true
 true
-true
 Normalized triage feed event envelope
 true
 true
 true
-3
-3
+2
+2
 triage_event
 github
 harn.triage_event.v1

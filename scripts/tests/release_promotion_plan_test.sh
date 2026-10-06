@@ -29,7 +29,8 @@ grep -Fq 'release_range_release_commits "$PUSH_BASE" "$GITHUB_SHA"' \
 
 repo="$tmp/repo"
 mkdir -p "$repo/scripts/lib" "$tmp/bin"
-cp "$root/scripts/lib/release_version.sh" "$root/scripts/lib/release_candidate_run.sh" "$repo/scripts/lib/"
+cp "$root/scripts/lib/release_version.sh" "$root/scripts/lib/release_candidate_run.sh" \
+  "$root/scripts/lib/release_consumer_verdict.sh" "$repo/scripts/lib/"
 cp "$root/scripts/release_contract.env" "$repo/scripts/"
 git -C "$repo" init -b main --quiet
 git -C "$repo" config user.name "Release Promotion Test"
@@ -42,6 +43,22 @@ git -C "$repo" config commit.gpgsign false
 # FAKE_RUNS_FAIL=1 makes the run listing unreadable.
 cat > "$tmp/bin/gh" <<'EOF'
 #!/usr/bin/env bash
+if [[ "$*" == *"/jobs?filter=latest"* ]]; then
+  if [[ -n "${FAKE_JOB_CENSUS:-}" ]]; then
+    printf '%s\n' "$FAKE_JOB_CENSUS"
+    exit 0
+  fi
+  if [[ "${FAKE_CONSUMER:-success}" == missing ]]; then
+    printf '[{"total_count":1,"jobs":[{"id":41,"name":"Build","status":"completed","conclusion":"success"}]}]\n'
+  else
+    status=completed
+    conclusion="${FAKE_CONSUMER:-success}"
+    [[ "$conclusion" != pending ]] || { status=in_progress; conclusion=null; }
+    [[ "$conclusion" == null ]] || conclusion="\"$conclusion\""
+    printf '[{"total_count":1,"jobs":[{"id":42,"name":"Consumer release rehearsal / Consumer canary","status":"%s","conclusion":%s}]}]\n' "$status" "$conclusion"
+  fi
+  exit 0
+fi
 case "$1 $2" in
   "api "*/commits/*) [[ -n "${FAKE_TAG_SHA:-}" ]] || exit 1; printf '%s\n' "$FAKE_TAG_SHA" ;;
   "api "*/build-release-binaries.yml/runs\?*)
@@ -49,6 +66,9 @@ case "$1 $2" in
     run="${FAKE_CANDIDATE_RUN-9001}"
     [[ -z "$run" ]] || printf '%s\n' "$run" ;;
   "api "*/artifacts\?name=candidate-manifest-*) printf '1\n' ;;
+  "api "*/actions/runs/*)
+    printf '{"id":%s,"head_sha":"%s","status":"completed","conclusion":"success"}\n' \
+      "${FAKE_CANDIDATE_RUN-9001}" "${FAKE_RUN_SHA:-$HEAD_SHA}" ;;
   "release "*) [[ "${FAKE_RELEASE:-0}" == 1 ]] ;;
   *) exit 2 ;;
 esac
@@ -85,6 +105,9 @@ commit_version 0.10.142-dev "Change something"
 plan warm
 [[ "$(cat "$tmp/warm.status")" == 0 && "$(output warm promote)" == false ]] \
   || fail "a development push was promoted: $(cat "$tmp/warm.log")"
+plan recovery_warm RECOVERY=true
+[[ "$(cat "$tmp/recovery_warm.status")" != 0 && -z "$(output recovery_warm promote)" ]] \
+  || fail "manual recovery accepted a warm run"
 
 commit_version 0.10.142 "Bump the workspace version"
 head_sha="$(git -C "$repo" rev-parse HEAD)"
@@ -95,11 +118,77 @@ plan candidate
    "$(output candidate major_minor)" == 0.10 && "$(output candidate run_id)" == 9001 ]] \
   || fail "wrong release identity: $(cat "$tmp/candidate.outputs")"
 
+# The workflow run itself is green in every fixture, including a legacy
+# tolerated consumer failure. Promotion must read the real job before arming.
+for verdict in missing pending failure cancelled; do
+  plan "consumer_$verdict" "FAKE_CONSUMER=$verdict"
+  [[ "$(cat "$tmp/consumer_$verdict.status")" != 0 &&
+     "$(output "consumer_$verdict" promote)" != true ]] \
+    || fail "consumer $verdict authorized publication"
+  grep -Fq 'Consumer release rehearsal' "$tmp/consumer_$verdict.log" \
+    || fail "consumer $verdict refusal did not name its owner"
+done
+plan wrong_consumer_source FAKE_RUN_SHA=1111111111111111111111111111111111111111
+[[ "$(cat "$tmp/wrong_consumer_source.status")" != 0 ]] \
+  || fail "another source's consumer verdict authorized publication"
+
 # The release's merge group built the candidate, so this push's run built
 # nothing: the queue's run is the one promoted.
 plan from_queue FAKE_CANDIDATE_RUN=4242
 [[ "$(output from_queue promote)" == true && "$(output from_queue run_id)" == 4242 ]] \
   || fail "the merge group's candidate run was not promoted: $(cat "$tmp/from_queue.log")"
+
+# Recovery retains the requested producer rather than selecting another run
+# of the same source; normal verification still reads its consumer result.
+plan recovery RECOVERY=true FAKE_RUNS_FAIL=1
+[[ "$(output recovery promote)" == true && "$(output recovery run_id)" == 9001 ]] \
+  || fail "recovery did not retain its certified run: $(cat "$tmp/recovery.log")"
+plan recovery_missing RECOVERY=true FAKE_CONSUMER=missing
+[[ "$(output recovery_missing promote)" == true && "$(output recovery_missing requires_rehearsal)" == true ]] \
+  || fail "missing rehearsal did not require actual measurement"
+for verdict in pending failure cancelled; do
+  plan "recovery_consumer_$verdict" RECOVERY=true "FAKE_CONSUMER=$verdict"
+  [[ "$(cat "$tmp/recovery_consumer_$verdict.status")" != 0 ]] \
+    || fail "recovery replaced a measured $verdict consumer with a new rehearsal"
+done
+
+# A complete page count is not a complete measurement when records cannot
+# identify the jobs. Exercise the actual recovery decision, not just a parser.
+census='[{"total_count":2,"jobs":[{"id":41,"name":"Build","status":"completed","conclusion":"success"},{"id":42,"name":"Consumer release rehearsal / Consumer canary","status":"completed","conclusion":"success"}]}]'
+plan valid_census RECOVERY=true "FAKE_JOB_CENSUS=$census"
+[[ "$(output valid_census promote)" == true && "$(output valid_census requires_rehearsal)" == false ]] \
+  || fail 'complete named job census refused'
+for defect in missing_name empty_name whitespace_name numeric_name missing_id zero_id fractional_id string_id duplicate_id missing_status missing_conclusion partial_page empty_census; do
+  case "$defect" in
+    missing_name) filter='del(.[0].jobs[1].name) | .[0].jobs[1].conclusion = "failure"' ;;
+    empty_name) filter='.[0].jobs[1].name = ""' ;;
+    whitespace_name) filter='.[0].jobs[1].name = "  "' ;;
+    numeric_name) filter='.[0].jobs[1].name = 42' ;;
+    missing_id) filter='del(.[0].jobs[1].id)' ;;
+    zero_id) filter='.[0].jobs[1].id = 0' ;;
+    fractional_id) filter='.[0].jobs[1].id = 42.5' ;;
+    string_id) filter='.[0].jobs[1].id = "42"' ;;
+    duplicate_id) filter='.[0].jobs[1].id = 41' ;;
+    missing_status) filter='del(.[0].jobs[0].status)' ;;
+    missing_conclusion) filter='del(.[0].jobs[0].conclusion)' ;;
+    partial_page) filter='.[0].total_count = 3' ;;
+    empty_census) filter='.[0] = {total_count:0,jobs:[]}' ;;
+  esac
+  malformed="$(jq -c "$filter" <<< "$census")"
+  plan "malformed_$defect" RECOVERY=true "FAKE_JOB_CENSUS=$malformed"
+  [[ "$(cat "$tmp/malformed_$defect.status")" != 0 &&
+     "$(output "malformed_$defect" promote)" != true &&
+     "$(output "malformed_$defect" requires_rehearsal)" != true ]] \
+    || fail "malformed $defect census authorized recovery"
+done
+
+# Historical candidates need not contain today's publication policy helpers.
+# The controller owns those helpers; the candidate supplies only version facts.
+git clone --quiet --no-hardlinks "$repo" "$tmp/old-source"
+rm -rf "$tmp/old-source/scripts"
+plan historical_source RECOVERY=true "SOURCE_DIRECTORY=$tmp/old-source"
+[[ "$(output historical_source promote)" == true ]] \
+  || fail "historical source required current controller helpers: $(cat "$tmp/historical_source.log")"
 
 # Negative controls: no run holds a candidate, or the runs cannot be read. A
 # release with nothing to publish is a failure, never a green no-op.
@@ -134,5 +223,8 @@ plan release_subject
 commit_version 0.10.143-rc.1 "Prerelease"
 plan prerelease
 [[ "$(output prerelease promote)" == false ]] || fail "a prerelease was promoted"
+plan recovery_prerelease RECOVERY=true
+[[ "$(cat "$tmp/recovery_prerelease.status")" != 0 ]] \
+  || fail "manual recovery accepted a prerelease run"
 
 echo "release_promotion_plan_test: ok"

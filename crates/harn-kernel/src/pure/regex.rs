@@ -97,6 +97,10 @@ pub fn regex_split(pattern: &str, text: &str, flags: &str) -> Result<Vec<String>
         .collect())
 }
 
+/// Keys every `regex_captures` result dict carries. Named groups are merged
+/// into the same dict, so a group may not reuse one of these names.
+pub const REGEX_CAPTURES_RESERVED_KEYS: [&str; 5] = ["match", "groups", "start", "end", "line"];
+
 pub fn regex_captures(pattern: &str, text: &str, flags: &str) -> Result<Vec<RegexCapture>, String> {
     let regex = compiled(pattern, flags)?;
     let names = regex
@@ -104,6 +108,15 @@ pub fn regex_captures(pattern: &str, text: &str, flags: &str) -> Result<Vec<Rege
         .flatten()
         .map(str::to_string)
         .collect::<Vec<_>>();
+    if let Some(name) = names
+        .iter()
+        .find(|name| REGEX_CAPTURES_RESERVED_KEYS.contains(&name.as_str()))
+    {
+        return Err(format!(
+            "named group `{name}` collides with a reserved regex_captures key \
+             (match, groups, start, end, line); rename the group"
+        ));
+    }
     let mut scanned_byte = 0;
     let mut chars_before = 0;
     let mut newlines_before = 0;
@@ -163,6 +176,19 @@ mod tests {
         assert_eq!(captures[1].line, 2);
         assert_eq!(captures[1].named["word"], "Harn");
         assert_eq!(captures[1].groups[1].as_deref(), Some("42"));
+    }
+
+    #[test]
+    fn reserved_named_groups_are_rejected() {
+        for key in REGEX_CAPTURES_RESERVED_KEYS {
+            let error = regex_captures(&format!(r"(?P<{key}>\d+)"), "10", "").unwrap_err();
+            assert!(error.contains(&format!("`{key}`")), "{error}");
+        }
+        // Near-miss names stay valid.
+        let captures = regex_captures(r"(?P<starts>\d+)-(?P<line_no>\d+)", "10-20", "").unwrap();
+        assert_eq!(captures[0].start, 0);
+        assert_eq!(captures[0].named["starts"], "10");
+        assert_eq!(captures[0].named["line_no"], "20");
     }
 
     #[test]

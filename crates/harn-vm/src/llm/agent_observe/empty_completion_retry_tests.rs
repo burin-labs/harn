@@ -73,6 +73,90 @@ fn billed_noncommittal_turn() -> FakeLlmTurn {
 }
 
 #[test]
+fn parent_call_waits_for_network_recovery_after_child_failures() {
+    let _env = crate::llm::env_guard();
+    let clock = crate::clock_mock::MockClock::at_wall_ms(1_000);
+    current_thread_runtime().block_on(crate::clock_mock::scope_capability_clock(
+        clock.auto_advancing(),
+        async {
+            let mut opts = fake_opts();
+            opts.model = "parent-child-network-recovery".to_string();
+            opts.timeout = Some(30);
+            for _ in 0..4 {
+                crate::llm::rate_limit::observe_network_outcome_for_llm_call(&opts, true);
+            }
+            let before = crate::clock_mock::instant_now();
+            let _script =
+                install_fake_llm_script(FakeLlmScript::new().push(FakeLlmTurn::stream(vec![
+                    FakeLlmEvent::Token("parent recovered".into()),
+                    FakeLlmEvent::Done(FakeStopReason::EndTurn),
+                ])));
+            let result = observed_llm_call(&opts, None, None, None, false, false, None, None)
+                .await
+                .expect("parent must wait for the half-open probe, then dispatch");
+            assert_eq!(result.text, "parent recovered");
+            assert_eq!(fake_llm_captured_calls().len(), 1);
+            assert_eq!(
+                crate::clock_mock::instant_now().as_millis() - before.as_millis(),
+                5_000,
+                "the real breaker window must elapse before provider dispatch"
+            );
+        },
+    ));
+}
+
+#[test]
+fn network_recovery_deadline_refuses_dispatch_without_spending_a_provider_call() {
+    let _env = crate::llm::env_guard();
+    let clock = crate::clock_mock::MockClock::at_wall_ms(1_000);
+    current_thread_runtime().block_on(crate::clock_mock::scope_capability_clock(
+        clock.auto_advancing(),
+        async {
+            let mut opts = fake_opts();
+            opts.model = "network-recovery-deadline".to_string();
+            opts.timeout = Some(2);
+            for _ in 0..4 {
+                crate::llm::rate_limit::observe_network_outcome_for_llm_call(&opts, true);
+            }
+            let _script = install_fake_llm_script(FakeLlmScript::new());
+            let before = crate::clock_mock::instant_now();
+            let error = observed_llm_call(&opts, None, None, None, false, false, None, None)
+                .await
+                .expect_err("the open window exceeds the call's available time");
+            assert_eq!(
+                crate::value::error_to_category(&error),
+                crate::value::ErrorCategory::Timeout
+            );
+            assert!(fake_llm_captured_calls().is_empty());
+            assert_eq!(
+                crate::clock_mock::instant_now()
+                    .duration_since(before)
+                    .as_millis(),
+                2_000
+            );
+        },
+    ));
+}
+
+#[tokio::test(flavor = "current_thread", start_paused = true)]
+async fn network_recovery_remains_interruptible_before_provider_dispatch() {
+    let _env = crate::llm::env_guard();
+    let mut opts = fake_opts();
+    opts.model = "network-recovery-interruption".into();
+    for _ in 0..4 {
+        crate::llm::rate_limit::observe_network_outcome_for_llm_call(&opts, true);
+    }
+    let _script = install_fake_llm_script(FakeLlmScript::new());
+    tokio::time::timeout(
+        std::time::Duration::from_millis(1),
+        observed_llm_call(&opts, None, None, None, false, false, None, None),
+    )
+    .await
+    .expect_err("an outer deadline interrupts the pending recovery future");
+    assert!(fake_llm_captured_calls().is_empty());
+}
+
+#[test]
 fn empty_completion_retries_then_succeeds_on_second_attempt() {
     current_thread_runtime().block_on(async {
         reset_agent_trace_state();

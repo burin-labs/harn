@@ -551,6 +551,90 @@ hook_resolved_upstream() {
   fi
 }
 
+# Write the distinct commits introduced by the actual pre-push ref updates.
+# Only server-supplied old OIDs and fresh advertised destination history are
+# exclusions. Local tracking refs can be stale or contain unpublished commits.
+# Missing remote objects are conservative: they exclude nothing, rather than
+# fetching every divergent branch or pretending that enumeration succeeded.
+hook_write_push_commits() (
+  output=$1
+  updates=$2
+  destination=$3
+  census_dir=$(mktemp -d)
+  trap 'rm -rf "$census_dir"' EXIT
+  : > "$output"
+  : > "$census_dir/revisions"
+  if [ ! -s "$updates" ] || ! awk '
+    function oid(v) { return v ~ /^[0-9a-f]+$/ && (length(v) == 40 || length(v) == 64) }
+    NF != 4 || !oid($2) || !oid($4) || length($2) != length($4) ||
+      ($2 ~ /^0+$/ && $1 != "(delete)") ||
+      ($1 == "(delete)" && ($2 !~ /^0+$/ || $4 ~ /^0+$/)) { bad = 1 }
+    END { exit bad ? 1 : 0 }
+  ' "$updates"; then
+    echo "error: cannot census pushed commits: missing or malformed ref updates" >&2
+    return 1
+  fi
+  nondeletions=0
+  while read -r local_ref local_oid remote_ref remote_oid extra ||
+    [ -n "$local_ref$local_oid$remote_ref$remote_oid$extra" ]; do
+    if ! git check-ref-format "$remote_ref" >/dev/null 2>&1; then
+      echo "error: cannot census pushed commits: invalid destination ref $remote_ref" >&2
+      return 1
+    fi
+    if [ "$local_ref" != "(delete)" ]; then nondeletions=1; fi
+  done < "$updates"
+  # Valid deletion-only input needs neither local objects nor a remote query.
+  if [ "$nondeletions" -eq 0 ]; then return 0; fi
+  while read -r local_ref local_oid remote_ref remote_oid extra ||
+    [ -n "$local_ref$local_oid$remote_ref$remote_oid$extra" ]; do
+    if [ "$local_ref" != "(delete)" ]; then
+      if ! local_type=$(git cat-file -t "${local_oid}^{}" 2>/dev/null); then
+        echo "error: cannot census pushed commits: unavailable local object $local_oid" >&2
+        return 1
+      fi
+      if [ "$local_type" = commit ]; then
+        local_commit=$(git rev-parse --verify "${local_oid}^{commit}") || return 1
+        printf '%s\n' "$local_commit" >> "$census_dir/revisions"
+      elif [ "$local_type" != "tree" ] && [ "$local_type" != "blob" ]; then
+        echo "error: cannot census pushed commits: invalid local object $local_oid" >&2
+        return 1
+      fi
+    fi
+    if [ "$(printf '%s' "$remote_oid" | tr -d 0)" != "" ]; then
+      if remote_commit=$(git rev-parse --verify "${remote_oid}^{commit}" 2>/dev/null); then
+        printf '^%s\n' "$remote_commit" >> "$census_dir/revisions"
+      else
+        echo "    Remote history $remote_oid is unavailable locally; checking ancestry conservatively." >&2
+      fi
+    fi
+  done < "$updates"
+  if [ -z "$destination" ]; then
+    echo "error: cannot census pushed commits: destination is absent" >&2
+    return 1
+  fi
+  if ! git ls-remote --symref -- "$destination" HEAD refs/heads/main > "$census_dir/advertised"; then
+    echo "error: cannot census pushed commits: destination history unavailable" >&2
+    return 1
+  fi
+  # HEAD's advertised OID is the actual default history; main also covers a
+  # destination with an unset HEAD. Never translate either into a local ref.
+  awk '$1 ~ /^[0-9a-f]+$/ && ($2 == "HEAD" || $2 == "refs/heads/main") { print $1 }' \
+    "$census_dir/advertised" > "$census_dir/baselines-unsorted" || return 1
+  sort -u "$census_dir/baselines-unsorted" > "$census_dir/baselines" || return 1
+  while read -r remote_oid; do
+    if remote_commit=$(git rev-parse --verify "${remote_oid}^{commit}" 2>/dev/null); then
+      printf '^%s\n' "$remote_commit" >> "$census_dir/revisions"
+    else
+      echo "    Advertised history $remote_oid is unavailable locally; checking ancestry conservatively." >&2
+    fi
+  done < "$census_dir/baselines"
+  if ! git rev-list --stdin < "$census_dir/revisions" > "$census_dir/commits"; then
+    echo "error: cannot census pushed commits: revision enumeration failed" >&2
+    return 1
+  fi
+  sort -u "$census_dir/commits" > "$output"
+)
+
 hook_push_base() {
   upstream=$(hook_resolved_upstream)
   if [ -n "$upstream" ]; then

@@ -8,7 +8,6 @@ fn fixture(fs: HarnessFs, name: string) {
 pipeline default(harness: Harness) {
   const github = fixture(harness.fs, "github_issue")
   const slack = fixture(harness.fs, "slack_message")
-  const notion = fixture(harness.fs, "notion_page")
   const github_retry = github
     + {
       dedupe_key: "github-delivery-1507-retry",
@@ -16,12 +15,10 @@ pipeline default(harness: Harness) {
     }
   const github_event = triage_normalize(github)
   const slack_event = triage_normalize(slack)
-  const notion_event = triage_normalize(notion)
   const github_retry_event = triage_normalize(github_retry)
   harness.stdio.println(github_event.schema)
   harness.stdio.println(github_event.provider + ":" + github_event.source_kind)
   harness.stdio.println(slack_event.source_url.starts_with("slack://channel"))
-  harness.stdio.println(notion_event.source_url.starts_with("https://www.notion.so/"))
   harness.stdio.println(github_event.dedupe_key == github_retry_event.dedupe_key)
   harness.stdio.println(github_event.id == github_retry_event.id)
   harness.stdio.println(github_event.raw_payload.issue.title)
@@ -55,7 +52,7 @@ pipeline default(harness: Harness) {
   harness.stdio.println(is_err(ungated_write))
   const feed = triage_start_my_day(
     harness.obs,
-    [github, slack, notion, github_retry],
+    [github, slack, github_retry],
     {emit: true, topic: "triage.inbox.test", generated_at: "fixture"},
   )
   harness.stdio.println(len(feed.events))

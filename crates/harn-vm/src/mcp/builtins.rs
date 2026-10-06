@@ -418,7 +418,7 @@ pub fn register_mcp_builtins(vm: &mut Vm) {
     // Fetch (or read from cache) the Server Card for a registered MCP
     // server, or from an explicit URL / local path.
     //
-    // `mcp_server_card("notion")`           -> looks up `card = ...` in harn.toml
+    // `mcp_server_card("wiki")`             -> looks up `card = ...` in harn.toml
     // `mcp_server_card("https://.../card")` -> fetches that URL directly
     // `mcp_server_card("./card.json")`      -> reads that file directly
     vm.register_async_capability_method(
@@ -1077,9 +1077,9 @@ mod reauth_tests {
         let specs = vec![
             // OAuth HTTP server (no static token) → selected.
             serde_json::json!({
-                "name": "Notion",
+                "name": "Wiki",
                 "transport": "http",
-                "url": "https://mcp.notion.com/mcp",
+                "url": "https://mcp.wiki.example/mcp",
             }),
             // HTTP server with a static bearer → excluded.
             serde_json::json!({
@@ -1111,7 +1111,7 @@ mod reauth_tests {
         ];
         let servers = oauth_servers_from_specs(&specs);
         assert_eq!(servers.len(), 1);
-        assert_eq!(servers[0].name, "Notion");
-        assert_eq!(servers[0].server_url, "https://mcp.notion.com/mcp");
+        assert_eq!(servers[0].name, "Wiki");
+        assert_eq!(servers[0].server_url, "https://mcp.wiki.example/mcp");
     }
 }

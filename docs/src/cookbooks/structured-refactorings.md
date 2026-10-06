@@ -11,8 +11,8 @@ previews as a unified diff, and commits atomically through the staged-fs overlay
 | Function | What it does |
 |---|---|
 | `edit_extract_variable` | Lift a single-line expression into a named local. |
-| `edit_extract_function` | Lift a statement range into a new function; free variables become parameters. |
-| `edit_change_signature` | Replace a function's whole parameter list. |
+| `edit_extract_function` | Lift an expression, statement run, or closure body into a new function and call it from every copy. |
+| `edit_change_signature` | Add, remove, reorder, or rename parameters and rewrite every call site. |
 | `edit_add_parameter` | Insert one parameter; fill the argument at every call site. |
 | `edit_reorder_parameters` | Permute parameters and every call's arguments together. |
 | `edit_change_return_type` | Rewrite a function's declared return type. |
@@ -82,45 +82,52 @@ for parameters, result fields, and language coverage.
 
 ## Recipe — extract a function
 
-Pull a contiguous range of statements out of a top-level function. Free
-variables of the block (computed from the AST) become parameters; names that
-resolve to the module level (other functions, imports) stay referenced rather
-than parameterized.
+Pull an expression, a run of statements, or a closure body out of a function.
+`edit_extract_function` wraps the `code_index.extract_function` builtin: the
+region's free names bound in the enclosing function become parameters, names
+it assigns that are read afterwards come back as the return value, and every
+same-file copy with the same tokens and bindings is replaced by the same call.
+Names that resolve to the module level (other functions, imports) stay
+referenced rather than parameterized.
 
 ```harn,ignore
 import { edit_extract_function } from "std/edit"
 
 pipeline default(harness: Harness) {
   // def report(base, qty):
-  //     subtotal = base * qty   <- line 1
-  //     audit(subtotal)         <- line 2
+  //     subtotal = base * qty   <- line 2
+  //     audit(subtotal)         <- line 3
   //     ...
   const preview = edit_extract_function(
-    harness.fs,
-    harness.random,
-    harness.ast,
+    harness.code_index,
     {
       path: "billing.py",
-      range: { start_line: 1, end_line: 2 },
+      start_line: 2,
+      end_line: 3,
       new_name: "compute_subtotal",
       dry_run: true,
     },
   )
-  harness.stdio.log(preview.unified_diff[0].diff)
+  harness.stdio.log(preview.helper)
   // def compute_subtotal(base, qty):     <- `base`/`qty` captured,
   //     subtotal = base * qty            <-  `audit` left as a free call
   //     audit(subtotal)
 }
 ```
 
-Supported: python, javascript, jsx, typescript, tsx, ruby. The generated
-function is `void`; if the block produces a value used afterward, thread it back
-by hand.
+Rust and strict TypeScript need the typed header in `signature`, for example
+`fn parse_line(line: &str) -> Option<Job>`. Without it the result is
+`types_required` and carries the computed `inputs` and `outputs` to type. A
+`break`, `continue`, `return`, or `?` that would leave the region is refused
+with `control_flow_escapes`; extract the closure body, an expression, or a
+smaller statement run instead.
 
 ## Recipe — change a signature across every caller
 
 This is where structured edits earn their keep: add a parameter to a function
-and fill the argument at all of its call sites in one atomic transaction.
+and fill the argument at all of its call sites, in every file, in one
+all-or-nothing edit. The parameter refactorings run on the code index, so
+rebuild it first.
 
 ```harn,ignore
 import { edit_add_parameter } from "std/edit"
@@ -128,40 +135,38 @@ import { edit_add_parameter } from "std/edit"
 pipeline default(harness: Harness) {
   // fn scale(value: i64, factor: i64) -> i64 { ... }
   // called as scale(2, 3), scale(4, 5), scale(6, 7)
+  harness.code_index.rebuild({root: "."})
   const result = edit_add_parameter(
-    harness.fs,
-    harness.random,
-    harness.ast,
+    harness.code_index,
     {
-      path: "src/lib.rs",
-      symbol: { name: "scale" },
-      param: "offset: i64",
-      default: "0",            // default_fill: inserted at each call site
+      symbol_ref: {name: "scale", path: "src/lib.rs"},
+      param: {name: "offset", type: "i64", call_value: "0"},
     },
   )
   if !result.ok {
     harness.stdio.log(
-      "refused: " + result.result + " — " + (result.details ?? "")
+      "refused: " + result.result + " — " + result.details
     )
     return
   }
-  harness.stdio.log(
-    "updated " + to_string(result.summary.files_touched) + " file(s)"
-  )
+  const calls = to_string(result.call_sites_updated)
+  harness.stdio.log("updated " + calls + " call(s)")
   // fn scale(value: i64, factor: i64, offset: i64) -> i64 { ... }
   // scale(2, 3, 0), scale(4, 5, 0), scale(6, 7, 0)
 }
 ```
 
-`callsite_strategy` controls how callers are handled:
+`edit_change_signature` takes the complete new parameter list. An entry that
+names a current parameter keeps it (`from` renames it, and its uses in the body
+follow); any other entry is new and needs `call_value` or `default`; a
+parameter left out is removed. `edit_reorder_parameters` permutes parameters
+and every call's arguments together. Python keyword arguments are matched by
+name.
 
-- `default_fill` (default for `add_parameter`) inserts `default` at each call.
-- `strict` refuses with `result: "conflict"` when callers exist, so you can
-  rewrite the definition only when it is safe.
-
-`edit_change_signature` takes the full `new_params` text for arbitrary changes;
-`edit_reorder_parameters` permutes parameters and every call's arguments
-together (refusing on an argument-count mismatch).
+Every refusal writes nothing and lists the blocking `sites`: a removed
+parameter the body still reads (`parameter_in_use`), the function passed as a
+value (`value_reference`), a spread or splat call (`unsupported_call_site`),
+or a trait, interface, or overridden method (`overrides_present`).
 
 ## Verify the result
 

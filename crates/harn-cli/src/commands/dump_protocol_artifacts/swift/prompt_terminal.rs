@@ -45,7 +45,7 @@ pub(super) fn append_prompt_terminal_types(out: &mut String, prompt_error_schema
     ));
     out.push_str(&swift_open_enum(
         "HarnLlmErrorReason",
-        "Canonical provider-failure reason carried in `reason` on the\n         `harn.acp.prompt_error.v1` envelope. Owned by `harn_vm`'s `LlmErrorReason`.\n         The sibling `code` field is a PROVIDER PASSTHROUGH with no closed set: it is\n         opaque diagnostic text, and a host must never branch on it. Branch on `reason`.",
+        "Canonical LLM failure reason carried in `reason` on the\n         `harn.acp.prompt_error.v1` envelope. Owned by `harn_vm`'s `LlmErrorReason`.\n         Includes local policy refusals before provider I/O. The sibling `code`\n         field is opaque diagnostic text with no closed set; branch on `reason`.",
         &llm_error_reason_values(),
     ));
     out.push_str(&swift_enum(
@@ -64,8 +64,10 @@ pub(super) fn append_prompt_terminal_types(out: &mut String, prompt_error_schema
     public var kind: String?
     /// Wire string for `HarnLlmErrorReason`.
     public var reason: String?
-    /// PROVIDER PASSTHROUGH. Opaque diagnostic text with no closed set and no
-    /// Harn-owned vocabulary. Never branch on it; branch on `reason`.
+    public var origin: String?
+    public var rule: String?
+    /// Opaque provider or local diagnostic text with no closed set.
+    /// Never branch on it; branch on `reason`.
     public var code: String?
     public var retryable: Bool?
     public var retryAfterMs: Int?

@@ -1,4 +1,6 @@
 use super::*;
+#[path = "tests/declared_client_errors.rs"]
+mod declared_client_errors;
 #[path = "tests/egress_context.rs"]
 mod egress_context;
 use tempfile::TempDir;
@@ -591,49 +593,6 @@ event: {
         "LinearEventPayload",
         "data",
         json!({"id": "ISS-1", "title": "Fix Linear connector"}),
-    );
-
-    let notion_event = normalize_with_harn_connector(
-        r#"
-pub fn provider_id() { return "notion" }
-pub fn kinds() { return ["webhook", "poll"] }
-pub fn payload_schema() { return "NotionEventPayload" }
-
-pub fn normalize_inbound(harness: Harness, raw) {
-  const body = raw.body_json
-  return {
-type: "event",
-event: {
-  kind: body.type,
-  dedupe_key: "notion:" + body.entity.id,
-  payload: body,
-  signature_status: {state: "verified"},
-},
-  }
-}
-"#,
-        json!({
-            "id": "evt_1",
-            "type": "page.content_updated",
-            "workspace_id": "ws_1",
-            "subscription_id": "sub_1",
-            "integration_id": "int_1",
-            "entity": {"id": "page_1", "type": "page"},
-            "api_version": "2022-06-28"
-        }),
-        BTreeMap::from([
-            ("Content-Type".to_string(), "application/json".to_string()),
-            ("request-id".to_string(), "req_123".to_string()),
-        ]),
-    )
-    .await;
-    assert_eq!(notion_event.kind, "page.content_updated");
-    assert_extension_payload(
-        &notion_event,
-        "notion",
-        "NotionEventPayload",
-        "entity",
-        json!({"id": "page_1", "type": "page"}),
     );
 }
 

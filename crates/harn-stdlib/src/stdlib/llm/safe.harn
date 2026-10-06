@@ -264,6 +264,7 @@ pub fn __wrap_llm_result(result: any) {
     context_overflow: "context_window_exceeded",
     auth_failure: "auth",
     content_policy: "policy_blocked",
+    policy_denied: "policy_blocked",
   }
   const mapped = status_by_reason[reason]
   if mapped != nil {

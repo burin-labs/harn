@@ -44,6 +44,8 @@
 //!   rebuild.
 //! - **`repo_map`**: personalized PageRank over the typed graph, rendered
 //!   as a token-budgeted symbol map for agent grounding.
+//! - **`module_graph`**: the import graph rolled up from files to
+//!   directories or modules, for architecture views and diffs.
 //!
 //! ### Cross-file safe rename (added in #2508)
 //!
@@ -53,6 +55,13 @@
 //!   `new_name` shadowing in any rewritten file and aborts before any
 //!   write. Routes through staged-fs (#1722) when a `session_id` is
 //!   supplied so all touched files succeed or none do.
+//! - **`change_signature`**: change a function's parameter list and
+//!   rewrite every call site across files (Rust, TypeScript, Python),
+//!   refusing value uses, splats, overrides, and removed parameters the
+//!   body still reads. Built on [`refactor_core`].
+//! - **`extract_function`**: lift an expression, a statement run, or a
+//!   closure body into a new function and replace it, and every token-equal
+//!   same-file copy, with a call. Built on the shared refactor core.
 //!
 //! ## Concurrency model
 //!
@@ -64,18 +73,24 @@
 mod agents;
 mod builtin_args;
 mod builtins;
+mod change_signature;
 mod cypher;
+mod extract;
+mod extract_plan;
 mod file_table;
 mod git_head;
 mod graph;
 mod imports;
 mod imports_go;
 mod imports_swift;
+mod module_graph;
 mod module_index;
 mod overlay;
 mod readonly;
+mod refactor_core;
 mod rename;
 mod repo_map;
+mod signature_syntax;
 mod snapshot;
 mod state;
 mod symbol_graph;
@@ -182,53 +197,11 @@ impl CodeIndexCapability {
     /// propagate I/O problems verbatim so callers can decide whether to
     /// fall back to `rebuild`.
     pub fn restore_from_disk(&self, workspace_root: &Path) -> std::io::Result<bool> {
-        match CodeIndexSnapshot::load(workspace_root)? {
-            Some(snap) => {
-                let mut state = IndexState::from_snapshot(snap)?;
-                // Always anchor at the caller root. `load` already rejected a
-                // snapshot whose recorded root does not match; this keeps
-                // the live slot on the requested checkout rather than the
-                // stored path string.
-                state.root = state::canonicalize(workspace_root);
-                state.reap_after_recovery(state::now_unix_ms());
-                // A snapshot is a starting point, not a claim of freshness.
-                // Reconcile against the files on disk before anyone can read
-                // the index. A changed HEAD forces content verification even
-                // when size and mtime happen to match.
-                let outcome = state.refresh_from_root(None);
-                // Resolver-backed Harn references are omitted from the
-                // snapshot. Project them once from this host after the file
-                // graph is current, so a changed Harn file is not resolved
-                // twice against two different graph states.
-                state.relink_harn_references(self.harn_reference_resolver.as_ref());
-                tracing::info!(
-                    target: "harn_hostlib::code_index",
-                    root = %state.root.display(),
-                    files_unchanged = outcome.files_unchanged,
-                    files_reindexed = outcome.files_reindexed,
-                    files_added = outcome.files_added,
-                    files_removed = outcome.files_removed,
-                    "code-index snapshot restored and reconciled",
-                );
-                // Carry the reconciled metadata and graph into the next
-                // process. A read-only workspace can still use this valid
-                // in-memory state, so persistence failure is advisory.
-                if !outcome.is_noop() || outcome.files_touched_only > 0 {
-                    if let Err(error) = state.snapshot().save(&state.root) {
-                        tracing::debug!(
-                            target: "harn_hostlib::code_index",
-                            %error,
-                            root = %state.root.display(),
-                            "code-index reconciled snapshot could not be persisted",
-                        );
-                    }
-                }
-                let mut guard = self.index.lock().expect("code_index mutex poisoned");
-                *guard = Some(state);
-                Ok(true)
-            }
-            None => Ok(false),
-        }
+        restore_shared(
+            &self.index,
+            self.harn_reference_resolver.as_ref(),
+            workspace_root,
+        )
     }
 
     /// Persist the current in-memory state to the path returned by
@@ -248,6 +221,63 @@ impl CodeIndexCapability {
     pub fn wait_until_idle(&self) {
         self.warm.take_and_join_builder();
         self.warm.wait_until_idle();
+    }
+}
+
+/// Body of [`CodeIndexCapability::restore_from_disk`], shared with the
+/// background session warm so the load and reconcile run off the caller's
+/// thread.
+fn restore_shared(
+    index: &SharedIndex,
+    resolver: Option<&HarnReferenceResolver>,
+    workspace_root: &Path,
+) -> std::io::Result<bool> {
+    match CodeIndexSnapshot::load(workspace_root)? {
+        Some(snap) => {
+            let mut state = IndexState::from_snapshot(snap)?;
+            // Always anchor at the caller root. `load` already rejected a
+            // snapshot whose recorded root does not match; this keeps
+            // the live slot on the requested checkout rather than the
+            // stored path string.
+            state.root = state::canonicalize(workspace_root);
+            state.reap_after_recovery(state::now_unix_ms());
+            // A snapshot is a starting point, not a claim of freshness.
+            // Reconcile against the files on disk before anyone can read
+            // the index. A changed HEAD forces content verification even
+            // when size and mtime happen to match.
+            let outcome = state.refresh_from_root(None);
+            // Resolver-backed Harn references are omitted from the
+            // snapshot. Project them once from this host after the file
+            // graph is current, so a changed Harn file is not resolved
+            // twice against two different graph states.
+            state.relink_harn_references(resolver);
+            tracing::info!(
+                target: "harn_hostlib::code_index",
+                root = %state.root.display(),
+                files_unchanged = outcome.files_unchanged,
+                files_reindexed = outcome.files_reindexed,
+                files_added = outcome.files_added,
+                files_removed = outcome.files_removed,
+                "code-index snapshot restored and reconciled",
+            );
+            // Carry the reconciled metadata and graph into the next
+            // process. A read-only workspace can still use this valid
+            // in-memory state, so persistence failure is advisory.
+            if !outcome.is_noop() || outcome.files_touched_only > 0 {
+                if let Err(error) = state.snapshot().save(&state.root) {
+                    tracing::debug!(
+                        target: "harn_hostlib::code_index",
+                        %error,
+                        root = %state.root.display(),
+                        "code-index reconciled snapshot could not be persisted",
+                    );
+                }
+            }
+            let mut guard = index.lock().expect("code_index mutex poisoned");
+            *guard = Some(state);
+            Ok(true)
+        }
+        None => Ok(false),
     }
 }
 
@@ -558,6 +588,13 @@ impl HostlibCapability for CodeIndexCapability {
             "freshness",
             builtins::run_freshness,
         );
+        register(
+            registry,
+            self.index.clone(),
+            module_graph::BUILTIN,
+            "module_graph",
+            module_graph::run,
+        );
 
         // Cross-file safe rename (issue #2508). Builds on the typed
         // symbol graph (#2434) and routes writes through staged-fs
@@ -568,6 +605,20 @@ impl HostlibCapability for CodeIndexCapability {
             rename::BUILTIN,
             "rename_symbol",
             rename::run,
+        );
+        register(
+            registry,
+            self.index.clone(),
+            change_signature::BUILTIN,
+            "change_signature",
+            change_signature::run,
+        );
+        register(
+            registry,
+            self.index.clone(),
+            extract::BUILTIN,
+            "extract_function",
+            extract::run,
         );
     }
 }

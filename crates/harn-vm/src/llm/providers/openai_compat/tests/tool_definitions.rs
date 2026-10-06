@@ -142,11 +142,7 @@ fn openai_tool_search_request_keeps_wire_extensions() {
     payload.provider = "openai".to_string();
     payload.model = "gpt-5.4".to_string();
     payload.native_tools = Some(vec![
-        json!({
-            "type": "tool_search",
-            "mode": "hosted",
-            "namespaces": ["ops"],
-        }),
+        json!({"type": "tool_search"}),
         json!({
             "type": "function",
             "namespace": "ops",
@@ -161,8 +157,8 @@ fn openai_tool_search_request_keeps_wire_extensions() {
     ]);
 
     let body = OpenAiCompatibleProvider::build_request_body(&payload);
-    assert_eq!(body["tools"][0]["namespaces"], json!(["ops"]));
-    assert_eq!(body["tools"][1]["namespace"], "ops");
+    assert_eq!(body["tools"][0], json!({"type": "tool_search"}));
+    assert!(body["tools"][1].get("namespace").is_none());
     assert_eq!(body["tools"][1]["defer_loading"], true);
     assert!(
         body["tools"][1]["function"]

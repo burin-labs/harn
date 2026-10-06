@@ -148,7 +148,10 @@ impl Machine<'_> {
                             ),
                         ])));
                         match self.charge_value_work(&value) {
-                            Ok(()) => OpStep::Throw(value),
+                            Ok(()) => OpStep::Throw(RuntimeException {
+                                value,
+                                declared: false,
+                            }),
                             Err(diagnostic) => OpStep::Error(diagnostic),
                         }
                     }

@@ -67,8 +67,8 @@ pub fn session_tokio_command(
 }
 
 pub fn std_command_for(program: &str, args: &[String]) -> Result<Command, VmError> {
-    let (command, closed) = std_command_for_with_env_state(program, args)?;
-    super::validate_command_environment(&command, closed)?;
+    let (mut command, closed) = std_command_for_with_env_state(program, args)?;
+    super::validate_command_environment(&mut command, closed)?;
     Ok(command)
 }
 
@@ -180,8 +180,8 @@ pub fn tokio_command_for(
     program: &str,
     args: &[String],
 ) -> Result<tokio::process::Command, VmError> {
-    let (command, closed) = tokio_command_for_with_env_state(program, args)?;
-    super::validate_command_environment(command.as_std(), closed)?;
+    let (mut command, closed) = tokio_command_for_with_env_state(program, args)?;
+    super::validate_command_environment(command.as_std_mut(), closed)?;
     Ok(command)
 }
 

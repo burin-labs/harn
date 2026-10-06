@@ -3,6 +3,28 @@ use super::*;
 use crate::{compile_program, EntryKind};
 
 #[test]
+fn transparent_rethrows_preserve_declared_and_legacy_channels() {
+    for (declaration, expected_code) in [("throws int", "harn_declared_throw"), ("", "harn_throw")]
+    {
+        for body in [
+            "return fail(input)",
+            "return try* fail(input)",
+            "return retry 2 { fail(input) }",
+            "try { return fail(input) } finally { try { throw 8 } catch (_ignored) {} }",
+        ] {
+            let source = format!("fn fail(input: int) -> any {declaration} {{ throw input }}\nfn reduce(input: int) -> any throws int {{ {body} }}");
+            let program = compile_program(&source, "reduce", EntryKind::Function).unwrap();
+            let result = start(&program, DataValue::Int(7), &GrantSet::pure());
+            let Execution::Failed { diagnostic } = result else {
+                panic!("throw did not reach the portable execution result: {body}: {result:?}")
+            };
+            assert_eq!(diagnostic.code, expected_code, "{declaration}: {body}");
+            assert_eq!(diagnostic.message, "7", "{declaration}: {body}");
+        }
+    }
+}
+
+#[test]
 fn reducer_executes_and_round_trips_json() {
     let source = "fn reduce(input: {count: int, reset: bool, tags: list<string>}) {\n  if input.reset { return {count: 0, tags: input.tags} }\n  return {count: input.count + 1, tags: input.tags + [\"increment\"]}\n}";
     let program = compile_program(source, "reduce", EntryKind::Function).unwrap();

@@ -82,6 +82,10 @@ impl harn_vm::agent_events::AgentEventSink for A2aWorkerSink {
                     "planDocument": document,
                 })
             }
+            harn_vm::agent_events::AgentEvent::SessionHealth { fact, .. } => {
+                self.emit_session_health(fact);
+                return;
+            }
             harn_vm::agent_events::AgentEvent::ProgressReported {
                 message, entries, ..
             } => {
@@ -136,6 +140,25 @@ struct AgentArtifactUpdate<'a> {
 }
 
 impl A2aWorkerSink {
+    fn emit_session_health(&self, fact: &harn_vm::agent_events::session_health::SessionHealthFact) {
+        let mut tasks = self.tasks.lock().expect("tasks poisoned");
+        let Some(task) = tasks.get_mut(&self.task_id) else {
+            return;
+        };
+        let mut event = json!({
+            "kind": "status-update",
+            "type": "status",
+            "taskId": self.task_id,
+            "status": {"state": task.status.as_str()},
+            "final": false,
+            "metadata": {"harn": {"sessionHealth": fact}},
+        });
+        if let Some(context_id) = task.context_id.as_ref() {
+            event["contextId"] = JsonValue::String(context_id.clone());
+        }
+        publish_locked(task, event);
+    }
+
     /// Translate a validated Harn artifact event into an A2A
     /// `TaskArtifactUpdateEvent`. The declarative spec is the primary data
     /// part; `fallback` gives text-only clients a stable degraded view.

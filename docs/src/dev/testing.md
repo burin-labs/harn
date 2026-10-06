@@ -339,6 +339,9 @@ Conformance fixtures can opt into these handles with an adjacent
 `<name>.harness.json` sidecar. Keep the sidecar small: choose `"mode": "null"`
 or `"mode": "mock"`, provide only the canned responses needed by that fixture,
 and assert the recorded calls or deny events there.
+A `net_gets` entry is the response body: `harness.net.get` returns the same
+`{status, headers, body, final_url, ok}` record as a live request, with status
+200 and that `body`.
 
 ```json
 {

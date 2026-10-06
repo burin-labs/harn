@@ -369,9 +369,9 @@ fn registry_handler_has_generated_cli_and_mcp_parity() {
 
 fn write_handler_envelope_registry_fixture(temp: &TempDir) {
     fs::write(
-        temp.path().join("server.harn"),
+        temp.path().join("widget_tools.harn"),
         r#"
-import { tool_registry_from } from "std/tools"
+import { tool_registry_from, ToolRegistry } from "std/tools"
 import { agent_tool_handler_result } from "std/agent/tool_lifecycle"
 
 const WIDGET = {
@@ -399,8 +399,8 @@ fn raw_widget(args: dict) -> dict {
   return {id: args.widget_id, name: "raw"}
 }
 
-fn main(harness: Harness) {
-  const tools = tool_registry_from([
+pub fn widget_tools() -> ToolRegistry {
+  return tool_registry_from([
     {
       name: "get",
       description: "Widget tool get.",
@@ -434,7 +434,41 @@ fn main(harness: Harness) {
       handler: raw_widget,
     },
   ], {info: {name: "widgets", version: "1.0.0"}})
-  harness.tools.mcp_tools(tools)
+}
+
+"#,
+    )
+    .unwrap();
+    fs::write(
+        temp.path().join("agent.harn"),
+        r#"
+import { widget_tools } from "./widget_tools"
+import { agent_dispatch_tool_call } from "std/agent/primitives"
+
+@test
+pipeline agent_schema_parity(harness: Harness) {
+  const tools = widget_tools()
+  const ok = agent_dispatch_tool_call(harness.tools, {name: "get", arguments: {widget_id: 7}}, tools)
+  assert(ok.ok)
+  assert(ok.result.data == {id: 7, name: "sprocket"})
+  const invalid = agent_dispatch_tool_call(harness.tools, {name: "invalid", arguments: {widget_id: 7}}, tools)
+  assert(!invalid.ok)
+  assert(invalid.error_category == "schema_validation")
+  assert(invalid.error.contains("output violates its declared schema"))
+  const failed = agent_dispatch_tool_call(harness.tools, {name: "fail", arguments: {widget_id: 7}}, tools)
+  assert(!failed.ok)
+  assert(failed.error_category == "tool_error")
+}
+"#,
+    )
+    .unwrap();
+    fs::write(
+        temp.path().join("server.harn"),
+        r#"
+import { widget_tools } from "./widget_tools"
+
+fn main(harness: Harness) {
+  harness.tools.mcp_tools(widget_tools())
 }
 "#,
     )
@@ -442,13 +476,29 @@ fn main(harness: Harness) {
 }
 
 /// A handler written to the agent-dispatch result envelope must mean the same
-/// thing on the generated CLI and on MCP: `data` is the value the declared
-/// output schema sees, and an `error` outcome is a failure.
+/// thing on agent dispatch, the generated CLI, and MCP: the declared output
+/// schema validates `data`, and an `error` outcome is a failure.
 #[test]
 fn registry_handler_result_envelope_has_cli_and_mcp_parity() {
     let temp = TempDir::new().unwrap();
     write_handler_envelope_registry_fixture(&temp);
     let script = temp.path().join("server.harn").display().to_string();
+    let agent_script = temp.path().join("agent.harn").display().to_string();
+    let agent = harn_e2e_command()
+        .current_dir(temp.path())
+        .args(["test", &agent_script])
+        .output()
+        .expect("agent dispatcher invocation");
+    assert!(
+        agent.status.success(),
+        "{}\n{}",
+        String::from_utf8_lossy(&agent.stdout),
+        String::from_utf8_lossy(&agent.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&agent.stdout).contains("1 passed"),
+        "agent parity case must execute"
+    );
     let cli = |command: &str| {
         harn_e2e_command()
             .args([

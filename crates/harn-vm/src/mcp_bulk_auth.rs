@@ -965,13 +965,13 @@ mod tests {
     #[test]
     fn status_serializes_snake_case() {
         let json = serde_json::to_value(McpAuthStatus {
-            server: "Notion".to_string(),
-            server_url: "https://mcp.notion.com/mcp".to_string(),
+            server: "Wiki".to_string(),
+            server_url: "https://mcp.wiki.example/mcp".to_string(),
             phase: McpAuthPhase::AwaitingConsent,
             detail: None,
         })
         .unwrap();
-        assert_eq!(json["server"], serde_json::json!("Notion"));
+        assert_eq!(json["server"], serde_json::json!("Wiki"));
         assert_eq!(json["phase"], serde_json::json!("awaiting_consent"));
         assert!(json.get("detail").is_none(), "None detail is omitted");
     }

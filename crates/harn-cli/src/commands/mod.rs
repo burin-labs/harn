@@ -50,6 +50,7 @@ pub(crate) mod guard;
 pub(crate) mod hardware;
 pub(crate) mod harness_migration_codegen;
 pub(crate) mod host;
+pub(crate) mod inference_admission;
 pub(crate) mod init;
 pub(crate) mod json_schemas;
 pub(crate) mod llm_evaluate;

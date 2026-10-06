@@ -143,7 +143,9 @@ impl DecisionBackend for NativeDecisionBackend {
             request.model,
             &privacy_plan(&request).receipt,
         )
-        .map_err(|diagnostic| DecisionTransportError::LocalAdmissionDenied { diagnostic })?;
+        .map_err(|error| DecisionTransportError::LocalAdmissionDenied {
+            diagnostic: error.to_string(),
+        })?;
         let body = request_body(&request)?;
         let definition = crate::llm_config::provider_config(request.provider)
             .ok_or_else(|| unsupported("decision provider is not configured"))?;
@@ -317,8 +319,10 @@ pub(super) fn read_response(
                             request.provider,
                             request.model,
                         )
-                        .map_err(|diagnostic| {
-                            DecisionTransportError::LocalAdmissionDenied { diagnostic }
+                        .map_err(|error| {
+                            DecisionTransportError::LocalAdmissionDenied {
+                                diagnostic: error.to_string(),
+                            }
                         })?,
                     );
                 }

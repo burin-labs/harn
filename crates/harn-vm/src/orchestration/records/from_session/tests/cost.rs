@@ -7,42 +7,49 @@ use super::super::*;
 use super::support::*;
 
 #[tokio::test]
-async fn an_unpriced_call_is_unknown_not_a_zero_cost_run() {
-    let store = MemorySessionStore::default();
-    let meta = store
-        .create(CreateSession::default())
-        .await
-        .expect("create session");
-    store
-        .append(
-            &meta.id,
-            AppendEvent::new(
-                custom("llm_call"),
-                transcript_event(
-                    "llm_call",
-                    json!({
-                        "accounting_status": "unknown",
-                        "cost_usd": null,
-                        "input_tokens": 0,
-                        "output_tokens": 0,
-                        "provider": "fireworks",
-                        "model": "unpriced-model",
-                    }),
+async fn unknown_accounting_cannot_publish_a_zero_cost_run() {
+    for (status, cost, unpriced, unknown, exact) in [
+        ("unknown", None, 1, 1, None),
+        ("unknown", Some(0.0), 0, 1, None),
+        ("reported", Some(0.0), 0, 0, Some(0.0)),
+    ] {
+        let store = MemorySessionStore::default();
+        let meta = store
+            .create(CreateSession::default())
+            .await
+            .expect("create session");
+        store
+            .append(
+                &meta.id,
+                AppendEvent::new(
+                    custom("llm_call"),
+                    transcript_event(
+                        "llm_call",
+                        json!({
+                            "accounting_status": status,
+                            "cost_usd": cost,
+                            "input_tokens": 0,
+                            "output_tokens": 0,
+                            "provider": "fireworks",
+                            "model": "unpriced-model",
+                        }),
+                    ),
                 ),
-            ),
-        )
-        .await
-        .expect("append");
+            )
+            .await
+            .expect("append");
 
-    let run = project_run_record_from_session(&store, &meta.id)
-        .await
-        .expect("project");
-    let usage = run.usage.as_ref().expect("usage");
-    assert_eq!(usage.cost_usd, None);
-    assert_eq!(usage.known_cost_usd, 0.0);
-    assert_eq!(usage.total_cost, 0.0);
-    assert_eq!(usage.unpriced_calls, 1);
-    assert_eq!(usage.usage_unknown_calls, 1);
+        let run = project_run_record_from_session(&store, &meta.id)
+            .await
+            .expect("project");
+        let usage = run.usage.as_ref().expect("usage");
+        assert_eq!(usage.cost_usd, exact);
+        assert_eq!(usage.known_cost_usd, 0.0);
+        assert_eq!(usage.total_cost, 0.0);
+        assert_eq!(usage.call_count, 1);
+        assert_eq!(usage.unpriced_calls, unpriced);
+        assert_eq!(usage.usage_unknown_calls, unknown);
+    }
 }
 
 /// A run report sources its per-call view from `trace_spans`. Leaving them

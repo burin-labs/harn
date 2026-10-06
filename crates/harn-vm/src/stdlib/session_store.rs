@@ -13,7 +13,7 @@ use harn_session_store::{
     AppendEvent, CreateSession, EventId, EventIdentity, EventIdentityField, ImportSession,
     ListFilter, ListOrder, ListSortKey, ReadRange, SearchFilter, SearchMode, SearchQuery,
     SessionEventKind, SessionImporter, SessionLeaseError, SessionStatus, SessionStore, SessionType,
-    SqliteSessionStore, StoreError, StoreHooks, StoredEvent, VerifyReport, MAX_READ_BATCH,
+    SqliteSessionStore, StoreError, StoredEvent, VerifyReport, MAX_READ_BATCH,
 };
 use serde::Deserialize;
 use serde_json::{json, Value as JsonValue};
@@ -21,7 +21,7 @@ use sha2::{Digest, Sha256};
 
 use crate::llm::vm_value_to_json;
 use crate::stdlib::args::{ArgError, Args, ErrorKind, Expected, Options};
-use crate::stdlib::canonical_store::CanonicalStore;
+use crate::stdlib::canonical_store::{store_hooks, CanonicalStore};
 use crate::stdlib::json_to_vm_value;
 use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
 use crate::value::{categorized_error, DictMap, ErrorCategory, VmError, VmValue};
@@ -369,7 +369,9 @@ async fn session_store_database_path_impl(
 }
 
 fn open_store(state_dir: &SessionStoreDir) -> Result<CanonicalStore, VmError> {
-    let store = SqliteSessionStore::open_with_hooks(store_path(state_dir), store_hooks())
+    let path = harn_session_store::sqlite::stable_file_path(&store_path(state_dir))
+        .map_err(store_error)?;
+    let store = SqliteSessionStore::open_with_hooks(&path, store_hooks(Some(&path)))
         .map_err(store_error)?;
     Ok(CanonicalStore::new(store))
 }
@@ -377,17 +379,10 @@ fn open_store(state_dir: &SessionStoreDir) -> Result<CanonicalStore, VmError> {
 fn open_maintenance_store(
     state_dir: &SessionStoreDir,
 ) -> harn_session_store::StoreResult<CanonicalStore> {
+    let path = harn_session_store::sqlite::stable_file_path(&store_path(state_dir))?;
     let store =
-        SqliteSessionStore::open_for_maintenance_with_hooks(store_path(state_dir), store_hooks())?;
+        SqliteSessionStore::open_for_maintenance_with_hooks(&path, store_hooks(Some(&path)))?;
     Ok(CanonicalStore::new(store))
-}
-
-fn store_hooks() -> StoreHooks {
-    StoreHooks {
-        redaction: Some(Arc::new(crate::redact::current_policy())),
-        change_observer: super::session_change::current_observer(),
-        ..StoreHooks::default()
-    }
 }
 
 enum StoreRead<T> {
@@ -419,11 +414,12 @@ fn store_read_present_value(value: VmValue) -> VmValue {
 }
 
 fn open_read_store(state_dir: &SessionStoreDir) -> Result<StoreRead<SqliteSessionStore>, VmError> {
-    let path = store_path(state_dir);
+    let path = harn_session_store::sqlite::stable_file_path(&store_path(state_dir))
+        .map_err(store_error)?;
     if !path.is_file() {
         return Ok(StoreRead::Absent);
     }
-    SqliteSessionStore::open_read_only_with_hooks(path, store_hooks())
+    SqliteSessionStore::open_read_only_with_hooks(&path, store_hooks(Some(&path)))
         .map(StoreRead::Present)
         .map_err(store_error)
 }
@@ -460,7 +456,7 @@ async fn open_read_session(
         return Ok(StoreRead::Present(None));
     }
     let store =
-        SqliteSessionStore::open_in_memory_with_hooks(store_hooks()).map_err(store_error)?;
+        SqliteSessionStore::open_in_memory_with_hooks(store_hooks(None)).map_err(store_error)?;
     import_legacy_events(&store, session_id, source, tenant_id.as_deref()).await?;
     Ok(StoreRead::Present(Some(store)))
 }

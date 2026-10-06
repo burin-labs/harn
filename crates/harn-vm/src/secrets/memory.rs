@@ -21,10 +21,39 @@ pub struct MemorySecretProvider {
 #[derive(Debug, Default)]
 struct VersionedSecret {
     latest: Option<u64>,
+    // A captured Latest reference has a resolved value, not a fabricated
+    // numeric version. It must coexist with explicitly selected versions.
+    resolved_latest: Option<SecretBytes>,
     versions: BTreeMap<u64, SecretBytes>,
 }
 
 impl MemorySecretProvider {
+    /// Preserve the exact references of a resolved read snapshot. Unlike normal
+    /// writes, an Exact entry does not imply a Latest grant, and Latest does
+    /// not invent a numeric version or overwrite an explicitly selected one.
+    pub(super) fn from_resolved_snapshot(
+        provider: impl Into<String>,
+        entries: impl IntoIterator<Item = (SecretId, SecretBytes)>,
+    ) -> Self {
+        let result = Self::new(provider);
+        {
+            let mut inner = result
+                .inner
+                .lock()
+                .expect("memory secret provider poisoned");
+            for (id, value) in entries {
+                let secret = inner.entry((id.namespace, id.name)).or_default();
+                match id.version {
+                    SecretVersion::Latest => secret.resolved_latest = Some(value),
+                    SecretVersion::Exact(version) => {
+                        secret.versions.insert(version, value);
+                    }
+                }
+            }
+        }
+        result
+    }
+
     pub fn new(provider: impl Into<String>) -> Self {
         Self {
             provider: provider.into(),
@@ -52,11 +81,20 @@ impl MemorySecretProvider {
         let inner = self.inner.lock().expect("memory secret provider poisoned");
         inner
             .iter()
-            .filter_map(|((namespace, name), secret)| {
-                let latest = secret.latest?;
-                Some(SecretMeta {
-                    id: SecretId::new(namespace.clone(), name.clone())
-                        .with_version(SecretVersion::Exact(latest)),
+            .flat_map(|((namespace, name), secret)| {
+                let versions = if let Some(latest) = secret.latest {
+                    vec![SecretVersion::Exact(latest)]
+                } else {
+                    secret
+                        .resolved_latest
+                        .as_ref()
+                        .map(|_| SecretVersion::Latest)
+                        .into_iter()
+                        .chain(secret.versions.keys().copied().map(SecretVersion::Exact))
+                        .collect()
+                };
+                versions.into_iter().map(move |version| SecretMeta {
+                    id: SecretId::new(namespace.clone(), name.clone()).with_version(version),
                     provider: self.provider.clone(),
                 })
             })
@@ -71,6 +109,12 @@ impl SecretProvider for MemorySecretProvider {
         let secret = inner
             .get(&(id.namespace.clone(), id.name.clone()))
             .ok_or_else(|| not_found(&self.provider, id))?;
+        if id.version == SecretVersion::Latest {
+            if let Some(value) = &secret.resolved_latest {
+                emit_secret_access_event("memory", id);
+                return Ok(value.reborrow());
+            }
+        }
         let version = match id.version {
             SecretVersion::Latest => secret.latest,
             SecretVersion::Exact(version) => Some(version),
@@ -138,10 +182,11 @@ fn insert_secret(
 ) {
     let secret = inner.entry((id.namespace, id.name)).or_default();
     let version = match id.version {
-        SecretVersion::Latest => secret.latest.unwrap_or(0) + 1,
+        SecretVersion::Latest => secret.versions.keys().next_back().copied().unwrap_or(0) + 1,
         SecretVersion::Exact(version) => version,
     };
     secret.versions.insert(version, value);
+    secret.resolved_latest = None;
     secret.latest = Some(secret.latest.map_or(version, |latest| latest.max(version)));
 }
 

@@ -479,6 +479,295 @@ pub fn code_librarian_freshness(code_index: HarnessCodeIndex, path: string) -> L
   return schema_expect(code_index.freshness({path: path}), schema_of(LibrarianFreshness))
 }
 
+/** How `code_librarian_module_graph` groups files into nodes. */
+type ModuleGraphGranularity = "dir" | "module"
+
+/** Options for `code_librarian_module_graph`. Every field is optional. */
+type ModuleGraphOptions = {
+  granularity?: ModuleGraphGranularity,
+  depth?: int,
+  roots?: list<string>,
+  include_external?: bool,
+  min_weight?: int,
+}
+
+/** A directory or module and the source files it groups. */
+type ModuleGraphNode = {id: string, files: int, languages: list<string>}
+
+/** Import links between two nodes, with up to three `[importer, imported]` file pairs. */
+type ModuleGraphEdge = {from: string, to: string, weight: int, sample: list<list<string>>}
+
+/** An import no workspace file satisfies, counted by importing files per node. */
+type ModuleGraphExternal = {from: string, spec: string, count: int}
+
+/** The workspace import graph rolled up to directories or modules. */
+type ModuleGraph = {
+  indexed: bool,
+  nodes: list<ModuleGraphNode>,
+  edges: list<ModuleGraphEdge>,
+  external: list<ModuleGraphExternal>,
+  unresolved_count: int,
+  index_seq: int,
+}
+
+/**
+ * The workspace import graph rolled up from files to directories
+ * (`granularity: "dir"`) or modules (`"module"`, the default: a Swift
+ * target or Go package, else the nearest package manifest directory,
+ * else the directory). Edges come from explicit import statements only,
+ * self-loops are dropped, and every list is sorted, so the same index
+ * gives the same graph. `indexed` is false when no workspace is indexed.
+ *
+ * @effects: [host]
+ * @errors: [backend, invalid_argument]
+ * @api_stability: experimental
+ * @example: code_librarian_module_graph(harness.code_index, {granularity: "dir", depth: 2})
+ */
+pub fn code_librarian_module_graph(
+  code_index: HarnessCodeIndex,
+  options: ModuleGraphOptions? = nil,
+) -> ModuleGraph {
+  return schema_expect(code_index.module_graph(options ?? {}), schema_of(ModuleGraph))
+}
+
+/** How a target architecture treats a dependency between two of its nodes. */
+type ArchitectureEdgeKind = "allowed" | "required" | "forbidden"
+
+/** A target node and the globs naming the actual graph nodes it owns. */
+type ArchitectureNode = {id: string, paths: list<string>}
+
+/** A declared dependency between target nodes. `kind` defaults to `"allowed"`. */
+type ArchitectureEdge = {from: string, to: string, kind?: ArchitectureEdgeKind}
+
+/** A target architecture. With `strict`, any undeclared dependency is reported. */
+type ArchitectureTarget = {
+  nodes: list<ArchitectureNode>,
+  edges: list<ArchitectureEdge>,
+  strict?: bool,
+}
+
+/** One actual edge that contributes to a target-level dependency. */
+type ArchitectureActualEdge = {from: string, to: string, weight: int}
+
+/** A target-level dependency that breaks the target, with the code behind it. */
+type ArchitectureViolation = {
+  from: string,
+  to: string,
+  weight: int,
+  sample: list<list<string>>,
+  actual: list<ArchitectureActualEdge>,
+}
+
+/** Where the actual graph departs from a target architecture. */
+type ArchitectureDiff = {
+  conforms: bool,
+  missing_required: list<ArchitectureViolation>,
+  forbidden_present: list<ArchitectureViolation>,
+  unexpected: list<ArchitectureViolation>,
+  unmatched_nodes: list<string>,
+  unmapped_actual: list<ModuleGraphNode>,
+}
+
+const __ARCHITECTURE_SAMPLE_CAP = 5
+
+/**
+ * Anchored regex for a path glob. A double star crosses directories (and
+ * a double star followed by a slash may match no directory at all), a
+ * single star and `?` stay inside one, and a pattern ending in slash and
+ * double star also matches the directory itself.
+ */
+fn __architecture_glob_regex(glob: string) -> string {
+  const chars = glob.chars()
+  let out = "^"
+  let i = 0
+  while i < len(chars) {
+    const c = chars[i]
+    if c == "*" && i + 2 < len(chars) && chars[i + 1] == "*" && chars[i + 2] == "/" {
+      out = out + "(?:.*/)?"
+      i = i + 3
+      continue
+    }
+    if c == "*" && i + 1 < len(chars) && chars[i + 1] == "*" {
+      out = out + ".*"
+      i = i + 2
+      continue
+    }
+    if c == "/" && i + 3 == len(chars) && chars[i + 1] == "*" && chars[i + 2] == "*" {
+      out = out + "(?:/.*)?"
+      i = i + 3
+      continue
+    }
+    if c == "*" {
+      out = out + "[^/]*"
+    } else if c == "?" {
+      out = out + "[^/]"
+    } else if contains(".+^$()[]{}|\\", c) {
+      out = out + "\\" + c
+    } else {
+      out = out + c
+    }
+    i = i + 1
+  }
+  return out + "$"
+}
+
+fn __architecture_owner(id: string, nodes: list<ArchitectureNode>, patterns: dict) -> string? {
+  for node in nodes {
+    for glob in node.paths {
+      if regex_match(patterns[glob], id) != nil {
+        return node.id
+      }
+    }
+  }
+  return nil
+}
+
+/** Validate a target once and index it: glob regexes by glob, edge kinds by key. */
+fn __architecture_index_target(target: ArchitectureTarget) -> dict {
+  let patterns: dict = {}
+  let declared_ids: dict = {}
+  for node in target.nodes {
+    if declared_ids[node.id] != nil {
+      throw "architecture_graph_diff: duplicate target node " + node.id
+    }
+    declared_ids = declared_ids + {[node.id]: true}
+    for glob in node.paths {
+      patterns = patterns + {[glob]: __architecture_glob_regex(glob)}
+    }
+  }
+  let kinds: dict = {}
+  for edge in target.edges {
+    if declared_ids[edge.from] == nil || declared_ids[edge.to] == nil {
+      throw "architecture_graph_diff: edge " + edge.from + " -> " + edge.to
+        + " names an undeclared target node"
+    }
+    const key = edge.from + "\n" + edge.to
+    if kinds[key] != nil {
+      throw "architecture_graph_diff: duplicate target edge " + edge.from + " -> " + edge.to
+    }
+    kinds = kinds + {[key]: edge.kind ?? "allowed"}
+  }
+  return {patterns: patterns, kinds: kinds}
+}
+
+/**
+ * Lift actual edges onto target nodes. Returns violations-in-waiting keyed
+ * by target edge, plus the keys in first-seen order so output is stable.
+ */
+fn __architecture_lift(edges: list<ModuleGraphEdge>, owner: dict) -> dict {
+  let lifted: dict = {}
+  let order: list<string> = []
+  for edge in edges {
+    const owner_from = owner[edge.from]
+    const owner_to = owner[edge.to]
+    if owner_from == nil || owner_to == nil || owner_from == owner_to {
+      continue
+    }
+    const key = owner_from + "\n" + owner_to
+    if lifted[key] == nil {
+      order = order + [key]
+    }
+    const prior = lifted[key]
+      ?? {from: owner_from, to: owner_to, weight: 0, sample: [], actual: []}
+    let sample = prior.sample
+    for pair in edge.sample {
+      if len(sample) < __ARCHITECTURE_SAMPLE_CAP {
+        sample = sample + [pair]
+      }
+    }
+    lifted = lifted
+      + {
+        [key]: prior
+          + {
+            weight: prior.weight + edge.weight,
+            sample: sample,
+            actual: prior.actual + [pick(edge, ["from", "to", "weight"])],
+          },
+      }
+  }
+  return {lifted: lifted, order: order}
+}
+
+/**
+ * Compare an actual module graph with a target architecture. Each actual
+ * node belongs to the first target node (in declaration order) with a
+ * path glob matching its id; dependencies inside one target node are
+ * ignored. Reports required dependencies with no code behind them,
+ * forbidden ones the code has, and, when `strict`, dependencies the
+ * target never declared. Every reported dependency carries its weight,
+ * sample file pairs, and the actual edges behind it. `conforms` is true
+ * when all three lists are empty and, under `strict`, every actual node
+ * has an owner. A graph that measured nothing (not indexed, or no nodes)
+ * throws rather than conforming vacuously. Pure: no index or file access.
+ *
+ * @effects: []
+ * @errors: [invalid_argument]
+ * @api_stability: experimental
+ * @example: architecture_graph_diff(graph, {nodes: [{id: "ui", paths: ["src/ui"]}], edges: []})
+ */
+pub fn architecture_graph_diff(
+  actual: ModuleGraph,
+  target: ArchitectureTarget,
+) -> ArchitectureDiff {
+  if !actual.indexed || len(actual.nodes) == 0 {
+    throw "architecture_graph_diff: the actual graph measured nothing (indexed: "
+      + to_string(actual.indexed)
+      + ", nodes: 0); rebuild the index or check the roots"
+  }
+  const index = __architecture_index_target(target)
+  const kinds = index.kinds
+  const strict = target.strict ?? false
+  let owner: dict = {}
+  let unmapped_actual: list<ModuleGraphNode> = []
+  for node in actual.nodes {
+    const found = __architecture_owner(node.id, target.nodes, index.patterns)
+    if found == nil {
+      unmapped_actual = unmapped_actual + [node]
+    } else {
+      owner = owner + {[node.id]: found}
+    }
+  }
+  const lift = __architecture_lift(actual.edges, owner)
+  const lifted = lift.lifted
+  let missing_required: list<ArchitectureViolation> = []
+  let forbidden_present: list<ArchitectureViolation> = []
+  for edge in target.edges {
+    const key = edge.from + "\n" + edge.to
+    if kinds[key] == "required" && lifted[key] == nil {
+      missing_required = missing_required
+        + [{from: edge.from, to: edge.to, weight: 0, sample: [], actual: []}]
+    } else if kinds[key] == "forbidden" && lifted[key] != nil {
+      forbidden_present = forbidden_present + [lifted[key]]
+    }
+  }
+  let unexpected: list<ArchitectureViolation> = []
+  if strict {
+    for key in lift.order {
+      if kinds[key] == nil {
+        unexpected = unexpected + [lifted[key]]
+      }
+    }
+  }
+  const owners = owner.values()
+  let unmatched_nodes: list<string> = []
+  for node in target.nodes {
+    if !contains(owners, node.id) {
+      unmatched_nodes = unmatched_nodes + [node.id]
+    }
+  }
+  return {
+    conforms: len(missing_required) == 0
+      && len(forbidden_present) == 0
+      && len(unexpected) == 0
+      && !(strict && len(unmapped_actual) > 0),
+    missing_required: missing_required,
+    forbidden_present: forbidden_present,
+    unexpected: unexpected,
+    unmatched_nodes: unmatched_nodes,
+    unmapped_actual: unmapped_actual,
+  }
+}
+
 /**
  * Batch current file hashes under one code-index sequence binding. The
  * returned `snapshot` map is the direct shape expected by

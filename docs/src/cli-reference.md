@@ -302,6 +302,23 @@ in [Sandboxing](./sandboxing.md) follows the same rule.
 Both `--environment-policy` and `--grant` are also accepted by
 [`harn time run`](#harn-time), which shares `harn run`'s confinement surface.
 
+### Parent secret handoff
+
+`--parent-secret-stdin` receives a selected parent secret store through a
+one-shot stdin pipe before command execution. Embedded hosts should use
+`harn_vm::secrets::ParentSecretHandoff::capture` and
+`harn_hostlib::process::spawn_harn_with_parent_secrets` to select logical secret
+ids and send the bounded frame. The sender owns stdin exclusively, closes it
+after delivery, and refuses an application that already needs stdin.
+
+The received store is read-only and process-local. Missing ids fail without
+consulting the child's configured stores or OS keyring. The handoff snapshots
+values at launch; subsequent parent rotation is not reflected in that child.
+It does not grant environment exposure or widen a command audience. Existing
+`--grant` exposure, `for=COMMAND`, and receipt rules still apply. Secret values
+are carried in the pipe, never arguments or environment variables; hosts must
+also keep unrelated credentials out of the child environment they supply.
+
 Terminology:
 
 - **Launcher**: the process that starts a Harn session, such as the `harn` CLI
@@ -2980,15 +2997,12 @@ harn connect slack \
 harn connect linear \
   --client-id "$LINEAR_CLIENT_ID" \
   --client-secret "$LINEAR_CLIENT_SECRET"
-harn connect notion \
-  --client-id "$NOTION_CLIENT_ID" \
-  --client-secret "$NOTION_CLIENT_SECRET"
 harn connect generic acme https://mcp.example.com/mcp
 harn connect --generic acme https://mcp.example.com/mcp
 harn connect acme
 harn connect duffel --from-env DUFFEL_TEST_KEY
 harn connect --list
-harn connect --refresh notion
+harn connect --refresh linear
 harn connect --revoke slack
 ```
 
@@ -3175,6 +3189,7 @@ and `<name>.harnmod` for a module, unless `--out` redirects them.
 |---|---|
 | `--out <DIR>` | Write artifacts under `DIR`, mirroring the source tree, instead of beside each source. |
 | `--keep-going` | Continue after a source fails to compile. The exit code still reports the failure. |
+| `-j`, `--jobs <N>` | Compile up to `N` sources at once when walking a directory. Defaults to the machine's available parallelism. Output, artifacts, and the summary are identical for every `N`. |
 | `--artifact-contract` | Print the machine-readable adjacent-artifact compatibility contract. |
 
 ### Regenerating artifacts, and what cannot go stale
@@ -3602,7 +3617,7 @@ harn orchestrator replay <event-id>
 harn orchestrator replay-oracle
 
 # Inspect the dead-letter queue.
-harn orchestrator dlq list
+harn orchestrator dlq --list
 harn orchestrator dlq --replay <event-id>
 
 # Inspect the pending-queue head.
@@ -4076,11 +4091,11 @@ Manage standalone OAuth state for remote HTTP MCP servers.
 
 ```bash
 harn mcp redirect-uri
-harn mcp login notion
-harn mcp login https://mcp.notion.com/mcp
+harn mcp login linear
+harn mcp login https://mcp.linear.app/mcp
 harn mcp login my-server --url https://example.com/mcp --client-id <id> --client-secret <secret>
-harn mcp status notion
-harn mcp logout notion
+harn mcp status linear
+harn mcp logout linear
 ```
 
 `harn mcp login` resolves the server from the nearest `harn.toml` when you pass
@@ -4136,8 +4151,8 @@ Add a dependency to `harn.toml`.
 
 ```bash
 harn add github.com/burin-labs/harn-openapi@v1.2.3
-harn add @burin/notion-sdk@1.2.3
-harn add @burin/notion-sdk@1.2.3 --registry ./harn-package-index.toml
+harn add @burin/linear-sdk@1.2.3
+harn add @burin/linear-sdk@1.2.3 --registry ./harn-package-index.toml
 harn add https://github.com/user/my-lib --alias my-lib --tag v1.2.3
 harn add https://github.com/user/my-lib --alias my-lib --rev v1.2.3
 harn add https://github.com/user/my-lib --alias my-lib --branch main
@@ -4379,7 +4394,7 @@ Useful flags:
 Search the configured package registry index.
 
 ```bash
-harn package search notion
+harn package search linear
 harn package search --registry ./harn-package-index.toml --json
 ```
 
@@ -4436,8 +4451,8 @@ count, and safety summary.
 Show registry metadata for one package, optionally at a specific version.
 
 ```bash
-harn package info @burin/notion-sdk
-harn package info @burin/notion-sdk@1.2.3 --json
+harn package info @burin/linear-sdk
+harn package info @burin/linear-sdk@1.2.3 --json
 ```
 
 Metadata includes repository, license, Harn compatibility, exported

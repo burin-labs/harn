@@ -117,9 +117,9 @@ command = "npx"
 args = ["-y", "@modelcontextprotocol/server-github"]
 
 [[mcp]]
-name = "notion"
+name = "linear"
 transport = "http"
-url = "https://mcp.notion.com/mcp"
+url = "https://mcp.linear.app/mcp"
 
 ```
 
@@ -190,10 +190,10 @@ Declare a card source in `harn.toml`:
 
 ```toml
 [[mcp]]
-name = "notion"
+name = "docs"
 transport = "http"
-url = "https://mcp.notion.com/mcp"
-card = "https://mcp.notion.com/.well-known/mcp-card"
+url = "https://mcp.example.com/mcp"
+card = "https://mcp.example.com/.well-known/mcp-card"
 
 [[mcp]]
 name = "local-agent"
@@ -206,7 +206,7 @@ Fetch it from a pipeline:
 
 ```harn,ignore
 // Look up by registered server name.
-const card = mcp_server_card("notion")
+const card = mcp_server_card("docs")
 harness.stdio.log(card.description)
 for t in card.tools {
   harness.stdio.log("- ${t.name}")
@@ -286,10 +286,10 @@ normally.
 For HTTP MCP servers, Harn can reuse OAuth tokens stored with the CLI:
 
 ```bash
-harn mcp discover https://www.notion.com --json
+harn mcp discover https://example.com --json
 harn mcp redirect-uri
-harn mcp login notion
-harn mcp status notion
+harn mcp login linear
+harn mcp status linear
 ```
 
 OAuth client authentication uses one `auth` table. With no explicit
@@ -353,8 +353,8 @@ from OAuth discovery: use it to find where to connect, then let normal MCP
 OAuth protected-resource metadata discover where to authorize.
 
 ```bash
-harn mcp discover https://www.notion.com
-harn mcp discover https://www.notion.com --json
+harn mcp discover https://example.com
+harn mcp discover https://example.com --json
 ```
 
 For remote OAuth, Harn owns the whole browser flow, token exchange, token

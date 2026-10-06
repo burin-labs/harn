@@ -223,18 +223,25 @@ fn uppercase_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
     Ok(VmValue::String(arcstr::ArcStr::from(s.to_uppercase())))
 }
 
+/// `split(text, sep)` and `text.split(sep)` share this error so neither form
+/// silently picks a default separator.
+pub(crate) fn split_separator_required() -> VmError {
+    VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+        "split: separator is required (use split(text, sep) or text.split(sep))",
+    )))
+}
+
 #[harn_builtin(
     exposure = "pure",
     effects = [],
-    sig = "split(text: string?, separator?: string) -> list",
+    sig = "split(text: string?, separator: string) -> list",
     category = "strings"
 )]
 fn split_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let s = args.first().map(|a| a.display()).unwrap_or_default();
-    let sep = args
-        .get(1)
-        .map(|a| a.display())
-        .unwrap_or_else(|| " ".to_string());
+    let Some(sep) = args.get(1).map(|a| a.display()) else {
+        return Err(split_separator_required());
+    };
     let parts: Vec<VmValue> = s
         .split(&sep)
         .map(|p| VmValue::String(arcstr::ArcStr::from(p)))
@@ -442,8 +449,8 @@ fn join_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
 /// `start`/`end` are character offsets, not byte offsets. Both are clamped
 /// to `[0, len]`; a negative offset clamps to `0`; an `end` below `start`
 /// (after clamping) yields the empty string. Omitting `end` runs to the end
-/// of the string. This matches the documented spec `substring(start, end?)`,
-/// the `s[a:b]` slice operator, `list.slice`, and `bytes_slice`.
+/// of the string. This is the documented `substring(start, end?)` contract;
+/// unlike `s[a:b]` and `.slice`, a negative offset does not count from the end.
 #[expect(
     clippy::string_slice,
     reason = "char_range_to_byte_range returns clamped char-boundary offsets"
@@ -958,17 +965,11 @@ fn dedent_str(text: &str) -> String {
     out
 }
 
-#[expect(
-    clippy::string_slice,
-    reason = "end is walked back to a char boundary before slicing"
-)]
+#[expect(clippy::string_slice, reason = "end comes from floor_char_boundary")]
 fn common_prefix<'a>(a: &'a str, b: &str) -> &'a str {
     let end = a.bytes().zip(b.bytes()).take_while(|(x, y)| x == y).count();
     // Walk back to a char boundary so multibyte content stays intact.
-    let mut end = end;
-    while end > 0 && !a.is_char_boundary(end) {
-        end -= 1;
-    }
+    let end = a.floor_char_boundary(end);
     &a[..end]
 }
 

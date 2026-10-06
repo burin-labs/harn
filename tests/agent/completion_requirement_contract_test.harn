@@ -2,6 +2,7 @@ import { completion_requirement_evidence_packet } from "std/agent/completion_evi
 // Run: harn test tests/agent/completion_requirement_contract_test.harn
 import {
   CompletionRequirementEvidencePacket,
+  CompletionRequirementReport,
   completion_requirement_contract,
   completion_requirement_pending_feedback,
   completion_requirement_report,
@@ -693,6 +694,60 @@ pipeline test_receipt_satisfaction_requires_a_passing_reading(harness: Harness, 
   )
   assert_eq(unmet.rows[0].status, "unmet")
   assert(!unmet.complete)
+}
+
+fn verify_and_change_report(refs: list<int>, measurement: string) -> CompletionRequirementReport? {
+  const contract: CompletionRequirementContract = {
+    requirements: [
+      {
+        requirement_id: "verify",
+        name: "The declared verifier passes.",
+        evidence_roles: ["deterministic_verification"],
+      },
+      {
+        requirement_id: "change",
+        name: "The requested behavior is implemented.",
+        evidence_roles: ["deterministic_verification", "mutation_summary"],
+      },
+    ],
+  }
+  return completion_requirement_report(
+    contract,
+    [
+      {requirement_id: "verify", met: true, evidence_refs: refs},
+      {requirement_id: "change", met: true, evidence_refs: refs},
+    ],
+    trial_shaped_packet(measurement),
+  )
+}
+
+/**
+ * A passing receipt is a binding only for an item whose evidence contract is
+ * verification alone. An item that also accepts `mutation_summary` asked for
+ * judge-cited evidence, so the receipt must not close it on its own, and a
+ * citation of the assistant's own output never qualifies for it.
+ */
+pipeline test_a_green_verifier_settles_only_the_verification_only_row() {
+  // Only a tool action is cited: the receipt settles the verification-only
+  // row and nothing else.
+  const uncited = verify_and_change_report([15], "passed")
+  assert_eq(uncited.rows[0].status, "met")
+  assert_eq(uncited.rows[1].status, "unsupported")
+  assert(!uncited.complete)
+  // The assistant's own claim is not evidence the wider row allows.
+  const prose = verify_and_change_report([-1], "passed")
+  assert_eq(prose.rows[0].status, "met")
+  assert_eq(prose.rows[1].status, "unsupported")
+  const prose_red = verify_and_change_report([-1], "failed")
+  assert_eq(prose_red.rows[0].status, "unsupported")
+  assert_eq(prose_red.rows[1].status, "unsupported")
+  // A supported citation of an allowed role closes the wider row.
+  const mutation = verify_and_change_report([-3], "passed")
+  assert_eq(mutation.rows[1].status, "met")
+  assert(mutation.complete)
+  const verifier = verify_and_change_report([-2], "passed")
+  assert_eq(verifier.rows[1].status, "met")
+  assert(verifier.complete)
 }
 
 pipeline test_citation_of_nothing_still_fails_the_row(harness: Harness, task: unknown) {

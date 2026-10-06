@@ -2,6 +2,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd -P)"
 # shellcheck source=scripts/ci/cache_policy.sh
 source "${SCRIPT_DIR}/cache_policy.sh"
 # shellcheck source=scripts/lib/sha256.sh
@@ -45,7 +46,9 @@ sha256() {
 
 require_nextest_version() {
   local actual first_line program version
-  actual="$(cargo nextest --version)"
+  # Cargo prefers CARGO_HOME/bin for subcommands, ahead of the installer PATH.
+  # Invoke the installed executable so the version check and archive agree.
+  actual="$(cargo-nextest nextest --version)"
   first_line="${actual%%$'\n'*}"
   read -r program version _ <<< "$first_line"
   if [[ "$program" != "cargo-nextest" || "$version" != "$NEXTEST_VERSION" ]]; then
@@ -314,7 +317,10 @@ build_test_bundle() {
   cleanup_dir="$staging"
 
   prepare_harn_cli "$staging" "$commit" "$target_dir"
-  cargo nextest archive --locked --workspace --profile ci \
+  HARN_ENUM_COMPILER_ARCHIVE_STAGE=1 cargo-nextest nextest run --locked --workspace --profile ci \
+    -E 'test(open_enum_source_compatibility)'
+  cargo-nextest nextest archive --locked --workspace --profile ci \
+    --tool-config-file "harn-compiler-archive:${REPO_ROOT}/.config/nextest-compiler-archive.toml" \
     -E "$NEUTRAL_FILTER" \
     --archive-file "$staging/harn-tests.tar.zst"
   # The archive digest is written only after nextest creates it.
@@ -458,7 +464,7 @@ build_security_bundle() {
   # Match the following workspace test build's unified feature graph. The
   # filter limits archived binaries, not compilation, so security consumers
   # still receive only their selected tests without a second crate build.
-  cargo nextest archive --locked --workspace --profile ci \
+  cargo-nextest nextest archive --locked --workspace --profile ci \
     -E "$SECURITY_FILTER" \
     --archive-file "$staging/harn-security-tests.tar.zst"
   write_security_manifest "$staging" "$commit" "$(rustc_identity_sha256)"

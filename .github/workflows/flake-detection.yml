@@ -116,7 +116,7 @@ jobs:
 
       - name: Install cargo-nextest
         if: steps.touched.outputs.has_tests == 'true'
-        uses: taiki-e/install-action@9983c65e42da123ff25d1f78505eb6de315aa172 # v2.87.20
+        uses: taiki-e/install-action@4cef1412cce204788f482e778a0b9187f9626a29 # v2.87.21
         continue-on-error: true
         with:
           tool: nextest@0.9.132
@@ -211,7 +211,7 @@ jobs:
             iter=$(( completed + 1 ))
             printf -- '--- Iteration %d/%d (%ds budget left) ---\n' "$iter" "$ceiling" "$remaining"
             start=$(date +%s)
-            if ! cargo nextest run --locked \
+            if ! cargo-nextest nextest run --locked \
               --workspace \
               --profile flake-detection \
               --test-threads 8 \

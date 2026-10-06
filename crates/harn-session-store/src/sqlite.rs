@@ -278,7 +278,8 @@ impl SqliteSessionStore {
     }
 }
 
-fn stable_file_path(path: &Path) -> StoreResult<PathBuf> {
+/// Resolve the file identity used by SQLite handles and their observers.
+pub fn stable_file_path(path: &Path) -> StoreResult<PathBuf> {
     std::path::absolute(path).map_err(|error| StoreError::Backend(error.to_string()))
 }
 

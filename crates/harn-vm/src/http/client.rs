@@ -1,9 +1,10 @@
+pub(super) use super::retry_after::parse_retry_after_value;
 use crate::value::VmDictExt;
 use std::cell::RefCell;
 use std::collections::{HashMap, VecDeque};
 use std::path::Path;
 use std::sync::Arc;
-use std::time::{Duration, SystemTime};
+use std::time::Duration;
 
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
@@ -128,7 +129,7 @@ pub(super) fn clear_http_streams() {
     HTTP_STREAMS.with(|streams| streams.borrow_mut().clear());
 }
 
-fn build_http_response(
+pub(super) fn build_http_response(
     status: i64,
     headers: crate::value::DictMap,
     body: String,
@@ -146,7 +147,7 @@ fn build_http_response(
     VmValue::dict(result)
 }
 
-fn build_http_download_response(
+pub(super) fn build_http_download_response(
     status: i64,
     headers: crate::value::DictMap,
     bytes_written: u64,
@@ -878,35 +879,6 @@ fn should_retry_transport(
     attempt < config.retry.max
         && method_is_retryable(&config.retry, method)
         && (error.is_timeout() || error.is_connect())
-}
-
-pub(super) fn parse_retry_after_value_at(value: &str, now: SystemTime) -> Option<Duration> {
-    let value = value.trim();
-    if value.is_empty() {
-        return None;
-    }
-
-    if let Ok(secs) = value.parse::<f64>() {
-        if !secs.is_finite() || secs < 0.0 {
-            return Some(Duration::from_millis(0));
-        }
-        let millis = (secs * 1_000.0) as u64;
-        return Some(Duration::from_millis(millis.min(MAX_RETRY_DELAY_MS)));
-    }
-
-    if let Ok(target) = httpdate::parse_http_date(value) {
-        let millis = target
-            .duration_since(now)
-            .map(|delta| delta.as_millis() as u64)
-            .unwrap_or(0);
-        return Some(Duration::from_millis(millis.min(MAX_RETRY_DELAY_MS)));
-    }
-
-    None
-}
-
-pub(super) fn parse_retry_after_value(value: &str) -> Option<Duration> {
-    parse_retry_after_value_at(value, SystemTime::now())
 }
 
 fn parse_retry_after_header(value: &reqwest::header::HeaderValue) -> Option<Duration> {

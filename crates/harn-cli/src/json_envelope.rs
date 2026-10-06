@@ -476,7 +476,7 @@ pub fn catalog() -> Vec<SchemaEntry> {
             command: "mcp presets",
             schema_version: crate::commands::mcp::presets::MCP_PRESETS_SCHEMA_VERSION,
             description:
-                "Canonical catalog of well-known MCP server presets (Notion, Linear, GitHub, filesystem): id, transport, command/url template, auth kind, and required placeholders.",
+                "Canonical catalog of well-known MCP server presets (Linear, GitHub, filesystem, and others): id, transport, command/url template, auth kind, and required placeholders.",
             schema_json: None,
         },
     ]

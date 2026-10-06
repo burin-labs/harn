@@ -1,0 +1,41 @@
+import { command_run } from "std/command"
+
+fn main(harness: Harness) {
+  const missing = "harn-absent-program-8932"
+  let caught = false
+  try {
+    command_run(harness.tools, [missing])
+  } catch (error) {
+    require error.kind == "not_found", "missing argv program must keep its typed spawn kind"
+    require error.missing_program == missing, "missing argv program must be named"
+    caught = true
+  }
+  require caught, "the argv spawn must fail"
+  if harness.system.platform().os != "windows" {
+    for command in [missing, "env VAR=1 " + missing, missing + " && true"] {
+      const result = command_run(harness.tools, {mode: "shell", shell_id: "sh", command: command})
+      require result.exit_code == 127, "missing shell program must exit 127"
+      require result.missing_program == missing, "missing shell program must be named"
+    }
+    const present = command_run(
+      harness.tools,
+      {mode: "shell", shell_id: "sh", command: "sh -c 'exit 127'"},
+    )
+    require present.exit_code == 127, "negative control must actually run and exit 127"
+    require present?.missing_program == nil,
+      "an installed program must not be classified as missing"
+    caught = false
+    try {
+      command_run(
+        harness.tools,
+        {mode: "auto", shell_id: "sh", command: missing + " 'one argument'"},
+      )
+    } catch (error) {
+      require error.kind == "not_found", "auto must use argv for a plain command"
+      require error.missing_program == missing, "auto must retain the program name"
+      caught = true
+    }
+    require caught, "auto must reach the argv spawn"
+  }
+  harness.stdio.println("ok")
+}

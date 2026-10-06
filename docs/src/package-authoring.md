@@ -321,7 +321,7 @@ write captures:
   version so `harn package outdated` can compare against the registry's latest
   release without re-reading the manifest. Registry dependencies may remain in
   `harn.toml` as semver ranges, for example
-  `notion-sdk-harn = { version = ">=1.2,<2.0" }`.
+  `linear-sdk-harn = { version = ">=1.2,<2.0" }`.
 - For registry-v2 Git entries, the immutable commit recorded by the index and
   the version provenance URL. Installation resolves the declared tag and
   refuses it if the resulting commit differs from the index.

@@ -103,6 +103,10 @@ pub fn classify(observation: any, policy: dict, prior_state: unknown) {
       {ready_label: policy.ready_label, observed_labels: obs.labels},
     )
   }
+  // Armed auto-merge enqueues itself; enqueueing again would be redundant.
+  if obs.auto_merge_armed {
+    return _result("queued", "wait", "all gates passed; auto-merge is armed", {})
+  }
   // Cleared all gates: queue or admin-merge depending on repo policy.
   if policy.merge_queue_enabled {
     return _result(

@@ -1,5 +1,6 @@
 // Run: harn test personas/merge_captain/tests/classifier_test.harn
 import { classify, verify } from "../lib/classifier"
+import { normalize_pr } from "../lib/github_adapter"
 import { from_github } from "../lib/observation"
 import { with_defaults } from "../lib/policy"
 
@@ -150,6 +151,57 @@ pipeline test_in_merge_queue_holds_state(harness: Harness, task: unknown) {
   const policy = _policy({})
   const obs = from_github(_pr({in_merge_queue: true}), _checks(true), policy.required_checks)
   const result = classify(obs, policy, "queued")
+  assert_eq(result.state, "queued")
+  assert_eq(result.action, "wait")
+}
+
+fn _rest_pr(overrides: dict) {
+  return {
+    number: 1,
+    title: "T",
+    state: "open",
+    draft: false,
+    merged: false,
+    mergeable: true,
+    mergeable_state: "clean",
+    approvals: 1,
+    review_decision: "APPROVED",
+    head: {sha: "abc", ref: "feat"},
+    base: {ref: "main", repo: {full_name: "x/y"}},
+    auto_merge: nil,
+  }
+    + overrides
+}
+
+/** `auto_merge` means armed, not queued: an armed PR that goes dirty still needs repair. */
+pipeline test_armed_auto_merge_is_not_queue_membership(harness: Harness, task: unknown) {
+  const policy = _policy({})
+  const pr = normalize_pr(
+    _rest_pr({auto_merge: {merge_method: "squash"}, mergeable: false, mergeable_state: "dirty"}),
+  )
+  assert(!pr.in_merge_queue)
+  assert(pr.auto_merge_armed)
+  const result = classify(from_github(pr, _checks(true), policy.required_checks), policy, "queued")
+  assert_eq(result.state, "dirty")
+}
+
+/** GitHub nulls `auto_merge` on queue entry; membership comes from GraphQL. */
+pipeline test_queued_pr_with_nulled_auto_merge_holds(harness: Harness, task: unknown) {
+  const policy = _policy({})
+  const pr = normalize_pr(_rest_pr({}), true)
+  const result = classify(from_github(pr, _checks(true), policy.required_checks), policy, "queued")
+  assert_eq(result.state, "queued")
+  assert_eq(result.action, "wait")
+}
+
+pipeline test_armed_pr_past_every_gate_is_not_enqueued_again(harness: Harness, task: unknown) {
+  const policy = _policy({})
+  const pr = normalize_pr(_rest_pr({auto_merge: {merge_method: "squash"}}))
+  const result = classify(
+    from_github(pr, _checks(true), policy.required_checks),
+    policy,
+    "waiting_checks",
+  )
   assert_eq(result.state, "queued")
   assert_eq(result.action, "wait")
 }

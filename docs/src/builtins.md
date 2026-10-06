@@ -101,8 +101,9 @@ harness.stdio.log(unwrap_err(bad))         // something went wrong
 | `toml_parse(str)` | str: string | value | Parse TOML string into Harn values. Throws on invalid TOML |
 | `toml_stringify(value)` | value: any | string | Serialize Harn value to TOML |
 | `json_validate(data, schema)` | data: any, schema: dict | bool | Validate data against a schema. Returns `true` if valid, throws with details if not |
-| `schema_check(data, schema)` | data: any, schema: dict | Result | Validate data against an extended schema and return `Result.Ok(data)` or `Result.Err({message, errors, issues, value?})` |
-| `schema_parse(data, schema)` | data: any, schema: dict | Result | Validate data and return `Result.Ok(data)` with `default` values applied recursively, or `Result.Err({message, errors, issues, value?})` |
+| `schema_check(data, schema)` | data: unknown, schema: dict or `schema_of(T)` | `Result<T, ...>` | Validate data against an extended schema and return `Result.Ok(data)` or `Result.Err({message, errors, issues, value?})` |
+| `schema_parse(data, schema)` | data: unknown, schema: dict or `schema_of(T)` | `Result<T, ...>` | Validate data and return `Result.Ok(data)` with `default` values applied recursively, or `Result.Err({message, errors, issues, value?})`. With `schema_of(T)` the `Ok` value is typed `T` |
+| `json_decode(text, schema)` | text: string, schema: dict or `schema_of(T)` | `Result<T, ...>` | Parse JSON and validate it in one step. Malformed JSON is an `Err` with the same record as a schema failure. See [Decode at the boundary](error-handling.md#decode-at-the-boundary) |
 | `schema_report(data, schema, apply_defaults?)` | data: any, schema: dict, bool (optional) | dict | Validate data and return `{ok, message, errors, issues, value?}` without wrapping in `Result` or throwing |
 | `schema_is(data, schema)` | data: any, schema: dict | bool | Validate data against a schema and return `true`/`false` without throwing |
 | `schema_expect(data, schema, apply_defaults?)` | data: any, schema: dict, bool (optional) | any | Validate data and return the normalized value, throwing on failure |
@@ -474,13 +475,13 @@ Sets also support method syntax: `my_set.union(other)`.
 | `trim(str)` | str: string | string | Remove leading and trailing whitespace |
 | `lowercase(str)` | str: string | string | Convert to lowercase |
 | `uppercase(str)` | str: string | string | Convert to uppercase |
-| `split(str, sep)` | str: string, sep: string | list | Split string by separator |
+| `split(str, sep)` | str: string, sep: string | list | Split string by separator. `sep` is required in both `split(str, sep)` and `str.split(sep)`; omitting it throws |
 | `starts_with(str, prefix)` | str: string, prefix: string | bool | Check if string starts with prefix |
 | `ends_with(str, suffix)` | str: string, suffix: string | bool | Check if string ends with suffix |
 | `contains(str, substr)` | str: string, substr: string | bool | Check if string contains substring. Also works on lists |
 | `replace(str, old, new)` | str: string, old: string, new: string | string | Replace all occurrences |
 | `join(list, sep)` | list: list, sep: string | string | Join list elements with separator |
-| `substring(str, start, end?)` | str: string, start: int, end: int | string | Extract the character range `[start, end)`; `end` defaults to the string length. Matches `.substring`, `s[a:b]`, and `list.slice` |
+| `substring(str, start, end?)` | str: string, start: int, end: int | string | Extract the character range `[start, end)`; `end` defaults to the string length. Out-of-range offsets clamp, and a negative offset clamps to `0`; use `s[a:b]` or `.slice` to count from the end |
 | `chars(str)` | str: string | list | Materialize a string into a list of single-character strings in one linear pass (ASCII chars are interned). Use this for cursor-style source scanning — see [Scanning large text](#scanning-large-text) — instead of repeated `substring`/`s[i]`, which are O(n) per call |
 | `unicode_normalize(str, form)` | str: string, form: `"NFC"\|"NFD"\|"NFKC"\|"NFKD"` | string | Normalize Unicode into the requested form |
 | `unicode_graphemes(str)` | str: string | list | Split a string into extended grapheme clusters |
@@ -760,7 +761,10 @@ Returns a list of dicts, one per match. Each dict contains:
   consistent with `substring`/`index_of`/`len`
 - `line` -- 1-based line of the match start (the equivalent of
   `text.count("\n", 0, start) + 1`), for positional diagnostics
-- Named capture groups (from `(?P<name>...)`) appear as additional keys
+- Named capture groups (from `(?P<name>...)`) appear as additional keys.
+  The names `match`, `groups`, `start`, `end`, and `line` are reserved: a
+  pattern that names a group with one of them throws instead of overwriting
+  the built-in value
 
 ```harn
 const results = regex_captures("(\\w+)@(\\w+)", "alice@example bob@test")
@@ -2590,7 +2594,7 @@ reuse the stored token automatically:
 
 ```bash
 harn mcp redirect-uri
-harn mcp login notion
+harn mcp login linear
 ```
 
 ### MCP server mode

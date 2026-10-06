@@ -355,6 +355,13 @@ pub(crate) fn strategy_for(language: &str) -> ResolutionStrategy {
         .unwrap_or(ResolutionStrategy::UnresolvedByDesign)
 }
 
+/// True when `language` has an entry in the import-rules table, which is
+/// what makes it source code for dependency purposes. Markdown, JSON,
+/// and the other indexed document formats have none.
+pub(crate) fn declares_import_rules(language: &str) -> bool {
+    rules().contains_key(language)
+}
+
 /// Resolve one import string into a [`ModuleTarget`].
 ///
 /// `from_relative_path` is the importing file, not its directory: Rust
@@ -826,7 +833,7 @@ fn resolve_relative(
     clippy::string_slice,
     reason = "both bounds are positions of ASCII quote bytes, so they are char boundaries"
 )]
-fn extract_string_literal(text: &str) -> Option<String> {
+pub(crate) fn extract_string_literal(text: &str) -> Option<String> {
     let bytes = text.as_bytes();
     let first = bytes.iter().position(|b| *b == b'"' || *b == b'\'')?;
     let quote = bytes[first];

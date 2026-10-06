@@ -31,9 +31,14 @@ can replay those same repairs after the branch was flattened. Repair commits
 must remain fetchable by their recorded IDs. A missing commit fails the run.
 
 The GitHub adapter identifies generated commits by the configured publisher's
-GitHub login and a valid GitHub signature. A local Git author name is not
-identity evidence. Unsigned, unknown, or other publishers' commits are repairs;
-an unavailable identity lookup fails the run. Repair merge commits are refused.
+GitHub login, a valid GitHub signature, and the exact refresh headline
+`chore: bump Harn runtime to vX.Y.Z`. A local Git author name is not identity
+evidence. Login and signature alone are not enough: a repair tool holding the
+same GitHub App credentials creates commits through the same signed API, and
+those commits carry the same evidence. Every other commit is a repair; an
+unavailable identity lookup fails the run. A refresh refuses to publish under
+any other headline, so its own output stays recognizable. Repair merge commits
+are refused.
 A patch conflict
 returns `repair_conflict` without publishing or arming auto-merge. Publication
 also rechecks the inspected pull-request head and refuses an observed change
@@ -123,6 +128,12 @@ jobs:
       # census, capability migrations, and deterministic formatting are applied
       # either way. Defaults to true.
       apply-behavior-preserving-fixes: true
+      # Optional comma-separated labels added to the bump PR each time it is
+      # created or refreshed. Blank entries are ignored and duplicates collapse
+      # case-insensitively. A name longer than 50 characters fails the run
+      # before refresh. The run also fails if GitHub does not report every
+      # label applied. Defaults to empty, which makes no labeling request.
+      labels: ""
     secrets:
       app-client-id: ${{ secrets.RELEASE_APP_CLIENT_ID }}
       app-private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
@@ -149,6 +160,12 @@ arbitrary orchestration ref.
   requested source commit using `HARN_BUMP_SOURCE_REVISION`. The installed
   release CLI owns this state machine, so commit-targeted bumps require a
   release whose embedded `std/bump` supports the input.
+- Newer release while a bump PR is open: the run refreshes that PR in place.
+  The branch name and PR number stay the same. The branch is reset to the base
+  plus one signed refresh commit for the newer target, with every repair
+  replayed into it and recorded as a `Harn-Repair-Commit` trailer. The PR is
+  closed only when the refreshed tree already matches the base. Labels from the
+  `labels` input are added again on each refresh.
 - Old implicit parameters: before caller regeneration or strict validation,
   the target runtime translates each checker-owned omitted annotation to
   explicit `any`. The printed typed census names scanned, changed, pending,

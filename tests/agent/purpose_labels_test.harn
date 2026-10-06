@@ -2,8 +2,11 @@
 //
 // Deterministic unit tests for the purpose-label declaration grammar. These
 // cover the pure half of the mechanism: option normalization, label clamping,
-// and extracting the declaration out of one turn's prose. The event contract
-// and its wire shape are proven separately by the Rust ACP fixture test.
+// and extracting the declaration out of one turn's prose. The last two run the
+// real loop on a mock script to prove the label reaches the tool-call start
+// event as `intent`. The wire shapes are proven separately by Rust tests.
+import { agent_capture_events } from "std/agent/events"
+import { agent_loop } from "std/agent/loop"
 import {
   agent_purpose_label_config,
   agent_purpose_label_extract,
@@ -12,6 +15,7 @@ import {
   agent_purpose_label_prompt_fragment,
   agent_purpose_label_turn_nudge,
 } from "std/agent/purpose_labels"
+import { llm_text, llm_tool_call, with_llm_script } from "std/testing"
 
 pipeline test_purpose_labels_default_off(harness: Harness, task: unknown) {
   const config = agent_purpose_label_config()
@@ -172,4 +176,83 @@ pipeline test_purpose_label_orphan_recovery_is_anchored(harness: Harness, task: 
   )
   assert(result.declared == false)
   assert(result.label == "")
+}
+
+fn intent_tools() {
+  return tool_define(
+    tool_registry(),
+    "inspect",
+    "Inspect the target.",
+    {
+      handler: { _args -> "artifact list" },
+      parameters: {},
+      returns: {type: "string"},
+      annotations: {kind: "read"},
+    },
+  )
+}
+
+/**
+ * Run one declared tool turn through the real loop and return the tool-call
+ * start event and every purpose-label event it produced.
+ */
+fn intent_run(harness: Harness, purpose_labels: bool) -> dict {
+  const session = "purpose-intent-" + harness.random.uuid()
+  return with_llm_script(
+    harness.llm,
+    [
+      llm_tool_call("inspect", {}, "inspect-1")
+        + {text: "<purpose>  Looking for\n PR 456 artifacts </purpose>"},
+      llm_text("Done. ##DONE##"),
+    ],
+    { ->
+      const captured = agent_capture_events(
+        harness.agent,
+        session,
+        { ->
+          agent_loop(
+            harness,
+            "Find the PR 456 artifacts.",
+            nil,
+            {
+              provider: "mock",
+              session_id: session,
+              tools: intent_tools(),
+              purpose_labels: purpose_labels,
+              loop_until_done: true,
+              max_iterations: 3,
+              final_wrapup: false,
+            },
+          )
+        },
+      )
+      const starts = captured.events.filter(
+        { event -> event.type == "tool_call" && event?.tool_call_id == "inspect-1" },
+      )
+        .to_list()
+      assert_eq(len(starts), 1, "the scripted call must reach dispatch exactly once")
+      return {
+        start: starts[0],
+        labels: captured.events.filter({ event -> event.type == "purpose_label" }).to_list(),
+      }
+    },
+  )
+}
+
+/**
+ * The batch's declared heading rides the tool-call start event as `intent`,
+ * from the same extraction that publishes the `purpose_label` event.
+ */
+pipeline test_purpose_label_reaches_the_tool_call_event_as_intent(harness: Harness, task: unknown) {
+  const run = intent_run(harness, true)
+  assert_eq(len(run.labels), 1)
+  assert_eq(run.labels[0].label, "Looking for PR 456 artifacts")
+  assert_eq(run.start?.intent, run.labels[0].label)
+}
+
+/** Labels stay opt-in: with the option off the call carries no intent. */
+pipeline test_tool_call_has_no_intent_when_labels_are_off(harness: Harness, task: unknown) {
+  const run = intent_run(harness, false)
+  assert_eq(len(run.labels), 0)
+  assert_eq(run.start?.intent, nil)
 }

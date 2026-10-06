@@ -1,5 +1,5 @@
-["call:edit","no_tool_call_intended"]
+["tool_call_intended","no_tool_call_intended","ambiguous"]
 llm
 ambiguous
 error
-refused
+false

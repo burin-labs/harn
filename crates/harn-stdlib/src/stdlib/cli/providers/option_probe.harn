@@ -239,6 +239,8 @@ pub fn provider_option_probe_classify(outcome: unknown) -> ProviderOptionProbeAt
     } else {
       ""
     },
+    retry_after_ms: to_int(raw?.retry_after_ms),
+    retry_after_exceeds_cap: raw?.retry_after_exceeds_cap == true,
     error: message,
   }
 }
@@ -316,6 +318,32 @@ pub fn provider_option_probe_retry_result(
 ) -> ProviderOptionProbeAttempt {
   const combined = __append_accounting(second, first)
   return combined + {retry_count: (combined.retry_count ?? 0) + 1}
+}
+
+/**
+ * One recovery request per option; persistent rate limits remain unmeasured.
+ * @effects: []
+ * @errors: []
+ */
+pub fn provider_option_probe_retry_delay_ms(attempt: ProviderOptionProbeAttempt) -> int? {
+  if attempt.verdict != "inconclusive" || (attempt.retry_count ?? 0) > 0 {
+    return nil
+  }
+  if attempt.reason == "timeout" {
+    return 0
+  }
+  if attempt.reason == "rate_limit" {
+    if attempt.retry_after_exceeds_cap == true {
+      return nil
+    }
+    const delay = attempt.retry_after_ms ?? 1000
+    // Do not retry before the provider's deadline or hold a probe indefinitely.
+    if delay < 0 || delay > 60000 {
+      return nil
+    }
+    return delay
+  }
+  return nil
 }
 
 /**
@@ -454,10 +482,13 @@ fn main(harness: Harness) {
   let attempt = provider_option_probe_classify(
     __attempt(harness.llm, provider, model, option, args.max_tokens),
   )
-  // One retry after a transport timeout: a scale-to-zero endpoint can spend
-  // the whole first request cold-starting (Fireworks Nemotron Lightning timed
-  // out at ~120 s, then answered every option within seconds).
-  if attempt.verdict == "inconclusive" && (attempt.reason ?? "") == "timeout" {
+  // Honor the provider's bounded Retry-After hint for rate limits and retain
+  // the existing immediate timeout retry.
+  const retry_delay_ms = provider_option_probe_retry_delay_ms(attempt)
+  if retry_delay_ms != nil {
+    if retry_delay_ms > 0 {
+      harness.clock.sleep_ms(retry_delay_ms)
+    }
     const second = provider_option_probe_classify(
       __attempt(harness.llm, provider, model, option, args.max_tokens),
     )

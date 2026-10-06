@@ -192,6 +192,7 @@
                 "scope_classifier_verdict",
                 "self_consistency_tie",
                 "session_closed",
+                "session_health",
                 "structural_validator_decision",
                 "subagent_join",
                 "subagent_stop",
@@ -315,7 +316,8 @@
             "host_bridge_unimplemented",
             "agent_loop_protocol_failure",
             "parse_dropped",
-            "generic_throw"
+            "generic_throw",
+            "managed_spend_paused"
           ]
         },
         "message": { "type": "string" },
@@ -369,12 +371,15 @@
             "host_bridge_unimplemented",
             "agent_loop_protocol_failure",
             "parse_dropped",
-            "generic_throw"
+            "generic_throw",
+            "managed_spend_paused"
           ]
         },
         "category": { "type": "string" },
         "kind": { "type": "string" },
         "reason": { "type": "string" },
+        "origin": { "type": "string" },
+        "rule": { "type": "string" },
         "code": { "type": "string" },
         "retryable": { "type": "boolean" },
         "retryAfterMs": { "type": "integer" },
@@ -527,6 +532,8 @@
         "errorCategory": { "type": "string" },
         "executionDurationMs": { "type": "number", "minimum": 0 },
         "executor": {},
+        "health": { "type": "object" },
+        "intent": { "type": "string", "minLength": 1, "maxLength": 200 },
         "mutationStatus": { "$ref": "#/$defs/ToolMutationStatus" },
         "parsing": { "type": "boolean" },
         "rawInputPartial": { "type": "string" }

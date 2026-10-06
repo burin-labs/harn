@@ -54,7 +54,7 @@ pub use execution::{
 };
 pub use opcode::{
     opcode_abi_fingerprint, Op, OperandKind, Portability, OPCODE_ABI_ARTIFACT_VERSION,
-    OPCODE_ABI_FINGERPRINT_V4,
+    OPCODE_ABI_FINGERPRINT_V4, OPCODE_ABI_FINGERPRINT_V5,
 };
 pub use program::{BindingTypeSlot, Chunk, CompiledFunction, Constant, LocalSlotInfo, ParamSlot};
 

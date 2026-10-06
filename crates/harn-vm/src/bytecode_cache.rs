@@ -25,7 +25,8 @@
 //! fp_len       : u32
 //! codegen_fp   : [u8; fp_len]   CODEGEN_FINGERPRINT of the producing build
 //! compiler_tag : u8        bitmask of active CompilerOptions
-//! kind         : u8        1 = entry chunk, 2 = module artifact
+//! kind         : u8        1 = entry chunk, 2 = module artifact,
+//!                           3 = module interface
 //! provenance   : u8        authority the artifact was compiled under
 //! source_hash  : [u8; 32]
 //! context_hash : [u8; 32]
@@ -54,16 +55,20 @@ use sha2::{Digest, Sha256};
 use crate::chunk::{CachedChunk, Chunk};
 use crate::compiler::CompilerOptions;
 use crate::context_manifest::{
-    ContextManifest, GraphLinkTable, ManifestCheck, ManifestFile, ManifestUnreadable,
-    ManifestUnresolved,
+    ContextManifest, GraphLinkTable, ManifestCheck, ManifestFile, ManifestPackageLink,
+    ManifestUnreadable, ManifestUnresolved,
 };
 use crate::module_artifact::{ModuleArtifact, ModuleCompilationContext, ModuleProvenance};
 use crate::module_source::{self, ModuleSource};
 
 mod graph;
+mod interface;
 pub(crate) use graph::derive_interface as module_compilation_context_with_manifest;
 pub use graph::prepare_entry_store;
-use graph::relative_path_label;
+use graph::{
+    hash_import_node, is_bare_import, relocatable_graph_hash, seed_entry_context_hasher, ImportNode,
+};
+pub(crate) use interface::InterfaceSlot;
 
 /// Header magic for all bytecode-cache artifact families.
 pub const MAGIC: &[u8; 8] = b"HARNBC\0\0";
@@ -94,7 +99,10 @@ pub const MAGIC: &[u8; 8] = b"HARNBC\0\0";
 /// and legacy-ambient bits only, never `privileged_wire_authority`.
 /// v14: entry manifests retain raw reachable package aliases so a cache hit can
 /// revalidate current manifest/lock authority without rebuilding the graph.
-pub const SCHEMA_VERSION: u32 = 14;
+/// v15: manifests record what each bare (package-shaped) import resolved to,
+/// so a reinstalled package generation invalidates them; module interfaces are
+/// persisted beside their manifest (kind 3).
+pub const SCHEMA_VERSION: u32 = 15;
 
 /// Compile-time Harn release. Cache files written by a different release
 /// are rejected on load.
@@ -129,6 +137,14 @@ pub const MODULE_CACHE_EXTENSION: &str = "harnmod";
 const KIND_ENTRY_CHUNK: u8 = 1;
 /// On-disk discriminant for a [`ModuleArtifact`] payload.
 const KIND_MODULE_ARTIFACT: u8 = 2;
+/// On-disk discriminant for a module's derived imported interface plus the
+/// manifest that keeps it reusable. See [`InterfaceSlot`].
+const KIND_MODULE_INTERFACE: u8 = 3;
+
+/// Extension for persisted module interfaces. They are a function of a
+/// module's place in a host tree, not of its bytes alone, so they live only in
+/// the shared cache and are never shipped adjacent to source.
+pub const INTERFACE_CACHE_EXTENSION: &str = "harnifc";
 
 /// Environment override for the cache directory. When set, takes
 /// precedence over the XDG and home-directory fallbacks.
@@ -231,6 +247,10 @@ impl CacheKey {
     /// source byte, compiler build, or embedded stdlib still invalidates it.
     /// This is the key used by packaged adjacent artifacts; ordinary shared
     /// cache entries remain anchored to canonical host paths.
+    ///
+    /// The graph half is [`graph::relocatable_graph_hash`], which lists what it
+    /// admits. The only environment read is `compiler_tag`: the documented
+    /// optimization and legacy-ambient switches, which change emitted bytecode.
     pub fn from_relocatable_source(source_path: &Path, source: &str) -> Self {
         let source_hash = sha256(source.as_bytes());
         let context_hash = hash_relocatable_user_imports(source_path, source);
@@ -263,6 +283,9 @@ impl CacheKey {
     /// dependency body remains protected by its own source-local key.
     /// Diagnostic paths are rebound when the artifact is loaded, so adjacent
     /// and packaged artifacts remain relocatable without aliasing attribution.
+    /// No path reaches the key: the interface digest frames sorted,
+    /// deduplicated names ([`ModuleCompilationContext::new`]), and provenance
+    /// is the caller's declared authority.
     pub fn from_module_source(
         source: &ModuleSource,
         compilation_context: &ModuleCompilationContext,
@@ -331,6 +354,10 @@ impl CacheKey {
     /// source paths are rebound at load time, so identical source and compiler
     /// inputs share one relocatable artifact across paths.
     pub fn module_filename(&self) -> String {
+        self.identity_filename(MODULE_CACHE_EXTENSION)
+    }
+
+    fn identity_filename(&self, extension: &str) -> String {
         let mut hasher = Sha256::new();
         hasher.update(self.source_hash);
         hasher.update(self.context_hash);
@@ -341,7 +368,7 @@ impl CacheKey {
         // path and overwrite each other.
         hasher.update([provenance_tag(self.provenance)]);
         let identity: [u8; 32] = hasher.finalize().into();
-        format!("{}.{}", hex(&identity), MODULE_CACHE_EXTENSION)
+        format!("{}.{}", hex(&identity), extension)
     }
 }
 
@@ -1290,21 +1317,39 @@ fn walk_import_graph_fingerprinted(
         let Some(resolved) = harn_modules::resolve_import_path(&anchor, &import) else {
             // Unresolved imports get a sentinel keyed by their resolution
             // anchor so that dropping a real file under that anchor later
-            // produces a different key.
-            let sentinel = anchor.join(format!("__unresolved__/{import}"));
+            // produces a different key. The anchor is the caller's spelling of
+            // the importing file; canonicalize it like every resolved node, or
+            // a symlinked or relative spelling leaks into both keys.
+            let anchor_identity = module_source::canonical_identity(&anchor);
+            let sentinel = anchor_identity.join(format!("__unresolved__/{import}"));
             if let std::collections::btree_map::Entry::Vacant(slot) = visited.entry(sentinel) {
                 slot.insert(ImportNode::Unresolved {
+                    anchor: anchor_identity.clone(),
                     import: Arc::clone(&import),
                 });
                 if let Some(m) = manifest.as_mut() {
                     m.unresolved.push(ManifestUnresolved {
                         anchor: anchor.clone(),
+                        anchor_identity,
                         import: import.to_string(),
                     });
                 }
             }
             continue;
         };
+        // A package-shaped import resolves through the installed generation,
+        // which a reinstall swaps while the old generation's files stay on
+        // disk unchanged. Stats on those files cannot see the swap, so the
+        // resolution itself is recorded and re-asked.
+        if is_bare_import(&import) {
+            if let Some(m) = manifest.as_mut() {
+                m.package_links.push(ManifestPackageLink {
+                    anchor: anchor.clone(),
+                    import: import.to_string(),
+                    resolved: resolved.clone(),
+                });
+            }
+        }
         let canonical = module_source::canonical_identity(&resolved);
         if visited.contains_key(&canonical) {
             continue;
@@ -1413,35 +1458,13 @@ fn walk_import_graph_fingerprinted(
 
     let mut canonical_hasher = Sha256::new();
     seed_entry_context_hasher(&mut canonical_hasher, codegen_fingerprint);
-    let mut relocatable_hasher = Sha256::new();
-    relocatable_hasher.update(b"relocatable-entry-graph-v1\0");
-    seed_entry_context_hasher(&mut relocatable_hasher, codegen_fingerprint);
-
-    let entry_identity = module_source::canonical_identity(source_path);
-    let entry_dir = entry_identity.parent().unwrap_or(Path::new(""));
-    let mut relocatable_nodes = Vec::with_capacity(visited.len());
     for (path, node) in &visited {
         canonical_hasher.update(path.to_string_lossy().as_bytes());
         canonical_hasher.update(b"\0");
         hash_import_node(&mut canonical_hasher, node);
         canonical_hasher.update(b"\0");
-
-        let Some(label) = relative_path_label(entry_dir, path) else {
-            // A dependency on another filesystem root cannot be moved as one
-            // closed tree. Preserve fail-closed behavior by retaining its
-            // canonical identity in the packaged key.
-            relocatable_nodes.push((path.to_string_lossy().replace('\\', "/"), node));
-            continue;
-        };
-        relocatable_nodes.push((label, node));
     }
-    relocatable_nodes.sort_by(|left, right| left.0.cmp(&right.0));
-    for (path, node) in relocatable_nodes {
-        relocatable_hasher.update(path.as_bytes());
-        relocatable_hasher.update(b"\0");
-        hash_import_node(&mut relocatable_hasher, node);
-        relocatable_hasher.update(b"\0");
-    }
+    let relocatable = relocatable_graph_hash(source_path, &visited, codegen_fingerprint);
 
     // Sorted so one graph always serializes to one byte sequence, whatever
     // order the frontier happened to pop.
@@ -1450,49 +1473,16 @@ fn walk_import_graph_fingerprinted(
         m.unresolved
             .sort_by(|a, b| (&a.anchor, &a.import).cmp(&(&b.anchor, &b.import)));
         m.unreadable.sort_by(|a, b| a.path.cmp(&b.path));
+        m.package_links
+            .sort_by(|a, b| (&a.anchor, &a.import).cmp(&(&b.anchor, &b.import)));
+        m.package_links.dedup();
     }
     GraphHashes {
         canonical: canonical_hasher.finalize().into(),
-        relocatable: relocatable_hasher.finalize().into(),
+        relocatable,
         manifest,
         entry_compilation_context,
     }
-}
-
-fn seed_entry_context_hasher(hasher: &mut Sha256, codegen_fingerprint: &str) {
-    hasher.update(b"stdlib-digest\0");
-    hasher.update(crate::runtime_content::embedded_stdlib_digest_bytes());
-    hasher.update(b"\0");
-    // Fold in the compiler's code-generation fingerprint so a compiler change
-    // that alters emitted bytecode for unchanged source busts stale cache
-    // entries within a single version — the gap that masked the #2610 fix until
-    // the cache was cleared by hand. See `build.rs` and `CODEGEN_FINGERPRINT`.
-    hasher.update(b"codegen-fingerprint\0");
-    hasher.update(codegen_fingerprint.as_bytes());
-    hasher.update(b"\0");
-}
-
-fn hash_import_node(hasher: &mut Sha256, node: &ImportNode) {
-    match node {
-        ImportNode::Resolved { content } => {
-            hasher.update(b"resolved\0");
-            hasher.update(content.as_bytes());
-        }
-        ImportNode::Unresolved { import } => {
-            hasher.update(b"unresolved\0");
-            hasher.update(import.as_bytes());
-        }
-        ImportNode::IoError { kind } => {
-            hasher.update(b"ioerror\0");
-            hasher.update(kind.as_bytes());
-        }
-    }
-}
-
-enum ImportNode {
-    Resolved { content: Arc<str> },
-    Unresolved { import: Arc<str> },
-    IoError { kind: String },
 }
 
 #[cfg(test)]

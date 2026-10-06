@@ -29,7 +29,16 @@
 //! - **`deadline` expiry**: the deadline `Instant` is captured when the
 //!   builtin starts; the wait loop compares against `Instant::now()`.
 
-use std::cell::RefCell;
+mod context;
+
+#[cfg(test)]
+pub(crate) use context::install_for_vm;
+pub use context::{
+    install, installed, requested, with_deadline, InterruptSources, OpInterruptGuard,
+};
+#[cfg_attr(not(target_os = "linux"), allow(unused_imports))]
+pub(crate) use context::{operation_budget_expired, requested_error, with_operation_budget};
+
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, LazyLock, Mutex};
@@ -291,16 +300,6 @@ fn push_unique<T: Copy + Eq>(values: &mut Vec<T>, value: T) {
     }
 }
 
-#[derive(Clone, Default)]
-struct OpInterrupt {
-    cancel: Option<Arc<AtomicBool>>,
-    deadline: Option<Instant>,
-}
-
-thread_local! {
-    static CURRENT: RefCell<Option<OpInterrupt>> = const { RefCell::new(None) };
-}
-
 #[derive(Clone, Debug)]
 struct ActiveProcessCleanup {
     pid: Option<u32>,
@@ -426,79 +425,6 @@ fn signal_active_process_cleanups_matching(
         }
     }
     report
-}
-
-/// Guard returned by [`install`]. Restores the previously installed
-/// interrupt context on drop so nested builtin dispatch (child VMs running
-/// on the same thread) composes correctly.
-pub struct OpInterruptGuard {
-    // Outer Option = "guard owes a restore"; inner Option is the previous
-    // thread-local slot value (which can itself be None).
-    #[allow(clippy::option_option)]
-    prev: Option<Option<OpInterrupt>>,
-}
-
-impl Drop for OpInterruptGuard {
-    fn drop(&mut self) {
-        if let Some(prev) = self.prev.take() {
-            CURRENT.with(|slot| *slot.borrow_mut() = prev);
-        }
-    }
-}
-
-/// Install the interrupt sources a blocking builtin on this thread should
-/// observe: an optional cooperative cancel token and an optional deadline.
-/// The VM calls this around sync builtin dispatch; tests use it to simulate
-/// scope cancellation without booting a full interpreter.
-pub fn install(cancel: Option<Arc<AtomicBool>>, deadline: Option<Instant>) -> OpInterruptGuard {
-    let prev = CURRENT.with(|slot| slot.borrow_mut().replace(OpInterrupt { cancel, deadline }));
-    OpInterruptGuard { prev: Some(prev) }
-}
-
-/// Bound a blocking operation, including synchronous process setup, without
-/// replacing its caller's cancellation token or extending an earlier deadline.
-/// Dropping the guard restores the previous interrupt context.
-pub fn with_deadline(deadline: Instant) -> OpInterruptGuard {
-    let parent = CURRENT
-        .with(|slot| slot.borrow().clone())
-        .unwrap_or_default();
-    install(
-        parent.cancel,
-        Some(
-            parent
-                .deadline
-                .map_or(deadline, |earlier| earlier.min(deadline)),
-        ),
-    )
-}
-
-/// Returns `true` when an interrupt context is installed on this thread.
-///
-/// This is separate from [`requested`] so blocking operations can decide
-/// whether to use a short heartbeat poll or a true indefinite wait.
-pub fn installed() -> bool {
-    CURRENT.with(|slot| slot.borrow().is_some())
-}
-
-/// Returns `true` when the interrupt context installed on this thread has
-/// fired: the cancel token is set, or the deadline has passed. Cheap enough
-/// to call from a ~20ms poll loop. Returns `false` when nothing is armed.
-pub fn requested() -> bool {
-    CURRENT.with(|slot| {
-        let ctx = slot.borrow();
-        let Some(ctx) = ctx.as_ref() else {
-            return false;
-        };
-        if ctx
-            .cancel
-            .as_ref()
-            .is_some_and(|token| token.load(Ordering::SeqCst))
-        {
-            return true;
-        }
-        ctx.deadline
-            .is_some_and(|deadline| Instant::now() >= deadline)
-    })
 }
 
 /// Put the child in its own session (`setsid()`), which also makes it the
@@ -1146,10 +1072,6 @@ pub fn capture_output_interruptible_in_session(
     ))
 }
 
-#[cfg(all(test, unix))]
-#[path = "op_interrupt_process_tests.rs"]
-mod process_tests;
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1186,6 +1108,64 @@ mod tests {
             .expect("monotonic clock supports a 1ms test lookback");
         let _guard = install(None, Some(expired));
         assert!(requested());
+    }
+
+    #[test]
+    fn requested_error_follows_the_vm_interrupt_precedence() {
+        let expired = Instant::now()
+            .checked_sub(Duration::from_millis(1))
+            .expect("monotonic clock supports a 1ms test lookback");
+        let thrown = || match requested_error() {
+            Some(crate::VmError::Thrown(value)) => value.display(),
+            other => panic!("expected a thrown interrupt error, got {other:?}"),
+        };
+        let cancel = Arc::new(AtomicBool::new(true));
+        let _all = install_for_vm(Some(cancel.clone()), Some(expired), Some(expired));
+        assert_eq!(thrown(), "kind:interrupted:handler_timeout");
+        // An operation bound keeps the caller's handler window.
+        let _bounded = with_deadline(Instant::now() + Duration::from_mins(1));
+        assert_eq!(thrown(), "kind:interrupted:handler_timeout");
+        let _cancel_and_scope = install_for_vm(Some(cancel), Some(expired), None);
+        assert!(requested_error().is_some_and(|error| crate::cancellation::is_cancellation(&error)));
+        let _scope = install_for_vm(None, Some(expired), None);
+        assert_eq!(thrown(), "Deadline exceeded");
+    }
+
+    #[test]
+    fn an_operation_budget_is_not_a_caller_interrupt() {
+        let expired = Instant::now()
+            .checked_sub(Duration::from_millis(1))
+            .expect("monotonic clock supports a 1ms test lookback");
+        let thrown = || match requested_error() {
+            Some(crate::VmError::Thrown(value)) => value.display(),
+            other => panic!("expected a thrown interrupt error, got {other:?}"),
+        };
+        {
+            let _budget = with_operation_budget(expired);
+            assert!(requested(), "an expired budget still stops blocking waits");
+            if let Some(error) = requested_error() {
+                panic!("an internal budget surfaced as the caller's interrupt: {error}");
+            }
+            assert!(operation_budget_expired());
+        }
+        assert!(!installed(), "the budget guard restores an empty slot");
+        // Every caller interrupt keeps its own kind inside an expired budget.
+        let cancel = Arc::new(AtomicBool::new(true));
+        let _handler = install_for_vm(Some(cancel.clone()), Some(expired), Some(expired));
+        let _budget = with_operation_budget(expired);
+        assert!(!operation_budget_expired());
+        assert_eq!(thrown(), "kind:interrupted:handler_timeout");
+        let _cancelled = install_for_vm(Some(cancel), Some(expired), None);
+        let _budget = with_operation_budget(expired);
+        assert!(requested_error().is_some_and(|error| crate::cancellation::is_cancellation(&error)));
+        let _scope = install_for_vm(None, Some(expired), None);
+        let _budget = with_operation_budget(expired);
+        assert_eq!(thrown(), "Deadline exceeded");
+        // A live caller deadline is not shortened into a caller error.
+        let _live = install_for_vm(None, Some(Instant::now() + Duration::from_mins(1)), None);
+        let _budget = with_operation_budget(expired);
+        assert!(operation_budget_expired());
+        assert!(requested_error().is_none());
     }
 
     #[test]
@@ -1360,5 +1340,114 @@ mod tests {
         initialize_process_owner_group_journal(&token)
             .expect_err("preexisting journal symlink must fail closed");
         std::fs::remove_file(journal).expect("remove owner journal symlink");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn interrupted_wait_kills_process_group() {
+        // Child spawns a grandchild; the whole group must die on interrupt.
+        let mut command = std::process::Command::new("sh");
+        command.args(["-c", "sleep 30 & wait"]);
+        configure_kill_group(&mut command);
+        let mut child = command.spawn().expect("spawn sh");
+        let pgid = child.id();
+
+        let cancel = Arc::new(AtomicBool::new(true));
+        let _guard = install(Some(cancel), None);
+        let started = Instant::now();
+        let outcome = wait_child_interruptible(&mut child, None).expect("wait");
+        assert!(matches!(outcome, ChildWait::Interrupted(_, _)));
+        assert!(started.elapsed() < Duration::from_secs(10));
+
+        // kill(-pgid, 0) fails with ESRCH once every member is gone.
+        extern "C" {
+            fn kill(pid: i32, sig: i32) -> i32;
+        }
+        let group_gone = || unsafe { kill(-(pgid as i32), 0) } != 0;
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !group_gone() && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        assert!(group_gone(), "process group {pgid} survived interrupt");
+    }
+
+    /// Both halves of the escalation, on one pid each.
+    ///
+    /// A dead pid on its own cannot tell TERM -> grace -> KILL apart from an
+    /// immediate KILL: both leave the same corpse. So the polite process
+    /// writes a marker from inside its SIGTERM handler, and that file is the
+    /// only evidence that the first signal was ever sent. Reverting
+    /// `terminate_pid_tree_group_and_token_with_report` to a bare SIGKILL
+    /// leaves the marker absent; reverting it to a bare SIGTERM leaves the
+    /// immune pid alive.
+    #[cfg(unix)]
+    #[test]
+    fn escalating_terminate_kills_a_term_immune_child_and_asks_a_polite_one_first() {
+        use std::process::{Command, Stdio};
+
+        let dir = tempfile::tempdir().expect("temp dir");
+        let marker = dir.path().join("term-received.marker");
+
+        let mut immune = Command::new("sh")
+            .arg("-c")
+            .arg("trap '' TERM; while true; do sleep 0.05; done")
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("spawn term-immune child");
+        let mut polite = Command::new("sh")
+            .arg("-c")
+            .arg(format!(
+                "trap 'printf TERM > {}; exit 0' TERM; while true; do sleep 0.05; done",
+                marker.display()
+            ))
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("spawn polite child");
+
+        let immune_pid = immune.id();
+        let polite_pid = polite.id();
+
+        // Liveness first: a child that never started would make every clause
+        // below pass for the wrong reason.
+        let started = Instant::now();
+        while started.elapsed() < Duration::from_secs(5)
+            && !(process_exists(immune_pid) && process_exists(polite_pid))
+        {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert!(
+            process_exists(immune_pid) && process_exists(polite_pid),
+            "both probe children must be running before the terminate"
+        );
+        assert!(
+            !marker.exists(),
+            "the SIGTERM marker must not exist before the terminate"
+        );
+
+        let immune_report = terminate_pid_tree_group_and_token_with_report(immune_pid, None);
+        let polite_report = terminate_pid_tree_group_and_token_with_report(polite_pid, None);
+
+        let _ = immune.wait();
+        let _ = polite.wait();
+
+        assert!(
+            !process_exists(immune_pid),
+            "a child that ignores SIGTERM must still be gone: {immune_report:?}"
+        );
+        assert!(
+            !process_exists(polite_pid),
+            "the polite child must be gone: {polite_report:?}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&marker).unwrap_or_default(),
+            "TERM",
+            "the polite child must have handled SIGTERM before anything killed it"
+        );
+        assert!(
+            polite_report.attempted_signals.contains(&15),
+            "the escalation must record the SIGTERM it sent: {polite_report:?}"
+        );
     }
 }

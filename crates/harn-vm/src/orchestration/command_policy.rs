@@ -1339,7 +1339,7 @@ fn apply_command_rewrite(
         }
     }
     match string_field_raw(params, "mode").as_deref() {
-        Some("shell") => {
+        Some("shell" | "auto") => {
             params.remove("argv");
         }
         Some("argv") => {
@@ -1411,7 +1411,7 @@ fn command_request_json(params: &crate::value::DictMap) -> JsonValue {
         ),
         _ => None,
     });
-    let (shell, shell_resolution_error) = if mode == "shell" {
+    let (shell, shell_resolution_error) = if matches!(mode.as_str(), "shell" | "auto") {
         match crate::shells::resolve_shell_from_vm_params(params) {
             Ok(shell) => (
                 crate::llm::vm_value_to_json(&crate::shells::shell_descriptor_to_vm_value(&shell)),

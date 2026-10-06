@@ -113,7 +113,7 @@ jobs:
     if: >
       github.event_name != 'pull_request' ||
       github.event.pull_request.head.repo.full_name == github.repository
-    uses: burin-labs/.github/.github/workflows/runner-availability.yml@550bff235c4bf6818ece3b27e0905bcf48aaee8b
+    uses: burin-labs/.github/.github/workflows/runner-availability.yml@d59d828bd5d2dc226111498e51ab5d41da76d62f
     secrets:
       RELEASE_APP_CLIENT_ID: ${{ secrets.RELEASE_APP_CLIENT_ID }}
       RELEASE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
@@ -151,16 +151,11 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           SELFHOSTED_DISABLED: ${{ needs.runner-availability.outputs.selfhosted_disabled }}
           RUNNER_CAPACITY: ${{ needs.runner-availability.outputs.capacity }}
-          # The same switch the routing expression below reads. Without it here
-          # this step would report the owned census while the job ran on
-          # elastic paid capacity.
-          FLEET_EVACUATION: ${{ vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true' }}
 
   e2e:
     name: Slow E2E suite
     needs: [changes, runner-availability, e2e-capacity]
-    # The fleet-evacuation switch takes every event to elastic paid capacity.
-    # When it is off, main pushes prefer the big self-hosted rung: 24 cores at
+    # Main pushes prefer the big self-hosted rung: 24 cores at
     # no cost, and this suite compiles the CLI integration tests before running
     # them.
     # `online` rather than `idle` is the deliberate part. A main push is not
@@ -217,7 +212,7 @@ jobs:
           cache-workspace-crates: "true"
           cache-bin: false
       - name: Install cargo-nextest
-        uses: taiki-e/install-action@9983c65e42da123ff25d1f78505eb6de315aa172 # v2.87.20
+        uses: taiki-e/install-action@4cef1412cce204788f482e778a0b9187f9626a29 # v2.87.21
         with:
           tool: nextest@0.9.132
       - run: make test-e2e

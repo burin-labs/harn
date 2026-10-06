@@ -203,9 +203,10 @@ impl Compiler {
         params: &[harn_parser::TypedParam],
         body: &[harn_parser::SNode],
         extends: Option<&str>,
+        throws: Option<&harn_parser::TypeExpr>,
     ) -> Result<CompiledFunction, CompileError> {
         self.inner
-            .compile_pipeline_callable(program, name, params, body, extends)
+            .compile_pipeline_callable(program, name, params, body, extends, throws)
             .map(CompiledFunction::from_portable)
     }
 
@@ -215,9 +216,10 @@ impl Compiler {
         params: &[harn_parser::TypedParam],
         body: &[harn_parser::SNode],
         source_file: Option<String>,
+        throws: Option<&harn_parser::TypeExpr>,
     ) -> Result<CompiledFunction, CompileError> {
         self.inner
-            .compile_fn_body(type_params, params, body, source_file)
+            .compile_fn_body(type_params, params, body, source_file, throws)
             .map(CompiledFunction::from_portable)
     }
 
@@ -228,9 +230,10 @@ impl Compiler {
         params: &[harn_parser::TypedParam],
         body: &[harn_parser::SNode],
         source_file: Option<String>,
+        throws: Option<&harn_parser::TypeExpr>,
     ) -> Result<CompiledFunction, CompileError> {
         self.inner
-            .compile_named_fn_body(name, type_params, params, body, source_file)
+            .compile_named_fn_body(name, type_params, params, body, source_file, throws)
             .map(CompiledFunction::from_portable)
     }
 

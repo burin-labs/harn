@@ -40,7 +40,7 @@ use std::path::{Path, PathBuf};
 
 use harn_vm::clock::{Clock, RealClock};
 use harn_vm::orchestration::EvalPackCase;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 
 use crate::cli::EvalCodingAgentArgs;
@@ -116,6 +116,47 @@ impl Drop for EnvOverlay {
     }
 }
 
+/// Projection of the agent result's usage facts. Missing legacy facts stay unknown.
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+struct MeasuredUsage {
+    cost_usd: Option<f64>,
+    known_cost_usd: Option<f64>,
+    model_call_count: Option<u64>,
+    usage_unknown_calls: Option<u64>,
+    unpriced_calls: Option<u64>,
+    #[serde(skip_deserializing)]
+    pricing_known: bool,
+}
+
+impl MeasuredUsage {
+    fn from_summary(summary: &serde_json::Value) -> Self {
+        let mut usage: Self = serde_json::from_value(summary.clone()).unwrap_or_default();
+        usage.pricing_known = usage.unpriced_calls == Some(0);
+        if usage.known_cost_usd.is_none()
+            || usage.model_call_count.is_none()
+            || usage.usage_unknown_calls != Some(0)
+            || usage.unpriced_calls != Some(0)
+        {
+            usage.cost_usd = None;
+        }
+        usage
+    }
+}
+
+fn sum_complete_costs(costs: impl IntoIterator<Item = Option<f64>>) -> Option<f64> {
+    let costs = costs.into_iter().collect::<Vec<_>>();
+    if costs.is_empty() {
+        return None;
+    }
+    costs
+        .into_iter()
+        .try_fold(0.0, |sum, cost| cost.map(|cost| sum + cost))
+}
+
+fn sum_known_costs(costs: impl IntoIterator<Item = Option<f64>>) -> Option<f64> {
+    costs.into_iter().flatten().reduce(|sum, cost| sum + cost)
+}
+
 #[derive(Debug, Clone, Serialize)]
 struct RunReport {
     run_id: String,
@@ -137,8 +178,8 @@ struct RunReport {
     iterations: i64,
     input_tokens: i64,
     output_tokens: i64,
-    cost_usd: f64,
-    pricing_known: bool,
+    #[serde(flatten)]
+    usage: MeasuredUsage,
     tool_calls: usize,
     rejected_tool_calls: usize,
     tool_sequence: Vec<String>,
@@ -212,7 +253,8 @@ struct RollupReport {
     passed_runs: usize,
     failed_runs: usize,
     skipped_runs: usize,
-    total_cost_usd: f64,
+    total_cost_usd: Option<f64>,
+    known_cost_usd: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -238,7 +280,8 @@ struct EvalSummary {
     failed_runs: usize,
     skipped_runs: usize,
     diverged_comparisons: usize,
-    total_cost_usd: f64,
+    total_cost_usd: Option<f64>,
+    known_cost_usd: Option<f64>,
     rollups: EvalRollups,
     runs: Vec<RunReport>,
     comparisons: Vec<FormatComparison>,
@@ -635,7 +678,8 @@ fn build_summary(
         .iter()
         .filter(|run| !run.passed && !run.skipped)
         .count();
-    let total_cost_usd = runs.iter().map(|run| run.cost_usd).sum();
+    let total_cost_usd = sum_complete_costs(runs.iter().map(|run| run.usage.cost_usd));
+    let known_cost_usd = sum_known_costs(runs.iter().map(|run| run.usage.known_cost_usd));
     let rollups = build_rollups(&runs);
     let comparisons = compare_formats(&runs);
     let parity_by_pair = build_parity_by_pair(&comparisons);
@@ -645,7 +689,7 @@ fn build_summary(
         .count();
     let followups = suggest_followups(&runs, &comparisons);
     EvalSummary {
-        schema_version: 3,
+        schema_version: 4,
         fixture_ids: fixtures
             .iter()
             .map(|fixture| fixture_id(fixture).to_string())
@@ -669,6 +713,7 @@ fn build_summary(
         skipped_runs,
         diverged_comparisons,
         total_cost_usd,
+        known_cost_usd,
         rollups,
         runs,
         comparisons,
@@ -828,7 +873,8 @@ where
             passed_runs: 0,
             failed_runs: 0,
             skipped_runs: 0,
-            total_cost_usd: 0.0,
+            total_cost_usd: Some(0.0),
+            known_cost_usd: None,
         });
         entry.total_runs += 1;
         if run.passed {
@@ -838,7 +884,11 @@ where
         } else {
             entry.failed_runs += 1;
         }
-        entry.total_cost_usd += run.cost_usd;
+        entry.total_cost_usd = entry
+            .total_cost_usd
+            .zip(run.usage.cost_usd)
+            .map(|(a, b)| a + b);
+        entry.known_cost_usd = sum_known_costs([entry.known_cost_usd, run.usage.known_cost_usd]);
     }
     grouped.into_values().collect()
 }
@@ -1072,7 +1122,7 @@ fn suggest_followups(
         .iter()
         .filter(|run| {
             !run.skipped
-                && !run.pricing_known
+                && run.usage.cost_usd.is_none()
                 && !matches!(run.selector.provider.as_str(), "mock" | "fake")
                 && !selector_is_local(&run.selector)
         })
@@ -1080,8 +1130,8 @@ fn suggest_followups(
         .collect::<Vec<_>>();
     if !unknown_pricing.is_empty() {
         out.push(FollowupSuggestion {
-            title: "Fill provider pricing metadata for benchmarked models".to_string(),
-            body: "At least one live provider/model produced usage metrics but had no pricing entry, which weakens cost comparisons in eval reports.".to_string(),
+            title: "Complete missing coding-agent usage measurements".to_string(),
+            body: "At least one live run lacks a complete usage/cost total. Inspect unknown usage, unpriced calls, and missing legacy receipts before comparing spend.".to_string(),
             labels: vec!["providers".to_string(), "docs".to_string()],
             run_ids: unknown_pricing,
         });

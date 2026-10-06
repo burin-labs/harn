@@ -470,7 +470,7 @@ fn parse_command(map: &harn_vm::value::DictMap) -> Result<(String, Vec<String>),
                 })?;
             parse_argv_program(NAME, argv)
         }
-        "shell" => {
+        mode @ ("shell" | "auto") => {
             let command =
                 optional_string(NAME, map, "command")?.ok_or(HostlibError::MissingParameter {
                     builtin: NAME,
@@ -511,12 +511,20 @@ fn parse_command(map: &harn_vm::value::DictMap) -> Result<(String, Vec<String>),
                     param: "shell",
                     message,
                 })?;
+            if mode == "auto" {
+                if let Some(argv) =
+                    harn_vm::shells::plan_invocation(&resolved.program, &resolved.args)
+                        .and_then(|plan| plan.argv)
+                {
+                    return parse_argv_program(NAME, argv);
+                }
+            }
             Ok((resolved.program, resolved.args))
         }
         other => Err(HostlibError::InvalidParameter {
             builtin: NAME,
             param: "mode",
-            message: format!("unsupported command mode {other:?}; expected argv or shell"),
+            message: format!("unsupported command mode {other:?}; expected argv, shell, or auto"),
         }),
     }
 }

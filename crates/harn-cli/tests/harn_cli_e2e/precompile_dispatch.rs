@@ -624,6 +624,126 @@ struct PrecompileOutcome {
     exit_code: i32,
 }
 
+/// Concurrency must not be observable in anything the walk produces.
+///
+/// The tree mixes an import graph, nested directories, and same-named modules
+/// so children finish out of source order. Each bound runs cold into the same
+/// `--out` so the per-file lines name identical paths; the streams are compared
+/// unsorted, because sorted output is the ordering claim under test.
+#[test]
+fn jobs_bound_does_not_change_artifacts_or_output() {
+    let workdir = tempfile::tempdir().expect("workdir");
+    let tree = workdir.path().join("src");
+    std::fs::create_dir(&tree).expect("mkdir src");
+    write_graph(&tree);
+    write_same_named_in_two_directories(&tree);
+    for name in ["e", "f", "g", "h"] {
+        write_hello(&tree, &format!("{name}.harn"));
+    }
+    let out = workdir.path().join("out");
+    let target = tree.to_string_lossy().into_owned();
+    let out_arg = out.to_string_lossy().into_owned();
+
+    let mut runs = Vec::new();
+    for jobs in ["1", "4"] {
+        let _ = std::fs::remove_dir_all(&out);
+        let run = run_precompile(&[&target, "--out", &out_arg, "--jobs", jobs], &[]);
+        assert_eq!(run.exit_code, 0, "--jobs {jobs} stderr={}", run.stderr);
+        runs.push((jobs, run, artifact_bytes(&out)));
+    }
+    let (_, serial, serial_bytes) = &runs[0];
+    let (_, parallel, parallel_bytes) = &runs[1];
+    assert!(
+        serial.stderr.contains("11 compiled, 0 reused, 0 failed"),
+        "a cold tree must compile every source; got: {}",
+        serial.stderr
+    );
+    assert_eq!(serial.stdout, parallel.stdout, "per-file lines diverged");
+    assert_eq!(serial.stderr, parallel.stderr, "summary diverged");
+    assert_eq!(
+        serial.stdout.lines().collect::<Vec<_>>(),
+        sort_lines(&serial.stdout),
+        "per-file lines must be in sorted source order"
+    );
+    assert_eq!(
+        serial_bytes.len(),
+        22,
+        "one .harnbc and .harnmod per source"
+    );
+    assert!(
+        serial_bytes == parallel_bytes,
+        "artifacts differ between --jobs 1 and --jobs 4"
+    );
+}
+
+/// A failure must be reported where the serial walk reported it.
+///
+/// Without `--keep-going`, sources after the first failure in source order may
+/// already be running when it lands; their outcomes must not reach the summary.
+/// With it, every failure is reported in source order.
+#[test]
+fn jobs_bound_preserves_failure_order_and_stop_semantics() {
+    let workdir = tempfile::tempdir().expect("workdir");
+    for name in ["a", "c", "e", "g"] {
+        write_hello(workdir.path(), &format!("{name}.harn"));
+    }
+    for name in ["b", "d"] {
+        std::fs::write(
+            workdir.path().join(format!("{name}.harn")),
+            "this is not valid harn syntax !!\n",
+        )
+        .expect("write bad source");
+    }
+    let target = workdir.path().to_string_lossy().into_owned();
+    for (extra, summary) in [
+        (None, "1 compiled, 0 reused, 1 failed"),
+        (Some("--keep-going"), "4 compiled, 0 reused, 2 failed"),
+    ] {
+        let mut outcomes = Vec::new();
+        for jobs in ["1", "4"] {
+            cleanup_artifacts(workdir.path());
+            let mut argv = vec![target.as_str(), "--jobs", jobs];
+            argv.extend(extra);
+            outcomes.push(run_precompile(&argv, &[]));
+        }
+        let (serial, parallel) = (&outcomes[0], &outcomes[1]);
+        assert_eq!(serial.exit_code, 1, "stderr={}", serial.stderr);
+        assert!(
+            serial.stderr.contains(summary),
+            "{extra:?}: expected {summary}; got: {}",
+            serial.stderr
+        );
+        assert_eq!(
+            serial.exit_code, parallel.exit_code,
+            "{extra:?}: exit diverged"
+        );
+        assert_eq!(serial.stdout, parallel.stdout, "{extra:?}: stdout diverged");
+        assert_eq!(serial.stderr, parallel.stderr, "{extra:?}: stderr diverged");
+    }
+}
+
+#[test]
+fn jobs_zero_is_refused() {
+    let workdir = tempfile::tempdir().expect("workdir");
+    write_hello(workdir.path(), "hello.harn");
+    let run = run_precompile(
+        &[workdir.path().to_string_lossy().as_ref(), "--jobs", "0"],
+        &[],
+    );
+    assert_eq!(run.exit_code, 2, "stderr={}", run.stderr);
+    assert!(collect_artifacts(workdir.path()).is_empty());
+}
+
+fn artifact_bytes(root: &Path) -> Vec<(PathBuf, Vec<u8>)> {
+    collect_artifacts(root)
+        .into_iter()
+        .map(|rel| {
+            let bytes = std::fs::read(root.join(&rel)).expect("read artifact");
+            (rel, bytes)
+        })
+        .collect()
+}
+
 fn run_precompile(argv: &[&str], extra_env: &[(&str, &str)]) -> PrecompileOutcome {
     run_precompile_in(None, argv, extra_env)
 }

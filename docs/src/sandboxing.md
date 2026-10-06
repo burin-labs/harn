@@ -723,6 +723,16 @@ caller overrides, removals, and `env_clear`. Those controls can execute before
 the helper installs confinement. Ordinary payload environment grants are
 preserved; a direct Landlock-confined payload may still configure its loader.
 
+The glibc allocator sizing knobs (`MALLOC_ARENA_MAX`, `MALLOC_ARENA_TEST`,
+`MALLOC_MMAP_MAX_`, `MALLOC_MMAP_THRESHOLD_`, `MALLOC_TOP_PAD_`, and
+`MALLOC_TRIM_THRESHOLD_`) are the exception under bubblewrap. Harn keeps them
+out of bubblewrap's environment and re-applies them to the confined payload, so
+a host that exports `MALLOC_ARENA_MAX`, as Heroku and many container images do,
+still runs sandboxed commands. A `process_sandbox_environment` log event names
+what was re-applied. `MALLOC_CHECK_` and `MALLOC_PERTURB_` change allocator
+behavior rather than its sizing and stay refused, as does every control under
+the namespace helper, which has no way to re-apply them.
+
 Bubblewrap supports complete read-only and writable directory grants. It
 refuses selective filesystem rights, managed proxy-only egress, and files-only
 process introspection. A run that needs a private `/proc` must explicitly grant
@@ -749,6 +759,20 @@ The Landlock ruleset is built lazily from `landlock_abi_version()`.
 Access bits are limited to the kernel's supported vocabulary. A kernel below
 the required ABI or one that cannot enforce the boundary selects bubblewrap;
 if bubblewrap cannot preserve the requested grants, the launch is refused.
+
+Bubblewrap availability uses a functional confinement probe with its own
+one-second setup budget and the runtime's normal cancellation and process
+cleanup. An inherited sandbox that prevents namespace setup, or a setup that
+outlives the budget, produces a typed mechanism refusal; a descendant retaining
+the probe's output cannot indefinitely delay command preparation. The budget is
+not the caller's deadline: its expiry is never reported as `Deadline exceeded`,
+while caller cancellation, the interrupt-handler window, and the scope deadline
+keep their own errors. This does not grant additional syscalls or extend the
+calling command's deadline.
+Caller interrupts and an expired setup budget are not cached as host
+unavailability; a later command can retry the functional probe.
+Since a confined command can stack its own Landlock domain, the nested path
+reaches Bubblewrap only when Landlock is not functional for that child.
 
 ### macOS (`crates/harn-vm/src/stdlib/sandbox/macos.rs`)
 

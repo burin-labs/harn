@@ -162,7 +162,7 @@ const fixture = with_cache("trace:" + trace_id, fn() {
 Because the session_id is set, the shadow run's tape captures the
 `cache_hit` events for every replay — the crystallization receipts and
 persona value ledger read them back to show "model calls avoided" in
-the demo from the [Moat Addendum: Workflow Crystallization](https://www.notion.so/34a7d224c63281fcbc13cf390981b01b).
+the Workflow Crystallization demo.
 
 ## Replay determinism
 

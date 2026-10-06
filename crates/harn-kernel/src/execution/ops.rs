@@ -1,5 +1,31 @@
 use super::*;
 
+pub(super) fn read_u8(frame: &mut Frame) -> Result<usize, OpStep> {
+    let value = *frame.chunk.code.get(frame.ip).ok_or_else(|| {
+        OpStep::Error(diagnostic(
+            "truncated_instruction",
+            "u8 operand is truncated",
+        ))
+    })?;
+    frame.ip += 1;
+    Ok(value as usize)
+}
+
+pub(super) fn read_u16(frame: &mut Frame) -> Result<usize, OpStep> {
+    let bytes = frame
+        .chunk
+        .code
+        .get(frame.ip..frame.ip + 2)
+        .ok_or_else(|| {
+            OpStep::Error(diagnostic(
+                "truncated_instruction",
+                "u16 operand is truncated",
+            ))
+        })?;
+    frame.ip += 2;
+    Ok(u16::from_be_bytes([bytes[0], bytes[1]]) as usize)
+}
+
 pub(super) fn binary(
     frame: &mut Frame,
     operation: fn(RuntimeValue, RuntimeValue) -> Result<RuntimeValue, Diagnostic>,
@@ -202,14 +228,19 @@ pub(super) fn runtime_value_kind(value: &RuntimeValue) -> &'static str {
         RuntimeValue::Closure(_) => "closure",
         RuntimeValue::Builtin(_) => "builtin",
         RuntimeValue::Harness(_) => "harness",
+        RuntimeValue::Exception(_) => "caught exception",
     }
 }
-pub(super) fn handle_throw(frames: &mut Vec<Frame>, value: RuntimeValue) -> bool {
+pub(super) fn handle_throw(frames: &mut Vec<Frame>, error: RuntimeException) -> bool {
     while let Some(frame) = frames.last_mut() {
         if let Some(handler) = frame.handlers.pop() {
             frame.stack.truncate(handler.stack_depth);
             frame.env = handler.env;
-            frame.stack.push(value);
+            frame.stack.push(if handler.preserve {
+                RuntimeValue::Exception(Rc::new(error))
+            } else {
+                error.value
+            });
             frame.ip = handler.target;
             return true;
         }

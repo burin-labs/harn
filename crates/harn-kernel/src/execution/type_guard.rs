@@ -19,6 +19,7 @@ impl TypeContractValue for RuntimeValue {
             Self::Enum(_) => RuntimeTypeKind::Enum,
             Self::Closure(_) | Self::Builtin(_) => RuntimeTypeKind::Closure,
             Self::Harness(_) => RuntimeTypeKind::Harness,
+            Self::Exception(_) => RuntimeTypeKind::Resource,
         }
     }
 

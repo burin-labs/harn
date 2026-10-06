@@ -39,6 +39,7 @@ fn streaming_update_for(
         mutation_status: ToolMutationStatus::Unknown,
         changed_paths: None,
         data: None,
+        health: None,
         executor: None,
         parsing: None,
         raw_input: None,
@@ -65,6 +66,7 @@ fn parsed_streaming_update(
         mutation_status: ToolMutationStatus::Unknown,
         changed_paths: None,
         data: None,
+        health: None,
         executor: None,
         parsing: None,
         raw_input: Some(raw_input),
@@ -87,6 +89,7 @@ fn completed_update(session_id: &str) -> AgentEvent {
         mutation_status: ToolMutationStatus::Applied,
         changed_paths: Some(vec!["src/lib.rs".into()]),
         data: None,
+        health: None,
         executor: None,
         parsing: None,
         raw_input: None,
@@ -105,6 +108,7 @@ fn settled_tool_call(session_id: &str) -> AgentEvent {
         raw_input: serde_json::json!({"body": "abcde"}),
         parsing: None,
         audit: None,
+        intent: None,
     }
 }
 
@@ -122,6 +126,7 @@ fn parse_aborted_update(session_id: &str, tool_call_id: &str) -> AgentEvent {
         mutation_status: ToolMutationStatus::Unknown,
         changed_paths: None,
         data: None,
+        health: None,
         executor: None,
         parsing: Some(false),
         raw_input: None,
@@ -421,6 +426,7 @@ fn projector_contains_abandoned_calls_and_evicts_exact_lifecycles() {
         raw_input: serde_json::json!({"body": "x"}),
         parsing: None,
         audit: None,
+        intent: None,
     }));
     assert_eq!(projector.tracked_stream_count(), 0);
 

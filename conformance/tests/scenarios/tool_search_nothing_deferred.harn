@@ -1,0 +1,51 @@
+import { llm_text, with_llm_script } from "std/testing"
+
+/**
+ * harn#9317: a native search meta-tool is sent only when the request has a
+ * deferred tool to find. A turn whose tools are all eager (or that has no
+ * tools at all, like a terminal wrap-up) ships exactly the tools it declared.
+ */
+pipeline test(harness: Harness, task: unknown) {
+  let eager = tool_registry()
+  eager = tool_define(
+    eager,
+    "lookup_account",
+    "Read an account record",
+    {parameters: {id: {type: "string"}}, handler: { args -> "acct " + args.id }},
+  )
+  const deferred = tool_define(
+    eager,
+    "deploy_service",
+    "Deploy the service stack",
+    {
+      parameters: {env: {type: "string"}},
+      defer_loading: true,
+      handler: { args -> "deployed to " + args.env },
+    },
+  )
+  with_llm_script(
+    harness.llm,
+    [llm_text("ack"), llm_text("ack")],
+    { ->
+      const options = {
+        provider: "mock",
+        model: "gpt-5.4-preview",
+        tool_search: {variant: "bm25", mode: "native"},
+      }
+      harness.llm.call("x", nil, options + {tools: deferred})
+      harness.llm.call("x", nil, options + {tools: eager})
+      const calls = harness.llm.mock_calls()
+      assert(len(calls) == 2, "two calls recorded")
+      assert(
+        calls[0].tools[0].type == "tool_search",
+        "control: a deferred tool gets the search meta-tool",
+      )
+      assert(len(calls[1].tools) == 1, "an all-eager request carries only its own tool")
+      assert(
+        calls[1].tools[0].function?.name == "lookup_account",
+        "the eager tool is sent unchanged",
+      )
+      harness.stdio.log("tool_search_nothing_deferred tests passed")
+    },
+  )
+}

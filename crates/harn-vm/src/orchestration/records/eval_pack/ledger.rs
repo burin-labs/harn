@@ -186,7 +186,7 @@ async fn read_eval_ledger_rows(
         }
         for (event_id, event) in batch {
             cursor = Some(event_id);
-            if let Some(row) = parse_eval_ledger_row(event_id, event) {
+            if let Some(row) = parse_eval_ledger_row(event_id, event)? {
                 if eval_ledger_row_matches(&row, options) {
                     rows.push(row);
                     if options.limit.is_some_and(|limit| rows.len() >= limit) {
@@ -204,6 +204,9 @@ async fn append_eval_ledger_rows(
     topic: &crate::event_log::Topic,
     rows: Vec<EvalLedgerRow>,
 ) -> Result<EvalLedgerAppendReport, VmError> {
+    for row in &rows {
+        validate_eval_ledger_schema(&row.schema)?;
+    }
     let mut report = EvalLedgerAppendReport {
         appended: rows.len(),
         all_skipped: !rows.is_empty() && rows.iter().all(eval_ledger_row_is_skip),
@@ -236,7 +239,7 @@ async fn append_eval_ledger_rows(
             report.duplicates += 1;
         }
         report.event_ids.push(outcome.event_id);
-        if let Some(stored) = parse_eval_ledger_row(outcome.event_id, outcome.event) {
+        if let Some(stored) = parse_eval_ledger_row(outcome.event_id, outcome.event)? {
             report.rows.push(stored);
         }
     }
@@ -247,16 +250,26 @@ async fn append_eval_ledger_rows(
 fn parse_eval_ledger_row(
     event_id: crate::event_log::EventId,
     event: crate::event_log::LogEvent,
-) -> Option<EvalLedgerRow> {
+) -> Result<Option<EvalLedgerRow>, VmError> {
     if event.kind != EVAL_LEDGER_ROW_KIND {
-        return None;
+        return Ok(None);
     }
-    let mut row: EvalLedgerRow = serde_json::from_value(event.payload).ok()?;
-    if row.schema != EVAL_LEDGER_ROW_SCHEMA {
-        return None;
-    }
+    let mut row: EvalLedgerRow = serde_json::from_value(event.payload).map_err(|error| {
+        VmError::Runtime(format!("eval ledger row {event_id} decode error: {error}"))
+    })?;
+    validate_eval_ledger_schema(&row.schema)?;
     row.event_id = Some(event_id);
-    Some(row)
+    Ok(Some(row))
+}
+
+fn validate_eval_ledger_schema(schema: &str) -> Result<(), VmError> {
+    if schema == EVAL_LEDGER_ROW_SCHEMA {
+        Ok(())
+    } else {
+        Err(VmError::Runtime(format!(
+            "unsupported eval ledger row schema {schema:?}; expected {EVAL_LEDGER_ROW_SCHEMA}"
+        )))
+    }
 }
 
 fn eval_ledger_row_matches(row: &EvalLedgerRow, options: &EvalLedgerOptions) -> bool {

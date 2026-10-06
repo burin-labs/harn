@@ -33,6 +33,7 @@ async fn tool_call_includes_audit_when_mutation_session_is_active() {
         raw_input: serde_json::json!({"path": "src/main.rs"}),
         parsing: None,
         audit: Some(audit),
+        intent: None,
     });
     let line = rx.recv().await.expect("acp tool_call notification");
     let payload: serde_json::Value = serde_json::from_str(&line).expect("json");
@@ -67,6 +68,7 @@ async fn tool_call_omits_audit_when_no_mutation_session() {
         raw_input: serde_json::json!({"path": "README.md"}),
         parsing: None,
         audit: None,
+        intent: None,
     });
     let line = rx.recv().await.expect("acp tool_call notification");
     let payload: serde_json::Value = serde_json::from_str(&line).expect("json");
@@ -100,6 +102,7 @@ async fn tool_call_update_includes_audit_when_mutation_session_is_active() {
         mutation_status: harn_vm::agent_events::ToolMutationStatus::Unknown,
         changed_paths: None,
         data: None,
+        health: None,
         executor: Some(ToolExecutor::HostBridge),
         parsing: None,
         raw_input: None,
@@ -141,6 +144,7 @@ async fn tool_call_update_omits_audit_but_keeps_typed_mutation_status() {
         mutation_status: harn_vm::agent_events::ToolMutationStatus::Unknown,
         changed_paths: None,
         data: None,
+        health: None,
         executor: None,
         parsing: None,
         raw_input: None,

@@ -171,6 +171,7 @@ fn close_unanswered_tool_calls(
                     mutation_status: ToolMutationStatus::Unknown,
                     changed_paths: None,
                     data: None,
+                    health: None,
                     executor: None,
                     parsing: None,
                     raw_input: None,
@@ -276,6 +277,7 @@ fn replay_event_from_stored(
                     .unwrap_or(serde_json::Value::Null),
                 parsing: None,
                 audit: None,
+                intent: None,
             }
         }
         (SessionEventKind::ToolResult, _) => {
@@ -301,6 +303,7 @@ fn replay_event_from_stored(
                 mutation_status: mutation_status(data),
                 changed_paths: changed_paths(data),
                 data: data.cloned(),
+                health: None,
                 executor: None,
                 parsing: None,
                 raw_input: None,

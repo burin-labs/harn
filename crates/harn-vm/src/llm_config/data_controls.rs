@@ -41,7 +41,9 @@ pub use harn_provider_catalog::{
 /// mistake this registry exists to fix — a privacy-relevant default chosen by
 /// omission. So the shipped value is `default`, and an embedder flips it in
 /// one place, in config, without patching Harn.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[derive(
+    Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default, schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum DataPosture {
     /// Send no data-control fields. The provider's server-side default

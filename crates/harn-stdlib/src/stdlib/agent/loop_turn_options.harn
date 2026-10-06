@@ -15,6 +15,7 @@ pub type AgentLoopCompletedDispatchStall = {state: AgentStallState, no_informati
 pub type AgentIterationInfo = {
   tool_count: int,
   text: string,
+  prose_characters: int,
   provider: string,
   model: string,
   serving_base_url: string,
@@ -408,6 +409,7 @@ pub fn __iteration_info_payload(
   return {
     tool_count: tool_count,
     text: visible_text,
+    prose_characters: len(visible_text),
     provider: llm_result?.provider ?? "",
     model: llm_result?.model ?? "",
     serving_base_url: telemetry?.serving_base_url ?? "",
