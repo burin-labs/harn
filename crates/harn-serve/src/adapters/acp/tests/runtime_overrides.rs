@@ -40,6 +40,9 @@ async fn actual_prompt_hook_reads_the_live_session_budget() {
                 AcpServerConfig::new(None)
                     .with_budget(BudgetSpec {
                         llm_cost_usd: Some(1.0),
+                        llm_tokens: Some(1000),
+                        pg_queries: Some(2),
+                        mcp_calls: Some(4),
                         ..BudgetSpec::default()
                     })
                     .with_runtime_configurator(Arc::new(BudgetRuntime {
@@ -48,10 +51,31 @@ async fn actual_prompt_hook_reads_the_live_session_budget() {
                 serde_json::json!(cwd.path()),
             )
             .await;
-            for (id, cap) in [(10, 0.25), (20, 0.75)] {
+            let inherited = super::served_agent_turn::prompt(
+                &tx,
+                &mut rx,
+                &session,
+                5,
+                "harness.stdio.println(\"inherited\")",
+            )
+            .await;
+            assert!(inherited.get("error").is_none(), "{inherited}");
+            for (id, mut params) in [
+                (
+                    10,
+                    serde_json::json!({"llm_cost_usd":0.25, "llm_tokens":null}),
+                ),
+                (20, serde_json::json!({"llm_cost_usd":0.75})),
+                (
+                    30,
+                    serde_json::json!({"llm_cost_usd":null, "llm_tokens":345}),
+                ),
+                (40, serde_json::json!({"llm_tokens":null})),
+            ] {
+                params["sessionId"] = serde_json::json!(session);
                 tx.send(serde_json::json!({
                     "jsonrpc": "2.0", "method": "session/set_budget",
-                    "params": {"sessionId": session, "llm_cost_usd": cap, "llm_tokens": null}
+                    "params": params
                 }))
                 .unwrap();
                 let response = super::served_agent_turn::prompt(
@@ -67,11 +91,21 @@ async fn actual_prompt_hook_reads_the_live_session_budget() {
             let budgets = observed.lock().unwrap().clone();
             assert_eq!(
                 budgets.len(),
-                2,
-                "the actual prompt execution hook must fire twice"
+                5,
+                "the actual prompt hook must reach inherited, updated and unlimited budgets"
             );
-            assert_eq!(budgets[0].llm_cost_usd, Some(0.25));
-            assert_eq!(budgets[1].llm_cost_usd, Some(0.75));
+            for (budget, (cost, tokens)) in budgets.iter().zip([
+                (Some(1.0), Some(1000)),
+                (Some(0.25), None),
+                (Some(0.75), None),
+                (None, Some(345)),
+                (None, None),
+            ]) {
+                assert_eq!(budget.llm_cost_usd, cost);
+                assert_eq!(budget.llm_tokens, tokens);
+                assert_eq!(budget.pg_queries, Some(2), "retain inherited query limits");
+                assert_eq!(budget.mcp_calls, Some(4), "retain inherited tool limits");
+            }
             drop(tx);
             server.await.unwrap();
         })
