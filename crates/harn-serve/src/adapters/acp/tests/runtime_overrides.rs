@@ -35,6 +35,7 @@ async fn actual_prompt_hook_reads_the_live_session_budget() {
     local
         .run_until(async {
             let observed = Arc::new(std::sync::Mutex::new(Vec::new()));
+            let cwd = tempfile::tempdir().expect("isolated live-budget workspace");
             let (tx, mut rx, server, session) = start_acp_channel_session_with_config(
                 AcpServerConfig::new(None)
                     .with_budget(BudgetSpec {
@@ -44,7 +45,7 @@ async fn actual_prompt_hook_reads_the_live_session_budget() {
                     .with_runtime_configurator(Arc::new(BudgetRuntime {
                         observed: observed.clone(),
                     })),
-                serde_json::json!(std::env::current_dir().unwrap()),
+                serde_json::json!(cwd.path()),
             )
             .await;
             for (id, cap) in [(10, 0.25), (20, 0.75)] {
