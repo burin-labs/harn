@@ -205,3 +205,29 @@ fn rename_refuses_when_an_out_of_scope_file_only_names_the_symbol() {
         PY_FETCH
     );
 }
+
+#[test]
+fn rename_refuses_for_a_name_the_word_index_does_not_record() {
+    // The word index skips one-character tokens, so it cannot vouch that
+    // the unreadable file does not name `f`.
+    const DECL: &str = "def f():\n    return []\n";
+    const USE: &str = "from allowed.a import f\n\nhandler = f\n";
+    let (_ws_dir, ws) = canonical_tempdir();
+    write(&ws, "allowed/a.py", DECL);
+    write(&ws, "other/b.py", USE);
+    let capability = indexed(&ws);
+    let _policy = PolicyGuard::worktree(&[&ws.join("allowed")]);
+
+    let request = dict(&[
+        (
+            "symbol_ref",
+            dict(&[("name", string("f")), ("path", string("allowed/a.py"))]),
+        ),
+        ("new_name", string("g")),
+        ("scope", string("workspace")),
+    ]);
+    let result = super::super::rename::run(&capability.shared(), &[request]);
+    assert!(result.is_err(), "rename must refuse: {result:?}");
+    assert_eq!(fs::read_to_string(ws.join("other/b.py")).unwrap(), USE);
+    assert_eq!(fs::read_to_string(ws.join("allowed/a.py")).unwrap(), DECL);
+}

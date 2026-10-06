@@ -211,10 +211,13 @@ pub(super) fn files_in_scope(
             ) {
                 Ok(abs) => file_contains_word(&abs, name, session_id),
                 // Out of reach now, so decide from what the index read
-                // when the file was inside. Keeping it in scope makes the
-                // rewrite pass refuse the operation instead of silently
-                // leaving its uses stale.
-                Err(_) => state.words.get(name).iter().any(|hit| hit.file == file.id),
+                // when the file was inside, and keep it in scope whenever
+                // the index cannot rule a mention out. The rewrite pass then
+                // refuses the operation instead of leaving a use stale.
+                Err(_) => {
+                    !super::words::records(name)
+                        || state.words.get(name).iter().any(|hit| hit.file == file.id)
+                }
             };
             if mentions {
                 seen.insert(file.relative_path.clone());
