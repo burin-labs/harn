@@ -52,3 +52,22 @@ fn retired_adapter_refusal_is_not_live_provider_evidence() {
     assert_eq!(report.evidence_source, ToolProbeEvidenceSource::Unknown);
     assert!(report.require_live_evidence().is_err());
 }
+
+#[test]
+fn completed_adapter_response_retains_observation_provenance() {
+    let _guard = crate::llm::env_guard();
+    let mut options = ToolConformanceProbeOptions::new("mock", "mock");
+    options.modes = vec![ToolProbeMode::NonStreaming];
+    let report = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("test runtime")
+        .block_on(run_tool_conformance_probe(options));
+    assert_eq!(report.cases.len(), 1);
+    assert!(
+        report.cases[0].usage.is_some(),
+        "adapter response was reached"
+    );
+    assert_eq!(report.evidence_source, ToolProbeEvidenceSource::LiveRequest);
+    assert!(report.require_live_evidence().is_ok());
+}
