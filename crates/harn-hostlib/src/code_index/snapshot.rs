@@ -25,8 +25,11 @@ use super::words::WordIndex;
 use super::IndexState;
 
 /// Current format version. Bumped whenever the snapshot layout changes
-/// in a non-additive way.
-pub const SNAPSHOT_FORMAT_VERSION: u32 = 2;
+/// in a non-additive way, or when graph edges a snapshot stores would be
+/// computed differently, since a restore keeps the stored edges for every
+/// file that has not changed. v3: `REFS` and `CALLS` edges no longer
+/// depend on the order files were indexed.
+pub const SNAPSHOT_FORMAT_VERSION: u32 = 3;
 
 /// On-disk metadata header. Small and cheap to read so embedders can
 /// peek at a snapshot without parsing the whole thing.
@@ -403,6 +406,18 @@ mod tests {
         assert!(
             CodeIndexSnapshot::load(dir.path()).unwrap().is_none(),
             "v1 cannot be served with an empty graph"
+        );
+    }
+
+    #[test]
+    fn load_rejects_a_v2_snapshot_with_order_dependent_edges() {
+        let dir = fixture_tree();
+        let mut snap = snapshot_for(dir.path());
+        snap.meta.format_version = 2;
+        snap.save(dir.path()).unwrap();
+        assert!(
+            CodeIndexSnapshot::load(dir.path()).unwrap().is_none(),
+            "a v2 graph would keep its REFS and CALLS edges for unchanged files"
         );
     }
 

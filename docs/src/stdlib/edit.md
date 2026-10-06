@@ -748,7 +748,7 @@ Backed by the `harness.code_index.rename_symbol` builtin (issue
 |---|---|---|
 | `symbol_ref` | yes | `{name, path, line?, kind?}`. `line` (1-based) and `kind` (`"Function" \| "Type" \| "Module"`) disambiguate when several symbols in the workspace share a name. |
 | `new_name` | yes | Replacement identifier. Must be a valid identifier token and differ from `symbol_ref.name`. |
-| `scope` | yes | `"file"` \| `"module"` \| `"workspace"`. `file` and `module` are aliases today (one Module node per file); `workspace` follows REFS edges and a textual sweep across the index. |
+| `scope` | yes | `"file"` \| `"module"` \| `"workspace"`. `file` and `module` are aliases today (one Module node per file); `workspace` adds every indexed file that declares the name or contains it as a whole word; each file is then parsed so only identifier occurrences change. |
 | `session_id` | no | Routes reads + writes through staged-fs (#1722). |
 | `dry_run` | no | When `true`, the host validates end-to-end (parse, conflict, syntax) and returns the planned edits without writing. |
 | `validate` | no, default `true` | Re-parse every rewritten file; reject on ERROR / MISSING nodes. |
@@ -934,7 +934,9 @@ extraction needs a per-language extractor.
 | `apply_node`, `insert_at_anchor` | **all** registered grammars |
 | `rename_symbol` | Rust, TypeScript/TSX, JavaScript/JSX, Python, Go, Swift |
 | `symbols` / `outline` | every general-purpose language (not the data/markup grammars) |
-| `move_symbol`, `extract_function`, `change_signature` | none yet; reserved for graph-grounded refactorings |
+| `extract_function` | Rust, TypeScript/TSX, JavaScript/JSX, Python |
+| `change_signature` | Rust, TypeScript/TSX, Python |
+| `move_symbol` | none yet; reserved for graph-grounded refactorings |
 
 Registered grammars fall into two groups:
 
@@ -1029,7 +1031,7 @@ All require the `tools:deterministic` capability.
 | Function | Key params | Languages |
 |---|---|---|
 | `edit_extract_variable` | `path`, `range{start_line,start_col,end_line,end_col}`, `new_name` | rust, python, ts/tsx, js/jsx, go, swift, ruby |
-| `edit_extract_function` | `path`, `range{start_line,end_line}`, `new_name`, `target_scope?`, `params_order?` | python, js/jsx, ts/tsx, ruby |
+| `edit_extract_function` | `code_index`, then `path`, `start_line`/`end_line` or `region`, `new_name`, `signature?`, `helper?`, `all_occurrences?` | rust, python, ts/tsx, js/jsx |
 | `edit_change_signature` | `symbol_ref{name,path,line?}`, `params` (complete new list of `{name, from?, type?, default?, call_value?}`) | rust, python, ts/tsx |
 | `edit_add_parameter` | `symbol_ref`, `param{name, type?, default?, call_value?}`, `index?` | rust, python, ts/tsx |
 | `edit_reorder_parameters` | `symbol_ref`, `order` (permutation of param indices) | rust, python, ts/tsx |

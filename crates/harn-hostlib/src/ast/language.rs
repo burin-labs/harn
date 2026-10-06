@@ -415,6 +415,21 @@ impl Language {
         )
     }
 
+    /// Whether `code_index.extract_function` can operate on this language:
+    /// it needs a free-name profile and a function form it can synthesize.
+    /// Mirrors `code_index::extract_plan::Dialect::of`, which a test pins.
+    pub fn supports_extract_function(self) -> bool {
+        matches!(
+            self,
+            Language::Rust
+                | Language::TypeScript
+                | Language::Tsx
+                | Language::JavaScript
+                | Language::Jsx
+                | Language::Python
+        )
+    }
+
     /// Data / markup / config grammars that carry no nameable symbols, so
     /// symbol + outline extraction is intentionally empty for them.
     fn is_data_format(self) -> bool {
@@ -446,7 +461,7 @@ impl Language {
             symbols: self.supports_symbol_extraction(),
             // Graph-grounded refactorings.
             move_symbol: false,
-            extract_function: false,
+            extract_function: self.supports_extract_function(),
             change_signature: self.supports_change_signature(),
         }
     }
