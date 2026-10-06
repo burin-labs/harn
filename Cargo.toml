@@ -58,7 +58,7 @@ keywords = ["ai", "agents", "pipeline", "llm", "language"]
 categories = ["compilers", "command-line-utilities"]
 
 [workspace.dependencies]
-jsonschema = { version = "0.57.0", default-features = false }
+jsonschema = { version = "0.58.2", default-features = false }
 
 # Smaller debuginfo => faster linking on macOS without losing line-level
 # backtraces. A strict win for inner-loop dev/test builds.
