@@ -14,8 +14,13 @@ cat > "$scratch/bin/gh" <<'EOF'
 case "$1 $2" in
   "api repos/acme/widget-host") echo main ;;
   "api repos/acme/widget-host/pulls/"*) cat "$STUB/pull" ;;
-  "api repos/acme/widget-host/actions/runs/"*) cat "$STUB/run" ;;
-  "workflow run") echo "$*" > "$STUB/dispatched"; cat "$STUB/dispatch" ;;
+  "api repos/acme/widget-host/actions/runs/"*)
+    if [[ "${GH_TOKEN:-}" == fixture-expired ]]; then
+      echo "HTTP 401: Bad credentials fixture-private-value" >&2
+      exit 1
+    fi
+    cat "$STUB/run" ;;
+  "workflow run") echo "$*" > "$STUB/dispatched"; echo dispatch >> "$STUB/dispatch-count"; cat "$STUB/dispatch" ;;
   "api repos/acme/harn/actions/workflows/"*) [[ -f "$STUB/history" ]] || exit 1; cat "$STUB/history" ;;
   "api repos/acme/harn/actions/runs/"*/jobs) id=${2#repos/acme/harn/actions/runs/}; cat "$STUB/jobs-${id%/jobs}" ;;
   *) echo "unexpected gh $*" >&2; exit 2 ;;
@@ -194,4 +199,107 @@ if [[ -s "$scratch/gho" ]]; then
   exit 1
 fi
 
-echo "Consumer canary: pass, red terminal states, missing run and pairing controls passed"
+# Renewed windows observe the same child; they never dispatch it again or
+# restart its aggregate clock. The fake expiry is a read-path counterexample.
+cat > "$scratch/bin/date" <<'EOF'
+#!/usr/bin/env bash
+if [[ "$*" == +%s ]]; then cat "$STUB/now"; else /bin/date "$@"; fi
+EOF
+chmod +x "$scratch/bin/date"
+echo 1000 > "$scratch/now"
+echo "$run_url" > "$scratch/dispatch"
+rm -f "$scratch/dispatch-count"
+: > "$scratch/gho"
+PATH="$scratch/bin:$PATH" STUB="$scratch" CANARY_REPOSITORY=acme/widget-host \
+  CANARY_WORKFLOW=rehearsal.yml SOURCE_REVISION="$main_sha" \
+  WORKSPACE_VERSION=1.2.4-dev GITHUB_OUTPUT="$scratch/gho" \
+  bash "$root/scripts/ci/consumer_canary.sh" --dispatch > "$scratch/out" 2>&1
+grep -qx run_id=42 "$scratch/gho"
+grep -qx started_at=1000 "$scratch/gho"
+
+observe() {
+  : > "$scratch/gho"
+  PATH="$scratch/bin:$PATH" STUB="$scratch" CANARY_REPOSITORY=acme/widget-host \
+    CANARY_RUN_ID=42 CANARY_STARTED_AT=1000 CANARY_WINDOW_SECONDS=0 \
+    CANARY_POLL_SECONDS=0 GH_TOKEN="$1" GITHUB_OUTPUT="$scratch/gho" \
+    bash "$root/scripts/ci/consumer_canary.sh" --observe > "$scratch/out" 2>&1
+}
+echo 'in_progress none' > "$scratch/run"
+observe fixture-fresh
+grep -q 'pending run=42' "$scratch/out"
+[[ ! -s "$scratch/gho" ]]
+
+# The original credential is dead after an hour. A redacted immediate refusal
+# carries no terminal verdict, even if the child is known to have completed.
+echo 4900 > "$scratch/now"
+echo 'completed cancelled' > "$scratch/run"
+if observe fixture-expired; then
+  echo 'expired read authority reported success' >&2; exit 1
+fi
+grep -q 'reason=consumer_read_refused run=42 verdict=unmeasured' "$scratch/out"
+if grep -qE 'fixture-private-value|widget-host|github\.com' "$scratch/out"; then
+  echo 'authorization refusal exposed private input' >&2; exit 1
+fi
+[[ ! -s "$scratch/gho" ]]
+
+# Renewing authority reads that exact terminal child and preserves its failure.
+if observe fixture-fresh; then
+  echo 'renewed authority turned a cancelled child green' >&2; exit 1
+fi
+grep -q 'verdict=fail conclusion=cancelled run=42 wall_seconds=3900' "$scratch/out"
+grep -qx verdict=fail "$scratch/gho"
+
+echo 6400 > "$scratch/now"
+echo 'completed success' > "$scratch/run"
+observe fixture-fresh
+grep -q 'verdict=pass conclusion=success run=42 wall_seconds=5400' "$scratch/out"
+grep -qx verdict=pass "$scratch/gho"
+
+# Even a successful child cannot reset or exceed the original 120-minute clock.
+echo 8200 > "$scratch/now"
+if observe fixture-fresh; then
+  echo 'a new window reset the aggregate deadline' >&2; exit 1
+fi
+grep -q 'reason=no_verdict_before_deadline run=42 verdict=unmeasured wall_seconds=7200' "$scratch/out"
+[[ ! -s "$scratch/gho" ]]
+[[ $(wc -l < "$scratch/dispatch-count") -eq 1 ]]
+
+# The executable windows need fresh read authority, not just a longer timer.
+# Parse the actual workflow/action contract, including historical-source
+# recovery, so it cannot silently return to executing the old observer.
+node - "$root" <<'JS'
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const root = process.argv[2];
+const yaml = require(require.resolve('js-yaml', { paths: [root] }));
+const load = (file) => yaml.load(fs.readFileSync(path.join(root, file), 'utf8'));
+const { jobs } = load('.github/workflows/consumer-canary.yml');
+const action = load('.github/actions/observe-consumer/action.yml');
+const steps = jobs.consumers.steps;
+assert.equal(jobs.decide.steps[0].with.ref, '${{ github.sha }}');
+assert.equal(steps[0].with.ref, '${{ github.sha }}');
+assert.equal(steps[1].with.path, 'certified-consumer-source');
+assert.equal(steps[1].with.ref, '${{ inputs.source_revision || github.sha }}');
+const dispatch = steps.filter((step) => step.id === 'canary');
+assert.equal(dispatch.length, 1);
+assert(dispatch[0].run.includes('--dispatch'));
+assert(dispatch[0].run.includes('certified-consumer-source/Cargo.toml'));
+const windows = steps.filter((step) => step.uses === './.github/actions/observe-consumer');
+assert.equal(windows.length, 3);
+for (const step of windows) {
+  assert.equal(step.with['run-id'], '${{ steps.canary.outputs.run_id }}');
+  assert.equal(step.with['started-at'], '${{ steps.canary.outputs.started_at }}');
+  assert(jobs.consumers.outputs.verdict.includes(`steps.${step.id}.outputs.verdict`));
+}
+const [mint, observe] = action.runs.steps;
+assert.equal(mint.uses, 'actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1');
+assert.deepEqual(Object.fromEntries(Object.entries(mint.with).filter(([key]) => key.startsWith('permission-'))), { 'permission-actions': 'read' });
+assert.equal(mint.with.repositories, '${{ inputs.repository }}');
+assert.equal(observe.env.GH_TOKEN, '${{ steps.token.outputs.token }}');
+assert.equal(observe.env.CANARY_WINDOW_SECONDS, '2700');
+assert.equal(observe.env.CANARY_DEADLINE_SECONDS, '7200');
+assert(observe.run.includes('--observe') && !observe.run.includes('--dispatch'));
+JS
+
+echo "Consumer canary: terminal, pairing, expiry, renewal, same-child and aggregate-deadline controls passed"
