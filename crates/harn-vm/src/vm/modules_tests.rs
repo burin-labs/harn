@@ -9,6 +9,8 @@ mod lifecycle;
 mod stdlib_warm;
 #[path = "modules_tests/tool_registry.rs"]
 mod tool_registry;
+#[path = "modules_tests/user_interface_warm.rs"]
+mod user_interface_warm;
 
 static CACHE_TEST_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 
