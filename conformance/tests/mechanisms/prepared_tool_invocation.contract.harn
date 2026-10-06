@@ -1,0 +1,53 @@
+import { agent_loop } from "std/agent/loop"
+import { with_llm_script } from "std/testing"
+import { contract_effect, contract_negative } from "./lib/mechanism_contract"
+
+// Trigger: a tool resolves execution facts before dispatch.
+// Effect: the public agent loop retains those facts for its handler.
+// Negative: model arguments cannot supply execution facts or reach the handler.
+fn main(harness: Harness) {
+  const root = harness.fs.workspace_temp_dir()
+  const facts = root + "/facts"
+  const marker = root + "/executed"
+  harness.fs.write_text(facts, "trusted operation")
+  let tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "verify",
+    "Verify the current task",
+    {
+      input_schema: {type: "object", properties: {}, additionalProperties: false},
+      returns: {type: "string"},
+      prepare: { args -> return {operation: {command: harness.fs.read_text(facts), cwd: root}} },
+      handler: { args ->
+        const operation = tool_invocation_binding().operation
+        harness.fs.write_text(marker, operation.command)
+        return operation.command
+      },
+    },
+  )
+  for arguments in [{}, {command: "untrusted operation"}] {
+    harness.fs.write_text(marker, "")
+    with_llm_script(
+      harness.llm,
+      [{tool_calls: [{id: "verify-call", name: "verify", arguments: arguments}]}],
+      { ->
+        const result = agent_loop(
+          harness,
+          "Verify this task",
+          nil,
+          {provider: "mock", tools: tools, tool_format: "native", max_iterations: 1},
+        )
+        if len(arguments) == 0 {
+          assert_eq(harness.fs.read_text(marker), "trusted operation")
+          assert_eq(len(result.tools.rejected), 0)
+          contract_effect(harness.stdio, "bound_operation_reaches_public_agent_handler", true)
+        } else {
+          assert_eq(harness.fs.read_text(marker), "")
+          assert_eq(len(result.tools.rejected), 1)
+          contract_negative(harness.stdio, "model_execution_facts_never_reach_handler", false)
+        }
+      },
+    )
+  }
+}
