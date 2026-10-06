@@ -44,10 +44,12 @@ pub enum AgentTerminalClass {
     AgentLoopProtocolFailure,
     ParseDropped,
     GenericThrow,
+    /// Managed inference is paused by the service spending policy.
+    ManagedSpendPaused,
 }
 
 impl AgentTerminalClass {
-    pub const ALL: [Self; 12] = [
+    pub const ALL: [Self; 13] = [
         Self::ContextOverflow,
         Self::ProviderMisconfigured,
         Self::ProviderUnavailable,
@@ -60,6 +62,7 @@ impl AgentTerminalClass {
         Self::AgentLoopProtocolFailure,
         Self::ParseDropped,
         Self::GenericThrow,
+        Self::ManagedSpendPaused,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -76,6 +79,7 @@ impl AgentTerminalClass {
             Self::AgentLoopProtocolFailure => "agent_loop_protocol_failure",
             Self::ParseDropped => "parse_dropped",
             Self::GenericThrow => "generic_throw",
+            Self::ManagedSpendPaused => "managed_spend_paused",
         }
     }
 
@@ -86,6 +90,7 @@ impl AgentTerminalClass {
                 | Self::ProviderMisconfigured
                 | Self::ProviderUnavailable
                 | Self::ProviderBilling
+                | Self::ManagedSpendPaused
                 | Self::RateLimited
                 | Self::Timeout
         )
@@ -105,6 +110,7 @@ impl AgentTerminalClass {
             "agent_loop_protocol_failure" => Some(Self::AgentLoopProtocolFailure),
             "parse_dropped" => Some(Self::ParseDropped),
             "generic_throw" => Some(Self::GenericThrow),
+            "managed_spend_paused" => Some(Self::ManagedSpendPaused),
             _ => None,
         }
     }
@@ -215,6 +221,9 @@ fn agent_terminal_class_from_structured_error(
     }
     if terminal_error_signal_matches(error, |signal| signal == "no_llm_call") {
         return Some(AgentTerminalClass::ProviderMisconfigured);
+    }
+    if error.get("reason").and_then(serde_json::Value::as_str) == Some("managed_spend_paused") {
+        return Some(AgentTerminalClass::ManagedSpendPaused);
     }
     // Before any `category`: a billing stop arrives as a 429, and producers
     // that predate its own category still label it `rate_limit`. The reason is
@@ -497,6 +506,24 @@ mod tests {
     use serde_json::json;
 
     #[test]
+    fn managed_pause_requires_typed_reason_not_opaque_code_or_prose() {
+        let mut error = json!({
+            "provider": "openai", "category": "rate_limit", "reason": "rate_limit",
+            "code": "managed_spend_paused", "message": "Managed AI is paused"
+        });
+        assert_eq!(
+            agent_terminal_class("error", "", Some(&error)),
+            Some(AgentTerminalClass::RateLimited)
+        );
+        error["reason"] = json!("managed_spend_paused");
+        error["code"] = json!("insufficient_quota");
+        assert_eq!(
+            agent_terminal_class("error", "", Some(&error)),
+            Some(AgentTerminalClass::ManagedSpendPaused)
+        );
+    }
+
+    #[test]
     fn terminal_class_wire_values_are_stable_and_exhaustive() {
         let pairs = [
             (AgentTerminalClass::ContextOverflow, "context_overflow"),
@@ -526,6 +553,10 @@ mod tests {
             ),
             (AgentTerminalClass::ParseDropped, "parse_dropped"),
             (AgentTerminalClass::GenericThrow, "generic_throw"),
+            (
+                AgentTerminalClass::ManagedSpendPaused,
+                "managed_spend_paused",
+            ),
         ];
         for (class, wire) in pairs {
             assert_eq!(class.as_str(), wire);
