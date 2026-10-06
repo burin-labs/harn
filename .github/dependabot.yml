@@ -27,8 +27,7 @@ updates:
     directories:
       - "/"
     schedule:
-      interval: "weekly"
-      day: "monday"
+      interval: "monthly"
       time: "09:00"
       timezone: "America/Los_Angeles"
     groups:
@@ -46,7 +45,7 @@ updates:
       tree-sitter:
         patterns:
           - "tree-sitter*"
-      # Everything else, majors included, in one weekly pull request. A group
+      # Everything else, majors included, in one monthly pull request. A group
       # holding a single package still opens its own pull request, so carving
       # families out of this one buys nothing but repetition: the cranelift,
       # wasmtime and opentelemetry groups are gone for that reason. Only the
@@ -64,7 +63,7 @@ updates:
     # A grammar we hold back on purpose. The `=` pin in
     # `crates/harn-hostlib/Cargo.toml` records the decision for a reader; this
     # records it for the bot, which cannot see a comment. Without it the same
-    # known-bad version is re-proposed every week, and it has been merged that
+    # known-bad version is re-proposed every month, and it has been merged that
     # way once already (#5127, reverted by #5470).
     #
     # Scoped to the one bad version rather than the package, so a future
@@ -100,8 +99,7 @@ updates:
       - "/tree-sitter-harn"
       - "/website"
     schedule:
-      interval: "weekly"
-      day: "monday"
+      interval: "monthly"
       time: "09:00"
       timezone: "America/Los_Angeles"
     groups:
@@ -127,3 +125,4 @@ updates:
         update-types: ["version-update:semver-major"]
     cooldown:
       default-days: 7
+

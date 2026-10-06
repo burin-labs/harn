@@ -92,7 +92,7 @@ jobs:
   # SAFETY PRINCIPLE — prune for PR fast feedback, run comprehensive on the
   # merge-queue speculative commit. Coarse
   # path-filtering is sound for `pull_request` events: a PR that touches only
-  # docs/website/markdown cannot regress the Rust build, so the ~45 paid
+  # docs/website/markdown cannot regress the Rust build, so the ~45 hosted
   # Linux-min those four matrix lanes cost are pure waste. But the merge queue
   # (`merge_group`) builds a speculative merge commit (target + earlier-queued
   # PRs + this PR) and is the ONLY place a cross-PR interaction regression is
@@ -580,7 +580,7 @@ jobs:
           cache-bin: false
           cache-workspace-crates: "true"
       - name: Install cargo-semver-checks
-        uses: taiki-e/install-action@9983c65e42da123ff25d1f78505eb6de315aa172 # v2.87.20
+        uses: taiki-e/install-action@4cef1412cce204788f482e778a0b9187f9626a29 # v2.87.21
         with:
           tool: cargo-semver-checks@0.50.0
       - name: Resolve the public API baseline
@@ -886,7 +886,7 @@ jobs:
       # Dependency hygiene compiles nothing, so it rides the shortest leg.
       - name: Install cargo-machete
         if: matrix.kind == 'lean-lsp'
-        uses: taiki-e/install-action@9983c65e42da123ff25d1f78505eb6de315aa172 # v2.87.20
+        uses: taiki-e/install-action@4cef1412cce204788f482e778a0b9187f9626a29 # v2.87.21
         with:
           tool: cargo-machete@0.9.2
       - name: Reject unused Rust dependencies
@@ -923,7 +923,7 @@ jobs:
       github.event_name == 'merge_group'
       || (github.event_name == 'pull_request'
       && github.event.pull_request.head.repo.full_name == github.repository)
-    uses: burin-labs/.github/.github/workflows/runner-availability.yml@550bff235c4bf6818ece3b27e0905bcf48aaee8b
+    uses: burin-labs/.github/.github/workflows/runner-availability.yml@bebed855b0067821ca1466300a687759cf04b29d
     with:
       linux_probe_runner_tag: harn-ci-producer
     secrets:
@@ -938,7 +938,7 @@ jobs:
   # busy or absent host costs the queue nothing it did not already pay.
   datacenter-availability:
     if: github.event_name == 'merge_group'
-    uses: burin-labs/.github/.github/workflows/runner-availability.yml@550bff235c4bf6818ece3b27e0905bcf48aaee8b
+    uses: burin-labs/.github/.github/workflows/runner-availability.yml@bebed855b0067821ca1466300a687759cf04b29d
     with:
       linux_runner_tag: harn-ci-big
       linux_fetch_runner_tag: hetzner-1
@@ -985,18 +985,11 @@ jobs:
           RUNNER_CAPACITY: ${{ needs.runner-availability.outputs.capacity }}
           # The same switch the routing expression below reads. Without it here
           # this step would report the owned census while the job ran on
-          # elastic paid capacity.
-          FLEET_EVACUATION: ${{ vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true' }}
-          # The paid rungs after the owned pool, and the variable that picks
-          # between them, so a hosted decision names the runner it lands on.
-          PAID_LINUX_PROVIDER: ${{ vars.HARN_CI_PAID_LINUX_PROVIDER }}
-          CAPACITY_VENDOR_RUNNER: ubicloud-standard-8
-          CAPACITY_HOSTED_RUNNER: ubuntu-8core
+          # free hosted capacity.
       # The shared CLI producer's own decision, over the runners reserved for
       # it. An idle reserved runner takes the build. Every other outcome (all
-      # reserved runners busy, none online, an unreadable census) keeps the
-      # paid ladder it had: Ubicloud, then GitHub's 8-core runner only when
-      # HARN_CI_PAID_LINUX_PROVIDER names it. The decision line is also a
+      # reserved runners busy, none online, an unreadable census) lands on
+      # GitHub's free standard runner (public repository, harn#9370). The decision line is also a
       # run-page annotation, so the share of builds that left the reserved
       # runners is countable.
       - name: Decide where the shared CLI producer lands
@@ -1009,9 +1002,6 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           SELFHOSTED_DISABLED: ${{ needs.runner-availability.outputs.selfhosted_disabled }}
           RUNNER_CAPACITY: ${{ needs.runner-availability.outputs.capacity }}
-          PAID_LINUX_PROVIDER: ${{ vars.HARN_CI_PAID_LINUX_PROVIDER }}
-          CAPACITY_VENDOR_RUNNER: ubicloud-standard-8
-          CAPACITY_HOSTED_RUNNER: ubuntu-8core
       # The workspace test producer's merge-group decision, over the
       # datacenter host's general runners alone. Every other event names
       # `hosted` here without reading the count, and the pull-request
@@ -1026,10 +1016,6 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           SELFHOSTED_DISABLED: ${{ needs.datacenter-availability.outputs.selfhosted_disabled }}
           RUNNER_CAPACITY: ${{ needs.datacenter-availability.outputs.capacity }}
-          FLEET_EVACUATION: ${{ vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true' }}
-          PAID_LINUX_PROVIDER: ${{ vars.HARN_CI_PAID_LINUX_PROVIDER }}
-          CAPACITY_VENDOR_RUNNER: ubicloud-standard-8
-          CAPACITY_HOSTED_RUNNER: ubuntu-8core
 
   rust-cli:
     name: Build shared Harn CLI
@@ -1046,9 +1032,9 @@ jobs:
     # producer's runner ladder and capacity decision, and runs beside
     # `rust-check-inputs` instead of before it: the two builds never shared
     # compiled units, so in one job the test build waited 230-310s for nothing.
-    # Paid minutes per run are about the same; two paid runners now overlap.
+    # Hosted minutes per run are about the same; two free runners now overlap.
     #
-    # Hosted ceiling: 6 setup + 19 CLI budget + 12 cache-save reserve = 37.
+    # Hosted ceiling: 6 setup + 31 CLI budget + 12 cache-save reserve = 49.
     # The CLI builds in the ci-cli profile (opt-level 1), which costs more to
     # compile than dev and runs every Harn proof lane four to five times faster.
     #
@@ -1060,32 +1046,25 @@ jobs:
     # Its own runners instead: `harn-ci-producer` runners serve this job and
     # nothing else, with the host's sccache. The capacity step sends the build
     # there when one is idle. When all are busy, none is online, or on fork
-    # pull requests and main pushes, the ladder is the one it had: Ubicloud,
-    # then GitHub's runner when the paid-provider switch names it. On
-    # 2026-10-02 this build sat 37 minutes in the Ubicloud queue, which every
-    # repository in the organization shares (run 37042288569). GitHub's
-    # runner bills about three times Ubicloud's rate, so it is not the
-    # default for a busy reserved pool: the capacity annotation counts how
-    # often the reserved pool was full, and the waiters name a producer that
-    # never left the queue, so a recurrence is measured before it is paid for.
+    # pull requests and main pushes, it runs on GitHub's free standard
+    # `ubuntu-24.04` (4 vCPU on a public repository). Public-repository CI is
+    # free by policy (harn#9370): no larger GitHub runner, Ubicloud or
+    # Blacksmith. On 2026-10-02 this build also sat 37 minutes in the shared
+    # Ubicloud queue (run 37042288569). The capacity annotation still counts
+    # how often the reserved pool was full.
+    #
+    # The hosted ceiling comes from the step budgets in
+    # scripts/ci_cache_policy/linux_checks.harn, sized for 4 vCPU.
     runs-on: >-
       ${{ (needs.rust-producer-capacity.outputs.cli_route == 'owned'
         && fromJSON('["self-hosted", "Linux", "X64", "harn-ci-producer"]'))
-        || (vars.HARN_CI_PAID_LINUX_PROVIDER != 'github'
-        && 'ubicloud-standard-8')
-        || 'ubuntu-8core' }}
+        || 'ubuntu-24.04' }}
     timeout-minutes: >-
       ${{ (needs.rust-producer-capacity.outputs.cli_route == 'owned'
         && 37)
-        || (vars.HARN_CI_PAID_LINUX_PROVIDER != 'github'
-        && 37)
-        || 37 }}
-    # The paid rung is Ubicloud's 8 vCPU runner (about a third of GitHub's
-    # 8-core rate); HARN_CI_PAID_LINUX_PROVIDER=github puts GitHub's runner
-    # back. Whichever paid rung main pushes land on is the authorized
-    # main-branch cache writer, and Ubicloud serves actions/cache from its own
-    # store, so its first runs after a switch build cold. Blacksmith uses
-    # sticky sccache and never enters that step.
+        || 49 }}
+    # Main pushes land on the free hosted rung, which is the authorized
+    # main-branch cache writer.
     permissions:
       contents: read
       actions: write
@@ -1096,8 +1075,6 @@ jobs:
       HARN_RUNNER_TIER: >-
         ${{ (needs.rust-producer-capacity.outputs.cli_route == 'owned'
           && 'self-hosted')
-          || (vars.HARN_CI_PAID_LINUX_PROVIDER != 'github'
-          && 'ubicloud')
           || 'github-hosted' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -1152,7 +1129,7 @@ jobs:
       - name: Record the sccache baseline
         run: ./scripts/ci/sccache_baseline.sh
       - name: Build portable Harn CLI
-        timeout-minutes: ${{ env.HARN_RUNNER_TIER == 'self-hosted' && 31 || 19 }}
+        timeout-minutes: ${{ env.HARN_RUNNER_TIER == 'self-hosted' && 31 || 31 }}
         env:
           CARGO_BUILD_JOBS: ${{ steps.resource-budget.outputs.build_jobs }}
         run: >-
@@ -1200,10 +1177,9 @@ jobs:
         && (needs.rust-producer-capacity.result == 'success'
         || github.event_name != 'pull_request'
         || github.event.pull_request.head.repo.full_name != github.repository) }}
-    # Public-repository CI defaults to GitHub-hosted capacity, which is free.
-    # Paid capacity requires the explicit repository opt-in below. At $0.016/min
-    # every paid run has a hard 20-minute/$0.32 fuse, and Blacksmith never saves
-    # a cache.
+    # Public-repository CI uses GitHub's free standard hosted capacity after the
+    # owned rungs. The hosted job still has a hard timeout so a stuck compile
+    # cannot consume the lane indefinitely.
     #
     # The shared CLI is built by `rust-cli`, a sibling job on the same ladder
     # that starts at the same time. The two builds never shared compiled units
@@ -1211,7 +1187,7 @@ jobs:
     # sequence for nothing: 230-310s of CLI before 283-372s of test build.
     #
     # The hosted ceiling is owned by the workload rather than chosen as a round
-    # number: it is the sum of the hosted step budgets below (16 + 26), plus
+    # number: it is the sum of the hosted step budgets below (24 + 26), plus
     # six minutes of setup and cache restore, plus a twelve-minute reserve for
     # this job's main-branch cache save. The save is a post step, so before the
     # reserve existed it ran inside whatever margin the tests happened to leave;
@@ -1234,27 +1210,20 @@ jobs:
         && fromJSON('["self-hosted", "Linux", "X64", "harn-ci-big"]'))
         || (needs.rust-producer-capacity.outputs.merge_route == 'owned'
         && fromJSON('["self-hosted", "Linux", "X64", "harn-ci-big", "hetzner-1"]'))
-        || (vars.HARN_CI_PAID_LINUX_PROVIDER != 'github'
-        && 'ubicloud-standard-8')
-        || 'ubuntu-8core' }}
+        || 'ubuntu-24.04' }}
     timeout-minutes: >-
       ${{ (needs.rust-producer-capacity.outputs.route == 'owned'
         && 56)
         || (needs.rust-producer-capacity.outputs.merge_route == 'owned'
         && 56)
-        || (vars.HARN_CI_PAID_LINUX_PROVIDER != 'github'
-        && 60)
-        || 60 }}
-    # The paid rung after the owned pool is Ubicloud's 8 vCPU runner (about a
-    # third of GitHub's 8-core rate); HARN_CI_PAID_LINUX_PROVIDER=github puts
-    # GitHub's runner back. Whichever paid rung main pushes land on is the
-    # authorized main-branch cache writer, and Ubicloud serves actions/cache
-    # from its own store, so its first runs after a switch build cold.
-    # Blacksmith uses sticky sccache and never enters that step, and the owned
+        || 68 }}
+    # The rung after the owned pool is GitHub's free standard `ubuntu-24.04`
+    # (public repository, harn#9370). Main pushes land on it, so it is the
+    # authorized main-branch cache writer, and the owned
     # self-hosted rung is pull-request-only so it never reaches the write
     # either. That is the reason the owned rung is scoped to pull requests
     # rather than to every event: routing main pushes there would retire the
-    # writer, and every later paid run would pay a cold cache.
+    # writer, and every later hosted run would pay a cold cache.
     permissions:
       contents: read
       actions: write
@@ -1275,8 +1244,6 @@ jobs:
           && 'self-hosted')
           || (needs.rust-producer-capacity.outputs.merge_route == 'owned'
           && 'self-hosted')
-          || (vars.HARN_CI_PAID_LINUX_PROVIDER != 'github'
-          && 'ubicloud')
           || 'github-hosted' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -1331,13 +1298,13 @@ jobs:
       - name: Record the sccache baseline
         run: ./scripts/ci/sccache_baseline.sh
       - name: Install cargo-nextest
-        uses: taiki-e/install-action@9983c65e42da123ff25d1f78505eb6de315aa172 # v2.87.20
+        uses: taiki-e/install-action@4cef1412cce204788f482e778a0b9187f9626a29 # v2.87.21
         with:
           tool: nextest@0.9.132
       # Only security binaries enter this archive; the following workspace
       # tests reuse the same profile and unified features without rebuilding.
       - name: Build security test archive
-        timeout-minutes: ${{ env.HARN_RUNNER_TIER == 'self-hosted' && 24 || 16 }}
+        timeout-minutes: ${{ env.HARN_RUNNER_TIER == 'self-hosted' && 24 || 24 }}
         env:
           CARGO_BUILD_JOBS: ${{ steps.resource-budget.outputs.build_jobs }}
         run: |
@@ -1534,7 +1501,7 @@ jobs:
           check-command: mold
       - uses: ./.github/actions/rust-toolchain
       - name: Install cargo-nextest
-        uses: taiki-e/install-action@9983c65e42da123ff25d1f78505eb6de315aa172 # v2.87.20
+        uses: taiki-e/install-action@4cef1412cce204788f482e778a0b9187f9626a29 # v2.87.21
         with:
           tool: nextest@0.9.132
       - name: Start workspace test archive download timer
@@ -1624,7 +1591,7 @@ jobs:
           check-command: mold bwrap
       - uses: ./.github/actions/rust-toolchain
       - name: Install cargo-nextest
-        uses: taiki-e/install-action@9983c65e42da123ff25d1f78505eb6de315aa172 # v2.87.20
+        uses: taiki-e/install-action@4cef1412cce204788f482e778a0b9187f9626a29 # v2.87.21
         with:
           tool: nextest@0.9.132
       - name: Download security test archive
@@ -2437,7 +2404,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/rust-toolchain
       - name: Install pinned cross CLI
-        uses: taiki-e/install-action@9983c65e42da123ff25d1f78505eb6de315aa172 # v2.87.20
+        uses: taiki-e/install-action@4cef1412cce204788f482e778a0b9187f9626a29 # v2.87.21
         with:
           tool: cross@0.2.5
           fallback: none

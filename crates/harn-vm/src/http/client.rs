@@ -129,7 +129,7 @@ pub(super) fn clear_http_streams() {
     HTTP_STREAMS.with(|streams| streams.borrow_mut().clear());
 }
 
-fn build_http_response(
+pub(super) fn build_http_response(
     status: i64,
     headers: crate::value::DictMap,
     body: String,
@@ -147,7 +147,7 @@ fn build_http_response(
     VmValue::dict(result)
 }
 
-fn build_http_download_response(
+pub(super) fn build_http_download_response(
     status: i64,
     headers: crate::value::DictMap,
     bytes_written: u64,

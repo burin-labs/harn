@@ -406,7 +406,15 @@ pub fn __tool_lifecycle_session_id(envelope: dict) -> string {
   return to_string(envelope?.turn?.session_id ?? "")
 }
 
-pub fn __emit_tool_lifecycle_start(agent: HarnessAgent, envelope: dict) {
+/**
+ * `intent` is the batch's declared purpose label (`_purpose_label` on the
+ * dispatch options). The host boundary normalizes it and drops a blank one,
+ * the same way dispatch does for the approval request.
+ *
+ * @effects: [agent]
+ * @errors: []
+ */
+pub fn __emit_tool_lifecycle_start(agent: HarnessAgent, envelope: dict, intent: string = "") {
   const session_id = __tool_lifecycle_session_id(envelope)
   if session_id == "" || to_string(envelope?.tool_name ?? "") == "" {
     return
@@ -420,6 +428,7 @@ pub fn __emit_tool_lifecycle_start(agent: HarnessAgent, envelope: dict) {
       tool_name: envelope.tool_name,
       status: "pending",
       raw_input: envelope.tool_args,
+      intent: intent,
     },
   )
   let _ = agent_emit_event(
@@ -534,7 +543,7 @@ pub fn __agent_error_must_propagate(err: any) -> bool {
 pub fn __invoke_tool(harness: Harness, call: dict, tools: dict, options: dict) {
   const caller = options?._tool_caller
   const envelope = __tool_envelope(harness.random, call, tools, options)
-  __emit_tool_lifecycle_start(harness.agent, envelope)
+  __emit_tool_lifecycle_start(harness.agent, envelope, to_string(options?._purpose_label ?? ""))
   if caller == nil {
     const direct = agent_dispatch_tool_call(
       harness.tools,
@@ -601,9 +610,11 @@ pub fn __maybe_emit_tool_audit(
 
 pub fn __visible_text(parsed: dict, raw_text: any) {
   let text = raw_text
-  if parsed?.user_response != nil && parsed.user_response != "" {
+  if parsed?.user_response != nil {
     text = parsed.user_response
-  } else if parsed?.prose != nil && parsed.prose != "" {
+  } else if to_string(parsed?.prose ?? "") != ""
+    || (parsed?.response_body_present ?? false)
+    || parsed?.done_marker != nil {
     text = parsed.prose
   }
   return __strip_internal_verdict_json(text)

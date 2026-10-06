@@ -44,15 +44,15 @@ required-features = ["internal-freshness-checker"]
 [dependencies]
 # `name` is needed for model-id pattern matching; harn-vm already enables it,
 # so this costs no additional build.
-harn-glob = { path = "../harn-glob", version = "=0.10.157", default-features = false, features = ["name"] }
-harn-flock = { path = "../harn-flock", version = "=0.10.157" }
-harn-lexer = { path = "../harn-lexer", version = "=0.10.157" }
-harn-parser = { path = "../harn-parser", version = "=0.10.157" }
-harn-ir = { path = "../harn-ir", version = "=0.10.157" }
-harn-kernel = { path = "../harn-kernel", version = "=0.10.157" }
-harn-builtin-meta = { path = "../harn-builtin-meta", version = "=0.10.157" }
-harn-clock = { path = "../harn-clock", version = "=0.10.157" }
-harn-test-runner = { path = "../harn-test-runner", version = "=0.10.157" }
+harn-glob = { path = "../harn-glob", version = "=0.10.158", default-features = false, features = ["name"] }
+harn-flock = { path = "../harn-flock", version = "=0.10.158" }
+harn-lexer = { path = "../harn-lexer", version = "=0.10.158" }
+harn-parser = { path = "../harn-parser", version = "=0.10.158" }
+harn-ir = { path = "../harn-ir", version = "=0.10.158" }
+harn-kernel = { path = "../harn-kernel", version = "=0.10.158" }
+harn-builtin-meta = { path = "../harn-builtin-meta", version = "=0.10.158" }
+harn-clock = { path = "../harn-clock", version = "=0.10.158" }
+harn-test-runner = { path = "../harn-test-runner", version = "=0.10.158" }
 # testbench-wasi (wasmtime + the cranelift JIT, ~36 crates, ~8.6 MB of the
 # stripped binary plus real compile time) is NOT enabled by default — it only
 # backs the advanced `harn testbench run --process-wasi <dir>`
@@ -62,26 +62,27 @@ harn-test-runner = { path = "../harn-test-runner", version = "=0.10.157" }
 # sidecars) works without it, so the default binary stays lean. Opt in with the
 # `testbench-wasi` feature below; without it `--process-wasi` returns a clear
 # "requires the testbench-wasi Cargo feature" error.
-harn-vm = { path = "../harn-vm", version = "=0.10.157", default-features = false, features = ["full", "otel"] }
-harn-hostlib = { path = "../harn-hostlib", version = "=0.10.157", optional = true }
-harn-rules = { path = "../harn-rules", version = "=0.10.157", optional = true }
-harn-rules-hostlib = { path = "../harn-rules-hostlib", version = "=0.10.157", optional = true }
-harn-lint = { path = "../harn-lint", version = "=0.10.157" }
-harn-modules = { path = "../harn-modules", version = "=0.10.157" }
-harn-fmt = { path = "../harn-fmt", version = "=0.10.157" }
+harn-vm = { path = "../harn-vm", version = "=0.10.158", default-features = false, features = ["full", "otel"] }
+harn-hostlib = { path = "../harn-hostlib", version = "=0.10.158", optional = true }
+harn-rules = { path = "../harn-rules", version = "=0.10.158", optional = true }
+harn-rules-hostlib = { path = "../harn-rules-hostlib", version = "=0.10.158", optional = true }
+harn-lint = { path = "../harn-lint", version = "=0.10.158" }
+harn-modules = { path = "../harn-modules", version = "=0.10.158" }
+harn-package = { path = "../harn-package", version = "=0.10.158", features = ["test-support"] }
+harn-fmt = { path = "../harn-fmt", version = "=0.10.158" }
 # Management layer for downloadable injection-detection models (Layer 2). Light
 # (no model runtime); the heavy neural backend is behind `harn-guard/neural`,
 # pulled in only by the off-by-default `guard-neural` feature below.
-harn-guard = { path = "../harn-guard", version = "=0.10.157" }
-harn-serve = { path = "../harn-serve", version = "=0.10.157" }
-harn-skills = { path = "../harn-skills", version = "=0.10.157" }
-harn-stdlib = { path = "../harn-stdlib", version = "=0.10.157" }
+harn-guard = { path = "../harn-guard", version = "=0.10.158" }
+harn-serve = { path = "../harn-serve", version = "=0.10.158" }
+harn-skills = { path = "../harn-skills", version = "=0.10.158" }
+harn-stdlib = { path = "../harn-stdlib", version = "=0.10.158" }
 # LSP and DAP are linked into the single multi-call `harn` binary and reached
 # via argv[0] dispatch (when invoked as `harn-lsp` / `harn-dap`). This replaces
 # shipping two additional fully-linked binaries that each re-statically-linked
 # nearly the same dependency closure — collapsing 3 release binaries into 1.
-harn-lsp = { path = "../harn-lsp", version = "=0.10.157" }
-harn-dap = { path = "../harn-dap", version = "=0.10.157" }
+harn-lsp = { path = "../harn-lsp", version = "=0.10.158" }
+harn-dap = { path = "../harn-dap", version = "=0.10.158" }
 async-trait = "0.1"
 axum = { version = "0.8", features = ["ws"] }
 axum-server = { version = "0.8", features = ["tls-rustls"] }
@@ -97,12 +98,10 @@ mimalloc = { version = "0.1.52", default-features = false, optional = true }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "io-util", "signal", "sync", "time", "process"] }
 serde_json = "1"
 serde_yaml_ng = "0.10"
-semver = "1"
 unicode-width = "0.2"
-reedline = "0.51"
+reedline = "0.52"
 nu-ansi-term = "0.50"
 toml = "1.1"
-toml_edit = "0.25.12"
 serde = { version = "1", features = ["derive"] }
 notify = "8"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "blocking", "stream"] }
@@ -139,9 +138,6 @@ time = { version = "0.3", features = ["formatting", "parsing"] }
 tempfile = "3"
 include_dir = "0.7"
 uuid = { version = "1", features = ["v4", "v7"] }
-chrono-tz = "0.10.4"
-croner = "4.0.0"
-jmespath = "0.5.0"
 rustls = { version = "0.23", features = ["aws-lc-rs"] }
 tracing = "0.1"
 thiserror = "2"
@@ -191,6 +187,7 @@ mimalloc = ["dep:mimalloc"]
 # without hostlib is supported one layer down, on `harn-serve` and `harn-vm`;
 # `scripts/measure_lean_embedding.sh` guards that configuration.
 hostlib = [
+    "harn-package/hostlib",
     "dep:harn-hostlib",
     "dep:harn-rules",
     "dep:harn-rules-hostlib",
@@ -209,7 +206,7 @@ guard-neural = ["harn-guard/neural"]
 testbench-wasi = ["harn-vm/testbench-wasi"]
 
 [dev-dependencies]
-harn-clock = { path = "../harn-clock", version = "=0.10.157", features = ["test-support"] }
+harn-clock = { path = "../harn-clock", version = "=0.10.158", features = ["test-support"] }
 harn-mcp-compat = { path = "../harn-mcp-compat" }
 syn = { version = "3", features = ["full", "visit"] }
 rcgen = "0.14"

@@ -1,5 +1,6 @@
 use super::*;
 
+mod cancellation;
 mod prompt_output;
 mod timeline;
 mod typed_observability;
@@ -1384,7 +1385,7 @@ async fn acp_bridge_routes_session_request_permission_response() {
         output: AcpOutput::Channel(tx),
         pending: server.pending.clone(),
         next_id_counter: AtomicU64::new(77),
-        cancellation: SessionCancellation::default(),
+        cancellation: SessionCancellation::default().prepare_prompt(),
         script_name: Mutex::new(String::new()),
         assistant_state: Mutex::new(VisibleTextState::default()),
     });
@@ -1428,17 +1429,16 @@ async fn acp_bridge_routes_session_request_permission_response() {
 fn prepared_session_prompt_preserves_queued_cancel() {
     let cancellation = SessionCancellation::default();
     cancellation.cancel();
-    cancellation.begin_prompt();
+    let next = cancellation.prepare_prompt();
     assert!(
-        !cancellation.cancelled.load(Ordering::SeqCst),
+        !next.cancelled.load(Ordering::SeqCst),
         "stale cancellation should not leak into a later prompt"
     );
 
-    cancellation.prepare_prompt();
+    let queued = cancellation.prepare_prompt();
     cancellation.cancel();
-    cancellation.begin_prompt();
     assert!(
-        cancellation.cancelled.load(Ordering::SeqCst),
+        queued.cancelled.load(Ordering::SeqCst),
         "cancellation observed after a prompt was routed must not be reset at prompt start"
     );
 }

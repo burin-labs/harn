@@ -25,6 +25,7 @@ members = [
     "crates/harn-skills",
     "crates/harn-lsp",
     "crates/harn-modules",
+    "crates/harn-package",
     "crates/harn-stdlib",
     "crates/harn-vm",
     "crates/harn-wasm",
@@ -46,7 +47,7 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "0.10.157"
+version = "0.10.158"
 edition = "2021"
 rust-version = "1.95"
 license = "MIT OR Apache-2.0"
@@ -57,7 +58,7 @@ keywords = ["ai", "agents", "pipeline", "llm", "language"]
 categories = ["compilers", "command-line-utilities"]
 
 [workspace.dependencies]
-jsonschema = { version = "0.57.0", default-features = false }
+jsonschema = { version = "0.58.2", default-features = false }
 
 # Smaller debuginfo => faster linking on macOS without losing line-level
 # backtraces. A strict win for inner-loop dev/test builds.

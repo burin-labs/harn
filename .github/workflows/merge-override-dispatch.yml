@@ -20,7 +20,7 @@ jobs:
     if: >-
       github.event_name == 'pull_request' &&
       contains(fromJSON('["bypass-ci", "bypass-merge-queue", "force-merge"]'), github.event.label.name)
-    uses: burin-labs/.github/.github/workflows/merge-override.yml@ac933e8f1ab38e406e26835b447308d4a3837185
+    uses: burin-labs/.github/.github/workflows/merge-override.yml@4174668f54a9b692488439138a7fb90faf6b0ad1
     with:
       label: ${{ github.event.label.name }}
       actor: ${{ github.actor }}

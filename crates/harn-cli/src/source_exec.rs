@@ -221,6 +221,7 @@ pub(crate) async fn execute_with_skill_dirs_and_options(
             DiagnosticSeverity::Warning => {
                 warning_lines.push(format!("warning: {}", diag.message));
             }
+            DiagnosticSeverity::Info => {}
         }
     }
 
@@ -387,22 +388,6 @@ pub(crate) fn should_install_default_connector_clients(
 pub(crate) fn is_conformance_path(path: &Path) -> bool {
     path.components()
         .any(|component| component.as_os_str() == "conformance")
-}
-
-/// The outbound credentials a provider's manifest declared, as secret ids the
-/// runtime resolves at dispatch. Inbound verification secrets never cross the
-/// outbound connector-call boundary.
-pub(crate) fn declared_connector_secrets(
-    config: &package::ResolvedProviderConnectorConfig,
-) -> Vec<harn_vm::secrets::SecretId> {
-    let Some(setup) = config.setup.as_ref() else {
-        return Vec::new();
-    };
-    harn_vm::declared_secret_ids(
-        setup
-            .outbound_credentials()
-            .map(|requirement| requirement.id.as_str()),
-    )
 }
 
 pub(crate) async fn install_connector_clients_for_vm(
@@ -697,7 +682,7 @@ async fn register_provider_connector(
             }
         }
     }
-    registry.declare_secrets(config.id.clone(), declared_connector_secrets(config));
+    registry.declare_secrets(config.id.clone(), config.outbound_secret_ids());
     Ok(())
 }
 

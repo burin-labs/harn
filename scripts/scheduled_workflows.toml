@@ -206,3 +206,12 @@ crons = ["0 7 * * *"]
 cadence_reason = "Daily covers Windows-only behavior outside US business hours."
 job_ids = ["nextest"]
 health_failures = 3
+
+[[workflow]]
+path = ".github/workflows/smart-ship.yml"
+name = "Smart Ship"
+claim = "Pull requests labeled ship keep moving toward main without an event to wake them"
+crons = ["7,22,37,52 * * * *"]
+cadence_reason = "A quarter-hour sweep bounds how long a labeled pull request waits when GitHub drops an event, and finds merge-queue removals that send no pull request event; a run with nothing labeled exits in seconds."
+job_ids = ["ship"]
+health_failures = 4
