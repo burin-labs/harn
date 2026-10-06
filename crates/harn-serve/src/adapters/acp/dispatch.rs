@@ -95,7 +95,7 @@ impl AcpServer {
                 }
                 // Keep the durable store future out of the shared dispatch
                 // frame, which is paid again at each nested ACP descent.
-                Box::pin(self.handle_session_fork(&id, &params)).await;
+                self.handle_session_fork(&id, &params).await;
             }
             "session/truncate" => {
                 if self.reject_unauthenticated(&id) {
