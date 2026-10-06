@@ -15,6 +15,7 @@ mod denial_results;
 mod dispatch_policy;
 pub(super) mod event_capture;
 mod host_permission;
+mod prepared_consent;
 mod primitive_args;
 mod side_effect_ceiling;
 mod structured_tool_result;
@@ -42,6 +43,7 @@ use tool_catalog::{
     annotations_for as tool_annotations_for, descriptor_for as tool_descriptor_for,
     permission_context_for,
 };
+use tool_parse_diagnostics::parse_error_carrier_feedback;
 
 /// Cause-named feedback for a tool call whose arguments failed validation
 /// because of an argument-DELIVERY fault — the model authored a real call, but
@@ -120,54 +122,6 @@ fn arg_delivery_fault_feedback(
             "empty_arguments_dropped",
         ))
     }
-}
-
-/// Cause-named feedback for a tool call whose arguments could not be parsed and
-/// arrived as a `{"__parse_error": "..."}` carrier. Splits on the parser
-/// diagnostic:
-///
-/// - a TRUNCATION (`EOF while parsing` / `unexpected end of input`): the
-///   streamed arguments were cut off mid-value — the model authored a valid
-///   call, but the response ended before the arguments finished. Coach a
-///   smaller re-issue, exactly like the length-truncation empty-args case; the
-///   parser diagnostic is the authoritative signal here because the provider
-///   often does NOT flag this with `finish_reason=length` (observed on
-///   llamacpp: the stream stops mid-tool-call with a clean stop reason).
-/// - anything else (unquoted keys, trailing garbage, wrong dialect): a genuine
-///   formatting fault. Coach a clean re-issue as valid JSON. This is the
-///   negative control — a malformed call is NEVER silently accepted or
-///   mislabeled as a recoverable truncation.
-fn parse_error_carrier_feedback(tool_name: &str, parse_error: &str) -> (String, &'static str) {
-    if parse_error_is_truncation(parse_error) {
-        (
-            format!(
-                "Tool '{tool_name}' arguments could NOT be parsed because the tool call was \
-                 TRUNCATED mid-stream — the arguments JSON ended before it was complete. This \
-                 is NOT a missing-parameter slip: you did author the arguments, but the \
-                 response was cut off before they finished. Re-issue the call with shorter \
-                 content, or split the change into several smaller calls so the arguments fit \
-                 in one response."
-            ),
-            "arguments_truncated",
-        )
-    } else {
-        (
-            format!(
-                "Tool '{tool_name}' arguments could NOT be parsed as valid JSON. Re-issue the \
-                 call as one complete, well-formed JSON object with the required parameters."
-            ),
-            "arguments_malformed",
-        )
-    }
-}
-
-/// True when a streamed-argument `__parse_error` message describes a buffer that
-/// ended mid-value — a cut-off stream, not a dialect error. Keys on the two
-/// diagnostics the JSON and Harn text-tool parsers emit for an incomplete tail
-/// (`serde_json`'s "EOF while parsing ..." and the text-tool "unexpected end of
-/// input"), so a truncation is recognized regardless of which parser ran last.
-fn parse_error_is_truncation(parse_error: &str) -> bool {
-    parse_error.contains("EOF while parsing") || parse_error.contains("unexpected end of input")
 }
 
 /// Shared base `tool_result` shape for a call that never produced a real
@@ -844,8 +798,25 @@ pub(super) async fn host_agent_dispatch_tool_call(
     let dispatch_policy =
         DispatchPolicy::new(policy_machinery_active, dispatch_annotations.as_ref());
 
+    let prepared_invocation =
+        match prepared_consent::prepare(&ctx, tools, &tool_name, &tool_id, &tool_args, &session_id)
+            .await
+        {
+            Ok(prepared) => prepared,
+            Err(denied) => return Ok(denied),
+        };
+    // These are observations for consent, not model arguments. The handler
+    // keeps the separately retained binding and never consumes a host rewrite.
+    let approval_args = prepared_invocation
+        .as_ref()
+        .map(|bound| bound.operation().clone());
+
     let mut approval_status = None;
-    if let Err(policy_denial) = dispatch_policy.enforce(&tool_name, &tool_args, None) {
+    if let Err(policy_denial) = dispatch_policy.enforce(
+        &tool_name,
+        approval_args.as_ref().unwrap_or(&tool_args),
+        None,
+    ) {
         if let Some(violation) = policy_denial.side_effect_ceiling {
             // A side-effect ceiling is the one static policy refusal that can
             // offer an explicit, dispatch-local ACP approval. The grant below
@@ -862,7 +833,7 @@ pub(super) async fn host_agent_dispatch_tool_call(
                     session_id: &session_id,
                     tool_call_id: &tool_id,
                     tool_name: &tool_name,
-                    tool_args: &tool_args,
+                    tool_args: approval_args.as_ref().unwrap_or(&tool_args),
                     violation,
                     reason: policy_denial.reason.clone(),
                     tool_context: permission_context_for(tools, &tool_name),
@@ -877,9 +848,11 @@ pub(super) async fn host_agent_dispatch_tool_call(
                             "side-effect approval missing its policy violation".to_string(),
                         ));
                     };
-                    if let Err(recheck_denial) =
-                        dispatch_policy.enforce(&tool_name, &tool_args, Some(&grant))
-                    {
+                    if let Err(recheck_denial) = dispatch_policy.enforce(
+                        &tool_name,
+                        approval_args.as_ref().unwrap_or(&tool_args),
+                        Some(&grant),
+                    ) {
                         let denial = tool_denial_from_policy(recheck_denial, &tool_name);
                         return Ok(deny_tool_call_value(
                             Some(&ctx),
@@ -964,9 +937,13 @@ pub(super) async fn host_agent_dispatch_tool_call(
     // tool-result path. Fail-open: no precheck (or an unreadable verdict)
     // leaves dispatch byte-identical.
     if crate::orchestration::tool_precheck_active() {
-        if let Some(precheck_denial) =
-            crate::orchestration::run_tool_precheck(Some(&ctx), &tool_name, &tool_args, &session_id)
-                .await?
+        if let Some(precheck_denial) = crate::orchestration::run_tool_precheck(
+            Some(&ctx),
+            &tool_name,
+            approval_args.as_ref().unwrap_or(&tool_args),
+            &session_id,
+        )
+        .await?
         {
             let denial = crate::orchestration::precheck_tool_denial(precheck_denial);
             return Ok(deny_tool_call_value(
@@ -999,7 +976,7 @@ pub(super) async fn host_agent_dispatch_tool_call(
             Some(&ctx),
             &mut permission_grants,
             &tool_name,
-            &tool_args,
+            approval_args.as_ref().unwrap_or(&tool_args),
             &session_id,
         ))
         .await?;
@@ -1083,9 +1060,13 @@ pub(super) async fn host_agent_dispatch_tool_call(
         let repeat_count = crate::orchestration::next_approval_policy_repeat_count(
             &session_id,
             &tool_name,
-            &tool_args,
+            approval_args.as_ref().unwrap_or(&tool_args),
         );
-        policy.evaluate_detailed_with_repeat(&tool_name, &tool_args, repeat_count)
+        policy.evaluate_detailed_with_repeat(
+            &tool_name,
+            approval_args.as_ref().unwrap_or(&tool_args),
+            repeat_count,
+        )
     });
     // Lethal-trifecta gate (Layer 1): once untrusted content has entered the
     // session's context, upgrade an auto-allow to an interactive confirmation
@@ -1105,7 +1086,7 @@ pub(super) async fn host_agent_dispatch_tool_call(
                             &security_policy,
                             annotations.as_ref(),
                             &tool_name,
-                            &tool_args,
+                            approval_args.as_ref().unwrap_or(&tool_args),
                             &taint,
                         ) {
                             let extra: &[&str] = if outcome.injection_flagged {
@@ -1128,7 +1109,7 @@ pub(super) async fn host_agent_dispatch_tool_call(
         Some(&ctx),
         approval.as_mut(),
         &tool_name,
-        &tool_args,
+        approval_args.as_ref().unwrap_or(&tool_args),
         &session_id,
     )
     .await
@@ -1179,7 +1160,7 @@ pub(super) async fn host_agent_dispatch_tool_call(
                 session_id: session_id.clone(),
                 tool_call_id: approval_id.clone(),
                 tool_name: tool_name.clone(),
-                tool_args: tool_args.clone(),
+                tool_args: approval_args.as_ref().unwrap_or(&tool_args).clone(),
                 policy_decision: decision.receipt.clone(),
                 request_context: serde_json::json!({"policy_decision": decision.receipt.clone()}),
                 requested_capabilities: vec![format!("tool.{tool_name}")],
@@ -1197,6 +1178,17 @@ pub(super) async fn host_agent_dispatch_tool_call(
                     // arguments: their exact exception was approved for the
                     // original dispatch and is rechecked before execution.
                     if let Some(new_args) = response.get("args") {
+                        if prepared_invocation.is_some() && new_args != &tool_args {
+                            return Ok(json_to_vm_value(&agent_primitive_denied_tool(
+                                &tool_name,
+                                &tool_id,
+                                &tool_args,
+                                "Prepared tool arguments changed during approval; request new approval",
+                                crate::agent_events::ToolCallErrorCategory::PermissionDenied,
+                                None,
+                                None,
+                            )));
+                        }
                         tool_args = new_args.clone();
                     }
                     approval_status = Some("host_granted");
@@ -1471,6 +1463,7 @@ pub(super) async fn host_agent_dispatch_tool_call(
             bridge: bridge.as_ref(),
             tool_retries,
             tool_backoff_ms,
+            prepared_invocation,
         },
     );
     let (outcome, preempted_by_cancel) = match cancel_handle.as_ref() {

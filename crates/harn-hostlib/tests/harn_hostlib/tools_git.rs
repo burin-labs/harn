@@ -60,7 +60,7 @@ fn invoke(args: &[(&str, VmValue)]) -> Result<VmValue, HostlibError> {
 
 /// Initialize a tiny git repo with two commits, configured locally so the
 /// test never reads global git config.
-fn fixture_repo() -> TempDir {
+pub(super) fn fixture_repo() -> TempDir {
     let dir = TempDir::new().unwrap();
     populate_fixture_repo(dir.path());
     dir
@@ -156,6 +156,79 @@ fn list_of(value: &VmValue) -> &Arc<Vec<VmValue>> {
         VmValue::List(l) => l,
         other => panic!("expected list, got {other:?}"),
     }
+}
+
+#[test]
+fn git_repository_identity_distinguishes_linked_worktrees_and_other_repositories() {
+    assert!(
+        ensure_git(),
+        "repository identity qualification requires git"
+    );
+    let repository = fixture_repo();
+    let linked_parent = TempDir::new().unwrap();
+    let linked = linked_parent.path().join("linked checkout");
+    run_git(
+        repository.path(),
+        &[
+            "worktree",
+            "add",
+            "--detach",
+            linked.to_str().unwrap(),
+            "HEAD",
+        ],
+    );
+    let identity = |root: &Path| {
+        let registry = registry();
+        let entry = registry
+            .find("hostlib_tools_git_repository_identity")
+            .unwrap();
+        (entry.handler)(&dict_arg(&[repo_arg(root)])).unwrap()
+    };
+    let main = identity(repository.path());
+    let worktree = identity(&linked);
+    let unrelated = identity(shared_fixture());
+    let data = |value: &VmValue, key: &str| match dict_get(value, key) {
+        VmValue::String(path) => std::fs::canonicalize(path.as_str()).unwrap(),
+        other => panic!("identity path is not a string: {other:?}"),
+    };
+    assert_eq!(
+        data(&main, "worktree_root"),
+        repository.path().canonicalize().unwrap()
+    );
+    assert_eq!(
+        data(&worktree, "worktree_root"),
+        linked.canonicalize().unwrap()
+    );
+    assert_ne!(
+        data(&main, "worktree_root"),
+        data(&worktree, "worktree_root")
+    );
+    assert_eq!(
+        data(&main, "common_directory"),
+        data(&worktree, "common_directory")
+    );
+    assert_ne!(
+        data(&main, "common_directory"),
+        data(&unrelated, "common_directory")
+    );
+}
+
+#[test]
+fn git_repository_identity_refuses_non_repository_instead_of_inventing_a_root() {
+    assert!(
+        ensure_git(),
+        "repository identity qualification requires git"
+    );
+    let directory = TempDir::new().unwrap();
+    let registry = registry();
+    let entry = registry
+        .find("hostlib_tools_git_repository_identity")
+        .unwrap();
+    let result = (entry.handler)(&dict_arg(&[repo_arg(directory.path())]));
+    assert!(
+        matches!(result, Err(HostlibError::Backend { .. })),
+        "{result:?}"
+    );
 }
 
 #[test]

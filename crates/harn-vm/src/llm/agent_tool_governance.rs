@@ -174,7 +174,10 @@ pub(super) fn registry_dispatch_rejection(
         })
 }
 
-fn require_registry_membership(tools_val: Option<&VmValue>, tool_name: &str) -> Result<(), String> {
+pub(super) fn require_registry_membership(
+    tools_val: Option<&VmValue>,
+    tool_name: &str,
+) -> Result<(), String> {
     let Some(tools_val) = tools_val else {
         return Ok(());
     };

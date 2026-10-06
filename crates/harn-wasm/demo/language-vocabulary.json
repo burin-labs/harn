@@ -886,6 +886,7 @@
     "tool_hooks_register",
     "tool_hooks_registry",
     "tool_hooks_unregister",
+    "tool_invocation_binding",
     "tool_list",
     "tool_parse_call",
     "tool_project",

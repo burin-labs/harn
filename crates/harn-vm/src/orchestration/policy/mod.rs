@@ -4,7 +4,10 @@ mod approval_activity;
 mod approval_resolver;
 mod approval_review_config;
 mod approval_rules;
+mod capability_invocation;
 mod capability_lattice;
+pub use capability_invocation::enforce_current_policy_for_capability;
+pub(crate) use capability_invocation::scope_read_only_invocation;
 mod consent_capability;
 pub(crate) use consent_capability::is_policy_machinery_consent_call;
 mod effect_call_cache;
@@ -387,10 +390,15 @@ pub fn tool_declared_path_entries(
 }
 
 pub fn enforce_current_policy_for_builtin(name: &str, args: &[VmValue]) -> Result<(), VmError> {
+    let entry = crate::stdlib::builtin_manifest_entry(name);
+    crate::tool_registry::preparation_scope::enforce_contract(
+        name,
+        entry.map(|entry| &entry.contract),
+    )?;
     let Some(policy) = current_execution_policy() else {
         return Ok(());
     };
-    if let Some(entry) = crate::stdlib::builtin_manifest_entry(name) {
+    if let Some(entry) = entry {
         match entry.contract.exposure {
             harn_builtin_meta::BuiltinExposure::CapabilityFunction { authority_argument } => {
                 if args.get(usize::from(authority_argument)).is_none() {
@@ -641,44 +649,8 @@ pub fn enforce_current_policy_for_builtin(name: &str, args: &[VmValue]) -> Resul
     Ok(())
 }
 
-/// Enforce a typed Harness method at the authoritative source policy boundary.
-pub fn enforce_current_policy_for_capability(
-    capability: harn_builtin_meta::CapabilityId,
-    method: &str,
-    args: &[VmValue],
-) -> Result<(), VmError> {
-    // Manifest/lifecycle VM hooks install `allow_trusted_bridge_calls` for the
-    // duration of the handler. That guard already exempts bridged builtins;
-    // Harness methods must honor the same depth, or a PreToolUse handler that
-    // migrated from ambient `store_get` / `agent_session_current_id` to
-    // `harness.runtime.store_get` / `harness.agent.current_id` silently loses
-    // state:read under the tool's effect ceiling (observed downstream).
-    if trusted_bridge_call_is_active() {
-        return Ok(());
-    }
-    let Some(policy) = current_execution_policy() else {
-        return Ok(());
-    };
-    let Some(entry) = crate::stdlib::capability_method_manifest_entry(capability, method) else {
-        return reject_policy(format!(
-            "undeclared Harness capability method `harness.{}.{method}`",
-            capability.field_name()
-        ));
-    };
-    let denied = effects::runtime_effects_from_contract(entry.contract.effects, args)
-        .into_iter()
-        .find(|effect| !contract_effect_allowed_by_ceiling(effect, entry.contract, &policy));
-    if let Some(effect) = denied {
-        return reject_policy(format!(
-            "harness.{}.{method} exceeds the active effect ceiling: {}",
-            capability.field_name(),
-            effects::effect_record_summary(&effect)
-        ));
-    }
-    Ok(())
-}
-
 pub fn enforce_current_policy_for_bridge_builtin(name: &str) -> Result<(), VmError> {
+    crate::tool_registry::preparation_scope::enforce_contract(name, None)?;
     if trusted_bridge_call_is_active() {
         return Ok(());
     }
