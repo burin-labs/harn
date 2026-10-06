@@ -87,6 +87,7 @@ impl ToolMutationStatus {
 /// deliberately extensible — `unknown` is the default when the runtime
 /// could not classify a failure.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
+#[non_exhaustive]
 #[serde(rename_all = "snake_case")]
 pub enum ToolCallErrorCategory {
     /// Host-side validation rejected the args (missing required field,

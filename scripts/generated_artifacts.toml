@@ -606,9 +606,10 @@ outputs = ["docs/src/connectors/parity-matrix.md"]
 sources = [
   "crates/harn-cli/portal/",
   "crates/harn-cli/src/commands/check/connector_matrix.rs",
-  "crates/harn-cli/src/package/manifest.rs",
-  "crates/harn-cli/src/package/manifest/",
-  "crates/harn-cli/src/package/credential_environment.rs",
+  "crates/harn-package/src/package/manifest.rs",
+  "crates/harn-package/src/package/manifest/",
+  "crates/harn-package/src/package/credential_environment.rs",
+  "crates/harn-vm/src/connectors/manifest/",
   "crates/harn-modules/",
   "conformance/fixtures/connectors/",
 ]

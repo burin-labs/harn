@@ -474,6 +474,10 @@ pub(super) struct ModePolicyScope {
 }
 
 impl ModePolicyScope {
+    pub(super) fn policy(&self) -> Option<&CapabilityPolicy> {
+        self.policy.as_ref()
+    }
+
     pub(super) fn new(mode_id: &str, sandbox: &AcpSandboxConfig) -> Self {
         // Install the SSRF guard only with explicit process confinement.
         // It blocks PRIVATE/loopback/link-local/metadata egress while leaving

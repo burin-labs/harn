@@ -13,6 +13,7 @@ mod evidence;
 mod identity;
 mod receipt;
 mod session;
+mod session_bridge;
 
 pub use contracts::*;
 pub use discovery::*;
@@ -21,6 +22,7 @@ pub use evidence::requirement_fingerprint;
 pub use identity::*;
 pub use receipt::*;
 pub use session::*;
+pub use session_bridge::request_session_approval;
 
 #[cfg(test)]
 mod tests;
