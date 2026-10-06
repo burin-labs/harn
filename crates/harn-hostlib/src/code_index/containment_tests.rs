@@ -185,3 +185,23 @@ fn rename_respects_a_sandbox_scope_narrower_than_the_index() {
         PY_FETCH
     );
 }
+
+#[test]
+fn rename_refuses_when_an_out_of_scope_file_only_names_the_symbol() {
+    // No call here, so no graph node puts `other/b.py` in scope; only the
+    // word sweep finds it, and it must refuse rather than skip it.
+    const USE: &str = "from allowed.a import fetch_rows\n\nhandler = fetch_rows\n";
+    let (_ws_dir, ws) = canonical_tempdir();
+    write(&ws, "allowed/a.py", PY_FETCH);
+    write(&ws, "other/b.py", USE);
+    let capability = indexed(&ws);
+    let _policy = PolicyGuard::worktree(&[&ws.join("allowed")]);
+
+    let result = super::super::rename::run(&capability.shared(), &[rename_request("allowed/a.py")]);
+    assert!(result.is_err(), "rename must refuse: {result:?}");
+    assert_eq!(fs::read_to_string(ws.join("other/b.py")).unwrap(), USE);
+    assert_eq!(
+        fs::read_to_string(ws.join("allowed/a.py")).unwrap(),
+        PY_FETCH
+    );
+}

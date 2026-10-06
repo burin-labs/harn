@@ -203,17 +203,20 @@ pub(super) fn files_in_scope(
         // through staged-fs (#1722) when a session id is supplied so
         // we observe pending writes from the same session.
         for file in state.files.values() {
-            // A file that no longer resolves inside the workspace is not
-            // read; the rewrite pass would refuse it anyway.
-            let Ok(abs) = contained_path(
+            let mentions = match contained_path(
                 "hostlib_code_index",
                 &state.root,
                 &file.relative_path,
                 FsAccess::Read,
-            ) else {
-                continue;
+            ) {
+                Ok(abs) => file_contains_word(&abs, name, session_id),
+                // Out of reach now, so decide from what the index read
+                // when the file was inside. Keeping it in scope makes the
+                // rewrite pass refuse the operation instead of silently
+                // leaving its uses stale.
+                Err(_) => state.words.get(name).iter().any(|hit| hit.file == file.id),
             };
-            if file_contains_word(&abs, name, session_id) {
+            if mentions {
                 seen.insert(file.relative_path.clone());
             }
         }
