@@ -106,8 +106,12 @@ pub(super) async fn prepare(
         return Ok(None);
     };
     super::agent_tool_governance::require_registry_membership(registry, name).map_err(rejected)?;
-    let schemas = super::tools::collect_tool_schemas(registry, None);
-    super::tools::validate_tool_args(name, arguments, &schemas).map_err(rejected)?;
+    super::agent_tool_governance::prepared_handler_catalog(
+        registry.ok_or_else(|| rejected("prepared tool requires its registry"))?,
+        name,
+    )?
+    .validate_input(name, arguments)
+    .map_err(|error| rejected(error.to_string()))?;
     let facts = resolve(ctx, &prepare, arguments).await?;
     Ok(Some(Arc::new(PreparedInvocation {
         name: name.into(),
