@@ -482,7 +482,9 @@ fn python_continuation_error(root: Node<'_>, source: &str) -> Option<String> {
                 "module" | "block" => !matches!(child.kind(), "decorated_definition" | "comment"),
                 // Decorators sit on their own lines; check the definition.
                 "decorated_definition" => child.kind() != "decorator",
-                _ => false,
+                // `elif`, `else`, `except`, `finally`, `case`: a clause with
+                // its own header line and body, nested under its statement.
+                _ => child.kind().ends_with("_clause") && has_block_child(child),
             };
             if !statement {
                 continue;
@@ -517,6 +519,14 @@ fn python_continuation_error(root: Node<'_>, source: &str) -> Option<String> {
         }
     }
     None
+}
+
+fn has_block_child(node: Node<'_>) -> bool {
+    let mut cursor = node.walk();
+    let found = node
+        .named_children(&mut cursor)
+        .any(|c| c.kind() == "block");
+    found
 }
 
 /// The tokens of a statement's own logical line: every leaf, strings as one
