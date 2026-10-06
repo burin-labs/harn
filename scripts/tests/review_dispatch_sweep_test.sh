@@ -130,8 +130,19 @@ in_flight="$(fake_sha 0 5)"
 spent="$(fake_sha 0 6)"
 told="$(fake_sha 0 7)"
 mixed="$(fake_sha 0 8)"
+renamed="$(fake_sha 0 9)"
+quoted="$(fake_sha 1 a)"
+# The body the reviewer posts on this repository when a run does not finish
+# and its account is withheld, captured from the reviewer's own builder and
+# public filter for this target (downstream #10419). HEAD stands for the head.
+captured_unfinished_body='<!-- automated-review-unfinished: HEAD -->
+**Automated review did not finish.** Its account of the stop was withheld from this repository because it referenced context that is private to the reviewer. This run does not approve.'
+bot_review() {
+  jq -cn --arg head "$1" --arg at "$2" --arg body "$3" \
+    '{author: {__typename: "Bot"}, commit: {oid: $head}, submittedAt: $at, body: $body}'
+}
 unfinished_review() {
-  printf '{"author":{"__typename":"Bot"},"commit":{"oid":"%s"},"submittedAt":"%s","body":"<!-- automated-review-unfinished: %s -->\\n**Automated review did not finish.** This run does not approve."}' "$1" "$2" "$1"
+  bot_review "$1" "$2" "${captured_unfinished_body//HEAD/$1}"
 }
 exhausted_notice() {
   printf '{"author":{"__typename":"Bot"},"createdAt":"2026-10-06T02:00:00Z","body":"<!-- automated-review-sweep-exhausted: %s -->"}' "$1"
@@ -142,14 +153,19 @@ $(pr 10 false "$again" User "$(unfinished_review "$again" 2026-10-06T02:00:00Z)"
 $(pr 11 false "$in_flight" User "$(unfinished_review "$in_flight" 2026-10-06T01:00:00Z)" ""),
 $(pr 12 false "$spent" User "$(unfinished_review "$spent" 2026-10-06T00:00:00Z),$(unfinished_review "$spent" 2026-10-06T01:00:00Z),$(unfinished_review "$spent" 2026-10-06T02:00:00Z)" ""),
 $(pr 13 false "$told" User "$(unfinished_review "$told" 2026-10-06T00:00:00Z),$(unfinished_review "$told" 2026-10-06T01:00:00Z),$(unfinished_review "$told" 2026-10-06T02:00:00Z)" "$(exhausted_notice "$told")"),
-$(pr 14 false "$mixed" User "$(unfinished_review "$mixed" 2026-10-06T01:00:00Z),{\"author\":{\"__typename\":\"Bot\"},\"commit\":{\"oid\":\"$mixed\"},\"submittedAt\":\"2026-10-06T02:00:00Z\",\"body\":\"real\"}" "")
+$(pr 14 false "$mixed" User "$(unfinished_review "$mixed" 2026-10-06T01:00:00Z),$(bot_review "$mixed" 2026-10-06T02:00:00Z real)" ""),
+$(pr 15 false "$renamed" User "$(bot_review "$renamed" 2026-10-06T02:00:00Z "<!-- reviewer-review-unfinished: $renamed -->
+Did not finish.")" ""),
+$(pr 16 false "$quoted" User "$(bot_review "$quoted" 2026-10-06T02:00:00Z "A real review that quotes \`<!-- automated-review-unfinished: $quoted -->\` in prose.")" "")
 ]}}}}
 JSON
 )"
 export FAKE_CENSUS
-export FAKE_REQUESTS="$again=2026-10-06T01:30:00Z $in_flight=2026-10-06T02:30:00Z $spent=2026-10-06T02:30:00Z $told=2026-10-06T02:30:00Z $mixed=2026-10-06T00:30:00Z"
+export FAKE_REQUESTS="$again=2026-10-06T01:30:00Z $in_flight=2026-10-06T02:30:00Z $spent=2026-10-06T02:30:00Z $told=2026-10-06T02:30:00Z $mixed=2026-10-06T00:30:00Z $renamed=2026-10-06T01:30:00Z $quoted=2026-10-06T01:30:00Z"
 plan="$("$script" --repo burin-labs/harn --now 2026-10-06T03:00:00Z)"
-expected="$(printf '10\t%s\tunfinished\n12\t%s\texhausted' "$again" "$spent")"
+# 15: any reviewer namespace counts. 16: a marker quoted inside a real
+# review's prose is not the marker, so that review decides the head.
+expected="$(printf '10\t%s\tunfinished\n12\t%s\texhausted\n15\t%s\tunfinished' "$again" "$spent" "$renamed")"
 [[ "$plan" == "$expected" ]] || fail "unexpected plan for unfinished reviews:
 $plan"
 

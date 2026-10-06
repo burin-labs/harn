@@ -17,7 +17,8 @@ ends with nothing:
               one pending run, so a burst of requests cancels the older ones
               without a word on the pull request.
   unfinished  the reviewer's only reviews of the head are failure verdicts
-              (marked `<!-- automated-review-unfinished: <head> -->`), and the
+              (a line `<!-- <namespace>-review-unfinished: <head> -->`; the
+              namespace is the reviewer's, so any is accepted), and the
               newest one is later than the head's latest request. A verdict
               that says the review did not finish is not a review.
   exhausted   the head already has REVIEW_SWEEP_MAX_UNFINISHED (default 3)
@@ -130,9 +131,10 @@ waiting="$(jq -c '
   | select(.isCrossRepository | not)
   | select(.author.__typename != "Bot")
   | .headRefOid as $head
-  | ("<!-- automated-review-unfinished: " + $head + " -->") as $unfinished_marker
+  # On a line of its own: a review that quotes the marker in prose is a review.
+  | ("(^|\n)<!-- [a-z][a-z0-9-]*-review-unfinished: " + $head + " -->(\n|$)") as $unfinished_marker
   | [.reviews.nodes[] | select(.author.__typename == "Bot" and .commit.oid == $head)] as $bot_reviews
-  | [$bot_reviews[] | select((.body // "") | contains($unfinished_marker))] as $unfinished
+  | [$bot_reviews[] | select((.body // "") | test($unfinished_marker))] as $unfinished
   | select(($bot_reviews | length) == ($unfinished | length))
   | ([.comments.nodes[]
       | select(.author.__typename == "Bot")
