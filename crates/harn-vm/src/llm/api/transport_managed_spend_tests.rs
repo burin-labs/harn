@@ -61,7 +61,16 @@ fn managed_spending_pause_survives_http_and_stream_transport() {
                 .build()
                 .expect("runtime");
             let error = runtime
-                .block_on(vm_call_llm_full(&opts))
+                .block_on(async {
+                    if reason == "managed_spend_paused" {
+                        crate::llm::agent_observe::observed_llm_call(
+                            &opts, None, None, None, false, false, None, None,
+                        )
+                        .await
+                    } else {
+                        vm_call_llm_full(&opts).await
+                    }
+                })
                 .expect_err("service refusal");
             crate::llm_config::clear_user_overrides();
             drop(server);
