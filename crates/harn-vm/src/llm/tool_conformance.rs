@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use crate::llm_config::{self, ProviderDef};
+use crate::llm_config;
 
 #[path = "tool_conformance_helpers.rs"]
 mod helpers;
@@ -22,6 +22,7 @@ mod text_parse;
 mod types;
 use super::usage::extract_probe_usage;
 pub use super::usage::ToolProbeUsage;
+use helpers::chat_url;
 pub(super) use helpers::{aggregate_stream_text, probe_tool_registry};
 #[cfg(test)]
 use request::validate_probe_request_body;
@@ -421,7 +422,7 @@ pub async fn run_tool_conformance_probe(
     let (provider, model_id) = match &resolution {
         Ok(route) => (
             route.resolved_provider.clone(),
-            resolved_probe_model_id(&route.resolved_model),
+            llm_config::wire_model_id(&route.resolved_model),
         ),
         Err(_) => {
             let model = llm_config::resolve_model_info(&options.model);
@@ -481,10 +482,6 @@ pub async fn run_tool_conformance_probe(
         options.marker,
         cases,
     )
-}
-
-fn resolved_probe_model_id(selector: &str) -> String {
-    llm_config::wire_model_id(selector)
 }
 
 pub fn classify_tool_conformance_fixture(
@@ -1485,30 +1482,15 @@ fn classify_no_tool_probe_response(
     }
 }
 
-fn chat_url(def: &ProviderDef, base_url: &str) -> Result<String, String> {
-    let endpoint = if def.chat_endpoint.trim().is_empty() {
-        "/v1/chat/completions"
-    } else {
-        def.chat_endpoint.as_str()
-    };
-    let url = if endpoint.starts_with("http://") || endpoint.starts_with("https://") {
-        endpoint.to_string()
-    } else if endpoint.starts_with('/') {
-        format!("{}{}", base_url.trim_end_matches('/'), endpoint)
-    } else {
-        format!("{}/{}", base_url.trim_end_matches('/'), endpoint)
-    };
-    reqwest::Url::parse(&url)
-        .map(|_| url.clone())
-        .map_err(|error| format!("invalid provider chat URL '{url}': {error}"))
-}
-
 fn elapsed_ms(clock: &dyn harn_clock::Clock, started_ms: i64) -> u64 {
     clock.monotonic_ms().saturating_sub(started_ms).max(0) as u64
 }
 #[cfg(test)]
 #[path = "tool_conformance_request_tests.rs"]
 mod request_tests;
+#[cfg(test)]
+#[path = "tool_conformance_retirement_tests.rs"]
+mod retirement_tests;
 #[cfg(test)]
 #[path = "tool_conformance_summary_tests.rs"]
 mod summary_tests;
