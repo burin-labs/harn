@@ -66,6 +66,7 @@ impl FixtureExecutor {
     }
 
     fn background_result(&self) -> serde_json::Value {
+        let _environment = super::process_tools_e2e::declare_inherited();
         let session_id = format!("source-witness-{}", uuid::Uuid::now_v7());
         let info = harn_hostlib::tools::long_running::spawn_long_running(
             "prepared_source_verifier_test",
