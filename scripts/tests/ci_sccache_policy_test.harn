@@ -322,6 +322,23 @@ pipeline test_consumer_canary_accepts_checkout_mint_and_script(harness: Harness,
   assert_eq(consumer_canary_errors(consumer_canary_workflow([])), [])
 }
 
+@test
+pipeline test_consumer_observer_cannot_hide_publication(harness: Harness, task: unknown) {
+  const workflow = consumer_canary_workflow([{uses: "./.github/actions/observe-consumer"}])
+  assert(len(consumer_canary_errors(workflow)) > 0)
+  assert(len(consumer_canary_errors(workflow, {runs: {using: "composite", steps: []}})) > 0)
+  const safe = {
+    runs: {using: "composite", steps: [{run: "bash scripts/ci/consumer_canary.sh --observe"}]},
+  }
+  assert_eq(consumer_canary_errors(workflow, safe), [])
+  const upload = {runs: {using: "composite", steps: [{uses: "actions/upload-artifact@v4"}]}}
+  assert(len(consumer_canary_errors(workflow, upload)) > 0)
+  const summary = {
+    runs: {using: "composite", steps: [{run: "echo report >> $GITHUB_STEP_SUMMARY"}]},
+  }
+  assert(len(consumer_canary_errors(workflow, summary)) > 0)
+}
+
 fn persistent_lane(
   rust_cache_key: string,
   write_cache: bool = false,

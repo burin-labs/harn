@@ -2477,7 +2477,7 @@ pub const CONSUMER_CANARY_ACTIONS = ["actions/checkout@", "actions/create-github
  * consumer's identity must come from a secret: the runner prints each step's
  * inputs and environment, and masks only secrets.
  */
-pub fn consumer_canary_errors(workflow: dict) -> list<string> {
+pub fn consumer_canary_errors(workflow: dict, observer: dict? = nil) -> list<string> {
   const job = workflow?.jobs?.[CONSUMER_CANARY_JOB]
   if job == nil {
     return ["${CONSUMER_CANARY_WORKFLOW}:${CONSUMER_CANARY_JOB} must define the consumer canary"]
@@ -2491,6 +2491,16 @@ pub fn consumer_canary_errors(workflow: dict) -> list<string> {
   }
   for step in job?.steps ?? [] {
     const uses = step_uses(step)
+    if uses == "./.github/actions/observe-consumer" {
+      if observer?.runs?.using != "composite" || len(observer?.runs?.steps ?? []) == 0 {
+        errors = errors + ["consumer observer must define nonempty composite steps"]
+      } else {
+        // Check the composite's actual effects with the same publication
+        // policy. Naming a local action must not hide an upload or summary.
+        errors = errors + consumer_canary_errors({jobs: {consumers: {steps: observer.runs.steps}}})
+      }
+      continue
+    }
     if uses != "" && !CONSUMER_CANARY_ACTIONS.any({ prefix -> uses.starts_with(prefix) }) {
       errors = errors
         + [

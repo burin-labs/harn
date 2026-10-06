@@ -267,15 +267,20 @@ grep -q 'reason=no_verdict_before_deadline run=42 verdict=unmeasured wall_second
 # The executable windows need fresh read authority, not just a longer timer.
 # Parse the actual workflow/action contract, including historical-source
 # recovery, so it cannot silently return to executing the old observer.
-node - "$root" <<'JS'
+# Use the same Harn YAML reader as the owning CI policy. Cold audit workers
+# have the shared Harn binary and Node, but intentionally no npm install.
+HARN_BIN_NO_BUILD=1 "$root/scripts/harn_bin.sh" -- run -e '
+import { read_yaml } from "std/fs"
+fn main(harness: Harness) {
+  harness.stdio.println(json_stringify({
+    workflow: read_yaml(harness.fs, ".github/workflows/consumer-canary.yml", nil),
+    action: read_yaml(harness.fs, ".github/actions/observe-consumer/action.yml", nil),
+  }))
+}' > "$scratch/observer-contract.json"
+node - "$scratch/observer-contract.json" <<'JS'
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
-const path = require('node:path');
-const root = process.argv[2];
-const yaml = require(require.resolve('js-yaml', { paths: [root] }));
-const load = (file) => yaml.load(fs.readFileSync(path.join(root, file), 'utf8'));
-const { jobs } = load('.github/workflows/consumer-canary.yml');
-const action = load('.github/actions/observe-consumer/action.yml');
+const { workflow: { jobs }, action } = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
 const steps = jobs.consumers.steps;
 assert.equal(jobs.decide.steps[0].with.ref, '${{ github.sha }}');
 assert.equal(steps[0].with.ref, '${{ github.sha }}');
