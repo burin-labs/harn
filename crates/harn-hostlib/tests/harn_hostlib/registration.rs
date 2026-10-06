@@ -393,6 +393,7 @@ fn tools_capability_registers_documented_methods() {
             "hostlib_tools_list_directory",
             "hostlib_tools_get_file_outline",
             "hostlib_tools_git",
+            "hostlib_tools_git_repository_identity",
             // Process tools use the same receiver authority.
             "hostlib_tools_run_command",
             "hostlib_tools_read_command_output",
