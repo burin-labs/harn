@@ -1,6 +1,7 @@
 //! Model path-shape mistakes are retryable before policy callbacks or prompts.
 
 use super::*;
+use crate::orchestration::ToolInterceptionScope;
 use crate::value::{VmDictExt, VmValue};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -12,7 +13,7 @@ struct Calls {
 #[tokio::test(flavor = "current_thread")]
 async fn execution_constraints_cover_final_hook_arguments() {
     clear_execution_policy_stacks();
-    crate::orchestration::clear_tool_hooks();
+    let interception = ToolInterceptionScope::new();
     let _bridge = HostBridgeGuard::replace(None);
     let mut options = crate::value::DictMap::new();
     options.put(
@@ -32,15 +33,9 @@ async fn execution_constraints_cover_final_hook_arguments() {
         let calls = Calls::new();
         let rewrites = Arc::new(AtomicUsize::new(0));
         let observed = rewrites.clone();
-        crate::orchestration::register_tool_hook(crate::orchestration::ToolHook {
-            pattern: "read_file".into(),
-            pre: Some(Arc::new(move |_, _| {
-                observed.fetch_add(1, Ordering::SeqCst);
-                crate::orchestration::PreToolAction::Modify(
-                    serde_json::json!({"location": replacement}),
-                )
-            })),
-            post: None,
+        interception.before("read_file", move || {
+            observed.fetch_add(1, Ordering::SeqCst);
+            Some(serde_json::json!({"location": replacement}))
         });
         let result = calls
             .dispatch(serde_json::json!({"location": initial}), false, &options)
@@ -51,7 +46,7 @@ async fn execution_constraints_cover_final_hook_arguments() {
             "{initial} -> {replacement}: {result}"
         );
         assert_eq!(calls.effect.load(Ordering::SeqCst), usize::from(permitted));
-        crate::orchestration::clear_tool_hooks();
+        interception.clear_hooks();
     }
 }
 
@@ -128,7 +123,7 @@ impl Calls {
 #[tokio::test(flavor = "current_thread")]
 async fn side_effect_once_grant_cannot_follow_changed_hook_arguments() {
     clear_execution_policy_stacks();
-    crate::orchestration::clear_tool_hooks();
+    let interception = ToolInterceptionScope::new();
     for (replacement, permitted) in [("proof", true), ("different-proof", false)] {
         let requests = Arc::new(StdMutex::new(Vec::new()));
         let _bridge = HostBridgeGuard::replace(Some(responding_bridge(
@@ -138,15 +133,9 @@ async fn side_effect_once_grant_cannot_follow_changed_hook_arguments() {
         let calls = Calls::new();
         let rewrites = Arc::new(AtomicUsize::new(0));
         let observed = rewrites.clone();
-        crate::orchestration::register_tool_hook(crate::orchestration::ToolHook {
-            pattern: "read_file".into(),
-            pre: Some(Arc::new(move |_, _| {
-                observed.fetch_add(1, Ordering::SeqCst);
-                crate::orchestration::PreToolAction::Modify(
-                    serde_json::json!({"location": replacement}),
-                )
-            })),
-            post: None,
+        interception.before("read_file", move || {
+            observed.fetch_add(1, Ordering::SeqCst);
+            Some(serde_json::json!({"location": replacement}))
         });
         let result = calls
             .dispatch(
@@ -162,7 +151,7 @@ async fn side_effect_once_grant_cannot_follow_changed_hook_arguments() {
         if !permitted {
             assert_eq!(result["denial"]["gate"], "side_effect_ceiling");
         }
-        crate::orchestration::clear_tool_hooks();
+        interception.clear_hooks();
     }
 }
 
@@ -204,7 +193,7 @@ async fn catalog_paths_reach_workspace_approval_before_dispatch() {
 async fn rewritten_catalog_paths_are_checked_before_effects() {
     clear_execution_policy_stacks();
     clear_all_approval_policy_repeat_counts();
-    crate::orchestration::clear_tool_hooks();
+    let interception = ToolInterceptionScope::new();
     let _bridge = HostBridgeGuard::replace(None);
     push_approval_policy(ToolApprovalPolicy {
         auto_approve: vec!["read_file".into()],
@@ -220,15 +209,9 @@ async fn rewritten_catalog_paths_are_checked_before_effects() {
     ] {
         let rewrites = Arc::new(AtomicUsize::new(0));
         let observed = rewrites.clone();
-        crate::orchestration::register_tool_hook(crate::orchestration::ToolHook {
-            pattern: "read_file".into(),
-            pre: Some(Arc::new(move |_, _| {
-                observed.fetch_add(1, Ordering::SeqCst);
-                crate::orchestration::PreToolAction::Modify(
-                    serde_json::json!({"location": replacement}),
-                )
-            })),
-            post: None,
+        interception.before("read_file", move || {
+            observed.fetch_add(1, Ordering::SeqCst);
+            Some(serde_json::json!({"location": replacement}))
         });
         let result = calls
             .dispatch(
@@ -240,7 +223,7 @@ async fn rewritten_catalog_paths_are_checked_before_effects() {
         assert_eq!(rewrites.load(Ordering::SeqCst), 1);
         assert_eq!(result["ok"], expected, "{result}");
         assert_eq!(calls.effect.load(Ordering::SeqCst), usize::from(expected));
-        crate::orchestration::clear_tool_hooks();
+        interception.clear_hooks();
     }
     pop_approval_policy();
     clear_all_approval_policy_repeat_counts();
@@ -284,26 +267,19 @@ async fn host_replacements_preserve_exact_approval_but_not_hard_refusals() {
 #[tokio::test(flavor = "current_thread")]
 #[cfg(unix)]
 async fn unchanged_catalog_paths_are_rechecked_after_symlink_changes() {
-    struct RestoreContext(Option<crate::orchestration::RunExecutionRecord>);
-    impl Drop for RestoreContext {
+    struct ClearExecutionPolicy;
+    impl Drop for ClearExecutionPolicy {
         fn drop(&mut self) {
-            crate::orchestration::set_thread_execution_context(self.0.take());
-            crate::orchestration::clear_tool_hooks();
             clear_execution_policy_stacks();
         }
     }
+    let _policy_cleanup = ClearExecutionPolicy;
     let root = tempfile::tempdir().unwrap();
     let outside = tempfile::tempdir().unwrap();
-    let _context = RestoreContext(crate::orchestration::current_execution_context());
-    crate::orchestration::set_thread_execution_context(Some(
-        crate::orchestration::RunExecutionRecord {
-            cwd: Some(root.path().to_string_lossy().into_owned()),
-            ..Default::default()
-        },
-    ));
+    let interception = ToolInterceptionScope::new();
+    interception.workspace(root.path());
     clear_execution_policy_stacks();
     clear_all_approval_policy_repeat_counts();
-    crate::orchestration::clear_tool_hooks();
     let _bridge = HostBridgeGuard::replace(None);
     push_approval_policy(
         serde_json::from_value(serde_json::json!({
@@ -334,15 +310,11 @@ async fn unchanged_catalog_paths_are_rechecked_after_symlink_changes() {
         let link = alias.clone();
         let rewrites = Arc::new(AtomicUsize::new(0));
         let observed = rewrites.clone();
-        crate::orchestration::register_tool_hook(crate::orchestration::ToolHook {
-            pattern: "read_file".into(),
-            pre: Some(Arc::new(move |_, _| {
-                observed.fetch_add(1, Ordering::SeqCst);
-                std::fs::remove_file(&link).unwrap();
-                std::os::unix::fs::symlink(&target, &link).unwrap();
-                crate::orchestration::PreToolAction::Allow
-            })),
-            post: None,
+        interception.before("read_file", move || {
+            observed.fetch_add(1, Ordering::SeqCst);
+            std::fs::remove_file(&link).unwrap();
+            std::os::unix::fs::symlink(&target, &link).unwrap();
+            None
         });
         let result = calls
             .dispatch(
@@ -354,7 +326,7 @@ async fn unchanged_catalog_paths_are_rechecked_after_symlink_changes() {
         assert_eq!(rewrites.load(Ordering::SeqCst), 1, "hook must fire");
         assert_eq!(result["ok"], expected, "{result}");
         assert_eq!(calls.effect.load(Ordering::SeqCst), usize::from(expected));
-        crate::orchestration::clear_tool_hooks();
+        interception.clear_hooks();
         std::fs::remove_file(&alias).unwrap();
         std::os::unix::fs::symlink(root.path().join("inside"), &alias).unwrap();
     }
@@ -374,15 +346,11 @@ async fn unchanged_catalog_paths_are_rechecked_after_symlink_changes() {
         let link = alias.clone();
         let rewrites = Arc::new(AtomicUsize::new(0));
         let observed = rewrites.clone();
-        crate::orchestration::register_tool_hook(crate::orchestration::ToolHook {
-            pattern: "read_file".into(),
-            pre: Some(Arc::new(move |_, _| {
-                observed.fetch_add(1, Ordering::SeqCst);
-                std::fs::remove_file(&link).unwrap();
-                std::os::unix::fs::symlink(&target, &link).unwrap();
-                crate::orchestration::PreToolAction::Allow
-            })),
-            post: None,
+        interception.before("read_file", move || {
+            observed.fetch_add(1, Ordering::SeqCst);
+            std::fs::remove_file(&link).unwrap();
+            std::os::unix::fs::symlink(&target, &link).unwrap();
+            None
         });
         let calls = Calls::new();
         let result = calls
@@ -396,7 +364,7 @@ async fn unchanged_catalog_paths_are_rechecked_after_symlink_changes() {
         assert_eq!(rewrites.load(Ordering::SeqCst), 1, "hook must fire");
         assert_eq!(result["ok"], expected, "{result}");
         assert_eq!(calls.effect.load(Ordering::SeqCst), usize::from(expected));
-        crate::orchestration::clear_tool_hooks();
+        interception.clear_hooks();
         std::fs::remove_file(&alias).unwrap();
         std::os::unix::fs::symlink(root.path().join("inside"), &alias).unwrap();
     }
@@ -407,9 +375,9 @@ async fn unchanged_catalog_paths_are_rechecked_after_symlink_changes() {
 #[tokio::test(flavor = "current_thread")]
 async fn malformed_paths_retry_before_policy_callbacks_approval_and_effects() {
     clear_execution_policy_stacks();
-    crate::orchestration::clear_tool_prechecks();
+    let interception = ToolInterceptionScope::new();
     clear_all_approval_policy_repeat_counts();
-    crate::orchestration::push_tool_precheck(
+    interception.precheck(
         super::super::tool_failure_recording_tests::compiled_closure(
             "precheck",
             "fn precheck(request: dict) { const counted = len([1, 2]); return nil }",
@@ -494,7 +462,6 @@ async fn malformed_paths_retry_before_policy_callbacks_approval_and_effects() {
         )
         .await;
     pop_approval_policy();
-    crate::orchestration::clear_tool_prechecks();
     clear_all_approval_policy_repeat_counts();
     assert_eq!(denied["error_category"], "permission_denied", "{denied}");
     assert!(

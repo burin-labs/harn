@@ -13,10 +13,14 @@ use crate::agent_events::WorkerEvent;
 use crate::llm::helpers::{ReminderPropagate, SystemReminder};
 use crate::value::{VmClosure, VmError, VmValue};
 
+#[cfg(test)]
+mod dispatch_test_scope;
 mod post_tool;
 mod reminder_fields;
 mod reminder_spec;
 mod vm_entry;
+#[cfg(test)]
+pub(crate) use dispatch_test_scope::ToolInterceptionScope;
 use post_tool::{apply_post_tool_action, parse_post_tool_result};
 pub use post_tool::{PostToolAction, PostToolDenial, PostToolHookResult};
 use reminder_spec::parse_reminder_spec;

@@ -13,7 +13,6 @@ use super::{
 
 mod denial_results;
 mod dispatch_approval;
-mod dispatch_policy;
 pub(super) mod event_capture;
 mod host_permission;
 mod prepared_consent;
@@ -22,12 +21,12 @@ mod side_effect_ceiling;
 mod structured_tool_result;
 mod tool_catalog;
 mod tool_parse_diagnostics;
+use crate::orchestration::ToolDispatchPolicy;
 use denial_results::{
     agent_primitive_denied_tool, deny_tool_call, deny_tool_call_value,
     schema_validation_tool_result, DenialEvidence,
 };
 use dispatch_approval::DispatchApproval;
-use dispatch_policy::{tool_denial_from_policy, DispatchPolicy};
 use host_permission::{
     emit_permission_event, emit_permission_event_with_policy, emit_runtime_denied_activity,
     emit_runtime_resolved_activity, emit_runtime_unavailable_activity, record_allowed_dispatch,
@@ -816,7 +815,7 @@ pub(super) async fn host_agent_dispatch_tool_call(
         return Ok(json_to_vm_value(&result));
     }
     let mut dispatch_policy =
-        DispatchPolicy::new(policy_machinery_active, dispatch_annotations.as_ref());
+        ToolDispatchPolicy::new(policy_machinery_active, dispatch_annotations.as_ref());
 
     let prepared_invocation =
         match prepared_consent::prepare(&ctx, tools, &tool_name, &tool_id, &tool_args, &session_id)
@@ -868,7 +867,7 @@ pub(super) async fn host_agent_dispatch_tool_call(
                         approval_args.as_ref().unwrap_or(&tool_args),
                         Some(&grant),
                     ) {
-                        let denial = tool_denial_from_policy(recheck_denial, &tool_name);
+                        let denial = recheck_denial.into_tool_denial(&tool_name);
                         return Ok(deny_tool_call_value(
                             Some(&ctx),
                             &session_id,
@@ -924,7 +923,7 @@ pub(super) async fn host_agent_dispatch_tool_call(
                 }
             }
         } else {
-            let denial = tool_denial_from_policy(policy_denial, &tool_name);
+            let denial = policy_denial.into_tool_denial(&tool_name);
             let schema_repair = if denial.gate == crate::agent_events::DenialGate::ToolCeiling {
                 let schemas = tools::collect_tool_schemas(tools, None);
                 let allowed = crate::orchestration::current_allowed_tool_names();
@@ -1400,7 +1399,7 @@ pub(super) async fn host_agent_dispatch_tool_call(
             final_annotations.as_ref(),
         )
         .err()
-        .map(|denial| (tool_denial_from_policy(denial, &tool_name), None))
+        .map(|denial| (denial.into_tool_denial(&tool_name), None))
         .or_else(|| {
             let decision = dispatch_approval.recheck(
                 &tool_name,
