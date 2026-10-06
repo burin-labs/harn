@@ -87,6 +87,9 @@ pub enum LlmErrorReason {
     /// Harn refused inference under its host/session policy before provider I/O.
     /// Provider response bodies cannot claim this locally owned reason.
     PolicyDenied,
+    /// A declared managed service paused inference under its spending policy.
+    /// This is not the caller's personal account balance or a retryable throttle.
+    ManagedSpendPaused,
 }
 
 impl LlmErrorReason {
@@ -108,6 +111,7 @@ impl LlmErrorReason {
         Self::OutputBudgetExhausted,
         Self::Unknown,
         Self::PolicyDenied,
+        Self::ManagedSpendPaused,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -127,6 +131,7 @@ impl LlmErrorReason {
             Self::OutputBudgetExhausted => "output_budget_exhausted",
             Self::Unknown => "unknown",
             Self::PolicyDenied => "policy_denied",
+            Self::ManagedSpendPaused => "managed_spend_paused",
         }
     }
 
@@ -147,6 +152,7 @@ impl LlmErrorReason {
             "output_budget_exhausted" => Some(Self::OutputBudgetExhausted),
             "unknown" => Some(Self::Unknown),
             "policy_denied" => Some(Self::PolicyDenied),
+            "managed_spend_paused" => Some(Self::ManagedSpendPaused),
             _ => None,
         }
     }
@@ -175,7 +181,7 @@ impl LlmErrorReason {
             | Self::BillingLimit
             | Self::OutputBudgetExhausted
             | Self::Unknown => LlmErrorKind::Terminal,
-            Self::PolicyDenied => LlmErrorKind::Terminal,
+            Self::PolicyDenied | Self::ManagedSpendPaused => LlmErrorKind::Terminal,
         }
     }
 }
@@ -302,7 +308,9 @@ fn category_owned_by_llm_reason(reason: LlmErrorReason) -> Option<ErrorCategory>
         // (`rate_limit`) made every retry layer back off and resend into the
         // same refusal. `reason: billing_limit` names it; `generic` is the
         // category nothing retries.
-        LlmErrorReason::BillingLimit => Some(ErrorCategory::Generic),
+        LlmErrorReason::BillingLimit | LlmErrorReason::ManagedSpendPaused => {
+            Some(ErrorCategory::Generic)
+        }
         _ => None,
     }
 }
@@ -368,7 +376,7 @@ pub(crate) fn classify_provider_http_error(
 /// valid terminal provider error does not fall through to premature EOF.
 pub(crate) fn classify_provider_stream_error(provider: &str, body: &str, partial: bool) -> VmError {
     let json = serde_json::from_str::<serde_json::Value>(body).ok();
-    let explicit = explicit_stream_error_taxonomy(json.as_ref());
+    let explicit = explicit_stream_error_taxonomy(provider, json.as_ref());
     // Read the provider's own error message, not the whole frame: Fireworks
     // attaches `raw_output` with the prompt and completion text, and a prompt
     // that merely mentions a channel must not make a request fault retryable.
@@ -414,19 +422,39 @@ pub(crate) fn classify_provider_stream_error(provider: &str, body: &str, partial
 }
 
 fn explicit_stream_error_taxonomy(
+    provider: &str,
     json: Option<&serde_json::Value>,
 ) -> Option<(LlmErrorKind, LlmErrorReason)> {
     let json = json?;
+    if let Some(taxonomy) = managed_spend_pause_taxonomy(provider, json) {
+        return Some(taxonomy);
+    }
     let kind = json_taxonomy_str(json, "kind").and_then(LlmErrorKind::parse);
     let reason = json_taxonomy_str(json, "reason")
         .and_then(LlmErrorReason::parse)
-        .filter(|reason| *reason != LlmErrorReason::PolicyDenied);
+        .filter(|reason| {
+            !matches!(
+                reason,
+                LlmErrorReason::PolicyDenied | LlmErrorReason::ManagedSpendPaused
+            )
+        });
     match (kind, reason) {
         (Some(kind), Some(reason)) => Some((kind, reason)),
         (None, Some(reason)) => Some((reason.default_kind(), reason)),
         (Some(kind), None) => Some((kind, LlmErrorReason::Unknown)),
         (None, None) => None,
     }
+}
+
+/// Only a registry-declared managed transport may report a service spending pause.
+/// Ignore prose and force terminal handling even if the frame claims transient.
+fn managed_spend_pause_taxonomy(
+    provider: &str,
+    json: &serde_json::Value,
+) -> Option<(LlmErrorKind, LlmErrorReason)> {
+    (crate::llm::managed_supply::is_managed_transport(provider)
+        && json_taxonomy_str(json, "reason") == Some(LlmErrorReason::ManagedSpendPaused.as_str()))
+    .then_some((LlmErrorKind::Terminal, LlmErrorReason::ManagedSpendPaused))
 }
 
 fn json_taxonomy_str<'a>(json: &'a serde_json::Value, key: &str) -> Option<&'a str> {
@@ -756,6 +784,12 @@ fn classify_http_status_and_body(
     status: reqwest::StatusCode,
     body: &str,
 ) -> (LlmErrorKind, LlmErrorReason) {
+    if let Some(taxonomy) = serde_json::from_str::<serde_json::Value>(body)
+        .ok()
+        .and_then(|json| managed_spend_pause_taxonomy(provider, &json))
+    {
+        return taxonomy;
+    }
     // Patterns cover vLLM, OpenAI, Anthropic, and most OpenAI-compatibles.
     let body_lower = body.to_lowercase();
 

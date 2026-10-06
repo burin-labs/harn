@@ -44,10 +44,12 @@ pub enum AgentTerminalClass {
     AgentLoopProtocolFailure,
     ParseDropped,
     GenericThrow,
+    /// Managed inference is paused by the service spending policy.
+    ManagedSpendPaused,
 }
 
 impl AgentTerminalClass {
-    pub const ALL: [Self; 12] = [
+    pub const ALL: [Self; 13] = [
         Self::ContextOverflow,
         Self::ProviderMisconfigured,
         Self::ProviderUnavailable,
@@ -60,6 +62,7 @@ impl AgentTerminalClass {
         Self::AgentLoopProtocolFailure,
         Self::ParseDropped,
         Self::GenericThrow,
+        Self::ManagedSpendPaused,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -76,6 +79,7 @@ impl AgentTerminalClass {
             Self::AgentLoopProtocolFailure => "agent_loop_protocol_failure",
             Self::ParseDropped => "parse_dropped",
             Self::GenericThrow => "generic_throw",
+            Self::ManagedSpendPaused => "managed_spend_paused",
         }
     }
 
@@ -86,6 +90,7 @@ impl AgentTerminalClass {
                 | Self::ProviderMisconfigured
                 | Self::ProviderUnavailable
                 | Self::ProviderBilling
+                | Self::ManagedSpendPaused
                 | Self::RateLimited
                 | Self::Timeout
         )
@@ -105,6 +110,7 @@ impl AgentTerminalClass {
             "agent_loop_protocol_failure" => Some(Self::AgentLoopProtocolFailure),
             "parse_dropped" => Some(Self::ParseDropped),
             "generic_throw" => Some(Self::GenericThrow),
+            "managed_spend_paused" => Some(Self::ManagedSpendPaused),
             _ => None,
         }
     }
@@ -215,6 +221,9 @@ fn agent_terminal_class_from_structured_error(
     }
     if terminal_error_signal_matches(error, |signal| signal == "no_llm_call") {
         return Some(AgentTerminalClass::ProviderMisconfigured);
+    }
+    if terminal_error_signal_matches(error, |signal| signal == "managed_spend_paused") {
+        return Some(AgentTerminalClass::ManagedSpendPaused);
     }
     // Before any `category`: a billing stop arrives as a 429, and producers
     // that predate its own category still label it `rate_limit`. The reason is
@@ -387,6 +396,7 @@ fn terminal_class_from_exact_signal(signal: &str) -> Option<AgentTerminalClass> 
         }
         "provider_unavailable" => Some(AgentTerminalClass::ProviderUnavailable),
         "provider_billing" | "billing_limit" => Some(AgentTerminalClass::ProviderBilling),
+        "managed_spend_paused" => Some(AgentTerminalClass::ManagedSpendPaused),
         "rate_limit" | "rate_limited" => Some(AgentTerminalClass::RateLimited),
         "timeout" | "timed_out" | "deadline_exceeded" => Some(AgentTerminalClass::Timeout),
         "resource_busy" => Some(AgentTerminalClass::ResourceBusy),
@@ -526,6 +536,10 @@ mod tests {
             ),
             (AgentTerminalClass::ParseDropped, "parse_dropped"),
             (AgentTerminalClass::GenericThrow, "generic_throw"),
+            (
+                AgentTerminalClass::ManagedSpendPaused,
+                "managed_spend_paused",
+            ),
         ];
         for (class, wire) in pairs {
             assert_eq!(class.as_str(), wire);
