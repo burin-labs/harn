@@ -1,10 +1,10 @@
+// Trigger: a tool resolves execution facts before dispatch.
+// Effect: the public agent loop retains those facts for its handler.
+// Negative: model arguments cannot supply execution facts or reach the handler.
 import { agent_loop } from "std/agent/loop"
 import { with_llm_script } from "std/testing"
 import { contract_effect, contract_negative } from "./lib/mechanism_contract"
 
-// Trigger: a tool resolves execution facts before dispatch.
-// Effect: the public agent loop retains those facts for its handler.
-// Negative: model arguments cannot supply execution facts or reach the handler.
 fn main(harness: Harness) {
   const root = harness.fs.workspace_temp_dir()
   const facts = root + "/facts"
@@ -18,8 +18,8 @@ fn main(harness: Harness) {
     {
       input_schema: {type: "object", properties: {}, additionalProperties: false},
       returns: {type: "string"},
-      prepare: { args -> return {operation: {command: harness.fs.read_text(facts), cwd: root}} },
-      handler: { args ->
+      prepare: { _args -> return {operation: {command: harness.fs.read_text(facts), cwd: root}} },
+      handler: { _args ->
         const child = spawn {
           return tool_invocation_binding().operation
         }

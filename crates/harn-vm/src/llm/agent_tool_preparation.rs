@@ -15,26 +15,31 @@ fn rejected(message: impl Into<String>) -> VmError {
     }
 }
 
-async fn resolve(
-    ctx: &crate::vm::AsyncBuiltinCtx,
-    prepare: &VmClosure,
-    arguments: &Value,
-    session_id: &str,
-) -> Result<Value, VmError> {
-    let mut vm = ctx.child_vm();
-    let args = crate::stdlib::json_to_vm_value(arguments);
-    let value = preparation(crate::orchestration::scope_read_only_invocation(
-        session_id,
-        vm.call_closure_pub(prepare, &[args]),
-    ))
-    .await?;
-    let facts = crate::tool_registry::result_to_json(&value).map_err(rejected)?;
-    if !facts.is_object() || !facts.get("operation").is_some_and(Value::is_object) {
-        return Err(rejected(
-            "tool preparation must return an object with an operation object",
-        ));
-    }
-    Ok(facts)
+// Keep the child interpreter and its closure future off every consent and retry
+// caller's async state machine. Construct the boxed future on this owner frame.
+#[inline(never)]
+fn resolve<'a>(
+    ctx: &'a crate::vm::AsyncBuiltinCtx,
+    prepare: &'a VmClosure,
+    arguments: &'a Value,
+    session_id: &'a str,
+) -> std::pin::Pin<Box<impl std::future::Future<Output = Result<Value, VmError>> + 'a>> {
+    Box::pin(async move {
+        let mut vm = Box::new(ctx.child_vm());
+        let args = crate::stdlib::json_to_vm_value(arguments);
+        let value = preparation(crate::orchestration::scope_read_only_invocation(
+            session_id,
+            vm.call_closure_pub(prepare, &[args]),
+        ))
+        .await?;
+        let facts = crate::tool_registry::result_to_json(&value).map_err(rejected)?;
+        if !facts.is_object() || !facts.get("operation").is_some_and(Value::is_object) {
+            return Err(rejected(
+                "tool preparation must return an object with an operation object",
+            ));
+        }
+        Ok(facts)
+    })
 }
 
 pub(super) async fn prepare(
