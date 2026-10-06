@@ -15,17 +15,45 @@ async fn prepared_verify_child_interpreter_preserves_read_only_restriction() {
     // mandatory preparation restriction must survive the real worker boundary
     // even when no ordinary policy is installed in this control.
     assert!(super::enforce_contract("unknown_host_effect", None).is_ok());
-    let result = super::PREPARING
-        .scope((), async {
-            crate::vm::subtask::spawn_child(
-                Arc::new(crate::stdlib::pool::PoolRegistry::default()),
-                async { super::enforce_contract("unknown_host_effect", None) },
-            )
-            .await
-            .unwrap()
-        })
-        .await;
-    assert!(result.is_err(), "child must retain preparation restriction");
+    for independent in [false, true] {
+        let result = super::PREPARING
+            .scope((), async {
+                let registry = Arc::new(crate::stdlib::pool::PoolRegistry::default());
+                let future = async { super::enforce_contract("unknown_host_effect", None) };
+                let child = if independent {
+                    crate::vm::subtask::spawn_inherited_child(registry, future)
+                } else {
+                    crate::vm::subtask::spawn_child(registry, future)
+                };
+                child.await.unwrap()
+            })
+            .await;
+        assert!(result.is_err(), "child must retain preparation restriction");
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn prepared_verify_independent_session_cannot_reuse_invocation() {
+    let fixture = Fixture::new();
+    let (ctx, registry) = fixture.registry(false).await;
+    let binding = super::prepare(&ctx, Some(&registry), "verify", &json!({}))
+        .await
+        .unwrap()
+        .unwrap();
+    super::scope(Some(binding), async {
+        assert!(matches!(super::current_binding(), VmValue::Dict(_)));
+        assert!(
+            super::validate_handler(Some(&ctx), Some(&registry), "different", &json!({}))
+                .await
+                .is_err()
+        );
+        let child = crate::vm::subtask::spawn_inherited_child(
+            Arc::new(crate::stdlib::pool::PoolRegistry::default()),
+            async { super::current_binding() },
+        );
+        assert!(matches!(child.await.unwrap(), VmValue::Nil));
+    })
+    .await;
 }
 
 struct BridgeGuard(Option<Arc<HostBridge>>);
