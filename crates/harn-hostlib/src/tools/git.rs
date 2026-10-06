@@ -150,11 +150,11 @@ pub(super) fn repository_identity(args: &[VmValue]) -> Result<VmValue, HostlibEr
     Ok(build_dict([
         (
             "worktree_root",
-            str_value(to_agent_path(&PathBuf::from(paths[0]))),
+            str_value(to_agent_path(PathBuf::from(paths[0]))),
         ),
         (
             "common_directory",
-            str_value(to_agent_path(&PathBuf::from(paths[1]))),
+            str_value(to_agent_path(PathBuf::from(paths[1]))),
         ),
     ]))
 }
