@@ -760,6 +760,20 @@ Access bits are limited to the kernel's supported vocabulary. A kernel below
 the required ABI or one that cannot enforce the boundary selects bubblewrap;
 if bubblewrap cannot preserve the requested grants, the launch is refused.
 
+Bubblewrap availability uses a functional confinement probe with its own
+one-second setup budget and the runtime's normal cancellation and process
+cleanup. An inherited sandbox that prevents namespace setup, or a setup that
+outlives the budget, produces a typed mechanism refusal; a descendant retaining
+the probe's output cannot indefinitely delay command preparation. The budget is
+not the caller's deadline: its expiry is never reported as `Deadline exceeded`,
+while caller cancellation, the interrupt-handler window, and the scope deadline
+keep their own errors. This does not grant additional syscalls or extend the
+calling command's deadline.
+Caller interrupts and an expired setup budget are not cached as host
+unavailability; a later command can retry the functional probe.
+Since a confined command can stack its own Landlock domain, the nested path
+reaches Bubblewrap only when Landlock is not functional for that child.
+
 ### macOS (`crates/harn-vm/src/stdlib/sandbox/macos.rs`)
 
 | Capability / policy | `sandbox-exec` rule | Effect |

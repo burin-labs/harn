@@ -350,7 +350,7 @@ jobs:
             fi
             RELEASE_COMMITS="$(release_range_release_commits "$PUSH_BASE" "$GITHUB_SHA")"
             if [[ -n "$RELEASE_COMMITS" && "$RELEASE_COMMITS" != "$GITHUB_SHA" ]]; then
-              echo "::error::This push lands release commit(s) ${RELEASE_COMMITS//$'\n'/, } below its head $GITHUB_SHA. A release is built and promoted only from the head of its push, so nothing was built or promoted. A person must re-land the release as the head of a push."
+              echo "::error::This push lands release commit(s) ${RELEASE_COMMITS//$'\n'/, } below its head $GITHUB_SHA. A release is built and promoted only from the head of its push, so nothing was built or promoted. Recover it by dispatching promote-release.yml with the release commit and its successful merge-group candidate run (docs/src/maintainer-release.md)."
               exit 1
             fi
             QUEUE_RUN_ID=""
@@ -380,11 +380,12 @@ jobs:
                   echo "::warning::Exact-SHA merge-group run $QUEUE_CANDIDATE_RUN succeeded without candidate-manifest-$GITHUB_SHA; rebuilding v$VERSION on the push."
                   ;;
                 timed_out)
-                  echo "::warning::Timed out waiting for exact-SHA merge-group candidate run $QUEUE_CANDIDATE_RUN while it was ${QUEUE_DETAIL:-in progress}; rebuilding v$VERSION on the push."
+                  echo "::error::Exact-SHA candidate run $QUEUE_CANDIDATE_RUN remains ${QUEUE_DETAIL:-pending} after the bounded wait; no duplicate build is authorized. Retry after that producer is terminal."
+                  exit 1
                   ;;
                 unread)
-                  # Unread is not "none": building again is slow but always safe.
-                  echo "::warning::Could not read whether the merge group built v$VERSION at $GITHUB_SHA; building it here."
+                  echo "::error::Candidate custody is unreadable for v$VERSION at $GITHUB_SHA; no duplicate build is authorized."
+                  exit 1
                   ;;
                 *)
                   echo "::error::Unknown exact-SHA candidate resolution '$QUEUE_RESOLUTION'."
@@ -786,7 +787,7 @@ jobs:
         # that outcome — install unconditionally on the measured target so a
         # budget failure can always produce its own attribution.
         if: matrix.target == 'x86_64-unknown-linux-gnu'
-        uses: taiki-e/install-action@9983c65e42da123ff25d1f78505eb6de315aa172 # v2.87.20
+        uses: taiki-e/install-action@4cef1412cce204788f482e778a0b9187f9626a29 # v2.87.21
         with:
           tool: cargo-bloat
 

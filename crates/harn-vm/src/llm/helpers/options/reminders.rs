@@ -70,16 +70,69 @@ pub(crate) fn directive_nonce_for_session(session_id: &str) -> String {
         .clone()
 }
 
+/// The session's directive contract for the system prompt: which nonce is
+/// authoritative, then how to read an envelope. A request whose system prompt
+/// states it sends its envelopes without restating it
+/// ([`elide_envelope_contract_stated_in_system`]).
 pub(super) fn directive_nonce_instructions(nonce: &str) -> String {
     let mut bindings = crate::value::DictMap::new();
     bindings.put_str("nonce", nonce);
-    crate::stdlib::template::render_stdlib_prompt_asset(
+    let authority = crate::stdlib::template::render_stdlib_prompt_asset(
         DIRECTIVE_NONCE_AUTHORITY_ASSET,
         Some(&bindings),
     )
-    .expect("directive nonce authority prompt asset is embedded and must render")
-    .trim_end()
-    .to_string()
+    .expect("directive nonce authority prompt asset is embedded and must render");
+    format!(
+        "{}\n{}",
+        authority.trim_end(),
+        directive_envelope_instructions()
+    )
+}
+
+/// Drop the envelope contract from each directive envelope in a request whose
+/// system prompt already states the session's complete directive contract.
+///
+/// Envelopes are rendered and persisted with the contract inline, so a
+/// transcript read anywhere stays self-describing. Every envelope a session
+/// accumulates used to restate it to the provider on every call; when this
+/// request's system prompt carries the contract, the copies are redundant.
+/// Decided per request from the two texts actually being sent, so a preview,
+/// a re-entered session, or a prompt that predates the contract can never
+/// leave an envelope without it.
+///
+/// The system prompt must carry the whole [`directive_nonce_instructions`]
+/// for `nonce`, not just the envelope text: a caller system string that quotes
+/// the envelope instructions without naming the authoritative nonce would
+/// otherwise strip the only contract the model sees. Only envelopes stamped
+/// with that same nonce are elided; an envelope under any other nonce keeps
+/// its inline contract.
+pub(crate) fn elide_envelope_contract_stated_in_system(
+    messages: &mut [serde_json::Value],
+    system: Option<&str>,
+    nonce: &str,
+) {
+    if !system.is_some_and(|system| system.contains(&directive_nonce_instructions(nonce))) {
+        return;
+    }
+    let inline = format!("\n{}\n", directive_envelope_instructions());
+    let nonce_attr = format!(" nonce=\"{nonce}\"");
+    for message in messages.iter_mut() {
+        let Some(content) = message.get("content").and_then(serde_json::Value::as_str) else {
+            continue;
+        };
+        if !content.starts_with("<context-directives ") {
+            continue;
+        }
+        let Some((open_tag, rest)) = content.split_once('>') else {
+            continue;
+        };
+        if !open_tag.ends_with(nonce_attr.as_str()) {
+            continue;
+        }
+        if let Some(directives) = rest.strip_prefix(inline.as_str()) {
+            message["content"] = serde_json::Value::String(format!("{open_tag}>\n{directives}"));
+        }
+    }
 }
 
 pub(super) fn directive_envelope_instructions() -> &'static str {

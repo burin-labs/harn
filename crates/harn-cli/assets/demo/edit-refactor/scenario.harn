@@ -6,11 +6,13 @@
  * refactoring as a unified diff against a throw-away staged-fs overlay
  * and touches no bytes on disk — fully offline, no LLM calls, no network.
  *
- *   1. `extract_function` — lift two statements out of a Python function;
- *      the block's free variables (`base`, `qty`) become parameters while
- *      the module-level callee `audit` correctly does NOT.
+ *   1. `extract_function` — lift two statements out of a Python function
+ *      through `code_index.extract_function`; the block's free variables
+ *      (`base`, `qty`) become parameters while the module-level callee
+ *      `audit` correctly does NOT.
  *   2. `add_parameter` — append a trailing parameter to a Rust function
- *      and fill the new argument at all three call sites (default_fill).
+ *      through `code_index.change_signature` and write its call value at
+ *      all three call sites.
  *   3. `change_return_type` — rewrite the same Rust function's return type.
  *
  * The receipt captures each result tag plus a spot-check that the
@@ -26,16 +28,17 @@ pipeline default(harness: Harness) {
   const rs = assets + "/seed/lib.rs"
   const py = assets + "/seed/calc.py"
   const extract = edit_extract_function(
-    harness.fs,
-    harness.random,
-    harness.ast,
-    {path: py, range: {start_line: 1, end_line: 2}, new_name: "compute_subtotal", dry_run: true},
+    harness.code_index,
+    {path: py, start_line: 2, end_line: 3, new_name: "compute_subtotal", dry_run: true},
   )
+  const _ = harness.code_index.rebuild({root: assets + "/seed"})
   const add_param = edit_add_parameter(
-    harness.fs,
-    harness.random,
-    harness.ast,
-    {path: rs, symbol: {name: "scale"}, param: "offset: i64", default: "0", dry_run: true},
+    harness.code_index,
+    {
+      symbol_ref: {name: "scale", path: "lib.rs"},
+      param: {name: "offset", type: "i64", call_value: "0"},
+      dry_run: true,
+    },
   )
   const ret = edit_change_return_type(
     harness.fs,
@@ -51,14 +54,10 @@ pipeline default(harness: Harness) {
   const receipt = {
     receipt_kind: "edit_refactor_receipt",
     extract_result: extract.result,
-    extract_signature: contains(extract.unified_diff[0].diff, "def compute_subtotal(base, qty):"),
+    extract_signature: starts_with(extract.helper, "def compute_subtotal(base, qty):"),
     add_param_result: add_param.result,
-    add_param_def: contains(
-      add_param.unified_diff[0].diff,
-      "fn scale(value: i64, factor: i64, offset: i64)",
-    ),
-    add_param_calls_filled: contains(add_param.unified_diff[0].diff, "scale(2, 3, 0)")
-      && contains(add_param.unified_diff[0].diff, "scale(6, 7, 0)"),
+    add_param_def: join(add_param.parameters_after, ", ") == "value: i64, factor: i64, offset: i64",
+    add_param_calls_filled: add_param.call_sites_updated == 3,
     return_type_result: ret.result,
   }
   harness.stdio.println(json_stringify(receipt))

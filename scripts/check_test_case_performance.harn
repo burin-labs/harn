@@ -53,6 +53,11 @@ pub fn parse_diagnose_output(text: string) -> dict {
       execute_ms: int_number(groups[4]),
       teardown_ms: int_number(groups[5]),
       total_ms: int_number(groups[6]),
+      admission_ms: optional_int(capture.match, r"admission=(\d+)ms"),
+      module_compile_ms: optional_int(capture.match, r"module_compile=(\d+)ms"),
+      module_load_ms: optional_int(capture.match, r"module_load=(\d+)ms"),
+      modules_compiled: optional_int(capture.match, r"modules_compiled=(\d+)"),
+      modules_loaded: optional_int(capture.match, r"modules_loaded=(\d+)"),
     }
     samples = samples + [sample]
     if sample.outcome != "ok" {
@@ -68,6 +73,15 @@ fn captured_float(text: string, pattern: string) -> float? {
     return nil
   }
   return to_float(captures[0].groups[0])
+}
+
+fn optional_int(text: string, pattern: string) -> int? {
+  const captures = regex_captures(pattern, text)
+  return if captures.count == 0 {
+    nil
+  } else {
+    to_int(captures[0].groups[0])
+  }
 }
 
 fn captured_int(text: string, patterns: list<string>) -> int {
@@ -363,11 +377,6 @@ fn harn_argv(env: HarnessEnv, process: HarnessProcess) -> list<string> {
   return [target_dir + "/debug/harn"]
 }
 
-fn mkdir(fs: HarnessFs, path: string) -> nil {
-  fs.mkdir(path)
-  return nil
-}
-
 fn materialize_suite(fs: HarnessFs, root: string, index: int) -> string {
   const suite = path_join(root, "suite-${index}")
   const state = path_join(suite, ".harn")
@@ -375,11 +384,11 @@ fn materialize_suite(fs: HarnessFs, root: string, index: int) -> string {
   const generation_root = path_join(path_join(state, "package-generations"), generation)
   const packages = path_join(generation_root, "packages")
   const tests = path_join(suite, "tests")
-  mkdir(fs, suite)
-  mkdir(fs, state)
-  mkdir(fs, generation_root)
-  mkdir(fs, packages)
-  mkdir(fs, tests)
+  fs.mkdir(suite)
+  fs.mkdir(state)
+  fs.mkdir(generation_root)
+  fs.mkdir(packages)
+  fs.mkdir(tests)
   let lock_body =
     "# Generated performance fixture.\nversion = 4\ngenerator_version = \"performance-check\"\nprotocol_artifact_version = \"performance-check\"\n"
   for item in range(0, 128) {
@@ -438,9 +447,9 @@ fn run_parallel(
     const run_root = path_join(root, "run-${index}")
     const home = path_join(run_root, "home")
     const cache = path_join(run_root, "cache")
-    mkdir(harness.fs, run_root)
-    mkdir(harness.fs, home)
-    mkdir(harness.fs, cache)
+    harness.fs.mkdir(run_root)
+    harness.fs.mkdir(home)
+    harness.fs.mkdir(cache)
     const stdout_path = path_join(run_root, "stdout.txt")
     const stderr_path = path_join(run_root, "stderr.txt")
     const status_path = path_join(run_root, "status.txt")
@@ -474,17 +483,27 @@ fn run_parallel(
     const run_root = path_join(root, "run-${index}")
     const stderr_path = path_join(run_root, "stderr.txt")
     const status_path = path_join(run_root, "status.txt")
+    harness.process.run(
+      {program: "rm", args: ["-rf", path_join(run_root, "home"), path_join(run_root, "cache")]},
+    )
     if !harness.fs.exists(stderr_path) || !harness.fs.exists(status_path) {
       errors = errors + ["run ${index} did not produce complete output"]
+      runs = runs
+        + [
+          {
+            index: index,
+            complete: false,
+            status: nil,
+            diagnose: {samples: [], failures: []},
+            time: {ok: false},
+          },
+        ]
       continue
     }
     const stderr = harness.fs.read_text(stderr_path)
     const status = int_number(harness.fs.read_text(status_path).trim())
     const diagnose = parse_diagnose_output(stderr)
     const timing = parse_time_output(stderr)
-    harness.process.run(
-      {program: "rm", args: ["-rf", path_join(run_root, "home"), path_join(run_root, "cache")]},
-    )
     if status != 0 {
       errors = errors + ["run ${index} exited ${status}"]
     }
@@ -498,7 +517,7 @@ fn run_parallel(
     if !timing.ok {
       errors = errors + ["run ${index} lacked portable real/user/sys telemetry"]
     }
-    runs = runs + [{diagnose: diagnose, time: timing}]
+    runs = runs + [{index: index, complete: true, status: status, diagnose: diagnose, time: timing}]
   }
   if !fanout.success && errors.count == 0 {
     errors = errors + ["parallel child fan-out failed without a child diagnostic"]
@@ -508,24 +527,100 @@ fn run_parallel(
 
 /**
  * One complete measurement: materialize fresh suites in an isolated root, run
- * them in parallel, and aggregate. Cleans up on success; preserves the root
- * for forensics when a child run failed.
+ * them in parallel, and aggregate. Keep records until the speed verdict is
+ * known: passing children can still fail the performance gate.
  */
-fn measure_round(harness: Harness, platform: string) -> dict {
-  const root = path_join(".harn-runs/test-case-performance", harness.random.uuid_v7())
-  mkdir(harness.fs, root)
+fn measure_round(harness: Harness, platform: string, root: string) -> dict {
+  harness.fs.mkdir(root)
   let test_files = []
   for index in range(0, SUITE_COUNT) {
     test_files = test_files + [materialize_suite(harness.fs, root, index)]
   }
   const execution = run_parallel(harness, root, platform, test_files)
   const metrics = aggregate_runs(execution.runs)
-  if execution.errors.count == 0 {
-    harness.process.run({program: "rm", args: ["-rf", root]})
-  } else {
-    harness.stdio.eprintln("error: preserved failed workload at " + root)
-  }
+  const report = {metrics: metrics, sample_errors: execution.errors, runs: execution.runs}
+  harness.fs.write_text(path_join(root, "measurement.json"), json_stringify_pretty(report))
   return {metrics: metrics, errors: execution.errors}
+}
+
+fn record_identity(harness: Harness, root: string, platform: string, profile: string) -> nil {
+  const prefix = harn_argv(harness.env, harness.process)
+  const version = harness.process.run({program: prefix[0], args: ["version", "--json"]})
+  const digest = harness.process.run(
+    {
+      program: "sh",
+      args: [
+        "-c",
+        "if command -v sha256sum >/dev/null 2>&1; then sha256sum "
+          + shell_quote(prefix[0])
+          + "; else shasum -a 256 "
+          + shell_quote(prefix[0])
+          + "; fi",
+      ],
+    },
+  )
+  const source = harness.process.run({program: "git", args: ["rev-parse", "HEAD"]})
+  const system = harness.process.run({program: "uname", args: ["-a"]})
+  const resources = harness.process.run(
+    {
+      program: "sh",
+      args: [
+        "-c",
+        if platform == "macos" {
+          "set -e\nsysctl hw.ncpu hw.memsize\nsw_vers"
+        } else {
+          "set -e\ngetconf _NPROCESSORS_ONLN\ncat /proc/meminfo"
+        },
+      ],
+    },
+  )
+  let runner = {}
+  for key in [
+    "RUNNER_NAME",
+    "RUNNER_OS",
+    "RUNNER_ARCH",
+    "RUNNER_ENVIRONMENT",
+    "ImageOS",
+    "ImageVersion",
+    "GITHUB_RUN_ID",
+    "GITHUB_RUN_ATTEMPT",
+    "GITHUB_JOB",
+    "GITHUB_SHA",
+  ] {
+    runner = runner + {[key]: harness.env.get(key)}
+  }
+  harness.fs.write_text(
+    path_join(root, "identity.json"),
+    json_stringify_pretty(
+      {
+        schema_version: 1,
+        workload_version: WORKLOAD_VERSION,
+        collection_phase: "after_measurement",
+        platform: platform,
+        baseline_profile: profile,
+        source: {ok: source.success, revision: source.stdout.trim(), error: source.stderr},
+        script_sha256: sha256(harness.fs.read_text("scripts/check_test_case_performance.harn")),
+        baseline_sha256: sha256(harness.fs.read_text(BASELINES)),
+        executable: {
+          argv: prefix,
+          version: {ok: version.success, stdout: version.stdout, stderr: version.stderr},
+          digest: {ok: digest.success, stdout: digest.stdout, stderr: digest.stderr},
+        },
+        runner: runner,
+        system: {ok: system.success, stdout: system.stdout, stderr: system.stderr},
+        resources: {ok: resources.success, stdout: resources.stdout, stderr: resources.stderr},
+      },
+    ),
+  )
+  return nil
+}
+
+fn record_verdict(fs: HarnessFs, root: string, verdict: dict, rounds: int) -> nil {
+  fs.write_text(
+    path_join(root, "verdict.json"),
+    json_stringify_pretty({schema_version: 1, rounds: rounds, verdict: verdict}),
+  )
+  return nil
 }
 
 // Wall-clock budgets on shared CI runners flake when a noisy neighbor lands on
@@ -550,12 +645,19 @@ pipeline main(harness: Harness, task: unknown) {
     return 1
   }
   const baseline_profile = selected_profile.profile
+  const evidence_root = path_join(".harn-runs/test-case-performance", harness.random.uuid_v7())
+  harness.fs.mkdir(evidence_root)
+  harness.stdio.eprintln("test-case performance evidence: " + evidence_root)
   let baseline = {}
   let round_metrics = []
   let best = {}
   let verdict: dict = {ok: false, failures: [], warnings: [], limits: {}}
   for round in range(0, MAX_MEASUREMENT_ROUNDS) {
-    const measured = measure_round(harness, platform)
+    const measured = measure_round(
+      harness,
+      platform,
+      path_join(evidence_root, "round-${round + 1}"),
+    )
     if round == 0 {
       const report = {
         schema_version: 1,
@@ -570,6 +672,8 @@ pipeline main(harness: Harness, task: unknown) {
       harness.stdio.println(json_stringify_pretty(report))
     }
     if measured.errors.count > 0 {
+      record_identity(harness, evidence_root, platform, baseline_profile)
+      record_verdict(harness.fs, evidence_root, {ok: false, failures: measured.errors}, round + 1)
       for error in measured.errors {
         harness.stdio.eprintln("error: ${error}")
       }
@@ -578,6 +682,8 @@ pipeline main(harness: Harness, task: unknown) {
     if round == 0 {
       const loaded = load_platform_baseline(harness.fs.read_text(BASELINES), baseline_profile)
       if !loaded.ok {
+        record_identity(harness, evidence_root, platform, baseline_profile)
+        record_verdict(harness.fs, evidence_root, {ok: false, failures: [loaded.error]}, round + 1)
         harness.stdio.eprintln(
           "error: ${loaded.error}; use the JSON above to record an honest baseline",
         )
@@ -588,6 +694,7 @@ pipeline main(harness: Harness, task: unknown) {
     round_metrics = round_metrics + [measured.metrics]
     best = best_metrics(round_metrics)
     verdict = evaluate_metrics(best, baseline)
+    record_verdict(harness.fs, evidence_root, verdict + {best_metrics: best}, round + 1)
     if verdict.ok {
       break
     }
@@ -597,6 +704,9 @@ pipeline main(harness: Harness, task: unknown) {
       )
     }
   }
+  // Query and hash the executable after measurement so identity collection
+  // cannot warm executable pages before the timed workload.
+  record_identity(harness, evidence_root, platform, baseline_profile)
   for warning in verdict.warnings {
     harness.stdio.eprintln("warning: ${warning}")
   }
@@ -609,5 +719,6 @@ pipeline main(harness: Harness, task: unknown) {
   harness.stdio.println(
     "parallel test-case performance: OK platform=${platform} profile=${baseline_profile} rounds=${round_metrics.count} tests=${best.test_count}",
   )
+  harness.process.run({program: "rm", args: ["-rf", evidence_root]})
   return 0
 }

@@ -19,7 +19,7 @@ pipeline test(harness: Harness, task: unknown) {
     harness.llm,
     [
       {text: "search", tool_calls: [{id: "s1", name: "find_tool", arguments: {query: "ship"}}]},
-      llm_text("<done>##DONE##</done>"),
+      llm_text("<user_response>Found the requested tool.</user_response><done>##DONE##</done>"),
     ],
     { ->
       const result = agent_loop(

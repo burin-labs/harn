@@ -576,8 +576,9 @@ async fn evaluate_live(
 
     // An accepted stop is observed before dispatch, so a cancelled run does
     // not pay for an answer no branch will read.
-    let (cancelled, deadline) = ctx.interrupt_sources();
-    if cancelled
+    let sources = ctx.interrupt_sources();
+    if sources
+        .cancel
         .as_ref()
         .is_some_and(|flag| flag.load(Ordering::Relaxed))
     {
@@ -586,7 +587,10 @@ async fn evaluate_live(
         publish(&receipt);
         return Ok((outcome, Vec::new(), policy, receipt));
     }
-    if deadline.is_some_and(|deadline| deadline <= std::time::Instant::now()) {
+    if sources
+        .earliest_deadline()
+        .is_some_and(|deadline| deadline <= std::time::Instant::now())
+    {
         let outcome = outcome::budget_cut(&reference, "deadline", 0.0, 0.0);
         let outcome = refuse(&mut receipt, outcome);
         publish(&receipt);

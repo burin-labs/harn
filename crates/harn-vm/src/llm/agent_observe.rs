@@ -859,7 +859,7 @@ pub(crate) async fn observed_llm_call(
                 ) {
                     let category = crate::value::error_to_category(&error);
                     let message = error.to_string();
-                    let classified = super::api::classify_llm_error(category.clone(), &message);
+                    let classified = super::api::classify_vm_llm_error(&error);
                     let status = "retries_exhausted";
                     let usage = result.usage();
                     annotate_current_span(&[
@@ -1024,7 +1024,7 @@ pub(crate) async fn observed_llm_call(
             Err(error) => {
                 let category = crate::value::error_to_category(&error);
                 let message = error.to_string();
-                let mut classified = super::api::classify_llm_error(category.clone(), &message);
+                let mut classified = super::api::classify_vm_llm_error(&error);
                 // Provider quota headers are a typed live account-tier signal.
                 // Feed them to the proactive route owner before the cooldown;
                 // do not scrape the human error message for Limit/Used text.
