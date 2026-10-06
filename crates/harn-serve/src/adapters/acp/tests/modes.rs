@@ -445,7 +445,8 @@ async fn acp_session_restore_methods_reject_unknown_sessions() {
                 "jsonrpc": "2.0",
                 "id": id,
                 "method": method,
-                "params": {"sessionId": "missing-session", "cwd": project.path()},
+                "params": {"sessionId": "missing-session", "cwd": project.path(),
+                    "environmentPolicy": {"kind": "isolated"}},
             }))
             .await;
         let response = recv_json(&mut rx).await;
@@ -487,7 +488,8 @@ async fn acp_session_load_restores_persisted_session_unknown_to_server() {
             "jsonrpc": "2.0",
             "id": 1,
             "method": "session/load",
-            "params": {"sessionId": session_id, "cwd": "."},
+            "params": {"sessionId": session_id, "cwd": ".",
+                "environmentPolicy": {"kind": "isolated"}},
         }))
         .await;
 
@@ -553,7 +555,8 @@ async fn acp_session_load_rejects_session_without_persisted_events() {
             "jsonrpc": "2.0",
             "id": 1,
             "method": "session/load",
-            "params": {"sessionId": "never-existed", "cwd": project.path()},
+            "params": {"sessionId": "never-existed", "cwd": project.path(),
+                "environmentPolicy": {"kind": "isolated"}},
         }))
         .await;
 

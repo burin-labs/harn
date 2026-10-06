@@ -77,6 +77,7 @@ async fn acp_session_load_restores_a_session_only_the_canonical_store_holds() {
                     "params": {
                         "sessionId": session_id,
                         "cwd": project.display().to_string(),
+                        "environmentPolicy": {"kind": "isolated"},
                     },
                 }))
                 .expect("send session/load");
@@ -133,6 +134,7 @@ async fn acp_session_load_still_rejects_an_id_no_store_holds() {
                     "params": {
                         "sessionId": "never-existed",
                         "cwd": project.display().to_string(),
+                        "environmentPolicy": {"kind": "isolated"},
                     },
                 }))
                 .expect("send session/load");
