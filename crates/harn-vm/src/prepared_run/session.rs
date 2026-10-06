@@ -749,6 +749,10 @@ impl<E> PreparedSession<E> {
         let mut receipt = active
             .authority
             .terminal_receipt(false, (self.run.now_ms)());
+        // This control was accepted by the session owner. Preserve its typed
+        // outcome in durable evidence instead of reporting executor failure.
+        receipt.stage = AuthorityReceiptStage::Stopped;
+        receipt.status = AuthorityReceiptStatus::Stopped;
         receipt.diagnostics.push(AuthorityDiagnostic {
             code: if pivot {
                 "prepared_session_pivot"

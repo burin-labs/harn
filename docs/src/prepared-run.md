@@ -93,8 +93,10 @@ lease. `attach` binds that lease to the exact session, workspace, runtime
 provenance, and consumer before engine startup. A durable
 `PreparedSessionLeaseStore` atomically rejects replay across server processes.
 Routine turns reuse the attached authority envelope without prompting again,
-and `stop`, `pivot`, and `terminal` all persist terminal accounting. The JSON
-Schema is `schemas/prepared-session-v1.schema.json`; generated Rust,
+and `stop`, `pivot`, and `terminal` all persist terminal accounting. Accepted
+Stop and pivot controls persist `stage: stopped` and `status: stopped`, retaining
+the used and unused authority without classifying the control as executor failure.
+The JSON Schema is `schemas/prepared-session-v1.schema.json`; generated Rust,
 TypeScript, Swift, Python, and Go protocol artifacts expose the same states and
 commands.
 
