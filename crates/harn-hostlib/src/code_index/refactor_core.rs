@@ -430,7 +430,10 @@ pub(super) fn first_syntax_error(source: &str, language: Language) -> Option<Str
     let tree = ast_api::parse_tree(source, language).ok()?;
     let root = tree.root_node();
     if !root.has_error() {
-        return None;
+        return match language {
+            Language::Python => python_layout_error(root, source),
+            _ => None,
+        };
     }
     let mut stack = vec![root];
     while let Some(node) = stack.pop() {
@@ -459,6 +462,53 @@ pub(super) fn first_syntax_error(source: &str, language: Language) -> Option<Str
         }
     }
     Some("post-edit source has parse errors".into())
+}
+
+/// tree-sitter-python recovers from indentation Python rejects (an
+/// unexpected indent, a dedent to no enclosing level, a tab against spaces)
+/// without an ERROR node. Every statement that starts a line in a block must
+/// share one column deeper than the block's header, and module statements
+/// sit at column 0.
+fn python_layout_error(root: Node<'_>, source: &str) -> Option<String> {
+    let bytes = source.as_bytes();
+    let starts_line = |node: Node<'_>| {
+        let start = node.start_byte();
+        let line_start = bytes[..start]
+            .iter()
+            .rposition(|b| *b == b'\n')
+            .map_or(0, |nl| nl + 1);
+        bytes[line_start..start]
+            .iter()
+            .all(|b| *b == b' ' || *b == b'\t')
+    };
+    let mut stack = vec![root];
+    while let Some(node) = stack.pop() {
+        let mut cursor = node.walk();
+        let children: Vec<Node<'_>> = node.named_children(&mut cursor).collect();
+        if matches!(node.kind(), "module" | "block") {
+            let floor = match node.kind() {
+                "module" => None,
+                _ => node.parent().map(|header| header.start_position().column),
+            };
+            let mut column = (node.kind() == "module").then_some(0);
+            for child in children
+                .iter()
+                .filter(|c| c.kind() != "comment" && starts_line(**c))
+            {
+                let at = child.start_position();
+                let expected = *column.get_or_insert(at.column);
+                if at.column != expected || floor.is_some_and(|f| at.column <= f) {
+                    return Some(format!(
+                        "inconsistent indentation at line {}, column {}",
+                        at.row + 1,
+                        at.column + 1
+                    ));
+                }
+            }
+        }
+        stack.extend(children);
+    }
+    None
 }
 
 pub(super) fn read_source(
