@@ -17,7 +17,7 @@ previews as a unified diff, and commits atomically through the staged-fs overlay
 | `edit_reorder_parameters` | Permute parameters and every call's arguments together. |
 | `edit_change_return_type` | Rewrite a function's declared return type. |
 | `edit_inline` | Inline a zero-parameter, single-return function and delete it. |
-| `edit_move_decl` | Move a named top-level declaration or Harn binding into another file. |
+| `edit_move_decl` | Move a top-level Rust, TS/JS, or Python declaration to another module and rewrite every import and qualified use. |
 
 ## Shared contract
 
@@ -49,36 +49,43 @@ Three knobs are common to all of them:
   needs, the call returns `result: "unsupported"` with a reason instead of
   guessing. These all require the `tools:deterministic` capability.
 
-## Recipe — move a Harn setting into a config module
+## Recipe — move a function to another module
 
-Use `edit_move_decl` when a top-level Harn `const` or `let` belongs in
-another module. The move is structural: Harn selects the named binding from the
-syntax tree, stages both file changes, and then commits them together. Local
-bindings and destructuring patterns are not selected by name.
+`edit_move_decl` wraps the `code_index.move_symbol` builtin, so it follows the
+code index rather than the staged-diff driver above: index the workspace first,
+and read the planned edits from `touched_files` instead of `unified_diff`. The
+declaration moves with its attributes, decorators, and the comment block
+directly above it. Every file that imports it, or names it through a module
+(`jobs::priority_label`, `orders.priorityLabel`), is rewritten; the destination
+gains imports for the names the declaration uses; and the source imports it
+back if it still calls it. Rust, TypeScript/JavaScript, and Python are
+supported.
 
 ```harn,ignore
 import { edit_move_decl } from "std/edit"
 
 pipeline default(harness: Harness) {
+  const root = harness.fs.runtime_paths().asset_root
+  harness.code_index.rebuild({root: root})
   const preview = edit_move_decl(
-    harness.fs,
-    harness.random,
-    harness.ast,
+    harness.code_index,
     {
-      path: "src/github.harn",
-      symbol: { name: "GITHUB_API_URL" },
-      target_file: "src/config.harn",
+      path: "src/jobs.rs",
+      symbol: "priority_label",
+      to_path: "src/display.rs",
       dry_run: true,
     },
   )
-
-  harness.stdio.log(preview.unified_diff[0].diff)
+  for file in preview.touched_files {
+    const count = to_string(len(file.edits))
+    harness.stdio.println(file.path + ": " + count + " edit(s)")
+  }
 }
 ```
 
-Review the preview, then repeat the call without `dry_run` to commit the move.
-See the [`std/edit` structured-refactoring reference](../stdlib/edit.md#structured-refactorings)
-for parameters, result fields, and language coverage.
+A refusal (`visibility_required`, `destination_conflict`, `import_cycle`, ...)
+writes nothing and lists the blocking locations in `sites`. Fix those, then
+repeat the call without `dry_run`.
 
 ## Recipe — extract a function
 

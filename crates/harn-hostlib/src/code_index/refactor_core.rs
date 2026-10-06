@@ -255,7 +255,7 @@ pub(super) fn is_identifier_token(text: &str) -> bool {
 /// Node kinds that must terminate identifier descent — strings, comments,
 /// and anything else where a matching textual substring is *not* an
 /// identifier reference.
-fn is_skip_kind(kind: &str) -> bool {
+pub(super) fn is_skip_kind(kind: &str) -> bool {
     matches!(
         kind,
         "comment"
@@ -279,7 +279,7 @@ fn is_skip_kind(kind: &str) -> bool {
 
 /// Code embedded in a string: a Python f-string `{..}` or a TypeScript
 /// template `${..}`. Identifier descent re-enters a skipped string here.
-fn is_interpolation_kind(kind: &str) -> bool {
+pub(super) fn is_interpolation_kind(kind: &str) -> bool {
     matches!(kind, "interpolation" | "template_substitution")
 }
 
@@ -573,11 +573,10 @@ pub(super) fn write_plans(
 
 // === Reference sites ===
 //
-// The move/extract/change-signature builtins are the production consumers
-// of this query; until they land only the golden tests call it.
+// `move_symbol` and `change_signature` consume this query; the extract
+// builtin will too.
 
 /// How a reference site uses the seed symbol.
-#[cfg_attr(not(test), allow(dead_code))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(super) enum ReferenceKind {
     /// `f(...)`.
@@ -628,14 +627,12 @@ pub(super) struct ReferenceSite {
 }
 
 /// An in-scope file the reference query could not read structurally.
-#[cfg_attr(not(test), allow(dead_code))]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct SkippedFile {
     pub path: String,
     pub reason: String,
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
 #[derive(Clone, Debug, Default)]
 pub(super) struct ReferenceSites {
     /// Sorted by path, then byte offset.
@@ -653,7 +650,6 @@ pub(super) struct ReferenceSites {
 /// Like rename, matching is by name inside identifier context. Declarations
 /// (the seed's own and any other of the same name) are not reference
 /// sites; [`competing_declarations`] reports the latter.
-#[cfg_attr(not(test), allow(dead_code))]
 pub(super) fn reference_sites(
     builtin: &'static str,
     state: &IndexState,
