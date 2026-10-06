@@ -211,7 +211,7 @@ fn __tool_parse_block_unit(
   if __tool_parse_tag_spellings("user_response").contains(tag) {
     const body = trim(to_string(unit?.body ?? ""))
     if body == "" {
-      return state
+      return state + {answers: state.answers.appending(body)}
     }
     return state
       + {
@@ -437,6 +437,7 @@ fn __tool_parse_tagged_result(state: dict, response_tags: list<string>) -> dict 
     protocol_violations: state.violations,
     recovered_from_stray_count: recovered_count,
     prose: visible_prose,
+    response_body_present: state?.response_body_present ?? false,
     user_response: answer,
     done_marker: state.done,
     canonical_text: __host_tool_render_parts(state.canonical),
@@ -683,6 +684,7 @@ fn __tool_parse_tagged(text: string, tools: any, tool_format: string? = "") -> d
   let violations: list = []
   let prose_parts: list<string> = []
   let answers: list<string> = []
+  let response_body_present = false
   let done = nil
   let canonical: list<string> = []
   let dropped: list<dict> = []
@@ -701,6 +703,10 @@ fn __tool_parse_tagged(text: string, tools: any, tool_format: string? = "") -> d
     const candidates = bare_candidates[index]
     const kind = unit?.kind ?? ""
     const tag = unit?.tag ?? ""
+    if (kind == "block" || kind == "unclosed_block")
+      && (assistant_tags.contains(tag) || response_tags.contains(tag)) {
+      response_body_present = true
+    }
     if pending_response == nil && TEXT_UNIT_KINDS.contains(kind) {
       const stray = __tool_parse_stray_fast(
         unit,
@@ -736,8 +742,8 @@ fn __tool_parse_tagged(text: string, tools: any, tool_format: string? = "") -> d
         continue
       }
       if response_tags.contains(tag) {
+        answers = answers.appending(body)
         if body != "" {
-          answers = answers.appending(body)
           canonical = canonical.appending({kind: "answer", text: body})
         }
         continue
@@ -813,6 +819,7 @@ fn __tool_parse_tagged(text: string, tools: any, tool_format: string? = "") -> d
   }
   return __tool_parse_tagged_result(
     {
+      response_body_present: response_body_present,
       calls: calls,
       errors: errors,
       violations: violations,
@@ -886,6 +893,8 @@ fn __tool_parse_join(head: dict, tail: dict) -> dict {
         + (tail?.protocol_violations ?? []),
       dropped: (head?.dropped ?? []) + (tail?.dropped ?? []),
       prose: prose,
+      response_body_present: (head?.response_body_present ?? false)
+        || (tail?.response_body_present ?? false),
       canonical_text: calls.map(fn(call) { return call_block(call) }).join("\n"),
     }
 }
@@ -934,6 +943,8 @@ fn __tool_parse_envelope_remainder(envelope: dict, parse_remainder: unknown) -> 
         + (after?.protocol_violations ?? []),
       dropped: (before?.dropped ?? []) + (after?.dropped ?? []),
       prose: prose,
+      response_body_present: (before?.response_body_present ?? false)
+        || (after?.response_body_present ?? false),
       canonical_text: calls.map(fn(call) { return call_block(call) }).join("\n"),
     }
 }
@@ -1134,6 +1145,9 @@ fn __tool_parse_sibling_recovery(text: string, tools: dict?, format: string, pin
     __tool_parse_tagged(text, tools, format)
   }
   if len(sibling?.calls ?? []) == 0 {
+    if (sibling?.response_body_present ?? false) || sibling?.done_marker != nil {
+      return sibling
+    }
     return pinned
   }
   const violation = if text_to_json {

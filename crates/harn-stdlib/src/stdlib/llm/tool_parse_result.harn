@@ -126,6 +126,7 @@ pub fn empty_parse() -> dict {
     protocol_violations: [],
     recovered_from_stray_count: 0,
     prose: "",
+    response_body_present: false,
     user_response: nil,
     done_marker: nil,
     canonical_text: "",
