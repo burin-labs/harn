@@ -59,7 +59,7 @@ fn repository_identity_runs_through_read_only_harness_without_process_authority(
     let root = dir.path().to_string_lossy().replace('\\', "/");
     let repo = serde_json::to_string(&root).unwrap();
     let policy = serde_json::from_value(serde_json::json!({
-        "capabilities": {"fs": ["read"]},
+        "capabilities": {"workspace": ["read_text"]},
         "side_effect_level": "read_only",
         "read_only_roots": [root],
     }))
