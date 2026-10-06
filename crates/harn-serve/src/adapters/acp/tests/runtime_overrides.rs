@@ -32,39 +32,49 @@ impl AcpRuntimeConfigurator for BudgetRuntime {
 #[tokio::test(flavor = "current_thread")]
 async fn actual_prompt_hook_reads_the_live_session_budget() {
     let local = LocalSet::new();
-    local.run_until(async {
-        let observed = Arc::new(std::sync::Mutex::new(Vec::new()));
-        let (tx, mut rx, server, session) = start_acp_channel_session_with_config(
-            AcpServerConfig::new(None).with_budget(BudgetSpec {
-                llm_cost_usd: Some(1.0),
-                ..BudgetSpec::default()
-            }).with_runtime_configurator(Arc::new(BudgetRuntime { observed: observed.clone() })),
-            serde_json::json!(std::env::current_dir().unwrap()),
-        ).await;
-        for (id, cap) in [(10, 0.25), (20, 0.75)] {
-            tx.send(serde_json::json!({
-                "jsonrpc": "2.0", "method": "session/set_budget",
-                "params": {"sessionId": session, "llm_cost_usd": cap, "llm_tokens": null}
-            })).unwrap();
-            tx.send(serde_json::json!({
-                "jsonrpc": "2.0", "id": id, "method": "session/prompt",
-                "params": {"sessionId": session, "prompt": [{"type": "text", "text": "harness.stdio.println(\"hello\")"}]}
-            })).unwrap();
-            loop {
-                let response = recv_json(&mut rx).await;
-                if response["id"] == id {
-                    assert!(response.get("error").is_none(), "{response}");
-                    break;
-                }
+    local
+        .run_until(async {
+            let observed = Arc::new(std::sync::Mutex::new(Vec::new()));
+            let (tx, mut rx, server, session) = start_acp_channel_session_with_config(
+                AcpServerConfig::new(None)
+                    .with_budget(BudgetSpec {
+                        llm_cost_usd: Some(1.0),
+                        ..BudgetSpec::default()
+                    })
+                    .with_runtime_configurator(Arc::new(BudgetRuntime {
+                        observed: observed.clone(),
+                    })),
+                serde_json::json!(std::env::current_dir().unwrap()),
+            )
+            .await;
+            for (id, cap) in [(10, 0.25), (20, 0.75)] {
+                tx.send(serde_json::json!({
+                    "jsonrpc": "2.0", "method": "session/set_budget",
+                    "params": {"sessionId": session, "llm_cost_usd": cap, "llm_tokens": null}
+                }))
+                .unwrap();
+                let response = super::served_agent_turn::prompt(
+                    &tx,
+                    &mut rx,
+                    &session,
+                    id,
+                    "harness.stdio.println(\"hello\")",
+                )
+                .await;
+                assert!(response.get("error").is_none(), "{response}");
             }
-        }
-        let budgets = observed.lock().unwrap().clone();
-        assert_eq!(budgets.len(), 2, "the actual prompt execution hook must fire twice");
-        assert_eq!(budgets[0].llm_cost_usd, Some(0.25));
-        assert_eq!(budgets[1].llm_cost_usd, Some(0.75));
-        drop(tx);
-        server.await.unwrap();
-    }).await;
+            let budgets = observed.lock().unwrap().clone();
+            assert_eq!(
+                budgets.len(),
+                2,
+                "the actual prompt execution hook must fire twice"
+            );
+            assert_eq!(budgets[0].llm_cost_usd, Some(0.25));
+            assert_eq!(budgets[1].llm_cost_usd, Some(0.75));
+            drop(tx);
+            server.await.unwrap();
+        })
+        .await;
 }
 
 #[async_trait::async_trait(?Send)]
