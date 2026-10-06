@@ -52,11 +52,16 @@ case "$2" in
   */actions/runs/[0-9]*)
     if [[ "$2" != *"/artifacts?"* ]]; then
       [[ "${FAKE_DIRECT_GH_FAIL:-0}" != 1 ]] || exit 1
+      # Direct reads keep one counter and sequence per run id, apart from
+      # discovery, so a fixture can lose a run from discovery while it lives.
+      run_id="${2##*/}"
+      direct_state_file="${FAKE_GH_STATE_FILE:?}.direct.$run_id"
       read_count=0
-      [[ ! -f "${FAKE_GH_STATE_FILE:-}" ]] || read -r read_count < "$FAKE_GH_STATE_FILE"
+      [[ ! -f "$direct_state_file" ]] || read -r read_count < "$direct_state_file"
       read_count=$((read_count + 1))
-      printf '%s\n' "$read_count" > "${FAKE_GH_STATE_FILE:?}"
-      IFS=',' read -r -a states <<< "${FAKE_QUEUE_SEQUENCE:-success}"
+      printf '%s\n' "$read_count" > "$direct_state_file"
+      sequence_var="FAKE_DIRECT_SEQUENCE_$run_id"
+      IFS=',' read -r -a states <<< "${!sequence_var:-${FAKE_DIRECT_SEQUENCE:-success}}"
       index=$((read_count - 1))
       (( index < ${#states[@]} )) || index=$((${#states[@]} - 1))
       state="${states[$index]}"
@@ -65,7 +70,7 @@ case "$2" in
       [[ "$state" != success ]] || conclusion='"success"'
       [[ "$state" != failed ]] || conclusion='"failure"'
       printf '{"id":%s,"head_sha":"%s","event":"%s","path":".github/workflows/build-release-binaries.yml","head_repository":{"full_name":"burin-labs/harn"},"status":"%s","conclusion":%s}\n' \
-        "${FAKE_QUEUE_RUN:-4242}" "${FAKE_DIRECT_SHA:-${GITHUB_SHA:?}}" "${FAKE_DIRECT_EVENT:-merge_group}" \
+        "$run_id" "${FAKE_DIRECT_SHA:-${GITHUB_SHA:?}}" "${FAKE_DIRECT_EVENT:-merge_group}" \
         "$([[ "$state" == success || "$state" == failed ]] && echo completed || echo "$state")" "$conclusion"
       exit 0
     fi
@@ -93,8 +98,14 @@ case "$2" in
         conclusion=null
         [[ "$state" != success ]] || conclusion='"success"'
         [[ "$state" != failed ]] || conclusion='"failure"'
-        printf '{"total_count":1,"workflow_runs":[{"id":%s,"head_sha":"%s","event":"merge_group","status":"%s","conclusion":%s}]}\n' \
-          "${FAKE_QUEUE_RUN:-4242}" "${GITHUB_SHA:?}" "$([[ "$state" == success || "$state" == failed ]] && echo completed || echo "$state")" "$conclusion"
+        if [[ -n "${FAKE_SECOND_RUN:-}" ]]; then
+          printf '{"total_count":2,"workflow_runs":[{"id":%s,"head_sha":"%s","event":"merge_group","status":"%s","conclusion":%s},{"id":%s,"head_sha":"%s","event":"merge_group","status":"in_progress","conclusion":null}]}\n' \
+            "${FAKE_QUEUE_RUN:-4242}" "${GITHUB_SHA:?}" "$([[ "$state" == success || "$state" == failed ]] && echo completed || echo "$state")" "$conclusion" \
+            "$FAKE_SECOND_RUN" "${GITHUB_SHA:?}"
+        else
+          printf '{"total_count":1,"workflow_runs":[{"id":%s,"head_sha":"%s","event":"merge_group","status":"%s","conclusion":%s}]}\n' \
+            "${FAKE_QUEUE_RUN:-4242}" "${GITHUB_SHA:?}" "$([[ "$state" == success || "$state" == failed ]] && echo completed || echo "$state")" "$conclusion"
+        fi
       fi
     else
       if [[ "$*" == *"--jq"* ]]; then
@@ -364,7 +375,7 @@ resolve pushed_waits_for_queue \
   || fail "the push rebuilt while its exact queue candidate was finishing: $(cat "$tmp/pushed_waits_for_queue.outputs")"
 [[ "$(cat "$tmp/wait-state")" == 2 ]] \
   || fail "the resolver did not re-read the in-progress candidate"
-grep -Fq "candidate run 4242 is in_progress; pending=1 known_run_id=4242; waiting" "$tmp/pushed_waits_for_queue.log" \
+grep -Fq "candidate run 4242 is in_progress; pending=1 known_run_ids=4242; waiting" "$tmp/pushed_waits_for_queue.log" \
   || fail "the resolver did not report the bounded wait"
 
 # A later empty discovery does not erase an already observed live producer.
@@ -372,7 +383,7 @@ grep -Fq "candidate run 4242 is in_progress; pending=1 known_run_id=4242; waitin
 # the repaired observer revalidates the saved run directly until its manifest.
 resolve pushed_preserves_observed_run \
   PUSH_BEFORE="$push_base" GITHUB_RUN_ID=9999 FAKE_QUEUE_RUN=4242 \
-  FAKE_QUEUE_SEQUENCE=in_progress,absent,success \
+  FAKE_QUEUE_SEQUENCE=in_progress,absent,absent FAKE_DIRECT_SEQUENCE=in_progress,success \
   FAKE_GH_STATE_FILE="$tmp/observed-state" FAKE_GH_TRACE_FILE="$tmp/observed-trace" \
   RELEASE_CANDIDATE_WAIT_ATTEMPTS=3 RELEASE_CANDIDATE_POLL_SECONDS=0
 [[ "$(output pushed_preserves_observed_run build_mode)" == queued &&
@@ -391,7 +402,7 @@ for invalid in wrong_source wrong_event unread; do
     unread) extra+=(FAKE_DIRECT_GH_FAIL=1) ;;
   esac
   if run_resolver "observed_$invalid" PUSH_BEFORE="$push_base" GITHUB_RUN_ID=9999 \
-    FAKE_QUEUE_RUN=4242 FAKE_QUEUE_SEQUENCE=in_progress,success \
+    FAKE_QUEUE_RUN=4242 FAKE_QUEUE_SEQUENCE=in_progress,absent \
     FAKE_GH_STATE_FILE="$tmp/observed-$invalid-state" \
     RELEASE_CANDIDATE_WAIT_ATTEMPTS=2 RELEASE_CANDIDATE_POLL_SECONDS=0 "${extra[@]}"; then
     fail "known producer $invalid authorized reuse or duplicate targets"
@@ -399,6 +410,24 @@ for invalid in wrong_source wrong_event unread; do
   grep -Fq "Known candidate run 4242" "$tmp/observed_$invalid.log" \
     || fail "known producer $invalid refusal lost its identity"
 done
+
+# Two same-SHA producers are both remembered. When discovery loses them and
+# the first fails while the second is still live, the push waits for the
+# second instead of treating the first failure as permission to rebuild.
+resolve pushed_preserves_every_live_producer \
+  PUSH_BEFORE="$push_base" GITHUB_RUN_ID=9999 FAKE_QUEUE_RUN=4242 FAKE_SECOND_RUN=4343 \
+  FAKE_QUEUE_SEQUENCE=in_progress,absent,absent \
+  FAKE_DIRECT_SEQUENCE_4242=failed FAKE_DIRECT_SEQUENCE_4343=in_progress,success \
+  FAKE_GH_STATE_FILE="$tmp/two-live-state" FAKE_GH_TRACE_FILE="$tmp/two-live-trace" \
+  RELEASE_CANDIDATE_WAIT_ATTEMPTS=3 RELEASE_CANDIDATE_POLL_SECONDS=0
+[[ "$(output pushed_preserves_every_live_producer build_mode)" == queued &&
+   "$(output pushed_preserves_every_live_producer should_build_binaries)" == false &&
+   "$(matrix_targets pushed_preserves_every_live_producer)" == "" ]] \
+  || fail "one producer's failure authorized duplicates while another was live: $(cat "$tmp/pushed_preserves_every_live_producer.outputs")"
+[[ "$(grep -c '/actions/runs/4343$' "$tmp/two-live-trace")" == 2 ]] \
+  || fail "the second live producer was not followed to its terminal state"
+grep -Fq "pending=2 known_run_ids=4242,4343" "$tmp/pushed_preserves_every_live_producer.log" \
+  || fail "the resolver did not report every known live producer"
 
 # Terminal failures and missing manifests permit a replacement. Pending or
 # unread custody refuses duplication and names why.
