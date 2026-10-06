@@ -368,9 +368,10 @@ pub(super) fn format_rust_source(source: String, repo_root: &Path) -> Result<Str
 ///
 /// The escape is what makes a version skew survivable in both directions. A
 /// host pinned to an older Harn round-trips a newer value unchanged instead of
-/// folding it into a neighbouring variant, and a `match` on the enum is
-/// exhaustive, so an arm for a value that no longer exists is a compile error
-/// rather than dead code that silently never fires.
+/// folding it into a neighbouring variant. Consumers must use a wildcard
+/// fallback when matching: regenerated bindings can add known unit variants.
+/// These enums are compiled inside the consumer's crate, where Rust's
+/// `non_exhaustive` attribute cannot enforce that fallback.
 ///
 /// `Unrecognized` deliberately does not reuse the name `Unknown`: at least one
 /// exported vocabulary (`HarnLlmErrorReason`) carries a literal `unknown` wire

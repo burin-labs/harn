@@ -105,27 +105,20 @@ jobs:
         continue-on-error: true
         with:
           shared-key: ${{ matrix.cache_key }}
-          cache-on-failure: true
+          # A failed leg must not save. The exact key names this commit's
+          # source, so saving a target whose warm build never ran (a refused
+          # headroom step, a failed compile) publishes a generation that every
+          # consumer restores and rebuilds from nothing, and that the next
+          # refresh restores exactly and refuses for its missing source record
+          # (#9430). Without a save, the next run restores the prior
+          # generation by prefix and warms it.
+          cache-on-failure: false
           cache-bin: false
           cache-workspace-crates: "true"
           # Also drops any source record a prefix-matched older generation
           # carried, so this save never inherits a commit it was not built from.
           reuse-workspace-crates: "true"
           save: "true"
-      # A cache miss means the immutable entry for this family is obsolete.
-      # Delete it only after restore (so its contents remain available to the
-      # local warm build), then reserve the measured per-family envelope (4 GiB
-      # workspace-tests, 2 GiB package-audit). Release compile caches yield
-      # here; the other Linux merge-gate family remains protected (#5003).
-      - name: Prepare Linux cache generation save
-        if: steps.rust-cache.outputs.cache-hit != 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          HARN_CACHE_FAMILY_PREFIX: v0-rust-${{ matrix.cache_key }}-
-          HARN_CACHE_SAVE_HEADROOM_BYTES: ${{ matrix.save_headroom_bytes }}
-        run: |
-          ./scripts/prune_ci_cache_generations.sh --clear-family-prefix "$HARN_CACHE_FAMILY_PREFIX"
-          ./scripts/prune_ci_cache_generations.sh --ensure-headroom "$HARN_CACHE_SAVE_HEADROOM_BYTES"
       - name: Install cargo-nextest
         if: matrix.install_nextest && steps.rust-cache.outputs.cache-hit != 'true'
         uses: taiki-e/install-action@4cef1412cce204788f482e778a0b9187f9626a29 # v2.87.21
@@ -146,6 +139,23 @@ jobs:
       - name: Record the workspace cache source
         if: success() && steps.rust-cache.outputs.cache-hit != 'true'
         run: ./scripts/ci/reuse_workspace_crates.sh record
+      # A cache miss means the immutable entry for this family is obsolete.
+      # Delete it only after the warm build succeeds and just before the post
+      # step saves the new generation, then reserve the measured per-family
+      # envelope (4 GiB workspace-tests, 2 GiB package-audit and CLI). Deleting
+      # it before the warm build left every pull request and merge group with
+      # no generation at all for the 5 to 20 minutes that build took, on every
+      # main push that changed Rust sources (#9430). Release compile caches
+      # yield here; the Linux merge-gate families remain protected (#5003).
+      - name: Prepare Linux cache generation save
+        if: steps.rust-cache.outputs.cache-hit != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HARN_CACHE_FAMILY_PREFIX: v0-rust-${{ matrix.cache_key }}-
+          HARN_CACHE_SAVE_HEADROOM_BYTES: ${{ matrix.save_headroom_bytes }}
+        run: |
+          ./scripts/prune_ci_cache_generations.sh --clear-family-prefix "$HARN_CACHE_FAMILY_PREFIX"
+          ./scripts/prune_ci_cache_generations.sh --ensure-headroom "$HARN_CACHE_SAVE_HEADROOM_BYTES"
       - name: Report cache generation already current
         if: steps.rust-cache.outputs.cache-hit == 'true'
         env:

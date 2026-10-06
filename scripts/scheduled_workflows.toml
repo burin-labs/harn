@@ -215,3 +215,12 @@ crons = ["7,22,37,52 * * * *"]
 cadence_reason = "A quarter-hour sweep bounds how long a labeled pull request waits when GitHub drops an event, and finds merge-queue removals that send no pull request event; a run with nothing labeled exits in seconds."
 job_ids = ["ship"]
 health_failures = 4
+
+[[workflow]]
+path = ".github/workflows/review-dispatch.yml"
+name = "Automatic review dispatch"
+claim = "A ready pull request head whose review request ended without an outcome is requested again"
+crons = ["13,43 * * * *"]
+cadence_reason = "Half-hourly sends four spaced requests per run, which drains a capped day's backlog within a few hours of the UTC reset; a run with nothing waiting ends after one read."
+job_ids = ["sweep"]
+health_failures = 4

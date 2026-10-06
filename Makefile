@@ -741,6 +741,7 @@ test-pr-gate-scripts:
 	./scripts/tests/ci_write_walltime_report_test.sh
 	./scripts/tests/update_queued_pr_test.sh
 	./scripts/tests/cancel_superseded_merge_groups_test.sh
+	./scripts/tests/review_dispatch_sweep_test.sh
 	./scripts/tests/audit_gates_parallel_test.sh
 	./scripts/tests/source_gate_receipt_test.sh
 	./scripts/tests/conformance_worker_budget_test.sh
@@ -798,6 +799,7 @@ test-pr-gate-post-warm-integrations: test-rust-lint-lane-cache
 	HARN_BIN="$(HARN_BIN)" ./scripts/tests/publish_script_test.sh
 	HARN_BIN="$(HARN_BIN)" ./scripts/tests/ci_preemption_recover_test.sh
 	HARN_BIN="$(HARN_BIN)" ./scripts/tests/check_harn_syntax_sensitive_scans_performance_test.sh
+	HARN_BIN="$(HARN_BIN)" bash ./scripts/tests/test_case_performance_evidence_test.sh
 	HARN_BIN="$(HARN_BIN)" ./scripts/tests/connector_scaffold_strict_package_test.sh
 	HARN_BIN="$(HARN_BIN)" ./scripts/tests/drift_preflight_stale_binary_test.sh
 	HARN_BIN="$(HARN_BIN)" ./scripts/tests/hook_generated_artifact_drift_warn_test.sh

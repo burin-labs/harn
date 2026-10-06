@@ -44,13 +44,9 @@
 //!    a single pass after every file has passed pre-flight, so a clean
 //!    run is all-or-nothing modulo mid-call disk failures.
 
-use std::collections::BTreeSet;
 use std::path::Path;
-use std::sync::Arc;
 
 use harn_vm::VmValue;
-use sha2::{Digest, Sha256};
-use tree_sitter::Node;
 
 use crate::ast::{api as ast_api, Language, TEXT_PATCH_FALLBACK};
 use crate::error::HostlibError;
@@ -59,75 +55,17 @@ use crate::tools::args::{
 };
 
 use super::builtins::SharedIndex;
+use super::refactor_core::{
+    candidates_value, collect_identifier_spans, competing_declarations, edit_envelope,
+    failed_paths_value, file_plan_value, files_in_scope, is_identifier_token, parse_kind,
+    plan_file, read_source, resolve_seed, write_plans, EditEnvelope, EditSpan, EditSymbol,
+    FilePlan, Scope, SeedLookup, ShadowSite,
+};
+#[cfg(test)]
 use super::state::IndexState;
-use super::symbol_graph::{Node as GraphNode, NodeKind, SymbolGraph};
+use super::symbol_graph::NodeKind;
 
 pub(super) const BUILTIN: &str = "hostlib_code_index_rename_symbol";
-
-/// Scope sketches how far the rename walks. `File` is just the seed
-/// file; `Module` is an alias today (one Module node per file in the
-/// graph) but is kept distinct on the wire so future per-package
-/// scoping doesn't require a wire break. `Workspace` follows REFS
-/// edges across files.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Scope {
-    File,
-    Module,
-    Workspace,
-}
-
-impl Scope {
-    fn parse(raw: &str) -> Result<Self, HostlibError> {
-        match raw {
-            "file" => Ok(Self::File),
-            "module" => Ok(Self::Module),
-            "workspace" => Ok(Self::Workspace),
-            other => Err(HostlibError::InvalidParameter {
-                builtin: BUILTIN,
-                param: "scope",
-                message: format!(
-                    "expected one of \"file\" | \"module\" | \"workspace\", got `{other}`"
-                ),
-            }),
-        }
-    }
-
-    fn as_str(self) -> &'static str {
-        match self {
-            Self::File => "file",
-            Self::Module => "module",
-            Self::Workspace => "workspace",
-        }
-    }
-}
-
-/// Per-file plan staged in memory before any disk write.
-struct FilePlan {
-    path: String,
-    language: Language,
-    source: String,
-    patched: String,
-    edits: Vec<EditSpan>,
-}
-
-#[derive(Clone, Debug)]
-struct EditSpan {
-    start_byte: usize,
-    end_byte: usize,
-    start_row: usize,
-    start_col: usize,
-    end_row: usize,
-    end_col: usize,
-    before: String,
-    after: String,
-}
-
-#[derive(Clone, Debug)]
-struct ShadowSite {
-    path: String,
-    row: usize,
-    col: usize,
-}
 
 pub(super) fn run(index: &SharedIndex, args: &[VmValue]) -> Result<VmValue, HostlibError> {
     let raw = dict_arg(BUILTIN, args)?;
@@ -171,7 +109,10 @@ pub(super) fn run(index: &SharedIndex, args: &[VmValue]) -> Result<VmValue, Host
         }
     };
     let symbol_kind_raw = optional_string(BUILTIN, symbol_dict, "kind")?;
-    let symbol_kind = symbol_kind_raw.as_deref().map(parse_kind).transpose()?;
+    let symbol_kind = symbol_kind_raw
+        .as_deref()
+        .map(|raw| parse_kind(BUILTIN, raw))
+        .transpose()?;
 
     // Two modes share the same machinery:
     //   - rename  : `new_name` is a fresh identifier; shadow-checked, identifier
@@ -182,7 +123,7 @@ pub(super) fn run(index: &SharedIndex, args: &[VmValue]) -> Result<VmValue, Host
     //     cross-file primitive into a general symbol-grounded find/replace so an
     //     API migration is one call instead of N `edit`s.
     let replacement_text = optional_string(BUILTIN, dict, "replacement_text")?;
-    let scope = Scope::parse(&require_string(BUILTIN, dict, "scope")?)?;
+    let scope = Scope::parse(BUILTIN, &require_string(BUILTIN, dict, "scope")?)?;
     let session_id = optional_string(BUILTIN, dict, "session_id")?;
     let dry_run = optional_bool(BUILTIN, dict, "dry_run", false)?;
     let validate = optional_bool(BUILTIN, dict, "validate", true)?;
@@ -264,22 +205,13 @@ pub(super) fn run(index: &SharedIndex, args: &[VmValue]) -> Result<VmValue, Host
         return Ok(no_match_response(&env));
     }
 
-    // The index's REFS edges are name-based, not binding-resolved. Pinning a
-    // declaration identifies the seed, but cannot establish which same-named
-    // declaration each use refers to. The identifier rewrite below would
-    // otherwise silently rename both definitions and their unrelated uses.
-    let competing_declarations: Vec<_> = state
-        .symbols
-        .nodes_named(&symbol_name)
-        .iter()
-        .filter(|id| **id != seed_node_id)
-        .filter_map(|id| state.symbols.node(*id))
-        .filter(|node| is_rename_declaration(node) && in_scope_files.contains(&node.path))
-        .map(|node| (node.path.clone(), node.line, node.kind.as_str()))
-        .collect();
-    if !competing_declarations.is_empty() {
+    // The identifier rewrite below would otherwise silently rename both
+    // definitions and their unrelated uses.
+    let competing =
+        competing_declarations(&state.symbols, seed_node_id, &symbol_name, &in_scope_files);
+    if !competing.is_empty() {
         let mut candidates = vec![(seed_path, seed_node.line, seed_node.kind.as_str())];
-        candidates.extend(competing_declarations);
+        candidates.extend(competing);
         return Ok(ambiguous_response_with_details(
             &env,
             &candidates,
@@ -305,7 +237,7 @@ pub(super) fn run(index: &SharedIndex, args: &[VmValue]) -> Result<VmValue, Host
         let Some(language) = Language::detect(Path::new(path), None) else {
             return Ok(unsupported_language_response(&env, path, None));
         };
-        let source = read_source(&abs, session_id.as_deref())?;
+        let source = read_source(BUILTIN, &abs, session_id.as_deref())?;
         let tree = match ast_api::parse_tree(&source, language) {
             Ok(tree) => tree,
             Err(err) => {
@@ -356,33 +288,17 @@ pub(super) fn run(index: &SharedIndex, args: &[VmValue]) -> Result<VmValue, Host
 
         let edits: Vec<EditSpan> = targets
             .into_iter()
-            .map(|(start, end, srow, scol, erow, ecol)| EditSpan {
-                start_byte: start,
-                end_byte: end,
-                start_row: srow,
-                start_col: scol,
-                end_row: erow,
-                end_col: ecol,
+            .map(|span| EditSpan {
+                span,
                 before: symbol_name.clone(),
                 after: new_name.clone(),
             })
             .collect();
 
-        let patched = splice(&source, &edits);
-
-        if validate {
-            if let Some(detail) = first_syntax_error(&patched, language) {
-                return Ok(syntax_error_response(&env, path, &detail));
-            }
+        match plan_file(path.clone(), language, source, edits, validate) {
+            Ok(plan) => plans.push(plan),
+            Err(detail) => return Ok(syntax_error_response(&env, path, &detail)),
         }
-
-        plans.push(FilePlan {
-            path: path.clone(),
-            language,
-            source,
-            patched,
-            edits,
-        });
     }
 
     if !shadows.is_empty() {
@@ -394,321 +310,13 @@ pub(super) fn run(index: &SharedIndex, args: &[VmValue]) -> Result<VmValue, Host
     }
 
     // Pre-flight done. With `dry_run` we stop here without persisting.
-    let mut failed: Vec<(String, String)> = Vec::new();
-    if !dry_run {
-        for plan in &plans {
-            let abs = state.root.join(&plan.path);
-            if let Err(err) = write_source(&abs, &plan.patched, session_id.as_deref()) {
-                failed.push((plan.path.clone(), err));
-            }
-        }
-    }
+    let failed = if dry_run {
+        Vec::new()
+    } else {
+        write_plans(BUILTIN, &state.root, &plans, session_id.as_deref())
+    };
 
     Ok(applied_response(&env, &plans, dry_run, failed))
-}
-
-enum SeedLookup {
-    One(super::symbol_graph::NodeId),
-    None,
-    Many(Vec<(String, u32, &'static str)>),
-}
-
-fn resolve_seed(
-    graph: &SymbolGraph,
-    relative_path: &str,
-    name: &str,
-    line: Option<u32>,
-    kind: Option<NodeKind>,
-) -> SeedLookup {
-    let candidates: Vec<&GraphNode> = graph
-        .nodes_named(name)
-        .iter()
-        .filter_map(|id| graph.node(*id))
-        .filter(|node| is_rename_declaration(node))
-        .collect();
-
-    let mut narrowed: Vec<&GraphNode> = candidates
-        .iter()
-        .copied()
-        .filter(|node| paths_match(&node.path, relative_path))
-        .collect();
-
-    if narrowed.is_empty() {
-        // The caller may have passed a workspace-wide hint; allow seeds
-        // from any file as long as the name matches and `line`/`kind`
-        // can pin one down.
-        narrowed = candidates;
-    }
-
-    if let Some(line) = line {
-        narrowed.retain(|node| node.line == line);
-    }
-    if let Some(kind) = kind {
-        narrowed.retain(|node| node.kind == kind);
-    }
-
-    match narrowed.len() {
-        0 => SeedLookup::None,
-        1 => SeedLookup::One(narrowed[0].id),
-        _ => SeedLookup::Many(
-            narrowed
-                .iter()
-                .map(|n| (n.path.clone(), n.line, n.kind.as_str()))
-                .collect(),
-        ),
-    }
-}
-
-fn is_rename_declaration(node: &GraphNode) -> bool {
-    if node.kind == NodeKind::Module
-        && (node.signature.strip_prefix("module ") == Some(node.path.as_str())
-            || (node.language == "harn" && node.signature.starts_with("impl ")))
-    {
-        // The graph adds a synthetic module for every file and projects Harn
-        // implementation blocks as modules. Neither declares a new binding.
-        return false;
-    }
-    matches!(
-        node.kind,
-        NodeKind::Function
-            | NodeKind::Type
-            | NodeKind::Field
-            | NodeKind::EnumCase
-            | NodeKind::Module
-    )
-}
-
-fn paths_match(a: &str, b: &str) -> bool {
-    a == b
-        || a.replace('\\', "/") == b.replace('\\', "/")
-        || a.ends_with(&format!("/{b}"))
-        || b.ends_with(&format!("/{a}"))
-}
-
-fn files_in_scope(
-    state: &IndexState,
-    scope: Scope,
-    name: &str,
-    seed_path: &str,
-    session_id: Option<&str>,
-) -> Vec<String> {
-    let mut seen: BTreeSet<String> = BTreeSet::new();
-    seen.insert(seed_path.to_string());
-    if scope == Scope::Workspace {
-        for id in state.symbols.nodes_named(name) {
-            if let Some(node) = state.symbols.node(*id) {
-                seen.insert(node.path.clone());
-            }
-        }
-        // Also include files whose source contains the bare word — the
-        // REFS edge catches the common case but the graph only adds
-        // edges for *named* nodes, missing call sites and free-text
-        // uses. The textual sweep here is cheap (file-bound) and we
-        // re-validate via tree-sitter in the rewrite pass. Reads route
-        // through staged-fs (#1722) when a session id is supplied so
-        // we observe pending writes from the same session.
-        for file in state.files.values() {
-            let abs = state.root.join(&file.relative_path);
-            if file_contains_word(&abs, name, session_id) {
-                seen.insert(file.relative_path.clone());
-            }
-        }
-    }
-    seen.into_iter().collect()
-}
-
-fn file_contains_word(path: &Path, name: &str, session_id: Option<&str>) -> bool {
-    let bytes = match crate::fs::read(path, session_id) {
-        Some(Ok(bytes)) => bytes,
-        Some(Err(_)) => return false,
-        None => match std::fs::read(path) {
-            Ok(bytes) => bytes,
-            Err(_) => return false,
-        },
-    };
-    let Ok(text) = std::str::from_utf8(&bytes) else {
-        return false;
-    };
-    text.split(|c: char| !(c.is_alphanumeric() || c == '_'))
-        .any(|tok| tok == name)
-}
-
-fn parse_kind(raw: &str) -> Result<NodeKind, HostlibError> {
-    match raw {
-        "Function" => Ok(NodeKind::Function),
-        "Type" => Ok(NodeKind::Type),
-        "Field" => Ok(NodeKind::Field),
-        "EnumCase" => Ok(NodeKind::EnumCase),
-        "Module" => Ok(NodeKind::Module),
-        other => Err(HostlibError::InvalidParameter {
-            builtin: BUILTIN,
-            param: "symbol_ref.kind",
-            message: format!(
-                "expected one of [Function, Type, Field, EnumCase, Module], got `{other}`"
-            ),
-        }),
-    }
-}
-
-fn is_identifier_token(text: &str) -> bool {
-    let mut chars = text.chars();
-    match chars.next() {
-        Some(c) if c.is_alphabetic() || c == '_' => {}
-        _ => return false,
-    }
-    chars.all(|c| c.is_alphanumeric() || c == '_')
-}
-
-/// Node kinds that must terminate identifier descent — strings, comments,
-/// and anything else where a matching textual substring is *not* an
-/// identifier reference.
-fn is_skip_kind(kind: &str) -> bool {
-    matches!(
-        kind,
-        "comment"
-            | "line_comment"
-            | "block_comment"
-            | "doc_comment"
-            | "hash_bang_line"
-            | "shebang"
-            | "string"
-            | "string_literal"
-            | "string_fragment"
-            | "string_content"
-            | "raw_string_literal"
-            | "interpreted_string_literal"
-            | "interpreted_string"
-            | "char_literal"
-            | "character_literal"
-            | "template_string"
-            | "template_substitution"
-    )
-}
-
-fn collect_identifier_spans(
-    root: Node<'_>,
-    bytes: &[u8],
-    target_name: &str,
-    new_name: &str,
-    identifier_kinds: &[&str],
-    path: &str,
-    targets: &mut Vec<(usize, usize, usize, usize, usize, usize)>,
-    shadows: &mut Vec<ShadowSite>,
-) {
-    let mut stack = vec![root];
-    while let Some(node) = stack.pop() {
-        if is_skip_kind(node.kind()) {
-            continue;
-        }
-        if identifier_kinds.contains(&node.kind()) {
-            let text = match std::str::from_utf8(&bytes[node.start_byte()..node.end_byte()]) {
-                Ok(s) => s,
-                Err(_) => continue,
-            };
-            if text == target_name {
-                let start = node.start_position();
-                let end = node.end_position();
-                targets.push((
-                    node.start_byte(),
-                    node.end_byte(),
-                    start.row,
-                    start.column,
-                    end.row,
-                    end.column,
-                ));
-            } else if text == new_name {
-                let pos = node.start_position();
-                shadows.push(ShadowSite {
-                    path: path.to_string(),
-                    row: pos.row,
-                    col: pos.column,
-                });
-            }
-            // Identifier nodes are leaves — no children to recurse into.
-            continue;
-        }
-        let mut cursor = node.walk();
-        for child in node.children(&mut cursor) {
-            stack.push(child);
-        }
-    }
-}
-
-fn splice(source: &str, edits: &[EditSpan]) -> String {
-    let mut ordered: Vec<&EditSpan> = edits.iter().collect();
-    ordered.sort_by_key(|e| std::cmp::Reverse(e.start_byte));
-    let mut out = source.to_string();
-    for edit in ordered {
-        out.replace_range(edit.start_byte..edit.end_byte, &edit.after);
-    }
-    out
-}
-
-fn first_syntax_error(source: &str, language: Language) -> Option<String> {
-    let tree = ast_api::parse_tree(source, language).ok()?;
-    let root = tree.root_node();
-    if !root.has_error() {
-        return None;
-    }
-    let mut stack = vec![root];
-    while let Some(node) = stack.pop() {
-        if node.is_missing() {
-            let pos = node.start_position();
-            return Some(format!(
-                "missing `{}` at line {}, column {}",
-                node.kind(),
-                pos.row + 1,
-                pos.column + 1
-            ));
-        }
-        if node.is_error() {
-            let pos = node.start_position();
-            return Some(format!(
-                "unexpected token at line {}, column {}",
-                pos.row + 1,
-                pos.column + 1
-            ));
-        }
-        let mut cursor = node.walk();
-        for child in node.children(&mut cursor) {
-            if child.has_error() || child.is_missing() {
-                stack.push(child);
-            }
-        }
-    }
-    Some("post-edit source has parse errors".into())
-}
-
-fn read_source(path: &Path, session_id: Option<&str>) -> Result<String, HostlibError> {
-    let bytes = if let Some(result) = crate::fs::read(path, session_id) {
-        result.map_err(|err| HostlibError::Backend {
-            builtin: BUILTIN,
-            message: format!("read `{}`: {err}", path.display()),
-        })?
-    } else {
-        std::fs::read(path).map_err(|err| HostlibError::Backend {
-            builtin: BUILTIN,
-            message: format!("read `{}`: {err}", path.display()),
-        })?
-    };
-    Ok(String::from_utf8_lossy(&bytes).into_owned())
-}
-
-fn write_source(path: &Path, contents: &str, session_id: Option<&str>) -> Result<(), String> {
-    match crate::fs::stage_write_or_none(BUILTIN, path, contents.as_bytes(), true, true, session_id)
-    {
-        Ok(Some(_)) => return Ok(()),
-        Ok(None) => {}
-        Err(err) => return Err(err.to_string()),
-    }
-    crate::fs_snapshot::auto_capture_for_write(BUILTIN, path);
-    if let Some(parent) = path.parent() {
-        if !parent.as_os_str().is_empty() {
-            std::fs::create_dir_all(parent)
-                .map_err(|err| format!("mkdir `{}`: {err}", parent.display()))?;
-        }
-    }
-    std::fs::write(path, contents).map_err(|err| format!("write `{}`: {err}", path.display()))
 }
 
 // === Response shaping ===
@@ -751,29 +359,29 @@ struct ResponseExtras {
 }
 
 fn emit_response(env: &ResponseEnv<'_>, tag: &'static str, extras: ResponseExtras) -> VmValue {
-    let mut entries: Vec<(&'static str, VmValue)> = vec![
-        ("result", str_value(tag)),
-        ("applied", VmValue::Bool(extras.applied)),
-        ("dry_run", VmValue::Bool(extras.dry_run)),
-        ("scope", str_value(env.scope.as_str())),
-        ("symbol", symbol_descriptor(env)),
-        (
-            "touched_files",
-            VmValue::List(Arc::new(extras.touched_files)),
-        ),
-        ("conflicts", VmValue::List(Arc::new(extras.conflicts))),
-        ("warnings", VmValue::List(Arc::new(extras.warnings))),
-        (
-            "failed_paths_with_reasons",
-            VmValue::List(Arc::new(extras.failed_paths)),
-        ),
-        ("match_count", VmValue::Int(extras.match_count as i64)),
-        ("details", str_value(&extras.details)),
-    ];
-    if let Some(fallback) = extras.fallback_suggestion {
-        entries.push(("fallback_suggestion", str_value(fallback)));
-    }
-    build_dict(entries)
+    edit_envelope(
+        tag,
+        env.scope,
+        &EditSymbol {
+            name: env.symbol_name,
+            new_name: Some(env.new_name),
+            path: env.symbol_path,
+            line: env.symbol_line,
+            kind: env.symbol_kind,
+        },
+        EditEnvelope {
+            applied: extras.applied,
+            dry_run: extras.dry_run,
+            touched_files: extras.touched_files,
+            conflicts: extras.conflicts,
+            warnings: extras.warnings,
+            failed_paths: extras.failed_paths,
+            match_count: extras.match_count,
+            details: extras.details,
+            fallback_suggestion: extras.fallback_suggestion,
+            extra: Vec::new(),
+        },
+    )
 }
 
 fn applied_response(
@@ -782,7 +390,7 @@ fn applied_response(
     dry_run: bool,
     failed: Vec<(String, String)>,
 ) -> VmValue {
-    let touched_files: Vec<VmValue> = plans.iter().map(file_plan_to_value).collect();
+    let touched_files: Vec<VmValue> = plans.iter().map(file_plan_value).collect();
     let match_count: usize = plans.iter().map(|p| p.edits.len()).sum();
     let details = if dry_run {
         "dry_run — no files were written"
@@ -838,16 +446,7 @@ fn ambiguous_response_with_details(
     candidates: &[(String, u32, &'static str)],
     details: &str,
 ) -> VmValue {
-    let candidate_list: Vec<VmValue> = candidates
-        .iter()
-        .map(|(path, line, kind)| {
-            build_dict([
-                ("path", str_value(path)),
-                ("line", VmValue::Int(*line as i64)),
-                ("kind", str_value(*kind)),
-            ])
-        })
-        .collect();
+    let candidate_list = candidates_value(candidates);
     emit_response(
         env,
         "ambiguous_symbol",
@@ -932,73 +531,6 @@ fn syntax_error_response(env: &ResponseEnv<'_>, file_path: &str, detail: &str) -
             ..Default::default()
         },
     )
-}
-
-fn symbol_descriptor(env: &ResponseEnv<'_>) -> VmValue {
-    build_dict([
-        ("name", str_value(env.symbol_name)),
-        ("new_name", str_value(env.new_name)),
-        ("path", str_value(env.symbol_path)),
-        (
-            "line",
-            env.symbol_line
-                .map(|n| VmValue::Int(n as i64))
-                .unwrap_or(VmValue::Nil),
-        ),
-        (
-            "kind",
-            env.symbol_kind
-                .map(|k| str_value(k.as_str()))
-                .unwrap_or(VmValue::Nil),
-        ),
-    ])
-}
-
-fn file_plan_to_value(plan: &FilePlan) -> VmValue {
-    let edits: Vec<VmValue> = plan
-        .edits
-        .iter()
-        .map(|edit| {
-            build_dict([
-                ("start_byte", VmValue::Int(edit.start_byte as i64)),
-                ("end_byte", VmValue::Int(edit.end_byte as i64)),
-                ("start_row", VmValue::Int(edit.start_row as i64)),
-                ("start_col", VmValue::Int(edit.start_col as i64)),
-                ("end_row", VmValue::Int(edit.end_row as i64)),
-                ("end_col", VmValue::Int(edit.end_col as i64)),
-                ("before", str_value(&edit.before)),
-                ("after", str_value(&edit.after)),
-            ])
-        })
-        .collect();
-    build_dict([
-        ("path", str_value(&plan.path)),
-        ("language", str_value(plan.language.name())),
-        (
-            "before_sha256",
-            str_value(sha256_hex(plan.source.as_bytes())),
-        ),
-        (
-            "after_sha256",
-            str_value(sha256_hex(plan.patched.as_bytes())),
-        ),
-        ("edits", VmValue::List(Arc::new(edits))),
-    ])
-}
-
-fn failed_paths_value(failed: &[(String, String)]) -> Vec<VmValue> {
-    failed
-        .iter()
-        .map(|(path, reason)| {
-            build_dict([("path", str_value(path)), ("reason", str_value(reason))])
-        })
-        .collect()
-}
-
-fn sha256_hex(bytes: &[u8]) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(bytes);
-    hex::encode(hasher.finalize())
 }
 
 #[cfg(test)]
