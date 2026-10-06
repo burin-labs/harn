@@ -199,3 +199,51 @@ fn pending_stop_reports_persistence_failure_without_leaving_a_grantable_request(
     assert_eq!(model_calls.load(Ordering::SeqCst), 0);
     assert_retired(&session, batch);
 }
+
+#[test]
+fn dropped_approval_reports_terminal_persistence_failure_to_the_host() {
+    let sink = Arc::new(RefuseTerminal {
+        failed: AtomicUsize::new(0),
+    });
+    let (session, model_calls) = fixture(sink.clone());
+    let messages = Arc::new(Mutex::new(Vec::<serde_json::Value>::new()));
+    let captured = messages.clone();
+    let bridge = crate::bridge::HostBridge::from_parts_with_writer(
+        Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
+        Arc::new(AtomicBool::new(false)),
+        Arc::new(move |line| {
+            captured
+                .lock()
+                .unwrap()
+                .push(serde_json::from_str(line).unwrap());
+            Ok(())
+        }),
+        1,
+    );
+    bridge.set_session_id("prepared-session-1");
+    let batch = prepare(&session, intent());
+    let wait = session
+        .pending_approval(&bridge, "prepared-session-1", &batch)
+        .unwrap()
+        .wait();
+    drop(wait);
+    assert_eq!(sink.failed.load(Ordering::SeqCst), 1);
+    assert_eq!(model_calls.load(Ordering::SeqCst), 0);
+    assert_retired(&session, batch);
+    let messages = messages.lock().unwrap();
+    assert_eq!(messages.len(), 1, "the failed sink must reach the host");
+    assert_eq!(messages[0]["method"], "log");
+    assert_eq!(messages[0]["params"]["level"], "error");
+    assert_eq!(
+        messages[0]["params"]["fields"]["code"],
+        "prepared_session_pending_terminal_persistence"
+    );
+    assert_eq!(
+        messages[0]["params"]["fields"]["session_id"],
+        "prepared-session-1"
+    );
+    assert_eq!(
+        messages[0]["params"]["fields"]["error"],
+        "terminal fixture persistence refused"
+    );
+}
