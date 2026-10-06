@@ -36,6 +36,7 @@ assert_measurement() {
     'length == 1 and .[0] == {scope: $scope, per_job_attribution: "unmeasured",
       requests: $requests, hits: $hits, misses: $misses}' \
     <<< "$measurement" > /dev/null
+  [[ "$output" == *"sccache measured ($1): requests=$2 hits=$3 misses=$4"* ]]
 }
 
 export SCCACHE_TEST_STATS='{"stats":{"compile_requests":321,"cache_hits":{"counts":{}},"cache_misses":{"counts":{"Rust":321}}}}'
@@ -47,7 +48,7 @@ output=$(PATH="$tmp_root/bin:$PATH" \
   "$repo_root/scripts/ci/finalize_sccache.sh")
 
 assert_measurement server_cumulative 321 0 321
-[[ "$output" == *"::warning title=sccache is cold::Within server_cumulative, 321 cacheable compilations produced zero cache hits."* ]]
+[[ "$output" == *"::warning title=sccache is cold::321 cacheable compilations produced zero cache hits."* ]]
 grep -Fxq -- '--show-stats --stats-format=json' "$record"
 grep -Fxq -- '--stop-server' "$record"
 grep -Fq '### sccache' "$summary"
@@ -93,7 +94,7 @@ for invalid in \
     SCCACHE_TEST_STATS="$invalid" HARN_SHARED_SCCACHE=off HARN_RUNNER_TIER=github-hosted \
     "$repo_root/scripts/ci/finalize_sccache.sh")
   [[ "$output" == *"::warning title=sccache measurement unavailable::"* ]]
-  [[ "$output" != *"sccache measured:"* && "$output" != *"sccache is cold"* ]]
+  [[ "$output" != *"sccache measured"* && "$output" != *"sccache is cold"* ]]
   grep -Fxq -- '--stop-server' "$record"
 done
 
@@ -102,7 +103,7 @@ output=$(PATH="$tmp_root/bin:$PATH" SCCACHE_TEST_RECORD="$record" \
   SCCACHE_TEST_STATUS=7 HARN_SHARED_SCCACHE=on \
   "$repo_root/scripts/ci/finalize_sccache.sh")
 [[ "$output" == *"Stats command failed with exit 7; cache activity is unknown."* ]]
-[[ "$output" != *"sccache measured:"* ]]
+[[ "$output" != *"sccache measured"* ]]
 if grep -Fxq -- '--stop-server' "$record"; then
   echo "a failed stats read must not stop a shared daemon" >&2
   exit 1
@@ -131,7 +132,7 @@ assert_measurement server_cumulative 321 0 0
 
 output=$(SCCACHE_PATH="$tmp_root/not-installed" "$repo_root/scripts/ci/finalize_sccache.sh")
 [[ "$output" == *"Compiler-cache activity was not measured; sccache is not installed."* ]]
-[[ "$output" != *"sccache measured:"* ]]
+[[ "$output" != *"sccache measured"* ]]
 
 # A baseline excludes earlier activity from the server observation, while
 # retaining explicit unmeasured per-job attribution.
@@ -144,7 +145,7 @@ cold_after="$(jq '.stats.compile_requests = 9321
   | .stats.cache_misses.counts.Rust = 1321' <<< "$warm_before")"
 output=$(PATH="$tmp_root/bin:$PATH" SCCACHE_TEST_RECORD="$record" SCCACHE_TEST_STATS="$cold_after" RUNNER_TEMP="$baseline_dir" HARN_SHARED_SCCACHE=on HARN_RUNNER_TIER=self-hosted "$repo_root/scripts/ci/finalize_sccache.sh")
 assert_measurement server_interval 321 0 321
-[[ "$output" == *"::warning title=sccache is cold::Within server_interval, 321 cacheable compilations produced zero cache hits."* ]]
+[[ "$output" == *"::warning title=sccache is cold::321 cacheable compilations produced zero cache hits."* ]]
 [[ "$output" != *"hits=8000"* ]]
 
 # An interval observing only hits still cannot establish which client hit.

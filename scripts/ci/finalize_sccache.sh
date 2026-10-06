@@ -76,10 +76,13 @@ else
     '{scope: $scope, per_job_attribution: "unmeasured", requests: $requests,
       hits: $hits, misses: $misses}')
   echo "sccache measured: ${measurement}"
+  # The scalar record and cold warning keep their established text so log
+  # readers matching it keep working. The scope token names what was measured.
+  echo "sccache measured (${scope}): requests=${compile_requests} hits=${cache_hits} misses=${cache_misses}"
   if [[ "$compile_requests" -eq 0 ]]; then
     echo "::notice title=sccache unused::No compile requests were observed in ${scope}."
   elif [[ "$((cache_hits + cache_misses))" -ge 100 && "$cache_hits" -eq 0 ]]; then
-    echo "::warning title=sccache is cold::Within ${scope}, ${cache_misses} cacheable compilations produced zero cache hits."
+    echo "::warning title=sccache is cold::${cache_misses} cacheable compilations produced zero cache hits."
   fi
 fi
 
