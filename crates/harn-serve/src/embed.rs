@@ -1262,8 +1262,9 @@ mod tests {
         assert_eq!(restored.session_id, session_id);
         assert!(
             client.pending.iter().any(|event| {
-                matches!(event, EmbeddedAgentEvent::Notification { raw, .. }
-                if raw.to_string().contains("embedded cold restore witness"))
+                matches!(event, EmbeddedAgentEvent::SessionUpdate { session_id: Some(id), update, raw }
+                    if id == session_id && raw["_harn"]["replayed"] == true
+                        && update["content"]["text"] == "embedded cold restore witness")
             }),
             "the public client must receive the durable transcript replay"
         );
