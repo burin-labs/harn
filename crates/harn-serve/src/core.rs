@@ -405,21 +405,23 @@ impl DispatchCore {
         );
 
         let started = Instant::now();
-        let invocation = async {
-            let value = match function.kind {
-                ExportedCallableKind::Function => self.invoke_function(&request, function).await?,
-                ExportedCallableKind::Pipeline => {
+        // Select one heap-owned execution future before entering the generic
+        // tracing wrapper. Keeping both VM entry futures in an async choice
+        // wrapper makes its stack frame grow with either execution path.
+        let invocation: std::pin::Pin<Box<dyn std::future::Future<Output = _> + '_>> =
+            match function.kind {
+                ExportedCallableKind::Function => {
+                    Box::pin(self.invoke_function(&request, function))
+                }
+                ExportedCallableKind::Pipeline => Box::pin(async {
                     let value = self.invoke_pipeline(&request, function).await?;
                     self.prepared_tool_catalog()
                         .validate_output(&request.function, &value.0)
                         .map_err(DispatchError::Contract)?;
-                    (value.0, value.1, None)
-                }
+                    Ok((value.0, value.1, None))
+                }),
             };
-            Ok::<_, DispatchError>(value)
-        }
-        .instrument(span)
-        .await;
+        let invocation = invocation.instrument(span).await;
 
         match invocation {
             Ok((value, printed_output, feedback)) => {
