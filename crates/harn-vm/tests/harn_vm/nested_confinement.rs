@@ -113,23 +113,19 @@ fn a_confined_command_stacks_its_own_confinement() {
         .env(FIXTURE_ENV, root.path())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
-    let mut child = command.spawn().expect("spawn the outer fixture process");
+    let child = command.spawn().expect("spawn the outer fixture process");
 
     // The defect this guards hung rather than failed on a host with
-    // Bubblewrap installed (harn#9351), so the wait is bounded here.
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
-    while child.try_wait().unwrap().is_none() {
-        if std::time::Instant::now() > deadline {
-            let _ = child.kill();
-            let output = child.wait_with_output().unwrap();
-            panic!(
-                "the nested confined command did not settle in 60 s: stdout={}",
-                String::from_utf8_lossy(&output.stdout)
-            );
-        }
-        std::thread::sleep(std::time::Duration::from_millis(50));
-    }
-    let output = child.wait_with_output().unwrap();
+    // Bubblewrap installed (harn#9351), so the wait is bounded by the shared
+    // hang ceiling, and a hung fixture is killed when the panic unwinds.
+    let reaper = KillOnDrop(Some(child.id()));
+    let (sender, receiver) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = sender.send(child.wait_with_output());
+    });
+    let output =
+        harn_clock::test_support::recv_within("the nested confined command", &receiver).unwrap();
+    std::mem::forget(reaper);
     let stdout = String::from_utf8_lossy(&output.stdout);
     let result = stdout
         .lines()
@@ -149,4 +145,25 @@ fn a_confined_command_stacks_its_own_confinement() {
         root.path().join("outer-probe").exists() && !root.path().join("outer-only").exists(),
         "the outer grant admitted the root, and only the inner layer refused the child"
     );
+}
+
+/// Kills the outer fixture if the wait for it panics, so a hang does not leave
+/// a confined process behind. Forgotten once the fixture has been reaped.
+#[cfg(target_os = "linux")]
+struct KillOnDrop(Option<u32>);
+
+#[cfg(target_os = "linux")]
+impl Drop for KillOnDrop {
+    fn drop(&mut self) {
+        if let Some(pid) = self
+            .0
+            .take()
+            .and_then(|pid| libc::pid_t::try_from(pid).ok())
+        {
+            // SAFETY: signals a child this test spawned and has not reaped.
+            unsafe {
+                libc::kill(pid, libc::SIGKILL);
+            }
+        }
+    }
 }

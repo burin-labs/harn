@@ -32,9 +32,12 @@ pub use descriptors::DescriptorTransfer;
 pub(super) mod bwrap;
 #[path = "linux_filesystem.rs"]
 mod filesystem;
+#[path = "linux_nesting.rs"]
+mod nesting;
 #[path = "linux_self_confinement.rs"]
 mod self_confinement;
 use filesystem::filesystem_profile;
+use nesting::{landlock_probe_witness, nested_seccomp_filter_rule};
 
 impl SandboxBackend for Backend {
     fn name() -> &'static str {
@@ -932,26 +935,6 @@ fn compile_seccomp_program(policy: &CapabilityPolicy) -> Result<BpfProgram, VmEr
         .map_err(|err| sandbox_rejection(format!("failed to compile the seccomp filter: {err}")))
 }
 
-/// `seccomp(SECCOMP_SET_MODE_FILTER, 0, ...)` and nothing else: both arguments
-/// are `unsigned int`, so a 32-bit comparison is the whole value the kernel
-/// reads.
-fn nested_seccomp_filter_rule() -> Result<SeccompRule, VmError> {
-    let condition = |index, value| {
-        SeccompCondition::new(index, SeccompCmpArgLen::Dword, SeccompCmpOp::Eq, value).map_err(
-            |err| {
-                sandbox_rejection(format!(
-                    "failed to build the nested seccomp condition: {err}"
-                ))
-            },
-        )
-    };
-    SeccompRule::new(vec![
-        condition(0, u64::from(libc::SECCOMP_SET_MODE_FILTER))?,
-        condition(1, 0)?,
-    ])
-    .map_err(|err| sandbox_rejection(format!("failed to build the nested seccomp rule: {err}")))
-}
-
 /// The ABI this binary was built for, and therefore the only one the child is
 /// permitted to enter the kernel through.
 ///
@@ -1375,26 +1358,6 @@ pub(super) fn landlock_available() -> bool {
             return false;
         }
     })
-}
-
-/// A directory this process can open now, which an empty ruleset must then
-/// close to it. The root comes first; a process already inside a Landlock
-/// domain usually cannot read the root, so its working directory and temp
-/// directory follow. No readable candidate means no measurement, which reads
-/// as unavailable rather than as enforcement.
-fn landlock_probe_witness() -> Option<std::ffi::CString> {
-    use std::os::unix::ffi::OsStrExt;
-    let candidates = [
-        Some(PathBuf::from("/")),
-        std::env::current_dir().ok(),
-        Some(std::env::temp_dir()),
-    ];
-    candidates
-        .into_iter()
-        .flatten()
-        .filter(|path| path.is_absolute())
-        .find(|path| std::fs::read_dir(path).is_ok())
-        .and_then(|path| std::ffi::CString::new(path.as_os_str().as_bytes()).ok())
 }
 
 fn landlock_handled_access(abi: u32) -> u64 {
