@@ -31,8 +31,11 @@
 
 mod context;
 
+#[cfg(test)]
 pub(crate) use context::install_for_vm;
-pub use context::{install, installed, requested, with_deadline, OpInterruptGuard};
+pub use context::{
+    install, installed, requested, with_deadline, InterruptSources, OpInterruptGuard,
+};
 #[cfg_attr(not(target_os = "linux"), allow(unused_imports))]
 pub(crate) use context::{operation_budget_expired, requested_error, with_operation_budget};
 

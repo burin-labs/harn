@@ -339,26 +339,56 @@ pipeline t(harness: Harness) {
     assert_eq!(out, "[harn] kind:interrupted:handler_timeout");
 }
 
-/// Run `source` with a sync builtin `observe_interrupt` that blocks until the
-/// installed interrupt context fires, then reports the error a VM-less
-/// blocking operation (Bubblewrap preparation) derives from it. Returns what
-/// that builtin observed, or `None` when it was never reached.
+/// Block until the installed interrupt context fires, then report the error a
+/// VM-less blocking operation (Bubblewrap preparation) derives from it.
+fn observe_requested_error() -> crate::VmError {
+    loop {
+        if let Some(error) = crate::op_interrupt::requested_error() {
+            break error;
+        }
+        std::thread::yield_now();
+    }
+}
+
+fn interrupt_error_display(error: &crate::VmError) -> String {
+    match error {
+        crate::VmError::Thrown(value) => value.display(),
+        other => other.to_string(),
+    }
+}
+
+/// Run `source` with a sync builtin `observe_interrupt` that observes the
+/// interrupt context the VM installs around sync dispatch. Returns what that
+/// builtin observed, or `None` when it was never reached.
 fn interrupt_error_seen_by_sync_builtin(source: &str) -> Option<String> {
     let seen = Arc::new(std::sync::Mutex::new(None::<String>));
     let writer = Arc::clone(&seen);
     let _ = run_harn_with_setup(source, move |vm| {
         vm.register_builtin("observe_interrupt", move |_, _| {
-            let error = loop {
-                if let Some(error) = crate::op_interrupt::requested_error() {
-                    break error;
-                }
-                std::thread::yield_now();
-            };
-            *writer.lock().unwrap() = Some(match &error {
-                crate::VmError::Thrown(value) => value.display(),
-                other => other.to_string(),
-            });
+            let error = observe_requested_error();
+            *writer.lock().unwrap() = Some(interrupt_error_display(&error));
             Err(error)
+        });
+    });
+    let seen = seen.lock().unwrap().clone();
+    seen
+}
+
+/// The async-builtin hand-off a host adapter (hostlib `run_command`) uses:
+/// capture `ctx.interrupt_sources()` and install them where the blocking work
+/// runs. The observation blocks inside the builtin so the VM cannot preempt it.
+fn interrupt_error_seen_by_async_builtin(source: &str) -> Option<String> {
+    let seen = Arc::new(std::sync::Mutex::new(None::<String>));
+    let writer = Arc::clone(&seen);
+    let _ = run_harn_with_setup(source, move |vm| {
+        vm.register_async_builtin("observe_interrupt", move |ctx, _| {
+            let writer = Arc::clone(&writer);
+            async move {
+                let _interrupt = ctx.interrupt_sources().install();
+                let error = observe_requested_error();
+                *writer.lock().unwrap() = Some(interrupt_error_display(&error));
+                Err(error)
+            }
         });
     });
     let seen = seen.lock().unwrap().clone();
@@ -384,6 +414,39 @@ pipeline t(harness: Harness) {
     );
 
     let scope = interrupt_error_seen_by_sync_builtin(
+        "
+pipeline t(harness: Harness) {
+  try { deadline 50ms { observe_interrupt() } } catch (e) { }
+}
+",
+    );
+    assert_eq!(scope.as_deref(), Some("Deadline exceeded"));
+}
+
+#[test]
+fn test_async_host_handoff_keeps_the_vm_interrupt_reason() {
+    // A live scope deadline around the handler window: merging the two into
+    // one deadline reports the window's expiry as `Deadline exceeded`, and a
+    // worker that never sees the window waits for this scope instead.
+    let handler_window = interrupt_error_seen_by_async_builtin(
+        r#"
+import "std/signal"
+
+pipeline t(harness: Harness) {
+  deadline 3s {
+    on_interrupt({ -> observe_interrupt() }, {graceful_timeout_ms: 200})
+    try { __signal_raise("SIGINT") } catch (e) { }
+  }
+}
+"#,
+    );
+    assert_eq!(
+        handler_window.as_deref(),
+        Some("kind:interrupted:handler_timeout"),
+        "a host worker must see the on_interrupt window as a handler timeout"
+    );
+
+    let scope = interrupt_error_seen_by_async_builtin(
         "
 pipeline t(harness: Harness) {
   try { deadline 50ms { observe_interrupt() } } catch (e) { }

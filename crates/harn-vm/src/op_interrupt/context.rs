@@ -56,20 +56,57 @@ pub fn install(cancel: Option<Arc<AtomicBool>>, deadline: Option<Instant>) -> Op
     })
 }
 
-/// The VM's sync-builtin installation: the scope deadline and the
+/// A VM's interrupt sources, captured for blocking work that runs on this
+/// thread or is handed to a worker thread. The scope deadline and the
 /// interrupt-handler window stay distinct so a VM-less observer reports the
 /// same error kind the VM's own interrupt check would.
+#[derive(Clone, Default)]
+pub struct InterruptSources {
+    /// The VM's cooperative cancel token, shared with the owning VM.
+    pub cancel: Option<Arc<AtomicBool>>,
+    /// The innermost scope `deadline`.
+    pub scope_deadline: Option<Instant>,
+    /// The `on_interrupt` handler's `graceful_timeout_ms` window.
+    pub handler_deadline: Option<Instant>,
+}
+
+impl InterruptSources {
+    /// The earliest instant at which either deadline stops the operation.
+    pub fn earliest_deadline(&self) -> Option<Instant> {
+        match (self.scope_deadline, self.handler_deadline) {
+            (Some(scope), Some(handler)) => Some(scope.min(handler)),
+            (scope, handler) => scope.or(handler),
+        }
+    }
+
+    /// Whether any source is armed at all.
+    pub fn is_armed(&self) -> bool {
+        self.cancel.is_some() || self.scope_deadline.is_some() || self.handler_deadline.is_some()
+    }
+
+    /// Install these sources on the current thread, keeping each kind apart.
+    pub fn install(self) -> OpInterruptGuard {
+        install_context(OpInterrupt {
+            cancel: self.cancel,
+            deadline: self.scope_deadline,
+            handler_deadline: self.handler_deadline,
+            operation_budget: None,
+        })
+    }
+}
+
+#[cfg(test)]
 pub(crate) fn install_for_vm(
     cancel: Option<Arc<AtomicBool>>,
     scope_deadline: Option<Instant>,
     handler_deadline: Option<Instant>,
 ) -> OpInterruptGuard {
-    install_context(OpInterrupt {
+    InterruptSources {
         cancel,
-        deadline: scope_deadline,
+        scope_deadline,
         handler_deadline,
-        operation_budget: None,
-    })
+    }
+    .install()
 }
 
 fn install_context(context: OpInterrupt) -> OpInterruptGuard {

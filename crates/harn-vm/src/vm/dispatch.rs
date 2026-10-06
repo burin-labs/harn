@@ -851,16 +851,8 @@ impl Vm {
         // Mirror `execution.rs::next_deadline`: the innermost scope deadline
         // and the interrupt-handler window both bound the call. They stay
         // separate so expiry keeps its own error kind.
-        let scope_deadline = self.deadlines.last().map(|(deadline, _)| *deadline);
-        let handler_deadline = self.interrupt_handler_deadline;
-        if self.cancel_token.is_none() && scope_deadline.is_none() && handler_deadline.is_none() {
-            return None;
-        }
-        Some(crate::op_interrupt::install_for_vm(
-            self.cancel_token.clone(),
-            scope_deadline,
-            handler_deadline,
-        ))
+        let sources = self.interrupt_sources();
+        sources.is_armed().then(|| sources.install())
     }
 
     pub(crate) fn try_call_sync_builtin_id_or_name_args(
