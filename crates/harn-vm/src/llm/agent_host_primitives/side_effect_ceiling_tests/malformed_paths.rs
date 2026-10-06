@@ -195,6 +195,73 @@ async fn host_replacements_preserve_exact_approval_but_not_hard_refusals() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+#[cfg(unix)]
+async fn unchanged_catalog_paths_are_rechecked_after_symlink_changes() {
+    struct RestoreContext(Option<crate::orchestration::RunExecutionRecord>);
+    impl Drop for RestoreContext {
+        fn drop(&mut self) {
+            crate::orchestration::set_thread_execution_context(self.0.take());
+            crate::orchestration::clear_tool_hooks();
+            clear_execution_policy_stacks();
+        }
+    }
+    let root = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    let _context = RestoreContext(crate::orchestration::current_execution_context());
+    crate::orchestration::set_thread_execution_context(Some(
+        crate::orchestration::RunExecutionRecord {
+            cwd: Some(root.path().to_string_lossy().into_owned()),
+            ..Default::default()
+        },
+    ));
+    clear_execution_policy_stacks();
+    clear_all_approval_policy_repeat_counts();
+    crate::orchestration::clear_tool_hooks();
+    let _bridge = HostBridgeGuard::replace(None);
+    push_approval_policy(ToolApprovalPolicy {
+        auto_approve: vec!["read_file".into()],
+        ..ToolApprovalPolicy::default()
+    });
+    let inside = root.path().join("inside");
+    let external = outside.path().join("outside");
+    std::fs::write(&inside, "inside").unwrap();
+    std::fs::write(&external, "outside").unwrap();
+    let alias = root.path().join("alias");
+    std::os::unix::fs::symlink(&inside, &alias).unwrap();
+    let calls = Calls::new();
+    for (target, expected) in [(external, false), (inside, true)] {
+        let link = alias.clone();
+        let rewrites = Arc::new(AtomicUsize::new(0));
+        let observed = rewrites.clone();
+        crate::orchestration::register_tool_hook(crate::orchestration::ToolHook {
+            pattern: "read_file".into(),
+            pre: Some(Arc::new(move |_, _| {
+                observed.fetch_add(1, Ordering::SeqCst);
+                std::fs::remove_file(&link).unwrap();
+                std::os::unix::fs::symlink(&target, &link).unwrap();
+                crate::orchestration::PreToolAction::Allow
+            })),
+            post: None,
+        });
+        let result = calls
+            .dispatch(
+                serde_json::json!({"location": alias}),
+                true,
+                &crate::value::DictMap::new(),
+            )
+            .await;
+        assert_eq!(rewrites.load(Ordering::SeqCst), 1, "hook must fire");
+        assert_eq!(result["ok"], expected, "{result}");
+        assert_eq!(calls.effect.load(Ordering::SeqCst), usize::from(expected));
+        crate::orchestration::clear_tool_hooks();
+        std::fs::remove_file(&alias).unwrap();
+        std::os::unix::fs::symlink(root.path().join("inside"), &alias).unwrap();
+    }
+    pop_approval_policy();
+    clear_all_approval_policy_repeat_counts();
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn malformed_paths_retry_before_policy_callbacks_approval_and_effects() {
     clear_execution_policy_stacks();
     crate::orchestration::clear_tool_prechecks();
