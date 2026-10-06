@@ -77,7 +77,7 @@ async fn saved_reply_admission_uses_full_session_indices_and_original_events() {
     ] {
         store.append(&id, message(source, raw)).await.unwrap();
     }
-    let receipt = settlement(&[published_old, user, rejected, accepted], true);
+    let receipt = settlement(&[published_old, user, rejected, accepted.clone()], true);
     store.append(&id, receipt.clone()).await.unwrap();
     store.append(&id, receipt).await.unwrap();
     // Later compaction must not erase the run's admitted original event.
@@ -93,6 +93,29 @@ async fn saved_reply_admission_uses_full_session_indices_and_original_events() {
         )
         .await
         .unwrap();
+    let events = store.read_all(&id).await.unwrap();
+    // Receipts follow drafts on later pages; duplicate receipts and subsequent
+    // compaction must keep the same sealed admission without retaining rows.
+    for page_size in 1..=events.len() {
+        let mut hydration = crate::agent_session_journal::TranscriptHydration::default();
+        for page in events.chunks(page_size) {
+            for event in page {
+                hydration.absorb(event);
+            }
+        }
+        let (transcript, publications) = hydration.finish();
+        assert!(transcript.messages.is_empty());
+        assert_eq!(publications.len(), 2, "old and current admitted replies");
+        assert_eq!(
+            publications["accepted"].text_for(&accepted),
+            Some("Admitted answer"),
+            "page size {page_size} must preserve the original source binding",
+        );
+        assert!(!publications.contains_key("rejected"));
+        let mut replaced = accepted.clone();
+        replaced["content"] = json!("Replaced draft");
+        assert!(publications["accepted"].text_for(&replaced).is_none());
+    }
     let run = project_run_record_from_session(&store, &id).await.unwrap();
     let view = crate::orchestration::records::build_run_view(&run);
     assert_eq!(view.visible_text.as_deref(), Some("Admitted answer"));
