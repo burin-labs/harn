@@ -406,6 +406,30 @@ impl Language {
         self.rename_identifier_kinds().is_some()
     }
 
+    /// Whether `code_index.change_signature` has a signature grammar for this
+    /// language. A unit test keeps it equal to the builtin's own table.
+    pub fn supports_change_signature(self) -> bool {
+        matches!(
+            self,
+            Language::Rust | Language::TypeScript | Language::Tsx | Language::Python
+        )
+    }
+
+    /// Whether `code_index.extract_function` can operate on this language:
+    /// it needs a free-name profile and a function form it can synthesize.
+    /// Mirrors `code_index::extract_plan::Dialect::of`, which a test pins.
+    pub fn supports_extract_function(self) -> bool {
+        matches!(
+            self,
+            Language::Rust
+                | Language::TypeScript
+                | Language::Tsx
+                | Language::JavaScript
+                | Language::Jsx
+                | Language::Python
+        )
+    }
+
     /// Data / markup / config grammars that carry no nameable symbols, so
     /// symbol + outline extraction is intentionally empty for them.
     fn is_data_format(self) -> bool {
@@ -435,10 +459,10 @@ impl Language {
             insert_at_anchor: true,
             rename_symbol: self.supports_rename(),
             symbols: self.supports_symbol_extraction(),
-            // Graph-grounded refactorings. No language qualifies yet.
+            // Graph-grounded refactorings.
             move_symbol: false,
-            extract_function: false,
-            change_signature: false,
+            extract_function: self.supports_extract_function(),
+            change_signature: self.supports_change_signature(),
         }
     }
 

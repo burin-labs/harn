@@ -55,6 +55,13 @@
 //!   `new_name` shadowing in any rewritten file and aborts before any
 //!   write. Routes through staged-fs (#1722) when a `session_id` is
 //!   supplied so all touched files succeed or none do.
+//! - **`change_signature`**: change a function's parameter list and
+//!   rewrite every call site across files (Rust, TypeScript, Python),
+//!   refusing value uses, splats, overrides, and removed parameters the
+//!   body still reads. Built on [`refactor_core`].
+//! - **`extract_function`**: lift an expression, a statement run, or a
+//!   closure body into a new function and replace it, and every token-equal
+//!   same-file copy, with a call. Built on the shared refactor core.
 //!
 //! ## Concurrency model
 //!
@@ -66,7 +73,10 @@
 mod agents;
 mod builtin_args;
 mod builtins;
+mod change_signature;
 mod cypher;
+mod extract;
+mod extract_plan;
 mod file_table;
 mod git_head;
 mod graph;
@@ -80,6 +90,7 @@ mod readonly;
 mod refactor_core;
 mod rename;
 mod repo_map;
+mod signature_syntax;
 mod snapshot;
 mod state;
 mod symbol_graph;
@@ -594,6 +605,20 @@ impl HostlibCapability for CodeIndexCapability {
             rename::BUILTIN,
             "rename_symbol",
             rename::run,
+        );
+        register(
+            registry,
+            self.index.clone(),
+            change_signature::BUILTIN,
+            "change_signature",
+            change_signature::run,
+        );
+        register(
+            registry,
+            self.index.clone(),
+            extract::BUILTIN,
+            "extract_function",
+            extract::run,
         );
     }
 }

@@ -16,15 +16,22 @@
 //!    reference or value reference.
 //! 5. **All-or-nothing apply** — [`plan_file`] splices one file in memory and
 //!    re-parses it; [`write_plans`] persists only after every plan passed.
+//! 6. **Response envelope** — [`edit_envelope`] spells the tagged result
+//!    every code_index edit builtin returns; each operation adds its own
+//!    refusal tags and fields.
 
 use std::collections::{BTreeSet, HashSet};
 use std::ops::Range;
 use std::path::Path;
+use std::sync::Arc;
 
+use harn_vm::VmValue;
+use sha2::{Digest, Sha256};
 use tree_sitter::Node;
 
 use crate::ast::{api as ast_api, Language};
 use crate::error::HostlibError;
+use crate::tools::args::{build_dict, str_value};
 
 use super::state::IndexState;
 use super::symbol_graph::{EdgeKind, Node as GraphNode, NodeId, NodeKind, SymbolGraph};
@@ -267,8 +274,13 @@ fn is_skip_kind(kind: &str) -> bool {
             | "char_literal"
             | "character_literal"
             | "template_string"
-            | "template_substitution"
     )
+}
+
+/// Code embedded in a string: a Python f-string `{..}` or a TypeScript
+/// template `${..}`. Identifier descent re-enters a skipped string here.
+fn is_interpolation_kind(kind: &str) -> bool {
+    matches!(kind, "interpolation" | "template_substitution")
 }
 
 /// Byte and 0-based row/column extent of one identifier token.
@@ -306,7 +318,7 @@ pub(super) struct ShadowSite {
 }
 
 /// Visit every identifier-context node in `root`, in no particular order,
-/// skipping comment and string bodies.
+/// skipping comment and string bodies but not string interpolations.
 fn for_each_identifier<'tree>(
     root: Node<'tree>,
     bytes: &[u8],
@@ -316,6 +328,11 @@ fn for_each_identifier<'tree>(
     let mut stack = vec![root];
     while let Some(node) = stack.pop() {
         if is_skip_kind(node.kind()) {
+            let mut cursor = node.walk();
+            stack.extend(
+                node.children(&mut cursor)
+                    .filter(|child| is_interpolation_kind(child.kind())),
+            );
             continue;
         }
         if identifier_kinds.contains(&node.kind()) {
@@ -413,7 +430,10 @@ pub(super) fn first_syntax_error(source: &str, language: Language) -> Option<Str
     let tree = ast_api::parse_tree(source, language).ok()?;
     let root = tree.root_node();
     if !root.has_error() {
-        return None;
+        return match language {
+            Language::Python => python_layout_error(root, source),
+            _ => None,
+        };
     }
     let mut stack = vec![root];
     while let Some(node) = stack.pop() {
@@ -442,6 +462,53 @@ pub(super) fn first_syntax_error(source: &str, language: Language) -> Option<Str
         }
     }
     Some("post-edit source has parse errors".into())
+}
+
+/// tree-sitter-python recovers from indentation Python rejects (an
+/// unexpected indent, a dedent to no enclosing level, a tab against spaces)
+/// without an ERROR node. Every statement that starts a line in a block must
+/// share one column deeper than the block's header, and module statements
+/// sit at column 0.
+fn python_layout_error(root: Node<'_>, source: &str) -> Option<String> {
+    let bytes = source.as_bytes();
+    let starts_line = |node: Node<'_>| {
+        let start = node.start_byte();
+        let line_start = bytes[..start]
+            .iter()
+            .rposition(|b| *b == b'\n')
+            .map_or(0, |nl| nl + 1);
+        bytes[line_start..start]
+            .iter()
+            .all(|b| *b == b' ' || *b == b'\t')
+    };
+    let mut stack = vec![root];
+    while let Some(node) = stack.pop() {
+        let mut cursor = node.walk();
+        let children: Vec<Node<'_>> = node.named_children(&mut cursor).collect();
+        if matches!(node.kind(), "module" | "block") {
+            let floor = match node.kind() {
+                "module" => None,
+                _ => node.parent().map(|header| header.start_position().column),
+            };
+            let mut column = (node.kind() == "module").then_some(0);
+            for child in children
+                .iter()
+                .filter(|c| c.kind() != "comment" && starts_line(**c))
+            {
+                let at = child.start_position();
+                let expected = *column.get_or_insert(at.column);
+                if at.column != expected || floor.is_some_and(|f| at.column <= f) {
+                    return Some(format!(
+                        "inconsistent indentation at line {}, column {}",
+                        at.row + 1,
+                        at.column + 1
+                    ));
+                }
+            }
+        }
+        stack.extend(children);
+    }
+    None
 }
 
 pub(super) fn read_source(
@@ -795,6 +862,153 @@ fn classify(
     };
     let enclosing = call.unwrap_or(callee).byte_range();
     Some((kind, qualifier, enclosing))
+}
+
+// === Response envelope ===
+//
+// Every code_index edit builtin answers with the envelope
+// `schemas/code_index/rename_symbol.response.json` locks. An operation adds
+// its own result tags (refusals) and fields through [`EditEnvelope::extra`];
+// the shared fields are spelled here once.
+
+/// The seed a response describes.
+pub(super) struct EditSymbol<'a> {
+    pub name: &'a str,
+    /// Only `rename_symbol` has a new name.
+    pub new_name: Option<&'a str>,
+    pub path: &'a str,
+    pub line: Option<u32>,
+    pub kind: Option<NodeKind>,
+}
+
+/// One response. Fields left at their default land as empty lists, zero,
+/// and `false`.
+#[derive(Default)]
+pub(super) struct EditEnvelope {
+    pub applied: bool,
+    pub dry_run: bool,
+    pub touched_files: Vec<VmValue>,
+    pub conflicts: Vec<VmValue>,
+    /// Strings, except on `ambiguous_symbol`, where each entry is a
+    /// `{path, line, kind}` candidate ([`candidates_value`]).
+    pub warnings: Vec<VmValue>,
+    pub failed_paths: Vec<VmValue>,
+    pub match_count: usize,
+    pub details: String,
+    /// The text-edit degradation path, on `unsupported_language` only.
+    pub fallback_suggestion: Option<String>,
+    /// Operation-specific fields, appended after the shared ones.
+    pub extra: Vec<(&'static str, VmValue)>,
+}
+
+pub(super) fn edit_envelope(
+    tag: &'static str,
+    scope: Scope,
+    symbol: &EditSymbol<'_>,
+    envelope: EditEnvelope,
+) -> VmValue {
+    let list = |items: Vec<VmValue>| VmValue::List(Arc::new(items));
+    let mut symbol_entries = vec![("name", str_value(symbol.name))];
+    if let Some(new_name) = symbol.new_name {
+        symbol_entries.push(("new_name", str_value(new_name)));
+    }
+    symbol_entries.extend([
+        ("path", str_value(symbol.path)),
+        (
+            "line",
+            symbol
+                .line
+                .map(|n| VmValue::Int(n as i64))
+                .unwrap_or(VmValue::Nil),
+        ),
+        (
+            "kind",
+            symbol
+                .kind
+                .map(|k| str_value(k.as_str()))
+                .unwrap_or(VmValue::Nil),
+        ),
+    ]);
+    let mut entries: Vec<(&'static str, VmValue)> = vec![
+        ("result", str_value(tag)),
+        ("applied", VmValue::Bool(envelope.applied)),
+        ("dry_run", VmValue::Bool(envelope.dry_run)),
+        ("scope", str_value(scope.as_str())),
+        ("symbol", build_dict(symbol_entries)),
+        ("touched_files", list(envelope.touched_files)),
+        ("conflicts", list(envelope.conflicts)),
+        ("warnings", list(envelope.warnings)),
+        ("failed_paths_with_reasons", list(envelope.failed_paths)),
+        ("match_count", VmValue::Int(envelope.match_count as i64)),
+        ("details", str_value(&envelope.details)),
+    ];
+    if let Some(fallback) = envelope.fallback_suggestion {
+        entries.push(("fallback_suggestion", str_value(fallback)));
+    }
+    entries.extend(envelope.extra);
+    build_dict(entries)
+}
+
+/// One `touched_files` entry.
+pub(super) fn file_plan_value(plan: &FilePlan) -> VmValue {
+    let edits: Vec<VmValue> = plan
+        .edits
+        .iter()
+        .map(|edit| {
+            build_dict([
+                ("start_byte", VmValue::Int(edit.span.start_byte as i64)),
+                ("end_byte", VmValue::Int(edit.span.end_byte as i64)),
+                ("start_row", VmValue::Int(edit.span.start_row as i64)),
+                ("start_col", VmValue::Int(edit.span.start_col as i64)),
+                ("end_row", VmValue::Int(edit.span.end_row as i64)),
+                ("end_col", VmValue::Int(edit.span.end_col as i64)),
+                ("before", str_value(&edit.before)),
+                ("after", str_value(&edit.after)),
+            ])
+        })
+        .collect();
+    build_dict([
+        ("path", str_value(&plan.path)),
+        ("language", str_value(plan.language.name())),
+        (
+            "before_sha256",
+            str_value(sha256_hex(plan.source.as_bytes())),
+        ),
+        (
+            "after_sha256",
+            str_value(sha256_hex(plan.patched.as_bytes())),
+        ),
+        ("edits", VmValue::List(Arc::new(edits))),
+    ])
+}
+
+pub(super) fn failed_paths_value(failed: &[(String, String)]) -> Vec<VmValue> {
+    failed
+        .iter()
+        .map(|(path, reason)| {
+            build_dict([("path", str_value(path)), ("reason", str_value(reason))])
+        })
+        .collect()
+}
+
+/// `ambiguous_symbol` warnings: one `{path, line, kind}` per candidate.
+pub(super) fn candidates_value(candidates: &[SeedCandidate]) -> Vec<VmValue> {
+    candidates
+        .iter()
+        .map(|(path, line, kind)| {
+            build_dict([
+                ("path", str_value(path)),
+                ("line", VmValue::Int(*line as i64)),
+                ("kind", str_value(*kind)),
+            ])
+        })
+        .collect()
+}
+
+fn sha256_hex(bytes: &[u8]) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(bytes);
+    hex::encode(hasher.finalize())
 }
 
 #[cfg(test)]

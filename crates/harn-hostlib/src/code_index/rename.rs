@@ -45,10 +45,8 @@
 //!    run is all-or-nothing modulo mid-call disk failures.
 
 use std::path::Path;
-use std::sync::Arc;
 
 use harn_vm::VmValue;
-use sha2::{Digest, Sha256};
 
 use crate::ast::{api as ast_api, Language, TEXT_PATCH_FALLBACK};
 use crate::error::HostlibError;
@@ -58,9 +56,10 @@ use crate::tools::args::{
 
 use super::builtins::SharedIndex;
 use super::refactor_core::{
-    collect_identifier_spans, competing_declarations, files_in_scope, is_identifier_token,
-    parse_kind, plan_file, read_source, resolve_seed, write_plans, EditSpan, FilePlan, Scope,
-    SeedLookup, ShadowSite,
+    candidates_value, collect_identifier_spans, competing_declarations, edit_envelope,
+    failed_paths_value, file_plan_value, files_in_scope, is_identifier_token, parse_kind,
+    plan_file, read_source, resolve_seed, write_plans, EditEnvelope, EditSpan, EditSymbol,
+    FilePlan, Scope, SeedLookup, ShadowSite,
 };
 #[cfg(test)]
 use super::state::IndexState;
@@ -360,29 +359,29 @@ struct ResponseExtras {
 }
 
 fn emit_response(env: &ResponseEnv<'_>, tag: &'static str, extras: ResponseExtras) -> VmValue {
-    let mut entries: Vec<(&'static str, VmValue)> = vec![
-        ("result", str_value(tag)),
-        ("applied", VmValue::Bool(extras.applied)),
-        ("dry_run", VmValue::Bool(extras.dry_run)),
-        ("scope", str_value(env.scope.as_str())),
-        ("symbol", symbol_descriptor(env)),
-        (
-            "touched_files",
-            VmValue::List(Arc::new(extras.touched_files)),
-        ),
-        ("conflicts", VmValue::List(Arc::new(extras.conflicts))),
-        ("warnings", VmValue::List(Arc::new(extras.warnings))),
-        (
-            "failed_paths_with_reasons",
-            VmValue::List(Arc::new(extras.failed_paths)),
-        ),
-        ("match_count", VmValue::Int(extras.match_count as i64)),
-        ("details", str_value(&extras.details)),
-    ];
-    if let Some(fallback) = extras.fallback_suggestion {
-        entries.push(("fallback_suggestion", str_value(fallback)));
-    }
-    build_dict(entries)
+    edit_envelope(
+        tag,
+        env.scope,
+        &EditSymbol {
+            name: env.symbol_name,
+            new_name: Some(env.new_name),
+            path: env.symbol_path,
+            line: env.symbol_line,
+            kind: env.symbol_kind,
+        },
+        EditEnvelope {
+            applied: extras.applied,
+            dry_run: extras.dry_run,
+            touched_files: extras.touched_files,
+            conflicts: extras.conflicts,
+            warnings: extras.warnings,
+            failed_paths: extras.failed_paths,
+            match_count: extras.match_count,
+            details: extras.details,
+            fallback_suggestion: extras.fallback_suggestion,
+            extra: Vec::new(),
+        },
+    )
 }
 
 fn applied_response(
@@ -391,7 +390,7 @@ fn applied_response(
     dry_run: bool,
     failed: Vec<(String, String)>,
 ) -> VmValue {
-    let touched_files: Vec<VmValue> = plans.iter().map(file_plan_to_value).collect();
+    let touched_files: Vec<VmValue> = plans.iter().map(file_plan_value).collect();
     let match_count: usize = plans.iter().map(|p| p.edits.len()).sum();
     let details = if dry_run {
         "dry_run — no files were written"
@@ -447,16 +446,7 @@ fn ambiguous_response_with_details(
     candidates: &[(String, u32, &'static str)],
     details: &str,
 ) -> VmValue {
-    let candidate_list: Vec<VmValue> = candidates
-        .iter()
-        .map(|(path, line, kind)| {
-            build_dict([
-                ("path", str_value(path)),
-                ("line", VmValue::Int(*line as i64)),
-                ("kind", str_value(*kind)),
-            ])
-        })
-        .collect();
+    let candidate_list = candidates_value(candidates);
     emit_response(
         env,
         "ambiguous_symbol",
@@ -541,73 +531,6 @@ fn syntax_error_response(env: &ResponseEnv<'_>, file_path: &str, detail: &str) -
             ..Default::default()
         },
     )
-}
-
-fn symbol_descriptor(env: &ResponseEnv<'_>) -> VmValue {
-    build_dict([
-        ("name", str_value(env.symbol_name)),
-        ("new_name", str_value(env.new_name)),
-        ("path", str_value(env.symbol_path)),
-        (
-            "line",
-            env.symbol_line
-                .map(|n| VmValue::Int(n as i64))
-                .unwrap_or(VmValue::Nil),
-        ),
-        (
-            "kind",
-            env.symbol_kind
-                .map(|k| str_value(k.as_str()))
-                .unwrap_or(VmValue::Nil),
-        ),
-    ])
-}
-
-fn file_plan_to_value(plan: &FilePlan) -> VmValue {
-    let edits: Vec<VmValue> = plan
-        .edits
-        .iter()
-        .map(|edit| {
-            build_dict([
-                ("start_byte", VmValue::Int(edit.span.start_byte as i64)),
-                ("end_byte", VmValue::Int(edit.span.end_byte as i64)),
-                ("start_row", VmValue::Int(edit.span.start_row as i64)),
-                ("start_col", VmValue::Int(edit.span.start_col as i64)),
-                ("end_row", VmValue::Int(edit.span.end_row as i64)),
-                ("end_col", VmValue::Int(edit.span.end_col as i64)),
-                ("before", str_value(&edit.before)),
-                ("after", str_value(&edit.after)),
-            ])
-        })
-        .collect();
-    build_dict([
-        ("path", str_value(&plan.path)),
-        ("language", str_value(plan.language.name())),
-        (
-            "before_sha256",
-            str_value(sha256_hex(plan.source.as_bytes())),
-        ),
-        (
-            "after_sha256",
-            str_value(sha256_hex(plan.patched.as_bytes())),
-        ),
-        ("edits", VmValue::List(Arc::new(edits))),
-    ])
-}
-
-fn failed_paths_value(failed: &[(String, String)]) -> Vec<VmValue> {
-    failed
-        .iter()
-        .map(|(path, reason)| {
-            build_dict([("path", str_value(path)), ("reason", str_value(reason))])
-        })
-        .collect()
-}
-
-fn sha256_hex(bytes: &[u8]) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(bytes);
-    hex::encode(hasher.finalize())
 }
 
 #[cfg(test)]
