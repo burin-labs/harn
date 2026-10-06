@@ -161,19 +161,10 @@ impl DispatchApproval {
         &self,
         tool: &str,
         args: &Value,
-        tools: Option<&crate::value::VmValue>,
-        initial_annotations: Option<&ToolAnnotations>,
+        annotations: Option<&ToolAnnotations>,
     ) -> Option<PolicyEvaluation> {
         let initial = self.initial.as_ref()?;
         let policy = self.policy.as_ref()?;
-        let unchanged = initial.tool == tool && initial.args == *args;
-        let replacement_annotations;
-        let annotations = if unchanged {
-            initial_annotations
-        } else {
-            replacement_annotations = super::tool_catalog::annotations_for(tools, tool);
-            replacement_annotations.as_ref()
-        };
         // Reuse the complete evaluator and its canonical identity. Identical
         // JSON cannot retain a grant when resolved resources or risk change.
         let (mut decision, identity) =

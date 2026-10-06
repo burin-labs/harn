@@ -815,7 +815,7 @@ pub(super) async fn host_agent_dispatch_tool_call(
         );
         return Ok(json_to_vm_value(&result));
     }
-    let dispatch_policy =
+    let mut dispatch_policy =
         DispatchPolicy::new(policy_machinery_active, dispatch_annotations.as_ref());
 
     let prepared_invocation =
@@ -838,14 +838,6 @@ pub(super) async fn host_agent_dispatch_tool_call(
         None,
     ) {
         if let Some(violation) = policy_denial.side_effect_ceiling {
-            // A side-effect ceiling is the one static policy refusal that can
-            // offer an explicit, dispatch-local ACP approval. The grant below
-            // is exact (tool + active ceiling + required effect), non-stored,
-            // and immediately rechecked before the call can proceed.
-            // Offer the ceiling refusal to the reviewer before the host, the
-            // same order the approval-policy path uses. Without this a run
-            // carrying both a capability policy and a reviewer refuses the
-            // call and never asks (harn#7982), which is every product loop.
             let (reviewer_granted, ceiling_outcome) = review_or_request_side_effect_permission(
                 &ctx,
                 bridge.as_ref(),
@@ -889,6 +881,11 @@ pub(super) async fn host_agent_dispatch_tool_call(
                         )
                         .await);
                     }
+                    dispatch_policy.retain_grant(
+                        &tool_name,
+                        approval_args.as_ref().unwrap_or(&tool_args),
+                        grant,
+                    );
                     approval_status = Some(if reviewer_granted {
                         "auto_review_granted"
                     } else {
@@ -1395,22 +1392,34 @@ pub(super) async fn host_agent_dispatch_tool_call(
         return Ok(json_to_vm_value(&denied));
     }
 
-    if let Some(decision) = dispatch_approval.recheck(
-        &tool_name,
-        approval_args.as_ref().unwrap_or(&tool_args),
-        tools,
-        dispatch_annotations.as_ref(),
-    ) {
-        emit_runtime_denied_activity(&session_id, &tool_id, &tool_name, &decision);
+    let final_annotations = tool_annotations_for(tools, &tool_name);
+    let final_denial = dispatch_policy
+        .recheck(
+            &tool_name,
+            approval_args.as_ref().unwrap_or(&tool_args),
+            final_annotations.as_ref(),
+        )
+        .err()
+        .map(|denial| (tool_denial_from_policy(denial, &tool_name), None))
+        .or_else(|| {
+            let decision = dispatch_approval.recheck(
+                &tool_name,
+                approval_args.as_ref().unwrap_or(&tool_args),
+                final_annotations.as_ref(),
+            )?;
+            emit_runtime_denied_activity(&session_id, &tool_id, &tool_name, &decision);
+            Some((decision.terminal_denial(), Some(decision.receipt)))
+        });
+    if let Some((denial, receipt)) = final_denial {
         let denied = deny_tool_call(
             Some(&ctx),
             &session_id,
             &tool_name,
             &tool_id,
             &tool_args,
-            decision.terminal_denial(),
+            denial,
             false,
-            DenialEvidence::new(Some(decision.receipt), None),
+            DenialEvidence::new(receipt, None),
         )
         .await;
         return Ok(json_to_vm_value(&attach_hook_reminder_audit(

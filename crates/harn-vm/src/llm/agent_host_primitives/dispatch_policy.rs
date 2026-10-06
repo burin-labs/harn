@@ -12,6 +12,13 @@
 pub(super) struct DispatchPolicy<'a> {
     active: bool,
     annotations: Option<&'a crate::tool_annotations::ToolAnnotations>,
+    grant: Option<GrantedInvocation>,
+}
+
+struct GrantedInvocation {
+    tool: String,
+    args: serde_json::Value,
+    ceiling: crate::orchestration::SideEffectCeilingGrant,
 }
 
 impl<'a> DispatchPolicy<'a> {
@@ -22,6 +29,7 @@ impl<'a> DispatchPolicy<'a> {
         Self {
             active,
             annotations,
+            grant: None,
         }
     }
 
@@ -31,12 +39,51 @@ impl<'a> DispatchPolicy<'a> {
         tool_args: &serde_json::Value,
         side_effect_grant: Option<&crate::orchestration::SideEffectCeilingGrant>,
     ) -> Result<(), crate::orchestration::PolicyDenial> {
+        self.enforce_with_annotations(tool_name, tool_args, self.annotations, side_effect_grant)
+    }
+
+    pub(super) fn retain_grant(
+        &mut self,
+        tool: &str,
+        args: &serde_json::Value,
+        ceiling: crate::orchestration::SideEffectCeilingGrant,
+    ) {
+        self.grant = Some(GrantedInvocation {
+            tool: tool.into(),
+            args: args.clone(),
+            ceiling,
+        });
+    }
+
+    pub(super) fn recheck(
+        &self,
+        tool: &str,
+        args: &serde_json::Value,
+        annotations: Option<&crate::tool_annotations::ToolAnnotations>,
+    ) -> Result<(), crate::orchestration::PolicyDenial> {
+        // A once grant belongs to these exact policy facts. The policy owner
+        // separately checks that its ceiling and required effect still match.
+        let grant = self
+            .grant
+            .as_ref()
+            .filter(|grant| grant.tool == tool && grant.args == *args)
+            .map(|grant| &grant.ceiling);
+        self.enforce_with_annotations(tool, args, annotations, grant)
+    }
+
+    fn enforce_with_annotations(
+        &self,
+        tool_name: &str,
+        tool_args: &serde_json::Value,
+        annotations: Option<&crate::tool_annotations::ToolAnnotations>,
+        side_effect_grant: Option<&crate::orchestration::SideEffectCeilingGrant>,
+    ) -> Result<(), crate::orchestration::PolicyDenial> {
         if !self.active {
             return Ok(());
         }
         crate::orchestration::enforce_current_policy_for_tool_with_annotations_and_side_effect_grant(
             tool_name,
-            self.annotations,
+            annotations,
             side_effect_grant,
         )?;
         crate::orchestration::enforce_tool_arg_constraints(

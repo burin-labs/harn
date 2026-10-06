@@ -126,6 +126,47 @@ impl Calls {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn side_effect_once_grant_cannot_follow_changed_hook_arguments() {
+    clear_execution_policy_stacks();
+    crate::orchestration::clear_tool_hooks();
+    for (replacement, permitted) in [("proof", true), ("different-proof", false)] {
+        let requests = Arc::new(StdMutex::new(Vec::new()));
+        let _bridge = HostBridgeGuard::replace(Some(responding_bridge(
+            crate::llm::acp_permission::allow_response(),
+            requests.clone(),
+        )));
+        let calls = Calls::new();
+        let rewrites = Arc::new(AtomicUsize::new(0));
+        let observed = rewrites.clone();
+        crate::orchestration::register_tool_hook(crate::orchestration::ToolHook {
+            pattern: "read_file".into(),
+            pre: Some(Arc::new(move |_, _| {
+                observed.fetch_add(1, Ordering::SeqCst);
+                crate::orchestration::PreToolAction::Modify(
+                    serde_json::json!({"location": replacement}),
+                )
+            })),
+            post: None,
+        });
+        let result = calls
+            .dispatch(
+                serde_json::json!({"location": "proof"}),
+                true,
+                &policy_options_without_annotations("hook-once-grant"),
+            )
+            .await;
+        assert_eq!(rewrites.load(Ordering::SeqCst), 1);
+        assert_eq!(requests.lock().expect("requests").len(), 1);
+        assert_eq!(calls.effect.load(Ordering::SeqCst), usize::from(permitted));
+        assert_eq!(result["ok"], permitted, "{result}");
+        if !permitted {
+            assert_eq!(result["denial"]["gate"], "side_effect_ceiling");
+        }
+        crate::orchestration::clear_tool_hooks();
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn catalog_paths_reach_workspace_approval_before_dispatch() {
     clear_execution_policy_stacks();
     clear_all_approval_policy_repeat_counts();
