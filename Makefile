@@ -741,6 +741,7 @@ test-pr-gate-scripts:
 	./scripts/tests/ci_write_walltime_report_test.sh
 	./scripts/tests/update_queued_pr_test.sh
 	./scripts/tests/cancel_superseded_merge_groups_test.sh
+	./scripts/tests/review_dispatch_sweep_test.sh
 	./scripts/tests/audit_gates_parallel_test.sh
 	./scripts/tests/source_gate_receipt_test.sh
 	./scripts/tests/conformance_worker_budget_test.sh
