@@ -15,6 +15,10 @@ struct OpInterrupt {
     /// The `on_interrupt` handler's `graceful_timeout_ms` window. Kept apart
     /// from `deadline` because expiry is a different error kind.
     handler_deadline: Option<Instant>,
+    /// An internal setup budget from [`with_operation_budget`]. It stops the
+    /// same blocking waits, but its expiry belongs to the operation that set
+    /// it, so it is never reported as a caller interrupt.
+    operation_budget: Option<Instant>,
 }
 
 thread_local! {
@@ -48,6 +52,7 @@ pub fn install(cancel: Option<Arc<AtomicBool>>, deadline: Option<Instant>) -> Op
         cancel,
         deadline,
         handler_deadline: None,
+        operation_budget: None,
     })
 }
 
@@ -63,6 +68,7 @@ pub(crate) fn install_for_vm(
         cancel,
         deadline: scope_deadline,
         handler_deadline,
+        operation_budget: None,
     })
 }
 
@@ -88,6 +94,27 @@ pub fn with_deadline(deadline: Instant) -> OpInterruptGuard {
     })
 }
 
+/// Bound an internal operation, such as a setup probe, that its caller did not
+/// ask to bound. Blocking waits stop when the budget expires, exactly as for
+/// [`with_deadline`], but [`requested_error`] does not report the expiry: the
+/// operation that installed the budget reads [`operation_budget_expired`] and
+/// owns the outcome. Caller cancellation, the handler window, and the scope
+/// deadline stay installed and keep their own error kinds.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+pub(crate) fn with_operation_budget(budget: Instant) -> OpInterruptGuard {
+    let parent = CURRENT
+        .with(|slot| slot.borrow().clone())
+        .unwrap_or_default();
+    install_context(OpInterrupt {
+        operation_budget: Some(
+            parent
+                .operation_budget
+                .map_or(budget, |earlier| earlier.min(budget)),
+        ),
+        ..parent
+    })
+}
+
 /// Returns `true` when an interrupt context is installed on this thread.
 ///
 /// This is separate from [`requested`] so blocking operations can decide
@@ -97,7 +124,8 @@ pub fn installed() -> bool {
 }
 
 /// Returns `true` when the interrupt context installed on this thread has
-/// fired: the cancel token is set, or the deadline has passed. Cheap enough
+/// fired: the cancel token is set, or a deadline or operation budget has
+/// passed. Cheap enough
 /// to call from a ~20ms poll loop. Returns `false` when nothing is armed.
 pub fn requested() -> bool {
     requested_reason().is_some()
@@ -107,23 +135,34 @@ enum InterruptReason {
     HandlerTimeout,
     Cancelled,
     Deadline,
+    OperationBudget,
 }
 
-/// The error a blocking operation with no VM of its own returns once an
+/// Whether only an internal [`with_operation_budget`] stopped the wait. Any
+/// caller interrupt takes precedence and reads `false` here.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+pub(crate) fn operation_budget_expired() -> bool {
+    matches!(requested_reason(), Some(InterruptReason::OperationBudget))
+}
+
+/// The error a blocking operation with no VM of its own returns once a caller
 /// interrupt is requested. Its caller's VM still owns dispatch; this only has
-/// to name the same kind that VM's interrupt check would.
+/// to name the same kind that VM's interrupt check would. An expired
+/// operation budget is not a caller interrupt and returns `None`.
 // Only Linux Bubblewrap preparation consumes it outside tests today.
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 pub(crate) fn requested_error() -> Option<crate::VmError> {
-    requested_reason().map(|reason| match reason {
-        InterruptReason::HandlerTimeout => crate::Vm::interrupt_handler_timeout_error(),
-        InterruptReason::Cancelled => crate::cancellation::cancelled_without_machine(),
-        InterruptReason::Deadline => crate::Vm::deadline_exceeded_error(),
+    requested_reason().and_then(|reason| match reason {
+        InterruptReason::HandlerTimeout => Some(crate::Vm::interrupt_handler_timeout_error()),
+        InterruptReason::Cancelled => Some(crate::cancellation::cancelled_without_machine()),
+        InterruptReason::Deadline => Some(crate::Vm::deadline_exceeded_error()),
+        InterruptReason::OperationBudget => None,
     })
 }
 
 /// Precedence mirrors the VM's interrupt check: an expired handler window,
-/// then cancellation, then a scope deadline.
+/// then cancellation, then a scope deadline. An internal operation budget
+/// comes last so every caller interrupt keeps its own kind.
 fn requested_reason() -> Option<InterruptReason> {
     CURRENT.with(|slot| {
         let ctx = slot.borrow();
@@ -141,6 +180,9 @@ fn requested_reason() -> Option<InterruptReason> {
         }
         if ctx.deadline.is_some_and(|deadline| now >= deadline) {
             return Some(InterruptReason::Deadline);
+        }
+        if ctx.operation_budget.is_some_and(|budget| now >= budget) {
+            return Some(InterruptReason::OperationBudget);
         }
         None
     })

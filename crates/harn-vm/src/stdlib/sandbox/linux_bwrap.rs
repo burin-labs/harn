@@ -57,7 +57,7 @@ fn cached_availability(
             *cached = Some(available);
             available
         }
-        probe::ProbeOutcome::Interrupted => false,
+        probe::ProbeOutcome::Interrupted | probe::ProbeOutcome::Incomplete => false,
     }
 }
 
@@ -68,8 +68,9 @@ pub(in crate::stdlib::sandbox) fn prepare(
     profile: SandboxProfile,
 ) -> Result<PrepareOutcome, VmError> {
     let available = available();
-    // The probe's setup deadline is restored before this read. A caller's
-    // cancellation/deadline is control flow, not a missing host mechanism.
+    // A caller's cancellation or deadline is control flow, not a missing host
+    // mechanism. The probe's own setup budget is never reported here: an
+    // incomplete probe falls through to the typed refusal below.
     if let Some(error) = crate::op_interrupt::requested_error() {
         return Err(error);
     }

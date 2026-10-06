@@ -32,9 +32,9 @@
 mod context;
 
 pub(crate) use context::install_for_vm;
-#[cfg_attr(not(target_os = "linux"), allow(unused_imports))]
-pub(crate) use context::requested_error;
 pub use context::{install, installed, requested, with_deadline, OpInterruptGuard};
+#[cfg_attr(not(target_os = "linux"), allow(unused_imports))]
+pub(crate) use context::{operation_budget_expired, requested_error, with_operation_budget};
 
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -1126,6 +1126,43 @@ mod tests {
         assert!(requested_error().is_some_and(|error| crate::cancellation::is_cancellation(&error)));
         let _scope = install_for_vm(None, Some(expired), None);
         assert_eq!(thrown(), "Deadline exceeded");
+    }
+
+    #[test]
+    fn an_operation_budget_is_not_a_caller_interrupt() {
+        let expired = Instant::now()
+            .checked_sub(Duration::from_millis(1))
+            .expect("monotonic clock supports a 1ms test lookback");
+        let thrown = || match requested_error() {
+            Some(crate::VmError::Thrown(value)) => value.display(),
+            other => panic!("expected a thrown interrupt error, got {other:?}"),
+        };
+        {
+            let _budget = with_operation_budget(expired);
+            assert!(requested(), "an expired budget still stops blocking waits");
+            if let Some(error) = requested_error() {
+                panic!("an internal budget surfaced as the caller's interrupt: {error}");
+            }
+            assert!(operation_budget_expired());
+        }
+        assert!(!installed(), "the budget guard restores an empty slot");
+        // Every caller interrupt keeps its own kind inside an expired budget.
+        let cancel = Arc::new(AtomicBool::new(true));
+        let _handler = install_for_vm(Some(cancel.clone()), Some(expired), Some(expired));
+        let _budget = with_operation_budget(expired);
+        assert!(!operation_budget_expired());
+        assert_eq!(thrown(), "kind:interrupted:handler_timeout");
+        let _cancelled = install_for_vm(Some(cancel), Some(expired), None);
+        let _budget = with_operation_budget(expired);
+        assert!(requested_error().is_some_and(|error| crate::cancellation::is_cancellation(&error)));
+        let _scope = install_for_vm(None, Some(expired), None);
+        let _budget = with_operation_budget(expired);
+        assert_eq!(thrown(), "Deadline exceeded");
+        // A live caller deadline is not shortened into a caller error.
+        let _live = install_for_vm(None, Some(Instant::now() + Duration::from_mins(1)), None);
+        let _budget = with_operation_budget(expired);
+        assert!(operation_budget_expired());
+        assert!(requested_error().is_none());
     }
 
     #[test]
