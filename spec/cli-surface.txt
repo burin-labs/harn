@@ -7,6 +7,7 @@ harn
 harn --argument-schema
 harn --command
 harn --json-schemas
+harn --parent-secret-stdin
 harn --spend-policy
 harn add
 harn add --alias

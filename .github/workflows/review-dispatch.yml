@@ -17,22 +17,44 @@
 # still runs this job, under a name that says it was skipped and why, and mints
 # nothing. Pull request secrets are available to `pull_request_target` runs from
 # forks, so the skip is decided before any step that could touch one.
+#
+# A request can end with no review: the reviewer stands a head down at its
+# daily limit, and its admission queue keeps one pending run, so a burst of
+# requests cancels the older ones without a word on the pull request. The
+# `sweep` job requests those heads again on a schedule; the rules live in
+# scripts/review_dispatch_sweep.sh. A manual run of it is a read-only plan
+# unless `apply` is set.
 name: Automatic review dispatch
 
 on:
   pull_request_target: # zizmor: ignore[dangerous-triggers] never checks out or runs pull request code; it only dispatches a review of the head SHA
     types: [opened, reopened, ready_for_review, synchronize]
+  schedule:
+    - cron: "13,43 * * * *"
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: Request the planned reviews instead of only listing them.
+        type: boolean
+        default: false
 
 permissions: {}
 
 concurrency:
   # A newer head supersedes a dispatch still queued for an older one; the
-  # reviewer also refuses a head that has moved.
-  group: review-dispatch-${{ github.event.pull_request.number }}
-  cancel-in-progress: true
+  # reviewer also refuses a head that has moved. A sweep never cancels
+  # another sweep mid-request; the next one waits.
+  group: review-dispatch-${{ github.event.pull_request.number || 'sweep' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request_target' }}
 
 jobs:
   dispatch:
+    if: github.event_name == 'pull_request_target'
+    # This name is the request record. A `pull_request_target` job reports as a
+    # check run on the pull request head, so an eligible request leaves an
+    # `Automatic review: requested` check there, the same record the sweep
+    # writes and reads to space its requests. Renaming it breaks that pairing;
+    # scripts/tests/review_dispatch_sweep_test.sh holds the two names equal.
     name: >-
       ${{ github.event.pull_request.head.repo.full_name != github.repository && 'Automatic review: skipped (fork)'
       || github.event.pull_request.draft && 'Automatic review: skipped (draft)'
@@ -110,3 +132,54 @@ jobs:
             -f head_sha="$HEAD_SHA"
           echo "Requested an automatic review of $TARGET_REPOSITORY#$PR_NUMBER at $HEAD_SHA."
           echo "The review arrives as a pull request review; a stand-down arrives as a comment."
+
+  sweep:
+    name: Re-request reviews that ended without an outcome
+    if: >-
+      github.event_name != 'pull_request_target'
+      && vars.REVIEW_DISPATCH_REPOSITORY != ''
+      && vars.REVIEW_DISPATCH_WORKFLOW != ''
+    runs-on: ubuntu-24.04
+    # Four requests spaced 90 seconds apart, plus one read per waiting head.
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      pull-requests: read
+      issues: read
+      # Each request is recorded as an `Automatic review: requested` check run
+      # on the head, the record the next sweep spaces its requests by.
+      checks: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: scripts/review_dispatch_sweep.sh
+          sparse-checkout-cone-mode: false
+
+      - name: Mint a token that can only dispatch the review workflow
+        id: token
+        if: github.event_name == 'schedule' || inputs.apply
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ secrets.RELEASE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ vars.REVIEW_DISPATCH_REPOSITORY }}
+          permission-actions: write
+
+      - name: Request reviews for heads still waiting
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DISPATCH_TOKEN: ${{ steps.token.outputs.token }}
+          APPLY: ${{ github.event_name == 'schedule' || inputs.apply }}
+          REVIEW_REPOSITORY: ${{ github.repository_owner }}/${{ vars.REVIEW_DISPATCH_REPOSITORY }}
+          REVIEW_WORKFLOW: ${{ vars.REVIEW_DISPATCH_WORKFLOW }}
+          REVIEW_REF: ${{ vars.REVIEW_DISPATCH_REF }}
+          TARGET_REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          args=(--repo "$TARGET_REPOSITORY")
+          if [ "$APPLY" = "true" ]; then
+            args+=(--apply)
+          fi
+          ./scripts/review_dispatch_sweep.sh "${args[@]}"

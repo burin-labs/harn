@@ -223,7 +223,7 @@ pipeline test_literal_timeout_pattern_rejections(harness: Harness, task: unknown
 
 @test
 pipeline test_literal_timeout_baseline_is_a_ratchet(harness: Harness, task: unknown) {
-  assert_eq(grandfather_count("literal_timeout", "crates/harn-vm/src/llm/rate_limit.rs"), 3)
+  assert_eq(grandfather_count("literal_timeout", "crates/harn-vm/src/llm/rate_limit/tests.rs"), 3)
   assert_eq(
     grandfather_count("literal_timeout", "crates/harn-serve/src/adapters/acp/tests.rs"),
     nil,

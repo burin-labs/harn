@@ -48,10 +48,18 @@ case "$1" in
       printf 'cargo-nextest %s (fake)\n' "${FAKE_NEXTEST_VERSION:-}"
       exit 0
     fi
-    if [[ "$#" -eq 10 && "$2" == "archive" && "$3" == "--locked" && \
+    if [[ "$#" -eq 8 && "$2" == "run" && "$3" == "--locked" && \
       "$4" == "--workspace" && "$5" == "--profile" && "$6" == "ci" && \
-      "$7" == "-E" && "$8" == 'all()' && "$9" == "--archive-file" && -n "${10}" ]]; then
-      printf 'tests archive\n' > "${10}"
+      "$7" == "-E" && "$8" == 'test(open_enum_source_compatibility)' ]]; then
+      [[ "${HARN_ENUM_COMPILER_ARCHIVE_STAGE:-}" == 1 ]] || exit 2
+      : > "${CARGO_RECEIPTS:?}/compiler-fixture-controls"
+      [[ "${FAKE_COMPILER_FIXTURE_FAILURE:-0}" == 0 ]] || exit 1
+    elif [[ "$#" -eq 12 && "$2" == "archive" && "$3" == "--locked" && \
+      "$4" == "--workspace" && "$5" == "--profile" && "$6" == "ci" && \
+      "$7" == "--tool-config-file" && "$8" == harn-compiler-archive:*/.config/nextest-compiler-archive.toml && \
+      "$9" == "-E" && "${10}" == 'all()' && "${11}" == "--archive-file" && -n "${12}" ]]; then
+      [[ -f "${CARGO_RECEIPTS:?}/compiler-fixture-controls" ]] || exit 2
+      printf 'tests archive\n' > "${12}"
       : > "${CARGO_RECEIPTS:?}/nextest-tests"
     elif [[ "$#" -eq 10 && "$2" == "archive" && "$3" == "--locked" && \
       "$4" == "--workspace" && "$5" == "--profile" && "$6" == "ci" && "$7" == "-E" && \
@@ -131,6 +139,7 @@ expect_failure() {
 run_artifact build-tests "$bundle" "$commit"
 test -f "$tmpdir/receipts/build"
 test -f "$tmpdir/receipts/nextest-tests"
+test -f "$tmpdir/receipts/compiler-fixture-controls"
 rm -f "$tmpdir/receipts/build" "$tmpdir/receipts/nextest-tests"
 run_artifact build-cli "$cli_bundle" "$commit"
 test -f "$tmpdir/receipts/build-ci-cli"
@@ -350,5 +359,13 @@ expect_failure "restore-candidate accepted a target the manifest does not list" 
 expect_failure "restore-candidate overwrote an existing destination" \
   run_artifact restore-candidate "$tmpdir/candidate/$candidate_file" \
   "$tmpdir/candidate/manifest.json" "$candidate_target" "$tmpdir/restored-candidate" "$commit"
+
+# A green archive cannot hide a failed compiler fixture or publish stale inputs.
+rm -f "$tmpdir/receipts/nextest-tests"
+FAKE_COMPILER_FIXTURE_FAILURE=1 \
+  expect_failure "build-tests accepted failed compiler fixture controls" \
+  run_artifact build-tests "$tmpdir/out/failed-compiler-fixture.tar.zst" "$commit"
+test ! -f "$tmpdir/receipts/nextest-tests"
+test ! -e "$tmpdir/out/failed-compiler-fixture.tar.zst"
 
 echo "rust_artifact_test: ok"

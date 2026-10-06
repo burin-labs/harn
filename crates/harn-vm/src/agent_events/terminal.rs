@@ -25,6 +25,7 @@ use super::agent::AgentEvent;
 /// [`Self::Unknown`] is the honest fallback when no rule matched or the
 /// supplied terminal evidence conflicts.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Serialize, Deserialize, schemars::JsonSchema)]
+#[non_exhaustive]
 #[serde(rename_all = "snake_case")]
 pub enum AgentTerminalKind {
     /// The model/agent finished naturally — a clean completion or a verified

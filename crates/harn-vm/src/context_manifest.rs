@@ -120,6 +120,24 @@ pub struct ManifestUnreadable {
     pub kind: String,
 }
 
+/// A package-shaped import and the path it resolved to.
+///
+/// An installed package resolves through the project's current generation. A
+/// reinstall publishes a new generation and repoints the project at it, while
+/// the old generation's files can stay on disk, byte- and stat-identical, for
+/// processes still holding them. Every recorded file then re-checks clean, yet
+/// the import now names different files, so the resolution is recorded and
+/// asked again.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+pub struct ManifestPackageLink {
+    /// The importing file as the walk spelled it.
+    pub anchor: PathBuf,
+    pub import: String,
+    /// The path resolution returned, before canonicalization: a re-resolution
+    /// from the same anchor returns the same spelling when nothing moved.
+    pub resolved: PathBuf,
+}
+
 /// Everything the entry key's import-graph walk observed, in re-checkable form.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct ContextManifest {
@@ -135,6 +153,7 @@ pub struct ContextManifest {
     pub files: Vec<ManifestFile>,
     pub unresolved: Vec<ManifestUnresolved>,
     pub unreadable: Vec<ManifestUnreadable>,
+    pub package_links: Vec<ManifestPackageLink>,
     /// Raw package aliases imported by the reachable graph. Cache hits use
     /// this projection to revalidate manifest/lock authority without parsing
     /// or rebuilding the graph.
@@ -181,6 +200,7 @@ impl ContextManifest {
             files: Vec::new(),
             unresolved: Vec::new(),
             unreadable: Vec::new(),
+            package_links: Vec::new(),
             package_import_aliases: Vec::new(),
             package_lock_digest: None,
         }
@@ -229,6 +249,10 @@ impl ContextManifest {
                 .unreadable
                 .iter()
                 .all(ManifestUnreadable::still_unreadable)
+            || !self
+                .package_links
+                .iter()
+                .all(ManifestPackageLink::still_resolves)
         {
             return ManifestCheck::Stale;
         }
@@ -370,6 +394,13 @@ impl ManifestUnreadable {
             Ok(_) => false,
             Err(error) => error.kind().to_string() == self.kind,
         }
+    }
+}
+
+impl ManifestPackageLink {
+    pub(crate) fn still_resolves(&self) -> bool {
+        harn_modules::resolve_import_path(&self.anchor, &self.import).as_deref()
+            == Some(self.resolved.as_path())
     }
 }
 

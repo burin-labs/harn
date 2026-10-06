@@ -30,11 +30,6 @@ impl ProcessSpawner for RealSpawner {
     fn spawn(&self, spec: SpawnSpec) -> Result<Box<dyn ProcessHandle>, ProcessError> {
         #[cfg(unix)]
         if spec.owner_death == super::OwnerDeathPolicy::KillContainment {
-            if spec.use_stdin {
-                return Err(ProcessError::InvalidArgv(
-                    "owner-death containment reserves stdin for the liveness pipe".to_string(),
-                ));
-            }
             if !matches!(spec.output_capture, OutputCapture::Pipe) {
                 return Err(ProcessError::InvalidArgv(
                     "owner-death containment requires piped output".to_string(),
@@ -108,6 +103,24 @@ impl ProcessSpawner for RealSpawner {
                         return Err(error);
                     }
                 };
+            let payload_stdin = if spec.use_stdin {
+                match super::owner_death::payload_stdin(&liveness) {
+                    Ok(stdin) => Some(stdin),
+                    Err(error) => {
+                        let _ = harn_vm::op_interrupt::signal_pid_tree_and_group_with_report(
+                            child.id(),
+                            9,
+                        );
+                        let _ = child.wait();
+                        harn_vm::op_interrupt::remove_process_owner_group_journal(&cleanup_token);
+                        return Err(ProcessError::Spawn(format!(
+                            "create guardian payload input: {error}"
+                        )));
+                    }
+                }
+            } else {
+                None
+            };
             let mut process = real_process(
                 child,
                 cleanup_token,
@@ -118,6 +131,7 @@ impl ProcessSpawner for RealSpawner {
                 None,
             );
             process.missing_program = missing_program;
+            process.payload_stdin = payload_stdin;
             return Ok(Box::new(process));
         }
 
@@ -526,6 +540,8 @@ struct RealProcess {
     killer: Arc<dyn ProcessKiller>,
     child: Option<Child>,
     stdin: Option<ChildStdin>,
+    #[cfg(unix)]
+    payload_stdin: Option<super::owner_death::PayloadStdin>,
     stdout: Option<ChildStdout>,
     stderr: Option<ChildStderr>,
     owner_liveness: Option<ChildStdin>,
@@ -561,6 +577,8 @@ fn real_process(
         killer,
         child: Some(child),
         stdin: None,
+        #[cfg(unix)]
+        payload_stdin: None,
         stdout: None,
         stderr,
         owner_liveness,
@@ -606,6 +624,10 @@ impl ProcessHandle for RealProcess {
     fn take_stdin(&mut self) -> Option<Box<dyn Write + Send>> {
         self.ensure_pipes_taken();
         self.stdin_taken = true;
+        #[cfg(unix)]
+        if let Some(stdin) = self.payload_stdin.take() {
+            return Some(Box::new(stdin));
+        }
         self.stdin
             .take()
             .map(|s| Box::new(s) as Box<dyn Write + Send>)

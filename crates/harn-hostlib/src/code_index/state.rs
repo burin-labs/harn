@@ -601,6 +601,14 @@ impl IndexState {
             &file.imports,
             &imported_files,
         );
+        // The rebuild linked this file to the declarations it names; now
+        // link every file that names this file's declarations. Without
+        // this, REFS depend on ingest order and an edit to a declaring
+        // file drops every edge into it.
+        let words = &self.words;
+        self.symbols.link_refs_into_file(id, |word| {
+            words.get(word).iter().map(|hit| hit.file).collect()
+        });
         if let Some(file_mut) = self.files.get_mut(&id) {
             file_mut.symbols = outcome
                 .symbols
@@ -1130,3 +1138,7 @@ mod tests {
         assert_eq!(go_row.files_with_resolved_imports, 0);
     }
 }
+
+#[cfg(test)]
+#[path = "refs_order_tests.rs"]
+mod refs_order_tests;

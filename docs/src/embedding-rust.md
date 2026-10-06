@@ -106,6 +106,36 @@ depends on `harn-cli` (which enables the full set) gets the full surface
 regardless of what it requests from `harn-serve`. The lean configurations only
 take effect in builds that do **not** pull in the full CLI.
 
+## Resolve connector credentials
+
+Use `harn_serve::try_load_provider_connectors` with the project directory or
+source anchor before initializing package-backed connector clients. It uses
+the CLI's package resolver, including dependency materialization, root
+overrides, provider deduplication, and explicit dependency failures.
+
+```rust
+# fn main() -> Result<(), Box<dyn std::error::Error>> {
+let project_root = std::env::current_dir()?;
+let resolved = harn_serve::try_load_provider_connectors(&project_root)?;
+let outbound = resolved.outbound_secret_ids();
+
+// Resolve these typed ids from the host's selected secret provider.
+// Keep `resolved` alive while initializing its connector configurations.
+for id in outbound {
+    println!("{}/{}", id.namespace, id.name);
+}
+# Ok(())
+# }
+```
+
+Inbound verification secrets are excluded from outbound requirements. An
+empty set means the resolved declarations need no outbound credentials; a
+missing or malformed dependency returns an error. Use
+`try_load_root_provider_connectors` only when the caller deliberately needs
+root declarations without resolving package contributions. Keep the returned
+`ResolvedProviderConnectors` alive through initialization so concurrent
+package publication cannot collect its generation.
+
 ## Start an embedded agent
 
 `EmbeddedAgentClient` owns the required worker thread, current-thread Tokio

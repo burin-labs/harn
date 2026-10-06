@@ -454,7 +454,8 @@
       "billing_limit",
       "output_budget_exhausted",
       "unknown",
-      "policy_denied"
+      "policy_denied",
+      "managed_spend_paused"
     ],
     "promptErrorTerminalClasses": [
       "context_overflow",
@@ -468,7 +469,8 @@
       "host_bridge_unimplemented",
       "agent_loop_protocol_failure",
       "parse_dropped",
-      "generic_throw"
+      "generic_throw",
+      "managed_spend_paused"
     ],
     "promptResultExtensionFields": [
       "terminal"
