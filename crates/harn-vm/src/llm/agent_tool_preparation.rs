@@ -64,13 +64,10 @@ async fn resolve(
 ) -> Result<Value, VmError> {
     let mut vm = ctx.child_vm();
     let args = crate::stdlib::json_to_vm_value(arguments);
-    let overlay: crate::orchestration::CapabilityPolicy =
-        serde_json::from_value(serde_json::json!({
-        "capabilities": {"workspace": ["read_text"], "environment": ["read"], "state": ["read"], "connector": ["call"]},
-            "side_effect_level": "read_only",
-            "sandbox_profile": "unrestricted",
-        }))
-        .expect("literal read-only preparation policy");
+    let overlay = crate::orchestration::CapabilityPolicy {
+        side_effect_level: Some("read_only".into()),
+        ..crate::orchestration::CapabilityPolicy::neutral()
+    };
     let ceiling = crate::orchestration::current_execution_policy()
         .unwrap_or_default()
         .intersect(&overlay)
