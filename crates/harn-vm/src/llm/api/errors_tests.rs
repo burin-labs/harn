@@ -39,6 +39,7 @@ fn exported_llm_outcome_vocabularies_are_complete_and_round_trip() {
             LlmErrorReason::OutputBudgetExhausted => 12,
             LlmErrorReason::Unknown => 13,
             LlmErrorReason::PolicyDenied => 14,
+            LlmErrorReason::ManagedSpendPaused => 15,
         }
     }
 
@@ -48,7 +49,7 @@ fn exported_llm_outcome_vocabularies_are_complete_and_round_trip() {
         assert_eq!(LlmErrorKind::parse(kind.as_str()), Some(*kind));
     }
 
-    assert_eq!(LlmErrorReason::ALL.len(), 15);
+    assert_eq!(LlmErrorReason::ALL.len(), 16);
     for (index, reason) in LlmErrorReason::ALL.iter().enumerate() {
         assert_eq!(reason_ordinal(*reason), index);
         assert_eq!(LlmErrorReason::parse(reason.as_str()), Some(*reason));

@@ -109,6 +109,18 @@ Breaking changes require a Harn minor-version migration note:
 
 ## Consumer migration
 
+Rust consumers of Harn's public error and terminal taxonomies must include a
+wildcard fallback in matches. Their native enums are `non_exhaustive`, so adding
+a reason does not invalidate a downstream match that already handles the
+fallback.
+
+Generated Rust open-vocabulary enums preserve unfamiliar wire strings in
+`Unrecognized(String)`. When vendored into the consumer's own crate, they still
+require a `_` match arm: Rust's `non_exhaustive` restriction applies only across
+crate boundaries. Matching every current unit variant plus `Unrecognized`
+does not cover a new unit variant after regenerating the bindings. Match the
+known cases that affect behavior, and send every other case to a fallback.
+
 Hosts should consume the generated bindings or schema artifacts instead of
 mirroring Harn protocol enums by hand. Burin consumers can replace local
 `ACPSessionUpdate`, `ACPToolKind`, and `ACPToolCallStatus` mirrors with

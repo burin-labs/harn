@@ -8,7 +8,7 @@ pub(super) fn governor_throttle_signal_for_error(
     if category == crate::value::ErrorCategory::Overloaded {
         return Some(ThrottleSignal::Overloaded);
     }
-    let rate_limited = crate::llm::api::classify_llm_error(category, &err.to_string()).reason
+    let rate_limited = crate::llm::api::classify_vm_llm_error(err).reason
         == crate::llm::api::LlmErrorReason::RateLimit;
     if rate_limited {
         return Some(ThrottleSignal::RateLimit429);

@@ -59,6 +59,22 @@ inputs:
       without that record the restore changes nothing.
     required: false
     default: "false"
+  persistent-target:
+    description: >-
+      "true" on an owned runner: build in that runner's own target directory
+      outside the checkout, which survives between its jobs, instead of
+      restoring the repository's Actions cache. That cache is capped at 10 GB
+      per repository and evicts least-recently-used entries, so a warm
+      generation can vanish between a save and the next restore; a runner's
+      own directory cannot. Only one job runs on a runner at a time, so the
+      directory is never shared. Callers pass their tier's answer; a vendor VM
+      starts empty every time and must keep the Actions cache.
+    required: false
+    default: "false"
+  persistent-target-max-gib:
+    description: Discard the runner's target directory before the build once it exceeds this many GiB.
+    required: false
+    default: "40"
 
 outputs:
   cache-hit:
@@ -131,7 +147,51 @@ runs:
         fs.appendFileSync(process.env.GITHUB_OUTPUT, `shared-key=${key}\nrestore-prefix=${fallback}\npaths<<harn-cache-paths\n${paths.join('\n')}\nharn-cache-paths\nworkspaces<<harn-cache-workspaces\n${workspaces.join('\n')}\nharn-cache-workspaces\n`);
         NODE
 
+    # An owned runner keeps its own target directory between its jobs, outside
+    # the checkout that actions/checkout cleans. The Actions cache restore and
+    # save below are skipped there: nothing this runner builds needs them, and
+    # downloading a multi-gigabyte generation it may not even find is slower
+    # than reading its own disk. The workspace source record lives beside the
+    # target, so unchanged workspace crates stay fresh across jobs.
+    - name: Use the runner's persistent target directory
+      id: persistent
+      if: inputs.persistent-target == 'true'
+      shell: bash
+      env:
+        CACHE_SHARED_KEY: ${{ inputs.shared-key }}
+        CACHE_MAX_GIB: ${{ inputs.persistent-target-max-gib }}
+        CACHE_BROAD_RESTORE_PREFIX: ${{ inputs.broad-restore-prefix }}
+      run: |
+        set -euo pipefail
+        valid='^[A-Za-z0-9][A-Za-z0-9._-]*$'
+        if [[ ! "${RUNNER_NAME:-}" =~ $valid || ! "$CACHE_SHARED_KEY" =~ $valid ]]; then
+          echo "::error::persistent target needs a plain runner name and shared key"
+          exit 1
+        fi
+        if [[ -n "$CACHE_BROAD_RESTORE_PREFIX" ]]; then
+          echo "::error::a persistent target cannot also restore a broad Actions cache fallback"
+          exit 1
+        fi
+        [[ "$CACHE_MAX_GIB" =~ ^[1-9][0-9]*$ ]] || { echo "::error::persistent-target-max-gib must be a positive integer"; exit 1; }
+        root="${XDG_CACHE_HOME:-${HOME:?}/.cache}/harn-ci-target/$CACHE_SHARED_KEY/$RUNNER_NAME"
+        mkdir -p "$root/target" "$root/source"
+        used_kib="$(du -sk "$root" | cut -f1)"
+        state=warm
+        if (( used_kib > CACHE_MAX_GIB * 1024 * 1024 )); then
+          rm -rf -- "$root/target" "$root/source"
+          mkdir -p "$root/target" "$root/source"
+          state="discarded-over-${CACHE_MAX_GIB}GiB"
+        elif [[ -z "$(ls -A "$root/target")" ]]; then
+          state=empty
+        fi
+        rm -rf -- .harn-workspace-source
+        ln -s "$root/source" .harn-workspace-source
+        echo "CARGO_TARGET_DIR=$root/target" >> "$GITHUB_ENV"
+        echo "HARN_PERSISTENT_TARGET: runner=$RUNNER_NAME key=$CACHE_SHARED_KEY state=$state used_mib=$((used_kib / 1024))"
+        echo "::notice::HARN_PERSISTENT_TARGET runner=$RUNNER_NAME key=$CACHE_SHARED_KEY state=$state used_mib=$((used_kib / 1024))"
+
     - id: cache
+      if: inputs.persistent-target != 'true'
       uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
       continue-on-error: true
       with:
