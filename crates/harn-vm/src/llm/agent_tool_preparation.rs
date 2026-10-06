@@ -105,6 +105,7 @@ pub(super) async fn prepare(
     let Some(prepare) = super::agent_tools::find_tool_closure(registry, name, "prepare") else {
         return Ok(None);
     };
+    super::agent_tool_governance::require_registry_membership(registry, name).map_err(rejected)?;
     let schemas = super::tools::collect_tool_schemas(registry, None);
     super::tools::validate_tool_args(name, arguments, &schemas).map_err(rejected)?;
     let facts = resolve(ctx, &prepare, arguments).await?;

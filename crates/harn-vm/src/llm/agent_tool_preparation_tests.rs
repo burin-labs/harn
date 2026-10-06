@@ -22,6 +22,7 @@ struct Fixture {
     other: std::path::PathBuf,
     facts_path: std::path::PathBuf,
     facts: Value,
+    policy: Option<crate::orchestration::CapabilityPolicy>,
 }
 
 impl Fixture {
@@ -40,6 +41,7 @@ impl Fixture {
             other,
             facts_path,
             facts,
+            policy: None,
         }
     }
 
@@ -61,6 +63,7 @@ fn main(harness: Harness) {{
       const binding = tool_invocation_binding()
       const operation = binding.operation
       const result = harness.process.run({{program: "sh", args: ["-c", operation.command], cwd: operation.cwd}})
+      if !result.success {{ throw {{category: "timeout", message: "transient verifier failure"}} }}
       return {{schema: "harn.agent_tool_handler_result.v2", outcome: "ok", text: result.stdout,
         data: {{command: operation.command, cwd: operation.cwd, success: result.success}}}}
     }},
@@ -129,16 +132,22 @@ async fn dispatch(
     let call = crate::stdlib::json_to_vm_value(
         &json!({"name": "verify", "id": "prepared-verify", "arguments": arguments}),
     );
-    let outcome = crate::orchestration::scope_approval_policy(
+    let options =
+        crate::stdlib::json_to_vm_value(&json!({"tool_retries": 1, "tool_backoff_ms": 1}));
+    let permission = crate::orchestration::scope_approval_policy(
         policy,
         super::super::agent_host_primitives::host_agent_dispatch_tool_call(
             ctx,
             call,
             Some(&registry),
-            &crate::value::DictMap::new(),
+            options.as_dict().unwrap(),
         ),
-    )
-    .await
+    );
+    let outcome = if let Some(policy) = &fixture.policy {
+        crate::orchestration::scope_execution_policy(policy.clone(), permission).await
+    } else {
+        permission.await
+    }
     .expect("dispatch returns a tool outcome");
     let requests = captured.lock().unwrap().clone();
     (crate::llm::vm_value_to_json(&outcome), requests)
@@ -239,4 +248,82 @@ async fn prepared_verify_refuses_model_execution_facts_and_preparation_effects()
         assert_eq!(outcome["ok"], false);
         fixture.no_effect();
     }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn prepared_verify_retries_unchanged_facts_but_refuses_changed_facts() {
+    for change_goal in [false, true] {
+        let mut fixture = Fixture::new();
+        let change = if change_goal {
+            let mut changed = fixture.facts.clone();
+            changed["goal"] = json!("replacement");
+            format!(
+                "printf '%s' '{}' > '{}' ; ",
+                serde_json::to_string(&changed).unwrap(),
+                fixture.facts_path.display()
+            )
+        } else {
+            String::new()
+        };
+        fixture.facts["operation"]["command"] = json!(format!(
+            "printf attempt >> attempts; if [ ! -e retried ]; then touch retried; {change}exit 1; fi; printf verified > reached; pwd"
+        ));
+        std::fs::write(
+            &fixture.facts_path,
+            serde_json::to_vec(&fixture.facts).unwrap(),
+        )
+        .unwrap();
+        let (outcome, requests) = dispatch(
+            &fixture,
+            crate::llm::acp_permission::allow_response(),
+            None,
+            json!({}),
+            false,
+        )
+        .await;
+        assert_eq!(requests.len(), 1, "{outcome}");
+        assert_eq!(outcome["ok"], !change_goal, "{outcome}");
+        let attempts = std::fs::read_to_string(fixture.root.join("attempts")).unwrap();
+        assert_eq!(
+            attempts,
+            if change_goal {
+                "attempt"
+            } else {
+                "attemptattempt"
+            }
+        );
+        assert_eq!(fixture.root.join("reached").exists(), !change_goal);
+        assert!(!fixture.other.join("reached").exists());
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn prepared_verify_keeps_parent_workspace_scope_and_refuses_approval_rewrites() {
+    let mut fixture = Fixture::new();
+    fixture.policy = Some(
+        serde_json::from_value(json!({
+            "workspace_roots": [fixture.other],
+            "capabilities": {"workspace": ["read_text"]}
+        }))
+        .unwrap(),
+    );
+    let (outcome, requests) = dispatch(
+        &fixture,
+        crate::llm::acp_permission::allow_response(),
+        None,
+        json!({}),
+        false,
+    )
+    .await;
+    assert_eq!(outcome["ok"], false, "{outcome}");
+    assert!(requests.is_empty(), "parent refusal precedes consent");
+    fixture.no_effect();
+
+    let fixture = Fixture::new();
+    let mut response = crate::llm::acp_permission::allow_response();
+    response["args"] = json!({"reason": "rewritten after preparation"});
+    let (outcome, requests) = dispatch(&fixture, response, None, json!({}), false).await;
+    assert_eq!(requests.len(), 1, "{outcome}");
+    assert_eq!(outcome["ok"], false, "{outcome}");
+    fixture.no_effect();
 }
