@@ -29,6 +29,13 @@ on:
     - cron: "53 */4 * * *"
   workflow_dispatch:
   workflow_call:
+    outputs:
+      verdict:
+        description: Actual downstream pass or fail; empty means unmeasured
+        value: ${{ jobs.consumers.outputs.verdict }}
+      source_revision:
+        description: Exact source rehearsed by this invocation
+        value: ${{ inputs.source_revision }}
     inputs:
       source_revision:
         required: true

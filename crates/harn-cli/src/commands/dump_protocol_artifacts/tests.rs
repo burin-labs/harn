@@ -37,8 +37,10 @@ use super::*;
 #[path = "../../../../../spec/protocol-artifacts/harn-protocol.rs"]
 mod generated_rust_binding;
 
+mod compiler_fixture_bundle;
 mod external_action_roundtrip;
 mod llm_outcome_vocabulary;
+mod open_enum_source_compatibility;
 mod open_vocabulary_projection;
 mod plan;
 mod prepared_session;

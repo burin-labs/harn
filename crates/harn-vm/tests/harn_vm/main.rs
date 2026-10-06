@@ -43,6 +43,7 @@ mod host_tool_batch_overlap;
 mod injection_classifier_loader;
 mod mcp_call_budget;
 mod namespace_handover;
+mod nested_confinement;
 mod orchestration_cutover;
 mod tool_handler_arity;
 mod tool_input_schema_spelling;

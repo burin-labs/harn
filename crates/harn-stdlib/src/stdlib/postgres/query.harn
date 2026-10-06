@@ -31,6 +31,10 @@ const __IDENTIFIER_PATTERN = "^[A-Za-z_][A-Za-z0-9_]*$"
 
 const __SQL_FRAGMENT_TYPE = "std/postgres/query.sql_fragment.v1"
 
+// Literal run, `{{` or `}}` escape, `{...}` placeholder to the first `}`, or a
+// lone brace. Every character of a template belongs to exactly one token.
+const __SQL_TEMPLATE_TOKEN = "\\{\\{|\\}\\}|\\{[^}]*\\}|\\{|\\}|[^{}]+"
+
 fn __sql_fragment(sql: string) -> PgSqlFragment {
   if type_of(sql) != "string" {
     throw "std/postgres/query: SQL fragment must be a string"
@@ -112,33 +116,16 @@ fn __with_query_name(query: dict, body: unknown) {
   }
 }
 
-fn __find_placeholder_end(chars: list<string>, start: int) -> int {
-  let idx = start
-  while idx < len(chars) {
-    if chars[idx] == "}" {
-      return idx
-    }
-    idx = idx + 1
-  }
-  return -1
-}
-
-fn __render_placeholder(key: string, value: unknown, params: list<any>, positions: dict) {
-  if __is_sql_fragment(value) {
-    return {sql: __sql_fragment_text(value), params: params, positions: positions}
-  }
-  const existing = positions[key]
-  if existing != nil {
-    return {sql: "$" + to_string(existing), params: params, positions: positions}
-  }
-  const next = len(params) + 1
-  return {
-    sql: "$" + to_string(next),
-    params: params.appending(value),
-    positions: positions + {[key]: next},
-  }
-}
-
+/**
+ * Render a SQL template in time linear in its length and placeholder count.
+ *
+ * One regex pass splits the template into literal runs, `{{`/`}}` escapes, and
+ * `{name}` placeholders; a placeholder runs to the first `}`, so an unclosed
+ * or malformed one fails exactly as it is written. The loop stays in this one
+ * function and appends each piece once at the top level: passing the growing
+ * lists to a typed helper, or appending inside a branch, copies them per token
+ * and brings back the quadratic cost.
+ */
 fn __render_sql_template(template: string, values: dict) {
   if type_of(template) != "string" || trim(template) == "" {
     throw "std/postgres/query: SQL template must be a non-empty string"
@@ -146,52 +133,45 @@ fn __render_sql_template(template: string, values: dict) {
   if type_of(values) != "dict" {
     throw "std/postgres/query: SQL template values must be a dict"
   }
-  const template_chars = chars(template)
-  let idx = 0
-  let out = ""
+  let pieces = []
   let params = []
   let positions = {}
-  while idx < len(template_chars) {
-    const char = template_chars[idx]
-    if char == "{" {
-      if idx + 1 < len(template_chars) && template_chars[idx + 1] == "{" {
-        out = out + "{"
-        idx = idx + 2
-        continue
-      }
-      const end = __find_placeholder_end(template_chars, idx + 1)
-      if end < 0 {
+  for token in regex_match(__SQL_TEMPLATE_TOKEN, template) ?? [] {
+    let piece = token
+    if token == "{{" {
+      piece = "{"
+    } else if token == "}}" {
+      piece = "}"
+    } else if token == "}" {
+      throw "std/postgres/query: unmatched `}` in SQL template"
+    } else if token.starts_with("{") {
+      if token == "{" {
         throw "std/postgres/query: unclosed `{` in SQL template"
       }
-      const key = trim(join(template_chars[idx + 1:end], ""))
+      const key = trim(token[1:len(token) - 1])
       if key == "" {
         throw "std/postgres/query: empty SQL template placeholder"
       }
       if regex_match(__IDENTIFIER_PATTERN, key) == nil {
         throw "std/postgres/query: invalid SQL template placeholder `" + key + "`"
       }
-      if !contains(values.keys(), key) {
+      if !values.has(key) {
         throw "std/postgres/query: missing SQL template value `" + key + "`"
       }
-      const rendered = __render_placeholder(key, values[key], params, positions)
-      out = out + rendered.sql
-      params = rendered.params
-      positions = rendered.positions
-      idx = end + 1
-      continue
-    }
-    if char == "}" {
-      if idx + 1 < len(template_chars) && template_chars[idx + 1] == "}" {
-        out = out + "}"
-        idx = idx + 2
-        continue
+      const value = values[key]
+      if __is_sql_fragment(value) {
+        piece = __sql_fragment_text(value)
+      } else {
+        if positions[key] == nil {
+          params = params.appending(value)
+          positions[key] = len(params)
+        }
+        piece = "$" + to_string(positions[key])
       }
-      throw "std/postgres/query: unmatched `}` in SQL template"
     }
-    out = out + char
-    idx = idx + 1
+    pieces = pieces.appending(piece)
   }
-  return {sql: out, params: params}
+  return {sql: join(pieces, ""), params: params}
 }
 
 /**

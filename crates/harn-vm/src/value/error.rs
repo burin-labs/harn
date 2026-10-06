@@ -459,6 +459,7 @@ impl std::fmt::Display for SchemaStreamAbort {
 
 /// Error categories for structured error handling in agent orchestration.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum ErrorCategory {
     /// Network/connection timeout
     Timeout,

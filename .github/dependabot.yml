@@ -2,13 +2,14 @@ version: 2
 
 # This file is the source projected into repositories that use GitHub Actions.
 # Cooldown gives a compromised release time to be yanked or flagged before an
-# automated PR proposes it.
+# automated PR proposes it. Version updates run monthly so routine bumps arrive
+# as one grouped pull request a month; security updates ignore the schedule and
+# still arrive immediately.
 updates:
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
-      interval: "weekly"
-      day: "monday"
+      interval: "monthly"
       time: "09:00"
       timezone: "America/Los_Angeles"
     cooldown:

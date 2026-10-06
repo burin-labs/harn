@@ -1718,6 +1718,7 @@ public struct HarnAgentTerminalClass: RawRepresentable, Codable, Sendable, Hasha
     public static let agentLoopProtocolFailure = Self(rawValue: "agent_loop_protocol_failure")
     public static let parseDropped = Self(rawValue: "parse_dropped")
     public static let genericThrow = Self(rawValue: "generic_throw")
+    public static let managedSpendPaused = Self(rawValue: "managed_spend_paused")
 
     /// Every value this binding was generated from, in wire order. A value
     /// outside it is valid and preserved; it is simply not listed here.
@@ -1734,6 +1735,7 @@ public struct HarnAgentTerminalClass: RawRepresentable, Codable, Sendable, Hasha
         "agent_loop_protocol_failure",
         "parse_dropped",
         "generic_throw",
+        "managed_spend_paused",
     ].map { Self(rawValue: $0) }
 
     /// Whether this value is part of the vocabulary this binding was generated from.
@@ -1995,6 +1997,7 @@ public struct HarnLlmErrorReason: RawRepresentable, Codable, Sendable, Hashable,
     public static let outputBudgetExhausted = Self(rawValue: "output_budget_exhausted")
     public static let unknown = Self(rawValue: "unknown")
     public static let policyDenied = Self(rawValue: "policy_denied")
+    public static let managedSpendPaused = Self(rawValue: "managed_spend_paused")
 
     /// Every value this binding was generated from, in wire order. A value
     /// outside it is valid and preserved; it is simply not listed here.
@@ -2014,6 +2017,7 @@ public struct HarnLlmErrorReason: RawRepresentable, Codable, Sendable, Hashable,
         "output_budget_exhausted",
         "unknown",
         "policy_denied",
+        "managed_spend_paused",
     ].map { Self(rawValue: $0) }
 
     /// Whether this value is part of the vocabulary this binding was generated from.

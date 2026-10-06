@@ -199,13 +199,7 @@ fn timeout_expression(budgets: list<StepBudget>, owned_rung: bool = true) -> str
   // ceiling, cache-save reserve included.
   const hosted = to_string(hosted_ceiling_minutes(budgets))
   return producer_rung_expression(
-    {
-      owned: owned_rung ? to_string(owned_ceiling_minutes(budgets)) : "",
-      // A merge group runs the same archive and complete test suite. Its
-      // ceiling must contain those step budgets even when the runner is cold.
-      datacenter: owned_rung ? to_string(owned_ceiling_minutes(budgets)) : "",
-      hosted: hosted,
-    },
+    {owned: owned_rung ? to_string(owned_ceiling_minutes(budgets)) : "", hosted: hosted},
   )
 }
 
@@ -268,7 +262,7 @@ fn producer_job_ladder(job_name: string) -> string {
     return " the reserved ${RESERVED_CLI_PRODUCER_LABEL} runners on same-repository pull requests and merge groups,"
   }
   if producer_uses_owned_pool(job_name) {
-    return " the owned ${SELFHOSTED_LINUX_BIG_POOL} pool on same-repository pull requests, the ${DATACENTER_HOST_LABEL} runners on merge groups,"
+    return " the owned ${SELFHOSTED_LINUX_BIG_POOL} pool on same-repository pull requests,"
   }
   return ""
 }
@@ -478,8 +472,6 @@ fn persistent_compile_lane_errors(
   }
   if job_name == "rust-cli" {
     errors = errors + cli_producer_reservation_errors(workflow)
-  } else if producer_uses_owned_pool(job_name) {
-    errors = errors + merge_group_datacenter_errors(workflow)
   }
   if trim(job?.env?.[RUNNER_TIER_ENV] ?? "") != producer_job_tier_expression(job_name) {
     errors = errors
@@ -490,11 +482,9 @@ fn persistent_compile_lane_errors(
   }
   if trim(to_string(job?.["timeout-minutes"] ?? ""))
     != producer_job_timeout_expression(job_name, budgets) {
-    const datacenter =
-      job_name != "rust-cli" && producer_uses_owned_pool(job_name) ? ", the ${owned_ceiling_minutes(budgets)}-minute merge-group datacenter ceiling" : ""
     errors = errors
       + [
-        "ci.yml:${job_name} must keep the ${owned_ceiling_minutes(budgets)}-minute owned ceiling${datacenter} and the ${hosted_ceiling_minutes(budgets)}-minute hosted ceiling sized from its step budgets plus a cache-save reserve",
+        "ci.yml:${job_name} must keep the ${owned_ceiling_minutes(budgets)}-minute owned ceiling and the ${hosted_ceiling_minutes(budgets)}-minute hosted ceiling sized from its step budgets plus a cache-save reserve",
       ]
   }
   errors = errors + producer_step_budget_errors(job, job_name, budgets)
