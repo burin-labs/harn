@@ -32,10 +32,18 @@ pub fn prepare_entry_store(source_path: &Path, source: &str) -> super::LookupOut
 }
 
 /// Derive an entry interface and the graph capture that keeps it reusable.
+///
+/// A record stored by an earlier walk answers without parsing anything when
+/// its manifest proves the closure unchanged; otherwise the walk runs and its
+/// answer is stored for the next process.
 pub(crate) fn derive_interface(
     source_path: &Path,
     source: &str,
 ) -> Result<(ModuleCompilationContext, Option<ContextManifest>), VmError> {
+    let slot = super::InterfaceSlot::open(source_path, source);
+    if let Some((context, manifest)) = slot.as_ref().and_then(super::InterfaceSlot::recall) {
+        return Ok((context, Some(manifest)));
+    }
     let result = super::walk_import_graph_fingerprinted(
         source_path,
         source,
@@ -46,6 +54,9 @@ pub(crate) fn derive_interface(
         Some(context) => {
             #[cfg(test)]
             crate::module_artifact::INTERFACE_RESOLUTIONS.with(|count| count.set(count.get() + 1));
+            if let (Some(slot), Some(manifest)) = (&slot, &result.manifest) {
+                slot.store(&context, manifest);
+            }
             context
         }
         None => crate::module_artifact::module_compilation_context_for_source(source_path, source)?,
