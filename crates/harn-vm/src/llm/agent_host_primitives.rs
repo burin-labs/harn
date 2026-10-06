@@ -844,8 +844,41 @@ pub(super) async fn host_agent_dispatch_tool_call(
     let dispatch_policy =
         DispatchPolicy::new(policy_machinery_active, dispatch_annotations.as_ref());
 
+    let prepared_invocation = match crate::orchestration::scope_agent_session(
+        session_id.clone(),
+        crate::agent_sessions::scope_current_tool_call(
+            tool_id.clone(),
+            super::agent_tool_preparation::prepare(&ctx, tools, &tool_name, &tool_args),
+        ),
+    )
+    .await
+    {
+        Ok(prepared) => prepared,
+        Err(error) => {
+            let denied = agent_primitive_denied_tool(
+                &tool_name,
+                &tool_id,
+                &tool_args,
+                error.to_string(),
+                crate::agent_events::ToolCallErrorCategory::PermissionDenied,
+                None,
+                None,
+            );
+            return Ok(json_to_vm_value(&denied));
+        }
+    };
+    // These are observations for consent, not model arguments. The handler
+    // keeps the separately retained binding and never consumes a host rewrite.
+    let approval_args = prepared_invocation
+        .as_ref()
+        .map(|bound| bound.operation().clone());
+
     let mut approval_status = None;
-    if let Err(policy_denial) = dispatch_policy.enforce(&tool_name, &tool_args, None) {
+    if let Err(policy_denial) = dispatch_policy.enforce(
+        &tool_name,
+        approval_args.as_ref().unwrap_or(&tool_args),
+        None,
+    ) {
         if let Some(violation) = policy_denial.side_effect_ceiling {
             // A side-effect ceiling is the one static policy refusal that can
             // offer an explicit, dispatch-local ACP approval. The grant below
@@ -862,7 +895,7 @@ pub(super) async fn host_agent_dispatch_tool_call(
                     session_id: &session_id,
                     tool_call_id: &tool_id,
                     tool_name: &tool_name,
-                    tool_args: &tool_args,
+                    tool_args: approval_args.as_ref().unwrap_or(&tool_args),
                     violation,
                     reason: policy_denial.reason.clone(),
                     tool_context: permission_context_for(tools, &tool_name),
@@ -964,9 +997,13 @@ pub(super) async fn host_agent_dispatch_tool_call(
     // tool-result path. Fail-open: no precheck (or an unreadable verdict)
     // leaves dispatch byte-identical.
     if crate::orchestration::tool_precheck_active() {
-        if let Some(precheck_denial) =
-            crate::orchestration::run_tool_precheck(Some(&ctx), &tool_name, &tool_args, &session_id)
-                .await?
+        if let Some(precheck_denial) = crate::orchestration::run_tool_precheck(
+            Some(&ctx),
+            &tool_name,
+            approval_args.as_ref().unwrap_or(&tool_args),
+            &session_id,
+        )
+        .await?
         {
             let denial = crate::orchestration::precheck_tool_denial(precheck_denial);
             return Ok(deny_tool_call_value(
@@ -999,7 +1036,7 @@ pub(super) async fn host_agent_dispatch_tool_call(
             Some(&ctx),
             &mut permission_grants,
             &tool_name,
-            &tool_args,
+            approval_args.as_ref().unwrap_or(&tool_args),
             &session_id,
         ))
         .await?;
@@ -1083,9 +1120,13 @@ pub(super) async fn host_agent_dispatch_tool_call(
         let repeat_count = crate::orchestration::next_approval_policy_repeat_count(
             &session_id,
             &tool_name,
-            &tool_args,
+            approval_args.as_ref().unwrap_or(&tool_args),
         );
-        policy.evaluate_detailed_with_repeat(&tool_name, &tool_args, repeat_count)
+        policy.evaluate_detailed_with_repeat(
+            &tool_name,
+            approval_args.as_ref().unwrap_or(&tool_args),
+            repeat_count,
+        )
     });
     // Lethal-trifecta gate (Layer 1): once untrusted content has entered the
     // session's context, upgrade an auto-allow to an interactive confirmation
@@ -1105,7 +1146,7 @@ pub(super) async fn host_agent_dispatch_tool_call(
                             &security_policy,
                             annotations.as_ref(),
                             &tool_name,
-                            &tool_args,
+                            approval_args.as_ref().unwrap_or(&tool_args),
                             &taint,
                         ) {
                             let extra: &[&str] = if outcome.injection_flagged {
@@ -1128,7 +1169,7 @@ pub(super) async fn host_agent_dispatch_tool_call(
         Some(&ctx),
         approval.as_mut(),
         &tool_name,
-        &tool_args,
+        approval_args.as_ref().unwrap_or(&tool_args),
         &session_id,
     )
     .await
@@ -1179,7 +1220,7 @@ pub(super) async fn host_agent_dispatch_tool_call(
                 session_id: session_id.clone(),
                 tool_call_id: approval_id.clone(),
                 tool_name: tool_name.clone(),
-                tool_args: tool_args.clone(),
+                tool_args: approval_args.as_ref().unwrap_or(&tool_args).clone(),
                 policy_decision: decision.receipt.clone(),
                 request_context: serde_json::json!({"policy_decision": decision.receipt.clone()}),
                 requested_capabilities: vec![format!("tool.{tool_name}")],
@@ -1471,6 +1512,7 @@ pub(super) async fn host_agent_dispatch_tool_call(
             bridge: bridge.as_ref(),
             tool_retries,
             tool_backoff_ms,
+            prepared_invocation,
         },
     );
     let (outcome, preempted_by_cancel) = match cancel_handle.as_ref() {

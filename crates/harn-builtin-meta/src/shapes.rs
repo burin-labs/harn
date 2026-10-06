@@ -677,9 +677,9 @@ pub const SCHEMA_RECOVER_ENVELOPE: Ty = Ty::Shape(&[
 ///
 /// Keep this aligned with `ToolDefinitionConfig` in `std/tools`.
 pub const TOOL_DEFINE_CONFIG: Ty = Ty::OpenShape(
-    &[ShapeFieldDescriptor::optional(
-        "handler",
-        Ty::Fn(&[TY_DICT], &TY_ANY),
-    )],
+    &[
+        ShapeFieldDescriptor::optional("handler", Ty::Fn(&[TY_DICT], &TY_ANY)),
+        ShapeFieldDescriptor::optional("prepare", Ty::Fn(&[TY_DICT], &TY_DICT)),
+    ],
     &[TY_DICT],
 );

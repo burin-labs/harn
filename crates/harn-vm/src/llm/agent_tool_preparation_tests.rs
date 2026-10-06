@@ -1,0 +1,242 @@
+//! Reach the canonical consent dispatcher and actual prepared process effect.
+
+use std::collections::HashMap;
+use std::sync::{atomic::AtomicBool, Arc, Mutex as StdMutex};
+
+use serde_json::{json, Value};
+use tokio::sync::Mutex;
+
+use crate::bridge::HostBridge;
+use crate::value::VmValue;
+
+struct BridgeGuard(Option<Arc<HostBridge>>);
+impl Drop for BridgeGuard {
+    fn drop(&mut self) {
+        crate::llm::swap_current_host_bridge(self.0.take());
+    }
+}
+
+struct Fixture {
+    _directory: tempfile::TempDir,
+    root: std::path::PathBuf,
+    other: std::path::PathBuf,
+    facts_path: std::path::PathBuf,
+    facts: Value,
+}
+
+impl Fixture {
+    fn new() -> Self {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path().join("approved");
+        let other = directory.path().join("replacement");
+        std::fs::create_dir(&root).unwrap();
+        std::fs::create_dir(&other).unwrap();
+        let facts_path = directory.path().join("current-verifier.json");
+        let facts = json!({"operation": {"command": "printf verified > reached; pwd", "cwd": root}, "goal": "original"});
+        std::fs::write(&facts_path, serde_json::to_vec(&facts).unwrap()).unwrap();
+        Self {
+            _directory: directory,
+            root,
+            other,
+            facts_path,
+            facts,
+        }
+    }
+
+    async fn registry(&self, preparing_effect: bool) -> (crate::vm::AsyncBuiltinCtx, VmValue) {
+        let path = serde_json::to_string(&self.facts_path).unwrap();
+        let preparation = if preparing_effect {
+            format!("harness.process.run({{program: \"sh\", args: [\"-c\", \"touch reached\"], cwd: {}}})", serde_json::to_string(&self.root).unwrap())
+        } else {
+            format!("json_parse(harness.fs.read_text({path}))")
+        };
+        let source = format!(
+            r#"
+fn main(harness: Harness) {{
+  return tool_define(tool_registry(), "verify", "Verify the active task", {{
+    input_schema: {{type: "object", properties: {{reason: {{type: "string"}}}}, additionalProperties: false}},
+    returns: {{type: "object"}},
+    prepare: {{ args -> return {preparation} }},
+    handler: {{ args ->
+      const binding = tool_invocation_binding()
+      const operation = binding.operation
+      const result = harness.process.run({{program: "sh", args: ["-c", operation.command], cwd: operation.cwd}})
+      return {{schema: "harn.agent_tool_handler_result.v2", outcome: "ok", text: result.stdout,
+        data: {{command: operation.command, cwd: operation.cwd, success: result.success}}}}
+    }},
+  }})
+}}
+"#
+        );
+        let chunk = crate::compile_source(&source).expect("compile preparation fixture");
+        let mut vm = crate::Vm::new();
+        crate::register_vm_stdlib(&mut vm);
+        vm.set_harness(crate::Harness::real());
+        let registry = vm.execute(&chunk).await.expect("register prepared tool");
+        (crate::vm::AsyncBuiltinCtx::for_test(vm), registry)
+    }
+
+    fn no_effect(&self) {
+        assert!(!self.root.join("reached").exists());
+        assert!(!self.other.join("reached").exists());
+    }
+}
+
+async fn dispatch(
+    fixture: &Fixture,
+    response: Value,
+    replacement: Option<Value>,
+    arguments: Value,
+    preparing_effect: bool,
+) -> (Value, Vec<Value>) {
+    crate::reset_thread_local_state();
+    let (ctx, registry) = fixture.registry(preparing_effect).await;
+    let captured = Arc::new(StdMutex::new(Vec::new()));
+    let observed = captured.clone();
+    let pending = Arc::new(Mutex::new(HashMap::<
+        u64,
+        tokio::sync::oneshot::Sender<Value>,
+    >::new()));
+    let response_pending = pending.clone();
+    let facts_path = fixture.facts_path.clone();
+    let writer = Arc::new(move |line: &str| {
+        let request: Value = serde_json::from_str(line).map_err(|error| error.to_string())?;
+        observed.lock().unwrap().push(request.clone());
+        assert_eq!(request["method"], "session/request_permission");
+        if let Some(replacement) = &replacement {
+            std::fs::write(&facts_path, serde_json::to_vec(replacement).unwrap()).unwrap();
+        }
+        let id = request["id"].as_u64().unwrap();
+        response_pending
+            .try_lock()
+            .unwrap()
+            .remove(&id)
+            .unwrap()
+            .send(json!({"jsonrpc": "2.0", "id": id, "result": response}))
+            .map_err(|_| "permission caller dropped".to_string())
+    });
+    let bridge = Arc::new(HostBridge::from_parts_with_writer(
+        pending,
+        Arc::new(AtomicBool::new(false)),
+        writer,
+        1,
+    ));
+    let _bridge = BridgeGuard(crate::llm::swap_current_host_bridge(Some(bridge)));
+    let policy = serde_json::from_value(
+        json!({"rules": [{"ask": {"tool": "verify"}, "reason": "verify requires consent"}]}),
+    )
+    .unwrap();
+    let call = crate::stdlib::json_to_vm_value(
+        &json!({"name": "verify", "id": "prepared-verify", "arguments": arguments}),
+    );
+    let outcome = crate::orchestration::scope_approval_policy(
+        policy,
+        super::super::agent_host_primitives::host_agent_dispatch_tool_call(
+            ctx,
+            call,
+            Some(&registry),
+            &crate::value::DictMap::new(),
+        ),
+    )
+    .await
+    .expect("dispatch returns a tool outcome");
+    let requests = captured.lock().unwrap().clone();
+    (crate::llm::vm_value_to_json(&outcome), requests)
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn prepared_verify_consent_matches_the_actual_process_command_and_root() {
+    let fixture = Fixture::new();
+    let (outcome, requests) = dispatch(
+        &fixture,
+        crate::llm::acp_permission::allow_response(),
+        None,
+        json!({}),
+        false,
+    )
+    .await;
+    assert_eq!(requests.len(), 1);
+    assert_eq!(
+        requests[0]["params"]["toolCall"]["rawInput"],
+        fixture.facts["operation"]
+    );
+    assert_eq!(outcome["ok"], true, "{outcome}");
+    assert_eq!(
+        std::fs::read_to_string(fixture.root.join("reached")).unwrap(),
+        "verified"
+    );
+    assert!(!fixture.other.join("reached").exists());
+    assert!(outcome["rendered_result"]
+        .as_str()
+        .unwrap()
+        .contains(fixture.root.to_str().unwrap()));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn prepared_verify_refusal_runs_no_process() {
+    let fixture = Fixture::new();
+    let (outcome, requests) = dispatch(
+        &fixture,
+        crate::llm::acp_permission::reject_response(Some("declined".into())),
+        None,
+        json!({}),
+        false,
+    )
+    .await;
+    assert_eq!(requests.len(), 1);
+    assert_eq!(outcome["ok"], false);
+    fixture.no_effect();
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn prepared_verify_rejects_changed_goal_command_or_root_after_consent() {
+    for key in ["goal", "command", "cwd"] {
+        let fixture = Fixture::new();
+        let mut changed = fixture.facts.clone();
+        match key {
+            "goal" => changed["goal"] = json!("replacement"),
+            "command" => changed["operation"]["command"] = json!("touch reached"),
+            _ => changed["operation"]["cwd"] = json!(fixture.other),
+        }
+        let (outcome, requests) = dispatch(
+            &fixture,
+            crate::llm::acp_permission::allow_response(),
+            Some(changed),
+            json!({}),
+            false,
+        )
+        .await;
+        assert_eq!(requests.len(), 1);
+        assert_eq!(
+            requests[0]["params"]["toolCall"]["rawInput"],
+            fixture.facts["operation"]
+        );
+        assert_eq!(outcome["ok"], false, "{key}: {outcome}");
+        fixture.no_effect();
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn prepared_verify_refuses_model_execution_facts_and_preparation_effects() {
+    for (arguments, preparing_effect) in [
+        (json!({"command": "touch reached"}), false),
+        (json!({"cwd": "/"}), false),
+        (json!({}), true),
+    ] {
+        let fixture = Fixture::new();
+        let (outcome, requests) = dispatch(
+            &fixture,
+            crate::llm::acp_permission::allow_response(),
+            None,
+            arguments,
+            preparing_effect,
+        )
+        .await;
+        assert!(
+            requests.is_empty(),
+            "refusal must precede consent: {requests:?}"
+        );
+        assert_eq!(outcome["ok"], false);
+        fixture.no_effect();
+    }
+}

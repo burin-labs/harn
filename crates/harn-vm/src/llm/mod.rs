@@ -38,6 +38,7 @@ pub(crate) mod assistant_publication;
 pub(crate) use agent_terminal_class::session_status_indicates_error;
 pub use agent_terminal_class::{agent_terminal_class, AgentTerminalClass};
 mod agent_tool_governance;
+pub(crate) mod agent_tool_preparation;
 mod agent_tools;
 pub use agent_tools::handler_result::AGENT_TOOL_HANDLER_RESULT_SCHEMA;
 pub(crate) mod admission;

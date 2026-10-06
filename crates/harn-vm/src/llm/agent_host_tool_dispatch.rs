@@ -16,6 +16,8 @@ pub(super) struct ToolDispatchRequest<'a> {
     pub(super) bridge: Option<&'a std::sync::Arc<crate::bridge::HostBridge>>,
     pub(super) tool_retries: usize,
     pub(super) tool_backoff_ms: u64,
+    pub(super) prepared_invocation:
+        Option<std::sync::Arc<super::agent_tool_preparation::PreparedInvocation>>,
 }
 
 /// Build the session- and tool-call-scoped dispatch future on its own frame.
@@ -39,15 +41,18 @@ pub(super) fn pin_scoped_tool_dispatch<'a>(
     Box::pin(crate::orchestration::scope_agent_session(
         session_id,
         crate::agent_sessions::scope_current_tool_call(tool_id, async move {
-            agent_tools::dispatch_tool_execution_with_mcp(
-                Some(request.ctx),
-                request.tool_name,
-                request.tool_args,
-                request.tools,
-                request.mcp_clients,
-                request.bridge,
-                request.tool_retries,
-                request.tool_backoff_ms,
+            super::agent_tool_preparation::scope(
+                request.prepared_invocation,
+                agent_tools::dispatch_tool_execution_with_mcp(
+                    Some(request.ctx),
+                    request.tool_name,
+                    request.tool_args,
+                    request.tools,
+                    request.mcp_clients,
+                    request.bridge,
+                    request.tool_retries,
+                    request.tool_backoff_ms,
+                ),
             )
             .await
         }),

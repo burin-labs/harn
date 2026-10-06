@@ -122,6 +122,16 @@ pub(crate) fn register_tool_builtins(vm: &mut Vm) {
 }
 
 #[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "tool_invocation_binding() -> dict?",
+    category = "tools"
+)]
+fn tool_invocation_binding_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    Ok(crate::llm::agent_tool_preparation::current_binding())
+}
+
+#[harn_builtin(
     exposure = "harness.tools.synthesize",
     effects = ["state.write@dynamic"],
     sig = "tool_synthesize(spec: dict) -> closure", category = "tools"
@@ -520,6 +530,12 @@ fn tool_define_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
 
     let handler = config.get("handler").cloned().unwrap_or(VmValue::Nil);
     let has_handler = !matches!(handler, VmValue::Nil);
+    let prepare = config.get("prepare").cloned().unwrap_or(VmValue::Nil);
+    if !matches!(prepare, VmValue::Nil | VmValue::Closure(_)) {
+        return Err(VmError::Runtime(
+            "tool_define: prepare must be a callable closure".into(),
+        ));
+    }
 
     if config.contains_key("params") && !config.contains_key("parameters") {
         return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
@@ -586,6 +602,11 @@ fn tool_define_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
     // - `"provider_native"` forbids `handler` (the model returns
     //   the already-executed result inline).
     let host_capability = config.get("host_capability");
+    if !matches!(prepare, VmValue::Nil) && resolved_executor != "harn" {
+        return Err(VmError::Runtime(
+            "tool_define: prepare requires a Harn handler".into(),
+        ));
+    }
     let mcp_server = config.get("mcp_server");
     match resolved_executor {
         "harn" => {
@@ -723,6 +744,9 @@ fn tool_define_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
     tool_entry.put_str("name", name.as_str());
     tool_entry.put_str("description", description);
     tool_entry.insert(crate::value::intern_key("handler"), handler);
+    if !matches!(prepare, VmValue::Nil) {
+        tool_entry.insert(crate::value::intern_key("prepare"), prepare);
+    }
     input_schema::insert_resolved_schema(&mut tool_entry, declared_schema);
     // Store the canonical executor as a plain string; wire
     // serialization is handled by the ACP adapter.
@@ -1047,6 +1071,7 @@ fn tool_def_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError
 }
 
 pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
+    &TOOL_INVOCATION_BINDING_IMPL_DEF,
     &TOOL_SYNTHESIZE_IMPL_DEF,
     &TOOL_SYNTH_INVOKE_IMPL_DEF,
     &TOOL_SYNTHESIS_CACHE_IMPL_DEF,

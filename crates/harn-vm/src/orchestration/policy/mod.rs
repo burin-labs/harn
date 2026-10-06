@@ -387,6 +387,10 @@ pub fn tool_declared_path_entries(
 }
 
 pub fn enforce_current_policy_for_builtin(name: &str, args: &[VmValue]) -> Result<(), VmError> {
+    crate::llm::agent_tool_preparation::enforce_contract(
+        name,
+        crate::stdlib::builtin_manifest_entry(name).map(|entry| &entry.contract),
+    )?;
     let Some(policy) = current_execution_policy() else {
         return Ok(());
     };
@@ -647,6 +651,11 @@ pub fn enforce_current_policy_for_capability(
     method: &str,
     args: &[VmValue],
 ) -> Result<(), VmError> {
+    crate::llm::agent_tool_preparation::enforce_contract(
+        method,
+        crate::stdlib::capability_method_manifest_entry(capability, method)
+            .map(|entry| &entry.contract),
+    )?;
     // Manifest/lifecycle VM hooks install `allow_trusted_bridge_calls` for the
     // duration of the handler. That guard already exempts bridged builtins;
     // Harness methods must honor the same depth, or a PreToolUse handler that
@@ -679,6 +688,7 @@ pub fn enforce_current_policy_for_capability(
 }
 
 pub fn enforce_current_policy_for_bridge_builtin(name: &str) -> Result<(), VmError> {
+    crate::llm::agent_tool_preparation::enforce_contract(name, None)?;
     if trusted_bridge_call_is_active() {
         return Ok(());
     }
