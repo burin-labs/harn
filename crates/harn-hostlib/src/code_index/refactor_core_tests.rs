@@ -206,3 +206,31 @@ fn calls_inside_string_interpolations_are_reference_sites() {
          src/main.ts:2:31 call | sum(1)\n"
     );
 }
+
+#[test]
+fn python_line_breaks_outside_brackets_do_not_parse() {
+    // tree-sitter-python reads this as `b = a + print(b)` without an error.
+    let broken = "def f(a):\n    b = a +\n    print(b)\n";
+    assert_eq!(
+        first_syntax_error(broken, Language::Python).as_deref(),
+        Some("line 2 ends inside a statement without brackets or `\\`")
+    );
+    let header = "if a and\n        b:\n    pass\n";
+    assert!(first_syntax_error(header, Language::Python).is_some());
+    // Every legal way to continue a line.
+    let valid = "import os\n\
+                 from os import (\n    path,\n    sep,\n)\n\
+                 \n\
+                 \n\
+                 @staticmethod\n\
+                 def f(a,\n      b):\n\
+                 \x20   total = (a +\n             b)\n\
+                 \x20   more = a + \\\n        b\n\
+                 \x20   text = \"\"\"one\ntwo\"\"\"\n\
+                 \x20   items = [\n        a,  # first\n        b,\n    ]\n\
+                 \x20   if a:\n        return total\n    else:\n        return more, text, items\n\
+                 \n\
+                 \n\
+                 class C(\n    object,\n):\n    x = {\"k\": 1,\n         \"j\": 2}\n";
+    assert_eq!(first_syntax_error(valid, Language::Python), None);
+}

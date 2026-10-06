@@ -449,12 +449,16 @@ pub(super) fn parse_gate(path: &str, source: &str, language: Language) -> Result
 }
 
 /// The first reason `source` is not valid `language`: a tree-sitter
-/// ERROR/MISSING node, or a construct in [`rejected_kinds`].
+/// ERROR/MISSING node, a construct in [`rejected_kinds`], or a line break
+/// the language rejects ([`python_continuation_error`]).
 pub(super) fn first_syntax_error(source: &str, language: Language) -> Option<String> {
     let tree = ast_api::parse_tree(source, language).ok()?;
     let root = tree.root_node();
     if !root.has_error() {
-        return first_rejected_node(root, language);
+        return first_rejected_node(root, language).or_else(|| match language {
+            Language::Python => python_continuation_error(root, source),
+            _ => None,
+        });
     }
     let mut stack = vec![root];
     while let Some(node) = stack.pop() {
@@ -483,6 +487,70 @@ pub(super) fn first_syntax_error(source: &str, language: Language) -> Option<Str
         }
     }
     Some("the source has parse errors".into())
+}
+
+/// A statement broken across lines outside brackets and without a trailing
+/// `\`. tree-sitter-python joins the lines (`b = a +` then `print(b)` parses
+/// as `b = a + print(b)`); Python rejects the break.
+fn python_continuation_error(root: Node<'_>, source: &str) -> Option<String> {
+    let mut stack = vec![root];
+    while let Some(node) = stack.pop() {
+        let mut cursor = node.walk();
+        for child in node.named_children(&mut cursor) {
+            stack.push(child);
+            let statement = match node.kind() {
+                "module" | "block" => !matches!(child.kind(), "decorated_definition" | "comment"),
+                // Decorators sit on their own lines; check the definition.
+                "decorated_definition" => child.kind() != "decorator",
+                _ => false,
+            };
+            if !statement {
+                continue;
+            }
+            let mut tokens = Vec::new();
+            logical_line_tokens(child, &mut tokens);
+            let mut depth = 0usize;
+            let mut previous: Option<Node<'_>> = None;
+            for token in tokens {
+                // A comment outside brackets ends the logical line.
+                if token.kind() == "comment" && depth == 0 {
+                    break;
+                }
+                if let Some(prev) = previous {
+                    let gap = source
+                        .get(prev.end_byte()..token.start_byte())
+                        .unwrap_or("");
+                    if depth == 0 && gap.contains('\n') && !gap.trim_start().starts_with('\\') {
+                        let line = prev.end_position().row + 1;
+                        return Some(format!(
+                            "line {line} ends inside a statement without brackets or `\\`"
+                        ));
+                    }
+                }
+                match token.kind() {
+                    "(" | "[" | "{" => depth += 1,
+                    ")" | "]" | "}" => depth = depth.saturating_sub(1),
+                    _ => {}
+                }
+                previous = Some(token);
+            }
+        }
+    }
+    None
+}
+
+/// The tokens of a statement's own logical line: every leaf, strings as one
+/// token, stopping at the body of a compound statement.
+fn logical_line_tokens<'t>(node: Node<'t>, out: &mut Vec<Node<'t>>) {
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        match child.kind() {
+            "block" => return,
+            "string" | "concatenated_string" => out.push(child),
+            _ if child.child_count() == 0 => out.push(child),
+            _ => logical_line_tokens(child, out),
+        }
+    }
 }
 
 fn first_rejected_node(root: Node<'_>, language: Language) -> Option<String> {

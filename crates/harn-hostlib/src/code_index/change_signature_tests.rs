@@ -923,3 +923,22 @@ fn input_that_does_not_parse_refuses_before_planning() {
         "{details}"
     );
 }
+
+#[test]
+fn a_statement_broken_across_lines_refuses_before_planning() {
+    let ws = Workspace::new(&[("broken.py", "def f(a):\n    b = a +\n    print(b)\n")]);
+    let result = ws.refuse(
+        "syntax_error",
+        "f",
+        "broken.py",
+        &[
+            &[("name", "a"), ("from", "a")],
+            &[("name", "z"), ("default", "0")],
+        ],
+    );
+    let details = text(field(&result, "details"));
+    assert!(
+        details.contains("`broken.py` does not parse before the edit"),
+        "{details}"
+    );
+}
