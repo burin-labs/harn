@@ -134,3 +134,35 @@ async fn saved_reply_rejects_withheld_stale_and_malformed_receipts() {
         assert_eq!(view.transcript.message_count, 0);
     }
 }
+
+#[tokio::test]
+async fn saved_reply_does_not_publish_compaction_replacement_under_an_old_event() {
+    let store = MemorySessionStore::default();
+    let id = store.create(CreateSession::default()).await.unwrap().id;
+    store
+        .append(&id, message("draft", &draft("Original draft")))
+        .await
+        .unwrap();
+    let replacement = draft("Replacement draft");
+    store
+        .append(
+            &id,
+            AppendEvent::new(
+                SessionEventKind::Compaction,
+                json!({
+                    "messages":[replacement.clone()], "source_event_ids":["draft"],
+                }),
+            ),
+        )
+        .await
+        .unwrap();
+    store
+        .append(&id, settlement(&[replacement], true))
+        .await
+        .unwrap();
+    // The receipt is valid for the replacement, but not the original event.
+    let run = project_run_record_from_session(&store, &id).await.unwrap();
+    let view = crate::orchestration::records::build_run_view(&run);
+    assert_eq!(view.visible_text, None);
+    assert_eq!(view.transcript.message_count, 0);
+}
