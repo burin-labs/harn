@@ -70,6 +70,7 @@ struct Fixture {
     facts_path: std::path::PathBuf,
     facts: Value,
     policy: Option<crate::orchestration::CapabilityPolicy>,
+    approval_policy: Option<crate::orchestration::ToolApprovalPolicy>,
 }
 
 impl Fixture {
@@ -89,6 +90,7 @@ impl Fixture {
             facts_path,
             facts,
             policy: None,
+            approval_policy: None,
         }
     }
 
@@ -175,10 +177,12 @@ async fn dispatch(
         1,
     ));
     let _bridge = BridgeGuard(crate::llm::swap_current_host_bridge(Some(bridge)));
-    let policy = serde_json::from_value(
-        json!({"rules": [{"ask": {"tool": "verify"}, "reason": "verify requires consent"}]}),
-    )
-    .unwrap();
+    let policy = fixture.approval_policy.clone().unwrap_or_else(|| {
+        serde_json::from_value(
+            json!({"rules": [{"ask": {"tool": "verify"}, "reason": "verify requires consent"}]}),
+        )
+        .unwrap()
+    });
     let call = crate::stdlib::json_to_vm_value(
         &json!({"name": "verify", "id": "prepared-verify", "arguments": arguments}),
     );
@@ -227,6 +231,34 @@ async fn prepared_verify_consent_matches_the_actual_process_command_and_root() {
         .as_str()
         .unwrap()
         .contains(fixture.root.to_str().unwrap()));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn prepared_verify_policy_matches_retained_command_before_requesting_consent() {
+    let mut fixture = Fixture::new();
+    fixture.approval_policy = Some(
+        serde_json::from_value(json!({"rules": [
+            {"id": "refuse-prepared-command", "deny": {
+                "tool": "verify", "command": fixture.facts["operation"]["command"]
+            }},
+            {"ask": {"tool": "verify"}}
+        ]}))
+        .unwrap(),
+    );
+    let (outcome, requests) = dispatch(
+        &fixture,
+        crate::llm::acp_permission::allow_response(),
+        None,
+        json!({}),
+        false,
+    )
+    .await;
+    assert_eq!(outcome["ok"], false, "{outcome}");
+    assert!(
+        requests.is_empty(),
+        "command refusal must precede consent: {outcome}"
+    );
+    fixture.no_effect();
 }
 
 #[tokio::test(flavor = "current_thread")]

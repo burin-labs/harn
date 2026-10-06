@@ -707,8 +707,14 @@ category = "thread_private"
 plan = "thread_private_test"
 
 [[thread_local]]
+path = "src/orchestration/execution_context.rs"
+statics = ["VM_EXECUTION_CONTEXT"]
+category = "logical_task"
+plan = "task_local_or_explicit"
+
+[[thread_local]]
 path = "src/stdlib/process.rs"
-statics = ["VM_SOURCE_DIR", "VM_EXECUTION_CONTEXT", "SESSION_ENVIRONMENT_CONTEXT"]
+statics = ["VM_SOURCE_DIR", "SESSION_ENVIRONMENT_CONTEXT"]
 category = "logical_task"
 plan = "task_local_or_explicit"
 

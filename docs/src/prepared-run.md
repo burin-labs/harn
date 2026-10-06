@@ -30,6 +30,13 @@ only `AuthorityUse`; it calls `authorize` with the exact typed requirement
 immediately before each material operation. Dispatch repeats the canonical
 evaluation and rejects any requirement not fingerprinted into the lease.
 
+Requested filesystem and process roots are authority to acquire, not concrete
+file effects in an existing workspace. Their policy evaluation retains authored
+path constraints and sensitive-path refusals, without treating the requested
+root as an existing workspace grant. Host ceilings, the exact approval batch,
+and the approved lease still control admission. Concrete tool dispatch uses its
+explicit workspace boundary and cannot use this internal acquisition interface.
+
 `PreparedRunExecutor` has separate `Output` and `Error` associated types.
 `ExecutionOutcome::ExecutorFailed` returns the concrete executor error beside
 the terminal authority receipt, so hosts can retain structured partial-run

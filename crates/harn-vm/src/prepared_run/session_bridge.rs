@@ -34,7 +34,7 @@ pub async fn request_session_approval(
         serde_json::json!({"summary": summary, "risk": "prepared_run", "approval_batch": batch}),
         &serde_json::json!({"action": "ask", "reason": "prepared session requires grouped approval"}),
         None,
-        crate::tool_annotations::ToolKind::Other,
+        None,
     );
     let response = bridge
         .call(METHOD_REQUEST_PERMISSION, params)
@@ -68,10 +68,14 @@ mod tests {
             let request: serde_json::Value = serde_json::from_str(line).unwrap();
             assert_eq!(request["method"], METHOD_REQUEST_PERMISSION);
             assert_eq!(request["params"]["sessionId"], "session-1");
+            assert_eq!(request["params"]["toolCall"]["kind"], "other");
             assert_eq!(
-                request["params"]["toolCall"]["rawInput"]["batch_fingerprint"],
-                "batch-1"
+                request["params"]["toolCall"]["rawInput"],
+                serde_json::to_value(batch()).unwrap()
             );
+            assert!(request["params"]["toolCall"]["_meta"]["harn"]
+                .get("toolAnnotations")
+                .is_none());
             assert_eq!(request["params"]["options"][0]["optionId"], "allow");
             calls.fetch_add(1, Ordering::SeqCst);
             let id = request["id"].as_u64().unwrap();
@@ -117,6 +121,17 @@ mod tests {
                 serde_json::json!({"outcome":{"outcome":"selected","optionId":"reject"}}),
                 false,
             ),
+            (
+                serde_json::json!({"outcome":{"outcome":"cancelled"}}),
+                false,
+            ),
+            (
+                serde_json::json!({
+                    "outcome":{"outcome":"selected","optionId":"allow"},
+                    "_meta":{"harn":{"permissionDecision":{}}}
+                }),
+                false,
+            ),
             (serde_json::json!({}), false),
             (serde_json::json!({"outcome":"approved"}), false),
             (
@@ -139,9 +154,11 @@ mod tests {
     async fn another_session_cannot_use_the_approval_bridge() {
         let calls = Arc::new(AtomicUsize::new(0));
         let bridge = responding_bridge(serde_json::json!({}), calls.clone());
-        assert!(request_session_approval(&bridge, "other-session", &batch())
-            .await
-            .is_err());
+        for session_id in ["other-session", ""] {
+            assert!(request_session_approval(&bridge, session_id, &batch())
+                .await
+                .is_err());
+        }
         assert_eq!(calls.load(Ordering::SeqCst), 0);
     }
 }

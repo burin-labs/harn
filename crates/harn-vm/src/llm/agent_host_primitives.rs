@@ -12,6 +12,7 @@ use super::{
 };
 
 mod denial_results;
+mod dispatch_approval;
 mod dispatch_policy;
 pub(super) mod event_capture;
 mod host_permission;
@@ -22,8 +23,10 @@ mod structured_tool_result;
 mod tool_catalog;
 mod tool_parse_diagnostics;
 use denial_results::{
-    agent_primitive_denied_tool, deny_tool_call, deny_tool_call_value, DenialEvidence,
+    agent_primitive_denied_tool, deny_tool_call, deny_tool_call_value,
+    schema_validation_tool_result, DenialEvidence,
 };
+use dispatch_approval::DispatchApproval;
 use dispatch_policy::{tool_denial_from_policy, DispatchPolicy};
 use host_permission::{
     emit_permission_event, emit_permission_event_with_policy, emit_runtime_denied_activity,
@@ -41,7 +44,6 @@ use side_effect_ceiling::{
 };
 use tool_catalog::{
     annotations_for as tool_annotations_for, descriptor_for as tool_descriptor_for,
-    permission_context_for,
 };
 use tool_parse_diagnostics::parse_error_carrier_feedback;
 
@@ -770,7 +772,6 @@ pub(super) async fn host_agent_dispatch_tool_call(
         .unwrap_or(1000)
         .max(1) as u64;
     let bridge = current_host_bridge();
-    let dispatch_annotations = tool_annotations_for(tools, &tool_name);
     // Happy-path fast path: when NO policy/permission machinery is
     // configured, the three blocks below — session policy guard install,
     // execution-policy enforcement, and the dynamic-permission check — are
@@ -795,6 +796,25 @@ pub(super) async fn host_agent_dispatch_tool_call(
     } else {
         None
     };
+    let dispatch_annotations = tool_annotations_for(tools, &tool_name);
+    // Install typed session context before resolving catalog/ambient path
+    // annotations, but refuse malformed paths before any policy callback or
+    // permission prompt. Full schema validation stays after hooks and routing.
+    if let Err(message) = crate::tool_annotations::path_inputs::validate_arguments(
+        &tool_args,
+        dispatch_annotations.as_ref(),
+    ) {
+        let stop_reason = agent_primitive_option_str(options, "_stop_reason");
+        let result = schema_validation_tool_result(
+            &tool_name,
+            &tool_id,
+            &tool_args,
+            message,
+            &raw_args_json(),
+            stop_reason.as_deref().filter(|reason| !reason.is_empty()),
+        );
+        return Ok(json_to_vm_value(&result));
+    }
     let dispatch_policy =
         DispatchPolicy::new(policy_machinery_active, dispatch_annotations.as_ref());
 
@@ -836,7 +856,10 @@ pub(super) async fn host_agent_dispatch_tool_call(
                     tool_args: approval_args.as_ref().unwrap_or(&tool_args),
                     violation,
                     reason: policy_denial.reason.clone(),
-                    tool_context: permission_context_for(tools, &tool_name),
+                    tool_context: (
+                        tool_descriptor_for(tools, &tool_name),
+                        dispatch_annotations.clone(),
+                    ),
                     intent: tool_call_intent(options),
                 },
             )
@@ -1056,51 +1079,18 @@ pub(super) async fn host_agent_dispatch_tool_call(
         }
     }
 
-    let mut approval = crate::orchestration::current_run_approval_policy().map(|policy| {
-        let repeat_count = crate::orchestration::next_approval_policy_repeat_count(
-            &session_id,
-            &tool_name,
-            approval_args.as_ref().unwrap_or(&tool_args),
-        );
-        policy.evaluate_detailed_with_repeat(
-            &tool_name,
-            approval_args.as_ref().unwrap_or(&tool_args),
-            repeat_count,
-        )
-    });
+    let mut dispatch_approval = DispatchApproval::new(
+        &session_id,
+        &tool_name,
+        approval_args.as_ref().unwrap_or(&tool_args),
+    );
+    let mut approval = dispatch_approval.evaluate(dispatch_annotations.as_ref());
     // Lethal-trifecta gate (Layer 1): once untrusted content has entered the
     // session's context, upgrade an auto-allow to an interactive confirmation
     // for any tool that can carry that content outward (network/fetch),
     // destroy state, or read secrets. Only acts where an approval policy is
     // installed, so non-interactive embedders are unaffected.
-    {
-        let security_policy = crate::security::current_policy();
-        if security_policy.trifecta_gate {
-            if let Some(decision) = approval.as_mut() {
-                if decision.is_allow() {
-                    let taint = super::agent_session_host::session_taint_snapshot(&session_id);
-                    if !taint.is_empty() {
-                        let annotations =
-                            crate::orchestration::current_tool_annotations(&tool_name);
-                        if let Some(outcome) = trifecta_gate_reason(
-                            &security_policy,
-                            annotations.as_ref(),
-                            &tool_name,
-                            approval_args.as_ref().unwrap_or(&tool_args),
-                            &taint,
-                        ) {
-                            let extra: &[&str] = if outcome.injection_flagged {
-                                &["prompt_injection"]
-                            } else {
-                                &[]
-                            };
-                            upgrade_to_trifecta_ask(decision, outcome.reason, extra);
-                        }
-                    }
-                }
-            }
-        }
-    }
+    dispatch_approval.apply_trifecta(approval.as_mut(), dispatch_annotations.as_ref());
     // The `AutoReview` seam: a refusal nobody is present to reconsider. Runs
     // AFTER the policy has decided and the trifecta gate has had its say, so
     // the reviewer sees the FINAL refusal and cannot pre-empt a gate that had
@@ -1165,7 +1155,7 @@ pub(super) async fn host_agent_dispatch_tool_call(
                 request_context: serde_json::json!({"policy_decision": decision.receipt.clone()}),
                 requested_capabilities: vec![format!("tool.{tool_name}")],
                 tool_descriptor: tool_descriptor_for(tools, &tool_name),
-                tool_annotations: tool_annotations_for(tools, &tool_name),
+                tool_annotations: dispatch_annotations.clone(),
                 intent: tool_call_intent(options),
             };
             match request_host_permission(bridge.as_ref(), request).await {
@@ -1191,6 +1181,10 @@ pub(super) async fn host_agent_dispatch_tool_call(
                         }
                         tool_args = new_args.clone();
                     }
+                    dispatch_approval.record_host_grant(
+                        &tool_name,
+                        approval_args.as_ref().unwrap_or(&tool_args),
+                    );
                     approval_status = Some("host_granted");
                     emit_permission_event_with_policy(
                         &session_id,
@@ -1386,39 +1380,42 @@ pub(super) async fn host_agent_dispatch_tool_call(
         // threaded in by the agent loop as `_stop_reason`). See
         // `arg_delivery_fault_feedback`.
         let turn_stop_reason = agent_primitive_option_str(options, "_stop_reason");
-        let cause_named = arg_delivery_fault_feedback(
+        let denied = schema_validation_tool_result(
             &tool_name,
+            &tool_id,
+            &tool_args,
+            message,
             // Re-derive the pre-normalization JSON args lazily: this failure
             // path is the only late consumer, and `call` is still in scope.
             &raw_args_json(),
             turn_stop_reason.as_deref().filter(|s| !s.is_empty()),
         );
-        let (message, cause) = match cause_named {
-            Some((cause_message, cause)) => (cause_message, Some(cause)),
-            None => (message, None),
-        };
-        // Schema validation is not a policy denial — the model can fix the
-        // arguments and retry — so no structured `ToolDenial` is attached.
-        let mut denied = agent_primitive_denied_tool(
+        let denied = attach_hook_reminder_audit(denied, hook_reminder_reports);
+        return Ok(json_to_vm_value(&denied));
+    }
+
+    if let Some(decision) = dispatch_approval.recheck(
+        &tool_name,
+        approval_args.as_ref().unwrap_or(&tool_args),
+        tools,
+        dispatch_annotations.as_ref(),
+    ) {
+        emit_runtime_denied_activity(&session_id, &tool_id, &tool_name, &decision);
+        let denied = deny_tool_call(
+            Some(&ctx),
+            &session_id,
             &tool_name,
             &tool_id,
             &tool_args,
-            message,
-            crate::agent_events::ToolCallErrorCategory::SchemaValidation,
-            None,
-            None,
-        );
-        if let Some(cause) = cause {
-            // Machine-readable cause on both the envelope (for host harnesses
-            // reading the dispatch outcome) and the inner model-facing result
-            // (so it rides the transcript).
-            denied["cause"] = serde_json::json!(cause);
-            if let Some(result) = denied.get_mut("result") {
-                result["cause"] = serde_json::json!(cause);
-            }
-        }
-        let denied = attach_hook_reminder_audit(denied, hook_reminder_reports);
-        return Ok(json_to_vm_value(&denied));
+            decision.terminal_denial(),
+            false,
+            DenialEvidence::new(Some(decision.receipt), None),
+        )
+        .await;
+        return Ok(json_to_vm_value(&attach_hook_reminder_audit(
+            denied,
+            hook_reminder_reports,
+        )));
     }
 
     let started = std::time::Instant::now();

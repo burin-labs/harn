@@ -41,6 +41,58 @@ const TY_STRING_OR_DICT_OR_NIL: Ty = Ty::Union(&[TY_STRING, TY_DICT, TY_NIL]);
 const TY_STRING_OR_LIST: Ty = Ty::Union(&[TY_STRING, TY_LIST]);
 const TY_TOOL_REGISTRY_OR_LIST: Ty = Ty::Union(&[TY_LIST, TY_DICT]);
 
+/// Native hosts supply facts; the canonical approval evaluator owns their meaning.
+pub const TOOL_APPROVAL_REQUEST: Ty = Ty::Shape(&[
+    ShapeFieldDescriptor::new("tool_name", TY_STRING),
+    ShapeFieldDescriptor::new("arguments", TY_DICT),
+    ShapeFieldDescriptor::optional("policy_decision", TY_DICT_OR_NIL),
+    ShapeFieldDescriptor::optional("approval_request", TY_DICT_OR_NIL),
+    ShapeFieldDescriptor::optional("repeat_count", TY_INT_OR_NIL),
+    ShapeFieldDescriptor::optional("tool_annotations", TY_DICT_OR_NIL),
+    ShapeFieldDescriptor::optional(
+        "workspace_boundary",
+        Ty::Optional(&Ty::Shape(&[ShapeFieldDescriptor::new("root", TY_STRING)])),
+    ),
+]);
+
+/// The existing PolicyEvaluation wire record, with its canonical audit receipt.
+pub const APPROVAL_POLICY_DECISION: Ty = Ty::Shape(&[
+    ShapeFieldDescriptor::new(
+        "action",
+        Ty::Union(&[
+            Ty::LitString("allow"),
+            Ty::LitString("ask"),
+            Ty::LitString("deny"),
+        ]),
+    ),
+    ShapeFieldDescriptor::new("reason", TY_STRING),
+    ShapeFieldDescriptor::optional(
+        "matched_rule",
+        Ty::Shape(&[
+            ShapeFieldDescriptor::new("source", TY_STRING),
+            ShapeFieldDescriptor::new("action", TY_STRING),
+            ShapeFieldDescriptor::optional("id", TY_STRING),
+            ShapeFieldDescriptor::optional("index", TY_INT),
+            ShapeFieldDescriptor::optional("contributing_rules", TY_LIST),
+        ]),
+    ),
+    ShapeFieldDescriptor::optional(
+        "required_approval",
+        Ty::Shape(&[
+            ShapeFieldDescriptor::optional("prompt", TY_STRING),
+            ShapeFieldDescriptor::optional("risk", TY_STRING),
+            ShapeFieldDescriptor::optional("reviewers", TY_LIST),
+            ShapeFieldDescriptor::optional("grant_options", TY_LIST),
+            // ApprovalShape preserves opaque JSON, including scalar and list metadata.
+            ShapeFieldDescriptor::optional("metadata", TY_ANY),
+        ]),
+    ),
+    ShapeFieldDescriptor::new("risk_labels", TY_LIST),
+    ShapeFieldDescriptor::optional("denied_paths", TY_LIST),
+    ShapeFieldDescriptor::optional("denied_network_targets", TY_LIST),
+    ShapeFieldDescriptor::new("receipt", TY_DICT),
+]);
+
 /// Closed projection of the Rust-parsed bundled approval-review policy.
 /// The runtime serialization and Harn aliases are checked by typed-options parity.
 pub const APPROVAL_REVIEW_POLICY: Ty = Ty::Shape(&[
