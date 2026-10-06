@@ -430,6 +430,20 @@ impl Language {
         )
     }
 
+    /// Whether `code_index.move_symbol` has an import and module-path model
+    /// for this language.
+    pub fn supports_move_symbol(self) -> bool {
+        matches!(
+            self,
+            Language::Rust
+                | Language::TypeScript
+                | Language::Tsx
+                | Language::JavaScript
+                | Language::Jsx
+                | Language::Python
+        )
+    }
+
     /// Data / markup / config grammars that carry no nameable symbols, so
     /// symbol + outline extraction is intentionally empty for them.
     fn is_data_format(self) -> bool {
@@ -460,7 +474,7 @@ impl Language {
             rename_symbol: self.supports_rename(),
             symbols: self.supports_symbol_extraction(),
             // Graph-grounded refactorings.
-            move_symbol: false,
+            move_symbol: self.supports_move_symbol(),
             extract_function: self.supports_extract_function(),
             change_signature: self.supports_change_signature(),
         }

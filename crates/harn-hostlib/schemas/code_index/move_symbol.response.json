@@ -1,0 +1,124 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/code_index/move_symbol.response.json",
+  "title": "code_index.move_symbol response",
+  "description": "Tagged result of a move, in the `rename_symbol` envelope (`scope`, `conflicts`, `match_count`, `warnings`) plus move fields. `applied` carries the per-file edits (planned only, with `dry_run`); every other tag is a refusal that left every file byte-identical and says why in `details`, with the blocking locations in `sites`.",
+  "type": "object",
+  "properties": {
+    "result": {
+      "type": "string",
+      "enum": [
+        "applied",
+        "no_match",
+        "ambiguous_symbol",
+        "unsupported_language",
+        "syntax_error",
+        "error",
+        "destination_conflict",
+        "visibility_required",
+        "import_cycle"
+      ]
+    },
+    "applied": { "type": "boolean", "description": "True when every planned file was written: false on refusals, dry runs, and failed writes." },
+    "dry_run": { "type": "boolean" },
+    "symbol": {
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "path": { "type": "string" },
+        "line": { "type": ["integer", "null"] },
+        "kind": { "type": ["string", "null"] }
+      },
+      "required": ["name", "path"]
+    },
+    "to_path": { "type": "string" },
+    "created_destination": { "type": "boolean" },
+    "moved_lines": {
+      "type": ["object", "null"],
+      "description": "1-based source lines the move removed, including attached comments and attributes.",
+      "properties": {
+        "start": { "type": "integer", "minimum": 1 },
+        "end": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "touched_files": {
+      "type": "array",
+      "description": "Every changed or created file with its edits in original-file coordinates. Empty on refusals.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "path": { "type": "string" },
+          "language": { "type": "string" },
+          "before_sha256": { "type": "string" },
+          "after_sha256": { "type": "string" },
+          "edits": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "start_byte": { "type": "integer", "minimum": 0 },
+                "end_byte": { "type": "integer", "minimum": 0 },
+                "start_row": { "type": "integer", "minimum": 0 },
+                "start_col": { "type": "integer", "minimum": 0 },
+                "end_row": { "type": "integer", "minimum": 0 },
+                "end_col": { "type": "integer", "minimum": 0 },
+                "before": { "type": "string" },
+                "after": { "type": "string" }
+              },
+              "required": ["start_byte", "end_byte", "before", "after"]
+            }
+          }
+        },
+        "required": ["path", "edits"]
+      }
+    },
+    "scope": { "type": "string", "const": "workspace" },
+    "conflicts": { "type": "array", "maxItems": 0, "description": "Always empty: a move never shadows. Kept for the shared envelope." },
+    "match_count": { "type": "integer", "minimum": 0, "description": "Edits across every touched file." },
+    "sites": { "$ref": "#/$defs/sites", "description": "Locations that block a `destination_conflict`, `visibility_required`, or `import_cycle` refusal." },
+    "comments_left_behind": { "$ref": "#/$defs/sites", "description": "Comment blocks above the item but separated from it by a blank line; they stay in the source." },
+    "warnings": {
+      "type": "array",
+      "description": "Strings; for `ambiguous_symbol`, the candidate declarations as `{path, line, kind}`.",
+      "items": {
+        "anyOf": [
+          { "type": "string" },
+          {
+            "type": "object",
+            "properties": { "path": { "type": "string" }, "line": { "type": "integer" }, "kind": { "type": "string" } },
+            "required": ["path", "line", "kind"]
+          }
+        ]
+      }
+    },
+    "failed_paths_with_reasons": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": { "path": { "type": "string" }, "reason": { "type": "string" } },
+        "required": ["path", "reason"]
+      }
+    },
+    "occurrences_replaced": { "type": "integer", "minimum": 0, "description": "Imports and qualified uses rewritten." },
+    "call_sites_updated": { "type": "integer", "minimum": 0, "description": "Qualified calls among `occurrences_replaced`." },
+    "details": { "type": "string" },
+    "fallback_suggestion": { "type": "string" }
+  },
+  "required": ["result", "applied", "dry_run", "scope", "symbol", "touched_files", "conflicts", "warnings", "failed_paths_with_reasons", "match_count", "details"],
+  "$defs": {
+    "sites": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "path": { "type": "string" },
+          "line": { "type": "integer", "minimum": 0 },
+          "kind": { "type": "string" },
+          "reason": { "type": "string" },
+          "text": { "type": "string" }
+        },
+        "required": ["path", "line", "kind"]
+      }
+    }
+  }
+}

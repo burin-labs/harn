@@ -242,6 +242,7 @@ pub const HOST_CAPABILITY_GROUPS: &[HostCapabilityGroup] = &[
             "extract_function",
             "lock_release",
             "lock_try",
+            "move_symbol",
             "rebuild",
             "reindex_file",
             "rename_symbol",

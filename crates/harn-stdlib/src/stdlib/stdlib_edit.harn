@@ -652,104 +652,53 @@ pub fn edit_inline(fs: HarnessFs, random: HarnessRandom, ast: HarnessAst, params
 }
 
 /**
- * Move a top-level declaration `symbol` out of its source `path` and into
- * `target_file`, deleting it from the source. `target_position` is `"end"`
- * (default, appended) or `"start"` (prepended). Both files are written in
- * one atomic staged-fs transaction.
+ * Move a top-level declaration to another module and rewrite every import
+ * and qualified use of it. A thin wrapper over `code_index.move_symbol`
+ * (Rust, TypeScript/JavaScript, Python), which owns resolution, rewrites,
+ * refusals, and the all-or-nothing write; index the workspace with
+ * `code_index.rebuild` first.
  *
- * The declaration text is lifted with `ast.symbol_extract` and
- * removed with `ast.symbol_delete`, so language support follows
- * those builtins (`result: "unsupported"` otherwise). Cross-file import /
- * export references are NOT rewritten yet — that is reported in
- * `warnings`; combine with `edit_rename_symbol` for re-export safety.
+ * Pass `path`, `symbol` (a name, or `{name, line?, kind?}`), and `to_path`
+ * (`target_file` also works). `dry_run` returns the planned edits without
+ * writing. The declaration moves with its attributes or decorators and the
+ * comment block directly above it; `comments_left_behind` lists comment
+ * blocks separated from it by a blank line, which stay. Refusals
+ * (`no_match`, `ambiguous_symbol`, `unsupported_language`, `syntax_error`,
+ * `destination_conflict`, `visibility_required`, `import_cycle`, `error`)
+ * leave every file unchanged and name the blocking locations in `sites`.
  *
  * @effects: [host, fs]
  * @errors: [backend]
  * @api_stability: experimental
- * @example: edit_move_decl({path: "src/a.rs", symbol: {name: "helper"}, target_file: "src/b.rs"})
+ * @example: edit_move_decl(harness.code_index, {path: "src/a.rs", symbol: "helper", to_path: "src/b.rs"})
  */
-pub fn edit_move_decl(fs: HarnessFs, random: HarnessRandom, ast: HarnessAst, params: dict?) {
+pub fn edit_move_decl(code_index: HarnessCodeIndex, params: dict?) {
   const p = params ?? {}
-  const language = __refactor_detect_language(p)
-  const path = p?.path ?? ""
-  const target_path = p?.target_file
-  const fn_name = __refactor_symbol_name(p)
-  if path == "" || target_path == nil || target_path == "" || fn_name == "" {
-    return __refactor_invalid(
-      "move_decl",
-      language,
-      "`path`, `symbol`/`name`, and `target_file` are required",
+  const symbol = p?.symbol
+  let req = p
+  if type_of(symbol) == "dict" {
+    req = p.merging(
+      {symbol: symbol?.name, line: p?.line ?? symbol?.line, kind: p?.kind ?? symbol?.kind},
     )
   }
-  const probe_session = if p?.dry_run ?? false {
-    nil
-  } else {
-    p?.session_id
+  const payload = code_index.move_symbol(req) ?? {}
+  const result_tag = payload?.result ?? "error"
+  return {
+    ok: result_tag == "applied" && len(payload?.failed_paths_with_reasons ?? []) == 0,
+    applied: payload?.applied ?? false,
+    result: result_tag,
+    dry_run: payload?.dry_run ?? false,
+    symbol: payload?.symbol,
+    to_path: payload?.to_path,
+    created_destination: payload?.created_destination ?? false,
+    touched_files: payload?.touched_files ?? [],
+    sites: payload?.sites ?? [],
+    comments_left_behind: payload?.comments_left_behind ?? [],
+    occurrences_replaced: payload?.occurrences_replaced ?? 0,
+    call_sites_updated: payload?.call_sites_updated ?? 0,
+    failed_paths_with_reasons: payload?.failed_paths_with_reasons ?? [],
+    details: payload?.details,
+    warnings: payload?.warnings ?? [],
+    provenance: {module: "std/edit", helper: "edit_move_decl", caller: p?.provenance},
   }
-  const src_content = fs.staged_read_text({path: path, session_id: probe_session})?.content ?? ""
-  const extracted = ast.symbol_extract(
-    {symbol_name: fn_name, source: src_content, language: language},
-  )
-  if extracted.result == "unsupported_language" {
-    return __refactor_unsupported(
-      "move_decl",
-      language,
-      "symbol extraction is unsupported for language `" + language + "`",
-    )
-  }
-  if extracted.result != "extracted" {
-    return __refactor_conflict(
-      "move_decl",
-      language,
-      [
-        {
-          code: extracted.result,
-          message: "cannot extract `" + fn_name + "` from " + path,
-          path: path,
-        },
-      ],
-    )
-  }
-  const deleted = ast.symbol_delete({symbol_name: fn_name, source: src_content, language: language})
-  if deleted.result != "removed" {
-    return __refactor_conflict(
-      "move_decl",
-      language,
-      [{code: deleted.result, message: "cannot remove `" + fn_name + "` from " + path, path: path}],
-    )
-  }
-  const moved = extracted.text
-  const target_content = fs.staged_read_text({path: target_path, session_id: probe_session})
-    ?.content
-    ?? ""
-  const position = p?.target_position ?? "end"
-  const new_target = if position == "start" {
-    moved + "\n\n" + target_content
-  } else if trim(target_content) == "" {
-    moved + "\n"
-  } else if target_content.ends_with("\n") {
-    target_content + "\n" + moved + "\n"
-  } else {
-    target_content + "\n\n" + moved + "\n"
-  }
-  const warns = [
-    {
-      code: "imports_not_rewritten",
-      message: "moved `" + fn_name
-        + "`; cross-file import/export references may need manual adjustment (pair with edit_rename_symbol)",
-    },
-  ]
-  return __refactor_run(
-    fs,
-    random,
-    ast,
-    "move_decl",
-    language,
-    [
-      {kind: "content", path: path, after: deleted.source},
-      {kind: "content", path: target_path, after: new_target},
-    ],
-    p,
-    warns,
-  )
 }

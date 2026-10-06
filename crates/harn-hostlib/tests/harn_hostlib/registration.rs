@@ -244,6 +244,7 @@ fn code_index_capability_registers_documented_methods() {
             "hostlib_code_index_rename_symbol",
             "hostlib_code_index_change_signature",
             "hostlib_code_index_extract_function",
+            "hostlib_code_index_move_symbol",
         ]
     );
     // Without a populated workspace, code-index read methods return empty

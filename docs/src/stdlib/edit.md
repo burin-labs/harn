@@ -934,9 +934,9 @@ extraction needs a per-language extractor.
 | `apply_node`, `insert_at_anchor` | **all** registered grammars |
 | `rename_symbol` | Rust, TypeScript/TSX, JavaScript/JSX, Python, Go, Swift |
 | `symbols` / `outline` | every general-purpose language (not the data/markup grammars) |
+| `move_symbol` | Rust, TypeScript/TSX, JavaScript/JSX, Python |
 | `extract_function` | Rust, TypeScript/TSX, JavaScript/JSX, Python |
 | `change_signature` | Rust, TypeScript/TSX, Python |
-| `move_symbol` | none yet; reserved for graph-grounded refactorings |
 
 Registered grammars fall into two groups:
 
@@ -1037,7 +1037,7 @@ All require the `tools:deterministic` capability.
 | `edit_reorder_parameters` | `symbol_ref`, `order` (permutation of param indices) | rust, python, ts/tsx |
 | `edit_change_return_type` | `path`, `symbol`, `new_type` | rust, python, ts/tsx, go |
 | `edit_inline` | `path`, `symbol` (zero-param, single-`return` body) | rust, python, ts/tsx, js/jsx, go |
-| `edit_move_decl` | `path`, `symbol`, `target_file`, `target_position?` (`end \| start`) | follows `harness.ast.symbol_extract` |
+| `edit_move_decl` | `code_index` first; `path`, `symbol`, `to_path` (or `target_file`), `dry_run?` | rust, python, ts/tsx, js/jsx (returns `code_index.move_symbol`'s tagged result) |
 
 The three parameter refactorings take `harness.code_index` instead of the
 `fs`/`random`/`ast` handles: they are thin wrappers over

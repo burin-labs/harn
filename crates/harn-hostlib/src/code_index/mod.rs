@@ -62,6 +62,9 @@
 //! - **`extract_function`**: lift an expression, a statement run, or a
 //!   closure body into a new function and replace it, and every token-equal
 //!   same-file copy, with a call. Built on the shared refactor core.
+//! - **`move_symbol`**: move a top-level Rust, TS/JS, or Python
+//!   declaration to another module and rewrite imports and qualified
+//!   uses in every referencing file, all-or-nothing.
 //!
 //! ## Concurrency model
 //!
@@ -85,6 +88,7 @@ mod imports_go;
 mod imports_swift;
 mod module_graph;
 mod module_index;
+mod move_symbol;
 mod overlay;
 mod readonly;
 mod refactor_core;
@@ -619,6 +623,13 @@ impl HostlibCapability for CodeIndexCapability {
             extract::BUILTIN,
             "extract_function",
             extract::run,
+        );
+        register(
+            registry,
+            self.index.clone(),
+            move_symbol::BUILTIN,
+            "move_symbol",
+            move_symbol::run,
         );
     }
 }
