@@ -27,7 +27,7 @@ pipeline main(harness: Harness, task: unknown) {
   harness.stdio.println(is_err(stale_finalize))
   with_llm_script(
     harness.llm,
-    [llm_text("<done>##DONE##</done>")],
+    [llm_text("<user_response>The task is finished.</user_response><done>##DONE##</done>")],
     { ->
       const result = agent_loop(
         harness,
