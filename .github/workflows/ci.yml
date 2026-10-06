@@ -1317,6 +1317,8 @@ jobs:
           ./scripts/ci/rust_artifact.sh build-tests
           "$RUNNER_TEMP/harn-workspace-tests.tar.zst"
           "$GITHUB_SHA"
+      # The first of three partitions; `rust-test-partitions` runs the other
+      # two on their own runners at the same time (#9435).
       - name: Run Rust workspace tests
         timeout-minutes: 26
         id: release-audit-rust-test
@@ -1329,6 +1331,7 @@ jobs:
           host_bound_filter="$(scripts/ci/host_bound_rust_test_filter.sh)";
           scripts/ci/run_rust_test_lane.sh
           cargo-nextest nextest run --locked --workspace --profile ci
+          --partition count:1/3
           -E "not (${host_bound_filter})"
       - name: Upload workspace test archive
         if: vars.HARN_CI_DISABLE_COLOCATED_TESTS == 'true'
@@ -1358,6 +1361,87 @@ jobs:
       - name: Summarize and stop sccache
         if: always()
         run: ./scripts/ci/finalize_sccache.sh
+
+  # The rest of the workspace suite, beside the producer instead of after it.
+  # The suite is about 2,400 test-seconds, which on one 4 vCPU runner was
+  # 11 minutes run after a 10-minute compile (job 112105424497). Each leg here
+  # compiles the same graph from the same restored cache and runs its share,
+  # so the three partitions finish together and the lane loses two thirds of
+  # its test phase. The legs are GitHub's free standard runner (public
+  # repository, harn#9370) and save nothing, so they cannot evict the
+  # producer's cache. Under the co-location kill switch the archive-mode
+  # fallback runs the whole suite and these skip.
+  #
+  # Ceiling: 6 setup + 24 compile (the security archive's budget, the same
+  # graph) + 10 for a third of the suite.
+  rust-test-partitions:
+    name: ${{ matrix.name }}
+    needs: [changes]
+    if: >-
+      needs.changes.outputs.rust == 'true'
+      && vars.HARN_CI_DISABLE_COLOCATED_TESTS != 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - kind: partition-2
+            name: Rust workspace tests (2/3)
+            partition: count:2/3
+          - kind: partition-3
+            name: Rust workspace tests (3/3)
+            partition: count:3/3
+    env:
+      # Match rust-check-inputs, so the workspace-tests cache key restores.
+      CARGO_PROFILE_DEV_DEBUG: line-tables-only
+      RUSTFLAGS: "-D warnings -Clink-arg=-fuse-ld=mold"
+      HARN_RUNNER_TIER: github-hosted
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+      - uses: ./.github/actions/free-disk-space
+      - name: Measure the compile budget
+        id: resource-budget
+        run: bash scripts/ci/rust_resource_budget.sh
+        env:
+          RUNNER_ENVIRONMENT: github-hosted
+          HARN_BUDGET_PROFILE: producer
+      - name: Install mold linker
+        uses: ./.github/actions/apt-install
+        timeout-minutes: 5
+        with:
+          packages: mold
+          check-command: mold
+      - uses: ./.github/actions/rust-toolchain
+      - uses: ./.github/actions/rust-cache
+        continue-on-error: true
+        with:
+          shared-key: workspace-tests
+          cache-bin: false
+          cache-workspace-crates: "true"
+          reuse-workspace-crates: "true"
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@4cef1412cce204788f482e778a0b9187f9626a29 # v2.87.21
+        with:
+          tool: nextest@0.9.132
+      - name: Run Rust workspace tests
+        id: release-audit-rust-test
+        timeout-minutes: 34
+        env:
+          CARGO_BUILD_JOBS: ${{ steps.resource-budget.outputs.build_jobs }}
+          HARN_LLM_CALLS_DISABLED: "1"
+          HARN_TEST_PARTITION: ${{ matrix.partition }}
+        run: >-
+          set -euo pipefail;
+          host_bound_filter="$(scripts/ci/host_bound_rust_test_filter.sh)";
+          scripts/ci/run_rust_test_lane.sh
+          cargo-nextest nextest run --locked --workspace --profile ci
+          --partition "$HARN_TEST_PARTITION"
+          -E "not (${host_bound_filter})"
 
   # GitHub job dependencies wait for terminal producer state, even when an
   # immutable v4 artifact is already available. This single free-hosted barrier
@@ -2832,6 +2916,7 @@ jobs:
         rust-producer-capacity,
         rust-cli,
         rust-check-inputs,
+        rust-test-partitions,
         rust-artifacts-ready,
         security-tests-ready,
         rust-test,
@@ -3003,6 +3088,14 @@ jobs:
           echo "Rust producer: $rust_check_inputs_result (workspace_tests_ok=$workspace_tests_ok)"
           require_result "$rust_check_inputs_result" \
             "Rust audit artifact build failed or skipped while Rust proof was required." [ "${{ needs.changes.outputs.rust }}" != "true" ]
+
+          # The other two thirds of the co-located suite. The archive-mode
+          # fallback runs the whole suite instead, so they skip under it.
+          rust_test_partitions_result="${{ needs['rust-test-partitions'].result }}"
+          echo "Rust workspace test partitions: $rust_test_partitions_result"
+          require_result "$rust_test_partitions_result" \
+            "Rust workspace test partitions failed or skipped while Rust proof was required." \
+            test "${{ needs.changes.outputs.rust }}" != "true" -o "$COLOCATED_TESTS_DISABLED" = "true"
 
           rust_artifacts_ready_result="${{ needs['rust-artifacts-ready'].result }}"
           echo "Rust artifacts ready: $rust_artifacts_ready_result"
