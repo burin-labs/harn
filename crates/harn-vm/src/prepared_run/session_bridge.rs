@@ -59,7 +59,11 @@ mod tests {
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use std::sync::Arc;
 
-    fn responding_bridge(response: serde_json::Value, calls: Arc<AtomicUsize>) -> HostBridge {
+    fn responding_bridge(
+        response: serde_json::Value,
+        calls: Arc<AtomicUsize>,
+        expected_batch: ApprovalBatch,
+    ) -> HostBridge {
         let pending = Arc::new(tokio::sync::Mutex::new(HashMap::<
             u64,
             tokio::sync::oneshot::Sender<serde_json::Value>,
@@ -72,7 +76,7 @@ mod tests {
             assert_eq!(request["params"]["toolCall"]["kind"], "other");
             assert_eq!(
                 request["params"]["toolCall"]["rawInput"],
-                serde_json::to_value(batch()).unwrap()
+                serde_json::to_value(&expected_batch).unwrap()
             );
             assert!(request["params"]["toolCall"]["_meta"]["harn"]
                 .get("toolAnnotations")
@@ -142,8 +146,8 @@ mod tests {
             ),
         ] {
             let calls = Arc::new(AtomicUsize::new(0));
-            let bridge = responding_bridge(response, calls.clone());
             let request = batch();
+            let bridge = responding_bridge(response, calls.clone(), request.clone());
             let decision = request_session_approval(&bridge, "session-1", &request)
                 .await
                 .unwrap();
@@ -157,9 +161,10 @@ mod tests {
     #[tokio::test]
     async fn another_session_cannot_use_the_approval_bridge() {
         let calls = Arc::new(AtomicUsize::new(0));
-        let bridge = responding_bridge(serde_json::json!({}), calls.clone());
+        let request = batch();
+        let bridge = responding_bridge(serde_json::json!({}), calls.clone(), request.clone());
         for session_id in ["other-session", ""] {
-            assert!(request_session_approval(&bridge, session_id, &batch())
+            assert!(request_session_approval(&bridge, session_id, &request)
                 .await
                 .is_err());
         }
