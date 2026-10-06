@@ -1098,6 +1098,7 @@ jobs:
           cache-workspace-crates: "true"
           reuse-workspace-crates: "true"
           save: "true"
+          persistent-target: ${{ env.HARN_RUNNER_TIER == 'self-hosted' }}
       # Read the counters before the first compile, so the summary below can
       # report what this job did rather than what the machine has done since
       # its cache server last started.
@@ -1261,6 +1262,7 @@ jobs:
           cache-workspace-crates: "true"
           reuse-workspace-crates: "true"
           save: "true"
+          persistent-target: ${{ env.HARN_RUNNER_TIER == 'self-hosted' }}
       # Read the counters before the first compile, so the summary below can
       # report what this job did rather than what the machine has done since
       # its cache server last started.
