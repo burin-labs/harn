@@ -386,15 +386,39 @@ pub fn tool_declared_path_entries(
     entries
 }
 
+/// Narrow invocation observation without replacing the caller's authority.
+pub(crate) async fn scope_read_only_invocation<T>(
+    session_id: &str,
+    future: impl std::future::Future<Output = Result<T, VmError>>,
+) -> Result<T, VmError> {
+    let overlay = CapabilityPolicy {
+        side_effect_level: Some("read_only".into()),
+        ..CapabilityPolicy::neutral()
+    };
+    let ceiling = current_execution_policy()
+        .unwrap_or_default()
+        .intersect(&overlay)
+        .map_err(|message| VmError::CategorizedError {
+            message,
+            category: crate::value::ErrorCategory::ToolRejected,
+        })?;
+    super::scope_agent_session(
+        session_id.to_string(),
+        super::scope_execution_policy(ceiling, future),
+    )
+    .await
+}
+
 pub fn enforce_current_policy_for_builtin(name: &str, args: &[VmValue]) -> Result<(), VmError> {
-    crate::llm::agent_tool_preparation::enforce_contract(
+    let entry = crate::stdlib::builtin_manifest_entry(name);
+    crate::tool_registry::preparation_scope::enforce_contract(
         name,
-        crate::stdlib::builtin_manifest_entry(name).map(|entry| &entry.contract),
+        entry.map(|entry| &entry.contract),
     )?;
     let Some(policy) = current_execution_policy() else {
         return Ok(());
     };
-    if let Some(entry) = crate::stdlib::builtin_manifest_entry(name) {
+    if let Some(entry) = entry {
         match entry.contract.exposure {
             harn_builtin_meta::BuiltinExposure::CapabilityFunction { authority_argument } => {
                 if args.get(usize::from(authority_argument)).is_none() {
@@ -651,10 +675,10 @@ pub fn enforce_current_policy_for_capability(
     method: &str,
     args: &[VmValue],
 ) -> Result<(), VmError> {
-    crate::llm::agent_tool_preparation::enforce_contract(
+    let entry = crate::stdlib::capability_method_manifest_entry(capability, method);
+    crate::tool_registry::preparation_scope::enforce_contract(
         method,
-        crate::stdlib::capability_method_manifest_entry(capability, method)
-            .map(|entry| &entry.contract),
+        entry.map(|entry| &entry.contract),
     )?;
     // Manifest/lifecycle VM hooks install `allow_trusted_bridge_calls` for the
     // duration of the handler. That guard already exempts bridged builtins;
@@ -668,7 +692,7 @@ pub fn enforce_current_policy_for_capability(
     let Some(policy) = current_execution_policy() else {
         return Ok(());
     };
-    let Some(entry) = crate::stdlib::capability_method_manifest_entry(capability, method) else {
+    let Some(entry) = entry else {
         return reject_policy(format!(
             "undeclared Harness capability method `harness.{}.{method}`",
             capability.field_name()
@@ -688,7 +712,7 @@ pub fn enforce_current_policy_for_capability(
 }
 
 pub fn enforce_current_policy_for_bridge_builtin(name: &str) -> Result<(), VmError> {
-    crate::llm::agent_tool_preparation::enforce_contract(name, None)?;
+    crate::tool_registry::preparation_scope::enforce_contract(name, None)?;
     if trusted_bridge_call_is_active() {
         return Ok(());
     }

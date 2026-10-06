@@ -844,12 +844,9 @@ pub(super) async fn host_agent_dispatch_tool_call(
     let dispatch_policy =
         DispatchPolicy::new(policy_machinery_active, dispatch_annotations.as_ref());
 
-    let prepared_invocation = match crate::orchestration::scope_agent_session(
-        session_id.clone(),
-        crate::agent_sessions::scope_current_tool_call(
-            tool_id.clone(),
-            super::agent_tool_preparation::prepare(&ctx, tools, &tool_name, &tool_args),
-        ),
+    let prepared_invocation = match crate::agent_sessions::scope_current_tool_call(
+        tool_id.clone(),
+        super::agent_tool_preparation::prepare(&ctx, tools, &tool_name, &tool_args, &session_id),
     )
     .await
     {

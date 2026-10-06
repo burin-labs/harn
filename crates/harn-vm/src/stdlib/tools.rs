@@ -128,7 +128,11 @@ pub(crate) fn register_tool_builtins(vm: &mut Vm) {
     category = "tools"
 )]
 fn tool_invocation_binding_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    Ok(crate::llm::agent_tool_preparation::current_binding())
+    Ok(
+        crate::tool_registry::preparation_scope::current_invocation()
+            .map(|bound| json_to_vm_value(&bound.facts))
+            .unwrap_or(VmValue::Nil),
+    )
 }
 
 #[harn_builtin(

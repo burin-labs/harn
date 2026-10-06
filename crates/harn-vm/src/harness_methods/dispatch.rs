@@ -36,7 +36,7 @@ async fn call_harness_method_in_scope(
 ) -> Result<VmValue, VmError> {
     if let Some(capability) = handle.kind().capability_id() {
         let declared = crate::stdlib::capability_method_manifest_entry(capability, method);
-        crate::llm::agent_tool_preparation::enforce_contract(
+        crate::tool_registry::preparation_scope::enforce_contract(
             method,
             declared.map(|entry| &entry.contract),
         )?;
@@ -223,8 +223,14 @@ async fn call_harness_method_in_scope(
     }
     if let Some(capability) = handle.kind().capability_id() {
         if harn_builtin_meta::host_capabilities::is_host_capability_method(capability, method) {
-            return call_dict_host_capability_method(vm, handle, capability.field_name(), method, args)
-                .await;
+            return call_dict_host_capability_method(
+                vm,
+                handle,
+                capability.field_name(),
+                method,
+                args,
+            )
+            .await;
         }
     }
     match handle.kind() {
