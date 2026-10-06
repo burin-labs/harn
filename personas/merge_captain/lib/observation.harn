@@ -52,6 +52,7 @@ pub fn from_github(pr: dict, checks: list?, required_checks: list?) {
     labels: pr.labels ?? [],
     review_decision: pr.review_decision ?? "REVIEW_REQUIRED",
     approvals: pr.approvals ?? 0,
+    auto_merge_armed: pr.auto_merge_armed ?? false,
     in_merge_queue: pr.in_merge_queue ?? false,
     merge_group_active: pr.merge_group_active ?? false,
     checks: observed_checks,

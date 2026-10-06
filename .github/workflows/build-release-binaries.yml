@@ -117,8 +117,6 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: "0"
-  # Paid release capacity is disabled unless explicitly enabled by an owner.
-  HARN_RELEASE_ENABLE_BLACKSMITH_MACOS: ${{ vars.HARN_RELEASE_ENABLE_BLACKSMITH_MACOS || 'false' }}
 
 jobs:
   setup:
@@ -133,6 +131,7 @@ jobs:
       build_matrix: ${{ steps.resolve.outputs.build_matrix }}
       build_mode: ${{ steps.resolve.outputs.build_mode }}
       candidate_purpose: ${{ steps.resolve.outputs.candidate_purpose }}
+      rehearsal_source_sha: ${{ steps.resolve.outputs.rehearsal_source_sha }}
       runner_profile: ${{ steps.resolve.outputs.runner_profile }}
       cli_aot_primary_runner: ${{ steps.resolve.outputs.cli_aot_primary_runner }}
       cli_aot_standard_runner: ${{ steps.resolve.outputs.cli_aot_standard_runner }}
@@ -207,6 +206,8 @@ jobs:
           REF_NAME: ${{ github.ref_name }}
           PUSH_BEFORE: ${{ github.event.before }}
           MERGE_GROUP_BASE: ${{ github.event.merge_group.base_sha }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           GH_TOKEN: ${{ github.token }}
           RELEASE_BUILD_INPUTS_CHANGED: ${{ steps.release-build-inputs.outputs.release_build_inputs || 'false' }}
         run: |
@@ -221,6 +222,7 @@ jobs:
           CANDIDATE_SOURCE_SHA=""
           BUILD_MODE=""
           CANDIDATE_PURPOSE=none
+          REHEARSAL_SOURCE_SHA=""
           RUNNER_PROFILE="${INPUT_RUNNER_PROFILE:-policy}"
           BUILD_MATRIX="[]"
           CLI_AOT_PRIMARY_RUNNER="$(jq -er '.jobs.cli_aot.primary | select(type == "string" and length > 0)' .github/release-runner-policy.json)"
@@ -378,11 +380,12 @@ jobs:
                   echo "::warning::Exact-SHA merge-group run $QUEUE_CANDIDATE_RUN succeeded without candidate-manifest-$GITHUB_SHA; rebuilding v$VERSION on the push."
                   ;;
                 timed_out)
-                  echo "::warning::Timed out waiting for exact-SHA merge-group candidate run $QUEUE_CANDIDATE_RUN while it was ${QUEUE_DETAIL:-in progress}; rebuilding v$VERSION on the push."
+                  echo "::error::Exact-SHA candidate run $QUEUE_CANDIDATE_RUN remains ${QUEUE_DETAIL:-pending} after the bounded wait; no duplicate build is authorized. Retry after that producer is terminal."
+                  exit 1
                   ;;
                 unread)
-                  # Unread is not "none": building again is slow but always safe.
-                  echo "::warning::Could not read whether the merge group built v$VERSION at $GITHUB_SHA; building it here."
+                  echo "::error::Candidate custody is unreadable for v$VERSION at $GITHUB_SHA; no duplicate build is authorized."
+                  exit 1
                   ;;
                 *)
                   echo "::error::Unknown exact-SHA candidate resolution '$QUEUE_RESOLUTION'."
@@ -436,6 +439,11 @@ jobs:
             fi
           elif [[ "$EVENT_NAME" == "pull_request" ]]; then
             BUILD_MODE=none
+            PR_VERSION="$(git show "$PR_HEAD_SHA:Cargo.toml" | release_workspace_version)"
+            PR_BASE_VERSION="$(git show "$PR_BASE_SHA:Cargo.toml" | release_workspace_version)"
+            if release_push_is_stable_version_change "$PR_BASE_VERSION" "$PR_VERSION"; then
+              REHEARSAL_SOURCE_SHA="$PR_HEAD_SHA"
+            fi
             echo "::notice::Pull requests build nothing; a release's merge group builds its candidate."
           elif [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
             echo "::error::workflow_dispatch requires source_candidate=true, warm_cache_only=true or benchmark_only=true"
@@ -444,6 +452,9 @@ jobs:
 
           if [[ "$BUILD_MODE" == candidate && "$CANDIDATE_PURPOSE" == none ]]; then
             CANDIDATE_PURPOSE=release
+          fi
+          if [[ "$BUILD_MODE" == candidate && "$CANDIDATE_PURPOSE" == release ]]; then
+            REHEARSAL_SOURCE_SHA="$CANDIDATE_SOURCE_SHA"
           fi
 
           {
@@ -454,6 +465,7 @@ jobs:
             echo "candidate_source_sha=$CANDIDATE_SOURCE_SHA"
             echo "build_mode=$BUILD_MODE"
             echo "candidate_purpose=$CANDIDATE_PURPOSE"
+            echo "rehearsal_source_sha=$REHEARSAL_SOURCE_SHA"
             echo "runner_profile=$RUNNER_PROFILE"
             echo "cli_aot_primary_runner=$CLI_AOT_PRIMARY_RUNNER"
             echo "cli_aot_standard_runner=$CLI_AOT_STANDARD_RUNNER"
@@ -491,11 +503,9 @@ jobs:
     # merely because this release/benchmark payload job had no work to do.
     if: needs.setup.outputs.should_build_binaries == 'true'
     # The generator compiles the complete Rust workspace and sits on every
-    # shipping target's critical path. Use bounded paid capacity only when it
-    # has real work; warm-cache runs retain the standard public runner. The
-    # repository opt-in enables paid capacity without changing release source
-    # or credentials; the public repository otherwise uses free hosted capacity.
-    runs-on: ${{ vars.HARN_RELEASE_ENABLE_BLACKSMITH_LINUX == 'true' && (needs.setup.outputs.build_mode == 'benchmark' || needs.setup.outputs.build_mode == 'candidate') && needs.setup.outputs.cli_aot_primary_runner || needs.setup.outputs.cli_aot_standard_runner }}
+    # shipping target's critical path. Public-repository release work always
+    # uses the standard free runner selected by the release policy.
+    runs-on: ${{ needs.setup.outputs.cli_aot_standard_runner }}
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -777,7 +787,7 @@ jobs:
         # that outcome — install unconditionally on the measured target so a
         # budget failure can always produce its own attribution.
         if: matrix.target == 'x86_64-unknown-linux-gnu'
-        uses: taiki-e/install-action@9983c65e42da123ff25d1f78505eb6de315aa172 # v2.87.20
+        uses: taiki-e/install-action@4cef1412cce204788f482e778a0b9187f9626a29 # v2.87.21
         with:
           tool: cargo-bloat
 
@@ -1777,12 +1787,24 @@ jobs:
     with:
       candidate-commit: ${{ needs.setup.outputs.candidate_source_sha }}
 
+  consumer-rehearsal:
+    name: Consumer release rehearsal
+    needs: setup
+    if: needs.setup.outputs.rehearsal_source_sha != ''
+    uses: ./.github/workflows/consumer-canary.yml
+    with:
+      source_revision: ${{ needs.setup.outputs.rehearsal_source_sha }}
+    secrets:
+      RELEASE_APP_CLIENT_ID: ${{ secrets.RELEASE_APP_CLIENT_ID }}
+      RELEASE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+      CONSUMER_CANARY_REPOSITORY: ${{ secrets.CONSUMER_CANARY_REPOSITORY }}
+
   # One check for the whole candidate, so the merge queue can require it: a
   # release waits in the queue until its candidate is built and checked, and
   # every other group passes as soon as setup finds nothing to build.
   candidate-verdict:
     name: Release candidate verdict
-    needs: [setup, prepare_cli_aot, build, collect_candidate_manifest, release-residual-audit, release-smoke]
+    needs: [setup, prepare_cli_aot, build, collect_candidate_manifest, release-residual-audit, release-smoke, consumer-rehearsal]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -1791,18 +1813,33 @@ jobs:
         env:
           SETUP_RESULT: ${{ needs.setup.result }}
           BUILD_MODE: ${{ needs.setup.outputs.build_mode }}
-          RESULTS: ${{ toJSON(needs.*.result) }}
+          CANDIDATE_PURPOSE: ${{ needs.setup.outputs.candidate_purpose }}
+          REHEARSAL_SOURCE_SHA: ${{ needs.setup.outputs.rehearsal_source_sha }}
+          CONSUMER_RESULT: ${{ needs.consumer-rehearsal.result }}
+          RESULTS: ${{ toJSON(needs) }}
         run: |
           set -euo pipefail
           if [[ "$SETUP_RESULT" != success ]]; then
             echo "::error::Resolve release context finished $SETUP_RESULT; no candidate verdict is possible."
             exit 1
           fi
+          if [[ -n "$REHEARSAL_SOURCE_SHA" && "$CONSUMER_RESULT" != success ]]; then
+            echo "::error::Consumer release rehearsal at $REHEARSAL_SOURCE_SHA finished ${CONSUMER_RESULT:-missing}; publication refused."
+            exit 1
+          fi
+          if [[ "$BUILD_MODE" == candidate && "$CANDIDATE_PURPOSE" == release &&
+                ( -z "$REHEARSAL_SOURCE_SHA" || "$CONSUMER_RESULT" != success ) ]]; then
+            echo "::error::Release candidate has no successful exact-source consumer rehearsal; publication refused."
+            exit 1
+          fi
           if [[ "$BUILD_MODE" != candidate ]]; then
             echo "This run builds no candidate (build mode ${BUILD_MODE:-unset})."
             exit 0
           fi
-          if ! jq -e 'length == 6 and all(. == "success")' <<<"$RESULTS" >/dev/null; then
+          if ! jq -e '
+            ["setup", "prepare_cli_aot", "build", "collect_candidate_manifest", "release-residual-audit", "release-smoke"] as $required |
+            . as $jobs | all($required[]; $jobs[.].result == "success")
+          ' <<<"$RESULTS" >/dev/null; then
             echo "::error::A candidate job did not succeed: $RESULTS"
             exit 1
           fi

@@ -113,6 +113,10 @@ write_paths vm_runtime_tests_dir crates/harn-vm/src/vm/tests_runtime/process_san
 assert_plan true --platform macos --event pull_request --changed-files "$tmp_dir/vm_runtime_tests_dir"
 
 write_paths release_meta Cargo.lock changelog.d/123.fixed.md
+write_paths linked_package_manifest crates/harn-package/src/package/manifest.rs
+assert_plan true --platform macos --event pull_request --changed-files "$tmp_dir/linked_package_manifest"
+write_paths linked_provider_schema crates/harn-vm/src/connectors/manifest/provider_setup.rs
+assert_plan true --platform macos --event pull_request --changed-files "$tmp_dir/linked_provider_schema"
 assert_plan false --platform macos --event push --changed-files "$tmp_dir/release_meta"
 
 # A release PR's own head ref must reach the metadata-only skip. The pull_request

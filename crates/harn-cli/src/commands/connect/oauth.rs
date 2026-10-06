@@ -489,13 +489,6 @@ pub(super) fn oauth_provider_defaults(provider: &str) -> Option<OAuthProviderDef
             default_resource: "https://api.linear.app/",
             default_scope: None,
         }),
-        "notion" => Some(OAuthProviderDefaults {
-            authorization_endpoint: "https://api.notion.com/v1/oauth/authorize",
-            token_endpoint: "https://api.notion.com/v1/oauth/token",
-            token_auth_method: "client_secret_basic",
-            default_resource: "https://api.notion.com/",
-            default_scope: None,
-        }),
         _ => None,
     }
 }

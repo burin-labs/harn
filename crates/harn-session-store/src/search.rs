@@ -305,13 +305,10 @@ pub fn snippet(text: &str, query: &str, max_chars: usize) -> String {
     } else {
         folded.find(&needle).unwrap_or(0)
     };
-    let mut original_byte_anchor = byte_anchor.min(text.len());
-    while original_byte_anchor > 0 && !text.is_char_boundary(original_byte_anchor) {
-        original_byte_anchor -= 1;
-    }
+    let original_byte_anchor = text.floor_char_boundary(byte_anchor);
     #[expect(
         clippy::string_slice,
-        reason = "original_byte_anchor is walked back to a char boundary by the loop above"
+        reason = "original_byte_anchor is floored to a char boundary above"
     )]
     let char_anchor = text[..original_byte_anchor].chars().count();
     let start = char_anchor.saturating_sub(max_chars / 3);

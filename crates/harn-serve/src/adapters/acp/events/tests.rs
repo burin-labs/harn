@@ -30,6 +30,7 @@ mod repair_claim;
 mod schema_contract;
 mod step_judge_skips;
 mod subagent_stop;
+mod tool_call_intent;
 mod tool_data;
 mod tool_format_override;
 mod turn_phase;
@@ -106,6 +107,7 @@ fn standard_fixture_events() -> Vec<AgentEvent> {
             raw_input: serde_json::json!({"path": "README.md"}),
             parsing: None,
             audit: None,
+            intent: None,
         },
         AgentEvent::ToolCallUpdate {
             session_id: "session-1".to_string(),
@@ -1073,6 +1075,7 @@ async fn forwarded_agent_events_serialize_as_session_updates() {
             raw_input: serde_json::json!({"path": "README.md"}),
             parsing: None,
             audit: None,
+            intent: None,
         },
         AgentEvent::ToolCallUpdate {
             session_id: "session-1".to_string(),
@@ -1090,7 +1093,6 @@ async fn forwarded_agent_events_serialize_as_session_updates() {
             health: None,
             executor: Some(ToolExecutor::HarnBuiltin),
             parsing: None,
-
             raw_input: None,
             raw_input_partial: None,
             audit: None,
@@ -1266,7 +1268,6 @@ async fn tool_call_update_serializes_error_category_in_camel_case() {
         health: None,
         executor: None,
         parsing: None,
-
         raw_input: None,
         raw_input_partial: None,
         audit: None,
@@ -1305,7 +1306,6 @@ async fn tool_call_update_omits_error_category_when_none() {
         health: None,
         executor: None,
         parsing: None,
-
         raw_input: None,
         raw_input_partial: None,
         audit: None,
@@ -1365,6 +1365,7 @@ async fn tool_call_carries_parsing_flag_through_to_acp_wire() {
         raw_input: serde_json::json!({}),
         parsing: Some(true),
         audit: None,
+        intent: None,
     });
     let line = rx.recv().await.expect("acp tool_call notification");
     let payload: serde_json::Value = serde_json::from_str(&line).expect("json");
@@ -1388,9 +1389,7 @@ async fn tool_call_carries_parsing_flag_through_to_acp_wire() {
         health: None,
         executor: None,
         parsing: Some(false),
-
         raw_input: None,
-
         raw_input_partial: None,
         audit: None,
     });
@@ -1416,6 +1415,7 @@ async fn tool_call_carries_parsing_flag_through_to_acp_wire() {
         raw_input: serde_json::json!({}),
         parsing: None,
         audit: None,
+        intent: None,
     });
     let line = rx.recv().await.expect("acp tool_call notification");
     let payload: serde_json::Value = serde_json::from_str(&line).expect("json");
@@ -1463,7 +1463,6 @@ async fn tool_call_update_serializes_executor_per_acp_wire_format() {
             health: None,
             executor: Some(executor),
             parsing: None,
-
             raw_input: None,
             raw_input_partial: None,
             audit: None,
@@ -1496,7 +1495,6 @@ async fn tool_call_update_serializes_executor_per_acp_wire_format() {
         health: None,
         executor: None,
         parsing: None,
-
         raw_input: None,
         raw_input_partial: None,
         audit: None,
@@ -1534,7 +1532,6 @@ async fn tool_call_update_streams_raw_input_and_raw_input_partial_per_acp_wire_f
         raw_input: Some(serde_json::json!({"q": "hello"})),
         raw_input_partial: None,
         audit: None,
-
         parsing: None,
     });
     let line = rx.recv().await.expect("acp tool_call_update notification");
