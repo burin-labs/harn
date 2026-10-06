@@ -4,6 +4,8 @@ use harn_session_store::{
 
 use super::*;
 
+mod publication;
+
 #[tokio::test]
 async fn internal_turn_phases_restore_candidate_and_finality_in_order() {
     use crate::agent_events::{AgentTerminalKind, AgentTerminalOutcome, AgentTurnPhase};

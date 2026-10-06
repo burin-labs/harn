@@ -27,7 +27,8 @@ use harn_session_store::{
 };
 
 /// One page of stored events per round trip. The store caps reads at its own
-/// `MAX_READ_BATCH`; this keeps the loop's memory bounded either way.
+/// `MAX_READ_BATCH`; page input allocation stays bounded. Projected replay
+/// and the journal owner's active transcript state grow with the session.
 const RESTORE_PAGE: usize = 512;
 
 /// A replay and its durable checkpoint describe the same captured prefix.
@@ -101,6 +102,7 @@ async fn read_canonical_session_prefix(
     }
 
     let mut events = Vec::new();
+    let mut hydration = crate::agent_session_journal::TranscriptHydration::default();
     let mut event_count = 0;
     let mut last_event_id = None;
     let mut chain_root = chain_root_init();
@@ -134,8 +136,9 @@ async fn read_canonical_session_prefix(
             }
             last_event_id = Some(stored.event_id);
             chain_root = chain_root_fold(&chain_root, stored.source_record_hash());
+            hydration.absorb(&stored);
             // Projection remains private until the complete prefix is validated.
-            if let Some(event) = replay_event_from_stored(session_id, &stored) {
+            if let Some(event) = publication::RestoreProjection::from_stored(session_id, &stored) {
                 events.push(event);
             }
         }
@@ -163,6 +166,11 @@ async fn read_canonical_session_prefix(
     {
         return Err(invalid_prefix());
     }
+    let (_, publications) = hydration.finish();
+    let events = events
+        .into_iter()
+        .filter_map(|event| event.finish(&publications))
+        .collect();
     Ok(CanonicalSessionReplay {
         events: close_unanswered_tool_calls(session_id, events),
         last_event_id: checkpoint.last_event_id,
@@ -507,6 +515,8 @@ fn stored_kind_label(kind: &SessionEventKind) -> String {
             .unwrap_or_else(|| "message".to_string()),
     }
 }
+
+mod publication;
 
 #[cfg(test)]
 mod tests;
