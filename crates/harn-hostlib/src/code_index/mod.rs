@@ -77,6 +77,7 @@ mod module_graph;
 mod module_index;
 mod overlay;
 mod readonly;
+mod refactor_core;
 mod rename;
 mod repo_map;
 mod snapshot;

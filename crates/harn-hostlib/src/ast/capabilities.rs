@@ -14,7 +14,8 @@
 //!
 //! Response carries `fallback_suggestion` (the text-edit degradation path)
 //! and `languages`: a list of `{ language, extension, apply_node,
-//! insert_at_anchor, rename_symbol, symbols }` rows. When a `language`
+//! insert_at_anchor, rename_symbol, symbols, move_symbol,
+//! extract_function, change_signature }` rows. When a `language`
 //! filter resolves to no grammar the response is the tagged
 //! `unsupported_language` union member instead, carrying the same
 //! `fallback_suggestion`.
@@ -61,6 +62,9 @@ fn row(language: Language) -> VmValue {
         insert_at_anchor,
         rename_symbol,
         symbols,
+        move_symbol,
+        extract_function,
+        change_signature,
     } = language.edit_capabilities();
     build_dict([
         ("language", str_value(language.name())),
@@ -69,6 +73,9 @@ fn row(language: Language) -> VmValue {
         ("insert_at_anchor", VmValue::Bool(insert_at_anchor)),
         ("rename_symbol", VmValue::Bool(rename_symbol)),
         ("symbols", VmValue::Bool(symbols)),
+        ("move_symbol", VmValue::Bool(move_symbol)),
+        ("extract_function", VmValue::Bool(extract_function)),
+        ("change_signature", VmValue::Bool(change_signature)),
         (
             "health",
             ParserHealth::fitted(language, ParserOperation::SafeEdit).to_vm_value(),
@@ -152,6 +159,9 @@ mod tests {
         assert!(b(field(rust, "apply_node")));
         assert!(b(field(rust, "rename_symbol")));
         assert!(b(field(rust, "symbols")));
+        assert!(!b(field(rust, "move_symbol")));
+        assert!(!b(field(rust, "extract_function")));
+        assert!(!b(field(rust, "change_signature")));
     }
 
     #[test]
