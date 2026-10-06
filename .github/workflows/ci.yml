@@ -1301,6 +1301,33 @@ jobs:
         uses: taiki-e/install-action@4cef1412cce204788f482e778a0b9187f9626a29 # v2.87.21
         with:
           tool: nextest@0.9.132
+      # EXPERIMENT (#9435, not for merge): measure the test graph at four
+      # compile jobs with cargo timings and a memory sampler.
+      - name: Experiment compile timings
+        env:
+          CARGO_BUILD_JOBS: "4"
+        run: |
+          set -uo pipefail
+          mkdir -p "$RUNNER_TEMP/exp"
+          ( while true; do
+              echo "$(date -u +%T) $(free -m | awk '/^Mem:/{print "used="$3" avail="$7}') $(ps -eo rss,comm --sort=-rss | awk 'NR>1 && NR<5 {printf "%s:%dMB ", $2, $1/1024}')"
+              sleep 3
+            done ) > "$RUNNER_TEMP/exp/memory.log" 2>&1 &
+          sampler=$!
+          status=0
+          /usr/bin/time -v cargo build --locked --workspace --tests --timings || status=$?
+          kill "$sampler" || true
+          cp -r target/cargo-timings "$RUNNER_TEMP/exp/" || true
+          sort -t= -k2 -n "$RUNNER_TEMP/exp/memory.log" | tail -5
+          awk '{print $2}' "$RUNNER_TEMP/exp/memory.log" | sort -t= -k2 -n | tail -1
+          exit "$status"
+      - name: Upload experiment timings
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: experiment-timings
+          path: ${{ runner.temp }}/exp
+          retention-days: 1
       # Only security binaries enter this archive; the following workspace
       # tests reuse the same profile and unified features without rebuilding.
       - name: Build security test archive
