@@ -6,6 +6,23 @@ use std::process::Command;
 
 use super::SpawnSpec;
 
+/// Filesystem presence is lookup evidence, never verifier identity or success.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ProgramLookupObservation {
+    Absent { program: String },
+    Present { path: std::path::PathBuf },
+    Unmeasured(ProgramLookupUnmeasured),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProgramLookupUnmeasured {
+    InvocationNotStatic,
+    WorkingDirectoryUnavailable,
+    ShellStartupUnbounded,
+    SearchPathUnavailable,
+    FilesystemUnavailable,
+}
+
 #[cfg(target_os = "linux")]
 pub(super) fn pinned_verifier(
     spec: &SpawnSpec,
@@ -27,10 +44,30 @@ pub(super) fn missing_program(
     command: &Command,
     env_cleared: bool,
 ) -> Option<String> {
-    let plan = harn_vm::shells::plan_invocation(&spec.program, &spec.args)?;
-    let cwd = command.get_current_dir()?;
+    match observe_program_lookup(spec, command, env_cleared) {
+        ProgramLookupObservation::Absent { program } => Some(program),
+        ProgramLookupObservation::Present { .. } | ProgramLookupObservation::Unmeasured(_) => None,
+    }
+}
+
+/// Observe against the prepared command without executing shell or loader code.
+/// This does not authorize shell conversion or attest a module selected by it.
+pub fn observe_program_lookup(
+    spec: &SpawnSpec,
+    command: &Command,
+    env_cleared: bool,
+) -> ProgramLookupObservation {
+    use ProgramLookupObservation::{Absent, Unmeasured};
+    use ProgramLookupUnmeasured::*;
+
+    let Some(plan) = harn_vm::shells::plan_invocation(&spec.program, &spec.args) else {
+        return Unmeasured(InvocationNotStatic);
+    };
+    let Some(cwd) = command.get_current_dir() else {
+        return Unmeasured(WorkingDirectoryUnavailable);
+    };
     if !cwd.is_dir() {
-        return None;
+        return Unmeasured(WorkingDirectoryUnavailable);
     }
     let value = |name: &str| -> Option<OsString> {
         if let Some(value) = plan.environment.get(name) {
@@ -67,7 +104,7 @@ pub(super) fn missing_program(
                 .any(|name| defines_function(name.as_ref()))
             || (!env_cleared && std::env::vars_os().any(|(name, _)| defines_function(&name)))
         {
-            return None;
+            return Unmeasured(ShellStartupUnbounded);
         }
     }
     let mut extensions = if cfg!(windows) {
@@ -94,34 +131,143 @@ pub(super) fn missing_program(
         && Path::new(command.get_program()).is_absolute()
         && Path::new(command.get_program()).file_name() == Path::new(&spec.program).file_name()
     {
-        return absent_executable(Path::new(command.get_program()), &extensions)
-            .then_some(plan.program);
+        return observe_candidates(Path::new(command.get_program()), &extensions, &plan.program);
     }
     let program = Path::new(&plan.program);
     if program.components().count() > 1 || plan.program.contains('/') {
-        return absent_executable(&cwd.join(program), &extensions).then_some(plan.program);
+        return observe_candidates(&cwd.join(program), &extensions, &plan.program);
     }
     // An absent PATH lets some shells use an implementation-defined default.
-    let path = value("PATH")?;
+    let Some(path) = value("PATH") else {
+        return Unmeasured(SearchPathUnavailable);
+    };
+    let mut unavailable = false;
     for directory in std::env::split_paths(&path) {
         let directory = cwd.join(directory);
-        if !absent_executable(&directory.join(program), &extensions) {
-            return None;
+        match observe_candidates(&directory.join(program), &extensions, &plan.program) {
+            present @ ProgramLookupObservation::Present { .. } => return present,
+            Unmeasured(_) => unavailable = true,
+            Absent { .. } => {}
         }
     }
-    Some(plan.program)
+    if unavailable {
+        Unmeasured(FilesystemUnavailable)
+    } else {
+        Absent {
+            program: plan.program,
+        }
+    }
 }
 
-fn absent_executable(path: &Path, extensions: &[String]) -> bool {
-    definitely_absent(path)
-        && extensions.iter().all(|extension| {
+/// Every candidate must be measured absent to produce an absence observation.
+fn observe_candidates(
+    path: &Path,
+    extensions: &[String],
+    program: &str,
+) -> ProgramLookupObservation {
+    let candidates =
+        std::iter::once(path.to_path_buf()).chain(extensions.iter().map(|extension| {
             let mut candidate = path.as_os_str().to_os_string();
             candidate.push(extension);
-            definitely_absent(Path::new(&candidate))
-        })
+            candidate.into()
+        }));
+    let mut unavailable = false;
+    for candidate in candidates {
+        match candidate.metadata() {
+            Ok(_) => return ProgramLookupObservation::Present { path: candidate },
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(_) => unavailable = true,
+        }
+    }
+    if unavailable {
+        ProgramLookupObservation::Unmeasured(ProgramLookupUnmeasured::FilesystemUnavailable)
+    } else {
+        ProgramLookupObservation::Absent {
+            program: program.to_string(),
+        }
+    }
 }
 
-fn definitely_absent(path: &Path) -> bool {
-    // Permission errors and non-executable existing files are not not-found.
-    matches!(path.metadata(), Err(error) if error.kind() == std::io::ErrorKind::NotFound)
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn spec(program: &str, args: &[&str]) -> SpawnSpec {
+        SpawnSpec {
+            builtin: "program_lookup_observation_test",
+            program: program.to_string(),
+            args: args.iter().map(|arg| (*arg).to_string()).collect(),
+            cwd: None,
+            env: Default::default(),
+            env_remove: Vec::new(),
+            env_mode: super::super::EnvMode::Replace,
+            use_stdin: false,
+            configure_process_group: false,
+            owner_death: super::super::OwnerDeathPolicy::None,
+            output_capture: super::super::OutputCapture::Pipe,
+        }
+    }
+
+    #[test]
+    fn absent_path_is_unmeasured_until_the_search_path_is_known() {
+        let root = tempfile::tempdir().unwrap();
+        let spec = spec("absent_verifier_9413", &[]);
+        let mut command = Command::new(&spec.program);
+        command.env_clear().current_dir(root.path());
+        assert_eq!(
+            observe_program_lookup(&spec, &command, true),
+            ProgramLookupObservation::Unmeasured(ProgramLookupUnmeasured::SearchPathUnavailable),
+        );
+        assert_eq!(missing_program(&spec, &command, true), None);
+        command.env("PATH", root.path());
+        assert_eq!(
+            observe_program_lookup(&spec, &command, true),
+            ProgramLookupObservation::Absent {
+                program: spec.program.clone()
+            },
+        );
+        assert_eq!(
+            missing_program(&spec, &command, true),
+            Some(spec.program.clone())
+        );
+        let candidate = root.path().join(&spec.program);
+        std::fs::write(&candidate, b"not an executable or a loader attestation").unwrap();
+        assert_eq!(
+            observe_program_lookup(&spec, &command, true),
+            ProgramLookupObservation::Present { path: candidate },
+        );
+        assert_eq!(missing_program(&spec, &command, true), None);
+    }
+
+    #[test]
+    fn startup_code_is_not_executed_to_measure_program_presence() {
+        let root = tempfile::tempdir().unwrap();
+        let spec = spec("/bin/bash", &["-c", "absent_verifier_9413"]);
+        let marker = root.path().join("startup-fired");
+        let startup = root.path().join("startup.sh");
+        std::fs::write(&startup, format!("touch '{}'", marker.display())).unwrap();
+        let mut command = Command::new(&spec.program);
+        command
+            .env_clear()
+            .current_dir(root.path())
+            .env("PATH", root.path())
+            .env("BASH_ENV", startup);
+        assert_eq!(
+            observe_program_lookup(&spec, &command, true),
+            ProgramLookupObservation::Unmeasured(ProgramLookupUnmeasured::ShellStartupUnbounded),
+        );
+        assert!(!marker.exists());
+        assert_eq!(missing_program(&spec, &command, true), None);
+    }
+
+    #[test]
+    fn inaccessible_candidate_is_not_measured_absent() {
+        let root = tempfile::tempdir().unwrap();
+        let parent = root.path().join("ordinary-file");
+        std::fs::write(&parent, b"not a directory").unwrap();
+        assert_eq!(
+            observe_candidates(&parent.join("verifier"), &[], "verifier"),
+            ProgramLookupObservation::Unmeasured(ProgramLookupUnmeasured::FilesystemUnavailable),
+        );
+    }
 }

@@ -21,6 +21,9 @@ pub use handle::{
     ProcessKiller, ProcessSpawner, SpawnSpec, SpawnerGuard, WaitOutcome,
 };
 pub use mock::{MockHandleController, MockProcess, MockProcessConfig, MockSpawner};
+pub use program_lookup::{
+    observe_program_lookup, ProgramLookupObservation, ProgramLookupUnmeasured,
+};
 pub use real::default_spawner;
 #[cfg(unix)]
 pub use real::replace_current_process;
