@@ -7,7 +7,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
@@ -15,6 +15,7 @@ use sha2::{Digest, Sha256};
 use walkdir::WalkDir;
 
 use super::estimate_chunk_tokens;
+use crate::orchestration::artifact_files::resolve_manifest_path;
 use crate::value::VmError;
 
 pub const SKILL_GATE_SCHEMA_VERSION: u32 = 1;
@@ -1152,17 +1153,6 @@ fn hex_digest(bytes: &[u8]) -> String {
 
 fn bytes_to_hex(bytes: &[u8]) -> String {
     bytes.iter().map(|byte| format!("{byte:02x}")).collect()
-}
-
-fn resolve_manifest_path(base_dir: Option<&Path>, path: &str) -> PathBuf {
-    let path_buf = PathBuf::from(path);
-    if path_buf.is_absolute() {
-        path_buf
-    } else if let Some(base_dir) = base_dir {
-        base_dir.join(path_buf)
-    } else {
-        path_buf
-    }
 }
 
 fn pareto_frontier(variants: &[SkillGateVariantReport]) -> Vec<String> {

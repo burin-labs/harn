@@ -13,7 +13,7 @@ use super::{
 };
 
 #[derive(Debug)]
-pub(super) struct PromptExecutionError {
+pub struct PromptExecutionError {
     pub message: String,
     pub terminal_class: harn_vm::llm::AgentTerminalClass,
     /// Machine facts projected from the thrown error dict (provider/model of the

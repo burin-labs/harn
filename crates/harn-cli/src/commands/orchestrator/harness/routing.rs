@@ -191,7 +191,7 @@ pub(super) async fn initialize_connectors(
                 .map_err(|error| error.to_string())?;
         }
         if let Some(config) = provider_override_config(&provider, provider_overrides) {
-            registry.declare_secrets(provider.clone(), crate::declared_connector_secrets(config));
+            registry.declare_secrets(provider.clone(), config.outbound_secret_ids());
         }
         if registry.get(&provider).is_none() {
             if provider_requires_harn_connector(provider.as_str()) {

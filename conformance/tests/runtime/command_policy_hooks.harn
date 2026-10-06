@@ -270,7 +270,9 @@ pipeline default(harness: Harness) {
     harness.llm,
     [
       {tool_calls: [{id: "run_1", name: "run", arguments: {command: "echo agent-policy-deny"}}]},
-      llm_text("<done>##DONE##</done>"),
+      llm_text(
+        "<user_response>The command policy rejected that command.</user_response><done>##DONE##</done>",
+      ),
     ],
     { ->
       const loop = agent_loop(
