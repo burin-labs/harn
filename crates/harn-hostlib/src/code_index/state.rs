@@ -17,7 +17,7 @@
 //! Every index read goes through it, which is why the cost of holding a
 //! warm index no longer scales with the size of the workspace.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fs::Metadata;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -188,6 +188,7 @@ impl IndexState {
         }
         // Second pass: every Module node exists now, so resolve IMPORTS.
         state.link_symbol_imports();
+        state.relink_dirty_calls();
         (state, outcome)
     }
 
@@ -295,18 +296,7 @@ impl IndexState {
         }
 
         if path_set_changed {
-            // A path appearing or disappearing can resolve or dangle an
-            // import in a file that did not itself change, so redo the
-            // whole resolution table. Pure map lookups, no disk reads.
-            self.refresh_module_index();
-            let all: Vec<(FileId, String)> = self
-                .files
-                .values()
-                .map(|f| (f.id, f.relative_path.clone()))
-                .collect();
-            for (id, rel) in all {
-                self.rebuild_deps(id, &rel);
-            }
+            self.rebuild_all_deps();
         } else {
             for (id, rel) in &reparse {
                 self.rebuild_deps(*id, rel);
@@ -316,6 +306,7 @@ impl IndexState {
             self.rebuild_symbol_graph_for(*id);
         }
         self.link_symbol_imports();
+        self.relink_dirty_calls();
         if harn_touched {
             self.relink_harn_references(resolver);
         }
@@ -336,6 +327,8 @@ impl IndexState {
             self.remove_file_path(abs);
             return None;
         }
+        let known =
+            relative_path(&self.root, abs).is_some_and(|rel| self.path_to_id.contains_key(&rel));
         let (id, _changed) = self.ingest(abs, None)?;
         let rel = self
             .files
@@ -343,10 +336,16 @@ impl IndexState {
             .map(|f| f.relative_path.clone())
             .unwrap_or_default();
         if !rel.is_empty() {
-            self.refresh_module_index();
-            self.rebuild_deps(id, &rel);
+            if known {
+                self.refresh_module_index();
+                self.rebuild_deps(id, &rel);
+            } else {
+                // A new path can resolve another file's dangling import.
+                self.rebuild_all_deps();
+            }
             self.rebuild_symbol_graph_for(id);
             self.link_symbol_imports();
+            self.relink_dirty_calls();
         }
         Some(id)
     }
@@ -358,6 +357,7 @@ impl IndexState {
             return;
         };
         self.remove_relative_path(&rel);
+        self.relink_dirty_calls();
     }
 
     /// Remove a workspace-relative path from every sub-index. The
@@ -581,25 +581,14 @@ impl IndexState {
         else {
             return;
         };
-        // Call resolution is scoped by what this file can actually see,
-        // so the dep graph for `id` must already be current. Every
-        // caller runs `rebuild_deps` for the same id immediately before
-        // this, and `refresh_from_root` re-resolves the whole table
-        // whenever the set of paths changed, which is when a dangling
-        // import can start resolving.
-        //
-        // The full answer, not just the explicit import statements: a
-        // Swift or Go file calls into its own module's other files
-        // without importing them, and scoping the resolver to written
-        // imports alone would put those calls out of reach.
-        let imported_files = self.imports_of(id);
-        let outcome = self.symbols.rebuild_file(
+        // Calls resolve after the batch, in [`Self::relink_dirty_calls`],
+        // once every declaration they can reach is in the graph.
+        let outcome = self.symbols.rebuild_file_deferring_calls(
             id,
             &file.relative_path,
             language,
             &source,
             &file.imports,
-            &imported_files,
         );
         // The rebuild linked this file to the declarations it names; now
         // link every file that names this file's declarations. Without
@@ -616,6 +605,46 @@ impl IndexState {
                 .map(indexed_symbol_from_ast)
                 .collect();
         }
+    }
+
+    /// Redo the whole import-resolution table. A path appearing or
+    /// disappearing can resolve or dangle an import in a file that did not
+    /// itself change. Pure map lookups, no disk reads.
+    fn rebuild_all_deps(&mut self) {
+        self.refresh_module_index();
+        let all: Vec<(FileId, String)> = self
+            .files
+            .values()
+            .map(|f| (f.id, f.relative_path.clone()))
+            .collect();
+        for (id, rel) in all {
+            self.rebuild_deps(id, &rel);
+        }
+    }
+
+    /// Resolve every call site the last batch of graph edits could have
+    /// changed. Resolving at ingest would see only the declarations of
+    /// files ingested earlier, so CALLS edges would depend on file order
+    /// and go stale when a later file adds or removes a declaration.
+    ///
+    /// Visibility is the full answer from [`Self::imports_of`], not just
+    /// the explicit import statements: a Swift or Go file calls into its
+    /// own module's other files without importing them.
+    pub(super) fn relink_dirty_calls(&mut self) {
+        let sites = self.symbols.take_dirty_call_sites();
+        if sites.is_empty() {
+            return;
+        }
+        let files: BTreeSet<FileId> = sites
+            .iter()
+            .filter_map(|id| self.symbols.node(*id))
+            .map(|node| node.file_id)
+            .collect();
+        let visible: HashMap<FileId, HashSet<FileId>> = files
+            .into_iter()
+            .map(|file| (file, self.imports_of(file).into_iter().collect()))
+            .collect();
+        self.symbols.resolve_call_sites(&sites, &visible);
     }
 
     /// Walk every file's import-resolution table and add the
@@ -1142,3 +1171,7 @@ mod tests {
 #[cfg(test)]
 #[path = "refs_order_tests.rs"]
 mod refs_order_tests;
+
+#[cfg(test)]
+#[path = "calls_order_tests.rs"]
+mod calls_order_tests;
