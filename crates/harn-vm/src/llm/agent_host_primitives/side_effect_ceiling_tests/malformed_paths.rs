@@ -160,6 +160,41 @@ async fn rewritten_catalog_paths_are_checked_before_effects() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn host_replacements_preserve_exact_approval_but_not_hard_refusals() {
+    clear_execution_policy_stacks();
+    clear_all_approval_policy_repeat_counts();
+    push_approval_policy(ToolApprovalPolicy {
+        require_approval: vec!["read_file".into()],
+        ..ToolApprovalPolicy::default()
+    });
+    let calls = Calls::new();
+    for (replacement, expected) in [
+        (
+            serde_json::json!(std::env::temp_dir().join("harn-host-path-approval-proof")),
+            false,
+        ),
+        (serde_json::json!("host-approved-proof"), true),
+    ] {
+        let captured = Arc::new(StdMutex::new(Vec::new()));
+        let mut response = crate::llm::acp_permission::allow_response();
+        response["args"] = serde_json::json!({"location": replacement});
+        let _bridge = HostBridgeGuard::replace(Some(responding_bridge(response, captured.clone())));
+        let result = calls
+            .dispatch(
+                serde_json::json!({"location": "proof"}),
+                true,
+                &crate::value::DictMap::new(),
+            )
+            .await;
+        assert_eq!(captured.lock().unwrap().len(), 1, "approval path must fire");
+        assert_eq!(result["ok"], expected, "{result}");
+        assert_eq!(calls.effect.load(Ordering::SeqCst), usize::from(expected));
+    }
+    pop_approval_policy();
+    clear_all_approval_policy_repeat_counts();
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn malformed_paths_retry_before_policy_callbacks_approval_and_effects() {
     clear_execution_policy_stacks();
     crate::orchestration::clear_tool_prechecks();
