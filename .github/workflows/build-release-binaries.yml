@@ -380,11 +380,12 @@ jobs:
                   echo "::warning::Exact-SHA merge-group run $QUEUE_CANDIDATE_RUN succeeded without candidate-manifest-$GITHUB_SHA; rebuilding v$VERSION on the push."
                   ;;
                 timed_out)
-                  echo "::warning::Timed out waiting for exact-SHA merge-group candidate run $QUEUE_CANDIDATE_RUN while it was ${QUEUE_DETAIL:-in progress}; rebuilding v$VERSION on the push."
+                  echo "::error::Exact-SHA candidate run $QUEUE_CANDIDATE_RUN remains ${QUEUE_DETAIL:-pending} after the bounded wait; no duplicate build is authorized. Retry after that producer is terminal."
+                  exit 1
                   ;;
                 unread)
-                  # Unread is not "none": building again is slow but always safe.
-                  echo "::warning::Could not read whether the merge group built v$VERSION at $GITHUB_SHA; building it here."
+                  echo "::error::Candidate custody is unreadable for v$VERSION at $GITHUB_SHA; no duplicate build is authorized."
+                  exit 1
                   ;;
                 *)
                   echo "::error::Unknown exact-SHA candidate resolution '$QUEUE_RESOLUTION'."
