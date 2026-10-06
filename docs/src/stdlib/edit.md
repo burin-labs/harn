@@ -748,7 +748,7 @@ Backed by the `harness.code_index.rename_symbol` builtin (issue
 |---|---|---|
 | `symbol_ref` | yes | `{name, path, line?, kind?}`. `line` (1-based) and `kind` (`"Function" \| "Type" \| "Module"`) disambiguate when several symbols in the workspace share a name. |
 | `new_name` | yes | Replacement identifier. Must be a valid identifier token and differ from `symbol_ref.name`. |
-| `scope` | yes | `"file"` \| `"module"` \| `"workspace"`. `file` and `module` are aliases today (one Module node per file); `workspace` follows REFS edges and a textual sweep across the index. |
+| `scope` | yes | `"file"` \| `"module"` \| `"workspace"`. `file` and `module` are aliases today (one Module node per file); `workspace` adds every indexed file that declares the name or contains it as a whole word; each file is then parsed so only identifier occurrences change. |
 | `session_id` | no | Routes reads + writes through staged-fs (#1722). |
 | `dry_run` | no | When `true`, the host validates end-to-end (parse, conflict, syntax) and returns the planned edits without writing. |
 | `validate` | no, default `true` | Re-parse every rewritten file; reject on ERROR / MISSING nodes. |

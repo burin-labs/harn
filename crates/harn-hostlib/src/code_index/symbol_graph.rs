@@ -238,6 +238,12 @@ pub struct SymbolGraph {
     out_edges: HashMap<NodeId, Vec<Edge>>,
     in_edges: HashMap<NodeId, Vec<Edge>>,
     next_id: NodeId,
+    /// Function names whose declarations changed since the last
+    /// [`Self::take_dirty_call_sites`]. Every call site with one of these
+    /// names may now resolve differently.
+    dirty_call_names: HashSet<String>,
+    /// Files rebuilt with call resolution deferred.
+    dirty_call_files: HashSet<FileId>,
 }
 
 /// Only the owning graph facts cross the snapshot boundary. Name, file, and
@@ -378,6 +384,7 @@ impl SymbolGraph {
 
     /// Drop every node + edge owned by `file_id`.
     pub fn remove_file(&mut self, file_id: FileId) {
+        self.mark_function_names_dirty(file_id);
         let Some(node_ids) = self.by_file.remove(&file_id) else {
             return;
         };
@@ -435,6 +442,45 @@ impl SymbolGraph {
         import_strings: &[String],
         imported_files: &[FileId],
     ) -> RebuildOutcome {
+        // A Swift target or Go package can put hundreds of files in
+        // scope, so the membership test is a set lookup rather than
+        // a scan of the import list per candidate per call site.
+        let visible: HashSet<FileId> = imported_files.iter().copied().collect();
+        self.rebuild_file_resolving(
+            file_id,
+            path,
+            language,
+            source,
+            import_strings,
+            Some(&visible),
+        )
+    }
+
+    /// [`Self::rebuild_file`] without resolving this file's call sites.
+    /// The caller resolves them with every other affected site once the
+    /// whole batch is in: [`Self::take_dirty_call_sites`] then
+    /// [`Self::resolve_call_sites`].
+    pub(super) fn rebuild_file_deferring_calls(
+        &mut self,
+        file_id: FileId,
+        path: &str,
+        language: Language,
+        source: &str,
+        import_strings: &[String],
+    ) -> RebuildOutcome {
+        self.dirty_call_files.insert(file_id);
+        self.rebuild_file_resolving(file_id, path, language, source, import_strings, None)
+    }
+
+    fn rebuild_file_resolving(
+        &mut self,
+        file_id: FileId,
+        path: &str,
+        language: Language,
+        source: &str,
+        import_strings: &[String],
+        visible: Option<&HashSet<FileId>>,
+    ) -> RebuildOutcome {
         self.remove_file(file_id);
         let module_id = self.add_module_for_file(file_id, path, &language);
 
@@ -484,14 +530,9 @@ impl SymbolGraph {
             self.add_edge(parent_id, id, EdgeKind::Contains);
         }
 
-        // CallSite nodes + CALLS edges. Targets are resolved against
-        // the global by-name index, so cross-file calls become callable
-        // once every file has been ingested at least once.
+        // CallSite nodes, plus CALLS edges unless resolution is deferred.
+        // Resolving here sees only the declarations already in the graph.
         if let Some(tree) = tree.as_ref() {
-            // A Swift target or Go package can put hundreds of files in
-            // scope, so the membership test is a set lookup rather than
-            // a scan of the import list per candidate per call site.
-            let visible: HashSet<FileId> = imported_files.iter().copied().collect();
             for (callee_name, line) in extract_call_sites_from_tree(tree, source) {
                 let call_id = self.add_node(Node {
                     id: 0,
@@ -506,12 +547,15 @@ impl SymbolGraph {
                     language: language.name().to_string(),
                 });
                 self.add_edge(module_id, call_id, EdgeKind::Contains);
-                let targets = self.resolve_call_targets(&callee_name, file_id, &visible);
-                for t in targets {
-                    self.add_edge(call_id, t, EdgeKind::Calls);
+                if let Some(visible) = visible {
+                    let functions = self.functions_named(&callee_name);
+                    for t in pick_call_targets(&functions, file_id, visible) {
+                        self.add_edge(call_id, t, EdgeKind::Calls);
+                    }
                 }
             }
         }
+        self.mark_function_names_dirty(file_id);
 
         // Import nodes — one per raw import string. IMPORTS edge from
         // the file's Module to the Import marker. A second resolution
@@ -727,77 +771,114 @@ impl SymbolGraph {
         out
     }
 
-    /// Which functions a call to `callee_name` in `file_id` can be
-    /// reaching, in order of confidence.
-    ///
-    /// The old rule was "every function with this name, anywhere". On a
-    /// 7,038-file workspace that made a call to `assert` link to all
-    /// seven unrelated functions of that name, so six of every seven
-    /// edges were wrong and one function node collected 32,887 callers
-    /// (#8107).
-    ///
-    /// The replacement never guesses between candidates it cannot
-    /// distinguish:
-    ///
-    /// 1. **Same file.** A local definition shadows anything imported,
-    ///    so if the file defines the name itself, that is the call.
-    /// 2. **Imported files.** Otherwise the call can only reach what
-    ///    this file actually imports. All matching declarations in the
-    ///    resolved import set are returned, because a genuine ambiguity
-    ///    across two imports is a fact about the code, not a guess.
-    /// 3. **Exactly one declaration workspace-wide.** A unique name is
-    ///    unambiguous whether or not the import resolver saw the edge,
-    ///    which keeps recall for implicit visibility — a sibling module
-    ///    in the same crate, a global, a language with no import syntax.
-    /// 4. **Otherwise, nothing.** Several candidates and no import
-    ///    linking any of them is precisely the case where an edge would
-    ///    be invented rather than found.
-    fn resolve_call_targets(
-        &self,
-        callee_name: &str,
-        file_id: FileId,
-        visible: &HashSet<FileId>,
-    ) -> Vec<NodeId> {
-        let named: Vec<NodeId> = self
-            .nodes_named(callee_name)
+    /// Every function declaration named `name`, with its file.
+    fn functions_named(&self, name: &str) -> Vec<(NodeId, FileId)> {
+        self.nodes_named(name)
             .iter()
-            .copied()
-            .filter(|nid| {
-                self.nodes
-                    .get(nid)
-                    .is_some_and(|n| n.kind == NodeKind::Function)
-            })
-            .collect();
-        if named.is_empty() {
-            return named;
-        }
+            .filter_map(|id| self.nodes.get(id))
+            .filter(|n| n.kind == NodeKind::Function)
+            .map(|n| (n.id, n.file_id))
+            .collect()
+    }
 
-        let local: Vec<NodeId> = named
-            .iter()
-            .copied()
-            .filter(|nid| self.nodes.get(nid).is_some_and(|n| n.file_id == file_id))
-            .collect();
-        if !local.is_empty() {
-            return local;
+    fn mark_function_names_dirty(&mut self, file_id: FileId) {
+        let Some(ids) = self.by_file.get(&file_id) else {
+            return;
+        };
+        for id in ids {
+            if let Some(node) = self.nodes.get(id) {
+                if node.kind == NodeKind::Function {
+                    self.dirty_call_names.insert(node.name.clone());
+                }
+            }
         }
+    }
 
-        let imported: Vec<NodeId> = named
-            .iter()
-            .copied()
-            .filter(|nid| {
-                self.nodes
-                    .get(nid)
-                    .is_some_and(|n| visible.contains(&n.file_id))
-            })
-            .collect();
-        if !imported.is_empty() {
-            return imported;
+    /// Drain the dirty set into the call sites that need resolving: every
+    /// site in a file rebuilt with deferred resolution, and every site
+    /// whose callee name gained or lost a declaration. Sorted, unique.
+    ///
+    /// Resolution reads the whole workspace's declarations, so a site
+    /// resolved before a later file arrived can be wrong in either
+    /// direction: it missed a declaration that now exists, or it linked
+    /// a name that was unique then and is ambiguous now.
+    pub fn take_dirty_call_sites(&mut self) -> Vec<NodeId> {
+        let names = std::mem::take(&mut self.dirty_call_names);
+        let files = std::mem::take(&mut self.dirty_call_files);
+        let mut sites: BTreeSet<NodeId> = BTreeSet::new();
+        for file in files {
+            for id in self.by_file.get(&file).map(Vec::as_slice).unwrap_or(&[]) {
+                if self
+                    .nodes
+                    .get(id)
+                    .is_some_and(|n| n.kind == NodeKind::CallSite)
+                {
+                    sites.insert(*id);
+                }
+            }
         }
+        for name in names {
+            for id in self.nodes_named(&name) {
+                if self
+                    .nodes
+                    .get(id)
+                    .is_some_and(|n| n.kind == NodeKind::CallSite)
+                {
+                    sites.insert(*id);
+                }
+            }
+        }
+        sites.into_iter().collect()
+    }
 
-        if named.len() == 1 {
-            return named;
+    /// Replace the CALLS edges of each call site in `sites`. `visible`
+    /// maps a call site's file to its resolved import set; a file with no
+    /// entry imports nothing.
+    pub fn resolve_call_sites(
+        &mut self,
+        sites: &[NodeId],
+        visible: &HashMap<FileId, HashSet<FileId>>,
+    ) {
+        let empty = HashSet::new();
+        let mut functions_by_name: HashMap<String, Vec<(NodeId, FileId)>> = HashMap::new();
+        for site in sites {
+            let Some((name, file_id)) = self
+                .nodes
+                .get(site)
+                .filter(|n| n.kind == NodeKind::CallSite)
+                .map(|n| (n.name.clone(), n.file_id))
+            else {
+                continue;
+            };
+            self.drop_out_edges(*site, EdgeKind::Calls);
+            let functions = functions_by_name
+                .entry(name)
+                .or_insert_with_key(|name| self.functions_named(name));
+            let targets =
+                pick_call_targets(functions, file_id, visible.get(&file_id).unwrap_or(&empty));
+            for target in targets {
+                self.add_edge(*site, target, EdgeKind::Calls);
+            }
         }
-        Vec::new()
+    }
+
+    fn drop_out_edges(&mut self, from: NodeId, kind: EdgeKind) {
+        let Some(edges) = self.out_edges.get_mut(&from) else {
+            return;
+        };
+        let mut dropped = Vec::new();
+        edges.retain(|edge| {
+            let keep = edge.kind != kind;
+            if !keep {
+                dropped.push(edge.to);
+            }
+            keep
+        });
+        for to in dropped {
+            if let Some(bucket) = self.in_edges.get_mut(&to) {
+                bucket.retain(|edge| !(edge.from == from && edge.kind == kind));
+            }
+        }
     }
 
     /// Add every cross-file declaration named `word` to `bag`.
@@ -856,6 +937,58 @@ impl SymbolGraph {
         self.out_edges.entry(from).or_default().push(edge);
         self.in_edges.entry(to).or_default().push(edge);
     }
+}
+
+/// Which functions a call to `callee_name` in `file_id` can be
+/// reaching, in order of confidence.
+///
+/// The old rule was "every function with this name, anywhere". On a
+/// 7,038-file workspace that made a call to `assert` link to all
+/// seven unrelated functions of that name, so six of every seven
+/// edges were wrong and one function node collected 32,887 callers
+/// (#8107).
+///
+/// The replacement never guesses between candidates it cannot
+/// distinguish:
+///
+/// 1. **Same file.** A local definition shadows anything imported,
+///    so if the file defines the name itself, that is the call.
+/// 2. **Imported files.** Otherwise the call can only reach what
+///    this file actually imports. All matching declarations in the
+///    resolved import set are returned, because a genuine ambiguity
+///    across two imports is a fact about the code, not a guess.
+/// 3. **Exactly one declaration workspace-wide.** A unique name is
+///    unambiguous whether or not the import resolver saw the edge,
+///    which keeps recall for implicit visibility — a sibling module
+///    in the same crate, a global, a language with no import syntax.
+/// 4. **Otherwise, nothing.** Several candidates and no import
+///    linking any of them is precisely the case where an edge would
+///    be invented rather than found.
+fn pick_call_targets(
+    functions: &[(NodeId, FileId)],
+    file_id: FileId,
+    visible: &HashSet<FileId>,
+) -> Vec<NodeId> {
+    let local: Vec<NodeId> = functions
+        .iter()
+        .filter(|(_, file)| *file == file_id)
+        .map(|(id, _)| *id)
+        .collect();
+    if !local.is_empty() {
+        return local;
+    }
+    let imported: Vec<NodeId> = functions
+        .iter()
+        .filter(|(_, file)| visible.contains(file))
+        .map(|(id, _)| *id)
+        .collect();
+    if !imported.is_empty() {
+        return imported;
+    }
+    if functions.len() == 1 {
+        return vec![functions[0].0];
+    }
+    Vec::new()
 }
 
 /// Derive a coarse module name from a workspace-relative path (basename
