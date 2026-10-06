@@ -28,7 +28,13 @@ pub type GuidanceSource = {
   imported_from?: string,
 }
 
-/** A source that was discovered but did not reach the model, and why. */
+/**
+ * A source that was discovered but did not reach the model, and why.
+ *
+ * `reason` is `"duplicate_body"`, `"file_too_large"`, `"budget_exhausted"`, or
+ * `"outside_scope"` for a user-scope entry or import that would leave the home
+ * directory and was never opened.
+ */
 pub type GuidanceOmission = {path: string, reason: string, bytes: int}
 
 /**
@@ -69,7 +75,8 @@ pub type GuidanceRequest = {
   /**
    * Home-relative user-scope files to read, in order. Defaults to
    * `PEER_AGENT_USER_SCOPE_FILES`. A host that keeps its own user file names
-   * it here and offers the peer files as an explicit opt-in.
+   * it here and offers the peer files as an explicit opt-in. Each entry, and
+   * every `@` import reached from it at any hop, must stay under `home_dir`.
    */
   user_scope_files?: list<string>,
   include_ancestors?: bool,
@@ -156,21 +163,9 @@ pub fn resolve_workspace_guidance(fs: HarnessFs, request: GuidanceRequest) -> Gu
   const hops = request.max_import_hops ?? DEFAULT_MAX_IMPORT_HOPS
   const skip = request.skip_dirs ?? DEFAULT_SKIP_DIRS
   // Ordered candidate directories, broadest scope first.
-  let candidates: list<{dir: string, scope: GuidanceScope, depth: int, file?: string}> = []
-  if request.include_user_scope ?? true {
-    const home = request.home_dir ?? ""
-    if home != "" {
-      for rel in request.user_scope_files ?? PEER_AGENT_USER_SCOPE_FILES {
-        // Home-relative only: an absolute path or a `..` segment would read a
-        // file outside the home directory into model context.
-        if !__guidance_home_relative(rel) {
-          continue
-        }
-        candidates = candidates
-          + [{dir: __guidance_norm(home), scope: "user", depth: -1, file: rel}]
-      }
-    }
-  }
+  const user_scope = __guidance_user_candidates(request)
+  let candidates: list<GuidanceCandidate> = user_scope.candidates
+  let omitted: list<GuidanceOmission> = user_scope.omitted
   if request.include_ancestors ?? true {
     for dir in __guidance_ancestors(root) {
       candidates = candidates + [{dir: dir, scope: "ancestor", depth: -1}]
@@ -195,7 +190,6 @@ pub fn resolve_workspace_guidance(fs: HarnessFs, request: GuidanceRequest) -> Gu
   let sources: list<GuidanceSource> = []
   let seen_bodies: list<string> = []
   let seen_paths: list<string> = []
-  let omitted: list<GuidanceOmission> = []
   // Every file opened, plus every import resolved, whether or not it was
   // followed. A caller watching for staleness needs all of them.
   let dependencies: list<GuidanceDependency> = []
@@ -229,10 +223,12 @@ pub fn resolve_workspace_guidance(fs: HarnessFs, request: GuidanceRequest) -> Gu
         fs,
         __guidance_strip_comments(text),
         dirname(full),
+        candidate.boundary,
         hops,
         [full],
       )
       dependencies = dependencies + expansion.dependencies
+      omitted = omitted + expansion.omitted
       const body = trim(expansion.text)
       if body == "" {
         continue
@@ -300,19 +296,38 @@ pub fn resolve_workspace_guidance(fs: HarnessFs, request: GuidanceRequest) -> Gu
   )
 }
 
-/** True for a path that stays under the directory it is joined to. */
-fn __guidance_home_relative(rel: string) -> bool {
-  const text = trim(rel)
-  if text == "" || starts_with(text, "/") || starts_with(text, "~") || text.contains("\\")
-    || regex_match(r"^[A-Za-z]:", text) != nil {
-    return false
+/**
+ * A directory or file the resolver reads, in precedence order. A candidate
+ * with a `boundary` reads nothing outside it, through any import at any hop.
+ */
+type GuidanceCandidate = {
+  dir: string,
+  scope: GuidanceScope,
+  depth: int,
+  file?: string,
+  boundary?: string,
+}
+
+/** The user-scope candidates, each bounded by home, and the entries refused. */
+fn __guidance_user_candidates(
+  request: GuidanceRequest,
+) -> {candidates: list<GuidanceCandidate>, omitted: list<GuidanceOmission>} {
+  let candidates: list<GuidanceCandidate> = []
+  let omitted: list<GuidanceOmission> = []
+  const home = __guidance_norm(request.home_dir ?? "")
+  if !(request.include_user_scope ?? true) || home == "" {
+    return {candidates: candidates, omitted: omitted}
   }
-  for segment in split(text, "/") {
-    if segment == ".." {
-      return false
+  for rel in request.user_scope_files ?? PEER_AGENT_USER_SCOPE_FILES {
+    const target = __guidance_import_path(home, rel, home)
+    if !target.inside {
+      omitted = omitted + [{path: target.path, reason: "outside_scope", bytes: 0}]
+      continue
     }
+    candidates = candidates
+      + [{dir: home, scope: "user", depth: -1, file: target.path, boundary: home}]
   }
-  return true
+  return {candidates: candidates, omitted: omitted}
 }
 
 /**
@@ -553,19 +568,22 @@ fn __guidance_expand(
   fs: HarnessFs,
   text: string,
   base_dir: string,
+  boundary: string?,
   hops: int,
   seen: list<string>,
 ) -> GuidanceExpansion {
   if !text.contains("@") {
-    return {text: text, dependencies: []}
+    return {text: text, dependencies: [], omitted: []}
   }
   if hops <= 0 {
     // The budget is spent, so the imports on this text are dependencies that
     // were deliberately not followed. Naming them keeps "not followed" apart
     // from "not present".
-    return {text: text, dependencies: __guidance_unfollowed(text, base_dir, "hop_limit")}
+    const unfollowed = __guidance_unfollowed(text, base_dir, boundary, "hop_limit")
+    return {text: text, dependencies: unfollowed.dependencies, omitted: unfollowed.omitted}
   }
   let deps: list<GuidanceDependency> = []
+  let refused: list<GuidanceOmission> = []
   let out: list<string> = []
   let in_fence = false
   for line in text.lines() {
@@ -584,11 +602,14 @@ fn __guidance_expand(
       out = out + [line]
       continue
     }
-    const spec = to_string(target)
-    const resolved = if starts_with(spec, "/") {
-      spec
-    } else {
-      path_join(base_dir, spec)
+    const import_path = __guidance_import_path(base_dir, to_string(target), boundary)
+    const resolved = import_path.path
+    if !import_path.inside {
+      // Never read and never a dependency: creating that file cannot change a
+      // resolution that will not open it.
+      refused = refused + [{path: resolved, reason: "outside_scope", bytes: 0}]
+      out = out + [line]
+      continue
     }
     if seen.contains(resolved) {
       deps = deps + [{path: resolved, state: "cycle"}]
@@ -606,17 +627,96 @@ fn __guidance_expand(
       fs,
       __guidance_strip_comments(to_string(body)),
       __guidance_parent(resolved) ?? base_dir,
+      boundary,
       hops - 1,
       seen + [resolved],
     )
     deps = deps + nested.dependencies
+    refused = refused + nested.omitted
     out = out + [nested.text]
   }
-  return {text: join(out, "\n"), dependencies: deps}
+  return {text: join(out, "\n"), dependencies: deps, omitted: refused}
 }
 
-/** The expanded text and every path the expansion depended on. */
-type GuidanceExpansion = {text: string, dependencies: list<GuidanceDependency>}
+/**
+ * The expanded text, every path the expansion depended on, and every import it
+ * refused because the path left the source's boundary.
+ */
+type GuidanceExpansion = {
+  text: string,
+  dependencies: list<GuidanceDependency>,
+  omitted: list<GuidanceOmission>,
+}
+
+/**
+ * Where an `@` import or a user-scope entry points, and whether it stays under
+ * `boundary`.
+ *
+ * This is the one containment check for every path the resolver derives from
+ * file text or a host list: a user-scope entry, an import it makes, and each
+ * nested import at every hop, followed or not. With a boundary the path is
+ * normalized lexically, so `..` and an absolute spec are judged by where they
+ * land, not how they are spelled. Without one the path is joined as written.
+ *
+ * Lexical only: a symlink under the boundary is followed by the read. The
+ * resolver has no way to canonicalize through `HarnessFs`; a confined run's
+ * sandbox canonicalizes every read against its grant roots.
+ */
+fn __guidance_import_path(
+  base_dir: string,
+  spec: string,
+  boundary: string?,
+) -> {path: string, inside: bool} {
+  const joined = path_join(base_dir, trim(spec))
+  if boundary == nil {
+    return {path: joined, inside: true}
+  }
+  const path = __guidance_lexical(joined)
+  const root = __guidance_lexical(path_join(to_string(boundary)))
+  if path == nil || root == nil {
+    return {path: joined, inside: false}
+  }
+  const text = to_string(path)
+  const base = to_string(root)
+  const inside = text == base
+    || starts_with(
+      text,
+      if base == "/" {
+        base
+      } else {
+        base + "/"
+      },
+    )
+  return {path: text, inside: inside}
+}
+
+/**
+ * `path` with `.` segments dropped, repeated separators collapsed, and each
+ * `..` applied to the segment before it; nil when a `..` climbs above the
+ * start of the path.
+ */
+fn __guidance_lexical(path: string) -> string? {
+  let kept: list<string> = []
+  for segment in split(path, "/") {
+    if segment == "" || segment == "." {
+      continue
+    }
+    if segment == ".." {
+      if len(kept) == 0 {
+        return nil
+      }
+      kept = kept[0:len(kept) - 1]
+      continue
+    }
+    kept = kept + [segment]
+  }
+  const body = join(kept, "/")
+  return if starts_with(path, "/") {
+    "/" + body
+  } else {
+    body
+  }
+}
 
 /**
  * The imports named by `text` that were not followed, all with one state.
@@ -628,9 +728,11 @@ type GuidanceExpansion = {text: string, dependencies: list<GuidanceDependency>}
 fn __guidance_unfollowed(
   text: string,
   base_dir: string,
+  boundary: string?,
   state: string,
-) -> list<GuidanceDependency> {
+) -> {dependencies: list<GuidanceDependency>, omitted: list<GuidanceOmission>} {
   let found: list<GuidanceDependency> = []
+  let refused: list<GuidanceOmission> = []
   let in_fence = false
   for line in text.lines() {
     const trimmed = trim(line)
@@ -645,15 +747,14 @@ fn __guidance_unfollowed(
     if target == nil {
       continue
     }
-    const spec = to_string(target)
-    const resolved = if starts_with(spec, "/") {
-      spec
+    const import_path = __guidance_import_path(base_dir, to_string(target), boundary)
+    if import_path.inside {
+      found = found + [{path: import_path.path, state: state}]
     } else {
-      path_join(base_dir, spec)
+      refused = refused + [{path: import_path.path, reason: "outside_scope", bytes: 0}]
     }
-    found = found + [{path: resolved, state: state}]
   }
-  return found
+  return {dependencies: found, omitted: refused}
 }
 
 /**

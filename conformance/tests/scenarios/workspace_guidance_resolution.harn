@@ -207,5 +207,79 @@ pipeline test(harness: Harness) {
     "imports resolve beside the selected file",
   )
   assert(!imported_body.contains("Wrong home-relative import."), "HOME is not the import base")
+  // Imports from a user-scope file stay under home at every hop: an absolute
+  // import, a `..` import, and a `..` import two hops down are all refused,
+  // while an in-home import at the same depth still loads.
+  harness.fs.write_text(path_join(base, "secret-abs.md"), "Absolute escape.")
+  harness.fs.write_text(path_join(base, "secret-rel.md"), "Parent escape.")
+  harness.fs.write_text(path_join(base, "secret-deep.md"), "Nested escape.")
+  harness.fs.write_text(
+    path_join(home, ".host/AGENTS.md"),
+    "Host rule.\n@" + path_join(base, "secret-abs.md") + "\n@../../secret-rel.md\n@shared.md",
+  )
+  harness.fs.write_text(
+    path_join(home, ".host/shared.md"),
+    "Shared rule.\n@../../secret-deep.md\n@../inner.md",
+  )
+  harness.fs.write_text(path_join(home, "inner.md"), "In-home nested rule.")
+  const confined_request = {
+    workspace_root: plain,
+    home_dir: home,
+    include_ancestors: false,
+    user_scope_files: [".host/AGENTS.md"],
+  }
+  const confined = resolve_workspace_guidance(harness.fs, confined_request)
+  const confined_body = join(confined.sources.map({ entry -> entry.body }).to_list(), "\n")
+  const confined_deps = confined.dependencies.map({ entry -> entry.path }).to_list()
+  const confined_omitted = confined.omitted.filter({ entry -> entry.reason == "outside_scope" })
+    .map({ entry -> entry.path })
+    .to_list()
+  assert(confined_body.contains("In-home nested rule."), "an in-home import two hops down loads")
+  for name in ["secret-abs.md", "secret-rel.md", "secret-deep.md"] {
+    const escape = path_join(base, name)
+    assert(!confined_deps.contains(escape), "an import outside home is never read: " + name)
+    assert(confined_omitted.contains(escape), "an import outside home is named as refused: " + name)
+  }
+  for text in ["Absolute escape.", "Parent escape.", "Nested escape."] {
+    assert(!confined_body.contains(text), "text outside home never reaches the model: " + text)
+  }
+  // The hop-limit path names unfollowed imports as dependencies; one outside
+  // home is refused there too, so a staleness watcher never stats it.
+  const shallow = resolve_workspace_guidance(
+    harness.fs,
+    {
+      workspace_root: plain,
+      home_dir: home,
+      include_ancestors: false,
+      user_scope_files: [".host/AGENTS.md"],
+      max_import_hops: 1,
+    },
+  )
+  const shallow_states = shallow.dependencies.filter(
+    { entry -> entry.path == path_join(base, "secret-deep.md") },
+  )
+    .to_list()
+  assert(shallow_states.count() == 0, "a hop-limited import outside home is not a dependency")
+  assert(
+    shallow.dependencies.filter(
+      { entry -> entry.path == path_join(home, "inner.md") && entry.state == "hop_limit" },
+    )
+      .to_list()
+      .count()
+      == 1,
+    "a hop-limited import inside home is still named",
+  )
+  // Workspace guidance keeps its documented reach: only user scope is bounded.
+  harness.fs.write_text(path_join(plain, "AGENTS.md"), "Plain rule.\n@../secret-abs.md")
+  const workspace_reach = resolve_workspace_guidance(
+    harness.fs,
+    {workspace_root: plain, home_dir: home, include_ancestors: false},
+  )
+  assert(
+    join(workspace_reach.sources.map({ entry -> entry.body }).to_list(), "\n").contains(
+      "Absolute escape.",
+    ),
+    "a workspace file's `..` import is not confined to home",
+  )
   harness.stdio.log("workspace_guidance_resolution passed")
 }
