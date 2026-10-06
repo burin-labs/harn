@@ -158,4 +158,24 @@ rm -f "$baseline_dir/sccache-baseline.json"
 output=$(PATH="$tmp_root/bin:$PATH" SCCACHE_TEST_RECORD="$record"   SCCACHE_TEST_STATS="$warm_after" RUNNER_TEMP="$baseline_dir"   HARN_SHARED_SCCACHE=on HARN_RUNNER_TIER=self-hosted   "$repo_root/scripts/ci/finalize_sccache.sh")
 [[ "$output" == *"sccache measured (cumulative): requests=9321 hits=8321 misses=1000"* ]]
 
+# A job that compiled through Kache reports Kache's own numbers for this
+# checkout and never the host sccache's, which counted other runners' work.
+mkdir -p "$tmp_root/kache-bin"
+cat > "$tmp_root/kache-bin/kache" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$KACHE_TEST_RECORD"
+printf '  Hit rate     98.9%%    891 of 901 crates from cache, 10 compiled\n'
+SH
+chmod +x "$tmp_root/kache-bin/kache"
+kache_record="$tmp_root/kache-record"
+: > "$record"
+output=$(PATH="$tmp_root/bin:$PATH" SCCACHE_TEST_RECORD="$record" \
+  KACHE_TEST_RECORD="$kache_record" RUSTC_WRAPPER="$tmp_root/kache-bin/kache" \
+  GITHUB_WORKSPACE=/work/harn GITHUB_STEP_SUMMARY="$tmp_root/kache-summary" \
+  "$repo_root/scripts/ci/finalize_sccache.sh")
+[[ "$output" == *"::notice title=Kache::HARN_COMPILER_CACHE=kache job 98.9% 891 of 901"* ]]
+grep -Fxq -- 'stats --last-build --root /work/harn' "$kache_record"
+grep -Fq '### Kache' "$tmp_root/kache-summary"
+[[ ! -s "$record" ]]
+
 echo "ci_finalize_sccache_test: ok"

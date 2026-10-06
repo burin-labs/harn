@@ -3,6 +3,20 @@
 # runner's orphan-process cleanup cannot turn a successful proof into a flake.
 set -euo pipefail
 
+# A job that compiled through Kache reports Kache. The host's sccache counters
+# would describe other runners' work, not this job's.
+if [[ "$(basename -- "${RUSTC_WRAPPER:-}")" == kache ]]; then
+  report="$("$RUSTC_WRAPPER" stats --last-build --root "${GITHUB_WORKSPACE:-$PWD}" 2>&1)" || true
+  printf '%s\n' "$report"
+  if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
+    fence='```'
+    printf '### Kache\n\n%stext\n%s\n%s\n' "$fence" "$report" "$fence" >> "$GITHUB_STEP_SUMMARY"
+  fi
+  rate="$(awk '/Hit rate/ {print $3, $4, $5, $6; exit}' <<< "$report")"
+  echo "::notice title=Kache::HARN_COMPILER_CACHE=kache job ${rate:-hit rate unreported}"
+  exit 0
+fi
+
 sccache_bin="${SCCACHE_PATH:-sccache}"
 if ! command -v "$sccache_bin" >/dev/null 2>&1; then
   echo "::notice title=sccache unavailable::Compiler-cache activity was not measured; sccache is not installed."
