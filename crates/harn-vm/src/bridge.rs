@@ -91,6 +91,8 @@ pub struct HostBridge {
     writer: HostBridgeWriter,
     /// ACP session ID (set in ACP mode for session-scoped notifications).
     session_id: std::sync::Mutex<String>,
+    /// Caller identity for this bridge's ACP prompt, never a child session's turn.
+    caller_message_id: std::sync::Mutex<Option<String>>,
     /// Name of the currently executing Harn script (without .harn suffix).
     script_name: std::sync::Mutex<String>,
     /// Transcript injections queued by the host while a run is active.
@@ -647,6 +649,7 @@ impl HostBridge {
             disconnected,
             writer: stdout_writer(Arc::new(std::sync::Mutex::new(()))),
             session_id: std::sync::Mutex::new(String::new()),
+            caller_message_id: std::sync::Mutex::new(None),
             script_name: std::sync::Mutex::new(String::new()),
             queued_transcript_injections,
             resume_requested,
@@ -702,6 +705,7 @@ impl HostBridge {
             disconnected: Arc::new(AtomicBool::new(false)),
             writer,
             session_id: std::sync::Mutex::new(String::new()),
+            caller_message_id: std::sync::Mutex::new(None),
             script_name: std::sync::Mutex::new(String::new()),
             queued_transcript_injections: control.queued_transcript_injections,
             resume_requested: Arc::new(AtomicBool::new(false)),
@@ -727,6 +731,7 @@ impl HostBridge {
             disconnected: Arc::new(AtomicBool::new(false)),
             writer: stdout_writer(Arc::new(std::sync::Mutex::new(()))),
             session_id: std::sync::Mutex::new(String::new()),
+            caller_message_id: std::sync::Mutex::new(None),
             script_name: std::sync::Mutex::new(String::new()),
             queued_transcript_injections: HostBridgeInjectionState::default(),
             resume_requested: Arc::new(AtomicBool::new(false)),
@@ -746,6 +751,25 @@ impl HostBridge {
     /// Set the ACP session ID for session-scoped notifications.
     pub fn set_session_id(&self, id: &str) {
         *self.session_id.lock().unwrap_or_else(|e| e.into_inner()) = id.to_string();
+    }
+
+    /// Bind the already normalized identity of the current ACP prompt.
+    pub fn set_caller_message_id(&self, id: Option<String>) {
+        *self
+            .caller_message_id
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()) = id;
+    }
+
+    /// Resolve identity only for the ACP session this prompt actually targets.
+    pub(crate) fn caller_message_id_for_session(&self, session_id: &str) -> Option<String> {
+        if session_id != self.get_session_id() {
+            return None;
+        }
+        self.caller_message_id
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
     }
 
     /// Set the currently executing script name (without .harn suffix).
@@ -1469,6 +1493,20 @@ mod tests {
                 crate::tool_call_cancellations::fresh_registry(),
             ),
         )
+    }
+
+    #[test]
+    fn caller_message_identity_is_bound_to_the_targeted_session() {
+        let bridge = test_bridge();
+        bridge.set_session_id("parent");
+        bridge.set_caller_message_id(Some("caller-turn".into()));
+        assert_eq!(
+            bridge.caller_message_id_for_session("parent").as_deref(),
+            Some("caller-turn")
+        );
+        assert_eq!(bridge.caller_message_id_for_session("child"), None);
+        bridge.set_caller_message_id(None);
+        assert_eq!(bridge.caller_message_id_for_session("parent"), None);
     }
 
     #[test]

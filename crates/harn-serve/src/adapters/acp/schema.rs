@@ -309,13 +309,6 @@ pub(super) fn normalize_acp_prompt(
 ) -> Result<NormalizedAcpPrompt, String> {
     let correlation: super::AcpPromptCorrelation = serde_json::from_value(params.clone())
         .map_err(|error| format!("session/prompt: invalid caller message identity: {error}"))?;
-    if correlation
-        .message_id
-        .as_deref()
-        .is_some_and(|value| value.trim().is_empty())
-    {
-        return Err("session/prompt: messageId must be a nonempty string".to_owned());
-    }
     let Some(prompt) = params.get("prompt") else {
         return Ok(NormalizedAcpPrompt {
             text: String::new(),
@@ -615,9 +608,11 @@ mod tests {
         .unwrap();
         assert!(absent.messages[0].get("messageId").is_none());
         for identity in [
+            serde_json::Value::Null,
             serde_json::json!(42),
             serde_json::json!({}),
             serde_json::json!(""),
+            serde_json::json!("   "),
         ] {
             assert!(super::normalize_acp_prompt(&serde_json::json!({
                 "messageId": identity,

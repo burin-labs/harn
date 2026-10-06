@@ -554,8 +554,26 @@ impl AcpSessionIdParams {
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct AcpPromptCorrelation {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_caller_message_id"
+    )]
+    #[schemars(with = "String")]
     pub message_id: Option<String>,
+}
+
+fn deserialize_caller_message_id<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = String::deserialize(deserializer)?;
+    if value.trim().is_empty() {
+        return Err(serde::de::Error::custom(
+            "messageId must be a nonempty string",
+        ));
+    }
+    Ok(Some(value))
 }
 
 impl AcpPromptCorrelation {

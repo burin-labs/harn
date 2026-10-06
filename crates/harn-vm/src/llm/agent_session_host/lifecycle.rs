@@ -47,11 +47,26 @@ async fn host_agent_session_init(
         Some(VmValue::String(s)) => Some(s.to_string()),
         _ => None,
     };
-    let opts_map = opts_dict(args.get(2));
+    let mut opts_map = opts_dict(args.get(2));
     let host_bridge = crate::llm::agent_runtime::current_host_bridge();
     let session_id = opt_str(&opts_map, "session_id")
         .or_else(crate::agent_sessions::current_session_id)
         .unwrap_or_else(|| format!("agent_session_{}", now_id()));
+
+    // Bind the default opening turn before durable context assembly. The
+    // bridge carries a validated caller fact, scoped to its ACP session;
+    // delegated children cannot inherit the parent's message identity.
+    if opt_str(&opts_map, "initial_user_message_id").is_none() {
+        if let Some(message_id) = host_bridge
+            .as_ref()
+            .and_then(|bridge| bridge.caller_message_id_for_session(&session_id))
+        {
+            opts_map.insert(
+                "initial_user_message_id".into(),
+                VmValue::String(message_id.into()),
+            );
+        }
+    }
 
     let initialized = live_transcript_journal::initialize(
         &session_id,
