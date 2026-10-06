@@ -13,6 +13,8 @@ pub const CANONICAL_HISTORY_BOUNDARIES_SCHEMA: &str = "harn.canonical_history_bo
 #[serde(deny_unknown_fields)]
 pub struct CanonicalHistoryPosition {
     pub source_event_id: String,
+    pub origin_session_id: String,
+    pub before_boundary: CanonicalSessionBoundary,
     pub boundary: CanonicalSessionBoundary,
 }
 
@@ -32,12 +34,21 @@ impl CanonicalHistoryBoundaries {
             ),
             positions: events
                 .iter()
-                .filter_map(|event| {
+                .enumerate()
+                .filter_map(|(index, event)| {
                     event
                         .headers
                         .get("source_event_id")
                         .map(|identity| CanonicalHistoryPosition {
                             source_event_id: identity.clone(),
+                            origin_session_id: event.canonical_origin_session_id().into(),
+                            // Source-linked positions omit metadata rows. The
+                            // store owns the actual preceding durable prefix.
+                            before_boundary: if index == 0 {
+                                CanonicalSessionBoundary::empty(session_id)
+                            } else {
+                                CanonicalSessionBoundary::acknowledged(&events[index - 1])
+                            },
                             boundary: CanonicalSessionBoundary::acknowledged(event),
                         })
                 })

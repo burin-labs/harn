@@ -284,6 +284,7 @@ fn generate_go_with_payloads(payloads: &SessionUpdatePayloads) -> String {
     super::plan_records::append(&mut out, super::records::Target::Go);
     super::inference_admission::append(&mut out, super::records::Target::Go);
     super::canonical_history::append(&mut out, super::records::Target::Go);
+    super::prompt_correlation::append(&mut out, super::records::Target::Go);
     out
 }
 

@@ -114,6 +114,7 @@ fn append_locked(
         prev_hash,
         signed_by: None,
     };
+    stored.bind_canonical_origin(&record.meta.id);
     stored.record_hash = compute_record_hash(&stored);
     if let Some(signer) = hooks.event_signer.as_ref() {
         stored.signed_by = Some(signer.sign_event(&stored));

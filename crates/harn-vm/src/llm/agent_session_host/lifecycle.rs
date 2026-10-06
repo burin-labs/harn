@@ -203,10 +203,13 @@ async fn host_agent_session_init(
             _ => false,
         };
         if !has_history || !message.trim().is_empty() || has_user_content {
-            let user_msg = serde_json::json!({
+            let mut user_msg = serde_json::json!({
                 "role": "user",
                 "content": user_content,
             });
+            if let Some(message_id) = opt_str(&opts_map, "initial_user_message_id") {
+                user_msg["messageId"] = serde_json::json!(message_id);
+            }
             crate::agent_sessions::inject_message(&resolved, json_to_vm(&user_msg))
                 .map_err(VmError::Runtime)?;
         } else {

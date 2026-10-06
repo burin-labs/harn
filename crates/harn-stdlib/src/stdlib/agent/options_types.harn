@@ -553,6 +553,8 @@ pub type AgentLifecycleSpec = {
 pub type AgentContextSpec = {
   /** Initial user message content; omitted content uses the task text. */
   initial_user_content?: string | list<dict>,
+  /** Explicit caller identity for the opening user message; never a source event ID. */
+  initial_user_message_id?: string,
   /** Root for the canonical durable session store used by this run. */
   root?: string,
   transcript_projection?: string | dict,

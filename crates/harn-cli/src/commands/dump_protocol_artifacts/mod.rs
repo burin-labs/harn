@@ -21,6 +21,7 @@ mod inference_admission;
 mod manifest;
 mod plan_records;
 mod prepared_session;
+mod prompt_correlation;
 mod recap_records;
 mod records;
 mod schema_records;

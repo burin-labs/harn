@@ -8,12 +8,21 @@ use crate::value::VmValue;
 const KEY: &str = "harn_assistant_publication";
 const SCHEMA: &str = "harn.assistant_publication.v1";
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
-enum Publication {
+pub enum Publication {
     Pending,
     Withheld,
     Published,
+}
+
+pub(crate) fn diagnostic_disposition(message: &serde_json::Value) -> (bool, Option<Publication>) {
+    match message.get(KEY) {
+        Some(value) => (true, serde_json::from_value(value.clone()).ok()),
+        None => (false, None),
+    }
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]

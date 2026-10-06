@@ -956,6 +956,7 @@ export interface HarnSessionTimelineUpdate {
     super::plan_records::append(&mut out, super::records::Target::Typescript);
     super::inference_admission::append(&mut out, super::records::Target::Typescript);
     super::canonical_history::append(&mut out, super::records::Target::Typescript);
+    super::prompt_correlation::append(&mut out, super::records::Target::Typescript);
     out
 }
 

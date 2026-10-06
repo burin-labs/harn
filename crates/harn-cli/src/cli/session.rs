@@ -25,6 +25,16 @@ pub(crate) enum SessionCommand {
     /// Check or rewrite the repository's run/session-view compatibility fixtures.
     #[command(hide = true)]
     ViewFixtures(SessionViewFixturesArgs),
+    /// Inspect source-linked publication decisions without exposing actor prose.
+    #[command(hide = true)]
+    PublicationEvidence(SessionPublicationEvidenceArgs),
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct SessionPublicationEvidenceArgs {
+    pub session_id: String,
+    #[arg(long, value_name = "PATH")]
+    pub project_root: PathBuf,
 }
 
 /// Sessions are the input to `harn runs --from-session`, so they need a way to

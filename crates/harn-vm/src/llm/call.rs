@@ -541,11 +541,19 @@ pub(crate) async fn execute_llm_call_outcome(
     // `llm_call_with_bridge`, structured variants, and the plain
     // `llm_call_impl` — so recording here is the single DRY point.
     super::introspection::record_resolved_llm_call(&opts.provider, &opts.model);
-    if let Some(policy) = opts.routing_policy.clone() {
+    let call_role = opts.context_manifest.call_role().to_owned();
+    let call_stage = opts.call_stage.clone();
+    let mut outcome = if let Some(policy) = opts.routing_policy.clone() {
         execute_routing_schema_retry_loop(ctx, policy, opts, options, bridge, delta_sink).await
     } else {
         execute_schema_retry_loop(ctx, opts, options, bridge, delta_sink).await
-    }
+    }?;
+    outcome.vm_result = super::pairing_receipts::attach_call_provenance(
+        outcome.vm_result,
+        &call_role,
+        call_stage.as_deref(),
+    );
+    Ok(outcome)
 }
 
 /// Make one observed call and project its visible text to `bridge` as

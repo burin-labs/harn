@@ -39,6 +39,7 @@ fn exported_llm_outcome_vocabularies_are_complete_and_round_trip() {
             LlmErrorReason::OutputBudgetExhausted => 12,
             LlmErrorReason::Unknown => 13,
             LlmErrorReason::PolicyDenied => 14,
+            LlmErrorReason::ManagedSpendPaused => 15,
         }
     }
 
@@ -48,7 +49,7 @@ fn exported_llm_outcome_vocabularies_are_complete_and_round_trip() {
         assert_eq!(LlmErrorKind::parse(kind.as_str()), Some(*kind));
     }
 
-    assert_eq!(LlmErrorReason::ALL.len(), 15);
+    assert_eq!(LlmErrorReason::ALL.len(), 16);
     for (index, reason) in LlmErrorReason::ALL.iter().enumerate() {
         assert_eq!(reason_ordinal(*reason), index);
         assert_eq!(LlmErrorReason::parse(reason.as_str()), Some(*reason));
@@ -474,6 +475,52 @@ fn a_billing_stop_on_a_429_is_terminal_not_a_rate_limit() {
 
     assert_eq!(classified.reason, LlmErrorReason::BillingLimit);
     assert_eq!(classified.kind, LlmErrorKind::Terminal);
+}
+
+#[test]
+fn managed_spend_pause_is_an_explicit_terminal_reason_not_personal_credit() {
+    for provider in ["openai", "anthropic"] {
+        let body = r#"{"error":{"reason":"managed_spend_paused","kind":"terminal","code":"billing_limit","message":"Managed AI is paused. Try again tomorrow or use your own key."}}"#;
+        let info = classify_provider_http_error(
+            provider,
+            reqwest::StatusCode::TOO_MANY_REQUESTS,
+            None,
+            body,
+        );
+        assert_eq!(info.reason, LlmErrorReason::ManagedSpendPaused);
+        assert_eq!(info.kind, LlmErrorKind::Terminal);
+        let error = provider_http_error(
+            None,
+            provider,
+            reqwest::StatusCode::TOO_MANY_REQUESTS,
+            &reqwest::header::HeaderMap::new(),
+            body,
+        );
+        assert_eq!(
+            thrown_field(&error, "reason").as_deref(),
+            Some("managed_spend_paused")
+        );
+        assert_eq!(thrown_field(&error, "kind").as_deref(), Some("terminal"));
+        assert_eq!(thrown_field(&error, "category").as_deref(), Some("generic"));
+    }
+}
+
+#[test]
+fn managed_spend_reason_is_not_inferred_from_opaque_code_message_or_metadata() {
+    for body in [
+        r#"{"error":{"code":"managed_spend_paused","message":"Managed AI is paused"}}"#,
+        r#"{"error":{"message":"managed_spend_paused","metadata":{"reason":"managed_spend_paused"}}}"#,
+        r#"{"error":{"reason":42,"message":"Managed AI is paused"}}"#,
+    ] {
+        let info = classify_provider_http_error(
+            "openai",
+            reqwest::StatusCode::TOO_MANY_REQUESTS,
+            None,
+            body,
+        );
+        assert_eq!(info.reason, LlmErrorReason::RateLimit);
+        assert_eq!(info.kind, LlmErrorKind::Transient);
+    }
 }
 
 /// The same stop expressed as a message rather than a code, which is how

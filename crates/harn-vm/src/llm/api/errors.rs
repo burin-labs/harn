@@ -78,6 +78,9 @@ pub enum LlmErrorReason {
     /// exhausted retry budget rather than an account with no credit, so the
     /// terminal record names the wrong cause.
     BillingLimit,
+    /// Managed inference is paused by its service's spend policy. Personal
+    /// provider credit may still be available; identical retries cannot help.
+    ManagedSpendPaused,
     /// The call consumed its entire output budget and committed nothing. The
     /// same context under the same cap exhausts the same way, so this is a
     /// deterministic budget failure rather than a provider hiccup: recovery is
@@ -108,6 +111,7 @@ impl LlmErrorReason {
         Self::OutputBudgetExhausted,
         Self::Unknown,
         Self::PolicyDenied,
+        Self::ManagedSpendPaused,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -124,6 +128,7 @@ impl LlmErrorReason {
             Self::ModelUnavailable => "model_unavailable",
             Self::EmptyGeneration => "empty_generation",
             Self::BillingLimit => "billing_limit",
+            Self::ManagedSpendPaused => "managed_spend_paused",
             Self::OutputBudgetExhausted => "output_budget_exhausted",
             Self::Unknown => "unknown",
             Self::PolicyDenied => "policy_denied",
@@ -144,6 +149,7 @@ impl LlmErrorReason {
             "model_unavailable" => Some(Self::ModelUnavailable),
             "empty_generation" => Some(Self::EmptyGeneration),
             "billing_limit" => Some(Self::BillingLimit),
+            "managed_spend_paused" => Some(Self::ManagedSpendPaused),
             "output_budget_exhausted" => Some(Self::OutputBudgetExhausted),
             "unknown" => Some(Self::Unknown),
             "policy_denied" => Some(Self::PolicyDenied),
@@ -173,6 +179,7 @@ impl LlmErrorReason {
             | Self::InvalidResponse
             | Self::ModelUnavailable
             | Self::BillingLimit
+            | Self::ManagedSpendPaused
             | Self::OutputBudgetExhausted
             | Self::Unknown => LlmErrorKind::Terminal,
             Self::PolicyDenied => LlmErrorKind::Terminal,
@@ -302,7 +309,9 @@ fn category_owned_by_llm_reason(reason: LlmErrorReason) -> Option<ErrorCategory>
         // (`rate_limit`) made every retry layer back off and resend into the
         // same refusal. `reason: billing_limit` names it; `generic` is the
         // category nothing retries.
-        LlmErrorReason::BillingLimit => Some(ErrorCategory::Generic),
+        LlmErrorReason::BillingLimit | LlmErrorReason::ManagedSpendPaused => {
+            Some(ErrorCategory::Generic)
+        }
         _ => None,
     }
 }
@@ -758,6 +767,23 @@ fn classify_http_status_and_body(
 ) -> (LlmErrorKind, LlmErrorReason) {
     // Patterns cover vLLM, OpenAI, Anthropic, and most OpenAI-compatibles.
     let body_lower = body.to_lowercase();
+
+    // An explicit service-owned reason outranks its 429 status and legacy
+    // billing wording. Never infer a managed spend policy from provider prose,
+    // opaque error codes or arbitrary nested metadata.
+    if serde_json::from_str::<serde_json::Value>(body)
+        .ok()
+        .is_some_and(|value| {
+            value
+                .get("error")
+                .unwrap_or(&value)
+                .get("reason")
+                .and_then(serde_json::Value::as_str)
+                == Some(LlmErrorReason::ManagedSpendPaused.as_str())
+        })
+    {
+        return (LlmErrorKind::Terminal, LlmErrorReason::ManagedSpendPaused);
+    }
 
     if is_context_overflow(&body_lower) {
         return (LlmErrorKind::Terminal, LlmErrorReason::ContextOverflow);

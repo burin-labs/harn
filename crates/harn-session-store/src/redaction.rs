@@ -144,8 +144,21 @@ fn apply_event_redaction(
     let Some(policy) = hooks.redaction.as_ref() else {
         return Ok(());
     };
+    let canonical_origin = headers
+        .get(crate::event::CANONICAL_ORIGIN_SESSION_HEADER)
+        .cloned();
     policy.redact_json_in_place(payload);
     *headers = policy.redact_headers(headers);
+    // This session ID is a store-owned lineage fact, not authored content.
+    // A confidentiality projection cannot grant or erase checkpoint ancestry.
+    match canonical_origin {
+        Some(origin) => {
+            headers.insert(crate::event::CANONICAL_ORIGIN_SESSION_HEADER.into(), origin);
+        }
+        None => {
+            headers.remove(crate::event::CANONICAL_ORIGIN_SESSION_HEADER);
+        }
+    }
     identity.apply_to_headers(headers)
 }
 

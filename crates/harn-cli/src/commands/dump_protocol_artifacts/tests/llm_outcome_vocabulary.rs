@@ -76,6 +76,43 @@ fn local_policy_denial_survives_the_native_protocol_projection() {
     assert_eq!(envelope["terminalClass"], "tool_policy_rejected");
 }
 
+#[test]
+fn managed_spend_pause_survives_the_generated_prompt_error_projection() {
+    for (owner, expected) in [
+        (
+            AgentTerminalClass::ManagedSpendPaused,
+            HarnLlmErrorReason::ManagedSpendPaused,
+        ),
+        (
+            AgentTerminalClass::ProviderBilling,
+            HarnLlmErrorReason::BillingLimit,
+        ),
+        (
+            AgentTerminalClass::RateLimited,
+            HarnLlmErrorReason::RateLimit,
+        ),
+    ] {
+        let reason = match owner {
+            AgentTerminalClass::ManagedSpendPaused => "managed_spend_paused",
+            AgentTerminalClass::ProviderBilling => "billing_limit",
+            AgentTerminalClass::RateLimited => "rate_limit",
+            _ => unreachable!(),
+        };
+        let transient = owner == AgentTerminalClass::RateLimited;
+        let facts = AcpPromptFailureFacts::from_thrown(&serde_json::json!({
+            "category": if transient { "rate_limit" } else { "generic" },
+            "kind": if transient { "transient" } else { "terminal" }, "reason": reason,
+        }));
+        let envelope = serde_json::to_value(AcpPromptErrorData::with_facts(owner, facts)).unwrap();
+        let decoded: HarnLlmErrorReason =
+            serde_json::from_value(envelope["reason"].clone()).unwrap();
+        assert_eq!(decoded, expected);
+        assert!(decoded.is_known());
+        assert_eq!(envelope["terminalClass"], owner.as_str());
+        assert_eq!(serde_json::to_value(decoded).unwrap(), envelope["reason"]);
+    }
+}
+
 /// The generated binding must carry exactly the owner's vocabulary. If this
 /// drifts, the artifact is stale and every consumer of it is guessing.
 #[test]

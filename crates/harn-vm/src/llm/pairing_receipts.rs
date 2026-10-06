@@ -33,6 +33,8 @@ use crate::value::VmValue;
 use serde::Serialize;
 
 const SESSION_MESSAGE_FACTS_KEY: &str = "_harn";
+const CALL_ROLE_KEY: &str = "_harn_call_role";
+const CALL_STAGE_KEY: &str = "_harn_call_stage";
 
 #[derive(Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -40,6 +42,12 @@ enum SessionMessageFacts {
     Assistant {
         tool_calls: Vec<serde_json::Value>,
         effective_reasoning_effort: crate::llm::EffectiveReasoningEffort,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        call_role: Option<String>,
+        /// Explicit null is a dispatch-observed unset stage; absent metadata
+        /// in an older record remains distinguishable from that observation.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        call_stage: Option<Option<String>>,
     },
     ToolResult {
         tool_call_id: String,
@@ -53,6 +61,27 @@ enum SessionMessageFacts {
         #[serde(skip_serializing_if = "Option::is_none")]
         data: Option<serde_json::Value>,
     },
+}
+
+/// The normalized dispatch contract supplies provenance, never response prose.
+pub(crate) fn attach_call_provenance(
+    result: VmValue,
+    call_role: &str,
+    call_stage: Option<&str>,
+) -> VmValue {
+    let Some(dict) = result.as_dict() else {
+        return result;
+    };
+    let mut dict = dict.clone();
+    dict.insert(
+        crate::value::intern_key(CALL_ROLE_KEY),
+        VmValue::string(call_role),
+    );
+    dict.insert(
+        crate::value::intern_key(CALL_STAGE_KEY),
+        call_stage.map(VmValue::string).unwrap_or(VmValue::Nil),
+    );
+    VmValue::dict(dict)
 }
 
 #[derive(Serialize)]
@@ -132,6 +161,20 @@ pub(crate) fn attach_assistant_facts(message: VmValue, llm_result: &VmValue) -> 
         &SessionMessageFacts::Assistant {
             tool_calls,
             effective_reasoning_effort,
+            call_role: llm_result
+                .as_dict()
+                .and_then(|result| result.get(CALL_ROLE_KEY))
+                .and_then(|value| match value {
+                    VmValue::String(role) => Some(role.to_string()),
+                    _ => None,
+                }),
+            call_stage: llm_result
+                .as_dict()
+                .and_then(|result| result.get(CALL_STAGE_KEY))
+                .map(|value| match value {
+                    VmValue::String(stage) => Some(stage.to_string()),
+                    _ => None,
+                }),
         },
     )
 }

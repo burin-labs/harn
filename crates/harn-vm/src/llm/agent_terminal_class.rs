@@ -36,6 +36,9 @@ pub enum AgentTerminalClass {
     /// same request into the same refusal. Arrives as an HTTP 429, so it must
     /// be told apart from `RateLimited` by the provider's own billing code.
     ProviderBilling,
+    /// The managed service's spend policy paused inference independently of
+    /// personal provider credit. Hosts can offer waiting or a personal key.
+    ManagedSpendPaused,
     RateLimited,
     Timeout,
     ResourceBusy,
@@ -47,11 +50,12 @@ pub enum AgentTerminalClass {
 }
 
 impl AgentTerminalClass {
-    pub const ALL: [Self; 12] = [
+    pub const ALL: [Self; 13] = [
         Self::ContextOverflow,
         Self::ProviderMisconfigured,
         Self::ProviderUnavailable,
         Self::ProviderBilling,
+        Self::ManagedSpendPaused,
         Self::RateLimited,
         Self::Timeout,
         Self::ResourceBusy,
@@ -68,6 +72,7 @@ impl AgentTerminalClass {
             Self::ProviderMisconfigured => "provider_misconfigured",
             Self::ProviderUnavailable => "provider_unavailable",
             Self::ProviderBilling => "provider_billing",
+            Self::ManagedSpendPaused => "managed_spend_paused",
             Self::RateLimited => "rate_limited",
             Self::Timeout => "timeout",
             Self::ResourceBusy => "resource_busy",
@@ -86,6 +91,7 @@ impl AgentTerminalClass {
                 | Self::ProviderMisconfigured
                 | Self::ProviderUnavailable
                 | Self::ProviderBilling
+                | Self::ManagedSpendPaused
                 | Self::RateLimited
                 | Self::Timeout
         )
@@ -97,6 +103,7 @@ impl AgentTerminalClass {
             "provider_misconfigured" => Some(Self::ProviderMisconfigured),
             "provider_unavailable" => Some(Self::ProviderUnavailable),
             "provider_billing" => Some(Self::ProviderBilling),
+            "managed_spend_paused" => Some(Self::ManagedSpendPaused),
             "rate_limited" => Some(Self::RateLimited),
             "timeout" => Some(Self::Timeout),
             "resource_busy" => Some(Self::ResourceBusy),
@@ -178,6 +185,7 @@ pub fn agent_terminal_class(
                 | "provider_unavailable"
                 | "provider_billing"
                 | "billing_limit"
+                | "managed_spend_paused"
                 | "rate_limit"
                 | "rate_limited"
                 | "timeout"
@@ -215,6 +223,9 @@ fn agent_terminal_class_from_structured_error(
     }
     if terminal_error_signal_matches(error, |signal| signal == "no_llm_call") {
         return Some(AgentTerminalClass::ProviderMisconfigured);
+    }
+    if error.get("reason").and_then(serde_json::Value::as_str) == Some("managed_spend_paused") {
+        return Some(AgentTerminalClass::ManagedSpendPaused);
     }
     // Before any `category`: a billing stop arrives as a 429, and producers
     // that predate its own category still label it `rate_limit`. The reason is
@@ -387,6 +398,7 @@ fn terminal_class_from_exact_signal(signal: &str) -> Option<AgentTerminalClass> 
         }
         "provider_unavailable" => Some(AgentTerminalClass::ProviderUnavailable),
         "provider_billing" | "billing_limit" => Some(AgentTerminalClass::ProviderBilling),
+        "managed_spend_paused" => Some(AgentTerminalClass::ManagedSpendPaused),
         "rate_limit" | "rate_limited" => Some(AgentTerminalClass::RateLimited),
         "timeout" | "timed_out" | "deadline_exceeded" => Some(AgentTerminalClass::Timeout),
         "resource_busy" => Some(AgentTerminalClass::ResourceBusy),
@@ -509,6 +521,10 @@ mod tests {
                 "provider_unavailable",
             ),
             (AgentTerminalClass::ProviderBilling, "provider_billing"),
+            (
+                AgentTerminalClass::ManagedSpendPaused,
+                "managed_spend_paused",
+            ),
             (AgentTerminalClass::RateLimited, "rate_limited"),
             (AgentTerminalClass::Timeout, "timeout"),
             (AgentTerminalClass::ResourceBusy, "resource_busy"),
@@ -536,6 +552,30 @@ mod tests {
             );
         }
         assert_eq!(pairs.len(), AgentTerminalClass::ALL.len());
+    }
+
+    #[test]
+    fn managed_spend_pause_keeps_personal_credit_and_throttle_distinct() {
+        for (reason, expected) in [
+            (
+                "managed_spend_paused",
+                AgentTerminalClass::ManagedSpendPaused,
+            ),
+            ("billing_limit", AgentTerminalClass::ProviderBilling),
+            ("rate_limit", AgentTerminalClass::RateLimited),
+        ] {
+            let error = json!({"reason": reason, "category": "rate_limit", "provider": "openai"});
+            assert_eq!(
+                agent_terminal_class("error", "", Some(&error)),
+                Some(expected)
+            );
+        }
+        let error = json!({"reason":"rate_limit", "category":"rate_limit", "provider":"openai",
+            "message":"managed_spend_paused", "metadata":{"reason":"managed_spend_paused"}});
+        assert_eq!(
+            agent_terminal_class("error", "", Some(&error)),
+            Some(AgentTerminalClass::RateLimited)
+        );
     }
 
     #[test]

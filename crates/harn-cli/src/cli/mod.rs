@@ -244,7 +244,8 @@ pub(crate) use serve::{
 };
 pub(crate) use session::{
     SessionArgs, SessionCheckpointArgs, SessionCommand, SessionExportArgs, SessionImportArgs,
-    SessionListArgs, SessionSchemaArgs, SessionValidateArgs, SessionViewFixturesArgs,
+    SessionListArgs, SessionPublicationEvidenceArgs, SessionSchemaArgs, SessionValidateArgs,
+    SessionViewFixturesArgs,
 };
 pub(crate) use skill::{
     SkillArgs, SkillCommand, SkillEndorseArgs, SkillKeyCommand, SkillKeyGenerateArgs,
