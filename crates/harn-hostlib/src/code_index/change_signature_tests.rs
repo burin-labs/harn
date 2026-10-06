@@ -868,3 +868,58 @@ fn same_named_free_functions_refuse_as_ambiguous_symbol_with_warning_candidates(
     assert!(matches!(field(&result, "match_count"), VmValue::Int(0)));
     assert!(items(field(&result, "conflicts")).is_empty());
 }
+
+#[test]
+fn input_that_does_not_parse_refuses_before_planning() {
+    // Python 2 `print` parses under the tree-sitter grammar but not under
+    // Python 3; a broken caller file fails tree-sitter itself.
+    let ws = Workspace::new(&[
+        (
+            "orders.py",
+            "def render_order(order):\n    print \"rendering\"\n    return order\n",
+        ),
+        (
+            "api.py",
+            "from orders import render_order\n\nrender_order(1)\n",
+        ),
+    ]);
+    let params: &[&[(&str, &str)]] = &[
+        &[("name", "order")],
+        &[("name", "prefix"), ("call_value", "\"o\"")],
+    ];
+    let seed = ws.refuse("syntax_error", "render_order", "orders.py", params);
+    let details = text(field(&seed, "details"));
+    assert!(
+        details.contains("`orders.py` does not parse before the edit"),
+        "{details}"
+    );
+    assert!(details.contains("print_statement"), "{details}");
+
+    let ws = Workspace::new(&[
+        ("src/lib.rs", "pub mod api;\npub mod jobs;\n"),
+        ("src/jobs.rs", RUST_JOBS),
+        (
+            "src/api.rs",
+            "use crate::jobs::{render, Job};\npub fn one(job: &Job) -> String {\n    render(job, true)\n}\npub fn broken( {\n",
+        ),
+    ]);
+    let caller = ws.refuse(
+        "syntax_error",
+        "render",
+        "src/jobs.rs",
+        &[
+            &[("name", "job")],
+            &[("name", "verbose")],
+            &[
+                ("name", "prefix"),
+                ("type", "&str"),
+                ("call_value", "\"job\""),
+            ],
+        ],
+    );
+    let details = text(field(&caller, "details"));
+    assert!(
+        details.contains("`src/api.rs` does not parse before the edit"),
+        "{details}"
+    );
+}

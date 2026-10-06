@@ -55,9 +55,9 @@ use crate::tools::args::{
 use super::builtins::SharedIndex;
 use super::refactor_core::{
     candidates_value, competing_declarations, edit_envelope, failed_paths_value, file_plan_value,
-    files_in_scope, is_identifier_token, parse_kind, plan_file, read_source, reference_sites,
-    resolve_seed, write_plans, EditEnvelope, EditSpan, EditSymbol, FilePlan, IdentifierSpan,
-    ReferenceKind, Scope, SeedCandidate, SeedLookup,
+    files_in_scope, is_identifier_token, parse_gate, parse_kind, plan_file, read_source,
+    reference_sites, resolve_seed, write_plans, EditEnvelope, EditSpan, EditSymbol, FilePlan,
+    IdentifierSpan, ReferenceKind, Scope, SeedCandidate, SeedLookup,
 };
 use super::signature_syntax::{
     body_uses, find_declaration, read_call_arguments, read_declaration, read_macro_call,
@@ -393,6 +393,9 @@ fn plan(
             ),
         )));
     };
+    if let Err(detail) = parse_gate(&seed_path, &seed_source, language) {
+        return Ok(Err(Refusal::new("syntax_error", detail)));
+    }
     let decl = match read_declaration(decl_node, &seed_source, family) {
         Ok(decl) => decl,
         Err(reason) => {
@@ -809,6 +812,9 @@ fn plan_call_sites(
             }
         };
         let root = tree.root_node();
+        if let Err(detail) = parse_gate(path, &source, language) {
+            return Ok(Err(Refusal::new("syntax_error", detail)));
+        }
         let line_text = |row: usize| source.lines().nth(row).unwrap_or("").trim().to_string();
         for site in sites {
             let row = site.span.start_row;

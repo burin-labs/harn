@@ -426,11 +426,35 @@ pub(super) fn splice(source: &str, edits: &[EditSpan]) -> String {
     out
 }
 
+/// Grammar nodes the language itself rejects although its tree-sitter
+/// grammar accepts them: tree-sitter-python still parses Python 2's
+/// `print` and `exec` statements, which Python 3 refuses.
+fn rejected_kinds(language: Language) -> &'static [&'static str] {
+    match language {
+        Language::Python => &["print_statement", "exec_statement"],
+        _ => &[],
+    }
+}
+
+/// Refuse a file that does not parse before an edit plans anything in it.
+/// Every refactoring calls this on each file it would rewrite, so it never
+/// rewrites input that is already broken; `Err` is the refusal detail.
+pub(super) fn parse_gate(path: &str, source: &str, language: Language) -> Result<(), String> {
+    match first_syntax_error(source, language) {
+        None => Ok(()),
+        Some(detail) => Err(format!(
+            "`{path}` does not parse before the edit ({detail}); fix it first, then retry"
+        )),
+    }
+}
+
+/// The first reason `source` is not valid `language`: a tree-sitter
+/// ERROR/MISSING node, or a construct in [`rejected_kinds`].
 pub(super) fn first_syntax_error(source: &str, language: Language) -> Option<String> {
     let tree = ast_api::parse_tree(source, language).ok()?;
     let root = tree.root_node();
     if !root.has_error() {
-        return None;
+        return first_rejected_node(root, language);
     }
     let mut stack = vec![root];
     while let Some(node) = stack.pop() {
@@ -458,7 +482,30 @@ pub(super) fn first_syntax_error(source: &str, language: Language) -> Option<Str
             }
         }
     }
-    Some("post-edit source has parse errors".into())
+    Some("the source has parse errors".into())
+}
+
+fn first_rejected_node(root: Node<'_>, language: Language) -> Option<String> {
+    let rejected = rejected_kinds(language);
+    if rejected.is_empty() {
+        return None;
+    }
+    let mut stack = vec![root];
+    while let Some(node) = stack.pop() {
+        if rejected.contains(&node.kind()) {
+            let pos = node.start_position();
+            return Some(format!(
+                "`{}` is not valid {} at line {}, column {}",
+                node.kind(),
+                language.name(),
+                pos.row + 1,
+                pos.column + 1
+            ));
+        }
+        let mut cursor = node.walk();
+        stack.extend(node.named_children(&mut cursor));
+    }
+    None
 }
 
 pub(super) fn read_source(
