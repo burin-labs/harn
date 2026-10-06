@@ -1797,6 +1797,7 @@ HARN_PREPARED_SESSION_STATES = ("needs_approval", "ready", "blocked", "active", 
 HARN_PREPARED_SESSION_COMMANDS = ("approval_decision", "attach", "turn", "request_delta", "stop", "pivot", "finish")
 @dataclass
 class HarnPreparedSessionApprovalDecision(_HarnDataclass):
+    request_id: str
     batch_fingerprint: str
     approved: bool
     decider: str
