@@ -684,3 +684,42 @@ fn a_broken_file_that_only_mentions_the_name_does_not_block_the_move() {
         "# label is documented here\nx = (\n"
     );
 }
+
+#[test]
+fn a_path_outside_the_workspace_is_rejected_before_any_read_or_write() {
+    let fixture = Fixture::new(&[
+        (
+            "pkg/orders.py",
+            "def label(n: int) -> str:\n    return str(n)\n",
+        ),
+        ("pkg/view.py", "X = 1\n"),
+    ]);
+    let outside = fixture
+        .dir
+        .path()
+        .parent()
+        .unwrap()
+        .join("move-symbol-escape.py");
+    let before = fixture.snapshot();
+    for (param, path, to_path) in [
+        ("to_path", "pkg/orders.py", "../move-symbol-escape.py"),
+        ("to_path", "pkg/orders.py", outside.to_str().unwrap()),
+        ("path", "../pkg/orders.py", "pkg/view.py"),
+    ] {
+        let err = run(
+            &fixture.capability.shared(),
+            &[dict(&[
+                ("symbol", vm_string("label")),
+                ("path", vm_string(path)),
+                ("to_path", vm_string(to_path)),
+            ])],
+        )
+        .expect_err("an escaping path must be refused");
+        assert!(
+            matches!(err, HostlibError::InvalidParameter { param: p, .. } if p == param),
+            "{err:?}"
+        );
+    }
+    assert!(!outside.exists());
+    assert_eq!(fixture.snapshot(), before);
+}

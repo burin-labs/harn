@@ -176,6 +176,23 @@ pub(super) fn run(index: &SharedIndex, args: &[VmValue]) -> Result<VmValue, Host
     };
     let source_path = super::builtins::normalize_relative_path_for(state, &request.path);
     let dest_path = super::builtins::normalize_relative_path_for(state, &request.to_path);
+    // Every read and write joins these onto the index root, so a path that
+    // escapes it (`../x.py`, an absolute path elsewhere) must not get there.
+    for (param, path) in [("path", &source_path), ("to_path", &dest_path)] {
+        let inside = Path::new(path).components().all(|component| {
+            matches!(
+                component,
+                std::path::Component::Normal(_) | std::path::Component::CurDir
+            )
+        });
+        if !inside {
+            return Err(HostlibError::InvalidParameter {
+                builtin: BUILTIN,
+                param,
+                message: format!("`{path}` is outside the indexed workspace"),
+            });
+        }
+    }
     if source_path == dest_path {
         return Err(HostlibError::InvalidParameter {
             builtin: BUILTIN,
