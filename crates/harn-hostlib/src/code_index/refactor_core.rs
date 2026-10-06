@@ -267,8 +267,13 @@ fn is_skip_kind(kind: &str) -> bool {
             | "char_literal"
             | "character_literal"
             | "template_string"
-            | "template_substitution"
     )
+}
+
+/// Code embedded in a string: a Python f-string `{..}` or a TypeScript
+/// template `${..}`. Identifier descent re-enters a skipped string here.
+fn is_interpolation_kind(kind: &str) -> bool {
+    matches!(kind, "interpolation" | "template_substitution")
 }
 
 /// Byte and 0-based row/column extent of one identifier token.
@@ -306,7 +311,7 @@ pub(super) struct ShadowSite {
 }
 
 /// Visit every identifier-context node in `root`, in no particular order,
-/// skipping comment and string bodies.
+/// skipping comment and string bodies but not string interpolations.
 fn for_each_identifier<'tree>(
     root: Node<'tree>,
     bytes: &[u8],
@@ -316,6 +321,11 @@ fn for_each_identifier<'tree>(
     let mut stack = vec![root];
     while let Some(node) = stack.pop() {
         if is_skip_kind(node.kind()) {
+            let mut cursor = node.walk();
+            stack.extend(
+                node.children(&mut cursor)
+                    .filter(|child| is_interpolation_kind(child.kind())),
+            );
             continue;
         }
         if identifier_kinds.contains(&node.kind()) {

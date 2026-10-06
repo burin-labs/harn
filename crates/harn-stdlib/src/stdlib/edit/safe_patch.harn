@@ -646,6 +646,155 @@ pub fn edit_rename_symbol(code_index: HarnessCodeIndex, params: dict?) {
   }
 }
 
+fn __edit_signature_request(p: dict, params: list) -> dict {
+  let req = {symbol_ref: p?.symbol_ref, params: params}
+  if p?.dry_run != nil {
+    req = req + {dry_run: p.dry_run}
+  }
+  if p?.session_id != nil {
+    req = req + {session_id: p.session_id}
+  }
+  return req
+}
+
+fn __edit_signature_result(helper: string, p: dict, raw: any) -> dict {
+  const payload = raw ?? {}
+  const result_tag = payload?.result ?? "error"
+  return {
+    ok: result_tag == "applied" || result_tag == "dry_run",
+    applied: payload?.applied ?? false,
+    result: result_tag,
+    dry_run: payload?.dry_run ?? false,
+    symbol: payload?.symbol,
+    touched_files: payload?.touched_files ?? [],
+    failed_paths_with_reasons: payload?.failed_paths_with_reasons ?? [],
+    call_sites_updated: payload?.call_sites_updated ?? 0,
+    sites: payload?.sites ?? [],
+    candidates: payload?.candidates ?? [],
+    parameters_before: payload?.parameters_before ?? [],
+    parameters_after: payload?.parameters_after ?? [],
+    details: payload?.details ?? "",
+    provenance: {
+      module: "std/edit",
+      helper: helper,
+      symbol: payload?.symbol,
+      dry_run: payload?.dry_run ?? false,
+      caller: p?.provenance,
+    },
+  }
+}
+
+/** The function's current parameters, read by a dry run that writes nothing. */
+fn __edit_signature_current(code_index: HarnessCodeIndex, p: dict) -> list {
+  const probe = code_index.change_signature(__edit_signature_request(p + {dry_run: true}, []))
+  return probe?.parameters_before ?? []
+}
+
+/**
+ * Change a function's parameter list and rewrite every call site across the
+ * workspace through `code_index.change_signature`. Pass `symbol_ref`
+ * (`{name, path, line?}`) and `params`, the complete new list in order:
+ * `{name, from?, type?, default?, call_value?}`. An entry naming a current
+ * parameter (by `name`, or by `from` to rename it) keeps it; any other entry
+ * adds one and needs `call_value`, written at every call, or `default`. A
+ * current parameter no entry keeps is removed.
+ *
+ * All-or-nothing and never a silent no-op: refusals (`parameter_in_use`,
+ * `value_reference`, `unsupported_call_site`, `overrides_present`,
+ * `ambiguous`, `not_found`, `error`, ...) write nothing and list the blocking
+ * `sites`. Languages: Rust, TypeScript/TSX, Python.
+ *
+ * @effects: [host, fs]
+ * @errors: [backend]
+ * @api_stability: experimental
+ * @example: edit_change_signature(harness.code_index, {symbol_ref: {name: "add", path: "src/lib.rs"}, params: [{name: "a"}, {name: "b"}, {name: "c", type: "i64", call_value: "0"}]})
+ */
+pub fn edit_change_signature(code_index: HarnessCodeIndex, params: dict?) -> dict {
+  const p = params ?? {}
+  const raw = code_index.change_signature(__edit_signature_request(p, p?.params ?? []))
+  return __edit_signature_result("edit_change_signature", p, raw)
+}
+
+/**
+ * Insert one parameter at `index` (0-based, excluding the receiver; default
+ * appends) and write its `call_value` at every call site. `param` is
+ * `{name, type?, default?, call_value?}`; see `edit_change_signature`.
+ *
+ * @effects: [host, fs]
+ * @errors: [backend]
+ * @api_stability: experimental
+ * @example: edit_add_parameter(harness.code_index, {symbol_ref: {name: "add", path: "src/lib.rs"}, param: {name: "c", type: "i64", call_value: "0"}})
+ */
+pub fn edit_add_parameter(code_index: HarnessCodeIndex, params: dict?) -> dict {
+  const p = params ?? {}
+  const kept = __edit_signature_current(code_index, p).map({ entry -> {name: entry.name} })
+  const at = max(0, min(p?.index ?? len(kept), len(kept)))
+  const head = if at > 0 {
+    kept[:at]
+  } else {
+    []
+  }
+  const tail = if at < len(kept) {
+    kept[at:]
+  } else {
+    []
+  }
+  const raw = code_index.change_signature(
+    __edit_signature_request(p, head + [p?.param ?? {}] + tail),
+  )
+  return __edit_signature_result("edit_add_parameter", p, raw)
+}
+
+/**
+ * Permute a function's parameters by `order`, a list of 0-based current
+ * indices (excluding the receiver), and permute every call's arguments to
+ * match. Python keyword arguments follow their parameter by name.
+ *
+ * @effects: [host, fs]
+ * @errors: [backend]
+ * @api_stability: experimental
+ * @example: edit_reorder_parameters(harness.code_index, {symbol_ref: {name: "add", path: "src/lib.rs"}, order: [1, 0]})
+ */
+pub fn edit_reorder_parameters(code_index: HarnessCodeIndex, params: dict?) -> dict {
+  const p = params ?? {}
+  const current = __edit_signature_current(code_index, p)
+  const order = p?.order ?? []
+  let seen = []
+  for index in order {
+    const valid = type_of(index) == "int" && index >= 0 && index < len(current)
+    if len(current) > 0 && (!valid || seen.contains(index)) {
+      return __edit_signature_result(
+        "edit_reorder_parameters",
+        p,
+        {
+          result: "error",
+          details: "`order` must be a permutation of the " + to_string(len(current))
+            + " current parameter indices",
+        },
+      )
+    }
+    seen = seen + [index]
+  }
+  if len(current) > 0 && len(order) != len(current) {
+    return __edit_signature_result(
+      "edit_reorder_parameters",
+      p,
+      {
+        result: "error",
+        details: "`order` must list each of the " + to_string(len(current))
+          + " current parameter indices once",
+      },
+    )
+  }
+  const reordered = if len(current) > 0 {
+    order.map({ index -> {name: current[index].name} })
+  } else {
+    []
+  }
+  const raw = code_index.change_signature(__edit_signature_request(p, reordered))
+  return __edit_signature_result("edit_reorder_parameters", p, raw)
+}
+
 /**
  * Render a multi-op edit plan as a per-file unified-diff bundle without
  * committing anything to disk. The host opens a *transient* staged-fs

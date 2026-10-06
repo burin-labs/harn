@@ -252,14 +252,14 @@ const SCENARIOS: &[Scenario] = &[
     },
     Scenario {
         id: "edit-refactor",
-        title: "edit.extract_function / add_parameter / change_return_type preview as diffs",
+        title: "edit.extract_function / add_parameter / change_return_type preview",
         description: "Drive the B.8 structured-refactoring primitives (#2520) offline against a \
                       bundled seed workspace, all in dry-run mode: extract two statements of a \
                       Python function into `compute_subtotal` (capturing `base`/`qty` but not the \
-                      module-level `audit`), append a trailing parameter to a Rust function and \
-                      fill the argument at all three call sites, and rewrite that function's \
-                      return type — each previewed as a unified diff against a throw-away \
-                      staged-fs overlay so no bytes hit disk. The conformance test in \
+                      module-level `audit`), append a trailing parameter to a Rust function \
+                      through `code_index.change_signature` and fill the argument at all three \
+                      call sites, and rewrite that function's return type, so no bytes hit \
+                      disk. The conformance test in \
                       `crates/harn-vm`/`conformance` exercises the apply path; this demo keeps \
                       the offline preview smoke covered.",
         script: include_str!("../../assets/demo/edit-refactor/scenario.harn"),

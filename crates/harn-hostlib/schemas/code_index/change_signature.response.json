@@ -1,0 +1,162 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/code_index/change_signature.response.json",
+  "title": "code_index.change_signature response",
+  "description": "Tagged result of a signature change. `applied` and `dry_run` carry the per-file edits and every rewritten call site; every other tag is a refusal that wrote nothing, with the blocking locations in `sites` (or `candidates` for `ambiguous` seed lookups) and the reason in `details`.",
+  "type": "object",
+  "properties": {
+    "result": {
+      "type": "string",
+      "enum": [
+        "applied",
+        "dry_run",
+        "not_found",
+        "ambiguous",
+        "unsupported_language",
+        "syntax_error",
+        "partial",
+        "error",
+        "parameter_in_use",
+        "value_reference",
+        "unsupported_call_site",
+        "overrides_present"
+      ],
+      "description": "`partial`: some files failed to write after every plan passed (see `failed_paths_with_reasons`). `error`: the request cannot apply to this declaration (unknown `from`, a new parameter without `call_value` or `default`, an unchanged list, an unsupported parameter form). `parameter_in_use`: the body still uses a removed parameter. `value_reference`: the function is used as a value. `unsupported_call_site`: a call passes a spread, splat, or an argument count that cannot be remapped. `overrides_present`: the function is a method whose name other declarations share. `ambiguous`: several declarations match the seed, another free function shares the name, or a call by that name cannot reach this declaration."
+    },
+    "applied": { "type": "boolean" },
+    "dry_run": { "type": "boolean" },
+    "symbol": {
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "path": { "type": "string" },
+        "line": { "type": ["integer", "null"] },
+        "kind": { "type": ["string", "null"] }
+      },
+      "required": ["name", "path"],
+      "additionalProperties": false
+    },
+    "touched_files": {
+      "type": "array",
+      "description": "One entry per file the change rewrites. Empty on refusals.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "path": { "type": "string" },
+          "language": { "type": "string" },
+          "edits": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "start_byte": { "type": "integer", "minimum": 0 },
+                "end_byte": { "type": "integer", "minimum": 0 },
+                "start_row": { "type": "integer", "minimum": 0 },
+                "start_col": { "type": "integer", "minimum": 0 },
+                "end_row": { "type": "integer", "minimum": 0 },
+                "end_col": { "type": "integer", "minimum": 0 },
+                "before": { "type": "string" },
+                "after": { "type": "string" }
+              },
+              "required": ["start_byte", "end_byte", "before", "after"],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": ["path", "language", "edits"],
+        "additionalProperties": false
+      }
+    },
+    "warnings": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Non-blocking notes. Empty today; kept so every code_index refactor shares one envelope."
+    },
+    "failed_paths_with_reasons": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "path": { "type": "string" },
+          "reason": { "type": "string" }
+        },
+        "required": ["path", "reason"],
+        "additionalProperties": false
+      }
+    },
+    "call_sites_updated": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Number of call sites rewritten (or planned, on `dry_run`)."
+    },
+    "sites": {
+      "type": "array",
+      "description": "On `applied`/`dry_run`: every rewritten call site. On a refusal: every blocking location.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "path": { "type": "string" },
+          "line": { "type": "integer", "minimum": 1 },
+          "kind": { "type": "string" },
+          "reason": { "type": "string" },
+          "text": { "type": "string", "description": "The trimmed source line." }
+        },
+        "required": ["path", "line", "kind", "reason", "text"],
+        "additionalProperties": false
+      }
+    },
+    "candidates": {
+      "type": "array",
+      "description": "Declarations matching an ambiguous `symbol_ref`.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "path": { "type": "string" },
+          "line": { "type": "integer", "minimum": 1 },
+          "kind": { "type": "string" }
+        },
+        "required": ["path", "line", "kind"],
+        "additionalProperties": false
+      }
+    },
+    "parameters_before": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string" },
+          "text": { "type": "string" }
+        },
+        "required": ["name", "text"],
+        "additionalProperties": false
+      },
+      "description": "Each current parameter, excluding the receiver. Present on every result after the declaration was read, refusals included; empty before that."
+    },
+    "parameters_after": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Source text of each parameter in the new header, receiver first. Empty on refusals."
+    },
+    "details": { "type": "string" },
+    "fallback_suggestion": {
+      "type": "string",
+      "description": "Present only on `unsupported_language`: the text-edit path to fall back to."
+    }
+  },
+  "required": [
+    "result",
+    "applied",
+    "dry_run",
+    "symbol",
+    "touched_files",
+    "warnings",
+    "failed_paths_with_reasons",
+    "call_sites_updated",
+    "sites",
+    "candidates",
+    "parameters_before",
+    "parameters_after",
+    "details"
+  ],
+  "additionalProperties": false
+}

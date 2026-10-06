@@ -170,3 +170,39 @@ fn type_positions_are_type_references() {
          src/user.rs:3:5 type_reference | Widget\n"
     );
 }
+
+#[test]
+fn calls_inside_string_interpolations_are_reference_sites() {
+    let (_dir, state) = index(&[
+        ("util.py", "def fetch(url):\n    return url\n"),
+        (
+            "app.py",
+            "from util import fetch\n\
+             \n\
+             \n\
+             def main():\n\
+             \x20   return f\"got {fetch('a')} not fetch\"\n",
+        ),
+        (
+            "src/sum.ts",
+            "export function sum(a: number): number {\n  return a;\n}\n",
+        ),
+        (
+            "src/main.ts",
+            "import { sum } from \"./sum\";\n\
+             export const label = `total ${sum(1)} not sum`;\n",
+        ),
+    ]);
+    let fetch = seed(&state, "util.py", "fetch", NodeKind::Function);
+    assert_eq!(
+        render(&state, fetch),
+        "app.py:1:18 import | from util import fetch\n\
+         app.py:5:19 call | fetch('a')\n"
+    );
+    let sum = seed(&state, "src/sum.ts", "sum", NodeKind::Function);
+    assert_eq!(
+        render(&state, sum),
+        "src/main.ts:1:10 import | import { sum } from \"./sum\";\n\
+         src/main.ts:2:31 call | sum(1)\n"
+    );
+}
