@@ -122,12 +122,15 @@ pub(super) fn repository_identity(args: &[VmValue]) -> Result<VmValue, HostlibEr
         &raw,
         "repo",
     )?);
-    crate::tools::permissions::enforce_path_scope(
-        "hostlib_tools_git_repository_identity",
-        &repo,
-        harn_vm::process_sandbox::FsAccess::Read,
-    )?;
-    let stdout = String::from_utf8(run_git_bytes(
+    let scope_error =
+        |violation: harn_vm::process_sandbox::SandboxViolation| HostlibError::SandboxViolation {
+            builtin: "hostlib_tools_git_repository_identity",
+            path: violation.attempted.display().to_string(),
+            message: violation.message("hostlib_tools_git_repository_identity"),
+        };
+    harn_vm::process_sandbox::check_git_metadata_path_scope(&repo).map_err(scope_error)?;
+    harn_vm::process_sandbox::check_repository_metadata_scope(&repo).map_err(scope_error)?;
+    let stdout = String::from_utf8(run_git_identity_bytes(
         &repo,
         &[
             "rev-parse",
@@ -146,6 +149,10 @@ pub(super) fn repository_identity(args: &[VmValue]) -> Result<VmValue, HostlibEr
             builtin: BUILTIN,
             message: "git returned an incomplete repository identity".to_string(),
         });
+    }
+    for path in &paths {
+        harn_vm::process_sandbox::check_git_metadata_path_scope(PathBuf::from(path).as_path())
+            .map_err(scope_error)?;
     }
     Ok(build_dict([
         (
@@ -438,6 +445,50 @@ fn run_git_bytes(repo: &PathBuf, args: &[&str]) -> Result<Vec<u8>, HostlibError>
             args.first().copied().unwrap_or("?")
         ),
     })?;
+    git_output_bytes(output, args)
+}
+
+fn run_git_identity_bytes(repo: &PathBuf, args: &[&str]) -> Result<Vec<u8>, HostlibError> {
+    let backend_error = |error: harn_vm::VmError| HostlibError::Backend {
+        builtin: "hostlib_tools_git_repository_identity",
+        message: error.to_string(),
+    };
+    let session = harn_vm::process_sandbox::session_std_command("git").map_err(backend_error)?;
+    // Remove keys from the actual composed session environment as well as
+    // ambient inheritance. A session-only GIT_DIR must not redirect identity.
+    let env_remove = std::env::vars_os()
+        .map(|(key, _)| key)
+        .chain(session.get_envs().map(|(key, _)| key.to_os_string()))
+        .filter(|key| {
+            key.to_string_lossy()
+                .to_ascii_uppercase()
+                .starts_with("GIT_")
+        })
+        .map(|key| key.to_string_lossy().into_owned())
+        .collect();
+    let root = repo.to_str().ok_or_else(|| HostlibError::Backend {
+        builtin: "hostlib_tools_git_repository_identity",
+        message: "git repository identity requires a UTF-8 root".into(),
+    })?;
+    let argv = std::iter::once("-C")
+        .chain(std::iter::once(root))
+        .chain(args.iter().copied())
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    let output = harn_vm::process_sandbox::command_output_with_declared_roots(
+        "git",
+        &argv,
+        &harn_vm::process_sandbox::ProcessCommandConfig {
+            cwd: Some(repo.clone()),
+            env_remove,
+            ..Default::default()
+        },
+    )
+    .map_err(backend_error)?;
+    git_output_bytes(output, args)
+}
+
+fn git_output_bytes(output: std::process::Output, args: &[&str]) -> Result<Vec<u8>, HostlibError> {
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         return Err(HostlibError::Backend {
