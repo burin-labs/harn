@@ -2417,7 +2417,6 @@ pub const AGENT_TERMINAL_CLASS_CONTEXT_OVERFLOW: &str = "context_overflow";
 pub const AGENT_TERMINAL_CLASS_PROVIDER_MISCONFIGURED: &str = "provider_misconfigured";
 pub const AGENT_TERMINAL_CLASS_PROVIDER_UNAVAILABLE: &str = "provider_unavailable";
 pub const AGENT_TERMINAL_CLASS_PROVIDER_BILLING: &str = "provider_billing";
-pub const AGENT_TERMINAL_CLASS_MANAGED_SPEND_PAUSED: &str = "managed_spend_paused";
 pub const AGENT_TERMINAL_CLASS_RATE_LIMITED: &str = "rate_limited";
 pub const AGENT_TERMINAL_CLASS_TIMEOUT: &str = "timeout";
 pub const AGENT_TERMINAL_CLASS_RESOURCE_BUSY: &str = "resource_busy";
@@ -2426,6 +2425,7 @@ pub const AGENT_TERMINAL_CLASS_HOST_BRIDGE_UNIMPLEMENTED: &str = "host_bridge_un
 pub const AGENT_TERMINAL_CLASS_AGENT_LOOP_PROTOCOL_FAILURE: &str = "agent_loop_protocol_failure";
 pub const AGENT_TERMINAL_CLASS_PARSE_DROPPED: &str = "parse_dropped";
 pub const AGENT_TERMINAL_CLASS_GENERIC_THROW: &str = "generic_throw";
+pub const AGENT_TERMINAL_CLASS_MANAGED_SPEND_PAUSED: &str = "managed_spend_paused";
 
 /// Stable terminal classes carried by typed ACP prompt-error data. Superseded by `HarnAgentTerminalClass`; retained for one release so existing consumers keep compiling.
 pub const AGENT_TERMINAL_CLASSES: &[&str] = &[
@@ -2433,7 +2433,6 @@ pub const AGENT_TERMINAL_CLASSES: &[&str] = &[
     "provider_misconfigured",
     "provider_unavailable",
     "provider_billing",
-    "managed_spend_paused",
     "rate_limited",
     "timeout",
     "resource_busy",
@@ -2442,6 +2441,7 @@ pub const AGENT_TERMINAL_CLASSES: &[&str] = &[
     "agent_loop_protocol_failure",
     "parse_dropped",
     "generic_throw",
+    "managed_spend_paused",
 ];
 
 pub const AGENT_TERMINAL_KIND_NATURAL: &str = "natural";
@@ -2493,7 +2493,6 @@ pub enum HarnAgentTerminalClass {
     ProviderMisconfigured,
     ProviderUnavailable,
     ProviderBilling,
-    ManagedSpendPaused,
     RateLimited,
     Timeout,
     ResourceBusy,
@@ -2502,6 +2501,7 @@ pub enum HarnAgentTerminalClass {
     AgentLoopProtocolFailure,
     ParseDropped,
     GenericThrow,
+    ManagedSpendPaused,
     /// A wire value outside the vocabulary this binding was generated from. Preserved verbatim.
     Unrecognized(String),
 }
@@ -2514,7 +2514,6 @@ impl HarnAgentTerminalClass {
         Self::ProviderMisconfigured,
         Self::ProviderUnavailable,
         Self::ProviderBilling,
-        Self::ManagedSpendPaused,
         Self::RateLimited,
         Self::Timeout,
         Self::ResourceBusy,
@@ -2523,6 +2522,7 @@ impl HarnAgentTerminalClass {
         Self::AgentLoopProtocolFailure,
         Self::ParseDropped,
         Self::GenericThrow,
+        Self::ManagedSpendPaused,
     ];
 
     /// The JSON wire string for this value.
@@ -2532,7 +2532,6 @@ impl HarnAgentTerminalClass {
             Self::ProviderMisconfigured => "provider_misconfigured",
             Self::ProviderUnavailable => "provider_unavailable",
             Self::ProviderBilling => "provider_billing",
-            Self::ManagedSpendPaused => "managed_spend_paused",
             Self::RateLimited => "rate_limited",
             Self::Timeout => "timeout",
             Self::ResourceBusy => "resource_busy",
@@ -2541,6 +2540,7 @@ impl HarnAgentTerminalClass {
             Self::AgentLoopProtocolFailure => "agent_loop_protocol_failure",
             Self::ParseDropped => "parse_dropped",
             Self::GenericThrow => "generic_throw",
+            Self::ManagedSpendPaused => "managed_spend_paused",
             Self::Unrecognized(value) => value.as_str(),
         }
     }
@@ -2552,7 +2552,6 @@ impl HarnAgentTerminalClass {
             "provider_misconfigured" => Self::ProviderMisconfigured,
             "provider_unavailable" => Self::ProviderUnavailable,
             "provider_billing" => Self::ProviderBilling,
-            "managed_spend_paused" => Self::ManagedSpendPaused,
             "rate_limited" => Self::RateLimited,
             "timeout" => Self::Timeout,
             "resource_busy" => Self::ResourceBusy,
@@ -2561,6 +2560,7 @@ impl HarnAgentTerminalClass {
             "agent_loop_protocol_failure" => Self::AgentLoopProtocolFailure,
             "parse_dropped" => Self::ParseDropped,
             "generic_throw" => Self::GenericThrow,
+            "managed_spend_paused" => Self::ManagedSpendPaused,
             other => Self::Unrecognized(other.to_string()),
         }
     }

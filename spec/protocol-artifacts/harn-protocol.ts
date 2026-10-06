@@ -140,7 +140,6 @@ export const AGENT_TERMINAL_CLASSES = [
   "provider_misconfigured",
   "provider_unavailable",
   "provider_billing",
-  "managed_spend_paused",
   "rate_limited",
   "timeout",
   "resource_busy",
@@ -149,6 +148,7 @@ export const AGENT_TERMINAL_CLASSES = [
   "agent_loop_protocol_failure",
   "parse_dropped",
   "generic_throw",
+  "managed_spend_paused",
 ] as const
 export type AgentTerminalClass = (typeof AGENT_TERMINAL_CLASSES)[number]
 

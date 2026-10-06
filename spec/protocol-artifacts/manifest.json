@@ -464,7 +464,6 @@
       "provider_misconfigured",
       "provider_unavailable",
       "provider_billing",
-      "managed_spend_paused",
       "rate_limited",
       "timeout",
       "resource_busy",
@@ -472,7 +471,8 @@
       "host_bridge_unimplemented",
       "agent_loop_protocol_failure",
       "parse_dropped",
-      "generic_throw"
+      "generic_throw",
+      "managed_spend_paused"
     ],
     "promptResultExtensionFields": [
       "terminal"

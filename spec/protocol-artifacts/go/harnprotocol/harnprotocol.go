@@ -369,7 +369,6 @@ var AgentTerminalClasses = []AgentTerminalClass{
 	"provider_misconfigured",
 	"provider_unavailable",
 	"provider_billing",
-	"managed_spend_paused",
 	"rate_limited",
 	"timeout",
 	"resource_busy",
@@ -378,6 +377,7 @@ var AgentTerminalClasses = []AgentTerminalClass{
 	"agent_loop_protocol_failure",
 	"parse_dropped",
 	"generic_throw",
+	"managed_spend_paused",
 }
 
 // AgentTerminalKind is the named string type for the AgentTerminalKinds wire vocabulary.

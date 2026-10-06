@@ -314,7 +314,6 @@ AGENT_TERMINAL_CLASSES: tuple = (
     "provider_misconfigured",
     "provider_unavailable",
     "provider_billing",
-    "managed_spend_paused",
     "rate_limited",
     "timeout",
     "resource_busy",
@@ -323,6 +322,7 @@ AGENT_TERMINAL_CLASSES: tuple = (
     "agent_loop_protocol_failure",
     "parse_dropped",
     "generic_throw",
+    "managed_spend_paused",
 )
 HARN_ACP_SESSION_UPDATE_EXTENSIONS: tuple = (
     "artifact",
@@ -686,7 +686,6 @@ class AgentTerminalClass(str, Enum):
     PROVIDER_MISCONFIGURED = "provider_misconfigured"
     PROVIDER_UNAVAILABLE = "provider_unavailable"
     PROVIDER_BILLING = "provider_billing"
-    MANAGED_SPEND_PAUSED = "managed_spend_paused"
     RATE_LIMITED = "rate_limited"
     TIMEOUT = "timeout"
     RESOURCE_BUSY = "resource_busy"
@@ -695,6 +694,7 @@ class AgentTerminalClass(str, Enum):
     AGENT_LOOP_PROTOCOL_FAILURE = "agent_loop_protocol_failure"
     PARSE_DROPPED = "parse_dropped"
     GENERIC_THROW = "generic_throw"
+    MANAGED_SPEND_PAUSED = "managed_spend_paused"
 
 
 class AgentTerminalKind(str, Enum):

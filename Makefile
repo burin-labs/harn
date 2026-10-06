@@ -707,6 +707,8 @@ test-pr-gate-scripts:
 	./scripts/tests/release_tag_main_ancestry_test.sh
 	./scripts/tests/candidate_manifest_test.sh
 	./scripts/tests/release_promotion_plan_test.sh
+	bash ./scripts/tests/release_promotion_source_test.sh
+	bash ./scripts/tests/release_rehearsal_authorization_test.sh
 	bash ./scripts/tests/release_consumer_candidate_verdict_test.sh
 	./scripts/tests/check_linux_glibc_floor_test.sh
 	./scripts/tests/release_version_test.sh
@@ -739,6 +741,7 @@ test-pr-gate-scripts:
 	./scripts/tests/ci_write_walltime_report_test.sh
 	./scripts/tests/update_queued_pr_test.sh
 	./scripts/tests/cancel_superseded_merge_groups_test.sh
+	./scripts/tests/review_dispatch_sweep_test.sh
 	./scripts/tests/audit_gates_parallel_test.sh
 	./scripts/tests/source_gate_receipt_test.sh
 	./scripts/tests/conformance_worker_budget_test.sh

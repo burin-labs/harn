@@ -1,0 +1,36 @@
+name: Smart Ship
+
+# Hands pull requests labeled `ship` to the Smart Ship shepherd, which lands
+# them and reports each step on the PR. The shared runner lives in
+# burin-labs/.github.
+
+on:
+  pull_request_target: # zizmor: ignore[dangerous-triggers] never checks out or runs pull request code; the shared runner reads the PR through the API and runs its own pinned scripts
+    types: [labeled, unlabeled, synchronize, ready_for_review, dequeued, closed]
+  pull_request_review:
+    types: [submitted]
+  schedule:
+    - cron: "7,22,37,52 * * * *"
+  workflow_dispatch:
+
+# Every write (labels, merge, PR comments) uses the release app token the
+# shared runner mints from the secrets below; GITHUB_TOKEN only reads.
+permissions:
+  contents: read
+
+jobs:
+  ship:
+    # A sweep or a manual run looks at every labeled PR; any event about one
+    # PR wakes the shepherd only when that PR carries the label, or just lost it.
+    if: >-
+      github.event_name == 'schedule'
+      || github.event_name == 'workflow_dispatch'
+      || contains(github.event.pull_request.labels.*.name, 'ship')
+      || (github.event.action == 'unlabeled' && github.event.label.name == 'ship')
+    uses: burin-labs/.github/.github/workflows/smart-ship.yml@22f7b6e8e20a70be002c7980a161b1e0cabbea43
+    with:
+      # Land-only until repair has been proven in this repository.
+      repair: false
+    secrets:
+      RELEASE_APP_CLIENT_ID: ${{ secrets.RELEASE_APP_CLIENT_ID }}
+      RELEASE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}

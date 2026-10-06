@@ -49,6 +49,7 @@ pub fn is_supported_session_mode(mode_id: &str) -> bool {
 use bridge::AcpBridge;
 pub use bridge::AcpOutput;
 pub use confinement::{confine_acp_server_process, AcpServerConfinement};
+pub use execute::PromptExecutionError as AcpPromptExecutionError;
 use live_clients::{
     apply_live_client_operation, is_live_client_method, write_live_client_operation,
 };
@@ -671,8 +672,42 @@ fn append_profile_json_line(
         .map_err(|error| format!("failed to append {}: {error}", path.display()))
 }
 
+/// The actual engine future, polled on the ACP server's local executor.
+pub type AcpPromptExecution<'a> = std::pin::Pin<
+    Box<dyn std::future::Future<Output = Result<String, AcpPromptExecutionError>> + 'a>,
+>;
+
+/// Product facts for binding an engine turn to its prepared authority.
+pub struct AcpPromptExecutionContext<'a> {
+    pub session_id: &'a str,
+    pub cwd: &'a Path,
+    pub project_root: &'a Path,
+    /// Harn's resolved mode and confinement policy, without a host re-derivation.
+    pub capability_policy: Option<&'a harn_vm::orchestration::CapabilityPolicy>,
+    /// The existing prompt bridge, including its cancellation-aware host calls.
+    pub host_bridge: &'a harn_vm::bridge::HostBridge,
+    cancelled: &'a std::sync::atomic::AtomicBool,
+}
+
+impl AcpPromptExecutionContext<'_> {
+    pub fn is_cancelled(&self) -> bool {
+        self.cancelled.load(Ordering::SeqCst)
+    }
+}
+
 #[async_trait(?Send)]
 pub trait AcpRuntimeConfigurator: Send + Sync {
+    /// Bind authority and credentials around the actual VM execution, including
+    /// host capabilities and model calls. UI enqueue scopes cannot reach this
+    /// executor. Refusing here leaves the execution future unpolled.
+    async fn run_prompt(
+        &self,
+        _context: AcpPromptExecutionContext<'_>,
+        execution: AcpPromptExecution<'_>,
+    ) -> Result<String, AcpPromptExecutionError> {
+        execution.await
+    }
+
     async fn configure(
         &self,
         _vm: &mut harn_vm::Vm,
@@ -713,6 +748,14 @@ struct EndpointOverrideRuntimeConfigurator {
 
 #[async_trait(?Send)]
 impl AcpRuntimeConfigurator for EndpointOverrideRuntimeConfigurator {
+    async fn run_prompt(
+        &self,
+        context: AcpPromptExecutionContext<'_>,
+        execution: AcpPromptExecution<'_>,
+    ) -> Result<String, AcpPromptExecutionError> {
+        self.inner.run_prompt(context, execution).await
+    }
+
     async fn configure(
         &self,
         vm: &mut harn_vm::Vm,

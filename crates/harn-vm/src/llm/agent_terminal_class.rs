@@ -36,9 +36,6 @@ pub enum AgentTerminalClass {
     /// same request into the same refusal. Arrives as an HTTP 429, so it must
     /// be told apart from `RateLimited` by the provider's own billing code.
     ProviderBilling,
-    /// The managed service's spend policy paused inference independently of
-    /// personal provider credit. Hosts can offer waiting or a personal key.
-    ManagedSpendPaused,
     RateLimited,
     Timeout,
     ResourceBusy,
@@ -47,6 +44,8 @@ pub enum AgentTerminalClass {
     AgentLoopProtocolFailure,
     ParseDropped,
     GenericThrow,
+    /// Managed inference is paused by the service spending policy.
+    ManagedSpendPaused,
 }
 
 impl AgentTerminalClass {
@@ -55,7 +54,6 @@ impl AgentTerminalClass {
         Self::ProviderMisconfigured,
         Self::ProviderUnavailable,
         Self::ProviderBilling,
-        Self::ManagedSpendPaused,
         Self::RateLimited,
         Self::Timeout,
         Self::ResourceBusy,
@@ -64,6 +62,7 @@ impl AgentTerminalClass {
         Self::AgentLoopProtocolFailure,
         Self::ParseDropped,
         Self::GenericThrow,
+        Self::ManagedSpendPaused,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -72,7 +71,6 @@ impl AgentTerminalClass {
             Self::ProviderMisconfigured => "provider_misconfigured",
             Self::ProviderUnavailable => "provider_unavailable",
             Self::ProviderBilling => "provider_billing",
-            Self::ManagedSpendPaused => "managed_spend_paused",
             Self::RateLimited => "rate_limited",
             Self::Timeout => "timeout",
             Self::ResourceBusy => "resource_busy",
@@ -81,6 +79,7 @@ impl AgentTerminalClass {
             Self::AgentLoopProtocolFailure => "agent_loop_protocol_failure",
             Self::ParseDropped => "parse_dropped",
             Self::GenericThrow => "generic_throw",
+            Self::ManagedSpendPaused => "managed_spend_paused",
         }
     }
 
@@ -103,7 +102,6 @@ impl AgentTerminalClass {
             "provider_misconfigured" => Some(Self::ProviderMisconfigured),
             "provider_unavailable" => Some(Self::ProviderUnavailable),
             "provider_billing" => Some(Self::ProviderBilling),
-            "managed_spend_paused" => Some(Self::ManagedSpendPaused),
             "rate_limited" => Some(Self::RateLimited),
             "timeout" => Some(Self::Timeout),
             "resource_busy" => Some(Self::ResourceBusy),
@@ -112,6 +110,7 @@ impl AgentTerminalClass {
             "agent_loop_protocol_failure" => Some(Self::AgentLoopProtocolFailure),
             "parse_dropped" => Some(Self::ParseDropped),
             "generic_throw" => Some(Self::GenericThrow),
+            "managed_spend_paused" => Some(Self::ManagedSpendPaused),
             _ => None,
         }
     }
@@ -185,7 +184,6 @@ pub fn agent_terminal_class(
                 | "provider_unavailable"
                 | "provider_billing"
                 | "billing_limit"
-                | "managed_spend_paused"
                 | "rate_limit"
                 | "rate_limited"
                 | "timeout"
@@ -398,7 +396,6 @@ fn terminal_class_from_exact_signal(signal: &str) -> Option<AgentTerminalClass> 
         }
         "provider_unavailable" => Some(AgentTerminalClass::ProviderUnavailable),
         "provider_billing" | "billing_limit" => Some(AgentTerminalClass::ProviderBilling),
-        "managed_spend_paused" => Some(AgentTerminalClass::ManagedSpendPaused),
         "rate_limit" | "rate_limited" => Some(AgentTerminalClass::RateLimited),
         "timeout" | "timed_out" | "deadline_exceeded" => Some(AgentTerminalClass::Timeout),
         "resource_busy" => Some(AgentTerminalClass::ResourceBusy),
@@ -509,6 +506,24 @@ mod tests {
     use serde_json::json;
 
     #[test]
+    fn managed_pause_requires_typed_reason_not_opaque_code_or_prose() {
+        let mut error = json!({
+            "provider": "openai", "category": "rate_limit", "reason": "rate_limit",
+            "code": "managed_spend_paused", "message": "Managed AI is paused"
+        });
+        assert_eq!(
+            agent_terminal_class("error", "", Some(&error)),
+            Some(AgentTerminalClass::RateLimited)
+        );
+        error["reason"] = json!("managed_spend_paused");
+        error["code"] = json!("insufficient_quota");
+        assert_eq!(
+            agent_terminal_class("error", "", Some(&error)),
+            Some(AgentTerminalClass::ManagedSpendPaused)
+        );
+    }
+
+    #[test]
     fn terminal_class_wire_values_are_stable_and_exhaustive() {
         let pairs = [
             (AgentTerminalClass::ContextOverflow, "context_overflow"),
@@ -521,10 +536,6 @@ mod tests {
                 "provider_unavailable",
             ),
             (AgentTerminalClass::ProviderBilling, "provider_billing"),
-            (
-                AgentTerminalClass::ManagedSpendPaused,
-                "managed_spend_paused",
-            ),
             (AgentTerminalClass::RateLimited, "rate_limited"),
             (AgentTerminalClass::Timeout, "timeout"),
             (AgentTerminalClass::ResourceBusy, "resource_busy"),
@@ -542,6 +553,10 @@ mod tests {
             ),
             (AgentTerminalClass::ParseDropped, "parse_dropped"),
             (AgentTerminalClass::GenericThrow, "generic_throw"),
+            (
+                AgentTerminalClass::ManagedSpendPaused,
+                "managed_spend_paused",
+            ),
         ];
         for (class, wire) in pairs {
             assert_eq!(class.as_str(), wire);
@@ -552,30 +567,6 @@ mod tests {
             );
         }
         assert_eq!(pairs.len(), AgentTerminalClass::ALL.len());
-    }
-
-    #[test]
-    fn managed_spend_pause_keeps_personal_credit_and_throttle_distinct() {
-        for (reason, expected) in [
-            (
-                "managed_spend_paused",
-                AgentTerminalClass::ManagedSpendPaused,
-            ),
-            ("billing_limit", AgentTerminalClass::ProviderBilling),
-            ("rate_limit", AgentTerminalClass::RateLimited),
-        ] {
-            let error = json!({"reason": reason, "category": "rate_limit", "provider": "openai"});
-            assert_eq!(
-                agent_terminal_class("error", "", Some(&error)),
-                Some(expected)
-            );
-        }
-        let error = json!({"reason":"rate_limit", "category":"rate_limit", "provider":"openai",
-            "message":"managed_spend_paused", "metadata":{"reason":"managed_spend_paused"}});
-        assert_eq!(
-            agent_terminal_class("error", "", Some(&error)),
-            Some(AgentTerminalClass::RateLimited)
-        );
     }
 
     #[test]

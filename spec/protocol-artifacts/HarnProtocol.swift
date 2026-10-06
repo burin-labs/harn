@@ -1714,7 +1714,6 @@ public struct HarnAgentTerminalClass: RawRepresentable, Codable, Sendable, Hasha
     public static let providerMisconfigured = Self(rawValue: "provider_misconfigured")
     public static let providerUnavailable = Self(rawValue: "provider_unavailable")
     public static let providerBilling = Self(rawValue: "provider_billing")
-    public static let managedSpendPaused = Self(rawValue: "managed_spend_paused")
     public static let rateLimited = Self(rawValue: "rate_limited")
     public static let timeout = Self(rawValue: "timeout")
     public static let resourceBusy = Self(rawValue: "resource_busy")
@@ -1723,6 +1722,7 @@ public struct HarnAgentTerminalClass: RawRepresentable, Codable, Sendable, Hasha
     public static let agentLoopProtocolFailure = Self(rawValue: "agent_loop_protocol_failure")
     public static let parseDropped = Self(rawValue: "parse_dropped")
     public static let genericThrow = Self(rawValue: "generic_throw")
+    public static let managedSpendPaused = Self(rawValue: "managed_spend_paused")
 
     /// Every value this binding was generated from, in wire order. A value
     /// outside it is valid and preserved; it is simply not listed here.
@@ -1731,7 +1731,6 @@ public struct HarnAgentTerminalClass: RawRepresentable, Codable, Sendable, Hasha
         "provider_misconfigured",
         "provider_unavailable",
         "provider_billing",
-        "managed_spend_paused",
         "rate_limited",
         "timeout",
         "resource_busy",
@@ -1740,6 +1739,7 @@ public struct HarnAgentTerminalClass: RawRepresentable, Codable, Sendable, Hasha
         "agent_loop_protocol_failure",
         "parse_dropped",
         "generic_throw",
+        "managed_spend_paused",
     ].map { Self(rawValue: $0) }
 
     /// Whether this value is part of the vocabulary this binding was generated from.

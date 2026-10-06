@@ -296,14 +296,21 @@ jobs:
           if [[ "$EVENT_NAME" == "pull_request" ]] && is_release_head_ref "$PR_HEAD_REF"; then
             changed_files="$RUNNER_TEMP/release-metadata-changed-files.txt"
 
+            # Diff against the merge ref's first parent, the base tip the merge
+            # was built on. The recorded base SHA goes stale as main moves and
+            # pulls main's later changes into this list (#9432). The shallow
+            # checkout grafts HEAD parentless, so read the parent from the
+            # commit object and fetch it.
+            base_sha="$(git cat-file -p HEAD | awk '/^parent /{n++; if (n == 1) first=$2} END {if (n == 2) print first}')"
+            base_sha="${base_sha:-$PR_BASE_SHA}"
             if [[ -n "$PR_BASE_REF" ]]; then
               git fetch --no-tags --depth=1 origin "$PR_BASE_REF" || true
             fi
-            if [[ -n "$PR_BASE_SHA" ]] && ! git cat-file -e "${PR_BASE_SHA}^{commit}" 2>/dev/null; then
-              git fetch --no-tags --depth=1 origin "$PR_BASE_SHA" || true
+            if [[ -n "$base_sha" ]] && ! git cat-file -e "${base_sha}^{commit}" 2>/dev/null; then
+              git fetch --no-tags --depth=1 origin "$base_sha" || true
             fi
 
-            if [[ -n "$PR_BASE_SHA" ]] && git diff --name-only "$PR_BASE_SHA" HEAD > "$changed_files"; then
+            if [[ -n "$base_sha" ]] && git diff --name-only "$base_sha" HEAD > "$changed_files"; then
               echo "Release PR changed files:"
               sed 's/^/  /' "$changed_files"
               if [[ "$(./scripts/ci_release_metadata_only.sh "$changed_files")" == "true" ]]; then
@@ -580,7 +587,7 @@ jobs:
           cache-bin: false
           cache-workspace-crates: "true"
       - name: Install cargo-semver-checks
-        uses: taiki-e/install-action@9983c65e42da123ff25d1f78505eb6de315aa172 # v2.87.20
+        uses: taiki-e/install-action@4cef1412cce204788f482e778a0b9187f9626a29 # v2.87.21
         with:
           tool: cargo-semver-checks@0.50.0
       - name: Resolve the public API baseline
@@ -886,7 +893,7 @@ jobs:
       # Dependency hygiene compiles nothing, so it rides the shortest leg.
       - name: Install cargo-machete
         if: matrix.kind == 'lean-lsp'
-        uses: taiki-e/install-action@9983c65e42da123ff25d1f78505eb6de315aa172 # v2.87.20
+        uses: taiki-e/install-action@4cef1412cce204788f482e778a0b9187f9626a29 # v2.87.21
         with:
           tool: cargo-machete@0.9.2
       - name: Reject unused Rust dependencies
@@ -1298,7 +1305,7 @@ jobs:
       - name: Record the sccache baseline
         run: ./scripts/ci/sccache_baseline.sh
       - name: Install cargo-nextest
-        uses: taiki-e/install-action@9983c65e42da123ff25d1f78505eb6de315aa172 # v2.87.20
+        uses: taiki-e/install-action@4cef1412cce204788f482e778a0b9187f9626a29 # v2.87.21
         with:
           tool: nextest@0.9.132
       # Only security binaries enter this archive; the following workspace
@@ -1501,7 +1508,7 @@ jobs:
           check-command: mold
       - uses: ./.github/actions/rust-toolchain
       - name: Install cargo-nextest
-        uses: taiki-e/install-action@9983c65e42da123ff25d1f78505eb6de315aa172 # v2.87.20
+        uses: taiki-e/install-action@4cef1412cce204788f482e778a0b9187f9626a29 # v2.87.21
         with:
           tool: nextest@0.9.132
       - name: Start workspace test archive download timer
@@ -1590,7 +1597,7 @@ jobs:
           check-command: mold
       - uses: ./.github/actions/rust-toolchain
       - name: Install cargo-nextest
-        uses: taiki-e/install-action@9983c65e42da123ff25d1f78505eb6de315aa172 # v2.87.20
+        uses: taiki-e/install-action@4cef1412cce204788f482e778a0b9187f9626a29 # v2.87.21
         with:
           tool: nextest@0.9.132
       - name: Download security test archive
@@ -2412,7 +2419,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/rust-toolchain
       - name: Install pinned cross CLI
-        uses: taiki-e/install-action@9983c65e42da123ff25d1f78505eb6de315aa172 # v2.87.20
+        uses: taiki-e/install-action@4cef1412cce204788f482e778a0b9187f9626a29 # v2.87.21
         with:
           tool: cross@0.2.5
           fallback: none
@@ -2449,8 +2456,8 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          # Full history on PR and push so the diff base (PR base SHA / pushed
-          # `before` SHA) is reachable for the path detection below. merge_group
+          # Full history on PR and push so the diff base (the merge ref's first
+          # parent / pushed `before` SHA) is reachable for the path detection below. merge_group
           # keeps the shallow checkout (it never diffs — run stays false).
           fetch-depth: ${{ (github.event_name == 'pull_request' || github.event_name == 'push') && '0' || '1' }}
       - name: Detect macOS-relevant changes
@@ -2473,10 +2480,21 @@ jobs:
           # run_macos=false (the merge queue never path-gates the platform plan
           # jobs — unchanged behavior).
           diff_base=""
+          # A pull request checks out `refs/pull/N/merge`, whose first parent is
+          # the base tip the merge was built on, so HEAD^1..HEAD is exactly what
+          # the pull request contributes. The recorded base SHA is the tip from
+          # when the event fired and goes stale as main moves; diffing against
+          # it counted everything main landed since as this pull request's
+          # change and ran this 30-minute lane for nothing (#9432). It stays
+          # the base only when the checkout is not a merge commit.
           if [[ "$EVENT_NAME" == "push" ]]; then
             diff_base="$BEFORE_SHA"
           elif [[ "$EVENT_NAME" == "pull_request" ]]; then
-            diff_base="$BASE_SHA"
+            if git rev-parse --verify --quiet HEAD^2 >/dev/null; then
+              diff_base="$(git rev-parse HEAD^1)"
+            else
+              diff_base="$BASE_SHA"
+            fi
           fi
 
           if [[ "$EVENT_NAME" == "push" || "$EVENT_NAME" == "pull_request" ]]; then

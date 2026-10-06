@@ -397,37 +397,49 @@ impl AcpServer {
         let id_owned = id.clone();
         let send_output = self.output.clone();
         let host_bridge_for_response = host_bridge.clone();
-        let result = mode_policy
-            .run(Box::pin(async {
-                let _budget_guard = turn_budget.install_session_turn(llm_spent_usd.unwrap_or(0.0));
-                let _spend_recorder = SessionSpendRecorder::new(
-                    llm_spend.clone(),
-                    &_budget_guard,
-                    llm_spent_usd.is_some(),
-                );
-                execute::execute_chunk(
-                    chunk,
-                    bridge.clone(),
-                    host_bridge,
-                    execute::PromptGlobals {
-                        text: &prompt_text,
-                        content: &prompt.content,
-                        messages: &prompt.messages,
-                    },
-                    execute::VmSetup {
-                        source: &source,
-                        baseline: vm_baseline.as_ref(),
-                        baseline_cache_hit: vm_baseline_cache_hit,
-                        baseline_prepare_ms: vm_baseline_prepare_ms,
-                        source_path: source_path.as_deref(),
-                        cwd: &cwd,
-                        project_root: Some(&project_root),
-                        runtime_configurator: self.runtime_configurator.clone(),
-                        session_environment: environment_policy.clone(),
-                    },
-                )
-                .await
-            }))
+        let runtime_configurator = self.runtime_configurator.clone();
+        let result = runtime_configurator
+            .run_prompt(
+                AcpPromptExecutionContext {
+                    session_id: &session_id,
+                    cwd: &cwd,
+                    project_root: &project_root,
+                    capability_policy: mode_policy.policy(),
+                    host_bridge: &host_bridge_for_response,
+                    cancelled: &cancellation.cancelled,
+                },
+                Box::pin(mode_policy.run(Box::pin(async {
+                    let _budget_guard =
+                        turn_budget.install_session_turn(llm_spent_usd.unwrap_or(0.0));
+                    let _spend_recorder = SessionSpendRecorder::new(
+                        llm_spend.clone(),
+                        &_budget_guard,
+                        llm_spent_usd.is_some(),
+                    );
+                    execute::execute_chunk(
+                        chunk,
+                        bridge.clone(),
+                        host_bridge,
+                        execute::PromptGlobals {
+                            text: &prompt_text,
+                            content: &prompt.content,
+                            messages: &prompt.messages,
+                        },
+                        execute::VmSetup {
+                            source: &source,
+                            baseline: vm_baseline.as_ref(),
+                            baseline_cache_hit: vm_baseline_cache_hit,
+                            baseline_prepare_ms: vm_baseline_prepare_ms,
+                            source_path: source_path.as_deref(),
+                            cwd: &cwd,
+                            project_root: Some(&project_root),
+                            runtime_configurator: self.runtime_configurator.clone(),
+                            session_environment: environment_policy.clone(),
+                        },
+                    )
+                    .await
+                }))),
+            )
             .await;
         self.finish_profile_turn(&session_id, profile_turn);
         let sink_flush_error = self.clear_active_prompt_transport(&session_id).await.err();
