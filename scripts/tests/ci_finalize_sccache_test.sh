@@ -13,7 +13,7 @@ shared_summary="$tmp_root/shared-summary"
 tier_record="$tmp_root/tier-record"
 tier_summary="$tmp_root/tier-summary"
 
-cat > "$tmp_root/bin/sccache" <<'SH'
+cat > "$tmp_root/bin/sccache" << 'SH'
 #!/usr/bin/env bash
 set -euo pipefail
 printf '%s\n' "$*" >> "$SCCACHE_TEST_RECORD"
@@ -27,6 +27,17 @@ case "$*" in
 esac
 SH
 chmod +x "$tmp_root/bin/sccache"
+
+assert_measurement() {
+  local measurement
+  measurement=$(sed -n 's/^sccache measured: //p' <<< "$output")
+  jq -se --arg scope "$1" --argjson requests "$2" --argjson hits "$3" \
+    --argjson misses "$4" \
+    'length == 1 and .[0] == {scope: $scope, per_job_attribution: "unmeasured",
+      requests: $requests, hits: $hits, misses: $misses}' \
+    <<< "$measurement" > /dev/null
+}
+
 export SCCACHE_TEST_STATS='{"stats":{"compile_requests":321,"cache_hits":{"counts":{}},"cache_misses":{"counts":{"Rust":321}}}}'
 
 output=$(PATH="$tmp_root/bin:$PATH" \
@@ -35,8 +46,8 @@ output=$(PATH="$tmp_root/bin:$PATH" \
   HARN_SHARED_SCCACHE=off \
   "$repo_root/scripts/ci/finalize_sccache.sh")
 
-[[ "$output" == *"sccache measured (cumulative): requests=321 hits=0 misses=321"* ]]
-[[ "$output" == *"::warning title=sccache is cold::321 cacheable compilations produced zero cache hits."* ]]
+assert_measurement server_cumulative 321 0 321
+[[ "$output" == *"::warning title=sccache is cold::Within server_cumulative, 321 cacheable compilations produced zero cache hits."* ]]
 grep -Fxq -- '--show-stats --stats-format=json' "$record"
 grep -Fxq -- '--stop-server' "$record"
 grep -Fq '### sccache' "$summary"
@@ -46,7 +57,7 @@ PATH="$tmp_root/bin:$PATH" \
   SCCACHE_TEST_RECORD="$shared_record" \
   GITHUB_STEP_SUMMARY="$shared_summary" \
   HARN_SHARED_SCCACHE=on \
-  "$repo_root/scripts/ci/finalize_sccache.sh" >/dev/null
+  "$repo_root/scripts/ci/finalize_sccache.sh" > /dev/null
 
 grep -Fxq -- '--show-stats --stats-format=json' "$shared_record"
 if grep -Fxq -- '--stop-server' "$shared_record"; then
@@ -58,7 +69,7 @@ PATH="$tmp_root/bin:$PATH" \
   SCCACHE_TEST_RECORD="$tier_record" \
   GITHUB_STEP_SUMMARY="$tier_summary" \
   HARN_RUNNER_TIER=self-hosted \
-  "$repo_root/scripts/ci/finalize_sccache.sh" >/dev/null
+  "$repo_root/scripts/ci/finalize_sccache.sh" > /dev/null
 
 grep -Fxq -- '--show-stats --stats-format=json' "$tier_record"
 if grep -Fxq -- '--stop-server' "$tier_record"; then
@@ -100,14 +111,14 @@ fi
 hits='{"stats":{"compile_requests":321,"cache_hits":{"counts":{"Rust":200,"C/C++":100}},"cache_misses":{"counts":{"Rust":21}}}}'
 output=$(PATH="$tmp_root/bin:$PATH" SCCACHE_TEST_RECORD="$record" SCCACHE_TEST_STATS="$hits" \
   "$repo_root/scripts/ci/finalize_sccache.sh")
-[[ "$output" == *"sccache measured (cumulative): requests=321 hits=300 misses=21"* ]]
+assert_measurement server_cumulative 321 300 21
 [[ "$output" != *"::warning"* ]]
 
 zero='{"stats":{"compile_requests":0,"cache_hits":{"counts":{}},"cache_misses":{"counts":{}}}}'
 output=$(PATH="$tmp_root/bin:$PATH" SCCACHE_TEST_RECORD="$record" SCCACHE_TEST_STATS="$zero" \
   "$repo_root/scripts/ci/finalize_sccache.sh")
-[[ "$output" == *"sccache measured (cumulative): requests=0 hits=0 misses=0"* ]]
-[[ "$output" == *"No compile requests were observed."* ]]
+assert_measurement server_cumulative 0 0 0
+[[ "$output" == *"No compile requests were observed in server_cumulative."* ]]
 [[ "$output" != *"::warning"* ]]
 
 # Rust linking and compiler version probes are not cacheable work. A busy
@@ -115,17 +126,15 @@ output=$(PATH="$tmp_root/bin:$PATH" SCCACHE_TEST_RECORD="$record" SCCACHE_TEST_S
 uncacheable="$(jq '.stats.compile_requests = 321' <<< "$zero")"
 output=$(PATH="$tmp_root/bin:$PATH" SCCACHE_TEST_RECORD="$record" SCCACHE_TEST_STATS="$uncacheable" \
   "$repo_root/scripts/ci/finalize_sccache.sh")
-[[ "$output" == *"sccache measured (cumulative): requests=321 hits=0 misses=0"* ]]
+assert_measurement server_cumulative 321 0 0
 [[ "$output" != *"::warning"* && "$output" != *"No compile requests"* ]]
 
 output=$(SCCACHE_PATH="$tmp_root/not-installed" "$repo_root/scripts/ci/finalize_sccache.sh")
 [[ "$output" == *"Compiler-cache activity was not measured; sccache is not installed."* ]]
 [[ "$output" != *"sccache measured:"* ]]
 
-# A job that compiled cold on a machine whose cache server is already warm
-# must report its own result. Before the baseline existed the host's running
-# total was the only number available, so a cold job inherited a neighbour's
-# hit rate and the cold-cache warning could never fire on a shared runner.
+# A baseline excludes earlier activity from the server observation, while
+# retaining explicit unmeasured per-job attribution.
 baseline_dir="$tmp_root/baseline"
 mkdir -p "$baseline_dir"
 warm_before='{"stats":{"compile_requests":9000,"cache_hits":{"counts":{"Rust":8000}},"cache_misses":{"counts":{"Rust":1000}}}}'
@@ -133,29 +142,46 @@ printf '%s\n' "$warm_before" > "$baseline_dir/sccache-baseline.json"
 
 cold_after="$(jq '.stats.compile_requests = 9321
   | .stats.cache_misses.counts.Rust = 1321' <<< "$warm_before")"
-output=$(PATH="$tmp_root/bin:$PATH" SCCACHE_TEST_RECORD="$record"   SCCACHE_TEST_STATS="$cold_after" RUNNER_TEMP="$baseline_dir"   HARN_SHARED_SCCACHE=on HARN_RUNNER_TIER=self-hosted   "$repo_root/scripts/ci/finalize_sccache.sh")
-[[ "$output" == *"sccache measured (job): requests=321 hits=0 misses=321"* ]]
-[[ "$output" == *"::warning title=sccache is cold::321 cacheable compilations produced zero cache hits."* ]]
+output=$(PATH="$tmp_root/bin:$PATH" SCCACHE_TEST_RECORD="$record" SCCACHE_TEST_STATS="$cold_after" RUNNER_TEMP="$baseline_dir" HARN_SHARED_SCCACHE=on HARN_RUNNER_TIER=self-hosted "$repo_root/scripts/ci/finalize_sccache.sh")
+assert_measurement server_interval 321 0 321
+[[ "$output" == *"::warning title=sccache is cold::Within server_interval, 321 cacheable compilations produced zero cache hits."* ]]
 [[ "$output" != *"hits=8000"* ]]
 
-# The same job on a second run, now hitting the objects the first one wrote.
+# An interval observing only hits still cannot establish which client hit.
 warm_after="$(jq '.stats.compile_requests = 9321
   | .stats.cache_hits.counts.Rust = 8321' <<< "$warm_before")"
-output=$(PATH="$tmp_root/bin:$PATH" SCCACHE_TEST_RECORD="$record"   SCCACHE_TEST_STATS="$warm_after" RUNNER_TEMP="$baseline_dir"   HARN_SHARED_SCCACHE=on HARN_RUNNER_TIER=self-hosted   "$repo_root/scripts/ci/finalize_sccache.sh")
-[[ "$output" == *"sccache measured (job): requests=321 hits=321 misses=0"* ]]
+output=$(PATH="$tmp_root/bin:$PATH" SCCACHE_TEST_RECORD="$record" SCCACHE_TEST_STATS="$warm_after" RUNNER_TEMP="$baseline_dir" HARN_SHARED_SCCACHE=on HARN_RUNNER_TIER=self-hosted "$repo_root/scripts/ci/finalize_sccache.sh")
+assert_measurement server_interval 321 321 0
 [[ "$output" != *"sccache is cold"* ]]
 
 # A server restarted mid-job resets its counters below the baseline. That is
 # not a negative delta; it is an unusable one, and it must say so.
 printf '%s\n' "$warm_before" > "$baseline_dir/sccache-baseline.json"
 restarted='{"stats":{"compile_requests":12,"cache_hits":{"counts":{}},"cache_misses":{"counts":{"Rust":12}}}}'
-output=$(PATH="$tmp_root/bin:$PATH" SCCACHE_TEST_RECORD="$record"   SCCACHE_TEST_STATS="$restarted" RUNNER_TEMP="$baseline_dir"   HARN_SHARED_SCCACHE=on HARN_RUNNER_TIER=self-hosted   "$repo_root/scripts/ci/finalize_sccache.sh")
+output=$(PATH="$tmp_root/bin:$PATH" SCCACHE_TEST_RECORD="$record" SCCACHE_TEST_STATS="$restarted" RUNNER_TEMP="$baseline_dir" HARN_SHARED_SCCACHE=on HARN_RUNNER_TIER=self-hosted "$repo_root/scripts/ci/finalize_sccache.sh")
 [[ "$output" == *"::warning title=sccache counters reset::"* ]]
-[[ "$output" == *"sccache measured (cumulative): requests=12 hits=0 misses=12"* ]]
+assert_measurement server_cumulative 12 0 12
 
 # An unreadable baseline falls back to the host total and never to a zero.
 rm -f "$baseline_dir/sccache-baseline.json"
-output=$(PATH="$tmp_root/bin:$PATH" SCCACHE_TEST_RECORD="$record"   SCCACHE_TEST_STATS="$warm_after" RUNNER_TEMP="$baseline_dir"   HARN_SHARED_SCCACHE=on HARN_RUNNER_TIER=self-hosted   "$repo_root/scripts/ci/finalize_sccache.sh")
-[[ "$output" == *"sccache measured (cumulative): requests=9321 hits=8321 misses=1000"* ]]
+output=$(PATH="$tmp_root/bin:$PATH" SCCACHE_TEST_RECORD="$record" SCCACHE_TEST_STATS="$warm_after" RUNNER_TEMP="$baseline_dir" HARN_SHARED_SCCACHE=on HARN_RUNNER_TIER=self-hosted "$repo_root/scripts/ci/finalize_sccache.sh")
+assert_measurement server_cumulative 9321 8321 1000
+
+# One client misses 321 times while a concurrent client supplies 200 hits.
+# The server delta observes both; it cannot attribute their work to one job.
+printf '%s\n' "$warm_before" > "$baseline_dir/sccache-baseline.json"
+overlapping_after="$(jq '.stats.compile_requests += 521
+  | .stats.cache_hits.counts.Rust += 200
+  | .stats.cache_misses.counts.Rust += 321' <<< "$warm_before")"
+output=$(PATH="$tmp_root/bin:$PATH" SCCACHE_TEST_RECORD="$record" \
+  SCCACHE_TEST_STATS="$overlapping_after" RUNNER_TEMP="$baseline_dir" \
+  HARN_SHARED_SCCACHE=on HARN_RUNNER_TIER=self-hosted \
+  "$repo_root/scripts/ci/finalize_sccache.sh")
+if [[ "$output" == *"sccache measured (job)"* ]]; then
+  echo "overlapping server clients were incorrectly attributed to one job" >&2
+  exit 1
+fi
+assert_measurement server_interval 521 200 321
+[[ "$output" != *"sccache is cold"* ]]
 
 echo "ci_finalize_sccache_test: ok"
