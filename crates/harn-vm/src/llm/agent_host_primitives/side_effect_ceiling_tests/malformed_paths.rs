@@ -80,6 +80,40 @@ impl Calls {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn catalog_paths_reach_workspace_approval_before_dispatch() {
+    clear_execution_policy_stacks();
+    clear_all_approval_policy_repeat_counts();
+    let _bridge = HostBridgeGuard::replace(None);
+    push_approval_policy(ToolApprovalPolicy {
+        auto_approve: vec!["read_file".into()],
+        ..ToolApprovalPolicy::default()
+    });
+    let calls = Calls::new();
+    let outside = std::env::temp_dir().join("harn-catalog-path-approval-proof");
+    let refused = calls
+        .dispatch(
+            serde_json::json!({"location": outside}),
+            true,
+            &crate::value::DictMap::new(),
+        )
+        .await;
+    assert_eq!(refused["ok"], false, "{refused}");
+    assert_eq!(calls.effect.load(Ordering::SeqCst), 0);
+
+    let allowed = calls
+        .dispatch(
+            serde_json::json!({"location": "proof"}),
+            true,
+            &crate::value::DictMap::new(),
+        )
+        .await;
+    assert_eq!(allowed["ok"], true, "{allowed}");
+    assert_eq!(calls.effect.load(Ordering::SeqCst), 1);
+    pop_approval_policy();
+    clear_all_approval_policy_repeat_counts();
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn malformed_paths_retry_before_policy_callbacks_approval_and_effects() {
     clear_execution_policy_stacks();
     crate::orchestration::clear_tool_prechecks();
