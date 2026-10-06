@@ -371,8 +371,10 @@ fn apply_profile(profile: &ProcessProfile) -> io::Result<()> {
     if let Some(landlock) = &profile.landlock {
         enter_landlock_ruleset(landlock.ruleset_fd)?;
     }
-    // Once seccomp is default-deny, the child should not retain sandbox-setup
-    // powers. Install Landlock first, then drop to the runtime syscall ceiling.
+    // Once seccomp is default-deny, the child keeps only the setup calls that
+    // narrow it further (stacking Landlock and seccomp, for its own confined
+    // children). Install Landlock first, then drop to the runtime syscall
+    // ceiling.
     //
     // `apply_filter` sets `PR_SET_NO_NEW_PRIVS` and issues `SYS_seccomp`
     // against the already-compiled program: no allocation, so it is safe on
@@ -903,6 +905,14 @@ fn compile_seccomp_program(policy: &CapabilityPolicy) -> Result<BpfProgram, VmEr
             rules.entry(syscall).or_default();
         }
     }
+    // `seccomp(SECCOMP_SET_MODE_FILTER, 0, prog)` is exactly what a nested
+    // Harn issues to install its own ceiling (`seccompiler::apply_filter`).
+    // It grants nothing new: `prctl(PR_SET_SECCOMP, SECCOMP_MODE_FILTER)` is
+    // already admitted, and the kernel evaluates every stacked filter and
+    // takes the most restrictive action, so an added filter can only narrow.
+    // Only that form is admitted. A flag such as `NEW_LISTENER` or `TSYNC`,
+    // and the other operations, keep failing with EPERM.
+    rules.insert(libc::SYS_seccomp, vec![nested_seccomp_filter_rule()?]);
     let rules: std::collections::BTreeMap<libc::c_long, Vec<SeccompRule>> = rules;
 
     // Denials return EPERM rather than killing: a child that trips the
@@ -920,6 +930,26 @@ fn compile_seccomp_program(policy: &CapabilityPolicy) -> Result<BpfProgram, VmEr
 
     BpfProgram::try_from(filter)
         .map_err(|err| sandbox_rejection(format!("failed to compile the seccomp filter: {err}")))
+}
+
+/// `seccomp(SECCOMP_SET_MODE_FILTER, 0, ...)` and nothing else: both arguments
+/// are `unsigned int`, so a 32-bit comparison is the whole value the kernel
+/// reads.
+fn nested_seccomp_filter_rule() -> Result<SeccompRule, VmError> {
+    let condition = |index, value| {
+        SeccompCondition::new(index, SeccompCmpArgLen::Dword, SeccompCmpOp::Eq, value).map_err(
+            |err| {
+                sandbox_rejection(format!(
+                    "failed to build the nested seccomp condition: {err}"
+                ))
+            },
+        )
+    };
+    SeccompRule::new(vec![
+        condition(0, u64::from(libc::SECCOMP_SET_MODE_FILTER))?,
+        condition(1, 0)?,
+    ])
+    .map_err(|err| sandbox_rejection(format!("failed to build the nested seccomp rule: {err}")))
 }
 
 /// The ABI this binary was built for, and therefore the only one the child is
@@ -1146,6 +1176,16 @@ fn allowed_syscalls(policy: &CapabilityPolicy) -> Vec<libc::c_long> {
         libc::SYS_waitid,
         libc::SYS_write,
         libc::SYS_writev,
+        // A confined child may confine its own children further. Landlock
+        // domains stack: a nested `landlock_restrict_self` intersects with the
+        // inherited domain and can never widen it. Without these, a confined
+        // Harn sees no Landlock, falls back to Bubblewrap, and Bubblewrap needs
+        // a user namespace this ceiling withholds, so every nested confined
+        // command fails (harn#9454). `seccomp` is admitted separately, with
+        // its arguments filtered, in `compile_seccomp_program`.
+        libc::SYS_landlock_create_ruleset,
+        libc::SYS_landlock_add_rule,
+        libc::SYS_landlock_restrict_self,
     ];
 
     #[cfg(target_arch = "x86_64")]
@@ -1282,9 +1322,12 @@ pub(super) fn landlock_available() -> bool {
     static AVAILABLE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *AVAILABLE.get_or_init(|| {
         let abi = landlock_abi_version();
-        if abi < LANDLOCK_ABI_SCOPED || std::fs::File::open("/").is_err() {
+        if abi < LANDLOCK_ABI_SCOPED {
             return false;
         }
+        let Some(witness) = landlock_probe_witness() else {
+            return false;
+        };
         let attr = LandlockRulesetAttr {
             handled_access_fs: landlock_handled_access(abi),
             handled_access_net: 0,
@@ -1310,12 +1353,12 @@ pub(super) fn landlock_available() -> bool {
                 libc::prctl(libc::PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) == 0
                     && libc::syscall(libc::SYS_landlock_restrict_self, ruleset.as_raw_fd(), 0) == 0
             };
-            let root = if confined {
-                unsafe { libc::open(c"/".as_ptr(), libc::O_RDONLY | libc::O_DIRECTORY) }
+            let opened = if confined {
+                unsafe { libc::open(witness.as_ptr(), libc::O_RDONLY | libc::O_DIRECTORY) }
             } else {
                 0
             };
-            unsafe { libc::_exit(i32::from(!(confined && root < 0))) };
+            unsafe { libc::_exit(i32::from(!(confined && opened < 0))) };
         }
         if child < 0 {
             return false;
@@ -1332,6 +1375,26 @@ pub(super) fn landlock_available() -> bool {
             return false;
         }
     })
+}
+
+/// A directory this process can open now, which an empty ruleset must then
+/// close to it. The root comes first; a process already inside a Landlock
+/// domain usually cannot read the root, so its working directory and temp
+/// directory follow. No readable candidate means no measurement, which reads
+/// as unavailable rather than as enforcement.
+fn landlock_probe_witness() -> Option<std::ffi::CString> {
+    use std::os::unix::ffi::OsStrExt;
+    let candidates = [
+        Some(PathBuf::from("/")),
+        std::env::current_dir().ok(),
+        Some(std::env::temp_dir()),
+    ];
+    candidates
+        .into_iter()
+        .flatten()
+        .filter(|path| path.is_absolute())
+        .find(|path| std::fs::read_dir(path).is_ok())
+        .and_then(|path| std::ffi::CString::new(path.as_os_str().as_bytes()).ok())
 }
 
 fn landlock_handled_access(abi: u32) -> u64 {
