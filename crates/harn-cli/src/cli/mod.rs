@@ -304,6 +304,10 @@ use clap::{Parser, Subcommand};
     arg_required_else_help = true
 )]
 pub(crate) struct Cli {
+    /// Consume a bounded parent secret-store frame from stdin before dispatch.
+    /// Values remain in memory, without ambient store fallback or tool inheritance.
+    #[arg(long = harn_vm::secrets::PARENT_SECRET_HANDOFF_OPTION, global = true)]
+    pub parent_secret_stdin: bool,
     /// Apply a durable provider allowance from a TOML policy file.
     #[arg(long, global = true, env = "HARN_SPEND_POLICY", value_name = "PATH")]
     pub spend_policy: Option<std::path::PathBuf>,
