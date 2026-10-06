@@ -360,6 +360,7 @@ fn git_identity_config_include_cannot_read_outside_declared_child_roots() {
     use harn_vm::orchestration::{
         pop_execution_policy, push_execution_policy, CapabilityPolicy, SandboxProfile,
     };
+    use harn_vm::value::{ErrorCategory, VmError};
     struct PolicyGuard;
     impl Drop for PolicyGuard {
         fn drop(&mut self) {
@@ -398,26 +399,69 @@ fn git_identity_config_include_cannot_read_outside_declared_child_roots() {
         String::from_utf8_lossy(&observed.stdout).trim(),
         "OUTSIDE_CONFIG_READ_REACHED"
     );
+    let inside = repository.path().join("inside.config");
+    std::fs::write(&inside, "[scoped]\nprobe = IN_ROOT_CONFIG_READ_REACHED\n").unwrap();
+    run_git(
+        repository.path(),
+        &["config", "include.path", inside.to_str().unwrap()],
+    );
     push_execution_policy(CapabilityPolicy {
         sandbox_profile: SandboxProfile::Worktree,
         workspace_roots: vec![repository.path().display().to_string()],
         ..CapabilityPolicy::default()
     });
     let _policy = PolicyGuard;
-    let refused =
+    let inside_read =
         harn_vm::process_sandbox::command_output_with_declared_roots("git", &args, &config);
-    if harn_vm::process_sandbox::active_backend_filesystem_available() {
-        let refused = refused.unwrap();
-        assert!(
-            !refused.status.success(),
-            "outside include was allowed: {refused:?}"
-        );
-        assert!(!String::from_utf8_lossy(&refused.stdout).contains("OUTSIDE_CONFIG_READ_REACHED"));
-    } else {
-        assert!(refused
-            .unwrap_err()
-            .to_string()
-            .contains("requires enforced filesystem read confinement"));
+    if !harn_vm::process_sandbox::active_backend_filesystem_available() {
+        assert!(matches!(
+            inside_read,
+            Err(VmError::CategorizedError {
+                category: ErrorCategory::ToolRejected,
+                ref message,
+            }) if message == "declared-root command requires enforced filesystem read confinement on this platform"
+        ));
+        eprintln!("UNMEASURED: Git include privacy requires an available filesystem sandbox");
+        return;
+    }
+    let inside_read = inside_read.expect("restricted Git must reach the in-root config read");
+    assert!(inside_read.status.success(), "{inside_read:?}");
+    assert_eq!(
+        String::from_utf8_lossy(&inside_read.stdout).trim(),
+        "IN_ROOT_CONFIG_READ_REACHED"
+    );
+
+    // Keep argv, cwd, command configuration and policy identical; only the
+    // repository's include target changes from granted to outside the jail.
+    run_git(
+        repository.path(),
+        &["config", "include.path", include.to_str().unwrap()],
+    );
+    match harn_vm::process_sandbox::command_output_with_declared_roots("git", &args, &config) {
+        Ok(refused) => {
+            assert!(
+                !refused.status.success(),
+                "outside include was allowed: {refused:?}"
+            );
+            for bytes in [&refused.stdout, &refused.stderr] {
+                assert!(!String::from_utf8_lossy(bytes).contains("OUTSIDE_CONFIG_READ_REACHED"));
+            }
+        }
+        Err(VmError::CategorizedError {
+            category: ErrorCategory::ToolRejected,
+            message,
+        }) => {
+            assert!(!message.contains("OUTSIDE_CONFIG_READ_REACHED"));
+            assert!(
+                (message.starts_with(
+                    "sandbox violation: process was denied by the OS sandbox (status "
+                ) || message.starts_with(
+                    "sandbox violation: process was terminated by the OS sandbox (status "
+                )) && message.contains("); mechanism="),
+                "expected the canonical OS sandbox refusal, got {message:?}"
+            );
+        }
+        other => panic!("expected an outside-config sandbox refusal, got {other:?}"),
     }
 }
 
