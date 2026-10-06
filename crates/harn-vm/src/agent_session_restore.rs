@@ -113,7 +113,6 @@ async fn read_canonical_session_prefix(
                     from_event_id: from,
                     to_event_id: checkpoint.last_event_id,
                     limit: Some(RESTORE_PAGE),
-                    ..ReadRange::default()
                 },
             )
             .await

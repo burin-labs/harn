@@ -243,9 +243,13 @@ impl AcpServer {
                     return;
                 }
             };
-            match harn_vm::agent_session_restore::load_canonical_session_replay(
-                &project_root,
-                &session_id,
+            // Cold replay owns page buffers and its checkpoint state. Keep its
+            // future out of the nested ACP dispatch frame.
+            match Box::pin(
+                harn_vm::agent_session_restore::load_canonical_session_replay(
+                    &project_root,
+                    &session_id,
+                ),
             )
             .await
             {
