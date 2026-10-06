@@ -2,6 +2,7 @@
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use sha2::{Digest, Sha256};
 
@@ -130,7 +131,7 @@ fn relative_path_label(base: &Path, target: &Path) -> Option<String> {
 /// `HOME`, or mtimes; mtimes live only in the manifest, which is not hashed.
 pub(super) fn relocatable_graph_hash(
     source_path: &Path,
-    visited: &BTreeMap<PathBuf, super::ImportNode>,
+    visited: &BTreeMap<PathBuf, ImportNode>,
     codegen_fingerprint: &str,
 ) -> [u8; 32] {
     let entry_identity = crate::module_source::canonical_identity(source_path);
@@ -143,13 +144,13 @@ pub(super) fn relocatable_graph_hash(
         .iter()
         .map(|(path, node)| {
             let label = match node {
-                super::ImportNode::Unresolved { anchor, import } => {
+                ImportNode::Unresolved { anchor, import } => {
                     format!("{}\0unresolved\0{import}", label_of(anchor))
                 }
                 _ => label_of(path),
             };
             let mut bytes = Sha256::new();
-            super::hash_import_node(&mut bytes, node);
+            hash_import_node(&mut bytes, node);
             (label, <[u8; 32]>::from(bytes.finalize()))
         })
         .collect::<Vec<_>>();
@@ -157,7 +158,7 @@ pub(super) fn relocatable_graph_hash(
 
     let mut hasher = Sha256::new();
     hasher.update(b"relocatable-entry-graph-v3\0");
-    super::seed_entry_context_hasher(&mut hasher, codegen_fingerprint);
+    seed_entry_context_hasher(&mut hasher, codegen_fingerprint);
     for (label, node_digest) in nodes {
         hasher.update(label.as_bytes());
         hasher.update(b"\0");
@@ -181,6 +182,62 @@ fn relocatable_label(entry_dir: &Path, path: &Path) -> Option<String> {
         ));
     }
     relative_path_label(entry_dir, path)
+}
+
+/// Whether `import` is resolved by anything other than its own spelling: not
+/// relative, absolute, or stdlib, so an installed package can answer it.
+pub(super) fn is_bare_import(import: &str) -> bool {
+    !(import.starts_with("./")
+        || import.starts_with("../")
+        || import.starts_with("std/")
+        || import == "observability"
+        || Path::new(import).is_absolute())
+}
+
+pub(super) fn seed_entry_context_hasher(hasher: &mut Sha256, codegen_fingerprint: &str) {
+    hasher.update(b"stdlib-digest\0");
+    hasher.update(crate::runtime_content::embedded_stdlib_digest_bytes());
+    hasher.update(b"\0");
+    // Fold in the compiler's code-generation fingerprint so a compiler change
+    // that alters emitted bytecode for unchanged source busts stale cache
+    // entries within a single version — the gap that masked the #2610 fix until
+    // the cache was cleared by hand. See `build.rs` and `CODEGEN_FINGERPRINT`.
+    hasher.update(b"codegen-fingerprint\0");
+    hasher.update(codegen_fingerprint.as_bytes());
+    hasher.update(b"\0");
+}
+
+pub(super) fn hash_import_node(hasher: &mut Sha256, node: &ImportNode) {
+    match node {
+        ImportNode::Resolved { content } => {
+            hasher.update(b"resolved\0");
+            hasher.update(content.as_bytes());
+        }
+        ImportNode::Unresolved { import, .. } => {
+            hasher.update(b"unresolved\0");
+            hasher.update(import.as_bytes());
+        }
+        ImportNode::IoError { kind } => {
+            hasher.update(b"ioerror\0");
+            hasher.update(kind.as_bytes());
+        }
+    }
+}
+
+pub(super) enum ImportNode {
+    Resolved {
+        content: Arc<str>,
+    },
+    /// `anchor` is the canonical importing file. It is not hashed here: the
+    /// canonical key carries it in the sentinel path, the relocatable key in
+    /// the node's label.
+    Unresolved {
+        anchor: PathBuf,
+        import: Arc<str>,
+    },
+    IoError {
+        kind: String,
+    },
 }
 
 #[cfg(test)]
