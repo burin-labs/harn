@@ -26,7 +26,7 @@ struct Fixture {
 
 impl Fixture {
     fn new() -> Self {
-        let directory = tempfile::tempdir().unwrap();
+        let directory = tempfile::tempdir_in(std::env::current_dir().unwrap()).unwrap();
         let root = directory.path().join("approved");
         let other = directory.path().join("replacement");
         std::fs::create_dir(&root).unwrap();
