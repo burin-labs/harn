@@ -456,13 +456,15 @@
       "billing_limit",
       "output_budget_exhausted",
       "unknown",
-      "policy_denied"
+      "policy_denied",
+      "managed_spend_paused"
     ],
     "promptErrorTerminalClasses": [
       "context_overflow",
       "provider_misconfigured",
       "provider_unavailable",
       "provider_billing",
+      "managed_spend_paused",
       "rate_limited",
       "timeout",
       "resource_busy",

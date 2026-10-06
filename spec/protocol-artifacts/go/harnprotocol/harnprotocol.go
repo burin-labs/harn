@@ -369,6 +369,7 @@ var AgentTerminalClasses = []AgentTerminalClass{
 	"provider_misconfigured",
 	"provider_unavailable",
 	"provider_billing",
+	"managed_spend_paused",
 	"rate_limited",
 	"timeout",
 	"resource_busy",
@@ -469,6 +470,7 @@ var LlmErrorReasons = []LlmErrorReason{
 	"output_budget_exhausted",
 	"unknown",
 	"policy_denied",
+	"managed_spend_paused",
 }
 
 // ToolCallReceiptStatus is the named string type for the ToolCallReceiptStatuses wire vocabulary.
@@ -2123,11 +2125,17 @@ type HarnCanonicalSessionBoundary struct {
 }
 
 type HarnCanonicalHistoryPosition struct {
-	SourceEventID string                       `json:"source_event_id"`
-	Boundary      HarnCanonicalSessionBoundary `json:"boundary"`
+	SourceEventID   string                       `json:"source_event_id"`
+	OriginSessionID string                       `json:"origin_session_id"`
+	BeforeBoundary  HarnCanonicalSessionBoundary `json:"before_boundary"`
+	Boundary        HarnCanonicalSessionBoundary `json:"boundary"`
 }
 
 type HarnCanonicalHistoryBoundaries struct {
 	Tip       HarnCanonicalSessionBoundary   `json:"tip"`
 	Positions []HarnCanonicalHistoryPosition `json:"positions"`
+}
+
+type HarnACPPromptCorrelation struct {
+	MessageID *string `json:"messageId,omitempty"`
 }

@@ -4,8 +4,14 @@
       "additionalProperties": false,
       "description": "Correlate a producer's opaque identity with its acknowledged stored prefix.",
       "properties": {
+        "before_boundary": {
+          "$ref": "#/$defs/CanonicalSessionBoundary"
+        },
         "boundary": {
           "$ref": "#/$defs/CanonicalSessionBoundary"
+        },
+        "origin_session_id": {
+          "type": "string"
         },
         "source_event_id": {
           "type": "string"
@@ -13,6 +19,8 @@
       },
       "required": [
         "source_event_id",
+        "origin_session_id",
+        "before_boundary",
         "boundary"
       ],
       "type": "object"

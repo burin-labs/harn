@@ -2417,6 +2417,7 @@ pub const AGENT_TERMINAL_CLASS_CONTEXT_OVERFLOW: &str = "context_overflow";
 pub const AGENT_TERMINAL_CLASS_PROVIDER_MISCONFIGURED: &str = "provider_misconfigured";
 pub const AGENT_TERMINAL_CLASS_PROVIDER_UNAVAILABLE: &str = "provider_unavailable";
 pub const AGENT_TERMINAL_CLASS_PROVIDER_BILLING: &str = "provider_billing";
+pub const AGENT_TERMINAL_CLASS_MANAGED_SPEND_PAUSED: &str = "managed_spend_paused";
 pub const AGENT_TERMINAL_CLASS_RATE_LIMITED: &str = "rate_limited";
 pub const AGENT_TERMINAL_CLASS_TIMEOUT: &str = "timeout";
 pub const AGENT_TERMINAL_CLASS_RESOURCE_BUSY: &str = "resource_busy";
@@ -2432,6 +2433,7 @@ pub const AGENT_TERMINAL_CLASSES: &[&str] = &[
     "provider_misconfigured",
     "provider_unavailable",
     "provider_billing",
+    "managed_spend_paused",
     "rate_limited",
     "timeout",
     "resource_busy",
@@ -2491,6 +2493,7 @@ pub enum HarnAgentTerminalClass {
     ProviderMisconfigured,
     ProviderUnavailable,
     ProviderBilling,
+    ManagedSpendPaused,
     RateLimited,
     Timeout,
     ResourceBusy,
@@ -2511,6 +2514,7 @@ impl HarnAgentTerminalClass {
         Self::ProviderMisconfigured,
         Self::ProviderUnavailable,
         Self::ProviderBilling,
+        Self::ManagedSpendPaused,
         Self::RateLimited,
         Self::Timeout,
         Self::ResourceBusy,
@@ -2528,6 +2532,7 @@ impl HarnAgentTerminalClass {
             Self::ProviderMisconfigured => "provider_misconfigured",
             Self::ProviderUnavailable => "provider_unavailable",
             Self::ProviderBilling => "provider_billing",
+            Self::ManagedSpendPaused => "managed_spend_paused",
             Self::RateLimited => "rate_limited",
             Self::Timeout => "timeout",
             Self::ResourceBusy => "resource_busy",
@@ -2547,6 +2552,7 @@ impl HarnAgentTerminalClass {
             "provider_misconfigured" => Self::ProviderMisconfigured,
             "provider_unavailable" => Self::ProviderUnavailable,
             "provider_billing" => Self::ProviderBilling,
+            "managed_spend_paused" => Self::ManagedSpendPaused,
             "rate_limited" => Self::RateLimited,
             "timeout" => Self::Timeout,
             "resource_busy" => Self::ResourceBusy,
@@ -2980,6 +2986,7 @@ pub enum HarnLlmErrorReason {
     OutputBudgetExhausted,
     Unknown,
     PolicyDenied,
+    ManagedSpendPaused,
     /// A wire value outside the vocabulary this binding was generated from. Preserved verbatim.
     Unrecognized(String),
 }
@@ -3003,6 +3010,7 @@ impl HarnLlmErrorReason {
         Self::OutputBudgetExhausted,
         Self::Unknown,
         Self::PolicyDenied,
+        Self::ManagedSpendPaused,
     ];
 
     /// The JSON wire string for this value.
@@ -3023,6 +3031,7 @@ impl HarnLlmErrorReason {
             Self::OutputBudgetExhausted => "output_budget_exhausted",
             Self::Unknown => "unknown",
             Self::PolicyDenied => "policy_denied",
+            Self::ManagedSpendPaused => "managed_spend_paused",
             Self::Unrecognized(value) => value.as_str(),
         }
     }
@@ -3045,6 +3054,7 @@ impl HarnLlmErrorReason {
             "output_budget_exhausted" => Self::OutputBudgetExhausted,
             "unknown" => Self::Unknown,
             "policy_denied" => Self::PolicyDenied,
+            "managed_spend_paused" => Self::ManagedSpendPaused,
             other => Self::Unrecognized(other.to_string()),
         }
     }
@@ -4890,6 +4900,8 @@ pub struct HarnCanonicalSessionBoundary {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HarnCanonicalHistoryPosition {
     pub source_event_id: String,
+    pub origin_session_id: String,
+    pub before_boundary: HarnCanonicalSessionBoundary,
     pub boundary: HarnCanonicalSessionBoundary,
 }
 
@@ -4897,4 +4909,11 @@ pub struct HarnCanonicalHistoryPosition {
 pub struct HarnCanonicalHistoryBoundaries {
     pub tip: HarnCanonicalSessionBoundary,
     pub positions: Vec<HarnCanonicalHistoryPosition>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnACPPromptCorrelation {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "messageId")]
+    pub message_id: Option<String>,
 }

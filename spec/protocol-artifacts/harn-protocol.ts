@@ -140,6 +140,7 @@ export const AGENT_TERMINAL_CLASSES = [
   "provider_misconfigured",
   "provider_unavailable",
   "provider_billing",
+  "managed_spend_paused",
   "rate_limited",
   "timeout",
   "resource_busy",
@@ -225,6 +226,7 @@ export const LLM_ERROR_REASONS = [
   "output_budget_exhausted",
   "unknown",
   "policy_denied",
+  "managed_spend_paused",
 ] as const
 export type LlmErrorReason = (typeof LLM_ERROR_REASONS)[number]
 
@@ -2482,6 +2484,8 @@ export interface HarnCanonicalSessionBoundary {
 
 export interface HarnCanonicalHistoryPosition {
   source_event_id: string
+  origin_session_id: string
+  before_boundary: HarnCanonicalSessionBoundary
   boundary: HarnCanonicalSessionBoundary
 }
 
@@ -2490,3 +2494,6 @@ export interface HarnCanonicalHistoryBoundaries {
   positions: HarnCanonicalHistoryPosition[]
 }
 
+export interface HarnACPPromptCorrelation {
+  messageId?: string | null
+}

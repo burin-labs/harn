@@ -1714,6 +1714,7 @@ public struct HarnAgentTerminalClass: RawRepresentable, Codable, Sendable, Hasha
     public static let providerMisconfigured = Self(rawValue: "provider_misconfigured")
     public static let providerUnavailable = Self(rawValue: "provider_unavailable")
     public static let providerBilling = Self(rawValue: "provider_billing")
+    public static let managedSpendPaused = Self(rawValue: "managed_spend_paused")
     public static let rateLimited = Self(rawValue: "rate_limited")
     public static let timeout = Self(rawValue: "timeout")
     public static let resourceBusy = Self(rawValue: "resource_busy")
@@ -1730,6 +1731,7 @@ public struct HarnAgentTerminalClass: RawRepresentable, Codable, Sendable, Hasha
         "provider_misconfigured",
         "provider_unavailable",
         "provider_billing",
+        "managed_spend_paused",
         "rate_limited",
         "timeout",
         "resource_busy",
@@ -1999,6 +2001,7 @@ public struct HarnLlmErrorReason: RawRepresentable, Codable, Sendable, Hashable,
     public static let outputBudgetExhausted = Self(rawValue: "output_budget_exhausted")
     public static let unknown = Self(rawValue: "unknown")
     public static let policyDenied = Self(rawValue: "policy_denied")
+    public static let managedSpendPaused = Self(rawValue: "managed_spend_paused")
 
     /// Every value this binding was generated from, in wire order. A value
     /// outside it is valid and preserved; it is simply not listed here.
@@ -2018,6 +2021,7 @@ public struct HarnLlmErrorReason: RawRepresentable, Codable, Sendable, Hashable,
         "output_budget_exhausted",
         "unknown",
         "policy_denied",
+        "managed_spend_paused",
     ].map { Self(rawValue: $0) }
 
     /// Whether this value is part of the vocabulary this binding was generated from.
@@ -4957,10 +4961,14 @@ public struct HarnCanonicalSessionBoundary: Codable, Sendable, Equatable {
 
 public struct HarnCanonicalHistoryPosition: Codable, Sendable, Equatable {
     public let sourceEventId: String
+    public let originSessionId: String
+    public let beforeBoundary: HarnCanonicalSessionBoundary
     public let boundary: HarnCanonicalSessionBoundary
 
     enum CodingKeys: String, CodingKey {
         case sourceEventId = "source_event_id"
+        case originSessionId = "origin_session_id"
+        case beforeBoundary = "before_boundary"
         case boundary
     }
 }
@@ -4970,3 +4978,6 @@ public struct HarnCanonicalHistoryBoundaries: Codable, Sendable, Equatable {
     public let positions: [HarnCanonicalHistoryPosition]
 }
 
+public struct HarnACPPromptCorrelation: Codable, Sendable, Equatable {
+    public let messageId: String?
+}

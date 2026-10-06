@@ -314,6 +314,7 @@ AGENT_TERMINAL_CLASSES: tuple = (
     "provider_misconfigured",
     "provider_unavailable",
     "provider_billing",
+    "managed_spend_paused",
     "rate_limited",
     "timeout",
     "resource_busy",
@@ -685,6 +686,7 @@ class AgentTerminalClass(str, Enum):
     PROVIDER_MISCONFIGURED = "provider_misconfigured"
     PROVIDER_UNAVAILABLE = "provider_unavailable"
     PROVIDER_BILLING = "provider_billing"
+    MANAGED_SPEND_PAUSED = "managed_spend_paused"
     RATE_LIMITED = "rate_limited"
     TIMEOUT = "timeout"
     RESOURCE_BUSY = "resource_busy"
@@ -765,6 +767,7 @@ class LlmErrorReason(str, Enum):
     OUTPUT_BUDGET_EXHAUSTED = "output_budget_exhausted"
     UNKNOWN = "unknown"
     POLICY_DENIED = "policy_denied"
+    MANAGED_SPEND_PAUSED = "managed_spend_paused"
 
 
 class ACPPromptErrorSchema(str, Enum):
@@ -2318,6 +2321,8 @@ class HarnCanonicalSessionBoundary(_HarnDataclass):
 @dataclass
 class HarnCanonicalHistoryPosition(_HarnDataclass):
     source_event_id: str
+    origin_session_id: str
+    before_boundary: HarnCanonicalSessionBoundary
     boundary: HarnCanonicalSessionBoundary
 
 @dataclass
@@ -2325,3 +2330,6 @@ class HarnCanonicalHistoryBoundaries(_HarnDataclass):
     tip: HarnCanonicalSessionBoundary
     positions: List[HarnCanonicalHistoryPosition]
 
+@dataclass
+class HarnACPPromptCorrelation(_HarnDataclass):
+    messageId: Optional[str] = None
