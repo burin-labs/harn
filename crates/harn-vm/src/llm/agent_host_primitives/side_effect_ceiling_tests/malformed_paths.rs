@@ -8,6 +8,111 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 struct Calls {
     precheck: Arc<AtomicUsize>,
     effect: Arc<AtomicUsize>,
+    reviews: Arc<AtomicUsize>,
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn reviewer_sensitive_path_grant_is_bound_to_the_reviewed_invocation() {
+    struct PolicyCleanup;
+    impl Drop for PolicyCleanup {
+        fn drop(&mut self) {
+            pop_approval_policy();
+            clear_all_approval_policy_repeat_counts();
+            clear_execution_policy_stacks();
+        }
+    }
+    clear_execution_policy_stacks();
+    let interception = ToolInterceptionScope::new();
+    let root = tempfile::tempdir().unwrap();
+    interception.workspace(root.path());
+    std::fs::write(root.path().join(".env"), "fixture").unwrap();
+    std::fs::write(root.path().join(".env.other"), "other").unwrap();
+    std::fs::write(root.path().join("forbidden"), "denied").unwrap();
+    let _bridge = HostBridgeGuard::replace(None);
+    push_approval_policy(
+        serde_json::from_value(serde_json::json!({
+            "require_approval": ["read_file"],
+            "rules": [{"deny": {"tool": "read_file", "path": "**/forbidden"}}]
+        }))
+        .unwrap(),
+    );
+    let _cleanup = PolicyCleanup;
+    for (reviewed, replacement, permitted, expected_hooks) in [
+        (false, ".env", false, 0),
+        (true, ".env", true, 1),
+        (true, ".env.other", false, 1),
+        (true, "forbidden", false, 1),
+    ] {
+        clear_all_approval_policy_repeat_counts();
+        let mut options = crate::value::DictMap::new();
+        if reviewed {
+            let reviewer = super::super::tool_failure_recording_tests::compiled_closure(
+                "reviewer",
+                "fn reviewer(request: dict) { let _ = len([1, 2, 3]); return {approved: true, reviewer_answered: true, rationale: \"read the requested file\"} }",
+            );
+            options.put("approval_reviewer", VmValue::Closure(reviewer));
+        }
+        let hooks = Arc::new(AtomicUsize::new(0));
+        let observed = hooks.clone();
+        interception.before("read_file", move || {
+            observed.fetch_add(1, Ordering::SeqCst);
+            Some(serde_json::json!({"location": replacement}))
+        });
+        let calls = Calls::new();
+        let result = calls
+            .dispatch(serde_json::json!({"location": ".env"}), true, &options)
+            .await;
+        assert_eq!(hooks.load(Ordering::SeqCst), expected_hooks, "{result}");
+        assert_eq!(
+            result["ok"], permitted,
+            "{reviewed}/{replacement}: {result}"
+        );
+        assert_eq!(calls.effect.load(Ordering::SeqCst), usize::from(permitted));
+        assert_eq!(calls.reviews.load(Ordering::SeqCst), usize::from(reviewed));
+        if !reviewed || replacement == ".env.other" {
+            assert_eq!(result["denial"]["gate"], "sensitive_path");
+        }
+        if replacement == "forbidden" {
+            assert_eq!(result["denial"]["gate"], "approval_policy");
+        }
+        interception.clear_hooks();
+    }
+    #[cfg(unix)]
+    {
+        // Identical JSON must not retain approval after its resolved resource
+        // changes. Both targets remain within the workspace and sensitive.
+        let alias = root.path().join(".env");
+        std::fs::remove_file(&alias).unwrap();
+        std::os::unix::fs::symlink(root.path().join(".env.other"), &alias).unwrap();
+        let target = root.path().join(".env.third");
+        std::fs::write(&target, "third").unwrap();
+        let hooks = Arc::new(AtomicUsize::new(0));
+        let observed = hooks.clone();
+        interception.before("read_file", move || {
+            observed.fetch_add(1, Ordering::SeqCst);
+            std::fs::remove_file(&alias).unwrap();
+            std::os::unix::fs::symlink(&target, &alias).unwrap();
+            None
+        });
+        let mut options = crate::value::DictMap::new();
+        options.put(
+            "approval_reviewer",
+            VmValue::Closure(super::super::tool_failure_recording_tests::compiled_closure(
+                "reviewer",
+                "fn reviewer(request: dict) { let _ = len([1, 2, 3]); return {approved: true, reviewer_answered: true} }",
+            )),
+        );
+        clear_all_approval_policy_repeat_counts();
+        let calls = Calls::new();
+        let result = calls
+            .dispatch(serde_json::json!({"location": ".env"}), true, &options)
+            .await;
+        assert_eq!(hooks.load(Ordering::SeqCst), 1, "retarget hook must fire");
+        assert_eq!(result["ok"], false, "{result}");
+        assert_eq!(result["denial"]["gate"], "sensitive_path");
+        assert_eq!(calls.effect.load(Ordering::SeqCst), 0);
+        assert_eq!(calls.reviews.load(Ordering::SeqCst), 1);
+    }
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -55,6 +160,7 @@ impl Calls {
         Self {
             precheck: Arc::new(AtomicUsize::new(0)),
             effect: Arc::new(AtomicUsize::new(0)),
+            reviews: Arc::new(AtomicUsize::new(0)),
         }
     }
 
@@ -88,6 +194,7 @@ impl Calls {
         crate::register_vm_stdlib(&mut vm);
         let precheck = self.precheck.clone();
         let effect = self.effect.clone();
+        let reviews = self.reviews.clone();
         // Both counters run through actual compiled closures. The corrected
         // control below must reach both, establishing that zero is measured.
         vm.register_builtin("len", move |args, _| {
@@ -100,6 +207,9 @@ impl Calls {
                 }
                 1 => {
                     effect.fetch_add(1, Ordering::SeqCst);
+                }
+                3 => {
+                    reviews.fetch_add(1, Ordering::SeqCst);
                 }
                 _ => panic!("unexpected fixture counter"),
             }

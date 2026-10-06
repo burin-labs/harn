@@ -1091,14 +1091,9 @@ pub(super) async fn host_agent_dispatch_tool_call(
     // AFTER the policy has decided and the trifecta gate has had its say, so
     // the reviewer sees the FINAL refusal and cannot pre-empt a gate that had
     // not run yet. Body lives in the owning module.
-    if crate::orchestration::maybe_grant_by_auto_review(
-        Some(&ctx),
-        approval.as_mut(),
-        &tool_name,
-        approval_args.as_ref().unwrap_or(&tool_args),
-        &session_id,
-    )
-    .await
+    if dispatch_approval
+        .review(Some(&ctx), approval.as_mut())
+        .await
     {
         approval_status = Some("auto_review_granted");
     }

@@ -47,6 +47,7 @@ pub(super) struct DispatchApproval {
     session: String,
     initial: Option<InvocationBinding>,
     host_grant: Option<InvocationBinding>,
+    reviewed_decision: Option<Box<PolicyEvaluation>>,
     repeat_count: u64,
 }
 
@@ -70,6 +71,7 @@ impl DispatchApproval {
             session,
             initial,
             host_grant: None,
+            reviewed_decision: None,
             repeat_count,
         }
     }
@@ -105,6 +107,38 @@ impl DispatchApproval {
         grant.identity = identity;
         grant.ask_risks = decision.is_ask().then(|| decision.risk_labels.clone());
         self.host_grant = Some(grant);
+    }
+
+    pub(super) async fn review(
+        &mut self,
+        ctx: Option<&crate::vm::AsyncBuiltinCtx>,
+        decision: Option<&mut PolicyEvaluation>,
+    ) -> bool {
+        let Some(initial) = self.initial.as_ref() else {
+            return false;
+        };
+        // Capture the policy's refusal before the reviewer rewrites its action
+        // and receipt. A grant authorizes this decision on this invocation,
+        // never a later refusal produced by rewritten arguments or resources.
+        let refused = decision
+            .as_deref()
+            .filter(|decision| {
+                (decision.is_ask() || decision.is_deny())
+                    && crate::orchestration::approval_reviewer_active()
+            })
+            .map(|decision| Box::new(decision.clone()));
+        let granted = crate::orchestration::maybe_grant_by_auto_review(
+            ctx,
+            decision,
+            &initial.tool,
+            &initial.args,
+            &self.session,
+        )
+        .await;
+        if granted {
+            self.reviewed_decision = refused;
+        }
+        granted
     }
 
     pub(super) fn apply_trifecta(
@@ -175,6 +209,16 @@ impl DispatchApproval {
                 .host_grant
                 .as_ref()
                 .is_some_and(|grant| grant.permits_ask(tool, args, &identity, &decision));
-        (decision.is_deny() || (decision.is_ask() && !exact_grant)).then_some(decision)
+        let reviewed_grant = initial.tool == tool
+            && initial.args == *args
+            && initial
+                .identity
+                .as_ref()
+                .zip(identity.as_ref())
+                .is_some_and(|(approved, current)| approved == current)
+            && self.reviewed_decision.as_deref() == Some(&decision);
+        ((decision.is_deny() && !reviewed_grant)
+            || (decision.is_ask() && !exact_grant && !reviewed_grant))
+            .then_some(decision)
     }
 }
