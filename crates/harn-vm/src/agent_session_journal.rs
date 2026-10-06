@@ -153,6 +153,7 @@ impl JournalState {
 pub(crate) struct HydratedTranscript {
     pub messages: Vec<serde_json::Value>,
     pub source_event_ids: Vec<Option<String>>,
+    pub summary: Option<String>,
 }
 
 pub(crate) struct PreparedJournal {
@@ -481,25 +482,58 @@ fn apply_identity(
     Ok(())
 }
 
-fn hydrate_events(events: Vec<harn_session_store::StoredEvent>) -> HydratedTranscript {
-    let mut messages: Vec<(Option<String>, serde_json::Value)> = Vec::new();
-    let mut summary = None;
+pub(crate) fn hydrate_events(events: Vec<harn_session_store::StoredEvent>) -> HydratedTranscript {
+    hydrate_events_with_publications(&events).0
+}
+
+/// Replay once with full-session indices, including compaction and removal.
+/// Reporting may retain an admitted message even after later compaction.
+pub(crate) fn hydrate_events_with_publications(
+    events: &[harn_session_store::StoredEvent],
+) -> (
+    HydratedTranscript,
+    std::collections::BTreeMap<String, crate::llm::assistant_publication::PublishedMessage>,
+) {
+    let mut hydration = TranscriptHydration::default();
     for event in events {
+        hydration.absorb(event);
+    }
+    hydration.finish()
+}
+
+/// Incremental journal replay for bounded store pages. Retains the current
+/// transcript and sealed admissions, never a second copy of stored events.
+/// Page boundaries do not reset the session-wide receipt indices.
+#[derive(Default)]
+pub(crate) struct TranscriptHydration {
+    messages: Vec<(Option<String>, serde_json::Value)>,
+    summary: Option<String>,
+    publications:
+        std::collections::BTreeMap<String, crate::llm::assistant_publication::PublishedMessage>,
+}
+
+impl TranscriptHydration {
+    pub(crate) fn absorb(&mut self, event: &harn_session_store::StoredEvent) {
+        let Self {
+            messages,
+            summary,
+            publications,
+        } = self;
         if matches!(
             event.kind,
             SessionEventKind::Message | SessionEventKind::ToolCall | SessionEventKind::ToolResult
         ) {
             if let Some(message) = event.payload.get("raw_message").cloned() {
                 messages.push((event.headers.get("source_event_id").cloned(), message));
-                continue;
+                return;
             }
         }
         match &event.kind {
             SessionEventKind::Custom { custom_type } if custom_type == "assistant_publication" => {
-                crate::llm::assistant_publication::replay(
-                    &mut messages,
+                publications.extend(crate::llm::assistant_publication::replay(
+                    messages,
                     &event.payload["transcript_event"]["metadata"],
-                );
+                ));
             }
             SessionEventKind::Compaction => {
                 if let Some(replaced) = event
@@ -511,7 +545,7 @@ fn hydrate_events(events: Vec<harn_session_store::StoredEvent>) -> HydratedTrans
                         .payload
                         .get("source_event_ids")
                         .and_then(serde_json::Value::as_array);
-                    messages = replaced
+                    *messages = replaced
                         .iter()
                         .enumerate()
                         .map(|(index, message)| {
@@ -523,7 +557,7 @@ fn hydrate_events(events: Vec<harn_session_store::StoredEvent>) -> HydratedTrans
                         })
                         .collect();
                 }
-                summary = event
+                *summary = event
                     .payload
                     .get("summary")
                     .and_then(serde_json::Value::as_str)
@@ -553,23 +587,41 @@ fn hydrate_events(events: Vec<harn_session_store::StoredEvent>) -> HydratedTrans
             _ => {}
         }
     }
-    let (mut source_event_ids, mut messages): (Vec<_>, Vec<_>) = messages.into_iter().unzip();
-    if let Some(summary_text) = summary.as_deref() {
-        let summary_is_present = messages.first().is_some_and(|message| {
-            message.get("role").and_then(serde_json::Value::as_str) == Some("user")
-                && message.get("content").and_then(serde_json::Value::as_str) == Some(summary_text)
-        });
-        if !summary_is_present {
-            messages.insert(
-                0,
-                serde_json::json!({"role": "user", "content": summary_text}),
-            );
-            source_event_ids.insert(0, None);
+
+    pub(crate) fn finish(
+        self,
+    ) -> (
+        HydratedTranscript,
+        std::collections::BTreeMap<String, crate::llm::assistant_publication::PublishedMessage>,
+    ) {
+        let Self {
+            messages,
+            summary,
+            publications,
+        } = self;
+        let (mut source_event_ids, mut messages): (Vec<_>, Vec<_>) = messages.into_iter().unzip();
+        if let Some(summary_text) = summary.as_deref() {
+            let summary_is_present = messages.first().is_some_and(|message| {
+                message.get("role").and_then(serde_json::Value::as_str) == Some("user")
+                    && message.get("content").and_then(serde_json::Value::as_str)
+                        == Some(summary_text)
+            });
+            if !summary_is_present {
+                messages.insert(
+                    0,
+                    serde_json::json!({"role": "user", "content": summary_text}),
+                );
+                source_event_ids.insert(0, None);
+            }
         }
-    }
-    HydratedTranscript {
-        messages,
-        source_event_ids,
+        (
+            HydratedTranscript {
+                messages,
+                source_event_ids,
+                summary,
+            },
+            publications,
+        )
     }
 }
 

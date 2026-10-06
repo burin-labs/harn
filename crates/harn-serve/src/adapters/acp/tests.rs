@@ -1475,6 +1475,7 @@ fn every_session_dispatch_arm_checks_authentication() {
 }
 
 mod caching;
+mod canonical_fork;
 mod commands;
 mod conservative_admission;
 mod emit_response;

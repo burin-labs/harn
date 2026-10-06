@@ -27,11 +27,11 @@ use tokio::sync::mpsc;
 use crate::adapters::acp::{
     run_acp_channel_server_with_existing_handle, AcpChannelHandle, AcpJsonRpcError,
     AcpJsonRpcErrorResponse, AcpJsonRpcId, AcpJsonRpcRequest, AcpJsonRpcResponse, AcpServerConfig,
-    AcpSessionIdParams, AcpSessionInjectParams, AcpSessionNewParams, AcpSessionPromptParams,
-    AcpSessionPromptResult, AcpSessionRestoreResult, ACP_METHOD_INITIALIZE,
-    ACP_METHOD_SESSION_CANCEL, ACP_METHOD_SESSION_CLOSE, ACP_METHOD_SESSION_INJECT,
-    ACP_METHOD_SESSION_LOAD, ACP_METHOD_SESSION_NEW, ACP_METHOD_SESSION_PROMPT,
-    ACP_METHOD_SESSION_RESUME, HARN_AGENT_EVENT_METHOD,
+    AcpSessionEnvironmentConfig, AcpSessionIdParams, AcpSessionInjectParams, AcpSessionLoadParams,
+    AcpSessionNewParams, AcpSessionPromptParams, AcpSessionPromptResult, AcpSessionRestoreResult,
+    ACP_METHOD_INITIALIZE, ACP_METHOD_SESSION_CANCEL, ACP_METHOD_SESSION_CLOSE,
+    ACP_METHOD_SESSION_INJECT, ACP_METHOD_SESSION_LOAD, ACP_METHOD_SESSION_NEW,
+    ACP_METHOD_SESSION_PROMPT, ACP_METHOD_SESSION_RESUME, HARN_AGENT_EVENT_METHOD,
 };
 
 /// Default name for the dedicated ACP worker thread.
@@ -523,11 +523,12 @@ impl EmbeddedAgentClient {
     pub async fn load_run(
         &mut self,
         session_id: impl Into<String>,
+        environment_policy: AcpSessionEnvironmentConfig,
     ) -> EmbeddedAgentResult<AcpSessionRestoreResult> {
         let result = self
             .request_value(
                 ACP_METHOD_SESSION_LOAD,
-                AcpSessionIdParams::new(session_id.into()),
+                AcpSessionLoadParams::new(session_id, environment_policy),
             )
             .await?;
         restore_result_from_value(result)
@@ -538,11 +539,12 @@ impl EmbeddedAgentClient {
         &mut self,
         session_id: impl Into<String>,
         cwd: impl Into<String>,
+        environment_policy: AcpSessionEnvironmentConfig,
     ) -> EmbeddedAgentResult<AcpSessionRestoreResult> {
         let result = self
             .request_value(
                 ACP_METHOD_SESSION_LOAD,
-                json!({"sessionId": session_id.into(), "cwd": cwd.into()}),
+                AcpSessionLoadParams::new(session_id, environment_policy).with_cwd(cwd),
             )
             .await?;
         restore_result_from_value(result)
@@ -1189,6 +1191,16 @@ mod tests {
             .expect("session/new through client");
         assert!(!created.session_id.is_empty());
 
+        let loaded = block_on(client.load_run(
+            created.session_id.clone(),
+            AcpSessionEnvironmentConfig {
+                kind: harn_vm::security::EnvironmentPolicyKind::Isolated,
+                grants: Vec::new(),
+            },
+        ))
+        .expect("live session/load through client");
+        assert_eq!(loaded.session_id, created.session_id);
+
         let resumed = block_on(client.resume_run(created.session_id.clone()))
             .expect("session/resume through client");
         assert_eq!(resumed.session_id, created.session_id);
@@ -1197,6 +1209,65 @@ mod tests {
             block_on(client.session_view(created.session_id.clone())).expect("session view query");
         assert_eq!(view.schema, harn_vm::orchestration::SESSION_VIEW_SCHEMA);
         assert_eq!(view.session.session_id, Some(created.session_id));
+
+        client.shutdown();
+        client.join().expect("client worker joins");
+    }
+
+    #[test]
+    fn embedded_agent_client_cold_load_replays_the_canonical_store() {
+        use harn_session_store::{
+            AppendEvent, CreateSession, SessionEventKind, SessionStore, SqliteSessionStore,
+        };
+
+        let project = tempfile::tempdir().expect("project root");
+        std::fs::create_dir(project.path().join(".harn")).expect("project state");
+        let session_id = "01a11000-0000-7000-8000-000000000001";
+        block_on(async {
+            let store = SqliteSessionStore::open(project.path().join(".harn/session-store.sqlite"))
+                .expect("canonical store");
+            store
+                .create(CreateSession {
+                    id: Some(session_id.to_string()),
+                    ..CreateSession::default()
+                })
+                .await
+                .expect("stored session");
+            store
+                .append(
+                    session_id,
+                    AppendEvent::new(
+                        SessionEventKind::Message,
+                        json!({"transcript_event": {
+                            "kind": "message", "role": "assistant", "visibility": "public",
+                            "text": "embedded cold restore witness",
+                        }}),
+                    ),
+                )
+                .await
+                .expect("durable transcript");
+        });
+
+        let mut client = block_on(EmbeddedAgentClient::spawn(AcpServerConfig::new(None)))
+            .expect("spawn embedded client");
+        let restored = block_on(client.load_run_with_cwd(
+            session_id,
+            project.path().display().to_string(),
+            AcpSessionEnvironmentConfig {
+                kind: harn_vm::security::EnvironmentPolicyKind::Isolated,
+                grants: Vec::new(),
+            },
+        ))
+        .expect("cold session/load through client");
+        assert_eq!(restored.session_id, session_id);
+        assert!(
+            client.pending.iter().any(|event| {
+                matches!(event, EmbeddedAgentEvent::SessionUpdate { session_id: Some(id), update, raw }
+                    if id == session_id && raw["_harn"]["replayed"] == true
+                        && update["content"]["text"] == "embedded cold restore witness")
+            }),
+            "the public client must receive the durable transcript replay"
+        );
 
         client.shutdown();
         client.join().expect("client worker joins");
