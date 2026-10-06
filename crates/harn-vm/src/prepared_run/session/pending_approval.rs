@@ -141,6 +141,15 @@ impl<E> PendingSessionApproval<'_, E> {
 impl<E> Drop for PendingSessionApproval<'_, E> {
     fn drop(&mut self) {
         if let Err(error) = self.retire(self.bridge.is_cancelled()) {
+            self.bridge.send_log(
+                "error",
+                "Pending preparation terminal accounting failed",
+                Some(serde_json::json!({
+                    "session_id": self.session_id,
+                    "code": "prepared_session_pending_terminal_persistence",
+                    "error": error,
+                })),
+            );
             tracing::error!(
                 session_id = %self.session_id,
                 code = "prepared_session_pending_terminal_persistence",

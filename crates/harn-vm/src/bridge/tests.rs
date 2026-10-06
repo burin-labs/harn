@@ -165,6 +165,43 @@ async fn dropped_permission_waits_release_rpc_senders_before_the_next_turn() {
 }
 
 #[tokio::test(flavor = "current_thread", start_paused = true)]
+async fn dropped_call_retires_after_map_contention_without_removing_new_work() {
+    let pending = Arc::new(Mutex::new(HashMap::new()));
+    let bridge = HostBridge::from_parts_with_writer(
+        pending.clone(),
+        Arc::new(AtomicBool::new(false)),
+        Arc::new(|_| Ok(())),
+        1,
+    );
+    let mut first = Box::pin(bridge.call("host/work", serde_json::json!({})));
+    wait_for_pending(&pending, 1, first.as_mut()).await;
+    let requests = pending.lock().await;
+    assert_eq!(requests.len(), 1);
+    drop(first);
+    drop(requests);
+
+    let mut next = Box::pin(bridge.call("host/work", serde_json::json!({})));
+    wait_for_pending(&pending, 2, next.as_mut()).await;
+    for _ in 0..8 {
+        if !pending.lock().await.contains_key(&1) {
+            break;
+        }
+        tokio::task::yield_now().await;
+    }
+    let mut requests = pending.lock().await;
+    assert_eq!(requests.len(), 1, "the old registration must retire");
+    assert!(requests.contains_key(&2), "new work must keep its sender");
+    requests
+        .remove(&2)
+        .unwrap()
+        .send(serde_json::json!({"id":2,"result":{"next_turn":true}}))
+        .unwrap();
+    drop(requests);
+    assert_eq!(next.await.unwrap()["next_turn"], true);
+    assert!(pending.lock().await.is_empty());
+}
+
+#[tokio::test(flavor = "current_thread", start_paused = true)]
 async fn registered_cancel_wait_survives_notification_before_first_poll() {
     let notify = Notify::new();
     let wait = notify.notified();
