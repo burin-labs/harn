@@ -592,15 +592,18 @@ mod tests {
     #[test]
     fn caller_identity_survives_multimodal_prompt_retargeting() {
         let image = serde_json::json!({"type": "image", "mimeType": "image/png", "data": "AAAA"});
+        let normalized_image =
+            serde_json::json!({"type": "image", "media_type": "image/png", "base64": "AAAA"});
         let mut prompt = super::normalize_acp_prompt(&serde_json::json!({
             "messageId": "opaque caller identity",
             "prompt": [{"type": "text", "text": "same request"}, image],
         }))
         .unwrap();
         assert_eq!(prompt.messages[0]["messageId"], "opaque caller identity");
+        assert_eq!(prompt.messages[0]["content"][1], normalized_image);
         super::retarget_prompt_text(&mut prompt, "rewritten request".into());
         assert_eq!(prompt.messages[0]["messageId"], "opaque caller identity");
-        assert_eq!(prompt.messages[0]["content"][1], image);
+        assert_eq!(prompt.messages[0]["content"][1], normalized_image);
         assert_eq!(prompt.text, "rewritten request");
     }
 
