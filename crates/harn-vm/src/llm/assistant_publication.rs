@@ -38,28 +38,58 @@ fn source_hash(message: &serde_json::Value) -> String {
         .to_string()
 }
 
+/// A validated admission bound to the original persisted draft.
+pub(crate) struct PublishedMessage {
+    source_hash: String,
+    text: String,
+}
+
+impl PublishedMessage {
+    pub(crate) fn text_for(&self, original: &serde_json::Value) -> Option<&str> {
+        (source_hash(original) == self.source_hash).then_some(self.text.as_str())
+    }
+}
+
 /// Apply the same source-bound receipt during live admission and hydration.
 /// A corrupt or stale receipt leaves the original draft unpublished.
 pub(crate) fn replay(
     messages: &mut [(Option<String>, serde_json::Value)],
     metadata: &serde_json::Value,
-) {
+) -> Vec<(String, PublishedMessage)> {
+    let mut published = Vec::new();
     if metadata.get("schema").and_then(serde_json::Value::as_str) != Some(SCHEMA) {
-        return;
+        return published;
     }
     let Ok(changes) = serde_json::from_value::<Vec<Change>>(metadata["changes"].clone()) else {
-        return;
+        return published;
     };
     for change in changes {
-        if let Some((_, message)) = messages.get_mut(change.message_index) {
+        if let Some((source_event_id, message)) = messages.get_mut(change.message_index) {
             if message.get(KEY).and_then(serde_json::Value::as_str) == Some("pending")
                 && source_hash(message) == change.source_hash
             {
                 message[KEY] =
                     serde_json::to_value(change.disposition).expect("publication is serializable");
+                if change.disposition == Publication::Published {
+                    if let (Some(source), Some(text)) = (
+                        source_event_id.as_ref(),
+                        super::agent_result_projection::visible_assistant_text(&json_to_vm(
+                            message,
+                        )),
+                    ) {
+                        published.push((
+                            source.clone(),
+                            PublishedMessage {
+                                source_hash: change.source_hash,
+                                text,
+                            },
+                        ));
+                    }
+                }
             }
         }
     }
+    published
 }
 
 /// The loop requests deferred visibility after parsing, rather than a provider

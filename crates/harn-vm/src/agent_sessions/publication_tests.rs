@@ -44,6 +44,16 @@ async fn admitted_publication_survives_canonical_journal_hydration() {
     crate::agent_session_journal::flush(session_id)
         .await
         .expect("persist admission");
+    let store = crate::stdlib::session_store::open_existing_canonical_store(root.path())
+        .expect("open canonical store")
+        .expect("persisted store");
+    let run =
+        crate::orchestration::records::project_run_record_from_session(store.as_ref(), session_id)
+            .await
+            .expect("project admitted reply from canonical journal");
+    let view = crate::orchestration::records::build_run_view(&run);
+    assert_eq!(view.visible_text.as_deref(), Some("Accepted answer"));
+    assert_eq!(view.transcript.message_count, 1, "no public reply copy");
     clear_journal(session_id);
     let hydrated = crate::agent_session_journal::prepare(
         session_id,

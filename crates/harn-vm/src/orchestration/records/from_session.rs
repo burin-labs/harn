@@ -836,14 +836,22 @@ fn build_from_session_attributes(
 
 impl SessionFold {
     fn from_events(events: &[StoredEvent]) -> Self {
+        // Publication receipts address the full session, not the latest run's
+        // message indices. Reuse journal replay before filtering this run.
+        let (_, publications) =
+            crate::agent_session_journal::hydrate_events_with_publications(events);
         let mut fold = Self::default();
         for event in events {
-            fold.absorb(event);
+            fold.absorb(event, &publications);
         }
         fold
     }
 
-    fn absorb(&mut self, event: &StoredEvent) {
+    fn absorb(
+        &mut self,
+        event: &StoredEvent,
+        publications: &BTreeMap<String, crate::llm::assistant_publication::PublishedMessage>,
+    ) {
         if event.kind.discriminator() == "agent_run_started" {
             self.absorb_run_started(event);
             return;
@@ -854,7 +862,7 @@ impl SessionFold {
         };
         self.last_observed_at = Some(clock);
         match event.kind.discriminator() {
-            "message" => self.absorb_message(event),
+            "message" => self.absorb_message(event, publications),
             "tool_call" => self.absorb_tool_call(event),
             "tool_call_update" => self.absorb_tool_update(event),
             "tool_result" => self.absorb_tool_result(event),
@@ -897,20 +905,42 @@ impl SessionFold {
         self.last_observed_at = self.run_started_at.clone();
     }
 
-    fn absorb_message(&mut self, event: &StoredEvent) {
+    fn absorb_message(
+        &mut self,
+        event: &StoredEvent,
+        publications: &BTreeMap<String, crate::llm::assistant_publication::PublishedMessage>,
+    ) {
         let Some(role) = facts::semantic_string(&event.payload, &facts::ROLE)
             .as_deref()
             .and_then(ProjectedMessageRole::parse)
         else {
             return;
         };
-        if facts::string_at(&event.payload, facts::VISIBILITY)
+        let text = if facts::string_at(&event.payload, facts::VISIBILITY)
             .is_some_and(|visibility| visibility != "public")
         {
-            return;
-        }
-        let Some(text) = facts::semantic_string(&event.payload, &facts::TEXT) else {
-            return;
+            if !matches!(role, ProjectedMessageRole::Assistant) {
+                return;
+            }
+            let Some(text) = event
+                .headers
+                .get("source_event_id")
+                .and_then(|id| publications.get(id))
+                .and_then(|publication| {
+                    event
+                        .payload
+                        .get("raw_message")
+                        .and_then(|raw| publication.text_for(raw))
+                })
+            else {
+                return;
+            };
+            text.to_string()
+        } else {
+            let Some(text) = facts::semantic_string(&event.payload, &facts::TEXT) else {
+                return;
+            };
+            text
         };
         if self.task.is_none()
             && (event.actor.as_deref() == Some("user")

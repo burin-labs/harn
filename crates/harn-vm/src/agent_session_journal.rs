@@ -483,8 +483,20 @@ fn apply_identity(
 }
 
 pub(crate) fn hydrate_events(events: Vec<harn_session_store::StoredEvent>) -> HydratedTranscript {
+    hydrate_events_with_publications(&events).0
+}
+
+/// Replay once with full-session indices, including compaction and removal.
+/// Reporting may retain an admitted message even after later compaction.
+pub(crate) fn hydrate_events_with_publications(
+    events: &[harn_session_store::StoredEvent],
+) -> (
+    HydratedTranscript,
+    std::collections::BTreeMap<String, crate::llm::assistant_publication::PublishedMessage>,
+) {
     let mut messages: Vec<(Option<String>, serde_json::Value)> = Vec::new();
     let mut summary = None;
+    let mut publications = std::collections::BTreeMap::new();
     for event in events {
         if matches!(
             event.kind,
@@ -497,10 +509,10 @@ pub(crate) fn hydrate_events(events: Vec<harn_session_store::StoredEvent>) -> Hy
         }
         match &event.kind {
             SessionEventKind::Custom { custom_type } if custom_type == "assistant_publication" => {
-                crate::llm::assistant_publication::replay(
+                publications.extend(crate::llm::assistant_publication::replay(
                     &mut messages,
                     &event.payload["transcript_event"]["metadata"],
-                );
+                ));
             }
             SessionEventKind::Compaction => {
                 if let Some(replaced) = event
@@ -568,11 +580,14 @@ pub(crate) fn hydrate_events(events: Vec<harn_session_store::StoredEvent>) -> Hy
             source_event_ids.insert(0, None);
         }
     }
-    HydratedTranscript {
-        messages,
-        source_event_ids,
-        summary,
-    }
+    (
+        HydratedTranscript {
+            messages,
+            source_event_ids,
+            summary,
+        },
+        publications,
+    )
 }
 
 fn source_event_id(payload: &serde_json::Value) -> Option<String> {
