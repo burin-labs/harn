@@ -68,6 +68,19 @@ fn repository_identity_runs_through_read_only_harness_without_process_authority(
         &format!(
             r#"
 const identity = harness.tools.git_repository_identity({{repo: {repo}}})
+const registry = tool_define(tool_registry(), "inspect_identity", "Read repository identity", {{
+  input_schema: {{type: "object", properties: {{}}, additionalProperties: false}},
+  returns: {{type: "object"}},
+  prepare: {{ args ->
+    return {{operation: harness.tools.git_repository_identity({{repo: {repo}}})}}
+  }},
+  handler: {{ args ->
+    return {{schema: "harn.agent_tool_handler_result.v2", outcome: "ok",
+      text: "identity observed", data: tool_invocation_binding().operation}}
+  }},
+}})
+const prepared_read = harness.tools.dispatch_agent_call(
+  {{name: "inspect_identity", id: "identity", arguments: {{}}}}, registry, {{}})
 const generic_git_denied = try {{
   harness.tools.git({{operation: "status", repo: {repo}}})
   false
@@ -81,12 +94,15 @@ const arbitrary_command_denied = try {{
   false
 }} catch {{ true }}
 return {{identity: identity, generic_git_denied: generic_git_denied,
-  write_denied: write_denied, arbitrary_command_denied: arbitrary_command_denied}}
+  prepared_read: prepared_read, write_denied: write_denied,
+  arbitrary_command_denied: arbitrary_command_denied}}
 "#
         ),
         Some(policy),
     );
     let result = harn_vm::llm::vm_value_to_json(&result);
+    assert_eq!(result["prepared_read"]["ok"], true, "{result}");
+    assert_eq!(result["prepared_read"]["data"], result["identity"]);
     assert_eq!(result["generic_git_denied"], true);
     assert_eq!(result["write_denied"], true);
     assert_eq!(result["arbitrary_command_denied"], true);
