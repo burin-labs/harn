@@ -34,13 +34,26 @@ if [[ ! -x "$kache" ]]; then
   mkdir -p "$root/bin/$KACHE_VERSION"
   staging="$(mktemp -d "$root/install.XXXXXX")"
   trap 'rm -rf -- "$staging"' EXIT
-  curl -fsSL --retry 3 -o "$staging/$KACHE_ASSET" \
-    "https://github.com/kunobi-ninja/kache/releases/download/$KACHE_VERSION/$KACHE_ASSET"
+  # A failed download or unpack leaves the job on no compiler wrapper rather
+  # than failing a required leg over a transport blip. A digest mismatch is
+  # different: the release changed under its pin, and that stays fatal.
+  if ! curl -fsSL --retry 3 -o "$staging/$KACHE_ASSET" \
+    "https://github.com/kunobi-ninja/kache/releases/download/$KACHE_VERSION/$KACHE_ASSET"; then
+    echo "::warning::Kache $KACHE_VERSION download failed; this job compiles without a wrapper"
+    echo "RUSTC_WRAPPER=" >> "$github_env"
+    exit 0
+  fi
   echo "$KACHE_SHA256  $staging/$KACHE_ASSET" | sha256sum --check --status \
     || { echo "::error::Kache $KACHE_VERSION archive does not match its pinned digest"; exit 1; }
-  tar -xzf "$staging/$KACHE_ASSET" -C "$staging"
-  unpacked="$(find "$staging" -type f -name kache -perm -u+x | head -1)"
-  [[ -n "$unpacked" ]] || { echo "::error::Kache $KACHE_VERSION archive holds no kache binary"; exit 1; }
+  unpacked=""
+  if tar -xzf "$staging/$KACHE_ASSET" -C "$staging"; then
+    unpacked="$(find "$staging" -type f -name kache -perm -u+x | head -1)"
+  fi
+  if [[ -z "$unpacked" ]]; then
+    echo "::warning::Kache $KACHE_VERSION archive did not unpack to a binary; this job compiles without a wrapper"
+    echo "RUSTC_WRAPPER=" >> "$github_env"
+    exit 0
+  fi
   # A rename is atomic, so a concurrent job on another runner sees either no
   # binary or a complete one.
   install -m 0755 "$unpacked" "$kache.$$"
@@ -49,7 +62,7 @@ fi
 version="$("$kache" --version)"
 
 mkdir -p "$root/store" "$root/run"
-: > "$root/kache.toml"
+[[ -e "$root/kache.toml" ]] || : > "$root/kache.toml"
 {
   echo "RUSTC_WRAPPER=$kache"
   echo "KACHE_CACHE_DIR=$root/store"
