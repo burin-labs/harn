@@ -199,10 +199,7 @@ fn timeout_expression(budgets: list<StepBudget>, owned_rung: bool = true) -> str
   // ceiling, cache-save reserve included.
   const hosted = to_string(hosted_ceiling_minutes(budgets))
   return producer_rung_expression(
-    {
-      owned: owned_rung ? to_string(owned_ceiling_minutes(budgets)) : "",
-      hosted: hosted,
-    },
+    {owned: owned_rung ? to_string(owned_ceiling_minutes(budgets)) : "", hosted: hosted},
   )
 }
 

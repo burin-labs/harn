@@ -2168,10 +2168,7 @@ pub fn producer_runner_expression(owned_rung: bool = true) -> string {
 
 pub fn producer_tier_expression(owned_rung: bool = true) -> string {
   return producer_rung_expression(
-    {
-      owned: owned_rung ? "'${SELFHOSTED_RUNNER_TIER}'" : "",
-      hosted: "'${HOSTED_RUNNER_TIER}'",
-    },
+    {owned: owned_rung ? "'${SELFHOSTED_RUNNER_TIER}'" : "", hosted: "'${HOSTED_RUNNER_TIER}'"},
   )
 }
 
