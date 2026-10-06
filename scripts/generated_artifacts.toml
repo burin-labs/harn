@@ -359,11 +359,14 @@ outputs = [
   "spec/protocol-artifacts/schemas/plan-document-v1.schema.json",
   "spec/protocol-artifacts/schemas/inference-admission-request.schema.json",
   "spec/protocol-artifacts/schemas/inference-admission-snapshot.schema.json",
+  "spec/protocol-artifacts/schemas/canonical-history-boundaries.schema.json",
 ]
 sources = [
   "crates/harn-serve/openapi.yaml",
   "conformance/protocols/schemas/acp-session-update.schema.json",
   "crates/harn-cli/src/commands/",
+  "crates/harn-session-store/src/boundary.rs",
+  "crates/harn-vm/src/agent_sessions/canonical_boundary.rs",
   "crates/harn-stdlib/src/stdlib/external_action/vocabulary.harn",
   "crates/harn-vm/src/mcp_tasks.rs",
   "crates/harn-vm/src/tool_annotations.rs",
