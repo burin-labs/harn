@@ -384,37 +384,41 @@ impl AcpServer {
         }
     }
 
-    pub(super) async fn handle_hitl_respond(
-        &self,
-        id: &serde_json::Value,
-        params: &serde_json::Value,
-    ) {
-        let session_cwd = params
-            .get("sessionId")
-            .and_then(|value| value.as_str())
-            .and_then(|session_id| self.sessions.get(session_id))
-            .map(|session| session.cwd.as_path());
-        let fallback_cwd = self
-            .sessions
-            .values()
-            .next()
-            .map(|session| session.cwd.as_path());
-        let cwd = session_cwd.or(fallback_cwd);
-        let response: harn_vm::HitlHostResponse = match serde_json::from_value(params.clone()) {
-            Ok(response) => response,
-            Err(error) => {
-                self.send_error(
-                    id,
-                    -32602,
-                    &format!("Invalid harn.hitl.respond params: {error}"),
-                );
-                return;
+    pub(super) fn handle_hitl_respond<'a>(
+        &'a self,
+        id: &'a serde_json::Value,
+        params: &'a serde_json::Value,
+    ) -> std::pin::Pin<Box<impl std::future::Future<Output = ()> + 'a>> {
+        // Allocate at the handler boundary so durable response persistence
+        // does not enlarge the shared incoming-message router's stack frame.
+        Box::pin(async move {
+            let session_cwd = params
+                .get("sessionId")
+                .and_then(|value| value.as_str())
+                .and_then(|session_id| self.sessions.get(session_id))
+                .map(|session| session.cwd.as_path());
+            let fallback_cwd = self
+                .sessions
+                .values()
+                .next()
+                .map(|session| session.cwd.as_path());
+            let cwd = session_cwd.or(fallback_cwd);
+            let response: harn_vm::HitlHostResponse = match serde_json::from_value(params.clone()) {
+                Ok(response) => response,
+                Err(error) => {
+                    self.send_error(
+                        id,
+                        -32602,
+                        &format!("Invalid harn.hitl.respond params: {error}"),
+                    );
+                    return;
+                }
+            };
+            match harn_vm::append_hitl_response(cwd, response).await {
+                Ok(_) => self.send_response(id, serde_json::json!({"ok": true})),
+                Err(error) => self.send_error(id, -32000, &error),
             }
-        };
-        match harn_vm::append_hitl_response(cwd, response).await {
-            Ok(_) => self.send_response(id, serde_json::json!({"ok": true})),
-            Err(error) => self.send_error(id, -32000, &error),
-        }
+        })
     }
 
     pub(super) fn workflow_base_dir_for<'a>(
