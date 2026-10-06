@@ -83,7 +83,10 @@ pub const TEXT_PATCH_FALLBACK: &str =
 /// per-language extractor (see `ast::symbols`). The matrix is the
 /// onboarding contract: it tells the agent loop which primitive to reach
 /// for and is rendered into the capability-matrix docs.
+///
+/// Non-exhaustive so a new column is not a breaking change for readers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct EditCapabilities {
     /// Tree-sitter query → format-preserving replace.
     pub apply_node: bool,
