@@ -1758,8 +1758,8 @@ pipeline test_host_bound_sandbox_filter_has_one_owner(harness: Harness, task: un
   const renderer_source = harness.fs.read_text(path_join(root, HOST_BOUND_RUST_TEST_FILTER_COMMAND))
   assert_eq(renderer_source.split(HOST_BOUND_RUST_TEST_FILTER_SOURCE).count - 1, 1)
   for projection in [
-    {path: ".github/workflows/ci.yml", references: 3},
-    {path: "scripts/release_audit_contract.json", references: 2},
+    {path: ".github/workflows/ci.yml", references: 4},
+    {path: "scripts/release_audit_contract.json", references: 4},
     {path: "scripts/release_gate.sh", references: 1},
     {path: "scripts/ci/warm_rust_cache.sh", references: 1},
     {path: "scripts/ci_cache_policy/host_bound_rust_test_filter.harn", references: 1},
