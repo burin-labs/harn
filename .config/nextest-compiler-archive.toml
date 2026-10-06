@@ -1,0 +1,4 @@
+# Only the workspace archive producer needs the compiler fixture. The ordinary
+# CI profile and the separate VM/hostlib security archive retain their coverage.
+[profile.ci.archive]
+include = [{ path = "open-enum-compiler", relative-to = "target", depth = 1, on-missing = "error" }]

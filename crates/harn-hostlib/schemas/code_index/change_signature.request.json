@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/code_index/change_signature.request.json",
+  "title": "code_index.change_signature request",
+  "description": "Change a function's parameter list and rewrite every call site across the workspace in one all-or-nothing edit. `params` is the complete new list in order: an entry whose `name` (or `from`) matches a current parameter keeps that parameter, an entry that matches none adds a parameter, and a current parameter no entry keeps is removed. The receiver (`self`, `cls`) is implicit and never listed. Call sites keep their argument text: positional arguments are remapped by position, Python keyword arguments by name, and a new parameter's `call_value` is written at every call. The function body is not rewritten except to rename the uses of a renamed parameter; adapting it to the new parameters is the caller's follow-up.",
+  "type": "object",
+  "properties": {
+    "symbol_ref": {
+      "type": "object",
+      "description": "The function to change. `name` and `path` (the defining file) are required; `line` (1-based) picks one declaration when several share the name; `kind` defaults to `Function`.",
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "path": { "type": "string", "minLength": 1 },
+        "line": { "type": "integer", "minimum": 1 },
+        "kind": { "type": "string", "enum": ["Function"] }
+      },
+      "required": ["name", "path"],
+      "additionalProperties": false
+    },
+    "params": {
+      "type": "array",
+      "description": "The complete new parameter list, in order, excluding the receiver.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The parameter's name after the change."
+          },
+          "from": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The current parameter this entry keeps under a new `name`. Omit it when the name is unchanged or the parameter is new."
+          },
+          "type": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Type annotation. Required for a new Rust parameter; replaces the current annotation of a kept one."
+          },
+          "default": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Default value expression (Python, TypeScript). A new parameter with only a default is not written at call sites."
+          },
+          "call_value": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Expression written for a new parameter at every existing call site."
+          }
+        },
+        "required": ["name"],
+        "additionalProperties": false
+      }
+    },
+    "dry_run": {
+      "type": "boolean",
+      "description": "When true, plan and validate every edit and return `result: \"dry_run\"` without writing. Defaults to false."
+    },
+    "session_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Optional staged-fs session id. Reads and writes route through the session's overlay."
+    }
+  },
+  "required": ["symbol_ref", "params"],
+  "additionalProperties": false
+}

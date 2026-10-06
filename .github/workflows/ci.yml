@@ -80,9 +80,9 @@ jobs:
   # `rust-check-inputs` may use the owned pool on same-repository pull requests.
   # A measured online pool queues work even when busy; zero online carriers or
   # retired owned routing selects hosted capacity. An unreadable census blocks
-  # dispatch. Merge groups may use the datacenter host's general runners
-  # (`hetzner-1`) when a second census finds one idle; the residential hosts
-  # stay pull-request-only (#6217). Main pushes retain their hosted routing.
+  # dispatch. Merge groups and main pushes use the hosted rung: the owned
+  # hosts stay pull-request-only (#6217), and the datacenter host's merge-group
+  # route ran the security archive past its limit (#9428).
   # The shared CLI producer is the exception: on pull requests and merge
   # groups it prefers runners reserved for it alone (`harn-ci-producer`).
 
@@ -296,14 +296,21 @@ jobs:
           if [[ "$EVENT_NAME" == "pull_request" ]] && is_release_head_ref "$PR_HEAD_REF"; then
             changed_files="$RUNNER_TEMP/release-metadata-changed-files.txt"
 
+            # Diff against the merge ref's first parent, the base tip the merge
+            # was built on. The recorded base SHA goes stale as main moves and
+            # pulls main's later changes into this list (#9432). The shallow
+            # checkout grafts HEAD parentless, so read the parent from the
+            # commit object and fetch it.
+            base_sha="$(git cat-file -p HEAD | awk '/^parent /{n++; if (n == 1) first=$2} END {if (n == 2) print first}')"
+            base_sha="${base_sha:-$PR_BASE_SHA}"
             if [[ -n "$PR_BASE_REF" ]]; then
               git fetch --no-tags --depth=1 origin "$PR_BASE_REF" || true
             fi
-            if [[ -n "$PR_BASE_SHA" ]] && ! git cat-file -e "${PR_BASE_SHA}^{commit}" 2>/dev/null; then
-              git fetch --no-tags --depth=1 origin "$PR_BASE_SHA" || true
+            if [[ -n "$base_sha" ]] && ! git cat-file -e "${base_sha}^{commit}" 2>/dev/null; then
+              git fetch --no-tags --depth=1 origin "$base_sha" || true
             fi
 
-            if [[ -n "$PR_BASE_SHA" ]] && git diff --name-only "$PR_BASE_SHA" HEAD > "$changed_files"; then
+            if [[ -n "$base_sha" ]] && git diff --name-only "$base_sha" HEAD > "$changed_files"; then
               echo "Release PR changed files:"
               sed 's/^/  /' "$changed_files"
               if [[ "$(./scripts/ci_release_metadata_only.sh "$changed_files")" == "true" ]]; then
@@ -664,17 +671,21 @@ jobs:
       # The merge queue lands a whole group in one push, and a release is built
       # and promoted only from the head of its push. An entry queued behind a
       # release commit would bury it, so that entry leaves the queue and is
-      # re-queued after the release merges.
+      # re-queued after the release merges. The group's `base_sha` is the
+      # previous entry's head, not main, so the range starts at main as fetched
+      # by the full checkout; an entry behind a release read from its own base
+      # sees an empty range (v0.10.158 was buried that way).
       - name: Keep a release commit last in its merge group
         if: github.event_name == 'merge_group'
         env:
-          BASE_SHA: ${{ github.event.merge_group.base_sha }}
+          MAIN_REF: refs/remotes/origin/main
           HEAD_SHA: ${{ github.event.merge_group.head_sha }}
         run: |
           set -euo pipefail
           # shellcheck source=scripts/lib/release_version.sh
           source scripts/lib/release_version.sh
-          releases="$(release_range_release_commits "$BASE_SHA" "$HEAD_SHA")"
+          main_sha="$(git rev-parse --verify "$MAIN_REF^{commit}")"
+          releases="$(release_range_release_commits "$(git merge-base "$main_sha" "$HEAD_SHA")" "$HEAD_SHA")"
           if [[ -n "$releases" && "$releases" != "$HEAD_SHA" ]]; then
             echo "::error::This entry is queued behind release commit(s) ${releases//$'\n'/, }. A release must be the last entry of its merge group; re-queue this entry after the release merges."
             exit 1
@@ -930,22 +941,6 @@ jobs:
       RELEASE_APP_CLIENT_ID: ${{ secrets.RELEASE_APP_CLIENT_ID }}
       RELEASE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
 
-  # The datacenter host's general runners alone, for merge groups. The census
-  # counts Linux runners carrying its base tag AND its fetch tag in the fetch
-  # lane, so `harn-ci-big` plus the host label is exactly those runners: the
-  # host's reserved CLI runners lack `harn-ci-big`, and the residential hosts
-  # lack the host label. Merge groups route there only when one is idle, so a
-  # busy or absent host costs the queue nothing it did not already pay.
-  datacenter-availability:
-    if: github.event_name == 'merge_group'
-    uses: burin-labs/.github/.github/workflows/runner-availability.yml@bebed855b0067821ca1466300a687759cf04b29d
-    with:
-      linux_runner_tag: harn-ci-big
-      linux_fetch_runner_tag: hetzner-1
-    secrets:
-      RELEASE_APP_CLIENT_ID: ${{ secrets.RELEASE_APP_CLIENT_ID }}
-      RELEASE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
-
   # Say where the producer is about to land, and name a hosted fallback when
   # the census cannot be read. The routing expression below reads this job's
   # route output instead of the census, so a census outage routes the producer
@@ -954,7 +949,7 @@ jobs:
   # skipping here would skip the required producer behind it.
   rust-producer-capacity:
     name: Name the Rust producer runner capacity decision
-    needs: [runner-availability, datacenter-availability]
+    needs: [runner-availability]
     if: >-
       ${{ !cancelled() && (github.event_name == 'merge_group'
         || (github.event_name == 'pull_request'
@@ -966,8 +961,6 @@ jobs:
       fallback: ${{ steps.decision.outputs.fallback }}
       cli_route: ${{ steps.cli-decision.outputs.route }}
       cli_fallback: ${{ steps.cli-decision.outputs.fallback }}
-      merge_route: ${{ steps.merge-decision.outputs.route }}
-      merge_fallback: ${{ steps.merge-decision.outputs.fallback }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -1002,20 +995,6 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           SELFHOSTED_DISABLED: ${{ needs.runner-availability.outputs.selfhosted_disabled }}
           RUNNER_CAPACITY: ${{ needs.runner-availability.outputs.capacity }}
-      # The workspace test producer's merge-group decision, over the
-      # datacenter host's general runners alone. Every other event names
-      # `hosted` here without reading the count, and the pull-request
-      # decision above stays the one that routes pull requests.
-      - name: Decide where a merge group's workspace producer lands
-        id: merge-decision
-        run: bash scripts/ci/runner_capacity.sh
-        env:
-          CAPACITY_LABEL: MERGE_PRODUCER_CAPACITY
-          CAPACITY_POOL: linux_fetch
-          CAPACITY_ROUTED_EVENT: merge_group
-          EVENT_NAME: ${{ github.event_name }}
-          SELFHOSTED_DISABLED: ${{ needs.datacenter-availability.outputs.selfhosted_disabled }}
-          RUNNER_CAPACITY: ${{ needs.datacenter-availability.outputs.capacity }}
 
   rust-cli:
     name: Build shared Harn CLI
@@ -1123,6 +1102,7 @@ jobs:
           cache-workspace-crates: "true"
           reuse-workspace-crates: "true"
           save: "true"
+          persistent-target: ${{ env.HARN_RUNNER_TIER == 'self-hosted' }}
       # Read the counters before the first compile, so the summary below can
       # report what this job did rather than what the machine has done since
       # its cache server last started.
@@ -1201,20 +1181,16 @@ jobs:
     # The owned self-hosted rung is the same arithmetic minus the cache-save
     # reserve, with bounded cold retries: 6 setup + 24 + 26 = 56. It is a
     # hang backstop, not a claim about host core count or improved performance.
-    # A merge group's datacenter leg runs the same workload and carries the
-    # same ceiling. On 2026-10-03 a cold security archive took 19m49s, and the
-    # former 20-minute job limit cancelled its upload before any tests ran.
-    # The ten-minute performance budget remains unchanged.
+    # Merge groups take the hosted rung: on the datacenter host the security
+    # archive alone ran past its 24-minute step limit five times out of five,
+    # against 7-14 minutes hosted (#9428). The ten-minute performance budget
+    # remains unchanged.
     runs-on: >-
       ${{ (needs.rust-producer-capacity.outputs.route == 'owned'
         && fromJSON('["self-hosted", "Linux", "X64", "harn-ci-big"]'))
-        || (needs.rust-producer-capacity.outputs.merge_route == 'owned'
-        && fromJSON('["self-hosted", "Linux", "X64", "harn-ci-big", "hetzner-1"]'))
         || 'ubuntu-24.04' }}
     timeout-minutes: >-
       ${{ (needs.rust-producer-capacity.outputs.route == 'owned'
-        && 56)
-        || (needs.rust-producer-capacity.outputs.merge_route == 'owned'
         && 56)
         || 68 }}
     # The rung after the owned pool is GitHub's free standard `ubuntu-24.04`
@@ -1241,8 +1217,6 @@ jobs:
       SCCACHE_CACHE_SIZE: 15G
       HARN_RUNNER_TIER: >-
         ${{ (needs.rust-producer-capacity.outputs.route == 'owned'
-          && 'self-hosted')
-          || (needs.rust-producer-capacity.outputs.merge_route == 'owned'
           && 'self-hosted')
           || 'github-hosted' }}
     steps:
@@ -1292,6 +1266,7 @@ jobs:
           cache-workspace-crates: "true"
           reuse-workspace-crates: "true"
           save: "true"
+          persistent-target: ${{ env.HARN_RUNNER_TIER == 'self-hosted' }}
       # Read the counters before the first compile, so the summary below can
       # report what this job did rather than what the machine has done since
       # its cache server last started.
@@ -1348,6 +1323,8 @@ jobs:
           ./scripts/ci/rust_artifact.sh build-tests
           "$RUNNER_TEMP/harn-workspace-tests.tar.zst"
           "$GITHUB_SHA"
+      # The first of three partitions; `rust-test-partitions` runs the other
+      # two on their own runners at the same time (#9435).
       - name: Run Rust workspace tests
         timeout-minutes: 26
         id: release-audit-rust-test
@@ -1360,6 +1337,7 @@ jobs:
           host_bound_filter="$(scripts/ci/host_bound_rust_test_filter.sh)";
           scripts/ci/run_rust_test_lane.sh
           cargo-nextest nextest run --locked --workspace --profile ci
+          --partition count:1/3
           -E "not (${host_bound_filter})"
       - name: Upload workspace test archive
         if: vars.HARN_CI_DISABLE_COLOCATED_TESTS == 'true'
@@ -1389,6 +1367,87 @@ jobs:
       - name: Summarize and stop sccache
         if: always()
         run: ./scripts/ci/finalize_sccache.sh
+
+  # The rest of the workspace suite, beside the producer instead of after it.
+  # The suite is about 2,400 test-seconds, which on one 4 vCPU runner was
+  # 11 minutes run after a 10-minute compile (job 112105424497). Each leg here
+  # compiles the same graph from the same restored cache and runs its share,
+  # so the three partitions finish together and the lane loses two thirds of
+  # its test phase. The legs are GitHub's free standard runner (public
+  # repository, harn#9370) and save nothing, so they cannot evict the
+  # producer's cache. Under the co-location kill switch the archive-mode
+  # fallback runs the whole suite and these skip.
+  #
+  # Ceiling: 6 setup + 24 compile (the security archive's budget, the same
+  # graph) + 10 for a third of the suite.
+  rust-test-partitions:
+    name: ${{ matrix.name }}
+    needs: [changes]
+    if: >-
+      needs.changes.outputs.rust == 'true'
+      && vars.HARN_CI_DISABLE_COLOCATED_TESTS != 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - kind: partition-2
+            name: Rust workspace tests (2/3)
+            partition: count:2/3
+          - kind: partition-3
+            name: Rust workspace tests (3/3)
+            partition: count:3/3
+    env:
+      # Match rust-check-inputs, so the workspace-tests cache key restores.
+      CARGO_PROFILE_DEV_DEBUG: line-tables-only
+      RUSTFLAGS: "-D warnings -Clink-arg=-fuse-ld=mold"
+      HARN_RUNNER_TIER: github-hosted
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+      - uses: ./.github/actions/free-disk-space
+      - name: Measure the compile budget
+        id: resource-budget
+        run: bash scripts/ci/rust_resource_budget.sh
+        env:
+          RUNNER_ENVIRONMENT: github-hosted
+          HARN_BUDGET_PROFILE: producer
+      - name: Install mold linker
+        uses: ./.github/actions/apt-install
+        timeout-minutes: 5
+        with:
+          packages: mold
+          check-command: mold
+      - uses: ./.github/actions/rust-toolchain
+      - uses: ./.github/actions/rust-cache
+        continue-on-error: true
+        with:
+          shared-key: workspace-tests
+          cache-bin: false
+          cache-workspace-crates: "true"
+          reuse-workspace-crates: "true"
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@4cef1412cce204788f482e778a0b9187f9626a29 # v2.87.21
+        with:
+          tool: nextest@0.9.132
+      - name: Run Rust workspace tests
+        id: release-audit-rust-test
+        timeout-minutes: 34
+        env:
+          CARGO_BUILD_JOBS: ${{ steps.resource-budget.outputs.build_jobs }}
+          HARN_LLM_CALLS_DISABLED: "1"
+          HARN_EXT_TEST_PARTITION: ${{ matrix.partition }}
+        run: >-
+          set -euo pipefail;
+          host_bound_filter="$(scripts/ci/host_bound_rust_test_filter.sh)";
+          scripts/ci/run_rust_test_lane.sh
+          cargo-nextest nextest run --locked --workspace --profile ci
+          --partition "$HARN_EXT_TEST_PARTITION"
+          -E "not (${host_bound_filter})"
 
   # GitHub job dependencies wait for terminal producer state, even when an
   # immutable v4 artifact is already available. This single free-hosted barrier
@@ -2440,8 +2499,8 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          # Full history on PR and push so the diff base (PR base SHA / pushed
-          # `before` SHA) is reachable for the path detection below. merge_group
+          # Full history on PR and push so the diff base (the merge ref's first
+          # parent / pushed `before` SHA) is reachable for the path detection below. merge_group
           # keeps the shallow checkout (it never diffs — run stays false).
           fetch-depth: ${{ (github.event_name == 'pull_request' || github.event_name == 'push') && '0' || '1' }}
       - name: Detect macOS-relevant changes
@@ -2464,10 +2523,21 @@ jobs:
           # run_macos=false (the merge queue never path-gates the platform plan
           # jobs — unchanged behavior).
           diff_base=""
+          # A pull request checks out `refs/pull/N/merge`, whose first parent is
+          # the base tip the merge was built on, so HEAD^1..HEAD is exactly what
+          # the pull request contributes. The recorded base SHA is the tip from
+          # when the event fired and goes stale as main moves; diffing against
+          # it counted everything main landed since as this pull request's
+          # change and ran this 30-minute lane for nothing (#9432). It stays
+          # the base only when the checkout is not a merge commit.
           if [[ "$EVENT_NAME" == "push" ]]; then
             diff_base="$BEFORE_SHA"
           elif [[ "$EVENT_NAME" == "pull_request" ]]; then
-            diff_base="$BASE_SHA"
+            if git rev-parse --verify --quiet HEAD^2 >/dev/null; then
+              diff_base="$(git rev-parse HEAD^1)"
+            else
+              diff_base="$BASE_SHA"
+            fi
           fi
 
           if [[ "$EVENT_NAME" == "push" || "$EVENT_NAME" == "pull_request" ]]; then
@@ -2852,6 +2922,7 @@ jobs:
         rust-producer-capacity,
         rust-cli,
         rust-check-inputs,
+        rust-test-partitions,
         rust-artifacts-ready,
         security-tests-ready,
         rust-test,
@@ -3023,6 +3094,14 @@ jobs:
           echo "Rust producer: $rust_check_inputs_result (workspace_tests_ok=$workspace_tests_ok)"
           require_result "$rust_check_inputs_result" \
             "Rust audit artifact build failed or skipped while Rust proof was required." [ "${{ needs.changes.outputs.rust }}" != "true" ]
+
+          # The other two thirds of the co-located suite. The archive-mode
+          # fallback runs the whole suite instead, so they skip under it.
+          rust_test_partitions_result="${{ needs['rust-test-partitions'].result }}"
+          echo "Rust workspace test partitions: $rust_test_partitions_result"
+          require_result "$rust_test_partitions_result" \
+            "Rust workspace test partitions failed or skipped while Rust proof was required." \
+            test "${{ needs.changes.outputs.rust }}" != "true" -o "$COLOCATED_TESTS_DISABLED" = "true"
 
           rust_artifacts_ready_result="${{ needs['rust-artifacts-ready'].result }}"
           echo "Rust artifacts ready: $rust_artifacts_ready_result"

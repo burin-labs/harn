@@ -2,6 +2,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd -P)"
 # shellcheck source=scripts/ci/cache_policy.sh
 source "${SCRIPT_DIR}/cache_policy.sh"
 # shellcheck source=scripts/lib/sha256.sh
@@ -316,7 +317,10 @@ build_test_bundle() {
   cleanup_dir="$staging"
 
   prepare_harn_cli "$staging" "$commit" "$target_dir"
+  HARN_ENUM_COMPILER_ARCHIVE_STAGE=1 cargo-nextest nextest run --locked --workspace --profile ci \
+    -E 'test(open_enum_source_compatibility)'
   cargo-nextest nextest archive --locked --workspace --profile ci \
+    --tool-config-file "harn-compiler-archive:${REPO_ROOT}/.config/nextest-compiler-archive.toml" \
     -E "$NEUTRAL_FILTER" \
     --archive-file "$staging/harn-tests.tar.zst"
   # The archive digest is written only after nextest creates it.
