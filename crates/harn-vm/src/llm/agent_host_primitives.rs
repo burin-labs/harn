@@ -1189,7 +1189,11 @@ pub(super) async fn host_agent_dispatch_tool_call(
                     if let Some(new_args) = response.get("args") {
                         tool_args = new_args.clone();
                     }
-                    dispatch_approval.record_host_grant(&tool_name, &tool_args);
+                    dispatch_approval.record_host_grant(
+                        &tool_name,
+                        &tool_args,
+                        dispatch_annotations.as_ref(),
+                    );
                     approval_status = Some("host_granted");
                     emit_permission_event_with_policy(
                         &session_id,

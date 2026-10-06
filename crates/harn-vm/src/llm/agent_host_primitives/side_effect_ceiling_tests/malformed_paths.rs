@@ -272,6 +272,48 @@ async fn unchanged_catalog_paths_are_rechecked_after_symlink_changes() {
         std::os::unix::fs::symlink(root.path().join("inside"), &alias).unwrap();
     }
     pop_approval_policy();
+    push_approval_policy(ToolApprovalPolicy {
+        require_approval: vec!["read_file".into()],
+        ..ToolApprovalPolicy::default()
+    });
+    let alternate = root.path().join("alternate");
+    std::fs::write(&alternate, "alternate").unwrap();
+    for (target, expected) in [(alternate, false), (root.path().join("inside"), true)] {
+        let captured = Arc::new(StdMutex::new(Vec::new()));
+        let _answer = HostBridgeGuard::replace(Some(responding_bridge(
+            crate::llm::acp_permission::allow_response(),
+            captured.clone(),
+        )));
+        let link = alias.clone();
+        let rewrites = Arc::new(AtomicUsize::new(0));
+        let observed = rewrites.clone();
+        crate::orchestration::register_tool_hook(crate::orchestration::ToolHook {
+            pattern: "read_file".into(),
+            pre: Some(Arc::new(move |_, _| {
+                observed.fetch_add(1, Ordering::SeqCst);
+                std::fs::remove_file(&link).unwrap();
+                std::os::unix::fs::symlink(&target, &link).unwrap();
+                crate::orchestration::PreToolAction::Allow
+            })),
+            post: None,
+        });
+        let calls = Calls::new();
+        let result = calls
+            .dispatch(
+                serde_json::json!({"location": alias}),
+                true,
+                &crate::value::DictMap::new(),
+            )
+            .await;
+        assert_eq!(captured.lock().unwrap().len(), 1, "one answer must fire");
+        assert_eq!(rewrites.load(Ordering::SeqCst), 1, "hook must fire");
+        assert_eq!(result["ok"], expected, "{result}");
+        assert_eq!(calls.effect.load(Ordering::SeqCst), usize::from(expected));
+        crate::orchestration::clear_tool_hooks();
+        std::fs::remove_file(&alias).unwrap();
+        std::os::unix::fs::symlink(root.path().join("inside"), &alias).unwrap();
+    }
+    pop_approval_policy();
     clear_all_approval_policy_repeat_counts();
 }
 

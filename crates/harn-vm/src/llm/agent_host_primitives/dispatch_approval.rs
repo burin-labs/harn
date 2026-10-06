@@ -4,11 +4,49 @@ use crate::orchestration::{PolicyEvaluation, RunApprovalPolicy};
 use crate::tool_annotations::ToolAnnotations;
 use serde_json::Value;
 
+struct InvocationBinding {
+    tool: String,
+    args: Value,
+    identity: Option<String>,
+    ask_risks: Option<Vec<String>>,
+}
+
+impl InvocationBinding {
+    fn new(tool: &str, args: &Value) -> Self {
+        Self {
+            tool: tool.into(),
+            args: args.clone(),
+            identity: None,
+            ask_risks: None,
+        }
+    }
+
+    fn permits_ask(
+        &self,
+        tool: &str,
+        args: &Value,
+        identity: &Option<String>,
+        decision: &PolicyEvaluation,
+    ) -> bool {
+        self.tool == tool
+            && self.args == *args
+            && self
+                .identity
+                .as_ref()
+                .zip(identity.as_ref())
+                .is_some_and(|(approved, current)| approved == current)
+            && self
+                .ask_risks
+                .as_ref()
+                .is_some_and(|risks| risks == &decision.risk_labels)
+    }
+}
+
 pub(super) struct DispatchApproval {
     policy: Option<RunApprovalPolicy>,
     session: String,
-    initial: Option<(String, Value)>,
-    host_grant: Option<(String, Value)>,
+    initial: Option<InvocationBinding>,
+    host_grant: Option<InvocationBinding>,
     repeat_count: u64,
 }
 
@@ -21,7 +59,7 @@ impl DispatchApproval {
             0
         };
         // Unconfigured dispatch captures no approval arguments or strings.
-        let initial = policy.as_ref().map(|_| (tool.into(), args.clone()));
+        let initial = policy.as_ref().map(|_| InvocationBinding::new(tool, args));
         let session = if policy.is_some() {
             session.into()
         } else {
@@ -37,26 +75,55 @@ impl DispatchApproval {
     }
 
     pub(super) fn evaluate(
-        &self,
+        &mut self,
         annotations: Option<&ToolAnnotations>,
     ) -> Option<PolicyEvaluation> {
-        let (tool, args) = self.initial.as_ref()?;
-        self.policy
-            .as_ref()
-            .map(|policy| policy.evaluate_dispatch(tool, args, self.repeat_count, annotations))
+        let initial = self.initial.as_mut()?;
+        let (decision, identity) = self.policy.as_ref()?.evaluate_dispatch(
+            &initial.tool,
+            &initial.args,
+            self.repeat_count,
+            annotations,
+        );
+        initial.identity = identity;
+        Some(decision)
     }
 
-    pub(super) fn record_host_grant(&mut self, tool: &str, args: &Value) {
-        self.host_grant = Some((tool.into(), args.clone()));
+    pub(super) fn record_host_grant(
+        &mut self,
+        tool: &str,
+        args: &Value,
+        annotations: Option<&ToolAnnotations>,
+    ) {
+        let Some(policy) = self.policy.as_ref() else {
+            return;
+        };
+        let (mut decision, identity) =
+            policy.evaluate_dispatch(tool, args, self.repeat_count, annotations);
+        self.apply_trifecta_to(Some(&mut decision), annotations, tool, args);
+        let mut grant = InvocationBinding::new(tool, args);
+        grant.identity = identity;
+        grant.ask_risks = decision.is_ask().then(|| decision.risk_labels.clone());
+        self.host_grant = Some(grant);
     }
 
     pub(super) fn apply_trifecta(
-        &self,
-        decision: Option<&mut PolicyEvaluation>,
+        &mut self,
+        mut decision: Option<&mut PolicyEvaluation>,
         annotations: Option<&ToolAnnotations>,
     ) {
-        if let Some((tool, args)) = self.initial.as_ref() {
-            self.apply_trifecta_to(decision, annotations, tool, args);
+        if let Some(initial) = self.initial.as_ref() {
+            self.apply_trifecta_to(
+                decision.as_deref_mut(),
+                annotations,
+                &initial.tool,
+                &initial.args,
+            );
+        }
+        if let Some(initial) = self.initial.as_mut() {
+            initial.ask_risks = decision
+                .filter(|decision| decision.is_ask())
+                .map(|decision| decision.risk_labels.clone());
         }
     }
 
@@ -97,22 +164,26 @@ impl DispatchApproval {
         tools: Option<&crate::value::VmValue>,
         initial_annotations: Option<&ToolAnnotations>,
     ) -> Option<PolicyEvaluation> {
-        let (initial_tool, initial_args) = self.initial.as_ref()?;
+        let initial = self.initial.as_ref()?;
         let policy = self.policy.as_ref()?;
-        if initial_tool == tool && initial_args == args {
-            return policy.recheck_dispatch_boundary(tool, args, initial_annotations);
-        }
-        let annotations = super::tool_catalog::annotations_for(tools, tool);
-        // The same evaluator judges the final facts without consuming another
-        // repeat count. An exact host replacement may retain ask approval, but
-        // cannot override a hard refusal or approve a later hook/router edit.
-        let mut decision =
-            policy.evaluate_dispatch(tool, args, self.repeat_count, annotations.as_ref());
-        self.apply_trifecta_to(Some(&mut decision), annotations.as_ref(), tool, args);
-        let exact_host_grant = self
-            .host_grant
-            .as_ref()
-            .is_some_and(|(name, granted_args)| name == tool && granted_args == args);
-        (decision.is_deny() || (decision.is_ask() && !exact_host_grant)).then_some(decision)
+        let unchanged = initial.tool == tool && initial.args == *args;
+        let replacement_annotations;
+        let annotations = if unchanged {
+            initial_annotations
+        } else {
+            replacement_annotations = super::tool_catalog::annotations_for(tools, tool);
+            replacement_annotations.as_ref()
+        };
+        // Reuse the complete evaluator and its canonical identity. Identical
+        // JSON cannot retain a grant when resolved resources or risk change.
+        let (mut decision, identity) =
+            policy.evaluate_dispatch(tool, args, self.repeat_count, annotations);
+        self.apply_trifecta_to(Some(&mut decision), annotations, tool, args);
+        let exact_grant = initial.permits_ask(tool, args, &identity, &decision)
+            || self
+                .host_grant
+                .as_ref()
+                .is_some_and(|grant| grant.permits_ask(tool, args, &identity, &decision));
+        (decision.is_deny() || (decision.is_ask() && !exact_grant)).then_some(decision)
     }
 }

@@ -13,6 +13,24 @@ use super::{
     PolicyRuleMatch, PolicyRuleSource, ToolApprovalRequest,
 };
 
+/// The decision and its canonical authority identity come from one evaluation.
+/// Callers never recover authority from a caller-supplied display receipt.
+pub(in crate::orchestration::policy) fn evaluate_dispatch(
+    policy: &super::ToolApprovalPolicy,
+    tool: &str,
+    args: &JsonValue,
+    repeat_count: Option<u64>,
+    annotations: Option<&crate::tool_annotations::ToolAnnotations>,
+) -> (super::PolicyEvaluation, Option<String>) {
+    let context = EvaluationContext::new(tool, args, repeat_count, annotations);
+    let identity = context.invocation_sha256.clone();
+    let decision = match super::validate_tool_approval_path_arguments(tool, args, annotations) {
+        Ok(()) => super::evaluate_context(policy, context),
+        Err(reason) => super::host_request::invalid_context(&context, reason),
+    };
+    (decision, identity)
+}
+
 pub(super) fn digest(
     context: &EvaluationContext,
     arguments: &JsonValue,
