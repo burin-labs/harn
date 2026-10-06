@@ -14,6 +14,13 @@ use harn_vm::{register_vm_stdlib, Compiler, Harness, Vm, VmValue};
 use tempfile::TempDir;
 
 fn run_harn(source: &str) -> (VmValue, String) {
+    run_harn_with_policy(source, None)
+}
+
+fn run_harn_with_policy(
+    source: &str,
+    policy: Option<harn_vm::orchestration::CapabilityPolicy>,
+) -> (VmValue, String) {
     let source = format!("fn main(harness: Harness) {{\n{source}\n}}");
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -33,11 +40,61 @@ fn run_harn(source: &str) -> (VmValue, String) {
                 register_vm_stdlib(&mut vm);
                 let _ = harn_hostlib::install_default(&mut vm);
                 vm.set_harness(Harness::real());
-                let result = vm.execute(&chunk).await.expect("execute");
+                let result = if let Some(policy) = policy {
+                    harn_vm::orchestration::scope_execution_policy(policy, vm.execute(&chunk))
+                        .await
+                        .expect("execute under policy")
+                } else {
+                    vm.execute(&chunk).await.expect("execute")
+                };
                 (result, vm.output().to_string())
             })
             .await
     })
+}
+
+#[test]
+fn repository_identity_runs_through_read_only_harness_without_process_authority() {
+    let dir = super::tools_git::fixture_repo();
+    let root = dir.path().to_string_lossy().replace('\\', "/");
+    let repo = serde_json::to_string(&root).unwrap();
+    let policy = serde_json::from_value(serde_json::json!({
+        "capabilities": {"fs": ["read"]},
+        "side_effect_level": "read_only",
+        "read_only_roots": [root],
+    }))
+    .unwrap();
+    let (result, _) = run_harn_with_policy(
+        &format!(
+            r#"
+const identity = harness.tools.git_repository_identity({{repo: {repo}}})
+const generic_git_denied = try {{
+  harness.tools.git({{operation: "status", repo: {repo}}})
+  false
+}} catch {{ true }}
+const write_denied = try {{
+  harness.tools.write_file({{path: {repo} + "/must-not-exist", content: "no"}})
+  false
+}} catch {{ true }}
+const arbitrary_command_denied = try {{
+  harness.tools.git_repository_identity({{repo: {repo}, command: "touch must-not-exist"}})
+  false
+}} catch {{ true }}
+return {{identity: identity, generic_git_denied: generic_git_denied,
+  write_denied: write_denied, arbitrary_command_denied: arbitrary_command_denied}}
+"#
+        ),
+        Some(policy),
+    );
+    let result = harn_vm::llm::vm_value_to_json(&result);
+    assert_eq!(result["generic_git_denied"], true);
+    assert_eq!(result["write_denied"], true);
+    assert_eq!(result["arbitrary_command_denied"], true);
+    assert_eq!(
+        std::fs::canonicalize(result["identity"]["worktree_root"].as_str().unwrap()).unwrap(),
+        dir.path().canonicalize().unwrap(),
+    );
+    assert!(!dir.path().join("must-not-exist").exists());
 }
 
 #[test]

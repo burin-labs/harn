@@ -357,6 +357,7 @@ pub const HOST_CAPABILITY_GROUPS: &[HostCapabilityGroup] = &[
         capability: CapabilityId::Tools,
         methods: &[
             "get_file_outline",
+            "git_repository_identity",
             "inspect_test_results",
             "list_directory",
             "read_file",

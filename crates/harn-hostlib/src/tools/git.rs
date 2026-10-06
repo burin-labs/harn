@@ -12,7 +12,8 @@ use harn_vm::VmValue;
 
 use crate::error::HostlibError;
 use crate::tools::args::{
-    build_dict, dict_arg, optional_int, optional_string, require_string, str_value, to_agent_path,
+    build_dict, dict_arg, optional_int, optional_string, require_string, resolve_host_path,
+    str_value, to_agent_path,
 };
 
 const BUILTIN: &str = "hostlib_tools_git";
@@ -108,6 +109,53 @@ pub(super) fn run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
         ("operation", str_value(operation.as_str())),
         ("repo", str_value(to_agent_path(&repo))),
         ("data", data),
+    ]))
+}
+
+/// Observe the checkout and repository identity without accepting caller argv.
+/// A linked worktree has its own worktree root but shares the common directory
+/// with its parent repository. Errors remain errors, never a fallback identity.
+pub(super) fn repository_identity(args: &[VmValue]) -> Result<VmValue, HostlibError> {
+    let raw = dict_arg("hostlib_tools_git_repository_identity", args)?;
+    let repo = resolve_host_path(&require_string(
+        "hostlib_tools_git_repository_identity",
+        &raw,
+        "repo",
+    )?);
+    crate::tools::permissions::enforce_path_scope(
+        "hostlib_tools_git_repository_identity",
+        &repo,
+        harn_vm::process_sandbox::FsAccess::Read,
+    )?;
+    let stdout = String::from_utf8(run_git_bytes(
+        &repo,
+        &[
+            "rev-parse",
+            "--path-format=absolute",
+            "--show-toplevel",
+            "--git-common-dir",
+        ],
+    )?)
+    .map_err(|_| HostlibError::Backend {
+        builtin: "hostlib_tools_git_repository_identity",
+        message: "git repository identity contains a non-UTF-8 path".to_string(),
+    })?;
+    let paths: Vec<_> = stdout.lines().collect();
+    if paths.len() != 2 || paths.iter().any(|path| !PathBuf::from(path).is_absolute()) {
+        return Err(HostlibError::Backend {
+            builtin: BUILTIN,
+            message: "git returned an incomplete repository identity".to_string(),
+        });
+    }
+    Ok(build_dict([
+        (
+            "worktree_root",
+            str_value(to_agent_path(&PathBuf::from(paths[0]))),
+        ),
+        (
+            "common_directory",
+            str_value(to_agent_path(&PathBuf::from(paths[1]))),
+        ),
     ]))
 }
 
@@ -360,6 +408,10 @@ fn validate_rev(rev: &str) -> Result<(), HostlibError> {
 }
 
 fn run_git(repo: &PathBuf, args: &[&str]) -> Result<String, HostlibError> {
+    Ok(String::from_utf8_lossy(&run_git_bytes(repo, args)?).into_owned())
+}
+
+fn run_git_bytes(repo: &PathBuf, args: &[&str]) -> Result<Vec<u8>, HostlibError> {
     let mut cmd = harn_vm::process_sandbox::session_std_command("git").map_err(|err| {
         HostlibError::Backend {
             builtin: BUILTIN,
@@ -398,7 +450,7 @@ fn run_git(repo: &PathBuf, args: &[&str]) -> Result<String, HostlibError> {
             ),
         });
     }
-    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+    Ok(output.stdout)
 }
 
 #[cfg(test)]
