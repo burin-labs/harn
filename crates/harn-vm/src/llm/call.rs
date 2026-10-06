@@ -553,27 +553,25 @@ pub(crate) async fn execute_llm_call_outcome(
 }
 
 /// Allocate the selected retry future on a frame that returns before polling.
-/// Boxing inside the async outcome body still materializes the large child on
-/// that body's stack. Keep selection and allocation together at this owner so
-/// routed and ordinary calls preserve the same retry and settlement behavior.
+/// Pin each branch before selecting it so the selection holds only pointers,
+/// rather than another copy of the largest retry future. Keep allocation at
+/// this owner without changing retry or settlement behavior.
 fn pin_schema_retry_dispatch<'a>(
     ctx: Option<&'a crate::vm::AsyncBuiltinCtx>,
     opts: api::LlmCallOptions,
     options: Option<crate::value::DictMap>,
     bridge: Option<&'a Arc<crate::bridge::HostBridge>>,
     delta_sink: Option<api::DeltaSender>,
-) -> std::pin::Pin<Box<impl std::future::Future<Output = Result<SchemaLoopOutcome, VmError>> + 'a>>
-{
-    let future = if let Some(policy) = opts.routing_policy.clone() {
-        futures::future::Either::Left(execute_routing_schema_retry_loop(
+) -> impl std::future::Future<Output = Result<SchemaLoopOutcome, VmError>> + 'a {
+    if let Some(policy) = opts.routing_policy.clone() {
+        futures::future::Either::Left(Box::pin(execute_routing_schema_retry_loop(
             ctx, policy, opts, options, bridge, delta_sink,
-        ))
+        )))
     } else {
-        futures::future::Either::Right(execute_schema_retry_loop(
+        futures::future::Either::Right(Box::pin(execute_schema_retry_loop(
             ctx, opts, options, bridge, delta_sink,
-        ))
-    };
-    Box::pin(future)
+        )))
+    }
 }
 
 /// Make one observed call and project its visible text to `bridge` as
