@@ -222,7 +222,7 @@ fn agent_terminal_class_from_structured_error(
     if terminal_error_signal_matches(error, |signal| signal == "no_llm_call") {
         return Some(AgentTerminalClass::ProviderMisconfigured);
     }
-    if terminal_error_signal_matches(error, |signal| signal == "managed_spend_paused") {
+    if error.get("reason").and_then(serde_json::Value::as_str) == Some("managed_spend_paused") {
         return Some(AgentTerminalClass::ManagedSpendPaused);
     }
     // Before any `category`: a billing stop arrives as a 429, and producers
@@ -396,7 +396,6 @@ fn terminal_class_from_exact_signal(signal: &str) -> Option<AgentTerminalClass> 
         }
         "provider_unavailable" => Some(AgentTerminalClass::ProviderUnavailable),
         "provider_billing" | "billing_limit" => Some(AgentTerminalClass::ProviderBilling),
-        "managed_spend_paused" => Some(AgentTerminalClass::ManagedSpendPaused),
         "rate_limit" | "rate_limited" => Some(AgentTerminalClass::RateLimited),
         "timeout" | "timed_out" | "deadline_exceeded" => Some(AgentTerminalClass::Timeout),
         "resource_busy" => Some(AgentTerminalClass::ResourceBusy),
@@ -505,6 +504,24 @@ fn terminal_bool_signal(value: &serde_json::Value) -> bool {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn managed_pause_requires_typed_reason_not_opaque_code_or_prose() {
+        let mut error = json!({
+            "provider": "openai", "category": "rate_limit", "reason": "rate_limit",
+            "code": "managed_spend_paused", "message": "Managed AI is paused"
+        });
+        assert_eq!(
+            agent_terminal_class("error", "", Some(&error)),
+            Some(AgentTerminalClass::RateLimited)
+        );
+        error["reason"] = json!("managed_spend_paused");
+        error["code"] = json!("insufficient_quota");
+        assert_eq!(
+            agent_terminal_class("error", "", Some(&error)),
+            Some(AgentTerminalClass::ManagedSpendPaused)
+        );
+    }
 
     #[test]
     fn terminal_class_wire_values_are_stable_and_exhaustive() {
