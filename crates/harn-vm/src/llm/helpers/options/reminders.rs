@@ -90,7 +90,7 @@ pub(super) fn directive_nonce_instructions(nonce: &str) -> String {
 }
 
 /// Drop the envelope contract from each directive envelope in a request whose
-/// system prompt already states it.
+/// system prompt already states the session's complete directive contract.
 ///
 /// Envelopes are rendered and persisted with the contract inline, so a
 /// transcript read anywhere stays self-describing. Every envelope a session
@@ -99,15 +99,23 @@ pub(super) fn directive_nonce_instructions(nonce: &str) -> String {
 /// Decided per request from the two texts actually being sent, so a preview,
 /// a re-entered session, or a prompt that predates the contract can never
 /// leave an envelope without it.
+///
+/// The system prompt must carry the whole [`directive_nonce_instructions`]
+/// for `nonce`, not just the envelope text: a caller system string that quotes
+/// the envelope instructions without naming the authoritative nonce would
+/// otherwise strip the only contract the model sees. Only envelopes stamped
+/// with that same nonce are elided; an envelope under any other nonce keeps
+/// its inline contract.
 pub(crate) fn elide_envelope_contract_stated_in_system(
     messages: &mut [serde_json::Value],
     system: Option<&str>,
+    nonce: &str,
 ) {
-    let instructions = directive_envelope_instructions();
-    if !system.is_some_and(|system| system.contains(instructions)) {
+    if !system.is_some_and(|system| system.contains(&directive_nonce_instructions(nonce))) {
         return;
     }
-    let inline = format!("\n{instructions}\n");
+    let inline = format!("\n{}\n", directive_envelope_instructions());
+    let nonce_attr = format!(" nonce=\"{nonce}\"");
     for message in messages.iter_mut() {
         let Some(content) = message.get("content").and_then(serde_json::Value::as_str) else {
             continue;
@@ -118,6 +126,9 @@ pub(crate) fn elide_envelope_contract_stated_in_system(
         let Some((open_tag, rest)) = content.split_once('>') else {
             continue;
         };
+        if !open_tag.ends_with(nonce_attr.as_str()) {
+            continue;
+        }
         if let Some(directives) = rest.strip_prefix(inline.as_str()) {
             message["content"] = serde_json::Value::String(format!("{open_tag}>\n{directives}"));
         }
