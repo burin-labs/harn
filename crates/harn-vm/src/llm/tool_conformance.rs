@@ -1030,6 +1030,11 @@ async fn execute_live_probe_case(
     marker: &str,
     timeout_secs: u64,
 ) -> ToolConformanceCase {
+    // Both the provider adapter and raw endpoint are live dispatch paths.
+    // Apply the canonical active-route contract before credentials or HTTP.
+    if let Err(error) = llm_config::resolve_model_request_for_active_call(model, Some(provider)) {
+        return ToolConformanceCase::transport_error(mode, error.to_string(), None);
+    }
     if let Err(error) = super::admission::check_auxiliary(None, "provider conformance probes") {
         return ToolConformanceCase::transport_error(mode, error.to_string(), None);
     }

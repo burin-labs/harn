@@ -3,6 +3,33 @@ use std::collections::BTreeMap;
 use super::request::{probe_request_body, probe_request_payload, tool_probe_max_tokens};
 use super::*;
 
+#[tokio::test]
+async fn live_probes_refuse_retired_routes_on_adapter_and_raw_endpoints() {
+    for model in ["deepinfra/Qwen/Qwen3.8-2.4T-A95B", "Qwen/Qwen3.8-2.4T-A95B"] {
+        for base_url in [None, Some("http://127.0.0.1:9".to_string())] {
+            let mut options = ToolConformanceProbeOptions::new("deepinfra", model);
+            options.base_url = base_url;
+            let report = run_tool_conformance_probe(options).await;
+            assert_eq!(
+                report.cases.len(),
+                2,
+                "both streaming modes must be reached"
+            );
+            for case in report.cases {
+                assert!(!case.ok);
+                assert_eq!(case.classification, ToolProbeClassification::TransportError);
+                assert!(case
+                    .failure_reason
+                    .as_deref()
+                    .is_some_and(|reason| reason.contains("select a different model explicitly")));
+                assert_eq!(case.http_status, None);
+                assert_eq!(case.elapsed_ms, None, "refuse before the transport starts");
+                assert!(case.usage.is_none());
+            }
+        }
+    }
+}
+
 #[test]
 fn probe_resolves_catalog_key_to_provider_wire_model() {
     let resolved = llm_config::resolve_model_info("baseten-glm-5.2");
