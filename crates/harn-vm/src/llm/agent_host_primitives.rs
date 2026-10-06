@@ -1399,11 +1399,7 @@ pub(super) async fn host_agent_dispatch_tool_call(
         return Ok(json_to_vm_value(&denied));
     }
 
-    if let Some(decision) = dispatch_approval.recheck(
-        &tool_name,
-        &tool_args,
-        tool_annotations_for(tools, &tool_name).as_ref(),
-    ) {
+    if let Some(decision) = dispatch_approval.recheck(&tool_name, &tool_args, tools) {
         emit_runtime_denied_activity(&session_id, &tool_id, &tool_name, &decision);
         let denied = deny_tool_call(
             Some(&ctx),

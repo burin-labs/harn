@@ -94,18 +94,20 @@ impl DispatchApproval {
         &self,
         tool: &str,
         args: &Value,
-        annotations: Option<&ToolAnnotations>,
+        tools: Option<&crate::value::VmValue>,
     ) -> Option<PolicyEvaluation> {
         let (initial_tool, initial_args) = self.initial.as_ref()?;
         if initial_tool == tool && initial_args == args {
             return None;
         }
         let policy = self.policy.as_ref()?;
+        let annotations = super::tool_catalog::annotations_for(tools, tool);
         // The same evaluator judges the final facts without consuming another
         // repeat count. An exact host replacement may retain ask approval, but
         // cannot override a hard refusal or approve a later hook/router edit.
-        let mut decision = policy.evaluate_dispatch(tool, args, self.repeat_count, annotations);
-        self.apply_trifecta_to(Some(&mut decision), annotations, tool, args);
+        let mut decision =
+            policy.evaluate_dispatch(tool, args, self.repeat_count, annotations.as_ref());
+        self.apply_trifecta_to(Some(&mut decision), annotations.as_ref(), tool, args);
         let exact_host_grant = self
             .host_grant
             .as_ref()
