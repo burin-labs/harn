@@ -160,11 +160,13 @@ impl AcpJsonRpcRequest<AcpSessionPromptParams> {
     }
 }
 
-impl AcpJsonRpcRequest<AcpSessionIdParams> {
-    pub fn session_load(id: impl Into<AcpJsonRpcId>, params: AcpSessionIdParams) -> Self {
+impl AcpJsonRpcRequest<AcpSessionLoadParams> {
+    pub fn session_load(id: impl Into<AcpJsonRpcId>, params: AcpSessionLoadParams) -> Self {
         Self::new(id, ACP_METHOD_SESSION_LOAD, params)
     }
+}
 
+impl AcpJsonRpcRequest<AcpSessionIdParams> {
     pub fn session_resume(id: impl Into<AcpJsonRpcId>, params: AcpSessionIdParams) -> Self {
         Self::new(id, ACP_METHOD_SESSION_RESUME, params)
     }
@@ -456,8 +458,9 @@ pub struct AcpJsonRpcErrorResponse {
     pub error: AcpJsonRpcError,
 }
 
-/// The environment policy a client declares on `session/new`. Omission means
-/// `inherited`. Harn resolves it once into a
+/// The environment policy a client declares on `session/new` or a cold
+/// `session/load`. Both require a declaration. A live load retains its established
+/// policy and refuses a different declaration. Harn resolves it once into a
 /// [`harn_vm::security::SessionEnvironment`].
 ///
 /// The launcher parses its own `--grant name=spec` strings at ITS boundary and
@@ -533,6 +536,35 @@ pub struct AcpSessionRestoreResult {
     pub config_options: Option<serde_json::Value>,
     #[serde(flatten, skip_serializing_if = "BTreeMap::is_empty")]
     pub extra: BTreeMap<String, serde_json::Value>,
+}
+
+/// `session/load` params with the launcher's explicit environment declaration.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AcpSessionLoadParams {
+    #[serde(rename = "sessionId")]
+    pub session_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cwd: Option<String>,
+    #[serde(rename = "environmentPolicy")]
+    pub environment_policy: AcpSessionEnvironmentConfig,
+}
+
+impl AcpSessionLoadParams {
+    pub fn new(
+        session_id: impl Into<String>,
+        environment_policy: AcpSessionEnvironmentConfig,
+    ) -> Self {
+        Self {
+            session_id: session_id.into(),
+            cwd: None,
+            environment_policy,
+        }
+    }
+
+    pub fn with_cwd(mut self, cwd: impl Into<String>) -> Self {
+        self.cwd = Some(cwd.into());
+        self
+    }
 }
 
 /// Params containing only an ACP session id.
@@ -945,6 +977,27 @@ impl AcpSessionCancelToolCallParams {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn session_load_request_requires_the_typed_launch_declaration() {
+        let params = AcpSessionLoadParams::new(
+            "saved-session",
+            AcpSessionEnvironmentConfig {
+                kind: harn_vm::security::EnvironmentPolicyKind::Isolated,
+                grants: Vec::new(),
+            },
+        )
+        .with_cwd("/workspace");
+        let request = AcpJsonRpcRequest::session_load(7, params)
+            .into_json_value()
+            .expect("typed load request");
+        assert_eq!(request["method"], ACP_METHOD_SESSION_LOAD);
+        assert_eq!(request["params"]["environmentPolicy"]["kind"], "isolated");
+        assert_eq!(request["params"]["cwd"], "/workspace");
+        let mut missing = request["params"].clone();
+        missing.as_object_mut().unwrap().remove("environmentPolicy");
+        assert!(serde_json::from_value::<AcpSessionLoadParams>(missing).is_err());
+    }
 
     #[test]
     fn session_new_environment_policy_uses_the_harn_extension_field() {
