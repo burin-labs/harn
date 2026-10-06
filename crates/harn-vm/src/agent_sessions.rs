@@ -50,8 +50,6 @@ pub use changed_paths::{
 };
 pub(crate) use health::observe_event;
 mod journal;
-#[cfg(test)]
-mod publication_tests;
 pub mod reclaim_hooks;
 mod state;
 mod subscribers;
