@@ -1,8 +1,73 @@
 //! Frame-isolated construction of the scoped tool-dispatch future.
 
-use crate::value::VmValue;
+use crate::value::{VmError, VmValue};
 
 use super::agent_tools;
+
+type HookDispatchResult<T> = (Result<T, VmError>, Vec<serde_json::Value>);
+
+/// Run and apply pre-tool interception with their separate report scopes.
+/// Construct the scoped future on this short-lived frame, as with execution
+/// below, rather than materializing it in the retained dispatch frame.
+#[inline(never)]
+pub(super) fn pin_pre_tool_interception<'a>(
+    ctx: &'a crate::vm::AsyncBuiltinCtx,
+    tool_id: String,
+    tool_name: &'a str,
+    tool_args: &'a mut serde_json::Value,
+) -> std::pin::Pin<Box<impl std::future::Future<Output = HookDispatchResult<Option<String>>> + 'a>>
+{
+    Box::pin(async move {
+        let (action, mut reports) = crate::orchestration::scope_hook_reminder_reports(
+            crate::agent_sessions::scope_current_tool_call(tool_id.clone(), async {
+                crate::orchestration::run_pre_tool_hooks_with_ctx(Some(ctx), tool_name, tool_args)
+                    .await
+            }),
+        )
+        .await;
+        let action = match action {
+            Ok(action) => action,
+            Err(error) => return (Err(error), reports),
+        };
+        let (result, applied_reports) = crate::orchestration::scope_hook_reminder_reports(
+            crate::agent_sessions::scope_current_tool_call(tool_id, async {
+                crate::orchestration::apply_pre_tool_action(action, tool_args)
+            }),
+        )
+        .await;
+        reports.extend(applied_reports);
+        (result, reports)
+    })
+}
+
+/// Preserve post-tool output, denial/truncation metadata and ordered reminder
+/// reports without retaining hook-future construction in the dispatch frame.
+#[inline(never)]
+pub(super) fn pin_post_tool_interception<'a>(
+    ctx: &'a crate::vm::AsyncBuiltinCtx,
+    tool_id: String,
+    tool_name: &'a str,
+    tool_args: &'a serde_json::Value,
+    rendered: &'a str,
+) -> std::pin::Pin<
+    Box<
+        impl std::future::Future<
+                Output = HookDispatchResult<crate::orchestration::PostToolHookResult>,
+            > + 'a,
+    >,
+> {
+    Box::pin(crate::orchestration::scope_hook_reminder_reports(
+        crate::agent_sessions::scope_current_tool_call(tool_id, async move {
+            crate::orchestration::run_post_tool_hooks_with_ctx(
+                Some(ctx),
+                tool_name,
+                tool_args,
+                rendered,
+            )
+            .await
+        }),
+    ))
+}
 
 /// The borrowed inputs one tool dispatch reads, bundled so
 /// [`pin_scoped_tool_dispatch`] stays inside clippy's argument limit.

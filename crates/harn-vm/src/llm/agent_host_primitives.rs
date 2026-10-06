@@ -710,7 +710,10 @@ async fn host_agent_dispatch_tool_call_impl(
     host_agent_dispatch_tool_call(ctx, call, tools.as_ref(), &options).await
 }
 
-use super::agent_host_tool_dispatch::{pin_scoped_tool_dispatch, ToolDispatchRequest};
+use super::agent_host_tool_dispatch::{
+    pin_post_tool_interception, pin_pre_tool_interception, pin_scoped_tool_dispatch,
+    ToolDispatchRequest,
+};
 
 pub(super) async fn host_agent_dispatch_tool_call(
     ctx: crate::vm::AsyncBuiltinCtx,
@@ -1253,21 +1256,8 @@ pub(super) async fn host_agent_dispatch_tool_call(
     }
 
     let mut hook_reminder_reports = Vec::new();
-    let (pre_tool_action, reports) = crate::orchestration::scope_hook_reminder_reports(
-        crate::agent_sessions::scope_current_tool_call(tool_id.clone(), async {
-            crate::orchestration::run_pre_tool_hooks_with_ctx(Some(&ctx), &tool_name, &tool_args)
-                .await
-        }),
-    )
-    .await;
-    hook_reminder_reports.extend(reports);
-    let pre_tool_action = pre_tool_action?;
-    let (pre_tool_result, reports) = crate::orchestration::scope_hook_reminder_reports(
-        crate::agent_sessions::scope_current_tool_call(tool_id.clone(), async {
-            crate::orchestration::apply_pre_tool_action(pre_tool_action, &mut tool_args)
-        }),
-    )
-    .await;
+    let (pre_tool_result, reports) =
+        pin_pre_tool_interception(&ctx, tool_id.clone(), &tool_name, &mut tool_args).await;
     hook_reminder_reports.extend(reports);
     if let Some(reason) = pre_tool_result? {
         let denial = crate::agent_events::ToolDenial::terminal(
@@ -1544,16 +1534,12 @@ pub(super) async fn host_agent_dispatch_tool_call(
             // structured `result` field below and the tool-result recording path.
             let rendered_before_hooks =
                 agent_tools::render_tool_result(&agent_tools::elide_image_base64(&raw_result));
-            let (rendered, reports) = crate::orchestration::scope_hook_reminder_reports(
-                crate::agent_sessions::scope_current_tool_call(tool_id.clone(), async {
-                    crate::orchestration::run_post_tool_hooks_with_ctx(
-                        Some(&ctx),
-                        &tool_name,
-                        &tool_args,
-                        &rendered_before_hooks,
-                    )
-                    .await
-                }),
+            let (rendered, reports) = pin_post_tool_interception(
+                &ctx,
+                tool_id.clone(),
+                &tool_name,
+                &tool_args,
+                &rendered_before_hooks,
             )
             .await;
             hook_reminder_reports.extend(reports);
