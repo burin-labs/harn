@@ -33,7 +33,7 @@ async fn live_probes_refuse_retired_routes_on_adapter_and_raw_endpoints() {
 #[test]
 fn probe_resolves_catalog_key_to_provider_wire_model() {
     let resolved = llm_config::resolve_model_info("baseten-glm-5.2");
-    assert_eq!(resolved_probe_model_id(&resolved.id), "zai-org/GLM-5.2");
+    assert_eq!(llm_config::wire_model_id(&resolved.id), "zai-org/GLM-5.2");
 }
 
 #[test]
