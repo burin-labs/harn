@@ -24,6 +24,7 @@ const INVALID_RESPONSE_FINGERPRINTS: &[&[&str]] = &[
 /// artifacts so hosts branch on the owner's vocabulary instead of inventing
 /// sibling strings.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[non_exhaustive]
 pub enum LlmErrorKind {
     Transient,
     Terminal,
@@ -57,6 +58,7 @@ impl LlmErrorKind {
 /// artifacts. `code`, by contrast, is a provider passthrough with no closed
 /// set: hosts must treat it as opaque diagnostic text and never branch on it.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[non_exhaustive]
 pub enum LlmErrorReason {
     RateLimit,
     ServerError,

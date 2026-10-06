@@ -26,6 +26,7 @@ use serde::{Deserialize, Serialize};
 /// the responsible owner. Serialized values are an additive wire contract used
 /// by terminal checkpoints and ACP prompt-error data.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
+#[non_exhaustive]
 #[serde(rename_all = "snake_case")]
 pub enum AgentTerminalClass {
     ContextOverflow,
