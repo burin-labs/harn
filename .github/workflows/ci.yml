@@ -1639,14 +1639,15 @@ jobs:
       # standing down and leaving a boundary proof that measures nothing.
       # Nowhere else sets this: a class without Landlock skips and says so.
       HARN_REQUIRE_LANDLOCK_TESTS: "1"
+      BWRAP_REQUIRE_TESTS: "1"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install mold linker
         uses: ./.github/actions/apt-install
         timeout-minutes: 5
         with:
-          packages: mold
-          check-command: mold
+          packages: mold bubblewrap
+          check-command: mold bwrap
       - uses: ./.github/actions/rust-toolchain
       - name: Install cargo-nextest
         uses: taiki-e/install-action@4cef1412cce204788f482e778a0b9187f9626a29 # v2.87.21
