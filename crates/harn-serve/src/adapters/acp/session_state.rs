@@ -147,6 +147,7 @@ impl AcpServer {
         &mut self,
         session_id: &str,
         params: &serde_json::Value,
+        environment: harn_vm::security::SessionEnvironment,
     ) -> Result<(), harn_vm::agent_sessions::SessionOpenError> {
         let cwd = params
             .get("cwd")
@@ -155,6 +156,7 @@ impl AcpServer {
             .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
         self.insert_session(session_id.to_string(), cwd, SessionInfo::default())?;
         if let Some(session) = self.sessions.get_mut(session_id) {
+            session.environment_policy = environment;
             session.admission_unavailable = true;
         }
         Ok(())
@@ -193,6 +195,37 @@ impl AcpServer {
             return;
         };
 
+        // Durable history is not launch authority. A cold load admits a new
+        // runnable session, so its host must declare the environment again.
+        // Resolved grants and launcher snapshots must never enter the store.
+        let environment = if !self.sessions.contains_key(&session_id)
+            || params.get("environmentPolicy").is_some()
+        {
+            let declared = match Self::resolve_session_environment(params) {
+                Ok(environment) => {
+                    environment.with_host_inference_boundary(self.host_inference_boundary)
+                }
+                Err((message, data)) => {
+                    self.send_error_with_data(id, -32602, &message, data);
+                    return;
+                }
+            };
+            if let Some(live) = self.sessions.get(&session_id) {
+                if declared != live.environment_policy {
+                    self.send_error_with_data(
+                        id,
+                        -32602,
+                        "session/load cannot change a live session's environment authority",
+                        serde_json::json!({"code": "environment_policy.live_mismatch"}),
+                    );
+                    return;
+                }
+            }
+            Some(declared)
+        } else {
+            None
+        };
+
         if let Err(error) = flush_session_sinks(&session_id).await {
             self.send_error(
                 id,
@@ -224,7 +257,13 @@ impl AcpServer {
                 return;
             }
         } else if !replay_events.is_empty() {
-            if let Err(error) = self.register_restored_session(&session_id, params) {
+            if let Err(error) = self.register_restored_session(
+                &session_id,
+                params,
+                environment
+                    .clone()
+                    .expect("cold load has declared authority"),
+            ) {
                 self.send_session_open_error(id, &error);
                 return;
             }
@@ -250,7 +289,11 @@ impl AcpServer {
             {
                 Ok(Some(persisted)) => {
                     replay_events = persisted;
-                    if let Err(error) = self.register_restored_session(&session_id, params) {
+                    if let Err(error) = self.register_restored_session(
+                        &session_id,
+                        params,
+                        environment.expect("cold load has declared authority"),
+                    ) {
                         self.send_session_open_error(id, &error);
                         return;
                     }

@@ -157,7 +157,11 @@ fn conservative_acp_refuses_late_and_cold_restored_activation() {
         SessionBudget::Custom(conservative(1.0));
     assert!(server.prompt_admission("late-admission").is_err());
     server
-        .register_restored_session("restored-admission", &serde_json::json!({"cwd":dir.path()}))
+        .register_restored_session(
+            "restored-admission",
+            &serde_json::json!({"cwd":dir.path()}),
+            harn_vm::security::SessionEnvironment::isolated(),
+        )
         .unwrap();
     server
         .sessions
