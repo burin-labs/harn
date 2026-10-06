@@ -2,6 +2,7 @@
 
 mod authority;
 mod control;
+mod correlation;
 mod remind;
 pub use authority::leading_authority_param_count;
 pub use authority::{inject_leading_authorities, inject_leading_authority};
@@ -748,30 +749,6 @@ impl HostBridge {
         })
     }
 
-    /// Set the ACP session ID for session-scoped notifications.
-    pub fn set_session_id(&self, id: &str) {
-        *self.session_id.lock().unwrap_or_else(|e| e.into_inner()) = id.to_string();
-    }
-
-    /// Bind the already normalized identity of the current ACP prompt.
-    pub fn set_caller_message_id(&self, id: Option<String>) {
-        *self
-            .caller_message_id
-            .lock()
-            .unwrap_or_else(|e| e.into_inner()) = id;
-    }
-
-    /// Resolve identity only for the ACP session this prompt actually targets.
-    pub(crate) fn caller_message_id_for_session(&self, session_id: &str) -> Option<String> {
-        if session_id != self.get_session_id() {
-            return None;
-        }
-        self.caller_message_id
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .clone()
-    }
-
     /// Set the currently executing script name (without .harn suffix).
     pub fn set_script_name(&self, name: &str) {
         *self.script_name.lock().unwrap_or_else(|e| e.into_inner()) = name.to_string();
@@ -786,13 +763,6 @@ impl HostBridge {
     }
 
     /// Get the session ID.
-    pub fn get_session_id(&self) -> String {
-        self.session_id
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .clone()
-    }
-
     pub fn tool_call_cancellation_registry(
         &self,
     ) -> Arc<crate::tool_call_cancellations::CancellationRegistry> {
@@ -1472,7 +1442,7 @@ mod tests {
     use harn_clock::test_support::within;
     use harn_parser::diagnostic_codes::Code;
 
-    fn test_bridge() -> HostBridge {
+    pub(super) fn test_bridge() -> HostBridge {
         HostBridge::from_parts(
             Arc::new(Mutex::new(HashMap::new())),
             Arc::new(AtomicBool::new(false)),
@@ -1493,20 +1463,6 @@ mod tests {
                 crate::tool_call_cancellations::fresh_registry(),
             ),
         )
-    }
-
-    #[test]
-    fn caller_message_identity_is_bound_to_the_targeted_session() {
-        let bridge = test_bridge();
-        bridge.set_session_id("parent");
-        bridge.set_caller_message_id(Some("caller-turn".into()));
-        assert_eq!(
-            bridge.caller_message_id_for_session("parent").as_deref(),
-            Some("caller-turn")
-        );
-        assert_eq!(bridge.caller_message_id_for_session("child"), None);
-        bridge.set_caller_message_id(None);
-        assert_eq!(bridge.caller_message_id_for_session("parent"), None);
     }
 
     #[test]

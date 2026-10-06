@@ -2495,5 +2495,5 @@ export interface HarnCanonicalHistoryBoundaries {
 }
 
 export interface HarnACPPromptCorrelation {
-  messageId?: string | null
+  messageId?: string
 }
