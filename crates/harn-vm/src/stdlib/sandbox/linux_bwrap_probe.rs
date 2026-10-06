@@ -132,15 +132,13 @@ mod tests {
 
     #[test]
     fn an_expired_setup_budget_is_an_incomplete_probe_not_a_caller_deadline() {
-        // The direct child exits at once, but a descendant keeps stdout open,
-        // so only the probe's own budget can end the capture.
+        // A setup that outlives the budget, with no caller interrupt armed:
+        // only the probe's own budget can end the capture.
         let cache = std::sync::Mutex::new(None);
         let started = Instant::now();
         let outcome = super::super::cached_availability(&cache, || {
-            let mut command = Command::new("/bin/sh");
-            command
-                .env_clear()
-                .args(["-c", "sleep 5 & printf harn-bwrap-boundary"]);
+            let mut command = Command::new("/bin/sleep");
+            command.env_clear().arg("5");
             let outcome = capture_probe_within(&mut command, Duration::from_millis(200));
             assert!(
                 crate::op_interrupt::requested_error().is_none(),
