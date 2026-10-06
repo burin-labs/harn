@@ -91,6 +91,13 @@ debug = "line-tables-only"
 debug-assertions = true
 overflow-checks = true
 
+# The interpreter those lanes are bound by lives in harn-vm and its
+# dependencies, which keep opt-level 1. harn-cli itself is command plumbing,
+# and optimizing it was the longest single compile in the CI producer: about
+# 7-9 minutes after its last dependency finished, on the free 4-vCPU runner.
+[profile.ci-cli.package.harn-cli]
+opt-level = 0
+
 # Default release profile mirrors the DISTRIBUTION build's shape: thin LTO +
 # 16 codegen units. This is the everyday / local "internal" release — fast to
 # build and identical in optimization to what ships (the release workflow only

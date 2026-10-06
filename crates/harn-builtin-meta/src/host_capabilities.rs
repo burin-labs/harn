@@ -247,6 +247,7 @@ pub const HOST_CAPABILITY_GROUPS: &[HostCapabilityGroup] = &[
             "agent_unregister",
             "branch_overlay",
             "change_signature",
+            "extract_function",
             "lock_release",
             "lock_try",
             "rebuild",
