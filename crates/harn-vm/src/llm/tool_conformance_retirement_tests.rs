@@ -18,6 +18,8 @@ fn live_probe_preserves_retired_catalog_identity_through_wire_overlay() {
         .expect("test runtime")
         .block_on(run_tool_conformance_probe(options));
     llm_config::clear_user_overrides();
+    assert_eq!(report.evidence_source, ToolProbeEvidenceSource::Unknown);
+    assert!(report.require_live_evidence().is_err());
     assert_eq!(report.cases.len(), 2);
     for case in report.cases {
         assert!(
@@ -30,4 +32,23 @@ fn live_probe_preserves_retired_catalog_identity_through_wire_overlay() {
         assert_eq!(case.http_status, None);
         assert!(case.usage.is_none());
     }
+}
+
+#[test]
+fn retired_adapter_refusal_is_not_live_provider_evidence() {
+    let _guard = crate::llm::env_guard();
+    let options = ToolConformanceProbeOptions::new("deepinfra", "deepinfra/Qwen/Qwen3.8-2.4T-A95B");
+    let report = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("test runtime")
+        .block_on(run_tool_conformance_probe(options));
+    assert_eq!(report.cases.len(), 2);
+    assert!(report.cases.iter().all(|case| {
+        case.failure_reason
+            .as_deref()
+            .is_some_and(|reason| reason.contains("select a different model explicitly"))
+    }));
+    assert_eq!(report.evidence_source, ToolProbeEvidenceSource::Unknown);
+    assert!(report.require_live_evidence().is_err());
 }

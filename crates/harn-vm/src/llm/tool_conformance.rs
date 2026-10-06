@@ -472,7 +472,14 @@ pub async fn run_tool_conformance_probe(
         provider,
         model_id,
         base_url,
-        if options.base_url.is_some() {
+        if !cases
+            .iter()
+            .any(|case| case.usage.is_some() || case.http_status.is_some())
+        {
+            // Resolution, admission, request construction and transport failures
+            // do not establish an observation of the provider's behavior.
+            ToolProbeEvidenceSource::Unknown
+        } else if options.base_url.is_some() {
             ToolProbeEvidenceSource::LiveRawEndpoint
         } else {
             ToolProbeEvidenceSource::LiveRequest
