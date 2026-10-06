@@ -942,6 +942,10 @@ fn acp_prompt_error_schema_matches_runtime_terminal_classes() {
         json!(agent_terminal_class_values())
     );
     assert_eq!(
+        schema["$defs"]["AgentTerminalOutcome"]["properties"]["terminalClass"]["enum"],
+        json!(agent_terminal_class_values())
+    );
+    assert_eq!(
         schema["$defs"]["AgentTerminalOutcome"]["properties"]["kind"]["enum"],
         json!(agent_terminal_kind_values())
     );
