@@ -2,7 +2,7 @@
 
 use super::*;
 
-pub(super) const RESTORE_CANARY: &str = "HARN_RESTORE_TEST_API_KEY";
+pub(super) const RESTORE_CANARY: &str = "SYNTHETIC_RESTORE_TEST_API_KEY";
 
 /// Use the production process-construction owner. Print only a presence
 /// verdict, never the synthetic value or any launcher credential.
@@ -22,14 +22,15 @@ pub(super) fn child_sees_restore_canary(
             std::env::var_os("COMSPEC").unwrap_or_else(|| "cmd.exe".into()),
         )
         .unwrap();
-        command.args([
-            "/C",
-            "if defined HARN_RESTORE_TEST_API_KEY (echo visible) else (echo absent)",
-        ]);
+        command.arg("/C").arg(format!(
+            "if defined {RESTORE_CANARY} (echo visible) else (echo absent)"
+        ));
         command
     } else {
         let mut command = harn_vm::process_sandbox::session_std_command("/bin/sh").unwrap();
-        command.args(["-c", "if [ -n \"${HARN_RESTORE_TEST_API_KEY-}\" ]; then printf visible; else printf absent; fi"]);
+        command.arg("-c").arg(format!(
+            "if [ -n \"${{{RESTORE_CANARY}-}}\" ]; then printf visible; else printf absent; fi"
+        ));
         command
     };
     let output = command.output().unwrap();
