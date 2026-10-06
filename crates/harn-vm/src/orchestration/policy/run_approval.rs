@@ -224,25 +224,15 @@ impl RunApprovalPolicy {
         args: &serde_json::Value,
         repeat_count: u64,
         annotations: Option<&crate::tool_annotations::ToolAnnotations>,
-    ) -> super::PolicyEvaluation {
-        self.resolve(
-            super::approval_rules::evaluate_annotated_tool_approval_policy(
-                &self.declared,
-                tool,
-                args,
-                Some(repeat_count),
-                annotations,
-            ),
-        )
-    }
-
-    pub(crate) fn recheck_dispatch_boundary(
-        &self,
-        tool: &str,
-        args: &serde_json::Value,
-        annotations: Option<&crate::tool_annotations::ToolAnnotations>,
-    ) -> Option<super::PolicyEvaluation> {
-        super::approval_rules::evaluate_invocation_guards(&self.declared, tool, args, annotations)
+    ) -> (super::PolicyEvaluation, Option<String>) {
+        let (decision, identity) = super::approval_rules::evaluate_dispatch(
+            &self.declared,
+            tool,
+            args,
+            Some(repeat_count),
+            annotations,
+        );
+        (self.resolve(decision), identity)
     }
 
     pub fn evaluate_detailed(

@@ -23,7 +23,7 @@ mod sensitive_paths;
 pub use host_request::{ToolApprovalRequest, ToolApprovalWorkspaceBoundary};
 use identity_match::LiteralResourceIdentity;
 pub use identity_match::PolicyIdentityMatch;
-pub(super) use path_guards::evaluate_invocation_guards;
+pub(super) use invocation_memory::evaluate_dispatch;
 pub use path_guards::{
     denial_gate_for_source, EXTERNAL_ROOT_READ_ONLY, SOURCE_DEFAULT_EXTERNAL_PATH,
     SOURCE_DEFAULT_PATH_GUARD, SOURCE_DEFAULT_SENSITIVE_PATH, SOURCE_NET_POLICY,
@@ -920,11 +920,7 @@ pub(super) fn evaluate_annotated_tool_approval_policy(
     repeat_count: Option<u64>,
     annotations: Option<&crate::tool_annotations::ToolAnnotations>,
 ) -> PolicyEvaluation {
-    let context = EvaluationContext::new(tool_name, args, repeat_count, annotations);
-    if let Err(reason) = validate_tool_approval_path_arguments(tool_name, args, annotations) {
-        return host_request::invalid_context(&context, reason);
-    }
-    evaluate_context(policy, context)
+    evaluate_dispatch(policy, tool_name, args, repeat_count, annotations).0
 }
 
 pub fn evaluate_tool_approval_request(

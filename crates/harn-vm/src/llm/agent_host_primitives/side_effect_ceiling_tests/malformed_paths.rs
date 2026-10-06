@@ -218,18 +218,32 @@ async fn unchanged_catalog_paths_are_rechecked_after_symlink_changes() {
     clear_all_approval_policy_repeat_counts();
     crate::orchestration::clear_tool_hooks();
     let _bridge = HostBridgeGuard::replace(None);
-    push_approval_policy(ToolApprovalPolicy {
-        auto_approve: vec!["read_file".into()],
-        ..ToolApprovalPolicy::default()
-    });
+    push_approval_policy(
+        serde_json::from_value(serde_json::json!({
+            "auto_approve": ["read_file"],
+            "rules": [{"deny": {"tool": "read_file", "path": "**/forbidden"}}]
+        }))
+        .unwrap(),
+    );
     let inside = root.path().join("inside");
     let external = outside.path().join("outside");
+    let forbidden = root.path().join("forbidden");
     std::fs::write(&inside, "inside").unwrap();
     std::fs::write(&external, "outside").unwrap();
+    std::fs::write(&forbidden, "forbidden").unwrap();
     let alias = root.path().join("alias");
     std::os::unix::fs::symlink(&inside, &alias).unwrap();
     let calls = Calls::new();
-    for (target, expected) in [(external, false), (inside, true)] {
+    let denied = calls
+        .dispatch(
+            serde_json::json!({"location": forbidden}),
+            true,
+            &crate::value::DictMap::new(),
+        )
+        .await;
+    assert_eq!(denied["ok"], false, "authored deny must fire: {denied}");
+    assert_eq!(calls.effect.load(Ordering::SeqCst), 0);
+    for (target, expected) in [(forbidden, false), (external, false), (inside, true)] {
         let link = alias.clone();
         let rewrites = Arc::new(AtomicUsize::new(0));
         let observed = rewrites.clone();
@@ -250,6 +264,48 @@ async fn unchanged_catalog_paths_are_rechecked_after_symlink_changes() {
                 &crate::value::DictMap::new(),
             )
             .await;
+        assert_eq!(rewrites.load(Ordering::SeqCst), 1, "hook must fire");
+        assert_eq!(result["ok"], expected, "{result}");
+        assert_eq!(calls.effect.load(Ordering::SeqCst), usize::from(expected));
+        crate::orchestration::clear_tool_hooks();
+        std::fs::remove_file(&alias).unwrap();
+        std::os::unix::fs::symlink(root.path().join("inside"), &alias).unwrap();
+    }
+    pop_approval_policy();
+    push_approval_policy(ToolApprovalPolicy {
+        require_approval: vec!["read_file".into()],
+        ..ToolApprovalPolicy::default()
+    });
+    let alternate = root.path().join("alternate");
+    std::fs::write(&alternate, "alternate").unwrap();
+    for (target, expected) in [(alternate, false), (root.path().join("inside"), true)] {
+        let captured = Arc::new(StdMutex::new(Vec::new()));
+        let _answer = HostBridgeGuard::replace(Some(responding_bridge(
+            crate::llm::acp_permission::allow_response(),
+            captured.clone(),
+        )));
+        let link = alias.clone();
+        let rewrites = Arc::new(AtomicUsize::new(0));
+        let observed = rewrites.clone();
+        crate::orchestration::register_tool_hook(crate::orchestration::ToolHook {
+            pattern: "read_file".into(),
+            pre: Some(Arc::new(move |_, _| {
+                observed.fetch_add(1, Ordering::SeqCst);
+                std::fs::remove_file(&link).unwrap();
+                std::os::unix::fs::symlink(&target, &link).unwrap();
+                crate::orchestration::PreToolAction::Allow
+            })),
+            post: None,
+        });
+        let calls = Calls::new();
+        let result = calls
+            .dispatch(
+                serde_json::json!({"location": alias}),
+                true,
+                &crate::value::DictMap::new(),
+            )
+            .await;
+        assert_eq!(captured.lock().unwrap().len(), 1, "one answer must fire");
         assert_eq!(rewrites.load(Ordering::SeqCst), 1, "hook must fire");
         assert_eq!(result["ok"], expected, "{result}");
         assert_eq!(calls.effect.load(Ordering::SeqCst), usize::from(expected));
