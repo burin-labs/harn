@@ -855,12 +855,19 @@ pub(super) async fn host_agent_dispatch_tool_call(
     {
         Ok(prepared) => prepared,
         Err(error) => {
+            let category = if crate::value::error_to_category(&error)
+                == crate::value::ErrorCategory::SchemaValidation
+            {
+                crate::agent_events::ToolCallErrorCategory::SchemaValidation
+            } else {
+                crate::agent_events::ToolCallErrorCategory::PermissionDenied
+            };
             let denied = agent_primitive_denied_tool(
                 &tool_name,
                 &tool_id,
                 &tool_args,
                 error.to_string(),
-                crate::agent_events::ToolCallErrorCategory::PermissionDenied,
+                category,
                 None,
                 None,
             );

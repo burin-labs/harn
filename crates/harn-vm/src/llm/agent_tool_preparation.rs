@@ -111,7 +111,10 @@ pub(super) async fn prepare(
         name,
     )?
     .validate_input(name, arguments)
-    .map_err(|error| rejected(error.to_string()))?;
+    .map_err(|error| VmError::CategorizedError {
+        message: error.to_string(),
+        category: ErrorCategory::SchemaValidation,
+    })?;
     let facts = resolve(ctx, &prepare, arguments).await?;
     Ok(Some(Arc::new(PreparedInvocation {
         name: name.into(),
