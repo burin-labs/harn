@@ -218,6 +218,24 @@ impl RunApprovalPolicy {
         self.resolve(decision)
     }
 
+    pub(crate) fn evaluate_dispatch(
+        &self,
+        tool: &str,
+        args: &serde_json::Value,
+        repeat_count: u64,
+        annotations: Option<&crate::tool_annotations::ToolAnnotations>,
+    ) -> super::PolicyEvaluation {
+        self.resolve(
+            super::approval_rules::evaluate_annotated_tool_approval_policy(
+                &self.declared,
+                tool,
+                args,
+                Some(repeat_count),
+                annotations,
+            ),
+        )
+    }
+
     pub fn evaluate_detailed(
         &self,
         tool: &str,

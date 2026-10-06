@@ -574,11 +574,20 @@ struct EvaluationContext {
 }
 
 impl EvaluationContext {
-    fn new(tool_name: &str, args: &JsonValue, repeat_count: Option<u64>) -> Self {
-        let annotations = super::current_tool_annotations(tool_name);
+    fn new(
+        tool_name: &str,
+        args: &JsonValue,
+        repeat_count: Option<u64>,
+        annotations: Option<&crate::tool_annotations::ToolAnnotations>,
+    ) -> Self {
+        let ambient = annotations
+            .is_none()
+            .then(|| super::current_tool_annotations(tool_name))
+            .flatten();
+        let annotations = annotations.or(ambient.as_ref());
         let path_entries = path_inputs::classify(
             args,
-            annotations.as_ref(),
+            annotations,
             &crate::orchestration::execution_root_path(),
         );
         let mut path_candidates = Vec::new();
@@ -605,7 +614,6 @@ impl EvaluationContext {
             .or_else(|| dispatch.as_ref().map(|context| context.action.clone()));
         let env_modes = string_values(args, &["env_mode", "envMode"]);
         let capabilities = annotations
-            .as_ref()
             .map(|annotations| {
                 annotations
                     .capabilities
@@ -623,10 +631,8 @@ impl EvaluationContext {
             invocation_sha256: None,
             tool_name: tool_name.to_string(),
             tool_kind: annotations
-                .as_ref()
                 .map(|annotations| tool_kind_string(annotations.kind).to_string()),
             side_effect: annotations
-                .as_ref()
                 .map(|annotations| annotations.side_effect_level.as_str().to_string()),
             capabilities,
             path_entries,
@@ -647,7 +653,11 @@ impl EvaluationContext {
             repeat_count,
             external_roots: Vec::new(),
         };
-        context.literal_identity = Some(LiteralResourceIdentity::capture(&context, args, None));
+        context.literal_identity = Some(LiteralResourceIdentity::capture(
+            &context,
+            args,
+            annotations.map(|annotations| annotations.arg_schema.path_params.as_slice()),
+        ));
         context.invocation_sha256 =
             invocation_memory::digest(&context, args, &crate::orchestration::execution_root_path());
         context
@@ -900,8 +910,18 @@ pub fn evaluate_tool_approval_policy(
     args: &JsonValue,
     repeat_count: Option<u64>,
 ) -> PolicyEvaluation {
-    let context = EvaluationContext::new(tool_name, args, repeat_count);
-    if let Err(reason) = validate_tool_approval_path_arguments(tool_name, args, None) {
+    evaluate_annotated_tool_approval_policy(policy, tool_name, args, repeat_count, None)
+}
+
+pub(super) fn evaluate_annotated_tool_approval_policy(
+    policy: &ToolApprovalPolicy,
+    tool_name: &str,
+    args: &JsonValue,
+    repeat_count: Option<u64>,
+    annotations: Option<&crate::tool_annotations::ToolAnnotations>,
+) -> PolicyEvaluation {
+    let context = EvaluationContext::new(tool_name, args, repeat_count, annotations);
+    if let Err(reason) = validate_tool_approval_path_arguments(tool_name, args, annotations) {
         return host_request::invalid_context(&context, reason);
     }
     evaluate_context(policy, context)
@@ -924,7 +944,8 @@ pub(crate) fn evaluate_authority_request(
     if request.authority_name.trim().is_empty() || !request.arguments.is_object() {
         return Err("authority policy request requires a name and object arguments".into());
     }
-    let mut context = EvaluationContext::new(&request.authority_name, &request.arguments, None);
+    let mut context =
+        EvaluationContext::new(&request.authority_name, &request.arguments, None, None);
     // Requested roots are matcher facts, not already-admitted concrete effect
     // paths. Keep path_candidates for authored and sensitive-path refusals,
     // while omitting effect-only workspace admission and captured invocation

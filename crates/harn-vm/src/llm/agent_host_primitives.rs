@@ -41,7 +41,6 @@ use side_effect_ceiling::{
 };
 use tool_catalog::{
     annotations_for as tool_annotations_for, descriptor_for as tool_descriptor_for,
-    permission_context_for,
 };
 
 /// Cause-named feedback for a tool call whose arguments failed validation
@@ -884,7 +883,10 @@ pub(super) async fn host_agent_dispatch_tool_call(
                     tool_args: &tool_args,
                     violation,
                     reason: policy_denial.reason.clone(),
-                    tool_context: permission_context_for(tools, &tool_name),
+                    tool_context: (
+                        tool_descriptor_for(tools, &tool_name),
+                        dispatch_annotations.clone(),
+                    ),
                     intent: tool_call_intent(options),
                 },
             )
@@ -1098,13 +1100,22 @@ pub(super) async fn host_agent_dispatch_tool_call(
         }
     }
 
+    let initial_invocation = (tool_name.clone(), tool_args.clone());
+    let mut host_approved_invocation = None;
+    let mut approval_repeat_count = 0;
     let mut approval = crate::orchestration::current_run_approval_policy().map(|policy| {
         let repeat_count = crate::orchestration::next_approval_policy_repeat_count(
             &session_id,
             &tool_name,
             &tool_args,
         );
-        policy.evaluate_detailed_with_repeat(&tool_name, &tool_args, repeat_count)
+        approval_repeat_count = repeat_count;
+        policy.evaluate_dispatch(
+            &tool_name,
+            &tool_args,
+            repeat_count,
+            dispatch_annotations.as_ref(),
+        )
     });
     // Lethal-trifecta gate (Layer 1): once untrusted content has entered the
     // session's context, upgrade an auto-allow to an interactive confirmation
@@ -1118,11 +1129,9 @@ pub(super) async fn host_agent_dispatch_tool_call(
                 if decision.is_allow() {
                     let taint = super::agent_session_host::session_taint_snapshot(&session_id);
                     if !taint.is_empty() {
-                        let annotations =
-                            crate::orchestration::current_tool_annotations(&tool_name);
                         if let Some(outcome) = trifecta_gate_reason(
                             &security_policy,
-                            annotations.as_ref(),
+                            dispatch_annotations.as_ref(),
                             &tool_name,
                             &tool_args,
                             &taint,
@@ -1203,7 +1212,7 @@ pub(super) async fn host_agent_dispatch_tool_call(
                 request_context: serde_json::json!({"policy_decision": decision.receipt.clone()}),
                 requested_capabilities: vec![format!("tool.{tool_name}")],
                 tool_descriptor: tool_descriptor_for(tools, &tool_name),
-                tool_annotations: tool_annotations_for(tools, &tool_name),
+                tool_annotations: dispatch_annotations.clone(),
                 intent: tool_call_intent(options),
             };
             match request_host_permission(bridge.as_ref(), request).await {
@@ -1218,6 +1227,7 @@ pub(super) async fn host_agent_dispatch_tool_call(
                     if let Some(new_args) = response.get("args") {
                         tool_args = new_args.clone();
                     }
+                    host_approved_invocation = Some((tool_name.clone(), tool_args.clone()));
                     approval_status = Some("host_granted");
                     emit_permission_event_with_policy(
                         &session_id,
@@ -1425,6 +1435,44 @@ pub(super) async fn host_agent_dispatch_tool_call(
         );
         let denied = attach_hook_reminder_audit(denied, hook_reminder_reports);
         return Ok(json_to_vm_value(&denied));
+    }
+
+    // Approval binds an invocation, not just a tool name. Host argument edits,
+    // hooks, and routing must not carry an earlier allow across a new path or
+    // tool. Reuse the owning evaluator without consuming another repeat count.
+    // A host may approve its exact replacement arguments, but cannot override
+    // a hard refusal or authorize a subsequent hook/router replacement.
+    if initial_invocation.0 != tool_name || initial_invocation.1 != tool_args {
+        if let Some(policy) = crate::orchestration::current_run_approval_policy() {
+            let final_annotations = tool_annotations_for(tools, &tool_name);
+            let decision = policy.evaluate_dispatch(
+                &tool_name,
+                &tool_args,
+                approval_repeat_count,
+                final_annotations.as_ref(),
+            );
+            let exact_host_grant = host_approved_invocation
+                .as_ref()
+                .is_some_and(|(name, args)| name == &tool_name && args == &tool_args);
+            if decision.is_deny() || (decision.is_ask() && !exact_host_grant) {
+                emit_runtime_denied_activity(&session_id, &tool_id, &tool_name, &decision);
+                let denied = deny_tool_call(
+                    Some(&ctx),
+                    &session_id,
+                    &tool_name,
+                    &tool_id,
+                    &tool_args,
+                    decision.terminal_denial(),
+                    false,
+                    DenialEvidence::new(Some(decision.receipt), None),
+                )
+                .await;
+                return Ok(json_to_vm_value(&attach_hook_reminder_audit(
+                    denied,
+                    hook_reminder_reports,
+                )));
+            }
+        }
     }
 
     let started = std::time::Instant::now();

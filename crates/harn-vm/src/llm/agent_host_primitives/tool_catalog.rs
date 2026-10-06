@@ -25,19 +25,6 @@ pub(super) fn annotations_for(
         .or_else(|| crate::orchestration::current_tool_annotations(tool_name))
 }
 
-pub(super) fn permission_context_for(
-    tools_val: Option<&VmValue>,
-    tool_name: &str,
-) -> (
-    Option<serde_json::Value>,
-    Option<crate::tool_annotations::ToolAnnotations>,
-) {
-    (
-        descriptor_for(tools_val, tool_name),
-        annotations_for(tools_val, tool_name),
-    )
-}
-
 /// Resolve a tool's model-visible descriptor plus its rug-pull flag so the
 /// host can render the full tool text at approval time.
 pub(super) fn descriptor_for(

@@ -127,8 +127,12 @@ impl ToolApprovalPolicy {
 }
 
 pub(super) fn invalid_request(request: &ToolApprovalRequest, reason: String) -> PolicyEvaluation {
-    let context =
-        EvaluationContext::new(&request.tool_name, &request.arguments, request.repeat_count);
+    let context = EvaluationContext::new(
+        &request.tool_name,
+        &request.arguments,
+        request.repeat_count,
+        request.tool_annotations.as_ref(),
+    );
     invalid_context(&context, reason)
 }
 
@@ -151,8 +155,12 @@ pub(super) fn invalid_context(context: &EvaluationContext, reason: String) -> Po
 }
 
 pub(super) fn request_context(request: &ToolApprovalRequest) -> EvaluationContext {
-    let mut context =
-        EvaluationContext::new(&request.tool_name, &request.arguments, request.repeat_count);
+    let mut context = EvaluationContext::new(
+        &request.tool_name,
+        &request.arguments,
+        request.repeat_count,
+        request.tool_annotations.as_ref(),
+    );
     let declared_params = request
         .tool_annotations
         .as_ref()

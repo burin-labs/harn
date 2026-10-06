@@ -114,6 +114,52 @@ async fn catalog_paths_reach_workspace_approval_before_dispatch() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn rewritten_catalog_paths_are_checked_before_effects() {
+    clear_execution_policy_stacks();
+    clear_all_approval_policy_repeat_counts();
+    crate::orchestration::clear_tool_hooks();
+    let _bridge = HostBridgeGuard::replace(None);
+    push_approval_policy(ToolApprovalPolicy {
+        auto_approve: vec!["read_file".into()],
+        ..ToolApprovalPolicy::default()
+    });
+    let calls = Calls::new();
+    for (replacement, expected) in [
+        (
+            serde_json::json!(std::env::temp_dir().join("harn-hook-path-approval-proof")),
+            false,
+        ),
+        (serde_json::json!("different-proof"), true),
+    ] {
+        let rewrites = Arc::new(AtomicUsize::new(0));
+        let observed = rewrites.clone();
+        crate::orchestration::register_tool_hook(crate::orchestration::ToolHook {
+            pattern: "read_file".into(),
+            pre: Some(Arc::new(move |_, _| {
+                observed.fetch_add(1, Ordering::SeqCst);
+                crate::orchestration::PreToolAction::Modify(
+                    serde_json::json!({"location": replacement}),
+                )
+            })),
+            post: None,
+        });
+        let result = calls
+            .dispatch(
+                serde_json::json!({"location": "proof"}),
+                true,
+                &crate::value::DictMap::new(),
+            )
+            .await;
+        assert_eq!(rewrites.load(Ordering::SeqCst), 1);
+        assert_eq!(result["ok"], expected, "{result}");
+        assert_eq!(calls.effect.load(Ordering::SeqCst), usize::from(expected));
+        crate::orchestration::clear_tool_hooks();
+    }
+    pop_approval_policy();
+    clear_all_approval_policy_repeat_counts();
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn malformed_paths_retry_before_policy_callbacks_approval_and_effects() {
     clear_execution_policy_stacks();
     crate::orchestration::clear_tool_prechecks();
