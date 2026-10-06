@@ -71,6 +71,14 @@ inputs:
       starts empty every time and must keep the Actions cache.
     required: false
     default: "false"
+  compiler-cache:
+    description: >-
+      "kache" with a persistent target: compile through the host's pinned Kache
+      store instead of the runner's default wrapper, so a crate another runner
+      of the host built is a hit despite its different checkout path
+      (scripts/ci/use_kache.sh). Empty keeps the runner's wrapper.
+    required: false
+    default: ""
   persistent-target-max-gib:
     description: Discard the runner's target directory before the build once it exceeds this many GiB.
     required: false
@@ -189,6 +197,18 @@ runs:
         echo "CARGO_TARGET_DIR=$root/target" >> "$GITHUB_ENV"
         echo "HARN_PERSISTENT_TARGET: runner=$RUNNER_NAME key=$CACHE_SHARED_KEY state=$state used_mib=$((used_kib / 1024))"
         echo "::notice::HARN_PERSISTENT_TARGET runner=$RUNNER_NAME key=$CACHE_SHARED_KEY state=$state used_mib=$((used_kib / 1024))"
+
+    - name: Compile through the host's Kache store
+      if: inputs.compiler-cache == 'kache'
+      shell: bash
+      env:
+        CACHE_PERSISTENT_TARGET: ${{ inputs.persistent-target }}
+      run: |
+        if [[ "$CACHE_PERSISTENT_TARGET" != true ]]; then
+          echo "::error::compiler-cache: kache needs a persistent target on an owned runner"
+          exit 1
+        fi
+        ./scripts/ci/use_kache.sh
 
     - id: cache
       if: inputs.persistent-target != 'true'
