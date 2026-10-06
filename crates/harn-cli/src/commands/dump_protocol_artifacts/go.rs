@@ -560,6 +560,7 @@ type HarnToolLifecycleMeta struct {
 	ErrorCategory       *string         `json:"errorCategory,omitempty"`
 	ExecutionDurationMs *float64        `json:"executionDurationMs,omitempty"`
 	Executor            json.RawMessage `json:"executor,omitempty"`
+	Intent              *string         `json:"intent,omitempty"`
 	MutationStatus      *HarnToolMutationStatus `json:"mutationStatus,omitempty"`
 	Parsing             *bool           `json:"parsing,omitempty"`
 	RawInputPartial     *string         `json:"rawInputPartial,omitempty"`

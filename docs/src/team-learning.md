@@ -84,7 +84,7 @@ output_slot = "splunk_errors"
 [[included_docs]]
 id = "runbook"
 title = "Checkout incident runbook"
-url = "https://notion.example/runbooks/checkout"
+url = "https://wiki.example/runbooks/checkout"
 
 [[included_tools]]
 name = "honeycomb_board"

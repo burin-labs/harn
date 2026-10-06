@@ -151,6 +151,47 @@ pub pipeline test_ci_cache_policy_rejects_uncoupled_workspace_retention(
   )
 }
 
+pub pipeline test_ci_cache_policy_rejects_unmeasured_or_reordered_workspace_generation(
+  harness: Harness,
+  task: unknown,
+) {
+  const valid = action()
+  const identity = valid.runs.steps[1]
+  const upstream = valid.runs.steps[2]
+  const broad = valid.runs.steps[3]
+  const reuse = valid.runs.steps[4]
+  const unmeasured = {
+    ...valid,
+    runs: {
+      ...valid.runs,
+      steps: [
+        valid.runs.steps[0],
+        {
+          ...identity,
+          env: {...identity.env, CACHE_SOURCE_KEY: gha_expression("inputs.source-key")},
+        },
+        upstream,
+        broad,
+        reuse,
+      ],
+    },
+  }
+  assert(
+    ci_cache_policy_errors(policy(), unmeasured, node_action(), workflows()).contains(
+      ".github/actions/rust-cache/action.yml must derive retained workspace generations from the canonical source fingerprint",
+    ),
+  )
+  const reordered = {
+    ...valid,
+    runs: {...valid.runs, steps: [valid.runs.steps[0], identity, broad, upstream, reuse]},
+  }
+  assert(
+    ci_cache_policy_errors(policy(), reordered, node_action(), workflows()).contains(
+      ".github/actions/rust-cache/action.yml must try the precise source generation before its dependency-compatible fallback",
+    ),
+  )
+}
+
 pub pipeline test_ci_cache_policy_rejects_open_or_duplicate_config(
   harness: Harness,
   task: unknown,
@@ -431,7 +472,7 @@ pub pipeline test_ci_cache_policy_rejects_cold_start_pr_trigger(harness: Harness
  * exercises is a rule that can be deleted by accident.
  */
 @test
-pub pipeline test_windows_native_admission_accepts_the_blacksmith_producer(
+pub pipeline test_windows_native_admission_accepts_the_free_producer(
   harness: Harness,
   task: unknown,
 ) {
@@ -446,36 +487,15 @@ pub pipeline test_windows_native_admission_accepts_the_blacksmith_producer(
 }
 
 @test
-pub pipeline test_windows_native_admission_rejects_a_hosted_only_producer(
+pub pipeline test_windows_native_admission_rejects_a_paid_producer(
   harness: Harness,
   task: unknown,
 ) {
   const nightly = workflows()["windows-nightly.yml"]
   const invalid = {
     ...nightly,
-    jobs: {nextest: {...nightly.jobs.nextest, "runs-on": "windows-latest"}},
+    jobs: {nextest: {...nightly.jobs.nextest, "runs-on": windows_runner_expression()}},
   }
   const errors = windows_native_admission_errors(policy(), workflows()["ci.yml"], invalid)
-  assert(
-    errors.contains(
-      "windows-nightly.yml:nextest must default to windows-latest, with HARN_CI_ENABLE_BLACKSMITH_WINDOWS=true opting into blacksmith-16vcpu-windows-2025",
-    ),
-  )
-}
-
-@test
-pub pipeline test_windows_native_admission_rejects_a_producer_without_a_declared_tier(
-  harness: Harness,
-  task: unknown,
-) {
-  const nightly = workflows()["windows-nightly.yml"]
-  const nextest = nightly.jobs.nextest
-  // A Blacksmith-capable job with no HARN_RUNNER_TIER is the exact shape that
-  // sends `runner.environment` branches down the wrong path, and it is also the
-  // shape that leaves the Dev Drive guard unable to name a tier.
-  const invalid = {...nightly, jobs: {nextest: {...nextest, env: {}}}}
-  const errors = windows_native_admission_errors(policy(), workflows()["ci.yml"], invalid)
-  assert(
-    errors.contains("windows-nightly.yml:nextest must mirror its Blacksmith/hosted runner tier"),
-  )
+  assert(errors.contains("windows-nightly.yml:nextest must use free standard windows-latest"))
 }

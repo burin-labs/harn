@@ -74,6 +74,7 @@ impl AcpServer {
         &mut self,
         id: &serde_json::Value,
         params: &serde_json::Value,
+        cancellation: Option<Arc<PromptCancellation>>,
     ) {
         let admission = match params.get("sessionId").and_then(|value| value.as_str()) {
             Some(session_id) => match self.prompt_admission(session_id) {
@@ -85,7 +86,7 @@ impl AcpServer {
             },
             None => None,
         };
-        let inner = Box::pin(self.handle_session_prompt_scoped(id, params));
+        let inner = Box::pin(self.handle_session_prompt_scoped(id, params, cancellation));
         let scope_error = match admission {
             Some(budget) => budget
                 .scope(inner)
@@ -106,6 +107,7 @@ impl AcpServer {
         &mut self,
         id: &serde_json::Value,
         params: &serde_json::Value,
+        prepared_cancellation: Option<Arc<PromptCancellation>>,
     ) {
         let session_id = match params.get("sessionId").and_then(|v| v.as_str()) {
             Some(s) => s.to_string(),
@@ -133,10 +135,9 @@ impl AcpServer {
             llm_spend,
         ) = match self.sessions.get_mut(&session_id) {
             Some(s) => {
-                s.cancellation.begin_prompt();
                 s.host_bridge = None;
                 (
-                    s.cancellation.clone(),
+                    prepared_cancellation.unwrap_or_else(|| s.cancellation.prepare_prompt()),
                     s.current_mode_id.clone(),
                     s.inject_state.clone(),
                     s.concurrent_control.tool_call_cancellations.clone(),

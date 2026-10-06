@@ -318,28 +318,6 @@ pub fn scan_secret_patterns<'a>(input: &'a str, placeholder: &str) -> Cow<'a, st
     result
 }
 
-/// Round `offset` down to the nearest UTF-8 char boundary (or `0`).
-fn floor_char_boundary(s: &str, mut offset: usize) -> usize {
-    if offset >= s.len() {
-        return s.len();
-    }
-    while offset > 0 && !s.is_char_boundary(offset) {
-        offset -= 1;
-    }
-    offset
-}
-
-/// Round `offset` up to the nearest UTF-8 char boundary (or `s.len()`).
-fn ceil_char_boundary(s: &str, mut offset: usize) -> usize {
-    if offset >= s.len() {
-        return s.len();
-    }
-    while offset < s.len() && !s.is_char_boundary(offset) {
-        offset += 1;
-    }
-    offset
-}
-
 /// Overlapping-window variant of [`scan_secret_patterns`] for inputs larger
 /// than [`MAX_SCAN_INPUT_BYTES`].
 ///
@@ -385,11 +363,8 @@ fn scan_secret_patterns_windowed<'a>(
     for (pattern_name, regex, default_pattern) in all_patterns {
         let mut window_start = 0usize;
         loop {
-            let ws = floor_char_boundary(input, window_start);
-            let we = ceil_char_boundary(
-                input,
-                (window_start + MAX_SCAN_INPUT_BYTES).min(input.len()),
-            );
+            let ws = input.floor_char_boundary(window_start);
+            let we = input.ceil_char_boundary(window_start + MAX_SCAN_INPUT_BYTES);
             for m in regex.find_iter(&input[ws..we]) {
                 let gs = ws + m.start();
                 let ge = ws + m.end();
@@ -558,8 +533,7 @@ mod tests {
     #[test]
     fn replaces_private_key_blocks() {
         run_clean();
-        let input =
-            "-----BEGIN OPENSSH PRIVATE KEY-----\nsecret-material\n-----END OPENSSH PRIVATE KEY-----";
+        let input = "-----BEGIN OPENSSH PRIVATE KEY-----\nsecret-material\n-----END OPENSSH PRIVATE KEY-----";
         let out = scan_secret_patterns(input, crate::redact::REDACTED_PLACEHOLDER);
         assert!(out.contains("<redacted:private_key_block:"));
         assert!(!out.contains("secret-material"));

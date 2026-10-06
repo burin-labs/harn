@@ -39,12 +39,6 @@ const FIRST_PARTY_CONNECTOR_PACKAGES: &[FirstPartyConnectorPackage] = &[
         package_gate: "harn package verify . --provider linear",
     },
     FirstPartyConnectorPackage {
-        provider: "Notion",
-        package_url: "https://github.com/burin-labs/harn-notion-connector",
-        install: "harn add github.com/burin-labs/harn-notion-connector@v0.1.0",
-        package_gate: "harn package verify . --provider notion --run-poll-tick",
-    },
-    FirstPartyConnectorPackage {
         provider: "GitLab",
         package_url: "https://github.com/burin-labs/harn-gitlab-connector",
         install: "harn add github.com/burin-labs/harn-gitlab-connector@v0.1.0",
@@ -221,7 +215,7 @@ fn generate_file() -> String {
         ));
     }
     out.push('\n');
-    out.push_str("Community connectors are Harn packages that declare `connector_contract = \"v1\"` and export the connector functions below. Direct GitHub refs are enough for private or pre-registry packages; registry names such as `@burin/notion-connector` are for discoverable package-index entries.\n\n");
+    out.push_str("Community connectors are Harn packages that declare `connector_contract = \"v1\"` and export the connector functions below. Direct GitHub refs are enough for private or pre-registry packages; registry names such as `@burin/linear-connector` are for discoverable package-index entries.\n\n");
 
     out.push_str("## Connector contract V1\n\n");
     out.push_str("Required exports for a pure-Harn connector package:\n\n");

@@ -560,7 +560,6 @@ fn direct_vendor_token(value: &str) -> bool {
         "gitlab",
         "slack",
         "linear",
-        "notion",
         "kafka",
         "nats",
         "pulsar",

@@ -16,6 +16,8 @@ pub type ReleaseMetadataPlan = {
 
 type PackageManifestProjection = {package: {name: string}}
 
+type WorkspaceVersionProjection = {workspace?: {package?: {version?: string?}?, version?: string?}?}
+
 type AgentArchiveProjection = {archive: string}
 
 type AgentManifestProjection = {
@@ -32,6 +34,22 @@ fn package_manifest_projection_schema() -> Schema<PackageManifestProjection> {
           schema_object({name: schema_field(schema_string())}, {additional_properties: true}),
         ),
       },
+      {additional_properties: true},
+    ),
+  )
+}
+
+fn workspace_version_projection_schema() -> Schema<WorkspaceVersionProjection> {
+  const version = schema_field(schema_nullable(schema_string()), false)
+  const package = schema_object({version: version}, {additional_properties: true})
+  const workspace = schema_object(
+    {package: schema_field(schema_nullable(package), false), version: version},
+    {additional_properties: true},
+  )
+  return schema_refine(
+    schema_of(WorkspaceVersionProjection),
+    schema_object(
+      {workspace: schema_field(schema_nullable(workspace), false)},
       {additional_properties: true},
     ),
   )
@@ -82,12 +100,17 @@ fn distribution_version(fs: HarnessFs, root: string, version: string) -> string 
   return release_distribution_version(load_release_withdrawals(fs, path), version)
 }
 
-pub fn workspace_version_from_doc(doc: dict) -> string {
-  const value = doc?.workspace?.package?.version ?? doc?.workspace?.version
-  if type_of(value) != "string" || to_string(value) == "" {
+pub fn workspace_version_from_doc(doc: unknown) -> string {
+  const manifest = match schema_parse(doc, workspace_version_projection_schema()) {
+    Ok(value) -> { value }
+    Err(_) -> {
+      throw "missing workspace version"
+    }
+  }
+  const version = manifest.workspace?.package?.version ?? manifest.workspace?.version ?? ""
+  if version == "" {
     throw "missing workspace version"
   }
-  const version = to_string(value)
   if semver.parse_release(version) == nil {
     throw "workspace version is not release SemVer: " + version
   }

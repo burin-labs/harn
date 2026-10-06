@@ -115,7 +115,6 @@
 # count    6  crates/harn-stdlib/src/stdlib/stdlib_composition.harn
 # count   30  crates/harn-stdlib/src/stdlib/stdlib_connectors_github.harn
 # count   11  crates/harn-stdlib/src/stdlib/stdlib_connectors_linear.harn
-# count    9  crates/harn-stdlib/src/stdlib/stdlib_connectors_notion.harn
 # count    7  crates/harn-stdlib/src/stdlib/stdlib_connectors_shared.harn
 # count   13  crates/harn-stdlib/src/stdlib/stdlib_connectors_slack.harn
 # count   19  crates/harn-stdlib/src/stdlib/stdlib_context.harn
@@ -927,15 +926,6 @@ crates/harn-stdlib/src/stdlib/stdlib_connectors_linear.harn::reset
 crates/harn-stdlib/src/stdlib/stdlib_connectors_linear.harn::search
 crates/harn-stdlib/src/stdlib/stdlib_connectors_linear.harn::update_issue
 crates/harn-stdlib/src/stdlib/stdlib_connectors_linear.harn::wait_until_issue_state
-crates/harn-stdlib/src/stdlib/stdlib_connectors_notion.harn::api_call
-crates/harn-stdlib/src/stdlib/stdlib_connectors_notion.harn::append_blocks
-crates/harn-stdlib/src/stdlib/stdlib_connectors_notion.harn::configure
-crates/harn-stdlib/src/stdlib/stdlib_connectors_notion.harn::create_comment
-crates/harn-stdlib/src/stdlib/stdlib_connectors_notion.harn::get_page
-crates/harn-stdlib/src/stdlib/stdlib_connectors_notion.harn::query_database
-crates/harn-stdlib/src/stdlib/stdlib_connectors_notion.harn::reset
-crates/harn-stdlib/src/stdlib/stdlib_connectors_notion.harn::search
-crates/harn-stdlib/src/stdlib/stdlib_connectors_notion.harn::update_page
 crates/harn-stdlib/src/stdlib/stdlib_connectors_shared.harn::git_forge_pull_request_topic
 crates/harn-stdlib/src/stdlib/stdlib_connectors_shared.harn::git_forge_writeback_comment
 crates/harn-stdlib/src/stdlib/stdlib_connectors_shared.harn::oauth2_token_refresh

@@ -1,6 +1,20 @@
 [
   {
     "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/loop_finalize.harn",
+    "expression": "agent_required_tools_missing_from_session(opts, state.successful_tools_seen)",
+    "owner": "agent_required_tools_missing_from_session",
+    "evidence": "Publication admission forwards accumulated successful tool names to the existing required-tools owner; its opts reads remain independently audited.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "agent_required_tools_missing_from_session",
+        "parameter": "opts"
+      }
+    ]
+  },
+  {
+    "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/loop_denial_cutoff.harn",
     "expression": "agent_session_record_usage(\n    harness.agent,\n    session_id,\n    llm_result,\n    turn_llm_opts,\n    iteration,\n  )",
     "owner": "agent_session_record_usage",
@@ -226,7 +240,7 @@
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/loop_foundation.harn",
-    "expression": "__invoke_llm_with_autocontinue(\n    harness,\n    message,\n    turn_system,\n    llm_opts + {_user_visible: true},\n    turn_opts,\n    session_id,\n    iteration_index,\n  )",
+    "expression": "__invoke_llm_with_autocontinue(\n    harness,\n    message,\n    turn_system,\n    llm_opts + {_user_visible: false, _on_delta: nil},\n    turn_opts,\n    session_id,\n    iteration_index,\n  )",
     "owner": "__invoke_llm_with_autocontinue",
     "evidence": "Consumer __invoke_llm_with_autocontinue.turn_opts in crates/harn-stdlib/src/stdlib/agent/loop_foundation.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
     "consumers": [
@@ -710,7 +724,7 @@
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/loop_run.harn",
-    "expression": "__dispatch_tool_calls(\n          harness,\n          session.session_id,\n          tool_calls,\n          turn_opts\n            + {\n              _iteration: iteration_index + 1,\n              _tool_caller: opts?._tool_caller,\n              _stop_reason: llm_result?.stop_reason ?? \"\",\n            },\n        )",
+    "expression": "__dispatch_tool_calls(\n          harness,\n          session.session_id,\n          tool_calls,\n          turn_opts\n            + {\n              _iteration: iteration_index + 1,\n              _tool_caller: opts?._tool_caller,\n              _stop_reason: llm_result?.stop_reason ?? \"\",\n              _purpose_label: projected.purpose_label,\n            },\n        )",
     "owner": "__dispatch_tool_calls",
     "evidence": "Consumer __dispatch_tool_calls.turn_opts in crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
     "consumers": [

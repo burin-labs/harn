@@ -310,15 +310,9 @@ fn dot_receiver_identifier(source: &SourceText, position: Position) -> Option<St
     Some(line[id_start..id_end].to_string())
 }
 
-#[expect(
-    clippy::string_slice,
-    reason = "i is lowered until is_char_boundary holds"
-)]
+#[expect(clippy::string_slice, reason = "i comes from floor_char_boundary")]
 fn previous_char_boundary(text: &str, index: usize) -> usize {
-    let mut i = index.min(text.len());
-    while i > 0 && !text.is_char_boundary(i) {
-        i -= 1;
-    }
+    let i = text.floor_char_boundary(index);
     if i == 0 {
         return 0;
     }

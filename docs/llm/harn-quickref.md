@@ -432,7 +432,9 @@ absence.
 - `command_wait_for_output(harness.tools, handle, pattern, opts?)` parks on background output,
   exit, or timeout without polling. Use `source: "stdout" | "stderr" |
   "combined"`, `regex: true`, and `from_offset` when needed. A match reports
-  byte offsets and leaves teardown to `command_cancel`.
+  byte offsets and leaves teardown to `command_cancel`. On `status: "exited"`,
+  `result` is the command's final result: `success`, `exit_code`, `stdout`,
+  and `stderr` match what `command_wait` returns for the same handle.
 
 ## Time, sleep, monotonic clock
 
@@ -1000,6 +1002,32 @@ Use `json_pointer(value, ptr)` for RFC 6901 paths such as
 paths return `nil`. `json_pointer_set(value, ptr, new)` and
 `json_pointer_delete(value, ptr)` return modified copies.
 
+Decode untyped data once, where it enters, into a declared type. Then read
+typed fields with `.`, never a `?.` chain:
+
+```harn
+type User = {email: string, active: bool}
+type Users = {users: list<User>}
+
+fn active_emails(body: string) -> Result<list<string>, string> {
+  match json_decode(body, schema_of(Users)) {
+    Result.Ok(decoded) -> {
+      const active = decoded.users.filter({ u -> u.active })
+      return Ok(active.map({ u -> u.email }))
+    }
+    Result.Err(error) -> {
+      return Err(error.message)
+    }
+  }
+}
+```
+
+`json_decode(text, schema_of(T))` parses and validates; `schema_parse(value,
+schema_of(T))` validates a value you already hold. Both return `Result<T,
+{message, errors, issues}>`; `match` or postfix `?` keeps `T`, while `unwrap`
+returns a dynamic value. Unknown fields pass. See "Decode at the boundary"
+in `docs/src/error-handling.md`.
+
 Use `jq(value, expr)` for a jq-like stream query; it always returns a
 list. Use `jq_first(value, expr)` when you expect one value or `nil`.
 Supported v1 forms include `.`, `.foo.bar`, `.[2]`, `.[2:5]`,
@@ -1458,8 +1486,7 @@ generation routes remain open-world. Explicit `cache: true` and
 `prompt_cache_ttl` instead require authored support because their wire lowering
 is provider-specific, and a TTL must be listed in `prompt_cache_ttls`.
 
-See the [complete option reference](../src/llm/llm_call.md#options-dict) and
-the [0.10 migration table](../src/migrations/v0.10.md#llm-call-options).
+See the [complete option reference](../src/llm/llm_call.md#options-dict).
 
 Provider auto-resolution precedence:
 
@@ -3772,7 +3799,7 @@ const handle = trigger_register({
 
 ### Triage inbox stdlib
 
-Use `std/triage` to turn Slack, Notion, GitHub, or generic connector payloads
+Use `std/triage` to turn Slack, GitHub, or generic connector payloads
 into host-renderable inbox cards while retaining raw provider payloads for
 audit:
 
@@ -5214,7 +5241,7 @@ token-redaction catalog. The five modules under `std/oauth/*` compose
 freely — pick a provider, pick a storage, then pick a grant.
 
 ```harn,ignore
-// github, slack, linear, notion, google, microsoft, atlassian, discord,
+// github, slack, linear, google, microsoft, atlassian, discord,
 // gitlab, bitbucket, github_enterprise, custom
 import { providers } from "std/oauth/providers"
 // memory, file, harn_cloud_*, custom

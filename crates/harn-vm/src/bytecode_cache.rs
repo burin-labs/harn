@@ -1304,12 +1304,13 @@ fn walk_import_graph_fingerprinted(
             let sentinel = anchor_identity.join(format!("__unresolved__/{import}"));
             if let std::collections::btree_map::Entry::Vacant(slot) = visited.entry(sentinel) {
                 slot.insert(ImportNode::Unresolved {
-                    anchor: anchor_identity,
+                    anchor: anchor_identity.clone(),
                     import: Arc::clone(&import),
                 });
                 if let Some(m) = manifest.as_mut() {
                     m.unresolved.push(ManifestUnresolved {
                         anchor: anchor.clone(),
+                        anchor_identity,
                         import: import.to_string(),
                     });
                 }

@@ -188,5 +188,24 @@ pipeline test(harness: Harness) {
     PEER_AGENT_USER_SCOPE_FILES.contains(".claude/CLAUDE.md"),
     "the peer list is exported for an opt-in",
   )
+  // Imports in a selected nested file are relative to that file, not HOME.
+  harness.fs.write_text(path_join(home, ".host/AGENTS.md"), "Host rule.\n@shared.md")
+  harness.fs.write_text(path_join(home, ".host/shared.md"), "File-relative import.")
+  harness.fs.write_text(path_join(home, "shared.md"), "Wrong home-relative import.")
+  const imported = resolve_workspace_guidance(
+    harness.fs,
+    {
+      workspace_root: plain,
+      home_dir: home,
+      include_ancestors: false,
+      user_scope_files: [".host/AGENTS.md"],
+    },
+  )
+  const imported_body = join(imported.sources.map({ entry -> entry.body }).to_list(), "\n")
+  assert(
+    imported_body.contains("File-relative import."),
+    "imports resolve beside the selected file",
+  )
+  assert(!imported_body.contains("Wrong home-relative import."), "HOME is not the import base")
   harness.stdio.log("workspace_guidance_resolution passed")
 }

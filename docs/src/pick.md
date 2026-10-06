@@ -130,5 +130,3 @@ copies with `pick`. Optional fields and literals with comments stay unchanged.
 - [`pick_keys(data, keys, {drop_nil: true})`](modules.md#stdcollections) picks
   and then drops `nil` values. It returns a dictionary.
 - [`omit` and `merge`](modules.md#stdjson) remove or combine fields.
-- `std/json.pick` is gone. See
-  [Migrating to 0.10](migrations/v0.10.md#stdjsonpick-is-now-the-global-pick).

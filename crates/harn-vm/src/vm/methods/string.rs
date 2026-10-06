@@ -18,10 +18,9 @@ impl crate::vm::Vm {
                 s.replace(&*args[0].as_str_cow(), &args[1].as_str_cow()),
             ))),
             "split" => {
-                let sep = args
-                    .first()
-                    .map(|a| a.as_str_cow())
-                    .unwrap_or(std::borrow::Cow::Borrowed(","));
+                let Some(sep) = args.first().map(|a| a.as_str_cow()) else {
+                    return Err(crate::stdlib::strings::split_separator_required());
+                };
                 Ok(VmValue::List(std::sync::Arc::new(
                     s.split(&*sep)
                         .map(|p| VmValue::String(arcstr::ArcStr::from(p)))
@@ -91,7 +90,7 @@ impl crate::vm::Vm {
             ))),
             "pad_left" | "pad_right" => {
                 let left = method == "pad_left";
-                let width = args.first().and_then(|a| a.as_int()).unwrap_or(0) as usize;
+                let width = args.first().and_then(|a| a.as_int()).unwrap_or(0).max(0) as usize;
                 let pad_char = args
                     .get(1)
                     .map(|a| a.display())

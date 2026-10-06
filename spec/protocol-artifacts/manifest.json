@@ -557,6 +557,7 @@
       "executionDurationMs",
       "executor",
       "health",
+      "intent",
       "mutationStatus",
       "parsing",
       "rawInputPartial"

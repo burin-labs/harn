@@ -73,6 +73,8 @@ jobs:
           source scripts/lib/release_version.sh
           # shellcheck source=scripts/lib/release_candidate_run.sh
           source scripts/lib/release_candidate_run.sh
+          # shellcheck source=scripts/lib/release_consumer_verdict.sh
+          source scripts/lib/release_consumer_verdict.sh
           version="$(release_workspace_version < Cargo.toml)"
           previous="$(git show HEAD^:Cargo.toml | release_workspace_version)"
           if ! release_push_is_stable_version_change "$previous" "$version"; then
@@ -104,6 +106,7 @@ jobs:
             echo "::error::No successful build run holds a $tag candidate at $HEAD_SHA (this push's run $BUILD_RUN_ID built none)."
             exit 1
           fi
+          release_require_consumer_verdict "$GITHUB_REPOSITORY" "$candidate_run" "$HEAD_SHA"
           echo "::notice::Promoting $tag from build run $candidate_run at $HEAD_SHA."
           {
             echo "promote=true"

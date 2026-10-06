@@ -30,10 +30,10 @@ credential), it has no standard way to learn *who the server thinks it
 is connected as*. The identity exists — the server resolved it to
 authorize the session — but the protocol never hands it back.
 
-Every client that wants to render "Connected to Notion as
+Every client that wants to render "Connected to Linear as
 alice@example.com" reverse-engineers a per-server answer:
 
-- call `notion-get-self` on Notion, `get_me` on GitHub-shaped servers,
+- call a `viewer` tool on Linear, `get_me` on GitHub-shaped servers,
   a `whoami` tool where one exists;
 - parse a different response shape per server;
 - give up and render "Connected" with no identity on servers that

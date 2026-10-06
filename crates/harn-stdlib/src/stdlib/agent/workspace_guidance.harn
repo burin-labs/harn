@@ -228,7 +228,7 @@ pub fn resolve_workspace_guidance(fs: HarnessFs, request: GuidanceRequest) -> Gu
       const expansion = __guidance_expand(
         fs,
         __guidance_strip_comments(text),
-        candidate.dir,
+        dirname(full),
         hops,
         [full],
       )
