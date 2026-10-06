@@ -367,6 +367,17 @@ where
     Ok(results)
 }
 
+/// The value of header `name`, matched case-insensitively.
+pub(crate) fn header_value<'a>(
+    headers: &'a std::collections::BTreeMap<String, String>,
+    name: &str,
+) -> Option<&'a str> {
+    headers
+        .iter()
+        .find(|(key, _)| key.eq_ignore_ascii_case(name))
+        .map(|(_, value)| value.as_str())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
