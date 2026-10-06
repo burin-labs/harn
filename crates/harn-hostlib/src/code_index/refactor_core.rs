@@ -22,9 +22,10 @@
 
 use std::collections::{BTreeSet, HashSet};
 use std::ops::Range;
-use std::path::Path;
+use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 
+use harn_vm::process_sandbox::FsAccess;
 use harn_vm::VmValue;
 use sha2::{Digest, Sha256};
 use tree_sitter::Node;
@@ -32,6 +33,7 @@ use tree_sitter::Node;
 use crate::ast::{api as ast_api, Language};
 use crate::error::HostlibError;
 use crate::tools::args::{build_dict, str_value};
+use crate::tools::permissions::enforce_path_scope;
 
 use super::state::IndexState;
 use super::symbol_graph::{EdgeKind, Node as GraphNode, NodeId, NodeKind, SymbolGraph};
@@ -201,7 +203,16 @@ pub(super) fn files_in_scope(
         // through staged-fs (#1722) when a session id is supplied so
         // we observe pending writes from the same session.
         for file in state.files.values() {
-            let abs = state.root.join(&file.relative_path);
+            // A file that no longer resolves inside the workspace is not
+            // read; the rewrite pass would refuse it anyway.
+            let Ok(abs) = contained_path(
+                "hostlib_code_index",
+                &state.root,
+                &file.relative_path,
+                FsAccess::Read,
+            ) else {
+                continue;
+            };
             if file_contains_word(&abs, name, session_id) {
                 seen.insert(file.relative_path.clone());
             }
@@ -511,11 +522,71 @@ fn python_layout_error(root: Node<'_>, source: &str) -> Option<String> {
     None
 }
 
+/// The one workspace-containment check. Every refactoring reads and
+/// writes through [`read_source`] and [`write_plans`], which run it, so no
+/// op reaches a file outside the indexed workspace or the sandbox scope.
+///
+/// `rel` must be relative with no `..`, and once symlinks resolve it must
+/// stay under the canonical `root`. The index lists a path when it is
+/// built; a directory swapped for a symlink afterwards would otherwise
+/// send a read or write outside. The sandbox's `workspace_roots`, when a
+/// restricted profile is active, apply on top.
+pub(super) fn contained_path(
+    builtin: &'static str,
+    root: &Path,
+    rel: &str,
+    access: FsAccess,
+) -> Result<PathBuf, HostlibError> {
+    let path = root.join(rel);
+    if !resolves_inside(root, rel) {
+        return Err(HostlibError::SandboxViolation {
+            builtin,
+            path: path.display().to_string(),
+            message: format!(
+                "`{rel}` resolves outside the indexed workspace `{}`; nothing was read or written",
+                root.display()
+            ),
+        });
+    }
+    enforce_path_scope(builtin, &path, access)?;
+    Ok(path)
+}
+
+/// Whether `rel`, joined onto `root`, stays inside `root` once symlinks
+/// resolve: only normal components, and the deepest existing ancestor
+/// (the file itself, or a dangling link at it) canonicalizes under `root`.
+fn resolves_inside(root: &Path, rel: &str) -> bool {
+    let lexical = Path::new(rel)
+        .components()
+        .all(|component| matches!(component, Component::Normal(_) | Component::CurDir));
+    if !lexical {
+        return false;
+    }
+    let Ok(canonical_root) = root.canonicalize() else {
+        return false;
+    };
+    let mut probe = root.join(rel);
+    loop {
+        if std::fs::symlink_metadata(&probe).is_ok() {
+            return probe
+                .canonicalize()
+                .is_ok_and(|resolved| resolved.starts_with(&canonical_root));
+        }
+        if !probe.pop() {
+            return false;
+        }
+    }
+}
+
+/// Read `rel` under `root`, through staged-fs when a session is active.
 pub(super) fn read_source(
     builtin: &'static str,
-    path: &Path,
+    root: &Path,
+    rel: &str,
     session_id: Option<&str>,
 ) -> Result<String, HostlibError> {
+    let path = contained_path(builtin, root, rel, FsAccess::Read)?;
+    let path = path.as_path();
     let bytes = if let Some(result) = crate::fs::read(path, session_id) {
         result.map_err(|err| HostlibError::Backend {
             builtin,
@@ -530,7 +601,7 @@ pub(super) fn read_source(
     Ok(String::from_utf8_lossy(&bytes).into_owned())
 }
 
-pub(super) fn write_source(
+fn write_source(
     builtin: &'static str,
     path: &Path,
     contents: &str,
@@ -554,21 +625,26 @@ pub(super) fn write_source(
 
 /// Persist every plan in one pass. Call only after every plan has passed
 /// pre-flight, so a clean run is all-or-nothing modulo mid-call disk
-/// failures; those come back as `(path, reason)`.
+/// failures; those come back as `(path, reason)`. Every target passes
+/// [`contained_path`] before the first byte is written, so one escaping
+/// plan refuses the whole batch.
 pub(super) fn write_plans(
     builtin: &'static str,
     root: &Path,
     plans: &[FilePlan],
     session_id: Option<&str>,
-) -> Vec<(String, String)> {
+) -> Result<Vec<(String, String)>, HostlibError> {
+    let targets = plans
+        .iter()
+        .map(|plan| contained_path(builtin, root, &plan.path, FsAccess::Write))
+        .collect::<Result<Vec<_>, _>>()?;
     let mut failed = Vec::new();
-    for plan in plans {
-        let abs = root.join(&plan.path);
-        if let Err(err) = write_source(builtin, &abs, &plan.patched, session_id) {
+    for (plan, abs) in plans.iter().zip(&targets) {
+        if let Err(err) = write_source(builtin, abs, &plan.patched, session_id) {
             failed.push((plan.path.clone(), err));
         }
     }
-    failed
+    Ok(failed)
 }
 
 // === Reference sites ===
@@ -688,7 +764,7 @@ pub(super) fn reference_sites(
             });
             continue;
         };
-        let source = read_source(builtin, &state.root.join(&path), session_id)?;
+        let source = read_source(builtin, &state.root, &path, session_id)?;
         let tree = match ast_api::parse_tree(&source, language) {
             Ok(tree) => tree,
             Err(err) => {
@@ -1010,3 +1086,7 @@ fn sha256_hex(bytes: &[u8]) -> String {
 #[cfg(test)]
 #[path = "refactor_core_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "containment_tests.rs"]
+mod containment_tests;
