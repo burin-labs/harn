@@ -99,25 +99,8 @@ impl Fixture {
         } else {
             format!("json_parse(harness.fs.read_text({path}))")
         };
-        let source = format!(
-            r#"
-fn main(harness: Harness) {{
-  return tool_define(tool_registry(), "verify", "Verify the active task", {{
-    input_schema: {{type: "object", properties: {{reason: {{type: "string"}}}}, additionalProperties: false}},
-    returns: {{type: "object"}},
-    prepare: {{ args -> return {preparation} }},
-    handler: {{ args ->
-      const binding = tool_invocation_binding()
-      const operation = binding.operation
-      const result = harness.process.run({{program: "sh", args: ["-c", operation.command], cwd: operation.cwd}})
-      if !result.success {{ throw {{category: "timeout", message: "transient verifier failure"}} }}
-      return {{schema: "harn.agent_tool_handler_result.v2", outcome: "ok", text: result.stdout,
-        data: {{command: operation.command, cwd: operation.cwd, success: result.success}}}}
-    }},
-  }})
-}}
-"#
-        );
+        let source = include_str!("fixtures/prepared_verify.harn.template")
+            .replace("{{preparation}}", &preparation);
         let chunk = crate::compile_source(&source).expect("compile preparation fixture");
         let mut vm = crate::Vm::new();
         crate::register_vm_stdlib(&mut vm);
