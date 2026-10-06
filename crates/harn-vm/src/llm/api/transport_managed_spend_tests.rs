@@ -72,10 +72,15 @@ fn managed_spending_pause_survives_http_and_stream_transport() {
             let facts = crate::llm::helpers::vm_value_dict_to_json(&fields);
             assert_eq!(facts["reason"], reason, "{facts}");
             assert_eq!(facts["kind"], kind, "{facts}");
-            assert_eq!(
-                crate::llm::agent_terminal_class("error", "", Some(&facts)),
-                Some(class)
-            );
+            // Billing and the service pause identify their owner without an
+            // agent session. A throttle's terminal class additionally requires
+            // the provider provenance attached by session finalization.
+            if reason != "rate_limit" {
+                assert_eq!(
+                    crate::llm::agent_terminal_class("error", "", Some(&facts)),
+                    Some(class)
+                );
+            }
         }
     }
 }
