@@ -134,15 +134,18 @@ async fn dispatch(
     );
     let options =
         crate::stdlib::json_to_vm_value(&json!({"tool_retries": 1, "tool_backoff_ms": 1}));
-    let permission = crate::orchestration::scope_approval_policy(
-        policy,
-        super::super::agent_host_primitives::host_agent_dispatch_tool_call(
-            ctx,
-            call,
-            Some(&registry),
-            options.as_dict().unwrap(),
-        ),
-    );
+    let permission = async {
+        crate::orchestration::scope_approval_policy(
+            policy,
+            super::super::agent_host_primitives::host_agent_dispatch_tool_call(
+                ctx,
+                call,
+                Some(&registry),
+                options.as_dict().unwrap(),
+            ),
+        )
+        .await
+    };
     let outcome = if let Some(policy) = &fixture.policy {
         crate::orchestration::scope_execution_policy(policy.clone(), permission).await
     } else {
