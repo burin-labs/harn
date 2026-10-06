@@ -9,6 +9,52 @@ struct Calls {
     effect: Arc<AtomicUsize>,
 }
 
+#[tokio::test(flavor = "current_thread")]
+async fn execution_constraints_cover_final_hook_arguments() {
+    clear_execution_policy_stacks();
+    crate::orchestration::clear_tool_hooks();
+    let _bridge = HostBridgeGuard::replace(None);
+    let mut options = crate::value::DictMap::new();
+    options.put(
+        "policy",
+        json_to_vm_value(&serde_json::json!({
+            "tools": ["read_file"],
+            "tool_arg_constraints": [{
+                "tool": "read_file", "arg_key": "location", "arg_patterns": ["allowed/*"]
+            }]
+        })),
+    );
+    for (initial, replacement, permitted, expected_hooks) in [
+        ("forbidden/direct", "allowed/rewritten", false, 0),
+        ("allowed/start", "allowed/rewritten", true, 1),
+        ("allowed/start", "forbidden/rewritten", false, 1),
+    ] {
+        let calls = Calls::new();
+        let rewrites = Arc::new(AtomicUsize::new(0));
+        let observed = rewrites.clone();
+        crate::orchestration::register_tool_hook(crate::orchestration::ToolHook {
+            pattern: "read_file".into(),
+            pre: Some(Arc::new(move |_, _| {
+                observed.fetch_add(1, Ordering::SeqCst);
+                crate::orchestration::PreToolAction::Modify(
+                    serde_json::json!({"location": replacement}),
+                )
+            })),
+            post: None,
+        });
+        let result = calls
+            .dispatch(serde_json::json!({"location": initial}), false, &options)
+            .await;
+        assert_eq!(rewrites.load(Ordering::SeqCst), expected_hooks);
+        assert_eq!(
+            result["ok"], permitted,
+            "{initial} -> {replacement}: {result}"
+        );
+        assert_eq!(calls.effect.load(Ordering::SeqCst), usize::from(permitted));
+        crate::orchestration::clear_tool_hooks();
+    }
+}
+
 impl Calls {
     fn new() -> Self {
         Self {
