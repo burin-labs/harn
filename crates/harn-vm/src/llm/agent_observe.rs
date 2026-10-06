@@ -261,6 +261,7 @@ pub(super) fn is_overloaded_llm_error(err: &VmError) -> bool {
     crate::value::error_to_category(err) == crate::value::ErrorCategory::Overloaded
 }
 
+mod completed_attempt;
 /// L0 detection: classify an LLM-call failure into a rate-governor throttle
 /// signal from the STRUCTURED error category (never a raw log string), reusing
 /// the same category logic the cooldown/breaker seams above use so the governor
@@ -276,6 +277,9 @@ mod provider_errors_boundary_tests;
 mod retry_request;
 mod transcript_observability;
 
+use completed_attempt::{
+    observe_successful_completion, observe_terminal_unproductive_completion, CompletedAttempt,
+};
 use detector::*;
 use provider_errors::*;
 use retry_request::{
@@ -857,168 +861,37 @@ pub(crate) async fn observed_llm_call(
                     attempt_count,
                     duration_ms,
                 ) {
-                    let category = crate::value::error_to_category(&error);
-                    let message = error.to_string();
-                    let classified = super::api::classify_vm_llm_error(&error);
-                    let status = "retries_exhausted";
-                    let usage = result.usage();
-                    annotate_current_span(&[
-                        ("status", serde_json::json!(status)),
-                        ("error", serde_json::json!(message.as_str())),
-                        ("retryable", serde_json::json!(false)),
-                        ("failover_eligible", serde_json::json!(true)),
-                        ("attempt", serde_json::json!(attempt)),
-                    ]);
-                    annotate_current_span(&usage.metadata_pairs(&result.provider, &result.model));
-                    dump_llm_response(
-                        iteration.unwrap_or(0),
-                        &call_id,
-                        &result,
-                        duration_ms,
-                        opts.applied_structural_experiment.as_ref(),
-                        opts.call_stage.as_deref(),
-                    );
-                    append_provider_call_error_observability(ProviderCallErrorObservation {
-                        iteration: iteration.unwrap_or(0),
-                        call_id: &call_id,
-                        attempt: attempt_count,
-                        status,
-                        opts,
-                        category: &category,
-                        classified: &classified,
-                        message: &message,
-                        stream_failure: None,
-                        schema_failure: None,
-                        usage: Some(&usage),
-                        retryable: false,
-                        failover_eligible: true,
-                        attempt_count: Some(attempt_count),
-                    });
-                    dump_resolved_dispatch(
-                        iteration.unwrap_or(0),
-                        &call_id,
-                        opts,
-                        &effective_tool_format,
-                        &super::resolved_dispatch::DispatchOutcome::from_error(&error),
-                    );
-                    if let Some(b) = bridge {
-                        b.send_call_end(
-                            &call_id,
-                            "llm",
-                            "llm_call",
+                    observe_terminal_unproductive_completion(
+                        CompletedAttempt {
+                            opts,
+                            result: &result,
+                            call_id: &call_id,
+                            bridge,
+                            iteration,
+                            attempt,
                             duration_ms,
-                            status,
-                            serde_json::json!({
-                                "error": message,
-                                "retryable": false,
-                                "failover_eligible": true,
-                                "attempt": attempt,
-                                "user_visible": user_visible,
-                            }),
-                        );
-                    }
-                    if let Some(metrics) = crate::active_metrics_registry() {
-                        metrics.record_llm_call(&result.provider, &result.model, status, &usage);
-                    }
-                    trace_llm_call(LlmTraceEntry {
-                        model: result.model.clone(),
-                        provider: result.provider.clone(),
-                        usage,
-                        duration_ms,
-                    });
+                            user_visible,
+                            effective_tool_format: &effective_tool_format,
+                        },
+                        &error,
+                        attempt_count,
+                    );
                     return Err(error);
                 }
-                let usage = result.usage();
-                annotate_current_span(&[("status", serde_json::json!("ok"))]);
-                annotate_current_span(&usage.metadata_pairs(&result.provider, &result.model));
-                dump_llm_response(
-                    iteration.unwrap_or(0),
-                    &call_id,
-                    &result,
-                    duration_ms,
-                    opts.applied_structural_experiment.as_ref(),
-                    opts.call_stage.as_deref(),
-                );
-                dump_resolved_dispatch(
-                    iteration.unwrap_or(0),
-                    &call_id,
-                    opts,
-                    &effective_tool_format,
-                    &super::resolved_dispatch::DispatchOutcome::from_result(
-                        &result,
-                        empty_completion_retries,
-                    ),
-                );
-                annotate_current_span(&[(
-                    "structural_experiment",
-                    opts.applied_structural_experiment
-                        .as_ref()
-                        .map(serde_json::to_value)
-                        .transpose()
-                        .unwrap_or(None)
-                        .unwrap_or(serde_json::Value::Null),
-                )]);
-                if let Some(b) = bridge {
-                    b.send_call_end(
-                        &call_id,
-                        "llm",
-                        "llm_call",
-                        duration_ms,
-                        "ok",
-                        serde_json::json!({
-                            "model": result.model,
-                            "input_tokens": usage.input_tokens,
-                            "output_tokens": usage.output_tokens,
-                            "user_visible": user_visible,
-                            "structural_experiment": opts.applied_structural_experiment.as_ref(),
-                        }),
-                    );
-                }
-                trace_llm_call(LlmTraceEntry {
-                    model: result.model.clone(),
-                    provider: result.provider.clone(),
-                    usage: usage.clone(),
-                    duration_ms,
-                });
-                if let Some(metrics) = crate::active_metrics_registry() {
-                    metrics.record_llm_call(&result.provider, &result.model, "succeeded", &usage);
-                    if usage.cache_hit {
-                        metrics.record_llm_cache_hit(&result.provider);
-                    }
-                }
-                super::trace::emit_agent_event(super::trace::AgentTraceEvent::LlmCall {
-                    call_id: call_id.clone(),
-                    model: result.model.clone(),
-                    usage,
-                    duration_ms,
-                    iteration: iteration.unwrap_or(0),
-                });
-                super::agent_session_host::record_auxiliary_call_usage(opts, &result);
-                // A terminal unproductive completion (a zero-token empty or a
-                // billed-noncommittal turn that survived the built-in
-                // empty-completion retry budget) is served-but-useless. It must
-                // NOT close the breaker as if the route answered — that reset is
-                // exactly what let the same throttled/empty lane be re-dispatched
-                // every turn, storming 18-43x per trial. Feed the always-on
-                // unproductive-completion streak instead so a route that keeps
-                // empty-completing trips `circuit_open` fast (governor-independent,
-                // and works for a single-provider model harn#4023's failover
-                // cannot rescue). A genuinely answering turn closes the breaker.
-                if is_retryable_unproductive_completion(&result)
-                    && !crate::llm::providers::is_internal_simulator(&opts.provider)
-                {
-                    let reason = if is_empty_unproductive_completion(&result) {
-                        UnproductiveCompletionReason::EmptyGeneration
-                    } else {
-                        UnproductiveCompletionReason::UnproductiveCompletion
-                    };
-                    super::rate_limit::observe_unproductive_completion_for_llm_call(
+                observe_successful_completion(
+                    CompletedAttempt {
                         opts,
-                        reason.as_str(),
-                    );
-                } else {
-                    super::rate_limit::observe_network_outcome_for_llm_call(opts, false);
-                }
+                        result: &result,
+                        call_id: &call_id,
+                        bridge,
+                        iteration,
+                        attempt,
+                        duration_ms,
+                        user_visible,
+                        effective_tool_format: &effective_tool_format,
+                    },
+                    empty_completion_retries,
+                );
                 return Ok(result);
             }
             Err(error) => {
