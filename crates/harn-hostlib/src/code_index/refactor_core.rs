@@ -561,7 +561,7 @@ pub(super) fn contained_path(
 /// Whether `rel`, joined onto `root`, stays inside `root` once symlinks
 /// resolve: only normal components, and the deepest existing ancestor
 /// (the file itself, or a dangling link at it) canonicalizes under `root`.
-fn resolves_inside(root: &Path, rel: &str) -> bool {
+pub(super) fn resolves_inside(root: &Path, rel: &str) -> bool {
     let lexical = Path::new(rel)
         .components()
         .all(|component| matches!(component, Component::Normal(_) | Component::CurDir));

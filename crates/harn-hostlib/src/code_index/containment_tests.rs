@@ -231,3 +231,25 @@ fn rename_refuses_for_a_name_the_word_index_does_not_record() {
     assert_eq!(fs::read_to_string(ws.join("other/b.py")).unwrap(), USE);
     assert_eq!(fs::read_to_string(ws.join("allowed/a.py")).unwrap(), DECL);
 }
+
+#[test]
+fn move_symbol_respects_a_sandbox_scope_narrower_than_the_index() {
+    const ORDERS: &str = "def label(n: int) -> str:\n    return str(n)\n";
+    let (_ws_dir, ws) = canonical_tempdir();
+    write(&ws, "allowed/orders.py", ORDERS);
+    let capability = indexed(&ws);
+    let _policy = PolicyGuard::worktree(&[&ws.join("allowed")]);
+
+    let request = dict(&[
+        ("symbol", string("label")),
+        ("path", string("allowed/orders.py")),
+        ("to_path", string("other/labels.py")),
+    ]);
+    let result = super::super::move_symbol::run(&capability.shared(), &[request]);
+    assert!(result.is_err(), "move_symbol must refuse: {result:?}");
+    assert!(!ws.join("other/labels.py").exists());
+    assert_eq!(
+        fs::read_to_string(ws.join("allowed/orders.py")).unwrap(),
+        ORDERS
+    );
+}
