@@ -15,6 +15,7 @@ mod denial_results;
 mod dispatch_policy;
 pub(super) mod event_capture;
 mod host_permission;
+mod prepared_consent;
 mod primitive_args;
 mod side_effect_ceiling;
 mod structured_tool_result;
@@ -42,6 +43,7 @@ use tool_catalog::{
     annotations_for as tool_annotations_for, descriptor_for as tool_descriptor_for,
     permission_context_for,
 };
+use tool_parse_diagnostics::parse_error_carrier_feedback;
 
 /// Cause-named feedback for a tool call whose arguments failed validation
 /// because of an argument-DELIVERY fault — the model authored a real call, but
@@ -120,54 +122,6 @@ fn arg_delivery_fault_feedback(
             "empty_arguments_dropped",
         ))
     }
-}
-
-/// Cause-named feedback for a tool call whose arguments could not be parsed and
-/// arrived as a `{"__parse_error": "..."}` carrier. Splits on the parser
-/// diagnostic:
-///
-/// - a TRUNCATION (`EOF while parsing` / `unexpected end of input`): the
-///   streamed arguments were cut off mid-value — the model authored a valid
-///   call, but the response ended before the arguments finished. Coach a
-///   smaller re-issue, exactly like the length-truncation empty-args case; the
-///   parser diagnostic is the authoritative signal here because the provider
-///   often does NOT flag this with `finish_reason=length` (observed on
-///   llamacpp: the stream stops mid-tool-call with a clean stop reason).
-/// - anything else (unquoted keys, trailing garbage, wrong dialect): a genuine
-///   formatting fault. Coach a clean re-issue as valid JSON. This is the
-///   negative control — a malformed call is NEVER silently accepted or
-///   mislabeled as a recoverable truncation.
-fn parse_error_carrier_feedback(tool_name: &str, parse_error: &str) -> (String, &'static str) {
-    if parse_error_is_truncation(parse_error) {
-        (
-            format!(
-                "Tool '{tool_name}' arguments could NOT be parsed because the tool call was \
-                 TRUNCATED mid-stream — the arguments JSON ended before it was complete. This \
-                 is NOT a missing-parameter slip: you did author the arguments, but the \
-                 response was cut off before they finished. Re-issue the call with shorter \
-                 content, or split the change into several smaller calls so the arguments fit \
-                 in one response."
-            ),
-            "arguments_truncated",
-        )
-    } else {
-        (
-            format!(
-                "Tool '{tool_name}' arguments could NOT be parsed as valid JSON. Re-issue the \
-                 call as one complete, well-formed JSON object with the required parameters."
-            ),
-            "arguments_malformed",
-        )
-    }
-}
-
-/// True when a streamed-argument `__parse_error` message describes a buffer that
-/// ended mid-value — a cut-off stream, not a dialect error. Keys on the two
-/// diagnostics the JSON and Harn text-tool parsers emit for an incomplete tail
-/// (`serde_json`'s "EOF while parsing ..." and the text-tool "unexpected end of
-/// input"), so a truncation is recognized regardless of which parser ran last.
-fn parse_error_is_truncation(parse_error: &str) -> bool {
-    parse_error.contains("EOF while parsing") || parse_error.contains("unexpected end of input")
 }
 
 /// Shared base `tool_result` shape for a call that never produced a real
@@ -844,33 +798,13 @@ pub(super) async fn host_agent_dispatch_tool_call(
     let dispatch_policy =
         DispatchPolicy::new(policy_machinery_active, dispatch_annotations.as_ref());
 
-    let prepared_invocation = match crate::agent_sessions::scope_current_tool_call(
-        tool_id.clone(),
-        super::agent_tool_preparation::prepare(&ctx, tools, &tool_name, &tool_args, &session_id),
-    )
-    .await
-    {
-        Ok(prepared) => prepared,
-        Err(error) => {
-            let category = if crate::value::error_to_category(&error)
-                == crate::value::ErrorCategory::SchemaValidation
-            {
-                crate::agent_events::ToolCallErrorCategory::SchemaValidation
-            } else {
-                crate::agent_events::ToolCallErrorCategory::PermissionDenied
-            };
-            let denied = agent_primitive_denied_tool(
-                &tool_name,
-                &tool_id,
-                &tool_args,
-                error.to_string(),
-                category,
-                None,
-                None,
-            );
-            return Ok(json_to_vm_value(&denied));
-        }
-    };
+    let prepared_invocation =
+        match prepared_consent::prepare(&ctx, tools, &tool_name, &tool_id, &tool_args, &session_id)
+            .await
+        {
+            Ok(prepared) => prepared,
+            Err(denied) => return Ok(denied),
+        };
     // These are observations for consent, not model arguments. The handler
     // keeps the separately retained binding and never consumes a host rewrite.
     let approval_args = prepared_invocation

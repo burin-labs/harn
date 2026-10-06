@@ -10,7 +10,7 @@ use crate::vm::Vm;
 mod input_schema;
 mod registry;
 mod synthesized_closure;
-use registry::TOOL_REGISTRY_IMPL_DEF;
+use registry::{TOOL_INVOCATION_BINDING_IMPL_DEF, TOOL_REGISTRY_IMPL_DEF, TOOL_SCHEMA_IMPL_DEF};
 use synthesized_closure::compile_synthesized_tool_closure;
 
 thread_local! {
@@ -119,20 +119,6 @@ pub(crate) fn register_tool_builtins(vm: &mut Vm) {
     for def in MODULE_BUILTINS {
         vm.register_builtin_def(def);
     }
-}
-
-#[harn_builtin(
-    exposure = "pure",
-    effects = [],
-    sig = "tool_invocation_binding() -> dict?",
-    category = "tools"
-)]
-fn tool_invocation_binding_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    Ok(
-        crate::tool_registry::preparation_scope::current_invocation()
-            .map(|bound| json_to_vm_value(&bound.facts))
-            .unwrap_or(VmValue::Nil),
-    )
 }
 
 #[harn_builtin(
@@ -477,22 +463,6 @@ fn tool_count_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
     vm_validate_registry("tool_count", registry)?;
     let count = vm_get_tools(registry).len();
     Ok(VmValue::Int(count as i64))
-}
-
-#[harn_builtin(
-    exposure = "pure",
-    effects = [],
-    sig = "tool_schema(registry: {_type: \"tool_registry\", tools: list} | closure) -> ToolCatalog",
-    category = "tools"
-)]
-fn tool_schema_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    let registry = args.first().ok_or_else(|| {
-        VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-            "tool_schema: requires a tool registry",
-        )))
-    })?;
-    let schema = crate::tool_registry::tool_registry_schema(registry)?;
-    Ok(crate::schema::json_to_vm_value(&schema))
 }
 
 // Preserve extension metadata, including `guidance`, which the prompt assembler
