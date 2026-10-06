@@ -1434,13 +1434,13 @@ jobs:
         env:
           CARGO_BUILD_JOBS: ${{ steps.resource-budget.outputs.build_jobs }}
           HARN_LLM_CALLS_DISABLED: "1"
-          HARN_TEST_PARTITION: ${{ matrix.partition }}
+          HARN_EXT_TEST_PARTITION: ${{ matrix.partition }}
         run: >-
           set -euo pipefail;
           host_bound_filter="$(scripts/ci/host_bound_rust_test_filter.sh)";
           scripts/ci/run_rust_test_lane.sh
           cargo-nextest nextest run --locked --workspace --profile ci
-          --partition "$HARN_TEST_PARTITION"
+          --partition "$HARN_EXT_TEST_PARTITION"
           -E "not (${host_bound_filter})"
 
   # GitHub job dependencies wait for terminal producer state, even when an

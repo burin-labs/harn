@@ -92,7 +92,7 @@
           "id": "release-audit-rust-test",
           "condition": "",
           "required_env": {"HARN_LLM_CALLS_DISABLED": "1"},
-          "run": "set -euo pipefail; host_bound_filter=\"$(scripts/ci/host_bound_rust_test_filter.sh)\"; scripts/ci/run_rust_test_lane.sh cargo-nextest nextest run --locked --workspace --profile ci --partition \"$HARN_TEST_PARTITION\" -E \"not (${host_bound_filter})\""
+          "run": "set -euo pipefail; host_bound_filter=\"$(scripts/ci/host_bound_rust_test_filter.sh)\"; scripts/ci/run_rust_test_lane.sh cargo-nextest nextest run --locked --workspace --profile ci --partition \"$HARN_EXT_TEST_PARTITION\" -E \"not (${host_bound_filter})\""
         }
       ]
     },
@@ -106,7 +106,7 @@
           "id": "release-audit-rust-test",
           "condition": "",
           "required_env": {"HARN_LLM_CALLS_DISABLED": "1"},
-          "run": "set -euo pipefail; host_bound_filter=\"$(scripts/ci/host_bound_rust_test_filter.sh)\"; scripts/ci/run_rust_test_lane.sh cargo-nextest nextest run --locked --workspace --profile ci --partition \"$HARN_TEST_PARTITION\" -E \"not (${host_bound_filter})\""
+          "run": "set -euo pipefail; host_bound_filter=\"$(scripts/ci/host_bound_rust_test_filter.sh)\"; scripts/ci/run_rust_test_lane.sh cargo-nextest nextest run --locked --workspace --profile ci --partition \"$HARN_EXT_TEST_PARTITION\" -E \"not (${host_bound_filter})\""
         }
       ]
     },
