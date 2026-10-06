@@ -218,18 +218,32 @@ async fn unchanged_catalog_paths_are_rechecked_after_symlink_changes() {
     clear_all_approval_policy_repeat_counts();
     crate::orchestration::clear_tool_hooks();
     let _bridge = HostBridgeGuard::replace(None);
-    push_approval_policy(ToolApprovalPolicy {
-        auto_approve: vec!["read_file".into()],
-        ..ToolApprovalPolicy::default()
-    });
+    push_approval_policy(
+        serde_json::from_value(serde_json::json!({
+            "auto_approve": ["read_file"],
+            "rules": [{"deny": {"tool": "read_file", "path": "**/forbidden"}}]
+        }))
+        .unwrap(),
+    );
     let inside = root.path().join("inside");
     let external = outside.path().join("outside");
+    let forbidden = root.path().join("forbidden");
     std::fs::write(&inside, "inside").unwrap();
     std::fs::write(&external, "outside").unwrap();
+    std::fs::write(&forbidden, "forbidden").unwrap();
     let alias = root.path().join("alias");
     std::os::unix::fs::symlink(&inside, &alias).unwrap();
     let calls = Calls::new();
-    for (target, expected) in [(external, false), (inside, true)] {
+    let denied = calls
+        .dispatch(
+            serde_json::json!({"location": forbidden}),
+            true,
+            &crate::value::DictMap::new(),
+        )
+        .await;
+    assert_eq!(denied["ok"], false, "authored deny must fire: {denied}");
+    assert_eq!(calls.effect.load(Ordering::SeqCst), 0);
+    for (target, expected) in [(forbidden, false), (external, false), (inside, true)] {
         let link = alias.clone();
         let rewrites = Arc::new(AtomicUsize::new(0));
         let observed = rewrites.clone();
