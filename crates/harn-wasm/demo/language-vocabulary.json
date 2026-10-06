@@ -325,6 +325,7 @@
     "eval_pack_validate_split",
     "eval_suite_manifest",
     "eval_suite_run",
+    "evaluate_approval_policy",
     "event_log.describe",
     "event_log.emit",
     "event_log.emit_idempotent",

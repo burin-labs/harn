@@ -2029,7 +2029,7 @@ export interface HarnSessionTimelineUpdate {
 export const HARN_PREPARED_SESSION_SCHEMA = "harn.prepared_session.v1" as const
 export type HarnPreparedSessionState = "needs_approval" | "ready" | "blocked" | "active" | "delta" | "stopped" | "pivoted" | "terminal"
 export type HarnPreparedSessionCommand = "approval_decision" | "attach" | "turn" | "request_delta" | "stop" | "pivot" | "finish"
-export interface HarnPreparedSessionApprovalDecision { batch_fingerprint: string; approved: boolean; decider: string }
+export interface HarnPreparedSessionApprovalDecision { request_id: string; batch_fingerprint: string; approved: boolean; decider: string }
 export interface HarnPreparedSessionBinding { session_id: string; workspace_fingerprint: string; runtime: ACPValue; consumer: ACPValue }
 export interface HarnPreparedRuntimeAttachment { session_id: string; workspace_fingerprint: string; runtime: ACPValue; consumer: ACPValue }
 export interface HarnPreparedSessionLease {
