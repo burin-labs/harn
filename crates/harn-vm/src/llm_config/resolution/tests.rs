@@ -44,13 +44,25 @@ fn retired_routes_preserve_other_providers_and_private_models() {
         ("Qwen/Qwen3.8-2.4T-A95B", "together"),
         ("accounts/fireworks/models/kimi-k3", "fireworks"),
         ("new-private-model", "deepinfra"),
-        ("Qwen/Qwen3.8-2.4T-A95B-private", "deepinfra"),
+        ("deepinfra/Qwen/Qwen3.8-2.4T-A95B-private", "deepinfra"),
     ] {
         let resolution = resolve_model_request_for_active_call(model, Some(provider))
             .expect("unretired route remains extensible");
         assert_eq!(resolution.resolved_provider, provider);
         assert_eq!(resolution.resolved_model, model);
     }
+    // A single slash is an existing OpenRouter namespace, not an unknown
+    // DeepInfra ID. Retirement must not change that ownership boundary.
+    let error =
+        resolve_model_request_for_active_call("Qwen/Qwen3.8-2.4T-A95B-private", Some("deepinfra"))
+            .expect_err("existing provider namespace remains enforced");
+    assert!(matches!(
+        error,
+        ModelResolutionError::ProviderModelMismatch {
+            ref catalog_provider,
+            ..
+        } if catalog_provider == "openrouter"
+    ));
 }
 
 #[test]

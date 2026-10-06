@@ -23,13 +23,15 @@ pub(super) fn check(
     wire_model: Option<&str>,
 ) -> Result<(), ModelResolutionError> {
     if let Some(route) = RETIRED_ROUTES.iter().find(|route| {
-        route.provider == provider
-            && (route.catalog_id == model
-                || route.wire_model == model
-                || Some(route.wire_model) == wire_model)
+        // A provider-qualified catalog identity names the retired route even
+        // after removing its row makes inference choose the default provider.
+        // Native wire identities remain scoped to their transport provider.
+        route.catalog_id == model
+            || (route.provider == provider
+                && (route.wire_model == model || Some(route.wire_model) == wire_model))
     }) {
         return Err(ModelResolutionError::RetiredModel {
-            provider: provider.to_string(),
+            provider: route.provider.to_string(),
             model: model.to_string(),
             reason: route.reason.to_string(),
             catalog_version: super::catalog_version(),
