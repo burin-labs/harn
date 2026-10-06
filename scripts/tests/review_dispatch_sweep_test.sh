@@ -111,4 +111,13 @@ if FAKE_CENSUS_FAILURE=1 "$script" --repo burin-labs/harn --now 2026-10-06T03:00
   fail "an unreadable census passed"
 fi
 
+# The event path records its request as the dispatch job's check run, under
+# the same name the sweep reads. A rename on either side would make every
+# freshly requested head look unrequested and request it again at once.
+workflow="$repo_root/.github/workflows/review-dispatch.yml"
+grep -qF "|| 'Automatic review: requested' }}" "$workflow" \
+  || fail "the dispatch job no longer reports as the request record"
+grep -qxF 'request_check="Automatic review: requested"' "$script" \
+  || fail "the sweep no longer reads the request record"
+
 printf 'review_dispatch_sweep_test: ok\n'

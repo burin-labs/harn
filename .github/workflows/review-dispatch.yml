@@ -50,6 +50,11 @@ concurrency:
 jobs:
   dispatch:
     if: github.event_name == 'pull_request_target'
+    # This name is the request record. A `pull_request_target` job reports as a
+    # check run on the pull request head, so an eligible request leaves an
+    # `Automatic review: requested` check there, the same record the sweep
+    # writes and reads to space its requests. Renaming it breaks that pairing;
+    # scripts/tests/review_dispatch_sweep_test.sh holds the two names equal.
     name: >-
       ${{ github.event.pull_request.head.repo.full_name != github.repository && 'Automatic review: skipped (fork)'
       || github.event.pull_request.draft && 'Automatic review: skipped (draft)'
