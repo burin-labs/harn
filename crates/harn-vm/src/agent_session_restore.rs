@@ -140,6 +140,11 @@ async fn read_canonical_session_prefix(
                 events.push(event);
             }
         }
+        // A full final page may advertise tip + 1 as its next cursor. The
+        // captured bound is already drained; do not reject or read beyond it.
+        if last_event_id == checkpoint.last_event_id {
+            break;
+        }
         match page.next_cursor {
             Some(cursor) => {
                 if from.is_some_and(|previous| cursor <= previous)

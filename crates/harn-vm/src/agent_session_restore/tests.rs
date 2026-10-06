@@ -225,31 +225,30 @@ async fn captured_empty_checkpoint_does_not_read_later_events() {
 
 #[tokio::test]
 async fn captured_checkpoint_validates_across_multiple_bounded_pages() {
-    let session_id = "paged-captured-prefix";
-    let store = store_with_session(session_id).await;
-    for index in 0..RESTORE_PAGE + 2 {
-        store
-            .append(
-                session_id,
-                AppendEvent::new(
-                    SessionEventKind::Message,
-                    transcript_row("message", "user", &format!("captured {index}")),
-                ),
-            )
+    for count in [RESTORE_PAGE, RESTORE_PAGE + 2] {
+        let session_id = "paged-captured-prefix";
+        let store = store_with_session(session_id).await;
+        for index in 0..count {
+            store
+                .append(
+                    session_id,
+                    AppendEvent::new(
+                        SessionEventKind::Message,
+                        transcript_row("message", "user", &format!("captured {index}")),
+                    ),
+                )
+                .await
+                .unwrap();
+        }
+        let captured = store.describe(session_id).await.unwrap();
+        let replay = read_canonical_session_prefix(&store, session_id, captured)
             .await
             .unwrap();
+        assert_eq!(replay.events.len(), count);
+        assert_eq!(replay.last_event_id, Some(count as u64));
+        assert_eq!(replay.events.first().unwrap().event_id, 1);
+        assert_eq!(replay.events.last().unwrap().event_id, count as u64);
     }
-    let captured = store.describe(session_id).await.unwrap();
-    let replay = read_canonical_session_prefix(&store, session_id, captured)
-        .await
-        .unwrap();
-    assert_eq!(replay.events.len(), RESTORE_PAGE + 2);
-    assert_eq!(replay.last_event_id, Some((RESTORE_PAGE + 2) as u64));
-    assert_eq!(replay.events.first().unwrap().event_id, 1);
-    assert_eq!(
-        replay.events.last().unwrap().event_id,
-        (RESTORE_PAGE + 2) as u64
-    );
 }
 
 #[tokio::test]
