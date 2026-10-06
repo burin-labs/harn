@@ -45,6 +45,7 @@ pub async fn request_session_approval(
         WireOutcome::Rejected { resolution, .. } => (false, resolution),
     };
     Ok(PreparedSessionApprovalDecision {
+        request_id: batch.request_id,
         batch_fingerprint: batch.batch_fingerprint.clone(),
         approved,
         decider: resolution.decider,
@@ -95,6 +96,7 @@ mod tests {
 
     fn batch() -> ApprovalBatch {
         ApprovalBatch {
+            request_id: uuid::Uuid::new_v4(),
             batch_fingerprint: "batch-1".to_string(),
             plan_fingerprint: "plan-1".to_string(),
             groups: vec![super::super::ApprovalGroup {
@@ -126,10 +128,12 @@ mod tests {
         ] {
             let calls = Arc::new(AtomicUsize::new(0));
             let bridge = responding_bridge(response, calls.clone());
-            let decision = request_session_approval(&bridge, "session-1", &batch())
+            let request = batch();
+            let decision = request_session_approval(&bridge, "session-1", &request)
                 .await
                 .unwrap();
             assert_eq!(decision.approved, approved);
+            assert_eq!(decision.request_id, request.request_id);
             assert_eq!(decision.batch_fingerprint, "batch-1");
             assert_eq!(calls.load(Ordering::SeqCst), 1);
         }

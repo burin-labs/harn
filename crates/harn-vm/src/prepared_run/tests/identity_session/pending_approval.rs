@@ -53,6 +53,7 @@ fn assert_retired(session: &PreparedSession<FixtureExecutor>, batch: ApprovalBat
     match session.decide(
         "prepared-session-1",
         PreparedSessionApprovalDecision {
+            request_id: batch.request_id,
             batch_fingerprint: batch.batch_fingerprint,
             approved: true,
             decider: AuthorityDecider::Person,
@@ -163,6 +164,42 @@ fn dropping_an_unpolled_old_wait_cannot_retire_an_identical_successor() {
 
 struct RefuseTerminal {
     failed: AtomicUsize,
+}
+
+#[test]
+fn identical_replacement_rejects_old_public_approval_and_denial() {
+    for approved in [false, true] {
+        let (session, calls) = fixture(Arc::new(MemoryAuthorityReceiptSink::default()));
+        let old = prepare(&session, intent());
+        let current = prepare(&session, intent());
+        assert_eq!(old.batch_fingerprint, current.batch_fingerprint);
+        assert_ne!(old.request_id, current.request_id);
+        let stale = PreparedSessionApprovalDecision {
+            request_id: old.request_id,
+            batch_fingerprint: old.batch_fingerprint,
+            approved,
+            decider: AuthorityDecider::Person,
+        };
+        match session.decide("prepared-session-1", stale) {
+            PreparedSessionUpdate::Blocked { diagnostics, .. } => assert!(diagnostics
+                .iter()
+                .any(|item| item.code == "prepared_session_approval_binding")),
+            other => panic!("an old answer must not consume identical replacement: {other:?}"),
+        }
+        assert!(matches!(
+            session.decide(
+                "prepared-session-1",
+                PreparedSessionApprovalDecision {
+                    request_id: current.request_id,
+                    batch_fingerprint: current.batch_fingerprint,
+                    approved: true,
+                    decider: AuthorityDecider::Person,
+                }
+            ),
+            PreparedSessionUpdate::Ready { .. }
+        ));
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+    }
 }
 
 impl AuthorityReceiptSink for RefuseTerminal {

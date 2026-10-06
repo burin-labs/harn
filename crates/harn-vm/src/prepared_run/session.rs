@@ -48,6 +48,7 @@ pub struct PreparedRuntimeAttachment {
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct PreparedSessionApprovalDecision {
+    pub request_id: uuid::Uuid,
     pub batch_fingerprint: String,
     pub approved: bool,
     pub decider: AuthorityDecider,
@@ -381,7 +382,8 @@ impl<E> PreparedSession<E> {
                 None,
             );
         };
-        if decision.batch_fingerprint != pending.batch.batch_fingerprint
+        if decision.request_id != pending.batch.request_id
+            || decision.batch_fingerprint != pending.batch.batch_fingerprint
             || identity.is_some_and(|identity| !Arc::ptr_eq(identity, &pending.identity))
         {
             return blocked(
@@ -712,7 +714,8 @@ impl<E> PreparedSession<E> {
                 "prepared session is not waiting for a delta approval",
             );
         };
-        if decision.batch_fingerprint != pending.batch.batch_fingerprint
+        if decision.request_id != pending.batch.request_id
+            || decision.batch_fingerprint != pending.batch.batch_fingerprint
             || pending.delta.parent_lease_fingerprint != active.authority.lease().lease_fingerprint
         {
             return PreparedSessionUpdate::Delta {

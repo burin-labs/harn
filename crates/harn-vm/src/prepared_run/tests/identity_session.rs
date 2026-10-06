@@ -542,6 +542,7 @@ async fn local_turn_reuses_attached_authority_and_identity_across_an_await() {
     let lease = match session.decide(
         "prepared-session-1",
         PreparedSessionApprovalDecision {
+            request_id: batch.request_id,
             batch_fingerprint: batch.batch_fingerprint,
             approved: true,
             decider: AuthorityDecider::Person,
@@ -725,6 +726,7 @@ async fn prepared_session_persists_one_approval_reuses_the_envelope_and_rejects_
     match host_session.decide(
         "prepared-session-1",
         PreparedSessionApprovalDecision {
+            request_id: earlier_batch.request_id,
             batch_fingerprint: earlier_batch.batch_fingerprint,
             approved: true,
             decider: AuthorityDecider::Person,
@@ -737,6 +739,7 @@ async fn prepared_session_persists_one_approval_reuses_the_envelope_and_rejects_
     }
     assert_eq!(model_calls.load(Ordering::SeqCst), 0);
     let decision = PreparedSessionApprovalDecision {
+        request_id: batch.request_id,
         batch_fingerprint: batch.batch_fingerprint,
         approved: true,
         decider: AuthorityDecider::Person,
@@ -829,6 +832,7 @@ async fn accepted_stop_and_pivot_persist_stopped_authority_and_retire_the_lease(
         let lease = match session.decide(
             "prepared-session-1",
             PreparedSessionApprovalDecision {
+                request_id: batch.request_id,
                 batch_fingerprint: batch.batch_fingerprint,
                 approved: true,
                 decider: AuthorityDecider::Person,
@@ -898,6 +902,7 @@ async fn prepared_session_rejects_stale_runtime_and_cross_workspace_attach_befor
     let lease = match session.decide(
         "prepared-session-1",
         PreparedSessionApprovalDecision {
+            request_id: batch.request_id,
             batch_fingerprint: batch.batch_fingerprint,
             approved: true,
             decider: AuthorityDecider::Person,
@@ -948,6 +953,7 @@ async fn prepared_session_widening_is_one_semantic_delta_batch() {
     let earlier_lease = match session.decide(
         "prepared-session-1",
         PreparedSessionApprovalDecision {
+            request_id: earlier_session_batch.request_id,
             batch_fingerprint: earlier_session_batch.batch_fingerprint,
             approved: true,
             decider: AuthorityDecider::Person,
@@ -966,6 +972,7 @@ async fn prepared_session_widening_is_one_semantic_delta_batch() {
     let lease = match session.decide(
         "prepared-session-1",
         PreparedSessionApprovalDecision {
+            request_id: batch.request_id,
             batch_fingerprint: batch.batch_fingerprint,
             approved: true,
             decider: AuthorityDecider::Person,
@@ -1006,6 +1013,7 @@ async fn prepared_session_widening_is_one_semantic_delta_batch() {
     match session.decide_delta(
         &earlier_active,
         PreparedSessionApprovalDecision {
+            request_id: delta_batch.request_id,
             batch_fingerprint: delta_batch.batch_fingerprint.clone(),
             approved: true,
             decider: AuthorityDecider::Person,
@@ -1025,6 +1033,7 @@ async fn prepared_session_widening_is_one_semantic_delta_batch() {
     match session.decide_delta(
         &active,
         PreparedSessionApprovalDecision {
+            request_id: earlier_batch.request_id,
             batch_fingerprint: earlier_batch.batch_fingerprint,
             approved: true,
             decider: AuthorityDecider::Person,
@@ -1037,10 +1046,66 @@ async fn prepared_session_widening_is_one_semantic_delta_batch() {
         other => panic!("stale delta must not consume its successor: {other:?}"),
     }
     assert!(active.authorize(&earlier_widening).is_err());
+    let repeated = AuthorityRequirement::Tool {
+        pattern: "repeat-deploy".to_string(),
+    };
+    for approved in [false, true] {
+        let mut batches = Vec::new();
+        for _ in 0..2 {
+            match session.request_delta(&active, repeated.clone()) {
+                PreparedSessionUpdate::Delta {
+                    outcome: PreparedSessionDelta::NeedsApproval { batch },
+                    ..
+                } => batches.push(batch),
+                other => panic!("expected identical pending delta: {other:?}"),
+            }
+        }
+        assert_eq!(batches[0].batch_fingerprint, batches[1].batch_fingerprint);
+        assert_ne!(batches[0].request_id, batches[1].request_id);
+        match session.decide_delta(
+            &active,
+            PreparedSessionApprovalDecision {
+                request_id: batches[0].request_id,
+                batch_fingerprint: batches[0].batch_fingerprint.clone(),
+                approved,
+                decider: AuthorityDecider::Person,
+            },
+        ) {
+            PreparedSessionUpdate::Delta {
+                outcome: PreparedSessionDelta::Blocked { diagnostic },
+                ..
+            } => assert_eq!(diagnostic.code, "prepared_session_delta_binding"),
+            other => panic!("stale answer must not consume replacement delta: {other:?}"),
+        }
+        assert!(active.authorize(&repeated).is_err());
+        match session.decide_delta(
+            &active,
+            PreparedSessionApprovalDecision {
+                request_id: batches[1].request_id,
+                batch_fingerprint: batches[1].batch_fingerprint.clone(),
+                approved: false,
+                decider: AuthorityDecider::Person,
+            },
+        ) {
+            PreparedSessionUpdate::Delta {
+                outcome: PreparedSessionDelta::Blocked { diagnostic },
+                ..
+            } => assert_eq!(diagnostic.code, "prepared_session_delta_denied"),
+            other => panic!("current delta denial must consume its own request: {other:?}"),
+        }
+    }
     assert!(active.authorize(&widened).is_err());
+    let delta_batch = match session.request_delta(&active, widened.clone()) {
+        PreparedSessionUpdate::Delta {
+            outcome: PreparedSessionDelta::NeedsApproval { batch },
+            ..
+        } => batch,
+        other => panic!("expected fresh widening approval: {other:?}"),
+    };
     match session.decide_delta(
         &active,
         PreparedSessionApprovalDecision {
+            request_id: delta_batch.request_id,
             batch_fingerprint: delta_batch.batch_fingerprint,
             approved: true,
             decider: AuthorityDecider::Person,
