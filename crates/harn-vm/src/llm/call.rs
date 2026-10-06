@@ -543,17 +543,37 @@ pub(crate) async fn execute_llm_call_outcome(
     super::introspection::record_resolved_llm_call(&opts.provider, &opts.model);
     let call_role = opts.context_manifest.call_role().to_owned();
     let call_stage = opts.call_stage.clone();
-    let mut outcome = if let Some(policy) = opts.routing_policy.clone() {
-        execute_routing_schema_retry_loop(ctx, policy, opts, options, bridge, delta_sink).await
-    } else {
-        execute_schema_retry_loop(ctx, opts, options, bridge, delta_sink).await
-    }?;
+    let mut outcome = pin_schema_retry_dispatch(ctx, opts, options, bridge, delta_sink).await?;
     outcome.vm_result = super::pairing_receipts::attach_call_provenance(
         outcome.vm_result,
         &call_role,
         call_stage.as_deref(),
     );
     Ok(outcome)
+}
+
+/// Allocate the selected retry future on a frame that returns before polling.
+/// Boxing inside the async outcome body still materializes the large child on
+/// that body's stack. Keep selection and allocation together at this owner so
+/// routed and ordinary calls preserve the same retry and settlement behavior.
+fn pin_schema_retry_dispatch<'a>(
+    ctx: Option<&'a crate::vm::AsyncBuiltinCtx>,
+    opts: api::LlmCallOptions,
+    options: Option<crate::value::DictMap>,
+    bridge: Option<&'a Arc<crate::bridge::HostBridge>>,
+    delta_sink: Option<api::DeltaSender>,
+) -> std::pin::Pin<Box<impl std::future::Future<Output = Result<SchemaLoopOutcome, VmError>> + 'a>>
+{
+    let future = if let Some(policy) = opts.routing_policy.clone() {
+        futures::future::Either::Left(execute_routing_schema_retry_loop(
+            ctx, policy, opts, options, bridge, delta_sink,
+        ))
+    } else {
+        futures::future::Either::Right(execute_schema_retry_loop(
+            ctx, opts, options, bridge, delta_sink,
+        ))
+    };
+    Box::pin(future)
 }
 
 /// Make one observed call and project its visible text to `bridge` as
