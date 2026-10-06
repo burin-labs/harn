@@ -119,6 +119,165 @@ async fn store_with_session(session_id: &str) -> SqliteSessionStore {
     store
 }
 
+#[tokio::test]
+async fn captured_checkpoint_rejects_equal_tip_and_count_with_replaced_history() {
+    let session_id = "replaced-restore-prefix";
+    let store = store_with_session(session_id).await;
+    for text in ["original first", "original second"] {
+        store
+            .append(
+                session_id,
+                AppendEvent::new(
+                    SessionEventKind::Message,
+                    transcript_row("message", "user", text),
+                ),
+            )
+            .await
+            .unwrap();
+    }
+    let captured = store.describe(session_id).await.unwrap();
+    store.truncate(session_id, 1).await.unwrap();
+    store
+        .append(
+            session_id,
+            AppendEvent::new(
+                SessionEventKind::Message,
+                transcript_row("message", "user", "replacement second"),
+            ),
+        )
+        .await
+        .unwrap();
+    let replaced = store.describe(session_id).await.unwrap();
+    assert_eq!(captured.event_count, replaced.event_count);
+    assert_eq!(captured.last_event_id, replaced.last_event_id);
+    assert_ne!(captured.chain_root_hash, replaced.chain_root_hash);
+    assert!(read_canonical_session_prefix(&store, session_id, captured)
+        .await
+        .is_err());
+}
+
+#[tokio::test]
+async fn captured_checkpoint_accepts_later_append_and_keeps_nonvisible_tip() {
+    let session_id = "bounded-restore-prefix";
+    let store = store_with_session(session_id).await;
+    store
+        .append(
+            session_id,
+            AppendEvent::new(
+                SessionEventKind::Message,
+                transcript_row("message", "user", "captured message"),
+            ),
+        )
+        .await
+        .unwrap();
+    store
+        .append(
+            session_id,
+            AppendEvent::new(
+                SessionEventKind::Receipt,
+                serde_json::json!({"audit": true}),
+            ),
+        )
+        .await
+        .unwrap();
+    let captured = store.describe(session_id).await.unwrap();
+    store
+        .append(
+            session_id,
+            AppendEvent::new(
+                SessionEventKind::Message,
+                transcript_row("message", "user", "later append"),
+            ),
+        )
+        .await
+        .unwrap();
+    let replay = read_canonical_session_prefix(&store, session_id, captured)
+        .await
+        .unwrap();
+    assert_eq!(replay.last_event_id, Some(2));
+    assert_eq!(replay.events.len(), 1);
+    assert_eq!(replay.events[0].event_id, 1);
+}
+
+#[tokio::test]
+async fn captured_empty_checkpoint_does_not_read_later_events() {
+    let session_id = "empty-captured-prefix";
+    let store = store_with_session(session_id).await;
+    let captured = store.describe(session_id).await.unwrap();
+    store
+        .append(
+            session_id,
+            AppendEvent::new(
+                SessionEventKind::Message,
+                transcript_row("message", "user", "after capture"),
+            ),
+        )
+        .await
+        .unwrap();
+    let replay = read_canonical_session_prefix(&store, session_id, captured)
+        .await
+        .unwrap();
+    assert_eq!(replay.last_event_id, None);
+    assert!(replay.events.is_empty());
+}
+
+#[tokio::test]
+async fn captured_checkpoint_refuses_truncated_prefix() {
+    let session_id = "truncated-captured-prefix";
+    let store = store_with_session(session_id).await;
+    for text in ["first", "second"] {
+        store
+            .append(
+                session_id,
+                AppendEvent::new(
+                    SessionEventKind::Message,
+                    transcript_row("message", "user", text),
+                ),
+            )
+            .await
+            .unwrap();
+    }
+    let captured = store.describe(session_id).await.unwrap();
+    store.truncate(session_id, 1).await.unwrap();
+    assert!(read_canonical_session_prefix(&store, session_id, captured)
+        .await
+        .is_err());
+}
+
+#[tokio::test]
+async fn internal_progress_replays_through_the_typed_host_event_owner() {
+    let session_id = "durable-progress-replay";
+    let store = store_with_session(session_id).await;
+    store
+        .append(
+            session_id,
+            AppendEvent::new(
+                SessionEventKind::Message,
+                serde_json::json!({"transcript_event": {
+                    "kind": "progress_reported", "role": "assistant", "visibility": "internal",
+                    "metadata": {"message": "Running verification", "entries": [], "replace": true},
+                }}),
+            ),
+        )
+        .await
+        .unwrap();
+    let replay = load_canonical_session_replay_from_store(&store, session_id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(replay.last_event_id, Some(1));
+    assert_eq!(replay.events.len(), 1);
+    match &replay.events[0].event {
+        AgentEvent::ProgressReported {
+            message, replace, ..
+        } => {
+            assert_eq!(message.as_deref(), Some("Running verification"));
+            assert!(*replace);
+        }
+        other => panic!("expected typed progress, got {other:?}"),
+    }
+}
+
 /// The defect this module exists to close (burin#6267): a session the canonical
 /// store holds must be restorable, whether or not the observability event log
 /// ever observed it.

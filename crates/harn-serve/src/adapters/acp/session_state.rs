@@ -218,6 +218,7 @@ impl AcpServer {
                 }
             };
 
+        let mut durable_checkpoint = None;
         if self.sessions.contains_key(&session_id) {
             if let Err(error) = harn_vm::agent_sessions::open_or_create(Some(session_id.clone())) {
                 self.send_session_open_error(id, &error);
@@ -249,7 +250,8 @@ impl AcpServer {
             .await
             {
                 Ok(Some(persisted)) => {
-                    replay_events = persisted;
+                    durable_checkpoint = persisted.last_event_id;
+                    replay_events = persisted.events;
                     if let Err(error) = self.register_restored_session(&session_id, params) {
                         self.send_session_open_error(id, &error);
                         return;
@@ -313,6 +315,11 @@ impl AcpServer {
         let mut result = self
             .session_restore_result(&session_id)
             .expect("validated session should still exist");
+        if durable_checkpoint.is_some() {
+            result["session"] = self
+                .session_item_json(&session_id, "live", durable_checkpoint)
+                .expect("restored session should still exist");
+        }
         result["replayed"] = serde_json::json!(replayed);
         self.send_response(id, result);
     }

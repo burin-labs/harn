@@ -59,6 +59,16 @@ async fn acp_session_load_restores_a_session_only_the_canonical_store_holds() {
                     )
                     .await
                     .expect("append stored transcript");
+                store
+                    .append(
+                        session_id,
+                        AppendEvent::new(
+                            SessionEventKind::Receipt,
+                            serde_json::json!({"audit": true}),
+                        ),
+                    )
+                    .await
+                    .expect("append nonvisible durable tail");
             }
 
             let (request_tx, request_rx) = mpsc::unbounded_channel();
@@ -98,6 +108,12 @@ async fn acp_session_load_restores_a_session_only_the_canonical_store_holds() {
                 replayed_text.contains("the earlier conversation"),
                 "session/load must replay the stored transcript, got {replayed_text}"
             );
+            assert_eq!(response["result"]["session"]["lastEventId"], 2);
+            assert_eq!(
+                response["result"]["session"]["_meta"]["harn"]["lastEventId"],
+                2
+            );
+            assert_eq!(response["result"]["replayed"][0]["eventId"], 1);
 
             drop(request_tx);
             server.await.expect("ACP channel server task");

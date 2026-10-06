@@ -21,29 +21,39 @@ use crate::agent_events::{AgentEvent, ToolCallStatus, ToolMutationStatus};
 use crate::agent_sessions::event_facts as facts;
 use crate::orchestration::AgentSessionReplayEvent;
 use crate::value::VmError;
-use harn_session_store::{ReadRange, SessionEventKind, SessionStore, StoreError, StoredEvent};
+use harn_session_store::{
+    chain_root_hash, EventId, ReadRange, SessionEventKind, SessionMeta, SessionStore, StoreError,
+    StoredEvent,
+};
 
 /// One page of stored events per round trip. The store caps reads at its own
 /// `MAX_READ_BATCH`; this keeps the loop's memory bounded either way.
 const RESTORE_PAGE: usize = 512;
+
+/// A replay and its durable checkpoint describe the same captured prefix.
+/// The checkpoint includes bookkeeping rows that have no visible projection.
+pub struct CanonicalSessionReplay {
+    pub events: Vec<AgentSessionReplayEvent>,
+    pub last_event_id: Option<EventId>,
+}
 
 /// Read `session_id`'s durable transcript out of `project_root`'s canonical
 /// store and project it into replayable agent events.
 ///
 /// Returns `Ok(None)` only when the store genuinely does not know the session —
 /// no store for this project, or no such row. That is the one condition under
-/// which a caller may report an unknown session. `Ok(Some(events))` with an
-/// empty vector is a real session that simply has no transcript yet, which is
+/// which a caller may report an unknown session. A replay with an
+/// empty event vector is a real session that simply has no transcript yet, which is
 /// still restorable.
 pub async fn load_canonical_session_replay_events(
     project_root: &Path,
     session_id: &str,
-) -> Result<Option<Vec<AgentSessionReplayEvent>>, VmError> {
+) -> Result<Option<CanonicalSessionReplay>, VmError> {
     let Some(store) = crate::stdlib::session_store::open_existing_canonical_store(project_root)?
     else {
         return Ok(None);
     };
-    load_canonical_session_replay_events_from_store(&store, session_id).await
+    load_canonical_session_replay_from_store(&store, session_id).await
 }
 
 /// Store-injected form of [`load_canonical_session_replay_events`], so tests
@@ -52,17 +62,55 @@ pub async fn load_canonical_session_replay_events_from_store(
     store: &dyn SessionStore,
     session_id: &str,
 ) -> Result<Option<Vec<AgentSessionReplayEvent>>, VmError> {
-    match store.describe(session_id).await {
-        Ok(_) => {}
+    Ok(load_canonical_session_replay_from_store(store, session_id)
+        .await?
+        .map(|replay| replay.events))
+}
+
+/// Capture the durable checkpoint before reading and validate that exact prefix.
+pub async fn load_canonical_session_replay_from_store(
+    store: &dyn SessionStore,
+    session_id: &str,
+) -> Result<Option<CanonicalSessionReplay>, VmError> {
+    let checkpoint = match store.describe(session_id).await {
+        Ok(checkpoint) => checkpoint,
         Err(StoreError::NotFound(_)) => return Ok(None),
         Err(error) => {
             return Err(VmError::Runtime(format!(
                 "canonical session store describe {session_id}: {error}"
             )))
         }
+    };
+    read_canonical_session_prefix(store, session_id, checkpoint)
+        .await
+        .map(Some)
+}
+
+async fn read_canonical_session_prefix(
+    store: &dyn SessionStore,
+    session_id: &str,
+    checkpoint: SessionMeta,
+) -> Result<CanonicalSessionReplay, VmError> {
+    let invalid_prefix = || {
+        VmError::Runtime(format!(
+            "canonical session store prefix changed while restoring {session_id}"
+        ))
+    };
+    if checkpoint.id != session_id {
+        return Err(invalid_prefix());
+    }
+    // An absent upper bound means an unbounded read, not an empty session.
+    if checkpoint.last_event_id.is_none() {
+        if checkpoint.event_count != 0 {
+            return Err(invalid_prefix());
+        }
+        return Ok(CanonicalSessionReplay {
+            events: Vec::new(),
+            last_event_id: None,
+        });
     }
 
-    let mut events = Vec::new();
+    let mut stored_events = Vec::new();
     let mut from = None;
     loop {
         let page = store
@@ -70,6 +118,7 @@ pub async fn load_canonical_session_replay_events_from_store(
                 session_id,
                 ReadRange {
                     from_event_id: from,
+                    to_event_id: checkpoint.last_event_id,
                     limit: Some(RESTORE_PAGE),
                     ..ReadRange::default()
                 },
@@ -80,17 +129,48 @@ pub async fn load_canonical_session_replay_events_from_store(
                     "canonical session store read {session_id}: {error}"
                 ))
             })?;
-        for stored in page.events {
-            if let Some(event) = replay_event_from_stored(session_id, &stored) {
-                events.push(event);
-            }
+        if page.events.iter().any(|event| {
+            event.session_id != session_id
+                || Some(event.event_id) > checkpoint.last_event_id
+                || stored_events
+                    .last()
+                    .is_some_and(|previous: &StoredEvent| previous.event_id >= event.event_id)
+        }) {
+            return Err(invalid_prefix());
         }
+        stored_events.extend(page.events);
         match page.next_cursor {
-            Some(cursor) => from = Some(cursor),
+            Some(cursor) => {
+                if from.is_some_and(|previous| cursor <= previous)
+                    || Some(cursor) > checkpoint.last_event_id
+                    || stored_events
+                        .last()
+                        .is_none_or(|event| cursor <= event.event_id)
+                {
+                    return Err(invalid_prefix());
+                }
+                from = Some(cursor);
+            }
             None => break,
         }
     }
-    Ok(Some(close_unanswered_tool_calls(session_id, events)))
+    if stored_events.len() != checkpoint.event_count
+        || stored_events.last().map(|event| event.event_id) != checkpoint.last_event_id
+        || checkpoint.chain_root_hash.as_deref() != Some(chain_root_hash(&stored_events).as_str())
+        || stored_events
+            .windows(2)
+            .any(|pair| pair[0].event_id >= pair[1].event_id)
+    {
+        return Err(invalid_prefix());
+    }
+    let events = stored_events
+        .iter()
+        .filter_map(|stored| replay_event_from_stored(session_id, stored))
+        .collect();
+    Ok(CanonicalSessionReplay {
+        events: close_unanswered_tool_calls(session_id, events),
+        last_event_id: checkpoint.last_event_id,
+    })
 }
 
 /// What a restored call with no result reports. The store keeps a call from
@@ -192,7 +272,10 @@ fn replay_event_from_stored(
 ) -> Option<AgentSessionReplayEvent> {
     let transcript = stored.payload.get("transcript_event")?;
     let kind = transcript.get("kind").and_then(serde_json::Value::as_str);
-    if matches!(kind, Some("turn_phase_changed" | "agent_run_terminal")) {
+    if matches!(
+        kind,
+        Some("turn_phase_changed" | "agent_run_terminal" | "progress_reported")
+    ) {
         let metadata = transcript.get("metadata")?;
         let event = if kind == Some("agent_run_terminal") {
             AgentEvent::TurnPhaseChanged {
@@ -200,7 +283,7 @@ fn replay_event_from_stored(
                 phase: crate::agent_events::AgentTurnPhase::from_terminal_record(metadata)?,
             }
         } else {
-            AgentEvent::from_host_payload(session_id, "turn_phase_changed", metadata).ok()??
+            AgentEvent::from_host_payload(session_id, kind?, metadata).ok()??
         };
         // A standalone phase row can precede a failed terminal write. Only the
         // committed run record owns finality; older records lack its reply.
