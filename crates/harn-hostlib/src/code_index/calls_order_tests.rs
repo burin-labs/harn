@@ -144,3 +144,18 @@ fn a_local_declaration_still_shadows_an_imported_one() {
     let (state, _) = IndexState::build_from_root(root);
     assert_eq!(calls(&state, "fetch_rows"), vec!["z_use.py -> z_use.py"]);
 }
+
+#[test]
+fn reindexing_a_new_file_resolves_an_import_that_was_dangling() {
+    let dir = tempdir().unwrap();
+    let root = dir.path();
+    write(root, "other.py", DECL);
+    write(root, "z_use.py", &call_importing("a_new"));
+    let (mut state, _) = IndexState::build_from_root(root);
+    // `a_new` does not exist yet, so the unique declaration is the target.
+    assert_eq!(calls(&state, "fetch_rows"), vec!["z_use.py -> other.py"]);
+
+    write(root, "a_new.py", DECL);
+    state.reindex_file(&root.join("a_new.py")).unwrap();
+    assert_eq!(calls(&state, "fetch_rows"), vec!["z_use.py -> a_new.py"]);
+}

@@ -296,18 +296,7 @@ impl IndexState {
         }
 
         if path_set_changed {
-            // A path appearing or disappearing can resolve or dangle an
-            // import in a file that did not itself change, so redo the
-            // whole resolution table. Pure map lookups, no disk reads.
-            self.refresh_module_index();
-            let all: Vec<(FileId, String)> = self
-                .files
-                .values()
-                .map(|f| (f.id, f.relative_path.clone()))
-                .collect();
-            for (id, rel) in all {
-                self.rebuild_deps(id, &rel);
-            }
+            self.rebuild_all_deps();
         } else {
             for (id, rel) in &reparse {
                 self.rebuild_deps(*id, rel);
@@ -338,6 +327,8 @@ impl IndexState {
             self.remove_file_path(abs);
             return None;
         }
+        let known =
+            relative_path(&self.root, abs).is_some_and(|rel| self.path_to_id.contains_key(&rel));
         let (id, _changed) = self.ingest(abs, None)?;
         let rel = self
             .files
@@ -345,8 +336,13 @@ impl IndexState {
             .map(|f| f.relative_path.clone())
             .unwrap_or_default();
         if !rel.is_empty() {
-            self.refresh_module_index();
-            self.rebuild_deps(id, &rel);
+            if known {
+                self.refresh_module_index();
+                self.rebuild_deps(id, &rel);
+            } else {
+                // A new path can resolve another file's dangling import.
+                self.rebuild_all_deps();
+            }
             self.rebuild_symbol_graph_for(id);
             self.link_symbol_imports();
             self.relink_dirty_calls();
@@ -608,6 +604,21 @@ impl IndexState {
                 .iter()
                 .map(indexed_symbol_from_ast)
                 .collect();
+        }
+    }
+
+    /// Redo the whole import-resolution table. A path appearing or
+    /// disappearing can resolve or dangle an import in a file that did not
+    /// itself change. Pure map lookups, no disk reads.
+    fn rebuild_all_deps(&mut self) {
+        self.refresh_module_index();
+        let all: Vec<(FileId, String)> = self
+            .files
+            .values()
+            .map(|f| (f.id, f.relative_path.clone()))
+            .collect();
+        for (id, rel) in all {
+            self.rebuild_deps(id, &rel);
         }
     }
 
