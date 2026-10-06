@@ -863,7 +863,7 @@ mod authorize_batch_tests {
 
     #[tokio::test(flavor = "current_thread")]
     async fn hitl_router_preserves_auth_validation_and_durable_response() {
-        use harn_vm::event_log::{EventLog, EventLogBackendKind, EventLogConfig, Topic};
+        use harn_vm::event_log::{EventLog, EventLogBackendKind, EventLogConfig, LogEvent, Topic};
         struct ResetLog;
         impl Drop for ResetLog {
             fn drop(&mut self) {
@@ -880,17 +880,17 @@ mod authorize_batch_tests {
         };
         let log = harn_vm::event_log::open_event_log(&config).unwrap();
         harn_vm::event_log::install_active_event_log(log.clone());
-        let request = harn_vm::stdlib::hitl::append_approval_request_on(
-            &log,
-            "agent",
-            "trace",
-            "edit",
-            serde_json::json!({"path":"file.txt"}),
-            vec![],
+        let request = "hitl_escalation_router_response";
+        let topic = Topic::new(harn_vm::HITL_ESCALATIONS_TOPIC).unwrap();
+        log.append(
+            &topic,
+            LogEvent::new(
+                "hitl.escalation_issued",
+                serde_json::json!({"request_id":request}),
+            ),
         )
         .await
         .unwrap();
-        let topic = Topic::new(harn_vm::HITL_APPROVALS_TOPIC).unwrap();
         let before = log.read_range(&topic, None, 100).await.unwrap();
         assert!(
             !before.is_empty(),
@@ -906,7 +906,7 @@ mod authorize_batch_tests {
                 crate::auth::ApiKeyAuthConfig::single("synthetic-router-test-key"),
             ));
         let valid = serde_json::json!({
-            "request_id":request, "approved":true, "reviewer":"reviewer",
+            "request_id":request, "accepted":false, "reviewer":"reviewer",
             "responded_at":"2026-10-06T00:00:00Z"
         });
         server
@@ -946,7 +946,7 @@ mod authorize_batch_tests {
         let events = reopened.read_range(&topic, None, 100).await.unwrap();
         let responses: Vec<_> = events
             .iter()
-            .filter(|(_, event)| event.kind == "hitl.response_received")
+            .filter(|(_, event)| event.kind == "hitl.escalation_accepted")
             .collect();
         assert_eq!(responses.len(), 1);
         assert_eq!(responses[0].1.payload, valid);
