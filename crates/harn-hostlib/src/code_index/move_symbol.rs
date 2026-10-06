@@ -177,15 +177,10 @@ pub(super) fn run(index: &SharedIndex, args: &[VmValue]) -> Result<VmValue, Host
     let source_path = super::builtins::normalize_relative_path_for(state, &request.path);
     let dest_path = super::builtins::normalize_relative_path_for(state, &request.to_path);
     // Every read and write joins these onto the index root, so a path that
-    // escapes it (`../x.py`, an absolute path elsewhere) must not get there.
+    // escapes it (`../x.py`, an absolute path elsewhere, a symlink out of the
+    // tree) must not get there.
     for (param, path) in [("path", &source_path), ("to_path", &dest_path)] {
-        let inside = Path::new(path).components().all(|component| {
-            matches!(
-                component,
-                std::path::Component::Normal(_) | std::path::Component::CurDir
-            )
-        });
-        if !inside {
+        if !resolves_inside(&state.root, path) {
             return Err(HostlibError::InvalidParameter {
                 builtin: BUILTIN,
                 param,
@@ -201,6 +196,21 @@ pub(super) fn run(index: &SharedIndex, args: &[VmValue]) -> Result<VmValue, Host
         });
     }
     let mut outcome = plan(state, &request, &source_path, &dest_path)?;
+    // Referencing files and a Rust parent module are written too.
+    if let Some(escaping) = outcome
+        .response
+        .plans
+        .iter()
+        .find(|plan| !resolves_inside(&state.root, &plan.path))
+    {
+        outcome = refuse(
+            "error",
+            format!(
+                "`{}` resolves outside the indexed workspace; nothing was written",
+                escaping.path
+            ),
+        );
+    }
     if outcome.tag == "applied" {
         if request.dry_run {
             outcome.response.details = "dry run: no files were written".into();
@@ -226,6 +236,35 @@ pub(super) fn run(index: &SharedIndex, args: &[VmValue]) -> Result<VmValue, Host
         }
     }
     Ok(respond(&request, &source_path, &dest_path, outcome))
+}
+
+/// Whether `rel`, joined onto `root`, stays inside `root` once symlinks
+/// resolve: no `..` or absolute component, and the deepest existing ancestor
+/// (or the file, or a dangling link at it) canonicalizes under `root`.
+fn resolves_inside(root: &Path, rel: &str) -> bool {
+    let lexical = Path::new(rel).components().all(|component| {
+        matches!(
+            component,
+            std::path::Component::Normal(_) | std::path::Component::CurDir
+        )
+    });
+    if !lexical {
+        return false;
+    }
+    let Ok(canonical_root) = root.canonicalize() else {
+        return false;
+    };
+    let mut probe = root.join(rel);
+    loop {
+        if std::fs::symlink_metadata(&probe).is_ok() {
+            return probe
+                .canonicalize()
+                .is_ok_and(|resolved| resolved.starts_with(&canonical_root));
+        }
+        if !probe.pop() {
+            return false;
+        }
+    }
 }
 
 // === Planning ===

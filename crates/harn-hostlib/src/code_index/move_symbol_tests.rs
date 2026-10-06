@@ -723,3 +723,39 @@ fn a_path_outside_the_workspace_is_rejected_before_any_read_or_write() {
     assert!(!outside.exists());
     assert_eq!(fixture.snapshot(), before);
 }
+
+#[cfg(unix)]
+#[test]
+fn a_destination_behind_a_symlink_out_of_the_workspace_is_rejected() {
+    let outside = tempdir().unwrap();
+    let fixture = Fixture::new(&[
+        (
+            "orders.py",
+            "def label(n: int) -> str:\n    return str(n)\n",
+        ),
+        ("view.py", "X = 1\n"),
+    ]);
+    std::os::unix::fs::symlink(outside.path(), fixture.dir.path().join("link")).unwrap();
+    let before = fixture.snapshot();
+    let err = run(
+        &fixture.capability.shared(),
+        &[dict(&[
+            ("symbol", vm_string("label")),
+            ("path", vm_string("orders.py")),
+            ("to_path", vm_string("link/new.py")),
+        ])],
+    )
+    .expect_err("a destination behind an escaping symlink must be refused");
+    assert!(
+        matches!(
+            err,
+            HostlibError::InvalidParameter {
+                param: "to_path",
+                ..
+            }
+        ),
+        "{err:?}"
+    );
+    assert!(!outside.path().join("new.py").exists());
+    assert_eq!(fixture.snapshot(), before);
+}
