@@ -305,6 +305,55 @@ if grep -Fq 'cache delete 203 ' "$tmp/release-yields-gh.log"; then
   exit 1
 fi
 
+# The shared CLI family is a merge-gate cache: a sibling leg's headroom step
+# deletes smaller eligible entries around it, and refuses rather than delete it
+# when nothing else covers the deficit (#9430).
+cat >"$tmp/bin/gh" <<'MOCK'
+#!/usr/bin/env bash
+set -euo pipefail
+args="$*"
+printf '%s\n' "$args" >>"$MOCK_GH_LOG"
+if [[ "$args" == *'/actions/caches?per_page=100'* ]]; then
+  small=${MOCK_SMALL_BYTES:-536870912}
+  printf '[{"actions_caches":[{"id":301,"ref":"refs/heads/main","key":"v0-rust-harn-ci-cli-workspace-crates-v3-Linux-x64-current","size_in_bytes":1342177280},{"id":302,"ref":"refs/heads/main","key":"node-cache-Linux-X64-npm-current","size_in_bytes":%s},{"id":303,"ref":"refs/heads/main","key":"v0-rust-workspace-tests-Linux-x64-current","size_in_bytes":2147483648}]}]\n' "$small"
+elif [[ "$args" == cache\ delete\ *\ --repo\ burin-labs/harn ]]; then
+  exit 0
+else
+  echo "unexpected gh arguments: $args" >&2
+  exit 64
+fi
+MOCK
+chmod +x "$tmp/bin/gh"
+# 5 GiB policy, 1.5 GiB headroom: listed 1.25 + 0.5 + 2 = 3.75 GiB against a
+# 3.5 GiB ceiling, a 0.25 GiB deficit the node cache covers.
+PATH="$tmp/bin:$PATH" MOCK_GH_LOG="$tmp/cli-protected-gh.log" \
+  HARN_CACHE_POLICY_PATH="$tmp/protect-policy.json" \
+  GITHUB_REPOSITORY=burin-labs/harn \
+  "$repo_root/scripts/prune_ci_cache_generations.sh" --ensure-headroom 1610612736 \
+  >"$tmp/cli-protected.json"
+jq -e '(.deleted | map(.id)) == [302]' "$tmp/cli-protected.json" >/dev/null
+if grep -Fq 'cache delete 301 ' "$tmp/cli-protected-gh.log"; then
+  echo "save headroom must preserve the shared CLI merge-gate cache" >&2
+  cat "$tmp/cli-protected-gh.log" >&2
+  exit 1
+fi
+# With only 64 MiB eligible the deficit cannot be covered without the CLI
+# cache, so the step refuses and deletes nothing.
+if PATH="$tmp/bin:$PATH" MOCK_GH_LOG="$tmp/cli-refused-gh.log" MOCK_SMALL_BYTES=67108864 \
+  HARN_CACHE_POLICY_PATH="$tmp/protect-policy.json" \
+  GITHUB_REPOSITORY=burin-labs/harn \
+  "$repo_root/scripts/prune_ci_cache_generations.sh" --ensure-headroom 2147483648 \
+  >"$tmp/cli-refused.out" 2>"$tmp/cli-refused.err"; then
+  echo "headroom that only the CLI cache could cover must refuse" >&2
+  exit 1
+fi
+grep -q 'without deleting protected CI caches' "$tmp/cli-refused.err"
+if grep -q '^cache delete ' "$tmp/cli-refused-gh.log"; then
+  echo "a refused headroom step must delete nothing" >&2
+  cat "$tmp/cli-refused-gh.log" >&2
+  exit 1
+fi
+
 # Restore the baseline mock for the remaining authorization-failure case.
 cat >"$tmp/bin/gh" <<'MOCK'
 #!/usr/bin/env bash
