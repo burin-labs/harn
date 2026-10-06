@@ -33,7 +33,7 @@ impl Drop for PendingCallRegistration {
             });
         } else {
             // A caller may drop a previously polled future outside its runtime.
-            std::thread::spawn(move || {
+            crate::runtime_stack::spawn(move || {
                 pending.blocking_lock().remove(&id);
             });
         }
