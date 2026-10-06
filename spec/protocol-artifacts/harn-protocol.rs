@@ -4262,6 +4262,7 @@ pub const HARN_PREPARED_SESSION_COMMANDS: &[&str] = &[
 ];
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HarnPreparedSessionApprovalDecision {
+    pub request_id: String,
     pub batch_fingerprint: String,
     pub approved: bool,
     pub decider: String,
