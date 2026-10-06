@@ -59,6 +59,9 @@
 //!   rewrite every call site across files (Rust, TypeScript, Python),
 //!   refusing value uses, splats, overrides, and removed parameters the
 //!   body still reads. Built on [`refactor_core`].
+//! - **`extract_function`**: lift an expression, a statement run, or a
+//!   closure body into a new function and replace it, and every token-equal
+//!   same-file copy, with a call. Built on the shared refactor core.
 //!
 //! ## Concurrency model
 //!
@@ -72,6 +75,8 @@ mod builtin_args;
 mod builtins;
 mod change_signature;
 mod cypher;
+mod extract;
+mod extract_plan;
 mod file_table;
 mod git_head;
 mod graph;
@@ -607,6 +612,13 @@ impl HostlibCapability for CodeIndexCapability {
             change_signature::BUILTIN,
             "change_signature",
             change_signature::run,
+        );
+        register(
+            registry,
+            self.index.clone(),
+            extract::BUILTIN,
+            "extract_function",
+            extract::run,
         );
     }
 }

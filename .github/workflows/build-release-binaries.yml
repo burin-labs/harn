@@ -350,7 +350,7 @@ jobs:
             fi
             RELEASE_COMMITS="$(release_range_release_commits "$PUSH_BASE" "$GITHUB_SHA")"
             if [[ -n "$RELEASE_COMMITS" && "$RELEASE_COMMITS" != "$GITHUB_SHA" ]]; then
-              echo "::error::This push lands release commit(s) ${RELEASE_COMMITS//$'\n'/, } below its head $GITHUB_SHA. A release is built and promoted only from the head of its push, so nothing was built or promoted. A person must re-land the release as the head of a push."
+              echo "::error::This push lands release commit(s) ${RELEASE_COMMITS//$'\n'/, } below its head $GITHUB_SHA. A release is built and promoted only from the head of its push, so nothing was built or promoted. Recover it by dispatching promote-release.yml with the release commit and its successful merge-group candidate run (docs/src/maintainer-release.md)."
               exit 1
             fi
             QUEUE_RUN_ID=""

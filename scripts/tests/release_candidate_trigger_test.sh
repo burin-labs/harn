@@ -324,17 +324,23 @@ grep -Fq "release commit(s) $buried_sha below its head" "$tmp/buried.log" \
   || fail "the refusal does not name the buried release commit: $(cat "$tmp/buried.log")"
 
 # The merge-group guard in ci.yml keeps a release last in its group: the entry
-# behind the buried release fails, and the release entry itself passes.
+# behind the buried release fails, and the release entry itself passes. GitHub
+# gives the entry behind the release the release commit as its group base, so
+# the guard must judge from main, never from that base.
 awk '/- name: Keep a release commit last in its merge group/{found=1} found && /        run: \|/{body=1;next} body && /^      - /{exit} body{print substr($0,11)}' \
   "$root/.github/workflows/ci.yml" > "$tmp/guard.sh"
 grep -Fq 'release_range_release_commits' "$tmp/guard.sh" || fail "could not extract the merge-group guard from ci.yml"
 guard() {
-  (cd "$repo" && BASE_SHA="$1" HEAD_SHA="$2" bash -eu "$tmp/guard.sh") > "$tmp/guard.log" 2>&1
+  (cd "$repo" && MAIN_REF="$1" HEAD_SHA="$2" BASE_SHA="$buried_sha" bash -eu "$tmp/guard.sh") > "$tmp/guard.log" 2>&1
 }
 if guard "$push_base" "$(git -C "$repo" rev-parse HEAD)"; then
   fail "the merge-group guard admitted an entry queued behind a release"
 fi
+grep -Fq "queued behind release commit(s) $buried_sha" "$tmp/guard.log" \
+  || fail "the merge-group guard does not name the buried release: $(cat "$tmp/guard.log")"
 guard "$push_base" "$buried_sha" || fail "the merge-group guard refused the release entry: $(cat "$tmp/guard.log")"
+guard "$buried_sha" "$(git -C "$repo" rev-parse HEAD)" \
+  || fail "the merge-group guard refused an entry after its release reached main: $(cat "$tmp/guard.log")"
 
 # The release's merge group builds the candidate at its own commit, which is
 # the commit that lands on main; a group without a release at its head builds
