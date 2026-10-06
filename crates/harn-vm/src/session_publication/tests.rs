@@ -239,12 +239,16 @@ fn dispatch_provenance_survives_assistant_fact_attachment() {
     );
     let recorded = crate::llm::helpers::vm_value_to_json(&message);
     assert_eq!(recorded["_harn"]["call_role"], "agent.main");
-    assert_eq!(recorded["_harn"]["call_stage"], "wrapup");
+    assert_eq!(
+        recorded["_harn"].get("call_stage"),
+        Some(&serde_json::Value::String("wrapup".into()))
+    );
     let unobserved = crate::llm::pairing_receipts::attach_assistant_facts(
         crate::stdlib::json_to_vm_value(&json!({"role":"assistant", "content":"PRIVATE"})),
         &crate::stdlib::json_to_vm_value(&json!({"text":"PRIVATE"})),
     );
     let unobserved = crate::llm::helpers::vm_value_to_json(&unobserved);
+    assert!(unobserved["_harn"].is_object());
     assert!(unobserved["_harn"].get("call_stage").is_none());
     let unstaged = crate::llm::pairing_receipts::attach_call_provenance(
         crate::stdlib::json_to_vm_value(&json!({"text":"PRIVATE"})),
@@ -256,6 +260,7 @@ fn dispatch_provenance_survives_assistant_fact_attachment() {
         &unstaged,
     );
     let unstaged = crate::llm::helpers::vm_value_to_json(&unstaged);
+    assert_eq!(unstaged["_harn"]["call_role"], "agent.main");
     assert_eq!(
         unstaged["_harn"].get("call_stage"),
         Some(&serde_json::Value::Null)

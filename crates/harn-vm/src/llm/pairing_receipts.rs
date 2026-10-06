@@ -36,6 +36,33 @@ const SESSION_MESSAGE_FACTS_KEY: &str = "_harn";
 const CALL_ROLE_KEY: &str = "_harn_call_role";
 const CALL_STAGE_KEY: &str = "_harn_call_stage";
 
+/// Dispatch observation is distinct from a legacy record with no observation.
+/// Both unit variants serialize as null; the containing field omits Absent.
+#[derive(Serialize)]
+#[serde(untagged)]
+enum CallStageObservation {
+    Absent,
+    Unset,
+    Named(String),
+}
+
+impl CallStageObservation {
+    fn is_absent(&self) -> bool {
+        matches!(self, Self::Absent)
+    }
+
+    fn from_result(result: &VmValue) -> Self {
+        match result
+            .as_dict()
+            .and_then(|result| result.get(CALL_STAGE_KEY))
+        {
+            None => Self::Absent,
+            Some(VmValue::String(stage)) => Self::Named(stage.to_string()),
+            Some(_) => Self::Unset,
+        }
+    }
+}
+
 #[derive(Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 enum SessionMessageFacts {
@@ -46,8 +73,8 @@ enum SessionMessageFacts {
         call_role: Option<String>,
         /// Explicit null is a dispatch-observed unset stage; absent metadata
         /// in an older record remains distinguishable from that observation.
-        #[serde(skip_serializing_if = "Option::is_none")]
-        call_stage: Option<Option<String>>,
+        #[serde(skip_serializing_if = "CallStageObservation::is_absent")]
+        call_stage: CallStageObservation,
     },
     ToolResult {
         tool_call_id: String,
@@ -168,13 +195,7 @@ pub(crate) fn attach_assistant_facts(message: VmValue, llm_result: &VmValue) -> 
                     VmValue::String(role) => Some(role.to_string()),
                     _ => None,
                 }),
-            call_stage: llm_result
-                .as_dict()
-                .and_then(|result| result.get(CALL_STAGE_KEY))
-                .map(|value| match value {
-                    VmValue::String(stage) => Some(stage.to_string()),
-                    _ => None,
-                }),
+            call_stage: CallStageObservation::from_result(llm_result),
         },
     )
 }
