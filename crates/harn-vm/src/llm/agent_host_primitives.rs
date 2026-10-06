@@ -12,6 +12,7 @@ use super::{
 };
 
 mod denial_results;
+mod dispatch_approval;
 mod dispatch_policy;
 pub(super) mod event_capture;
 mod host_permission;
@@ -24,6 +25,7 @@ use denial_results::{
     agent_primitive_denied_tool, deny_tool_call, deny_tool_call_value,
     schema_validation_tool_result, DenialEvidence,
 };
+use dispatch_approval::DispatchApproval;
 use dispatch_policy::{tool_denial_from_policy, DispatchPolicy};
 use host_permission::{
     emit_permission_event, emit_permission_event_with_policy, emit_runtime_denied_activity,
@@ -1100,54 +1102,14 @@ pub(super) async fn host_agent_dispatch_tool_call(
         }
     }
 
-    let initial_invocation = (tool_name.clone(), tool_args.clone());
-    let mut host_approved_invocation = None;
-    let mut approval_repeat_count = 0;
-    let mut approval = crate::orchestration::current_run_approval_policy().map(|policy| {
-        let repeat_count = crate::orchestration::next_approval_policy_repeat_count(
-            &session_id,
-            &tool_name,
-            &tool_args,
-        );
-        approval_repeat_count = repeat_count;
-        policy.evaluate_dispatch(
-            &tool_name,
-            &tool_args,
-            repeat_count,
-            dispatch_annotations.as_ref(),
-        )
-    });
+    let mut dispatch_approval = DispatchApproval::new(&session_id, &tool_name, &tool_args);
+    let mut approval = dispatch_approval.evaluate(dispatch_annotations.as_ref());
     // Lethal-trifecta gate (Layer 1): once untrusted content has entered the
     // session's context, upgrade an auto-allow to an interactive confirmation
     // for any tool that can carry that content outward (network/fetch),
     // destroy state, or read secrets. Only acts where an approval policy is
     // installed, so non-interactive embedders are unaffected.
-    {
-        let security_policy = crate::security::current_policy();
-        if security_policy.trifecta_gate {
-            if let Some(decision) = approval.as_mut() {
-                if decision.is_allow() {
-                    let taint = super::agent_session_host::session_taint_snapshot(&session_id);
-                    if !taint.is_empty() {
-                        if let Some(outcome) = trifecta_gate_reason(
-                            &security_policy,
-                            dispatch_annotations.as_ref(),
-                            &tool_name,
-                            &tool_args,
-                            &taint,
-                        ) {
-                            let extra: &[&str] = if outcome.injection_flagged {
-                                &["prompt_injection"]
-                            } else {
-                                &[]
-                            };
-                            upgrade_to_trifecta_ask(decision, outcome.reason, extra);
-                        }
-                    }
-                }
-            }
-        }
-    }
+    dispatch_approval.apply_trifecta(approval.as_mut(), dispatch_annotations.as_ref());
     // The `AutoReview` seam: a refusal nobody is present to reconsider. Runs
     // AFTER the policy has decided and the trifecta gate has had its say, so
     // the reviewer sees the FINAL refusal and cannot pre-empt a gate that had
@@ -1227,7 +1189,7 @@ pub(super) async fn host_agent_dispatch_tool_call(
                     if let Some(new_args) = response.get("args") {
                         tool_args = new_args.clone();
                     }
-                    host_approved_invocation = Some((tool_name.clone(), tool_args.clone()));
+                    dispatch_approval.record_host_grant(&tool_name, &tool_args);
                     approval_status = Some("host_granted");
                     emit_permission_event_with_policy(
                         &session_id,
@@ -1437,42 +1399,27 @@ pub(super) async fn host_agent_dispatch_tool_call(
         return Ok(json_to_vm_value(&denied));
     }
 
-    // Approval binds an invocation, not just a tool name. Host argument edits,
-    // hooks, and routing must not carry an earlier allow across a new path or
-    // tool. Reuse the owning evaluator without consuming another repeat count.
-    // A host may approve its exact replacement arguments, but cannot override
-    // a hard refusal or authorize a subsequent hook/router replacement.
-    if initial_invocation.0 != tool_name || initial_invocation.1 != tool_args {
-        if let Some(policy) = crate::orchestration::current_run_approval_policy() {
-            let final_annotations = tool_annotations_for(tools, &tool_name);
-            let decision = policy.evaluate_dispatch(
-                &tool_name,
-                &tool_args,
-                approval_repeat_count,
-                final_annotations.as_ref(),
-            );
-            let exact_host_grant = host_approved_invocation
-                .as_ref()
-                .is_some_and(|(name, args)| name == &tool_name && args == &tool_args);
-            if decision.is_deny() || (decision.is_ask() && !exact_host_grant) {
-                emit_runtime_denied_activity(&session_id, &tool_id, &tool_name, &decision);
-                let denied = deny_tool_call(
-                    Some(&ctx),
-                    &session_id,
-                    &tool_name,
-                    &tool_id,
-                    &tool_args,
-                    decision.terminal_denial(),
-                    false,
-                    DenialEvidence::new(Some(decision.receipt), None),
-                )
-                .await;
-                return Ok(json_to_vm_value(&attach_hook_reminder_audit(
-                    denied,
-                    hook_reminder_reports,
-                )));
-            }
-        }
+    if let Some(decision) = dispatch_approval.recheck(
+        &tool_name,
+        &tool_args,
+        tool_annotations_for(tools, &tool_name).as_ref(),
+    ) {
+        emit_runtime_denied_activity(&session_id, &tool_id, &tool_name, &decision);
+        let denied = deny_tool_call(
+            Some(&ctx),
+            &session_id,
+            &tool_name,
+            &tool_id,
+            &tool_args,
+            decision.terminal_denial(),
+            false,
+            DenialEvidence::new(Some(decision.receipt), None),
+        )
+        .await;
+        return Ok(json_to_vm_value(&attach_hook_reminder_audit(
+            denied,
+            hook_reminder_reports,
+        )));
     }
 
     let started = std::time::Instant::now();
