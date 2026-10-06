@@ -934,6 +934,7 @@ extraction needs a per-language extractor.
 | `apply_node`, `insert_at_anchor` | **all** registered grammars |
 | `rename_symbol` | Rust, TypeScript/TSX, JavaScript/JSX, Python, Go, Swift |
 | `symbols` / `outline` | every general-purpose language (not the data/markup grammars) |
+| `move_symbol`, `extract_function`, `change_signature` | none yet; reserved for graph-grounded refactorings |
 
 Registered grammars fall into two groups:
 
@@ -965,7 +966,8 @@ pipeline default(harness: Harness) {
 ```
 
 Each row is `{language, extension, apply_node, insert_at_anchor,
-rename_symbol, symbols}`. A `language` filter that names no grammar
+rename_symbol, symbols, move_symbol, extract_function, change_signature,
+health}`. A `language` filter that names no grammar
 returns `result == "unsupported_language"` plus a `fallback_suggestion`.
 
 ### Graceful degradation

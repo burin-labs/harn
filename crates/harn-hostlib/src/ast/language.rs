@@ -93,6 +93,13 @@ pub struct EditCapabilities {
     pub rename_symbol: bool,
     /// Symbol + outline extraction.
     pub symbols: bool,
+    /// Move a declaration to another file and rewrite its imports and
+    /// qualified uses.
+    pub move_symbol: bool,
+    /// Lift a span into a new function and replace it with a call.
+    pub extract_function: bool,
+    /// Change a function's parameters and rewrite every call site.
+    pub change_signature: bool,
 }
 
 impl Language {
@@ -425,6 +432,10 @@ impl Language {
             insert_at_anchor: true,
             rename_symbol: self.supports_rename(),
             symbols: self.supports_symbol_extraction(),
+            // Graph-grounded refactorings. No language qualifies yet.
+            move_symbol: false,
+            extract_function: false,
+            change_signature: false,
         }
     }
 
