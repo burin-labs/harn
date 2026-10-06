@@ -52,6 +52,16 @@ impl DispatchApproval {
         decision: Option<&mut PolicyEvaluation>,
         annotations: Option<&ToolAnnotations>,
     ) {
+        self.apply_trifecta_to(decision, annotations, &self.initial.0, &self.initial.1);
+    }
+
+    fn apply_trifecta_to(
+        &self,
+        decision: Option<&mut PolicyEvaluation>,
+        annotations: Option<&ToolAnnotations>,
+        tool: &str,
+        args: &Value,
+    ) {
         let security_policy = crate::security::current_policy();
         let Some(decision) = decision.filter(|decision| decision.is_allow()) else {
             return;
@@ -63,13 +73,9 @@ impl DispatchApproval {
         if taint.is_empty() {
             return;
         }
-        if let Some(outcome) = super::trifecta_gate_reason(
-            &security_policy,
-            annotations,
-            &self.initial.0,
-            &self.initial.1,
-            &taint,
-        ) {
+        if let Some(outcome) =
+            super::trifecta_gate_reason(&security_policy, annotations, tool, args, &taint)
+        {
             let extra: &[&str] = if outcome.injection_flagged {
                 &["prompt_injection"]
             } else {
@@ -92,7 +98,8 @@ impl DispatchApproval {
         // The same evaluator judges the final facts without consuming another
         // repeat count. An exact host replacement may retain ask approval, but
         // cannot override a hard refusal or approve a later hook/router edit.
-        let decision = policy.evaluate_dispatch(tool, args, self.repeat_count, annotations);
+        let mut decision = policy.evaluate_dispatch(tool, args, self.repeat_count, annotations);
+        self.apply_trifecta_to(Some(&mut decision), annotations, tool, args);
         let exact_host_grant = self
             .host_grant
             .as_ref()
