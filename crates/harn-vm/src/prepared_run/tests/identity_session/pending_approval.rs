@@ -193,8 +193,7 @@ fn pending_stop_reports_persistence_failure_without_leaving_a_grantable_request(
         .pending_approval(&bridge, "prepared-session-1", &batch)
         .unwrap()
         .stop()
-        .err()
-        .expect("persistence failure must reach the caller");
+        .expect_err("persistence failure must reach the caller");
     assert_eq!(error, "terminal fixture persistence refused");
     assert_eq!(sink.failed.load(Ordering::SeqCst), 1);
     assert_eq!(model_calls.load(Ordering::SeqCst), 0);
