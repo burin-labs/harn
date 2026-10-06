@@ -4,7 +4,6 @@
     "crates/harn-package/src/package/extensions_tests.rs": "crates/harn-cli/src/package/extensions_tests.rs"
   },
   "legacy_oversized_paths": [
-    "crates/harn-cli/src/commands/check/preflight.rs",
     "crates/harn-cli/src/commands/orchestrator/listener/acp_hub.rs",
     "crates/harn-dap/src/debugger/tests.rs",
     "crates/harn-package/src/package/extensions_tests.rs",
