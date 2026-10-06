@@ -150,12 +150,14 @@ pub fn reset_all_sinks() {
     }
 }
 
-/// Mirror externally-registered sinks from `source_session_id` onto
+/// Mirror directly registered sinks from `source_session_id` onto
 /// `target_session_id` without moving ownership. Transports such as ACP
 /// register sinks on the outer prompt session before a script runs; scripts
 /// may then open a first-class agent transcript and route `agent_loop` events
 /// through that inner id. Mirroring keeps the transport subscribed to the
-/// in-run child transcript while preserving explicit session ids.
+/// in-run child transcript while preserving explicit session ids. Inherited
+/// observers remain owned by lineage and are resolved at delivery/flush time;
+/// copying them here would retain former ancestors after reparenting or removal.
 pub fn mirror_session_sinks(source_session_id: &str, target_session_id: &str) {
     if source_session_id.is_empty() || target_session_id.is_empty() {
         return;
@@ -164,7 +166,11 @@ pub fn mirror_session_sinks(source_session_id: &str, target_session_id: &str) {
         return;
     }
     let mut reg = external_sinks().write().expect("sink registry poisoned");
-    let source_sinks = registered_snapshot(&reg, source_session_id);
+    let source_sinks = reg
+        .sinks
+        .get(source_session_id)
+        .cloned()
+        .unwrap_or_default();
     let target = reg.sinks.entry(target_session_id.to_string()).or_default();
     for source in source_sinks {
         if !target

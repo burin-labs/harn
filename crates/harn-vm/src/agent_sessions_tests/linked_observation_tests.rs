@@ -136,6 +136,107 @@ fn descendants_follow_reparenting_and_observer_removal() {
 }
 
 #[test]
+fn ambient_mirroring_cannot_pin_a_former_ancestor_after_reparenting() {
+    reset_all_sinks();
+    reset_session_store();
+    let former = observed_session("mirrored-former-ancestor");
+    let current = observed_session("mirrored-current-parent");
+    let middle = open_child_session("mirrored-former-ancestor", Some("mirrored-middle".into()));
+    let child = {
+        let _ambient = enter_current_session(&middle);
+        open_or_create(Some("mirrored-reparented-child".into()))
+    };
+    super::super::link_child_session(&middle, &child).unwrap();
+    emit_child_request(&child);
+    assert_eq!(
+        former.lock().unwrap().len(),
+        1,
+        "original lineage was reached"
+    );
+    super::super::link_child_session("mirrored-current-parent", &child).unwrap();
+    emit_child_request(&child);
+    assert_eq!(
+        former.lock().unwrap().len(),
+        1,
+        "ambient mirroring must not promote inherited observation into direct authority"
+    );
+    assert_eq!(
+        current.lock().unwrap().len(),
+        1,
+        "new parent receives exactly one event"
+    );
+}
+
+#[test]
+fn ambient_mirroring_cannot_retain_a_removed_ancestor_observer() {
+    reset_all_sinks();
+    reset_session_store();
+    let ancestor = observed_session("mirrored-removal-ancestor");
+    let middle = open_child_session(
+        "mirrored-removal-ancestor",
+        Some("mirrored-removal-middle".into()),
+    );
+    let child = {
+        let _ambient = enter_current_session(&middle);
+        open_or_create(Some("mirrored-removal-child".into()))
+    };
+    super::super::link_child_session(&middle, &child).unwrap();
+    emit_child_request(&child);
+    assert_eq!(
+        ancestor.lock().unwrap().len(),
+        1,
+        "observer was reached before removal"
+    );
+    clear_session_sinks("mirrored-removal-ancestor");
+    emit_child_request(&child);
+    assert_eq!(
+        ancestor.lock().unwrap().len(),
+        1,
+        "removed observer must not survive ambient mirroring"
+    );
+}
+
+#[test]
+fn ambient_mirroring_preserves_direct_transport_and_child_observers() {
+    reset_all_sinks();
+    reset_session_store();
+    let ancestor = observed_session("mirrored-transport-ancestor");
+    let transport = observed_session("mirrored-direct-transport");
+    super::super::link_child_session("mirrored-transport-ancestor", "mirrored-direct-transport")
+        .unwrap();
+    let current = observed_session("mirrored-transport-current-parent");
+    let child = {
+        let _ambient = enter_current_session("mirrored-direct-transport");
+        open_or_create(Some("mirrored-transport-child".into()))
+    };
+    let direct_child = Arc::new(Mutex::new(Vec::new()));
+    register_sink(&child, Arc::new(CapturingSink(direct_child.clone())));
+    super::super::link_child_session("mirrored-transport-current-parent", &child).unwrap();
+    super::super::link_child_session("mirrored-transport-current-parent", &child).unwrap();
+    emit_child_request(&child);
+    assert_eq!(
+        ancestor.lock().unwrap().len(),
+        0,
+        "former inherited observer receives no event"
+    );
+    assert_eq!(
+        transport.lock().unwrap().len(),
+        1,
+        "explicit mirrored transport remains subscribed"
+    );
+    assert_eq!(
+        current.lock().unwrap().len(),
+        1,
+        "current parent is delivered exactly once"
+    );
+    assert_eq!(
+        direct_child.lock().unwrap().len(),
+        1,
+        "direct child observer remains subscribed"
+    );
+}
+
+#[test]
 fn forks_observe_the_explicit_source_not_the_ambient_session() {
     reset_all_sinks();
     reset_session_store();
