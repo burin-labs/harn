@@ -15,8 +15,6 @@ pub import {
 import {
   __refactor_conflict,
   __refactor_invalid,
-  __refactor_member,
-  __refactor_result,
   __refactor_run,
   __refactor_unsupported,
 } from "std/edit/refactor_runtime"
@@ -473,260 +471,34 @@ pub fn edit_change_return_type(
   return __refactor_run(fs, random, ast, "change_return_type", language, [op], p, warns)
 }
 
-/** --- extract_function ------------------------------------------------------- */
-fn __refactor_fn_synth_kind(language: any) {
-  const table = {
-    javascript: "brace",
-    jsx: "brace",
-    python: "python",
-    ruby: "ruby",
-    tsx: "brace",
-    typescript: "brace",
-  }
-  return table.get(language, nil)
-}
-
-fn __refactor_min_indent(lines: list) {
-  let smallest = -1
-  for line in lines {
-    if trim(line ?? "") == "" {
-      continue
-    }
-    const body = regex_replace("^[ \\t]+", "", line)
-    const n = len(line) - len(body)
-    if smallest == -1 || n < smallest {
-      smallest = n
-    }
-  }
-  if smallest == -1 {
-    return 0
-  }
-  return smallest
-}
-
-fn __refactor_strip_n(line: string?, n: int) {
-  const raw = line ?? ""
-  if len(raw) >= n {
-    return raw.substring(n)
-  }
-  return ""
-}
-
-fn __refactor_indent_lines(lines: any, prefix: string) {
-  return lines.map(
-    { l ->
-      if trim(l) == "" {
-        ""
-      } else {
-        prefix + l
-      }
-    },
-  )
-}
-
 /**
- * Free names in an extracted snippet, which become the extracted function's
- * parameters.
+ * --- extract_function -------------------------------------------------------
+ * Extract an expression, a run of statements, or a closure body into a new
+ * function `new_name`, replacing it and every same-file copy with a call.
  *
- * This deliberately ignores the response's `resolution` field. That field
- * answers "can this FILE's names be resolved", which is the right question for
- * reporting a defect and the wrong one here: `src` is a fragment, so it is
- * expected not to parse standalone and expected to reference names bound by its
- * surrounding scope. Those free names are exactly what we want as parameters.
- */
-fn __refactor_undef_names(ast: HarnessAst, src: any, language: any) {
-  const r = ast.undefined_names({content: src, language: language})
-  if !(r?.supported ?? false) {
-    return []
-  }
-  let names = []
-  for d in r?.diagnostics ?? [] {
-    if (d?.kind ?? "identifier") == "identifier" && !__refactor_member(names, d.name) {
-      names = names + [d.name]
-    }
-  }
-  return names
-}
-
-fn __refactor_enclosing_fn(symbols: list?, start_line: any, end_line: any) {
-  let best = nil
-  for sym in symbols ?? [] {
-    if sym.kind != "function" || sym.container != nil {
-      continue
-    }
-    if sym.start_row <= start_line && sym.end_row >= end_line {
-      if best == nil || sym.end_row - sym.start_row < best.end_row - best.start_row {
-        best = sym
-      }
-    }
-  }
-  return best
-}
-
-fn __refactor_synth_fn(kind: string, name: string, params: list, body_lines: any) {
-  const signature = name + "(" + join(params, ", ") + ")"
-  if kind == "python" {
-    return ["def " + signature + ":"] + __refactor_indent_lines(body_lines, "    ")
-  }
-  if kind == "ruby" {
-    return ["def " + signature] + __refactor_indent_lines(body_lines, "  ") + ["end"]
-  }
-  return ["function " + signature + " {"] + __refactor_indent_lines(body_lines, "  ") + ["}"]
-}
-
-fn __refactor_wrap_probe(kind: string, body_lines: any) {
-  if kind == "python" {
-    return join(["def __harn_probe__():"] + __refactor_indent_lines(body_lines, "    "), "\n")
-  }
-  if kind == "ruby" {
-    return join(["def __harn_probe__"] + __refactor_indent_lines(body_lines, "  ") + ["end"], "\n")
-  }
-  return join(
-    ["function __harn_probe__() {"] + __refactor_indent_lines(body_lines, "  ") + ["}"],
-    "\n",
-  )
-}
-
-/**
- * Extract a contiguous range of statements (`range`{start_line, end_line},
- * 0-based inclusive) out of an enclosing top-level function into a new
- * function `new_name`, replacing the range with a call to it.
+ * A thin wrapper over `code_index.extract_function`, which owns the analysis:
+ * the region's free names bound in the enclosing function become parameters,
+ * names it assigns and the caller reads afterwards become the return value
+ * (a tuple in Rust and Python, an object in TypeScript and JavaScript), and a
+ * closure body becomes a function over the closure's parameters.
  *
- * Captured free variables become parameters: the selection's free names
- * (computed via `ast.undefined_names` over the block) minus the
- * enclosing function's free names (so module-level / imported names stay
- * referenced, not parameterized). Pass `params_order` to fix the order.
- *
- * The new definition is placed at module scope after the enclosing
- * function (`target_scope: "after"`, default) or before it
- * (`target_scope: "before"`). Only top-level functions are supported as
- * the enclosing scope (methods/nested return `result: "unsupported"`),
- * which keeps the placement and indentation correct.
- *
- * v1 produces a `void` function: if the block computes values used after
- * the selection, the generated call will not thread them back — adjust the
- * call by hand or select a self-contained block. Languages: python,
- * javascript, jsx, typescript, tsx, ruby (the set with both capture
- * analysis and a parameter form that needs no inferred types).
+ * Name the region with `start_line`/`end_line` (1-based, inclusive) or its
+ * exact text in `region`. Rust and strict TypeScript need `signature`, the
+ * typed header; without it the result is `types_required` with the computed
+ * `inputs` and `outputs`. `helper` inserts a complete function verbatim.
+ * Refusals (`control_flow_escapes`, `signature_mismatch`, `name_conflict`,
+ * ...) leave the file byte-identical. Languages: rust, typescript, tsx,
+ * javascript, jsx, python.
  *
  * @effects: [host, fs]
  * @errors: [backend]
  * @api_stability: experimental
- * @example: edit_extract_function({path: "app.py", range: {start_line: 3, end_line: 5}, new_name: "summarize"})
+ * @example: edit_extract_function(harness.code_index, {path: "app.py", start_line: 4, end_line: 6, new_name: "summarize"})
  */
-pub fn edit_extract_function(fs: HarnessFs, random: HarnessRandom, ast: HarnessAst, params: dict?) {
-  const p = params ?? {}
-  const language = __refactor_detect_language(p)
-  const kind = __refactor_fn_synth_kind(language)
-  if kind == nil {
-    return __refactor_unsupported(
-      "extract_function",
-      language,
-      "extract_function supports python/javascript/jsx/typescript/tsx/ruby",
-    )
-  }
-  const {path = "", new_name = "", range = {}} = p ?? {}
-  const start_line = range?.start_line
-  const end_line = range?.end_line ?? start_line
-  if path == "" || new_name == "" || start_line == nil || end_line == nil {
-    return __refactor_invalid(
-      "extract_function",
-      language,
-      "`path`, `new_name`, and `range`{start_line, end_line} are required",
-    )
-  }
-  const probe_session = if p?.dry_run ?? false {
-    nil
-  } else {
-    p?.session_id
-  }
-  const read = fs.staged_read_text({path: path, session_id: probe_session})
-  const content = read?.content ?? ""
-  const lines = split(content, "\n")
-  if start_line < 0 || end_line >= len(lines) || end_line < start_line {
-    return __refactor_invalid("extract_function", language, "`range` is outside the file")
-  }
-  const block_lines = lines[start_line:end_line + 1]
-  const dedent = __refactor_min_indent(block_lines)
-  const dedented = block_lines.map({ l -> __refactor_strip_n(l, dedent) })
-  const symbols = ast.symbols({path: path, language: language})?.symbols ?? []
-  const enclosing = __refactor_enclosing_fn(symbols, start_line, end_line)
-  if enclosing == nil {
-    return __refactor_result(
-      "extract_function",
-      language,
-      {
-        result: "unsupported",
-        details: "selected range is not inside a top-level function",
-        errors: [
-          {code: "no_enclosing_function", message: "range is not inside a top-level function"},
-        ],
-      },
-    )
-  }
-  const block_undef = __refactor_undef_names(ast, __refactor_wrap_probe(kind, dedented), language)
-  const enclosing_lines = lines[enclosing.start_row:enclosing.end_row + 1]
-  const enclosing_dedent = __refactor_min_indent(enclosing_lines)
-  const enclosing_src = join(
-    enclosing_lines.map({ l -> __refactor_strip_n(l, enclosing_dedent) }),
-    "\n",
-  )
-  const enclosing_undef = __refactor_undef_names(ast, enclosing_src, language)
-  let captures = []
-  for nm in block_undef {
-    if !__refactor_member(enclosing_undef, nm) && nm != new_name
-      && !__refactor_member(captures, nm) {
-      captures = captures + [nm]
-    }
-  }
-  const final_params = p?.params_order ?? captures
-  const def_lines = __refactor_synth_fn(kind, new_name, final_params, dedented)
-  const orig_indent = __refactor_leading_ws(lines[start_line])
-  const term = if kind == "brace" {
-    ";"
-  } else {
-    ""
-  }
-  const call_line = orig_indent + new_name + "(" + join(final_params, ", ") + ")" + term
-  const head = if start_line > 0 {
-    lines[:start_line]
-  } else {
-    []
-  }
-  const tail = if end_line + 1 < len(lines) {
-    lines[end_line + 1:]
-  } else {
-    []
-  }
-  const replaced = head + [call_line] + tail
-  const target_scope = p?.target_scope ?? "after"
-  const new_lines = if target_scope == "before" {
-    const pre = if enclosing.start_row > 0 {
-      replaced[:enclosing.start_row]
-    } else {
-      []
-    }
-    pre + def_lines + [""] + replaced[enclosing.start_row:]
-  } else {
-    const insert_idx = enclosing.end_row + (1 - (end_line - start_line + 1)) + 1
-    const suffix = if insert_idx < len(replaced) {
-      replaced[insert_idx:]
-    } else {
-      []
-    }
-    replaced[:insert_idx] + [""] + def_lines + suffix
-  }
-  const after = join(new_lines, "\n")
-  return __refactor_run(
-    fs,
-    random,
-    ast,
-    "extract_function",
-    language,
-    [{kind: "content", path: path, after: after}],
-    p,
-    [],
-  )
+pub fn edit_extract_function(code_index: HarnessCodeIndex, params: dict?) {
+  const payload = code_index.extract_function(params ?? {}) ?? {}
+  return payload
+    + {ok: payload?.result == "applied" && len(payload?.failed_paths_with_reasons ?? []) == 0}
 }
 
 /** --- inline + move_decl ----------------------------------------------------- */
