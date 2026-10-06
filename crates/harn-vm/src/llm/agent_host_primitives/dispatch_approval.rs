@@ -7,7 +7,7 @@ use serde_json::Value;
 pub(super) struct DispatchApproval {
     policy: Option<RunApprovalPolicy>,
     session: String,
-    initial: (String, Value),
+    initial: Option<(String, Value)>,
     host_grant: Option<(String, Value)>,
     repeat_count: u64,
 }
@@ -20,10 +20,17 @@ impl DispatchApproval {
         } else {
             0
         };
+        // Unconfigured dispatch captures no approval arguments or strings.
+        let initial = policy.as_ref().map(|_| (tool.into(), args.clone()));
+        let session = if policy.is_some() {
+            session.into()
+        } else {
+            String::new()
+        };
         Self {
             policy,
-            session: session.into(),
-            initial: (tool.into(), args.clone()),
+            session,
+            initial,
             host_grant: None,
             repeat_count,
         }
@@ -33,14 +40,10 @@ impl DispatchApproval {
         &self,
         annotations: Option<&ToolAnnotations>,
     ) -> Option<PolicyEvaluation> {
-        self.policy.as_ref().map(|policy| {
-            policy.evaluate_dispatch(
-                &self.initial.0,
-                &self.initial.1,
-                self.repeat_count,
-                annotations,
-            )
-        })
+        let (tool, args) = self.initial.as_ref()?;
+        self.policy
+            .as_ref()
+            .map(|policy| policy.evaluate_dispatch(tool, args, self.repeat_count, annotations))
     }
 
     pub(super) fn record_host_grant(&mut self, tool: &str, args: &Value) {
@@ -52,7 +55,9 @@ impl DispatchApproval {
         decision: Option<&mut PolicyEvaluation>,
         annotations: Option<&ToolAnnotations>,
     ) {
-        self.apply_trifecta_to(decision, annotations, &self.initial.0, &self.initial.1);
+        if let Some((tool, args)) = self.initial.as_ref() {
+            self.apply_trifecta_to(decision, annotations, tool, args);
+        }
     }
 
     fn apply_trifecta_to(
@@ -91,7 +96,8 @@ impl DispatchApproval {
         args: &Value,
         annotations: Option<&ToolAnnotations>,
     ) -> Option<PolicyEvaluation> {
-        if self.initial.0 == tool && self.initial.1 == *args {
+        let (initial_tool, initial_args) = self.initial.as_ref()?;
+        if initial_tool == tool && initial_args == args {
             return None;
         }
         let policy = self.policy.as_ref()?;
