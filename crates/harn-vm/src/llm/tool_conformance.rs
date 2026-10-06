@@ -412,13 +412,27 @@ fn classify_http_failure(status: u16, body: &str) -> ToolProbeClassification {
 pub async fn run_tool_conformance_probe(
     options: ToolConformanceProbeOptions,
 ) -> ToolConformanceReport {
-    let model = llm_config::resolve_model_info(&options.model);
-    let provider = if options.provider.trim().is_empty() {
-        model.provider.clone()
-    } else {
-        options.provider.clone()
+    // Preserve the requested identity until the active-route owner validates it.
+    // Wire overlays may otherwise erase a retired catalog selector.
+    let resolution = llm_config::resolve_model_request_for_active_call(
+        &options.model,
+        (!options.provider.trim().is_empty()).then_some(options.provider.as_str()),
+    );
+    let (provider, model_id) = match &resolution {
+        Ok(route) => (
+            route.resolved_provider.clone(),
+            resolved_probe_model_id(&route.resolved_model),
+        ),
+        Err(_) => {
+            let model = llm_config::resolve_model_info(&options.model);
+            let provider = if options.provider.trim().is_empty() {
+                model.provider
+            } else {
+                options.provider.clone()
+            };
+            (provider, options.model.clone())
+        }
     };
-    let model_id = resolved_probe_model_id(&model.id);
     let base_url = options.base_url.clone().or_else(|| {
         llm_config::provider_config(&provider).map(|def| llm_config::resolve_base_url(&def))
     });
@@ -427,6 +441,14 @@ pub async fn run_tool_conformance_probe(
     let expected_value = options.probe_case.expected_value(&options.marker);
     for _ in 0..options.repeat.max(1) {
         for mode in &modes {
+            if let Err(error) = &resolution {
+                cases.push(ToolConformanceCase::transport_error(
+                    *mode,
+                    error.to_string(),
+                    None,
+                ));
+                continue;
+            }
             cases.push(
                 execute_live_probe_case(
                     &provider,
@@ -1030,11 +1052,6 @@ async fn execute_live_probe_case(
     marker: &str,
     timeout_secs: u64,
 ) -> ToolConformanceCase {
-    // Both the provider adapter and raw endpoint are live dispatch paths.
-    // Apply the canonical active-route contract before credentials or HTTP.
-    if let Err(error) = llm_config::resolve_model_request_for_active_call(model, Some(provider)) {
-        return ToolConformanceCase::transport_error(mode, error.to_string(), None);
-    }
     if let Err(error) = super::admission::check_auxiliary(None, "provider conformance probes") {
         return ToolConformanceCase::transport_error(mode, error.to_string(), None);
     }
