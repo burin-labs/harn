@@ -24,6 +24,8 @@ use time::OffsetDateTime;
 /// session; assigned by the store on `append`.
 pub type EventId = u64;
 
+pub(crate) const CANONICAL_ORIGIN_SESSION_HEADER: &str = "harn.canonical_origin_session_id";
+
 /// The named event variants the primitive understands out of the box.
 /// `Custom` carries an arbitrary string discriminator so surfaces can
 /// extend the taxonomy without forking the schema; the structural
@@ -277,6 +279,19 @@ pub struct StoredEvent {
 }
 
 impl StoredEvent {
+    /// The store admits this fact on append and retains it in a fork.
+    /// It is not a caller-supplied producer identity.
+    pub fn canonical_origin_session_id(&self) -> &str {
+        self.headers
+            .get(CANONICAL_ORIGIN_SESSION_HEADER)
+            .map_or(self.session_id.as_str(), String::as_str)
+    }
+
+    pub(crate) fn bind_canonical_origin(&mut self, session_id: &str) {
+        self.headers
+            .insert(CANONICAL_ORIGIN_SESSION_HEADER.into(), session_id.into());
+    }
+
     /// Read producer identity from the signed canonical headers.
     pub fn identity(
         &self,

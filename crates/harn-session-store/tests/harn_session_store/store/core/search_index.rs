@@ -282,7 +282,7 @@ async fn canonical_search_index_tracks_fork_truncate_and_delete() {
         let child = store
             .fork(
                 &parent.id,
-                Some(removable.event_id),
+                harn_session_store::CanonicalSessionBoundary::acknowledged(&removable),
                 Some("search-child".into()),
             )
             .await

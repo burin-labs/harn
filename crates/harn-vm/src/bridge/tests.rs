@@ -2,7 +2,7 @@ use super::*;
 use harn_clock::test_support::within;
 use harn_parser::diagnostic_codes::Code;
 
-fn test_bridge() -> HostBridge {
+pub(super) fn test_bridge() -> HostBridge {
     HostBridge::from_parts(
         Arc::new(Mutex::new(HashMap::new())),
         Arc::new(AtomicBool::new(false)),

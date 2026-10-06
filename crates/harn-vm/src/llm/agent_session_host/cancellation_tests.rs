@@ -82,12 +82,12 @@ async fn ordinary_init_failure_persists_terminal_before_releasing_owned_session(
             .pointer("/transcript_event/metadata/visible_reply"),
         Some(&json!(""))
     );
-    let replay = crate::agent_session_restore::load_canonical_session_replay_events_from_store(
-        &*store, session_id,
-    )
-    .await
-    .expect("restore initialization failure")
-    .expect("known session");
+    let replay =
+        crate::agent_session_restore::load_canonical_session_replay_from_store(&*store, session_id)
+            .await
+            .expect("restore initialization failure")
+            .expect("known session")
+            .events;
     assert!(replay.iter().any(
         |event| matches!(&event.event, crate::agent_events::AgentEvent::TurnPhaseChanged {
         phase: crate::agent_events::AgentTurnPhase::Terminal { reply, outcome }, ..

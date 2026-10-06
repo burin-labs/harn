@@ -325,6 +325,7 @@ impl AcpServer {
             ),
         );
         host_bridge.set_session_id(&bridge.session_id);
+        host_bridge.set_caller_message_id(prompt.correlation.message_id.clone());
         if let Some(session) = self.sessions.get_mut(&session_id) {
             session.host_bridge = Some(host_bridge.clone());
             session.concurrent_control.set_prompt_active(true);
