@@ -20,7 +20,10 @@ fn main(harness: Harness) {
       returns: {type: "string"},
       prepare: { args -> return {operation: {command: harness.fs.read_text(facts), cwd: root}} },
       handler: { args ->
-        const operation = tool_invocation_binding().operation
+        const child = spawn {
+          return tool_invocation_binding().operation
+        }
+        const operation = await(child)
         harness.fs.write_text(marker, operation.command)
         return operation.command
       },

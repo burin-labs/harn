@@ -175,6 +175,25 @@ pub(super) async fn scope<F: Future>(
     INVOCATION.scope(invocation, future).await
 }
 
+/// Capture while the creating task is still scoped. Tokio tasks do not inherit
+/// task-locals, so every child interpreter must carry the binding and the
+/// preparation restriction through the existing subtask owner.
+pub(crate) fn scope_subtask<F: Future>(future: F) -> impl Future<Output = F::Output> {
+    let preparing = PREPARING.try_with(|()| true).unwrap_or(false);
+    let invocation = INVOCATION.try_with(Clone::clone).ok().flatten();
+    async move {
+        INVOCATION
+            .scope(invocation, async move {
+                if preparing {
+                    PREPARING.scope((), future).await
+                } else {
+                    future.await
+                }
+            })
+            .await
+    }
+}
+
 pub(crate) fn current_binding() -> VmValue {
     INVOCATION
         .try_with(|invocation| {

@@ -202,7 +202,9 @@ pub(crate) fn prepare<F: Future>(
     PreparedSubtask {
         inner: scope_ambient(
             AmbientExecutionScope::capture_for_inline_subtask(),
-            with_pool_registry_scope(registry, future),
+            crate::llm::agent_tool_preparation::scope_subtask(with_pool_registry_scope(
+                registry, future,
+            )),
         ),
     }
 }

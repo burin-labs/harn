@@ -9,6 +9,25 @@ use tokio::sync::Mutex;
 use crate::bridge::HostBridge;
 use crate::value::VmValue;
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn prepared_verify_child_interpreter_preserves_read_only_restriction() {
+    // Ordinary execution policy can be bypassed by trusted host adapters. The
+    // mandatory preparation restriction must survive the real worker boundary
+    // even when no ordinary policy is installed in this control.
+    assert!(super::enforce_contract("unknown_host_effect", None).is_ok());
+    let result = super::PREPARING
+        .scope((), async {
+            crate::vm::subtask::spawn_child(
+                Arc::new(crate::stdlib::pool::PoolRegistry::default()),
+                async { super::enforce_contract("unknown_host_effect", None) },
+            )
+            .await
+            .unwrap()
+        })
+        .await;
+    assert!(result.is_err(), "child must retain preparation restriction");
+}
+
 struct BridgeGuard(Option<Arc<HostBridge>>);
 impl Drop for BridgeGuard {
     fn drop(&mut self) {
