@@ -339,6 +339,61 @@ pipeline t(harness: Harness) {
     assert_eq!(out, "[harn] kind:interrupted:handler_timeout");
 }
 
+/// Run `source` with a sync builtin `observe_interrupt` that blocks for
+/// `block`, then reports the error a VM-less blocking operation (Bubblewrap
+/// preparation) derives from the installed interrupt context. Returns what
+/// that builtin observed, or `None` when it was never reached.
+fn interrupt_error_seen_by_sync_builtin(source: &str, block: Duration) -> Option<String> {
+    let seen = Arc::new(std::sync::Mutex::new(None::<String>));
+    let writer = Arc::clone(&seen);
+    let _ = run_harn_with_setup(source, move |vm| {
+        vm.register_builtin("observe_interrupt", move |_, _| {
+            std::thread::sleep(block);
+            let error = crate::op_interrupt::requested_error();
+            *writer.lock().unwrap() = Some(error.as_ref().map_or_else(
+                || "none".to_string(),
+                |error| match error {
+                    crate::VmError::Thrown(value) => value.display(),
+                    other => other.to_string(),
+                },
+            ));
+            error.map_or(Ok(VmValue::Nil), Err)
+        });
+    });
+    let seen = seen.lock().unwrap().clone();
+    seen
+}
+
+#[test]
+fn test_sync_interrupt_error_keeps_the_vm_interrupt_reason() {
+    let handler_window = interrupt_error_seen_by_sync_builtin(
+        r#"
+import "std/signal"
+
+pipeline t(harness: Harness) {
+  on_interrupt({ -> observe_interrupt() }, {graceful_timeout_ms: 200})
+  try { __signal_raise("SIGINT") } catch (e) { }
+}
+"#,
+        Duration::from_millis(400),
+    );
+    assert_eq!(
+        handler_window.as_deref(),
+        Some("kind:interrupted:handler_timeout"),
+        "an expired on_interrupt graceful window must not read as a scope deadline"
+    );
+
+    let scope = interrupt_error_seen_by_sync_builtin(
+        r#"
+pipeline t(harness: Harness) {
+  try { deadline 50ms { observe_interrupt() } } catch (e) { }
+}
+"#,
+        Duration::from_millis(200),
+    );
+    assert_eq!(scope.as_deref(), Some("Deadline exceeded"));
+}
+
 #[test]
 fn test_host_signal_token_dispatches_matching_signal() {
     let rt = tokio::runtime::Builder::new_current_thread()

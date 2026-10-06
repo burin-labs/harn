@@ -294,7 +294,11 @@ fn push_unique<T: Copy + Eq>(values: &mut Vec<T>, value: T) {
 #[derive(Clone, Default)]
 struct OpInterrupt {
     cancel: Option<Arc<AtomicBool>>,
+    /// A scope `deadline` or an operation bound from [`with_deadline`].
     deadline: Option<Instant>,
+    /// The `on_interrupt` handler's `graceful_timeout_ms` window. Kept apart
+    /// from `deadline` because expiry is a different error kind.
+    handler_deadline: Option<Instant>,
 }
 
 thread_local! {
@@ -451,7 +455,30 @@ impl Drop for OpInterruptGuard {
 /// The VM calls this around sync builtin dispatch; tests use it to simulate
 /// scope cancellation without booting a full interpreter.
 pub fn install(cancel: Option<Arc<AtomicBool>>, deadline: Option<Instant>) -> OpInterruptGuard {
-    let prev = CURRENT.with(|slot| slot.borrow_mut().replace(OpInterrupt { cancel, deadline }));
+    install_context(OpInterrupt {
+        cancel,
+        deadline,
+        handler_deadline: None,
+    })
+}
+
+/// The VM's sync-builtin installation: the scope deadline and the
+/// interrupt-handler window stay distinct so a VM-less observer reports the
+/// same error kind the VM's own interrupt check would.
+pub(crate) fn install_for_vm(
+    cancel: Option<Arc<AtomicBool>>,
+    scope_deadline: Option<Instant>,
+    handler_deadline: Option<Instant>,
+) -> OpInterruptGuard {
+    install_context(OpInterrupt {
+        cancel,
+        deadline: scope_deadline,
+        handler_deadline,
+    })
+}
+
+fn install_context(context: OpInterrupt) -> OpInterruptGuard {
+    let prev = CURRENT.with(|slot| slot.borrow_mut().replace(context));
     OpInterruptGuard { prev: Some(prev) }
 }
 
@@ -462,14 +489,14 @@ pub fn with_deadline(deadline: Instant) -> OpInterruptGuard {
     let parent = CURRENT
         .with(|slot| slot.borrow().clone())
         .unwrap_or_default();
-    install(
-        parent.cancel,
-        Some(
+    install_context(OpInterrupt {
+        deadline: Some(
             parent
                 .deadline
                 .map_or(deadline, |earlier| earlier.min(deadline)),
         ),
-    )
+        ..parent
+    })
 }
 
 /// Returns `true` when an interrupt context is installed on this thread.
@@ -488,28 +515,33 @@ pub fn requested() -> bool {
 }
 
 enum InterruptReason {
-    Deadline,
+    HandlerTimeout,
     Cancelled,
+    Deadline,
 }
 
-/// Preparation has no VM to dispatch through; its caller retains that owner.
-#[cfg(target_os = "linux")]
+/// The error a blocking operation with no VM of its own returns once an
+/// interrupt is requested. Its caller's VM still owns dispatch; this only has
+/// to name the same kind that VM's interrupt check would.
+// Only Linux Bubblewrap preparation consumes it outside tests today.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 pub(crate) fn requested_error() -> Option<crate::VmError> {
     requested_reason().map(|reason| match reason {
-        InterruptReason::Deadline => crate::Vm::deadline_exceeded_error(),
+        InterruptReason::HandlerTimeout => crate::Vm::interrupt_handler_timeout_error(),
         InterruptReason::Cancelled => crate::cancellation::cancelled_without_machine(),
+        InterruptReason::Deadline => crate::Vm::deadline_exceeded_error(),
     })
 }
 
+/// Precedence mirrors the VM's interrupt check: an expired handler window,
+/// then cancellation, then a scope deadline.
 fn requested_reason() -> Option<InterruptReason> {
     CURRENT.with(|slot| {
         let ctx = slot.borrow();
         let ctx = ctx.as_ref()?;
-        if ctx
-            .deadline
-            .is_some_and(|deadline| Instant::now() >= deadline)
-        {
-            return Some(InterruptReason::Deadline);
+        let now = Instant::now();
+        if ctx.handler_deadline.is_some_and(|deadline| now >= deadline) {
+            return Some(InterruptReason::HandlerTimeout);
         }
         if ctx
             .cancel
@@ -517,6 +549,9 @@ fn requested_reason() -> Option<InterruptReason> {
             .is_some_and(|token| token.load(Ordering::SeqCst))
         {
             return Some(InterruptReason::Cancelled);
+        }
+        if ctx.deadline.is_some_and(|deadline| now >= deadline) {
+            return Some(InterruptReason::Deadline);
         }
         None
     })
@@ -1203,6 +1238,27 @@ mod tests {
             .expect("monotonic clock supports a 1ms test lookback");
         let _guard = install(None, Some(expired));
         assert!(requested());
+    }
+
+    #[test]
+    fn requested_error_follows_the_vm_interrupt_precedence() {
+        let expired = Instant::now()
+            .checked_sub(Duration::from_millis(1))
+            .expect("monotonic clock supports a 1ms test lookback");
+        let thrown = || match requested_error() {
+            Some(crate::VmError::Thrown(value)) => value.display(),
+            other => panic!("expected a thrown interrupt error, got {other:?}"),
+        };
+        let cancel = Arc::new(AtomicBool::new(true));
+        let _all = install_for_vm(Some(cancel.clone()), Some(expired), Some(expired));
+        assert_eq!(thrown(), "kind:interrupted:handler_timeout");
+        // An operation bound keeps the caller's handler window.
+        let _bounded = with_deadline(Instant::now() + Duration::from_secs(60));
+        assert_eq!(thrown(), "kind:interrupted:handler_timeout");
+        let _cancel_and_scope = install_for_vm(Some(cancel), Some(expired), None);
+        assert!(requested_error().is_some_and(|error| crate::cancellation::is_cancellation(&error)));
+        let _scope = install_for_vm(None, Some(expired), None);
+        assert_eq!(thrown(), "Deadline exceeded");
     }
 
     #[test]

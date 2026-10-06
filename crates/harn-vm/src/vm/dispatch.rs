@@ -848,19 +848,18 @@ impl Vm {
     pub(crate) fn sync_builtin_interrupt_guard(
         &self,
     ) -> Option<crate::op_interrupt::OpInterruptGuard> {
-        // Mirror `execution.rs::next_deadline`: innermost scope deadline,
-        // tightened by the interrupt-handler deadline when that is sooner.
+        // Mirror `execution.rs::next_deadline`: the innermost scope deadline
+        // and the interrupt-handler window both bound the call. They stay
+        // separate so expiry keeps its own error kind.
         let scope_deadline = self.deadlines.last().map(|(deadline, _)| *deadline);
-        let deadline = match (scope_deadline, self.interrupt_handler_deadline) {
-            (Some(scope), Some(interrupt)) => Some(scope.min(interrupt)),
-            (scope, interrupt) => scope.or(interrupt),
-        };
-        if self.cancel_token.is_none() && deadline.is_none() {
+        let handler_deadline = self.interrupt_handler_deadline;
+        if self.cancel_token.is_none() && scope_deadline.is_none() && handler_deadline.is_none() {
             return None;
         }
-        Some(crate::op_interrupt::install(
+        Some(crate::op_interrupt::install_for_vm(
             self.cancel_token.clone(),
-            deadline,
+            scope_deadline,
+            handler_deadline,
         ))
     }
 
