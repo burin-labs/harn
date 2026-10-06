@@ -123,7 +123,7 @@ use harn_serve::{
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut agent = EmbeddedAgentClient::spawn(AcpServerConfig::new(None)).await?;
-    let session = agent.start_run(AcpSessionNewParams::harness.fs.cwd(".")).await?;
+    let session = agent.start_run(AcpSessionNewParams::isolated(".")).await?;
     let view = agent.session_view(session.session_id.clone()).await?;
     assert_eq!(view.schema, "harn.session_view.v1");
 
@@ -172,10 +172,17 @@ The ACP channel server is `!Send` because it owns a `LocalSet` and uses
 server future is built and driven entirely on the dedicated worker thread,
 while the host gets typed lifecycle calls, `harn.session_view.v1` /
 `harn.run_view.v1` helpers, and a single event stream. Use
-`EmbeddedAgentClient::load_run(...)` / `resume_run(...)` to reattach persisted
-sessions, `subscribe_session_events(...)` for live timeline updates, and
+`EmbeddedAgentClient::load_run(id, environment_policy)` to restore a saved session,
+`subscribe_session_events(...)` for live timeline updates, and
 `run_view_from_path(...)` to inspect a persisted run without reading private
 record internals.
+
+Pass the host's `AcpSessionEnvironmentConfig` to both `load_run` and
+`load_run_with_cwd(id, cwd, environment_policy)`. Cold restoration requires a
+fresh explicit declaration; saved history contains no credentials or launcher
+environment snapshot. A live load retains its established authority and refuses
+a declaration that would replace it. The typed JSON-RPC load constructor uses
+`AcpSessionLoadParams::new(id, environment_policy).with_cwd(cwd)`.
 
 ## Send typed ACP requests
 
