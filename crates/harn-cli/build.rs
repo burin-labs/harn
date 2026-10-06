@@ -71,7 +71,7 @@ fn main() {
 
 /// Fingerprint the check pipeline's own sources — `harn-lint`, this crate's
 /// `commands/check` (typecheck driver, lint bridge, preflight scans, the
-/// result cache itself), and `package` (CheckConfig parsing) — and bake the
+/// result cache itself), and the shared package owner (CheckConfig parsing) — and bake the
 /// digest in as `HARN_CHECK_FINGERPRINT`. The check-result cache folds it
 /// into every key, so a within-version edit to lint or preflight logic
 /// invalidates stale cached diagnostics automatically, exactly like
@@ -89,7 +89,8 @@ fn emit_check_fingerprint() {
     let roots = [
         crates_dir.join("harn-lint").join("src"),
         manifest_dir.join("src").join("commands").join("check"),
-        manifest_dir.join("src").join("package"),
+        manifest_dir.join("src").join("package.rs"),
+        crates_dir.join("harn-package").join("src"),
     ];
     let mut files: Vec<PathBuf> = Vec::new();
     for root in &roots {
@@ -122,6 +123,12 @@ fn emit_check_fingerprint() {
 }
 
 fn collect_rs_files(dir: &Path, out: &mut Vec<PathBuf>) {
+    if dir.is_file() {
+        if dir.extension().is_some_and(|ext| ext == "rs") {
+            out.push(dir.to_path_buf());
+        }
+        return;
+    }
     let Ok(entries) = fs::read_dir(dir) else {
         return;
     };

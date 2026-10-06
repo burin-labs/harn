@@ -14,6 +14,17 @@ use serde_json::Value as JsonValue;
 use super::{hmac, Connector, ConnectorError};
 
 const DEFAULT_JWKS_CACHE_TTL: StdDuration = StdDuration::from_hours(24);
+const OUTBOUND_CONNECTOR_HTTP_TIMEOUT: StdDuration = StdDuration::from_secs(30);
+
+pub(crate) fn outbound_http_client(user_agent: &'static str) -> reqwest::Client {
+    let builder = reqwest::Client::builder()
+        .user_agent(user_agent)
+        .timeout(OUTBOUND_CONNECTOR_HTTP_TIMEOUT)
+        .redirect(crate::egress::redirect_policy("connector_redirect", 10));
+    crate::egress::install_ssrf_guard(builder)
+        .build()
+        .expect("connector HTTP client configuration should be valid")
+}
 
 /// Base connector contract name for shared runtime code.
 ///
