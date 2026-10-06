@@ -661,16 +661,19 @@ fn __edit_signature_result(helper: string, p: dict, raw: any) -> dict {
   const payload = raw ?? {}
   const result_tag = payload?.result ?? "error"
   return {
-    ok: result_tag == "applied" || result_tag == "dry_run",
+    ok: result_tag == "applied",
     applied: payload?.applied ?? false,
     result: result_tag,
     dry_run: payload?.dry_run ?? false,
+    scope: payload?.scope,
     symbol: payload?.symbol,
     touched_files: payload?.touched_files ?? [],
+    conflicts: payload?.conflicts ?? [],
+    warnings: payload?.warnings ?? [],
     failed_paths_with_reasons: payload?.failed_paths_with_reasons ?? [],
+    match_count: payload?.match_count ?? 0,
     call_sites_updated: payload?.call_sites_updated ?? 0,
     sites: payload?.sites ?? [],
-    candidates: payload?.candidates ?? [],
     parameters_before: payload?.parameters_before ?? [],
     parameters_after: payload?.parameters_after ?? [],
     details: payload?.details ?? "",
@@ -684,10 +687,19 @@ fn __edit_signature_result(helper: string, p: dict, raw: any) -> dict {
   }
 }
 
-/** The function's current parameters, read by a dry run that writes nothing. */
+/**
+ * The function's current parameters, read by a dry run that writes nothing.
+ * Removing every parameter is the probe; it raises only for a function that
+ * has none, which reads as an empty list.
+ */
 fn __edit_signature_current(code_index: HarnessCodeIndex, p: dict) -> list {
-  const probe = code_index.change_signature(__edit_signature_request(p + {dry_run: true}, []))
-  return probe?.parameters_before ?? []
+  const probe = try {
+    code_index.change_signature(__edit_signature_request(p + {dry_run: true}, []))
+  }
+  if !is_ok(probe) {
+    return []
+  }
+  return unwrap(probe)?.parameters_before ?? []
 }
 
 /**
@@ -701,8 +713,10 @@ fn __edit_signature_current(code_index: HarnessCodeIndex, p: dict) -> list {
  *
  * All-or-nothing and never a silent no-op: refusals (`parameter_in_use`,
  * `value_reference`, `unsupported_call_site`, `overrides_present`,
- * `ambiguous`, `not_found`, `error`, ...) write nothing and list the blocking
- * `sites`. Languages: Rust, TypeScript/TSX, Python.
+ * `ambiguous_symbol`, `no_match`, ...) write nothing and list the blocking
+ * `sites`; a request that does not fit the function (an unknown `from`, a
+ * new parameter without a value, an unchanged list) throws. The result keeps
+ * `rename_symbol`'s envelope. Languages: Rust, TypeScript/TSX, Python.
  *
  * @effects: [host, fs]
  * @errors: [backend]

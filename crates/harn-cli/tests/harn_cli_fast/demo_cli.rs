@@ -493,7 +493,7 @@ fn edit_refactor_demo_runs_end_to_end_against_bundled_tape() {
         outcome.stdout
     );
     assert!(
-        outcome.stdout.contains("\"add_param_result\":\"dry_run\"")
+        outcome.stdout.contains("\"add_param_result\":\"applied\"")
             && outcome.stdout.contains("\"add_param_def\":true")
             && outcome.stdout.contains("\"add_param_calls_filled\":true"),
         "add_parameter dry-run must fill the new argument at every call site:\n{}",

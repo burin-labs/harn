@@ -10,10 +10,16 @@
 //! needs a `call_value` written at every call or a `default`. Parameters the
 //! list leaves out are removed.
 //!
-//! The response is tagged: `applied` | `dry_run` | `not_found` | `ambiguous`
-//! | `unsupported_language` | `syntax_error` | `partial` | `error` |
-//! `parameter_in_use` | `value_reference` | `unsupported_call_site` |
-//! `overrides_present`. Every refusal leaves every file byte-identical.
+//! The response is the shared code_index edit envelope
+//! ([`super::refactor_core::edit_envelope`], the `rename_symbol` shape):
+//! `applied` (with `dry_run`, or `applied: false` plus
+//! `failed_paths_with_reasons` after a failed write) | `no_match` |
+//! `ambiguous_symbol` (candidates in `warnings`) | `conflict` |
+//! `unsupported_language` | `syntax_error` | `error`, plus this operation's
+//! refusals `parameter_in_use` | `value_reference` | `unsupported_call_site` |
+//! `overrides_present` and its `call_sites_updated`, `sites`, and parameter
+//! lists. A request that does not fit the declaration raises an invalid
+//! parameter error. Every refusal leaves every file byte-identical.
 //!
 //! # Algorithm
 //!
@@ -48,8 +54,9 @@ use crate::tools::args::{
 
 use super::builtins::SharedIndex;
 use super::refactor_core::{
-    competing_declarations, files_in_scope, is_identifier_token, parse_kind, plan_file,
-    read_source, reference_sites, resolve_seed, write_plans, EditSpan, FilePlan, IdentifierSpan,
+    candidates_value, competing_declarations, edit_envelope, failed_paths_value, file_plan_value,
+    files_in_scope, is_identifier_token, parse_kind, plan_file, read_source, reference_sites,
+    resolve_seed, write_plans, EditEnvelope, EditSpan, EditSymbol, FilePlan, IdentifierSpan,
     ReferenceKind, Scope, SeedCandidate, SeedLookup,
 };
 use super::signature_syntax::{
@@ -211,6 +218,7 @@ struct Refusal {
     details: String,
     sites: Vec<Site>,
     candidates: Vec<SeedCandidate>,
+    conflicts: Vec<VmValue>,
 }
 
 impl Refusal {
@@ -220,6 +228,7 @@ impl Refusal {
             details: details.into(),
             sites: Vec::new(),
             candidates: Vec::new(),
+            conflicts: Vec::new(),
         }
     }
 
@@ -229,17 +238,34 @@ impl Refusal {
     }
 
     fn into_value(self, request: &Request, parameters_before: Vec<(String, String)>) -> VmValue {
-        let fallback = (self.tag == "unsupported_language").then_some(TEXT_PATCH_FALLBACK);
-        envelope(
+        // `ambiguous_symbol` carries its candidates in `warnings`; a refusal
+        // over same-named declarations or calls lists those as candidates.
+        let warnings = if self.tag == "ambiguous_symbol" {
+            let mut candidates = self.candidates;
+            candidates.extend(
+                self.sites
+                    .iter()
+                    .map(|site| (site.path.clone(), site.line as u32, site.kind)),
+            );
+            candidates_value(&candidates)
+        } else {
+            Vec::new()
+        };
+        respond(
             request,
-            Envelope {
-                tag: self.tag,
+            self.tag,
+            EditEnvelope {
+                conflicts: self.conflicts,
+                warnings,
                 details: self.details,
+                fallback_suggestion: (self.tag == "unsupported_language")
+                    .then(|| TEXT_PATCH_FALLBACK.to_string()),
+                ..EditEnvelope::default()
+            },
+            SignatureFields {
                 sites: self.sites,
-                candidates: self.candidates,
                 parameters_before,
-                fallback,
-                ..Envelope::default()
+                ..SignatureFields::default()
             },
         )
     }
@@ -306,7 +332,7 @@ fn plan(
         SeedLookup::One(id) => id,
         SeedLookup::None => {
             return Ok(Err(Refusal::new(
-                "not_found",
+                "no_match",
                 format!(
                     "no function named `{}` resolved in the code index; check `path` names the file that defines it, or pass `line`",
                     request.name
@@ -315,7 +341,7 @@ fn plan(
         }
         SeedLookup::Many(candidates) => {
             let mut refusal = Refusal::new(
-                "ambiguous",
+                "ambiguous_symbol",
                 "several functions match; pass `symbol_ref.line` to pick one",
             );
             refusal.candidates = candidates;
@@ -325,7 +351,7 @@ fn plan(
     let seed_node = state.symbols.node(seed).expect("resolved seed exists");
     if seed_node.kind != NodeKind::Function {
         return Ok(Err(Refusal::new(
-            "error",
+            "no_match",
             format!(
                 "`{}` is a {}, not a function",
                 request.name,
@@ -360,7 +386,7 @@ fn plan(
         seed_line,
     ) else {
         return Ok(Err(Refusal::new(
-            "not_found",
+            "no_match",
             format!(
                 "the index places `{}` at {seed_path}:{seed_line}, but no declaration with that name parses there; rebuild the index",
                 request.name
@@ -408,7 +434,7 @@ fn plan(
             )
         } else {
             Refusal::new(
-                "ambiguous",
+                "ambiguous_symbol",
                 format!(
                     "other declarations are named `{}`; call sites are matched by name, so they cannot be told apart",
                     request.name
@@ -441,7 +467,8 @@ fn plan(
 
     let new_params = match plan_params(&decl, &request.params) {
         Ok(params) => params,
-        Err(message) => return Ok(Err(Refusal::new("error", message))),
+        // The request does not fit this declaration: bad arguments.
+        Err(message) => return Err(invalid("params", message)),
     };
 
     let mut edits: BTreeMap<String, Vec<PendingEdit>> = BTreeMap::new();
@@ -685,15 +712,22 @@ fn plan_body(
         if !old_names.contains(&param.spec.name.as_str()) {
             let captured = body_uses(root, source, decl.family, body.clone(), &param.spec.name);
             if let Some(first) = captured.first() {
-                return Err(Refusal::new(
-                    "error",
+                let mut refusal = Refusal::new(
+                    "conflict",
                     format!(
                         "renaming `{old}` to `{}` would capture the existing `{}` at line {}",
                         param.spec.name,
                         param.spec.name,
                         first.row + 1
                     ),
-                ));
+                );
+                refusal.conflicts = vec![build_dict([
+                    ("path", str_value(path)),
+                    ("row", VmValue::Int(first.row as i64)),
+                    ("col", VmValue::Int(first.col as i64)),
+                    ("shadow", str_value(&param.spec.name)),
+                ])];
+                return Err(refusal);
             }
         }
         for use_site in body_uses(root, source, decl.family, body.clone(), old) {
@@ -881,7 +915,7 @@ fn plan_call_sites(
     }
     if !foreign_calls.is_empty() {
         return Ok(Err(Refusal::new(
-            "ambiguous",
+            "ambiguous_symbol",
             format!(
                 "some calls named `{}` cannot be matched to this declaration by name",
                 request.name
@@ -1127,21 +1161,79 @@ fn splice_inner(source: &str, range: &Range<usize>, rendered: &[(Range<usize>, S
 }
 
 // === Response ===
+//
+// The shared code_index edit envelope ([`edit_envelope`]) plus this
+// operation's fields: `call_sites_updated`, `sites` (rewritten calls, or the
+// blocking locations of a refusal), and the parameter lists.
 
+/// Operation-specific fields of one response.
 #[derive(Default)]
-struct Envelope {
-    tag: &'static str,
-    applied: bool,
-    dry_run: bool,
-    details: String,
-    touched_files: Vec<VmValue>,
-    failed: Vec<(String, String)>,
+struct SignatureFields {
     sites: Vec<Site>,
-    candidates: Vec<SeedCandidate>,
     call_sites_updated: usize,
     parameters_before: Vec<(String, String)>,
     parameters_after: Vec<String>,
-    fallback: Option<&'static str>,
+}
+
+fn respond(
+    request: &Request,
+    tag: &'static str,
+    mut envelope: EditEnvelope,
+    fields: SignatureFields,
+) -> VmValue {
+    let list = |items: Vec<VmValue>| VmValue::List(Arc::new(items));
+    envelope.extra = vec![
+        (
+            "call_sites_updated",
+            VmValue::Int(fields.call_sites_updated as i64),
+        ),
+        (
+            "sites",
+            list(
+                fields
+                    .sites
+                    .iter()
+                    .map(|site| {
+                        build_dict([
+                            ("path", str_value(&site.path)),
+                            ("line", VmValue::Int(site.line as i64)),
+                            ("kind", str_value(site.kind)),
+                            ("reason", str_value(&site.reason)),
+                            ("text", str_value(&site.text)),
+                        ])
+                    })
+                    .collect(),
+            ),
+        ),
+        (
+            "parameters_before",
+            list(
+                fields
+                    .parameters_before
+                    .iter()
+                    .map(|(name, text)| {
+                        build_dict([("name", str_value(name)), ("text", str_value(text))])
+                    })
+                    .collect(),
+            ),
+        ),
+        (
+            "parameters_after",
+            list(fields.parameters_after.into_iter().map(str_value).collect()),
+        ),
+    ];
+    edit_envelope(
+        tag,
+        Scope::Workspace,
+        &EditSymbol {
+            name: &request.name,
+            new_name: None,
+            path: &request.path,
+            line: request.line,
+            kind: request.kind,
+        },
+        envelope,
+    )
 }
 
 fn finish(
@@ -1160,159 +1252,34 @@ fn finish(
             request.session_id.as_deref(),
         )
     };
-    let (tag, details) = if request.dry_run {
-        ("dry_run", "dry run: no files were written".to_string())
+    let details = if request.dry_run {
+        "dry_run — no files were written"
     } else if failed.is_empty() {
-        (
-            "applied",
-            "signature changed; update the function body to use the new parameters, then build"
-                .to_string(),
-        )
+        "signature changed; update the function body to use the new parameters, then build"
     } else {
-        (
-            "partial",
-            "some files failed to write; see failed_paths_with_reasons".to_string(),
-        )
+        "signature change partially applied; see failed_paths_with_reasons"
     };
     let mut sites = planned.call_sites;
     sites.sort_by(|a, b| (&a.path, a.line).cmp(&(&b.path, b.line)));
-    envelope(
+    respond(
         request,
-        Envelope {
-            tag,
+        "applied",
+        EditEnvelope {
             applied: !request.dry_run && failed.is_empty(),
             dry_run: request.dry_run,
-            details,
             touched_files: planned.plans.iter().map(file_plan_value).collect(),
-            failed,
+            failed_paths: failed_paths_value(&failed),
+            match_count: planned.plans.iter().map(|p| p.edits.len()).sum(),
+            details: details.to_string(),
+            ..EditEnvelope::default()
+        },
+        SignatureFields {
             call_sites_updated: sites.len(),
             sites,
             parameters_before,
             parameters_after: planned.parameters_after,
-            ..Envelope::default()
         },
     )
-}
-
-fn envelope(request: &Request, env: Envelope) -> VmValue {
-    let list = |items: Vec<VmValue>| VmValue::List(Arc::new(items));
-    let strings = |items: Vec<String>| list(items.into_iter().map(str_value).collect());
-    let mut entries: Vec<(&'static str, VmValue)> = vec![
-        ("result", str_value(env.tag)),
-        ("applied", VmValue::Bool(env.applied)),
-        ("dry_run", VmValue::Bool(env.dry_run)),
-        (
-            "symbol",
-            build_dict([
-                ("name", str_value(&request.name)),
-                ("path", str_value(&request.path)),
-                (
-                    "line",
-                    request
-                        .line
-                        .map(|n| VmValue::Int(n as i64))
-                        .unwrap_or(VmValue::Nil),
-                ),
-                (
-                    "kind",
-                    request
-                        .kind
-                        .map(|k| str_value(k.as_str()))
-                        .unwrap_or(VmValue::Nil),
-                ),
-            ]),
-        ),
-        ("touched_files", list(env.touched_files)),
-        ("warnings", list(Vec::new())),
-        (
-            "failed_paths_with_reasons",
-            list(
-                env.failed
-                    .iter()
-                    .map(|(path, reason)| {
-                        build_dict([("path", str_value(path)), ("reason", str_value(reason))])
-                    })
-                    .collect(),
-            ),
-        ),
-        (
-            "call_sites_updated",
-            VmValue::Int(env.call_sites_updated as i64),
-        ),
-        (
-            "sites",
-            list(
-                env.sites
-                    .iter()
-                    .map(|site| {
-                        build_dict([
-                            ("path", str_value(&site.path)),
-                            ("line", VmValue::Int(site.line as i64)),
-                            ("kind", str_value(site.kind)),
-                            ("reason", str_value(&site.reason)),
-                            ("text", str_value(&site.text)),
-                        ])
-                    })
-                    .collect(),
-            ),
-        ),
-        (
-            "candidates",
-            list(
-                env.candidates
-                    .iter()
-                    .map(|(path, line, kind)| {
-                        build_dict([
-                            ("path", str_value(path)),
-                            ("line", VmValue::Int(*line as i64)),
-                            ("kind", str_value(*kind)),
-                        ])
-                    })
-                    .collect(),
-            ),
-        ),
-        (
-            "parameters_before",
-            list(
-                env.parameters_before
-                    .iter()
-                    .map(|(name, text)| {
-                        build_dict([("name", str_value(name)), ("text", str_value(text))])
-                    })
-                    .collect(),
-            ),
-        ),
-        ("parameters_after", strings(env.parameters_after)),
-        ("details", str_value(&env.details)),
-    ];
-    if let Some(fallback) = env.fallback {
-        entries.push(("fallback_suggestion", str_value(fallback)));
-    }
-    build_dict(entries)
-}
-
-fn file_plan_value(plan: &FilePlan) -> VmValue {
-    let edits: Vec<VmValue> = plan
-        .edits
-        .iter()
-        .map(|edit| {
-            build_dict([
-                ("start_byte", VmValue::Int(edit.span.start_byte as i64)),
-                ("end_byte", VmValue::Int(edit.span.end_byte as i64)),
-                ("start_row", VmValue::Int(edit.span.start_row as i64)),
-                ("start_col", VmValue::Int(edit.span.start_col as i64)),
-                ("end_row", VmValue::Int(edit.span.end_row as i64)),
-                ("end_col", VmValue::Int(edit.span.end_col as i64)),
-                ("before", str_value(&edit.before)),
-                ("after", str_value(&edit.after)),
-            ])
-        })
-        .collect();
-    build_dict([
-        ("path", str_value(&plan.path)),
-        ("language", str_value(plan.language.name())),
-        ("edits", VmValue::List(Arc::new(edits))),
-    ])
 }
 
 #[cfg(test)]

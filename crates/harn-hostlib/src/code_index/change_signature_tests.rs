@@ -111,6 +111,29 @@ impl Workspace {
         run(&self.capability.shared(), &[dict(&request)]).expect("change_signature runs")
     }
 
+    /// Call the builtin and return the error it raises.
+    fn change_err(&self, name: &str, path: &str, params: &[&[(&str, &str)]]) -> String {
+        let params: Vec<VmValue> = params
+            .iter()
+            .map(|entry| {
+                let pairs: Vec<(&str, VmValue)> =
+                    entry.iter().map(|(k, v)| (*k, string(v))).collect();
+                dict(&pairs)
+            })
+            .collect();
+        let request = dict(&[
+            (
+                "symbol_ref",
+                dict(&[("name", string(name)), ("path", string(path))]),
+            ),
+            ("params", VmValue::List(Arc::new(params))),
+        ]);
+        match run(&self.capability.shared(), &[request]) {
+            Ok(value) => panic!("expected an error, got {value:?}"),
+            Err(err) => err.to_string(),
+        }
+    }
+
     /// Call the builtin and assert it refused with `tag`, leaving every file
     /// byte-identical. Returns the response.
     fn refuse(&self, tag: &str, name: &str, path: &str, params: &[&[(&str, &str)]]) -> VmValue {
@@ -150,6 +173,11 @@ fn assert_applied(result: &VmValue, call_sites: i64) {
         field(result, "sites")
     );
     assert!(matches!(field(result, "applied"), VmValue::Bool(true)));
+    assert_eq!(text(field(result, "scope")), "workspace");
+    assert!(matches!(field(result, "match_count"), VmValue::Int(n) if *n > call_sites));
+    for file in items(field(result, "touched_files")) {
+        assert_eq!(text(field(&file, "before_sha256")).len(), 64);
+    }
     assert!(
         matches!(field(result, "call_sites_updated"), VmValue::Int(n) if *n == call_sites),
         "call_sites_updated: {:?}",
@@ -425,20 +453,19 @@ fn rust_trait_methods_refuse_as_overrides() {
 }
 
 #[test]
-fn unchanged_list_and_missing_call_value_are_errors_not_no_ops() {
+fn unchanged_list_and_missing_call_value_raise_instead_of_no_ops() {
     let ws = Workspace::new(&[
         ("src/lib.rs", "pub mod jobs;\n"),
         ("src/jobs.rs", RUST_JOBS),
     ]);
-    let same = ws.refuse(
-        "error",
+    let before = ws.snapshot();
+    let same = ws.change_err(
         "render",
         "src/jobs.rs",
         &[&[("name", "job")], &[("name", "verbose")]],
     );
-    assert!(text(field(&same, "details")).contains("nothing would change"));
-    let missing = ws.refuse(
-        "error",
+    assert!(same.contains("nothing would change"), "{same}");
+    let missing = ws.change_err(
         "render",
         "src/jobs.rs",
         &[
@@ -447,7 +474,8 @@ fn unchanged_list_and_missing_call_value_are_errors_not_no_ops() {
             &[("name", "prefix"), ("type", "&str")],
         ],
     );
-    assert!(text(field(&missing, "details")).contains("call_value"));
+    assert!(missing.contains("call_value"), "{missing}");
+    assert_eq!(ws.snapshot(), before);
 }
 
 #[test]
@@ -475,7 +503,8 @@ fn dry_run_plans_without_writing() {
         &[&[("name", "verbose")], &[("name", "job")]],
         &[("dry_run", VmValue::Bool(true))],
     );
-    assert_eq!(text(field(&result, "result")), "dry_run");
+    assert_eq!(text(field(&result, "result")), "applied");
+    assert!(matches!(field(&result, "dry_run"), VmValue::Bool(true)));
     assert!(matches!(field(&result, "applied"), VmValue::Bool(false)));
     assert_eq!(items(field(&result, "touched_files")).len(), 2);
     assert_eq!(ws.snapshot(), before);
@@ -803,4 +832,39 @@ fn python_overridden_method_refuses() {
     assert_eq!(text(field(&result, "result")), "overrides_present");
     assert_eq!(site_lines(&result), ["pkg/shapes.py:7 Function"]);
     assert_eq!(ws.snapshot(), before);
+}
+
+#[test]
+fn same_named_free_functions_refuse_as_ambiguous_symbol_with_warning_candidates() {
+    let ws = Workspace::new(&[
+        ("src/lib.rs", "pub mod a;\npub mod b;\n"),
+        ("src/a.rs", "pub fn load(x: u32) -> u32 {\n    x\n}\n"),
+        ("src/b.rs", "pub fn load(x: u32) -> u32 {\n    x + 1\n}\n"),
+    ]);
+    let result = ws.refuse(
+        "ambiguous_symbol",
+        "load",
+        "src/a.rs",
+        &[
+            &[("name", "x")],
+            &[("name", "y"), ("type", "u32"), ("call_value", "0")],
+        ],
+    );
+    let warnings: Vec<String> = items(field(&result, "warnings"))
+        .iter()
+        .map(|w| {
+            format!(
+                "{}:{}",
+                text(field(w, "path")),
+                match field(w, "line") {
+                    VmValue::Int(n) => *n,
+                    other => panic!("{other:?}"),
+                }
+            )
+        })
+        .collect();
+    assert_eq!(warnings, ["src/b.rs:1"]);
+    assert_eq!(text(field(&result, "scope")), "workspace");
+    assert!(matches!(field(&result, "match_count"), VmValue::Int(0)));
+    assert!(items(field(&result, "conflicts")).is_empty());
 }

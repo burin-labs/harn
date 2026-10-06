@@ -1041,9 +1041,10 @@ The three parameter refactorings take `harness.code_index` instead of the
 `fs`/`random`/`ast` handles: they are thin wrappers over
 `code_index.change_signature`, which rewrites the declaration and every call
 site across the indexed workspace and returns its own tagged result
-(`applied | dry_run | not_found | ambiguous | parameter_in_use |
-value_reference | unsupported_call_site | overrides_present | ...`) with the
-rewritten or blocking `sites`. Rebuild the index (`harness.code_index.rebuild`)
+in `rename_symbol`'s envelope (`applied` with `dry_run`, `no_match`,
+`ambiguous_symbol`, plus `parameter_in_use | value_reference |
+unsupported_call_site | overrides_present`) with the rewritten or blocking
+`sites`. Rebuild the index (`harness.code_index.rebuild`)
 before calling them.
 
 `symbol` accepts `{name}` or a bare name string. A language outside a
