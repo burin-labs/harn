@@ -117,6 +117,10 @@ impl NodeKind {
     }
 }
 
+/// Shortest declaration name the REFS heuristic links. Shorter words
+/// (`id`, `ok`) match too much to mean anything.
+const MIN_REF_WORD_LEN: usize = 3;
+
 /// Coarse typed edge kinds defined in issue #2434.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum EdgeKind {
@@ -654,26 +658,72 @@ impl SymbolGraph {
         })
     }
 
-    /// Walk `source` once, collecting node ids whose name appears as a
-    /// word in the file *and* who live in a different file. Each target
-    /// id appears at most once.
+    /// Add the REFS edges that point *into* `file_id`'s declarations.
+    ///
+    /// [`Self::rebuild_file`] links a module only to declarations that
+    /// already exist when it is parsed. A declaration that arrives later
+    /// needs the reverse direction: a file ingested after the files that
+    /// name it, or a declaring file re-parsed after an edit, which drops
+    /// every edge into its old nodes. With both directions a REFS edge
+    /// exists exactly when another non-Harn module's source names the
+    /// declaration, whatever order the files arrived in.
+    ///
+    /// `files_naming(word)` answers which files contain `word` as a
+    /// [`super::words::tokenize`] token, the tokenizer the forward scan
+    /// uses. Repeats are fine. Idempotent.
+    pub fn link_refs_into_file(
+        &mut self,
+        file_id: FileId,
+        files_naming: impl Fn(&str) -> Vec<FileId>,
+    ) {
+        let Some(ids) = self.by_file.get(&file_id) else {
+            return;
+        };
+        let targets: Vec<(NodeId, String)> = ids
+            .iter()
+            .filter_map(|id| self.nodes.get(id))
+            .filter(|n| n.kind.is_name_addressable() && n.name.len() >= MIN_REF_WORD_LEN)
+            .map(|n| (n.id, n.name.clone()))
+            .collect();
+        for (target, name) in targets {
+            let files: BTreeSet<FileId> = files_naming(&name).into_iter().collect();
+            let mut linked: HashSet<NodeId> = self
+                .incoming(target)
+                .iter()
+                .filter(|e| e.kind == EdgeKind::Refs)
+                .map(|e| e.from)
+                .collect();
+            for file in files {
+                if file == file_id {
+                    continue;
+                }
+                let Some(module) = self.module_node_for_file(file) else {
+                    continue;
+                };
+                if self
+                    .nodes
+                    .get(&module)
+                    .is_some_and(|m| m.language == "harn")
+                {
+                    continue;
+                }
+                if linked.insert(module) {
+                    self.add_edge(module, target, EdgeKind::Refs);
+                }
+            }
+        }
+    }
+
+    /// Collect the ids of declarations in other files whose name is a
+    /// token of `source`. Each target id appears at most once.
     fn collect_cross_file_refs(&self, source: &str, this_file: FileId) -> BTreeSet<NodeId> {
         let mut out: BTreeSet<NodeId> = BTreeSet::new();
         if self.by_name.is_empty() {
             return out;
         }
-        let mut word = String::with_capacity(32);
-        for ch in source.chars() {
-            if ch.is_alphanumeric() || ch == '_' {
-                word.push(ch);
-            } else if !word.is_empty() {
-                self.absorb_word_refs(&word, this_file, &mut out);
-                word.clear();
-            }
-        }
-        if !word.is_empty() {
-            self.absorb_word_refs(&word, this_file, &mut out);
-        }
+        super::words::tokenize(source, |word| {
+            self.absorb_word_refs(word, this_file, &mut out);
+        });
         out
     }
 
@@ -758,7 +808,7 @@ impl SymbolGraph {
     /// another file could actually be naming, so it filters to
     /// [`NodeKind::is_name_addressable`].
     fn absorb_word_refs(&self, word: &str, this_file: FileId, bag: &mut BTreeSet<NodeId>) {
-        if word.len() < 3 {
+        if word.len() < MIN_REF_WORD_LEN {
             return;
         }
         let Some(ids) = self.by_name.get(word) else {
