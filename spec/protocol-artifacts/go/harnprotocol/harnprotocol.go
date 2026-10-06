@@ -180,6 +180,7 @@ var HarnAgentEventKinds = []HarnAgentEventKind{
 	"host_tool_result",
 	"input_guardrail_verdict",
 	"iteration_end",
+	"session_health",
 	"iteration_start",
 	"judge_decision",
 	"judge_started",
@@ -467,6 +468,7 @@ var LlmErrorReasons = []LlmErrorReason{
 	"billing_limit",
 	"output_budget_exhausted",
 	"unknown",
+	"policy_denied",
 }
 
 // ToolCallReceiptStatus is the named string type for the ToolCallReceiptStatuses wire vocabulary.
@@ -592,6 +594,8 @@ var HarnToolLifecycleExtensionFields = []string{
 	"errorCategory",
 	"executionDurationMs",
 	"executor",
+	"health",
+	"intent",
 	"mutationStatus",
 	"parsing",
 	"rawInputPartial",
@@ -829,6 +833,8 @@ type HarnACPPromptErrorData struct {
 	Category      *string            `json:"category,omitempty"`
 	Kind          *string            `json:"kind,omitempty"`
 	Reason        *string            `json:"reason,omitempty"`
+	Origin        *string            `json:"origin,omitempty"`
+	Rule          *string            `json:"rule,omitempty"`
 	Code          *string            `json:"code,omitempty"`
 	Retryable     *bool              `json:"retryable,omitempty"`
 	RetryAfterMs  *int64             `json:"retryAfterMs,omitempty"`
@@ -922,6 +928,7 @@ type HarnToolLifecycleMeta struct {
 	ErrorCategory       *string                 `json:"errorCategory,omitempty"`
 	ExecutionDurationMs *float64                `json:"executionDurationMs,omitempty"`
 	Executor            json.RawMessage         `json:"executor,omitempty"`
+	Intent              *string                 `json:"intent,omitempty"`
 	MutationStatus      *HarnToolMutationStatus `json:"mutationStatus,omitempty"`
 	Parsing             *bool                   `json:"parsing,omitempty"`
 	RawInputPartial     *string                 `json:"rawInputPartial,omitempty"`
@@ -2053,4 +2060,58 @@ type HarnPlanDocument struct {
 	ResolutionReceipts []HarnPlanCommentResolutionReceipt `json:"resolution_receipts"`
 	CreatedAt          string                             `json:"created_at"`
 	UpdatedAt          string                             `json:"updated_at"`
+}
+
+// HarnInferenceAdmissionStatus is the named string type for the HarnInferenceAdmissionStatusValues wire vocabulary.
+type HarnInferenceAdmissionStatus string
+
+// HarnInferenceAdmissionStatusValues enumerates every wire value Harn currently emits for HarnInferenceAdmissionStatus.
+var HarnInferenceAdmissionStatusValues = []HarnInferenceAdmissionStatus{
+	"admitted",
+	"denied",
+	"unknown",
+}
+
+// HarnInferenceAdmissionReach is the named string type for the HarnInferenceAdmissionReachValues wire vocabulary.
+type HarnInferenceAdmissionReach string
+
+// HarnInferenceAdmissionReachValues enumerates every wire value Harn currently emits for HarnInferenceAdmissionReach.
+var HarnInferenceAdmissionReachValues = []HarnInferenceAdmissionReach{
+	"local_only",
+	"hosted_open_weight",
+	"any_hosted",
+}
+
+// HarnInferenceAdmissionDataPosture is the named string type for the HarnInferenceAdmissionDataPostureValues wire vocabulary.
+type HarnInferenceAdmissionDataPosture string
+
+// HarnInferenceAdmissionDataPostureValues enumerates every wire value Harn currently emits for HarnInferenceAdmissionDataPosture.
+var HarnInferenceAdmissionDataPostureValues = []HarnInferenceAdmissionDataPosture{
+	"default",
+	"strictest_available",
+}
+
+type HarnInferenceAdmissionBoundary struct {
+	Reach                  HarnInferenceAdmissionReach `json:"reach"`
+	AllowTrainingDiscounts bool                        `json:"allow_training_discounts"`
+}
+
+type HarnInferenceAdmissionRequest struct {
+	Provider     string                             `json:"provider"`
+	Model        string                             `json:"model"`
+	Boundary     *HarnInferenceAdmissionBoundary    `json:"boundary,omitempty"`
+	DataControls *HarnInferenceAdmissionDataPosture `json:"data_controls,omitempty"`
+}
+
+type HarnInferenceAdmissionSnapshot struct {
+	Schema                 string                          `json:"schema"`
+	Provider               string                          `json:"provider"`
+	Model                  string                          `json:"model"`
+	Status                 HarnInferenceAdmissionStatus    `json:"status"`
+	TrainingControlPlanned bool                            `json:"training_control_planned"`
+	EffectiveBoundary      *HarnInferenceAdmissionBoundary `json:"effective_boundary,omitempty"`
+	GoverningRule          *string                         `json:"governing_rule,omitempty"`
+	LocalRuntime           *bool                           `json:"local_runtime,omitempty"`
+	OpenWeight             *bool                           `json:"open_weight,omitempty"`
+	TrainingDefault        *string                         `json:"training_default,omitempty"`
 }

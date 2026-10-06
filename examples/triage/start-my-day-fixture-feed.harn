@@ -8,11 +8,7 @@ fn fixture(fs: HarnessFs, name: string) {
 pipeline default(harness: Harness) {
   const feed = triage_start_my_day(
     harness.obs,
-    [
-      fixture(harness.fs, "github_issue"),
-      fixture(harness.fs, "slack_message"),
-      fixture(harness.fs, "notion_page"),
-    ],
+    [fixture(harness.fs, "github_issue"), fixture(harness.fs, "slack_message")],
     {
       title: "Start My Day",
       generated_at: "fixture",

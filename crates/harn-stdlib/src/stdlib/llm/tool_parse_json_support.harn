@@ -1,3 +1,4 @@
+import { tool_call_json_error } from "std/llm/call_shape"
 /**
  * JSON-fence normalization and counted-verbatim binding for tool parsing.
  *
@@ -142,16 +143,6 @@ pub fn json_call(value: unknown, allow_flat_argument_string: bool) -> dict {
   return {ok: true, call: {id: "tc_json", name: name, arguments: arguments}}
 }
 
-fn __tool_parse_json_error(detail: string) -> string {
-  return "The ```tool block is not valid JSON: "
-    + detail
-    + ". For a multi-line or code-bearing field, do not hand-escape it: set the "
-    + "value to \"<<BODY\" and put the raw text after the JSON object inside the "
-    + "same ```tool fence, ending with a line that is exactly BODY. Short scalar "
-    + "values stay ordinary JSON strings (escape newlines as \\n, quotes as \\\", "
-    + "backslashes as \\\\); backticks need no escaping."
-}
-
 /**
  * Parse one argument value as a verbatim body declaration, or return nil.
  *
@@ -269,7 +260,7 @@ fn __tool_parse_verbatim_count_error(requests: list<dict>, lines: list<string>) 
       }
     }
     if available < required {
-      return __tool_parse_json_error(
+      return tool_call_json_error(
         "verbatim declaration `"
           + request.opener
           + "` has "
@@ -310,7 +301,7 @@ pub fn bind_verbatim(calls: list<dict>, trailing: string) -> dict {
     const orphan = trim(trailing).split("\n")[0] ?? ""
     return {
       ok: false,
-      error: __tool_parse_json_error(
+      error: tool_call_json_error(
         "a verbatim heredoc `"
           + orphan
           + "` trails the block but no argument's value declared it",
@@ -354,7 +345,7 @@ pub fn bind_verbatim(calls: list<dict>, trailing: string) -> dict {
       if __tool_parse_verbatim_declaration(opener) == nil && last_uncounted_tag != nil {
         return {
           ok: false,
-          error: __tool_parse_json_error(
+          error: tool_call_json_error(
             "verbatim body `<<"
               + last_uncounted_tag
               + "` closed early on a line that is exactly `"
@@ -379,7 +370,7 @@ pub fn bind_verbatim(calls: list<dict>, trailing: string) -> dict {
     if request.counted && request.count == nil {
       return {
         ok: false,
-        error: __tool_parse_json_error(
+        error: tool_call_json_error(
           "verbatim declaration `"
             + request.opener
             + "` states a line count that is not a usable number; re-emit the "
@@ -402,7 +393,7 @@ pub fn bind_verbatim(calls: list<dict>, trailing: string) -> dict {
     if close_at < 0 {
       return {
         ok: false,
-        error: __tool_parse_json_error(
+        error: tool_call_json_error(
           "verbatim body `"
             + request.opener
             + "` never closed; end it with a line that is exactly `"
@@ -416,7 +407,7 @@ pub fn bind_verbatim(calls: list<dict>, trailing: string) -> dict {
     if close_at >= len(lines) || trim(lines[close_at]) != request.tag {
       return {
         ok: false,
-        error: __tool_parse_json_error(
+        error: tool_call_json_error(
           "verbatim body `"
             + request.opener
             + "` did not close on the line its `:N` count declared; "
@@ -452,7 +443,7 @@ pub fn bind_verbatim(calls: list<dict>, trailing: string) -> dict {
     if !request.bound {
       return {
         ok: false,
-        error: __tool_parse_json_error(
+        error: tool_call_json_error(
           "verbatim declaration `"
             + request.opener
             + "` has 0 matching bodies, expected 1",

@@ -11,6 +11,11 @@
 //! - the file's content and its transitive user-import closure, stdlib
 //!   digest, codegen fingerprint, harn version, and compiler options — all
 //!   via the bytecode cache's [`bytecode_cache::CacheKey`];
+//! - a digest of the stdlib builtin manifest (every `#[harn_builtin]`
+//!   signature and contract the type checker reads), which lives in
+//!   `harn-vm` outside both source fingerprints, so a rebuilt binary with a
+//!   changed builtin signature cannot serve diagnostics typed against the old
+//!   one;
 //! - a build-time fingerprint of the check driver itself (`harn-lint`,
 //!   `commands/check`, package-config parsing) — `HARN_CHECK_FINGERPRINT` —
 //!   so within-version edits to lint/preflight logic invalidate entries
@@ -249,6 +254,7 @@ pub(super) fn result_cache_key(
     fold("harn-version", base.harn_version.as_bytes());
     fold("compiler-tag", &[base.compiler_tag]);
     fold("check-fingerprint", CHECK_FINGERPRINT.as_bytes());
+    fold("builtin-manifest", builtin_manifest_digest());
     fold(
         "predicate-model-operations",
         &harn_vm::provider_catalog::predicate_model_catalog_identity(),
@@ -259,6 +265,24 @@ pub(super) fn result_cache_key(
         fold("lint-exemption", name.as_bytes());
     }
     fold_config(&mut fold, config, host_capabilities_content);
+    hasher.finalize().into()
+}
+
+/// Digest of every builtin's name, signature, and contract as the stdlib
+/// declares them. Computed once per process; the manifest is static.
+fn builtin_manifest_digest() -> &'static [u8; 32] {
+    static DIGEST: std::sync::OnceLock<[u8; 32]> = std::sync::OnceLock::new();
+    DIGEST.get_or_init(|| manifest_digest(harn_vm::stdlib::all_builtin_manifest().iter().copied()))
+}
+
+fn manifest_digest<'a, E: std::fmt::Debug + 'a>(
+    entries: impl IntoIterator<Item = &'a E>,
+) -> [u8; 32] {
+    let mut hasher = Sha256::new();
+    for entry in entries {
+        hasher.update(format!("{entry:?}").as_bytes());
+        hasher.update(b"\0");
+    }
     hasher.finalize().into()
 }
 
@@ -513,6 +537,23 @@ fn hex(bytes: &[u8; 32]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn builtin_manifest_digest_tracks_signature_changes() {
+        let manifest = harn_vm::stdlib::all_builtin_manifest();
+        let original = manifest_digest(manifest.iter().copied());
+        assert_eq!(original, *builtin_manifest_digest());
+        // A rebuilt binary whose first builtin returns another type must key
+        // differently, or `harn check` replays diagnostics typed against the
+        // old signature.
+        let mut changed: Vec<_> = manifest.iter().map(|entry| **entry).collect();
+        let other = manifest
+            .iter()
+            .find(|entry| entry.signature != changed[0].signature)
+            .expect("manifest has two distinct signatures");
+        changed[0].signature = other.signature;
+        assert_ne!(original, manifest_digest(changed.iter()));
+    }
 
     #[test]
     fn result_key_hashes_resolved_host_capability_snapshot() {

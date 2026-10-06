@@ -131,12 +131,11 @@ jobs:
         uses: taiki-e/install-action@9983c65e42da123ff25d1f78505eb6de315aa172 # v2.87.20
         with:
           tool: nextest@0.9.132
-      # Warm only after a miss. An exact-key restore means this family's entry
-      # already holds this commit's env + lockfile fingerprint, and GitHub's
-      # cache entries are immutable: Swatinem's post step then reports
-      # "Cache up-to-date." and writes nothing, so a warm build compiles for
-      # ~10 min and is discarded with the runner. On a miss this step is
-      # unchanged and still produces the generation the post step saves.
+      # Warm only after a source-generation miss. Pinned Swatinem restores the
+      # prior OS/toolchain-compatible generation through its own restore key,
+      # then its post step saves the rebuilt workspace under the new exact
+      # source key. GitHub cache entries are immutable, so an exact hit skips
+      # this rebuild while a compatible prefix hit advances the generation.
       - name: Warm Cargo graph
         if: steps.rust-cache.outputs.cache-hit != 'true'
         env:
@@ -151,12 +150,17 @@ jobs:
         if: steps.rust-cache.outputs.cache-hit == 'true'
         env:
           HARN_CACHE_FAMILY: ${{ matrix.cache_key }}
+          HARN_WORKSPACE_SOURCE_CURRENT: ${{ steps.rust-cache.outputs.source-current }}
         run: |
+          if [[ "$HARN_WORKSPACE_SOURCE_CURRENT" != "true" ]]; then
+            echo "::error::Exact dependency key restored without a current workspace source record."
+            exit 1
+          fi
           {
             echo "### Rust cache refresh (${HARN_CACHE_FAMILY})"
             echo
             echo "Exact-key restore: the main-scoped generation already matches"
-            echo "this commit's Rust environment and lockfile fingerprint."
+            echo "this commit's Rust environment, lockfile fingerprint and measured workspace source."
             echo "Nothing to warm: GitHub cache entries are immutable, so a"
             echo "rebuild would be discarded rather than saved."
           } >> "$GITHUB_STEP_SUMMARY"

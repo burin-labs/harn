@@ -249,6 +249,7 @@ fn precompile_then_run_skips_compile() {
                 relocatable: false,
                 out: None,
                 keep_going: false,
+                jobs: None,
                 quiet: true,
             });
         }
@@ -315,6 +316,7 @@ fn relocated_precompiled_module_uses_adjacent_artifact_and_rebinds_diagnostics()
                 relocatable: false,
                 out: None,
                 keep_going: false,
+                jobs: None,
                 quiet: true,
             });
         }

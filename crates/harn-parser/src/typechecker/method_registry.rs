@@ -8,10 +8,12 @@
 //! of crashing (strings/lists/sets) or silently returning `nil` (numbers) at
 //! runtime.
 //!
-//! Drift guard: a test in `harn-vm` (`method_registry_matches_vm`) asserts
-//! every name here is accepted by the corresponding VM dispatch, so a stale
-//! entry can never produce a false "unknown method". When you add a method to
-//! a VM dispatch, add its name to the matching list below.
+//! Drift guard: the `drift_guard_tests` in `harn-vm`'s `methods/dispatch.rs`
+//! assert both directions. Every name here must be accepted by the
+//! corresponding VM dispatch (a stale entry would let a crashing call pass
+//! `harn check`), and every VM dispatch arm must be listed here (a missing
+//! entry would be a false "unknown method"). When you add a method to a VM
+//! dispatch, add its name to the matching list below.
 
 /// `string` receiver methods (`call_string_method`), plus the universal
 /// `.iter()` bridge that `call_method_sync` handles for every iterable.

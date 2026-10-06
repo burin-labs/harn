@@ -19,8 +19,6 @@
 
 # Pages whose subject is the API that was replaced. Naming the old
 # spelling is the point of the page, not a defect.
-page docs/src/migrations/v0.10.md        # ambient -> harness migration guide
-page docs/src/migrations/v0.7.md         # earlier migration guide
 page docs/src/adr/0001-pipe-operator.md  # dated decision record
 
 # docs/llm/harn-quickref.md lines 105-106 are that same migration crib,

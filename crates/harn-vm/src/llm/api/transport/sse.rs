@@ -112,6 +112,7 @@ fn try_emit_partial_tool_args(
         mutation_status: crate::agent_events::ToolMutationStatus::Unknown,
         changed_paths: None,
         data: None,
+        health: None,
         executor: None,
         raw_input: value,
         raw_input_partial: raw_partial,
@@ -164,6 +165,7 @@ fn emit_stream_tool_call_start(
         status: ToolCallStatus::Pending,
         raw_input,
         audit: crate::orchestration::current_mutation_session(),
+        intent: None,
         parsing: None,
     });
 }
@@ -282,6 +284,7 @@ fn emit_stream_tool_call_closeout(session_id: &str, announcement: &AnnouncedStre
         mutation_status: crate::agent_events::ToolMutationStatus::Unknown,
         changed_paths: None,
         data: None,
+        health: None,
         executor: None,
         raw_input: None,
         raw_input_partial: None,

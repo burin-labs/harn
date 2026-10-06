@@ -10,6 +10,7 @@ use crate::vm::Vm;
 mod client;
 pub(crate) mod framing;
 mod mock;
+mod retry_after;
 mod sigv4;
 mod streaming;
 #[cfg(test)]
@@ -21,6 +22,7 @@ use mock::{
     reset_http_mocks,
 };
 pub use mock::{http_mock_calls_snapshot, push_http_mock, HttpMockCallSnapshot, HttpMockResponse};
+pub(crate) use retry_after::hint as retry_after_hint;
 
 /// Route a Harn HTTP request through the standard verb pipeline.
 ///
@@ -33,6 +35,13 @@ pub(crate) async fn execute_http_request(
     options: &crate::value::DictMap,
 ) -> Result<VmValue, VmError> {
     client::vm_execute_http_request(method, url, options).await
+}
+
+/// A successful response carrying `body`, for scripted Harness mocks. It is
+/// built by the same builder as live and `http_mock` responses, so every
+/// `harness.net` path returns the declared `HTTP_RESPONSE` record.
+pub(crate) fn mock_text_response(url: &str, body: &str) -> VmValue {
+    client::build_http_response(200, crate::value::DictMap::new(), body.to_string(), url)
 }
 
 pub(crate) async fn execute_harness_http_request(
@@ -748,6 +757,7 @@ async fn run_http_server_request(
 
 /// Register HTTP builtins on a VM.
 pub fn register_http_builtins(vm: &mut Vm) {
+    retry_after::register(vm);
     register_http_tls_builtins(vm);
     register_http_server_builtins(vm);
     register_http_mock_builtins(vm);

@@ -207,16 +207,17 @@ pub(crate) use portable::{
     PortableResumeArgs, PortableStartArgs,
 };
 pub(crate) use portal::PortalArgs;
-pub use precompile::PrecompileArgs;
+pub use precompile::{PrecompileArgs, PRECOMPILE_JOBS_ENV};
 pub(crate) use profile::ProfileArgs;
 pub(crate) use provider::ProviderToolProbeFormatArg;
 pub(crate) use provider::{
-    refresh_provider_catalog_if_requested, ProviderArgs, ProviderCacheProbeArgs,
-    ProviderCapabilitiesArgs, ProviderCapabilitiesCommand, ProviderCapabilitiesPromoteFromEvalArgs,
-    ProviderCommand, ProviderDispatchAuditArgs, ProviderDispatchAuditVariantArg,
-    ProviderDispatchExplainArgs, ProviderEffortProbeArgs, ProviderLimitsArgs,
-    ProviderOptionProbeArgs, ProviderProbeArgs, ProviderToolCalibrateArgs, ProviderToolProbeArgs,
-    ProviderToolProbeAuditArgs, ProviderToolProbeCaseArg, ProviderToolScorecardArgs,
+    refresh_provider_catalog_if_requested, ProviderAdmissionArgs, ProviderArgs,
+    ProviderCacheProbeArgs, ProviderCapabilitiesArgs, ProviderCapabilitiesCommand,
+    ProviderCapabilitiesPromoteFromEvalArgs, ProviderCommand, ProviderDispatchAuditArgs,
+    ProviderDispatchAuditVariantArg, ProviderDispatchExplainArgs, ProviderEffortProbeArgs,
+    ProviderLimitsArgs, ProviderOptionProbeArgs, ProviderProbeArgs, ProviderToolCalibrateArgs,
+    ProviderToolProbeArgs, ProviderToolProbeAuditArgs, ProviderToolProbeCaseArg,
+    ProviderToolScorecardArgs,
 };
 #[cfg(test)]
 pub(crate) use provider::{ProviderPortableOptionArg, ProviderToolProbeModeArg};

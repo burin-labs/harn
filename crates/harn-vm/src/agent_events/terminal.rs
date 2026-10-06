@@ -24,7 +24,7 @@ use super::agent::AgentEvent;
 /// Serialized `snake_case`. The vocabulary is deliberately extensible —
 /// [`Self::Unknown`] is the honest fallback when no rule matched or the
 /// supplied terminal evidence conflicts.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum AgentTerminalKind {
     /// The model/agent finished naturally — a clean completion or a verified

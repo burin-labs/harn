@@ -63,7 +63,7 @@ use crate::module_source::{self, ModuleSource};
 mod graph;
 pub(crate) use graph::derive_interface as module_compilation_context_with_manifest;
 pub use graph::prepare_entry_store;
-use graph::relative_path_label;
+use graph::relocatable_graph_hash;
 
 /// Header magic for all bytecode-cache artifact families.
 pub const MAGIC: &[u8; 8] = b"HARNBC\0\0";
@@ -231,6 +231,10 @@ impl CacheKey {
     /// source byte, compiler build, or embedded stdlib still invalidates it.
     /// This is the key used by packaged adjacent artifacts; ordinary shared
     /// cache entries remain anchored to canonical host paths.
+    ///
+    /// The graph half is [`graph::relocatable_graph_hash`], which lists what it
+    /// admits. The only environment read is `compiler_tag`: the documented
+    /// optimization and legacy-ambient switches, which change emitted bytecode.
     pub fn from_relocatable_source(source_path: &Path, source: &str) -> Self {
         let source_hash = sha256(source.as_bytes());
         let context_hash = hash_relocatable_user_imports(source_path, source);
@@ -263,6 +267,9 @@ impl CacheKey {
     /// dependency body remains protected by its own source-local key.
     /// Diagnostic paths are rebound when the artifact is loaded, so adjacent
     /// and packaged artifacts remain relocatable without aliasing attribution.
+    /// No path reaches the key: the interface digest frames sorted,
+    /// deduplicated names ([`ModuleCompilationContext::new`]), and provenance
+    /// is the caller's declared authority.
     pub fn from_module_source(
         source: &ModuleSource,
         compilation_context: &ModuleCompilationContext,
@@ -1290,15 +1297,20 @@ fn walk_import_graph_fingerprinted(
         let Some(resolved) = harn_modules::resolve_import_path(&anchor, &import) else {
             // Unresolved imports get a sentinel keyed by their resolution
             // anchor so that dropping a real file under that anchor later
-            // produces a different key.
-            let sentinel = anchor.join(format!("__unresolved__/{import}"));
+            // produces a different key. The anchor is the caller's spelling of
+            // the importing file; canonicalize it like every resolved node, or
+            // a symlinked or relative spelling leaks into both keys.
+            let anchor_identity = module_source::canonical_identity(&anchor);
+            let sentinel = anchor_identity.join(format!("__unresolved__/{import}"));
             if let std::collections::btree_map::Entry::Vacant(slot) = visited.entry(sentinel) {
                 slot.insert(ImportNode::Unresolved {
+                    anchor: anchor_identity.clone(),
                     import: Arc::clone(&import),
                 });
                 if let Some(m) = manifest.as_mut() {
                     m.unresolved.push(ManifestUnresolved {
                         anchor: anchor.clone(),
+                        anchor_identity,
                         import: import.to_string(),
                     });
                 }
@@ -1413,35 +1425,13 @@ fn walk_import_graph_fingerprinted(
 
     let mut canonical_hasher = Sha256::new();
     seed_entry_context_hasher(&mut canonical_hasher, codegen_fingerprint);
-    let mut relocatable_hasher = Sha256::new();
-    relocatable_hasher.update(b"relocatable-entry-graph-v1\0");
-    seed_entry_context_hasher(&mut relocatable_hasher, codegen_fingerprint);
-
-    let entry_identity = module_source::canonical_identity(source_path);
-    let entry_dir = entry_identity.parent().unwrap_or(Path::new(""));
-    let mut relocatable_nodes = Vec::with_capacity(visited.len());
     for (path, node) in &visited {
         canonical_hasher.update(path.to_string_lossy().as_bytes());
         canonical_hasher.update(b"\0");
         hash_import_node(&mut canonical_hasher, node);
         canonical_hasher.update(b"\0");
-
-        let Some(label) = relative_path_label(entry_dir, path) else {
-            // A dependency on another filesystem root cannot be moved as one
-            // closed tree. Preserve fail-closed behavior by retaining its
-            // canonical identity in the packaged key.
-            relocatable_nodes.push((path.to_string_lossy().replace('\\', "/"), node));
-            continue;
-        };
-        relocatable_nodes.push((label, node));
     }
-    relocatable_nodes.sort_by(|left, right| left.0.cmp(&right.0));
-    for (path, node) in relocatable_nodes {
-        relocatable_hasher.update(path.as_bytes());
-        relocatable_hasher.update(b"\0");
-        hash_import_node(&mut relocatable_hasher, node);
-        relocatable_hasher.update(b"\0");
-    }
+    let relocatable = relocatable_graph_hash(source_path, &visited, codegen_fingerprint);
 
     // Sorted so one graph always serializes to one byte sequence, whatever
     // order the frontier happened to pop.
@@ -1453,7 +1443,7 @@ fn walk_import_graph_fingerprinted(
     }
     GraphHashes {
         canonical: canonical_hasher.finalize().into(),
-        relocatable: relocatable_hasher.finalize().into(),
+        relocatable,
         manifest,
         entry_compilation_context,
     }
@@ -1478,7 +1468,7 @@ fn hash_import_node(hasher: &mut Sha256, node: &ImportNode) {
             hasher.update(b"resolved\0");
             hasher.update(content.as_bytes());
         }
-        ImportNode::Unresolved { import } => {
+        ImportNode::Unresolved { import, .. } => {
             hasher.update(b"unresolved\0");
             hasher.update(import.as_bytes());
         }
@@ -1490,9 +1480,19 @@ fn hash_import_node(hasher: &mut Sha256, node: &ImportNode) {
 }
 
 enum ImportNode {
-    Resolved { content: Arc<str> },
-    Unresolved { import: Arc<str> },
-    IoError { kind: String },
+    Resolved {
+        content: Arc<str>,
+    },
+    /// `anchor` is the canonical importing file. It is not hashed here: the
+    /// canonical key carries it in the sentinel path, the relocatable key in
+    /// the node's label.
+    Unresolved {
+        anchor: PathBuf,
+        import: Arc<str>,
+    },
+    IoError {
+        kind: String,
+    },
 }
 
 #[cfg(test)]

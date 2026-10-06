@@ -9,6 +9,248 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.158
+
+### Breaking
+
+- `agent_loop` publishes actor text and calls `on_delta` only after completion
+  admission, once with the accepted reply. Provisional provider deltas remain
+  private; typed tool events still provide live progress. Direct LLM streaming
+  keeps its existing behavior.
+
+  Migration: Treat `agent_loop`'s `on_delta` callback as delivery of one accepted
+  answer, rather than incremental provider tokens. Use typed tool events for live
+  work progress. Consumers that require raw token streaming should use the direct
+  LLM streaming interface.
+- `schema_parse` and `schema_check` are generic: with `schema_of(T)` they return `Result<T, SchemaError>`
+  instead of `any`, as the language spec already stated. Code that read fields the type does not declare now
+  fails type checking.
+- `harness.process.exec`, `shell`, `exec_at`, and `shell_at` are typed as the closed record they already
+  returned, the one `harness.process.run` declares (`stdout`, `stderr`, `combined`, `exit_code`, `success`,
+  string `status`, ...). Buffered `harness.net` requests return
+  `{status, headers, body, final_url, ok}`, and `harness.net.download` returns
+  `{status, headers, bytes_written, ok}`. None of these fields is nil, so `?.` on them is reported as
+  unnecessary (`HARN-LNT-051`). They are no longer untyped boundary values; only the response `body` text is.
+- `harn_parser::DiagnosticSeverity` gains an `Info` variant for advisory type-checker lints.
+
+  Migration: decode a value whose fields you read with the type that declares them:
+
+  ```harn
+  const pr = schema_parse(raw, schema_of(Pr))?           // Pr, not any; read only declared fields
+  const child = harness.process.exec("git", "status")
+  harness.stdio.println(child.stdout)                    // was child?.stdout ?? ""
+  ```
+
+  Rust embedders matching `DiagnosticSeverity` exhaustively add an `Info` arm; treat it like a warning that
+  never fails a strict run.
+
+### Added
+
+- `json_decode(text, schema_of(T))` parses JSON and validates it against `T` in one step, returning
+  `Result<T, SchemaError>`. Malformed JSON is an `Err` with the same record as a shape mismatch, so command
+  output and response bodies decode with one `?`.
+- `HARN-LNT-080` (`untyped-optional-chain`) reports a `?.` chain over an untyped value (`any`, `unknown`, an
+  open `dict`, or nothing inferred) and points at decoding once with `schema_parse` or `json_decode`, or at
+  annotating the erased parameter. It is advisory (`info`) and never fails `--strict`.
+- Type-checker lints can report at `info` severity, shown in `harn check`, `harn lint`, and the editor
+  without failing a strict run.
+- The `harn-language` skill, the quick reference, and the error-handling guide gain a "Decode at the
+  boundary" section.
+- **Bump PR labels.** The reusable `bump-harn` workflow accepts a `labels`
+  input: comma-separated labels added to the bump PR each time it is created or
+  refreshed. The run fails if GitHub does not report every label applied.
+
+### Fixed
+
+- Agent prose stays provisional until tool and completion admission finishes.
+  Completion checks use the actual remaining deadline after reserving terminal
+  bookkeeping time, rather than requiring their entire configured maximum to fit.
+  Tool parameters with leading underscores, including the natural-language
+  binder's intent field, derive valid CLI flags while preserving their JSON keys.
+- Provider calls wait within their deadline for a network circuit's half-open
+  probe. A child agent's temporary transport failures no longer end a recoverable
+  parent turn before the provider can be reached again. Recovery wait time is
+  deducted from the transport budget; unproductive-response quarantine still
+  fails over immediately.
+- `command_wait_for_output` now reports an exited command's real outcome. A
+  background command that exited 0 no longer reads `result.success: false` and
+  an empty `result.combined` carried over from the handle returned at spawn.
+- OpenAI native `tool_search` now sends the documented `{"type": "tool_search"}` meta-tool and no `namespace`
+  field on functions. The previous `mode` and `namespaces` fields made every OpenAI request with a deferred tool
+  fail with HTTP 400.
+- Native tool search no longer adds its meta-tool to a request with nothing deferred, so a tool-free turn such as
+  a terminal wrap-up stays tool-free.
+- **Relocatable bytecode keys ignore how the tree is spelled (#9323).** A
+  source tree with an import that resolves nowhere keyed its precompiled
+  artifacts by the caller's spelling of the importing file, so a tree reached
+  through a symlink, a relative path, or a non-canonical temp directory missed
+  its prepared bytecode, and an unresolved `../` import inside a package leaked
+  the install generation back into the key. Unresolved imports are now keyed
+  by their canonical anchor. The relocatable hash domain moves to v3, so
+  existing relocatable artifacts rebuild once.
+- CI latency checks use the shared typed baseline contract to reject missing or
+  altered job measurements while preserving the existing time budget.
+- OpenRouter OpenAI routes no longer claim native `tool_search`, which OpenRouter rejects with HTTP 400; `auto`
+  falls back to the client search there.
+- **Release opener outcomes are observable (#9344).** The official workflow
+  publishes an exact-run outcome receipt so release controllers can distinguish
+  a measured no-op from missing evidence without parsing logs.
+- The `untyped-optional-chain` lint (HARN-LNT-080) also reports a `?.` chain through a declared field typed `any`,
+  and treats an undeclared key on an open record as untyped when any of its row tails is untyped.
+- An accepted ACP Stop keeps running and queued prompts cancelled when the next prompt is submitted immediately.
+  Each prompt carries its own cancellation scope from transport admission through execution, so a later prompt
+  cannot revive stopped tools or assistant output.
+- The `shutdown_releases_child_during_mcp_initialization` test no longer reads an empty PID file:
+  its fake MCP child renames the PID file into place after writing it.
+- `harn run`, `bench`, `pack`, `precompile`, and the playground no longer print advisory (`info`) type-checker
+  findings such as `HARN-LNT-080`; they stay in `harn check`, `harn lint`, and the editor.
+- **Same-App repairs survive a bump refresh.** The bump driver treated any
+  commit signed by GitHub for its own App as its refresh output, so a repair
+  created through the same App credentials was discarded on the next refresh.
+  A commit is now refresh output only when it also carries the exact
+  `chore: bump Harn runtime to vX.Y.Z` headline, and a refresh refuses to
+  publish under any other headline.
+
+## v0.10.157
+
+### Breaking
+
+- **Declared exception provenance (#7782).** Typed tool errors now require a
+  source-authored throw in a callable with `throws E`. Legacy dependency throws
+  remain runtime failures even when their values match the tool's error schema.
+  Automatic cleanup and retry rethrows preserve the original error channel,
+  including scalar errors and nested catches.
+
+  Migration: portable program artifacts use version 5 for the new exception
+  opcodes. Recompile older artifacts. Rust compiler entry points now accept the
+  callable's optional declared throws type. Rust embedders matching `VmError`
+  must handle `DeclaredThrown` separately from legacy `Thrown`; only the declared
+  variant is eligible for application-error schema validation.
+- **Missing-command evidence (#8932).** Command results identify statically
+  missing programs with `missing_program`, including shell commands, environment
+  prefixes, and relative paths. The opt-in `auto` mode runs plain POSIX commands
+  as argv and preserves shell execution when shell syntax is needed.
+
+  Migration: Rust embedders constructing `HostlibError::ProcessSpawn` must supply
+  `missing_program: None`, or `Some(program.into())` when the executable is proven
+  absent. Matches listing every field must include `missing_program` or `..`.
+- Agent events now carry typed session health facts and optional tool outcome
+  telemetry. Payloads are boxed so observations do not enlarge every event's
+  native stack footprint. The serialized event contract remains generated from
+  the owning types.
+
+  Migration: Rust consumers constructing `AgentEvent::ToolCallUpdate` must supply
+  `health: None` when no telemetry is measured, or `Some(Box::new(telemetry))`.
+  Exhaustive `AgentEvent` matches must handle `SessionHealth { session_id, fact }`;
+  the fact is a boxed `SessionHealthFact`. Wire consumers may accept the new
+  `session_health` event and optional `health` field through regenerated bindings.
+- Eval reports now preserve measured cost and known subtotals through coding-agent
+  results, generic live execution, saved trial rows, and statistics. Unknown total
+  cost stays unknown; coding-agent reports no longer reprice aggregate tokens.
+
+  Migration: consumers of eval trial, live verification, statistics, and ledger
+  cost fields must handle `Option<f64>` and JSON null as unknown. Use
+  `known_cost_usd` for the measured lower bound rather than replacing unknown
+  totals with zero. Ledger writes use `harn.eval.ledger.row.v2`; retain older
+  ledgers separately and start a v2 ledger, because v1 rows are explicitly refused.
+- **`harn_cli::cli::PrecompileArgs` gains a `jobs: Option<u32>` field for
+  `harn precompile --jobs`.** A struct literal that builds the arguments in
+  Rust no longer compiles without it.
+
+  Migration: add `jobs: None` to every `PrecompileArgs { .. }` literal. `None`
+  keeps the default bound, the machine's available parallelism.
+
+  ```rust
+  PrecompileArgs { target, artifact_contract: false, relocatable: false, out: None, keep_going: false, quiet: true }             // before
+  PrecompileArgs { target, artifact_contract: false, relocatable: false, out: None, keep_going: false, quiet: true, jobs: None } // after
+  ```
+- **Typed inference refusals expose their local authority (#9296).**
+  `LlmErrorReason` adds `PolicyDenied`; `AcpPromptFailureFacts` adds `origin`
+  and `rule` so hosts can distinguish a local policy refusal from a provider
+  failure.
+
+  Migration: update `AcpPromptFailureFacts` struct literals with
+  `origin: None` and `rule: None` when no local authority applies. Regenerate
+  vendored protocol bindings with `harn dump-protocol-artifacts`; handle
+  `policy_denied` as a non-retryable local refusal rather than matching text.
+  Exhaustive Rust matches on `LlmErrorReason` must handle `PolicyDenied`.
+
+### Added
+
+- Agent sessions emit versioned health facts with turn and rolling tool outcomes,
+  command exits, edit and verification progress, diagnostic trends, timing,
+  prose counts, and terminal classification. Missing measurements remain distinct
+  from measured zero; health facts do not change loop policy.
+- `harn provider admission --request '<JSON>'` previews a concrete chat route as
+  admitted, denied, or unknown under the effective inference boundary. The preview
+  uses Harn's enforcement rules without provider I/O or credential resolution;
+  generated host records come from the owning request and snapshot schemas.
+- `harn precompile <dir>` compiles sources concurrently, up to `-j`/`--jobs N`
+  at once (default: the machine's available parallelism). Per-file lines,
+  failures, the summary, the exit status, and `--keep-going` behave exactly as
+  the serial walk did, in sorted source order.
+
+### Fixed
+
+- **Failed post-release development bumps have an explicit repair entry point (#8380).** Promotion and manual repair use
+  the same workflow and opener. Publication must be proved before the release App can open or queue the cutover.
+- Session metadata notifications no longer repeat a rename when the database
+  watcher reaches a local commit before its callback. Changes to usage, model,
+  and other metadata still publish when the title stays the same.
+- **Prepared releases retain their signed candidate identity (#9225).** The release opener records an immutable attempt
+  before queueing. Later changelog fragments wait for the next release without replacing the candidate or restarting its
+  checks.
+- Provider option probes retry a rate-limited request once after the runtime's
+  bounded retry hint, falling back to one second. Provider deadlines beyond the
+  runtime's minute cap decline recovery. Persistent limits remain
+  unmeasured, with physical request accounting preserved.
+- Registered runtime hooks can call advertised host operations under an agent's restricted tool ceiling.
+  Ordinary tool calls remain ceiling-checked, and tool handlers cannot acquire hook authority.
+- CI runs the installed nextest directly so an older Cargo cache binary cannot override the pinned test runner.
+- JSON tool-call instructions now teach the required opening line for verbatim
+  bodies. Parser repair messages use that same contract, preserving strict body
+  binding and literal code content.
+- Inference refusals retain a typed, non-retryable `policy_denied` reason and the
+  local governing rule through chat, streaming, and completion errors. Provider
+  responses cannot claim this locally owned reason.
+- Pre-push signature checks now inspect every ref being pushed, deduplicate shared commits, and exclude freshly
+  advertised destination history instead of using the checked-out branch's stale upstream.
+- Relocatable bytecode keys (`harn precompile` output and adjacent artifacts)
+  now name a package file by its place in the packages tree instead of by a
+  path through the install's generation id. Reinstalling identical packages no
+  longer invalidates prepared bytecode for every source that imports a
+  package; changed package content still does.
+- Automatically attempt an owed post-release development cutover once, using
+  the existing repair workflow and a durable reservation before dispatch.
+
+## v0.10.156
+
+### Breaking
+
+- **`CodeIndexCapability::warm_session` restores the on-disk snapshot on the
+  background warm thread and returns `Building` at once.** A stale snapshot on
+  a large repository no longer blocks the embedder's session start for
+  minutes. `SessionWarmOutcome::Restored` is removed because the restore never
+  completes before the call returns.
+
+  Migration: replace a match on `SessionWarmOutcome::Restored` with
+  `SessionWarmOutcome::Building`, and call `wait_until_idle()` when the code
+  needs the restored index before continuing.
+
+### Added
+
+- `harness.code_index.module_graph` rolls the workspace import graph up from
+  files to directories or modules in one deterministic call, and
+  `std/code_librarian` adds `code_librarian_module_graph` plus a pure
+  `architecture_graph_diff` that compares the graph with a target architecture
+  of required, allowed, and forbidden dependencies (#9281).
+
+### Fixed
+
+- Declared host operations can carry explicit `optional: true` metadata.
+  Static and ACP reconciliation keep these operations known without warning
+  that an optional callback is absent; missing required operations still warn or fail closed.
+
 ## v0.10.155
 
 ### Breaking

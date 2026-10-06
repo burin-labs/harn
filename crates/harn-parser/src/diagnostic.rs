@@ -636,6 +636,7 @@ pub fn render_type_diagnostic(
     let severity = match diag.severity {
         crate::typechecker::DiagnosticSeverity::Error => "error",
         crate::typechecker::DiagnosticSeverity::Warning => "warning",
+        crate::typechecker::DiagnosticSeverity::Info => "info",
     };
     let related = diag
         .related
@@ -760,14 +761,8 @@ fn diagnostic_span_char_len(source: &str, source_line: &str, span: &Span) -> usi
     if span.end <= span.start || span.start >= source.len() {
         return 1;
     }
-    let mut start = span.start.min(source.len());
-    while start > 0 && !source.is_char_boundary(start) {
-        start -= 1;
-    }
-    let mut end = span.end.min(source.len());
-    while end < source.len() && !source.is_char_boundary(end) {
-        end += 1;
-    }
+    let start = source.floor_char_boundary(span.start);
+    let end = source.ceil_char_boundary(span.end);
     let span_len = source
         .get(start..end)
         .map(|text| text.lines().next().unwrap_or(text).chars().count().max(1))

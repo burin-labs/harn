@@ -28,10 +28,8 @@ name: Windows targeted nextest
 # rust-cache's environment hash: a different value here would silently miss the
 # shared cache rather than fail, and every dispatch would compile cold.
 #
-# No Dev Drive step. The nightly creates one only on the GitHub-hosted
-# fallback, because the Blacksmith Windows image does not expose the Hyper-V
-# `New-VHD` command the action needs. A diagnostic lane is not worth paying the
-# VHDX creation time on either tier, so it uses the native filesystem.
+# No Dev Drive step. A targeted diagnostic is not worth paying the VHDX
+# creation time, so it uses the free runner's native filesystem.
 
 on:
   workflow_dispatch:
@@ -58,14 +56,6 @@ on:
         options:
           - harn-cli-fast
           - harn-vm
-      runner:
-        description: Runner tier to measure this dispatch on.
-        required: false
-        type: choice
-        default: blacksmith-8vcpu-windows-2025
-        options:
-          - blacksmith-8vcpu-windows-2025
-          - windows-latest
       success_output:
         description: >-
           Show stdout for tests that PASS. A read-only diagnostic test that
@@ -84,7 +74,7 @@ permissions:
   actions: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ inputs.ref }}-${{ inputs.runner }}
+  group: ${{ github.workflow }}-${{ inputs.ref }}
   cancel-in-progress: true
 
 env:
@@ -93,16 +83,11 @@ env:
 
 jobs:
   targeted:
-    name: Targeted nextest (${{ inputs.runner }})
-    runs-on: ${{ inputs.runner }}
+    name: Targeted nextest (windows-latest)
+    runs-on: windows-latest
     if: github.repository == 'burin-labs/harn'
     timeout-minutes: 60
     env:
-      # Mirror the `runs-on` ladder exactly, per the runner-tier contract in
-      # `scripts/check_runner_tier.harn`: Blacksmith runners report
-      # `self-hosted` in `runner.environment`, so no step may branch on that
-      # context.
-      HARN_RUNNER_TIER: ${{ inputs.runner == 'windows-latest' && 'github-hosted' || 'blacksmith' }}
       # Byte-identical to the `windows-nightly.yml:nextest` producer. A job-level RUSTFLAGS fully
       # replaces the workflow-level value rather than merging with it, so
       # `-D warnings` is restated here.
@@ -177,7 +162,7 @@ jobs:
             harn-vm) scope_args=(-p harn-vm --lib --tests) ;;
             *) scope_args=(-p harn-cli --test harn_cli_fast --features internal-freshness-checker) ;;
           esac
-          cargo nextest run --locked "${scope_args[@]}" \
+          cargo-nextest nextest run --locked "${scope_args[@]}" \
             --profile ci \
             --success-output "${NEXTEST_SUCCESS_OUTPUT}" \
             -E "${NEXTEST_FILTER}" --no-tests=fail 2>&1 | tee "${log}"
@@ -194,7 +179,7 @@ jobs:
         shell: bash
         env:
           TESTED_REF: ${{ inputs.ref }}
-          TESTED_RUNNER: ${{ inputs.runner }}
+          TESTED_RUNNER: windows-latest
           NEXTEST_FILTER: ${{ inputs.filter }}
           NEXTEST_SCOPE: ${{ inputs.scope }}
           LOG_PATH: ${{ steps.targeted-nextest.outputs.log_path }}

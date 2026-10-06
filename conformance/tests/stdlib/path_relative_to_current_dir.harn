@@ -1,0 +1,8 @@
+pipeline default(harness: Harness) {
+  // `.` names the base directory itself, not a segment to climb out of.
+  harness.stdio.println(path_relative_to("src/main.rs", "."))
+  harness.stdio.println(path_relative_to("src/main.rs", "./"))
+  harness.stdio.println(path_relative_to(".", "a"))
+  // A base above the working directory cannot be climbed out of by name.
+  harness.stdio.println(path_relative_to("a", "../b"))
+}

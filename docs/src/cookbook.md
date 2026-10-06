@@ -708,7 +708,7 @@ For remote HTTP MCP servers, authorize once with the CLI and reuse the
 stored token:
 
 ```bash
-harn mcp login notion
+harn mcp login linear
 ```
 
 ### How to give an agent MCP tools

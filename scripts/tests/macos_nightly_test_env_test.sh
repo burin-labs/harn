@@ -4,18 +4,16 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 workflow="$ROOT_DIR/.github/workflows/macos-nightly.yml"
 # An exact-source dispatch runs on the organization's own Apple Silicon
-# runners; the paid M4 class requires the explicit repository opt-in on top.
-# An unset or malformed variable therefore stays on owned capacity instead of
-# silently restoring paid capacity, and any non-dispatch event stays hosted.
-dispatch_runner="runs-on: \${{ github.event_name == 'workflow_dispatch' && (vars.HARN_CI_ENABLE_BLACKSMITH_MACOS == 'true' && 'blacksmith-12vcpu-macos-15' || 'macos-arm64') || 'macos-latest' }}"
-# The dispatch budgets belong to warm builds: 30 minutes on the paid class,
-# 45 on the owned runners whose first build after a toolchain change is cold.
+# runners. Every other event stays on standard hosted capacity.
+dispatch_runner="runs-on: \${{ github.event_name == 'workflow_dispatch' && 'macos-arm64' || 'macos-latest' }}"
+# The dispatch budget belongs to warm builds: 45 minutes on the owned runners
+# whose first build after a toolchain change may be cold.
 # A cold pull-request or scheduled run needs the nightly's budget: this lane's
 # p90 is 47 minutes, and a timeout reads as a red lane rather than a slow one.
-dispatch_timeout="timeout-minutes: \${{ github.event_name == 'workflow_dispatch' && (vars.HARN_CI_ENABLE_BLACKSMITH_MACOS == 'true' && 30 || 45) || 75 }}"
+dispatch_timeout="timeout-minutes: \${{ github.event_name == 'workflow_dispatch' && 45 || 75 }}"
 
 if ! grep -Fq "$dispatch_runner" "$workflow"; then
-  echo "macOS workspace tests must require an explicit opt-in for the paid M4 runner" >&2
+  echo "macOS workspace tests must use owned capacity for an exact-source dispatch" >&2
   exit 1
 fi
 
@@ -24,11 +22,10 @@ if ! grep -Fq "$dispatch_timeout" "$workflow"; then
   exit 1
 fi
 
-# A pull-request run must never reach the paid class or the short budget. Both
-# expressions name the dispatch event positively, so any event that is not a
-# dispatch falls to the hosted runner and the generous budget by construction.
-if grep -Fq "github.event_name != 'pull_request' && 'blacksmith" "$workflow"; then
-  echo "macOS workspace tests must not route pull requests to the paid M4 class" >&2
+# Any paid runner selector here bypasses the repository-wide public-runner
+# policy's intended behavior even if its event expression looks safe.
+if grep -Fq "blacksmith" "$workflow"; then
+  echo "macOS workspace tests must not route to paid capacity" >&2
   exit 1
 fi
 
@@ -42,12 +39,12 @@ fi
 #
 # Each fact is now checked on its own, on the one line that carries them, so a
 # flag inserted between two of them passes and a missing one still fails.
-nextest_command="$(grep -F 'run_rust_test_lane.sh cargo nextest run' "$workflow" || true)"
+nextest_command="$(grep -F 'run_rust_test_lane.sh cargo-nextest nextest run' "$workflow" || true)"
 if [[ -z "$nextest_command" ]]; then
   echo "macOS workspace tests must run through scripts/ci/run_rust_test_lane.sh" >&2
   exit 1
 fi
-if [[ "$(grep -Fc 'run_rust_test_lane.sh cargo nextest run' "$workflow")" != "1" ]]; then
+if [[ "$(grep -Fc 'run_rust_test_lane.sh cargo-nextest nextest run' "$workflow")" != "1" ]]; then
   # Two such lines and the checks below could each be satisfied by a different
   # one, which would report a canonical environment nothing actually runs.
   echo "macOS workspace tests must have exactly one workspace nextest invocation" >&2
@@ -73,7 +70,7 @@ performance_id_line="$(grep -Fn 'id: release-test-case-performance' "$workflow" 
 performance_command_line="$(grep -Fn 'make check-test-case-performance' "$workflow" | cut -d: -f1)"
 performance_binary_line="$(grep -Fn 'export HARN_BIN="${CARGO_TARGET_DIR:-./target}/debug/harn"' "$workflow" | cut -d: -f1)"
 performance_profile_line="$(grep -Fn "HARN_TEST_CASE_PERFORMANCE_PROFILE: \${{ runner.environment == 'self-hosted' && 'macos_owned_arm64' || 'macos_hosted_arm64' }}" "$workflow" | cut -d: -f1)"
-nextest_line="$(grep -Fn 'run_rust_test_lane.sh cargo nextest run' "$workflow" | cut -d: -f1)"
+nextest_line="$(grep -Fn 'run_rust_test_lane.sh cargo-nextest nextest run' "$workflow" | cut -d: -f1)"
 
 if [[ -z "$performance_id_line" || -z "$performance_command_line" || -z "$performance_binary_line" || -z "$performance_profile_line" ]]; then
   echo "macOS workspace tests must own the exact release test-case performance proof" >&2

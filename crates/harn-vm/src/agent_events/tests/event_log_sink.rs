@@ -54,6 +54,7 @@ fn redacts_tool_payloads_before_append() {
         }),
         parsing: None,
         audit: None,
+        intent: None,
     });
 
     let topic = Topic::new("observability.agent_events.s").unwrap();
@@ -145,6 +146,7 @@ fn persists_text_parsing_candidates() {
         raw_input: serde_json::json!({}),
         parsing: Some(true),
         audit: None,
+        intent: None,
     });
     sink.handle_event(&AgentEvent::ToolCallUpdate {
         session_id: "s".into(),
@@ -159,6 +161,7 @@ fn persists_text_parsing_candidates() {
         mutation_status: ToolMutationStatus::Unknown,
         changed_paths: None,
         data: None,
+        health: None,
         executor: None,
         parsing: None,
         raw_input: None,
@@ -188,6 +191,7 @@ fn partial_tool_args(session_id: &str) -> AgentEvent {
         mutation_status: ToolMutationStatus::Unknown,
         changed_paths: None,
         data: None,
+        health: None,
         executor: None,
         parsing: None,
         raw_input: Some(serde_json::json!({"path": "src/"})),
@@ -212,6 +216,7 @@ fn persists_partial_tool_args_without_a_live_subscriber() {
         raw_input: serde_json::json!({"path": "src/lib.rs"}),
         parsing: None,
         audit: None,
+        intent: None,
     });
 
     let topic = Topic::new("observability.agent_events.headless-stream").unwrap();

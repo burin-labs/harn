@@ -898,6 +898,7 @@ impl TypeChecker {
             }
             Node::OptionalPropertyAccess { object, property } => {
                 self.check_unnecessary_safe_property_access(snode, object, property, scope);
+                self.check_untyped_optional_chain(snode, object, scope);
                 self.check_strict_untyped_access(object, scope, span, UntypedAccessKind::Property);
                 self.check_property_access(object, property, scope, span, true, false);
                 self.check_node(object, scope);
@@ -910,6 +911,7 @@ impl TypeChecker {
             }
             Node::OptionalSubscriptAccess { object, index } => {
                 self.check_unnecessary_safe_subscript_access(snode, object, scope);
+                self.check_untyped_optional_chain(snode, object, scope);
                 self.check_strict_untyped_access(object, scope, span, UntypedAccessKind::Subscript);
                 self.check_subscript_access(object, index, scope, span, true, false);
                 self.check_node(object, scope);

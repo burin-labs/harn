@@ -7,6 +7,7 @@
 //! "a store nobody has open is not watched" a property of the type rather than
 //! a rule somebody has to remember at every call site (harn#7960).
 
+use std::path::Path;
 use std::sync::Arc;
 
 use harn_session_store::{
@@ -37,6 +38,15 @@ use crate::value::VmError;
 pub struct CanonicalStore {
     store: SqliteSessionStore,
     _watch: Arc<super::session_wal_watch::StoreWatchRegistration>,
+}
+
+/// Canonical persistence hooks share the store owner's database identity.
+pub(super) fn store_hooks(path: Option<&Path>) -> StoreHooks {
+    StoreHooks {
+        redaction: Some(Arc::new(crate::redact::current_policy())),
+        change_observer: super::session_change::current_observer(path),
+        ..StoreHooks::default()
+    }
 }
 
 impl CanonicalStore {

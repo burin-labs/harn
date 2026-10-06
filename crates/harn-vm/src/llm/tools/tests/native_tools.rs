@@ -429,10 +429,14 @@ fn apply_tool_search_native_injection_regex_variant() {
 
 #[test]
 fn apply_tool_search_native_injection_emits_openai_shape_for_non_anthropic() {
-    // OpenAI's native `tool_search` meta-tool (harn#71) uses a flat
-    // `{"type": "tool_search", "mode": "hosted"}` shape, distinct from
-    // Anthropic's versioned `tool_search_tool_*_20251119` block.
-    let mut tools: Option<Vec<serde_json::Value>> = Some(vec![json!({"name": "look"})]);
+    // OpenAI's documented meta-tool is exactly `{"type": "tool_search"}` for
+    // hosted search. Any other field 400s the request (harn#9314), so the
+    // whole object is pinned, not just its type.
+    let mut tools: Option<Vec<serde_json::Value>> = Some(vec![json!({
+        "type": "function",
+        "function": {"name": "look"},
+        "namespace": "ops",
+    })]);
     apply_tool_search_native_injection_typed(
         &mut tools,
         NativeToolSearchShape::OpenAi,
@@ -441,51 +445,24 @@ fn apply_tool_search_native_injection_emits_openai_shape_for_non_anthropic() {
     );
     let tools = tools.unwrap();
     assert_eq!(tools.len(), 2, "OpenAI meta-tool prepended");
-    assert_eq!(tools[0]["type"].as_str(), Some("tool_search"));
-    assert_eq!(tools[0]["mode"].as_str(), Some("hosted"));
-    assert!(
-        tools[0].get("name").is_none(),
-        "OpenAI meta-tool has no `name` field (that's an Anthropic detail)"
-    );
-    assert_eq!(tools[1]["name"].as_str(), Some("look"));
+    assert_eq!(tools[0], json!({"type": "tool_search"}));
+    assert_eq!(tools[1]["function"]["name"].as_str(), Some("look"));
 }
 
 #[test]
-fn apply_tool_search_native_injection_openai_collects_namespaces() {
-    // When deferred tools declare a `namespace`, OpenAI's meta-tool
-    // carries the distinct set so the server can group them.
-    let mut tools: Option<Vec<serde_json::Value>> = Some(vec![
-        json!({
-            "type": "function",
-            "function": {"name": "deploy_api"},
-            "namespace": "ops",
-        }),
-        json!({
-            "type": "function",
-            "function": {"name": "deploy_web"},
-            "namespace": "ops",
-        }),
-        json!({
-            "type": "function",
-            "function": {"name": "lookup_account"},
-            "namespace": "crm",
-        }),
-    ]);
+fn apply_tool_search_native_injection_openai_client_execution() {
+    let mut tools: Option<Vec<serde_json::Value>> = Some(vec![json!({"name": "look"})]);
     apply_tool_search_native_injection_typed(
         &mut tools,
         NativeToolSearchShape::OpenAi,
-        "bm25",
-        "hosted",
+        "client",
+        "client",
     );
     let tools = tools.unwrap();
-    let namespaces = tools[0]["namespaces"]
-        .as_array()
-        .expect("namespaces present");
-    let names: Vec<&str> = namespaces
-        .iter()
-        .filter_map(|value| value.as_str())
-        .collect();
-    assert_eq!(names, vec!["crm", "ops"], "sorted + deduped");
+    assert_eq!(tools[0]["type"], "tool_search");
+    assert_eq!(tools[0]["execution"], "client");
+    assert_eq!(tools[0]["parameters"]["required"], json!(["query"]));
+    assert!(tools[0].get("mode").is_none());
 }
 
 #[test]

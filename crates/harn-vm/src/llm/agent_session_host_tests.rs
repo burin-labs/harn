@@ -441,7 +441,7 @@ fn record_loop_stamps_endpoints_and_narrows_live_gate() {
 
     // Benign: research-and-synthesis to a user-named destination that never
     // appeared in the fetched content — YOLO-mode research must not be gated.
-    let user_sink = json!({"url": "https://www.notion.so/workspace/SOTA-notes"});
+    let user_sink = json!({"url": "https://wiki.example/workspace/SOTA-notes"});
     assert!(
         !precise_exfil_gate_fires(&untrusted, &user_sink, false),
         "the gate must stay quiet for a user-named destination absent from untrusted content"

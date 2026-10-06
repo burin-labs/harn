@@ -628,6 +628,36 @@
       "jsonrpc": "2.0",
       "method": "_harn/agentEvent",
       "params": {
+        "heuristics": {},
+        "iteration": null,
+        "kind": "session_health",
+        "rolling": {
+          "diagnostic_trend": null,
+          "edits_since_verification": null,
+          "last_stop_class": null,
+          "nonzero_command_exit_rate": null,
+          "prose_to_tool_balance": null,
+          "tool_call_success_rate": null,
+          "turn_wall_time": null
+        },
+        "schema_version": 1,
+        "sessionId": "session-1",
+        "session_id": "session-1",
+        "turn": {
+          "diagnostic_trend": null,
+          "edits_since_verification": null,
+          "last_stop_class": null,
+          "nonzero_command_exit_rate": null,
+          "prose_to_tool_balance": null,
+          "tool_call_success_rate": null,
+          "turn_wall_time": null
+        }
+      }
+    },
+    {
+      "jsonrpc": "2.0",
+      "method": "_harn/agentEvent",
+      "params": {
         "iteration": 0,
         "kind": "purpose_label",
         "label": "Searching for GitHub issues",

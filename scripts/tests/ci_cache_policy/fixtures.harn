@@ -15,18 +15,6 @@ pub fn windows_runner_expression() -> string {
   )
 }
 
-pub fn windows_nightly_runner_expression() -> string {
-  return gha_expression(
-    "vars.HARN_CI_ENABLE_BLACKSMITH_WINDOWS == 'true' && 'blacksmith-16vcpu-windows-2025' || 'windows-latest'",
-  )
-}
-
-pub fn windows_tier_expression() -> string {
-  return gha_expression(
-    "vars.HARN_CI_ENABLE_BLACKSMITH_WINDOWS == 'true' && 'blacksmith' || 'github-hosted'",
-  )
-}
-
 pub fn ci_concurrency() {
   return {
     group: gha_expression("github.workflow")
@@ -154,7 +142,7 @@ pub fn release_warm_cache_path_policy() -> ReleaseWarmCachePathPolicy {
 
 /** Address setup steps by id so inserting one cannot silently shift a fixture. */
 pub fn setup_step_by_id(workflow: dict, id: string) {
-  return (workflow?.jobs?.setup?.steps ?? []).filter({ step -> step?.id == id }).to_list()[0]
+  return (workflow.jobs.setup.steps ?? []).filter({ step -> step.id == id }).to_list()[0]
 }
 
 /**
@@ -208,11 +196,7 @@ pub fn release_binary_workflow() {
           },
         ],
       },
-      prepare_cli_aot: {
-        "runs-on": gha_expression(
-          "vars.HARN_RELEASE_ENABLE_BLACKSMITH_LINUX == 'true' && needs.setup.outputs.cli_aot_primary_runner || needs.setup.outputs.cli_aot_standard_runner",
-        ),
-      },
+      prepare_cli_aot: {"runs-on": gha_expression("needs.setup.outputs.cli_aot_standard_runner")},
       build: {
         if: "needs.setup.outputs.should_build_binaries == 'true'",
         concurrency: {
@@ -301,6 +285,9 @@ pub fn setup_harn_action() {
 pub fn action() {
   return {
     inputs: {
+      "source-key": {default: ""},
+      "broad-restore-prefix": {default: ""},
+      "cache-bin": {default: "false"},
       "cache-workspace-crates": {default: "false"},
       "prune-superseded-release-generations": {default: "false"},
       "target-dir": {default: ""},
@@ -318,36 +305,50 @@ pub fn action() {
           },
         },
         {
-          uses: "actions/cache/restore@exact-pin",
-          if: "inputs.broad-restore-prefix != ''",
-          "continue-on-error": true,
-          with: {
-            path: gha_expression("env.CARGO_HOME || '~/.cargo'")
-              + "/registry\n"
-              + gha_expression("env.CARGO_HOME || '~/.cargo'")
-              + "/git\n"
-              + gha_expression("env.CARGO_TARGET_DIR || format('{0}/target', github.workspace)"),
-            key: gha_expression("inputs.broad-restore-prefix") + gha_expression("github.sha"),
-            "restore-keys": gha_expression("inputs.broad-restore-prefix"),
+          id: "cache-paths",
+          env: {
+            CACHE_SHARED_KEY: gha_expression("inputs.shared-key"),
+            CACHE_EXPLICIT_SOURCE_KEY: gha_expression("inputs.source-key"),
+            CACHE_SOURCE_KEY: gha_expression(
+              "inputs.source-key || (inputs.cache-workspace-crates == 'true' && hashFiles('Cargo.lock', 'Cargo.toml', 'crates/**', 'spec/**', 'tree-sitter-harn/**')) || ''",
+            ),
           },
+          run: "Retained workspace cache has no measured source fingerprint\n-workspace-crates-v3\nv0-rust-$"
+            + "{shared}-\n[package.metadata.harn]\nsource = \"$"
+            + "{source}\"\nrestore-prefix=$"
+            + "{fallback}\npaths<<harn-cache-paths\nworkspaces<<harn-cache-workspaces\n.harn-workspace-source",
         },
         {
+          id: "cache",
           uses: "Swatinem/rust-cache@exact-pin",
           "continue-on-error": true,
           with: {
-            "shared-key": gha_expression(
-              "format('{0}{1}', inputs.source-key != '' && format('{0}-{1}', inputs.shared-key, inputs.source-key) || inputs.shared-key, inputs.cache-workspace-crates == 'true' && '-workspace-crates-v2' || '')",
-            ),
+            "shared-key": gha_expression("steps.cache-paths.outputs.shared-key"),
             "cache-workspace-crates": gha_expression("inputs.cache-workspace-crates"),
             "cache-targets": gha_expression("inputs.target-dir == ''"),
             "cache-directories": gha_expression(
               "format('{0} {1}', inputs.target-dir, inputs.cache-workspace-crates == 'true' && '.harn-workspace-source' || '')",
             ),
+            workspaces: gha_expression("steps.cache-paths.outputs.workspaces"),
             "save-if": gha_expression("inputs.save == 'true' && github.ref == 'refs/heads/main'"),
           },
         },
+        {
+          uses: "actions/cache/restore@exact-pin",
+          if:
+            "steps.cache-paths.outputs.restore-prefix != '' && steps.cache.outputs.cache-hit != 'true'",
+          "continue-on-error": true,
+          with: {
+            path: gha_expression("steps.cache-paths.outputs.paths"),
+            key: gha_expression("steps.cache-paths.outputs.restore-prefix")
+              + gha_expression("github.sha"),
+            "restore-keys": gha_expression("steps.cache-paths.outputs.restore-prefix"),
+          },
+        },
+        {id: "reuse", run: "./scripts/ci/reuse_workspace_crates.sh restore"},
       ],
     },
+    outputs: {"source-current": {value: gha_expression("steps.reuse.outputs.source-current")}},
   }
 }
 
@@ -452,15 +453,12 @@ pub fn workflows() {
           needs: "route",
           if: "needs.route.outputs.run == 'true'",
           permissions: {contents: "read", actions: "write"},
-          "runs-on": windows_nightly_runner_expression(),
-          env: {HARN_RUNNER_TIER: windows_tier_expression()},
+          "runs-on": "windows-latest",
           steps: [
             {uses: "actions/checkout@exact-pin"},
             {
               name: "Set up Dev Drive",
-              if: gha_expression(
-                "vars.HARN_WINDOWS_DEVDRIVE == 'on' && env.HARN_RUNNER_TIER == 'github-hosted'",
-              ),
+              if: gha_expression("vars.HARN_WINDOWS_DEVDRIVE == 'on'"),
               uses: "samypr100/setup-dev-drive@exact-pin",
               with: {"drive-size": "50GB"},
             },

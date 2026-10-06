@@ -1401,7 +1401,6 @@ pub(crate) fn known_persona_tools(manifest: &Manifest) -> BTreeSet<String> {
         "github".to_string(),
         "linear".to_string(),
         "mcp".to_string(),
-        "notion".to_string(),
         "pagerduty".to_string(),
         "shell".to_string(),
         "slack".to_string(),

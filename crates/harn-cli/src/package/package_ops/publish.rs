@@ -143,7 +143,7 @@ pub(super) fn prepare_publish_plan(
         .to_string();
     if !is_valid_registry_package_name(&registry_name) {
         return Err(PackageError::Validation(format!(
-            "invalid registry package name '{registry_name}'; use names like @burin/notion-sdk or acme-lib"
+            "invalid registry package name '{registry_name}'; use names like @burin/linear-sdk or acme-lib"
         )));
     }
 
