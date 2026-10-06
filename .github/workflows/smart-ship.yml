@@ -13,6 +13,8 @@ on:
     - cron: "7,22,37,52 * * * *"
   workflow_dispatch:
 
+# Every write (labels, merge, PR comments) uses the release app token the
+# shared runner mints from the secrets below; GITHUB_TOKEN only reads.
 permissions:
   contents: read
 
@@ -25,7 +27,7 @@ jobs:
       || github.event_name == 'workflow_dispatch'
       || contains(github.event.pull_request.labels.*.name, 'ship')
       || (github.event.action == 'unlabeled' && github.event.label.name == 'ship')
-    uses: burin-labs/.github/.github/workflows/smart-ship.yml@2c7a19ca83eed728e14fd0f6a0b2f5754dc9e078
+    uses: burin-labs/.github/.github/workflows/smart-ship.yml@22f7b6e8e20a70be002c7980a161b1e0cabbea43
     with:
       # Land-only until repair has been proven in this repository.
       repair: false
