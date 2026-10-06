@@ -55,9 +55,9 @@ use crate::tools::args::{
 use super::builtins::SharedIndex;
 use super::refactor_core::{
     candidates_value, competing_declarations, edit_envelope, failed_paths_value, file_plan_value,
-    files_in_scope, is_identifier_token, parse_kind, plan_file, read_source, reference_sites,
-    resolve_seed, write_plans, EditEnvelope, EditSpan, EditSymbol, FilePlan, IdentifierSpan,
-    ReferenceKind, Scope, SeedCandidate, SeedLookup,
+    files_in_scope, first_syntax_error, is_identifier_token, parse_kind, plan_file, read_source,
+    reference_sites, resolve_seed, write_plans, EditEnvelope, EditSpan, EditSymbol, FilePlan,
+    IdentifierSpan, ReferenceKind, Scope, SeedCandidate, SeedLookup,
 };
 use super::signature_syntax::{
     body_uses, find_declaration, read_call_arguments, read_declaration, read_macro_call,
@@ -393,6 +393,12 @@ fn plan(
             ),
         )));
     };
+    if let Some(detail) = first_syntax_error(&seed_source, language) {
+        return Ok(Err(Refusal::new(
+            "syntax_error",
+            format!("`{seed_path}` does not parse before the edit ({detail}); fix it first"),
+        )));
+    }
     let decl = match read_declaration(decl_node, &seed_source, family) {
         Ok(decl) => decl,
         Err(reason) => {
@@ -809,6 +815,12 @@ fn plan_call_sites(
             }
         };
         let root = tree.root_node();
+        if let Some(detail) = first_syntax_error(&source, language) {
+            return Ok(Err(Refusal::new(
+                "syntax_error",
+                format!("`{path}` does not parse before the edit ({detail}); fix it first"),
+            )));
+        }
         let line_text = |row: usize| source.lines().nth(row).unwrap_or("").trim().to_string();
         for site in sites {
             let row = site.span.start_row;

@@ -868,3 +868,23 @@ fn same_named_free_functions_refuse_as_ambiguous_symbol_with_warning_candidates(
     assert!(matches!(field(&result, "match_count"), VmValue::Int(0)));
     assert!(items(field(&result, "conflicts")).is_empty());
 }
+
+#[test]
+fn a_file_that_does_not_parse_refuses_before_planning() {
+    // The captured input: CPython rejects it, tree-sitter-python does not.
+    let ws = Workspace::new(&[("broken.py", "def f(a):\n    b = a +\n    print(b)\n")]);
+    let result = ws.refuse(
+        "syntax_error",
+        "f",
+        "broken.py",
+        &[
+            &[("name", "a"), ("from", "a")],
+            &[("name", "z"), ("default", "0")],
+        ],
+    );
+    let details = text(field(&result, "details"));
+    assert!(
+        details.contains("`broken.py` does not parse before the edit"),
+        "{details}"
+    );
+}

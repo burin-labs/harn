@@ -57,9 +57,9 @@ use crate::tools::args::{
 use super::builtins::SharedIndex;
 use super::refactor_core::{
     candidates_value, collect_identifier_spans, competing_declarations, edit_envelope,
-    failed_paths_value, file_plan_value, files_in_scope, is_identifier_token, parse_kind,
-    plan_file, read_source, resolve_seed, write_plans, EditEnvelope, EditSpan, EditSymbol,
-    FilePlan, Scope, SeedLookup, ShadowSite,
+    failed_paths_value, file_plan_value, files_in_scope, first_syntax_error, is_identifier_token,
+    parse_kind, plan_file, read_source, resolve_seed, write_plans, EditEnvelope, EditSpan,
+    EditSymbol, FilePlan, Scope, SeedLookup, ShadowSite,
 };
 #[cfg(test)]
 use super::state::IndexState;
@@ -243,8 +243,7 @@ pub(super) fn run(index: &SharedIndex, args: &[VmValue]) -> Result<VmValue, Host
             Err(err) => {
                 return Ok(syntax_error_response(
                     &env,
-                    path,
-                    &format!("parse failed: {err}"),
+                    format!("`{path}` failed to parse: {err}"),
                 ));
             }
         };
@@ -285,6 +284,14 @@ pub(super) fn run(index: &SharedIndex, args: &[VmValue]) -> Result<VmValue, Host
             // so the rename still flows.
             continue;
         }
+        if validate {
+            if let Some(detail) = first_syntax_error(&source, language) {
+                return Ok(syntax_error_response(
+                    &env,
+                    format!("`{path}` does not parse before the edit ({detail}); fix it first"),
+                ));
+            }
+        }
 
         let edits: Vec<EditSpan> = targets
             .into_iter()
@@ -297,7 +304,12 @@ pub(super) fn run(index: &SharedIndex, args: &[VmValue]) -> Result<VmValue, Host
 
         match plan_file(path.clone(), language, source, edits, validate) {
             Ok(plan) => plans.push(plan),
-            Err(detail) => return Ok(syntax_error_response(&env, path, &detail)),
+            Err(detail) => {
+                return Ok(syntax_error_response(
+                    &env,
+                    format!("rewriting `{path}` produced syntax errors: {detail}"),
+                ));
+            }
         }
     }
 
@@ -522,12 +534,12 @@ fn invalid_identifier_response(env: &ResponseEnv<'_>, detail: &str) -> VmValue {
     )
 }
 
-fn syntax_error_response(env: &ResponseEnv<'_>, file_path: &str, detail: &str) -> VmValue {
+fn syntax_error_response(env: &ResponseEnv<'_>, details: String) -> VmValue {
     emit_response(
         env,
         "syntax_error",
         ResponseExtras {
-            details: format!("rewriting `{file_path}` produced syntax errors: {detail}"),
+            details,
             ..Default::default()
         },
     )
