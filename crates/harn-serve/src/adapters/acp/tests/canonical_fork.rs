@@ -3,8 +3,8 @@
 use super::*;
 use harn_session_store::{AppendEvent, CreateSession, ReadRange, SessionEventKind, SessionStore};
 
-#[tokio::test(flavor = "current_thread")]
-async fn cold_parent_forks_persist_selected_context_and_lineage_before_prompt() {
+#[test]
+fn cold_parent_forks_persist_selected_context_and_lineage_before_prompt() {
     use super::session_environment::{child_sees_restore_canary, RESTORE_CANARY};
 
     let _lock = acp_env_lock()
@@ -15,6 +15,13 @@ async fn cold_parent_forks_persist_selected_context_and_lineage_before_prompt() 
     assert!(child_sees_restore_canary(
         &harn_vm::security::SessionEnvironment::inherited()
     ));
+    // Serialize process environment outside the async runtime, so another
+    // environment test cannot block this runtime's executor on the same lock.
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("test runtime")
+        .block_on(async {
     harn_vm::reset_thread_local_state();
     let root = tempfile::tempdir().expect("root");
     let store = harn_vm::open_canonical_store(root.path()).expect("store");
@@ -180,4 +187,5 @@ async fn cold_parent_forks_persist_selected_context_and_lineage_before_prompt() 
         store.describe("changed-prefix").await,
         Err(harn_session_store::StoreError::NotFound(_))
     ));
+        });
 }
