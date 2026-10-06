@@ -115,6 +115,26 @@ impl Fixture {
     }
 }
 
+// Construct the real dispatch future outside the permission scope's frame.
+#[inline(never)]
+fn pin_dispatch<'a>(
+    ctx: crate::vm::AsyncBuiltinCtx,
+    call: VmValue,
+    registry: &'a VmValue,
+    options: &'a VmValue,
+) -> std::pin::Pin<
+    Box<impl std::future::Future<Output = Result<VmValue, crate::value::VmError>> + 'a>,
+> {
+    Box::pin(
+        super::super::agent_host_primitives::host_agent_dispatch_tool_call(
+            ctx,
+            call,
+            Some(registry),
+            options.as_dict().unwrap(),
+        ),
+    )
+}
+
 async fn dispatch(
     fixture: &Fixture,
     response: Value,
@@ -167,12 +187,7 @@ async fn dispatch(
     let permission = async {
         crate::orchestration::scope_approval_policy(
             policy,
-            super::super::agent_host_primitives::host_agent_dispatch_tool_call(
-                ctx,
-                call,
-                Some(&registry),
-                options.as_dict().unwrap(),
-            ),
+            pin_dispatch(ctx, call, &registry, &options),
         )
         .await
     };
