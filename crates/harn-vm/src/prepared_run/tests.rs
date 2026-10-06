@@ -303,6 +303,41 @@ fn executor_requirements() -> Vec<AuthorityRequirement> {
     ]
 }
 
+#[test]
+fn interactive_uncapped_dimensions_do_not_invent_authority_or_weaken_unattended_runs() {
+    let receipts = Arc::new(MemoryAuthorityReceiptSink::default());
+    let run = PreparedRun::with_clock((), receipts, Arc::new(|| NOW_MS));
+    let mut requested = intent();
+    requested.budget.time_ms = None;
+    requested.budget.turns = None;
+    let mut host = host_facts();
+    host.budget_ceiling.time_ms = None;
+    host.budget_ceiling.turns = None;
+
+    let unattended = run.prepare(requested.clone(), host.clone());
+    assert!(
+        matches!(unattended, PreparationOutcome::Blocked { ref diagnostics, .. }
+        if diagnostics.iter().any(|item| item.code == "incomplete_run_budget"))
+    );
+
+    requested.interactivity = RunInteractivity::Interactive;
+    host.approval_policy = run_approval_policy(
+        RunInteractivity::Interactive,
+        ApprovalAvailability::Available,
+        WorkspaceTrust::Trusted,
+    );
+    assert!(matches!(
+        run.prepare(requested.clone(), host.clone()),
+        PreparationOutcome::NeedsApproval { .. }
+    ));
+
+    host.budget_ceiling.turns = Some(12);
+    assert!(
+        matches!(run.prepare(requested, host), PreparationOutcome::Blocked { ref diagnostics, .. }
+        if diagnostics.iter().any(|item| item.code == "budget_ceiling" && item.message.contains("turns")))
+    );
+}
+
 fn prepared<E: PreparedRunExecutor>(
     executor: E,
 ) -> (

@@ -684,6 +684,9 @@ pub struct AcpPromptExecutionContext<'a> {
     pub project_root: &'a Path,
     /// Harn's resolved mode and confinement policy, without a host re-derivation.
     pub capability_policy: Option<&'a harn_vm::orchestration::CapabilityPolicy>,
+    /// The resolved budget installed for this turn, including live session
+    /// updates. Hosts must not reconstruct it from startup configuration.
+    pub budget: &'a BudgetSpec,
     /// The existing prompt bridge, including its cancellation-aware host calls.
     pub host_bridge: &'a harn_vm::bridge::HostBridge,
     cancelled: &'a std::sync::atomic::AtomicBool,
