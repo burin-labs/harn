@@ -66,6 +66,9 @@ fn managed_spending_pause_survives_http_and_stream_transport() {
             crate::llm_config::clear_user_overrides();
             drop(server);
             assert_eq!(requests.load(std::sync::atomic::Ordering::SeqCst), 1);
+            let observed = crate::llm::api::classify_vm_llm_error(&error);
+            assert_eq!(observed.reason.as_str(), reason);
+            assert_eq!(observed.kind.as_str(), kind);
             let VmError::Thrown(VmValue::Dict(fields)) = error else {
                 panic!("transport must preserve typed error: {error}");
             };

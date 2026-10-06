@@ -661,6 +661,37 @@ fn redact_provider_error_secrets(text: &str) -> String {
         .into_owned()
 }
 
+/// Keep normalized provider facts authoritative when observation consumes a VM error.
+/// Flattening a dict into prose lets quoted upstream text reclassify the refusal.
+pub(crate) fn classify_vm_llm_error(error: &VmError) -> LlmErrorInfo {
+    if let VmError::Thrown(VmValue::Dict(fields)) = error {
+        if let Some(reason) = fields.get("reason").and_then(|value| {
+            if let VmValue::String(value) = value {
+                LlmErrorReason::parse(value)
+            } else {
+                None
+            }
+        }) {
+            let kind = fields
+                .get("kind")
+                .and_then(|value| {
+                    if let VmValue::String(value) = value {
+                        LlmErrorKind::parse(value)
+                    } else {
+                        None
+                    }
+                })
+                .unwrap_or_else(|| reason.default_kind());
+            return LlmErrorInfo {
+                kind,
+                reason,
+                message: error.to_string(),
+            };
+        }
+    }
+    classify_llm_error(crate::value::error_to_category(error), &error.to_string())
+}
+
 pub(crate) fn classify_llm_error(category: ErrorCategory, message: &str) -> LlmErrorInfo {
     if let Some((kind, reason)) = classify_error_message_taxonomy(message) {
         return LlmErrorInfo {
