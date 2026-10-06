@@ -348,12 +348,11 @@ impl<E> PreparedSession<E> {
         session_id: &str,
         decision: PreparedSessionApprovalDecision,
     ) -> PreparedSessionUpdate {
-        let Some(mut pending) = self
+        let mut pending_sessions = self
             .pending
             .lock()
-            .expect("prepared-session pending state poisoned")
-            .remove(session_id)
-        else {
+            .expect("prepared-session pending state poisoned");
+        let Some(pending) = pending_sessions.get(session_id) else {
             return blocked(
                 session_id.to_string(),
                 "prepared_session_not_waiting",
@@ -366,9 +365,13 @@ impl<E> PreparedSession<E> {
                 session_id.to_string(),
                 "prepared_session_approval_binding",
                 "approval decision does not match the grouped request",
-                Some(pending.receipt),
+                Some(pending.receipt.clone()),
             );
         }
+        let mut pending = pending_sessions
+            .remove(session_id)
+            .expect("validated pending session is held under the same lock");
+        drop(pending_sessions);
         let mut decision_receipt = pending.receipt.clone();
         decision_receipt.stage = AuthorityReceiptStage::ApprovalDecision;
         decision_receipt.observed_at_ms = (self.run.now_ms)();
@@ -671,28 +674,39 @@ impl<E> PreparedSession<E> {
         active: &ActivePreparedSession,
         decision: PreparedSessionApprovalDecision,
     ) -> PreparedSessionUpdate {
-        let Some(pending) = self
+        let mut pending_deltas = self
             .pending_deltas
             .lock()
-            .expect("prepared-session delta state poisoned")
-            .remove(&active.lease.session_id)
-        else {
+            .expect("prepared-session delta state poisoned");
+        let Some(pending) = pending_deltas.get(&active.lease.session_id) else {
             return blocked_update(
                 &active.lease.session_id,
                 "prepared_session_delta_not_waiting",
                 "prepared session is not waiting for a delta approval",
             );
         };
-        let outcome = if decision.batch_fingerprint != pending.batch.batch_fingerprint {
-            PreparedSessionDelta::Blocked {
-                diagnostic: AuthorityDiagnostic {
-                    code: "prepared_session_delta_binding".to_string(),
-                    message: "delta approval does not match the semantic batch".to_string(),
-                    requirement_fingerprint: None,
-                    actionable: "Approve the exact pending delta batch.".to_string(),
+        if decision.batch_fingerprint != pending.batch.batch_fingerprint
+            || pending.delta.parent_lease_fingerprint != active.authority.lease().lease_fingerprint
+        {
+            return PreparedSessionUpdate::Delta {
+                session_id: active.lease.session_id.clone(),
+                outcome: PreparedSessionDelta::Blocked {
+                    diagnostic: AuthorityDiagnostic {
+                        code: "prepared_session_delta_binding".to_string(),
+                        message:
+                            "delta approval does not match the active lease and semantic batch"
+                                .to_string(),
+                        requirement_fingerprint: None,
+                        actionable: "Approve the exact pending delta batch.".to_string(),
+                    },
                 },
-            }
-        } else if !decision.approved {
+            };
+        }
+        let pending = pending_deltas
+            .remove(&active.lease.session_id)
+            .expect("validated pending delta is held under the same lock");
+        drop(pending_deltas);
+        let outcome = if !decision.approved {
             PreparedSessionDelta::Blocked {
                 diagnostic: AuthorityDiagnostic {
                     code: "prepared_session_delta_denied".to_string(),
