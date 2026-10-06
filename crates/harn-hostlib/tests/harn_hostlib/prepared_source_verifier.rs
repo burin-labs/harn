@@ -18,6 +18,8 @@ struct FixtureExecutor {
     ignores_source: bool,
     unittest_runner: bool,
     background_only: bool,
+    reserved_startup_slot: std::sync::Mutex<Option<std::fs::File>>,
+    confined_guardian: bool,
 }
 
 impl FixtureExecutor {
@@ -121,6 +123,10 @@ impl PreparedRunExecutor for FixtureExecutor {
     type Error = String;
 
     async fn execute(&self, _authority: &AuthorityUse) -> Result<(), String> {
+        // Capture ran while our subprocess owned fd 3. Release only that known
+        // startup role now, so the verifier's default clone allocator can reuse
+        // it before the guardian assigns the confinement ruleset there.
+        drop(self.reserved_startup_slot.lock().unwrap().take());
         if self.ignores_source {
             for mode in [OwnerDeathPolicy::None, OwnerDeathPolicy::KillContainment]
                 .into_iter()
@@ -158,7 +164,10 @@ impl PreparedRunExecutor for FixtureExecutor {
         // Mutation begins only after PreparedRun installs the native authority.
         std::fs::write(&self.request.source, "print('RUNNER_SHIM_BYPASS')\n").unwrap();
         std::fs::remove_file(&self.request.interpreter).unwrap();
-        for mode in [OwnerDeathPolicy::None, OwnerDeathPolicy::KillContainment] {
+        for mode in [OwnerDeathPolicy::None, OwnerDeathPolicy::KillContainment]
+            .into_iter()
+            .filter(|mode| !self.confined_guardian || *mode == OwnerDeathPolicy::KillContainment)
+        {
             for blocking in [false, true] {
                 std::fs::write(
                     &self.request.args[0],
@@ -219,29 +228,73 @@ impl PreparedRunExecutor for FixtureExecutor {
 #[tokio::test]
 async fn prepared_source_verifier_direct_and_guardian_keep_original_material_and_refuse_loader_overrides(
 ) {
-    source_verifier_control(false, false, false).await;
+    source_verifier_control(false, false, false, None).await;
 }
 
 #[tokio::test]
 async fn prepared_source_verifier_direct_and_guardian_refuse_an_elf_that_ignores_source() {
-    source_verifier_control(true, false, false).await;
+    source_verifier_control(true, false, false, None).await;
 }
 
 #[tokio::test]
 async fn prepared_source_verifier_background_refuses_an_elf_that_ignores_source() {
-    source_verifier_control(true, false, true).await;
+    source_verifier_control(true, false, true, None).await;
 }
 
 #[tokio::test]
 async fn prepared_source_verifier_direct_and_guardian_preserve_registered_main_module_test_discovery(
 ) {
-    source_verifier_control(false, true, false).await;
+    source_verifier_control(false, true, false, None).await;
+}
+
+#[test]
+fn prepared_source_verifier_confined_guardian_survives_a_released_startup_slot() {
+    use std::os::fd::{AsRawFd, FromRawFd};
+    use std::os::unix::process::CommandExt;
+
+    const CHILD: &str = "HARN_VERIFIER_RELEASED_STARTUP_CONTROL";
+    if std::env::var_os(CHILD).is_some() {
+        // SAFETY: our parent's pre_exec installed this exclusive /dev/null
+        // capability at fd 3 before exec. No other test runs in this subprocess.
+        let startup = unsafe { std::fs::File::from_raw_fd(3) };
+        assert_eq!(startup.as_raw_fd(), 3);
+        startup.metadata().expect("known non-null startup role");
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        runtime.block_on(source_verifier_control(false, false, false, Some(startup)));
+        return;
+    }
+
+    let startup = std::fs::File::open("/dev/null").unwrap();
+    let mut child = std::process::Command::new(std::env::current_exe().unwrap());
+    child.args([
+        "--exact",
+        "prepared_source_verifier::prepared_source_verifier_confined_guardian_survives_a_released_startup_slot",
+        "--nocapture",
+    ])
+    .env(CHILD, "1")
+    .env("HARN_HANDLER_SANDBOX", "enforce");
+    // SAFETY: only async-signal-safe descriptor operations run after fork.
+    // The callback retains startup's custody until the isolated child execs.
+    unsafe {
+        child.pre_exec(move || {
+            if libc::dup2(startup.as_raw_fd(), 3) < 0 || libc::fcntl(3, libc::F_SETFD, 0) < 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+            Ok(())
+        });
+    }
+    let result = child.output().unwrap();
+    assert!(result.status.success(), "{result:?}");
 }
 
 async fn source_verifier_control(
     ignores_source: bool,
     unittest_runner: bool,
     background_only: bool,
+    reserved_startup_slot: Option<std::fs::File>,
 ) {
     let _guardian = harn_hostlib::process::owner_death::install_guardian_reexec_args([
         "--exact",
@@ -282,8 +335,18 @@ async fn source_verifier_control(
         workspace,
         args: vec![target.display().to_string()],
     };
+    let confined_guardian = reserved_startup_slot.is_some();
     let policy = CapabilityPolicy {
-        sandbox_profile: SandboxProfile::Unrestricted,
+        sandbox_profile: if confined_guardian {
+            SandboxProfile::Worktree
+        } else {
+            SandboxProfile::Unrestricted
+        },
+        workspace_roots: if confined_guardian {
+            vec![request.workspace.display().to_string()]
+        } else {
+            Vec::new()
+        },
         ..Default::default()
     };
     let budget = RunBudget {
@@ -351,6 +414,8 @@ async fn source_verifier_control(
             ignores_source,
             unittest_runner,
             background_only,
+            reserved_startup_slot: std::sync::Mutex::new(reserved_startup_slot),
+            confined_guardian,
         },
         Arc::new(MemoryAuthorityReceiptSink::default()),
         Arc::new(|| 1),
