@@ -233,11 +233,10 @@ pub(super) fn run(index: &SharedIndex, args: &[VmValue]) -> Result<VmValue, Host
     let mut shadows: Vec<ShadowSite> = Vec::new();
 
     for path in &in_scope_files {
-        let abs = state.root.join(path);
         let Some(language) = Language::detect(Path::new(path), None) else {
             return Ok(unsupported_language_response(&env, path, None));
         };
-        let source = read_source(BUILTIN, &abs, session_id.as_deref())?;
+        let source = read_source(BUILTIN, &state.root, path, session_id.as_deref())?;
         let tree = match ast_api::parse_tree(&source, language) {
             Ok(tree) => tree,
             Err(err) => {
@@ -313,7 +312,7 @@ pub(super) fn run(index: &SharedIndex, args: &[VmValue]) -> Result<VmValue, Host
     let failed = if dry_run {
         Vec::new()
     } else {
-        write_plans(BUILTIN, &state.root, &plans, session_id.as_deref())
+        write_plans(BUILTIN, &state.root, &plans, session_id.as_deref())?
     };
 
     Ok(applied_response(&env, &plans, dry_run, failed))

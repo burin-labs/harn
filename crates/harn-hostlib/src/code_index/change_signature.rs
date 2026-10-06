@@ -102,7 +102,7 @@ pub(super) fn run(index: &SharedIndex, args: &[VmValue]) -> Result<VmValue, Host
     };
     let mut parameters_before = Vec::new();
     Ok(match plan(state, &request, &mut parameters_before)? {
-        Ok(planned) => finish(state, &request, planned, parameters_before),
+        Ok(planned) => finish(state, &request, planned, parameters_before)?,
         Err(refusal) => refusal.into_value(&request, parameters_before),
     })
 }
@@ -368,7 +368,7 @@ fn plan(
         return Ok(Err(unsupported_language(&seed_path, Some(language))));
     };
 
-    let seed_source = read_source(BUILTIN, &state.root.join(&seed_path), session)?;
+    let seed_source = read_source(BUILTIN, &state.root, &seed_path, session)?;
     let seed_tree = match ast_api::parse_tree(&seed_source, language) {
         Ok(tree) => tree,
         Err(err) => {
@@ -510,7 +510,7 @@ fn plan(
             continue;
         }
         let language = Language::detect(Path::new(&path), None).expect("planned files parse");
-        let source = read_source(BUILTIN, &state.root.join(&path), session)?;
+        let source = read_source(BUILTIN, &state.root, &path, session)?;
         let spans = match materialize_file(&source, file_edits) {
             Ok(spans) => spans,
             Err(message) => return Ok(Err(Refusal::new("error", format!("{path}: {message}")))),
@@ -798,7 +798,7 @@ fn plan_call_sites(
     let mut unsupported = Vec::new();
     for (path, sites) in by_path {
         let language = sites[0].language;
-        let source = read_source(BUILTIN, &state.root.join(path), session)?;
+        let source = read_source(BUILTIN, &state.root, path, session)?;
         let tree = match ast_api::parse_tree(&source, language) {
             Ok(tree) => tree,
             Err(err) => {
@@ -1241,7 +1241,7 @@ fn finish(
     request: &Request,
     planned: Planned,
     parameters_before: Vec<(String, String)>,
-) -> VmValue {
+) -> Result<VmValue, HostlibError> {
     let failed = if request.dry_run {
         Vec::new()
     } else {
@@ -1250,7 +1250,7 @@ fn finish(
             &state.root,
             &planned.plans,
             request.session_id.as_deref(),
-        )
+        )?
     };
     let details = if request.dry_run {
         "dry_run — no files were written"
@@ -1261,7 +1261,7 @@ fn finish(
     };
     let mut sites = planned.call_sites;
     sites.sort_by(|a, b| (&a.path, a.line).cmp(&(&b.path, b.line)));
-    respond(
+    Ok(respond(
         request,
         "applied",
         EditEnvelope {
@@ -1279,7 +1279,7 @@ fn finish(
             parameters_before,
             parameters_after: planned.parameters_after,
         },
-    )
+    ))
 }
 
 #[cfg(test)]

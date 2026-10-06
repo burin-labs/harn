@@ -41,7 +41,7 @@ impl WordIndex {
         for (line_idx, line) in content.split('\n').enumerate() {
             let line_no = (line_idx as u32) + 1;
             tokenize(line, |word| {
-                if word.len() < 2 {
+                if word.len() < MIN_WORD_LEN {
                     return;
                 }
                 self.index
@@ -132,6 +132,22 @@ impl WordIndex {
         // the per-word vec plus the reverse map.
         words * 16 + key_bytes + hits * 8 + self.file_words.len() * 16
     }
+}
+
+/// Shortest token the index records.
+const MIN_WORD_LEN: usize = 2;
+
+/// Whether [`WordIndex`] records `word` at all, so an empty
+/// [`WordIndex::get`] means "absent" rather than "never indexed". False
+/// for one-character names and anything [`tokenize`] would split or skip.
+pub fn records(word: &str) -> bool {
+    let mut tokens = 0;
+    let mut whole = false;
+    tokenize(word, |token| {
+        tokens += 1;
+        whole = token == word;
+    });
+    tokens == 1 && whole && word.len() >= MIN_WORD_LEN
 }
 
 /// Split a single line into identifier tokens. A token matches

@@ -68,6 +68,7 @@ use std::collections::{BTreeMap, HashSet};
 use std::ops::Range;
 use std::path::Path;
 
+use harn_vm::process_sandbox::FsAccess;
 use harn_vm::VmValue;
 use tree_sitter::Tree;
 
@@ -77,8 +78,9 @@ use crate::tools::args::{dict_arg, optional_bool, optional_string};
 
 use super::builtins::SharedIndex;
 use super::refactor_core::{
-    first_syntax_error, parse_kind, plan_file, read_source, reference_sites, resolve_seed,
-    write_plans, ReferenceKind, ReferenceSite, SeedCandidate, SeedLookup,
+    contained_path, first_syntax_error, parse_kind, plan_file, read_source, reference_sites,
+    resolve_seed, resolves_inside, write_plans, ReferenceKind, ReferenceSite, SeedCandidate,
+    SeedLookup,
 };
 use super::state::IndexState;
 use super::symbol_graph::NodeKind;
@@ -220,7 +222,7 @@ pub(super) fn run(index: &SharedIndex, args: &[VmValue]) -> Result<VmValue, Host
                 &state.root,
                 &outcome.response.plans,
                 request.session_id.as_deref(),
-            );
+            )?;
             if request.session_id.is_none() {
                 for plan in &outcome.response.plans {
                     if !failed.iter().any(|(path, _)| path == &plan.path) {
@@ -236,35 +238,6 @@ pub(super) fn run(index: &SharedIndex, args: &[VmValue]) -> Result<VmValue, Host
         }
     }
     Ok(respond(&request, &source_path, &dest_path, outcome))
-}
-
-/// Whether `rel`, joined onto `root`, stays inside `root` once symlinks
-/// resolve: no `..` or absolute component, and the deepest existing ancestor
-/// (or the file, or a dangling link at it) canonicalizes under `root`.
-fn resolves_inside(root: &Path, rel: &str) -> bool {
-    let lexical = Path::new(rel).components().all(|component| {
-        matches!(
-            component,
-            std::path::Component::Normal(_) | std::path::Component::CurDir
-        )
-    });
-    if !lexical {
-        return false;
-    }
-    let Ok(canonical_root) = root.canonicalize() else {
-        return false;
-    };
-    let mut probe = root.join(rel);
-    loop {
-        if std::fs::symlink_metadata(&probe).is_ok() {
-            return probe
-                .canonicalize()
-                .is_ok_and(|resolved| resolved.starts_with(&canonical_root));
-        }
-        if !probe.pop() {
-            return false;
-        }
-    }
 }
 
 // === Planning ===
@@ -286,7 +259,7 @@ fn read_optional(
     path: &str,
     session_id: Option<&str>,
 ) -> Result<Option<String>, HostlibError> {
-    let abs = root.join(path);
+    let abs = contained_path(BUILTIN, root, path, FsAccess::Read)?;
     if let Some(result) = crate::fs::read(&abs, session_id) {
         return match result {
             Ok(bytes) => Ok(Some(String::from_utf8_lossy(&bytes).into_owned())),
@@ -300,7 +273,7 @@ fn read_optional(
     if !abs.exists() {
         return Ok(None);
     }
-    read_source(BUILTIN, &abs, session_id).map(Some)
+    read_source(BUILTIN, root, path, session_id).map(Some)
 }
 
 fn parse(source: &str, language: Language) -> Result<Tree, HostlibError> {
@@ -400,7 +373,7 @@ fn plan(
     }
     let seed_line = seed_node.line;
 
-    let source_text = read_source(BUILTIN, &state.root.join(source_path), session)?;
+    let source_text = read_source(BUILTIN, &state.root, source_path, session)?;
     if let Some(detail) = first_syntax_error(&source_text, language) {
         return Ok(refuse(
             "syntax_error",
@@ -703,7 +676,7 @@ fn plan(
         if Family::of(file_language) != Some(family) {
             continue;
         }
-        let file_source = read_source(BUILTIN, &state.root.join(path), session)?;
+        let file_source = read_source(BUILTIN, &state.root, path, session)?;
         let tree = parse(&file_source, file_language)?;
         let model = lang.model(path, &tree, &file_source);
         works.insert(
@@ -828,8 +801,7 @@ fn plan(
             match ws.module_declaration(dest_path, item.exported) {
                 Ok((parent, line)) => {
                     if !works.contains_key(&parent) {
-                        let parent_source =
-                            read_source(BUILTIN, &state.root.join(&parent), session)?;
+                        let parent_source = read_source(BUILTIN, &state.root, &parent, session)?;
                         let tree = parse(&parent_source, Language::Rust)?;
                         let model = lang.model(&parent, &tree, &parent_source);
                         works.insert(
