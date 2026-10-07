@@ -238,21 +238,22 @@ pipeline test_minimal_pr_capacity_policy_and_negative_controls(harness: Harness,
       "ci.yml:ci-status must require repository policies on every Rust-changing main push, proven or not",
     ),
   )
-  // A proven push built nothing, so downloading from this run would fail.
+  // Every run builds its own CLI: a download naming another run measures a
+  // binary this commit did not build.
   for consumer in ["audit-scripts", "binary-size-signal"] {
-    let own_run_download = ci
-    own_run_download.jobs[consumer].steps = own_run_download.jobs[consumer].steps.map(
+    let foreign_download = ci
+    foreign_download.jobs[consumer].steps = foreign_download.jobs[consumer].steps.map(
       { step ->
         if contains(to_string(step?.uses ?? ""), "download-artifact-with-retry") {
-          return {...step, with: {...step.with, "run-id": ""}}
+          return {...step, with: {...step.with, "run-id": "4242"}}
         }
         return step
       },
     )
       .to_list()
     assert(
-      minimal_pr_capacity_errors(own_run_download, publish).contains(
-        "ci.yml:${consumer} must download the shared CLI from the run the artifact barrier names",
+      minimal_pr_capacity_errors(foreign_download, publish).contains(
+        "ci.yml:${consumer} must download the shared CLI this run built",
       ),
     )
   }
@@ -263,14 +264,23 @@ pipeline test_minimal_pr_capacity_policy_and_negative_controls(harness: Harness,
   const shell_refusal = "ci.yml:shell-gates is a cheap refusal and must carry no event condition"
   const shell_errors = minimal_pr_capacity_errors(main_only_shell, publish)
   assert(shell_errors.any(fn(error) { contains(error, shell_refusal) }))
-  // The Windows cross-compile check is required on every merge-group
-  // candidate: a main-only job, a job queued behind the Linux lanes, or an
+  // The Windows cross-compile check is required on every full-suite pull
+  // request and merge-group candidate: a main-only job, a job queued behind the Linux lanes, or an
   // aggregate that tolerates a merge-group skip each reopen the gap.
   let main_only_cross = ci
   main_only_cross.jobs["windows-cross-check"].if = "github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.changes.outputs.rust == 'true'"
   assert(
     minimal_pr_capacity_errors(main_only_cross, publish).contains(
-      "ci.yml:windows-cross-check must run on every merge-group candidate and on Rust-changing main pushes",
+      "ci.yml:windows-cross-check must run on every full-suite pull request and merge-group candidate and on Rust-changing main pushes",
+    ),
+  )
+  // A merge group cannot read `CI-Scope: full`, so a merge-group-only check
+  // lets a declared full-suite pull request land without it.
+  let merge_group_only_cross = ci
+  merge_group_only_cross.jobs["windows-cross-check"].if = "(github.event_name == 'merge_group' && needs.changes.outputs.post_merge_tier != 'true') || (github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.changes.outputs.rust == 'true')"
+  assert(
+    minimal_pr_capacity_errors(merge_group_only_cross, publish).contains(
+      "ci.yml:windows-cross-check must run on every full-suite pull request and merge-group candidate and on Rust-changing main pushes",
     ),
   )
   let queued_cross = ci
