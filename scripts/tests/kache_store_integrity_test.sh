@@ -7,8 +7,8 @@
 #   - a replace-by-rename, which is how Cargo and rustc update outputs, must
 #     leave the store blob byte-identical;
 # and finally `kache doctor --verify` must still report a clean store.
-# Linux x86_64 only, and it downloads the pinned Kache once; run it on an owned
-# host: bash scripts/tests/kache_store_integrity_test.sh
+# Linux x86_64 only. CI runs it in the workspace test producer whenever that
+# job lands on an owned runner.
 set -euo pipefail
 
 if [[ "$(uname -s)-$(uname -m)" != Linux-x86_64 ]]; then
@@ -21,6 +21,14 @@ tmp="$(mktemp -d)"
 trap 'env_kache daemon stop >/dev/null 2>&1 || true; chmod -R u+w "$tmp" 2>/dev/null || true; rm -rf "$tmp"' EXIT
 fail() { echo "kache store integrity: FAIL: $*" >&2; exit 1; }
 
+# A host that already installed the pinned Kache (checked against its digest)
+# lends that binary, so the proof needs no download; otherwise use_kache.sh
+# fetches and verifies it.
+if [[ -n "${KACHE_INTEGRITY_SEED_BIN:-}" && "$(basename -- "$KACHE_INTEGRITY_SEED_BIN")" == kache \
+  && -x "$KACHE_INTEGRITY_SEED_BIN" ]]; then
+  mkdir -p "$tmp/root/bin/v1.0.0"
+  cp "$KACHE_INTEGRITY_SEED_BIN" "$tmp/root/bin/v1.0.0/kache"
+fi
 HARN_KACHE_ROOT="$tmp/root" "$repo_root/scripts/ci/use_kache.sh" "$tmp/env" > /dev/null
 set -a
 # shellcheck disable=SC1091

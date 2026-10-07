@@ -1309,6 +1309,16 @@ jobs:
           archive: false
           if-no-files-found: error
           retention-days: 1
+      # The owned route shares one Kache store across the host's runners, and
+      # some restored outputs are hardlinks into it. Prove on the host that a
+      # target file sharing a store inode refuses in-place writes, that
+      # replacing one leaves the store untouched, and that the store verifies
+      # clean (#9435).
+      - name: Prove the shared Kache store cannot be corrupted
+        if: env.HARN_RUNNER_TIER == 'self-hosted'
+        env:
+          KACHE_INTEGRITY_SEED_BIN: ${{ env.RUSTC_WRAPPER }}
+        run: bash scripts/tests/kache_store_integrity_test.sh
       - name: Mark workspace test success
         id: workspace-tests-ok
         run: echo "ok=true" >> "$GITHUB_OUTPUT"
