@@ -1,5 +1,7 @@
 use super::*;
 
+mod pending_approval;
+
 #[derive(Clone)]
 struct FixtureIdentityBroker {
     requirement: IdentityBrokerRequirement,
@@ -540,6 +542,7 @@ async fn local_turn_reuses_attached_authority_and_identity_across_an_await() {
     let lease = match session.decide(
         "prepared-session-1",
         PreparedSessionApprovalDecision {
+            request_id: batch.request_id,
             batch_fingerprint: batch.batch_fingerprint,
             approved: true,
             decider: AuthorityDecider::Person,
@@ -657,12 +660,15 @@ async fn bridge_approval_grants_only_a_canonical_selected_allow_before_execution
             1,
         );
         bridge.set_session_id("prepared-session-1");
-        let decision = request_session_approval(&bridge, "prepared-session-1", &batch)
+        let update = session
+            .pending_approval(&bridge, "prepared-session-1", &batch)
+            .unwrap()
+            .wait()
             .await
             .unwrap();
         assert_eq!(approval_calls.load(Ordering::SeqCst), 1);
         assert_eq!(model_calls.load(Ordering::SeqCst), 0);
-        match session.decide("prepared-session-1", decision) {
+        match update {
             PreparedSessionUpdate::Ready { lease, .. } if approved => {
                 let active = session
                     .attach(*lease, host_facts(), prepared_runtime_attachment())
@@ -705,11 +711,35 @@ async fn prepared_session_persists_one_approval_reuses_the_envelope_and_rejects_
         ),
         claims.clone(),
     );
+    let mut earlier_intent = intent();
+    earlier_intent.budget.turns = Some(7);
+    let earlier_batch =
+        match host_session.prepare(prepared_session_binding(), earlier_intent, host_facts()) {
+            PreparedSessionUpdate::NeedsApproval { batch, .. } => batch,
+            other => panic!("expected earlier grouped approval, got {other:?}"),
+        };
     let batch = match host_session.prepare(prepared_session_binding(), intent(), host_facts()) {
         PreparedSessionUpdate::NeedsApproval { batch, .. } => batch,
         other => panic!("interactive session must present one grouped batch, got {other:?}"),
     };
+    assert_ne!(earlier_batch.batch_fingerprint, batch.batch_fingerprint);
+    match host_session.decide(
+        "prepared-session-1",
+        PreparedSessionApprovalDecision {
+            request_id: earlier_batch.request_id,
+            batch_fingerprint: earlier_batch.batch_fingerprint,
+            approved: true,
+            decider: AuthorityDecider::Person,
+        },
+    ) {
+        PreparedSessionUpdate::Blocked { diagnostics, .. } => assert!(diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "prepared_session_approval_binding")),
+        other => panic!("stale decision must refuse without consuming its successor: {other:?}"),
+    }
+    assert_eq!(model_calls.load(Ordering::SeqCst), 0);
     let decision = PreparedSessionApprovalDecision {
+        request_id: batch.request_id,
         batch_fingerprint: batch.batch_fingerprint,
         approved: true,
         decider: AuthorityDecider::Person,
@@ -802,6 +832,7 @@ async fn accepted_stop_and_pivot_persist_stopped_authority_and_retire_the_lease(
         let lease = match session.decide(
             "prepared-session-1",
             PreparedSessionApprovalDecision {
+                request_id: batch.request_id,
                 batch_fingerprint: batch.batch_fingerprint,
                 approved: true,
                 decider: AuthorityDecider::Person,
@@ -871,6 +902,7 @@ async fn prepared_session_rejects_stale_runtime_and_cross_workspace_attach_befor
     let lease = match session.decide(
         "prepared-session-1",
         PreparedSessionApprovalDecision {
+            request_id: batch.request_id,
             batch_fingerprint: batch.batch_fingerprint,
             approved: true,
             decider: AuthorityDecider::Person,
@@ -911,6 +943,28 @@ async fn prepared_session_widening_is_one_semantic_delta_batch() {
         ),
         Arc::new(MemoryPreparedSessionLeaseStore::default()),
     );
+    let mut earlier_intent = intent();
+    earlier_intent.budget.turns = Some(7);
+    let earlier_session_batch =
+        match session.prepare(prepared_session_binding(), earlier_intent, host_facts()) {
+            PreparedSessionUpdate::NeedsApproval { batch, .. } => batch,
+            other => panic!("expected earlier session approval, got {other:?}"),
+        };
+    let earlier_lease = match session.decide(
+        "prepared-session-1",
+        PreparedSessionApprovalDecision {
+            request_id: earlier_session_batch.request_id,
+            batch_fingerprint: earlier_session_batch.batch_fingerprint,
+            approved: true,
+            decider: AuthorityDecider::Person,
+        },
+    ) {
+        PreparedSessionUpdate::Ready { lease, .. } => *lease,
+        other => panic!("expected earlier ready session, got {other:?}"),
+    };
+    let earlier_active = session
+        .attach(earlier_lease, host_facts(), prepared_runtime_attachment())
+        .expect("attach earlier same-id session");
     let batch = match session.prepare(prepared_session_binding(), intent(), host_facts()) {
         PreparedSessionUpdate::NeedsApproval { batch, .. } => batch,
         other => panic!("expected initial approval batch, got {other:?}"),
@@ -918,6 +972,7 @@ async fn prepared_session_widening_is_one_semantic_delta_batch() {
     let lease = match session.decide(
         "prepared-session-1",
         PreparedSessionApprovalDecision {
+            request_id: batch.request_id,
             batch_fingerprint: batch.batch_fingerprint,
             approved: true,
             decider: AuthorityDecider::Person,
@@ -932,6 +987,16 @@ async fn prepared_session_widening_is_one_semantic_delta_batch() {
     let widened = AuthorityRequirement::Tool {
         pattern: "deploy".to_string(),
     };
+    let earlier_widening = AuthorityRequirement::Tool {
+        pattern: "publish".to_string(),
+    };
+    let earlier_batch = match session.request_delta(&active, earlier_widening.clone()) {
+        PreparedSessionUpdate::Delta {
+            outcome: PreparedSessionDelta::NeedsApproval { batch },
+            ..
+        } => batch,
+        other => panic!("expected earlier delta approval, got {other:?}"),
+    };
     let delta_batch = match session.request_delta(&active, widened.clone()) {
         PreparedSessionUpdate::Delta {
             outcome: PreparedSessionDelta::NeedsApproval { batch },
@@ -941,10 +1006,106 @@ async fn prepared_session_widening_is_one_semantic_delta_batch() {
     };
     assert_eq!(delta_batch.groups.len(), 1);
     assert_eq!(delta_batch.groups[0].semantic_group, "host_capabilities");
-    assert!(active.authorize(&widened).is_err());
+    assert_ne!(
+        earlier_active.lease().plan_fingerprint,
+        active.lease().plan_fingerprint,
+    );
+    match session.decide_delta(
+        &earlier_active,
+        PreparedSessionApprovalDecision {
+            request_id: delta_batch.request_id,
+            batch_fingerprint: delta_batch.batch_fingerprint.clone(),
+            approved: true,
+            decider: AuthorityDecider::Person,
+        },
+    ) {
+        PreparedSessionUpdate::Delta {
+            outcome: PreparedSessionDelta::Blocked { diagnostic },
+            ..
+        } => assert_eq!(diagnostic.code, "prepared_session_delta_binding"),
+        other => panic!("stale active lease must not consume or grant a newer delta: {other:?}"),
+    }
+    assert!(earlier_active.authorize(&widened).is_err());
+    assert_ne!(
+        earlier_batch.batch_fingerprint,
+        delta_batch.batch_fingerprint
+    );
     match session.decide_delta(
         &active,
         PreparedSessionApprovalDecision {
+            request_id: earlier_batch.request_id,
+            batch_fingerprint: earlier_batch.batch_fingerprint,
+            approved: true,
+            decider: AuthorityDecider::Person,
+        },
+    ) {
+        PreparedSessionUpdate::Delta {
+            outcome: PreparedSessionDelta::Blocked { diagnostic },
+            ..
+        } => assert_eq!(diagnostic.code, "prepared_session_delta_binding"),
+        other => panic!("stale delta must not consume its successor: {other:?}"),
+    }
+    assert!(active.authorize(&earlier_widening).is_err());
+    let repeated = AuthorityRequirement::Tool {
+        pattern: "repeat-deploy".to_string(),
+    };
+    for approved in [false, true] {
+        let mut batches = Vec::new();
+        for _ in 0..2 {
+            match session.request_delta(&active, repeated.clone()) {
+                PreparedSessionUpdate::Delta {
+                    outcome: PreparedSessionDelta::NeedsApproval { batch },
+                    ..
+                } => batches.push(batch),
+                other => panic!("expected identical pending delta: {other:?}"),
+            }
+        }
+        assert_eq!(batches[0].batch_fingerprint, batches[1].batch_fingerprint);
+        assert_ne!(batches[0].request_id, batches[1].request_id);
+        match session.decide_delta(
+            &active,
+            PreparedSessionApprovalDecision {
+                request_id: batches[0].request_id,
+                batch_fingerprint: batches[0].batch_fingerprint.clone(),
+                approved,
+                decider: AuthorityDecider::Person,
+            },
+        ) {
+            PreparedSessionUpdate::Delta {
+                outcome: PreparedSessionDelta::Blocked { diagnostic },
+                ..
+            } => assert_eq!(diagnostic.code, "prepared_session_delta_binding"),
+            other => panic!("stale answer must not consume replacement delta: {other:?}"),
+        }
+        assert!(active.authorize(&repeated).is_err());
+        match session.decide_delta(
+            &active,
+            PreparedSessionApprovalDecision {
+                request_id: batches[1].request_id,
+                batch_fingerprint: batches[1].batch_fingerprint.clone(),
+                approved: false,
+                decider: AuthorityDecider::Person,
+            },
+        ) {
+            PreparedSessionUpdate::Delta {
+                outcome: PreparedSessionDelta::Blocked { diagnostic },
+                ..
+            } => assert_eq!(diagnostic.code, "prepared_session_delta_denied"),
+            other => panic!("current delta denial must consume its own request: {other:?}"),
+        }
+    }
+    assert!(active.authorize(&widened).is_err());
+    let delta_batch = match session.request_delta(&active, widened.clone()) {
+        PreparedSessionUpdate::Delta {
+            outcome: PreparedSessionDelta::NeedsApproval { batch },
+            ..
+        } => batch,
+        other => panic!("expected fresh widening approval: {other:?}"),
+    };
+    match session.decide_delta(
+        &active,
+        PreparedSessionApprovalDecision {
+            request_id: delta_batch.request_id,
             batch_fingerprint: delta_batch.batch_fingerprint,
             approved: true,
             decider: AuthorityDecider::Person,
@@ -959,4 +1120,6 @@ async fn prepared_session_widening_is_one_semantic_delta_batch() {
     active
         .authorize(&widened)
         .expect("approved widening is live without re-preparation");
+    assert!(active.authorize(&earlier_widening).is_err());
+    assert!(earlier_active.authorize(&widened).is_err());
 }

@@ -9,6 +9,9 @@ use serde::{Deserialize, Serialize};
 use super::evidence::{approval_batch, fingerprint};
 use super::*;
 
+mod pending_approval;
+pub use pending_approval::PendingSessionApproval;
+
 pub const PREPARED_SESSION_SCHEMA: &str = "harn.prepared_session.v1";
 pub const PREPARED_SESSION_SCHEMA_ARTIFACT: &str = "schemas/prepared-session-v1.schema.json";
 pub const PREPARED_SESSION_V1_SCHEMA_JSON: &str =
@@ -45,6 +48,7 @@ pub struct PreparedRuntimeAttachment {
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct PreparedSessionApprovalDecision {
+    pub request_id: uuid::Uuid,
     pub batch_fingerprint: String,
     pub approved: bool,
     pub decider: AuthorityDecider,
@@ -205,7 +209,15 @@ impl PreparedSessionLeaseStore for FilePreparedSessionLeaseStore {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum PendingPreparationState {
+    Waiting,
+    Decided,
+    Retired,
+}
+
 struct PendingPreparedSession {
+    identity: Arc<Mutex<PendingPreparationState>>,
     intent: RunIntent,
     host_facts: HostFacts,
     binding: PreparedSessionBindingV1,
@@ -315,6 +327,7 @@ impl<E> PreparedSession<E> {
                     .insert(
                         binding.session_id.clone(),
                         PendingPreparedSession {
+                            identity: Arc::new(Mutex::new(PendingPreparationState::Waiting)),
                             intent,
                             host_facts,
                             binding: binding.clone(),
@@ -348,12 +361,20 @@ impl<E> PreparedSession<E> {
         session_id: &str,
         decision: PreparedSessionApprovalDecision,
     ) -> PreparedSessionUpdate {
-        let Some(mut pending) = self
+        self.decide_bound(session_id, decision, None)
+    }
+
+    fn decide_bound(
+        &self,
+        session_id: &str,
+        decision: PreparedSessionApprovalDecision,
+        identity: Option<&Arc<Mutex<PendingPreparationState>>>,
+    ) -> PreparedSessionUpdate {
+        let mut pending_sessions = self
             .pending
             .lock()
-            .expect("prepared-session pending state poisoned")
-            .remove(session_id)
-        else {
+            .expect("prepared-session pending state poisoned");
+        let Some(pending) = pending_sessions.get(session_id) else {
             return blocked(
                 session_id.to_string(),
                 "prepared_session_not_waiting",
@@ -361,14 +382,25 @@ impl<E> PreparedSession<E> {
                 None,
             );
         };
-        if decision.batch_fingerprint != pending.batch.batch_fingerprint {
+        if decision.request_id != pending.batch.request_id
+            || decision.batch_fingerprint != pending.batch.batch_fingerprint
+            || identity.is_some_and(|identity| !Arc::ptr_eq(identity, &pending.identity))
+        {
             return blocked(
                 session_id.to_string(),
                 "prepared_session_approval_binding",
                 "approval decision does not match the grouped request",
-                Some(pending.receipt),
+                Some(pending.receipt.clone()),
             );
         }
+        let mut pending = pending_sessions
+            .remove(session_id)
+            .expect("validated pending session is held under the same lock");
+        *pending
+            .identity
+            .lock()
+            .expect("pending preparation state poisoned") = PendingPreparationState::Decided;
+        drop(pending_sessions);
         let mut decision_receipt = pending.receipt.clone();
         decision_receipt.stage = AuthorityReceiptStage::ApprovalDecision;
         decision_receipt.observed_at_ms = (self.run.now_ms)();
@@ -671,28 +703,40 @@ impl<E> PreparedSession<E> {
         active: &ActivePreparedSession,
         decision: PreparedSessionApprovalDecision,
     ) -> PreparedSessionUpdate {
-        let Some(pending) = self
+        let mut pending_deltas = self
             .pending_deltas
             .lock()
-            .expect("prepared-session delta state poisoned")
-            .remove(&active.lease.session_id)
-        else {
+            .expect("prepared-session delta state poisoned");
+        let Some(pending) = pending_deltas.get(&active.lease.session_id) else {
             return blocked_update(
                 &active.lease.session_id,
                 "prepared_session_delta_not_waiting",
                 "prepared session is not waiting for a delta approval",
             );
         };
-        let outcome = if decision.batch_fingerprint != pending.batch.batch_fingerprint {
-            PreparedSessionDelta::Blocked {
-                diagnostic: AuthorityDiagnostic {
-                    code: "prepared_session_delta_binding".to_string(),
-                    message: "delta approval does not match the semantic batch".to_string(),
-                    requirement_fingerprint: None,
-                    actionable: "Approve the exact pending delta batch.".to_string(),
+        if decision.request_id != pending.batch.request_id
+            || decision.batch_fingerprint != pending.batch.batch_fingerprint
+            || pending.delta.parent_lease_fingerprint != active.authority.lease().lease_fingerprint
+        {
+            return PreparedSessionUpdate::Delta {
+                session_id: active.lease.session_id.clone(),
+                outcome: PreparedSessionDelta::Blocked {
+                    diagnostic: AuthorityDiagnostic {
+                        code: "prepared_session_delta_binding".to_string(),
+                        message:
+                            "delta approval does not match the active lease and semantic batch"
+                                .to_string(),
+                        requirement_fingerprint: None,
+                        actionable: "Approve the exact pending delta batch.".to_string(),
+                    },
                 },
-            }
-        } else if !decision.approved {
+            };
+        }
+        let pending = pending_deltas
+            .remove(&active.lease.session_id)
+            .expect("validated pending delta is held under the same lock");
+        drop(pending_deltas);
+        let outcome = if !decision.approved {
             PreparedSessionDelta::Blocked {
                 diagnostic: AuthorityDiagnostic {
                     code: "prepared_session_delta_denied".to_string(),

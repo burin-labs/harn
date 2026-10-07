@@ -451,6 +451,8 @@ pub struct ApprovalGroup {
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct ApprovalBatch {
+    /// Identity of this request, independent of its stable semantic fingerprint.
+    pub request_id: uuid::Uuid,
     pub batch_fingerprint: String,
     pub plan_fingerprint: String,
     pub groups: Vec<ApprovalGroup>,

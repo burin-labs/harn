@@ -2,6 +2,7 @@
 
 mod authority;
 mod control;
+mod pending_call;
 mod remind;
 pub use authority::leading_authority_param_count;
 pub use authority::{inject_leading_authorities, inject_leading_authority};
@@ -817,18 +818,13 @@ impl HostBridge {
             }
             pending.insert(id, tx);
         }
+        let _registration = pending_call::PendingCallRegistration::new(self.pending.clone(), id);
 
         let line = serde_json::to_string(&request)
             .map_err(|e| VmError::Runtime(format!("Bridge serialization error: {e}")))?;
-        if let Err(e) = self.write_line(&line) {
-            let mut pending = self.pending.lock().await;
-            pending.remove(&id);
-            return Err(e);
-        }
+        self.write_line(&line)?;
 
         if self.is_cancelled() {
-            let mut pending = self.pending.lock().await;
-            pending.remove(&id);
             return Err(VmError::Runtime("Bridge: operation cancelled".into()));
         }
 
@@ -846,13 +842,9 @@ impl HostBridge {
                 }
             },
             _ = &mut cancel_wait => {
-                let mut pending = self.pending.lock().await;
-                pending.remove(&id);
                 return Err(VmError::Runtime("Bridge: operation cancelled".into()));
             }
             timeout = &mut timeout_wait => {
-                let mut pending = self.pending.lock().await;
-                pending.remove(&id);
                 return Err(VmError::Runtime(format!(
                     "Bridge: host did not respond to '{method}' within {}s",
                     timeout.as_secs()

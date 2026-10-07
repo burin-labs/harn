@@ -1584,6 +1584,7 @@ var HarnPreparedSessionStates = []string{"needs_approval", "ready", "blocked", "
 var HarnPreparedSessionCommands = []string{"approval_decision", "attach", "turn", "request_delta", "stop", "pivot", "finish"}
 
 type HarnPreparedSessionApprovalDecision struct {
+	RequestID        string `json:"request_id"`
 	BatchFingerprint string `json:"batch_fingerprint"`
 	Approved         bool   `json:"approved"`
 	Decider          string `json:"decider"`

@@ -112,6 +112,141 @@ async fn pending_permission_calls_return_when_cancellation_arrives() {
 }
 
 #[tokio::test(flavor = "current_thread", start_paused = true)]
+async fn dropped_permission_waits_release_rpc_senders_before_the_next_turn() {
+    let pending = Arc::new(Mutex::new(HashMap::new()));
+    let cancelled = Arc::new(AtomicBool::new(false));
+    let bridge = HostBridge::from_parts_with_writer(
+        pending.clone(),
+        cancelled.clone(),
+        Arc::new(|_| Ok(())),
+        1,
+    );
+    for id in 1..=3 {
+        let mut call = Box::pin(bridge.call(
+            crate::llm::acp_permission::METHOD_REQUEST_PERMISSION,
+            serde_json::json!({}),
+        ));
+        wait_for_pending(&pending, id, call.as_mut()).await;
+        assert_eq!(
+            pending.lock().await.len(),
+            1,
+            "the real request must register once"
+        );
+        cancelled.store(true, Ordering::SeqCst);
+        bridge.cancel_notify.notify_waiters();
+        drop(call);
+        assert!(
+            pending.lock().await.is_empty(),
+            "dropped Stop {id} retained a pending RPC sender"
+        );
+        cancelled.store(false, Ordering::SeqCst);
+    }
+    let mut next = Box::pin(bridge.call(
+        crate::llm::acp_permission::METHOD_REQUEST_PERMISSION,
+        serde_json::json!({}),
+    ));
+    wait_for_pending(&pending, 4, next.as_mut()).await;
+    let mut requests = pending.lock().await;
+    assert_eq!(
+        requests.len(),
+        1,
+        "new work cannot inherit stopped requests"
+    );
+    requests
+        .remove(&4)
+        .unwrap()
+        .send(serde_json::json!({
+            "id":4, "result":crate::llm::acp_permission::allow_response(),
+        }))
+        .unwrap();
+    drop(requests);
+    assert!(next.await.is_ok());
+    assert!(pending.lock().await.is_empty());
+}
+
+#[tokio::test(flavor = "current_thread", start_paused = true)]
+async fn dropped_call_retires_after_map_contention_without_removing_new_work() {
+    let pending = Arc::new(Mutex::new(HashMap::new()));
+    let bridge = HostBridge::from_parts_with_writer(
+        pending.clone(),
+        Arc::new(AtomicBool::new(false)),
+        Arc::new(|_| Ok(())),
+        1,
+    );
+    let mut first = Box::pin(bridge.call("host/work", serde_json::json!({})));
+    wait_for_pending(&pending, 1, first.as_mut()).await;
+    let requests = pending.lock().await;
+    assert_eq!(requests.len(), 1);
+    drop(first);
+    drop(requests);
+
+    let mut next = Box::pin(bridge.call("host/work", serde_json::json!({})));
+    wait_for_pending(&pending, 2, next.as_mut()).await;
+    for _ in 0..8 {
+        if !pending.lock().await.contains_key(&1) {
+            break;
+        }
+        tokio::task::yield_now().await;
+    }
+    let mut requests = pending.lock().await;
+    assert_eq!(requests.len(), 1, "the old registration must retire");
+    assert!(requests.contains_key(&2), "new work must keep its sender");
+    requests
+        .remove(&2)
+        .unwrap()
+        .send(serde_json::json!({"id":2,"result":{"next_turn":true}}))
+        .unwrap();
+    drop(requests);
+    assert_eq!(next.await.unwrap()["next_turn"], true);
+    assert!(pending.lock().await.is_empty());
+}
+
+#[test]
+fn dropped_call_outside_its_runtime_retires_a_contended_registration() {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    let pending = Arc::new(Mutex::new(HashMap::new()));
+    let bridge = HostBridge::from_parts_with_writer(
+        pending.clone(),
+        Arc::new(AtomicBool::new(false)),
+        Arc::new(|_| Ok(())),
+        1,
+    );
+    let mut first = Box::pin(bridge.call("host/work", serde_json::json!({})));
+    runtime.block_on(wait_for_pending(&pending, 1, first.as_mut()));
+    let requests = runtime.block_on(pending.clone().lock_owned());
+    assert_eq!(requests.len(), 1);
+    drop(runtime);
+    drop(first);
+    drop(requests);
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    runtime.block_on(async {
+        within("out-of-runtime RPC registration retirement", async {
+            while !pending.lock().await.is_empty() {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await;
+        let mut next = Box::pin(bridge.call("host/work", serde_json::json!({})));
+        wait_for_pending(&pending, 2, next.as_mut()).await;
+        pending
+            .lock()
+            .await
+            .remove(&2)
+            .unwrap()
+            .send(serde_json::json!({"id":2,"result":{"next_turn":true}}))
+            .unwrap();
+        assert_eq!(next.await.unwrap()["next_turn"], true);
+        assert!(pending.lock().await.is_empty());
+    });
+}
+
+#[tokio::test(flavor = "current_thread", start_paused = true)]
 async fn registered_cancel_wait_survives_notification_before_first_poll() {
     let notify = Notify::new();
     let wait = notify.notified();
