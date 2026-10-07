@@ -15,6 +15,7 @@ async fn run_prompt_with_project_capability(
     prompt_text: &str,
     project_read_capability: bool,
 ) -> String {
+    let message_id = format!("qualification-prompt-{id}");
     request_tx
         .send(serde_json::json!({
             "jsonrpc": "2.0",
@@ -22,6 +23,7 @@ async fn run_prompt_with_project_capability(
             "method": "session/prompt",
             "params": {
                 "sessionId": session_id,
+                "messageId": message_id,
                 "prompt": [{"type": "text", "text": prompt_text}],
             },
         }))
@@ -34,10 +36,18 @@ async fn run_prompt_with_project_capability(
     };
     let mut output = String::new();
     let mut saw_completed = false;
+    let mut capability_frames = 0;
+    let mut visible_frames = 0;
     for _ in 0..64 {
         let message = recv_json(response_rx).await;
         match message.get("method").and_then(|value| value.as_str()) {
             Some("host/capabilities") => {
+                assert_eq!(message["params"]["sessionId"], session_id);
+                assert_eq!(
+                    message["params"]["promptCorrelation"]["messageId"],
+                    message_id
+                );
+                capability_frames += 1;
                 request_tx
                     .send(serde_json::json!({
                         "jsonrpc": "2.0",
@@ -49,6 +59,12 @@ async fn run_prompt_with_project_capability(
             Some("session/update")
                 if message["params"]["update"]["sessionUpdate"] == "agent_message_chunk" =>
             {
+                assert_eq!(message["params"]["sessionId"], session_id);
+                assert_eq!(
+                    message["params"]["promptCorrelation"]["messageId"], message_id,
+                    "the canonical prompt must install its scoped output for each turn"
+                );
+                visible_frames += 1;
                 let content = &message["params"]["update"]["content"];
                 let text = content["text"].as_str().expect("chunk text");
                 let visible_delta = content["_meta"]["harn"]["visible_delta"]
@@ -62,6 +78,10 @@ async fn run_prompt_with_project_capability(
             }
             _ if message["id"] == id => {
                 assert_eq!(message["result"]["stopReason"], "end_turn");
+                assert!(
+                    message.get("params").is_none(),
+                    "responses keep their original shape"
+                );
                 saw_completed = true;
                 break;
             }
@@ -69,6 +89,14 @@ async fn run_prompt_with_project_capability(
         }
     }
     assert!(saw_completed, "prompt {id} should complete successfully");
+    assert!(
+        capability_frames > 0,
+        "prompt {id} must reach its host bridge"
+    );
+    assert!(
+        visible_frames > 0,
+        "prompt {id} must emit correlated visible output"
+    );
     output
 }
 
@@ -1156,6 +1184,17 @@ pipeline default(harness: Harness, task: unknown) {
             )
             .await;
             assert_eq!(first, "one\none\ntrue\n1\ntrue\n");
+
+            request_tx
+                .send(serde_json::json!({
+                    "jsonrpc": "2.0",
+                    "id": 20,
+                    "method": "session/load",
+                    "params": {"sessionId": session_id},
+                }))
+                .expect("reload the same saved session before its next prompt");
+            let loaded = recv_response_with_id(&mut response_rx, 20).await;
+            assert_eq!(loaded["result"]["session"]["sessionId"], session_id);
 
             let second = run_prompt_with_project_capability(
                 &request_tx,
