@@ -357,7 +357,7 @@ fn verify_apply(
     let extensions =
         package::try_load_runtime_extensions(manifest_path).map_err(|error| error.to_string())?;
     let resolved_persona = extensions
-        .runtime_personas
+        .runtime_personas()
         .iter()
         .find(|persona| persona.id == discovered.id)
         .ok_or_else(|| format!("runtime did not load activated persona {persona_id}"))?;
@@ -960,7 +960,7 @@ mod tests {
                 &[installed],
                 &handler,
                 &extensions
-                    .runtime_personas
+                    .runtime_personas()
                     .iter()
                     .find(|persona| persona.id == verification.persona_id)
                     .unwrap()

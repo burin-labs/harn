@@ -5,7 +5,7 @@
   "lost_verdict_routes": [
     {
       "workflow": "CI",
-      "job_names": ["Build shared Harn CLI", "Rust workspace tests", "Rust workspace tests (archive mode)", "Run Linux sandbox tests", "Check repository shell gates"],
+      "job_names": ["Build shared Harn CLI", "Rust workspace tests", "Rust workspace tests (2/3)", "Rust workspace tests (3/3)", "Rust workspace tests (archive mode)", "Run Linux sandbox tests", "Check repository shell gates"],
       "events": ["pull_request", "merge_group"]
     }
   ]

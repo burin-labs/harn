@@ -19,6 +19,7 @@ globset = "0.4"
 harn-builtin-meta = { path = "../harn-builtin-meta", version = "=0.10.158" }
 harn-clock = { path = "../harn-clock", version = "=0.10.158" }
 harn-modules = { path = "../harn-modules", version = "=0.10.158" }
+harn-package = { path = "../harn-package", version = "=0.10.158" }
 harn-parser = { path = "../harn-parser", version = "=0.10.158" }
 harn-session-store = { path = "../harn-session-store", version = "=0.10.158" }
 # `default-features = false` keeps the in-process embedding surface lean:

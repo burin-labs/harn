@@ -74,6 +74,7 @@ pub use compaction_policy_registry::*;
 
 pub mod agent_inbox;
 
+mod artifact_files;
 mod artifacts;
 pub use artifacts::*;
 

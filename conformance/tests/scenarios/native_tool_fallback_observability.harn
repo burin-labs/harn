@@ -61,7 +61,7 @@ pipeline default(harness: Harness) {
             "openai-compatible model mock reported completion_tokens=1 but delivered no content, reasoning, or tool calls",
         },
       },
-      llm_text("<done>##DONE##</done>"),
+      llm_text("<user_response>The task is finished.</user_response><done>##DONE##</done>"),
     ],
     { ->
       const surfaced = agent_loop(

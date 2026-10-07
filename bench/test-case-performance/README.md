@@ -13,6 +13,15 @@ and system CPU, and setup/execute percentiles. RSS, page faults, context
 switches, and filesystem I/O are telemetry-only because cache state makes them
 too variable for a release-blocking assertion.
 
+Failed checks retain `.harn-runs/test-case-performance/<run-id>/`. Each round
+contains `measurement.json`, per-child stdout, stderr and exit status, and the
+generated suites. `identity.json` records source and script identity, the
+measured executable's version and digest, and runner details. `verdict.json`
+records the number of rounds, failures, limits and best observed metrics.
+Missing optional module fields remain null rather than reading as measured zero.
+The Mac workflow uploads this directory after a failed performance step.
+Successful checks remove their own directory after the final verdict.
+
 Baselines in `baselines.toml` are measured observations. Each checked limit is
 the larger of twice its observation or a small additive noise floor. A warning
 starts at 80% utilization. Do not add a platform row by copying another

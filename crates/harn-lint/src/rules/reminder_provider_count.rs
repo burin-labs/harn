@@ -7,6 +7,7 @@ use harn_lexer::Span;
 use harn_parser::visit;
 use harn_parser::{DiagnosticCode as Code, DictEntry, Node, SNode};
 
+use super::dict_keys::entry_for_key;
 use crate::diagnostic::{LintDiagnostic, LintSeverity};
 
 const RULE_NAME: &str = "reminder-provider-count";
@@ -101,21 +102,6 @@ fn apply_provider_list(enabled: &mut BTreeSet<String>, items: &[SNode]) {
         } else {
             enabled.insert(trimmed.to_string());
         }
-    }
-}
-
-fn entry_for_key<'a>(entries: &'a [DictEntry], key: &str) -> Option<&'a DictEntry> {
-    entries
-        .iter()
-        .find(|entry| key_name(&entry.key).as_deref() == Some(key))
-}
-
-fn key_name(node: &SNode) -> Option<String> {
-    match &node.node {
-        Node::StringLiteral(value) | Node::RawStringLiteral(value) | Node::Identifier(value) => {
-            Some(value.clone())
-        }
-        _ => None,
     }
 }
 

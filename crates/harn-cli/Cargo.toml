@@ -68,6 +68,7 @@ harn-rules = { path = "../harn-rules", version = "=0.10.158", optional = true }
 harn-rules-hostlib = { path = "../harn-rules-hostlib", version = "=0.10.158", optional = true }
 harn-lint = { path = "../harn-lint", version = "=0.10.158" }
 harn-modules = { path = "../harn-modules", version = "=0.10.158" }
+harn-package = { path = "../harn-package", version = "=0.10.158", features = ["test-support"] }
 harn-fmt = { path = "../harn-fmt", version = "=0.10.158" }
 # Management layer for downloadable injection-detection models (Layer 2). Light
 # (no model runtime); the heavy neural backend is behind `harn-guard/neural`,
@@ -97,12 +98,10 @@ mimalloc = { version = "0.1.52", default-features = false, optional = true }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "io-util", "signal", "sync", "time", "process"] }
 serde_json = "1"
 serde_yaml_ng = "0.10"
-semver = "1"
 unicode-width = "0.2"
-reedline = "0.51"
+reedline = "0.52"
 nu-ansi-term = "0.50"
 toml = "1.1"
-toml_edit = "0.25.12"
 serde = { version = "1", features = ["derive"] }
 notify = "8"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "blocking", "stream"] }
@@ -139,9 +138,6 @@ time = { version = "0.3", features = ["formatting", "parsing"] }
 tempfile = "3"
 include_dir = "0.7"
 uuid = { version = "1", features = ["v4", "v7"] }
-chrono-tz = "0.10.4"
-croner = "4.0.0"
-jmespath = "0.5.0"
 rustls = { version = "0.23", features = ["aws-lc-rs"] }
 tracing = "0.1"
 thiserror = "2"
@@ -191,6 +187,7 @@ mimalloc = ["dep:mimalloc"]
 # without hostlib is supported one layer down, on `harn-serve` and `harn-vm`;
 # `scripts/measure_lean_embedding.sh` guards that configuration.
 hostlib = [
+    "harn-package/hostlib",
     "dep:harn-hostlib",
     "dep:harn-rules",
     "dep:harn-rules-hostlib",

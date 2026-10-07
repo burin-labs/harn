@@ -10,6 +10,8 @@ use serde::Serialize;
 
 use super::*;
 
+mod retired_routes;
+
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct ResolvedModel {
     pub id: String,
@@ -129,6 +131,12 @@ pub enum ModelResolutionError {
         catalog_version: String,
         suggestions: Vec<String>,
     },
+    RetiredModel {
+        provider: String,
+        model: String,
+        reason: String,
+        catalog_version: String,
+    },
     AliasCycle {
         alias_chain: Vec<String>,
         catalog_version: String,
@@ -159,6 +167,9 @@ impl ModelResolutionError {
                 catalog_version, ..
             }
             | Self::UnknownModel {
+                catalog_version, ..
+            }
+            | Self::RetiredModel {
                 catalog_version, ..
             }
             | Self::AliasCycle {
@@ -240,6 +251,15 @@ impl std::fmt::Display for ModelResolutionError {
                 f,
                 "model alias cycle in catalog {catalog_version}: {}",
                 alias_chain.join(" -> ")
+            ),
+            Self::RetiredModel {
+                provider,
+                model,
+                reason,
+                catalog_version,
+            } => write!(
+                f,
+                "model '{model}' is retired for provider '{provider}' (catalog {catalog_version}): {reason}"
             ),
             Self::ResolvedRouteMismatch {
                 receipt_provider,
@@ -513,6 +533,14 @@ fn resolve_model_request_with_config(
         .or(alias_provider)
         .or(catalog_provider)
         .unwrap_or(inferred.provider.as_str());
+
+    // Resolve aliases and provider constraints first, then refuse retired
+    // identities before any open-world or routing-policy transport can use them.
+    retired_routes::check(
+        resolved_provider,
+        &current,
+        catalog_row.and_then(|row| row.wire_model.as_deref()),
+    )?;
 
     let inferred_provider = (inferred.source
         == crate::llm::provider::ProviderInferenceSource::BuiltinRule)

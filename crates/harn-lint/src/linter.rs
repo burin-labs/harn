@@ -680,9 +680,9 @@ impl<'a> Linter<'a> {
         let Node::DictLiteral(entries) = &config.node else {
             return false;
         };
-        entries
-            .iter()
-            .any(|entry| Self::dict_key_name(&entry.key).as_deref() == Some("annotations"))
+        entries.iter().any(|entry| {
+            crate::rules::dict_keys::key_name(&entry.key).as_deref() == Some("annotations")
+        })
     }
 
     fn warn_missing_mcp_tool_annotations(&mut self, span: Span) {

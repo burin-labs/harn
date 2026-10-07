@@ -18,6 +18,7 @@ use harn_lexer::Span;
 use harn_parser::visit;
 use harn_parser::{DiagnosticCode as Code, DictEntry, Node, SNode};
 
+use super::dict_keys::{entry_for_key, key_name};
 use crate::diagnostic::{LintDiagnostic, LintSeverity};
 
 const RULE_NAME: &str = "schema-shaped-tool-parameters";
@@ -57,21 +58,6 @@ fn schema_shaped(entries: &[DictEntry]) -> bool {
             key_name(&entry.key)
                 .is_some_and(|key| JSON_SCHEMA_DOCUMENT_KEYS.contains(&key.as_str()))
         })
-}
-
-fn entry_for_key<'a>(entries: &'a [DictEntry], key: &str) -> Option<&'a DictEntry> {
-    entries
-        .iter()
-        .find(|entry| key_name(&entry.key).as_deref() == Some(key))
-}
-
-fn key_name(node: &SNode) -> Option<String> {
-    match &node.node {
-        Node::StringLiteral(value) | Node::RawStringLiteral(value) | Node::Identifier(value) => {
-            Some(value.clone())
-        }
-        _ => None,
-    }
 }
 
 fn make_diagnostic(span: Span) -> LintDiagnostic {

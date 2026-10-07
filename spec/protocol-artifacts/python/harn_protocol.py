@@ -322,6 +322,7 @@ AGENT_TERMINAL_CLASSES: tuple = (
     "agent_loop_protocol_failure",
     "parse_dropped",
     "generic_throw",
+    "managed_spend_paused",
 )
 HARN_ACP_SESSION_UPDATE_EXTENSIONS: tuple = (
     "artifact",
@@ -693,6 +694,7 @@ class AgentTerminalClass(str, Enum):
     AGENT_LOOP_PROTOCOL_FAILURE = "agent_loop_protocol_failure"
     PARSE_DROPPED = "parse_dropped"
     GENERIC_THROW = "generic_throw"
+    MANAGED_SPEND_PAUSED = "managed_spend_paused"
 
 
 class AgentTerminalKind(str, Enum):
@@ -765,6 +767,7 @@ class LlmErrorReason(str, Enum):
     OUTPUT_BUDGET_EXHAUSTED = "output_budget_exhausted"
     UNKNOWN = "unknown"
     POLICY_DENIED = "policy_denied"
+    MANAGED_SPEND_PAUSED = "managed_spend_paused"
 
 
 class ACPPromptErrorSchema(str, Enum):

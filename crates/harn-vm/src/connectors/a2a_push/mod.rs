@@ -9,6 +9,7 @@ use serde_json::Value as JsonValue;
 use subtle::ConstantTimeEq;
 use time::OffsetDateTime;
 
+use crate::connectors::shared::header_value;
 use crate::connectors::{
     ActivationHandle, ClientError, Connector, ConnectorClient, ConnectorCtx, ConnectorError,
     JwtKeySource, JwtVerificationOptions, ProviderPayloadSchema, RawInbound, TriggerBinding,
@@ -603,13 +604,6 @@ fn bearer_token(headers: &BTreeMap<String, String>) -> Result<&str, ConnectorErr
         });
     }
     Ok(value)
-}
-
-fn header_value<'a>(headers: &'a BTreeMap<String, String>, name: &str) -> Option<&'a str> {
-    headers
-        .iter()
-        .find(|(key, _)| key.eq_ignore_ascii_case(name))
-        .map(|(_, value)| value.as_str())
 }
 
 fn infer_occurred_at(body: &JsonValue) -> Option<OffsetDateTime> {

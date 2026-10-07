@@ -1215,7 +1215,9 @@ pub fn fork_at(
     Ok(Some(new_id))
 }
 
+mod durable_fork;
 mod truncation;
+pub use durable_fork::{fork_canonical, CanonicalForkError};
 use truncation::truncate_state;
 pub use truncation::{trim, truncate};
 
