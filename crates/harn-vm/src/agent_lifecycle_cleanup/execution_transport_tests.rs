@@ -31,6 +31,28 @@ fn event(session: &str) -> AgentEvent {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn never_executed_vm_cleanup_keeps_transport_explicitly_empty() {
+    let (ambient, count) = transport();
+    ambient
+        .scope(async {
+            let vm = crate::Vm::new();
+            emit_event(&event("never-executed-cleanup"));
+            assert_eq!(count.load(Ordering::SeqCst), 1);
+            ScopedCleanup {
+                runtimes: vm.agent_cleanup_runtimes(),
+                inner: async {
+                    emit_event(&event("never-executed-cleanup"));
+                },
+            }
+            .await;
+            assert_eq!(count.load(Ordering::SeqCst), 1);
+            emit_event(&event("never-executed-cleanup"));
+            assert_eq!(count.load(Ordering::SeqCst), 2);
+        })
+        .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn reused_vm_captures_current_runtimes_and_retains_them_for_children_and_cleanup() {
     let mut vm = crate::Vm::new();
     crate::register_vm_stdlib(&mut vm);
@@ -67,16 +89,14 @@ async fn reused_vm_captures_current_runtimes_and_retains_them_for_children_and_c
     );
     assert_eq!(vm.child_vm().agent_cleanup_runtimes().key(), second_key);
 
-    let pending = second.for_execution(first_key.execution_id.clone());
-    assert_eq!(pending.key().execution_id, first_key.execution_id);
-    assert_eq!(pending.key().session_runtime, second_key.session_runtime);
-    assert_eq!(pending.key().host_runtime, second_key.host_runtime);
+    let retained = second.clone();
+    assert_eq!(retained.key(), second_key);
     let old_before = old_count.load(Ordering::SeqCst);
     let new_before = new_count.load(Ordering::SeqCst);
-    // Scheduling under OLD ambient state must use the retained NEW snapshot;
-    // changing only the pending execution ID cannot recapture its caller.
+    // Scheduling under OLD ambient state must use the complete retained NEW
+    // snapshot, including its unchanged execution identity.
     old.scope(ScopedCleanup {
-        runtimes: pending,
+        runtimes: retained,
         inner: async {
             emit_event(&event("reused-vm-cleanup"));
         },
@@ -266,7 +286,7 @@ async fn pending_cleanup_after_vm_reuse(drop_instead_of_retry: bool) {
                  BEGIN SELECT RAISE(FAIL, 'pending cleanup append fault'); END;",
                 )
                 .unwrap();
-            vm.spawned_tasks.insert(
+            vm.register_spawned_task(
                 public_id.into(),
                 crate::value::VmTaskHandle {
                     handle: tokio::spawn(std::future::pending()),
@@ -410,7 +430,7 @@ async fn active_child_cancel_after_same_runtime_vm_reuse_retains_original_owner(
             )
             .unwrap();
             let (started_tx, started_rx) = tokio::sync::oneshot::channel();
-            vm.spawned_tasks.insert(
+            vm.register_spawned_task(
                 public_id.into(),
                 crate::value::VmTaskHandle {
                     handle: tokio::spawn(async move {
@@ -425,7 +445,7 @@ async fn active_child_cancel_after_same_runtime_vm_reuse_retains_original_owner(
                 .await
                 .expect("the original child actually started");
             assert!(crate::agent_sessions::has_journal(&session));
-            assert!(!vm.spawned_tasks[public_id].handle.is_finished());
+            assert!(!vm.spawned_tasks[public_id].task.handle.is_finished());
             store
         },
     }

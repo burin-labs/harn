@@ -238,13 +238,17 @@ impl CleanupRuntimes {
         self
     }
 
-    /// Pending cleanup can retain an earlier execution identity without changing
-    /// its captured runtime pointers or transport ownership.
-    pub(crate) fn for_execution(&self, execution_id: String) -> Self {
-        Self {
-            execution_id,
-            ..self.clone()
-        }
+    /// Retry through the original session runtimes and observation transport.
+    /// The caller retains this snapshot until the canonical terminal commits.
+    pub(crate) async fn abandon_task(&self, task_id: &str) -> Result<(), VmError> {
+        Box::pin(ScopedCleanup {
+            runtimes: self.clone(),
+            inner: crate::llm::agent_session_host::cancellation::abandon_task_sessions(
+                &self.execution_id,
+                task_id,
+            ),
+        })
+        .await
     }
 
     fn key(&self) -> RuntimeKey {

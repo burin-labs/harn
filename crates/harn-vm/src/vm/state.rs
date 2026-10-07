@@ -8,7 +8,7 @@ use crate::chunk::{Chunk, ChunkRef, Constant};
 use crate::runtime_limits::RuntimeLimits;
 use crate::value::{
     ModuleFunctionRegistry, VmAsyncBuiltinFn, VmBuiltinFn, VmClosure, VmEnv, VmError, VmMutex,
-    VmTaskHandle, VmValue,
+    VmValue,
 };
 use crate::BuiltinId;
 
@@ -291,7 +291,7 @@ pub struct Vm {
     /// Exception handler stack.
     pub(crate) exception_handlers: Vec<super::ExceptionHandler>,
     /// Spawned async task handles.
-    pub(crate) spawned_tasks: BTreeMap<String, VmTaskHandle>,
+    pub(crate) spawned_tasks: BTreeMap<String, super::SpawnedTask>,
     /// Force-cancelled tasks whose durable agent terminalization failed.
     /// The public handle remains a retry key even though its join handle has
     /// already stopped.
@@ -1418,7 +1418,7 @@ impl Vm {
                 let scope = self.task_scopes.remove(i);
                 for id in &scope.task_ids {
                     if let Some(task) = self.spawned_tasks.remove(id) {
-                        super::ops::abort_task_detached(task, self.agent_cleanup_runtimes());
+                        super::ops::abort_task_detached(task);
                     }
                 }
             } else {

@@ -299,18 +299,18 @@ fn detached_task_abort_survives_the_source_runtime_shutdown() {
             std::future::pending::<Result<(crate::value::VmValue, String), crate::value::VmError>>()
                 .await
         });
-        crate::vm::ops::abort_task_detached(
-            crate::value::VmTaskHandle {
+        crate::vm::ops::abort_task_detached(crate::vm::SpawnedTask {
+            task: crate::value::VmTaskHandle {
                 handle,
                 cancel_token: cancel_token.clone(),
                 wait_task_id: task_id.to_string(),
             },
-            crate::agent_lifecycle_cleanup::CleanupRuntimes::new(
+            runtimes: Arc::new(crate::agent_lifecycle_cleanup::CleanupRuntimes::new(
                 "detached-execution".to_string(),
                 crate::agent_sessions::active_session_runtime(),
                 super::super::active_agent_host_session_runtime(),
-            ),
-        );
+            )),
+        });
     });
     drop(source_runtime);
 
@@ -571,8 +571,8 @@ fn pending_cleanup_keeps_the_execution_that_owned_the_cancelled_task() {
         vm.pending_task_cleanups.insert(
             "public-task".to_string(),
             crate::vm::PendingTaskCleanup {
-                execution_id: original_execution_id.clone(),
                 task_id: task_id.to_string(),
+                runtimes: Arc::new(vm.agent_cleanup_runtimes()),
             },
         );
 

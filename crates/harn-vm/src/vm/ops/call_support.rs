@@ -1,4 +1,5 @@
-use crate::value::{VmJoinHandle, VmTaskHandle, VmValue};
+use super::super::{PendingTaskCleanup, SpawnedTask};
+use crate::value::{VmJoinHandle, VmValue};
 
 pub(super) type VmTaskJoinResult =
     Result<Result<(VmValue, String), crate::value::VmError>, tokio::task::JoinError>;
@@ -8,11 +9,10 @@ pub(super) type VmTaskJoinResult =
 /// newly added await/cancel surface cannot silently strand the task's journal.
 pub(super) fn finish_task_join(
     joined: VmTaskJoinResult,
-    task_id: String,
-    runtimes: crate::agent_lifecycle_cleanup::CleanupRuntimes,
+    cleanup: PendingTaskCleanup,
 ) -> VmTaskJoinResult {
     if !matches!(&joined, Ok(Ok(_))) {
-        schedule_task_cleanup(task_id, runtimes);
+        schedule_task_cleanup(cleanup.task_id, cleanup.runtimes.as_ref().clone());
     }
     joined
 }
@@ -20,22 +20,20 @@ pub(super) fn finish_task_join(
 /// Stop a task from a synchronous unwind boundary, then finish its durable
 /// agent lifecycle on an inherited runtime child. The journal and writer lease
 /// remain visible if cleanup fails, so absence never masquerades as success.
-pub(crate) fn abort_task_detached(
-    task: VmTaskHandle,
-    runtimes: crate::agent_lifecycle_cleanup::CleanupRuntimes,
-) {
+pub(crate) fn abort_task_detached(owned: SpawnedTask) {
+    let SpawnedTask { task, runtimes } = owned;
     let task_id = task.wait_task_id.clone();
     // A Tokio JoinHandle remains a value after yielding Ready, but polling it
     // again panics. Cleanup needs the task identity, not its discarded output,
     // so never hand an already-finished handle to the waiter.
     if task.handle.is_finished() {
-        schedule_task_cleanup(task_id, runtimes);
+        schedule_task_cleanup(task_id, runtimes.as_ref().clone());
         return;
     }
     task.cancel_token
         .store(true, std::sync::atomic::Ordering::SeqCst);
     task.handle.abort();
-    schedule_task_cleanup_after(task_id, runtimes, async move {
+    schedule_task_cleanup_after(task_id, runtimes.as_ref().clone(), async move {
         let _ = task.handle.await;
     });
 }
@@ -63,16 +61,8 @@ fn schedule_task_cleanup_after<F>(
     });
 }
 
-pub(super) async fn abort_task_and_wait(
-    mut task: VmTaskHandle,
-    execution_id: &str,
-) -> Result<(), crate::value::VmError> {
-    let task_id = task.wait_task_id.clone();
-    task.cancel_token
-        .store(true, std::sync::atomic::Ordering::SeqCst);
-    abort_join_and_wait(&mut task.handle).await;
-    crate::llm::agent_session_host::cancellation::abandon_task_sessions(execution_id, &task_id)
-        .await
+pub(super) async fn abort_task_and_wait(owned: SpawnedTask) -> Result<(), crate::value::VmError> {
+    AwaitingTask::new(owned).cancel().await
 }
 
 pub(super) async fn abort_join_and_wait(handle: &mut VmJoinHandle) {
@@ -81,19 +71,12 @@ pub(super) async fn abort_join_and_wait(handle: &mut VmJoinHandle) {
 }
 
 pub(super) struct AwaitingTask {
-    task: Option<VmTaskHandle>,
-    runtimes: crate::agent_lifecycle_cleanup::CleanupRuntimes,
+    task: Option<SpawnedTask>,
 }
 
 impl AwaitingTask {
-    pub(super) fn new(
-        task: VmTaskHandle,
-        runtimes: crate::agent_lifecycle_cleanup::CleanupRuntimes,
-    ) -> Self {
-        Self {
-            task: Some(task),
-            runtimes,
-        }
+    pub(super) fn new(task: SpawnedTask) -> Self {
+        Self { task: Some(task) }
     }
 
     /// Await the child while retaining cancellation ownership until its join
@@ -101,16 +84,50 @@ impl AwaitingTask {
     /// completed handle must never be polled a second time by the detached
     /// cleanup path.
     pub(super) async fn join(mut self) -> VmTaskJoinResult {
-        let joined = (&mut self.task.as_mut().expect("awaiting task present").handle).await;
+        let joined = self.wait().await;
+        self.finish_join(joined)
+    }
+
+    pub(super) fn request_cancel(&self) {
+        self.task
+            .as_ref()
+            .expect("awaiting task present")
+            .task
+            .cancel_token
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    pub(super) async fn wait(&mut self) -> VmTaskJoinResult {
+        (&mut self
+            .task
+            .as_mut()
+            .expect("awaiting task present")
+            .task
+            .handle)
+            .await
+    }
+
+    pub(super) fn finish_join(mut self, joined: VmTaskJoinResult) -> VmTaskJoinResult {
         let task = self.task.take().expect("awaiting task present after join");
-        finish_task_join(joined, task.wait_task_id, self.runtimes.clone())
+        finish_task_join(joined, task.pending_cleanup())
+    }
+
+    pub(super) async fn cancel(mut self) -> Result<(), crate::value::VmError> {
+        self.request_cancel();
+        let task = self.task.as_mut().expect("awaiting task present");
+        abort_join_and_wait(&mut task.task.handle).await;
+        let result = task.runtimes.abandon_task(&task.task.wait_task_id).await;
+        // The caller transfers any failed terminal write into its pending
+        // registry synchronously. Until this point Drop still owns recovery.
+        self.task.take();
+        result
     }
 }
 
 impl Drop for AwaitingTask {
     fn drop(&mut self) {
         if let Some(task) = self.task.take() {
-            abort_task_detached(task, self.runtimes.clone());
+            abort_task_detached(task);
         }
     }
 }

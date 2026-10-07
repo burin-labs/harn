@@ -24,11 +24,7 @@ impl super::super::Vm {
         let Some(pending) = self.pending_task_cleanups.get(public_task_id).cloned() else {
             return Ok(false);
         };
-        crate::llm::agent_session_host::cancellation::abandon_task_sessions(
-            &pending.execution_id,
-            &pending.task_id,
-        )
-        .await?;
+        pending.runtimes.abandon_task(&pending.task_id).await?;
         self.pending_task_cleanups.remove(public_task_id);
         Ok(true)
     }
@@ -413,7 +409,7 @@ impl super::super::Vm {
                     ))));
                 }
                 if let Some(task) = self.spawned_tasks.get(&id) {
-                    if task.wait_task_id == self.runtime_context.task_id {
+                    if task.task.wait_task_id == self.runtime_context.task_id {
                         return Err(VmError::Deadlock(Box::new(DeadlockError::self_deadlock(
                             "task",
                             id,
@@ -422,7 +418,7 @@ impl super::super::Vm {
                     }
                     let _wait = self.wait_for_graph.wait_for_tasks(
                         &self.runtime_context.task_id,
-                        [task.wait_task_id.clone()],
+                        [task.task.wait_task_id.clone()],
                     )?;
                     let handle = self
                         .spawned_tasks
@@ -431,7 +427,7 @@ impl super::super::Vm {
                     // Explicitly awaited: drop it from any enclosing nursery so
                     // `scope {}` exit neither double-joins nor cancels it.
                     self.deregister_task_from_scopes(&id);
-                    let joined = AwaitingTask::new(handle, self.agent_cleanup_runtimes())
+                    let joined = AwaitingTask::new(handle)
                         .join()
                         .await
                         .map_err(|e| VmError::Runtime(format!("Task join error: {e}")))??;
@@ -452,17 +448,9 @@ impl super::super::Vm {
             crate::typecheck::validate_builtin_call(name, args, None)?;
             if let Some(VmValue::TaskHandle(id)) = args.first() {
                 if let Some(task) = self.spawned_tasks.remove(id.as_str()) {
-                    let runtime_task_id = task.wait_task_id.clone();
-                    if let Err(error) =
-                        super::call_support::abort_task_and_wait(task, self.execution_id()).await
-                    {
-                        self.pending_task_cleanups.insert(
-                            id.to_string(),
-                            super::super::PendingTaskCleanup {
-                                execution_id: self.execution_id().to_string(),
-                                task_id: runtime_task_id,
-                            },
-                        );
+                    let pending = task.pending_cleanup();
+                    if let Err(error) = super::call_support::abort_task_and_wait(task).await {
+                        self.pending_task_cleanups.insert(id.to_string(), pending);
                         return Err(error);
                     }
                 } else {
@@ -489,20 +477,15 @@ impl super::super::Vm {
                 .unwrap_or(5000);
             if let Some(id) = task_id {
                 if let Some(task) = self.spawned_tasks.remove(&id) {
-                    let task_runtime_id = task.wait_task_id.clone();
-                    task.cancel_token
-                        .store(true, std::sync::atomic::Ordering::SeqCst);
-                    let mut handle = task.handle;
+                    let pending = task.pending_cleanup();
+                    let mut task = AwaitingTask::new(task);
+                    task.request_cancel();
                     let timeout =
                         tokio::time::sleep(tokio::time::Duration::from_millis(timeout_ms));
                     tokio::pin!(timeout);
                     tokio::select! {
-                        joined = &mut handle => {
-                            let joined = super::call_support::finish_task_join(
-                                joined,
-                                task_runtime_id.clone(),
-                                self.agent_cleanup_runtimes(),
-                            );
+                        joined = task.wait() => {
+                            let joined = task.finish_join(joined);
                             match joined {
                                 Ok(Ok((result, output))) => {
                                     self.output.push_str(&output);
@@ -525,17 +508,10 @@ impl super::super::Vm {
                             }
                         }
                         _ = &mut timeout => {
-                            super::call_support::abort_join_and_wait(&mut handle).await;
-                            if let Err(error) = crate::llm::agent_session_host::cancellation::abandon_task_sessions(
-                                self.execution_id(),
-                                &task_runtime_id,
-                            ).await {
+                            if let Err(error) = task.cancel().await {
                                 self.pending_task_cleanups.insert(
                                     id.clone(),
-                                    super::super::PendingTaskCleanup {
-                                        execution_id: self.execution_id().to_string(),
-                                        task_id: task_runtime_id,
-                                    },
+                                    pending,
                                 );
                                 return Err(error);
                             }
