@@ -26,8 +26,8 @@ import {
   changelog_parse_sections,
 } from "std/changelog"
 import { help_requested, parse, parser } from "std/cli/argparse"
-import { parse_release } from "std/semver"
 import { path_visibility, require_scanned } from "./path_visibility.harn"
+import { changelog_entries, changelog_entry_heading } from "./render_release_notes.harn"
 
 const CHECK_NAME = "Release changelog fold"
 
@@ -86,12 +86,7 @@ pub fn is_release_changelog_fragment_name(name: string) -> bool {
 }
 
 fn changelog_version_heading(line: string?) -> string? {
-  const matches = regex_captures("^## v([^\\s]+)\\s*$", trim(line ?? ""))
-  if len(matches) == 0 {
-    return nil
-  }
-  const version = matches[0].groups[0]
-  return parse_release(version) == nil ? nil : version
+  return changelog_entry_heading(trim(line ?? ""))?.version
 }
 
 fn changelog_top_from_text(text: string) -> string {
@@ -117,7 +112,7 @@ fn changelog_heading_offsets(text: string) -> list<HeadingOffset> {
   let headings: list<HeadingOffset> = []
   let offset = 0
   for line in split(text, "\n") {
-    const version = changelog_version_heading(line)
+    const version = changelog_entry_heading(line)?.version
     const heading = trim(line)
     if version != nil || heading == "## Unreleased" {
       headings = headings.push(
@@ -283,6 +278,39 @@ pub fn promote_unreleased_section(
     message:
       "no release notes for v${version}: changelog.d has no fragments and CHANGELOG.md has no `## Unreleased` entries",
   }
+}
+
+/** Preserve the failed identity while carrying its changes into the next cut. */
+pub fn retire_unpublished_section(text: string, version: string, published_base: string) -> string {
+  const entries = changelog_entries(text)
+  if entries[0]?.version != version || entries[0]?.never_published != false
+    || entries[1]?.version != published_base
+    || entries[1]?.never_published != false {
+    throw "retirement requires the current unreleased identity and its actual published predecessor"
+  }
+  const headings = changelog_heading_offsets(text)
+  const first = first_version_heading(headings)
+  if first == nil {
+    throw "retirement has no changelog section"
+  }
+  const end = next_heading_start(headings, first.start) ?? len(text)
+  const body = changelog_body_for(text, first, end)
+  if body.trim() == "" {
+    throw "retirement cannot carry empty release notes"
+  }
+  const unreleased = first_unreleased_heading(headings)
+  const start = unreleased != nil && unreleased.start < first.start ? unreleased.start : first.start
+  const pending = unreleased != nil && unreleased.start < first.start ? changelog_body_for(
+    text,
+    unreleased,
+    first.start,
+  ) : ""
+  const carried = changelog_merge_release_bodies(pending, body)
+  return text[0:start] + "## Unreleased\n\n" + carried + "\n\n"
+    + "## v${version} (never published)\n\n"
+    + body
+    + "\n\n"
+    + text[end:len(text)]
 }
 
 fn section_bullet_lines(body: string) -> int {
