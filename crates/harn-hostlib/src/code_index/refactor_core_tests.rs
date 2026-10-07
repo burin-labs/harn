@@ -206,3 +206,49 @@ fn calls_inside_string_interpolations_are_reference_sites() {
          src/main.ts:2:31 call | sum(1)\n"
     );
 }
+
+#[test]
+fn python_line_breaks_outside_brackets_do_not_parse() {
+    // tree-sitter-python reads this as `b = a + print(b)` without an error.
+    let broken = "def f(a):\n    b = a +\n    print(b)\n";
+    assert_eq!(
+        first_syntax_error(broken, Language::Python).as_deref(),
+        Some("line 2 ends inside a statement without brackets or `\\`")
+    );
+    // Every header line is checked, including clauses nested under their
+    // statement.
+    for header in [
+        "if a and\nb:\n    pass\n",
+        "if a:\n    pass\nelif a and\nb:\n    pass\n",
+        "try:\n    pass\nexcept a or\nb:\n    pass\n",
+        "match a:\n    case 1 if a and\nb:\n        pass\n",
+        // A backslash joins lines only when the break follows it directly;
+        // tree-sitter itself rejects trailing whitespace after it.
+        "x = 1 + \\   \n    2\n",
+        "x = 1 + \\\n\n    2\n",
+    ] {
+        assert!(
+            first_syntax_error(header, Language::Python).is_some(),
+            "{header}"
+        );
+    }
+    // Every legal way to continue a line.
+    let valid = "import os\n\
+                 from os import (\n    path,\n    sep,\n)\n\
+                 \n\
+                 \n\
+                 @staticmethod\n\
+                 def f(a,\n      b):\n\
+                 \x20   # body comment\n\
+                 \x20   total = (a +\n             b)\n\
+                 \x20   more = a + \\\n        b\n\
+                 \x20   text = \"\"\"one\ntwo\"\"\"\n\
+                 \x20   items = [\n        a,  # first\n        b,\n    ]\n\
+                 \x20   if a:\n        return total\n    elif (b and\n          a):\n        pass\n    else:\n        return more, text, items\n\
+                 \x20   try:\n        pass\n    except (ValueError,\n            KeyError):\n        pass\n    else:\n        pass\n    finally:\n        pass\n\
+                 \x20   for x in items:\n        pass\n    else:\n        pass\n\
+                 \n\
+                 \n\
+                 class C(\n    object,\n):\n    x = {\"k\": 1,\n         \"j\": 2}\n";
+    assert_eq!(first_syntax_error(valid, Language::Python), None);
+}
