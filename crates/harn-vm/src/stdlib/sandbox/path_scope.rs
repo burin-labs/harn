@@ -153,6 +153,13 @@ pub fn command_output_with_declared_roots(
         } else {
             None
         };
+        let restricted_config;
+        let config = if _policy_scope.is_some() {
+            restricted_config = without_user_git_config(config);
+            &restricted_config
+        } else {
+            config
+        };
         if _policy_scope.is_some() {
             let row = enforcement::active_enforcement();
             if active_sandbox_policy().is_none()
@@ -173,4 +180,27 @@ pub fn command_output_with_declared_roots(
         }
         command_output(program, args, config)
     })
+}
+
+/// Git's global and system config are read roots only under the
+/// package-manager preset this runner withholds: that preset is what grants
+/// `~/.gitconfig` and the includes it names. A child pointed at those files
+/// would hit the jail and Git treats an unreadable config as fatal, so the
+/// confined child reads repository config alone. Repository includes still
+/// resolve, and still stop at the declared roots.
+fn without_user_git_config(config: &ProcessCommandConfig) -> ProcessCommandConfig {
+    let mut config = config.clone();
+    for (key, value) in [
+        ("GIT_CONFIG_GLOBAL", "/dev/null"),
+        ("GIT_CONFIG_NOSYSTEM", "1"),
+    ] {
+        config
+            .env
+            .retain(|(existing, _)| !existing.eq_ignore_ascii_case(key));
+        config
+            .env_remove
+            .retain(|removed| !removed.eq_ignore_ascii_case(key));
+        config.env.push((key.to_string(), value.to_string()));
+    }
+    config
 }
