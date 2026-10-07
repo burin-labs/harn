@@ -32,7 +32,7 @@ const ALLOWED_RAW_SPAWNS: &[(&str, usize, &str)] = &[
         "the funnel's confined builders; command_for.rs closes their environment",
     ),
     (
-        "harn-vm/src/stdlib/sandbox/linux_bwrap.rs",
+        "harn-vm/src/stdlib/sandbox/linux_bwrap_probe.rs",
         1,
         "setup-only availability probe; clears the environment and uses absolute programs \
          without payload grants",

@@ -83,8 +83,7 @@ jobs:
   # dispatch. Merge groups and main pushes use the hosted rung: the owned
   # hosts stay pull-request-only (#6217), and the datacenter host's merge-group
   # route ran the security archive past its limit (#9428).
-  # The shared CLI producer is the exception: on pull requests and merge
-  # groups it prefers runners reserved for it alone (`harn-ci-producer`).
+  # The shared CLI producer always runs hosted (#9435).
 
   # Decide whether the heavy Linux Rust lanes (rust-checks, audit-scripts) need
   # to run at all.
@@ -699,6 +698,11 @@ jobs:
           path: .release-orchestrator
           persist-credentials: false
 
+      - name: Verify release license notices and archive assembly
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund
+          make test-release-notices
+
       # The orchestrator's modules are written against the Harn runtime it
       # pins, not the one this repository is currently building.
       - name: Install the orchestrator's pinned Harn
@@ -922,21 +926,13 @@ jobs:
   # Same-repository pull requests and merge groups only. Fork pull requests
   # cannot read the release-app credentials this probe needs, and they are not
   # eligible for owned capacity anyway, so the probe is skipped rather than
-  # failed for them. Merge groups are measured for the shared CLI producer's
-  # reserved runners alone; the workspace producer still routes them hosted.
-  #
-  # The probe label names the runners reserved for the shared CLI producer.
-  # Every Harn proof lane waits on that one build, and on 2026-10-02 it sat
-  # 37 minutes in the vendor queue behind other repositories' jobs on the same
-  # shared quota (run 37042288569).
+  # failed for them. Merge groups route every producer hosted, so they skip
+  # the census and the decision rather than wait on them.
   runner-availability:
     if: >-
-      github.event_name == 'merge_group'
-      || (github.event_name == 'pull_request'
-      && github.event.pull_request.head.repo.full_name == github.repository)
+      github.event_name == 'pull_request'
+      && github.event.pull_request.head.repo.full_name == github.repository
     uses: burin-labs/.github/.github/workflows/runner-availability.yml@bebed855b0067821ca1466300a687759cf04b29d
-    with:
-      linux_probe_runner_tag: harn-ci-producer
     secrets:
       RELEASE_APP_CLIENT_ID: ${{ secrets.RELEASE_APP_CLIENT_ID }}
       RELEASE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
@@ -951,16 +947,13 @@ jobs:
     name: Name the Rust producer runner capacity decision
     needs: [runner-availability]
     if: >-
-      ${{ !cancelled() && (github.event_name == 'merge_group'
-        || (github.event_name == 'pull_request'
-        && github.event.pull_request.head.repo.full_name == github.repository)) }}
+      ${{ !cancelled() && github.event_name == 'pull_request'
+        && github.event.pull_request.head.repo.full_name == github.repository }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     outputs:
       route: ${{ steps.decision.outputs.route }}
       fallback: ${{ steps.decision.outputs.fallback }}
-      cli_route: ${{ steps.cli-decision.outputs.route }}
-      cli_fallback: ${{ steps.cli-decision.outputs.fallback }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -979,23 +972,6 @@ jobs:
           # The same switch the routing expression below reads. Without it here
           # this step would report the owned census while the job ran on
           # free hosted capacity.
-      # The shared CLI producer's own decision, over the runners reserved for
-      # it. An idle reserved runner takes the build. Every other outcome (all
-      # reserved runners busy, none online, an unreadable census) lands on
-      # GitHub's free standard runner (public repository, harn#9370). The decision line is also a
-      # run-page annotation, so the share of builds that left the reserved
-      # runners is countable.
-      - name: Decide where the shared CLI producer lands
-        id: cli-decision
-        run: bash scripts/ci/runner_capacity.sh
-        env:
-          CAPACITY_LABEL: CLI_PRODUCER_CAPACITY
-          CAPACITY_POOL: linux_probe
-          CAPACITY_ROUTED_EVENT: pull_request merge_group
-          EVENT_NAME: ${{ github.event_name }}
-          SELFHOSTED_DISABLED: ${{ needs.runner-availability.outputs.selfhosted_disabled }}
-          RUNNER_CAPACITY: ${{ needs.runner-availability.outputs.capacity }}
-
   rust-cli:
     name: Build shared Harn CLI
     needs: [changes, runner-availability, rust-producer-capacity]
@@ -1022,26 +998,19 @@ jobs:
     # target restored and no sccache it hit its 31-minute step timeout while
     # ten proof lanes waited on it (run 36987728246).
     #
-    # Its own runners instead: `harn-ci-producer` runners serve this job and
-    # nothing else, with the host's sccache. The capacity step sends the build
-    # there when one is idle. When all are busy, none is online, or on fork
-    # pull requests and main pushes, it runs on GitHub's free standard
-    # `ubuntu-24.04` (4 vCPU on a public repository). Public-repository CI is
-    # free by policy (harn#9370): no larger GitHub runner, Ubicloud or
-    # Blacksmith. On 2026-10-02 this build also sat 37 minutes in the shared
-    # Ubicloud queue (run 37042288569). The capacity annotation still counts
-    # how often the reserved pool was full.
+    # Not the reserved owned runners either. Their compiles run in the host's
+    # shared compiler cache server, outside the runner's CPU quota, so they
+    # compete with every other runner on the host: on 2026-10-06 eight builds
+    # there took a median 22.9 minutes (harn-vm alone 10.5 minutes) against
+    # 15.7 for seventeen on GitHub's free standard `ubuntu-24.04` (4 vCPU on
+    # a public repository; harn#9370 keeps public CI free: no larger GitHub
+    # runner, Ubicloud or Blacksmith). Every proof lane waits on this build,
+    # so it always runs hosted (#9435).
     #
     # The hosted ceiling comes from the step budgets in
     # scripts/ci_cache_policy/linux_checks.harn, sized for 4 vCPU.
-    runs-on: >-
-      ${{ (needs.rust-producer-capacity.outputs.cli_route == 'owned'
-        && fromJSON('["self-hosted", "Linux", "X64", "harn-ci-producer"]'))
-        || 'ubuntu-24.04' }}
-    timeout-minutes: >-
-      ${{ (needs.rust-producer-capacity.outputs.cli_route == 'owned'
-        && 37)
-        || 49 }}
+    runs-on: ${{ 'ubuntu-24.04' }}
+    timeout-minutes: ${{ 49 }}
     # Main pushes land on the free hosted rung, which is the authorized
     # main-branch cache writer.
     permissions:
@@ -1051,10 +1020,7 @@ jobs:
       CARGO_PROFILE_DEV_DEBUG: line-tables-only
       RUSTFLAGS: "-D warnings -Clink-arg=-fuse-ld=mold"
       SCCACHE_CACHE_SIZE: 15G
-      HARN_RUNNER_TIER: >-
-        ${{ (needs.rust-producer-capacity.outputs.cli_route == 'owned'
-          && 'self-hosted')
-          || 'github-hosted' }}
+      HARN_RUNNER_TIER: ${{ 'github-hosted' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -1639,14 +1605,15 @@ jobs:
       # standing down and leaving a boundary proof that measures nothing.
       # Nowhere else sets this: a class without Landlock skips and says so.
       HARN_REQUIRE_LANDLOCK_TESTS: "1"
+      BWRAP_REQUIRE_TESTS: "1"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install mold linker
         uses: ./.github/actions/apt-install
         timeout-minutes: 5
         with:
-          packages: mold
-          check-command: mold
+          packages: mold bubblewrap
+          check-command: mold bwrap
       - uses: ./.github/actions/rust-toolchain
       - name: Install cargo-nextest
         uses: taiki-e/install-action@4cef1412cce204788f482e778a0b9187f9626a29 # v2.87.21

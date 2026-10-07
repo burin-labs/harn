@@ -393,6 +393,57 @@ pub(crate) fn record_provider_dispatch(session_id: &str) {
     });
 }
 
+/// Bill an auxiliary call (a judge, classifier, or other Harn-assigned purpose
+/// that is not the agent turn) to its session's run record.
+///
+/// The agent turn records its accepted result through
+/// `__host_agent_session_record_usage`. An auxiliary call never passes that
+/// way, so its spend was missing from the run's `usage`. The accepted-turn
+/// counters behind `result.llm` stay untouched and keep their declared scope.
+pub(crate) fn record_auxiliary_call_usage(
+    opts: &super::api::LlmCallOptions,
+    result: &super::api::LlmResult,
+) {
+    let call_role = opts.context_manifest.call_role();
+    if !super::mock::is_auxiliary_call_role(call_role) {
+        return;
+    }
+    let Some(session_id) = opts
+        .session_id
+        .as_deref()
+        .filter(|session_id| crate::agent_sessions::exists(session_id))
+    else {
+        return;
+    };
+    let usage = result.usage();
+    let usage_unknown = matches!(
+        usage.accounting_status,
+        crate::llm::usage::UsageAccountingStatus::Unknown
+    );
+    let _ = crate::agent_sessions::append_event(
+        session_id,
+        crate::llm::helpers::transcript_event(
+            "llm_call",
+            "assistant",
+            "internal",
+            "LLM call completed",
+            Some(serde_json::json!({
+                "call_role": call_role,
+                "input_tokens": usage.input_tokens,
+                "output_tokens": usage.output_tokens,
+                "cache_read_tokens": usage.cache_read_tokens,
+                "cache_write_tokens": usage.cache_write_tokens,
+                "provider": result.provider,
+                "model": result.model,
+                "cost_usd": usage.cost_usd,
+                "accounting_status": if usage_unknown { "unknown" } else { "reported" },
+                "provider_stop_reason": result.stop_reason,
+                "canonical_stop_reason": canonical_provider_stop_reason(result.stop_reason.as_deref()),
+            })),
+        ),
+    );
+}
+
 /// Append a taint record to the session's lethal-trifecta ledger. No-op when
 /// the session is unknown (e.g. tool results recorded outside a host session).
 pub(crate) fn push_session_taint(session_id: &str, record: crate::security::TaintRecord) {
