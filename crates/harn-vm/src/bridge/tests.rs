@@ -2,7 +2,7 @@ use super::*;
 use harn_clock::test_support::within;
 use harn_parser::diagnostic_codes::Code;
 
-fn test_bridge() -> HostBridge {
+pub(super) fn test_bridge() -> HostBridge {
     HostBridge::from_parts(
         Arc::new(Mutex::new(HashMap::new())),
         Arc::new(AtomicBool::new(false)),
@@ -80,6 +80,156 @@ fn test_cancelled_flag() {
     assert!(!cancelled.load(Ordering::SeqCst));
     cancelled.store(true, Ordering::SeqCst);
     assert!(cancelled.load(Ordering::SeqCst));
+}
+
+#[tokio::test(flavor = "current_thread", start_paused = true)]
+async fn delayed_legacy_frames_keep_their_originating_session_identity() {
+    let pending = Arc::new(Mutex::new(HashMap::new()));
+    let frames = Arc::new(std::sync::Mutex::new(Vec::<serde_json::Value>::new()));
+    let captured = frames.clone();
+    let writer: HostBridgeWriter = Arc::new(move |line| {
+        captured
+            .lock()
+            .unwrap()
+            .push(serde_json::from_str(line).unwrap());
+        Ok(())
+    });
+    let old = HostBridge::from_parts_with_writer(
+        pending.clone(),
+        Arc::new(AtomicBool::new(false)),
+        writer.clone(),
+        1,
+    );
+    let current = HostBridge::from_parts_with_writer(
+        pending.clone(),
+        Arc::new(AtomicBool::new(false)),
+        writer,
+        100,
+    );
+    old.set_session_id("old-session");
+    current.set_session_id("current-session");
+
+    // Hold the old serialized request without delivering it to the host.
+    let old_call = old.call(
+        "builtin_call",
+        serde_json::json!({"name": "host_call", "args": []}),
+    );
+    tokio::pin!(old_call);
+    wait_for_pending(&pending, 1, old_call.as_mut()).await;
+    let held_old_frame = frames.lock().unwrap()[0].clone();
+
+    let current_call = current.call(
+        "builtin_call",
+        serde_json::json!({"name": "host_call", "args": []}),
+    );
+    tokio::pin!(current_call);
+    wait_for_pending(&pending, 100, current_call.as_mut()).await;
+    let current_frame = frames.lock().unwrap()[1].clone();
+    assert_eq!(current_frame["params"]["sessionId"], "current-session");
+    pending
+        .lock()
+        .await
+        .remove(&100)
+        .unwrap()
+        .send(serde_json::json!({"result": true}))
+        .unwrap();
+    assert_eq!(
+        within("current session callback", current_call)
+            .await
+            .unwrap(),
+        true
+    );
+
+    // Delivery after a new session starts cannot relabel an already queued
+    // old request, and an old skill callback created later is also attributed.
+    assert_eq!(held_old_frame["params"]["sessionId"], "old-session");
+    let old_skill = old.call("skill/match", serde_json::json!({"task": "old task"}));
+    tokio::pin!(old_skill);
+    wait_for_pending(&pending, 2, old_skill.as_mut()).await;
+    assert_eq!(
+        frames.lock().unwrap()[2]["params"]["sessionId"],
+        "old-session"
+    );
+    assert_eq!(frames.lock().unwrap().len(), 3);
+    old.notify(
+        "harn.hitl.requested",
+        serde_json::json!({"request_id": "old-approval"}),
+    );
+    current.notify(
+        "harn.hitl.requested",
+        serde_json::json!({"request_id": "current-approval"}),
+    );
+    assert_eq!(
+        frames.lock().unwrap()[3]["params"]["sessionId"],
+        "old-session"
+    );
+    assert_eq!(
+        frames.lock().unwrap()[4]["params"]["sessionId"],
+        "current-session"
+    );
+    for id in [1, 2] {
+        pending
+            .lock()
+            .await
+            .remove(&id)
+            .unwrap()
+            .send(serde_json::json!({
+                "error": {"message": "Inactive ACP session"}
+            }))
+            .unwrap();
+    }
+    assert!(within("late builtin refusal", old_call).await.is_err());
+    assert!(within("late skill refusal", old_skill).await.is_err());
+}
+
+#[tokio::test(flavor = "current_thread", start_paused = true)]
+async fn session_request_binding_preserves_unbound_transport_and_rejects_forgery() {
+    let pending = Arc::new(Mutex::new(HashMap::new()));
+    let frames = Arc::new(std::sync::Mutex::new(Vec::<serde_json::Value>::new()));
+    let captured = frames.clone();
+    let bridge = HostBridge::from_parts_with_writer(
+        pending.clone(),
+        Arc::new(AtomicBool::new(false)),
+        Arc::new(move |line| {
+            captured
+                .lock()
+                .unwrap()
+                .push(serde_json::from_str(line).unwrap());
+            Ok(())
+        }),
+        1,
+    );
+    let declaration = bridge.call("host/capabilities", serde_json::json!({}));
+    tokio::pin!(declaration);
+    wait_for_pending(&pending, 1, declaration.as_mut()).await;
+    assert!(frames.lock().unwrap()[0]["params"]
+        .get("sessionId")
+        .is_none());
+    pending
+        .lock()
+        .await
+        .remove(&1)
+        .unwrap()
+        .send(serde_json::json!({"result": {}}))
+        .unwrap();
+    within("unbound transport declaration", declaration)
+        .await
+        .unwrap();
+
+    bridge.set_session_id("owning-session");
+    for params in [
+        serde_json::json!({"sessionId": "foreign-session"}),
+        serde_json::Value::Null,
+    ] {
+        assert!(bridge.call("builtin_call", params.clone()).await.is_err());
+        bridge.notify("harn.hitl.requested", params);
+    }
+    assert_eq!(
+        frames.lock().unwrap().len(),
+        1,
+        "invalid session requests never reach the writer"
+    );
+    assert!(pending.lock().await.is_empty());
 }
 
 #[tokio::test(flavor = "current_thread", start_paused = true)]

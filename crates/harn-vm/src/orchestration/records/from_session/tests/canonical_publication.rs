@@ -1,6 +1,11 @@
-use super::*;
+//! Publication round-trip across live sessions, durable journals and saved views.
+
+use crate::agent_sessions::{
+    clear_journal, inject_message, install_journal, journal_store, open_or_create_for_test,
+    reset_session_store, settle_assistant_publication, transcript,
+};
 use crate::schema::json_to_vm_value as json_to_vm;
-use crate::value::VmDictExt;
+use crate::value::{VmDictExt, VmValue};
 
 #[tokio::test]
 async fn admitted_publication_survives_canonical_journal_hydration() {
@@ -44,6 +49,13 @@ async fn admitted_publication_survives_canonical_journal_hydration() {
     crate::agent_session_journal::flush(session_id)
         .await
         .expect("persist admission");
+    let store = journal_store(session_id).expect("installed canonical store");
+    let run = crate::orchestration::project_run_record_from_session(&store, session_id)
+        .await
+        .expect("project admitted reply from canonical journal");
+    let view = crate::orchestration::build_run_view(&run);
+    assert_eq!(view.visible_text.as_deref(), Some("Accepted answer"));
+    assert_eq!(view.transcript.message_count, 1, "no public reply copy");
     clear_journal(session_id);
     let hydrated = crate::agent_session_journal::prepare(
         session_id,

@@ -610,6 +610,17 @@ async fn bridge_approval_grants_only_a_canonical_selected_allow_before_execution
         ),
         (serde_json::json!({}), false),
         (serde_json::json!({"outcome":"approved"}), false),
+        (
+            serde_json::json!({"outcome":{"outcome":"cancelled"}}),
+            false,
+        ),
+        (
+            serde_json::json!({
+                "outcome":{"outcome":"selected","optionId":"allow"},
+                "_meta":{"harn":{"permissionDecision":{}}}
+            }),
+            false,
+        ),
     ] {
         let model_calls = Arc::new(AtomicUsize::new(0));
         let receipts = Arc::new(MemoryAuthorityReceiptSink::default());
@@ -683,8 +694,15 @@ async fn bridge_approval_grants_only_a_canonical_selected_allow_before_execution
                     other => panic!("expected terminal accounting, got {other:?}"),
                 }
             }
-            PreparedSessionUpdate::Blocked { .. } if !approved => {
+            PreparedSessionUpdate::Blocked { receipt, .. } if !approved => {
                 assert_eq!(model_calls.load(Ordering::SeqCst), 0);
+                let receipt = receipt.expect("grouped rejection preserves its decision receipt");
+                assert_eq!(receipt.status, AuthorityReceiptStatus::Blocked);
+                assert_eq!(receipt.stage, AuthorityReceiptStage::ApprovalDecision);
+                assert!(receipt
+                    .diagnostics
+                    .iter()
+                    .any(|diagnostic| diagnostic.code == "prepared_session_approval_denied"));
             }
             other => panic!("approval result disagrees with canonical answer: {other:?}"),
         }

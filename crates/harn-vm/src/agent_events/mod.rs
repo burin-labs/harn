@@ -40,6 +40,7 @@ mod sinks;
 mod terminal;
 mod terminal_suspension;
 mod tool;
+pub(crate) mod transport;
 mod turn_phase;
 mod worker;
 
@@ -84,6 +85,7 @@ pub use tool::{
     DenialGate, SideEffectCeilingDetails, SideEffectCeilingRemedy, StagedWriteSummary,
     ToolCallErrorCategory, ToolCallStatus, ToolDenial, ToolExecutor, ToolMutationStatus,
 };
+pub use transport::AgentEventTransport;
 pub use turn_phase::AgentTurnPhase;
 pub use worker::{
     AgentRunRef, DelegatedJoinBoundaries, DelegatedRunLineage, FsWatchEvent,

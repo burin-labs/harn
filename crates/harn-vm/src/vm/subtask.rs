@@ -202,7 +202,10 @@ pub(crate) fn prepare<F: Future>(
     PreparedSubtask {
         inner: scope_ambient(
             AmbientExecutionScope::capture_for_inline_subtask(),
-            with_pool_registry_scope(registry, future),
+            crate::tool_registry::preparation_scope::scope_subtask(
+                with_pool_registry_scope(registry, future),
+                true,
+            ),
         ),
     }
 }
@@ -328,7 +331,10 @@ where
     spawn(PreparedSubtask {
         inner: scope_ambient(
             AmbientExecutionScope::capture_inherited(),
-            with_pool_registry_scope(registry, future),
+            crate::tool_registry::preparation_scope::scope_subtask(
+                with_pool_registry_scope(registry, future),
+                false,
+            ),
         ),
     })
 }

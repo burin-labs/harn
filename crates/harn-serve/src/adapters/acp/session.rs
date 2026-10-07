@@ -481,13 +481,47 @@ impl AcpServer {
         }
     }
 
+    pub(super) fn handle_canonical_history_boundaries<'a>(
+        &'a self,
+        id: &'a serde_json::Value,
+        params: &'a serde_json::Value,
+    ) -> std::pin::Pin<Box<impl std::future::Future<Output = ()> + 'a>> {
+        // Allocate at the handler boundary: boxing at the dispatch call site
+        // still constructs this store future in the shared router's frame.
+        Box::pin(async move {
+            let Some(session_id) = session_id_param(params) else {
+                self.send_error(id, -32602, "Missing session_id");
+                return;
+            };
+            let Some(session) = self.sessions.get(&session_id) else {
+                self.send_error(id, -32602, &format!("Unknown session: {session_id}"));
+                return;
+            };
+            let root = &session.project_root;
+            let store = match harn_vm::open_canonical_store(root) {
+                Ok(store) => store,
+                Err(error) => {
+                    self.send_error(id, -32000, &error.to_string());
+                    return;
+                }
+            };
+            match harn_vm::agent_sessions::canonical_history_boundaries(&store, root, &session_id)
+                .await
+            {
+                Ok(boundaries) => self.send_response(
+                    id,
+                    serde_json::to_value(boundaries).expect("canonical boundaries serialize"),
+                ),
+                Err(error) => self.send_error(id, -32000, &error.to_string()),
+            }
+        })
+    }
+
     pub(super) fn handle_session_fork<'a>(
         &'a mut self,
         id: &'a serde_json::Value,
         params: &'a serde_json::Value,
     ) -> std::pin::Pin<Box<impl std::future::Future<Output = ()> + 'a>> {
-        // Boxing at the call site still constructs the concrete durable-store
-        // future in the shared dispatch frame. Allocate inside its owner.
         Box::pin(async move {
             let src_id = session_id_param(params);
             let Some(src_id) = src_id else {
@@ -514,14 +548,23 @@ impl AcpServer {
                 }
             }
 
-            let keep_first =
-                match nonnegative_usize_param(params, &["keep_first", "keepFirst"], "keep_first") {
-                    Ok(value) => value,
-                    Err(message) => {
-                        self.send_error(id, -32602, &message);
+            if params.get("keep_first").is_some() || params.get("keepFirst").is_some() {
+                self.send_error(id, -32602, "session/fork requires an acknowledged canonical boundary; message counts are not history positions");
+                return;
+            }
+            let boundary = match params.get("canonicalBoundary") {
+                Some(value) => match serde_json::from_value::<
+                    harn_vm::agent_sessions::CanonicalSessionBoundary,
+                >(value.clone())
+                {
+                    Ok(boundary) => Some(boundary),
+                    Err(error) => {
+                        self.send_error(id, -32602, &format!("Invalid canonicalBoundary: {error}"));
                         return;
                     }
-                };
+                },
+                None => None,
+            };
             let dst_id = params
                 .get("id")
                 .and_then(|value| value.as_str())
@@ -597,10 +640,10 @@ impl AcpServer {
                 }
             };
             let new_session_id =
-                harn_vm::agent_sessions::fork_canonical(&store, &root, &src_id, keep_first, dst_id)
+                harn_vm::agent_sessions::fork_canonical(&store, &root, &src_id, boundary, dst_id)
                     .await;
-            let new_session_id = match new_session_id {
-                Ok(Some(new_session_id)) => new_session_id,
+            let (new_session_id, source_boundary) = match new_session_id {
+                Ok(Some(fork)) => (fork.session_id, fork.source_boundary),
                 Ok(None) => {
                     self.send_error(id, -32000, &format!("Failed to fork session: {src_id}"));
                     return;
@@ -615,18 +658,13 @@ impl AcpServer {
                 }
             };
 
-            let snapshot = harn_vm::agent_sessions::snapshot(&new_session_id)
-                .and_then(|value| serde_json::to_value(harn_vm::llm::vm_value_to_json(&value)).ok())
-                .unwrap_or_else(|| serde_json::json!({}));
-            let branched_at = snapshot
-                .get("branched_at_event_index")
-                .cloned()
-                .unwrap_or(serde_json::Value::Null);
-
             let mut meta = serde_json::Map::new();
             meta.insert("state".to_string(), serde_json::json!("forked"));
             meta.insert("parent_id".to_string(), serde_json::json!(src_id));
-            meta.insert("branched_at".to_string(), branched_at.clone());
+            meta.insert(
+                "canonical_boundary".to_string(),
+                serde_json::json!(source_boundary),
+            );
             if let Some(branch_name) = &branch_name {
                 meta.insert("branch_name".to_string(), serde_json::json!(branch_name));
             }
@@ -691,7 +729,7 @@ impl AcpServer {
                 "sessionId": new_session_id,
                 "state": "forked",
                 "parent_id": src_id,
-                "branched_at": branched_at,
+                "canonicalBoundary": source_boundary,
                 "modes": modes::session_mode_state(&parent_mode_id),
                 "configOptions": self.config_options_for_session(&new_session_id, &parent_mode_id),
             }),

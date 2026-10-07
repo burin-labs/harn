@@ -3,6 +3,144 @@
 use super::*;
 use harn_session_store::{AppendEvent, CreateSession, ReadRange, SessionEventKind, SessionStore};
 
+#[tokio::test(flavor = "current_thread")]
+async fn acknowledged_tool_history_survives_compaction_and_child_restart() {
+    harn_vm::reset_thread_local_state();
+    let root = tempfile::tempdir().expect("root");
+    let store = harn_vm::open_canonical_store(root.path()).expect("store");
+    let parent = "tool-history-parent";
+    store
+        .create(CreateSession {
+            id: Some(parent.into()),
+            ..CreateSession::default()
+        })
+        .await
+        .expect("parent");
+    let messages = serde_json::json!([
+        {"role":"user", "content":"first"},
+        {"role":"assistant", "content":"", "tool_calls":[{"id":"call-1", "type":"function", "function":{"name":"read_file", "arguments":"{}"}}]},
+        {"role":"tool", "content":"file contents", "tool_call_id":"call-1"},
+        {"role":"assistant", "content":"selected answer"},
+        {"role":"user", "content":"later question"}
+    ]);
+    for (index, message) in messages.as_array().expect("messages").iter().enumerate() {
+        let identity = format!("tool-message-{index}");
+        let kind = match index {
+            1 => SessionEventKind::ToolCall,
+            2 => SessionEventKind::ToolResult,
+            _ => SessionEventKind::Message,
+        };
+        let mut event = AppendEvent::new(kind, serde_json::json!({"raw_message":message}));
+        event.headers.insert("source_event_id".into(), identity);
+        store
+            .append(parent, event)
+            .await
+            .expect("canonical message");
+    }
+    let acknowledged =
+        harn_vm::agent_sessions::canonical_history_boundaries(&store, root.path(), parent)
+            .await
+            .expect("acknowledged positions");
+    assert_eq!(acknowledged.positions.len(), 5);
+    let selected = acknowledged.positions[3].boundary.clone();
+    store
+        .append(
+            parent,
+            AppendEvent::new(
+                SessionEventKind::Compaction,
+                serde_json::json!({
+                    "messages":[messages[0],messages[4]], "summary":"compacted tool exchange",
+                    "source_event_ids":["tool-message-0", "tool-message-4"]
+                }),
+            ),
+        )
+        .await
+        .expect("compaction");
+    let archived = store.read_all(parent).await.expect("parent archive");
+    let mut server = AcpServer::new(AcpServerConfig::new(None));
+    server
+        .handle_session_load(
+            &serde_json::json!(1),
+            &serde_json::json!({"sessionId":parent,"cwd":root.path(),"environmentPolicy":{"kind":"isolated","grants":[]}}),
+        )
+        .await;
+    server.handle_session_fork(&serde_json::json!(2),
+        &serde_json::json!({"sessionId":parent,"id":"tool-history-child","canonicalBoundary":selected})).await;
+    assert!(
+        server.sessions.contains_key("tool-history-child"),
+        "fork action must fire"
+    );
+    let live = harn_vm::llm::vm_value_to_json(
+        &harn_vm::agent_sessions::transcript("tool-history-child").expect("child"),
+    );
+    let expected = serde_json::Value::Array(messages.as_array().unwrap()[..4].to_vec());
+    assert_eq!(
+        live["messages"], expected,
+        "all tool rows and selected answer, no later question"
+    );
+    assert!(
+        live["summary"].is_null(),
+        "a later summary cannot leak into historical context"
+    );
+    server
+        .handle_session_fork(
+            &serde_json::json!("current-tip"),
+            &serde_json::json!({"sessionId":parent,"id":"current-tip-child"}),
+        )
+        .await;
+    assert!(server.sessions.contains_key("current-tip-child"));
+    let current = harn_vm::llm::vm_value_to_json(
+        &harn_vm::agent_sessions::transcript("current-tip-child").expect("current context"),
+    );
+    assert_eq!(
+        current["messages"],
+        serde_json::json!([
+            {"role":"user", "content":"compacted tool exchange"},
+            messages[0], messages[4]
+        ]),
+        "the owning hydrator retains the summary in effective model context"
+    );
+    assert_eq!(current["summary"], "compacted tool exchange");
+    let after = store
+        .read_all(parent)
+        .await
+        .expect("parent archive after fork");
+    assert_eq!(after.len(), archived.len());
+    assert_eq!(
+        after.last().unwrap().record_hash,
+        archived.last().unwrap().record_hash
+    );
+    drop(server);
+    harn_vm::reset_thread_local_state();
+    let mut restarted = AcpServer::new(AcpServerConfig::new(None));
+    restarted
+        .handle_session_load(
+            &serde_json::json!(3),
+            &serde_json::json!({"sessionId":"tool-history-child","cwd":root.path(),"environmentPolicy":{"kind":"isolated","grants":[]}}),
+        )
+        .await;
+    restarted
+        .handle_session_fork(
+            &serde_json::json!(4),
+            &serde_json::json!({"sessionId":"tool-history-child","id":"tool-history-grandchild"}),
+        )
+        .await;
+    assert!(restarted.sessions.contains_key("tool-history-grandchild"));
+    let restored = harn_vm::llm::vm_value_to_json(
+        &harn_vm::agent_sessions::transcript("tool-history-grandchild").expect("grandchild"),
+    );
+    assert_eq!(restored["messages"], expected);
+    assert_eq!(
+        store
+            .describe("tool-history-grandchild")
+            .await
+            .expect("grandchild")
+            .parent_session_id
+            .as_deref(),
+        Some("tool-history-child")
+    );
+}
+
 #[test]
 fn cold_parent_forks_persist_selected_context_and_lineage_before_prompt() {
     use super::session_environment::{child_sees_restore_canary, RESTORE_CANARY};
@@ -61,12 +199,24 @@ fn cold_parent_forks_persist_selected_context_and_lineage_before_prompt() {
         server.sessions.contains_key(parent),
         "cold parent must actually load"
     );
-    for (count, child) in [(2, "prefix-child"), (0, "empty-child")] {
+    let boundaries =
+        harn_vm::agent_sessions::canonical_history_boundaries(&store, root.path(), parent)
+            .await
+            .expect("acknowledged canonical boundaries");
+    let first_boundary = boundaries.positions[0].boundary.clone();
+    for (count, child, boundary) in [
+        (2, "prefix-child", boundaries.positions[1].boundary.clone()),
+        (
+            0,
+            "empty-child",
+            harn_vm::agent_sessions::CanonicalSessionBoundary::empty(parent),
+        ),
+    ] {
         server
             .handle_session_fork(
                 &serde_json::json!(2),
                 &serde_json::json!({
-                    "sessionId": parent, "id": child, "keep_first": count,
+                    "sessionId": parent, "id": child, "canonicalBoundary": boundary,
                     "environmentPolicy": {"kind": "isolated", "grants": []},
                 }),
             )
@@ -112,6 +262,10 @@ fn cold_parent_forks_persist_selected_context_and_lineage_before_prompt() {
         restarted.sessions.contains_key("prefix-child"),
         "durable child must reload after restart"
     );
+    let child_boundaries =
+        harn_vm::agent_sessions::canonical_history_boundaries(&store, root.path(), "prefix-child")
+            .await
+            .expect("child acknowledgments");
     assert!(!child_sees_restore_canary(
         &restarted.sessions["prefix-child"].environment_policy
     ));
@@ -119,7 +273,7 @@ fn cold_parent_forks_persist_selected_context_and_lineage_before_prompt() {
         .handle_session_fork(
             &serde_json::json!(4),
             &serde_json::json!({
-                "sessionId": "prefix-child", "id": "grandchild", "keep_first": 1,
+                "sessionId": "prefix-child", "id": "grandchild", "canonicalBoundary": child_boundaries.positions[0].boundary,
             }),
         )
         .await;
@@ -146,9 +300,7 @@ fn cold_parent_forks_persist_selected_context_and_lineage_before_prompt() {
         Some("prefix-child")
     );
 
-    // A replacement preserves identities but changes the context those old
-    // event boundaries would restore. Refuse that prefix instead of silently
-    // creating a child that changes its context on the next restart.
+    // A later replacement must not redefine the acknowledged historical prefix.
     store
         .append(
             parent,
@@ -178,14 +330,69 @@ fn cold_parent_forks_persist_selected_context_and_lineage_before_prompt() {
     restarted
         .handle_session_fork(
             &serde_json::json!(6),
-            &serde_json::json!({"sessionId": parent, "id": "changed-prefix", "keep_first": 1}),
+            &serde_json::json!({"sessionId": parent, "id": "historical-prefix", "canonicalBoundary": first_boundary}),
         )
         .await;
-    assert!(!restarted.sessions.contains_key("changed-prefix"));
-    assert!(!harn_vm::agent_sessions::exists("changed-prefix"));
+    assert!(restarted.sessions.contains_key("historical-prefix"));
+    let historical = harn_vm::llm::vm_value_to_json(
+        &harn_vm::agent_sessions::transcript("historical-prefix").expect("historical context"),
+    );
+    assert_eq!(
+        historical["messages"],
+        serde_json::json!([{"role":"user", "content":"first"}])
+    );
+    let stored = store
+        .read("historical-prefix", ReadRange::default())
+        .await
+        .expect("durable historical prefix");
+    assert_eq!(stored.events.len(), 1);
+    assert_eq!(stored.events[0].payload["raw_message"]["content"], "first");
+
+    // Numeric collisions are not provenance: a foreign ID, wrong hash, or
+    // observability domain must never create a live or durable child.
+    restarted
+        .handle_session_fork(
+            &serde_json::json!("count-refused"),
+            &serde_json::json!({"sessionId":parent, "id":"count-based-child", "keep_first":1}),
+        )
+        .await;
+    assert!(!restarted.sessions.contains_key("count-based-child"));
+    assert!(!harn_vm::agent_sessions::exists("count-based-child"));
     assert!(matches!(
-        store.describe("changed-prefix").await,
+        store.describe("count-based-child").await,
         Err(harn_session_store::StoreError::NotFound(_))
     ));
+    for (name, invalid) in [
+        (
+            "foreign-boundary",
+            serde_json::json!({"schema":first_boundary.schema, "session_id":"another-session", "event_id":first_boundary.event_id, "record_hash":first_boundary.record_hash}),
+        ),
+        (
+            "stale-boundary",
+            serde_json::json!({"schema":first_boundary.schema, "session_id":parent, "event_id":1, "record_hash":"sha256:not-the-acknowledged-row"}),
+        ),
+        (
+            "topic-collision",
+            serde_json::json!({"schema":"observability.agent_events", "session_id":parent, "event_id":1, "record_hash":first_boundary.record_hash}),
+        ),
+    ] {
+        restarted
+            .handle_session_fork(
+                &serde_json::json!(7),
+                &serde_json::json!({
+                    "sessionId":parent, "id":name, "canonicalBoundary":invalid,
+                }),
+            )
+            .await;
+        assert!(
+            !restarted.sessions.contains_key(name),
+            "{name} must be refused"
+        );
+        assert!(!harn_vm::agent_sessions::exists(name));
+        assert!(matches!(
+            store.describe(name).await,
+            Err(harn_session_store::StoreError::NotFound(_))
+        ));
+    }
         });
 }

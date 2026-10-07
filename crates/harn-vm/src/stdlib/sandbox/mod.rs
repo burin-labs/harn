@@ -82,9 +82,16 @@ mod locked_append;
 mod macos;
 #[cfg(target_os = "openbsd")]
 mod openbsd;
+mod path_scope;
 pub(crate) mod paths;
 mod process_config;
 mod process_output;
+use path_scope::declared_path_roots_active;
+#[cfg(test)]
+use path_scope::with_declared_path_roots;
+pub use path_scope::{
+    check_fs_path_scope, check_git_metadata_path_scope, command_output_with_declared_roots,
+};
 mod read_roots;
 mod refusal;
 mod scope_memo;
@@ -252,74 +259,6 @@ impl SandboxViolation {
                 .join(", ")
         )
     }
-}
-
-/// Check whether `path` is inside the active policy's workspace roots.
-///
-/// Returns `Ok(())` when no execution policy is active, when the active
-/// profile does not enforce path scope, when the normalized path
-/// falls within a writable workspace root, or — for [`FsAccess::Read`]
-/// only — when it falls within a read-only root. A write/delete that
-/// resolves under a read-only root is rejected with `read_only` set, as
-/// is any access that falls outside every configured root.
-///
-/// This is the public, `VmError`-free entry point embedders use to apply
-/// workspace-root scoping to their own host calls. The in-crate
-/// `harness.fs.*` builtins funnel through [`enforce_fs_path`], which wraps
-/// this with a `VmError`; both share the same path normalization and
-/// rejection text.
-pub fn check_fs_path_scope(path: &Path, access: FsAccess) -> Result<(), SandboxViolation> {
-    let Some(policy) = crate::orchestration::current_execution_policy() else {
-        return Ok(());
-    };
-    if !policy.sandbox_profile.enforces_path_scope() {
-        return Ok(());
-    }
-    // Standard process I/O device files are not workspace filesystem
-    // mutations: writing to /dev/stdout, /dev/stderr, or /dev/null (and the
-    // numeric /dev/fd/<N> descriptors they alias) targets the process's own
-    // output streams, not the sandboxed tree. A pipeline that falls back to
-    // /dev/stdout for debug output must not read as a sandbox violation, so
-    // allow these regardless of the configured roots. Matched on the
-    // lexically-normalized path (not the canonicalized form): canonicalize()
-    // rewrites /dev/stdout to a per-process /dev/fd/<…>.output alias that no
-    // longer looks like a standard device. Kept deliberately narrow — only
-    // the well-known device files, no broader /dev access.
-    if access_is_exempt_from_scope(path, access) {
-        return Ok(());
-    }
-    let candidate = normalize_for_policy(path);
-    let scope = scope_memo::scope_roots(&policy, access);
-    let roots = scope.workspace.clone();
-    // The denylist is checked BEFORE any grant, because it must beat all of
-    // them. A workspace root, a read-only root, and a preset are each a reason
-    // to allow; this is the one reason to refuse, and a subtraction that ran
-    // after the grants would never fire on the paths that matter (a credential
-    // under preset-granted `~/.config/composer` is exactly that case).
-    if access == FsAccess::Read && path_is_denied(&candidate, &scope.read_deny) {
-        return Err(SandboxViolation {
-            attempted: candidate,
-            roots,
-            access,
-            read_only: false,
-        });
-    }
-    if roots.iter().any(|root| path_is_within(&candidate, root)) {
-        return Ok(());
-    }
-    let within_read_only = scope
-        .read_only
-        .iter()
-        .any(|root| path_is_within(&candidate, root));
-    if within_read_only && access == FsAccess::Read {
-        return Ok(());
-    }
-    Err(SandboxViolation {
-        attempted: candidate,
-        roots,
-        access,
-        read_only: within_read_only,
-    })
 }
 
 pub(crate) fn enforce_fs_path(builtin: &str, path: &Path, access: FsAccess) -> Result<(), VmError> {
@@ -1503,6 +1442,9 @@ fn project_root_workspace_root() -> Option<PathBuf> {
 
 fn normalized_workspace_roots(policy: &CapabilityPolicy) -> Vec<PathBuf> {
     let mut roots = base_workspace_roots(policy);
+    if declared_path_roots_active() {
+        return roots;
+    }
     // A linked worktree's git dirs and Harn's own relocated runtime
     // directories sit outside the working tree and must stay writable.
     let mut outside = git_scope_extension_for_roots(&roots).read_write;

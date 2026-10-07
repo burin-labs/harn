@@ -93,9 +93,13 @@ impl AcpServer {
                 if self.reject_unauthenticated(&id) {
                     return;
                 }
-                // Keep the durable store future out of the shared dispatch
-                // frame, which is paid again at each nested ACP descent.
                 self.handle_session_fork(&id, &params).await;
+            }
+            harn_vm::agent_sessions::CANONICAL_HISTORY_BOUNDARIES_METHOD => {
+                if self.reject_unauthenticated(&id) {
+                    return;
+                }
+                self.handle_canonical_history_boundaries(&id, &params).await;
             }
             "session/truncate" => {
                 if self.reject_unauthenticated(&id) {

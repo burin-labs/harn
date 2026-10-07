@@ -502,6 +502,12 @@ impl McpServer {
         if let Err(error) = self.tools.prepared().validate_input(tool_name, &arguments) {
             return crate::jsonrpc::error_response(id.clone(), -32602, &error.to_string());
         }
+        if let Err(error) = tool
+            .invocation_requirement
+            .require_direct(&tool.catalog.name)
+        {
+            return crate::jsonrpc::error_response(id.clone(), -32602, &error.to_string());
+        }
         let args_vm = json_to_vm_value(&arguments);
 
         // Bind a per-call progress context so the handler (and any

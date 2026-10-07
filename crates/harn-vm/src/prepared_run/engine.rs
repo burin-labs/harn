@@ -7,7 +7,7 @@ use serde_json::json;
 
 use crate::harness_net::NetPolicyDecision;
 use crate::orchestration::{
-    PolicyEvaluation, PolicyMatchedRule, ProcessSandboxPreset, ToolApprovalRequest,
+    PolicyAuthorityRequest, PolicyEvaluation, PolicyMatchedRule, ProcessSandboxPreset,
     SOURCE_NET_POLICY,
 };
 
@@ -1259,6 +1259,7 @@ pub(super) fn evaluate_requirement(
                     action: "deny".to_string(),
                     id: audit.matched_rule.clone(),
                     index: None,
+                    contributing_rules: Vec::new(),
                 };
                 return Ok(PolicyEvaluation {
                     action: "deny".to_string(),
@@ -1283,10 +1284,10 @@ pub(super) fn evaluate_requirement(
             }
         }
     }
-    Ok(approval_policy.evaluate_request(&policy_request(requirement)))
+    approval_policy.evaluate_authority_request(&policy_request(requirement))
 }
 
-fn policy_request(requirement: &AuthorityRequirement) -> ToolApprovalRequest {
+fn policy_request(requirement: &AuthorityRequirement) -> PolicyAuthorityRequest {
     let (tool_name, arguments) = match requirement {
         AuthorityRequirement::FilesystemRead { root } => (
             "prepared_run.filesystem",
@@ -1406,9 +1407,8 @@ fn policy_request(requirement: &AuthorityRequirement) -> ToolApprovalRequest {
             json!({"deadline_at_ms": deadline_at_ms, "receipt_uri": receipt_uri}),
         ),
     };
-    ToolApprovalRequest {
-        tool_name: tool_name.to_string(),
+    PolicyAuthorityRequest {
+        authority_name: tool_name.to_string(),
         arguments,
-        ..Default::default()
     }
 }

@@ -320,20 +320,15 @@ impl SessionStore for SqliteSessionStore {
     async fn fork(
         &self,
         session_id: &str,
-        at_event_id: Option<EventId>,
+        boundary: crate::CanonicalSessionBoundary,
         child_id: Option<SessionId>,
     ) -> StoreResult<ForkResult> {
         let mut conn = self.lock_for_mutation()?;
         let tx = write_transaction(&mut conn)?;
         let (parent_meta, _) = read_session_meta(&tx, session_id)?;
         let parent_events = load_all_events(&tx, session_id)?;
-        if let Some(boundary) = at_event_id {
-            if !parent_events.iter().any(|event| event.event_id == boundary) {
-                return Err(StoreError::InvalidInput(format!(
-                    "event {boundary} not found in session '{session_id}'"
-                )));
-            }
-        }
+        boundary.validate(session_id, &parent_events)?;
+        let at_event_id = boundary.event_id;
         let new_id = child_id.unwrap_or_else(|| Uuid::now_v7().to_string());
         let exists: bool = tx
             .query_row(

@@ -2475,3 +2475,25 @@ export interface HarnInferenceAdmissionSnapshot {
   open_weight?: boolean | null
   training_default?: string | null
 }
+export interface HarnCanonicalSessionBoundary {
+  schema: string
+  session_id: string
+  event_id?: number | null
+  record_hash?: string | null
+}
+
+export interface HarnCanonicalHistoryPosition {
+  source_event_id: string
+  origin_session_id: string
+  before_boundary: HarnCanonicalSessionBoundary
+  boundary: HarnCanonicalSessionBoundary
+}
+
+export interface HarnCanonicalHistoryBoundaries {
+  tip: HarnCanonicalSessionBoundary
+  positions: HarnCanonicalHistoryPosition[]
+}
+
+export interface HarnACPPromptCorrelation {
+  messageId?: string
+}

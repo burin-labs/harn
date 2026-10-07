@@ -50,8 +50,6 @@ pub use changed_paths::{
 };
 pub(crate) use health::observe_event;
 mod journal;
-#[cfg(test)]
-mod publication_tests;
 pub mod reclaim_hooks;
 mod state;
 mod subscribers;
@@ -1248,9 +1246,15 @@ pub fn fork_at(
     Ok(Some(new_id))
 }
 
+mod canonical_boundary;
 mod durable_fork;
+pub use canonical_boundary::{
+    canonical_history_boundaries, canonical_history_boundaries_schema, CanonicalHistoryBoundaries,
+    CanonicalHistoryPosition, CanonicalSessionBoundary, CANONICAL_HISTORY_BOUNDARIES_METHOD,
+    CANONICAL_HISTORY_BOUNDARIES_SCHEMA, CANONICAL_SESSION_BOUNDARY_SCHEMA,
+};
 mod truncation;
-pub use durable_fork::{fork_canonical, CanonicalForkError};
+pub use durable_fork::{fork_canonical, CanonicalForkError, CanonicalForkResult};
 use truncation::truncate_state;
 pub use truncation::{trim, truncate};
 
