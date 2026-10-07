@@ -14,6 +14,12 @@ use super::call_support::{AwaitingTask, StepPreHookAction};
 const DIRECT_CALL_QUICKEN_THRESHOLD: u8 = 3;
 
 impl super::super::Vm {
+    #[cfg(test)]
+    pub(crate) async fn cancel_task_for_test(&mut self, task_id: &str) -> Result<bool, VmError> {
+        self.try_call_special_name("cancel", &[VmValue::task_handle(task_id)])
+            .await
+    }
+
     async fn retry_pending_task_cleanup(&mut self, public_task_id: &str) -> Result<bool, VmError> {
         let Some(pending) = self.pending_task_cleanups.get(public_task_id).cloned() else {
             return Ok(false);

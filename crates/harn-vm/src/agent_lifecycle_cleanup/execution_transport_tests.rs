@@ -220,3 +220,153 @@ async fn top_level_vm_drop_keeps_origin_after_execution_scope_has_unwound() {
         if outcome.kind == crate::agent_events::AgentTerminalKind::UserCancelled)
     );
 }
+
+async fn pending_cleanup_after_vm_reuse(drop_instead_of_retry: bool) {
+    let root = tempfile::tempdir().expect("temp root");
+    let session = format!("pending-reuse-{}", uuid::Uuid::now_v7());
+    let task_id = "task_pending_reuse";
+    let public_id = "public-pending-reuse";
+    let (old, old_count) = transport();
+    let (new, new_count) = transport();
+    let mut vm = crate::Vm::new();
+    crate::register_vm_stdlib(&mut vm);
+    let chunk = crate::compile_source("pipeline main() {}").unwrap();
+    old.scope(vm.execute(&chunk)).await.unwrap();
+    let original = vm.agent_cleanup_runtimes();
+    let original_execution = vm.execution_id().to_string();
+    let store = ScopedCleanup {
+        runtimes: original.clone(),
+        inner: async {
+            let mut options = crate::value::DictMap::new();
+            options.put_str("root", root.path().to_string_lossy().as_ref());
+            let prepared = crate::agent_session_journal::prepare(
+                &session,
+                &options,
+                format!("run-{session}"),
+                format!("turn-{session}"),
+            )
+            .await
+            .unwrap();
+            let store = prepared.state.store();
+            crate::agent_sessions::open_or_create_for_test(Some(session.clone()));
+            crate::agent_sessions::install_journal(&session, prepared.state).unwrap();
+            crate::agent_sessions::claim_journal_task(
+                &session,
+                &original_execution,
+                task_id.into(),
+                true,
+            )
+            .unwrap();
+            // Fail a real canonical append without permanently closing the session.
+            // This private database's removable trigger injects only the write fault.
+            let fault = rusqlite::Connection::open(store.path()).unwrap();
+            fault
+                .execute_batch(
+                    "CREATE TRIGGER fail_pending_cleanup BEFORE INSERT ON session_events
+                 BEGIN SELECT RAISE(FAIL, 'pending cleanup append fault'); END;",
+                )
+                .unwrap();
+            vm.spawned_tasks.insert(
+                public_id.into(),
+                crate::value::VmTaskHandle {
+                    handle: tokio::spawn(std::future::pending()),
+                    cancel_token: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+                    wait_task_id: task_id.into(),
+                },
+            );
+            let error = vm
+                .cancel_task_for_test(public_id)
+                .await
+                .expect_err("actual cancel must observe the canonical append failure");
+            assert!(error.to_string().contains("pending cleanup append fault"));
+            assert!(!vm.spawned_tasks.contains_key(public_id));
+            assert!(vm.pending_task_cleanups.contains_key(public_id));
+            assert!(crate::agent_sessions::has_journal(&session));
+            assert!(crate::agent_sessions::next_journal_event(&session)
+                .unwrap()
+                .is_some());
+            fault
+                .execute_batch("DROP TRIGGER fail_pending_cleanup;")
+                .unwrap();
+            store
+        },
+    }
+    .await;
+
+    let old_before = old_count.load(Ordering::SeqCst);
+    vm.session_runtime = crate::agent_sessions::fresh_session_runtime();
+    vm.agent_host_session_runtime =
+        crate::llm::agent_session_host::fresh_agent_host_session_runtime();
+    new.scope(vm.execute(&chunk)).await.unwrap();
+    assert_ne!(vm.execution_id().to_string(), original_execution);
+    assert!(vm.pending_task_cleanups.contains_key(public_id));
+    let current = vm.agent_cleanup_runtimes();
+    let new_before = new_count.load(Ordering::SeqCst);
+    let mut progress = subscribe_cleanup_progress();
+    ScopedCleanup {
+        runtimes: current,
+        inner: async {
+            if drop_instead_of_retry {
+                drop(vm);
+            } else {
+                assert!(vm.cancel_task_for_test(public_id).await
+                    .expect("retry commits the original pending terminal"));
+                assert!(!vm.pending_task_cleanups.contains_key(public_id));
+                ScopedCleanup {
+                    runtimes: original.clone(),
+                    inner: async {
+                        assert!(
+                            !crate::agent_sessions::has_journal(&session),
+                            "a successful retry must discharge the original journal, not find zero sessions in the new runtime"
+                        );
+                        assert!(old_count.load(Ordering::SeqCst) > old_before);
+                    },
+                }.await;
+                drop(vm);
+            }
+            ScopedCleanup {
+                runtimes: original,
+                inner: async {
+                    settle_cleanup(
+                        &mut progress,
+                        || {
+                            !crate::agent_sessions::has_journal(&session)
+                                && !crate::agent_sessions::exists(&session)
+                                && old_count.load(Ordering::SeqCst) > old_before
+                        },
+                        "pending cleanup after reuse must commit and emit through its original owner",
+                    ).await;
+                },
+            }.await;
+            emit_event(&event(&session));
+        },
+    }.await;
+    assert!(old_count.load(Ordering::SeqCst) > old_before);
+    assert_eq!(new_count.load(Ordering::SeqCst), new_before + 1);
+    let events = crate::stdlib::session_store::read_all_events(&store, &session)
+        .await
+        .unwrap();
+    let terminals: Vec<_> = events
+        .iter()
+        .filter(|event| event.payload["transcript_event"]["kind"] == "agent_run_terminal")
+        .collect();
+    assert_eq!(terminals.len(), 1);
+    assert_eq!(
+        terminals[0].payload["transcript_event"]["metadata"]["final_status"],
+        "cancelled"
+    );
+    assert_eq!(
+        terminals[0].payload["transcript_event"]["metadata"]["stop_reason"],
+        "cancelled"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn pending_cancel_retry_after_vm_reuse_retains_original_owner() {
+    pending_cleanup_after_vm_reuse(false).await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn pending_cancel_drop_after_vm_reuse_retains_original_owner() {
+    pending_cleanup_after_vm_reuse(true).await;
+}
