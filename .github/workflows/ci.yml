@@ -237,6 +237,9 @@ jobs:
             # touches `Cargo.toml` and `CHANGELOG.md`, so this fires on every
             # release candidate; that is the case the gate exists for.
             release_contract:
+              - 'Makefile'
+              - 'install.sh'
+              - 'scripts/tests/install_sh.test.mjs'
               - '.github/workflows/ci.yml'
               - '.github/workflows/build-release-binaries.yml'
               - '.github/workflows/bump-release.yml'

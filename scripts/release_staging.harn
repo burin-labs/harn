@@ -72,6 +72,9 @@ pub fn release_rehearsal_ci_errors(workflow: dict) -> list<string> {
   }
   const filters: WorkflowFilters = unwrap(loaded)
   for path in [
+    "Makefile",
+    "install.sh",
+    "scripts/tests/install_sh.test.mjs",
     ".github/workflows/ci.yml",
     ".github/workflows/release*",
     ".github/workflows/build-release-binaries.yml",

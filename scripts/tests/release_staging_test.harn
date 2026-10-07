@@ -33,6 +33,25 @@ pipeline rehearsal_cannot_skip_main_or_disappear_from_the_required_gate(
 }
 
 @test
+pipeline installer_and_legal_gate_inputs_cannot_disappear_from_release_selection(harness: Harness) {
+  const workflow = read_yaml(harness.fs, "../../.github/workflows/ci.yml", nil)
+  assert_eq(release_rehearsal_ci_errors(workflow), [])
+  for path in ["Makefile", "install.sh", "scripts/tests/install_sh.test.mjs"] {
+    let changed = json_parse(json_stringify(workflow))
+    for index in range(len(changed.jobs.changes.steps)) {
+      if changed.jobs.changes.steps[index]?.id == "surface_filter" {
+        let filters = yaml_parse(changed.jobs.changes.steps[index]["with"].filters)
+        filters.release_contract = filters.release_contract.filter({ entry -> entry != path })
+          .to_list()
+        changed.jobs.changes.steps[index]["with"].filters = json_stringify(filters)
+      }
+    }
+    const errors = release_rehearsal_ci_errors(changed)
+    assert(join(errors, "\n").contains("missing " + path), "missing gate input must be reported")
+  }
+}
+
+@test
 pipeline canonical_staging_is_required_in_each_real_consumer(harness: Harness, task: unknown) {
   assert_eq(len(RELEASE_STAGING_CONSUMERS), 1)
   for consumer in RELEASE_STAGING_CONSUMERS {
