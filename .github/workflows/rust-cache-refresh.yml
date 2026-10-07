@@ -121,7 +121,7 @@ jobs:
           save: "true"
       - name: Install cargo-nextest
         if: matrix.install_nextest && steps.rust-cache.outputs.cache-hit != 'true'
-        uses: taiki-e/install-action@4cef1412cce204788f482e778a0b9187f9626a29 # v2.87.21
+        uses: taiki-e/install-action@83ac0ad63c0167e6f06796fab0fce28db1bf3db0 # v2.87.22
         with:
           tool: nextest@0.9.132
       # Warm only after a source-generation miss. Pinned Swatinem restores the
