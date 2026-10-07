@@ -17,7 +17,7 @@
 // that have one.
 import { readFileSync, readdirSync, statSync } from "node:fs"
 import { join, dirname, relative, posix } from "node:path"
-import matter from "gray-matter"
+import { load as loadYaml } from "js-yaml"
 import { unified } from "unified"
 import remarkParse from "remark-parse"
 import remarkGfm from "remark-gfm"
@@ -338,6 +338,22 @@ function makeHarnPromptLanguage(repoRoot: string) {
         DIRECTIVE,
       ],
     }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// YAML front matter
+// ---------------------------------------------------------------------------
+
+const FRONT_MATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---[ \t]*(?:\r?\n|$)/
+
+function parseFrontMatter(raw: string): { data: Record<string, unknown>; content: string } {
+  const match = FRONT_MATTER_RE.exec(raw)
+  if (!match) return { data: {}, content: raw }
+  const data = loadYaml(match[1])
+  return {
+    data: data && typeof data === "object" ? (data as Record<string, unknown>) : {},
+    content: raw.slice(match[0].length),
   }
 }
 
@@ -1225,7 +1241,7 @@ export function loadAllDocs(repoRoot: string): LoadedDocs {
     const sourceRel = relative(srcRoot, fileAbs).split("\\").join("/")
     const slug = sourceRel.replace(/\.md$/, "")
     const raw = readFileSync(fileAbs, "utf8")
-    const fm = matter(raw)
+    const fm = parseFrontMatter(raw)
     const included = resolveComparisonMatrix(resolveIncludes(fm.content, fileAbs, repoRoot))
 
     const headings: Heading[] = []
