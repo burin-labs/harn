@@ -222,6 +222,10 @@ fn python_line_breaks_outside_brackets_do_not_parse() {
         "if a:\n    pass\nelif a and\nb:\n    pass\n",
         "try:\n    pass\nexcept a or\nb:\n    pass\n",
         "match a:\n    case 1 if a and\nb:\n        pass\n",
+        // A backslash joins lines only when the break follows it directly;
+        // tree-sitter itself rejects trailing whitespace after it.
+        "x = 1 + \\   \n    2\n",
+        "x = 1 + \\\n\n    2\n",
     ] {
         assert!(
             first_syntax_error(header, Language::Python).is_some(),
