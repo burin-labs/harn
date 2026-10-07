@@ -67,7 +67,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ inputs.source_revision || github.sha }}
+          ref: ${{ github.sha }}
           persist-credentials: false
       - name: Compare main with the last settled verdict
         id: decide
@@ -89,11 +89,19 @@ jobs:
     permissions:
       contents: read
     outputs:
-      verdict: ${{ steps.canary.outputs.verdict }}
+      verdict: ${{ steps.observe-1.outputs.verdict || steps.observe-2.outputs.verdict || steps.observe-3.outputs.verdict }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Read the certified product source separately
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
           ref: ${{ inputs.source_revision || github.sha }}
+          path: certified-consumer-source
+          sparse-checkout: Cargo.toml
+          sparse-checkout-cone-mode: false
           persist-credentials: false
       - name: Mint the consumer dispatch credential
         id: consumer-token
@@ -105,7 +113,7 @@ jobs:
           repositories: ${{ secrets.CONSUMER_CANARY_REPOSITORY }}
           permission-actions: write
           permission-pull-requests: read
-      - name: Rehearse the consumer update at this revision
+      - name: Dispatch the consumer update once
         id: canary
         env:
           GH_TOKEN: ${{ steps.consumer-token.outputs.token }}
@@ -115,9 +123,41 @@ jobs:
           SOURCE_REVISION: ${{ inputs.source_revision || github.sha }}
         run: |
           CANARY_REPOSITORY="$CANARY_OWNER/$CANARY_NAME" \
-            WORKSPACE_VERSION="$(sed -n '/^\[workspace.package\]/,/^\[/s/^version = "\(.*\)"/\1/p' Cargo.toml)" \
-            PAIRING_TEXT="$(git log -1 --format=%B HEAD)" \
-            bash scripts/ci/consumer_canary.sh
+            WORKSPACE_VERSION="$(sed -n '/^\[workspace.package\]/,/^\[/s/^version = "\(.*\)"/\1/p' certified-consumer-source/Cargo.toml)" \
+            PAIRING_TEXT="$(git -C certified-consumer-source log -1 --format=%B HEAD)" \
+            bash scripts/ci/consumer_canary.sh --dispatch
+      - name: Observe the first bounded window
+        id: observe-1
+        uses: ./.github/actions/observe-consumer
+        with:
+          client-id: ${{ secrets.RELEASE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repository: ${{ secrets.CONSUMER_CANARY_REPOSITORY }}
+          run-id: ${{ steps.canary.outputs.run_id }}
+          started-at: ${{ steps.canary.outputs.started_at }}
+      - name: Observe the second bounded window
+        if: steps.observe-1.outputs.verdict == ''
+        id: observe-2
+        uses: ./.github/actions/observe-consumer
+        with:
+          client-id: ${{ secrets.RELEASE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repository: ${{ secrets.CONSUMER_CANARY_REPOSITORY }}
+          run-id: ${{ steps.canary.outputs.run_id }}
+          started-at: ${{ steps.canary.outputs.started_at }}
+      - name: Observe the final bounded window
+        if: steps.observe-2.outcome == 'success' && steps.observe-2.outputs.verdict == ''
+        id: observe-3
+        uses: ./.github/actions/observe-consumer
+        with:
+          client-id: ${{ secrets.RELEASE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repository: ${{ secrets.CONSUMER_CANARY_REPOSITORY }}
+          run-id: ${{ steps.canary.outputs.run_id }}
+          started-at: ${{ steps.canary.outputs.started_at }}
 
   # Succeeds only when the consumer run concluded, pass or fail. The decide
   # job reads this job's result from earlier runs to find the last commit with

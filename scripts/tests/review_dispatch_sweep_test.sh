@@ -65,7 +65,7 @@ if [[ "$1" == "api" && "$2" == repos/burin-labs/harn/commits/*/check-runs* ]]; t
   printf 'null\n'
   exit 0
 fi
-if [[ "$1" == "workflow" || ( "$1" == "api" && "$2" == "repos/burin-labs/harn/check-runs" ) ]]; then
+if [[ "$1" == "workflow" || ( "$1" == "api" && ( "$2" == "repos/burin-labs/harn/check-runs" || "$2" == repos/burin-labs/harn/issues/*/comments ) ) ]]; then
   exit 0
 fi
 printf 'unexpected gh call: %s\n' "$*" >&2
@@ -119,5 +119,71 @@ grep -qF "|| 'Automatic review: requested' }}" "$workflow" \
   || fail "the dispatch job no longer reports as the request record"
 grep -qxF 'request_check="Automatic review: requested"' "$script" \
   || fail "the sweep no longer reads the request record"
+
+# An unfinished review is not a review. harn#9477 stalled at 180453b0: the
+# reviewer posted "did not finish", the census counted that bot review as an
+# outcome, and no sweep asked again until the pull request was reopened by
+# hand. Each unfinished verdict on a head is asked again once, after it lands;
+# the third one stops the sweep and says so once on the pull request.
+again="$(fake_sha 0 4)"
+in_flight="$(fake_sha 0 5)"
+spent="$(fake_sha 0 6)"
+told="$(fake_sha 0 7)"
+mixed="$(fake_sha 0 8)"
+renamed="$(fake_sha 0 9)"
+quoted="$(fake_sha 1 a)"
+# The body the reviewer posts on this repository when a run does not finish
+# and its account is withheld, captured from the reviewer's own builder and
+# public filter for this target (downstream #10419). HEAD stands for the head.
+captured_unfinished_body='<!-- automated-review-unfinished: HEAD -->
+**Automated review did not finish.** Its account of the stop was withheld from this repository because it referenced context that is private to the reviewer. This run does not approve.'
+bot_review() {
+  jq -cn --arg head "$1" --arg at "$2" --arg body "$3" \
+    '{author: {__typename: "Bot"}, commit: {oid: $head}, submittedAt: $at, body: $body}'
+}
+unfinished_review() {
+  bot_review "$1" "$2" "${captured_unfinished_body//HEAD/$1}"
+}
+exhausted_notice() {
+  printf '{"author":{"__typename":"Bot"},"createdAt":"2026-10-06T02:00:00Z","body":"<!-- automated-review-sweep-exhausted: %s -->"}' "$1"
+}
+FAKE_CENSUS="$(cat <<JSON
+{"data":{"repository":{"pullRequests":{"pageInfo":{"hasNextPage":false},"nodes":[
+$(pr 10 false "$again" User "$(unfinished_review "$again" 2026-10-06T02:00:00Z)" ""),
+$(pr 11 false "$in_flight" User "$(unfinished_review "$in_flight" 2026-10-06T01:00:00Z)" ""),
+$(pr 12 false "$spent" User "$(unfinished_review "$spent" 2026-10-06T00:00:00Z),$(unfinished_review "$spent" 2026-10-06T01:00:00Z),$(unfinished_review "$spent" 2026-10-06T02:00:00Z)" ""),
+$(pr 13 false "$told" User "$(unfinished_review "$told" 2026-10-06T00:00:00Z),$(unfinished_review "$told" 2026-10-06T01:00:00Z),$(unfinished_review "$told" 2026-10-06T02:00:00Z)" "$(exhausted_notice "$told")"),
+$(pr 14 false "$mixed" User "$(unfinished_review "$mixed" 2026-10-06T01:00:00Z),$(bot_review "$mixed" 2026-10-06T02:00:00Z real)" ""),
+$(pr 15 false "$renamed" User "$(bot_review "$renamed" 2026-10-06T02:00:00Z "<!-- reviewer-review-unfinished: $renamed -->
+Did not finish.")" ""),
+$(pr 16 false "$quoted" User "$(bot_review "$quoted" 2026-10-06T02:00:00Z "A real review that quotes \`<!-- automated-review-unfinished: $quoted -->\` in prose.")" "")
+]}}}}
+JSON
+)"
+export FAKE_CENSUS
+export FAKE_REQUESTS="$again=2026-10-06T01:30:00Z $in_flight=2026-10-06T02:30:00Z $spent=2026-10-06T02:30:00Z $told=2026-10-06T02:30:00Z $mixed=2026-10-06T00:30:00Z $renamed=2026-10-06T01:30:00Z $quoted=2026-10-06T01:30:00Z"
+plan="$("$script" --repo burin-labs/harn --now 2026-10-06T03:00:00Z)"
+# 15: any reviewer namespace counts. 16: a marker quoted inside a real
+# review's prose is not the marker, so that review decides the head.
+expected="$(printf '10\t%s\tunfinished\n12\t%s\texhausted\n15\t%s\tunfinished' "$again" "$spent" "$renamed")"
+[[ "$plan" == "$expected" ]] || fail "unexpected plan for unfinished reviews:
+$plan"
+
+: > "$calls"
+REVIEW_REPOSITORY=burin-labs/reviewer REVIEW_WORKFLOW=review.yml DISPATCH_TOKEN=token \
+  REVIEW_SWEEP_SPACING_SECONDS=0 \
+  "$script" --repo burin-labs/harn --now 2026-10-06T03:00:00Z --limit 1 --apply >/dev/null
+grep -q "^workflow run review.yml --repo burin-labs/reviewer -f repository=burin-labs/harn -f pr=10 -f head_sha=$again$" "$calls" \
+  || fail "the unfinished head was not requested again"
+[[ "$(grep -c '^workflow run' "$calls")" == 1 ]] || fail "only the unfinished head is requested"
+grep -q "^api repos/burin-labs/harn/issues/12/comments -f body=<!-- automated-review-sweep-exhausted: $spent -->" "$calls" \
+  || fail "the exhausted head was not told on its pull request, past the request limit"
+! grep -q "issues/1[0134]/comments" "$calls" || fail "a stop notice went to the wrong pull request"
+
+# The bound is a setting, so one more allowed retry asks the spent head again.
+plan="$(FAKE_REQUESTS="$spent=2026-10-06T01:30:00Z" REVIEW_SWEEP_MAX_UNFINISHED=4 \
+  "$script" --repo burin-labs/harn --now 2026-10-06T03:00:00Z)"
+grep -q "^12	$spent	unfinished$" <<<"$plan" || fail "the bound did not follow REVIEW_SWEEP_MAX_UNFINISHED:
+$plan"
 
 printf 'review_dispatch_sweep_test: ok\n'

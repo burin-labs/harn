@@ -153,7 +153,8 @@ fn cold_parent_forks_persist_selected_context_and_lineage_before_prompt() {
     assert!(child_sees_restore_canary(
         &harn_vm::security::SessionEnvironment::inherited()
     ));
-    // Acquire the process-environment lock before entering the async runtime.
+    // Serialize process environment outside the async runtime, so another
+    // environment test cannot block this runtime's executor on the same lock.
     tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -265,7 +266,9 @@ fn cold_parent_forks_persist_selected_context_and_lineage_before_prompt() {
         harn_vm::agent_sessions::canonical_history_boundaries(&store, root.path(), "prefix-child")
             .await
             .expect("child acknowledgments");
-    assert!(!child_sees_restore_canary(&restarted.sessions["prefix-child"].environment_policy));
+    assert!(!child_sees_restore_canary(
+        &restarted.sessions["prefix-child"].environment_policy
+    ));
     restarted
         .handle_session_fork(
             &serde_json::json!(4),
@@ -318,7 +321,10 @@ fn cold_parent_forks_persist_selected_context_and_lineage_before_prompt() {
     restarted
         .handle_session_load(
             &serde_json::json!(5),
-            &serde_json::json!({"sessionId": parent, "cwd": root.path(),"environmentPolicy":{"kind":"isolated","grants":[]}}),
+            &serde_json::json!({
+                "sessionId": parent, "cwd": root.path(),
+                "environmentPolicy": {"kind": "isolated", "grants": []},
+            }),
         )
         .await;
     restarted
