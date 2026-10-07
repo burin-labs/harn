@@ -2,7 +2,7 @@ import { read_yaml } from "std/fs"
 
 pub type ReleaseStagingConsumer = {workflow: string, job: string, directory: string}
 
-type WorkflowFilters = dict<string, list<string>>
+pub type WorkflowFilters = dict<string, list<string>>
 
 pub const RELEASE_STAGING_CONSUMERS = [
   {workflow: "publish-release.yml", job: "publish", directory: "release-tools"},

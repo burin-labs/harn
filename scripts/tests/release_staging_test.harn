@@ -1,6 +1,8 @@
 import { read_yaml } from "std/fs"
+import { schema_dict } from "std/schema"
 import {
   RELEASE_STAGING_CONSUMERS,
+  WorkflowFilters,
   release_rehearsal_ci_errors,
   release_staging_errors,
 } from "../release_staging"
@@ -37,10 +39,15 @@ pipeline installer_and_legal_gate_inputs_cannot_disappear_from_release_selection
   const workflow = read_yaml(harness.fs, "../../.github/workflows/ci.yml", nil)
   assert_eq(release_rehearsal_ci_errors(workflow), [])
   for path in ["Makefile", "install.sh", "scripts/tests/install_sh.test.mjs"] {
-    let changed = json_parse(json_stringify(workflow))
+    const decoded = schema_check(json_parse(json_stringify(workflow)), schema_dict())
+    assert(is_ok(decoded), "cloned workflow must remain a dictionary")
+    let changed: dict = unwrap(decoded)
     for index in range(len(changed.jobs.changes.steps)) {
       if changed.jobs.changes.steps[index]?.id == "surface_filter" {
-        let filters = yaml_parse(changed.jobs.changes.steps[index]["with"].filters)
+        let filters: WorkflowFilters = schema_expect(
+          yaml_parse(changed.jobs.changes.steps[index]["with"].filters),
+          schema_of(WorkflowFilters),
+        )
         filters.release_contract = filters.release_contract.filter({ entry -> entry != path })
           .to_list()
         changed.jobs.changes.steps[index]["with"].filters = json_stringify(filters)
