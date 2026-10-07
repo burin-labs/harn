@@ -46,10 +46,13 @@ serde = { version = "1", features = ["derive"] }
 itoa = "1"
 TOML
 printf 'fn main() { println!("cargo:rerun-if-changed=build.rs"); }\n' > "$tmp/first/build.rs"
-(cd "$tmp/first" && cargo build -q)
+# Each checkout builds into its own explicit target. A job may already export
+# CARGO_TARGET_DIR (an owned runner's persistent target), and building there
+# would leave the scanned directories empty and the proof vacuous.
+(cd "$tmp/first" && cargo build -q --target-dir "$tmp/first/target")
 cp -r "$tmp/first" "$tmp/second"
 rm -rf "$tmp/second/target"
-(cd "$tmp/second" && cargo build -q)
+(cd "$tmp/second" && cargo build -q --target-dir "$tmp/second/target")
 
 store="$tmp/root/store"
 mapfile -t linked < <(

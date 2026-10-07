@@ -1228,6 +1228,11 @@ jobs:
           reuse-workspace-crates: "true"
           save: "true"
           persistent-target: ${{ env.HARN_RUNNER_TIER == 'self-hosted' }}
+          # A pull request's owned route starts from whatever target that
+          # runner last built; Kache reuses what any runner of the host built
+          # (#9435). Measured against this lane's persistent-target sccache
+          # baseline and kept only where it wins.
+          compiler-cache: ${{ env.HARN_RUNNER_TIER == 'self-hosted' && 'kache' || '' }}
       # Read the counters before the first compile, so the summary below can
       # report what this job did rather than what the machine has done since
       # its cache server last started.
