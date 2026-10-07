@@ -74,6 +74,21 @@ impl AcpOutput {
         Self::Callback(Arc::new(write_line))
     }
 
+    /// Capture the normalized prompt identity before any asynchronous producer
+    /// can outlive this turn. Session-global and replay outputs stay unwrapped.
+    pub(super) fn for_prompt(&self, correlation: AcpPromptCorrelation) -> Self {
+        if correlation.message_id.is_none() {
+            return self.clone();
+        }
+        let output = self.clone();
+        Self::callback(
+            move |line| match correlate_prompt_frame(line, &correlation) {
+                Ok(line) => output.write_line(&line),
+                Err(error) => tracing::warn!(%error, "Refused invalid prompt-owned ACP frame"),
+            },
+        )
+    }
+
     /// Write a serialized ACP JSON-RPC message to this sink.
     pub fn write_line(&self, line: &str) {
         match self {
@@ -91,6 +106,43 @@ impl AcpOutput {
         }
     }
 }
+
+fn correlate_prompt_frame(
+    line: &str,
+    correlation: &AcpPromptCorrelation,
+) -> Result<String, String> {
+    let mut frame: serde_json::Value =
+        serde_json::from_str(line).map_err(|_| "Malformed ACP frame".to_string())?;
+    let object = frame.as_object_mut().ok_or("ACP frame must be an object")?;
+    let Some(method) = object.get("method") else {
+        // Responses retain their JSON-RPC request identity and result shape.
+        return Ok(line.to_string());
+    };
+    if !method.is_string() {
+        return Err("ACP method must be a string".into());
+    }
+    let params = object
+        .get_mut("params")
+        .and_then(serde_json::Value::as_object_mut)
+        .ok_or("Prompt-owned ACP params must be an object")?;
+    if let Some(supplied) = params.get("promptCorrelation") {
+        let supplied: AcpPromptCorrelation = serde_json::from_value(supplied.clone())
+            .map_err(|_| "Invalid ACP prompt correlation".to_string())?;
+        if supplied != *correlation {
+            return Err("ACP frame conflicts with its owning prompt".into());
+        }
+    }
+    params.insert(
+        "promptCorrelation".into(),
+        serde_json::to_value(correlation)
+            .map_err(|_| "ACP prompt correlation encoding failed".to_string())?,
+    );
+    serde_json::to_string(&frame).map_err(|_| "ACP frame encoding failed".to_string())
+}
+
+#[cfg(test)]
+#[path = "bridge/prompt_correlation_tests.rs"]
+mod prompt_correlation_tests;
 
 /// Shared state that bridge-style builtins use to communicate with the
 /// ACP client (editor) over JSON-RPC.

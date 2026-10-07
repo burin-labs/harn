@@ -282,7 +282,7 @@ impl AcpServer {
             retarget_prompt_text(&mut prompt, prompt_text.clone());
         }
 
-        let output = self.output.clone();
+        let output = self.output.for_prompt(prompt.correlation.clone());
         let pending = self.pending.clone();
         let next_id = &self.next_id;
         let sid = session_id.clone();
