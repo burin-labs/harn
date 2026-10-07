@@ -759,3 +759,24 @@ fn a_destination_behind_a_symlink_out_of_the_workspace_is_rejected() {
     assert!(!outside.path().join("new.py").exists());
     assert_eq!(fixture.snapshot(), before);
 }
+
+#[test]
+fn a_source_file_broken_across_lines_refuses_before_planning() {
+    // tree-sitter-python reads `b = a +` and the next line as one expression;
+    // Python rejects the file, so the move must not rewrite it.
+    let source =
+        "def label(n: int) -> str:\n    return str(n)\n\n\ndef f(a):\n    b = a +\n    print(b)\n";
+    let fixture = Fixture::new(&[
+        ("orders.py", source),
+        ("view.py", "def heading() -> str:\n    return \"h\"\n"),
+    ]);
+    let result = fixture.refused(
+        "syntax_error",
+        &[
+            ("symbol", vm_string("label")),
+            ("path", vm_string("orders.py")),
+            ("to_path", vm_string("view.py")),
+        ],
+    );
+    assert!(s(field(&result, "details")).starts_with("`orders.py` does not parse before the edit"));
+}
