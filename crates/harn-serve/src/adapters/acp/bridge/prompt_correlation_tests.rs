@@ -7,9 +7,8 @@ fn correlation(id: &str) -> AcpPromptCorrelation {
 }
 
 async fn receive(rx: &mut mpsc::UnboundedReceiver<String>) -> serde_json::Value {
-    let line = tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv())
+    let line = harn_clock::test_support::within("prompt-scoped ACP frame", rx.recv())
         .await
-        .expect("scoped output must emit a frame")
         .expect("output remains open");
     serde_json::from_str(&line).unwrap()
 }

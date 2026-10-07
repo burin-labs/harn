@@ -140,10 +140,6 @@ fn correlate_prompt_frame(
     serde_json::to_string(&frame).map_err(|_| "ACP frame encoding failed".to_string())
 }
 
-#[cfg(test)]
-#[path = "bridge/prompt_correlation_tests.rs"]
-mod prompt_correlation_tests;
-
 /// Shared state that bridge-style builtins use to communicate with the
 /// ACP client (editor) over JSON-RPC.
 pub(super) struct AcpBridge {
@@ -412,3 +408,7 @@ pub(super) fn progress_update(
     events::merge_harn_meta(&mut update, harn_meta);
     update
 }
+
+#[cfg(test)]
+#[path = "bridge/prompt_correlation_tests.rs"]
+mod prompt_correlation_tests;
