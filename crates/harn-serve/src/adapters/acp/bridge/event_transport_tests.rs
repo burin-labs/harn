@@ -73,7 +73,7 @@ async fn idle_plan_mutation_does_not_leave_a_transport_for_late_prompt_events() 
             iteration: 1,
             provider: String::new(),
             model: String::new(),
-        })
+        });
     });
     let late = harn_clock::test_support::within(
         "nonempty old prompt delivery after idle mutation",

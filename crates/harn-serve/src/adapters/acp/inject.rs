@@ -316,6 +316,9 @@ impl AcpServer {
         if let Some(session) = self.sessions.get_mut(session_id) {
             session.host_bridge = None;
             session.concurrent_control.set_prompt_active(false);
+            session
+                .concurrent_control
+                .set_prompt_transport(harn_vm::agent_events::AgentEventTransport::default());
         }
         flush_result
     }
