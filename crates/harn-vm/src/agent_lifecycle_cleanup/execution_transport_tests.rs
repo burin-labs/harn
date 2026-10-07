@@ -141,6 +141,7 @@ async fn top_level_vm_drop_keeps_origin_after_execution_scope_has_unwound() {
             || {
                 !crate::agent_sessions::has_journal(&session)
                     && !crate::agent_sessions::exists(&session)
+                    && crate::agent_events::session_external_sink_count(&session) == 0
                     && old_count.load(Ordering::SeqCst) > old_before_cleanup
             },
             "originating top-level cleanup must emit and release both session owners",
