@@ -17,7 +17,8 @@
 #
 # The script downloads a signed tarball from the GitHub release matching
 # your OS/arch, verifies it against the release's SHA256SUMS manifest,
-# and installs the `harn`, `harn-dap`, and `harn-lsp` binaries.
+# and installs the `harn`, `harn-dap`, and `harn-lsp` binaries. Required license
+# material is retained in `harn-licenses/` beside the installed binary.
 
 set -eu
 
@@ -171,9 +172,6 @@ else
   fi
 fi
 
-mkdir -p "$INSTALL_DIR" || die "cannot create $INSTALL_DIR"
-[ -w "$INSTALL_DIR" ] || die "$INSTALL_DIR is not writable"
-
 # Stage download in a temp dir so a failed install never leaves a
 # half-written binary on PATH.
 TMPDIR_BASE="${TMPDIR:-/tmp}"
@@ -213,6 +211,27 @@ fi
 
 info "Extracting"
 tar -xzf "$WORKDIR/$ASSET" -C "$WORKDIR"
+
+# Refuse incomplete archives before changing an existing installation. Keep
+# Harn's legal files in their own directory when PATH is shared with other tools.
+for legal in LICENSE-MIT LICENSE-APACHE THIRD-PARTY-NOTICES.txt; do
+  [ -f "$WORKDIR/$legal" ] && [ -s "$WORKDIR/$legal" ] && [ ! -L "$WORKDIR/$legal" ] \
+    || die "$ASSET has missing or invalid $legal; required license material must be a nonempty regular file"
+done
+LICENSE_DIR="$INSTALL_DIR/harn-licenses"
+[ ! -L "$LICENSE_DIR" ] || die "$LICENSE_DIR must not be a symbolic link"
+for legal in LICENSE-MIT LICENSE-APACHE THIRD-PARTY-NOTICES.txt; do
+  destination="$LICENSE_DIR/$legal"
+  [ ! -L "$destination" ] || die "$destination must not be a symbolic link"
+  if [ -e "$destination" ]; then
+    [ -f "$destination" ] || die "$destination must be a regular file"
+  fi
+done
+mkdir -p "$LICENSE_DIR" || die "cannot create $LICENSE_DIR"
+[ -w "$INSTALL_DIR" ] && [ -w "$LICENSE_DIR" ] || die "$INSTALL_DIR is not writable"
+for legal in LICENSE-MIT LICENSE-APACHE THIRD-PARTY-NOTICES.txt; do
+  install -m 0644 "$WORKDIR/$legal" "$LICENSE_DIR/$legal"
+done
 
 # Install the single multi-call `harn` binary, then point harn-lsp / harn-dap
 # at it with symlinks (they are the same binary, dispatched on argv[0]). An

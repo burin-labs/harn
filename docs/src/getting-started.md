@@ -15,6 +15,9 @@ curl -fsSL https://harnlang.com/install.sh | sh
 
 The installer downloads the release for your operating system and CPU. To
 install a particular release, set `HARN_VERSION` to its release tag.
+Project licenses and third-party notices are retained in `harn-licenses/`
+beside the installed binary, including when `HARN_INSTALL_DIR` selects a custom
+destination. Releases missing those required files are refused.
 
 ### Windows
 
@@ -23,6 +26,9 @@ Run this command in PowerShell:
 ```powershell
 irm https://harnlang.com/install.ps1 | iex
 ```
+
+The Windows installer retains the same legal files beside the binary in its
+installation directory. Homebrew retains them inside its versioned keg.
 
 ### From source
 

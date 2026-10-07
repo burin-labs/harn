@@ -1582,7 +1582,7 @@ check-release-notices:
 	node scripts/release_third_party_notices.mjs verify dist/release-notices
 
 test-release-notices:
-	node --test scripts/tests/release_third_party_notices.test.mjs
+	node --test scripts/tests/release_third_party_notices.test.mjs scripts/tests/install_sh.test.mjs
 
 check-release-audit-contract:
 	@echo "=== Checking release-audit proof contract against CI ==="
