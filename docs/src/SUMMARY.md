@@ -388,7 +388,7 @@
 - [Reusable bump-harn workflow](./dev/reusable-bump-harn-runtime.md)
 - [Use the CI recovery workflow](./dev/ci-preemption-recovery.md)
 - [Merge overrides](./dev/merge-overrides.md)
-- [Sprint fast CI](./dev/sprint-fast-ci.md)
+- [Post-merge CI tier](./dev/post-merge-tier.md)
 - [Agent shell guard](./dev/agent-shell-guard.md)
 - [Deterministic test patterns](./dev/testing.md)
 - [Check documentation examples](./dev/check-docs-snippets.md)

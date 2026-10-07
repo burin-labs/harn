@@ -1,0 +1,121 @@
+import "./policy_core.harn"
+
+/**
+ * The post-merge tier (harn#9495, from the #7628 sprint switch): pull requests
+ * and merge groups leave the slow proof families to the push to main, which
+ * always runs them, unless the change selects the full suite.
+ *
+ * One owner decides it. The `changes` job's decision step turns the event,
+ * the `full_suite` path filter and the pull request's `CI-Scope:` line into
+ * the output `post_merge_tier`, and every family and the aggregate read that
+ * output. A job deciding for itself could disagree with the aggregate about
+ * which events the tier covers, which is how a skip would pass on main.
+ */
+const TIER_STEP_ID = "post_merge_tier"
+
+const TIER_EXCUSE = "\"$POST_MERGE_TIER_ACTIVE\" = \"true\""
+
+/**
+ * Jobs that skip in the tier. Conformance and the Harn audits stay merge tier:
+ * they are how a runtime or stdlib change proves itself before it lands.
+ */
+pub const POST_MERGE_TIER_JOBS = ["security-tests-ready", "windows-cross-check", "macos"]
+
+/**
+ * The aggregate's result variables whose skip the tier may excuse. Windows
+ * is excused through `WINDOWS_CROSS_REQUIRED`, and macOS skips are excused on
+ * every event already.
+ */
+const TIER_EXCUSED_RESULTS = ["security_tests_ready_result", "rust_security_result"]
+
+fn gha(body: string) -> string {
+  return "$" + "{{ " + body + " }}"
+}
+
+fn needs_of(job: dict?) -> list<string> {
+  const needs = job?.needs
+  if type_of(needs) == "string" {
+    return [trim(needs)]
+  }
+  return (needs ?? []).map({ value -> trim(to_string(value)) }).to_list()
+}
+
+fn step_with_id(job: dict?, id: string) {
+  for step in job?.steps ?? [] {
+    if trim(to_string(step?.id ?? "")) == id {
+      return step
+    }
+  }
+  return nil
+}
+
+fn checkout_before_decision(job: dict?) -> bool {
+  let checked_out = false
+  for step in job?.steps ?? [] {
+    if trim(to_string(step?.id ?? "")) == TIER_STEP_ID {
+      return checked_out
+    }
+    if to_string(step?.uses ?? "").starts_with("actions/checkout@") {
+      checked_out = true
+    }
+  }
+  return false
+}
+
+/** The text of one `require_result` call, from its result variable to the next blank line. */
+fn require_call(command: string, result_var: string) -> string {
+  const marker = "require_result \"$" + result_var + "\""
+  const parts = command.split(marker)
+  if len(parts) != 2 {
+    return ""
+  }
+  return parts[1].split("\n\n")[0]
+}
+
+pub fn post_merge_tier_errors(workflows: dict) -> list<string> {
+  const ci = workflows["ci.yml"]
+  let errors: list<string> = []
+  const changes = ci?.jobs?.changes
+  const decision = step_with_id(changes, TIER_STEP_ID)
+  const decision_run = to_string(decision?.run ?? "")
+  if trim(to_string(changes?.outputs?.post_merge_tier ?? ""))
+    != gha("steps.${TIER_STEP_ID}.outputs.active")
+    || trim(to_string(decision?.env?.FULL_SUITE_PATHS ?? ""))
+      != gha("steps.surface_filter.outputs.full_suite")
+    || trim(to_string(decision?.env?.EVENT_NAME ?? "")) != gha("github.event_name")
+    || trim(to_string(decision?.shell ?? "")) != "bash"
+    || trim(decision_run) != "bash scripts/ci/post_merge_tier.sh"
+    || !checkout_before_decision(changes) {
+    errors = errors
+      + [
+        "ci.yml:changes must own the post-merge tier decision: pull requests and merge groups whose change does not select the full suite",
+      ]
+  }
+  for name in POST_MERGE_TIER_JOBS {
+    const job = ci?.jobs?.[name]
+    if !contains(to_string(job?.if ?? ""), POST_MERGE_TIER_GUARD)
+      || !needs_of(job).contains("changes") {
+      errors = errors + ["ci.yml:${name} must skip under the post-merge tier decision"]
+    }
+  }
+  const status = ci?.jobs?.["ci-status"]
+  const status_step = step_by_name(status?.steps ?? [], "Verify required CI jobs")
+  const command = to_string(status_step?.run ?? "")
+  const env = status_step?.env ?? {}
+  if trim(to_string(env?.POST_MERGE_TIER_ACTIVE ?? ""))
+    != gha("needs.changes.outputs.post_merge_tier")
+    || !contains(to_string(env?.WINDOWS_CROSS_REQUIRED ?? ""), POST_MERGE_TIER_GUARD) {
+    errors = errors + ["ci.yml:ci-status must read the post-merge tier decision from changes"]
+  }
+  for result_var in TIER_EXCUSED_RESULTS {
+    if !contains(require_call(command, result_var), TIER_EXCUSE) {
+      errors = errors + ["ci.yml:ci-status must excuse a post-merge tier skip of ${result_var}"]
+    }
+  }
+  // Any further excuse would let the switch hide a proof it does not own.
+  if len(command.split(TIER_EXCUSE)) - 1 != len(TIER_EXCUSED_RESULTS) {
+    errors = errors
+      + ["ci.yml:ci-status may excuse post-merge tier skips only for the tier's families"]
+  }
+  return errors
+}
