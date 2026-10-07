@@ -222,12 +222,29 @@ impl CleanupRuntimes {
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn with_event_transport(
         mut self,
         transport: crate::agent_events::AgentEventTransport,
     ) -> Self {
         self.event_transport = transport;
         self
+    }
+
+    /// Capture attribution once at admitted execution entry. Cleanup scheduling
+    /// clones this snapshot and never reads a later caller's ambient transport.
+    pub(crate) fn capture_transport(mut self) -> Self {
+        self.event_transport = crate::agent_events::transport::current();
+        self
+    }
+
+    /// Pending cleanup can retain an earlier execution identity without changing
+    /// its captured runtime pointers or transport ownership.
+    pub(crate) fn for_execution(&self, execution_id: String) -> Self {
+        Self {
+            execution_id,
+            ..self.clone()
+        }
     }
 
     fn key(&self) -> RuntimeKey {
@@ -397,3 +414,7 @@ mod tests;
 #[cfg(test)]
 #[path = "agent_lifecycle_cleanup/transport_tests.rs"]
 mod transport_tests;
+
+#[cfg(test)]
+#[path = "agent_lifecycle_cleanup/execution_transport_tests.rs"]
+mod execution_transport_tests;
