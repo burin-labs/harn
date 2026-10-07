@@ -130,7 +130,7 @@ impl SessionStore for CanonicalStore {
     async fn fork(
         &self,
         session_id: &str,
-        at_event_id: EventId,
+        at_event_id: Option<EventId>,
         child_id: Option<harn_session_store::SessionId>,
     ) -> harn_session_store::StoreResult<harn_session_store::ForkResult> {
         self.store.fork(session_id, at_event_id, child_id).await

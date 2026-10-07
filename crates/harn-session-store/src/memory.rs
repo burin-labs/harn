@@ -323,7 +323,7 @@ impl SessionStore for MemorySessionStore {
     async fn fork(
         &self,
         session_id: &str,
-        at_event_id: EventId,
+        at_event_id: Option<EventId>,
         child_id: Option<SessionId>,
     ) -> StoreResult<ForkResult> {
         let mut guard = lock(&self.inner);
@@ -331,14 +331,12 @@ impl SessionStore for MemorySessionStore {
             .sessions
             .get(session_id)
             .ok_or_else(|| StoreError::NotFound(session_id.to_string()))?;
-        if !parent
-            .events
-            .iter()
-            .any(|event| event.event_id == at_event_id)
-        {
-            return Err(StoreError::InvalidInput(format!(
-                "event {at_event_id} not found in session '{session_id}'"
-            )));
+        if let Some(boundary) = at_event_id {
+            if !parent.events.iter().any(|event| event.event_id == boundary) {
+                return Err(StoreError::InvalidInput(format!(
+                    "event {boundary} not found in session '{session_id}'"
+                )));
+            }
         }
         let new_id = child_id.unwrap_or_else(|| Uuid::now_v7().to_string());
         if guard.sessions.contains_key(&new_id) {
@@ -360,7 +358,7 @@ impl SessionStore for MemorySessionStore {
         let mut parent_events: Vec<StoredEvent> = parent
             .events
             .iter()
-            .filter(|event| event.event_id <= at_event_id)
+            .filter(|event| at_event_id.is_some_and(|boundary| event.event_id <= boundary))
             .cloned()
             .collect();
         prepare_stored_events_for_persistence(&self.hooks, &mut parent_events)?;

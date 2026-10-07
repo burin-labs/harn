@@ -101,8 +101,8 @@ auth_style = "none"
     }).await;
 }
 
-#[test]
-fn conservative_acp_forks_share_the_parent_allowance() {
+#[tokio::test(flavor = "current_thread")]
+async fn conservative_acp_forks_share_the_parent_allowance() {
     harn_vm::reset_thread_local_state();
     let dir = tempfile::tempdir().unwrap();
     let mut server = AcpServer::new(AcpServerConfig::new(None).with_budget(conservative(0.01)));
@@ -115,12 +115,14 @@ fn conservative_acp_forks_share_the_parent_allowance() {
         )
         .unwrap();
     let retained = server.prompt_admission(session_id).unwrap().unwrap();
-    server.handle_session_fork(
-        &serde_json::json!(3),
-        &serde_json::json!({
-            "sessionId":session_id, "id":"conservative-native-fork"
-        }),
-    );
+    server
+        .handle_session_fork(
+            &serde_json::json!(3),
+            &serde_json::json!({
+                "sessionId":session_id, "id":"conservative-native-fork"
+            }),
+        )
+        .await;
     let fork = server
         .sessions
         .get("conservative-native-fork")
@@ -155,7 +157,11 @@ fn conservative_acp_refuses_late_and_cold_restored_activation() {
         SessionBudget::Custom(conservative(1.0));
     assert!(server.prompt_admission("late-admission").is_err());
     server
-        .register_restored_session("restored-admission", &serde_json::json!({"cwd":dir.path()}))
+        .register_restored_session(
+            "restored-admission",
+            &serde_json::json!({"cwd":dir.path()}),
+            harn_vm::security::SessionEnvironment::isolated(),
+        )
         .unwrap();
     server
         .sessions
