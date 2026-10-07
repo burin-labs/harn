@@ -662,6 +662,11 @@ jobs:
           path: .release-orchestrator
           persist-credentials: false
 
+      - name: Verify release license notices and archive assembly
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund
+          make test-release-notices
+
       # The orchestrator's modules are written against the Harn runtime it
       # pins, not the one this repository is currently building.
       - name: Install the orchestrator's pinned Harn
