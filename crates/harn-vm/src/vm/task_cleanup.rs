@@ -38,10 +38,10 @@ impl Vm {
     pub(super) fn capture_agent_cleanup_runtimes(&mut self) {
         // Entry reads the VM's current runtimes, never a prior execution's
         // retained snapshot. Drop and scheduling must use this captured owner.
-        self.cleanup_runtimes = Some(
+        self.cleanup_runtimes = Some(std::sync::Arc::new(
             self.current_agent_cleanup_runtimes(self.execution_id.to_string())
                 .capture_transport(),
-        );
+        ));
     }
 
     fn agent_cleanup_runtimes_for_execution(

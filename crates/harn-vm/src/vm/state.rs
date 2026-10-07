@@ -313,8 +313,9 @@ pub struct Vm {
     pub(crate) trigger_registry: Arc<crate::triggers::registry::TriggerRegistryRuntime>,
     /// Agent transcripts and subscribers owned by this VM tree.
     pub(crate) session_runtime: Arc<crate::agent_sessions::AgentSessionRuntime>,
-    /// Retained across ambient unwind so Drop never captures a sibling prompt.
-    pub(crate) cleanup_runtimes: Option<crate::agent_lifecycle_cleanup::CleanupRuntimes>,
+    /// Shared immutable cleanup snapshot survives ambient unwind without
+    /// expanding every inline VM or cloning its resources for each child.
+    pub(crate) cleanup_runtimes: Option<Arc<crate::agent_lifecycle_cleanup::CleanupRuntimes>>,
     /// Structured spans owned by this VM tree.
     pub(crate) tracing_runtime: Arc<crate::tracing::TracingRuntime>,
     /// Durable identity shared by every VM in this execution tree.
