@@ -85,7 +85,7 @@ async fn fork_copies_history_up_to_event_id() {
                 .expect("append");
         }
         let result = store
-            .fork(&meta.id, 3, Some("child".into()))
+            .fork(&meta.id, Some(3), Some("child".into()))
             .await
             .expect("fork");
         assert_eq!(result.child_session_id, "child");
@@ -108,6 +108,51 @@ async fn fork_copies_history_up_to_event_id() {
             .await
             .expect("append on child");
         assert_eq!(next.event_id, 4);
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn empty_fork_retains_lineage_without_copying_an_event() {
+    run_with_hooks(StoreHooks::default(), |store| async move {
+        let parent = store
+            .create(CreateSession::default())
+            .await
+            .expect("parent");
+        store
+            .append(
+                &parent.id,
+                AppendEvent::new(SessionEventKind::Message, json!({"text": "parent"})),
+            )
+            .await
+            .expect("parent message");
+        let fork = store
+            .fork(&parent.id, None, Some("empty-child".into()))
+            .await
+            .expect("empty fork");
+        assert_eq!(fork.forked_from_event_id, None);
+        assert_eq!(fork.copied_event_count, 0);
+        let child = store.describe("empty-child").await.expect("child");
+        assert_eq!(child.parent_session_id.as_deref(), Some(parent.id.as_str()));
+        assert_eq!(child.event_count, 0);
+        assert!(store
+            .read("empty-child", ReadRange::default())
+            .await
+            .expect("child events")
+            .events
+            .is_empty());
+        assert!(matches!(
+            store.fork(&parent.id, Some(99), None).await,
+            Err(StoreError::InvalidInput(_))
+        ));
+        let added = store
+            .append(
+                "empty-child",
+                AppendEvent::new(SessionEventKind::Message, json!({"text": "child"})),
+            )
+            .await
+            .expect("first child message");
+        assert_eq!(added.event_id, 1);
     })
     .await;
 }
@@ -450,7 +495,7 @@ async fn retrieval_reapplies_redaction_to_stored_data_and_marks_projection() {
             assert!(matches!(verify_error, VerifyError::InvalidShape(_)));
 
             let forked = store
-                .fork(&meta.id, 1, Some("redacted-child".to_string()))
+                .fork(&meta.id, Some(1), Some("redacted-child".to_string()))
                 .await
                 .expect("fork");
             let child_page = store
@@ -1042,7 +1087,7 @@ async fn fork_produces_self_contained_verifiable_chain() {
                 .expect("append");
         }
         let _ = store
-            .fork(&meta.id, 3, Some("forked-child".into()))
+            .fork(&meta.id, Some(3), Some("forked-child".into()))
             .await
             .expect("fork");
 

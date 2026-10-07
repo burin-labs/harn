@@ -5,6 +5,27 @@ use serde_json::{json, Value};
 use super::TOOL_PROBE_TOOL_NAME;
 use crate::value::VmValue;
 
+pub(super) fn chat_url(
+    def: &crate::llm_config::ProviderDef,
+    base_url: &str,
+) -> Result<String, String> {
+    let endpoint = if def.chat_endpoint.trim().is_empty() {
+        "/v1/chat/completions"
+    } else {
+        def.chat_endpoint.as_str()
+    };
+    let url = if endpoint.starts_with("http://") || endpoint.starts_with("https://") {
+        endpoint.to_string()
+    } else if endpoint.starts_with('/') {
+        format!("{}{}", base_url.trim_end_matches('/'), endpoint)
+    } else {
+        format!("{}/{}", base_url.trim_end_matches('/'), endpoint)
+    };
+    reqwest::Url::parse(&url)
+        .map(|_| url.clone())
+        .map_err(|error| format!("invalid provider chat URL '{url}': {error}"))
+}
+
 pub(crate) fn apply_stream_transport_fields(
     provider: &str,
     model: &str,

@@ -122,7 +122,7 @@ pub(super) fn run(index: &SharedIndex, args: &[VmValue]) -> Result<VmValue, Host
             format!("no tree-sitter grammar for `{relative}`"),
         )));
     };
-    let source = read_source(BUILTIN, &absolute, session_id.as_deref())?;
+    let source = read_source(BUILTIN, &root, &relative, session_id.as_deref())?;
     let input = PlanInput {
         source: &source,
         language,
@@ -161,7 +161,7 @@ pub(super) fn run(index: &SharedIndex, args: &[VmValue]) -> Result<VmValue, Host
         &root,
         std::slice::from_ref(&file_plan),
         session_id.as_deref(),
-    );
+    )?;
     Ok(env.success(&planned, &file_plan, false, failed))
 }
 

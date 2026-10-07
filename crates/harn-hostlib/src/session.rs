@@ -330,7 +330,7 @@ struct ListRequest {
 struct ForkRequest {
     root: String,
     session_id: String,
-    at_event_id: EventId,
+    at_event_id: Option<EventId>,
     #[serde(default)]
     child_session_id: Option<String>,
 }
