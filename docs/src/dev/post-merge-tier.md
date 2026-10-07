@@ -8,6 +8,10 @@ which always runs and requires every proof:
 - the macOS deny-warnings build and lint,
 - the Linux sandbox tests.
 
+The macOS lane also keeps its own path plan on every event: it runs only when
+the change touches macOS-gated process, sandbox, secret-store, or CLI paths,
+and `macos-nightly.yml` covers the rest.
+
 Conformance and the Harn source, documentation, and script audits stay on
 every pull request that changes Rust or Harn sources. They are how a runtime or
 stdlib change proves itself before it lands.
@@ -25,7 +29,8 @@ toolchain pin, the protocol artifacts, and the safety domain: sandbox,
 secrets, egress, permissions, consent and credentials.
 
 To ask for everything on any other pull request, add this line to its body
-before you push:
+before you push. A merge group cannot read the body, so a declared full suite
+runs on the pull request:
 
 ```text
 CI-Scope: full

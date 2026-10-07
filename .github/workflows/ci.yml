@@ -2360,10 +2360,12 @@ jobs:
   windows-cross-check:
     name: Windows cross-compile check
     needs: changes
-    # Every merge-group candidate runs it; main pushes run it when the Rust
-    # surface is on, so a push already proven on merge_group may skip.
+    # Pull requests and merge groups run it when the change selects the full
+    # suite: a merge group cannot read a pull request body, so a `CI-Scope:
+    # full` declaration is honored only on the pull request. Main pushes run
+    # it whenever the Rust surface is on.
     if: >-
-      (github.event_name == 'merge_group'
+      ((github.event_name == 'pull_request' || github.event_name == 'merge_group')
       && needs.changes.outputs.post_merge_tier != 'true')
       || (github.event_name == 'push'
       && github.ref == 'refs/heads/main'
@@ -2858,7 +2860,7 @@ jobs:
           # group already proved skips the heavy lanes but still owes the
           # main-only repository policies, which no merge group runs.
           RUST_PATHS_SELECTED: ${{ needs.changes.outputs.rust_paths }}
-          WINDOWS_CROSS_REQUIRED: ${{ (github.event_name == 'merge_group' && needs.changes.outputs.post_merge_tier != 'true') || (github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.changes.outputs.rust == 'true') }}
+          WINDOWS_CROSS_REQUIRED: ${{ ((github.event_name == 'pull_request' || github.event_name == 'merge_group') && needs.changes.outputs.post_merge_tier != 'true') || (github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.changes.outputs.rust == 'true') }}
           # Exactly the `changes` decision: true only on a pull request or
           # merge group whose change the post-merge tier may leave to main.
           # Only a skip is excused by it.
