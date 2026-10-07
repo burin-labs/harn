@@ -775,6 +775,31 @@ impl HostBridge {
         (self.writer)(line).map_err(VmError::Runtime)
     }
 
+    /// Bind the envelope before dispatch or serialization. A delayed frame keeps
+    /// its originating session even after another session acquires the host.
+    fn bind_session_params(
+        &self,
+        mut params: serde_json::Value,
+    ) -> Result<serde_json::Value, VmError> {
+        let session_id = self.get_session_id();
+        if session_id.is_empty() {
+            return Ok(params);
+        }
+        let object = params.as_object_mut().ok_or_else(|| {
+            VmError::Runtime("Bridge: session-bound host envelopes require object params".into())
+        })?;
+        if object
+            .get("sessionId")
+            .is_some_and(|value| value.as_str() != Some(session_id.as_str()))
+        {
+            return Err(VmError::Runtime(
+                "Bridge: host envelope does not match its owning session".into(),
+            ));
+        }
+        object.insert("sessionId".into(), serde_json::Value::String(session_id));
+        Ok(params)
+    }
+
     /// Send a JSON-RPC request to the host and wait for the response.
     /// Non-interactive calls time out after 5 minutes to prevent deadlocks.
     /// Interactive permission requests remain pending until the host answers,
@@ -784,6 +809,7 @@ impl HostBridge {
         method: &str,
         params: serde_json::Value,
     ) -> Result<serde_json::Value, VmError> {
+        let params = self.bind_session_params(params)?;
         if let Some(in_process) = &self.in_process {
             return in_process.dispatch(method, params).await;
         }
@@ -865,10 +891,15 @@ impl HostBridge {
     /// Send a JSON-RPC notification to the host (no response expected).
     /// Serialized through the stdout mutex to prevent interleaving.
     pub fn notify(&self, method: &str, params: serde_json::Value) {
-        let notification = crate::jsonrpc::notification(method, params);
         if self.in_process.is_some() {
             return;
         }
+        // Invalid authority in a one-way frame is never forwarded. Calls use
+        // the same owner and return its failure to their caller.
+        let Ok(params) = self.bind_session_params(params) else {
+            return;
+        };
+        let notification = crate::jsonrpc::notification(method, params);
         if let Ok(line) = serde_json::to_string(&notification) {
             let _ = self.write_line(&line);
         }
