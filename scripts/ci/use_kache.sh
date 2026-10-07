@@ -19,6 +19,10 @@ set -euo pipefail
 KACHE_VERSION=v1.0.0
 KACHE_ASSET="kache-x86_64-unknown-linux-musl.tar.gz"
 KACHE_SHA256=756e9701a6afb8354fd8b1d76164e13272d320354d84f01197e57d8a3b4be397
+# The binary inside that archive. Every run checks the installed copy against
+# it before exporting it, so a damaged or replaced file is reinstalled rather
+# than trusted for being present.
+KACHE_BIN_SHA256=b826e99983057974663d6863eafbee4e1b25ca9373071406b15dd02961b2c37d
 
 github_env=${1:-${GITHUB_ENV:?GITHUB_ENV is required}}
 if [[ "$(uname -s)-$(uname -m)" != Linux-x86_64 ]]; then
@@ -29,8 +33,27 @@ max_gib=${HARN_KACHE_MAX_GIB:-100}
 [[ "$max_gib" =~ ^[1-9][0-9]*$ ]] || { echo "::error::HARN_KACHE_MAX_GIB must be a positive integer"; exit 1; }
 
 root="${HARN_KACHE_ROOT:-${XDG_CACHE_HOME:-${HOME:?}/.cache}/harn-ci-kache}"
+# A host short on disk compiles without a wrapper. One owned host is a shared
+# machine in the owned pool with about 114-156 GiB free, and a store allowed to
+# reach its cap there would fill the disk. The existing store is left for the
+# runners still using it; its size cap bounds it.
+floor_gib="${HARN_KACHE_MIN_FREE_GIB:-200}"
+mkdir -p "$root"
+free_kib="$(df -Pk "$root" | awk 'NR == 2 { print $4 }')"
+if [[ -z "$free_kib" || "$free_kib" -lt $((floor_gib * 1024 * 1024)) ]]; then
+  echo "::warning::only ${free_kib:-unknown} KiB free under $root, below ${floor_gib} GiB; this job compiles without Kache"
+  echo "RUSTC_WRAPPER=" >> "$github_env"
+  exit 0
+fi
 kache="$root/bin/$KACHE_VERSION/kache"
-if [[ ! -x "$kache" ]]; then
+binary_is_pinned() {
+  [[ -x "$1" ]] && echo "$KACHE_BIN_SHA256  $1" | sha256sum --check --status
+}
+if [[ -e "$kache" ]] && ! binary_is_pinned "$kache"; then
+  echo "::warning::the installed Kache $KACHE_VERSION does not match its pinned digest; reinstalling it"
+  rm -f -- "$kache"
+fi
+if [[ ! -e "$kache" ]]; then
   mkdir -p "$root/bin/$KACHE_VERSION"
   staging="$(mktemp -d "$root/install.XXXXXX")"
   trap 'rm -rf -- "$staging"' EXIT
@@ -54,6 +77,8 @@ if [[ ! -x "$kache" ]]; then
     echo "RUSTC_WRAPPER=" >> "$github_env"
     exit 0
   fi
+  binary_is_pinned "$unpacked" \
+    || { echo "::error::the Kache $KACHE_VERSION binary does not match its pinned digest"; exit 1; }
   # A rename is atomic, so a concurrent job on another runner sees either no
   # binary or a complete one.
   install -m 0755 "$unpacked" "$kache.$$"

@@ -1315,7 +1315,7 @@ jobs:
       # replacing one leaves the store untouched, and that the store verifies
       # clean (#9435).
       - name: Prove the shared Kache store cannot be corrupted
-        if: env.HARN_RUNNER_TIER == 'self-hosted'
+        if: env.HARN_RUNNER_TIER == 'self-hosted' && endsWith(env.RUSTC_WRAPPER, '/kache')
         env:
           KACHE_INTEGRITY_SEED_BIN: ${{ env.RUSTC_WRAPPER }}
         run: bash scripts/tests/kache_store_integrity_test.sh

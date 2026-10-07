@@ -29,7 +29,9 @@ if [[ -n "${KACHE_INTEGRITY_SEED_BIN:-}" && "$(basename -- "$KACHE_INTEGRITY_SEE
   mkdir -p "$tmp/root/bin/v1.0.0"
   cp "$KACHE_INTEGRITY_SEED_BIN" "$tmp/root/bin/v1.0.0/kache"
 fi
-HARN_KACHE_ROOT="$tmp/root" "$repo_root/scripts/ci/use_kache.sh" "$tmp/env" > /dev/null
+# The proof builds one small crate, so the host's disk floor does not apply.
+HARN_KACHE_MIN_FREE_GIB=1 HARN_KACHE_ROOT="$tmp/root" \
+  "$repo_root/scripts/ci/use_kache.sh" "$tmp/env" > /dev/null
 set -a
 # shellcheck disable=SC1091
 . "$tmp/env"
