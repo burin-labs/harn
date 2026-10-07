@@ -370,3 +370,116 @@ async fn pending_cancel_retry_after_vm_reuse_retains_original_owner() {
 async fn pending_cancel_drop_after_vm_reuse_retains_original_owner() {
     pending_cleanup_after_vm_reuse(true).await;
 }
+
+#[tokio::test(flavor = "current_thread")]
+async fn active_child_cancel_after_same_runtime_vm_reuse_retains_original_owner() {
+    let root = tempfile::tempdir().unwrap();
+    let session = format!("active-reuse-{}", uuid::Uuid::now_v7());
+    let task_id = "task_active_reuse";
+    let public_id = "public-active-reuse";
+    let (old, old_count) = transport();
+    let (new, new_count) = transport();
+    let mut vm = crate::Vm::new();
+    crate::register_vm_stdlib(&mut vm);
+    let chunk = crate::compile_source("pipeline main() {}").unwrap();
+    old.scope(vm.execute(&chunk)).await.unwrap();
+    let original = vm.agent_cleanup_runtimes();
+    let original_key = original.key();
+    let cancelled = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let store = ScopedCleanup {
+        runtimes: original.clone(),
+        inner: async {
+            let mut options = crate::value::DictMap::new();
+            options.put_str("root", root.path().to_string_lossy().as_ref());
+            let prepared = crate::agent_session_journal::prepare(
+                &session,
+                &options,
+                format!("run-{session}"),
+                format!("turn-{session}"),
+            )
+            .await
+            .unwrap();
+            let store = prepared.state.store();
+            crate::agent_sessions::open_or_create_for_test(Some(session.clone()));
+            crate::agent_sessions::install_journal(&session, prepared.state).unwrap();
+            crate::agent_sessions::claim_journal_task(
+                &session,
+                &original_key.execution_id,
+                task_id.into(),
+                true,
+            )
+            .unwrap();
+            let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+            vm.spawned_tasks.insert(
+                public_id.into(),
+                crate::value::VmTaskHandle {
+                    handle: tokio::spawn(async move {
+                        started_tx.send(()).unwrap();
+                        std::future::pending().await
+                    }),
+                    cancel_token: cancelled.clone(),
+                    wait_task_id: task_id.into(),
+                },
+            );
+            started_rx
+                .await
+                .expect("the original child actually started");
+            assert!(crate::agent_sessions::has_journal(&session));
+            assert!(!vm.spawned_tasks[public_id].handle.is_finished());
+            store
+        },
+    }
+    .await;
+    let old_before = old_count.load(Ordering::SeqCst);
+    // Keep BOTH runtime handles unchanged: only top-level execution identity
+    // and transport advance, unlike the pending-write-failure controls.
+    new.scope(vm.execute(&chunk)).await.unwrap();
+    let current = vm.agent_cleanup_runtimes();
+    let current_key = current.key();
+    assert_ne!(current_key.execution_id, original_key.execution_id);
+    assert_eq!(current_key.session_runtime, original_key.session_runtime);
+    assert_eq!(current_key.host_runtime, original_key.host_runtime);
+    assert!(vm.spawned_tasks.contains_key(public_id));
+    assert!(!cancelled.load(Ordering::SeqCst));
+    let new_before = new_count.load(Ordering::SeqCst);
+    ScopedCleanup {
+        runtimes: current,
+        inner: async {
+            emit_event(&event(&session));
+            assert_eq!(new_count.load(Ordering::SeqCst), new_before + 1);
+            assert!(vm.cancel_task_for_test(public_id).await.unwrap());
+            assert!(cancelled.load(Ordering::SeqCst));
+            assert!(!vm.spawned_tasks.contains_key(public_id));
+            assert!(!vm.pending_task_cleanups.contains_key(public_id));
+            ScopedCleanup {
+                runtimes: original,
+                inner: async {
+                    assert!(
+                        !crate::agent_sessions::has_journal(&session),
+                        "cancelling an active old child after reuse must commit its original terminal"
+                    );
+                    assert!(!crate::agent_sessions::exists(&session));
+                    assert!(old_count.load(Ordering::SeqCst) > old_before);
+                },
+            }.await;
+            emit_event(&event(&session));
+            assert_eq!(new_count.load(Ordering::SeqCst), new_before + 2);
+        },
+    }.await;
+    let events = crate::stdlib::session_store::read_all_events(&store, &session)
+        .await
+        .unwrap();
+    let terminals: Vec<_> = events
+        .iter()
+        .filter(|event| event.payload["transcript_event"]["kind"] == "agent_run_terminal")
+        .collect();
+    assert_eq!(terminals.len(), 1);
+    assert_eq!(
+        terminals[0].payload["transcript_event"]["metadata"]["final_status"],
+        "cancelled"
+    );
+    assert_eq!(
+        terminals[0].payload["transcript_event"]["metadata"]["stop_reason"],
+        "cancelled"
+    );
+}
