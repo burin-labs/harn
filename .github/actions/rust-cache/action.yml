@@ -155,6 +155,25 @@ runs:
         fs.appendFileSync(process.env.GITHUB_OUTPUT, `shared-key=${key}\nrestore-prefix=${fallback}\npaths<<harn-cache-paths\n${paths.join('\n')}\nharn-cache-paths\nworkspaces<<harn-cache-workspaces\n${workspaces.join('\n')}\nharn-cache-workspaces\n`);
         NODE
 
+    # Kache, when asked for, is decided first: a job that compiles through it
+    # keeps no persistent target. Kache restores some outputs as read-only
+    # hardlinks into its store, and a later job without Kache (a disk-short
+    # host, a failed download) that shared the target could not overwrite
+    # them; a downstream job on the same hosts failed exactly that way on an
+    # unwritable `.rmeta`. Kache's store is its cross-run reuse, so it starts
+    # from the checkout's target each time.
+    - name: Compile through the host's Kache store
+      if: inputs.compiler-cache == 'kache'
+      shell: bash
+      env:
+        CACHE_PERSISTENT_TARGET: ${{ inputs.persistent-target }}
+      run: |
+        if [[ "$CACHE_PERSISTENT_TARGET" != true ]]; then
+          echo "::error::compiler-cache: kache needs a persistent target on an owned runner"
+          exit 1
+        fi
+        ./scripts/ci/use_kache.sh
+
     # An owned runner keeps its own target directory between its jobs, outside
     # the checkout that actions/checkout cleans. The Actions cache restore and
     # save below are skipped there: nothing this runner builds needs them, and
@@ -163,7 +182,7 @@ runs:
     # target, so unchanged workspace crates stay fresh across jobs.
     - name: Use the runner's persistent target directory
       id: persistent
-      if: inputs.persistent-target == 'true'
+      if: inputs.persistent-target == 'true' && !endsWith(env.RUSTC_WRAPPER, '/kache')
       shell: bash
       env:
         CACHE_SHARED_KEY: ${{ inputs.shared-key }}
@@ -197,18 +216,6 @@ runs:
         echo "CARGO_TARGET_DIR=$root/target" >> "$GITHUB_ENV"
         echo "HARN_PERSISTENT_TARGET: runner=$RUNNER_NAME key=$CACHE_SHARED_KEY state=$state used_mib=$((used_kib / 1024))"
         echo "::notice::HARN_PERSISTENT_TARGET runner=$RUNNER_NAME key=$CACHE_SHARED_KEY state=$state used_mib=$((used_kib / 1024))"
-
-    - name: Compile through the host's Kache store
-      if: inputs.compiler-cache == 'kache'
-      shell: bash
-      env:
-        CACHE_PERSISTENT_TARGET: ${{ inputs.persistent-target }}
-      run: |
-        if [[ "$CACHE_PERSISTENT_TARGET" != true ]]; then
-          echo "::error::compiler-cache: kache needs a persistent target on an owned runner"
-          exit 1
-        fi
-        ./scripts/ci/use_kache.sh
 
     - id: cache
       if: inputs.persistent-target != 'true'
