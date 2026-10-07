@@ -12,6 +12,41 @@ import { parse_release } from "std/semver"
 
 const CHANGELOG = "CHANGELOG.md"
 
+pub type ChangelogEntry = {version: string, never_published: bool}
+
+/** One parser owns version headings, including an explicitly retired candidate. */
+pub fn changelog_entry_heading(line: string) -> ChangelogEntry? {
+  if !line.starts_with("## v") {
+    return nil
+  }
+  const suffix = " (never published)"
+  const retired = line.ends_with(suffix)
+  const version = line.substring(4, retired ? line.len() - suffix.len() : line.len())
+  if parse_release(version) == nil {
+    return nil
+  }
+  return {version: version, never_published: retired}
+}
+
+pub fn changelog_entries(text: string) -> list<ChangelogEntry> {
+  let entries: list<ChangelogEntry> = []
+  for line in text.lines() {
+    const entry = changelog_entry_heading(line)
+    if entry != nil {
+      entries = entries + [entry]
+    }
+  }
+  return entries
+}
+
+/** Install and comparison bases exclude identities that never shipped. */
+pub fn published_changelog_versions(text: string) -> list<string> {
+  return changelog_entries(text).filter({ entry -> !entry.never_published }).map(
+    { entry -> entry.version },
+  )
+    .to_list()
+}
+
 /** Drop a leading `v` so `v0.8.71` and `0.8.71` are equivalent. */
 pub fn normalize_version(version: string) -> string {
   return if version.starts_with("v") {
@@ -39,16 +74,7 @@ pub fn escape_regex(text: string) -> string {
 
 /** Collect every canonical stable or prerelease heading version, top to bottom. */
 pub fn changelog_versions(changelog: string) -> list<string> {
-  let versions: list<string> = []
-  for line in changelog.lines() {
-    if line.starts_with("## v") {
-      const version = line.substring(4, line.len())
-      if parse_release(version) != nil {
-        versions = versions + [version]
-      }
-    }
-  }
-  return versions
+  return changelog_entries(changelog).map({ entry -> entry.version }).to_list()
 }
 
 /**
@@ -57,7 +83,10 @@ pub fn changelog_versions(changelog: string) -> list<string> {
  * Throws if no such section exists.
  */
 pub fn extract_section(changelog: string, version: string) -> string {
-  const caps = regex_captures(r"(?ms)^## v" + escape_regex(version) + r"\n(.*)", changelog)
+  const caps = regex_captures(
+    r"(?ms)^## v" + escape_regex(version) + r"(?: \(never published\))?\n(.*)",
+    changelog,
+  )
   if caps.count == 0 {
     throw "error: CHANGELOG.md does not contain a section for ## v${version}"
   }
@@ -152,7 +181,11 @@ pipeline main(harness: Harness, task: unknown) {
     return 1
   }
   const changelog = harness.fs.read_text(CHANGELOG)
-  const versions = changelog_versions(changelog)
+  const versions = published_changelog_versions(changelog)
+  if !versions.contains(version) {
+    harness.stdio.eprintln("error: cannot publish notes for an absent or never-published identity")
+    return 1
+  }
   const result = try {
     extract_section(changelog, version)
   } catch (e) {

@@ -2,6 +2,7 @@ import { help_requested, parse, parser } from "std/cli/argparse"
 import "std/schema"
 import * as semver from "std/semver"
 import { BumpKind } from "std/semver"
+import { retire_unpublished_section } from "./release_changelog_fold.harn"
 import { release_development_prerelease } from "./release_contract.harn"
 import { load_release_withdrawals, release_distribution_version } from "./release_withdrawals.harn"
 
@@ -410,6 +411,28 @@ pub fn apply_development_metadata(fs: HarnessFs, root: string) -> ReleaseMetadat
   return plan
 }
 
+pub fn apply_unpublished_retirement(
+  fs: HarnessFs,
+  root: string,
+  retired: string,
+  published: string,
+) -> ReleaseMetadataPlan {
+  const current = current_version(fs, root)
+  const base = stable_release_version(published)
+  if current != stable_release_version(retired) {
+    throw "retirement source does not match the workspace identity"
+  }
+  const changelog = path_join(root, "CHANGELOG.md")
+  const carried = retire_unpublished_section(fs.read_text(changelog), current, base)
+  const plan = apply_development_metadata(fs, root)
+  fs.write_text(changelog, carried)
+  // The retired candidate has no installable archives. Keep the last real
+  // release as the editor/embedding install base until the next publication.
+  rewrite_agent_manifest(fs, root, distribution_version(fs, root, current), base)
+  rewrite_embedding_tags(fs, root, base)
+  return plan
+}
+
 pub fn apply_release_metadata(
   fs: HarnessFs,
   root: string,
@@ -566,6 +589,13 @@ fn main(harness: Harness) -> int {
       }
     } else if action == "develop" {
       apply_development_metadata(harness.fs, root)
+    } else if action == "retire" {
+      apply_unpublished_retirement(
+        harness.fs,
+        root,
+        to_string(parsed.options?.version ?? ""),
+        to_string(parsed.options?.released ?? ""),
+      )
     } else if action == "verify-changelog" {
       const version = to_string(parsed.options?.version ?? "")
       verify_changelog_top(harness.fs.read_text(path_join(root, "CHANGELOG.md")), version)

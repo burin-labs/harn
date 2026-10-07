@@ -227,4 +227,17 @@ plan recovery_prerelease RECOVERY=true
 [[ "$(cat "$tmp/recovery_prerelease.status")" != 0 ]] \
   || fail "manual recovery accepted a prerelease run"
 
+# Main has retired the older unpublished source. Recovery must not resurrect
+# it, but an actually published tag still takes the existing follow-through
+# path before the superseded-source guard.
+commit_version 0.10.143-dev "Retire unpublished v0.10.142"
+plan retired_unpublished RECOVERY=true "SOURCE_DIRECTORY=$tmp/old-source" "HEAD_SHA=$head_sha"
+[[ "$(cat "$tmp/retired_unpublished.status")" != 0 &&
+   "$(output retired_unpublished promote)" != true ]] || fail "retired unpublished source was resurrected"
+grep -Fq 'superseded by main' "$tmp/retired_unpublished.log" || fail 'retirement was not the refusal reason'
+plan published_after_cutover RECOVERY=true "SOURCE_DIRECTORY=$tmp/old-source" "HEAD_SHA=$head_sha" \
+  "FAKE_TAG_SHA=$head_sha" FAKE_RELEASE=1
+[[ "$(cat "$tmp/published_after_cutover.status")" == 0 &&
+   "$(output published_after_cutover promote)" == false ]] || fail 'published source lost its existing completion path'
+
 echo "release_promotion_plan_test: ok"
