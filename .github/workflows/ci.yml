@@ -129,11 +129,6 @@ jobs:
       contents: read
       pull-requests: read
     outputs:
-      merge_group_proven: ${{ steps.merge_group_proof.outputs.proven }}
-      # The merge-group run that proved this push, empty when unproven. Its
-      # artifacts stand in for this run's on the main-only lanes.
-      merge_group_run_id: ${{ steps.merge_group_proof.outputs.run_id }}
-      merge_group_run_attempt: ${{ steps.merge_group_proof.outputs.run_attempt }}
       rust: ${{ steps.force.outputs.rust }}
       # Whether the Rust surface changed, independent of whether the heavy
       # lanes rebuild it. Differs from `rust` only on a proven main push, where
@@ -149,22 +144,9 @@ jobs:
       release_contract: ${{ steps.surface_filter.outputs.release_contract }}
       release_residual: ${{ steps.surface_filter.outputs.release_residual }}
       release_metadata_only: ${{ steps.release_metadata.outputs.release_metadata_only }}
-      sprint_fast_ci: ${{ steps.sprint_fast_ci.outputs.active }}
+      post_merge_tier: ${{ steps.post_merge_tier.outputs.active }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      # The sprint fast-CI switch (#7628). The one place that decides it: the
-      # five slow proof families and ci-status read this output, never the
-      # variable. It applies only to pull requests and merge groups, so a push
-      # to main always runs and requires the full slow set. Deleting the
-      # variable, or any value other than exactly `true`, restores full
-      # pre-merge proof without a code change.
-      - name: Decide the sprint fast-CI mode
-        id: sprint_fast_ci
-        shell: bash
-        env:
-          SPRINT_FAST_CI: ${{ vars.SPRINT_FAST_CI }}
-          EVENT_NAME: ${{ github.event_name }}
-        run: bash scripts/ci/sprint_fast_ci.sh
       - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
         id: filter
         with:
@@ -264,6 +246,30 @@ jobs:
               - 'spec/**'
               - 'tree-sitter-harn/**'
               - 'website/**'
+            # Paths that change what every surface proves, so a pull request or
+            # merge group touching one runs the post-merge tier before it
+            # lands: CI wiring, the lockfile and toolchain pin, the protocol
+            # artifacts, and the safety domain (sandbox, secrets, egress,
+            # permissions, consent, credentials).
+            full_suite:
+              - '.github/**'
+              - 'scripts/ci/**'
+              - 'Cargo.lock'
+              - 'rust-toolchain.toml'
+              - 'spec/protocol-artifacts/**'
+              - 'crates/harn-cli/src/commands/dump_protocol_artifacts/**'
+              - 'crates/harn-secret-catalog/**'
+              - 'crates/harn-vm/src/secrets/**'
+              - 'crates/harn-vm/src/egress/**'
+              - 'crates/harn-serve/src/permissions/**'
+              - 'crates/harn-hostlib/schemas/secret_store/**'
+              - 'crates/**/*sandbox*/**'
+              - 'crates/**/*sandbox*'
+              - 'crates/**/*secret*'
+              - 'crates/**/*egress*'
+              - 'crates/**/*permission*'
+              - 'crates/**/*consent*'
+              - 'crates/**/*credential*'
             package_audit:
               - '.github/workflows/ci.yml'
               - 'Cargo.lock'
@@ -278,6 +284,18 @@ jobs:
               - 'scripts/verify_crate_package_includes.harn'
               - 'scripts/verify_crate_packages.sh'
               - 'scripts/verify_crate_packages_plan.harn'
+      # The post-merge tier (harn#9495). The one place that decides it: the
+      # slow proof families and ci-status read this output. Pull requests and
+      # merge groups leave those families to the push to main, which always
+      # runs and requires them, unless the change selects the full suite (the
+      # `full_suite` paths below, or `CI-Scope: full` in the pull request body).
+      - name: Decide the post-merge tier
+        id: post_merge_tier
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          FULL_SUITE_PATHS: ${{ steps.surface_filter.outputs.full_suite }}
+        run: bash scripts/ci/post_merge_tier.sh
       - name: Detect release metadata-only PR
         id: release_metadata
         shell: bash
@@ -374,44 +392,6 @@ jobs:
 
           echo "docs_only_tail=$docs_only_tail" >> "$GITHUB_OUTPUT"
           echo "merge-group docs-only tail: $docs_only_tail"
-      - name: Detect exact-SHA merge-group proof
-        id: merge_group_proof
-        shell: bash
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          GITHUB_TOKEN: ${{ github.token }}
-          REPOSITORY: ${{ github.repository }}
-          COMMIT_SHA: ${{ github.sha }}
-        run: |
-          set -euo pipefail
-          proven=false
-          proof_run="$RUNNER_TEMP/merge-group-proof-run.txt"
-          : > "$proof_run"
-          if [[ "$EVENT_NAME" == "push" ]]; then
-            # Package verification no longer holds the merge verdict, so it can
-            # still be running in the merge group when this push starts. Its
-            # check lands on this same commit either way.
-            if ! proven="$(./scripts/ci_merge_group_proof.sh "$REPOSITORY" ci.yml "$COMMIT_SHA" \
-              --allow-pending-job "Verify publishable crates" \
-              --run-output "$proof_run")"; then
-              echo "::notice::merge-group proof helper failed; keeping the full push CI graph enabled"
-              proven=false
-            fi
-          fi
-          # A proof that cannot name its run cannot lend its artifacts.
-          if [[ "$proven" == "true" ]] \
-            && ! grep -Eq '^run_id=[0-9]+$' "$proof_run"; then
-            echo "::notice::merge-group proof named no run; keeping the full push CI graph enabled"
-            proven=false
-          fi
-          if [[ "$proven" != "true" ]]; then
-            proven=false
-          else
-            cat "$proof_run" >> "$GITHUB_OUTPUT"
-            echo "proving merge-group run: $(paste -sd' ' "$proof_run")"
-          fi
-          echo "proven=$proven" >> "$GITHUB_OUTPUT"
-          echo "exact-SHA merge-group proof: $proven"
       - name: Resolve heavy-lane gate
         id: force
         # `pull_request`: honour the paths filter — a docs/website/markdown-only
@@ -423,34 +403,19 @@ jobs:
         #   catches cross-PR interaction regressions. The only skip is a
         #   stacked docs-only tail whose incremental diff from the previous
         #   queue head is provably docs/website/Markdown-only.
-        # `push`: skip the heavy Rust lanes when this exact SHA already passed
-        #   this workflow on merge_group. Otherwise only release metadata-only
-        #   bookkeeping skips; all uncertainty retains the full backstop.
+        # `push`: run the full suite on every merge (harn#9495); a merge
+        #   group no longer runs the post-merge tier, so its success cannot
+        #   excuse a push. Only release metadata-only bookkeeping skips.
         env:
           FORCE_MERGE_GROUP: ${{ github.event_name == 'merge_group' }}
           F_RUST: ${{ steps.filter.outputs.rust }}
           F_PACKAGE_AUDIT: ${{ steps.surface_filter.outputs.package_audit }}
-          MERGE_GROUP_PROVEN: ${{ steps.merge_group_proof.outputs.proven }}
           RELEASE_METADATA_ONLY: ${{ steps.release_metadata.outputs.release_metadata_only }}
           MERGE_GROUP_DOCS_ONLY_TAIL: ${{ steps.merge_group_tail.outputs.docs_only_tail }}
         #
-        # `rust_paths` equals `rust` everywhere except a proven push, where it
-        # keeps the paths filter's answer: repository policies and main's
-        # binary-size record cannot be proven by a merge group (neither runs
-        # there), so they still run, on the merge group's artifacts.
+        # `rust_paths` equals `rust`; consumers that read it keep its name.
         run: |
           set -euo pipefail
-          if [ "${MERGE_GROUP_PROVEN}" = "true" ]; then
-            echo "::notice::changes: exact ${GITHUB_SHA} already passed this workflow on merge_group — skipping duplicate heavy push lanes"
-            echo "rust=false" >> "$GITHUB_OUTPUT"
-            echo "package_audit=false" >> "$GITHUB_OUTPUT"
-            if [ "${RELEASE_METADATA_ONLY}" = "true" ]; then
-              echo "rust_paths=false" >> "$GITHUB_OUTPUT"
-            else
-              echo "rust_paths=${F_RUST}" >> "$GITHUB_OUTPUT"
-            fi
-            exit 0
-          fi
           if [ "${FORCE_MERGE_GROUP}" = "true" ] && [ "${MERGE_GROUP_DOCS_ONLY_TAIL}" = "true" ]; then
             echo "::notice::changes: ${GITHUB_EVENT_NAME} — skipping heavy Linux Rust lanes for a proven docs-only merge-queue tail"
             rust=false
@@ -479,7 +444,6 @@ jobs:
     # Runs `make fmt-check`; no compilation and no cache benefit, so the
     # smallest hosted runner is the right home.
     needs: changes
-    if: needs.changes.outputs.merge_group_proven != 'true'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -802,11 +766,10 @@ jobs:
       # `make check-docs` was this job's long pole (about 120s of a 160s docs
       # lane on a fast host, roughly three times that here) and repeats what
       # "Check Harn documentation" proves on the same commit and binary in this
-      # run; ci-status requires both. In sprint mode that job is skipped, so
-      # the rehearsal runs the contracts itself. A release never passes this.
+      # run; ci-status requires both. A release never passes this.
       - name: Run the release residual audit
         env:
-          DOCS_CONTRACTS_PROVEN_BY: ${{ needs.changes.outputs.sprint_fast_ci != 'true' && 'Check Harn documentation' || '' }}
+          DOCS_CONTRACTS_PROVEN_BY: Check Harn documentation
         run: |
           args=(--residual-only)
           if [ -n "$DOCS_CONTRACTS_PROVEN_BY" ]; then
@@ -1414,12 +1377,6 @@ jobs:
   # immutable v4 artifact is already available. This single free-hosted barrier
   # turns CLI visibility into the dependency contract and lets Harn consumers
   # overlap both the security build and the producer's test phase.
-  #
-  # On a main push the merge group already proved for this exact commit, no
-  # producer runs here. The barrier then waits on the merge group's run instead
-  # and names it in `source_run_id`, so the main-only lanes download the CLI
-  # that run built. Its manifest binds the same commit, toolchain, and build
-  # flags, which `restore-cli` checks against this checkout.
   rust-artifacts-ready:
     name: Wait for shared Harn binary
     needs: [changes]
@@ -1429,9 +1386,6 @@ jobs:
     permissions:
       actions: read
       contents: read
-    outputs:
-      # Empty means this run. Otherwise the proven merge-group run.
-      source_run_id: ${{ needs.changes.outputs.merge_group_proven == 'true' && needs.changes.outputs.merge_group_run_id || '' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -1439,8 +1393,6 @@ jobs:
       - name: Wait for shared Harn binary
         env:
           GH_TOKEN: ${{ github.token }}
-          HARN_EXT_ARTIFACT_RUN_ID: ${{ needs.changes.outputs.merge_group_proven == 'true' && needs.changes.outputs.merge_group_run_id || '' }}
-          HARN_EXT_ARTIFACT_RUN_ATTEMPT: ${{ needs.changes.outputs.merge_group_proven == 'true' && needs.changes.outputs.merge_group_run_attempt || '' }}
         run: >-
           ./scripts/ci/wait_for_run_artifacts.sh
           harn-cli.tar.zst
@@ -1456,7 +1408,7 @@ jobs:
   security-tests-ready:
     name: Wait for Linux security tests
     needs: [changes]
-    if: needs.changes.outputs.rust == 'true' && needs.changes.outputs.sprint_fast_ci != 'true'
+    if: needs.changes.outputs.rust == 'true' && needs.changes.outputs.post_merge_tier != 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 50
     permissions:
@@ -1688,8 +1640,10 @@ jobs:
     name: ${{ matrix.name }}
     # Start CLI-independent setup immediately. Each worker waits for and
     # verifies the exact-commit binary only at the last responsible moment.
+    # Merge tier: conformance and the Harn audits are how a runtime or stdlib
+    # change proves itself before it lands (harn#9495).
     needs: [changes]
-    if: needs.changes.outputs.rust == 'true' && needs.changes.outputs.sprint_fast_ci != 'true'
+    if: needs.changes.outputs.rust == 'true'
     runs-on: ubuntu-24.04
     # The immutable CLI producer is shared, and the Harn proof work after it is
     # spread over free hosted workers. Everything here starts only once the CLI
@@ -1956,7 +1910,6 @@ jobs:
           name: harn-cli.tar.zst
           path: ${{ runner.temp }}
           skip-decompress: true
-          run-id: ${{ needs.rust-artifacts-ready.outputs.source_run_id }}
 
       # Verifies the bundle's checksums and manifest against this exact commit
       # before anything measures it. Exports HARN_BIN.
@@ -2345,7 +2298,6 @@ jobs:
           name: harn-cli.tar.zst
           path: ${{ runner.temp }}
           skip-decompress: true
-          run-id: ${{ needs.rust-artifacts-ready.outputs.source_run_id }}
       - name: Verify portable Harn CLI
         run: >-
           ./scripts/ci/rust_artifact.sh restore-cli
@@ -2399,8 +2351,6 @@ jobs:
   # on each Rust-changing main push, and reports through `ci-status`. It needs
   # only `changes`, and nothing but `ci-status` waits on it, so it runs beside
   # the Linux lanes rather than in front of them. A successful run on the
-  # candidate is also what lets the identical main push reuse the merge-group
-  # proof (scripts/ci_merge_group_proof.sh requires it by name).
   # `cross check` performs no linking, so the windows-gnu target compiles the
   # C-dependency graph in the digest-pinned MinGW image and reaches workspace Rust —
   # `x86_64-pc-windows-msvc` cannot (it needs the Windows SDK headers). The
@@ -2414,7 +2364,7 @@ jobs:
     # surface is on, so a push already proven on merge_group may skip.
     if: >-
       (github.event_name == 'merge_group'
-      && needs.changes.outputs.sprint_fast_ci != 'true')
+      && needs.changes.outputs.post_merge_tier != 'true')
       || (github.event_name == 'push'
       && github.ref == 'refs/heads/main'
       && needs.changes.outputs.rust == 'true')
@@ -2573,7 +2523,7 @@ jobs:
     # execute the live-Keychain tests (that's the nightly's job).
     if: >-
       needs.macos-plan.outputs.run_macos == 'true'
-      && needs.changes.outputs.sprint_fast_ci != 'true'
+      && needs.changes.outputs.post_merge_tier != 'true'
     env:
       RUSTFLAGS: "-D warnings"
     steps:
@@ -2725,7 +2675,6 @@ jobs:
     if: >-
       needs.changes.outputs.docs_checks == 'true'
       && needs.changes.outputs.rust != 'true'
-      && needs.changes.outputs.merge_group_proven != 'true'
     # A check that parses a moving schema never runs a pinned parser.
     #
     # This lane installs the checksum-verified published release rather than
@@ -2742,14 +2691,6 @@ jobs:
     # the commit under test. The merge queue forces the heavy lanes on for
     # every merge, so `check-docs` still runs whole, with the right binary,
     # before anything lands.
-    #
-    # `merge_group_proven` has to be excluded explicitly. On a push whose exact
-    # SHA already passed on merge_group, the `force` step reports `rust=false`
-    # to suppress the duplicate heavy lanes; that output answers "should the
-    # heavy lanes run", not "did Rust change". Without this clause a source
-    # change reads as docs-only on that push and runs here against a released
-    # binary older than the commit — the substitution the note above rules out,
-    # on the one event where the exact-commit lane has already proven the tree.
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -2909,7 +2850,6 @@ jobs:
     steps:
       - name: Verify required CI jobs
         env:
-          MERGE_GROUP_PROVEN: ${{ needs.changes.outputs.merge_group_proven }}
           COLOCATED_TESTS_DISABLED: ${{ vars.HARN_CI_DISABLE_COLOCATED_TESTS }}
           RELEASE_CONTRACT_EXPECTED: ${{ github.event_name != 'pull_request' || needs.changes.outputs.release_contract == 'true' }}
           EVENT_NAME: ${{ github.event_name }}
@@ -2918,10 +2858,11 @@ jobs:
           # group already proved skips the heavy lanes but still owes the
           # main-only repository policies, which no merge group runs.
           RUST_PATHS_SELECTED: ${{ needs.changes.outputs.rust_paths }}
-          WINDOWS_CROSS_REQUIRED: ${{ (github.event_name == 'merge_group' && needs.changes.outputs.sprint_fast_ci != 'true') || (github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.changes.outputs.rust == 'true') }}
-          # Exactly the `changes` decision: true only on pull requests and
-          # merge groups with SPRINT_FAST_CI=true. Only a skip is excused by it.
-          SPRINT_FAST_CI_ACTIVE: ${{ needs.changes.outputs.sprint_fast_ci }}
+          WINDOWS_CROSS_REQUIRED: ${{ (github.event_name == 'merge_group' && needs.changes.outputs.post_merge_tier != 'true') || (github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.changes.outputs.rust == 'true') }}
+          # Exactly the `changes` decision: true only on a pull request or
+          # merge group whose change the post-merge tier may leave to main.
+          # Only a skip is excused by it.
+          POST_MERGE_TIER_ACTIVE: ${{ needs.changes.outputs.post_merge_tier }}
         run: |
           # A skipped job is valid only when its owning condition permits it.
           # Missing, pending, failed, and cancelled results always fail closed.
@@ -2946,15 +2887,10 @@ jobs:
             ["GitHub Actions hygiene"]="${{ needs.actions.result }}"
           )
 
-          merge_group_proven="$MERGE_GROUP_PROVEN"
-
-          # Format already ran for this exact workflow + SHA on merge_group
-          # when proof reuse is active. Otherwise it remains required.
           fmt_result="${{ needs.fmt.result }}"
           echo "Format check: $fmt_result"
-          if [ "$fmt_result" != "success" ] \
-            && { [ "$merge_group_proven" != "true" ] || [ "$fmt_result" != "skipped" ]; }; then
-            echo "::error::Format check failed or skipped without exact-SHA merge-group proof."
+          if [ "$fmt_result" != "success" ]; then
+            echo "::error::Format check failed or skipped."
             exit 1
           fi
 
@@ -2972,7 +2908,7 @@ jobs:
           echo "Public Rust API check: $public_api_result"
           if [ "$public_api_result" != "success" ]; then
             if [ "$public_api_result" = "skipped" ] \
-              && { [ "$package_audit_expected" != "true" ] || [ "$merge_group_proven" = "true" ]; }; then
+              && [ "$package_audit_expected" != "true" ]; then
               :
             else
               echo "::error::Public Rust API check failed or skipped when required."
@@ -3074,7 +3010,7 @@ jobs:
           echo "Linux security test inputs: $security_tests_ready_result"
           require_result "$security_tests_ready_result" \
             "Linux security test input handoff failed or skipped while Rust proof was required." \
-            test "${{ needs.changes.outputs.rust }}" != "true" -o "$SPRINT_FAST_CI_ACTIVE" = "true"
+            test "${{ needs.changes.outputs.rust }}" != "true" -o "$POST_MERGE_TIER_ACTIVE" = "true"
           # With co-location active the environment-neutral suite proof lives
           # inside the single persistent producer. A successful artifact build
           # without the explicit test marker must fail closed.
@@ -3102,13 +3038,13 @@ jobs:
           echo "Linux sandbox tests: $rust_security_result"
           require_result "$rust_security_result" \
             "Linux sandbox tests failed or skipped while Rust checks were required." \
-            test "${{ needs.changes.outputs.rust }}" != "true" -o "$SPRINT_FAST_CI_ACTIVE" = "true"
+            test "${{ needs.changes.outputs.rust }}" != "true" -o "$POST_MERGE_TIER_ACTIVE" = "true"
 
           harn_audit_result="${{ needs['harn-audit'].result }}"
           echo "Harn proof workers: $harn_audit_result"
           require_result "$harn_audit_result" \
             "Harn proof workers failed or skipped while Rust proof was required." \
-            test "${{ needs.changes.outputs.rust }}" != "true" -o "$SPRINT_FAST_CI_ACTIVE" = "true"
+            test "${{ needs.changes.outputs.rust }}" != "true"
 
           source_length_result="${{ needs['source-length-ratchet'].result }}"
           echo "Source file lengths: $source_length_result"
@@ -3173,13 +3109,8 @@ jobs:
           docs_checks_expected="${{ needs.changes.outputs.docs_checks }}"
           rust_expected="${{ needs.changes.outputs.rust }}"
           echo "Documentation checks: $docs_checks_result"
-          # Same predicate as the job's own `if`, including the
-          # `merge_group_proven` clause. `rust_expected` is false on a
-          # proof-reusing push even when the commit changed Rust, so without
-          # that clause this branch would demand a success from a job the same
-          # condition just told to skip.
-          if [ "$docs_checks_expected" = "true" ] && [ "$rust_expected" != "true" ] \
-            && [ "$merge_group_proven" != "true" ]; then
+          # Same predicate as the job's own `if`.
+          if [ "$docs_checks_expected" = "true" ] && [ "$rust_expected" != "true" ]; then
             if [ "$docs_checks_result" != "success" ]; then
               echo "::error::Documentation checks failed or skipped for a docs-only change."
               exit 1

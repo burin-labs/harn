@@ -397,17 +397,16 @@ pub const MAIN_ONLY_POLICY_SKIP_TEST = "test \"$" + "{EVENT_NAME}:$" + "{GIT_REF
  * On a proven push the artifact barrier names the merge-group run whose CLI
  * stands in for this run's, and every main-only consumer downloads from it.
  */
-pub const ARTIFACT_SOURCE_RUN_ID = "$" + "{{ needs.rust-artifacts-ready.outputs.source_run_id }}"
 
 /**
  * The Windows cross-compile check is the one Windows admission lane: every
  * merge-group candidate, plus Rust-changing main pushes.
  */
-/** Skips a slow proof family under the sprint fast-CI switch (#7628). */
-pub const SPRINT_FAST_CI_GUARD = "needs.changes.outputs.sprint_fast_ci != 'true'"
+/** Skips a slow proof family in the post-merge tier (harn#9495). */
+pub const POST_MERGE_TIER_GUARD = "needs.changes.outputs.post_merge_tier != 'true'"
 
 pub const WINDOWS_CROSS_CHECK_IF = "(github.event_name == 'merge_group' && "
-  + SPRINT_FAST_CI_GUARD
+  + POST_MERGE_TIER_GUARD
   + ") || (github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.changes.outputs.rust == 'true')"
 
 /** `ci-status` requires the cross-check exactly where the job itself must run. */
@@ -2180,7 +2179,9 @@ fn proven_push_main_only_errors(jobs: dict) -> list<string> {
     for step in jobs[consumer]?.steps ?? [] {
       if contains(to_string(step?.uses ?? ""), "download-artifact-with-retry") {
         downloads = downloads + 1
-        if trim(to_string(step?.with?.["run-id"] ?? "")) == ARTIFACT_SOURCE_RUN_ID {
+        // Every run builds its own CLI (harn#9495): a download that names
+        // another run would measure a binary this commit did not build.
+        if step?.with?.["run-id"] == nil {
           sourced = sourced + 1
         }
       }
@@ -2188,7 +2189,7 @@ fn proven_push_main_only_errors(jobs: dict) -> list<string> {
     if downloads != 1 || sourced != 1 {
       errors = errors
         + [
-          "ci.yml:${consumer} must download the shared CLI from the run the artifact barrier names",
+          "ci.yml:${consumer} must download the shared CLI this run built",
         ]
     }
   }

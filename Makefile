@@ -695,7 +695,6 @@ test-pr-gate-scripts:
 	./scripts/tests/tree_sitter_generated_test.sh
 	./scripts/tests/native_platform_ci_plan_test.sh
 	./scripts/tests/release_ref_matcher_test.sh
-	./scripts/tests/ci_merge_group_proof_test.sh
 	./scripts/tests/check_sdk_release_artifacts_test.sh
 	./scripts/tests/generate_sdk_clients_test.sh
 	./scripts/tests/changelog_fragment_check_test.sh
@@ -1579,8 +1578,8 @@ check-release-audit-contract:
 
 check-ci-cache-policy:
 	@echo "=== Checking CI cache ownership policy ==="
-	bash scripts/tests/ci_sprint_fast_ci_test.sh
-	@$(HARN_SCRIPT_TEST_ENV) $(HARN_CMD) test scripts/tests/ci_sprint_fast_ci_policy_test.harn
+	bash scripts/tests/ci_post_merge_tier_test.sh
+	@$(HARN_SCRIPT_TEST_ENV) $(HARN_CMD) test scripts/tests/ci_post_merge_tier_policy_test.harn
 	@$(HARN_CMD) run scripts/check_ci_cache_policy.harn
 
 # The `#[harn_builtin(exposure = "harness...")]` declarations in harn-vm are the
