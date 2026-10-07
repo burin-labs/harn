@@ -13,6 +13,105 @@ struct ScopedRuntime {
     refuse: bool,
 }
 
+struct BudgetRuntime {
+    observed: Arc<std::sync::Mutex<Vec<BudgetSpec>>>,
+}
+
+#[async_trait::async_trait(?Send)]
+impl AcpRuntimeConfigurator for BudgetRuntime {
+    async fn run_prompt(
+        &self,
+        context: AcpPromptExecutionContext<'_>,
+        execution: AcpPromptExecution<'_>,
+    ) -> Result<String, AcpPromptExecutionError> {
+        self.observed.lock().unwrap().push(context.budget.clone());
+        execution.await
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn actual_prompt_hook_reads_the_live_session_budget() {
+    let local = LocalSet::new();
+    local
+        .run_until(async {
+            let observed = Arc::new(std::sync::Mutex::new(Vec::new()));
+            let cwd = tempfile::tempdir().expect("isolated live-budget workspace");
+            let (tx, mut rx, server, session) = start_acp_channel_session_with_config(
+                AcpServerConfig::new(None)
+                    .with_budget(BudgetSpec {
+                        llm_cost_usd: Some(1.0),
+                        llm_tokens: Some(1000),
+                        pg_queries: Some(2),
+                        mcp_calls: Some(4),
+                        ..BudgetSpec::default()
+                    })
+                    .with_runtime_configurator(Arc::new(BudgetRuntime {
+                        observed: observed.clone(),
+                    })),
+                serde_json::json!(cwd.path()),
+            )
+            .await;
+            let inherited = super::served_agent_turn::prompt(
+                &tx,
+                &mut rx,
+                &session,
+                5,
+                "harness.stdio.println(\"inherited\")",
+            )
+            .await;
+            assert!(inherited.get("error").is_none(), "{inherited}");
+            for (id, mut params) in [
+                (
+                    10,
+                    serde_json::json!({"llm_cost_usd":0.25, "llm_tokens":null}),
+                ),
+                (20, serde_json::json!({"llm_cost_usd":0.75})),
+                (
+                    30,
+                    serde_json::json!({"llm_cost_usd":null, "llm_tokens":345}),
+                ),
+                (40, serde_json::json!({"llm_tokens":null})),
+            ] {
+                params["sessionId"] = serde_json::json!(session);
+                tx.send(serde_json::json!({
+                    "jsonrpc": "2.0", "method": "session/set_budget",
+                    "params": params
+                }))
+                .unwrap();
+                let response = super::served_agent_turn::prompt(
+                    &tx,
+                    &mut rx,
+                    &session,
+                    id,
+                    "harness.stdio.println(\"hello\")",
+                )
+                .await;
+                assert!(response.get("error").is_none(), "{response}");
+            }
+            let budgets = observed.lock().unwrap().clone();
+            assert_eq!(
+                budgets.len(),
+                5,
+                "the actual prompt hook must reach inherited, updated and unlimited budgets"
+            );
+            for (budget, (cost, tokens)) in budgets.iter().zip([
+                (Some(1.0), Some(1000)),
+                (Some(0.25), None),
+                (Some(0.75), None),
+                (None, Some(345)),
+                (None, None),
+            ]) {
+                assert_eq!(budget.llm_cost_usd, cost);
+                assert_eq!(budget.llm_tokens, tokens);
+                assert_eq!(budget.pg_queries, Some(2), "retain inherited query limits");
+                assert_eq!(budget.mcp_calls, Some(4), "retain inherited tool limits");
+            }
+            drop(tx);
+            server.await.unwrap();
+        })
+        .await;
+}
+
 #[async_trait::async_trait(?Send)]
 impl AcpRuntimeConfigurator for ScopedRuntime {
     async fn run_prompt(
