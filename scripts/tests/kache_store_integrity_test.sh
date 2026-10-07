@@ -84,5 +84,43 @@ for file in "${linked[@]}"; do
   echo "ok: $(basename -- "$file") ($mode) refuses in-place writes; replacing it left the store blob unchanged"
 done
 
+# A Kache job and a later non-Kache job on the same owned runner. Read-only
+# Kache outputs left in a persistent target that a later non-Kache build reuses
+# broke a downstream main run on the same hosts. The rust-cache action now
+# uses the runner's persistent target only when the job did not end up on
+# Kache; this replays that gate, job after job, against one runner directory.
+action="$repo_root/.github/actions/rust-cache/action.yml"
+gate_line="$(awk "/name: Use the runner's persistent target directory/ {getline; getline; print; exit}" "$action")"
+[[ "$gate_line" == *"!endsWith(env.RUSTC_WRAPPER, '/kache')"* ]] \
+  || fail "the persistent target step must exclude jobs compiling through Kache (got: $gate_line)"
+
+replay_jobs() { # gate(new|old) -> "files the Kache job left in the persistent target" "unwritable files after job 2"
+  local gate=$1 checkout="$tmp/checkout-$1" persistent="$tmp/runner-$1/harn-ci-target/workspace-tests/replay-w1/target"
+  rm -rf "$checkout"
+  cp -r "$tmp/first" "$checkout"
+  rm -rf "$checkout/target"
+  mkdir -p "$persistent"
+  # Job 1 compiles through Kache: the old gate gave it the persistent target.
+  local kache_target="$checkout/target"
+  [[ $gate == old ]] && kache_target="$persistent"
+  (cd "$checkout" && cargo build -q --target-dir "$kache_target") || fail "the Kache job ($gate gate) did not build"
+  local leaked
+  leaked="$(find "$persistent" -type f | wc -l | tr -d ' ')"
+  # Job 2, without Kache, after checkout's clean and a source change.
+  rm -rf "$checkout/target"
+  printf '\npub fn replay() {}\n' >> "$checkout/src/lib.rs"
+  (cd "$checkout" && RUSTC_WRAPPER='' cargo build -q --target-dir "$persistent") \
+    || fail "the non-Kache job after a Kache job failed ($gate gate)"
+  echo "$leaked $(find "$persistent" -type f ! -perm -u+w | wc -l | tr -d ' ')"
+}
+read -r new_leaked new_unwritable < <(replay_jobs new)
+read -r old_leaked _ < <(replay_jobs old)
+[[ "$new_leaked" == 0 ]] || fail "a Kache job wrote $new_leaked files into the persistent target"
+[[ "$new_unwritable" == 0 ]] || fail "the persistent target holds $new_unwritable unwritable files after a Kache job"
+# Negative control: the old gate let the same Kache job write into the target
+# the next job reuses, so this replay can see the leak.
+((old_leaked > 0)) || fail "the replay of the old gate saw no leak; the check above proves nothing"
+echo "ok: a non-Kache build after a Kache build on one runner succeeds; the Kache job left 0 files in the persistent target (the old gate left $old_leaked)"
+
 env_kache doctor --verify > "$tmp/doctor.log" 2>&1 || { cat "$tmp/doctor.log" >&2; fail "kache doctor --verify reports a damaged store"; }
 echo "kache store integrity: ok (${#linked[@]} linked outputs attacked; doctor --verify clean)"
