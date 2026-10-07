@@ -397,7 +397,6 @@ pub const MAIN_ONLY_POLICY_SKIP_TEST = "test \"$" + "{EVENT_NAME}:$" + "{GIT_REF
  * On a proven push the artifact barrier names the merge-group run whose CLI
  * stands in for this run's, and every main-only consumer downloads from it.
  */
-
 /**
  * The Windows cross-compile check is the one Windows admission lane: every
  * merge-group candidate, plus Rust-changing main pushes.
@@ -2188,9 +2187,7 @@ fn proven_push_main_only_errors(jobs: dict) -> list<string> {
     }
     if downloads != 1 || sourced != 1 {
       errors = errors
-        + [
-          "ci.yml:${consumer} must download the shared CLI this run built",
-        ]
+        + ["ci.yml:${consumer} must download the shared CLI this run built"]
     }
   }
   const status_step = step_by_name(jobs["ci-status"]?.steps ?? [], "Verify required CI jobs")

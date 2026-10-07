@@ -558,9 +558,7 @@ fn workflow() {
         steps: [
           {
             name: "Run the release residual audit",
-            env: {
-              DOCS_CONTRACTS_PROVEN_BY: "Check Harn documentation",
-            },
+            env: {DOCS_CONTRACTS_PROVEN_BY: "Check Harn documentation"},
             run:
               "./scripts/release_gate.sh audit --residual-only --docs-contracts-proven-by \"$DOCS_CONTRACTS_PROVEN_BY\"",
           },
@@ -2034,9 +2032,7 @@ pipeline test_residual_rehearsal_names_the_docs_slice_it_relies_on(
       ...valid.jobs,
       "release-residual-audit": {
         ...residual,
-        steps: [
-          {...residual.steps[0], env: {DOCS_CONTRACTS_PROVEN_BY: "Check Harn sources"}},
-        ],
+        steps: [{...residual.steps[0], env: {DOCS_CONTRACTS_PROVEN_BY: "Check Harn sources"}}],
       },
     },
   }
