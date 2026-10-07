@@ -313,6 +313,8 @@ pub struct Vm {
     pub(crate) trigger_registry: Arc<crate::triggers::registry::TriggerRegistryRuntime>,
     /// Agent transcripts and subscribers owned by this VM tree.
     pub(crate) session_runtime: Arc<crate::agent_sessions::AgentSessionRuntime>,
+    /// Retained across ambient unwind so Drop never captures a sibling prompt.
+    pub(crate) event_transport: crate::agent_events::AgentEventTransport,
     /// Structured spans owned by this VM tree.
     pub(crate) tracing_runtime: Arc<crate::tracing::TracingRuntime>,
     /// Durable identity shared by every VM in this execution tree.
@@ -578,6 +580,7 @@ impl VmBaseline {
             daemon_registry: crate::stdlib::agents_daemon::active_daemon_registry(),
             trigger_registry: crate::triggers::registry::active_trigger_registry(),
             session_runtime: crate::agent_sessions::active_session_runtime(),
+            event_transport: crate::agent_events::AgentEventTransport::default(),
             tracing_runtime: crate::tracing::active_tracing_runtime(),
             execution_id: crate::observability::execution_scope::mint_execution_scope(),
             owns_execution: true,
@@ -856,6 +859,7 @@ impl Vm {
             daemon_registry: crate::stdlib::agents_daemon::active_daemon_registry(),
             trigger_registry: crate::triggers::registry::active_trigger_registry(),
             session_runtime: crate::agent_sessions::active_session_runtime(),
+            event_transport: crate::agent_events::AgentEventTransport::default(),
             tracing_runtime: crate::tracing::active_tracing_runtime(),
             execution_id: crate::observability::execution_scope::mint_execution_scope(),
             owns_execution: true,
@@ -1145,6 +1149,7 @@ impl Vm {
             daemon_registry: self.daemon_registry.clone(),
             trigger_registry: self.trigger_registry.clone(),
             session_runtime: self.session_runtime.clone(),
+            event_transport: self.event_transport.clone(),
             tracing_runtime: self.tracing_runtime.clone(),
             execution_id: self.execution_id.clone(),
             owns_execution: false,

@@ -44,5 +44,6 @@ impl Vm {
             self.session_runtime.clone(),
             self.agent_host_session_runtime.clone(),
         )
+        .with_event_transport(self.event_transport.clone())
     }
 }

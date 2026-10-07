@@ -132,6 +132,7 @@ pub fn emit_event(event: &AgentEvent) {
     for sink in session_sink_snapshot(event.session_id()) {
         sink.handle_event(event);
     }
+    super::transport::emit(event);
     for sink in wildcard_sink_snapshot() {
         sink.handle_event(event);
     }

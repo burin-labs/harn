@@ -412,3 +412,7 @@ pub(super) fn progress_update(
 #[cfg(test)]
 #[path = "bridge/prompt_correlation_tests.rs"]
 mod prompt_correlation_tests;
+
+#[cfg(test)]
+#[path = "bridge/event_transport_tests.rs"]
+mod event_transport_tests;

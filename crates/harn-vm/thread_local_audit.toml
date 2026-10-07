@@ -44,6 +44,7 @@ captured = [
   "PROCESS_ADMISSION_CONTEXT",
   "CURRENT_HOST_BRIDGE",
   "CURRENT_LOOP_SINKS",
+  "CURRENT_AGENT_EVENT_TRANSPORT",
   "CURRENT_SESSION_STACK",
   "LLM_CONFIG_OVERRIDES_CONTEXT",
   "SCOPE",
@@ -228,6 +229,12 @@ plan = "task_local_or_explicit"
 [[thread_local]]
 path = "src/llm/agent_runtime.rs"
 statics = ["CURRENT_HOST_BRIDGE", "CURRENT_LOOP_SINKS"]
+category = "logical_task"
+plan = "task_local_or_explicit"
+
+[[thread_local]]
+path = "src/agent_events/transport.rs"
+statics = ["CURRENT_AGENT_EVENT_TRANSPORT"]
 category = "logical_task"
 plan = "task_local_or_explicit"
 

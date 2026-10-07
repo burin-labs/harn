@@ -130,6 +130,7 @@ pub(crate) struct AmbientExecutionScope {
     /// closure, including delegated agents. A child may layer its own sink on
     /// top without losing the outer capture when no narrower sink is present.
     loop_sinks: Vec<std::sync::Arc<dyn crate::agent_events::AgentEventSink>>,
+    event_transport: crate::agent_events::AgentEventTransport,
     /// The verdict execution-scope owner stack. Unlike `session_stack`, this is
     /// INHERITED by fan-out workers and inline subtasks: they are part of the
     /// SAME program run, so a `run_test` executed in a fan-out body must record
@@ -228,6 +229,7 @@ impl AmbientExecutionScope {
             process_admission: clone_via_swap(swap_process_admission_context),
             host_bridge: clone_via_swap(swap_current_host_bridge),
             loop_sinks: clone_via_swap(swap_current_loop_sinks),
+            event_transport: crate::agent_events::transport::current(),
             provider_overrides: clone_via_swap(swap_provider_overrides),
             runtime_provider_endpoint_overrides: clone_via_swap(
                 swap_runtime_provider_endpoint_overrides,
@@ -299,6 +301,7 @@ impl AmbientExecutionScope {
             process_admission: clone_via_swap(swap_process_admission_context),
             host_bridge: clone_via_swap(swap_current_host_bridge),
             loop_sinks: clone_via_swap(swap_current_loop_sinks),
+            event_transport: crate::agent_events::transport::current(),
             provider_overrides: clone_via_swap(swap_provider_overrides),
             runtime_provider_endpoint_overrides: clone_via_swap(
                 swap_runtime_provider_endpoint_overrides,
@@ -374,6 +377,10 @@ impl AmbientExecutionScope {
         swap_slot(&mut self.process_admission, swap_process_admission_context);
         swap_slot(&mut self.host_bridge, swap_current_host_bridge);
         swap_slot(&mut self.loop_sinks, swap_current_loop_sinks);
+        swap_slot(
+            &mut self.event_transport,
+            crate::agent_events::transport::swap,
+        );
         swap_slot(&mut self.provider_overrides, swap_provider_overrides);
         swap_slot(
             &mut self.runtime_provider_endpoint_overrides,
