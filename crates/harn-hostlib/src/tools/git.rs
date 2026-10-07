@@ -5,7 +5,7 @@
 //! surface free of shell injection and preserves the contract documented in
 //! `schemas/tools/git.{request,response}.json`.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use harn_vm::VmValue;
@@ -448,7 +448,7 @@ fn run_git_bytes(repo: &PathBuf, args: &[&str]) -> Result<Vec<u8>, HostlibError>
     git_output_bytes(output, args)
 }
 
-fn run_git_identity_bytes(repo: &PathBuf, args: &[&str]) -> Result<Vec<u8>, HostlibError> {
+fn run_git_identity_bytes(repo: &Path, args: &[&str]) -> Result<Vec<u8>, HostlibError> {
     let backend_error = |error: harn_vm::VmError| HostlibError::Backend {
         builtin: "hostlib_tools_git_repository_identity",
         message: error.to_string(),
@@ -479,7 +479,7 @@ fn run_git_identity_bytes(repo: &PathBuf, args: &[&str]) -> Result<Vec<u8>, Host
         "git",
         &argv,
         &harn_vm::process_sandbox::ProcessCommandConfig {
-            cwd: Some(repo.clone()),
+            cwd: Some(repo.to_path_buf()),
             env_remove,
             ..Default::default()
         },
