@@ -6,6 +6,9 @@ use crate::orchestration::{
 };
 use crate::tool_annotations::{SideEffectLevel, ToolAnnotations, ToolArgSchema, ToolKind};
 
+#[path = "authority_acquisition_tests.rs"]
+mod authority_acquisition;
+
 fn policy_with_path_annotation(tool: &str, kind: ToolKind) {
     let mut annotations = BTreeMap::new();
     annotations.insert(
@@ -494,6 +497,8 @@ fn explicit_sensitive_opt_out_allows_regular_evaluation() {
 #[test]
 fn external_declared_paths_are_denied_without_root() {
     let temp = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(temp.path().join("packages/app")).unwrap();
+    std::fs::write(temp.path().join("packages/app/host.harn"), "ok").unwrap();
     crate::stdlib::process::set_thread_execution_context(Some(
         crate::orchestration::RunExecutionRecord {
             cwd: Some(temp.path().to_string_lossy().into_owned()),
@@ -512,14 +517,35 @@ fn external_declared_paths_are_denied_without_root() {
         },
     ));
     policy_with_path_annotation("read_file", ToolKind::Read);
-    let decision = evaluate_tool_approval_policy(
-        &ToolApprovalPolicy::default(),
-        "read_file",
-        &serde_json::json!({"path": "/tmp/outside.txt"}),
-        None,
-    );
-    assert!(decision.is_deny());
-    assert!(decision.risk_labels.contains(&"external_path".to_string()));
+    for path in ["/tmp/outside.txt", "/packages/app/host.harn"] {
+        let decision = evaluate_tool_approval_policy(
+            &ToolApprovalPolicy::default(),
+            "read_file",
+            &serde_json::json!({"path": path}),
+            None,
+        );
+        assert!(decision.is_deny(), "{path}: {decision:?}");
+        assert!(decision.risk_labels.contains(&"external_path".to_string()));
+        assert_eq!(
+            decision.receipt["matched_rule"]["source"],
+            "default_external_path"
+        );
+    }
+    for path in [
+        "packages/app/host.harn".to_string(),
+        temp.path()
+            .join("packages/app/host.harn")
+            .to_string_lossy()
+            .into_owned(),
+    ] {
+        let decision = evaluate_tool_approval_policy(
+            &ToolApprovalPolicy::default(),
+            "read_file",
+            &serde_json::json!({"path": path}),
+            None,
+        );
+        assert!(decision.is_allow(), "{path}: {decision:?}");
+    }
     pop_execution_policy();
     crate::stdlib::process::set_thread_execution_context(None);
 }
@@ -655,6 +681,7 @@ fn host_request_normalizes_harn_context_and_emits_canonical_receipt() {
         })),
         approval_request: None,
         repeat_count: None,
+        ..Default::default()
     };
 
     let decision = policy.evaluate_request(&request);
@@ -683,6 +710,7 @@ fn host_request_normalizes_harn_context_and_emits_canonical_receipt() {
 
 #[test]
 fn host_request_normalizes_generic_argument_paths() {
+    let workspace = tempfile::tempdir().unwrap();
     let policy: ToolApprovalPolicy = serde_json::from_value(serde_json::json!({
         "allow_sensitive_paths": true,
         "rules": [{
@@ -695,6 +723,9 @@ fn host_request_normalizes_generic_argument_paths() {
     let request = ToolApprovalRequest {
         tool_name: "read".to_string(),
         arguments: serde_json::json!({"path": "src/main.rs"}),
+        workspace_boundary: Some(ToolApprovalWorkspaceBoundary {
+            root: workspace.path().to_str().unwrap().into(),
+        }),
         ..Default::default()
     };
 
@@ -708,6 +739,257 @@ fn host_request_normalizes_generic_argument_paths() {
             .as_ref()
             .and_then(|rule| rule.id.as_deref()),
         Some("ask-source-read")
+    );
+}
+
+#[test]
+fn host_request_declared_schema_owns_paths_and_tool_effects() {
+    let workspace = tempfile::tempdir().unwrap();
+    let annotations = ToolAnnotations {
+        kind: ToolKind::Edit,
+        side_effect_level: SideEffectLevel::WorkspaceWrite,
+        arg_schema: ToolArgSchema {
+            path_params: vec!["filename".into()],
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let request = ToolApprovalRequest::from_host_json(serde_json::json!({
+        "tool_name": "custom_edit",
+        "arguments": {"filename": "actual.txt", "target": {"presentation": "not a path"}},
+        "workspace_boundary": {"root": workspace.path().to_str().unwrap()},
+        "tool_annotations": annotations,
+        "policy_decision": {"context": {
+            "tool_kind": "read", "side_effect": "read_only",
+            "paths": [{"input": "remembered.txt", "workspace_path": "remembered.txt"}]
+        }}
+    }))
+    .unwrap();
+    let policy = ToolApprovalPolicy::from_host_json(serde_json::json!({
+        "allow_sensitive_paths": true,
+        "rules": [
+            {"id": "actual", "source": "user", "identity_match": "literal", "allow": {
+                "tool": "custom_edit", "tool_kind": "edit", "side_effect": "workspace_write", "path": "actual.txt"
+            }},
+            {"id": "ask", "source": "mode", "ask": {"tool": "custom_edit"}}
+        ]
+    })).unwrap();
+    let decision = policy.evaluate_request(&request);
+    assert!(decision.is_allow(), "{decision:?}");
+    assert_eq!(decision.receipt["matched_rule"]["id"], "actual");
+    assert_eq!(decision.receipt["context"]["tool_kind"], "edit");
+    let mut different = request;
+    different.arguments["filename"] = serde_json::json!("different.txt");
+    let refusal = policy.evaluate_request(&different);
+    assert!(refusal.is_ask(), "{refusal:?}");
+    assert_eq!(refusal.receipt["matched_rule"]["id"], "ask");
+}
+
+#[test]
+fn host_request_unannotated_paths_require_owned_workspace_authority() {
+    let workspace = tempfile::tempdir().unwrap();
+    let policy = ToolApprovalPolicy::from_host_json(serde_json::json!({
+        "allow_sensitive_paths": true,
+        "rules": [{"id": "user-read", "source": "user", "allow": {"tool": "custom_read"}}]
+    }))
+    .unwrap();
+    let inside = ToolApprovalRequest::from_host_json(serde_json::json!({
+        "tool_name": "custom_read",
+        "arguments": {"path": "inside.txt"},
+        "workspace_boundary": {"root": workspace.path()}
+    }))
+    .unwrap();
+    let allowed = policy.evaluate_request(&inside);
+    assert!(allowed.is_allow(), "{allowed:?}");
+    assert_eq!(allowed.receipt["matched_rule"]["id"], "user-read");
+
+    let mut external = inside;
+    external.arguments = serde_json::json!({"path": "../outside.txt"});
+    let refused = policy.evaluate_request(&external);
+    assert!(refused.is_deny(), "{refused:?}");
+
+    external.workspace_boundary = None;
+    let no_authority = policy.evaluate_request(&external);
+    assert!(no_authority.is_deny(), "{no_authority:?}");
+    assert_eq!(
+        no_authority.receipt["matched_rule"]["id"],
+        "invalid_host_request"
+    );
+    assert!(ToolApprovalRequest::from_host_json(serde_json::to_value(&external).unwrap()).is_err());
+
+    for (arguments, policy_decision) in [
+        (serde_json::json!({"paths": ["../outside.txt"]}), None),
+        (serde_json::json!({"path": null}), None),
+        (serde_json::json!({"path": {}}), None),
+        (serde_json::json!({"path": ""}), None),
+        (serde_json::json!({"paths": [123]}), None),
+        (serde_json::json!({"paths": []}), None),
+        (serde_json::json!({"command": "cat ../outside.txt"}), None),
+        (
+            serde_json::json!({"rawInput": {"path": "../outside.txt"}}),
+            None,
+        ),
+        (
+            serde_json::json!({}),
+            Some(serde_json::json!({"context": {"path": "../outside.txt"}})),
+        ),
+    ] {
+        let request = ToolApprovalRequest {
+            tool_name: "custom_read".into(),
+            arguments,
+            policy_decision,
+            ..Default::default()
+        };
+        let refused = policy.evaluate_request(&request);
+        assert!(refused.is_deny(), "{refused:?}");
+        assert_eq!(
+            refused.receipt["matched_rule"]["id"],
+            "invalid_host_request"
+        );
+    }
+
+    let no_paths = ToolApprovalRequest::from_host_json(serde_json::json!({
+        "tool_name": "custom_read", "arguments": {"url": "https://example.invalid"}
+    }))
+    .unwrap();
+    assert!(policy.evaluate_request(&no_paths).is_allow());
+}
+
+#[test]
+fn host_request_path_free_annotations_do_not_require_workspace_authority() {
+    let policy = ToolApprovalPolicy::from_host_json(serde_json::json!({
+        "rules": [{"id": "review-command", "ask": {
+            "tool": "annotated_command", "tool_kind": "execute", "side_effect": "process_exec"
+        }}]
+    }))
+    .unwrap();
+    let request_json = |arguments: JsonValue, path_params: JsonValue| {
+        serde_json::json!({
+            "tool_name": "annotated_command",
+            "arguments": arguments,
+            "tool_annotations": {
+                "kind": "execute", "side_effect_level": "process_exec",
+                "arg_schema": {"path_params": path_params}
+            },
+            "policy_decision": {"context": {"tool_kind": "read", "side_effect": "read_only"}}
+        })
+    };
+    for path_params in [serde_json::json!([]), serde_json::json!(["filename"])] {
+        let request = ToolApprovalRequest::from_host_json(request_json(
+            serde_json::json!({"command": "git status"}),
+            path_params,
+        ))
+        .expect("annotations without actual paths do not require workspace authority");
+        let decision = policy.evaluate_request(&request);
+        assert!(decision.is_ask(), "{decision:?}");
+        assert_eq!(decision.receipt["matched_rule"]["id"], "review-command");
+        assert_eq!(decision.receipt["context"]["tool_kind"], "execute");
+        assert_eq!(decision.receipt["context"]["side_effect"], "process_exec");
+    }
+
+    for value in [
+        request_json(
+            serde_json::json!({"filename": "outside.txt"}),
+            serde_json::json!(["filename"]),
+        ),
+        serde_json::json!({"tool_name": "annotated_command", "arguments": {"path": "outside.txt"}}),
+        request_json(
+            serde_json::json!({"command": "cat ../outside.txt"}),
+            serde_json::json!([]),
+        ),
+    ] {
+        let refusal = ToolApprovalRequest::from_host_json(value.clone()).unwrap_err();
+        assert!(refusal.contains("explicit workspace_boundary"), "{refusal}");
+        let direct: ToolApprovalRequest = serde_json::from_value(value).unwrap();
+        let decision = policy.evaluate_request(&direct);
+        assert!(decision.is_deny(), "{decision:?}");
+        assert_eq!(
+            decision.receipt["matched_rule"]["id"],
+            "invalid_host_request"
+        );
+    }
+    for value in [
+        serde_json::json!(null),
+        serde_json::json!({}),
+        serde_json::json!([1]),
+    ] {
+        let refusal = ToolApprovalRequest::from_host_json(request_json(
+            serde_json::json!({"filename": value}),
+            serde_json::json!(["filename"]),
+        ))
+        .unwrap_err();
+        assert!(
+            refusal.contains("workspace path argument 'filename'"),
+            "{refusal}"
+        );
+    }
+
+    let workspace = tempfile::tempdir().unwrap();
+    let mut sensitive = request_json(
+        serde_json::json!({"filename": ".env"}),
+        serde_json::json!(["filename"]),
+    );
+    sensitive["workspace_boundary"] = serde_json::json!({"root": workspace.path()});
+    let sensitive = ToolApprovalRequest::from_host_json(sensitive).unwrap();
+    let refusal = policy.evaluate_request(&sensitive);
+    assert!(refusal.is_deny(), "{refusal:?}");
+    assert!(refusal
+        .risk_labels
+        .iter()
+        .any(|label| label == "sensitive_path"));
+}
+
+#[test]
+fn host_request_rejects_invalid_explicit_workspace_inputs() {
+    let workspace = tempfile::tempdir().unwrap();
+    let valid = serde_json::json!({
+        "tool_name": "custom_read", "arguments": {"filename": "file.txt"},
+        "workspace_boundary": {"root": workspace.path().to_str().unwrap()},
+        "tool_annotations": {"arg_schema": {"path_params": ["filename"]}}
+    });
+    assert!(ToolApprovalRequest::from_host_json(valid.clone()).is_ok());
+    let mut no_root = valid.clone();
+    no_root
+        .as_object_mut()
+        .unwrap()
+        .remove("workspace_boundary");
+    assert!(ToolApprovalRequest::from_host_json(no_root).is_err());
+    let mut malformed_fallback = valid.clone();
+    malformed_fallback
+        .as_object_mut()
+        .unwrap()
+        .remove("tool_annotations");
+    malformed_fallback["arguments"] = serde_json::json!({"paths": [123]});
+    assert!(ToolApprovalRequest::from_host_json(malformed_fallback).is_err());
+    for root in [
+        serde_json::json!("relative"),
+        serde_json::json!(workspace.path().join("absent")),
+        serde_json::json!("/\0"),
+    ] {
+        let mut invalid = valid.clone();
+        invalid["workspace_boundary"]["root"] = root;
+        assert!(ToolApprovalRequest::from_host_json(invalid).is_err());
+    }
+    for value in [
+        serde_json::json!(null),
+        serde_json::json!({}),
+        serde_json::json!(["file.txt", 1]),
+        serde_json::json!(""),
+    ] {
+        let mut invalid = valid.clone();
+        invalid["arguments"]["filename"] = value;
+        assert!(ToolApprovalRequest::from_host_json(invalid).is_err());
+    }
+    let mut unknown = valid.clone();
+    unknown["tool_annotations"]["arg_schema"]["path_param"] = serde_json::json!(["other"]);
+    assert!(ToolApprovalRequest::from_host_json(unknown).is_err());
+    let mut direct = ToolApprovalRequest::from_host_json(valid).unwrap();
+    direct.workspace_boundary.as_mut().unwrap().root = "relative".into();
+    let refusal = ToolApprovalPolicy::default().evaluate_request(&direct);
+    assert!(refusal.is_deny());
+    assert_eq!(
+        refusal.receipt["matched_rule"]["id"],
+        "invalid_host_request"
     );
 }
 
@@ -846,11 +1128,22 @@ fn each_deciding_source_names_its_own_gate() {
     ));
     policy_with_path_annotation("read_file", ToolKind::Read);
 
+    // A real external directory keeps this independent of temporary-directory
+    // aliases such as macOS /tmp -> /private/tmp.
+    let external = tempfile::tempdir().unwrap();
+    let outside_path = external.path().join("outside.txt");
+    let reported_outside = external
+        .path()
+        .canonicalize()
+        .unwrap()
+        .join("outside.txt")
+        .to_string_lossy()
+        .replace('\\', "/");
     // The workspace path boundary: outside the workspace, no external root.
     let outside = evaluate_tool_approval_policy(
         &ToolApprovalPolicy::default(),
         "read_file",
-        &serde_json::json!({"path": "/tmp/outside.txt"}),
+        &serde_json::json!({"path": outside_path}),
         None,
     );
     assert!(outside.is_deny());
@@ -912,7 +1205,7 @@ fn each_deciding_source_names_its_own_gate() {
     // The subject is a typed value, not only prose. A configured deny that
     // did not refuse ON a path declares none, so "empty" keeps meaning
     // "no path was the reason" instead of "nobody filled this in".
-    assert_eq!(rendered[0].1, vec!["/tmp/outside.txt".to_string()]);
+    assert_eq!(rendered[0].1, vec![reported_outside.clone()]);
     // The sensitive-path guard reports the path it resolved and matched on,
     // which for a workspace-relative argument is the absolute form.
     assert_eq!(rendered[1].1.len(), 1, "{:?}", rendered[1].1);
@@ -936,7 +1229,7 @@ fn each_deciding_source_names_its_own_gate() {
         "{rendered:?}"
     );
     // The subject the boundary refused is named, not only described.
-    assert!(rendered[0].contains("/tmp/outside.txt"), "{rendered:?}");
+    assert!(rendered[0].contains(&reported_outside), "{rendered:?}");
 
     pop_execution_policy();
     crate::stdlib::process::set_thread_execution_context(None);
@@ -1009,7 +1302,16 @@ fn a_path_refusal_names_the_path_that_refused_not_every_path_declared() {
 
     // `from` is inside the workspace and unobjectionable; `to` is what the
     // boundary refuses.
-    let args = serde_json::json!({"from": "src/main.rs", "to": "/tmp/outside.txt"});
+    let external = tempfile::tempdir().unwrap();
+    let outside_path = external.path().join("outside.txt");
+    let reported_outside = external
+        .path()
+        .canonicalize()
+        .unwrap()
+        .join("outside.txt")
+        .to_string_lossy()
+        .replace('\\', "/");
+    let args = serde_json::json!({"from": "src/main.rs", "to": outside_path});
     let decision =
         evaluate_tool_approval_policy(&ToolApprovalPolicy::default(), "move_file", &args, None);
     assert!(decision.is_deny());
@@ -1023,7 +1325,7 @@ fn a_path_refusal_names_the_path_that_refused_not_every_path_declared() {
     let denial = decision.terminal_denial();
     assert_eq!(
         denial.denied_paths,
-        vec!["/tmp/outside.txt".to_string()],
+        vec![reported_outside],
         "the refusal must name the path that refused, not the declared set {declared:?}"
     );
 
@@ -1041,9 +1343,16 @@ fn with_workspace_and_external_root<T>(run: impl FnOnce(&str, &str) -> T) -> T {
             ..Default::default()
         },
     ));
-    let external_root = external.path().to_string_lossy().into_owned();
+    let external_root = external
+        .path()
+        .canonicalize()
+        .unwrap()
+        .to_string_lossy()
+        .into_owned();
     let inside = external
         .path()
+        .canonicalize()
+        .unwrap()
         .join("notes.txt")
         .to_string_lossy()
         .into_owned();

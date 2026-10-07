@@ -19,6 +19,14 @@ if [[ -z "${GH_TOKEN:-}" ]]; then
   echo "error: GH_TOKEN is required" >&2
   exit 1
 fi
+source "$script_root/scripts/lib/release_version.sh"
+source "$script_root/scripts/lib/release_consumer_verdict.sh"
+release_validate_retirement_request
+retired_version=""
+if [[ -n "${RETIRE_SOURCE_SHA:-}" ]]; then
+  retired_version="$(release_workspace_version < Cargo.toml)"
+  release_require_unpublished_retirement "$retired_version" "${RELEASE_PUBLISHED_VERSION:?published predecessor required}"
+fi
 
 # One expression reads a workspace version, so the local tree and the branch are
 # always compared the same way.
@@ -69,8 +77,18 @@ if [[ "$main_version" == "$actual" ]]; then
   fi
   exit 0
 fi
+if [[ -n "$retired_version" ]]; then
+  [[ "$main_version" == "$retired_version" ]] || {
+    echo "error: main changed the identity being retired; refusing a stale retirement" >&2
+    exit 1
+  }
+  # Preparation and credential minting may take minutes. Repeat all external
+  # observations at the mutation boundary, using the unmodified main identity.
+  release_require_unpublished_retirement "$main_version" "$RELEASE_PUBLISHED_VERSION"
+fi
 pr_url="$(gh pr list --state open --head "$branch" --json url --jq '.[0].url // empty')"
 if [[ -z "$pr_url" ]]; then
+  # shellcheck disable=SC2031 # retirement observation changes credentials only in its subshell
   HARN_BRANCH_COMMIT_TOKEN="$GH_TOKEN" \
     HARN_BRANCH_COMMIT_BRANCH="$branch" \
     HARN_BRANCH_COMMIT_BASE_OID="$(git rev-parse HEAD)" \
@@ -79,11 +97,18 @@ if [[ -z "$pr_url" ]]; then
       "$script_root/scripts/bump-driver/publish_branch_commit.harn"
   body_file="$(mktemp)"
   trap 'rm -f "$body_file"' EXIT
-  printf '%s\n' \
-    "Automated post-release cutover to the next patch development identity." \
-    "" \
-    "Stable release strings now remain exclusive to immutable release commits; mid-cycle builds self-report $actual." \
-    > "$body_file"
+  if [[ -n "$retired_version" ]]; then
+    printf 'Retire failed, never-published v%s and start %s. Carry its notes into the next release; keep %s as the install and comparison base.\n\nRetained producer %s certifies source %s. Promotion %s refused publication after consumer run %s reached failing required job %s. This change does not publish the retired identity.\n' \
+      "$retired_version" "$actual" "$RELEASE_PUBLISHED_VERSION" \
+      "$RETIRE_PRODUCER_RUN" "$RETIRE_SOURCE_SHA" "$RETIRE_PROMOTION_RUN" \
+      "$RETIRE_CONSUMER_RUN" "$RETIRE_FAILED_JOB" > "$body_file"
+  else
+    printf '%s\n' \
+      "Automated post-release cutover to the next patch development identity." \
+      "" \
+      "Stable release strings now remain exclusive to immutable release commits; mid-cycle builds self-report $actual." \
+      > "$body_file"
+  fi
   pr_url="$(gh pr create \
     --base main \
     --head "$branch" \

@@ -558,11 +558,7 @@ fn workflow() {
         steps: [
           {
             name: "Run the release residual audit",
-            env: {
-              DOCS_CONTRACTS_PROVEN_BY: gha_expression(
-                "needs.changes.outputs.sprint_fast_ci != 'true' && 'Check Harn documentation' || ''",
-              ),
-            },
+            env: {DOCS_CONTRACTS_PROVEN_BY: "Check Harn documentation"},
             run:
               "./scripts/release_gate.sh audit --residual-only --docs-contracts-proven-by \"$DOCS_CONTRACTS_PROVEN_BY\"",
           },
@@ -573,7 +569,7 @@ fn workflow() {
         "timeout-minutes": 50,
         needs: ["changes"],
         if:
-          "needs.changes.outputs.rust == 'true' && needs.changes.outputs.sprint_fast_ci != 'true'",
+          "needs.changes.outputs.rust == 'true' && needs.changes.outputs.post_merge_tier != 'true'",
         permissions: {actions: "read", contents: "read"},
         steps: [
           {
@@ -600,8 +596,7 @@ fn workflow() {
         "runs-on": "ubuntu-24.04",
         "timeout-minutes": 65,
         needs: ["changes"],
-        if:
-          "needs.changes.outputs.rust == 'true' && needs.changes.outputs.sprint_fast_ci != 'true'",
+        if: "needs.changes.outputs.rust == 'true'",
         strategy: {
           matrix: {
             include: [
@@ -2007,7 +2002,7 @@ pipeline test_residual_rehearsal_names_the_docs_slice_it_relies_on(
 ) {
   const valid = workflow()
   const message =
-    "ci.yml:release-residual-audit may skip check-docs only by naming the harn-audit docs slice outside sprint mode"
+    "ci.yml:release-residual-audit may skip check-docs only by naming the harn-audit docs slice"
   assert(!ci_linux_lane_policy_errors(valid).contains(message))
   // A renamed docs slice leaves the rehearsal pointing at a job that proves nothing.
   const audit = valid.jobs["harn-audit"]
@@ -2029,21 +2024,19 @@ pipeline test_residual_rehearsal_names_the_docs_slice_it_relies_on(
     },
   }
   assert(ci_linux_lane_policy_errors(renamed).contains(message))
-  // Leaning on the slice in sprint mode, where it is skipped, proves nothing.
+  // Naming any other job leans on a proof that is not the docs slice.
   const residual = valid.jobs["release-residual-audit"]
-  const always = {
+  const elsewhere = {
     ...valid,
     jobs: {
       ...valid.jobs,
       "release-residual-audit": {
         ...residual,
-        steps: [
-          {...residual.steps[0], env: {DOCS_CONTRACTS_PROVEN_BY: "Check Harn documentation"}},
-        ],
+        steps: [{...residual.steps[0], env: {DOCS_CONTRACTS_PROVEN_BY: "Check Harn sources"}}],
       },
     },
   }
-  assert(ci_linux_lane_policy_errors(always).contains(message))
+  assert(ci_linux_lane_policy_errors(elsewhere).contains(message))
 }
 
 @test

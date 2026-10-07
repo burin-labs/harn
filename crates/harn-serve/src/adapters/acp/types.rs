@@ -582,12 +582,48 @@ impl AcpSessionIdParams {
     }
 }
 
+/// A caller's message identity, distinct from the durable source event identity.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct AcpPromptCorrelation {
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_caller_message_id"
+    )]
+    #[schemars(with = "String")]
+    pub message_id: Option<String>,
+}
+
+fn deserialize_caller_message_id<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = String::deserialize(deserializer)?;
+    if value.trim().is_empty() {
+        return Err(serde::de::Error::custom(
+            "messageId must be a nonempty string",
+        ));
+    }
+    Ok(Some(value))
+}
+
+impl AcpPromptCorrelation {
+    /// The owning schema projected into host transport bindings.
+    pub fn schema() -> serde_json::Value {
+        serde_json::to_value(schemars::schema_for!(Self))
+            .expect("ACP prompt correlation schema serializes")
+    }
+}
+
 /// `session/prompt` params.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AcpSessionPromptParams {
     #[serde(rename = "sessionId")]
     pub session_id: String,
     pub prompt: Vec<AcpContentBlock>,
+    #[serde(flatten)]
+    pub correlation: AcpPromptCorrelation,
     #[serde(flatten, skip_serializing_if = "BTreeMap::is_empty")]
     pub extra: BTreeMap<String, serde_json::Value>,
 }
@@ -597,6 +633,7 @@ impl AcpSessionPromptParams {
         Self {
             session_id: session_id.into(),
             prompt,
+            correlation: AcpPromptCorrelation::default(),
             extra: BTreeMap::new(),
         }
     }

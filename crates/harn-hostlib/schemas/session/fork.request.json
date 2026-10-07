@@ -6,9 +6,19 @@
   "properties": {
     "root": { "type": "string", "minLength": 1 },
     "session_id": { "type": "string", "minLength": 1 },
-    "at_event_id": { "type": ["integer", "null"], "minimum": 1 },
+    "canonical_boundary": {
+      "type": "object",
+      "properties": {
+        "schema": { "type": "string" },
+        "session_id": { "type": "string" },
+        "event_id": { "type": ["integer", "null"], "format": "uint64", "minimum": 0 },
+        "record_hash": { "type": ["string", "null"] }
+      },
+      "required": ["schema", "session_id"],
+      "additionalProperties": false
+    },
     "child_session_id": { "type": ["string", "null"] }
   },
-  "required": ["root", "session_id", "at_event_id"],
+  "required": ["root", "session_id", "canonical_boundary"],
   "additionalProperties": false
 }

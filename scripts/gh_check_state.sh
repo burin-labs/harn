@@ -21,6 +21,14 @@ set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# A status read must never acquire compiler capacity. Keep binary selection
+# with the shared resolver, but classify unavailable execution as unobservable.
+if ! harn_bin="$("$script_dir/harn_bin.sh" --no-build --print)"; then
+  echo "gh_check_state: Harn unavailable; no check census was measured" >&2
+  exit 3
+fi
+export HARN_BIN="$harn_bin"
+
 if [[ -z "${GH_TOKEN:-}" ]]; then
   if ! GH_TOKEN="$(gh auth token 2>/dev/null)" || [[ -z "$GH_TOKEN" ]]; then
     echo "gh_check_state: no GH_TOKEN and \`gh auth token\` produced none" >&2
@@ -33,13 +41,19 @@ gh_config_dir="$(mktemp -d "${TMPDIR:-/tmp}/gh-check-state-cfg.XXXXXX")"
 trap 'rm -rf "$gh_config_dir"' EXIT
 export GH_CONFIG_DIR="$gh_config_dir"
 
-set +e
-"$script_dir/harn_bin.sh" run \
+run_args=(run \
   --allow-process-network \
   --sandbox-read-root "$gh_config_dir" \
-  --grant gh_token=env:GH_TOKEN,expose=GH_TOKEN,for=gh \
-  --grant gh_config=env:GH_CONFIG_DIR,expose=GH_CONFIG_DIR,for=gh \
-  "$script_dir/gh_check_state.harn" -- "$@"
+  --grant 'gh_token=env:GH_TOKEN,expose=GH_TOKEN,for=gh' \
+  --grant 'gh_config=env:GH_CONFIG_DIR,expose=GH_CONFIG_DIR,for=gh')
+# Preserve an explicitly supplied Go resolver setting for gh alone. Do not
+# inherit the parent environment into arbitrary sandboxed child processes.
+if [[ -n "${GODEBUG:-}" ]]; then
+  run_args+=(--grant 'gh_dns=env:GODEBUG,expose=GODEBUG,for=gh')
+fi
+
+set +e
+"$harn_bin" "${run_args[@]}" "$script_dir/gh_check_state.harn" -- "$@"
 status=$?
 set -e
 exit "$status"

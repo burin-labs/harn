@@ -850,7 +850,7 @@ fn security_ready_barrier_errors(workflow: dict) -> list<string> {
     || ready_step?.env?.HARN_EXT_ARTIFACT_WAIT_MAX_ATTEMPTS != nil
     || ready_needs != ["changes"]
     || trim(ready_job?.if ?? "")
-      != "needs.changes.outputs.rust == 'true' && " + SPRINT_FAST_CI_GUARD
+      != "needs.changes.outputs.rust == 'true' && " + POST_MERGE_TIER_GUARD
     || trim(ready_job?.permissions?.actions ?? "") != "read"
     || trim(ready_job?.permissions?.contents ?? "")
       != "read"
@@ -877,8 +877,7 @@ fn harn_audit_overlap_errors(workflow: dict) -> list<string> {
   const parser_command = trim(step_by_name(steps, "Check generated parser is current")?.run ?? "")
   const audit_command = trim(step_by_name(steps, "Run $" + "{{ matrix.step_name }}")?.run ?? "")
   if (audit?.needs ?? []) != ["changes"]
-    || trim(audit?.if ?? "")
-      != "needs.changes.outputs.rust == 'true' && " + SPRINT_FAST_CI_GUARD
+    || trim(audit?.if ?? "") != "needs.changes.outputs.rust == 'true'"
     || trim(to_string(audit?.["timeout-minutes"] ?? ""))
       != HARN_AUDIT_TIMEOUT_MINUTES
     || wait_index < 0
@@ -1286,8 +1285,8 @@ pub fn cache_refresh_workflow_errors(workflow: dict) -> list<string> {
  * sibling job that runs it on the same commit. That name is derived from the
  * `harn-audit` row running `--group=docs`, so renaming or removing that row
  * fails here instead of leaving the rehearsal pointing at a job that no longer
- * proves anything. Sprint mode skips that job, so the rehearsal must not lean
- * on it there.
+ * proves anything. That job is merge tier, so it runs wherever the rehearsal
+ * does.
  */
 fn residual_docs_proof_errors(workflow: dict) -> list<string> {
   let docs_job = ""
@@ -1300,8 +1299,7 @@ fn residual_docs_proof_errors(workflow: dict) -> list<string> {
     workflow?.jobs?.["release-residual-audit"]?.steps ?? [],
     "Run the release residual audit",
   )
-  const expected = "$"
-    + "{{ needs.changes.outputs.sprint_fast_ci != 'true' && '${docs_job}' || '' }}"
+  const expected = docs_job
   if docs_job == ""
     || trim(to_string(step?.env?.DOCS_CONTRACTS_PROVEN_BY ?? "")) != expected
     || !contains(
@@ -1309,7 +1307,7 @@ fn residual_docs_proof_errors(workflow: dict) -> list<string> {
       "--docs-contracts-proven-by \"$DOCS_CONTRACTS_PROVEN_BY\"",
     ) {
     return [
-      "ci.yml:release-residual-audit may skip check-docs only by naming the harn-audit docs slice outside sprint mode",
+      "ci.yml:release-residual-audit may skip check-docs only by naming the harn-audit docs slice",
     ]
   }
   return []

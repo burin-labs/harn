@@ -937,6 +937,14 @@ impl Vm {
     ) -> Result<VmValue, VmError> {
         let _observe = Self::observe_builtin_call(name);
 
+        crate::tool_registry::preparation_scope::enforce_contract(
+            name,
+            self.builtin_metadata
+                .get(name)
+                .map(|entry| entry.contract())
+                .as_ref(),
+        )?;
+
         // Sandbox check: deny builtins blocked by --deny/--allow flags.
         if self.denied_builtins.contains(name) {
             return Err(VmError::CategorizedError {

@@ -5,7 +5,7 @@ import "./harn_check_cache.harn"
 import "./linux_checks.harn"
 import "./native_checks.harn"
 import "./policy_core.harn"
-import "./sprint_fast_ci.harn"
+import "./post_merge_tier.harn"
 
 /**
  * The pin is load-bearing, not hygiene. sccache allows one server per user and
@@ -116,7 +116,7 @@ pub fn run_ci_cache_policy(harness: Harness) {
     ci_linux_lane_policy_errors(workflows["ci.yml"]),
     linux_confinement_errors(workflows, release_runner_policy),
     public_repository_runner_errors(workflows, release_runner_policy),
-    sprint_fast_ci_errors(workflows),
+    post_merge_tier_errors(workflows),
     cache_refresh_workflow_errors(workflows["rust-cache-refresh.yml"]),
     windows_shared_cache_errors(workflows["windows-nightly.yml"]),
     windows_native_admission_errors(policy, workflows["ci.yml"], workflows["windows-nightly.yml"]),

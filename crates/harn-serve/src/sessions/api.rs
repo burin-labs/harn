@@ -36,6 +36,7 @@ pub fn sessions_router(store: SharedSessionStore) -> Router {
         )
         .route("/sessions/{id}/view", get(session_view))
         .route("/sessions/{id}/timeline", get(session_timeline))
+        .route("/sessions/{id}/boundaries", get(session_history_boundaries))
         .route("/sessions/{id}/recap", get(session_recap))
         .route("/sessions/{id}/events", post(append_event).get(read_events))
         .route("/sessions/{id}/fork", post(fork_session))
@@ -70,7 +71,7 @@ struct AppendRequest {
 
 #[derive(Debug, Deserialize)]
 struct ForkRequest {
-    at_event_id: Option<EventId>,
+    canonical_boundary: harn_session_store::CanonicalSessionBoundary,
     #[serde(default)]
     child_session_id: Option<SessionId>,
 }
@@ -365,6 +366,21 @@ async fn session_timeline(
 }
 
 #[tracing::instrument(
+    name = "harn.session.history_boundaries",
+    skip_all,
+    fields(harn.session.id = %id),
+)]
+async fn session_history_boundaries(
+    State(state): State<SessionsState>,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
+    match state.store.history_boundaries(&id).await {
+        Ok(boundaries) => (StatusCode::OK, Json(json!(boundaries))).into_response(),
+        Err(error) => map_error(error).into_response(),
+    }
+}
+
+#[tracing::instrument(
     name = "harn.session.recap",
     skip_all,
     fields(harn.session.id = %id),
@@ -435,7 +451,7 @@ fn session_status_string(status: SessionStatus) -> String {
     skip_all,
     fields(
         harn.session.id = %id,
-        harn.session.fork_at_event_id = ?body.at_event_id,
+        harn.session.fork_at_event_id = ?body.canonical_boundary.event_id,
     ),
 )]
 async fn fork_session(
@@ -445,7 +461,7 @@ async fn fork_session(
 ) -> impl IntoResponse {
     match state
         .store
-        .fork(&id, body.at_event_id, body.child_session_id)
+        .fork(&id, body.canonical_boundary, body.child_session_id)
         .await
     {
         Ok(result) => (StatusCode::CREATED, Json(json!(result))).into_response(),

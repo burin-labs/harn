@@ -408,11 +408,7 @@ pub(crate) fn record_auxiliary_call_usage(
     if !super::mock::is_auxiliary_call_role(call_role) {
         return;
     }
-    let Some(session_id) = opts
-        .session_id
-        .as_deref()
-        .filter(|session_id| crate::agent_sessions::exists(session_id))
-    else {
+    let Some(session_id) = opts.session_id.as_deref() else {
         return;
     };
     let usage = result.usage();
@@ -420,6 +416,8 @@ pub(crate) fn record_auxiliary_call_usage(
         usage.accounting_status,
         crate::llm::usage::UsageAccountingStatus::Unknown
     );
+    // The session owner admits the append and refuses unknown IDs atomically.
+    // This best-effort observation needs no separate existence preflight.
     let _ = crate::agent_sessions::append_event(
         session_id,
         crate::llm::helpers::transcript_event(
