@@ -98,6 +98,36 @@ overflow-checks = true
 [profile.ci-cli.package.harn-cli]
 opt-level = 0
 
+# The protocol servers, policy engines and package tooling between harn-vm and
+# harn-cli are not on the proof lanes' hot path either, and they compile one
+# after another behind harn-vm: about 4 minutes of a warm CI build (#9435).
+[profile.ci-cli.package.harn-serve]
+opt-level = 0
+
+[profile.ci-cli.package.harn-lsp]
+opt-level = 0
+
+[profile.ci-cli.package.harn-dap]
+opt-level = 0
+
+[profile.ci-cli.package.harn-guard]
+opt-level = 0
+
+[profile.ci-cli.package.harn-rules]
+opt-level = 0
+
+[profile.ci-cli.package.harn-rules-hostlib]
+opt-level = 0
+
+[profile.ci-cli.package.harn-package]
+opt-level = 0
+
+[profile.ci-cli.package.harn-test-runner]
+opt-level = 0
+
+[profile.ci-cli.package.harn-skills]
+opt-level = 0
+
 # Default release profile mirrors the DISTRIBUTION build's shape: thin LTO +
 # 16 codegen units. This is the everyday / local "internal" release — fast to
 # build and identical in optimization to what ships (the release workflow only
