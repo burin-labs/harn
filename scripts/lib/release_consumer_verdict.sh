@@ -165,7 +165,8 @@ release_authenticated_failed_rehearsal() (
   jq -e --arg repository "$repository" --arg parent "$parent" '
     (.id | tostring) == $parent and .repository.full_name == $repository and
     .head_repository.full_name == $repository and
-    .path == ".github/workflows/promote-release.yml" and .event == "workflow_dispatch" and
+    .path == ".github/workflows/promote-release.yml" and
+    (.event == "workflow_dispatch" or .event == "workflow_run") and
     .head_branch == "main" and .status == "completed" and .conclusion == "failure" and
     (.run_attempt | type == "number" and . > 0)
   ' <<< "$run" >/dev/null

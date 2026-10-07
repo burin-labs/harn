@@ -83,9 +83,12 @@ case "${endpoint:?}" in
     id="${endpoint##*/}"; repo=example/harn; path=promote-release.yml; conclusion=failure
     if [[ "$id" == 9 ]]; then repo=example/consumer; path=harn-repin-rehearsal.yml; conclusion=cancelled; fi
     [[ "${MUTATION:-}" != live_parent || "$id" != 5 ]] || conclusion=null
-    jq -n --argjson id "$id" --arg repo "$repo" --arg path "$path" --arg conclusion "$conclusion" '
+    event=workflow_dispatch
+    [[ "${PARENT_EVENT:-}" == "" || "$id" != 5 ]] || event="$PARENT_EVENT"
+    [[ "${MUTATION:-}" != foreign_parent_event || "$id" != 5 ]] || event=pull_request_target
+    jq -n --argjson id "$id" --arg repo "$repo" --arg path "$path" --arg conclusion "$conclusion" --arg event "$event" '
       {id:$id,repository:{full_name:$repo},head_repository:{full_name:$repo},path:(".github/workflows/"+$path),
-       event:"workflow_dispatch",head_branch:"main",status:"completed",conclusion:$conclusion,run_attempt:1}' ;;
+       event:$event,head_branch:"main",status:"completed",conclusion:$conclusion,run_attempt:1}' ;;
   */actions/jobs/*/logs)
     job="${endpoint%/logs}"; job="${job##*/}"
     case "$job" in
@@ -152,9 +155,14 @@ grep -Fxq required=true "$GITHUB_OUTPUT"
 grep -Fxq version=1.2.5-dev "$GITHUB_OUTPUT"
 grep -Fxq reason=failed_unpublished_identity_retired "$GITHUB_OUTPUT"
 grep -Fxq published_tag=v1.2.3 "$GITHUB_OUTPUT"
+# The automatic promotion owner is the workflow_run trigger; its failed run
+# carries the same evidence as a manual dispatch.
+: > "$GITHUB_OUTPUT"
+PARENT_EVENT=workflow_run bash "$root/scripts/plan_development_bump.sh" > "$fixture/workflow-run.log"
+grep -Fxq reason=failed_unpublished_identity_retired "$GITHUB_OUTPUT"
 for mutation in tags_unreadable known_tag_absent tag_present conflicting_attempt release_unreadable empty_releases \
   release_present live_publisher partial_publishers empty_publishers manifest_mismatch duplicate_manifest \
-  source_version_mismatch producer_wrong_source live_parent wrong_job_run successful_authorizer wrong_pr_merge; do
+  source_version_mismatch producer_wrong_source live_parent wrong_job_run successful_authorizer wrong_pr_merge foreign_parent_event; do
   : > "$GITHUB_OUTPUT"
   if MUTATION="$mutation" bash "$root/scripts/plan_development_bump.sh" > "$fixture/$mutation.log" 2>&1; then
     echo "FAIL: accepted $mutation" >&2; exit 1
@@ -193,4 +201,4 @@ fi
 [[ -e "$fixture/prepared" && ! -e "$fixture/unexpected_mutation" ]] || {
   cat "$fixture/action-boundary.log" >&2; echo 'FAIL: did not reach safe action-boundary refusal' >&2; exit 1;
 }
-echo 'Unpublished retirement: exact failed candidate advances; 19 false authorities refuse; actual opener rechecks publication after preparation.'
+echo 'Unpublished retirement: exact failed candidate advances; 20 false authorities refuse; the automatic promotion trigger is accepted; actual opener rechecks publication after preparation.'
