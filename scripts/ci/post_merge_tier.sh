@@ -45,7 +45,11 @@ if [[ "$EVENT_NAME" == pull_request || "$EVENT_NAME" == merge_group ]]; then
         full=true
       fi
     else
-      body="$(jq -r 'if (.pull_request | type) == "object" and (.pull_request | has("body")) then (.pull_request.body // "") else error("Missing pull request scope") end' "$GITHUB_EVENT_PATH")"
+      number=$(jq -er '.number // .pull_request.number' "$GITHUB_EVENT_PATH")
+      [[ "$number" =~ ^[1-9][0-9]*$ ]] || exit 1
+      # A rerun retains its original event payload. Read the current body so
+      # adding scope and rerunning CI actually applies the declaration.
+      body=$(gh api "repos/${GITHUB_REPOSITORY:?}/pulls/$number" --jq '.body // ""')
     fi
     while IFS= read -r line; do
       if [[ "$line" =~ ^[[:space:]]*[Cc][Ii]-[Ss][Cc][Oo][Pp][Ee]:[[:space:]]*(.*)$ ]]; then

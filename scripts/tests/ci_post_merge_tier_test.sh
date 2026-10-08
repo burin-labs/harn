@@ -10,6 +10,7 @@ cat > "$scratch/bin/gh" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
 case "$*" in
+  *pulls/41*) jq -r '.pull_request.body // ""' "$GITHUB_EVENT_PATH" ;;
   *compare*)
     [[ "${EMPTY_COMMITS:-false}" != true ]] || exit 0
     echo 3333333333333333333333333333333333333333
@@ -26,7 +27,7 @@ export PATH="$scratch/bin:$PATH" GITHUB_REPOSITORY=fixture/repo
 check() {
   local event=$1 paths=$2 body=$3 expected=$4
   printf 'known_non_null=present\n' > "$scratch/output"
-  jq -n --arg body "$body" '{pull_request: {body: $body}, merge_group: {base_sha: "1111111111111111111111111111111111111111", head_sha: "2222222222222222222222222222222222222222"}}' > "$scratch/event.json"
+  jq -n --arg body "$body" '{number: 41, pull_request: {body: $body}, merge_group: {base_sha: "1111111111111111111111111111111111111111", head_sha: "2222222222222222222222222222222222222222"}}' > "$scratch/event.json"
   EVENT_NAME="$event" FULL_SUITE_PATHS="$paths" GITHUB_EVENT_PATH="$scratch/event.json" \
     GITHUB_OUTPUT="$scratch/output" bash "$owner" > "$scratch/stdout"
   local actual
@@ -56,7 +57,7 @@ for event in push schedule workflow_dispatch pull_request_target; do
   check "$event" false '' false
 done
 
-jq -n '{pull_request: {body: "CI-Scope: harn-audit"}}' > "$scratch/event.json"
+jq -n '{number: 41, pull_request: {body: "CI-Scope: harn-audit"}}' > "$scratch/event.json"
 if EVENT_NAME=pull_request FULL_SUITE_PATHS=false GITHUB_EVENT_PATH="$scratch/event.json" \
   GITHUB_OUTPUT="$scratch/output" bash "$owner" > "$scratch/stdout" 2>&1; then
   echo 'an unknown declared scope was accepted' >&2

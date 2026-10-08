@@ -651,7 +651,8 @@ Keep write-ups repository-agnostic, per
 
 Add `CI-Scope: full` on its own line in the pull request body to run every
 CI family before merge. The merge queue inherits this declaration from its
-pull requests. CI wiring, dependency manifests and lockfiles, toolchain pins,
+pull requests. After editing an existing pull request, rerun CI to apply the
+declaration. CI wiring, dependency manifests and lockfiles, toolchain pins,
 generated protocol artifacts, and safety-domain changes also select the full suite.
 
 Other pull requests and merge groups test their affected crates and reverse
