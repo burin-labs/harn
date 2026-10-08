@@ -367,6 +367,9 @@ jobs:
 
   publish:
     name: Publish release
+    permissions:
+      contents: read
+      actions: read
     needs: detect-drift
     runs-on: ubuntu-24.04
     if: github.event_name == 'workflow_dispatch' || needs.detect-drift.outputs.drift == 'true'
@@ -378,7 +381,9 @@ jobs:
 
       - name: Stage current release tools
         id: stage-release-tools
-        run: scripts/stage_release_tools.sh "$RUNNER_TEMP/release-tools"
+        run: |
+          scripts/stage_release_tools.sh "$RUNNER_TEMP/release-tools"
+          cp scripts/ci/require_full_suite.sh "$RUNNER_TEMP/require_full_suite.sh"
 
       - name: Select publish ref
         run: |
@@ -389,6 +394,14 @@ jobs:
             git switch --detach "$publish_ref"
           fi
           echo "Publishing from $(git rev-parse --short HEAD) ($publish_ref)"
+
+      - name: Require full-suite CI at the published commit
+        timeout-minutes: 90
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          WAIT_FOR_FULL_SUITE: 'true'
+        run: SOURCE_SHA=$(git rev-parse HEAD) bash "$RUNNER_TEMP/require_full_suite.sh"
 
       - uses: ./.github/actions/rust-toolchain
         with:

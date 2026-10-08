@@ -319,7 +319,11 @@ build_test_bundle() {
   prepare_harn_cli "$staging" "$commit" "$target_dir"
   HARN_ENUM_COMPILER_ARCHIVE_STAGE=1 cargo-nextest nextest run --locked --workspace --profile ci \
     -E 'test(open_enum_source_compatibility)'
-  cargo-nextest nextest archive --locked --workspace --profile ci \
+  local selected
+  local packages=()
+  selected=$(bash "${SCRIPT_DIR}/workspace_test_args.sh")
+  read -ra packages <<< "$selected"
+  cargo-nextest nextest archive --locked "${packages[@]}" --profile ci \
     --tool-config-file "harn-compiler-archive:${REPO_ROOT}/.config/nextest-compiler-archive.toml" \
     -E "$NEUTRAL_FILTER" \
     --archive-file "$staging/harn-tests.tar.zst"
