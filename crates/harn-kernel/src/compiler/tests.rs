@@ -1026,6 +1026,42 @@ fn list_appending_assign_uses_fused_concat_opcode() {
 }
 
 #[test]
+fn list_appending_assign_optimizes_every_assignment_site() {
+    for body in [
+        "x = x.appending(i)\n x = x.appending(i)",
+        "if i % 2 == 0 { x = x.appending(i) } else { x = x.appending(i) }",
+        "x = x.appending(i)\n x = x.appending(\"text\")",
+    ] {
+        let source = format!(
+            "pipeline t(harness: Harness) {{ let x = []\n for i in 0 to 10 exclusive {{ {body} }} }}"
+        );
+        let chunk = compile_source(&source);
+        let d = chunk.disassemble("t");
+        assert_eq!(
+            disasm_opcodes(&d)
+                .iter()
+                .filter(|op| **op == "CONCAT_ASSIGN_LOCAL")
+                .count(),
+            2,
+            "each append site must use the fused opcode:\n{d}"
+        );
+        assert!(!d.contains("METHOD_CALL"), "{d}");
+    }
+}
+
+#[test]
+fn list_appending_assign_does_not_assume_unknown_receivers_are_lists() {
+    for source in [
+        "pipeline t(harness: Harness, x: any) { x = x.appending(1) }",
+        "pipeline t(harness: Harness) { let x = []\n x = 1\n x = x.appending(2) }",
+    ] {
+        let d = compile_source(source).disassemble("t");
+        assert!(d.contains("METHOD_CALL"), "{d}");
+        assert!(!d.contains("CONCAT_ASSIGN_LOCAL"), "{d}");
+    }
+}
+
+#[test]
 fn inplace_list_concat_compound_assign_form() {
     // `x += [i]` gets the same fused opcode as `x = x + [i]`.
     let chunk = compile_source(
