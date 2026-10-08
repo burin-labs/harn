@@ -99,8 +99,6 @@ case "${endpoint:?}" in
         printf '%s\n' '##[group]Run CANARY_REPOSITORY="$CANARY_OWNER/$CANARY_NAME" \' 'env:' \
           "  SOURCE_REVISION: $RETIRE_SOURCE_SHA" '  CANARY_WORKFLOW: harn-repin-rehearsal.yml' '##[endgroup]' \
           'CONSUMER_CANARY dispatched run=9 ref=default' \
-          '##[group]Run CANARY_REPOSITORY="$CANARY_OWNER/$CANARY_NAME" bash scripts/ci/consumer_canary.sh --observe' \
-          'env:' '  CANARY_RUN_ID: 9' '##[endgroup]' \
           'CONSUMER_CANARY verdict=fail conclusion=cancelled run=9 wall_seconds=30' \
           '##[error]Process completed with exit code 1.' ;;
       8)
