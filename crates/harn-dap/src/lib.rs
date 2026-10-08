@@ -46,10 +46,18 @@ mod environment_tests {
     #[test]
     fn adapter_keeps_sdk_profile_but_withholds_it_from_children() {
         const PROFILE: &str = "AWS_PROFILE";
+        const FUTURE: &str = "HARN_DAP_FUTURE_CREDENTIAL";
         const ORDINARY: &str = "HARN_DAP_ENV_CONTROL";
         let old_profile = std::env::var_os(PROFILE);
+        let old_future = std::env::var_os(FUTURE);
         let old_ordinary = std::env::var_os(ORDINARY);
+        let overlay = harn_vm::llm_config::parse_config_toml(
+            "[providers.future_dap]\nbase_url = \"https://future.example.test/v1\"\nauth_style = \"bearer\"\nauth_env = \"HARN_DAP_FUTURE_CREDENTIAL\"\nchat_endpoint = \"/chat/completions\"\n",
+        )
+        .expect("future provider parses");
+        harn_vm::llm_config::set_user_overrides(Some(overlay));
         std::env::set_var(PROFILE, "dap-test-profile");
+        std::env::set_var(FUTURE, "future-dummy-canary");
         std::env::set_var(ORDINARY, "ordinary-value");
 
         let inherited = std::process::Command::new("printenv")
@@ -68,6 +76,14 @@ mod environment_tests {
             assert!(!profile_child.status.success());
             assert!(profile_child.stdout.is_empty());
 
+            let future_child =
+                harn_vm::process_sandbox::std_command_for("printenv", &[FUTURE.to_string()])
+                    .expect("build future-provider child")
+                    .output()
+                    .expect("run future-provider child");
+            assert!(!future_child.status.success());
+            assert!(future_child.stdout.is_empty());
+
             let ordinary_child =
                 harn_vm::process_sandbox::std_command_for("printenv", &[ORDINARY.to_string()])
                     .expect("build ordinary child")
@@ -81,10 +97,15 @@ mod environment_tests {
             Some(value) => std::env::set_var(PROFILE, value),
             None => std::env::remove_var(PROFILE),
         }
+        match old_future {
+            Some(value) => std::env::set_var(FUTURE, value),
+            None => std::env::remove_var(FUTURE),
+        }
         match old_ordinary {
             Some(value) => std::env::set_var(ORDINARY, value),
             None => std::env::remove_var(ORDINARY),
         }
+        harn_vm::llm_config::clear_user_overrides();
     }
 }
 
