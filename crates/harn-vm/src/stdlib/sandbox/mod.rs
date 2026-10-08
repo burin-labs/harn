@@ -103,7 +103,9 @@ pub use backend::{
 };
 pub(crate) use backend::{PrepareOutcome, SandboxBackend};
 use process_config::apply_rustc_wrapper_decision;
-pub use process_config::{apply_active_rustc_wrapper_policy, rustc_wrapper};
+pub use process_config::{
+    apply_active_rustc_wrapper_policy, apply_active_rustc_wrapper_policy_for_command, rustc_wrapper,
+};
 pub use process_config::{ProcessCommandConfig, ProcessStdin};
 use process_output::apply_process_config;
 pub use process_output::{deterministic_message_locale_env, MESSAGE_LOCALE_OVERRIDE_ENV};
@@ -1143,7 +1145,7 @@ pub fn command_output(
     let output = match active_sandbox_policy() {
         Some((policy, profile)) => {
             ensure_spawn_enforceable::<ActiveBackend>(&policy)?;
-            let config = sandboxed_process_config(config, &policy)?;
+            let config = sandboxed_process_config(program, args, config, &policy)?;
             ActiveBackend::run_to_output(program, args, &config, &policy, profile)?
         }
         None => {
@@ -1177,6 +1179,8 @@ pub fn command_output(
 }
 
 fn sandboxed_process_config(
+    program: &str,
+    args: &[String],
     config: &ProcessCommandConfig,
     policy: &CapabilityPolicy,
 ) -> Result<ProcessCommandConfig, VmError> {
@@ -1186,7 +1190,7 @@ fn sandboxed_process_config(
     } else {
         resolved.cwd = Some(policy_process_cwd(policy, None)?);
     }
-    apply_rustc_wrapper_decision(policy, &mut resolved);
+    apply_rustc_wrapper_decision(program, args, policy, &mut resolved);
     inject_workspace_process_env(&mut resolved.env, policy);
     resolved.env.retain(|(key, _)| {
         !resolved

@@ -240,7 +240,9 @@ pub(crate) fn prepare_command_from(
         .map(|(key, value)| (key.clone(), value.clone()))
         .collect();
     let mut env_remove = spec.env_remove.clone();
-    process_sandbox::apply_active_rustc_wrapper_policy(
+    process_sandbox::apply_active_rustc_wrapper_policy_for_command(
+        &spec.program,
+        &spec.args,
         &mut env,
         &mut env_remove,
         spec.cwd.as_deref(),

@@ -167,4 +167,15 @@ fn real_run_command_neutralizes_rustc_wrappers_inside_sandbox() {
             "the real host-process path must override {source} and Cargo-configured wrappers"
         );
     }
+    let canonical_workspace = workspace.path().canonicalize().unwrap();
+    assert!(
+        !harn_vm::process_sandbox::rustc_wrapper::rustc_wrapper_decisions()
+            .iter()
+            .any(|decision| std::path::Path::new(&decision.cwd)
+                .canonicalize()
+                .ok()
+                .as_ref()
+                == Some(&canonical_workspace)),
+        "shell launches must disable wrappers without measuring a compiler build"
+    );
 }

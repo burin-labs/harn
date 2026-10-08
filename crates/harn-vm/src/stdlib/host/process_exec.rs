@@ -402,7 +402,9 @@ pub(crate) fn build_sandboxed_command(
     label: &str,
 ) -> Result<tokio::process::Command, VmError> {
     let mut launch = ProcessExecLaunch::from_params(params, label)?;
-    crate::process_sandbox::apply_active_rustc_wrapper_policy(
+    crate::process_sandbox::apply_active_rustc_wrapper_policy_for_command(
+        &launch.program,
+        &launch.args,
         &mut launch.env,
         &mut launch.env_remove,
         launch.cwd.as_deref(),

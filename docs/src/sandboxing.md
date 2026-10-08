@@ -181,6 +181,34 @@ The two boundaries never widen each other, and environment policy stays
 active under `--no-sandbox`. See
 [Environment policies and grants](./cli-reference.md#environment-policies-and-grants).
 
+### Cargo compiler wrappers
+
+Confined process calls measure a configured Rust compiler wrapper when they
+launch a compiling Cargo command directly, such as `cargo build` or `cargo test`.
+Version checks and informational commands don't trigger the probe.
+Harn builds a temporary crate with Cargo under the
+active OS sandbox. A wrapper stays enabled only if that build succeeds and
+leaves no confined background process running. Harn starts known compiler-cache
+servers outside confinement before measuring them.
+
+Other programs, including shells, receive empty `RUSTC_WRAPPER`,
+`RUSTC_WORKSPACE_WRAPPER`, `CARGO_BUILD_RUSTC_WRAPPER`, and
+`CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER` settings. Cargo launched indirectly by
+those programs builds without wrappers. This prevents unrelated commands such
+as Git inventory from triggering a compiler build during session startup.
+
+Wrapper decisions are reused within the process for the same working directory,
+child environment, and OS confinement. Changing an agent's tool list or
+recursion budget doesn't repeat the probe. Changing process permissions does.
+Decisions aren't persisted across processes: compiler-cache servers can stop
+between launches, changing whether a wrapper would start a confined daemon.
+
+Git configuration discovery also caches results within the process. Changes to
+the child environment, config files, included files, or repository branch
+invalidate those results. A failed query isn't cached as an empty configuration.
+On macOS, discovery uses an installed Git binary from Command Line Tools or
+Xcode when available, avoiding the `/usr/bin/git` toolchain lookup shim.
+
 ## Sandbox profiles
 
 The active [`CapabilityPolicy`](./host-boundary.md) carries a

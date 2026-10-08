@@ -4,8 +4,8 @@
 //! A wrapper such as a compiler cache is configured outside the command: in
 //! the environment, or in a `.cargo/config.toml` anywhere from the working
 //! directory up to `CARGO_HOME`. Cargo resolves it, not the command, so the
-//! decision is a property of the (policy, working directory) pair and is made
-//! once per pair.
+//! decision is a property of the confinement, working directory, and child
+//! environment, rather than the tool registry or the agent's recursion budget.
 //!
 //! # How the decision is measured
 //!
@@ -110,6 +110,24 @@ impl RustcWrapperDecision {
 
 type DecisionKey = (String, String, Vec<(String, String)>);
 
+/// Only the policy axes consumed by the OS sandbox belong in the probe key.
+/// Tool names, argument constraints, annotations, and recursion budgets do not
+/// change what a compiler or its wrapper can access.
+fn confinement_key(policy: &CapabilityPolicy) -> String {
+    serde_json::to_string(&(
+        policy.sandbox_profile,
+        &policy.workspace_roots,
+        &policy.read_only_roots,
+        &policy.process_sandbox,
+        policy.children_may_write(),
+        super::super::policy_allows_network(policy),
+        policy
+            .process_network_proxy
+            .map(|proxy| (proxy.http_port, proxy.socks_port)),
+    ))
+    .expect("confinement policy is serializable")
+}
+
 fn decisions() -> &'static Mutex<BTreeMap<DecisionKey, RustcWrapperDecision>> {
     static DECISIONS: OnceLock<Mutex<BTreeMap<DecisionKey, RustcWrapperDecision>>> =
         OnceLock::new();
@@ -126,52 +144,39 @@ pub(crate) fn probing() -> bool {
     PROBING.with(std::cell::Cell::get)
 }
 
-/// The caller-supplied wrapper settings, which Cargo reads before its
-/// configuration files and which therefore belong to the decision's key.
-fn caller_wrapper_env(env: &[(String, String)]) -> Vec<(String, String)> {
-    let mut pairs: Vec<(String, String)> = env
-        .iter()
-        .filter(|(key, _)| {
-            RUSTC_WRAPPER_ENV_KEYS
-                .iter()
-                .any(|wrapper| key.eq_ignore_ascii_case(wrapper))
-        })
-        .map(|(key, value)| (key.to_ascii_uppercase(), value.clone()))
-        .collect();
-    pairs.sort();
-    pairs
-}
-
 /// The recorded decision for `policy` and `cwd`, measuring it on first use.
 ///
-/// `caller_env` is the spawn's own environment overlay; only its wrapper
-/// settings are read.
+/// `caller_env` is the spawn's own environment overlay.
 pub fn rustc_wrapper_decision(
     policy: &CapabilityPolicy,
     cwd: &Path,
     caller_env: &[(String, String)],
 ) -> RustcWrapperDecision {
-    let caller = caller_wrapper_env(caller_env);
+    // Cargo and wrappers also depend on PATH, CARGO_HOME, RUSTUP_HOME, etc.
+    // Resolve the same child environment used by the build, rather than keying
+    // only on explicit wrapper overlays and missing session/environment changes.
+    let child_env =
+        crate::stdlib::process::session_closed_env_for_command("cargo", caller_env.iter().cloned());
+    let env: BTreeMap<String, String> = match child_env {
+        Ok(Some(env)) => env.into_iter().collect(),
+        _ => std::env::vars().chain(caller_env.iter().cloned()).collect(),
+    };
     let key = (
-        serde_json::to_string(policy).unwrap_or_default(),
+        confinement_key(policy),
         cwd.display().to_string(),
-        caller.clone(),
+        env.into_iter().collect(),
     );
-    if let Some(decision) = decisions()
+    // Serialize first measurements too: concurrent spawns must not both miss
+    // the map and start identical builds (or race a compiler-cache server).
+    let mut cache = decisions()
         .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .get(&key)
-    {
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if let Some(decision) = cache.get(&key) {
         return decision.clone();
     }
-    let decision = measure(policy, cwd, &caller);
+    let decision = measure(policy, cwd, caller_env);
     record(&decision);
-    decisions()
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .entry(key)
-        .or_insert(decision)
-        .clone()
+    cache.entry(key).or_insert(decision).clone()
 }
 
 /// Every decision made in this process, for a receipt.
@@ -546,8 +551,8 @@ fn build(
         ..crate::stdlib::sandbox::ProcessCommandConfig::default()
     };
     PROBING.with(|flag| flag.set(true));
-    let output =
-        crate::stdlib::sandbox::sandboxed_process_config(&config, &policy).and_then(|config| {
+    let output = crate::stdlib::sandbox::sandboxed_process_config("cargo", &args, &config, &policy)
+        .and_then(|config| {
             use crate::stdlib::sandbox::SandboxBackend;
             #[cfg(unix)]
             {
@@ -861,14 +866,16 @@ mod tests {
     }
 
     #[test]
-    fn only_the_callers_wrapper_settings_key_the_decision() {
-        let env = vec![
-            ("PATH".to_string(), "/usr/bin".to_string()),
-            ("rustc_wrapper".to_string(), "sccache".to_string()),
-        ];
-        assert_eq!(
-            caller_wrapper_env(&env),
-            vec![("RUSTC_WRAPPER".to_string(), "sccache".to_string())]
-        );
+    fn confinement_key_ignores_agent_policy_but_preserves_process_authority() {
+        let policy = CapabilityPolicy::default();
+        let mut tool_policy = policy.clone();
+        tool_policy.tools = vec!["other_tool".into()];
+        tool_policy.recursion_limit = Some(0);
+        assert_eq!(confinement_key(&policy), confinement_key(&tool_policy));
+        tool_policy
+            .process_sandbox
+            .read_roots
+            .push("/other/root".into());
+        assert_ne!(confinement_key(&policy), confinement_key(&tool_policy));
     }
 }

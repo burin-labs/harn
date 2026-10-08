@@ -51,12 +51,71 @@ pub fn apply_active_rustc_wrapper_policy(
     }
 }
 
+/// Apply wrapper policy only when launching Cargo directly. Other programs,
+/// including shells that might start Cargo later, receive empty wrapper
+/// settings: they must not start an unmeasured confined compiler-cache daemon.
+/// This keeps unrelated commands off the compiler probe's startup path.
+pub fn apply_active_rustc_wrapper_policy_for_command(
+    program: &str,
+    args: &[String],
+    env: &mut Vec<(String, String)>,
+    env_remove: &mut Vec<String>,
+    cwd: Option<&Path>,
+) {
+    if let Some((policy, _)) = super::active_sandbox_policy() {
+        if cargo_may_compile(program, args) {
+            decide_and_apply(&policy, cwd, env, env_remove);
+        } else {
+            neutralize_rustc_wrapper(env, env_remove);
+        }
+    }
+}
+
+fn cargo_may_compile(program: &str, args: &[String]) -> bool {
+    let cargo = Path::new(program).file_name().is_some_and(|name| {
+        name == "cargo"
+            || (cfg!(windows)
+                && name
+                    .to_str()
+                    .is_some_and(|name| name.eq_ignore_ascii_case("cargo.exe")))
+    });
+    // Cargo's informational commands never invoke a compiler wrapper. Unknown
+    // commands may be plugins that compile, so keep the probe for those.
+    cargo
+        && !args.is_empty()
+        && !matches!(
+            args[0].as_str(),
+            "--version"
+                | "-V"
+                | "--help"
+                | "-h"
+                | "--list"
+                | "help"
+                | "metadata"
+                | "locate-project"
+                | "verify-project"
+                | "fetch"
+                | "generate-lockfile"
+                | "update"
+                | "search"
+                | "info"
+                | "tree"
+                | "clean"
+        )
+}
+
 /// [`apply_active_rustc_wrapper_policy`] for a config already known to run
 /// under `policy`.
 pub(super) fn apply_rustc_wrapper_decision(
+    program: &str,
+    args: &[String],
     policy: &CapabilityPolicy,
     config: &mut ProcessCommandConfig,
 ) {
+    if !cargo_may_compile(program, args) {
+        neutralize_rustc_wrapper(&mut config.env, &mut config.env_remove);
+        return;
+    }
     let cwd = config.cwd.clone();
     decide_and_apply(
         policy,
