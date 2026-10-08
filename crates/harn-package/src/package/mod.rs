@@ -100,7 +100,7 @@ pub use registry::{
 pub use skills::*;
 pub(crate) use validation::*;
 pub use validation::{
-    build_manifest_provider_catalog, install_manifest_provider_schemas,
+    build_manifest_provider_catalog, install_manifest_provider_metadata,
     manifest_module_source_path, manifest_trigger_location, parse_duration_millis,
     parse_local_trigger_ref, parse_trigger_handler_uri, validate_contributions,
     validate_orchestrator_budget, validate_static_trigger_configs,

@@ -193,11 +193,11 @@ pub(crate) struct PackageVerifyCheck {
 pub(crate) async fn check_connector_package(
     args: &ConnectorCheckArgs,
 ) -> Result<ConnectorCheckReport, String> {
-    let _provider_schema_guard = package::lock_manifest_provider_schemas().await;
+    let _provider_catalog_guard = package::lock_manifest_provider_catalog().await;
     let package = PathBuf::from(&args.package);
     let anchor = normalize_anchor(&package);
     let extensions = package::try_load_runtime_extensions(&anchor)?;
-    package::install_manifest_provider_schemas(&extensions).await?;
+    package::install_manifest_provider_metadata(&extensions).await?;
     let manifest = extensions
         .root_manifest
         .as_ref()

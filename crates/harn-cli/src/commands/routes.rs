@@ -156,7 +156,7 @@ async fn analyze_routes(root: &Path) -> Result<RoutesReport, String> {
 }
 
 async fn validate_route_inputs(extensions: &RuntimeExtensions) -> Result<(), String> {
-    let _guard = package::lock_manifest_provider_schemas().await;
+    let _guard = package::lock_manifest_provider_catalog().await;
     let provider_catalog = package::build_manifest_provider_catalog(extensions)
         .await
         .map_err(|error| error.to_string())?;

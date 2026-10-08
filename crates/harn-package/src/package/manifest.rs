@@ -1189,10 +1189,10 @@ pub struct CollectedTriggerPredicate {
 pub(crate) type ManifestModuleCacheKey = (PathBuf, Option<String>, Option<String>);
 pub(crate) type ManifestModuleExports = BTreeMap<String, Arc<harn_vm::VmClosure>>;
 
-static MANIFEST_PROVIDER_SCHEMA_LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
+static MANIFEST_PROVIDER_CATALOG_LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
 
-pub async fn lock_manifest_provider_schemas() -> tokio::sync::MutexGuard<'static, ()> {
-    MANIFEST_PROVIDER_SCHEMA_LOCK
+pub async fn lock_manifest_provider_catalog() -> tokio::sync::MutexGuard<'static, ()> {
+    MANIFEST_PROVIDER_CATALOG_LOCK
         .get_or_init(|| tokio::sync::Mutex::new(()))
         .lock()
         .await
