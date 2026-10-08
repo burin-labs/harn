@@ -283,6 +283,12 @@ const q = sql(
 Use `pg_transaction` for changes that must commit or roll back together. The
 transaction handle is only valid inside the callback.
 
+Transactions share their pool's cached parameter types for SQL containing
+`nil` values. A known statement skips the describe probe and its internal
+savepoint, including in later transactions. The first use of a new statement
+still probes; separate pools keep separate caches. `pg_migrate` clears the
+pool's cached types after schema changes.
+
 ```harn
 pg_transaction(
   db,

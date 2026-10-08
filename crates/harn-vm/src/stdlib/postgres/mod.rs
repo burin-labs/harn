@@ -56,7 +56,7 @@ pub(super) struct PoolHandle {
 
 pub(super) struct TxHandle {
     cell: Mutex<Option<Transaction<'static, Postgres>>>,
-    described_oids: SyncMutex<BTreeMap<String, Arc<Vec<PgTypeInfo>>>>,
+    described_oids: Arc<SyncMutex<BTreeMap<String, Arc<Vec<PgTypeInfo>>>>>,
 }
 
 #[derive(Clone)]
@@ -514,7 +514,7 @@ pub(super) async fn run_managed_transaction(
         .map_err(|error| runtime_error(format!("{builtin}: begin failed: {error}")))?;
     let tx_state = Arc::new(TxHandle {
         cell: Mutex::new(Some(tx)),
-        described_oids: SyncMutex::new(BTreeMap::new()),
+        described_oids: Arc::clone(&pool.described_oids),
     });
     let tx_value = VmValue::resource(VmResourceHandle::from_arc(HANDLE_TX, Arc::clone(&tx_state)));
 
@@ -1350,7 +1350,7 @@ fn bind_params_described<'q>(
 }
 
 /// Server-described per-slot parameter OIDs for `sql`, looked up from the
-/// owning pool or transaction authority's cache and computed on a miss.
+/// pool's cache, shared across transactions, and computed on a miss.
 ///
 /// The described OID list is a pure function of the SQL *structure* (Postgres
 /// infers each `$n` from casts/target columns/operators, not from the runtime

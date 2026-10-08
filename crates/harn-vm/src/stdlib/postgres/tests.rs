@@ -1,5 +1,8 @@
 use super::*;
 
+#[path = "describe_tests.rs"]
+mod describe_tests;
+
 use crate::{compile_source, register_vm_stdlib, Vm};
 
 fn s(value: &str) -> VmValue {
@@ -2350,70 +2353,6 @@ pg_close(db)
             })
             .await;
     });
-}
-
-/// Performant describe-then-bind: the server describe for a given SQL runs
-/// at most **once**. The first nil-query of a SQL populates the
-/// pool-local described-OID cache (one describe round-trip); every subsequent
-/// nil-query of the SAME SQL is a cache hit and performs **no** further
-/// describe. Asserted via the `cfg(test)` [`DESCRIBE_ROUND_TRIPS`] counter.
-#[tokio::test(flavor = "current_thread")]
-async fn nil_query_describes_once_and_caches_oids_when_env_url_is_set() {
-    let Ok(url) = std::env::var("HARN_TEST_POSTGRES_URL") else {
-        return;
-    };
-    reset_postgres_state();
-    reset_describe_round_trips();
-    let handle = open_single_conn_pool(&url).await;
-
-    let sql = "SELECT $1::bigint AS v";
-
-    // Cache must start empty for this SQL.
-    let record = pool_record_from_handle(&handle, "test").expect("pool authority");
-    assert!(
-        !record.described_oids.lock().contains_key(sql),
-        "OID cache should not contain the SQL before first use"
-    );
-
-    // First nil-query: one describe round-trip, populates the cache.
-    let first = query_rows(&handle, sql, &[VmValue::Nil], QueryRouting::Primary)
-        .await
-        .expect("first nil query");
-    assert!(matches!(one_cell(first, "v"), VmValue::Nil));
-    assert_eq!(
-        describe_round_trips(),
-        1,
-        "first nil query must perform exactly one describe round-trip"
-    );
-    assert!(
-        record.described_oids.lock().contains_key(sql),
-        "OID cache must be populated after first nil query"
-    );
-
-    // Subsequent nil-queries of the SAME SQL must NOT re-describe.
-    for _ in 0..5 {
-        let row = query_rows(&handle, sql, &[VmValue::Nil], QueryRouting::Primary)
-            .await
-            .expect("repeat nil query");
-        assert!(matches!(one_cell(row, "v"), VmValue::Nil));
-    }
-    assert_eq!(
-        describe_round_trips(),
-        1,
-        "repeat nil queries of the same SQL must hit the OID cache (no re-describe)"
-    );
-
-    // A different SQL still describes once (independent cache key).
-    let other = "SELECT $1::int AS v";
-    let r = query_rows(&handle, other, &[VmValue::Nil], QueryRouting::Primary)
-        .await
-        .expect("different SQL nil query");
-    assert!(matches!(one_cell(r, "v"), VmValue::Nil));
-    assert_eq!(
-        describe_round_trips(),
-        2,
-        "a distinct SQL must add exactly one more describe round-trip"
-    );
 }
 
 /// Micro-benchmark proving the performant path: after warmup, a
