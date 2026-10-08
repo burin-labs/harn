@@ -4,6 +4,143 @@ use super::*;
 use std::sync::Arc;
 use tokio::task::LocalSet;
 
+tokio::task_local! {
+    static ENGINE_PROMPT_SCOPE: String;
+}
+
+struct ScopedRuntime {
+    invoked: Arc<std::sync::atomic::AtomicUsize>,
+    refuse: bool,
+}
+
+struct BudgetRuntime {
+    observed: Arc<std::sync::Mutex<Vec<BudgetSpec>>>,
+}
+
+#[async_trait::async_trait(?Send)]
+impl AcpRuntimeConfigurator for BudgetRuntime {
+    async fn run_prompt(
+        &self,
+        context: AcpPromptExecutionContext<'_>,
+        execution: AcpPromptExecution<'_>,
+    ) -> Result<String, AcpPromptExecutionError> {
+        self.observed.lock().unwrap().push(context.budget.clone());
+        execution.await
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn actual_prompt_hook_reads_the_live_session_budget() {
+    let local = LocalSet::new();
+    local
+        .run_until(async {
+            let observed = Arc::new(std::sync::Mutex::new(Vec::new()));
+            let cwd = tempfile::tempdir().expect("isolated live-budget workspace");
+            let (tx, mut rx, server, session) = start_acp_channel_session_with_config(
+                AcpServerConfig::new(None)
+                    .with_budget(BudgetSpec {
+                        llm_cost_usd: Some(1.0),
+                        llm_tokens: Some(1000),
+                        pg_queries: Some(2),
+                        mcp_calls: Some(4),
+                        ..BudgetSpec::default()
+                    })
+                    .with_runtime_configurator(Arc::new(BudgetRuntime {
+                        observed: observed.clone(),
+                    })),
+                serde_json::json!(cwd.path()),
+            )
+            .await;
+            let inherited = super::served_agent_turn::prompt(
+                &tx,
+                &mut rx,
+                &session,
+                5,
+                "harness.stdio.println(\"inherited\")",
+            )
+            .await;
+            assert!(inherited.get("error").is_none(), "{inherited}");
+            for (id, mut params) in [
+                (
+                    10,
+                    serde_json::json!({"llm_cost_usd":0.25, "llm_tokens":null}),
+                ),
+                (20, serde_json::json!({"llm_cost_usd":0.75})),
+                (
+                    30,
+                    serde_json::json!({"llm_cost_usd":null, "llm_tokens":345}),
+                ),
+                (40, serde_json::json!({"llm_tokens":null})),
+            ] {
+                params["sessionId"] = serde_json::json!(session);
+                tx.send(serde_json::json!({
+                    "jsonrpc": "2.0", "method": "session/set_budget",
+                    "params": params
+                }))
+                .unwrap();
+                let response = super::served_agent_turn::prompt(
+                    &tx,
+                    &mut rx,
+                    &session,
+                    id,
+                    "harness.stdio.println(\"hello\")",
+                )
+                .await;
+                assert!(response.get("error").is_none(), "{response}");
+            }
+            let budgets = observed.lock().unwrap().clone();
+            assert_eq!(
+                budgets.len(),
+                5,
+                "the actual prompt hook must reach inherited, updated and unlimited budgets"
+            );
+            for (budget, (cost, tokens)) in budgets.iter().zip([
+                (Some(1.0), Some(1000)),
+                (Some(0.25), None),
+                (Some(0.75), None),
+                (None, Some(345)),
+                (None, None),
+            ]) {
+                assert_eq!(budget.llm_cost_usd, cost);
+                assert_eq!(budget.llm_tokens, tokens);
+                assert_eq!(budget.pg_queries, Some(2), "retain inherited query limits");
+                assert_eq!(budget.mcp_calls, Some(4), "retain inherited tool limits");
+            }
+            drop(tx);
+            server.await.unwrap();
+        })
+        .await;
+}
+
+#[async_trait::async_trait(?Send)]
+impl AcpRuntimeConfigurator for ScopedRuntime {
+    async fn run_prompt(
+        &self,
+        context: AcpPromptExecutionContext<'_>,
+        execution: AcpPromptExecution<'_>,
+    ) -> Result<String, AcpPromptExecutionError> {
+        assert!(!context.session_id.is_empty());
+        assert!(context.cwd.is_absolute());
+        assert!(context.project_root.is_absolute());
+        assert!(!context.is_cancelled());
+        if self.refuse {
+            return Err("fixture authority refused before execution"
+                .to_string()
+                .into());
+        }
+        // Rc retained over this await proves the configured engine seam is local.
+        let local = std::rc::Rc::new(context.session_id.to_string());
+        tokio::task::yield_now().await;
+        ENGINE_PROMPT_SCOPE.scope((*local).clone(), execution).await
+    }
+
+    fn configure_harness(&self, harness: harn_vm::Harness) -> harn_vm::Harness {
+        ENGINE_PROMPT_SCOPE.with(|session| assert!(!session.is_empty()));
+        self.invoked.fetch_add(1, Ordering::SeqCst);
+        harness
+    }
+}
+
 #[test]
 fn acp_manifest_advertises_local_runtime_prompt_content() {
     let manifest = super::super::builtins::advertise_runtime_prompt_content(VmValue::dict_map(
@@ -169,6 +306,7 @@ async fn acp_runtime_provider_endpoints_are_scoped_per_live_server() {
         .run_until(async {
             let (first_endpoint, first_endpoint_task) = start_health_endpoint().await;
             let (second_endpoint, second_endpoint_task) = start_health_endpoint().await;
+            let invoked = Arc::new(std::sync::atomic::AtomicUsize::new(0));
 
             let (first_tx, mut first_rx, first_server, first_session) =
                 start_acp_channel_session_with_config(
@@ -176,8 +314,11 @@ async fn acp_runtime_provider_endpoints_are_scoped_per_live_server() {
                         .with_llm_overrides(Some(endpoint_overlay()), None)
                         .with_runtime_provider_endpoint("fixture", &first_endpoint)
                         .expect("first endpoint override")
-                        .with_runtime_configurator(Arc::new(NoopAcpRuntimeConfigurator)),
-                    serde_json::json!("."),
+                        .with_runtime_configurator(Arc::new(ScopedRuntime {
+                            invoked: invoked.clone(),
+                            refuse: false,
+                        })),
+                    serde_json::json!(std::env::current_dir().unwrap()),
                 )
                 .await;
             let (second_tx, mut second_rx, second_server, second_session) =
@@ -186,7 +327,7 @@ async fn acp_runtime_provider_endpoints_are_scoped_per_live_server() {
                         .with_llm_overrides(Some(endpoint_overlay()), None)
                         .with_runtime_provider_endpoint("fixture", &second_endpoint)
                         .expect("second endpoint override"),
-                    serde_json::json!("."),
+                    serde_json::json!(std::env::current_dir().unwrap()),
                 )
                 .await;
 
@@ -214,6 +355,8 @@ async fn acp_runtime_provider_endpoints_are_scoped_per_live_server() {
                 second_output.contains("true"),
                 "second server healthcheck must succeed: {second_output}"
             );
+            assert_eq!(invoked.load(Ordering::SeqCst), 1);
+            assert!(ENGINE_PROMPT_SCOPE.try_with(|_| ()).is_err());
 
             drop(first_tx);
             drop(second_tx);
@@ -225,6 +368,47 @@ async fn acp_runtime_provider_endpoints_are_scoped_per_live_server() {
             let _ = second_server.await;
             let _ = first_endpoint_task.await;
             let _ = second_endpoint_task.await;
+        })
+        .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn acp_runtime_authority_refusal_never_polls_the_engine_future() {
+    LocalSet::new()
+        .run_until(async {
+            let invoked = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+            let (tx, mut rx, server, session) = start_acp_channel_session_with_config(
+                AcpServerConfig::new(None).with_runtime_configurator(Arc::new(ScopedRuntime {
+                    invoked: invoked.clone(),
+                    refuse: true,
+                })),
+                serde_json::json!(std::env::current_dir().unwrap()),
+            )
+            .await;
+            set_code_mode(&tx, &mut rx, &session, 8).await;
+            tx.send(serde_json::json!({
+                "jsonrpc": "2.0", "id": 10, "method": "session/prompt",
+                "params": {
+                    "sessionId": session,
+                    "prompt": [{"type": "text", "text": "harness.stdio.println(\"must not execute\")"}],
+                },
+            }))
+            .unwrap();
+            loop {
+                let response = recv_json(&mut rx).await;
+                if response["id"] == 10 {
+                    assert!(response["error"]["message"]
+                        .as_str()
+                        .unwrap()
+                        .contains("fixture authority refused before execution"));
+                    assert!(response.get("result").is_none());
+                    break;
+                }
+            }
+            assert_eq!(invoked.load(Ordering::SeqCst), 0);
+            drop(tx);
+            server.abort();
+            let _ = server.await;
         })
         .await;
 }

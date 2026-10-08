@@ -148,9 +148,20 @@ metadata keys are advertised during `initialize` under
 - `errorCategory`
 - `executionDurationMs`
 - `executor`
+- `intent`
 - `mutationStatus`
 - `parsing`
 - `rawInputPartial`
+
+`intent` appears on `tool_call` only. It is the model's short statement of what
+the call is for, such as `"Looking for PR 456 artifacts"`, taken from the
+`<purpose>` heading the model declares when the agent loop runs with
+`purpose_labels` enabled. Every call in the declaring turn carries the same
+value. Harn collapses whitespace runs to one space and caps the value at 200
+characters, ending a cut value with `…`. The key is absent when the turn declared
+no heading or `purpose_labels` is off. The same value reaches
+`session/request_permission` as `toolCall._meta.harn.intent`, so a host can
+show it as the approval title.
 
 The standard ACP fields (`toolCallId`, `title`, `kind`, `status`,
 `content`, `locations`, `rawInput`, and `rawOutput`) remain available in
@@ -485,6 +496,12 @@ locations. The same policy receipt is copied into
 `approvalRequest.undo_metadata.policy_decision` and into
 `PermissionGrant`/`PermissionDeny` transcript-event metadata so approvals are
 auditable and replayable.
+
+`toolCall._meta.harn.intent` is present when the model declared a purpose for
+the turn that issued the call. It is the same string, with the same bounds, as
+the `intent` on that call's `tool_call` update. Both the approval-policy `ask`
+path and the side-effect ceiling escalation set it. Hosts should fall back to
+`title` when it is absent.
 
 Response payload (host-issued):
 

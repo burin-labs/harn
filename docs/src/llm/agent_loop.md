@@ -269,48 +269,30 @@ full agent loop (tools, judges, compaction) without losing the conversation.
 
 ### Streaming visible-text deltas
 
-A chat-shaped harness that wants to render — or transform — tokens as they
-arrive no longer has to abandon `agent_loop` for a raw `harness.llm.stream_call`. Pass an
-`on_delta` closure and each per-turn model call is issued through the streaming
-transport; the callback fires once per streamed chunk of the assistant's
-**visible text**:
+A full agent run publishes its answer after tool effects and completion checks
+finish. Pass `on_delta` to receive that admitted reply once. Provider deltas,
+tool-batch prose, rejected candidates, and retry attempts remain private.
+Use typed tool events for live progress and the existing turn phase for
+generating, verifying, and terminal state.
 
 ```harn,ignore
 agent_loop(harness, "summarize the diff", nil, {
   provider: "anthropic",
   model: "claude-sonnet-5",
-  on_delta: { delta -> render_token(delta) },
+  on_delta: { reply -> render_answer(reply) },
 })
 ```
 
 Semantics:
 
-- **Observational.** `on_delta` is a pure side-effect seam — its return value is
-  ignored, and the loop's transcript is always the true concatenation of the raw
-  deltas. To *mask* a stream (e.g. hide a `<secret>…</secret>` span mid-render,
-  even when the tag is split across chunks), fold each delta through
-  `agent_private_stream_delta` from `std/agent/stream` inside your callback; that
-  transforms what you display without altering the transcript the model sees.
-- **A complete turn is preserved.** The streaming call returns the same
-  normalized result as `harness.llm.call`, so native tool calls and usage survive intact
-  and tool dispatch is unaffected. `on_delta` fires only for visible text — it
-  never streams tool-call fragments (a deliberate v1 limitation, aligned with the
-  [tool-calling north-star](../../rfcs/tool-calling-north-star.md) dialect
-  phases).
-- **Graceful non-streaming fallback.** When a provider returns a complete
-  response without incremental deltas (the mock provider, cached results, or a
-  transport that does not stream), `on_delta` still fires exactly once with the
-  full visible text, so harness code sees a uniform "at least one delta, and the
-  concatenation equals the visible text" contract. `harness.llm.provider_capabilities(...)`
-  reports `requires_streaming` for models that must stream.
-- **Attempts are observable.** Schema retries, routing failover, and
-  context-overflow reissues can each start a fresh provider call. `on_delta`
-  reports visible text from every attempted call in order; callers that render a
-  single final transcript should treat the callback as live progress, not as the
-  authoritative persisted assistant message.
-- **Composes with `llm_caller`.** `on_delta` only affects the *default* per-turn
-  caller. A custom `llm_caller` short-circuits before the streaming path, so a
-  caller that does not itself stream simply never fires `on_delta`.
+- The callback is observational. Its return value and errors do not change the
+  run's result.
+- Canonical provider messages, tool calls, and usage are retained. A
+  source-bound publication receipt records which draft was admitted without
+  creating another assistant turn or charging usage again.
+- Streaming and non-streaming transports use the same publication boundary,
+  including custom `llm_caller` results. An empty or rejected reply produces no
+  callback. Direct LLM streaming keeps its token-level contract.
 
 ### agent_loop options
 
@@ -342,7 +324,7 @@ Same as `harness.llm.call`, plus additional options:
 | `max_nudges` | int | `8` | Max consecutive text-only responses before stopping |
 | `nudge` | string | see below | Custom message to send when nudging the agent |
 | `llm_caller` | closure | nil | Custom caller wrapping the per-turn `harness.llm.call`. The resilience surface: compose `with_retry` / `with_fallback` from `std/llm/handlers` here. See [Composable callers and middleware](../stdlib/llm-handlers.md). |
-| `on_delta` | closure | nil | Observational streaming callback `delta -> nil`, invoked once per streamed chunk of the assistant's visible text during each turn. Lets chat-shaped harnesses render or transform the token stream without leaving `agent_loop`. See [Streaming visible-text deltas](#streaming-visible-text-deltas). |
+| `on_delta` | closure | nil | Observational callback invoked once with the admitted visible reply. See [Streaming visible-text deltas](#streaming-visible-text-deltas). |
 | `reasoning_policy` | string/bool | `"auto"` | Provider-aware reasoning policy. `auto` chooses a task/scale-appropriate setting; `off` disables thinking where possible and otherwise uses the provider's lowest reasoning floor; explicit levels run from `minimal` through `max`. Caller-supplied `thinking` or `effort` wins. |
 | `reasoning_scale` | string | `"medium"` | Scale hint for `reasoning_policy: "auto"`: `small`, `medium`, or `large`. |
 | `reasoning_task` | string | inferred | Task hint for `reasoning_policy: "auto"`: `chat`, `agent`, `code`, `verify`, or `summarize` |
@@ -596,7 +578,7 @@ Caller contract: `fn(call) -> {ok, value | status, error?}` where
 The pre-0.10 `llm_retries` / `llm_backoff_ms` options were removed —
 the loop is fail-fast on transient provider errors unless a composed
 `llm_caller` retries them; the `removed-llm-options` lint hard-errors
-on usage (see [Migrating to 0.10](../migrations/v0.10.md)). See
+on usage. See
 [Composable callers and middleware](../stdlib/llm-handlers.md) for the
 full middleware catalog.
 

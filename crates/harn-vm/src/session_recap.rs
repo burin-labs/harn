@@ -538,7 +538,9 @@ impl<'a> RecapProjector<'a> {
 
         if is_checkpoint(event) {
             self.absorb_checkpoint(turn_index, event);
-        } else if matches!(event.kind, SessionEventKind::Message) {
+        } else if matches!(event.kind, SessionEventKind::Message)
+            || event.kind.discriminator() == "assistant_publication"
+        {
             self.absorb_message(turn_index, event);
         } else if matches!(event.kind, SessionEventKind::ToolCall) {
             self.absorb_tool_call(turn_index, event);

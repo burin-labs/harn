@@ -43,7 +43,7 @@ pipeline default(harness: Harness) {
           {id: "mcp-elicit", name: "remote__ask", arguments: {prompt: "Choose deploy target"}},
         ],
       },
-      llm_text("<done>##DONE##</done>"),
+      llm_text("<user_response>Asked for the deploy target.</user_response><done>##DONE##</done>"),
     ],
     { ->
       const opts: AgentSpec = {

@@ -99,6 +99,7 @@
       "rust-checks": { "budget_ms": 470000 },
       "rust-cli": { "budget_ms": 420000 },
       "rust-check-inputs": { "budget_ms": 600000 },
+      "rust-test-partitions": { "budget_ms": 600000 },
       "rust-artifacts-ready": { "budget_ms": 240000 },
       "security-tests-ready": { "budget_ms": 420000 },
       "rust-test": { "budget_ms": 600000 },

@@ -374,24 +374,6 @@ pub fn help_flags_cached(state: dict, path: list<string>, fetch: fn(list<string>
   return {state: {...ht.state, flagsets: flagsets}, flags: parsed.flags, takes: parsed.takes}
 }
 
-/** Flags accepted at `path`: the union over every prefix of the path. */
-pub fn accepted_flags_cached(state: any, path: list<string>, fetch: fn(list<string>) -> string) {
-  let st = state
-  let accepted: list<string> = []
-  let depth = 0
-  while depth <= path.count {
-    const r = help_flags_cached(st, path.slice(0, depth), fetch)
-    st = r.state
-    for f in r.flags {
-      if !accepted.contains(f) {
-        accepted = accepted + [f]
-      }
-    }
-    depth = depth + 1
-  }
-  return {state: st, flags: accepted}
-}
-
 /**
  * Walk one harn invocation's args, building the subcommand path and
  * collecting long flags the corresponding `--help` does not advertise.
@@ -414,14 +396,15 @@ pub fn analyze_harn_args(state: any, args: list<string>, fetch: fn(list<string>)
       } else {
         token
       }
-      const ar = accepted_flags_cached(st, path, fetch)
-      st = ar.state
-      const accepted = ar.flags
-      if !accepted.contains(flag) {
-        missing = missing + [flag]
-      }
+      // Only the help of the command the flag follows counts: clap lists
+      // inherited `global` flags there already, and rejects a parent's
+      // non-global flag once a subcommand has been named.
       const hr = help_flags_cached(st, path, fetch)
       st = hr.state
+      const accepted = hr.flags
+      if flag != "--help" && !accepted.contains(flag) {
+        missing = missing + [flag]
+      }
       const takes_value = hr.takes[flag] ?? false
       if eq
         < 0

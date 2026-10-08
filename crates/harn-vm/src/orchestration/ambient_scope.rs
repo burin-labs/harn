@@ -33,7 +33,9 @@ use super::policy::{
     OperatorApprovalGrant, RunApprovalPolicy,
 };
 use super::tool_precheck::{swap_tool_precheck_depth, swap_tool_precheck_stack};
-use super::{swap_mutation_session, MutationSessionRecord, RunExecutionRecord};
+use super::{
+    swap_mutation_session, swap_thread_execution_context, MutationSessionRecord, RunExecutionRecord,
+};
 use crate::agent_sessions::swap_current_session_stack;
 use crate::autonomy::{swap_autonomy_policy_stack, AutonomyPolicy};
 use crate::connectors::harn_module::swap_active_harn_connector_ctx;
@@ -55,9 +57,7 @@ use crate::runtime_context::{swap_runtime_context_overlay_stack, RuntimeContextO
 use crate::stdlib::host::process_admission::{
     swap_process_admission_context, ProcessAdmissionContext,
 };
-use crate::stdlib::process::{
-    swap_session_environment, swap_source_dir, swap_thread_execution_context,
-};
+use crate::stdlib::process::{swap_session_environment, swap_source_dir};
 use crate::stdlib::template::llm_context::{swap_llm_render_stack, LlmRenderContextFrame};
 pub(crate) mod blocking;
 mod subtask_state;
@@ -130,6 +130,7 @@ pub(crate) struct AmbientExecutionScope {
     /// closure, including delegated agents. A child may layer its own sink on
     /// top without losing the outer capture when no narrower sink is present.
     loop_sinks: Vec<std::sync::Arc<dyn crate::agent_events::AgentEventSink>>,
+    event_transport: crate::agent_events::AgentEventTransport,
     /// The verdict execution-scope owner stack. Unlike `session_stack`, this is
     /// INHERITED by fan-out workers and inline subtasks: they are part of the
     /// SAME program run, so a `run_test` executed in a fan-out body must record
@@ -228,6 +229,7 @@ impl AmbientExecutionScope {
             process_admission: clone_via_swap(swap_process_admission_context),
             host_bridge: clone_via_swap(swap_current_host_bridge),
             loop_sinks: clone_via_swap(swap_current_loop_sinks),
+            event_transport: crate::agent_events::transport::current(),
             provider_overrides: clone_via_swap(swap_provider_overrides),
             runtime_provider_endpoint_overrides: clone_via_swap(
                 swap_runtime_provider_endpoint_overrides,
@@ -299,6 +301,7 @@ impl AmbientExecutionScope {
             process_admission: clone_via_swap(swap_process_admission_context),
             host_bridge: clone_via_swap(swap_current_host_bridge),
             loop_sinks: clone_via_swap(swap_current_loop_sinks),
+            event_transport: crate::agent_events::transport::current(),
             provider_overrides: clone_via_swap(swap_provider_overrides),
             runtime_provider_endpoint_overrides: clone_via_swap(
                 swap_runtime_provider_endpoint_overrides,
@@ -374,6 +377,10 @@ impl AmbientExecutionScope {
         swap_slot(&mut self.process_admission, swap_process_admission_context);
         swap_slot(&mut self.host_bridge, swap_current_host_bridge);
         swap_slot(&mut self.loop_sinks, swap_current_loop_sinks);
+        swap_slot(
+            &mut self.event_transport,
+            crate::agent_events::transport::swap,
+        );
         swap_slot(&mut self.provider_overrides, swap_provider_overrides);
         swap_slot(
             &mut self.runtime_provider_endpoint_overrides,
@@ -1308,7 +1315,7 @@ mod tests {
     /// write-capable fan-out cross-wire.
     #[tokio::test]
     async fn scoped_tasks_do_not_cross_wire_execution_context() {
-        use crate::stdlib::process::{current_execution_context, set_thread_execution_context};
+        use crate::orchestration::{current_execution_context, set_thread_execution_context};
         let local = tokio::task::LocalSet::new();
         local
             .run_until(async {
@@ -1349,7 +1356,7 @@ mod tests {
             })
             .await;
         // The outer thread is left clean — neither task's context leaked out.
-        assert!(crate::stdlib::process::current_execution_context().is_none());
+        assert!(crate::orchestration::current_execution_context().is_none());
     }
 
     /// F2 regression: two cooperatively-scheduled tasks install DISTINCT

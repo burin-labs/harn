@@ -18,6 +18,7 @@ use harn_parser::{BindingPattern, DiagnosticCode as Code, DictEntry, Node, SNode
 use harn_vm::llm::AGENT_TOOL_HANDLER_RESULT_SCHEMA;
 use std::collections::BTreeSet;
 
+use super::dict_keys::entry_for_key;
 use crate::diagnostic::{LintDiagnostic, LintSeverity};
 
 const RULE_NAME: &str = "untyped-tool-handler-result";
@@ -149,21 +150,6 @@ fn is_handler_result_envelope(entries: &[DictEntry]) -> bool {
                     if value == AGENT_TOOL_HANDLER_RESULT_SCHEMA
             )
         })
-}
-
-fn entry_for_key<'a>(entries: &'a [DictEntry], key: &str) -> Option<&'a DictEntry> {
-    entries
-        .iter()
-        .find(|entry| key_name(&entry.key).as_deref() == Some(key))
-}
-
-fn key_name(node: &SNode) -> Option<String> {
-    match &node.node {
-        Node::StringLiteral(value) | Node::RawStringLiteral(value) | Node::Identifier(value) => {
-            Some(value.clone())
-        }
-        _ => None,
-    }
 }
 
 fn make_diagnostic(span: Span) -> LintDiagnostic {

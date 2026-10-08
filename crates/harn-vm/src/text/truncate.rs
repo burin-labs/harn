@@ -85,10 +85,7 @@ pub fn truncate_start(text: &str, max_chars: usize) -> String {
 /// backs off to the nearest character boundary. When the budget cannot even
 /// hold the marker the result is empty, because emitting the marker would
 /// break the ceiling this function exists to enforce.
-#[expect(
-    clippy::string_slice,
-    reason = "end backs off until is_char_boundary holds"
-)]
+#[expect(clippy::string_slice, reason = "end comes from floor_char_boundary")]
 pub fn truncate_end_bytes(text: &str, max_bytes: usize) -> String {
     if text.len() <= max_bytes {
         return text.to_string();
@@ -96,10 +93,7 @@ pub fn truncate_end_bytes(text: &str, max_bytes: usize) -> String {
     let Some(budget) = max_bytes.checked_sub(ELLIPSIS.len_utf8()) else {
         return String::new();
     };
-    let mut end = budget;
-    while end > 0 && !text.is_char_boundary(end) {
-        end -= 1;
-    }
+    let end = text.floor_char_boundary(budget);
     let mut out = String::with_capacity(end + ELLIPSIS.len_utf8());
     out.push_str(&text[..end]);
     out.push(ELLIPSIS);

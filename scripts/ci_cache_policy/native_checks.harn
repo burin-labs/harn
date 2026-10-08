@@ -290,28 +290,11 @@ pub fn macos_warm_errors(
 }
 
 /**
- * The nightly producer defaults to free GitHub-hosted capacity and opts into
- * Blacksmith through the single ${WINDOWS_BLACKSMITH_ENABLE_VAR} variable.
- */
-fn windows_nightly_blacksmith_runner_expression() -> string {
-  return "$"
-    + "{{ vars.${WINDOWS_BLACKSMITH_ENABLE_VAR} == 'true' && '${BLACKSMITH_16CPU_WINDOWS_RUNNER}' || '${HOSTED_WINDOWS_RUNNER}' }}"
-}
-
-fn windows_blacksmith_tier_expression() -> string {
-  return "$"
-    + "{{ vars.${WINDOWS_BLACKSMITH_ENABLE_VAR} == 'true' && '${BLACKSMITH_RUNNER_TIER}' || '${HOSTED_RUNNER_TIER}' }}"
-}
-
-/**
- * The Blacksmith Windows image does not expose the Hyper-V `New-VHD` command
- * `setup-dev-drive` needs, so the Dev Drive experiment is reachable only on the
- * github-hosted fallback. A variable-only guard would run the action on a tier
- * that cannot execute it.
+ * The public repository's Windows producer always uses GitHub's free standard
+ * runner, so the repository variable is the whole Dev Drive decision.
  */
 fn windows_dev_drive_guard() -> string {
-  return "$"
-    + "{{ vars.HARN_WINDOWS_DEVDRIVE == 'on' && env.${RUNNER_TIER_ENV} == '${HOSTED_RUNNER_TIER}' }}"
+  return "$" + "{{ vars.HARN_WINDOWS_DEVDRIVE == 'on' }}"
 }
 
 fn exact_step_env(job: dict, step_name: string, key: string) -> string {
@@ -478,24 +461,16 @@ fn windows_nightly_producer_errors(
   producer: dict,
 ) -> list<string> {
   let errors: list<string> = []
-  if trim(producer["runs-on"] ?? "") != windows_nightly_blacksmith_runner_expression() {
+  if trim(producer["runs-on"] ?? "") != HOSTED_WINDOWS_RUNNER {
     errors = errors
-      + [
-        "${warm.workflow}:${warm.job} must default to ${HOSTED_WINDOWS_RUNNER}, with ${WINDOWS_BLACKSMITH_ENABLE_VAR}=true opting into ${BLACKSMITH_16CPU_WINDOWS_RUNNER}",
-      ]
-  }
-  if trim(producer?.env?.[RUNNER_TIER_ENV] ?? "") != windows_blacksmith_tier_expression() {
-    errors = errors
-      + ["${warm.workflow}:${warm.job} must mirror its Blacksmith/hosted runner tier"]
+      + ["${warm.workflow}:${warm.job} must use free standard ${HOSTED_WINDOWS_RUNNER}"]
   }
   const dev_drives = matching_named_steps(producer, "Set up Dev Drive")
   if len(dev_drives) != 1
     || trim(to_string(dev_drives[0]?.if ?? ""))
       != windows_dev_drive_guard() {
     errors = errors
-      + [
-        "${warm.workflow}:${warm.job} must skip Hyper-V Dev Drive setup on Blacksmith and retain it for the github-hosted fallback",
-      ]
+      + ["${warm.workflow}:${warm.job} must gate Hyper-V Dev Drive setup on HARN_WINDOWS_DEVDRIVE"]
   }
   if effective_job_env(nightly_workflow, producer, "RUST_MIN_STACK") != "<unset>" {
     errors = errors

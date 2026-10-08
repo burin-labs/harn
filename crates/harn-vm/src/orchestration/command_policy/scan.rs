@@ -105,6 +105,10 @@ pub(super) fn scan_command_risk_scan_json(
         labels.insert("git_force_push".to_string());
         rationale.push("git force-push or remote ref deletion detected");
     }
+    if super::catastrophic::analysis_discards_worktree(&command_analysis) {
+        labels.insert("git_discards_worktree".to_string());
+        rationale.push("git command discards uncommitted working-tree changes");
+    }
     if has_process_kill(&lower) {
         labels.insert("process_kill".to_string());
         rationale.push("process kill command detected");

@@ -89,7 +89,7 @@ canary_read_pairing() {
   CANARY_PAIRED=$numbers
 }
 
-canary_main() {
+canary_dispatch() {
   local repo=${CANARY_REPOSITORY:-} workflow=${CANARY_WORKFLOW:-}
   local revision=${SOURCE_REVISION:-} workspace_version=${WORKSPACE_VERSION:-}
   # The consumer's rehearsal now runs two candidate legs that capacity
@@ -99,7 +99,6 @@ canary_main() {
   # discarded every verdict as unmeasured. 120 minutes leaves headroom over
   # the 90-minute maximum; the job's timeout in consumer-canary.yml stays 10
   # minutes above it so the deadline, not the runner, names the outcome.
-  local poll=${CANARY_POLL_SECONDS:-60} deadline=${CANARY_DEADLINE_SECONDS:-7200}
   # The job joins the owner and the secret's name, so an unset secret arrives
   # as "owner/" and must not reach the API as a half-formed repository.
   [[ "$repo" =~ ^[^/]+/[^/]+$ ]] \
@@ -142,18 +141,49 @@ canary_main() {
   [[ -n "$run_id" ]] || canary_fail dispatch_returned_no_run
   canary_say "CONSUMER_CANARY dispatched run=$run_id ref=$label"
 
-  local status conclusion now
+  CANARY_RUN_ID=$run_id
+  CANARY_STARTED_AT=$started
+}
+
+# One credential owns at most 45 minutes of observation. Workflow windows
+# renew the same scoped App authority and carry the original run and clock.
+canary_observe() {
+  local repo=${CANARY_REPOSITORY:-} run_id=${CANARY_RUN_ID:-} started=${CANARY_STARTED_AT:-}
+  local poll=${CANARY_POLL_SECONDS:-60} deadline=${CANARY_DEADLINE_SECONDS:-7200}
+  local window=${CANARY_WINDOW_SECONDS:-2700} window_started
+  [[ "$repo" =~ ^[^/]+/[^/]+$ ]] || canary_fail consumer_repository_unset
+  CANARY_SECRET_NAME=${repo#*/}
+  [[ "$run_id" =~ ^[1-9][0-9]*$ && "$started" =~ ^[1-9][0-9]*$ ]] \
+    || canary_fail observation_identity_invalid
+  [[ "$window" =~ ^[0-9]+$ && "$window" -le 2700 ]] \
+    || canary_fail observation_window_invalid "run=$run_id"
+  [[ "$poll" =~ ^[0-9]+$ && "$poll" -le 60 && "$deadline" =~ ^-?[0-9]+$ && "$deadline" -le 7200 ]] \
+    || canary_fail observation_budget_invalid "run=$run_id"
+  window_started=$(date +%s)
+  CANARY_PENDING=false
+
+  local status conclusion now record
   while true; do
-    sleep "$poll"
     now=$(date +%s)
-    if ! read -r status conclusion < <(gh api "repos/$repo/actions/runs/$run_id" \
-      --jq '"\(.status) \(.conclusion // "none")"' 2> /dev/null); then
-      status=unreadable
+    ((now >= started)) || canary_fail observation_clock_invalid "run=$run_id"
+    if ((now - started >= deadline)); then
+      canary_fail no_verdict_before_deadline "run=$run_id verdict=unmeasured wall_seconds=$((now - started))"
     fi
+    record=$(gh api "repos/$repo/actions/runs/$run_id" \
+      --jq '"\(.status) \(.conclusion // "none")"' 2> /dev/null) \
+      || canary_fail consumer_read_refused "run=$run_id verdict=unmeasured"
+    read -r status conclusion <<< "$record"
+    case "$status" in
+      completed|queued|in_progress|waiting|pending|requested) ;;
+      *) canary_fail consumer_state_unreported "run=$run_id verdict=unmeasured" ;;
+    esac
     [[ "$status" == completed ]] && break
-    if ((now - started > deadline)); then
-      canary_fail no_verdict_before_deadline "run=$run_id status=$status wall_seconds=$((now - started))"
+    if ((now - window_started >= window)); then
+      CANARY_PENDING=true
+      canary_say "CONSUMER_CANARY pending run=$run_id status=$status wall_seconds=$((now - started))"
+      return 0
     fi
+    sleep "$poll"
   done
 
   local verdict=fail
@@ -163,6 +193,12 @@ canary_main() {
   fi
   canary_say "CONSUMER_CANARY verdict=$verdict conclusion=$conclusion run=$run_id wall_seconds=$((now - started))"
   [[ "$verdict" == pass ]] || canary_fail consumer_rehearsal_failed "run=$run_id conclusion=$conclusion"
+}
+
+canary_main() {
+  canary_dispatch
+  canary_observe
+  [[ "$CANARY_PENDING" == false ]] || canary_fail observation_window_elapsed "run=$CANARY_RUN_ID verdict=unmeasured"
 }
 
 canary_decide() {
@@ -176,7 +212,7 @@ canary_decide() {
     echo "run=true" >> "$output"
     return 0
   fi
-  local history id head settled last= last_run=
+  local history id head settled last='' last_run=''
   history=$(gh api "repos/$repo/actions/workflows/consumer-canary.yml/runs?branch=main&status=completed&per_page=20" \
     --jq '.workflow_runs[] | "\(.id) \(.head_sha)"' 2> /dev/null) \
     || canary_fail settled_history_unreadable
@@ -204,9 +240,15 @@ canary_decide() {
 }
 
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
-  if [[ "${1:-}" == --decide ]]; then
-    canary_decide
-  else
-    canary_main
-  fi
+  case "${1:-}" in
+    --decide) canary_decide ;;
+    --dispatch)
+      canary_dispatch
+      [[ -n "${GITHUB_OUTPUT:-}" ]] || canary_fail observation_output_unset
+      printf 'run_id=%s\nstarted_at=%s\n' "$CANARY_RUN_ID" "$CANARY_STARTED_AT" >> "$GITHUB_OUTPUT"
+      ;;
+    --observe) canary_observe ;;
+    "") canary_main ;;
+    *) canary_fail invocation_unrecognized ;;
+  esac
 fi

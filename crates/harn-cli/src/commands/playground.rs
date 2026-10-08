@@ -343,6 +343,9 @@ fn typecheck_program(
     let mut rendered = String::new();
     let mut had_error = false;
     for diagnostic in &diagnostics {
+        if !diagnostic.severity.reported_when_executing() {
+            continue;
+        }
         if diagnostic.severity == DiagnosticSeverity::Error {
             had_error = true;
         }

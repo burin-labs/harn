@@ -80,15 +80,17 @@
 #   HARN_TARGET_GC_ROOTS        space-separated repo search roots
 #                               (default: "$HOME/projects $HOME/.codex/worktrees /private/tmp")
 #   HARN_TARGET_GC_FIND_DEPTH   max depth for nested worktree discovery (default 3)
-#   HARN_TARGET_GC_MIN_AGE_SECS minimum idle age before removal (default 10800)
+#   HARN_TARGET_GC_MIN_AGE_SECS minimum idle age before any automatic removal,
+#                               including size enforcement (default 10800)
 #   HARN_TARGET_GC_KEEP_RECENT  warm trees per root kept whatever their age
 #                               (default 10; a negative value disables the cap)
 #   HARN_TARGET_GC_MAX_IDLE_SECS idle age past which a warm tree outside the
 #                               most-recent set is retired (default 259200)
 #   HARN_TARGET_GC_MAX_BYTES    per-root size ceiling; once the entries this
-#                               run kept exceed it, the coldest are retired
-#                               until the root fits. 0 (the default) disables
-#                               it. Off by default because enforcing it costs
+#                               run kept exceed it, the coldest entries past
+#                               the minimum idle age are retired until the root
+#                               fits. 0 (the default) disables it. Off by
+#                               default because enforcing it costs
 #                               a full `du` of every kept entry, which is
 #                               seconds to minutes on a large root and is not
 #                               a price every dev-setup should pay; enable it
@@ -516,8 +518,10 @@ release_keep_file="$(mktemp)"
 # root, so the retention cap below can rank them by recency.
 warm_file="$(mktemp)"
 # Entries this run kept whose ONLY protection is rank or age. The size pass may
-# evict from here and nowhere else: a live process or the caller's own entry is
-# never a candidate no matter how far over the ceiling the root sits.
+# consider entries from here and nowhere else, then applies the same minimum
+# idle age as the orphan pass before evicting one. A live process, recent
+# activity, or the caller's own entry wins no matter how far over the ceiling
+# the root sits.
 evictable_file="$(mktemp)"
 # Print the summary from the EXIT trap so no stray failure can ever make the
 # GC die silently again.
@@ -730,7 +734,9 @@ entry_kib() {
 # age alone. Count and age cannot answer "is this root too big": a fleet that
 # touches every entry inside the idle bound keeps all of them, so a root can
 # sit at any size and every rule still reports a pass. This runs last so that
-# liveness, the caller's own entry, and an explicit name all outrank it.
+# liveness, recent activity, the caller's own entry, and an explicit name all
+# outrank it. An old oversized tree remains reclaimable; a fresh one makes the
+# ceiling explicitly unproven until it crosses the shared idle-age boundary.
 enforce_size_ceiling() {
   local target_root="$1"
   [ "$max_bytes" -gt 0 ] || return 0
@@ -763,6 +769,10 @@ enforce_size_ceiling() {
     [ "$total_kib" -gt "$ceiling_kib" ] || break
     case "$path" in "$target_root"/*) ;; *) continue ;; esac
     [ -d "$path" ] || continue
+    if [ "$mtime" -ge "$cutoff" ]; then
+      echo "keep (recently active within ${min_age}s; size grace): $(basename "$path")"
+      continue
+    fi
     kib="$(entry_kib "$path")" || continue
     remove_entry "$target_root" "$path" "over the size ceiling"
     # Only count the space back when the entry is really gone. Under --dry-run

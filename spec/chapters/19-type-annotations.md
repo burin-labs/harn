@@ -740,8 +740,12 @@ wrappers pick up the same narrowing.
   is true for either success; `repair_tier` is `"local"` or `"llm"`
   when a repair produced the payload and `nil` otherwise. Transport
   failures skip both repair tiers.
-- `schema_parse<T>(value: unknown, schema: Schema<T>) -> Result<T, string>`
-- `schema_check<T>(value: unknown, schema: Schema<T>) -> Result<T, string>`
+- `schema_parse<T>(value: unknown, schema: Schema<T>) -> Result<T, SchemaError>`
+- `schema_check<T>(value: unknown, schema: Schema<T>) -> Result<T, SchemaError>`
+- `json_decode<T>(text: string, schema: Schema<T>) -> Result<T, SchemaError>`.
+  Parses and validates in one step; malformed JSON is an `Err`.
+  `SchemaError` is `{message: string, errors: list<string>, issues:
+  list<{path: string, message: string, code: string}>, value?: any}`.
 - `schema_expect<T>(value: unknown, schema: Schema<T>) -> T`
 - `schema_recover<T>(text: string, schema: Schema<T>, options?:
   {repair?: bool | dict, apply_defaults?: bool,

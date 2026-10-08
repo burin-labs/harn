@@ -100,9 +100,11 @@ harn tool run server.harn widgets get --help
 harn tool completions server.harn --shell zsh > _widgets
 ```
 
-Each input property becomes a long flag by default. Underscores become hyphens
-in the flag spelling and retain their original names in the handler argument
-object. `cli.arguments` can make a property positional, change its long flag,
+Each input property becomes a long flag by default. Leading underscores are
+omitted and remaining underscores become hyphens in the flag spelling. The
+handler argument object retains the original property name: `_nl_intent`
+becomes `--nl-intent`. Explicit spellings remain unchanged and must be valid;
+ambiguous or reserved flags are rejected. `cli.arguments` can make a property positional, change its long flag,
 add one short flag and long aliases, group and order help, mark an array as a
 repeatable flag, or attach a portable completion hint. These settings change
 presentation only; the input JSON Schema remains the validation owner.

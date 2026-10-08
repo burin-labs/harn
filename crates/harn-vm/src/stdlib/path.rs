@@ -203,8 +203,15 @@ fn with_stem(p: &str, new_stem: &str) -> String {
 /// Compute the relative path from `base` to `p`. Returns `None` if `p` is
 /// not reachable as a descendant of `base` via relative traversal.
 fn relative_to(p: &str, base: &str) -> Option<String> {
-    let (p_abs, p_drive, p_segs) = split_segments(&normalize(p));
-    let (b_abs, b_drive, b_segs) = split_segments(&normalize(base));
+    // `normalize` keeps a lone `.` for the current directory; it names no
+    // segment, so drop it before counting how far `base` sits below `p`.
+    let segments = |path: &str| {
+        let (absolute, drive, mut segs) = split_segments(&normalize(path));
+        segs.retain(|seg| seg != ".");
+        (absolute, drive, segs)
+    };
+    let (p_abs, p_drive, p_segs) = segments(p);
+    let (b_abs, b_drive, b_segs) = segments(base);
     if p_abs != b_abs || p_drive != b_drive {
         return None;
     }
@@ -213,6 +220,11 @@ fn relative_to(p: &str, base: &str) -> Option<String> {
         .zip(b_segs.iter())
         .take_while(|(a, b)| a == b)
         .count();
+    // Climbing out of a base that itself starts above the working directory
+    // (`../x`) would need the names of directories the paths never mention.
+    if b_segs[common..].iter().any(|seg| seg == "..") {
+        return None;
+    }
     let up = b_segs.len() - common;
     let mut out: Vec<String> = std::iter::repeat_n("..".to_string(), up).collect();
     out.extend(p_segs[common..].iter().cloned());
@@ -674,6 +686,17 @@ mod tests {
         assert_eq!(relative_to("/a/b/c", "/a/b").as_deref(), Some("c"));
         assert_eq!(relative_to("/a/c", "/a/b").as_deref(), Some("../c"));
         assert_eq!(relative_to("a/b/c", "a/b").as_deref(), Some("c"));
+        assert_eq!(
+            relative_to("src/main.rs", ".").as_deref(),
+            Some("src/main.rs")
+        );
+        assert_eq!(
+            relative_to("src/main.rs", "./").as_deref(),
+            Some("src/main.rs")
+        );
+        assert_eq!(relative_to(".", "a").as_deref(), Some(".."));
+        assert_eq!(relative_to("..", ".").as_deref(), Some(".."));
+        assert_eq!(relative_to("a", "../b"), None);
         assert_eq!(relative_to("/a", "b"), None);
         assert_eq!(relative_to("C:/a/b", "D:/a/b"), None);
     }

@@ -46,7 +46,7 @@ Repairs are tagged with a six-level safety class so `harn fix --apply --safety <
 | [`MOD`](#mod--modules-and-exports) | Modules and exports | 7 |
 | [`RMD`](#rmd--reminder-lifecycle) | Reminder lifecycle | 8 |
 | [`SUS`](#sus--suspend--resume-lifecycle) | Suspend / resume lifecycle | 13 |
-| [`LNT`](#lnt--lint-rules) | Lint rules | 78 |
+| [`LNT`](#lnt--lint-rules) | Lint rules | 79 |
 | [`FMT`](#fmt--formatter) | Formatter | 3 |
 | [`IMP`](#imp--import-resolution) | Import resolution | 3 |
 | [`OWN`](#own--ownership-and-mutability) | Ownership and mutability | 4 |
@@ -337,6 +337,7 @@ Lints are not hard errors. The code compiles, but Harn flags the pattern as like
 | [`HARN-LNT-077`](#harn-lnt-077) | record literal copies fields one by one from a value that `pick` can select | `records/pick-fields` | `behavior-preserving` |
 | [`HARN-LNT-078`](#harn-lnt-078) | tool descriptor spells its per-parameter map as a JSON Schema document | — | — |
 | [`HARN-LNT-079`](#harn-lnt-079) | evaluation site hands a native decision route an input whose declared type has no finite size bound | — | — |
+| [`HARN-LNT-080`](#harn-lnt-080) | `?.` chain hedges every field of an untyped value instead of decoding it once | — | — |
 
 ## FMT — Formatter
 
@@ -4453,6 +4454,65 @@ This reports as a warning. A bound the rule cannot see may still exist: it reads
 declared types in one file, so a type that arrives through an import, or a
 binding with no annotation, is not reported. Silence here means the rule found
 no unbounded construct it could read, not that the input is proven bounded.
+
+### `HARN-LNT-080`
+
+**Category:** `LNT` (Lint rules) &nbsp;·&nbsp; **API stability:** `stable`
+
+`?.` chain hedges every field of an untyped value instead of decoding it once
+
+#### What it means
+
+A chain of two or more `?.` links reads fields from a value whose type the
+checker does not know: `any`, `unknown`, an open `dict`, or a value with no
+inferred type. Parsed JSON, command output decoded by hand, and responses
+passed around as `dict` all look like this:
+
+```harn,ignore
+const pr = response.data?.repository?.pullRequest
+const head = to_string(pr?.headRefOid ?? "")
+```
+
+Every link hedges against a shape nobody declared. A misspelled field reads as
+`nil` and falls through to the default, so the code runs and reports nothing.
+
+The rule fires once per chain, on its second optional link. A chain over a
+typed record whose fields are declared optional is real nil handling and is
+not reported. The finding is advisory (`info`): existing code still carries
+thousands of these chains, so it does not fail `harn lint --strict`.
+
+#### How to fix
+
+Declare the shape you rely on and decode the value once, where it enters. When
+the value is your own data passed around as `dict`, annotate the parameter or
+return type that erased it instead.
+
+```harn
+type PullRequest = {headRefOid: string, isDraft: bool, mergedAt: string?}
+type Snapshot = {repository: {pullRequest: PullRequest?}}
+
+fn head_of(raw: unknown) -> Result<string, string> {
+  match schema_parse(raw, schema_of(Snapshot)) {
+    Result.Err(error) -> {
+      return Err(error.message)
+    }
+    Result.Ok(snapshot) -> {
+      const pr = snapshot.repository.pullRequest
+      if pr == nil {
+        return Err("pull request not found")
+      }
+      return Ok(pr.headRefOid)
+    }
+  }
+}
+```
+
+`schema_parse` returns `Result<T, SchemaError>`, so a function that returns a
+`Result` can write `schema_parse(raw, schema_of(Snapshot))?` instead. Unknown
+fields pass validation. A field written `name: T?` must be present but may be
+`null`; `name?: T` may also be absent.
+
+See "Decode at the boundary" in the error-handling guide.
 
 ### `HARN-FMT-001`
 

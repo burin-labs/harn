@@ -1158,7 +1158,7 @@ async fn call_mock_harness_method(
                 let url = string_arg(args, 0, "HarnessNet.get")?;
                 Ok(state
                     .net_get(url)
-                    .map(vm_string)
+                    .map(|body| crate::http::mock_text_response(url, body))
                     .ok_or_else(|| VmError::CategorizedError {
                         message: format!("MockHarness has no net_get response for {url}"),
                         category: ErrorCategory::NotFound,

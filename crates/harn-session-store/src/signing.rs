@@ -401,6 +401,7 @@ pub fn re_anchor_events(events: &[StoredEvent], new_session_id: &str) -> Vec<Sto
     let mut prev_hash: Option<String> = None;
     for event in events {
         let mut copied = event.clone();
+        copied.bind_canonical_origin(event.canonical_origin_session_id());
         copied.session_id = new_session_id.to_string();
         copied.prev_hash = prev_hash.clone();
         copied.record_hash = compute_record_hash(&copied);

@@ -11,7 +11,7 @@ fn main(harness: Harness) {
     {allow: [domain_wildcard("*.github.com")], deny: [domain("evil.github.com")], default: "deny"},
   )
   const restricted = harness.with_net_policy(policy)
-  const ok = restricted.net.get("https://api.github.com/probe")
+  const ok = restricted.net.get("https://api.github.com/probe").body
   harness.stdio.println("api=" + ok)
   let deny_err = nil
   try {

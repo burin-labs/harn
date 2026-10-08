@@ -565,7 +565,7 @@ fn prepare_argument(
         Some(
             projection
                 .long
-                .unwrap_or_else(|| property.replace('_', "-")),
+                .unwrap_or_else(|| property.trim_start_matches('_').replace('_', "-")),
         )
     };
     for spelling in long.iter().chain(projection.aliases.iter()) {
@@ -773,6 +773,103 @@ mod tests {
         assert_eq!(leaf.arguments()[0].position(), Some(0));
         assert_eq!(leaf.arguments()[1].long(), Some("tag"));
         assert!(leaf.arguments()[1].repeatable());
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn binder_intent_parameter_prepares_without_changing_its_json_name() {
+        let source = r#"
+import { natural_language_executor_schema_transform } from "std/llm/tool_binder"
+import { tool_inject_param } from "std/llm/tool_middleware"
+pipeline main(harness: Harness) {
+  let tools = tool_registry()
+  tools = tool_define(tools, "create_widget", "Create", {
+    handler: { _ -> "created" },
+    input_schema: {
+      type: "object",
+      properties: {widget_id: {type: "integer"}, tags: {type: "array", items: {type: "string"}}},
+      required: ["widget_id"], additionalProperties: false,
+    },
+    returns: {type: "string"},
+  })
+  const transformed = natural_language_executor_schema_transform()(tools.tools[0])
+  const nested = tool_inject_param(transformed, "nested", {
+    type: "object", properties: {value: {type: "string"}}, required: ["value"],
+  }, {required: false})
+  harness.stdio.println(json_stringify(nested.inputSchema))
+}
+"#;
+        let chunk = crate::compile_source(source).expect("compile real binder projection");
+        let local = tokio::task::LocalSet::new();
+        let schema = local
+            .run_until(async {
+                let mut vm = crate::Vm::new();
+                crate::register_vm_stdlib(&mut vm);
+                vm.execute(&chunk)
+                    .await
+                    .expect("run real binder projection");
+                serde_json::from_str::<JsonValue>(vm.output().trim()).expect("binder schema output")
+            })
+            .await;
+        assert_eq!(schema["properties"]["_nl_intent"]["type"], "string");
+        let mut entry = tool();
+        entry.input_schema = schema;
+        let prepared = super::super::PreparedToolCatalog::prepare(catalog(entry))
+            .expect("prepare complete binder contract");
+        let intent = prepared.cli_tree().commands()[0].children()[0]
+            .arguments()
+            .iter()
+            .find(|arg| arg.property() == "_nl_intent")
+            .expect("intent parameter retained");
+        assert_eq!(intent.long(), Some("nl-intent"));
+        assert!(prepared
+            .validate_input(
+                "create_widget",
+                &json!({
+                    "widget_id": 1, "_nl_intent": "create one", "nested": {"value": "actual"},
+                })
+            )
+            .is_ok());
+        assert!(
+            prepared
+                .validate_input(
+                    "create_widget",
+                    &json!({
+                        "widget_id": 1, "nested": {},
+                    })
+                )
+                .is_err(),
+            "a nested required array must retain its validation effect"
+        );
+    }
+
+    #[test]
+    fn derived_parameter_names_still_reject_collisions_and_reserved_flags() {
+        let mut entry = tool();
+        entry.input_schema["properties"]["_tags"] = json!({"type": "string"});
+        entry.cli.arguments.remove("tags");
+        let error = PreparedCliTree::prepare(&catalog(entry))
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("shared by properties"), "{error}");
+        let mut reserved = tool();
+        reserved.input_schema["properties"]["_harn_input"] = json!({"type": "string"});
+        let error = PreparedCliTree::prepare(&catalog(reserved))
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("reserved --harn-input"), "{error}");
+        let mut empty = tool();
+        empty.input_schema["properties"]["___"] = json!({"type": "string"});
+        assert!(PreparedCliTree::prepare(&catalog(empty)).is_err());
+    }
+
+    #[test]
+    fn explicit_parameter_spellings_are_validated_without_normalization() {
+        let mut entry = tool();
+        entry.cli.arguments.get_mut("tags").unwrap().long = Some("-tags".into());
+        let error = PreparedCliTree::prepare(&catalog(entry))
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("invalid CLI spelling ---tags"), "{error}");
     }
 
     #[test]

@@ -1,0 +1,186 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/code_index/change_signature.response.json",
+  "title": "code_index.change_signature response",
+  "description": "The shared code_index edit envelope (the `rename_symbol` response shape) plus this operation's refusal tags and fields. `applied` carries the per-file edits and every rewritten call site; with `dry_run` nothing was written, and `applied: false` with `failed_paths_with_reasons` means some writes failed after every plan passed. Every other tag is a refusal that wrote nothing, with the blocking locations in `sites` and the reason in `details`. A request that does not fit the declaration (an unknown `from`, a new parameter without `call_value` or `default`, an unchanged list) raises an invalid-parameter error instead of returning a result.",
+  "type": "object",
+  "properties": {
+    "result": {
+      "type": "string",
+      "enum": [
+        "applied",
+        "no_match",
+        "ambiguous_symbol",
+        "conflict",
+        "unsupported_language",
+        "syntax_error",
+        "error",
+        "parameter_in_use",
+        "value_reference",
+        "unsupported_call_site",
+        "overrides_present"
+      ],
+      "description": "`ambiguous_symbol`: several declarations match the seed, another free function shares the name, or a call by that name cannot reach this declaration; candidates are in `warnings`. `conflict`: renaming a parameter would capture an existing name in the body. `error`: the declaration's parameter list cannot be rewritten (a comment inside it, keyword-only markers). `parameter_in_use`: the body still uses a removed parameter. `value_reference`: the function is used as a value. `unsupported_call_site`: a call passes a spread, splat, or an argument count that cannot be remapped. `overrides_present`: the function is a trait, interface, or overridden method."
+    },
+    "applied": { "type": "boolean" },
+    "dry_run": { "type": "boolean" },
+    "scope": { "type": "string", "enum": ["workspace"] },
+    "symbol": {
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "path": { "type": "string" },
+        "line": { "type": ["integer", "null"] },
+        "kind": { "type": ["string", "null"] }
+      },
+      "required": ["name", "path"],
+      "additionalProperties": false
+    },
+    "touched_files": {
+      "type": "array",
+      "description": "One entry per rewritten file. Empty on refusals.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "path": { "type": "string" },
+          "language": { "type": "string" },
+          "before_sha256": { "type": "string" },
+          "after_sha256": { "type": "string" },
+          "edits": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "start_byte": { "type": "integer", "minimum": 0 },
+                "end_byte": { "type": "integer", "minimum": 0 },
+                "start_row": { "type": "integer", "minimum": 0 },
+                "start_col": { "type": "integer", "minimum": 0 },
+                "end_row": { "type": "integer", "minimum": 0 },
+                "end_col": { "type": "integer", "minimum": 0 },
+                "before": { "type": "string" },
+                "after": { "type": "string" }
+              },
+              "required": ["start_byte", "end_byte", "before", "after"],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": ["path", "language", "edits"],
+        "additionalProperties": false
+      }
+    },
+    "conflicts": {
+      "type": "array",
+      "description": "On `conflict`: where a renamed parameter would capture an existing name.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "path": { "type": "string" },
+          "row": { "type": "integer", "minimum": 0 },
+          "col": { "type": "integer", "minimum": 0 },
+          "shadow": { "type": "string" }
+        },
+        "required": ["path", "shadow"],
+        "additionalProperties": false
+      }
+    },
+    "warnings": {
+      "type": "array",
+      "description": "On `ambiguous_symbol`: one `{path, line, kind}` candidate per competing declaration or call. Empty otherwise.",
+      "items": {
+        "oneOf": [
+          { "type": "string" },
+          {
+            "type": "object",
+            "properties": {
+              "path": { "type": "string" },
+              "line": { "type": "integer", "minimum": 1 },
+              "kind": { "type": "string" }
+            },
+            "required": ["path", "line", "kind"],
+            "additionalProperties": false
+          }
+        ]
+      }
+    },
+    "failed_paths_with_reasons": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "path": { "type": "string" },
+          "reason": { "type": "string" }
+        },
+        "required": ["path", "reason"],
+        "additionalProperties": false
+      }
+    },
+    "match_count": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Total edits across `touched_files`: the header, renamed body uses, and call-site argument lists."
+    },
+    "details": { "type": "string" },
+    "fallback_suggestion": {
+      "type": "string",
+      "description": "Present only on `unsupported_language`: the text-edit path to fall back to."
+    },
+    "call_sites_updated": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Number of call sites rewritten (or planned, on a dry run)."
+    },
+    "sites": {
+      "type": "array",
+      "description": "On `applied`: every rewritten call site. On a refusal: every blocking location.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "path": { "type": "string" },
+          "line": { "type": "integer", "minimum": 1 },
+          "kind": { "type": "string" },
+          "reason": { "type": "string" },
+          "text": { "type": "string", "description": "The trimmed source line." }
+        },
+        "required": ["path", "line", "kind", "reason", "text"],
+        "additionalProperties": false
+      }
+    },
+    "parameters_before": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string" },
+          "text": { "type": "string" }
+        },
+        "required": ["name", "text"],
+        "additionalProperties": false
+      },
+      "description": "Each current parameter, excluding the receiver. Present on every result after the declaration was read, refusals included; empty before that."
+    },
+    "parameters_after": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Source text of each parameter in the new header, receiver first. Empty on refusals."
+    }
+  },
+  "required": [
+    "result",
+    "applied",
+    "dry_run",
+    "scope",
+    "symbol",
+    "touched_files",
+    "conflicts",
+    "warnings",
+    "failed_paths_with_reasons",
+    "match_count",
+    "details",
+    "call_sites_updated",
+    "sites",
+    "parameters_before",
+    "parameters_after"
+  ],
+  "additionalProperties": false
+}

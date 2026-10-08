@@ -93,10 +93,9 @@ impl ThinkingStreamSplitter {
                     if remaining <= hold {
                         self.carry.push_str(&combined[cursor..]);
                     } else {
-                        let mut split = combined.len() - hold;
-                        while split > cursor && !combined.is_char_boundary(split) {
-                            split -= 1;
-                        }
+                        let split = combined
+                            .floor_char_boundary(combined.len() - hold)
+                            .max(cursor);
                         self.thinking.push_str(&combined[cursor..split]);
                         self.carry.push_str(&combined[split..]);
                     }
@@ -116,12 +115,11 @@ impl ThinkingStreamSplitter {
                     if remaining <= hold {
                         self.carry.push_str(&combined[cursor..]);
                     } else {
-                        let mut split = combined.len() - hold;
                         // Floor to char boundary to avoid slicing inside a
                         // multi-byte UTF-8 codepoint.
-                        while split > cursor && !combined.is_char_boundary(split) {
-                            split -= 1;
-                        }
+                        let split = combined
+                            .floor_char_boundary(combined.len() - hold)
+                            .max(cursor);
                         visible_out.push_str(&combined[cursor..split]);
                         self.carry.push_str(&combined[split..]);
                     }

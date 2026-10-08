@@ -721,6 +721,7 @@ public struct HarnToolLifecycleMeta: Codable, Sendable, Equatable {
     public var errorCategory: HarnToolCallErrorCategory?
     public var executionDurationMs: Double?
     public var executor: HarnACPToolExecutor?
+    public var intent: String?
     public var mutationStatus: HarnToolMutationStatus?
     public var parsing: Bool?
     public var rawInputPartial: String?
@@ -1200,5 +1201,7 @@ public struct HarnMCPOAuthDynamicClientRegistrationRequest: Codable, Sendable, E
     append_swift_session_recap_types(&mut out);
     super::plan_records::append(&mut out, super::records::Target::Swift);
     super::inference_admission::append(&mut out, super::records::Target::Swift);
+    super::canonical_history::append(&mut out, super::records::Target::Swift);
+    super::prompt_correlation::append(&mut out, super::records::Target::Swift);
     out
 }

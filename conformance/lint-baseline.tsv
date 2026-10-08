@@ -115,6 +115,7 @@
 3	stdlib/poll_until_helpers.harn	HARN-LNT-018
 3	stdlib/rules_engine.harn	HARN-LNT-016
 1	stdlib/schema_validator.harn	HARN-LNT-020
+1	stdlib/split_separator_required.harn	HARN-STD-003
 9	stdlib/stdlib_testing_snapshot.harn	HARN-LNT-018
 3	stdlib/stdlib_testing_toolkit.harn	HARN-LNT-018
 1	stdlib/tui_select_from.harn	HARN-LNT-018

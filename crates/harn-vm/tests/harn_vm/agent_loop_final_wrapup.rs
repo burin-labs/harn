@@ -355,11 +355,11 @@ fn exhaustion_mid_tool_use_fires_wrapup_and_surfaces_sentinel() {
         lines[2], "1",
         "expected exactly one wrap-up LLM call; lines: {lines:?}"
     );
-    // The surfaced final text is the wrap-up summary, not the dangling
-    // tool-call turn.
+    // The summary remains diagnostic history after budget exhaustion, rather
+    // than becoming an admitted answer.
     assert_eq!(
-        lines[3], "true",
-        "expected surfaced text to contain the wrap-up summary; lines: {lines:?}"
+        lines[3], "false",
+        "a rejected wrap-up must stay provisional; lines: {lines:?}"
     );
 }
 
@@ -404,8 +404,8 @@ keep_exploring({})
         "evidence line must be human-readable; lines: {lines:?}"
     );
     assert_eq!(
-        lines[10], "true",
-        "summary prose must remain visible; lines: {lines:?}"
+        lines[10], "false",
+        "unconsumed tool prose must stay provisional; lines: {lines:?}"
     );
 }
 
@@ -456,8 +456,8 @@ fn final_wrapup_surfaces_a_malformed_unconsumed_tool_call_diagnostic() {
         "evidence line must be human-readable; lines: {lines:?}"
     );
     assert_eq!(
-        lines[10], "true",
-        "summary prose must remain visible; lines: {lines:?}"
+        lines[10], "false",
+        "malformed tool prose must stay provisional; lines: {lines:?}"
     );
 }
 
@@ -700,8 +700,8 @@ fn host_directive_rides_trailing_message_and_keeps_system_stable() {
         "the context block must carry its authoritative-facts label; lines: {lines:?}"
     );
     assert_eq!(
-        lines[7], "true",
-        "the host wrap-up summary must be surfaced as the run text; lines: {lines:?}"
+        lines[7], "false",
+        "host-directed wrap-up must retain the rejected outcome; lines: {lines:?}"
     );
 }
 

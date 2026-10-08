@@ -68,21 +68,6 @@
 - [Use Harn from ACP editor hosts](./acp-editor-hosts.md)
 - [Run a portable reducer in a browser](./portable-kernel-browser.md)
 
-## Migrations
-
-- [Portable kernel artifacts](./migrations/portable-kernel-v1.md)
-- [Agent plane cutover](./migrations/agent-plane-cutover.md)
-
-- [0.6.x → 0.7.0](./migrations/v0.7.md)
-- [Migrating to 0.10](./migrations/v0.10.md)
-- [`const`/`let` keyword scheme](./migrations/const-let.md)
-- [Pure collection method names](./migrations/pure-collection-methods.md)
-- [Prompt templates: v2](./migrations/template-engine-v2.md)
-- [Package-root prompt assets](./migrations/package-root-prompt-assets.md)
-- [Schema-as-type](./migrations/schema-as-type.md)
-- [Rust connectors → Harn packages](./migrations/rust-connectors-to-harn-packages.md)
-- [harn-hostlib host contracts](./migrations/harn-hostlib-host-contracts.md)
-
 # Reference
 
 ## Language
@@ -297,7 +282,6 @@
 - [Cron connector](./connectors/cron.md)
 - [GitHub app connector](./connectors/github.md)
 - [Linear connector](./connectors/linear.md)
-- [Notion connector](./connectors/notion.md)
 - [Slack events connector](./connectors/slack-events.md)
 - [Generic webhook connector](./connectors/webhook.md)
 - [A2A push connector](./connectors/a2a-push.md)
@@ -320,6 +304,7 @@
 - [CLI `--json` contract](./cli-json-contract.md)
 - [Extending the CLI in `.harn`](./cli-extending-in-harn.md)
 - [Tool registry adapters](./tool-registry-adapters.md)
+- [Tool invocation preparation](./tool-invocation-preparation.md)
 - [Tool adapter architecture](./tool-adapter-architecture.md)
 - [`std/cli/argparse`](./cli-argparse-reference.md)
 - [`std/cli/envelope`](./cli-envelope-reference.md)
@@ -336,6 +321,7 @@
 - [Editor integration](./editor-integration.md)
 - [Testing](./testing.md)
 - [Secret store (hostlib)](./hostlib/secret_store.md)
+- [Git repository inspection (hostlib)](./hostlib/git-inspection.md)
 - [Text similarity / embeddings (hostlib)](./hostlib/embed.md)
 - [Staged filesystem (hostlib)](./hostlib/staged-fs.md)
 - [Per-tool-call FS snapshots (hostlib)](./hostlib/fs-snapshot.md)
@@ -398,12 +384,13 @@
 
 - [Maintainer release workflow](./maintainer-release.md)
 - [Release assets manifest](./dev/release-assets-manifest.md)
+- [Release opener outcome](./dev/release-opener-receipt.md)
 - [Release runner policy](./dev/release-runner-policy.md)
 - [Release binary-size policy](./dev/release-binary-size-policy.md)
 - [Reusable bump-harn workflow](./dev/reusable-bump-harn-runtime.md)
 - [Use the CI recovery workflow](./dev/ci-preemption-recovery.md)
 - [Merge overrides](./dev/merge-overrides.md)
-- [Sprint fast CI](./dev/sprint-fast-ci.md)
+- [Post-merge CI tier](./dev/post-merge-tier.md)
 - [Agent shell guard](./dev/agent-shell-guard.md)
 - [Deterministic test patterns](./dev/testing.md)
 - [Check documentation examples](./dev/check-docs-snippets.md)

@@ -497,7 +497,6 @@ pub(in crate::commands::orchestrator::listener) fn normalize_headers(
         ("x-slack-request-timestamp", "X-Slack-Request-Timestamp"),
         ("x-slack-retry-num", "X-Slack-Retry-Num"),
         ("x-slack-retry-reason", "X-Slack-Retry-Reason"),
-        ("x-notion-signature", "X-Notion-Signature"),
         ("request-id", "request-id"),
         ("x-request-id", "x-request-id"),
         ("webhook-id", "webhook-id"),

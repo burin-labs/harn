@@ -56,7 +56,7 @@ pipeline test(harness: Harness, task: unknown) {
         text: "Deploying now.",
         tool_calls: [{id: "tool2", name: "deploy_service", arguments: {env: "prod"}}],
       },
-      llm_text("<done>##DONE##</done>"),
+      llm_text("<user_response>Called the deploy tool.</user_response><done>##DONE##</done>"),
     ],
     { ->
       const result = agent_loop(

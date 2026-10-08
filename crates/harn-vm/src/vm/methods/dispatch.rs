@@ -198,4 +198,70 @@ mod drift_guard_tests {
             );
         }
     }
+
+    /// Method names in the `match method { "a" | "b" => ... }` arms of a VM
+    /// dispatch source file, including continuation lines that start with
+    /// `| "c"`. Lines whose quoted names are followed by anything other than
+    /// `=>`, a guard, or a continuation (format args, `vec![...]` items) are
+    /// ignored.
+    fn vm_arm_method_names(source: &str) -> std::collections::BTreeSet<&str> {
+        let mut names = std::collections::BTreeSet::new();
+        for line in source.lines() {
+            let mut rest = line.trim_start();
+            rest = rest.strip_prefix("| ").unwrap_or(rest);
+            let mut found = Vec::new();
+            while let Some(after_quote) = rest.strip_prefix('"') {
+                let Some((name, tail)) = after_quote.split_once('"') else {
+                    break;
+                };
+                found.push(name);
+                rest = tail.trim_start();
+                match rest.strip_prefix("| ") {
+                    Some(next) => rest = next,
+                    None => break,
+                }
+            }
+            let is_arm = rest.is_empty() || rest.starts_with("=>") || rest.starts_with("if ");
+            let all_idents = found.iter().all(|name| {
+                !name.is_empty()
+                    && name.chars().all(|c| {
+                        c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' || c == '?'
+                    })
+            });
+            if is_arm && all_idents {
+                names.extend(found);
+            }
+        }
+        names
+    }
+
+    /// The reverse direction of the tests above: every method a VM dispatch
+    /// accepts must be in the registry, or `harn check` reports a false
+    /// HARN-NAM-005 for a call the runtime supports.
+    #[test]
+    fn vm_dispatch_methods_are_all_registered() {
+        let dispatches: [(&str, &str, &[&str]); 5] = [
+            ("string", include_str!("string.rs"), reg::STRING_METHODS),
+            ("list", include_str!("list.rs"), reg::LIST_METHODS),
+            ("set", include_str!("set.rs"), reg::SET_METHODS),
+            ("dict", include_str!("dict.rs"), reg::DICT_METHODS),
+            ("range", include_str!("range.rs"), reg::RANGE_METHODS),
+        ];
+        for (label, source, registry) in dispatches {
+            let vm_names = vm_arm_method_names(source);
+            assert!(
+                vm_names.contains("count"),
+                "{label} dispatch scan found no arms; the scanner no longer matches the source"
+            );
+            let missing: Vec<&str> = vm_names
+                .into_iter()
+                .filter(|name| !registry.contains(name))
+                .collect();
+            assert!(
+                missing.is_empty(),
+                "the VM {label} dispatch accepts {missing:?} but the typechecker registry \
+                 omits them; add them to method_registry.rs"
+            );
+        }
+    }
 }

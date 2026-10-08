@@ -447,6 +447,7 @@ fn type_diagnostic_as_lint(diagnostic: &harn_parser::TypeDiagnostic) -> Option<L
         severity: match diagnostic.severity {
             harn_parser::DiagnosticSeverity::Warning => LintSeverity::Warning,
             harn_parser::DiagnosticSeverity::Error => LintSeverity::Error,
+            harn_parser::DiagnosticSeverity::Info => LintSeverity::Info,
         },
         suggestion: diagnostic.help.clone(),
         fix: diagnostic.fix.clone(),

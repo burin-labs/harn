@@ -74,6 +74,7 @@ impl AcpServer {
         &mut self,
         id: &serde_json::Value,
         params: &serde_json::Value,
+        cancellation: Option<Arc<PromptCancellation>>,
     ) {
         let admission = match params.get("sessionId").and_then(|value| value.as_str()) {
             Some(session_id) => match self.prompt_admission(session_id) {
@@ -85,7 +86,7 @@ impl AcpServer {
             },
             None => None,
         };
-        let inner = Box::pin(self.handle_session_prompt_scoped(id, params));
+        let inner = Box::pin(self.handle_session_prompt_scoped(id, params, cancellation));
         let scope_error = match admission {
             Some(budget) => budget
                 .scope(inner)
@@ -106,6 +107,7 @@ impl AcpServer {
         &mut self,
         id: &serde_json::Value,
         params: &serde_json::Value,
+        prepared_cancellation: Option<Arc<PromptCancellation>>,
     ) {
         let session_id = match params.get("sessionId").and_then(|v| v.as_str()) {
             Some(s) => s.to_string(),
@@ -133,10 +135,9 @@ impl AcpServer {
             llm_spend,
         ) = match self.sessions.get_mut(&session_id) {
             Some(s) => {
-                s.cancellation.begin_prompt();
                 s.host_bridge = None;
                 (
-                    s.cancellation.clone(),
+                    prepared_cancellation.unwrap_or_else(|| s.cancellation.prepare_prompt()),
                     s.current_mode_id.clone(),
                     s.inject_state.clone(),
                     s.concurrent_control.tool_call_cancellations.clone(),
@@ -281,21 +282,18 @@ impl AcpServer {
             retarget_prompt_text(&mut prompt, prompt_text.clone());
         }
 
-        let output = self.output.clone();
+        let output = self.output.for_prompt(prompt.correlation.clone());
         let pending = self.pending.clone();
         let next_id = &self.next_id;
         let sid = session_id.clone();
 
-        // Translate AgentEvents into ACP session/update notifications so
-        // the client observes tool lifecycle on the wire. The event-log
-        // sink is reinstalled here because prompt teardown clears all
-        // per-session transport sinks after each turn.
+        // Durable subscribers stay session-owned. The immutable ACP transport
+        // follows this execution and its cleanup, never a later session rebind.
         clear_session_sinks(&session_id);
         harn_vm::agent_sessions::register_event_log_sink(&session_id);
-        register_sink(
-            session_id.clone(),
-            Arc::new(AcpAgentEventSink::new(output.clone())),
-        );
+        let event_transport = harn_vm::agent_events::AgentEventTransport::new(Arc::new(
+            AcpAgentEventSink::new(output.clone()),
+        ));
 
         let bridge = Arc::new(AcpBridge {
             session_id: sid.clone(),
@@ -324,9 +322,13 @@ impl AcpServer {
             ),
         );
         host_bridge.set_session_id(&bridge.session_id);
+        host_bridge.set_caller_message_id(prompt.correlation.message_id.clone());
         if let Some(session) = self.sessions.get_mut(&session_id) {
             session.host_bridge = Some(host_bridge.clone());
             session.concurrent_control.set_prompt_active(true);
+            session
+                .concurrent_control
+                .set_prompt_transport(event_transport.clone());
         }
 
         let compile_started = Instant::now();
@@ -395,8 +397,18 @@ impl AcpServer {
         let id_owned = id.clone();
         let send_output = self.output.clone();
         let host_bridge_for_response = host_bridge.clone();
-        let result = mode_policy
-            .run(Box::pin(async {
+        let runtime_configurator = self.runtime_configurator.clone();
+        let execution = runtime_configurator.run_prompt(
+            AcpPromptExecutionContext {
+                session_id: &session_id,
+                cwd: &cwd,
+                project_root: &project_root,
+                capability_policy: mode_policy.policy(),
+                budget: &turn_budget,
+                host_bridge: &host_bridge_for_response,
+                cancelled: &cancellation.cancelled,
+            },
+            Box::pin(mode_policy.run(Box::pin(async {
                 let _budget_guard = turn_budget.install_session_turn(llm_spent_usd.unwrap_or(0.0));
                 let _spend_recorder = SessionSpendRecorder::new(
                     llm_spend.clone(),
@@ -425,8 +437,9 @@ impl AcpServer {
                     },
                 )
                 .await
-            }))
-            .await;
+            }))),
+        );
+        let result = event_transport.scope(execution).await;
         self.finish_profile_turn(&session_id, profile_turn);
         let sink_flush_error = self.clear_active_prompt_transport(&session_id).await.err();
         let turn_spent_usd = llm_spent_usd.and_then(|_| {

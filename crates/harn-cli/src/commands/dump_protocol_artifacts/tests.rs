@@ -37,8 +37,10 @@ use super::*;
 #[path = "../../../../../spec/protocol-artifacts/harn-protocol.rs"]
 mod generated_rust_binding;
 
+mod compiler_fixture_bundle;
 mod external_action_roundtrip;
 mod llm_outcome_vocabulary;
+mod open_enum_source_compatibility;
 mod open_vocabulary_projection;
 mod plan;
 mod prepared_session;
@@ -792,36 +794,7 @@ fn dispatched_acp_methods_match_artifact() {
     let dispatch = protocol_source()
         .read_text("crates/harn-serve/src/adapters/acp/dispatch.rs")
         .expect("read acp adapter");
-    let body = dispatch
-        .split_once("match method.as_str() {")
-        .expect("dispatch match block")
-        .1
-        .split_once("\n            _ => {")
-        .expect("dispatch wildcard arm")
-        .0;
-    let mut dispatched = BTreeSet::new();
-    for line in body.lines() {
-        let trimmed = line.trim();
-        // Match-arm heads look like `"method" => {` or `"a" | "b" => {`.
-        if !trimmed.contains("=>") || !trimmed.starts_with('"') {
-            if trimmed.contains("=>") {
-                let method = dispatch_arm_constant_value(trimmed).unwrap_or_else(|| {
-                    panic!(
-                        "constant-based ACP dispatch arm is not resolved by the protocol artifact guard: {trimmed}"
-                    )
-                });
-                dispatched.insert(method);
-            }
-            continue;
-        }
-        let arm = trimmed.split("=>").next().unwrap_or("");
-        for literal in arm.split('|') {
-            let name = literal.trim().trim_matches('"');
-            if !name.is_empty() {
-                dispatched.insert(name.to_string());
-            }
-        }
-    }
+    let dispatched = acp_dispatch::methods(&dispatch);
     let published: BTreeSet<String> = ACP_DISPATCHED_METHODS
         .iter()
         .map(|m| m.to_string())
@@ -837,6 +810,8 @@ fn dispatched_acp_methods_match_artifact() {
     );
 }
 
+mod acp_dispatch;
+
 fn dispatch_arm_constant_value(trimmed_arm: &str) -> Option<String> {
     let name = trimmed_arm.split("=>").next()?.trim();
     match name {
@@ -846,6 +821,9 @@ fn dispatch_arm_constant_value(trimmed_arm: &str) -> Option<String> {
         }
         "harn_vm::session_timeline::SESSION_TIMELINE_QUERY_METHOD" => {
             Some(SESSION_TIMELINE_QUERY_METHOD.to_string())
+        }
+        "harn_vm::agent_sessions::CANONICAL_HISTORY_BOUNDARIES_METHOD" => {
+            Some(harn_vm::agent_sessions::CANONICAL_HISTORY_BOUNDARIES_METHOD.to_string())
         }
         "harn_vm::session_timeline::SESSION_TIMELINE_SUBSCRIBE_METHOD" => {
             Some(SESSION_TIMELINE_SUBSCRIBE_METHOD.to_string())
@@ -963,6 +941,10 @@ fn acp_prompt_error_schema_matches_runtime_terminal_classes() {
     );
     assert_eq!(
         schema["$defs"]["HarnPromptErrorData"]["properties"]["terminalClass"]["enum"],
+        json!(agent_terminal_class_values())
+    );
+    assert_eq!(
+        schema["$defs"]["AgentTerminalOutcome"]["properties"]["terminalClass"]["enum"],
         json!(agent_terminal_class_values())
     );
     assert_eq!(

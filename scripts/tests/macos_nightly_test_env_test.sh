@@ -4,18 +4,16 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 workflow="$ROOT_DIR/.github/workflows/macos-nightly.yml"
 # An exact-source dispatch runs on the organization's own Apple Silicon
-# runners; the paid M4 class requires the explicit repository opt-in on top.
-# An unset or malformed variable therefore stays on owned capacity instead of
-# silently restoring paid capacity, and any non-dispatch event stays hosted.
-dispatch_runner="runs-on: \${{ github.event_name == 'workflow_dispatch' && (vars.HARN_CI_ENABLE_BLACKSMITH_MACOS == 'true' && 'blacksmith-12vcpu-macos-15' || 'macos-arm64') || 'macos-latest' }}"
-# The dispatch budgets belong to warm builds: 30 minutes on the paid class,
-# 45 on the owned runners whose first build after a toolchain change is cold.
+# runners. Every other event stays on standard hosted capacity.
+dispatch_runner="runs-on: \${{ github.event_name == 'workflow_dispatch' && 'macos-arm64' || 'macos-latest' }}"
+# The dispatch budget belongs to warm builds: 45 minutes on the owned runners
+# whose first build after a toolchain change may be cold.
 # A cold pull-request or scheduled run needs the nightly's budget: this lane's
 # p90 is 47 minutes, and a timeout reads as a red lane rather than a slow one.
-dispatch_timeout="timeout-minutes: \${{ github.event_name == 'workflow_dispatch' && (vars.HARN_CI_ENABLE_BLACKSMITH_MACOS == 'true' && 30 || 45) || 75 }}"
+dispatch_timeout="timeout-minutes: \${{ github.event_name == 'workflow_dispatch' && 45 || 75 }}"
 
 if ! grep -Fq "$dispatch_runner" "$workflow"; then
-  echo "macOS workspace tests must require an explicit opt-in for the paid M4 runner" >&2
+  echo "macOS workspace tests must use owned capacity for an exact-source dispatch" >&2
   exit 1
 fi
 
@@ -24,11 +22,10 @@ if ! grep -Fq "$dispatch_timeout" "$workflow"; then
   exit 1
 fi
 
-# A pull-request run must never reach the paid class or the short budget. Both
-# expressions name the dispatch event positively, so any event that is not a
-# dispatch falls to the hosted runner and the generous budget by construction.
-if grep -Fq "github.event_name != 'pull_request' && 'blacksmith" "$workflow"; then
-  echo "macOS workspace tests must not route pull requests to the paid M4 class" >&2
+# Any paid runner selector here bypasses the repository-wide public-runner
+# policy's intended behavior even if its event expression looks safe.
+if grep -Fq "blacksmith" "$workflow"; then
+  echo "macOS workspace tests must not route to paid capacity" >&2
   exit 1
 fi
 

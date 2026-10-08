@@ -133,8 +133,7 @@ pub enum AgentEvent {
         /// `status: failed` with `error_category: parse_aborted`.
         /// `None` (the default) means "this is a normal post-parse tool
         /// call, no candidate phase was active" so the on-disk shape
-        /// stays compatible with replays recorded before this field
-        /// existed.
+        /// stays compatible with replays recorded before this field existed.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         parsing: Option<bool>,
         /// Mutation-session audit context active when the tool was
@@ -142,6 +141,9 @@ pub enum AgentEvent {
         /// emission belonging to the same write-capable session.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         audit: Option<MutationSessionRecord>,
+        /// The batch's declared purpose, normalized by `llm::tool_call_intent`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        intent: Option<String>,
     },
     ToolCallUpdate {
         session_id: String,

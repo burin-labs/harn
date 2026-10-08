@@ -22,6 +22,7 @@ use super::{
     audit_transcript, load_merge_captain_golden, load_transcript_jsonl, AuditReport,
     LoadedTranscript, MergeCaptainGolden, StateTransition,
 };
+use crate::orchestration::artifact_files::{write_bytes_file, write_json_file};
 
 const RECEIPT_TYPE: &str = "merge_captain_run_receipt";
 const SUMMARY_TYPE: &str = "merge_captain_run_summary";
@@ -584,30 +585,6 @@ fn deterministic_run_id(events: &[PersistedAgentEvent]) -> Result<String, VmErro
         suffix.push_str(&format!("{byte:02x}"));
     }
     Ok(format!("merge-captain-{suffix}"))
-}
-
-fn write_json_file<T: Serialize>(path: &Path, value: &T) -> Result<(), VmError> {
-    let mut bytes = serde_json::to_vec_pretty(value)
-        .map_err(|error| VmError::Runtime(format!("failed to serialize JSON artifact: {error}")))?;
-    bytes.push(b'\n');
-    write_bytes_file(path, &bytes)
-}
-
-fn write_bytes_file(path: &Path, bytes: &[u8]) -> Result<(), VmError> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|error| {
-            VmError::Runtime(format!(
-                "failed to create artifact directory {}: {error}",
-                parent.display()
-            ))
-        })?;
-    }
-    fs::write(path, bytes).map_err(|error| {
-        VmError::Runtime(format!(
-            "failed to write artifact {}: {error}",
-            path.display()
-        ))
-    })
 }
 
 #[cfg(test)]

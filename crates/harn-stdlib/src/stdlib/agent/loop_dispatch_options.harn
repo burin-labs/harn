@@ -102,6 +102,9 @@ pub fn __loop_dispatch_options(turn_opts: any, session_id: any, cap: int) -> dic
     _max_concurrent_tools: cap,
     _prefetch_next_turn: turn_opts?.prefetch_next_turn ?? false,
     _stop_reason: turn_opts?._stop_reason ?? "",
+    // The batch's declared purpose label. Dispatch puts it on the host
+    // approval request and the tool-call start event as `intent`.
+    _purpose_label: turn_opts?._purpose_label ?? "",
     _intra_turn_failure_fanout_cap: __resolve_intra_turn_failure_fanout_cap(turn_opts),
     _intra_turn_resource_fail_fast: __resolve_intra_turn_resource_fail_fast(turn_opts),
     _stop_after_successful_tools: turn_opts?.stop_after_successful_tools ?? [],

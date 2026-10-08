@@ -254,6 +254,9 @@ run_opener() {
   case_record="$case_state/record.txt"
   case_outputs="$case_state/github-output.txt"
   case_output="$case_state/output.txt"
+  case_receipt="$case_state/opener.json"
+  # A prior invocation's green receipt must never survive an early failure.
+  printf '{"schema":"stale","exit_code":0}\n' > "$case_receipt"
   : > "$case_record"
   : > "$case_outputs"
   local opener_args=()
@@ -269,6 +272,9 @@ run_opener() {
     GH_TOKEN=fixture-token \
     GITHUB_REPOSITORY=example/harn \
     GITHUB_OUTPUT="$case_outputs" \
+    GITHUB_RUN_ID=12345 \
+    GITHUB_RUN_ATTEMPT=2 \
+    HARN_EXT_RELEASE_OPENER_RECEIPT="$case_receipt" \
     OPENER_RECORD="$case_record" \
     OPENER_STATE="$case_state" \
     PATH="$bin_dir:$PATH" \
@@ -277,6 +283,25 @@ run_opener() {
     > "$case_output" 2>&1
   case_status=$?
   set -e
+  local expected_phase=open
+  [[ "${OPENER_ARGS:-}" != --plan ]] || expected_phase=plan
+  jq -e --argjson status "$case_status" --arg phase "$expected_phase" \
+    '.schema == "harn.release-opener.v1" and .repository == "example/harn"
+      and .workflow == "bump-release.yml" and .run_id == 12345
+      and .run_attempt == 2 and .exit_code == $status and .phase == $phase
+      and (.source_sha | test("^[0-9a-f]{40}$"))' \
+    "$case_receipt" >/dev/null || fail "missing, stale or incorrectly attributed opener outcome"
+  if [[ "$case_status" == 0 ]]; then
+    local action
+    action="$(sed -n 's/^action=//p' "$case_outputs" | tail -n 1)"
+    jq -e --arg action "$action" \
+      '.decision == $action
+        and (if .decision == "opened" or .decision == "existing"
+          then (.pr_url | startswith("https://github.com/"))
+            and (.release_source_sha | test("^[0-9a-f]{40}$"))
+          else .pr_url == "" and .release_source_sha == "" end)' \
+      "$case_receipt" >/dev/null || fail "receipt differs from the opener decision or omits selected immutable source"
+  fi
 }
 
 assert_no_side_effects() {
@@ -428,6 +453,10 @@ grep -Fxq "pr_url=https://github.com/example/harn/pull/9001" "$case_outputs" \
 if grep -Fxq "action=opened" "$case_outputs"; then
   fail "arming failure still reported action=opened"
 fi
+jq -e '.exit_code != 0 and .decision == "pending"
+  and .pr_url == "https://github.com/example/harn/pull/9001"
+  and (.release_source_sha | test("^[0-9a-f]{40}$"))' "$case_receipt" >/dev/null \
+  || fail "arming failure receipt lost the unarmed pull request or reported success"
 
 # --- This version's release merges while the run prepares: no second PR -----
 moved=$(new_fixture moved 1.2.4-dev)
@@ -445,6 +474,7 @@ fi
 # --- A release PR opens while the run prepares: name it, publish nothing -----
 raced=$(new_fixture raced 1.2.4-dev)
 add_fragments "$raced"
+open_release_branch_on_origin "$raced"
 FAKE_GH_PRS_LATER='[{"url":"https://github.com/example/harn/pull/80","title":"Release v1.2.4","headRefName":"release/v1.2.4"}]' \
   run_opener "$raced"
 [[ "$case_status" -eq 0 ]] || { cat "$case_output" >&2; fail "raced case failed"; }
@@ -476,6 +506,9 @@ OPENER_ARGS=--plan run_opener "$planned"
 [[ "$case_status" -eq 0 ]] || { cat "$case_output" >&2; fail "--plan failed"; }
 grep -Fxq "action=open" "$case_outputs" || fail "--plan did not decide to open"
 assert_no_side_effects "--plan" "$planned"
+jq -e '.phase == "plan" and .decision == "open" and .exit_code == 0
+  and .release_source_sha == ""' "$case_receipt" >/dev/null \
+  || fail "plan receipt claimed a prepared release source"
 
 # --- No fragments: no-op with a notice ----------------------------------------
 empty=$(new_fixture empty 1.2.4-dev)

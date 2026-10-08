@@ -207,43 +207,6 @@ pub fn linear(overrides: dict? = nil) -> OAuthProvider {
 }
 
 /**
- * notion returns the preconfigured Notion public-connection OAuth provider record.
- *
- * @effects: []
- * @errors: []
- * @api_stability: experimental
- */
-pub fn notion(overrides: dict? = nil) -> OAuthProvider {
-  return __with_overrides(
-    {
-      id: "notion",
-      label: "Notion",
-      auth_url: "https://api.notion.com/v1/oauth/authorize",
-      token_url: "https://api.notion.com/v1/oauth/token",
-      device_code_url: nil,
-      revoke_url: nil,
-      userinfo_url: "https://api.notion.com/v1/users/me",
-      default_scopes: [],
-      pkce_required: false,
-      refresh_handling: __refresh(
-        "use token response expiry metadata and refresh through the Notion token endpoint when a refresh token is issued",
-        "standard_refresh_token",
-        true,
-        [
-          "Page/database access is selected by the user during the Notion page-picker flow, not by OAuth scopes.",
-        ],
-      ),
-      documented_quirks: [
-        "The authorize URL requires owner=user for user-owned public-connection installs.",
-        "Notion-Version must be sent on API requests after OAuth completes.",
-      ],
-      documentation_url: "https://developers.notion.com/docs/authorization",
-    },
-    overrides,
-  )
-}
-
-/**
  * google returns the preconfigured Google OAuth/OIDC provider record.
  *
  * @effects: []
@@ -463,7 +426,7 @@ pub fn bitbucket(overrides: dict? = nil) -> OAuthProvider {
 }
 
 /**
- * provider_names returns the ten named provider keys in the catalogue.
+ * provider_names returns the nine named provider keys in the catalogue.
  *
  * @effects: []
  * @errors: []
@@ -474,7 +437,6 @@ pub fn provider_names() -> list<string> {
     "github",
     "slack",
     "linear",
-    "notion",
     "google",
     "microsoft",
     "atlassian",
@@ -503,9 +465,6 @@ pub fn provider(name: string?, overrides: dict? = nil) -> OAuthProvider {
   if key == "linear" {
     return linear(overrides)
   }
-  if key == "notion" {
-    return notion(overrides)
-  }
   if key == "google" {
     return google(overrides)
   }
@@ -528,7 +487,7 @@ pub fn provider(name: string?, overrides: dict? = nil) -> OAuthProvider {
 }
 
 /**
- * provider_catalog returns the ten named provider records, with per-provider overrides.
+ * provider_catalog returns the nine named provider records, with per-provider overrides.
  *
  * @effects: []
  * @errors: [invalid_argument]

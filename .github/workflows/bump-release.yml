@@ -40,6 +40,9 @@ jobs:
           ref: main
           persist-credentials: false
 
+      - name: Set the current invocation receipt path
+        run: printf 'HARN_EXT_RELEASE_OPENER_RECEIPT=%s/release-opener-%s-%s.json\n' "$RUNNER_TEMP" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" >> "$GITHUB_ENV"
+
       # Decide before building anything: most scheduled runs end here.
       - name: Decide whether a release pull request is due
         id: plan
@@ -74,3 +77,11 @@ jobs:
           set -euo pipefail
           harn_bin="$(HARN_BIN_NO_BUILD=1 ./scripts/harn_bin.sh --print)"
           HARN_BIN="$harn_bin" ./scripts/open_release_pr.sh ${OPENER_SCOPE:+"$OPENER_SCOPE"}
+
+      - name: Publish the observed opener outcome
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-opener-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ env.HARN_EXT_RELEASE_OPENER_RECEIPT }}
+          if-no-files-found: error

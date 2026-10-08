@@ -11,7 +11,7 @@ fn main(harness: Harness) {
   const policy = create({allow: [], default: "deny", on_violation: "audit_only"})
   const observed = harness.with_net_policy(policy)
   // The URL would otherwise be denied, but audit_only lets it through.
-  const body = observed.net.get("https://shadow.test/x")
+  const body = observed.net.get("https://shadow.test/x").body
   harness.stdio.println("body=" + body)
   harness.stdio.println("quarantined=" + to_string(observed.is_quarantined()))
 }

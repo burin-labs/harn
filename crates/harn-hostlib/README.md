@@ -439,9 +439,6 @@ and are also mirrored at compile time via `include_str!` into
 [`schemas.rs`](src/schemas.rs) so embedders can fetch them
 programmatically without locating the on-disk schema directory.
 
-Historical notes about the original bridge migration live in
-[`docs/src/migrations/harn-hostlib-host-contracts.md`](../../docs/src/migrations/harn-hostlib-host-contracts.md).
-
 ## Directory layout
 
 ```text

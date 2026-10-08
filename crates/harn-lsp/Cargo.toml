@@ -13,18 +13,18 @@ name = "harn-lsp"
 path = "src/main.rs"
 
 [dependencies]
-harn-lexer = { path = "../harn-lexer", version = "=0.10.157" }
-harn-parser = { path = "../harn-parser", version = "=0.10.157" }
-harn-builtin-meta = { path = "../harn-builtin-meta", version = "=0.10.157" }
-harn-capability-contracts = { path = "../harn-capability-contracts", version = "=0.10.157" }
-harn-ir = { path = "../harn-ir", version = "=0.10.157" }
-harn-lint = { path = "../harn-lint", version = "=0.10.157" }
-harn-modules = { path = "../harn-modules", version = "=0.10.157" }
-harn-fmt = { path = "../harn-fmt", version = "=0.10.157" }
-harn-vm = { path = "../harn-vm", version = "=0.10.157", default-features = false }
+harn-lexer = { path = "../harn-lexer", version = "=0.10.158" }
+harn-parser = { path = "../harn-parser", version = "=0.10.158" }
+harn-builtin-meta = { path = "../harn-builtin-meta", version = "=0.10.158" }
+harn-capability-contracts = { path = "../harn-capability-contracts", version = "=0.10.158" }
+harn-ir = { path = "../harn-ir", version = "=0.10.158" }
+harn-lint = { path = "../harn-lint", version = "=0.10.158" }
+harn-modules = { path = "../harn-modules", version = "=0.10.158" }
+harn-fmt = { path = "../harn-fmt", version = "=0.10.158" }
+harn-vm = { path = "../harn-vm", version = "=0.10.158", default-features = false }
 # LSP wants the full code-intelligence surface (AST + every grammar family).
-harn-hostlib = { path = "../harn-hostlib", version = "=0.10.157", default-features = false, features = ["full"] }
-harn-rules = { path = "../harn-rules", version = "=0.10.157" }
+harn-hostlib = { path = "../harn-hostlib", version = "=0.10.158", default-features = false, features = ["full"] }
+harn-rules = { path = "../harn-rules", version = "=0.10.158" }
 tower-lsp = "0.20"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "io-std"] }
 serde = { version = "1", features = ["derive"] }

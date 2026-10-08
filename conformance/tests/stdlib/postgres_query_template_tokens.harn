@@ -1,0 +1,53 @@
+import { sql, unsafe_sql } from "std/postgres/query"
+
+fn rendered_error(template: string, values: dict) -> string {
+  const result = try {
+    sql(template, values)
+  }
+  if is_err(result) {
+    return to_string(unwrap_err(result))
+  }
+  return "rendered: " + unwrap(result).sql
+}
+
+pipeline default(harness: Harness) {
+  // Escapes, repeated placeholders, fragments, whitespace and a multi-line
+  // placeholder all render as before the single-pass tokenizer.
+  const mixed = sql(
+    "SELECT {a}, {b}, {a} FROM t WHERE note = '{{lit}}' AND at < {now} AND x = {  b  }\n  AND y = {\nc\n}",
+    {a: 1, b: "two", c: nil, now: unsafe_sql("NOW()")},
+  )
+  harness.stdio.println(mixed.sql)
+  harness.stdio.println(json_stringify(mixed.params))
+  const adjacent = sql("{a}{b}{{}}{a}", {a: 1, b: 2})
+  harness.stdio.println(adjacent.sql)
+  const unicode = sql("SELECT 'ünïcödé 😀' || {a} || '}}'", {a: "x"})
+  harness.stdio.println(unicode.sql)
+  // A placeholder runs to the first `}`, so malformed input fails as written.
+  harness.stdio.println(rendered_error("SELECT {a{b}", {}))
+  harness.stdio.println(rendered_error("SELECT {a", {a: 1}))
+  harness.stdio.println(rendered_error("SELECT a}", {a: 1}))
+  harness.stdio.println(rendered_error("SELECT {x}} }", {x: 1}))
+  harness.stdio.println(rendered_error("SELECT {}", {}))
+  harness.stdio.println(rendered_error("SELECT {missing}", {a: 1}))
+  // Falsifier for harn#9467: 6,400 distinct placeholders render in
+  // well under a second. The per-placeholder rescan this replaced took 144 s
+  // here on an unloaded Apple M-series machine, so the 10 s bound separates the
+  // two by more than an order of magnitude in each direction.
+  let template = "SELECT 0"
+  let values = {}
+  for i in 0 to 6400 exclusive {
+    const name = "p" + to_string(i)
+    template = template + "\n  , COALESCE(column_" + to_string(i) + ", {" + name
+      + "}::numeric) AS a"
+      + to_string(i)
+    values[name] = i
+  }
+  const started = harness.clock.monotonic_ms()
+  const large = sql(template, values)
+  const elapsed_ms = harness.clock.monotonic_ms() - started
+  harness.stdio.println(len(large.params ?? []))
+  harness.stdio.println(large.params?.[6399])
+  harness.stdio.println(contains(large.sql, "COALESCE(column_6399, $6400::numeric) AS a6399"))
+  harness.stdio.println(elapsed_ms < 10000)
+}

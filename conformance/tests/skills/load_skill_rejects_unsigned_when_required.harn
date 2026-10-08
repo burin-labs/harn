@@ -16,7 +16,9 @@ pipeline test(harness: Harness, task: unknown) {
           },
         ],
       },
-      llm_text("<done>##DONE##</done>"),
+      llm_text(
+        "<user_response>The unsigned skill was rejected.</user_response><done>##DONE##</done>",
+      ),
     ],
     { ->
       const result = agent_loop(

@@ -67,14 +67,14 @@ async fn directive_frames_keep_internal_visibility_in_the_persisted_timeline() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn native_tool_narration_survives_the_live_journal_and_result_merge() {
+async fn native_tool_narration_stays_private_and_tool_progress_survives_result_merge() {
     crate::agent_sessions::reset_session_store();
     crate::reset_thread_local_state();
     let root = tempfile::tempdir().expect("project root");
     let root_literal =
         serde_json::to_string(root.path().to_str().expect("UTF-8 root")).expect("root literal");
     let source = format!(
-        r###"
+        r#"
 import {{ agent_loop }} from "std/agent/loop"
 
 pipeline main(harness: Harness, task: unknown) {{
@@ -85,7 +85,7 @@ pipeline main(harness: Harness, task: unknown) {{
     {{id: "related-call-1", name: "noop", arguments: {{path: "second.rs"}}}},
     {{id: "related-call-2", name: "noop", arguments: {{path: "third.rs"}}}},
   ]}})
-  harness.llm.mock_enqueue({{text: "##DONE##"}})
+  harness.llm.mock_enqueue({{text: "Inspected all three files. ##DONE##"}})
   let tools = tool_registry()
   tools = tool_define(tools, "noop", "Read the deterministic source.", {{
     handler: {{ _args -> "known-source-contents" }},
@@ -98,7 +98,7 @@ pipeline main(harness: Harness, task: unknown) {{
   }})
   harness.stdio.println(result.status)
 }}
-"###,
+"#,
     );
     let chunk = crate::compile_source(&source).expect("compile agent loop");
     let local = tokio::task::LocalSet::new();
@@ -138,13 +138,7 @@ pipeline main(harness: Harness, task: unknown) {{
         .iter()
         .filter(|node| node.category == "message" && node.name == "I will inspect the source.")
         .collect::<Vec<_>>();
-    assert_eq!(
-        narration.len(),
-        1,
-        "public narration must survive exactly once"
-    );
-    assert!(narration[0].order < tools[0].order);
-    assert_eq!(narration[0].attributes["role"], "assistant");
+    assert_eq!(narration.len(), 0, "tool-batch narration stays private");
     let related = snapshot
         .nodes
         .iter()
@@ -152,28 +146,60 @@ pipeline main(harness: Harness, task: unknown) {{
             node.category == "message" && node.name == "I will inspect both related files."
         })
         .collect::<Vec<_>>();
+    assert_eq!(related.len(), 0, "multi-tool narration also stays private");
+    let accepted = snapshot
+        .nodes
+        .iter()
+        .filter(|node| node.category == "message" && node.name == "Inspected all three files.")
+        .collect::<Vec<_>>();
     assert_eq!(
-        related.len(),
+        accepted.len(),
         1,
-        "one message can narrate multiple tool calls"
+        "one admitted answer survives result merge"
     );
-    assert!(related[0].order > tools[0].order);
-    assert!(related[0].order < tools[1].order);
+    assert!(accepted[0].order > tools[2].order);
+    let mut options = crate::value::DictMap::new();
+    crate::value::VmDictExt::put_str(&mut options, "root", root.path().to_str().expect("root"));
+    let hydrated = crate::agent_session_journal::prepare(
+        "narrated-native-tool",
+        &options,
+        "inspect-history".into(),
+        "inspect-history".into(),
+    )
+    .await
+    .expect("hydrate provider history");
+    for draft in [
+        "I will inspect the source.",
+        "I will inspect both related files.",
+    ] {
+        let drafts = hydrated
+            .transcript
+            .messages
+            .iter()
+            .filter(|message| message["role"] == "assistant" && message["content"] == draft)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            drafts.len(),
+            1,
+            "provider history retains one original draft"
+        );
+        assert_eq!(drafts[0]["harn_assistant_publication"], "withheld");
+    }
     for (tool, path) in tools.iter().zip(["first.rs", "second.rs", "third.rs"]) {
         assert_eq!(tool.attributes["input"], json!({"path": path}));
     }
 
-    let narration_event = narration[0]
+    let tool_event = tools[0]
         .references
         .iter()
         .find(|reference| reference.kind == "session_event")
         .and_then(|reference| reference.event_id)
-        .expect("narration must retain its canonical source event");
+        .expect("tool progress must retain its canonical source event");
     let mut incremental_query = SessionTimelineQuery::for_session("narrated-native-tool");
-    incremental_query.from_cursor.topics.insert(
-        "session-store:narrated-native-tool".to_string(),
-        narration_event,
-    );
+    incremental_query
+        .from_cursor
+        .topics
+        .insert("session-store:narrated-native-tool".to_string(), tool_event);
     let incremental =
         crate::session_timeline::query_persisted_session_timeline(root.path(), incremental_query)
             .await
@@ -183,7 +209,7 @@ pipeline main(harness: Harness, task: unknown) {{
         incremental
             .nodes
             .iter()
-            .filter(|node| node.id == related[0].id)
+            .filter(|node| node.id == accepted[0].id)
             .count(),
         1,
     );

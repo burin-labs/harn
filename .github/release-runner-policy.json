@@ -22,7 +22,7 @@
   },
   "jobs": {
     "cli_aot": {
-      "primary": "ubuntu-16core-release",
+      "primary": "ubuntu-24.04",
       "standard": "ubuntu-24.04"
     }
   },
@@ -35,10 +35,10 @@
       "sccache_backend": "sticky",
       "runners": {
         "warm": "macos-15-intel",
-        "primary": "macos-15-xlarge",
-        "recovery": "macos-15-xlarge",
+        "primary": "macos-15-intel",
+        "recovery": "macos-15-intel",
         "standard": "macos-15-intel",
-        "fast": "macos-15-xlarge"
+        "fast": "macos-15-intel"
       }
     },
     {
@@ -49,10 +49,10 @@
       "sccache_backend": "local",
       "runners": {
         "warm": "macos-latest",
-        "primary": "macos-15-xlarge",
-        "recovery": "macos-15-xlarge",
+        "primary": "macos-latest",
+        "recovery": "macos-latest",
         "standard": "macos-latest",
-        "fast": "macos-15-xlarge"
+        "fast": "macos-latest"
       }
     },
     {
@@ -63,10 +63,10 @@
       "sccache_backend": "install",
       "runners": {
         "warm": "ubuntu-22.04",
-        "primary": "ubuntu-16core-release",
-        "recovery": "ubuntu-16core-release",
+        "primary": "ubuntu-22.04",
+        "recovery": "ubuntu-22.04",
         "standard": "ubuntu-22.04",
-        "fast": "ubuntu-16core-release"
+        "fast": "ubuntu-22.04"
       }
     },
     {
@@ -77,10 +77,10 @@
       "sccache_backend": "install",
       "runners": {
         "warm": "ubuntu-22.04",
-        "primary": "ubuntu-16core-release",
-        "recovery": "ubuntu-16core-release",
+        "primary": "ubuntu-22.04",
+        "recovery": "ubuntu-22.04",
         "standard": "ubuntu-22.04",
-        "fast": "ubuntu-16core-release"
+        "fast": "ubuntu-22.04"
       }
     },
     {

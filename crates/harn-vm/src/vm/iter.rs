@@ -21,7 +21,13 @@ fn range_initial_done(start: i64, end: i64, inclusive: bool) -> bool {
     }
 }
 
-fn range_next(next: &mut i64, end: i64, inclusive: bool, done: &mut bool) -> Option<i64> {
+#[inline]
+pub(crate) fn range_next(
+    next: &mut i64,
+    end: i64,
+    inclusive: bool,
+    done: &mut bool,
+) -> Option<i64> {
     if *done {
         return None;
     }
