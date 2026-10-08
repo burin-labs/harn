@@ -204,6 +204,12 @@ impl Compiler {
                     let new_kind = Self::primitive_kind(&type_expr);
                     if existing_kind.is_some() && existing_kind == new_kind {
                         *existing = type_expr;
+                    } else if Self::is_list_type(Some(existing))
+                        && Self::is_list_type(Some(&type_expr))
+                    {
+                        // Keep the collection kind across element-type changes,
+                        // without specializing later reads to the old elements.
+                        *existing = TypeExpr::Named("list".into());
                     } else {
                         scope.remove(name);
                     }
@@ -261,6 +267,19 @@ impl Compiler {
                 } else {
                     None
                 }
+            }
+            Node::MethodCall {
+                object,
+                method,
+                args,
+            } if method == "appending"
+                && args.len() == 1
+                && !matches!(args[0].node, Node::Spread(_))
+                && Self::is_list_type(self.infer_expr_type(object).as_ref()) =>
+            {
+                // Appending preserves the list kind, but the new element may
+                // differ from every existing element.
+                Some(TypeExpr::Named("list".into()))
             }
             Node::ListLiteral(items) => self.infer_list_literal_type(items),
             Node::FunctionCall { name, args, .. } if name == "tuple" => {
@@ -897,6 +916,11 @@ impl Compiler {
         });
         self.type_scopes.pop();
         preserved
+    }
+
+    pub(super) fn is_list_type(type_expr: Option<&TypeExpr>) -> bool {
+        matches!(type_expr, Some(TypeExpr::List(_)))
+            || matches!(type_expr, Some(TypeExpr::Named(name)) if name == "list")
     }
 
     fn primitive_kind(type_expr: &TypeExpr) -> Option<PrimitiveType> {

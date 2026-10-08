@@ -424,11 +424,7 @@ impl Compiler {
         item: &SNode,
         left_type: Option<&TypeExpr>,
     ) -> Result<bool, CompileError> {
-        fn is_list(t: Option<&TypeExpr>) -> bool {
-            matches!(t, Some(TypeExpr::List(_)))
-                || matches!(t, Some(TypeExpr::Named(n)) if n == "list")
-        }
-        if !self.options.optimizations_enabled() || !is_list(left_type) {
+        if !self.options.optimizations_enabled() || !Self::is_list_type(left_type) {
             return Ok(false);
         }
         if matches!(item.node, Node::Spread(_)) {
