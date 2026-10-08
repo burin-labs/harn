@@ -94,30 +94,37 @@ release_rehearsal_step_observation() {
     ([range(0; length) | select($rest[$end + 1 + .] == "Post job cleanup." or
       ($rest[$end + 1 + .] | startswith("##[group]")))] | first) as $stop |
     if $stop == null then error("missing step termination") else . end |
-    {environment:$environment, records:.[:$stop]}
+    {step_start:$start, environment:$environment, records:.[:$stop]}
   ' "$log"
 }
 
-# Join the resolver, dispatch and authorization observations from one failed
-# promotion. The API boundary supplies authenticated named jobs separately;
-# this pure parser cannot authorize retirement by itself.
+# Join the resolver, dispatch, observation and authorization records from one
+# failed promotion. Dispatch and observation are distinct steps in the same
+# authenticated job; the child's identity must cross that boundary unchanged.
+# The API boundary supplies authenticated named jobs separately, so this pure
+# parser cannot authorize retirement by itself.
 release_failed_rehearsal_observation() {
   local resolver_log="${1:?resolver log required}"
   local consumer_log="${2:?consumer log required}"
   local authorization_log="${3:?authorization log required}"
   local source="${4:?source required}" producer="${5:?producer required}"
-  local child="${6:?child run required}" resolver consumer authorization
+  local child="${6:?child run required}" resolver dispatch observation authorization
   resolver="$(release_rehearsal_step_observation "$resolver_log" \
     'bash scripts/resolve-release-promotion-source.sh' \
     '["CANDIDATE_RUN_ID","EXPECTED_SOURCE_SHA"]')" || return 1
   # shellcheck disable=SC2016,SC1003 # literal owning runner command, including its trailing backslash
-  consumer="$(release_rehearsal_step_observation "$consumer_log" \
+  dispatch="$(release_rehearsal_step_observation "$consumer_log" \
     'CANARY_REPOSITORY="$CANARY_OWNER/$CANARY_NAME" \' \
     '["SOURCE_REVISION","CANARY_WORKFLOW"]')" || return 1
+  # shellcheck disable=SC2016 # literal runner command; do not expand it here
+  observation="$(release_rehearsal_step_observation "$consumer_log" \
+    'CANARY_REPOSITORY="$CANARY_OWNER/$CANARY_NAME" bash scripts/ci/consumer_canary.sh --observe' \
+    '["CANARY_RUN_ID"]')" || return 1
   authorization="$(release_rehearsal_step_observation "$authorization_log" \
     'bash scripts/authorize-release-rehearsal.sh' \
     '["SOURCE_SHA","REQUIRES_REHEARSAL","REHEARSAL_RESULT","REHEARSAL_VERDICT","REHEARSAL_SOURCE_SHA"]')" || return 1
-  jq -nce --argjson resolver "$resolver" --argjson consumer "$consumer" \
+  jq -nce --argjson resolver "$resolver" --argjson dispatch "$dispatch" \
+    --argjson observation "$observation" \
     --argjson authorization "$authorization" --arg source "$source" \
     --arg producer "$producer" --arg child "$child" '
     def one_record($records; $prefix; $expected):
@@ -126,19 +133,21 @@ release_failed_rehearsal_observation() {
     if ($source | test("^[0-9a-f]{40}$")) and
       ($producer | test("^[1-9][0-9]*$")) and ($child | test("^[1-9][0-9]*$")) and
       $resolver.environment == {CANDIDATE_RUN_ID:$producer, EXPECTED_SOURCE_SHA:$source} and
-      $consumer.environment == {SOURCE_REVISION:$source, CANARY_WORKFLOW:"harn-repin-rehearsal.yml"} and
+      $dispatch.environment == {SOURCE_REVISION:$source, CANARY_WORKFLOW:"harn-repin-rehearsal.yml"} and
+      $observation.environment == {CANARY_RUN_ID:$child} and
+      $dispatch.step_start < $observation.step_start and
       $authorization.environment == {SOURCE_SHA:$source, REQUIRES_REHEARSAL:"true",
         REHEARSAL_RESULT:"failure", REHEARSAL_VERDICT:"fail", REHEARSAL_SOURCE_SHA:$source} and
-      one_record($consumer.records; "CONSUMER_CANARY dispatched ";
+      one_record($dispatch.records; "CONSUMER_CANARY dispatched ";
         "^CONSUMER_CANARY dispatched run=" + $child + " ref=default$") and
-      one_record($consumer.records; "CONSUMER_CANARY verdict=";
+      one_record($observation.records; "CONSUMER_CANARY verdict=";
         "^CONSUMER_CANARY verdict=fail conclusion=(failure|cancelled) run=" + $child + " wall_seconds=[0-9]+$") and
-      one_record($consumer.records; "##[error]Process completed ";
+      one_record($observation.records; "##[error]Process completed ";
         "^##\\[error\\]Process completed with exit code 1\\.$") and
       one_record($authorization.records; "##[error]Process completed ";
         "^##\\[error\\]Process completed with exit code 1\\.$")
     then {source_sha:$source, producer_run:$producer, consumer_run:$child,
-      consumer_conclusion:($consumer.records[] | select(startswith("CONSUMER_CANARY verdict=")) |
+      consumer_conclusion:($observation.records[] | select(startswith("CONSUMER_CANARY verdict=")) |
         capture("conclusion=(?<value>failure|cancelled) ").value),
       verdict:"failed_historical_rehearsal"}
     else error("historical rehearsal machine contracts do not agree") end
