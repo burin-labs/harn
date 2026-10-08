@@ -1,5 +1,7 @@
 import "../bench_cli_cold_start.harn"
 
+const CONTEXT = {host: "Linux x86_64", timer: "monotonic fallback"}
+
 @test
 pipeline test_load_budgets_defaults_and_command_override(harness: Harness, task: unknown) {
   const budgets = load_budgets_text(
@@ -29,20 +31,45 @@ pipeline test_load_baseline_blank_is_empty(harness: Harness, task: unknown) {
 @test
 pipeline test_most_recent_baseline_skips_current_sha(harness: Harness, task: unknown) {
   const payload = {
-    current: {captured_at: "2026-01-03T00:00:00Z", commands: {version: {cold_ms: 1.0}}},
-    old: {captured_at: "2026-01-01T00:00:00Z", commands: {version: {cold_ms: 10.0}}},
-    newest: {captured_at: "2026-01-02T00:00:00Z", commands: {version: {cold_ms: 5.0}}},
+    current: {...CONTEXT, captured_at: "2026-01-03T00:00:00Z", commands: {version: {cold_ms: 1.0}}},
+    old: {...CONTEXT, captured_at: "2026-01-01T00:00:00Z", commands: {version: {cold_ms: 10.0}}},
+    newest: {...CONTEXT, captured_at: "2026-01-02T00:00:00Z", commands: {version: {cold_ms: 5.0}}},
   }
-  const found = most_recent_baseline_for(payload, "version", "current")
+  const found = most_recent_baseline_for(payload, "version", "current", CONTEXT)
   assert_eq(found.sha, "newest")
   assert_eq(found.cold_ms, 5.0)
 }
 
 @test
 pipeline test_most_recent_baseline_missing(harness: Harness, task: unknown) {
-  const found = most_recent_baseline_for({}, "version", "sha")
+  const found = most_recent_baseline_for({}, "version", "sha", CONTEXT)
   assert_eq(found.sha, nil)
   assert_eq(found.cold_ms, nil)
+}
+
+@test
+pipeline test_cross_host_and_timer_baselines_cannot_decide_regressions() {
+  const mac = {
+    host: "Apple M5 Pro, Darwin arm64 (Darwin 25.5.0)",
+    timer: CONTEXT.timer,
+    captured_at: "2026-07-04",
+    commands: {version: {cold_ms: 53.0}},
+  }
+  const budget = {cold_ms: 200.0, regression_x: 1.25}
+  const missing = most_recent_baseline_for({mac: mac}, "version", "current", CONTEXT)
+  assert_eq(missing.sha, nil)
+  assert_eq(failure_reasons(68.0, budget, missing), [])
+  assert_eq(failure_reasons(201.0, budget, missing), ["exceeds budget 200.0 ms"])
+  const matching = {...CONTEXT, captured_at: "2026-07-03", commands: {version: {cold_ms: 53.0}}}
+  const other_timer = {...matching, timer: "hyperfine", captured_at: "2026-07-05"}
+  const found = most_recent_baseline_for(
+    {mac: mac, linux: matching, hyperfine: other_timer},
+    "version",
+    "current",
+    CONTEXT,
+  )
+  assert_eq(found.sha, "linux")
+  assert_eq(failure_reasons(68.0, budget, found), ["exceeds 1.25x baseline (53.0 ms from linux)"])
 }
 
 @test
@@ -92,6 +119,7 @@ pipeline test_merge_baseline_append_only_without_update(harness: Harness, task: 
       payload: {
         sha: {
           host: "old-host",
+          timer: "monotonic fallback",
           harn_version: "old-version",
           captured_at: "old",
           commands: {version: {cold_ms: 10.0}},
@@ -100,7 +128,8 @@ pipeline test_merge_baseline_append_only_without_update(harness: Harness, task: 
       sha: "sha",
       measurements: {version: {cold_ms: 20.0}, "try --help": {cold_ms: 30.0}},
       update_baseline: false,
-      host: "host",
+      host: "old-host",
+      timer: "monotonic fallback",
       version: "version",
       captured_at: "now",
     },
@@ -116,11 +145,12 @@ pipeline test_merge_baseline_append_only_without_update(harness: Harness, task: 
 pipeline test_merge_baseline_update_overwrites_current_slot(harness: Harness, task: unknown) {
   const merged = merge_baseline(
     {
-      payload: {sha: {commands: {version: {cold_ms: 10.0}}}},
+      payload: {sha: {...CONTEXT, commands: {version: {cold_ms: 10.0}}}},
       sha: "sha",
       measurements: {version: {cold_ms: 20.0}},
       update_baseline: true,
-      host: "host",
+      host: CONTEXT.host,
+      timer: CONTEXT.timer,
       version: "version",
       captured_at: "now",
     },
@@ -133,4 +163,26 @@ pipeline test_parse_positive_int(harness: Harness, task: unknown) {
   assert_eq(parse_positive_int("N", "3").value, 3)
   assert_eq(parse_positive_int("N", "0").ok, false)
   assert_eq(parse_positive_int("N", "wat").error, "N must be an integer, got 'wat'")
+}
+
+@test
+pipeline test_baseline_slot_cannot_mix_measurement_contexts() {
+  const result = try {
+    merge_baseline(
+      {
+        payload: {sha: {...CONTEXT, commands: {version: {cold_ms: 53.0}}}},
+        sha: "sha",
+        measurements: {"try --help": {cold_ms: 17.0}},
+        update_baseline: true,
+        host: "Darwin arm64",
+        timer: CONTEXT.timer,
+        version: "harn",
+        captured_at: "now",
+      },
+    )
+    "accepted"
+  } catch (err) {
+    to_string(err)
+  }
+  assert(result.contains("different host or timer"))
 }
