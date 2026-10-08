@@ -73,6 +73,22 @@ pipeline test_cross_host_and_timer_baselines_cannot_decide_regressions() {
 }
 
 @test
+pipeline test_committed_linux_reference_preserves_ratio_coverage(harness: Harness) {
+  const payload = load_baseline_text(harness.fs.read_text("../../bench/cli/baselines/main.json"))
+  const version = most_recent_baseline_for(payload, "version", "current", CONTEXT)
+  const help = most_recent_baseline_for(payload, "try --help", "current", CONTEXT)
+  assert_eq(version.sha, "0253a81dbf59cc1cf15201483f5094a227e6111b")
+  assert_eq(version.cold_ms, 68.0)
+  assert_eq(help.cold_ms, 17.0)
+  const budget = {cold_ms: 200.0, regression_x: 1.25}
+  assert_eq(failure_reasons(68.0, budget, version), [])
+  assert_eq(
+    failure_reasons(86.0, budget, version),
+    ["exceeds 1.25x baseline (68.0 ms from 0253a81d)"],
+  )
+}
+
+@test
 pipeline test_build_invocation_expands_trace_paths(harness: Harness, task: unknown) {
   const dir = harness.fs.workspace_temp_dir() + "/harn-cold-start-test-" + harness.random.uuid_v7()
   harness.fs.mkdir(dir)

@@ -151,6 +151,15 @@ inversion; see `bench/README.md`). Provenance:
   3 warmup invocations, then merged into the same baseline entry by
   hand. The runner itself still only writes `cold_ms`.
 
+## Recorded Linux baseline (2026-10-03)
+
+The Linux reference comes from the first scheduled run after the workflow pinned
+`ubuntu-24.04`: [October 3, 2026](https://github.com/burin-labs/harn/actions/runs/37125786246).
+Its receipt and log record 10 iterations, the monotonic fallback timer, and medians
+of 68 ms for `version` and 17 ms for `try --help`. That run failed only because it
+compared `version` against the Mac baseline. The Linux reference preserves the
+1.25× ratio limit, giving thresholds of 85 ms and 21.25 ms on this host/timer pair.
+
 ## Tracked commands (initial set)
 
 The harness starts with the two currently enabled smallest,
