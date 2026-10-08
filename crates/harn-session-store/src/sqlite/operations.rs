@@ -320,21 +320,15 @@ impl SessionStore for SqliteSessionStore {
     async fn fork(
         &self,
         session_id: &str,
-        at_event_id: EventId,
+        boundary: crate::CanonicalSessionBoundary,
         child_id: Option<SessionId>,
     ) -> StoreResult<ForkResult> {
         let mut conn = self.lock_for_mutation()?;
         let tx = write_transaction(&mut conn)?;
         let (parent_meta, _) = read_session_meta(&tx, session_id)?;
         let parent_events = load_all_events(&tx, session_id)?;
-        if !parent_events
-            .iter()
-            .any(|event| event.event_id == at_event_id)
-        {
-            return Err(StoreError::InvalidInput(format!(
-                "event {at_event_id} not found in session '{session_id}'"
-            )));
-        }
+        boundary.validate(session_id, &parent_events)?;
+        let at_event_id = boundary.event_id;
         let new_id = child_id.unwrap_or_else(|| Uuid::now_v7().to_string());
         let exists: bool = tx
             .query_row(
@@ -362,7 +356,7 @@ impl SessionStore for SqliteSessionStore {
         child_meta.soft_deleted_at_ms = None;
         let mut inherited: Vec<StoredEvent> = parent_events
             .into_iter()
-            .filter(|event| event.event_id <= at_event_id)
+            .filter(|event| at_event_id.is_some_and(|boundary| event.event_id <= boundary))
             .collect();
         prepare_stored_events_for_persistence(self.hooks(), &mut inherited)?;
         let copied = re_anchor_events(&inherited, &new_id);

@@ -25,6 +25,7 @@ members = [
     "crates/harn-skills",
     "crates/harn-lsp",
     "crates/harn-modules",
+    "crates/harn-package",
     "crates/harn-stdlib",
     "crates/harn-vm",
     "crates/harn-wasm",
@@ -57,7 +58,7 @@ keywords = ["ai", "agents", "pipeline", "llm", "language"]
 categories = ["compilers", "command-line-utilities"]
 
 [workspace.dependencies]
-jsonschema = { version = "0.57.0", default-features = false }
+jsonschema = { version = "0.58.2", default-features = false }
 
 # Smaller debuginfo => faster linking on macOS without losing line-level
 # backtraces. A strict win for inner-loop dev/test builds.
@@ -89,6 +90,13 @@ opt-level = 1
 debug = "line-tables-only"
 debug-assertions = true
 overflow-checks = true
+
+# The interpreter those lanes are bound by lives in harn-vm and its
+# dependencies, which keep opt-level 1. harn-cli itself is command plumbing,
+# and optimizing it was the longest single compile in the CI producer: about
+# 7-9 minutes after its last dependency finished, on the free 4-vCPU runner.
+[profile.ci-cli.package.harn-cli]
+opt-level = 0
 
 # Default release profile mirrors the DISTRIBUTION build's shape: thin LTO +
 # 16 codegen units. This is the everyday / local "internal" release — fast to

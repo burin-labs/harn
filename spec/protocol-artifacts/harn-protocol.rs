@@ -1856,6 +1856,8 @@ pub const ACP_DISPATCHED_METHOD_HARN_PROVIDERCATALOG: &str = "_harn/providerCata
 pub const ACP_DISPATCHED_METHOD_HARN_SESSION_RECAP_QUERY: &str = "harn.session_recap.query";
 pub const ACP_DISPATCHED_METHOD_HARN_SESSION_TIMELINE_QUERY: &str = "harn.session_timeline.query";
 pub const ACP_DISPATCHED_METHOD_HARN_SESSION_VIEW_QUERY: &str = "harn.session_view.query";
+pub const ACP_DISPATCHED_METHOD_HARN_SESSION_HISTORY_BOUNDARIES: &str =
+    "harn.session_history.boundaries";
 pub const ACP_DISPATCHED_METHOD_HARN_SESSION_TIMELINE_SUBSCRIBE: &str =
     "harn.session_timeline.subscribe";
 pub const ACP_DISPATCHED_METHOD_HARN_SESSION_TIMELINE_UNSUBSCRIBE: &str =
@@ -1930,6 +1932,7 @@ pub const ACP_DISPATCHED_METHODS: &[&str] = &[
     "harn.session_recap.query",
     "harn.session_timeline.query",
     "harn.session_view.query",
+    "harn.session_history.boundaries",
     "harn.session_timeline.subscribe",
     "harn.session_timeline.unsubscribe",
     "session/new",
@@ -2007,6 +2010,8 @@ pub const ACP_HANDLED_METHOD_HARN_PROVIDERCATALOG: &str = "_harn/providerCatalog
 pub const ACP_HANDLED_METHOD_HARN_SESSION_RECAP_QUERY: &str = "harn.session_recap.query";
 pub const ACP_HANDLED_METHOD_HARN_SESSION_TIMELINE_QUERY: &str = "harn.session_timeline.query";
 pub const ACP_HANDLED_METHOD_HARN_SESSION_VIEW_QUERY: &str = "harn.session_view.query";
+pub const ACP_HANDLED_METHOD_HARN_SESSION_HISTORY_BOUNDARIES: &str =
+    "harn.session_history.boundaries";
 pub const ACP_HANDLED_METHOD_HARN_SESSION_TIMELINE_SUBSCRIBE: &str =
     "harn.session_timeline.subscribe";
 pub const ACP_HANDLED_METHOD_HARN_SESSION_TIMELINE_UNSUBSCRIBE: &str =
@@ -2082,6 +2087,7 @@ pub const ACP_HANDLED_METHODS: &[&str] = &[
     "harn.session_recap.query",
     "harn.session_timeline.query",
     "harn.session_view.query",
+    "harn.session_history.boundaries",
     "harn.session_timeline.subscribe",
     "harn.session_timeline.unsubscribe",
     "session/new",
@@ -2419,6 +2425,7 @@ pub const AGENT_TERMINAL_CLASS_HOST_BRIDGE_UNIMPLEMENTED: &str = "host_bridge_un
 pub const AGENT_TERMINAL_CLASS_AGENT_LOOP_PROTOCOL_FAILURE: &str = "agent_loop_protocol_failure";
 pub const AGENT_TERMINAL_CLASS_PARSE_DROPPED: &str = "parse_dropped";
 pub const AGENT_TERMINAL_CLASS_GENERIC_THROW: &str = "generic_throw";
+pub const AGENT_TERMINAL_CLASS_MANAGED_SPEND_PAUSED: &str = "managed_spend_paused";
 
 /// Stable terminal classes carried by typed ACP prompt-error data. Superseded by `HarnAgentTerminalClass`; retained for one release so existing consumers keep compiling.
 pub const AGENT_TERMINAL_CLASSES: &[&str] = &[
@@ -2434,6 +2441,7 @@ pub const AGENT_TERMINAL_CLASSES: &[&str] = &[
     "agent_loop_protocol_failure",
     "parse_dropped",
     "generic_throw",
+    "managed_spend_paused",
 ];
 
 pub const AGENT_TERMINAL_KIND_NATURAL: &str = "natural";
@@ -2493,6 +2501,7 @@ pub enum HarnAgentTerminalClass {
     AgentLoopProtocolFailure,
     ParseDropped,
     GenericThrow,
+    ManagedSpendPaused,
     /// A wire value outside the vocabulary this binding was generated from. Preserved verbatim.
     Unrecognized(String),
 }
@@ -2513,6 +2522,7 @@ impl HarnAgentTerminalClass {
         Self::AgentLoopProtocolFailure,
         Self::ParseDropped,
         Self::GenericThrow,
+        Self::ManagedSpendPaused,
     ];
 
     /// The JSON wire string for this value.
@@ -2530,6 +2540,7 @@ impl HarnAgentTerminalClass {
             Self::AgentLoopProtocolFailure => "agent_loop_protocol_failure",
             Self::ParseDropped => "parse_dropped",
             Self::GenericThrow => "generic_throw",
+            Self::ManagedSpendPaused => "managed_spend_paused",
             Self::Unrecognized(value) => value.as_str(),
         }
     }
@@ -2549,6 +2560,7 @@ impl HarnAgentTerminalClass {
             "agent_loop_protocol_failure" => Self::AgentLoopProtocolFailure,
             "parse_dropped" => Self::ParseDropped,
             "generic_throw" => Self::GenericThrow,
+            "managed_spend_paused" => Self::ManagedSpendPaused,
             other => Self::Unrecognized(other.to_string()),
         }
     }
@@ -2974,6 +2986,7 @@ pub enum HarnLlmErrorReason {
     OutputBudgetExhausted,
     Unknown,
     PolicyDenied,
+    ManagedSpendPaused,
     /// A wire value outside the vocabulary this binding was generated from. Preserved verbatim.
     Unrecognized(String),
 }
@@ -2997,6 +3010,7 @@ impl HarnLlmErrorReason {
         Self::OutputBudgetExhausted,
         Self::Unknown,
         Self::PolicyDenied,
+        Self::ManagedSpendPaused,
     ];
 
     /// The JSON wire string for this value.
@@ -3017,6 +3031,7 @@ impl HarnLlmErrorReason {
             Self::OutputBudgetExhausted => "output_budget_exhausted",
             Self::Unknown => "unknown",
             Self::PolicyDenied => "policy_denied",
+            Self::ManagedSpendPaused => "managed_spend_paused",
             Self::Unrecognized(value) => value.as_str(),
         }
     }
@@ -3039,6 +3054,7 @@ impl HarnLlmErrorReason {
             "output_budget_exhausted" => Self::OutputBudgetExhausted,
             "unknown" => Self::Unknown,
             "policy_denied" => Self::PolicyDenied,
+            "managed_spend_paused" => Self::ManagedSpendPaused,
             other => Self::Unrecognized(other.to_string()),
         }
     }
@@ -4252,6 +4268,7 @@ pub const HARN_PREPARED_SESSION_COMMANDS: &[&str] = &[
 ];
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HarnPreparedSessionApprovalDecision {
+    pub request_id: String,
     pub batch_fingerprint: String,
     pub approved: bool,
     pub decider: String,
@@ -4870,4 +4887,34 @@ pub struct HarnInferenceAdmissionSnapshot {
     pub open_weight: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub training_default: Option<String>,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnCanonicalSessionBoundary {
+    pub schema: String,
+    pub session_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub event_id: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub record_hash: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnCanonicalHistoryPosition {
+    pub source_event_id: String,
+    pub origin_session_id: String,
+    pub before_boundary: HarnCanonicalSessionBoundary,
+    pub boundary: HarnCanonicalSessionBoundary,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnCanonicalHistoryBoundaries {
+    pub tip: HarnCanonicalSessionBoundary,
+    pub positions: Vec<HarnCanonicalHistoryPosition>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnACPPromptCorrelation {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "messageId")]
+    pub message_id: Option<String>,
 }

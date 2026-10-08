@@ -18,6 +18,9 @@ use super::{
     new_id, parse_json_value, MergeCaptainDriverBackend, MergeCaptainDriverMode,
     MergeCaptainDriverOptions, MergeCaptainRunSummary, StateTransition,
 };
+use crate::orchestration::artifact_files::{
+    resolve_manifest_path, safe_path_segment, write_json_file,
+};
 
 const MANIFEST_TYPE: &str = "persona_eval_ladder_manifest";
 const REPORT_TYPE: &str = "persona_eval_ladder_report";
@@ -346,17 +349,6 @@ fn resolve_artifact_root(manifest: &PersonaEvalLadderManifest, base_dir: Option<
     resolve_manifest_path(base_dir, &root)
 }
 
-fn resolve_manifest_path(base_dir: Option<&Path>, path: &str) -> PathBuf {
-    let path_buf = PathBuf::from(path);
-    if path_buf.is_absolute() {
-        path_buf
-    } else if let Some(base_dir) = base_dir {
-        base_dir.join(path_buf)
-    } else {
-        path_buf
-    }
-}
-
 fn run_ladder_tier(
     backend: &MergeCaptainDriverBackend,
     artifact_root: &Path,
@@ -512,34 +504,6 @@ fn normalize_ladder_severity(value: Option<&str>) -> String {
         "info" | "informational" => "informational".to_string(),
         _ => "blocking".to_string(),
     }
-}
-
-fn safe_path_segment(value: &str) -> String {
-    let mut out = String::new();
-    for ch in value.chars() {
-        if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' {
-            out.push(ch);
-        } else {
-            out.push('_');
-        }
-    }
-    if out.is_empty() {
-        "unnamed".to_string()
-    } else {
-        out
-    }
-}
-
-fn write_json_file<T: Serialize>(path: &Path, value: &T) -> Result<(), VmError> {
-    let mut bytes = serde_json::to_vec_pretty(value)
-        .map_err(|error| VmError::Runtime(format!("failed to serialize JSON artifact: {error}")))?;
-    bytes.push(b'\n');
-    fs::write(path, bytes).map_err(|error| {
-        VmError::Runtime(format!(
-            "failed to write artifact {}: {error}",
-            path.display()
-        ))
-    })
 }
 
 #[cfg(test)]

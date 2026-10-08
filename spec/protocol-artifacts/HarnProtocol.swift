@@ -1093,6 +1093,7 @@ public enum HarnACPDispatchedMethod: String, Codable, Sendable, CaseIterable {
     case harnSessionRecapQuery = "harn.session_recap.query"
     case harnSessionTimelineQuery = "harn.session_timeline.query"
     case harnSessionViewQuery = "harn.session_view.query"
+    case harnSessionHistoryBoundaries = "harn.session_history.boundaries"
     case harnSessionTimelineSubscribe = "harn.session_timeline.subscribe"
     case harnSessionTimelineUnsubscribe = "harn.session_timeline.unsubscribe"
     case sessionNew = "session/new"
@@ -1164,6 +1165,7 @@ public enum HarnACPDispatchedMethod: String, Codable, Sendable, CaseIterable {
         "harn.session_recap.query",
         "harn.session_timeline.query",
         "harn.session_view.query",
+        "harn.session_history.boundaries",
         "harn.session_timeline.subscribe",
         "harn.session_timeline.unsubscribe",
         "session/new",
@@ -1246,6 +1248,7 @@ public enum HarnACPHandledMethod: String, Codable, Sendable, CaseIterable {
     case harnSessionRecapQuery = "harn.session_recap.query"
     case harnSessionTimelineQuery = "harn.session_timeline.query"
     case harnSessionViewQuery = "harn.session_view.query"
+    case harnSessionHistoryBoundaries = "harn.session_history.boundaries"
     case harnSessionTimelineSubscribe = "harn.session_timeline.subscribe"
     case harnSessionTimelineUnsubscribe = "harn.session_timeline.unsubscribe"
     case sessionNew = "session/new"
@@ -1318,6 +1321,7 @@ public enum HarnACPHandledMethod: String, Codable, Sendable, CaseIterable {
         "harn.session_recap.query",
         "harn.session_timeline.query",
         "harn.session_view.query",
+        "harn.session_history.boundaries",
         "harn.session_timeline.subscribe",
         "harn.session_timeline.unsubscribe",
         "session/new",
@@ -1718,6 +1722,7 @@ public struct HarnAgentTerminalClass: RawRepresentable, Codable, Sendable, Hasha
     public static let agentLoopProtocolFailure = Self(rawValue: "agent_loop_protocol_failure")
     public static let parseDropped = Self(rawValue: "parse_dropped")
     public static let genericThrow = Self(rawValue: "generic_throw")
+    public static let managedSpendPaused = Self(rawValue: "managed_spend_paused")
 
     /// Every value this binding was generated from, in wire order. A value
     /// outside it is valid and preserved; it is simply not listed here.
@@ -1734,6 +1739,7 @@ public struct HarnAgentTerminalClass: RawRepresentable, Codable, Sendable, Hasha
         "agent_loop_protocol_failure",
         "parse_dropped",
         "generic_throw",
+        "managed_spend_paused",
     ].map { Self(rawValue: $0) }
 
     /// Whether this value is part of the vocabulary this binding was generated from.
@@ -1995,6 +2001,7 @@ public struct HarnLlmErrorReason: RawRepresentable, Codable, Sendable, Hashable,
     public static let outputBudgetExhausted = Self(rawValue: "output_budget_exhausted")
     public static let unknown = Self(rawValue: "unknown")
     public static let policyDenied = Self(rawValue: "policy_denied")
+    public static let managedSpendPaused = Self(rawValue: "managed_spend_paused")
 
     /// Every value this binding was generated from, in wire order. A value
     /// outside it is valid and preserved; it is simply not listed here.
@@ -2014,6 +2021,7 @@ public struct HarnLlmErrorReason: RawRepresentable, Codable, Sendable, Hashable,
         "output_budget_exhausted",
         "unknown",
         "policy_denied",
+        "managed_spend_paused",
     ].map { Self(rawValue: $0) }
 
     /// Whether this value is part of the vocabulary this binding was generated from.
@@ -4292,7 +4300,7 @@ public enum HarnACPTypedSessionUpdate: Codable, Sendable, Equatable {
 public let harnPreparedSessionSchema = "harn.prepared_session.v1"
 public enum HarnPreparedSessionState: String, Codable, Sendable { case needsApproval = "needs_approval", ready, blocked, active, delta, stopped, pivoted, terminal }
 public enum HarnPreparedSessionCommand: String, Codable, Sendable { case approvalDecision = "approval_decision", attach, turn, requestDelta = "request_delta", stop, pivot, finish }
-public struct HarnPreparedSessionApprovalDecision: Codable, Sendable, Equatable { public var batch_fingerprint: String; public var approved: Bool; public var decider: String }
+public struct HarnPreparedSessionApprovalDecision: Codable, Sendable, Equatable { public var request_id: String; public var batch_fingerprint: String; public var approved: Bool; public var decider: String }
 public struct HarnPreparedSessionBinding: Codable, Sendable, Equatable { public var session_id: String; public var workspace_fingerprint: String; public var runtime: HarnACPValue; public var consumer: HarnACPValue }
 public struct HarnPreparedRuntimeAttachment: Codable, Sendable, Equatable { public var session_id: String; public var workspace_fingerprint: String; public var runtime: HarnACPValue; public var consumer: HarnACPValue }
 public struct HarnPreparedSessionLease: Codable, Sendable, Equatable {
@@ -4936,4 +4944,40 @@ public struct HarnInferenceAdmissionSnapshot: Codable, Sendable, Equatable {
         case openWeight = "open_weight"
         case trainingDefault = "training_default"
     }
+}
+public struct HarnCanonicalSessionBoundary: Codable, Sendable, Equatable {
+    public let schema: String
+    public let sessionId: String
+    public let eventId: Int64?
+    public let recordHash: String?
+
+    enum CodingKeys: String, CodingKey {
+        case schema
+        case sessionId = "session_id"
+        case eventId = "event_id"
+        case recordHash = "record_hash"
+    }
+}
+
+public struct HarnCanonicalHistoryPosition: Codable, Sendable, Equatable {
+    public let sourceEventId: String
+    public let originSessionId: String
+    public let beforeBoundary: HarnCanonicalSessionBoundary
+    public let boundary: HarnCanonicalSessionBoundary
+
+    enum CodingKeys: String, CodingKey {
+        case sourceEventId = "source_event_id"
+        case originSessionId = "origin_session_id"
+        case beforeBoundary = "before_boundary"
+        case boundary
+    }
+}
+
+public struct HarnCanonicalHistoryBoundaries: Codable, Sendable, Equatable {
+    public let tip: HarnCanonicalSessionBoundary
+    public let positions: [HarnCanonicalHistoryPosition]
+}
+
+public struct HarnACPPromptCorrelation: Codable, Sendable, Equatable {
+    public let messageId: String?
 }

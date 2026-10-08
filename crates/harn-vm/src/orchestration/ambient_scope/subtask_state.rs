@@ -41,6 +41,7 @@ pub(super) const CAPTURED_THREAD_LOCAL_PROJECTION: &[&str] = &[
     "PROCESS_ADMISSION_CONTEXT",
     "CURRENT_HOST_BRIDGE",
     "CURRENT_LOOP_SINKS",
+    "CURRENT_AGENT_EVENT_TRANSPORT",
     "CURRENT_SESSION_STACK",
     "LLM_CONFIG_OVERRIDES_CONTEXT",
     "LLM_RUNTIME_PROVIDER_ENDPOINTS_CONTEXT",
@@ -280,5 +281,62 @@ mod tests {
             .map(|name| (*name).to_string())
             .collect();
         assert_eq!(projection, policy);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn captured_child_scope_retains_transport_after_same_session_rebind() {
+        use crate::agent_events::{
+            emit_event, register_sink, AgentEvent, AgentEventSink, AgentEventTransport,
+        };
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
+
+        struct Count(Arc<AtomicUsize>);
+        impl AgentEventSink for Count {
+            fn handle_event(&self, _: &AgentEvent) {
+                self.0.fetch_add(1, Ordering::SeqCst);
+            }
+        }
+        let transport = || {
+            let count = Arc::new(AtomicUsize::new(0));
+            (
+                AgentEventTransport::new(Arc::new(Count(count.clone()))),
+                count,
+            )
+        };
+        let session = format!("transport-child-{}", uuid::Uuid::now_v7());
+        let event = AgentEvent::IterationStart {
+            session_id: session.clone(),
+            iteration: 1,
+            provider: String::new(),
+            model: String::new(),
+        };
+        let (old, old_count) = transport();
+        let (new, new_count) = transport();
+        let durable = Arc::new(AtomicUsize::new(0));
+        register_sink(session.clone(), Arc::new(Count(durable.clone())));
+        let old_scope = old
+            .scope(async { crate::orchestration::AmbientExecutionScope::capture_inherited() })
+            .await;
+        new.scope(async {
+            emit_event(&event);
+            crate::orchestration::scope_ambient(old_scope, async {
+                emit_event(&event);
+                tokio::task::yield_now().await;
+                emit_event(&event);
+            })
+            .await;
+            emit_event(&event);
+        })
+        .await;
+        crate::agent_events::clear_session_sinks(&session);
+        assert_eq!(
+            (
+                old_count.load(Ordering::SeqCst),
+                new_count.load(Ordering::SeqCst)
+            ),
+            (2, 2)
+        );
+        assert_eq!(durable.load(Ordering::SeqCst), 4);
     }
 }

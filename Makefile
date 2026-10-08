@@ -65,6 +65,7 @@ all: fmt
 	trap 'rm -rf "$$stable_root"' EXIT; \
 	harn_bin="$$(./scripts/snapshot_harn_bin.sh "$$harn_bin" "$$stable_root/harn-bin")" || exit 1; \
 	$(MAKE) HARN_BIN="$$harn_bin" check-agent-gates || exit 1; \
+	$(MAKE) test-release-notices || exit 1; \
 	$(MAKE) HARN_BIN="$$harn_bin" lint lint-md lint-actions lint-harn check-app-host spec-lint check-openapi-snapshot fmt-harn test test-harn-scripts test-agent-scripts test-pr-gate-scripts test-rust-lint-lane-cache conformance protocol-conformance mcp-conformance replay-oracle replay-bench check-highlight check-portable-benchmark-schema check-portable-demo-package check-prompt-grammar check-protocol-artifacts check-connector-schemas check-harness-migrations check-cli-surface check-bindings check-session-bundle-schema check-run-view-fixtures check-docs lint-test-patterns lint-diagnostic-codes check-stdlib-host-neutral check-public-product-names check-stdlib-strict-types check-stdlib-public-return-types check-schema-strict check-optional-dep-feature-contracts check-receipt-structs check-provider-catalog-drift check-source-file-lengths check-test-target-coverage check-gate-path-visibility check-python-boundary check-harn-syntax-sensitive-scans check-agent-guidance check-crate-sibling-versions check-protocol-symbol-removals check-dependabot-groups check-tree-sitter-keywords check-tree-sitter-parser check-grammar-keywords check-grammar-fitness check-loud-boundaries check-turn-end-boundary check-release-contract check-release-audit-contract check-ci-cache-policy check-rust-test-lane-policy check-cargo-lock-contract check-scheduled-workflows check-vm-exposures portal-check || exit 1; \
 	if [ -z "$(strip $(HARN_BIN))" ]; then HARN_BIN='' HARN_BIN_NO_BUILD=1 ./scripts/harn_bin.sh --record-receipt; fi
 
@@ -676,6 +677,7 @@ test-agent-scripts:
 	@echo "    Harn agent-loop tests OK."
 
 test-pr-gate-scripts:
+	./scripts/tests/gh_check_state_launcher_test.sh
 	./scripts/tests/pr_title_convention_test.sh
 	./scripts/tests/fixture_git_init_branch_test.sh
 	./scripts/tests/sha256_file_hex_test.sh
@@ -695,7 +697,6 @@ test-pr-gate-scripts:
 	./scripts/tests/tree_sitter_generated_test.sh
 	./scripts/tests/native_platform_ci_plan_test.sh
 	./scripts/tests/release_ref_matcher_test.sh
-	./scripts/tests/ci_merge_group_proof_test.sh
 	./scripts/tests/check_sdk_release_artifacts_test.sh
 	./scripts/tests/generate_sdk_clients_test.sh
 	./scripts/tests/changelog_fragment_check_test.sh
@@ -707,7 +708,11 @@ test-pr-gate-scripts:
 	./scripts/tests/release_tag_main_ancestry_test.sh
 	./scripts/tests/candidate_manifest_test.sh
 	./scripts/tests/release_promotion_plan_test.sh
+	bash ./scripts/tests/release_promotion_source_test.sh
+	bash ./scripts/tests/release_rehearsal_authorization_test.sh
 	bash ./scripts/tests/release_consumer_candidate_verdict_test.sh
+	bash ./scripts/tests/failed_rehearsal_observation_test.sh
+	bash ./scripts/tests/unpublished_retirement_test.sh
 	./scripts/tests/check_linux_glibc_floor_test.sh
 	./scripts/tests/release_version_test.sh
 	./scripts/tests/release_publication_policy_test.sh
@@ -739,6 +744,7 @@ test-pr-gate-scripts:
 	./scripts/tests/ci_write_walltime_report_test.sh
 	./scripts/tests/update_queued_pr_test.sh
 	./scripts/tests/cancel_superseded_merge_groups_test.sh
+	./scripts/tests/review_dispatch_sweep_test.sh
 	./scripts/tests/audit_gates_parallel_test.sh
 	./scripts/tests/source_gate_receipt_test.sh
 	./scripts/tests/conformance_worker_budget_test.sh
@@ -796,6 +802,7 @@ test-pr-gate-post-warm-integrations: test-rust-lint-lane-cache
 	HARN_BIN="$(HARN_BIN)" ./scripts/tests/publish_script_test.sh
 	HARN_BIN="$(HARN_BIN)" ./scripts/tests/ci_preemption_recover_test.sh
 	HARN_BIN="$(HARN_BIN)" ./scripts/tests/check_harn_syntax_sensitive_scans_performance_test.sh
+	HARN_BIN="$(HARN_BIN)" bash ./scripts/tests/test_case_performance_evidence_test.sh
 	HARN_BIN="$(HARN_BIN)" ./scripts/tests/connector_scaffold_strict_package_test.sh
 	HARN_BIN="$(HARN_BIN)" ./scripts/tests/drift_preflight_stale_binary_test.sh
 	HARN_BIN="$(HARN_BIN)" ./scripts/tests/hook_generated_artifact_drift_warn_test.sh
@@ -1569,14 +1576,24 @@ check-release-contract:
 	@echo "=== Checking Harn-owned release contract ==="
 	@$(HARN_CMD) run scripts/release_contract.harn -- --check
 
+.PHONY: gen-release-notices check-release-notices test-release-notices
+gen-release-notices:
+	node scripts/release_third_party_notices.mjs generate dist/release-notices
+
+check-release-notices:
+	node scripts/release_third_party_notices.mjs verify dist/release-notices
+
+test-release-notices:
+	node --test scripts/tests/release_third_party_notices.test.mjs
+
 check-release-audit-contract:
 	@echo "=== Checking release-audit proof contract against CI ==="
 	@$(HARN_CMD) run scripts/release_audit_contract.harn -- --contract scripts/release_audit_contract.json --check-ci .github/workflows/ci.yml
 
 check-ci-cache-policy:
 	@echo "=== Checking CI cache ownership policy ==="
-	bash scripts/tests/ci_sprint_fast_ci_test.sh
-	@$(HARN_SCRIPT_TEST_ENV) $(HARN_CMD) test scripts/tests/ci_sprint_fast_ci_policy_test.harn
+	bash scripts/tests/ci_post_merge_tier_test.sh
+	@$(HARN_SCRIPT_TEST_ENV) $(HARN_CMD) test scripts/tests/ci_post_merge_tier_policy_test.harn
 	@$(HARN_CMD) run scripts/check_ci_cache_policy.harn
 
 # The `#[harn_builtin(exposure = "harness...")]` declarations in harn-vm are the

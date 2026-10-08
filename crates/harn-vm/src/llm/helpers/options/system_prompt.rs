@@ -169,6 +169,26 @@ fn context_call_role(options: Option<&crate::value::DictMap>) -> Result<String, 
         .unwrap_or_else(|| "unattributed".to_string()))
 }
 
+/// The agent session whose directive envelope this call continues: the
+/// named `session_id`, else the ambient session. An auxiliary call such as a
+/// completion judge keeps its session for attribution but continues no
+/// conversation, so it receives neither the envelope nor its authority
+/// declaration, and the directives stay pending for the agent's next turn.
+pub(crate) fn directive_session_id(
+    options: Option<&crate::value::DictMap>,
+) -> Result<Option<String>, VmError> {
+    if crate::llm::mock::is_auxiliary_call_role(&context_call_role(options)?) {
+        return Ok(None);
+    }
+    Ok(options
+        .and_then(|options| options.get("session_id"))
+        .and_then(|value| match value {
+            VmValue::String(value) if !value.is_empty() => Some(value.to_string()),
+            _ => None,
+        })
+        .or_else(crate::agent_sessions::current_session_id))
+}
+
 /// Render one fragment dict into its block. An optional `title` becomes a
 /// `## <title>` heading above the trimmed content.
 pub(super) fn render_system_fragment(content: &str, part: &crate::value::DictMap) -> String {
@@ -311,14 +331,7 @@ pub(crate) fn assemble_system_prompt(
     use crate::llm::prompt::{assemble, FragmentBucket, PromptFragment};
 
     let call_role = context_call_role(options)?;
-    let directive_authority = options
-        .and_then(|options| options.get("session_id"))
-        .and_then(|value| match value {
-            VmValue::String(value) if !value.is_empty() => Some(value.as_str()),
-            _ => None,
-        })
-        .map(str::to_string)
-        .or_else(crate::agent_sessions::current_session_id)
+    let directive_authority = directive_session_id(options)?
         .filter(|session_id| crate::agent_sessions::exists(session_id))
         .map(|session_id| {
             let nonce = super::reminders::directive_nonce_for_session(&session_id);

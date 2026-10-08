@@ -70,7 +70,7 @@ async fn scoped_first_child_failure_releases_its_lifecycle_owner() {
     install_claimed_journal(&vm, root.path(), session_id, task_id).await;
 
     let cleanup_progress = crate::agent_lifecycle_cleanup::subscribe_cleanup_progress();
-    vm.spawned_tasks.insert(
+    vm.register_spawned_task(
         "public-scope-child".to_string(),
         failed_task(task_id, "scope boom"),
     );
@@ -102,7 +102,7 @@ async fn graceful_cancel_early_failure_releases_its_lifecycle_owner() {
     install_claimed_journal(&vm, root.path(), session_id, task_id).await;
 
     let cleanup_progress = crate::agent_lifecycle_cleanup::subscribe_cleanup_progress();
-    vm.spawned_tasks.insert(
+    vm.register_spawned_task(
         "public-graceful-child".to_string(),
         failed_task(task_id, "graceful boom"),
     );

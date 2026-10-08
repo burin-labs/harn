@@ -308,17 +308,19 @@ impl AcpServer {
         target: serde_json::Value,
         reason: Option<&str>,
     ) {
-        harn_vm::agent_events::emit_event(&harn_vm::agent_events::AgentEvent::ControlOutcome {
-            session_id: session_id.to_string(),
-            control_id: control_id(),
-            method: method.to_string(),
-            outcome: outcome.to_string(),
-            status: status.to_string(),
-            actor,
-            target,
-            reason: reason.map(str::to_string),
-            metadata: serde_json::Value::Null,
-        });
+        self.concurrent_controls.emit_control_event(
+            &harn_vm::agent_events::AgentEvent::ControlOutcome {
+                session_id: session_id.to_string(),
+                control_id: control_id(),
+                method: method.to_string(),
+                outcome: outcome.to_string(),
+                status: status.to_string(),
+                actor,
+                target,
+                reason: reason.map(str::to_string),
+                metadata: serde_json::Value::Null,
+            },
+        );
     }
 
     /// Record an accepted control word and publish its outcome. See
@@ -328,7 +330,7 @@ impl AcpServer {
         session_id: &str,
         control: harn_session_store::ControlEvent,
     ) {
-        record_and_emit_control(session_id, control);
+        record_and_emit_control(&self.concurrent_controls, session_id, control);
     }
 
     /// Send a JSON-RPC notification (no id, no response expected).
@@ -421,9 +423,13 @@ impl AcpServer {
 /// notification's `metadata.recorded` rather than being swallowed,
 /// because "no control row in the store" must not read the same as "no
 /// control happened".
-pub(super) fn record_and_emit_control(session_id: &str, control: harn_session_store::ControlEvent) {
+pub(super) fn record_and_emit_control(
+    controls: &ConcurrentSessionControls,
+    session_id: &str,
+    control: harn_session_store::ControlEvent,
+) {
     let outcome = harn_vm::agent_sessions::record_control_event(session_id, &control);
-    harn_vm::agent_events::emit_event(&harn_vm::agent_events::AgentEvent::ControlOutcome {
+    controls.emit_control_event(&harn_vm::agent_events::AgentEvent::ControlOutcome {
         session_id: session_id.to_string(),
         control_id: control.control_id.clone(),
         method: control.method.clone(),

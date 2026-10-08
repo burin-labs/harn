@@ -23,7 +23,7 @@ fn admin_merge(harness: Harness, ctx: string) -> string {
     harness.llm,
     [
       {tool_calls: [{id: "audit_1", name: "audit_tool", arguments: {}}]},
-      llm_text("<done>##DONE##</done>"),
+      llm_text("<user_response>Ran the audit tool.</user_response><done>##DONE##</done>"),
     ],
     { ->
       const result = agent_loop(

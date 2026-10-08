@@ -5,6 +5,7 @@ impl SessionState {
         let now = Instant::now();
         let transcript = empty_transcript(&id);
         Self {
+            admission_role: SessionAdmissionRole::Admitted,
             id,
             transcript,
             subscribers: Vec::new(),

@@ -10,7 +10,7 @@ use crate::vm::Vm;
 mod input_schema;
 mod registry;
 mod synthesized_closure;
-use registry::TOOL_REGISTRY_IMPL_DEF;
+use registry::{TOOL_INVOCATION_BINDING_IMPL_DEF, TOOL_REGISTRY_IMPL_DEF, TOOL_SCHEMA_IMPL_DEF};
 use synthesized_closure::compile_synthesized_tool_closure;
 
 thread_local! {
@@ -465,22 +465,6 @@ fn tool_count_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
     Ok(VmValue::Int(count as i64))
 }
 
-#[harn_builtin(
-    exposure = "pure",
-    effects = [],
-    sig = "tool_schema(registry: {_type: \"tool_registry\", tools: list} | closure) -> ToolCatalog",
-    category = "tools"
-)]
-fn tool_schema_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    let registry = args.first().ok_or_else(|| {
-        VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-            "tool_schema: requires a tool registry",
-        )))
-    })?;
-    let schema = crate::tool_registry::tool_registry_schema(registry)?;
-    Ok(crate::schema::json_to_vm_value(&schema))
-}
-
 // Preserve extension metadata, including `guidance`, which the prompt assembler
 // reads from the active tool set to inject capability-gated instructions.
 #[harn_builtin(
@@ -520,6 +504,12 @@ fn tool_define_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
 
     let handler = config.get("handler").cloned().unwrap_or(VmValue::Nil);
     let has_handler = !matches!(handler, VmValue::Nil);
+    let prepare = config.get("prepare").cloned().unwrap_or(VmValue::Nil);
+    if !matches!(prepare, VmValue::Nil | VmValue::Closure(_)) {
+        return Err(VmError::Runtime(
+            "tool_define: prepare must be a callable closure".into(),
+        ));
+    }
 
     if config.contains_key("params") && !config.contains_key("parameters") {
         return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
@@ -586,6 +576,11 @@ fn tool_define_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
     // - `"provider_native"` forbids `handler` (the model returns
     //   the already-executed result inline).
     let host_capability = config.get("host_capability");
+    if !matches!(prepare, VmValue::Nil) && resolved_executor != "harn" {
+        return Err(VmError::Runtime(
+            "tool_define: prepare requires a Harn handler".into(),
+        ));
+    }
     let mcp_server = config.get("mcp_server");
     match resolved_executor {
         "harn" => {
@@ -723,6 +718,9 @@ fn tool_define_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
     tool_entry.put_str("name", name.as_str());
     tool_entry.put_str("description", description);
     tool_entry.insert(crate::value::intern_key("handler"), handler);
+    if !matches!(prepare, VmValue::Nil) {
+        tool_entry.insert(crate::value::intern_key("prepare"), prepare);
+    }
     input_schema::insert_resolved_schema(&mut tool_entry, declared_schema);
     // Store the canonical executor as a plain string; wire
     // serialization is handled by the ACP adapter.
@@ -1047,6 +1045,7 @@ fn tool_def_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError
 }
 
 pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
+    &TOOL_INVOCATION_BINDING_IMPL_DEF,
     &TOOL_SYNTHESIZE_IMPL_DEF,
     &TOOL_SYNTH_INVOKE_IMPL_DEF,
     &TOOL_SYNTHESIS_CACHE_IMPL_DEF,

@@ -3,6 +3,7 @@ use crate::orchestration::{pop_execution_policy, push_execution_policy, UnixSock
 
 mod overlay_scope;
 mod path_contracts;
+mod path_scope;
 mod process_axis;
 mod runtime_roots;
 mod rustc_wrapper_policy;

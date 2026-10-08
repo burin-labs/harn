@@ -30,6 +30,13 @@ only `AuthorityUse`; it calls `authorize` with the exact typed requirement
 immediately before each material operation. Dispatch repeats the canonical
 evaluation and rejects any requirement not fingerprinted into the lease.
 
+Requested filesystem and process roots are authority to acquire, not concrete
+file effects in an existing workspace. Their policy evaluation retains authored
+path constraints and sensitive-path refusals, without treating the requested
+root as an existing workspace grant. Host ceilings, the exact approval batch,
+and the approved lease still control admission. Concrete tool dispatch uses its
+explicit workspace boundary and cannot use this internal acquisition interface.
+
 `PreparedRunExecutor` has separate `Output` and `Error` associated types.
 `ExecutionOutcome::ExecutorFailed` returns the concrete executor error beside
 the terminal authority receipt, so hosts can retain structured partial-run
@@ -93,15 +100,44 @@ lease. `attach` binds that lease to the exact session, workspace, runtime
 provenance, and consumer before engine startup. A durable
 `PreparedSessionLeaseStore` atomically rejects replay across server processes.
 Routine turns reuse the attached authority envelope without prompting again,
-and `stop`, `pivot`, and `terminal` all persist terminal accounting. The JSON
-Schema is `schemas/prepared-session-v1.schema.json`; generated Rust,
+and `stop`, `pivot`, and `terminal` all persist terminal accounting. Accepted
+Stop and pivot controls persist `stage: stopped` and `status: stopped`, retaining
+the used and unused authority without classifying the control as executor failure.
+The JSON Schema is `schemas/prepared-session-v1.schema.json`; generated Rust,
 TypeScript, Swift, Python, and Go protocol artifacts expose the same states and
 commands.
+
+Embedded runtimes whose turn futures are not `Send` use
+`PreparedSession::run_turn_with(&active, turn)`. The future runs in the same
+attached authority and identity scope as `run_turn`; the embedder calls
+`active.authorize` before each material operation. Returning from a turn keeps
+the session attached. Its accepted lifecycle event calls `finish` or `stop` to
+persist terminal accounting and retire the lease.
+
+ACP embedders implement `AcpRuntimeConfigurator::run_prompt` to scope that
+future on the server's engine executor. The context identifies the session and
+workspace, exposes Harn's resolved capability policy and the existing host
+bridge, and reports accepted cancellation. Refusing before polling the future
+prevents VM, host-capability, and provider execution. Provider endpoint overrides
+preserve this configurator. The adapter still owns prompt responses, event
+flushing, and cancellation classification.
+
+`request_session_approval(&bridge, session_id, &batch)` projects a grouped batch
+through the attached ACP permission bridge. It uses Harn's canonical permission
+options and response parser; missing, malformed, and rejected answers cannot
+grant authority. Pass its decision to `PreparedSession::decide`, which verifies
+both the request ID and semantic batch fingerprint, then persists the decision
+before attachment or execution. Each batch has a fresh request ID even when its
+semantic content is identical. Preserve that ID in the decision; an older Allow
+or Deny cannot consume a replacement request.
+The helper rejects a bridge attached to another session before requesting any
+host decision.
 
 `PreparedRun::request_delta` remains the typed attenuation interface for a
 single prepared run. `PreparedSession::request_delta` adds the interactive
 session behavior: an identical requirement is already covered, attenuation is
 immediate, and widening produces one fingerprinted semantic approval batch.
+Delta decisions likewise require the exact request ID and active parent lease.
 Only the exact approved widening joins the active envelope; a denial leaves
 the existing session usable.
 

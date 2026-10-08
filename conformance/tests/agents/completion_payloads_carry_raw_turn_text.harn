@@ -15,9 +15,9 @@ import { llm_text, with_llm_script } from "std/testing"
  * identical; asserting that the projected view LACKS it is what proves the
  * views genuinely differ, which is the whole reason the field exists.
  *
- * The post-turn payload is reported rather than asserted on the projected
- * side: its `text` is not projected on this path, so `raw_text` there is a
- * consistency guarantee (host view == detector view) rather than a repair.
+ * Wrapped post-turn text is projected too. Its raw field preserves the exact
+ * emission, while the projected field keeps only the answer. Bare compatibility
+ * text retains its existing marker treatment.
  */
 fn marker_report(label: string, projected: string, raw: string) -> string {
   return label
@@ -106,6 +106,12 @@ pipeline test(harness: Harness) {
       contains(to_string(seen.post_raw), "##DONE##"),
       label + ": post-turn raw_text keeps the completion marker",
     )
+    assert_eq(seen.post_raw, case.emission, "post-turn raw evidence stays byte-identical")
+    assert_eq(seen.judge_raw, case.emission, "judge raw evidence stays byte-identical")
+    if label == "wrapped" {
+      assert_eq(seen.post_projected, "All set.", "post-turn projection keeps the visible answer")
+      assert_eq(seen.judge_projected, "All set.", "judge projection keeps the visible answer")
+    }
     harness.stdio.println(seen.status)
     harness.stdio.println(
       marker_report(label + " post_turn", to_string(seen.post_projected), to_string(seen.post_raw)),

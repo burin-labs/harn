@@ -3,10 +3,12 @@
 
 mod support;
 
+mod canonical_publication;
 mod cost;
 mod lifecycle;
 mod lineage;
 mod projection;
+mod publication;
 mod reasoning_receipts;
 mod tool_calls;
 mod transcript;

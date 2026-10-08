@@ -711,6 +711,8 @@ pub(crate) fn compile_embedded_stdlib_module_artifact_from_source(
 #[cfg(test)]
 thread_local! {
     pub(crate) static INTERFACE_RESOLUTIONS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+    /// Every module parse this crate performs, whatever asked for it.
+    pub(crate) static MODULE_PARSES: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
 }
 
 /// Resolve the exact imported interface consulted while lowering `source`.
@@ -935,6 +937,8 @@ fn parse_module_source(
     source_path: &Path,
     source: &str,
 ) -> Result<Vec<harn_parser::SNode>, VmError> {
+    #[cfg(test)]
+    MODULE_PARSES.with(|count| count.set(count.get() + 1));
     let mut lexer = harn_lexer::Lexer::new(source);
     let tokens = lexer.tokenize().map_err(|e| {
         VmError::Runtime(format!(

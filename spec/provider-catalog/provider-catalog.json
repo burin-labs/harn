@@ -7369,104 +7369,6 @@
       ]
     },
     {
-      "id": "deepinfra/Qwen/Qwen3.8-2.4T-A95B",
-      "name": "Qwen3.8 2.4T A95B (DeepInfra)",
-      "operations": [
-        "text_generation",
-        "decision"
-      ],
-      "display_name": "Qwen3.8 2.4T A95B",
-      "provider": "deepinfra",
-      "aliases": [],
-      "context_window": 262144,
-      "logical_model": "qwen3.8-2.4t-a95b",
-      "equivalence_group": "qwen3.8-2.4t-a95b",
-      "served_variant": "deepinfra",
-      "wire_model": "Qwen/Qwen3.8-2.4T-A95B",
-      "api_dialect": "openai_chat",
-      "modalities": {
-        "input": [
-          "text"
-        ],
-        "output": [
-          "text",
-          "decision"
-        ]
-      },
-      "tool_support": {
-        "native": true,
-        "text": true,
-        "preferred_format": "native",
-        "parity": "unknown",
-        "parity_source": "derived",
-        "tool_search": []
-      },
-      "structured_output": "native",
-      "format_preferences": {
-        "prefers_xml_scaffolding": false,
-        "prefers_markdown_scaffolding": true,
-        "structured_output_mode": "native_json",
-        "supports_assistant_prefill": false,
-        "prefers_role_developer": false,
-        "prefers_xml_tools": false,
-        "thinking_block_style": "inline"
-      },
-      "reasoning": {
-        "modes": [
-          "effort"
-        ],
-        "effort_supported": true,
-        "effort_levels": [
-          "low",
-          "medium",
-          "high",
-          "xhigh",
-          "max"
-        ],
-        "none_supported": false,
-        "interleaved_supported": false,
-        "preserve_thinking": false
-      },
-      "prompt_cache": true,
-      "pricing": {
-        "input_per_mtok": 2.0,
-        "output_per_mtok": 6.0,
-        "cache_read_per_mtok": 0.2,
-        "cache_write_per_mtok": null
-      },
-      "deprecation": {
-        "status": "active"
-      },
-      "availability": "serverless",
-      "quality_tags": [],
-      "capability_tags": [
-        "streaming",
-        "tools",
-        "prompt_caching",
-        "thinking",
-        "extended_thinking",
-        "structured_output"
-      ],
-      "family": "qwen",
-      "lineage": "qwen3",
-      "complementary_with": [
-        "anthropic-claude",
-        "openai-gpt",
-        "google-gemini",
-        "deepseek",
-        "kimi"
-      ],
-      "tier": "frontier",
-      "open_weight": true,
-      "strengths": [
-        "coding",
-        "agentic",
-        "long_context",
-        "tool_use",
-        "reasoning"
-      ]
-    },
-    {
       "id": "deepinfra/Qwen/Qwen3.8-Max",
       "name": "Qwen3.8 Max (DeepInfra)",
       "operations": [
@@ -34414,27 +34316,6 @@
         "streaming",
         "structured_output",
         "structured_output_mode:delimited",
-        "text_tools",
-        "thinking",
-        "tools"
-      ]
-    },
-    {
-      "provider": "deepinfra",
-      "model": "Qwen/Qwen3.8-2.4T-A95B",
-      "base_url": "https://api.deepinfra.com/v1/openai",
-      "secret_env": "DEEPINFRA_API_KEY",
-      "label": "Qwen3.8 2.4T A95B (DeepInfra)",
-      "family": "qwen",
-      "capabilities": [
-        "extended_thinking",
-        "native_tools",
-        "prefers_markdown_scaffolding",
-        "prompt_caching",
-        "reasoning_effort",
-        "streaming",
-        "structured_output",
-        "structured_output_mode:native_json",
         "text_tools",
         "thinking",
         "tools"

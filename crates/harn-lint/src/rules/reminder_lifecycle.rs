@@ -4,6 +4,7 @@ use harn_lexer::Span;
 use harn_parser::visit;
 use harn_parser::{DiagnosticCode as Code, DictEntry, Node, SNode};
 
+use super::dict_keys::entry_for_key;
 use crate::diagnostic::{LintDiagnostic, LintSeverity};
 
 const RULE_NAME: &str = "reminder-infinite-discardable";
@@ -43,21 +44,6 @@ fn check_reminder_entries(entries: &[DictEntry], diagnostics: &mut Vec<LintDiagn
 fn looks_like_reminder(entries: &[DictEntry]) -> bool {
     entry_for_key(entries, "body").is_some()
         && entry_for_key(entries, "preserve_on_compact").is_some()
-}
-
-fn entry_for_key<'a>(entries: &'a [DictEntry], key: &str) -> Option<&'a DictEntry> {
-    entries
-        .iter()
-        .find(|entry| key_name(&entry.key).as_deref() == Some(key))
-}
-
-fn key_name(node: &SNode) -> Option<String> {
-    match &node.node {
-        Node::StringLiteral(value) | Node::RawStringLiteral(value) | Node::Identifier(value) => {
-            Some(value.clone())
-        }
-        _ => None,
-    }
 }
 
 fn make_diagnostic(span: Span) -> LintDiagnostic {
