@@ -1,6 +1,8 @@
 use std::path::{Path, PathBuf};
 
 use crate::orchestration::CapabilityPolicy;
+use crate::security::environment_policy::environment_names_equal;
+use crate::security::session_environment::insert_env_value;
 
 /// Whether a Cargo `rustc` wrapper runs inside the sandbox, and the receipt.
 #[path = "rustc_wrapper.rs"]
@@ -82,9 +84,9 @@ pub fn apply_active_rustc_wrapper_policy_for_command(
         for (key, value) in command.get_envs() {
             let key = key.to_string_lossy().into_owned();
             if let Some(value) = value {
-                env.insert(key, value.to_string_lossy().into_owned());
+                insert_env_value(&mut env, &key, value.to_string_lossy().into_owned());
             } else {
-                env.remove(&key);
+                env.retain(|name, _| !environment_names_equal(name, &key));
             }
         }
         let cwd = command
@@ -180,9 +182,11 @@ pub(super) fn apply_rustc_wrapper_decision(
     } else {
         std::env::vars().collect()
     };
-    env.extend(config.env.iter().cloned());
+    for (key, value) in &config.env {
+        insert_env_value(&mut env, key, value.clone());
+    }
     for key in &config.env_remove {
-        env.remove(key);
+        env.retain(|name, _| !environment_names_equal(name, key));
     }
     if config.cwd.as_ref().is_none_or(|cwd| {
         rustc_wrapper::rustc_wrapper_decision_for_environment(policy, cwd, &env).disables()
@@ -217,8 +221,8 @@ pub(super) fn neutralize_rustc_wrapper(
     env_remove: &mut Vec<String>,
 ) {
     for key in RUSTC_WRAPPER_ENV_KEYS {
-        env.retain(|(existing, _)| !existing.eq_ignore_ascii_case(key));
-        env_remove.retain(|removed| !removed.eq_ignore_ascii_case(key));
+        env.retain(|(existing, _)| !environment_names_equal(existing, key));
+        env_remove.retain(|removed| !environment_names_equal(removed, key));
         env.push((key.to_string(), String::new()));
     }
 }
@@ -241,7 +245,7 @@ pub(super) fn sandboxed_process_config(
         !resolved
             .env_remove
             .iter()
-            .any(|removed| key.eq_ignore_ascii_case(removed))
+            .any(|removed| environment_names_equal(key, removed))
     });
     Ok(resolved)
 }

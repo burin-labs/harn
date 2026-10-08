@@ -342,6 +342,13 @@ pub(crate) fn prepare_command_from(
         command.env(key, value);
     }
 
+    // Fresh cleanup tokens must not turn each spawn into a new wrapper measurement.
+    process_sandbox::apply_active_rustc_wrapper_policy_for_command(
+        &spec.program,
+        &spec.args,
+        &mut command,
+        env_cleared,
+    );
     log_spawn_context(&command, spec.env_mode);
 
     if spec.configure_process_group {
@@ -388,12 +395,6 @@ pub(crate) fn prepare_command_from(
         (_, false) => Stdio::null(),
     });
 
-    process_sandbox::apply_active_rustc_wrapper_policy_for_command(
-        &spec.program,
-        &spec.args,
-        &mut command,
-        env_cleared,
-    );
     process_sandbox::validate_command_environment(&mut command, env_cleared)
         .map_err(ProcessError::sandbox_setup)?;
 

@@ -50,6 +50,7 @@ use std::sync::{Mutex, OnceLock};
 use serde::Serialize;
 
 use crate::orchestration::CapabilityPolicy;
+use crate::security::environment_policy::environment_names_equal_for_platform;
 
 /// The four Cargo settings that name a wrapper. An empty value is Cargo's
 /// switch for "no wrapper", which overrides configuration files too.
@@ -159,7 +160,17 @@ pub fn rustc_wrapper_decision(
         crate::stdlib::process::session_closed_env_for_command("cargo", caller_env.iter().cloned());
     let env: BTreeMap<String, String> = match child_env {
         Ok(Some(env)) => env.into_iter().collect(),
-        _ => std::env::vars().chain(caller_env.iter().cloned()).collect(),
+        _ => {
+            let mut env = std::env::vars().collect();
+            for (key, value) in caller_env {
+                crate::security::session_environment::insert_env_value(
+                    &mut env,
+                    key,
+                    value.clone(),
+                );
+            }
+            env
+        }
     };
     rustc_wrapper_decision_for_environment(policy, cwd, &env)
 }
@@ -352,13 +363,7 @@ fn measure(
         };
     }
 
-    let mut blanked = caller.to_vec();
-    blanked.retain(|(key, _)| !RUSTC_WRAPPER_ENV_KEYS.contains(&key.as_str()));
-    blanked.extend(
-        RUSTC_WRAPPER_ENV_KEYS
-            .iter()
-            .map(|key| (key.to_string(), String::new())),
-    );
+    let blanked = wrapper_free_environment(caller, cfg!(windows));
     // Why the wrapper-free build failed is the only evidence that separates a
     // broken toolchain from a broken wrapper, so the reason carries it.
     let without_error = match build(scratch.path(), cwd, blanked, None) {
@@ -411,6 +416,23 @@ impl Drop for Scratch {
     }
 }
 
+fn wrapper_free_environment(caller: &[(String, String)], windows: bool) -> Vec<(String, String)> {
+    caller
+        .iter()
+        .filter(|(key, _)| {
+            !RUSTC_WRAPPER_ENV_KEYS
+                .iter()
+                .any(|wrapper| environment_names_equal_for_platform(key, wrapper, windows))
+        })
+        .cloned()
+        .chain(
+            RUSTC_WRAPPER_ENV_KEYS
+                .iter()
+                .map(|key| (key.to_string(), String::new())),
+        )
+        .collect()
+}
+
 /// The wrapper Cargo could resolve for a build from `cwd`, as a hint, or
 /// `None` when it certainly resolves none.
 ///
@@ -422,19 +444,31 @@ impl Drop for Scratch {
 /// mentions a wrapper in a form this does not read yields an empty hint,
 /// which still runs the probe.
 fn configured_wrapper(cwd: &Path, caller: &[(String, String)]) -> Option<String> {
+    configured_wrapper_for_platform(cwd, caller, cfg!(windows))
+}
+
+fn configured_wrapper_for_platform(
+    cwd: &Path,
+    caller: &[(String, String)],
+    windows: bool,
+) -> Option<String> {
     let child_env: BTreeMap<String, String> = caller.iter().cloned().collect();
+    let value = |key: &str| {
+        child_env
+            .iter()
+            .find(|(name, _)| environment_names_equal_for_platform(name, key, windows))
+            .map(|(_, value)| value)
+    };
     if let Some(value) = RUSTC_WRAPPER_ENV_KEYS
         .iter()
-        .filter_map(|key| child_env.get(*key))
+        .filter_map(|key| value(key))
         .find(|value| !value.is_empty())
     {
         return Some(value.clone());
     }
-    let cargo_home = child_env.get("CARGO_HOME").map(PathBuf::from).or_else(|| {
-        child_env
-            .get("HOME")
-            .map(|home| Path::new(home).join(".cargo"))
-    });
+    let cargo_home = value("CARGO_HOME")
+        .map(PathBuf::from)
+        .or_else(|| value("HOME").map(|home| Path::new(home).join(".cargo")));
     let mut dirs: Vec<PathBuf> = cwd.ancestors().map(|dir| dir.join(".cargo")).collect();
     dirs.extend(cargo_home);
     dirs.iter()
@@ -884,5 +918,29 @@ mod tests {
             .read_roots
             .push("/other/root".into());
         assert_ne!(confinement_key(&policy), confinement_key(&tool_policy));
+    }
+
+    #[test]
+    fn wrapper_lookup_and_control_build_follow_platform_environment_names() {
+        let workspace = tempfile::tempdir().unwrap();
+        let env = vec![("Rustc_Wrapper".into(), "mixed-case-wrapper".into())];
+        assert_eq!(
+            configured_wrapper_for_platform(workspace.path(), &env, true).as_deref(),
+            Some("mixed-case-wrapper")
+        );
+        assert_eq!(
+            configured_wrapper_for_platform(workspace.path(), &env, false),
+            None
+        );
+        let windows = wrapper_free_environment(&env, true);
+        assert!(!windows.iter().any(|(key, _)| key == "Rustc_Wrapper"));
+        assert!(RUSTC_WRAPPER_ENV_KEYS.iter().all(|key| windows
+            .iter()
+            .any(|(name, value)| name == *key && value.is_empty())));
+        let posix = wrapper_free_environment(&env, false);
+        assert!(
+            posix.contains(&env[0]),
+            "POSIX mixed-case names are unrelated variables"
+        );
     }
 }

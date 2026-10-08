@@ -173,8 +173,8 @@ fn real_run_command_neutralizes_rustc_wrappers_inside_sandbox() {
         "CARGO_TARGET_DIR".into(),
         value(&workspace.path().join("target").to_string_lossy()),
     );
-    replacement.insert("env".into(), VmValue::dict(replacement_env));
-    let replacement_response = call(replacement);
+    replacement.insert("env".into(), VmValue::dict(replacement_env.clone()));
+    let replacement_response = call(replacement.clone());
     assert!(replacement_response.is_ok(), "{replacement_response:?}");
     assert!(
         workspace
@@ -190,6 +190,32 @@ fn real_run_command_neutralizes_rustc_wrappers_inside_sandbox() {
         harn_vm::process_sandbox::rustc_wrapper::RustcWrapperDisposition::NotConfigured,
         "replacement launches must not probe any of the four inherited non-null wrappers: {:?}",
         decisions[0]
+    );
+
+    use std::os::unix::fs::PermissionsExt;
+    let wrapper = workspace.path().join("count-wrapper");
+    let count = workspace.path().join("wrapper-count");
+    std::fs::write(
+        &wrapper,
+        format!("#!/bin/sh\nprintf x >> '{}'\nexit 1\n", count.display()),
+    )
+    .unwrap();
+    std::fs::set_permissions(&wrapper, std::fs::Permissions::from_mode(0o755)).unwrap();
+    replacement_env.insert("RUSTC_WRAPPER".into(), value(&wrapper.to_string_lossy()));
+    replacement.insert("env".into(), VmValue::dict(replacement_env));
+    for response in [call(replacement.clone()), call(replacement)] {
+        let VmValue::Dict(response) = response.unwrap() else {
+            panic!("expected process result");
+        };
+        assert!(
+            matches!(response.get("exit_code"), Some(VmValue::Int(0))),
+            "{response:?}"
+        );
+    }
+    assert_eq!(
+        std::fs::read_to_string(count).unwrap(),
+        "x",
+        "per-spawn cleanup tokens must not repeat the real compiler probe"
     );
 
     pop_execution_policy();

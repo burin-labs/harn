@@ -200,10 +200,10 @@ fn neutralize_rustc_wrapper_overrides_caller_supplied_wrapper() {
         ("PATH".to_string(), "/usr/bin".to_string()),
     ];
     let mut env_remove = vec![
-        "rustc_wrapper".to_string(),
-        "cargo_build_rustc_wrapper".to_string(),
-        "rustc_workspace_wrapper".to_string(),
-        "cargo_build_rustc_workspace_wrapper".to_string(),
+        "RUSTC_WRAPPER".to_string(),
+        "CARGO_BUILD_RUSTC_WRAPPER".to_string(),
+        "RUSTC_WORKSPACE_WRAPPER".to_string(),
+        "CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER".to_string(),
     ];
     process_config::neutralize_rustc_wrapper(&mut env, &mut env_remove);
     let collected: std::collections::BTreeMap<_, _> = env.iter().cloned().collect();
