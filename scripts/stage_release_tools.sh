@@ -35,3 +35,4 @@ do
   cp "$repo_root/scripts/$source" "$destination/$source"
 done
 cp -R "$repo_root/scripts/lib" "$destination/lib"
+cp "$repo_root/scripts/ci/require_full_suite.sh" "$destination/require_full_suite.sh"

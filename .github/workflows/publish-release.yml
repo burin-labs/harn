@@ -381,9 +381,7 @@ jobs:
 
       - name: Stage current release tools
         id: stage-release-tools
-        run: |
-          scripts/stage_release_tools.sh "$RUNNER_TEMP/release-tools"
-          cp scripts/ci/require_full_suite.sh "$RUNNER_TEMP/require_full_suite.sh"
+        run: scripts/stage_release_tools.sh "$RUNNER_TEMP/release-tools"
 
       - name: Select publish ref
         run: |
@@ -401,7 +399,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           WAIT_FOR_FULL_SUITE: 'true'
-        run: SOURCE_SHA=$(git rev-parse HEAD) bash "$RUNNER_TEMP/require_full_suite.sh"
+        run: SOURCE_SHA=$(git rev-parse HEAD) bash "$RUNNER_TEMP/release-tools/require_full_suite.sh"
 
       - uses: ./.github/actions/rust-toolchain
         with:
