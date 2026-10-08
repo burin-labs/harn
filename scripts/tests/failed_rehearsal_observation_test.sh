@@ -27,6 +27,10 @@ env:
   CANARY_WORKFLOW: harn-repin-rehearsal.yml
 ##[endgroup]
 CONSUMER_CANARY dispatched run=$child ref=default
+##[group]Run CANARY_REPOSITORY="\$CANARY_OWNER/\$CANARY_NAME" bash scripts/ci/consumer_canary.sh --observe
+env:
+  CANARY_RUN_ID: $child
+##[endgroup]
 CONSUMER_CANARY verdict=fail conclusion=cancelled run=$child wall_seconds=1510
 ##[error]Process completed with exit code 1.
 Post job cleanup.
@@ -62,7 +66,9 @@ observe | jq -e --arg source "$source_sha" \
 
 for mutation in duplicate_source missing_source wrong_source wrong_producer \
   wrong_child duplicate_verdict success_authorizer wrong_step truncated \
-  unrelated_prose records_in_other_step missing_exit duplicate_env; do
+  unrelated_prose records_in_other_step missing_exit duplicate_env \
+  missing_observe wrong_observe_child duplicate_observe wrong_order \
+  duplicate_dispatch verdict_in_other_step; do
   reset_logs
   case "$mutation" in
     duplicate_source) sed '/  SOURCE_REVISION:/p' "$fixture/consumer" > "$fixture/changed" ;;
@@ -79,6 +85,29 @@ for mutation in duplicate_source missing_source wrong_source wrong_producer \
 ##[group]Run echo unrelated' "$fixture/consumer" > "$fixture/changed" ;;
     missing_exit) sed '/Process completed with exit code/d' "$fixture/consumer" > "$fixture/changed" ;;
     duplicate_env) sed '/^env:/p' "$fixture/consumer" > "$fixture/changed" ;;
+    missing_observe) sed '/^##\[group\]Run CANARY_REPOSITORY=.*--observe$/s/--observe/--other/' "$fixture/consumer" > "$fixture/changed" ;;
+    wrong_observe_child) sed "s/CANARY_RUN_ID: $child/CANARY_RUN_ID: 1/" "$fixture/consumer" > "$fixture/changed" ;;
+    duplicate_observe) sed '/^##\[group\]Run CANARY_REPOSITORY=.*--observe$/p' "$fixture/consumer" > "$fixture/changed" ;;
+    duplicate_dispatch) sed '/^CONSUMER_CANARY dispatched /p' "$fixture/consumer" > "$fixture/changed" ;;
+    verdict_in_other_step) sed '/^CONSUMER_CANARY verdict=/i\
+##[group]Run echo unrelated' "$fixture/consumer" > "$fixture/changed" ;;
+    wrong_order) cat > "$fixture/changed" <<EOF
+##[group]Run CANARY_REPOSITORY="\$CANARY_OWNER/\$CANARY_NAME" bash scripts/ci/consumer_canary.sh --observe
+env:
+  CANARY_RUN_ID: $child
+##[endgroup]
+CONSUMER_CANARY verdict=fail conclusion=cancelled run=$child wall_seconds=1510
+##[error]Process completed with exit code 1.
+##[group]Run CANARY_REPOSITORY="\$CANARY_OWNER/\$CANARY_NAME" \\
+env:
+  SOURCE_REVISION: $source_sha
+  CANARY_WORKFLOW: harn-repin-rehearsal.yml
+##[endgroup]
+CONSUMER_CANARY dispatched run=$child ref=default
+Post job cleanup.
+Cleaning up orphan processes
+EOF
+      ;;
   esac
   mv "$fixture/changed" "$fixture/consumer"
   refuses "$mutation"
@@ -89,4 +118,4 @@ for log in resolver consumer authorization; do
   mv "$fixture/changed" "$fixture/$log"
 done
 observe >/dev/null
-echo 'Historical rehearsal observation: exact failure accepted; 13 false proofs refused.'
+echo 'Historical rehearsal observation: split-step failure accepted; 19 false proofs refused.'
