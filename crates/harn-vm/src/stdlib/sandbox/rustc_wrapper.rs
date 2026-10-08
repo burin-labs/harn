@@ -108,7 +108,7 @@ impl RustcWrapperDecision {
     }
 }
 
-type DecisionKey = (String, String, Vec<(String, String)>);
+type DecisionKey = (String, String, [u8; 32]);
 
 /// Only the policy axes consumed by the OS sandbox belong in the probe key.
 /// Tool names, argument constraints, annotations, and recursion budgets do not
@@ -161,10 +161,18 @@ pub fn rustc_wrapper_decision(
         Ok(Some(env)) => env.into_iter().collect(),
         _ => std::env::vars().chain(caller_env.iter().cloned()).collect(),
     };
+    rustc_wrapper_decision_for_environment(policy, cwd, &env)
+}
+
+pub(super) fn rustc_wrapper_decision_for_environment(
+    policy: &CapabilityPolicy,
+    cwd: &Path,
+    env: &BTreeMap<String, String>,
+) -> RustcWrapperDecision {
     let key = (
         confinement_key(policy),
         cwd.display().to_string(),
-        env.into_iter().collect(),
+        *blake3::hash(&serde_json::to_vec(env).expect("environment is serializable")).as_bytes(),
     );
     // Serialize first measurements too: concurrent spawns must not both miss
     // the map and start identical builds (or race a compiler-cache server).
@@ -174,7 +182,11 @@ pub fn rustc_wrapper_decision(
     if let Some(decision) = cache.get(&key) {
         return decision.clone();
     }
-    let decision = measure(policy, cwd, caller_env);
+    let child_env: Vec<_> = env
+        .iter()
+        .map(|(key, value)| (key.clone(), value.clone()))
+        .collect();
+    let decision = measure(policy, cwd, &child_env);
     record(&decision);
     cache.entry(key).or_insert(decision).clone()
 }
@@ -285,7 +297,7 @@ fn measure(
     }
 
     if let Some(known) = configured.as_deref().and_then(known_wrapper) {
-        known.prepare();
+        known.prepare(caller);
     }
     let nonce = probe_nonce();
     let with_wrapper = match build(scratch.path(), cwd, caller.to_vec(), Some(&nonce)) {
@@ -340,10 +352,13 @@ fn measure(
         };
     }
 
-    let blanked = RUSTC_WRAPPER_ENV_KEYS
-        .iter()
-        .map(|key| (key.to_string(), String::new()))
-        .collect();
+    let mut blanked = caller.to_vec();
+    blanked.retain(|(key, _)| !RUSTC_WRAPPER_ENV_KEYS.contains(&key.as_str()));
+    blanked.extend(
+        RUSTC_WRAPPER_ENV_KEYS
+            .iter()
+            .map(|key| (key.to_string(), String::new())),
+    );
     // Why the wrapper-free build failed is the only evidence that separates a
     // broken toolchain from a broken wrapper, so the reason carries it.
     let without_error = match build(scratch.path(), cwd, blanked, None) {
@@ -407,14 +422,7 @@ impl Drop for Scratch {
 /// mentions a wrapper in a form this does not read yields an empty hint,
 /// which still runs the probe.
 fn configured_wrapper(cwd: &Path, caller: &[(String, String)]) -> Option<String> {
-    let child_env: BTreeMap<String, String> =
-        match crate::stdlib::process::session_closed_env_for_command(
-            "cargo",
-            caller.iter().cloned(),
-        ) {
-            Ok(Some(env)) => env.into_iter().collect(),
-            _ => std::env::vars().chain(caller.iter().cloned()).collect(),
-        };
+    let child_env: BTreeMap<String, String> = caller.iter().cloned().collect();
     if let Some(value) = RUSTC_WRAPPER_ENV_KEYS
         .iter()
         .filter_map(|key| child_env.get(*key))
@@ -469,7 +477,7 @@ fn known_wrapper(configured: &str) -> Option<&'static KnownWrapper> {
 }
 
 impl KnownWrapper {
-    fn prepare(&self) {
+    fn prepare(&self, env: &[(String, String)]) {
         let Some((program, args)) = self.prepare.split_first() else {
             return;
         };
@@ -479,6 +487,8 @@ impl KnownWrapper {
             return;
         };
         let _ = command
+            .env_clear()
+            .envs(env.iter().map(|(key, value)| (key, value)))
             .args(args)
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
@@ -541,13 +551,10 @@ fn build(
     if let Some(nonce) = nonce {
         env.push((PROBE_NONCE_ENV.to_string(), nonce.to_string()));
     }
-    let overlay =
-        crate::stdlib::process::session_closed_env_for_command("cargo", env.clone().into_iter())
-            .map_err(|error| format!("the session environment refused the probe: {error:?}"))?;
     let config = crate::stdlib::sandbox::ProcessCommandConfig {
         cwd: Some(PathBuf::from(cwd)),
-        closed_env: overlay.is_some(),
-        env: overlay.unwrap_or(env),
+        closed_env: true,
+        env,
         ..crate::stdlib::sandbox::ProcessCommandConfig::default()
     };
     PROBING.with(|flag| flag.set(true));

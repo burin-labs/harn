@@ -7,7 +7,18 @@ use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 use std::time::SystemTime;
 
-type Key = (PathBuf, Option<PathBuf>, PathBuf, Vec<(OsString, OsString)>);
+type Key = (PathBuf, Option<PathBuf>, PathBuf, [u8; 32]);
+
+fn environment_digest(env: &BTreeMap<OsString, OsString>) -> [u8; 32] {
+    let mut hash = blake3::Hasher::new();
+    for (key, value) in env {
+        for bytes in [key.as_encoded_bytes(), value.as_encoded_bytes()] {
+            hash.update(&(bytes.len() as u64).to_le_bytes());
+            hash.update(bytes);
+        }
+    }
+    *hash.finalize().as_bytes()
+}
 
 #[derive(PartialEq, Eq)]
 struct Stamp {
@@ -51,7 +62,7 @@ impl Cache {
             workspace.to_path_buf(),
             home.map(Path::to_path_buf),
             git.to_path_buf(),
-            env.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
+            environment_digest(env),
         );
         if let Some(entry) = self.0.get(&key) {
             if entry
@@ -76,7 +87,7 @@ impl Cache {
         }
         dependencies.sort();
         dependencies.dedup();
-        // Avoid retaining credentials from arbitrarily many environments.
+        // Bound the number of distinct workspace/environment entries.
         if self.0.len() >= 128 {
             self.0.clear();
         }

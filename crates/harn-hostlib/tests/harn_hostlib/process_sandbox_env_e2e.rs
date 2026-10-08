@@ -130,6 +130,68 @@ fn real_run_command_neutralizes_rustc_wrappers_inside_sandbox() {
     caller_request.insert("env_mode".into(), value("patch"));
     let caller_response = call(caller_request);
 
+    let canonical_workspace = workspace.path().canonicalize().unwrap();
+    let workspace_decisions = || {
+        harn_vm::process_sandbox::rustc_wrapper::rustc_wrapper_decisions()
+            .into_iter()
+            .filter(|decision| {
+                std::path::Path::new(&decision.cwd)
+                    .canonicalize()
+                    .ok()
+                    .as_ref()
+                    == Some(&canonical_workspace)
+            })
+            .collect::<Vec<_>>()
+    };
+    assert!(
+        workspace_decisions().is_empty(),
+        "shell launches must disable wrappers without measuring a compiler build"
+    );
+
+    std::fs::create_dir(workspace.path().join("src")).unwrap();
+    std::fs::write(workspace.path().join("Cargo.toml"), "[package]\nname = \"replacement-env\"\nversion = \"0.0.0\"\nedition = \"2021\"\n[workspace]\n").unwrap();
+    std::fs::write(workspace.path().join("src/main.rs"), "fn main() {}\n").unwrap();
+    let mut replacement = command_request(&cwd);
+    replacement.insert(
+        "argv".into(),
+        VmValue::List(Arc::new(
+            ["cargo", "build", "--offline"]
+                .into_iter()
+                .map(value)
+                .collect(),
+        )),
+    );
+    replacement.insert("env_mode".into(), value("replace"));
+    let mut replacement_env = harn_vm::value::DictMap::new();
+    for key in ["PATH", "HOME", "RUSTUP_HOME"] {
+        if let Ok(entry) = std::env::var(key) {
+            replacement_env.insert(key.into(), value(&entry));
+        }
+    }
+    replacement_env.insert("CARGO_HOME".into(), value(&cwd));
+    replacement_env.insert(
+        "CARGO_TARGET_DIR".into(),
+        value(&workspace.path().join("target").to_string_lossy()),
+    );
+    replacement.insert("env".into(), VmValue::dict(replacement_env));
+    let replacement_response = call(replacement);
+    assert!(replacement_response.is_ok(), "{replacement_response:?}");
+    assert!(
+        workspace
+            .path()
+            .join("target/debug/replacement-env")
+            .is_file(),
+        "the real replacement-environment build must finish"
+    );
+    let decisions = workspace_decisions();
+    assert_eq!(decisions.len(), 1);
+    assert_eq!(
+        decisions[0].disposition,
+        harn_vm::process_sandbox::rustc_wrapper::RustcWrapperDisposition::NotConfigured,
+        "replacement launches must not probe any of the four inherited non-null wrappers: {:?}",
+        decisions[0]
+    );
+
     pop_execution_policy();
     unsafe {
         match old_handler_sandbox {
@@ -167,15 +229,4 @@ fn real_run_command_neutralizes_rustc_wrappers_inside_sandbox() {
             "the real host-process path must override {source} and Cargo-configured wrappers"
         );
     }
-    let canonical_workspace = workspace.path().canonicalize().unwrap();
-    assert!(
-        !harn_vm::process_sandbox::rustc_wrapper::rustc_wrapper_decisions()
-            .iter()
-            .any(|decision| std::path::Path::new(&decision.cwd)
-                .canonicalize()
-                .ok()
-                .as_ref()
-                == Some(&canonical_workspace)),
-        "shell launches must disable wrappers without measuring a compiler build"
-    );
 }

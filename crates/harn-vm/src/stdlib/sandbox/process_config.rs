@@ -46,6 +46,9 @@ pub fn apply_active_rustc_wrapper_policy(
     env_remove: &mut Vec<String>,
     cwd: Option<&Path>,
 ) {
+    if rustc_wrapper::probing() {
+        return;
+    }
     if let Some((policy, _)) = super::active_sandbox_policy() {
         decide_and_apply(&policy, cwd, env, env_remove);
     }
@@ -58,15 +61,43 @@ pub fn apply_active_rustc_wrapper_policy(
 pub fn apply_active_rustc_wrapper_policy_for_command(
     program: &str,
     args: &[String],
-    env: &mut Vec<(String, String)>,
-    env_remove: &mut Vec<String>,
-    cwd: Option<&Path>,
+    command: &mut std::process::Command,
+    closed_env: bool,
 ) {
+    if rustc_wrapper::probing() {
+        return;
+    }
     if let Some((policy, _)) = super::active_sandbox_policy() {
-        if cargo_may_compile(program, args) {
-            decide_and_apply(&policy, cwd, env, env_remove);
+        if !cargo_may_compile(program, args) {
+            for key in RUSTC_WRAPPER_ENV_KEYS {
+                command.env(key, "");
+            }
+            return;
+        }
+        let mut env: std::collections::BTreeMap<_, _> = if closed_env {
+            Default::default()
         } else {
-            neutralize_rustc_wrapper(env, env_remove);
+            std::env::vars().collect()
+        };
+        for (key, value) in command.get_envs() {
+            let key = key.to_string_lossy().into_owned();
+            if let Some(value) = value {
+                env.insert(key, value.to_string_lossy().into_owned());
+            } else {
+                env.remove(&key);
+            }
+        }
+        let cwd = command
+            .get_current_dir()
+            .map(Path::to_path_buf)
+            .or_else(|| super::policy_process_cwd(&policy, None).ok());
+        let disable = cwd.is_none_or(|cwd| {
+            rustc_wrapper::rustc_wrapper_decision_for_environment(&policy, &cwd, &env).disables()
+        });
+        if disable {
+            for key in RUSTC_WRAPPER_ENV_KEYS {
+                command.env(key, "");
+            }
         }
     }
 }
@@ -81,27 +112,80 @@ fn cargo_may_compile(program: &str, args: &[String]) -> bool {
     });
     // Cargo's informational commands never invoke a compiler wrapper. Unknown
     // commands may be plugins that compile, so keep the probe for those.
-    cargo
-        && !args.is_empty()
-        && !matches!(
-            args[0].as_str(),
-            "--version"
-                | "-V"
-                | "--help"
-                | "-h"
-                | "--list"
-                | "help"
-                | "metadata"
-                | "locate-project"
-                | "verify-project"
-                | "fetch"
-                | "generate-lockfile"
-                | "update"
-                | "search"
-                | "info"
-                | "tree"
-                | "clean"
-        )
+    if !cargo {
+        return false;
+    }
+    let mut args = args.iter().map(String::as_str).peekable();
+    if args.peek().is_some_and(|arg| arg.starts_with('+')) {
+        args.next();
+    }
+    while let Some(arg) = args.next() {
+        match arg {
+            "--offline" | "--locked" | "--frozen" | "-v" | "-vv" | "--verbose" | "-q"
+            | "--quiet" => continue,
+            "--color" | "--config" | "-C" | "-Z" => {
+                args.next();
+                continue;
+            }
+            value
+                if value.starts_with("--color=")
+                    || value.starts_with("--config=")
+                    || value.starts_with("-Z") =>
+            {
+                continue
+            }
+            command => {
+                return !matches!(
+                    command,
+                    "--version"
+                        | "-V"
+                        | "--help"
+                        | "-h"
+                        | "--list"
+                        | "help"
+                        | "metadata"
+                        | "locate-project"
+                        | "verify-project"
+                        | "fetch"
+                        | "generate-lockfile"
+                        | "update"
+                        | "search"
+                        | "info"
+                        | "tree"
+                        | "clean"
+                )
+            }
+        }
+    }
+    false
+}
+
+#[cfg(test)]
+mod tests {
+    use super::cargo_may_compile;
+
+    #[test]
+    fn cargo_global_options_and_toolchain_preserve_command_classification() {
+        for args in [
+            vec!["+stable", "--offline", "--version"],
+            vec!["--config", "build.jobs=1", "--color=never", "metadata"],
+            vec!["+stable", "--help"],
+        ] {
+            assert!(!cargo_may_compile(
+                "cargo",
+                &args.into_iter().map(str::to_owned).collect::<Vec<_>>()
+            ));
+        }
+        for args in [
+            vec!["+stable", "--offline", "build"],
+            vec!["--config", "build.jobs=1", "custom-plugin"],
+        ] {
+            assert!(cargo_may_compile(
+                "cargo",
+                &args.into_iter().map(str::to_owned).collect::<Vec<_>>()
+            ));
+        }
+    }
 }
 
 /// [`apply_active_rustc_wrapper_policy`] for a config already known to run
@@ -112,17 +196,27 @@ pub(super) fn apply_rustc_wrapper_decision(
     policy: &CapabilityPolicy,
     config: &mut ProcessCommandConfig,
 ) {
+    if rustc_wrapper::probing() {
+        return;
+    }
     if !cargo_may_compile(program, args) {
         neutralize_rustc_wrapper(&mut config.env, &mut config.env_remove);
         return;
     }
-    let cwd = config.cwd.clone();
-    decide_and_apply(
-        policy,
-        cwd.as_deref(),
-        &mut config.env,
-        &mut config.env_remove,
-    );
+    let mut env: std::collections::BTreeMap<_, _> = if config.closed_env {
+        Default::default()
+    } else {
+        std::env::vars().collect()
+    };
+    env.extend(config.env.iter().cloned());
+    for key in &config.env_remove {
+        env.remove(key);
+    }
+    if config.cwd.as_ref().is_none_or(|cwd| {
+        rustc_wrapper::rustc_wrapper_decision_for_environment(policy, cwd, &env).disables()
+    }) {
+        neutralize_rustc_wrapper(&mut config.env, &mut config.env_remove);
+    }
 }
 
 fn decide_and_apply(
@@ -155,4 +249,27 @@ pub(super) fn neutralize_rustc_wrapper(
         env_remove.retain(|removed| !removed.eq_ignore_ascii_case(key));
         env.push((key.to_string(), String::new()));
     }
+}
+
+pub(super) fn sandboxed_process_config(
+    program: &str,
+    args: &[String],
+    config: &ProcessCommandConfig,
+    policy: &CapabilityPolicy,
+) -> Result<ProcessCommandConfig, crate::VmError> {
+    let mut resolved = config.clone();
+    if let Some(cwd) = resolved.cwd.as_ref() {
+        super::enforce_process_cwd_for_policy(cwd, policy)?;
+    } else {
+        resolved.cwd = Some(super::policy_process_cwd(policy, None)?);
+    }
+    super::inject_workspace_process_env(&mut resolved.env, policy);
+    apply_rustc_wrapper_decision(program, args, policy, &mut resolved);
+    resolved.env.retain(|(key, _)| {
+        !resolved
+            .env_remove
+            .iter()
+            .any(|removed| key.eq_ignore_ascii_case(removed))
+    });
+    Ok(resolved)
 }

@@ -58,7 +58,7 @@ fn git_inventory_defers_wrapper_probe_and_cargo_reuses_it_across_tool_policies()
         &["ls-files", "--others", "--exclude-standard"],
     );
     assert!(String::from_utf8_lossy(&inventory.stdout).contains("main.py"));
-    let version = run(&policy, "cargo", &["--version"]);
+    let version = run(&policy, "cargo", &["--offline", "--version"]);
     assert!(String::from_utf8_lossy(&version.stdout).starts_with("cargo "));
     assert!(
         !count.exists(),
@@ -89,6 +89,7 @@ fn git_inventory_defers_wrapper_probe_and_cargo_reuses_it_across_tool_policies()
         "x",
         "tool policy changes must reuse the measurement"
     );
+    std::fs::create_dir(cwd.join("extra")).unwrap();
     policy
         .process_sandbox
         .read_roots
@@ -98,6 +99,34 @@ fn git_inventory_defers_wrapper_probe_and_cargo_reuses_it_across_tool_policies()
         std::fs::read_to_string(&count).unwrap(),
         "xx",
         "changed process authority must remeasure"
+    );
+
+    let mut replacement = config.clone();
+    replacement.closed_env = true;
+    replacement.env.extend(
+        ["PATH", "HOME", "RUSTUP_HOME", "CARGO_HOME"]
+            .into_iter()
+            .filter_map(|key| std::env::var(key).ok().map(|value| (key.into(), value))),
+    );
+    replacement.env_remove.push("RUSTC_WRAPPER".into());
+    crate::orchestration::push_execution_policy(policy.clone());
+    let output = command_output("cargo", &["build".into(), "--offline".into()], &replacement);
+    crate::orchestration::pop_execution_policy();
+    assert!(output.unwrap().status.success());
+    assert_eq!(
+        std::fs::read_to_string(&count).unwrap(),
+        "xx",
+        "removed wrappers must reach neither probe nor real build"
+    );
+    replacement.env_remove.clear();
+    crate::orchestration::push_execution_policy(policy.clone());
+    let output = command_output("cargo", &["build".into(), "--offline".into()], &replacement);
+    crate::orchestration::pop_execution_policy();
+    assert!(output.unwrap().status.success());
+    assert_eq!(
+        std::fs::read_to_string(&count).unwrap(),
+        "xxx",
+        "an explicit wrapper in a replacement environment must be measured"
     );
 }
 
@@ -129,7 +158,10 @@ fn sandboxed_process_config_switches_off_a_wrapper_that_cannot_run() {
     crate::orchestration::pop_execution_policy();
     let resolved = resolved.unwrap();
     let env: std::collections::BTreeMap<_, _> = resolved.env.into_iter().collect();
-    let decision = rustc_wrapper::rustc_wrapper_decision(&policy, &cwd, &config.env);
+    let decision = rustc_wrapper::rustc_wrapper_decisions()
+        .into_iter()
+        .find(|decision| decision.cwd == cwd.display().to_string())
+        .expect("the confined launch must record its actual environment's decision");
     assert_eq!(
         decision.disposition,
         rustc_wrapper::RustcWrapperDisposition::Disabled,

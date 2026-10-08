@@ -102,7 +102,7 @@ pub use backend::{
     conformance, self_confinement,
 };
 pub(crate) use backend::{PrepareOutcome, SandboxBackend};
-use process_config::apply_rustc_wrapper_decision;
+use process_config::sandboxed_process_config;
 pub use process_config::{
     apply_active_rustc_wrapper_policy, apply_active_rustc_wrapper_policy_for_command, rustc_wrapper,
 };
@@ -1176,29 +1176,6 @@ pub fn command_output(
         span.finish(&output);
     }
     Ok(output)
-}
-
-fn sandboxed_process_config(
-    program: &str,
-    args: &[String],
-    config: &ProcessCommandConfig,
-    policy: &CapabilityPolicy,
-) -> Result<ProcessCommandConfig, VmError> {
-    let mut resolved = config.clone();
-    if let Some(cwd) = resolved.cwd.as_ref() {
-        enforce_process_cwd_for_policy(cwd, policy)?;
-    } else {
-        resolved.cwd = Some(policy_process_cwd(policy, None)?);
-    }
-    apply_rustc_wrapper_decision(program, args, policy, &mut resolved);
-    inject_workspace_process_env(&mut resolved.env, policy);
-    resolved.env.retain(|(key, _)| {
-        !resolved
-            .env_remove
-            .iter()
-            .any(|removed| key.eq_ignore_ascii_case(removed))
-    });
-    Ok(resolved)
 }
 
 pub fn process_spawn_error(error: &std::io::Error) -> Option<VmError> {
