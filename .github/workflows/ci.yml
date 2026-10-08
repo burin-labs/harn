@@ -85,31 +85,9 @@ jobs:
   # route ran the security archive past its limit (#9428).
   # The shared CLI producer always runs hosted (#9435).
 
-  # Decide whether the heavy Linux Rust lanes (rust-checks, audit-scripts) need
-  # to run at all.
-  #
-  # SAFETY PRINCIPLE — prune for PR fast feedback, run comprehensive on the
-  # merge-queue speculative commit. Coarse
-  # path-filtering is sound for `pull_request` events: a PR that touches only
-  # docs/website/markdown cannot regress the Rust build, so the ~45 hosted
-  # Linux-min those four matrix lanes cost are pure waste. But the merge queue
-  # (`merge_group`) builds a speculative merge commit (target + earlier-queued
-  # PRs + this PR) and is the ONLY place a cross-PR interaction regression is
-  # caught. On that event the default is still full heavy coverage. The only
-  # merge-queue prune is the stacked docs-only tail case: GitHub encodes the
-  # previous queue head in `gh-readonly-queue/<base>/pr-<n>-<sha>`, and when
-  # the incremental diff from that previous head to the current speculative
-  # commit is provably only docs/website/Markdown, the earlier queue entry is
-  # already running the full code backstop. Any parse/fetch/diff uncertainty
-  # falls back to heavy coverage. Push events reuse comprehensive merge-queue
-  # proof only when the Actions API returns a successful run of this workflow
-  # for the exact commit SHA; any API/schema/match uncertainty runs the full
-  # backstop. A proven push still runs the main-only lanes no merge group runs
-  # (repository policies and main's binary-size record), gated on `rust_paths`
-  # and fed the proving run's CLI. Release metadata-only push events are bookkeeping for a tree the
-  # merge queue already tested, so keep them on the cheap lanes too. Do not wire
-  # the downstream `if:`s back to the raw `steps.filter.outputs.*`; they must
-  # read `steps.force.outputs.*`.
+  # Pull requests and merge groups select the same proofs from their changed
+  # surfaces. Main pushes and full-suite requests run every family. Consumers
+  # read the resolved outputs, so no job can independently weaken that choice.
   #
   # The filter is an EXCLUSION list with `predicate-quantifier: every`: a file
   # only fails to mark `rust=true` when it matches EVERY pattern, i.e. it is
@@ -130,20 +108,17 @@ jobs:
       pull-requests: read
     outputs:
       rust: ${{ steps.force.outputs.rust }}
-      # Whether the Rust surface changed, independent of whether the heavy
-      # lanes rebuild it. Differs from `rust` only on a proven main push, where
-      # the main-only lanes still run against the merge group's artifacts.
+      # Kept for artifact consumers; equal to the resolved Rust selection.
       rust_paths: ${{ steps.force.outputs.rust_paths }}
       package_audit: ${{ steps.force.outputs.package_audit }}
-      portal: ${{ steps.surface_filter.outputs.portal }}
-      docs_site: ${{ steps.surface_filter.outputs.docs_site }}
-      docs_checks: ${{ steps.surface_filter.outputs.docs_checks }}
-      vscode: ${{ steps.surface_filter.outputs.vscode }}
-      prompt_prose: ${{ steps.surface_filter.outputs.prompt_prose }}
-      setup_action: ${{ steps.surface_filter.outputs.setup_action }}
-      release_contract: ${{ steps.surface_filter.outputs.release_contract }}
-      release_residual: ${{ steps.surface_filter.outputs.release_residual }}
-      release_metadata_only: ${{ steps.release_metadata.outputs.release_metadata_only }}
+      portal: ${{ steps.post_merge_tier.outputs.active != 'true' || steps.surface_filter.outputs.portal == 'true' }}
+      docs_site: ${{ steps.post_merge_tier.outputs.active != 'true' || steps.surface_filter.outputs.docs_site == 'true' }}
+      docs_checks: ${{ steps.post_merge_tier.outputs.active != 'true' || steps.surface_filter.outputs.docs_checks == 'true' }}
+      vscode: ${{ steps.post_merge_tier.outputs.active != 'true' || steps.surface_filter.outputs.vscode == 'true' }}
+      prompt_prose: ${{ steps.post_merge_tier.outputs.active != 'true' || steps.surface_filter.outputs.prompt_prose == 'true' }}
+      setup_action: ${{ steps.post_merge_tier.outputs.active != 'true' || steps.surface_filter.outputs.setup_action == 'true' }}
+      release_contract: ${{ steps.post_merge_tier.outputs.active != 'true' || steps.surface_filter.outputs.release_contract == 'true' }}
+      release_residual: ${{ steps.post_merge_tier.outputs.active != 'true' || steps.surface_filter.outputs.release_residual == 'true' }}
       post_merge_tier: ${{ steps.post_merge_tier.outputs.active }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -254,11 +229,21 @@ jobs:
             full_suite:
               - '.github/**'
               - 'scripts/ci/**'
+              - '**/Cargo.toml'
+              - 'Cargo.toml'
+              - '**/*lock*'
+              - 'Makefile'
+              - '.cargo/**'
+              - '.config/**'
               - 'Cargo.lock'
               - 'rust-toolchain.toml'
+              - '.node-version'
+              - '.harn-version'
+              - '.harn-bootstrap-version'
               - 'spec/protocol-artifacts/**'
               - 'crates/harn-cli/src/commands/dump_protocol_artifacts/**'
               - 'crates/harn-secret-catalog/**'
+              - 'crates/harn-capability-contracts/**'
               - 'crates/harn-vm/src/secrets/**'
               - 'crates/harn-vm/src/egress/**'
               - 'crates/harn-serve/src/permissions/**'
@@ -270,6 +255,10 @@ jobs:
               - 'crates/**/*permission*'
               - 'crates/**/*consent*'
               - 'crates/**/*credential*'
+              - 'crates/**/*approval*/**'
+              - 'crates/**/*approval*'
+              - 'crates/**/*policy*/**'
+              - 'crates/**/*policy*'
             package_audit:
               - '.github/workflows/ci.yml'
               - 'Cargo.lock'
@@ -295,139 +284,21 @@ jobs:
         env:
           EVENT_NAME: ${{ github.event_name }}
           FULL_SUITE_PATHS: ${{ steps.surface_filter.outputs.full_suite }}
+          GH_TOKEN: ${{ github.token }}
         run: bash scripts/ci/post_merge_tier.sh
-      - name: Detect release metadata-only PR
-        id: release_metadata
-        shell: bash
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          PR_HEAD_REF: ${{ github.event.pull_request.head.ref || '' }}
-          PR_BASE_REF: ${{ github.event.pull_request.base.ref || '' }}
-          PR_BASE_SHA: ${{ github.event.pull_request.base.sha || '' }}
-          BEFORE_SHA: ${{ github.event.before || '' }}
-        run: |
-          set -euo pipefail
-          source .github/scripts/release-ref.sh
-          release_metadata_only=false
-
-          if [[ "$EVENT_NAME" == "pull_request" ]] && is_release_head_ref "$PR_HEAD_REF"; then
-            changed_files="$RUNNER_TEMP/release-metadata-changed-files.txt"
-
-            # Diff against the merge ref's first parent, the base tip the merge
-            # was built on. The recorded base SHA goes stale as main moves and
-            # pulls main's later changes into this list (#9432). The shallow
-            # checkout grafts HEAD parentless, so read the parent from the
-            # commit object and fetch it.
-            base_sha="$(git cat-file -p HEAD | awk '/^parent /{n++; if (n == 1) first=$2} END {if (n == 2) print first}')"
-            base_sha="${base_sha:-$PR_BASE_SHA}"
-            if [[ -n "$PR_BASE_REF" ]]; then
-              git fetch --no-tags --depth=1 origin "$PR_BASE_REF" || true
-            fi
-            if [[ -n "$base_sha" ]] && ! git cat-file -e "${base_sha}^{commit}" 2>/dev/null; then
-              git fetch --no-tags --depth=1 origin "$base_sha" || true
-            fi
-
-            if [[ -n "$base_sha" ]] && git diff --name-only "$base_sha" HEAD > "$changed_files"; then
-              echo "Release PR changed files:"
-              sed 's/^/  /' "$changed_files"
-              if [[ "$(./scripts/ci_release_metadata_only.sh "$changed_files")" == "true" ]]; then
-                release_metadata_only=true
-              fi
-            else
-              echo "::notice::Could not diff release PR against its base; keeping heavy PR-head lanes enabled."
-            fi
-          elif [[ "$EVENT_NAME" == "push" ]]; then
-            changed_files="$RUNNER_TEMP/release-metadata-changed-files.txt"
-
-            if [[ -n "$BEFORE_SHA" && "$BEFORE_SHA" != "0000000000000000000000000000000000000000" ]] \
-              && git diff --name-only "$BEFORE_SHA" HEAD > "$changed_files"; then
-              echo "Push changed files:"
-              sed 's/^/  /' "$changed_files"
-              if [[ "$(./scripts/ci_release_metadata_only.sh "$changed_files")" == "true" ]]; then
-                release_metadata_only=true
-              fi
-            else
-              echo "::notice::Could not diff push against its before SHA; keeping heavy push lanes enabled."
-            fi
-          fi
-
-          echo "release_metadata_only=$release_metadata_only" >> "$GITHUB_OUTPUT"
-          echo "release metadata only: $release_metadata_only"
-      - name: Detect merge-group docs-only tail
-        id: merge_group_tail
-        shell: bash
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          REF_NAME: ${{ github.ref_name }}
-        run: |
-          set -euo pipefail
-          docs_only_tail=false
-
-          if [[ "$EVENT_NAME" == "merge_group" ]]; then
-            previous_sha=""
-            if [[ "$REF_NAME" =~ (^|/)pr-[0-9]+-([0-9a-f]{40})$ ]]; then
-              previous_sha="${BASH_REMATCH[2]}"
-            fi
-
-            if [[ -z "$previous_sha" ]]; then
-              echo "::notice::merge_group: could not parse previous queue head from ref '$REF_NAME'; keeping heavy lanes enabled."
-            else
-              if ! git cat-file -e "${previous_sha}^{commit}" 2>/dev/null; then
-                git fetch --no-tags --depth=1 origin "$previous_sha" || true
-              fi
-
-              changed_files="$RUNNER_TEMP/merge-group-tail-changed-files.txt"
-              if git cat-file -e "${previous_sha}^{commit}" 2>/dev/null \
-                && git diff --name-only "$previous_sha" HEAD > "$changed_files"; then
-                echo "Merge-group incremental changed files from $previous_sha:"
-                sed 's/^/  /' "$changed_files"
-                if [[ "$(./scripts/ci_docs_only.sh "$changed_files")" == "true" ]]; then
-                  docs_only_tail=true
-                fi
-              else
-                echo "::notice::merge_group: could not diff previous queue head $previous_sha to HEAD; keeping heavy lanes enabled."
-              fi
-            fi
-          fi
-
-          echo "docs_only_tail=$docs_only_tail" >> "$GITHUB_OUTPUT"
-          echo "merge-group docs-only tail: $docs_only_tail"
       - name: Resolve heavy-lane gate
         id: force
-        # `pull_request`: honour the paths filter — a docs/website/markdown-only
-        #   PR skips the heavy Linux Rust lanes for fast, cheap feedback. A
-        #   release/vX.Y.Z PR whose diff is only release metadata also skips
-        #   those PR-head lanes: its content is a version bump and folded notes,
-        #   and merge_group below runs the full backstop before it can land.
-        # `merge_group`: default to `rust=true` so the speculative merge commit
-        #   catches cross-PR interaction regressions. The only skip is a
-        #   stacked docs-only tail whose incremental diff from the previous
-        #   queue head is provably docs/website/Markdown-only.
-        # `push`: run the full suite on every merge (harn#9495); a merge
-        #   group no longer runs the post-merge tier, so its success cannot
-        #   excuse a push. Only release metadata-only bookkeeping skips.
         env:
-          FORCE_MERGE_GROUP: ${{ github.event_name == 'merge_group' }}
           F_RUST: ${{ steps.filter.outputs.rust }}
           F_PACKAGE_AUDIT: ${{ steps.surface_filter.outputs.package_audit }}
-          RELEASE_METADATA_ONLY: ${{ steps.release_metadata.outputs.release_metadata_only }}
-          MERGE_GROUP_DOCS_ONLY_TAIL: ${{ steps.merge_group_tail.outputs.docs_only_tail }}
+          POST_MERGE_TIER_ACTIVE: ${{ steps.post_merge_tier.outputs.active }}
         #
         # `rust_paths` equals `rust`; consumers that read it keep its name.
         run: |
           set -euo pipefail
-          if [ "${FORCE_MERGE_GROUP}" = "true" ] && [ "${MERGE_GROUP_DOCS_ONLY_TAIL}" = "true" ]; then
-            echo "::notice::changes: ${GITHUB_EVENT_NAME} — skipping heavy Linux Rust lanes for a proven docs-only merge-queue tail"
-            rust=false
-            package_audit=false
-          elif [ "${FORCE_MERGE_GROUP}" = "true" ]; then
-            echo "::notice::changes: ${GITHUB_EVENT_NAME} — forcing heavy Linux Rust lanes on"
+          if [ "${POST_MERGE_TIER_ACTIVE}" != "true" ]; then
             rust=true
             package_audit=true
-          elif [ "${RELEASE_METADATA_ONLY}" = "true" ]; then
-            echo "::notice::changes: release metadata-only ${GITHUB_EVENT_NAME} — skipping heavy Linux Rust lanes"
-            rust=false
-            package_audit=false
           else
             echo "::notice::changes: ${GITHUB_EVENT_NAME} — heavy Linux Rust lanes gated by paths filter (rust=${F_RUST})"
             rust="${F_RUST}"
@@ -457,12 +328,9 @@ jobs:
   package-audit:
     name: Verify publishable crates
     needs: [changes]
-    # Cargo package verification is a release/package correctness proof, not a
-    # formatting proof. Keep it out of the always-on fmt lane so workflow,
-    # docs, and prompt-only PRs do not pay a 9-minute cargo package/check tail.
-    # It still runs for package-relevant PRs and unconditionally on merge_group
-    # unless the speculative merge diff is a proven docs-only tail.
-    if: needs.changes.outputs.package_audit == 'true'
+    # Packaging belongs to the post-merge tier; full-suite changes prove it
+    # before landing, and every main push proves it before release.
+    if: needs.changes.outputs.package_audit == 'true' && needs.changes.outputs.post_merge_tier != 'true'
     runs-on: ubuntu-24.04
     # Hang tripwire, not a perf budget (check-test-case-performance owns perf).
     # Hosted `ubuntu-24.04` completes this lane in up to ~16m — the prior 20m
@@ -1208,6 +1076,7 @@ jobs:
       # Only security binaries enter this archive; the following workspace
       # tests reuse the same profile and unified features without rebuilding.
       - name: Build security test archive
+        if: needs.changes.outputs.post_merge_tier != 'true'
         timeout-minutes: ${{ env.HARN_RUNNER_TIER == 'self-hosted' && 24 || 24 }}
         env:
           CARGO_BUILD_JOBS: ${{ steps.resource-budget.outputs.build_jobs }}
@@ -1235,6 +1104,7 @@ jobs:
         continue-on-error: true
         run: ./scripts/ci/report_host_state.sh "security archive build"
       - name: Upload security test archive
+        if: needs.changes.outputs.post_merge_tier != 'true'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: harn-security.tar.zst
@@ -1248,6 +1118,7 @@ jobs:
         if: vars.HARN_CI_DISABLE_COLOCATED_TESTS == 'true'
         env:
           CARGO_BUILD_JOBS: ${{ steps.resource-budget.outputs.build_jobs }}
+          POST_MERGE_TIER_ACTIVE: ${{ needs.changes.outputs.post_merge_tier }}
         run: >-
           ./scripts/ci/rust_artifact.sh build-tests
           "$RUNNER_TEMP/harn-workspace-tests.tar.zst"
@@ -1261,13 +1132,10 @@ jobs:
         env:
           CARGO_BUILD_JOBS: ${{ steps.resource-budget.outputs.build_jobs }}
           HARN_LLM_CALLS_DISABLED: "1"
+          POST_MERGE_TIER_ACTIVE: ${{ needs.changes.outputs.post_merge_tier }}
         run: >-
-          set -euo pipefail;
-          host_bound_filter="$(scripts/ci/host_bound_rust_test_filter.sh)";
           scripts/ci/run_rust_test_lane.sh
-          cargo-nextest nextest run --locked --workspace --profile ci
-          --partition count:1/3
-          -E "not (${host_bound_filter})"
+          bash scripts/ci/run_workspace_tests.sh count:1/3
       - name: Upload workspace test archive
         if: vars.HARN_CI_DISABLE_COLOCATED_TESTS == 'true'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -1370,13 +1238,10 @@ jobs:
           CARGO_BUILD_JOBS: ${{ steps.resource-budget.outputs.build_jobs }}
           HARN_LLM_CALLS_DISABLED: "1"
           HARN_EXT_TEST_PARTITION: ${{ matrix.partition }}
+          POST_MERGE_TIER_ACTIVE: ${{ needs.changes.outputs.post_merge_tier }}
         run: >-
-          set -euo pipefail;
-          host_bound_filter="$(scripts/ci/host_bound_rust_test_filter.sh)";
           scripts/ci/run_rust_test_lane.sh
-          cargo-nextest nextest run --locked --workspace --profile ci
-          --partition "$HARN_EXT_TEST_PARTITION"
-          -E "not (${host_bound_filter})"
+          bash scripts/ci/run_workspace_tests.sh "$HARN_EXT_TEST_PARTITION"
 
   # GitHub job dependencies wait for terminal producer state, even when an
   # immutable v4 artifact is already available. This single free-hosted barrier
@@ -2017,7 +1882,7 @@ jobs:
   stack-frames:
     name: Stack frame budget
     needs: [changes]
-    if: needs.changes.outputs.rust == 'true'
+    if: needs.changes.outputs.rust == 'true' && needs.changes.outputs.post_merge_tier != 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     permissions:
@@ -2374,10 +2239,8 @@ jobs:
   windows-cross-check:
     name: Windows cross-compile check
     needs: changes
-    # Pull requests and merge groups run it when the change selects the full
-    # suite: a merge group cannot read a pull request body, so a `CI-Scope:
-    # full` declaration is honored only on the pull request. Main pushes run
-    # it whenever the Rust surface is on.
+    # Full-suite selection includes inherited pull-request declarations in a
+    # merge group. Every main push selects this family.
     if: >-
       ((github.event_name == 'pull_request' || github.event_name == 'merge_group')
       && needs.changes.outputs.post_merge_tier != 'true')
@@ -2419,105 +2282,6 @@ jobs:
           cross check --locked -p harn-serve --tests --features hostlib \
             --target x86_64-pc-windows-gnu
 
-  macos-plan:
-    name: macOS CI routing
-    runs-on: ubuntu-24.04
-    outputs:
-      run_macos: ${{ steps.detect.outputs.run_macos }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          # Full history on PR and push so the diff base (the merge ref's first
-          # parent / pushed `before` SHA) is reachable for the path detection below. merge_group
-          # keeps the shallow checkout (it never diffs — run stays false).
-          fetch-depth: ${{ (github.event_name == 'pull_request' || github.event_name == 'push') && '0' || '1' }}
-      - name: Detect macOS-relevant changes
-        id: detect
-        shell: bash
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha || '' }}
-          PR_HEAD_REF: ${{ github.event.pull_request.head.ref || '' }}
-          # Previous tip of the pushed ref — the diff base for `push` events.
-          # Routed through env (never inlined into the script) to avoid a
-          # template-injection sink, matching how BASE_SHA is handled.
-          BEFORE_SHA: ${{ github.event.before || '' }}
-        run: |
-          set -euo pipefail
-          run_macos=false
-
-          # Pick the diff base per event. push diffs against the previous tip;
-          # pull_request diffs against the PR base. merge_group leaves
-          # run_macos=false (the merge queue never path-gates the platform plan
-          # jobs — unchanged behavior).
-          diff_base=""
-          # A pull request checks out `refs/pull/N/merge`, whose first parent is
-          # the base tip the merge was built on, so HEAD^1..HEAD is exactly what
-          # the pull request contributes. The recorded base SHA is the tip from
-          # when the event fired and goes stale as main moves; diffing against
-          # it counted everything main landed since as this pull request's
-          # change and ran this 30-minute lane for nothing (#9432). It stays
-          # the base only when the checkout is not a merge commit.
-          if [[ "$EVENT_NAME" == "push" ]]; then
-            diff_base="$BEFORE_SHA"
-          elif [[ "$EVENT_NAME" == "pull_request" ]]; then
-            if git rev-parse --verify --quiet HEAD^2 >/dev/null; then
-              diff_base="$(git rev-parse HEAD^1)"
-            else
-              diff_base="$BASE_SHA"
-            fi
-          fi
-
-          if [[ "$EVENT_NAME" == "push" || "$EVENT_NAME" == "pull_request" ]]; then
-            if [[ -z "$diff_base" || "$diff_base" == "0000000000000000000000000000000000000000" ]]; then
-              # New branch / first push / force-push / missing PR base — the diff
-              # base is invalid, so run the full build defensively.
-              echo "macos: missing or zero diff base ($EVENT_NAME); running macOS check defensively."
-              run_macos=true
-            elif ! git diff --name-only "$diff_base" HEAD > "$RUNNER_TEMP/macos-changed-files.txt" 2>/dev/null; then
-              # Diff failed (e.g. base SHA not present) — never silently skip the
-              # backstop; run defensively.
-              echo "macos: git diff against $diff_base failed; running macOS check defensively."
-              run_macos=true
-            else
-              ci_diff="$RUNNER_TEMP/macos-ci-workflow.diff"
-              policy_diff="$RUNNER_TEMP/macos-native-policy.diff"
-              : > "$ci_diff"
-              : > "$policy_diff"
-              if grep -Fxq ".github/workflows/ci.yml" "$RUNNER_TEMP/macos-changed-files.txt"; then
-                if ! git diff --unified=0 "$diff_base" HEAD -- .github/workflows/ci.yml > "$ci_diff" 2>/dev/null; then
-                  echo "macos: ci.yml diff against $diff_base failed; running macOS check defensively."
-                  run_macos=true
-                fi
-              fi
-              if ! git diff --unified=0 "$diff_base" HEAD -- \
-                .github/release-runner-policy.json \
-                .github/workflows/build-release-binaries.yml \
-                .github/workflows/release-smoke.yml \
-                scripts/release_runner_matrix.sh \
-                scripts/release_smoke.harn \
-                scripts/smoke_installed_binary.sh > "$policy_diff" 2>/dev/null; then
-                echo "macos: native policy diff against $diff_base failed; running macOS check defensively."
-                run_macos=true
-              fi
-              cat "$RUNNER_TEMP/macos-changed-files.txt"
-              if [[ "$run_macos" != "true" ]]; then
-                run_macos="$(
-                  ./scripts/native_platform_ci_plan.sh \
-                    --platform macos \
-                    --event "$EVENT_NAME" \
-                    --head-ref "$PR_HEAD_REF" \
-                    --changed-files "$RUNNER_TEMP/macos-changed-files.txt" \
-                    --ci-diff "$ci_diff" \
-                    --policy-diff "$policy_diff"
-                )"
-              fi
-            fi
-          fi
-
-          echo "run_macos=$run_macos" >> "$GITHUB_OUTPUT"
-          echo "macos: run=$run_macos"
-
   macos:
     name: Rust on macOS (deny-warnings build + lint)
     # Hosted runners only: this is a public repo, so GitHub-hosted macOS
@@ -2526,7 +2290,7 @@ jobs:
     # runners rather than probing a self-hosted pool.
     runs-on: macos-latest
     timeout-minutes: 60
-    needs: [changes, macos-plan]
+    needs: [changes]
     # macOS coverage stays off the default PR / merge-queue critical path, but
     # runs before merge for changes that touch macOS-gated process, sandbox,
     # secret-store, or CLI paths. Other PRs rely on the main-push backstop plus
@@ -2538,8 +2302,7 @@ jobs:
     # `secret_store_os_native` that no Linux lane ever builds — but does NOT
     # execute the live-Keychain tests (that's the nightly's job).
     if: >-
-      needs.macos-plan.outputs.run_macos == 'true'
-      && needs.changes.outputs.post_merge_tier != 'true'
+      needs.changes.outputs.post_merge_tier != 'true'
     env:
       RUSTFLAGS: "-D warnings"
     steps:
@@ -2834,6 +2597,7 @@ jobs:
         changes,
         fmt,
         public-api,
+        package-audit,
         lint-md,
         release-contract,
         release-residual-audit,
@@ -2854,7 +2618,6 @@ jobs:
         ci-walltime-report,
         audit-scripts,
         windows-cross-check,
-        macos-plan,
         macos,
         portal,
         vscode,
@@ -2870,9 +2633,7 @@ jobs:
           RELEASE_CONTRACT_EXPECTED: ${{ github.event_name != 'pull_request' || needs.changes.outputs.release_contract == 'true' }}
           EVENT_NAME: ${{ github.event_name }}
           GIT_REF: ${{ github.ref }}
-          # The paths filter, not the heavy-lane decision: a push the merge
-          # group already proved skips the heavy lanes but still owes the
-          # main-only repository policies, which no merge group runs.
+          # Artifact consumers and the aggregate use the same resolved scope.
           RUST_PATHS_SELECTED: ${{ needs.changes.outputs.rust_paths }}
           WINDOWS_CROSS_REQUIRED: ${{ ((github.event_name == 'pull_request' || github.event_name == 'merge_group') && needs.changes.outputs.post_merge_tier != 'true') || (github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.changes.outputs.rust == 'true') }}
           # Exactly the `changes` decision: true only on a pull request or
@@ -2880,6 +2641,10 @@ jobs:
           # Only a skip is excused by it.
           POST_MERGE_TIER_ACTIVE: ${{ needs.changes.outputs.post_merge_tier }}
         run: |
+          case "$POST_MERGE_TIER_ACTIVE" in
+            true|false) ;;
+            *) echo '::error::CI tier was not measured.'; exit 1 ;;
+          esac
           # A skipped job is valid only when its owning condition permits it.
           # Missing, pending, failed, and cancelled results always fail closed.
           require_result() {
@@ -2899,7 +2664,6 @@ jobs:
           declare -A results=(
             ["Detect changes"]="${{ needs.changes.result }}"
             ["Markdown lint"]="${{ needs['lint-md'].result }}"
-            ["macOS CI routing"]="${{ needs['macos-plan'].result }}"
             ["GitHub Actions hygiene"]="${{ needs.actions.result }}"
           )
 
@@ -2910,16 +2674,13 @@ jobs:
             exit 1
           fi
 
-          # Publishable-crate verification still runs on every merge group, but
-          # it does not hold this verdict: at about 15 minutes it was the merge
-          # queue's long pole for a release-time property. Its check lands on
-          # the merged commit, so a failure turns main red after the merge.
-          # Release certification still requires it to have passed, so a
-          # release stops until it is fixed.
-
-          # The public API check shares package verification's trigger, so the
-          # same skips are the only acceptable ones.
+          # The public API remains merge-tier proof; package verification may
+          # defer only under the owning tier decision.
           package_audit_expected="${{ needs.changes.outputs.package_audit }}"
+          package_audit_result="${{ needs['package-audit'].result }}"
+          echo "Publishable crates: $package_audit_result"
+          require_result "$package_audit_result" "Publishable crate proof failed or is missing." \
+            test "$package_audit_expected" = "false" -o "$POST_MERGE_TIER_ACTIVE" = "true"
           public_api_result="${{ needs['public-api'].result }}"
           echo "Public Rust API check: $public_api_result"
           if [ "$public_api_result" != "success" ]; then
@@ -2979,8 +2740,9 @@ jobs:
           stack_frames_result="${{ needs['stack-frames'].result }}"
           stack_frames_ok="${{ needs['stack-frames'].outputs.gate_ok }}"
           echo "Stack frame budget: $stack_frames_result (gate_ok=$stack_frames_ok)"
-          require_result "$stack_frames_result" "Stack frame budget failed." true
-          if [ "${{ needs.changes.outputs.rust }}" = "true" ] && [ "$stack_frames_ok" != "true" ]; then
+          require_result "$stack_frames_result" "Stack frame budget failed." \
+            test "$RUST_PATHS_SELECTED" = "false" -o "$POST_MERGE_TIER_ACTIVE" = "true"
+          if [ "${{ needs.changes.outputs.rust }}" = "true" ] && [ "$POST_MERGE_TIER_ACTIVE" != "true" ] && [ "$stack_frames_ok" != "true" ]; then
             echo "::error::Stack frame proof is missing."
             exit 1
           fi
@@ -3101,13 +2863,10 @@ jobs:
             "Windows cross-compile check failed or skipped on a merge-group candidate or a Rust-changing main push." \
             [ "$WINDOWS_CROSS_REQUIRED" != "true" ]
 
-          # The macOS job runs on `push` to main and on pull requests whose
-          # diff touches macOS-gated process/sandbox/secret-store/CLI paths. It
-          # skips on routine PRs and merge_group events. Treat `skipped` as
-          # passing here; only an actual failure should fail the gate.
+          # macOS may skip only when the tier decision defers its proof.
           macos_result="${{ needs.macos.result }}"
           echo "Rust on macOS (deny-warnings build + lint): $macos_result"
-          require_result "$macos_result" "macOS job failed." true
+          require_result "$macos_result" "macOS job failed or is missing." test "$POST_MERGE_TIER_ACTIVE" = "true"
 
           # Portal and docs-site jobs are path-gated by `changes`: they run
           # when the frontend/docs surfaces or this workflow change, and skip

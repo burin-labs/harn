@@ -215,6 +215,7 @@ jobs:
     runs-on: ubuntu-24.04
     permissions:
       contents: read
+      actions: read
     outputs:
       ready: ${{ steps.authorize.outputs.ready }}
     steps:
@@ -222,6 +223,14 @@ jobs:
         with:
           ref: main
           persist-credentials: false
+      - name: Require full-suite CI at the release source
+        timeout-minutes: 90
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          SOURCE_SHA: ${{ needs.plan.outputs.source_sha }}
+          WAIT_FOR_FULL_SUITE: 'true'
+        run: bash scripts/ci/require_full_suite.sh
       - name: Require the owning rehearsal result
         id: authorize
         env:

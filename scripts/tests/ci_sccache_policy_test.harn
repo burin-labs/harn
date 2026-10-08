@@ -480,7 +480,7 @@ fn workflow() {
               if: "vars.HARN_CI_DISABLE_COLOCATED_TESTS != 'true'",
               env: {HARN_LLM_CALLS_DISABLED: "1"},
               run:
-                "${HOST_BOUND_RUST_TEST_FILTER_SETUP} scripts/ci/run_rust_test_lane.sh cargo-nextest nextest run --locked --workspace --profile ci ${NEUTRAL_RUST_TEST_FILTER_FLAG}",
+                "scripts/ci/run_rust_test_lane.sh bash scripts/ci/run_workspace_tests.sh count:1/3",
             },
           ],
       },
@@ -1748,15 +1748,16 @@ pipeline test_host_bound_sandbox_filter_has_one_owner(harness: Harness) {
   const renderer_source = harness.fs.read_text(path_join(root, HOST_BOUND_RUST_TEST_FILTER_COMMAND))
   assert_eq(renderer_source.split(HOST_BOUND_RUST_TEST_FILTER_SOURCE).count - 1, 1)
   for projection in [
-    {path: ".github/workflows/ci.yml", references: 4},
-    {path: "scripts/release_audit_contract.json", references: 4},
+    {path: ".github/workflows/ci.yml", references: 2},
+    {path: "scripts/release_audit_contract.json", references: 1},
+    {path: "scripts/ci/run_workspace_tests.sh", references: 1},
     {path: "scripts/release_gate.sh", references: 1},
     {path: "scripts/ci/warm_rust_cache.sh", references: 1},
     {path: "scripts/ci_cache_policy/host_bound_rust_test_filter.harn", references: 1},
   ] {
     const source = harness.fs.read_text(path_join(root, projection.path))
     assert_eq(
-      source.split(HOST_BOUND_RUST_TEST_FILTER_COMMAND).count - 1,
+      source.split(path_basename(HOST_BOUND_RUST_TEST_FILTER_COMMAND)).count - 1,
       projection.references,
       projection.path + " must read the owned host-bound filter at every projection",
     )
@@ -1770,7 +1771,7 @@ pipeline test_host_bound_sandbox_filter_has_one_owner(harness: Harness) {
 }
 
 @test
-pipeline test_rejects_masked_host_bound_filter_renderer_failure(harness: Harness, task: unknown) {
+pipeline test_rejects_masked_workspace_test_failure(harness: Harness, task: unknown) {
   const valid = workflow()
   const producer = valid.jobs["rust-check-inputs"]
   const unsafe = {
@@ -1781,7 +1782,13 @@ pipeline test_rejects_masked_host_bound_filter_renderer_failure(harness: Harness
         ...producer,
         steps: producer.steps.map(
           { step ->
-            return {...step, run: to_string(step?.run ?? "").replace("set -euo pipefail; ", "")}
+            return {
+              ...step,
+              run: to_string(step?.run ?? "").replace(
+                "run_workspace_tests.sh count:1/3",
+                "run_workspace_tests.sh count:1/3 || true",
+              ),
+            }
           },
         )
           .to_list(),

@@ -647,6 +647,25 @@ request, rescope the issue or file the remainder so the work keeps an owner.
 Keep write-ups repository-agnostic, per
 [Keep write-ups repository-agnostic](#keep-write-ups-repository-agnostic).
 
+## Request the full CI suite
+
+Add `CI-Scope: full` on its own line in the pull request body to run every
+CI family before merge. The merge queue inherits this declaration from its
+pull requests. After editing an existing pull request, rerun CI to apply the
+declaration. CI wiring, dependency manifests and lockfiles, toolchain pins,
+generated protocol artifacts, and safety-domain changes also select the full suite.
+
+Other pull requests and merge groups test their affected crates and reverse
+dependencies. They defer Linux sandbox tests, macOS, the Windows cross-check,
+publishable-crate verification, and stack-frame checks until the push to main.
+Every main push runs the full suite, including release metadata changes.
+
+Inspect the **Recover failed main CI** workflow after a main failure. It retries
+failed jobs once. A passing retry opens a flaky-test issue. A persistent failure
+opens a signed revert PR when the parent commit has green full-suite proof.
+The revert goes through Smart Ship. Missing parent proof or a conflicting revert
+opens an investigation issue instead of guessing the culprit.
+
 ## Keep write-ups repository-agnostic
 
 Harn is a general agent-orchestration project. Issue bodies, PR descriptions,

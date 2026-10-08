@@ -81,9 +81,12 @@ Follow the runs for that commit in
    digests, and publication metadata. Keep its exact run ID with the release.
 3. `promote-release.yml` starts after the successful main push run. It finds
    the successful candidate run at that commit and verifies the manifest,
-   digests, and attestations. It creates the tag and GitHub release using those
-   files. Promotion doesn't rebuild them.
-4. The tag starts `publish-release.yml`, which publishes crates from the tag.
+   digests, and attestations. It also requires successful full-suite main-push
+   CI at the release commit, including every deferred test family. It waits
+   for an active run; missing or failed proof blocks publication. It creates
+   the tag and GitHub release using those files. Promotion doesn't rebuild them.
+4. The tag starts `publish-release.yml`, which checks the same full-suite proof
+   before publishing crates from the tag.
    Promotion also packages the published Linux archives into the container
    and opens the next patch's development-version pull request.
 
