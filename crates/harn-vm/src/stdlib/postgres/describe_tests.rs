@@ -44,30 +44,32 @@ fn transactions_reuse_pool_describes_when_env_url_is_set() {
     let source = r#"
 import "std/postgres"
 
-const db = harness.postgres.pool("env:HARN_TEST_POSTGRES_URL", {max_connections: 1})
-const known = "SELECT $1::bigint AS v"
-const learned = "SELECT $1::int AS v"
-const ambiguous = "SELECT $1 IS NULL AS v"
-assert(pg_query_one(db, known, [nil]).v == nil)
-for i in 0 to 2 exclusive {
-  pg_transaction(db, { tx ->
-    assert(pg_query_one(tx, known, [nil]).v == nil)
-    assert(pg_query_one(tx, learned, [nil]).v == nil)
-    // Execute and query share metadata, including failed-probe fallback.
-    pg_execute(tx, learned, [nil])
-    assert(pg_query_one(tx, ambiguous, [nil]).v)
-    pg_execute(tx, ambiguous, [nil])
-    assert(pg_query_one(tx, "SELECT $1::bigint AS non_null", [7]).non_null == 7)
-  })
+fn main(harness: Harness) {
+  const db = harness.postgres.pool("env:HARN_TEST_POSTGRES_URL", {max_connections: 1})
+  const known = "SELECT $1::bigint AS v"
+  const learned = "SELECT $1::int AS v"
+  const ambiguous = "SELECT $1 IS NULL AS v"
+  assert(pg_query_one(db, known, [nil]).v == nil)
+  for i in 0 to 2 exclusive {
+    pg_transaction(db, { tx ->
+      assert(pg_query_one(tx, known, [nil]).v == nil)
+      assert(pg_query_one(tx, learned, [nil]).v == nil)
+      // Execute and query share metadata, including failed-probe fallback.
+      pg_execute(tx, learned, [nil])
+      assert(pg_query_one(tx, ambiguous, [nil]).v)
+      pg_execute(tx, ambiguous, [nil])
+      assert(pg_query_one(tx, "SELECT $1::bigint AS non_null", [7]).non_null == 7)
+    })
+  }
+  assert(pg_query_one(db, learned, [nil]).v == nil)
+  assert(pg_query_one(db, ambiguous, [nil]).v)
+  // A separate pool must describe independently, even for identical SQL.
+  const other = harness.postgres.pool("env:HARN_TEST_POSTGRES_URL", {max_connections: 1})
+  assert(pg_query_one(other, known, [nil]).v == nil)
+  pg_close(other)
+  pg_close(db)
+  harness.stdio.println("reused")
 }
-assert(pg_query_one(db, learned, [nil]).v == nil)
-assert(pg_query_one(db, ambiguous, [nil]).v)
-// A separate pool must describe independently, even for identical SQL.
-const other = harness.postgres.pool("env:HARN_TEST_POSTGRES_URL", {max_connections: 1})
-assert(pg_query_one(other, known, [nil]).v == nil)
-pg_close(other)
-pg_close(db)
-harness.stdio.println("reused")
 "#;
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -80,6 +82,7 @@ harness.stdio.println("reused")
                 let chunk = compile_source(source).expect("compile transaction describe reuse");
                 let mut vm = Vm::new();
                 register_vm_stdlib(&mut vm);
+                vm.set_harness(crate::Harness::real());
                 vm.execute(&chunk)
                     .await
                     .expect("execute transaction describe reuse");
