@@ -160,34 +160,6 @@ fn cargo_may_compile(program: &str, args: &[String]) -> bool {
     false
 }
 
-#[cfg(test)]
-mod tests {
-    use super::cargo_may_compile;
-
-    #[test]
-    fn cargo_global_options_and_toolchain_preserve_command_classification() {
-        for args in [
-            vec!["+stable", "--offline", "--version"],
-            vec!["--config", "build.jobs=1", "--color=never", "metadata"],
-            vec!["+stable", "--help"],
-        ] {
-            assert!(!cargo_may_compile(
-                "cargo",
-                &args.into_iter().map(str::to_owned).collect::<Vec<_>>()
-            ));
-        }
-        for args in [
-            vec!["+stable", "--offline", "build"],
-            vec!["--config", "build.jobs=1", "custom-plugin"],
-        ] {
-            assert!(cargo_may_compile(
-                "cargo",
-                &args.into_iter().map(str::to_owned).collect::<Vec<_>>()
-            ));
-        }
-    }
-}
-
 /// [`apply_active_rustc_wrapper_policy`] for a config already known to run
 /// under `policy`.
 pub(super) fn apply_rustc_wrapper_decision(
@@ -272,4 +244,32 @@ pub(super) fn sandboxed_process_config(
             .any(|removed| key.eq_ignore_ascii_case(removed))
     });
     Ok(resolved)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::cargo_may_compile;
+
+    #[test]
+    fn cargo_global_options_and_toolchain_preserve_command_classification() {
+        for args in [
+            vec!["+stable", "--offline", "--version"],
+            vec!["--config", "build.jobs=1", "--color=never", "metadata"],
+            vec!["+stable", "--help"],
+        ] {
+            assert!(!cargo_may_compile(
+                "cargo",
+                &args.into_iter().map(str::to_owned).collect::<Vec<_>>()
+            ));
+        }
+        for args in [
+            vec!["+stable", "--offline", "build"],
+            vec!["--config", "build.jobs=1", "custom-plugin"],
+        ] {
+            assert!(cargo_may_compile(
+                "cargo",
+                &args.into_iter().map(str::to_owned).collect::<Vec<_>>()
+            ));
+        }
+    }
 }

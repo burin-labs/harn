@@ -119,7 +119,7 @@ fn git_inventory_defers_wrapper_probe_and_cargo_reuses_it_across_tool_policies()
         "removed wrappers must reach neither probe nor real build"
     );
     replacement.env_remove.clear();
-    crate::orchestration::push_execution_policy(policy.clone());
+    crate::orchestration::push_execution_policy(policy);
     let output = command_output("cargo", &["build".into(), "--offline".into()], &replacement);
     crate::orchestration::pop_execution_policy();
     assert!(output.unwrap().status.success());
