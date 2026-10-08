@@ -203,6 +203,7 @@ fn real_run_command_neutralizes_rustc_wrappers_inside_sandbox() {
     std::fs::set_permissions(&wrapper, std::fs::Permissions::from_mode(0o755)).unwrap();
     replacement_env.insert("RUSTC_WRAPPER".into(), value(&wrapper.to_string_lossy()));
     replacement.insert("env".into(), VmValue::dict(replacement_env));
+    let mut indirect = replacement.clone();
     for response in [call(replacement.clone()), call(replacement)] {
         let VmValue::Dict(response) = response.unwrap() else {
             panic!("expected process result");
@@ -213,10 +214,33 @@ fn real_run_command_neutralizes_rustc_wrappers_inside_sandbox() {
         );
     }
     assert_eq!(
-        std::fs::read_to_string(count).unwrap(),
+        std::fs::read_to_string(&count).unwrap(),
         "x",
         "per-spawn cleanup tokens must not repeat the real compiler probe"
     );
+
+    let decisions_before_shell = workspace_decisions().len();
+    indirect.insert(
+        "argv".into(),
+        VmValue::List(Arc::new(vec![
+            value("sh"),
+            value("-c"),
+            value(
+                "export RUSTC_WRAPPER=\"$1\"; exec cargo build --offline --target-dir shell-target",
+            ),
+            value("shell-wrapper-control"),
+            value(&wrapper.to_string_lossy()),
+        ])),
+    );
+    let VmValue::Dict(response) = call(indirect).unwrap() else {
+        panic!("expected shell process result");
+    };
+    assert!(
+        matches!(response.get("exit_code"), Some(VmValue::Int(code)) if *code != 0),
+        "the explicitly reset failing wrapper must reach nested Cargo: {response:?}"
+    );
+    assert_eq!(std::fs::read_to_string(&count).unwrap(), "xx");
+    assert_eq!(workspace_decisions().len(), decisions_before_shell);
 
     pop_execution_policy();
     unsafe {

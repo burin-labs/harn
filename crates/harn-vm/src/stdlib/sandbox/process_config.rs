@@ -58,7 +58,8 @@ pub fn apply_active_rustc_wrapper_policy(
 
 /// Apply wrapper policy only when launching Cargo directly. Other programs,
 /// including shells that might start Cargo later, receive empty wrapper
-/// settings: they must not start an unmeasured confined compiler-cache daemon.
+/// settings to clear inherited and Cargo-configured wrappers. A shell can set
+/// them again; nested launches remain governed by the OS sandbox.
 /// This keeps unrelated commands off the compiler probe's startup path.
 pub fn apply_active_rustc_wrapper_policy_for_command(
     program: &str,

@@ -193,9 +193,11 @@ servers outside confinement before measuring them.
 
 Other programs, including shells, receive empty `RUSTC_WRAPPER`,
 `RUSTC_WORKSPACE_WRAPPER`, `CARGO_BUILD_RUSTC_WRAPPER`, and
-`CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER` settings. Cargo launched indirectly by
-those programs builds without wrappers. This prevents unrelated commands such
-as Git inventory from triggering a compiler build during session startup.
+`CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER` settings. This clears inherited and
+Cargo-configured wrappers without triggering a compiler build during unrelated
+commands such as Git inventory. A shell or script can set these variables again
+before launching Cargo; Harn does not intercept that nested launch or measure
+its wrapper. The nested process remains subject to the OS sandbox.
 
 Wrapper decisions are reused within the process for the same working directory,
 child environment, and OS confinement. Changing an agent's tool list or
