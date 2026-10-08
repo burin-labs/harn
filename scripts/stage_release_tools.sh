@@ -23,6 +23,8 @@ for source in \
   release_contract.env \
   verify_release_tag_main_ancestry.sh \
   release_metadata.harn \
+  release_changelog_fold.harn \
+  render_release_notes.harn \
   release_withdrawals.harn \
   path_visibility.harn \
   npm_ci_with_retry.sh \
