@@ -148,6 +148,7 @@ export const AGENT_TERMINAL_CLASSES = [
   "agent_loop_protocol_failure",
   "parse_dropped",
   "generic_throw",
+  "managed_spend_paused",
 ] as const
 export type AgentTerminalClass = (typeof AGENT_TERMINAL_CLASSES)[number]
 
@@ -225,6 +226,7 @@ export const LLM_ERROR_REASONS = [
   "output_budget_exhausted",
   "unknown",
   "policy_denied",
+  "managed_spend_paused",
 ] as const
 export type LlmErrorReason = (typeof LLM_ERROR_REASONS)[number]
 
@@ -1177,6 +1179,7 @@ export interface HarnToolLifecycleMeta {
   errorCategory?: HarnToolCallErrorCategory
   executionDurationMs?: number
   executor?: ACPToolExecutor
+  intent?: string
   mutationStatus?: HarnToolMutationStatus
   parsing?: boolean
   rawInputPartial?: string
@@ -2026,7 +2029,7 @@ export interface HarnSessionTimelineUpdate {
 export const HARN_PREPARED_SESSION_SCHEMA = "harn.prepared_session.v1" as const
 export type HarnPreparedSessionState = "needs_approval" | "ready" | "blocked" | "active" | "delta" | "stopped" | "pivoted" | "terminal"
 export type HarnPreparedSessionCommand = "approval_decision" | "attach" | "turn" | "request_delta" | "stop" | "pivot" | "finish"
-export interface HarnPreparedSessionApprovalDecision { batch_fingerprint: string; approved: boolean; decider: string }
+export interface HarnPreparedSessionApprovalDecision { request_id: string; batch_fingerprint: string; approved: boolean; decider: string }
 export interface HarnPreparedSessionBinding { session_id: string; workspace_fingerprint: string; runtime: ACPValue; consumer: ACPValue }
 export interface HarnPreparedRuntimeAttachment { session_id: string; workspace_fingerprint: string; runtime: ACPValue; consumer: ACPValue }
 export interface HarnPreparedSessionLease {
@@ -2471,4 +2474,26 @@ export interface HarnInferenceAdmissionSnapshot {
   local_runtime?: boolean | null
   open_weight?: boolean | null
   training_default?: string | null
+}
+export interface HarnCanonicalSessionBoundary {
+  schema: string
+  session_id: string
+  event_id?: number | null
+  record_hash?: string | null
+}
+
+export interface HarnCanonicalHistoryPosition {
+  source_event_id: string
+  origin_session_id: string
+  before_boundary: HarnCanonicalSessionBoundary
+  boundary: HarnCanonicalSessionBoundary
+}
+
+export interface HarnCanonicalHistoryBoundaries {
+  tip: HarnCanonicalSessionBoundary
+  positions: HarnCanonicalHistoryPosition[]
+}
+
+export interface HarnACPPromptCorrelation {
+  messageId?: string
 }

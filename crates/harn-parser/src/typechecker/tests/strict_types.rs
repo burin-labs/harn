@@ -280,7 +280,7 @@ output: {schema: my_schema, validation: "error"}
 fn test_strict_types_flags_the_ambient_boundary_spelling() {
     let errs = strict_errors(
         r#"pipeline t(harness: Harness) {
-  harness.stdio.log(http_get("https://example.com").body)
+  harness.stdio.log(llm_call("rate this", "system").data)
 }"#,
     );
     assert!(
@@ -293,7 +293,7 @@ fn test_strict_types_flags_the_ambient_boundary_spelling() {
 fn test_strict_types_flags_the_harness_boundary_spelling() {
     let errs = strict_errors(
         r#"pipeline t(harness: Harness) {
-  harness.stdio.log(harness.net.get("https://example.com").body)
+  harness.stdio.log(harness.llm.call("rate this", "system").data)
 }"#,
     );
     assert!(
@@ -302,17 +302,38 @@ fn test_strict_types_flags_the_harness_boundary_spelling() {
     );
 }
 
+/// A buffered HTTP response is a closed record, so reading its envelope is
+/// typed access. The body text stays untrusted until it is decoded.
+#[test]
+fn test_strict_types_reads_a_typed_http_envelope_and_flags_its_parsed_body() {
+    let errs = strict_errors(
+        r#"pipeline t(harness: Harness) {
+  const response = harness.net.get("https://example.com")
+  harness.stdio.log(response.status)
+  const payload = json_parse(response.body)
+  harness.stdio.log(payload.name)
+}"#,
+    );
+    let unvalidated: Vec<_> = errs.iter().filter(|w| w.contains("unvalidated")).collect();
+    assert_eq!(
+        unvalidated.len(),
+        1,
+        "only the parsed body is untrusted, got: {errs:?}"
+    );
+    assert!(unvalidated[0].contains("payload"), "got: {errs:?}");
+}
+
 #[test]
 fn test_strict_types_ignores_a_get_method_on_another_receiver() {
     let errs = strict_errors(
         r#"pipeline t(harness: Harness) {
-  const proxy = {net: {get: { url -> {body: url} }}}
-  harness.stdio.log(proxy.net.get("https://example.com").body)
+  const proxy = {llm: {call: { prompt, system -> {data: prompt} }}}
+  harness.stdio.log(proxy.llm.call("rate this", "system").data)
 }"#,
     );
     assert!(
         !errs.iter().any(|w| w.contains("unvalidated")),
-        "`net.get` on a plain value is not the harness method, got: {errs:?}"
+        "`llm.call` on a plain value is not the harness method, got: {errs:?}"
     );
 }
 

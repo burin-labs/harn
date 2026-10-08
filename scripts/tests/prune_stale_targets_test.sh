@@ -302,6 +302,48 @@ grep -Fq "over the size ceiling" "$tmp_root/size-big.txt" && {
   exit 1
 }
 
+echo "recent activity outranks the ceiling while an old oversized tree remains reclaimable"
+grace_storage="$tmp_root/grace-storage"
+grace_repos="$tmp_root/grace-repos"
+mkdir -p "$grace_storage/harn-target" "$grace_repos"
+for n in old fresh; do
+  mkdir -p "$grace_repos/$n"
+  git -C "$grace_repos/$n" init -b main -q 2>/dev/null || true
+  mkdir -p "$grace_storage/harn-target/grace-repos-$n"
+  dd if=/dev/zero of="$grace_storage/harn-target/grace-repos-$n/blob" bs=1024 count=2048 \
+    >/dev/null 2>&1
+done
+touch -t 202001010000 "$grace_storage/harn-target/grace-repos-old"
+
+HARN_DEV_SETUP_STORAGE_ROOT="$grace_storage" \
+  HARN_TARGET_GC_ROOTS="$grace_repos" \
+  HARN_TARGET_GC_MIN_AGE_SECS=3600 \
+  HARN_TARGET_GC_MAX_BYTES=1048576 \
+  "$minimum_bash" "$repo_root/scripts/prune_stale_targets.sh" --measure-bytes \
+  > "$tmp_root/size-recent-grace.txt" 2>&1
+[[ ! -d "$grace_storage/harn-target/grace-repos-old" ]] || {
+  echo "an old oversized entry survived the size ceiling" >&2
+  cat "$tmp_root/size-recent-grace.txt" >&2
+  exit 1
+}
+[[ -d "$grace_storage/harn-target/grace-repos-fresh" ]] || {
+  echo "the size ceiling evicted a freshly active entry" >&2
+  cat "$tmp_root/size-recent-grace.txt" >&2
+  exit 1
+}
+grep -Fq "keep (recently active within 3600s; size grace): grace-repos-fresh" \
+  "$tmp_root/size-recent-grace.txt" || {
+  echo "the size pass did not report the fresh entry it protected" >&2
+  cat "$tmp_root/size-recent-grace.txt" >&2
+  exit 1
+}
+grep -Eq 'status=partial .*reclaimed_bytes=[1-9][0-9]* retained_bytes=[1-9][0-9]* .*ceiling_unproven_roots=1' \
+  "$tmp_root/size-recent-grace.txt" || {
+  echo "the size pass did not expose reclaimed bytes and the ceiling blocked by the fresh entry" >&2
+  cat "$tmp_root/size-recent-grace.txt" >&2
+  exit 1
+}
+
 echo "a live process outranks the ceiling"
 : > "$size_storage/harn-target/repos-mid/.cargo-lock"
 exec 8<> "$size_storage/harn-target/repos-mid/.cargo-lock"

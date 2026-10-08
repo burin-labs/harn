@@ -101,8 +101,9 @@ harness.stdio.log(unwrap_err(bad))         // something went wrong
 | `toml_parse(str)` | str: string | value | Parse TOML string into Harn values. Throws on invalid TOML |
 | `toml_stringify(value)` | value: any | string | Serialize Harn value to TOML |
 | `json_validate(data, schema)` | data: any, schema: dict | bool | Validate data against a schema. Returns `true` if valid, throws with details if not |
-| `schema_check(data, schema)` | data: any, schema: dict | Result | Validate data against an extended schema and return `Result.Ok(data)` or `Result.Err({message, errors, issues, value?})` |
-| `schema_parse(data, schema)` | data: any, schema: dict | Result | Validate data and return `Result.Ok(data)` with `default` values applied recursively, or `Result.Err({message, errors, issues, value?})` |
+| `schema_check(data, schema)` | data: unknown, schema: dict or `schema_of(T)` | `Result<T, ...>` | Validate data against an extended schema and return `Result.Ok(data)` or `Result.Err({message, errors, issues, value?})` |
+| `schema_parse(data, schema)` | data: unknown, schema: dict or `schema_of(T)` | `Result<T, ...>` | Validate data and return `Result.Ok(data)` with `default` values applied recursively, or `Result.Err({message, errors, issues, value?})`. With `schema_of(T)` the `Ok` value is typed `T` |
+| `json_decode(text, schema)` | text: string, schema: dict or `schema_of(T)` | `Result<T, ...>` | Parse JSON and validate it in one step. Malformed JSON is an `Err` with the same record as a schema failure. See [Decode at the boundary](error-handling.md#decode-at-the-boundary) |
 | `schema_report(data, schema, apply_defaults?)` | data: any, schema: dict, bool (optional) | dict | Validate data and return `{ok, message, errors, issues, value?}` without wrapping in `Result` or throwing |
 | `schema_is(data, schema)` | data: any, schema: dict | bool | Validate data against a schema and return `true`/`false` without throwing |
 | `schema_expect(data, schema, apply_defaults?)` | data: any, schema: dict, bool (optional) | any | Validate data and return the normalized value, throwing on failure |
@@ -474,13 +475,13 @@ Sets also support method syntax: `my_set.union(other)`.
 | `trim(str)` | str: string | string | Remove leading and trailing whitespace |
 | `lowercase(str)` | str: string | string | Convert to lowercase |
 | `uppercase(str)` | str: string | string | Convert to uppercase |
-| `split(str, sep)` | str: string, sep: string | list | Split string by separator |
+| `split(str, sep)` | str: string, sep: string | list | Split string by separator. `sep` is required in both `split(str, sep)` and `str.split(sep)`; omitting it throws |
 | `starts_with(str, prefix)` | str: string, prefix: string | bool | Check if string starts with prefix |
 | `ends_with(str, suffix)` | str: string, suffix: string | bool | Check if string ends with suffix |
 | `contains(str, substr)` | str: string, substr: string | bool | Check if string contains substring. Also works on lists |
 | `replace(str, old, new)` | str: string, old: string, new: string | string | Replace all occurrences |
 | `join(list, sep)` | list: list, sep: string | string | Join list elements with separator |
-| `substring(str, start, end?)` | str: string, start: int, end: int | string | Extract the character range `[start, end)`; `end` defaults to the string length. Matches `.substring`, `s[a:b]`, and `list.slice` |
+| `substring(str, start, end?)` | str: string, start: int, end: int | string | Extract the character range `[start, end)`; `end` defaults to the string length. Out-of-range offsets clamp, and a negative offset clamps to `0`; use `s[a:b]` or `.slice` to count from the end |
 | `chars(str)` | str: string | list | Materialize a string into a list of single-character strings in one linear pass (ASCII chars are interned). Use this for cursor-style source scanning — see [Scanning large text](#scanning-large-text) — instead of repeated `substring`/`s[i]`, which are O(n) per call |
 | `unicode_normalize(str, form)` | str: string, form: `"NFC"\|"NFD"\|"NFKC"\|"NFKD"` | string | Normalize Unicode into the requested form |
 | `unicode_graphemes(str)` | str: string | list | Split a string into extended grapheme clusters |
@@ -760,7 +761,10 @@ Returns a list of dicts, one per match. Each dict contains:
   consistent with `substring`/`index_of`/`len`
 - `line` -- 1-based line of the match start (the equivalent of
   `text.count("\n", 0, start) + 1`), for positional diagnostics
-- Named capture groups (from `(?P<name>...)`) appear as additional keys
+- Named capture groups (from `(?P<name>...)`) appear as additional keys.
+  The names `match`, `groups`, `start`, `end`, and `line` are reserved: a
+  pattern that names a group with one of them throws instead of overwriting
+  the built-in value
 
 ```harn
 const results = regex_captures("(\\w+)@(\\w+)", "alice@example bob@test")
@@ -1748,11 +1752,21 @@ id. Mutating operations stay unavailable unless the toolbox is configured with
 | `with_autonomy_policy(policy, fn)` | policy: dict, fn: closure | whatever `fn` returns | Run `fn` with a scoped autonomy tier policy; side-effecting builtins are enforced by the VM |
 | `harness.runtime.with_execution_policy(policy, fn)` | policy: dict, fn: closure | whatever `fn` returns | Run `fn` with a scoped capability policy; the policy is popped on success or throw |
 | `with_approval_policy(policy, fn)` | policy: dict, fn: closure | whatever `fn` returns | Run `fn` with a scoped tool approval policy; the policy is popped on success or throw |
+| `harness.runtime.evaluate_approval_policy(policy, request)` | policy: explicit tool approval policy; request: tool_name, arguments, optional policy_decision, approval_request, repeat_count | Canonical approval decision and receipt | Pure evaluation through the same engine as VM tool dispatch; does not install policy or approve an execution |
 | `with_command_policy(policy, fn)` | policy: dict, fn: closure | whatever `fn` returns | Run `fn` with a scoped command policy; the policy is popped on success or throw |
 | `with_dynamic_permissions(policy, fn)` | policy: dict, fn: closure | whatever `fn` returns | Run `fn` with a scoped dynamic permission policy; the policy is popped on success or throw |
 | `command_risk_scan(ctx)` | ctx: dict | dict | Run deterministic command-risk classification and return labels, confidence, rationale, and recommended action |
 | `command_result_scan(ctx)` | ctx: dict | dict | Classify a command result envelope for unsafe output or audit annotations |
 | `command_llm_risk_scan(ctx, options?)` | ctx: dict, options: dict | dict | Return the structured risk-scan helper shape with redacted options; deterministic fallback does not make network calls |
+
+`evaluate_approval_policy` accepts an effective policy and a raw native-host
+request. It returns `action` (`allow`, `ask`, or `deny`), `reason`, optional
+`matched_rule` and `required_approval`, risk labels, optional denied paths and
+network targets, and the existing `harn.permission_policy_decision.v1` receipt.
+Missing tool names, non-object arguments, unknown policy/request fields, and
+invalid field types raise an error. Hosts must treat evaluation failure as
+unavailable permission, never as permission to execute. The call reads no
+policy file, uses no provider or credential, and changes no ambient policy.
 
 Install policies directly or pass them to `agent_loop` with
 `command_policy: policy` / `policy: {command_policy: policy}`. Active policies
@@ -2590,7 +2604,7 @@ reuse the stored token automatically:
 
 ```bash
 harn mcp redirect-uri
-harn mcp login notion
+harn mcp login linear
 ```
 
 ### MCP server mode
@@ -2775,6 +2789,20 @@ rule and accept strings or string lists:
 | `agent` / `persona` / `mode` | Agent/persona/mode identity from args or trigger context |
 | `capability` | Annotated capability operation such as `workspace.read_text` |
 | `repeat_count_gte` | Same `(session, tool, args)` call count threshold |
+
+A rule can set `identity_match: "literal"` for a remembered invocation. This
+compares all captured string fields, including resource scopes, by exact equality after
+the evaluator's normal context normalization, except `command`, which compares
+the raw shell text without collapsing quoted whitespace. A shell-text grant
+does not match an `argv` invocation or mixed shell/argv input. Normalized
+receipt text cannot replace the raw command for a literal grant. A literal `*` in a remembered
+command is not a wildcard, and extra shell text does not match. `command`
+matches the complete command; `command_identity` matches the executable name.
+Literal paths, URLs, domains, side effects, and agent/persona/mode values do not
+expand wildcards or URL fragments. The default `identity_match:
+"pattern"` retains authored rule behavior. Unknown identity modes are invalid.
+Literal identity changes only matching; rule authority, refusal precedence,
+sensitive-path guards, and explicit environment-write grants still apply.
 
 Deny beats ask, and ask beats allow regardless of rule order. Legacy
 `auto_deny`, `require_approval`, and `auto_approve` are evaluated through the

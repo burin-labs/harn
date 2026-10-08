@@ -147,6 +147,7 @@ impl AcpServer {
         &mut self,
         session_id: &str,
         params: &serde_json::Value,
+        environment: harn_vm::security::SessionEnvironment,
     ) -> Result<(), harn_vm::agent_sessions::SessionOpenError> {
         let cwd = params
             .get("cwd")
@@ -155,6 +156,7 @@ impl AcpServer {
             .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
         self.insert_session(session_id.to_string(), cwd, SessionInfo::default())?;
         if let Some(session) = self.sessions.get_mut(session_id) {
+            session.environment_policy = environment;
             session.admission_unavailable = true;
         }
         Ok(())
@@ -193,6 +195,37 @@ impl AcpServer {
             return;
         };
 
+        // Durable history is not launch authority. A cold load admits a new
+        // runnable session, so its host must declare the environment again.
+        // Resolved grants and launcher snapshots must never enter the store.
+        let environment = if !self.sessions.contains_key(&session_id)
+            || params.get("environmentPolicy").is_some()
+        {
+            let declared = match Self::resolve_session_environment(params) {
+                Ok(environment) => {
+                    environment.with_host_inference_boundary(self.host_inference_boundary)
+                }
+                Err((message, data)) => {
+                    self.send_error_with_data(id, -32602, &message, data);
+                    return;
+                }
+            };
+            if let Some(live) = self.sessions.get(&session_id) {
+                if declared != live.environment_policy {
+                    self.send_error_with_data(
+                        id,
+                        -32602,
+                        "session/load cannot change a live session's environment authority",
+                        serde_json::json!({"code": "environment_policy.live_mismatch"}),
+                    );
+                    return;
+                }
+            }
+            Some(declared)
+        } else {
+            None
+        };
+
         if let Err(error) = flush_session_sinks(&session_id).await {
             self.send_error(
                 id,
@@ -218,13 +251,20 @@ impl AcpServer {
                 }
             };
 
+        let mut durable_checkpoint = None;
         if self.sessions.contains_key(&session_id) {
             if let Err(error) = harn_vm::agent_sessions::open_or_create(Some(session_id.clone())) {
                 self.send_session_open_error(id, &error);
                 return;
             }
         } else if !replay_events.is_empty() {
-            if let Err(error) = self.register_restored_session(&session_id, params) {
+            if let Err(error) = self.register_restored_session(
+                &session_id,
+                params,
+                environment
+                    .clone()
+                    .expect("cold load has declared authority"),
+            ) {
                 self.send_session_open_error(id, &error);
                 return;
             }
@@ -242,15 +282,24 @@ impl AcpServer {
                     return;
                 }
             };
-            match harn_vm::agent_session_restore::load_canonical_session_replay_events(
-                &project_root,
-                &session_id,
+            // Cold replay owns page buffers and its checkpoint state. Keep its
+            // future out of the nested ACP dispatch frame.
+            match Box::pin(
+                harn_vm::agent_session_restore::load_canonical_session_replay(
+                    &project_root,
+                    &session_id,
+                ),
             )
             .await
             {
                 Ok(Some(persisted)) => {
-                    replay_events = persisted;
-                    if let Err(error) = self.register_restored_session(&session_id, params) {
+                    durable_checkpoint = persisted.last_event_id;
+                    replay_events = persisted.events;
+                    if let Err(error) = self.register_restored_session(
+                        &session_id,
+                        params,
+                        environment.expect("cold load has declared authority"),
+                    ) {
                         self.send_session_open_error(id, &error);
                         return;
                     }
@@ -313,6 +362,11 @@ impl AcpServer {
         let mut result = self
             .session_restore_result(&session_id)
             .expect("validated session should still exist");
+        if durable_checkpoint.is_some() {
+            result["session"] = self
+                .session_item_json(&session_id, "live", durable_checkpoint)
+                .expect("restored session should still exist");
+        }
         result["replayed"] = serde_json::json!(replayed);
         self.send_response(id, result);
     }

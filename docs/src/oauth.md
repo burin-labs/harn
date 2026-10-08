@@ -77,8 +77,8 @@ const conf = atlassian({
 const all = providers()
 ```
 
-Built-ins: `github`, `github_enterprise`, `slack`, `linear`, `notion`,
-`google`, `microsoft`, `atlassian`, `discord`, `gitlab`, `bitbucket`.
+Built-ins: `github`, `github_enterprise`, `slack`, `linear`, `google`,
+`microsoft`, `atlassian`, `discord`, `gitlab`, `bitbucket`.
 Plus `custom(config, overrides?)` for in-house IdPs.
 
 A provider record carries:
@@ -98,7 +98,7 @@ A provider record carries:
 | `documentation_url` | Vendor doc link for "go read the source" |
 
 `provider("github", overrides?)` is a string-keyed factory for the same
-records, and `provider_catalog(overrides?)` returns all ten built-ins
+records, and `provider_catalog(overrides?)` returns all nine built-ins
 keyed by id.
 
 ## Storage (`std/oauth/storage`)
@@ -551,44 +551,6 @@ Two Linear quirks the catalog handles for you:
 Use `storage_key: "linear:" + team_id` to keep per-team installations
 isolated under the same provider record.
 
-### Notion
-
-```harn,ignore
-import {
-  client, exchange_code, request, start_authorization,
-} from "std/oauth/client"
-import { providers } from "std/oauth/providers"
-import { harn_cloud_session } from "std/oauth/storage"
-
-const cli = client(
-  providers().notion,
-  {
-    client_id: harness.env.get("NOTION_CLIENT_ID"),
-    client_secret: harness.env.get("NOTION_CLIENT_SECRET"),
-    redirect_uri: "https://app.example/oauth/notion/callback",
-    storage: harn_cloud_session(),
-    // user-owned public connection
-    extra_auth_params: {owner: "user"},
-  },
-)
-const pages = request(
-  cli,
-  "GET",
-  "https://api.notion.com/v1/users/me",
-  {headers: {"Notion-Version": "2022-06-28"}},
-)
-```
-
-Two Notion-specific things to remember:
-
-- **Database / page access is not OAuth scopes.** The user picks pages
-  during the Notion page-picker flow on `/authorize`; subsequent API
-  calls can only see what the user granted. Plan your UX around the
-  picker, not around incremental scope upgrades.
-- **`Notion-Version` is required on every API call** after the OAuth
-  dance completes. Add it to the `opts.headers` you pass into `request(...)`
-  or set it inside a tiny wrapper.
-
 ### Google
 
 ```harn,ignore
@@ -887,7 +849,7 @@ const token_set = device_flow(
 ```
 
 The same pattern works for Google, Microsoft, and GitLab. Slack,
-Linear, Notion, Atlassian, Discord, and Bitbucket do not advertise
+Linear, Atlassian, Discord, and Bitbucket do not advertise
 device endpoints — `device_flow(...)` raises on construction if
 `provider.device_code_url` is nil.
 

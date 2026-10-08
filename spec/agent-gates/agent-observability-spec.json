@@ -26,6 +26,10 @@
     "reachability": "unknown",
     "readers": [
       {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_finalize.harn",
+        "reader": "__agent_loop_project_terminal_result"
+      },
+      {
         "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
         "reader": "__validate_agent_loop_callback_options"
       }

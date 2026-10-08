@@ -1,5 +1,6 @@
 use super::*;
 
+mod git_discard;
 mod git_push;
 mod preflight;
 mod process_result;

@@ -1,6 +1,6 @@
 import { LiveBumpRemote, live_bump_adapter } from "std/bump/live"
 import { BumpAdapter } from "std/bump/runtime"
-import { GITHUB_BUMP_PERMISSIONS } from "./github_authority"
+import { GITHUB_BUMP_PERMISSIONS, bump_refresh_headline } from "./github_authority"
 import { GithubClientOptions, installation_token } from "harn-github-connector/default"
 
 pub type GithubBumpCredentials = {
@@ -105,6 +105,14 @@ pub fn github_bump_live_adapter(
           }
         return live_bump_adapter(harness.clock, harness.tools, request.remote, fresh, harness.fs)
           .apply_version(tag, revision)
+      },
+      publish_commit: fn(commit) {
+        // Repair replay recognizes refresh output by its headline. Any other
+        // headline would be replayed onto the next refresh as a repair.
+        if !bump_refresh_headline(commit.headline) {
+          throw "bump-driver: refusing a refresh publication headed '${commit.headline}'"
+        }
+        return adapter.publish_commit(commit)
       },
     }
 }

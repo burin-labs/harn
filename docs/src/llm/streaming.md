@@ -69,14 +69,11 @@ interruption.
 
 When the harness runs a full `agent_loop` (tools, transcript, completion policy)
 rather than a single `harness.llm.stream_call`, use the loop's own
-[`on_delta` streaming seam](agent_loop.md#streaming-visible-text-deltas) instead
-of dropping to a raw stream. Each per-turn call is issued through the streaming
-transport, and the closure sees one delta per chunk of the assistant's visible
-text — fold each delta through `agent_private_stream_delta` from
-`std/agent/stream` inside the callback to mask a `<secret>` span while it renders.
-The callback is observational and the turn still returns a complete result, so
-tool dispatch is unaffected; providers that do not stream fall back to a single
-full-text delta:
+[`on_delta` publication seam](agent_loop.md#streaming-visible-text-deltas).
+The callback receives the admitted final reply once, after tool effects and
+completion checks. Typed tool events provide live progress while provider
+deltas remain private. The callback is observational; tool dispatch and usage
+accounting retain their canonical history:
 
 ```harn,ignore
 agent_loop(harness, "summarize the diff", nil, {

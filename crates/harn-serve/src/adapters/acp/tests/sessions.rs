@@ -1,75 +1,11 @@
 use super::*;
 
+mod cancellation;
 mod prompt_output;
 mod timeline;
 mod typed_observability;
 
-use prompt_output::run_json_prompt;
-
-async fn run_prompt_with_project_capability(
-    request_tx: &mpsc::UnboundedSender<serde_json::Value>,
-    response_rx: &mut mpsc::UnboundedReceiver<String>,
-    session_id: &str,
-    id: i64,
-    prompt_text: &str,
-    project_read_capability: bool,
-) -> String {
-    request_tx
-        .send(serde_json::json!({
-            "jsonrpc": "2.0",
-            "id": id,
-            "method": "session/prompt",
-            "params": {
-                "sessionId": session_id,
-                "prompt": [{"type": "text", "text": prompt_text}],
-            },
-        }))
-        .expect("send session/prompt");
-
-    let host_capabilities = if project_read_capability {
-        serde_json::json!({"project": ["read_file"]})
-    } else {
-        serde_json::json!({})
-    };
-    let mut output = String::new();
-    let mut saw_completed = false;
-    for _ in 0..64 {
-        let message = recv_json(response_rx).await;
-        match message.get("method").and_then(|value| value.as_str()) {
-            Some("host/capabilities") => {
-                request_tx
-                    .send(serde_json::json!({
-                        "jsonrpc": "2.0",
-                        "id": message["id"].clone(),
-                        "result": host_capabilities.clone(),
-                    }))
-                    .expect("send host/capabilities response");
-            }
-            Some("session/update")
-                if message["params"]["update"]["sessionUpdate"] == "agent_message_chunk" =>
-            {
-                let content = &message["params"]["update"]["content"];
-                let text = content["text"].as_str().expect("chunk text");
-                let visible_delta = content["_meta"]["harn"]["visible_delta"]
-                    .as_str()
-                    .expect("visible_delta");
-                assert!(
-                    !visible_delta.contains(if prompt_text == "one" { "two" } else { "one" }),
-                    "each prompt turn gets a fresh bridge visible-text state"
-                );
-                output.push_str(text);
-            }
-            _ if message["id"] == id => {
-                assert_eq!(message["result"]["stopReason"], "end_turn");
-                saw_completed = true;
-                break;
-            }
-            _ => {}
-        }
-    }
-    assert!(saw_completed, "prompt {id} should complete successfully");
-    output
-}
+use prompt_output::{run_json_prompt, run_prompt_with_project_capability};
 
 async fn recv_response_with_id(
     response_rx: &mut mpsc::UnboundedReceiver<String>,
@@ -1156,6 +1092,17 @@ pipeline default(harness: Harness, task: unknown) {
             .await;
             assert_eq!(first, "one\none\ntrue\n1\ntrue\n");
 
+            request_tx
+                .send(serde_json::json!({
+                    "jsonrpc": "2.0",
+                    "id": 20,
+                    "method": "session/load",
+                    "params": {"sessionId": session_id},
+                }))
+                .expect("reload the same saved session before its next prompt");
+            let loaded = recv_response_with_id(&mut response_rx, 20).await;
+            assert_eq!(loaded["result"]["session"]["sessionId"], session_id);
+
             let second = run_prompt_with_project_capability(
                 &request_tx,
                 &mut response_rx,
@@ -1384,7 +1331,7 @@ async fn acp_bridge_routes_session_request_permission_response() {
         output: AcpOutput::Channel(tx),
         pending: server.pending.clone(),
         next_id_counter: AtomicU64::new(77),
-        cancellation: SessionCancellation::default(),
+        cancellation: SessionCancellation::default().prepare_prompt(),
         script_name: Mutex::new(String::new()),
         assistant_state: Mutex::new(VisibleTextState::default()),
     });
@@ -1428,17 +1375,16 @@ async fn acp_bridge_routes_session_request_permission_response() {
 fn prepared_session_prompt_preserves_queued_cancel() {
     let cancellation = SessionCancellation::default();
     cancellation.cancel();
-    cancellation.begin_prompt();
+    let next = cancellation.prepare_prompt();
     assert!(
-        !cancellation.cancelled.load(Ordering::SeqCst),
+        !next.cancelled.load(Ordering::SeqCst),
         "stale cancellation should not leak into a later prompt"
     );
 
-    cancellation.prepare_prompt();
+    let queued = cancellation.prepare_prompt();
     cancellation.cancel();
-    cancellation.begin_prompt();
     assert!(
-        cancellation.cancelled.load(Ordering::SeqCst),
+        queued.cancelled.load(Ordering::SeqCst),
         "cancellation observed after a prompt was routed must not be reset at prompt start"
     );
 }

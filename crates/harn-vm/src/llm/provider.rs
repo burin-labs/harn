@@ -148,16 +148,18 @@ pub(crate) trait LlmProvider {
     }
 }
 
+/// Boxed chat futures retain the thread handoff required by the LLM API.
+pub(crate) type ProviderChatFuture<'a> = futures::future::BoxFuture<'a, Result<LlmResult, VmError>>;
+
 /// Async chat operation. Uses explicit lifetime parameters because providers
 /// are constructed on-the-fly, to avoid RefCell-across-await issues.
-#[allow(dead_code)]
 pub(crate) trait LlmProviderChat: LlmProvider {
     /// Execute an LLM chat call, optionally streaming text deltas.
     fn chat<'a>(
         &'a self,
         request: &'a LlmRequestPayload,
         delta_tx: Option<DeltaSender>,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<LlmResult, VmError>> + 'a>>;
+    ) -> ProviderChatFuture<'a>;
 }
 
 thread_local! {

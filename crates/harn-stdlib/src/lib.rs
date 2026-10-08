@@ -433,7 +433,6 @@ pub const STDLIB_SOURCES: &[StdlibSource] = embedded_catalog!(StdlibSource, modu
     "connectors/github" => "stdlib/stdlib_connectors_github.harn",
     "connectors/github/repository" => "stdlib/connectors/github/repository.harn",
     "connectors/linear" => "stdlib/stdlib_connectors_linear.harn",
-    "connectors/notion" => "stdlib/stdlib_connectors_notion.harn",
     "connectors/slack" => "stdlib/stdlib_connectors_slack.harn",
     "workflow/prompts" => "stdlib/workflow/prompts.harn",
     "workflow/context" => "stdlib/workflow/context.harn",

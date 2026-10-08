@@ -283,6 +283,8 @@ fn generate_go_with_payloads(payloads: &SessionUpdatePayloads) -> String {
     append_go_session_recap_types(&mut out);
     super::plan_records::append(&mut out, super::records::Target::Go);
     super::inference_admission::append(&mut out, super::records::Target::Go);
+    super::canonical_history::append(&mut out, super::records::Target::Go);
+    super::prompt_correlation::append(&mut out, super::records::Target::Go);
     out
 }
 
@@ -560,6 +562,7 @@ type HarnToolLifecycleMeta struct {
 	ErrorCategory       *string         `json:"errorCategory,omitempty"`
 	ExecutionDurationMs *float64        `json:"executionDurationMs,omitempty"`
 	Executor            json.RawMessage `json:"executor,omitempty"`
+	Intent              *string         `json:"intent,omitempty"`
 	MutationStatus      *HarnToolMutationStatus `json:"mutationStatus,omitempty"`
 	Parsing             *bool           `json:"parsing,omitempty"`
 	RawInputPartial     *string         `json:"rawInputPartial,omitempty"`

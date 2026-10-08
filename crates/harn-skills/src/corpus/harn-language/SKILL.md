@@ -60,6 +60,32 @@ Pair it with [[harn-testing]] for fixtures and [[harn-diagnostics]] for user-fac
 - Heredoc syntax is for LLM tool-call argument JSON, not general strings.
 - Keep comments factual and close to non-obvious logic.
 
+## Decode at the boundary
+
+Untyped data (JSON text, a GraphQL response, a `dict` from another API) gets
+decoded once where it enters. After that, read typed fields with `.`.
+
+```harn,ignore
+type WorkflowRun = {headBranch: string, conclusion: string?, url: string}
+type WorkflowRuns = list<WorkflowRun>
+
+const runs = json_decode(child.stdout, schema_of(WorkflowRuns))?   // text
+const pr = schema_parse(payload, schema_of(Snapshot))?             // a value
+```
+
+- `json_decode` and `schema_parse` return `Result<T, {message, errors,
+  issues}>`. `match` or postfix `?` keeps `T`; `unwrap` returns a dynamic
+  value. Use `schema_expect` to throw instead.
+- Unknown fields pass. `name: T?` may be `null`; `name?: T` may be absent.
+- Declare a GraphQL response type next to its query and decode
+  `payload.data` with it.
+- `command_run`, `harness.process.exec`/`shell`, and buffered `harness.net`
+  requests already return typed, never-nil records: write `result.stdout`,
+  not `result?.stdout ?? ""`. Keep the type when you wrap them; a wrapper
+  that returns `dict` erases it.
+- A `?.` chain over an untyped value (`HARN-LNT-080`) or `to_string(x ?? "")`
+  on a field means a decode is missing.
+
 ## Types and boundaries
 
 - Treat `unknown` as the type for untrusted inputs.

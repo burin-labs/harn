@@ -59,7 +59,7 @@
     {
       "id": "LNT",
       "title": "Lint rules",
-      "count": 78
+      "count": 79
     },
     {
       "id": "FMT",
@@ -2589,6 +2589,15 @@
       "code": "HARN-LNT-079",
       "category": "LNT",
       "summary": "evaluation site hands a native decision route an input whose declared type has no finite size bound",
+      "repairs": [],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-LNT-080",
+      "category": "LNT",
+      "summary": "`?.` chain hedges every field of an untyped value instead of decoding it once",
       "repairs": [],
       "related": [],
       "explanationPresent": true,

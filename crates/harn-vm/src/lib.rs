@@ -28,6 +28,8 @@ pub mod a2a;
 pub mod actor_chain;
 pub mod agent_events;
 mod agent_lifecycle_cleanup;
+#[cfg(test)]
+mod agent_session_auxiliary_usage_tests;
 pub(crate) mod agent_session_journal;
 pub mod agent_session_restore;
 pub mod agent_session_spend;
@@ -155,6 +157,7 @@ pub(crate) mod secret_patterns;
 pub mod secrets;
 pub mod security;
 pub mod session_bundle;
+pub mod session_publication;
 pub mod session_recap;
 pub mod session_timeline;
 pub mod sessions;

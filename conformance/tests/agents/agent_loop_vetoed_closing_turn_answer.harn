@@ -6,9 +6,9 @@
    then ends on that same round, nothing later is accepted and the placeholder
    is the trailing assistant message.
 
-   The run's `text` must not be that placeholder. A run with an earlier
-   accepted draft answers with that draft; a run where nothing was accepted
-   answers with nothing, and the stop reason carries the meaning. Otherwise
+   The run's `text` must not be that placeholder. Earlier actor prose remains
+   provisional until terminal admission, so a rejected run answers with
+   nothing, and the stop reason carries the meaning. Otherwise
    every consumer reads a bookkeeping line as the model's closing report. */
 import { agent_loop } from "std/agent/loop"
 import { llm_text, with_llm_script } from "std/testing"
@@ -54,8 +54,8 @@ fn run_nothing_accepted(harness: Harness) {
 }
 
 /**
- * An earlier draft was accepted; a later one is vetoed and the loop then ends.
- * The accepted draft is the answer.
+ * Earlier prose remains provisional; a later closing turn is vetoed.
+ * Neither draft is an admitted answer.
  */
 fn run_earlier_accepted(harness: Harness) {
   with_llm_script(
@@ -80,8 +80,7 @@ fn run_earlier_accepted(harness: Harness) {
         },
       )
       harness.stdio.println("earlier_accepted.vetoes=${result.completion_judge.vetoes}")
-      // A run that DOES have an answer keeps whatever ended it as its reason.
-      // The withdrawal reason is for runs with nothing left to report.
+      // Earlier progress prose cannot become an answer after rejection.
       harness.stdio.println(
         "earlier_accepted.stop_reason_is_withdrawn="
           + to_string(result.stop_reason == "turn_withdrawn"),

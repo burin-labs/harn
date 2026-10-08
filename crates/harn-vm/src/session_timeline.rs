@@ -769,8 +769,18 @@ fn stored_event_node(mut event: StoredEvent) -> SessionTimelineNode {
                 .map(|id| format!("session:{}:source:{id}", event.session_id))
         })
         .unwrap_or_else(|| format!("session:{}:event:{}", event.session_id, event.event_id));
+    let visibility = facts::string_at(&event.payload, facts::VISIBILITY);
     let category = match &event.kind {
+        // Keep private transcript frames inspectable as diagnostic events,
+        // rather than projecting them as conversation messages on hydration.
+        SessionEventKind::Message if visibility.as_deref() == Some("internal") => "event",
         SessionEventKind::Message => "message",
+        SessionEventKind::Custom { custom_type }
+            if custom_type == "assistant_publication"
+                && visibility.as_deref() == Some("public") =>
+        {
+            "message"
+        }
         SessionEventKind::ToolCall | SessionEventKind::ToolResult => "tool",
         SessionEventKind::Plan => "plan",
         SessionEventKind::Compaction => "compaction",

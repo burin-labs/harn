@@ -135,7 +135,7 @@ const LITERAL_TIMEOUT_BASELINE = [
   {rule: "literal_timeout", path: "crates/harn-cli/tests/test_util/stdio_jsonrpc.rs", count: 1},
   // Deliberate expiry: each asserts a second acquire is STILL parked behind a
   // held permit after 100ms. The timeout firing is the behavior under test.
-  {rule: "literal_timeout", path: "crates/harn-vm/src/llm/rate_limit.rs", count: 3},
+  {rule: "literal_timeout", path: "crates/harn-vm/src/llm/rate_limit/tests.rs", count: 3},
   // Deliberate expiry under paused Tokio time: an outer deadline must interrupt
   // network recovery before any provider dispatch. No wall-clock latency claim.
   {
@@ -498,7 +498,7 @@ const NON_TEST_WALL_CLOCK_ALLOWLIST: list<string> = [
   "crates/harn-cli/src/commands/time.rs",
   "crates/harn-cli/src/commands/trigger/ops.rs",
   "crates/harn-cli/src/commands/trigger/replay.rs",
-  "crates/harn-cli/src/package/registry/cache_layout.rs",
+  "crates/harn-package/src/package/registry/cache_layout.rs",
   "crates/harn-cli/src/skill_provenance.rs",
   // User-test phase timings report real host wall time; the extracted execution
   // module preserves the existing `test_runner.rs` observability contract.
@@ -562,6 +562,10 @@ const NON_TEST_WALL_CLOCK_ALLOWLIST: list<string> = [
   // Virtual time cannot decide whether an OS subprocess has exited or whether
   // SIGTERM grace has elapsed.
   "crates/harn-vm/src/op_interrupt.rs",
+  "crates/harn-vm/src/op_interrupt/context.rs",
+  // Bubblewrap setup waits on real OS descendants; its monotonic deadline
+  // bounds inherited pipes through the existing subprocess interrupt owner.
+  "crates/harn-vm/src/stdlib/sandbox/linux_bwrap_probe.rs",
   "crates/harn-vm/src/llm/api/partial_tool_args.rs",
   "crates/harn-vm/src/llm/api/transport.rs",
   "crates/harn-vm/src/llm/autonomy_budget.rs",

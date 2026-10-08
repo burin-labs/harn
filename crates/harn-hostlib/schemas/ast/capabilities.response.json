@@ -29,6 +29,9 @@
           "insert_at_anchor": { "type": "boolean" },
           "rename_symbol": { "type": "boolean" },
           "symbols": { "type": "boolean" },
+          "move_symbol": { "type": "boolean" },
+          "extract_function": { "type": "boolean" },
+          "change_signature": { "type": "boolean" },
           "health": {
             "type": "object",
             "description": "Versioned safe-edit ParserHealth artifact and corpus fitness.",
@@ -52,6 +55,9 @@
           "insert_at_anchor",
           "rename_symbol",
           "symbols",
+          "move_symbol",
+          "extract_function",
+          "change_signature",
           "health"
         ],
         "additionalProperties": false

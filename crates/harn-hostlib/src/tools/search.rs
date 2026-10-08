@@ -482,7 +482,7 @@ fn row_to_value(rwp: RowWithPath) -> VmValue {
 
 #[expect(
     clippy::string_slice,
-    reason = "start/end come from floor/next_char_boundary, so they are char boundaries"
+    reason = "start/end come from floor/ceil_char_boundary, so they are char boundaries"
 )]
 fn clip_text(value: &str, max_bytes: usize, anchor_byte: Option<usize>) -> (String, bool) {
     if value.len() <= max_bytes {
@@ -491,7 +491,7 @@ fn clip_text(value: &str, max_bytes: usize, anchor_byte: Option<usize>) -> (Stri
 
     let Some(anchor_byte) = anchor_byte else {
         let keep = max_bytes.saturating_sub(CLIP_SUFFIX.len()).max(1);
-        let end = floor_char_boundary(value, keep);
+        let end = value.floor_char_boundary(keep);
         return (format!("{}{}", &value[..end], CLIP_SUFFIX), true);
     };
 
@@ -504,11 +504,11 @@ fn clip_text(value: &str, max_bytes: usize, anchor_byte: Option<usize>) -> (Stri
     if start.saturating_add(content_budget) > value.len() {
         start = value.len().saturating_sub(content_budget);
     }
-    start = floor_char_boundary(value, start);
+    start = value.floor_char_boundary(start);
     let mut end = (start + content_budget).min(value.len());
-    end = floor_char_boundary(value, end);
+    end = value.floor_char_boundary(end);
     if end <= start {
-        end = next_char_boundary(value, start);
+        end = value.ceil_char_boundary(start + 1);
     }
 
     let mut out = String::with_capacity(max_bytes);
@@ -520,27 +520,4 @@ fn clip_text(value: &str, max_bytes: usize, anchor_byte: Option<usize>) -> (Stri
         out.push_str(CLIP_SUFFIX);
     }
     (out, true)
-}
-
-fn floor_char_boundary(value: &str, mut index: usize) -> usize {
-    index = index.min(value.len());
-    while index > 0 && !value.is_char_boundary(index) {
-        index -= 1;
-    }
-    index
-}
-
-#[expect(
-    clippy::string_slice,
-    reason = "the only caller passes an index already floored to a char boundary"
-)]
-fn next_char_boundary(value: &str, index: usize) -> usize {
-    if index >= value.len() {
-        return value.len();
-    }
-    value[index..]
-        .chars()
-        .next()
-        .map(|ch| index + ch.len_utf8())
-        .unwrap_or(value.len())
 }

@@ -18,7 +18,8 @@ Pair it with [[harn-orchestration]] for workflow behavior and [[harn-testing]] f
 - The quickref also covers `provider: "auto"`, schemas, and retries.
 - `docs/llm/harn-triggers-quickref.md` documents connector provider manifests.
 - LLM configuration and routing live under `crates/harn-vm/src/`.
-- Package/provider manifest handling lives under `crates/harn-cli/src/package/`.
+- Package resolution lives under `crates/harn-package/src/package/`.
+- Provider manifest contracts live under `crates/harn-vm/src/connectors/manifest/`.
 - Provider capability rows are surfaced by CLI matrix commands.
 - Mock providers are the default for deterministic tests.
 - Never require live credentials in ordinary CI.

@@ -1,7 +1,7 @@
 //! Canonical catalog of well-known MCP server presets (harn#2650).
 //!
 //! Thin clients (an IDE host's TUI and the macOS GUI) read this shared
-//! harn-owned source of truth for "one-click" MCP servers — Notion, Linear,
+//! harn-owned source of truth for "one-click" MCP servers — Linear,
 //! GitHub, a local filesystem server, etc. Keep client lists derived from this
 //! catalog so presets do not drift across surfaces.
 //!
@@ -16,7 +16,7 @@
 //!
 //! The catalog is **descriptive metadata only** — it never connects to a
 //! server or fabricates credentials. A preset is a template a client fills in
-//! (allowed roots for filesystem, an OAuth login for Notion) before handing the
+//! (allowed roots for filesystem, an OAuth login for Linear) before handing the
 //! resolved spec to the MCP registry. Required substitutions are declared as
 //! [`PresetPlaceholder`]s so a client can prompt for them.
 //!
@@ -173,7 +173,7 @@ pub enum IdentityDescriptorConfidence {
 pub struct IdentityProbeSource {
     /// Which kind of probe this is.
     pub kind: IdentityProbeKind,
-    /// MCP tool to call when `kind = tool` (e.g. Notion's self/whoami tool).
+    /// MCP tool to call when `kind = tool` (e.g. a self/whoami tool).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool: Option<String>,
     /// HTTP endpoint to GET (with the bearer) when `kind = http`.
@@ -189,8 +189,8 @@ pub struct IdentityProbeSource {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum IdentityProbeKind {
-    /// Capture fields from the OAuth token-exchange JSON response (Notion, for
-    /// instance, returns `workspace_name` + `owner.user` inline).
+    /// Capture fields from the OAuth token-exchange JSON response, for servers
+    /// that return the authorizing user or workspace inline.
     TokenResponse,
     /// Call a named MCP tool and capture fields from its JSON result.
     Tool,
@@ -204,9 +204,9 @@ pub enum IdentityProbeKind {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all(serialize = "camelCase", deserialize = "snake_case"))]
 pub struct McpPreset {
-    /// Stable lookup key (e.g. `"notion"`). Unique across the catalog.
+    /// Stable lookup key (e.g. `"linear"`). Unique across the catalog.
     pub id: String,
-    /// Display name for the client UI (e.g. `"Notion"`).
+    /// Display name for the client UI (e.g. `"Linear"`).
     pub name: String,
     /// One-line description of what the server exposes.
     pub description: String,
@@ -339,7 +339,7 @@ mod tests {
     #[test]
     fn bundled_catalog_parses() {
         let presets = base_presets();
-        assert_eq!(presets.len(), 9, "bundled catalog should ship 9 presets");
+        assert_eq!(presets.len(), 8, "bundled catalog should ship 8 presets");
     }
 
     #[test]
@@ -359,7 +359,6 @@ mod tests {
     #[test]
     fn ships_the_well_known_servers() {
         for id in [
-            "notion",
             "linear",
             "github",
             "sentry",
@@ -419,39 +418,35 @@ mod tests {
     fn json_shape_is_stable() {
         let json = serde_json::to_value(catalog()).expect("serialize catalog");
         assert_eq!(json["schemaVersion"], serde_json::json!(3));
-        let notion = json["presets"]
+        let linear = json["presets"]
             .as_array()
             .expect("presets array")
             .iter()
-            .find(|preset| preset["id"] == serde_json::json!("notion"))
-            .expect("notion preset present");
-        assert_eq!(notion["transport"], serde_json::json!("http"));
-        assert_eq!(notion["authKind"], serde_json::json!("oauth"));
+            .find(|preset| preset["id"] == serde_json::json!("linear"))
+            .expect("linear preset present");
+        assert_eq!(linear["transport"], serde_json::json!("http"));
+        assert_eq!(linear["authKind"], serde_json::json!("oauth"));
         assert_eq!(
-            notion["url"],
-            serde_json::json!("https://mcp.notion.com/mcp")
+            linear["url"],
+            serde_json::json!("https://mcp.linear.app/mcp")
         );
-        assert!(
-            notion.get("oauthScopes").is_none(),
-            "Notion MCP does not currently expose configurable OAuth scopes"
-        );
-        // Notion declares a token_response identity descriptor (harn#3349).
-        assert_eq!(notion["identity"]["resolution"], serde_json::json!("user"));
+        assert_eq!(linear["oauthScopes"], serde_json::json!("read write"));
+        assert_eq!(linear["identity"]["resolution"], serde_json::json!("user"));
         assert_eq!(
-            notion["identity"]["confidence"],
-            serde_json::json!("documented")
+            linear["identity"]["confidence"],
+            serde_json::json!("observed")
         );
         assert_eq!(
-            notion["identity"]["sourceUrl"],
-            serde_json::json!("https://developers.notion.com/reference/create-a-token")
+            linear["identity"]["sourceUrl"],
+            serde_json::json!("https://linear.app/docs/mcp")
         );
         assert_eq!(
-            notion["identity"]["displayTemplate"],
-            serde_json::json!("{name} <{email}> — {workspace}")
+            linear["identity"]["displayTemplate"],
+            serde_json::json!("{name} <{email}>")
         );
         assert_eq!(
-            notion["identity"]["sources"][0]["kind"],
-            serde_json::json!("token_response")
+            linear["identity"]["sources"][0]["kind"],
+            serde_json::json!("tool")
         );
     }
 
@@ -459,7 +454,6 @@ mod tests {
     fn vetted_identity_descriptors_are_declared_for_well_known_servers() {
         let presets = base_presets();
         let expected = [
-            ("notion", IdentityResolutionKind::User),
             ("linear", IdentityResolutionKind::User),
             ("github", IdentityResolutionKind::User),
             ("sentry", IdentityResolutionKind::User),
@@ -611,13 +605,13 @@ mod tests {
         let overlay = parse_presets(
             r#"
 [[presets]]
-id = "notion"
-name = "Notion (corp)"
-description = "Corp Notion workspace."
-icon = "doc.text.fill"
+id = "linear"
+name = "Linear (corp)"
+description = "Corp Linear workspace."
+icon = "list.bullet.rectangle.fill"
 category = "productivity"
 transport = "http"
-url = "https://notion.corp.example/mcp"
+url = "https://linear.corp.example/mcp"
 auth_kind = "oauth"
 
 [[presets]]
@@ -634,14 +628,14 @@ auth_kind = "oauth"
         .expect("overlay parses");
         merge_presets(&mut base, overlay);
 
-        let notion = base.iter().find(|preset| preset.id == "notion").unwrap();
-        assert_eq!(notion.name, "Notion (corp)");
-        assert_eq!(notion.url, "https://notion.corp.example/mcp");
+        let linear = base.iter().find(|preset| preset.id == "linear").unwrap();
+        assert_eq!(linear.name, "Linear (corp)");
+        assert_eq!(linear.url, "https://linear.corp.example/mcp");
         assert!(
             base.iter().any(|preset| preset.id == "sentry"),
             "existing sentry preset should remain present after replacement"
         );
-        assert_eq!(base.len(), 9, "sentry overlay replaces bundled preset");
+        assert_eq!(base.len(), 8, "sentry overlay replaces bundled preset");
     }
 
     #[test]
@@ -649,13 +643,13 @@ auth_kind = "oauth"
         let presets = parse_presets(
             r#"
 [[presets]]
-id = "notion"
-name = "Notion"
-description = "Notion workspace."
+id = "docs"
+name = "Docs"
+description = "Example docs workspace."
 icon = "doc.text.fill"
 category = "productivity"
 transport = "http"
-url = "https://mcp.notion.com/mcp"
+url = "https://mcp.docs.example/mcp"
 auth_kind = "oauth"
 
 [presets.identity]
@@ -670,7 +664,7 @@ workspace = "workspace_name"
 
 [[presets.identity.sources]]
 kind = "tool"
-tool = "notion-get-self"
+tool = "docs-get-self"
 [presets.identity.sources.fields]
 name = "name"
 email = "person.email"
@@ -680,7 +674,7 @@ email = "person.email"
         let identity = presets[0]
             .identity
             .as_ref()
-            .expect("notion has identity descriptor");
+            .expect("docs preset has identity descriptor");
         assert_eq!(identity.resolution, IdentityResolutionKind::User);
         assert!(identity.confidence.is_none());
         assert!(identity.source_url.is_none());
@@ -695,7 +689,7 @@ email = "person.email"
             Some("workspace_name")
         );
         assert_eq!(identity.sources[1].kind, IdentityProbeKind::Tool);
-        assert_eq!(identity.sources[1].tool.as_deref(), Some("notion-get-self"));
+        assert_eq!(identity.sources[1].tool.as_deref(), Some("docs-get-self"));
 
         // Round-trips to camelCase JSON for thin clients.
         let json = serde_json::to_value(&presets[0]).expect("serialize");

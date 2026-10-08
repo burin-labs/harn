@@ -316,7 +316,8 @@
             "host_bridge_unimplemented",
             "agent_loop_protocol_failure",
             "parse_dropped",
-            "generic_throw"
+            "generic_throw",
+            "managed_spend_paused"
           ]
         },
         "message": { "type": "string" },
@@ -370,7 +371,8 @@
             "host_bridge_unimplemented",
             "agent_loop_protocol_failure",
             "parse_dropped",
-            "generic_throw"
+            "generic_throw",
+            "managed_spend_paused"
           ]
         },
         "category": { "type": "string" },
@@ -531,6 +533,7 @@
         "executionDurationMs": { "type": "number", "minimum": 0 },
         "executor": {},
         "health": { "type": "object" },
+        "intent": { "type": "string", "minLength": 1, "maxLength": 200 },
         "mutationStatus": { "$ref": "#/$defs/ToolMutationStatus" },
         "parsing": { "type": "boolean" },
         "rawInputPartial": { "type": "string" }

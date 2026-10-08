@@ -301,6 +301,10 @@ pub fn builtin_return_type(name: &str) -> Option<TypeExpr> {
 /// typechecker knew `connector_call`, `host_tool_call`, `http_download`,
 /// `http_stream_info`, and `llm_call_safe`, and only the linter knew
 /// `mcp_call`. This list is their union.
+///
+/// Buffered HTTP requests are not listed: their response is the closed
+/// `HTTP_RESPONSE` record, so its fields are typed. The untrusted part is the
+/// `body` string, which becomes a boundary value when it reaches `json_parse`.
 pub const UNTYPED_BOUNDARY_SOURCES: &[&str] = &[
     "json_parse",
     "json_extract",
@@ -309,14 +313,6 @@ pub const UNTYPED_BOUNDARY_SOURCES: &[&str] = &[
     "llm_call",
     "llm_call_safe",
     "llm_completion",
-    "http_get",
-    "http_post",
-    "http_put",
-    "http_patch",
-    "http_delete",
-    "http_download",
-    "http_request",
-    "http_session_request",
     "http_stream_info",
     "sse_receive",
     "sse_server_mock_receive",

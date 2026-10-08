@@ -10,7 +10,7 @@ import { create, domain_wildcard } from "std/net_policy"
 fn main(harness: Harness) {
   const policy = create({deny: [domain_wildcard("*.competitor.com")], default: "allow"})
   const restricted = harness.with_net_policy(policy)
-  const through = restricted.net.get("https://example.test/anywhere")
+  const through = restricted.net.get("https://example.test/anywhere").body
   harness.stdio.println("through=" + through)
   let deny_err = nil
   try {

@@ -660,7 +660,7 @@ fn poll_connector() { nil }
 fn write_shared_state() { nil }
 
 // Connector polling: cap concurrent calls against one provider.
-const permit = sync_semaphore_acquire("connector:notion", 4, 1, 2s)
+const permit = sync_semaphore_acquire("connector:linear", 4, 1, 2s)
 guard permit != nil else { throw "connector poll saturated" }
 try { poll_connector() } finally { sync_release(permit) }
 
@@ -882,7 +882,7 @@ Paginated fetch with bounded page fan-out:
 
 ```harn
 fn fetch_page(net: HarnessNet, cursor) {
-  net.connector_call("notion", "search", {cursor: cursor, page_size: 100})
+  net.connector_call("linear", "search", {cursor: cursor, page_size: 100})
 }
 
 fn collect_pages(net: HarnessNet, stdio: HarnessStdio, cursors) {

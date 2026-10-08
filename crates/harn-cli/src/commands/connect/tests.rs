@@ -996,9 +996,18 @@ fn github_install_callback_ignores_invalid_request_before_valid_callback() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn mocked_builtin_oauth_token_endpoints_receive_pkce_and_resource_indicators() {
-    for provider in ["slack", "linear", "notion"] {
-        let defaults = oauth_provider_defaults(provider).expect("provider defaults");
-        let expected_resource = defaults.default_resource.to_string();
+    let mut cases: Vec<(&str, &str)> = ["slack", "linear"]
+        .into_iter()
+        .map(|provider| {
+            let defaults = oauth_provider_defaults(provider).expect("provider defaults");
+            (defaults.token_auth_method, defaults.default_resource)
+        })
+        .collect();
+    // No built-in provider defaults to HTTP Basic client authentication, so
+    // pin that exchange path with an explicit case.
+    cases.push(("client_secret_basic", "https://api.example.com/"));
+    for (token_auth_method, resource) in cases {
+        let expected_resource = resource.to_string();
         let token_endpoint = spawn_token_endpoint(move |form| {
             assert_eq!(
                 form.get("grant_type").map(String::as_str),
@@ -1019,9 +1028,9 @@ async fn mocked_builtin_oauth_token_endpoints_receive_pkce_and_resource_indicato
             AuthorizationCodeExchange {
                 client_id: "client",
                 client_secret: Some("secret"),
-                token_auth_method: defaults.token_auth_method,
+                token_auth_method,
                 redirect_uri: "http://127.0.0.1:49152/oauth/callback",
-                resource: defaults.default_resource,
+                resource,
                 scopes: Some("read write"),
                 code: "code-123",
                 code_verifier: "verifier-123",
@@ -1037,7 +1046,7 @@ async fn mocked_builtin_oauth_token_endpoints_receive_pkce_and_resource_indicato
 #[tokio::test(flavor = "current_thread")]
 async fn generic_mcp_oauth_discovers_metadata_and_registers_client() {
     let (base_url, server) = spawn_generic_mcp_oauth_server();
-    let discovery = discover_oauth_server(&format!("{base_url}/mcp/notion"))
+    let discovery = discover_oauth_server(&format!("{base_url}/mcp/docs"))
         .await
         .expect("discover oauth server");
     assert_eq!(
@@ -1184,14 +1193,14 @@ fn spawn_generic_mcp_oauth_server() -> (String, thread::JoinHandle<()>) {
                 .next()
                 .and_then(|line| line.split_whitespace().nth(1))
                 .unwrap_or("/");
-            if path.starts_with("/mcp/notion") {
+            if path.starts_with("/mcp/docs") {
                 write_response(
                     &mut stream,
                     &format!(
-                        "HTTP/1.1 401 Unauthorized\r\nWWW-Authenticate: Bearer resource_metadata=\"{server_base_url}/.well-known/oauth-protected-resource/mcp/notion\", scope=\"mcp.read\"\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                        "HTTP/1.1 401 Unauthorized\r\nWWW-Authenticate: Bearer resource_metadata=\"{server_base_url}/.well-known/oauth-protected-resource/mcp/docs\", scope=\"mcp.read\"\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
                     ),
                 );
-            } else if path.starts_with("/.well-known/oauth-protected-resource/mcp/notion") {
+            } else if path.starts_with("/.well-known/oauth-protected-resource/mcp/docs") {
                 write_json_response(
                     &mut stream,
                     &format!(

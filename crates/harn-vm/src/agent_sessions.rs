@@ -180,7 +180,14 @@ impl Default for SessionTranscriptBudgetPolicy {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SessionAdmissionRole {
+    Admitted,
+    ParentReference,
+}
+
 pub struct SessionState {
+    admission_role: SessionAdmissionRole,
     pub id: String,
     pub transcript: VmValue,
     pub subscribers: Vec<SessionSubscriber>,
@@ -348,6 +355,7 @@ use runtime_store::{
 };
 pub use scratchpad::*;
 pub(crate) use transcript_lifecycle::append_event_to_state;
+pub(crate) use transcript_lifecycle::settle_assistant_publication;
 pub use transcript_lifecycle::*;
 pub use types::*;
 
@@ -490,6 +498,7 @@ pub fn reset_session_store() {
     CURRENT_TOOL_CALL_STACK.with(|stack| stack.borrow_mut().clear());
     for session_id in owned_session_ids {
         clear_session_changed_paths(&session_id);
+        crate::agent_events::clear_session_parent_routes(&session_id);
     }
     active_session_runtime()
         .unknown_host_event_warnings
@@ -744,6 +753,7 @@ pub fn open_or_create_with_actor_chain(
     SESSIONS.with(|s| {
         let mut map = s.borrow_mut();
         if let Some(state) = map.get_mut(&resolved) {
+            state.admission_role = SessionAdmissionRole::Admitted;
             if let Some(actor_chain) = requested_actor_chain.clone() {
                 state.actor_chain = Some(actor_chain);
             }
@@ -782,11 +792,13 @@ pub fn open_or_create_with_actor_chain(
     })?;
     for evicted in evicted {
         clear_session_changed_paths(&evicted);
+        crate::agent_events::clear_session_parent_routes(&evicted);
     }
     if was_new {
-        // A prior owner may have been abandoned before its receipt drained.
-        // Opening a fresh session with the same id starts a fresh receipt.
+        // Local admission can follow global observer registration. Only an
+        // explicit close retires that identity and its incoming child routes.
         clear_session_changed_paths(&resolved);
+        crate::agent_events::clear_session_parent_routes(&resolved);
         if let Some(parent) = parent_session.as_deref() {
             crate::agent_events::mirror_session_sinks(parent, &resolved);
         }
@@ -882,6 +894,7 @@ fn admit_linked_sessions(
         }
         if !map.contains_key(parent_id) {
             let mut parent = SessionState::new(parent_id.to_string());
+            parent.admission_role = SessionAdmissionRole::ParentReference;
             parent.actor_chain = inherited_actor_chain.clone();
             map.insert(parent_id.to_string(), parent);
             created.push(parent_id.to_string());
@@ -897,18 +910,28 @@ fn admit_linked_sessions(
             }
         }
         lineage.commit(&mut map, parent_id, child_id, branched_at_event_index);
+        map.get_mut(child_id)
+            .expect("admitted child exists")
+            .admission_role = SessionAdmissionRole::Admitted;
         Ok(())
     })?;
     for id in evicted {
         clear_session_changed_paths(&id);
+        crate::agent_events::clear_session_parent_routes(&id);
     }
     for id in created {
         clear_session_changed_paths(&id);
-        if let Some(parent) = ambient_parent.as_deref() {
-            crate::agent_events::mirror_session_sinks(parent, &id);
+        // A parent placeholder in a fresh worker is not a new global parent.
+        if id == child_id {
+            crate::agent_events::clear_session_parent_routes(&id);
         }
         try_register_event_log(&id);
     }
+    // Linked lineage owns observation. A background worker has no ambient
+    // session, and an unrelated ambient session must not receive these events.
+    // Replace the observer edge after admission even for an existing child;
+    // the event registry resolves current ancestors and deduplicates delivery.
+    crate::agent_events::link_session_sinks(parent_id, child_id);
     Ok(())
 }
 
@@ -984,6 +1007,12 @@ pub fn register_event_log_sink(session_id: &str) {
 pub fn close(id: &str) -> bool {
     let (removed, active_run) = SESSIONS.with(|s| {
         let mut sessions = s.borrow_mut();
+        let Some(state) = sessions.get(id) else {
+            return (false, false);
+        };
+        if state.admission_role == SessionAdmissionRole::ParentReference {
+            return (false, false);
+        }
         if sessions
             .get(id)
             .is_some_and(|state| state.transcript_journal.is_some())
@@ -999,14 +1028,16 @@ pub fn close(id: &str) -> bool {
         );
         return false;
     }
-    if removed {
-        reclaim_hooks::release_closed_session(id);
+    if !removed {
+        return false;
     }
+    reclaim_hooks::release_closed_session(id);
     // Cross-thread per-session state must be released too, otherwise
     // pending inbox entries can be delivered to a future session that
     // happens to reuse the same id.
     crate::orchestration::agent_inbox::clear_session(id);
     crate::agent_events::clear_session_sinks(id);
+    crate::agent_events::retire_session_observer_lineage(id);
     clear_unknown_host_event_warnings(id);
     removed
 }
@@ -1037,6 +1068,9 @@ pub fn close_with_status(
         let Some(state) = sessions.get_mut(id) else {
             return Ok(false);
         };
+        if state.admission_role == SessionAdmissionRole::ParentReference {
+            return Ok(false);
+        }
         if state.transcript_journal.is_some() {
             return Err(format!(
                 "agent session '{id}' has an active run; finalize it before closing"
@@ -1059,6 +1093,7 @@ pub fn close_with_status(
         metadata,
     });
     crate::agent_events::clear_session_sinks(id);
+    crate::agent_events::retire_session_observer_lineage(id);
     Ok(true)
 }
 
@@ -1096,7 +1131,6 @@ pub fn fork(src_id: &str, dst_id: Option<String>) -> Result<Option<String>, Sess
     if dst == src_id {
         return Ok(None);
     }
-    let ambient_parent = current_session_id();
     let mut evicted = Vec::new();
     let mut budget_event = None;
     let forked = SESSIONS.with(|s| {
@@ -1170,11 +1204,11 @@ pub fn fork(src_id: &str, dst_id: Option<String>) -> Result<Option<String>, Sess
     }
     for id in evicted {
         clear_session_changed_paths(&id);
+        crate::agent_events::clear_session_parent_routes(&id);
     }
     clear_session_changed_paths(&dst);
-    if let Some(parent) = ambient_parent.as_deref() {
-        crate::agent_events::mirror_session_sinks(parent, &dst);
-    }
+    crate::agent_events::clear_session_parent_routes(&dst);
+    crate::agent_events::link_session_sinks(src_id, &dst);
     try_register_event_log(&dst);
     publish_transcript_budget_event(budget_event);
     Ok(Some(dst))
@@ -1212,7 +1246,15 @@ pub fn fork_at(
     Ok(Some(new_id))
 }
 
+mod canonical_boundary;
+mod durable_fork;
+pub use canonical_boundary::{
+    canonical_history_boundaries, canonical_history_boundaries_schema, CanonicalHistoryBoundaries,
+    CanonicalHistoryPosition, CanonicalSessionBoundary, CANONICAL_HISTORY_BOUNDARIES_METHOD,
+    CANONICAL_HISTORY_BOUNDARIES_SCHEMA, CANONICAL_SESSION_BOUNDARY_SCHEMA,
+};
 mod truncation;
+pub use durable_fork::{fork_canonical, CanonicalForkError, CanonicalForkResult};
 use truncation::truncate_state;
 pub use truncation::{trim, truncate};
 
@@ -1424,9 +1466,6 @@ pub fn replace_messages_with_summary(
     })
 }
 
-/// Persist the set of active skill names for session resume. Called at
-/// the end of an agent_loop run; the next `open_or_create` for this id
-/// reads them back via [`active_skills`].
 #[cfg(test)]
 #[path = "agent_sessions_tests.rs"]
 mod tests;

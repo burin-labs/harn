@@ -474,6 +474,7 @@ fn serialize_diag(d: &TypeDiagnostic) -> SerializedDiagnostic {
         severity: match d.severity {
             DiagnosticSeverity::Error => "error",
             DiagnosticSeverity::Warning => "warning",
+            DiagnosticSeverity::Info => "info",
         },
         code: d.code.as_str().to_string(),
         message: d.message.clone(),

@@ -83,6 +83,7 @@ mod tests {
                     raw_input: serde_json::json!({}),
                     parsing: None,
                     audit: None,
+                    intent: None,
                 });
             }
             emit_agent_event_with_ctx(

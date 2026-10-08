@@ -529,22 +529,23 @@ fn completion_requirement_refs_supported(
  * packet carries a passing reading, the item is satisfied by that receipt, so a
  * citation the model formatted badly cannot veto settled work. The model must
  * still report the item met; this removes the citation trap, not the judgment.
+ *
+ * The receipt settles only an item whose whole evidence contract IS
+ * verification: the normalized role set is exactly `deterministic_verification`.
+ * Any wider set names other evidence the author wants weighed, so a green
+ * command elsewhere in the session says nothing about it. Testing membership
+ * instead let one passing verifier close a `deterministic_verification` +
+ * `mutation_summary` item whatever the judge cited, and let the default set
+ * (`assistant_output` + `deterministic_verification`) close "Answer the
+ * question." Those items must pass `completion_requirement_refs_supported`.
+ * See `test_a_green_verifier_settles_only_the_verification_only_row`.
  */
 fn completion_requirement_verified_by_receipt(
   requirement: CompletionRequirement,
   packet: CompletionRequirementEvidencePacket,
 ) -> bool {
   const allowed_roles = completion_requirement_evidence_roles(requirement.evidence_roles)
-  // The receipt settles an item whose evidence kind IS verification, never one
-  // that merely permits verification among other kinds. The default role set
-  // contains `deterministic_verification` alongside `assistant_output`, so
-  // testing only for its presence would let a passing verifier anywhere in the
-  // session satisfy "Answer the question." — an item the verifier says nothing
-  // about. Requiring the author to have narrowed the item to verification
-  // evidence is the opt-in that keeps this a binding, not a bypass.
-  // See `test_omitted_roles_do_not_let_mutation_summary_prove_any_requirement`.
-  if !allowed_roles.contains("deterministic_verification")
-    || allowed_roles.contains("assistant_output") {
+  if allowed_roles != ["deterministic_verification"] {
     return false
   }
   for record in packet.requirement_evidence ?? [] {

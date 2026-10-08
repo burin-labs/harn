@@ -348,7 +348,15 @@ pub fn tool_inject_param(entry: dict, name: string, schema_fragment: dict, opts:
     if contains(props.keys(), name) {
       return entry
     }
-    const new_props = props + {[name]: fragment}
+    // The shorthand required bit is authoring metadata, not a JSON Schema
+    // keyword. Preserve a real nested object's required array unchanged.
+    let property_fragment = {}
+    for key in fragment.keys() {
+      if key != "required" || type_of(fragment[key]) != "bool" {
+        property_fragment = property_fragment + {[key]: fragment[key]}
+      }
+    }
+    const new_props = props + {[name]: property_fragment}
     const req_list = __tool_mw_list(params?.required)
     const new_req = if required && !contains(req_list, name) {
       req_list.appending(name)

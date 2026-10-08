@@ -3,8 +3,8 @@
 //! A live transcript journal is a durable-write obligation. Capacity is
 //! reserved when the journal is claimed, before the agent session is admitted,
 //! so cancellation never discovers that recovery is full after work started.
-//! Detached recovery scopes only the two runtimes that own session state; it
-//! does not retain the VM's full ambient policy, prompt, bridge, and sink state.
+//! Detached recovery retains the two session runtimes and immutable event
+//! transport. It does not retain the VM's ambient policy, prompt or bridge.
 
 use std::collections::HashMap;
 use std::future::Future;
@@ -205,6 +205,7 @@ pub(crate) struct CleanupRuntimes {
     execution_id: String,
     session: Arc<crate::agent_sessions::AgentSessionRuntime>,
     host: Arc<crate::llm::agent_session_host::AgentHostSessionRuntime>,
+    event_transport: crate::agent_events::AgentEventTransport,
 }
 
 impl CleanupRuntimes {
@@ -217,7 +218,37 @@ impl CleanupRuntimes {
             execution_id,
             session,
             host,
+            event_transport: crate::agent_events::AgentEventTransport::default(),
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_event_transport(
+        mut self,
+        transport: crate::agent_events::AgentEventTransport,
+    ) -> Self {
+        self.event_transport = transport;
+        self
+    }
+
+    /// Capture attribution once at admitted execution entry. Cleanup scheduling
+    /// clones this snapshot and never reads a later caller's ambient transport.
+    pub(crate) fn capture_transport(mut self) -> Self {
+        self.event_transport = crate::agent_events::transport::current();
+        self
+    }
+
+    /// Retry through the original session runtimes and observation transport.
+    /// The caller retains this snapshot until the canonical terminal commits.
+    pub(crate) async fn abandon_task(&self, task_id: &str) -> Result<(), VmError> {
+        Box::pin(ScopedCleanup {
+            runtimes: self.clone(),
+            inner: crate::llm::agent_session_host::cancellation::abandon_task_sessions(
+                &self.execution_id,
+                task_id,
+            ),
+        })
+        .await
     }
 
     fn key(&self) -> RuntimeKey {
@@ -247,7 +278,10 @@ impl<F: Future> Future for ScopedCleanup<F> {
         let previous_host = crate::llm::agent_session_host::swap_active_agent_host_session_runtime(
             this.runtimes.host.clone(),
         );
-        let result = this.inner.poll(context);
+        let result = this
+            .runtimes
+            .event_transport
+            .with(|| this.inner.poll(context));
         let _ =
             crate::llm::agent_session_host::swap_active_agent_host_session_runtime(previous_host);
         let _ = crate::agent_sessions::swap_active_session_runtime(previous_session);
@@ -380,3 +414,11 @@ async fn retry_task_cleanup<Cleanup, CleanupFuture, Sleep, SleepFuture>(
 #[cfg(test)]
 #[path = "agent_lifecycle_cleanup/tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "agent_lifecycle_cleanup/transport_tests.rs"]
+mod transport_tests;
+
+#[cfg(test)]
+#[path = "agent_lifecycle_cleanup/execution_transport_tests.rs"]
+mod execution_transport_tests;

@@ -95,7 +95,15 @@ pub struct ManifestFile {
 /// real dependency without changing any recorded file's content.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct ManifestUnresolved {
+    /// The importing file as the walk spelled it, which is what resolution is
+    /// relative to.
     pub anchor: PathBuf,
+    /// The file `anchor` named when the walk ran. A manifest is shared by
+    /// every spelling of one entry, so a symlink spelling that has since been
+    /// removed or retargeted would otherwise still re-check as unresolved
+    /// while the file it named gains the import.
+    #[serde(default)]
+    pub anchor_identity: PathBuf,
     pub import: String,
 }
 
@@ -110,6 +118,24 @@ pub struct ManifestUnresolved {
 pub struct ManifestUnreadable {
     pub path: PathBuf,
     pub kind: String,
+}
+
+/// A package-shaped import and the path it resolved to.
+///
+/// An installed package resolves through the project's current generation. A
+/// reinstall publishes a new generation and repoints the project at it, while
+/// the old generation's files can stay on disk, byte- and stat-identical, for
+/// processes still holding them. Every recorded file then re-checks clean, yet
+/// the import now names different files, so the resolution is recorded and
+/// asked again.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+pub struct ManifestPackageLink {
+    /// The importing file as the walk spelled it.
+    pub anchor: PathBuf,
+    pub import: String,
+    /// The path resolution returned, before canonicalization: a re-resolution
+    /// from the same anchor returns the same spelling when nothing moved.
+    pub resolved: PathBuf,
 }
 
 /// Everything the entry key's import-graph walk observed, in re-checkable form.
@@ -127,6 +153,7 @@ pub struct ContextManifest {
     pub files: Vec<ManifestFile>,
     pub unresolved: Vec<ManifestUnresolved>,
     pub unreadable: Vec<ManifestUnreadable>,
+    pub package_links: Vec<ManifestPackageLink>,
     /// Raw package aliases imported by the reachable graph. Cache hits use
     /// this projection to revalidate manifest/lock authority without parsing
     /// or rebuilding the graph.
@@ -173,6 +200,7 @@ impl ContextManifest {
             files: Vec::new(),
             unresolved: Vec::new(),
             unreadable: Vec::new(),
+            package_links: Vec::new(),
             package_import_aliases: Vec::new(),
             package_lock_digest: None,
         }
@@ -221,6 +249,10 @@ impl ContextManifest {
                 .unreadable
                 .iter()
                 .all(ManifestUnreadable::still_unreadable)
+            || !self
+                .package_links
+                .iter()
+                .all(ManifestPackageLink::still_resolves)
         {
             return ManifestCheck::Stale;
         }
@@ -365,9 +397,21 @@ impl ManifestUnreadable {
     }
 }
 
+impl ManifestPackageLink {
+    pub(crate) fn still_resolves(&self) -> bool {
+        harn_modules::resolve_import_path(&self.anchor, &self.import).as_deref()
+            == Some(self.resolved.as_path())
+    }
+}
+
 impl ManifestUnresolved {
     pub(crate) fn still_unresolved(&self) -> bool {
-        harn_modules::resolve_import_path(&self.anchor, &self.import).is_none()
+        // Not `canonical_identity`: its memo would answer for a spelling that
+        // changed since this process first resolved it.
+        self.anchor
+            .canonicalize()
+            .is_ok_and(|identity| identity == self.anchor_identity)
+            && harn_modules::resolve_import_path(&self.anchor, &self.import).is_none()
     }
 }
 
@@ -647,6 +691,7 @@ mod tests {
         write(&entry, "import \"./late\"\n");
         let manifest = ContextManifest {
             unresolved: vec![ManifestUnresolved {
+                anchor_identity: entry.canonicalize().unwrap(),
                 anchor: entry,
                 import: "./late".to_string(),
             }],
@@ -661,6 +706,38 @@ mod tests {
         assert!(
             !revalidates(&manifest),
             "an import that now resolves must invalidate the manifest"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_removed_anchor_spelling_invalidates() {
+        // Captured through a symlink, validated for the canonical entry after
+        // the link is gone: resolving from the dead spelling still finds
+        // nothing, while the real directory has gained the import.
+        let tmp = tempfile::tempdir().unwrap();
+        let real = tmp.path().join("real");
+        write(&real.join("entry.harn"), "import \"./missing\"\n");
+        let alias = tmp.path().join("alias");
+        std::os::unix::fs::symlink(&real, &alias).unwrap();
+        let manifest = ContextManifest {
+            unresolved: vec![ManifestUnresolved {
+                anchor: alias.join("entry.harn"),
+                anchor_identity: real.join("entry.harn").canonicalize().unwrap(),
+                import: "./missing".to_string(),
+            }],
+            ..ContextManifest::begin(anchor())
+        };
+        assert!(revalidates(&manifest));
+
+        std::fs::remove_file(&alias).unwrap();
+        write(
+            &real.join("missing.harn"),
+            "pub fn m() -> int { return 1 }\n",
+        );
+        assert!(
+            !revalidates(&manifest),
+            "a vanished anchor spelling must not vouch for the file it named"
         );
     }
 

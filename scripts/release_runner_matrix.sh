@@ -6,7 +6,6 @@ POLICY="${HARN_RELEASE_RUNNER_POLICY:-${ROOT}/.github/release-runner-policy.json
 MODE=""
 PROFILE="policy"
 TARGETS=""
-ENABLE_BLACKSMITH_MACOS="${HARN_RELEASE_ENABLE_BLACKSMITH_MACOS:-false}"
 
 usage() {
   cat <<'EOF'
@@ -53,14 +52,6 @@ case "$MODE:$PROFILE" in
     ;;
   *)
     printf 'unsupported release runner mode/profile: %s/%s\n' "$MODE" "$PROFILE" >&2
-    exit 2
-    ;;
-esac
-
-case "$ENABLE_BLACKSMITH_MACOS" in
-  true|false) ;;
-  *)
-    echo 'HARN_RELEASE_ENABLE_BLACKSMITH_MACOS must be true or false' >&2
     exit 2
     ;;
 esac
@@ -154,7 +145,6 @@ fi
 
 jq -c \
   --arg runner_key "$RUNNER_KEY" \
-  --argjson enable_blacksmith_macos "$ENABLE_BLACKSMITH_MACOS" \
   --argjson requested "$REQUESTED_JSON" '
     . as $policy |
     def rust_cache_broad_restore_prefix($target):
@@ -178,15 +168,7 @@ jq -c \
       | {
           target,
           glibc_max,
-          runner: (
-            if ($runner_key == "primary" or $runner_key == "recovery" or $runner_key == "candidate")
-              and (.target | endswith("apple-darwin"))
-              and $policy.runner_registry[.runners[$runner_key]].provider == "blacksmith"
-              and ($enable_blacksmith_macos | not)
-            then .runners.standard
-            else .runners[$runner_key]
-            end
-          ),
+          runner: .runners[$runner_key],
           rust_cache_broad_restore_prefix: rust_cache_broad_restore_prefix(.target),
           release_codegen_units,
           use_sccache,

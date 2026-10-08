@@ -42,6 +42,12 @@ fn min_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
             (VmValue::Int(x), VmValue::Float(y)) => Ok(VmValue::Float((*x as f64).min(*y))),
             (VmValue::Float(x), VmValue::Int(y)) => Ok(VmValue::Float(x.min(*y as f64))),
             (VmValue::Decimal(x), VmValue::Decimal(y)) => Ok(VmValue::decimal((**x).min(**y))),
+            (VmValue::Decimal(x), VmValue::Int(y)) => {
+                Ok(VmValue::decimal((**x).min(rust_decimal::Decimal::from(*y))))
+            }
+            (VmValue::Int(x), VmValue::Decimal(y)) => {
+                Ok(VmValue::decimal(rust_decimal::Decimal::from(*x).min(**y)))
+            }
             _ => Ok(VmValue::Nil),
         }
     } else {
@@ -62,6 +68,12 @@ fn max_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
             (VmValue::Int(x), VmValue::Float(y)) => Ok(VmValue::Float((*x as f64).max(*y))),
             (VmValue::Float(x), VmValue::Int(y)) => Ok(VmValue::Float(x.max(*y as f64))),
             (VmValue::Decimal(x), VmValue::Decimal(y)) => Ok(VmValue::decimal((**x).max(**y))),
+            (VmValue::Decimal(x), VmValue::Int(y)) => {
+                Ok(VmValue::decimal((**x).max(rust_decimal::Decimal::from(*y))))
+            }
+            (VmValue::Int(x), VmValue::Decimal(y)) => {
+                Ok(VmValue::decimal(rust_decimal::Decimal::from(*x).max(**y)))
+            }
             _ => Ok(VmValue::Nil),
         }
     } else {
@@ -72,12 +84,13 @@ fn max_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
 #[harn_builtin(
     exposure = "pure",
     effects = [],
-    sig = "floor(value: number) -> int", category = "math"
+    sig = "floor(value: number | decimal) -> int", category = "math"
 )]
 fn floor_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     match args.first().unwrap_or(&VmValue::Nil) {
         VmValue::Float(n) => finite_float_to_i64(n.floor()).map(VmValue::Int),
         VmValue::Int(n) => Ok(VmValue::Int(*n)),
+        VmValue::Decimal(d) => decimal_to_i64(d.floor()).map(VmValue::Int),
         _ => Ok(VmValue::Nil),
     }
 }
@@ -85,12 +98,13 @@ fn floor_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
 #[harn_builtin(
     exposure = "pure",
     effects = [],
-    sig = "ceil(value: number) -> int", category = "math"
+    sig = "ceil(value: number | decimal) -> int", category = "math"
 )]
 fn ceil_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     match args.first().unwrap_or(&VmValue::Nil) {
         VmValue::Float(n) => finite_float_to_i64(n.ceil()).map(VmValue::Int),
         VmValue::Int(n) => Ok(VmValue::Int(*n)),
+        VmValue::Decimal(d) => decimal_to_i64(d.ceil()).map(VmValue::Int),
         _ => Ok(VmValue::Nil),
     }
 }
@@ -656,7 +670,7 @@ fn range_internal_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
 #[harn_builtin(
     exposure = "pure",
     effects = [],
-    sig = "range(...args: any) -> list", category = "math"
+    sig = "range(...args: any) -> range", category = "math"
 )]
 fn range_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let bounds = Args::new("range", args);
@@ -757,6 +771,13 @@ fn unary_float(args: &[VmValue], f: fn(f64) -> f64) -> Result<VmValue, VmError> 
 /// A `decimal` operand was passed to a float-only math builtin (sqrt, pow,
 /// trig, …). These have no exact base-10 result, so we error with guidance
 /// instead of silently returning `nil`.
+fn decimal_to_i64(d: rust_decimal::Decimal) -> Result<i64, VmError> {
+    use rust_decimal::prelude::ToPrimitive;
+    d.to_i64().ok_or_else(|| {
+        VmError::Runtime("decimal is outside the representable int range".to_string())
+    })
+}
+
 fn decimal_not_supported(name: &str) -> VmError {
     VmError::TypeError(format!(
         "{name} is not defined for decimal; convert with to_float(value) first"

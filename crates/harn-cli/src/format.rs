@@ -9,6 +9,10 @@ use std::time::Duration as StdDuration;
 
 use time::OffsetDateTime;
 
+pub(crate) use harn_package::format::{
+    escape_toml_basic_string, looks_like_windows_drive_path, toml_basic_string_literal,
+};
+
 /// Render a UTC instant as RFC3339. Thin alias over the workspace-wide
 /// renderer so the CLI cannot drift from the runtime's timestamp shape.
 pub(crate) fn format_timestamp_rfc3339(value: OffsetDateTime) -> String {
@@ -47,15 +51,6 @@ pub(crate) fn format_duration_coarse(value: StdDuration) -> String {
         return format!("{}w", seconds / (60 * 60 * 24 * 7));
     }
     format!("{}d", seconds / (60 * 60 * 24))
-}
-
-/// Quote a path for inclusion in a copy-pasteable shell command line.
-///
-/// Delegates to `shell_words::quote` so every emitted command line shares one
-/// definition of "safe to leave bare"; non-UTF-8 components are rendered
-/// lossily, matching how the path would be displayed elsewhere.
-pub(crate) fn shell_quote_path(path: &Path) -> String {
-    shell_words::quote(&path.to_string_lossy()).into_owned()
 }
 
 /// Render a millisecond duration with a single decimal point of precision
@@ -97,36 +92,6 @@ pub(crate) fn escape_html(value: &str) -> String {
     out
 }
 
-/// Escape a string for a TOML basic (double-quoted) string: backslash,
-/// double quote, and the control characters TOML forbids raw in basic
-/// strings. `harn rules` and `harn connector` scaffolding had divergent
-/// copies — the connector one skipped control characters, so a value with a
-/// newline produced invalid TOML.
-pub(crate) fn escape_toml_basic_string(value: &str) -> String {
-    let mut out = String::with_capacity(value.len());
-    for ch in value.chars() {
-        match ch {
-            '"' => out.push_str("\\\""),
-            '\\' => out.push_str("\\\\"),
-            '\n' => out.push_str("\\n"),
-            '\t' => out.push_str("\\t"),
-            '\r' => out.push_str("\\r"),
-            // Remaining C0 control chars (and DEL) must be escaped in TOML
-            // basic strings.
-            c if (c as u32) < 0x20 || c == '\u{7f}' => {
-                out.push_str(&format!("\\u{:04X}", c as u32));
-            }
-            _ => out.push(ch),
-        }
-    }
-    out
-}
-
-/// Render a full TOML basic string literal.
-pub(crate) fn toml_basic_string_literal(value: &str) -> String {
-    format!("\"{}\"", escape_toml_basic_string(value))
-}
-
 /// Normalize path separators in machine-readable output. Harn package and
 /// bundle artifacts use slash-separated logical paths even on Windows.
 pub(crate) fn slash_separators(value: &str) -> String {
@@ -136,13 +101,6 @@ pub(crate) fn slash_separators(value: &str) -> String {
 /// Render a path with slash separators for deterministic JSON/report output.
 pub(crate) fn slash_path(path: &Path) -> String {
     slash_separators(&path.to_string_lossy())
-}
-
-/// True when a string starts with Windows drive syntax such as `C:\`, `C:/`,
-/// or drive-relative `C:foo`. URL parsers otherwise treat these as scheme `c`.
-pub(crate) fn looks_like_windows_drive_path(value: &str) -> bool {
-    let bytes = value.as_bytes();
-    bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':'
 }
 
 #[cfg(test)]

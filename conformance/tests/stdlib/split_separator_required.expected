@@ -1,0 +1,2 @@
+warning: Builtin function 'split' expects 2 arguments, got 1
+[harn] split separator required ok

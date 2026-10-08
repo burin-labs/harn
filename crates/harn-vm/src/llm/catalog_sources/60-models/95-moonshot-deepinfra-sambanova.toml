@@ -104,23 +104,11 @@ open_weight = true
 strengths = ["coding", "agentic", "long_context", "tool_use", "reasoning", "vision"]
 complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "qwen", "deepseek"]
 
-[models."deepinfra/Qwen/Qwen3.8-2.4T-A95B"]
-name = "Qwen3.8 2.4T A95B (DeepInfra)"
-provider = "deepinfra"
-wire_model = "Qwen/Qwen3.8-2.4T-A95B"
-logical_model = "qwen3.8-2.4t-a95b"
-equivalence_group = "qwen3.8-2.4t-a95b"
-served_variant = "deepinfra"
-api_dialect = "openai_chat"
-context_window = 262144
-capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
-# DeepInfra's authenticated model inventory and live usage receipts agreed on
-# this rate and context window on 2026-08-26.
-pricing = { input_per_mtok = 2.00, output_per_mtok = 6.00, cache_read_per_mtok = 0.20 }
-tier = "frontier"
-open_weight = true
-strengths = ["coding", "agentic", "long_context", "tool_use", "reasoning"]
-complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "deepseek", "kimi"]
+# Retired the DeepInfra Qwen3.8 route before its 2026-10-12 23:48:18 UTC
+# redirect to zai-org/GLM-5.3. Sunset metadata does not enforce dispatch, and
+# a different model must not inherit Qwen's identity. Together's separate
+# Qwen route remains in 26-together-frontier-agents.toml.
+# https://status.deepinfra.com/models/qwen3-8-2-4t-a95b
 
 [models."deepinfra/deepseek-ai/DeepSeek-V4-Pro"]
 name = "DeepSeek V4 Pro (DeepInfra)"

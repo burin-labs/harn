@@ -117,9 +117,9 @@ command = "npx"
 args = ["-y", "@modelcontextprotocol/server-github"]
 
 [[mcp]]
-name = "notion"
+name = "linear"
 transport = "http"
-url = "https://mcp.notion.com/mcp"
+url = "https://mcp.linear.app/mcp"
 
 ```
 
@@ -190,10 +190,10 @@ Declare a card source in `harn.toml`:
 
 ```toml
 [[mcp]]
-name = "notion"
+name = "docs"
 transport = "http"
-url = "https://mcp.notion.com/mcp"
-card = "https://mcp.notion.com/.well-known/mcp-card"
+url = "https://mcp.example.com/mcp"
+card = "https://mcp.example.com/.well-known/mcp-card"
 
 [[mcp]]
 name = "local-agent"
@@ -206,7 +206,7 @@ Fetch it from a pipeline:
 
 ```harn,ignore
 // Look up by registered server name.
-const card = mcp_server_card("notion")
+const card = mcp_server_card("docs")
 harness.stdio.log(card.description)
 for t in card.tools {
   harness.stdio.log("- ${t.name}")
@@ -286,10 +286,10 @@ normally.
 For HTTP MCP servers, Harn can reuse OAuth tokens stored with the CLI:
 
 ```bash
-harn mcp discover https://www.notion.com --json
+harn mcp discover https://example.com --json
 harn mcp redirect-uri
-harn mcp login notion
-harn mcp status notion
+harn mcp login linear
+harn mcp status linear
 ```
 
 OAuth client authentication uses one `auth` table. With no explicit
@@ -353,8 +353,8 @@ from OAuth discovery: use it to find where to connect, then let normal MCP
 OAuth protected-resource metadata discover where to authorize.
 
 ```bash
-harn mcp discover https://www.notion.com
-harn mcp discover https://www.notion.com --json
+harn mcp discover https://example.com
+harn mcp discover https://example.com --json
 ```
 
 For remote OAuth, Harn owns the whole browser flow, token exchange, token
@@ -932,22 +932,55 @@ stream. Closing a session also cancels subscriptions scoped to that session.
 
 ### Session forking
 
-`session/fork` promotes Harn's runtime transcript branching to a host-visible
-ACP method. The request shape is:
+`session/fork` creates a durable child from an acknowledged canonical history
+boundary. First request `harn.session_history.boundaries` with the parent's
+`sessionId`:
 
 ```json
 {
-  "session_id": "sess_parent",
-  "keep_first": 3,
+  "sessionId": "sess_parent"
+}
+```
+
+The response contains `tip` and `positions`. For an empty parent it is:
+
+```json
+{
+  "tip": {
+    "schema": "harn.canonical_session_boundary.v1",
+    "session_id": "sess_parent",
+    "event_id": null,
+    "record_hash": null
+  },
+  "positions": []
+}
+```
+
+Pass the returned `tip` to copy the complete history. For a historical prefix,
+select a position by its `source_event_id` and pass its `boundary`; use its
+`before_boundary` to fork before that event. Copy the acknowledged object rather
+than constructing an event ID or hash. Using the empty-parent response above,
+the fork request is:
+
+```json
+{
+  "sessionId": "sess_parent",
+  "canonicalBoundary": {
+    "schema": "harn.canonical_session_boundary.v1",
+    "session_id": "sess_parent",
+    "event_id": null,
+    "record_hash": null
+  },
   "id": "sess_branch",
   "branch_name": "left"
 }
 ```
 
-- `session_id` is required and identifies the source session to fork.
-- `keep_first` is optional; when present Harn uses
-  `harness.agent.fork_at(session_id, keep_first, id?)`.
-- Without `keep_first`, Harn uses `harness.agent.fork(session_id, id?)`.
+- `sessionId` is required and identifies the source session to fork.
+- `canonicalBoundary` is the acknowledged parent prefix. Omitting it selects
+  the parent's current complete history.
+- Message counts (`keep_first` or `keepFirst`) are refused. Observability event
+  IDs also do not identify canonical history.
 - `id` is optional; when omitted Harn mints a fresh session id.
 - `branch_name` is optional session metadata that Harn mirrors into the
   forked session's title and `_meta.branch_name`.
@@ -959,7 +992,12 @@ Successful responses return the new branch id plus fork metadata:
   "sessionId": "sess_branch",
   "state": "forked",
   "parent_id": "sess_parent",
-  "branched_at": 3
+  "canonicalBoundary": {
+    "schema": "harn.canonical_session_boundary.v1",
+    "session_id": "sess_parent",
+    "event_id": null,
+    "record_hash": null
+  }
 }
 ```
 
@@ -968,6 +1006,12 @@ When a fork is created, Harn also emits a `session/update` notification with
 hosts can render branch-aware session UIs without scraping text output. The
 forked session gets its own stream; subscriber sinks and in-flight prompt state
 are not copied from the parent.
+
+The child and parent linkage are persisted before success, so the child can be
+loaded after restart or forked again before its first prompt. A stale hash,
+foreign session or foreign boundary schema is refused before creating the child.
+See [Canonical ACP forks](sessions.md#canonical-acp-forks) for the history and
+compaction contract.
 
 ### Session modes
 

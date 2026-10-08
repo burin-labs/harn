@@ -73,8 +73,8 @@ impl AcpServer {
         self.emit_available_commands(&session_id);
     }
 
-    /// Parse and launch the `environmentPolicy` block of a `session/new`
-    /// request. Omission is refused. Env-source grants are snapshotted from
+    /// Parse and launch the `environmentPolicy` block at a runnable session
+    /// admission boundary. Omission is refused. Env-source grants are snapshotted from
     /// the server environment here, at the launch boundary.
     ///
     /// Omission once selected `inherited`, which returns the launcher snapshot
@@ -101,7 +101,7 @@ impl AcpServer {
     /// client says nothing.
     ///
     /// [`ENV_ALLOWLIST`]: harn_vm::security::ENV_ALLOWLIST
-    fn resolve_session_environment(
+    pub(super) fn resolve_session_environment(
         params: &serde_json::Value,
     ) -> Result<harn_vm::security::SessionEnvironment, (String, serde_json::Value)> {
         let Some(raw) = params.get("environmentPolicy") else {
@@ -127,7 +127,7 @@ impl AcpServer {
         Ok(environment)
     }
 
-    /// The refusal for a `session/new` that names no environment policy.
+    /// The refusal for a runnable session admission with no environment policy.
     ///
     /// It names the field and every accepted value, because the client that
     /// hits this is by definition one that never thought about the field, and
@@ -147,7 +147,7 @@ impl AcpServer {
         ];
         let names: Vec<&'static str> = accepted.iter().map(|kind| kind.as_str()).collect();
         let message = format!(
-            "[environment_policy.missing] session/new requires `environmentPolicy`: \
+            "[environment_policy.missing] runnable session admission requires `environmentPolicy`: \
              state `kind` as one of {}. Omission is refused rather than defaulted, \
              so that what a session's children can read never depends on this \
              server's default.",
@@ -481,197 +481,260 @@ impl AcpServer {
         }
     }
 
-    pub(super) fn handle_session_fork(
-        &mut self,
-        id: &serde_json::Value,
-        params: &serde_json::Value,
-    ) {
-        let src_id = session_id_param(params);
-        let Some(src_id) = src_id else {
-            self.send_error(id, -32602, "Missing session_id");
-            return;
-        };
-        if let Err(error) = self.prompt_admission(&src_id) {
-            self.send_error(id, -32602, &error);
-            return;
-        }
-        let Some(src_cwd) = self
-            .sessions
-            .get(&src_id)
-            .map(|session| session.cwd.clone())
-        else {
-            self.send_error(id, -32602, &format!("Unknown session: {src_id}"));
-            return;
-        };
-
-        if !harn_vm::agent_sessions::exists(&src_id) {
-            if let Err(error) = harn_vm::agent_sessions::open_or_create(Some(src_id.clone())) {
-                self.send_session_open_error(id, &error);
+    pub(super) fn handle_canonical_history_boundaries<'a>(
+        &'a self,
+        id: &'a serde_json::Value,
+        params: &'a serde_json::Value,
+    ) -> std::pin::Pin<Box<impl std::future::Future<Output = ()> + 'a>> {
+        // Allocate at the handler boundary: boxing at the dispatch call site
+        // still constructs this store future in the shared router's frame.
+        Box::pin(async move {
+            let Some(session_id) = session_id_param(params) else {
+                self.send_error(id, -32602, "Missing session_id");
                 return;
-            }
-        }
-
-        let keep_first =
-            match nonnegative_usize_param(params, &["keep_first", "keepFirst"], "keep_first") {
-                Ok(value) => value,
-                Err(message) => {
-                    self.send_error(id, -32602, &message);
+            };
+            let Some(session) = self.sessions.get(&session_id) else {
+                self.send_error(id, -32602, &format!("Unknown session: {session_id}"));
+                return;
+            };
+            let root = &session.project_root;
+            let store = match harn_vm::open_canonical_store(root) {
+                Ok(store) => store,
+                Err(error) => {
+                    self.send_error(id, -32000, &error.to_string());
                     return;
                 }
             };
-        let dst_id = params
-            .get("id")
-            .and_then(|value| value.as_str())
-            .map(str::to_string);
-        if let Some(dst_id) = dst_id.as_deref() {
-            if self.sessions.contains_key(dst_id) {
-                self.send_error(id, -32602, &format!("Session already exists: {dst_id}"));
-                return;
+            match harn_vm::agent_sessions::canonical_history_boundaries(&store, root, &session_id)
+                .await
+            {
+                Ok(boundaries) => self.send_response(
+                    id,
+                    serde_json::to_value(boundaries).expect("canonical boundaries serialize"),
+                ),
+                Err(error) => self.send_error(id, -32000, &error.to_string()),
             }
-            if harn_vm::agent_sessions::exists(dst_id) {
-                self.send_error(id, -32602, &format!("Session already exists: {dst_id}"));
-                return;
-            }
-        }
-        let branch_name = params
-            .get("branch_name")
-            .and_then(|value| value.as_str())
-            .map(str::to_string);
+        })
+    }
 
-        let parent_environment = self
-            .sessions
-            .get(&src_id)
-            .map(|session| session.environment_policy.clone())
-            .unwrap_or_else(harn_vm::security::SessionEnvironment::inherited);
-        let child_environment = match params.get("environmentPolicy") {
-            None => parent_environment,
-            Some(raw) => {
-                let config: AcpSessionEnvironmentConfig = match serde_json::from_value(raw.clone())
-                {
-                    Ok(config) => config,
-                    Err(error) => {
-                        let message = format!(
-                            "[environment_policy.invalid] invalid child environment policy: {error}"
-                        );
-                        self.send_error_with_data(
-                            id,
-                            -32602,
-                            &message,
-                            serde_json::json!({
-                                "code": "environment_policy.invalid",
-                                "message": message,
-                            }),
-                        );
-                        return;
-                    }
-                };
-                match parent_environment.narrow(config.kind, config.grants) {
-                    Ok(environment) => environment,
-                    Err(error) => {
-                        self.send_error_with_data(id, -32602, &error.to_string(), error.to_json());
-                        return;
-                    }
+    pub(super) fn handle_session_fork<'a>(
+        &'a mut self,
+        id: &'a serde_json::Value,
+        params: &'a serde_json::Value,
+    ) -> std::pin::Pin<Box<impl std::future::Future<Output = ()> + 'a>> {
+        Box::pin(async move {
+            let src_id = session_id_param(params);
+            let Some(src_id) = src_id else {
+                self.send_error(id, -32602, "Missing session_id");
+                return;
+            };
+            if let Err(error) = self.prompt_admission(&src_id) {
+                self.send_error(id, -32602, &error);
+                return;
+            }
+            let Some(src_cwd) = self
+                .sessions
+                .get(&src_id)
+                .map(|session| session.cwd.clone())
+            else {
+                self.send_error(id, -32602, &format!("Unknown session: {src_id}"));
+                return;
+            };
+
+            if !harn_vm::agent_sessions::exists(&src_id) {
+                if let Err(error) = harn_vm::agent_sessions::open_or_create(Some(src_id.clone())) {
+                    self.send_session_open_error(id, &error);
+                    return;
                 }
             }
-        };
 
-        let new_session_id = match keep_first {
-            Some(keep_first) => harn_vm::agent_sessions::fork_at(&src_id, keep_first, dst_id),
-            None => harn_vm::agent_sessions::fork(&src_id, dst_id),
-        };
-        let new_session_id = match new_session_id {
-            Ok(Some(new_session_id)) => new_session_id,
-            Ok(None) => {
-                self.send_error(id, -32000, &format!("Failed to fork session: {src_id}"));
+            if params.get("keep_first").is_some() || params.get("keepFirst").is_some() {
+                self.send_error(id, -32602, "session/fork requires an acknowledged canonical boundary; message counts are not history positions");
                 return;
             }
-            Err(error) => {
-                self.send_session_open_error(id, &error);
-                return;
+            let boundary = match params.get("canonicalBoundary") {
+                Some(value) => match serde_json::from_value::<
+                    harn_vm::agent_sessions::CanonicalSessionBoundary,
+                >(value.clone())
+                {
+                    Ok(boundary) => Some(boundary),
+                    Err(error) => {
+                        self.send_error(id, -32602, &format!("Invalid canonicalBoundary: {error}"));
+                        return;
+                    }
+                },
+                None => None,
+            };
+            let dst_id = params
+                .get("id")
+                .and_then(|value| value.as_str())
+                .map(str::to_string);
+            if let Some(dst_id) = dst_id.as_deref() {
+                if self.sessions.contains_key(dst_id) {
+                    self.send_error(id, -32602, &format!("Session already exists: {dst_id}"));
+                    return;
+                }
+                if harn_vm::agent_sessions::exists(dst_id) {
+                    self.send_error(id, -32602, &format!("Session already exists: {dst_id}"));
+                    return;
+                }
             }
-        };
+            let branch_name = params
+                .get("branch_name")
+                .and_then(|value| value.as_str())
+                .map(str::to_string);
 
-        let snapshot = harn_vm::agent_sessions::snapshot(&new_session_id)
-            .and_then(|value| serde_json::to_value(harn_vm::llm::vm_value_to_json(&value)).ok())
-            .unwrap_or_else(|| serde_json::json!({}));
-        let branched_at = snapshot
-            .get("branched_at_event_index")
-            .cloned()
-            .unwrap_or(serde_json::Value::Null);
+            let parent_environment = self
+                .sessions
+                .get(&src_id)
+                .map(|session| session.environment_policy.clone())
+                .unwrap_or_else(harn_vm::security::SessionEnvironment::inherited);
+            let child_environment = match params.get("environmentPolicy") {
+                None => parent_environment,
+                Some(raw) => {
+                    let config: AcpSessionEnvironmentConfig =
+                        match serde_json::from_value(raw.clone()) {
+                            Ok(config) => config,
+                            Err(error) => {
+                                let message = format!(
+                            "[environment_policy.invalid] invalid child environment policy: {error}"
+                        );
+                                self.send_error_with_data(
+                                    id,
+                                    -32602,
+                                    &message,
+                                    serde_json::json!({
+                                        "code": "environment_policy.invalid",
+                                        "message": message,
+                                    }),
+                                );
+                                return;
+                            }
+                        };
+                    match parent_environment.narrow(config.kind, config.grants) {
+                        Ok(environment) => environment,
+                        Err(error) => {
+                            self.send_error_with_data(
+                                id,
+                                -32602,
+                                &error.to_string(),
+                                error.to_json(),
+                            );
+                            return;
+                        }
+                    }
+                }
+            };
 
-        let mut meta = serde_json::Map::new();
-        meta.insert("state".to_string(), serde_json::json!("forked"));
-        meta.insert("parent_id".to_string(), serde_json::json!(src_id));
-        meta.insert("branched_at".to_string(), branched_at.clone());
-        if let Some(branch_name) = &branch_name {
-            meta.insert("branch_name".to_string(), serde_json::json!(branch_name));
-        }
-        let info = SessionInfo {
-            title: branch_name,
-            meta,
-        };
+            let root = self
+                .sessions
+                .get(&src_id)
+                .expect("validated source session")
+                .project_root
+                .clone();
+            let store = match harn_vm::open_canonical_store(&root) {
+                Ok(store) => store,
+                Err(error) => {
+                    self.send_error(id, -32000, &error.to_string());
+                    return;
+                }
+            };
+            let new_session_id =
+                harn_vm::agent_sessions::fork_canonical(&store, &root, &src_id, boundary, dst_id)
+                    .await;
+            let (new_session_id, source_boundary) = match new_session_id {
+                Ok(Some(fork)) => (fork.session_id, fork.source_boundary),
+                Ok(None) => {
+                    self.send_error(id, -32000, &format!("Failed to fork session: {src_id}"));
+                    return;
+                }
+                Err(harn_vm::agent_sessions::CanonicalForkError::Admission(error)) => {
+                    self.send_session_open_error(id, &error);
+                    return;
+                }
+                Err(error) => {
+                    self.send_error(id, -32000, &error.to_string());
+                    return;
+                }
+            };
 
-        let parent_mode_id = self
-            .sessions
-            .get(&src_id)
-            .map(|session| session.current_mode_id.clone())
-            .unwrap_or_else(|| modes::DEFAULT_MODE_ID.to_string());
-        let parent_budget = self
-            .sessions
-            .get(&src_id)
-            .map(|session| session.budget.clone())
-            .unwrap_or_default();
-        let parent_admission = self
-            .sessions
-            .get(&src_id)
-            .and_then(|session| session.admission.clone());
-        let admission_unavailable = self
-            .sessions
-            .get(&src_id)
-            .is_none_or(|session| session.admission_unavailable);
-        // A fork is the same session lineage: it inherits the parent's
-        // environment policy (and thus its grants), not a fresh legacy env.
-        let cancellation = self.register_session_cancellation(&new_session_id);
-        let concurrent_control = ConcurrentSessionControl::new();
-        self.concurrent_controls
-            .register(&new_session_id, concurrent_control.clone());
-        let fork_cwd = harn_vm::agent_sessions::workspace_anchor(&new_session_id)
-            .map(|anchor| anchor.primary)
-            .unwrap_or(src_cwd);
-        let project_root = session_project_root_for_cwd(&fork_cwd);
-        self.track_known_session(&new_session_id);
-        self.sessions.insert(
-            new_session_id.clone(),
-            Session {
-                cwd: fork_cwd,
-                project_root,
-                cancellation,
-                host_bridge: None,
-                inject_state: concurrent_control.inject_state.clone(),
-                concurrent_control,
-                info: info.clone(),
-                advertised_commands: Vec::new(),
-                current_mode_id: parent_mode_id.clone(),
-                budget: parent_budget,
-                admission: parent_admission,
-                admission_unavailable,
-                profile_turn: 0,
-                environment_policy: child_environment,
-            },
-        );
-        self.emit_session_info_update(&new_session_id, &info);
-        self.emit_available_commands(&new_session_id);
-        self.send_response(
+            let mut meta = serde_json::Map::new();
+            meta.insert("state".to_string(), serde_json::json!("forked"));
+            meta.insert("parent_id".to_string(), serde_json::json!(src_id));
+            meta.insert(
+                "canonical_boundary".to_string(),
+                serde_json::json!(source_boundary),
+            );
+            if let Some(branch_name) = &branch_name {
+                meta.insert("branch_name".to_string(), serde_json::json!(branch_name));
+            }
+            let info = SessionInfo {
+                title: branch_name,
+                meta,
+            };
+
+            let parent_mode_id = self
+                .sessions
+                .get(&src_id)
+                .map(|session| session.current_mode_id.clone())
+                .unwrap_or_else(|| modes::DEFAULT_MODE_ID.to_string());
+            let parent_budget = self
+                .sessions
+                .get(&src_id)
+                .map(|session| session.budget.clone())
+                .unwrap_or_default();
+            let parent_admission = self
+                .sessions
+                .get(&src_id)
+                .and_then(|session| session.admission.clone());
+            let admission_unavailable = self
+                .sessions
+                .get(&src_id)
+                .is_none_or(|session| session.admission_unavailable);
+            // A fork is the same session lineage: it inherits the parent's
+            // environment policy (and thus its grants), not a fresh legacy env.
+            let cancellation = self.register_session_cancellation(&new_session_id);
+            let concurrent_control = ConcurrentSessionControl::new();
+            self.concurrent_controls
+                .register(&new_session_id, concurrent_control.clone());
+            let fork_cwd = harn_vm::agent_sessions::workspace_anchor(&new_session_id)
+                .map(|anchor| anchor.primary)
+                .unwrap_or(src_cwd);
+            let project_root = session_project_root_for_cwd(&fork_cwd);
+            self.track_known_session(&new_session_id);
+            self.sessions.insert(
+                new_session_id.clone(),
+                Session {
+                    cwd: fork_cwd,
+                    project_root,
+                    cancellation,
+                    host_bridge: None,
+                    inject_state: concurrent_control.inject_state.clone(),
+                    concurrent_control,
+                    info: info.clone(),
+                    advertised_commands: Vec::new(),
+                    current_mode_id: parent_mode_id.clone(),
+                    budget: parent_budget,
+                    admission: parent_admission,
+                    admission_unavailable,
+                    profile_turn: 0,
+                    environment_policy: child_environment,
+                },
+            );
+            self.emit_session_info_update(&new_session_id, &info);
+            self.emit_available_commands(&new_session_id);
+            self.send_response(
             id,
             serde_json::json!({
                 "sessionId": new_session_id,
                 "state": "forked",
                 "parent_id": src_id,
-                "branched_at": branched_at,
+                "canonicalBoundary": source_boundary,
                 "modes": modes::session_mode_state(&parent_mode_id),
                 "configOptions": self.config_options_for_session(&new_session_id, &parent_mode_id),
             }),
         );
+        })
     }
 
     pub(super) fn handle_session_truncate(

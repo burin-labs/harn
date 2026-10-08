@@ -20,6 +20,8 @@ pub enum AuthorityReceiptStage {
     Blocked,
     Ready,
     Terminal,
+    /// An accepted Stop or pivot ended the prepared session.
+    Stopped,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -31,6 +33,7 @@ pub enum AuthorityReceiptStatus {
     Ready,
     Completed,
     Failed,
+    Stopped,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]

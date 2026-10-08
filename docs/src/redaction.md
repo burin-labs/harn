@@ -22,7 +22,7 @@ The default policy redacts:
   `X-CSRF-Token`, `X-XSRF-Token`, plus any header whose name (case-
   insensitively) contains `authorization`, `cookie`, `secret`, `token`,
   or `key`. Common debugging headers (`User-Agent`, `Content-Type`,
-  `X-Request-Id`, GitHub/Slack/Linear/Notion signature headers) are
+  `X-Request-Id`, GitHub/Slack/Linear signature headers) are
   retained on a built-in safe-list.
 - **URLs with credentials in userinfo** — `https://user:pw@host/...`
   loses both `user` and `pw`. The username and password fields are

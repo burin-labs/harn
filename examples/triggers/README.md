@@ -20,8 +20,6 @@ contains `harn.toml`, `lib.harn`, `README.md`, and `SKILL.md` unless noted:
 - `linear-sla-breach/`: scheduled Linear SLA scan
 - `linear-cycle-planning/`: Linear issue webhook planning intake
 - `linear-stuck-issue-bumper/`: scheduled Linear review queue follow-up
-- `notion-content-review-scheduler/`: scheduled Notion content review
-- `notion-database-watcher/`: Notion poll trigger with durable state key
 - `webhook-generic-hmac/`: generic HMAC-verified webhook routing
 
 Validate the full library from the repo root:

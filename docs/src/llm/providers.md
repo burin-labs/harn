@@ -897,7 +897,7 @@ base_url = "https://gateway.example.com/v1"
 chat_endpoint = "/chat/completions"
 auth_style = "bearer"
 auth_env = "PRODUCT_INFERENCE_GRANT"
-managed_supply = { version = 1 }
+managed_supply = { version = 2 }
 ```
 
 Callers still select an ordinary Harn catalog model. Harn uses that model's
@@ -908,11 +908,15 @@ egress Harn adds this versioned request extension:
 ```json
 {
   "harn_managed_supply": {
-    "version": 1,
+    "version": 2,
     "logical_route": {
       "provider": "openai",
       "model": "gpt-5.4-mini",
       "capability_fingerprint": "<64 hex characters>"
+    },
+    "inference_boundary": {
+      "reach": "any_hosted",
+      "allow_training_discounts": false
     }
   }
 }
@@ -924,11 +928,28 @@ pinned to the same Harn release verifies it before selecting a physical route
 with the same fingerprint; this makes Harn's catalog the contract instead of
 requiring products to copy capability tables.
 
+Version 2 requires the caller's resolved inference boundary. Harn captures the
+trusted host ceiling and any tighter call scope once, and retains that same
+request for terminal receipt validation. Missing, malformed, and version 1
+authority are refused; there is no implicit hosted grant. Managed supply uses
+the OpenAI chat-completions transport; ACP, Responses and other wire adapters
+are refused before dispatch. Every declared managed provider enters the same
+request and receipt wrapper. Provider wire overrides cannot replace the
+captured `harn_managed_supply` authority. The managed relay
+must also declare its own researched data policy. A model's physical provider
+policy does not establish how the relay handles prompts.
+
+Before provider egress, `compatible_served_route` checks the physical model
+against that boundary through Harn's shared admission decision. Equal
+capability fingerprints do not establish equal weight class or training policy.
+The hosted wire adapter sends no opt-out controls, so a planned control cannot
+justify admission. A gateway may enforce a stricter no-training floor.
+
 Every successful JSON response, or the terminal SSE frame of a streaming
 response, must contain a `harn_managed_supply` receipt with `version`,
 `request_id`, `served_route`, non-negative `input_tokens` and `output_tokens`,
 decimal-string `cost_usd`, `cost_basis`, `capability_mode`, and typed
-`routing_attempts`. Managed supply v1 requires `capability_mode = "exact"`;
+`routing_attempts`. Managed supply v2 requires `capability_mode = "exact"`;
 each attempt reports only its route, typed outcome, elapsed time, optional HTTP
 status, and a safe gateway detail code. Provider payloads and credential names
 do not cross this audit boundary. The served route carries its own capability
@@ -1313,7 +1334,7 @@ The declarations are projected into the provider catalog, so the accurate table
 comes from the binary rather than from prose that drifts:
 
 ```sh
-harn provider catalog show --json > catalog.json
+harn provider catalog show > catalog.json
 jq -r '.providers[] | select(.data_controls) | [.id, .data_controls.control_scope, .data_controls.retention_default, .data_controls.training_default] | @tsv' catalog.json
 ```
 

@@ -37,6 +37,7 @@ use super::types::{
 };
 use crate::value::{VmError, VmValue};
 
+use crate::orchestration::artifact_files::resolve_manifest_path;
 use ledger::eval_pack_manifest_model;
 pub use ledger::{
     eval_ledger_append_rows_report, eval_ledger_prior_commit_rows_report, eval_ledger_read_report,
@@ -641,17 +642,6 @@ fn load_replay_fixture_from_ref(
         ))
     })?;
     load_replay_fixture(&resolve_manifest_path(base_dir, path))
-}
-
-fn resolve_manifest_path(base_dir: Option<&Path>, path: &str) -> PathBuf {
-    let path_buf = PathBuf::from(path);
-    if path_buf.is_absolute() {
-        path_buf
-    } else if let Some(base_dir) = base_dir {
-        base_dir.join(path_buf)
-    } else {
-        path_buf
-    }
 }
 
 pub fn evaluate_run_suite_manifest(

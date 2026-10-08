@@ -10,7 +10,7 @@
 | `empty` | `.empty` (property) | bool -- true if empty |
 | `contains(sub)` | string | bool |
 | `replace(old, new)` | string, string | string |
-| `split(sep)` | string | list of strings |
+| `split(sep)` | string | list of strings; `sep` is required |
 | `trim()` | (none) | string -- whitespace stripped |
 | `starts_with(prefix)` | string | bool |
 | `ends_with(suffix)` | string | bool |

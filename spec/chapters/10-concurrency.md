@@ -349,7 +349,7 @@ fn main(harness: Harness) {
     "state:customer-42", 250ms,
   )
   const slot = harness.runtime.sync_semaphore_acquire(
-    "connector:notion", 4, 1, 2s,
+    "connector:linear", 4, 1, 2s,
   )
   const gate = harness.runtime.sync_gate_acquire(
     "workflow-runner", 8, 5s,

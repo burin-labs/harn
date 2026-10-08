@@ -206,10 +206,10 @@ pub struct StoredMcpToken {
     #[serde(default)]
     pub scopes: Option<String>,
     /// Non-credential extras the token endpoint returned alongside the tokens
-    /// (everything except `access_token`/`refresh_token`/`expires_in`). Notion,
-    /// for example, returns `workspace_name` + `owner.user` here. Captured so an
-    /// identity probe (harn#3349) can render a "logged in as …" string without a
-    /// follow-up network call. `None` for tokens stored before this existed.
+    /// (everything except `access_token`/`refresh_token`/`expires_in`), such as a
+    /// workspace name or owner record. Captured so an identity probe (harn#3349)
+    /// can render a "logged in as …" string without a follow-up network call.
+    /// `None` for tokens stored before this existed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub token_response_extra: Option<serde_json::Value>,
 }
@@ -1779,19 +1779,15 @@ mod tests {
 
     #[test]
     fn token_store_account_is_stable_and_dimension_sensitive() {
-        let first =
-            token_store_account("https://mcp.notion.com", "https://auth.example", "client-a");
+        let first = token_store_account("https://wiki.example", "https://auth.example", "client-a");
         let second =
-            token_store_account("https://mcp.notion.com", "https://auth.example", "client-a");
-        let other_issuer = token_store_account(
-            "https://mcp.notion.com",
-            "https://other.example",
-            "client-a",
-        );
+            token_store_account("https://wiki.example", "https://auth.example", "client-a");
+        let other_issuer =
+            token_store_account("https://wiki.example", "https://other.example", "client-a");
         let other_resource =
             token_store_account("https://mcp.linear.app", "https://auth.example", "client-a");
         let other_client =
-            token_store_account("https://mcp.notion.com", "https://auth.example", "client-b");
+            token_store_account("https://wiki.example", "https://auth.example", "client-b");
         assert_eq!(first, second);
         assert_ne!(first, other_issuer);
         assert_ne!(first, other_resource);

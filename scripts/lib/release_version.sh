@@ -68,6 +68,27 @@ release_development_target_precedes_stable() {
   [[ "$development" == "${stable}-${HARN_RELEASE_DEVELOPMENT_PRERELEASE}" ]]
 }
 
+# Compare numeric release generations without shell integer overflow. A newer
+# workspace retires an unpublished older source, while a published source is
+# handled before this guard so its remaining distribution steps can finish.
+release_workspace_supersedes_source() {
+  local source="${1:-}" workspace="${2:-}" index left right
+  release_version_is_canonical "$source" || return 2
+  release_version_is_prerelease "$source" && return 2
+  release_version_is_canonical "$workspace" || return 2
+  local source_parts=() workspace_parts=()
+  IFS=. read -r -a source_parts <<< "$source"
+  IFS=. read -r -a workspace_parts <<< "${workspace%%-*}"
+  for index in 0 1 2; do
+    left="${source_parts[$index]}" right="${workspace_parts[$index]}"
+    if [[ ${#right} -gt ${#left} ]]; then return 0; fi
+    if [[ ${#right} -lt ${#left} ]]; then return 1; fi
+    if [[ "$right" > "$left" ]]; then return 0; fi
+    if [[ "$right" < "$left" ]]; then return 1; fi
+  done
+  return 1
+}
+
 release_published_version_for_workspace() {
   local workspace="${1:-}"
   if [[ "$workspace" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
@@ -169,6 +190,151 @@ release_development_bump_plan() {
   RELEASE_DEVELOPMENT_BUMP_REQUIRED=true
   RELEASE_DEVELOPMENT_BUMP_REASON="published_stable_needs_development_identity"
 }
+
+# Explicit repair of a stable identity that never became a release. Historical
+# failure is necessary but insufficient: publication and publishers are read
+# again every time this is called, including immediately before opening a PR.
+release_validate_retirement_request() {
+  local field count=0
+  for field in RETIRE_SOURCE_SHA RETIRE_PRODUCER_RUN RETIRE_PROMOTION_RUN \
+    RETIRE_RESOLVER_JOB RETIRE_CONSUMER_JOB RETIRE_AUTHORIZATION_JOB RETIRE_CONSUMER_RUN RETIRE_FAILED_JOB RETIRE_RELEASE_PR; do
+    [[ -z "${!field:-}" ]] || count=$((count + 1))
+  done
+  if [[ "$count" != 0 && "$count" != 9 ]]; then
+    echo "error: incomplete unpublished retirement request; refusing partial authority" >&2
+    return 1
+  fi
+}
+
+release_require_unpublished_retirement() (
+  set -euo pipefail
+  release_validate_retirement_request
+  local repository="${GITHUB_REPOSITORY:?repository required}"
+  local version="${1:?workspace version required}" published_tag="${2:?published predecessor required}"
+  local source="${RETIRE_SOURCE_SHA:?retired source required}"
+  local GH_TOKEN="${RELEASE_OBSERVATION_TOKEN:-${GH_TOKEN:-}}"
+  export GH_TOKEN
+  local producer="${RETIRE_PRODUCER_RUN:?producer required}"
+  local parent="${RETIRE_PROMOTION_RUN:?failed promotion required}"
+  local release_pr="${RETIRE_RELEASE_PR:?owning release pull request required}"
+  local tags attempts releases runs workflow observation scratch artifacts manifest source_cargo producer_run census status control pull release_head
+  # shellcheck source=scripts/lib/candidate_archive_contract.sh
+  source "$RELEASE_VERSION_LIB_DIR/candidate_archive_contract.sh"
+  release_version_is_canonical "$version"
+  if release_version_is_prerelease "$version"; then return 1; fi
+  release_tag_is_canonical "$published_tag"
+  [[ "$version" != "${published_tag#v}" ]]
+  [[ "$source" =~ ^[0-9a-f]{40}$ && "$producer" =~ ^[1-9][0-9]*$ && "$parent" =~ ^[1-9][0-9]*$ && "$release_pr" =~ ^[1-9][0-9]*$ ]]
+  # The same producer/source validation used by promotion, including main ancestry.
+  scratch="$(mktemp -d)"
+  trap 'rm -rf "$scratch"' EXIT
+  GITHUB_OUTPUT="$scratch/resolved" CANDIDATE_RUN_ID="$producer" EXPECTED_SOURCE_SHA="$source" \
+    bash "$RELEASE_VERSION_LIB_DIR/../resolve-release-promotion-source.sh"
+  producer_run="$(gh api "repos/$repository/actions/runs/$producer")"
+  jq -e '.run_attempt | type == "number" and . > 0 and . == floor' <<< "$producer_run" >/dev/null
+  source_cargo="$(gh api "repos/$repository/contents/Cargo.toml?ref=$source" --jq '.content | @base64d')"
+  [[ "$(release_workspace_version <<< "$source_cargo")" == "$version" ]]
+  pull="$(gh api "repos/$repository/pulls/$release_pr")"
+  release_head="$(jq -er --arg repository "$repository" --arg number "$release_pr" --arg source "$source" '
+    select((.number | tostring) == $number and .state == "closed" and .merged == true and
+      (.merged_at | type == "string" and length > 0) and .merge_commit_sha == $source and
+      .base.ref == "main" and .base.repo.full_name == $repository and .head.repo.full_name == $repository)
+    | .head.sha | select(type == "string" and test("^[0-9a-f]{40}$"))
+  ' <<< "$pull")"
+  # Bind the canonical retained manifest, rather than inferring a candidate
+  # from a green run or from a title. Only this small artifact is downloaded.
+  artifacts="$(gh api "repos/$repository/actions/runs/$producer/artifacts?name=candidate-manifest-$source")"
+  jq -e --arg name "candidate-manifest-$source" --arg source "$source" --arg producer "$producer" '
+    .total_count == 1 and (.artifacts | length) == 1 and
+    .artifacts[0].name == $name and .artifacts[0].expired == false and
+    (.artifacts[0].id | type == "number" and . > 0) and
+    (.artifacts[0].workflow_run.id | tostring) == $producer and
+    .artifacts[0].workflow_run.head_sha == $source
+  ' <<< "$artifacts" >/dev/null
+  gh run download "$producer" --repo "$repository" --name "candidate-manifest-$source" --dir "$scratch/manifest"
+  manifest="$scratch/manifest/candidate-manifest.json"
+  jq -e --arg repository "$repository" --arg source "$source" --arg producer "$producer" \
+    --arg schema "$CANDIDATE_MANIFEST_SCHEMA" --arg predicate "$RELEASE_ARCHIVE_PREDICATE_TYPE" \
+    --argjson targets "$(candidate_archive_expected_targets_json)" --argjson producer_run "$producer_run" '
+    .schemaVersion == $schema and .repository == $repository and
+    .sourceCommit == $source and (.runId | tostring) == $producer and
+    (.runAttempt | tostring) == ($producer_run.run_attempt | tostring) and
+    ([.artifacts[] | select(.kind == "archive")] | length) == 5 and
+    ([.artifacts[] | select(.kind == "archive") | .target] | sort) ==
+      ($targets | sort) and
+    all(.artifacts[] | select(.kind == "archive");
+      (.sha256 | type == "string" and test("^[0-9a-f]{64}$")) and
+      .attestationPredicateType == $predicate)
+  ' "$manifest" >/dev/null
+  observation="$(release_authenticated_failed_rehearsal "$repository" "$parent" "$producer" "$source" \
+    "${RETIRE_RESOLVER_JOB:?resolver job required}" "${RETIRE_CONSUMER_JOB:?consumer job required}" \
+    "${RETIRE_AUTHORIZATION_JOB:?authorization job required}" \
+    "${RETIRE_CONSUMER_REPOSITORY:?consumer repository required}" \
+    "${RETIRE_CONSUMER_RUN:?consumer run required}" "${RETIRE_FAILED_JOB:?failed consumer job required}")"
+  # Force a known positive through both authoritative absence paths. Errors,
+  # empty lists and incomplete pagination are not evidence of nonpublication.
+  tags="$(git ls-remote --tags origin)"
+  awk -v known="refs/tags/$published_tag" -v retired="refs/tags/v$version" '
+    NF != 2 || $1 !~ /^[0-9a-f]+$/ || length($1) != 40 || $2 !~ /^refs\/tags\// {bad=1}
+    $2 == known {seen++}
+    $2 == retired || $2 == retired "^{}" {bad=1}
+    END {exit(bad || seen != 1)}
+  ' <<< "$tags"
+  attempts="$(git ls-remote --refs origin refs/heads/main "refs/heads/release-attempt/v$version/*")"
+  # The immutable attempt records the release PR head. A merge queue gives
+  # the landed, certified source a different SHA; the actual merged PR binds
+  # those identities, never a matching title or a patch-equivalence guess.
+  awk -v prefix="refs/heads/release-attempt/v$version/" -v source="$release_head" '
+    NF != 2 || $1 !~ /^[0-9a-f]+$/ || length($1) != 40 {bad=1}
+    $2 == "refs/heads/main" {seen++; next}
+    $2 != prefix source || $1 != source {bad=1}
+    END {exit(bad || seen != 1)}
+  ' <<< "$attempts"
+  releases="$(gh api --paginate --slurp "repos/$repository/releases?per_page=100")"
+  jq -e --arg known "$published_tag" --arg retired "v$version" '
+    type == "array" and length > 0 and all(.[]; type == "array" and length <= 100) and
+    all(.[:-1][]; length == 100) and
+    ([.[][] | select(.tag_name == $known and .draft == false and .prerelease == false and
+      (.published_at | type == "string" and length > 0))] | length) == 1 and
+    all(.[][]; (.id | type == "number" and . > 0) and
+      (.tag_name | type == "string" and length > 0) and .tag_name != $retired)
+  ' <<< "$releases" >/dev/null
+  # Read the two publication owners. A known nonempty read through the same
+  # workflow-runs endpoint distinguishes measured zero from measuring nothing.
+  # Then paginate each active status completely, without walking terminal
+  # history whose size cannot change whether publication is in flight.
+  for workflow in promote-release.yml publish-release.yml; do
+    control="$(gh api "repos/$repository/actions/workflows/$workflow/runs?per_page=1")"
+    jq -e --arg repository "$repository" --arg path ".github/workflows/$workflow" '
+      (.total_count | type == "number" and . >= 1 and . == floor) and
+      (.workflow_runs | length) == 1 and
+      (.workflow_runs[0].id | type == "number" and . > 0) and
+      .workflow_runs[0].repository.full_name == $repository and .workflow_runs[0].path == $path and
+      (.workflow_runs[0].status as $status |
+        ["completed","queued","requested","waiting","pending","in_progress"] | index($status) != null)
+    ' <<< "$control" >/dev/null
+    for status in queued requested waiting pending in_progress; do
+      runs="$(gh api --paginate --slurp "repos/$repository/actions/workflows/$workflow/runs?status=$status&per_page=100")"
+      census="$(jq -ce --arg repository "$repository" --arg path ".github/workflows/$workflow" --arg status "$status" '
+      if type == "array" and length > 0 and
+      all(.[]; (.workflow_runs | type) == "array" and
+        (.total_count | type == "number" and . >= 0 and . == floor))
+      then . else error("missing publication-owner census") end |
+      [.[].workflow_runs[]] as $runs |
+      if all(.[]; .total_count == ($runs | length)) and
+      ([$runs[].id] | unique | length) == ($runs | length) and
+      all($runs[]; (.id | type == "number" and . > 0) and .repository.full_name == $repository and
+        .path == $path and .status == $status and .conclusion == null)
+      then $runs | {observed:length, pending:length, unfinished:map({id,status,path})}
+      else error("incomplete publication-owner census") end
+      ' <<< "$runs")"
+      echo "Retirement publication census workflow=$workflow status=$status control_observed=1 $census" >&2
+      jq -e '.pending == 0' <<< "$census" >/dev/null
+    done
+  done
+  jq -ce --arg release_pr "$release_pr" --arg attempt_source "$release_head" \
+    '. + {release_pr:$release_pr, attempt_source:$attempt_source}' <<< "$observation"
+)
 
 # Print the root workspace version from a Cargo.toml read on stdin: the first
 # top-level `version = "..."` line, which is `[workspace.package]` in this

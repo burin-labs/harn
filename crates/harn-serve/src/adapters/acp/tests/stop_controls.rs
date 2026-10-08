@@ -584,6 +584,7 @@ fn accepted_cancel_kills_only_the_cancelled_sessions_background_children() {
     // The notification form, exactly as a host sends it.
     let consumed = preempt_session_interruption(
         &cancellations,
+        &ConcurrentSessionControls::new(true, serde_json::json!({})),
         &serde_json::json!({
             "jsonrpc": "2.0",
             "method": "session/cancel",
