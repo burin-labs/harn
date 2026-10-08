@@ -832,7 +832,11 @@ fn inject_identified_user_message_emits_replayable_user_event() {
             session_id,
             message_id,
             content,
+            history_source_event_id,
         } => {
+            assert!(history_source_event_id
+                .as_ref()
+                .is_some_and(|id| !id.is_empty()));
             assert_eq!(session_id, &id);
             assert_eq!(message_id, "msg_inj_test");
             assert_eq!(

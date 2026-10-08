@@ -42,6 +42,7 @@ fn source_hash(message: &serde_json::Value) -> String {
 pub(crate) struct PublishedMessage {
     source_hash: String,
     text: String,
+    pub history_source_event_id: Option<String>,
 }
 
 impl PublishedMessage {
@@ -55,6 +56,7 @@ impl PublishedMessage {
 pub(crate) fn replay(
     messages: &mut [(Option<String>, serde_json::Value)],
     metadata: &serde_json::Value,
+    history_source_event_id: Option<&str>,
 ) -> Vec<(String, PublishedMessage)> {
     let mut published = Vec::new();
     if metadata.get("schema").and_then(serde_json::Value::as_str) != Some(SCHEMA) {
@@ -82,6 +84,8 @@ pub(crate) fn replay(
                             PublishedMessage {
                                 source_hash: change.source_hash,
                                 text,
+                                history_source_event_id: history_source_event_id
+                                    .map(str::to_string),
                             },
                         ));
                     }
@@ -214,23 +218,24 @@ mod tests {
             message_index:0, source_hash:source_hash(&draft), disposition:Publication::Published,
         }]});
         let mut messages = vec![(None, draft.clone())];
-        replay(&mut messages, &receipt);
+        replay(&mut messages, &receipt, None);
         assert_eq!(messages[0].1[KEY], "published");
         let once = messages.clone();
-        replay(&mut messages, &receipt);
+        replay(&mut messages, &receipt, None);
         assert_eq!(messages, once);
 
         let mut wrong_source = vec![(
             None,
             serde_json::json!({"role":"assistant","content":"Different draft",KEY:"pending"}),
         )];
-        replay(&mut wrong_source, &receipt);
+        replay(&mut wrong_source, &receipt, None);
         assert_eq!(wrong_source[0].1[KEY], "pending");
         assert!(!is_visible(&json_to_vm(&wrong_source[0].1)));
         let mut malformed = vec![(None, draft)];
         replay(
             &mut malformed,
             &serde_json::json!({"schema":SCHEMA,"changes":"broken"}),
+            None,
         );
         assert_eq!(malformed[0].1[KEY], "pending");
     }

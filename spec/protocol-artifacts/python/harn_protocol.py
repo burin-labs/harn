@@ -1251,6 +1251,7 @@ class ACPSessionUpdateEnvelope(_HarnDataclass):
     sessionUpdate: str
     content: Optional[JsonValue] = None
     messageId: Optional[str] = None
+    historySourceEventId: Optional[str] = None
     entries: Optional[List[JsonValue]] = None
     keptTurnCount: Optional[int] = None
     removedTurnCount: Optional[int] = None

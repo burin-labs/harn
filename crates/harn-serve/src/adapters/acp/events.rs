@@ -211,6 +211,7 @@ impl AgentEventSink for AcpAgentEventSink {
             AgentEvent::AgentMessageChunk {
                 session_id,
                 content,
+                history_source_event_id,
             } => {
                 let visible = sanitize_visible_assistant_text(content, true);
                 let mut content_block = serde_json::json!({
@@ -231,6 +232,7 @@ impl AgentEventSink for AcpAgentEventSink {
                     "sessionId": session_id,
                     "update": {
                         "sessionUpdate": "agent_message_chunk",
+                        "historySourceEventId": history_source_event_id,
                         "content": content_block,
                     },
                 }));
@@ -254,12 +256,14 @@ impl AgentEventSink for AcpAgentEventSink {
                 session_id,
                 message_id,
                 content,
+                history_source_event_id,
             } => {
                 self.write_notification(serde_json::json!({
                     "sessionId": session_id,
                     "update": {
                         "sessionUpdate": "user_message",
                         "messageId": message_id,
+                        "historySourceEventId": history_source_event_id,
                         "content": content,
                     },
                 }));

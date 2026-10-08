@@ -866,6 +866,7 @@ public struct HarnACPSessionUpdateEnvelope: Codable, Sendable, Equatable {
     public var sessionUpdate: HarnACPSessionUpdate
     public var content: HarnACPValue?
     public var messageId: String?
+    public var historySourceEventId: String?
     public var entries: [HarnACPValue]?
     public var harnPlanDocument: HarnPlanDocument?
     public var keptTurnCount: Int?
@@ -884,6 +885,7 @@ public struct HarnACPSessionUpdateEnvelope: Codable, Sendable, Equatable {
         case sessionUpdate
         case content
         case messageId
+        case historySourceEventId
         case entries
         case harnPlanDocument
         case keptTurnCount

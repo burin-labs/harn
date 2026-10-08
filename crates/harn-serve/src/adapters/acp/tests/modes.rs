@@ -403,8 +403,8 @@ async fn acp_session_resume_includes_current_mode_state_without_replay() {
     harn_vm::agent_events::emit_event(&harn_vm::agent_events::AgentEvent::AgentMessageChunk {
         session_id: session_id.clone(),
         content: "do not replay me".to_string(),
+        history_source_event_id: None,
     });
-
     server
         .handle_incoming_message(serde_json::json!({
             "jsonrpc": "2.0",
@@ -477,8 +477,8 @@ async fn acp_session_load_restores_persisted_session_unknown_to_server() {
     harn_vm::agent_events::emit_event(&harn_vm::agent_events::AgentEvent::AgentMessageChunk {
         session_id: session_id.clone(),
         content: "restored history".to_string(),
+        history_source_event_id: None,
     });
-
     let (tx, mut rx) = mpsc::unbounded_channel();
     let mut server = AcpServer::new_with_output(AcpServerConfig::new(None), AcpOutput::Channel(tx));
 

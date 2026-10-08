@@ -28,6 +28,7 @@ impl RestoreProjection {
                             event: AgentEvent::AgentMessageChunk {
                                 session_id: session_id.to_string(),
                                 content: String::new(),
+                                history_source_event_id: None,
                             },
                         },
                         admission: Some((
@@ -49,11 +50,18 @@ impl RestoreProjection {
         publications: &BTreeMap<String, PublishedMessage>,
     ) -> Option<AgentSessionReplayEvent> {
         if let Some((source_id, original)) = self.admission {
-            let text = publications.get(&source_id)?.text_for(&original)?;
-            let AgentEvent::AgentMessageChunk { content, .. } = &mut self.event.event else {
+            let publication = publications.get(&source_id)?;
+            let text = publication.text_for(&original)?;
+            let AgentEvent::AgentMessageChunk {
+                content,
+                history_source_event_id,
+                ..
+            } = &mut self.event.event
+            else {
                 unreachable!("only deferred assistant text awaits admission");
             };
             *content = text.to_string();
+            *history_source_event_id = publication.history_source_event_id.clone();
         }
         Some(self.event)
     }

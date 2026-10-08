@@ -342,10 +342,12 @@ fn replay_event_from_stored(
                 .unwrap_or(&stored.record_hash)
                 .to_string(),
             content: user_content_blocks(transcript, text),
+            history_source_event_id: stored.headers.get("source_event_id").cloned(),
         },
         (SessionEventKind::Message, _) if !text.is_empty() => AgentEvent::AgentMessageChunk {
             session_id: session_id.to_string(),
             content: text.to_string(),
+            history_source_event_id: stored.headers.get("source_event_id").cloned(),
         },
         (SessionEventKind::ToolCall, _) => {
             let tool_call_id = tool_call_id(stored, transcript)?;

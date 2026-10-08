@@ -50,7 +50,11 @@ fn recording_assistant_text_emits_the_live_message_projection() {
         AgentEvent::AgentMessageChunk {
             session_id: event_session_id,
             content,
+            history_source_event_id,
         } => {
+            assert!(history_source_event_id
+                .as_ref()
+                .is_some_and(|id| !id.is_empty()));
             assert_eq!(event_session_id, &session_id);
             assert_eq!(content, "ready");
         }

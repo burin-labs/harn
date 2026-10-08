@@ -942,7 +942,16 @@ boundary. First request `harn.session_history.boundaries` with the parent's
 }
 ```
 
-The response contains `tip` and `positions`. For an empty parent it is:
+The response contains `tip` and `positions`. User and assistant message updates
+carry `historySourceEventId` when backed by canonical history. Match that value
+to a position's `source_event_id` and pass its `boundary` to branch after the
+message, or `before_boundary` to branch before it. For an admitted assistant
+answer the identity names its publication receipt, so the child retains the
+decision that made the answer visible. Replay preserves the same identity.
+Messages without this field do not acknowledge a branch point; do not substitute
+displayed row counts, text matching, or observability event IDs.
+
+For an empty parent the response is:
 
 ```json
 {

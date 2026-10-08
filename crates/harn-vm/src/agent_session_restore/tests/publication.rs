@@ -27,12 +27,94 @@ fn settlement(messages: &[Value], admitted: bool) -> AppendEvent {
         admitted,
     );
     let (_, event) = settled.mutation.expect("pending fixture settled");
-    AppendEvent::new(
+    let source_event_id = event.as_dict().unwrap().get("id").unwrap().display();
+    let mut receipt = AppendEvent::new(
         SessionEventKind::Custom {
             custom_type: "assistant_publication".into(),
         },
         json!({"transcript_event":crate::llm::vm_value_to_json(&event)}),
-    )
+    );
+    receipt
+        .headers
+        .insert("source_event_id".into(), source_event_id);
+    receipt
+}
+
+#[tokio::test]
+async fn displayed_answer_identity_forks_through_admission_and_excludes_later_messages() {
+    let id = "branch-published-answer";
+    let store = store_with_session(id).await;
+    let raw = draft("Accepted answer");
+    store
+        .append(id, message("private-draft", &raw))
+        .await
+        .unwrap();
+    let receipt = settlement(std::slice::from_ref(&raw), true);
+    let receipt_id = receipt.headers["source_event_id"].clone();
+    store.append(id, receipt).await.unwrap();
+    store
+        .append(
+            id,
+            message(
+                "later-user",
+                &json!({"role":"user","content":"Later request"}),
+            ),
+        )
+        .await
+        .unwrap();
+    let replay = load_canonical_session_replay_from_store(&store, id)
+        .await
+        .unwrap()
+        .unwrap();
+    let answer_id = replay
+        .events
+        .iter()
+        .find_map(|event| match &event.event {
+            AgentEvent::AgentMessageChunk {
+                content,
+                history_source_event_id,
+                ..
+            } if content == "Accepted answer" => history_source_event_id.clone(),
+            _ => None,
+        })
+        .expect("restored visible answer has a canonical source identity");
+    assert_eq!(answer_id, receipt_id);
+    let boundaries = store.history_boundaries(id).await.unwrap();
+    let answer = boundaries
+        .positions
+        .iter()
+        .find(|position| position.source_event_id == answer_id)
+        .expect("published answer is acknowledged");
+    store
+        .fork(id, answer.boundary.clone(), Some("answer-child".into()))
+        .await
+        .unwrap();
+    let child = load_canonical_session_replay_from_store(&store, "answer-child")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(child.events.len(), 1, "later request is excluded");
+    assert!(
+        matches!(&child.events[0].event, AgentEvent::AgentMessageChunk {content, ..} if content == "Accepted answer")
+    );
+
+    let private = boundaries
+        .positions
+        .iter()
+        .find(|position| position.source_event_id == "private-draft")
+        .unwrap();
+    store
+        .fork(id, private.boundary.clone(), Some("private-child".into()))
+        .await
+        .unwrap();
+    let private_child = load_canonical_session_replay_from_store(&store, "private-child")
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        private_child.events.is_empty(),
+        "draft identity is not a valid substitute for the visible answer"
+    );
 }
 
 #[tokio::test]
