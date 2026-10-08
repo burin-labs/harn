@@ -572,6 +572,7 @@ pub fn merge_baseline(request: MergeBaselineRequest) {
   return payload
     + {
       [sha]: {
+        ...existing_entry,
         host: existing_entry?.host ?? host,
         timer: request.timer,
         harn_version: existing_entry?.harn_version ?? version,

@@ -136,6 +136,7 @@ pipeline test_merge_baseline_append_only_without_update(harness: Harness, task: 
         sha: {
           host: "old-host",
           timer: "monotonic fallback",
+          source_run: "recorded-run",
           harn_version: "old-version",
           captured_at: "old",
           commands: {version: {cold_ms: 10.0}},
@@ -151,6 +152,7 @@ pipeline test_merge_baseline_append_only_without_update(harness: Harness, task: 
     },
   )
   assert_eq(merged.sha.host, "old-host")
+  assert_eq(merged.sha.source_run, "recorded-run")
   assert_eq(merged.sha.harn_version, "old-version")
   assert_eq(merged.sha.captured_at, "now")
   assert_eq(merged.sha.commands.version.cold_ms, 10.0)
