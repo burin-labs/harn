@@ -141,23 +141,53 @@ fn trusted_git_executable(workspaces: &[PathBuf]) -> Option<PathBuf> {
     // the process current directory or a PATH entry inside the workspace.
     // Apple's /usr/bin/git is an xcrun shim. Use an installed system-owned
     // binary directly so host discovery doesn't warm the workspace cache.
-    #[cfg(target_os = "macos")]
-    for path in [
-        "/var/db/xcode_select_link/usr/bin/git",
-        "/Library/Developer/CommandLineTools/usr/bin/git",
-        "/Applications/Xcode.app/Contents/Developer/usr/bin/git",
-    ] {
+    let installed = if cfg!(target_os = "macos") {
+        &[
+            "/var/db/xcode_select_link/usr/bin/git",
+            "/Library/Developer/CommandLineTools/usr/bin/git",
+            "/Applications/Xcode.app/Contents/Developer/usr/bin/git",
+        ][..]
+    } else {
+        &[]
+    };
+    select_trusted_git(
+        workspaces,
+        installed,
+        std::env::var_os("PATH").as_deref(),
+        cfg!(target_os = "macos"),
+    )
+}
+
+fn select_trusted_git(
+    workspaces: &[PathBuf],
+    installed: &[&str],
+    path: Option<&std::ffi::OsStr>,
+    macos: bool,
+) -> Option<PathBuf> {
+    for path in installed {
         if Path::new(path).is_file() {
-            return Some(PathBuf::from(path));
+            return Some(PathBuf::from(*path));
+        }
+    }
+    if macos {
+        if let Some(git) = path.and_then(|path| trusted_git_from_path(workspaces, path, true)) {
+            return Some(git);
         }
     }
     #[cfg(unix)]
     if Path::new("/usr/bin/git").is_file() {
         return Some(PathBuf::from("/usr/bin/git"));
     }
+    path.and_then(|path| trusted_git_from_path(workspaces, path, false))
+}
+
+fn trusted_git_from_path(
+    workspaces: &[PathBuf],
+    path: &std::ffi::OsStr,
+    skip_shim: bool,
+) -> Option<PathBuf> {
     let filename = if cfg!(windows) { "git.exe" } else { "git" };
-    let path = std::env::var_os("PATH")?;
-    std::env::split_paths(&path)
+    std::env::split_paths(path)
         .filter(|directory| directory.is_absolute())
         .find_map(|directory| {
             let candidate = directory.join(filename);
@@ -165,6 +195,9 @@ fn trusted_git_executable(workspaces: &[PathBuf]) -> Option<PathBuf> {
                 return None;
             }
             let resolved = normalize_for_policy(&candidate);
+            if skip_shim && resolved == Path::new("/usr/bin/git") {
+                return None;
+            }
             (!workspaces
                 .iter()
                 .any(|workspace| resolved.starts_with(workspace)))
@@ -240,6 +273,32 @@ fn named_root(value: &str, workspace: &Path, home: Option<&Path>) -> Option<Path
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
+
+    #[test]
+    fn macos_git_selection_prefers_installed_path_git_over_the_shim() {
+        let temp = tempfile::tempdir().unwrap();
+        let workspace = temp.path().join("workspace");
+        let installed = temp.path().join("installed");
+        std::fs::create_dir_all(&workspace).unwrap();
+        std::fs::create_dir_all(&installed).unwrap();
+        std::fs::write(workspace.join("git"), "workspace executable").unwrap();
+        std::fs::write(installed.join("git"), "installed executable").unwrap();
+        let path = std::env::join_paths([Path::new("/usr/bin"), &workspace, &installed]).unwrap();
+        assert_eq!(
+            select_trusted_git(&[normalize_for_policy(&workspace)], &[], Some(&path), true),
+            Some(normalize_for_policy(&installed.join("git")))
+        );
+        let only_workspace = std::env::join_paths([Path::new("/usr/bin"), &workspace]).unwrap();
+        assert_eq!(
+            select_trusted_git(
+                &[normalize_for_policy(&workspace)],
+                &[],
+                Some(&only_workspace),
+                true
+            ),
+            Some(PathBuf::from("/usr/bin/git"))
+        );
+    }
 
     #[test]
     fn config_listing_grants_included_files_and_named_paths_only() {

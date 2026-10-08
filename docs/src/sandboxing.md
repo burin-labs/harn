@@ -201,7 +201,10 @@ its wrapper. The nested process remains subject to the OS sandbox.
 
 Wrapper decisions are reused within the process for the same working directory,
 child environment, and OS confinement. Changing an agent's tool list or
-recursion budget doesn't repeat the probe. Changing process permissions does.
+recursion budget doesn't repeat the probe. Changes to process permissions,
+Cargo configuration, or wrapper executable files repeat it. Configurations with
+includes are measured on every compiling launch because Harn cannot verify
+their full file dependencies.
 Decisions aren't persisted across processes: compiler-cache servers can stop
 between launches, changing whether a wrapper would start a confined daemon.
 

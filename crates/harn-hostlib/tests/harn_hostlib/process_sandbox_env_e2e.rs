@@ -201,6 +201,47 @@ fn real_run_command_neutralizes_rustc_wrappers_inside_sandbox() {
     )
     .unwrap();
     std::fs::set_permissions(&wrapper, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let cargo_config = workspace.path().join(".cargo/config.toml");
+    std::fs::create_dir(cargo_config.parent().unwrap()).unwrap();
+    std::fs::write(
+        &cargo_config,
+        format!("[build]\nrustc-wrapper = \"{}\"\n", wrapper.display()),
+    )
+    .unwrap();
+    let VmValue::Dict(response) = call(replacement.clone()).unwrap() else {
+        panic!("expected configured-wrapper build result");
+    };
+    assert!(
+        matches!(response.get("exit_code"), Some(VmValue::Int(0))),
+        "{response:?}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&count).unwrap_or_default(),
+        "x",
+        "a new Cargo config must invalidate NotConfigured"
+    );
+    std::fs::write(
+        &wrapper,
+        format!(
+            "#!/bin/sh\n# replacement executable\nprintf x >> '{}'\nexit 1\n",
+            count.display()
+        ),
+    )
+    .unwrap();
+    let VmValue::Dict(response) = call(replacement.clone()).unwrap() else {
+        panic!("expected replacement-wrapper build result");
+    };
+    assert!(
+        matches!(response.get("exit_code"), Some(VmValue::Int(0))),
+        "{response:?}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&count).unwrap(),
+        "xx",
+        "a replaced wrapper must be measured again"
+    );
+    std::fs::remove_file(&cargo_config).unwrap();
+    std::fs::write(&count, "").unwrap();
     replacement_env.insert("RUSTC_WRAPPER".into(), value(&wrapper.to_string_lossy()));
     replacement.insert("env".into(), VmValue::dict(replacement_env));
     let mut indirect = replacement.clone();

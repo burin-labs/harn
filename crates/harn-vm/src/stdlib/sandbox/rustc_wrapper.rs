@@ -10,7 +10,7 @@
 //! # How the decision is measured
 //!
 //! Cargo's resolution rules are Cargo's to change, so this module does not
-//! read Cargo configuration. It asks Cargo: a throwaway crate is built with
+//! reproduce Cargo's resolution. It asks Cargo: a throwaway crate is built with
 //! `cargo build -v --offline` from the command's working directory, confined
 //! under the command's own policy and environment, so a wrapper resolves and
 //! runs exactly as it would for the command.
@@ -111,6 +111,14 @@ impl RustcWrapperDecision {
 
 type DecisionKey = (String, String, [u8; 32]);
 
+#[path = "rustc_wrapper_cache.rs"]
+mod cache_inputs;
+
+struct Entry {
+    decision: RustcWrapperDecision,
+    inputs: Option<cache_inputs::Inputs>,
+}
+
 /// Only the policy axes consumed by the OS sandbox belong in the probe key.
 /// Tool names, argument constraints, annotations, and recursion budgets do not
 /// change what a compiler or its wrapper can access.
@@ -129,9 +137,8 @@ fn confinement_key(policy: &CapabilityPolicy) -> String {
     .expect("confinement policy is serializable")
 }
 
-fn decisions() -> &'static Mutex<BTreeMap<DecisionKey, RustcWrapperDecision>> {
-    static DECISIONS: OnceLock<Mutex<BTreeMap<DecisionKey, RustcWrapperDecision>>> =
-        OnceLock::new();
+fn decisions() -> &'static Mutex<BTreeMap<DecisionKey, Entry>> {
+    static DECISIONS: OnceLock<Mutex<BTreeMap<DecisionKey, Entry>>> = OnceLock::new();
     DECISIONS.get_or_init(|| Mutex::new(BTreeMap::new()))
 }
 
@@ -190,8 +197,11 @@ pub(super) fn rustc_wrapper_decision_for_environment(
     let mut cache = decisions()
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
-    if let Some(decision) = cache.get(&key) {
-        return decision.clone();
+    let inputs = cache_inputs::capture(cwd, env);
+    if let Some(entry) = cache.get(&key) {
+        if inputs.is_some() && entry.inputs == inputs {
+            return entry.decision.clone();
+        }
     }
     let child_env: Vec<_> = env
         .iter()
@@ -199,7 +209,14 @@ pub(super) fn rustc_wrapper_decision_for_environment(
         .collect();
     let decision = measure(policy, cwd, &child_env);
     record(&decision);
-    cache.entry(key).or_insert(decision).clone()
+    cache.insert(
+        key,
+        Entry {
+            decision: decision.clone(),
+            inputs,
+        },
+    );
+    decision
 }
 
 /// Every decision made in this process, for a receipt.
@@ -208,7 +225,7 @@ pub fn rustc_wrapper_decisions() -> Vec<RustcWrapperDecision> {
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
         .values()
-        .cloned()
+        .map(|entry| entry.decision.clone())
         .collect()
 }
 
@@ -470,7 +487,13 @@ fn configured_wrapper_for_platform(
         .map(PathBuf::from)
         .or_else(|| value("HOME").map(|home| Path::new(home).join(".cargo")));
     let mut dirs: Vec<PathBuf> = cwd.ancestors().map(|dir| dir.join(".cargo")).collect();
-    dirs.extend(cargo_home);
+    dirs.extend(cargo_home.map(|directory| {
+        if directory.is_absolute() {
+            directory
+        } else {
+            cwd.join(directory)
+        }
+    }));
     dirs.iter()
         .flat_map(|dir| [dir.join("config"), dir.join("config.toml")])
         .filter_map(|file| std::fs::read_to_string(file).ok())
