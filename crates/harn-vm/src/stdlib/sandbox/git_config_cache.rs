@@ -130,16 +130,27 @@ fn config_inputs(
     }
     // Conditional includes can depend on the repository's branch or remotes.
     // Track worktree indirection and common config as well as ordinary .git.
-    let dotgit = workspace.join(".git");
-    paths.push(dotgit.clone());
+    // Git discovers repositories above a workspace opened at a subdirectory.
+    // Missing nearer entries matter too: creating one changes that discovery.
+    let candidates: Vec<_> = workspace.ancestors().map(|dir| dir.join(".git")).collect();
+    let dotgit = candidates
+        .iter()
+        .find(|path| path.exists())
+        .cloned()
+        .unwrap_or_else(|| workspace.join(".git"));
+    paths.extend(candidates);
     let gitdir = var("GIT_DIR")
         .map(|path| workspace.join(path))
         .unwrap_or_else(|| {
             std::fs::read_to_string(&dotgit)
                 .ok()
                 .and_then(|text| {
-                    text.strip_prefix("gitdir: ")
-                        .map(|path| workspace.join(path.trim()))
+                    text.strip_prefix("gitdir: ").map(|path| {
+                        dotgit
+                            .parent()
+                            .expect(".git has a parent")
+                            .join(path.trim())
+                    })
                 })
                 .unwrap_or(dotgit)
         });
@@ -151,6 +162,7 @@ fn config_inputs(
     if let Ok(common) = std::fs::read_to_string(gitdir.join("commondir")) {
         paths.push(gitdir.join(common.trim()).join("config"));
     }
+    paths.extend(var("GIT_COMMON_DIR").map(|path| workspace.join(path).join("config")));
     paths
 }
 
@@ -211,7 +223,8 @@ mod tests {
     #[test]
     fn git_queries_are_reused_and_includes_environment_and_branch_invalidate() {
         let temp = tempfile::tempdir().unwrap();
-        let workspace = temp.path().join("workspace");
+        let repository = temp.path().join("workspace");
+        let workspace = repository.join("subdirectory");
         let home = temp.path().join("home");
         std::fs::create_dir_all(&workspace).unwrap();
         std::fs::create_dir_all(&home).unwrap();
@@ -231,7 +244,7 @@ mod tests {
             .env_clear()
             .envs(&env)
             .args(["init", "-q"])
-            .arg(&workspace)
+            .arg(&repository)
             .status()
             .unwrap()
             .success());
@@ -308,7 +321,7 @@ mod tests {
         assert!(!updated.contains(&super::super::normalize_for_policy(&home.join("ignore"))));
         assert_eq!(calls.get(), 6);
 
-        std::fs::write(workspace.join(".git/HEAD"), "ref: refs/heads/topic\n").unwrap();
+        std::fs::write(repository.join(".git/HEAD"), "ref: refs/heads/topic\n").unwrap();
         assert!(
             query(&mut cache, &env).contains(&super::super::normalize_for_policy(
                 &home.join("topic-ignore")
