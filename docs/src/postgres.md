@@ -285,10 +285,18 @@ transaction handle is only valid inside the callback.
 
 The first caller statement in a transaction can reuse its pool's cached
 parameter types for `nil` values, skipping the describe probe and its internal
-savepoint. Later statements use a transaction-local cache because earlier SQL
-may have changed name resolution, such as with `SET LOCAL search_path`.
-New statements still probe; separate pools keep separate caches. `pg_migrate`
-clears the pool's cached types after schema changes.
+savepoint. Pool metadata assumes a stable schema and name-resolution context;
+use transaction-local settings for temporary changes. Every executed caller
+statement consumes the transaction's known initial context, even identical SQL:
+a called function can change `search_path` during execution. Each later
+statement containing `nil` therefore performs a fresh describe protected by an
+internal savepoint. Successful inference adds a describe, savepoint, release,
+and driver statement-cache clear;
+ambiguous inference also rolls back the probe before retaining the existing text
+NULL fallback. This costs more than reusing potentially stale types, without
+adding a context-read query. Statements without `nil` retain their ordinary bind
+path. Separate pools keep separate caches. `pg_migrate` clears the pool's cached
+types after schema changes.
 
 ```harn
 pg_transaction(

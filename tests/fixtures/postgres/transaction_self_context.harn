@@ -1,0 +1,37 @@
+import "std/postgres"
+
+fn main(harness: Harness) {
+  const db = harness.postgres.pool("env:HARN_TEST_POSTGRES_URL", {max_connections: 1})
+  pg_execute(db, "DROP SCHEMA IF EXISTS harn_9520_self_a CASCADE", [])
+  pg_execute(db, "DROP SCHEMA IF EXISTS harn_9520_self_b CASCADE", [])
+  pg_execute(db, "CREATE SCHEMA harn_9520_self_a", [])
+  pg_execute(db, "CREATE SCHEMA harn_9520_self_b", [])
+  pg_execute(db, "CREATE TABLE harn_9520_self_a.t(v integer)", [])
+  pg_execute(db, "CREATE TABLE harn_9520_self_b.t(v uuid)", [])
+  pg_execute(
+    db,
+    "CREATE FUNCTION harn_9520_self_a.shift(input_v integer) RETURNS integer LANGUAGE plpgsql AS $$ BEGIN PERFORM pg_catalog.set_config('search_path', 'harn_9520_self_b', true); RETURN input_v; END $$",
+    [],
+  )
+  pg_execute(
+    db,
+    "CREATE FUNCTION harn_9520_self_b.shift(input_v uuid) RETURNS uuid LANGUAGE plpgsql AS $$ BEGIN PERFORM pg_catalog.set_config('search_path', 'harn_9520_self_a', true); RETURN input_v; END $$",
+    [],
+  )
+  pg_execute(db, "SET search_path = harn_9520_self_a", [])
+  const sql = "INSERT INTO t(v) VALUES ($1) RETURNING shift(v) AS v"
+  pg_transaction(
+    db,
+    { tx ->
+      for i in 0 to 3 exclusive {
+        assert(pg_query_one(tx, sql, [nil]).v == nil)
+      }
+    },
+  )
+  assert(pg_query_one(db, "SELECT count(*) AS n FROM harn_9520_self_a.t", []).n == 2)
+  assert(pg_query_one(db, "SELECT count(*) AS n FROM harn_9520_self_b.t", []).n == 1)
+  pg_execute(db, "DROP SCHEMA harn_9520_self_a CASCADE", [])
+  pg_execute(db, "DROP SCHEMA harn_9520_self_b CASCADE", [])
+  pg_close(db)
+  harness.stdio.println("same SQL changed its own context: committed")
+}
