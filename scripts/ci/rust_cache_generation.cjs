@@ -17,7 +17,7 @@ const producerConfigurationPaths = [
   // Producer scripts invoke audit planning, shell libraries and nested CI
   // helpers. Preserve this whole owning recipe subtree rather than maintain
   // an incomplete transitive file list. Unrelated script edits conservatively
-  // require the next producer; catalog-only descendants can still qualify.
+  // require the next producer; documentation-only descendants can qualify.
   "scripts",
 ];
 const inputNames = [
