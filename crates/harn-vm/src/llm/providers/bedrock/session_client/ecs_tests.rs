@@ -14,7 +14,7 @@ fn captured_sdk_ecs_authorization_remains_distinct_in_parallel() {
     std::fs::write(&config, "").expect("empty config fixture");
     std::fs::write(&credentials, "").expect("empty credential fixture");
     let barrier = Arc::new(Barrier::new(2));
-    std::thread::scope(|scope| {
+    crate::runtime_stack::scope(|scope| {
         for name in ["first", "second"] {
             let listener =
                 std::net::TcpListener::bind("127.0.0.1:0").expect("local credential fixture");

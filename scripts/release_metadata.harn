@@ -305,8 +305,8 @@ pub fn cargo_dependency_from_line(
   }
   return {
     package_name: package_name,
-    path: projection.path ?? nil,
-    version: projection.version ?? nil,
+    path: projection.path,
+    version: projection.version,
   }
 }
 

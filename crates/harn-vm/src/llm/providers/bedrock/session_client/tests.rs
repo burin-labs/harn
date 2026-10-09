@@ -13,7 +13,7 @@ pub(super) fn map(values: &[(&str, &str)]) -> BTreeMap<String, String> {
 
 fn run_pair(contexts: [(BTreeMap<String, String>, &str, &str, &str); 2]) {
     let barrier = Arc::new(Barrier::new(2));
-    std::thread::scope(|scope| {
+    crate::runtime_stack::scope(|scope| {
         for (snapshot, access_key, token, region) in contexts {
             let barrier = Arc::clone(&barrier);
             scope.spawn(move || {
@@ -194,7 +194,7 @@ fn captured_sdk_profile_helpers_receive_their_session_inputs() {
 
 #[test]
 fn captured_sdk_context_debug_never_contains_inputs() {
-    std::thread::spawn(|| {
+    crate::runtime_stack::spawn(|| {
         let environment = LauncherEnvironment::from_snapshot(map(&[
             ("AWS_ACCESS_KEY_ID", "synthetic-debug-access"),
             ("AWS_SECRET_ACCESS_KEY", "synthetic-debug-secret"),

@@ -20,7 +20,7 @@ impl Write for Capture {
 
 #[test]
 fn captured_sdk_region_trace_redacts_inputs_after_provider_fires() {
-    std::thread::spawn(|| {
+    crate::runtime_stack::spawn(|| {
         let environment = LauncherEnvironment::from_snapshot(super::tests::map(&[
             ("AWS_ACCESS_KEY_ID", "synthetic-trace-access"),
             ("AWS_SECRET_ACCESS_KEY", "synthetic-trace-secret"),

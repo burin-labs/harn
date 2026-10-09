@@ -3,7 +3,7 @@ use crate::security::{EnvironmentPolicyKind, LauncherEnvironment};
 
 #[test]
 fn captured_sdk_empty_tokens_are_absent_and_granted_discovery_stays_disabled() {
-    std::thread::spawn(|| {
+    crate::runtime_stack::spawn(|| {
         let launcher = LauncherEnvironment::from_snapshot(super::tests::map(&[
             ("AWS_ACCESS_KEY_ID", "synthetic-policy-access"),
             ("AWS_SECRET_ACCESS_KEY", "synthetic-policy-secret"),

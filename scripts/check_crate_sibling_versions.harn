@@ -66,7 +66,7 @@ pub fn sibling_dep_errors_from_line_with_context(
   const section = request.section
   const unpublished_sibling_names = request.unpublished_sibling_names
   const manifest_is_publishable = request.manifest_is_publishable
-  const dependency = cargo_dependency_from_line(line, request.manifest ?? nil, section)
+  const dependency = cargo_dependency_from_line(line, request.manifest, section)
   if dependency == nil {
     return []
   }
