@@ -3,6 +3,7 @@ const os = require("node:os");
 const path = require("node:path");
 const assert = require("node:assert/strict");
 const { execFileSync, spawnSync } = require("node:child_process");
+const { pathToFileURL } = require("node:url");
 const root = path.resolve(__dirname, "../..");
 const ownerFile = process.env.HARN_TEST_CACHE_GENERATION_OWNER || path.join(root, "scripts/ci/rust_cache_generation.cjs");
 const owner = require(ownerFile);
@@ -168,6 +169,7 @@ if(args[0]==='api' && args.length===4 && args.includes('--paginate') && args.inc
       success = false,
       deleted = false,
       expectedError = null,
+      checkout = repository,
     } = {},
   ) {
     const stateRoot = fs.mkdtempSync(
@@ -180,7 +182,7 @@ if(args[0]==='api' && args.length===4 && args.includes('--paginate') && args.inc
       path.join(stateRoot, "restore-observation.json"),
       JSON.stringify(observation),
     );
-    const sourceRoot = path.join(repository, ".harn-workspace-source");
+    const sourceRoot = path.join(checkout, ".harn-workspace-source");
     fs.rmSync(sourceRoot, { recursive: true, force: true });
     if (record) {
       fs.mkdirSync(sourceRoot);
@@ -204,7 +206,7 @@ if(args[0]==='api' && args.length===4 && args.includes('--paginate') && args.inc
         `require(${JSON.stringify(ownerFile)}).finish().catch(e=>{console.error(e.message);process.exitCode=1})`,
       ],
       {
-        cwd: repository,
+        cwd: checkout,
         encoding: "utf8",
         env: {
           ...process.env,
@@ -304,6 +306,8 @@ if(args[0]==='api' && args.length===4 && args.includes('--paginate') && args.inc
     "Advance main",
   ]);
   runGit(["push", "origin", "main"]);
+  runGit(["tag", "frozen-producer", sha]);
+  runGit(["push", "origin", "refs/tags/frozen-producer"]);
   scenario("checkout-advanced-after-admission", {
     expectedError: /Generation checkout changed after admission/,
   });
@@ -316,6 +320,16 @@ if(args[0]==='api' && args.length===4 && args.includes('--paginate') && args.inc
     initial: current.id,
     observation: { cache_hit: true, source_current: true },
     record: false,
+    success: true,
+    deleted: true,
+  });
+  const shallowCheckout = path.join(scratch, "shallow-producer");
+  execFileSync("git", ["clone", "--depth", "1", "--branch", "frozen-producer",
+    pathToFileURL(origin).href, shallowCheckout], { env: gitEnv, stdio: "pipe" });
+  assert.equal(execFileSync("git", ["rev-parse", "--is-shallow-repository"], {
+    cwd: shallowCheckout, encoding: "utf8" }).trim(), "true");
+  scenario("irrelevant-descendant-real-shallow-producer", {
+    checkout: shallowCheckout,
     success: true,
     deleted: true,
   });
