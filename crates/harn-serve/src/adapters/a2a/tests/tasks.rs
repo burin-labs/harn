@@ -617,8 +617,8 @@ fn a2a_worker_sink_publishes_worker_update_to_task_stream() {
     sink.handle_event(&harn_vm::agent_events::AgentEvent::AgentMessageChunk {
         session_id: super::a2a_worker_session_id(&task_id),
         content: "ignored".into(),
+        history_source_event_id: None,
     });
-
     let tasks = tasks.lock().expect("tasks");
     let task = tasks.get(&task_id).expect("task");
     let worker_events: Vec<&JsonValue> = task

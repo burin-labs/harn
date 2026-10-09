@@ -533,6 +533,7 @@ impl TranscriptHydration {
                 publications.extend(crate::llm::assistant_publication::replay(
                     messages,
                     &event.payload["transcript_event"]["metadata"],
+                    event.headers.get("source_event_id").map(String::as_str),
                 ));
             }
             SessionEventKind::Compaction => {

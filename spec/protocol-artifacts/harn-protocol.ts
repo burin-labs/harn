@@ -1237,11 +1237,13 @@ export interface ACPToolCallUpdate {
 export interface ACPMessageChunkUpdate {
   sessionUpdate: "agent_message_chunk" | "agent_thought_chunk" | "user_message_chunk"
   content: ACPContentBlock
+  historySourceEventId?: string | null
 }
 
 export interface ACPUserMessageUpdate {
   sessionUpdate: "user_message"
   messageId: string
+  historySourceEventId?: string | null
   content: ACPContentBlock[]
 }
 

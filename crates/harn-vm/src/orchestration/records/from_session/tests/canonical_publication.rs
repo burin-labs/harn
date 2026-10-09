@@ -38,18 +38,37 @@ async fn admitted_publication_survives_canonical_journal_hydration() {
         ),
         None
     );
+    let published = settle_assistant_publication(session_id, true)
+        .expect("admit")
+        .expect("accepted reply");
+    assert_eq!(published.content, "Accepted answer");
     assert_eq!(
-        settle_assistant_publication(session_id, true).expect("admit"),
-        Some("Accepted answer".into())
-    );
-    assert_eq!(
-        settle_assistant_publication(session_id, true).expect("idempotent settle"),
+        settle_assistant_publication(session_id, true)
+            .expect("idempotent settle")
+            .map(|reply| reply.content),
         None
     );
     crate::agent_session_journal::flush(session_id)
         .await
         .expect("persist admission");
     let store = journal_store(session_id).expect("installed canonical store");
+    let boundaries =
+        crate::agent_sessions::canonical_history_boundaries(&store, root.path(), session_id)
+            .await
+            .expect("acknowledged live reply");
+    assert!(boundaries
+        .positions
+        .iter()
+        .any(|position| position.source_event_id == published.source_event_id));
+    let replay =
+        crate::agent_session_restore::load_canonical_session_replay_from_store(&store, session_id)
+            .await
+            .expect("replay read")
+            .expect("canonical session");
+    assert!(replay.events.iter().any(|event| matches!(&event.event,
+        crate::agent_events::AgentEvent::AgentMessageChunk {content, history_source_event_id, ..}
+        if content == &published.content && history_source_event_id.as_ref() == Some(&published.source_event_id)
+    )));
     let run = crate::orchestration::project_run_record_from_session(&store, session_id)
         .await
         .expect("project admitted reply from canonical journal");

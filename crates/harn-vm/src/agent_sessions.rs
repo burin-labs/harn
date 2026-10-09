@@ -1271,6 +1271,18 @@ pub(crate) use restore_message_event_ids::restore_message_event_ids;
 /// results, which must name the call they answer) use it to bind the receipt
 /// to the exact message rather than to "whatever came next".
 pub fn inject_message(id: &str, message: VmValue) -> Result<usize, String> {
+    inject_message_with_source(id, message).map(|receipt| receipt.message_index)
+}
+
+pub(crate) struct InjectedMessage {
+    pub message_index: usize,
+    pub source_event_id: String,
+}
+
+pub(crate) fn inject_message_with_source(
+    id: &str,
+    message: VmValue,
+) -> Result<InjectedMessage, String> {
     let Some(msg_dict) = message.as_dict().cloned() else {
         return Err("agent_session_inject: message must be a dict".into());
     };
@@ -1302,6 +1314,11 @@ pub fn inject_message(id: &str, message: VmValue) -> Result<usize, String> {
         let new_message = VmValue::dict(msg_dict);
         let message_index = messages.len();
         let transcript_event = crate::llm::helpers::transcript_event_from_message(&new_message);
+        let source_event_id = transcript_event
+            .as_dict()
+            .and_then(|event| event.get("id"))
+            .map(VmValue::display)
+            .ok_or_else(|| "injected transcript event has no source identity".to_string())?;
         events.push(transcript_event.clone());
         messages.push(new_message);
         let mut next = dict;
@@ -1326,9 +1343,12 @@ pub fn inject_message(id: &str, message: VmValue) -> Result<usize, String> {
             crate::llm::helpers::vm_value_to_json(&transcript_event),
             crate::llm::helpers::vm_value_to_json(&persisted_message),
         );
-        emit_identified_user_message_event(id, &persisted_message);
+        emit_identified_user_message_event(id, &persisted_message, &source_event_id);
         emit_llm_message_event(id, message_index, &persisted_message);
-        Ok(message_index)
+        Ok(InjectedMessage {
+            message_index,
+            source_event_id,
+        })
     })
 }
 

@@ -720,10 +720,11 @@ pub(super) async fn host_agent_session_finalize(
         )
     };
     crate::llm::agent_runtime::emit_agent_event_with_ctx(Some(&ctx), &terminal_phase).await;
-    if let Some(content) = published {
+    if let Some(reply) = published {
         emit_event(&AgentEvent::AgentMessageChunk {
             session_id: session_id.clone(),
-            content,
+            content: reply.content,
+            history_source_event_id: Some(reply.source_event_id),
         });
     }
     let mut session = finalization.commit();

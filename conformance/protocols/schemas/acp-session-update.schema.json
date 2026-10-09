@@ -437,6 +437,7 @@
       "properties": {
         "sessionUpdate": { "const": "user_message" },
         "messageId": { "type": "string", "minLength": 1 },
+        "historySourceEventId": { "type": ["string", "null"], "minLength": 1 },
         "content": {
           "type": "array",
           "items": { "$ref": "#/$defs/ContentBlock" }
@@ -449,6 +450,7 @@
       "additionalProperties": true,
       "properties": {
         "sessionUpdate": { "const": "agent_message_chunk" },
+        "historySourceEventId": { "type": ["string", "null"], "minLength": 1 },
         "content": { "$ref": "#/$defs/ContentBlock" }
       }
     },
