@@ -310,62 +310,7 @@ pub(crate) fn is_absolute_path_syntax(path: &str) -> bool {
 }
 
 pub(crate) fn split_segments(path: &str) -> (bool, Option<String>, Vec<String>) {
-    let posix = to_posix(path);
-    let mut prefix = String::new();
-    let mut rest = posix.as_str();
-    let mut unc = false;
-    // Canonical Windows paths carry a verbatim prefix. Losing its second
-    // slash changes the resource and prevents pre-approval file reads.
-    if let Some(after_prefix) = rest.strip_prefix("//?/") {
-        prefix.push_str("//?/");
-        rest = after_prefix;
-        if let Some((server, share, remainder)) =
-            rest.strip_prefix("UNC/").and_then(split_unc_share)
-        {
-            prefix.push_str("UNC/");
-            prefix.push_str(server);
-            prefix.push('/');
-            prefix.push_str(share);
-            rest = remainder;
-            unc = true;
-        }
-    } else if let Some((server, share, remainder)) =
-        rest.strip_prefix("//").and_then(split_unc_share)
-    {
-        prefix.push_str("//");
-        prefix.push_str(server);
-        prefix.push('/');
-        prefix.push_str(share);
-        rest = remainder;
-        unc = true;
-    }
-    let bytes = rest.as_bytes();
-    if !unc && bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' {
-        let (drive_prefix, remainder) = rest.split_at(2);
-        prefix.push_str(drive_prefix);
-        rest = remainder;
-    }
-    let drive = (!prefix.is_empty()).then_some(prefix);
-    let absolute = unc || rest.starts_with('/');
-    let segments = rest
-        .split('/')
-        .filter(|segment| !segment.is_empty())
-        .map(|segment| segment.to_string())
-        .collect();
-    (absolute, drive, segments)
-}
-
-/// Only a complete server/share pair establishes a UNC filesystem root.
-/// Repeated POSIX slashes retain ordinary lexical normalization; incomplete
-/// verbatim UNC spelling retains its namespace prefix without inventing a share.
-fn split_unc_share(path: &str) -> Option<(&str, &str, &str)> {
-    let mut components = path.splitn(3, '/');
-    let server = components.next()?;
-    let share = components.next()?;
-    if server.is_empty() || share.is_empty() {
-        return None;
-    }
-    Some((server, share, components.next().unwrap_or_default()))
+    crate::windows_path::split_segments(path)
 }
 
 pub(crate) fn normalize_lexical(path: &str) -> String {

@@ -106,7 +106,7 @@ fn stem(p: &str) -> String {
 fn join_parent_child(parent_dir: &str, child: &str) -> String {
     if parent_dir.is_empty() {
         child.to_string()
-    } else if parent_dir == "/" || parent_dir.ends_with(":/") {
+    } else if parent_dir.ends_with('/') {
         format!("{parent_dir}{child}")
     } else {
         format!("{parent_dir}/{child}")
@@ -592,6 +592,11 @@ mod tests {
         assert_eq!(with_stem("c.rs", "main"), "main.rs");
         assert_eq!(with_stem("/c.rs", "main"), "/main.rs");
         assert_eq!(with_stem("C:/c.rs", "main"), "C:/main.rs");
+        for root in ["//server/share/", "//?/UNC/server/share/", "//?/C:/"] {
+            let file = format!("{root}c.rs");
+            assert_eq!(with_extension(&file, "py"), format!("{root}c.py"));
+            assert_eq!(with_stem(&file, "main"), format!("{root}main.rs"));
+        }
     }
 
     #[test]
