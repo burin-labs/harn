@@ -9,6 +9,93 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.160
+
+### Breaking
+
+- Package test inventory, verification, and `harn test package` share validated `[tests].roots` selection,
+  including nested directories and individual files. Missing, invalid, unreadable, and empty configured roots
+  fail instead of reporting successful empty execution.
+
+  Migration: Rust callers constructing `harn_package::package::PackageTestsConfig` with exhaustive struct literals
+  must add `roots: None` to retain conventional `tests/` selection, or use `..Default::default()` for omitted fields.
+  Existing `harn.toml` files need no change.
+- **Trigger provider registration now uses one authoritative description (#9506).**
+  Package reload accepts identical metadata, but conflicting descriptions,
+  malformed identities, and package claims to built-in runtime connectors fail
+  before dispatch. A failed batch leaves the catalog unchanged, and
+  catalog-normalized package payload tags derive from the registered description.
+
+  Migration: replace `ProviderSchema` implementations with `ProviderMetadata`
+  values and call `register_provider_metadata` instead of
+  `register_provider_schemas`. Keep provider-specific inbound normalization in
+  the connector; the catalog wraps its structured body in an extension payload.
+- **Displayed messages carry canonical history identities (#9513).** Live and
+  restored user and assistant messages expose the saved event that hosts can
+  branch through without counting UI rows. Accepted answers identify their
+  publication receipt, preserving their visibility in the child session.
+
+  Migration: Rust consumers constructing `AgentEvent::AgentMessageChunk` or
+  `AgentEvent::UserMessage` must supply `history_source_event_id: None` when
+  no canonical event exists, or `Some(source_event_id)` for a persisted message.
+  Destructuring patterns that do not consume this field should include `..`.
+  ACP clients may consume the optional `historySourceEventId` field and resolve
+  it through `harn.session_history.boundaries` before requesting a fork.
+- Keep Bedrock SDK credentials and profile helpers bound to each session's captured launcher environment,
+  so concurrent engines cannot use another project's AWS inputs.
+
+  Migration: exhaustive `AcpServerConfig` literals must supply the new
+  `launcher_environment` field with a trusted `LauncherEnvironment` captured before
+  engine startup. `AcpServerConfig::new(...)` captures the launch environment;
+  `with_launcher_environment(...)` supplies an explicitly captured session snapshot.
+
+### Changed
+
+- Run the three macOS Rust lint feature graphs concurrently while retaining the required check for complete, successful coverage.
+
+### Fixed
+
+- Confined Git inventory no longer triggers a Cargo compiler-wrapper probe.
+  Direct Cargo launches reuse wrapper measurements across tool policies with the
+  same process permissions. Sandbox setup caches Git config discovery within the
+  process and invalidates it when configuration or branch inputs change. On macOS,
+  host config discovery avoids Apple's Git shim when an installed Git binary is
+  available. Shells and other indirect launchers receive empty compiler-wrapper
+  settings; scripts can explicitly set them again within the OS sandbox.
+- The first statement in a transaction reuses its pool's cached parameter types,
+  avoiding repeated describe probes and savepoints for known SQL with `nil`
+  parameters while preserving transaction-local name resolution.
+- **Live Postgres verification (#9519).** Integration fixtures use typed Harness
+  entrypoints and opaque pool resources. The ordinary suite reports unavailable
+  database fixtures as ignored; explicit live targets refuse missing database
+  configuration. Index introspection returns column names as a string list.
+- **Transaction NULL binding (#9520).** Refresh parameter types after every
+  executed transaction statement, including SQL that changes its own search
+  path. Only the first statement can reuse known pool metadata; later nullable
+  statements pay for fresh, savepoint-protected inference.
+- The debug adapter now keeps provider credentials available for its model calls while withholding them from child processes.
+- Preserve Windows verbatim and network path prefixes when resolving permission requests,
+  so edit approvals can include file previews and refusals name the correct resource.
+- GitHub check censuses now grant budget wrappers their declared executable files and dedicated state directory while
+  preserving the sandbox and shared API budget. Unsupported wrapper policies fail explicitly, and API failures retain their
+  underlying diagnostic.
+- Manual release recovery now admits successful main source candidates only when their stable version and complete,
+  unexpired producer artifact inventory match the selected source and run. Publication retains its existing certification,
+  full-suite CI, consumer rehearsal, digest, and attestation checks.
+- Failed release recovery accepts up to three ordered consumer observation windows bound to one original clock and budget,
+  while refusing early observation, extra windows and records after the terminal failure.
+- Crate publication now accepts certified corrected stable sources on main by proving their original version transition
+  and durable, signed exact-source publication evidence.
+  Recovery keeps the published tag unchanged and verifies the permanent archive index without relying on expiring build artifacts.
+- Published containers now identify the certified archive source in their revision label, including corrected releases.
+- Pull request checks fetch the exact source commits after squash merges and refuse unreadable CLI surface comparisons.
+- ACP restores saved conversations from the selected workspace even when a parent
+  directory contains a Harn manifest. Creation, listing, and cold loading share
+  the captured store address; a shared physical store does not expose another
+  workspace's conversations.
+- Validate release Cargo metadata before traversing dependency tables so strict release checks accept valid manifests
+  and reject malformed tables explicitly.
+
 ## v0.10.159
 
 ### Breaking
