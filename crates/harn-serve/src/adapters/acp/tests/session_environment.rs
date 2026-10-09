@@ -4,6 +4,47 @@ use super::*;
 
 pub(super) const RESTORE_CANARY: &str = "SYNTHETIC_RESTORE_TEST_API_KEY";
 
+#[tokio::test(flavor = "current_thread")]
+async fn session_new_uses_each_servers_captured_launcher_inputs() {
+    use harn_vm::security::LauncherEnvironment;
+
+    harn_vm::reset_thread_local_state();
+    for profile in ["synthetic-first", "synthetic-second"] {
+        let launcher = LauncherEnvironment::from_snapshot(std::collections::BTreeMap::from([(
+            "AWS_PROFILE".to_string(),
+            profile.to_string(),
+        )]));
+        let expected = launcher
+            .launch(
+                harn_vm::security::EnvironmentPolicyKind::Inherited,
+                Vec::new(),
+            )
+            .expect("configured capture");
+        let config = AcpServerConfig::new(None).with_launcher_environment(launcher);
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let mut server = AcpServer::new_with_output(config, AcpOutput::Channel(tx));
+        server
+            .handle_incoming_message(serde_json::json!({
+                "jsonrpc": "2.0", "id": 1, "method": "session/new",
+                "params": {"cwd": ".", "environmentPolicy": {"kind": "inherited", "grants": []}},
+            }))
+            .await;
+        let created = recv_json(&mut rx).await;
+        let id = created["result"]["sessionId"]
+            .as_str()
+            .expect("session admitted");
+        let policy = &server.sessions[id].environment_policy;
+        assert_eq!(
+            policy, &expected,
+            "session/new must use its configured snapshot rather than process-global inputs"
+        );
+        assert!(
+            !created.to_string().contains(profile),
+            "credential values never enter ACP JSON"
+        );
+    }
+}
+
 /// Use the production process-construction owner. Print only a presence
 /// verdict, never the synthetic value or any launcher credential.
 pub(super) fn child_sees_restore_canary(
@@ -145,9 +186,12 @@ fn cold_load_requires_authority_and_live_load_cannot_replace_it() {
                 AcpServer::new_with_output(AcpServerConfig::new(None), AcpOutput::Channel(tx));
             // Non-null calibration through the same launch resolver: inherited really
             // exposes the synthetic sensitive name, so an isolated zero is meaningful.
-            let inherited = AcpServer::resolve_session_environment(&serde_json::json!({
-                "environmentPolicy": {"kind": "inherited", "grants": []},
-            }))
+            let inherited = AcpServer::resolve_session_environment(
+                &serde_json::json!({
+                    "environmentPolicy": {"kind": "inherited", "grants": []},
+                }),
+                &harn_vm::security::LauncherEnvironment::capture(),
+            )
             .unwrap();
             assert!(child_sees_restore_canary(&inherited));
 

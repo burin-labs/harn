@@ -382,7 +382,7 @@ fn hosted_compile_lane_errors(
  * The legs `scripts/ci/run_rust_lint_lane.sh --leg` accepts. Each resolves its
  * own feature graph, so the lane runs them on separate runners.
  */
-const RUST_LINT_LEGS = ["workspace", "lean-lsp", "freshness-checker"]
+pub const RUST_LINT_LEGS: list<string> = ["workspace", "lean-lsp", "freshness-checker"]
 
 /**
  * Keep strict Clippy one leg per runner on the elastic switch, without a build

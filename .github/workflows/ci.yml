@@ -2282,8 +2282,15 @@ jobs:
           cross check --locked -p harn-serve --tests --features hostlib \
             --target x86_64-pc-windows-gnu
 
-  macos:
-    name: Rust on macOS (deny-warnings build + lint)
+  macos-lint:
+    name: Rust on macOS strict lint (${{ matrix.kind }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - kind: workspace
+          - kind: lean-lsp
+          - kind: freshness-checker
     # Hosted runners only: this is a public repo, so GitHub-hosted macOS
     # minutes are free, and routing CI to a self-hosted machine contends with
     # local development work on that machine. Keep every lane on hosted
@@ -2375,14 +2382,34 @@ jobs:
         # failure so it fails the PR instead of the release. The shared lint
         # entrypoint invalidates restored workspace units first so Cargo cannot
         # call them fresh without replaying their diagnostics.
-        run: ./scripts/ci/run_rust_lint_lane.sh
+        run: ./scripts/ci/run_rust_lint_lane.sh --leg "${{ matrix.kind }}"
       - name: Verify canonical package hash parity
+        if: matrix.kind == 'workspace'
         run: >-
           scripts/ci/run_rust_test_lane.sh
           cargo test --locked -p harn-modules canonical_content_hash_projection_is_platform_independent
       - name: Verify generated Swift protocol bindings
+        if: matrix.kind == 'workspace'
         shell: bash
         run: make check-swift-protocol-binding
+
+  macos:
+    name: Rust on macOS (deny-warnings build + lint)
+    needs: [changes, macos-lint]
+    if: ${{ always() && needs.changes.outputs.post_merge_tier != 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Require every macOS lint leg
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          MATRIX_RESULT: ${{ needs.macos-lint.result }}
+        run: ./scripts/ci/require_macos_lint.sh
 
   portal:
     name: Portal frontend

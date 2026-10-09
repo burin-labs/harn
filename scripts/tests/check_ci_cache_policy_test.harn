@@ -11,6 +11,7 @@ import {
   e2e_workflow_concurrency_errors,
   event_skip_propagation_errors,
   linux_confinement_errors,
+  macos_shared_cache_errors,
   macos_warm_errors,
   minimal_pr_capacity_errors,
   nextest_version_errors,
@@ -30,8 +31,47 @@ import {
   windows_release_certify_warm_errors,
   windows_shared_cache_errors,
 } from "../check_ci_cache_policy"
+import { RUST_LINT_LEGS } from "../ci_cache_policy/linux_checks.harn"
 import "./ci_cache_policy/fixtures.harn"
 import "./ci_cache_policy/policy_integration_test.harn"
+
+@test
+pipeline test_macos_lint_matrix_preserves_every_typed_graph_and_fail_closed_aggregate(
+  harness: Harness,
+) {
+  const ci = read_yaml(harness.fs, "../../.github/workflows/ci.yml")
+  const nightly = read_yaml(harness.fs, "../../.github/workflows/macos-nightly.yml")
+  assert_eq(macos_shared_cache_errors(ci, nightly), [])
+  const dispatched = harness.process.run(
+    {
+      program: "bash",
+      args: ["scripts/ci/run_rust_lint_lane.sh", "--list-legs"],
+      cwd: path_normalize(path_join(harness.fs.cwd(), "../..")),
+    },
+  )
+  assert_eq(dispatched.exit_code, 0)
+  assert_eq(trim(dispatched.stdout).split("\n"), RUST_LINT_LEGS)
+  const lint = ci.jobs["macos-lint"]
+  for mutation in [
+    {...lint, strategy: {...lint.strategy, matrix: {include: [{kind: "workspace"}]}}},
+    {...lint, strategy: {...lint.strategy, "fail-fast": true}},
+    {...lint, env: {RUSTFLAGS: ""}},
+    {...lint, name: "unreported leg"},
+  ] {
+    const invalid = {...ci, jobs: {...ci.jobs, "macos-lint": mutation}}
+    assert(
+      macos_shared_cache_errors(invalid, nightly).contains(
+        "ci.yml:macos-lint must run all three named strict lint graphs on independent hosted runners",
+      ),
+    )
+  }
+  const invalid = {...ci, jobs: {...ci.jobs, macos: {...ci.jobs.macos, steps: []}}}
+  assert(
+    macos_shared_cache_errors(invalid, nightly).contains(
+      "ci.yml:macos must retain the required aggregate and verify the complete current-attempt lint census",
+    ),
+  )
+}
 
 fn sccache_action(
   default_size: string = "",
@@ -1082,9 +1122,9 @@ pipeline test_macos_warm_requires_a_main_producer_and_a_pull_request_consumer(
     ...ci,
     jobs: {
       ...ci.jobs,
-      macos: {
-        ...ci.jobs.macos,
-        steps: ci.jobs.macos.steps.filter(
+      "macos-lint": {
+        ...ci.jobs["macos-lint"],
+        steps: ci.jobs["macos-lint"].steps.filter(
           { step ->
             return !contains(
               trim(step?.run ?? ""),
@@ -1098,7 +1138,7 @@ pipeline test_macos_warm_requires_a_main_producer_and_a_pull_request_consumer(
   }
   assert(
     macos_warm_errors(declared_policy, producer, ci_without_consumer).contains(
-      "ci.yml:macos must restore workspace-macos-warm through one macos-warm-restore step with cold fallback",
+      "ci.yml:macos-lint must restore workspace-macos-warm through one macos-warm-restore step with cold fallback",
     ),
   )
 }

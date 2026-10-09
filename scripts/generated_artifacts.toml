@@ -98,6 +98,16 @@ exempt_checks = [
 # ---------------------------------------------------------------------------
 
 [[artifact]]
+id = "aws-config-vendor"
+description = "Publishable AWS SDK configuration mirror verified against a checksum-pinned pristine archive plus its complete recorded patch."
+gen = "" # replace from the reviewed pristine archive and record the complete patch
+check = "check-aws-config-vendor"
+outputs = ["crates/harn-aws-config/"]
+sources = ["crates/harn-aws-config/upstream.json", "crates/harn-aws-config/upstream.patch", "scripts/check_aws_config_vendor.mjs"]
+ci = true
+make_all = true
+
+[[artifact]]
 id = "agent-gates"
 description = "Typed runner, stop decision, and stall handler configuration with structural read coverage and generated review tables."
 gen = "gen-agent-gates"
@@ -685,6 +695,7 @@ make_all = false  # excluded from `make all` for the same reason (no sibling che
 #               toolchain (go), a sibling repo checkout, executes runtime
 #               fixtures, or is a perf soak; in neither preflight.
 [preflight.dispatch]
+"check-aws-config-vendor" = "excluded" # verifies an external checksum-pinned crate archive
 "check-agent-gates" = "binary"
 "check-release-metadata" = "binary"
 # --- source: fast, reads committed files (check-drift) ---

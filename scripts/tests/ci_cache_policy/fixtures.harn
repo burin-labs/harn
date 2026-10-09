@@ -402,6 +402,25 @@ pub fn workflows() {
           ],
         },
         macos: {
+          name: "Rust on macOS (deny-warnings build + lint)",
+          needs: ["changes", "macos-lint"],
+          permissions: {contents: "read", actions: "read"},
+          steps: [
+            {
+              run: "./scripts/ci/require_macos_lint.sh",
+              env: {MATRIX_RESULT: gha_expression("needs.macos-lint.result")},
+            },
+          ],
+        },
+        "macos-lint": {
+          name: "Rust on macOS strict lint (" + gha_expression("matrix.kind") + ")",
+          "runs-on": "macos-latest",
+          strategy: {
+            "fail-fast": false,
+            matrix: {
+              include: [{kind: "workspace"}, {kind: "lean-lsp"}, {kind: "freshness-checker"}],
+            },
+          },
           env: {RUSTFLAGS: "-D warnings"},
           steps: [
             {uses: "actions/checkout@exact-pin"},
@@ -417,7 +436,11 @@ pub fn workflows() {
               uses: "./.github/actions/rust-cache",
               with: {"shared-key": "workspace-macos", "source-key": native_source_key()},
             },
-            {name: "Clippy all targets (deny warnings)", run: "./scripts/ci/run_rust_lint_lane.sh"},
+            {
+              name: "Clippy all targets (deny warnings)",
+              run: "./scripts/ci/run_rust_lint_lane.sh --leg \"" + gha_expression("matrix.kind")
+                + "\"",
+            },
           ],
         },
       },

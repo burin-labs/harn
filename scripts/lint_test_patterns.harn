@@ -25,6 +25,7 @@
 // std::thread::sleep in test files
 // Legitimate uses: waiting on real subprocess I/O that cannot be time-paused.
 import { scan_glob } from "./path_visibility.harn"
+import { is_mechanically_checked_source_projection } from "./source_projections.harn"
 
 const THREAD_SLEEP_ALLOWLIST: list<string> = [
   "crates/harn-hostlib/tests/harn_hostlib/process_tools.rs",
@@ -1205,6 +1206,9 @@ pipeline main(harness: Harness, task: unknown) {
   let inline_rels: list<string> = []
   for g in scan_glob(harness.fs, "lint-test-patterns", "crates/**/*.rs") {
     const rel = rel_path(g)
+    if is_mechanically_checked_source_projection(rel) {
+      continue
+    }
     if !harness.fs.stat(rel).is_file {
       // Mirror `find -type f`: a directory can match the glob (e.g. a
       // state dir literally named `.harn` matching `*.harn`).
