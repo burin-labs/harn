@@ -370,7 +370,7 @@ fn hosted_compile_lane_errors(
     errors = errors
       + ["ci.yml:${job_name} must keep complete hosted cache ${rust_cache_key}"]
   }
-  if CI_CACHE_WRITE_JOBS.contains(job_name)
+  if caches.any({ cache -> save_requested(cache) })
     && trim(job?.permissions?.actions ?? "")
       != "write" {
     errors = errors + ["ci.yml:${job_name} must grant actions: write to persist rust-cache"]
@@ -477,7 +477,7 @@ fn persistent_compile_lane_errors(
     errors = errors
       + ["ci.yml:${job_name} must keep complete hosted fallback cache ${rust_cache_key}"]
   }
-  if CI_CACHE_WRITE_JOBS.contains(job_name)
+  if caches.any({ cache -> save_requested(cache) })
     && trim(job?.permissions?.actions ?? "")
       != "write" {
     errors = errors + ["ci.yml:${job_name} must grant actions: write to persist rust-cache"]

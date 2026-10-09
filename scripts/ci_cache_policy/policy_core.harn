@@ -198,18 +198,6 @@ pub const E2E_CAPACITY_DECISION_STEP = "Decide where the slow E2E suite lands"
 /** The input that carries the evacuation switch into that decision. */
 pub const RUST_CACHE_ACTION = "./.github/actions/rust-cache"
 
-// Authorized ci.yml cache writers must grant actions: write. The workflow
-// top-level token is contents/read-only; without a job-level grant, Swatinem
-// save fails under continue-on-error and the Linux workspace-tests cache stays
-// empty (#5003).
-pub const CI_CACHE_WRITE_JOBS = [
-  "package-audit",
-  "rust-cli",
-  "rust-check-inputs",
-  "rust-cache-refresh",
-  "rust-cache-refresh-cli",
-]
-
 // Compile fan-out on the producer is measured, not typed, and the ceiling now
 // rests on a measurement rather than on a fear. It lives in
 // `scripts/ci/rust-resource-policy.json` beside the E2E ceiling.
