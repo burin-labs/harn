@@ -47,11 +47,132 @@
 //! embedder's `resolve_secret` closure (backed by the `secret_store` facade),
 //! so this crate takes no dependency on the hostlib that registers it.
 
+use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 use super::environment_policy::environment_names_equal;
 use serde::{Deserialize, Serialize};
+
+thread_local! {
+    /// A task's resolved session policy. The ambient scope swaps this same
+    /// context across awaits; outside a session it remains absent.
+    static SESSION_ENVIRONMENT_CONTEXT: RefCell<Option<SessionEnvironment>> =
+        const { RefCell::new(None) };
+}
+
+/// Install or clear the resolved policy at the session launch boundary.
+pub fn set_session_environment(environment: Option<SessionEnvironment>) {
+    SESSION_ENVIRONMENT_CONTEXT.with(|current| *current.borrow_mut() = environment);
+}
+
+/// Return the active policy, distinguishing no session from an empty grant set.
+pub fn current_session_environment() -> Option<SessionEnvironment> {
+    SESSION_ENVIRONMENT_CONTEXT.with(|current| current.borrow().clone())
+}
+
+/// Declare a default only when no session policy is already installed.
+/// The guard restores the enclosing policy rather than clearing its authority.
+#[must_use = "the declaration lasts only while the guard is held"]
+pub fn declare_session_environment_if_absent(
+    environment: SessionEnvironment,
+) -> SessionEnvironmentGuard {
+    let previous = current_session_environment();
+    if previous.is_none() {
+        set_session_environment(Some(environment));
+    }
+    SessionEnvironmentGuard { previous }
+}
+
+/// Restore the policy preceding a scoped declaration, including on panic.
+pub struct SessionEnvironmentGuard {
+    previous: Option<SessionEnvironment>,
+}
+
+impl Drop for SessionEnvironmentGuard {
+    fn drop(&mut self) {
+        set_session_environment(self.previous.take());
+    }
+}
+
+impl SessionEnvironmentGuard {
+    /// Tighten the active environment without replacing its credential policy.
+    pub fn with_host_inference_boundary(
+        self,
+        boundary: Option<crate::llm::api::InferenceBoundary>,
+    ) -> Self {
+        if let Some(environment) = current_session_environment() {
+            set_session_environment(Some(environment.with_host_inference_boundary(boundary)));
+        }
+        self
+    }
+}
+
+/// Swap the same policy context when an ambient task is polled.
+pub(crate) fn swap_session_environment(
+    next: Option<SessionEnvironment>,
+) -> Option<SessionEnvironment> {
+    SESSION_ENVIRONMENT_CONTEXT.with(|current| std::mem::replace(&mut *current.borrow_mut(), next))
+}
+
+/// Trusted launch inputs captured before an embedded server starts.
+///
+/// This value can hold credentials. It is not serializable, and its debug
+/// representation contains names only. Client policy declarations still
+/// decide which captured inputs reach a session or a spawned command.
+#[derive(Clone, PartialEq, Eq)]
+pub struct LauncherEnvironment {
+    snapshot: BTreeMap<String, String>,
+}
+
+impl fmt::Debug for LauncherEnvironment {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("LauncherEnvironment")
+            .field("names", &self.snapshot.keys().collect::<Vec<_>>())
+            .finish()
+    }
+}
+
+impl LauncherEnvironment {
+    /// Capture the host once, before moving work to another engine thread.
+    pub fn capture() -> Self {
+        Self::from_snapshot(capture_process_environment())
+    }
+
+    /// Supply authoritative host inputs without writing process environment.
+    pub fn from_snapshot(snapshot: BTreeMap<String, String>) -> Self {
+        let mut normalized = BTreeMap::new();
+        for (name, value) in snapshot {
+            insert_env_value(&mut normalized, &name, value);
+        }
+        Self {
+            snapshot: normalized,
+        }
+    }
+
+    /// Overlay inputs already resolved by the trusted host's precedence owner.
+    pub fn with_overlay(mut self, overlay: BTreeMap<String, String>) -> Self {
+        for (name, value) in overlay {
+            insert_env_value(&mut self.snapshot, &name, value);
+        }
+        self
+    }
+
+    /// Resolve the client's declared policy against this captured launcher.
+    pub fn launch(
+        &self,
+        kind: EnvironmentPolicyKind,
+        specs: Vec<GrantSpec>,
+    ) -> Result<SessionEnvironment, EnvironmentPolicyError> {
+        SessionEnvironment::launch_from_snapshot(kind, specs, self.snapshot.clone(), &|name| {
+            self.snapshot
+                .iter()
+                .find(|(candidate, _)| environment_names_equal(candidate, name))
+                .map(|(_, value)| value.clone())
+        })
+    }
+}
 
 /// Where a granted value originates. Recorded in receipts as a stable
 /// string; never carries the value itself.

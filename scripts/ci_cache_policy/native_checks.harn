@@ -1,3 +1,4 @@
+import { RUST_LINT_LEGS } from "./linux_checks.harn"
 import "./policy_core.harn"
 
 fn native_shared_cache_errors(
@@ -7,11 +8,17 @@ fn native_shared_cache_errors(
   cache_key: string,
   expected_source_key: string,
   consumer_ignored_step_ids: list<string> = [],
+  consumer_job: string = "",
 ) -> list<string> {
-  const consumer = ci_workflow?.jobs?.[platform]
+  const consumer_name = if consumer_job == "" {
+    platform
+  } else {
+    consumer_job
+  }
+  const consumer = ci_workflow?.jobs?.[consumer_name]
   const producer = nightly_workflow?.jobs?.nextest
   if consumer == nil || producer == nil {
-    return ["${cache_key} must pair ci.yml:${platform} with ${platform}-nightly.yml:nextest"]
+    return ["${cache_key} must pair ci.yml:${consumer_name} with ${platform}-nightly.yml:nextest"]
   }
   let errors: list<string> = []
   const consumer_caches = matching_steps(consumer, "./.github/actions/rust-cache")
@@ -39,7 +46,7 @@ fn native_shared_cache_errors(
       != cache_key
     || save_requested(consumer_caches[0]) {
     errors = errors
-      + ["ci.yml:${platform} must restore ${cache_key} exactly once without saving"]
+      + ["ci.yml:${consumer_name} must restore ${cache_key} exactly once without saving"]
   }
   if len(producer_caches) != 1
     || trim(producer_caches[0]?.with?.["shared-key"] ?? "")
@@ -275,7 +282,7 @@ pub fn macos_warm_errors(
   }
   // The blocking pull-request lane is the one this exists to speed up, so its
   // consumer is part of the contract rather than an optional extra.
-  const ci_job = ci_workflow?.jobs?.macos
+  const ci_job = ci_workflow?.jobs?.["macos-lint"]
   const ci_restores = matching_run_steps(ci_job, MACOS_WARM_RESTORE_MARKER)
   if len(ci_restores) != 1
     || trim(ci_restores[0]?.id ?? "") != MACOS_WARM_RESTORE_STEP_ID
@@ -283,7 +290,7 @@ pub fn macos_warm_errors(
       != true {
     errors = errors
       + [
-        "ci.yml:macos must restore ${warm.artifact_name} through one ${MACOS_WARM_RESTORE_STEP_ID} step with cold fallback",
+        "ci.yml:macos-lint must restore ${warm.artifact_name} through one ${MACOS_WARM_RESTORE_STEP_ID} step with cold fallback",
       ]
   }
   return errors
@@ -553,14 +560,45 @@ pub fn macos_shared_cache_errors(ci_workflow: dict, nightly_workflow: dict) -> l
     MACOS_CACHE_KEY,
     source_key,
     [MACOS_WARM_RESTORE_STEP_ID],
+    "macos-lint",
   )
-  const lint_steps = (ci_workflow?.jobs?.macos?.steps ?? []).filter(
-    { step -> trim(step?.run ?? "") == "./scripts/ci/run_rust_lint_lane.sh" },
+  const lint_job = ci_workflow?.jobs?.["macos-lint"]
+  const lint_command = "./scripts/ci/run_rust_lint_lane.sh --leg \"$" + "{{ matrix.kind }}\""
+  const lint_steps = (lint_job?.steps ?? []).filter(
+    { step -> trim(step?.run ?? "") == lint_command },
   )
     .to_list()
   if len(lint_steps) != 1 {
     errors = errors
-      + ["ci.yml:macos must route strict Clippy through the cache-safe Rust lint entrypoint"]
+      + [
+        "ci.yml:macos-lint must route each strict Clippy leg through the cache-safe Rust lint entrypoint",
+      ]
+  }
+  const kinds = (lint_job?.strategy?.matrix?.include ?? []).map(
+    { entry -> trim(entry?.kind ?? "") },
+  )
+    .to_list()
+  const expected_name = "Rust on macOS strict lint ($" + "{{ matrix.kind }})"
+  if kinds != RUST_LINT_LEGS || lint_job?.strategy?.["fail-fast"] != false
+    || lint_job?.["runs-on"] != "macos-latest"
+    || lint_job?.name != expected_name
+    || lint_job?.env?.RUSTFLAGS != "-D warnings" {
+    errors = errors
+      + [
+        "ci.yml:macos-lint must run all three named strict lint graphs on independent hosted runners",
+      ]
+  }
+  const aggregate = ci_workflow?.jobs?.macos
+  const aggregate_steps = matching_run_steps(aggregate, "./scripts/ci/require_macos_lint.sh")
+  if aggregate?.name != "Rust on macOS (deny-warnings build + lint)"
+    || job_needs(aggregate) != ["changes", "macos-lint"]
+    || len(aggregate_steps) != 1
+    || aggregate?.permissions?.actions != "read"
+    || aggregate_steps[0]?.env?.MATRIX_RESULT != "$" + "{{ needs.macos-lint.result }}" {
+    errors = errors
+      + [
+        "ci.yml:macos must retain the required aggregate and verify the complete current-attempt lint census",
+      ]
   }
   return errors
 }
