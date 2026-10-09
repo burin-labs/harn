@@ -2369,6 +2369,9 @@ jobs:
           fi
       - name: Clippy all targets (deny warnings)
         shell: bash
+        env:
+          HARN_LINT_TIMINGS_DIR: ${{ matrix.kind == 'workspace' && format('{0}/macos-workspace-timings', runner.temp) || '' }}
+          HARN_LINT_SOURCE_SHA: ${{ github.sha }}
         # `--all-targets` so the cfg-gated *test* targets compile (that's
         # exactly where the v0.8.109 release blocker — an unused
         # `BTreeMap` import in `secret_store_os_native.rs` — hid). Clippy
@@ -2378,6 +2381,14 @@ jobs:
         # entrypoint invalidates restored workspace units first so Cargo cannot
         # call them fresh without replaying their diagnostics.
         run: ./scripts/ci/run_rust_lint_lane.sh --leg "${{ matrix.kind }}"
+      - name: Upload actual workspace compile timings
+        if: ${{ always() && matrix.kind == 'workspace' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: macos-workspace-compile-timings-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/macos-workspace-timings
+          if-no-files-found: error
+          retention-days: 3
       - name: Verify canonical package hash parity
         if: matrix.kind == 'workspace'
         run: >-

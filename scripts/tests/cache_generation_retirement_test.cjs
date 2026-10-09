@@ -4,7 +4,8 @@ const path = require("node:path");
 const assert = require("node:assert/strict");
 const { execFileSync, spawnSync } = require("node:child_process");
 const root = path.resolve(__dirname, "../..");
-const owner = require("../ci/rust_cache_generation.cjs");
+const ownerFile = process.env.HARN_TEST_CACHE_GENERATION_OWNER || path.join(root, "scripts/ci/rust_cache_generation.cjs");
+const owner = require(ownerFile);
 const scratch = fs.mkdtempSync(
   path.join(os.tmpdir(), "cache-generation-retirement-"),
 );
@@ -67,7 +68,7 @@ try {
       fs.writeFileSync(${JSON.stringify(startupMarker)}, 'expected pinned fetch reached');
       throw Error('probe pinned download unavailable');
     };
-    require(${JSON.stringify(path.join(root, "scripts/ci/rust_cache_generation.cjs"))}).start().catch(e=>{console.error(e.message);process.exitCode=1});
+    require(${JSON.stringify(ownerFile)}).start().catch(e=>{console.error(e.message);process.exitCode=1});
   `,
     ],
     {
@@ -200,7 +201,7 @@ if(args[0]==='api' && args.length===4 && args.includes('--paginate') && args.inc
       process.execPath,
       [
         "-e",
-        `require(${JSON.stringify(path.join(root, "scripts/ci/rust_cache_generation.cjs"))}).finish().catch(e=>{console.error(e.message);process.exitCode=1})`,
+        `require(${JSON.stringify(ownerFile)}).finish().catch(e=>{console.error(e.message);process.exitCode=1})`,
       ],
       {
         cwd: repository,
@@ -218,7 +219,7 @@ if(args[0]==='api' && args.length===4 && args.includes('--paginate') && args.inc
         },
       },
     );
-    assert.equal(child.status === 0, success, `${name}: ${child.stderr}`);
+    assert.equal(child.status === 0, success, `${name}: ${child.stderr}\n${child.stdout}`);
     if (expectedError !== null) assert.match(child.stderr, expectedError, name);
     const observations = fs.existsSync(calls)
       ? fs
@@ -303,11 +304,46 @@ if(args[0]==='api' && args.length===4 && args.includes('--paginate') && args.inc
     "Advance main",
   ]);
   runGit(["push", "origin", "main"]);
-  scenario("stale-source-after-main-advanced", {
+  scenario("checkout-advanced-after-admission", {
+    expectedError: /Generation checkout changed after admission/,
+  });
+  runGit(["checkout", "--detach", sha]);
+  scenario("irrelevant-main-descendant", {
+    success: true,
+    deleted: true,
+  });
+  scenario("irrelevant-descendant-exact-restore-without-stamp", {
     initial: current.id,
     observation: { cache_hit: true, source_current: true },
-    expectedError: /Owning main advanced; cache qualification is unmeasured/,
+    record: false,
+    success: true,
+    deleted: true,
   });
+  function mainChange(name, file) {
+    runGit(["checkout", "main"]);
+    runGit(["reset", "--hard", sha]);
+    fs.mkdirSync(path.dirname(path.join(repository, file)), { recursive: true });
+    fs.writeFileSync(path.join(repository, file), `changed ${name}\n`);
+    runGit(["add", file]);
+    runGit(["-c", "core.hooksPath=/dev/null", "-c", "commit.gpgsign=false",
+      "-c", "user.name=Cache lifecycle fixture", "-c",
+      "user.email=cache-fixture@example.invalid", "commit", "-m", name]);
+    runGit(["push", "--force", "origin", "main"]);
+    runGit(["checkout", "--detach", sha]);
+    scenario(name, { expectedError: /Command failed: (git diff|bash scripts\/ci\/reuse_workspace_crates)/ });
+  }
+  mainChange("native-input-changed", "Cargo.toml");
+  mainChange("producer-configuration-changed", ".github/actions/rust-cache/pinned-config.json");
+  mainChange("nested-workspace-filter-changed", "scripts/ci/host_bound_rust_test_filter.sh");
+  mainChange("nested-audit-recipe-changed", "scripts/verify_crate_packages.sh");
+  mainChange("nested-cache-wrapper-changed", "scripts/ci/use_kache.sh");
+  runGit(["checkout", "--orphan", "unrelated"]);
+  runGit(["-c", "core.hooksPath=/dev/null", "-c", "commit.gpgsign=false",
+    "-c", "user.name=Cache lifecycle fixture", "-c",
+    "user.email=cache-fixture@example.invalid", "commit", "-m", "Unrelated source"]);
+  runGit(["push", "--force", "origin", "HEAD:refs/heads/main"]);
+  runGit(["checkout", "--detach", sha]);
+  scenario("nonancestor-main", { expectedError: /Command failed: git merge-base/ });
   const qualified = {
     schema: "harn.qualified_rust_cache_generation.v1",
     family: "harn-ci-cli",

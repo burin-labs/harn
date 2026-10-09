@@ -25,7 +25,9 @@ portal = "llama3.2"
 
 [provider_defaults.openrouter]
 runtime = "anthropic/claude-sonnet-4-6"
-portal = "Qwen/Qwen3.5-9B"
+# Was Qwen/Qwen3.5-9B, which OpenRouter retires 2026-10-21. Gemma 4 26B is
+# the `small` alias target at a similar price.
+portal = "google/gemma-4-26b-a4b-it"
 
 # A provider with no `runtime` entry has no default model: a call that names
 # only that provider fails before dispatch and lists the provider's routes.
