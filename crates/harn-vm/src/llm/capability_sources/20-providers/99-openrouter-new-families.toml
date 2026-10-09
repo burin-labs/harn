@@ -275,10 +275,14 @@ prefers_xml_tools = false
 thinking_block_style = "inline"
 
 # Command A+ through OpenRouter's Cohere endpoint, probed 2026-10-09: native
-# tool calls and the tool-result round trip are clean and reasoning turns on
-# and off. OpenRouter lists neither `tool_choice` nor `reasoning_effort` for
-# the endpoint and silently drops what it does not list, so only `auto` tool
-# choice and on/off reasoning are declared.
+# tool calls and the tool-result round trip are clean. With
+# `reasoning.enabled: false` the request succeeded but the model wrote its
+# deliberation into the visible answer ("The user asks: ..."), so the rule
+# declares that reasoning cannot be disabled: Harn then omits the directive
+# on ordinary calls, which the auto policy would otherwise resolve to off.
+# OpenRouter lists neither `tool_choice` nor `reasoning_effort` for the
+# endpoint and silently drops what it does not list, so only `auto` tool
+# choice is declared and effort is not claimed.
 [[provider.openrouter]]
 model_match = "cohere/command-a*"
 top_k_supported = true
@@ -287,6 +291,7 @@ preferred_tool_format = "native"
 allowed_tool_choice_modes = ["auto"]
 structured_output = "native"
 thinking_modes = ["enabled"]
+reasoning_disable_supported = false
 prompt_caching = true
 vision_supported = true
 text_tool_wire_format_supported = true

@@ -14791,6 +14791,7 @@
       "context_window": 1048576,
       "logical_model": "mistral-large-4-0",
       "equivalence_group": "mistral-large-4-0",
+      "wire_model": "mistral-large-4",
       "api_dialect": "openai_chat_compat",
       "architecture": {
         "parameter_count_b": 1050.0,
@@ -32258,10 +32259,16 @@
       },
       "reasoning": {
         "modes": [
-          "adaptive"
+          "adaptive",
+          "effort"
         ],
-        "effort_supported": false,
-        "effort_levels": [],
+        "effort_supported": true,
+        "effort_levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh"
+        ],
         "none_supported": false,
         "interleaved_supported": false,
         "preserve_thinking": false
@@ -37093,7 +37100,7 @@
     },
     {
       "provider": "mistral",
-      "model": "mistral-large-4-0",
+      "model": "mistral-large-4",
       "base_url": "https://api.mistral.ai/v1",
       "secret_env": "MISTRAL_API_KEY",
       "label": "Mistral Large 4",
@@ -40250,6 +40257,7 @@
         "extended_thinking",
         "prefers_markdown_scaffolding",
         "prompt_caching",
+        "reasoning_effort",
         "streaming",
         "structured_output",
         "structured_output_mode:native_json",

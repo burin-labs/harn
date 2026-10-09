@@ -6721,8 +6721,11 @@ thinking_block_style = "reasoning_summary"
 
 # Grok 4.20's non-reasoning snapshot does not reason, and its multi-agent
 # snapshot found no tool-accepting endpoint through OpenRouter's xAI route
-# (2026-10-09 probe: HTTP 404 "No endpoints found that support tool use"),
-# though it reasoned at effort `low` and `xhigh`. Both layer onto `grok-*`.
+# (2026-10-09 probe: HTTP 404 "No endpoints found that support tool use").
+# xAI documents the multi-agent effort ladder as low/medium/high/xhigh (it
+# sets the agent count), and `low` and `xhigh` reasoned in that probe. Both
+# rows layer onto `grok-*`. The 4.20 reasoning snapshot keeps the family's
+# adaptive-only claim: xAI documents no effort values for it.
 [[provider.xai]]
 model_match = "grok-4.20*non-reasoning*"
 extends = true
@@ -6733,6 +6736,9 @@ model_match = "grok-4.20-multi-agent*"
 extends = true
 native_tools = false
 preferred_tool_format = "text"
+thinking_modes = ["adaptive", "effort"]
+reasoning_effort_supported = true
+reasoning_effort_levels = ["low", "medium", "high", "xhigh"]
 
 [[provider.xai]]
 model_match = "grok-*"
@@ -7843,10 +7849,14 @@ prefers_xml_tools = false
 thinking_block_style = "inline"
 
 # Command A+ through OpenRouter's Cohere endpoint, probed 2026-10-09: native
-# tool calls and the tool-result round trip are clean and reasoning turns on
-# and off. OpenRouter lists neither `tool_choice` nor `reasoning_effort` for
-# the endpoint and silently drops what it does not list, so only `auto` tool
-# choice and on/off reasoning are declared.
+# tool calls and the tool-result round trip are clean. With
+# `reasoning.enabled: false` the request succeeded but the model wrote its
+# deliberation into the visible answer ("The user asks: ..."), so the rule
+# declares that reasoning cannot be disabled: Harn then omits the directive
+# on ordinary calls, which the auto policy would otherwise resolve to off.
+# OpenRouter lists neither `tool_choice` nor `reasoning_effort` for the
+# endpoint and silently drops what it does not list, so only `auto` tool
+# choice is declared and effort is not claimed.
 [[provider.openrouter]]
 model_match = "cohere/command-a*"
 top_k_supported = true
@@ -7855,6 +7865,7 @@ preferred_tool_format = "native"
 allowed_tool_choice_modes = ["auto"]
 structured_output = "native"
 thinking_modes = ["enabled"]
+reasoning_disable_supported = false
 prompt_caching = true
 vision_supported = true
 text_tool_wire_format_supported = true

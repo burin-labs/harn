@@ -811,14 +811,18 @@ strengths = ["coding", "tool_use", "reasoning", "long_context", "vision", "agent
 # $2.09 out against an original $1.36 / $0.14 / $4.18 per MTok; it states no
 # end date, and Artificial Analysis reports a two-week window (to about
 # 2026-10-20), so the row carries the original card with the sale as a
-# promotion to review then. The id follows the docs slug and OpenRouter; the
-# model page's code sample says `mistral-large-4`, and no source confirms that
-# `mistral-large-latest` has moved. Mistral documents only `reasoning_effort`
+# promotion to review then. The catalog id follows the docs slug and
+# OpenRouter, while the wire id is the API name the model card lists first
+# (`mistral-large-4`, shown with one alias; the reasoning guide names the
+# `mistral-large-4-0` alias). Medium 3.5's card lists `mistral-medium-3-5`
+# first the same way, and that is the id its row sends. No source confirms
+# that `mistral-large-latest` has moved. Mistral documents only `reasoning_effort`
 # `high` and `none` for it. Not call-verified on the direct route (no
 # MISTRAL_API_KEY on this host); see the OpenRouter row for the probe.
 [models."mistral-large-4-0"]
 name = "Mistral Large 4"
 provider = "mistral"
+wire_model = "mistral-large-4"
 context_window = 1048576
 released = "2026-10-06"
 logical_model = "mistral-large-4-0"
