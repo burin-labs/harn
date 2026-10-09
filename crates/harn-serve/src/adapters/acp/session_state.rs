@@ -79,13 +79,7 @@ impl AcpServer {
         params: &serde_json::Value,
     ) -> bool {
         if let Some(cwd) = session_cwd_filter(params) {
-            let Ok(selected) = resolve_acp_session_cwd(Some(cwd)) else {
-                return false;
-            };
-            let Ok(actual) = session.cwd.canonicalize() else {
-                return false;
-            };
-            if selected != actual {
+            if session.cwd.to_string_lossy() != cwd {
                 return false;
             }
         }
@@ -168,12 +162,14 @@ impl AcpServer {
         Ok(())
     }
 
-    /// Select the canonical store from a declared cwd and captured host inputs.
-    /// Listing and cold admission share this address and workspace boundary.
-    pub(super) fn restore_store_scope(
+    /// Project root to consult for a session this server never saw, resolved
+    /// exactly the way `session/list` resolves the roots it lists persisted
+    /// sessions from. Sharing the resolution is what keeps listing and loading
+    /// pointed at one store.
+    pub(super) fn restore_project_root(
         &self,
         params: &serde_json::Value,
-    ) -> Result<harn_vm::SessionStoreScope, AcpSessionProjectRootError> {
+    ) -> Result<PathBuf, AcpSessionProjectRootError> {
         let cwd = params
             .get("cwd")
             .and_then(|value| value.as_str())
@@ -184,13 +180,7 @@ impl AcpServer {
                     .and_then(|harn| harn.get("cwd"))
                     .and_then(|value| value.as_str())
             });
-        let cwd = resolve_acp_session_cwd(cwd)?;
-        harn_vm::SessionStoreScope::resolve(&cwd, &self.launcher_environment).map_err(|error| {
-            AcpSessionProjectRootError::Invalid {
-                cwd: cwd.to_string_lossy().into_owned(),
-                detail: error.to_string(),
-            }
-        })
+        resolve_acp_session_project_root(cwd)
     }
 
     pub(super) async fn handle_session_load(
@@ -249,7 +239,7 @@ impl AcpServer {
         // The observability event log carries this process's live stream, so
         // prefer it while it has the session: it is the freshest view and keeps
         // an in-flight session promptable rather than replay-only.
-        let mut replay_events = if self.sessions.contains_key(&session_id) {
+        let mut replay_events =
             match harn_vm::orchestration::load_agent_session_replay_events(&session_id).await {
                 Ok(events) => events,
                 Err(error) => {
@@ -260,10 +250,7 @@ impl AcpServer {
                     );
                     return;
                 }
-            }
-        } else {
-            Vec::new()
-        };
+            };
 
         let mut durable_checkpoint = None;
         if self.sessions.contains_key(&session_id) {
@@ -271,10 +258,25 @@ impl AcpServer {
                 self.send_session_open_error(id, &error);
                 return;
             }
+        } else if !replay_events.is_empty() {
+            if let Err(error) = self.register_restored_session(
+                &session_id,
+                params,
+                environment
+                    .clone()
+                    .expect("cold load has declared authority"),
+            ) {
+                self.send_session_open_error(id, &error);
+                return;
+            }
         } else {
-            // Every cold admission is scoped to the selected canonical store.
-            // Process telemetry cannot grant visibility to another workspace.
-            let project_root = match self.restore_store_scope(params) {
+            // Nothing live and nothing observed. Existence is not the event
+            // log's to decide — that sink is best-effort and is registered only
+            // while a prompt runs — so ask the canonical store, which is the
+            // same oracle `session/list` answers from. Anything it lists must
+            // load, or the client is handed ids it is then told are unknown
+            // while the load path says they are unknown.
+            let project_root = match self.restore_project_root(params) {
                 Ok(project_root) => project_root,
                 Err(error) => {
                     self.send_error(id, -32602, &format!("session/load: {error}"));
@@ -283,12 +285,12 @@ impl AcpServer {
             };
             // Cold replay owns page buffers and its checkpoint state. Keep its
             // future out of the nested ACP dispatch frame.
-            match Box::pin(project_root.run(
+            match Box::pin(
                 harn_vm::agent_session_restore::load_canonical_session_replay(
-                    project_root.workspace(),
+                    &project_root,
                     &session_id,
                 ),
-            ))
+            )
             .await
             {
                 Ok(Some(persisted)) => {
@@ -329,15 +331,14 @@ impl AcpServer {
                 if let Some(project_root) = self
                     .sessions
                     .get(&session_id)
-                    .map(|session| session.store_scope.clone())
+                    .map(|session| session.project_root.clone())
                 {
-                    let _ = project_root
-                        .run(harn_vm::agent_session_spend::record_session_llm_spend_usd(
-                            project_root.workspace(),
-                            &session_id,
-                            spent,
-                        ))
-                        .await;
+                    let _ = harn_vm::agent_session_spend::record_session_llm_spend_usd(
+                        &project_root,
+                        &session_id,
+                        spent,
+                    )
+                    .await;
                 }
             }
         }

@@ -460,6 +460,84 @@ async fn acp_session_restore_methods_reject_unknown_sessions() {
     }
 }
 
+/// A fresh in-process server (one that never created the id via
+/// `session/new`) must still restore a host-saved session from
+/// persisted replay events: register it as a live, promptable session,
+/// replay history, and return the normal restore-result shape. This is
+/// the in-process analogue of the WebSocket hub's persisted fallback and
+/// unblocks the Rust TUI saved-session picker.
+#[tokio::test(flavor = "current_thread")]
+async fn acp_session_load_restores_persisted_session_unknown_to_server() {
+    harn_vm::event_log::reset_active_event_log();
+    let log = harn_vm::event_log::install_memory_for_current_thread(64);
+
+    // Persist replay history under an id the server has never created.
+    let session_id = "burin-saved-session".to_string();
+    install_test_agent_event_log_sink(&log, &session_id);
+    harn_vm::agent_events::emit_event(&harn_vm::agent_events::AgentEvent::AgentMessageChunk {
+        session_id: session_id.clone(),
+        content: "restored history".to_string(),
+        history_source_event_id: None,
+    });
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let mut server = AcpServer::new_with_output(AcpServerConfig::new(None), AcpOutput::Channel(tx));
+
+    server
+        .handle_incoming_message(serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "session/load",
+            "params": {"sessionId": session_id, "cwd": ".", "environmentPolicy": {"kind": "isolated"}},
+        }))
+        .await;
+
+    let replay = recv_json(&mut rx).await;
+    assert_eq!(replay["method"], "session/update");
+    assert_eq!(
+        replay["params"]["update"]["sessionUpdate"],
+        "agent_message_chunk"
+    );
+    assert_eq!(
+        replay["params"]["update"]["content"]["text"],
+        "restored history"
+    );
+    assert_eq!(
+        replay["params"]["update"]["_meta"]["harn"]["replayed"],
+        true
+    );
+
+    let loaded = recv_json(&mut rx).await;
+    assert_eq!(loaded["id"], 1);
+    assert_eq!(loaded["result"]["session"]["sessionId"], session_id);
+    assert_eq!(
+        loaded["result"]["session"]["liveState"], "live",
+        "the in-process server restores to a live, promptable session"
+    );
+    assert_eq!(loaded["result"]["replayed"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        loaded["result"]["replayed"][0]["type"],
+        "agent_message_chunk"
+    );
+
+    // After restore the session is tracked, so a second load takes the
+    // live reload path (and still replays the persisted history).
+    server
+        .handle_incoming_message(serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "session/load",
+            "params": {"sessionId": session_id},
+        }))
+        .await;
+    let _second_replay = recv_json(&mut rx).await;
+    let second = recv_json(&mut rx).await;
+    assert_eq!(second["id"], 2);
+    assert_eq!(second["result"]["session"]["sessionId"], session_id);
+
+    harn_vm::agent_events::clear_session_sinks(&session_id);
+    harn_vm::event_log::reset_active_event_log();
+}
+
 /// `session/load` for an id that is neither live nor persisted must fail
 /// loudly so the client can distinguish a stale/typo id from a restore.
 #[tokio::test(flavor = "current_thread")]

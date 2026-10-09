@@ -1229,10 +1229,6 @@ mod tests {
             store
                 .create(CreateSession {
                     id: Some(session_id.to_string()),
-                    cwd: Some(project.path().canonicalize().unwrap().display().to_string()),
-                    project_scope: Some(
-                        project.path().canonicalize().unwrap().display().to_string(),
-                    ),
                     ..CreateSession::default()
                 })
                 .await

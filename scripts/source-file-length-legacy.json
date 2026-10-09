@@ -10,6 +10,7 @@
     "crates/harn-parser/src/typechecker/inference/expressions.rs",
     "crates/harn-parser/src/typechecker/tests/narrowing.rs",
     "crates/harn-serve/src/adapters/acp/events/tests.rs",
+    "crates/harn-serve/src/adapters/acp/tests/modes.rs",
     "crates/harn-serve/src/adapters/acp/tests/sessions.rs",
     "crates/harn-vm/src/channels/mod.rs",
     "crates/harn-vm/src/connectors/mod.rs",

@@ -335,18 +335,14 @@ pub async fn list_persisted_sessions(
     else {
         return Ok(Vec::new());
     };
-    let sessions = store
+    store
         .list(ListFilter {
             project_scope: Some(project_root.to_string_lossy().into_owned()),
             limit: Some(limit),
             ..ListFilter::default()
         })
         .await
-        .map_err(|error| SessionTimelineError::SessionStore(error.to_string()))?;
-    Ok(sessions
-        .into_iter()
-        .filter(crate::persistent_state::session_matches_current_workspace)
-        .collect())
+        .map_err(|error| SessionTimelineError::SessionStore(error.to_string()))
 }
 
 pub async fn subscribe_session_timeline(

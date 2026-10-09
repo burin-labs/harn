@@ -51,7 +51,7 @@ impl AcpServer {
             return Ok(0.0);
         };
         let llm_spend = session.concurrent_control.llm_spend.clone();
-        let store_scope = session.store_scope.clone();
+        let project_root = session.project_root.clone();
         let known = llm_spend
             .lock()
             .unwrap_or_else(|error| error.into_inner())
@@ -59,13 +59,10 @@ impl AcpServer {
         if let Some(spent) = known {
             return Ok(spent);
         }
-        let spent = store_scope
-            .run(harn_vm::agent_session_spend::load_session_llm_spend_usd(
-                store_scope.workspace(),
-                session_id,
-            ))
-            .await
-            .map_err(|error| error.to_string())?;
+        let spent =
+            harn_vm::agent_session_spend::load_session_llm_spend_usd(&project_root, session_id)
+                .await
+                .map_err(|error| error.to_string())?;
         llm_spend
             .lock()
             .unwrap_or_else(|error| error.into_inner())
@@ -170,19 +167,17 @@ impl AcpServer {
             self.send_prompt_error(id, &message);
             return;
         }
-        let (cwd, project_root, store_scope, environment_policy) =
-            match self.sessions.get(&session_id) {
-                Some(session) => (
-                    session.cwd.clone(),
-                    session.project_root.clone(),
-                    session.store_scope.clone(),
-                    session.environment_policy.clone(),
-                ),
-                None => {
-                    self.send_prompt_protocol_error(id, &format!("Unknown session: {session_id}"));
-                    return;
-                }
-            };
+        let (cwd, project_root, environment_policy) = match self.sessions.get(&session_id) {
+            Some(session) => (
+                session.cwd.clone(),
+                session.project_root.clone(),
+                session.environment_policy.clone(),
+            ),
+            None => {
+                self.send_prompt_protocol_error(id, &format!("Unknown session: {session_id}"));
+                return;
+            }
+        };
         let turn_budget = llm_spend
             .lock()
             .unwrap_or_else(|error| error.into_inner())
@@ -378,16 +373,15 @@ impl AcpServer {
         // Both scoped spans are boxed before they are awaited. `Scoped` holds the
         // wrapped future inline, so keeping these on the stack would add the whole
         // prompt body's state to this frame, which a nested descent re-enters.
-        let (vm_baseline, vm_baseline_cache_hit, vm_baseline_prepare_ms) = match store_scope
-            .run(mode_policy.run(Box::pin(self.prepare_vm_baseline_cached(
+        let (vm_baseline, vm_baseline_cache_hit, vm_baseline_prepare_ms) = match mode_policy
+            .run(Box::pin(self.prepare_vm_baseline_cached(
                 &source,
                 source_path.as_deref(),
                 target_pipeline.as_deref(),
                 &cwd,
                 &project_root,
-                &store_scope,
                 &current_mode_id,
-            ))))
+            )))
             .await
         {
             Ok(value) => value,
@@ -414,7 +408,7 @@ impl AcpServer {
                 host_bridge: &host_bridge_for_response,
                 cancelled: &cancellation.cancelled,
             },
-            Box::pin(store_scope.run(mode_policy.run(Box::pin(async {
+            Box::pin(mode_policy.run(Box::pin(async {
                 let _budget_guard = turn_budget.install_session_turn(llm_spent_usd.unwrap_or(0.0));
                 let _spend_recorder = SessionSpendRecorder::new(
                     llm_spend.clone(),
@@ -443,7 +437,7 @@ impl AcpServer {
                     },
                 )
                 .await
-            })))),
+            }))),
         );
         let result = event_transport.scope(execution).await;
         self.finish_profile_turn(&session_id, profile_turn);
@@ -456,13 +450,12 @@ impl AcpServer {
         });
         let persisted = match turn_spent_usd {
             Some(spent) => {
-                store_scope
-                    .run(harn_vm::agent_session_spend::record_session_llm_spend_usd(
-                        store_scope.workspace(),
-                        &session_id,
-                        spent,
-                    ))
-                    .await
+                harn_vm::agent_session_spend::record_session_llm_spend_usd(
+                    &project_root,
+                    &session_id,
+                    spent,
+                )
+                .await
             }
             None => Ok(()),
         };

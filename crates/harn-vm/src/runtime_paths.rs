@@ -50,19 +50,6 @@ pub fn state_root(base_dir: &Path) -> PathBuf {
     )
 }
 
-pub(crate) fn captured_state_root(
-    base_dir: &Path,
-    launcher: &crate::security::LauncherEnvironment,
-) -> PathBuf {
-    if let Some(root) = launcher
-        .captured_value("HARN_SESSION_STORE_ROOT")
-        .filter(|root| !root.trim().is_empty())
-    {
-        return resolve_root_value(base_dir, Some(root), ".").join(".harn");
-    }
-    state_root_value(base_dir, launcher.captured_value(HARN_STATE_DIR_ENV), None)
-}
-
 /// Resolve the state root for a path stored in a portable record.
 pub fn state_root_reference(base_dir: &Path) -> PathBuf {
     if let Some(root) = crate::persistent_state::current_persistent_state_root() {

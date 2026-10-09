@@ -71,10 +71,9 @@ pub use sessions::{
 };
 use sessions::{
     cancel_session_command_handles, lookup_session_cancellation, preempt_session_interruption,
-    prepare_session_request, resolve_acp_session_cwd, session_project_root_for_cwd,
-    ConcurrentSessionControl, ConcurrentSessionControls, PreparedSessionRequest,
-    PromptCancellation, Session, SessionBudget, SessionCancellation, SessionInfo,
-    SessionSpendRecorder,
+    prepare_session_request, session_project_root_for_cwd, ConcurrentSessionControl,
+    ConcurrentSessionControls, PreparedSessionRequest, PromptCancellation, Session, SessionBudget,
+    SessionCancellation, SessionInfo, SessionSpendRecorder,
 };
 pub(crate) use transport::run_acp_channel_server_with_existing_handle;
 pub use transport::{
@@ -1035,7 +1034,6 @@ struct VmBaselineCacheEntry {
     source: String,
     cwd: PathBuf,
     project_root: Option<PathBuf>,
-    store_scope: harn_vm::SessionStoreScope,
     mode_id: String,
     baseline: harn_vm::VmBaseline,
 }

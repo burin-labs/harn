@@ -84,17 +84,9 @@ auth_style = "none"
     let (tx, mut rx, server, session_id) =
         start_acp_channel_session_with_config(config, json!(dir.path())).await;
     let store = harn_vm::open_canonical_store(dir.path()).unwrap();
-    let workspace = dir
-        .path()
-        .canonicalize()
-        .unwrap()
-        .to_string_lossy()
-        .into_owned();
     store
         .create(CreateSession {
             id: Some(session_id.clone()),
-            cwd: Some(workspace.clone()),
-            project_scope: Some(workspace),
             ..Default::default()
         })
         .await

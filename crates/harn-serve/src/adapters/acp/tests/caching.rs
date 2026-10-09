@@ -87,11 +87,6 @@ async fn vm_baseline_cached_serves_file_backed_context_until_key_changes() {
     let pipeline_path = dir.path().join("baseline.harn");
     let source = "pipeline main(harness: Harness) { harness.stdio.println(\"baseline\") }\n";
     std::fs::write(&pipeline_path, source).expect("write pipeline");
-    let store_scope = harn_vm::SessionStoreScope::resolve(
-        dir.path(),
-        &harn_vm::security::LauncherEnvironment::from_snapshot(Default::default()),
-    )
-    .unwrap();
 
     let mut server = AcpServer::new(AcpServerConfig::new(Some(
         pipeline_path.to_string_lossy().to_string(),
@@ -103,7 +98,6 @@ async fn vm_baseline_cached_serves_file_backed_context_until_key_changes() {
             None,
             dir.path(),
             dir.path(),
-            &store_scope,
             "code",
         )
         .await
@@ -117,7 +111,6 @@ async fn vm_baseline_cached_serves_file_backed_context_until_key_changes() {
             None,
             dir.path(),
             dir.path(),
-            &store_scope,
             "code",
         )
         .await
@@ -131,7 +124,6 @@ async fn vm_baseline_cached_serves_file_backed_context_until_key_changes() {
             Some("review"),
             dir.path(),
             dir.path(),
-            &store_scope,
             "code",
         )
         .await
@@ -149,7 +141,6 @@ async fn vm_baseline_cached_serves_file_backed_context_until_key_changes() {
             Some("review"),
             dir.path(),
             dir.path(),
-            &store_scope,
             "plan",
         )
         .await
@@ -168,7 +159,6 @@ async fn vm_baseline_cached_serves_file_backed_context_until_key_changes() {
             Some("review"),
             dir.path(),
             other_root.path(),
-            &store_scope,
             "plan",
         )
         .await
@@ -180,15 +170,7 @@ async fn vm_baseline_cached_serves_file_backed_context_until_key_changes() {
     );
 
     let (baseline, hit6, ms6) = server
-        .prepare_vm_baseline_cached(
-            source,
-            None,
-            None,
-            dir.path(),
-            dir.path(),
-            &store_scope,
-            "code",
-        )
+        .prepare_vm_baseline_cached(source, None, None, dir.path(), dir.path(), "code")
         .await
         .expect("inline prepare");
     assert!(baseline.is_none());

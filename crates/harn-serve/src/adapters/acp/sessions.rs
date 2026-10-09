@@ -702,7 +702,6 @@ impl SessionCancellation {
 pub(super) struct Session {
     pub(super) cwd: PathBuf,
     pub(super) project_root: PathBuf,
-    pub(super) store_scope: harn_vm::SessionStoreScope,
     /// If a cancel was requested for the current prompt execution.
     pub(super) cancellation: SessionCancellation,
     /// Host bridge for the active prompt, if one is running.
@@ -763,18 +762,12 @@ impl std::fmt::Display for AcpSessionProjectRootError {
 
 impl std::error::Error for AcpSessionProjectRootError {}
 
-/// Resolve the execution and capability root for a declared workspace.
+/// Resolve the only project store a persisted-session request may inspect.
 ///
-/// The caller must name an existing directory; Harn resolves its nearest
-/// manifest. Persistent sessions bind the selected cwd separately.
+/// Cold session lookup never searches sibling projects or falls back to the
+/// listener's process directory. The caller must name an existing directory;
+/// Harn then resolves it to its nearest project root.
 pub fn resolve_acp_session_project_root(
-    cwd: Option<&str>,
-) -> Result<PathBuf, AcpSessionProjectRootError> {
-    let canonical = resolve_acp_session_cwd(cwd)?;
-    Ok(harn_vm::stdlib::process::find_project_root(&canonical).unwrap_or(canonical))
-}
-
-pub(super) fn resolve_acp_session_cwd(
     cwd: Option<&str>,
 ) -> Result<PathBuf, AcpSessionProjectRootError> {
     let cwd = cwd
@@ -792,7 +785,7 @@ pub(super) fn resolve_acp_session_cwd(
             detail: "path is not a directory".to_string(),
         });
     }
-    Ok(canonical)
+    Ok(harn_vm::stdlib::process::find_project_root(&canonical).unwrap_or(canonical))
 }
 
 /// Project one canonical store row into ACP's persisted-session shape.

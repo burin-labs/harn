@@ -186,8 +186,6 @@ async fn a_resumed_session_is_charged_what_it_spent_before() {
             .create(CreateSession {
                 id: Some(session_id.to_string()),
                 usage_cost_usd_micros: 25_000,
-                cwd: Some(project.canonicalize().unwrap().display().to_string()),
-                project_scope: Some(project.canonicalize().unwrap().display().to_string()),
                 ..CreateSession::default()
             })
             .await
@@ -245,8 +243,6 @@ async fn loading_an_older_session_backfills_its_spend_from_recorded_calls() {
         store
             .create(CreateSession {
                 id: Some(session_id.to_string()),
-                cwd: Some(project.canonicalize().unwrap().display().to_string()),
-                project_scope: Some(project.canonicalize().unwrap().display().to_string()),
                 ..CreateSession::default()
             })
             .await

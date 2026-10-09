@@ -109,7 +109,6 @@ pub(crate) struct AmbientExecutionScope {
     execution_context: Option<RunExecutionRecord>,
     /// The VM source directory, which anchors source-relative path resolution.
     source_dir: Option<PathBuf>,
-    persistent_state: Option<crate::persistent_state::PersistentStateContext>,
     /// The current mutation session (audit/run_id/approval/secret-scope). Same
     /// shape as `execution_context`: one `Option` held across the loop's awaits.
     mutation_session: Option<MutationSessionRecord>,
@@ -225,9 +224,6 @@ impl AmbientExecutionScope {
             ),
             execution_context: clone_via_swap(swap_thread_execution_context),
             source_dir: clone_via_swap(swap_source_dir),
-            persistent_state: clone_via_swap(
-                crate::persistent_state::swap_persistent_state_context,
-            ),
             mutation_session: clone_via_swap(swap_mutation_session),
             session_environment: clone_via_swap(swap_session_environment),
             process_admission: clone_via_swap(swap_process_admission_context),
@@ -300,9 +296,6 @@ impl AmbientExecutionScope {
             session_stack: clone_via_swap(swap_current_session_stack),
             execution_context: clone_via_swap(swap_thread_execution_context),
             source_dir: clone_via_swap(swap_source_dir),
-            persistent_state: clone_via_swap(
-                crate::persistent_state::swap_persistent_state_context,
-            ),
             mutation_session: clone_via_swap(swap_mutation_session),
             session_environment: clone_via_swap(swap_session_environment),
             process_admission: clone_via_swap(swap_process_admission_context),
@@ -379,10 +372,6 @@ impl AmbientExecutionScope {
         swap_slot(&mut self.session_stack, swap_current_session_stack);
         swap_slot(&mut self.execution_context, swap_thread_execution_context);
         swap_slot(&mut self.source_dir, swap_source_dir);
-        swap_slot(
-            &mut self.persistent_state,
-            crate::persistent_state::swap_persistent_state_context,
-        );
         swap_slot(&mut self.mutation_session, swap_mutation_session);
         swap_slot(&mut self.session_environment, swap_session_environment);
         swap_slot(&mut self.process_admission, swap_process_admission_context);
@@ -627,15 +616,6 @@ pub(crate) fn scope_ambient_transaction<F: Future>(inner: F) -> Scoped<F> {
 /// Preserve the caller's complete logical execution scope in a spawned task.
 pub(crate) fn scope_inline_subtask<F: Future>(inner: F) -> Scoped<F> {
     scope_ambient(AmbientExecutionScope::capture_for_inline_subtask(), inner)
-}
-
-pub(crate) fn scope_persistent_state_context<F: Future>(
-    context: crate::persistent_state::PersistentStateContext,
-    inner: F,
-) -> Scoped<F> {
-    let mut scope = AmbientExecutionScope::capture_for_inline_subtask();
-    scope.persistent_state = Some(context);
-    scope_ambient(scope, inner)
 }
 
 /// Install a ceiling for one closure and all workers it spawns. Nested scopes
