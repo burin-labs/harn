@@ -3719,6 +3719,7 @@ dependencies = [
  "croner",
  "flate2",
  "futures",
+ "globset",
  "harn-flock",
  "harn-fmt",
  "harn-kernel",
