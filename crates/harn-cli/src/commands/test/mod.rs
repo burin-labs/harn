@@ -453,10 +453,16 @@ async fn run_user_test_targets(
     // Reports describe the requested suite, not whichever affected test file
     // happens to be selected first. Retain that owner before impact analysis
     // narrows the execution list, including all the way to an empty list.
+    let package_target = [".".to_owned()];
+    let report_targets = if args.target.as_deref() == Some("package") {
+        &package_target[..]
+    } else {
+        paths
+    };
     let mut report_config = UserTestReportConfig::for_requested_targets(
         args.junit.as_deref(),
         args.json_out.as_deref(),
-        paths,
+        report_targets,
     );
     if args.target.as_deref() == Some("package") {
         report_config.display_target = Some("package".to_owned());
