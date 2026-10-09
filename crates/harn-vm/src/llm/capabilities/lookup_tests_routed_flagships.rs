@@ -215,12 +215,18 @@ fn october_routes_carry_their_probed_reasoning_controls() {
 
     let multi = lookup("xai", "grok-4.20-multi-agent-0309");
     assert!(!multi.native_tools);
+    assert!(!multi.text_tool_wire_format_supported);
+    assert_eq!(multi.preferred_tool_format.as_deref(), Some("none"));
+    assert!(!llm_config::capability_tags_from_capabilities(&multi).contains(&"tools".to_string()));
     assert_eq!(
         multi.reasoning_effort_levels,
         vec!["low", "medium", "high", "xhigh"]
     );
     let reasoning = lookup("xai", "grok-4.20-0309-reasoning");
     assert!(reasoning.native_tools);
+    assert!(
+        llm_config::capability_tags_from_capabilities(&reasoning).contains(&"tools".to_string())
+    );
     assert!(reasoning.reasoning_effort_levels.is_empty());
     let non_reasoning = lookup("xai", "grok-4.20-0309-non-reasoning");
     assert!(non_reasoning.thinking_modes.is_empty());

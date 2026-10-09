@@ -102,7 +102,9 @@ thinking_block_style = "reasoning_summary"
 # snapshot found no tool-accepting endpoint through OpenRouter's xAI route
 # (2026-10-09 probe: HTTP 404 "No endpoints found that support tool use").
 # xAI documents the multi-agent effort ladder as low/medium/high/xhigh (it
-# sets the agent count), and `low` and `xhigh` reasoned in that probe. Both
+# sets the agent count), and `low` and `xhigh` reasoned in that probe. With
+# no tool endpoint, the multi-agent row also turns off the text-tool channel
+# (the Groq Compound shape), so its catalog tags do not claim `tools`. Both
 # rows layer onto `grok-*`. The 4.20 reasoning snapshot keeps the family's
 # adaptive-only claim: xAI documents no effort values for it.
 [[provider.xai]]
@@ -114,7 +116,8 @@ thinking_modes = []
 model_match = "grok-4.20-multi-agent*"
 extends = true
 native_tools = false
-preferred_tool_format = "text"
+preferred_tool_format = "none"
+text_tool_wire_format_supported = false
 thinking_modes = ["adaptive", "effort"]
 reasoning_effort_supported = true
 reasoning_effort_levels = ["low", "medium", "high", "xhigh"]
