@@ -207,6 +207,7 @@ pub const CI_CACHE_WRITE_JOBS = [
   "rust-cli",
   "rust-check-inputs",
   "rust-cache-refresh",
+  "rust-cache-refresh-cli",
 ]
 
 // Compile fan-out on the producer is measured, not typed, and the ceiling now

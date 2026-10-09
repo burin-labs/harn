@@ -1,5 +1,8 @@
 import { run_ci_cache_policy } from "./ci_cache_policy/entrypoint.harn"
 pub import {
+  rust_cache_generation_projection_errors,
+} from "./ci_cache_policy/generation_projection.harn"
+pub import {
   harn_check_cache_action_errors,
   harn_check_cache_writer_errors,
 } from "./ci_cache_policy/harn_check_cache.harn"
@@ -9,6 +12,7 @@ pub import {
   ci_linux_lane_policy_errors,
   cli_producer_hosted_ceiling_minutes,
   event_skip_propagation_errors,
+  linux_cache_consumers_restore_only_errors,
   producer_admission_expression,
   producer_cache_save_reserve_minutes,
   producer_cli_timeout_expression,
@@ -17,8 +21,10 @@ pub import {
   producer_security_timeout_expression,
   producer_step_budget_margin_errors,
   producer_timeout_expression,
+  rust_cache_generation_admission_errors,
   rust_cache_refresh_concurrency_errors,
   rust_cache_refresh_miss_only_errors,
+  rust_cache_refresh_prerequisite_errors,
   sccache_action_cache_size_errors,
   step_budget_margin_errors,
 } from "./ci_cache_policy/linux_checks.harn"
