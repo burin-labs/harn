@@ -99,7 +99,7 @@ pub(crate) async fn run_command(mut args: TestArgs) {
             || args.evals
             || matches!(
                 args.target.as_deref(),
-                Some("agents-conformance" | "conformance" | "protocols" | "package")
+                Some("agents-conformance" | "conformance" | "protocols")
             ))
     {
         command_error("--fail-on-skip is supported only for one-shot user-test suites");
@@ -109,7 +109,7 @@ pub(crate) async fn run_command(mut args: TestArgs) {
             || args.evals
             || matches!(
                 args.target.as_deref(),
-                Some("agents-conformance" | "conformance" | "protocols" | "package")
+                Some("agents-conformance" | "conformance" | "protocols")
             ))
     {
         command_error("timing receipts are supported only for user-test suites");
@@ -120,7 +120,7 @@ pub(crate) async fn run_command(mut args: TestArgs) {
             || args.evals
             || matches!(
                 args.target.as_deref(),
-                Some("agents-conformance" | "conformance" | "protocols" | "package")
+                Some("agents-conformance" | "conformance" | "protocols")
             ))
     {
         command_error("--affected-from is supported only for one-shot user-test suites");
@@ -179,6 +179,11 @@ pub(crate) async fn run_command(mut args: TestArgs) {
         }
         crate::run_package_evals();
     } else if args.determinism {
+        if args.target.as_deref() == Some("package") {
+            command_error(
+                "`harn test package` does not support --determinism; select a test file directly",
+            );
+        }
         run_determinism_command(Box::new(args), shard_requested).await;
     } else {
         run_standard_command(args, operator_approval_grant).await;
@@ -318,7 +323,7 @@ async fn run_determinism_command(args: Box<TestArgs>, shard_requested: bool) {
 }
 
 async fn run_standard_command(
-    args: TestArgs,
+    mut args: TestArgs,
     operator_approval_grant: Option<harn_vm::orchestration::OperatorApprovalGrant>,
 ) {
     let cli_skill_dirs: Vec<PathBuf> = args.skill_dir.iter().map(PathBuf::from).collect();
@@ -387,6 +392,32 @@ async fn run_standard_command(
         } else {
             let mut paths = vec![t.to_string()];
             paths.extend(args.test_paths.iter().cloned());
+            if t == "package" {
+                if !args.test_paths.is_empty() || args.watch {
+                    command_error(
+                        "`harn test package` does not accept extra positional paths or --watch",
+                    );
+                }
+                let anchor = std::env::current_dir()
+                    .unwrap_or_else(|error| command_error(&error.to_string()));
+                let (inventory, problems) =
+                    super::package_verify::test_discovery::inspect_package_test_discovery(&anchor);
+                if !problems.is_empty() {
+                    command_error(&problems.join("\n"));
+                }
+                if inventory.selected_files.is_empty() {
+                    eprintln!(
+                        "Package intentionally has no tests: {}",
+                        inventory.allow_empty_reason.as_deref().unwrap_or_default()
+                    );
+                    args.allow_empty = true;
+                }
+                paths = inventory
+                    .selected_files
+                    .iter()
+                    .map(|path| path.to_string_lossy().into_owned())
+                    .collect();
+            }
             run_user_test_targets(&paths, &args, &cli_skill_dirs, operator_approval_grant).await;
         }
     } else {
@@ -422,11 +453,14 @@ async fn run_user_test_targets(
     // Reports describe the requested suite, not whichever affected test file
     // happens to be selected first. Retain that owner before impact analysis
     // narrows the execution list, including all the way to an empty list.
-    let report_config = UserTestReportConfig::for_requested_targets(
+    let mut report_config = UserTestReportConfig::for_requested_targets(
         args.junit.as_deref(),
         args.json_out.as_deref(),
         paths,
     );
+    if args.target.as_deref() == Some("package") {
+        report_config.display_target = Some("package".to_owned());
+    }
     let selected_paths;
     let mut allow_empty = args.allow_empty;
     let paths = if let Some(base) = args.affected_from.as_deref() {
@@ -631,6 +665,7 @@ fn command_error(message: &str) -> ! {
 pub(crate) struct UserTestReportConfig<'a> {
     reports: Option<UserTestReports<'a>>,
     suite_root: PathBuf,
+    display_target: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -655,6 +690,7 @@ impl<'a> UserTestReportConfig<'a> {
         Self {
             reports,
             suite_root,
+            display_target: None,
         }
     }
 
@@ -986,9 +1022,14 @@ pub(crate) async fn run_user_tests(
     // problems: an explicitly allowed empty run is a normal outcome and must
     // not write there.
     let census = discovery::census_targets(&paths);
+    let display_targets = report_config
+        .display_target
+        .as_ref()
+        .map(std::slice::from_ref)
+        .unwrap_or(path_strs);
     println!(
         "{}",
-        discovery::coverage_line(path_strs, &census, summary.total)
+        discovery::coverage_line(display_targets, &census, summary.total)
     );
 
     if let Some(reports) = report_config.reports() {
@@ -1019,7 +1060,7 @@ pub(crate) async fn run_user_tests(
         process::exit(crate::exit::PROGRAM_FAILURE);
     }
     if summary.total == 0 && !allow_empty {
-        eprintln!("{}", empty_user_test_message(path_strs, filter));
+        eprintln!("{}", empty_user_test_message(display_targets, filter));
         process::exit(crate::exit::PROGRAM_FAILURE);
     }
 }

@@ -132,9 +132,29 @@ pub struct Manifest {
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PackageTestsConfig {
+    /// Package-relative directories or individual .harn files. Omission uses tests/.
+    pub roots: Option<Vec<PackageTestRoot>>,
     #[serde(default)]
     pub allow_empty: bool,
     pub reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+pub enum PackageTestRoot {
+    Path(String),
+    Directory(PackageTestDirectory),
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PackageTestDirectory {
+    pub path: String,
+    pub recursive: bool,
+    /// Basename glob, defaulting to all .harn files.
+    pub pattern: Option<String>,
+    #[serde(default)]
+    pub exclude: Vec<String>,
 }
 
 /// A single `[[contributes]]` host-surface contribution.
