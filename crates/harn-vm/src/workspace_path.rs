@@ -452,12 +452,12 @@ mod tests {
                 assert!(info.resolved_host_path().is_some());
             }
         }
-        for input in ["//server/share/../../..", "//?/UNC/server/share/../../.."] {
-            let expected = if input.starts_with("//?/") {
-                "//?/UNC/server/share/"
-            } else {
-                "//server/share/"
-            };
+        for (input, expected) in [
+            ("//server/share/../../..", "//server/share/"),
+            ("//?/UNC/server/share/../../..", "//?/UNC/server/share/"),
+            (r"\\server/share\..\..\..", "//server/share/"),
+            (r"\\?\UNC/server\share/..\..\..", "//?/UNC/server/share/"),
+        ] {
             assert_eq!(normalize_lexical(input), expected);
             assert!(split_segments(input).0, "UNC paths are absolute");
         }
@@ -476,6 +476,12 @@ mod tests {
             r"\\.\pipe\name\..\..\secret",
             "//?/UNC//share/../main.rs",
             "//?/UNC/server/../../secret",
+            "//?/UNC/../share/secret",
+            "//?/UNC/server/./secret",
+            "//server/../secret",
+            "//../share/secret",
+            r"\\?\UNC/server\..\..\secret",
+            r"\\server/..\secret",
             "//?/C:relative/../secret",
             "//?//../secret",
         ] {

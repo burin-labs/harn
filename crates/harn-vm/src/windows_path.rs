@@ -74,7 +74,16 @@ pub(crate) fn is_opaque_device_path(posix: &str) -> bool {
         return true;
     }
     let Some(rest) = posix.strip_prefix("//?/") else {
-        return false;
+        // Repeated POSIX slashes and incomplete //server spellings retain
+        // their normal behavior, but dot components cannot name a UNC root.
+        return posix.strip_prefix("//").is_some_and(|rest| {
+            let mut components = rest.split('/');
+            let server = components.next().unwrap_or_default();
+            let share = components.next().unwrap_or_default();
+            !server.is_empty()
+                && !share.is_empty()
+                && (!valid_unc_component(server) || !valid_unc_component(share))
+        });
     };
     let bytes = rest.as_bytes();
     let drive =
@@ -91,10 +100,14 @@ fn split_unc_share(path: &str) -> Option<(&str, &str, &str)> {
     let mut components = path.splitn(3, '/');
     let server = components.next()?;
     let share = components.next()?;
-    if server.is_empty() || share.is_empty() {
+    if !valid_unc_component(server) || !valid_unc_component(share) {
         return None;
     }
     Some((server, share, components.next().unwrap_or_default()))
+}
+
+fn valid_unc_component(component: &str) -> bool {
+    !component.is_empty() && !matches!(component, "." | "..")
 }
 
 /// Strip a Windows verbatim (`\\?\`) prefix from a path string:

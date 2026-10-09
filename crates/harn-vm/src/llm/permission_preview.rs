@@ -484,6 +484,10 @@ mod tests {
             r"\\?\pipe\name\..\..\secret",
             r"\\.\pipe\name\..\..\secret",
             "//?/UNC//share/../main.rs",
+            "//?/UNC/server/../../secret",
+            "//server/../secret",
+            r"\\?\UNC/server\..\..\secret",
+            r"\\server/..\secret",
             "//?/C:relative/../secret",
         ] {
             let entry =
