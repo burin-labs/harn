@@ -255,7 +255,7 @@ pub fn cargo_dependency_from_line(
     return nil
   }
   const alias = matches[0].groups[0]
-  let table = manifest == nil ? toml_parse(line) : manifest
+  let table = manifest ?? toml_parse(line)
   if section == "" && manifest != nil
     && (manifest.get("package") != nil || manifest.get("workspace") != nil) {
     return nil
@@ -303,11 +303,7 @@ pub fn cargo_dependency_from_line(
   if package_name == "" {
     throw "dependency package identity must be a nonempty string"
   }
-  return {
-    package_name: package_name,
-    path: projection.path,
-    version: projection.version,
-  }
+  return {package_name: package_name, path: projection.path, version: projection.version}
 }
 
 pub fn cargo_section_from_line(line: string) -> string? {
@@ -315,9 +311,11 @@ pub fn cargo_section_from_line(line: string) -> string? {
   return section.count == 0 ? nil : section[0].groups[0]
 }
 
-// Source-preserving writer boundary: inline values may span lines, but a
-// version literal must be on its dependency's declaration line. Other layouts
-// refuse during planning before any manifest in the version cut is written.
+/**
+ * Source-preserving writer boundary: inline values may span lines, but a
+ * version literal must be on its dependency's declaration line. Other layouts
+ * refuse during planning before any manifest in the version cut is written.
+ */
 pub fn rewrite_local_dependency_versions(
   text: string,
   package_names: list<string>,
