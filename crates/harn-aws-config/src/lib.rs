@@ -3,6 +3,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+// The published upstream archive omits its internal test fixtures. Harn's
+// owning SDK tests exercise this crate as a normal dependency instead.
+#![cfg(not(test))]
 /* Automatically managed default lints */
 #![cfg_attr(docsrs, feature(doc_cfg))]
 /* End of automatically managed default lints */

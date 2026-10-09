@@ -20,8 +20,15 @@ embedders. A root-only Cargo patch would disappear from that graph.
 Upstream authorship, Apache-2.0 license, features, and SDK chain implementation
 remain in their original files. The published upstream archive omits the fixture
 directory used by its internal unit tests. Those unavailable tests and upstream
-doctests are disabled in the package manifest. Their development dependencies
-and example target are omitted; runtime dependencies and features are preserved.
+doctests are disabled in the package manifest. A recorded crate-level
+`cfg(not(test))` also disables the unavailable internal test target when Cargo
+forces every target to compile. The normal SDK library remains enabled, and
+Harn's owning SDK tests consume it as a dependency. Upstream development
+dependencies and the example target are omitted; runtime dependencies and
+features are preserved.
+The recorded manifest names only upstream's unused `bytes` declaration in
+`cargo-machete` metadata, preserving that dependency without exempting the crate
+from dependency checks.
 Harn's Bedrock tests exercise the
 actual credential and region chains with captured static, profile, and local ECS
 inputs. They must prove that distinct parallel sessions retain distinct inputs.
