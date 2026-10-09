@@ -505,7 +505,7 @@ fn package_test_roots_reject_unreadable_files_and_symlink_traversal() {
     )
     .unwrap();
     let original = fs::metadata(&file).unwrap().permissions();
-    fs::set_permissions(&file, fs::Permissions::from_mode(0)).unwrap();
+    fs::set_permissions(&file, fs::Permissions::from_mode(0o0)).unwrap();
     let permissions_enforced = fs::read(&file).is_err();
     let unreadable = run(Command::new(harn_e2e_binary())
         .current_dir(temp.path())
