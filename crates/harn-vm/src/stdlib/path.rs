@@ -28,48 +28,14 @@ fn to_native(s: &str) -> String {
     }
 }
 
-/// The Windows verbatim prefix, in the spelling [`to_posix`] produces.
-///
-/// `\\?\C:\repo` arrives here as `//?/C:/repo`. Without this, the empty
-/// segment between its two leading slashes is dropped along with every other
-/// empty segment and the path comes back as `/?/C:/repo`: neither a verbatim
-/// path nor a drive-absolute one, and no longer the prefix
-/// `stdlib/process.rs`'s `child_process_cwd` is written to strip. Windows
-/// rejects the result as a working directory, which is how a normalized `cwd`
-/// became "The directory name is invalid".
-const VERBATIM_PREFIX: &str = "//?/";
-
 /// Split a path into segments, preserving whether it was absolute.
 ///
 /// The second element is the root to reprint ahead of the segments: a drive
 /// (`C:`), a verbatim prefix and its drive (`//?/C:`), or a bare verbatim
 /// prefix ahead of a UNC share (`//?/`). Everything after it is ordinary
 /// segment arithmetic.
-#[expect(
-    clippy::string_slice,
-    reason = "the drive prefix split at 2 is guarded to be two ASCII bytes"
-)]
 fn split_segments(p: &str) -> (bool, Option<String>, Vec<String>) {
-    let posix = to_posix(p);
-    let mut root = String::new();
-    let mut rest: &str = &posix;
-    if let Some(after_prefix) = posix.strip_prefix(VERBATIM_PREFIX) {
-        root.push_str(VERBATIM_PREFIX);
-        rest = after_prefix;
-    }
-    let bytes = rest.as_bytes();
-    if bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' {
-        root.push_str(&rest[..2]);
-        rest = &rest[2..];
-    }
-    let drive = if root.is_empty() { None } else { Some(root) };
-    let absolute = rest.starts_with('/');
-    let segments: Vec<String> = rest
-        .split('/')
-        .filter(|s| !s.is_empty())
-        .map(|s| s.to_string())
-        .collect();
-    (absolute, drive, segments)
+    crate::workspace_path::split_segments(p)
 }
 
 /// Normalise a path: collapse `..`, dedupe `/`, strip trailing slashes.
@@ -77,38 +43,7 @@ fn normalize(p: &str) -> String {
     if p.is_empty() {
         return String::new();
     }
-    let (absolute, drive, segments) = split_segments(p);
-    let mut stack: Vec<String> = Vec::new();
-    for seg in segments {
-        match seg.as_str() {
-            "." => continue,
-            ".." => {
-                if let Some(top) = stack.last() {
-                    if top != ".." {
-                        stack.pop();
-                        continue;
-                    }
-                }
-                if !absolute {
-                    stack.push("..".into());
-                }
-            }
-            _ => stack.push(seg),
-        }
-    }
-    let mut out = String::new();
-    if let Some(d) = drive {
-        out.push_str(&d);
-    }
-    if absolute {
-        out.push('/');
-    }
-    out.push_str(&stack.join("/"));
-    if out.is_empty() {
-        ".".into()
-    } else {
-        out
-    }
+    crate::workspace_path::normalize_lexical(p)
 }
 
 /// Extract the file name (last segment) of a path.

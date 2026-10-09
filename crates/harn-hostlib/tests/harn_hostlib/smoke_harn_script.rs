@@ -54,6 +54,7 @@ fn run_harn_with_policy(
 }
 
 #[test]
+#[cfg(unix)] // Declared-root subprocess reads require OS filesystem confinement.
 fn repository_identity_runs_through_read_only_harness_without_process_authority() {
     let dir = super::tools_git::fixture_repo();
     let root = dir.path().to_string_lossy().replace('\\', "/");
@@ -111,6 +112,27 @@ return {{identity: identity, generic_git_denied: generic_git_denied,
         dir.path().canonicalize().unwrap(),
     );
     assert!(!dir.path().join("must-not-exist").exists());
+}
+
+#[test]
+#[cfg(windows)]
+fn repository_identity_refuses_unconfined_declared_root_reads() {
+    let dir = super::tools_git::fixture_repo();
+    let root = dir.path().to_string_lossy().replace('\\', "/");
+    let repo = serde_json::to_string(&root).unwrap();
+    let policy = serde_json::from_value(serde_json::json!({
+        "capabilities": {"workspace": ["read_text"]},
+        "side_effect_level": "read_only",
+        "read_only_roots": [root],
+    }))
+    .unwrap();
+    let (result, _) = run_harn_with_policy(
+        &format!(
+            "return try {{ harness.tools.git_repository_identity({{repo: {repo}}}); false }} catch {{ true }}"
+        ),
+        Some(policy),
+    );
+    assert_eq!(harn_vm::llm::vm_value_to_json(&result), true);
 }
 
 #[test]

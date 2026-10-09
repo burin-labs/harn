@@ -301,16 +301,26 @@ pub(crate) fn is_absolute_path_syntax(path: &str) -> bool {
     bytes.len() >= 3 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' && bytes[2] == b'/'
 }
 
-fn split_segments(path: &str) -> (bool, Option<String>, Vec<String>) {
+pub(crate) fn split_segments(path: &str) -> (bool, Option<String>, Vec<String>) {
     let posix = to_posix(path);
-    let mut drive: Option<String> = None;
+    let mut prefix = String::new();
     let mut rest = posix.as_str();
-    let bytes = posix.as_bytes();
+    // Canonical Windows paths carry a verbatim prefix. Losing its second
+    // slash changes the resource and prevents pre-approval file reads.
+    if let Some(after_prefix) = rest.strip_prefix("//?/") {
+        prefix.push_str("//?/");
+        rest = after_prefix;
+    } else if let Some(after_prefix) = rest.strip_prefix("//") {
+        prefix.push_str("//");
+        rest = after_prefix;
+    }
+    let bytes = rest.as_bytes();
     if bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' {
-        let (drive_prefix, remainder) = posix.split_at(2);
-        drive = Some(drive_prefix.to_string());
+        let (drive_prefix, remainder) = rest.split_at(2);
+        prefix.push_str(drive_prefix);
         rest = remainder;
     }
+    let drive = (!prefix.is_empty()).then_some(prefix);
     let absolute = rest.starts_with('/');
     let segments = rest
         .split('/')
@@ -320,7 +330,7 @@ fn split_segments(path: &str) -> (bool, Option<String>, Vec<String>) {
     (absolute, drive, segments)
 }
 
-fn normalize_lexical(path: &str) -> String {
+pub(crate) fn normalize_lexical(path: &str) -> String {
     let (absolute, drive, segments) = split_segments(path);
     let mut stack = Vec::new();
     for segment in segments {
@@ -410,6 +420,22 @@ fn recover_root_drift(path: &str, workspace_root: &Path) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn windows_prefixes_survive_permission_path_normalization() {
+        for (input, expected) in [
+            (r"\\?\C:\repo\src\..\main.rs", "//?/C:/repo/main.rs"),
+            (
+                r"\\?\UNC\server\share\main.rs",
+                "//?/UNC/server/share/main.rs",
+            ),
+            (r"\\server\share\main.rs", "//server/share/main.rs"),
+        ] {
+            let info = classify_workspace_path(input, None);
+            assert_eq!(info.host_path.as_deref(), Some(expected));
+            assert_eq!(info.kind, WorkspacePathKind::HostAbsolute);
+        }
+    }
 
     #[test]
     fn relative_path_is_workspace_relative() {
