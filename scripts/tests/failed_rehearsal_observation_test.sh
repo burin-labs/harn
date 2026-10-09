@@ -26,10 +26,13 @@ env:
   SOURCE_REVISION: $source_sha
   CANARY_WORKFLOW: harn-repin-rehearsal.yml
 ##[endgroup]
-CONSUMER_CANARY dispatched run=$child ref=default
+CONSUMER_CANARY dispatched run=$child ref=default started_at=1700000000
 ##[group]Run CANARY_REPOSITORY="\$CANARY_OWNER/\$CANARY_NAME" bash scripts/ci/consumer_canary.sh --observe
 env:
   CANARY_RUN_ID: $child
+  CANARY_STARTED_AT: 1700000000
+  CANARY_WINDOW_SECONDS: 2700
+  CANARY_DEADLINE_SECONDS: 7200
 ##[endgroup]
 CONSUMER_CANARY verdict=fail conclusion=cancelled run=$child wall_seconds=1510
 ##[error]Process completed with exit code 1.
@@ -95,6 +98,9 @@ for mutation in duplicate_source missing_source wrong_source wrong_producer \
 ##[group]Run CANARY_REPOSITORY="\$CANARY_OWNER/\$CANARY_NAME" bash scripts/ci/consumer_canary.sh --observe
 env:
   CANARY_RUN_ID: $child
+  CANARY_STARTED_AT: 1700000000
+  CANARY_WINDOW_SECONDS: 2700
+  CANARY_DEADLINE_SECONDS: 7200
 ##[endgroup]
 CONSUMER_CANARY verdict=fail conclusion=cancelled run=$child wall_seconds=1510
 ##[error]Process completed with exit code 1.
@@ -103,7 +109,7 @@ env:
   SOURCE_REVISION: $source_sha
   CANARY_WORKFLOW: harn-repin-rehearsal.yml
 ##[endgroup]
-CONSUMER_CANARY dispatched run=$child ref=default
+CONSUMER_CANARY dispatched run=$child ref=default started_at=1700000000
 Post job cleanup.
 Cleaning up orphan processes
 EOF
@@ -118,4 +124,5 @@ for log in resolver consumer authorization; do
   mv "$fixture/changed" "$fixture/$log"
 done
 observe >/dev/null
+node "$root/scripts/tests/failed_rehearsal_windows_test.mjs" "$root" "$fixture" "$source_sha" "$producer" "$child"
 echo 'Historical rehearsal observation: split-step failure accepted; 19 false proofs refused.'

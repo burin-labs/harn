@@ -216,6 +216,7 @@ PATH="$scratch/bin:$PATH" STUB="$scratch" CANARY_REPOSITORY=acme/widget-host \
   bash "$root/scripts/ci/consumer_canary.sh" --dispatch > "$scratch/out" 2>&1
 grep -qx run_id=42 "$scratch/gho"
 grep -qx started_at=1000 "$scratch/gho"
+grep -qx 'CONSUMER_CANARY dispatched run=42 ref=default started_at=1000' "$scratch/out"
 
 observe() {
   : > "$scratch/gho"
@@ -270,17 +271,18 @@ grep -q 'reason=no_verdict_before_deadline run=42 verdict=unmeasured wall_second
 # Use the same Harn YAML reader as the owning CI policy. Cold audit workers
 # have the shared Harn binary and Node, but intentionally no npm install.
 HARN_BIN_NO_BUILD=1 "$root/scripts/harn_bin.sh" -- run -e '
-import { read_yaml } from "std/fs"
+import { read_json, read_yaml } from "std/fs"
 fn main(harness: Harness) {
   harness.stdio.println(json_stringify({
     workflow: read_yaml(harness.fs, ".github/workflows/consumer-canary.yml", nil),
     action: read_yaml(harness.fs, ".github/actions/observe-consumer/action.yml", nil),
+    policy: read_json(harness.fs, "scripts/ci/consumer_canary_policy.json"),
   }))
 }' > "$scratch/observer-contract.json"
 node - "$scratch/observer-contract.json" <<'JS'
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
-const { workflow: { jobs }, action } = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+const { workflow: { jobs }, action, policy } = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
 const steps = jobs.consumers.steps;
 assert.equal(jobs.decide.steps[0].with.ref, '${{ github.sha }}');
 assert.equal(steps[0].with.ref, '${{ github.sha }}');
@@ -291,7 +293,7 @@ assert.equal(dispatch.length, 1);
 assert(dispatch[0].run.includes('--dispatch'));
 assert(dispatch[0].run.includes('certified-consumer-source/Cargo.toml'));
 const windows = steps.filter((step) => step.uses === './.github/actions/observe-consumer');
-assert.equal(windows.length, 3);
+assert.equal(windows.length, Math.ceil(policy.deadline_seconds / policy.window_seconds));
 for (const step of windows) {
   assert.equal(step.with['run-id'], '${{ steps.canary.outputs.run_id }}');
   assert.equal(step.with['started-at'], '${{ steps.canary.outputs.started_at }}');
@@ -302,8 +304,10 @@ assert.equal(mint.uses, 'actions/create-github-app-token@bcd2ba49218906704ab6c1a
 assert.deepEqual(Object.fromEntries(Object.entries(mint.with).filter(([key]) => key.startsWith('permission-'))), { 'permission-actions': 'read' });
 assert.equal(mint.with.repositories, '${{ inputs.repository }}');
 assert.equal(observe.env.GH_TOKEN, '${{ steps.token.outputs.token }}');
-assert.equal(observe.env.CANARY_WINDOW_SECONDS, '2700');
-assert.equal(observe.env.CANARY_DEADLINE_SECONDS, '7200');
+assert.equal(observe.env.CANARY_STARTED_AT, '${{ inputs.started-at }}');
+assert.equal(observe.env.CANARY_RUN_ID, '${{ inputs.run-id }}');
+assert.equal(observe.env.CANARY_WINDOW_SECONDS, String(policy.window_seconds));
+assert.equal(observe.env.CANARY_DEADLINE_SECONDS, String(policy.deadline_seconds));
 assert(observe.run.includes('--observe') && !observe.run.includes('--dispatch'));
 JS
 

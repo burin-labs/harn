@@ -52,6 +52,8 @@ set -euo pipefail
 
 # shellcheck source=scripts/lib/release_version.sh
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/lib/release_version.sh"
+# shellcheck source=scripts/lib/consumer_canary_policy.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/lib/consumer_canary_policy.sh"
 
 # The consumer's repository name, which no output line may contain.
 CANARY_SECRET_NAME=
@@ -139,7 +141,7 @@ canary_dispatch() {
   run_id=$(grep -oE "https://github\.com/$repo/actions/runs/[0-9]+" <<< "$dispatched" | head -1 || true)
   run_id=${run_id##*/}
   [[ -n "$run_id" ]] || canary_fail dispatch_returned_no_run
-  canary_say "CONSUMER_CANARY dispatched run=$run_id ref=$label"
+  canary_say "CONSUMER_CANARY dispatched run=$run_id ref=$label started_at=$started"
 
   CANARY_RUN_ID=$run_id
   CANARY_STARTED_AT=$started
@@ -149,15 +151,18 @@ canary_dispatch() {
 # renew the same scoped App authority and carry the original run and clock.
 canary_observe() {
   local repo=${CANARY_REPOSITORY:-} run_id=${CANARY_RUN_ID:-} started=${CANARY_STARTED_AT:-}
-  local poll=${CANARY_POLL_SECONDS:-60} deadline=${CANARY_DEADLINE_SECONDS:-7200}
-  local window=${CANARY_WINDOW_SECONDS:-2700} window_started
+  local policy poll_limit deadline_limit window_limit
+  policy=$(consumer_canary_policy) || canary_fail observation_budget_contract_invalid
+  read -r poll_limit deadline_limit window_limit <<< "$(jq -r '[.poll_seconds,.deadline_seconds,.window_seconds] | @tsv' <<< "$policy")"
+  local poll=${CANARY_POLL_SECONDS:-$poll_limit} deadline=${CANARY_DEADLINE_SECONDS:-$deadline_limit}
+  local window=${CANARY_WINDOW_SECONDS:-$window_limit} window_started
   [[ "$repo" =~ ^[^/]+/[^/]+$ ]] || canary_fail consumer_repository_unset
   CANARY_SECRET_NAME=${repo#*/}
   [[ "$run_id" =~ ^[1-9][0-9]*$ && "$started" =~ ^[1-9][0-9]*$ ]] \
     || canary_fail observation_identity_invalid
-  [[ "$window" =~ ^[0-9]+$ && "$window" -le 2700 ]] \
+  [[ "$window" =~ ^[0-9]+$ && "$window" -le "$window_limit" ]] \
     || canary_fail observation_window_invalid "run=$run_id"
-  [[ "$poll" =~ ^[0-9]+$ && "$poll" -le 60 && "$deadline" =~ ^-?[0-9]+$ && "$deadline" -le 7200 ]] \
+  [[ "$poll" =~ ^[0-9]+$ && "$poll" -le "$poll_limit" && "$deadline" =~ ^-?[0-9]+$ && "$deadline" -le "$deadline_limit" ]] \
     || canary_fail observation_budget_invalid "run=$run_id"
   window_started=$(date +%s)
   CANARY_PENDING=false
