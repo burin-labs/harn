@@ -32,9 +32,24 @@ const otherEnvironment = {
   id: 3,
   key: "v0-rust-harn-ci-cli-workspace-crates-v3-Linux-x64-ffffffff-6d94302f",
 };
+const gitConfig = path.join(scratch, "empty-gitconfig");
+fs.writeFileSync(gitConfig, "");
+const gitEnv = {
+  ...process.env,
+  GIT_CONFIG_GLOBAL: gitConfig,
+  GIT_CONFIG_NOSYSTEM: "1",
+};
+for (const name of [
+  "GIT_AUTHOR_NAME",
+  "GIT_AUTHOR_EMAIL",
+  "GIT_COMMITTER_NAME",
+  "GIT_COMMITTER_EMAIL",
+])
+  delete gitEnv[name];
 const runGit = (args) =>
-  execFileSync("git", args, {
+  execFileSync("git", ["-c", "user.useConfigOnly=true", ...args], {
     cwd: repository,
+    env: gitEnv,
     encoding: "utf8",
     stdio: ["pipe", "pipe", "pipe"],
   }).trim();
@@ -83,7 +98,10 @@ try {
     "PASS actual startup: failed pinned fetch reached and scratch removed",
   );
   fs.mkdirSync(repository);
-  execFileSync("git", ["init", "--bare", origin], { stdio: "pipe" });
+  execFileSync("git", ["init", "--bare", origin], {
+    stdio: "pipe",
+    env: gitEnv,
+  });
   runGit(["init", "-b", "main"]);
   runGit(["config", "maintenance.auto", "false"]);
   fs.mkdirSync(path.join(repository, "scripts/ci"), { recursive: true });
@@ -108,6 +126,10 @@ try {
     "core.hooksPath=/dev/null",
     "-c",
     "commit.gpgsign=false",
+    "-c",
+    "user.name=Cache lifecycle fixture",
+    "-c",
+    "user.email=cache-fixture@example.invalid",
     "commit",
     "-m",
     "Fixture source",
@@ -272,6 +294,10 @@ if(args[0]==='api' && args.length===4 && args.includes('--paginate') && args.inc
     "core.hooksPath=/dev/null",
     "-c",
     "commit.gpgsign=false",
+    "-c",
+    "user.name=Cache lifecycle fixture",
+    "-c",
+    "user.email=cache-fixture@example.invalid",
     "commit",
     "-m",
     "Advance main",
