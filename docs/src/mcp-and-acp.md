@@ -1022,6 +1022,21 @@ foreign session or foreign boundary schema is refused before creating the child.
 See [Canonical ACP forks](sessions.md#canonical-acp-forks) for the history and
 compaction contract.
 
+### Persisted workspace scope
+
+ACP creation, listing, and cold loading select the canonical store from the
+declared existing `cwd`. The default is that directory's `.harn`, even when a
+parent directory has a `harn.toml`. The nearest manifest continues to govern
+execution and capability policy.
+
+The server captures trusted launcher storage configuration once.
+`HARN_SESSION_STORE_ROOT` selects `<root>/.harn`; otherwise `HARN_STATE_DIR`
+selects the state directory directly. Relative overrides resolve from the
+selected workspace. A physical store shared by multiple workspaces exposes
+only rows whose `cwd` and `project_scope` match the selected canonical workspace.
+Cold loading never searches siblings or admits a session from process telemetry.
+The Harn CLI's explicit session-store `root` option keeps its existing meaning.
+
 ### Session modes
 
 Harn exposes ACP
