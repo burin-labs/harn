@@ -497,8 +497,12 @@ impl AcpServer {
                 self.send_error(id, -32602, &format!("Unknown session: {session_id}"));
                 return;
             };
-            let root = &session.project_root;
-            let store = match harn_vm::open_canonical_store(root) {
+            let root = session.store_scope.workspace();
+            let opened = {
+                let _scope = session.store_scope.enter();
+                harn_vm::open_canonical_store(root)
+            };
+            let store = match opened {
                 Ok(store) => store,
                 Err(error) => {
                     self.send_error(id, -32000, &error.to_string());
@@ -626,13 +630,18 @@ impl AcpServer {
                 }
             };
 
-            let root = self
+            let scope = self
                 .sessions
                 .get(&src_id)
                 .expect("validated source session")
-                .project_root
+                .store_scope
                 .clone();
-            let store = match harn_vm::open_canonical_store(&root) {
+            let root = scope.workspace();
+            let opened = {
+                let _scope = scope.enter();
+                harn_vm::open_canonical_store(root)
+            };
+            let store = match opened {
                 Ok(store) => store,
                 Err(error) => {
                     self.send_error(id, -32000, &error.to_string());
@@ -640,7 +649,7 @@ impl AcpServer {
                 }
             };
             let new_session_id =
-                harn_vm::agent_sessions::fork_canonical(&store, &root, &src_id, boundary, dst_id)
+                harn_vm::agent_sessions::fork_canonical(&store, root, &src_id, boundary, dst_id)
                     .await;
             let (new_session_id, source_boundary) = match new_session_id {
                 Ok(Some(fork)) => (fork.session_id, fork.source_boundary),
@@ -707,6 +716,7 @@ impl AcpServer {
                 Session {
                     cwd: fork_cwd,
                     project_root,
+                    store_scope: scope.clone(),
                     cancellation,
                     host_bridge: None,
                     inject_state: concurrent_control.inject_state.clone(),

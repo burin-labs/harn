@@ -72,6 +72,9 @@ pub async fn load_canonical_session_replay_from_store(
             )))
         }
     };
+    if !crate::persistent_state::session_matches_current_workspace(&checkpoint) {
+        return Ok(None);
+    }
     read_canonical_session_prefix(store, session_id, checkpoint)
         .await
         .map(Some)

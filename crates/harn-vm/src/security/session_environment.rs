@@ -135,6 +135,13 @@ impl fmt::Debug for LauncherEnvironment {
 }
 
 impl LauncherEnvironment {
+    pub(crate) fn captured_value(&self, name: &str) -> Option<&str> {
+        self.snapshot
+            .iter()
+            .find(|(candidate, _)| environment_names_equal(candidate, name))
+            .map(|(_, value)| value.as_str())
+    }
+
     /// Capture the host once, before moving work to another engine thread.
     pub fn capture() -> Self {
         Self::from_snapshot(capture_process_environment())
