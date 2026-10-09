@@ -54,7 +54,15 @@ impl WorkspacePathInfo {
     }
 
     pub fn resolved_host_path(&self) -> Option<PathBuf> {
-        self.host_path.as_ref().map(PathBuf::from)
+        self.host_path.as_ref().map(|path| {
+            // The wire uses forward slashes; Windows verbatim paths require
+            // native separators when handed back to filesystem APIs.
+            if cfg!(windows) {
+                PathBuf::from(path.replace('/', "\\"))
+            } else {
+                PathBuf::from(path)
+            }
+        })
     }
 }
 
@@ -305,23 +313,41 @@ pub(crate) fn split_segments(path: &str) -> (bool, Option<String>, Vec<String>) 
     let posix = to_posix(path);
     let mut prefix = String::new();
     let mut rest = posix.as_str();
+    let mut unc = false;
     // Canonical Windows paths carry a verbatim prefix. Losing its second
     // slash changes the resource and prevents pre-approval file reads.
     if let Some(after_prefix) = rest.strip_prefix("//?/") {
         prefix.push_str("//?/");
         rest = after_prefix;
+        if let Some(after_unc) = rest.strip_prefix("UNC/") {
+            prefix.push_str("UNC/");
+            rest = after_unc;
+            unc = true;
+        }
     } else if let Some(after_prefix) = rest.strip_prefix("//") {
         prefix.push_str("//");
         rest = after_prefix;
+        unc = true;
+    }
+    if unc {
+        // A share is a filesystem root. Parent traversal cannot remove its
+        // server or share components, including in verbatim UNC spelling.
+        let mut components = rest.splitn(3, '/');
+        prefix.push_str(components.next().unwrap_or_default());
+        if let Some(share) = components.next() {
+            prefix.push('/');
+            prefix.push_str(share);
+        }
+        rest = components.next().unwrap_or_default();
     }
     let bytes = rest.as_bytes();
-    if bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' {
+    if !unc && bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' {
         let (drive_prefix, remainder) = rest.split_at(2);
         prefix.push_str(drive_prefix);
         rest = remainder;
     }
     let drive = (!prefix.is_empty()).then_some(prefix);
-    let absolute = rest.starts_with('/');
+    let absolute = unc || rest.starts_with('/');
     let segments = rest
         .split('/')
         .filter(|segment| !segment.is_empty())
@@ -434,6 +460,15 @@ mod tests {
             let info = classify_workspace_path(input, None);
             assert_eq!(info.host_path.as_deref(), Some(expected));
             assert_eq!(info.kind, WorkspacePathKind::HostAbsolute);
+        }
+        for input in ["//server/share/../../..", "//?/UNC/server/share/../../.."] {
+            let expected = if input.starts_with("//?/") {
+                "//?/UNC/server/share/"
+            } else {
+                "//server/share/"
+            };
+            assert_eq!(normalize_lexical(input), expected);
+            assert!(split_segments(input).0, "UNC paths are absolute");
         }
     }
 

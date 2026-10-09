@@ -21,6 +21,13 @@ fn run_harn_with_policy(
     source: &str,
     policy: Option<harn_vm::orchestration::CapabilityPolicy>,
 ) -> (VmValue, String) {
+    run_harn_with_policy_result(source, policy).expect("execute under policy")
+}
+
+fn run_harn_with_policy_result(
+    source: &str,
+    policy: Option<harn_vm::orchestration::CapabilityPolicy>,
+) -> Result<(VmValue, String), harn_vm::VmError> {
     let source = format!("fn main(harness: Harness) {{\n{source}\n}}");
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -42,12 +49,11 @@ fn run_harn_with_policy(
                 vm.set_harness(Harness::real());
                 let result = if let Some(policy) = policy {
                     harn_vm::orchestration::scope_execution_policy(policy, vm.execute(&chunk))
-                        .await
-                        .expect("execute under policy")
+                        .await?
                 } else {
-                    vm.execute(&chunk).await.expect("execute")
+                    vm.execute(&chunk).await?
                 };
-                (result, vm.output().to_string())
+                Ok((result, vm.output().to_string()))
             })
             .await
     })
@@ -126,13 +132,25 @@ fn repository_identity_refuses_unconfined_declared_root_reads() {
         "read_only_roots": [root],
     }))
     .unwrap();
-    let (result, _) = run_harn_with_policy(
-        &format!(
-            "return try {{ harness.tools.git_repository_identity({{repo: {repo}}}); false }} catch {{ true }}"
-        ),
-        Some(policy),
+    let source = format!("return harness.tools.git_repository_identity({{repo: {repo}}})");
+    let (identity, _) = run_harn(&source);
+    let identity = harn_vm::llm::vm_value_to_json(&identity);
+    assert_eq!(
+        std::fs::canonicalize(identity["worktree_root"].as_str().unwrap()).unwrap(),
+        dir.path().canonicalize().unwrap()
     );
-    assert_eq!(harn_vm::llm::vm_value_to_json(&result), true);
+    let error = run_harn_with_policy_result(&source, Some(policy))
+        .expect_err("Windows cannot confine declared-root subprocess reads");
+    let harn_vm::VmError::Thrown(payload) = error else {
+        panic!("expected a hostlib refusal, got {error:?}");
+    };
+    let payload = harn_vm::llm::vm_value_to_json(&payload);
+    assert_eq!(payload["builtin"], "hostlib_tools_git_repository_identity");
+    assert_eq!(payload["kind"], "backend_error");
+    assert_eq!(
+        payload["message"],
+        "hostlib: hostlib_tools_git_repository_identity: Error [tool_rejected]: declared-root command requires enforced filesystem read confinement on this platform"
+    );
 }
 
 #[test]

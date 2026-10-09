@@ -728,10 +728,14 @@ mod tests {
         crate::stdlib::process::set_thread_execution_context(None);
         assert_eq!(evidence.len(), 1);
         assert_eq!(
-            std::path::Path::new(evidence[0]["path"].as_str().expect("captured path"))
+            evidence[0]["path"],
+            directory
+                .path()
+                .join("src.rs")
                 .canonicalize()
-                .expect("captured path resolves"),
-            directory.path().join("src.rs").canonicalize().unwrap()
+                .unwrap()
+                .to_string_lossy()
+                .replace('\\', "/")
         );
         assert_eq!(evidence[0]["oldText"], "old\n");
         assert_eq!(evidence[0]["newText"], "new\n");
