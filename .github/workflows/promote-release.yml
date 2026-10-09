@@ -345,6 +345,8 @@ jobs:
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         with:
           images: ghcr.io/burin-labs/harn
+          labels: |
+            org.opencontainers.image.revision=${{ needs.plan.outputs.source_sha }}
           # Promotion publishes only stable versions, so each one is latest.
           tags: |
             type=raw,value=${{ needs.plan.outputs.version }}
