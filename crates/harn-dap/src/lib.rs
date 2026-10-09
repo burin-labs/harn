@@ -46,13 +46,13 @@ mod environment_tests {
     #[test]
     fn adapter_keeps_sdk_profile_but_withholds_it_from_children() {
         const PROFILE: &str = "AWS_PROFILE";
-        const FUTURE: &str = "HARN_DAP_FUTURE_CREDENTIAL";
-        const ORDINARY: &str = "HARN_DAP_ENV_CONTROL";
+        const FUTURE: &str = "DAP_TEST_FUTURE_CREDENTIAL";
+        const ORDINARY: &str = "DAP_TEST_ENV_CONTROL";
         let old_profile = std::env::var_os(PROFILE);
         let old_future = std::env::var_os(FUTURE);
         let old_ordinary = std::env::var_os(ORDINARY);
         let overlay = harn_vm::llm_config::parse_config_toml(
-            "[providers.future_dap]\nbase_url = \"https://future.example.test/v1\"\nauth_style = \"bearer\"\nauth_env = \"HARN_DAP_FUTURE_CREDENTIAL\"\nchat_endpoint = \"/chat/completions\"\n",
+            "[providers.future_dap]\nbase_url = \"https://future.example.test/v1\"\nauth_style = \"bearer\"\nauth_env = \"DAP_TEST_FUTURE_CREDENTIAL\"\nchat_endpoint = \"/chat/completions\"\n",
         )
         .expect("future provider parses");
         harn_vm::llm_config::set_user_overrides(Some(overlay));
