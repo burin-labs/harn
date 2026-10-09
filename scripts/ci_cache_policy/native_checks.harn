@@ -577,12 +577,14 @@ pub fn macos_shared_cache_errors(ci_workflow: dict, nightly_workflow: dict) -> l
   const timing_dir = "$"
     + "{{ matrix.kind == 'workspace' && format('{0}/macos-workspace-timings', runner.temp) || '' }}"
   const timing_uploads = (lint_job?.steps ?? []).filter(
-    { step -> step?.with?.name == "macos-workspace-compile-timings" },
+    { step -> step?.name == "Upload actual workspace compile timings" },
   )
     .to_list()
   if lint_steps[0]?.env?.HARN_LINT_TIMINGS_DIR != timing_dir
     || lint_steps[0]?.env?.HARN_LINT_SOURCE_SHA != "$" + "{{ github.sha }}"
     || len(timing_uploads) != 1
+    || timing_uploads[0]?.with?.name
+      != "macos-workspace-compile-timings-$" + "{{ github.run_id }}-$" + "{{ github.run_attempt }}"
     || timing_uploads[0]?.uses != "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a"
     || timing_uploads[0]?.if != "$" + "{{ always() && matrix.kind == 'workspace' }}"
     || timing_uploads[0]?.with?.path != "$" + "{{ runner.temp }}/macos-workspace-timings"

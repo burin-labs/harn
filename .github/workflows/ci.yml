@@ -2390,7 +2390,7 @@ jobs:
         if: ${{ always() && matrix.kind == 'workspace' }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: macos-workspace-compile-timings
+          name: macos-workspace-compile-timings-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/macos-workspace-timings
           if-no-files-found: error
           retention-days: 3
