@@ -78,6 +78,7 @@ on:
 
 permissions:
   contents: read
+  attestations: read
 
 concurrency:
   # Scope by ref so a tag-push run does not contend with concurrent
@@ -370,6 +371,7 @@ jobs:
     permissions:
       contents: read
       actions: read
+      attestations: read
     needs: detect-drift
     runs-on: ubuntu-24.04
     if: github.event_name == 'workflow_dispatch' || needs.detect-drift.outputs.drift == 'true'
