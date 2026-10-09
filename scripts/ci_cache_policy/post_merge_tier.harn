@@ -23,6 +23,7 @@ pub const POST_MERGE_TIER_JOBS: list<string> = [
   "security-tests-ready",
   "windows-cross-check",
   "macos",
+  "macos-lint",
   "package-audit",
   "stack-frames",
 ]
