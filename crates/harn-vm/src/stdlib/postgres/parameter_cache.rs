@@ -4,7 +4,9 @@ type ParameterCache = SyncMutex<BTreeMap<String, Arc<Vec<PgTypeInfo>>>>;
 
 /// Only the first caller statement has the pool's original SQL context.
 /// Arbitrary SQL can change search_path or other name-resolution state, so
-/// subsequent statements retain the original transaction-local cache scope.
+/// subsequent statements use transaction-local metadata. That metadata is known
+/// only while the caller repeats the same described statement without another
+/// opaque statement or a rollback changing its SQL context.
 pub(super) struct TransactionParameterCache {
     initial: SyncMutex<Option<Arc<ParameterCache>>>,
     local: ParameterCache,
@@ -20,8 +22,21 @@ impl TransactionParameterCache {
 
     /// Called for every caller statement, including statements without nils.
     /// The transaction connection lock serializes this transition and execution.
-    pub(super) fn begin_statement(&self) -> Option<Arc<ParameterCache>> {
-        self.initial.lock().take()
+    pub(super) fn begin_statement(&self, sql: &str, has_nil: bool) -> Option<Arc<ParameterCache>> {
+        let initial = self.initial.lock().take();
+        let mut local = self.local.lock();
+        if !has_nil || !local.contains_key(sql) {
+            // Caller SQL is opaque. Another statement may change name
+            // resolution, including through functions, without a SQL keyword
+            // classification or a context-read round trip.
+            local.clear();
+        }
+        initial
+    }
+
+    pub(super) fn invalidate(&self) {
+        self.initial.lock().take();
+        self.local.lock().clear();
     }
 
     pub(super) async fn describe(

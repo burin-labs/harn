@@ -1,5 +1,31 @@
 use super::*;
 
+#[test]
+#[ignore = "requires an isolated database; make test-postgres-live"]
+fn transaction_context_changes_refresh_types_without_warm_probes_when_env_url_is_set() {
+    live_postgres_url();
+    for (first, second) in [("integer", "uuid"), ("uuid", "integer")] {
+        let _direction = crate::llm::test_env::ScopedEnvVar::set("HARN_EXT_FIRST_TYPE", first);
+        reset_postgres_state();
+        reset_describe_round_trips();
+        let source = include_str!("fixtures/transaction_context.harn");
+        assert_eq!(
+            run_harn_source(source).trim(),
+            format!("{first}->{second}: committed and recovered")
+        );
+        assert_eq!(
+            describe_round_trips(),
+            4,
+            "describe only cold contexts; repeated SQL and known original context stay warm"
+        );
+        assert_eq!(
+            describe_savepoint_round_trips(),
+            8,
+            "each cold context has one real probe savepoint/release pair; warm calls add none"
+        );
+    }
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn nil_query_describes_once_and_caches_oids_when_env_url_is_set() {
     let Ok(url) = std::env::var("HARN_TEST_POSTGRES_URL") else {

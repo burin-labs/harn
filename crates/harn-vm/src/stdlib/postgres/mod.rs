@@ -88,6 +88,7 @@ struct MockPool {
 #[cfg(test)]
 thread_local! {
     static DESCRIBE_ROUND_TRIPS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+    static DESCRIBE_SAVEPOINT_ROUND_TRIPS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
 }
 
 #[cfg(test)]
@@ -98,6 +99,17 @@ fn describe_round_trips() -> u64 {
 #[cfg(test)]
 fn reset_describe_round_trips() {
     DESCRIBE_ROUND_TRIPS.with(|c| c.set(0));
+    DESCRIBE_SAVEPOINT_ROUND_TRIPS.with(|c| c.set(0));
+}
+
+#[cfg(test)]
+fn describe_savepoint_round_trips() -> u64 {
+    DESCRIBE_SAVEPOINT_ROUND_TRIPS.with(std::cell::Cell::get)
+}
+
+#[cfg(test)]
+fn bump_describe_savepoint_round_trips() {
+    DESCRIBE_SAVEPOINT_ROUND_TRIPS.with(|c| c.set(c.get() + 1));
 }
 
 #[cfg(test)]
@@ -883,8 +895,9 @@ pub(super) async fn query_rows(
             let tx = tx
                 .as_mut()
                 .ok_or_else(|| runtime_error("pg_query: transaction is closed"))?;
-            let initial_cache = tx_state.parameter_cache.begin_statement();
-            let rows = if params_have_nil(params) {
+            let has_nil = params_have_nil(params);
+            let initial_cache = tx_state.parameter_cache.begin_statement(sql, has_nil);
+            let rows = if has_nil {
                 let oids = tx_state
                     .parameter_cache
                     .describe(initial_cache, tx, sql, "pg_query")
@@ -958,8 +971,9 @@ pub(super) async fn execute_stmt(
         let tx = tx
             .as_mut()
             .ok_or_else(|| runtime_error("pg_execute: transaction is closed"))?;
-        let initial_cache = tx_state.parameter_cache.begin_statement();
-        let result = if params_have_nil(params) {
+        let has_nil = params_have_nil(params);
+        let initial_cache = tx_state.parameter_cache.begin_statement(sql, has_nil);
+        let result = if has_nil {
             let oids = tx_state
                 .parameter_cache
                 .describe(initial_cache, tx, sql, "pg_execute")
@@ -1030,8 +1044,8 @@ async fn savepoint_op(
         let _ = mock_query(target, &sql, &[], true);
         return Ok(VmValue::Bool(true));
     }
-    let tx = tx_handle(Some(target), builtin)?;
-    let mut tx = tx.cell.lock().await;
+    let tx_state = tx_handle(Some(target), builtin)?;
+    let mut tx = tx_state.cell.lock().await;
     let tx = tx
         .as_mut()
         .ok_or_else(|| runtime_error(format!("{builtin}: transaction is closed")))?;
@@ -1040,6 +1054,9 @@ async fn savepoint_op(
         .execute(AssertSqlSafe(sql))
         .await
         .map_err(|error| runtime_error(format!("{builtin}: {error}")))?;
+    if matches!(op, SavepointOp::RollbackTo) {
+        tx_state.parameter_cache.invalidate();
+    }
     Ok(VmValue::Bool(true))
 }
 
@@ -1432,6 +1449,8 @@ async fn describe_param_oids_uncached(
         conn.execute(AssertSqlSafe(format!("SAVEPOINT {SAVEPOINT}")))
             .await
             .map_err(|error| runtime_error(format!("{builtin}: savepoint failed: {error}")))?;
+        #[cfg(test)]
+        bump_describe_savepoint_round_trips();
     }
 
     let prepared = conn
@@ -1451,6 +1470,8 @@ async fn describe_param_oids_uncached(
                     .map_err(|error| {
                         runtime_error(format!("{builtin}: rollback to savepoint failed: {error}"))
                     })?;
+                #[cfg(test)]
+                bump_describe_savepoint_round_trips();
             }
             return Ok(Vec::new());
         }
@@ -1470,6 +1491,8 @@ async fn describe_param_oids_uncached(
             .map_err(|error| {
                 runtime_error(format!("{builtin}: release savepoint failed: {error}"))
             })?;
+        #[cfg(test)]
+        bump_describe_savepoint_round_trips();
     }
 
     conn.clear_cached_statements()
