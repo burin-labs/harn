@@ -109,17 +109,15 @@ fn refreshed_rows_ship_and_uncatalogued_neighbours_do_not() {
         ("qwen/qwen3.8-max-0902", "openrouter"),
         ("deepinfra/Qwen/Qwen3.8-Max", "deepinfra"),
         ("deepinfra/MiniMaxAI/MiniMax-M3", "deepinfra"),
+        // #9023 asked for GLM 5.3 Prime as an OpenRouter-only row.
+        ("z-ai/glm-5.3-prime", "openrouter"),
     ] {
         let entry = llm_config::model_catalog_entry(id).expect("refreshed row ships");
         assert_eq!(entry.provider, provider, "{id}");
         assert!(!entry.deprecated, "{id}");
     }
     // Real slugs the providers list that were deliberately not catalogued.
-    for id in [
-        "qwen/qwen3.8-max-prime",
-        "z-ai/glm-5.3-prime",
-        "deepinfra/Qwen/Qwen3.8-Flash",
-    ] {
+    for id in ["qwen/qwen3.8-max-prime", "deepinfra/Qwen/Qwen3.8-Flash"] {
         assert!(llm_config::model_catalog_entry(id).is_none(), "{id}");
     }
 }
@@ -142,7 +140,11 @@ fn retired_routes_point_at_live_successors_and_defaults_leave_them() {
             None,
             "deepinfra/MiniMaxAI/MiniMax-M3",
         ),
-        ("sambanova/MiniMax-M2.7", None, "sambanova/MiniMax-M3"),
+        (
+            "sambanova/MiniMax-M2.7",
+            Some("2026-10-01"),
+            "sambanova/MiniMax-M3",
+        ),
     ] {
         let entry = llm_config::model_catalog_entry(id).expect("retired row stays listed");
         assert!(entry.deprecated, "{id}");
@@ -174,4 +176,52 @@ fn openrouter_gemini_3_never_sends_a_reasoning_disable_unlike_gemini_25() {
     }
     // Contrast: OpenRouter's Gemini 2.5 Flash accepted the same disable.
     assert!(lookup("openrouter", "google/gemini-2.5-flash").reasoning_disable_supported);
+}
+
+/// The direct Mistral Large 4 row keeps its docs-slug catalog id but sends the
+/// API name the model card lists first; OpenRouter keeps its own slug, and an
+/// existing direct row whose id is already the API name is unchanged.
+#[test]
+fn mistral_large_4_direct_route_sends_the_card_api_name() {
+    reset();
+    assert_eq!(
+        llm_config::wire_model_id("mistral-large-4-0"),
+        "mistral-large-4"
+    );
+    assert_eq!(
+        llm_config::wire_model_id("mistralai/mistral-large-4-0"),
+        "mistralai/mistral-large-4-0"
+    );
+    assert_eq!(
+        llm_config::wire_model_id("mistral-small-2603"),
+        "mistral-small-2603"
+    );
+    let direct = lookup("mistral", "mistral-large-4-0");
+    assert_eq!(direct.reasoning_effort_levels, vec!["high"]);
+    assert!(direct.native_tools);
+}
+
+/// Command A+ through OpenRouter leaks deliberation into the answer with
+/// reasoning off, so its rule must not let ordinary calls send the disable.
+/// Grok 4.20 Multi-Agent declares xAI's documented effort ladder; the
+/// reasoning snapshot keeps the family's adaptive-only claim.
+#[test]
+fn october_routes_carry_their_probed_reasoning_controls() {
+    reset();
+    let command = lookup("openrouter", "cohere/command-a-plus");
+    assert!(!command.reasoning_disable_supported);
+    assert!(command.native_tools);
+    assert_eq!(command.allowed_tool_choice_modes, vec!["auto"]);
+
+    let multi = lookup("xai", "grok-4.20-multi-agent-0309");
+    assert!(!multi.native_tools);
+    assert_eq!(
+        multi.reasoning_effort_levels,
+        vec!["low", "medium", "high", "xhigh"]
+    );
+    let reasoning = lookup("xai", "grok-4.20-0309-reasoning");
+    assert!(reasoning.native_tools);
+    assert!(reasoning.reasoning_effort_levels.is_empty());
+    let non_reasoning = lookup("xai", "grok-4.20-0309-non-reasoning");
+    assert!(non_reasoning.thinking_modes.is_empty());
 }

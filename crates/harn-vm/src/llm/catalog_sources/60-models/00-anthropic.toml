@@ -46,9 +46,35 @@ operations = ["text_generation", "decision"]
 context_window = 200000
 capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
 pricing = { input_per_mtok = 1.00, output_per_mtok = 5.00, cache_read_per_mtok = 0.10, cache_write_per_mtok = 1.25, cache_write_1h_per_mtok = 2.00, hosted_tool_fees = { web_search = { per_1k_calls = 10.0, source_url = "https://platform.claude.com/docs/en/agents-and-tools/tool-use/web-search-tool" } } }
+superseded_by = "claude-haiku-5-5"
 tier = "mid"
 open_weight = false
 strengths = ["speed", "cheap", "coding", "tool_use", "summarization"]
+
+# Claude Haiku 5.5 (released 2026-10-07) — the current Haiku and the `haiku`
+# alias target. Haiku 4.5 is not superseded: the deprecations page (read
+# 2026-10-09) lists it active, retiring no sooner than 2026-10-15, and Haiku
+# 5.5 no sooner than 2027-10-07. 1M context and 128K output (OpenRouter's
+# per-endpoint index, read 2026-10-09). Pricing has two rate cards chosen by
+# prompt length: $0.10 / $0.50 per MTok up to 100K input tokens and $0.50 /
+# $2.50 above, with cache reads at 0.1x, five-minute writes at 1.25x and
+# one-hour writes at 2x the input rate on both cards; the band's 5x input
+# multiplier therefore scales the cache rates exactly. Haiku 4.5 is $1 / $5 at
+# any length. A newer tokenizer counts the same text as about 30% more tokens
+# than Haiku 4.5. The request surface (see the capability row) is
+# generation-5: adaptive thinking on by default, effort low..max with a
+# `medium` default, no sampling parameters, no assistant prefill.
+[models."claude-haiku-5-5"]
+name = "Claude Haiku 5.5"
+provider = "anthropic"
+context_window = 1000000
+released = "2026-10-07"
+capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
+pricing = { input_per_mtok = 0.10, output_per_mtok = 0.50, cache_read_per_mtok = 0.01, cache_write_per_mtok = 0.125, cache_write_1h_per_mtok = 0.20, input_token_bands = [{ minimum_input_tokens = 100001, input_multiplier = 5.0, output_multiplier = 5.0 }], hosted_tool_fees = { web_search = { per_1k_calls = 10.0, source_url = "https://platform.claude.com/docs/en/agents-and-tools/tool-use/web-search-tool" } } }
+tier = "mid"
+open_weight = false
+strengths = ["speed", "cheap", "coding", "tool_use", "summarization", "long_context"]
+complementary_with = ["openai-gpt", "google-gemini", "qwen", "deepseek", "kimi"]
 
 [models."claude-3-5-sonnet-20240620"]
 name = "Claude Sonnet 3.5 (2024-06-20)"
@@ -203,9 +229,26 @@ wire_model = "anthropic/claude-haiku-4.5"
 context_window = 200000
 capabilities = ["tools", "vision", "streaming", "prompt_caching"]
 pricing = { input_per_mtok = 1.00, output_per_mtok = 5.00, cache_read_per_mtok = 0.10, cache_write_per_mtok = 1.25, cache_write_1h_per_mtok = 2.00 }
+superseded_by = "anthropic/claude-haiku-5.5"
 tier = "mid"
 open_weight = false
 strengths = ["speed", "cheap", "coding", "tool_use", "summarization"]
+# OpenRouter serves Haiku 5.5 under a dotted slug at Anthropic's list price on
+# its first-party-priced endpoints (per-endpoint index read 2026-10-09: $0.10 /
+# $0.50, cache read $0.01, five-minute write $0.125, one-hour write $0.20, and
+# a `min_prompt_tokens = 100000` override at 5x). Some Bedrock, Google and
+# Azure endpoints list a 10% regional premium; the row carries the list price.
+[models."anthropic/claude-haiku-5.5"]
+name = "Claude Haiku 5.5 (via OpenRouter)"
+provider = "openrouter"
+context_window = 1000000
+released = "2026-10-07"
+capabilities = ["tools", "vision", "streaming", "prompt_caching"]
+pricing = { input_per_mtok = 0.10, output_per_mtok = 0.50, cache_read_per_mtok = 0.01, cache_write_per_mtok = 0.125, cache_write_1h_per_mtok = 0.20, input_token_bands = [{ minimum_input_tokens = 100001, input_multiplier = 5.0, output_multiplier = 5.0 }] }
+tier = "mid"
+open_weight = false
+strengths = ["speed", "cheap", "coding", "tool_use", "summarization", "long_context"]
+complementary_with = ["openai-gpt", "google-gemini", "qwen", "deepseek", "kimi"]
 [models."anthropic/claude-fable-5"]
 name = "Claude Fable 5 (via OpenRouter)"
 provider = "openrouter"

@@ -56,6 +56,16 @@ id = "claude-fable-5"
 provider = "anthropic"
 
 [aliases.haiku]
+id = "claude-haiku-5-5"
+provider = "anthropic"
+
+[aliases.haiku55]
+id = "claude-haiku-5-5"
+provider = "anthropic"
+
+# Previous Haiku generation, kept addressable for pinned workflows. Unlike
+# Haiku 5.5 it accepts temperature and assistant prefill.
+[aliases.haiku45]
 id = "claude-haiku-4-5-20251001"
 provider = "anthropic"
 

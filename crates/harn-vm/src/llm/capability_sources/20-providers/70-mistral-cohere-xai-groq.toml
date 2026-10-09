@@ -20,6 +20,22 @@ prefers_role_developer = false
 prefers_xml_tools = false
 thinking_block_style = "reasoning_summary"
 
+# Mistral Large 4 reasons through `reasoning_effort`; Mistral documents only
+# `high` (returns a thinking chunk) and `none` (minimal thinking) for it
+# (docs.mistral.ai/capabilities/reasoning, read 2026-10-09), so `none` is the
+# off switch and `high` the only declared rung. It layers onto `mistral-*`.
+[[provider.mistral]]
+model_match = "mistral-large-4*"
+extends = true
+prompt_caching = true
+vision = true
+vision_supported = true
+thinking_modes = ["enabled", "effort"]
+reasoning_effort_supported = true
+reasoning_effort_levels = ["high"]
+reasoning_none_supported = true
+thinking_block_style = "reasoning_summary"
+
 [[provider.mistral]]
 model_match = "mistral-*"
 native_tools = true
@@ -81,6 +97,27 @@ supports_assistant_prefill = false
 prefers_role_developer = false
 prefers_xml_tools = false
 thinking_block_style = "reasoning_summary"
+
+# Grok 4.20's non-reasoning snapshot does not reason, and its multi-agent
+# snapshot found no tool-accepting endpoint through OpenRouter's xAI route
+# (2026-10-09 probe: HTTP 404 "No endpoints found that support tool use").
+# xAI documents the multi-agent effort ladder as low/medium/high/xhigh (it
+# sets the agent count), and `low` and `xhigh` reasoned in that probe. Both
+# rows layer onto `grok-*`. The 4.20 reasoning snapshot keeps the family's
+# adaptive-only claim: xAI documents no effort values for it.
+[[provider.xai]]
+model_match = "grok-4.20*non-reasoning*"
+extends = true
+thinking_modes = []
+
+[[provider.xai]]
+model_match = "grok-4.20-multi-agent*"
+extends = true
+native_tools = false
+preferred_tool_format = "text"
+thinking_modes = ["adaptive", "effort"]
+reasoning_effort_supported = true
+reasoning_effort_levels = ["low", "medium", "high", "xhigh"]
 
 [[provider.xai]]
 model_match = "grok-*"

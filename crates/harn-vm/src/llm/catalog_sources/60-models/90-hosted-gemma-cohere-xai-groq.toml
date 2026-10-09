@@ -363,6 +363,29 @@ tier = "mid"
 open_weight = true
 strengths = ["speed", "coding", "tool_use", "reasoning", "vision"]
 
+# Command A+ through OpenRouter's single Cohere endpoint (listed 2026-09-22 as
+# `cohere/command-a-plus`, canonical `command-a-plus-05-2026`; 192,000
+# context, 64,000 max output, text and image input, $0.30 / $0.15 cached /
+# $1.50). Cohere's own docs give 128K context and publish no per-token price.
+# Probed 2026-10-09 pinned to that endpoint: a native tool call, the
+# tool-result round trip and effort `high` returned 200. With reasoning off the
+# model wrote its deliberation into the visible answer ("The user asks: ..."),
+# so prefer leaving reasoning on. OpenRouter lists no `tool_choice` for it.
+[models."cohere/command-a-plus"]
+name = "Command A+ (via OpenRouter)"
+provider = "openrouter"
+context_window = 192000
+released = "2026-09-22"
+logical_model = "command-a-plus-05-2026"
+equivalence_group = "command-a-plus-05-2026"
+served_variant = "openrouter"
+api_dialect = "openai_chat"
+capabilities = ["tools", "streaming", "thinking", "vision", "prompt_caching"]
+pricing = { input_per_mtok = 0.30, output_per_mtok = 1.50, cache_read_per_mtok = 0.15 }
+tier = "frontier"
+open_weight = true
+strengths = ["agentic", "tool_use", "reasoning", "multilingual", "vision"]
+
 # Cohere and xAI first-party routes. Both are OpenAI-compatible enough for
 # Harn's chat-completions adapter, but their economics are unusual: Command A+
 # is free up to account limits, while xAI's coding model exposes very high TPM
@@ -390,12 +413,15 @@ logical_model = "grok-4.3"
 equivalence_group = "grok-4.3"
 api_dialect = "openai_chat_compat"
 capabilities = ["tools", "streaming", "thinking", "vision", "prompt_caching"]
-pricing = { input_per_mtok = 1.25, output_per_mtok = 2.50, cache_read_per_mtok = 0.20 }
+pricing = { input_per_mtok = 1.25, output_per_mtok = 2.50, cache_read_per_mtok = 0.20, input_token_bands = [{ minimum_input_tokens = 200001, input_multiplier = 2.0, output_multiplier = 2.0 }] }
 rate_limits = { source_url = "https://docs.x.ai/developers/models", last_verified = "2026-06-20" }
 tier = "frontier"
 open_weight = false
 strengths = ["agentic", "tool_use", "reasoning", "vision", "long_context"]
 
+# Grok 4.3 and Grok Build 0.1 bill every token at 2x once a request reaches
+# 200K input tokens, cache reads included (docs.x.ai model pages, read
+# 2026-10-09), like Grok 4.5-4.7; the band was missing from both rows.
 [models."grok-build-0.1"]
 name = "Grok Build 0.1"
 provider = "xai"
@@ -404,7 +430,7 @@ logical_model = "grok-code-fast-1"
 equivalence_group = "grok-code-fast-1"
 api_dialect = "openai_chat_compat"
 capabilities = ["tools", "streaming", "thinking", "vision", "prompt_caching"]
-pricing = { input_per_mtok = 1.00, output_per_mtok = 2.00, cache_read_per_mtok = 0.20 }
+pricing = { input_per_mtok = 1.00, output_per_mtok = 2.00, cache_read_per_mtok = 0.20, input_token_bands = [{ minimum_input_tokens = 200001, input_multiplier = 2.0, output_multiplier = 2.0 }] }
 rate_limits = { rpm = 1800, tpm = 10000000, tier = "us-east-1", source_url = "https://docs.x.ai/developers/models/grok-code-fast-1", last_verified = "2026-06-05" }
 tier = "frontier"
 open_weight = false

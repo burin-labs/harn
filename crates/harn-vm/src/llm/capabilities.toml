@@ -1008,6 +1008,36 @@ prefers_role_developer = false
 prefers_xml_tools = true
 thinking_block_style = "thinking_blocks"
 
+# Claude Haiku 5.5 (2026-10-07) layers the generation-5 surface onto the
+# adaptive-only row below. Probed through OpenRouter's first-party Anthropic
+# and Claude Platform on AWS endpoints on 2026-10-09 with Haiku 4.5 as the
+# control:
+#   * effort is honored at `low` and `max` (209 and 461 reasoning tokens on the
+#     same prompt), and thinking can be turned off (`reasoning.enabled: false`
+#     returned 200 with zero reasoning tokens). The off switch is `disabled`,
+#     valid at effort `high` or below like the rest of generation 5; the shared
+#     generation-5 clamp in the Anthropic adapter already enforces that ceiling;
+#   * forced tool choice is still accepted (a named-function `tool_choice`
+#     returned a tool call), so unlike Sonnet 5.5 and Opus 5.5 this row leaves
+#     `allowed_tool_choice_modes` unrestricted;
+#   * assistant prefill is a 400 ("This model does not support assistant message
+#     prefill"), where Haiku 4.5 continued the prefill;
+#   * a 914-token prefix wrote and then read a cache entry, where Haiku 4.5
+#     (4096-token floor) cached nothing; Anthropic documents a 512-token floor.
+# Mid-conversation system messages are native on this model (Anthropic
+# migration guide for Haiku 5.5, read 2026-10-09).
+[[provider.anthropic]]
+model_match = "claude-haiku-*"
+version_min = [5, 5]
+extends = true
+native_tools = true
+prompt_cache_min_prefix_tokens = 512
+system_message_placement = "native_directive"
+thinking_modes = ["adaptive", "effort"]
+reasoning_effort_supported = true
+reasoning_effort_levels = ["low", "medium", "high", "xhigh", "max"]
+interleaved_thinking_supported = true
+
 # Claude 4.7+ uses adaptive thinking instead of explicit budgets.
 [[provider.anthropic]]
 model_match = "claude-haiku-*"
@@ -1356,6 +1386,19 @@ supports_assistant_prefill = true
 prefers_role_developer = false
 prefers_xml_tools = true
 thinking_block_style = "thinking_blocks"
+
+# Prefixed Haiku 5.5 ids mirror the direct 5.5 row above.
+[[provider.anthropic]]
+model_match = "anthropic/claude-haiku-*"
+version_min = [5, 5]
+extends = true
+native_tools = true
+prompt_cache_min_prefix_tokens = 512
+system_message_placement = "native_directive"
+thinking_modes = ["adaptive", "effort"]
+reasoning_effort_supported = true
+reasoning_effort_levels = ["low", "medium", "high", "xhigh", "max"]
+interleaved_thinking_supported = true
 
 # OpenRouter-style `anthropic/claude-...` prefixes.
 [[provider.anthropic]]
@@ -1744,11 +1787,19 @@ thinking_block_style = "thinking_blocks"
 # The file sorts before every OpenRouter base rule, which an overlay must do
 # to apply. A new route needs its own evidence rather than inheriting these.
 
-# Anthropic. The Claude 5-generation rows take no top_p on any endpoint; Fable
-# and Sonnet 5 take neither temperature nor top_p. No Claude route serves
+# Anthropic. The Claude 5-generation rows take no top_p on any endpoint; Fable,
+# Haiku 5.5 and Sonnet 5 take neither temperature nor top_p. Haiku 5.5 was
+# checked on 2026-10-09: no endpoint lists temperature, top_p or top_k, and
+# `temperature: 0` with `require_parameters` returned 404 while the Haiku 4.5
+# control returned 200. No Claude route serves
 # seed or the penalties.
 [[provider.openrouter]]
-model_match = ["anthropic/claude-fable-5", "anthropic/claude-fable-5.1", "anthropic/claude-sonnet-5"]
+model_match = [
+  "anthropic/claude-fable-5",
+  "anthropic/claude-fable-5.1",
+  "anthropic/claude-haiku-5.5",
+  "anthropic/claude-sonnet-5",
+]
 extends = true
 temperature_supported = false
 top_p_supported = false
@@ -3255,6 +3306,19 @@ text_tool_wire_format_supported = true
 # safety with same-named routes elsewhere), so each rule below needs a
 # prefixed twin — capability matching sees the catalog id, not the wire
 # id.
+# Qwen3.8 Max refuses to turn reasoning off on Alibaba's endpoint (OpenRouter
+# probe, 2026-10-09: 400 "Reasoning is mandatory"), so Harn omits the disable
+# rather than trusting Model Studio's `enable_thinking` toggle. It layers onto
+# `dashscope/qwen*`.
+[[provider.dashscope]]
+model_match = "dashscope/qwen3.8-max*"
+extends = true
+reasoning_disable_supported = false
+reasoning_none_supported = false
+vision = true
+vision_supported = true
+prompt_caching = true
+
 [[provider.dashscope]]
 model_match = "dashscope/qwen3.6*"
 native_tools = true
@@ -5485,6 +5549,22 @@ prefers_role_developer = false
 prefers_xml_tools = false
 thinking_block_style = "reasoning_summary"
 
+# Mistral Large 4 through OpenRouter's Mistral endpoint, probed 2026-10-09:
+# `reasoning.enabled: false` returned zero reasoning tokens, and effort `low`
+# and `high` both reasoned, so OpenRouter normalizes a wider ladder than the
+# `high`/`none` Mistral documents for the direct route. Only measured rungs are
+# declared. It layers onto `mistralai/mistral*`.
+[[provider.openrouter]]
+model_match = "mistralai/mistral-large-4*"
+extends = true
+prompt_caching = true
+vision = true
+vision_supported = true
+thinking_modes = ["enabled", "effort"]
+reasoning_effort_supported = true
+reasoning_effort_levels = ["low", "high"]
+thinking_block_style = "reasoning_summary"
+
 [[provider.openrouter]]
 model_match = "mistralai/mistral*"
 native_tools = true
@@ -6561,6 +6641,22 @@ prefers_role_developer = false
 prefers_xml_tools = false
 thinking_block_style = "reasoning_summary"
 
+# Mistral Large 4 reasons through `reasoning_effort`; Mistral documents only
+# `high` (returns a thinking chunk) and `none` (minimal thinking) for it
+# (docs.mistral.ai/capabilities/reasoning, read 2026-10-09), so `none` is the
+# off switch and `high` the only declared rung. It layers onto `mistral-*`.
+[[provider.mistral]]
+model_match = "mistral-large-4*"
+extends = true
+prompt_caching = true
+vision = true
+vision_supported = true
+thinking_modes = ["enabled", "effort"]
+reasoning_effort_supported = true
+reasoning_effort_levels = ["high"]
+reasoning_none_supported = true
+thinking_block_style = "reasoning_summary"
+
 [[provider.mistral]]
 model_match = "mistral-*"
 native_tools = true
@@ -6622,6 +6718,27 @@ supports_assistant_prefill = false
 prefers_role_developer = false
 prefers_xml_tools = false
 thinking_block_style = "reasoning_summary"
+
+# Grok 4.20's non-reasoning snapshot does not reason, and its multi-agent
+# snapshot found no tool-accepting endpoint through OpenRouter's xAI route
+# (2026-10-09 probe: HTTP 404 "No endpoints found that support tool use").
+# xAI documents the multi-agent effort ladder as low/medium/high/xhigh (it
+# sets the agent count), and `low` and `xhigh` reasoned in that probe. Both
+# rows layer onto `grok-*`. The 4.20 reasoning snapshot keeps the family's
+# adaptive-only claim: xAI documents no effort values for it.
+[[provider.xai]]
+model_match = "grok-4.20*non-reasoning*"
+extends = true
+thinking_modes = []
+
+[[provider.xai]]
+model_match = "grok-4.20-multi-agent*"
+extends = true
+native_tools = false
+preferred_tool_format = "text"
+thinking_modes = ["adaptive", "effort"]
+reasoning_effort_supported = true
+reasoning_effort_levels = ["low", "medium", "high", "xhigh"]
 
 [[provider.xai]]
 model_match = "grok-*"
@@ -7689,6 +7806,30 @@ prefers_role_developer = false
 prefers_xml_tools = false
 thinking_block_style = "reasoning_summary"
 
+# Xiaomi MiMo v2.6 Pro and Flash, probed 2026-10-09 on OpenRouter's Xiaomi
+# endpoint: clean native tool calls, reasoning off and on, and a second tool
+# turn that succeeded without the prior reasoning echoed. OpenRouter lists no
+# `reasoning_effort` for either, so effort is not claimed.
+[[provider.openrouter]]
+model_match = "xiaomi/mimo-v2.6*"
+top_k_supported = true
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+thinking_modes = ["enabled"]
+prompt_caching = true
+vision_supported = true
+video_supported = true
+audio_supported = true
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
+
 [[provider.openrouter]]
 model_match = "bytedance-seed/*"
 native_tools = true
@@ -7706,6 +7847,35 @@ supports_assistant_prefill = false
 prefers_role_developer = false
 prefers_xml_tools = false
 thinking_block_style = "inline"
+
+# Command A+ through OpenRouter's Cohere endpoint, probed 2026-10-09: native
+# tool calls and the tool-result round trip are clean. With
+# `reasoning.enabled: false` the request succeeded but the model wrote its
+# deliberation into the visible answer ("The user asks: ..."), so the rule
+# declares that reasoning cannot be disabled: Harn then omits the directive
+# on ordinary calls, which the auto policy would otherwise resolve to off.
+# OpenRouter lists neither `tool_choice` nor `reasoning_effort` for the
+# endpoint and silently drops what it does not list, so only `auto` tool
+# choice is declared and effort is not claimed.
+[[provider.openrouter]]
+model_match = "cohere/command-a*"
+top_k_supported = true
+native_tools = true
+preferred_tool_format = "native"
+allowed_tool_choice_modes = ["auto"]
+structured_output = "native"
+thinking_modes = ["enabled"]
+reasoning_disable_supported = false
+prompt_caching = true
+vision_supported = true
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "reasoning_summary"
 
 [[provider.openrouter]]
 model_match = "cohere/north-mini-code:free"

@@ -32,6 +32,13 @@ steps = [
   { model = "gpt-4o-mini", provider = "openai", label = "cheap" },
 ]
 
+# The sitrep, judge and approval-reviewer rows below (and the Anthropic QC
+# default) stay on Claude Haiku 4.5 rather than the `haiku` alias's Haiku 5.5:
+# std/agent/sitrep sends temperature 0.2 and the judge task profile sends 0.0,
+# and Haiku 5.5 rejects any non-default sampling parameter, which Harn refuses
+# locally as a terminal capability denial. Moving these roles needs those
+# callers to stop authoring temperature on routes that decline it first.
+#
 # Reverse-chronological cheap summarizers used by std/agent/sitrep. The stdlib
 # filters these routes by provider availability but never owns their model IDs.
 [model_ladders.sitrep]
