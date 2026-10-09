@@ -319,26 +319,25 @@ pub(crate) fn split_segments(path: &str) -> (bool, Option<String>, Vec<String>) 
     if let Some(after_prefix) = rest.strip_prefix("//?/") {
         prefix.push_str("//?/");
         rest = after_prefix;
-        if let Some(after_unc) = rest.strip_prefix("UNC/") {
+        if let Some((server, share, remainder)) =
+            rest.strip_prefix("UNC/").and_then(split_unc_share)
+        {
             prefix.push_str("UNC/");
-            rest = after_unc;
-            unc = true;
-        }
-    } else if let Some(after_prefix) = rest.strip_prefix("//") {
-        prefix.push_str("//");
-        rest = after_prefix;
-        unc = true;
-    }
-    if unc {
-        // A share is a filesystem root. Parent traversal cannot remove its
-        // server or share components, including in verbatim UNC spelling.
-        let mut components = rest.splitn(3, '/');
-        prefix.push_str(components.next().unwrap_or_default());
-        if let Some(share) = components.next() {
+            prefix.push_str(server);
             prefix.push('/');
             prefix.push_str(share);
+            rest = remainder;
+            unc = true;
         }
-        rest = components.next().unwrap_or_default();
+    } else if let Some((server, share, remainder)) =
+        rest.strip_prefix("//").and_then(split_unc_share)
+    {
+        prefix.push_str("//");
+        prefix.push_str(server);
+        prefix.push('/');
+        prefix.push_str(share);
+        rest = remainder;
+        unc = true;
     }
     let bytes = rest.as_bytes();
     if !unc && bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' {
@@ -354,6 +353,19 @@ pub(crate) fn split_segments(path: &str) -> (bool, Option<String>, Vec<String>) 
         .map(|segment| segment.to_string())
         .collect();
     (absolute, drive, segments)
+}
+
+/// Only a complete server/share pair establishes a UNC filesystem root.
+/// Repeated POSIX slashes retain ordinary lexical normalization; incomplete
+/// verbatim UNC spelling retains its namespace prefix without inventing a share.
+fn split_unc_share(path: &str) -> Option<(&str, &str, &str)> {
+    let mut components = path.splitn(3, '/');
+    let server = components.next()?;
+    let share = components.next()?;
+    if server.is_empty() || share.is_empty() {
+        return None;
+    }
+    Some((server, share, components.next().unwrap_or_default()))
 }
 
 pub(crate) fn normalize_lexical(path: &str) -> String {
@@ -469,6 +481,15 @@ mod tests {
             };
             assert_eq!(normalize_lexical(input), expected);
             assert!(split_segments(input).0, "UNC paths are absolute");
+        }
+        for (input, expected) in [
+            ("///a", "/a"),
+            ("//server", "/server"),
+            ("////", "/"),
+            ("//?/UNC/server", "//?/UNC/server"),
+            ("//?/UNC//share", "//?/UNC/share"),
+        ] {
+            assert_eq!(normalize_lexical(input), expected);
         }
     }
 
