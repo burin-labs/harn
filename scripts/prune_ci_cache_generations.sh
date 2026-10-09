@@ -22,9 +22,11 @@ list_main_cache_pages() {
 }
 
 list_cache_pages() {
-  gh api --paginate \
+  local pages
+  pages="$(gh api --paginate \
     "repos/$repository/actions/caches?per_page=100" \
-    --slurp
+    --slurp)"
+  node "$repo_root/scripts/ci/rust_cache_generation.cjs" validate-census <<< "$pages"
 }
 
 configured_limit_bytes() {
@@ -54,11 +56,6 @@ prune_to_listed_ceiling() {
           and (.key | startswith("v0-rust-release-"))
         );
       [.[].actions_caches[]
-        | select(
-            (.id | type) == "number"
-            and (.size_in_bytes | type) == "number"
-            and .size_in_bytes >= 0
-          )
         | {
             id,
             key,
@@ -90,8 +87,12 @@ prune_to_listed_ceiling() {
           configured_limit_bytes: $configured_limit_bytes,
           listed_ceiling_bytes: $ceiling_bytes,
           listed_bytes_before: $listed_bytes,
+          observed: ($caches | length),
+          pending: 0,
+          bad: 0,
           deficit_bytes: $deficit,
           protected_bytes: ($protected | map(.size_in_bytes) | add // 0),
+          protected_generations: $protected,
           protected_release_bytes: (
             [$protected[] | select(.key | startswith("v0-rust-release-"))]
             | map(.size_in_bytes)
@@ -106,6 +107,7 @@ prune_to_listed_ceiling() {
   deficit_bytes="$(jq -r '.deficit_bytes' <<<"$plan")"
   selected_bytes="$(jq -r '.selected_bytes' <<<"$plan")"
   if [[ "$selected_bytes" -lt "$deficit_bytes" ]]; then
+    printf '%s\n' "$plan"
     echo "unable to restore the cache budget without deleting protected CI caches" >&2
     exit 1
   fi
@@ -131,9 +133,27 @@ per_commit_family_selector='
   | .id
 '
 
-usage_modes="--family-prefix v0-rust-release-<target>- | --local-sccache-family-prefix <repository>-sccache-local-<cache-key>-<os>-<arch>- | --harn-check-cache-family-prefix harn-check-cache-v<N>-<family>-<os>-<arch>- | --all-release-families | --clear-family-prefix v0-rust-{workspace-tests|package-audit|harn-ci-cli}- | --to-budget <bytes-at-least-1GiB> | --ensure-headroom <positive-bytes>"
+usage_modes="--retain-qualified-generation <identity-file> [--dry-run] | --family-prefix v0-rust-release-<target>- | --local-sccache-family-prefix <repository>-sccache-local-<cache-key>-<os>-<arch>- | --harn-check-cache-family-prefix harn-check-cache-v<N>-<family>-<os>-<arch>- | --all-release-families | --clear-family-prefix v0-rust-{workspace-tests|package-audit|harn-ci-cli}- | --to-budget <bytes-at-least-1GiB> | --ensure-headroom <positive-bytes>"
 
 case "$mode" in
+  --retain-qualified-generation)
+    identity_file="${2:-}"
+    dry_run="${3:-}"
+    if [[ ! -f "$identity_file" || ( -n "$dry_run" && "$dry_run" != --dry-run ) || -n "${4:-}" ]]; then
+      echo "usage: $0 --retain-qualified-generation <identity-file> [--dry-run]" >&2
+      exit 64
+    fi
+    pages="$(list_cache_pages)"
+    plan="$(node "$repo_root/scripts/ci/rust_cache_generation.cjs" plan-qualified-generation "$identity_file" <<< "$pages")"
+    if [[ "$dry_run" != --dry-run ]]; then
+      while IFS= read -r cache_id; do
+        [[ -n "$cache_id" ]] || continue
+        gh cache delete "$cache_id" --repo "$repository"
+      done < <(jq -r '.deleted[].id' <<< "$plan")
+    fi
+    printf '%s\n' "$plan"
+    exit 0
+    ;;
   --family-prefix)
     family_prefix="${2:-}"
     if [[ "$family_prefix" != v0-rust-release-*- || -n "${3:-}" ]]; then

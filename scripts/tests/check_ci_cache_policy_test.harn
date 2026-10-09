@@ -1,4 +1,4 @@
-import { read_yaml } from "std/fs"
+import { read_json_result, read_yaml } from "std/fs"
 import {
   CiCachePolicy,
   NATIVE_CACHE_INPUTS,
@@ -10,6 +10,7 @@ import {
   ci_workflow_concurrency_errors,
   e2e_workflow_concurrency_errors,
   event_skip_propagation_errors,
+  linux_cache_consumers_restore_only_errors,
   linux_confinement_errors,
   macos_shared_cache_errors,
   macos_warm_errors,
@@ -23,8 +24,11 @@ import {
   release_warm_cache_path_policy_errors,
   release_warm_cache_path_policy_parse,
   release_warm_cache_prune_errors,
+  rust_cache_generation_admission_errors,
+  rust_cache_generation_projection_errors,
   rust_cache_refresh_concurrency_errors,
   rust_cache_refresh_miss_only_errors,
+  rust_cache_refresh_prerequisite_errors,
   save_requested,
   sccache_action_cache_size_errors,
   windows_native_admission_errors,
@@ -472,6 +476,225 @@ pipeline test_public_runner_policy_keeps_historical_registry_rows_inert(
       release_policy,
     ),
     [],
+  )
+}
+
+@test
+pipeline test_cache_generation_projection_binds_actual_inputs_and_post_order(
+  harness: Harness,
+  task: unknown,
+) {
+  const action = read_yaml(harness.fs, "../../.github/actions/rust-cache/action.yml", nil)
+  const companion = read_yaml(
+    harness.fs,
+    "../../.github/actions/rust-cache-generation/action.yml",
+    nil,
+  )
+  const pin = unwrap(
+    read_json_result(harness.fs, "../../.github/actions/rust-cache/pinned-config.json"),
+  )
+  assert_eq(rust_cache_generation_projection_errors(action, companion, pin), [])
+  const bad_inputs = {
+    ...action,
+    runs: {
+      ...action.runs,
+      steps: action.runs.steps.map(
+        { step ->
+          if step?.id == "generation" {
+            return {...step, with: {...step.with, "shared-key": "different"}}
+          }
+          return step
+        },
+      )
+        .to_list(),
+    },
+  }
+  assert_eq(len(rust_cache_generation_projection_errors(bad_inputs, companion, pin)), 1)
+  const reversed = {...action, runs: {...action.runs, steps: action.runs.steps.reverse()}}
+  assert_eq(len(rust_cache_generation_projection_errors(reversed, companion, pin)), 1)
+  assert_eq(
+    len(
+      rust_cache_generation_projection_errors(
+        action,
+        {...companion, runs: {...companion.runs, "post-if": "always()"}},
+        pin,
+      ),
+    ),
+    1,
+  )
+  assert_eq(
+    len(rust_cache_generation_projection_errors(action, companion, {...pin, bundle_sha256: ""})),
+    1,
+  )
+}
+
+@test
+pipeline test_linux_ci_cannot_add_unadmitted_parallel_cache_saves(harness: Harness, task: unknown) {
+  const workflow = read_yaml(harness.fs, "../../.github/workflows/ci.yml", nil)
+  assert_eq(linux_cache_consumers_restore_only_errors(workflow), [])
+  for job_name in ["rust-cli", "rust-check-inputs", "package-audit"] {
+    const job = workflow.jobs[job_name]
+    const steps = job.steps.map(
+      { step ->
+        if step?.uses == "./.github/actions/rust-cache" {
+          return {...step, with: {...step.with, save: "true"}}
+        }
+        return step
+      },
+    )
+      .to_list()
+    let jobs = {...workflow.jobs}
+    jobs[job_name] = {...job, steps: steps}
+    assert_eq(len(linux_cache_consumers_restore_only_errors({...workflow, jobs: jobs})), 1)
+  }
+}
+
+@test
+pipeline test_cache_refresh_requires_a_successful_cli_post_lifecycle_before_other_families(
+  harness: Harness,
+  task: unknown,
+) {
+  const workflow = read_yaml(harness.fs, "../../.github/workflows/rust-cache-refresh.yml", nil)
+  const job = workflow.jobs["rust-cache-refresh"]
+  const cli = workflow.jobs["rust-cache-refresh-cli"]
+  assert_eq(rust_cache_refresh_prerequisite_errors(workflow), [])
+  assert_eq(
+    len(
+      rust_cache_refresh_prerequisite_errors(
+        {...workflow, jobs: {...workflow.jobs, "rust-cache-refresh": {...job, needs: nil}}},
+      ),
+    ),
+    1,
+  )
+  assert_eq(
+    len(
+      rust_cache_refresh_prerequisite_errors(
+        {...workflow, jobs: {...workflow.jobs, "rust-cache-refresh": {...job, if: "always()"}}},
+      ),
+    ),
+    1,
+  )
+  const steps = cli.steps.map(
+    { step ->
+      if step?.id == "rust-cache" {
+        return {...step, "continue-on-error": true}
+      }
+      return step
+    },
+  )
+    .to_list()
+  assert_eq(
+    len(
+      rust_cache_refresh_prerequisite_errors(
+        {
+          ...workflow,
+          jobs: {
+            ...workflow.jobs,
+            "rust-cache-refresh": {...job, steps: steps},
+            "rust-cache-refresh-cli": {...cli, steps: steps},
+          },
+        },
+      ),
+    ),
+    1,
+  )
+  assert_eq(
+    len(
+      rust_cache_refresh_prerequisite_errors(
+        {...workflow, jobs: {...workflow.jobs, "rust-cache-refresh-cli": {...cli, env: {}}}},
+      ),
+    ),
+    1,
+  )
+}
+
+@test
+pipeline test_cache_refresh_whole_workflow_prevents_interleaved_pending_job_replacement(
+  harness: Harness,
+  task: unknown,
+) {
+  const workflow = read_yaml(harness.fs, "../../.github/workflows/rust-cache-refresh.yml", nil)
+  assert_eq(rust_cache_refresh_concurrency_errors(workflow), [])
+  let jobs = {...workflow.jobs}
+  for job_name in ["rust-cache-refresh-cli", "rust-cache-refresh"] {
+    jobs[job_name] = {...jobs[job_name], concurrency: workflow.concurrency}
+  }
+  // An overlapping run's CLI can replace this run's pending dependent job.
+  assert_eq(
+    len(rust_cache_refresh_concurrency_errors({...workflow, concurrency: nil, jobs: jobs})),
+    4,
+  )
+  for job_name in ["rust-cache-refresh-cli", "rust-cache-refresh"] {
+    const job = workflow.jobs[job_name]
+    assert_eq(
+      len(
+        rust_cache_refresh_concurrency_errors(
+          {
+            ...workflow,
+            jobs: {...workflow.jobs, [job_name]: {...job, concurrency: workflow.concurrency}},
+          },
+        ),
+      ),
+      1,
+    )
+    assert_eq(
+      len(
+        rust_cache_refresh_concurrency_errors(
+          {
+            ...workflow,
+            jobs: {
+              ...workflow.jobs,
+              [job_name]: {...job, strategy: {...job.strategy, "max-parallel": 2}},
+            },
+          },
+        ),
+      ),
+      1,
+    )
+  }
+  assert_eq(
+    len(
+      rust_cache_refresh_concurrency_errors(
+        {...workflow, concurrency: {...workflow.concurrency, group: "per-source"}},
+      ),
+    ),
+    1,
+  )
+  assert_eq(
+    len(
+      rust_cache_refresh_concurrency_errors(
+        {...workflow, concurrency: {...workflow.concurrency, "cancel-in-progress": true}},
+      ),
+    ),
+    1,
+  )
+}
+
+@test
+pipeline test_cache_refresh_admits_capacity_without_clearing_current_generation(
+  harness: Harness,
+  task: unknown,
+) {
+  const command =
+    "./scripts/prune_ci_cache_generations.sh --ensure-headroom \"$HARN_CACHE_SAVE_HEADROOM_BYTES\""
+  const job = {steps: [{name: "Prepare Linux cache generation save", run: command}]}
+  assert_eq(rust_cache_generation_admission_errors(job), [])
+  assert_eq(len(rust_cache_generation_admission_errors({steps: []})), 1)
+  assert_eq(
+    len(
+      rust_cache_generation_admission_errors(
+        {
+          steps: [
+            {
+              name: "Prepare Linux cache generation save",
+              run: "./scripts/prune_ci_cache_generations.sh --clear-family-prefix \"$HARN_CACHE_FAMILY_PREFIX\"\n"
+                + command,
+            },
+          ],
+        },
+      ),
+    ),
+    1,
   )
 }
 

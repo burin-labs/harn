@@ -328,7 +328,11 @@ fn persistent_lane(
   timeout: string = "",
   owned_rung: bool = true,
 ) {
-  const cache_inputs = {"shared-key": rust_cache_key, "cache-workspace-crates": "true"}
+  const cache_inputs = {
+    "shared-key": rust_cache_key,
+    "cache-workspace-crates": "true",
+    save: "false",
+  }
   let lane = {
     "runs-on": producer_runner_expression(owned_rung),
     needs: ["changes", "runner-availability", "rust-producer-capacity"],
@@ -363,7 +367,7 @@ fn persistent_lane(
 }
 
 fn hosted_lane(cache_key: string, write_cache: bool = false) {
-  const cache_inputs = {"shared-key": cache_key, "cache-workspace-crates": "true"}
+  const cache_inputs = {"shared-key": cache_key, "cache-workspace-crates": "true", save: "false"}
   let lane = {
     "runs-on": "ubuntu-24.04",
     env: {HARN_RUNNER_TIER: "github-hosted"},
@@ -402,10 +406,10 @@ fn cli_producer_timeout() -> string {
 }
 
 fn workflow() {
-  const package_audit = hosted_lane("package-audit", true)
+  const package_audit = hosted_lane("package-audit", false)
   const lint = lint_lane()
-  const producer = persistent_lane("workspace-tests", true)
-  const cli_producer = persistent_lane("harn-ci-cli", true, cli_producer_timeout(), false)
+  const producer = persistent_lane("workspace-tests", false)
+  const cli_producer = persistent_lane("harn-ci-cli", false, cli_producer_timeout(), false)
   const rust_test = {
     env: {RUSTFLAGS: "-D warnings -Clink-arg=-fuse-ld=mold"},
     "runs-on": "ubuntu-24.04",
@@ -745,6 +749,35 @@ pipeline test_accepts_persistent_compile_lanes_with_hosted_fallback(
   assert_eq(ci_linux_lane_policy_errors(workflow()), [])
 }
 
+@test
+pipeline test_ordinary_linux_consumers_cannot_reintroduce_persistent_generation_writers() {
+  const valid = workflow()
+  assert_eq(ci_linux_lane_policy_errors(valid), [])
+  for name in ["package-audit", "rust-check-inputs", "rust-cli"] {
+    const job = valid.jobs[name]
+    const steps = job.steps.map(
+      { step ->
+        if step?.uses == "./.github/actions/rust-cache" {
+          return {...step, with: {...step.with, save: "true"}}
+        }
+        return step
+      },
+    )
+      .to_list()
+    const invalid = {...valid, jobs: {...valid.jobs, [name]: {...job, steps: steps}}}
+    assert(
+      ci_linux_lane_policy_errors(invalid).contains(
+        "ci.yml:${name} must restore only; persistent Linux generations belong to the admitted refresh producer",
+      ),
+    )
+    assert(
+      ci_linux_lane_policy_errors(invalid).contains(
+        "ci.yml:${name} must grant actions: write to persist rust-cache",
+      ),
+    )
+  }
+}
+
 /**
  * The refresh lives in its own workflow now, so its checks take a document with
  * its own `on:` block rather than a job inside the CI graph.
@@ -849,7 +882,7 @@ pipeline test_rejects_unbounded_or_unconditional_cache_generation_save(
   )
   assert(
     errors.contains(
-      "rust-cache-refresh.yml:rust-cache-refresh must replace stale generations with bounded save headroom",
+      "rust-cache-refresh.yml:rust-cache-refresh must admit save headroom without deleting its current generation",
     ),
   )
 }
