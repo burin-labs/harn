@@ -229,7 +229,7 @@ plan corrected_source_failed_consumer RECOVERY=true FAKE_CONSUMER=failure
 plan corrected_source_conflicting_tag RECOVERY=true "FAKE_TAG_SHA=$head_sha"
 [[ "$(cat "$tmp/corrected_source_conflicting_tag.status")" != 0 ]] \
   || fail "corrected source replaced a tag at the original source"
-git clone --quiet --depth 1 "file://$repo" "$tmp/shallow-source"
+git clone --quiet --depth 2 "file://$repo" "$tmp/shallow-source"
 plan corrected_source_unproved RECOVERY=true "SOURCE_DIRECTORY=$tmp/shallow-source"
 [[ "$(cat "$tmp/corrected_source_unproved.status")" != 0 ]] \
   || fail "missing transition history authorized corrected-source recovery"
