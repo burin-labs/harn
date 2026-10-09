@@ -14,6 +14,9 @@ fn status_command() -> string {
     + "  \"sandbox failed\" \\\n"
     + "  test \"$RUST\" != \"true\" -o \"$POST_MERGE_TIER_ACTIVE\" = \"true\"\n\n"
     + "require_result \"$harn_audit_result\" \"harn failed\" test \"$RUST\" != \"true\"\n\n"
+    + "require_result \"$macos_result\" \"macos failed\" test \"$POST_MERGE_TIER_ACTIVE\" = \"true\"\n\n"
+    + "require_result \"$package_audit_result\" \"package failed\" test \"$POST_MERGE_TIER_ACTIVE\" = \"true\"\n\n"
+    + "require_result \"$stack_frames_result\" \"stack frames failed\" test \"$POST_MERGE_TIER_ACTIVE\" = \"true\"\n\n"
     + "require_result \"$source_length_result\" \"lengths failed\" [ \"$RUST\" != \"true\" ]\n"
 }
 
@@ -37,6 +40,8 @@ fn workflows() {
           ],
         },
         "harn-audit": {needs: ["changes"], if: "needs.changes.outputs.rust == 'true'"},
+        "package-audit": {needs: ["changes"], if: GUARD},
+        "stack-frames": {needs: ["changes"], if: GUARD},
         "security-tests-ready": {
           needs: ["changes", "rust-check-inputs"],
           if: "!cancelled() && " + GUARD,

@@ -9,7 +9,727 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
-## v0.10.158
+## v0.10.159
+
+### Breaking
+
+- `agent_loop` publishes actor text and calls `on_delta` only after completion
+  admission, once with the accepted reply. Provisional provider deltas remain
+  private; typed tool events still provide live progress. Direct LLM streaming
+  keeps its existing behavior.
+
+  Migration: Treat `agent_loop`'s `on_delta` callback as delivery of one accepted
+  answer, rather than incremental provider tokens. Use typed tool events for live
+  work progress. Consumers that require raw token streaming should use the direct
+  LLM streaming interface.
+- `schema_parse` and `schema_check` are generic: with `schema_of(T)` they return `Result<T, SchemaError>`
+  instead of `any`, as the language spec already stated. Code that read fields the type does not declare now
+  fails type checking.
+- `harness.process.exec`, `shell`, `exec_at`, and `shell_at` are typed as the closed record they already
+  returned, the one `harness.process.run` declares (`stdout`, `stderr`, `combined`, `exit_code`, `success`,
+  string `status`, ...). Buffered `harness.net` requests return
+  `{status, headers, body, final_url, ok}`, and `harness.net.download` returns
+  `{status, headers, bytes_written, ok}`. None of these fields is nil, so `?.` on them is reported as
+  unnecessary (`HARN-LNT-051`). They are no longer untyped boundary values; only the response `body` text is.
+- `harn_parser::DiagnosticSeverity` gains an `Info` variant for advisory type-checker lints.
+
+  Migration: decode a value whose fields you read with the type that declares them:
+
+  ```harn
+  const pr = schema_parse(raw, schema_of(Pr))?           // Pr, not any; read only declared fields
+  const child = harness.process.exec("git", "status")
+  harness.stdio.println(child.stdout)                    // was child?.stdout ?? ""
+  ```
+
+  Rust embedders matching `DiagnosticSeverity` exhaustively add an `Info` arm; treat it like a warning that
+  never fails a strict run.
+
+- Restored ACP sessions return the durable history checkpoint that was actually replayed, including nonvisible audit rows.
+  Replay verifies the captured history prefix, permits later appends, refuses replaced or truncated history,
+  and restores typed progress updates. Private assistant drafts become visible only through the journal's
+  source-bound admission receipt, including receipts on later pages and replies retained after compaction.
+
+  Migration: Replace `load_canonical_session_replay_events` with `load_canonical_session_replay`,
+  and `load_canonical_session_replay_events_from_store` with `load_canonical_session_replay_from_store`.
+  Both return `Result<Option<CanonicalSessionReplay>, VmError>`; read `.events` for replay entries
+  and retain `.last_event_id` as the durable checkpoint. `Ok(None)` still means an unknown session;
+  a known empty session returns a replay with empty events and no checkpoint.
+- Embedded hosts can hand selected in-memory secrets to a contained Harn child through a one-shot pipe.
+  The child uses a read-only memory store without keyring fallback, and secret values stay out of its
+  arguments and environment.
+
+  Migration: exhaustive matches on `SecretProviderExclusion` must handle the new `ParentHandoff`
+  variant. It records providers excluded because a child received an explicit read-only parent store.
+- **A context manifest's unresolved import now records the file its anchor
+  named (#9340).** `harn_vm::context_manifest::ManifestUnresolved` gains a
+  public `anchor_identity: PathBuf` field, the canonical path of `anchor` when
+  the import walk ran. Revalidation treats the import as changed when the
+  anchor spelling no longer names that file, so a removed or retargeted
+  symlink spelling can no longer vouch for a stale manifest. Manifests
+  written before this release deserialize with an empty identity and are
+  rebuilt on first use.
+
+  Migration: code that builds a `ManifestUnresolved` with a struct literal
+  sets the new field to the anchor's canonical path.
+
+  ```rust
+  // Before
+  ManifestUnresolved { anchor, import }
+  // After
+  ManifestUnresolved { anchor_identity: anchor.canonicalize()?, anchor, import }
+  ```
+- Native hosts can evaluate explicit tool approval policies through
+  `harness.runtime.evaluate_approval_policy`, using Harn's canonical decision and
+  receipt without a second policy matcher. Native Rust consumers use the same
+  evaluator directly, without starting a nested VM.
+
+  Permission rules now declare their invocation identity semantics through
+  `PolicyRule.identity_match`. Literal remembered approvals do not expand command
+  wildcards, collapse quoted whitespace or approve appended shell commands.
+  Captured paths, URLs and other string constraints also match literally, so a
+  saved filename containing `*` cannot approve a different file.
+
+  Host requests carrying paths require an explicit `workspace_boundary` whose
+  root is an existing absolute directory, even without tool annotations. Invalid
+  path shapes are rejected before evaluation. Path-free requests remain valid
+  without a workspace boundary; historical receipt paths cannot provide authority.
+  Run preparation evaluates authority acquisition through the same policy owner,
+  retaining authored path and sensitive-path refusals without fabricating an
+  existing workspace grant. Approval batching, host ceilings and lease admission
+  still precede execution; remembered concrete effects cannot grant new authority.
+
+  Migration: Rust code constructing `PolicyRule` with a struct literal must set
+  `identity_match: PolicyIdentityMatch::Pattern` for authored pattern rules, or
+  `PolicyIdentityMatch::Literal` for an exact remembered invocation. JSON-authored
+  rules retain pattern semantics when the field is omitted. A remembered grant
+  uses `"identity_match": "literal"`; it must carry the raw shell command rather
+  than a normalized receipt or joined argument vector.
+- Removed the Notion connector integration: the `harn connect notion` command,
+  the `std/connectors/notion` module, the Notion record in `std/oauth/providers`,
+  the bundled Notion MCP server preset, the Notion webhook signature style,
+  Notion-specific `std/triage` normalization, the Notion trigger examples, and
+  the Notion connector documentation.
+
+  Migration: declare the provider's OAuth endpoints on a `[[providers]]` entry
+  and authorize it through the registered-provider path; scripts that used
+  `providers().notion` pass the same endpoints to `custom(...)` instead.
+
+  ```toml
+  [[providers]]
+  id = "notion"
+  connector = { harn = "./notion_connector.harn" }
+  oauth = {
+  resource = "https://api.notion.com/",
+  authorization_endpoint = "https://api.notion.com/v1/oauth/authorize",
+  token_endpoint = "https://api.notion.com/v1/oauth/token",
+  }
+  ```
+
+  ```sh
+  harn connect notion --client-id "$CLIENT_ID" --client-secret "$CLIENT_SECRET"
+  ```
+- Public Rust error and terminal taxonomies now require downstream wildcard match arms, allowing future reasons to be added
+  without breaking those consumers. Vendored generated Rust vocabulary enums also require a wildcard when regenerated;
+  unfamiliar wire values continue to round-trip through `Unrecognized`.
+
+  Migration: downstream Rust crates must add a wildcard arm to matches on `LlmErrorKind`, `LlmErrorReason`, `ErrorCategory`,
+  `AgentTerminalClass`, `AgentTerminalKind` and `ToolCallErrorCategory`. Keep specific arms for classifications you understand;
+  the wildcard must preserve the original diagnostic and use your unknown-classification policy. Do not assume that an
+  unfamiliar failure is retryable or that an unfamiliar terminal classification means successful completion.
+
+  For example, replace an exhaustive `LlmErrorKind` match with:
+
+  ```rust
+  match kind {
+  LlmErrorKind::Transient => handle_transient(),
+  LlmErrorKind::Terminal => handle_terminal(),
+  _ => handle_unknown(kind),
+  }
+  ```
+
+  Apply the same fallback when updating vendored generated Rust vocabulary enums. Their variants are declared inside the
+  consumer crate, so Rust does not enforce the external-crate `non_exhaustive` rule there. Keep generated bindings current
+  and retain a wildcard for newly generated variants, alongside the existing `Unrecognized` arm for unfamiliar wire values.
+  Existing wire spellings and known-variant construction are unchanged.
+- **Managed inference preserves the caller's privacy limits on physical
+  routes (#9383).** The version 2 request requires the resolved caller
+  inference boundary. Gateways and terminal receipt validation use Harn's
+  existing admission decision to refuse closed or unverified weight classes
+  under open-weight consent, local-only hosted supply, and unapproved training.
+  Matching capabilities alone do not grant privacy authority. Physical policy
+  refusals preserve structured, nonretryable policy errors.
+
+  Migration: pin callers and gateways to the same Harn version, declare
+  `managed_supply = { version = 2 }`, include required `inference_boundary`
+  with `reach` and boolean `allow_training_discounts` in each
+  `ManagedSupplyRequest`, and emit version 2 receipts. The Rust
+  `request_for(provider, model, boundary)` helper takes the existing caller
+  boundary as its third argument. Missing, malformed and version 1 requests
+  fail closed; do not invent hosted permission when authority is absent.
+- Rust package resolution, manifest types, scoped environment helpers and package test support now have one defining crate,
+  `harn-package`. The CLI retains forwarding exports. The public API audit reports the cross-crate
+  definition move as a breaking ownership change.
+
+  Migration: Linked Rust hosts should depend on `harn-package` at the matching Harn workspace version and import package
+  contracts from `harn_package::package` and environment helpers from `harn_package::env_guard`.
+  Enable `test-support` only for consumers that use `harn_package::test_support`. Enable `hostlib`
+  when the consumer needs package rule integration. CLI forwarding paths remain available for
+  command-line consumers.
+- Accepted prepared-session Stop and pivot controls now persist stopped authority
+  receipts instead of failed receipts, preserving the existing authority accounting.
+
+  Migration: exhaustive matches on `AuthorityReceiptStage` and
+  `AuthorityReceiptStatus` must handle the new `Stopped` variant. Treat its
+  serialized `stopped` value as an accepted control that ended the session,
+  retaining used and unused authority rather than reporting executor failure.
+- **`ContextManifest` records package import resolutions (#9403).** The public
+  `harn_vm::context_manifest::ContextManifest` struct gains a
+  `package_links: Vec<ManifestPackageLink>` field, and the bytecode cache
+  schema moves to v15, so artifacts written by earlier builds are recompiled
+  once.
+
+  Migration: code that builds a `ContextManifest` with a struct literal adds
+  `package_links: Vec::new()`, or starts from `ContextManifest::begin(entry)`
+  and fills fields with `..` update syntax. No action is needed for cached
+  artifacts.
+- Canonical ACP forks restore a cold parent's selected context and persist the child and its parent lineage before the
+  first prompt. Session-store fork boundaries now accept no event for an empty branch; Rust callers use an optional event
+  ID, and JSON callers pass null for the beginning or an integer to retain an event prefix. Message prefixes that cannot
+  be represented after transcript replacement are refused instead of restoring different context.
+
+  Migration: Rust callers change `store.fork(id, event_id, child)` to `store.fork(id, Some(event_id), child)`.
+  Use `None` to retain no events. JSON callers retain integer `at_event_id` values or pass `null` for an empty branch.
+  `forked_from_event_id` in the result is now nullable and Rust consumers handle `Option<EventId>`.
+
+  Cold ACP `session/load` now requires an explicit `environmentPolicy`, just as a new runnable session does.
+  Saved history does not store resolved credentials or launcher snapshots. A live load retains its established
+  authority and refuses a supplied declaration that would replace it. Hosts send their typed launch declaration
+  when restoring a saved session instead of relying on the former inherited-environment default.
+
+  Migration: Rust callers pass their `AcpSessionEnvironmentConfig` to `EmbeddedAgentClient::load_run`
+  and `load_run_with_cwd`. `AcpJsonRpcRequest::session_load` accepts `AcpSessionLoadParams::new(id, policy)`;
+  use `.with_cwd(cwd)` to select a project. Resume, cancel, and close continue to use `AcpSessionIdParams`.
+- Canonical session forks accept acknowledged, session-bound event identities and
+  restore the selected historical context, including tool exchanges before later
+  compaction. The existing store transaction rejects stale or foreign boundaries
+  without creating a child.
+
+  Migration: ACP hosts request `harn.session_history.boundaries`, bind displayed
+  entries by `source_event_id`, and send the acknowledged object as
+  `canonicalBoundary` to `session/fork`. Remove `keep_first` and `keepFirst`; message
+  counts are refused. Omitting the boundary retains full history. The result and
+  session-info metadata expose `canonicalBoundary` and `canonical_boundary`
+  respectively instead of a message count. Rust session-store callers pass
+  `CanonicalSessionBoundary::acknowledged(&event)` or `::empty(session_id)` to
+  `store.fork`. HTTP and hostlib callers replace `at_event_id` with
+  `canonical_boundary`, containing schema `harn.canonical_session_boundary.v1`,
+  `session_id`, and the acknowledged `event_id` and `record_hash`; both nullable
+  fields are null for an empty prefix. Never convert an observability ID into a
+  canonical boundary.
+
+  Each source-linked canonical history position now includes `before_boundary`
+  alongside its inclusive `boundary`. Hosts selecting "before this turn" use
+  this acknowledged object. Do not select the previous source-linked position:
+  metadata and other unlinked records may occur between source-linked rows.
+
+  Each position also exposes `origin_session_id`, admitted by the canonical store
+  when the original event was appended and preserved through prefix forks. Hosts
+  authorize an inherited checkpoint against this origin, not against a caller ID
+  alone or a guessed parent chain. Caller-provided origin headers cannot claim
+  another session; retrieval redaction preserves the store-owned lineage fact.
+
+  ACP prompt callers may send an optional opaque `messageId` to preserve their
+  user-message identity through normalized prompt attachments and the durable
+  transcript. Omission means no caller identity; it is never inferred from text,
+  row order, or an observability identifier. Empty identifiers and non-string
+  values are refused. Rust callers constructing `AcpSessionPromptParams` with a
+  struct literal add `correlation: AcpPromptCorrelation::default()`, or supply
+  its `message_id`; the existing constructor supplies the absent default.
+  Default ACP agent assembly forwards the normalized identity through
+  `initial_user_message_id` for the targeted session only. Explicit child sessions
+  do not inherit the parent's caller identity. Explicit JSON null is refused;
+  omit `messageId` when no identity exists. Hosts correlate unique `message` and `source_event`
+  links in the committed timeline before selecting an acknowledged boundary.
+
+  Saved run views apply the canonical journal's source-bound assistant admission
+  receipts to the original message. Admitted replies remain visible across run
+  boundaries and later compaction; withheld drafts remain private. Publication
+  does not append another copy of the assistant message.
+- Public Rust `harn_vm::llm_config::ModelResolutionError` adds the `RetiredModel` variant (#9433).
+  Explicit requests and later routing decisions now refuse DeepInfra's retired Qwen identity before provider dispatch.
+
+  Migration: downstream exhaustive matches on `ModelResolutionError` must handle
+  `RetiredModel { provider, model, reason, catalog_version }`. Present the retirement reason and require an explicit
+  different model selection; do not retry the retired route or silently substitute the provider's replacement model.
+  Existing matches for other error variants remain unchanged.
+- Managed providers now report a shared spending pause as the terminal
+  `managed_spend_paused` reason, separately from personal credit exhaustion
+  (`billing_limit`) and a temporary throttle (`rate_limit`).
+
+  Migration: exhaustive matches on `LlmErrorReason` and `AgentTerminalClass`
+  must handle the new `ManagedSpendPaused` variant. Preserve its terminal
+  classification and present the shared spending pause without retrying it
+  as a temporary throttle. Regenerate protocol bindings to consume the new
+  wire value; ordinary providers cannot select this managed-provider reason.
+- **The AST capability matrix gains refactoring columns (#9443).**
+  `ast.capabilities` rows (and `edit_capabilities` in `std/edit`) now carry
+  `move_symbol`, `extract_function`, and `change_signature`. Every language
+  reports `false` until the matching graph-grounded refactoring ships.
+  `harn_hostlib::ast::EditCapabilities` gains the same three public `bool`
+  fields and is now `#[non_exhaustive]`, so later columns no longer break
+  readers.
+
+  Migration: read the struct from `Language::edit_capabilities()` instead of
+  building it, and add `..` when destructuring it.
+
+  ```rust
+  // Before
+  let EditCapabilities { apply_node, insert_at_anchor, rename_symbol, symbols } = caps;
+  // After
+  let EditCapabilities { apply_node, rename_symbol, .. } = language.edit_capabilities();
+  ```
+- Interactive prepared sessions can represent uncapped budget dimensions without
+  inventing limits. Unattended runs still require spend, time, and turn ceilings;
+  an unbounded request cannot pass a bounded host ceiling.
+
+  Migration: hosts constructing `AcpPromptExecutionContext` must supply its new
+  `budget` field from the resolved turn `BudgetSpec`. Consumers read that field
+  for live session limits instead of reconstructing them from startup settings.
+- **`edit_move_decl` in `std/edit` now wraps `code_index.move_symbol` (#9447).**
+  It takes the code index instead of `fs`, `random`, and `ast`, rewrites
+  imports and qualified uses in referencing files instead of warning that it
+  cannot, and returns the builtin's tagged result (`touched_files`, `sites`,
+  `comments_left_behind`) instead of the staged-diff envelope. Harn bindings
+  and `target_position` are no longer supported: a `.harn` source returns
+  `unsupported_language`.
+
+  Migration: index the workspace, pass `harness.code_index`, and read
+  `touched_files` instead of `unified_diff`.
+
+  ```harn
+  // Before
+  edit_move_decl(harness.fs, harness.random, harness.ast, {path: "src/a.py", symbol: {name: "helper"}, target_file: "src/b.py"})
+  // After
+  harness.code_index.rebuild({root: "."})
+  edit_move_decl(harness.code_index, {path: "src/a.py", symbol: "helper", to_path: "src/b.py"})
+  ```
+- **`edit_extract_function` is a thin wrapper over `code_index.extract_function` (#9448).**
+  It takes `harness.code_index` instead of `fs`, `random`, and `ast`, names the
+  region with 1-based `start_line`/`end_line` (or `region` text) instead of a
+  0-based `range`, and returns the builtin's tagged response plus `ok`.
+  `target_scope` and `params_order` are gone: the helper always follows the
+  enclosing item, and `signature` fixes parameter order. Ruby is no longer
+  supported; Rust is.
+
+  Migration: pass `harness.code_index` and 1-based lines.
+
+  ```harn
+  // Before
+  edit_extract_function(harness.fs, harness.random, harness.ast,
+    {path: "app.py", range: {start_line: 3, end_line: 5}, new_name: "summarize"})
+  // After
+  edit_extract_function(harness.code_index,
+    {path: "app.py", start_line: 4, end_line: 6, new_name: "summarize"})
+  ```
+- Prepared-session approval decisions now require the request ID returned in the
+  approval batch. An older answer cannot grant or deny an identical replacement,
+  including authority-widening requests on the same active lease.
+
+  Migration: `ApprovalBatch` and `PreparedSessionApprovalDecision` gain a public
+  `request_id: uuid::Uuid` field, and the generated
+  `HarnPreparedSessionApprovalDecision` protocol type gains `request_id`. Copy
+  the batch's `request_id` into every decision, including delta decisions;
+  `request_session_approval` already does this. Code that builds either struct
+  with a literal sets the new field.
+
+  ```rust
+  // Before
+  PreparedSessionApprovalDecision { batch_fingerprint, approved, decider }
+  // After
+  PreparedSessionApprovalDecision { request_id: batch.request_id, batch_fingerprint, approved, decider }
+  ```
+- Rust hosts can capture a remembered Allow or Deny with
+  `ToolApprovalRequest::capture_decision`. Harn binds the returned rule to the
+  whole argument object, canonical workspace and current tool facts. Session and
+  durable stores use that same rule; changing another resource, argument or write
+  environment mode requires a new decision. Persisted rules contain an opaque
+  fingerprint rather than raw arguments that may hold credentials.
+  Host capture and VM execution use the same path projection, including
+  conventional unannotated path fields and command-reader paths, so an unchanged
+  invocation retains its decision without weakening workspace refusal.
+
+  Migration: Rust consumers constructing `PolicyRuleMatch` with an exhaustive
+  struct literal must add `invocation_sha256: None` for authored rules. Hosts
+  remembering a user decision should use `ToolApprovalRequest::capture_decision`
+  and preserve its returned matcher instead of reconstructing a partial scope.
+- **`std/edit`'s parameter refactorings run on the code index (#9447).**
+  `edit_change_signature`, `edit_add_parameter`, and `edit_reorder_parameters`
+  now take `harness.code_index` instead of `fs`/`random`/`ast`, address the
+  function by `symbol_ref`, and return `code_index.change_signature`'s result.
+  `callsite_strategy`, `fill`, and the parameter-text arguments are gone, and
+  the old single-file rewrite no longer exists.
+
+  Migration: rebuild the code index, then pass structured parameters.
+
+  ```harn,ignore
+  // Before
+  edit_add_parameter(harness.fs, harness.random, harness.ast,
+    {path: "src/lib.rs", symbol: {name: "scale"}, param: "offset: i64", default: "0"})
+  // After
+  harness.code_index.rebuild({root: "."})
+  edit_add_parameter(harness.code_index,
+    {symbol_ref: {name: "scale", path: "src/lib.rs"},
+     param: {name: "offset", type: "i64", call_value: "0"}})
+  ```
+- `split` now requires a separator in both forms. Previously `split(text)`
+  defaulted to `" "` while `text.split()` defaulted to `","`, so the two forms
+  disagreed; both now throw `split: separator is required`.
+
+  `regex_captures` now rejects a named group called `match`, `groups`, `start`,
+  `end`, or `line` with an `Invalid regex: named group ... collides with a
+  reserved regex_captures key` error. Previously the group silently overwrote
+  the built-in key, so `(?P<start>\d+)` made `.start` a string instead of the
+  match's character offset.
+
+  Migration: pass the separator explicitly (`split(text, " ")`,
+  `text.split(",")`) and rename colliding groups (for example `(?P<from>...)`).
+- **`harn_vm::agent_events::AgentEvent::ToolCall` has a new `intent: Option<String>` field.** It carries
+  the turn's declared purpose to the tool-call start event. Serialized events are unchanged when it is
+  `None`, and events recorded before this field decode with `None`. Rust code that constructs the variant
+  must set the field; code that matches it with `..` is unaffected.
+
+  Migration: add `intent: None` (or the normalized purpose) where you build the variant.
+
+  ```rust
+  // before
+  AgentEvent::ToolCall { session_id, tool_call_id, tool_name, kind, status, raw_input, parsing, audit }
+  // after
+  AgentEvent::ToolCall { session_id, tool_call_id, tool_name, kind, status, raw_input, parsing, audit, intent: None }
+  ```
+
+### Added
+
+- `json_decode(text, schema_of(T))` parses JSON and validates it against `T` in one step, returning
+  `Result<T, SchemaError>`. Malformed JSON is an `Err` with the same record as a shape mismatch, so command
+  output and response bodies decode with one `?`.
+- `HARN-LNT-080` (`untyped-optional-chain`) reports a `?.` chain over an untyped value (`any`, `unknown`, an
+  open `dict`, or nothing inferred) and points at decoding once with `schema_parse` or `json_decode`, or at
+  annotating the erased parameter. It is advisory (`info`) and never fails `--strict`.
+- Type-checker lints can report at `info` severity, shown in `harn check`, `harn lint`, and the editor
+  without failing a strict run.
+- The `harn-language` skill, the quick reference, and the error-handling guide gain a "Decode at the
+  boundary" section.
+- **Bump PR labels.** The reusable `bump-harn` workflow accepts a `labels`
+  input: comma-separated labels added to the bump PR each time it is created or
+  refreshed. The run fails if GitHub does not report every label applied.
+
+- `resolve_workspace_guidance` accepts `user_scope_files`, so a host can read its own user-level rules file and
+  offer other agents' personal files (`PEER_AGENT_USER_SCOPE_FILES`, the default) as an opt-in. A user-scope file and
+  every `@` import it reaches stay under the home directory; anything outside is reported as `outside_scope`.
+- The command risk scan labels git commands that discard uncommitted working-tree changes as
+  `git_discards_worktree`, recommending `require_approval`: `git checkout -- <paths>`, `git checkout -f`,
+  `git restore <paths>` unless only `--staged` is given, and `git switch -f`/`--discard-changes`.
+  A policy can now gate them; they stay off the never-approvable floor.
+- Linked hosts can resolve package-backed connector declarations and typed outbound secret requirements
+  through `harn-serve`, using the same package owner as the CLI. The returned discovery keeps its
+  package generation leased while the host selects grants and initializes connector clients.
+- Prepared sessions can scope a local, non-Send runtime turn through
+  `run_turn_with`, preserving the attached authority, identity consumption,
+  and terminal accounting used by executor-backed turns.
+  ACP runtime configurators can wrap the actual engine prompt future in that
+  scope or refuse it before execution, including when endpoint overrides are set.
+  Grouped prepared-session approval uses the existing ACP permission bridge and
+  canonical response parser, refusing missing or malformed answers before grants.
+- **`code_index.move_symbol` moves a declaration to another module and rewrites
+  its uses (#9447).** It moves a top-level Rust, TypeScript/JavaScript, or
+  Python declaration with its attributes, decorators, and the comment block
+  directly above it. Every import of it is rewritten, including grouped Rust
+  use-trees, TS named and `type` imports, and Python `from` imports, as is
+  every qualified use (`jobs::f`, `orders.f`, `m.f()` through `import m`). The
+  destination gains imports for the names the declaration uses, the source
+  imports it back if it still calls it, and a missing destination is created
+  (Rust also gains the `mod` line). The result is tagged and all-or-nothing:
+  `destination_conflict`, `visibility_required` (a private item that would
+  become unreachable), and `import_cycle` (a new Python module-level cycle)
+  refuse with every file unchanged. `ast.capabilities` reports `move_symbol`
+  for these languages.
+- **`code_index.extract_function` lifts a region into a new function (#9448).**
+  Name an expression, a run of statements, or a closure body by
+  `start_line`/`end_line` or exact `region` text. The region's free names
+  bound in the enclosing function become parameters; names it assigns that
+  are read afterwards become the return value (a tuple in Rust and Python, an
+  object in TypeScript and JavaScript); a closure body becomes a function over
+  the closure's parameters. Same-file copies with the same tokens and
+  bindings are replaced too (`all_occurrences`, default on). Rust and strict
+  TypeScript take a typed `signature` whose parameter names must equal the
+  computed inputs; without one the result is `types_required` with those
+  inputs and outputs. `helper` inserts a complete function verbatim. It
+  answers in `rename_symbol`'s envelope (`applied` with `dry_run`,
+  `no_match`, `ambiguous_symbol` with `warnings`), adding
+  `control_flow_escapes`, `signature_mismatch`, `types_required`,
+  `name_conflict`, and `unsupported_region`; every refusal leaves the file
+  byte-identical. Responses go through the shared refactor-core envelope
+  (`edit_envelope`), whose `symbol` is the new function. `ast.capabilities` now reports `extract_function: true` for
+  Rust, TypeScript/TSX, JavaScript/JSX, and Python.
+- **Python indentation errors count as syntax errors for code_index edits.**
+  tree-sitter recovers from an unexpected indent, a dedent to no enclosing
+  level, or a tab against spaces without an error node; the shared post-edit
+  check now rejects them, and `extract_function` refuses such a file up front
+  with `syntax_error`.
+- **`ast.undefined_names` supports Rust.** Bare value identifiers are
+  references; paths, fields, types, labels, and macro names are not. A glob
+  `use` or an item-position macro marks the file's resolution incomplete.
+- Read-only Git inspection can now report a working tree's root and shared
+  repository directory, allowing callers to identify linked worktrees without
+  accepting arbitrary process arguments.
+
+  Harn tools can resolve read-only invocation facts before consent, display the
+  concrete operation, and retain it for execution and unchanged-context retries.
+  Changed facts or approval argument rewrites require a newly approved call.
+- **`code_index.change_signature` changes a function's parameters and rewrites
+  every call site across files (#9447).** Pass `symbol_ref` and `params`, the
+  complete new parameter list: an entry naming a current parameter keeps it
+  (`from` renames it, and its body uses are renamed too), a new entry needs a
+  `call_value` written at every call or a `default`, and a parameter left out
+  is removed. Positional arguments are remapped by position, Python keyword
+  arguments by name, and qualified, method, and macro-argument calls are
+  included. The result is all-or-nothing and uses `rename_symbol`'s
+  envelope, now built once in the refactor core for every code_index edit:
+  `parameter_in_use`, `value_reference`, `unsupported_call_site`,
+  `overrides_present`, `ambiguous_symbol`, and `no_match` write nothing and
+  list the blocking `sites`, and a request that does not fit the function
+  raises. Rust, TypeScript/TSX, and Python report `change_signature: true` in
+  `ast.capabilities`. Calls inside Python f-strings and TypeScript template
+  literals are now reference sites for every code_index refactoring, so
+  `rename_symbol` renames them too.
+- With `purpose_labels` enabled, a tool call now carries the model's declared purpose for its turn as
+  `intent`. Hosts read it as `_meta.harn.intent` on the ACP `tool_call` update and as
+  `toolCall._meta.harn.intent` on `session/request_permission`, so an approval prompt can say what the
+  model is doing ("Looking for PR 456 artifacts") instead of only the tool name. Whitespace is collapsed,
+  the value is capped at 200 characters, and the key is absent when the turn declared no purpose.
+
+### Changed
+
+- A live agent session states the directive envelope contract once in its system prompt instead of repeating it
+  inside every `<context-directives>` envelope, which removes about 230 re-read tokens per envelope from long
+  transcripts.
+- Pull requests and merge groups select CI by changed surface and affected
+  crate dependencies. Every main push runs the full suite; releases require
+  that proof at their source commit. Failed main CI retries once, then records
+  a flake or opens a culprit revert through the merge queue.
+
+### Removed
+
+- Removed the pre-1.0 migration guides under `docs/src/migrations/` (0.7, 0.10,
+  `const`/`let`, template engine v2, schema-as-type, and the rest). Their
+  inbound links now point at the current reference pages, and the
+  `removed-llm-options` lint message no longer cites a deleted page.
+
+### Fixed
+
+- Agent prose stays provisional until tool and completion admission finishes.
+  Completion checks use the actual remaining deadline after reserving terminal
+  bookkeeping time, rather than requiring their entire configured maximum to fit.
+  Tool parameters with leading underscores, including the natural-language
+  binder's intent field, derive valid CLI flags while preserving their JSON keys.
+- Provider calls wait within their deadline for a network circuit's half-open
+  probe. A child agent's temporary transport failures no longer end a recoverable
+  parent turn before the provider can be reached again. Recovery wait time is
+  deducted from the transport budget; unproductive-response quarantine still
+  fails over immediately.
+- `command_wait_for_output` now reports an exited command's real outcome. A
+  background command that exited 0 no longer reads `result.success: false` and
+  an empty `result.combined` carried over from the handle returned at spawn.
+- OpenAI native `tool_search` now sends the documented `{"type": "tool_search"}` meta-tool and no `namespace`
+  field on functions. The previous `mode` and `namespaces` fields made every OpenAI request with a deferred tool
+  fail with HTTP 400.
+- Native tool search no longer adds its meta-tool to a request with nothing deferred, so a tool-free turn such as
+  a terminal wrap-up stays tool-free.
+- **Relocatable bytecode keys ignore how the tree is spelled (#9323).** A
+  source tree with an import that resolves nowhere keyed its precompiled
+  artifacts by the caller's spelling of the importing file, so a tree reached
+  through a symlink, a relative path, or a non-canonical temp directory missed
+  its prepared bytecode, and an unresolved `../` import inside a package leaked
+  the install generation back into the key. Unresolved imports are now keyed
+  by their canonical anchor. The relocatable hash domain moves to v3, so
+  existing relocatable artifacts rebuild once.
+- CI latency checks use the shared typed baseline contract to reject missing or
+  altered job measurements while preserving the existing time budget.
+- OpenRouter OpenAI routes no longer claim native `tool_search`, which OpenRouter rejects with HTTP 400; `auto`
+  falls back to the client search there.
+- **Release opener outcomes are observable (#9344).** The official workflow
+  publishes an exact-run outcome receipt so release controllers can distinguish
+  a measured no-op from missing evidence without parsing logs.
+- The `untyped-optional-chain` lint (HARN-LNT-080) also reports a `?.` chain through a declared field typed `any`,
+  and treats an undeclared key on an open record as untyped when any of its row tails is untyped.
+- An accepted ACP Stop keeps running and queued prompts cancelled when the next prompt is submitted immediately.
+  Each prompt carries its own cancellation scope from transport admission through execution, so a later prompt
+  cannot revive stopped tools or assistant output.
+- The `shutdown_releases_child_during_mcp_initialization` test no longer reads an empty PID file:
+  its fake MCP child renames the PID file into place after writing it.
+- `harn run`, `bench`, `pack`, `precompile`, and the playground no longer print advisory (`info`) type-checker
+  findings such as `HARN-LNT-080`; they stay in `harn check`, `harn lint`, and the editor.
+- **Same-App repairs survive a bump refresh.** The bump driver treated any
+  commit signed by GitHub for its own App as its refresh output, so a repair
+  created through the same App credentials was discarded on the next refresh.
+  A commit is now refresh output only when it also carries the exact
+  `chore: bump Harn runtime to vX.Y.Z` headline, and a refresh refuses to
+  publish under any other headline.
+
+- Child-session events now follow their declared parent across background workers,
+  reparenting and request-observer replacement. Unrelated current sessions and
+  former parents receive no child events, while direct child observers remain
+  registered without duplicate delivery. Local parent references and absent
+  sessions cannot close another worker's observer or inbox state.
+  Opening a parent locally after its observer or worker lineage is registered
+  preserves that live lineage; an explicit close retires it.
+- Release setup retains observed candidate producers and refuses duplicate builds while their status is pending or unreadable.
+- **Merge Captain no longer reads armed auto-merge as merge-queue membership
+  (#9302).** The live GitHub adapter reads `isInMergeQueue` from GraphQL, so a
+  queued PR whose `auto_merge` record GitHub nulled is held instead of sent
+  `update_branch`, and an armed PR that goes dirty, behind, or red is repaired
+  instead of parked as queued. Armed PRs past every gate wait rather than
+  re-enqueue.
+- `harn check` reports an unknown method (HARN-NAM-005) on an unannotated `list`,
+  `string`, or number binding, such as `const xs = [1, 2, 3]; xs.take_last(2)`,
+  instead of letting it crash at runtime. `range()` is now typed as returning a
+  lazy `range`, which is what the runtime returns, rather than a `list`.
+- Nested commands now return a typed sandbox refusal when the Linux confinement
+  availability probe cannot complete, instead of hanging before the command's
+  timeout can start.
+- Release metadata commands validate the Cargo workspace version before reading it,
+  preserving clean command output under the current compiler.
+- **Target cache cleanup preserves freshly active build trees (#9373).** The
+  size ceiling now honors the same minimum idle age as orphan cleanup, while
+  still reclaiming old oversized trees and reporting when protected bytes keep
+  a cache above its ceiling.
+- Release pull requests and publication now require a successful consumer rehearsal at the exact candidate revision.
+  Missing, running, cancelled and failed consumer results block publication, including older build runs that tolerated
+  a failed consumer job.
+- Opening an inner transcript no longer copies inherited ancestor observers into direct subscriptions.
+  Reparenting or removing an ancestor observer therefore stops its child-event delivery, while explicitly registered
+  transport and child observers remain subscribed.
+- **Release recovery (#9397).** Maintainers can recover certified publication
+  when a main-push event is missing, using existing files and current checks.
+  Recovery refuses incomplete job identities instead of mistaking an
+  unreported consumer for a missing rehearsal.
+- **Completion judges no longer receive the agent's session directives (#9400).**
+  A judge, classifier, guardrail, approval review, stance consent check,
+  attachment description, or fast-apply merge call keeps its session for
+  attribution, but the session's directive envelope and its authority
+  declaration now reach only the agent's own turns. Those directives stay
+  pending for the agent's next turn. These auxiliary calls are also billed to
+  the session's run record, so its `usage` counts their tokens, cost, and calls.
+  `result.llm` keeps its accepted-turn scope.
+- Empty parsed answer and prose bodies no longer fall back to raw protocol wrappers in agent visible text.
+- **Warm module imports no longer re-parse an unchanged import graph (#9403).**
+  A module's derived imported interface is now stored in the bytecode cache
+  with the manifest that proves its import closure, so a later process checks
+  file stats instead of walking and parsing every reachable module. An edited
+  module, a changed import list, another compiler build, or a reinstalled
+  package generation still re-derives the interface. Manifests now record what
+  each package import resolved to, so a reinstall also invalidates cached entry
+  chunks whose files are otherwise unchanged.
+- Removed DeepInfra's Qwen3.8 2.4T A95B catalog route before the provider redirects it to GLM-5.3.
+  Explicit requests and later routing decisions also refuse this retired DeepInfra model identity.
+  The separate Together Qwen route and private model IDs remain available.
+- Managed inference spending pauses retain a distinct terminal reason instead of
+  being retried as throttles or presented as personal account credit exhaustion.
+- Pending session approvals now have a cancellation-safe wait that records Stop
+  or lost-wait failure without invoking the executor. Stale approval responses
+  preserve newer pending requests and cannot grant additional authority to an
+  older active lease.
+- Code-index `REFS` edges no longer depend on the order files are indexed. A file indexed before the
+  file that declares a name it uses now still gets its edge, and editing a declaring file no longer
+  drops every `REFS` edge into it, so `REFS` / `REFERENCED_BY` graph queries return every referrer.
+  Word matching for `REFS` now uses the code index's own ASCII identifier tokenizer.
+- A command confined by the Linux sandbox can run its own confined commands.
+  The syscall ceiling admitted no Landlock calls, so a nested Harn fell back
+  to Bubblewrap, which cannot start there, and the command never returned.
+  The nested command now runs under both Landlock layers and holds only what
+  both policies grant.
+- **A passing verifier settles only verification-only requirements (#9459).**
+  The receipt shortcut now applies only when a row's evidence roles are exactly
+  `deterministic_verification`. A row that also accepts `mutation_summary`, or
+  any wider set, is met only by a supported judge citation, so one green
+  command no longer closes it whatever the judge cited.
+- Retain all rounds and runner identities when the test-case performance check fails,
+  and upload the Mac failure evidence for diagnosis.
+- `sql` and `named_sql` in `std/postgres/query` render templates in linear time.
+  A query of about 10k characters with 57 placeholders went from about 37 ms to
+  0.35 ms per render; output and errors are unchanged.
+- Code-index `CALLS` edges no longer depend on the order files are indexed. Call sites now resolve
+  after each batch of index updates, so a call to a function declared in a file indexed later gets its
+  edge, a later duplicate declaration removes an edge that relied on the name being unique, and a
+  declaration that becomes unique adds one. Reindexing a newly added file also re-resolves imports
+  that pointed at it. `CALLS` / `CALLED_BY` graph queries return every caller. The code-index
+  snapshot format moves to v3, so a snapshot saved with order-dependent `REFS` or `CALLS` edges is
+  rebuilt once instead of being restored.
+- **code_index refactors refuse Python that is broken across lines (#9469).**
+  tree-sitter-python joins `b = a +` and the next line into one expression,
+  so `change_signature` rewrote a file Python rejects. The shared syntax
+  check now refuses a statement, or a compound statement's header, broken
+  across lines outside brackets without a trailing `\`. `rename_symbol` and
+  `change_signature` run that check on each file before rewriting it, so
+  the refusal says the file was already broken, and every file stays
+  byte-identical.
+- Keep repeated local list `.appending()` assignments linear across loop branches
+  and consecutive assignment sites, while preserving immutable aliases.
+- **The automatic review sweep re-requests a review that ended unfinished
+  (#9482).** A "did not finish" verdict from the reviewer used to count as the
+  head's review outcome, so the pull request waited with no approval and no
+  further request. The sweep now asks again once the verdict is newer than
+  the head's last request. After `REVIEW_SWEEP_MAX_UNFINISHED` (default 3)
+  unfinished verdicts it stops and says so once on the pull request.
+- **The review sweep recognises an unfinished verdict under any reviewer
+  namespace (#9485).** It matches a `<!-- <namespace>-review-unfinished: <head> -->`
+  line rather than one spelling. A review that only quotes the marker in its
+  prose still counts as a review.
+- CLI release archives include the project licenses and full dependency license and NOTICE material.
+- The portal's failed-trigger queue preserves literal `pending` search filters,
+  displays date filters in local time, and shows API errors from replay, purge,
+  and export actions.
+- Standalone release tools now include the changelog modules required by release
+  metadata verification.
+- CLI cold-start benchmarks compare regression ratios only against baselines from the same host and timer.
+  Reports distinguish unavailable baseline comparisons from missing measurements, while retaining absolute startup budgets.
+- Read separate dispatch and observation steps when retiring a failed, unpublished release candidate.
+- Failed, unpublished release candidates can advance to the next development
+  version after their exact producer, consumer failure, and publication state
+  are verified. Their changes carry forward while install links retain the last
+  published release, and later recovery cannot publish a superseded candidate.
+- GitHub check-state reads refuse unavailable Harn binaries without starting a build, and preserve explicitly supplied
+  Go resolver settings only for GitHub CLI requests.
+- `floor` and `ceil` accept decimals instead of raising a type error, and
+  `min`/`max` promote an int operand beside a decimal instead of returning
+  `nil`.
+- `date_parse` honors the offset on a minute-precision ISO 8601 time such as
+  `2026-04-25T17:32+02:00` instead of reading the offset hour as seconds.
+- `path_relative_to` treats a `.` base as the current directory
+  (`path_relative_to("src/a", ".")` is `src/a`, not `../src/a`) and returns
+  `nil` for a base that climbs above it.
+- `.pad_left` and `.pad_right` return the string unchanged for a negative
+  width, matching `str_pad`, instead of raising an allocation error.
+- Sanitizing a tool schema whose dropped `default`, `enum`, or `pattern`
+  holds long non-ASCII text no longer panics.
+- `harn check` no longer replays cached diagnostics after a rebuild that
+  changed a builtin signature. The result-cache key now includes a digest of
+  the builtin manifest, which neither source fingerprint covered.
+
+### Security
+
+- The code-index refactorings (`rename_symbol`, `change_signature`, `extract_function`, and
+  `move_symbol`) now pass every file they read or write through one containment check. A path must
+  resolve inside the indexed workspace after symlinks resolve, and inside the sandbox's
+  `workspace_roots` when a restricted profile is active. Before this, a directory replaced by a
+  symlink after indexing sent `rename_symbol` and `change_signature` writes outside the workspace.
+  `rename_symbol` also ignored a sandbox scope narrower than the index, and `extract_function`
+  without an index and `move_symbol` both wrote outside the sandbox scope. An escaping file now
+  refuses the whole operation with a sandbox violation before anything is written.
+- Recheck execution limits after tool hooks and routing, keeping one-time side-effect
+  approvals bound to the exact invocation they authorized.
+
+## v0.10.158 (never published)
 
 ### Breaking
 

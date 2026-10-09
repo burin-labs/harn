@@ -19,14 +19,25 @@ const TIER_EXCUSE = "\"$POST_MERGE_TIER_ACTIVE\" = \"true\""
  * Jobs that skip in the tier. Conformance and the Harn audits stay merge tier:
  * they are how a runtime or stdlib change proves itself before it lands.
  */
-pub const POST_MERGE_TIER_JOBS = ["security-tests-ready", "windows-cross-check", "macos"]
+pub const POST_MERGE_TIER_JOBS: list<string> = [
+  "security-tests-ready",
+  "windows-cross-check",
+  "macos",
+  "package-audit",
+  "stack-frames",
+]
 
 /**
  * The aggregate's result variables whose skip the tier may excuse. Windows
- * is excused through `WINDOWS_CROSS_REQUIRED`, and macOS skips are excused on
- * every event already.
+ * is excused through `WINDOWS_CROSS_REQUIRED`.
  */
-const TIER_EXCUSED_RESULTS = ["security_tests_ready_result", "rust_security_result"]
+const TIER_EXCUSED_RESULTS = [
+  "security_tests_ready_result",
+  "rust_security_result",
+  "macos_result",
+  "package_audit_result",
+  "stack_frames_result",
+]
 
 fn gha(body: string) -> string {
   return "$" + "{{ " + body + " }}"

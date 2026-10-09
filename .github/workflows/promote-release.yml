@@ -101,7 +101,7 @@ jobs:
         with:
           ref: ${{ needs.resolve.outputs.source_sha }}
           path: release-source
-          fetch-depth: 2
+          fetch-depth: 0
           persist-credentials: false
 
       - name: Decide from the version
@@ -125,12 +125,16 @@ jobs:
           previous="$(git -C "$source_directory" show HEAD^:Cargo.toml | release_workspace_version)"
           if ! release_push_is_stable_version_change "$previous" "$version"; then
             if [[ "${RECOVERY:-false}" == true ]]; then
-              echo "::error::Requested recovery source is not a stable release version transition."
-              exit 1
+              if ! transition="$(cd "$source_directory" && release_recovery_transition "$HEAD_SHA" "$version")"; then
+                echo "::error::Requested recovery source has no proved stable release version transition in its first-parent history."
+                exit 1
+              fi
+              echo "::notice::Recovering corrected source $HEAD_SHA for stable transition $transition at $version."
+            else
+              echo "::notice::$HEAD_SHA keeps the workspace version at $version (was $previous); its run built no candidate, so there is nothing to promote."
+              echo "promote=false" >> "$GITHUB_OUTPUT"
+              exit 0
             fi
-            echo "::notice::$HEAD_SHA keeps the workspace version at $version (was $previous); its run built no candidate, so there is nothing to promote."
-            echo "promote=false" >> "$GITHUB_OUTPUT"
-            exit 0
           fi
           tag="v$version"
           # A rerun of this workflow after the release exists is a no-op; a tag
@@ -215,6 +219,7 @@ jobs:
     runs-on: ubuntu-24.04
     permissions:
       contents: read
+      actions: read
     outputs:
       ready: ${{ steps.authorize.outputs.ready }}
     steps:
@@ -222,6 +227,14 @@ jobs:
         with:
           ref: main
           persist-credentials: false
+      - name: Require full-suite CI at the release source
+        timeout-minutes: 90
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          SOURCE_SHA: ${{ needs.plan.outputs.source_sha }}
+          WAIT_FOR_FULL_SUITE: 'true'
+        run: bash scripts/ci/require_full_suite.sh
       - name: Require the owning rehearsal result
         id: authorize
         env:

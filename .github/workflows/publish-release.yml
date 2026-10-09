@@ -35,7 +35,7 @@ on:
         description: 'Explicit immutable release tag for current-main recovery.'
         type: string
       expected_source_sha:
-        description: 'Exact certified commit selected by the signed tag.'
+        description: 'Exact certified commit selected by the immutable tag.'
         type: string
       expected_policy_sha:
         description: 'Exact current-main workflow execution commit.'
@@ -78,6 +78,7 @@ on:
 
 permissions:
   contents: read
+  attestations: read
 
 concurrency:
   # Scope by ref so a tag-push run does not contend with concurrent
@@ -187,7 +188,7 @@ jobs:
             if [[ -z "$matching_tag_commit" ]]; then
               # Main-anchored publishing has a deliberate handoff window: the
               # `Release vX.Y.Z` commit lands on main a few seconds
-              # before the signed `vX.Y.Z` tag is pushed at that same commit.
+              # before the immutable `vX.Y.Z` tag is pushed at that same commit.
               # During that window Cargo.toml is ahead of the latest tag with
               # no matching tag yet. That transient is EXPECTED and must not
               # turn main red — the tag push is the real publish trigger.
@@ -367,6 +368,10 @@ jobs:
 
   publish:
     name: Publish release
+    permissions:
+      contents: read
+      actions: read
+      attestations: read
     needs: detect-drift
     runs-on: ubuntu-24.04
     if: github.event_name == 'workflow_dispatch' || needs.detect-drift.outputs.drift == 'true'
@@ -389,6 +394,14 @@ jobs:
             git switch --detach "$publish_ref"
           fi
           echo "Publishing from $(git rev-parse --short HEAD) ($publish_ref)"
+
+      - name: Require full-suite CI at the published commit
+        timeout-minutes: 90
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          WAIT_FOR_FULL_SUITE: 'true'
+        run: SOURCE_SHA=$(git rev-parse HEAD) bash "$RUNNER_TEMP/release-tools/require_full_suite.sh"
 
       - uses: ./.github/actions/rust-toolchain
         with:

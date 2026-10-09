@@ -1063,10 +1063,8 @@ fn colocated_rust_proof_errors(workflow: dict) -> list<string> {
       != "vars.${COLOCATED_TESTS_DISABLE_VAR} != 'true'"
     || trim(colocated_step?.env?.HARN_LLM_CALLS_DISABLED ?? "")
       != "1"
-    || !contains(colocated_command, "cargo-nextest nextest run --locked --workspace --profile ci")
-    || !contains(colocated_command, HOST_BOUND_RUST_TEST_FILTER_SETUP)
-    || !contains(colocated_command, NEUTRAL_RUST_TEST_FILTER_FLAG)
-    || contains(colocated_command, "--archive-file") {
+    || colocated_command
+      != "scripts/ci/run_rust_test_lane.sh bash scripts/ci/run_workspace_tests.sh count:1/3" {
     errors = errors
       + ["ci.yml:rust-check-inputs must own the exact co-located environment-neutral Rust proof"]
   }

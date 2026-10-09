@@ -20,7 +20,8 @@
 pub use crate::stdlib::sandbox::{
     active_backend_available, active_backend_filesystem_available,
     active_backend_filesystem_mechanism, active_backend_mechanism, active_backend_name,
-    active_workspace_process_env, apply_active_rustc_wrapper_policy, check_fs_path_scope,
+    active_workspace_process_env, apply_active_rustc_wrapper_policy,
+    apply_active_rustc_wrapper_policy_for_command, check_fs_path_scope,
     check_git_metadata_path_scope, command_output, conformance, deterministic_message_locale_env,
     enforce_process_cwd, enforcement, host_confinement, infer_process_sandbox_mechanism,
     is_process_sandbox_signal, process_spawn_error, process_violation_error,

@@ -47,6 +47,34 @@ SH
 chmod +x "$tmp_root/bin/fake-harn"
 export HARN_BIN="$tmp_root/bin/fake-harn"
 export CAPTURE_ARGS="$tmp_root/args"
+export POLICY_CALLS="$tmp_root/policy-calls"
+export POLICY_MODE=valid
+export POLICY_IMPLEMENTATION="$tmp_root/implementation.py"
+export POLICY_STATE="$tmp_root/budget-state"
+export POLICY_REAL="$(realpath /usr/bin/true)"
+touch "$POLICY_IMPLEMENTATION"
+cat > "$tmp_root/bin/gh" <<'SH'
+#!/bin/bash
+printf '%s:%s\n' "${GH_BUDGET_PRINT_REAL:-}" "$*" >> "$POLICY_CALLS"
+[[ "$*" == --budget-subprocess-policy && "$GH_BUDGET_PRINT_REAL" == 1 ]] || exit 97
+case "$POLICY_MODE" in
+  unavailable) exit 64 ;;
+  old-wrapper) printf '%s\n' "$POLICY_REAL"; exit 0 ;;
+  malformed) echo '{'; exit 0 ;;
+esac
+jq -nc --arg executable "$(realpath "$0")" --arg implementation "$POLICY_IMPLEMENTATION" \
+  --arg real "$POLICY_REAL" --arg state "$POLICY_STATE" --arg mode "$POLICY_MODE" '
+  {schema:"gh-budget.subprocess-policy.v1", executable:$executable,
+   implementation:$implementation, real_executable:$real, state_directory:$state} |
+  if $mode == "identity" then .executable = $real
+  elif $mode == "schema" then .schema = "unknown"
+  elif $mode == "extra" then .arbitrary_root = "/"
+  elif $mode == "relative" then .state_directory = "relative"
+  elif $mode == "newline" then .state_directory = "/tmp/\nroot"
+  elif $mode == "missing" then .real_executable = "/absent/gh"
+  else . end'
+SH
+chmod +x "$tmp_root/bin/gh"
 export GODEBUG=netdns=go
 for expected in 0 1 2 3 64; do
   export FAKE_STATUS="$expected"
@@ -60,13 +88,38 @@ grep -Fxq 'gh_dns=env:GODEBUG,expose=GODEBUG,for=gh' "$CAPTURE_ARGS"
 grep -Fxq 'gh_token=env:GH_TOKEN,expose=GH_TOKEN,for=gh' "$CAPTURE_ARGS"
 grep -Fxq 'gh_config=env:GH_CONFIG_DIR,expose=GH_CONFIG_DIR,for=gh' "$CAPTURE_ARGS"
 grep -Fxq -- '--sandbox-read-root' "$CAPTURE_ARGS"
+grep -Fxq "$POLICY_IMPLEMENTATION" "$CAPTURE_ARGS"
+grep -Fxq "$POLICY_REAL" "$CAPTURE_ARGS"
+grep -Fxq -- '--sandbox-write-root' "$CAPTURE_ARGS"
+grep -Fxq "$POLICY_STATE" "$CAPTURE_ARGS"
+grep -Fxq 'gh_budget_state=env:GH_BUDGET_STATE_DIR,expose=GH_BUDGET_STATE_DIR,for=gh' "$CAPTURE_ARGS"
+grep -Fxq 'gh_budget_real=env:GH_BUDGET_REAL_GH,expose=GH_BUDGET_REAL_GH,for=gh' "$CAPTURE_ARGS"
 if grep -Fxq -- '--no-sandbox' "$CAPTURE_ARGS"; then exit 1; fi
-config_dir="$(sed -n '/^--sandbox-read-root$/{n;p;}' "$CAPTURE_ARGS")"
+config_dir="$(awk '/^--sandbox-read-root$/{getline; value=$0} END{print value}' "$CAPTURE_ARGS")"
 [[ -n "$config_dir" && ! -e "$config_dir" ]]
+[[ ! -e "$POLICY_STATE" ]]
+
+for mode in unavailable old-wrapper malformed identity schema extra relative newline missing; do
+  export POLICY_MODE="$mode"
+  rm -f "$CAPTURE_ARGS"
+  set +e
+  /bin/bash "$fixture/scripts/gh_check_state.sh" --repo example/repo --sha fixture > "$tmp_root/$mode.log" 2>&1
+  status=$?
+  set -e
+  [[ "$status" == 3 && ! -e "$CAPTURE_ARGS" ]] || { cat "$tmp_root/$mode.log"; exit 1; }
+  grep -Fq 'no check census was measured' "$tmp_root/$mode.log"
+done
+if grep -Fxv '1:--budget-subprocess-policy' "$POLICY_CALLS"; then exit 1; fi
+export POLICY_MODE=valid
 
 unset GODEBUG
 export FAKE_STATUS=0
 /bin/bash "$fixture/scripts/gh_check_state.sh" --repo example/repo --sha fixture
 if grep -Fq 'env:GODEBUG' "$CAPTURE_ARGS"; then exit 1; fi
+# A native CLI keeps its own executable and needs no wrapper state or grants.
+cp "$POLICY_REAL" "$tmp_root/bin/gh"
+/bin/bash "$fixture/scripts/gh_check_state.sh" --repo example/repo --sha fixture
+grep -Fxq "$(realpath "$tmp_root/bin/gh")" "$CAPTURE_ARGS"
+if grep -Eq 'gh_budget_|--sandbox-write-root' "$CAPTURE_ARGS"; then exit 1; fi
 [[ ! -e "$COMPILER_CALLS" ]]
 echo 'gh_check_state_launcher_test: ok'

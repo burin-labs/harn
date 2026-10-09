@@ -38,17 +38,19 @@ it.each(["Search", "Trigger", "Provider"])("preserves pending as a %s filter", a
   ))
 })
 
-it("round-trips a local date filter through its UTC URL value", async () => {
-  const since = new Date(2026, 3, 24, 10, 30).toISOString()
-  const fetchMock = renderQueue(`?since=${encodeURIComponent(since)}`)
-  const input = screen.getByLabelText("Since")
-  expect(input).toHaveValue("2026-04-24T10:30")
-  fireEvent.change(input, { target: { value: "2026-04-24T11:30" } })
-  expect(input).toHaveValue("2026-04-24T11:30")
-  await waitFor(() => expect(fetchMock).toHaveBeenLastCalledWith(
-    expect.stringContaining(`since=${encodeURIComponent(new Date(2026, 3, 24, 11, 30).toISOString())}`),
-  ))
-})
+it.each(["2026-04-24T17:30:00Z", "2026-04-24T23:00:00+05:30"])(
+  "round-trips the date filter %s through local time",
+  async (since) => {
+    const fetchMock = renderQueue(`?since=${encodeURIComponent(since)}`)
+    const input = screen.getByLabelText<HTMLInputElement>("Since")
+    expect(new Date(input.value).getTime()).toBe(new Date(since).getTime())
+    fireEvent.change(input, { target: { value: "2026-04-24T11:30" } })
+    expect(input).toHaveValue("2026-04-24T11:30")
+    await waitFor(() => expect(fetchMock).toHaveBeenLastCalledWith(
+      expect.stringContaining(`since=${encodeURIComponent(new Date(2026, 3, 24, 11, 30).toISOString())}`),
+    ))
+  },
+)
 
 it("shows a rejected operation and clears the error on the next attempt", async () => {
   const fetchMock = renderQueue()

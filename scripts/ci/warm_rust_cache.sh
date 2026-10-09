@@ -1,11 +1,8 @@
 #!/usr/bin/env bash
 # Warm the shared Linux workspace-tests Cargo graph on refs/heads/main.
 #
-# Exact-SHA merge-group proof reuse skips the compile lanes on main push, and
-# rust-cache save-if only persists from refs/heads/main. This script is the
-# post-merge writer that keeps the next merge_group restore from compiling
-# cold. It matches the compile shape used by rust-check-inputs and the
-# colocated workspace-tests leg without re-running the suite.
+# The scheduled cache writer refreshes the same graph as main's test producer
+# between pushes, without re-running the suite.
 #
 # Pair with cache-workspace-crates=true on the writer: Swatinem otherwise
 # strips workspace artifacts before save and merge_group still rebuilds every

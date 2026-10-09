@@ -715,8 +715,8 @@ category = "logical_task"
 plan = "task_local_or_explicit"
 
 [[thread_local]]
-path = "src/stdlib/postgres/mod.rs"
-statics = ["DESCRIBE_ROUND_TRIPS"]
+path = "src/stdlib/postgres/parameter_cache.rs"
+statics = ["DESCRIBE_ROUND_TRIPS", "DESCRIBE_SAVEPOINT_ROUND_TRIPS"]
 category = "thread_private"
 plan = "thread_private_test"
 

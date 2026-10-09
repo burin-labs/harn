@@ -13,5 +13,20 @@
     },
     "harn_version": "harn 0.9.10",
     "host": "Apple M5 Pro, Darwin arm64 (Darwin 25.5.0)"
+  },
+  "0253a81dbf59cc1cf15201483f5094a227e6111b": {
+    "captured_at": "2026-10-03T13:45:42.0960909Z",
+    "commands": {
+      "try --help": {
+        "cold_ms": 17.0
+      },
+      "version": {
+        "cold_ms": 68.0
+      }
+    },
+    "harn_version": "harn 0.10.156-dev",
+    "host": "Linux x86_64",
+    "timer": "monotonic fallback",
+    "source_run": "https://github.com/burin-labs/harn/actions/runs/37125786246"
   }
 }
