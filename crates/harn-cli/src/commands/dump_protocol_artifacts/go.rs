@@ -283,6 +283,8 @@ fn generate_go_with_payloads(payloads: &SessionUpdatePayloads) -> String {
     append_go_session_recap_types(&mut out);
     super::plan_records::append(&mut out, super::records::Target::Go);
     super::inference_admission::append(&mut out, super::records::Target::Go);
+    super::canonical_history::append(&mut out, super::records::Target::Go);
+    super::prompt_correlation::append(&mut out, super::records::Target::Go);
     out
 }
 
@@ -627,6 +629,7 @@ type ACPSessionUpdateEnvelope struct {
 	SessionUpdate    string             `json:"sessionUpdate"`
 	Content          json.RawMessage    `json:"content,omitempty"`
 	MessageID        *string            `json:"messageId,omitempty"`
+	HistorySourceEventID *string        `json:"historySourceEventId,omitempty"`
 	Entries          []json.RawMessage  `json:"entries,omitempty"`
 	KeptTurnCount    *int               `json:"keptTurnCount,omitempty"`
 	RemovedTurnCount *int               `json:"removedTurnCount,omitempty"`

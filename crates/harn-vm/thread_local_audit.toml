@@ -6,6 +6,7 @@
 task_local_or_explicit = "Logical execution state. Convert to tokio::task_local! scope or explicit Vm/AsyncBuiltinCtx state before it is read from work-stealing tasks."
 arc_registry_scope = "Runtime/resource registry. Promote to an Arc-backed VM/runtime registry and scope or pass the handle into spawned work before the surface crosses a work-stealing boundary."
 thread_private_cache = "Thread-private cache, mock, or warning de-dupe state. Safe to keep thread-local because it is non-authoritative and resettable."
+thread_private_sync_scope = "Synchronous authoritative selection scoped on one thread and restored before return or unwind. Never held across an await or inherited across an async, spawned-task, or child-interpreter boundary."
 immutable_registration_cache = "Immutable standard-library registration reconstructed from compiled builtin definitions on each thread. VMs own Arc-backed copy-on-write tables; the cache contains no Harness, policy, source, mocks, or task state and is not inherited as ambient child-interpreter state."
 thread_private_test = "Test harness state. Safe to keep thread-local because tests install/reset it on the owning thread and production work-stealing tasks must not depend on it."
 
@@ -44,6 +45,7 @@ captured = [
   "PROCESS_ADMISSION_CONTEXT",
   "CURRENT_HOST_BRIDGE",
   "CURRENT_LOOP_SINKS",
+  "CURRENT_AGENT_EVENT_TRANSPORT",
   "CURRENT_SESSION_STACK",
   "LLM_CONFIG_OVERRIDES_CONTEXT",
   "SCOPE",
@@ -230,6 +232,18 @@ path = "src/llm/agent_runtime.rs"
 statics = ["CURRENT_HOST_BRIDGE", "CURRENT_LOOP_SINKS"]
 category = "logical_task"
 plan = "task_local_or_explicit"
+
+[[thread_local]]
+path = "src/agent_events/transport.rs"
+statics = ["CURRENT_AGENT_EVENT_TRANSPORT"]
+category = "logical_task"
+plan = "task_local_or_explicit"
+
+[[thread_local]]
+path = "src/stdlib/sandbox/path_scope.rs"
+statics = ["PATH_SCOPE_ROOTS"]
+category = "thread_private"
+plan = "thread_private_sync_scope"
 
 [[thread_local]]
 path = "src/llm/agent_session_host.rs"
@@ -427,7 +441,7 @@ category = "logical_task"
 plan = "task_local_or_explicit"
 
 [[thread_local]]
-path = "src/op_interrupt.rs"
+path = "src/op_interrupt/context.rs"
 statics = ["CURRENT"]
 category = "logical_task"
 plan = "task_local_or_explicit"
@@ -701,14 +715,20 @@ category = "logical_task"
 plan = "task_local_or_explicit"
 
 [[thread_local]]
-path = "src/stdlib/postgres/mod.rs"
-statics = ["DESCRIBE_ROUND_TRIPS"]
+path = "src/stdlib/postgres/parameter_cache.rs"
+statics = ["DESCRIBE_ROUND_TRIPS", "DESCRIBE_SAVEPOINT_ROUND_TRIPS"]
 category = "thread_private"
 plan = "thread_private_test"
 
 [[thread_local]]
+path = "src/orchestration/execution_context.rs"
+statics = ["VM_EXECUTION_CONTEXT"]
+category = "logical_task"
+plan = "task_local_or_explicit"
+
+[[thread_local]]
 path = "src/stdlib/process.rs"
-statics = ["VM_SOURCE_DIR", "VM_EXECUTION_CONTEXT", "SESSION_ENVIRONMENT_CONTEXT"]
+statics = ["VM_SOURCE_DIR", "SESSION_ENVIRONMENT_CONTEXT"]
 category = "logical_task"
 plan = "task_local_or_explicit"
 

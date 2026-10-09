@@ -81,15 +81,18 @@ Follow the runs for that commit in
    digests, and publication metadata. Keep its exact run ID with the release.
 3. `promote-release.yml` starts after the successful main push run. It finds
    the successful candidate run at that commit and verifies the manifest,
-   digests, and attestations. It creates the tag and GitHub release using those
-   files. Promotion doesn't rebuild them.
-4. The tag starts `publish-release.yml`, which publishes crates from the tag.
+   digests, and attestations. It also requires successful full-suite main-push
+   CI at the release commit, including every deferred test family. It waits
+   for an active run; missing or failed proof blocks publication. It creates
+   the tag and GitHub release using those files. Promotion doesn't rebuild them.
+4. The tag starts `publish-release.yml`, which checks the same full-suite proof
+   before publishing crates from the tag.
    Promotion also packages the published Linux archives into the container
    and opens the next patch's development-version pull request.
 
 Publication is complete only after you verify all of these:
 
-- The release pull request merged, and the signed tag selects its main commit.
+- The release pull request merged, and the immutable tag selects its certified source.
 - The exact candidate and promotion runs succeeded.
 - The GitHub release has all five archives, `SHA256SUMS`, and
   `release-assets.json`, with digests matching the candidate manifest.
@@ -97,6 +100,18 @@ Publication is complete only after you verify all of these:
   anonymously pullable.
 - The post-publication development bump reached main or reported a proved
   no-op because main had already advanced.
+
+Main ancestry and exact-source certification bind a tag to its release source.
+A tag outside main also needs a trusted SSH signature naming its candidate commit.
+Corrected stable sources also prove the original version transition in their
+first-parent history, a verified source signature, and durable publication
+evidence. The published manifest and signed archive index must bind all five
+archive digests to that exact source and the owning producer's workflow, main
+ref, run, and attempt. This read does not depend on temporary build artifacts
+or retained workflow-run records. The signed index proves provenance; the
+public release supplies publication authority. Its author and the required
+manifest, index, and archive uploaders must be the owning release app's GitHub
+bot identity; additional SDK assets can come from their own publisher.
 
 Read [Release assets manifest](./dev/release-assets-manifest.md) for the
 download contract. A visible tag or release page alone doesn't prove complete
@@ -111,11 +126,28 @@ candidate manifest attached to the release record.
   `bump-release.yml` again. Its admission checks run again.
 - Candidate failed because of infrastructure: rerun the failed jobs in that
   exact candidate run. A source defect needs a corrected pull request and
-  certification of the resulting commit.
+  certification of the resulting commit. For an unpublished stable version,
+  keep that version, build a signed source candidate on corrected main with
+  `source_candidate=true`, then use manual promotion recovery. Recovery proves
+  the stable version transition in the source's first-parent history and still
+  requires exact-source CI, consumer rehearsal, and candidate certification.
 - Promotion failed: rerun the failed jobs in the exact promotion run. It
   checks the existing tag's commit and refuses a conflicting tag.
+- Candidate succeeded but no main-push event started promotion: dispatch the
+  existing promoter on main with that certified candidate's run ID and source:
+  `gh workflow run promote-release.yml --repo burin-labs/harn --ref main -f candidate_run_id=RUN_ID -f candidate_sha=FULL_SHA`.
+  It refuses an unsuccessful or foreign producer and a source not contained
+  in main, then applies the normal version, manifest, digest and attestation
+  checks. If the producer never ran a consumer rehearsal, recovery runs the
+  existing rehearsal workflow at that exact source and requires its measured
+  pass before publication. Missing, failed, cancelled or mismatched results
+  refuse publication. A producer's existing failed rehearsal is not replaced.
+  Recovery publishes the existing files without rebuilding them.
 - Crate publication failed after the tag exists: rerun the failed jobs in the
   tag's `publish-release.yml` run. Its publisher resumes remaining crates.
+  If publication policy needed a repair on main, dispatch `publish-release.yml`
+  with the immutable `tag`, its `expected_source_sha`, and the landed
+  `expected_policy_sha`. Recovery uses that policy without changing the tag's source.
 - Container or development bump failed: rerun those failed promotion jobs.
 
 Don't retag a published version or start a local publisher or watcher as a

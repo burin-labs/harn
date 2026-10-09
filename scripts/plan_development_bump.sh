@@ -7,6 +7,8 @@ root="${HARN_RELEASE_ROOT:-$script_root}"
 cd "$root"
 # shellcheck source=scripts/lib/release_version.sh
 source "$script_root/scripts/lib/release_version.sh"
+source "$script_root/scripts/lib/release_consumer_verdict.sh"
+release_validate_retirement_request
 
 requested_tag="${PUBLISHED_TAG:-}"
 release_args=()
@@ -41,6 +43,12 @@ if ! release_version_is_canonical "$version"; then
   exit 1
 fi
 release_development_bump_plan "$version" "$published_tag" true
+if [[ -n "${RETIRE_SOURCE_SHA:-}" ]]; then
+  release_require_unpublished_retirement "$version" "$published_tag"
+  RELEASE_DEVELOPMENT_BUMP_REQUIRED=true
+  RELEASE_DEVELOPMENT_BUMP_VERSION="$(release_next_patch_development "$version")"
+  RELEASE_DEVELOPMENT_BUMP_REASON=failed_unpublished_identity_retired
+fi
 if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
   {
     echo "required=$RELEASE_DEVELOPMENT_BUMP_REQUIRED"

@@ -25,6 +25,22 @@ release_candidate_run_id() {
   done
 }
 
+# Validate one measured artifact inventory before source reuse or recovery.
+release_candidate_artifacts_complete() {
+  local artifacts="${1:?artifact response required}"
+  local expected="${2:?expected artifact names required}"
+  jq -e --argjson expected "$expected" '
+    . as $response |
+    (.artifacts | type == "array") and
+    (.total_count == (.artifacts | length)) and
+    all($expected[]; . as $name |
+      [$response.artifacts[] | select(.name == $name)] as $matches |
+      ($matches | length) == 1 and
+      all($matches[]; .expired == false and
+        (.size_in_bytes | type == "number" and . > 0 and . == floor)))
+  ' <<< "$artifacts" >/dev/null
+}
+
 # A scheduled source build may reuse only a complete, unexpired artifact set.
 # Target names come from the producer's resolved matrix, not a parallel list.
 source_candidate_live_run_id() {
@@ -41,13 +57,7 @@ source_candidate_live_run_id() {
     --jq ".workflow_runs[] | select(.head_sha == \"${sha}\" and .head_branch == \"main\") | .id")" || return 1
   for run_id in $runs; do
     artifacts="$(gh api "repos/${repository}/actions/runs/${run_id}/artifacts?per_page=100")" || return 1
-    if jq -e --argjson expected "$expected" '
-      . as $response |
-      (.artifacts | type == "array") and
-      (.total_count == (.artifacts | length)) and
-      all($expected[]; . as $name |
-        [$response.artifacts[] | select(.name == $name and .expired == false and .size_in_bytes > 0)] | length == 1)
-    ' <<< "$artifacts" >/dev/null; then
+    if release_candidate_artifacts_complete "$artifacts" "$expected"; then
       printf '%s\n' "$run_id"
       return 0
     fi

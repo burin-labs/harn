@@ -1,0 +1,76 @@
+// harn#9400: the completion judge grades the agent; it is not the agent. A
+// directive pending on the agent's session must not reach the judge's request,
+// and it must still reach the agent's next turn. The durable run record built
+// from this fixture must also bill the judge's calls (see
+// crates/harn-vm/src/agent_session_auxiliary_usage_tests.rs).
+import { agent_loop } from "std/agent/loop"
+import { agent_session_inject_reminder } from "std/agent/state"
+import { llm_text, with_llm_script } from "std/testing"
+
+const DIRECTIVE = "Verify your own work with run({ intent: test }) before you finish."
+
+fn request_text(call: dict) -> string {
+  return json_stringify(call.messages) + "\n" + to_string(call?.system ?? "")
+}
+
+pipeline default(harness: Harness) {
+  const root = harness.fs.mkdtemp_in_workspace("judge-directives")
+  const session = "turn-end-judge-directives"
+  harness.agent.open(session)
+  agent_session_inject_reminder(
+    harness.agent,
+    session,
+    {body: DIRECTIVE, authority: "contract", dedupe_key: "verification_contract"},
+  )
+  with_llm_script(
+    harness.llm,
+    [
+      llm_text("<user_response>ready</user_response>\n<done>##DONE##</done>"),
+      llm_text("{\"verdict\":\"continue\",\"detail\":\"State the answer once more.\"}"),
+      llm_text("<user_response>ready</user_response>\n<done>##DONE##</done>"),
+      llm_text("{\"verdict\":\"done\",\"detail\":\"The reply is the requested word.\"}"),
+    ],
+    { ->
+      const result = agent_loop(
+        harness,
+        "Reply with the single word ready.",
+        nil,
+        {
+          provider: "mock",
+          root: root,
+          session_id: session,
+          loop_until_done: true,
+          max_iterations: 4,
+          turn_end_condition: true,
+        },
+      )
+      const calls = harness.llm.mock_calls()
+      require len(calls) == 4, "two agent turns and two judge calls"
+      harness.stdio.println(result.status)
+      harness.stdio.println(calls.map({ call -> call.mock_scope }).join(","))
+      for index in [1, 3] {
+        const judge = request_text(calls[index])
+        harness.stdio.println(
+          "judge "
+            + to_string(index)
+            + " directive-free: "
+            + to_string(
+              !contains(judge, DIRECTIVE) && !contains(judge, "context-directives")
+                && !contains(judge, "State the answer once more."),
+            ),
+        )
+      }
+      harness.stdio.println(
+        "agent turn 1 directed: " + to_string(contains(request_text(calls[0]), DIRECTIVE)),
+      )
+      const second_turn = request_text(calls[2])
+      harness.stdio.println(
+        "agent turn 2 directed: "
+          + to_string(
+            contains(second_turn, DIRECTIVE)
+              && contains(second_turn, "State the answer once more."),
+          ),
+      )
+    },
+  )
+}

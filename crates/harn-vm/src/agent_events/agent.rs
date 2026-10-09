@@ -106,6 +106,10 @@ pub enum AgentEvent {
     AgentMessageChunk {
         session_id: String,
         content: String,
+        /// Canonical journal source that made this text visible. For admitted
+        /// actor output this names the publication receipt, not its private draft.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        history_source_event_id: Option<String>,
     },
     AgentThoughtChunk {
         session_id: String,
@@ -115,6 +119,8 @@ pub enum AgentEvent {
         session_id: String,
         message_id: String,
         content: Vec<serde_json::Value>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        history_source_event_id: Option<String>,
     },
     ToolCall {
         session_id: String,

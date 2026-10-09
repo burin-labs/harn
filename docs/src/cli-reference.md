@@ -302,6 +302,23 @@ in [Sandboxing](./sandboxing.md) follows the same rule.
 Both `--environment-policy` and `--grant` are also accepted by
 [`harn time run`](#harn-time), which shares `harn run`'s confinement surface.
 
+### Parent secret handoff
+
+`--parent-secret-stdin` receives a selected parent secret store through a
+one-shot stdin pipe before command execution. Embedded hosts should use
+`harn_vm::secrets::ParentSecretHandoff::capture` and
+`harn_hostlib::process::spawn_harn_with_parent_secrets` to select logical secret
+ids and send the bounded frame. The sender owns stdin exclusively, closes it
+after delivery, and refuses an application that already needs stdin.
+
+The received store is read-only and process-local. Missing ids fail without
+consulting the child's configured stores or OS keyring. The handoff snapshots
+values at launch; subsequent parent rotation is not reflected in that child.
+It does not grant environment exposure or widen a command audience. Existing
+`--grant` exposure, `for=COMMAND`, and receipt rules still apply. Secret values
+are carried in the pipe, never arguments or environment variables; hosts must
+also keep unrelated credentials out of the child environment they supply.
+
 Terminology:
 
 - **Launcher**: the process that starts a Harn session, such as the `harn` CLI
@@ -720,6 +737,7 @@ harn test conformance tests/stdlib/     # run a conformance subtree
 harn test conformance --parallel       # run isolated conformance workers
 harn test conformance --parallel -j 4  # pin the conformance worker count
 harn test tests/                       # run user tests in directory
+harn test package                     # run the package's declared test selection
 harn test tests/ --filter "auth*"      # filter by pattern
 harn test tests/ --parallel            # run tests concurrently with bounded workers
 harn test tests/ --parallel --timing   # show progress and slowest tests/files
@@ -4331,7 +4349,13 @@ harn package test-inventory . --json \
   --receipt-out .harn/receipts/package-test-inventory.json
 ```
 
-The command exits nonzero for an unreasoned empty suite, a parse or discovery
+Selection comes from `[tests].roots` in `harn.toml`, defaulting to `tests/`.
+It accepts package-relative directories and individual `.harn` files. The same
+selection runs through `harn test package` and `harn package verify`.
+See [package test configuration](package-authoring.md) for path constraints and
+the reasoned exception for testless packages.
+
+The command exits nonzero for an invalid root, an unreasoned empty suite, a parse or discovery
 error, or any selected file with no discoverable test pipeline. Its schema-v1
 receipt reports selected-file and discovered-test counts, the configured empty
 suite exception, and path plus SHA-256 identity for each file with no test or

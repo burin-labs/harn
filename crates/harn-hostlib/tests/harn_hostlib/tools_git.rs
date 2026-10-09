@@ -60,7 +60,7 @@ fn invoke(args: &[(&str, VmValue)]) -> Result<VmValue, HostlibError> {
 
 /// Initialize a tiny git repo with two commits, configured locally so the
 /// test never reads global git config.
-fn fixture_repo() -> TempDir {
+pub(super) fn fixture_repo() -> TempDir {
     let dir = TempDir::new().unwrap();
     populate_fixture_repo(dir.path());
     dir
@@ -155,6 +155,313 @@ fn list_of(value: &VmValue) -> &Arc<Vec<VmValue>> {
     match value {
         VmValue::List(l) => l,
         other => panic!("expected list, got {other:?}"),
+    }
+}
+
+#[test]
+fn git_repository_identity_distinguishes_linked_worktrees_and_other_repositories() {
+    assert!(
+        ensure_git(),
+        "repository identity qualification requires git"
+    );
+    let repository = fixture_repo();
+    let linked_parent = TempDir::new().unwrap();
+    let linked = linked_parent.path().join("linked checkout");
+    run_git(
+        repository.path(),
+        &[
+            "worktree",
+            "add",
+            "--detach",
+            linked.to_str().unwrap(),
+            "HEAD",
+        ],
+    );
+    let identity = |root: &Path| {
+        let registry = registry();
+        let entry = registry
+            .find("hostlib_tools_git_repository_identity")
+            .unwrap();
+        (entry.handler)(&dict_arg(&[repo_arg(root)])).unwrap()
+    };
+    let main = identity(repository.path());
+    let worktree = identity(&linked);
+    let unrelated = identity(shared_fixture());
+    let data = |value: &VmValue, key: &str| match dict_get(value, key) {
+        VmValue::String(path) => std::fs::canonicalize(path.as_str()).unwrap(),
+        other => panic!("identity path is not a string: {other:?}"),
+    };
+    assert_eq!(
+        data(&main, "worktree_root"),
+        repository.path().canonicalize().unwrap()
+    );
+    assert_eq!(
+        data(&worktree, "worktree_root"),
+        linked.canonicalize().unwrap()
+    );
+    assert_ne!(
+        data(&main, "worktree_root"),
+        data(&worktree, "worktree_root")
+    );
+    assert_eq!(
+        data(&main, "common_directory"),
+        data(&worktree, "common_directory")
+    );
+    assert_ne!(
+        data(&main, "common_directory"),
+        data(&unrelated, "common_directory")
+    );
+}
+
+#[test]
+fn git_repository_identity_refuses_non_repository_instead_of_inventing_a_root() {
+    assert!(
+        ensure_git(),
+        "repository identity qualification requires git"
+    );
+    let directory = TempDir::new().unwrap();
+    let registry = registry();
+    let entry = registry
+        .find("hostlib_tools_git_repository_identity")
+        .unwrap();
+    let result = (entry.handler)(&dict_arg(&[repo_arg(directory.path())]));
+    assert!(
+        matches!(result, Err(HostlibError::Backend { .. })),
+        "{result:?}"
+    );
+}
+
+#[test]
+fn git_repository_identity_requires_declared_metadata_scope_before_following_pointers() {
+    use harn_vm::orchestration::{
+        pop_execution_policy, push_execution_policy, CapabilityPolicy, SandboxProfile,
+    };
+
+    struct PolicyGuard;
+    impl Drop for PolicyGuard {
+        fn drop(&mut self) {
+            pop_execution_policy();
+        }
+    }
+    let identity = |root: &Path| {
+        let registry = registry();
+        let entry = registry
+            .find("hostlib_tools_git_repository_identity")
+            .unwrap();
+        (entry.handler)(&dict_arg(&[repo_arg(root)]))
+    };
+    let scoped = |root: &Path, metadata: &[&Path], denied: &[&Path]| {
+        let mut policy = CapabilityPolicy {
+            sandbox_profile: SandboxProfile::Worktree,
+            workspace_roots: vec![root.display().to_string()],
+            read_only_roots: metadata
+                .iter()
+                .map(|path| path.display().to_string())
+                .collect(),
+            ..CapabilityPolicy::default()
+        };
+        policy.process_sandbox.read_deny_roots = denied
+            .iter()
+            .map(|path| path.display().to_string())
+            .collect();
+        push_execution_policy(policy);
+        PolicyGuard
+    };
+    assert!(
+        ensure_git(),
+        "repository identity qualification requires git"
+    );
+    let _environment = harn_vm::stdlib::process::declare_session_environment_if_absent(
+        harn_vm::security::SessionEnvironment::inherited(),
+    );
+    let repository = fixture_repo();
+    let metadata = repository.path().join(".git");
+    let false_checkout = TempDir::new().unwrap();
+    std::fs::write(
+        false_checkout.path().join(".git"),
+        format!("gitdir: {}\n", metadata.display()),
+    )
+    .unwrap();
+    assert!(
+        identity(false_checkout.path()).is_ok(),
+        "unrestricted control must reach the pointed repository"
+    );
+    {
+        let _policy = scoped(false_checkout.path(), &[], &[]);
+        let result = identity(false_checkout.path());
+        assert!(
+            matches!(result, Err(HostlibError::SandboxViolation { .. })),
+            "{result:?}"
+        );
+    }
+    // A post-Git output check would report Backend here, after following the
+    // invalid external metadata. The permission refusal must happen first.
+    let invalid_metadata = TempDir::new().unwrap();
+    std::fs::write(
+        false_checkout.path().join(".git"),
+        format!("gitdir: {}\n", invalid_metadata.path().display()),
+    )
+    .unwrap();
+    {
+        let _policy = scoped(false_checkout.path(), &[], &[]);
+        let result = identity(false_checkout.path());
+        assert!(
+            matches!(result, Err(HostlibError::SandboxViolation { .. })),
+            "pointer must be refused before Git can inspect invalid external metadata: {result:?}"
+        );
+    }
+    let linked_parent = TempDir::new().unwrap();
+    let linked = linked_parent.path().join("linked");
+    run_git(
+        repository.path(),
+        &[
+            "worktree",
+            "add",
+            "--detach",
+            linked.to_str().unwrap(),
+            "HEAD",
+        ],
+    );
+    {
+        let _policy = scoped(&linked, &[], &[]);
+        let result = identity(&linked);
+        assert!(
+            matches!(result, Err(HostlibError::SandboxViolation { .. })),
+            "{result:?}"
+        );
+    }
+    {
+        let _policy = scoped(&linked, &[&metadata], &[]);
+        let result = identity(&linked);
+        if harn_vm::process_sandbox::active_backend_filesystem_available() {
+            assert!(
+                result.is_ok(),
+                "explicit metadata read grant must preserve linked-worktree identity: {result:?}"
+            );
+        } else {
+            assert!(
+                matches!(result, Err(HostlibError::Backend { ref message, .. }) if message.contains("requires enforced filesystem read confinement")),
+                "unsupported restricted child must refuse: {result:?}"
+            );
+        }
+    }
+    {
+        let _policy = scoped(&linked, &[&metadata], &[&metadata]);
+        let result = identity(&linked);
+        assert!(
+            matches!(result, Err(HostlibError::SandboxViolation { .. })),
+            "read deny must beat metadata grant: {result:?}"
+        );
+    }
+}
+
+#[test]
+fn git_identity_config_include_cannot_read_outside_declared_child_roots() {
+    use harn_vm::orchestration::{
+        pop_execution_policy, push_execution_policy, CapabilityPolicy, SandboxProfile,
+    };
+    use harn_vm::value::{ErrorCategory, VmError};
+    struct PolicyGuard;
+    impl Drop for PolicyGuard {
+        fn drop(&mut self) {
+            pop_execution_policy();
+        }
+    }
+    assert!(ensure_git(), "Git include qualification requires Git");
+    let _environment = harn_vm::stdlib::process::declare_session_environment_if_absent(
+        harn_vm::security::SessionEnvironment::inherited(),
+    );
+    let repository = fixture_repo();
+    let outside = TempDir::new().unwrap();
+    let include = outside.path().join("outside.config");
+    std::fs::write(&include, "[scoped]\nprobe = OUTSIDE_CONFIG_READ_REACHED\n").unwrap();
+    run_git(
+        repository.path(),
+        &["config", "include.path", include.to_str().unwrap()],
+    );
+    let args = [
+        "-C",
+        repository.path().to_str().unwrap(),
+        "config",
+        "--get",
+        "scoped.probe",
+    ]
+    .map(str::to_string);
+    let config = harn_vm::process_sandbox::ProcessCommandConfig {
+        cwd: Some(repository.path().to_path_buf()),
+        ..Default::default()
+    };
+    let observed =
+        harn_vm::process_sandbox::command_output_with_declared_roots("git", &args, &config)
+            .unwrap();
+    assert!(observed.status.success());
+    assert_eq!(
+        String::from_utf8_lossy(&observed.stdout).trim(),
+        "OUTSIDE_CONFIG_READ_REACHED"
+    );
+    let inside = repository.path().join("inside.config");
+    std::fs::write(&inside, "[scoped]\nprobe = IN_ROOT_CONFIG_READ_REACHED\n").unwrap();
+    run_git(
+        repository.path(),
+        &["config", "include.path", inside.to_str().unwrap()],
+    );
+    push_execution_policy(CapabilityPolicy {
+        sandbox_profile: SandboxProfile::Worktree,
+        workspace_roots: vec![repository.path().display().to_string()],
+        ..CapabilityPolicy::default()
+    });
+    let _policy = PolicyGuard;
+    let inside_read =
+        harn_vm::process_sandbox::command_output_with_declared_roots("git", &args, &config);
+    if !harn_vm::process_sandbox::active_backend_filesystem_available() {
+        assert!(matches!(
+            inside_read,
+            Err(VmError::CategorizedError {
+                category: ErrorCategory::ToolRejected,
+                ref message,
+            }) if message == "declared-root command requires enforced filesystem read confinement on this platform"
+        ));
+        eprintln!("UNMEASURED: Git include privacy requires an available filesystem sandbox");
+        return;
+    }
+    let inside_read = inside_read.expect("restricted Git must reach the in-root config read");
+    assert!(inside_read.status.success(), "{inside_read:?}");
+    assert_eq!(
+        String::from_utf8_lossy(&inside_read.stdout).trim(),
+        "IN_ROOT_CONFIG_READ_REACHED"
+    );
+
+    // Keep argv, cwd, command configuration and policy identical; only the
+    // repository's include target changes from granted to outside the jail.
+    run_git(
+        repository.path(),
+        &["config", "include.path", include.to_str().unwrap()],
+    );
+    match harn_vm::process_sandbox::command_output_with_declared_roots("git", &args, &config) {
+        Ok(refused) => {
+            assert!(
+                !refused.status.success(),
+                "outside include was allowed: {refused:?}"
+            );
+            for bytes in [&refused.stdout, &refused.stderr] {
+                assert!(!String::from_utf8_lossy(bytes).contains("OUTSIDE_CONFIG_READ_REACHED"));
+            }
+        }
+        Err(VmError::CategorizedError {
+            category: ErrorCategory::ToolRejected,
+            message,
+        }) => {
+            assert!(!message.contains("OUTSIDE_CONFIG_READ_REACHED"));
+            assert!(
+                (message.starts_with(
+                    "sandbox violation: process was denied by the OS sandbox (status "
+                ) || message.starts_with(
+                    "sandbox violation: process was terminated by the OS sandbox (status "
+                )) && message.contains("); mechanism="),
+                "expected the canonical OS sandbox refusal, got {message:?}"
+            );
+        }
+        other => panic!("expected an outside-config sandbox refusal, got {other:?}"),
     }
 }
 

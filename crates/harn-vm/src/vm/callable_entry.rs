@@ -102,6 +102,7 @@ impl Vm {
         &mut self,
     ) -> crate::orchestration::AmbientExecutionScope {
         self.prepare_execution_for_top_level();
+        self.capture_agent_cleanup_runtimes();
         crate::orchestration::AmbientExecutionScope::capture_for_top_level_execution(
             self.execution_id.clone(),
             self.llm_mock_context.clone(),

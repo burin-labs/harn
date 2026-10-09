@@ -384,37 +384,41 @@ impl AcpServer {
         }
     }
 
-    pub(super) async fn handle_hitl_respond(
-        &self,
-        id: &serde_json::Value,
-        params: &serde_json::Value,
-    ) {
-        let session_cwd = params
-            .get("sessionId")
-            .and_then(|value| value.as_str())
-            .and_then(|session_id| self.sessions.get(session_id))
-            .map(|session| session.cwd.as_path());
-        let fallback_cwd = self
-            .sessions
-            .values()
-            .next()
-            .map(|session| session.cwd.as_path());
-        let cwd = session_cwd.or(fallback_cwd);
-        let response: harn_vm::HitlHostResponse = match serde_json::from_value(params.clone()) {
-            Ok(response) => response,
-            Err(error) => {
-                self.send_error(
-                    id,
-                    -32602,
-                    &format!("Invalid harn.hitl.respond params: {error}"),
-                );
-                return;
+    pub(super) fn handle_hitl_respond<'a>(
+        &'a self,
+        id: &'a serde_json::Value,
+        params: &'a serde_json::Value,
+    ) -> std::pin::Pin<Box<impl std::future::Future<Output = ()> + 'a>> {
+        // Allocate at the handler boundary so durable response persistence
+        // does not enlarge the shared incoming-message router's stack frame.
+        Box::pin(async move {
+            let session_cwd = params
+                .get("sessionId")
+                .and_then(|value| value.as_str())
+                .and_then(|session_id| self.sessions.get(session_id))
+                .map(|session| session.cwd.as_path());
+            let fallback_cwd = self
+                .sessions
+                .values()
+                .next()
+                .map(|session| session.cwd.as_path());
+            let cwd = session_cwd.or(fallback_cwd);
+            let response: harn_vm::HitlHostResponse = match serde_json::from_value(params.clone()) {
+                Ok(response) => response,
+                Err(error) => {
+                    self.send_error(
+                        id,
+                        -32602,
+                        &format!("Invalid harn.hitl.respond params: {error}"),
+                    );
+                    return;
+                }
+            };
+            match harn_vm::append_hitl_response(cwd, response).await {
+                Ok(_) => self.send_response(id, serde_json::json!({"ok": true})),
+                Err(error) => self.send_error(id, -32000, &error),
             }
-        };
-        match harn_vm::append_hitl_response(cwd, response).await {
-            Ok(_) => self.send_response(id, serde_json::json!({"ok": true})),
-            Err(error) => self.send_error(id, -32000, &error),
-        }
+        })
     }
 
     pub(super) fn workflow_base_dir_for<'a>(
@@ -855,6 +859,97 @@ mod authorize_batch_tests {
         assert_eq!(server["cacheEntries"], 3);
         assert_eq!(server["displayIdentity"], "Jane Doe <jane@acme.com> - Acme");
         assert!(server.get("display_identity").is_none());
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn hitl_router_preserves_auth_validation_and_durable_response() {
+        use harn_vm::event_log::{EventLog, EventLogBackendKind, EventLogConfig, LogEvent, Topic};
+        struct ResetLog;
+        impl Drop for ResetLog {
+            fn drop(&mut self) {
+                harn_vm::event_log::reset_active_event_log();
+            }
+        }
+        let _reset = ResetLog;
+        let root = tempfile::tempdir().unwrap();
+        let config = EventLogConfig {
+            backend: EventLogBackendKind::Sqlite,
+            file_dir: root.path().join("events"),
+            sqlite_path: root.path().join("events.sqlite"),
+            queue_depth: 32,
+        };
+        let log = harn_vm::event_log::open_event_log(&config).unwrap();
+        harn_vm::event_log::install_active_event_log(log.clone());
+        let request = "hitl_escalation_router_response";
+        let topic = Topic::new(harn_vm::HITL_ESCALATIONS_TOPIC).unwrap();
+        log.append(
+            &topic,
+            LogEvent::new(
+                "hitl.escalation_issued",
+                serde_json::json!({"request_id":request}),
+            ),
+        )
+        .await
+        .unwrap();
+        let before = log.read_range(&topic, None, 100).await.unwrap();
+        assert!(
+            !before.is_empty(),
+            "the durable request must actually exist"
+        );
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let mut server =
+            AcpServer::new_with_output(AcpServerConfig::new(None), AcpOutput::Channel(tx));
+        server
+            .auth_policy
+            .methods
+            .push(crate::auth::AuthMethodConfig::ApiKey(
+                crate::auth::ApiKeyAuthConfig::single("synthetic-router-test-key"),
+            ));
+        let valid = serde_json::json!({
+            "request_id":request, "accepted":false, "reviewer":"reviewer",
+            "responded_at":"2026-10-06T00:00:00Z"
+        });
+        server
+            .handle_incoming_message(serde_json::json!({
+                "jsonrpc":"2.0", "id":1, "method":"harn.hitl.respond", "params":valid,
+            }))
+            .await;
+        let refused = recv_value(&mut rx).await;
+        assert_eq!(refused["id"], 1);
+        assert_eq!(refused["error"]["code"], ACP_AUTH_REQUIRED_CODE);
+        assert_eq!(
+            log.read_range(&topic, None, 100).await.unwrap().len(),
+            before.len()
+        );
+        server.auth_policy = AuthPolicy::allow_all();
+        server
+            .handle_incoming_message(serde_json::json!({
+                "jsonrpc":"2.0", "id":2, "method":"harn.hitl.respond", "params":{},
+            }))
+            .await;
+        let malformed = recv_value(&mut rx).await;
+        assert_eq!(malformed["id"], 2);
+        assert_eq!(malformed["error"]["code"], -32602);
+        assert_eq!(
+            log.read_range(&topic, None, 100).await.unwrap().len(),
+            before.len()
+        );
+        server
+            .handle_incoming_message(serde_json::json!({
+                "jsonrpc":"2.0", "id":3, "method":"harn.hitl.respond", "params":valid,
+            }))
+            .await;
+        let accepted = recv_value(&mut rx).await;
+        assert_eq!(accepted["id"], 3);
+        assert_eq!(accepted["result"]["ok"], true);
+        let reopened = harn_vm::event_log::open_event_log(&config).unwrap();
+        let events = reopened.read_range(&topic, None, 100).await.unwrap();
+        let responses: Vec<_> = events
+            .iter()
+            .filter(|(_, event)| event.kind == "hitl.escalation_accepted")
+            .collect();
+        assert_eq!(responses.len(), 1);
+        assert_eq!(responses[0].1.payload, valid);
     }
 
     async fn recv_value(rx: &mut mpsc::UnboundedReceiver<String>) -> serde_json::Value {

@@ -28,6 +28,8 @@ pub mod a2a;
 pub mod actor_chain;
 pub mod agent_events;
 mod agent_lifecycle_cleanup;
+#[cfg(test)]
+mod agent_session_auxiliary_usage_tests;
 pub(crate) mod agent_session_journal;
 pub mod agent_session_restore;
 pub mod agent_session_spend;
@@ -155,6 +157,7 @@ pub(crate) mod secret_patterns;
 pub mod secrets;
 pub mod security;
 pub mod session_bundle;
+pub mod session_publication;
 pub mod session_recap;
 pub mod session_timeline;
 pub mod sessions;
@@ -499,7 +502,7 @@ pub use triggers::{
     install_manifest_triggers, install_orchestrator_budget, micros_to_usd,
     note_autonomous_decision, note_orchestrator_budget_cost, orchestrator_budget_would_exceed,
     parse_flow_control_duration, pause, pin_trigger_binding, provider_metadata,
-    record_predicate_cost_sample, redact_headers, register_provider_schemas,
+    record_predicate_cost_sample, redact_headers, register_provider_metadata,
     registered_provider_metadata, registered_provider_schema_names, reset_binding_budget_windows,
     reset_provider_catalog, resolve_live_or_as_of, resolve_live_trigger_binding,
     resolve_trigger_binding_as_of, resume, run_trigger_harness_fixture, scheduler_in_flight_by_key,
@@ -510,24 +513,23 @@ pub use triggers::{
     DispatcherStatsSnapshot, ExtensionProviderPayload, FairnessKey, HeaderRedactionPolicy,
     InboxIndex, OrchestratorBudgetConfig, OrchestratorBudgetSnapshot, ProviderCatalog,
     ProviderCatalogError, ProviderId, ProviderMetadata, ProviderOutboundMethod, ProviderPayload,
-    ProviderRuntimeMetadata, ProviderSchema, ProviderSecretRequirement, ReadyKeyStats,
-    RecordedTriggerBinding, RetryPolicy, SchedulableJob, SchedulerKeyStat, SchedulerPolicy,
-    SchedulerSnapshot, SchedulerState, SchedulerStrategy, SignatureStatus,
-    SignatureVerificationMetadata, StreamEventPayload, TenantId, TraceId, TriggerBatchConfig,
-    TriggerBindingSnapshot, TriggerBindingSource, TriggerBindingSpec,
-    TriggerBudgetExhaustionStrategy, TriggerConcurrencyConfig, TriggerDebounceConfig,
-    TriggerDispatchOutcome, TriggerEvent, TriggerEventId, TriggerExpressionSpec,
-    TriggerFlowControlConfig, TriggerHandlerSpec, TriggerHarnessResult, TriggerId,
-    TriggerMetricsSnapshot, TriggerPredicateSpec, TriggerPriorityOrderConfig,
-    TriggerRateLimitConfig, TriggerRegistryError, TriggerRetryConfig, TriggerSingletonConfig,
-    TriggerState, TriggerThrottleConfig, WorkerQueue, WorkerQueueClaimHandle,
-    WorkerQueueEnqueueReceipt, WorkerQueueInspectSnapshot, WorkerQueueJob, WorkerQueueJobState,
-    WorkerQueuePriority, WorkerQueueResponseRecord, WorkerQueueState, WorkerQueueSummary,
-    DEFAULT_INBOX_RETENTION_DAYS, DEFAULT_STARVATION_AGE_MS, TRIGGERS_LIFECYCLE_TOPIC,
-    TRIGGER_ATTEMPTS_TOPIC, TRIGGER_CANCEL_REQUESTS_TOPIC, TRIGGER_DLQ_TOPIC,
-    TRIGGER_INBOX_CLAIMS_TOPIC, TRIGGER_INBOX_ENVELOPES_TOPIC, TRIGGER_INBOX_LEGACY_TOPIC,
-    TRIGGER_INBOX_OBSERVABILITY_TOPIC, TRIGGER_OPERATION_AUDIT_TOPIC, TRIGGER_OUTBOX_TOPIC,
-    TRIGGER_TEST_FIXTURES, WORKER_QUEUE_CATALOG_TOPIC,
+    ProviderRuntimeMetadata, ProviderSecretRequirement, ReadyKeyStats, RecordedTriggerBinding,
+    RetryPolicy, SchedulableJob, SchedulerKeyStat, SchedulerPolicy, SchedulerSnapshot,
+    SchedulerState, SchedulerStrategy, SignatureStatus, SignatureVerificationMetadata,
+    StreamEventPayload, TenantId, TraceId, TriggerBatchConfig, TriggerBindingSnapshot,
+    TriggerBindingSource, TriggerBindingSpec, TriggerBudgetExhaustionStrategy,
+    TriggerConcurrencyConfig, TriggerDebounceConfig, TriggerDispatchOutcome, TriggerEvent,
+    TriggerEventId, TriggerExpressionSpec, TriggerFlowControlConfig, TriggerHandlerSpec,
+    TriggerHarnessResult, TriggerId, TriggerMetricsSnapshot, TriggerPredicateSpec,
+    TriggerPriorityOrderConfig, TriggerRateLimitConfig, TriggerRegistryError, TriggerRetryConfig,
+    TriggerSingletonConfig, TriggerState, TriggerThrottleConfig, WorkerQueue,
+    WorkerQueueClaimHandle, WorkerQueueEnqueueReceipt, WorkerQueueInspectSnapshot, WorkerQueueJob,
+    WorkerQueueJobState, WorkerQueuePriority, WorkerQueueResponseRecord, WorkerQueueState,
+    WorkerQueueSummary, DEFAULT_INBOX_RETENTION_DAYS, DEFAULT_STARVATION_AGE_MS,
+    TRIGGERS_LIFECYCLE_TOPIC, TRIGGER_ATTEMPTS_TOPIC, TRIGGER_CANCEL_REQUESTS_TOPIC,
+    TRIGGER_DLQ_TOPIC, TRIGGER_INBOX_CLAIMS_TOPIC, TRIGGER_INBOX_ENVELOPES_TOPIC,
+    TRIGGER_INBOX_LEGACY_TOPIC, TRIGGER_INBOX_OBSERVABILITY_TOPIC, TRIGGER_OPERATION_AUDIT_TOPIC,
+    TRIGGER_OUTBOX_TOPIC, TRIGGER_TEST_FIXTURES, WORKER_QUEUE_CATALOG_TOPIC,
 };
 pub use trust_graph::{
     append_active_scope_attenuation_alert, append_active_trust_record,

@@ -5,6 +5,7 @@
 //! `use super::*` still resolves to the production module's items.
 
 use super::*;
+use crate::orchestration::RunExecutionRecord;
 
 struct CurrentDirGuard(std::path::PathBuf);
 

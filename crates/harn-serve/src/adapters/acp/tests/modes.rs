@@ -403,8 +403,8 @@ async fn acp_session_resume_includes_current_mode_state_without_replay() {
     harn_vm::agent_events::emit_event(&harn_vm::agent_events::AgentEvent::AgentMessageChunk {
         session_id: session_id.clone(),
         content: "do not replay me".to_string(),
+        history_source_event_id: None,
     });
-
     server
         .handle_incoming_message(serde_json::json!({
             "jsonrpc": "2.0",
@@ -445,7 +445,7 @@ async fn acp_session_restore_methods_reject_unknown_sessions() {
                 "jsonrpc": "2.0",
                 "id": id,
                 "method": method,
-                "params": {"sessionId": "missing-session", "cwd": project.path()},
+                "params": {"sessionId": "missing-session", "cwd": project.path(), "environmentPolicy": {"kind": "isolated"}},
             }))
             .await;
         let response = recv_json(&mut rx).await;
@@ -477,8 +477,8 @@ async fn acp_session_load_restores_persisted_session_unknown_to_server() {
     harn_vm::agent_events::emit_event(&harn_vm::agent_events::AgentEvent::AgentMessageChunk {
         session_id: session_id.clone(),
         content: "restored history".to_string(),
+        history_source_event_id: None,
     });
-
     let (tx, mut rx) = mpsc::unbounded_channel();
     let mut server = AcpServer::new_with_output(AcpServerConfig::new(None), AcpOutput::Channel(tx));
 
@@ -487,7 +487,7 @@ async fn acp_session_load_restores_persisted_session_unknown_to_server() {
             "jsonrpc": "2.0",
             "id": 1,
             "method": "session/load",
-            "params": {"sessionId": session_id, "cwd": "."},
+            "params": {"sessionId": session_id, "cwd": ".", "environmentPolicy": {"kind": "isolated"}},
         }))
         .await;
 
@@ -553,7 +553,7 @@ async fn acp_session_load_rejects_session_without_persisted_events() {
             "jsonrpc": "2.0",
             "id": 1,
             "method": "session/load",
-            "params": {"sessionId": "never-existed", "cwd": project.path()},
+            "params": {"sessionId": "never-existed", "cwd": project.path(), "environmentPolicy": {"kind": "isolated"}},
         }))
         .await;
 

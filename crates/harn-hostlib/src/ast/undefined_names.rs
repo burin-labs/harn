@@ -10,9 +10,11 @@
 //! - Deduplicate by name on first occurrence so callers see one
 //!   diagnostic per missing import / typo, not one per usage.
 //!
-//! Profiles ship for Python, JavaScript, TypeScript, Go, and Ruby. Other
-//! languages return `supported = false` so callers can fall back to an
-//! external linter.
+//! Profiles ship for Python, JavaScript, TypeScript, Go, Ruby, and Rust.
+//! Other languages return `supported = false` so callers can fall back to an
+//! external linter. [`scan_names`] exposes a profile's raw binding and
+//! reference sets for one subtree, which `code_index.extract_function` uses
+//! to compute a region's inputs and outputs.
 //!
 //! Single-file scope is a deliberate restriction: cross-file resolution,
 //! re-exports, dynamic attribute access, and `exec`/`eval`-style name
@@ -167,28 +169,50 @@ pub(super) fn is_supported(language: Language) -> bool {
             | Language::Tsx
             | Language::Go
             | Language::Ruby
+            | Language::Rust
     )
+}
+
+/// Every name a subtree binds and every identifier reference it makes,
+/// before builtins or file-level definitions are subtracted.
+pub(crate) struct NameScan {
+    pub defined: HashSet<String>,
+    pub references: Vec<UndefinedName>,
+}
+
+/// Run `language`'s profile over `node`. `None` when no profile ships.
+pub(crate) fn scan_names(node: Node<'_>, source: &str, language: Language) -> Option<NameScan> {
+    let mut defined: HashSet<String> = HashSet::new();
+    let mut references: Vec<UndefinedName> = Vec::new();
+    match language {
+        Language::Python => python::collect(node, source, &mut defined, &mut references),
+        Language::JavaScript | Language::Jsx => {
+            javascript::collect(node, source, &mut defined, &mut references, false);
+        }
+        Language::TypeScript | Language::Tsx => {
+            javascript::collect(node, source, &mut defined, &mut references, true);
+        }
+        Language::Go => go::collect(node, source, &mut defined, &mut references),
+        Language::Ruby => ruby::collect(node, source, &mut defined, &mut references),
+        Language::Rust => rust::collect(node, source, &mut defined, &mut references),
+        _ => return None,
+    }
+    Some(NameScan {
+        defined,
+        references,
+    })
 }
 
 /// Run the appropriate per-language profile against `tree` / `source`
 /// and return the deduplicated undefined-name list.
 fn diagnose(tree: &Tree, source: &str, language: Language) -> Vec<UndefinedName> {
-    let mut defined: HashSet<String> = HashSet::new();
-    let mut references: Vec<UndefinedName> = Vec::new();
-    let root = tree.root_node();
-
-    match language {
-        Language::Python => python::collect(root, source, &mut defined, &mut references),
-        Language::JavaScript | Language::Jsx => {
-            javascript::collect(root, source, &mut defined, &mut references, false);
-        }
-        Language::TypeScript | Language::Tsx => {
-            javascript::collect(root, source, &mut defined, &mut references, true);
-        }
-        Language::Go => go::collect(root, source, &mut defined, &mut references),
-        Language::Ruby => ruby::collect(root, source, &mut defined, &mut references),
-        _ => return Vec::new(),
-    }
+    let Some(NameScan {
+        defined,
+        references,
+    }) = scan_names(tree.root_node(), source, language)
+    else {
+        return Vec::new();
+    };
 
     let builtins = builtins_for(language);
     let mut seen: HashSet<String> = HashSet::new();
@@ -212,6 +236,7 @@ fn builtins_for(language: Language) -> &'static HashSet<&'static str> {
         Language::TypeScript | Language::Tsx => &javascript::TS_BUILTINS,
         Language::Go => &go::BUILTINS,
         Language::Ruby => &ruby::BUILTINS,
+        Language::Rust => &rust::BUILTINS,
         _ => &EMPTY_BUILTINS,
     }
 }
@@ -292,6 +317,7 @@ mod go;
 mod javascript;
 mod python;
 mod ruby;
+mod rust;
 
 #[cfg(test)]
 mod tests {
@@ -406,11 +432,30 @@ mod tests {
 
     #[test]
     fn unsupported_language_returns_supported_false() {
-        let src = "fn main() {}\n";
-        let result = run_with(src, "rust");
+        let src = "class Main {}\n";
+        let result = run_with(src, "java");
         assert!(!supported(&result));
         let n = names(&result);
         assert!(n.is_empty());
+    }
+
+    #[test]
+    fn rust_flags_only_unbound_value_identifiers() {
+        let src = "use std::collections::HashMap;\nuse crate::a::{b as c, d};\n\
+                   struct Meters(u32);\n\
+                   fn total(items: &[u32], Meters(base): Meters) -> u32 {\n\
+                       let mut sum = base;\n\
+                       for (i, x) in items.iter().enumerate() { sum += x * i as u32; }\n\
+                       let f = |y: u32| y + offset;\n\
+                       if let Some(z) = items.first() { sum += z; }\n\
+                       match sum { 0 => helper(c, d), n => n.max(1) };\n\
+                       let _m: HashMap<u32, u32> = HashMap::new();\n\
+                       println!(\"{}\", f(sum) + missing);\n\
+                       Meters(sum).0 + total(items, Meters(0))\n\
+                   }\n";
+        let result = run_with(src, "rust");
+        assert!(supported(&result));
+        assert_eq!(names(&result), vec!["offset", "helper", "missing"]);
     }
 
     #[test]

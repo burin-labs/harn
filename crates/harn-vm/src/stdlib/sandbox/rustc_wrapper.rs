@@ -4,13 +4,13 @@
 //! A wrapper such as a compiler cache is configured outside the command: in
 //! the environment, or in a `.cargo/config.toml` anywhere from the working
 //! directory up to `CARGO_HOME`. Cargo resolves it, not the command, so the
-//! decision is a property of the (policy, working directory) pair and is made
-//! once per pair.
+//! decision is a property of the confinement, working directory, and child
+//! environment, rather than the tool registry or the agent's recursion budget.
 //!
 //! # How the decision is measured
 //!
 //! Cargo's resolution rules are Cargo's to change, so this module does not
-//! read Cargo configuration. It asks Cargo: a throwaway crate is built with
+//! reproduce Cargo's resolution. It asks Cargo: a throwaway crate is built with
 //! `cargo build -v --offline` from the command's working directory, confined
 //! under the command's own policy and environment, so a wrapper resolves and
 //! runs exactly as it would for the command.
@@ -50,6 +50,7 @@ use std::sync::{Mutex, OnceLock};
 use serde::Serialize;
 
 use crate::orchestration::CapabilityPolicy;
+use crate::security::environment_policy::environment_names_equal_for_platform;
 
 /// The four Cargo settings that name a wrapper. An empty value is Cargo's
 /// switch for "no wrapper", which overrides configuration files too.
@@ -108,11 +109,36 @@ impl RustcWrapperDecision {
     }
 }
 
-type DecisionKey = (String, String, Vec<(String, String)>);
+type DecisionKey = (String, String, [u8; 32]);
 
-fn decisions() -> &'static Mutex<BTreeMap<DecisionKey, RustcWrapperDecision>> {
-    static DECISIONS: OnceLock<Mutex<BTreeMap<DecisionKey, RustcWrapperDecision>>> =
-        OnceLock::new();
+#[path = "rustc_wrapper_cache.rs"]
+mod cache_inputs;
+
+struct Entry {
+    decision: RustcWrapperDecision,
+    inputs: Option<cache_inputs::Inputs>,
+}
+
+/// Only the policy axes consumed by the OS sandbox belong in the probe key.
+/// Tool names, argument constraints, annotations, and recursion budgets do not
+/// change what a compiler or its wrapper can access.
+fn confinement_key(policy: &CapabilityPolicy) -> String {
+    serde_json::to_string(&(
+        policy.sandbox_profile,
+        &policy.workspace_roots,
+        &policy.read_only_roots,
+        &policy.process_sandbox,
+        policy.children_may_write(),
+        super::super::policy_allows_network(policy),
+        policy
+            .process_network_proxy
+            .map(|proxy| (proxy.http_port, proxy.socks_port)),
+    ))
+    .expect("confinement policy is serializable")
+}
+
+fn decisions() -> &'static Mutex<BTreeMap<DecisionKey, Entry>> {
+    static DECISIONS: OnceLock<Mutex<BTreeMap<DecisionKey, Entry>>> = OnceLock::new();
     DECISIONS.get_or_init(|| Mutex::new(BTreeMap::new()))
 }
 
@@ -126,52 +152,71 @@ pub(crate) fn probing() -> bool {
     PROBING.with(std::cell::Cell::get)
 }
 
-/// The caller-supplied wrapper settings, which Cargo reads before its
-/// configuration files and which therefore belong to the decision's key.
-fn caller_wrapper_env(env: &[(String, String)]) -> Vec<(String, String)> {
-    let mut pairs: Vec<(String, String)> = env
-        .iter()
-        .filter(|(key, _)| {
-            RUSTC_WRAPPER_ENV_KEYS
-                .iter()
-                .any(|wrapper| key.eq_ignore_ascii_case(wrapper))
-        })
-        .map(|(key, value)| (key.to_ascii_uppercase(), value.clone()))
-        .collect();
-    pairs.sort();
-    pairs
-}
-
 /// The recorded decision for `policy` and `cwd`, measuring it on first use.
 ///
-/// `caller_env` is the spawn's own environment overlay; only its wrapper
-/// settings are read.
+/// `caller_env` is the spawn's own environment overlay.
 pub fn rustc_wrapper_decision(
     policy: &CapabilityPolicy,
     cwd: &Path,
     caller_env: &[(String, String)],
 ) -> RustcWrapperDecision {
-    let caller = caller_wrapper_env(caller_env);
+    // Cargo and wrappers also depend on PATH, CARGO_HOME, RUSTUP_HOME, etc.
+    // Resolve the same child environment used by the build, rather than keying
+    // only on explicit wrapper overlays and missing session/environment changes.
+    let child_env =
+        crate::stdlib::process::session_closed_env_for_command("cargo", caller_env.iter().cloned());
+    let env: BTreeMap<String, String> = match child_env {
+        Ok(Some(env)) => env.into_iter().collect(),
+        _ => {
+            let mut env = std::env::vars().collect();
+            for (key, value) in caller_env {
+                crate::security::session_environment::insert_env_value(
+                    &mut env,
+                    key,
+                    value.clone(),
+                );
+            }
+            env
+        }
+    };
+    rustc_wrapper_decision_for_environment(policy, cwd, &env)
+}
+
+pub(super) fn rustc_wrapper_decision_for_environment(
+    policy: &CapabilityPolicy,
+    cwd: &Path,
+    env: &BTreeMap<String, String>,
+) -> RustcWrapperDecision {
     let key = (
-        serde_json::to_string(policy).unwrap_or_default(),
+        confinement_key(policy),
         cwd.display().to_string(),
-        caller.clone(),
+        *blake3::hash(&serde_json::to_vec(env).expect("environment is serializable")).as_bytes(),
     );
-    if let Some(decision) = decisions()
+    // Serialize first measurements too: concurrent spawns must not both miss
+    // the map and start identical builds (or race a compiler-cache server).
+    let mut cache = decisions()
         .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .get(&key)
-    {
-        return decision.clone();
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let inputs = cache_inputs::capture(cwd, env);
+    if let Some(entry) = cache.get(&key) {
+        if inputs.is_some() && entry.inputs == inputs {
+            return entry.decision.clone();
+        }
     }
-    let decision = measure(policy, cwd, &caller);
+    let child_env: Vec<_> = env
+        .iter()
+        .map(|(key, value)| (key.clone(), value.clone()))
+        .collect();
+    let decision = measure(policy, cwd, &child_env);
     record(&decision);
-    decisions()
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .entry(key)
-        .or_insert(decision)
-        .clone()
+    cache.insert(
+        key,
+        Entry {
+            decision: decision.clone(),
+            inputs,
+        },
+    );
+    decision
 }
 
 /// Every decision made in this process, for a receipt.
@@ -180,7 +225,7 @@ pub fn rustc_wrapper_decisions() -> Vec<RustcWrapperDecision> {
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
         .values()
-        .cloned()
+        .map(|entry| entry.decision.clone())
         .collect()
 }
 
@@ -280,7 +325,7 @@ fn measure(
     }
 
     if let Some(known) = configured.as_deref().and_then(known_wrapper) {
-        known.prepare();
+        known.prepare(caller);
     }
     let nonce = probe_nonce();
     let with_wrapper = match build(scratch.path(), cwd, caller.to_vec(), Some(&nonce)) {
@@ -335,10 +380,7 @@ fn measure(
         };
     }
 
-    let blanked = RUSTC_WRAPPER_ENV_KEYS
-        .iter()
-        .map(|key| (key.to_string(), String::new()))
-        .collect();
+    let blanked = wrapper_free_environment(caller, cfg!(windows));
     // Why the wrapper-free build failed is the only evidence that separates a
     // broken toolchain from a broken wrapper, so the reason carries it.
     let without_error = match build(scratch.path(), cwd, blanked, None) {
@@ -391,6 +433,23 @@ impl Drop for Scratch {
     }
 }
 
+fn wrapper_free_environment(caller: &[(String, String)], windows: bool) -> Vec<(String, String)> {
+    caller
+        .iter()
+        .filter(|(key, _)| {
+            !RUSTC_WRAPPER_ENV_KEYS
+                .iter()
+                .any(|wrapper| environment_names_equal_for_platform(key, wrapper, windows))
+        })
+        .cloned()
+        .chain(
+            RUSTC_WRAPPER_ENV_KEYS
+                .iter()
+                .map(|key| (key.to_string(), String::new())),
+        )
+        .collect()
+}
+
 /// The wrapper Cargo could resolve for a build from `cwd`, as a hint, or
 /// `None` when it certainly resolves none.
 ///
@@ -402,28 +461,39 @@ impl Drop for Scratch {
 /// mentions a wrapper in a form this does not read yields an empty hint,
 /// which still runs the probe.
 fn configured_wrapper(cwd: &Path, caller: &[(String, String)]) -> Option<String> {
-    let child_env: BTreeMap<String, String> =
-        match crate::stdlib::process::session_closed_env_for_command(
-            "cargo",
-            caller.iter().cloned(),
-        ) {
-            Ok(Some(env)) => env.into_iter().collect(),
-            _ => std::env::vars().chain(caller.iter().cloned()).collect(),
-        };
+    configured_wrapper_for_platform(cwd, caller, cfg!(windows))
+}
+
+fn configured_wrapper_for_platform(
+    cwd: &Path,
+    caller: &[(String, String)],
+    windows: bool,
+) -> Option<String> {
+    let child_env: BTreeMap<String, String> = caller.iter().cloned().collect();
+    let value = |key: &str| {
+        child_env
+            .iter()
+            .find(|(name, _)| environment_names_equal_for_platform(name, key, windows))
+            .map(|(_, value)| value)
+    };
     if let Some(value) = RUSTC_WRAPPER_ENV_KEYS
         .iter()
-        .filter_map(|key| child_env.get(*key))
+        .filter_map(|key| value(key))
         .find(|value| !value.is_empty())
     {
         return Some(value.clone());
     }
-    let cargo_home = child_env.get("CARGO_HOME").map(PathBuf::from).or_else(|| {
-        child_env
-            .get("HOME")
-            .map(|home| Path::new(home).join(".cargo"))
-    });
+    let cargo_home = value("CARGO_HOME")
+        .map(PathBuf::from)
+        .or_else(|| value("HOME").map(|home| Path::new(home).join(".cargo")));
     let mut dirs: Vec<PathBuf> = cwd.ancestors().map(|dir| dir.join(".cargo")).collect();
-    dirs.extend(cargo_home);
+    dirs.extend(cargo_home.map(|directory| {
+        if directory.is_absolute() {
+            directory
+        } else {
+            cwd.join(directory)
+        }
+    }));
     dirs.iter()
         .flat_map(|dir| [dir.join("config"), dir.join("config.toml")])
         .filter_map(|file| std::fs::read_to_string(file).ok())
@@ -464,7 +534,7 @@ fn known_wrapper(configured: &str) -> Option<&'static KnownWrapper> {
 }
 
 impl KnownWrapper {
-    fn prepare(&self) {
+    fn prepare(&self, env: &[(String, String)]) {
         let Some((program, args)) = self.prepare.split_first() else {
             return;
         };
@@ -474,6 +544,8 @@ impl KnownWrapper {
             return;
         };
         let _ = command
+            .env_clear()
+            .envs(env.iter().map(|(key, value)| (key, value)))
             .args(args)
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
@@ -536,18 +608,15 @@ fn build(
     if let Some(nonce) = nonce {
         env.push((PROBE_NONCE_ENV.to_string(), nonce.to_string()));
     }
-    let overlay =
-        crate::stdlib::process::session_closed_env_for_command("cargo", env.clone().into_iter())
-            .map_err(|error| format!("the session environment refused the probe: {error:?}"))?;
     let config = crate::stdlib::sandbox::ProcessCommandConfig {
         cwd: Some(PathBuf::from(cwd)),
-        closed_env: overlay.is_some(),
-        env: overlay.unwrap_or(env),
+        closed_env: true,
+        env,
         ..crate::stdlib::sandbox::ProcessCommandConfig::default()
     };
     PROBING.with(|flag| flag.set(true));
-    let output =
-        crate::stdlib::sandbox::sandboxed_process_config(&config, &policy).and_then(|config| {
+    let output = crate::stdlib::sandbox::sandboxed_process_config("cargo", &args, &config, &policy)
+        .and_then(|config| {
             use crate::stdlib::sandbox::SandboxBackend;
             #[cfg(unix)]
             {
@@ -861,14 +930,40 @@ mod tests {
     }
 
     #[test]
-    fn only_the_callers_wrapper_settings_key_the_decision() {
-        let env = vec![
-            ("PATH".to_string(), "/usr/bin".to_string()),
-            ("rustc_wrapper".to_string(), "sccache".to_string()),
-        ];
+    fn confinement_key_ignores_agent_policy_but_preserves_process_authority() {
+        let policy = CapabilityPolicy::default();
+        let mut tool_policy = policy.clone();
+        tool_policy.tools = vec!["other_tool".into()];
+        tool_policy.recursion_limit = Some(0);
+        assert_eq!(confinement_key(&policy), confinement_key(&tool_policy));
+        tool_policy
+            .process_sandbox
+            .read_roots
+            .push("/other/root".into());
+        assert_ne!(confinement_key(&policy), confinement_key(&tool_policy));
+    }
+
+    #[test]
+    fn wrapper_lookup_and_control_build_follow_platform_environment_names() {
+        let workspace = tempfile::tempdir().unwrap();
+        let env = vec![("Rustc_Wrapper".into(), "mixed-case-wrapper".into())];
         assert_eq!(
-            caller_wrapper_env(&env),
-            vec![("RUSTC_WRAPPER".to_string(), "sccache".to_string())]
+            configured_wrapper_for_platform(workspace.path(), &env, true).as_deref(),
+            Some("mixed-case-wrapper")
+        );
+        assert_eq!(
+            configured_wrapper_for_platform(workspace.path(), &env, false),
+            None
+        );
+        let windows = wrapper_free_environment(&env, true);
+        assert!(!windows.iter().any(|(key, _)| key == "Rustc_Wrapper"));
+        assert!(RUSTC_WRAPPER_ENV_KEYS.iter().all(|key| windows
+            .iter()
+            .any(|(name, value)| name == *key && value.is_empty())));
+        let posix = wrapper_free_environment(&env, false);
+        assert!(
+            posix.contains(&env[0]),
+            "POSIX mixed-case names are unrelated variables"
         );
     }
 }

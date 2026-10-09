@@ -165,12 +165,13 @@ pub(super) fn host_agent_session_record_assistant_builtin(
     super::super::assistant_publication::defer(&mut assistant_message, &llm_result);
     let visible_text =
         crate::llm::agent_result_projection::visible_assistant_text(&assistant_message);
-    crate::agent_sessions::inject_message(&session_id, assistant_message)
+    let receipt = crate::agent_sessions::inject_message_with_source(&session_id, assistant_message)
         .map_err(VmError::Runtime)?;
     if let Some(content) = visible_text {
         emit_event(&AgentEvent::AgentMessageChunk {
             session_id: session_id.clone(),
             content,
+            history_source_event_id: Some(receipt.source_event_id),
         });
     }
     assistant_messages::record_dispatch_receipt(

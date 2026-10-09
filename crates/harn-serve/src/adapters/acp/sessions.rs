@@ -9,6 +9,12 @@ pub(super) struct ConcurrentSessionControl {
     /// re-arms here while a prompt may be running.
     pub(super) llm_spend: Arc<std::sync::Mutex<SessionLlmSpend>>,
     prompt_active: Arc<AtomicBool>,
+    /// The live prompt's client event transport. Controls are answered by
+    /// dispatch handlers and router preemption, outside the prompt's execution
+    /// scope, so they reach the turn's event stream only through this binding.
+    /// Empty between turns, as the per-turn client sink always was: an idle
+    /// control is answered by its JSON-RPC reply and its durable record.
+    prompt_transport: Arc<std::sync::Mutex<harn_vm::agent_events::AgentEventTransport>>,
 }
 
 /// What one session's spend ceiling is measured against across its turns.
@@ -128,6 +134,7 @@ impl ConcurrentSessionControl {
             ),
             llm_spend: Arc::default(),
             prompt_active: Arc::new(AtomicBool::new(false)),
+            prompt_transport: Arc::default(),
         }
     }
 
@@ -137,6 +144,27 @@ impl ConcurrentSessionControl {
 
     pub(super) fn prompt_is_active(&self) -> bool {
         self.prompt_active.load(Ordering::SeqCst)
+    }
+
+    /// Bind (or, with the empty transport, release) the live turn's client
+    /// event stream for controls answered outside its execution scope.
+    pub(super) fn set_prompt_transport(
+        &self,
+        transport: harn_vm::agent_events::AgentEventTransport,
+    ) {
+        *self
+            .prompt_transport
+            .lock()
+            .unwrap_or_else(|error| error.into_inner()) = transport;
+    }
+
+    fn emit_control_event(&self, event: &harn_vm::agent_events::AgentEvent) {
+        let transport = self
+            .prompt_transport
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .clone();
+        transport.with(|| harn_vm::agent_events::emit_event(event));
     }
 }
 
@@ -167,6 +195,21 @@ impl ConcurrentSessionControls {
             .lock()
             .unwrap_or_else(|error| error.into_inner())
             .insert(session_id.to_string(), control);
+    }
+
+    /// Publish a control outcome to the session's durable subscribers and,
+    /// while a turn is live, to that turn's client event stream.
+    pub(super) fn emit_control_event(&self, event: &harn_vm::agent_events::AgentEvent) {
+        let control = self
+            .sessions
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .get(event.session_id())
+            .cloned();
+        match control {
+            Some(control) => control.emit_control_event(event),
+            None => harn_vm::agent_events::emit_event(event),
+        }
     }
 
     pub(super) fn remove(&self, session_id: &str) {
@@ -321,6 +364,7 @@ impl ConcurrentSessionControls {
             Err(message) => {
                 send_routed_error(output, id, -32602, &message);
                 emit_routed_control_outcome(
+                    self,
                     &session_id,
                     "rejected",
                     actor,
@@ -336,6 +380,7 @@ impl ConcurrentSessionControls {
                 Err(message) => {
                     send_routed_error(output, id, -32602, &message);
                     emit_routed_control_outcome(
+                        self,
                         &session_id,
                         "rejected",
                         actor,
@@ -350,6 +395,7 @@ impl ConcurrentSessionControls {
             Err(message) => {
                 send_routed_error(output, id, -32602, &message);
                 emit_routed_control_outcome(
+                    self,
                     &session_id,
                     "rejected",
                     actor,
@@ -377,6 +423,7 @@ impl ConcurrentSessionControls {
         // would have left the store blind to exactly the case the typed
         // control event exists for.
         super::core::record_and_emit_control(
+            self,
             &session_id,
             harn_session_store::ControlEvent::injection(
                 "session/inject",
@@ -557,13 +604,14 @@ fn send_routed_error(output: &AcpOutput, id: &serde_json::Value, code: i64, mess
 }
 
 fn emit_routed_control_outcome(
+    controls: &ConcurrentSessionControls,
     session_id: &str,
     outcome: &str,
     actor: serde_json::Value,
     target: serde_json::Value,
     reason: Option<&str>,
 ) {
-    harn_vm::agent_events::emit_event(&harn_vm::agent_events::AgentEvent::ControlOutcome {
+    controls.emit_control_event(&harn_vm::agent_events::AgentEvent::ControlOutcome {
         session_id: session_id.to_string(),
         control_id: control_id(),
         method: "session/inject".to_string(),
@@ -871,6 +919,7 @@ pub(super) fn preempt_session_interruption(
                     .and_then(|value| value.as_str())
                 {
                     super::core::record_and_emit_control(
+                        controls,
                         session_id,
                         harn_session_store::ControlEvent::stop(
                             "session/cancel",
