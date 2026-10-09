@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 
+# shellcheck source=scripts/lib/consumer_canary_policy.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/consumer_canary_policy.sh"
+
 # Promotion reads the actual job, including legacy runs whose workflow stayed
 # green after a tolerated consumer failure. Empty and partial reads refuse.
 release_consumer_verdict() {
@@ -60,7 +63,7 @@ release_require_consumer_verdict() {
 # new verdict: callers must first authenticate the terminal run and named job.
 # Only the runner's env block and this step's records are eligible; matching
 # prose, another step, truncated logs and repeated fields all refuse.
-release_rehearsal_step_observation() {
+release_rehearsal_step_observations() {
   local log="${1:?job log required}" command="${2:?owning command required}"
   local fields="${3:?field names required}"
   jq -Rsec --arg command "$command" --argjson fields "$fields" '
@@ -75,7 +78,8 @@ release_rehearsal_step_observation() {
     if (map(select(length > 0)) | last) != "Cleaning up orphan processes"
     then error("incomplete historical job log") else . end |
     [range(0; length) | select($lines[.] == "##[group]Run " + $command)] |
-    exactly_one("owning step") as $start |
+    if length == 0 then error("missing owning step") else . end |
+    map(. as $start |
     $lines[$start + 1:] as $rest |
     ([range(0; $rest | length) | select($rest[.] == "##[endgroup]")] | first) as $end |
     if $end == null then error("incomplete runner step header") else . end |
@@ -94,8 +98,14 @@ release_rehearsal_step_observation() {
     ([range(0; length) | select($rest[$end + 1 + .] == "Post job cleanup." or
       ($rest[$end + 1 + .] | startswith("##[group]")))] | first) as $stop |
     if $stop == null then error("missing step termination") else . end |
-    {step_start:$start, environment:$environment, records:.[:$stop]}
+    {step_start:$start, environment:$environment, records:.[:$stop]})
   ' "$log"
+}
+
+release_rehearsal_step_observation() {
+  local observations
+  observations="$(release_rehearsal_step_observations "$@")" || return 1
+  jq -ce 'if length == 1 then .[0] else error("duplicate owning step") end' <<< "$observations"
 }
 
 # Join the resolver, dispatch, observation and authorization records from one
@@ -108,7 +118,8 @@ release_failed_rehearsal_observation() {
   local consumer_log="${2:?consumer log required}"
   local authorization_log="${3:?authorization log required}"
   local source="${4:?source required}" producer="${5:?producer required}"
-  local child="${6:?child run required}" resolver dispatch observation authorization
+  local child="${6:?child run required}" resolver dispatch observations authorization policy
+  policy="$(consumer_canary_policy)" || return 1
   resolver="$(release_rehearsal_step_observation "$resolver_log" \
     'bash scripts/resolve-release-promotion-source.sh' \
     '["CANDIDATE_RUN_ID","EXPECTED_SOURCE_SHA"]')" || return 1
@@ -117,37 +128,64 @@ release_failed_rehearsal_observation() {
     'CANARY_REPOSITORY="$CANARY_OWNER/$CANARY_NAME" \' \
     '["SOURCE_REVISION","CANARY_WORKFLOW"]')" || return 1
   # shellcheck disable=SC2016 # literal runner command; do not expand it here
-  observation="$(release_rehearsal_step_observation "$consumer_log" \
+  observations="$(release_rehearsal_step_observations "$consumer_log" \
     'CANARY_REPOSITORY="$CANARY_OWNER/$CANARY_NAME" bash scripts/ci/consumer_canary.sh --observe' \
-    '["CANARY_RUN_ID"]')" || return 1
+    '["CANARY_RUN_ID","CANARY_STARTED_AT","CANARY_WINDOW_SECONDS","CANARY_DEADLINE_SECONDS"]')" || return 1
   authorization="$(release_rehearsal_step_observation "$authorization_log" \
     'bash scripts/authorize-release-rehearsal.sh' \
     '["SOURCE_SHA","REQUIRES_REHEARSAL","REHEARSAL_RESULT","REHEARSAL_VERDICT","REHEARSAL_SOURCE_SHA"]')" || return 1
   jq -nce --argjson resolver "$resolver" --argjson dispatch "$dispatch" \
-    --argjson observation "$observation" \
+    --argjson observations "$observations" --argjson policy "$policy" \
     --argjson authorization "$authorization" --arg source "$source" \
     --arg producer "$producer" --arg child "$child" '
     def one_record($records; $prefix; $expected):
       [$records[] | select(startswith($prefix))] as $matches |
       ($matches | length) == 1 and ($matches[0] | test($expected));
+    def no_record($records; $prefix): all($records[]; startswith($prefix) | not);
+    def failed_terminal($records):
+      one_record($records; "CONSUMER_CANARY verdict=";
+        "^CONSUMER_CANARY verdict=fail conclusion=(failure|cancelled) run=" + $child + " wall_seconds=[0-9]+$") and
+      no_record($records; "CONSUMER_CANARY pending ") and
+      one_record($records; "##[error]Process completed ";
+        "^##\\[error\\]Process completed with exit code 1\\.$");
+    def pending_window($records):
+      one_record($records; "CONSUMER_CANARY pending ";
+        "^CONSUMER_CANARY pending run=" + $child + " status=(queued|in_progress|waiting|pending|requested) wall_seconds=[0-9]+$") and
+      no_record($records; "CONSUMER_CANARY verdict=") and
+      no_record($records; "##[error]Process completed ");
+    def elapsed($records):
+      [$records[] | select(startswith("CONSUMER_CANARY pending ") or startswith("CONSUMER_CANARY verdict=")) |
+        capture("wall_seconds=(?<seconds>[0-9]+)$").seconds | tonumber] |
+      if length == 1 then .[0] else error("missing or duplicate observation elapsed time") end;
+    ($observations | length) as $count |
+    ([$dispatch.records[] | select(startswith("CONSUMER_CANARY dispatched ")) |
+      capture("^CONSUMER_CANARY dispatched run=[1-9][0-9]* ref=default started_at=(?<started>[1-9][0-9]*)$").started] |
+      if length == 1 then .[0] else error("missing or duplicate dispatch clock") end) as $started |
+    [$observations[] | elapsed(.records)] as $elapsed |
     if ($source | test("^[0-9a-f]{40}$")) and
       ($producer | test("^[1-9][0-9]*$")) and ($child | test("^[1-9][0-9]*$")) and
       $resolver.environment == {CANDIDATE_RUN_ID:$producer, EXPECTED_SOURCE_SHA:$source} and
       $dispatch.environment == {SOURCE_REVISION:$source, CANARY_WORKFLOW:"harn-repin-rehearsal.yml"} and
-      $observation.environment == {CANARY_RUN_ID:$child} and
-      $dispatch.step_start < $observation.step_start and
+      $count >= 1 and $count <= $policy.max_windows and
+      all($observations[]; $dispatch.step_start < .step_start) and
+      ([$observations[].step_start] == ([$observations[].step_start] | sort | unique)) and
+      all($observations[]; .environment == {CANARY_RUN_ID:$child, CANARY_STARTED_AT:$started,
+        CANARY_WINDOW_SECONDS:($policy.window_seconds | tostring),
+        CANARY_DEADLINE_SECONDS:($policy.deadline_seconds | tostring)}) and
+      all($elapsed[]; . < $policy.deadline_seconds) and
+      ($elapsed == ($elapsed | sort)) and
+      all(range(0; $count - 1); . as $index | $elapsed[$index] >= (($index + 1) * $policy.window_seconds)) and
+      all(range(1; $count - 1); . as $index | $elapsed[$index] >= ($elapsed[$index - 1] + $policy.window_seconds)) and
       $authorization.environment == {SOURCE_SHA:$source, REQUIRES_REHEARSAL:"true",
         REHEARSAL_RESULT:"failure", REHEARSAL_VERDICT:"fail", REHEARSAL_SOURCE_SHA:$source} and
       one_record($dispatch.records; "CONSUMER_CANARY dispatched ";
-        "^CONSUMER_CANARY dispatched run=" + $child + " ref=default$") and
-      one_record($observation.records; "CONSUMER_CANARY verdict=";
-        "^CONSUMER_CANARY verdict=fail conclusion=(failure|cancelled) run=" + $child + " wall_seconds=[0-9]+$") and
-      one_record($observation.records; "##[error]Process completed ";
-        "^##\\[error\\]Process completed with exit code 1\\.$") and
+        "^CONSUMER_CANARY dispatched run=" + $child + " ref=default started_at=" + $started + "$") and
+      all(range(0; $count - 1); pending_window($observations[.].records)) and
+      failed_terminal($observations[-1].records) and
       one_record($authorization.records; "##[error]Process completed ";
         "^##\\[error\\]Process completed with exit code 1\\.$")
     then {source_sha:$source, producer_run:$producer, consumer_run:$child,
-      consumer_conclusion:($observation.records[] | select(startswith("CONSUMER_CANARY verdict=")) |
+      consumer_conclusion:($observations[-1].records[] | select(startswith("CONSUMER_CANARY verdict=")) |
         capture("conclusion=(?<value>failure|cancelled) ").value),
       verdict:"failed_historical_rehearsal"}
     else error("historical rehearsal machine contracts do not agree") end
