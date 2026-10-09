@@ -7,7 +7,11 @@ fn identical_sql_can_change_its_own_parameter_context_when_env_url_is_set() {
     reset_postgres_state();
     reset_describe_round_trips();
     assert_eq!(
-        run_harn_source(include_str!("fixtures/transaction_self_context.harn")).trim(),
+        run_harn_source(include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../tests/fixtures/postgres/transaction_self_context.harn"
+        )))
+        .trim(),
         "same SQL changed its own context: committed"
     );
     assert_eq!(describe_round_trips(), 3);
@@ -22,7 +26,10 @@ fn transaction_context_changes_refresh_types_when_env_url_is_set() {
         let _direction = crate::llm::test_env::ScopedEnvVar::set("HARN_EXT_FIRST_TYPE", first);
         reset_postgres_state();
         reset_describe_round_trips();
-        let source = include_str!("fixtures/transaction_context.harn");
+        let source = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../tests/fixtures/postgres/transaction_context.harn"
+        ));
         assert_eq!(
             run_harn_source(source).trim(),
             format!("{first}->{second}: committed and recovered")
