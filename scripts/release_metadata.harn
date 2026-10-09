@@ -17,10 +17,6 @@ pub type ReleaseMetadataPlan = {
 
 type PackageManifestProjection = {package: {name: string}}
 
-type InlineDependencyProjection = {package?: string, path?: string, version?: string}
-
-pub type CargoDependencyLine = {package_name: string, path: string?, version: string?}
-
 type WorkspaceVersionProjection = {workspace?: {package?: {version?: string?}?, version?: string?}?}
 
 type AgentArchiveProjection = {archive: string}
@@ -244,103 +240,28 @@ pub fn package_names_for_manifests(fs: HarnessFs, manifests: list<string>) -> li
   return names.sort()
 }
 
-/** Resolve an inline Cargo dependency once, including its renamed package identity. */
-pub fn cargo_dependency_from_line(
-  line: string,
-  manifest: unknown = nil,
-  section: string = "",
-) -> CargoDependencyLine? {
+fn dependency_name(line: string) -> string? {
   const matches = regex_captures(r"^\s*([A-Za-z0-9_-]+)\s*=\s*\{", line)
   if matches.count == 0 {
     return nil
   }
-  const alias = matches[0].groups[0]
-  let table = manifest ?? toml_parse(line)
-  if section == "" && manifest != nil
-    && (manifest.get("package") != nil || manifest.get("workspace") != nil) {
-    return nil
-  }
-  if section != "" {
-    // TOML owns quoted target expressions and dotted table names.
-    let section_shape = toml_parse("[" + section + "]")
-    let section_keys: list<string> = []
-    while section_shape.keys().count > 0 {
-      if section_shape.keys().count != 1 {
-        throw "dependency section must identify one Cargo table"
-      }
-      const key = section_shape.keys()[0]
-      section_keys = section_keys + [key]
-      if manifest != nil {
-        table = table?.get(key)
-      }
-      section_shape = section_shape.get(key)
-    }
-    const dependency_sections = ["dependencies", "dev-dependencies", "build-dependencies"]
-    const is_dependency_section = (section_keys.count == 1
-        && dependency_sections.contains(section_keys[0]))
-      || section_keys == ["workspace", "dependencies"]
-      || (section_keys.count == 3 && section_keys[0] == "target"
-        && dependency_sections.contains(section_keys[2]))
-    if !is_dependency_section {
-      return nil
-    }
-  }
-  const projection: InlineDependencyProjection = schema_expect(
-    table?.get(alias),
-    schema_refine(
-      schema_of(InlineDependencyProjection),
-      schema_object(
-        {
-          package: schema_field(schema_string(), false),
-          path: schema_field(schema_string(), false),
-          version: schema_field(schema_string(), false),
-        },
-        {additional_properties: true},
-      ),
-    ),
-  )
-  const package_name = projection.package ?? alias
-  if package_name == "" {
-    throw "dependency package identity must be a nonempty string"
-  }
-  return {package_name: package_name, path: projection.path, version: projection.version}
+  return matches[0].groups[0]
 }
 
-pub fn cargo_section_from_line(line: string) -> string? {
-  const section = regex_captures(r"^\s*\[([^\]]+)\]\s*$", line)
-  return section.count == 0 ? nil : section[0].groups[0]
-}
-
-/**
- * Source-preserving writer boundary: inline values may span lines, but a
- * version literal must be on its dependency's declaration line. Other layouts
- * refuse during planning before any manifest in the version cut is written.
- */
 pub fn rewrite_local_dependency_versions(
   text: string,
   package_names: list<string>,
   version: string,
 ) -> string {
-  const manifest = toml_parse(text)
   let lines: list<string> = []
-  let section = ""
   for line in text.split("\n") {
-    const next_section = cargo_section_from_line(line)
-    if next_section != nil {
-      section = next_section
-    }
-    const dependency = cargo_dependency_from_line(line, manifest, section)
-    if dependency == nil || !package_names.contains(dependency.package_name)
-      || dependency.path == nil {
+    const name = dependency_name(line)
+    if name == nil || !package_names.contains(name) || !line.contains("path") {
       lines = lines + [line]
       continue
     }
-    const name = dependency.package_name
     const versions = regex_captures(r#"version\s*=\s*"[^"]+""#, line)
     if versions.count == 0 {
-      if dependency.version != nil {
-        throw "local path dependency " + name + " version must be on its declaration line"
-      }
       lines = lines + [line]
       continue
     }
@@ -359,26 +280,6 @@ fn replace_workspace_version(text: string, current: string, next: string) -> str
     throw "workspace version literal must occur exactly once"
   }
   return regex_replace(pattern, "version = \"" + next + "\"", text)
-}
-
-fn planned_manifest_rewrites(
-  fs: HarnessFs,
-  manifests: list<string>,
-  root_manifest: string,
-  current: string,
-  next: string,
-  names: list<string>,
-) -> list<{path: string, text: string}> {
-  let rewrites: list<{path: string, text: string}> = []
-  for manifest in manifests.unique() {
-    let text = fs.read_text(manifest)
-    if path_normalize(manifest) == path_normalize(root_manifest) {
-      text = replace_workspace_version(text, current, next)
-    }
-    text = rewrite_local_dependency_versions(text, names, next)
-    rewrites = rewrites + [{path: manifest, text: text}]
-  }
-  return rewrites
 }
 
 fn rewrite_agent_manifest(
@@ -499,9 +400,13 @@ pub fn apply_development_metadata(fs: HarnessFs, root: string) -> ReleaseMetadat
   }
   const root_manifest = cargo_path(root)
   const all_manifests = [root_manifest] + manifests
-  const rewrites = planned_manifest_rewrites(fs, all_manifests, root_manifest, current, next, names)
-  for rewrite in rewrites {
-    fs.write_text(rewrite.path, rewrite.text)
+  for manifest in all_manifests.unique() {
+    let text = fs.read_text(manifest)
+    if path_normalize(manifest) == path_normalize(root_manifest) {
+      text = replace_workspace_version(text, current, next)
+    }
+    text = rewrite_local_dependency_versions(text, names, next)
+    fs.write_text(manifest, text)
   }
   return plan
 }
@@ -553,16 +458,13 @@ pub fn apply_release_metadata(
   const root_manifest = cargo_path(root)
   const all_manifests = [root_manifest]
     + plan.manifests.map({ path -> path_join(root, path) }).to_list()
-  const rewrites = planned_manifest_rewrites(
-    fs,
-    all_manifests,
-    root_manifest,
-    current,
-    version,
-    plan.package_names,
-  )
-  for rewrite in rewrites {
-    fs.write_text(rewrite.path, rewrite.text)
+  for manifest in all_manifests.unique() {
+    let text = fs.read_text(manifest)
+    if path_normalize(manifest) == path_normalize(root_manifest) {
+      text = replace_workspace_version(text, current, version)
+    }
+    text = rewrite_local_dependency_versions(text, plan.package_names, version)
+    fs.write_text(manifest, text)
   }
   const current_distribution = if current.ends_with("-" + release_development_prerelease()) {
     nil

@@ -728,13 +728,7 @@ plan = "task_local_or_explicit"
 
 [[thread_local]]
 path = "src/stdlib/process.rs"
-statics = ["VM_SOURCE_DIR"]
-category = "logical_task"
-plan = "task_local_or_explicit"
-
-[[thread_local]]
-path = "src/security/session_environment.rs"
-statics = ["SESSION_ENVIRONMENT_CONTEXT"]
+statics = ["VM_SOURCE_DIR", "SESSION_ENVIRONMENT_CONTEXT"]
 category = "logical_task"
 plan = "task_local_or_explicit"
 

@@ -2,23 +2,6 @@
 // (path classification + grep-equivalent pattern scans) on synthetic
 // inputs, no filesystem dependency.
 import "../lint_test_patterns.harn"
-import { is_mechanically_checked_source_projection } from "../source_projections.harn"
-
-@test
-pipeline test_only_checked_projection_skips_authored_test_policy(harness: Harness, task: unknown) {
-  assert_eq(is_mechanically_checked_source_projection("crates/harn-aws-config/src/ecs.rs"), true)
-  assert_eq(
-    is_mechanically_checked_source_projection("crates/harn-aws-config-extra/src/ecs.rs"),
-    false,
-  )
-  assert_eq(is_mechanically_checked_source_projection("crates/unverified-vendor/src/ecs.rs"), false)
-  assert_eq(
-    is_mechanically_checked_source_projection(
-      "crates/harn-vm/src/llm/providers/bedrock/session_client/tests.rs",
-    ),
-    false,
-  )
-}
 
 // --- rel_path / base_name ---------------------------------------------------
 @test

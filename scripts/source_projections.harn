@@ -1,9 +1,0 @@
-// Exact source projections governed by mandatory byte/source drift owners.
-// The AWS SDK mirror is checked against its pristine archive and recorded
-// patch by check-aws-config-vendor. Harn-authored adapters and tests are outside
-// that projection and retain the ordinary source and test policies.
-const CHECKED_SOURCE_PREFIXES = ["spec/protocol-artifacts/", "crates/harn-aws-config/src/"]
-
-pub fn is_mechanically_checked_source_projection(path: string) -> bool {
-  return CHECKED_SOURCE_PREFIXES.any({ prefix -> path.starts_with(prefix) })
-}

@@ -25,56 +25,6 @@ pipeline test_accepts_exact_path_dependency(harness: Harness, task: unknown) {
 }
 
 @test
-pipeline test_renamed_workspace_dependency_checks_package_identity(
-  harness: Harness,
-  task: unknown,
-) {
-  const exact =
-    "aws-config = { package = \"harn-aws-config\", path = \"../harn-aws-config\", version = \"=0.9.18\" }\n"
-  const loose =
-    "aws-config = { package = \"harn-aws-config\", path = \"../harn-aws-config\", version = \"0.9.18\" }\n"
-  assert_eq(sibling_dep_errors_from_text("Cargo.toml", exact, "0.9.18"), [])
-  assert_eq(sibling_dep_errors_from_text("Cargo.toml", loose, "0.9.18").count, 1)
-}
-
-@test
-pipeline test_dependency_package_and_path_are_structural(harness: Harness, task: unknown) {
-  const outside =
-    "harn-alias = { package = \"third-party\", path = \"../third-party\", version = \"0.9\" }\n"
-  const registry = "harn-vm = { version = \"0.9\", features = [\"path\"] }\n"
-  assert_eq(sibling_dep_errors_from_text("Cargo.toml", outside, "0.9.18"), [])
-  assert_eq(sibling_dep_errors_from_text("Cargo.toml", registry, "0.9.18"), [])
-  const private = "alias = { package = \"harn-private\", path = \"../harn-private\" }\n"
-  assert_eq(
-    sibling_dep_errors_from_text_with_context(
-      "Cargo.toml",
-      "[dependencies]\n" + private,
-      "0.9.18",
-      ["harn-private"],
-      true,
-    ).count,
-    1,
-  )
-  assert_eq(
-    sibling_dep_errors_from_text_with_context(
-      "Cargo.toml",
-      "[dev-dependencies]\n" + private,
-      "0.9.18",
-      ["harn-private"],
-      true,
-    ),
-    [],
-  )
-}
-
-@test
-pipeline test_multiline_renamed_target_dependency_is_checked(harness: Harness, task: unknown) {
-  const text =
-    "[target.'cfg(windows)'.dependencies]\nsdk = { package = \"harn-aws-config\", path = \"../harn-aws-config\", version = \"0.9.18\", features = [\n  \"default\",\n] }\n"
-  assert_eq(sibling_dep_errors_from_text("Cargo.toml", text, "0.9.18").count, 1)
-}
-
-@test
 pipeline test_rejects_loose_path_dependency(harness: Harness, task: unknown) {
   const text = "harn-modules = { path = \"../harn-modules\", version = \"0.9\" }\n"
   const errors = sibling_dep_errors_from_text("crates/harn-vm/Cargo.toml", text, "0.9.18")

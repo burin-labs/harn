@@ -359,17 +359,6 @@ container credentials, and EC2 instance profile credentials. Set `AWS_REGION`,
 as `anthropic.claude-3-5-sonnet-20240620-v1:0` or
 `meta.llama3-70b-instruct-v1:0`.
 
-The SDK reads the session's captured launcher environment, including profile
-selection, container authorization, region settings, and ordinary inputs needed
-by profile credential helpers. Concurrent sessions keep separate captures;
-changing process variables after launch does not change a session's SDK inputs.
-Embedders supply a `LauncherEnvironment` through
-`AcpServerConfig::with_launcher_environment` before starting the server. This
-capture is an in-memory host input, never a credential-bearing ACP JSON field.
-Granted sessions retain their static credential restriction and do not run SDK
-discovery. A nonempty `AWS_SESSION_TOKEN` takes precedence over the declared
-legacy `AWS_SECURITY_TOKEN`; empty tokens are absent.
-
 Azure OpenAI requires `AZURE_OPENAI_ENDPOINT`, for example
 `https://my-resource.openai.azure.com`. Harn routes the request to
 `/openai/deployments/{deployment}/chat/completions` and uses the Harn

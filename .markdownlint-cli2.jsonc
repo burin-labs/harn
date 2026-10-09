@@ -30,10 +30,6 @@
     // nested `.harn/` directories. Their vendored docs are build output, while
     // the owning package sources remain linted at their normal paths.
     "**/.harn*/**",
-    // Pristine upstream SDK documents are byte-checked by check-aws-config-vendor.
-    // The authored README.harn.md and Harn documentation remain linted.
-    "crates/harn-aws-config/README.md",
-    "crates/harn-aws-config/src/profile/location_of_profile_files.md",
     "docs/dist",
     ".worktrees",
     ".burin",
