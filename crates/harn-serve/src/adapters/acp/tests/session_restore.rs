@@ -120,6 +120,13 @@ pipeline default(harness: Harness) {
         loop { let message = recv_json(&mut rx).await; if message["id"] == 6 {
             assert!(message["result"]["sessions"].as_array().unwrap().iter().any(|row| row["sessionId"] == session_id), "live list must follow execution cwd: {message}"); break;
         }}
+        tx.send(serde_json::json!({"jsonrpc":"2.0", "id":70,
+            "method":harn_vm::agent_sessions::CANONICAL_HISTORY_BOUNDARIES_METHOD,
+            "params":{"sessionId":session_id}})).unwrap();
+        loop { let message = recv_json(&mut rx).await; if message["id"] == 70 {
+            assert!(message.get("error").is_none(), "reanchored history boundaries: {message}");
+            assert!(!message["result"]["positions"].as_array().unwrap().is_empty(), "actual journal history must be reached: {message}"); break;
+        }}
         let fork_id = format!("{session_id}-fork");
         tx.send(serde_json::json!({"jsonrpc":"2.0", "id":7, "method":"session/fork", "params":{"sessionId":session_id, "id":fork_id}})).unwrap();
         loop { let message = recv_json(&mut rx).await; if message["id"] == 7 {

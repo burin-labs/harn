@@ -498,10 +498,11 @@ impl AcpServer {
                 return;
             };
             let root = session.store_scope.workspace();
-            let store = match {
+            let opened = {
                 let _scope = session.store_scope.enter();
                 harn_vm::open_canonical_store(root)
-            } {
+            };
+            let store = match opened {
                 Ok(store) => store,
                 Err(error) => {
                     self.send_error(id, -32000, &error.to_string());
@@ -636,10 +637,11 @@ impl AcpServer {
                 .store_scope
                 .clone();
             let root = scope.workspace();
-            let store = match {
+            let opened = {
                 let _scope = scope.enter();
                 harn_vm::open_canonical_store(root)
-            } {
+            };
+            let store = match opened {
                 Ok(store) => store,
                 Err(error) => {
                     self.send_error(id, -32000, &error.to_string());
@@ -647,7 +649,7 @@ impl AcpServer {
                 }
             };
             let new_session_id =
-                harn_vm::agent_sessions::fork_canonical(&store, &root, &src_id, boundary, dst_id)
+                harn_vm::agent_sessions::fork_canonical(&store, root, &src_id, boundary, dst_id)
                     .await;
             let (new_session_id, source_boundary) = match new_session_id {
                 Ok(Some(fork)) => (fork.session_id, fork.source_boundary),
