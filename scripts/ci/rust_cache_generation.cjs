@@ -7,6 +7,19 @@ const crypto = require("node:crypto");
 const { execFileSync } = require("node:child_process");
 const pin = require("../../.github/actions/rust-cache/pinned-config.json");
 const families = ["workspace-tests", "harn-ci-cli", "package-audit"];
+// These files own the producer's toolchain, action inputs and post lifecycle.
+// Native source equality is delegated to reuse_workspace_crates.sh below.
+const producerConfigurationPaths = [
+  ".github/workflows/rust-cache-refresh.yml",
+  ".github/actions",
+  "rust-toolchain.toml",
+  ".cargo/config.toml",
+  // Producer scripts invoke audit planning, shell libraries and nested CI
+  // helpers. Preserve this whole owning recipe subtree rather than maintain
+  // an incomplete transitive file list. Unrelated script edits conservatively
+  // require the next producer; documentation-only descendants can qualify.
+  "scripts",
+];
 const inputNames = [
   "shared-key",
   "cache-on-failure",
@@ -328,6 +341,12 @@ async function finish() {
     "Generation action state is invalid",
   );
   try {
+    requireValue(
+      execFileSync("git", ["rev-parse", "--verify", "HEAD"], {
+        encoding: "utf8",
+      }).trim() === context.source_sha,
+      "Generation checkout changed after admission",
+    );
     const main = execFileSync(
       "git",
       ["ls-remote", "--exit-code", "origin", "refs/heads/main"],
@@ -339,17 +358,21 @@ async function finish() {
       main.length === 2 && main[1] === "refs/heads/main",
       "Owning main source is unmeasured",
     );
+    requireValue(/^[0-9a-f]{40}$/.test(main[0]), "Owning main source is invalid");
     if (main[0] !== context.source_sha) {
-      console.log(
-        JSON.stringify({
-          schema: "harn.qualified_cache_retirement.v1",
-          qualified: false,
-          pending: 1,
-          bad: 0,
-          reason: "main advanced; preserve existing generations",
-        }),
-      );
-      throw Error("Owning main advanced; cache qualification is unmeasured");
+      execFileSync("git", ["fetch", "--quiet", "--no-tags", "--no-write-fetch-head", "origin", main[0]], {
+        timeout: 30000,
+        stdio: "pipe",
+      });
+      execFileSync("git", ["merge-base", "--is-ancestor", context.source_sha, main[0]], {
+        stdio: "pipe",
+      });
+      execFileSync("git", ["diff", "--quiet", context.source_sha, main[0], "--", ...producerConfigurationPaths], {
+        stdio: "pipe",
+      });
+      execFileSync("bash", ["scripts/ci/reuse_workspace_crates.sh", "current", main[0], context.source_sha], {
+        stdio: "pipe",
+      });
     }
     const observation = JSON.parse(
       fs.readFileSync(
