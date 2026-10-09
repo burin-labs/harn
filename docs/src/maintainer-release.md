@@ -103,7 +103,15 @@ Publication is complete only after you verify all of these:
 
 Main ancestry and exact-source certification bind a tag to its release source.
 A tag outside main also needs a trusted SSH signature naming its candidate commit.
-Corrected stable sources prove the original version transition in their first-parent history.
+Corrected stable sources also prove the original version transition in their
+first-parent history, a verified source signature, and durable publication
+evidence. The published manifest and signed archive index must bind all five
+archive digests to that exact source and the owning producer's workflow, main
+ref, run, and attempt. This read does not depend on temporary build artifacts
+or retained workflow-run records. The signed index proves provenance; the
+public release supplies publication authority. Its author and the required
+manifest, index, and archive uploaders must be the owning release app's GitHub
+bot identity; additional SDK assets can come from their own publisher.
 
 Read [Release assets manifest](./dev/release-assets-manifest.md) for the
 download contract. A visible tag or release page alone doesn't prove complete

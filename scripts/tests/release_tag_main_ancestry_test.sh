@@ -2,7 +2,7 @@
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-verifier="$root/scripts/verify_release_tag_main_ancestry.sh"
+verifier="${RELEASE_TAG_TEST_VERIFIER:-$root/scripts/verify_release_tag_main_ancestry.sh}"
 tmp_root="$(mktemp -d "${TMPDIR:-/tmp}/harn-release-main-tag-test.XXXXXX")"
 trap 'rm -rf "$tmp_root"' EXIT
 
@@ -232,27 +232,74 @@ fi
 # descendant. The version transition still belongs to the original cut.
 printf 'corrected runtime\n' >"$tmp_root/work/repair.txt"
 git -C "$tmp_root/work" add repair.txt
-git -C "$tmp_root/work" commit -q -m 'Repair the release runtime'
+git -C "$tmp_root/work" config user.signingkey "$tmp_root/signing-key"
+git -C "$tmp_root/work" -c commit.gpgSign=true commit -q -m 'Repair the release runtime'
 corrected_commit="$(git -C "$tmp_root/work" rev-parse HEAD)"
+git -C "$tmp_root/work" -c "gpg.ssh.allowedSignersFile=$tmp_root/work/.github/release-bot-allowed-signers" \
+  verify-commit "$corrected_commit" >/dev/null 2>&1
 git -C "$tmp_root/work" tag -d v1.2.3 >/dev/null
 git -C "$tmp_root/work" tag -a v1.2.3 -m 'Corrected Release v1.2.3'
 git -C "$tmp_root/work" push -q origin main
 git -C "$tmp_root/work" push -q --force origin refs/tags/v1.2.3
-corrected_output="$($verifier --repo "$tmp_root/work" --tag v1.2.3 --expect-commit "$corrected_commit")"
+mkdir -p "$tmp_root/bin"
+cp "$root/scripts/tests/fixtures/release_publication_github.py" "$tmp_root/bin/gh"
+chmod +x "$tmp_root/bin/gh"
+# The real reader and Git history execute; only the GitHub transport is mocked.
+# Unexpected requests refuse, including ephemeral run/artifact inventory reads.
+# The live published-source check separately verifies real cryptographic bytes.
+# shellcheck source=scripts/lib/candidate_archive_contract.sh
+source "$root/scripts/lib/candidate_archive_contract.sh"
+publication_verify() {
+  PATH="$tmp_root/bin:$PATH" GITHUB_REPOSITORY=fixture/harn \
+    PUBLICATION_SOURCE="$corrected_commit" PUBLICATION_TARGETS="$(candidate_archive_expected_targets_json)" \
+    PUBLICATION_TRACE="$tmp_root/publication-calls" PUBLICATION_CASE="${PUBLICATION_CASE:-valid}" "$@"
+}
+# A genuinely signed, same-version commit on main is not publication authority.
+if PUBLICATION_CASE=unpublished-source publication_verify "$verifier" --repo "$tmp_root/work" --tag v1.2.3 \
+  >"$tmp_root/unpublished.out" 2>&1; then
+  echo "FAIL: signed same-version main source without publication proof was accepted" >&2
+  exit 1
+fi
+grep -q 'corrected source lacks durable exact-source publication proof' "$tmp_root/unpublished.out"
+grep -q '^api repos/fixture/harn/releases/tags/v1.2.3$' "$tmp_root/publication-calls"
+corrected_output="$(publication_verify "$verifier" --repo "$tmp_root/work" --tag v1.2.3 --expect-commit "$corrected_commit")"
 [[ "$corrected_output" == *"transition=$release_commit"* ]] || {
   echo "FAIL: corrected source did not prove its original version transition: $corrected_output" >&2
   exit 1
 }
-"$tmp_root/release-tools/verify_release_tag_main_ancestry.sh" \
+publication_verify "$tmp_root/release-tools/verify_release_tag_main_ancestry.sh" \
   --repo "$tmp_root/work" --tag v1.2.3 --expect-commit "$corrected_commit" >/dev/null
 git -C "$tmp_root/origin.git" update-ref refs/tags/v1.2.3 "$corrected_commit"
-"$verifier" --repo "$tmp_root/work" --tag v1.2.3 --expect-commit "$corrected_commit" >/dev/null
+publication_verify "$verifier" --repo "$tmp_root/work" --tag v1.2.3 --expect-commit "$corrected_commit" >/dev/null
 if "$verifier" --repo "$tmp_root/work" --tag v1.2.3 --expect-commit "$release_commit" \
   >"$tmp_root/corrected-mismatch.out" 2>&1; then
   echo "FAIL: corrected tag was accepted for the original source" >&2
   exit 1
 fi
 grep -Fq "selects $corrected_commit, not the expected commit $release_commit" "$tmp_root/corrected-mismatch.out"
+
+for publication_case in unsigned-source http-failure draft-release nonpublisher-author \
+  nonpublisher-manifest nonpublisher-index nonpublisher-archive wrong-manifest-source \
+  wrong-manifest-bytes incomplete-assets wrong-archive-digest incomplete-index \
+  attestation-failure empty-attestation wrong-workflow wrong-ref wrong-source wrong-run \
+  wrong-attempt wrong-subject wrong-predicate; do
+  : >"$tmp_root/publication-calls"
+  if PUBLICATION_CASE="$publication_case" publication_verify "$verifier" \
+    --repo "$tmp_root/work" --tag v1.2.3 --expect-commit "$corrected_commit" \
+    >"$tmp_root/$publication_case.out" 2>&1; then
+    echo "FAIL: corrected publication accepted $publication_case" >&2
+    exit 1
+  fi
+  grep -q 'corrected source lacks durable exact-source publication proof' "$tmp_root/$publication_case.out"
+  grep -q "^api repos/fixture/harn/git/commits/$corrected_commit$" "$tmp_root/publication-calls"
+  case "$publication_case" in
+    attestation-failure|empty-attestation|wrong-workflow|wrong-ref|wrong-source|wrong-run|wrong-attempt|wrong-subject|wrong-predicate)
+      grep -q '^attestation verify$' "$tmp_root/publication-calls" ;;
+  esac
+  echo "published correction refused $publication_case"
+done
+# A refusal cannot poison the same path's next valid read.
+publication_verify "$verifier" --repo "$tmp_root/work" --tag v1.2.3 --expect-commit "$corrected_commit" >/dev/null
 
 # A matching stable version with no earlier version transition is not a cut.
 git init -q -b main "$tmp_root/no-transition"
