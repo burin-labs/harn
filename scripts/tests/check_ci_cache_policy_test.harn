@@ -56,6 +56,77 @@ pipeline test_macos_lint_matrix_preserves_every_typed_graph_and_fail_closed_aggr
   assert_eq(dispatched.exit_code, 0)
   assert_eq(trim(dispatched.stdout).split("\n"), RUST_LINT_LEGS)
   const lint = ci.jobs["macos-lint"]
+  const timing_error =
+    "ci.yml:macos-lint must retain bounded source-bound workspace compile timings"
+  for field in ["HARN_LINT_TIMINGS_DIR", "HARN_LINT_SOURCE_SHA"] {
+    const steps = lint.steps.map(
+      { step ->
+        if step?.env?.HARN_LINT_SOURCE_SHA == "$" + "{{ github.sha }}" {
+          return {...step, env: {...step.env, [field]: ""}}
+        }
+        return step
+      },
+    )
+      .to_list()
+    assert(
+      macos_shared_cache_errors(
+        {...ci, jobs: {...ci.jobs, "macos-lint": {...lint, steps: steps}}},
+        nightly,
+      )
+        .contains(timing_error),
+    )
+  }
+  const timing_removed = lint.steps.filter(
+    { step -> step?.name != "Upload actual workspace compile timings" },
+  )
+    .to_list()
+  assert(
+    macos_shared_cache_errors(
+      {...ci, jobs: {...ci.jobs, "macos-lint": {...lint, steps: timing_removed}}},
+      nightly,
+    )
+      .contains(timing_error),
+  )
+  const timing_uploads = lint.steps.filter(
+    { step -> step?.name == "Upload actual workspace compile timings" },
+  )
+    .to_list()
+  assert_eq(len(timing_uploads), 1)
+  const artifact_name = timing_uploads[0].with.name
+  const run_id = "$" + "{{ github.run_id }}"
+  const attempt = "$" + "{{ github.run_attempt }}"
+  const first_upload = artifact_name.replace(run_id, "100").replace(attempt, "1")
+  const rerun_upload = artifact_name.replace(run_id, "100").replace(attempt, "2")
+  const separate_upload = artifact_name.replace(run_id, "101").replace(attempt, "1")
+  assert_eq(first_upload, "macos-workspace-compile-timings-100-1")
+  assert_eq(rerun_upload, "macos-workspace-compile-timings-100-2")
+  assert_eq(separate_upload, "macos-workspace-compile-timings-101-1")
+  assert(
+    first_upload != rerun_upload && first_upload != separate_upload
+      && rerun_upload != separate_upload,
+  )
+  for name in [
+    "macos-workspace-compile-timings",
+    "macos-workspace-compile-timings-" + run_id,
+    "macos-workspace-compile-timings-" + attempt,
+  ] {
+    const steps = lint.steps.map(
+      { step ->
+        if step?.name == "Upload actual workspace compile timings" {
+          return {...step, with: {...step.with, name: name}}
+        }
+        return step
+      },
+    )
+      .to_list()
+    assert(
+      macos_shared_cache_errors(
+        {...ci, jobs: {...ci.jobs, "macos-lint": {...lint, steps: steps}}},
+        nightly,
+      )
+        .contains(timing_error),
+    )
+  }
   for mutation in [
     {...lint, strategy: {...lint.strategy, matrix: {include: [{kind: "workspace"}]}}},
     {...lint, strategy: {...lint.strategy, "fail-fast": true}},
