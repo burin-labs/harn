@@ -8,7 +8,71 @@ use std::rc::Rc;
 use crate::Vm;
 
 thread_local! {
-    static SCOPED_PERSISTENT_STATE_ROOT: RefCell<Option<PathBuf>> = const { RefCell::new(None) };
+    static SCOPED_PERSISTENT_STATE_ROOT: RefCell<Option<PersistentStateContext>> = const { RefCell::new(None) };
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct PersistentStateContext {
+    state_root: PathBuf,
+    workspace: Option<PathBuf>,
+}
+
+/// One selected workspace and its captured physical store address.
+/// Execution and capability roots remain independent of this storage scope.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct SessionStoreScope {
+    workspace: PathBuf,
+    state_root: PathBuf,
+}
+
+impl SessionStoreScope {
+    /// Resolve trusted storage configuration once for an existing workspace.
+    pub fn resolve(
+        cwd: &Path,
+        launcher: &crate::security::LauncherEnvironment,
+    ) -> std::io::Result<Self> {
+        let workspace = cwd.canonicalize()?;
+        if !workspace.is_dir() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "session workspace must be a directory",
+            ));
+        }
+        let state_root = crate::runtime_paths::captured_state_root(&workspace, launcher);
+        Ok(Self {
+            workspace,
+            state_root,
+        })
+    }
+
+    pub fn workspace(&self) -> &Path {
+        &self.workspace
+    }
+    pub fn state_root(&self) -> &Path {
+        &self.state_root
+    }
+
+    /// Bind a synchronous store open. Use `run` across async suspensions.
+    pub fn enter(&self) -> ScopedPersistentStateRoot {
+        replace_context(PersistentStateContext {
+            state_root: self.state_root.clone(),
+            workspace: Some(self.workspace.clone()),
+        })
+    }
+
+    /// Save and restore this storage scope at every async suspension.
+    pub fn run<F: std::future::Future>(
+        &self,
+        future: F,
+    ) -> impl std::future::Future<Output = F::Output> {
+        crate::orchestration::scope_persistent_state_context(
+            PersistentStateContext {
+                state_root: self.state_root.clone(),
+                workspace: Some(self.workspace.clone()),
+            },
+            future,
+        )
+    }
 }
 
 /// A caller-owned persistent-state root that bypasses ambient runtime paths.
@@ -33,7 +97,7 @@ impl<'a> PersistentStateRoot<'a> {
 #[derive(Debug)]
 #[must_use = "retain this guard for the isolated VM execution"]
 pub struct ScopedPersistentStateRoot {
-    previous: Option<PathBuf>,
+    previous: Option<PersistentStateContext>,
     _not_send: PhantomData<Rc<()>>,
 }
 
@@ -44,8 +108,14 @@ pub struct ScopedPersistentStateRoot {
 /// such as the agent session journal that resolve their paths during execution
 /// rather than when builtins are registered.
 pub fn scope_persistent_state_root(root: PersistentStateRoot<'_>) -> ScopedPersistentStateRoot {
-    let previous =
-        SCOPED_PERSISTENT_STATE_ROOT.with(|slot| slot.replace(Some(root.as_path().to_path_buf())));
+    replace_context(PersistentStateContext {
+        state_root: root.as_path().to_path_buf(),
+        workspace: None,
+    })
+}
+
+fn replace_context(context: PersistentStateContext) -> ScopedPersistentStateRoot {
+    let previous = SCOPED_PERSISTENT_STATE_ROOT.with(|slot| slot.replace(Some(context)));
     ScopedPersistentStateRoot {
         previous,
         _not_send: PhantomData,
@@ -61,7 +131,52 @@ impl Drop for ScopedPersistentStateRoot {
 }
 
 pub(crate) fn current_persistent_state_root() -> Option<PathBuf> {
-    SCOPED_PERSISTENT_STATE_ROOT.with(|slot| slot.borrow().clone())
+    SCOPED_PERSISTENT_STATE_ROOT.with(|slot| {
+        slot.borrow()
+            .as_ref()
+            .map(|context| context.state_root.clone())
+    })
+}
+
+pub(crate) fn current_session_workspace() -> Option<PathBuf> {
+    SCOPED_PERSISTENT_STATE_ROOT.with(|slot| {
+        slot.borrow()
+            .as_ref()
+            .and_then(|context| context.workspace.clone())
+    })
+}
+
+pub(crate) fn session_matches_current_workspace(meta: &harn_session_store::SessionMeta) -> bool {
+    current_session_workspace().is_none_or(|workspace| {
+        let expected = workspace.to_string_lossy();
+        meta.project_scope.as_deref() == Some(expected.as_ref())
+            && meta.cwd.as_deref() == Some(expected.as_ref())
+    })
+}
+
+pub(crate) fn session_workspace_for_state(state_root: &Path) -> Option<PathBuf> {
+    SCOPED_PERSISTENT_STATE_ROOT.with(|slot| {
+        slot.borrow()
+            .as_ref()
+            .filter(|context| context.state_root == state_root)
+            .and_then(|context| context.workspace.clone())
+    })
+}
+
+pub(crate) fn canonical_store_root(workspace: &Path) -> PathBuf {
+    SCOPED_PERSISTENT_STATE_ROOT.with(|slot| {
+        slot.borrow()
+            .as_ref()
+            .filter(|context| context.workspace.as_deref() == Some(workspace))
+            .map(|context| context.state_root.clone())
+            .unwrap_or_else(|| workspace.join(".harn"))
+    })
+}
+
+pub(crate) fn swap_persistent_state_context(
+    replacement: Option<PersistentStateContext>,
+) -> Option<PersistentStateContext> {
+    SCOPED_PERSISTENT_STATE_ROOT.with(|slot| slot.replace(replacement))
 }
 
 /// Register store, metadata, and checkpoint builtins at an exact state root.
@@ -99,5 +214,58 @@ mod tests {
         assert_eq!(current_persistent_state_root().as_deref(), Some(outer));
         drop(outer_guard);
         assert_eq!(current_persistent_state_root(), None);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn interleaved_session_store_scopes_restore_and_follow_child_tasks() {
+        let left_dir = tempfile::tempdir().expect("left workspace");
+        let right_dir = tempfile::tempdir().expect("right workspace");
+        let launcher = crate::security::LauncherEnvironment::from_snapshot(Default::default());
+        let left = SessionStoreScope::resolve(left_dir.path(), &launcher).unwrap();
+        let right = SessionStoreScope::resolve(right_dir.path(), &launcher).unwrap();
+        let check = |scope: SessionStoreScope| async move {
+            scope
+                .run(async {
+                    for _ in 0..3 {
+                        assert_eq!(
+                            current_persistent_state_root().as_deref(),
+                            Some(scope.state_root())
+                        );
+                        assert_eq!(
+                            current_session_workspace().as_deref(),
+                            Some(scope.workspace())
+                        );
+                        tokio::task::yield_now().await;
+                    }
+                    let expected = scope.state_root().to_path_buf();
+                    crate::orchestration::run_blocking_with_ambient(move || {
+                        assert_eq!(
+                            current_persistent_state_root().as_deref(),
+                            Some(expected.as_path())
+                        );
+                    })
+                    .await
+                    .expect("captured child host task");
+                    crate::orchestration::scope_ambient(
+                        crate::orchestration::AmbientExecutionScope::capture_inherited(),
+                        async {
+                            tokio::task::yield_now().await;
+                            assert_eq!(
+                                current_persistent_state_root().as_deref(),
+                                Some(scope.state_root())
+                            );
+                            assert_eq!(
+                                current_session_workspace().as_deref(),
+                                Some(scope.workspace())
+                            );
+                        },
+                    )
+                    .await;
+                })
+                .await;
+        };
+        tokio::join!(check(left), check(right));
+        assert_eq!(current_persistent_state_root(), None);
+        assert_eq!(current_session_workspace(), None);
     }
 }
