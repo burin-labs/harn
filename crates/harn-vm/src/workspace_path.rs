@@ -107,6 +107,7 @@ pub fn classify_workspace_path(path: &str, workspace_root: Option<&Path>) -> Wor
 pub fn classify_permission_path(path: &str, workspace_root: Option<&Path>) -> WorkspacePathInfo {
     let mut info = classify_path(path, workspace_root, false);
     if info.kind == WorkspacePathKind::Invalid
+        || unsupported_workspace_root(workspace_root)
         || (is_absolute_path_syntax(path.trim()) && !Path::new(path.trim()).is_absolute())
     {
         return info;
@@ -192,9 +193,27 @@ fn classify_path(
     if trimmed.contains('\0') {
         return invalid_info(input, to_posix(trimmed), "path contains NUL bytes");
     }
+    let serialized = to_posix(trimmed);
+    if crate::windows_path::is_opaque_device_path(&serialized) {
+        return invalid_info(
+            input,
+            serialized,
+            "unsupported or malformed Windows device namespace",
+        );
+    }
 
     let normalized_input = normalize_lexical(trimmed);
-    let root_path = workspace_root.map(normalize_workspace_root);
+    let unsupported_root = unsupported_workspace_root(workspace_root);
+    if unsupported_root && !is_absolute_path_syntax(trimmed) {
+        return invalid_info(
+            input,
+            normalized_input,
+            "unsupported or malformed Windows device workspace root",
+        );
+    }
+    let root_path = workspace_root
+        .filter(|_| !unsupported_root)
+        .map(normalize_workspace_root);
     let root_norm = root_path
         .as_ref()
         .map(|root| normalize_host_path(root))
@@ -294,6 +313,12 @@ fn normalize_workspace_root(root: &Path) -> PathBuf {
     }
 }
 
+fn unsupported_workspace_root(root: Option<&Path>) -> bool {
+    root.is_some_and(|root| {
+        crate::windows_path::is_opaque_device_path(&to_posix(&root.to_string_lossy()))
+    })
+}
+
 fn to_posix(s: &str) -> String {
     s.replace('\\', "/")
 }
@@ -314,6 +339,10 @@ pub(crate) fn split_segments(path: &str) -> (bool, Option<String>, Vec<String>) 
 }
 
 pub(crate) fn normalize_lexical(path: &str) -> String {
+    let serialized = to_posix(path);
+    if crate::windows_path::is_opaque_device_path(&serialized) {
+        return serialized;
+    }
     let (absolute, drive, segments) = split_segments(path);
     let mut stack = Vec::new();
     for segment in segments {
@@ -414,9 +443,14 @@ mod tests {
             ),
             (r"\\server\share\main.rs", "//server/share/main.rs"),
         ] {
-            let info = classify_workspace_path(input, None);
-            assert_eq!(info.host_path.as_deref(), Some(expected));
-            assert_eq!(info.kind, WorkspacePathKind::HostAbsolute);
+            for info in [
+                classify_workspace_path(input, None),
+                classify_permission_path(input, None),
+            ] {
+                assert_eq!(info.host_path.as_deref(), Some(expected));
+                assert_eq!(info.kind, WorkspacePathKind::HostAbsolute);
+                assert!(info.resolved_host_path().is_some());
+            }
         }
         for input in ["//server/share/../../..", "//?/UNC/server/share/../../.."] {
             let expected = if input.starts_with("//?/") {
@@ -432,9 +466,47 @@ mod tests {
             ("//server", "/server"),
             ("////", "/"),
             ("//?/UNC/server", "//?/UNC/server"),
-            ("//?/UNC//share", "//?/UNC/share"),
+            ("//?/UNC//share", "//?/UNC//share"),
         ] {
             assert_eq!(normalize_lexical(input), expected);
+        }
+        for input in [
+            r"\\?\Volume{GUID}\dir\..\..\secret",
+            r"\\?\pipe\name\..\..\secret",
+            r"\\.\pipe\name\..\..\secret",
+            "//?/UNC//share/../main.rs",
+            "//?/UNC/server/../../secret",
+            "//?/C:relative/../secret",
+            "//?//../secret",
+        ] {
+            let expected = to_posix(input);
+            assert_eq!(normalize_lexical(input), expected);
+            for info in [
+                classify_workspace_path(input, None),
+                classify_permission_path(input, None),
+            ] {
+                assert_eq!(info.kind, WorkspacePathKind::Invalid);
+                assert_eq!(info.normalized, expected);
+                assert!(info.resolved_host_path().is_none());
+                assert!(info.workspace_path.is_none());
+            }
+            for info in [
+                classify_workspace_path("secret", Some(Path::new(input))),
+                classify_permission_path("secret", Some(Path::new(input))),
+            ] {
+                assert_eq!(info.kind, WorkspacePathKind::Invalid);
+                assert!(info.resolved_host_path().is_none());
+                assert!(info.workspace_path.is_none());
+            }
+            let absolute = classify_permission_path("C:/safe/absolute", Some(Path::new(input)));
+            assert_eq!(absolute.kind, WorkspacePathKind::HostAbsolute);
+            assert_eq!(absolute.host_path.as_deref(), Some("C:/safe/absolute"));
+        }
+        for root in [r"\\?\C:\repo", r"\\?\UNC\server\share", r"\\server\share"] {
+            assert!(!unsupported_workspace_root(Some(Path::new(root))));
+            let info = classify_workspace_path("secret", Some(Path::new(root)));
+            assert_eq!(info.kind, WorkspacePathKind::WorkspaceRelative);
+            assert!(info.resolved_host_path().is_some());
         }
     }
 

@@ -21,6 +21,9 @@ use std::borrow::Cow;
 /// ordinary lexical components, independent of the current host.
 pub(crate) fn split_segments(path: &str) -> (bool, Option<String>, Vec<String>) {
     let posix = path.replace('\\', "/");
+    if is_opaque_device_path(&posix) {
+        return (true, Some(posix), Vec::new());
+    }
     let mut prefix = String::new();
     let mut rest = posix.as_str();
     let mut unc = false;
@@ -61,6 +64,26 @@ pub(crate) fn split_segments(path: &str) -> (bool, Option<String>, Vec<String>) 
         .map(|segment| segment.to_string())
         .collect();
     (absolute, drive, segments)
+}
+
+/// Unknown or malformed verbatim namespaces are opaque resource identities.
+/// Windows does not apply ordinary dot-component normalization to them.
+/// Only absolute drive and complete UNC roots have a modeled wire projection.
+pub(crate) fn is_opaque_device_path(posix: &str) -> bool {
+    if posix.starts_with("//./") {
+        return true;
+    }
+    let Some(rest) = posix.strip_prefix("//?/") else {
+        return false;
+    };
+    let bytes = rest.as_bytes();
+    let drive =
+        bytes.len() >= 3 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' && bytes[2] == b'/';
+    !drive
+        && rest
+            .strip_prefix("UNC/")
+            .and_then(split_unc_share)
+            .is_none()
 }
 
 /// Incomplete or repeated slash spellings must not invent a UNC share root.
