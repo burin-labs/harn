@@ -694,6 +694,7 @@ test-agent-scripts:
 
 test-pr-gate-scripts:
 	./scripts/tests/macos_lint_aggregate_test.sh
+	node scripts/tests/rust_lint_timings_test.cjs
 	./scripts/tests/gh_check_state_launcher_test.sh
 	./scripts/tests/pr_title_convention_test.sh
 	./scripts/tests/fixture_git_init_branch_test.sh

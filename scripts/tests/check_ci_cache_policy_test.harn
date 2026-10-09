@@ -52,6 +52,37 @@ pipeline test_macos_lint_matrix_preserves_every_typed_graph_and_fail_closed_aggr
   assert_eq(dispatched.exit_code, 0)
   assert_eq(trim(dispatched.stdout).split("\n"), RUST_LINT_LEGS)
   const lint = ci.jobs["macos-lint"]
+  const timing_error =
+    "ci.yml:macos-lint must retain bounded source-bound workspace compile timings"
+  for field in ["HARN_LINT_TIMINGS_DIR", "HARN_LINT_SOURCE_SHA"] {
+    const steps = lint.steps.map(
+      { step ->
+        if step?.env?.HARN_LINT_SOURCE_SHA == "$" + "{{ github.sha }}" {
+          return {...step, env: {...step.env, [field]: ""}}
+        }
+        return step
+      },
+    )
+      .to_list()
+    assert(
+      macos_shared_cache_errors(
+        {...ci, jobs: {...ci.jobs, "macos-lint": {...lint, steps: steps}}},
+        nightly,
+      )
+        .contains(timing_error),
+    )
+  }
+  const timing_removed = lint.steps.filter(
+    { step -> step?.with?.name != "macos-workspace-compile-timings" },
+  )
+    .to_list()
+  assert(
+    macos_shared_cache_errors(
+      {...ci, jobs: {...ci.jobs, "macos-lint": {...lint, steps: timing_removed}}},
+      nightly,
+    )
+      .contains(timing_error),
+  )
   for mutation in [
     {...lint, strategy: {...lint.strategy, matrix: {include: [{kind: "workspace"}]}}},
     {...lint, strategy: {...lint.strategy, "fail-fast": true}},
