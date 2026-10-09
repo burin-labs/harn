@@ -61,10 +61,9 @@ impl SessionStoreScope {
     }
 
     /// Save and restore this storage scope at every async suspension.
-    pub fn run<F: std::future::Future>(
-        &self,
-        future: F,
-    ) -> impl std::future::Future<Output = F::Output> {
+    pub async fn run<F: std::future::Future>(&self, future: F) -> F::Output {
+        // Capture when the execution is polled, after outer transport and host
+        // scopes are installed, rather than while its future is constructed.
         crate::orchestration::scope_persistent_state_context(
             PersistentStateContext {
                 state_root: self.state_root.clone(),
@@ -72,6 +71,7 @@ impl SessionStoreScope {
             },
             future,
         )
+        .await
     }
 }
 

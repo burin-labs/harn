@@ -8,6 +8,93 @@
 use super::event_log_barrier::ResetActiveEventLog;
 use super::*;
 
+/// Cold restores admit through the selected journal; only an already-live
+/// session may prefer its telemetry replay stream.
+#[tokio::test(flavor = "current_thread")]
+async fn acp_session_load_restores_persisted_session_unknown_to_server() {
+    use harn_session_store::{
+        AppendEvent, CreateSession, SessionEventKind, SessionStore, SqliteSessionStore,
+    };
+    let _reset = ResetActiveEventLog;
+    let log = harn_vm::event_log::install_memory_for_current_thread(64);
+    let directory = tempfile::tempdir().expect("selected workspace");
+    let cwd = directory.path().canonicalize().unwrap();
+    std::fs::create_dir(cwd.join(".harn")).unwrap();
+    let session_id = "burin-saved-session".to_string();
+    let store = SqliteSessionStore::open(cwd.join(".harn/session-store.sqlite")).unwrap();
+    store
+        .create(CreateSession {
+            id: Some(session_id.clone()),
+            cwd: Some(cwd.display().to_string()),
+            project_scope: Some(cwd.display().to_string()),
+            ..CreateSession::default()
+        })
+        .await
+        .unwrap();
+    store.append(&session_id, AppendEvent::new(SessionEventKind::Message, serde_json::json!({
+        "transcript_event": {"kind":"message", "role":"assistant", "visibility":"public", "text":"restored history"},
+    }))).await.unwrap();
+    harn_vm::agent_events::clear_session_sinks(&session_id);
+    harn_vm::agent_events::register_sink(
+        session_id.clone(),
+        harn_vm::agent_events::EventLogSink::new(log, &session_id),
+    );
+    harn_vm::agent_events::emit_event(&harn_vm::agent_events::AgentEvent::AgentMessageChunk {
+        session_id: session_id.clone(),
+        content: "live telemetry history".into(),
+        history_source_event_id: None,
+    });
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let mut server = AcpServer::new_with_output(AcpServerConfig::new(None), AcpOutput::Channel(tx));
+    server
+        .handle_incoming_message(serde_json::json!({
+            "jsonrpc":"2.0", "id":1, "method":"session/load", "params": {
+                "sessionId":session_id, "cwd":cwd, "environmentPolicy":{"kind":"isolated"},
+            },
+        }))
+        .await;
+    let replay = recv_json(&mut rx).await;
+    assert_eq!(replay["method"], "session/update");
+    assert_eq!(
+        replay["params"]["update"]["sessionUpdate"],
+        "agent_message_chunk"
+    );
+    assert_eq!(
+        replay["params"]["update"]["content"]["text"],
+        "restored history"
+    );
+    assert_eq!(
+        replay["params"]["update"]["_meta"]["harn"]["replayed"],
+        true
+    );
+    let loaded = recv_json(&mut rx).await;
+    assert_eq!(loaded["id"], 1);
+    assert_eq!(loaded["result"]["session"]["sessionId"], session_id);
+    assert_eq!(
+        loaded["result"]["session"]["liveState"], "live",
+        "the restored session is live and promptable"
+    );
+    assert_eq!(loaded["result"]["replayed"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        loaded["result"]["replayed"][0]["type"],
+        "agent_message_chunk"
+    );
+    server
+        .handle_incoming_message(serde_json::json!({
+            "jsonrpc":"2.0", "id":2, "method":"session/load", "params":{"sessionId":session_id},
+        }))
+        .await;
+    let second_replay = recv_json(&mut rx).await;
+    assert_eq!(
+        second_replay["params"]["update"]["content"]["text"],
+        "live telemetry history"
+    );
+    let second = recv_json(&mut rx).await;
+    assert_eq!(second["id"], 2);
+    assert_eq!(second["result"]["session"]["sessionId"], session_id);
+    harn_vm::agent_events::clear_session_sinks(&session_id);
+}
+
 #[test]
 fn a_live_cwd_filter_refuses_two_unresolvable_paths() {
     let directory = tempfile::tempdir().unwrap();
