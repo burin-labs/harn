@@ -3,55 +3,14 @@ use super::*;
 use crate::redact::REDACTED_HEADER_VALUE;
 use serde_json::Value as JsonValue;
 use std::collections::BTreeMap;
-use std::sync::Arc;
-
-struct OwnedProviderSchema {
-    metadata: ProviderMetadata,
-}
-
-impl OwnedProviderSchema {
-    fn new(provider: &str, schema_name: &str) -> Self {
-        Self {
-            metadata: ProviderMetadata {
-                provider: provider.to_string(),
-                kinds: vec!["webhook".to_string()],
-                schema_name: schema_name.to_string(),
-                runtime: ProviderRuntimeMetadata::Placeholder,
-                ..ProviderMetadata::default()
-            },
-        }
+fn provider_metadata(provider: &str, schema_name: &str) -> ProviderMetadata {
+    ProviderMetadata {
+        provider: provider.to_string(),
+        kinds: vec!["webhook".to_string()],
+        schema_name: schema_name.to_string(),
+        runtime: ProviderRuntimeMetadata::Placeholder,
+        ..ProviderMetadata::default()
     }
-}
-
-impl ProviderSchema for OwnedProviderSchema {
-    fn provider_id(&self) -> &str {
-        &self.metadata.provider
-    }
-
-    fn harn_schema_name(&self) -> &str {
-        &self.metadata.schema_name
-    }
-
-    fn metadata(&self) -> ProviderMetadata {
-        self.metadata.clone()
-    }
-
-    fn normalize(
-        &self,
-        _kind: &str,
-        _headers: &BTreeMap<String, String>,
-        raw: JsonValue,
-    ) -> Result<ProviderPayload, ProviderCatalogError> {
-        Ok(ProviderPayload::Extension(ExtensionProviderPayload {
-            provider: self.metadata.provider.clone(),
-            schema_name: self.metadata.schema_name.clone(),
-            raw,
-        }))
-    }
-}
-
-fn owned_provider_schema(provider: &str, schema_name: &str) -> Arc<dyn ProviderSchema> {
-    Arc::new(OwnedProviderSchema::new(provider, schema_name))
 }
 
 fn sample_headers() -> BTreeMap<String, String> {
@@ -85,10 +44,10 @@ fn default_redaction_policy_keeps_safe_headers() {
 fn provider_catalog_rejects_duplicates() {
     let mut catalog = ProviderCatalog::default();
     catalog
-        .register(owned_provider_schema("github", "GitHubEventPayload"))
+        .register(provider_metadata("github", "GitHubEventPayload"))
         .unwrap();
     let error = catalog
-        .register(owned_provider_schema("github", "GitHubEventPayload"))
+        .register(provider_metadata("github", "GitHubEventPayload"))
         .unwrap_err();
     assert_eq!(
         error,
@@ -100,10 +59,10 @@ fn provider_catalog_rejects_duplicates() {
 fn merging_contributions_preserves_each_package() {
     let mut catalog = ProviderCatalog::with_defaults();
     catalog
-        .merge(vec![owned_provider_schema("runtime-a", "RuntimeAPayload")])
+        .merge(vec![provider_metadata("runtime-a", "RuntimeAPayload")])
         .unwrap();
     catalog
-        .merge(vec![owned_provider_schema("runtime-b", "RuntimeBPayload")])
+        .merge(vec![provider_metadata("runtime-b", "RuntimeBPayload")])
         .unwrap();
 
     assert!(catalog.metadata_for("runtime-a").is_some());
@@ -114,19 +73,57 @@ fn merging_contributions_preserves_each_package() {
 #[test]
 fn reloading_the_same_package_is_idempotent() {
     let mut catalog = ProviderCatalog::with_defaults();
-    let schemas = || vec![owned_provider_schema("runtime-a", "RuntimeAPayload")];
-    catalog.merge(schemas()).unwrap();
-    catalog.merge(schemas()).expect("reloading is idempotent");
+    let providers = || vec![provider_metadata("runtime-a", "RuntimeAPayload")];
+    catalog.merge(providers()).unwrap();
+    catalog.merge(providers()).expect("reloading is idempotent");
+}
+
+#[test]
+fn same_schema_name_with_different_metadata_is_a_conflict() {
+    let mut catalog = ProviderCatalog::with_defaults();
+    catalog
+        .merge(vec![provider_metadata("runtime-a", "RuntimeAPayload")])
+        .unwrap();
+    let mut changed = provider_metadata("runtime-a", "RuntimeAPayload");
+    changed.kinds = vec!["poll".to_string()];
+
+    assert_eq!(
+        catalog.merge(vec![changed]).unwrap_err(),
+        ProviderCatalogError::DuplicateProvider("runtime-a".to_string())
+    );
+    assert_eq!(
+        catalog.metadata_for("runtime-a").unwrap().kinds,
+        vec!["webhook".to_string()]
+    );
+}
+
+#[test]
+fn failed_merge_keeps_the_original_catalog() {
+    let mut catalog = ProviderCatalog::with_defaults();
+    let original = catalog.entries();
+    let error = catalog
+        .merge(vec![
+            provider_metadata("runtime-a", "RuntimeAPayload"),
+            provider_metadata("webhook", "PackageWebhookPayload"),
+        ])
+        .unwrap_err();
+
+    assert_eq!(
+        error,
+        ProviderCatalogError::DuplicateProvider("webhook".to_string())
+    );
+    assert_eq!(catalog.entries(), original);
+    assert!(catalog.metadata_for("runtime-a").is_none());
 }
 
 #[test]
 fn conflicting_package_schema_does_not_displace_owner() {
     let mut catalog = ProviderCatalog::with_defaults();
     catalog
-        .merge(vec![owned_provider_schema("runtime-a", "RuntimeAPayload")])
+        .merge(vec![provider_metadata("runtime-a", "RuntimeAPayload")])
         .unwrap();
     let error = catalog
-        .merge(vec![owned_provider_schema("runtime-a", "OtherPayload")])
+        .merge(vec![provider_metadata("runtime-a", "OtherPayload")])
         .unwrap_err();
 
     assert_eq!(
@@ -142,13 +139,14 @@ fn conflicting_package_schema_does_not_displace_owner() {
 #[test]
 fn package_cannot_displace_a_core_provider() {
     let mut catalog = ProviderCatalog::with_defaults();
-    catalog
-        .merge(vec![owned_provider_schema(
-            "webhook",
-            "PackageWebhookPayload",
-        )])
-        .expect("core provider remains authoritative");
+    let error = catalog
+        .merge(vec![provider_metadata("webhook", "PackageWebhookPayload")])
+        .unwrap_err();
 
+    assert_eq!(
+        error,
+        ProviderCatalogError::DuplicateProvider("webhook".to_string())
+    );
     assert_eq!(
         catalog.metadata_for("webhook").unwrap().schema_name,
         "GenericWebhookPayload"
@@ -156,8 +154,76 @@ fn package_cannot_displace_a_core_provider() {
 }
 
 #[test]
+fn invalid_registration_is_rejected_before_install() {
+    let mut catalog = ProviderCatalog::default();
+    let error = catalog
+        .register(provider_metadata(" ", "RuntimeAPayload"))
+        .unwrap_err();
+    assert!(matches!(error, ProviderCatalogError::InvalidMetadata(_)));
+
+    let mut spoofed = provider_metadata("package-provider", "PackagePayload");
+    spoofed.runtime = ProviderRuntimeMetadata::Builtin {
+        connector: "webhook".into(),
+        default_signature_variant: None,
+    };
+    let error = catalog.register(spoofed).unwrap_err();
+    assert!(matches!(error, ProviderCatalogError::InvalidMetadata(_)));
+    assert!(catalog.entries().is_empty());
+}
+
+#[test]
+fn extension_normalization_uses_the_registered_identity() {
+    let mut catalog = ProviderCatalog::default();
+    catalog
+        .register(provider_metadata("runtime-a", "RuntimeAPayload"))
+        .unwrap();
+
+    let raw = serde_json::json!({"id": 1});
+    let payload = catalog
+        .normalize(
+            &ProviderId::from("runtime-a"),
+            "webhook",
+            &BTreeMap::new(),
+            raw.clone(),
+        )
+        .unwrap();
+    assert_eq!(
+        payload,
+        ProviderPayload::Extension(ExtensionProviderPayload {
+            provider: "runtime-a".into(),
+            schema_name: "RuntimeAPayload".into(),
+            raw,
+        })
+    );
+    assert_eq!(
+        catalog
+            .normalize(
+                &ProviderId::from("runtime-b"),
+                "webhook",
+                &BTreeMap::new(),
+                JsonValue::Null,
+            )
+            .unwrap_err(),
+        ProviderCatalogError::UnknownProvider("runtime-b".into())
+    );
+}
+
+#[test]
 fn default_catalog_contains_only_core_provider_schemas() {
-    let entries = registered_provider_metadata();
+    let catalog = ProviderCatalog::with_defaults();
+    let entries = catalog.entries();
+    assert_eq!(entries.len(), 9);
+    for entry in &entries {
+        let payload = catalog
+            .normalize(
+                &ProviderId::from(entry.provider.as_str()),
+                "test",
+                &BTreeMap::new(),
+                JsonValue::Null,
+            )
+            .unwrap();
+        assert_eq!(payload.provider(), entry.provider);
+    }
     for provider in ["github", "linear", "slack"] {
         assert!(
             entries.iter().all(|entry| entry.provider != provider),

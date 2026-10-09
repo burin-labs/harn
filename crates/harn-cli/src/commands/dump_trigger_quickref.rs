@@ -435,7 +435,7 @@ fn method_summary(provider: &ProviderMetadata) -> String {
 mod tests {
     use super::*;
 
-    use crate::package::lock_manifest_provider_schemas;
+    use crate::package::lock_manifest_provider_catalog;
     use crate::tests::common::harn_state_lock::{lock_harn_state_async, HarnStateGuard};
 
     /// `collect_manifest_triggers` (in `package::extensions`) contributes a
@@ -446,21 +446,21 @@ mod tests {
     /// ordering.
     ///
     /// The state lock supplies that baseline — it drops contributed
-    /// providers on acquisition. The schema lock underneath it is what
+    /// providers on acquisition. The catalog lock underneath it is what
     /// production registration holds, so taking it too keeps a package load
     /// running in a sibling test from contributing between the reset and
     /// `generate_file()`.
     struct CatalogTestScope {
-        _schema_guard: tokio::sync::MutexGuard<'static, ()>,
+        _catalog_guard: tokio::sync::MutexGuard<'static, ()>,
         _state_guard: HarnStateGuard,
     }
 
     impl CatalogTestScope {
         async fn new() -> Self {
             let state_guard = lock_harn_state_async().await;
-            let schema_guard = lock_manifest_provider_schemas().await;
+            let catalog_guard = lock_manifest_provider_catalog().await;
             Self {
-                _schema_guard: schema_guard,
+                _catalog_guard: catalog_guard,
                 _state_guard: state_guard,
             }
         }
