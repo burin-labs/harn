@@ -289,6 +289,7 @@ mod tests {
             root: workspace.path().to_str().unwrap().into(),
         };
         for (field, exact, different) in [
+            #[cfg(not(windows))] // Asterisk is not a legal Windows filename.
             ("path", "report*.txt", "report-2026.txt"),
             (
                 "url",
