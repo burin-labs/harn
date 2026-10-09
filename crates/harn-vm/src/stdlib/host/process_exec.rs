@@ -401,12 +401,7 @@ pub(crate) fn build_sandboxed_command(
     params: &crate::value::DictMap,
     label: &str,
 ) -> Result<tokio::process::Command, VmError> {
-    let mut launch = ProcessExecLaunch::from_params(params, label)?;
-    crate::process_sandbox::apply_active_rustc_wrapper_policy(
-        &mut launch.env,
-        &mut launch.env_remove,
-        launch.cwd.as_deref(),
-    );
+    let launch = ProcessExecLaunch::from_params(params, label)?;
     let (mut cmd, session_closed) =
         crate::process_sandbox::tokio_command_for_with_env_state(&launch.program, &launch.args)
             .map_err(|error| contextualize_process_error(label, "sandbox setup", error))?;
@@ -423,6 +418,12 @@ pub(crate) fn build_sandboxed_command(
         cmd.env_remove(key);
     }
     let closed = launch.closed_env || session_closed;
+    crate::process_sandbox::apply_active_rustc_wrapper_policy_for_command(
+        &launch.program,
+        &launch.args,
+        cmd.as_std_mut(),
+        closed,
+    );
     crate::process_sandbox::validate_command_environment(cmd.as_std_mut(), closed)?;
     Ok(cmd)
 }

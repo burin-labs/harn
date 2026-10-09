@@ -945,7 +945,7 @@ fn insert_env_value_case_insensitive(
 
 /// Case-insensitive on Windows, plain elsewhere: POSIX treats `PATH` and
 /// `Path` as unrelated variables, so folding them there is the bug.
-fn insert_env_value(map: &mut BTreeMap<String, String>, name: &str, value: String) {
+pub(crate) fn insert_env_value(map: &mut BTreeMap<String, String>, name: &str, value: String) {
     if cfg!(windows) {
         insert_env_value_case_insensitive(map, name, value);
     } else {
