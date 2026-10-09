@@ -505,11 +505,10 @@ async fn open_pool_shares_across_requests_when_registry_installed() {
 #[ignore = "requires an isolated database; make test-postgres-live"]
 async fn open_pool_does_not_share_when_registry_absent() {
     let url = live_postgres_url();
-    if shared::is_installed() {
-        // Another test installed it in this (cargo test) process; skip rather
-        // than assert a false negative.
-        return;
-    }
+    assert!(
+        !shared::is_installed(),
+        "live Postgres fixtures require nextest per-test process isolation"
+    );
     reset_postgres_state();
     let ctx = crate::vm::AsyncBuiltinCtx::for_test(crate::Vm::new());
     let o = dict(&[("max_connections", VmValue::Int(1))]);
@@ -1651,6 +1650,8 @@ harness.stdio.println(cols[0].column + ":" + cols[0].type)
 harness.stdio.println(cols[1].column + ":" + cols[1].type)
 
 const idx = pg_introspect_indexes(db, "{schema}.widgets")
+assert(len(idx[0].columns) == 1 && idx[0].columns[0] == "id")
+assert(len(idx[1].columns) == 1 && idx[1].columns[0] == "id")
 harness.stdio.println(len(idx))
 
 // --- Array decoding ------------------------------------------------------
