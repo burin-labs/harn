@@ -32241,9 +32241,9 @@
       },
       "tool_support": {
         "native": false,
-        "text": true,
-        "preferred_format": "text",
-        "parity": "text_only",
+        "text": false,
+        "preferred_format": "none",
+        "parity": "unsupported",
         "parity_source": "derived",
         "tool_search": []
       },
@@ -32307,7 +32307,6 @@
       "quality_tags": [],
       "capability_tags": [
         "streaming",
-        "tools",
         "vision",
         "prompt_caching",
         "thinking",
@@ -40261,9 +40260,7 @@
         "streaming",
         "structured_output",
         "structured_output_mode:native_json",
-        "text_tools",
         "thinking",
-        "tools",
         "vision"
       ]
     },

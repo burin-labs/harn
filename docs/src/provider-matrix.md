@@ -330,7 +330,7 @@ Regenerate with `make gen-provider-matrix` and verify with `make check-provider-
 | `vertex` | `gemini-*` | `any` | no | `none` | no | no | no | no | yes | no | no | `markdown` | `native_json` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | no |
 | `volcengine_ark` | `*` | `any` | no | `none` | no | no | no | no | yes | no | `native` | `plain` | `native_json` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | no |
 | `xai` | `grok-4.20*non-reasoning*` | `any; extends` | no | `none` | no | no | no | no | yes | no | no | `plain` | `none` | no | `system` | `json` | `none` | `json` | no | yes | `text_only` | yes | no |
-| `xai` | `grok-4.20-multi-agent*` | `any; extends` | `adaptive,effort` | `none` | no | no | no | no | yes | no | no | `plain` | `none` | no | `system` | `json` | `reasoning_summary` | `text` | no | yes | `text_only` | yes | no |
+| `xai` | `grok-4.20-multi-agent*` | `any; extends` | `adaptive,effort` | `none` | no | no | no | no | yes | no | no | `plain` | `none` | no | `system` | `json` | `reasoning_summary` | `none` | no | no | `unsupported` | no | no |
 | `xai` | `grok-*` | `any` | `adaptive` | `none` | yes | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | yes |
 | `zai` | `glm-5.3-flash` | `any; extends` | no | `none` | yes | no | no | yes | yes | no | no | `plain` | `none` | no | `system` | `json` | `none` | `json` | no | yes | `text_only` | yes | no |
 | `zai` | `glm-5.3*` | `any` | `effort` | `none` | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | yes |
@@ -640,7 +640,7 @@ This section starts from the checked-in provider catalog. Recommended format fol
 | `vertex` | `vertex/gemini-2.5-flash` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `xai` | `grok-4.20-0309-non-reasoning` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `xai` | `grok-4.20-0309-reasoning` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
-| `xai` | `grok-4.20-multi-agent-0309` | `text` | `text_only` | - | - | - | - | - | `data not yet collected` |
+| `xai` | `grok-4.20-multi-agent-0309` | `none` | `unsupported` | - | - | - | - | - | `data not yet collected` |
 | `xai` | `grok-4.3` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `xai` | `grok-4.5` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `xai` | `grok-4.6` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
