@@ -50,7 +50,7 @@ refuse_gate "$base" "$head"
 echo 'PASS: missing base and closed PR head refuse an unmeasured surface'
 
 jq -n --arg base "$base" --arg head "$head" \
-  '{pull_request:{base:{sha:$base},head:{sha:$head}}}' > "$tmp/event.json"
+  '{repository:{full_name:"burin-labs/harn"},pull_request:{base:{sha:$base,repo:{full_name:"burin-labs/harn"}},head:{sha:$head,repo:{full_name:"burin-labs/harn"}}}}' > "$tmp/event.json"
 bash "$prepare" "$tmp/event.json" > "$tmp/prepared.log" 2>&1
 [[ $(git rev-parse "$head") == "$head" ]]
 [[ $(git merge-base "$base" "$head") == "$base" ]]
@@ -66,7 +66,7 @@ grep -q 'endpoints=2 pending=0' "$tmp/queue.log"
 echo 'PASS: nonempty merge-group range remains available'
 
 jq -n --arg base "$base" --arg head "$missing" \
-  '{pull_request:{base:{sha:$base},head:{sha:$head}}}' > "$tmp/missing.json"
+  '{repository:{full_name:"burin-labs/harn"},pull_request:{base:{sha:$base,repo:{full_name:"burin-labs/harn"}},head:{sha:$head,repo:{full_name:"burin-labs/harn"}}}}' > "$tmp/missing.json"
 if bash "$prepare" "$tmp/missing.json" > "$tmp/missing.log" 2>&1; then
   echo 'unavailable source fetch unexpectedly passed' >&2
   exit 1
@@ -77,6 +77,52 @@ if bash "$prepare" "$tmp/invalid.json" > "$tmp/invalid.log" 2>&1; then
   exit 1
 fi
 echo 'PASS: unavailable source and malformed event refuse preparation'
+
+# The head exists only in a distinct fork remote, never in the base repository.
+git clone -q --bare "$source_repo" "$tmp/fork.git"
+git clone -q "$source_repo" "$tmp/fork-writer"
+git -C "$tmp/fork-writer" config user.name 'Harn Test'
+git -C "$tmp/fork-writer" config user.email 'harn-test@example.invalid'
+git -C "$tmp/fork-writer" config commit.gpgsign false
+git -C "$tmp/fork-writer" config maintenance.auto false
+printf 'fork-only head\n' > "$tmp/fork-writer/fork.txt"
+git -C "$tmp/fork-writer" add .
+git -C "$tmp/fork-writer" commit -qm 'fork-only head'
+fork_head=$(git -C "$tmp/fork-writer" rev-parse HEAD)
+git -C "$tmp/fork-writer" push -q "$tmp/fork.git" HEAD:refs/heads/fork
+if git -C "$source_repo" cat-file -e "${fork_head}^{commit}" 2>/dev/null; then
+  echo 'fixture fork head unexpectedly exists in the base remote' >&2
+  exit 1
+fi
+git config url."$tmp/fork.git".insteadOf https://github.com/contributor/harn.git
+jq --arg head "$fork_head" \
+  '.pull_request.head.sha=$head | .pull_request.head.repo.full_name="contributor/harn"' \
+  "$tmp/event.json" > "$tmp/fork-event.json"
+if git fetch --no-tags origin "$fork_head" > "$tmp/old-fork.log" 2>&1; then
+  echo 'origin-only fetch unexpectedly found the fork-only head' >&2
+  exit 1
+fi
+bash "$prepare" "$tmp/fork-event.json" > "$tmp/fork.log" 2>&1
+[[ $(git rev-parse "${fork_head}^{commit}") == "$fork_head" ]]
+[[ $(git merge-base "$base" "$fork_head") == "$base" ]]
+BASE_SHA="$base" HEAD_SHA="$fork_head" bash "$gate" cli > "$tmp/fork-gate.log"
+grep -q 'no cli break' "$tmp/fork-gate.log"
+echo 'PASS: distinct validated fork supplies the exact head and original ancestry'
+
+for source in missing invalid mismatched; do
+  case "$source" in
+    missing) filter='del(.pull_request.head.repo)' ;;
+    invalid) filter='.pull_request.head.repo.full_name="../untrusted"' ;;
+    mismatched) filter='.pull_request.base.repo.full_name="other/harn"' ;;
+  esac
+  jq "$filter" "$tmp/fork-event.json" > "$tmp/source-$source.json"
+  if bash "$prepare" "$tmp/source-$source.json" > "$tmp/source-$source.log" 2>&1; then
+    echo "invalid $source repository identity unexpectedly passed" >&2
+    exit 1
+  fi
+  grep -q 'invalid PR gate source repository identity' "$tmp/source-$source.log"
+done
+echo 'PASS: missing, invalid, and mismatched source identity refuse even a cached head'
 
 # A known commit with an unreadable surface blob must not become file deletion.
 # Use loose objects so no packed fallback can hide the absent blob.
