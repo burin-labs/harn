@@ -3401,7 +3401,7 @@ dependencies = [
 
 [[package]]
 name = "harn-aws-config"
-version = "0.10.159"
+version = "0.10.160-dev"
 dependencies = [
  "aws-credential-types",
  "aws-runtime",
