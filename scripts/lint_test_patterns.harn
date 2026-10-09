@@ -1423,6 +1423,7 @@ pipeline main(harness: Harness, task: unknown) {
         // a URL and run through the required-input test-postgres-live/cloud targets.
         rel.starts_with("crates/harn-cli/tests/")
           || rel == "crates/harn-vm/src/stdlib/postgres/tests.rs"
+          || rel == "crates/harn-vm/src/stdlib/postgres/describe_tests.rs"
       },
       ignore_attr_pattern(),
       [
