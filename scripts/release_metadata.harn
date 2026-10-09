@@ -17,6 +17,10 @@ pub type ReleaseMetadataPlan = {
 
 type PackageManifestProjection = {package: {name: string}}
 
+type CargoManifestTable = dict<string, unknown>
+
+type OptionalCargoManifestTable = CargoManifestTable?
+
 type InlineDependencyProjection = {package?: string, path?: string, version?: string}
 
 pub type CargoDependencyLine = {package_name: string, path: string?, version: string?}
@@ -255,9 +259,10 @@ pub fn cargo_dependency_from_line(
     return nil
   }
   const alias = matches[0].groups[0]
-  let table = manifest ?? toml_parse(line)
-  if section == "" && manifest != nil
-    && (manifest.get("package") != nil || manifest.get("workspace") != nil) {
+  const document = schema_expect(manifest, schema_of(OptionalCargoManifestTable))
+  let table: OptionalCargoManifestTable = document ?? toml_parse(line)
+  if section == "" && document != nil
+    && (document.get("package") != nil || document.get("workspace") != nil) {
     return nil
   }
   if section != "" {
@@ -270,8 +275,8 @@ pub fn cargo_dependency_from_line(
       }
       const key = section_shape.keys()[0]
       section_keys = section_keys + [key]
-      if manifest != nil {
-        table = table?.get(key)
+      if document != nil {
+        table = schema_expect(table?.get(key), schema_of(OptionalCargoManifestTable))
       }
       section_shape = section_shape.get(key)
     }
