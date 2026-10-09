@@ -110,7 +110,7 @@ refuses a missing or empty URL, and a database connection failure fails the
 suite. It exercises transactions, rollback, settings, migrations, and NULL
 parameter binding without calling an LLM provider.
 
-The test-pattern gate permits `#[ignore]` in the Postgres fixture file because
+The test-pattern gate permits `#[ignore]` in the two Postgres fixture files because
 these tests require an external database. Keep deterministic Postgres tests
 enabled in the ordinary suite; only database-dependent cases use this exception.
 

@@ -76,30 +76,12 @@ fn main(harness: Harness) {
   harness.stdio.println("reused")
 }
 "#;
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    rt.block_on(async {
-        let local = tokio::task::LocalSet::new();
-        local
-            .run_until(async {
-                let chunk = compile_source(source).expect("compile transaction describe reuse");
-                let mut vm = Vm::new();
-                register_vm_stdlib(&mut vm);
-                vm.set_harness(crate::Harness::real());
-                vm.execute(&chunk)
-                    .await
-                    .expect("execute transaction describe reuse");
-                assert_eq!(vm.output().trim(), "reused");
-            })
-            .await;
-        assert_eq!(
-            describe_round_trips(),
-            9,
-            "only first statements share pool types; later SQL stays transaction-local"
-        );
-    });
+    assert_eq!(run_harn_source(source).trim(), "reused");
+    assert_eq!(
+        describe_round_trips(),
+        9,
+        "only first statements share pool types; later SQL stays transaction-local"
+    );
 }
 
 #[test]
@@ -133,21 +115,5 @@ fn main(harness: Harness) {
   pg_close(db)
 }
 "#;
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    rt.block_on(async {
-        tokio::task::LocalSet::new()
-            .run_until(async {
-                let chunk = compile_source(source).expect("compile schema context regression");
-                let mut vm = Vm::new();
-                register_vm_stdlib(&mut vm);
-                vm.set_harness(crate::Harness::real());
-                vm.execute(&chunk)
-                    .await
-                    .expect("execute schema context regression");
-            })
-            .await;
-    });
+    run_harn_source(source);
 }
