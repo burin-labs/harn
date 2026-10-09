@@ -114,7 +114,11 @@ candidate manifest attached to the release record.
   `bump-release.yml` again. Its admission checks run again.
 - Candidate failed because of infrastructure: rerun the failed jobs in that
   exact candidate run. A source defect needs a corrected pull request and
-  certification of the resulting commit.
+  certification of the resulting commit. For an unpublished stable version,
+  keep that version, build a signed source candidate on corrected main with
+  `source_candidate=true`, then use manual promotion recovery. Recovery proves
+  the stable version transition in the source's first-parent history and still
+  requires exact-source CI, consumer rehearsal, and candidate certification.
 - Promotion failed: rerun the failed jobs in the exact promotion run. It
   checks the existing tag's commit and refuses a conflicting tag.
 - Candidate succeeded but no main-push event started promotion: dispatch the

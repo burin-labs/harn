@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # Execute promote-release.yml's real plan step against fixture build runs. Only
-# the run of a commit that changes the workspace version to a stable X.Y.Z is
-# promoted; a rerun after the release exists is a no-op, and a tag at another
-# commit is refused.
+# a stable version transition is promoted automatically. Manual recovery also
+# admits a corrected descendant with that version's proved transition. A rerun
+# after publication is a no-op, and a tag at another commit is refused.
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-workflow="$root/.github/workflows/promote-release.yml"
+workflow="${RELEASE_PROMOTION_WORKFLOW:-$root/.github/workflows/promote-release.yml}"
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 
@@ -220,6 +220,19 @@ grep -Fq "not the candidate commit $head_sha" "$tmp/conflict.log" \
 commit_version 0.10.142 "Release v0.10.142"
 plan release_subject
 [[ "$(output release_subject promote)" == false ]] || fail "a Release subject was promoted"
+plan corrected_source RECOVERY=true
+[[ "$(cat "$tmp/corrected_source.status")" == 0 && "$(output corrected_source promote)" == true ]] \
+  || fail "certified corrected stable source was refused: $(cat "$tmp/corrected_source.log")"
+plan corrected_source_failed_consumer RECOVERY=true FAKE_CONSUMER=failure
+[[ "$(cat "$tmp/corrected_source_failed_consumer.status")" != 0 ]] \
+  || fail "corrected source bypassed its failed consumer rehearsal"
+plan corrected_source_conflicting_tag RECOVERY=true "FAKE_TAG_SHA=$head_sha"
+[[ "$(cat "$tmp/corrected_source_conflicting_tag.status")" != 0 ]] \
+  || fail "corrected source replaced a tag at the original source"
+git clone --quiet --depth 1 "file://$repo" "$tmp/shallow-source"
+plan corrected_source_unproved RECOVERY=true "SOURCE_DIRECTORY=$tmp/shallow-source"
+[[ "$(cat "$tmp/corrected_source_unproved.status")" != 0 ]] \
+  || fail "missing transition history authorized corrected-source recovery"
 commit_version 0.10.143-rc.1 "Prerelease"
 plan prerelease
 [[ "$(output prerelease promote)" == false ]] || fail "a prerelease was promoted"

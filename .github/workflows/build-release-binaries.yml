@@ -1649,7 +1649,10 @@ jobs:
             --artifacts-dir "$archives" \
             --tag "v$VERSION" \
             --output "$release_files/release-assets.json"
-          if [[ "$CANDIDATE_PURPOSE" == source ]]; then
+          # Stable source candidates can recover an unpublished stable cut;
+          # retain its publication notes in the certified manifest.
+          source scripts/lib/release_version.sh
+          if [[ "$CANDIDATE_PURPOSE" == source ]] && release_version_is_prerelease "$VERSION"; then
             printf 'Unreleased source candidate %s at %s.\n' "$VERSION" "$SOURCE_COMMIT" \
               > "$release_files/release-notes.md"
           else
