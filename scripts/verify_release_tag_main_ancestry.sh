@@ -1,13 +1,18 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=scripts/lib/release_version.sh
+source "$script_dir/lib/release_version.sh"
+
 usage() {
   cat >&2 <<'EOF'
 Usage: scripts/verify_release_tag_main_ancestry.sh --tag vX.Y.Z[-PRERELEASE] [--repo PATH] [--expect-commit SHA]
 
-Verify that an immutable remote release tag selects a genuine matching release
-on main or a trusted signed release candidate based on main. The command is read-only with respect to
-the remote and does not trust ambient local tag refs.
+Verify that an immutable remote release tag selects a matching release on main
+or a trusted signed release candidate based on main. Corrected stable sources
+prove their original first-parent version transition. The command is read-only
+with respect to the remote and does not trust ambient local tag refs.
 
 --expect-commit also refuses a tag that selects any other commit. This script is
 the one reader of which commit a release tag selects, lightweight or annotated;
@@ -61,8 +66,7 @@ remote_rows="$(
 )"
 tag_object="$(awk -v ref="refs/tags/$tag" '$2 == ref {print $1}' <<<"$remote_rows")"
 tag_target="$(awk -v ref="refs/tags/$tag^{}" '$2 == ref {print $1}' <<<"$remote_rows")"
-# Promotion publishes through the Releases API, which creates a lightweight tag:
-# the ref names the release commit itself and has no peeled row.
+# A lightweight tag names the release commit itself and has no peeled row.
 lightweight=false
 if [[ "$tag_object" =~ ^[0-9a-f]{40}$ && -z "$tag_target" ]]; then
   tag_target="$tag_object"
@@ -119,6 +123,24 @@ if ! git -C "$repo" merge-base --is-ancestor "$tag_target" "$main_head"; then
   candidate=true
 fi
 
+version="$(git -C "$repo" show "$tag_target:Cargo.toml" | release_workspace_version)"
+if [[ -z "$version" || "v$version" != "$tag" ]]; then
+  echo "error: origin/$tag target reports workspace version '${version:-<missing>}'" >&2
+  exit 1
+fi
+
+# Main ancestry supplies the trust boundary; the same version-transition owner
+# used by promotion admits a repaired descendant of the original stable cut.
+if [[ "$candidate" == false ]] && ! release_version_is_prerelease "$version"; then
+  if ! transition="$(cd "$repo" && release_recovery_transition "$tag_target" "$version")"; then
+    echo "error: origin/$tag target has no proved stable version transition for $version" >&2
+    exit 1
+  fi
+  echo "verified origin/$tag -> $tag_target: stable release $version transition=$transition (trusted candidate=false)"
+  exit 0
+fi
+
+# Off-main candidates and prereleases retain the exact release-cut contract.
 read -r -a ancestry <<<"$(git -C "$repo" rev-list --parents -n 1 "$tag_target")"
 if ((${#ancestry[@]} != 2)); then
   echo "error: origin/$tag target must be a one-parent squash commit on main" >&2
@@ -129,12 +151,7 @@ if [[ "$candidate" == true ]] && ! git -C "$repo" merge-base --is-ancestor "$par
   echo "error: origin/$tag candidate parent is not reachable from origin/main" >&2
   exit 1
 fi
-version="$(git -C "$repo" show "$tag_target:Cargo.toml" | awk -F'"' '/^version = "/ {print $2; exit}')"
-parent_version="$(git -C "$repo" show "$parent:Cargo.toml" | awk -F'"' '/^version = "/ {print $2; exit}')"
-if [[ -z "$version" || "v$version" != "$tag" ]]; then
-  echo "error: origin/$tag target reports workspace version '${version:-<missing>}'" >&2
-  exit 1
-fi
+parent_version="$(git -C "$repo" show "$parent:Cargo.toml" | release_workspace_version)"
 if [[ "$parent_version" == "$version" ]]; then
   echo "error: origin/$tag target did not introduce workspace version $version" >&2
   exit 1

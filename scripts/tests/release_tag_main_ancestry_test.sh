@@ -136,6 +136,27 @@ if grep -n 'ls-remote' "$tmp_root/release-tools/release_ship.sh"; then
   exit 1
 fi
 
+# Main's corrected-source contract does not admit repaired off-main candidates,
+# even when their signature and exact candidate metadata are valid.
+git -C "$tmp_root/work" commit --allow-empty -q -m 'Repair an off-main candidate'
+off_main_corrected="$(git -C "$tmp_root/work" rev-parse HEAD)"
+git -C "$tmp_root/work" tag -d v1.2.4 >/dev/null
+git -C "$tmp_root/work" tag -s v1.2.4 -m "Release v1.2.4
+
+Harn-Release-Candidate: $off_main_corrected"
+git -C "$tmp_root/work" push -q --force origin refs/tags/v1.2.4
+if "$verifier" --repo "$tmp_root/work" --tag v1.2.4 >"$tmp_root/off-main-corrected.out" 2>&1; then
+  echo "FAIL: corrected-source recovery escaped the main-ancestry boundary" >&2
+  exit 1
+fi
+grep -q 'candidate parent is not reachable from origin/main' "$tmp_root/off-main-corrected.out"
+git -C "$tmp_root/work" switch -q --detach "$candidate_commit"
+git -C "$tmp_root/work" tag -d v1.2.4 >/dev/null
+git -C "$tmp_root/work" tag -s v1.2.4 -m "Release v1.2.4
+
+Harn-Release-Candidate: $candidate_commit"
+git -C "$tmp_root/work" push -q --force origin refs/tags/v1.2.4
+
 # Terminal cleanup may remove the certify ref; the signed endorsement remains.
 git -C "$tmp_root/work" push -q origin "$candidate_commit:refs/heads/release-certify/$candidate_commit"
 "$verifier" --repo "$tmp_root/work" --tag v1.2.4 >/dev/null
@@ -206,5 +227,52 @@ if "$verifier" --repo "$tmp_root/work" --tag v1.2.6 >"$tmp_root/lightweight.out"
   echo "FAIL: lightweight release tag was accepted" >&2
   exit 1
 fi
+
+# Corrected stable publication keeps the version and tags a repaired main
+# descendant. The version transition still belongs to the original cut.
+printf 'corrected runtime\n' >"$tmp_root/work/repair.txt"
+git -C "$tmp_root/work" add repair.txt
+git -C "$tmp_root/work" commit -q -m 'Repair the release runtime'
+corrected_commit="$(git -C "$tmp_root/work" rev-parse HEAD)"
+git -C "$tmp_root/work" tag -d v1.2.3 >/dev/null
+git -C "$tmp_root/work" tag -a v1.2.3 -m 'Corrected Release v1.2.3'
+git -C "$tmp_root/work" push -q origin main
+git -C "$tmp_root/work" push -q --force origin refs/tags/v1.2.3
+corrected_output="$($verifier --repo "$tmp_root/work" --tag v1.2.3 --expect-commit "$corrected_commit")"
+[[ "$corrected_output" == *"transition=$release_commit"* ]] || {
+  echo "FAIL: corrected source did not prove its original version transition: $corrected_output" >&2
+  exit 1
+}
+"$tmp_root/release-tools/verify_release_tag_main_ancestry.sh" \
+  --repo "$tmp_root/work" --tag v1.2.3 --expect-commit "$corrected_commit" >/dev/null
+git -C "$tmp_root/origin.git" update-ref refs/tags/v1.2.3 "$corrected_commit"
+"$verifier" --repo "$tmp_root/work" --tag v1.2.3 --expect-commit "$corrected_commit" >/dev/null
+if "$verifier" --repo "$tmp_root/work" --tag v1.2.3 --expect-commit "$release_commit" \
+  >"$tmp_root/corrected-mismatch.out" 2>&1; then
+  echo "FAIL: corrected tag was accepted for the original source" >&2
+  exit 1
+fi
+grep -Fq "selects $corrected_commit, not the expected commit $release_commit" "$tmp_root/corrected-mismatch.out"
+
+# A matching stable version with no earlier version transition is not a cut.
+git init -q -b main "$tmp_root/no-transition"
+git -C "$tmp_root/no-transition" config user.name Test
+git -C "$tmp_root/no-transition" config user.email test@example.com
+git -C "$tmp_root/no-transition" config commit.gpgSign false
+git -C "$tmp_root/no-transition" config tag.gpgSign false
+git init -q -b main --bare "$tmp_root/no-transition-origin.git"
+git -C "$tmp_root/no-transition" remote add origin "$tmp_root/no-transition-origin.git"
+printf '[workspace.package]\nversion = "1.2.7"\n' >"$tmp_root/no-transition/Cargo.toml"
+git -C "$tmp_root/no-transition" add Cargo.toml
+git -C "$tmp_root/no-transition" commit -q -m bootstrap
+git -C "$tmp_root/no-transition" commit --allow-empty -q -m 'Release v1.2.7'
+git -C "$tmp_root/no-transition" tag -a v1.2.7 -m 'Release v1.2.7'
+git -C "$tmp_root/no-transition" push -q -u origin main refs/tags/v1.2.7
+if "$verifier" --repo "$tmp_root/no-transition" --tag v1.2.7 \
+  >"$tmp_root/no-transition.out" 2>&1; then
+  echo "FAIL: matching version without a proved transition was accepted" >&2
+  exit 1
+fi
+grep -q 'no proved stable version transition' "$tmp_root/no-transition.out"
 
 echo "release_tag_main_ancestry_test: ok"

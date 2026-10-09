@@ -35,7 +35,7 @@ on:
         description: 'Explicit immutable release tag for current-main recovery.'
         type: string
       expected_source_sha:
-        description: 'Exact certified commit selected by the signed tag.'
+        description: 'Exact certified commit selected by the immutable tag.'
         type: string
       expected_policy_sha:
         description: 'Exact current-main workflow execution commit.'
@@ -187,7 +187,7 @@ jobs:
             if [[ -z "$matching_tag_commit" ]]; then
               # Main-anchored publishing has a deliberate handoff window: the
               # `Release vX.Y.Z` commit lands on main a few seconds
-              # before the signed `vX.Y.Z` tag is pushed at that same commit.
+              # before the immutable `vX.Y.Z` tag is pushed at that same commit.
               # During that window Cargo.toml is ahead of the latest tag with
               # no matching tag yet. That transient is EXPECTED and must not
               # turn main red — the tag push is the real publish trigger.

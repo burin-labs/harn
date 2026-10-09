@@ -92,7 +92,7 @@ Follow the runs for that commit in
 
 Publication is complete only after you verify all of these:
 
-- The release pull request merged, and the signed tag selects its main commit.
+- The release pull request merged, and the immutable tag selects its certified source.
 - The exact candidate and promotion runs succeeded.
 - The GitHub release has all five archives, `SHA256SUMS`, and
   `release-assets.json`, with digests matching the candidate manifest.
@@ -100,6 +100,10 @@ Publication is complete only after you verify all of these:
   anonymously pullable.
 - The post-publication development bump reached main or reported a proved
   no-op because main had already advanced.
+
+Main ancestry and exact-source certification bind a tag to its release source.
+A tag outside main also needs a trusted SSH signature naming its candidate commit.
+Corrected stable sources prove the original version transition in their first-parent history.
 
 Read [Release assets manifest](./dev/release-assets-manifest.md) for the
 download contract. A visible tag or release page alone doesn't prove complete
@@ -133,6 +137,9 @@ candidate manifest attached to the release record.
   Recovery publishes the existing files without rebuilding them.
 - Crate publication failed after the tag exists: rerun the failed jobs in the
   tag's `publish-release.yml` run. Its publisher resumes remaining crates.
+  If publication policy needed a repair on main, dispatch `publish-release.yml`
+  with the immutable `tag`, its `expected_source_sha`, and the landed
+  `expected_policy_sha`. Recovery uses that policy without changing the tag's source.
 - Container or development bump failed: rerun those failed promotion jobs.
 
 Don't retag a published version or start a local publisher or watcher as a
