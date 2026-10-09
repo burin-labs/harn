@@ -154,6 +154,9 @@ fn captured_sdk_profile_helpers_receive_their_session_inputs() {
         format!("[profile synthetic-first]\ncredential_process={command}\n[profile synthetic-second]\ncredential_process={command}\n"),
     )
     .expect("synthetic helper profile config");
+    let launcher = LauncherEnvironment::capture()
+        .launch(EnvironmentPolicyKind::Inherited, Vec::new())
+        .expect("ordinary captured launcher inputs");
     let context = |profile: &str, region: &str| {
         let mut inputs = map(&[
             ("AWS_PROFILE", profile),
@@ -167,8 +170,8 @@ fn captured_sdk_profile_helpers_receive_their_session_inputs() {
         ]);
         // Preserve the trusted ordinary launcher inputs needed by shell helpers.
         for name in ["PATH", "SystemRoot", "ComSpec"] {
-            if let Ok(value) = std::env::var(name) {
-                inputs.insert(name.to_string(), value);
+            if let Some(value) = launcher.launcher_value(name) {
+                inputs.insert(name.to_string(), value.to_string());
             }
         }
         inputs
