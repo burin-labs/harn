@@ -4,6 +4,7 @@
 .PHONY: check-typescript-protocol-binding check-swift-protocol-binding
 .PHONY: check-provider-catalog-drift-core
 .PHONY: check-scheduled-workflows check-e2e-trigger-contract
+.PHONY: test-postgres-live test-postgres-cloud
 .PHONY: sync-docs-diagnostics
 .PHONY: setup-wasm setup-wasm-tools gen-wasm-wit check-wasm-wit wasm-build gen-app-runtime check-app-runtime wasm-audit-imports wasm-test-browser wasm-check wasm-demo kernel-check kernel-test kernel-vm-parity vm-check cli-check cli-test gen-portable-benchmark-schema check-portable-benchmark-schema gen-portable-demo-package check-portable-demo-package
 
@@ -305,6 +306,20 @@ test:
 # by the same typed environment boundary.
 test-focused:
 	$(HARN_RUST_TEST_ENV) ./scripts/test_focused.sh
+
+# Live database tests are ignored by the ordinary suite, never counted as a
+# passing test that returned before opening a connection.
+test-postgres-live:
+	@ : "$${HARN_TEST_POSTGRES_URL:?set HARN_TEST_POSTGRES_URL to an isolated test database}"
+	$(HARN_REQUIRE_NEXTEST)
+	$(HARN_RUST_TEST_ENV) $(HARN_CARGO_CMD) nextest run --package harn-vm --lib --run-ignored all --ignore-default-filter -E 'test(stdlib::postgres::) and not test(when_env_set) and not test(when_bench_enabled)'
+
+test-postgres-cloud:
+	@ : "$${HARN_TEST_POSTGRES_URL:?set HARN_TEST_POSTGRES_URL to an isolated test database}"
+	@ : "$${HARN_TEST_CLOUD_MIGRATIONS_DIR:?set HARN_TEST_CLOUD_MIGRATIONS_DIR to the cloud migrations directory}"
+	@test -d "$${HARN_TEST_CLOUD_MIGRATIONS_DIR}"
+	$(HARN_REQUIRE_NEXTEST)
+	$(HARN_RUST_TEST_ENV) $(HARN_CARGO_CMD) nextest run --package harn-vm --lib --test-threads 1 --run-ignored only --ignore-default-filter -E 'test(stdlib::postgres::tests::) and test(when_env_set)'
 
 # Run exactly one Rust test without making nextest enumerate every test binary
 # in the package first. The environment-variable boundary keeps the

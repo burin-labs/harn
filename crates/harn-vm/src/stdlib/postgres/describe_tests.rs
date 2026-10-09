@@ -1,10 +1,9 @@
 use super::*;
 
 #[tokio::test(flavor = "current_thread")]
+#[ignore = "requires an isolated database; make test-postgres-live"]
 async fn nil_query_describes_once_and_caches_oids_when_env_url_is_set() {
-    let Ok(url) = std::env::var("HARN_TEST_POSTGRES_URL") else {
-        return;
-    };
+    let url = live_postgres_url();
     reset_postgres_state();
     reset_describe_round_trips();
     let handle = open_single_conn_pool(&url).await;
@@ -35,10 +34,9 @@ async fn nil_query_describes_once_and_caches_oids_when_env_url_is_set() {
 }
 
 #[test]
+#[ignore = "requires an isolated database; make test-postgres-live"]
 fn transactions_reuse_pool_describes_when_env_url_is_set() {
-    if std::env::var("HARN_TEST_POSTGRES_URL").is_err() {
-        return;
-    }
+    live_postgres_url();
     reset_postgres_state();
     reset_describe_round_trips();
     let source = r#"
@@ -78,37 +76,18 @@ fn main(harness: Harness) {
   harness.stdio.println("reused")
 }
 "#;
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    rt.block_on(async {
-        let local = tokio::task::LocalSet::new();
-        local
-            .run_until(async {
-                let chunk = compile_source(source).expect("compile transaction describe reuse");
-                let mut vm = Vm::new();
-                register_vm_stdlib(&mut vm);
-                vm.set_harness(crate::Harness::real());
-                vm.execute(&chunk)
-                    .await
-                    .expect("execute transaction describe reuse");
-                assert_eq!(vm.output().trim(), "reused");
-            })
-            .await;
-        assert_eq!(
-            describe_round_trips(),
-            9,
-            "only first statements share pool types; later SQL stays transaction-local"
-        );
-    });
+    assert_eq!(run_harn_source(source).trim(), "reused");
+    assert_eq!(
+        describe_round_trips(),
+        9,
+        "only first statements share pool types; later SQL stays transaction-local"
+    );
 }
 
 #[test]
+#[ignore = "requires an isolated database; make test-postgres-live"]
 fn transaction_search_path_keeps_parameter_types_local_when_env_url_is_set() {
-    if std::env::var("HARN_TEST_POSTGRES_URL").is_err() {
-        return;
-    }
+    live_postgres_url();
     reset_postgres_state();
     let source = r#"
 import "std/postgres"
@@ -136,21 +115,5 @@ fn main(harness: Harness) {
   pg_close(db)
 }
 "#;
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    rt.block_on(async {
-        tokio::task::LocalSet::new()
-            .run_until(async {
-                let chunk = compile_source(source).expect("compile schema context regression");
-                let mut vm = Vm::new();
-                register_vm_stdlib(&mut vm);
-                vm.set_harness(crate::Harness::real());
-                vm.execute(&chunk)
-                    .await
-                    .expect("execute schema context regression");
-            })
-            .await;
-    });
+    run_harn_source(source);
 }
