@@ -147,11 +147,32 @@ pub(crate) fn current_session_workspace() -> Option<PathBuf> {
 }
 
 pub(crate) fn session_matches_current_workspace(meta: &harn_session_store::SessionMeta) -> bool {
-    current_session_workspace().is_none_or(|workspace| {
+    session_matches_workspace(meta, current_session_workspace())
+}
+
+fn session_matches_workspace(
+    meta: &harn_session_store::SessionMeta,
+    workspace: Option<PathBuf>,
+) -> bool {
+    workspace.is_none_or(|workspace| {
         let expected = workspace.to_string_lossy();
         meta.project_scope.as_deref() == Some(expected.as_ref())
             && meta.cwd.as_deref() == Some(expected.as_ref())
     })
+}
+
+pub(crate) fn validate_session_store_workspace(
+    state_root: &Path,
+    meta: &harn_session_store::SessionMeta,
+) -> Result<(), crate::VmError> {
+    if session_matches_workspace(meta, session_workspace_for_state(state_root)) {
+        Ok(())
+    } else {
+        Err(crate::VmError::Runtime(format!(
+            "session_store: session '{}' belongs to another workspace",
+            meta.id
+        )))
+    }
 }
 
 pub(crate) fn session_workspace_for_state(state_root: &Path) -> Option<PathBuf> {
@@ -214,6 +235,36 @@ mod tests {
         assert_eq!(current_persistent_state_root().as_deref(), Some(outer));
         drop(outer_guard);
         assert_eq!(current_persistent_state_root(), None);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn scoped_store_row_validation_preserves_explicit_root_and_refuses_foreign_rows() {
+        use harn_session_store::{CreateSession, SessionStore, SqliteSessionStore};
+
+        let dir = tempfile::tempdir().unwrap();
+        let launcher = crate::security::LauncherEnvironment::from_snapshot(Default::default());
+        let scope = SessionStoreScope::resolve(dir.path(), &launcher).unwrap();
+        let store = SqliteSessionStore::open_in_memory().unwrap();
+        let workspace = scope.workspace().to_string_lossy().into_owned();
+        let mut meta = store
+            .create(CreateSession {
+                cwd: Some(workspace.clone()),
+                project_scope: Some(workspace),
+                ..CreateSession::default()
+            })
+            .await
+            .unwrap();
+        let _guard = scope.enter();
+        assert!(validate_session_store_workspace(scope.state_root(), &meta).is_ok());
+        meta.cwd = Some("foreign workspace".to_string());
+        assert!(validate_session_store_workspace(scope.state_root(), &meta).is_err());
+        meta.cwd = None;
+        meta.project_scope = None;
+        assert!(validate_session_store_workspace(scope.state_root(), &meta).is_err());
+        assert!(
+            validate_session_store_workspace(&dir.path().join("explicit-other-state"), &meta)
+                .is_ok()
+        );
     }
 
     #[tokio::test(flavor = "current_thread")]

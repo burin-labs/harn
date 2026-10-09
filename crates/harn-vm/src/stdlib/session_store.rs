@@ -552,6 +552,7 @@ async fn ensure_session_with_create(
             return match store.describe(session_id).await {
                 Ok(meta) => {
                     validate_tenant(session_id, &meta.tenant_id, tenant_id.as_deref())?;
+                    crate::persistent_state::validate_session_store_workspace(state_dir.as_path(), &meta)?;
                     Ok(true)
                 }
                 Err(StoreError::NotFound(_)) => Err(VmError::Runtime(format!(
@@ -564,18 +565,7 @@ async fn ensure_session_with_create(
     match store.describe(session_id).await {
         Ok(meta) => {
             validate_tenant(session_id, &meta.tenant_id, tenant_id.as_deref())?;
-            if let Some(workspace) =
-                crate::persistent_state::session_workspace_for_state(state_dir.as_path())
-            {
-                let expected = workspace.to_string_lossy();
-                if meta.project_scope.as_deref() != Some(expected.as_ref())
-                    || meta.cwd.as_deref() != Some(expected.as_ref())
-                {
-                    return Err(VmError::Runtime(format!(
-                        "session_store: session '{session_id}' belongs to another workspace"
-                    )));
-                }
-            }
+            crate::persistent_state::validate_session_store_workspace(state_dir.as_path(), &meta)?;
             Ok(true)
         }
         Err(StoreError::NotFound(_)) => {
@@ -589,6 +579,7 @@ async fn ensure_session_with_create(
             }
             let meta = store.describe(session_id).await.map_err(store_error)?;
             validate_tenant(session_id, &meta.tenant_id, tenant_id.as_deref())?;
+            crate::persistent_state::validate_session_store_workspace(state_dir.as_path(), &meta)?;
             Ok(true)
         }
         Err(error) => Err(store_error(error)),
