@@ -49,3 +49,16 @@ test('recorded patch and pristine archive identities cannot silently drift', asy
     await assert.rejects(verifyAwsConfigMirror(root, archive), /archive checksum mismatch/);
   });
 });
+
+test('upstream lock provenance cannot become an active lock or change bytes', async () => {
+  await fixture(async (root, directory) => {
+    const provenance = join(directory, 'Cargo.lock.upstream');
+    const original = readFileSync(provenance);
+    const active = join(directory, 'Cargo.lock');
+    writeFileSync(active, original);
+    await assert.rejects(verifyAwsConfigMirror(root), /mirror drift: Cargo\.lock/);
+    rmSync(active);
+    writeFileSync(provenance, Buffer.concat([original, Buffer.from('\n')]));
+    await assert.rejects(verifyAwsConfigMirror(root), /mirror drift: Cargo\.lock\.upstream/);
+  });
+});

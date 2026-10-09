@@ -868,3 +868,7 @@
  
  use std::borrow::Cow;
  use std::path::{Path, PathBuf};
+diff --git a/Cargo.lock b/Cargo.lock.upstream
+similarity index 100%
+rename from Cargo.lock
+rename to Cargo.lock.upstream

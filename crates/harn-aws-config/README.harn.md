@@ -36,3 +36,9 @@ Cargo reserves `.cargo_vcs_info.json` and `Cargo.toml.orig` for its own package
 writer. The mirror keeps those pristine files for the complete source comparison
 but excludes them from package inputs. `Cargo.toml.upstream` preserves the
 original upstream manifest inside the published crate.
+
+`Cargo.lock.upstream` preserves the pristine upstream lockfile as recorded
+provenance. It is not an active Cargo lockfile: the Harn workspace lockfile owns
+the mirrored component's runtime dependency resolution and updates. The recorded
+patch renames it without changing its bytes, so the mirror does not introduce a
+second dependency update owner.

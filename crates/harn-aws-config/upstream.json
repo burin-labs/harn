@@ -3,5 +3,5 @@
   "crate": "aws-config",
   "version": "1.12.0",
   "archive_sha256": "b8d7b388a9fc3a6db15a5ec778c38b354eff1364882c94d08e0252f7a47dcaa4",
-  "patch_sha256": "7f18ab4f7a5a882da2bdb4a86f92c7556049f018264f9e695237e3c1c5b1510f"
+  "patch_sha256": "733b7669bbaa2038253d2e98804e16d2d657bf21f7f3a1f17fcacf272e9fda43"
 }
