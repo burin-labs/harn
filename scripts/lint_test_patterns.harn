@@ -1418,7 +1418,12 @@ pipeline main(harness: Harness, task: unknown) {
       harness.stdio,
       "ignore_attr",
       test_files,
-      { rel -> rel.starts_with("crates/harn-cli/tests/") },
+      { rel ->
+        // External database availability is explicit: these cases fail without
+        // a URL and run through the required-input test-postgres-live/cloud targets.
+        rel.starts_with("crates/harn-cli/tests/")
+          || rel == "crates/harn-vm/src/stdlib/postgres/tests.rs"
+      },
       ignore_attr_pattern(),
       [
         "    hint: Default-suite Rust tests must run by default. Move slow subprocess coverage to the harn-cli E2E profile instead of using #[ignore].",

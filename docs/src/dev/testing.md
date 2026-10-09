@@ -97,6 +97,35 @@ directly, so parentheses, spaces, and other expression syntax do not need an
 extra shell-escaping layer. Keep using `ARGS` with `make test` for general Cargo
 selection that is already safe to express at the Make command line.
 
+## Live Postgres tests
+
+Supply a disposable database and run the Postgres integration suite:
+
+```bash
+HARN_TEST_POSTGRES_URL=postgres://localhost/harn_tests make test-postgres-live
+```
+
+The ordinary suite reports live database cases as ignored. The live target
+refuses a missing or empty URL, and a database connection failure fails the
+suite. It exercises transactions, rollback, settings, migrations, and NULL
+parameter binding without calling an LLM provider.
+
+The test-pattern gate permits `#[ignore]` in the Postgres fixture file because
+these tests require an external database. Keep deterministic Postgres tests
+enabled in the ordinary suite; only database-dependent cases use this exception.
+
+The two tests that consume Harn Cloud's migration history have a separate
+target because that source directory is not included in this repository:
+
+```bash
+HARN_TEST_POSTGRES_URL=postgres://localhost/harn_tests \
+  HARN_TEST_CLOUD_MIGRATIONS_DIR=../harn-cloud/migrations \
+  make test-postgres-cloud
+```
+
+This target also refuses a missing migrations directory. The optional NULL
+latency benchmark remains outside both integration targets.
+
 ## One exact test
 
 `make test-one` runs a single named test and requires a one-test success

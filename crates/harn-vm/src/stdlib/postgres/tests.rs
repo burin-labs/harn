@@ -2,6 +2,26 @@ use super::*;
 
 use crate::{compile_source, register_vm_stdlib, Vm};
 
+fn live_postgres_url() -> String {
+    let url = std::env::var("HARN_TEST_POSTGRES_URL")
+        .expect("live Postgres tests require HARN_TEST_POSTGRES_URL; use make test-postgres-live");
+    assert!(
+        !url.trim().is_empty(),
+        "HARN_TEST_POSTGRES_URL must not be empty"
+    );
+    url
+}
+
+fn cloud_migrations_dir() -> String {
+    let dir = std::env::var("HARN_TEST_CLOUD_MIGRATIONS_DIR")
+        .expect("cloud migration tests require HARN_TEST_CLOUD_MIGRATIONS_DIR");
+    assert!(
+        std::path::Path::new(&dir).is_dir(),
+        "cloud migrations directory is missing"
+    );
+    dir
+}
+
 fn s(value: &str) -> VmValue {
     VmValue::String(arcstr::ArcStr::from(value))
 }
@@ -287,10 +307,9 @@ fn execute_result_value_includes_duration() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+#[ignore = "requires an isolated database; make test-postgres-live"]
 async fn postgres_round_trip_when_env_url_is_set() {
-    let Ok(url) = std::env::var("HARN_TEST_POSTGRES_URL") else {
-        return;
-    };
+    let url = live_postgres_url();
     reset_postgres_state();
     let mut options = crate::value::DictMap::new();
     options.insert(crate::value::intern_key("max_connections"), VmValue::Int(1));
@@ -302,7 +321,12 @@ async fn postgres_round_trip_when_env_url_is_set() {
     let handle = open_pool(&ctx, &s(&url), Some(&options), false)
         .await
         .unwrap();
-    assert_eq!(handle.as_dict().unwrap()["max_connections"].display(), "1");
+    assert_eq!(
+        pool_record_from_handle(&handle, "test")
+            .unwrap()
+            .max_connections,
+        1
+    );
     let row = query_rows(
             &handle,
             "select $1::uuid as id, $2::jsonb as payload, $3::timestamptz as observed_at, $4::numeric as amount",
@@ -430,10 +454,9 @@ fn lazy_record() -> PoolRecord {
 /// distinct `Vm`s / simulated requests returns handles backed by the SAME
 /// physical pool; a different database does not share.
 #[tokio::test(flavor = "current_thread")]
+#[ignore = "requires an isolated database; make test-postgres-live"]
 async fn open_pool_shares_across_requests_when_registry_installed() {
-    let Ok(url) = std::env::var("HARN_TEST_POSTGRES_URL") else {
-        return;
-    };
+    let url = live_postgres_url();
     shared::install_shared_pool_registry();
     shared::clear_for_test();
     reset_postgres_state();
@@ -446,10 +469,12 @@ async fn open_pool_shares_across_requests_when_registry_installed() {
     let h1 = open_pool(&ctx, &s(&url), opt, false).await.unwrap();
     // Request 2: fresh handle id, but must resolve to the same pool Arc.
     let h2 = open_pool(&ctx, &s(&url), opt, false).await.unwrap();
-    assert_ne!(
-        h1.as_dict().unwrap()["id"].display(),
-        h2.as_dict().unwrap()["id"].display(),
-        "each call still gets a distinct opaque handle id"
+    assert!(
+        !Arc::ptr_eq(
+            &pool_handle(Some(&h1), "test").unwrap(),
+            &pool_handle(Some(&h2), "test").unwrap(),
+        ),
+        "each call still gets distinct pool authority"
     );
     assert!(
         Arc::ptr_eq(&pool_ptr(&h1), &pool_ptr(&h2)),
@@ -474,10 +499,9 @@ async fn open_pool_shares_across_requests_when_registry_installed() {
 /// behavior). Gated on a live DB. NOTE: relies on per-test process isolation
 /// (nextest) so no sibling test has installed the registry in this process.
 #[tokio::test(flavor = "current_thread")]
+#[ignore = "requires an isolated database; make test-postgres-live"]
 async fn open_pool_does_not_share_when_registry_absent() {
-    let Ok(url) = std::env::var("HARN_TEST_POSTGRES_URL") else {
-        return;
-    };
+    let url = live_postgres_url();
     if shared::is_installed() {
         // Another test installed it in this (cargo test) process; skip rather
         // than assert a false negative.
@@ -495,14 +519,14 @@ async fn open_pool_does_not_share_when_registry_absent() {
 }
 
 #[test]
+#[ignore = "requires an isolated database; make test-postgres-live"]
 fn harn_transaction_commits_rolls_back_and_applies_settings_when_env_url_is_set() {
-    if std::env::var("HARN_TEST_POSTGRES_URL").is_err() {
-        return;
-    }
+    live_postgres_url();
     reset_postgres_state();
     let source = r#"
 import "std/postgres"
 
+fn main(harness: Harness) {
 const db = harness.postgres.pool("env:HARN_TEST_POSTGRES_URL", {max_connections: 1})
 pg_execute(db, "create temporary table if not exists harn_pg_tx_test(value int) on commit preserve rows", [])
 pg_execute(db, "truncate table harn_pg_tx_test", [])
@@ -528,39 +552,23 @@ const rolled = try {
 harness.stdio.println(rolled)
 harness.stdio.println(pg_query_one(db, "select count(*)::int8 as count from harn_pg_tx_test", []).count)
 pg_close(db)
+}
 "#;
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    rt.block_on(async {
-        let local = tokio::task::LocalSet::new();
-        local
-            .run_until(async {
-                let chunk = compile_source(source).expect("compile postgres transaction source");
-                let mut vm = Vm::new();
-                register_vm_stdlib(&mut vm);
-                vm.execute(&chunk)
-                    .await
-                    .expect("execute postgres transaction source");
-                assert_eq!(vm.output().trim(), "tenant-a\nrolled back\n1");
-            })
-            .await;
-    });
+    assert_eq!(run_harn_source(source).trim(), "tenant-a\nrolled back\n1");
 }
 
 /// Drives `pg_savepoint` / `pg_rollback_to_savepoint` /
 /// `pg_release_savepoint` against a real Postgres so we cover the
 /// transaction-state-machine path the mocks can't exercise.
 #[test]
+#[ignore = "requires an isolated database; make test-postgres-live"]
 fn savepoint_rollback_preserves_outer_writes_when_env_url_is_set() {
-    if std::env::var("HARN_TEST_POSTGRES_URL").is_err() {
-        return;
-    }
+    live_postgres_url();
     reset_postgres_state();
     let source = r#"
 import "std/postgres"
 
+fn main(harness: Harness) {
 const db = harness.postgres.pool("env:HARN_TEST_POSTGRES_URL", {max_connections: 1})
 pg_execute(db, "DROP TABLE IF EXISTS harn_pg_sp_test", [])
 pg_execute(db, "CREATE TABLE harn_pg_sp_test (id int PRIMARY KEY, label text NOT NULL)", [])
@@ -581,25 +589,9 @@ for row in rows {
 }
 pg_execute(db, "DROP TABLE harn_pg_sp_test", [])
 pg_close(db)
+}
 "#;
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    rt.block_on(async {
-        let local = tokio::task::LocalSet::new();
-        local
-            .run_until(async {
-                let chunk = compile_source(source).expect("compile postgres savepoint source");
-                let mut vm = Vm::new();
-                register_vm_stdlib(&mut vm);
-                vm.execute(&chunk)
-                    .await
-                    .expect("execute postgres savepoint source");
-                assert_eq!(vm.output().trim(), "1:outer\n3:after_release");
-            })
-            .await;
-    });
+    assert_eq!(run_harn_source(source).trim(), "1:outer\n3:after_release");
 }
 
 /// `pg_migrate` applies a synthetic two-file directory exactly once
@@ -607,10 +599,9 @@ pg_close(db)
 /// Requires `HARN_TEST_POSTGRES_URL`; runs against a unique scratch
 /// schema so concurrent invocations don't conflict.
 #[test]
+#[ignore = "requires an isolated database; make test-postgres-live"]
 fn migrate_applies_synthetic_dir_and_is_idempotent_when_env_url_is_set() {
-    if std::env::var("HARN_TEST_POSTGRES_URL").is_err() {
-        return;
-    }
+    live_postgres_url();
     reset_postgres_state();
     let tmp = tempfile::tempdir().expect("tempdir");
     let dir = tmp.path();
@@ -638,6 +629,7 @@ fn migrate_applies_synthetic_dir_and_is_idempotent_when_env_url_is_set() {
         r#"
 import "std/postgres"
 
+fn main(harness: Harness) {{
 const admin = harness.postgres.pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
 pg_execute(admin, "DROP SCHEMA IF EXISTS \"{schema}\" CASCADE", [])
 pg_execute(admin, "CREATE SCHEMA \"{schema}\"", [])
@@ -659,25 +651,12 @@ harness.stdio.println(count.c)
 
 pg_execute(db, "DROP SCHEMA \"{schema}\" CASCADE", [])
 pg_close(db)
+}}
 "#,
     );
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    rt.block_on(async {
-        let local = tokio::task::LocalSet::new();
-        local
-            .run_until(async {
-                let chunk = compile_source(&source).expect("compile migrate source");
-                let mut vm = Vm::new();
-                register_vm_stdlib(&mut vm);
-                vm.execute(&chunk).await.expect("execute migrate source");
-                let lines: Vec<&str> = vm.output().lines().collect();
-                assert_eq!(lines, vec!["2", "0", "0", "2", "1"]);
-            })
-            .await;
-    });
+    let output = run_harn_source(&source);
+    let lines: Vec<&str> = output.lines().collect();
+    assert_eq!(lines, vec!["2", "0", "0", "2", "1"]);
 }
 
 /// Harn-ledger drift detection (C-2): apply a migration, then edit the
@@ -685,10 +664,9 @@ pg_close(db)
 /// see it no longer matches the recorded SHA-256, and error naming the
 /// migration — never silently skip an edited (already-applied) file.
 #[test]
+#[ignore = "requires an isolated database; make test-postgres-live"]
 fn migrate_harn_detects_checksum_drift_when_env_url_is_set() {
-    if std::env::var("HARN_TEST_POSTGRES_URL").is_err() {
-        return;
-    }
+    live_postgres_url();
     reset_postgres_state();
     let tmp = tempfile::tempdir().expect("tempdir");
     let dir = tmp.path();
@@ -708,6 +686,7 @@ fn migrate_harn_detects_checksum_drift_when_env_url_is_set() {
         r#"
 import "std/postgres"
 
+fn main(harness: Harness) {{
 const admin = harness.postgres.pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
 pg_execute(admin, "DROP SCHEMA IF EXISTS \"{schema}\" CASCADE", [])
 pg_execute(admin, "CREATE SCHEMA \"{schema}\"", [])
@@ -718,6 +697,7 @@ pg_execute(db, "SET search_path TO \"{schema}\"", [])
 const first = pg_migrate(db, {{dir: "{migration_dir}"}})
 harness.stdio.println(len(first.applied))
 pg_close(db)
+}}
 "#,
     );
     let out = run_harn_source(&apply_source);
@@ -736,11 +716,13 @@ pg_close(db)
         r#"
 import "std/postgres"
 
+fn main(harness: Harness) {{
 const db = harness.postgres.pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
 pg_execute(db, "SET search_path TO \"{schema}\"", [])
 const second = pg_migrate(db, {{dir: "{migration_dir}"}})
 harness.stdio.println(len(second.applied))
 pg_close(db)
+}}
 "#,
     );
     let err = run_harn_source_expect_err(&rerun_source);
@@ -753,9 +735,11 @@ pg_close(db)
     let cleanup = format!(
         r#"
 import "std/postgres"
+fn main(harness: Harness) {{
 const admin = harness.postgres.pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
 pg_execute(admin, "DROP SCHEMA IF EXISTS \"{schema}\" CASCADE", [])
 pg_close(admin)
+}}
 "#,
     );
     run_harn_source(&cleanup);
@@ -765,22 +749,17 @@ pg_close(admin)
 /// directory. Opt-in via `HARN_TEST_CLOUD_MIGRATIONS_DIR`; verifies
 /// that the runner consumes the full ledger without errors.
 #[test]
+#[ignore = "requires database and cloud migrations; make test-postgres-cloud"]
 fn migrate_loads_harn_cloud_store_migrations_when_env_set() {
-    if std::env::var("HARN_TEST_POSTGRES_URL").is_err() {
-        return;
-    }
-    let Ok(dir) = std::env::var("HARN_TEST_CLOUD_MIGRATIONS_DIR") else {
-        return;
-    };
-    if !std::path::Path::new(&dir).exists() {
-        return;
-    }
+    live_postgres_url();
+    let dir = cloud_migrations_dir();
     reset_postgres_state();
     let schema = format!("harn_pg_cloud_{}", uuid::Uuid::new_v4().simple());
     let source = format!(
         r#"
 import "std/postgres"
 
+fn main(harness: Harness) {{
 const admin = harness.postgres.pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
 pg_execute(admin, "DROP SCHEMA IF EXISTS \"{schema}\" CASCADE", [])
 pg_execute(admin, "CREATE SCHEMA \"{schema}\"", [])
@@ -802,34 +781,19 @@ harness.stdio.println(len(tables))
 
 pg_execute(db, "DROP SCHEMA \"{schema}\" CASCADE", [])
 pg_close(db)
+}}
 "#,
     );
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    rt.block_on(async {
-        let local = tokio::task::LocalSet::new();
-        local
-            .run_until(async {
-                let chunk = compile_source(&source).expect("compile cloud-migrate source");
-                let mut vm = Vm::new();
-                register_vm_stdlib(&mut vm);
-                vm.execute(&chunk)
-                    .await
-                    .expect("execute cloud-migrate source");
-                let lines: Vec<&str> = vm.output().lines().collect();
-                assert_eq!(lines.len(), 3, "unexpected output: {}", vm.output());
-                let applied: usize = lines[0].parse().expect("applied count");
-                let tables: usize = lines[2].parse().expect("table count");
-                assert!(applied > 0, "no migrations applied: {}", vm.output());
-                assert!(
-                    tables >= applied,
-                    "fewer tables than migrations applied: tables={tables}, applied={applied}",
-                );
-            })
-            .await;
-    });
+    let output = run_harn_source(&source);
+    let lines: Vec<&str> = output.lines().collect();
+    assert_eq!(lines.len(), 3, "unexpected output: {output}");
+    let applied: usize = lines[0].parse().expect("applied count");
+    let tables: usize = lines[2].parse().expect("table count");
+    assert!(applied > 0, "no migrations applied: {output}");
+    assert!(
+        tables >= applied,
+        "fewer tables than migrations applied: tables={tables}, applied={applied}",
+    );
 }
 
 /// M-4 (live): `pg_transaction(settings)` rejects a privileged GUC
@@ -837,18 +801,19 @@ pg_close(db)
 /// `app.current_tenant_id` / `app.bypass_rls` / timeout settings. This is
 /// the RLS-escape guard exercised end-to-end through the VM.
 #[test]
+#[ignore = "requires an isolated database; make test-postgres-live"]
 fn transaction_settings_reject_privileged_gucs_when_env_url_is_set() {
-    if std::env::var("HARN_TEST_POSTGRES_URL").is_err() {
-        return;
-    }
+    live_postgres_url();
     reset_postgres_state();
 
     // `role` is rejected before any SQL runs.
     let reject_role = r#"
 import "std/postgres"
+fn main(harness: Harness) {
 const db = harness.postgres.pool("env:HARN_TEST_POSTGRES_URL", {max_connections: 1})
 const r = pg_transaction(db, { tx -> return 1 }, {settings: {"role": "postgres"}})
 pg_close(db)
+}
 "#;
     let err = run_harn_source_expect_err(reject_role);
     assert!(
@@ -860,9 +825,11 @@ pg_close(db)
     reset_postgres_state();
     let reject_nil = r#"
 import "std/postgres"
+fn main(harness: Harness) {
 const db = harness.postgres.pool("env:HARN_TEST_POSTGRES_URL", {max_connections: 1})
 const r = pg_transaction(db, { tx -> return 1 }, {settings: {"app.current_tenant_id": nil}})
 pg_close(db)
+}
 "#;
     let err = run_harn_source_expect_err(reject_nil);
     assert!(
@@ -874,12 +841,14 @@ pg_close(db)
     reset_postgres_state();
     let allow_legit = r#"
 import "std/postgres"
+fn main(harness: Harness) {
 const db = harness.postgres.pool("env:HARN_TEST_POSTGRES_URL", {max_connections: 1})
 const tenant = pg_transaction(db, { tx ->
   return pg_query_one(tx, "SELECT current_setting('app.current_tenant_id', true) AS t", []).t
 }, {settings: {"app.current_tenant_id": "tenant-xyz", "app.bypass_rls": "on", "statement_timeout": "5000"}})
 harness.stdio.println(tenant)
 pg_close(db)
+}
 "#;
     let out = run_harn_source(allow_legit);
     assert_eq!(out.trim(), "tenant-xyz", "legit settings must apply: {out}");
@@ -888,15 +857,15 @@ pg_close(db)
 /// M-2 (live): a unique-constraint violation surfaces a *stable category*
 /// (`unique_violation` + SQLSTATE 23505), never the raw constraint name.
 #[test]
+#[ignore = "requires an isolated database; make test-postgres-live"]
 fn constraint_violation_surfaces_stable_category_when_env_url_is_set() {
-    if std::env::var("HARN_TEST_POSTGRES_URL").is_err() {
-        return;
-    }
+    live_postgres_url();
     reset_postgres_state();
     let schema = format!("harn_pg_m2_{}", uuid::Uuid::new_v4().simple());
     let source = format!(
         r#"
 import "std/postgres"
+fn main(harness: Harness) {{
 const db = harness.postgres.pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
 pg_execute(db, "DROP SCHEMA IF EXISTS \"{schema}\" CASCADE", [])
 pg_execute(db, "CREATE SCHEMA \"{schema}\"", [])
@@ -905,6 +874,7 @@ pg_execute(db, "CREATE TABLE accounts (id int4 PRIMARY KEY, email text UNIQUE)",
 pg_execute(db, "INSERT INTO accounts (id, email) VALUES (1, 'a@b.com')", [])
 pg_execute(db, "INSERT INTO accounts (id, email) VALUES ($1, $2)", [2, "a@b.com"])
 pg_close(db)
+}}
 "#,
     );
     let err = run_harn_source_expect_err(&source);
@@ -922,9 +892,11 @@ pg_close(db)
     let cleanup = format!(
         r#"
 import "std/postgres"
+fn main(harness: Harness) {{
 const db = harness.postgres.pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
 pg_execute(db, "DROP SCHEMA IF EXISTS \"{schema}\" CASCADE", [])
 pg_close(db)
+}}
 "#,
     );
     run_harn_source(&cleanup);
@@ -935,15 +907,15 @@ pg_close(db)
 /// `numeric_out_of_range` (SQLSTATE 22003) diagnostic rather than a raw or
 /// confusing message.
 #[test]
+#[ignore = "requires an isolated database; make test-postgres-live"]
 fn int_bind_into_int4_column_when_env_url_is_set() {
-    if std::env::var("HARN_TEST_POSTGRES_URL").is_err() {
-        return;
-    }
+    live_postgres_url();
     reset_postgres_state();
     let schema = format!("harn_pg_h2_{}", uuid::Uuid::new_v4().simple());
     let ok_source = format!(
         r#"
 import "std/postgres"
+fn main(harness: Harness) {{
 const db = harness.postgres.pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
 pg_execute(db, "DROP SCHEMA IF EXISTS \"{schema}\" CASCADE", [])
 pg_execute(db, "CREATE SCHEMA \"{schema}\"", [])
@@ -954,6 +926,7 @@ const row = pg_query_one(db, "SELECT a, b FROM narrow WHERE a = $1", [2000000000
 harness.stdio.println(row.a)
 harness.stdio.println(row.b)
 pg_close(db)
+}}
 "#,
     );
     let out = run_harn_source(&ok_source);
@@ -968,10 +941,12 @@ pg_close(db)
     let overflow_source = format!(
         r#"
 import "std/postgres"
+fn main(harness: Harness) {{
 const db = harness.postgres.pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
 pg_execute(db, "SET search_path TO \"{schema}\"", [])
 pg_execute(db, "INSERT INTO narrow (a) VALUES ($1)", [5000000000])
 pg_close(db)
+}}
 "#,
     );
     let err = run_harn_source_expect_err(&overflow_source);
@@ -983,9 +958,11 @@ pg_close(db)
     let cleanup = format!(
         r#"
 import "std/postgres"
+fn main(harness: Harness) {{
 const db = harness.postgres.pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
 pg_execute(db, "DROP SCHEMA IF EXISTS \"{schema}\" CASCADE", [])
 pg_close(db)
+}}
 "#,
     );
     run_harn_source(&cleanup);
@@ -997,10 +974,9 @@ pg_close(db)
 /// `ALTER TABLE` that changes the column type, then re-query on the same
 /// pool — it must succeed because the migrate recycled the statement caches.
 #[test]
+#[ignore = "requires an isolated database; make test-postgres-live"]
 fn migrate_recycles_statement_cache_after_ddl_when_env_url_is_set() {
-    if std::env::var("HARN_TEST_POSTGRES_URL").is_err() {
-        return;
-    }
+    live_postgres_url();
     reset_postgres_state();
     let schema = format!("harn_pg_m5_{}", uuid::Uuid::new_v4().simple());
 
@@ -1035,6 +1011,7 @@ fn migrate_recycles_statement_cache_after_ddl_when_env_url_is_set() {
     let source = format!(
         r#"
 import "std/postgres"
+fn main(harness: Harness) {{
 const admin = harness.postgres.pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
 pg_execute(admin, "DROP SCHEMA IF EXISTS \"{schema}\" CASCADE", [])
 pg_execute(admin, "CREATE SCHEMA \"{schema}\"", [])
@@ -1058,6 +1035,7 @@ const after = pg_query_one(db, "SELECT v FROM plan_t LIMIT 1", [])
 harness.stdio.println(after.v)
 pg_execute(db, "DROP SCHEMA \"{schema}\" CASCADE", [])
 pg_close(db)
+}}
 "#,
     );
     let out = run_harn_source(&source);
@@ -1075,10 +1053,9 @@ pg_close(db)
 /// applies each migration, and the lock is released afterward (a third run
 /// can immediately acquire it and is a clean no-op).
 #[test]
+#[ignore = "requires an isolated database; make test-postgres-live"]
 fn concurrent_migrate_serializes_on_advisory_lock_when_env_url_is_set() {
-    if std::env::var("HARN_TEST_POSTGRES_URL").is_err() {
-        return;
-    }
+    live_postgres_url();
     reset_postgres_state();
     let schema = format!("harn_pg_c1_{}", uuid::Uuid::new_v4().simple());
 
@@ -1100,10 +1077,12 @@ fn concurrent_migrate_serializes_on_advisory_lock_when_env_url_is_set() {
     let setup = format!(
         r#"
 import "std/postgres"
+fn main(harness: Harness) {{
 const admin = harness.postgres.pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
 pg_execute(admin, "DROP SCHEMA IF EXISTS \"{schema}\" CASCADE", [])
 pg_execute(admin, "CREATE SCHEMA \"{schema}\"", [])
 pg_close(admin)
+}}
 "#,
     );
     run_harn_source(&setup);
@@ -1112,11 +1091,13 @@ pg_close(admin)
         format!(
             r#"
 import "std/postgres"
+fn main(harness: Harness) {{
 const db = harness.postgres.pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
 pg_execute(db, "SET search_path TO \"{schema}\"", [])
 const r = pg_migrate(db, {{dir: "{migration_dir}"}})
 harness.stdio.println("{label}:" + to_string(len(r.applied)))
 pg_close(db)
+}}
 "#,
         )
     };
@@ -1132,11 +1113,11 @@ pg_close(db)
         local
             .run_until(async {
                 let run_one = |src: String| async move {
-                    let chunk = compile_source(&src).expect("compile migrate src");
-                    let mut vm = Vm::new();
-                    register_vm_stdlib(&mut vm);
-                    vm.execute(&chunk).await.expect("execute migrate src");
-                    vm.output().trim().to_string()
+                    execute_harn_source(&src)
+                        .await
+                        .expect("execute migrate src")
+                        .trim()
+                        .to_string()
                 };
                 tokio::join!(run_one(src_a), run_one(src_b))
             })
@@ -1176,9 +1157,11 @@ pg_close(db)
     let cleanup = format!(
         r#"
 import "std/postgres"
+fn main(harness: Harness) {{
 const db = harness.postgres.pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
 pg_execute(db, "DROP SCHEMA IF EXISTS \"{schema}\" CASCADE", [])
 pg_close(db)
+}}
 "#,
     );
     run_harn_source(&cleanup);
@@ -1217,55 +1200,44 @@ fn sqlx_synthetic_migrations() -> (tempfile::TempDir, String) {
     (tmp, s)
 }
 
-fn run_harn_source(source: &str) -> String {
+async fn execute_harn_source(source: &str) -> Result<String, VmError> {
+    let chunk = compile_source(source).expect("compile source");
+    let mut vm = Vm::new();
+    register_vm_stdlib(&mut vm);
+    vm.set_harness(crate::Harness::real());
+    vm.execute(&chunk).await?;
+    Ok(vm.output().to_string())
+}
+
+fn run_harn_source_result(source: &str) -> Result<String, VmError> {
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .unwrap();
     rt.block_on(async {
         let local = tokio::task::LocalSet::new();
-        local
-            .run_until(async {
-                let chunk = compile_source(source).expect("compile source");
-                let mut vm = Vm::new();
-                register_vm_stdlib(&mut vm);
-                vm.execute(&chunk).await.expect("execute source");
-                vm.output().to_string()
-            })
-            .await
+        local.run_until(execute_harn_source(source)).await
     })
 }
 
+fn run_harn_source(source: &str) -> String {
+    run_harn_source_result(source).expect("execute source")
+}
+
 fn run_harn_source_expect_err(source: &str) -> String {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    rt.block_on(async {
-        let local = tokio::task::LocalSet::new();
-        local
-            .run_until(async {
-                let chunk = compile_source(source).expect("compile source");
-                let mut vm = Vm::new();
-                register_vm_stdlib(&mut vm);
-                let err = vm
-                    .execute(&chunk)
-                    .await
-                    .expect_err("expected source to error");
-                format!("{err:?}")
-            })
-            .await
-    })
+    format!(
+        "{:?}",
+        run_harn_source_result(source).expect_err("expected source to error")
+    )
 }
 
 /// SQLx ledger mode applies all forward files into `_sqlx_migrations`
 /// with the exact 6-column schema, 48-byte SHA-384 checksums, and
 /// `success = true`.
 #[test]
+#[ignore = "requires an isolated database; make test-postgres-live"]
 fn migrate_sqlx_applies_into_sqlx_migrations_table_when_env_url_is_set() {
-    if std::env::var("HARN_TEST_POSTGRES_URL").is_err() {
-        return;
-    }
+    live_postgres_url();
     reset_postgres_state();
     let (_tmp, dir) = sqlx_synthetic_migrations();
     let schema = format!("harn_pg_sqlx_{}", uuid::Uuid::new_v4().simple());
@@ -1273,6 +1245,7 @@ fn migrate_sqlx_applies_into_sqlx_migrations_table_when_env_url_is_set() {
         r#"
 import "std/postgres"
 
+fn main(harness: Harness) {{
 const admin = harness.postgres.pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
 pg_execute(admin, "DROP SCHEMA IF EXISTS \"{schema}\" CASCADE", [])
 pg_execute(admin, "CREATE SCHEMA \"{schema}\"", [])
@@ -1303,6 +1276,7 @@ harness.stdio.println(len(versions))
 
 pg_execute(db, "DROP SCHEMA \"{schema}\" CASCADE", [])
 pg_close(db)
+}}
 "#,
     );
     let out = run_harn_source(&source);
@@ -1319,10 +1293,9 @@ pg_close(db)
 /// SQLx ledger mode is idempotent: a second run applies 0, skips all,
 /// and leaves the row count unchanged.
 #[test]
+#[ignore = "requires an isolated database; make test-postgres-live"]
 fn migrate_sqlx_is_idempotent_when_env_url_is_set() {
-    if std::env::var("HARN_TEST_POSTGRES_URL").is_err() {
-        return;
-    }
+    live_postgres_url();
     reset_postgres_state();
     let (_tmp, dir) = sqlx_synthetic_migrations();
     let schema = format!("harn_pg_sqlxidem_{}", uuid::Uuid::new_v4().simple());
@@ -1330,6 +1303,7 @@ fn migrate_sqlx_is_idempotent_when_env_url_is_set() {
         r#"
 import "std/postgres"
 
+fn main(harness: Harness) {{
 const admin = harness.postgres.pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
 pg_execute(admin, "DROP SCHEMA IF EXISTS \"{schema}\" CASCADE", [])
 pg_execute(admin, "CREATE SCHEMA \"{schema}\"", [])
@@ -1354,6 +1328,7 @@ harness.stdio.println(count2.c)
 
 pg_execute(db, "DROP SCHEMA \"{schema}\" CASCADE", [])
 pg_close(db)
+}}
 "#,
     );
     let out = run_harn_source(&source);
@@ -1373,10 +1348,9 @@ pg_close(db)
 /// have written — then run `pg_migrate(ledger: "sqlx")`. It must apply
 /// 0 and the checksums stay byte-identical.
 #[test]
+#[ignore = "requires an isolated database; make test-postgres-live"]
 fn migrate_sqlx_no_fork_against_preseeded_ledger_when_env_url_is_set() {
-    if std::env::var("HARN_TEST_POSTGRES_URL").is_err() {
-        return;
-    }
+    live_postgres_url();
     reset_postgres_state();
     let (_tmp, dir) = sqlx_synthetic_migrations();
 
@@ -1398,6 +1372,7 @@ fn migrate_sqlx_no_fork_against_preseeded_ledger_when_env_url_is_set() {
         r#"
 import "std/postgres"
 
+fn main(harness: Harness) {{
 const admin = harness.postgres.pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
 pg_execute(admin, "DROP SCHEMA IF EXISTS \"{schema}\" CASCADE", [])
 pg_execute(admin, "CREATE SCHEMA \"{schema}\"", [])
@@ -1431,6 +1406,7 @@ harness.stdio.println(count.c)
 
 pg_execute(db, "DROP SCHEMA \"{schema}\" CASCADE", [])
 pg_close(db)
+}}
 "#,
     );
     let out = run_harn_source(&source);
@@ -1445,10 +1421,9 @@ pg_close(db)
 /// Checksum-mismatch detection: corrupt one recorded checksum then run;
 /// the runner must error and name the offending version.
 #[test]
+#[ignore = "requires an isolated database; make test-postgres-live"]
 fn migrate_sqlx_detects_checksum_mismatch_when_env_url_is_set() {
-    if std::env::var("HARN_TEST_POSTGRES_URL").is_err() {
-        return;
-    }
+    live_postgres_url();
     reset_postgres_state();
     let (_tmp, dir) = sqlx_synthetic_migrations();
     let schema = format!("harn_pg_sqlxmismatch_{}", uuid::Uuid::new_v4().simple());
@@ -1456,6 +1431,7 @@ fn migrate_sqlx_detects_checksum_mismatch_when_env_url_is_set() {
         r#"
 import "std/postgres"
 
+fn main(harness: Harness) {{
 const admin = harness.postgres.pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
 pg_execute(admin, "DROP SCHEMA IF EXISTS \"{schema}\" CASCADE", [])
 pg_execute(admin, "CREATE SCHEMA \"{schema}\"", [])
@@ -1475,6 +1451,7 @@ harness.stdio.println(len(second.applied))
 
 pg_execute(db, "DROP SCHEMA \"{schema}\" CASCADE", [])
 pg_close(db)
+}}
 "#,
     );
     let err = run_harn_source_expect_err(&source);
@@ -1486,10 +1463,9 @@ pg_close(db)
 
 /// Dirty-ledger detection: a `success = false` row blocks the run.
 #[test]
+#[ignore = "requires an isolated database; make test-postgres-live"]
 fn migrate_sqlx_detects_dirty_ledger_when_env_url_is_set() {
-    if std::env::var("HARN_TEST_POSTGRES_URL").is_err() {
-        return;
-    }
+    live_postgres_url();
     reset_postgres_state();
     let (_tmp, dir) = sqlx_synthetic_migrations();
     let schema = format!("harn_pg_sqlxdirty_{}", uuid::Uuid::new_v4().simple());
@@ -1497,6 +1473,7 @@ fn migrate_sqlx_detects_dirty_ledger_when_env_url_is_set() {
         r#"
 import "std/postgres"
 
+fn main(harness: Harness) {{
 const admin = harness.postgres.pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
 pg_execute(admin, "DROP SCHEMA IF EXISTS \"{schema}\" CASCADE", [])
 pg_execute(admin, "CREATE SCHEMA \"{schema}\"", [])
@@ -1513,6 +1490,7 @@ harness.stdio.println(len(result.applied))
 
 pg_execute(db, "DROP SCHEMA \"{schema}\" CASCADE", [])
 pg_close(db)
+}}
 "#,
     );
     let err = run_harn_source_expect_err(&source);
@@ -1528,22 +1506,17 @@ pg_close(db)
 /// retire-`migrations.rs` acceptance test. Opt-in via
 /// `HARN_TEST_CLOUD_MIGRATIONS_DIR`.
 #[test]
+#[ignore = "requires database and cloud migrations; make test-postgres-cloud"]
 fn migrate_sqlx_applies_real_cloud_dir_and_is_idempotent_when_env_set() {
-    if std::env::var("HARN_TEST_POSTGRES_URL").is_err() {
-        return;
-    }
-    let Ok(dir) = std::env::var("HARN_TEST_CLOUD_MIGRATIONS_DIR") else {
-        return;
-    };
-    if !std::path::Path::new(&dir).exists() {
-        return;
-    }
+    live_postgres_url();
+    let dir = cloud_migrations_dir();
     reset_postgres_state();
     let schema = format!("harn_pg_sqlxcloud_{}", uuid::Uuid::new_v4().simple());
     let source = format!(
         r#"
 import "std/postgres"
 
+fn main(harness: Harness) {{
 const admin = harness.postgres.pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 1}})
 pg_execute(admin, "DROP SCHEMA IF EXISTS \"{schema}\" CASCADE", [])
 pg_execute(admin, "CREATE SCHEMA \"{schema}\"", [])
@@ -1568,6 +1541,7 @@ harness.stdio.println(len(second.skipped))
 
 pg_execute(db, "DROP SCHEMA \"{schema}\" CASCADE", [])
 pg_close(db)
+}}
 "#,
     );
     let out = run_harn_source(&source);
@@ -1594,40 +1568,23 @@ pg_close(db)
 /// synthetic `Instant` path is covered by
 /// `execute_result_value_includes_duration`.
 #[test]
+#[ignore = "requires an isolated database; make test-postgres-live"]
 fn execute_reports_duration_ms_on_real_pool_when_env_url_is_set() {
-    if std::env::var("HARN_TEST_POSTGRES_URL").is_err() {
-        return;
-    }
+    live_postgres_url();
     reset_postgres_state();
     let source = r#"
 import "std/postgres"
 
+fn main(harness: Harness) {
 const db = harness.postgres.pool("env:HARN_TEST_POSTGRES_URL", {max_connections: 1})
 const result = pg_execute(db, "SELECT pg_sleep(0.05)", [])
 harness.stdio.println(result.duration_ms)
 pg_close(db)
+}
 "#;
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    rt.block_on(async {
-        let local = tokio::task::LocalSet::new();
-        local
-            .run_until(async {
-                let chunk = compile_source(source).expect("compile duration source");
-                let mut vm = Vm::new();
-                register_vm_stdlib(&mut vm);
-                vm.execute(&chunk).await.expect("execute duration source");
-                let duration_ms: i64 = vm
-                    .output()
-                    .trim()
-                    .parse()
-                    .unwrap_or_else(|_| panic!("expected int, got `{}`", vm.output()));
-                assert!(duration_ms >= 50, "expected ≥50ms, got {duration_ms}");
-            })
-            .await;
-    });
+    let output = run_harn_source(source);
+    let duration_ms: i64 = output.trim().parse().expect("integer duration");
+    assert!(duration_ms >= 50, "expected ≥50ms, got {duration_ms}");
 }
 
 /// End-to-end smoke for the v2 surface against a real Postgres:
@@ -1636,16 +1593,16 @@ pg_close(db)
 /// `int[]` column round-trips through the array decoder, and
 /// LISTEN/NOTIFY delivers the payload back through pg_listener_recv.
 #[test]
+#[ignore = "requires an isolated database; make test-postgres-live"]
 fn v2_surface_smoke_when_env_url_is_set() {
-    if std::env::var("HARN_TEST_POSTGRES_URL").is_err() {
-        return;
-    }
+    live_postgres_url();
     reset_postgres_state();
     let schema = format!("harn_pg_v2_{}", uuid::Uuid::new_v4().simple());
     let source = format!(
         r#"
 import "std/postgres"
 
+fn main(harness: Harness) {{
 const db = harness.postgres.pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 2}})
 
 // --- Pool observability --------------------------------------------------
@@ -1662,15 +1619,14 @@ harness.stdio.println(clear_result.connections_skipped)
 
 // --- Schema setup --------------------------------------------------------
 pg_execute(db, "CREATE SCHEMA IF NOT EXISTS \"{schema}\"", [])
-pg_execute(db, "SET search_path TO \"{schema}\"", [])
-pg_execute(db, "CREATE TABLE widgets (id int4 PRIMARY KEY, tags text[] NOT NULL DEFAULT '{{}}')", [])
-pg_execute(db, "CREATE UNIQUE INDEX widgets_id_uniq ON widgets (id)", [])
-pg_execute(db, "INSERT INTO widgets (id, tags) VALUES (1, ARRAY['alpha','beta'])", [])
-pg_execute(db, "INSERT INTO widgets (id, tags) VALUES (2, ARRAY[]::text[])", [])
+pg_execute(db, "CREATE TABLE \"{schema}\".widgets (id int4 PRIMARY KEY, tags text[] NOT NULL DEFAULT '{{}}')", [])
+pg_execute(db, "CREATE UNIQUE INDEX widgets_id_uniq ON \"{schema}\".widgets (id)", [])
+pg_execute(db, "INSERT INTO \"{schema}\".widgets (id, tags) VALUES (1, ARRAY['alpha','beta'])", [])
+pg_execute(db, "INSERT INTO \"{schema}\".widgets (id, tags) VALUES (2, ARRAY[]::text[])", [])
 
 // --- Advisory lock inside a transaction ----------------------------------
 const locked_label = pg_transaction(db, {{ tx ->
-  pg_advisory_xact_lock(tx, 0x4861_726E_5632_AABB)
+  pg_advisory_xact_lock(tx, 5215575661689875131)
   return pg_query_one(tx, "SELECT 'locked' AS label", []).label
 }})
 harness.stdio.println(locked_label)
@@ -1695,10 +1651,10 @@ const idx = pg_introspect_indexes(db, "{schema}.widgets")
 harness.stdio.println(len(idx))
 
 // --- Array decoding ------------------------------------------------------
-const row = pg_query_one(db, "SELECT tags FROM widgets WHERE id = $1", [1])
+const row = pg_query_one(db, "SELECT tags FROM \"{schema}\".widgets WHERE id = $1", [1])
 harness.stdio.println(row.tags[0] + "," + row.tags[1])
 
-const empty = pg_query_one(db, "SELECT tags FROM widgets WHERE id = $1", [2])
+const empty = pg_query_one(db, "SELECT tags FROM \"{schema}\".widgets WHERE id = $1", [2])
 harness.stdio.println(len(empty.tags))
 
 // --- LISTEN/NOTIFY round-trip --------------------------------------------
@@ -1711,66 +1667,54 @@ pg_listener_close(listener)
 // --- Teardown ------------------------------------------------------------
 pg_execute(db, "DROP SCHEMA \"{schema}\" CASCADE", [])
 pg_close(db)
+}}
 "#,
     );
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    rt.block_on(async {
-        let local = tokio::task::LocalSet::new();
-        local
-            .run_until(async {
-                let chunk = compile_source(&source).expect("compile v2 smoke source");
-                let mut vm = Vm::new();
-                register_vm_stdlib(&mut vm);
-                vm.execute(&chunk).await.expect("execute v2 smoke source");
-                let lines: Vec<&str> = vm.output().lines().collect();
-                // Expected (in order):
-                //   disabled            // circuit_state
-                //   2                   // max_connections
-                //   replica_or_primary  // read_routing_policy
-                //   0                   // replicas
-                //   1                   // primary pool cache clear
-                //   true                // at least one idle connection cleared
-                //   0                   // no checked-out connections skipped
-                //   locked              // pg_advisory_xact_lock path label
-                //   raii                // pg_with_advisory_lock path label
-                //   1                   // tables in schema
-                //   table               // kind
-                //   2                   // columns count
-                //   id:int4             // column 0 type
-                //   tags:_text          // column 1 type (PG type is _text)
-                //   2                   // PK + explicit UNIQUE indexes
-                //   alpha,beta          // array decoding
-                //   0                   // empty array length
-                //   harn_v2_test:hello  // notification
-                assert_eq!(lines[0], "disabled");
-                assert_eq!(lines[1], "2");
-                assert_eq!(lines[2], "replica_or_primary");
-                assert_eq!(lines[3], "0");
-                assert_eq!(lines[4], "1");
-                assert_eq!(lines[5], "true");
-                assert_eq!(lines[6], "0");
-                assert_eq!(lines[7], "locked");
-                assert_eq!(lines[8], "raii");
-                assert_eq!(lines[9], "1");
-                assert_eq!(lines[10], "table");
-                assert_eq!(lines[11], "2");
-                assert_eq!(lines[12], "id:int4");
-                assert!(
-                    lines[13] == "tags:_text" || lines[13] == "tags:text[]",
-                    "tags column type unexpected: {}",
-                    lines[13]
-                );
-                // PK index + the explicit UNIQUE = 2 indexes
-                assert_eq!(lines[14], "2");
-                assert_eq!(lines[15], "alpha,beta");
-                assert_eq!(lines[16], "0");
-                assert_eq!(lines[17], "harn_v2_test:hello");
-            })
-            .await;
-    });
+    let output = run_harn_source(&source);
+    let lines: Vec<&str> = output.lines().collect();
+    assert_eq!(lines.len(), 18, "unexpected smoke output: {output}");
+    // Expected (in order):
+    //   disabled            // circuit_state
+    //   2                   // max_connections
+    //   replica_or_primary  // read_routing_policy
+    //   0                   // replicas
+    //   1                   // primary pool cache clear
+    //   true                // at least one idle connection cleared
+    //   0                   // no checked-out connections skipped
+    //   locked              // pg_advisory_xact_lock path label
+    //   raii                // pg_with_advisory_lock path label
+    //   1                   // tables in schema
+    //   table               // kind
+    //   2                   // columns count
+    //   id:int4             // column 0 type
+    //   tags:_text          // column 1 type (PG type is _text)
+    //   2                   // PK + explicit UNIQUE indexes
+    //   alpha,beta          // array decoding
+    //   0                   // empty array length
+    //   harn_v2_test:hello  // notification
+    assert_eq!(lines[0], "disabled");
+    assert_eq!(lines[1], "2");
+    assert_eq!(lines[2], "replica_or_primary");
+    assert_eq!(lines[3], "0");
+    assert_eq!(lines[4], "1");
+    assert_eq!(lines[5], "true");
+    assert_eq!(lines[6], "0");
+    assert_eq!(lines[7], "locked");
+    assert_eq!(lines[8], "raii");
+    assert_eq!(lines[9], "1");
+    assert_eq!(lines[10], "table");
+    assert_eq!(lines[11], "2");
+    assert_eq!(lines[12], "id:int4");
+    assert!(
+        lines[13] == "tags:_text" || lines[13] == "tags:text[]",
+        "tags column type unexpected: {}",
+        lines[13]
+    );
+    // PK index + the explicit UNIQUE = 2 indexes
+    assert_eq!(lines[14], "2");
+    assert_eq!(lines[15], "alpha,beta");
+    assert_eq!(lines[16], "0");
+    assert_eq!(lines[17], "harn_v2_test:hello");
 }
 
 /// Advisory locks must isolate distinct tenants when
@@ -1844,10 +1788,9 @@ fn non_finite_float_guard_catches_direct_and_nested() {
 /// guard's error rather than corrupting a `float8` column or emitting
 /// invalid JSON on the jsonb path. Gated on `HARN_TEST_POSTGRES_URL`.
 #[tokio::test(flavor = "current_thread")]
+#[ignore = "requires an isolated database; make test-postgres-live"]
 async fn non_finite_float_bind_errors_cleanly_when_env_url_is_set() {
-    let Ok(url) = std::env::var("HARN_TEST_POSTGRES_URL") else {
-        return;
-    };
+    let url = live_postgres_url();
     reset_postgres_state();
     let handle = open_single_conn_pool(&url).await;
 
@@ -1910,10 +1853,9 @@ fn one_cell(rows: Vec<VmValue>, key: &str) -> VmValue {
 /// instead of failing with `column is of type integer but expression is of
 /// type text` (the `None::<String>` failure mode).
 #[tokio::test(flavor = "current_thread")]
+#[ignore = "requires an isolated database; make test-postgres-live"]
 async fn nil_into_typed_columns_stores_sql_null_when_env_url_is_set() {
-    let Ok(url) = std::env::var("HARN_TEST_POSTGRES_URL") else {
-        return;
-    };
+    let url = live_postgres_url();
     reset_postgres_state();
     let handle = open_single_conn_pool(&url).await;
 
@@ -1976,10 +1918,9 @@ async fn nil_into_typed_columns_stores_sql_null_when_env_url_is_set() {
 /// prepared-statement cache, so the second call failed with
 /// `invalid byte sequence for encoding "UTF8": 0x00`.
 #[tokio::test(flavor = "current_thread")]
+#[ignore = "requires an isolated database; make test-postgres-live"]
 async fn nil_then_non_null_same_sql_does_not_poison_cache_when_env_url_is_set() {
-    let Ok(url) = std::env::var("HARN_TEST_POSTGRES_URL") else {
-        return;
-    };
+    let url = live_postgres_url();
     reset_postgres_state();
     let handle = open_single_conn_pool(&url).await;
 
@@ -2024,10 +1965,9 @@ async fn nil_then_non_null_same_sql_does_not_poison_cache_when_env_url_is_set() 
 /// sibling params keep their binary encodings while the nils declare the
 /// described OID.
 #[tokio::test(flavor = "current_thread")]
+#[ignore = "requires an isolated database; make test-postgres-live"]
 async fn mixed_nil_and_non_null_params_when_env_url_is_set() {
-    let Ok(url) = std::env::var("HARN_TEST_POSTGRES_URL") else {
-        return;
-    };
+    let url = live_postgres_url();
     reset_postgres_state();
     let handle = open_single_conn_pool(&url).await;
 
@@ -2128,10 +2068,9 @@ async fn mixed_nil_and_non_null_params_when_env_url_is_set() {
 /// the slot to `text`; the described OID is therefore `text` and the NULL
 /// round-trips as SQL NULL (documented expected behavior).
 #[tokio::test(flavor = "current_thread")]
+#[ignore = "requires an isolated database; make test-postgres-live"]
 async fn ambiguous_bare_select_nil_when_env_url_is_set() {
-    let Ok(url) = std::env::var("HARN_TEST_POSTGRES_URL") else {
-        return;
-    };
+    let url = live_postgres_url();
     reset_postgres_state();
     let handle = open_single_conn_pool(&url).await;
 
@@ -2157,10 +2096,9 @@ async fn ambiguous_bare_select_nil_when_env_url_is_set() {
 /// `text` NULL — `text IS NULL` → `true`. Before the fix this query failed
 /// outright even though the pre-describe-then-bind behavior worked.
 #[tokio::test(flavor = "current_thread")]
+#[ignore = "requires an isolated database; make test-postgres-live"]
 async fn pool_describe_probe_failure_falls_back_to_text_null_when_env_url_is_set() {
-    let Ok(url) = std::env::var("HARN_TEST_POSTGRES_URL") else {
-        return;
-    };
+    let url = live_postgres_url();
     reset_postgres_state();
     let handle = open_single_conn_pool(&url).await;
 
@@ -2207,14 +2145,14 @@ async fn pool_describe_probe_failure_falls_back_to_text_null_when_env_url_is_set
 /// usable: the ambiguous nil query succeeds via the text fallback, AND a
 /// subsequent write + commit in the SAME tx lands durably.
 #[test]
+#[ignore = "requires an isolated database; make test-postgres-live"]
 fn tx_describe_probe_failure_keeps_tx_alive_when_env_url_is_set() {
-    if std::env::var("HARN_TEST_POSTGRES_URL").is_err() {
-        return;
-    }
+    live_postgres_url();
     reset_postgres_state();
     let source = r#"
 import "std/postgres"
 
+fn main(harness: Harness) {
 const db = harness.postgres.pool("env:HARN_TEST_POSTGRES_URL", {max_connections: 1})
 pg_execute(db, "DROP TABLE IF EXISTS harn_pg_tx_probe", [])
 pg_execute(db, "CREATE TABLE harn_pg_tx_probe (id int PRIMARY KEY, note text)", [])
@@ -2235,23 +2173,9 @@ const row = pg_query_one(db, "SELECT note FROM harn_pg_tx_probe WHERE id = 1", [
 harness.stdio.println(row.note)
 pg_execute(db, "DROP TABLE harn_pg_tx_probe", [])
 pg_close(db)
+}
 "#;
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    rt.block_on(async {
-        let local = tokio::task::LocalSet::new();
-        local
-            .run_until(async {
-                let chunk = compile_source(source).expect("compile tx probe source");
-                let mut vm = Vm::new();
-                register_vm_stdlib(&mut vm);
-                vm.execute(&chunk).await.expect("execute tx probe source");
-                assert_eq!(vm.output().trim(), "true\nafter-probe");
-            })
-            .await;
-    });
+    assert_eq!(run_harn_source(source).trim(), "true\nafter-probe");
 }
 
 /// Perf path: an all-non-null query still works and reuses the per-connection
@@ -2261,10 +2185,9 @@ pg_close(db)
 /// stay correct. Also asserts a nil-containing run of the SAME SQL afterward
 /// still works (the describe path repairs/uses the same cache entry).
 #[tokio::test(flavor = "current_thread")]
+#[ignore = "requires an isolated database; make test-postgres-live"]
 async fn all_non_null_uses_cache_and_interops_with_nil_when_env_url_is_set() {
-    let Ok(url) = std::env::var("HARN_TEST_POSTGRES_URL") else {
-        return;
-    };
+    let url = live_postgres_url();
     reset_postgres_state();
     let handle = open_single_conn_pool(&url).await;
 
@@ -2309,14 +2232,14 @@ async fn all_non_null_uses_cache_and_interops_with_nil_when_env_url_is_set() {
 /// detached pool connection) must store SQL NULL and coexist with non-null
 /// binds in the same transaction.
 #[test]
+#[ignore = "requires an isolated database; make test-postgres-live"]
 fn nil_in_transaction_when_env_url_is_set() {
-    if std::env::var("HARN_TEST_POSTGRES_URL").is_err() {
-        return;
-    }
+    live_postgres_url();
     reset_postgres_state();
     let source = r#"
 import "std/postgres"
 
+fn main(harness: Harness) {
 const db = harness.postgres.pool("env:HARN_TEST_POSTGRES_URL", {max_connections: 1})
 pg_execute(db, "DROP TABLE IF EXISTS harn_pg_tx_nil", [])
 pg_execute(db, "CREATE TABLE harn_pg_tx_nil (id int PRIMARY KEY, a int, b text)", [])
@@ -2333,23 +2256,9 @@ const r2 = pg_query_one(db, "SELECT a, (b IS NULL) AS b_null FROM harn_pg_tx_nil
 harness.stdio.println(to_string(r2.a) + ":" + to_string(r2.b_null))
 pg_execute(db, "DROP TABLE harn_pg_tx_nil", [])
 pg_close(db)
+}
 "#;
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    rt.block_on(async {
-        let local = tokio::task::LocalSet::new();
-        local
-            .run_until(async {
-                let chunk = compile_source(source).expect("compile tx nil source");
-                let mut vm = Vm::new();
-                register_vm_stdlib(&mut vm);
-                vm.execute(&chunk).await.expect("execute tx nil source");
-                assert_eq!(vm.output().trim(), "true:x\n7:true");
-            })
-            .await;
-    });
+    assert_eq!(run_harn_source(source).trim(), "true:x\n7:true");
 }
 
 /// Performant describe-then-bind: the server describe for a given SQL runs
@@ -2358,10 +2267,9 @@ pg_close(db)
 /// nil-query of the SAME SQL is a cache hit and performs **no** further
 /// describe. Asserted via the `cfg(test)` [`DESCRIBE_ROUND_TRIPS`] counter.
 #[tokio::test(flavor = "current_thread")]
+#[ignore = "requires an isolated database; make test-postgres-live"]
 async fn nil_query_describes_once_and_caches_oids_when_env_url_is_set() {
-    let Ok(url) = std::env::var("HARN_TEST_POSTGRES_URL") else {
-        return;
-    };
+    let url = live_postgres_url();
     reset_postgres_state();
     reset_describe_round_trips();
     let handle = open_single_conn_pool(&url).await;
@@ -2422,13 +2330,10 @@ async fn nil_query_describes_once_and_caches_oids_when_env_url_is_set() {
 /// plain fast path) on the same pool. Gated behind `HARN_PG_NIL_BENCH=1` (in
 /// addition to `HARN_TEST_POSTGRES_URL`) so it does not run in normal CI.
 #[tokio::test(flavor = "current_thread")]
+#[ignore = "requires isolated database and HARN_PG_NIL_BENCH=1"]
 async fn nil_path_p99_within_budget_of_plain_path_when_bench_enabled() {
-    let Ok(url) = std::env::var("HARN_TEST_POSTGRES_URL") else {
-        return;
-    };
-    if std::env::var("HARN_PG_NIL_BENCH").as_deref() != Ok("1") {
-        return;
-    }
+    let url = live_postgres_url();
+    assert_eq!(std::env::var("HARN_PG_NIL_BENCH").as_deref(), Ok("1"));
     reset_postgres_state();
     let handle = open_single_conn_pool(&url).await;
 
