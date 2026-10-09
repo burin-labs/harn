@@ -56,7 +56,7 @@ pub(super) struct PoolHandle {
 
 pub(super) struct TxHandle {
     cell: Mutex<Option<Transaction<'static, Postgres>>>,
-    described_oids: SyncMutex<BTreeMap<String, Arc<Vec<PgTypeInfo>>>>,
+    parameter_cache: parameter_cache::TransactionParameterCache,
 }
 
 #[derive(Clone)]
@@ -200,6 +200,7 @@ mod introspect;
 mod jsonb;
 mod listen;
 mod migrate;
+mod parameter_cache;
 mod shared;
 
 pub use shared::install_shared_pool_registry;
@@ -514,7 +515,7 @@ pub(super) async fn run_managed_transaction(
         .map_err(|error| runtime_error(format!("{builtin}: begin failed: {error}")))?;
     let tx_state = Arc::new(TxHandle {
         cell: Mutex::new(Some(tx)),
-        described_oids: SyncMutex::new(BTreeMap::new()),
+        parameter_cache: parameter_cache::TransactionParameterCache::new(&pool.described_oids),
     });
     let tx_value = VmValue::resource(VmResourceHandle::from_arc(HANDLE_TX, Arc::clone(&tx_state)));
 
@@ -882,13 +883,12 @@ pub(super) async fn query_rows(
             let tx = tx
                 .as_mut()
                 .ok_or_else(|| runtime_error("pg_query: transaction is closed"))?;
+            let initial_cache = tx_state.parameter_cache.begin_statement();
             let rows = if params_have_nil(params) {
-                // describe-then-bind: learn the server-inferred parameter OIDs
-                // on the tx connection (cached per SQL), then bind typed NULLs
-                // for the nils.
-                let oids =
-                    described_param_oids(&tx_state.described_oids, tx, sql, "pg_query", true)
-                        .await?;
+                let oids = tx_state
+                    .parameter_cache
+                    .describe(initial_cache, tx, sql, "pg_query")
+                    .await?;
                 bind_params_described(sql, &oids, params)?
                     .fetch_all(&mut **tx)
                     .await
@@ -958,12 +958,12 @@ pub(super) async fn execute_stmt(
         let tx = tx
             .as_mut()
             .ok_or_else(|| runtime_error("pg_execute: transaction is closed"))?;
+        let initial_cache = tx_state.parameter_cache.begin_statement();
         let result = if params_have_nil(params) {
-            // describe-then-bind: learn the server-inferred parameter OIDs on
-            // the tx connection (cached per SQL), then bind typed NULLs for the
-            // nils.
-            let oids =
-                described_param_oids(&tx_state.described_oids, tx, sql, "pg_execute", true).await?;
+            let oids = tx_state
+                .parameter_cache
+                .describe(initial_cache, tx, sql, "pg_execute")
+                .await?;
             bind_params_described(sql, &oids, params)?
                 .execute(&mut **tx)
                 .await
@@ -1349,34 +1349,13 @@ fn bind_params_described<'q>(
     Ok(query)
 }
 
-/// Server-described per-slot parameter OIDs for `sql`, looked up from the
-/// owning pool or transaction authority's cache and computed on a miss.
+/// Look up server-inferred parameter types, describing on a miss. Cache scope
+/// belongs to the caller: pool SQL must retain a stable schema context, while
+/// transactions isolate metadata after their first caller statement.
+/// Migrations clear pool metadata when column types change.
 ///
-/// The described OID list is a pure function of the SQL *structure* (Postgres
-/// infers each `$n` from casts/target columns/operators, not from the runtime
-/// param values), so it is stable per SQL string and never needs invalidation:
-///
-///   * **HIT** — return the cached `Arc<Vec<PgTypeInfo>>` with **no** describe
-///     round-trip and **no** statement-cache clear. The caller then binds the
-///     nils with these OIDs and executes via the *normal* path, which Parses its
-///     own self-consistent type list and caches it under `sql` like any plain
-///     query. After warmup, a nil-query therefore costs exactly the same
-///     round-trips as a plain bind.
-///   * **MISS** — perform a single describe via
-///     [`describe_param_oids_uncached`] (one prepare + one cache clear), store
-///     the result, and return it.
-///
-/// Schema changes that would alter a slot's inferred type are extremely rare and
-/// are already handled by the execute path: Postgres raises `cached plan must
-/// not change result type` / re-parse on its own, and sqlx surfaces it as a
-/// query error — the cached OIDs only seed the NULL *declaration*, they do not
-/// pin server-side plans.
-///
-/// `in_transaction` tells the describe probe whether `conn` is currently inside
-/// a caller-owned transaction (the `HANDLE_TX` paths pass `true`; the
-/// autocommit pool path passes `false`). It controls whether the probe wraps its
-/// `prepare_with` in a `SAVEPOINT` so a failed probe cannot abort the caller's
-/// transaction — see [`describe_param_oids_uncached`].
+/// Transaction probes use a savepoint so an unsuccessful describe cannot abort
+/// the caller's transaction. Cache hits skip both the probe and savepoint.
 async fn described_param_oids(
     cache: &SyncMutex<BTreeMap<String, Arc<Vec<PgTypeInfo>>>>,
     conn: &mut sqlx_postgres::PgConnection,
