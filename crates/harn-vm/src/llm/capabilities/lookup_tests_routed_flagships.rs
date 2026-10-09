@@ -109,17 +109,15 @@ fn refreshed_rows_ship_and_uncatalogued_neighbours_do_not() {
         ("qwen/qwen3.8-max-0902", "openrouter"),
         ("deepinfra/Qwen/Qwen3.8-Max", "deepinfra"),
         ("deepinfra/MiniMaxAI/MiniMax-M3", "deepinfra"),
+        // #9023 asked for GLM 5.3 Prime as an OpenRouter-only row.
+        ("z-ai/glm-5.3-prime", "openrouter"),
     ] {
         let entry = llm_config::model_catalog_entry(id).expect("refreshed row ships");
         assert_eq!(entry.provider, provider, "{id}");
         assert!(!entry.deprecated, "{id}");
     }
     // Real slugs the providers list that were deliberately not catalogued.
-    for id in [
-        "qwen/qwen3.8-max-prime",
-        "z-ai/glm-5.3-prime",
-        "deepinfra/Qwen/Qwen3.8-Flash",
-    ] {
+    for id in ["qwen/qwen3.8-max-prime", "deepinfra/Qwen/Qwen3.8-Flash"] {
         assert!(llm_config::model_catalog_entry(id).is_none(), "{id}");
     }
 }
@@ -142,7 +140,11 @@ fn retired_routes_point_at_live_successors_and_defaults_leave_them() {
             None,
             "deepinfra/MiniMaxAI/MiniMax-M3",
         ),
-        ("sambanova/MiniMax-M2.7", None, "sambanova/MiniMax-M3"),
+        (
+            "sambanova/MiniMax-M2.7",
+            Some("2026-10-01"),
+            "sambanova/MiniMax-M3",
+        ),
     ] {
         let entry = llm_config::model_catalog_entry(id).expect("retired row stays listed");
         assert!(entry.deprecated, "{id}");
