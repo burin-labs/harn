@@ -2,7 +2,21 @@ use super::*;
 
 #[test]
 #[ignore = "requires an isolated database; make test-postgres-live"]
-fn transaction_context_changes_refresh_types_without_warm_probes_when_env_url_is_set() {
+fn identical_sql_can_change_its_own_parameter_context_when_env_url_is_set() {
+    live_postgres_url();
+    reset_postgres_state();
+    reset_describe_round_trips();
+    assert_eq!(
+        run_harn_source(include_str!("fixtures/transaction_self_context.harn")).trim(),
+        "same SQL changed its own context: committed"
+    );
+    assert_eq!(describe_round_trips(), 3);
+    assert_eq!(describe_savepoint_round_trips(), 6);
+}
+
+#[test]
+#[ignore = "requires an isolated database; make test-postgres-live"]
+fn transaction_context_changes_refresh_types_when_env_url_is_set() {
     live_postgres_url();
     for (first, second) in [("integer", "uuid"), ("uuid", "integer")] {
         let _direction = crate::llm::test_env::ScopedEnvVar::set("HARN_EXT_FIRST_TYPE", first);
@@ -15,13 +29,13 @@ fn transaction_context_changes_refresh_types_without_warm_probes_when_env_url_is
         );
         assert_eq!(
             describe_round_trips(),
-            4,
-            "describe only cold contexts; repeated SQL and known original context stay warm"
+            9,
+            "first transaction describes six calls; the next retains only its known first-call hit"
         );
         assert_eq!(
             describe_savepoint_round_trips(),
-            8,
-            "each cold context has one real probe savepoint/release pair; warm calls add none"
+            18,
+            "each fresh inference has one real probe savepoint/release pair"
         );
     }
 }
@@ -78,7 +92,7 @@ fn main(harness: Harness) {
     pg_transaction(db, { tx ->
       assert(pg_query_one(tx, known, [nil]).v == nil)
       assert(pg_query_one(tx, learned, [nil]).v == nil)
-      // Execute and query share metadata, including failed-probe fallback.
+      // Execute and query both refresh metadata and recover ambiguous probes.
       pg_execute(tx, learned, [nil])
       assert(pg_query_one(tx, ambiguous, [nil]).v)
       pg_execute(tx, ambiguous, [nil])
@@ -105,9 +119,10 @@ fn main(harness: Harness) {
     assert_eq!(run_harn_source(source).trim(), "reused");
     assert_eq!(
         describe_round_trips(),
-        9,
-        "only first statements share pool types; later SQL stays transaction-local"
+        15,
+        "only first statements share pool types; every later nil statement infers afresh"
     );
+    assert_eq!(describe_savepoint_round_trips(), 26);
 }
 
 #[test]

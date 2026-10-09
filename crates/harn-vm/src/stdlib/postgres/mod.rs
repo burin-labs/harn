@@ -74,48 +74,11 @@ struct MockPool {
     calls: Vec<VmValue>,
 }
 
-// Counts how many times an *uncached* server describe round-trip is performed.
-// Used by tests to assert that a repeated nil-query of the same SQL hits the OID
-// cache and does **not** re-describe. Lives behind `cfg(test)` so it has zero
-// cost in release builds.
-//
-// Thread-local (not a process-global atomic): cargo runs the postgres tests in
-// parallel against one live database, and several of them perform describes. A
-// process-global counter would race — one test's describe would inflate
-// another's absolute count. A per-thread counter, combined with the
-// `current_thread` runtime the counting test uses, isolates each test's own
-// describe count so the assertions are deterministic.
 #[cfg(test)]
-thread_local! {
-    static DESCRIBE_ROUND_TRIPS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
-    static DESCRIBE_SAVEPOINT_ROUND_TRIPS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
-}
-
-#[cfg(test)]
-fn describe_round_trips() -> u64 {
-    DESCRIBE_ROUND_TRIPS.with(std::cell::Cell::get)
-}
-
-#[cfg(test)]
-fn reset_describe_round_trips() {
-    DESCRIBE_ROUND_TRIPS.with(|c| c.set(0));
-    DESCRIBE_SAVEPOINT_ROUND_TRIPS.with(|c| c.set(0));
-}
-
-#[cfg(test)]
-fn describe_savepoint_round_trips() -> u64 {
-    DESCRIBE_SAVEPOINT_ROUND_TRIPS.with(std::cell::Cell::get)
-}
-
-#[cfg(test)]
-fn bump_describe_savepoint_round_trips() {
-    DESCRIBE_SAVEPOINT_ROUND_TRIPS.with(|c| c.set(c.get() + 1));
-}
-
-#[cfg(test)]
-fn bump_describe_round_trips() {
-    DESCRIBE_ROUND_TRIPS.with(|c| c.set(c.get() + 1));
-}
+use parameter_cache::{
+    bump_describe_round_trips, bump_describe_savepoint_round_trips, describe_round_trips,
+    describe_savepoint_round_trips, reset_describe_round_trips,
+};
 
 pub(crate) fn reset_postgres_state() {
     listen::reset_state();
@@ -896,7 +859,7 @@ pub(super) async fn query_rows(
                 .as_mut()
                 .ok_or_else(|| runtime_error("pg_query: transaction is closed"))?;
             let has_nil = params_have_nil(params);
-            let initial_cache = tx_state.parameter_cache.begin_statement(sql, has_nil);
+            let initial_cache = tx_state.parameter_cache.begin_statement();
             let rows = if has_nil {
                 let oids = tx_state
                     .parameter_cache
@@ -972,7 +935,7 @@ pub(super) async fn execute_stmt(
             .as_mut()
             .ok_or_else(|| runtime_error("pg_execute: transaction is closed"))?;
         let has_nil = params_have_nil(params);
-        let initial_cache = tx_state.parameter_cache.begin_statement(sql, has_nil);
+        let initial_cache = tx_state.parameter_cache.begin_statement();
         let result = if has_nil {
             let oids = tx_state
                 .parameter_cache
@@ -1044,8 +1007,8 @@ async fn savepoint_op(
         let _ = mock_query(target, &sql, &[], true);
         return Ok(VmValue::Bool(true));
     }
-    let tx_state = tx_handle(Some(target), builtin)?;
-    let mut tx = tx_state.cell.lock().await;
+    let tx = tx_handle(Some(target), builtin)?;
+    let mut tx = tx.cell.lock().await;
     let tx = tx
         .as_mut()
         .ok_or_else(|| runtime_error(format!("{builtin}: transaction is closed")))?;
@@ -1054,9 +1017,6 @@ async fn savepoint_op(
         .execute(AssertSqlSafe(sql))
         .await
         .map_err(|error| runtime_error(format!("{builtin}: {error}")))?;
-    if matches!(op, SavepointOp::RollbackTo) {
-        tx_state.parameter_cache.invalidate();
-    }
     Ok(VmValue::Bool(true))
 }
 
@@ -1232,25 +1192,10 @@ fn reject_non_finite_floats(value: &VmValue) -> Result<(), VmError> {
     }
 }
 
-/// A SQL `NULL` that declares a *specific* Postgres type OID.
-///
-/// A dynamic `nil` from harn has no static Rust type, so we cannot pick a
-/// sqlx `Type` for it the way every other `VmValue` does. Binding it as
-/// `None::<String>` declares the parameter as `text` (OID 25), which is wrong
-/// in two ways:
-///
-///   * it poisons sqlx's *per-connection*, *SQL-keyed* prepared-statement
-///     cache — the first execution caches `$n = text`, so a later execution
-///     that binds a non-text value at `$n` sends binary data that no longer
-///     matches the cached parameter type (→ `invalid byte sequence ... 0x00`);
-///   * it fails outright against a non-text typed column / cast
-///     (→ `column is of type integer but expression is of type text`).
-///
-/// `TypedNull` carries the *server-described* OID for that parameter slot (see
-/// [`bind_params_described`]) so the NULL declares exactly the type a non-null
-/// value at that slot would. `encode` writes no bytes and reports `IsNull::Yes`,
-/// while `produces()` overrides the declared type to our chosen OID — matching
-/// the cached statement's parameter list and eliminating both failure modes.
+/// A NULL declaring the current server-inferred parameter OID. Dynamic `nil`
+/// has no Rust type; using `None::<String>` would declare text even for integer
+/// or UUID columns. `encode` writes no payload, and `produces` supplies the
+/// inferred OID to the nonpersistent query built by `bind_params_described`.
 struct TypedNull(PgTypeInfo);
 
 impl sqlx_core::types::Type<Postgres> for TypedNull {
@@ -1347,8 +1292,7 @@ pub(super) fn bind_params<'q>(
 /// `sqlx_postgres::connection::executor::{prepare, get_or_prepare}` — the cache
 /// insert is gated on `persistent == true`, and a non-persistent prepare uses
 /// `StatementId::UNNAMED`). Each described execute thus Parses exactly this
-/// self-consistent type list (in the *same* network round-trip as the Bind +
-/// Execute — sqlx pipelines Parse/Bind/Execute/Sync behind one flush),
+/// self-consistent type list before the separate Bind + Execute flush,
 /// eliminating both the binary-format mismatch (the OID-0 failure mode) and the
 /// text-NULL failure modes, and it cannot poison sibling patterns or the
 /// all-non-null fast path. A `nil` reusing an all-non-null cached statement is
@@ -1368,11 +1312,12 @@ fn bind_params_described<'q>(
 
 /// Look up server-inferred parameter types, describing on a miss. Cache scope
 /// belongs to the caller: pool SQL must retain a stable schema context, while
-/// transactions isolate metadata after their first caller statement.
+/// transactions discard metadata after their first caller statement.
 /// Migrations clear pool metadata when column types change.
 ///
 /// Transaction probes use a savepoint so an unsuccessful describe cannot abort
-/// the caller's transaction. Cache hits skip both the probe and savepoint.
+/// the caller's transaction. Only a known first-statement pool cache hit skips
+/// the probe and savepoint; later transaction statements infer afresh.
 async fn described_param_oids(
     cache: &SyncMutex<BTreeMap<String, Arc<Vec<PgTypeInfo>>>>,
     conn: &mut sqlx_postgres::PgConnection,
@@ -1402,9 +1347,9 @@ async fn described_param_oids(
 /// the inferred column type (e.g. an `i64` against an `int4` column), that
 /// inferred cache entry would poison a later execute, so we
 /// [`clear_cached_statements`] once here. Because the result is cached by
-/// [`described_param_oids`], this prepare+clear happens **at most once per
-/// distinct SQL** (on the first nil-bearing execution); every subsequent
-/// nil-query of that SQL is a pure cache hit with no describe and no clear.
+/// [`described_param_oids`], this prepare+clear happens at most once per distinct
+/// SQL in the pool's stable context. Later transaction statements instead
+/// describe afresh because previous SQL can change name resolution.
 ///
 /// **Best-effort, never worse than the legacy bind.** `prepare_with(sql, &[])`
 /// forces Postgres to infer *every* `$n` from query structure alone, so a query
@@ -1414,9 +1359,8 @@ async fn described_param_oids(
 /// "no per-slot OIDs available" rather than an error: we return an **empty**
 /// `Vec`, which the bind path turns into the legacy `None::<String>` (text) NULL
 /// for each nil — strictly ≥ the pre-describe behavior. The empty result is
-/// cached by [`described_param_oids`] like any other (the failure is
-/// deterministic per SQL structure, so re-probing every call would be wasted
-/// round-trips).
+/// cached by [`described_param_oids`] within the pool's stable context. Later
+/// transaction statements never retain the fallback across caller execution.
 ///
 /// Inside a caller transaction (`in_transaction`), a failed `prepare_with`
 /// aborts the whole transaction (`current transaction is aborted`), which would
@@ -1441,6 +1385,15 @@ async fn describe_param_oids_uncached(
 
     #[cfg(test)]
     bump_describe_round_trips();
+
+    // SQLx looks up SQL-keyed entries even for nonpersistent execution. A
+    // previous nonnil execution may have prepared this SQL in another context;
+    // the probe must reach the server's current name resolution instead.
+    if conn.cached_statements_size() != 0 {
+        conn.clear_cached_statements()
+            .await
+            .map_err(|error| runtime_error(format!("{builtin}: clear cache failed: {error}")))?;
+    }
 
     // In a caller transaction, a failed probe aborts the whole tx. A savepoint
     // lets us roll back *only* the failed probe and keep the tx alive. Outside a
@@ -1469,6 +1422,13 @@ async fn describe_param_oids_uncached(
                     .await
                     .map_err(|error| {
                         runtime_error(format!("{builtin}: rollback to savepoint failed: {error}"))
+                    })?;
+                #[cfg(test)]
+                bump_describe_savepoint_round_trips();
+                conn.execute(AssertSqlSafe(format!("RELEASE SAVEPOINT {SAVEPOINT}")))
+                    .await
+                    .map_err(|error| {
+                        runtime_error(format!("{builtin}: release savepoint failed: {error}"))
                     })?;
                 #[cfg(test)]
                 bump_describe_savepoint_round_trips();
@@ -1504,19 +1464,14 @@ async fn describe_param_oids_uncached(
 /// Run a nil-containing query against `pool` via the describe-then-bind path on
 /// a single acquired pool connection.
 ///
-/// On the first nil-bearing execution of `sql`, [`described_param_oids`] does one
-/// describe (and one statement-cache clear) and caches the per-slot OIDs; the
-/// describe-bound execute then re-parses with its own self-consistent type list
-/// and the connection returns to the pool with the *correct* cached entry for
-/// `sql`. Every subsequent nil-query of the same SQL is an OID-cache hit: no
-/// describe, no clear — it binds the cached OIDs and executes via the normal
-/// prepared-statement cache, so it costs the same round-trips as a plain bind
-/// (and on a fresh pool connection it simply Parses+caches its self-consistent
-/// statement once, exactly like any plain query would). This work happens
-/// **only** when a `nil` is present; the all-non-null fast path never reaches
-/// here and is fully unchanged. `run` performs the actual `fetch_all`/`execute`
-/// and is generic over the result so both `pg_query` and `pg_execute` can share
-/// this flow.
+/// The first nil-bearing execution describes and clears the driver's prepared
+/// statement, then caches OIDs under the pool's stable-context contract. Later
+/// pool calls skip that probe, but execution remains nonpersistent: SQLx Parses
+/// and Describes before its separate Bind + Execute flush unless an existing
+/// nonnil statement can be reused. Nil executions never insert prepared entries
+/// that could poison another argument pattern. The all-non-null path bypasses
+/// this helper. `run` shares the acquired connection across metadata lookup and
+/// the actual `fetch_all`/`execute`.
 async fn run_described_query<T>(
     pool: &PgPool,
     cache: &SyncMutex<BTreeMap<String, Arc<Vec<PgTypeInfo>>>>,
