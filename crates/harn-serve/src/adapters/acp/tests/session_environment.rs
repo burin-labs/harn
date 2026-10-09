@@ -171,12 +171,13 @@ fn cold_load_requires_authority_and_live_load_cannot_replace_it() {
         .block_on(async {
             harn_vm::reset_thread_local_state();
             let root = tempfile::tempdir().unwrap();
+            let workspace = root.path().canonicalize().unwrap();
             let store = harn_vm::open_canonical_store(root.path()).unwrap();
             store
                 .create(CreateSession {
                     id: Some("cold-authority".into()),
-                    cwd: Some(root.path().to_string_lossy().into_owned()),
-                    project_scope: Some(root.path().to_string_lossy().into_owned()),
+                    cwd: Some(workspace.to_string_lossy().into_owned()),
+                    project_scope: Some(workspace.to_string_lossy().into_owned()),
                     ..CreateSession::default()
                 })
                 .await
