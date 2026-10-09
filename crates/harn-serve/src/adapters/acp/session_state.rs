@@ -201,15 +201,16 @@ impl AcpServer {
         let environment = if !self.sessions.contains_key(&session_id)
             || params.get("environmentPolicy").is_some()
         {
-            let declared = match Self::resolve_session_environment(params) {
-                Ok(environment) => {
-                    environment.with_host_inference_boundary(self.host_inference_boundary)
-                }
-                Err((message, data)) => {
-                    self.send_error_with_data(id, -32602, &message, data);
-                    return;
-                }
-            };
+            let declared =
+                match Self::resolve_session_environment(params, &self.launcher_environment) {
+                    Ok(environment) => {
+                        environment.with_host_inference_boundary(self.host_inference_boundary)
+                    }
+                    Err((message, data)) => {
+                        self.send_error_with_data(id, -32602, &message, data);
+                        return;
+                    }
+                };
             if let Some(live) = self.sessions.get(&session_id) {
                 if declared != live.environment_policy {
                     self.send_error_with_data(

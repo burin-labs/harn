@@ -38,15 +38,16 @@ impl AcpServer {
         // Resolve the declared environment policy at the launch
         // boundary, snapshotting the server environment for env-source grants.
         // A malformed config or rejected launch fails the session loudly.
-        let environment_policy = match Self::resolve_session_environment(params) {
-            Ok(environment) => {
-                environment.with_host_inference_boundary(self.host_inference_boundary)
-            }
-            Err((message, data)) => {
-                self.send_error_with_data(id, -32602, &message, data);
-                return;
-            }
-        };
+        let environment_policy =
+            match Self::resolve_session_environment(params, &self.launcher_environment) {
+                Ok(environment) => {
+                    environment.with_host_inference_boundary(self.host_inference_boundary)
+                }
+                Err((message, data)) => {
+                    self.send_error_with_data(id, -32602, &message, data);
+                    return;
+                }
+            };
 
         let session_id = self.next_session_id();
         if let Err(error) = self.insert_session(session_id.clone(), cwd, SessionInfo::default()) {
@@ -103,6 +104,7 @@ impl AcpServer {
     /// [`ENV_ALLOWLIST`]: harn_vm::security::ENV_ALLOWLIST
     pub(super) fn resolve_session_environment(
         params: &serde_json::Value,
+        launcher_environment: &harn_vm::security::LauncherEnvironment,
     ) -> Result<harn_vm::security::SessionEnvironment, (String, serde_json::Value)> {
         let Some(raw) = params.get("environmentPolicy") else {
             return Err(Self::missing_environment_policy());
@@ -119,10 +121,8 @@ impl AcpServer {
                     }),
                 )
             })?;
-        let environment =
-            harn_vm::security::SessionEnvironment::launch(config.kind, config.grants, &|name| {
-                std::env::var(name).ok()
-            })
+        let environment = launcher_environment
+            .launch(config.kind, config.grants)
             .map_err(|error| (error.to_string(), error.to_json()))?;
         Ok(environment)
     }
@@ -856,9 +856,12 @@ mod environment_policy_default_tests {
     const CANARY_VALUE: &str = "probe-must-not-cross";
 
     fn kind_for(params: serde_json::Value) -> EnvironmentPolicyKind {
-        AcpServer::resolve_session_environment(&params)
-            .expect("the policy must resolve")
-            .kind()
+        AcpServer::resolve_session_environment(
+            &params,
+            &harn_vm::security::LauncherEnvironment::capture(),
+        )
+        .expect("the policy must resolve")
+        .kind()
     }
 
     /// Omission resolves to nothing at all.
@@ -873,9 +876,11 @@ mod environment_policy_default_tests {
     /// that never wrote one down, so omission resolves to a refusal.
     #[test]
     fn omitting_the_policy_resolves_to_no_kind_at_all() {
-        let (message, data) =
-            AcpServer::resolve_session_environment(&serde_json::json!({"cwd": "/tmp"}))
-                .expect_err("an omitted policy must not resolve to any kind");
+        let (message, data) = AcpServer::resolve_session_environment(
+            &serde_json::json!({"cwd": "/tmp"}),
+            &harn_vm::security::LauncherEnvironment::capture(),
+        )
+        .expect_err("an omitted policy must not resolve to any kind");
         assert_eq!(
             data["code"],
             serde_json::json!("environment_policy.missing")

@@ -50,7 +50,7 @@ pub use file_provenance::{command_string, path_arguments, FileProvenanceLedger};
 pub use provenance::{classify_directive_trust, DirectiveProvenance};
 pub use session_environment::{
     command_basename, EnvironmentPolicyError, EnvironmentPolicyKind, GrantAudience, GrantReceipt,
-    GrantSource, GrantSourceSpec, GrantSpec, SessionEnvironment, SessionGrant,
+    GrantSource, GrantSourceSpec, GrantSpec, LauncherEnvironment, SessionEnvironment, SessionGrant,
 };
 
 use crate::value::VmDictExt;

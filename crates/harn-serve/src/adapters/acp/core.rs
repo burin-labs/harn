@@ -28,6 +28,7 @@ impl AcpServer {
         );
 
         Self {
+            launcher_environment: config.launcher_environment,
             descriptor: AdapterDescriptor {
                 id: "acp".to_string(),
                 caller_shape: "agent-session".to_string(),
