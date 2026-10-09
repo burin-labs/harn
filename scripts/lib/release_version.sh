@@ -355,6 +355,30 @@ release_push_is_stable_version_change() {
     && [[ "$current" != "$previous" ]]
 }
 
+# Recovery may certify a corrected descendant of an unpublished stable cut.
+# Find the version transition on its first-parent history; missing history is
+# not evidence of a release. The caller still checks tags and certification.
+release_recovery_transition() {
+  local source="${1:?source commit required}" version="${2:?version required}"
+  local commits commit toml current owner="$source"
+  release_version_is_canonical "$version" && ! release_version_is_prerelease "$version" || return 1
+  toml="$(git show "$source:Cargo.toml")" || return 1
+  [[ "$(release_workspace_version <<< "$toml")" == "$version" ]] || return 1
+  commits="$(git rev-list --first-parent "$source" -- Cargo.toml)" || return 1
+  while IFS= read -r commit; do
+    [[ -n "$commit" ]] || return 1
+    toml="$(git show "$commit:Cargo.toml")" || return 1
+    current="$(release_workspace_version <<< "$toml")"
+    release_version_is_canonical "$current" || return 1
+    if [[ "$current" != "$version" ]]; then
+      printf '%s\n' "$owner"
+      return 0
+    fi
+    owner="$commit"
+  done <<< "$commits"
+  return 1
+}
+
 # The commits in base..head (first parent, oldest first) that change the
 # workspace version to a stable X.Y.Z. A merge queue lands several entries in
 # one push, so the pushed head's parent need not be the previous main: a push is
