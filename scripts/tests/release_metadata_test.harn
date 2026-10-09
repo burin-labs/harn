@@ -4,6 +4,7 @@ import {
   apply_development_metadata,
   apply_release_metadata,
   apply_unpublished_retirement,
+  cargo_dependency_from_line,
   current_version,
   development_version_from_stable,
   package_names_for_manifests,
@@ -23,6 +24,38 @@ type RootManifestProjection = {workspace: {dependencies: dict<string, Dependency
 type MemberManifestProjection = {dependencies: dict<string, DependencyProjection>}
 
 type AgentProjection = {version: string, distribution: {binary: {linux: {archive: string}}}}
+
+@test
+pipeline test_cargo_dependency_manifest_tables_validate_before_traversal() {
+  const line =
+    "sdk = { package = \"harn-aws-config\", path = \"../harn-aws-config\", version = \"=1.2.3\" }"
+  const dependency = {package: "harn-aws-config", path: "../harn-aws-config", version: "=1.2.3"}
+  assert_eq(
+    cargo_dependency_from_line(line, {dependencies: {sdk: dependency}}, "dependencies"),
+    {package_name: "harn-aws-config", path: "../harn-aws-config", version: "=1.2.3"},
+  )
+  assert_eq(
+    cargo_dependency_from_line(line),
+    {package_name: "harn-aws-config", path: "../harn-aws-config", version: "=1.2.3"},
+  )
+  assert_eq(cargo_dependency_from_line(line, {package: {name: "example"}}), nil)
+  for malformed in [[], 1, "manifest"] {
+    assert(
+      is_err(
+        try {
+          cargo_dependency_from_line(line, malformed, "dependencies")
+        },
+      ),
+    )
+  }
+  assert(
+    is_err(
+      try {
+        cargo_dependency_from_line(line, {dependencies: []}, "dependencies")
+      },
+    ),
+  )
+}
 
 @test
 pipeline test_workspace_version_projection_validates_at_boundary() {
