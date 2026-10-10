@@ -9,6 +9,31 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.162
+
+### Fixed
+
+- Deterministic completion checks can return a final `stop_unverified` refusal with a reason.
+  The run stops without another model turn, records `completion_unverified`, and withholds the unverified reply.
+  Plain refusals still request another turn.
+- Read-only tool preparation now supports compiler-validated default arguments and declared session transcript reads
+  without granting mutation or changing existing builtin exposure.
+- Manual build benchmarks and cache warms retain one exact source commit across jobs.
+  Explicit benchmark sources use their own workspace version while preserving the
+  separately selected workflow policy.
+- Retired the expired SambaNova MiniMax M2.7 alias so downstream catalog generation can certify a release
+  without redirecting it to different model weights.
+- Keep default-source benchmarks from blocking release source candidates, and
+  serialize manual and scheduled candidates in the same non-cancelling group.
+- The default run root `.harn-runs/` now carries its own `.gitignore` (`*`), like `.harn-tmp/`
+  and the sandbox's workspace directories, so run records no longer show as untracked files in
+  a host's repository. A `.gitignore` already in that directory is kept, and an explicit
+  `HARN_RUN_DIR` is left untouched.
+- An optional path argument sent as `""` is now treated as absent at dispatch instead of being
+  refused as a malformed path. OpenAI strict mode makes models send every optional property, and
+  they fill unused strings with `""`, so a tool such as a `look` with optional `file` and `folder`
+  failed its first call. A required path that is empty is still refused.
+
 ## v0.10.161
 
 ### Added
