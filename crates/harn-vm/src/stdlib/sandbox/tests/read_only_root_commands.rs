@@ -9,7 +9,6 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use super::harness::*;
 use crate::orchestration::{
     pop_execution_policy, push_execution_policy, CapabilityPolicy, ExternalRoot, SandboxProfile,
     ToolApprovalPolicy,
@@ -64,6 +63,7 @@ fn confined_policy(
 /// The boundary's answer for `run` naming `path`, under `policy` and a `read`
 /// external root at `root`.
 fn run_admitted(policy: &CapabilityPolicy, root: &Path, path: &Path) -> bool {
+    crate::stdlib::sandbox::child_write::install_child_write_probe();
     let approval = ToolApprovalPolicy {
         external_roots: vec![ExternalRoot::read(root.display().to_string())],
         ..Default::default()
@@ -77,24 +77,20 @@ fn run_admitted(policy: &CapabilityPolicy, root: &Path, path: &Path) -> bool {
     decision.is_allow()
 }
 
-/// Run `script` through the VM's process capability under `policy`. Returns
-/// whether the shell exited zero.
+/// Run `script` through the confined spawn path under `policy`: the same
+/// `std_command_for` a process capability builds its child with. Returns
+/// whether the shell exited zero; a refused spawn is a refused write.
 fn shell_succeeds(policy: &CapabilityPolicy, script: &str) -> bool {
-    let source = format!(
-        r"pipeline t(harness: Harness, task: unknown) {{ harness.process.shell({}) }}",
-        serde_json::to_string(script).unwrap()
-    );
-    match run_harn_with_policy(&source, policy.clone()) {
-        Ok((_, result)) => {
-            result
-                .as_dict()
-                .and_then(|receipt| receipt.get("success").map(crate::VmValue::display))
-                .as_deref()
-                == Some("true")
-        }
-        // A refused spawn is a refused write.
-        Err(_) => false,
-    }
+    push_execution_policy(policy.clone());
+    let output =
+        crate::stdlib::sandbox::std_command_for("/bin/sh", &["-c".to_string(), script.to_string()])
+            .and_then(|mut command| {
+                command
+                    .output()
+                    .map_err(|error| crate::value::VmError::Runtime(error.to_string()))
+            });
+    pop_execution_policy();
+    output.is_ok_and(|output| output.status.success())
 }
 
 fn canonical(path: &Path) -> PathBuf {

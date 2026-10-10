@@ -51,6 +51,14 @@ pub fn child_write_disposition(policy: &CapabilityPolicy, path: &Path) -> ChildW
     platform_disposition(policy, &target)
 }
 
+/// Install [`child_write_disposition`] as the approval boundary's
+/// child-write probe. Idempotent; called when the stdlib is registered.
+pub fn install_child_write_probe() {
+    crate::orchestration::install_child_write_probe(|policy, path| {
+        child_write_disposition(policy, path) == ChildWriteDisposition::EnforcedReadOnly
+    });
+}
+
 /// The path a write would land on: symlinks resolved through the deepest
 /// existing ancestor, since both mechanisms judge the resolved path.
 fn resolved_target(path: &Path) -> Option<PathBuf> {

@@ -5,6 +5,7 @@ mod overlay_scope;
 mod path_contracts;
 mod path_scope;
 mod process_axis;
+mod read_only_root_commands;
 mod runtime_roots;
 mod rustc_wrapper_policy;
 mod scope_memo;

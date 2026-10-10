@@ -54,10 +54,10 @@ pub use approval_review_config::{
 };
 pub use approval_rules::{
     clear_all_approval_policy_repeat_counts, clear_approval_policy_repeat_counts,
-    denial_gate_for_source, next_approval_policy_repeat_count,
-    next_approval_unavailable_class_repeat_count, ApprovalShape, PolicyAction, PolicyEvaluation,
-    PolicyIdentityMatch, PolicyMatchedRule, PolicyRule, PolicyRuleMatch, PolicyRuleSource,
-    ToolApprovalRequest, ToolApprovalWorkspaceBoundary, EXTERNAL_ROOT_READ_ONLY,
+    denial_gate_for_source, install_child_write_probe, next_approval_policy_repeat_count,
+    next_approval_unavailable_class_repeat_count, ApprovalShape, ChildWriteProbe, PolicyAction,
+    PolicyEvaluation, PolicyIdentityMatch, PolicyMatchedRule, PolicyRule, PolicyRuleMatch,
+    PolicyRuleSource, ToolApprovalRequest, ToolApprovalWorkspaceBoundary, EXTERNAL_ROOT_READ_ONLY,
     SOURCE_DEFAULT_EXTERNAL_PATH, SOURCE_DEFAULT_PATH_GUARD, SOURCE_DEFAULT_SENSITIVE_PATH,
     SOURCE_NET_POLICY,
 };

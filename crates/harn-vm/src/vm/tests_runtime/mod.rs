@@ -15,7 +15,6 @@ mod language;
 mod lexical_scope;
 mod optimizer;
 mod process_sandbox;
-mod read_only_root_commands;
 mod sandbox_builtins;
 mod slots;
 mod smoke;
