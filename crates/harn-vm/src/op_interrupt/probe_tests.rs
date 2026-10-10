@@ -23,7 +23,7 @@ extern "C" fn handle_term(_: libc::c_int) {
 
 #[test]
 fn process_probe_child() {
-    let Ok(mode) = std::env::var("HARN_INTERRUPT_PROBE_MODE") else {
+    let Ok(mode) = std::env::var("HARN_TEST_INTERRUPT_PROBE_MODE") else {
         return;
     };
     let mut leaf = None;
@@ -32,9 +32,10 @@ fn process_probe_child() {
             assert_ne!(libc::signal(libc::SIGTERM, libc::SIG_IGN), libc::SIG_ERR);
         },
         "polite" => {
-            let marker =
-                std::fs::File::create(std::env::var_os("HARN_INTERRUPT_PROBE_MARKER").unwrap())
-                    .expect("open SIGTERM marker");
+            let marker = std::fs::File::create(
+                std::env::var_os("HARN_TEST_INTERRUPT_PROBE_MARKER").unwrap(),
+            )
+            .expect("open SIGTERM marker");
             MARKER_FD.store(marker.into_raw_fd(), Ordering::Relaxed);
             unsafe {
                 assert_ne!(
@@ -107,13 +108,13 @@ pub(super) fn start_process_probe(
             "op_interrupt::probe_tests::process_probe_child",
             "--nocapture",
         ])
-        .env("HARN_INTERRUPT_PROBE_MODE", mode)
-        .env_remove("HARN_INTERRUPT_PROBE_MARKER")
+        .env("HARN_TEST_INTERRUPT_PROBE_MODE", mode)
+        .env_remove("HARN_TEST_INTERRUPT_PROBE_MARKER")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
     if let Some(marker) = marker {
-        command.env("HARN_INTERRUPT_PROBE_MARKER", marker);
+        command.env("HARN_TEST_INTERRUPT_PROBE_MARKER", marker);
     }
     if group {
         configure_kill_group(&mut command);
