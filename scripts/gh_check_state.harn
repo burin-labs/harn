@@ -531,9 +531,15 @@ fn is_hex40(value: string) -> bool {
   return true
 }
 
-fn api_json(process: HarnessProcess, clock: HarnessClock, path: string) -> any {
+fn api_json(
+  process: HarnessProcess,
+  clock: HarnessClock,
+  stdio: HarnessStdio,
+  path: string,
+) -> any {
   const receipt = github_api_json_result(process, clock, path)
   if !receipt.ok {
+    stdio.eprintln(receipt.detail ?? "GitHub API request failed")
     return nil
   }
   return receipt.value
@@ -542,6 +548,7 @@ fn api_json(process: HarnessProcess, clock: HarnessClock, path: string) -> any {
 fn collect_observations(
   process: HarnessProcess,
   clock: HarnessClock,
+  stdio: HarnessStdio,
   repo: string,
   sha: string,
 ) -> any {
@@ -554,6 +561,7 @@ fn collect_observations(
     const payload = api_json(
       process,
       clock,
+      stdio,
       "/repos/${repo}/commits/${sha}/check-runs?per_page=${to_string(PAGE_SIZE)}&page=${to_string(page)}",
     )
     if payload == nil {
@@ -572,6 +580,7 @@ fn collect_observations(
   const statuses = api_json(
     process,
     clock,
+    stdio,
     "/repos/${repo}/commits/${sha}/status?per_page=${to_string(PAGE_SIZE)}",
   )
   if statuses == nil {
@@ -584,6 +593,7 @@ fn collect_observations(
 fn changed_paths(
   process: HarnessProcess,
   clock: HarnessClock,
+  stdio: HarnessStdio,
   repo: string,
   base: string,
   sha: string,
@@ -591,6 +601,7 @@ fn changed_paths(
   const payload = api_json(
     process,
     clock,
+    stdio,
     "/repos/${repo}/compare/${base}...${sha}?per_page=${to_string(PAGE_SIZE)}",
   )
   if payload == nil || type_of(payload?.files) != "list" {
@@ -698,7 +709,7 @@ fn main(harness: Harness) {
     harness.stdio.eprintln("gh_check_state: --sha must be a 40-character commit sha")
     harness.runtime.exit(EXIT_USAGE)
   }
-  const collected = collect_observations(harness.process, harness.clock, repo, sha)
+  const collected = collect_observations(harness.process, harness.clock, harness.stdio, repo, sha)
   if !collected.ok {
     harness.stdio.eprintln(
       "gh_check_state: could not read check state for ${sha}; treating it as unobservable",
@@ -723,7 +734,14 @@ fn main(harness: Harness) {
       workflow_owner = workflow_repository(harness.fs, harness.process, path)
       if (workflow_owner ?? "").lower() == WORKFLOW_REGISTRY_REPOSITORY {
         filters = workflow_surface_filters(workflow, "surface_filter")
-        const changed = changed_paths(harness.process, harness.clock, repo, base, sha)
+        const changed = changed_paths(
+          harness.process,
+          harness.clock,
+          harness.stdio,
+          repo,
+          base,
+          sha,
+        )
         diff = {ok: changed.ok, paths: changed.paths}
       }
     }

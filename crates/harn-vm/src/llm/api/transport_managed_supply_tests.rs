@@ -1,6 +1,9 @@
 use super::*;
 use crate::llm::api::{inference_boundary, InferenceBoundary, InferenceReach, LlmCallOptions};
 
+#[path = "transport_managed_spend_tests.rs"]
+mod managed_spend_tests;
+
 fn install_managed_supply_stub_provider(provider: &str, addr: std::net::SocketAddr) {
     let mut overlay = crate::llm_config::ProvidersConfig::default();
     overlay.providers.insert(

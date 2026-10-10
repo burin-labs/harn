@@ -1,0 +1,237 @@
+import { post_merge_tier_errors } from "../ci_cache_policy/post_merge_tier"
+
+const GUARD = "needs.changes.outputs.post_merge_tier != 'true'"
+
+fn gha(body: string) -> string {
+  return "$" + "{{ " + body + " }}"
+}
+
+fn status_command() -> string {
+  return "require_result \"$security_tests_ready_result\" \\\n"
+    + "  \"handoff failed\" \\\n"
+    + "  test \"$RUST\" != \"true\" -o \"$POST_MERGE_TIER_ACTIVE\" = \"true\"\n\n"
+    + "require_result \"$rust_security_result\" \\\n"
+    + "  \"sandbox failed\" \\\n"
+    + "  test \"$RUST\" != \"true\" -o \"$POST_MERGE_TIER_ACTIVE\" = \"true\"\n\n"
+    + "require_result \"$harn_audit_result\" \"harn failed\" test \"$RUST\" != \"true\"\n\n"
+    + "require_result \"$macos_result\" \"macos failed\" test \"$POST_MERGE_TIER_ACTIVE\" = \"true\"\n\n"
+    + "require_result \"$package_audit_result\" \"package failed\" test \"$POST_MERGE_TIER_ACTIVE\" = \"true\"\n\n"
+    + "require_result \"$stack_frames_result\" \"stack frames failed\" test \"$POST_MERGE_TIER_ACTIVE\" = \"true\"\n\n"
+    + "require_result \"$source_length_result\" \"lengths failed\" [ \"$RUST\" != \"true\" ]\n"
+}
+
+fn workflows() {
+  return {
+    "ci.yml": {
+      jobs: {
+        changes: {
+          outputs: {post_merge_tier: gha("steps.post_merge_tier.outputs.active")},
+          steps: [
+            {uses: "actions/checkout@fixture"},
+            {
+              id: "post_merge_tier",
+              shell: "bash",
+              env: {
+                EVENT_NAME: gha("github.event_name"),
+                FULL_SUITE_PATHS: gha("steps.surface_filter.outputs.full_suite"),
+              },
+              run: "bash scripts/ci/post_merge_tier.sh",
+            },
+          ],
+        },
+        "harn-audit": {needs: ["changes"], if: "needs.changes.outputs.rust == 'true'"},
+        "package-audit": {needs: ["changes"], if: GUARD},
+        "stack-frames": {needs: ["changes"], if: GUARD},
+        "security-tests-ready": {
+          needs: ["changes", "rust-check-inputs"],
+          if: "!cancelled() && " + GUARD,
+        },
+        "windows-cross-check": {
+          needs: "changes",
+          if: "(github.event_name == 'merge_group' && " + GUARD + ")",
+        },
+        macos: {
+          needs: ["changes", "macos-plan"],
+          if: "needs.macos-plan.outputs.run_macos == 'true' && " + GUARD,
+        },
+        "macos-lint": {needs: ["changes"], if: GUARD},
+        "ci-status": {
+          steps: [
+            {
+              name: "Verify required CI jobs",
+              env: {
+                POST_MERGE_TIER_ACTIVE: gha("needs.changes.outputs.post_merge_tier"),
+                WINDOWS_CROSS_REQUIRED: gha(
+                  "(github.event_name == 'merge_group' && " + GUARD + ")",
+                ),
+              },
+              run: status_command(),
+            },
+          ],
+        },
+      },
+    },
+    "e2e.yml": {jobs: {e2e: {steps: [{run: "make test-e2e"}]}}},
+  }
+}
+
+fn with_ci_job(base: dict, name: string, job: dict) -> dict {
+  const ci = base["ci.yml"]
+  return {...base, "ci.yml": {...ci, jobs: {...ci.jobs, [name]: job}}}
+}
+
+pipeline test_post_merge_tier_policy_accepts_one_owned_switch(harness: Harness, task: unknown) {
+  assert_eq(post_merge_tier_errors(workflows()), [])
+}
+
+pipeline test_post_merge_tier_policy_refuses_a_family_without_the_gate(
+  harness: Harness,
+  task: unknown,
+) {
+  const base = workflows()
+  const windows = base["ci.yml"].jobs["windows-cross-check"]
+  const ungated = with_ci_job(
+    base,
+    "windows-cross-check",
+    {...windows, if: "github.event_name == 'merge_group'"},
+  )
+  assert_eq(
+    post_merge_tier_errors(ungated),
+    ["ci.yml:windows-cross-check must skip under the post-merge tier decision"],
+  )
+}
+
+pipeline test_post_merge_tier_policy_refuses_an_excuse_beyond_the_families(
+  harness: Harness,
+  task: unknown,
+) {
+  const base = workflows()
+  const status = base["ci.yml"].jobs["ci-status"]
+  const step = status.steps[0]
+  const widened = with_ci_job(
+    base,
+    "ci-status",
+    {
+      ...status,
+      steps: [
+        {
+          ...step,
+          run: step.run.replace(
+            "[ \"$RUST\" != \"true\" ]",
+            "test \"$RUST\" != \"true\" -o \"$POST_MERGE_TIER_ACTIVE\" = \"true\"",
+          ),
+        },
+      ],
+    },
+  )
+  assert_eq(
+    post_merge_tier_errors(widened),
+    ["ci.yml:ci-status may excuse post-merge tier skips only for the tier's families"],
+  )
+}
+
+pipeline test_post_merge_tier_policy_keeps_conformance_in_the_merge_tier(
+  harness: Harness,
+  task: unknown,
+) {
+  // Conformance is how a runtime or stdlib change proves itself before it
+  // lands; excusing its skip would let the tier hide it.
+  const base = workflows()
+  const status = base["ci.yml"].jobs["ci-status"]
+  const step = status.steps[0]
+  const hidden = with_ci_job(
+    base,
+    "ci-status",
+    {
+      ...status,
+      steps: [
+        {
+          ...step,
+          run: step.run.replace(
+            "\"harn failed\" test \"$RUST\" != \"true\"",
+            "\"harn failed\" test \"$RUST\" != \"true\" -o \"$POST_MERGE_TIER_ACTIVE\" = \"true\"",
+          ),
+        },
+      ],
+    },
+  )
+  assert_eq(
+    post_merge_tier_errors(hidden),
+    ["ci.yml:ci-status may excuse post-merge tier skips only for the tier's families"],
+  )
+}
+
+pipeline test_post_merge_tier_policy_refuses_a_decision_that_covers_main(
+  harness: Harness,
+  task: unknown,
+) {
+  const base = workflows()
+  const changes = base["ci.yml"].jobs.changes
+  const step = changes.steps[1]
+  const covers_push = with_ci_job(
+    base,
+    "changes",
+    {
+      ...changes,
+      steps: [
+        changes.steps[0],
+        {...step, run: step.run + "\n[ \"$EVENT_NAME\" = \"push\" ] && active=true\n"},
+      ],
+    },
+  )
+  assert_eq(
+    post_merge_tier_errors(covers_push),
+    [
+      "ci.yml:changes must own the post-merge tier decision: pull requests and merge groups whose change does not select the full suite",
+    ],
+  )
+}
+
+pipeline test_post_merge_tier_policy_refuses_an_unconditional_output_override(
+  harness: Harness,
+  task: unknown,
+) {
+  const base = workflows()
+  const changes = base["ci.yml"].jobs.changes
+  const step = changes.steps[1]
+  const overridden = with_ci_job(
+    base,
+    "changes",
+    {
+      ...changes,
+      steps: [
+        changes.steps[0],
+        {...step, run: step.run + "\nactive=true\necho \"active=$active\" >> \"$GITHUB_OUTPUT\""},
+      ],
+    },
+  )
+  assert_eq(
+    post_merge_tier_errors(overridden),
+    [
+      "ci.yml:changes must own the post-merge tier decision: pull requests and merge groups whose change does not select the full suite",
+    ],
+  )
+}
+
+pipeline test_post_merge_tier_policy_refuses_wrong_event_binding_and_missing_checkout(
+  harness: Harness,
+  task: unknown,
+) {
+  const base = workflows()
+  const changes = base["ci.yml"].jobs.changes
+  const step = changes.steps[1]
+  const wrong_event = with_ci_job(
+    base,
+    "changes",
+    {...changes, steps: [changes.steps[0], {...step, env: {...step.env, EVENT_NAME: "push"}}]},
+  )
+  const no_checkout = with_ci_job(base, "changes", {...changes, steps: [step]})
+  for invalid in [wrong_event, no_checkout] {
+    assert_eq(
+      post_merge_tier_errors(invalid),
+      [
+        "ci.yml:changes must own the post-merge tier decision: pull requests and merge groups whose change does not select the full suite",
+      ],
+    )
+  }
+}

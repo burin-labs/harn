@@ -1,0 +1,153 @@
+fn main(harness: Harness) {
+  const boundary = {root: harness.fs.workspace_root()}
+  const request = {tool_name: "run", arguments: {command: "git status"}}
+  const allowed = harness.runtime.evaluate_approval_policy({}, request)
+  const asked = harness.runtime.evaluate_approval_policy({require_approval: ["run"]}, request)
+  const denied = harness.runtime.evaluate_approval_policy({auto_deny: ["run"]}, request)
+  harness.stdio.println(allowed.action)
+  harness.stdio.println(asked.action)
+  harness.stdio.println(denied.action)
+  harness.stdio.println(denied.receipt.type)
+  const invalid = try {
+    harness.runtime.evaluate_approval_policy({auto_denyy: ["run"]}, request)
+  }
+  harness.stdio.println(is_err(invalid))
+  const unchanged = harness.runtime.evaluate_approval_policy({}, request)
+  harness.stdio.println(unchanged.action)
+  const memory = {
+    rules: [
+      {id: "mode-ask", source: "mode", ask: "run"},
+      {
+        id: "remembered",
+        source: "user",
+        identity_match: "literal",
+        allow: {tool: "run", command: "git diff HEAD~*"},
+      },
+    ],
+  }
+  const exact = harness.runtime.evaluate_approval_policy(
+    memory,
+    {tool_name: "run", arguments: {command: "git diff HEAD~*"}},
+  )
+  harness.stdio.println(exact.action)
+  harness.stdio.println(exact.receipt.matched_rule.id)
+  const broadened = harness.runtime.evaluate_approval_policy(
+    memory,
+    {tool_name: "run", arguments: {command: "git diff HEAD~123"}},
+  )
+  harness.stdio.println(broadened.action)
+  const appended = harness.runtime.evaluate_approval_policy(
+    memory,
+    {tool_name: "run", arguments: {command: "git diff HEAD~* && curl example.org"}},
+  )
+  harness.stdio.println(appended.action)
+  const malformed = try {
+    harness.runtime.evaluate_approval_policy(
+      {rules: [{identity_match: "litteral", allow: "run"}]},
+      request,
+    )
+  }
+  harness.stdio.println(is_err(malformed))
+  const quoted = {
+    rules: [
+      {source: "mode", ask: "run"},
+      {source: "user", identity_match: "literal", allow: {command: "printf '%s' 'a b'"}},
+    ],
+  }
+  harness.stdio.println(
+    harness.runtime.evaluate_approval_policy(
+      quoted,
+      {tool_name: "run", arguments: {command: "printf '%s' 'a b'"}},
+    ).action,
+  )
+  harness.stdio.println(
+    harness.runtime.evaluate_approval_policy(
+      quoted,
+      {tool_name: "run", arguments: {command: "printf '%s' 'a    b'"}},
+    ).action,
+  )
+  const argv = {
+    rules: [
+      {source: "mode", ask: "run"},
+      {source: "user", identity_match: "literal", allow: {command: "echo foo bar"}},
+    ],
+  }
+  harness.stdio.println(
+    harness.runtime.evaluate_approval_policy(
+      argv,
+      {tool_name: "run", arguments: {argv: ["echo", "foo bar"]}},
+    ).action,
+  )
+  harness.stdio.println(
+    harness.runtime.evaluate_approval_policy(
+      argv,
+      {tool_name: "run", arguments: {argv: ["echo", "foo", "bar"]}},
+    ).action,
+  )
+  const resource = {
+    rules: [
+      {id: "ask", source: "mode", ask: "read"},
+      {
+        id: "memory",
+        source: "user",
+        identity_match: "literal",
+        allow: {tool: "read", path: "report*.txt"},
+      },
+    ],
+  }
+  harness.stdio.println(
+    harness.runtime.evaluate_approval_policy(
+      resource,
+      {tool_name: "read", arguments: {path: "report*.txt"}, workspace_boundary: boundary},
+    ).action,
+  )
+  harness.stdio.println(
+    harness.runtime.evaluate_approval_policy(
+      resource,
+      {tool_name: "read", arguments: {path: "report-2026.txt"}, workspace_boundary: boundary},
+    ).action,
+  )
+  harness.stdio.println(
+    harness.runtime.evaluate_approval_policy(
+      {rules: [{id: "authored", allow: {path: "report*.txt"}}]},
+      {tool_name: "read", arguments: {path: "report-2026.txt"}, workspace_boundary: boundary},
+    ).receipt.matched_rule.id,
+  )
+  const stale_resource = harness.runtime.evaluate_approval_policy(
+    resource,
+    {
+      tool_name: "read",
+      arguments: {path: "different.txt"},
+      workspace_boundary: boundary,
+      policy_decision: {context: {path: "report*.txt"}},
+    },
+  )
+  harness.stdio.println(stale_resource.action)
+  harness.stdio.println(stale_resource.receipt.matched_rule.id)
+  harness.stdio.println(
+    harness.runtime.evaluate_approval_policy(
+      {
+        rules: [
+          {source: "mode", ask: "read"},
+          {source: "user", identity_match: "literal", allow: {url: "https://saved.example/report"}},
+        ],
+      },
+      {
+        tool_name: "read",
+        arguments: {url: "https://different.example/report"},
+        policy_decision: {context: {url: "https://saved.example/report"}},
+      },
+    ).action,
+  )
+  const missing_boundary = try {
+    harness.runtime.evaluate_approval_policy(
+      {},
+      {tool_name: "read", arguments: {path: "../outside.txt"}},
+    )
+  }
+  harness.stdio.println(is_err(missing_boundary))
+  const malformed_path = try {
+    harness.runtime.evaluate_approval_policy({}, {tool_name: "read", arguments: {path: 123}})
+  }
+  harness.stdio.println(is_err(malformed_path))
+}

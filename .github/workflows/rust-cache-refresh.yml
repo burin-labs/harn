@@ -22,11 +22,9 @@ on:
   push:
     branches: [main]
   schedule:
-    # Quiet-period backstop, every three hours. ci.yml's own cache writers
-    # (the shared CLI, workspace tests, and package audit lanes) no longer run
-    # on a main push the merge group already proved, so this workflow is now
-    # the main-branch writer for those keys. A run whose key already restored
-    # exactly does no compile, so the extra runs cost a few hosted minutes.
+    # Quiet-period backstop for the sole persistent Linux cache writer.
+    # Ordinary CI restores these keys without saving. An exact-key restore
+    # does no compile, so the extra runs cost a few hosted minutes.
     # Minute 43 is unused by the other scheduled workflows, so this does not
     # contend with the nightly platform suites or the release warm build.
     - cron: "43 */3 * * *"
@@ -35,20 +33,20 @@ on:
 permissions:
   contents: read
 
+# Serialize the complete CLI prerequisite and dependent matrix together.
+# Job-level groups can replace a pending dependent job with another run's CLI.
+concurrency:
+  group: harn-ci-rust-cache-refresh
+  cancel-in-progress: false
+
 env:
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: "0"
 
 jobs:
-  rust-cache-refresh:
+  rust-cache-refresh-cli:
     name: Refresh Rust cache (${{ matrix.cache_key }})
     runs-on: ubuntu-24.04
-    # Serialize this mutating tail across overlapping main pushes: GitHub
-    # retains the running job and the newest pending job, avoiding concurrent
-    # prune and save operations against the same cache family.
-    concurrency:
-      group: harn-ci-rust-cache-refresh
-      cancel-in-progress: false
     # Serial legs: each save needs its own headroom under the 10 GiB ceiling.
     timeout-minutes: 45
     strategy:
@@ -56,38 +54,26 @@ jobs:
       max-parallel: 1
       matrix:
         include:
-          # Match rust-check-inputs / rust-checks workspace-tests env hash.
-          - cache_key: workspace-tests
-            rustflags: "-D warnings -Clink-arg=-fuse-ld=mold"
-            install_mold: true
-            install_nextest: true
-            warm_script: ./scripts/ci/warm_rust_cache.sh
-            save_headroom_bytes: 4294967296
           # Match rust-cli, which builds the shared Harn CLI in its own job.
+          # Retire superseded qualified CLI generations before admitting the
+          # larger workspace replacement into the same bounded cache pool.
           - cache_key: harn-ci-cli
             rustflags: "-D warnings -Clink-arg=-fuse-ld=mold"
             install_mold: true
             install_nextest: false
             warm_script: ./scripts/ci/warm_harn_cli_cache.sh
             save_headroom_bytes: 2147483648
-          # Match package-audit: workflow RUSTFLAGS only (no mold).
-          - cache_key: package-audit
-            rustflags: "-D warnings"
-            install_mold: false
-            install_nextest: false
-            warm_script: ./scripts/ci/warm_package_audit_cache.sh
-            save_headroom_bytes: 2147483648
-    permissions:
+    permissions: &cache-writer-permissions
       contents: read
       actions: write
-    env:
+    env: &cache-writer-environment
       CARGO_PROFILE_DEV_DEBUG: line-tables-only
       RUSTFLAGS: ${{ matrix.rustflags }}
       HARN_RUNNER_TIER: github-hosted
       # Do NOT set CARGO_BUILD_JOBS here. Swatinem hashes every CARGO_* env var
       # into the cache key; consumers only set jobs on build steps, so a
       # job-level value here makes the saved key unrestorable (#5003).
-    steps:
+    steps: &cache-producer-steps
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 1
@@ -102,33 +88,25 @@ jobs:
       - uses: ./.github/actions/rust-toolchain
       - id: rust-cache
         uses: ./.github/actions/rust-cache
-        continue-on-error: true
         with:
           shared-key: ${{ matrix.cache_key }}
-          cache-on-failure: true
+          # A failed leg must not save. The exact key names this commit's
+          # source, so saving a target whose warm build never ran (a refused
+          # headroom step, a failed compile) publishes a generation that every
+          # consumer restores and rebuilds from nothing, and that the next
+          # refresh restores exactly and refuses for its missing source record
+          # (#9430). Without a save, the next run restores the prior
+          # generation by prefix and warms it.
+          cache-on-failure: false
           cache-bin: false
           cache-workspace-crates: "true"
           # Also drops any source record a prefix-matched older generation
           # carried, so this save never inherits a commit it was not built from.
           reuse-workspace-crates: "true"
           save: "true"
-      # A cache miss means the immutable entry for this family is obsolete.
-      # Delete it only after restore (so its contents remain available to the
-      # local warm build), then reserve the measured per-family envelope (4 GiB
-      # workspace-tests, 2 GiB package-audit). Release compile caches yield
-      # here; the other Linux merge-gate family remains protected (#5003).
-      - name: Prepare Linux cache generation save
-        if: steps.rust-cache.outputs.cache-hit != 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          HARN_CACHE_FAMILY_PREFIX: v0-rust-${{ matrix.cache_key }}-
-          HARN_CACHE_SAVE_HEADROOM_BYTES: ${{ matrix.save_headroom_bytes }}
-        run: |
-          ./scripts/prune_ci_cache_generations.sh --clear-family-prefix "$HARN_CACHE_FAMILY_PREFIX"
-          ./scripts/prune_ci_cache_generations.sh --ensure-headroom "$HARN_CACHE_SAVE_HEADROOM_BYTES"
       - name: Install cargo-nextest
         if: matrix.install_nextest && steps.rust-cache.outputs.cache-hit != 'true'
-        uses: taiki-e/install-action@9983c65e42da123ff25d1f78505eb6de315aa172 # v2.87.20
+        uses: taiki-e/install-action@83ac0ad63c0167e6f06796fab0fce28db1bf3db0 # v2.87.22
         with:
           tool: nextest@0.9.132
       # Warm only after a source-generation miss. Pinned Swatinem restores the
@@ -146,6 +124,18 @@ jobs:
       - name: Record the workspace cache source
         if: success() && steps.rust-cache.outputs.cache-hit != 'true'
         run: ./scripts/ci/reuse_workspace_crates.sh record
+      # Admission must preserve the current generation until its replacement
+      # has actually uploaded. A successful build does not certify a save:
+      # headroom refusal or upload failure must leave the old cache available.
+      # Release compile caches yield; Linux merge-gate caches stay protected.
+      - name: Prepare Linux cache generation save
+        if: steps.rust-cache.outputs.cache-hit != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HARN_CACHE_FAMILY_PREFIX: v0-rust-${{ matrix.cache_key }}-
+          HARN_CACHE_SAVE_HEADROOM_BYTES: ${{ matrix.save_headroom_bytes }}
+        run: |
+          ./scripts/prune_ci_cache_generations.sh --ensure-headroom "$HARN_CACHE_SAVE_HEADROOM_BYTES"
       - name: Report cache generation already current
         if: steps.rust-cache.outputs.cache-hit == 'true'
         env:
@@ -164,3 +154,33 @@ jobs:
             echo "Nothing to warm: GitHub cache entries are immutable, so a"
             echo "rebuild would be discarded rather than saved."
           } >> "$GITHUB_STEP_SUMMARY"
+
+  rust-cache-refresh:
+    name: Refresh Rust cache (${{ matrix.cache_key }})
+    # Matrix creation order cannot certify CLI retirement. Its complete post
+    # lifecycle must succeed before another family can reserve the freed space.
+    needs: rust-cache-refresh-cli
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        include:
+          - cache_key: workspace-tests
+            rustflags: "-D warnings -Clink-arg=-fuse-ld=mold"
+            install_mold: true
+            install_nextest: true
+            warm_script: ./scripts/ci/warm_rust_cache.sh
+            save_headroom_bytes: 4294967296
+          # The measured audit generation is 3,138,292,985 bytes. Refuse
+          # insufficient replacement space while retaining the old generation.
+          - cache_key: package-audit
+            rustflags: "-D warnings"
+            install_mold: false
+            install_nextest: false
+            warm_script: ./scripts/ci/warm_package_audit_cache.sh
+            save_headroom_bytes: 4294967296
+    permissions: *cache-writer-permissions
+    env: *cache-writer-environment
+    steps: *cache-producer-steps

@@ -30,10 +30,11 @@ destination=$2
 : "${GH_TOKEN:?GH_TOKEN must be set}"
 
 # The artifact list is newest first, so the first match is the newest match.
-# Ten pages of a hundred bounds the read while covering far more history than
-# either reader needs: main records a measurement on every Rust push.
-readonly MAX_PAGES=10
-readonly PER_PAGE=100
+# Small pages avoid truncated responses from GitHub's large artifact listing.
+# Keep the same 1,000-artifact search horizon: main records a measurement on
+# every Rust push.
+readonly MAX_PAGES=100
+readonly PER_PAGE=10
 
 mkdir -p "$destination"
 

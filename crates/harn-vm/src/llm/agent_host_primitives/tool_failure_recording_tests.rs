@@ -40,7 +40,7 @@ impl crate::HostCallBridge for PipelineInputBridge {
 
 /// Compile one Harn function into a callable closure, the same way a
 /// `tool_define`d handler is compiled from pipeline source.
-fn compiled_closure(name: &str, source: &str) -> Arc<VmClosure> {
+pub(super) fn compiled_closure(name: &str, source: &str) -> Arc<VmClosure> {
     compiled_closure_with(name, source, crate::compiler::Compiler::new())
 }
 

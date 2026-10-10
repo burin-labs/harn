@@ -34,13 +34,7 @@ fn create_self_ignored_dir(
         );
         return None;
     }
-    let ignore = path.join(".gitignore");
-    if !ignore.exists() {
-        let _ = std::fs::write(
-            &ignore,
-            "# Created by the Harn sandbox; safe to delete.\n*\n",
-        );
-    }
+    let _ = crate::runtime_paths::ensure_self_ignored_dir(&path);
     Some(path)
 }
 

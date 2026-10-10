@@ -34,6 +34,17 @@ route facts, never credentials, endpoint URLs, or request-control values.
 preview does not apply it or establish model readiness. Inference enforces its
 boundary again at dispatch.
 
+`data_posture` is the data posture inference will send on this route: the
+request's `data_controls` when given, otherwise the catalog's
+`[data_controls_policy] default_posture`, and `default` on a transport that
+cannot carry per-request controls. The per-request receipt reports the same
+value as `requested_posture`. `data_controls_outcome` is what that posture does
+on the route, and `data_controls_note` is the route's own handling note when its
+model row declares one, otherwise its provider's. A route the catalog records as
+training on API traffic with no control to stop it is `denied` under
+`strictest_available`, with governing rule `data_controls.training_refused`,
+because inference refuses it before sending.
+
 Embedders can call `harn_vm::llm::api::preview_inference_admission`. Request and
 snapshot schemas and host records are generated from those owning types in
 the published protocol artifacts.
@@ -358,6 +369,17 @@ container credentials, and EC2 instance profile credentials. Set `AWS_REGION`,
 `AWS_DEFAULT_REGION`, or `BEDROCK_REGION`. The model is a Bedrock model ID such
 as `anthropic.claude-3-5-sonnet-20240620-v1:0` or
 `meta.llama3-70b-instruct-v1:0`.
+
+The SDK reads the session's captured launcher environment, including profile
+selection, container authorization, region settings, and ordinary inputs needed
+by profile credential helpers. Concurrent sessions keep separate captures;
+changing process variables after launch does not change a session's SDK inputs.
+Embedders supply a `LauncherEnvironment` through
+`AcpServerConfig::with_launcher_environment` before starting the server. This
+capture is an in-memory host input, never a credential-bearing ACP JSON field.
+Granted sessions retain their static credential restriction and do not run SDK
+discovery. A nonempty `AWS_SESSION_TOKEN` takes precedence over the declared
+legacy `AWS_SECURITY_TOKEN`; empty tokens are absent.
 
 Azure OpenAI requires `AZURE_OPENAI_ENDPOINT`, for example
 `https://my-resource.openai.azure.com`. Harn routes the request to

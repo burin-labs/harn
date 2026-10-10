@@ -23,7 +23,7 @@ pipeline default(harness: Harness) {
     [
       llm_text("_call>_call>"),
       llm_text("<tool_call>\nwrite_note({ path: \"notes.txt\" })\n</tool_call>"),
-      llm_text("<done>##DONE##</done>"),
+      llm_text("<user_response>Wrote notes.txt.</user_response><done>##DONE##</done>"),
     ],
     { ->
       const result = agent_loop(
@@ -56,7 +56,10 @@ pipeline default(harness: Harness) {
   // should not be polluted with corrective parse guidance.
   with_llm_script(
     harness.llm,
-    [llm_text("write_note({ path: \"notes.txt\" })"), llm_text("<done>##DONE##</done>")],
+    [
+      llm_text("write_note({ path: \"notes.txt\" })"),
+      llm_text("<user_response>Wrote notes.txt.</user_response><done>##DONE##</done>"),
+    ],
     { ->
       const result = agent_loop(
         harness,
@@ -116,7 +119,7 @@ pipeline default(harness: Harness) {
         "<tool_call>\nwrite_note({ path: \"a.txt\" })\n</tool_call>\n"
           + "<tool_call>\nnope({})\n</tool_call>",
       ),
-      llm_text("<done>##DONE##</done>"),
+      llm_text("<user_response>Wrote a.txt.</user_response><done>##DONE##</done>"),
     ],
     { ->
       const result = agent_loop(
@@ -157,7 +160,7 @@ pipeline default(harness: Harness) {
           + "</tool_calls>",
       ),
       llm_text("<tool_call>\nwrite_note({ path: \"retry.txt\" })\n</tool_call>"),
-      llm_text("<done>##DONE##</done>"),
+      llm_text("<user_response>Wrote retry.txt.</user_response><done>##DONE##</done>"),
     ],
     { ->
       const result = agent_loop(

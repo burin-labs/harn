@@ -1,5 +1,7 @@
 use super::*;
 
+mod pending_approval;
+
 #[derive(Clone)]
 struct FixtureIdentityBroker {
     requirement: IdentityBrokerRequirement,
@@ -511,6 +513,206 @@ fn prepared_runtime_attachment() -> PreparedRuntimeAttachment {
     }
 }
 
+#[tokio::test(flavor = "current_thread")]
+async fn local_turn_reuses_attached_authority_and_identity_across_an_await() {
+    let mut identity = identity_requirement();
+    identity.binding.consumer = prepared_session_binding().consumer;
+    let mut run_intent = intent();
+    run_intent.identity_brokers = vec![identity.clone()];
+    let mut host = host_facts();
+    host.identity_brokers
+        .insert(identity.broker_id.clone(), identity_facts(&identity));
+    let mut brokers = IdentityBrokerRegistry::default();
+    brokers.insert(
+        identity.broker_id.clone(),
+        Arc::new(FixtureIdentityBroker {
+            requirement: identity.clone(),
+        }),
+    );
+    let receipts = Arc::new(MemoryAuthorityReceiptSink::default());
+    let session = PreparedSession::new(
+        PreparedRun::with_clock((), receipts.clone(), Arc::new(|| NOW_MS))
+            .with_identity_brokers(brokers, prepared_session_binding().consumer),
+        Arc::new(MemoryPreparedSessionLeaseStore::default()),
+    );
+    let batch = match session.prepare(prepared_session_binding(), run_intent, host.clone()) {
+        PreparedSessionUpdate::NeedsApproval { batch, .. } => batch,
+        other => panic!("local turn requires the same approval, got {other:?}"),
+    };
+    let lease = match session.decide(
+        "prepared-session-1",
+        PreparedSessionApprovalDecision {
+            request_id: batch.request_id,
+            batch_fingerprint: batch.batch_fingerprint,
+            approved: true,
+            decider: AuthorityDecider::Person,
+        },
+    ) {
+        PreparedSessionUpdate::Ready { lease, .. } => *lease,
+        other => panic!("approved local turn must become ready, got {other:?}"),
+    };
+    let active = session
+        .attach(lease, host, prepared_runtime_attachment())
+        .expect("attach the approved session");
+    // Retaining Rc across an await makes this future genuinely non-Send.
+    let reached = std::rc::Rc::new(std::cell::Cell::new(false));
+    let turn_reached = reached.clone();
+    let material_len = session
+        .run_turn_with(&active, async {
+            tokio::task::yield_now().await;
+            for requirement in executor_requirements() {
+                active.authorize(&requirement).unwrap();
+            }
+            assert!(active
+                .authorize(&AuthorityRequirement::Network(network(
+                    "undeclared.example.test"
+                )))
+                .is_err());
+            let len = consume_provider_identity(
+                &identity.binding.provider,
+                &identity.binding.audience,
+                identity.binding.tenant.as_deref(),
+                |material| Ok(material.as_ref().len()),
+            )
+            .await
+            .expect("identity scope survives the local await")
+            .expect("the brokered identity was actually consumed");
+            turn_reached.set(true);
+            len
+        })
+        .await;
+    assert!(reached.get());
+    assert_eq!(material_len, SECRET_CANARY.len());
+    let receipt = match session.finish(active, true).unwrap() {
+        PreparedSessionUpdate::Terminal { receipt, .. } => receipt,
+        other => panic!("local turn must retain terminal accounting, got {other:?}"),
+    };
+    assert!(receipt.executor_invoked);
+    assert_eq!(receipt.status, AuthorityReceiptStatus::Completed);
+    assert!(!receipt.used.is_empty());
+    assert!(!receipt.denied.is_empty());
+    assert_eq!(receipts.receipts().last(), Some(&receipt));
+    assert!(!serde_json::to_string(&receipt)
+        .unwrap()
+        .contains(SECRET_CANARY));
+}
+
+#[tokio::test]
+async fn bridge_approval_grants_only_a_canonical_selected_allow_before_execution() {
+    for (response, approved) in [
+        (
+            serde_json::json!({"outcome":{"outcome":"selected","optionId":"allow"}}),
+            true,
+        ),
+        (
+            serde_json::json!({"outcome":{"outcome":"selected","optionId":"reject"}}),
+            false,
+        ),
+        (serde_json::json!({}), false),
+        (serde_json::json!({"outcome":"approved"}), false),
+        (
+            serde_json::json!({"outcome":{"outcome":"cancelled"}}),
+            false,
+        ),
+        (
+            serde_json::json!({
+                "outcome":{"outcome":"selected","optionId":"allow"},
+                "_meta":{"harn":{"permissionDecision":{}}}
+            }),
+            false,
+        ),
+    ] {
+        let model_calls = Arc::new(AtomicUsize::new(0));
+        let receipts = Arc::new(MemoryAuthorityReceiptSink::default());
+        let session = PreparedSession::new(
+            PreparedRun::with_clock(
+                FixtureExecutor {
+                    requirements: executor_requirements(),
+                    model_calls: model_calls.clone(),
+                },
+                receipts.clone(),
+                Arc::new(|| NOW_MS),
+            ),
+            Arc::new(MemoryPreparedSessionLeaseStore::default()),
+        );
+        let batch = match session.prepare(prepared_session_binding(), intent(), host_facts()) {
+            PreparedSessionUpdate::NeedsApproval { batch, .. } => batch,
+            other => panic!("expected grouped approval, got {other:?}"),
+        };
+        let pending = Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::<
+            u64,
+            tokio::sync::oneshot::Sender<serde_json::Value>,
+        >::new()));
+        let responses = pending.clone();
+        let fingerprint = batch.batch_fingerprint.clone();
+        let approval_calls = Arc::new(AtomicUsize::new(0));
+        let observed_calls = approval_calls.clone();
+        let writer = Arc::new(move |line: &str| {
+            let request: serde_json::Value = serde_json::from_str(line).unwrap();
+            assert_eq!(request["method"], "session/request_permission");
+            assert_eq!(
+                request["params"]["toolCall"]["rawInput"]["batch_fingerprint"],
+                fingerprint
+            );
+            observed_calls.fetch_add(1, Ordering::SeqCst);
+            let id = request["id"].as_u64().unwrap();
+            responses
+                .try_lock()
+                .unwrap()
+                .remove(&id)
+                .unwrap()
+                .send(serde_json::json!({"id":id,"result":response.clone()}))
+                .map_err(|_| "approval receiver closed".to_string())
+        });
+        let bridge = crate::bridge::HostBridge::from_parts_with_writer(
+            pending,
+            Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            writer,
+            1,
+        );
+        bridge.set_session_id("prepared-session-1");
+        let update = session
+            .pending_approval(&bridge, "prepared-session-1", &batch)
+            .unwrap()
+            .wait()
+            .await
+            .unwrap();
+        assert_eq!(approval_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(model_calls.load(Ordering::SeqCst), 0);
+        match update {
+            PreparedSessionUpdate::Ready { lease, .. } if approved => {
+                let active = session
+                    .attach(*lease, host_facts(), prepared_runtime_attachment())
+                    .unwrap();
+                assert_eq!(session.run_turn(&active).await.unwrap(), "completed");
+                assert_eq!(model_calls.load(Ordering::SeqCst), 1);
+                match session.finish(active, true).unwrap() {
+                    PreparedSessionUpdate::Terminal { receipt, .. } => {
+                        assert_eq!(receipt.status, AuthorityReceiptStatus::Completed);
+                        assert_eq!(receipt.used.len(), executor_requirements().len());
+                    }
+                    other => panic!("expected terminal accounting, got {other:?}"),
+                }
+            }
+            PreparedSessionUpdate::Blocked { receipt, .. } if !approved => {
+                assert_eq!(model_calls.load(Ordering::SeqCst), 0);
+                let receipt = receipt.expect("grouped rejection preserves its decision receipt");
+                assert_eq!(receipt.status, AuthorityReceiptStatus::Blocked);
+                assert_eq!(receipt.stage, AuthorityReceiptStage::ApprovalDecision);
+                assert!(receipt
+                    .diagnostics
+                    .iter()
+                    .any(|diagnostic| diagnostic.code == "prepared_session_approval_denied"));
+            }
+            other => panic!("approval result disagrees with canonical answer: {other:?}"),
+        }
+        assert!(receipts
+            .receipts()
+            .iter()
+            .any(|receipt| receipt.stage == AuthorityReceiptStage::ApprovalDecision));
+    }
+}
+
 #[tokio::test]
 async fn prepared_session_persists_one_approval_reuses_the_envelope_and_rejects_replay() {
     let model_calls = Arc::new(AtomicUsize::new(0));
@@ -527,11 +729,35 @@ async fn prepared_session_persists_one_approval_reuses_the_envelope_and_rejects_
         ),
         claims.clone(),
     );
+    let mut earlier_intent = intent();
+    earlier_intent.budget.turns = Some(7);
+    let earlier_batch =
+        match host_session.prepare(prepared_session_binding(), earlier_intent, host_facts()) {
+            PreparedSessionUpdate::NeedsApproval { batch, .. } => batch,
+            other => panic!("expected earlier grouped approval, got {other:?}"),
+        };
     let batch = match host_session.prepare(prepared_session_binding(), intent(), host_facts()) {
         PreparedSessionUpdate::NeedsApproval { batch, .. } => batch,
         other => panic!("interactive session must present one grouped batch, got {other:?}"),
     };
+    assert_ne!(earlier_batch.batch_fingerprint, batch.batch_fingerprint);
+    match host_session.decide(
+        "prepared-session-1",
+        PreparedSessionApprovalDecision {
+            request_id: earlier_batch.request_id,
+            batch_fingerprint: earlier_batch.batch_fingerprint,
+            approved: true,
+            decider: AuthorityDecider::Person,
+        },
+    ) {
+        PreparedSessionUpdate::Blocked { diagnostics, .. } => assert!(diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "prepared_session_approval_binding")),
+        other => panic!("stale decision must refuse without consuming its successor: {other:?}"),
+    }
+    assert_eq!(model_calls.load(Ordering::SeqCst), 0);
     let decision = PreparedSessionApprovalDecision {
+        request_id: batch.request_id,
         batch_fingerprint: batch.batch_fingerprint,
         approved: true,
         decider: AuthorityDecider::Person,
@@ -599,6 +825,77 @@ async fn prepared_session_persists_one_approval_reuses_the_envelope_and_rejects_
 }
 
 #[tokio::test]
+async fn accepted_stop_and_pivot_persist_stopped_authority_and_retire_the_lease() {
+    for pivot in [false, true] {
+        let directory = tempfile::tempdir().expect("receipt directory");
+        let receipt_path = directory.path().join("authority.ndjson");
+        let model_calls = Arc::new(AtomicUsize::new(0));
+        let mut requested = intent();
+        requested.receipt_uri = receipt_path.to_string_lossy().into_owned();
+        let session = PreparedSession::new(
+            PreparedRun::with_clock(
+                FixtureExecutor {
+                    requirements: executor_requirements(),
+                    model_calls: model_calls.clone(),
+                },
+                Arc::new(NdjsonAuthorityReceiptSink::new(&receipt_path)),
+                Arc::new(|| NOW_MS),
+            ),
+            Arc::new(MemoryPreparedSessionLeaseStore::default()),
+        );
+        let batch = match session.prepare(prepared_session_binding(), requested, host_facts()) {
+            PreparedSessionUpdate::NeedsApproval { batch, .. } => batch,
+            other => panic!("expected approval batch, got {other:?}"),
+        };
+        let lease = match session.decide(
+            "prepared-session-1",
+            PreparedSessionApprovalDecision {
+                request_id: batch.request_id,
+                batch_fingerprint: batch.batch_fingerprint,
+                approved: true,
+                decider: AuthorityDecider::Person,
+            },
+        ) {
+            PreparedSessionUpdate::Ready { lease, .. } => *lease,
+            other => panic!("expected ready lease, got {other:?}"),
+        };
+        let active = session
+            .attach(lease.clone(), host_facts(), prepared_runtime_attachment())
+            .expect("attach approved lease");
+        assert_eq!(session.run_turn(&active).await.unwrap(), "completed");
+        let stopped = session
+            .stop(active, pivot)
+            .expect("persist accepted control");
+        let receipt = match stopped {
+            PreparedSessionUpdate::Stopped { receipt, .. } if !pivot => receipt,
+            PreparedSessionUpdate::Pivoted { receipt, .. } if pivot => receipt,
+            other => panic!("accepted control must preserve its kind, got {other:?}"),
+        };
+        assert_eq!(receipt.stage, AuthorityReceiptStage::Stopped);
+        assert_eq!(receipt.status, AuthorityReceiptStatus::Stopped);
+        assert_eq!(receipt.used.len(), executor_requirements().len());
+        assert_eq!(
+            receipt.used.len() + receipt.unused.len(),
+            receipt.granted.len()
+        );
+        assert!(receipt.executor_invoked);
+        let persisted = std::fs::read_to_string(&receipt_path).expect("read durable receipts");
+        assert!(!persisted.contains(SECRET_CANARY));
+        let terminal: RunAuthorityReceipt =
+            serde_json::from_str(persisted.lines().last().expect("terminal row"))
+                .expect("decode terminal receipt");
+        assert_eq!(terminal, receipt);
+        let wire = serde_json::to_value(&terminal).expect("receipt wire shape");
+        assert_eq!(wire["stage"], "stopped");
+        assert_eq!(wire["status"], "stopped");
+        assert!(session
+            .attach(lease, host_facts(), prepared_runtime_attachment())
+            .is_err());
+        assert_eq!(model_calls.load(Ordering::SeqCst), 1);
+    }
+}
+
+#[tokio::test]
 async fn prepared_session_rejects_stale_runtime_and_cross_workspace_attach_before_turns() {
     let model_calls = Arc::new(AtomicUsize::new(0));
     let session = PreparedSession::new(
@@ -623,6 +920,7 @@ async fn prepared_session_rejects_stale_runtime_and_cross_workspace_attach_befor
     let lease = match session.decide(
         "prepared-session-1",
         PreparedSessionApprovalDecision {
+            request_id: batch.request_id,
             batch_fingerprint: batch.batch_fingerprint,
             approved: true,
             decider: AuthorityDecider::Person,
@@ -663,6 +961,28 @@ async fn prepared_session_widening_is_one_semantic_delta_batch() {
         ),
         Arc::new(MemoryPreparedSessionLeaseStore::default()),
     );
+    let mut earlier_intent = intent();
+    earlier_intent.budget.turns = Some(7);
+    let earlier_session_batch =
+        match session.prepare(prepared_session_binding(), earlier_intent, host_facts()) {
+            PreparedSessionUpdate::NeedsApproval { batch, .. } => batch,
+            other => panic!("expected earlier session approval, got {other:?}"),
+        };
+    let earlier_lease = match session.decide(
+        "prepared-session-1",
+        PreparedSessionApprovalDecision {
+            request_id: earlier_session_batch.request_id,
+            batch_fingerprint: earlier_session_batch.batch_fingerprint,
+            approved: true,
+            decider: AuthorityDecider::Person,
+        },
+    ) {
+        PreparedSessionUpdate::Ready { lease, .. } => *lease,
+        other => panic!("expected earlier ready session, got {other:?}"),
+    };
+    let earlier_active = session
+        .attach(earlier_lease, host_facts(), prepared_runtime_attachment())
+        .expect("attach earlier same-id session");
     let batch = match session.prepare(prepared_session_binding(), intent(), host_facts()) {
         PreparedSessionUpdate::NeedsApproval { batch, .. } => batch,
         other => panic!("expected initial approval batch, got {other:?}"),
@@ -670,6 +990,7 @@ async fn prepared_session_widening_is_one_semantic_delta_batch() {
     let lease = match session.decide(
         "prepared-session-1",
         PreparedSessionApprovalDecision {
+            request_id: batch.request_id,
             batch_fingerprint: batch.batch_fingerprint,
             approved: true,
             decider: AuthorityDecider::Person,
@@ -684,6 +1005,16 @@ async fn prepared_session_widening_is_one_semantic_delta_batch() {
     let widened = AuthorityRequirement::Tool {
         pattern: "deploy".to_string(),
     };
+    let earlier_widening = AuthorityRequirement::Tool {
+        pattern: "publish".to_string(),
+    };
+    let earlier_batch = match session.request_delta(&active, earlier_widening.clone()) {
+        PreparedSessionUpdate::Delta {
+            outcome: PreparedSessionDelta::NeedsApproval { batch },
+            ..
+        } => batch,
+        other => panic!("expected earlier delta approval, got {other:?}"),
+    };
     let delta_batch = match session.request_delta(&active, widened.clone()) {
         PreparedSessionUpdate::Delta {
             outcome: PreparedSessionDelta::NeedsApproval { batch },
@@ -693,10 +1024,106 @@ async fn prepared_session_widening_is_one_semantic_delta_batch() {
     };
     assert_eq!(delta_batch.groups.len(), 1);
     assert_eq!(delta_batch.groups[0].semantic_group, "host_capabilities");
-    assert!(active.authorize(&widened).is_err());
+    assert_ne!(
+        earlier_active.lease().plan_fingerprint,
+        active.lease().plan_fingerprint,
+    );
+    match session.decide_delta(
+        &earlier_active,
+        PreparedSessionApprovalDecision {
+            request_id: delta_batch.request_id,
+            batch_fingerprint: delta_batch.batch_fingerprint.clone(),
+            approved: true,
+            decider: AuthorityDecider::Person,
+        },
+    ) {
+        PreparedSessionUpdate::Delta {
+            outcome: PreparedSessionDelta::Blocked { diagnostic },
+            ..
+        } => assert_eq!(diagnostic.code, "prepared_session_delta_binding"),
+        other => panic!("stale active lease must not consume or grant a newer delta: {other:?}"),
+    }
+    assert!(earlier_active.authorize(&widened).is_err());
+    assert_ne!(
+        earlier_batch.batch_fingerprint,
+        delta_batch.batch_fingerprint
+    );
     match session.decide_delta(
         &active,
         PreparedSessionApprovalDecision {
+            request_id: earlier_batch.request_id,
+            batch_fingerprint: earlier_batch.batch_fingerprint,
+            approved: true,
+            decider: AuthorityDecider::Person,
+        },
+    ) {
+        PreparedSessionUpdate::Delta {
+            outcome: PreparedSessionDelta::Blocked { diagnostic },
+            ..
+        } => assert_eq!(diagnostic.code, "prepared_session_delta_binding"),
+        other => panic!("stale delta must not consume its successor: {other:?}"),
+    }
+    assert!(active.authorize(&earlier_widening).is_err());
+    let repeated = AuthorityRequirement::Tool {
+        pattern: "repeat-deploy".to_string(),
+    };
+    for approved in [false, true] {
+        let mut batches = Vec::new();
+        for _ in 0..2 {
+            match session.request_delta(&active, repeated.clone()) {
+                PreparedSessionUpdate::Delta {
+                    outcome: PreparedSessionDelta::NeedsApproval { batch },
+                    ..
+                } => batches.push(batch),
+                other => panic!("expected identical pending delta: {other:?}"),
+            }
+        }
+        assert_eq!(batches[0].batch_fingerprint, batches[1].batch_fingerprint);
+        assert_ne!(batches[0].request_id, batches[1].request_id);
+        match session.decide_delta(
+            &active,
+            PreparedSessionApprovalDecision {
+                request_id: batches[0].request_id,
+                batch_fingerprint: batches[0].batch_fingerprint.clone(),
+                approved,
+                decider: AuthorityDecider::Person,
+            },
+        ) {
+            PreparedSessionUpdate::Delta {
+                outcome: PreparedSessionDelta::Blocked { diagnostic },
+                ..
+            } => assert_eq!(diagnostic.code, "prepared_session_delta_binding"),
+            other => panic!("stale answer must not consume replacement delta: {other:?}"),
+        }
+        assert!(active.authorize(&repeated).is_err());
+        match session.decide_delta(
+            &active,
+            PreparedSessionApprovalDecision {
+                request_id: batches[1].request_id,
+                batch_fingerprint: batches[1].batch_fingerprint.clone(),
+                approved: false,
+                decider: AuthorityDecider::Person,
+            },
+        ) {
+            PreparedSessionUpdate::Delta {
+                outcome: PreparedSessionDelta::Blocked { diagnostic },
+                ..
+            } => assert_eq!(diagnostic.code, "prepared_session_delta_denied"),
+            other => panic!("current delta denial must consume its own request: {other:?}"),
+        }
+    }
+    assert!(active.authorize(&widened).is_err());
+    let delta_batch = match session.request_delta(&active, widened.clone()) {
+        PreparedSessionUpdate::Delta {
+            outcome: PreparedSessionDelta::NeedsApproval { batch },
+            ..
+        } => batch,
+        other => panic!("expected fresh widening approval: {other:?}"),
+    };
+    match session.decide_delta(
+        &active,
+        PreparedSessionApprovalDecision {
+            request_id: delta_batch.request_id,
             batch_fingerprint: delta_batch.batch_fingerprint,
             approved: true,
             decider: AuthorityDecider::Person,
@@ -711,4 +1138,6 @@ async fn prepared_session_widening_is_one_semantic_delta_batch() {
     active
         .authorize(&widened)
         .expect("approved widening is live without re-preparation");
+    assert!(active.authorize(&earlier_widening).is_err());
+    assert!(earlier_active.authorize(&widened).is_err());
 }

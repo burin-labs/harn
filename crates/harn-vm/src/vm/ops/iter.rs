@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use crate::value::{VmError, VmValue};
+use crate::vm::iter::range_next;
 
 fn range_initial_done(start: i64, end: i64, inclusive: bool) -> bool {
     if inclusive {
@@ -8,26 +9,6 @@ fn range_initial_done(start: i64, end: i64, inclusive: bool) -> bool {
     } else {
         start >= end
     }
-}
-
-fn range_next(next: &mut i64, end: i64, inclusive: bool, done: &mut bool) -> Option<i64> {
-    if *done {
-        return None;
-    }
-    let value = *next;
-    let at_end = if inclusive {
-        value >= end
-    } else {
-        value
-            .checked_add(1)
-            .is_none_or(|candidate| candidate >= end)
-    };
-    if at_end {
-        *done = true;
-    } else {
-        *next += 1;
-    }
-    Some(value)
 }
 
 impl super::super::Vm {

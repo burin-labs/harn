@@ -512,7 +512,7 @@ fn runtime_binding_or_err(
                 .map_err(|error| error.to_string())?
         {
             if let Some(resolved) = extensions
-                .runtime_personas
+                .runtime_personas()
                 .iter()
                 .find(|persona| persona.id == name)
             {
@@ -533,7 +533,7 @@ fn runtime_binding_or_err(
     let extensions =
         package::try_load_runtime_extensions(Path::new(".")).map_err(|error| error.to_string())?;
     let resolved = extensions
-        .runtime_personas
+        .runtime_personas()
         .iter()
         .find(|persona| persona.id == name)
         .ok_or_else(|| format!("active runtime persona '{name}' not found"))?;

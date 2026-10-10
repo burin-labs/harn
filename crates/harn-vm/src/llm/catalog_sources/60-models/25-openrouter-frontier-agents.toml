@@ -81,3 +81,36 @@ pricing = { input_per_mtok = 0.20, output_per_mtok = 1.15, cache_read_per_mtok =
 tier = "frontier"
 open_weight = false
 strengths = ["agentic", "coding", "long_context", "tool_use", "reasoning"]
+
+# Xiaomi MiMo v2.6 (released 2026-09-21, MIT licence). Pro is a 1.02T / 42B
+# active MoE, Flash 309B / 15B active; both take text, image, video and audio
+# with a ~1M context and 131,072 max output on Xiaomi's endpoint. Prices are
+# the live OpenRouter index only (read 2026-10-09), as #9023 asked, because
+# secondary sources disagree on Flash: Pro $0.435 / $0.0036 cached / $0.87 and
+# Flash $0.14 / $0.0028 cached / $0.28. Probed 2026-10-09 pinned to the Xiaomi
+# endpoint: native tool calls, the tool-result round trip, a required tool
+# choice, reasoning off and on all returned 200, and a second tool turn
+# succeeded without echoing the prior reasoning back.
+[models."xiaomi/mimo-v2.6-pro"]
+name = "MiMo v2.6 Pro (via OpenRouter)"
+provider = "openrouter"
+context_window = 1050000
+released = "2026-09-21"
+capabilities = ["tools", "vision", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 0.435, output_per_mtok = 0.87, cache_read_per_mtok = 0.0036 }
+architecture = { parameter_count_b = 1020.0, active_parameter_count_b = 42.0, moe = true, license = "MIT", source_url = "https://huggingface.co/XiaomiMiMo/MiMo-V2.6-Pro-RL", last_verified = "2026-10-09" }
+tier = "frontier"
+open_weight = true
+strengths = ["coding", "agentic", "tool_use", "reasoning", "long_context", "cheap"]
+
+[models."xiaomi/mimo-v2.6-flash"]
+name = "MiMo v2.6 Flash (via OpenRouter)"
+provider = "openrouter"
+context_window = 1050000
+released = "2026-09-21"
+capabilities = ["tools", "vision", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 0.14, output_per_mtok = 0.28, cache_read_per_mtok = 0.0028 }
+architecture = { parameter_count_b = 309.0, active_parameter_count_b = 15.0, moe = true, license = "MIT", source_url = "https://openrouter.ai/api/v1/models", last_verified = "2026-10-09" }
+tier = "mid"
+open_weight = true
+strengths = ["speed", "cheap", "tool_use", "reasoning", "long_context"]

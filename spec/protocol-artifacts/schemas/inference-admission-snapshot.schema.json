@@ -1,5 +1,45 @@
 {
   "$defs": {
+    "DataControlsOutcome": {
+      "description": "What Harn did about data controls on one request.",
+      "oneOf": [
+        {
+          "const": "not_requested",
+          "description": "The caller left the posture at `default`. Harn set nothing and the\nprovider's server-side default applies. This is not a claim about what\nthat default is.",
+          "type": "string"
+        },
+        {
+          "const": "applied",
+          "description": "The caller asked for the strictest available posture and at least one\ndeclared control was written onto this request.",
+          "type": "string"
+        },
+        {
+          "const": "no_control_available",
+          "description": "The caller asked, the provider is researched, and it exposes no\nper-request control on this dialect. The posture was NOT achieved.",
+          "type": "string"
+        },
+        {
+          "const": "provider_unresearched",
+          "description": "The caller asked and this provider carries no researched declaration.\nNobody has checked; this is not the same claim as\n`no_control_available`.",
+          "type": "string"
+        }
+      ]
+    },
+    "DataPosture": {
+      "description": "The registry's own default posture.\n\nMaking the strictest posture the default is a product decision for each\nembedder, and making it silently inside the runtime would repeat the\nmistake this registry exists to fix — a privacy-relevant default chosen by\nomission. So the shipped value is `default`, and an embedder flips it in\none place, in config, without patching Harn.",
+      "oneOf": [
+        {
+          "const": "default",
+          "description": "Send no data-control fields. The provider's server-side default\napplies.",
+          "type": "string"
+        },
+        {
+          "const": "strictest_available",
+          "description": "Apply every declared per-request control for the resolved provider.",
+          "type": "string"
+        }
+      ]
+    },
     "InferenceAdmissionStatus": {
       "enum": [
         "admitted",
@@ -36,6 +76,28 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "description": "Admission says only what the current policy and route facts permit.\nIt does not establish credentials, availability, model readiness, or future\nadmission. Actual inference resolves and enforces its boundary again.",
   "properties": {
+    "data_controls_note": {
+      "description": "The route's own data-handling note when its model row declares one,\notherwise its provider's. Absent when neither level carries a note.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "data_controls_outcome": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/DataControlsOutcome"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "What that posture will do on this route, as the receipt will say it.\nAbsent when the route never resolved, so an unresolved route does not\nread as `not_requested`."
+    },
+    "data_posture": {
+      "$ref": "#/$defs/DataPosture",
+      "description": "The data posture inference will send on this route: the request's own\n`data_controls` when named, otherwise the catalog's\n`[data_controls_policy] default_posture`, and `default` on a transport\nthat cannot carry per-request controls. The same value the per-request\nreceipt reports as `requested_posture`."
+    },
     "effective_boundary": {
       "anyOf": [
         {
@@ -92,7 +154,8 @@
     "provider",
     "model",
     "status",
-    "training_control_planned"
+    "training_control_planned",
+    "data_posture"
   ],
   "title": "InferenceAdmissionSnapshot",
   "type": "object"

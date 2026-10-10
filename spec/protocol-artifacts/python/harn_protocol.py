@@ -322,6 +322,7 @@ AGENT_TERMINAL_CLASSES: tuple = (
     "agent_loop_protocol_failure",
     "parse_dropped",
     "generic_throw",
+    "managed_spend_paused",
 )
 HARN_ACP_SESSION_UPDATE_EXTENSIONS: tuple = (
     "artifact",
@@ -693,6 +694,7 @@ class AgentTerminalClass(str, Enum):
     AGENT_LOOP_PROTOCOL_FAILURE = "agent_loop_protocol_failure"
     PARSE_DROPPED = "parse_dropped"
     GENERIC_THROW = "generic_throw"
+    MANAGED_SPEND_PAUSED = "managed_spend_paused"
 
 
 class AgentTerminalKind(str, Enum):
@@ -765,6 +767,7 @@ class LlmErrorReason(str, Enum):
     OUTPUT_BUDGET_EXHAUSTED = "output_budget_exhausted"
     UNKNOWN = "unknown"
     POLICY_DENIED = "policy_denied"
+    MANAGED_SPEND_PAUSED = "managed_spend_paused"
 
 
 class ACPPromptErrorSchema(str, Enum):
@@ -1248,6 +1251,7 @@ class ACPSessionUpdateEnvelope(_HarnDataclass):
     sessionUpdate: str
     content: Optional[JsonValue] = None
     messageId: Optional[str] = None
+    historySourceEventId: Optional[str] = None
     entries: Optional[List[JsonValue]] = None
     keptTurnCount: Optional[int] = None
     removedTurnCount: Optional[int] = None
@@ -1794,6 +1798,7 @@ HARN_PREPARED_SESSION_STATES = ("needs_approval", "ready", "blocked", "active", 
 HARN_PREPARED_SESSION_COMMANDS = ("approval_decision", "attach", "turn", "request_delta", "stop", "pivot", "finish")
 @dataclass
 class HarnPreparedSessionApprovalDecision(_HarnDataclass):
+    request_id: str
     batch_fingerprint: str
     approved: bool
     decider: str
@@ -2284,6 +2289,13 @@ class HarnInferenceAdmissionReach(str, Enum):
 class HarnInferenceAdmissionDataPosture(str, Enum):
     DEFAULT = "default"
     STRICTEST_AVAILABLE = "strictest_available"
+
+
+class HarnInferenceAdmissionDataControlsOutcome(str, Enum):
+    NOT_REQUESTED = "not_requested"
+    APPLIED = "applied"
+    NO_CONTROL_AVAILABLE = "no_control_available"
+    PROVIDER_UNRESEARCHED = "provider_unresearched"
 @dataclass
 class HarnInferenceAdmissionBoundary(_HarnDataclass):
     reach: HarnInferenceAdmissionReach
@@ -2303,8 +2315,33 @@ class HarnInferenceAdmissionSnapshot(_HarnDataclass):
     model: str
     status: HarnInferenceAdmissionStatus
     training_control_planned: bool
+    data_posture: HarnInferenceAdmissionDataPosture
+    data_controls_note: Optional[str] = None
+    data_controls_outcome: Optional[HarnInferenceAdmissionDataControlsOutcome] = None
     effective_boundary: Optional[HarnInferenceAdmissionBoundary] = None
     governing_rule: Optional[str] = None
     local_runtime: Optional[bool] = None
     open_weight: Optional[bool] = None
     training_default: Optional[str] = None
+@dataclass
+class HarnCanonicalSessionBoundary(_HarnDataclass):
+    schema: str
+    session_id: str
+    event_id: Optional[int] = None
+    record_hash: Optional[str] = None
+
+@dataclass
+class HarnCanonicalHistoryPosition(_HarnDataclass):
+    source_event_id: str
+    origin_session_id: str
+    before_boundary: HarnCanonicalSessionBoundary
+    boundary: HarnCanonicalSessionBoundary
+
+@dataclass
+class HarnCanonicalHistoryBoundaries(_HarnDataclass):
+    tip: HarnCanonicalSessionBoundary
+    positions: List[HarnCanonicalHistoryPosition]
+
+@dataclass
+class HarnACPPromptCorrelation(_HarnDataclass):
+    messageId: Optional[str] = None

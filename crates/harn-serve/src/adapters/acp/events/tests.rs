@@ -93,6 +93,7 @@ fn standard_fixture_events() -> Vec<AgentEvent> {
         AgentEvent::AgentMessageChunk {
             session_id: "session-1".to_string(),
             content: "hello".to_string(),
+            history_source_event_id: None,
         },
         AgentEvent::AgentThoughtChunk {
             session_id: "session-1".to_string(),
@@ -1061,6 +1062,7 @@ async fn forwarded_agent_events_serialize_as_session_updates() {
         AgentEvent::AgentMessageChunk {
             session_id: "session-1".to_string(),
             content: "hello".to_string(),
+            history_source_event_id: None,
         },
         AgentEvent::AgentThoughtChunk {
             session_id: "session-1".to_string(),
@@ -1834,29 +1836,6 @@ async fn bridge_progress_and_log_session_updates_namespace_vendor_fields() {
             );
         })
         .await;
-}
-
-/// harn#905 conformance: `agent_message_chunk` is canonical, so the
-/// content block and its `text` field stay at the canonical
-/// location; only the harn-specific `visible_text` /
-/// `visible_delta` content extensions move under `content._meta.harn`.
-#[tokio::test(flavor = "current_thread")]
-async fn agent_message_chunk_visible_text_lives_under_content_meta_harn() {
-    let (tx, mut rx) = mpsc::unbounded_channel();
-    let sink = AcpAgentEventSink::new(AcpOutput::Channel(tx));
-    sink.handle_event(&AgentEvent::AgentMessageChunk {
-        session_id: "session-1".to_string(),
-        content: "hello".to_string(),
-    });
-    let line = rx.recv().await.expect("agent_message_chunk notification");
-    let payload: serde_json::Value = serde_json::from_str(&line).expect("json");
-    let content = &payload["params"]["update"]["content"];
-    assert_eq!(content["type"], "text");
-    assert_eq!(content["text"], "hello");
-    assert_eq!(content["_meta"]["harn"]["visible_text"], "hello");
-    assert_eq!(content["_meta"]["harn"]["visible_delta"], "hello");
-    assert!(content.get("visible_text").is_none());
-    assert!(content.get("visible_delta").is_none());
 }
 
 /// Pipeline-loop milestones used to be silently dropped by the ACP

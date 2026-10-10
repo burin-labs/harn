@@ -27,7 +27,7 @@ pub(super) fn append_typescript_prepared_session_types(out: &mut String) {
 export const HARN_PREPARED_SESSION_SCHEMA = "harn.prepared_session.v1" as const
 export type HarnPreparedSessionState = "needs_approval" | "ready" | "blocked" | "active" | "delta" | "stopped" | "pivoted" | "terminal"
 export type HarnPreparedSessionCommand = "approval_decision" | "attach" | "turn" | "request_delta" | "stop" | "pivot" | "finish"
-export interface HarnPreparedSessionApprovalDecision { batch_fingerprint: string; approved: boolean; decider: string }
+export interface HarnPreparedSessionApprovalDecision { request_id: string; batch_fingerprint: string; approved: boolean; decider: string }
 export interface HarnPreparedSessionBinding { session_id: string; workspace_fingerprint: string; runtime: ACPValue; consumer: ACPValue }
 export interface HarnPreparedRuntimeAttachment { session_id: string; workspace_fingerprint: string; runtime: ACPValue; consumer: ACPValue }
 export interface HarnPreparedSessionLease {
@@ -50,7 +50,7 @@ pub const HARN_PREPARED_SESSION_SCHEMA: &str = "harn.prepared_session.v1";
 pub const HARN_PREPARED_SESSION_STATES: &[&str] = &["needs_approval", "ready", "blocked", "active", "delta", "stopped", "pivoted", "terminal"];
 pub const HARN_PREPARED_SESSION_COMMANDS: &[&str] = &["approval_decision", "attach", "turn", "request_delta", "stop", "pivot", "finish"];
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct HarnPreparedSessionApprovalDecision { pub batch_fingerprint: String, pub approved: bool, pub decider: String }
+pub struct HarnPreparedSessionApprovalDecision { pub request_id: String, pub batch_fingerprint: String, pub approved: bool, pub decider: String }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HarnPreparedSessionBinding { pub session_id: String, pub workspace_fingerprint: String, pub runtime: Value, pub consumer: Value }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -81,7 +81,7 @@ pub(super) fn append_swift_prepared_session_types(out: &mut String) {
 public let harnPreparedSessionSchema = "harn.prepared_session.v1"
 public enum HarnPreparedSessionState: String, Codable, Sendable { case needsApproval = "needs_approval", ready, blocked, active, delta, stopped, pivoted, terminal }
 public enum HarnPreparedSessionCommand: String, Codable, Sendable { case approvalDecision = "approval_decision", attach, turn, requestDelta = "request_delta", stop, pivot, finish }
-public struct HarnPreparedSessionApprovalDecision: Codable, Sendable, Equatable { public var batch_fingerprint: String; public var approved: Bool; public var decider: String }
+public struct HarnPreparedSessionApprovalDecision: Codable, Sendable, Equatable { public var request_id: String; public var batch_fingerprint: String; public var approved: Bool; public var decider: String }
 public struct HarnPreparedSessionBinding: Codable, Sendable, Equatable { public var session_id: String; public var workspace_fingerprint: String; public var runtime: HarnACPValue; public var consumer: HarnACPValue }
 public struct HarnPreparedRuntimeAttachment: Codable, Sendable, Equatable { public var session_id: String; public var workspace_fingerprint: String; public var runtime: HarnACPValue; public var consumer: HarnACPValue }
 public struct HarnPreparedSessionLease: Codable, Sendable, Equatable {
@@ -105,6 +105,7 @@ HARN_PREPARED_SESSION_STATES = ("needs_approval", "ready", "blocked", "active", 
 HARN_PREPARED_SESSION_COMMANDS = ("approval_decision", "attach", "turn", "request_delta", "stop", "pivot", "finish")
 @dataclass
 class HarnPreparedSessionApprovalDecision(_HarnDataclass):
+    request_id: str
     batch_fingerprint: str
     approved: bool
     decider: str
@@ -150,7 +151,7 @@ pub(super) fn append_go_prepared_session_types(out: &mut String) {
 const HarnPreparedSessionSchema = "harn.prepared_session.v1"
 var HarnPreparedSessionStates = []string{"needs_approval", "ready", "blocked", "active", "delta", "stopped", "pivoted", "terminal"}
 var HarnPreparedSessionCommands = []string{"approval_decision", "attach", "turn", "request_delta", "stop", "pivot", "finish"}
-type HarnPreparedSessionApprovalDecision struct { BatchFingerprint string `json:"batch_fingerprint"`; Approved bool `json:"approved"`; Decider string `json:"decider"` }
+type HarnPreparedSessionApprovalDecision struct { RequestID string `json:"request_id"`; BatchFingerprint string `json:"batch_fingerprint"`; Approved bool `json:"approved"`; Decider string `json:"decider"` }
 type HarnPreparedSessionBinding struct { SessionID string `json:"session_id"`; WorkspaceFingerprint string `json:"workspace_fingerprint"`; Runtime json.RawMessage `json:"runtime"`; Consumer json.RawMessage `json:"consumer"` }
 type HarnPreparedRuntimeAttachment struct { SessionID string `json:"session_id"`; WorkspaceFingerprint string `json:"workspace_fingerprint"`; Runtime json.RawMessage `json:"runtime"`; Consumer json.RawMessage `json:"consumer"` }
 type HarnPreparedSessionLease struct {

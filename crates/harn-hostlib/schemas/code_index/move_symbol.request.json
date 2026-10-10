@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/code_index/move_symbol.request.json",
+  "title": "code_index.move_symbol request",
+  "description": "Move a top-level Rust, TypeScript/JavaScript, or Python declaration to another module. The declaration moves with its attributes or decorators and the comment block directly above it; every import and qualified use of it across the workspace is rewritten, the destination gains imports for the names the declaration uses, and the source re-imports it when still needed. A missing destination is created (for Rust, the parent module also gains a `mod` declaration). All-or-nothing: every planned file is re-parsed before anything is written.",
+  "type": "object",
+  "properties": {
+    "symbol": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Name of the declaration to move. Alias: `name`."
+    },
+    "path": {
+      "type": "string",
+      "minLength": 1,
+      "description": "File that declares it, workspace-relative or absolute. Alias: `file`."
+    },
+    "to_path": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Destination file in the same language family. Aliases: `target_file`, `destination`."
+    },
+    "line": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "1-based line of the declaration when several share the name."
+    },
+    "kind": {
+      "type": "string",
+      "enum": ["Function", "Type", "Field", "EnumCase", "Module"],
+      "description": "Symbol-graph node kind that narrows the seed."
+    },
+    "dry_run": {
+      "type": "boolean",
+      "description": "Plan and validate every edit, return them under `result: \"dry_run\"`, and write nothing. Defaults to false."
+    },
+    "session_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Optional staged-fs session id; reads and writes go through its overlay."
+    }
+  },
+  "allOf": [
+    { "anyOf": [{ "required": ["symbol"] }, { "required": ["name"] }] },
+    { "anyOf": [{ "required": ["path"] }, { "required": ["file"] }] },
+    {
+      "anyOf": [
+        { "required": ["to_path"] },
+        { "required": ["target_file"] },
+        { "required": ["destination"] }
+      ]
+    }
+  ]
+}

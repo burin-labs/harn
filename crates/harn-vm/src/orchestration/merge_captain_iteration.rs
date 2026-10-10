@@ -19,6 +19,9 @@ use super::{
     load_merge_captain_golden, new_id, MergeCaptainDriverBackend, MergeCaptainDriverMode,
     MergeCaptainDriverOptions, MergeCaptainRunSummary,
 };
+use crate::orchestration::artifact_files::{
+    resolve_manifest_path, safe_path_segment, write_json_file, write_text_file,
+};
 
 const MANIFEST_TYPE: &str = "merge_captain_iteration_manifest";
 const REPORT_TYPE: &str = "merge_captain_iteration_report";
@@ -941,65 +944,10 @@ fn resolve_artifact_root(
     }
 }
 
-fn resolve_manifest_path(base_dir: Option<&Path>, path: &str) -> PathBuf {
-    let path_buf = PathBuf::from(path);
-    if path_buf.is_absolute() {
-        path_buf
-    } else if let Some(base_dir) = base_dir {
-        base_dir.join(path_buf)
-    } else {
-        path_buf
-    }
-}
-
 fn relative_display(root: &Path, path: &Path) -> String {
     path.strip_prefix(root)
         .map(|path| path.display().to_string())
         .unwrap_or_else(|_| path.display().to_string())
-}
-
-fn safe_path_segment(value: &str) -> String {
-    let mut out = String::new();
-    for ch in value.chars() {
-        if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' {
-            out.push(ch);
-        } else {
-            out.push('_');
-        }
-    }
-    if out.is_empty() {
-        "unnamed".to_string()
-    } else {
-        out
-    }
-}
-
-fn write_json_file<T: Serialize>(path: &Path, value: &T) -> Result<(), VmError> {
-    let mut bytes = serde_json::to_vec_pretty(value)
-        .map_err(|error| VmError::Runtime(format!("failed to serialize JSON artifact: {error}")))?;
-    bytes.push(b'\n');
-    write_bytes_file(path, &bytes)
-}
-
-fn write_text_file(path: &Path, value: &str) -> Result<(), VmError> {
-    write_bytes_file(path, value.as_bytes())
-}
-
-fn write_bytes_file(path: &Path, bytes: &[u8]) -> Result<(), VmError> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|error| {
-            VmError::Runtime(format!(
-                "failed to create artifact directory {}: {error}",
-                parent.display()
-            ))
-        })?;
-    }
-    fs::write(path, bytes).map_err(|error| {
-        VmError::Runtime(format!(
-            "failed to write artifact {}: {error}",
-            path.display()
-        ))
-    })
 }
 
 #[cfg(test)]

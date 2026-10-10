@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{catalog_evidence, chat_controls, decide, effective_result};
 use super::{DenialRule, InferenceBoundary, RouteFacts};
+use crate::llm::api::data_controls::DataControlsOutcome;
 use crate::llm_config::DataPosture;
 
 #[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
@@ -48,7 +49,27 @@ pub struct InferenceAdmissionSnapshot {
     /// A control the selected chat transport can apply, not an assertion that
     /// this preview sent a request or applied a control to live traffic.
     pub training_control_planned: bool,
+    /// The data posture inference will send on this route: the request's own
+    /// `data_controls` when named, otherwise the catalog's
+    /// `[data_controls_policy] default_posture`, and `default` on a transport
+    /// that cannot carry per-request controls. The same value the per-request
+    /// receipt reports as `requested_posture`.
+    pub data_posture: DataPosture,
+    /// What that posture will do on this route, as the receipt will say it.
+    /// Absent when the route never resolved, so an unresolved route does not
+    /// read as `not_requested`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub data_controls_outcome: Option<DataControlsOutcome>,
+    /// The route's own data-handling note when its model row declares one,
+    /// otherwise its provider's. Absent when neither level carries a note.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub data_controls_note: Option<String>,
 }
+
+/// Governing rule when the requested posture refuses the route outright: the
+/// catalog records that it trains on API traffic and it exposes no control
+/// that would stop it, so `strictest_available` cannot be honored.
+pub const DATA_CONTROLS_TRAINING_REFUSED_RULE: &str = "data_controls.training_refused";
 
 /// Schema projections of the owning request and snapshot types for embedders
 /// and the host-binding generator. No hand-maintained field list is involved.
@@ -83,6 +104,11 @@ pub fn preview_inference_admission(
         open_weight: None,
         training_default: None,
         training_control_planned: false,
+        data_posture: request
+            .data_controls
+            .unwrap_or_else(crate::llm_config::data_controls_default_posture),
+        data_controls_outcome: None,
+        data_controls_note: None,
     };
     // Malformed host authority remains distinct from a valid policy refusal.
     // Never return its supplied bytes or guess that a default was admitted.
@@ -111,13 +137,15 @@ pub fn preview_inference_admission(
     };
     snapshot.local_runtime = Some(evidence.local_runtime);
     snapshot.open_weight = evidence.open_weight;
-    let controls = chat_controls(
-        &request.provider,
-        &request.model,
-        request
-            .data_controls
-            .unwrap_or_else(crate::llm_config::data_controls_default_posture),
-    );
+    let controls = chat_controls(&request.provider, &request.model, snapshot.data_posture);
+    // The plan's own posture, not the requested one: a transport that cannot
+    // carry per-request controls sends `default` whatever was asked.
+    snapshot.data_posture = serde_json::from_value(serde_json::Value::String(
+        controls.receipt.requested_posture.clone(),
+    ))
+    .unwrap_or(DataPosture::Default);
+    snapshot.data_controls_outcome = Some(controls.receipt.outcome);
+    snapshot.data_controls_note = controls.receipt.note.clone();
     snapshot.training_default =
         controls
             .receipt
@@ -131,6 +159,20 @@ pub fn preview_inference_admission(
         .applied
         .iter()
         .any(|control| control.effect == "training");
+    // Inference refuses this route before building the request; a preview
+    // that admitted it would promise a call that cannot be made.
+    if crate::llm::api::data_controls::training_refusal(
+        &request.provider,
+        &request.model,
+        snapshot.data_posture,
+        &controls.receipt,
+    )
+    .is_some()
+    {
+        snapshot.status = InferenceAdmissionStatus::Denied;
+        snapshot.governing_rule = Some(DATA_CONTROLS_TRAINING_REFUSED_RULE.into());
+        return snapshot;
+    }
     let Some(boundary) = snapshot.effective_boundary else {
         snapshot.status = InferenceAdmissionStatus::Admitted;
         return snapshot;

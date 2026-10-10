@@ -71,6 +71,7 @@ spec/protocol-artifacts/schemas/harn-tools-v2.schema.json -merge
 spec/protocol-artifacts/schemas/plan-document-v1.schema.json -merge
 spec/protocol-artifacts/schemas/inference-admission-request.schema.json -merge
 spec/protocol-artifacts/schemas/inference-admission-snapshot.schema.json -merge
+spec/protocol-artifacts/schemas/canonical-history-boundaries.schema.json -merge
 crates/harn-vm/src/triggers/event/schemas_generated.rs -merge
 crates/harn-parser/src/diagnostic/harness_migrations_generated.rs -merge
 spec/cli-surface.txt -merge

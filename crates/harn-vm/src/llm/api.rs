@@ -43,7 +43,7 @@ pub use data_controls::{
 };
 pub(crate) use dialect::{DialectContract, StreamProtocol};
 pub(crate) use errors::{
-    classify_llm_error, classify_provider_stream_error, err_for_non_success,
+    classify_llm_error, classify_provider_stream_error, classify_vm_llm_error, err_for_non_success,
     err_for_non_success_with_dialect, parse_retry_after_value, provider_http_error,
     retry_after_header, LlmErrorInfo,
 };
@@ -54,6 +54,7 @@ pub use errors::{LlmErrorKind, LlmErrorReason};
 pub use inference_boundary::{
     inference_admission_schemas, preview_inference_admission, InferenceAdmissionRequest,
     InferenceAdmissionSnapshot, InferenceAdmissionStatus, InferenceBoundary, InferenceReach,
+    DATA_CONTROLS_TRAINING_REFUSED_RULE,
 };
 pub(crate) use ollama::apply_ollama_runtime_settings;
 pub(crate) use ollama::ollama_unload_grace_duration_from_env;

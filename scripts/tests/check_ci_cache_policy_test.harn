@@ -1,4 +1,4 @@
-import { read_yaml } from "std/fs"
+import { read_json_result, read_yaml } from "std/fs"
 import {
   CiCachePolicy,
   NATIVE_CACHE_INPUTS,
@@ -10,7 +10,9 @@ import {
   ci_workflow_concurrency_errors,
   e2e_workflow_concurrency_errors,
   event_skip_propagation_errors,
+  linux_cache_consumers_restore_only_errors,
   linux_confinement_errors,
+  macos_shared_cache_errors,
   macos_warm_errors,
   minimal_pr_capacity_errors,
   nextest_version_errors,
@@ -22,16 +24,183 @@ import {
   release_warm_cache_path_policy_errors,
   release_warm_cache_path_policy_parse,
   release_warm_cache_prune_errors,
+  rust_cache_generation_admission_errors,
+  rust_cache_generation_projection_errors,
   rust_cache_refresh_concurrency_errors,
   rust_cache_refresh_miss_only_errors,
+  rust_cache_refresh_prerequisite_errors,
   save_requested,
   sccache_action_cache_size_errors,
   windows_native_admission_errors,
   windows_release_certify_warm_errors,
   windows_shared_cache_errors,
 } from "../check_ci_cache_policy"
+import { RUST_LINT_LEGS } from "../ci_cache_policy/linux_checks.harn"
 import "./ci_cache_policy/fixtures.harn"
 import "./ci_cache_policy/policy_integration_test.harn"
+
+@test
+pipeline test_release_order_is_checked_before_expensive_ci_admission(harness: Harness) {
+  const ci = read_yaml(harness.fs, "../../.github/workflows/ci.yml")
+  const steps = ci.jobs.changes.steps
+  assert_eq(steps[0].with["fetch-depth"], 0)
+  assert_eq(steps[1].name, "Keep a release commit last in its merge group")
+  assert_eq(steps[1].if, "github.event_name == 'merge_group'")
+  assert(steps[1].run.contains("release_range_release_commits"))
+  assert_eq(steps[2].id, "filter")
+  // Every compile, artifact consumer, and product proof depends directly on
+  // admission. Capacity measurement and inexpensive hygiene can stay parallel.
+  for name in [
+    "fmt",
+    "package-audit",
+    "public-api",
+    "release-contract",
+    "release-residual-audit",
+    "rust-checks",
+    "rust-cli",
+    "rust-check-inputs",
+    "rust-test-partitions",
+    "rust-artifacts-ready",
+    "security-tests-ready",
+    "rust-test",
+    "rust-security",
+    "harn-audit",
+    "source-length-ratchet",
+    "windows-cross-check",
+    "macos-lint",
+    "portal",
+    "vscode",
+    "docs-site",
+    "docs-checks",
+    "setup-harn-action",
+  ] {
+    const needs = ci.jobs[name].needs
+    assert(needs == "changes" || (type_of(needs) == "list" && needs.contains("changes")))
+  }
+  assert_eq(ci.jobs["ci-status"].if, "always()")
+  assert(ci.jobs["ci-status"].needs.contains("changes"))
+  const aggregate = ci.jobs["ci-status"].steps[0].run
+  assert(aggregate.contains("CI tier was not measured."))
+  assert(aggregate.contains("[\"Detect changes\"]=\"$" + "{{ needs.changes.result }}\""))
+  assert_eq(
+    len(
+      ci.jobs["release-contract"].steps.filter(
+        { step -> step?.name == "Keep a release commit last in its merge group" },
+      )
+        .to_list(),
+    ),
+    0,
+  )
+}
+
+@test
+pipeline test_macos_lint_matrix_preserves_every_typed_graph_and_fail_closed_aggregate(
+  harness: Harness,
+) {
+  const ci = read_yaml(harness.fs, "../../.github/workflows/ci.yml")
+  const nightly = read_yaml(harness.fs, "../../.github/workflows/macos-nightly.yml")
+  assert_eq(macos_shared_cache_errors(ci, nightly), [])
+  const dispatched = harness.process.run(
+    {
+      program: "bash",
+      args: ["scripts/ci/run_rust_lint_lane.sh", "--list-legs"],
+      cwd: path_normalize(path_join(harness.fs.cwd(), "../..")),
+    },
+  )
+  assert_eq(dispatched.exit_code, 0)
+  assert_eq(trim(dispatched.stdout).split("\n"), RUST_LINT_LEGS)
+  const lint = ci.jobs["macos-lint"]
+  const timing_error =
+    "ci.yml:macos-lint must retain bounded source-bound workspace compile timings"
+  for field in ["HARN_LINT_TIMINGS_DIR", "HARN_LINT_SOURCE_SHA"] {
+    const steps = lint.steps.map(
+      { step ->
+        if step?.env?.HARN_LINT_SOURCE_SHA == "$" + "{{ github.sha }}" {
+          return {...step, env: {...step.env, [field]: ""}}
+        }
+        return step
+      },
+    )
+      .to_list()
+    assert(
+      macos_shared_cache_errors(
+        {...ci, jobs: {...ci.jobs, "macos-lint": {...lint, steps: steps}}},
+        nightly,
+      )
+        .contains(timing_error),
+    )
+  }
+  const timing_removed = lint.steps.filter(
+    { step -> step?.name != "Upload actual workspace compile timings" },
+  )
+    .to_list()
+  assert(
+    macos_shared_cache_errors(
+      {...ci, jobs: {...ci.jobs, "macos-lint": {...lint, steps: timing_removed}}},
+      nightly,
+    )
+      .contains(timing_error),
+  )
+  const timing_uploads = lint.steps.filter(
+    { step -> step?.name == "Upload actual workspace compile timings" },
+  )
+    .to_list()
+  assert_eq(len(timing_uploads), 1)
+  const artifact_name = timing_uploads[0].with.name
+  const run_id = "$" + "{{ github.run_id }}"
+  const attempt = "$" + "{{ github.run_attempt }}"
+  const first_upload = artifact_name.replace(run_id, "100").replace(attempt, "1")
+  const rerun_upload = artifact_name.replace(run_id, "100").replace(attempt, "2")
+  const separate_upload = artifact_name.replace(run_id, "101").replace(attempt, "1")
+  assert_eq(first_upload, "macos-workspace-compile-timings-100-1")
+  assert_eq(rerun_upload, "macos-workspace-compile-timings-100-2")
+  assert_eq(separate_upload, "macos-workspace-compile-timings-101-1")
+  assert(
+    first_upload != rerun_upload && first_upload != separate_upload
+      && rerun_upload != separate_upload,
+  )
+  for name in [
+    "macos-workspace-compile-timings",
+    "macos-workspace-compile-timings-" + run_id,
+    "macos-workspace-compile-timings-" + attempt,
+  ] {
+    const steps = lint.steps.map(
+      { step ->
+        if step?.name == "Upload actual workspace compile timings" {
+          return {...step, with: {...step.with, name: name}}
+        }
+        return step
+      },
+    )
+      .to_list()
+    assert(
+      macos_shared_cache_errors(
+        {...ci, jobs: {...ci.jobs, "macos-lint": {...lint, steps: steps}}},
+        nightly,
+      )
+        .contains(timing_error),
+    )
+  }
+  for mutation in [
+    {...lint, strategy: {...lint.strategy, matrix: {include: [{kind: "workspace"}]}}},
+    {...lint, strategy: {...lint.strategy, "fail-fast": true}},
+    {...lint, env: {RUSTFLAGS: ""}},
+    {...lint, name: "unreported leg"},
+  ] {
+    const invalid = {...ci, jobs: {...ci.jobs, "macos-lint": mutation}}
+    assert(
+      macos_shared_cache_errors(invalid, nightly).contains(
+        "ci.yml:macos-lint must run all three named strict lint graphs on independent hosted runners",
+      ),
+    )
+  }
+  const invalid = {...ci, jobs: {...ci.jobs, macos: {...ci.jobs.macos, steps: []}}}
+  assert(
+    macos_shared_cache_errors(invalid, nightly).contains(
+      "ci.yml:macos must retain the required aggregate and verify the complete current-attempt lint census",
+    ),
+  )
+}
 
 fn sccache_action(
   default_size: string = "",
@@ -238,21 +407,22 @@ pipeline test_minimal_pr_capacity_policy_and_negative_controls(harness: Harness,
       "ci.yml:ci-status must require repository policies on every Rust-changing main push, proven or not",
     ),
   )
-  // A proven push built nothing, so downloading from this run would fail.
+  // Every run builds its own CLI: a download naming another run measures a
+  // binary this commit did not build.
   for consumer in ["audit-scripts", "binary-size-signal"] {
-    let own_run_download = ci
-    own_run_download.jobs[consumer].steps = own_run_download.jobs[consumer].steps.map(
+    let foreign_download = ci
+    foreign_download.jobs[consumer].steps = foreign_download.jobs[consumer].steps.map(
       { step ->
         if contains(to_string(step?.uses ?? ""), "download-artifact-with-retry") {
-          return {...step, with: {...step.with, "run-id": ""}}
+          return {...step, with: {...step.with, "run-id": "4242"}}
         }
         return step
       },
     )
       .to_list()
     assert(
-      minimal_pr_capacity_errors(own_run_download, publish).contains(
-        "ci.yml:${consumer} must download the shared CLI from the run the artifact barrier names",
+      minimal_pr_capacity_errors(foreign_download, publish).contains(
+        "ci.yml:${consumer} must download the shared CLI this run built",
       ),
     )
   }
@@ -263,14 +433,23 @@ pipeline test_minimal_pr_capacity_policy_and_negative_controls(harness: Harness,
   const shell_refusal = "ci.yml:shell-gates is a cheap refusal and must carry no event condition"
   const shell_errors = minimal_pr_capacity_errors(main_only_shell, publish)
   assert(shell_errors.any(fn(error) { contains(error, shell_refusal) }))
-  // The Windows cross-compile check is required on every merge-group
-  // candidate: a main-only job, a job queued behind the Linux lanes, or an
+  // The Windows cross-compile check is required on every full-suite pull
+  // request and merge-group candidate: a main-only job, a job queued behind the Linux lanes, or an
   // aggregate that tolerates a merge-group skip each reopen the gap.
   let main_only_cross = ci
   main_only_cross.jobs["windows-cross-check"].if = "github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.changes.outputs.rust == 'true'"
   assert(
     minimal_pr_capacity_errors(main_only_cross, publish).contains(
-      "ci.yml:windows-cross-check must run on every merge-group candidate and on Rust-changing main pushes",
+      "ci.yml:windows-cross-check must run on every full-suite pull request and merge-group candidate and on Rust-changing main pushes",
+    ),
+  )
+  // A merge group cannot read `CI-Scope: full`, so a merge-group-only check
+  // lets a declared full-suite pull request land without it.
+  let merge_group_only_cross = ci
+  merge_group_only_cross.jobs["windows-cross-check"].if = "(github.event_name == 'merge_group' && needs.changes.outputs.post_merge_tier != 'true') || (github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.changes.outputs.rust == 'true')"
+  assert(
+    minimal_pr_capacity_errors(merge_group_only_cross, publish).contains(
+      "ci.yml:windows-cross-check must run on every full-suite pull request and merge-group candidate and on Rust-changing main pushes",
     ),
   )
   let queued_cross = ci
@@ -422,6 +601,225 @@ pipeline test_public_runner_policy_keeps_historical_registry_rows_inert(
       release_policy,
     ),
     [],
+  )
+}
+
+@test
+pipeline test_cache_generation_projection_binds_actual_inputs_and_post_order(
+  harness: Harness,
+  task: unknown,
+) {
+  const action = read_yaml(harness.fs, "../../.github/actions/rust-cache/action.yml", nil)
+  const companion = read_yaml(
+    harness.fs,
+    "../../.github/actions/rust-cache-generation/action.yml",
+    nil,
+  )
+  const pin = unwrap(
+    read_json_result(harness.fs, "../../.github/actions/rust-cache/pinned-config.json"),
+  )
+  assert_eq(rust_cache_generation_projection_errors(action, companion, pin), [])
+  const bad_inputs = {
+    ...action,
+    runs: {
+      ...action.runs,
+      steps: action.runs.steps.map(
+        { step ->
+          if step?.id == "generation" {
+            return {...step, with: {...step.with, "shared-key": "different"}}
+          }
+          return step
+        },
+      )
+        .to_list(),
+    },
+  }
+  assert_eq(len(rust_cache_generation_projection_errors(bad_inputs, companion, pin)), 1)
+  const reversed = {...action, runs: {...action.runs, steps: action.runs.steps.reverse()}}
+  assert_eq(len(rust_cache_generation_projection_errors(reversed, companion, pin)), 1)
+  assert_eq(
+    len(
+      rust_cache_generation_projection_errors(
+        action,
+        {...companion, runs: {...companion.runs, "post-if": "always()"}},
+        pin,
+      ),
+    ),
+    1,
+  )
+  assert_eq(
+    len(rust_cache_generation_projection_errors(action, companion, {...pin, bundle_sha256: ""})),
+    1,
+  )
+}
+
+@test
+pipeline test_linux_ci_cannot_add_unadmitted_parallel_cache_saves(harness: Harness, task: unknown) {
+  const workflow = read_yaml(harness.fs, "../../.github/workflows/ci.yml", nil)
+  assert_eq(linux_cache_consumers_restore_only_errors(workflow), [])
+  for job_name in ["rust-cli", "rust-check-inputs", "package-audit"] {
+    const job = workflow.jobs[job_name]
+    const steps = job.steps.map(
+      { step ->
+        if step?.uses == "./.github/actions/rust-cache" {
+          return {...step, with: {...step.with, save: "true"}}
+        }
+        return step
+      },
+    )
+      .to_list()
+    let jobs = {...workflow.jobs}
+    jobs[job_name] = {...job, steps: steps}
+    assert_eq(len(linux_cache_consumers_restore_only_errors({...workflow, jobs: jobs})), 1)
+  }
+}
+
+@test
+pipeline test_cache_refresh_requires_a_successful_cli_post_lifecycle_before_other_families(
+  harness: Harness,
+  task: unknown,
+) {
+  const workflow = read_yaml(harness.fs, "../../.github/workflows/rust-cache-refresh.yml", nil)
+  const job = workflow.jobs["rust-cache-refresh"]
+  const cli = workflow.jobs["rust-cache-refresh-cli"]
+  assert_eq(rust_cache_refresh_prerequisite_errors(workflow), [])
+  assert_eq(
+    len(
+      rust_cache_refresh_prerequisite_errors(
+        {...workflow, jobs: {...workflow.jobs, "rust-cache-refresh": {...job, needs: nil}}},
+      ),
+    ),
+    1,
+  )
+  assert_eq(
+    len(
+      rust_cache_refresh_prerequisite_errors(
+        {...workflow, jobs: {...workflow.jobs, "rust-cache-refresh": {...job, if: "always()"}}},
+      ),
+    ),
+    1,
+  )
+  const steps = cli.steps.map(
+    { step ->
+      if step?.id == "rust-cache" {
+        return {...step, "continue-on-error": true}
+      }
+      return step
+    },
+  )
+    .to_list()
+  assert_eq(
+    len(
+      rust_cache_refresh_prerequisite_errors(
+        {
+          ...workflow,
+          jobs: {
+            ...workflow.jobs,
+            "rust-cache-refresh": {...job, steps: steps},
+            "rust-cache-refresh-cli": {...cli, steps: steps},
+          },
+        },
+      ),
+    ),
+    1,
+  )
+  assert_eq(
+    len(
+      rust_cache_refresh_prerequisite_errors(
+        {...workflow, jobs: {...workflow.jobs, "rust-cache-refresh-cli": {...cli, env: {}}}},
+      ),
+    ),
+    1,
+  )
+}
+
+@test
+pipeline test_cache_refresh_whole_workflow_prevents_interleaved_pending_job_replacement(
+  harness: Harness,
+  task: unknown,
+) {
+  const workflow = read_yaml(harness.fs, "../../.github/workflows/rust-cache-refresh.yml", nil)
+  assert_eq(rust_cache_refresh_concurrency_errors(workflow), [])
+  let jobs = {...workflow.jobs}
+  for job_name in ["rust-cache-refresh-cli", "rust-cache-refresh"] {
+    jobs[job_name] = {...jobs[job_name], concurrency: workflow.concurrency}
+  }
+  // An overlapping run's CLI can replace this run's pending dependent job.
+  assert_eq(
+    len(rust_cache_refresh_concurrency_errors({...workflow, concurrency: nil, jobs: jobs})),
+    4,
+  )
+  for job_name in ["rust-cache-refresh-cli", "rust-cache-refresh"] {
+    const job = workflow.jobs[job_name]
+    assert_eq(
+      len(
+        rust_cache_refresh_concurrency_errors(
+          {
+            ...workflow,
+            jobs: {...workflow.jobs, [job_name]: {...job, concurrency: workflow.concurrency}},
+          },
+        ),
+      ),
+      1,
+    )
+    assert_eq(
+      len(
+        rust_cache_refresh_concurrency_errors(
+          {
+            ...workflow,
+            jobs: {
+              ...workflow.jobs,
+              [job_name]: {...job, strategy: {...job.strategy, "max-parallel": 2}},
+            },
+          },
+        ),
+      ),
+      1,
+    )
+  }
+  assert_eq(
+    len(
+      rust_cache_refresh_concurrency_errors(
+        {...workflow, concurrency: {...workflow.concurrency, group: "per-source"}},
+      ),
+    ),
+    1,
+  )
+  assert_eq(
+    len(
+      rust_cache_refresh_concurrency_errors(
+        {...workflow, concurrency: {...workflow.concurrency, "cancel-in-progress": true}},
+      ),
+    ),
+    1,
+  )
+}
+
+@test
+pipeline test_cache_refresh_admits_capacity_without_clearing_current_generation(
+  harness: Harness,
+  task: unknown,
+) {
+  const command =
+    "./scripts/prune_ci_cache_generations.sh --ensure-headroom \"$HARN_CACHE_SAVE_HEADROOM_BYTES\""
+  const job = {steps: [{name: "Prepare Linux cache generation save", run: command}]}
+  assert_eq(rust_cache_generation_admission_errors(job), [])
+  assert_eq(len(rust_cache_generation_admission_errors({steps: []})), 1)
+  assert_eq(
+    len(
+      rust_cache_generation_admission_errors(
+        {
+          steps: [
+            {
+              name: "Prepare Linux cache generation save",
+              run: "./scripts/prune_ci_cache_generations.sh --clear-family-prefix \"$HARN_CACHE_FAMILY_PREFIX\"\n"
+                + command,
+            },
+          ],
+        },
+      ),
+    ),
+    1,
   )
 }
 
@@ -688,6 +1086,29 @@ pipeline test_release_warm_cache_concurrency_rejects_setup_only_preemption(
       "build-release-binaries.yml:build must instantiate only after setup selects a real build",
       "build-release-binaries.yml:build must share one warm lane per target and qualify every other run",
       "build-release-binaries.yml:build must let only real main-branch warms supersede a target warm",
+    ],
+  )
+}
+
+pipeline test_release_concurrency_rejects_pre_fix_dispatch_groups() {
+  const workflow = release_binary_workflow()
+  const invalid = {
+    ...workflow,
+    concurrency: {
+      group: "build-release-binaries-"
+        + gha_expression(
+          "(github.event_name == 'workflow_dispatch' && inputs.benchmark_source_sha != '' && format('benchmark-{0}-{1}', inputs.benchmark_source_sha, github.sha)) || (github.event_name == 'schedule' && 'source-main') || (github.event_name == 'workflow_dispatch' && inputs.warm_cache_only && 'warm-main') || (github.event_name == 'push' && format('branch-{0}', github.run_id)) || github.ref_name",
+        ),
+      "cancel-in-progress": gha_expression(
+        "github.event_name == 'workflow_dispatch' && inputs.warm_cache_only",
+      ),
+    },
+  }
+  assert_eq(
+    release_warm_cache_concurrency_errors(invalid),
+    [
+      "build-release-binaries.yml must give branch pushes run-qualified workflow lanes",
+      "build-release-binaries.yml must reserve workflow cancellation for manual warms",
     ],
   )
 }
@@ -1072,9 +1493,9 @@ pipeline test_macos_warm_requires_a_main_producer_and_a_pull_request_consumer(
     ...ci,
     jobs: {
       ...ci.jobs,
-      macos: {
-        ...ci.jobs.macos,
-        steps: ci.jobs.macos.steps.filter(
+      "macos-lint": {
+        ...ci.jobs["macos-lint"],
+        steps: ci.jobs["macos-lint"].steps.filter(
           { step ->
             return !contains(
               trim(step?.run ?? ""),
@@ -1088,7 +1509,7 @@ pipeline test_macos_warm_requires_a_main_producer_and_a_pull_request_consumer(
   }
   assert(
     macos_warm_errors(declared_policy, producer, ci_without_consumer).contains(
-      "ci.yml:macos must restore workspace-macos-warm through one macos-warm-restore step with cold fallback",
+      "ci.yml:macos-lint must restore workspace-macos-warm through one macos-warm-restore step with cold fallback",
     ),
   )
 }

@@ -1,5 +1,6 @@
 import { help_requested, parse, parser } from "std/cli/argparse"
 import { path_visibility, visibility_failure, zero_scan_failure } from "./path_visibility.harn"
+import { is_mechanically_checked_source_projection } from "./source_projections.harn"
 
 /** This gate's own name, quoted back into any denial it reports. */
 const CHECK_NAME = "check-source-file-lengths"
@@ -29,8 +30,6 @@ const CARGO_TARGET_DIR_PREFIXES = [".target-"]
 const WORKTREE_CARGO_TARGET_DIR_PREFIX = "target-"
 
 const CARGO_TARGET_ARTIFACT_DIR_NAMES = ["debug", "release"]
-
-const GENERATED_SOURCE_PREFIXES = ["spec/protocol-artifacts/"]
 
 /** The only tree whose `.harn` sources the ratchet governs. */
 pub const STDLIB_SOURCE_DIR = "crates/harn-stdlib/src/stdlib"
@@ -198,12 +197,7 @@ fn files_below(harness: Harness, root: string, rel_dir: string, suffix: string) 
 
 /** Whether `path` is a generated source the ratchet must not govern. */
 pub fn is_generated_source(path: string) -> bool {
-  for prefix in GENERATED_SOURCE_PREFIXES {
-    if path.starts_with(prefix) {
-      return true
-    }
-  }
-  return false
+  return is_mechanically_checked_source_projection(path)
 }
 
 /** Inventory all repo Rust plus the canonical stdlib Harn source. */

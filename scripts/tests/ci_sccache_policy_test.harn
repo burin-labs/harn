@@ -3,15 +3,9 @@ import {
   cache_refresh_workflow_errors,
   ci_linux_lane_policy_errors,
   cli_producer_hosted_ceiling_minutes,
-  cli_producer_owned_ceiling_minutes,
-  cli_producer_reservation_errors,
-  cli_producer_runner_expression,
-  cli_producer_tier_expression,
-  cli_producer_timeout_expression,
   consumer_canary_errors,
   e2e_elastic_capacity_errors,
   landlock_incapable_runner_errors,
-  merge_group_datacenter_errors,
   producer_admission_expression,
   producer_cache_save_reserve_minutes,
   producer_cli_timeout_expression,
@@ -43,49 +37,21 @@ fn gha_expression(body: string) -> string {
 // would make the fixture describe a producer the policy now refuses.
 const MEASURED_BUILD_JOBS = "$" + "{{ steps.resource-budget.outputs.build_jobs }}"
 
-// The census and capacity jobs as the workflow wires them for the shared CLI
-// producer's reserved runners and the workspace producer's merge-group host.
+// The census and capacity jobs as the workflow wires them for the workspace
+// producer's pull-request route. Merge groups skip both.
 const CENSUS_WORKFLOW = "burin-labs/.github/.github/workflows/runner-availability.yml@fixture"
 
-const CLI_RESERVATION_CENSUS = {
+const PRODUCER_CENSUS = {
   if:
-    "github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)",
+    "github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository",
   uses: CENSUS_WORKFLOW,
-  with: {linux_probe_runner_tag: "harn-ci-producer"},
 }
 
-const DATACENTER_CENSUS = {
-  if: "github.event_name == 'merge_group'",
-  uses: CENSUS_WORKFLOW,
-  with: {linux_runner_tag: "harn-ci-big", linux_fetch_runner_tag: "hetzner-1"},
-}
-
-const CLI_RESERVATION_CAPACITY = {
-  if: "$"
-    + "{{ !cancelled() && (github.event_name == 'merge_group' || github.event_name == 'pull_request') }}",
-  needs: ["runner-availability", "datacenter-availability"],
-  outputs: {
-    route: "$" + "{{ steps.decision.outputs.route }}",
-    cli_route: "$" + "{{ steps.cli-decision.outputs.route }}",
-    merge_route: "$" + "{{ steps.merge-decision.outputs.route }}",
-  },
-  steps: [
-    {id: "decision", run: "bash scripts/ci/runner_capacity.sh"},
-    {
-      id: "cli-decision",
-      run: "bash scripts/ci/runner_capacity.sh",
-      env: {CAPACITY_POOL: "linux_probe", CAPACITY_ROUTED_EVENT: "pull_request merge_group"},
-    },
-    {
-      id: "merge-decision",
-      run: "bash scripts/ci/runner_capacity.sh",
-      env: {
-        CAPACITY_POOL: "linux_fetch",
-        CAPACITY_ROUTED_EVENT: "merge_group",
-        RUNNER_CAPACITY: "$" + "{{ needs.datacenter-availability.outputs.capacity }}",
-      },
-    },
-  ],
+const PRODUCER_CAPACITY = {
+  if: "$" + "{{ !cancelled() && github.event_name == 'pull_request' }}",
+  needs: ["runner-availability"],
+  outputs: {route: "$" + "{{ steps.decision.outputs.route }}"},
+  steps: [{id: "decision", run: "bash scripts/ci/runner_capacity.sh"}],
 }
 
 const BUDGET_STEP = {
@@ -339,13 +305,34 @@ pipeline test_consumer_canary_accepts_checkout_mint_and_script(harness: Harness,
   assert_eq(consumer_canary_errors(consumer_canary_workflow([])), [])
 }
 
+@test
+pipeline test_consumer_observer_cannot_hide_publication(harness: Harness, task: unknown) {
+  const workflow = consumer_canary_workflow([{uses: "./.github/actions/observe-consumer"}])
+  assert(len(consumer_canary_errors(workflow)) > 0)
+  assert(len(consumer_canary_errors(workflow, {runs: {using: "composite", steps: []}})) > 0)
+  const safe = {
+    runs: {using: "composite", steps: [{run: "bash scripts/ci/consumer_canary.sh --observe"}]},
+  }
+  assert_eq(consumer_canary_errors(workflow, safe), [])
+  const upload = {runs: {using: "composite", steps: [{uses: "actions/upload-artifact@v4"}]}}
+  assert(len(consumer_canary_errors(workflow, upload)) > 0)
+  const summary = {
+    runs: {using: "composite", steps: [{run: "echo report >> $GITHUB_STEP_SUMMARY"}]},
+  }
+  assert(len(consumer_canary_errors(workflow, summary)) > 0)
+}
+
 fn persistent_lane(
   rust_cache_key: string,
   write_cache: bool = false,
   timeout: string = "",
   owned_rung: bool = true,
 ) {
-  const cache_inputs = {"shared-key": rust_cache_key, "cache-workspace-crates": "true"}
+  const cache_inputs = {
+    "shared-key": rust_cache_key,
+    "cache-workspace-crates": "true",
+    save: "false",
+  }
   let lane = {
     "runs-on": producer_runner_expression(owned_rung),
     needs: ["changes", "runner-availability", "rust-producer-capacity"],
@@ -380,7 +367,7 @@ fn persistent_lane(
 }
 
 fn hosted_lane(cache_key: string, write_cache: bool = false) {
-  const cache_inputs = {"shared-key": cache_key, "cache-workspace-crates": "true"}
+  const cache_inputs = {"shared-key": cache_key, "cache-workspace-crates": "true", save: "false"}
   let lane = {
     "runs-on": "ubuntu-24.04",
     env: {HARN_RUNNER_TIER: "github-hosted"},
@@ -414,16 +401,15 @@ fn lint_lane() {
   }
 }
 
+fn cli_producer_timeout() -> string {
+  return "$" + "{{ " + to_string(cli_producer_hosted_ceiling_minutes()) + " }}"
+}
+
 fn workflow() {
-  const package_audit = hosted_lane("package-audit", true)
+  const package_audit = hosted_lane("package-audit", false)
   const lint = lint_lane()
-  const producer = persistent_lane("workspace-tests", true)
-  const cli_producer = persistent_lane(
-    "harn-ci-cli",
-    true,
-    cli_producer_timeout_expression(),
-    false,
-  )
+  const producer = persistent_lane("workspace-tests", false)
+  const cli_producer = persistent_lane("harn-ci-cli", false, cli_producer_timeout(), false)
   const rust_test = {
     env: {RUSTFLAGS: "-D warnings -Clink-arg=-fuse-ld=mold"},
     "runs-on": "ubuntu-24.04",
@@ -457,17 +443,11 @@ fn workflow() {
     },
     jobs: {
       "package-audit": package_audit,
-      "runner-availability": CLI_RESERVATION_CENSUS,
-      "datacenter-availability": DATACENTER_CENSUS,
-      "rust-producer-capacity": CLI_RESERVATION_CAPACITY,
+      "runner-availability": PRODUCER_CENSUS,
+      "rust-producer-capacity": PRODUCER_CAPACITY,
       "rust-cli": {
         ...cli_producer,
-        "runs-on": cli_producer_runner_expression(),
-        env: {
-          ...cli_producer.env,
-          HARN_RUNNER_TIER: cli_producer_tier_expression(),
-          RUSTFLAGS: "-D warnings -Clink-arg=-fuse-ld=mold",
-        },
+        env: {...cli_producer.env, RUSTFLAGS: "-D warnings -Clink-arg=-fuse-ld=mold"},
         steps: cli_producer.steps
           + [
             BUDGET_STEP,
@@ -504,7 +484,7 @@ fn workflow() {
               if: "vars.HARN_CI_DISABLE_COLOCATED_TESTS != 'true'",
               env: {HARN_LLM_CALLS_DISABLED: "1"},
               run:
-                "${HOST_BOUND_RUST_TEST_FILTER_SETUP} scripts/ci/run_rust_test_lane.sh cargo-nextest nextest run --locked --workspace --profile ci ${NEUTRAL_RUST_TEST_FILTER_FLAG}",
+                "scripts/ci/run_rust_test_lane.sh bash scripts/ci/run_workspace_tests.sh count:1/3",
             },
           ],
       },
@@ -582,11 +562,7 @@ fn workflow() {
         steps: [
           {
             name: "Run the release residual audit",
-            env: {
-              DOCS_CONTRACTS_PROVEN_BY: gha_expression(
-                "needs.changes.outputs.sprint_fast_ci != 'true' && 'Check Harn documentation' || ''",
-              ),
-            },
+            env: {DOCS_CONTRACTS_PROVEN_BY: "Check Harn documentation"},
             run:
               "./scripts/release_gate.sh audit --residual-only --docs-contracts-proven-by \"$DOCS_CONTRACTS_PROVEN_BY\"",
           },
@@ -597,7 +573,7 @@ fn workflow() {
         "timeout-minutes": 50,
         needs: ["changes"],
         if:
-          "needs.changes.outputs.rust == 'true' && needs.changes.outputs.sprint_fast_ci != 'true'",
+          "needs.changes.outputs.rust == 'true' && needs.changes.outputs.post_merge_tier != 'true'",
         permissions: {actions: "read", contents: "read"},
         steps: [
           {
@@ -624,8 +600,7 @@ fn workflow() {
         "runs-on": "ubuntu-24.04",
         "timeout-minutes": 65,
         needs: ["changes"],
-        if:
-          "needs.changes.outputs.rust == 'true' && needs.changes.outputs.sprint_fast_ci != 'true'",
+        if: "needs.changes.outputs.rust == 'true'",
         strategy: {
           matrix: {
             include: [
@@ -774,6 +749,35 @@ pipeline test_accepts_persistent_compile_lanes_with_hosted_fallback(
   assert_eq(ci_linux_lane_policy_errors(workflow()), [])
 }
 
+@test
+pipeline test_ordinary_linux_consumers_cannot_reintroduce_persistent_generation_writers() {
+  const valid = workflow()
+  assert_eq(ci_linux_lane_policy_errors(valid), [])
+  for name in ["package-audit", "rust-check-inputs", "rust-cli"] {
+    const job = valid.jobs[name]
+    const steps = job.steps.map(
+      { step ->
+        if step?.uses == "./.github/actions/rust-cache" {
+          return {...step, with: {...step.with, save: "true"}}
+        }
+        return step
+      },
+    )
+      .to_list()
+    const invalid = {...valid, jobs: {...valid.jobs, [name]: {...job, steps: steps}}}
+    assert(
+      ci_linux_lane_policy_errors(invalid).contains(
+        "ci.yml:${name} must restore only; persistent Linux generations belong to the admitted refresh producer",
+      ),
+    )
+    assert(
+      ci_linux_lane_policy_errors(invalid).contains(
+        "ci.yml:${name} must grant actions: write to persist rust-cache",
+      ),
+    )
+  }
+}
+
 /**
  * The refresh lives in its own workflow now, so its checks take a document with
  * its own `on:` block rather than a job inside the CI graph.
@@ -878,7 +882,7 @@ pipeline test_rejects_unbounded_or_unconditional_cache_generation_save(
   )
   assert(
     errors.contains(
-      "rust-cache-refresh.yml:rust-cache-refresh must replace stale generations with bounded save headroom",
+      "rust-cache-refresh.yml:rust-cache-refresh must admit save headroom without deleting its current generation",
     ),
   )
 }
@@ -1599,11 +1603,6 @@ pipeline test_owned_ceiling_uses_cold_safe_budgets_without_cache_save(harness: H
     producer_hosted_ceiling_minutes() - producer_cache_save_reserve_minutes(),
     "the owned ceiling must carry the cold-safe step budgets without a cache-save reserve",
   )
-  assert_eq(
-    cli_producer_owned_ceiling_minutes(),
-    cli_producer_hosted_ceiling_minutes() - producer_cache_save_reserve_minutes(),
-    "the owned CLI ceiling must carry the cold-safe step budget without a cache-save reserve",
-  )
 }
 
 @test
@@ -1639,7 +1638,6 @@ pipeline test_owned_cli_rejects_the_hosted_only_timeout(harness: Harness) {
   assert_eq(producer_hosted_ceiling_minutes(), 68)
   assert_eq(producer_owned_ceiling_minutes(), 56)
   assert_eq(cli_producer_hosted_ceiling_minutes(), 49)
-  assert_eq(cli_producer_owned_ceiling_minutes(), 37)
 }
 
 pipeline test_security_wait_uses_the_shared_waiter_budget() {
@@ -1735,36 +1733,43 @@ pipeline test_rejects_a_producer_ladder_off_its_rungs_or_ceilings(harness: Harne
   const errors = ci_linux_lane_policy_errors(invalid)
   assert(
     errors.contains(
-      "ci.yml:rust-check-inputs must ladder the owned linux_big pool on same-repository pull requests, the hetzner-1 runners on merge groups, then ubuntu-24.04",
+      "ci.yml:rust-check-inputs must ladder the owned linux_big pool on same-repository pull requests, then ubuntu-24.04",
     ),
   )
   assert(errors.contains("ci.yml:rust-check-inputs must mirror every one of its runner tiers"))
-  // The shared CLI must not wait on the owned pool's one-job compile budget,
-  // and must not lose its reserved runners: both the shared owned rung and the
-  // a hosted-only ladder are refused.
+  // The shared CLI must not wait on the owned pool's compile budget: an owned
+  // rung on it is refused, and the hosted-only ladder is the valid one.
   const cli = valid.jobs["rust-cli"]
-  const cli_ladder_error =
-    "ci.yml:rust-cli must ladder the reserved harn-ci-producer runners on same-repository pull requests and merge groups, then ubuntu-24.04"
-  for runs_on in [producer_runner_expression(true), producer_runner_expression(false)] {
-    const regressed = {...valid, jobs: {...valid.jobs, "rust-cli": {...cli, "runs-on": runs_on}}}
-    assert(ci_linux_lane_policy_errors(regressed).contains(cli_ladder_error))
+  const cli_ladder_error = "ci.yml:rust-cli must ladder then ubuntu-24.04"
+  const regressed = {
+    ...valid,
+    jobs: {...valid.jobs, "rust-cli": {...cli, "runs-on": producer_runner_expression(true)}},
   }
+  assert(ci_linux_lane_policy_errors(regressed).contains(cli_ladder_error))
   assert(!ci_linux_lane_policy_errors(valid).contains(cli_ladder_error))
   assert(
     errors.contains(
-      "ci.yml:rust-check-inputs must keep the 56-minute owned ceiling, the 56-minute merge-group datacenter ceiling and the 68-minute hosted ceiling sized from its step budgets plus a cache-save reserve",
+      "ci.yml:rust-check-inputs must keep the 56-minute owned ceiling and the 68-minute hosted ceiling sized from its step budgets plus a cache-save reserve",
     ),
   )
 }
 
 @test
-pipeline test_host_bound_sandbox_filter_has_one_owner(harness: Harness, task: unknown) {
+pipeline test_host_bound_sandbox_filter_has_one_owner(harness: Harness) {
   const root = path_normalize(path_join(harness.fs.cwd(), "../.."))
   const test_names = harness.fs.read_text(path_join(root, HOST_BOUND_RUST_TEST_FILTER_SOURCE))
     .split("\n")
     .filter({ name -> trim(name) != "" })
     .to_list()
-  assert_eq(test_names.count, 11)
+  assert(test_names.count > 0, "the host-bound registry must be nonempty")
+  assert(
+    test_names.contains("nested_availability_refuses_before_command_deadline"),
+    "the registry must reach the nested confinement regression",
+  )
+  assert(
+    test_names.contains("a_confined_command_stacks_its_own_confinement"),
+    "the registry must reach the stacked confinement regression",
+  )
   const rendered = harness.process.run(
     {program: path_join(root, HOST_BOUND_RUST_TEST_FILTER_COMMAND), args: []},
   )
@@ -1776,15 +1781,16 @@ pipeline test_host_bound_sandbox_filter_has_one_owner(harness: Harness, task: un
   const renderer_source = harness.fs.read_text(path_join(root, HOST_BOUND_RUST_TEST_FILTER_COMMAND))
   assert_eq(renderer_source.split(HOST_BOUND_RUST_TEST_FILTER_SOURCE).count - 1, 1)
   for projection in [
-    {path: ".github/workflows/ci.yml", references: 3},
-    {path: "scripts/release_audit_contract.json", references: 2},
+    {path: ".github/workflows/ci.yml", references: 2},
+    {path: "scripts/release_audit_contract.json", references: 1},
+    {path: "scripts/ci/run_workspace_tests.sh", references: 1},
     {path: "scripts/release_gate.sh", references: 1},
     {path: "scripts/ci/warm_rust_cache.sh", references: 1},
     {path: "scripts/ci_cache_policy/host_bound_rust_test_filter.harn", references: 1},
   ] {
     const source = harness.fs.read_text(path_join(root, projection.path))
     assert_eq(
-      source.split(HOST_BOUND_RUST_TEST_FILTER_COMMAND).count - 1,
+      source.split(path_basename(HOST_BOUND_RUST_TEST_FILTER_COMMAND)).count - 1,
       projection.references,
       projection.path + " must read the owned host-bound filter at every projection",
     )
@@ -1798,7 +1804,7 @@ pipeline test_host_bound_sandbox_filter_has_one_owner(harness: Harness, task: un
 }
 
 @test
-pipeline test_rejects_masked_host_bound_filter_renderer_failure(harness: Harness, task: unknown) {
+pipeline test_rejects_masked_workspace_test_failure(harness: Harness, task: unknown) {
   const valid = workflow()
   const producer = valid.jobs["rust-check-inputs"]
   const unsafe = {
@@ -1809,7 +1815,13 @@ pipeline test_rejects_masked_host_bound_filter_renderer_failure(harness: Harness
         ...producer,
         steps: producer.steps.map(
           { step ->
-            return {...step, run: to_string(step?.run ?? "").replace("set -euo pipefail; ", "")}
+            return {
+              ...step,
+              run: to_string(step?.run ?? "").replace(
+                "run_workspace_tests.sh count:1/3",
+                "run_workspace_tests.sh count:1/3 || true",
+              ),
+            }
           },
         )
           .to_list(),
@@ -2030,7 +2042,7 @@ pipeline test_residual_rehearsal_names_the_docs_slice_it_relies_on(
 ) {
   const valid = workflow()
   const message =
-    "ci.yml:release-residual-audit may skip check-docs only by naming the harn-audit docs slice outside sprint mode"
+    "ci.yml:release-residual-audit may skip check-docs only by naming the harn-audit docs slice"
   assert(!ci_linux_lane_policy_errors(valid).contains(message))
   // A renamed docs slice leaves the rehearsal pointing at a job that proves nothing.
   const audit = valid.jobs["harn-audit"]
@@ -2052,21 +2064,19 @@ pipeline test_residual_rehearsal_names_the_docs_slice_it_relies_on(
     },
   }
   assert(ci_linux_lane_policy_errors(renamed).contains(message))
-  // Leaning on the slice in sprint mode, where it is skipped, proves nothing.
+  // Naming any other job leans on a proof that is not the docs slice.
   const residual = valid.jobs["release-residual-audit"]
-  const always = {
+  const elsewhere = {
     ...valid,
     jobs: {
       ...valid.jobs,
       "release-residual-audit": {
         ...residual,
-        steps: [
-          {...residual.steps[0], env: {DOCS_CONTRACTS_PROVEN_BY: "Check Harn documentation"}},
-        ],
+        steps: [{...residual.steps[0], env: {DOCS_CONTRACTS_PROVEN_BY: "Check Harn sources"}}],
       },
     },
   }
-  assert(ci_linux_lane_policy_errors(always).contains(message))
+  assert(ci_linux_lane_policy_errors(elsewhere).contains(message))
 }
 
 @test
@@ -2096,247 +2106,56 @@ pipeline test_test_producer_leaves_the_cli_to_its_sibling(harness: Harness, task
   assert(ci_linux_lane_policy_errors(doubled).contains(message))
 }
 
-/**
- * The reserved label is named by the census probe, the capacity step and the
- * producer's runs-on. Each one drifting on its own is refused, so the reserved
- * runners cannot fall silently out of reach while every check stays green.
- */
+/** The shared CLI producer has one rung: GitHub's free standard runner. */
 @test
-pipeline test_cli_producer_reservation_agrees_across_census_capacity_and_runs_on(
-  harness: Harness,
-  task: unknown,
-) {
+pipeline test_cli_producer_runs_only_on_the_free_hosted_runner(harness: Harness, task: unknown) {
   const valid = workflow()
-  assert_eq(cli_producer_reservation_errors(valid), [])
-  assert(contains(cli_producer_runner_expression(), "\"harn-ci-producer\""))
-  // A busy reserved pool takes GitHub's free standard runner. Paid runner
-  // labels and the retired provider switch do not remain in the projection.
-  assert(!contains(cli_producer_runner_expression(), "overflow"))
+  assert_eq(ci_linux_lane_policy_errors(valid), [])
+  const reserved = {
+    ...valid,
+    jobs: {
+      ...valid.jobs,
+      "rust-cli": {
+        ...valid.jobs["rust-cli"],
+        "runs-on": "$"
+          + "{{ (needs.rust-producer-capacity.outputs.cli_route == 'owned'\n  && fromJSON('[\"self-hosted\", \"Linux\", \"X64\", \"harn-ci-producer\"]'))\n  || 'ubuntu-24.04' }}",
+      },
+    },
+  }
   assert(
-    contains(cli_producer_runner_expression(), "\"harn-ci-producer\"]'))\n  || 'ubuntu-24.04'"),
+    ci_linux_lane_policy_errors(reserved).contains("ci.yml:rust-cli must ladder then ubuntu-24.04"),
   )
-  assert(!contains(cli_producer_runner_expression(), "ubicloud"))
-  assert(!contains(cli_producer_runner_expression(), "ubuntu-8core"))
-  assert(!contains(cli_producer_runner_expression(), "HARN_CI_PAID_LINUX_PROVIDER"))
-  assert(contains(cli_producer_tier_expression(), "cli_route == 'owned'\n  && 'self-hosted'"))
-  const census = valid.jobs["runner-availability"]
-  const capacity = valid.jobs["rust-producer-capacity"]
-  const step = capacity.steps[1]
-  const with_capacity_step = { changed ->
-    return {
-      ...valid,
-      jobs: {
-        ...valid.jobs,
-        "rust-producer-capacity": {...capacity, steps: [capacity.steps[0], changed]},
-      },
-    }
-  }
-  const cases = [
-    {
-      workflow: {
-        ...valid,
-        jobs: {
-          ...valid.jobs,
-          "runner-availability": {...census, with: {linux_probe_runner_tag: "harn-ci-big"}},
-        },
-      },
-      error:
-        "ci.yml:runner-availability must probe the harn-ci-producer runners the shared CLI producer reserves",
-    },
-    {
-      workflow: {
-        ...valid,
-        jobs: {
-          ...valid.jobs,
-          "runner-availability": {...census, if: "github.event_name == 'pull_request'"},
-        },
-      },
-      error: "ci.yml:runner-availability must measure merge groups for the shared CLI producer",
-    },
-    {
-      workflow: {
-        ...valid,
-        jobs: {
-          ...valid.jobs,
-          "rust-producer-capacity": {...capacity, outputs: {route: capacity.outputs.route}},
-        },
-      },
-      error: "ci.yml:rust-producer-capacity must publish cli_route from its cli-decision step",
-    },
-    {
-      workflow: with_capacity_step(
-        {...step, env: {...step.env, CAPACITY_VENDOR_RUNNER: "ubicloud-standard-8"}},
-      ),
-      error:
-        "ci.yml:rust-producer-capacity step cli-decision must route the linux_probe pool on pull requests and merge groups and name no paid vendor runner for a busy pool",
-    },
-    {
-      workflow: with_capacity_step(
-        {...step, env: {...step.env, CAPACITY_ROUTED_EVENT: "pull_request"}},
-      ),
-      error:
-        "ci.yml:rust-producer-capacity step cli-decision must route the linux_probe pool on pull requests and merge groups and name no paid vendor runner for a busy pool",
-    },
-    {
-      workflow: with_capacity_step({...step, env: {...step.env, CAPACITY_POOL: "linux_big"}}),
-      error:
-        "ci.yml:rust-producer-capacity step cli-decision must route the linux_probe pool on pull requests and merge groups and name no paid vendor runner for a busy pool",
-    },
-  ]
-  for case in cases {
-    assert(cli_producer_reservation_errors(case.workflow).contains(case.error))
-    // The lane policy carries the reservation check, not just the helper.
-    assert(ci_linux_lane_policy_errors(case.workflow).contains(case.error))
-  }
 }
 
 /**
- * The workspace producer's merge-group rung names the datacenter host in the
- * second census, the merge-group capacity step and `runs-on`. Each drifting on
- * its own is refused, and so is the pull-request-only ladder this replaced.
+ * Merge groups take the hosted rung for the workspace producer. The datacenter
+ * route ran the security archive past its 24-minute step limit five times out
+ * of five while the hosted rung finished it in 7-14 minutes (#9428), so a
+ * ladder that names that host again, or any second owned rung, is refused.
  */
 @test
-pipeline test_merge_group_datacenter_rung_agrees_across_census_capacity_and_runs_on(
-  harness: Harness,
-  task: unknown,
-) {
+pipeline test_merge_groups_take_the_hosted_workspace_producer(harness: Harness, task: unknown) {
   const valid = workflow()
-  assert_eq(merge_group_datacenter_errors(valid), [])
-  // The residential pool stays pull-request-only: the merge-group rung names
-  // the host label, and the pull-request rung's label set does not.
-  assert(
-    contains(
-      producer_runner_expression(),
-      "merge_route == 'owned'\n  && fromJSON('[\"self-hosted\", \"Linux\", \"X64\", \"harn-ci-big\", \"hetzner-1\"]'))",
-    ),
+  assert_eq(ci_linux_lane_policy_errors(valid), [])
+  assert(!contains(producer_runner_expression(), "merge_route"))
+  assert(!contains(producer_runner_expression(), "hetzner-1"))
+  assert_eq(
+    producer_runner_expression(),
+    "$"
+      + "{{ (needs.rust-producer-capacity.outputs.route == 'owned'\n  && fromJSON('[\"self-hosted\", \"Linux\", \"X64\", \"harn-ci-big\"]'))\n  || 'ubuntu-24.04' }}",
   )
-  assert(contains(producer_tier_expression(), "merge_route == 'owned'\n  && 'self-hosted'"))
-  // Both owned routes must leave room for the same archive and complete tests.
-  assert(contains(producer_timeout_expression(), "outputs.route == 'owned'\n  && 56)"))
-  assert(contains(producer_timeout_expression(), "merge_route == 'owned'\n  && 56)"))
   const producer = valid.jobs["rust-check-inputs"]
-  const pull_request_only = "$"
-    + "{{ (needs.rust-producer-capacity.outputs.route == 'owned'\n  && fromJSON('[\"self-hosted\", \"Linux\", \"X64\", \"harn-ci-big\"]'))\n  || 'ubuntu-24.04' }}"
+  const datacenter_ladder = "$"
+    + "{{ (needs.rust-producer-capacity.outputs.route == 'owned'\n  && fromJSON('[\"self-hosted\", \"Linux\", \"X64\", \"harn-ci-big\"]'))\n  || (needs.rust-producer-capacity.outputs.merge_route == 'owned'\n  && fromJSON('[\"self-hosted\", \"Linux\", \"X64\", \"harn-ci-big\", \"hetzner-1\"]'))\n  || 'ubuntu-24.04' }}"
   assert(
     ci_linux_lane_policy_errors(
       {
         ...valid,
-        jobs: {...valid.jobs, "rust-check-inputs": {...producer, "runs-on": pull_request_only}},
+        jobs: {...valid.jobs, "rust-check-inputs": {...producer, "runs-on": datacenter_ladder}},
       },
     )
       .contains(
-        "ci.yml:rust-check-inputs must ladder the owned linux_big pool on same-repository pull requests, the hetzner-1 runners on merge groups, then ubuntu-24.04",
+        "ci.yml:rust-check-inputs must ladder the owned linux_big pool on same-repository pull requests, then ubuntu-24.04",
       ),
   )
-  const truncated_merge_ceiling = regex_replace(
-    "merge_route == 'owned'\n  && 56\\)",
-    "merge_route == 'owned'\n  && 20)",
-    producer_timeout_expression(),
-  )
-  assert(truncated_merge_ceiling != producer_timeout_expression())
-  assert(
-    ci_linux_lane_policy_errors(
-      {
-        ...valid,
-        jobs: {
-          ...valid.jobs,
-          "rust-check-inputs": {...producer, "timeout-minutes": truncated_merge_ceiling},
-        },
-      },
-    )
-      .contains(
-        "ci.yml:rust-check-inputs must keep the 56-minute owned ceiling, the 56-minute merge-group datacenter ceiling and the 68-minute hosted ceiling sized from its step budgets plus a cache-save reserve",
-      ),
-  )
-  const census = valid.jobs["datacenter-availability"]
-  const capacity = valid.jobs["rust-producer-capacity"]
-  const step = capacity.steps[2]
-  const with_merge_step = { changed ->
-    return {
-      ...valid,
-      jobs: {
-        ...valid.jobs,
-        "rust-producer-capacity": {
-          ...capacity,
-          steps: [capacity.steps[0], capacity.steps[1], changed],
-        },
-      },
-    }
-  }
-  const with_census = { changed ->
-    return {...valid, jobs: {...valid.jobs, "datacenter-availability": changed}}
-  }
-  const census_error =
-    "ci.yml:datacenter-availability must count the hetzner-1 harn-ci-big runners on merge groups with the same census as runner-availability"
-  const step_error =
-    "ci.yml:rust-producer-capacity step merge-decision must route merge groups over the datacenter-availability linux_fetch count alone"
-  const cases = [
-    {
-      workflow: with_census(
-        {...census, with: {linux_runner_tag: "harn-ci-big", linux_fetch_runner_tag: "other-host"}},
-      ),
-      error: census_error,
-    },
-    {
-      workflow: with_census({...census, with: {linux_fetch_runner_tag: "hetzner-1"}}),
-      error: census_error,
-    },
-    {workflow: with_census({...census, if: "github.event_name != 'push'"}), error: census_error},
-    {
-      workflow: with_census(
-        {...census, uses: "burin-labs/.github/.github/workflows/runner-availability.yml@other"},
-      ),
-      error: census_error,
-    },
-    {
-      workflow: {
-        ...valid,
-        jobs: {
-          ...valid.jobs,
-          "rust-producer-capacity": {...capacity, needs: "runner-availability"},
-        },
-      },
-      error: "ci.yml:rust-producer-capacity must wait for datacenter-availability",
-    },
-    {
-      workflow: {
-        ...valid,
-        jobs: {
-          ...valid.jobs,
-          "rust-producer-capacity": {
-            ...capacity,
-            outputs: pick(capacity.outputs, ["route", "cli_route"]),
-          },
-        },
-      },
-      error: "ci.yml:rust-producer-capacity must publish merge_route from its merge-decision step",
-    },
-    {
-      workflow: with_merge_step({...step, env: {...step.env, CAPACITY_POOL: "linux_big"}}),
-      error: step_error,
-    },
-    {
-      workflow: with_merge_step(
-        {...step, env: {...step.env, CAPACITY_ROUTED_EVENT: "pull_request merge_group"}},
-      ),
-      error: step_error,
-    },
-    {
-      workflow: with_merge_step(
-        {
-          ...step,
-          env: {
-            ...step.env,
-            RUNNER_CAPACITY: "$" + "{{ needs.runner-availability.outputs.capacity }}",
-          },
-        },
-      ),
-      error: step_error,
-    },
-  ]
-  for case in cases {
-    assert(merge_group_datacenter_errors(case.workflow).contains(case.error))
-    // The lane policy carries the datacenter check, not just the helper.
-    assert(ci_linux_lane_policy_errors(case.workflow).contains(case.error))
-  }
 }

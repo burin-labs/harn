@@ -21,9 +21,10 @@ grep -Fq 'release_range_release_commits' "$tmp/resolve.sh" \
   || fail "could not extract the setup resolver from $workflow"
 
 repo="$tmp/repo"
-mkdir -p "$repo/scripts/lib" "$repo/.github"
+mkdir -p "$repo/scripts/lib" "$repo/scripts/ci" "$repo/.github"
 cp "$root/scripts/lib/release_version.sh" "$root/scripts/lib/release_candidate_run.sh" \
-  "$root/scripts/lib/release_consumer_verdict.sh" "$repo/scripts/lib/"
+  "$root/scripts/lib/release_consumer_verdict.sh" "$root/scripts/lib/consumer_canary_policy.sh" "$repo/scripts/lib/"
+cp "$root/scripts/ci/consumer_canary_policy.json" "$repo/scripts/ci/"
 cp "$root/scripts/release_contract.env" "$root/scripts/release_runner_matrix.sh" "$repo/scripts/"
 cp "$root/scripts/release_contract.harn" "$root/scripts/path_visibility.harn" "$repo/scripts/"
 cp "$root/.github/release-runner-policy.json" "$repo/.github/"
@@ -45,6 +46,37 @@ ln -s "$HARN_BIN" "$tmp/bin/harn"
 cat > "$tmp/bin/gh" <<'EOF'
 #!/usr/bin/env bash
 [[ "${FAKE_GH_FAIL:-0}" == 1 ]] && exit 1
+if [[ -n "${FAKE_GH_TRACE_FILE:-}" ]]; then
+  printf '%s\n' "$2" >> "$FAKE_GH_TRACE_FILE"
+fi
+case "$2" in
+  */actions/runs/[0-9]*)
+    if [[ "$2" != *"/artifacts?"* ]]; then
+      [[ "${FAKE_DIRECT_GH_FAIL:-0}" != 1 ]] || exit 1
+      # Direct reads keep one counter and sequence per run id, apart from
+      # discovery, so a fixture can lose a run from discovery while it lives.
+      run_id="${2##*/}"
+      direct_state_file="${FAKE_GH_STATE_FILE:?}.direct.$run_id"
+      read_count=0
+      [[ ! -f "$direct_state_file" ]] || read -r read_count < "$direct_state_file"
+      read_count=$((read_count + 1))
+      printf '%s\n' "$read_count" > "$direct_state_file"
+      sequence_var="FAKE_DIRECT_SEQUENCE_$run_id"
+      IFS=',' read -r -a states <<< "${!sequence_var:-${FAKE_DIRECT_SEQUENCE:-success}}"
+      index=$((read_count - 1))
+      (( index < ${#states[@]} )) || index=$((${#states[@]} - 1))
+      state="${states[$index]}"
+      [[ "$state" != absent ]] || state=in_progress
+      conclusion=null
+      [[ "$state" != success ]] || conclusion='"success"'
+      [[ "$state" != failed ]] || conclusion='"failure"'
+      printf '{"id":%s,"head_sha":"%s","event":"%s","path":".github/workflows/build-release-binaries.yml","head_repository":{"full_name":"burin-labs/harn"},"status":"%s","conclusion":%s}\n' \
+        "$run_id" "${FAKE_DIRECT_SHA:-${GITHUB_SHA:?}}" "${FAKE_DIRECT_EVENT:-merge_group}" \
+        "$([[ "$state" == success || "$state" == failed ]] && echo completed || echo "$state")" "$conclusion"
+      exit 0
+    fi
+    ;;
+esac
 case "$2" in
   */build-release-binaries.yml/runs\?*)
     if [[ -n "${FAKE_QUEUE_SEQUENCE:-}" ]]; then
@@ -57,23 +89,33 @@ case "$2" in
       index=$((read_count - 1))
       (( index < ${#states[@]} )) || index=$((${#states[@]} - 1))
       state="${states[$index]}"
+      if [[ "$state" == absent ]]; then
+        printf '{"total_count":0,"workflow_runs":[]}\n'
+        exit 0
+      fi
       if [[ "$*" == *"--jq"* ]]; then
         [[ "$state" != success ]] || printf '%s\n' "${FAKE_QUEUE_RUN:-4242}"
       else
         conclusion=null
         [[ "$state" != success ]] || conclusion='"success"'
         [[ "$state" != failed ]] || conclusion='"failure"'
-        printf '{"workflow_runs":[{"id":%s,"head_sha":"%s","event":"merge_group","status":"%s","conclusion":%s}]}\n' \
-          "${FAKE_QUEUE_RUN:-4242}" "${GITHUB_SHA:?}" "$([[ "$state" == success || "$state" == failed ]] && echo completed || echo "$state")" "$conclusion"
+        if [[ -n "${FAKE_SECOND_RUN:-}" ]]; then
+          printf '{"total_count":2,"workflow_runs":[{"id":%s,"head_sha":"%s","event":"merge_group","status":"%s","conclusion":%s},{"id":%s,"head_sha":"%s","event":"merge_group","status":"in_progress","conclusion":null}]}\n' \
+            "${FAKE_QUEUE_RUN:-4242}" "${GITHUB_SHA:?}" "$([[ "$state" == success || "$state" == failed ]] && echo completed || echo "$state")" "$conclusion" \
+            "$FAKE_SECOND_RUN" "${GITHUB_SHA:?}"
+        else
+          printf '{"total_count":1,"workflow_runs":[{"id":%s,"head_sha":"%s","event":"merge_group","status":"%s","conclusion":%s}]}\n' \
+            "${FAKE_QUEUE_RUN:-4242}" "${GITHUB_SHA:?}" "$([[ "$state" == success || "$state" == failed ]] && echo completed || echo "$state")" "$conclusion"
+        fi
       fi
     else
       if [[ "$*" == *"--jq"* ]]; then
         [[ -z "${FAKE_QUEUE_RUN:-}" ]] || printf '%s\n' "$FAKE_QUEUE_RUN"
       elif [[ -n "${FAKE_QUEUE_RUN:-}" ]]; then
-        printf '{"workflow_runs":[{"id":%s,"head_sha":"%s","event":"merge_group","status":"completed","conclusion":"success"}]}\n' \
+        printf '{"total_count":1,"workflow_runs":[{"id":%s,"head_sha":"%s","event":"merge_group","status":"completed","conclusion":"success"}]}\n' \
           "$FAKE_QUEUE_RUN" "${GITHUB_SHA:?}"
       else
-        printf '{"workflow_runs":[]}\n'
+        printf '{"total_count":0,"workflow_runs":[]}\n'
       fi
     fi
     ;;
@@ -283,17 +325,41 @@ grep -Fq "release commit(s) $buried_sha below its head" "$tmp/buried.log" \
   || fail "the refusal does not name the buried release commit: $(cat "$tmp/buried.log")"
 
 # The merge-group guard in ci.yml keeps a release last in its group: the entry
-# behind the buried release fails, and the release entry itself passes.
-awk '/- name: Keep a release commit last in its merge group/{found=1} found && /        run: \|/{body=1;next} body && /^      - /{exit} body{print substr($0,11)}' \
+# behind the buried release fails, and the release entry itself passes. GitHub
+# gives the entry behind the release the release commit as its group base, so
+# the guard must judge from main, never from that base.
+awk '/^  changes:/{admission=1;next} admission && /^  [a-zA-Z0-9_-]+:/{exit} admission && /- name: Keep a release commit last in its merge group/{found=1} found && /        run: \|/{body=1;next} body && /^      - /{exit} body{print substr($0,11)}' \
   "$root/.github/workflows/ci.yml" > "$tmp/guard.sh"
-grep -Fq 'release_range_release_commits' "$tmp/guard.sh" || fail "could not extract the merge-group guard from ci.yml"
+grep -Fq 'release_range_release_commits' "$tmp/guard.sh" || fail "the merge-group guard must run in changes before expensive CI admission"
 guard() {
-  (cd "$repo" && BASE_SHA="$1" HEAD_SHA="$2" bash -eu "$tmp/guard.sh") > "$tmp/guard.log" 2>&1
+  (cd "$repo" && MAIN_REF="$1" HEAD_SHA="$2" BASE_SHA="$buried_sha" bash -eu "$tmp/guard.sh") > "$tmp/guard.log" 2>&1
 }
 if guard "$push_base" "$(git -C "$repo" rev-parse HEAD)"; then
   fail "the merge-group guard admitted an entry queued behind a release"
 fi
+grep -Fq "queued behind release commit(s) $buried_sha" "$tmp/guard.log" \
+  || fail "the merge-group guard does not name the buried release: $(cat "$tmp/guard.log")"
 guard "$push_base" "$buried_sha" || fail "the merge-group guard refused the release entry: $(cat "$tmp/guard.log")"
+guard "$buried_sha" "$(git -C "$repo" rev-parse HEAD)" \
+  || fail "the merge-group guard refused an entry after its release reached main: $(cat "$tmp/guard.log")"
+
+# Failed admission leaves the tier output unmeasured. Execute the aggregate's
+# actual first decision to prove that absence cannot become a green skip.
+awk '/^  ci-status:/{aggregate=1} aggregate && /        run: \|/{body=1;next} body{print substr($0,11)} body && /          esac/{exit}' \
+  "$root/.github/workflows/ci.yml" > "$tmp/admission-result.sh"
+grep -Fq 'CI tier was not measured.' "$tmp/admission-result.sh" \
+  || fail "could not extract the aggregate's admission-result decision"
+for tier in '' unmeasured; do
+  if POST_MERGE_TIER_ACTIVE="$tier" bash -eu "$tmp/admission-result.sh" > "$tmp/admission-result.log" 2>&1; then
+    fail "the aggregate accepted an absent or invalid admission decision"
+  fi
+  grep -Fq 'CI tier was not measured.' "$tmp/admission-result.log" \
+    || fail "the aggregate did not name missing admission: $(cat "$tmp/admission-result.log")"
+done
+for tier in true false; do
+  POST_MERGE_TIER_ACTIVE="$tier" bash -eu "$tmp/admission-result.sh" \
+    || fail "the aggregate refused a measured admission decision"
+done
 
 # The release's merge group builds the candidate at its own commit, which is
 # the commit that lands on main; a group without a release at its head builds
@@ -311,7 +377,7 @@ resolve queue_release EVENT_NAME=merge_group REF_NAME=gh-readonly-queue/main/pr-
   || fail "the release's merge group did not build its candidate: $(cat "$tmp/queue_release.outputs")"
 
 # When that commit reaches main, the push finds the queue's run and builds
-# nothing; with the queue's run unreadable it builds rather than guess.
+# nothing; unreadable custody refuses another build.
 resolve pushed_after_queue PUSH_BEFORE="$push_base" FAKE_QUEUE_RUN=4242
 [[ "$(output pushed_after_queue build_mode)" == queued && "$(output pushed_after_queue should_build_binaries)" == false &&
    "$(matrix_targets pushed_after_queue)" == "" ]] \
@@ -334,11 +400,62 @@ resolve pushed_waits_for_queue \
   || fail "the push rebuilt while its exact queue candidate was finishing: $(cat "$tmp/pushed_waits_for_queue.outputs")"
 [[ "$(cat "$tmp/wait-state")" == 2 ]] \
   || fail "the resolver did not re-read the in-progress candidate"
-grep -Fq "candidate run 4242 is in_progress; waiting" "$tmp/pushed_waits_for_queue.log" \
+grep -Fq "candidate run 4242 is in_progress; pending=1 known_run_ids=4242; waiting" "$tmp/pushed_waits_for_queue.log" \
   || fail "the resolver did not report the bounded wait"
 
-# A terminal failed candidate, an exhausted wait, and an unread API each take
-# the safe rebuild path and name why. None may collapse into reuse.
+# A later empty discovery does not erase an already observed live producer.
+# The old observer reads the empty list on poll two and starts five duplicates;
+# the repaired observer revalidates the saved run directly until its manifest.
+resolve pushed_preserves_observed_run \
+  PUSH_BEFORE="$push_base" GITHUB_RUN_ID=9999 FAKE_QUEUE_RUN=4242 \
+  FAKE_QUEUE_SEQUENCE=in_progress,absent,absent FAKE_DIRECT_SEQUENCE=in_progress,success \
+  FAKE_GH_STATE_FILE="$tmp/observed-state" FAKE_GH_TRACE_FILE="$tmp/observed-trace" \
+  RELEASE_CANDIDATE_WAIT_ATTEMPTS=3 RELEASE_CANDIDATE_POLL_SECONDS=0
+[[ "$(output pushed_preserves_observed_run build_mode)" == queued &&
+   "$(output pushed_preserves_observed_run should_build_binaries)" == false &&
+   "$(matrix_targets pushed_preserves_observed_run)" == "" ]] \
+  || fail "discovery loss erased a known live producer and started duplicate targets"
+[[ "$(cat "$tmp/observed-state")" == 3 ]] || fail "known producer was not observed through terminal state"
+[[ "$(grep -c '/actions/runs/4242$' "$tmp/observed-trace")" == 2 ]] \
+  || fail "known producer was not revalidated by exact run identity"
+
+for invalid in wrong_source wrong_event unread; do
+  extra=()
+  case "$invalid" in
+    wrong_source) extra+=(FAKE_DIRECT_SHA=0000000000000000000000000000000000000000) ;;
+    wrong_event) extra+=(FAKE_DIRECT_EVENT=push) ;;
+    unread) extra+=(FAKE_DIRECT_GH_FAIL=1) ;;
+  esac
+  if run_resolver "observed_$invalid" PUSH_BEFORE="$push_base" GITHUB_RUN_ID=9999 \
+    FAKE_QUEUE_RUN=4242 FAKE_QUEUE_SEQUENCE=in_progress,absent \
+    FAKE_GH_STATE_FILE="$tmp/observed-$invalid-state" \
+    RELEASE_CANDIDATE_WAIT_ATTEMPTS=2 RELEASE_CANDIDATE_POLL_SECONDS=0 "${extra[@]}"; then
+    fail "known producer $invalid authorized reuse or duplicate targets"
+  fi
+  grep -Fq "Known candidate run 4242" "$tmp/observed_$invalid.log" \
+    || fail "known producer $invalid refusal lost its identity"
+done
+
+# Two same-SHA producers are both remembered. When discovery loses them and
+# the first fails while the second is still live, the push waits for the
+# second instead of treating the first failure as permission to rebuild.
+resolve pushed_preserves_every_live_producer \
+  PUSH_BEFORE="$push_base" GITHUB_RUN_ID=9999 FAKE_QUEUE_RUN=4242 FAKE_SECOND_RUN=4343 \
+  FAKE_QUEUE_SEQUENCE=in_progress,absent,absent \
+  FAKE_DIRECT_SEQUENCE_4242=failed FAKE_DIRECT_SEQUENCE_4343=in_progress,success \
+  FAKE_GH_STATE_FILE="$tmp/two-live-state" FAKE_GH_TRACE_FILE="$tmp/two-live-trace" \
+  RELEASE_CANDIDATE_WAIT_ATTEMPTS=3 RELEASE_CANDIDATE_POLL_SECONDS=0
+[[ "$(output pushed_preserves_every_live_producer build_mode)" == queued &&
+   "$(output pushed_preserves_every_live_producer should_build_binaries)" == false &&
+   "$(matrix_targets pushed_preserves_every_live_producer)" == "" ]] \
+  || fail "one producer's failure authorized duplicates while another was live: $(cat "$tmp/pushed_preserves_every_live_producer.outputs")"
+[[ "$(grep -c '/actions/runs/4343$' "$tmp/two-live-trace")" == 2 ]] \
+  || fail "the second live producer was not followed to its terminal state"
+grep -Fq "pending=2 known_run_ids=4242,4343" "$tmp/pushed_preserves_every_live_producer.log" \
+  || fail "the resolver did not report every known live producer"
+
+# Terminal failures and missing manifests permit a replacement. Pending or
+# unread custody refuses duplication and names why.
 resolve pushed_after_failed_queue \
   PUSH_BEFORE="$push_base" \
   GITHUB_RUN_ID=9999 \
@@ -366,18 +483,18 @@ resolve pushed_after_manifestless_queue \
 grep -Fq "run 4246 succeeded without candidate-manifest-$queue_sha" "$tmp/pushed_after_manifestless_queue.log" \
   || fail "the manifestless rebuild did not name its reason"
 
-resolve pushed_after_queue_timeout \
+if run_resolver pushed_after_queue_timeout \
   PUSH_BEFORE="$push_base" \
   GITHUB_RUN_ID=9999 \
   FAKE_QUEUE_RUN=4244 \
   FAKE_QUEUE_SEQUENCE=in_progress \
   FAKE_GH_STATE_FILE="$tmp/timeout-state" \
   RELEASE_CANDIDATE_WAIT_ATTEMPTS=1 \
-  RELEASE_CANDIDATE_POLL_SECONDS=0
-[[ "$(output pushed_after_queue_timeout build_mode)" == candidate ]] \
-  || fail "a timed-out queue candidate was reused"
-grep -Fq "Timed out waiting for exact-SHA merge-group candidate run 4244" "$tmp/pushed_after_queue_timeout.log" \
-  || fail "the timed-out rebuild did not name its reason"
+  RELEASE_CANDIDATE_POLL_SECONDS=0; then
+  fail "a live producer after the bounded wait authorized another build"
+fi
+grep -Fq "candidate run 4244 remains in_progress" "$tmp/pushed_after_queue_timeout.log" \
+  || fail "the bounded-wait refusal did not name the known producer and pending state"
 
 # The push workflow itself has the same SHA and is always in progress during
 # setup. Even a synthetic successful row with its id must not be reused.
@@ -392,13 +509,63 @@ resolve pushed_excludes_itself \
 [[ "$(output pushed_excludes_itself build_mode)" == candidate ]] \
   || fail "the push reused its own workflow run"
 
-resolve pushed_unread PUSH_BEFORE="$push_base" FAKE_GH_FAIL=1
-[[ "$(output pushed_unread build_mode)" == candidate && "$(output pushed_unread candidate_source_sha)" == "$queue_sha" ]] \
-  || fail "an unreadable queue run did not fall back to building: $(cat "$tmp/pushed_unread.outputs")"
+if run_resolver pushed_unread PUSH_BEFORE="$push_base" FAKE_GH_FAIL=1; then
+  fail "unread candidate custody authorized another build"
+fi
+grep -Fq "Candidate custody is unreadable" "$tmp/pushed_unread.log" \
+  || fail "unread custody was not named"
 
 # A pull request builds nothing, even the release PR itself; it only reports.
 resolve pull_request EVENT_NAME=pull_request REF_NAME=8861/merge
 [[ "$(output pull_request build_mode)" == none && "$(output pull_request should_build_binaries)" == false ]] \
   || fail "a pull request built something: $(cat "$tmp/pull_request.outputs")"
+
+# A benchmark's AOT and build checkouts must remain identical when main
+# advances between jobs. Execute the real setup resolver, then use its ref for
+# both checkouts exactly as the workflow's two consumers do.
+git -C "$repo" checkout --quiet main
+commit_version 0.10.160 "Stable benchmark fixture"
+benchmark_sha="$(git -C "$repo" rev-parse HEAD)"
+resolve benchmark_frozen EVENT_NAME=workflow_dispatch INPUT_BENCHMARK_ONLY=true \
+  INPUT_TARGETS=x86_64-unknown-linux-gnu INPUT_RUNNER_PROFILE=standard
+benchmark_ref="$(output benchmark_frozen ref)"
+aot_version="$(git -C "$repo" show "$benchmark_ref:Cargo.toml" | sed -n 's/^version = "\([^"]*\)"$/\1/p')"
+commit_version 0.10.161-dev "Advance main after AOT"
+build_version="$(git -C "$repo" show "$benchmark_ref:Cargo.toml" | sed -n 's/^version = "\([^"]*\)"$/\1/p')"
+[[ "$aot_version" == "$build_version" && "$build_version" == 0.10.160 &&
+   "$benchmark_ref" == "$benchmark_sha" ]] \
+  || fail "split benchmark checkouts changed source/version: AOT=$aot_version build=$build_version ref=$benchmark_ref"
+echo "ok: benchmark AOT and build retain 0.10.160 after main advances to 0.10.161-dev"
+
+resolve manual_warm_frozen EVENT_NAME=workflow_dispatch INPUT_WARM_CACHE_ONLY=true
+warm_sha="$(git -C "$repo" rev-parse HEAD)"
+[[ "$(output manual_warm_frozen ref)" == "$warm_sha" ]] \
+  || fail "manual warm retained a moving branch ref"
+
+# Explicit source selection keeps policy from current HEAD but reads its
+# actual source version, and refuses a source ref that does not bind the SHA.
+git -C "$repo" tag retained-benchmark "$benchmark_sha"
+git clone --bare --quiet "$repo" "$tmp/origin.git"
+git -C "$repo" remote add origin "$tmp/origin.git"
+resolve explicit_benchmark EVENT_NAME=workflow_dispatch INPUT_BENCHMARK_ONLY=true \
+  INPUT_TARGETS=x86_64-unknown-linux-gnu INPUT_RUNNER_PROFILE=standard \
+  INPUT_BENCHMARK_SOURCE_REF=retained-benchmark INPUT_BENCHMARK_SOURCE_SHA="$benchmark_sha"
+[[ "$(output explicit_benchmark ref)" == "$benchmark_sha" &&
+   "$(output explicit_benchmark version)" == 0.10.160 ]] \
+  || fail "explicit benchmark source/version came from policy HEAD"
+for source_control in missing mismatched malformed; do
+  source_ref=retained-benchmark source_sha="$benchmark_sha"
+  case "$source_control" in
+    missing) source_ref=absent-source ;;
+    mismatched) source_sha="$warm_sha" ;;
+    malformed) source_sha=not-a-sha ;;
+  esac
+  if run_resolver "explicit_$source_control" EVENT_NAME=workflow_dispatch INPUT_BENCHMARK_ONLY=true \
+      INPUT_TARGETS=x86_64-unknown-linux-gnu INPUT_RUNNER_PROFILE=standard \
+      INPUT_BENCHMARK_SOURCE_REF="$source_ref" INPUT_BENCHMARK_SOURCE_SHA="$source_sha"; then
+    fail "explicit benchmark admitted $source_control source identity"
+  fi
+done
+echo "ok: explicit benchmark binds source ref, exact revision, and source version"
 
 echo "release_candidate_trigger_test: ok"
