@@ -454,7 +454,9 @@ hr { width: 100%; border: 0; border-top: 1px solid var(--line); }
       update(node, spec);
       retained.set(spec.id, { node, tag });
       nodes.set(spec.id, node);
-      children.set(node, [...(node.harnIntrinsic || [])]);
+      if (spec.kind === "column" || spec.kind === "row") {
+        children.set(node, [...(node.harnIntrinsic || [])]);
+      }
       const parentNode = nodes.get(spec.parent || '') || root;
       (children.get(parentNode) || children.get(root)).push(node);
     }

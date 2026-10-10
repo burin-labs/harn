@@ -27,7 +27,7 @@ assert.ok(html, "renderer.harn must define UI_RENDERER_HTML");
 const script = html.split("<script>")[1]?.split("</script>")[0];
 assert.ok(script, "the renderer HTML must contain one script block");
 
-/** Element-only DOM shim: enough for the renderer, and nothing it can hide in. */
+/** Minimal DOM shim: enough for the renderer, and nothing it can hide in. */
 class ShimNode {
   constructor(tagName) {
     this.tagName = tagName;
@@ -36,7 +36,6 @@ class ShimNode {
     this.dataset = {};
     this.attributes = {};
     this.className = "";
-    this.ownText = "";
   }
 
   get children() {
@@ -82,18 +81,23 @@ class ShimNode {
   }
 
   get textContent() {
-    if (this.childNodes.length === 0) {
-      return this.ownText;
-    }
     return this.childNodes.map((child) => child.textContent).join("");
   }
 
+  // As in a browser, text is a child node. Keeping it out of `childNodes`
+  // would hide it from `syncChildren`, which once deleted the text of every
+  // heading, paragraph and button right after `update()` set it.
   set textContent(value) {
     for (const child of this.childNodes) {
       child.parentNode = null;
     }
     this.childNodes = [];
-    this.ownText = value;
+    const text = String(value ?? "");
+    if (text !== "") {
+      const node = new ShimText(text);
+      node.parentNode = this;
+      this.childNodes.push(node);
+    }
   }
 
   insertBefore(node, reference) {
@@ -168,6 +172,22 @@ class ShimNode {
       lineTo() {},
       stroke() {},
     };
+  }
+}
+
+/** A text node: a leaf whose content is its data. */
+class ShimText extends ShimNode {
+  constructor(data) {
+    super("#text");
+    this.data = data;
+  }
+
+  get textContent() {
+    return this.data;
+  }
+
+  set textContent(value) {
+    this.data = String(value ?? "");
   }
 }
 
@@ -404,6 +424,32 @@ test("nested children are placed under their declared parent", async () => {
     ],
   );
   assert.equal(row.childNodes[0].textContent, "Add Direction");
+});
+
+test("headings, text, status and button labels keep their text", async () => {
+  const app = await boot();
+  const elements = (title, status) => [
+    { id: "toolbar", kind: "row", parent: "" },
+    { id: "title", kind: "heading", text: title, level: 1, parent: "toolbar" },
+    { id: "note", kind: "text", text: "Sketch loosely.", parent: "toolbar" },
+    { id: "status", kind: "status", text: status, parent: "" },
+    button("go", "Generate", "toolbar"),
+  ];
+  const texts = () =>
+    ["title", "note", "status", "go"].map((id) => app.byId(id).textContent);
+
+  await app.ready(elements("Studio", "Ready"));
+  assert.deepEqual(
+    texts(),
+    ["Studio", "Sketch loosely.", "Ready", "Generate"],
+    "a leaf's text is a child node, so child reconciliation must not remove it",
+  );
+
+  await app.exchange(
+    () => app.byId("go").onclick(),
+    elements("Studio 2", "Busy"),
+  );
+  assert.deepEqual(texts(), ["Studio 2", "Sketch loosely.", "Busy", "Generate"]);
 });
 
 test("a canvas keeps its node and its handlers across a redraw", async () => {
