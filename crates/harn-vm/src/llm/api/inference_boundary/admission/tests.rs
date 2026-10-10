@@ -209,3 +209,97 @@ fn malformed_authority_is_unknown_without_echoing_supplied_values() {
         .unwrap()
         .contains("malformed-private-marker"));
 }
+
+fn unbounded(
+    provider: &str,
+    model: &str,
+    posture: Option<DataPosture>,
+) -> InferenceAdmissionRequest {
+    InferenceAdmissionRequest {
+        provider: provider.into(),
+        model: model.into(),
+        boundary: None,
+        data_controls: posture,
+    }
+}
+
+#[test]
+fn preview_reports_the_posture_inference_will_send_and_the_routes_own_note() {
+    let _guard = crate::llm::env_guard();
+    let _host = ScopedEnvVar::remove(super::super::HOST_BOUNDARY_ENV);
+    // No posture named: the catalog's resolved default is what inference sends.
+    let standard = preview_inference_admission(&unbounded("meta", "muse-spark-1.3", None));
+    assert_eq!(
+        standard.data_posture,
+        crate::llm_config::data_controls_default_posture()
+    );
+    assert_eq!(
+        standard.data_controls_outcome,
+        Some(DataControlsOutcome::NotRequested)
+    );
+    let provider_note = standard
+        .data_controls_note
+        .clone()
+        .expect("meta declares a note");
+    // A route whose model row declares its own handling reports that row, not
+    // the provider line: the provider says it does not train, this route does.
+    let contributor =
+        preview_inference_admission(&unbounded("meta", "muse-spark-1.3-contributor", None));
+    assert_eq!(contributor.training_default.as_deref(), Some("trains"));
+    let route_note = contributor
+        .data_controls_note
+        .expect("the route declares a note");
+    assert_ne!(route_note, provider_note);
+    assert!(route_note.contains("train"), "{route_note}");
+    // Same posture the per-request receipt reports for the route.
+    let receipt = super::super::chat_controls(
+        "meta",
+        "muse-spark-1.3-contributor",
+        crate::llm_config::data_controls_default_posture(),
+    )
+    .receipt;
+    assert_eq!(
+        serde_json::to_value(contributor.data_posture).unwrap(),
+        serde_json::Value::String(receipt.requested_posture)
+    );
+}
+
+#[test]
+fn preview_refuses_a_route_the_strict_posture_cannot_honor() {
+    let _guard = crate::llm::env_guard();
+    let _host = ScopedEnvVar::remove(super::super::HOST_BOUNDARY_ENV);
+    let strict = Some(DataPosture::StrictestAvailable);
+    let refused =
+        preview_inference_admission(&unbounded("meta", "muse-spark-1.3-contributor", strict));
+    assert_eq!(refused.status, InferenceAdmissionStatus::Denied);
+    assert_eq!(
+        refused.governing_rule.as_deref(),
+        Some(DATA_CONTROLS_TRAINING_REFUSED_RULE)
+    );
+    assert_eq!(refused.data_posture, DataPosture::StrictestAvailable);
+    // Negative control: the same posture on the route that does not train is
+    // admitted, and the default posture admits the training route.
+    let admitted = preview_inference_admission(&unbounded("meta", "muse-spark-1.3", strict));
+    assert_eq!(admitted.status, InferenceAdmissionStatus::Admitted);
+    let default = preview_inference_admission(&unbounded(
+        "meta",
+        "muse-spark-1.3-contributor",
+        Some(DataPosture::Default),
+    ));
+    assert_eq!(default.status, InferenceAdmissionStatus::Admitted);
+    assert_eq!(default.data_posture, DataPosture::Default);
+}
+
+#[test]
+fn an_unresolved_route_reports_no_data_controls_outcome() {
+    let _guard = crate::llm::env_guard();
+    let _host = ScopedEnvVar::remove(super::super::HOST_BOUNDARY_ENV);
+    let unknown = preview_inference_admission(&unbounded("not-a-catalog-provider", "model", None));
+    assert_eq!(unknown.status, InferenceAdmissionStatus::Unknown);
+    assert_eq!(unknown.data_controls_outcome, None);
+    assert!(!serde_json::to_value(&unknown)
+        .unwrap()
+        .as_object()
+        .unwrap()
+        .contains_key("data_controls_outcome"));
+}
