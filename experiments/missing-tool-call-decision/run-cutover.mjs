@@ -44,6 +44,10 @@ const arms = [
   {id: 'native_decision', script: replayFile, config: {evaluation: {backend: 'native_decision', provider: 'vercel_ai_gateway', model: 'vercel/typesafe-ai/jev', threshold: 0.0}}},
 ];
 const manifest = {
+  candidate_sha: git(['rev-parse', 'HEAD']).trim(),
+  candidate_classifier_sha256: hash(fs.readFileSync(path.join(workspace, 'crates/harn-stdlib/src/stdlib/llm/missing_tool_call.harn'))),
+  candidate_intent_sha256: hash(fs.readFileSync(path.join(workspace, 'crates/harn-stdlib/src/stdlib/llm/prompts/missing_tool_call_intent.harn.prompt'))),
+  candidate_target_sha256: hash(fs.readFileSync(path.join(workspace, 'crates/harn-stdlib/src/stdlib/llm/prompts/missing_tool_call_target.harn.prompt'))),
   baseline_sha: baselineSha, baseline_classifier_sha256: hash(legacySource), baseline_prompt_sha256: hash(legacyPrompt),
   corpus_sha256: hash(corpusText), replay_sha256: hash(replay), binary_sha256: hash(fs.readFileSync(binary)),
   repetitions, rows: corpus.length, maximum_spend_usd: 1,
