@@ -27,6 +27,7 @@ mod llm_returns;
 mod match_patterns;
 mod pipe;
 mod record_arguments;
+mod record_literals;
 mod record_projection;
 mod sequence_types;
 mod statements;
