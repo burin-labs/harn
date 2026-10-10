@@ -1,0 +1,34 @@
+import { main_recovery_policy_errors } from "../ci_cache_policy/main_recovery.harn"
+
+const POLICY = {
+  source_assertions: [{workflow_job: "tests", job: "Source tests", step: "Run tests"}],
+}
+
+pipeline test_main_recovery_assertion_owner() {
+  assert_eq(
+    main_recovery_policy_errors(
+      POLICY,
+      {jobs: {tests: {name: "Source tests", steps: [{name: "Run tests", run: "make test"}]}}},
+    ),
+    [],
+  )
+}
+
+pipeline test_main_recovery_refuses_missing_and_renamed_owner() {
+  assert_ne(
+    main_recovery_policy_errors(
+      POLICY,
+      {jobs: {tests: {name: "Source tests", steps: [{name: "Download tests", run: "fetch"}]}}},
+    ),
+    [],
+  )
+  assert_ne(
+    main_recovery_policy_errors(
+      POLICY,
+      {jobs: {tests: {name: "Source tests", steps: [{name: "Run tests", uses: "action"}]}}},
+    ),
+    [],
+  )
+  assert_ne(main_recovery_policy_errors(POLICY, {jobs: {}}), [])
+  assert_ne(main_recovery_policy_errors({source_assertions: []}, {jobs: {}}), [])
+}

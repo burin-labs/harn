@@ -1,0 +1,9 @@
+{
+  "source_assertions": [
+    {"workflow_job": "rust-check-inputs", "job": "Rust workspace tests", "step": "Run Rust workspace tests"},
+    {"workflow_job": "rust-test-partitions", "job": "Rust workspace tests (2/3)", "step": "Run Rust workspace tests"},
+    {"workflow_job": "rust-test-partitions", "job": "Rust workspace tests (3/3)", "step": "Run Rust workspace tests"},
+    {"workflow_job": "rust-test", "job": "Rust workspace tests (archive mode)", "step": "Run Rust workspace tests"},
+    {"workflow_job": "rust-security", "job": "Run Linux sandbox tests", "step": "Run Linux sandbox tests"}
+  ]
+}

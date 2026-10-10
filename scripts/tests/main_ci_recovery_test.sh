@@ -5,6 +5,7 @@ scratch=$(mktemp -d)
 trap 'rm -rf "$scratch"' EXIT
 mkdir -p "$scratch/bin" "$scratch/repo/scripts/ci"
 cp "$root/scripts/ci/require_full_suite.sh" "$scratch/repo/scripts/ci/"
+cp "$root/scripts/ci/main_recovery_policy.json" "$root/scripts/ci/main_recovery_evidence.jq" "$scratch/repo/scripts/ci/"
 cat > "$scratch/bin/gh" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -14,8 +15,21 @@ case "$*" in
     jq -n --arg sha "$FAILED_SHA" --arg conclusion "$OUTCOME" --arg event "${EVENT:-push}" --argjson attempt "$ATTEMPT" \
       '{name: "CI", event: $event, head_branch: "main", head_repository: {full_name: "fixture/repo"}, status: "completed", head_sha: $sha, conclusion: $conclusion, run_attempt: $attempt}'
     ;;
-  *attempts/1/jobs*) [[ "${NO_JOBS:-false}" == true ]] || echo 'Rust workspace tests' ;;
-  *runs/42/jobs*) echo "${RETRY_JOB:-Rust workspace tests}" ;;
+  *attempts/1/jobs*|*runs/42/jobs*)
+    job="${FIRST_JOB:-Rust workspace tests}"
+    step="${FIRST_STEP:-Run Rust workspace tests}"
+    if [[ "$*" != *attempts/1/jobs* ]]; then
+      job="${RETRY_JOB:-$job}"
+      step="${RETRY_STEP:-$step}"
+    fi
+    if [[ "$*" == *--slurp* ]]; then
+      jq -n --arg job "$job" --arg step "$step" --arg status "${JOB_STATUS:-completed}" \
+        --arg missing "${MISSING_STEPS:-false}" --argjson count "${JOB_COUNT:-1}" \
+        '[{total_count: $count, jobs: [{name: $job, status: $status, conclusion: "failure", steps: (if $missing == "true" then null else [{name: $step, status: "completed", conclusion: "failure"}] end)}]}]'
+    elif [[ "${NO_JOBS:-false}" != true ]]; then
+      echo "$job"
+    fi
+    ;;
   *workflows/ci.yml/runs*)
     if [[ "${PARENT_RED:-false}" != true ]]; then
       printf '71\t%s\tcompleted\tsuccess\n' "$SOURCE_SHA"
@@ -63,7 +77,7 @@ git commit -qm subsequent
 
 run_case() {
   : > "$scratch/calls"
-  bash "$root/scripts/ci/recover_main_ci.sh" > "$scratch/log" 2>&1
+  bash "${HARN_RECOVERY_SCRIPT:-$root/scripts/ci/recover_main_ci.sh}" > "$scratch/log" 2>&1
 }
 absent() {
   if grep -Eq "$1" "$scratch/calls"; then
@@ -85,6 +99,21 @@ absent signed-publish
 ATTEMPT=2 OUTCOME=failure RETRY_JOB='Windows cross-compile check' run_case
 grep -Fq '[CI] Unstable main suite' "$scratch/calls"
 absent signed-publish
+ATTEMPT=2 OUTCOME=failure FIRST_JOB='Binary size signal' FIRST_STEP="Fetch main's last debug measurement" run_case
+absent 'signed-publish|pr create|pr edit'
+grep -Fq '[CI] Unstable main suite' "$scratch/calls"
+ATTEMPT=2 OUTCOME=failure FIRST_STEP='Download workspace test archive' run_case
+absent 'signed-publish|pr create|pr edit'
+ATTEMPT=2 OUTCOME=failure RETRY_STEP='Download workspace test archive' run_case
+absent 'signed-publish|pr create|pr edit'
+ATTEMPT=2 OUTCOME=failure MISSING_STEPS=true run_case
+absent 'signed-publish|pr create|pr edit'
+ATTEMPT=2 OUTCOME=failure JOB_STATUS=in_progress run_case
+absent 'signed-publish|pr create|pr edit'
+if ATTEMPT=2 OUTCOME=failure JOB_COUNT=2 run_case; then
+  echo 'Partial job census authorized recovery' >&2; exit 1
+fi
+absent 'signed-publish|pr create|pr edit'
 ATTEMPT=2 OUTCOME=failure DUPLICATE=true run_case
 absent 'run rerun|issue create|signed-publish'
 if ATTEMPT=2 OUTCOME=success NO_JOBS=true run_case; then
@@ -98,4 +127,4 @@ grep -Fxq signed-publish "$scratch/calls"
 grep -Fq -- '--add-label ship' "$scratch/calls"
 absent 'run rerun'
 [[ "$(cat source)" == good && "$(cat later)" == keep ]]
-echo 'Main recovery: retry, measured flake, signed culprit revert, duplicate, unknown parent, and untrusted-event controls passed.'
+echo 'Main recovery: source assertion, measurement/setup refusal, missing/pending evidence, retry, duplicate, unknown parent and untrusted-event controls passed.'

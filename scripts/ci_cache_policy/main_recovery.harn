@@ -1,0 +1,52 @@
+type RecoveryAssertion = {workflow_job: string, job: string, step: string}
+
+type RecoveryPolicy = {source_assertions: list<RecoveryAssertion>}
+
+type RecoveryWorkflow = {jobs: dict}
+
+type RecoveryStep = {name?: string, run?: string}
+
+type RecoveryJob = {
+  name: string,
+  steps: list<RecoveryStep>,
+  strategy?: {matrix: {include: list<{name: string}>}},
+}
+
+pub fn main_recovery_policy_errors(payload: unknown, workflow_payload: unknown) -> list<string> {
+  const parsed = schema_parse(payload, schema_of(RecoveryPolicy))
+  guard is_ok(parsed) else {
+    return ["invalid main recovery assertion policy"]
+  }
+  const policy: RecoveryPolicy = unwrap(parsed)
+  guard len(policy.source_assertions) > 0 else {
+    return ["main recovery assertion policy is empty"]
+  }
+  const parsed_workflow = schema_parse(workflow_payload, schema_of(RecoveryWorkflow))
+  guard is_ok(parsed_workflow) else {
+    return ["invalid main recovery workflow"]
+  }
+  const workflow: RecoveryWorkflow = unwrap(parsed_workflow)
+  let errors: list<string> = []
+  let identities: list<string> = []
+  for gate in policy.source_assertions {
+    const identity = gate.job + "/" + gate.step
+    if identities.contains(identity) || gate.job == "" || gate.step == "" {
+      errors = errors + ["invalid or duplicated main recovery assertion: " + identity]
+    }
+    identities = identities + [identity]
+    const parsed_job = schema_parse(workflow.jobs[gate.workflow_job], schema_of(RecoveryJob))
+    if !is_ok(parsed_job) {
+      errors = errors + ["invalid main recovery job owner: " + gate.workflow_job]
+      continue
+    }
+    const job: RecoveryJob = unwrap(parsed_job)
+    const matching_name = job.name == gate.job
+      || (job.strategy?.matrix.include ?? []).any({ row -> row.name == gate.job })
+    const steps = job.steps.filter({ step -> step.name == gate.step && (step.run ?? "") != "" })
+      .to_list()
+    if !matching_name || len(steps) != 1 {
+      errors = errors + ["main recovery assertion has no unique CI execution owner: " + identity]
+    }
+  }
+  return errors
+}

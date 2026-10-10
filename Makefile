@@ -1626,6 +1626,7 @@ check-ci-cache-policy:
 	bash scripts/tests/workspace_test_args_test.sh
 	bash scripts/tests/ci_full_suite_test.sh
 	bash scripts/tests/main_ci_recovery_test.sh
+	@$(HARN_SCRIPT_TEST_ENV) $(HARN_CMD) test scripts/tests/main_recovery_policy_test.harn
 	@$(HARN_SCRIPT_TEST_ENV) $(HARN_CMD) test scripts/tests/ci_post_merge_tier_policy_test.harn
 	@$(HARN_CMD) run scripts/check_ci_cache_policy.harn
 

@@ -38,13 +38,25 @@ if [[ "$conclusion" == success ]]; then
 fi
 latest=$(gh api --paginate "repos/$GH_REPO/actions/runs/$RUN_ID/jobs?filter=latest&per_page=100" --jq '.jobs[] | select(.conclusion == "failure" and .name != "CI status") | .name')
 [[ -n "$latest" ]] || { echo 'No measured retry failures; refusing culprit attribution.' >&2; exit 1; }
-persistent=false
-while IFS= read -r name; do
-  if grep -Fxq "$name" <<< "$latest"; then persistent=true; fi
-done <<< "$jobs"
+# A repeated job name can be a repeated setup/API failure. Require the same
+# registered source assertion to have actually failed on both attempts.
+gh api --paginate --slurp "repos/$GH_REPO/actions/runs/$RUN_ID/attempts/1/jobs?per_page=100" > "$scratch/first-pages.json"
+gh api --paginate --slurp "repos/$GH_REPO/actions/runs/$RUN_ID/jobs?filter=latest&per_page=100" > "$scratch/latest-pages.json"
+jq -n --slurpfile first "$scratch/first-pages.json" --slurpfile latest "$scratch/latest-pages.json" '
+  def census:
+    if type != "array" or length == 0 then error("missing job pages") else . end
+    | . as $pages | [$pages[] | .jobs[]] as $jobs
+    | if ($pages[0].total_count | type) != "number"
+         or ($pages[0].total_count != ($jobs | length))
+         or any($pages[]; .total_count != $pages[0].total_count)
+      then error("incomplete job census") else $jobs end;
+  {first: ($first[0] | census), latest: ($latest[0] | census)}' \
+  | jq --slurpfile policy scripts/ci/main_recovery_policy.json -f scripts/ci/main_recovery_evidence.jq > "$scratch/evidence.json"
 printf '\nRetry failing jobs:\n%s\n' "$latest" >> "$scratch/body"
-if [[ "$persistent" != true ]]; then
-  printf '\nThe retry failed different jobs; no persistent culprit was established.\n' >> "$scratch/body"
+# shellcheck disable=SC2016 # Markdown fences are literal, not substitutions.
+printf '\nSource assertion evidence:\n```json\n%s\n```\n' "$(cat "$scratch/evidence.json")" >> "$scratch/body"
+if [[ "$(jq -r '.authorized' "$scratch/evidence.json")" != true ]]; then
+  printf '\nNo repeated source assertion was established; setup, measurement and unregistered checks need investigation, not a source revert.\n' >> "$scratch/body"
   gh issue create --repo "$GH_REPO" --title "[CI] Unstable main suite at ${sha:0:12}" --body-file "$scratch/body"
   exit 0
 fi
