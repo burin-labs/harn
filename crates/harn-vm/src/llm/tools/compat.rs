@@ -399,6 +399,37 @@ fn infer_tool_name_from_arguments(arguments: &serde_json::Value) -> Option<Strin
     None
 }
 
+/// Remove an optional path argument that names no path.
+///
+/// A strict provider schema (OpenAI strict mode) lists every property as
+/// required, so a model must send each optional argument it does not use, and
+/// it fills an unused string with `""`. An empty path names no location, and
+/// path validation rightly refuses it as malformed, so a `look` that set
+/// `file` and left `folder: ""` failed before it ran and the model spent a
+/// turn retrying the same read.
+///
+/// Only a path parameter the schema declares optional is touched: there `""`
+/// cannot name anything, so it is absent. Elsewhere an empty string can be a
+/// real value, such as an empty file body, and an explicit `null` stays for
+/// typed validation to judge. A required path keeps its value so validation
+/// still reports what is missing.
+pub(crate) fn drop_unused_optional_args(
+    map: &mut serde_json::Map<String, serde_json::Value>,
+    schema: Option<&super::ToolSchema>,
+    path_parameters: &[String],
+) {
+    let Some(schema) = schema else {
+        return;
+    };
+    for param in schema.params.iter().filter(|param| !param.required) {
+        let names_no_path = path_parameters.contains(&param.name)
+            && matches!(map.get(&param.name), Some(serde_json::Value::String(value)) if value.trim().is_empty());
+        if names_no_path {
+            map.remove(&param.name);
+        }
+    }
+}
+
 /// Coerce string-typed argument values onto the shape the tool's registered
 /// schema expects, at the dispatch chokepoint every call passes through.
 ///
