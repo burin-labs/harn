@@ -23,7 +23,7 @@ pub struct TestRunSession {
 impl Default for TestRunSession {
     fn default() -> Self {
         Self {
-            prepared_module_cache: harn_vm::PreparedModuleCache::default(),
+            prepared_module_cache: harn_vm::PreparedModuleCache::for_module_graph(),
             workers: Mutex::new(0),
             clock: harn_vm::clock::RealClock::arc(),
             stdio_available: true,

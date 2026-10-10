@@ -7,6 +7,7 @@ use harn_vm::VmValue;
 mod compile_once_tests;
 mod egress_isolation;
 mod manifest_hooks;
+mod prepared_graph;
 mod sharding;
 mod work;
 
