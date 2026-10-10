@@ -8,37 +8,44 @@ pub struct CompilerInput {
     pub disk_path: PathBuf,
 }
 
+// These owners determine both emitted bytecode and the derived import interface
+// reused before compilation. Cargo watches the same roots that we fingerprint.
+const SOURCE_ROOTS: &[&str] = &[
+    "harn-lexer/src",
+    "harn-parser/src",
+    "harn-ir/src",
+    "harn-kernel/src",
+    "harn-modules/src",
+    "harn-vm/src/chunk",
+    "harn-vm/src/bytecode_cache",
+];
+
+const SOURCE_FILES: &[&str] = &[
+    "bytecode_cache.rs",
+    "chunk.rs",
+    "compiler.rs",
+    "context_manifest.rs",
+    "module_artifact.rs",
+    "module_source.rs",
+];
+
 pub fn compiler_inputs(manifest_dir: &Path) -> Vec<CompilerInput> {
     let crates_dir = manifest_dir.parent().expect("crate dir has a parent");
     let mut inputs = Vec::new();
 
-    let roots = [
-        (crates_dir.join("harn-lexer").join("src"), "harn-lexer/src"),
-        (
-            crates_dir.join("harn-parser").join("src"),
-            "harn-parser/src",
-        ),
-        (crates_dir.join("harn-ir").join("src"), "harn-ir/src"),
-        (
-            crates_dir.join("harn-kernel").join("src"),
-            "harn-kernel/src",
-        ),
-        (manifest_dir.join("src").join("chunk"), "harn-vm/src/chunk"),
-    ];
-    for (root, logical_prefix) in roots {
-        collect_rs_files(&root, logical_prefix, &mut inputs);
+    for logical_prefix in SOURCE_ROOTS {
+        collect_rs_files(
+            &crates_dir.join(logical_prefix),
+            logical_prefix,
+            &mut inputs,
+        );
     }
 
-    for (file_name, logical_path) in [
-        ("bytecode_cache.rs", "harn-vm/src/bytecode_cache.rs"),
-        ("chunk.rs", "harn-vm/src/chunk.rs"),
-        ("compiler.rs", "harn-vm/src/compiler.rs"),
-        ("module_artifact.rs", "harn-vm/src/module_artifact.rs"),
-    ] {
+    for file_name in SOURCE_FILES {
         let disk_path = manifest_dir.join("src").join(file_name);
         if disk_path.is_file() {
             inputs.push(CompilerInput {
-                logical_path: logical_path.to_string(),
+                logical_path: format!("harn-vm/src/{file_name}"),
                 disk_path,
             });
         }
@@ -50,13 +57,10 @@ pub fn compiler_inputs(manifest_dir: &Path) -> Vec<CompilerInput> {
 
 pub fn watch_roots(manifest_dir: &Path) -> Vec<PathBuf> {
     let crates_dir = manifest_dir.parent().expect("crate dir has a parent");
-    vec![
-        crates_dir.join("harn-lexer").join("src"),
-        crates_dir.join("harn-parser").join("src"),
-        crates_dir.join("harn-ir").join("src"),
-        crates_dir.join("harn-kernel").join("src"),
-        manifest_dir.join("src").join("chunk"),
-    ]
+    SOURCE_ROOTS
+        .iter()
+        .map(|root| crates_dir.join(root))
+        .collect()
 }
 
 pub fn fingerprint_inputs(inputs: &[CompilerInput]) -> String {
