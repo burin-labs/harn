@@ -86,11 +86,16 @@ mod tests {
 
     #[tokio::test]
     async fn compiler_schema_validation_is_pure_but_other_runtime_internals_stay_denied() {
-        let entry = crate::stdlib::builtin_manifest_entry("__assert_schema").unwrap();
-        assert_eq!(entry.contract.exposure, BuiltinExposure::RuntimeInternal);
-        assert!(entry.contract.effects.is_empty());
+        let (entry, contract) = crate::stdlib::builtin_policy_metadata("__assert_schema");
+        assert!(
+            entry.is_none(),
+            "runtime-only validation has no source manifest entry"
+        );
+        let contract = contract.unwrap();
+        assert_eq!(contract.exposure, BuiltinExposure::RuntimeInternal);
+        assert!(contract.effects.is_empty());
         preparation(async {
-            enforce_contract(entry.name, Some(&entry.contract)).unwrap();
+            enforce_contract("__assert_schema", Some(contract)).unwrap();
             assert!(
                 enforce_contract("unknown_internal", Some(&BuiltinContract::RUNTIME_INTERNAL))
                     .is_err()
