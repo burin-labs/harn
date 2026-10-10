@@ -610,9 +610,13 @@ fn write_file_bytes_builtin(args: &[VmValue], _out: &mut String) -> Result<VmVal
     Ok(VmValue::Nil)
 }
 
+/// Every VM fs mutation reaches this only after it succeeded, so it is also
+/// where the current tool call's completed mutations are recorded.
 fn queue_file_edited_for(resolved: &std::path::Path, operation: &str, bytes: usize) {
+    let path = resolved.to_string_lossy();
+    crate::agent_sessions::record_tool_call_mutation(&path);
     crate::orchestration::queue_file_edited(
-        &resolved.to_string_lossy(),
+        &path,
         serde_json::json!({"operation": operation, "bytes": bytes}),
     );
 }

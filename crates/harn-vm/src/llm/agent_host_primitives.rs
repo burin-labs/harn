@@ -1510,7 +1510,7 @@ pub(super) async fn host_agent_dispatch_tool_call(
             .as_ref()
             .and_then(|handle| handle.reason())
             .unwrap_or_default();
-        let cancelled = agent_primitive_cancelled_tool(
+        let mut cancelled = agent_primitive_cancelled_tool(
             &tool_name,
             &tool_id,
             &tool_args,
@@ -1519,6 +1519,18 @@ pub(super) async fn host_agent_dispatch_tool_call(
             execution_duration_ms,
             approval_status,
         );
+        // A write the handler finished before the cancel is a known change,
+        // so the cancelled result says so instead of `unknown`.
+        let applied = crate::agent_sessions::take_tool_call_mutations(&session_id, &tool_id);
+        if !applied.is_empty() {
+            if let Some(obj) = cancelled.as_object_mut() {
+                obj.insert(
+                    "mutation_status".to_string(),
+                    serde_json::json!(crate::agent_events::ToolMutationStatus::Applied.as_str()),
+                );
+                obj.insert("changed_paths".to_string(), serde_json::json!(applied));
+            }
+        }
         let cancelled = attach_hook_reminder_audit(cancelled, hook_reminder_reports);
         return Ok(json_to_vm_value(&cancelled));
     }

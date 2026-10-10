@@ -852,6 +852,13 @@ fn safe_text_patch_disk(
         builtin: SAFE_TEXT_PATCH_BUILTIN,
         message: format!("replace `{}`: {err}", path.display()),
     })?;
+    if matches!(
+        receipt.status,
+        harn_vm::conditional_replace::ConditionalReplaceStatus::Created
+            | harn_vm::conditional_replace::ConditionalReplaceStatus::Replaced
+    ) {
+        crate::fs_snapshot::record_completed_write(path);
+    }
     Ok(SafeTextPatchOutcome {
         result: match receipt.status {
             harn_vm::conditional_replace::ConditionalReplaceStatus::Created
