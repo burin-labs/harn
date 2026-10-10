@@ -124,7 +124,7 @@ pub(super) fn start_process_probe(
     };
     let stdout = child.stdout.take().expect("probe stdout");
     let (tx, rx) = std::sync::mpsc::channel();
-    std::thread::spawn(move || {
+    crate::runtime_stack::spawn(move || {
         let ready = BufReader::new(stdout)
             .lines()
             .any(|line| line.is_ok_and(|line| line == "probe-ready"));

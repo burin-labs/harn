@@ -1077,11 +1077,6 @@ pub fn has_mock_time(text: string) -> bool {
 // Reporting driver
 // -------------------------------------------------------------------------------------------------
 
-/**
- * Run one pattern check over `files` ({rel, text} records), skipping any
- * file for which `skip(rel)` is true. Prints each hit as `  <n>:<line>`
- * followed by the pre-formatted `hint_lines`; returns the violation count.
- */
 /** The pinned finding count for `rule` in `rel`, or nil when not pinned. */
 pub fn pattern_baseline_count(rule: string, rel: string) -> int? {
   for row in LITERAL_TIMEOUT_BASELINE + LIVE_PROVIDER_TEST_BASELINE {
@@ -1106,6 +1101,11 @@ pub fn pattern_baseline_duplicates() -> list<string> {
   return dupes
 }
 
+/**
+ * Run one pattern check over `files` ({rel, text} records), skipping any
+ * file for which `skip(rel)` is true. Prints each hit as `  <n>:<line>`
+ * followed by the pre-formatted `hint_lines`; returns the violation count.
+ */
 fn report_pattern(
   stdio: HarnessStdio,
   rule: string,
