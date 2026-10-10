@@ -1857,8 +1857,9 @@ jobs:
             echo "::notice::Posted the binary-size comment."
           fi
 
-      # Only main publishes the baseline. Source-qualified so the artifact list
-      # can be sorted to the newest one, and retained long enough that a quiet
+      # Only main publishes the baseline. Named `<prefix><sha>` because the
+      # reader looks it up by exact name for each of main's newest commits, and
+      # retained long enough that a quiet
       # weekend does not leave the next pull request without a comparison.
       - name: Record main's debug measurement
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
