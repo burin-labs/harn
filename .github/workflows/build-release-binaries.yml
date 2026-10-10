@@ -216,7 +216,9 @@ jobs:
           source scripts/lib/release_version.sh
           # shellcheck source=scripts/lib/release_candidate_run.sh
           source scripts/lib/release_candidate_run.sh
-          REF="$REF_NAME"
+          # Freeze the source before jobs fan out. A branch name can advance
+          # between the AOT checkout and the later per-target checkout.
+          REF="$GITHUB_SHA"
           SHOULD_BUILD_BINARIES=false
           SHOULD_PACKAGE_ARCHIVES=false
           CANDIDATE_SOURCE_SHA=""
@@ -310,7 +312,21 @@ jobs:
                 echo "::error::benchmark_source_sha must be an exact lowercase 40-hex commit"
                 exit 1
               fi
-              REF="$INPUT_BENCHMARK_SOURCE_REF"
+              # Resolve the requested ref once and preserve its exact binding.
+              # The workflow's policy still comes from its own github.sha.
+              git fetch --no-tags origin -- "$INPUT_BENCHMARK_SOURCE_REF"
+              ACTUAL_BENCHMARK_SOURCE_SHA="$(git rev-parse 'FETCH_HEAD^{commit}')"
+              if [[ "$ACTUAL_BENCHMARK_SOURCE_SHA" != "$INPUT_BENCHMARK_SOURCE_SHA" ]]; then
+                echo "::error::benchmark source resolved to $ACTUAL_BENCHMARK_SOURCE_SHA; expected $INPUT_BENCHMARK_SOURCE_SHA"
+                exit 1
+              fi
+              REF="$INPUT_BENCHMARK_SOURCE_SHA"
+              SOURCE_MANIFEST="$(git show "$REF:Cargo.toml")"
+              VERSION="$(release_workspace_version <<< "$SOURCE_MANIFEST")"
+              if ! release_version_is_canonical "$VERSION"; then
+                echo "::error::benchmark source has no canonical workspace version"
+                exit 1
+              fi
               echo "::notice::Policy from ${REF_TYPE}/${REF_NAME} will benchmark immutable source ${REF} at ${INPUT_BENCHMARK_SOURCE_SHA}."
             fi
             BUILD_MODE=benchmark
