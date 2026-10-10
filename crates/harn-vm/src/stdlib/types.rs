@@ -126,7 +126,7 @@ fn decimal_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError>
 }
 
 #[harn_builtin(
-    exposure = "runtime_internal",
+    exposure = "stdlib_internal",
     effects = [],
     sig = "Ok(value?: any) -> any",
     runtime_only = true,
@@ -138,7 +138,7 @@ fn ok_ctor_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError>
 }
 
 #[harn_builtin(
-    exposure = "runtime_internal",
+    exposure = "stdlib_internal",
     effects = [],
     sig = "Err(value?: any) -> any",
     runtime_only = true,

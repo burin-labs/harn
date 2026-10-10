@@ -101,8 +101,15 @@ impl Fixture {
         } else {
             format!("json_parse(harness.fs.read_text({path}))")
         };
+        self.registry_with_preparation(&preparation).await
+    }
+
+    async fn registry_with_preparation(
+        &self,
+        preparation: &str,
+    ) -> (crate::vm::AsyncBuiltinCtx, VmValue) {
         let source = include_str!("fixtures/prepared_verify.harn.template")
-            .replace("{{preparation}}", &preparation);
+            .replace("{{preparation}}", preparation);
         let chunk = crate::compile_source(&source).expect("compile preparation fixture");
         let mut vm = crate::Vm::new();
         crate::register_vm_stdlib(&mut vm);
@@ -115,6 +122,64 @@ impl Fixture {
         assert!(!self.root.join("reached").exists());
         assert!(!self.other.join("reached").exists());
     }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn prepared_verify_admits_pure_result_constructors_and_compiler_try_results() {
+    let fixture = Fixture::new();
+    let path = serde_json::to_string(&fixture.facts_path).unwrap();
+    let read = format!("json_parse(harness.fs.read_text({path}))");
+    for expression in [
+        format!("unwrap(Ok({read}))"),
+        format!("unwrap_or(Err(\"absent\"), {read})"),
+        format!("unwrap(try {{ {read} }})"),
+        format!("unwrap_or(try {{ throw \"absent\" }}, {read})"),
+    ] {
+        let (ctx, registry) = fixture.registry_with_preparation(&expression).await;
+        let binding = super::prepare(
+            &ctx,
+            Some(&registry),
+            "verify",
+            &json!({}),
+            "result-session",
+        )
+        .await
+        .unwrap_or_else(|error| panic!("{expression}: {error}"))
+        .expect("real invocation preparation must bind facts");
+        assert_eq!(binding.facts, fixture.facts, "{expression}");
+        fixture.no_effect();
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn prepared_verify_result_constructors_do_not_admit_file_mutation() {
+    let fixture = Fixture::new();
+    let path = serde_json::to_string(&fixture.facts_path).unwrap();
+    let expression = format!("harness.fs.write_text({path}, \"mutated before consent\")");
+    let (ctx, registry) = fixture.registry_with_preparation(&expression).await;
+    let error = match super::prepare(
+        &ctx,
+        Some(&registry),
+        "verify",
+        &json!({}),
+        "result-session",
+    )
+    .await
+    {
+        Err(error) => error,
+        Ok(_) => panic!("preparation must refuse a write before consent"),
+    };
+    assert!(
+        error
+            .to_string()
+            .contains("read-only invocation preparation"),
+        "{error}"
+    );
+    assert_eq!(
+        serde_json::from_slice::<Value>(&std::fs::read(&fixture.facts_path).unwrap()).unwrap(),
+        fixture.facts
+    );
+    fixture.no_effect();
 }
 
 // Construct the real dispatch future outside the permission scope's frame.
