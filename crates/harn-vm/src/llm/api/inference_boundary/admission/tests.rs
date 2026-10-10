@@ -237,10 +237,7 @@ fn preview_reports_the_posture_inference_will_send_and_the_routes_own_note() {
         standard.data_controls_outcome,
         Some(DataControlsOutcome::NotRequested)
     );
-    let provider_note = standard
-        .data_controls_note
-        .clone()
-        .expect("meta declares a note");
+    let provider_note = standard.data_controls_note.expect("meta declares a note");
     // A route whose model row declares its own handling reports that row, not
     // the provider line: the provider says it does not train, this route does.
     let contributor =
