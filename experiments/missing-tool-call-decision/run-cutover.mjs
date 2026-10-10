@@ -39,8 +39,8 @@ const legacyImport = 'import { missing_tool_call_classifier } from "std/llm/miss
 if (replay.split(legacyImport).length !== 2) throw Error('replay classifier binding changed');
 fs.writeFileSync(path.join(root, 'legacy_replay.harn'), replay.replace(legacyImport, 'import { missing_tool_call_classifier } from "./legacy_missing_tool_call"'));
 const arms = [
-  {id: 'legacy_structured', script: path.join(root, 'legacy_replay.harn'), config: {provider: 'openai', model: 'gpt-5.4-nano'}},
-  {id: 'structured_decision', script: replayFile, config: {provider: 'openai', model: 'gpt-5.4-nano'}},
+  {id: 'legacy_structured', script: path.join(root, 'legacy_replay.harn'), config: {provider: 'openai', model: 'gpt-5.4-nano', effort: 'none'}},
+  {id: 'structured_decision', script: replayFile, config: {provider: 'openai', model: 'gpt-5.4-nano', effort: 'none'}},
   {id: 'native_decision', script: replayFile, config: {evaluation: {backend: 'native_decision', provider: 'vercel_ai_gateway', model: 'vercel/typesafe-ai/jev', threshold: 0.0}}},
 ];
 const manifest = {
@@ -99,6 +99,7 @@ for (let repeat = 0; repeat < repetitions; repeat++) {
       if (arm.id === 'legacy_structured' && !(observation.verdict.typed_checkpoint?.attempts >= 1)) throw Error(`baseline never dispatched; see ${dir}`);
       const cost = observation.cost_usd;
       if (!Number.isFinite(cost)) throw Error(`unmeasured cost; see ${dir}`);
+      if (!Number.isFinite(observed.cost.total_cost) || Math.abs(cost - observed.cost.total_cost) > 1e-9) throw Error(`classifier and completing-run accounting disagree; see ${dir}`);
       if (receipts.length && Math.abs(cost - receipts[0].cost_usd) > 1e-9) throw Error(`receipt and session accounting disagree; see ${dir}`);
       const item = {repeat, row_id: row.row_id, language: row.language, arm: arm.id,
         expected: {intended: row.intended, tool: row.tool}, cost_usd: cost, observed, receipts};
