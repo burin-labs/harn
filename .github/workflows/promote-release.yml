@@ -32,6 +32,10 @@ on:
         description: Full source SHA certified by the candidate run
         required: true
         type: string
+      rehearsal_promotion_run_id:
+        description: Prior promotion with a measured successful rehearsal of this candidate
+        required: false
+        type: string
   # Privileged `workflow_run` is intentional: the resolver executes trusted
   # main code and validates the producer before candidate source is read.
   workflow_run: # zizmor: ignore[dangerous-triggers] promotes only main push runs of this repository
@@ -207,6 +211,8 @@ jobs:
     uses: ./.github/workflows/consumer-canary.yml
     with:
       source_revision: ${{ needs.plan.outputs.source_sha }}
+      candidate_run_id: ${{ needs.plan.outputs.run_id }}
+      rehearsal_promotion_run_id: ${{ inputs.rehearsal_promotion_run_id }}
     secrets:
       RELEASE_APP_CLIENT_ID: ${{ secrets.RELEASE_APP_CLIENT_ID }}
       RELEASE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
@@ -255,7 +261,7 @@ jobs:
       contents: read
       actions: read
       attestations: read
-    uses: burin-labs/.github/.github/workflows/promote-release.yml@47b97f48a4862d684f54a0b8ee7aa370d8bfc126
+    uses: burin-labs/.github/.github/workflows/promote-release.yml@4f755671f8c2eac4308eae2c2e20e0fbc99e03e2
     with:
       sha: ${{ needs.plan.outputs.source_sha }}
       run-id: ${{ needs.plan.outputs.run_id }}

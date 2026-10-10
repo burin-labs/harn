@@ -108,6 +108,127 @@ release_rehearsal_step_observation() {
   jq -ce 'if length == 1 then .[0] else error("duplicate owning step") end' <<< "$observations"
 }
 
+# Reuse measurement from an authenticated publication attempt, never a bare
+# supplied child ID. The successful resolver, dispatch/observation and
+# authorization must all describe the same candidate. A changed consumer head
+# requires a fresh rehearsal rather than carrying old product proof.
+release_authenticated_successful_rehearsal() (
+  set -euo pipefail
+  local repository="${1:?repository required}" parent="${2:?promotion required}"
+  local producer="${3:?producer required}" source="${4:?source required}"
+  local child_repository="${5:?consumer repository required}" run pages jobs scratch
+  local child_token="${GH_TOKEN:?consumer authority required}"
+  local id name log resolver dispatch observations authorization child child_run default_head policy
+  [[ "$repository" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ &&
+     "$child_repository" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ &&
+     "$parent" =~ ^[1-9][0-9]*$ && "$producer" =~ ^[1-9][0-9]*$ &&
+     "$source" =~ ^[0-9a-f]{40}$ ]] || return 1
+  export GH_TOKEN="${REHEARSAL_PROMOTION_READ_TOKEN:?promotion read authority required}"
+  run="$(gh api "repos/$repository/actions/runs/$parent")" || return 1
+  jq -e --arg repo "$repository" --arg parent "$parent" '
+    (.id|tostring) == $parent and .repository.full_name == $repo and
+    .head_repository.full_name == $repo and .head_branch == "main" and
+    .path == ".github/workflows/promote-release.yml" and
+    (.event == "workflow_dispatch" or .event == "workflow_run") and
+    .status == "completed" and (.conclusion == "failure" or .conclusion == "success") and
+    (.run_attempt|type == "number" and . > 0 and . == floor)
+  ' <<< "$run" >/dev/null || return 1
+  pages="$(gh api --paginate --slurp "repos/$repository/actions/runs/$parent/jobs?filter=latest&per_page=100")" || return 1
+  jobs="$(jq -ce --argjson run "$run" '
+    if type != "array" or length == 0 then error("missing job census") else . end |
+    . as $pages | [.[].jobs[]] as $jobs |
+    if ($jobs|length) == 0 or any($pages[]; .total_count != ($jobs|length)) or
+      any($jobs[]; (.id|type) != "number" or .id <= 0 or .run_id != $run.id or
+        .id != (.id|floor) or .run_attempt != $run.run_attempt or
+        (.name|type) != "string" or (.name|test("\\S")|not)) or
+      ([$jobs[].id]|unique|length) != ($jobs|length)
+    then error("incomplete job census") else $jobs end
+  ' <<< "$pages")" || return 1
+  scratch="$(mktemp -d)" || return 1
+  trap 'rm -rf "$scratch"' EXIT
+  for name in 'Resolve certified source' 'Recover missing consumer rehearsal / Consumer canary' 'Require measured consumer completion'; do
+    id="$(jq -er --arg name "$name" '
+      [.[]|select(.name == $name)] |
+      if length == 1 and .[0].status == "completed" and .[0].conclusion == "success"
+      then .[0].id else error("missing successful owning job") end
+    ' <<< "$jobs")" || return 1
+    case "$name" in
+      'Resolve certified source') log=resolver ;;
+      'Require measured consumer completion') log=authorization ;;
+      *) log=consumer ;;
+    esac
+    gh api --allow-escape-sequences "repos/$repository/actions/jobs/$id/logs" > "$scratch/$log" || return 1
+  done
+  resolver="$(release_rehearsal_step_observation "$scratch/resolver" \
+    'bash scripts/resolve-release-promotion-source.sh' '["CANDIDATE_RUN_ID","EXPECTED_SOURCE_SHA"]')" || return 1
+  # shellcheck disable=SC2016,SC1003 # exact owning runner command, not expansion
+  dispatch="$(release_rehearsal_step_observation "$scratch/consumer" \
+    'CANARY_REPOSITORY="$CANARY_OWNER/$CANARY_NAME" \' '["SOURCE_REVISION","CANARY_WORKFLOW"]')" || return 1
+  # shellcheck disable=SC2016 # exact owning runner command
+  observations="$(release_rehearsal_step_observations "$scratch/consumer" \
+    'CANARY_REPOSITORY="$CANARY_OWNER/$CANARY_NAME" bash scripts/ci/consumer_canary.sh --observe' \
+    '["CANARY_RUN_ID","CANARY_STARTED_AT","CANARY_WINDOW_SECONDS","CANARY_DEADLINE_SECONDS"]')" || return 1
+  authorization="$(release_rehearsal_step_observation "$scratch/authorization" \
+    'bash scripts/authorize-release-rehearsal.sh' \
+    '["SOURCE_SHA","REQUIRES_REHEARSAL","REHEARSAL_RESULT","REHEARSAL_VERDICT","REHEARSAL_SOURCE_SHA"]')" || return 1
+  policy="$(consumer_canary_policy)" || return 1
+  child="$(jq -ner --argjson r "$resolver" --argjson d "$dispatch" --argjson o "$observations" \
+    --argjson a "$authorization" --argjson p "$policy" --arg source "$source" --arg producer "$producer" '
+    def elapsed($records):
+      [$records[]|select(startswith("CONSUMER_CANARY pending ") or startswith("CONSUMER_CANARY verdict="))|
+        capture("wall_seconds=(?<seconds>[0-9]+)$").seconds|tonumber] |
+      if length == 1 then .[0] else error("ambiguous observation") end;
+    [$d.records[]|select(startswith("CONSUMER_CANARY dispatched "))|
+      capture("^CONSUMER_CANARY dispatched run=(?<child>[1-9][0-9]*) ref=default started_at=(?<clock>[1-9][0-9]*)$")] as $dispatch |
+    (if ($dispatch|length) != 1 then error("missing default dispatch") else $dispatch[0] end) as $identity |
+    ($o|last) as $last | ($last.records|map(select(length > 0))) as $records |
+    ($records|map(select(test("^##\\[end-action id=observe-[1-3]\\.observe;outcome=success;conclusion=success;duration_ms=[0-9]+\\]$")|not))) as $tail |
+    [$o[]|elapsed(.records)] as $elapsed |
+    if $r.environment != {CANDIDATE_RUN_ID:$producer,EXPECTED_SOURCE_SHA:$source} or
+      $d.environment != {SOURCE_REVISION:$source,CANARY_WORKFLOW:"harn-repin-rehearsal.yml"} or
+      $a.environment != {SOURCE_SHA:$source,REQUIRES_REHEARSAL:"true",REHEARSAL_RESULT:"success",REHEARSAL_VERDICT:"pass",REHEARSAL_SOURCE_SHA:$source} or
+      ($o|length) < 1 or ($o|length) > $p.max_windows or
+      $elapsed != ($elapsed|sort) or
+      any(range(0; ($o|length)-1); . as $i |
+        $elapsed[$i] < (($i+1)*$p.window_seconds) or
+        ([$o[$i].records[]|select(test("^CONSUMER_CANARY pending run=" + $identity.child + " status=(queued|in_progress|waiting|pending|requested) wall_seconds=[0-9]+$"))]|length) != 1) or
+      any($o[]; .step_start <= $d.step_start or .environment != {
+        CANARY_RUN_ID:$identity.child,CANARY_STARTED_AT:$identity.clock,
+        CANARY_WINDOW_SECONDS:($p.window_seconds|tostring),CANARY_DEADLINE_SECONDS:($p.deadline_seconds|tostring)}) or
+      ($tail|last|test("^CONSUMER_CANARY verdict=pass conclusion=success run=" + $identity.child + " wall_seconds=[0-9]+$")|not) or
+      ([$last.records[]|select(startswith("CONSUMER_CANARY verdict="))]|length) != 1 or
+      (($tail|last|capture("wall_seconds=(?<seconds>[0-9]+)$").seconds|tonumber) >= $p.deadline_seconds)
+    then error("unbound successful rehearsal") else $identity.child end
+  ')" || return 1
+  export GH_TOKEN="$child_token"
+  child_run="$(gh api "repos/$child_repository/actions/runs/$child")" || return 1
+  local default_branch
+  default_branch="$(gh api "repos/$child_repository" --jq .default_branch)" || return 1
+  default_head="$(gh api "repos/$child_repository/commits/$default_branch" --jq .sha)" || return 1
+  [[ "$default_head" =~ ^[0-9a-f]{40}$ ]] || return 1
+  jq -e --arg child "$child" --arg repo "$child_repository" --arg head "$default_head" --arg branch "$default_branch" '
+    (.id|tostring) == $child and .repository.full_name == $repo and
+    .head_repository.full_name == $repo and .head_sha == $head and .head_branch == $branch and
+    .path == ".github/workflows/harn-repin-rehearsal.yml" and .event == "workflow_dispatch" and
+    .status == "completed" and .conclusion == "success"
+  ' <<< "$child_run" >/dev/null || return 1
+  pages="$(gh api --paginate --slurp "repos/$child_repository/actions/runs/$child/jobs?filter=latest&per_page=100")" || return 1
+  jq -e --argjson run "$child_run" '
+    . as $pages | [.[].jobs[]] as $jobs |
+    type == "array" and length > 0 and ($jobs|length) > 0 and
+    all($pages[]; .total_count == ($jobs|length)) and
+    ([$jobs[].id]|unique|length) == ($jobs|length) and
+    all($jobs[]; (.id|type) == "number" and .id > 0 and
+      .id == (.id|floor) and .run_id == $run.id and .run_attempt == $run.run_attempt and
+      .status == "completed" and .conclusion == "success") and
+    all(["Prove the candidate against the harn-linked TUI suite",
+      "Prove the candidate against the first-run gauntlet",
+      "Rehearse the Harn repin surface"][]; . as $name |
+      ([$jobs[]|select(.name == $name)]|length) == 1)
+  ' <<< "$pages" >/dev/null || return 1
+  printf '%s\n' "$child"
+)
+
 # Join the resolver, dispatch, observation and authorization records from one
 # failed promotion. Dispatch and observation are distinct steps in the same
 # authenticated job; the child's identity must cross that boundary unchanged.
