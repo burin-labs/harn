@@ -18,7 +18,7 @@ fn main(harness: Harness) {
     {
       input_schema: {type: "object", properties: {}, additionalProperties: false},
       returns: {type: "string"},
-      prepare: { _args -> return {operation: {command: harness.fs.read_text(facts), cwd: root}} },
+      prepare: { _args -> return unwrap(Ok({operation: {command: harness.fs.read_text(facts), cwd: root}})) },
       handler: { _args ->
         const child = spawn {
           return tool_invocation_binding().operation

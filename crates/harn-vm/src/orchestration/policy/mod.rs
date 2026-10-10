@@ -395,11 +395,8 @@ pub fn tool_declared_path_entries(
 }
 
 pub fn enforce_current_policy_for_builtin(name: &str, args: &[VmValue]) -> Result<(), VmError> {
-    let entry = crate::stdlib::builtin_manifest_entry(name);
-    crate::tool_registry::preparation_scope::enforce_contract(
-        name,
-        entry.map(|entry| &entry.contract),
-    )?;
+    let (entry, preparation_contract) = crate::stdlib::builtin_policy_metadata(name);
+    crate::tool_registry::preparation_scope::enforce_contract(name, preparation_contract)?;
     let Some(policy) = current_execution_policy() else {
         return Ok(());
     };
