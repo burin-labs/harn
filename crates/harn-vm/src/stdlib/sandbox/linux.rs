@@ -37,6 +37,7 @@ mod nesting;
 #[path = "linux_self_confinement.rs"]
 mod self_confinement;
 use filesystem::filesystem_profile;
+pub(crate) use filesystem::installed_write_grants;
 use nesting::{landlock_probe_witness, nested_seccomp_filter_rule};
 
 impl SandboxBackend for Backend {

@@ -1617,7 +1617,11 @@ default, and declared host-absolute paths outside the workspace require an
 explicit `external_roots` allowance. Each root carries an `access` mode,
 `read` (the default, and the meaning of a bare path string) or `read_write`;
 a call that is not read-only is refused under a `read` root with
-`external_root_read_only`. Ask decisions call
+`external_root_read_only`. The one exception is a command-running call
+(`process_exec`) whose child provably cannot write the declared path: the
+active policy is `os_hardened`, the platform is macOS or Linux, and the
+backend's installed rules refuse every write to that path. Unmeasured is
+refused, never admitted. Ask decisions call
 `session/request_permission`; the host request and the transcript event both
 carry a `policyDecision` receipt with matched rule and rationale.
 
