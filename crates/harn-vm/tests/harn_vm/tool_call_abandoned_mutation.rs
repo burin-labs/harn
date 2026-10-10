@@ -55,9 +55,20 @@ fn stopped_call_update(
 ) -> (ToolCallStatus, ToolMutationStatus, Option<Vec<String>>) {
     let write = if writes {
         r#"harness.fs.write_text(path_join(harness.fs.workspace_temp_dir(), "stopped-write.txt"), "applied before the stop")"#
+            .to_string()
     } else {
-        ""
+        String::new()
     };
+    stopped_call_update_with(session, &write, None)
+}
+
+/// [`stopped_call_update`] with an explicit handler write, run under a
+/// testbench overlay rooted at `overlay_root` when one is given.
+fn stopped_call_update_with(
+    session: &str,
+    write: &str,
+    overlay_root: Option<std::path::PathBuf>,
+) -> (ToolCallStatus, ToolMutationStatus, Option<Vec<String>>) {
     let canceller = format!(
         r#"const canceller = spawn {{
     harness.clock.sleep_ms(200)
@@ -106,6 +117,11 @@ pipeline main(harness: Harness, _: unknown) {{
         // Reset first: it drops every sink registered before it.
         harn_vm::reset_thread_local_state();
         harn_vm::agent_events::register_sink(session_id, registered);
+        let _overlay = overlay_root.map(|root| {
+            harn_vm::testbench::overlay_fs::install_overlay(Arc::new(
+                harn_vm::testbench::overlay_fs::OverlayFs::rooted_at(root),
+            ))
+        });
         let chunk = harn_vm::compile_source(&source).expect("source compiles");
         let rt = tokio::runtime::Builder::new_current_thread()
             .enable_all()
@@ -170,6 +186,31 @@ fn a_stopped_call_that_wrote_nothing_stays_unknown() {
         ToolCallStatus::Completed,
         "the call was stopped, not finished"
     );
+    assert_eq!(mutation, ToolMutationStatus::Unknown);
+    assert_eq!(paths, None);
+}
+
+/// A write the testbench overlay absorbed never reached the workspace, so the
+/// stopped call must not claim an applied change (review on harn#9617).
+#[test]
+fn a_stopped_call_whose_write_the_overlay_absorbed_stays_unknown() {
+    let dir = tempfile::tempdir().expect("overlay root");
+    let target = dir.path().join("absorbed.txt");
+    let write = format!(
+        r#"harness.fs.write_text("{}", "never reaches disk")"#,
+        target.display()
+    );
+    let (status, mutation, paths) = stopped_call_update_with(
+        "abandoned-mutation-overlay",
+        &write,
+        Some(dir.path().to_path_buf()),
+    );
+    assert_ne!(
+        status,
+        ToolCallStatus::Completed,
+        "the call was stopped, not finished"
+    );
+    assert!(!target.exists(), "the overlay absorbed the write");
     assert_eq!(mutation, ToolMutationStatus::Unknown);
     assert_eq!(paths, None);
 }
