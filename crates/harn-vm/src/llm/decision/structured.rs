@@ -24,7 +24,7 @@ use super::question::QuestionBody;
 
 /// Bumped whenever the instruction or answer interpretation changes, because both
 /// change what the model was asked and therefore the cache identity.
-pub const EVALUATOR_INSTRUCTION_VERSION: &str = "harn.evaluator.structured.v3";
+pub const EVALUATOR_INSTRUCTION_VERSION: &str = "harn.evaluator.structured.v4";
 pub const OUTPUT_SCHEMA_VERSION: &str = "harn.evaluation.answers.v1";
 
 const INSTRUCTION: &str = "\
@@ -121,14 +121,8 @@ impl DecisionBackend for StructuredLlmBackend {
         &self,
         request: DecisionRequest<'_>,
     ) -> Result<RawDecisionResponse, DecisionTransportError> {
-        // The profile is temperature exactly zero and an explicit effort. A
-        // route that cannot honor both is unavailable; nothing is dropped to
-        // make the call succeed.
-        if request.temperature != 0.0 {
-            return Err(DecisionTransportError::UnsupportedOptions {
-                diagnostic: "the structured evaluation profile requires temperature 0".into(),
-            });
-        }
+        // Transport validates declared sampling options against the route.
+        // Unsupported options are refused rather than silently dropped.
         if request.effort.trim().is_empty() {
             return Err(DecisionTransportError::UnsupportedOptions {
                 diagnostic: "the structured evaluation profile requires an explicit effort".into(),

@@ -16,7 +16,16 @@ pipeline test(harness: Harness) {
   }
   const classify = missing_tool_call_classifier(
     harness,
-    {provider: "openai", model: "gpt-5.4-nano", confidence_threshold: 0.8},
+    {
+      provider: "openai",
+      model: "gpt-5.4-nano",
+      confidence_threshold: 0.8,
+      max_tokens: 256,
+      temperature: 0.1,
+      top_p: 0.9,
+      seed: 8543,
+      timeout_ms: 30000,
+    },
   )
   for backend in ["structured_llm", "native_decision"] {
     const policy: EvaluationPolicy = if backend == "structured_llm" {
@@ -111,6 +120,11 @@ pipeline test(harness: Harness) {
         )
         assert_eq(result.decision?.kind, "answered")
         assert_eq(len(harness.llm.mock_calls()), 1)
+        const call = harness.llm.mock_calls()[0]
+        assert_eq(call.max_tokens, 256)
+        assert_eq(call.temperature, 0.1)
+        assert_eq(call.top_p, 0.9)
+        assert_eq(call.seed, 8543)
       },
     )
   }
@@ -128,6 +142,22 @@ pipeline test(harness: Harness) {
         throw "malformed response must refuse"
       }
       assert_eq(len(harness.llm.mock_calls()), 1)
+    },
+  )
+  with_llm_script(
+    harness.llm,
+    [],
+    { ->
+      const invalid = missing_tool_call_classifier(
+        harness,
+        {provider: "openai", model: "gpt-5.4-nano", max_tokens: 0},
+      )(
+        request,
+      )
+      assert(invalid != nil)
+      assert_eq(invalid.action, "ambiguous")
+      assert(invalid.error != nil, "invalid transport settings stay visible and fail open")
+      assert_eq(len(harness.llm.mock_calls()), 0)
     },
   )
   harness.stdio.log("missing-call evaluation batched once; confidence and refusal preserved")

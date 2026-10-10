@@ -57,6 +57,10 @@ fn native_routes_project_wire_answers_and_refuse_partial_tapes() {
             contract: &contract,
             effort: "none",
             temperature: 0.0,
+            max_tokens: None,
+            top_p: None,
+            seed: None,
+            timeout_ms: None,
             evaluation_cost_limit: None,
             run_cost_limit: None,
         };

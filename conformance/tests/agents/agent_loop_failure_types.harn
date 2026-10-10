@@ -21,5 +21,9 @@ pipeline test(harness: Harness) {
   }
   assert(is_err(callback))
   assert(is_err(dispatch))
-  harness.stdio.log("both structured agent failures inhabit the named error channel")
+  const cancelled: Result<_, AgentLoopFailure> = try {
+    throw {category: "cancelled", message: "evaluation interrupted"}
+  }
+  assert(is_err(cancelled))
+  harness.stdio.log("owned structured agent failures inhabit the named error channel")
 }

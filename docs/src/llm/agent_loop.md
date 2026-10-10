@@ -140,6 +140,11 @@ selects `native_decision`. An explicit `evaluation: EvaluationPolicy`
 selects the route and backend, including `native_decision`. Native evaluation
 requires conservative run budget authority from the start of the run.
 
+On the inherited chat route, classifier `max_tokens` defaults to `192`,
+`temperature` to `0.0`, and `effort` to `none`. Optional `top_p`, `seed`, and
+`timeout_ms` retain their transport meanings. An explicit `evaluation` supplies
+its own chat settings; native policies omit chat settings.
+
 `confidence_threshold` defaults to `0.65`. Recovery requires both intent and
 target confidence to meet that floor. A confident negative intent doesn't need
 a confident target. The evaluator policy threshold is set to zero so the
@@ -1330,6 +1335,13 @@ when it reaches its next terminal decision.
 
 A callback that throws is attempted once. If it also fails while recording a
 thrown loop error, the propagated error retains both causes.
+
+`std/agent/failure_types` names the loop's structured errors. The
+`AgentLoopTerminalCallbackFailure` record carries `cause.terminal_error` and
+`cause.callback_error`. `AgentLoopProtocolFailure` identifies an empty provider
+request refused before dispatch. `AgentLoopFailure` combines those records
+with `AgentLoopCancelledFailure` and the loop's string errors. Misspelled or
+missing record fields fail checking.
 
 ### Example with retry
 

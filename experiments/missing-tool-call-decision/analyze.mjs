@@ -29,7 +29,7 @@ function paired(a, b, metric) {
   return {difference: mean(values), paired_row_bootstrap_95: [quantile(draws, .025), quantile(draws, .975)], independent_row_clusters: values.length};
 }
 const calibration = [];
-const report = {design: 'Fixed curated 12-row corpus, five repeated trials. Descriptive fidelity only; bootstrap clusters rows, not repeats. Primary assistant/tool execution replayed, classifier paid.', completed: items.length, arms: {}};
+const report = {design: `Fixed curated ${corpus.length}-row corpus, ${manifest.repetitions} repeated trials. Descriptive fidelity only; bootstrap clusters rows, not repeats. Primary assistant/tool execution replayed, classifier paid.`, completed: items.length, arms: {}};
 for (const arm of arms) {
   const subset = items.filter(x => x.arm === arm);
   const cache = [];

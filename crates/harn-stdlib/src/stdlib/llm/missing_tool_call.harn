@@ -1,3 +1,4 @@
+import { AgentLoopCancelledFailure } from "std/agent/failure_types"
 pub import { MissingToolCallClassifier, MissingToolCallVerdict } from "std/agent/options_types"
 import { MissingToolCallRecoveryOptions } from "std/agent/options_types"
 import { EvaluationPolicy, boolean, choice } from "std/predicate"
@@ -33,14 +34,25 @@ fn __missing_tool_call_policy(
       threshold: 0.0,
     }
   }
-  return {
+  let policy: EvaluationPolicy = {
     backend: "structured_llm",
     provider: route.provider,
     model: route.model,
     effort: cfg.effort ?? "none",
     temperature: cfg.temperature ?? 0.0,
+    max_tokens: cfg.max_tokens ?? 192,
     threshold: 0.0,
   }
+  if cfg.top_p != nil {
+    policy = policy + {top_p: cfg.top_p}
+  }
+  if cfg.seed != nil {
+    policy = policy + {seed: cfg.seed}
+  }
+  if cfg.timeout_ms != nil {
+    policy = policy + {timeout_ms: cfg.timeout_ms}
+  }
+  return policy
 }
 
 fn __missing_tool_call_string(value: any) -> string {
@@ -223,7 +235,7 @@ fn __missing_tool_call_fail_open(error: any, threshold: float) -> MissingToolCal
  * model otherwise. Refusal fails open to `ambiguous`; cancellation propagates.
  *
  * @effects: [llm.call]
- * @errors: []
+ * @errors: ["invalid classifier configuration", "cancelled"]
  * @api_stability: experimental
  */
 pub fn missing_tool_call_classifier(
@@ -300,22 +312,37 @@ pub fn missing_tool_call_classifier(
     for candidate in candidate_tools {
       criteria[candidate.name] = candidate.description ?? ""
     }
-    const outcome = harness.llm.evaluate_request(
-      "agent.missing_tool_call.v1",
-      state,
-      {
-        intended: boolean(
-          harness.fs.render_prompt("std/llm/prompts/missing_tool_call_intent.harn.prompt", {}),
-        ),
-        tool: choice(
-          harness.fs.render_prompt("std/llm/prompts/missing_tool_call_target.harn.prompt", {}),
-          criteria,
-        ),
-      },
-      policy,
-    )
+    const evaluated = try {
+      harness.llm.evaluate_request(
+        "agent.missing_tool_call.v1",
+        state,
+        {
+          intended: boolean(
+            harness.fs.render_prompt("std/llm/prompts/missing_tool_call_intent.harn.prompt", {}),
+          ),
+          tool: choice(
+            harness.fs.render_prompt("std/llm/prompts/missing_tool_call_target.harn.prompt", {}),
+            criteria,
+          ),
+        },
+        policy,
+      )
+    }
+    if is_err(evaluated) {
+      const err = unwrap_err(evaluated)
+      if error_category(err) == "cancelled" {
+        throw err
+      }
+      return __missing_tool_call_fail_open(err, threshold)
+        + {classifier_kind: "llm", model: policy.model}
+    }
+    const outcome = unwrap(evaluated)
     if outcome.kind == "cancelled" {
-      throw {category: "cancelled", message: "missing tool call evaluation cancelled"}
+      const failure: AgentLoopCancelledFailure = {
+        category: "cancelled",
+        message: "missing tool call evaluation cancelled",
+      }
+      throw failure
     }
     const metadata = {classifier_kind: "llm", model: policy.model, decision: outcome}
     if outcome.kind != "answered" {

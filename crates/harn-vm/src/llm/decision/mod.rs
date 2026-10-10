@@ -49,6 +49,10 @@ pub(crate) struct EvaluationPolicy {
     pub model: String,
     pub effort: String,
     pub temperature: f64,
+    pub max_tokens: Option<i64>,
+    pub top_p: Option<f64>,
+    pub seed: Option<i64>,
+    pub timeout_ms: Option<i64>,
     pub native_options_supplied: bool,
     pub threshold: f64,
     pub evaluation_cost_limit: Option<f64>,
@@ -98,6 +102,11 @@ impl EvaluationPolicy {
             "native_decision" => BackendKind::NativeDecision,
             other => return Err(format!("unknown evaluation backend `{other}`")),
         };
+        let optional_int = |key: &str| match fields.get(key) {
+            None => Ok(None),
+            Some(VmValue::Int(value)) => Ok(Some(*value)),
+            _ => Err(format!("evaluation policy has no integer `{key}`")),
+        };
         let policy = Self {
             backend,
             provider: text("provider")?,
@@ -112,8 +121,23 @@ impl EvaluationPolicy {
             } else {
                 0.0
             },
-            native_options_supplied: fields.contains_key("effort")
-                || fields.contains_key("temperature"),
+            max_tokens: optional_int("max_tokens")?,
+            top_p: fields
+                .contains_key("top_p")
+                .then(|| number("top_p"))
+                .transpose()?,
+            seed: optional_int("seed")?,
+            timeout_ms: optional_int("timeout_ms")?,
+            native_options_supplied: [
+                "effort",
+                "temperature",
+                "max_tokens",
+                "top_p",
+                "seed",
+                "timeout_ms",
+            ]
+            .iter()
+            .any(|key| fields.contains_key(*key)),
             threshold: number("threshold")?,
             evaluation_cost_limit: fields
                 .contains_key("evaluation_cost_limit")
@@ -127,6 +151,11 @@ impl EvaluationPolicy {
         if !policy.threshold.is_finite()
             || !(0.0..=1.0).contains(&policy.threshold)
             || !policy.temperature.is_finite()
+            || policy.max_tokens.is_some_and(|limit| limit <= 0)
+            || policy.timeout_ms.is_some_and(|limit| limit <= 0)
+            || policy
+                .top_p
+                .is_some_and(|value| !value.is_finite() || !(0.0..=1.0).contains(&value))
             || policy
                 .evaluation_cost_limit
                 .is_some_and(|limit| !limit.is_finite() || limit < 0.0)
@@ -147,7 +176,7 @@ impl EvaluationPolicy {
     /// a different decision, and a cache that ignored it would silently reuse
     /// an acceptance the caller no longer wants.
     fn digest(&self) -> String {
-        let parts = [
+        let mut parts = vec![
             self.backend.as_str().to_string(),
             self.provider.clone(),
             self.model.clone(),
@@ -158,6 +187,16 @@ impl EvaluationPolicy {
             format!("{:?}", self.evaluation_cost_limit),
             format!("{:?}", self.run_cost_limit),
         ];
+        for (key, value) in [
+            ("max_tokens", self.max_tokens.map(|value| value.to_string())),
+            ("top_p", self.top_p.map(|value| format!("{value:?}"))),
+            ("seed", self.seed.map(|value| value.to_string())),
+            ("timeout_ms", self.timeout_ms.map(|value| value.to_string())),
+        ] {
+            if let Some(value) = value {
+                parts.push(format!("{key}={value}"));
+            }
+        }
         digest_parts(parts.iter().map(String::as_str))
     }
 }
@@ -506,6 +545,10 @@ async fn evaluate_live(
             contract: &route,
             effort: &policy.effort,
             temperature: policy.temperature,
+            max_tokens: policy.max_tokens,
+            top_p: policy.top_p,
+            seed: policy.seed,
+            timeout_ms: policy.timeout_ms,
             evaluation_cost_limit: policy.evaluation_cost_limit,
             run_cost_limit: policy.run_cost_limit,
         };
@@ -554,7 +597,7 @@ async fn evaluate_live(
     } else {
         estimated
     };
-    let Some(bound) = admitted_cost_bound(&route, budget_input) else {
+    let Some(bound) = admitted_cost_bound(&route, budget_input, policy.max_tokens) else {
         let outcome = outcome::unavailable(&reference, "unsupported_options");
         let outcome = refuse(&mut receipt, outcome);
         publish(&receipt);
@@ -716,6 +759,10 @@ async fn dispatch(
         contract: route,
         effort: &evaluation.policy.effort,
         temperature: evaluation.policy.temperature,
+        max_tokens: evaluation.policy.max_tokens,
+        top_p: evaluation.policy.top_p,
+        seed: evaluation.policy.seed,
+        timeout_ms: evaluation.policy.timeout_ms,
         evaluation_cost_limit: evaluation.policy.evaluation_cost_limit,
         run_cost_limit: evaluation.policy.run_cost_limit,
     };
@@ -948,7 +995,11 @@ fn apply_structured_usage(
 
 /// The upper bound this evaluation may cost under the route's declared price.
 /// `None` when the price is unknown, which refuses dispatch.
-fn admitted_cost_bound(route: &DecisionContract, estimated_state_tokens: usize) -> Option<f64> {
+fn admitted_cost_bound(
+    route: &DecisionContract,
+    estimated_state_tokens: usize,
+    max_tokens: Option<i64>,
+) -> Option<f64> {
     // Native protocols here have no output-token cap. Their monetary bound
     // is valid only for an explicitly declared input-only billing contract.
     if route.protocol.is_native() && route.output_price_per_mtok != Some(0.0) {
@@ -960,7 +1011,7 @@ fn admitted_cost_bound(route: &DecisionContract, estimated_state_tokens: usize) 
         return None;
     }
     let input_tokens = estimated_state_tokens as f64 + 2048.0;
-    let output_tokens = 2048.0;
+    let output_tokens = max_tokens.unwrap_or(2048) as f64;
     Some((input_tokens * input + output_tokens * output) / 1_000_000.0)
 }
 

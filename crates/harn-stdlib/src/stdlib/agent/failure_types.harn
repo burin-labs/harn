@@ -18,4 +18,10 @@ pub type AgentLoopProtocolFailure = {
   message: string,
 }
 
-pub type AgentLoopFailure = string | AgentLoopTerminalCallbackFailure | AgentLoopProtocolFailure
+/** A typed cancellation outcome propagated from an auxiliary evaluation. */
+pub type AgentLoopCancelledFailure = {category: "cancelled", message: string}
+
+pub type AgentLoopFailure = string \
+  | AgentLoopTerminalCallbackFailure \
+  | AgentLoopProtocolFailure \
+  | AgentLoopCancelledFailure

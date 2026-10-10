@@ -480,6 +480,10 @@ fn the_policy_digest_covers_the_threshold() {
         model: "fixture".into(),
         effort: "low".into(),
         temperature: 0.0,
+        max_tokens: None,
+        top_p: None,
+        seed: None,
+        timeout_ms: None,
         native_options_supplied: false,
         threshold,
         evaluation_cost_limit: Some(1.0),
@@ -511,6 +515,46 @@ fn runtime_policy_uses_the_closed_registry_and_optional_caps_are_explicit_in_ide
 }
 
 // --- Through the evaluator, with the request counter as the instrument ------
+
+#[test]
+fn chat_overrides_change_identity_and_admission_without_allowing_retry_options() {
+    let value = policy_value(0.5, 1.0);
+    let default = EvaluationPolicy::from_value(&value).unwrap();
+    for (key, setting) in [
+        ("max_tokens", VmValue::Int(192)),
+        ("top_p", VmValue::Float(0.9)),
+        ("seed", VmValue::Int(8543)),
+        ("timeout_ms", VmValue::Int(30000)),
+    ] {
+        let mut fields = value.as_dict().unwrap().clone();
+        fields.insert(crate::value::intern_key(key), setting);
+        let changed = EvaluationPolicy::from_value(&VmValue::dict(fields)).unwrap();
+        assert_ne!(default.digest(), changed.digest(), "{key}");
+        assert!(
+            changed.native_options_supplied,
+            "native routes must refuse {key}"
+        );
+    }
+    for (key, setting) in [
+        ("max_tokens", VmValue::Int(0)),
+        ("timeout_ms", VmValue::Int(-1)),
+        ("top_p", VmValue::Float(1.1)),
+        ("schema_retries", VmValue::Int(1)),
+    ] {
+        let mut fields = value.as_dict().unwrap().clone();
+        fields.insert(crate::value::intern_key(key), setting);
+        assert!(
+            EvaluationPolicy::from_value(&VmValue::dict(fields)).is_err(),
+            "{key}"
+        );
+    }
+    let route = contract::decision_contract_for_route("openai", "gpt-5.4-nano").unwrap();
+    let default_bound = super::admitted_cost_bound(&route, 100, None).unwrap();
+    let small_bound = super::admitted_cost_bound(&route, 100, Some(192)).unwrap();
+    assert!(small_bound > 0.0 && small_bound < default_bound);
+    let expected_difference = (2048.0 - 192.0) * route.output_price_per_mtok.unwrap() / 1_000_000.0;
+    assert!((default_bound - small_bound - expected_difference).abs() < 1e-12);
+}
 
 fn policy_value(threshold: f64, evaluation_cost_limit: f64) -> VmValue {
     VmValue::dict(vec![

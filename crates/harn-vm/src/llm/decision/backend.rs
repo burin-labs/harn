@@ -28,6 +28,10 @@ pub struct DecisionRequest<'a> {
     /// honor both returns `UnsupportedOptions` rather than dropping one.
     pub effort: &'a str,
     pub temperature: f64,
+    pub max_tokens: Option<i64>,
+    pub top_p: Option<f64>,
+    pub seed: Option<i64>,
+    pub timeout_ms: Option<i64>,
     pub evaluation_cost_limit: Option<f64>,
     pub run_cost_limit: Option<f64>,
 }
