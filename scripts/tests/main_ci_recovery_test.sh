@@ -24,7 +24,16 @@ case "$*" in
     if [[ "$*" == *--slurp* ]]; then
       jq -n --arg job "$job" --arg step "$step" --arg status "${JOB_STATUS:-completed}" \
         --arg missing "${MISSING_STEPS:-false}" --argjson count "${JOB_COUNT:-1}" \
-        '[{total_count: $count, jobs: [{name: $job, status: $status, conclusion: "failure", steps: (if $missing == "true" then null else [{name: $step, status: "completed", conclusion: "failure"}] end)}]}]'
+        --arg malformed "${MALFORMED:-}" --arg empty "${NO_JOBS:-false}" \
+        '[{total_count: $count, jobs: [{id: 101, name: $job, status: $status, conclusion: "failure", steps: (if $missing == "true" then null else [{name: $step, status: "completed", conclusion: "failure"}] end)}]}]
+        | if $empty == "true" then .[0].total_count = 0 | .[0].jobs = []
+          elif $malformed == "duplicate" then .[0].total_count = 2 | .[0].jobs += .[0].jobs
+          elif $malformed == "name" then .[0].jobs[0].name = null
+          elif $malformed == "id" then .[0].jobs[0].id = "101"
+          elif $malformed == "steps" then .[0].jobs[0].steps = "unreported"
+          elif $malformed == "step" then .[0].jobs[0].steps[0].status = false
+          elif $malformed == "jobs" then .[0].jobs = null
+          else . end'
     elif [[ "${NO_JOBS:-false}" != true ]]; then
       echo "$job"
     fi
@@ -105,6 +114,16 @@ absent signed-publish
 ATTEMPT=2 OUTCOME=failure FIRST_JOB='Binary size signal' FIRST_STEP="Fetch main's last debug measurement" run_case
 absent 'signed-publish|pr create|pr edit'
 grep -Fq '[CI] Persistent main failure' "$scratch/calls"
+for malformed in duplicate name id steps step jobs; do
+  if ATTEMPT=2 OUTCOME=failure MALFORMED="$malformed" run_case; then
+    echo "Malformed $malformed census accepted" >&2; exit 1
+  fi
+  absent 'issue create|signed-publish|pr create|pr edit'
+done
+if ATTEMPT=2 OUTCOME=failure JOB_COUNT=1.5 run_case; then
+  echo 'Fractional census count accepted' >&2; exit 1
+fi
+absent 'issue create|signed-publish|pr create|pr edit'
 ATTEMPT=2 OUTCOME=failure FIRST_STEP='Download workspace test archive' run_case
 absent 'signed-publish|pr create|pr edit'
 ATTEMPT=2 OUTCOME=failure RETRY_STEP='Download workspace test archive' run_case

@@ -28,7 +28,29 @@ if [[ -n "$existing" ]]; then
   echo "Run already recorded in issue #$existing."
   exit 0
 fi
-jobs=$(gh api --paginate "repos/$GH_REPO/actions/runs/$RUN_ID/attempts/1/jobs?per_page=100" --jq '.jobs[] | select(.conclusion == "failure" and .name != "CI status") | .name')
+cat > "$scratch/census.jq" <<'JQ'
+def positive_integer: type == "number" and . > 0 and floor == .;
+def named: .name | type == "string" and length > 0;
+def status_valid: .status | IN("queued", "in_progress", "completed", "waiting", "pending", "requested");
+def conclusion_valid: .conclusion == null or (.conclusion | type == "string");
+def step_valid: type == "object" and named and status_valid and conclusion_valid;
+def job_valid:
+  type == "object" and (.id | positive_integer) and named and status_valid and conclusion_valid
+  and (.steps == null or (.steps | type == "array" and all(.[]; step_valid)));
+if type != "array" or length == 0 then error("missing job pages") else . end
+| . as $pages
+| if all($pages[]; type == "object" and (.jobs | type == "array") and (.total_count | positive_integer))
+  then [$pages[] | .jobs[]] else error("malformed job census") end
+| . as $jobs
+| if ($pages[0].total_count != length)
+     or any($pages[]; .total_count != $pages[0].total_count)
+     or (all($jobs[]; job_valid) | not)
+     or ([$jobs[].id] | unique | length) != length
+  then error("incomplete or malformed job census") else . end
+JQ
+gh api --paginate --slurp "repos/$GH_REPO/actions/runs/$RUN_ID/attempts/1/jobs?per_page=100" > "$scratch/first-pages.json"
+jq -f "$scratch/census.jq" "$scratch/first-pages.json" > "$scratch/first.json"
+jobs=$(jq -r '.[] | select(.conclusion == "failure" and .name != "CI status") | .name' "$scratch/first.json")
 [[ -n "$jobs" ]] || { echo 'No measured first-attempt failures; refusing classification.' >&2; exit 1; }
 # shellcheck disable=SC2016 # Markdown code spans, not shell substitutions.
 printf '%s\n\nSource: `%s`\nRun: https://github.com/%s/actions/runs/%s\n\nFirst-attempt failing jobs:\n%s\n' "$marker" "$sha" "$GH_REPO" "$RUN_ID" "$jobs" > "$scratch/body"
@@ -36,21 +58,14 @@ if [[ "$conclusion" == success ]]; then
   gh issue create --repo "$GH_REPO" --title "[CI] Flaky main suite at ${sha:0:12}" --body-file "$scratch/body"
   exit 0
 fi
-latest=$(gh api --paginate "repos/$GH_REPO/actions/runs/$RUN_ID/jobs?filter=latest&per_page=100" --jq '.jobs[] | select(.conclusion == "failure" and .name != "CI status") | .name')
+gh api --paginate --slurp "repos/$GH_REPO/actions/runs/$RUN_ID/jobs?filter=latest&per_page=100" > "$scratch/latest-pages.json"
+jq -f "$scratch/census.jq" "$scratch/latest-pages.json" > "$scratch/latest.json"
+latest=$(jq -r '.[] | select(.conclusion == "failure" and .name != "CI status") | .name' "$scratch/latest.json")
 [[ -n "$latest" ]] || { echo 'No measured retry failures; refusing culprit attribution.' >&2; exit 1; }
 # Repeated jobs, even a test step, can fail during setup or compilation. These
 # observations do not establish a source culprit. Record the complete census
 # for diagnosis; source changes go through an independently reviewed PR.
-gh api --paginate --slurp "repos/$GH_REPO/actions/runs/$RUN_ID/attempts/1/jobs?per_page=100" > "$scratch/first-pages.json"
-gh api --paginate --slurp "repos/$GH_REPO/actions/runs/$RUN_ID/jobs?filter=latest&per_page=100" > "$scratch/latest-pages.json"
-jq -n --slurpfile first "$scratch/first-pages.json" --slurpfile latest "$scratch/latest-pages.json" '
-  def census:
-    if type != "array" or length == 0 then error("missing job pages") else . end
-    | . as $pages | [$pages[] | .jobs[]] as $jobs
-    | if ($pages[0].total_count | type) != "number"
-         or ($pages[0].total_count != ($jobs | length))
-         or any($pages[]; .total_count != $pages[0].total_count)
-      then error("incomplete job census") else $jobs end;
+jq -n --slurpfile first "$scratch/first.json" --slurpfile latest "$scratch/latest.json" '
   def evidence:
     . as $jobs | {
       measured_jobs: length,
@@ -61,7 +76,7 @@ jq -n --slurpfile first "$scratch/first-pages.json" --slurpfile latest "$scratch
         steps_reported: (.steps | type == "array")
       }]
     };
-  {first: ($first[0] | census | evidence), latest: ($latest[0] | census | evidence),
+  {first: ($first[0] | evidence), latest: ($latest[0] | evidence),
    source_cause: "unestablished", automatic_source_action: "none"}' > "$scratch/evidence.json"
 {
   printf '\nRetry failing jobs:\n%s\n' "$latest"
