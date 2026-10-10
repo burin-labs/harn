@@ -124,7 +124,8 @@ pub fn conditional_replace(
 }
 
 /// Variant used by hosts that must snapshot the pre-image immediately before
-/// mutation while the replacement lock is still held.
+/// mutation while the replacement lock is still held. A replacement that
+/// changed the file is recorded against the current tool call.
 pub fn conditional_replace_with_hook<F>(
     path: &Path,
     contents: &[u8],
@@ -134,7 +135,7 @@ pub fn conditional_replace_with_hook<F>(
 where
     F: FnOnce(),
 {
-    conditional_replace_with_io(
+    let receipt = conditional_replace_with_io(
         path,
         contents,
         options,
@@ -149,7 +150,14 @@ where
             atomic_write_with_durability_unlocked(candidate, bytes, durability)
         },
         before_write,
-    )
+    )?;
+    if matches!(
+        receipt.status,
+        ConditionalReplaceStatus::Created | ConditionalReplaceStatus::Replaced
+    ) {
+        crate::agent_sessions::record_tool_call_mutation(&path.to_string_lossy());
+    }
+    Ok(receipt)
 }
 
 pub(crate) fn conditional_replace_with_io<R, W, F>(

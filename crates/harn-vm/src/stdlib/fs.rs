@@ -610,9 +610,19 @@ fn write_file_bytes_builtin(args: &[VmValue], _out: &mut String) -> Result<VmVal
     Ok(VmValue::Nil)
 }
 
+/// Every VM fs mutation reaches this only after it succeeded, so it is also
+/// where the current tool call's completed mutations are recorded. A mutation
+/// an active testbench overlay absorbed never reached the workspace, so it is
+/// not recorded as one.
 fn queue_file_edited_for(resolved: &std::path::Path, operation: &str, bytes: usize) {
+    let path = resolved.to_string_lossy();
+    let absorbed = crate::testbench::overlay_fs::active_overlay()
+        .is_some_and(|overlay| overlay.absorbs_mutation(resolved));
+    if !absorbed {
+        crate::agent_sessions::record_tool_call_mutation(&path);
+    }
     crate::orchestration::queue_file_edited(
-        &resolved.to_string_lossy(),
+        &path,
         serde_json::json!({"operation": operation, "bytes": bytes}),
     );
 }
