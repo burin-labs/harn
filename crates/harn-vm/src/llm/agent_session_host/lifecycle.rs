@@ -47,11 +47,26 @@ async fn host_agent_session_init(
         Some(VmValue::String(s)) => Some(s.to_string()),
         _ => None,
     };
-    let opts_map = opts_dict(args.get(2));
+    let mut opts_map = opts_dict(args.get(2));
     let host_bridge = crate::llm::agent_runtime::current_host_bridge();
     let session_id = opt_str(&opts_map, "session_id")
         .or_else(crate::agent_sessions::current_session_id)
         .unwrap_or_else(|| format!("agent_session_{}", now_id()));
+
+    // Bind the default opening turn before durable context assembly. The
+    // bridge carries a validated caller fact, scoped to its ACP session;
+    // delegated children cannot inherit the parent's message identity.
+    if opt_str(&opts_map, "initial_user_message_id").is_none() {
+        if let Some(message_id) = host_bridge
+            .as_ref()
+            .and_then(|bridge| bridge.caller_message_id_for_session(&session_id))
+        {
+            opts_map.insert(
+                "initial_user_message_id".into(),
+                VmValue::String(message_id.into()),
+            );
+        }
+    }
 
     let initialized = live_transcript_journal::initialize(
         &session_id,
@@ -203,10 +218,13 @@ async fn host_agent_session_init(
             _ => false,
         };
         if !has_history || !message.trim().is_empty() || has_user_content {
-            let user_msg = serde_json::json!({
+            let mut user_msg = serde_json::json!({
                 "role": "user",
                 "content": user_content,
             });
+            if let Some(message_id) = opt_str(&opts_map, "initial_user_message_id") {
+                user_msg["messageId"] = serde_json::json!(message_id);
+            }
             crate::agent_sessions::inject_message(&resolved, json_to_vm(&user_msg))
                 .map_err(VmError::Runtime)?;
         } else {
@@ -702,10 +720,11 @@ pub(super) async fn host_agent_session_finalize(
         )
     };
     crate::llm::agent_runtime::emit_agent_event_with_ctx(Some(&ctx), &terminal_phase).await;
-    if let Some(content) = published {
+    if let Some(reply) = published {
         emit_event(&AgentEvent::AgentMessageChunk {
             session_id: session_id.clone(),
-            content,
+            content: reply.content,
+            history_source_event_id: Some(reply.source_event_id),
         });
     }
     let mut session = finalization.commit();

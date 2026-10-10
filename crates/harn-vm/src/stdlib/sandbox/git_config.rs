@@ -6,7 +6,7 @@
 //! The query is host-side, before the child enters its OS sandbox. Values stay
 //! in memory and are never printed because Git config can contain credentials.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use super::paths::normalize_for_policy;
@@ -15,6 +15,9 @@ use super::{
     sandbox_user_home_dir,
 };
 use crate::orchestration::{CapabilityPolicy, ProcessSandboxPreset};
+
+#[path = "git_config_cache.rs"]
+mod cache;
 
 pub(crate) fn process_sandbox_package_manager_config_read_roots(
     policy: &CapabilityPolicy,
@@ -44,34 +47,68 @@ pub(super) fn read_roots_for_workspaces(
     let Some(git) = trusted_git_executable(workspaces) else {
         return Vec::new();
     };
+    let env: BTreeMap<_, _> = match crate::stdlib::process::session_closed_env_for_command(
+        &git.to_string_lossy(),
+        std::iter::empty(),
+    ) {
+        Ok(Some(env)) => env
+            .into_iter()
+            .map(|(key, value)| (key.into(), value.into()))
+            .collect(),
+        Ok(None) => std::env::vars_os().collect(),
+        Err(_) => return Vec::new(),
+    };
+    let effective_home = env.get(std::ffi::OsStr::new("HOME")).map(PathBuf::from);
+    let home = effective_home
+        .as_deref()
+        .filter(|home| home.is_absolute())
+        .or(home);
+    let mut cache = cache::cache()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     for workspace in workspaces {
-        for scope in ["--global", "--system"] {
-            // The confined git reads its config under the session's child
-            // environment, so the roots are computed under the same one.
-            let Ok(mut command) = crate::process_sandbox::session_std_command(&git) else {
-                continue;
-            };
-            let Ok(output) = command
-                .arg("-C")
-                .arg(workspace)
-                .args([
-                    "config",
-                    scope,
-                    "--includes",
-                    "--show-origin",
-                    "--null",
-                    "--list",
-                ])
-                .output()
-            else {
-                continue;
-            };
-            if output.status.success() {
-                roots.extend(roots_from_config_listing(&output.stdout, workspace, home));
+        roots.extend(cache.roots(workspace, home, &git, &env, || {
+            let mut listings = Vec::new();
+            let mut complete = true;
+            for scope in ["--global", "--system"] {
+                // The confined git reads its config under the session's child
+                // environment, so the roots are computed under the same one.
+                let Ok(mut command) = crate::process_sandbox::session_std_command(&git) else {
+                    complete = false;
+                    continue;
+                };
+                command.env_clear().envs(&env);
+                let Ok(output) = command
+                    .arg("-C")
+                    .arg(workspace)
+                    .args([
+                        "config",
+                        scope,
+                        "--includes",
+                        "--show-origin",
+                        "--null",
+                        "--get-regexp",
+                        ".*",
+                    ])
+                    .output()
+                else {
+                    complete = false;
+                    continue;
+                };
+                // Exit 1 means no matching entries, including an absent default
+                // config. It is a measured empty listing, not a query failure.
+                if output.status.success() || output.status.code() == Some(1) {
+                    listings.push(output.stdout);
+                } else {
+                    complete = false;
+                }
             }
-        }
+            (listings, complete)
+        }));
     }
-    roots.extend(env_named_config_files(|key| std::env::var_os(key)));
+    roots.extend(env_named_config_files(|key| {
+        env.get(std::ffi::OsStr::new(key)).cloned()
+    }));
     let workspaces: Vec<_> = workspaces
         .iter()
         .map(|workspace| normalize_for_policy(workspace))
@@ -102,13 +139,55 @@ fn env_named_config_files(var: impl Fn(&str) -> Option<std::ffi::OsString>) -> V
 fn trusted_git_executable(workspaces: &[PathBuf]) -> Option<PathBuf> {
     // This runs on the host before confinement. Never resolve `git` through
     // the process current directory or a PATH entry inside the workspace.
+    // Apple's /usr/bin/git is an xcrun shim. Use an installed system-owned
+    // binary directly so host discovery doesn't warm the workspace cache.
+    let installed = if cfg!(target_os = "macos") {
+        &[
+            "/var/db/xcode_select_link/usr/bin/git",
+            "/Library/Developer/CommandLineTools/usr/bin/git",
+            "/Applications/Xcode.app/Contents/Developer/usr/bin/git",
+        ][..]
+    } else {
+        &[]
+    };
+    select_trusted_git(
+        workspaces,
+        installed,
+        std::env::var_os("PATH").as_deref(),
+        cfg!(target_os = "macos"),
+    )
+}
+
+fn select_trusted_git(
+    workspaces: &[PathBuf],
+    installed: &[&str],
+    path: Option<&std::ffi::OsStr>,
+    macos: bool,
+) -> Option<PathBuf> {
+    for path in installed {
+        if Path::new(path).is_file() {
+            return Some(PathBuf::from(*path));
+        }
+    }
+    if macos {
+        if let Some(git) = path.and_then(|path| trusted_git_from_path(workspaces, path, true)) {
+            return Some(git);
+        }
+    }
     #[cfg(unix)]
     if Path::new("/usr/bin/git").is_file() {
         return Some(PathBuf::from("/usr/bin/git"));
     }
+    path.and_then(|path| trusted_git_from_path(workspaces, path, false))
+}
+
+fn trusted_git_from_path(
+    workspaces: &[PathBuf],
+    path: &std::ffi::OsStr,
+    skip_shim: bool,
+) -> Option<PathBuf> {
     let filename = if cfg!(windows) { "git.exe" } else { "git" };
-    let path = std::env::var_os("PATH")?;
-    std::env::split_paths(&path)
+    std::env::split_paths(path)
         .filter(|directory| directory.is_absolute())
         .find_map(|directory| {
             let candidate = directory.join(filename);
@@ -116,6 +195,9 @@ fn trusted_git_executable(workspaces: &[PathBuf]) -> Option<PathBuf> {
                 return None;
             }
             let resolved = normalize_for_policy(&candidate);
+            if skip_shim && resolved == Path::new("/usr/bin/git") {
+                return None;
+            }
             (!workspaces
                 .iter()
                 .any(|workspace| resolved.starts_with(workspace)))
@@ -191,6 +273,32 @@ fn named_root(value: &str, workspace: &Path, home: Option<&Path>) -> Option<Path
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
+
+    #[test]
+    fn macos_git_selection_prefers_installed_path_git_over_the_shim() {
+        let temp = tempfile::tempdir().unwrap();
+        let workspace = temp.path().join("workspace");
+        let installed = temp.path().join("installed");
+        std::fs::create_dir_all(&workspace).unwrap();
+        std::fs::create_dir_all(&installed).unwrap();
+        std::fs::write(workspace.join("git"), "workspace executable").unwrap();
+        std::fs::write(installed.join("git"), "installed executable").unwrap();
+        let path = std::env::join_paths([Path::new("/usr/bin"), &workspace, &installed]).unwrap();
+        assert_eq!(
+            select_trusted_git(&[normalize_for_policy(&workspace)], &[], Some(&path), true),
+            Some(normalize_for_policy(&installed.join("git")))
+        );
+        let only_workspace = std::env::join_paths([Path::new("/usr/bin"), &workspace]).unwrap();
+        assert_eq!(
+            select_trusted_git(
+                &[normalize_for_policy(&workspace)],
+                &[],
+                Some(&only_workspace),
+                true
+            ),
+            Some(PathBuf::from("/usr/bin/git"))
+        );
+    }
 
     #[test]
     fn config_listing_grants_included_files_and_named_paths_only() {

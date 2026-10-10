@@ -32,6 +32,10 @@ pub(crate) fn default_run_dir() -> PathBuf {
     crate::runtime_paths::run_root(&base)
 }
 
+mod execution_context;
+pub(crate) use execution_context::{current_execution_context, swap_thread_execution_context};
+pub use execution_context::{execution_root_path, set_thread_execution_context};
+
 mod hooks;
 pub use hooks::*;
 #[cfg(test)]
@@ -100,12 +104,14 @@ mod replay_bench;
 pub use replay_bench::*;
 
 mod policy;
+pub(crate) use policy::PolicyAuthorityRequest;
 pub use policy::*;
 #[cfg(test)]
 pub(crate) use policy::{is_policy_machinery_consent_call, swap_execution_policy_stack};
 
 mod ambient_scope;
 pub use ambient_scope::blocking::run_blocking_with_ambient;
+pub(crate) use ambient_scope::scope_persistent_state_context;
 pub(crate) use ambient_scope::{
     scope_agent_session, scope_ambient, scope_ambient_transaction, scope_approval_policy,
     scope_autonomy_policy, scope_command_policy, scope_dynamic_permissions,

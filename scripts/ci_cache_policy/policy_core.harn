@@ -85,10 +85,10 @@ pub const RELEASE_PATH_FILTER_OUTPUT = "$"
 pub const RELEASE_PATH_FILTER_BRANCH = "[[ \"$RELEASE_BUILD_INPUTS_CHANGED\" == \"true\" ]]"
 
 pub const RELEASE_WORKFLOW_CONCURRENCY_GROUP = "build-release-binaries-$"
-  + "{{ (github.event_name == 'workflow_dispatch' && inputs.benchmark_source_sha != '' && format('benchmark-{0}-{1}', inputs.benchmark_source_sha, github.sha)) || (github.event_name == 'schedule' && 'source-main') || (github.event_name == 'workflow_dispatch' && inputs.warm_cache_only && 'warm-main') || (github.event_name == 'push' && format('branch-{0}', github.run_id)) || github.ref_name }}"
+  + "{{ (github.event_name == 'workflow_dispatch' && inputs.benchmark_only && format('benchmark-{0}-{1}', inputs.benchmark_source_sha || github.sha, github.sha)) || ((github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.source_candidate)) && 'source-main') || (github.event_name == 'workflow_dispatch' && inputs.warm_cache_only && 'warm-main') || (github.event_name == 'push' && format('branch-{0}', github.run_id)) || github.ref_name }}"
 
 pub const RELEASE_WORKFLOW_CANCEL_POLICY = "$"
-  + "{{ github.event_name == 'workflow_dispatch' && inputs.warm_cache_only }}"
+  + "{{ github.event_name == 'workflow_dispatch' && inputs.warm_cache_only && !inputs.source_candidate && !inputs.benchmark_only }}"
 
 pub const RELEASE_BUILD_CONCURRENCY_GROUP = "build-release-binaries-build-$"
   + "{{ (github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.setup.outputs.build_mode == 'warm' && format('warm-{0}', matrix.target)) || format('{0}-{1}', github.run_id, matrix.target) }}"
@@ -192,42 +192,11 @@ pub const SELFHOSTED_LINUX_BIG_RUNNER = "[\"self-hosted\", \"Linux\", \"X64\", \
 /** The census pool that answers for that label set. */
 pub const SELFHOSTED_LINUX_BIG_POOL = "linux_big"
 
-/**
- * The label only the shared CLI producer asks for. Runners carrying it serve
- * nothing else, so the build every Harn proof lane waits on never queues
- * behind general work or behind the vendor quota every repository in the
- * organization shares. That quota held it 37 minutes on 2026-10-02 (run
- * 37042288569).
- */
-pub const RESERVED_CLI_PRODUCER_LABEL = "harn-ci-producer"
-
-pub const RESERVED_CLI_PRODUCER_RUNNER =
-  "[\"self-hosted\", \"Linux\", \"X64\", \"${RESERVED_CLI_PRODUCER_LABEL}\"]"
-
-/** The census pool that measures the reserved label: the census's probe lane. */
-pub const RESERVED_CLI_PRODUCER_POOL = "linux_probe"
-
-/** The capacity step that routes the shared CLI producer, and its output. */
-pub const CLI_CAPACITY_DECISION_STEP = "cli-decision"
-
-pub const CLI_CAPACITY_ROUTE_OUTPUT = "cli_route"
-
 /** The step that names where the slow E2E suite is about to land. */
 pub const E2E_CAPACITY_DECISION_STEP = "Decide where the slow E2E suite lands"
 
 /** The input that carries the evacuation switch into that decision. */
 pub const RUST_CACHE_ACTION = "./.github/actions/rust-cache"
-
-// Authorized ci.yml cache writers must grant actions: write. The workflow
-// top-level token is contents/read-only; without a job-level grant, Swatinem
-// save fails under continue-on-error and the Linux workspace-tests cache stays
-// empty (#5003).
-pub const CI_CACHE_WRITE_JOBS = [
-  "package-audit",
-  "rust-cli",
-  "rust-check-inputs",
-  "rust-cache-refresh",
-]
 
 // Compile fan-out on the producer is measured, not typed, and the ceiling now
 // rests on a measurement rather than on a fear. It lives in
@@ -417,17 +386,18 @@ pub const MAIN_ONLY_POLICY_SKIP_TEST = "test \"$" + "{EVENT_NAME}:$" + "{GIT_REF
  * On a proven push the artifact barrier names the merge-group run whose CLI
  * stands in for this run's, and every main-only consumer downloads from it.
  */
-pub const ARTIFACT_SOURCE_RUN_ID = "$" + "{{ needs.rust-artifacts-ready.outputs.source_run_id }}"
+/** Skips a slow proof family in the post-merge tier (harn#9495). */
+pub const POST_MERGE_TIER_GUARD = "needs.changes.outputs.post_merge_tier != 'true'"
 
 /**
  * The Windows cross-compile check is the one Windows admission lane: every
- * merge-group candidate, plus Rust-changing main pushes.
+ * pull request and merge-group candidate that selects the full suite, plus
+ * Rust-changing main pushes. Only the pull request can honor a `CI-Scope:
+ * full` declaration, because a merge group cannot read the body.
  */
-/** Skips a slow proof family under the sprint fast-CI switch (#7628). */
-pub const SPRINT_FAST_CI_GUARD = "needs.changes.outputs.sprint_fast_ci != 'true'"
-
-pub const WINDOWS_CROSS_CHECK_IF = "(github.event_name == 'merge_group' && "
-  + SPRINT_FAST_CI_GUARD
+pub const WINDOWS_CROSS_CHECK_IF =
+  "((github.event_name == 'pull_request' || github.event_name == 'merge_group') && "
+  + POST_MERGE_TIER_GUARD
   + ") || (github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.changes.outputs.rust == 'true')"
 
 /** `ci-status` requires the cross-check exactly where the job itself must run. */
@@ -1102,7 +1072,7 @@ pub fn cache_target_input_errors(action: dict, step: dict) -> list<string> {
 pub fn native_source_projection_errors(script: string) -> list<string> {
   const paths = join(NATIVE_SOURCE_PATHS, " ")
   if !contains(script, "SOURCE_PATHS=(${paths})")
-    || !contains(script, "git diff --quiet \"$recorded\" HEAD -- \"$" + "{SOURCE_PATHS[@]}\"")
+    || !contains(script, "git diff --quiet \"$recorded\" \"$head\" -- \"$" + "{SOURCE_PATHS[@]}\"")
     || !contains(script, "git ls-files --others --exclude-standard -- \"$" + "{SOURCE_PATHS[@]}\"") {
     return ["${WORKSPACE_REUSE_SCRIPT} must compare the canonical native source fingerprint roots"]
   }
@@ -2149,9 +2119,11 @@ pub fn landlock_incapable_runner_errors(workflow_name: string, workflow: dict) -
  * carrier shares four cores among six runners, so its compile budget is one
  * job: with no target restored and no sccache it hit its 31-minute step
  * timeout in run 36987728246, while a cold build on the vendor rung took
- * 693s. It has runners of its own instead, which nothing else may occupy
- * (`RESERVED_CLI_PRODUCER_LABEL`). The workspace test producer keeps the
- * shared owned rung; nothing waits on its finish except the verdict.
+ * 693s. Its reserved runners did no better: their compiles ran in the host's
+ * shared compiler cache server and took a median 22.9 minutes against 15.7
+ * hosted (#9435), so it always runs on the free hosted runner. The workspace
+ * test producer keeps the shared owned rung; nothing waits on its finish
+ * except the verdict.
  */
 pub fn producer_uses_owned_pool(job_name: string) -> bool {
   return job_name != "rust-cli"
@@ -2170,104 +2142,6 @@ pub fn producer_tier_expression(owned_rung: bool = true) -> string {
   return producer_rung_expression(
     {owned: owned_rung ? "'${SELFHOSTED_RUNNER_TIER}'" : "", hosted: "'${HOSTED_RUNNER_TIER}'"},
   )
-}
-
-fn cli_route_condition(route: string) -> string {
-  return "(needs.rust-producer-capacity.outputs.${CLI_CAPACITY_ROUTE_OUTPUT} == '${route}'"
-}
-
-/**
- * The shared CLI producer's three rungs, for `runs-on`, `timeout-minutes` and
- * the tier mirror alike: an idle reserved runner, then the free hosted rung.
- * The capacity step names `owned` only on events it routes, so
- * every other event, a fully busy reserved pool, and a census it cannot read
- * all take GitHub's free standard runner.
- */
-pub type CliProducerRungs = {reserved: string, hosted: string}
-
-pub fn cli_producer_rung_expression(rungs: CliProducerRungs) -> string {
-  const {reserved, hosted} = rungs
-  return "$"
-    + "{{ "
-    + cli_route_condition("owned")
-    + "\n  && ${reserved})"
-    + "\n  || ${hosted} }}"
-}
-
-pub fn cli_producer_runner_expression() -> string {
-  return cli_producer_rung_expression(
-    {
-      reserved: "fromJSON('${RESERVED_CLI_PRODUCER_RUNNER}')",
-      hosted: "'${PRODUCER_HOSTED_LINUX_RUNNER}'",
-    },
-  )
-}
-
-pub fn cli_producer_tier_expression() -> string {
-  return cli_producer_rung_expression(
-    {reserved: "'${SELFHOSTED_RUNNER_TIER}'", hosted: "'${HOSTED_RUNNER_TIER}'"},
-  )
-}
-
-fn step_with_id(job: dict, id: string) {
-  for step in job?.steps ?? [] {
-    if trim(to_string(step?.id ?? "")) == id {
-      return step
-    }
-  }
-  return nil
-}
-
-/**
- * The reserved label is named in three places that must agree: the census
- * probe that counts its runners, the capacity step that routes over that
- * count, and the producer's `runs-on`. A census probing another label would
- * report the reserved pool absent forever, and the producer would never
- * reach it while every check stayed green.
- */
-pub fn cli_producer_reservation_errors(workflow: dict) -> list<string> {
-  let errors: list<string> = []
-  const jobs = workflow?.jobs ?? {}
-  const census = jobs["runner-availability"] ?? {}
-  if trim(to_string(census?.with?.linux_probe_runner_tag ?? "")) != RESERVED_CLI_PRODUCER_LABEL {
-    errors = errors
-      + [
-        "ci.yml:runner-availability must probe the ${RESERVED_CLI_PRODUCER_LABEL} runners the shared CLI producer reserves",
-      ]
-  }
-  if !contains(to_string(census?.if ?? ""), "merge_group") {
-    errors = errors
-      + ["ci.yml:runner-availability must measure merge groups for the shared CLI producer"]
-  }
-  const capacity = jobs["rust-producer-capacity"] ?? {}
-  if !contains(to_string(capacity?.if ?? ""), "merge_group") {
-    errors = errors
-      + [
-        "ci.yml:rust-producer-capacity must decide the shared CLI producer's route on merge groups",
-      ]
-  }
-  if trim(to_string(capacity?.outputs?.[CLI_CAPACITY_ROUTE_OUTPUT] ?? ""))
-    != "$" + "{{ steps.${CLI_CAPACITY_DECISION_STEP}.outputs.route }}" {
-    errors = errors
-      + [
-        "ci.yml:rust-producer-capacity must publish ${CLI_CAPACITY_ROUTE_OUTPUT} from its ${CLI_CAPACITY_DECISION_STEP} step",
-      ]
-  }
-  const step = step_with_id(capacity, CLI_CAPACITY_DECISION_STEP)
-  const env = step?.env ?? {}
-  const routed = trim(to_string(env?.CAPACITY_ROUTED_EVENT ?? "")).split(" ")
-  if step == nil
-    || trim(to_string(step?.run ?? "")) != "bash scripts/ci/runner_capacity.sh"
-    || trim(to_string(env?.CAPACITY_POOL ?? "")) != RESERVED_CLI_PRODUCER_POOL
-    || !routed.contains("pull_request")
-    || !routed.contains("merge_group")
-    || trim(to_string(env?.CAPACITY_VENDOR_RUNNER ?? "")) != "" {
-    errors = errors
-      + [
-        "ci.yml:rust-producer-capacity step ${CLI_CAPACITY_DECISION_STEP} must route the ${RESERVED_CLI_PRODUCER_POOL} pool on pull requests and merge groups and name no paid vendor runner for a busy pool",
-      ]
-  }
-  return errors
 }
 
 /**
@@ -2296,16 +2170,16 @@ fn proven_push_main_only_errors(jobs: dict) -> list<string> {
     for step in jobs[consumer]?.steps ?? [] {
       if contains(to_string(step?.uses ?? ""), "download-artifact-with-retry") {
         downloads = downloads + 1
-        if trim(to_string(step?.with?.["run-id"] ?? "")) == ARTIFACT_SOURCE_RUN_ID {
+        // Every run builds its own CLI (harn#9495): a download that names
+        // another run would measure a binary this commit did not build.
+        if step?.with?.["run-id"] == nil {
           sourced = sourced + 1
         }
       }
     }
     if downloads != 1 || sourced != 1 {
       errors = errors
-        + [
-          "ci.yml:${consumer} must download the shared CLI from the run the artifact barrier names",
-        ]
+        + ["ci.yml:${consumer} must download the shared CLI this run built"]
     }
   }
   const status_step = step_by_name(jobs["ci-status"]?.steps ?? [], "Verify required CI jobs")
@@ -2385,7 +2259,7 @@ pub fn minimal_pr_capacity_errors(ci: dict, publish: dict) -> list<string> {
   if trim(cross_check?.if ?? "") != WINDOWS_CROSS_CHECK_IF {
     errors = errors
       + [
-        "ci.yml:windows-cross-check must run on every merge-group candidate and on Rust-changing main pushes",
+        "ci.yml:windows-cross-check must run on every full-suite pull request and merge-group candidate and on Rust-changing main pushes",
       ]
   }
   // Off the critical path: it waits on the cheap `changes` router only.
@@ -2477,7 +2351,7 @@ pub const CONSUMER_CANARY_ACTIONS = ["actions/checkout@", "actions/create-github
  * consumer's identity must come from a secret: the runner prints each step's
  * inputs and environment, and masks only secrets.
  */
-pub fn consumer_canary_errors(workflow: dict) -> list<string> {
+pub fn consumer_canary_errors(workflow: dict, observer: dict? = nil) -> list<string> {
   const job = workflow?.jobs?.[CONSUMER_CANARY_JOB]
   if job == nil {
     return ["${CONSUMER_CANARY_WORKFLOW}:${CONSUMER_CANARY_JOB} must define the consumer canary"]
@@ -2491,6 +2365,16 @@ pub fn consumer_canary_errors(workflow: dict) -> list<string> {
   }
   for step in job?.steps ?? [] {
     const uses = step_uses(step)
+    if uses == "./.github/actions/observe-consumer" {
+      if observer?.runs?.using != "composite" || len(observer?.runs?.steps ?? []) == 0 {
+        errors = errors + ["consumer observer must define nonempty composite steps"]
+      } else {
+        // Check the composite's actual effects with the same publication
+        // policy. Naming a local action must not hide an upload or summary.
+        errors = errors + consumer_canary_errors({jobs: {consumers: {steps: observer.runs.steps}}})
+      }
+      continue
+    }
     if uses != "" && !CONSUMER_CANARY_ACTIONS.any({ prefix -> uses.starts_with(prefix) }) {
       errors = errors
         + [

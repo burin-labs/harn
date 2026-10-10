@@ -90,6 +90,14 @@ pub fn capability_binding_for_legacy_hostlib_name(
 
 const DYNAMIC: &[ResourceSelector] = &[ResourceSelector::Dynamic];
 const FS_READ: &[EffectSpec] = &[EffectSpec::new(EffectKind::Fs, EffectAccess::Read, DYNAMIC)];
+const GIT_IDENTITY_READ: &[EffectSpec] = &[EffectSpec::new(
+    EffectKind::Fs,
+    EffectAccess::Read,
+    &[ResourceSelector::Field {
+        argument: 0,
+        path: &["repo"],
+    }],
+)];
 const FS_WRITE: &[EffectSpec] = &[EffectSpec::new(
     EffectKind::Fs,
     EffectAccess::Write,
@@ -242,6 +250,7 @@ pub const HOST_CAPABILITY_GROUPS: &[HostCapabilityGroup] = &[
             "extract_function",
             "lock_release",
             "lock_try",
+            "move_symbol",
             "rebuild",
             "reindex_file",
             "rename_symbol",
@@ -365,6 +374,11 @@ pub const HOST_CAPABILITY_GROUPS: &[HostCapabilityGroup] = &[
             "toolchain_facts",
         ],
         effects: FS_READ,
+    },
+    HostCapabilityGroup {
+        capability: CapabilityId::Tools,
+        methods: &["git_repository_identity"],
+        effects: GIT_IDENTITY_READ,
     },
     HostCapabilityGroup {
         capability: CapabilityId::Tools,

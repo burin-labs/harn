@@ -43,28 +43,34 @@ BEFORE_ANY_BUILD="@946684800"
 SOURCE_PATHS=(Cargo.lock Cargo.toml crates spec tree-sitter-harn)
 
 usage() {
-  echo "usage: $0 restore|record|current" >&2
+  echo "usage: $0 restore|record|current [commit [source]]" >&2
   exit 2
 }
 
-[[ $# -eq 1 ]] || usage
+[[ $# -eq 1 || ( $# -ge 2 && $# -le 3 && $1 == current ) ]] || usage
 mode=$1
+comparison_ref=${2:-HEAD}
+comparison_source=${3:-}
 cd "$(git rev-parse --show-toplevel)"
 record="$RECORD_DIR/commit"
 
 current_source() {
-  [[ -f "$record" ]] || return 1
   local recorded head
-  recorded=$(cat "$record")
+  if [[ -n "$comparison_source" ]]; then
+    recorded=$comparison_source
+  else
+    [[ -f "$record" ]] || return 1
+    recorded=$(cat "$record")
+  fi
   [[ "$recorded" =~ ^[0-9a-f]{40}$ ]] || return 1
-  head=$(git rev-parse --verify HEAD) || return 1
+  head=$(git rev-parse --verify "${comparison_ref}^{commit}") || return 1
   # These are the canonical native-source fingerprint roots. The owning cache
   # policy checks this projection against NATIVE_SOURCE_FINGERPRINT_BODY.
   if [[ "$recorded" != "$head" ]]; then
     git cat-file -e "${recorded}^{tree}" 2>/dev/null \
-      || git fetch --quiet --no-tags --depth=1 origin "$recorded" 2>/dev/null \
+      || git fetch --quiet --no-tags --no-write-fetch-head --depth=1 origin "$recorded" 2>/dev/null \
       || return 1
-    git diff --quiet "$recorded" HEAD -- "${SOURCE_PATHS[@]}" || return 1
+    git diff --quiet "$recorded" "$head" -- "${SOURCE_PATHS[@]}" || return 1
   fi
   git diff --quiet HEAD -- \
     && git diff --cached --quiet HEAD -- \

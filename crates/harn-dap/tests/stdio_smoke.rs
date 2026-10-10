@@ -50,12 +50,19 @@ fn read_message(stdout: &mut BufReader<ChildStdout>) -> Option<Value> {
 
 impl DapClient {
     fn spawn() -> Self {
-        let mut child = Command::new(harn_dap_bin())
+        Self::spawn_with_env(&[])
+    }
+
+    fn spawn_with_env(environment: &[(&str, &str)]) -> Self {
+        let mut command = Command::new(harn_dap_bin());
+        command
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .spawn()
-            .expect("spawn harn-dap binary");
+            .stderr(Stdio::null());
+        for (name, value) in environment {
+            command.env(name, value);
+        }
+        let mut child = command.spawn().expect("spawn harn-dap binary");
         let stdin = child.stdin.take().expect("child stdin");
         let mut stdout = BufReader::new(child.stdout.take().expect("child stdout"));
         let (tx, rx) = mpsc::channel();
@@ -243,5 +250,43 @@ fn dap_stdio_hits_breakpoint_and_reads_a_local_variable() {
 
     // continue -> the program runs to completion and terminates.
     dap.send("continue", json!({ "threadId": 1 }));
+    dap.read_until("terminated event", |m| is_event(m, "terminated"));
+}
+
+#[cfg(unix)]
+#[test]
+fn dap_stdio_keeps_sdk_input_in_vm() {
+    let dir = tempfile::tempdir().unwrap();
+    let program = dir.path().join("credential-boundary.harn");
+    std::fs::write(
+        &program,
+        "pipeline test(harness: Harness, task: unknown) {\n  harness.stdio.log(harness.env.get(\"AWS_PROFILE\") == \"dap-test-profile\")\n}\n",
+    )
+    .unwrap();
+
+    let mut dap = DapClient::spawn_with_env(&[("AWS_PROFILE", "dap-test-profile")]);
+    dap.send("initialize", json!({ "adapterID": "harn" }));
+    let initialized =
+        dap.read_until_started("initialize response", |m| is_response(m, "initialize"));
+    assert_eq!(initialized["success"], json!(true));
+    dap.send(
+        "launch",
+        json!({ "program": program, "stopOnEntry": false }),
+    );
+    let launched = dap.read_until("launch response or compilation error", |m| {
+        is_response(m, "launch") || is_event(m, "output")
+    });
+    assert!(
+        is_response(&launched, "launch"),
+        "unexpected launch output: {launched}"
+    );
+    assert_eq!(launched["success"], json!(true));
+    dap.send("configurationDone", Value::Null);
+
+    let in_process = dap.read_until("in-process SDK input or execution failure", |m| {
+        is_event(m, "output") || is_event(m, "terminated")
+    });
+    assert_eq!(in_process["body"]["category"], "stdout", "{in_process}");
+    assert_eq!(in_process["body"]["output"], "[harn] true\n");
     dap.read_until("terminated event", |m| is_event(m, "terminated"));
 }

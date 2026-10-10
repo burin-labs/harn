@@ -1856,6 +1856,8 @@ pub const ACP_DISPATCHED_METHOD_HARN_PROVIDERCATALOG: &str = "_harn/providerCata
 pub const ACP_DISPATCHED_METHOD_HARN_SESSION_RECAP_QUERY: &str = "harn.session_recap.query";
 pub const ACP_DISPATCHED_METHOD_HARN_SESSION_TIMELINE_QUERY: &str = "harn.session_timeline.query";
 pub const ACP_DISPATCHED_METHOD_HARN_SESSION_VIEW_QUERY: &str = "harn.session_view.query";
+pub const ACP_DISPATCHED_METHOD_HARN_SESSION_HISTORY_BOUNDARIES: &str =
+    "harn.session_history.boundaries";
 pub const ACP_DISPATCHED_METHOD_HARN_SESSION_TIMELINE_SUBSCRIBE: &str =
     "harn.session_timeline.subscribe";
 pub const ACP_DISPATCHED_METHOD_HARN_SESSION_TIMELINE_UNSUBSCRIBE: &str =
@@ -1930,6 +1932,7 @@ pub const ACP_DISPATCHED_METHODS: &[&str] = &[
     "harn.session_recap.query",
     "harn.session_timeline.query",
     "harn.session_view.query",
+    "harn.session_history.boundaries",
     "harn.session_timeline.subscribe",
     "harn.session_timeline.unsubscribe",
     "session/new",
@@ -2007,6 +2010,8 @@ pub const ACP_HANDLED_METHOD_HARN_PROVIDERCATALOG: &str = "_harn/providerCatalog
 pub const ACP_HANDLED_METHOD_HARN_SESSION_RECAP_QUERY: &str = "harn.session_recap.query";
 pub const ACP_HANDLED_METHOD_HARN_SESSION_TIMELINE_QUERY: &str = "harn.session_timeline.query";
 pub const ACP_HANDLED_METHOD_HARN_SESSION_VIEW_QUERY: &str = "harn.session_view.query";
+pub const ACP_HANDLED_METHOD_HARN_SESSION_HISTORY_BOUNDARIES: &str =
+    "harn.session_history.boundaries";
 pub const ACP_HANDLED_METHOD_HARN_SESSION_TIMELINE_SUBSCRIBE: &str =
     "harn.session_timeline.subscribe";
 pub const ACP_HANDLED_METHOD_HARN_SESSION_TIMELINE_UNSUBSCRIBE: &str =
@@ -2082,6 +2087,7 @@ pub const ACP_HANDLED_METHODS: &[&str] = &[
     "harn.session_recap.query",
     "harn.session_timeline.query",
     "harn.session_view.query",
+    "harn.session_history.boundaries",
     "harn.session_timeline.subscribe",
     "harn.session_timeline.unsubscribe",
     "session/new",
@@ -4262,6 +4268,7 @@ pub const HARN_PREPARED_SESSION_COMMANDS: &[&str] = &[
 ];
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HarnPreparedSessionApprovalDecision {
+    pub request_id: String,
     pub batch_fingerprint: String,
     pub approved: bool,
     pub decider: String,
@@ -4847,6 +4854,75 @@ impl std::fmt::Display for HarnInferenceAdmissionDataPosture {
     }
 }
 
+/// Value-free inference admission vocabulary owned by harn_vm.
+/// Open vocabulary: unit variants are the values this binding was generated from, and `Unrecognized` carries any other string verbatim so a newer Harn never breaks an older consumer.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
+pub enum HarnInferenceAdmissionDataControlsOutcome {
+    NotRequested,
+    Applied,
+    NoControlAvailable,
+    ProviderUnresearched,
+    /// A wire value outside the vocabulary this binding was generated from. Preserved verbatim.
+    Unrecognized(String),
+}
+
+impl HarnInferenceAdmissionDataControlsOutcome {
+    /// Every value this binding was generated from, in wire order.
+    /// Excludes the `Unrecognized` escape.
+    pub const KNOWN: &'static [Self] = &[
+        Self::NotRequested,
+        Self::Applied,
+        Self::NoControlAvailable,
+        Self::ProviderUnresearched,
+    ];
+
+    /// The JSON wire string for this value.
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::NotRequested => "not_requested",
+            Self::Applied => "applied",
+            Self::NoControlAvailable => "no_control_available",
+            Self::ProviderUnresearched => "provider_unresearched",
+            Self::Unrecognized(value) => value.as_str(),
+        }
+    }
+
+    /// Parse a wire string. An unrecognized value is preserved rather than rejected.
+    pub fn from_wire(value: &str) -> Self {
+        match value {
+            "not_requested" => Self::NotRequested,
+            "applied" => Self::Applied,
+            "no_control_available" => Self::NoControlAvailable,
+            "provider_unresearched" => Self::ProviderUnresearched,
+            other => Self::Unrecognized(other.to_string()),
+        }
+    }
+
+    /// Whether this value is part of the vocabulary this binding was generated from.
+    pub fn is_known(&self) -> bool {
+        !matches!(self, Self::Unrecognized(_))
+    }
+}
+
+impl From<String> for HarnInferenceAdmissionDataControlsOutcome {
+    fn from(value: String) -> Self {
+        Self::from_wire(&value)
+    }
+}
+
+impl From<HarnInferenceAdmissionDataControlsOutcome> for String {
+    fn from(value: HarnInferenceAdmissionDataControlsOutcome) -> Self {
+        value.as_str().to_string()
+    }
+}
+
+impl std::fmt::Display for HarnInferenceAdmissionDataControlsOutcome {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HarnInferenceAdmissionBoundary {
     pub reach: HarnInferenceAdmissionReach,
@@ -4870,6 +4946,11 @@ pub struct HarnInferenceAdmissionSnapshot {
     pub model: String,
     pub status: HarnInferenceAdmissionStatus,
     pub training_control_planned: bool,
+    pub data_posture: HarnInferenceAdmissionDataPosture,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub data_controls_note: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub data_controls_outcome: Option<HarnInferenceAdmissionDataControlsOutcome>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub effective_boundary: Option<HarnInferenceAdmissionBoundary>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -4880,4 +4961,34 @@ pub struct HarnInferenceAdmissionSnapshot {
     pub open_weight: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub training_default: Option<String>,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnCanonicalSessionBoundary {
+    pub schema: String,
+    pub session_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub event_id: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub record_hash: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnCanonicalHistoryPosition {
+    pub source_event_id: String,
+    pub origin_session_id: String,
+    pub before_boundary: HarnCanonicalSessionBoundary,
+    pub boundary: HarnCanonicalSessionBoundary,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnCanonicalHistoryBoundaries {
+    pub tip: HarnCanonicalSessionBoundary,
+    pub positions: Vec<HarnCanonicalHistoryPosition>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnACPPromptCorrelation {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "messageId")]
+    pub message_id: Option<String>,
 }

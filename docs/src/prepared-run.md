@@ -30,6 +30,13 @@ only `AuthorityUse`; it calls `authorize` with the exact typed requirement
 immediately before each material operation. Dispatch repeats the canonical
 evaluation and rejects any requirement not fingerprinted into the lease.
 
+Requested filesystem and process roots are authority to acquire, not concrete
+file effects in an existing workspace. Their policy evaluation retains authored
+path constraints and sensitive-path refusals, without treating the requested
+root as an existing workspace grant. Host ceilings, the exact approval batch,
+and the approved lease still control admission. Concrete tool dispatch uses its
+explicit workspace boundary and cannot use this internal acquisition interface.
+
 `PreparedRunExecutor` has separate `Output` and `Error` associated types.
 `ExecutionOutcome::ExecutorFailed` returns the concrete executor error beside
 the terminal authority receipt, so hosts can retain structured partial-run
@@ -119,7 +126,10 @@ flushing, and cancellation classification.
 through the attached ACP permission bridge. It uses Harn's canonical permission
 options and response parser; missing, malformed, and rejected answers cannot
 grant authority. Pass its decision to `PreparedSession::decide`, which verifies
-the batch fingerprint and persists the decision before attachment or execution.
+both the request ID and semantic batch fingerprint, then persists the decision
+before attachment or execution. Each batch has a fresh request ID even when its
+semantic content is identical. Preserve that ID in the decision; an older Allow
+or Deny cannot consume a replacement request.
 The helper rejects a bridge attached to another session before requesting any
 host decision.
 
@@ -127,6 +137,7 @@ host decision.
 single prepared run. `PreparedSession::request_delta` adds the interactive
 session behavior: an identical requirement is already covered, attenuation is
 immediate, and widening produces one fingerprinted semantic approval batch.
+Delta decisions likewise require the exact request ID and active parent lease.
 Only the exact approved widening joins the active envelope; a denial leaves
 the existing session usable.
 

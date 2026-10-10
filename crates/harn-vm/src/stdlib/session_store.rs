@@ -11,9 +11,9 @@ use std::sync::Arc;
 
 use harn_session_store::{
     AppendEvent, CreateSession, EventId, EventIdentity, EventIdentityField, ImportSession,
-    ListFilter, ListOrder, ListSortKey, ReadRange, SearchFilter, SearchMode, SearchQuery,
-    SessionEventKind, SessionImporter, SessionLeaseError, SessionStatus, SessionStore, SessionType,
-    SqliteSessionStore, StoreError, StoredEvent, VerifyReport, MAX_READ_BATCH,
+    ListFilter, ListOrder, ListSortKey, SearchFilter, SearchMode, SearchQuery, SessionEventKind,
+    SessionImporter, SessionLeaseError, SessionStatus, SessionStore, SessionType,
+    SqliteSessionStore, StoreError, StoredEvent, VerifyReport,
 };
 use serde::Deserialize;
 use serde_json::{json, Value as JsonValue};
@@ -474,7 +474,9 @@ fn store_path(state_dir: &SessionStoreDir) -> PathBuf {
 /// outside this crate go through here so "what a canonical store carries" has
 /// one answer.
 pub fn open_canonical_store(root: &Path) -> Result<CanonicalStore, VmError> {
-    open_store(&SessionStoreDir::under_root(root))
+    open_store(&SessionStoreDir(
+        crate::persistent_state::canonical_store_root(root),
+    ))
 }
 
 /// Open the canonical session store for exclusive project-wide maintenance.
@@ -491,7 +493,10 @@ pub fn open_canonical_store_for_maintenance(
 pub(crate) fn open_existing_canonical_store(
     root: &Path,
 ) -> Result<Option<SqliteSessionStore>, VmError> {
-    open_read_store(&SessionStoreDir::under_root(root)).map(StoreRead::into_option)
+    open_read_store(&SessionStoreDir(
+        crate::persistent_state::canonical_store_root(root),
+    ))
+    .map(StoreRead::into_option)
 }
 
 async fn ensure_session(
@@ -529,8 +534,15 @@ async fn ensure_session_with_create(
     session_id: &str,
     create_if_missing: bool,
     tenant_id: Option<String>,
-    create: CreateSession,
+    mut create: CreateSession,
 ) -> Result<bool, VmError> {
+    if let Some(workspace) =
+        crate::persistent_state::session_workspace_for_state(state_dir.as_path())
+    {
+        let workspace = workspace.to_string_lossy().into_owned();
+        create.cwd = Some(workspace.clone());
+        create.project_scope = Some(workspace);
+    }
     validate_session_id(session_id)?;
     let legacy_path = legacy_session_path(state_dir, session_id)?;
     if legacy_path.is_file() {
@@ -540,6 +552,7 @@ async fn ensure_session_with_create(
             return match store.describe(session_id).await {
                 Ok(meta) => {
                     validate_tenant(session_id, &meta.tenant_id, tenant_id.as_deref())?;
+                    crate::persistent_state::validate_session_store_workspace(state_dir.as_path(), &meta)?;
                     Ok(true)
                 }
                 Err(StoreError::NotFound(_)) => Err(VmError::Runtime(format!(
@@ -552,6 +565,7 @@ async fn ensure_session_with_create(
     match store.describe(session_id).await {
         Ok(meta) => {
             validate_tenant(session_id, &meta.tenant_id, tenant_id.as_deref())?;
+            crate::persistent_state::validate_session_store_workspace(state_dir.as_path(), &meta)?;
             Ok(true)
         }
         Err(StoreError::NotFound(_)) => {
@@ -565,6 +579,7 @@ async fn ensure_session_with_create(
             }
             let meta = store.describe(session_id).await.map_err(store_error)?;
             validate_tenant(session_id, &meta.tenant_id, tenant_id.as_deref())?;
+            crate::persistent_state::validate_session_store_workspace(state_dir.as_path(), &meta)?;
             Ok(true)
         }
         Err(error) => Err(store_error(error)),
@@ -608,26 +623,7 @@ pub(crate) async fn read_all_events(
     store: &SqliteSessionStore,
     session_id: &str,
 ) -> Result<Vec<StoredEvent>, VmError> {
-    let mut events = Vec::new();
-    let mut cursor: Option<EventId> = None;
-    loop {
-        let page = store
-            .read(
-                session_id,
-                ReadRange {
-                    from_event_id: cursor,
-                    to_event_id: None,
-                    limit: Some(MAX_READ_BATCH),
-                },
-            )
-            .await
-            .map_err(store_error)?;
-        cursor = page.next_cursor;
-        events.extend(page.events);
-        if cursor.is_none() {
-            return Ok(events);
-        }
-    }
+    store.read_all(session_id).await.map_err(store_error)
 }
 
 #[derive(Debug, Deserialize)]
@@ -822,13 +818,19 @@ fn verify_report_value(report: VerifyReport, broken_at: Option<usize>) -> Result
 pub(crate) fn canonical_store_state_dir(
     options: Option<&DictMap>,
 ) -> Result<SessionStoreDir, VmError> {
-    let named_root = option_string(options, "root")?
-        .map(|root| crate::stdlib::process::resolve_source_relative_path(&root))
-        .or_else(|| {
-            crate::stdlib::process::read_env_value(STORE_ROOT_ENV)
-                .filter(|value| !value.trim().is_empty())
-                .map(|root| crate::stdlib::process::resolve_source_relative_path(&root))
-        });
+    let explicit_root = option_string(options, "root")?
+        .map(|root| crate::stdlib::process::resolve_source_relative_path(&root));
+    if explicit_root.is_none() && crate::persistent_state::current_session_workspace().is_some() {
+        return Ok(SessionStoreDir(
+            crate::persistent_state::current_persistent_state_root()
+                .expect("session scope has a state root"),
+        ));
+    }
+    let named_root = explicit_root.or_else(|| {
+        crate::stdlib::process::read_env_value(STORE_ROOT_ENV)
+            .filter(|value| !value.trim().is_empty())
+            .map(|root| crate::stdlib::process::resolve_source_relative_path(&root))
+    });
     Ok(match named_root {
         Some(root) => SessionStoreDir::under_root(&root),
         None => SessionStoreDir(crate::runtime_paths::state_root(

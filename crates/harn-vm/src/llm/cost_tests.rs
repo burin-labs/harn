@@ -734,6 +734,51 @@ fn a_long_context_call_bills_at_the_input_token_band() {
     );
 }
 
+/// Claude Haiku 5.5 bills $0.10/$0.50 per MTok for prompts of up to 100K
+/// tokens and $0.50/$2.50 above, on both its direct and OpenRouter routes
+/// (the latter plus the provider's catalogued platform fee). The boundary is
+/// inclusive at 100K, so 100,000 tokens is the last base-rate prompt. Haiku
+/// 4.5 is the control: it is flat at $1/$5 at any length.
+#[test]
+fn haiku_55_bills_its_long_prompt_card_above_100k_input_tokens() {
+    let _guard = crate::llm::env_guard();
+    for (provider, model) in [
+        ("anthropic", "claude-haiku-5-5"),
+        ("openrouter", "anthropic/claude-haiku-5.5"),
+    ] {
+        let fee = 1.0
+            + crate::llm_config::provider_config(provider)
+                .and_then(|config| config.platform_fee_percent)
+                .unwrap_or(0.0)
+                / 100.0;
+        let at_boundary =
+            pricing_aware_call_cost(provider, model, 100_000, 1_000, settlement_now())
+                .expect("priced");
+        assert!(
+            (at_boundary - fee * (100_000.0 * 0.10 + 1_000.0 * 0.50) / 1_000_000.0).abs() < 1e-12,
+            "{model}: 100K input tokens must bill the short-prompt card, got {at_boundary}"
+        );
+        let above = pricing_aware_call_cost(provider, model, 100_001, 1_000, settlement_now())
+            .expect("priced");
+        assert!(
+            (above - fee * (100_001.0 * 0.50 + 1_000.0 * 2.50) / 1_000_000.0).abs() < 1e-12,
+            "{model}: one token past 100K must bill the long-prompt card, got {above}"
+        );
+    }
+    let flat = pricing_aware_call_cost(
+        "anthropic",
+        "claude-haiku-4-5-20251001",
+        150_000,
+        1_000,
+        settlement_now(),
+    )
+    .expect("priced");
+    assert!(
+        (flat - (150_000.0 * 1.00 + 1_000.0 * 5.00) / 1_000_000.0).abs() < 1e-12,
+        "Haiku 4.5 has no long-prompt band, got {flat}"
+    );
+}
+
 #[test]
 fn mock_provider_has_an_authoritative_zero_cost() {
     assert_eq!(

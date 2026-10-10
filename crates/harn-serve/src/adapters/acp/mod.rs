@@ -71,9 +71,10 @@ pub use sessions::{
 };
 use sessions::{
     cancel_session_command_handles, lookup_session_cancellation, preempt_session_interruption,
-    prepare_session_request, session_project_root_for_cwd, ConcurrentSessionControl,
-    ConcurrentSessionControls, PreparedSessionRequest, PromptCancellation, Session, SessionBudget,
-    SessionCancellation, SessionInfo, SessionSpendRecorder,
+    prepare_session_request, resolve_acp_session_cwd, session_project_root_for_cwd,
+    ConcurrentSessionControl, ConcurrentSessionControls, PreparedSessionRequest,
+    PromptCancellation, Session, SessionBudget, SessionCancellation, SessionInfo,
+    SessionSpendRecorder,
 };
 pub(crate) use transport::run_acp_channel_server_with_existing_handle;
 pub use transport::{
@@ -83,18 +84,18 @@ pub use transport::{
 pub use types::{
     AcpContentBlock, AcpEmbeddedResource, AcpHarnMeta, AcpJsonRpcError, AcpJsonRpcErrorResponse,
     AcpJsonRpcId, AcpJsonRpcRequest, AcpJsonRpcResponse, AcpMeta, AcpPlanDocumentMutation,
-    AcpPlanDocumentMutationParams, AcpPlanDocumentMutationResult, AcpPromptErrorData,
-    AcpPromptErrorSchema, AcpPromptFailureFacts, AcpRoutingAttempt, AcpSessionCancelToolCallParams,
-    AcpSessionEnvironmentConfig, AcpSessionIdParams, AcpSessionInjectContent,
-    AcpSessionInjectHostEventParams, AcpSessionInjectMode, AcpSessionInjectParams,
-    AcpSessionMessageIdParams, AcpSessionNewParams, AcpSessionPromptParams, AcpSessionPromptResult,
-    AcpSessionReplaceInjectParams, AcpSessionRestoreResult, ACP_METHOD_INITIALIZE,
-    ACP_METHOD_SESSION_CANCEL, ACP_METHOD_SESSION_CANCEL_TOOL_CALL, ACP_METHOD_SESSION_CLOSE,
-    ACP_METHOD_SESSION_INJECT, ACP_METHOD_SESSION_INJECT_HOST_EVENT, ACP_METHOD_SESSION_LOAD,
-    ACP_METHOD_SESSION_NEW, ACP_METHOD_SESSION_PENDING_INJECTIONS,
-    ACP_METHOD_SESSION_PLAN_DOCUMENT_MUTATE, ACP_METHOD_SESSION_PROMPT,
-    ACP_METHOD_SESSION_REPLACE_INJECT, ACP_METHOD_SESSION_RESUME, ACP_METHOD_SESSION_REVOKE_INJECT,
-    ACP_PLAN_MUTATION_BUSY_CODE, ACP_PLAN_REVISION_CONFLICT_CODE,
+    AcpPlanDocumentMutationParams, AcpPlanDocumentMutationResult, AcpPromptCorrelation,
+    AcpPromptErrorData, AcpPromptErrorSchema, AcpPromptFailureFacts, AcpRoutingAttempt,
+    AcpSessionCancelToolCallParams, AcpSessionEnvironmentConfig, AcpSessionIdParams,
+    AcpSessionInjectContent, AcpSessionInjectHostEventParams, AcpSessionInjectMode,
+    AcpSessionInjectParams, AcpSessionLoadParams, AcpSessionMessageIdParams, AcpSessionNewParams,
+    AcpSessionPromptParams, AcpSessionPromptResult, AcpSessionReplaceInjectParams,
+    AcpSessionRestoreResult, ACP_METHOD_INITIALIZE, ACP_METHOD_SESSION_CANCEL,
+    ACP_METHOD_SESSION_CANCEL_TOOL_CALL, ACP_METHOD_SESSION_CLOSE, ACP_METHOD_SESSION_INJECT,
+    ACP_METHOD_SESSION_INJECT_HOST_EVENT, ACP_METHOD_SESSION_LOAD, ACP_METHOD_SESSION_NEW,
+    ACP_METHOD_SESSION_PENDING_INJECTIONS, ACP_METHOD_SESSION_PLAN_DOCUMENT_MUTATE,
+    ACP_METHOD_SESSION_PROMPT, ACP_METHOD_SESSION_REPLACE_INJECT, ACP_METHOD_SESSION_RESUME,
+    ACP_METHOD_SESSION_REVOKE_INJECT, ACP_PLAN_MUTATION_BUSY_CODE, ACP_PLAN_REVISION_CONFLICT_CODE,
     ACP_PLAN_REVISION_CONFLICT_SCHEMA, ACP_PROMPT_ERROR_DATA_SCHEMA,
 };
 
@@ -109,8 +110,7 @@ use std::time::{Instant, SystemTime};
 use async_trait::async_trait;
 use futures::StreamExt;
 use harn_vm::agent_events::{
-    clear_session_sinks, flush_and_clear_session_sinks, flush_session_sinks, register_sink,
-    AgentEventSink,
+    clear_session_sinks, flush_and_clear_session_sinks, flush_session_sinks, AgentEventSink,
 };
 use harn_vm::visible_text::VisibleTextState;
 use serde::Deserialize;
@@ -684,6 +684,9 @@ pub struct AcpPromptExecutionContext<'a> {
     pub project_root: &'a Path,
     /// Harn's resolved mode and confinement policy, without a host re-derivation.
     pub capability_policy: Option<&'a harn_vm::orchestration::CapabilityPolicy>,
+    /// The resolved budget installed for this turn, including live session
+    /// updates. Hosts must not reconstruct it from startup configuration.
+    pub budget: &'a BudgetSpec,
     /// The existing prompt bridge, including its cancellation-aware host calls.
     pub host_bridge: &'a harn_vm::bridge::HostBridge,
     cancelled: &'a std::sync::atomic::AtomicBool,
@@ -789,6 +792,8 @@ impl AcpProfileConfig {
 
 #[derive(Clone)]
 pub struct AcpServerConfig {
+    /// Trusted host inputs captured before engine startup, never ACP JSON.
+    pub launcher_environment: harn_vm::security::LauncherEnvironment,
     /// Trusted launch authority, independent of client environment grants.
     pub host_inference_boundary: Option<harn_vm::llm::api::InferenceBoundary>,
     pub pipeline: Option<String>,
@@ -825,6 +830,7 @@ pub struct AcpSandboxConfig {
 impl AcpServerConfig {
     pub fn new(pipeline: Option<String>) -> Self {
         Self {
+            launcher_environment: harn_vm::security::LauncherEnvironment::capture(),
             host_inference_boundary: None,
             pipeline,
             auth_policy: AuthPolicy::allow_all(),
@@ -840,6 +846,15 @@ impl AcpServerConfig {
 
     pub fn for_pipeline(path: impl Into<String>) -> Self {
         Self::new(Some(path.into()))
+    }
+
+    /// Supply one host-resolved launch context without process-global mutation.
+    pub fn with_launcher_environment(
+        mut self,
+        environment: harn_vm::security::LauncherEnvironment,
+    ) -> Self {
+        self.launcher_environment = environment;
+        self
     }
 
     pub fn with_runtime_configurator(
@@ -1020,6 +1035,7 @@ struct VmBaselineCacheEntry {
     source: String,
     cwd: PathBuf,
     project_root: Option<PathBuf>,
+    store_scope: harn_vm::SessionStoreScope,
     mode_id: String,
     baseline: harn_vm::VmBaseline,
 }
@@ -1027,6 +1043,7 @@ struct VmBaselineCacheEntry {
 /// ACP server that reads JSON-RPC requests from a transport and writes
 /// responses / notifications back to that same transport.
 pub struct AcpServer {
+    launcher_environment: harn_vm::security::LauncherEnvironment,
     host_inference_boundary: Option<harn_vm::llm::api::InferenceBoundary>,
     descriptor: AdapterDescriptor,
     /// Optional pipeline file to execute on each `session/prompt`.

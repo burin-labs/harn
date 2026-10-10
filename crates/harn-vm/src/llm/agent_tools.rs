@@ -534,6 +534,16 @@ pub(super) async fn dispatch_tool_execution_with_mcp(
     let mut handler_outcome: Option<handler_result::HandlerOutcome>;
     loop {
         handler_outcome = None;
+        if let Err(error) =
+            super::agent_tool_preparation::validate_handler(ctx, tools_val, tool_name, tool_args)
+                .await
+        {
+            break ToolDispatchOutcome {
+                result: Err(error),
+                executor,
+                handler_outcome,
+            };
+        }
         let result = if matches!(declared.as_deref(), Some("provider_native")) {
             // The runtime never dispatches provider-native tools — the
             // model returns the already-executed result inline. Reaching
@@ -892,6 +902,14 @@ pub(super) fn find_tool_handler(
     tools_val: Option<&VmValue>,
     tool_name: &str,
 ) -> Option<std::sync::Arc<VmClosure>> {
+    find_tool_closure(tools_val, tool_name, "handler")
+}
+
+pub(super) fn find_tool_closure(
+    tools_val: Option<&VmValue>,
+    tool_name: &str,
+    key: &str,
+) -> Option<std::sync::Arc<VmClosure>> {
     let dict = tools_val?.as_dict()?;
     let tools_list = match dict.get("tools") {
         Some(VmValue::List(l)) => l,
@@ -907,7 +925,7 @@ pub(super) fn find_tool_handler(
             None => continue,
         };
         if name == tool_name {
-            if let Some(VmValue::Closure(c)) = entry.get("handler") {
+            if let Some(VmValue::Closure(c)) = entry.get(key) {
                 return Some(std::sync::Arc::clone(c));
             }
             return None;

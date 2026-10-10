@@ -14,7 +14,9 @@ fn entry_for<'a>(
     })
 }
 
-pub(super) fn annotations_for(
+/// The annotations dispatch enforces for `tool_name`: the registry entry's
+/// own, else the ambient policy's. Argument normalization reads the same.
+pub(crate) fn annotations_for(
     tools_val: Option<&VmValue>,
     tool_name: &str,
 ) -> Option<crate::tool_annotations::ToolAnnotations> {
@@ -23,19 +25,6 @@ pub(super) fn annotations_for(
         .map(crate::llm::vm_value_to_json)
         .and_then(|value| serde_json::from_value(value).ok())
         .or_else(|| crate::orchestration::current_tool_annotations(tool_name))
-}
-
-pub(super) fn permission_context_for(
-    tools_val: Option<&VmValue>,
-    tool_name: &str,
-) -> (
-    Option<serde_json::Value>,
-    Option<crate::tool_annotations::ToolAnnotations>,
-) {
-    (
-        descriptor_for(tools_val, tool_name),
-        annotations_for(tools_val, tool_name),
-    )
 }
 
 /// Resolve a tool's model-visible descriptor plus its rug-pull flag so the

@@ -127,7 +127,8 @@ pub(crate) fn normalize_tool_args(
         other => return other,
     };
 
-    if let Some(annotations) = crate::orchestration::current_tool_annotations(name) {
+    let annotations = crate::llm::agent_host_primitives::tool_catalog::annotations_for(tools, name);
+    if let Some(annotations) = annotations.as_ref() {
         for (alias, canonical) in &annotations.arg_schema.arg_aliases {
             if obj.contains_key(canonical) {
                 continue;
@@ -137,6 +138,11 @@ pub(crate) fn normalize_tool_args(
             }
         }
     }
+    super::compat::drop_unused_optional_args(
+        &mut obj,
+        schema.as_ref(),
+        &crate::tool_annotations::path_inputs::parameters(annotations.as_ref()),
+    );
 
     // Strip a leaked tool-call heredoc wrapper from any string argument that is
     // *entirely* a `<<TAG\n...\nTAG` heredoc. The model is taught the

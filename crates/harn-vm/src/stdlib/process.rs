@@ -6,7 +6,13 @@ use std::path::PathBuf;
 use std::process::Stdio;
 use std::time::{Duration, Instant};
 
-use crate::orchestration::RunExecutionRecord;
+pub(crate) use crate::orchestration::current_execution_context;
+pub use crate::orchestration::{execution_root_path, set_thread_execution_context};
+pub(crate) use crate::security::session_environment::swap_session_environment;
+pub use crate::security::session_environment::{
+    current_session_environment, declare_session_environment_if_absent, set_session_environment,
+    SessionEnvironmentGuard,
+};
 use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
@@ -15,13 +21,6 @@ const HARN_REPLAY_ENV: &str = "HARN_REPLAY";
 
 thread_local! {
     pub(crate) static VM_SOURCE_DIR: RefCell<Option<PathBuf>> = const { RefCell::new(None) };
-    static VM_EXECUTION_CONTEXT: RefCell<Option<RunExecutionRecord>> = const { RefCell::new(None) };
-    /// The resolved environment for the current launched session. `None` means
-    /// this thread is outside a session boundary. Held across a worker's `.await`s and
-    /// so swapped per-task by the ambient scope; its `_CONTEXT` suffix enrolls it
-    /// in the ambient-thread-local drift guard.
-    static SESSION_ENVIRONMENT_CONTEXT: RefCell<Option<crate::security::SessionEnvironment>> =
-        const { RefCell::new(None) };
 }
 
 /// Set the source directory for the current thread (called by VM on file execution).
@@ -44,112 +43,8 @@ pub(crate) fn normalize_context_path(path: &std::path::Path) -> PathBuf {
         .unwrap_or_else(|_| path.to_path_buf())
 }
 
-pub fn set_thread_execution_context(context: Option<RunExecutionRecord>) {
-    VM_EXECUTION_CONTEXT.with(|current| *current.borrow_mut() = context);
-}
-
-pub(crate) fn current_execution_context() -> Option<RunExecutionRecord> {
-    VM_EXECUTION_CONTEXT.with(|current| current.borrow().clone())
-}
-
-/// Install (or clear) the environment policy the current session runs under.
-/// Called at the session launch boundary once the declared policy
-/// and grants have been resolved into a [`crate::security::SessionEnvironment`].
-pub fn set_session_environment(environment: Option<crate::security::SessionEnvironment>) {
-    SESSION_ENVIRONMENT_CONTEXT.with(|current| *current.borrow_mut() = environment);
-}
-
-/// The environment policy governing subprocess env construction for the current
-/// task, or `None` on the legacy non-session path.
-///
-/// Public because a host's process seam has to be able to tell "no policy is
-/// installed" apart from "a policy is installed and admits nothing". Those two
-/// look identical downstream — both produce a child the caller did not
-/// explicitly populate — and only the first is a defect. A seam that cannot
-/// ask this question ends up treating absence as permission.
-pub fn current_session_environment() -> Option<crate::security::SessionEnvironment> {
-    SESSION_ENVIRONMENT_CONTEXT.with(|current| current.borrow().clone())
-}
-
-/// Declare a default environment for a surface that has none, for as long as
-/// the returned guard is held.
-///
-/// This is what a host surface wants, and the distinction from
-/// [`set_session_environment`] is the whole point of the function existing.
-///
-/// If a policy is already installed, this leaves it alone. A surface
-/// declaring its default must never overwrite a session that made a real
-/// choice: an MCP dispatch that happens inside an agent session would
-/// otherwise replace that session's `granted` policy with a permissive one
-/// and widen the very boundary the session asked for.
-///
-/// On drop it restores whatever was installed before rather than clearing.
-/// Clearing is not the inverse of installing, and a guard that cleared would
-/// leave an enclosing session with no policy at all — which, at a spawn seam,
-/// is an error rather than a default.
-#[must_use = "the declaration lasts only while the guard is held"]
-pub fn declare_session_environment_if_absent(
-    environment: crate::security::SessionEnvironment,
-) -> SessionEnvironmentGuard {
-    let previous = current_session_environment();
-    if previous.is_none() {
-        set_session_environment(Some(environment));
-    }
-    SessionEnvironmentGuard { previous }
-}
-
-/// Restores the session environment that was installed before its
-/// declaration, including on the panicking path.
-pub struct SessionEnvironmentGuard {
-    previous: Option<crate::security::SessionEnvironment>,
-}
-
-impl Drop for SessionEnvironmentGuard {
-    fn drop(&mut self) {
-        set_session_environment(self.previous.take());
-    }
-}
-
-impl SessionEnvironmentGuard {
-    /// Tighten the active environment without replacing its credential policy.
-    /// The guard restores the previous session on drop.
-    pub fn with_host_inference_boundary(
-        self,
-        boundary: Option<crate::llm::api::InferenceBoundary>,
-    ) -> Self {
-        if let Some(environment) = current_session_environment() {
-            set_session_environment(Some(environment.with_host_inference_boundary(boundary)));
-        }
-        self
-    }
-}
-
-/// Per-task ambient-scope swap of the session environment. Same rationale as
-/// [`swap_thread_execution_context`]: a fan-out worker holds its session's
-/// environment across `.await`s, so it must keep its own copy rather than read a
-/// cooperatively-scheduled sibling's. `pub(crate)` — only the ambient combinator
-/// moves whole environments; launch code uses [`set_session_environment`].
-pub(crate) fn swap_session_environment(
-    next: Option<crate::security::SessionEnvironment>,
-) -> Option<crate::security::SessionEnvironment> {
-    SESSION_ENVIRONMENT_CONTEXT.with(|current| std::mem::replace(&mut *current.borrow_mut(), next))
-}
-
-/// Per-task ambient-scope swap of the thread execution context. See
-/// `orchestration::ambient_scope`: the execution context carries the running
-/// task's cwd/env/source-dir AND anchors the capability path-scope workspace
-/// root, so a worker holding it across an `.await` must keep its OWN copy rather
-/// than read whatever a cooperatively-scheduled fan-out sibling left behind. The
-/// helper is `pub(crate)` — only the ambient combinator moves whole contexts;
-/// ordinary code uses `set_thread_execution_context`/`current_execution_context`.
-pub(crate) fn swap_thread_execution_context(
-    next: Option<RunExecutionRecord>,
-) -> Option<RunExecutionRecord> {
-    VM_EXECUTION_CONTEXT.with(|current| std::mem::replace(&mut *current.borrow_mut(), next))
-}
-
 /// Per-task ambient-scope swap of the VM source directory. Same rationale as
-/// [`swap_thread_execution_context`]: it anchors source-relative path
+/// [`crate::orchestration::swap_thread_execution_context`]: it anchors source-relative path
 /// resolution for the running task, so it must follow that task across `.await`.
 pub(crate) fn swap_source_dir(next: Option<PathBuf>) -> Option<PathBuf> {
     VM_SOURCE_DIR.with(|current| std::mem::replace(&mut *current.borrow_mut(), next))
@@ -209,14 +104,7 @@ impl Drop for SourceDirGuard {
 /// Reset thread-local process state (for test isolation).
 pub(crate) fn reset_process_state() {
     VM_SOURCE_DIR.with(|sd| *sd.borrow_mut() = None);
-    VM_EXECUTION_CONTEXT.with(|current| *current.borrow_mut() = None);
-}
-
-pub fn execution_root_path() -> PathBuf {
-    current_execution_context()
-        .and_then(|context| context.cwd.map(PathBuf::from))
-        .or_else(|| std::env::current_dir().ok())
-        .unwrap_or_else(|| PathBuf::from("."))
+    set_thread_execution_context(None);
 }
 
 /// The form of `path` a child process can actually be started in.

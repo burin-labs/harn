@@ -21,48 +21,94 @@ use crate::agent_events::{AgentEvent, ToolCallStatus, ToolMutationStatus};
 use crate::agent_sessions::event_facts as facts;
 use crate::orchestration::AgentSessionReplayEvent;
 use crate::value::VmError;
-use harn_session_store::{ReadRange, SessionEventKind, SessionStore, StoreError, StoredEvent};
+use harn_session_store::{
+    chain_root_fold, chain_root_init, EventId, ReadRange, SessionEventKind, SessionMeta,
+    SessionStore, StoreError, StoredEvent,
+};
 
 /// One page of stored events per round trip. The store caps reads at its own
-/// `MAX_READ_BATCH`; this keeps the loop's memory bounded either way.
+/// `MAX_READ_BATCH`; page input allocation stays bounded. Projected replay
+/// and the journal owner's active transcript state grow with the session.
 const RESTORE_PAGE: usize = 512;
+
+/// A replay and its durable checkpoint describe the same captured prefix.
+/// The checkpoint includes bookkeeping rows that have no visible projection.
+pub struct CanonicalSessionReplay {
+    pub events: Vec<AgentSessionReplayEvent>,
+    pub last_event_id: Option<EventId>,
+}
 
 /// Read `session_id`'s durable transcript out of `project_root`'s canonical
 /// store and project it into replayable agent events.
 ///
 /// Returns `Ok(None)` only when the store genuinely does not know the session —
 /// no store for this project, or no such row. That is the one condition under
-/// which a caller may report an unknown session. `Ok(Some(events))` with an
-/// empty vector is a real session that simply has no transcript yet, which is
+/// which a caller may report an unknown session. A replay with an
+/// empty event vector is a real session that simply has no transcript yet, which is
 /// still restorable.
-pub async fn load_canonical_session_replay_events(
+pub async fn load_canonical_session_replay(
     project_root: &Path,
     session_id: &str,
-) -> Result<Option<Vec<AgentSessionReplayEvent>>, VmError> {
+) -> Result<Option<CanonicalSessionReplay>, VmError> {
     let Some(store) = crate::stdlib::session_store::open_existing_canonical_store(project_root)?
     else {
         return Ok(None);
     };
-    load_canonical_session_replay_events_from_store(&store, session_id).await
+    load_canonical_session_replay_from_store(&store, session_id).await
 }
 
-/// Store-injected form of [`load_canonical_session_replay_events`], so tests
-/// and non-SQLite hosts can exercise the projection without a project layout.
-pub async fn load_canonical_session_replay_events_from_store(
+/// Store-injected form of [`load_canonical_session_replay`]. Capture the
+/// durable checkpoint before reading and validate that exact prefix.
+pub async fn load_canonical_session_replay_from_store(
     store: &dyn SessionStore,
     session_id: &str,
-) -> Result<Option<Vec<AgentSessionReplayEvent>>, VmError> {
-    match store.describe(session_id).await {
-        Ok(_) => {}
+) -> Result<Option<CanonicalSessionReplay>, VmError> {
+    let checkpoint = match store.describe(session_id).await {
+        Ok(checkpoint) => checkpoint,
         Err(StoreError::NotFound(_)) => return Ok(None),
         Err(error) => {
             return Err(VmError::Runtime(format!(
                 "canonical session store describe {session_id}: {error}"
             )))
         }
+    };
+    if !crate::persistent_state::session_matches_current_workspace(&checkpoint) {
+        return Ok(None);
+    }
+    read_canonical_session_prefix(store, session_id, checkpoint)
+        .await
+        .map(Some)
+}
+
+async fn read_canonical_session_prefix(
+    store: &dyn SessionStore,
+    session_id: &str,
+    checkpoint: SessionMeta,
+) -> Result<CanonicalSessionReplay, VmError> {
+    let invalid_prefix = || {
+        VmError::Runtime(format!(
+            "canonical session store prefix changed while restoring {session_id}"
+        ))
+    };
+    if checkpoint.id != session_id {
+        return Err(invalid_prefix());
+    }
+    // An absent upper bound means an unbounded read, not an empty session.
+    if checkpoint.last_event_id.is_none() {
+        if checkpoint.event_count != 0 {
+            return Err(invalid_prefix());
+        }
+        return Ok(CanonicalSessionReplay {
+            events: Vec::new(),
+            last_event_id: None,
+        });
     }
 
     let mut events = Vec::new();
+    let mut hydration = crate::agent_session_journal::TranscriptHydration::default();
+    let mut event_count = 0;
+    let mut last_event_id = None;
+    let mut chain_root = chain_root_init();
     let mut from = None;
     loop {
         let page = store
@@ -70,8 +116,8 @@ pub async fn load_canonical_session_replay_events_from_store(
                 session_id,
                 ReadRange {
                     from_event_id: from,
+                    to_event_id: checkpoint.last_event_id,
                     limit: Some(RESTORE_PAGE),
-                    ..ReadRange::default()
                 },
             )
             .await
@@ -81,16 +127,57 @@ pub async fn load_canonical_session_replay_events_from_store(
                 ))
             })?;
         for stored in page.events {
-            if let Some(event) = replay_event_from_stored(session_id, &stored) {
+            if stored.session_id != session_id
+                || Some(stored.event_id) > checkpoint.last_event_id
+                || last_event_id.is_some_and(|previous| previous >= stored.event_id)
+            {
+                return Err(invalid_prefix());
+            }
+            event_count += 1;
+            if event_count > checkpoint.event_count {
+                return Err(invalid_prefix());
+            }
+            last_event_id = Some(stored.event_id);
+            chain_root = chain_root_fold(&chain_root, stored.source_record_hash());
+            hydration.absorb(&stored);
+            // Projection remains private until the complete prefix is validated.
+            if let Some(event) = publication::RestoreProjection::from_stored(session_id, &stored) {
                 events.push(event);
             }
         }
+        // A full final page may advertise tip + 1 as its next cursor. The
+        // captured bound is already drained; do not reject or read beyond it.
+        if last_event_id == checkpoint.last_event_id {
+            break;
+        }
         match page.next_cursor {
-            Some(cursor) => from = Some(cursor),
+            Some(cursor) => {
+                if from.is_some_and(|previous| cursor <= previous)
+                    || Some(cursor) > checkpoint.last_event_id
+                    || last_event_id.is_none_or(|event_id| cursor <= event_id)
+                {
+                    return Err(invalid_prefix());
+                }
+                from = Some(cursor);
+            }
             None => break,
         }
     }
-    Ok(Some(close_unanswered_tool_calls(session_id, events)))
+    if event_count != checkpoint.event_count
+        || last_event_id != checkpoint.last_event_id
+        || checkpoint.chain_root_hash.as_deref() != Some(chain_root.as_str())
+    {
+        return Err(invalid_prefix());
+    }
+    let (_, publications) = hydration.finish();
+    let events = events
+        .into_iter()
+        .filter_map(|event| event.finish(&publications))
+        .collect();
+    Ok(CanonicalSessionReplay {
+        events: close_unanswered_tool_calls(session_id, events),
+        last_event_id: checkpoint.last_event_id,
+    })
 }
 
 /// What a restored call with no result reports. The store keeps a call from
@@ -192,7 +279,10 @@ fn replay_event_from_stored(
 ) -> Option<AgentSessionReplayEvent> {
     let transcript = stored.payload.get("transcript_event")?;
     let kind = transcript.get("kind").and_then(serde_json::Value::as_str);
-    if matches!(kind, Some("turn_phase_changed" | "agent_run_terminal")) {
+    if matches!(
+        kind,
+        Some("turn_phase_changed" | "agent_run_terminal" | "progress_reported")
+    ) {
         let metadata = transcript.get("metadata")?;
         let event = if kind == Some("agent_run_terminal") {
             AgentEvent::TurnPhaseChanged {
@@ -200,7 +290,7 @@ fn replay_event_from_stored(
                 phase: crate::agent_events::AgentTurnPhase::from_terminal_record(metadata)?,
             }
         } else {
-            AgentEvent::from_host_payload(session_id, "turn_phase_changed", metadata).ok()??
+            AgentEvent::from_host_payload(session_id, kind?, metadata).ok()??
         };
         // A standalone phase row can precede a failed terminal write. Only the
         // committed run record owns finality; older records lack its reply.
@@ -255,10 +345,12 @@ fn replay_event_from_stored(
                 .unwrap_or(&stored.record_hash)
                 .to_string(),
             content: user_content_blocks(transcript, text),
+            history_source_event_id: stored.headers.get("source_event_id").cloned(),
         },
         (SessionEventKind::Message, _) if !text.is_empty() => AgentEvent::AgentMessageChunk {
             session_id: session_id.to_string(),
             content: text.to_string(),
+            history_source_event_id: stored.headers.get("source_event_id").cloned(),
         },
         (SessionEventKind::ToolCall, _) => {
             let tool_call_id = tool_call_id(stored, transcript)?;
@@ -428,6 +520,8 @@ fn stored_kind_label(kind: &SessionEventKind) -> String {
             .unwrap_or_else(|| "message".to_string()),
     }
 }
+
+mod publication;
 
 #[cfg(test)]
 mod tests;

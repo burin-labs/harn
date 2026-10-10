@@ -35,12 +35,14 @@ fn write_fixture(temp: &TempDir) {
         temp.path(),
         "acp_fixture.harn",
         r#"
+import { agent_session_init, agent_session_flush } from "std/agent/state"
 pub pipeline main(harness: Harness) {
   const sid = harness.agent.current_id()
   guard sid != nil else { throw "ACP prompt installs the current session id" }
   if prompt != "snapshot" {
-    harness.agent.inject(sid, {role: "user", content: prompt})
+    agent_session_init(harness.agent, prompt, nil, {root: ".", session_id: sid})
   }
+  agent_session_flush(harness.agent, sid)
   const snap = harness.agent.snapshot(sid)
   harness.stdio.println(
     json_stringify({
@@ -539,6 +541,34 @@ fn acp_session_fork_branches_runtime_state_and_dispatches_independently() {
     let session_id = created["result"]["sessionId"].as_str().unwrap().to_string();
     select_code_mode(&mut client, &session_id);
 
+    let (_, unknown_history) = send_request(
+        &mut client,
+        json!({
+            "jsonrpc": "2.0", "id": "unknown-boundary",
+            "method": "harn.session_history.boundaries",
+            "params": {"sessionId": "unknown-canonical-parent"}
+        }),
+    );
+    assert!(
+        unknown_history.get("error").is_some(),
+        "unknown history must return an error without ending the server"
+    );
+    let (_, empty_history) = send_request(
+        &mut client,
+        json!({
+            "jsonrpc": "2.0", "id": "empty-boundary",
+            "method": "harn.session_history.boundaries",
+            "params": {"sessionId": session_id}
+        }),
+    );
+    assert_eq!(empty_history["result"]["tip"]["session_id"], session_id);
+    assert_eq!(
+        empty_history["result"]["tip"]["schema"],
+        "harn.canonical_session_boundary.v1"
+    );
+    assert!(empty_history["result"]["tip"]["event_id"].is_null());
+    assert_eq!(empty_history["result"]["positions"], json!([]));
+
     let (alpha_notifications, alpha_response) = send_request(
         &mut client,
         json!({
@@ -557,6 +587,19 @@ fn acp_session_fork_branches_runtime_state_and_dispatches_independently() {
     );
     let alpha_summary = latest_prompt_summary(&alpha_notifications, &session_id);
     assert_eq!(alpha_summary["len"], 1);
+
+    let (_, acknowledged) = send_request(
+        &mut client,
+        json!({
+            "jsonrpc": "2.0", "id": "alpha-boundary",
+            "method": "harn.session_history.boundaries",
+            "params": {"sessionId": session_id}
+        }),
+    );
+    let alpha_boundary = acknowledged["result"]["tip"].clone();
+    assert_eq!(alpha_boundary["session_id"], session_id);
+    assert!(alpha_boundary["event_id"].is_u64());
+    assert!(alpha_boundary["record_hash"].is_string());
 
     let (beta_notifications, beta_response) = send_request(
         &mut client,
@@ -585,7 +628,7 @@ fn acp_session_fork_branches_runtime_state_and_dispatches_independently() {
             "method": "session/fork",
             "params": {
                 "session_id": session_id,
-                "keep_first": 1,
+                "canonicalBoundary": alpha_boundary,
                 "id": branch_id,
                 "branch_name": "left"
             }
@@ -594,7 +637,7 @@ fn acp_session_fork_branches_runtime_state_and_dispatches_independently() {
     assert_eq!(fork_response["result"]["sessionId"], branch_id);
     assert_eq!(fork_response["result"]["state"], "forked");
     assert_eq!(fork_response["result"]["parent_id"], session_id);
-    assert_eq!(fork_response["result"]["branched_at"], 1);
+    assert_eq!(fork_response["result"]["canonicalBoundary"], alpha_boundary);
     let session_info_update = fork_notifications
         .iter()
         .find(|message| {
@@ -612,8 +655,8 @@ fn acp_session_fork_branches_runtime_state_and_dispatches_independently() {
         session_id
     );
     assert_eq!(
-        session_info_update["params"]["update"]["_meta"]["branched_at"],
-        1
+        session_info_update["params"]["update"]["_meta"]["canonical_boundary"],
+        alpha_boundary
     );
     assert_eq!(
         session_info_update["params"]["update"]["_meta"]["branch_name"],
@@ -659,7 +702,6 @@ fn acp_session_fork_branches_runtime_state_and_dispatches_independently() {
     let child_summary = latest_prompt_summary(&child_notifications, branch_id);
     assert_eq!(child_summary["len"], 2);
     assert_eq!(child_summary["parent_id"], session_id);
-    assert_eq!(child_summary["branched_at"], 1);
     assert_eq!(child_summary["messages"][0]["content"], "alpha");
     assert_eq!(child_summary["messages"][1]["content"], "child");
 

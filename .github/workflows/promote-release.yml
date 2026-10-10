@@ -32,6 +32,10 @@ on:
         description: Full source SHA certified by the candidate run
         required: true
         type: string
+      rehearsal_promotion_run_id:
+        description: Prior promotion with a measured successful rehearsal of this candidate
+        required: false
+        type: string
   # Privileged `workflow_run` is intentional: the resolver executes trusted
   # main code and validates the producer before candidate source is read.
   workflow_run: # zizmor: ignore[dangerous-triggers] promotes only main push runs of this repository
@@ -101,7 +105,7 @@ jobs:
         with:
           ref: ${{ needs.resolve.outputs.source_sha }}
           path: release-source
-          fetch-depth: 2
+          fetch-depth: 0
           persist-credentials: false
 
       - name: Decide from the version
@@ -125,12 +129,16 @@ jobs:
           previous="$(git -C "$source_directory" show HEAD^:Cargo.toml | release_workspace_version)"
           if ! release_push_is_stable_version_change "$previous" "$version"; then
             if [[ "${RECOVERY:-false}" == true ]]; then
-              echo "::error::Requested recovery source is not a stable release version transition."
-              exit 1
+              if ! transition="$(cd "$source_directory" && release_recovery_transition "$HEAD_SHA" "$version")"; then
+                echo "::error::Requested recovery source has no proved stable release version transition in its first-parent history."
+                exit 1
+              fi
+              echo "::notice::Recovering corrected source $HEAD_SHA for stable transition $transition at $version."
+            else
+              echo "::notice::$HEAD_SHA keeps the workspace version at $version (was $previous); its run built no candidate, so there is nothing to promote."
+              echo "promote=false" >> "$GITHUB_OUTPUT"
+              exit 0
             fi
-            echo "::notice::$HEAD_SHA keeps the workspace version at $version (was $previous); its run built no candidate, so there is nothing to promote."
-            echo "promote=false" >> "$GITHUB_OUTPUT"
-            exit 0
           fi
           tag="v$version"
           # A rerun of this workflow after the release exists is a no-op; a tag
@@ -145,6 +153,18 @@ jobs:
               echo "promote=false" >> "$GITHUB_OUTPUT"
               exit 0
             fi
+          fi
+          # Main can explicitly retire a failed, never-published stable
+          # candidate by advancing development. Do not resurrect it later.
+          # Published tags were handled above and retain their follow-through.
+          main_version="$(release_workspace_version < Cargo.toml)"
+          release_version_is_canonical "$main_version" || {
+            echo "::error::Cannot read main's release identity; refusing unproved promotion."
+            exit 1
+          }
+          if release_workspace_supersedes_source "$version" "$main_version"; then
+            echo "::error::Unpublished $tag is superseded by main's $main_version identity."
+            exit 1
           fi
           # The candidate was built by the release's merge group, or by this push
           # when no queue run built it. Either way it is found by commit.
@@ -191,6 +211,8 @@ jobs:
     uses: ./.github/workflows/consumer-canary.yml
     with:
       source_revision: ${{ needs.plan.outputs.source_sha }}
+      candidate_run_id: ${{ needs.plan.outputs.run_id }}
+      rehearsal_promotion_run_id: ${{ inputs.rehearsal_promotion_run_id }}
     secrets:
       RELEASE_APP_CLIENT_ID: ${{ secrets.RELEASE_APP_CLIENT_ID }}
       RELEASE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
@@ -203,6 +225,7 @@ jobs:
     runs-on: ubuntu-24.04
     permissions:
       contents: read
+      actions: read
     outputs:
       ready: ${{ steps.authorize.outputs.ready }}
     steps:
@@ -210,6 +233,14 @@ jobs:
         with:
           ref: main
           persist-credentials: false
+      - name: Require full-suite CI at the release source
+        timeout-minutes: 90
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          SOURCE_SHA: ${{ needs.plan.outputs.source_sha }}
+          WAIT_FOR_FULL_SUITE: 'true'
+        run: bash scripts/ci/require_full_suite.sh
       - name: Require the owning rehearsal result
         id: authorize
         env:
@@ -230,7 +261,7 @@ jobs:
       contents: read
       actions: read
       attestations: read
-    uses: burin-labs/.github/.github/workflows/promote-release.yml@47b97f48a4862d684f54a0b8ee7aa370d8bfc126
+    uses: burin-labs/.github/.github/workflows/promote-release.yml@4f755671f8c2eac4308eae2c2e20e0fbc99e03e2
     with:
       sha: ${{ needs.plan.outputs.source_sha }}
       run-id: ${{ needs.plan.outputs.run_id }}
@@ -320,6 +351,8 @@ jobs:
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         with:
           images: ghcr.io/burin-labs/harn
+          labels: |
+            org.opencontainers.image.revision=${{ needs.plan.outputs.source_sha }}
           # Promotion publishes only stable versions, so each one is latest.
           tags: |
             type=raw,value=${{ needs.plan.outputs.version }}

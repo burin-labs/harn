@@ -140,6 +140,8 @@ type ToolDefinitionConfig = {
   output_schema?: JsonSchema202012,
   error_schema?: JsonSchema202012,
   handler?: fn(dict) -> any,
+  /** Read-only invocation facts, resolved before consent and rechecked before each attempt. */
+  prepare?: fn(dict) -> dict,
   executor?: string,
   host_capability?: string,
   mcp_server?: string,
@@ -182,6 +184,7 @@ pub type ToolDefinitionSpec = {
   output_schema?: JsonSchema202012,
   error_schema?: JsonSchema202012,
   handler?: fn(dict) -> any,
+  prepare?: fn(dict) -> dict,
   executor?: string,
   host_capability?: string,
   mcp_server?: string,

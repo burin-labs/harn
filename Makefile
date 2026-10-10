@@ -4,6 +4,7 @@
 .PHONY: check-typescript-protocol-binding check-swift-protocol-binding
 .PHONY: check-provider-catalog-drift-core
 .PHONY: check-scheduled-workflows check-e2e-trigger-contract
+.PHONY: test-postgres-live test-postgres-cloud
 .PHONY: sync-docs-diagnostics
 .PHONY: setup-wasm setup-wasm-tools gen-wasm-wit check-wasm-wit wasm-build gen-app-runtime check-app-runtime wasm-audit-imports wasm-test-browser wasm-check wasm-demo kernel-check kernel-test kernel-vm-parity vm-check cli-check cli-test gen-portable-benchmark-schema check-portable-benchmark-schema gen-portable-demo-package check-portable-demo-package
 
@@ -65,6 +66,8 @@ all: fmt
 	trap 'rm -rf "$$stable_root"' EXIT; \
 	harn_bin="$$(./scripts/snapshot_harn_bin.sh "$$harn_bin" "$$stable_root/harn-bin")" || exit 1; \
 	$(MAKE) HARN_BIN="$$harn_bin" check-agent-gates || exit 1; \
+	$(MAKE) test-release-notices || exit 1; \
+	$(MAKE) check-aws-config-vendor test-aws-config-vendor || exit 1; \
 	$(MAKE) HARN_BIN="$$harn_bin" lint lint-md lint-actions lint-harn check-app-host spec-lint check-openapi-snapshot fmt-harn test test-harn-scripts test-agent-scripts test-pr-gate-scripts test-rust-lint-lane-cache conformance protocol-conformance mcp-conformance replay-oracle replay-bench check-highlight check-portable-benchmark-schema check-portable-demo-package check-prompt-grammar check-protocol-artifacts check-connector-schemas check-harness-migrations check-cli-surface check-bindings check-session-bundle-schema check-run-view-fixtures check-docs lint-test-patterns lint-diagnostic-codes check-stdlib-host-neutral check-public-product-names check-stdlib-strict-types check-stdlib-public-return-types check-schema-strict check-optional-dep-feature-contracts check-receipt-structs check-provider-catalog-drift check-source-file-lengths check-test-target-coverage check-gate-path-visibility check-python-boundary check-harn-syntax-sensitive-scans check-agent-guidance check-crate-sibling-versions check-protocol-symbol-removals check-dependabot-groups check-tree-sitter-keywords check-tree-sitter-parser check-grammar-keywords check-grammar-fitness check-loud-boundaries check-turn-end-boundary check-release-contract check-release-audit-contract check-ci-cache-policy check-rust-test-lane-policy check-cargo-lock-contract check-scheduled-workflows check-vm-exposures portal-check || exit 1; \
 	if [ -z "$(strip $(HARN_BIN))" ]; then HARN_BIN='' HARN_BIN_NO_BUILD=1 ./scripts/harn_bin.sh --record-receipt; fi
 
@@ -304,6 +307,20 @@ test:
 # by the same typed environment boundary.
 test-focused:
 	$(HARN_RUST_TEST_ENV) ./scripts/test_focused.sh
+
+# Live database tests are ignored by the ordinary suite, never counted as a
+# passing test that returned before opening a connection.
+test-postgres-live:
+	@ : "$${HARN_TEST_POSTGRES_URL:?set HARN_TEST_POSTGRES_URL to an isolated test database}"
+	$(HARN_REQUIRE_NEXTEST)
+	$(HARN_RUST_TEST_ENV) $(HARN_CARGO_CMD) nextest run --package harn-vm --lib --run-ignored all --ignore-default-filter -E 'test(stdlib::postgres::) and not test(when_env_set) and not test(when_bench_enabled)'
+
+test-postgres-cloud:
+	@ : "$${HARN_TEST_POSTGRES_URL:?set HARN_TEST_POSTGRES_URL to an isolated test database}"
+	@ : "$${HARN_TEST_CLOUD_MIGRATIONS_DIR:?set HARN_TEST_CLOUD_MIGRATIONS_DIR to the cloud migrations directory}"
+	@test -d "$${HARN_TEST_CLOUD_MIGRATIONS_DIR}"
+	$(HARN_REQUIRE_NEXTEST)
+	$(HARN_RUST_TEST_ENV) $(HARN_CARGO_CMD) nextest run --package harn-vm --lib --test-threads 1 --run-ignored only --ignore-default-filter -E 'test(stdlib::postgres::tests::) and test(when_env_set)'
 
 # Run exactly one Rust test without making nextest enumerate every test binary
 # in the package first. The environment-variable boundary keeps the
@@ -676,6 +693,9 @@ test-agent-scripts:
 	@echo "    Harn agent-loop tests OK."
 
 test-pr-gate-scripts:
+	./scripts/tests/macos_lint_aggregate_test.sh
+	node scripts/tests/rust_lint_timings_test.cjs
+	./scripts/tests/gh_check_state_launcher_test.sh
 	./scripts/tests/pr_title_convention_test.sh
 	./scripts/tests/fixture_git_init_branch_test.sh
 	./scripts/tests/sha256_file_hex_test.sh
@@ -695,11 +715,11 @@ test-pr-gate-scripts:
 	./scripts/tests/tree_sitter_generated_test.sh
 	./scripts/tests/native_platform_ci_plan_test.sh
 	./scripts/tests/release_ref_matcher_test.sh
-	./scripts/tests/ci_merge_group_proof_test.sh
 	./scripts/tests/check_sdk_release_artifacts_test.sh
 	./scripts/tests/generate_sdk_clients_test.sh
 	./scripts/tests/changelog_fragment_check_test.sh
 	./scripts/tests/breaking_surface_check_test.sh
+	bash ./scripts/tests/pr_gate_range_test.sh
 	./scripts/tests/release_pr_drift_check_test.sh
 	./scripts/tests/release_ship_fragment_guard_test.sh
 	./scripts/tests/release_ship_root_harn_bin_test.sh
@@ -710,6 +730,9 @@ test-pr-gate-scripts:
 	bash ./scripts/tests/release_promotion_source_test.sh
 	bash ./scripts/tests/release_rehearsal_authorization_test.sh
 	bash ./scripts/tests/release_consumer_candidate_verdict_test.sh
+	bash ./scripts/tests/failed_rehearsal_observation_test.sh
+	bash ./scripts/tests/successful_rehearsal_reuse_test.sh
+	bash ./scripts/tests/unpublished_retirement_test.sh
 	./scripts/tests/check_linux_glibc_floor_test.sh
 	./scripts/tests/release_version_test.sh
 	./scripts/tests/release_publication_policy_test.sh
@@ -774,6 +797,9 @@ test-pr-gate-scripts:
 	./scripts/tests/prune_stale_targets_host_policy_test.sh
 	./scripts/tests/target_gc_maintenance_test.sh
 	./scripts/tests/report_ci_cache_budget_test.sh
+	./scripts/tests/cache_refresh_admission_test.sh
+	node scripts/tests/cache_generation_retirement_test.cjs
+	node scripts/tests/workspace_warm_phase_test.cjs
 	./scripts/tests/loadgen_postgres_gate_test.sh
 	./scripts/tests/check_all_features_test.sh
 	./scripts/tests/check_stdlib_strict_types_test.sh
@@ -1516,7 +1542,7 @@ repository-policies-source:
 	@$(MAKE) --no-print-directory run-policy-list POLICY_LIST="$(SOURCE_REPOSITORY_POLICIES)" \
 	  POLICY_JOBS="$$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 2)"
 
-repository-policies:
+repository-policies: check-aws-config-vendor test-aws-config-vendor
 	@$(MAKE) --no-print-directory run-policy-list \
 	  POLICY_LIST="$(SOURCE_REPOSITORY_POLICIES) $(WARM_REPOSITORY_POLICIES)"
 
@@ -1573,14 +1599,34 @@ check-release-contract:
 	@echo "=== Checking Harn-owned release contract ==="
 	@$(HARN_CMD) run scripts/release_contract.harn -- --check
 
+.PHONY: gen-release-notices check-release-notices test-release-notices
+.PHONY: check-aws-config-vendor test-aws-config-vendor
+check-aws-config-vendor:
+	node scripts/check_aws_config_vendor.mjs
+
+test-aws-config-vendor:
+	node --test scripts/tests/aws_config_vendor.test.mjs
+
+gen-release-notices:
+	node scripts/release_third_party_notices.mjs generate dist/release-notices
+
+check-release-notices:
+	node scripts/release_third_party_notices.mjs verify dist/release-notices
+
+test-release-notices:
+	node --test scripts/tests/release_third_party_notices.test.mjs
+
 check-release-audit-contract:
 	@echo "=== Checking release-audit proof contract against CI ==="
 	@$(HARN_CMD) run scripts/release_audit_contract.harn -- --contract scripts/release_audit_contract.json --check-ci .github/workflows/ci.yml
 
 check-ci-cache-policy:
 	@echo "=== Checking CI cache ownership policy ==="
-	bash scripts/tests/ci_sprint_fast_ci_test.sh
-	@$(HARN_SCRIPT_TEST_ENV) $(HARN_CMD) test scripts/tests/ci_sprint_fast_ci_policy_test.harn
+	bash scripts/tests/ci_post_merge_tier_test.sh
+	bash scripts/tests/workspace_test_args_test.sh
+	bash scripts/tests/ci_full_suite_test.sh
+	bash scripts/tests/main_ci_recovery_test.sh
+	@$(HARN_SCRIPT_TEST_ENV) $(HARN_CMD) test scripts/tests/ci_post_merge_tier_policy_test.harn
 	@$(HARN_CMD) run scripts/check_ci_cache_policy.harn
 
 # The `#[harn_builtin(exposure = "harness...")]` declarations in harn-vm are the

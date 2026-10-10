@@ -21,9 +21,10 @@ grep -Fq 'release_range_release_commits' "$tmp/resolve.sh" \
   || fail "could not extract the setup resolver from $workflow"
 
 repo="$tmp/repo"
-mkdir -p "$repo/scripts/lib" "$repo/.github"
+mkdir -p "$repo/scripts/lib" "$repo/scripts/ci" "$repo/.github"
 cp "$root/scripts/lib/release_version.sh" "$root/scripts/lib/release_candidate_run.sh" \
-  "$root/scripts/lib/release_consumer_verdict.sh" "$repo/scripts/lib/"
+  "$root/scripts/lib/release_consumer_verdict.sh" "$root/scripts/lib/consumer_canary_policy.sh" "$repo/scripts/lib/"
+cp "$root/scripts/ci/consumer_canary_policy.json" "$repo/scripts/ci/"
 cp "$root/scripts/release_contract.env" "$root/scripts/release_runner_matrix.sh" "$repo/scripts/"
 cp "$root/scripts/release_contract.harn" "$root/scripts/path_visibility.harn" "$repo/scripts/"
 cp "$root/.github/release-runner-policy.json" "$repo/.github/"
@@ -500,5 +501,53 @@ grep -Fq "Candidate custody is unreadable" "$tmp/pushed_unread.log" \
 resolve pull_request EVENT_NAME=pull_request REF_NAME=8861/merge
 [[ "$(output pull_request build_mode)" == none && "$(output pull_request should_build_binaries)" == false ]] \
   || fail "a pull request built something: $(cat "$tmp/pull_request.outputs")"
+
+# A benchmark's AOT and build checkouts must remain identical when main
+# advances between jobs. Execute the real setup resolver, then use its ref for
+# both checkouts exactly as the workflow's two consumers do.
+git -C "$repo" checkout --quiet main
+commit_version 0.10.160 "Stable benchmark fixture"
+benchmark_sha="$(git -C "$repo" rev-parse HEAD)"
+resolve benchmark_frozen EVENT_NAME=workflow_dispatch INPUT_BENCHMARK_ONLY=true \
+  INPUT_TARGETS=x86_64-unknown-linux-gnu INPUT_RUNNER_PROFILE=standard
+benchmark_ref="$(output benchmark_frozen ref)"
+aot_version="$(git -C "$repo" show "$benchmark_ref:Cargo.toml" | sed -n 's/^version = "\([^"]*\)"$/\1/p')"
+commit_version 0.10.161-dev "Advance main after AOT"
+build_version="$(git -C "$repo" show "$benchmark_ref:Cargo.toml" | sed -n 's/^version = "\([^"]*\)"$/\1/p')"
+[[ "$aot_version" == "$build_version" && "$build_version" == 0.10.160 &&
+   "$benchmark_ref" == "$benchmark_sha" ]] \
+  || fail "split benchmark checkouts changed source/version: AOT=$aot_version build=$build_version ref=$benchmark_ref"
+echo "ok: benchmark AOT and build retain 0.10.160 after main advances to 0.10.161-dev"
+
+resolve manual_warm_frozen EVENT_NAME=workflow_dispatch INPUT_WARM_CACHE_ONLY=true
+warm_sha="$(git -C "$repo" rev-parse HEAD)"
+[[ "$(output manual_warm_frozen ref)" == "$warm_sha" ]] \
+  || fail "manual warm retained a moving branch ref"
+
+# Explicit source selection keeps policy from current HEAD but reads its
+# actual source version, and refuses a source ref that does not bind the SHA.
+git -C "$repo" tag retained-benchmark "$benchmark_sha"
+git clone --bare --quiet "$repo" "$tmp/origin.git"
+git -C "$repo" remote add origin "$tmp/origin.git"
+resolve explicit_benchmark EVENT_NAME=workflow_dispatch INPUT_BENCHMARK_ONLY=true \
+  INPUT_TARGETS=x86_64-unknown-linux-gnu INPUT_RUNNER_PROFILE=standard \
+  INPUT_BENCHMARK_SOURCE_REF=retained-benchmark INPUT_BENCHMARK_SOURCE_SHA="$benchmark_sha"
+[[ "$(output explicit_benchmark ref)" == "$benchmark_sha" &&
+   "$(output explicit_benchmark version)" == 0.10.160 ]] \
+  || fail "explicit benchmark source/version came from policy HEAD"
+for source_control in missing mismatched malformed; do
+  source_ref=retained-benchmark source_sha="$benchmark_sha"
+  case "$source_control" in
+    missing) source_ref=absent-source ;;
+    mismatched) source_sha="$warm_sha" ;;
+    malformed) source_sha=not-a-sha ;;
+  esac
+  if run_resolver "explicit_$source_control" EVENT_NAME=workflow_dispatch INPUT_BENCHMARK_ONLY=true \
+      INPUT_TARGETS=x86_64-unknown-linux-gnu INPUT_RUNNER_PROFILE=standard \
+      INPUT_BENCHMARK_SOURCE_REF="$source_ref" INPUT_BENCHMARK_SOURCE_SHA="$source_sha"; then
+    fail "explicit benchmark admitted $source_control source identity"
+  fi
+done
+echo "ok: explicit benchmark binds source ref, exact revision, and source version"
 
 echo "release_candidate_trigger_test: ok"

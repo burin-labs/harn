@@ -1,0 +1,152 @@
+import { completion_requirement_ledger_unassessed } from "std/agent/completion_requirements"
+import { agent_capture_events } from "std/agent/events"
+import { agent_loop } from "std/agent/loop"
+import { llm_stream_text, llm_text, with_llm_script } from "std/testing"
+import { contract_effect, contract_negative } from "./lib/mechanism_contract.harn"
+
+fn run_case(
+  harness: Harness,
+  label: string,
+  decision: dict,
+  expected_calls: int,
+  expected_reason: string,
+) {
+  with_llm_script(
+    harness.llm,
+    [
+      llm_stream_text(["Finished. ", "##DONE##"]),
+      llm_text("Retry. ##DONE##"),
+      llm_text("Retry. ##DONE##"),
+    ],
+    { ->
+      const sid = "completion-final-" + harness.random.uuid()
+      const displayed = harness.runtime.atomic(0)
+      const captured = agent_capture_events(
+        harness.agent,
+        sid,
+        fn() { return agent_loop(
+          harness,
+          "Do the work",
+          nil,
+          {
+            provider: "mock",
+            session_id: sid,
+            loop_until_done: true,
+            max_iterations: 5,
+            max_nudges: 5,
+            max_verify_attempts: 2,
+            done_sentinel: "##DONE##",
+            verify_completion: { _info -> decision },
+            on_delta: { _delta -> harness.runtime.atomic_add(displayed, 1) },
+          },
+        ) },
+      )
+      const result = captured.result
+      assert_eq(len(harness.llm.mock_calls()), expected_calls)
+      assert_eq(
+        result.terminal.kind,
+        if label == "plain" {
+          "policy_budget"
+        } else {
+          "completion_unverified"
+        },
+      )
+      if label == "plain" {
+        assert_eq(result.status, "verify_exhausted")
+      }
+      assert_eq(result.terminal.reason, expected_reason)
+      assert_eq(result.visible_text, "")
+      assert_eq(harness.runtime.atomic_get(displayed), 0)
+      assert_eq(len(captured.events.filter({ event -> event.type == "agent_message_chunk" })), 0)
+      assert(
+        json_stringify(result.transcript).contains(
+          if label == "plain" {
+            "Retry."
+          } else {
+            "Finished."
+          },
+        ),
+        "the withheld draft must actually have been produced",
+      )
+      if label == "final" {
+        const receipts = captured.events.filter(
+          { event -> event?.checkpoint?.schema == "harn.completion_directive_receipt.v1" },
+        )
+        assert_eq(len(receipts), 1)
+        const receipt = receipts[0].checkpoint
+        assert_eq(receipt.verification.observed, "failed")
+        assert_eq(receipt.verification.command, "pytest -q")
+        assert_eq(receipt.requirements.required_count, 1)
+        assert_eq(receipt.requirements.pending_count, 1)
+        assert_eq(receipt.requirements.pending_names, ["Tests pass"])
+      }
+      harness.stdio.println("${label}: ${result.terminal.kind}, calls=${expected_calls}")
+      if label == "final" {
+        assert(
+          contract_effect(
+            harness.stdio,
+            "final_refusal_stops",
+            result.terminal.reason == "host_check_failed",
+          ),
+        )
+      }
+      if label == "plain" {
+        assert(
+          contract_negative(
+            harness.stdio,
+            "plain_refusal_keeps_retrying",
+            result.terminal.kind == "completion_unverified",
+          ),
+        )
+      }
+    },
+  )
+}
+
+pipeline default(harness: Harness) {
+  run_case(
+    harness,
+    "final",
+    {
+      confirm: false,
+      action: "stop_unverified",
+      reason: "host_check_failed",
+      verification: {oracle_expected: true, command: "pytest -q", observed: "failed"},
+      requirement_report: completion_requirement_ledger_unassessed(
+        {
+          requirements: [
+            {
+              requirement_id: "tests",
+              name: "Tests pass",
+              evidence_roles: ["deterministic_verification"],
+            },
+          ],
+        },
+      ),
+    },
+    1,
+    "host_check_failed",
+  )
+  run_case(harness, "plain", {confirm: false, reason: "host_check_failed"}, 3, "sentinel")
+  run_case(
+    harness,
+    "contradictory",
+    {confirm: true, action: "stop_unverified", reason: "host_check_failed"},
+    1,
+    "completion_verifier_invalid_result",
+  )
+  run_case(
+    harness,
+    "unknown",
+    {confirm: false, action: "stop_verified", reason: "host_check_failed"},
+    1,
+    "completion_verifier_invalid_result",
+  )
+  run_case(
+    harness,
+    "missing_reason",
+    {confirm: false, action: "stop_unverified", reason: " "},
+    1,
+    "completion_verifier_invalid_result",
+  )
+}

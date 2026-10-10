@@ -20,11 +20,12 @@
     "test:harn": "cargo run --quiet --bin harn -- test tests/code_librarian/query_nl_test.harn --filter"
   },
   "overrides": {
-    "js-yaml": "5.2.2",
+    "js-yaml": "5.4.3",
+    "katex": "0.18.11",
     "react": "19.2.6",
     "react-dom": "19.2.6",
-    "shell-quote": "1.10.0",
-    "smol-toml": "1.7.1"
+    "shell-quote": "1.12.0",
+    "smol-toml": "1.9.0"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
@@ -33,6 +34,7 @@
     "eslint": "^10.11.0",
     "markdownlint-cli2": "^0.23.3",
     "prettier": "^3.9.9",
+    "smol-toml": "1.9.0",
     "typescript": "^7.0.2"
   }
 }

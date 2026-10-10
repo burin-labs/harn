@@ -46,6 +46,7 @@ fn tool_def(
     task_support: crate::mcp_tasks::McpTaskSupport,
 ) -> McpToolDef {
     McpToolDef {
+        invocation_requirement: crate::tool_registry::ToolInvocationRequirement::Direct,
         catalog: crate::tool_registry::ToolCatalogEntry {
             name: name.to_string(),
             title: None,

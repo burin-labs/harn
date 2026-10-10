@@ -4,7 +4,11 @@ mod approval_activity;
 mod approval_resolver;
 mod approval_review_config;
 mod approval_rules;
+mod capability_invocation;
+pub(crate) use approval_rules::PolicyAuthorityRequest;
 mod capability_lattice;
+pub use capability_invocation::enforce_current_policy_for_capability;
+pub(crate) use capability_invocation::scope_read_only_invocation;
 mod consent_capability;
 pub(crate) use consent_capability::is_policy_machinery_consent_call;
 mod effect_call_cache;
@@ -14,6 +18,7 @@ mod nested_budget;
 mod operator_grant;
 mod run_approval;
 mod runtime_effect_state;
+mod tool_approval_policy;
 pub(crate) mod tool_enforcement;
 mod types;
 
@@ -27,7 +32,7 @@ use serde::{Deserialize, Serialize};
 use crate::runtime_limits::RuntimeLimits;
 use crate::tool_annotations::{SideEffectLevel, ToolAnnotations};
 use crate::value::{VmError, VmValue};
-use crate::workspace_path::{classify_workspace_path, WorkspacePathInfo};
+use crate::workspace_path::{classify_permission_path, WorkspacePathInfo};
 pub(crate) use capability_lattice::operation_is_covered;
 use capability_lattice::policy_allows_capability;
 
@@ -51,9 +56,10 @@ pub use approval_rules::{
     clear_all_approval_policy_repeat_counts, clear_approval_policy_repeat_counts,
     denial_gate_for_source, next_approval_policy_repeat_count,
     next_approval_unavailable_class_repeat_count, ApprovalShape, PolicyAction, PolicyEvaluation,
-    PolicyMatchedRule, PolicyRule, PolicyRuleMatch, PolicyRuleSource, ToolApprovalRequest,
-    EXTERNAL_ROOT_READ_ONLY, SOURCE_DEFAULT_EXTERNAL_PATH, SOURCE_DEFAULT_PATH_GUARD,
-    SOURCE_DEFAULT_SENSITIVE_PATH, SOURCE_NET_POLICY,
+    PolicyIdentityMatch, PolicyMatchedRule, PolicyRule, PolicyRuleMatch, PolicyRuleSource,
+    ToolApprovalRequest, ToolApprovalWorkspaceBoundary, EXTERNAL_ROOT_READ_ONLY,
+    SOURCE_DEFAULT_EXTERNAL_PATH, SOURCE_DEFAULT_PATH_GUARD, SOURCE_DEFAULT_SENSITIVE_PATH,
+    SOURCE_NET_POLICY,
 };
 pub use effects::{
     compute_handoff_effects, effect_kind_label, effect_record_summary, effect_subset_violations,
@@ -80,7 +86,9 @@ pub use run_approval::{
 };
 pub(crate) use runtime_effect_state::RuntimeEffectState;
 pub use tool_enforcement::enforce_current_policy_for_tool;
+#[cfg(test)]
 pub(crate) use tool_enforcement::enforce_current_policy_for_tool_with_annotations_and_side_effect_grant;
+pub(crate) use tool_enforcement::ToolDispatchPolicy;
 pub use types::{
     default_read_deny_home_paths, enforce_tool_arg_constraints, AutoCompactPolicy, BranchSemantics,
     CapabilityPolicy, ContextPolicy, EqIgnored, EscalationPolicy, FeedbackBounds, FeedbackPolicy,
@@ -368,12 +376,12 @@ pub fn tool_declared_path_entries(
         if let Some(value) = map.get(key) {
             match value {
                 serde_json::Value::String(path) if !path.is_empty() => {
-                    entries.push(classify_workspace_path(path, Some(&workspace_root)));
+                    entries.push(classify_permission_path(path, Some(&workspace_root)));
                 }
                 serde_json::Value::Array(items) => {
                     for item in items.iter().filter_map(|item| item.as_str()) {
                         if !item.is_empty() {
-                            entries.push(classify_workspace_path(item, Some(&workspace_root)));
+                            entries.push(classify_permission_path(item, Some(&workspace_root)));
                         }
                     }
                 }
@@ -387,10 +395,12 @@ pub fn tool_declared_path_entries(
 }
 
 pub fn enforce_current_policy_for_builtin(name: &str, args: &[VmValue]) -> Result<(), VmError> {
+    let (entry, preparation_contract) = crate::stdlib::builtin_policy_metadata(name);
+    crate::tool_registry::preparation_scope::enforce_contract(name, preparation_contract)?;
     let Some(policy) = current_execution_policy() else {
         return Ok(());
     };
-    if let Some(entry) = crate::stdlib::builtin_manifest_entry(name) {
+    if let Some(entry) = entry {
         match entry.contract.exposure {
             harn_builtin_meta::BuiltinExposure::CapabilityFunction { authority_argument } => {
                 if args.get(usize::from(authority_argument)).is_none() {
@@ -641,44 +651,8 @@ pub fn enforce_current_policy_for_builtin(name: &str, args: &[VmValue]) -> Resul
     Ok(())
 }
 
-/// Enforce a typed Harness method at the authoritative source policy boundary.
-pub fn enforce_current_policy_for_capability(
-    capability: harn_builtin_meta::CapabilityId,
-    method: &str,
-    args: &[VmValue],
-) -> Result<(), VmError> {
-    // Manifest/lifecycle VM hooks install `allow_trusted_bridge_calls` for the
-    // duration of the handler. That guard already exempts bridged builtins;
-    // Harness methods must honor the same depth, or a PreToolUse handler that
-    // migrated from ambient `store_get` / `agent_session_current_id` to
-    // `harness.runtime.store_get` / `harness.agent.current_id` silently loses
-    // state:read under the tool's effect ceiling (observed downstream).
-    if trusted_bridge_call_is_active() {
-        return Ok(());
-    }
-    let Some(policy) = current_execution_policy() else {
-        return Ok(());
-    };
-    let Some(entry) = crate::stdlib::capability_method_manifest_entry(capability, method) else {
-        return reject_policy(format!(
-            "undeclared Harness capability method `harness.{}.{method}`",
-            capability.field_name()
-        ));
-    };
-    let denied = effects::runtime_effects_from_contract(entry.contract.effects, args)
-        .into_iter()
-        .find(|effect| !contract_effect_allowed_by_ceiling(effect, entry.contract, &policy));
-    if let Some(effect) = denied {
-        return reject_policy(format!(
-            "harness.{}.{method} exceeds the active effect ceiling: {}",
-            capability.field_name(),
-            effects::effect_record_summary(&effect)
-        ));
-    }
-    Ok(())
-}
-
 pub fn enforce_current_policy_for_bridge_builtin(name: &str) -> Result<(), VmError> {
+    crate::tool_registry::preparation_scope::enforce_contract(name, None)?;
     if trusted_bridge_call_is_active() {
         return Ok(());
     }
@@ -900,106 +874,6 @@ pub enum ToolApprovalDecision {
     RequiresHostApproval,
 }
 
-impl ToolApprovalPolicy {
-    pub fn evaluate_detailed(&self, tool_name: &str, args: &serde_json::Value) -> PolicyEvaluation {
-        approval_rules::evaluate_tool_approval_policy(self, tool_name, args, None)
-    }
-
-    pub fn evaluate_detailed_with_repeat(
-        &self,
-        tool_name: &str,
-        args: &serde_json::Value,
-        repeat_count: u64,
-    ) -> PolicyEvaluation {
-        approval_rules::evaluate_tool_approval_policy(self, tool_name, args, Some(repeat_count))
-    }
-
-    /// Evaluate whether a tool call should be approved, denied, or needs
-    /// host confirmation.
-    pub fn evaluate(&self, tool_name: &str, args: &serde_json::Value) -> ToolApprovalDecision {
-        let decision = self.evaluate_detailed(tool_name, args);
-        if decision.is_deny() {
-            return ToolApprovalDecision::AutoDenied {
-                reason: decision.reason,
-            };
-        }
-        if decision.is_ask() {
-            return ToolApprovalDecision::RequiresHostApproval;
-        }
-        ToolApprovalDecision::AutoApproved
-    }
-
-    /// Merge two approval policies, taking the most restrictive combination.
-    /// - auto_approve: only tools approved by BOTH policies stay approved
-    ///   (if either policy has no patterns, the other's patterns are used)
-    /// - auto_deny / require_approval: union (either policy can deny/gate)
-    /// - write_path_allowlist: intersection (both must allow the path)
-    /// - external_roots: intersection; a shared root keeps the narrower mode
-    pub fn intersect(&self, other: &ToolApprovalPolicy) -> ToolApprovalPolicy {
-        let auto_approve = if self.auto_approve.is_empty() {
-            other.auto_approve.clone()
-        } else if other.auto_approve.is_empty() {
-            self.auto_approve.clone()
-        } else {
-            self.auto_approve
-                .iter()
-                .filter(|p| other.auto_approve.contains(p))
-                .cloned()
-                .collect()
-        };
-        let mut auto_deny = self.auto_deny.clone();
-        auto_deny.extend(other.auto_deny.iter().cloned());
-        let mut require_approval = self.require_approval.clone();
-        require_approval.extend(other.require_approval.iter().cloned());
-        let write_path_allowlist = if self.write_path_allowlist.is_empty() {
-            other.write_path_allowlist.clone()
-        } else if other.write_path_allowlist.is_empty() {
-            self.write_path_allowlist.clone()
-        } else {
-            self.write_path_allowlist
-                .iter()
-                .filter(|p| other.write_path_allowlist.contains(p))
-                .cloned()
-                .collect()
-        };
-        let mut rules = self.rules.clone();
-        rules.extend(other.rules.iter().cloned());
-        let mut sensitive_path_patterns = self.sensitive_path_patterns.clone();
-        sensitive_path_patterns.extend(other.sensitive_path_patterns.iter().cloned());
-        sensitive_path_patterns.sort();
-        sensitive_path_patterns.dedup();
-        let external_roots = external_roots::intersect(&self.external_roots, &other.external_roots);
-        ToolApprovalPolicy {
-            rules,
-            auto_approve,
-            auto_deny,
-            require_approval,
-            write_path_allowlist,
-            allow_sensitive_paths: self.allow_sensitive_paths && other.allow_sensitive_paths,
-            sensitive_path_patterns,
-            allow_external_paths: self.allow_external_paths && other.allow_external_paths,
-            external_roots,
-            repeat_limit: match (self.repeat_limit, other.repeat_limit) {
-                (Some(left), Some(right)) => Some(left.min(right)),
-                (Some(left), None) => Some(left),
-                (None, Some(right)) => Some(right),
-                (None, None) => None,
-            },
-            repeat_action: match (self.repeat_action, other.repeat_action) {
-                (Some(PolicyAction::Deny), _) | (_, Some(PolicyAction::Deny)) => {
-                    Some(PolicyAction::Deny)
-                }
-                (Some(PolicyAction::Ask), _) | (_, Some(PolicyAction::Ask)) => {
-                    Some(PolicyAction::Ask)
-                }
-                (Some(PolicyAction::Allow), Some(PolicyAction::Allow)) => Some(PolicyAction::Allow),
-                (Some(action), None) | (None, Some(action)) => Some(action),
-                (None, None) => None,
-            },
-        }
-    }
-}
-
 #[cfg(test)]
 mod approval_policy_tests {
     use super::*;
@@ -1182,17 +1056,14 @@ mod approval_policy_tests {
     }
 
     #[test]
-    fn write_path_allowlist_matches_recovered_workspace_relative_path() {
+    fn write_path_allowlist_refuses_root_drift_and_accepts_contained_paths() {
         let temp = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(temp.path().join("packages/demo")).unwrap();
         std::fs::write(temp.path().join("packages/demo/file.txt"), "ok").unwrap();
         crate::stdlib::process::set_thread_execution_context(Some(
             crate::orchestration::RunExecutionRecord {
                 cwd: Some(temp.path().to_string_lossy().into_owned()),
-                project_root: None,
                 source_dir: Some(temp.path().to_string_lossy().into_owned()),
-                // Only the three paths above matter to this test; the rest of
-                // the record is whatever a default run carries.
                 ..Default::default()
             },
         ));
@@ -1222,7 +1093,12 @@ mod approval_policy_tests {
             "write_file",
             &serde_json::json!({"path": "/packages/demo/file.txt"}),
         );
-        assert_eq!(decision, ToolApprovalDecision::AutoApproved);
+        assert!(matches!(decision, ToolApprovalDecision::AutoDenied { .. }));
+        let relative = serde_json::json!({"path": "packages/demo/file.txt"});
+        assert_eq!(
+            policy.evaluate("write_file", &relative),
+            ToolApprovalDecision::AutoApproved
+        );
 
         pop_execution_policy();
         crate::stdlib::process::set_thread_execution_context(None);
@@ -1236,10 +1112,7 @@ mod approval_policy_tests {
         crate::stdlib::process::set_thread_execution_context(Some(
             crate::orchestration::RunExecutionRecord {
                 cwd: Some(temp.path().to_string_lossy().into_owned()),
-                project_root: None,
                 source_dir: Some(temp.path().to_string_lossy().into_owned()),
-                // Only the three paths above matter to this test; the rest of
-                // the record is whatever a default run carries.
                 ..Default::default()
             },
         ));
@@ -1267,7 +1140,7 @@ mod approval_policy_tests {
         };
         let decision = policy.evaluate(
             "read_file",
-            &serde_json::json!({"path": "/packages/demo/context.txt"}),
+            &serde_json::json!({"path": "packages/demo/context.txt"}),
         );
         assert_eq!(decision, ToolApprovalDecision::AutoApproved);
 

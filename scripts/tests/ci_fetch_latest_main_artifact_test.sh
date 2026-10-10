@@ -17,6 +17,31 @@ if (( count <= FAIL_FIRST )); then
   echo "unexpected end of JSON input" >&2
   exit 1
 fi
+if [[ ${GH_FAKE_PAGINATED:-} == 1 ]]; then
+  case "$2" in
+    *per_page=10\&page=1)
+      printf '{"artifacts":['
+      for ((i = 1; i <= 10; i++)); do
+        ((i == 1)) || printf ','
+        printf '{"id":%d,"name":"unrelated","expired":false,"workflow_run":{"head_branch":"main"}}' "$i"
+      done
+      printf ']}'
+      exit 0
+      ;;
+    *per_page=10\&page=2)
+      echo '{"artifacts":[{"id":42,"name":"prefix-newest","expired":false,"workflow_run":{"head_branch":"main"}}]}'
+      exit 0
+      ;;
+    *artifacts/42/zip)
+      cat "$GH_FAKE_ZIP"
+      exit 0
+      ;;
+    *)
+      echo "unexpected GitHub path: $2" >&2
+      exit 1
+      ;;
+  esac
+fi
 echo '{"artifacts": []}'
 GH
 chmod +x "$root/bin/gh"
@@ -36,6 +61,16 @@ if FAIL_FIRST=99 "$script" prefix- "$root/dest" >/dev/null 2>&1; then
   echo "a persistent API failure must fail the fetch" >&2
   exit 1
 fi
+[[ "$(cat "$GH_FAKE_COUNT")" == 3 ]]
+
+# A full first page must lead to a second small page and a real extraction.
+printf 'main measurement\n' > "$root/measurement.txt"
+(cd "$root" && zip -q "$root/measurement.zip" measurement.txt)
+export GH_FAKE_ZIP="$root/measurement.zip"
+rm -f "$GH_FAKE_COUNT"
+out=$(GH_FAKE_PAGINATED=1 FAIL_FIRST=0 "$script" prefix- "$root/paged" 2>&1)
+[[ "$out" == *"Restored main artifact 42"* ]]
+[[ "$(cat "$root/paged/measurement.txt")" == "main measurement" ]]
 [[ "$(cat "$GH_FAKE_COUNT")" == 3 ]]
 
 echo "ci_fetch_latest_main_artifact_test: ok"

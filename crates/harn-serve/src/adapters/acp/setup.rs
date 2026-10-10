@@ -43,13 +43,14 @@ impl AcpServer {
             .session_id
             .as_deref()
             .and_then(|session_id| self.sessions.get(session_id))
-            .map(|session| session.project_root.clone())
+            .map(|session| session.store_scope.clone())
         {
-            match harn_vm::session_timeline::query_persisted_session_timeline(
-                &project_root,
-                query.clone(),
-            )
-            .await
+            match project_root
+                .run(harn_vm::session_timeline::query_persisted_session_timeline(
+                    project_root.workspace(),
+                    query.clone(),
+                ))
+                .await
             {
                 Ok(Some(snapshot)) => {
                     self.send_response(
@@ -99,7 +100,7 @@ impl AcpServer {
         let Some(project_root) = self
             .sessions
             .get(&query.session_id)
-            .map(|session| session.project_root.clone())
+            .map(|session| session.store_scope.clone())
         else {
             self.send_response(
                 id,
@@ -112,7 +113,13 @@ impl AcpServer {
             );
             return;
         };
-        match harn_vm::session_recap::query_persisted_session_recap(&project_root, query).await {
+        match project_root
+            .run(harn_vm::session_recap::query_persisted_session_recap(
+                project_root.workspace(),
+                query,
+            ))
+            .await
+        {
             Ok(Some(snapshot)) => self.send_response(
                 id,
                 serde_json::to_value(harn_vm::session_recap::SessionRecapAvailability::available(
@@ -486,6 +493,13 @@ impl AcpServer {
         cwd: PathBuf,
         info: SessionInfo,
     ) -> Result<(), harn_vm::agent_sessions::SessionOpenError> {
+        let store_scope = harn_vm::SessionStoreScope::resolve(&cwd, &self.launcher_environment)
+            .map_err(
+                |error| harn_vm::agent_sessions::SessionOpenError::LineageRejected {
+                    session_id: session_id.clone(),
+                    reason: format!("session storage workspace: {error}"),
+                },
+            )?;
         harn_vm::agent_sessions::open_or_create_with_actor_chain(
             Some(session_id.clone()),
             self.actor_chain(),
@@ -501,6 +515,7 @@ impl AcpServer {
             Session {
                 cwd,
                 project_root,
+                store_scope,
                 cancellation,
                 host_bridge: None,
                 inject_state: concurrent_control.inject_state.clone(),

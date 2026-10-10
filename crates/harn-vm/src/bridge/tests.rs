@@ -2,7 +2,7 @@ use super::*;
 use harn_clock::test_support::within;
 use harn_parser::diagnostic_codes::Code;
 
-fn test_bridge() -> HostBridge {
+pub(super) fn test_bridge() -> HostBridge {
     HostBridge::from_parts(
         Arc::new(Mutex::new(HashMap::new())),
         Arc::new(AtomicBool::new(false)),
@@ -83,6 +83,156 @@ fn test_cancelled_flag() {
 }
 
 #[tokio::test(flavor = "current_thread", start_paused = true)]
+async fn delayed_legacy_frames_keep_their_originating_session_identity() {
+    let pending = Arc::new(Mutex::new(HashMap::new()));
+    let frames = Arc::new(std::sync::Mutex::new(Vec::<serde_json::Value>::new()));
+    let captured = frames.clone();
+    let writer: HostBridgeWriter = Arc::new(move |line| {
+        captured
+            .lock()
+            .unwrap()
+            .push(serde_json::from_str(line).unwrap());
+        Ok(())
+    });
+    let old = HostBridge::from_parts_with_writer(
+        pending.clone(),
+        Arc::new(AtomicBool::new(false)),
+        writer.clone(),
+        1,
+    );
+    let current = HostBridge::from_parts_with_writer(
+        pending.clone(),
+        Arc::new(AtomicBool::new(false)),
+        writer,
+        100,
+    );
+    old.set_session_id("old-session");
+    current.set_session_id("current-session");
+
+    // Hold the old serialized request without delivering it to the host.
+    let old_call = old.call(
+        "builtin_call",
+        serde_json::json!({"name": "host_call", "args": []}),
+    );
+    tokio::pin!(old_call);
+    wait_for_pending(&pending, 1, old_call.as_mut()).await;
+    let held_old_frame = frames.lock().unwrap()[0].clone();
+
+    let current_call = current.call(
+        "builtin_call",
+        serde_json::json!({"name": "host_call", "args": []}),
+    );
+    tokio::pin!(current_call);
+    wait_for_pending(&pending, 100, current_call.as_mut()).await;
+    let current_frame = frames.lock().unwrap()[1].clone();
+    assert_eq!(current_frame["params"]["sessionId"], "current-session");
+    pending
+        .lock()
+        .await
+        .remove(&100)
+        .unwrap()
+        .send(serde_json::json!({"result": true}))
+        .unwrap();
+    assert_eq!(
+        within("current session callback", current_call)
+            .await
+            .unwrap(),
+        true
+    );
+
+    // Delivery after a new session starts cannot relabel an already queued
+    // old request, and an old skill callback created later is also attributed.
+    assert_eq!(held_old_frame["params"]["sessionId"], "old-session");
+    let old_skill = old.call("skill/match", serde_json::json!({"task": "old task"}));
+    tokio::pin!(old_skill);
+    wait_for_pending(&pending, 2, old_skill.as_mut()).await;
+    assert_eq!(
+        frames.lock().unwrap()[2]["params"]["sessionId"],
+        "old-session"
+    );
+    assert_eq!(frames.lock().unwrap().len(), 3);
+    old.notify(
+        "harn.hitl.requested",
+        serde_json::json!({"request_id": "old-approval"}),
+    );
+    current.notify(
+        "harn.hitl.requested",
+        serde_json::json!({"request_id": "current-approval"}),
+    );
+    assert_eq!(
+        frames.lock().unwrap()[3]["params"]["sessionId"],
+        "old-session"
+    );
+    assert_eq!(
+        frames.lock().unwrap()[4]["params"]["sessionId"],
+        "current-session"
+    );
+    for id in [1, 2] {
+        pending
+            .lock()
+            .await
+            .remove(&id)
+            .unwrap()
+            .send(serde_json::json!({
+                "error": {"message": "Inactive ACP session"}
+            }))
+            .unwrap();
+    }
+    assert!(within("late builtin refusal", old_call).await.is_err());
+    assert!(within("late skill refusal", old_skill).await.is_err());
+}
+
+#[tokio::test(flavor = "current_thread", start_paused = true)]
+async fn session_request_binding_preserves_unbound_transport_and_rejects_forgery() {
+    let pending = Arc::new(Mutex::new(HashMap::new()));
+    let frames = Arc::new(std::sync::Mutex::new(Vec::<serde_json::Value>::new()));
+    let captured = frames.clone();
+    let bridge = HostBridge::from_parts_with_writer(
+        pending.clone(),
+        Arc::new(AtomicBool::new(false)),
+        Arc::new(move |line| {
+            captured
+                .lock()
+                .unwrap()
+                .push(serde_json::from_str(line).unwrap());
+            Ok(())
+        }),
+        1,
+    );
+    let declaration = bridge.call("host/capabilities", serde_json::json!({}));
+    tokio::pin!(declaration);
+    wait_for_pending(&pending, 1, declaration.as_mut()).await;
+    assert!(frames.lock().unwrap()[0]["params"]
+        .get("sessionId")
+        .is_none());
+    pending
+        .lock()
+        .await
+        .remove(&1)
+        .unwrap()
+        .send(serde_json::json!({"result": {}}))
+        .unwrap();
+    within("unbound transport declaration", declaration)
+        .await
+        .unwrap();
+
+    bridge.set_session_id("owning-session");
+    for params in [
+        serde_json::json!({"sessionId": "foreign-session"}),
+        serde_json::Value::Null,
+    ] {
+        assert!(bridge.call("builtin_call", params.clone()).await.is_err());
+        bridge.notify("harn.hitl.requested", params);
+    }
+    assert_eq!(
+        frames.lock().unwrap().len(),
+        1,
+        "invalid session requests never reach the writer"
+    );
+    assert!(pending.lock().await.is_empty());
+}
+
+#[tokio::test(flavor = "current_thread", start_paused = true)]
 async fn pending_permission_calls_return_when_cancellation_arrives() {
     let pending = Arc::new(Mutex::new(HashMap::new()));
     let cancelled = Arc::new(AtomicBool::new(false));
@@ -109,6 +259,141 @@ async fn pending_permission_calls_return_when_cancellation_arrives() {
         Err(VmError::Runtime(message)) if message.contains("cancelled")
     ));
     assert!(pending.lock().await.is_empty());
+}
+
+#[tokio::test(flavor = "current_thread", start_paused = true)]
+async fn dropped_permission_waits_release_rpc_senders_before_the_next_turn() {
+    let pending = Arc::new(Mutex::new(HashMap::new()));
+    let cancelled = Arc::new(AtomicBool::new(false));
+    let bridge = HostBridge::from_parts_with_writer(
+        pending.clone(),
+        cancelled.clone(),
+        Arc::new(|_| Ok(())),
+        1,
+    );
+    for id in 1..=3 {
+        let mut call = Box::pin(bridge.call(
+            crate::llm::acp_permission::METHOD_REQUEST_PERMISSION,
+            serde_json::json!({}),
+        ));
+        wait_for_pending(&pending, id, call.as_mut()).await;
+        assert_eq!(
+            pending.lock().await.len(),
+            1,
+            "the real request must register once"
+        );
+        cancelled.store(true, Ordering::SeqCst);
+        bridge.cancel_notify.notify_waiters();
+        drop(call);
+        assert!(
+            pending.lock().await.is_empty(),
+            "dropped Stop {id} retained a pending RPC sender"
+        );
+        cancelled.store(false, Ordering::SeqCst);
+    }
+    let mut next = Box::pin(bridge.call(
+        crate::llm::acp_permission::METHOD_REQUEST_PERMISSION,
+        serde_json::json!({}),
+    ));
+    wait_for_pending(&pending, 4, next.as_mut()).await;
+    let mut requests = pending.lock().await;
+    assert_eq!(
+        requests.len(),
+        1,
+        "new work cannot inherit stopped requests"
+    );
+    requests
+        .remove(&4)
+        .unwrap()
+        .send(serde_json::json!({
+            "id":4, "result":crate::llm::acp_permission::allow_response(),
+        }))
+        .unwrap();
+    drop(requests);
+    assert!(next.await.is_ok());
+    assert!(pending.lock().await.is_empty());
+}
+
+#[tokio::test(flavor = "current_thread", start_paused = true)]
+async fn dropped_call_retires_after_map_contention_without_removing_new_work() {
+    let pending = Arc::new(Mutex::new(HashMap::new()));
+    let bridge = HostBridge::from_parts_with_writer(
+        pending.clone(),
+        Arc::new(AtomicBool::new(false)),
+        Arc::new(|_| Ok(())),
+        1,
+    );
+    let mut first = Box::pin(bridge.call("host/work", serde_json::json!({})));
+    wait_for_pending(&pending, 1, first.as_mut()).await;
+    let requests = pending.lock().await;
+    assert_eq!(requests.len(), 1);
+    drop(first);
+    drop(requests);
+
+    let mut next = Box::pin(bridge.call("host/work", serde_json::json!({})));
+    wait_for_pending(&pending, 2, next.as_mut()).await;
+    for _ in 0..8 {
+        if !pending.lock().await.contains_key(&1) {
+            break;
+        }
+        tokio::task::yield_now().await;
+    }
+    let mut requests = pending.lock().await;
+    assert_eq!(requests.len(), 1, "the old registration must retire");
+    assert!(requests.contains_key(&2), "new work must keep its sender");
+    requests
+        .remove(&2)
+        .unwrap()
+        .send(serde_json::json!({"id":2,"result":{"next_turn":true}}))
+        .unwrap();
+    drop(requests);
+    assert_eq!(next.await.unwrap()["next_turn"], true);
+    assert!(pending.lock().await.is_empty());
+}
+
+#[test]
+fn dropped_call_outside_its_runtime_retires_a_contended_registration() {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    let pending = Arc::new(Mutex::new(HashMap::new()));
+    let bridge = HostBridge::from_parts_with_writer(
+        pending.clone(),
+        Arc::new(AtomicBool::new(false)),
+        Arc::new(|_| Ok(())),
+        1,
+    );
+    let mut first = Box::pin(bridge.call("host/work", serde_json::json!({})));
+    runtime.block_on(wait_for_pending(&pending, 1, first.as_mut()));
+    let requests = runtime.block_on(pending.clone().lock_owned());
+    assert_eq!(requests.len(), 1);
+    drop(runtime);
+    drop(first);
+    drop(requests);
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    runtime.block_on(async {
+        within("out-of-runtime RPC registration retirement", async {
+            while !pending.lock().await.is_empty() {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await;
+        let mut next = Box::pin(bridge.call("host/work", serde_json::json!({})));
+        wait_for_pending(&pending, 2, next.as_mut()).await;
+        pending
+            .lock()
+            .await
+            .remove(&2)
+            .unwrap()
+            .send(serde_json::json!({"id":2,"result":{"next_turn":true}}))
+            .unwrap();
+        assert_eq!(next.await.unwrap()["next_turn"], true);
+        assert!(pending.lock().await.is_empty());
+    });
 }
 
 #[tokio::test(flavor = "current_thread", start_paused = true)]

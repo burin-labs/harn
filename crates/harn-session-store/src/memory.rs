@@ -114,6 +114,7 @@ fn append_locked(
         prev_hash,
         signed_by: None,
     };
+    stored.bind_canonical_origin(&record.meta.id);
     stored.record_hash = compute_record_hash(&stored);
     if let Some(signer) = hooks.event_signer.as_ref() {
         stored.signed_by = Some(signer.sign_event(&stored));
@@ -323,7 +324,7 @@ impl SessionStore for MemorySessionStore {
     async fn fork(
         &self,
         session_id: &str,
-        at_event_id: EventId,
+        boundary: crate::CanonicalSessionBoundary,
         child_id: Option<SessionId>,
     ) -> StoreResult<ForkResult> {
         let mut guard = lock(&self.inner);
@@ -331,15 +332,8 @@ impl SessionStore for MemorySessionStore {
             .sessions
             .get(session_id)
             .ok_or_else(|| StoreError::NotFound(session_id.to_string()))?;
-        if !parent
-            .events
-            .iter()
-            .any(|event| event.event_id == at_event_id)
-        {
-            return Err(StoreError::InvalidInput(format!(
-                "event {at_event_id} not found in session '{session_id}'"
-            )));
-        }
+        boundary.validate(session_id, &parent.events)?;
+        let at_event_id = boundary.event_id;
         let new_id = child_id.unwrap_or_else(|| Uuid::now_v7().to_string());
         if guard.sessions.contains_key(&new_id) {
             return Err(StoreError::AlreadyExists(new_id));
@@ -360,7 +354,7 @@ impl SessionStore for MemorySessionStore {
         let mut parent_events: Vec<StoredEvent> = parent
             .events
             .iter()
-            .filter(|event| event.event_id <= at_event_id)
+            .filter(|event| at_event_id.is_some_and(|boundary| event.event_id <= boundary))
             .cloned()
             .collect();
         prepare_stored_events_for_persistence(&self.hooks, &mut parent_events)?;

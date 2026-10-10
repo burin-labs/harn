@@ -937,6 +937,7 @@ fn user_turn(session_id: &str, event_id: u64, occurred_at_ms: i64) -> AgentSessi
             session_id: session_id.to_string(),
             message_id: format!("m{event_id}"),
             content: vec![json!({ "type": "text", "text": "do the thing" })],
+            history_source_event_id: None,
         },
     )
 }
@@ -948,6 +949,7 @@ fn assistant_turn(session_id: &str, event_id: u64, occurred_at_ms: i64) -> Agent
         AgentEvent::AgentMessageChunk {
             session_id: session_id.to_string(),
             content: "working on it".to_string(),
+            history_source_event_id: None,
         },
     )
 }

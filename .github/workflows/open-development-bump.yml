@@ -14,11 +14,40 @@ on:
         required: true
       RELEASE_APP_PRIVATE_KEY:
         required: true
+      CONSUMER_CANARY_REPOSITORY:
+        required: false
   workflow_dispatch:
     inputs:
       published_tag:
         description: Published stable tag to repair; empty selects the latest published release
         required: false
+        type: string
+      retire_source_sha:
+        description: Explicit failed unpublished source to retire, never a published tag
+        type: string
+      retire_release_pr:
+        description: Merged owning release PR binding immutable attempt head to certified source
+        type: string
+      retire_producer_run:
+        description: Retained canonical producer run
+        type: string
+      retire_promotion_run:
+        description: Terminal failed owning promotion run
+        type: string
+      retire_resolver_job:
+        description: Successful source resolver job in that promotion
+        type: string
+      retire_consumer_job:
+        description: Failed consumer dispatch job in that promotion
+        type: string
+      retire_authorization_job:
+        description: Failed measured-completion authorization job in that promotion
+        type: string
+      retire_consumer_run:
+        description: Exact terminal downstream run dispatched by that promotion
+        type: string
+      retire_failed_job:
+        description: Reached failing required linked TUI job in that downstream run
         type: string
 
 permissions:
@@ -33,6 +62,17 @@ jobs:
   open-development-bump:
     name: Open post-publication development bump
     runs-on: ubuntu-24.04
+    env:
+      RETIRE_SOURCE_SHA: ${{ inputs.retire_source_sha }}
+      RETIRE_RELEASE_PR: ${{ inputs.retire_release_pr }}
+      RETIRE_PRODUCER_RUN: ${{ inputs.retire_producer_run }}
+      RETIRE_PROMOTION_RUN: ${{ inputs.retire_promotion_run }}
+      RETIRE_RESOLVER_JOB: ${{ inputs.retire_resolver_job }}
+      RETIRE_CONSUMER_JOB: ${{ inputs.retire_consumer_job }}
+      RETIRE_AUTHORIZATION_JOB: ${{ inputs.retire_authorization_job }}
+      RETIRE_CONSUMER_RUN: ${{ inputs.retire_consumer_run }}
+      RETIRE_FAILED_JOB: ${{ inputs.retire_failed_job }}
+      RETIRE_CONSUMER_REPOSITORY: ${{ github.repository_owner }}/${{ secrets.CONSUMER_CANARY_REPOSITORY }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -40,11 +80,26 @@ jobs:
           ref: main
           persist-credentials: false
 
+      - name: Mint read-only historical observation credential
+        if: inputs.retire_source_sha != ''
+        id: observer-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ secrets.RELEASE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: |
+            harn
+            ${{ secrets.CONSUMER_CANARY_REPOSITORY }}
+          permission-actions: read
+          permission-contents: read
+          permission-pull-requests: read
+
       - name: Plan development identity after published release
         id: development
         env:
           PUBLISHED_TAG: ${{ inputs.published_tag }}
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ steps.observer-token.outputs.token || github.token }}
         run: bash scripts/plan_development_bump.sh
 
       - name: Mint GitHub App installation token
@@ -74,6 +129,7 @@ jobs:
         env:
           EXPECTED_DEVELOPMENT_VERSION: ${{ steps.development.outputs.version }}
           RELEASE_PUBLISHED_VERSION: ${{ steps.development.outputs.published_tag }}
+          RELEASE_OBSERVATION_TOKEN: ${{ steps.observer-token.outputs.token }}
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
           set -euo pipefail

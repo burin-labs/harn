@@ -3,6 +3,8 @@ import { with_temp_dir } from "std/testing"
 import {
   apply_development_metadata,
   apply_release_metadata,
+  apply_unpublished_retirement,
+  cargo_dependency_from_line,
   current_version,
   development_version_from_stable,
   package_names_for_manifests,
@@ -22,6 +24,38 @@ type RootManifestProjection = {workspace: {dependencies: dict<string, Dependency
 type MemberManifestProjection = {dependencies: dict<string, DependencyProjection>}
 
 type AgentProjection = {version: string, distribution: {binary: {linux: {archive: string}}}}
+
+@test
+pipeline test_cargo_dependency_manifest_tables_validate_before_traversal() {
+  const line =
+    "sdk = { package = \"harn-aws-config\", path = \"../harn-aws-config\", version = \"=1.2.3\" }"
+  const dependency = {package: "harn-aws-config", path: "../harn-aws-config", version: "=1.2.3"}
+  assert_eq(
+    cargo_dependency_from_line(line, {dependencies: {sdk: dependency}}, "dependencies"),
+    {package_name: "harn-aws-config", path: "../harn-aws-config", version: "=1.2.3"},
+  )
+  assert_eq(
+    cargo_dependency_from_line(line),
+    {package_name: "harn-aws-config", path: "../harn-aws-config", version: "=1.2.3"},
+  )
+  assert_eq(cargo_dependency_from_line(line, {package: {name: "example"}}), nil)
+  for malformed in [[], 1, "manifest"] {
+    assert(
+      is_err(
+        try {
+          cargo_dependency_from_line(line, malformed, "dependencies")
+        },
+      ),
+    )
+  }
+  assert(
+    is_err(
+      try {
+        cargo_dependency_from_line(line, {dependencies: []}, "dependencies")
+      },
+    ),
+  )
+}
 
 @test
 pipeline test_workspace_version_projection_validates_at_boundary() {
@@ -247,6 +281,42 @@ version = "1.2.3"
   )
   write_fixture(fs, root, "docs/src/embedding-rust.md", "tag = \"v1.0.0\"\n")
   return nil
+}
+
+@test
+pipeline test_retirement_rewrites_the_development_graph_and_actual_install_base(harness: Harness) {
+  with_temp_dir(
+    harness.fs,
+    { root ->
+      workspace(harness.fs, root)
+      write_fixture(
+        harness.fs,
+        root,
+        "CHANGELOG.md",
+        "## v1.2.3\n\n### Fixed\n\n- candidate\n\n## v1.2.2\n\n- published\n",
+      )
+      const plan = apply_unpublished_retirement(harness.fs, root, "1.2.3", "v1.2.2")
+      assert_eq(plan.next_version, "1.2.4-dev")
+      assert_eq(current_version(harness.fs, root), "1.2.4-dev")
+      const root_doc = root_manifest_projection(harness.fs.read_text(path_join(root, "Cargo.toml")))
+      assert_eq(root_doc.workspace.dependencies["member-a"]?.version, "=1.2.4-dev")
+      const agent = agent_projection(
+        harness.fs.read_text(path_join(root, "spec/acp-registry/harn/agent.json")),
+      )
+      assert_eq(agent.version, "1.2.2")
+      assert_eq(
+        agent.distribution.binary.linux.archive,
+        "https://example.test/releases/download/v1.2.2/harn.tar.gz",
+      )
+      assert_eq(
+        harness.fs.read_text(path_join(root, "docs/src/embedding-rust.md")),
+        "tag = \"v1.2.2\"\n",
+      )
+      const changelog = harness.fs.read_text(path_join(root, "CHANGELOG.md"))
+      assert_eq(changelog.contains("## v1.2.3 (never published)"), true)
+      assert_eq(changelog.contains("## Unreleased\n\n### Fixed\n\n- candidate"), true)
+    },
+  )
 }
 
 @test
@@ -559,6 +629,132 @@ pipeline test_versionless_unpublished_dependency_is_preserved(harness: Harness, 
       "1.2.4",
     ),
     "member-a = { path = \"crates/member-a\" }\n",
+  )
+}
+
+@test
+pipeline test_renamed_local_package_dependency_tracks_version_cut(harness: Harness, task: unknown) {
+  const before =
+    "aws-config = { package = \"harn-aws-config\", path = \"../harn-aws-config\", version = \"=1.2.3\" }\n"
+  const after =
+    "aws-config = { package = \"harn-aws-config\", path = \"../harn-aws-config\", version = \"=1.2.4\" }\n"
+  assert_eq(rewrite_local_dependency_versions(before, ["harn-aws-config"], "1.2.4"), after)
+}
+
+@test
+pipeline test_multiline_renamed_target_dependency_tracks_version_cut(
+  harness: Harness,
+  task: unknown,
+) {
+  const before =
+    "[target.'cfg(windows)'.dependencies]\nsdk = { package = \"harn-aws-config\", path = \"../harn-aws-config\", version = \"=1.2.3\", features = [\n  \"default\",\n] }\n"
+  const after = replace(before, "=1.2.3", "=1.2.4")
+  assert_eq(rewrite_local_dependency_versions(before, ["harn-aws-config"], "1.2.4"), after)
+}
+
+@test
+pipeline test_actual_version_cut_rewrites_and_reads_back_renamed_package(
+  harness: Harness,
+  task: unknown,
+) {
+  with_temp_dir(
+    harness.fs,
+    { root ->
+      workspace(harness.fs, root)
+      const path = path_join(root, "crates/member-a/Cargo.toml")
+      harness.fs.write_text(
+        path,
+        harness.fs.read_text(path)
+          + "\naliased = { package = \"tree-sitter-harn\", path = \"../../tree-sitter-harn\", version = \"=1.2.3\" }\n",
+      )
+      apply_development_metadata(harness.fs, root)
+      const development = member_manifest_projection(harness.fs.read_text(path))
+      assert_eq(
+        development.dependencies.get("aliased"),
+        {package: "tree-sitter-harn", path: "../../tree-sitter-harn", version: "=1.2.4-dev"},
+      )
+      apply_release_metadata(harness.fs, root, "1.2.4", "patch")
+      const release = member_manifest_projection(harness.fs.read_text(path))
+      assert_eq(
+        release.dependencies.get("aliased"),
+        {package: "tree-sitter-harn", path: "../../tree-sitter-harn", version: "=1.2.4"},
+      )
+    },
+  )
+}
+
+@test
+pipeline test_later_line_version_cannot_silently_keep_old_identity(
+  harness: Harness,
+  task: unknown,
+) {
+  const before =
+    "[dependencies]\nsdk = { package = \"harn-aws-config\", path = \"../harn-aws-config\",\n  version = \"=1.2.3\" }\n"
+  assert_throws_eq(
+    { -> rewrite_local_dependency_versions(before, ["harn-aws-config"], "1.2.4") },
+    "local path dependency harn-aws-config version must be on its declaration line",
+  )
+}
+
+@test
+pipeline test_alias_shaped_metadata_keeps_its_own_version(harness: Harness, task: unknown) {
+  const before =
+    "[package.metadata.example]\nsdk = { package = \"harn-aws-config\", path = \"../harn-aws-config\", version = \"=1.2.3\" }\n"
+  assert_eq(rewrite_local_dependency_versions(before, ["harn-aws-config"], "1.2.4"), before)
+}
+
+@test
+pipeline test_actual_later_line_version_refuses_before_every_manifest_write(harness: Harness) {
+  with_temp_dir(
+    harness.fs,
+    { root ->
+      workspace(harness.fs, root)
+      const member_path = path_join(root, "crates/member-a/Cargo.toml")
+      harness.fs.write_text(
+        member_path,
+        harness.fs.read_text(member_path)
+          + "\naliased = { package = \"tree-sitter-harn\", path = \"../../tree-sitter-harn\",\n  version = \"=1.2.3\" }\n",
+      )
+      const paths = [
+        "Cargo.toml",
+        "crates/member-a/Cargo.toml",
+        "tree-sitter-harn/Cargo.toml",
+        "spec/acp-registry/harn/agent.json",
+        "docs/src/embedding-rust.md",
+      ]
+      const before = paths.map(
+        { path -> {path: path, text: harness.fs.read_text(path_join(root, path))} },
+      )
+        .to_list()
+      assert_eq(before.count, 5)
+      assert_throws_eq(
+        { -> apply_development_metadata(harness.fs, root) },
+        "local path dependency tree-sitter-harn version must be on its declaration line",
+      )
+      for original in before {
+        assert_eq(harness.fs.read_text(path_join(root, original.path)), original.text)
+      }
+      assert_eq(current_version(harness.fs, root), "1.2.3")
+    },
+  )
+}
+
+@test
+pipeline test_actual_bump_preserves_alias_shaped_and_wrong_type_metadata(harness: Harness) {
+  with_temp_dir(
+    harness.fs,
+    { root ->
+      workspace(harness.fs, root)
+      const path = path_join(root, "crates/member-a/Cargo.toml")
+      const metadata =
+        "\n[package.metadata.example]\nsdk = { package = \"tree-sitter-harn\", path = \"../../tree-sitter-harn\", version = \"=1.2.3\" }\nwrong_types = { package = 7, path = false, version = true }\n"
+      harness.fs.write_text(path, harness.fs.read_text(path) + metadata)
+      apply_development_metadata(harness.fs, root)
+      assert_eq(current_version(harness.fs, root), "1.2.4-dev")
+      const actual = toml_parse(harness.fs.read_text(path)).get("package")?.get("metadata")
+      const expected = toml_parse(metadata).get("package")?.get("metadata")
+      assert_eq(actual, expected)
+    },
   )
 }
 

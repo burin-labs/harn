@@ -68,7 +68,7 @@ A star marks the short list Harn names first in setup messages and pickers. The 
 
 | Provider | Endpoint style | Recommended selector | Tool mode | Native tools | Text tools | Structured output | Reasoning knobs | Cache | Batch | Serving tiers | Usage confidence | Empirical |
 |---|---|---|---|---:|---:|---|---|---:|---|---|---|---|
-| `Anthropic` | Anthropic Messages API | `haiku` | `native` | yes | yes | `native` / `native_json` | `enabled` | yes | Yes (50%) | `fast:premium` | `high` | `not_recorded` |
+| `Anthropic` | Anthropic Messages API | `haiku` | `native` | yes | yes | `native` / `native_json` | `adaptive,effort,reasoning_effort` | yes | Yes (50%) | `fast:premium` | `high` | `not_recorded` |
 | `Atlas` | OpenAI-compatible chat completions | `atlas` | `text` | no | yes | `none` / `none` | none | no | No | none | `provider_default` | `not_recorded` |
 | `Azure Openai` | OpenAI-compatible chat completions | `azure_openai:gpt-*` | `native` | yes | yes | `none` / `native_json` | none | no | Yes (50%) | none | `provider_default` | `not_recorded` |
 | `Baseten` | OpenAI-compatible chat completions | `baseten:baseten/deepseek-ai/DeepSeek-V4-Flash-0731` | `native` | yes | yes | `native` / `native_json` | `effort,reasoning_effort` | yes | No | none | `high` | `not_recorded` |
@@ -120,7 +120,7 @@ A star marks the short list Harn names first in setup messages and pickers. The 
 ### Anthropic
 
 - catalog provider: `anthropic`
-- recommended route: `haiku` (`claude-haiku-4-5-20251001`)
+- recommended route: `haiku` (`claude-haiku-5-5`)
 - endpoint style: Anthropic Messages API
 - recommended Harn options:
 
@@ -135,6 +135,7 @@ Notes:
 
 - Native tools, prompt caching, file upload, and XML-oriented scaffolding are first-class in Harn capability data.
 - Claude 4.7 rows use adaptive thinking; older Claude 4 rows use explicit thinking controls where supported.
+- Claude Haiku 5.5 (the `haiku` selector) rejects temperature, top_p, top_k and assistant prefill; pin `haiku45` for workflows that need them.
 
 Caveats:
 

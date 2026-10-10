@@ -11,6 +11,19 @@
 # safety with same-named routes elsewhere), so each rule below needs a
 # prefixed twin — capability matching sees the catalog id, not the wire
 # id.
+# Qwen3.8 Max refuses to turn reasoning off on Alibaba's endpoint (OpenRouter
+# probe, 2026-10-09: 400 "Reasoning is mandatory"), so Harn omits the disable
+# rather than trusting Model Studio's `enable_thinking` toggle. It layers onto
+# `dashscope/qwen*`.
+[[provider.dashscope]]
+model_match = "dashscope/qwen3.8-max*"
+extends = true
+reasoning_disable_supported = false
+reasoning_none_supported = false
+vision = true
+vision_supported = true
+prompt_caching = true
+
 [[provider.dashscope]]
 model_match = "dashscope/qwen3.6*"
 native_tools = true
