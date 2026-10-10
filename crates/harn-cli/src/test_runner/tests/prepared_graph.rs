@@ -3,7 +3,7 @@ use super::*;
 #[tokio::test]
 async fn prepared_test_graph_retains_bytecode_beyond_the_ordinary_vm_cache() {
     let _env_guard = crate::tests::common::harn_state_lock::lock_harn_state_async().await;
-    for module_count in [16, 640] {
+    for module_count in [16_usize, 640] {
         let temp = TempTestDir::new();
         let cache_dir = temp.path().join("bytecode-cache");
         let _cache_dir = ScopedEnvVar::set(
@@ -39,7 +39,10 @@ async fn prepared_test_graph_retains_bytecode_beyond_the_ordinary_vm_cache() {
         assert_eq!(summary.skipped, 0);
         let stats = session.stats();
         assert_eq!(stats.evictions, 0, "{module_count}: {stats:?}");
-        assert_eq!(stats.insertions, module_count, "{module_count}: {stats:?}");
+        assert_eq!(
+            stats.insertions, module_count as u64,
+            "{module_count}: {stats:?}"
+        );
         assert_eq!(stats.entries, module_count, "{module_count}: {stats:?}");
         assert!(stats.hits >= (module_count * 2) as u64, "{stats:?}");
         assert!(summary.results.iter().all(|result| {

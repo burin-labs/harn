@@ -25,7 +25,7 @@ impl PreparedModuleCache {
     /// so preparing a graph larger than the ordinary VM cache does not evict its
     /// earliest artifacts before the first invocation. This only retains
     /// bytecode; runtime module state and filesystem validation remain separate.
-    pub fn for_module_graph() -> Self {
+    pub fn for_immutable_generation() -> Self {
         Self::with_capacity(
             NonZeroUsize::new(MAX_REMEMBERED_INTERFACES)
                 .expect("module graph capacity is non-zero"),

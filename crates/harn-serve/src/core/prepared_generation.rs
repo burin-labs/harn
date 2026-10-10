@@ -68,7 +68,7 @@ impl PreparedDispatchGeneration {
             Arc::new(AtomicBool::new(false)),
         );
 
-        let cache = PreparedModuleCache::for_module_graph();
+        let cache = PreparedModuleCache::for_immutable_generation();
         let stats = if config.trusted_host_dispatch {
             cache
                 .prepare_trusted_host_dispatch_generation(std::slice::from_ref(&config.script_path))
