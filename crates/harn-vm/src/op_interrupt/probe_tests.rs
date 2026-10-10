@@ -38,7 +38,10 @@ fn process_probe_child() {
             MARKER_FD.store(marker.into_raw_fd(), Ordering::Relaxed);
             unsafe {
                 assert_ne!(
-                    libc::signal(libc::SIGTERM, handle_term as libc::sighandler_t),
+                    libc::signal(
+                        libc::SIGTERM,
+                        handle_term as *const () as libc::sighandler_t
+                    ),
                     libc::SIG_ERR
                 );
             }
