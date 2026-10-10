@@ -21,7 +21,7 @@ const corpusFile = path.join(workspace, 'experiments/missing-tool-call-decision/
 const corpusText = fs.readFileSync(corpusFile, 'utf8');
 const corpus = corpusText.trim().split('\n').map(JSON.parse);
 const env = {...process.env};
-const allowedKeys = ['OPENAI_API_KEY', 'VERCEL_AI_GATEWAY_API_KEY'];
+const allowedKeys = ['OPENAI_API_KEY', 'OPENROUTER_API_KEY'];
 for (const line of fs.readFileSync(path.join(os.homedir(), 'gate-clone/.env'), 'utf8').split('\n')) {
   const match = line.match(/^([A-Z0-9_]+)=(.*)$/);
   if (match && allowedKeys.includes(match[1])) env[match[1]] = match[2].replace(/^(['"])(.*)\1$/, '$2');
@@ -44,7 +44,7 @@ fs.writeFileSync(path.join(root, 'candidate_replay.harn'), replay.replace(legacy
 const arms = [
   {id: 'legacy_structured', script: path.join(root, 'legacy_replay.harn'), config: {provider: 'openai', model: 'gpt-5.4-nano', effort: 'none'}},
   {id: 'structured_decision', script: path.join(root, 'candidate_replay.harn'), config: {provider: 'openai', model: 'gpt-5.4-nano', effort: 'none'}},
-  {id: 'native_decision', script: path.join(root, 'candidate_replay.harn'), config: {evaluation: {backend: 'native_decision', provider: 'vercel_ai_gateway', model: 'vercel/typesafe-ai/jev', threshold: 0.0, evaluation_cost_limit: 0.05, run_cost_limit: 0.5}}},
+  {id: 'native_decision', script: path.join(root, 'candidate_replay.harn'), config: {evaluation: {backend: 'native_decision', provider: 'openrouter', model: 'openrouter/typesafe/jev-1.13', threshold: 0.0, evaluation_cost_limit: 0.05, run_cost_limit: 0.5}}},
 ];
 const manifest = {
   candidate_sha: git(['rev-parse', 'HEAD']).trim(),
