@@ -47,6 +47,7 @@ for (const arm of arms) {
       (arm !== 'native_decision' || usage.cache_accounting_declared === true) ? usage.cache_read_tokens : null);
   }
   report.arms[arm] = {rows: subset.length, correct_recovery_and_tool: subset.filter(correct).length, false_recovery: subset.filter(x => recovery(x) && !x.expected.intended).length, missed_recovery: subset.filter(x => !recovery(x) && x.expected.intended).length, ambiguous: subset.filter(x => observation(x).verdict.action === 'ambiguous').length, failures: subset.filter(x => observation(x).verdict.error).length, completed_runs: subset.filter(x => x.observed.status === 'done').length, classifier_latency_ms: {median: quantile(subset.map(x => observation(x).elapsed_ms), .5), max: Math.max(...subset.map(x => observation(x).elapsed_ms))}, run_latency_ms_median: quantile(subset.map(x => x.observed.elapsed_ms), .5), cost_usd: subset.reduce((n,x) => n+x.cost_usd,0), cache: {reported_rows: cache.filter(x => x !== null).length, unavailable_rows: cache.filter(x => x === null).length, positive_rows: cache.filter(x => x > 0).length}, by_language: Object.fromEntries(['en','es','fr'].map(lang => {const xs = subset.filter(x => x.language === lang); return [lang,{rows:xs.length,correct:xs.filter(correct).length}]}))};
+  if (subset.some(item => item.cost_usd === null)) report.arms[arm].cost_usd = null;
 }
 report.cost_accounting = Object.fromEntries(arms.map(arm => {
   const rows = items.filter(item => item.arm === arm);
