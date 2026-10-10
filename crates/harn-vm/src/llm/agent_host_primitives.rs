@@ -19,7 +19,7 @@ mod prepared_consent;
 mod primitive_args;
 mod side_effect_ceiling;
 mod structured_tool_result;
-pub(crate) mod tool_catalog;
+mod tool_catalog;
 mod tool_parse_diagnostics;
 use crate::orchestration::ToolDispatchPolicy;
 use denial_results::{
