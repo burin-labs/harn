@@ -1036,6 +1036,29 @@ pipeline test_release_warm_cache_concurrency_rejects_setup_only_preemption(
   )
 }
 
+pipeline test_release_concurrency_rejects_pre_fix_dispatch_groups() {
+  const workflow = release_binary_workflow()
+  const invalid = {
+    ...workflow,
+    concurrency: {
+      group: "build-release-binaries-"
+        + gha_expression(
+          "(github.event_name == 'workflow_dispatch' && inputs.benchmark_source_sha != '' && format('benchmark-{0}-{1}', inputs.benchmark_source_sha, github.sha)) || (github.event_name == 'schedule' && 'source-main') || (github.event_name == 'workflow_dispatch' && inputs.warm_cache_only && 'warm-main') || (github.event_name == 'push' && format('branch-{0}', github.run_id)) || github.ref_name",
+        ),
+      "cancel-in-progress": gha_expression(
+        "github.event_name == 'workflow_dispatch' && inputs.warm_cache_only",
+      ),
+    },
+  }
+  assert_eq(
+    release_warm_cache_concurrency_errors(invalid),
+    [
+      "build-release-binaries.yml must give branch pushes run-qualified workflow lanes",
+      "build-release-binaries.yml must reserve workflow cancellation for manual warms",
+    ],
+  )
+}
+
 pipeline test_release_aot_runner_requires_only_the_free_standard_runner(
   harness: Harness,
   task: unknown,
