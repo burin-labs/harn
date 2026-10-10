@@ -85,6 +85,7 @@ pub mod harness_system;
 pub mod harness_tenant;
 pub mod host_attachments;
 pub mod host_stdio;
+pub(crate) mod tool_call_mutations;
 
 /// Placement policy for child-interpreter subtasks.
 ///

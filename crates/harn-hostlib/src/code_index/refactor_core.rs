@@ -704,7 +704,9 @@ fn write_source(
                 .map_err(|err| format!("mkdir `{}`: {err}", parent.display()))?;
         }
     }
-    std::fs::write(path, contents).map_err(|err| format!("write `{}`: {err}", path.display()))
+    std::fs::write(path, contents).map_err(|err| format!("write `{}`: {err}", path.display()))?;
+    crate::fs_snapshot::record_completed_write(path);
+    Ok(())
 }
 
 /// Persist every plan in one pass. Call only after every plan has passed

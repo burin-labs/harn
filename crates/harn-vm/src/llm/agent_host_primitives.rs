@@ -11,6 +11,7 @@ use super::{
     agent_runtime, agent_session_host, agent_tools, compass_router, helpers, permissions, tools,
 };
 
+mod cancelled_tool;
 mod denial_results;
 mod dispatch_approval;
 pub(super) mod event_capture;
@@ -126,7 +127,7 @@ fn arg_delivery_fault_feedback(
 }
 
 /// Shared base `tool_result` shape for a call that never produced a real
-/// tool outcome. Extended by [`agent_primitive_cancelled_tool`] (preempted
+/// tool outcome. Extended by [`cancelled_tool::agent_primitive_cancelled_tool`] (preempted
 /// in-flight) and [`agent_primitive_undispatched_tool`] (never dispatched at
 /// all) so every non-dispatch path records the same transcript shape.
 fn agent_primitive_unexecuted_tool_base(
@@ -151,62 +152,6 @@ fn agent_primitive_unexecuted_tool_base(
         "error_category": crate::agent_events::ToolCallErrorCategory::Cancelled.as_str(),
         "mutation_status": crate::agent_events::ToolMutationStatus::Unknown.as_str(),
     })
-}
-
-/// Build the `tool_result` shape used when a call was preempted by
-/// `cancel_in_flight_tool_call`. Distinct from `agent_primitive_denied_tool`
-/// so the model can tell "user stopped me mid-run" from "the tool errored".
-fn agent_primitive_cancelled_tool(
-    tool_name: &str,
-    tool_call_id: &str,
-    tool_args: &serde_json::Value,
-    reason: &str,
-    executor: Option<serde_json::Value>,
-    execution_duration_ms: u64,
-    approval_status: Option<&'static str>,
-) -> serde_json::Value {
-    let rendered = if reason.is_empty() {
-        format!("[cancelled in-flight: {tool_name}]")
-    } else {
-        format!("[cancelled in-flight: {tool_name}] {reason}")
-    };
-    let observation = format!(
-        "[cancelled call to {name}]\n{reason}\n[end of {name} cancellation]\n",
-        name = tool_name,
-        reason = if reason.is_empty() {
-            "cancelled by host"
-        } else {
-            reason
-        },
-    );
-    let error_message = if reason.is_empty() {
-        format!("tool call cancelled in-flight: {tool_name}")
-    } else {
-        format!("tool call cancelled in-flight: {reason}")
-    };
-    let mut result = agent_primitive_unexecuted_tool_base(
-        tool_name,
-        tool_call_id,
-        tool_args,
-        "cancelled",
-        rendered,
-        observation,
-        error_message,
-    );
-    if let Some(obj) = result.as_object_mut() {
-        obj.insert(
-            "executor".to_string(),
-            executor.unwrap_or(serde_json::Value::Null),
-        );
-        obj.insert("approval".to_string(), serde_json::json!(approval_status));
-        obj.insert(
-            "execution_duration_ms".to_string(),
-            serde_json::json!(execution_duration_ms),
-        );
-        obj.insert("cancelled".to_string(), serde_json::Value::Bool(true));
-        obj.insert("cancellation_reason".to_string(), serde_json::json!(reason));
-    }
-    result
 }
 
 /// Build the `tool_result` shape for a call that was persisted as part of an
@@ -1510,7 +1455,7 @@ pub(super) async fn host_agent_dispatch_tool_call(
             .as_ref()
             .and_then(|handle| handle.reason())
             .unwrap_or_default();
-        let cancelled = agent_primitive_cancelled_tool(
+        let cancelled = cancelled_tool::agent_primitive_cancelled_tool(
             &tool_name,
             &tool_id,
             &tool_args,
@@ -1519,6 +1464,7 @@ pub(super) async fn host_agent_dispatch_tool_call(
             execution_duration_ms,
             approval_status,
         );
+        let cancelled = cancelled_tool::with_applied_mutations(cancelled, &session_id, &tool_id);
         let cancelled = attach_hook_reminder_audit(cancelled, hook_reminder_reports);
         return Ok(json_to_vm_value(&cancelled));
     }

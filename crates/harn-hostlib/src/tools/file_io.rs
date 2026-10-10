@@ -182,6 +182,7 @@ pub(super) fn write_file(args: &[VmValue]) -> Result<VmValue, HostlibError> {
     }
 
     write_no_follow(WRITE_FILE_BUILTIN, &path, &path_str, &bytes)?;
+    crate::fs_snapshot::record_completed_write(&path);
 
     Ok(build_dict([
         ("path", str_value(&path_str)),
@@ -268,6 +269,9 @@ pub(super) fn delete_file(args: &[VmValue]) -> Result<VmValue, HostlibError> {
         })?;
         true
     };
+    if removed {
+        crate::fs_snapshot::record_completed_write(&path);
+    }
 
     Ok(build_dict([
         ("path", str_value(&path_str)),
