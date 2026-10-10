@@ -1,0 +1,15 @@
+SELECT $1, $2, $1 FROM t WHERE note = '{lit}' AND at < NOW() AND x = $2
+  AND y = $3
+[1,"two",null]
+$1$2{}$1
+SELECT 'ünïcödé 😀' || $1 || '}'
+std/postgres/query: invalid SQL template placeholder `a{b`
+std/postgres/query: unclosed `{` in SQL template
+std/postgres/query: unmatched `}` in SQL template
+std/postgres/query: unmatched `}` in SQL template
+std/postgres/query: empty SQL template placeholder
+std/postgres/query: missing SQL template value `missing`
+6400
+6399
+true
+true

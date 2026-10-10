@@ -407,9 +407,13 @@ impl DispatchCore {
         let started = Instant::now();
         let invocation = async {
             let value = match function.kind {
-                ExportedCallableKind::Function => self.invoke_function(&request, function).await?,
+                // Keep each invocation's ambient-wrapper future out of this
+                // dispatch frame as captured execution context grows.
+                ExportedCallableKind::Function => {
+                    Box::pin(self.invoke_function(&request, function)).await?
+                }
                 ExportedCallableKind::Pipeline => {
-                    let value = self.invoke_pipeline(&request, function).await?;
+                    let value = Box::pin(self.invoke_pipeline(&request, function)).await?;
                     self.prepared_tool_catalog()
                         .validate_output(&request.function, &value.0)
                         .map_err(DispatchError::Contract)?;

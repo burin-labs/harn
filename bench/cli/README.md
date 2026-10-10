@@ -78,9 +78,19 @@ A subcommand fails the gate when *either* of these holds:
 
 - Median cold start exceeds the budget in `budgets.toml`
   (`commands.<name>.cold_ms`, falling back to `defaults.cold_ms`).
-- A baseline exists in `baselines/main.json` for the most recent
-  committed `main` commit, and the current run's median is greater
-  than `baseline * regression_x` (default `1.25`).
+- A baseline with the same `host` and `timer` exists, and the current
+  median exceeds `baseline * regression_x` (default `1.25`). The runner
+  selects the most recently captured matching entry, excluding the current SHA.
+
+Without a matching baseline, only the absolute budget applies. The console
+names each unavailable comparison; the measurement receipt records the selected
+baselines and comparison context. CI reports `baseline_comparison_count` and
+`baseline_unavailable_commands` separately from measured and pending commands.
+A passing absolute budget does not establish that startup has not regressed.
+
+Host labels currently identify operating system and architecture. Matching labels
+do not eliminate CPU differences or contention on hosted runners. Compare repeated
+runs before attributing a timing change to source code.
 
 The runner prints both numbers and the delta for every command, then
 exits non-zero if any command failed. A passing run writes its medians
@@ -90,6 +100,8 @@ file a monotonic append-only ledger — adding noisy retroactive
 overwrites breaks bisect on regression triage. Use
 `--update-baseline` only when you deliberately want to refresh a slot
 (e.g. you tightened a budget and need a fresh reference).
+An existing SHA slot from another host or timer cannot be overwritten or extended;
+use `--baseline FILE` to keep that measurement in a separate file.
 
 ## Baseline file format
 
@@ -97,6 +109,7 @@ overwrites breaks bisect on regression triage. Use
 {
   "<commit_sha>": {
     "host": "<uname -s + arch>",
+    "timer": "monotonic fallback",
     "harn_version": "<harn --version>",
     "captured_at": "<ISO 8601 UTC>",
     "commands": {
@@ -124,12 +137,10 @@ The first real baseline in `baselines/main.json` is the **pre-migration
 reference point** for the VM-heavier re-architecture (stage-loop
 inversion; see `bench/README.md`). Provenance:
 
-- **Host**: Apple M5 Pro, macOS (Darwin 25.5.0, arm64) — the same
-  machine class as the self-hosted `[self-hosted, macos, m5pro]` pool
-  this workflow is slated to move to. The advisory `ubuntu-latest`
-  CI lane measures a different machine class, so treat its
-  baseline-ratio column as informational until the workflow moves to
-  the matching pool.
+- **Host**: Apple M5 Pro, macOS (Darwin 25.5.0, arm64). The advisory
+  `ubuntu-24.04` CI lane measures a different machine class, so this entry cannot govern
+  its regression ratio. Legacy entries without a `timer` are retained as
+  historical evidence and excluded from ratio comparisons.
 - **Cold numbers** (`cold_ms`): produced by the standard runner
   (`scripts/bench_cli_cold_start.sh`, 20 iterations, monotonic
   fallback timer) — `HARN_BYTECODE_CACHE=0` plus a wiped
@@ -139,6 +150,15 @@ inversion; see `bench/README.md`). Provenance:
   its default (enabled) and the cache dir persisted across runs after
   3 warmup invocations, then merged into the same baseline entry by
   hand. The runner itself still only writes `cold_ms`.
+
+## Recorded Linux baseline (2026-10-03)
+
+The Linux reference comes from the first scheduled run after the workflow pinned
+`ubuntu-24.04`: [October 3, 2026](https://github.com/burin-labs/harn/actions/runs/37125786246).
+Its receipt and log record 10 iterations, the monotonic fallback timer, and medians
+of 68 ms for `version` and 17 ms for `try --help`. That run failed only because it
+compared `version` against the Mac baseline. The Linux reference preserves the
+1.25× ratio limit, giving thresholds of 85 ms and 21.25 ms on this host/timer pair.
 
 ## Tracked commands (initial set)
 

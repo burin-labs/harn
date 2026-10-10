@@ -94,6 +94,34 @@ wire_model = "deepseek-ai/DeepSeek-V4-Flash-0731"
 api_dialect = "openai_chat"
 capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
 pricing = { input_per_mtok = 0.14, output_per_mtok = 0.28, cache_read_per_mtok = 0.03 }
+deprecated = true
+deprecation_note = "Together's customer notice (support@together.ai, received 2026-10-08) deprecates this serverless model on 2026-10-22 and names deepseek-ai/DeepSeek-V4.1-Flash as the replacement. Together's deprecations page did not list it yet on 2026-10-09. Together cancelled an earlier 2026-09-29 date for the same model, so recheck before the sunset."
+sunset_date = "2026-10-22"
+superseded_by = "deepseek-ai/DeepSeek-V4.1-Flash"
+tier = "mid"
+open_weight = true
+strengths = ["speed", "cheap", "tool_use", "reasoning", "long_context"]
+
+# DeepSeek V4.1 Flash on Together serverless (launched 2026-09-11 per Together's
+# changelog: 1M context, FP8, function calling, structured outputs). Pricing
+# from Together's serverless models and pricing pages, read 2026-10-09: $0.30
+# in / $1.20 out / $0.006 cached-input per MTok; OpenRouter's Together endpoint
+# lists the same card. Probed 2026-10-09 through OpenRouter pinned to its
+# Together endpoint: a native tool call, the tool-result round trip, a
+# required tool choice, reasoning off (zero reasoning tokens) and effort
+# `high` all returned 200. The direct Together adapter was not call-verified.
+[models."deepseek-ai/DeepSeek-V4.1-Flash"]
+name = "DeepSeek V4.1 Flash (Together)"
+provider = "together"
+context_window = 1048576
+released = "2026-09-11"
+logical_model = "deepseek-v4.1-flash"
+equivalence_group = "deepseek-v4.1-flash"
+served_variant = "together"
+wire_model = "deepseek-ai/DeepSeek-V4.1-Flash"
+api_dialect = "openai_chat"
+capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 0.30, output_per_mtok = 1.20, cache_read_per_mtok = 0.006 }
 tier = "mid"
 open_weight = true
 strengths = ["speed", "cheap", "tool_use", "reasoning", "long_context"]
@@ -185,6 +213,9 @@ provider = "together"
 context_window = 131072
 capabilities = ["tools", "streaming"]
 pricing = { input_per_mtok = 1.04, output_per_mtok = 1.04 }
+deprecated = true
+deprecation_note = "Together's customer notice (support@together.ai, received 2026-10-08) deprecates this serverless model on 2026-10-22 and recommends transitioning; it names no single replacement, and Together's deprecations page did not list it yet on 2026-10-09."
+sunset_date = "2026-10-22"
 logical_model = "llama-3.3-70b-instruct"
 equivalence_group = "llama-3.3-70b-instruct"
 served_variant = "together"

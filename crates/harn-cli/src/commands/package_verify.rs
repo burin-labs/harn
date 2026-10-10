@@ -16,7 +16,7 @@ use crate::cli::{ConnectorCheckArgs, PackageTestInventoryArgs, PackageVerifyArgs
 use crate::package::{self, ConnectorContractFixture, ResolvedProviderConnectorKind};
 
 mod connector_contract;
-mod test_discovery;
+pub(crate) mod test_discovery;
 use connector_contract::check_one_connector;
 use test_discovery::inspect_package_test_discovery;
 #[cfg(test)]
@@ -193,11 +193,11 @@ pub(crate) struct PackageVerifyCheck {
 pub(crate) async fn check_connector_package(
     args: &ConnectorCheckArgs,
 ) -> Result<ConnectorCheckReport, String> {
-    let _provider_schema_guard = package::lock_manifest_provider_schemas().await;
+    let _provider_catalog_guard = package::lock_manifest_provider_catalog().await;
     let package = PathBuf::from(&args.package);
     let anchor = normalize_anchor(&package);
     let extensions = package::try_load_runtime_extensions(&anchor)?;
-    package::install_manifest_provider_schemas(&extensions).await?;
+    package::install_manifest_provider_metadata(&extensions).await?;
     let manifest = extensions
         .root_manifest
         .as_ref()
@@ -964,38 +964,32 @@ fn should_skip_package_input_directory(root: &Path, path: &Path) -> bool {
 
 fn run_package_tests(package_dir: &Path) -> PackageVerifyCheck {
     let started = Instant::now();
-    let tests = package_test_files(package_dir);
-    if tests.is_empty() {
+    let (inventory, problems) = inspect_package_test_discovery(package_dir);
+    if !problems.is_empty() {
+        return gate_check_from_findings("package tests", started, problems, Vec::new());
+    }
+    if inventory.selected_files.is_empty() {
         return skipped_check(
             "package tests",
             false,
             elapsed_ms(started),
-            vec!["no runnable tests/*.harn files found".to_string()],
+            vec![format!(
+                "intentionally testless: {}",
+                inventory.allow_empty_reason.as_deref().unwrap_or_default()
+            )],
         );
     }
     let mut check = run_harn_subcommand(
         "package tests",
         package_dir,
-        &["test", "tests/", "--parallel"],
+        &["test", "package", "--parallel"],
     );
-    check
-        .details
-        .push(format!("discovered {} runnable test file(s)", tests.len()));
+    check.details.push(format!(
+        "selected {} file(s), discovered {} test pipeline(s)",
+        inventory.selected_file_count, inventory.discovered_test_count
+    ));
     check.duration_ms = elapsed_ms(started);
     check
-}
-
-fn package_test_files(package_dir: &Path) -> Vec<PathBuf> {
-    let tests_dir = package_dir.join("tests");
-    let mut files = Vec::new();
-    collect_package_harn_files(package_dir, &tests_dir, &mut files);
-    files.retain(|path| {
-        fs::read_to_string(path)
-            .map(|source| source.contains("pipeline ") || source.contains("@test"))
-            .unwrap_or(false)
-    });
-    files.sort();
-    files
 }
 
 fn run_install_import_smoke(package_dir: &Path, metadata_ok: bool) -> PackageVerifyCheck {

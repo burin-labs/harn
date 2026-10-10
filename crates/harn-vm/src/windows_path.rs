@@ -16,6 +16,100 @@
 
 use std::borrow::Cow;
 
+/// Split serialized POSIX or Windows paths while preserving an immutable
+/// Windows drive or complete UNC share root. The remaining segments are
+/// ordinary lexical components, independent of the current host.
+pub(crate) fn split_segments(path: &str) -> (bool, Option<String>, Vec<String>) {
+    let posix = path.replace('\\', "/");
+    if is_opaque_device_path(&posix) {
+        return (true, Some(posix), Vec::new());
+    }
+    let mut prefix = String::new();
+    let mut rest = posix.as_str();
+    let mut unc = false;
+    if let Some(after_prefix) = rest.strip_prefix("//?/") {
+        prefix.push_str("//?/");
+        rest = after_prefix;
+        if let Some((server, share, remainder)) =
+            rest.strip_prefix("UNC/").and_then(split_unc_share)
+        {
+            prefix.push_str("UNC/");
+            prefix.push_str(server);
+            prefix.push('/');
+            prefix.push_str(share);
+            rest = remainder;
+            unc = true;
+        }
+    } else if let Some((server, share, remainder)) =
+        rest.strip_prefix("//").and_then(split_unc_share)
+    {
+        prefix.push_str("//");
+        prefix.push_str(server);
+        prefix.push('/');
+        prefix.push_str(share);
+        rest = remainder;
+        unc = true;
+    }
+    let bytes = rest.as_bytes();
+    if !unc && bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' {
+        let (drive_prefix, remainder) = rest.split_at(2);
+        prefix.push_str(drive_prefix);
+        rest = remainder;
+    }
+    let drive = (!prefix.is_empty()).then_some(prefix);
+    let absolute = unc || rest.starts_with('/');
+    let segments = rest
+        .split('/')
+        .filter(|segment| !segment.is_empty())
+        .map(|segment| segment.to_string())
+        .collect();
+    (absolute, drive, segments)
+}
+
+/// Unknown or malformed verbatim namespaces are opaque resource identities.
+/// Windows does not apply ordinary dot-component normalization to them.
+/// Only absolute drive and complete UNC roots have a modeled wire projection.
+pub(crate) fn is_opaque_device_path(posix: &str) -> bool {
+    if posix.starts_with("//./") {
+        return true;
+    }
+    let Some(rest) = posix.strip_prefix("//?/") else {
+        // Repeated POSIX slashes and incomplete //server spellings retain
+        // their normal behavior, but dot components cannot name a UNC root.
+        return posix.strip_prefix("//").is_some_and(|rest| {
+            let mut components = rest.split('/');
+            let server = components.next().unwrap_or_default();
+            let share = components.next().unwrap_or_default();
+            !server.is_empty()
+                && !share.is_empty()
+                && (!valid_unc_component(server) || !valid_unc_component(share))
+        });
+    };
+    let bytes = rest.as_bytes();
+    let drive =
+        bytes.len() >= 3 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' && bytes[2] == b'/';
+    !drive
+        && rest
+            .strip_prefix("UNC/")
+            .and_then(split_unc_share)
+            .is_none()
+}
+
+/// Incomplete or repeated slash spellings must not invent a UNC share root.
+fn split_unc_share(path: &str) -> Option<(&str, &str, &str)> {
+    let mut components = path.splitn(3, '/');
+    let server = components.next()?;
+    let share = components.next()?;
+    if !valid_unc_component(server) || !valid_unc_component(share) {
+        return None;
+    }
+    Some((server, share, components.next().unwrap_or_default()))
+}
+
+fn valid_unc_component(component: &str) -> bool {
+    !component.is_empty() && !matches!(component, "." | "..")
+}
+
 /// Strip a Windows verbatim (`\\?\`) prefix from a path string:
 /// `\\?\UNC\server\share` -> `\\server\share`, `\\?\C:\dir` -> `C:\dir`. Inputs
 /// without the prefix — every well-formed Unix path, plain Windows paths, and

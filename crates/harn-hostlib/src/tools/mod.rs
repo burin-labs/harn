@@ -101,6 +101,12 @@ impl HostlibCapability for ToolsCapability {
             outline::run,
         );
         registry.register_fn("tools", "hostlib_tools_git", "git", git::run);
+        registry.register_fn(
+            "tools",
+            "hostlib_tools_git_repository_identity",
+            "git_repository_identity",
+            git::repository_identity,
+        );
 
         registry.register_command_fn(
             "tools",

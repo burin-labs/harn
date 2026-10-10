@@ -1,0 +1,59 @@
+import "std/postgres"
+
+fn main(harness: Harness) {
+  const first_type = harness.env.get("HARN_EXT_FIRST_TYPE") ?? "integer"
+  assert(["integer", "uuid"].contains(first_type))
+  const second_type = first_type == "integer" ? "uuid" : "integer"
+  const first = "harn_9520_" + first_type + "_a"
+  const second = "harn_9520_" + first_type + "_b"
+  const db = harness.postgres.pool("env:HARN_TEST_POSTGRES_URL", {max_connections: 1})
+  pg_execute(db, "DROP SCHEMA IF EXISTS " + first + " CASCADE", [])
+  pg_execute(db, "DROP SCHEMA IF EXISTS " + second + " CASCADE", [])
+  pg_execute(db, "CREATE SCHEMA " + first, [])
+  pg_execute(db, "CREATE SCHEMA " + second, [])
+  pg_execute(db, "CREATE TABLE " + first + ".t(v " + first_type + ")", [])
+  pg_execute(db, "CREATE TABLE " + second + ".t(v " + second_type + ")", [])
+  pg_execute(db, "SET search_path = " + first, [])
+  const sql = "INSERT INTO t(v) VALUES ($1) RETURNING v"
+  pg_transaction(
+    db,
+    { tx ->
+      for i in 0 to 3 exclusive {
+        assert(pg_query_one(tx, sql, [nil]).v == nil)
+      }
+      // Also warm SQLx's SQL-keyed cache with a nonnil parameter before changing
+      // its inferred type. The following probe must not reuse that statement.
+      if first_type == "integer" {
+        assert(pg_query_one(tx, sql, [7]).v == 7)
+      }
+      pg_execute(tx, "SET LOCAL search_path = " + second, [])
+      for i in 0 to 3 exclusive {
+        assert(pg_query_one(tx, sql, [nil]).v == nil)
+      }
+    },
+  )
+  // The first transaction committed both types, including the changed context.
+  const first_count = first_type == "integer" ? 4 : 3
+  assert(pg_query_one(db, "SELECT count(*) AS n FROM " + first + ".t", []).n == first_count)
+  assert(pg_query_one(db, "SELECT count(*) AS n FROM " + second + ".t", []).n == 3)
+  pg_transaction(
+    db,
+    { tx ->
+      pg_savepoint(tx, "before_context")
+      assert(pg_query_one(tx, sql, [nil]).v == nil)
+      pg_execute(tx, "SET LOCAL search_path = " + second, [])
+      assert(pg_query_one(tx, sql, [nil]).v == nil)
+      pg_rollback_to_savepoint(tx, "before_context")
+      assert(pg_query_one(tx, sql, [nil]).v == nil)
+      pg_release_savepoint(tx, "before_context")
+      assert(pg_query_one(tx, sql, [nil]).v == nil)
+    },
+  )
+  // Rollback restored the first context; the following statements infer afresh.
+  assert(pg_query_one(db, "SELECT count(*) AS n FROM " + first + ".t", []).n == first_count + 2)
+  assert(pg_query_one(db, "SELECT count(*) AS n FROM " + second + ".t", []).n == 3)
+  pg_execute(db, "DROP SCHEMA " + first + " CASCADE", [])
+  pg_execute(db, "DROP SCHEMA " + second + " CASCADE", [])
+  pg_close(db)
+  harness.stdio.println(first_type + "->" + second_type + ": committed and recovered")
+}

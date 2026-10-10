@@ -1248,6 +1248,9 @@ async fn webhook_first_delivery_is_appended() {
             .and_then(JsonValue::as_str),
         Some("delivery-1")
     );
+    let normalized = &events[0].1.payload["event"]["provider_payload"];
+    assert_eq!(normalized["provider"], "webhook");
+    assert_eq!(normalized["raw"]["action"], "opened");
 
     listener
         .shutdown(Duration::from_secs(5))

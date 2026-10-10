@@ -38,6 +38,8 @@ fn fork_at(src_id: &str, keep_first: usize, dst_id: Option<String>) -> Option<St
 
 #[path = "agent_sessions_tests/host_attachment_tests.rs"]
 mod host_attachment_tests;
+#[path = "agent_sessions_tests/linked_observation_tests.rs"]
+mod linked_observation_tests;
 #[path = "agent_sessions_tests/scratchpad_tests.rs"]
 mod scratchpad_tests;
 #[path = "agent_sessions_tests/truncation_boundary_tests.rs"]
@@ -830,7 +832,11 @@ fn inject_identified_user_message_emits_replayable_user_event() {
             session_id,
             message_id,
             content,
+            history_source_event_id,
         } => {
+            assert!(history_source_event_id
+                .as_ref()
+                .is_some_and(|id| !id.is_empty()));
             assert_eq!(session_id, &id);
             assert_eq!(message_id, "msg_inj_test");
             assert_eq!(

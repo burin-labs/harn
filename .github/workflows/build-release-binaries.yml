@@ -104,15 +104,16 @@ permissions:
   packages: read
 
 concurrency:
-  group: build-release-binaries-${{ (github.event_name == 'workflow_dispatch' && inputs.benchmark_source_sha != '' && format('benchmark-{0}-{1}', inputs.benchmark_source_sha, github.sha)) || (github.event_name == 'schedule' && 'source-main') || (github.event_name == 'workflow_dispatch' && inputs.warm_cache_only && 'warm-main') || (github.event_name == 'push' && format('branch-{0}', github.run_id)) || github.ref_name }}
+  group: build-release-binaries-${{ (github.event_name == 'workflow_dispatch' && inputs.benchmark_only && format('benchmark-{0}-{1}', inputs.benchmark_source_sha || github.sha, github.sha)) || ((github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.source_candidate)) && 'source-main') || (github.event_name == 'workflow_dispatch' && inputs.warm_cache_only && 'warm-main') || (github.event_name == 'push' && format('branch-{0}', github.run_id)) || github.ref_name }}
   # Candidate runs are push runs, so they get a run-qualified lane and a later
   # main push can never cancel a release candidate. An immutable-source
-  # benchmark has a source-qualified lane. Setup may resolve a push to a no-op;
+  # benchmark has a source-and-policy-qualified lane, including when its source
+  # defaults to the dispatched commit. Setup may resolve a push to a no-op;
   # the build job below gives only real per-target warms a shared, preemptible
-  # lane, so a docs-only push cannot destroy useful cache work. Scheduled source
-  # candidates serialize without cancellation. Manual warms may supersede an
+  # lane, so a docs-only push cannot destroy useful cache work. Scheduled and
+  # manual source candidates serialize without cancellation. Manual warms may supersede an
   # older manual warm in their separate group.
-  cancel-in-progress: ${{ github.event_name == 'workflow_dispatch' && inputs.warm_cache_only }}
+  cancel-in-progress: ${{ github.event_name == 'workflow_dispatch' && inputs.warm_cache_only && !inputs.source_candidate && !inputs.benchmark_only }}
 
 env:
   CARGO_TERM_COLOR: always
@@ -216,7 +217,9 @@ jobs:
           source scripts/lib/release_version.sh
           # shellcheck source=scripts/lib/release_candidate_run.sh
           source scripts/lib/release_candidate_run.sh
-          REF="$REF_NAME"
+          # Freeze the source before jobs fan out. A branch name can advance
+          # between the AOT checkout and the later per-target checkout.
+          REF="$GITHUB_SHA"
           SHOULD_BUILD_BINARIES=false
           SHOULD_PACKAGE_ARCHIVES=false
           CANDIDATE_SOURCE_SHA=""
@@ -310,7 +313,21 @@ jobs:
                 echo "::error::benchmark_source_sha must be an exact lowercase 40-hex commit"
                 exit 1
               fi
-              REF="$INPUT_BENCHMARK_SOURCE_REF"
+              # Resolve the requested ref once and preserve its exact binding.
+              # The workflow's policy still comes from its own github.sha.
+              git fetch --no-tags origin -- "$INPUT_BENCHMARK_SOURCE_REF"
+              ACTUAL_BENCHMARK_SOURCE_SHA="$(git rev-parse 'FETCH_HEAD^{commit}')"
+              if [[ "$ACTUAL_BENCHMARK_SOURCE_SHA" != "$INPUT_BENCHMARK_SOURCE_SHA" ]]; then
+                echo "::error::benchmark source resolved to $ACTUAL_BENCHMARK_SOURCE_SHA; expected $INPUT_BENCHMARK_SOURCE_SHA"
+                exit 1
+              fi
+              REF="$INPUT_BENCHMARK_SOURCE_SHA"
+              SOURCE_MANIFEST="$(git show "$REF:Cargo.toml")"
+              VERSION="$(release_workspace_version <<< "$SOURCE_MANIFEST")"
+              if ! release_version_is_canonical "$VERSION"; then
+                echo "::error::benchmark source has no canonical workspace version"
+                exit 1
+              fi
               echo "::notice::Policy from ${REF_TYPE}/${REF_NAME} will benchmark immutable source ${REF} at ${INPUT_BENCHMARK_SOURCE_SHA}."
             fi
             BUILD_MODE=benchmark
@@ -350,7 +367,7 @@ jobs:
             fi
             RELEASE_COMMITS="$(release_range_release_commits "$PUSH_BASE" "$GITHUB_SHA")"
             if [[ -n "$RELEASE_COMMITS" && "$RELEASE_COMMITS" != "$GITHUB_SHA" ]]; then
-              echo "::error::This push lands release commit(s) ${RELEASE_COMMITS//$'\n'/, } below its head $GITHUB_SHA. A release is built and promoted only from the head of its push, so nothing was built or promoted. A person must re-land the release as the head of a push."
+              echo "::error::This push lands release commit(s) ${RELEASE_COMMITS//$'\n'/, } below its head $GITHUB_SHA. A release is built and promoted only from the head of its push, so nothing was built or promoted. Recover it by dispatching promote-release.yml with the release commit and its successful merge-group candidate run (docs/src/maintainer-release.md)."
               exit 1
             fi
             QUEUE_RUN_ID=""
@@ -547,6 +564,31 @@ jobs:
         if: needs.setup.outputs.build_mode == 'benchmark' || needs.setup.outputs.build_mode == 'candidate'
         run: make gen-cli-aot && make check-cli-aot
 
+      - name: Generate locked release license notices
+        if: needs.setup.outputs.should_package_archives == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          tools="$(mktemp -d "${RUNNER_TEMP}/harn-notices-tools.XXXXXX")"
+          trap 'rm -rf "$tools"' EXIT
+          curl --fail --location --retry 3 --max-time 120 \
+            https://github.com/EmbarkStudios/cargo-about/releases/download/0.9.2/cargo-about-0.9.2-x86_64-unknown-linux-musl.tar.gz \
+            -o "$tools/cargo-about.tar.gz"
+          echo "9099a59e820c38a68b9d65f300662a567d56562f9a10f6aa4c7e86c17c2566af  $tools/cargo-about.tar.gz" | sha256sum --check --strict
+          tar -xzf "$tools/cargo-about.tar.gz" -C "$tools" --strip-components=1
+          npm ci --ignore-scripts --no-audit --no-fund
+          node --test scripts/tests/release_third_party_notices.test.mjs
+          CARGO_ABOUT="$tools/cargo-about" make gen-release-notices check-release-notices
+
+      - name: Upload release license notices
+        if: needs.setup.outputs.should_package_archives == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: harn-release-license-notices
+          path: dist/release-notices/
+          if-no-files-found: error
+          retention-days: 1
+
       - name: Upload CLI AOT payload for release and benchmark targets
         if: needs.setup.outputs.build_mode == 'benchmark' || needs.setup.outputs.build_mode == 'candidate'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -658,6 +700,13 @@ jobs:
         with:
           name: harn-cli-aot-payload
           path: crates/harn-cli/generated
+
+      - name: Restore release license notices
+        if: needs.setup.outputs.should_package_archives == 'true'
+        uses: ./.github/actions/download-artifact-with-retry
+        with:
+          name: harn-release-license-notices
+          path: dist/release-notices
 
       # Compiler-cache backends are policy data (sccache_backend):
       #   sticky  — Blacksmith sticky disk; hosted runners fall back to local
@@ -787,7 +836,7 @@ jobs:
         # that outcome — install unconditionally on the measured target so a
         # budget failure can always produce its own attribution.
         if: matrix.target == 'x86_64-unknown-linux-gnu'
-        uses: taiki-e/install-action@4cef1412cce204788f482e778a0b9187f9626a29 # v2.87.21
+        uses: taiki-e/install-action@83ac0ad63c0167e6f06796fab0fce28db1bf3db0 # v2.87.22
         with:
           tool: cargo-bloat
 
@@ -1098,6 +1147,10 @@ jobs:
           start=$SECONDS
           mkdir -p dist
           cp "target/${HARN_RELEASE_TARGET}/release/harn" dist/harn
+          for notice in LICENSE-MIT LICENSE-APACHE THIRD-PARTY-NOTICES.txt; do
+            test -s "dist/release-notices/$notice"
+            cp "dist/release-notices/$notice" "dist/$notice"
+          done
           # harn-lsp / harn-dap are relative symlinks to the single `harn`
           # binary (argv[0] dispatch). Editors that spawn `harn-lsp` /
           # `harn-dap` by path keep working; the tarball carries one real
@@ -1105,7 +1158,7 @@ jobs:
           # recreates them pointing at the sibling `harn`.
           ln -s harn dist/harn-lsp
           ln -s harn dist/harn-dap
-          package_entries=(harn harn-dap harn-lsp)
+          package_entries=(harn harn-dap harn-lsp LICENSE-MIT LICENSE-APACHE THIRD-PARTY-NOTICES.txt)
           if [[ "$HARN_RELEASE_TARGET" == *unknown-linux-gnu ]]; then
             cp "target/${HARN_RELEASE_TARGET}/release/harn-container-probe" dist/harn-container-probe
             package_entries+=(harn-container-probe)
@@ -1113,6 +1166,9 @@ jobs:
           cd dist
           tar czf "harn-${HARN_RELEASE_TARGET}.tar.gz" "${package_entries[@]}"
           archive="harn-${HARN_RELEASE_TARGET}.tar.gz"
+          for notice in LICENSE-MIT LICENSE-APACHE THIRD-PARTY-NOTICES.txt; do
+            cmp "$notice" <(tar -xOzf "$archive" "$notice")
+          done
           archive_bytes="$(wc -c < "$archive" | tr -d '[:space:]')"
           duration=$((SECONDS - start))
           {
@@ -1134,12 +1190,16 @@ jobs:
           start=$SECONDS
           mkdir -p dist
           cp target/${{ matrix.target }}/release/harn.exe dist/harn.exe
+          for notice in LICENSE-MIT LICENSE-APACHE THIRD-PARTY-NOTICES.txt; do
+            test -s "dist/release-notices/$notice"
+            cp "dist/release-notices/$notice" "dist/$notice"
+          done
           cd dist
           archive="harn-${{ matrix.target }}.zip"
           # The bootstrap installer creates harn-lsp.exe and harn-dap.exe as
           # hard links. Keeping one binary in the zip cuts its download to
           # roughly one third while manual extraction still yields harn.exe.
-          7z a "$archive" harn.exe
+          7z a "$archive" harn.exe LICENSE-MIT LICENSE-APACHE THIRD-PARTY-NOTICES.txt
           proof_dir="${RUNNER_TEMP}/harn-windows-manual-unpack"
           mkdir -p "$proof_dir"
           HARN_RELEASE_ARCHIVE_PATH="$(cygpath -w "$PWD/$archive")" \
@@ -1147,6 +1207,10 @@ jobs:
             powershell.exe -NoProfile -Command \
               "Expand-Archive -LiteralPath \$env:HARN_RELEASE_ARCHIVE_PATH -DestinationPath \$env:HARN_RELEASE_PROOF_DIR -Force"
           "$proof_dir/harn.exe" --version
+          for notice in LICENSE-MIT LICENSE-APACHE THIRD-PARTY-NOTICES.txt; do
+            test -s "$proof_dir/$notice"
+            cmp "$notice" "$proof_dir/$notice"
+          done
           test ! -e "$proof_dir/harn-lsp.exe"
           test ! -e "$proof_dir/harn-dap.exe"
           archive_bytes="$(wc -c < "$archive" | tr -d '[:space:]')"
@@ -1602,7 +1666,10 @@ jobs:
             --artifacts-dir "$archives" \
             --tag "v$VERSION" \
             --output "$release_files/release-assets.json"
-          if [[ "$CANDIDATE_PURPOSE" == source ]]; then
+          # Stable source candidates can recover an unpublished stable cut;
+          # retain its publication notes in the certified manifest.
+          source scripts/lib/release_version.sh
+          if [[ "$CANDIDATE_PURPOSE" == source ]] && release_version_is_prerelease "$VERSION"; then
             printf 'Unreleased source candidate %s at %s.\n' "$VERSION" "$SOURCE_COMMIT" \
               > "$release_files/release-notes.md"
           else

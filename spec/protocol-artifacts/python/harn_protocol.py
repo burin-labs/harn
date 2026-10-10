@@ -1251,6 +1251,7 @@ class ACPSessionUpdateEnvelope(_HarnDataclass):
     sessionUpdate: str
     content: Optional[JsonValue] = None
     messageId: Optional[str] = None
+    historySourceEventId: Optional[str] = None
     entries: Optional[List[JsonValue]] = None
     keptTurnCount: Optional[int] = None
     removedTurnCount: Optional[int] = None
@@ -1797,6 +1798,7 @@ HARN_PREPARED_SESSION_STATES = ("needs_approval", "ready", "blocked", "active", 
 HARN_PREPARED_SESSION_COMMANDS = ("approval_decision", "attach", "turn", "request_delta", "stop", "pivot", "finish")
 @dataclass
 class HarnPreparedSessionApprovalDecision(_HarnDataclass):
+    request_id: str
     batch_fingerprint: str
     approved: bool
     decider: str
@@ -2311,3 +2313,25 @@ class HarnInferenceAdmissionSnapshot(_HarnDataclass):
     local_runtime: Optional[bool] = None
     open_weight: Optional[bool] = None
     training_default: Optional[str] = None
+@dataclass
+class HarnCanonicalSessionBoundary(_HarnDataclass):
+    schema: str
+    session_id: str
+    event_id: Optional[int] = None
+    record_hash: Optional[str] = None
+
+@dataclass
+class HarnCanonicalHistoryPosition(_HarnDataclass):
+    source_event_id: str
+    origin_session_id: str
+    before_boundary: HarnCanonicalSessionBoundary
+    boundary: HarnCanonicalSessionBoundary
+
+@dataclass
+class HarnCanonicalHistoryBoundaries(_HarnDataclass):
+    tip: HarnCanonicalSessionBoundary
+    positions: List[HarnCanonicalHistoryPosition]
+
+@dataclass
+class HarnACPPromptCorrelation(_HarnDataclass):
+    messageId: Optional[str] = None

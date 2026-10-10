@@ -553,6 +553,8 @@ pub fn all_builtin_manifest() -> &'static [&'static harn_builtin_registry::Built
 /// linearly rescan the full registry. The nested capability map also accepts a
 /// borrowed `&str`, so a method call does not allocate an owned lookup key.
 struct BuiltinManifestIndex {
+    runtime_only_contracts:
+        std::collections::HashMap<&'static str, &'static harn_builtin_meta::BuiltinContract>,
     by_name: std::collections::HashMap<
         &'static str,
         &'static harn_builtin_registry::BuiltinManifestEntry,
@@ -617,7 +619,18 @@ fn builtin_manifest_index() -> &'static BuiltinManifestIndex {
                 recorded_effects_by_name.insert(entry.name, *entry);
             }
         }
+        let mut runtime_only_contracts = std::collections::HashMap::new();
+        for def in all_builtin_defs().iter().filter(|def| def.runtime_only) {
+            for name in std::iter::once(def.sig.name).chain(def.aliases.iter().copied()) {
+                assert!(
+                    !by_name.contains_key(name)
+                        && runtime_only_contracts.insert(name, &def.contract).is_none(),
+                    "duplicate runtime builtin contract `{name}`"
+                );
+            }
+        }
         BuiltinManifestIndex {
+            runtime_only_contracts,
             by_name,
             by_capability,
             recorded_effects_by_name,
@@ -654,6 +667,21 @@ pub fn builtin_manifest_entry(
     name: &str,
 ) -> Option<&'static harn_builtin_registry::BuiltinManifestEntry> {
     builtin_manifest_index().by_name.get(name).copied()
+}
+
+/// Runtime-only constructors have contracts but are not source manifest entries.
+pub(crate) fn builtin_policy_metadata(
+    name: &str,
+) -> (
+    Option<&'static harn_builtin_registry::BuiltinManifestEntry>,
+    Option<&'static harn_builtin_meta::BuiltinContract>,
+) {
+    let index = builtin_manifest_index();
+    let entry = index.by_name.get(name).copied();
+    let contract = entry
+        .map(|entry| &entry.contract)
+        .or_else(|| index.runtime_only_contracts.get(name).copied());
+    (entry, contract)
 }
 
 /// Resolve the contract for one typed Harness method without allocation.

@@ -144,7 +144,9 @@ jobs:
     timeout-minutes: 15
     permissions:
       contents: read
-      pull-requests: read
+      # A head whose review ended unfinished too many times gets one comment
+      # saying the sweep stopped asking, where its author reads reviews.
+      pull-requests: write
       issues: read
       # Each request is recorded as an `Automatic review: requested` check run
       # on the head, the record the next sweep spaces its requests by.

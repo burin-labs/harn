@@ -181,6 +181,39 @@ The two boundaries never widen each other, and environment policy stays
 active under `--no-sandbox`. See
 [Environment policies and grants](./cli-reference.md#environment-policies-and-grants).
 
+### Cargo compiler wrappers
+
+Confined process calls measure a configured Rust compiler wrapper when they
+launch a compiling Cargo command directly, such as `cargo build` or `cargo test`.
+Version checks and informational commands don't trigger the probe.
+Harn builds a temporary crate with Cargo under the
+active OS sandbox. A wrapper stays enabled only if that build succeeds and
+leaves no confined background process running. Harn starts known compiler-cache
+servers outside confinement before measuring them.
+
+Other programs, including shells, receive empty `RUSTC_WRAPPER`,
+`RUSTC_WORKSPACE_WRAPPER`, `CARGO_BUILD_RUSTC_WRAPPER`, and
+`CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER` settings. This clears inherited and
+Cargo-configured wrappers without triggering a compiler build during unrelated
+commands such as Git inventory. A shell or script can set these variables again
+before launching Cargo; Harn does not intercept that nested launch or measure
+its wrapper. The nested process remains subject to the OS sandbox.
+
+Wrapper decisions are reused within the process for the same working directory,
+child environment, and OS confinement. Changing an agent's tool list or
+recursion budget doesn't repeat the probe. Changes to process permissions,
+Cargo configuration, or wrapper executable files repeat it. Configurations with
+includes are measured on every compiling launch because Harn cannot verify
+their full file dependencies.
+Decisions aren't persisted across processes: compiler-cache servers can stop
+between launches, changing whether a wrapper would start a confined daemon.
+
+Git configuration discovery also caches results within the process. Changes to
+the child environment, config files, included files, or repository branch
+invalidate those results. A failed query isn't cached as an empty configuration.
+On macOS, discovery uses an installed Git binary from Command Line Tools or
+Xcode when available, avoiding the `/usr/bin/git` toolchain lookup shim.
+
 ## Sandbox profiles
 
 The active [`CapabilityPolicy`](./host-boundary.md) carries a
@@ -759,6 +792,20 @@ The Landlock ruleset is built lazily from `landlock_abi_version()`.
 Access bits are limited to the kernel's supported vocabulary. A kernel below
 the required ABI or one that cannot enforce the boundary selects bubblewrap;
 if bubblewrap cannot preserve the requested grants, the launch is refused.
+
+Bubblewrap availability uses a functional confinement probe with its own
+one-second setup budget and the runtime's normal cancellation and process
+cleanup. An inherited sandbox that prevents namespace setup, or a setup that
+outlives the budget, produces a typed mechanism refusal; a descendant retaining
+the probe's output cannot indefinitely delay command preparation. The budget is
+not the caller's deadline: its expiry is never reported as `Deadline exceeded`,
+while caller cancellation, the interrupt-handler window, and the scope deadline
+keep their own errors. This does not grant additional syscalls or extend the
+calling command's deadline.
+Caller interrupts and an expired setup budget are not cached as host
+unavailability; a later command can retry the functional probe.
+Since a confined command can stack its own Landlock domain, the nested path
+reaches Bubblewrap only when Landlock is not functional for that child.
 
 ### macOS (`crates/harn-vm/src/stdlib/sandbox/macos.rs`)
 

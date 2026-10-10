@@ -586,9 +586,9 @@ fn undefined_names_marks_unsupported_languages() {
     let payload = dict(&[
         (
             "content",
-            VmValue::String(arcstr::ArcStr::from("fn main() {}\n")),
+            VmValue::String(arcstr::ArcStr::from("class Main {}\n")),
         ),
-        ("language", VmValue::String(arcstr::ArcStr::from("rust"))),
+        ("language", VmValue::String(arcstr::ArcStr::from("java"))),
     ]);
     let result = invoke(&registry, "hostlib_ast_undefined_names", payload);
     let supported = match dict_field(&result, "supported") {
@@ -597,7 +597,7 @@ fn undefined_names_marks_unsupported_languages() {
     };
     assert!(
         !supported,
-        "rust isn't in the undefined-name profile set; must report supported = false"
+        "java isn't in the undefined-name profile set; must report supported = false"
     );
     let diagnostics = list_value(&dict_field(&result, "diagnostics"));
     assert!(diagnostics.is_empty());
@@ -666,7 +666,7 @@ fn undefined_names_never_claims_complete_resolution_for_a_runtime_resolved_langu
 fn undefined_names_unsupported_language_reports_no_analysis_rather_than_completeness() {
     // An empty diagnostic list here means "nothing was checked". The reading
     // must not read as "nothing is wrong".
-    let resolution = undefined_names_resolution("fn main() {}\n", "rust");
+    let resolution = undefined_names_resolution("class Main {}\n", "java");
     assert!(!resolution_is_complete(&resolution));
     assert!(
         !matches!(dict_field(&resolution, "analysed"), VmValue::Bool(true)),

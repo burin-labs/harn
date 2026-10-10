@@ -211,6 +211,7 @@ impl AgentEventSink for AcpAgentEventSink {
             AgentEvent::AgentMessageChunk {
                 session_id,
                 content,
+                history_source_event_id,
             } => {
                 let visible = sanitize_visible_assistant_text(content, true);
                 let mut content_block = serde_json::json!({
@@ -227,12 +228,16 @@ impl AgentEventSink for AcpAgentEventSink {
                     serde_json::Value::String(visible),
                 );
                 merge_harn_meta(&mut content_block, content_meta);
+                let mut update = serde_json::json!({
+                    "sessionUpdate": "agent_message_chunk",
+                    "content": content_block,
+                });
+                if let Some(identity) = history_source_event_id {
+                    update["historySourceEventId"] = serde_json::json!(identity);
+                }
                 self.write_notification(serde_json::json!({
                     "sessionId": session_id,
-                    "update": {
-                        "sessionUpdate": "agent_message_chunk",
-                        "content": content_block,
-                    },
+                    "update": update,
                 }));
             }
             AgentEvent::AgentThoughtChunk {
@@ -254,14 +259,19 @@ impl AgentEventSink for AcpAgentEventSink {
                 session_id,
                 message_id,
                 content,
+                history_source_event_id,
             } => {
+                let mut update = serde_json::json!({
+                    "sessionUpdate": "user_message",
+                    "messageId": message_id,
+                    "content": content,
+                });
+                if let Some(identity) = history_source_event_id {
+                    update["historySourceEventId"] = serde_json::json!(identity);
+                }
                 self.write_notification(serde_json::json!({
                     "sessionId": session_id,
-                    "update": {
-                        "sessionUpdate": "user_message",
-                        "messageId": message_id,
-                        "content": content,
-                    },
+                    "update": update,
                 }));
             }
             AgentEvent::ToolCall {

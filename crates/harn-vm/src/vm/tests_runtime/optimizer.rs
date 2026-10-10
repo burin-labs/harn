@@ -276,6 +276,35 @@ pipeline t(harness: Harness, task: unknown) {
 }
 
 #[test]
+fn list_appending_multiple_sites_matches_unoptimized() {
+    let source = r#"
+pipeline t(harness: Harness) {
+  let x = [1]
+  const before = x
+  for i in [2, 3] {
+    if i == 2 { x = x.appending(i) } else { x = x.appending(i) }
+  }
+  const middle = x
+  x = x.appending("four")
+  x = x.appending(x)
+  harness.stdio.println(before)
+  harness.stdio.println(middle)
+  harness.stdio.println(x)
+  for item in x { harness.stdio.println(item == 1) }
+}"#;
+    let optimized =
+        run_harn_result_display_with_options(source, CompilerOptions::optimized()).unwrap();
+    let baseline =
+        run_harn_result_display_with_options(source, CompilerOptions::without_optimizations())
+            .unwrap();
+    assert_eq!(optimized, baseline);
+    assert_eq!(
+        optimized.0.trim_end(),
+        "[1]\n[1, 2, 3]\n[1, 2, 3, four, [1, 2, 3, four]]\ntrue\nfalse\nfalse\nfalse\nfalse"
+    );
+}
+
+#[test]
 fn inplace_concat_preserves_binding_when_add_throws() {
     // The fused opcode only takes the slot in place for List/Dict values. A
     // scalar accumulator hit with an incompatible `+=` throws, and the binding

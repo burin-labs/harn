@@ -175,7 +175,7 @@ async fn pg_introspect_indexes_impl(
     )?;
     let sql = r#"
         SELECT i.relname AS index,
-               array_agg(a.attname ORDER BY x.ord) AS columns,
+               array_agg(a.attname::text ORDER BY x.ord) AS columns,
                ix.indisunique AS "unique",
                ix.indisprimary AS "primary"
         FROM pg_class t

@@ -19,7 +19,7 @@ pub type SessionId = String;
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ForkResult {
     pub child_session_id: SessionId,
-    pub forked_from_event_id: EventId,
+    pub forked_from_event_id: Option<EventId>,
     pub copied_event_count: usize,
 }
 
@@ -505,10 +505,48 @@ pub trait SessionStore: Send + Sync {
     async fn list(&self, filter: ListFilter) -> StoreResult<Vec<SessionMeta>>;
     async fn append(&self, session_id: &str, event: AppendEvent) -> StoreResult<StoredEvent>;
     async fn read(&self, session_id: &str, range: ReadRange) -> StoreResult<EventPage>;
+    /// Drain the canonical event sequence using the store's cursor contract.
+    async fn read_all(&self, session_id: &str) -> StoreResult<Vec<StoredEvent>> {
+        let mut events = Vec::new();
+        let mut cursor = None;
+        loop {
+            let page = self
+                .read(
+                    session_id,
+                    ReadRange {
+                        from_event_id: cursor,
+                        limit: Some(MAX_READ_BATCH),
+                        ..ReadRange::default()
+                    },
+                )
+                .await?;
+            cursor = page.next_cursor;
+            events.extend(page.events);
+            if cursor.is_none() {
+                return Ok(events);
+            }
+        }
+    }
+    /// Acknowledge durable rows through the same contract on every transport.
+    /// This read makes no claim about pending producer journals; their owner
+    /// must flush before requiring an acknowledgement for a newly emitted event.
+    async fn history_boundaries(
+        &self,
+        session_id: &str,
+    ) -> StoreResult<crate::CanonicalHistoryBoundaries> {
+        // A missing session must never look like an acknowledged empty history.
+        self.describe(session_id).await?;
+        let events = self.read_all(session_id).await?;
+        Ok(crate::CanonicalHistoryBoundaries::from_events(
+            session_id, &events,
+        ))
+    }
+    /// Copy an acknowledged event prefix, or no events for an explicit empty boundary.
+    /// Both cases retain the parent's metadata and explicit child lineage.
     async fn fork(
         &self,
         session_id: &str,
-        at_event_id: EventId,
+        boundary: crate::CanonicalSessionBoundary,
         child_id: Option<SessionId>,
     ) -> StoreResult<ForkResult>;
     async fn truncate(&self, session_id: &str, at_event_id: EventId)

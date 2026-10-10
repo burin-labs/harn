@@ -234,17 +234,12 @@ pub(crate) fn prepare_command_from(
 ) -> Result<PreparedSpawn, ProcessError> {
     let env_cleared = session_closed || spec.env_mode == EnvMode::Replace;
 
-    let mut env: Vec<_> = spec
+    let env: Vec<_> = spec
         .env
         .iter()
         .map(|(key, value)| (key.clone(), value.clone()))
         .collect();
-    let mut env_remove = spec.env_remove.clone();
-    process_sandbox::apply_active_rustc_wrapper_policy(
-        &mut env,
-        &mut env_remove,
-        spec.cwd.as_deref(),
-    );
+    let env_remove = spec.env_remove.clone();
 
     if let Some(cwd) = spec.cwd.as_ref() {
         process_sandbox::enforce_process_cwd(cwd)
@@ -347,6 +342,13 @@ pub(crate) fn prepare_command_from(
         command.env(key, value);
     }
 
+    // Fresh cleanup tokens must not turn each spawn into a new wrapper measurement.
+    process_sandbox::apply_active_rustc_wrapper_policy_for_command(
+        &spec.program,
+        &spec.args,
+        &mut command,
+        env_cleared,
+    );
     log_spawn_context(&command, spec.env_mode);
 
     if spec.configure_process_group {

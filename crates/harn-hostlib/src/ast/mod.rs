@@ -62,6 +62,7 @@ mod unified_diff;
 pub use health::{Coverage, ParserHealth, ParserOperation, SourceObservation};
 pub use language::{EditCapabilities, Language, TEXT_PATCH_FALLBACK};
 pub use types::{OutlineItem, ParseError, ParsedNode, Symbol, SymbolKind, UndefinedName};
+pub(crate) use undefined_names::scan_names;
 
 /// Programmatic entry point to the AST builtins. Embedders typically go
 /// through the registered builtins, but tests and tools that want

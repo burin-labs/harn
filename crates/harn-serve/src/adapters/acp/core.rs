@@ -28,6 +28,7 @@ impl AcpServer {
         );
 
         Self {
+            launcher_environment: config.launcher_environment,
             descriptor: AdapterDescriptor {
                 id: "acp".to_string(),
                 caller_shape: "agent-session".to_string(),
@@ -165,6 +166,7 @@ impl AcpServer {
         target_pipeline: Option<&str>,
         cwd: &Path,
         project_root: &Path,
+        store_scope: &harn_vm::SessionStoreScope,
         mode_id: &str,
     ) -> Result<(Option<harn_vm::VmBaseline>, Option<bool>, u64), String> {
         let Some(source_path) = source_path else {
@@ -187,6 +189,7 @@ impl AcpServer {
                     && entry.source == source
                     && entry.cwd == cwd
                     && entry.project_root == project_root
+                    && &entry.store_scope == store_scope
                     && entry.mode_id == mode_id
                 {
                     return Ok((
@@ -198,14 +201,15 @@ impl AcpServer {
             }
         }
 
-        let baseline = execute::prepare_vm_baseline(
-            source,
-            source_path,
-            cwd,
-            project_root.as_deref(),
-            self.runtime_configurator.clone(),
-        )
-        .await?;
+        let baseline = store_scope
+            .run(execute::prepare_vm_baseline(
+                source,
+                source_path,
+                cwd,
+                project_root.as_deref(),
+                self.runtime_configurator.clone(),
+            ))
+            .await?;
         if let Some((path, mtime)) = cache_key {
             self.vm_baseline_cache = Some(VmBaselineCacheEntry {
                 path,
@@ -214,6 +218,7 @@ impl AcpServer {
                 source: source.to_string(),
                 cwd: cwd.to_path_buf(),
                 project_root,
+                store_scope: store_scope.clone(),
                 mode_id: mode_id.to_string(),
                 baseline: baseline.clone(),
             });
@@ -308,17 +313,19 @@ impl AcpServer {
         target: serde_json::Value,
         reason: Option<&str>,
     ) {
-        harn_vm::agent_events::emit_event(&harn_vm::agent_events::AgentEvent::ControlOutcome {
-            session_id: session_id.to_string(),
-            control_id: control_id(),
-            method: method.to_string(),
-            outcome: outcome.to_string(),
-            status: status.to_string(),
-            actor,
-            target,
-            reason: reason.map(str::to_string),
-            metadata: serde_json::Value::Null,
-        });
+        self.concurrent_controls.emit_control_event(
+            &harn_vm::agent_events::AgentEvent::ControlOutcome {
+                session_id: session_id.to_string(),
+                control_id: control_id(),
+                method: method.to_string(),
+                outcome: outcome.to_string(),
+                status: status.to_string(),
+                actor,
+                target,
+                reason: reason.map(str::to_string),
+                metadata: serde_json::Value::Null,
+            },
+        );
     }
 
     /// Record an accepted control word and publish its outcome. See
@@ -328,7 +335,7 @@ impl AcpServer {
         session_id: &str,
         control: harn_session_store::ControlEvent,
     ) {
-        record_and_emit_control(session_id, control);
+        record_and_emit_control(&self.concurrent_controls, session_id, control);
     }
 
     /// Send a JSON-RPC notification (no id, no response expected).
@@ -421,9 +428,13 @@ impl AcpServer {
 /// notification's `metadata.recorded` rather than being swallowed,
 /// because "no control row in the store" must not read the same as "no
 /// control happened".
-pub(super) fn record_and_emit_control(session_id: &str, control: harn_session_store::ControlEvent) {
+pub(super) fn record_and_emit_control(
+    controls: &ConcurrentSessionControls,
+    session_id: &str,
+    control: harn_session_store::ControlEvent,
+) {
     let outcome = harn_vm::agent_sessions::record_control_event(session_id, &control);
-    harn_vm::agent_events::emit_event(&harn_vm::agent_events::AgentEvent::ControlOutcome {
+    controls.emit_control_event(&harn_vm::agent_events::AgentEvent::ControlOutcome {
         session_id: session_id.to_string(),
         control_id: control.control_id.clone(),
         method: control.method.clone(),

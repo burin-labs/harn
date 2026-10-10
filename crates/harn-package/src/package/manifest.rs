@@ -132,9 +132,29 @@ pub struct Manifest {
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PackageTestsConfig {
+    /// Package-relative directories or individual .harn files. Omission uses tests/.
+    pub roots: Option<Vec<PackageTestRoot>>,
     #[serde(default)]
     pub allow_empty: bool,
     pub reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+pub enum PackageTestRoot {
+    Path(String),
+    Directory(PackageTestDirectory),
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PackageTestDirectory {
+    pub path: String,
+    pub recursive: bool,
+    /// Basename glob, defaulting to all .harn files.
+    pub pattern: Option<String>,
+    #[serde(default)]
+    pub exclude: Vec<String>,
 }
 
 /// A single `[[contributes]]` host-surface contribution.
@@ -1189,10 +1209,10 @@ pub struct CollectedTriggerPredicate {
 pub(crate) type ManifestModuleCacheKey = (PathBuf, Option<String>, Option<String>);
 pub(crate) type ManifestModuleExports = BTreeMap<String, Arc<harn_vm::VmClosure>>;
 
-static MANIFEST_PROVIDER_SCHEMA_LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
+static MANIFEST_PROVIDER_CATALOG_LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
 
-pub async fn lock_manifest_provider_schemas() -> tokio::sync::MutexGuard<'static, ()> {
-    MANIFEST_PROVIDER_SCHEMA_LOCK
+pub async fn lock_manifest_provider_catalog() -> tokio::sync::MutexGuard<'static, ()> {
+    MANIFEST_PROVIDER_CATALOG_LOCK
         .get_or_init(|| tokio::sync::Mutex::new(()))
         .lock()
         .await

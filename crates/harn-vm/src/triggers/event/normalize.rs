@@ -86,67 +86,7 @@ pub(super) fn a2a_push_payload(
     }))
 }
 
-pub(super) fn kafka_payload(
-    kind: &str,
-    headers: &BTreeMap<String, String>,
-    raw: JsonValue,
-) -> ProviderPayload {
-    ProviderPayload::Known(KnownProviderPayload::Kafka(stream_payload(
-        kind, headers, raw,
-    )))
-}
-
-pub(super) fn nats_payload(
-    kind: &str,
-    headers: &BTreeMap<String, String>,
-    raw: JsonValue,
-) -> ProviderPayload {
-    ProviderPayload::Known(KnownProviderPayload::Nats(stream_payload(
-        kind, headers, raw,
-    )))
-}
-
-pub(super) fn pulsar_payload(
-    kind: &str,
-    headers: &BTreeMap<String, String>,
-    raw: JsonValue,
-) -> ProviderPayload {
-    ProviderPayload::Known(KnownProviderPayload::Pulsar(stream_payload(
-        kind, headers, raw,
-    )))
-}
-
-pub(super) fn postgres_cdc_payload(
-    kind: &str,
-    headers: &BTreeMap<String, String>,
-    raw: JsonValue,
-) -> ProviderPayload {
-    ProviderPayload::Known(KnownProviderPayload::PostgresCdc(stream_payload(
-        kind, headers, raw,
-    )))
-}
-
-pub(super) fn email_payload(
-    kind: &str,
-    headers: &BTreeMap<String, String>,
-    raw: JsonValue,
-) -> ProviderPayload {
-    ProviderPayload::Known(KnownProviderPayload::Email(stream_payload(
-        kind, headers, raw,
-    )))
-}
-
-pub(super) fn websocket_payload(
-    kind: &str,
-    headers: &BTreeMap<String, String>,
-    raw: JsonValue,
-) -> ProviderPayload {
-    ProviderPayload::Known(KnownProviderPayload::Websocket(stream_payload(
-        kind, headers, raw,
-    )))
-}
-
-fn stream_payload(
+pub(super) fn stream_payload(
     kind: &str,
     headers: &BTreeMap<String, String>,
     raw: JsonValue,

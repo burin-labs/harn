@@ -848,20 +848,11 @@ impl Vm {
     pub(crate) fn sync_builtin_interrupt_guard(
         &self,
     ) -> Option<crate::op_interrupt::OpInterruptGuard> {
-        // Mirror `execution.rs::next_deadline`: innermost scope deadline,
-        // tightened by the interrupt-handler deadline when that is sooner.
-        let scope_deadline = self.deadlines.last().map(|(deadline, _)| *deadline);
-        let deadline = match (scope_deadline, self.interrupt_handler_deadline) {
-            (Some(scope), Some(interrupt)) => Some(scope.min(interrupt)),
-            (scope, interrupt) => scope.or(interrupt),
-        };
-        if self.cancel_token.is_none() && deadline.is_none() {
-            return None;
-        }
-        Some(crate::op_interrupt::install(
-            self.cancel_token.clone(),
-            deadline,
-        ))
+        // Mirror `execution.rs::next_deadline`: the innermost scope deadline
+        // and the interrupt-handler window both bound the call. They stay
+        // separate so expiry keeps its own error kind.
+        let sources = self.interrupt_sources();
+        sources.is_armed().then(|| sources.install())
     }
 
     pub(crate) fn try_call_sync_builtin_id_or_name_args(
@@ -945,6 +936,14 @@ impl Vm {
         enforce_contract: bool,
     ) -> Result<VmValue, VmError> {
         let _observe = Self::observe_builtin_call(name);
+
+        crate::tool_registry::preparation_scope::enforce_contract(
+            name,
+            self.builtin_metadata
+                .get(name)
+                .map(|entry| entry.contract())
+                .as_ref(),
+        )?;
 
         // Sandbox check: deny builtins blocked by --deny/--allow flags.
         if self.denied_builtins.contains(name) {

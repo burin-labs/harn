@@ -309,6 +309,7 @@ async fn acp_session_load_replays_persisted_agent_events() {
     harn_vm::agent_events::emit_event(&harn_vm::agent_events::AgentEvent::AgentMessageChunk {
         session_id: session_id.clone(),
         content: "replay me".to_string(),
+        history_source_event_id: None,
     });
     let plan = harn_vm::llm::plan::normalize_plan_tool_call(
         harn_vm::llm::plan::UPDATE_PLAN_TOOL,

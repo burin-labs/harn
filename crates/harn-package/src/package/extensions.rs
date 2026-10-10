@@ -315,9 +315,9 @@ async fn collect_manifest_triggers_with_initialization(
     extensions: &RuntimeExtensions,
     initialization: ManifestHandlerInitialization,
 ) -> Result<Vec<CollectedManifestTrigger>, PackageError> {
-    let _provider_schema_guard = lock_manifest_provider_schemas().await;
-    let provider_schemas = build_manifest_provider_schemas(extensions).await?;
-    let provider_catalog = manifest_provider_catalog(provider_schemas.clone())?;
+    let _provider_catalog_guard = lock_manifest_provider_catalog().await;
+    let providers = build_manifest_provider_metadata(extensions).await?;
+    let provider_catalog = manifest_provider_catalog(providers.clone())?;
     validate_orchestrator_budget(extensions.root_manifest.as_ref())?;
     validate_static_trigger_configs(&extensions.triggers, &provider_catalog)?;
     let mut loaded_exports: HashMap<ManifestModuleCacheKey, ManifestModuleExports> = HashMap::new();
@@ -410,7 +410,7 @@ async fn collect_manifest_triggers_with_initialization(
         });
     }
 
-    register_manifest_provider_schemas(provider_schemas)?;
+    register_manifest_provider_metadata(providers)?;
     Ok(collected)
 }
 

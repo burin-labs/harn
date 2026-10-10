@@ -29,11 +29,19 @@
 # The file sorts before every OpenRouter base rule, which an overlay must do
 # to apply. A new route needs its own evidence rather than inheriting these.
 
-# Anthropic. The Claude 5-generation rows take no top_p on any endpoint; Fable
-# and Sonnet 5 take neither temperature nor top_p. No Claude route serves
+# Anthropic. The Claude 5-generation rows take no top_p on any endpoint; Fable,
+# Haiku 5.5 and Sonnet 5 take neither temperature nor top_p. Haiku 5.5 was
+# checked on 2026-10-09: no endpoint lists temperature, top_p or top_k, and
+# `temperature: 0` with `require_parameters` returned 404 while the Haiku 4.5
+# control returned 200. No Claude route serves
 # seed or the penalties.
 [[provider.openrouter]]
-model_match = ["anthropic/claude-fable-5", "anthropic/claude-fable-5.1", "anthropic/claude-sonnet-5"]
+model_match = [
+  "anthropic/claude-fable-5",
+  "anthropic/claude-fable-5.1",
+  "anthropic/claude-haiku-5.5",
+  "anthropic/claude-sonnet-5",
+]
 extends = true
 temperature_supported = false
 top_p_supported = false

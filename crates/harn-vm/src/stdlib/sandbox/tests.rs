@@ -3,6 +3,7 @@ use crate::orchestration::{pop_execution_policy, push_execution_policy, UnixSock
 
 mod overlay_scope;
 mod path_contracts;
+mod path_scope;
 mod process_axis;
 mod runtime_roots;
 mod rustc_wrapper_policy;
@@ -838,7 +839,8 @@ fn sandboxed_process_config_defaults_cwd_to_current_when_allowed() {
         ..CapabilityPolicy::default()
     };
 
-    let resolved = sandboxed_process_config(&ProcessCommandConfig::default(), &policy).unwrap();
+    let resolved =
+        sandboxed_process_config("git", &[], &ProcessCommandConfig::default(), &policy).unwrap();
 
     assert_eq!(resolved.cwd.unwrap(), normalize_for_policy(&cwd));
 }
@@ -852,7 +854,8 @@ fn sandboxed_process_config_defaults_cwd_to_workspace_when_current_is_outside() 
         ..CapabilityPolicy::default()
     };
 
-    let resolved = sandboxed_process_config(&ProcessCommandConfig::default(), &policy).unwrap();
+    let resolved =
+        sandboxed_process_config("git", &[], &ProcessCommandConfig::default(), &policy).unwrap();
 
     assert_eq!(
         resolved.cwd.unwrap(),
@@ -874,7 +877,7 @@ fn sandboxed_process_config_rejects_explicit_cwd_outside_workspace() {
         ..ProcessCommandConfig::default()
     };
 
-    assert!(sandboxed_process_config(&config, &policy).is_err());
+    assert!(sandboxed_process_config("git", &[], &config, &policy).is_err());
 }
 
 #[test]
@@ -1025,7 +1028,7 @@ fn sandboxed_process_config_injects_workspace_tmpdir() {
         cwd: Some(workspace.path().to_path_buf()),
         ..ProcessCommandConfig::default()
     };
-    let resolved = sandboxed_process_config(&config, &policy).unwrap();
+    let resolved = sandboxed_process_config("git", &[], &config, &policy).unwrap();
     let env: std::collections::BTreeMap<_, _> = resolved.env.into_iter().collect();
     let expected = workspace_local_tmpdir(&policy)
         .unwrap()

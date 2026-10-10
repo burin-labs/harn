@@ -2,10 +2,10 @@
 //!
 //! These share the process-wide provider catalog, so each one takes
 //! `lock_harn_state_async()`, which resets contributed providers on
-//! acquisition. Tests that register schemas without going through
-//! `collect_manifest_triggers` also take `lock_manifest_provider_schemas()`
+//! acquisition. Tests that register provider metadata without going through
+//! `collect_manifest_triggers` also take `lock_manifest_provider_catalog()`
 //! underneath it, because that is the lock production registration holds.
-//! Always in that order: `collect_manifest_triggers` takes the schema lock
+//! Always in that order: `collect_manifest_triggers` takes the catalog lock
 //! itself, so no test may hold it across a call that does.
 //!
 //! They live apart from the rest of the trigger-collection tests for that
@@ -54,6 +54,21 @@ handler = "worker://echo-queue"
             .schema_name,
         "EchoEventPayload"
     );
+    let raw = serde_json::json!({"id": "delivery-1"});
+    assert_eq!(
+        harn_vm::ProviderPayload::normalize(
+            &harn_vm::ProviderId::from("echo"),
+            "received",
+            &BTreeMap::new(),
+            raw.clone(),
+        )
+        .unwrap(),
+        harn_vm::ProviderPayload::Extension(harn_vm::ExtensionProviderPayload {
+            provider: "echo".into(),
+            schema_name: "EchoEventPayload".into(),
+            raw,
+        })
+    );
 }
 
 /// The reported failure was an orchestrator harness losing its `echo`
@@ -63,7 +78,7 @@ handler = "worker://echo-queue"
 #[tokio::test(flavor = "current_thread")]
 async fn loading_a_second_package_keeps_the_first_packages_providers() {
     let _state_guard = lock_harn_state_async().await;
-    let _provider_schema_guard = lock_manifest_provider_schemas().await;
+    let _provider_catalog_guard = lock_manifest_provider_catalog().await;
 
     let mut tmpdirs = Vec::new();
     for provider in ["echo-first", "echo-second"] {
@@ -84,10 +99,10 @@ connector = {{ harn = "./echo_connector.harn" }}
             test_harn_connector_source(provider),
         )
         .unwrap();
-        let schemas = build_manifest_provider_schemas(&load_runtime_extensions(&harn_file))
+        let providers = build_manifest_provider_metadata(&load_runtime_extensions(&harn_file))
             .await
-            .expect("manifest provider schemas build");
-        register_manifest_provider_schemas(schemas).expect("providers register");
+            .expect("manifest provider metadata builds");
+        register_manifest_provider_metadata(providers).expect("providers register");
         tmpdirs.push(tmp);
     }
 
@@ -106,7 +121,7 @@ connector = {{ harn = "./echo_connector.harn" }}
 #[tokio::test(flavor = "current_thread")]
 async fn build_manifest_provider_catalog_keeps_dynamic_providers_scoped() {
     let _state_guard = lock_harn_state_async().await;
-    let _provider_schema_guard = lock_manifest_provider_schemas().await;
+    let _provider_catalog_guard = lock_manifest_provider_catalog().await;
 
     for provider in ["echo-a", "echo-b", "echo-c"] {
         let tmp = tempfile::tempdir().unwrap();
@@ -167,10 +182,10 @@ connector = {{ harn = "./echo_connector.harn" }}
         test_harn_connector_source_with_schema(provider, schema_name),
     )
     .unwrap();
-    let schemas = build_manifest_provider_schemas(&load_runtime_extensions(&harn_file))
+    let providers = build_manifest_provider_metadata(&load_runtime_extensions(&harn_file))
         .await
-        .expect("manifest provider schemas build");
-    register_manifest_provider_schemas(schemas).expect("providers register");
+        .expect("manifest provider metadata builds");
+    register_manifest_provider_metadata(providers).expect("providers register");
     harn_vm::provider_metadata(provider)
         .expect("provider metadata registered")
         .schema_name
@@ -193,7 +208,7 @@ connector = {{ harn = "./echo_connector.harn" }}
 /// acquisitions of the one lock reproduce the same contention in either
 /// runner.
 ///
-/// Deliberately does not take `lock_manifest_provider_schemas()`: the
+/// Deliberately does not take `lock_manifest_provider_catalog()`: the
 /// reset under test belongs to the state lock alone.
 #[tokio::test(flavor = "current_thread")]
 async fn the_state_lock_drops_providers_contributed_by_an_earlier_holder() {
