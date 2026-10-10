@@ -169,6 +169,7 @@ jobs:
               - 'editors/vscode/**'
             docs_site:
               - '.github/workflows/ci.yml'
+              - 'crates/harn-vm/src/mcp_auth.rs'
               - 'docs/**'
               - 'scripts/build_docs_site.sh'
               - 'website/**'

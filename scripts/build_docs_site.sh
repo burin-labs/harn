@@ -42,6 +42,7 @@ docs_site_inputs=(
   install.sh
   install.ps1
   spec/provider-catalog/provider-catalog.json
+  crates/harn-vm/src/mcp_auth.rs
   scripts/build_docs_site.sh
 )
 
