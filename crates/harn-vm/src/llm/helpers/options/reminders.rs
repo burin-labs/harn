@@ -77,7 +77,7 @@ pub(crate) fn directive_nonce_for_session(session_id: &str) -> String {
 pub(super) fn directive_nonce_instructions(nonce: &str) -> String {
     let mut bindings = crate::value::DictMap::new();
     bindings.put_str("nonce", nonce);
-    let authority = crate::stdlib::template::render_stdlib_prompt_asset(
+    let authority = crate::llm::helpers::render_stdlib_prompt_asset(
         DIRECTIVE_NONCE_AUTHORITY_ASSET,
         Some(&bindings),
     )
@@ -139,7 +139,7 @@ pub(super) fn directive_envelope_instructions() -> &'static str {
     static RENDERED: std::sync::OnceLock<String> = std::sync::OnceLock::new();
     RENDERED
         .get_or_init(|| {
-            crate::stdlib::template::render_stdlib_prompt_asset(
+            crate::llm::helpers::render_stdlib_prompt_asset(
                 DIRECTIVE_ENVELOPE_INSTRUCTIONS_ASSET,
                 None,
             )

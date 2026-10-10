@@ -5,6 +5,7 @@ mod opt_get;
 mod options;
 mod provider;
 mod transcript;
+pub(crate) use crate::stdlib::template::render_stdlib_prompt_asset;
 pub(crate) use crate::value::json::vm_value_dict_to_json;
 pub use crate::value::json::vm_value_to_json;
 

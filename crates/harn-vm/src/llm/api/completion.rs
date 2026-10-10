@@ -373,11 +373,11 @@ async fn vm_call_completion_fallback(
         VmValue::Bool(has_suffix),
     );
     bindings.put_str("suffix", suffix.unwrap_or_default());
-    let instruction = crate::stdlib::template::render_stdlib_prompt_asset(
+    let instruction = crate::llm::helpers::render_stdlib_prompt_asset(
         "llm/prompts/completion_fallback_system.harn.prompt",
         Some(&bindings),
     )?;
-    let user_prompt = crate::stdlib::template::render_stdlib_prompt_asset(
+    let user_prompt = crate::llm::helpers::render_stdlib_prompt_asset(
         "llm/prompts/completion_fallback_user.harn.prompt",
         Some(&bindings),
     )?;

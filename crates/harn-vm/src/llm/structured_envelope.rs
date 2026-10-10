@@ -263,7 +263,7 @@ fn prompt_with_schema_contract(prompt: &str, schema: &VmValue) -> String {
     let mut bindings = crate::value::DictMap::new();
     bindings.put_str("prompt", prompt);
     bindings.put_str("schema_json", schema_json);
-    crate::stdlib::template::render_stdlib_prompt_asset(
+    crate::llm::helpers::render_stdlib_prompt_asset(
         "llm/prompts/structured_envelope_schema_contract.harn.prompt",
         Some(&bindings),
     )
@@ -382,7 +382,7 @@ fn build_repair_prompt(raw_text: &str, errors: &[String]) -> String {
     let mut bindings = crate::value::DictMap::new();
     bindings.put_str("errors_line", errors_line);
     bindings.put_str("raw_text", raw_text);
-    crate::stdlib::template::render_stdlib_prompt_asset(
+    crate::llm::helpers::render_stdlib_prompt_asset(
         "llm/prompts/structured_envelope_repair.harn.prompt",
         Some(&bindings),
     )

@@ -164,9 +164,6 @@ fn request_prompt(state: &JsonValue, schema: &JsonValue) -> Result<String, Decis
         })
         .collect::<Result<Vec<_>, _>>()?
         .join("\n");
-    let path = "llm/prompts/evaluation_questions.harn.prompt";
-    let template = harn_stdlib::get_stdlib_prompt_asset(path)
-        .ok_or_else(|| schema_invalid("evaluation prompt asset is missing"))?;
     let bindings: crate::value::DictMap = [
         ("questions", crate::value::VmValue::string(descriptions)),
         (
@@ -177,8 +174,11 @@ fn request_prompt(state: &JsonValue, schema: &JsonValue) -> Result<String, Decis
     .into_iter()
     .map(|(key, value)| (crate::value::intern_key(key), value))
     .collect();
-    crate::stdlib::template::render_template_result(template, Some(&bindings), None, None)
-        .map_err(|error| schema_invalid(error.message()))
+    crate::llm::helpers::render_stdlib_prompt_asset(
+        "llm/prompts/evaluation_questions.harn.prompt",
+        Some(&bindings),
+    )
+    .map_err(|error| schema_invalid(error.to_string()))
 }
 
 fn schema_invalid(diagnostic: impl Into<String>) -> DecisionTransportError {
