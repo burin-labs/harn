@@ -475,7 +475,12 @@ impl AuthorityUse {
     /// executor. Harn projects it into the sole durable authority receipt;
     /// delivering an agent payload successfully does not imply work completed.
     /// Executors without an agent terminal retain ordinary result semantics.
-    pub fn record_agent_terminal(&self, terminal: AgentTerminalOutcome) {
+    pub fn record_agent_terminal(&self, mut terminal: AgentTerminalOutcome) {
+        // Custom stop reasons are open text. Apply the producer's current
+        // journal policy now, before its execution scope can be dropped.
+        terminal.reason = crate::redact::current_policy()
+            .redact_string(&terminal.reason)
+            .into_owned();
         self.state
             .lock()
             .expect("authority use state poisoned")
@@ -484,7 +489,7 @@ impl AuthorityUse {
 
     pub(super) fn record_accepted_stop(&self, pivot: bool) {
         let mut state = self.state.lock().expect("authority use state poisoned");
-        // Preserve the producer's complete stop identity when the host
+        // Preserve the producer's stop identity when the host
         // observed it before accepting this lifecycle control.
         if state
             .agent_terminal

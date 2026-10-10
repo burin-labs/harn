@@ -48,9 +48,12 @@ use `type Error = String`; no adapter or side channel is required.
 Agent executors call `AuthorityUse::record_agent_terminal` with the actual
 producer's `AgentTerminalOutcome` before returning. Attached sessions expose
 the same operation as `ActivePreparedSession::record_agent_terminal`. The
-authority owner retains that value in the optional receipt `agent_terminal`
+authority owner retains the decision in the optional receipt `agent_terminal`
 field and projects its shared lifecycle before the terminal receipt is
 persisted. Hosts do not rewrite authority receipts after execution.
+Provider diagnostic `message` and `detail` are omitted from authority evidence.
+Custom reasons use the producer's current journal redaction policy when recorded;
+ordinary stop reasons and typed owner identity are retained.
 
 | Producer lifecycle | Authority stage / status |
 | --- | --- |

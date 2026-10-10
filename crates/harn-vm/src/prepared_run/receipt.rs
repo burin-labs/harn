@@ -124,7 +124,7 @@ impl RunAuthorityReceipt {
 
     pub(super) fn apply_agent_terminal(
         &mut self,
-        terminal: AgentTerminalOutcome,
+        mut terminal: AgentTerminalOutcome,
         executor_succeeded: bool,
     ) {
         let lifecycle = terminal.kind.lifecycle_state();
@@ -146,6 +146,9 @@ impl RunAuthorityReceipt {
                 AuthorityReceiptStatus::Failed,
             ),
         };
+        // Authority evidence keeps the producer decision, not provider prose.
+        terminal.message = None;
+        terminal.detail = None;
         self.agent_terminal = Some(terminal);
     }
 }
