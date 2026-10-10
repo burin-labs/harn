@@ -78,8 +78,10 @@ fn child_cannot_write(side_effect: Option<&str>, host_path: &str) -> bool {
     let Some(policy) = crate::orchestration::current_execution_policy() else {
         return false;
     };
-    crate::stdlib::sandbox::child_write_disposition(&policy, std::path::Path::new(host_path))
-        == crate::stdlib::sandbox::ChildWriteDisposition::EnforcedReadOnly
+    crate::stdlib::sandbox::child_write::child_write_disposition(
+        &policy,
+        std::path::Path::new(host_path),
+    ) == crate::stdlib::sandbox::child_write::ChildWriteDisposition::EnforcedReadOnly
 }
 
 pub(super) fn default_guard(

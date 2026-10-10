@@ -149,3 +149,53 @@ pub(super) fn filesystem_profile(
     }
     Ok(profile)
 }
+
+/// The write side of the grant set a confined child would run under, for
+/// [`super::super::child_write::child_write_disposition`]. Built by the same
+/// `filesystem_profile` both Linux renderers install, so it cannot claim a
+/// rule the kernel does not get. `None` when Landlock is unavailable here.
+pub(crate) fn installed_write_grants(
+    policy: &CapabilityPolicy,
+) -> Option<super::super::child_write::LandlockWriteGrants> {
+    if !super::landlock_available() {
+        return None;
+    }
+    let handled_access = super::landlock_handled_access(super::landlock_abi_version());
+    let profile = filesystem_profile(
+        "/bin/sh",
+        policy,
+        handled_access,
+        ProcessFilesystemScope::Host,
+    )
+    .ok()?;
+    Some(super::super::child_write::LandlockWriteGrants {
+        rules: profile
+            .filesystem_rules()
+            .map(|(path, access)| (path.to_path_buf(), access))
+            .collect(),
+        handled_access,
+        write_access: LANDLOCK_WRITE_ACCESS,
+    })
+}
+
+/// Every Landlock right that changes the filesystem.
+const LANDLOCK_WRITE_ACCESS: u64 = super::LANDLOCK_ACCESS_FS_WRITE_FILE
+    | super::LANDLOCK_ACCESS_FS_REMOVE_DIR
+    | super::LANDLOCK_ACCESS_FS_REMOVE_FILE
+    | super::LANDLOCK_ACCESS_FS_MAKE_CHAR
+    | super::LANDLOCK_ACCESS_FS_MAKE_DIR
+    | super::LANDLOCK_ACCESS_FS_MAKE_REG
+    | super::LANDLOCK_ACCESS_FS_MAKE_SOCK
+    | super::LANDLOCK_ACCESS_FS_MAKE_FIFO
+    | super::LANDLOCK_ACCESS_FS_MAKE_BLOCK
+    | super::LANDLOCK_ACCESS_FS_MAKE_SYM
+    | super::LANDLOCK_ACCESS_FS_REFER
+    | super::LANDLOCK_ACCESS_FS_TRUNCATE;
+
+impl FilesystemProfile {
+    fn filesystem_rules(&self) -> impl Iterator<Item = (&std::path::Path, u64)> + '_ {
+        self.rules
+            .iter()
+            .map(|rule| (rule.path.as_path(), rule.allowed_access))
+    }
+}

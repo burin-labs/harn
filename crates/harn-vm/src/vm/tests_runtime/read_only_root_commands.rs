@@ -14,7 +14,7 @@ use crate::orchestration::{
     pop_execution_policy, push_execution_policy, CapabilityPolicy, ExternalRoot, SandboxProfile,
     ToolApprovalPolicy,
 };
-use crate::stdlib::sandbox::{child_write_disposition, ChildWriteDisposition};
+use crate::stdlib::sandbox::child_write::{child_write_disposition, ChildWriteDisposition};
 use crate::tool_annotations::{SideEffectLevel, ToolAnnotations, ToolArgSchema, ToolKind};
 
 /// A confined-run policy: `workspace` writable, `read_only` readable, the

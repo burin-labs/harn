@@ -42,6 +42,10 @@ use crate::orchestration::ProcessSandboxPreset;
 use crate::orchestration::{CapabilityPolicy, SandboxProfile};
 use crate::value::{environment_io_error_thrown, ErrorCategory, VmError};
 
+use paths::{
+    access_is_exempt_from_scope, is_standard_io_device_for_access, normalize_for_policy,
+    normalize_io_device_path, path_is_within, relocated_runtime_roots,
+};
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 pub(crate) use read_roots::developer_toolchain_cache_write_roots_for_home;
 use read_roots::normalized_read_only_roots;
@@ -50,16 +54,10 @@ pub(crate) use read_roots::{
     sandbox_user_home_dir,
 };
 
-use paths::{
-    access_is_exempt_from_scope, is_standard_io_device_for_access, normalize_for_policy,
-    normalize_io_device_path, path_is_within, relocated_runtime_roots,
-};
-
 mod backend;
 mod build_command;
-mod child_write;
+pub mod child_write;
 pub(crate) use build_command::{build_std_command, build_tokio_command};
-pub use child_write::{child_write_disposition, ChildWriteDisposition};
 mod command_for;
 pub use command_for::{
     session_std_command, session_tokio_command, std_command_for, std_command_for_with_env_state,

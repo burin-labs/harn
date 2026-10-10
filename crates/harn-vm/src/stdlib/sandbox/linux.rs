@@ -37,6 +37,7 @@ mod nesting;
 #[path = "linux_self_confinement.rs"]
 mod self_confinement;
 use filesystem::filesystem_profile;
+pub(crate) use filesystem::installed_write_grants;
 use nesting::{landlock_probe_witness, nested_seccomp_filter_rule};
 
 impl SandboxBackend for Backend {
@@ -385,56 +386,6 @@ fn apply_profile(profile: &ProcessProfile) -> io::Result<()> {
     seccompiler::apply_filter(&profile.seccomp)
         .map_err(|err| io::Error::other(format!("failed to install the seccomp filter: {err}")))?;
     Ok(())
-}
-
-/// The write side of the grant set a confined child would run under, for
-/// [`super::child_write::child_write_disposition`]. Built by the same
-/// `filesystem_profile` both Linux renderers install, so it cannot claim a
-/// rule the kernel does not get. `None` when Landlock is unavailable here.
-pub(crate) fn installed_write_grants(
-    policy: &CapabilityPolicy,
-) -> Option<super::child_write::LandlockWriteGrants> {
-    if !landlock_available() {
-        return None;
-    }
-    let handled_access = landlock_handled_access(landlock_abi_version());
-    let profile = filesystem_profile(
-        "/bin/sh",
-        policy,
-        handled_access,
-        ProcessFilesystemScope::Host,
-    )
-    .ok()?;
-    Some(super::child_write::LandlockWriteGrants {
-        rules: profile
-            .filesystem_rules()
-            .map(|(path, access)| (path.to_path_buf(), access))
-            .collect(),
-        handled_access,
-        write_access: LANDLOCK_WRITE_ACCESS,
-    })
-}
-
-/// Every Landlock right that changes the filesystem.
-const LANDLOCK_WRITE_ACCESS: u64 = LANDLOCK_ACCESS_FS_WRITE_FILE
-    | LANDLOCK_ACCESS_FS_REMOVE_DIR
-    | LANDLOCK_ACCESS_FS_REMOVE_FILE
-    | LANDLOCK_ACCESS_FS_MAKE_CHAR
-    | LANDLOCK_ACCESS_FS_MAKE_DIR
-    | LANDLOCK_ACCESS_FS_MAKE_REG
-    | LANDLOCK_ACCESS_FS_MAKE_SOCK
-    | LANDLOCK_ACCESS_FS_MAKE_FIFO
-    | LANDLOCK_ACCESS_FS_MAKE_BLOCK
-    | LANDLOCK_ACCESS_FS_MAKE_SYM
-    | LANDLOCK_ACCESS_FS_REFER
-    | LANDLOCK_ACCESS_FS_TRUNCATE;
-
-impl FilesystemProfile {
-    fn filesystem_rules(&self) -> impl Iterator<Item = (&std::path::Path, u64)> + '_ {
-        self.rules
-            .iter()
-            .map(|rule| (rule.path.as_path(), rule.allowed_access))
-    }
 }
 
 fn landlock_profile(
