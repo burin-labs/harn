@@ -5,6 +5,8 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use serde_json::json;
 
+use crate::agent_events::{AgentTerminalKind, AgentTerminalOutcome};
+
 use crate::harness_net::NetPolicyDecision;
 use crate::orchestration::{
     PolicyAuthorityRequest, PolicyEvaluation, PolicyMatchedRule, ProcessSandboxPreset,
@@ -439,6 +441,7 @@ struct AuthorityUseState {
     denied: Vec<DeniedAuthority>,
     policy_decisions: Vec<PolicyDecisionEvidence>,
     executor_invoked: bool,
+    agent_terminal: Option<AgentTerminalOutcome>,
 }
 
 impl AuthorityUse {
@@ -457,6 +460,7 @@ impl AuthorityUse {
                 denied: lease.prior_denied.clone(),
                 policy_decisions: lease.prior_policy_decisions.clone(),
                 executor_invoked: false,
+                agent_terminal: None,
             })),
         }
     }
@@ -465,6 +469,43 @@ impl AuthorityUse {
         let granted_fingerprint = self.check(requirement)?;
         self.mark_used(granted_fingerprint);
         Ok(())
+    }
+
+    /// Record the agent producer's actual terminal before returning from the
+    /// executor. Harn projects it into the sole durable authority receipt;
+    /// delivering an agent payload successfully does not imply work completed.
+    /// Executors without an agent terminal retain ordinary result semantics.
+    pub fn record_agent_terminal(&self, mut terminal: AgentTerminalOutcome) {
+        // Custom stop reasons are open text. Apply the producer's current
+        // journal policy now, before its execution scope can be dropped.
+        terminal.reason = crate::redact::current_policy()
+            .redact_string(&terminal.reason)
+            .into_owned();
+        self.state
+            .lock()
+            .expect("authority use state poisoned")
+            .agent_terminal = Some(terminal);
+    }
+
+    pub(super) fn record_accepted_stop(&self, pivot: bool) {
+        let mut state = self.state.lock().expect("authority use state poisoned");
+        // Preserve the producer's stop identity when the host
+        // observed it before accepting this lifecycle control.
+        if state
+            .agent_terminal
+            .as_ref()
+            .is_some_and(|terminal| terminal.kind == AgentTerminalKind::UserCancelled)
+        {
+            return;
+        }
+        state.agent_terminal = Some(AgentTerminalOutcome::new(
+            AgentTerminalKind::UserCancelled,
+            if pivot {
+                "session/pivot"
+            } else {
+                "session/cancel"
+            },
+        ));
     }
 
     pub(crate) fn check(&self, requirement: &AuthorityRequirement) -> Result<String, String> {
@@ -656,7 +697,7 @@ impl AuthorityUse {
             .filter(|authority| !state.used.contains(&authority.fingerprint))
             .cloned()
             .collect::<Vec<_>>();
-        RunAuthorityReceipt {
+        let mut receipt = RunAuthorityReceipt {
             schema: RUN_AUTHORITY_RECEIPT_SCHEMA.to_string(),
             stage: AuthorityReceiptStage::Terminal,
             status: if completed {
@@ -683,7 +724,12 @@ impl AuthorityUse {
             policy_decisions: state.policy_decisions.clone(),
             diagnostics: Vec::new(),
             executor_invoked: state.executor_invoked,
+            agent_terminal: None,
+        };
+        if let Some(terminal) = state.agent_terminal.clone() {
+            receipt.apply_agent_terminal(terminal, completed);
         }
+        receipt
     }
 }
 
