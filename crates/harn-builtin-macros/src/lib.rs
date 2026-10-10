@@ -308,7 +308,7 @@ impl Parse for BuiltinAttrs {
                         "parser_only" => out.parser_only = parse_lit_bool(&nv.value)?,
                         "runtime_only" => out.runtime_only = parse_lit_bool(&nv.value)?,
                         "read_only_preparation" => {
-                            out.read_only_preparation = parse_lit_bool(&nv.value)?
+                            out.read_only_preparation = parse_lit_bool(&nv.value)?;
                         }
                         "aliases" => out.aliases = parse_str_array(&nv.value)?,
                         "exposure" => out.exposure = Some(parse_lit_str(&nv.value)?),
