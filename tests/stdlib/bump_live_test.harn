@@ -409,6 +409,16 @@ pipeline test_apply_version_writes_exact_source_revision(harness: Harness) {
   harness.fs.delete(root)
 }
 
+/** The disjointness read lists the advance's paths without moving the checkout. */
+pipeline test_base_changes_reads_paths_without_moving_head(harness: Harness) {
+  const fixture = adoption_fixture(harness)
+  const changes = fixture.adapter.base_changes(fixture.from_oid, fixture.to_oid)
+  assert_eq(changes, {ok: true, paths: ["base.txt"], detail: ""})
+  assert_eq(git_ok(harness.tools, fixture.root, ["rev-parse", "HEAD"]), fixture.from_oid)
+  assert_eq(fixture.adapter.base_changes("not-a-commit", fixture.to_oid).ok, false)
+  harness.fs.delete(fixture.root)
+}
+
 pipeline test_adopt_base_failed_comparison_does_not_move_head(harness: Harness) {
   const fixture = adoption_fixture(harness)
   const outcome = fixture.adapter.adopt_base(
