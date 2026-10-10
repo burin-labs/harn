@@ -63,6 +63,25 @@ pub fn denial_gate_for_source(source: Option<&str>) -> crate::agent_events::Deni
     }
 }
 
+/// Whether a command-running call cannot write `host_path`, because the OS
+/// sandbox its child will run under refuses every write there.
+///
+/// A `read` external root admits reads only, and a command is not a read. Its
+/// child, though, runs under the active capability policy, and when that
+/// policy's backend measures the path as read-only the root's mode is held by
+/// the kernel rather than by this guard. Every other answer, an absent policy
+/// included, keeps the refusal (harn#9622).
+fn child_cannot_write(side_effect: Option<&str>, host_path: &str) -> bool {
+    if side_effect != Some("process_exec") {
+        return false;
+    }
+    let Some(policy) = crate::orchestration::current_execution_policy() else {
+        return false;
+    };
+    crate::stdlib::sandbox::child_write_disposition(&policy, std::path::Path::new(host_path))
+        == crate::stdlib::sandbox::ChildWriteDisposition::EnforcedReadOnly
+}
+
 pub(super) fn default_guard(
     policy: &ToolApprovalPolicy,
     ctx: &EvaluationContext,
@@ -115,6 +134,7 @@ pub(super) fn default_guard(
         if let Some(root) = governing_root(host_path, &policy.external_roots) {
             if root.access == ExternalRootAccess::Read
                 && !is_read_side(ctx.side_effect.as_deref(), ctx.tool_kind.as_deref())
+                && !child_cannot_write(ctx.side_effect.as_deref(), host_path)
             {
                 return Some(Candidate {
                     source: SOURCE_DEFAULT_EXTERNAL_PATH.to_string(),

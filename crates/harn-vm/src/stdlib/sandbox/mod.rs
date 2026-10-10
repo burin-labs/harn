@@ -57,7 +57,9 @@ use paths::{
 
 mod backend;
 mod build_command;
+mod child_write;
 pub(crate) use build_command::{build_std_command, build_tokio_command};
+pub use child_write::{child_write_disposition, ChildWriteDisposition};
 mod command_for;
 pub use command_for::{
     session_std_command, session_tokio_command, std_command_for, std_command_for_with_env_state,

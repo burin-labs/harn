@@ -395,8 +395,11 @@ nothing, such as a reviewer or a verifier:
 
 It changes only the OS profile rendered for child processes. Harn's own file
 builtins still read the `workspace` capability, so the role above cannot call
-`write_text`. `read_only_roots` stay unwritable to the child on every backend,
-and nothing outside the writable roots becomes writable. A nested policy keeps
+`write_text`. `read_only_roots` disjoint from the writable roots stay
+unwritable to the child on every backend, and nothing outside the writable
+roots becomes writable. A read-only root nested inside a writable root differs
+by backend: macOS re-denies it, Linux Landlock cannot and grants the parent's
+write. `child_write_disposition` reads that answer from the installed rules. A nested policy keeps
 the grant only when its ceiling's children could already write, through the
 same grant or through the ceiling's `workspace` capability; stage-policy
 validation rejects a flattened child that adds it beyond that. The

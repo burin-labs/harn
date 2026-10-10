@@ -157,6 +157,12 @@ fn wrap_with_sandbox_exec(
     })
 }
 
+/// The profile a confined `/bin/sh` child would run under, for
+/// [`super::child_write::child_write_disposition`].
+pub(super) fn rendered_profile(policy: &CapabilityPolicy) -> String {
+    render_profile_for_program(policy, "/bin/sh")
+}
+
 fn render_profile_for_program(policy: &CapabilityPolicy, program: &str) -> String {
     let mut developer_toolchain_read_roots = process_sandbox_developer_toolchain_read_roots(policy);
     developer_toolchain_read_roots.extend(toolchain_roots::go_read_root(policy, program));
