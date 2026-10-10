@@ -30,7 +30,8 @@ grep -Fq 'release_range_release_commits "$PUSH_BASE" "$GITHUB_SHA"' \
 repo="$tmp/repo"
 mkdir -p "$repo/scripts/lib" "$repo/scripts/ci" "$tmp/bin"
 cp "$root/scripts/lib/release_version.sh" "$root/scripts/lib/release_candidate_run.sh" \
-  "$root/scripts/lib/release_consumer_verdict.sh" "$root/scripts/lib/consumer_canary_policy.sh" "$repo/scripts/lib/"
+  "$root/scripts/lib/release_consumer_verdict.sh" "$root/scripts/lib/consumer_canary_policy.sh" \
+  "$root/scripts/lib/candidate_archive_contract.sh" "$root/scripts/lib/sha256.sh" "$repo/scripts/lib/"
 cp "$root/scripts/ci/consumer_canary_policy.json" "$repo/scripts/ci/"
 cp "$root/scripts/release_contract.env" "$repo/scripts/"
 git -C "$repo" init -b main --quiet
