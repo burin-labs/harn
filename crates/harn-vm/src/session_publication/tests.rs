@@ -152,6 +152,97 @@ async fn missing_unknown_and_pending_are_observed_without_silently_publishing() 
 }
 
 #[tokio::test]
+async fn bookkeeping_retains_source_coverage_without_hiding_unknown_actor_metadata() {
+    let root = tempfile::tempdir().unwrap();
+    let store = SqliteSessionStore::open(root.path().join("journal.sqlite")).unwrap();
+    store
+        .create(CreateSession {
+            id: Some("bookkeeping".into()),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    append_message(
+        &store,
+        "bookkeeping",
+        Some("model-source"),
+        json!({
+            "role":"assistant", "content":"PRIVATE model draft",
+            "harn_assistant_publication":"withheld",
+            "_harn":{"kind":"assistant", "call_role":"agent.main", "call_stage":"work"}
+        }),
+    )
+    .await;
+    let mut bookkeeping = json!({"role":"assistant", "content":"PRIVATE withdrawal"});
+    bookkeeping[crate::llm::agent_result_projection::BOOKKEEPING_TURN_KEY] = json!(true);
+    append_message(
+        &store,
+        "bookkeeping",
+        Some("withdrawal-source"),
+        bookkeeping,
+    )
+    .await;
+    let measured = read_session_publication_evidence(&store, "bookkeeping")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(measured.stored_event_count, 2);
+    assert_eq!(measured.assistant_message_count, 2);
+    assert_eq!(measured.bookkeeping_count, 1);
+    assert_eq!(measured.missing_source_count, 0);
+    assert_eq!(measured.missing_call_role_count, 0);
+    assert_eq!(measured.missing_call_stage_metadata_count, 0);
+    assert_eq!(measured.missing_metadata_count, 0);
+    assert_eq!(measured.withheld_count, 1);
+    assert_eq!(measured.published_count, 0);
+    let withdrawal = &measured.records[1];
+    assert_eq!(
+        withdrawal.origin,
+        AssistantPublicationOrigin::HarnessBookkeeping
+    );
+    assert_eq!(
+        withdrawal.source_event_id.as_deref(),
+        Some("withdrawal-source")
+    );
+    assert_eq!(withdrawal.call_role, None);
+    assert_eq!(withdrawal.call_stage, None);
+    assert!(!withdrawal.stage_metadata_present);
+    assert!(!withdrawal.metadata_present);
+    assert_eq!(withdrawal.disposition, None);
+
+    append_message(
+        &store,
+        "bookkeeping",
+        Some("unknown-actor"),
+        json!({
+            "role":"assistant", "content":"PRIVATE unmeasured actor"
+        }),
+    )
+    .await;
+    let mut malformed = json!({"role":"assistant", "content":"PRIVATE malformed flag"});
+    malformed[crate::llm::agent_result_projection::BOOKKEEPING_TURN_KEY] = json!("true");
+    append_message(&store, "bookkeeping", Some("malformed-flag"), malformed).await;
+    let unknown = read_session_publication_evidence(&store, "bookkeeping")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(unknown.stored_event_count, 4);
+    assert_eq!(unknown.assistant_message_count, 4);
+    assert_eq!(unknown.records.len(), 4);
+    assert_eq!(unknown.bookkeeping_count, 1);
+    assert_eq!(unknown.missing_source_count, 0);
+    assert_eq!(unknown.missing_call_role_count, 2);
+    assert_eq!(unknown.missing_call_stage_metadata_count, 2);
+    assert_eq!(unknown.missing_metadata_count, 2);
+    assert_eq!(unknown.withheld_count, 1);
+    for record in &unknown.records[2..] {
+        assert_eq!(record.origin, AssistantPublicationOrigin::UnmarkedAssistant);
+        assert_eq!(record.disposition, None);
+    }
+    assert!(!serde_json::to_string(&unknown).unwrap().contains("PRIVATE"));
+}
+
+#[tokio::test]
 async fn incomplete_changing_and_wrong_session_reads_fail_coverage() {
     let root = tempfile::tempdir().unwrap();
     let store = SqliteSessionStore::open(root.path().join("journal.sqlite")).unwrap();
