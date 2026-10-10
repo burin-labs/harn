@@ -44,7 +44,7 @@ fs.writeFileSync(path.join(root, 'candidate_replay.harn'), replay.replace(legacy
 const arms = [
   {id: 'legacy_structured', script: path.join(root, 'legacy_replay.harn'), config: {provider: 'openai', model: 'gpt-5.4-nano', effort: 'none'}},
   {id: 'structured_decision', script: path.join(root, 'candidate_replay.harn'), config: {provider: 'openai', model: 'gpt-5.4-nano', effort: 'none'}},
-  {id: 'native_decision', script: path.join(root, 'candidate_replay.harn'), config: {evaluation: {backend: 'native_decision', provider: 'vercel_ai_gateway', model: 'vercel/typesafe-ai/jev', threshold: 0.0}}},
+  {id: 'native_decision', script: path.join(root, 'candidate_replay.harn'), config: {evaluation: {backend: 'native_decision', provider: 'vercel_ai_gateway', model: 'vercel/typesafe-ai/jev', threshold: 0.0, evaluation_cost_limit: 0.05, run_cost_limit: 0.5}}},
 ];
 const manifest = {
   candidate_sha: git(['rev-parse', 'HEAD']).trim(),
