@@ -1,7 +1,7 @@
 import { AgentLoopCancelledFailure } from "std/agent/failure_types"
 pub import { MissingToolCallClassifier, MissingToolCallVerdict } from "std/agent/options_types"
 import { MissingToolCallRecoveryOptions } from "std/agent/options_types"
-import { EvaluationPolicy, boolean, choice } from "std/predicate"
+import { EvaluationOutcome, EvaluationPolicy, boolean, choice } from "std/predicate"
 
 type MissingToolCallAction = "tool_call_intended" | "no_tool_call_intended" | "ambiguous"
 
@@ -312,8 +312,9 @@ pub fn missing_tool_call_classifier(
     for candidate in candidate_tools {
       criteria[candidate.name] = candidate.description ?? ""
     }
-    const evaluated = try {
-      harness.llm.evaluate_request(
+    let outcome: EvaluationOutcome? = nil
+    try {
+      outcome = harness.llm.evaluate_request(
         "agent.missing_tool_call.v1",
         state,
         {
@@ -327,16 +328,17 @@ pub fn missing_tool_call_classifier(
         },
         policy,
       )
-    }
-    if is_err(evaluated) {
-      const err = unwrap_err(evaluated)
+    } catch (err) {
       if error_category(err) == "cancelled" {
         throw err
       }
       return __missing_tool_call_fail_open(err, threshold)
         + {classifier_kind: "llm", model: policy.model}
     }
-    const outcome = unwrap(evaluated)
+    if outcome == nil {
+      return __missing_tool_call_fail_open("evaluation returned no outcome", threshold)
+        + {classifier_kind: "llm", model: policy.model}
+    }
     if outcome.kind == "cancelled" {
       const failure: AgentLoopCancelledFailure = {
         category: "cancelled",

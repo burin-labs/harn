@@ -41,7 +41,7 @@ pipeline test(harness: Harness) {
     const classify_fixture = missing_tool_call_classifier(
       harness,
       if backend == "native_decision" {
-        {provider: policy.provider, model: policy.model}
+        pick(policy, ["provider", "model"])
       } else {
         {evaluation: policy}
       },

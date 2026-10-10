@@ -38,14 +38,18 @@ const replay = fs.readFileSync(replayFile, 'utf8');
 const legacyImport = 'import { missing_tool_call_classifier } from "std/llm/missing_tool_call"';
 if (replay.split(legacyImport).length !== 2) throw Error('replay classifier binding changed');
 fs.writeFileSync(path.join(root, 'legacy_replay.harn'), replay.replace(legacyImport, 'import { missing_tool_call_classifier } from "./legacy_missing_tool_call"'));
+const candidateSourceFile = path.join(workspace, 'crates/harn-stdlib/src/stdlib/llm/missing_tool_call.harn');
+fs.writeFileSync(path.join(root, 'candidate_replay.harn'), replay.replace(legacyImport,
+  `import { missing_tool_call_classifier } from "${candidateSourceFile.slice(0, -5)}"`));
 const arms = [
   {id: 'legacy_structured', script: path.join(root, 'legacy_replay.harn'), config: {provider: 'openai', model: 'gpt-5.4-nano', effort: 'none'}},
-  {id: 'structured_decision', script: replayFile, config: {provider: 'openai', model: 'gpt-5.4-nano', effort: 'none'}},
-  {id: 'native_decision', script: replayFile, config: {evaluation: {backend: 'native_decision', provider: 'vercel_ai_gateway', model: 'vercel/typesafe-ai/jev', threshold: 0.0}}},
+  {id: 'structured_decision', script: path.join(root, 'candidate_replay.harn'), config: {provider: 'openai', model: 'gpt-5.4-nano', effort: 'none'}},
+  {id: 'native_decision', script: path.join(root, 'candidate_replay.harn'), config: {evaluation: {backend: 'native_decision', provider: 'vercel_ai_gateway', model: 'vercel/typesafe-ai/jev', threshold: 0.0}}},
 ];
 const manifest = {
   candidate_sha: git(['rev-parse', 'HEAD']).trim(),
-  candidate_classifier_sha256: hash(fs.readFileSync(path.join(workspace, 'crates/harn-stdlib/src/stdlib/llm/missing_tool_call.harn'))),
+  classifier_source_binding: 'explicit owning source modules for both baseline and candidate',
+  candidate_classifier_sha256: hash(fs.readFileSync(candidateSourceFile)),
   candidate_intent_sha256: hash(fs.readFileSync(path.join(workspace, 'crates/harn-stdlib/src/stdlib/llm/prompts/missing_tool_call_intent.harn.prompt'))),
   candidate_target_sha256: hash(fs.readFileSync(path.join(workspace, 'crates/harn-stdlib/src/stdlib/llm/prompts/missing_tool_call_target.harn.prompt'))),
   baseline_sha: baselineSha, baseline_classifier_sha256: hash(legacySource), baseline_prompt_sha256: hash(legacyPrompt),
@@ -78,7 +82,7 @@ for (let repeat = 0; repeat < repetitions; repeat++) {
       const tapeFile = path.join(dir, 'evaluation.json');
       fs.writeFileSync(configFile, JSON.stringify(arm.config));
       fs.writeFileSync(rowFile, JSON.stringify(row));
-      const args = ['run', '--standalone', '--no-sandbox', '--timeout', '60s', '--emit-summary-json', '--summary-file', path.join(dir, 'summary.json')];
+      const args = ['run', '--standalone', '--read-only-root', root, '--timeout', '60s', '--emit-summary-json', '--summary-file', path.join(dir, 'summary.json')];
       if (arm.id !== 'legacy_structured') args.push('--evaluation-tape', tapeFile);
       args.push(arm.script, '--', configFile, rowFile);
       const run = spawnSync(binary, args, {cwd: workspace, env, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024});

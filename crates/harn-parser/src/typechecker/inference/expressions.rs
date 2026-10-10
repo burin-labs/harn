@@ -44,6 +44,49 @@ pub(in crate::typechecker) enum SubscriptMode {
 }
 
 impl TypeChecker {
+    fn infer_record_type(
+        &self,
+        entries: &[DictEntry],
+        scope: &TypeScope,
+        literal_fields: bool,
+    ) -> InferredType {
+        // Fold entries with the same right-biased merge used by the VM.
+        let mut fields = Vec::new();
+        for entry in entries {
+            if let Node::Spread(inner) = &entry.value.node {
+                let inferred = if let Node::DictLiteral(entries) = &inner.node {
+                    self.infer_record_type(entries, scope, literal_fields)
+                } else {
+                    self.infer_type(inner, scope)
+                };
+                match inferred {
+                    Some(TypeExpr::Shape(spread_fields)) => {
+                        fields = merge_shape_fields(&fields, &spread_fields);
+                    }
+                    _ => return Some(TypeExpr::Named("dict".into())),
+                }
+                continue;
+            }
+            let key = match &entry.key.node {
+                Node::StringLiteral(key) | Node::Identifier(key) => key.clone(),
+                _ => return Some(TypeExpr::Named("dict".into())),
+            };
+            let inferred = match &entry.value.node {
+                Node::StringLiteral(value) | Node::RawStringLiteral(value) if literal_fields => {
+                    Some(TypeExpr::LitString(value.clone()))
+                }
+                Node::IntLiteral(value) if literal_fields => Some(TypeExpr::LitInt(*value)),
+                Node::DictLiteral(entries) if literal_fields => {
+                    self.infer_record_type(entries, scope, true)
+                }
+                _ => self.infer_type(&entry.value, scope),
+            };
+            let value_type = inferred.unwrap_or_else(Self::wildcard_type);
+            fields = merge_shape_fields(&fields, &[ShapeField::synthetic(key, value_type, false)]);
+        }
+        Some(TypeExpr::Shape(fields))
+    }
+
     pub(in crate::typechecker) fn infer_try_error_type(
         &self,
         stmts: &[SNode],
@@ -53,7 +96,14 @@ impl TypeChecker {
         for stmt in stmts {
             match &stmt.node {
                 Node::ThrowStmt { value } => {
-                    if let Some(ty) = self.infer_type(value, scope) {
+                    // Error tags must retain their literal values so a malformed
+                    // record cannot match a different arm of the error union.
+                    let ty = if let Node::DictLiteral(entries) = &value.node {
+                        self.infer_record_type(entries, scope, true)
+                    } else {
+                        self.infer_type(value, scope)
+                    };
+                    if let Some(ty) = ty {
                         inferred.push(ty);
                     }
                 }
@@ -294,48 +344,7 @@ impl TypeChecker {
             // Expose it as a named `range` type; for-in and method resolution
             // special-case this type where needed.
             Node::RangeExpr { .. } => Some(TypeExpr::Named("range".into())),
-            Node::DictLiteral(entries) => {
-                // Build the shape by folding entries left-to-right with the
-                // right-biased shape merge, so `{...base, k: v}` and
-                // `{...a, ...b}` infer the precise merged record instead of a
-                // bare `dict`. A spread of anything that isn't a statically
-                // closed shape (a `dict`, `dict<K,V>`, union, or unknown) means
-                // an unknown tail, so the result degrades to `dict` — we can't
-                // name the merged fields without open-record types.
-                let mut fields: Vec<ShapeField> = Vec::new();
-                for entry in entries {
-                    if matches!(&entry.value.node, Node::Spread(inner) if matches!(&inner.node, Node::Identifier(_) | Node::DictLiteral(_) | Node::PropertyAccess { .. } | Node::SubscriptAccess { .. } | Node::OptionalPropertyAccess { .. } | Node::FunctionCall { .. } | Node::MethodCall { .. }))
-                    {
-                        let Node::Spread(inner) = &entry.value.node else {
-                            unreachable!()
-                        };
-                        match self.infer_type(inner, scope) {
-                            Some(TypeExpr::Shape(spread_fields)) => {
-                                fields = merge_shape_fields(&fields, &spread_fields);
-                            }
-                            _ => return Some(TypeExpr::Named("dict".into())),
-                        }
-                        continue;
-                    }
-                    let key = match &entry.key.node {
-                        Node::StringLiteral(key) | Node::Identifier(key) => key.clone(),
-                        _ => return Some(TypeExpr::Named("dict".into())),
-                    };
-                    let val_type = self
-                        .infer_type(&entry.value, scope)
-                        .unwrap_or_else(Self::wildcard_type);
-                    fields =
-                        merge_shape_fields(&fields, &[ShapeField::synthetic(key, val_type, false)]);
-                }
-                // A dict literal has statically known fields, so it is a
-                // precise closed record — the empty literal `{}` is the empty
-                // record `Shape([])`, not the opaque `dict`. This is how TS/Flow
-                // type object literals: `{}` is the top object type (it satisfies
-                // an all-optional shape and accepts any later value), while a
-                // *bare* `dict` value from `json_parse` stays opaque and must be
-                // narrowed before it can flow into a specific shape.
-                Some(TypeExpr::Shape(fields))
-            }
+            Node::DictLiteral(entries) => self.infer_record_type(entries, scope, false),
             Node::Closure {
                 params,
                 return_type,
