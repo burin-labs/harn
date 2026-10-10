@@ -467,6 +467,8 @@ The script searches files under `crates/**/tests/**/*.rs`,
 `crates/**/src/**/tests.rs`, `crates/**/src/**/tests_*.rs`, the inline
 `#[cfg(test)] mod` block of any other `crates/**/*.rs` file, and
 `conformance/tests/**/*.harn`.
+Sibling declarations such as `#[cfg(test)] mod tests;` don't contain inline
+tests and don't remove subsequent runtime code from the runtime scan.
 
 | Pattern | Why it is banned | Approved alternative |
 |---|---|---|
@@ -496,6 +498,12 @@ has no deterministic equivalent — you have two options:
    explaining why the opt-out is justified, and gets a second reviewer sign-off.
    The allowlist is public and tracked as technical debt; entries are expected to
    shrink, not grow, as the codebase matures.
+
+Live provider quality measurements are pinned in `LIVE_PROVIDER_TEST_BASELINE`.
+Each row fixes one file's ignored-test count and records why it needs external
+inputs. The behavioral baseline requires `FIREWORKS_API_KEY`; stance rejudging
+requires `STANCE_DUMP` and `STANCE_JUDGE_API_KEY`. Explicit runs fail when these
+inputs are missing. Their deterministic logic remains in the default suite.
 
 ## Writing subprocess tests in the slow E2E suite
 

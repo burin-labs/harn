@@ -240,12 +240,24 @@ pipeline test_literal_timeout_pattern_rejections(harness: Harness, task: unknown
 
 @test
 pipeline test_literal_timeout_baseline_is_a_ratchet(harness: Harness, task: unknown) {
-  assert_eq(grandfather_count("literal_timeout", "crates/harn-vm/src/llm/rate_limit/tests.rs"), 3)
   assert_eq(
-    grandfather_count("literal_timeout", "crates/harn-serve/src/adapters/acp/tests.rs"),
+    pattern_baseline_count("literal_timeout", "crates/harn-vm/src/llm/rate_limit/tests.rs"),
+    3,
+  )
+  assert_eq(
+    pattern_baseline_count("literal_timeout", "crates/harn-serve/src/adapters/acp/tests.rs"),
     nil,
   )
-  assert_eq(grandfather_duplicates(), [])
+  assert_eq(pattern_baseline_duplicates(), [])
+}
+
+@test
+pipeline test_live_measurements_have_exact_exemptions(harness: Harness) {
+  assert_eq(pattern_baseline_count("ignore_attr", "crates/harn-vm/src/security/behavioral.rs"), 1)
+  assert_eq(pattern_baseline_count("ignore_attr", "crates/harn-vm/src/security/stance_judge.rs"), 1)
+  assert_eq(pattern_baseline_count("ignore_attr", "crates/harn-vm/src/security/other.rs"), nil)
+  assert_eq(pattern_baseline_count("tokio_sleep", "crates/harn-vm/src/security/behavioral.rs"), nil)
+  assert_eq(shell_spawn_literal_baseline("crates/harn-vm/src/op_interrupt.rs"), 0)
 }
 
 @test
@@ -418,4 +430,15 @@ pipeline test_a_cfg_test_helper_is_not_the_test_module(harness: Harness, task: u
   const plain = ["fn runtime() {}", "#[cfg(test)]", "mod tests {", "}"].join("\n")
   assert_eq(inline_test_module_line(plain), 2)
   assert(carries_inline_tests("crates/x/src/a.rs", plain))
+}
+
+@test
+pipeline test_sibling_test_module_keeps_runtime_lines(harness: Harness) {
+  const sibling = ["#[cfg(test)]", "mod tests;", "fn runtime() { SystemTime::now(); }"].join("\n")
+  assert_eq(inline_test_module_line(sibling), nil)
+  assert(!carries_inline_tests("crates/x/src/a.rs", sibling))
+  assert_eq(find_hits(sibling, system_time_pattern()).count, 1)
+  const mixed = sibling + "\n#[cfg(test)]\nmod inline_tests {\n}\n"
+  assert_eq(inline_test_module_line(mixed), 4)
+  assert(carries_inline_tests("crates/x/src/a.rs", mixed))
 }
