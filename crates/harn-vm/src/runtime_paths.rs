@@ -17,6 +17,43 @@ const NEXTEST_BINARY_ID_ENV: &str = "NEXTEST_BINARY_ID";
 const NEXTEST_TEST_NAME_ENV: &str = "NEXTEST_TEST_NAME";
 const NEXTEST_ATTEMPT_ID_ENV: &str = "NEXTEST_ATTEMPT_ID";
 
+/// Directory name of the default run root, `<base>/.harn-runs`.
+pub const DEFAULT_RUN_DIR_NAME: &str = ".harn-runs";
+
+const SELF_IGNORE_CONTENTS: &str = "# Created by Harn; safe to delete.\n*\n";
+
+/// Give a Harn-owned directory inside someone's checkout a `.gitignore` that
+/// ignores everything in it, so its contents never show in `git status`.
+///
+/// An existing `.gitignore` is left as it is: a person who wrote one there
+/// decided what that directory tracks.
+pub fn ensure_self_ignored_dir(dir: &Path) -> std::io::Result<()> {
+    let opened = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(dir.join(".gitignore"));
+    match opened {
+        Ok(mut file) => std::io::Write::write_all(&mut file, SELF_IGNORE_CONTENTS.as_bytes()),
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => Ok(()),
+        Err(error) => Err(error),
+    }
+}
+
+/// Self-ignore the default run root that contains `written`, if any.
+///
+/// Called after a record lands under it. Only the default `.harn-runs` name is
+/// Harn's to hide: an explicit `HARN_RUN_DIR` is a directory the caller chose,
+/// and may be one they mean to keep. Best effort, because a record that was
+/// written must not fail on its ignore file.
+pub fn self_ignore_default_run_root(written: &Path) {
+    let root = written
+        .ancestors()
+        .find(|dir| dir.file_name() == Some(std::ffi::OsStr::new(DEFAULT_RUN_DIR_NAME)));
+    if let Some(root) = root {
+        let _ = ensure_self_ignored_dir(root);
+    }
+}
+
 #[cfg(test)]
 pub(crate) fn test_env_lock() -> &'static std::sync::Mutex<()> {
     use std::sync::{Mutex, OnceLock};
@@ -97,7 +134,7 @@ pub fn run_root_reference(base_dir: &Path) -> PathBuf {
     root_reference_value(
         base_dir,
         run_env_value.as_deref(),
-        ".harn-runs",
+        DEFAULT_RUN_DIR_NAME,
         nextest_attempt_root().as_deref(),
         Some("runs"),
     )
@@ -198,7 +235,7 @@ fn run_root_value(
     attempt_scoped_root_value(
         base_dir,
         run_env_value,
-        ".harn-runs",
+        DEFAULT_RUN_DIR_NAME,
         nextest_root,
         Some("runs"),
     )
