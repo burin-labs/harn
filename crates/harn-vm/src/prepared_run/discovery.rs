@@ -374,5 +374,6 @@ fn discovery_receipt(lease: &AuthorityLease, observed_at_ms: u64) -> RunAuthorit
         policy_decisions: lease.prior_policy_decisions.clone(),
         diagnostics: Vec::new(),
         executor_invoked: false,
+        agent_terminal: None,
     }
 }
