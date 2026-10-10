@@ -40,6 +40,14 @@ on:
       source_revision:
         required: true
         type: string
+      rehearsal_promotion_run_id:
+        description: Prior authenticated promotion whose successful rehearsal is reused
+        required: false
+        type: string
+      candidate_run_id:
+        description: Certified producer bound to the prior promotion
+        required: false
+        type: string
     secrets:
       RELEASE_APP_CLIENT_ID:
         required: true
@@ -113,6 +121,15 @@ jobs:
           repositories: ${{ secrets.CONSUMER_CANARY_REPOSITORY }}
           permission-actions: write
           permission-pull-requests: read
+          permission-contents: read
+      - name: Mint historical promotion read authority
+        if: inputs.rehearsal_promotion_run_id != ''
+        id: history-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ secrets.RELEASE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          permission-actions: read
       - name: Dispatch the consumer update once
         id: canary
         env:
@@ -121,6 +138,9 @@ jobs:
           CANARY_NAME: ${{ secrets.CONSUMER_CANARY_REPOSITORY }}
           CANARY_WORKFLOW: ${{ vars.CONSUMER_CANARY_WORKFLOW }}
           SOURCE_REVISION: ${{ inputs.source_revision || github.sha }}
+          REHEARSAL_PROMOTION_RUN_ID: ${{ inputs.rehearsal_promotion_run_id }}
+          CANDIDATE_RUN_ID: ${{ inputs.candidate_run_id }}
+          REHEARSAL_PROMOTION_READ_TOKEN: ${{ steps.history-token.outputs.token }}
         run: |
           CANARY_REPOSITORY="$CANARY_OWNER/$CANARY_NAME" \
             WORKSPACE_VERSION="$(sed -n '/^\[workspace.package\]/,/^\[/s/^version = "\(.*\)"/\1/p' certified-consumer-source/Cargo.toml)" \

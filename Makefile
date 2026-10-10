@@ -731,6 +731,7 @@ test-pr-gate-scripts:
 	bash ./scripts/tests/release_rehearsal_authorization_test.sh
 	bash ./scripts/tests/release_consumer_candidate_verdict_test.sh
 	bash ./scripts/tests/failed_rehearsal_observation_test.sh
+	bash ./scripts/tests/successful_rehearsal_reuse_test.sh
 	bash ./scripts/tests/unpublished_retirement_test.sh
 	./scripts/tests/check_linux_glibc_floor_test.sh
 	./scripts/tests/release_version_test.sh
