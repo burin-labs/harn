@@ -370,7 +370,7 @@ fn hosted_compile_lane_errors(
     errors = errors
       + ["ci.yml:${job_name} must keep complete hosted cache ${rust_cache_key}"]
   }
-  if CI_CACHE_WRITE_JOBS.contains(job_name)
+  if caches.any({ cache -> save_requested(cache) })
     && trim(job?.permissions?.actions ?? "")
       != "write" {
     errors = errors + ["ci.yml:${job_name} must grant actions: write to persist rust-cache"]
@@ -382,7 +382,7 @@ fn hosted_compile_lane_errors(
  * The legs `scripts/ci/run_rust_lint_lane.sh --leg` accepts. Each resolves its
  * own feature graph, so the lane runs them on separate runners.
  */
-const RUST_LINT_LEGS = ["workspace", "lean-lsp", "freshness-checker"]
+pub const RUST_LINT_LEGS: list<string> = ["workspace", "lean-lsp", "freshness-checker"]
 
 /**
  * Keep strict Clippy one leg per runner on the elastic switch, without a build
@@ -477,7 +477,7 @@ fn persistent_compile_lane_errors(
     errors = errors
       + ["ci.yml:${job_name} must keep complete hosted fallback cache ${rust_cache_key}"]
   }
-  if CI_CACHE_WRITE_JOBS.contains(job_name)
+  if caches.any({ cache -> save_requested(cache) })
     && trim(job?.permissions?.actions ?? "")
       != "write" {
     errors = errors + ["ci.yml:${job_name} must grant actions: write to persist rust-cache"]
@@ -528,20 +528,30 @@ fn hosted_refresh_lane_errors(workflow: dict) -> list<string> {
   return errors
 }
 
-/** Serialize the mutating cache tail without cancelling an in-flight save. */
-pub fn rust_cache_refresh_concurrency_errors(job: dict) -> list<string> {
+/** Serialize the whole producer lifecycle; job groups can displace its prerequisite. */
+pub fn rust_cache_refresh_concurrency_errors(workflow: dict) -> list<string> {
   let errors: list<string> = []
-  if trim(job?.concurrency?.group ?? "") != CI_CACHE_REFRESH_CONCURRENCY_GROUP {
+  if trim(workflow?.concurrency?.group ?? "") != CI_CACHE_REFRESH_CONCURRENCY_GROUP {
     errors = errors
       + [
         "${CACHE_REFRESH_WORKFLOW}:rust-cache-refresh must serialize cache mutation across main commits",
       ]
   }
-  if lowercase(trim(to_string(job?.concurrency?.["cancel-in-progress"] ?? true))) != "false" {
+  if lowercase(trim(to_string(workflow?.concurrency?.["cancel-in-progress"] ?? true))) != "false" {
     errors = errors
       + [
         "${CACHE_REFRESH_WORKFLOW}:rust-cache-refresh must finish the active cache save before the newest pending one",
       ]
+  }
+  for job_name in ["rust-cache-refresh-cli", "rust-cache-refresh"] {
+    const job = workflow?.jobs?.[job_name]
+    if job?.concurrency != nil {
+      errors = errors
+        + ["Cache refresh must not interleave producer jobs through a job concurrency group"]
+    }
+    if job != nil && job?.strategy?.["max-parallel"] != 1 {
+      errors = errors + ["Cache refresh must serialize each producer matrix"]
+    }
   }
   return errors
 }
@@ -625,20 +635,67 @@ pub fn cache_refresh_trigger_errors(workflow: dict) -> list<string> {
 }
 
 /** Keep the main-scoped cache refresher's shape intact after the move. */
+pub fn rust_cache_generation_admission_errors(job: dict) -> list<string> {
+  const command = trim(
+    step_by_name(job?.steps ?? [], "Prepare Linux cache generation save")?.run ?? "",
+  )
+  if command
+    != "./scripts/prune_ci_cache_generations.sh --ensure-headroom \"$HARN_CACHE_SAVE_HEADROOM_BYTES\"" {
+    return [
+      "${CACHE_REFRESH_WORKFLOW}:rust-cache-refresh must admit save headroom without deleting its current generation",
+    ]
+  }
+  return []
+}
+
+pub fn rust_cache_refresh_prerequisite_errors(workflow: dict) -> list<string> {
+  const job = workflow?.jobs?.["rust-cache-refresh"]
+  const cli = workflow?.jobs?.["rust-cache-refresh-cli"]
+  if cli == nil || job == nil {
+    return ["Cache refresh requires an explicit CLI prerequisite and dependent producer"]
+  }
+  let errors: list<string> = []
+  if job?.needs != "rust-cache-refresh-cli" || job?.["if"] != nil || cli?.needs != nil
+    || cli?.["if"] != nil {
+    errors = errors
+      + [
+        "Cache refresh must wait for the complete successful CLI lifecycle without a conditional bypass",
+      ]
+  }
+  for field in ["runs-on", "timeout-minutes", "permissions", "env", "steps"] {
+    if job?.[field] != cli?.[field] {
+      errors = errors + ["Cache refresh producers must share their owning ${field} configuration"]
+    }
+  }
+  const caches = matching_steps(cli, RUST_CACHE_ACTION)
+  if len(caches) != 1 || caches[0]?.["continue-on-error"] == true {
+    errors = errors
+      + ["Cache refresh cannot treat a failed qualification lifecycle as a successful prerequisite"]
+  }
+  if cli?.strategy?.matrix?.include?.map({ row -> row?.cache_key }).to_list() != ["harn-ci-cli"] {
+    errors = errors + ["Cache refresh prerequisite must qualify only the shared CLI family"]
+  }
+  return errors
+}
+
 fn rust_cache_refresh_errors(workflow: dict) -> list<string> {
   const job = workflow?.jobs?.["rust-cache-refresh"]
   if job == nil {
     return ["${CACHE_REFRESH_WORKFLOW}:rust-cache-refresh must define the main-scoped cache writer"]
   }
   let errors: list<string> = cache_refresh_trigger_errors(workflow)
+    + rust_cache_refresh_prerequisite_errors(workflow)
+    + rust_cache_refresh_concurrency_errors(workflow)
   // Matrix legs write each Linux merge-gate key with that lane's env fingerprint.
   let matrix_keys: list<string> = []
-  for entry in job?.strategy?.matrix?.include ?? [] {
+  const profiles = (workflow?.jobs?.["rust-cache-refresh-cli"]?.strategy?.matrix?.include ?? [])
+    + (job?.strategy?.matrix?.include ?? [])
+  for entry in profiles {
     const cache_key = trim(entry?.cache_key ?? "")
     matrix_keys = matrix_keys + [cache_key]
-    const expected_headroom = if cache_key == "workspace-tests" {
+    const expected_headroom = if cache_key == "workspace-tests" || cache_key == "package-audit" {
       "4294967296"
-    } else if cache_key == "package-audit" || cache_key == "harn-ci-cli" {
+    } else if cache_key == "harn-ci-cli" {
       "2147483648"
     } else {
       ""
@@ -650,10 +707,10 @@ fn rust_cache_refresh_errors(workflow: dict) -> list<string> {
         ]
     }
   }
-  if !matrix_keys.contains("workspace-tests") || !matrix_keys.contains("package-audit") {
+  if matrix_keys != ["harn-ci-cli", "workspace-tests", "package-audit"] {
     errors = errors
       + [
-        "${CACHE_REFRESH_WORKFLOW}:rust-cache-refresh must matrix-write workspace-tests and package-audit cache keys",
+        "${CACHE_REFRESH_WORKFLOW}:rust-cache-refresh must qualify CLI before admitting workspace-tests and package-audit",
       ]
   }
   const caches = matching_steps(job, RUST_CACHE_ACTION)
@@ -678,16 +735,7 @@ fn rust_cache_refresh_errors(workflow: dict) -> list<string> {
       ]
   }
   errors = errors + rust_cache_refresh_miss_only_errors(job)
-  const headroom_run = trim(
-    step_by_name(job?.steps ?? [], "Prepare Linux cache generation save")?.run ?? "",
-  )
-  if !contains(headroom_run, "prune_ci_cache_generations.sh --clear-family-prefix")
-    || !contains(headroom_run, "prune_ci_cache_generations.sh --ensure-headroom") {
-    errors = errors
-      + [
-        "${CACHE_REFRESH_WORKFLOW}:rust-cache-refresh must replace stale generations with bounded save headroom",
-      ]
-  }
+  errors = errors + rust_cache_generation_admission_errors(job)
   const warm = step_by_name(job?.steps ?? [], "Warm Cargo graph")
   if !contains(trim(warm?.run ?? ""), "matrix.warm_script") {
     errors = errors
@@ -1311,6 +1359,24 @@ fn residual_docs_proof_errors(workflow: dict) -> list<string> {
   return []
 }
 
+pub fn linux_cache_consumers_restore_only_errors(workflow: dict) -> list<string> {
+  let errors: list<string> = []
+  for job_name in (workflow?.jobs ?? {}).keys() {
+    for cache in matching_steps(workflow.jobs[job_name], RUST_CACHE_ACTION) {
+      if ["harn-ci-cli", "workspace-tests", "package-audit"].contains(
+        cache?.with?.["shared-key"] ?? "",
+      )
+        && save_requested(cache) {
+        errors = errors
+          + [
+            "ci.yml:${job_name} must restore only; persistent Linux generations belong to the admitted refresh producer",
+          ]
+      }
+    }
+  }
+  return errors
+}
+
 pub fn ci_linux_lane_policy_errors(workflow: dict) -> list<string> {
   let errors = hosted_compile_lane_errors(workflow, "package-audit", "package-audit")
     + rust_lint_lane_errors(workflow)
@@ -1321,6 +1387,7 @@ pub fn ci_linux_lane_policy_errors(workflow: dict) -> list<string> {
       "workspace-tests",
       TEST_PRODUCER_STEP_BUDGETS,
     )
+  errors = errors + linux_cache_consumers_restore_only_errors(workflow)
   const rust_job = workflow?.jobs?.["rust-checks"]
   errors = errors + strict_clippy_entrypoint_errors(rust_job)
   errors = errors + residual_docs_proof_errors(workflow)

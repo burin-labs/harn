@@ -71,9 +71,10 @@ pub use sessions::{
 };
 use sessions::{
     cancel_session_command_handles, lookup_session_cancellation, preempt_session_interruption,
-    prepare_session_request, session_project_root_for_cwd, ConcurrentSessionControl,
-    ConcurrentSessionControls, PreparedSessionRequest, PromptCancellation, Session, SessionBudget,
-    SessionCancellation, SessionInfo, SessionSpendRecorder,
+    prepare_session_request, resolve_acp_session_cwd, session_project_root_for_cwd,
+    ConcurrentSessionControl, ConcurrentSessionControls, PreparedSessionRequest,
+    PromptCancellation, Session, SessionBudget, SessionCancellation, SessionInfo,
+    SessionSpendRecorder,
 };
 pub(crate) use transport::run_acp_channel_server_with_existing_handle;
 pub use transport::{
@@ -791,6 +792,8 @@ impl AcpProfileConfig {
 
 #[derive(Clone)]
 pub struct AcpServerConfig {
+    /// Trusted host inputs captured before engine startup, never ACP JSON.
+    pub launcher_environment: harn_vm::security::LauncherEnvironment,
     /// Trusted launch authority, independent of client environment grants.
     pub host_inference_boundary: Option<harn_vm::llm::api::InferenceBoundary>,
     pub pipeline: Option<String>,
@@ -827,6 +830,7 @@ pub struct AcpSandboxConfig {
 impl AcpServerConfig {
     pub fn new(pipeline: Option<String>) -> Self {
         Self {
+            launcher_environment: harn_vm::security::LauncherEnvironment::capture(),
             host_inference_boundary: None,
             pipeline,
             auth_policy: AuthPolicy::allow_all(),
@@ -842,6 +846,15 @@ impl AcpServerConfig {
 
     pub fn for_pipeline(path: impl Into<String>) -> Self {
         Self::new(Some(path.into()))
+    }
+
+    /// Supply one host-resolved launch context without process-global mutation.
+    pub fn with_launcher_environment(
+        mut self,
+        environment: harn_vm::security::LauncherEnvironment,
+    ) -> Self {
+        self.launcher_environment = environment;
+        self
     }
 
     pub fn with_runtime_configurator(
@@ -1022,6 +1035,7 @@ struct VmBaselineCacheEntry {
     source: String,
     cwd: PathBuf,
     project_root: Option<PathBuf>,
+    store_scope: harn_vm::SessionStoreScope,
     mode_id: String,
     baseline: harn_vm::VmBaseline,
 }
@@ -1029,6 +1043,7 @@ struct VmBaselineCacheEntry {
 /// ACP server that reads JSON-RPC requests from a transport and writes
 /// responses / notifications back to that same transport.
 pub struct AcpServer {
+    launcher_environment: harn_vm::security::LauncherEnvironment,
     host_inference_boundary: Option<harn_vm::llm::api::InferenceBoundary>,
     descriptor: AdapterDescriptor,
     /// Optional pipeline file to execute on each `session/prompt`.

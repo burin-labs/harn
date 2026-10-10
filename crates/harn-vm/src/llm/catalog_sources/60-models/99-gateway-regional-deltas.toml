@@ -89,6 +89,59 @@ tier = "frontier"
 open_weight = false
 strengths = ["agentic", "coding", "tool_use", "reasoning", "vision", "long_context"]
 
+# Grok 4.20 (0309 snapshots), still current on xAI's model index with no
+# retirement notice (docs.x.ai, read 2026-10-09): one reasoning id, one
+# non-reasoning id and a multi-agent id, all 1M context with image input, at
+# $1.25 / $2.50 per MTok and $0.20 cached, doubling at 200K input tokens like
+# the rest of the line. Probed 2026-10-09 through OpenRouter pinned to its xAI
+# endpoint (no direct xAI key was available):
+#   * `x-ai/grok-4.20` (the reasoning id): a native tool call, the tool-result
+#     round trip and a required tool choice returned 200, effort `low` and
+#     `high` both reasoned, and unlike Grok 4.5-4.7 reasoning off also
+#     returned 200;
+#   * `x-ai/grok-4.20-multi-agent`: effort `low` and `xhigh` reasoned (2,581
+#     and 9,247 reasoning tokens; xAI documents effort as the agent count), but
+#     OpenRouter found no endpoint that accepts tools, so the row claims none
+#     despite xAI's page listing function calling.
+[models."grok-4.20-0309-reasoning"]
+name = "Grok 4.20 Reasoning"
+provider = "xai"
+context_window = 1000000
+released = "2026-03-09"
+api_dialect = "openai_chat_compat"
+capabilities = ["tools", "vision", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 1.25, output_per_mtok = 2.50, cache_read_per_mtok = 0.20, input_token_bands = [{ minimum_input_tokens = 200001, input_multiplier = 2.0, output_multiplier = 2.0 }] }
+rate_limits = { source_url = "https://docs.x.ai/docs/models/grok-4.20-0309-reasoning", last_verified = "2026-10-09" }
+tier = "frontier"
+open_weight = false
+strengths = ["agentic", "tool_use", "reasoning", "vision", "long_context"]
+
+[models."grok-4.20-0309-non-reasoning"]
+name = "Grok 4.20 Non-Reasoning"
+provider = "xai"
+context_window = 1000000
+released = "2026-03-09"
+api_dialect = "openai_chat_compat"
+capabilities = ["tools", "vision", "streaming", "prompt_caching"]
+pricing = { input_per_mtok = 1.25, output_per_mtok = 2.50, cache_read_per_mtok = 0.20, input_token_bands = [{ minimum_input_tokens = 200001, input_multiplier = 2.0, output_multiplier = 2.0 }] }
+rate_limits = { source_url = "https://docs.x.ai/docs/models/grok-4.20-0309-non-reasoning", last_verified = "2026-10-09" }
+tier = "mid"
+open_weight = false
+strengths = ["speed", "tool_use", "vision", "long_context"]
+
+[models."grok-4.20-multi-agent-0309"]
+name = "Grok 4.20 Multi-Agent"
+provider = "xai"
+context_window = 1000000
+released = "2026-03-09"
+api_dialect = "openai_chat_compat"
+capabilities = ["vision", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 1.25, output_per_mtok = 2.50, cache_read_per_mtok = 0.20, input_token_bands = [{ minimum_input_tokens = 200001, input_multiplier = 2.0, output_multiplier = 2.0 }] }
+rate_limits = { source_url = "https://docs.x.ai/docs/models/grok-4.20-multi-agent-0309", last_verified = "2026-10-09" }
+tier = "frontier"
+open_weight = false
+strengths = ["reasoning", "vision", "long_context"]
+
 [models."grok-4.6"]
 name = "Grok 4.6"
 provider = "xai"

@@ -54,6 +54,7 @@ fn workflows() {
           needs: ["changes", "macos-plan"],
           if: "needs.macos-plan.outputs.run_macos == 'true' && " + GUARD,
         },
+        "macos-lint": {needs: ["changes"], if: GUARD},
         "ci-status": {
           steps: [
             {

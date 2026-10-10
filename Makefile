@@ -67,6 +67,7 @@ all: fmt
 	harn_bin="$$(./scripts/snapshot_harn_bin.sh "$$harn_bin" "$$stable_root/harn-bin")" || exit 1; \
 	$(MAKE) HARN_BIN="$$harn_bin" check-agent-gates || exit 1; \
 	$(MAKE) test-release-notices || exit 1; \
+	$(MAKE) check-aws-config-vendor test-aws-config-vendor || exit 1; \
 	$(MAKE) HARN_BIN="$$harn_bin" lint lint-md lint-actions lint-harn check-app-host spec-lint check-openapi-snapshot fmt-harn test test-harn-scripts test-agent-scripts test-pr-gate-scripts test-rust-lint-lane-cache conformance protocol-conformance mcp-conformance replay-oracle replay-bench check-highlight check-portable-benchmark-schema check-portable-demo-package check-prompt-grammar check-protocol-artifacts check-connector-schemas check-harness-migrations check-cli-surface check-bindings check-session-bundle-schema check-run-view-fixtures check-docs lint-test-patterns lint-diagnostic-codes check-stdlib-host-neutral check-public-product-names check-stdlib-strict-types check-stdlib-public-return-types check-schema-strict check-optional-dep-feature-contracts check-receipt-structs check-provider-catalog-drift check-source-file-lengths check-test-target-coverage check-gate-path-visibility check-python-boundary check-harn-syntax-sensitive-scans check-agent-guidance check-crate-sibling-versions check-protocol-symbol-removals check-dependabot-groups check-tree-sitter-keywords check-tree-sitter-parser check-grammar-keywords check-grammar-fitness check-loud-boundaries check-turn-end-boundary check-release-contract check-release-audit-contract check-ci-cache-policy check-rust-test-lane-policy check-cargo-lock-contract check-scheduled-workflows check-vm-exposures portal-check || exit 1; \
 	if [ -z "$(strip $(HARN_BIN))" ]; then HARN_BIN='' HARN_BIN_NO_BUILD=1 ./scripts/harn_bin.sh --record-receipt; fi
 
@@ -692,6 +693,8 @@ test-agent-scripts:
 	@echo "    Harn agent-loop tests OK."
 
 test-pr-gate-scripts:
+	./scripts/tests/macos_lint_aggregate_test.sh
+	node scripts/tests/rust_lint_timings_test.cjs
 	./scripts/tests/gh_check_state_launcher_test.sh
 	./scripts/tests/pr_title_convention_test.sh
 	./scripts/tests/fixture_git_init_branch_test.sh
@@ -716,6 +719,7 @@ test-pr-gate-scripts:
 	./scripts/tests/generate_sdk_clients_test.sh
 	./scripts/tests/changelog_fragment_check_test.sh
 	./scripts/tests/breaking_surface_check_test.sh
+	bash ./scripts/tests/pr_gate_range_test.sh
 	./scripts/tests/release_pr_drift_check_test.sh
 	./scripts/tests/release_ship_fragment_guard_test.sh
 	./scripts/tests/release_ship_root_harn_bin_test.sh
@@ -792,6 +796,8 @@ test-pr-gate-scripts:
 	./scripts/tests/prune_stale_targets_host_policy_test.sh
 	./scripts/tests/target_gc_maintenance_test.sh
 	./scripts/tests/report_ci_cache_budget_test.sh
+	./scripts/tests/cache_refresh_admission_test.sh
+	node scripts/tests/cache_generation_retirement_test.cjs
 	./scripts/tests/loadgen_postgres_gate_test.sh
 	./scripts/tests/check_all_features_test.sh
 	./scripts/tests/check_stdlib_strict_types_test.sh
@@ -1534,7 +1540,7 @@ repository-policies-source:
 	@$(MAKE) --no-print-directory run-policy-list POLICY_LIST="$(SOURCE_REPOSITORY_POLICIES)" \
 	  POLICY_JOBS="$$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 2)"
 
-repository-policies:
+repository-policies: check-aws-config-vendor test-aws-config-vendor
 	@$(MAKE) --no-print-directory run-policy-list \
 	  POLICY_LIST="$(SOURCE_REPOSITORY_POLICIES) $(WARM_REPOSITORY_POLICIES)"
 
@@ -1592,6 +1598,13 @@ check-release-contract:
 	@$(HARN_CMD) run scripts/release_contract.harn -- --check
 
 .PHONY: gen-release-notices check-release-notices test-release-notices
+.PHONY: check-aws-config-vendor test-aws-config-vendor
+check-aws-config-vendor:
+	node scripts/check_aws_config_vendor.mjs
+
+test-aws-config-vendor:
+	node --test scripts/tests/aws_config_vendor.test.mjs
+
 gen-release-notices:
 	node scripts/release_third_party_notices.mjs generate dist/release-notices
 

@@ -210,6 +210,26 @@ runs:
         fi
         ./scripts/ci/use_kache.sh
 
+    # Register before Swatinem so this companion's post hook observes the
+    # provider commit after Swatinem's post upload, rather than before it.
+    - id: generation
+      if: >-
+        inputs.persistent-target != 'true' && inputs.save == 'true' &&
+        github.ref == 'refs/heads/main' && runner.os == 'Linux' &&
+        (inputs.shared-key == 'harn-ci-cli' || inputs.shared-key == 'workspace-tests' || inputs.shared-key == 'package-audit')
+      uses: ./.github/actions/rust-cache-generation
+      env:
+        GH_TOKEN: ${{ github.token }}
+      with:
+        shared-key: ${{ steps.cache-paths.outputs.shared-key }}
+        cache-on-failure: ${{ inputs.cache-on-failure }}
+        cache-bin: ${{ inputs.cache-bin }}
+        cache-workspace-crates: ${{ inputs.cache-workspace-crates }}
+        cache-targets: ${{ inputs.target-dir == '' }}
+        cache-directories: ${{ format('{0} {1}', inputs.target-dir, inputs.cache-workspace-crates == 'true' && '.harn-workspace-source' || '') }}
+        workspaces: ${{ steps.cache-paths.outputs.workspaces }}
+        save-if: ${{ inputs.save == 'true' && github.ref == 'refs/heads/main' }}
+
     - id: cache
       if: inputs.persistent-target != 'true'
       uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
@@ -247,3 +267,12 @@ runs:
       if: inputs.reuse-workspace-crates == 'true' && inputs.cache-workspace-crates == 'true'
       shell: bash
       run: ./scripts/ci/reuse_workspace_crates.sh restore
+
+    - name: Record the measured restore for generation retirement
+      if: steps.generation.outputs.observation-file != ''
+      shell: bash
+      env:
+        CACHE_OBSERVATION_FILE: ${{ steps.generation.outputs.observation-file }}
+        CACHE_HIT: ${{ steps.cache.outputs.cache-hit }}
+        SOURCE_CURRENT: ${{ steps.reuse.outputs.source-current }}
+      run: node scripts/ci/rust_cache_generation.cjs observe

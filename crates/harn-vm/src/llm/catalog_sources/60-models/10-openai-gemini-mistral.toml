@@ -470,7 +470,8 @@ context_window = 200000
 capabilities = ["tools", "streaming"]
 pricing = { input_per_mtok = 2.00, output_per_mtok = 8.00, cache_read_per_mtok = 0.50 }
 deprecated = true
-deprecation_note = "Shutdown 2026-12-11 (announced 2026-06-11) per OpenAI deprecations page. Harn recommends gpt-6.1-sol."
+deprecation_note = "Shutdown 2026-12-11 (announced 2026-06-11) per OpenAI deprecations page, which retires the only o3 snapshot (o3-2025-04-16; read 2026-10-09). Harn recommends gpt-6.1-sol."
+sunset_date = "2026-12-11"
 superseded_by = "gpt-6.1-sol"
 tier = "reasoning"
 open_weight = false
@@ -804,6 +805,37 @@ architecture = { parameter_count_b = 128.0, moe = false, license = "Modified MIT
 tier = "frontier"
 open_weight = true
 strengths = ["coding", "tool_use", "reasoning", "long_context", "vision", "agentic"]
+# Mistral Large 4 (public preview v26.10, released 2026-10-06): 52B active /
+# 1.05T total MoE with a vision encoder and a 1M context window. Mistral's
+# model page (read 2026-10-09) lists a launch sale of $0.68 in / $0.07 cached /
+# $2.09 out against an original $1.36 / $0.14 / $4.18 per MTok; it states no
+# end date, and Artificial Analysis reports a two-week window (to about
+# 2026-10-20), so the row carries the original card with the sale as a
+# promotion to review then. The catalog id follows the docs slug and
+# OpenRouter, while the wire id is the API name the model card lists first
+# (`mistral-large-4`, shown with one alias; the reasoning guide names the
+# `mistral-large-4-0` alias). Medium 3.5's card lists `mistral-medium-3-5`
+# first the same way, and that is the id its row sends. No source confirms
+# that `mistral-large-latest` has moved. Mistral documents only `reasoning_effort`
+# `high` and `none` for it. Not call-verified on the direct route (no
+# MISTRAL_API_KEY on this host); see the OpenRouter row for the probe.
+[models."mistral-large-4-0"]
+name = "Mistral Large 4"
+provider = "mistral"
+wire_model = "mistral-large-4"
+context_window = 1048576
+released = "2026-10-06"
+logical_model = "mistral-large-4-0"
+equivalence_group = "mistral-large-4-0"
+api_dialect = "openai_chat_compat"
+capabilities = ["tools", "vision", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 1.36, output_per_mtok = 4.18, cache_read_per_mtok = 0.14, promotions = [
+  { id = "mistral-large-4-launch", starts_on = "2026-10-06", review_after = "2026-10-20", source_url = "https://docs.mistral.ai/models/mistral-large-4-0", input_per_mtok = 0.68, output_per_mtok = 2.09, cache_read_per_mtok = 0.07 },
+] }
+architecture = { parameter_count_b = 1050.0, active_parameter_count_b = 52.0, moe = true, source_url = "https://docs.mistral.ai/models/mistral-large-4-0", last_verified = "2026-10-09" }
+tier = "frontier"
+open_weight = false
+strengths = ["coding", "tool_use", "reasoning", "long_context", "vision", "agentic"]
 [models."mistral-large-2512"]
 name = "Mistral Large 3 2512"
 provider = "mistral"
@@ -866,6 +898,30 @@ strengths = ["coding", "tool_use", "reasoning", "long_context", "vision", "agent
 # that variant is deliberately not picked up in its place. The direct
 # Mistral `mistral-large-2512` row is unaffected and unverified this pass (no
 # MISTRAL_API_KEY on this host, and api.mistral.ai/v1/models is 401 without one).
+# Mistral Large 4 through OpenRouter's Mistral endpoint (listed 2026-10-06;
+# 1,048,576 context, 262,144 max output, text and image input, $0.68 / $0.07
+# cached / $2.09 at the launch sale). Probed 2026-10-09 pinned to that
+# endpoint: a native tool call, the tool-result round trip and a required tool
+# choice returned 200; reasoning off returned zero reasoning tokens and effort
+# `low` and `high` both reasoned. The EU endpoint has a 524,288 context and a
+# 10% premium; the row carries the global endpoint.
+[models."mistralai/mistral-large-4-0"]
+name = "Mistral Large 4 (via OpenRouter)"
+provider = "openrouter"
+context_window = 1048576
+released = "2026-10-06"
+logical_model = "mistral-large-4-0"
+equivalence_group = "mistral-large-4-0"
+served_variant = "openrouter"
+api_dialect = "openai_chat"
+capabilities = ["tools", "vision", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 1.36, output_per_mtok = 4.18, cache_read_per_mtok = 0.14, promotions = [
+  { id = "mistral-large-4-launch", starts_on = "2026-10-06", review_after = "2026-10-20", source_url = "https://openrouter.ai/api/v1/models/mistralai/mistral-large-4-0/endpoints", input_per_mtok = 0.68, output_per_mtok = 2.09, cache_read_per_mtok = 0.07 },
+] }
+architecture = { parameter_count_b = 1050.0, active_parameter_count_b = 52.0, moe = true, source_url = "https://docs.mistral.ai/models/mistral-large-4-0", last_verified = "2026-10-09" }
+tier = "frontier"
+open_weight = false
+strengths = ["coding", "tool_use", "reasoning", "long_context", "vision", "agentic"]
 [models."mistralai/mistral-small-2603"]
 name = "Mistral Small 4"
 provider = "openrouter"
