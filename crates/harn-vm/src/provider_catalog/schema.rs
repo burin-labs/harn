@@ -26,7 +26,8 @@ pub fn schema_value() -> Value {
             "variants": {"type": "array", "items": {"$ref": "#/$defs/variant"}},
             "families": {"type": "array", "items": {"$ref": "#/$defs/model_family"}},
             "routing_routes": {"type": "array", "items": {"$ref": "#/$defs/routing_route"}},
-            "qc_defaults": {"type": "object", "additionalProperties": {"type": "string"}}
+            "qc_defaults": {"type": "object", "additionalProperties": {"type": "string"}},
+            "portal_defaults": {"type": "object", "additionalProperties": {"type": "string"}}
         },
         "additionalProperties": false,
         "$defs": {

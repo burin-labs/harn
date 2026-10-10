@@ -23,6 +23,11 @@ pub struct ProviderCatalogArtifact {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub routing_routes: Vec<CatalogRoutingRoute>,
     pub qc_defaults: BTreeMap<String, String>,
+    /// Each provider's setup-UI default model (`provider_defaults.<p>.portal`),
+    /// the model a host offers when a person picks that provider. Distinct from
+    /// `qc_defaults`, the cheap quality-check route.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub portal_defaults: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

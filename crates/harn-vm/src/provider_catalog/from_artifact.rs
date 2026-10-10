@@ -48,6 +48,19 @@ pub(crate) fn config_from_artifact(
             .map(|model| (model.id.clone(), model_def_from_catalog(model)))
             .collect(),
         qc_defaults: artifact.qc_defaults.clone(),
+        provider_defaults: artifact
+            .portal_defaults
+            .iter()
+            .map(|(provider, model)| {
+                (
+                    provider.clone(),
+                    llm_config::ProviderDefaultModels {
+                        runtime: None,
+                        portal: Some(model.clone()),
+                    },
+                )
+            })
+            .collect(),
         presentation: llm_config::PresentationConfig {
             // A remote artifact already resolved every recommendation. Preserve
             // that exact choice as a fixed model selector when installing the

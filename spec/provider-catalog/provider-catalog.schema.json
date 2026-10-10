@@ -2135,7 +2135,7 @@
       "type": "object"
     }
   },
-  "$id": "https://harnlang.com/schemas/provider-catalog.v12.json",
+  "$id": "https://harnlang.com/schemas/provider-catalog.v13.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "properties": {
@@ -2160,6 +2160,12 @@
       },
       "type": "array"
     },
+    "portal_defaults": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "type": "object"
+    },
     "providers": {
       "items": {
         "$ref": "#/$defs/provider"
@@ -2179,10 +2185,10 @@
       "type": "array"
     },
     "schema": {
-      "const": "https://harnlang.com/schemas/provider-catalog.v12.json"
+      "const": "https://harnlang.com/schemas/provider-catalog.v13.json"
     },
     "schema_version": {
-      "const": 12
+      "const": 13
     },
     "variants": {
       "items": {

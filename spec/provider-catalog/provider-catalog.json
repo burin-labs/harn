@@ -1,6 +1,6 @@
 {
-  "schema_version": 12,
-  "schema": "https://harnlang.com/schemas/provider-catalog.v12.json",
+  "schema_version": 13,
+  "schema": "https://harnlang.com/schemas/provider-catalog.v13.json",
   "generated_by": "harn provider catalog generate",
   "providers": [
     {
@@ -40594,5 +40594,13 @@
     "openrouter": "google/gemini-3.5-flash-lite",
     "xai": "grok-build-0.1",
     "zai": "glm-4.6"
+  },
+  "portal_defaults": {
+    "anthropic": "claude-sonnet-5-5",
+    "local": "gemma-4-26b-a4b-it",
+    "mlx": "unsloth/Qwen3.6-35B-A3B-UD-MLX-4bit",
+    "ollama": "llama3.2",
+    "openai": "gpt-6.1-sol",
+    "openrouter": "google/gemma-4-26b-a4b-it"
   }
 }

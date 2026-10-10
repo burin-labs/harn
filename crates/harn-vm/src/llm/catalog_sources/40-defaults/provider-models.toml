@@ -3,9 +3,13 @@
 # setup UI. The two may differ deliberately, including in price.
 # Host-supplied local/MLX model environment variables still take precedence.
 
+# The setup-UI offer follows the current generation: Claude Sonnet 5.5, the
+# `sonnet` alias target. The runtime fallback stays on Sonnet 4.6 because
+# Sonnet 5.5 rejects non-default sampling parameters, and bare CLI callers may
+# still send temperature.
 [provider_defaults.anthropic]
 runtime = "claude-sonnet-4-6"
-portal = "claude-sonnet-4-6"
+portal = "claude-sonnet-5-5"
 
 [provider_defaults.local]
 runtime = "gemma-4-26b-a4b-it"
@@ -15,9 +19,11 @@ portal = "gemma-4-26b-a4b-it"
 runtime = "unsloth/Qwen3.6-35B-A3B-UD-MLX-4bit"
 portal = "unsloth/Qwen3.6-35B-A3B-UD-MLX-4bit"
 
+# The setup-UI offer is GPT-6.1 Sol, the `sol` alias target, in place of the
+# two-generation-old GPT-4o.
 [provider_defaults.openai]
 runtime = "gpt-4o-mini"
-portal = "gpt-4o"
+portal = "gpt-6.1-sol"
 
 [provider_defaults.ollama]
 runtime = "llama3.2"
