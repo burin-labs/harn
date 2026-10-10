@@ -2453,6 +2453,14 @@ export const HARN_INFERENCE_ADMISSION_DATA_POSTURE_VALUES = [
 ] as const
 export type HarnInferenceAdmissionDataPosture = (typeof HARN_INFERENCE_ADMISSION_DATA_POSTURE_VALUES)[number]
 
+export const HARN_INFERENCE_ADMISSION_DATA_CONTROLS_OUTCOME_VALUES = [
+  "not_requested",
+  "applied",
+  "no_control_available",
+  "provider_unresearched",
+] as const
+export type HarnInferenceAdmissionDataControlsOutcome = (typeof HARN_INFERENCE_ADMISSION_DATA_CONTROLS_OUTCOME_VALUES)[number]
+
 export interface HarnInferenceAdmissionBoundary {
   reach: HarnInferenceAdmissionReach
   allow_training_discounts: boolean
@@ -2471,6 +2479,9 @@ export interface HarnInferenceAdmissionSnapshot {
   model: string
   status: HarnInferenceAdmissionStatus
   training_control_planned: boolean
+  data_posture: HarnInferenceAdmissionDataPosture
+  data_controls_note?: string | null
+  data_controls_outcome?: HarnInferenceAdmissionDataControlsOutcome
   effective_boundary?: HarnInferenceAdmissionBoundary | null
   governing_rule?: string | null
   local_runtime?: boolean | null

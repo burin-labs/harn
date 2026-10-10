@@ -4898,6 +4898,20 @@ public enum HarnInferenceAdmissionDataPosture: String, Codable, Sendable, CaseIt
     ].map { Self(rawValue: $0)! }
 }
 
+public enum HarnInferenceAdmissionDataControlsOutcome: String, Codable, Sendable, CaseIterable {
+    case notRequested = "not_requested"
+    case applied = "applied"
+    case noControlAvailable = "no_control_available"
+    case providerUnresearched = "provider_unresearched"
+
+    public static let allCases: [Self] = [
+        "not_requested",
+        "applied",
+        "no_control_available",
+        "provider_unresearched",
+    ].map { Self(rawValue: $0)! }
+}
+
 public struct HarnInferenceAdmissionBoundary: Codable, Sendable, Equatable {
     public let reach: HarnInferenceAdmissionReach
     public let allowTrainingDiscounts: Bool
@@ -4928,6 +4942,9 @@ public struct HarnInferenceAdmissionSnapshot: Codable, Sendable, Equatable {
     public let model: String
     public let status: HarnInferenceAdmissionStatus
     public let trainingControlPlanned: Bool
+    public let dataPosture: HarnInferenceAdmissionDataPosture
+    public let dataControlsNote: String?
+    public let dataControlsOutcome: HarnInferenceAdmissionDataControlsOutcome?
     public let effectiveBoundary: HarnInferenceAdmissionBoundary?
     public let governingRule: String?
     public let localRuntime: Bool?
@@ -4940,6 +4957,9 @@ public struct HarnInferenceAdmissionSnapshot: Codable, Sendable, Equatable {
         case model
         case status
         case trainingControlPlanned = "training_control_planned"
+        case dataPosture = "data_posture"
+        case dataControlsNote = "data_controls_note"
+        case dataControlsOutcome = "data_controls_outcome"
         case effectiveBoundary = "effective_boundary"
         case governingRule = "governing_rule"
         case localRuntime = "local_runtime"

@@ -34,6 +34,17 @@ route facts, never credentials, endpoint URLs, or request-control values.
 preview does not apply it or establish model readiness. Inference enforces its
 boundary again at dispatch.
 
+`data_posture` is the data posture inference will send on this route: the
+request's `data_controls` when given, otherwise the catalog's
+`[data_controls_policy] default_posture`, and `default` on a transport that
+cannot carry per-request controls. The per-request receipt reports the same
+value as `requested_posture`. `data_controls_outcome` is what that posture does
+on the route, and `data_controls_note` is the route's own handling note when its
+model row declares one, otherwise its provider's. A route the catalog records as
+training on API traffic with no control to stop it is `denied` under
+`strictest_available`, with governing rule `data_controls.training_refused`,
+because inference refuses it before sending.
+
 Embedders can call `harn_vm::llm::api::preview_inference_admission`. Request and
 snapshot schemas and host records are generated from those owning types in
 the published protocol artifacts.

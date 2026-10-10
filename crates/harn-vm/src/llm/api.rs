@@ -54,6 +54,7 @@ pub use errors::{LlmErrorKind, LlmErrorReason};
 pub use inference_boundary::{
     inference_admission_schemas, preview_inference_admission, InferenceAdmissionRequest,
     InferenceAdmissionSnapshot, InferenceAdmissionStatus, InferenceBoundary, InferenceReach,
+    DATA_CONTROLS_TRAINING_REFUSED_RULE,
 };
 pub(crate) use ollama::apply_ollama_runtime_settings;
 pub(crate) use ollama::ollama_unload_grace_duration_from_env;

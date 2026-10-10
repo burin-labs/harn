@@ -12,7 +12,7 @@ use super::errors::{LlmErrorKind, LlmErrorReason};
 mod admission;
 pub use admission::{
     inference_admission_schemas, preview_inference_admission, InferenceAdmissionRequest,
-    InferenceAdmissionSnapshot, InferenceAdmissionStatus,
+    InferenceAdmissionSnapshot, InferenceAdmissionStatus, DATA_CONTROLS_TRAINING_REFUSED_RULE,
 };
 
 #[derive(Clone, Copy, PartialEq, Eq)]
