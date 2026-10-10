@@ -5,7 +5,6 @@ scratch=$(mktemp -d)
 trap 'rm -rf "$scratch"' EXIT
 mkdir -p "$scratch/bin" "$scratch/repo/scripts/ci"
 cp "$root/scripts/ci/require_full_suite.sh" "$scratch/repo/scripts/ci/"
-cp "$root/scripts/ci/main_recovery_policy.json" "$root/scripts/ci/main_recovery_evidence.jq" "$scratch/repo/scripts/ci/"
 cat > "$scratch/bin/gh" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -41,7 +40,11 @@ case "$*" in
     done
     ;;
   'issue list'*) [[ "${DUPLICATE:-false}" != true ]] || echo 99 ;;
-  'issue create'*) echo https://github.com/fixture/repo/issues/99 ;;
+  'issue create'*)
+    while [[ "$1" != --body-file ]]; do shift; done
+    cp "$2" "$FIXTURE/issue-body"
+    echo https://github.com/fixture/repo/issues/99
+    ;;
   'pr list'*) : ;;
   'pr create'*) echo https://github.com/fixture/repo/pull/100 ;;
   'pr edit'*|'run rerun'*) : ;;
@@ -97,11 +100,11 @@ ATTEMPT=2 OUTCOME=failure PARENT_RED=true run_case
 grep -Fq '[CI] Persistent main failure' "$scratch/calls"
 absent signed-publish
 ATTEMPT=2 OUTCOME=failure RETRY_JOB='Windows cross-compile check' run_case
-grep -Fq '[CI] Unstable main suite' "$scratch/calls"
+grep -Fq 'issue create' "$scratch/calls"
 absent signed-publish
 ATTEMPT=2 OUTCOME=failure FIRST_JOB='Binary size signal' FIRST_STEP="Fetch main's last debug measurement" run_case
 absent 'signed-publish|pr create|pr edit'
-grep -Fq '[CI] Unstable main suite' "$scratch/calls"
+grep -Fq '[CI] Persistent main failure' "$scratch/calls"
 ATTEMPT=2 OUTCOME=failure FIRST_STEP='Download workspace test archive' run_case
 absent 'signed-publish|pr create|pr edit'
 ATTEMPT=2 OUTCOME=failure RETRY_STEP='Download workspace test archive' run_case
@@ -123,8 +126,10 @@ if ATTEMPT=1 OUTCOME=failure EVENT=pull_request run_case; then
   echo 'Untrusted event was accepted' >&2; exit 1
 fi
 ATTEMPT=2 OUTCOME=failure run_case
-grep -Fxq signed-publish "$scratch/calls"
-grep -Fq -- '--add-label ship' "$scratch/calls"
-absent 'run rerun'
-[[ "$(cat source)" == good && "$(cat later)" == keep ]]
-echo 'Main recovery: source assertion, measurement/setup refusal, missing/pending evidence, retry, duplicate, unknown parent and untrusted-event controls passed.'
+grep -Fq '[CI] Persistent main failure' "$scratch/calls"
+grep -Fq 'Run Rust workspace tests' "$scratch/issue-body"
+grep -Fq '"measured_jobs": 1' "$scratch/issue-body"
+grep -Fq '"source_cause": "unestablished"' "$scratch/issue-body"
+absent 'run rerun|signed-publish|pr create|pr edit'
+[[ "$(cat source)" == bad && "$(cat later)" == keep ]]
+echo 'Main recovery: retry, failure census, source preservation, measurement/setup/missing/pending/partial controls passed.'

@@ -4,7 +4,6 @@ import { scan_glob } from "../path_visibility.harn"
 import "./generation_projection.harn"
 import "./harn_check_cache.harn"
 import "./linux_checks.harn"
-import "./main_recovery.harn"
 import "./native_checks.harn"
 import "./policy_core.harn"
 import "./post_merge_tier.harn"
@@ -101,10 +100,6 @@ pub fn run_ci_cache_policy(harness: Harness) {
     harness.runtime.exit(1)
   }
   const error_groups: list<list<string>> = [
-    main_recovery_policy_errors(
-      unwrap(read_json_result(harness.fs, "scripts/ci/main_recovery_policy.json")),
-      workflows["ci.yml"],
-    ),
     ci_cache_policy_errors(policy, action, node_action, workflows),
     rust_cache_generation_projection_errors(action, generation_action, generation_pin),
     native_source_projection_errors(workspace_reuse_script),
