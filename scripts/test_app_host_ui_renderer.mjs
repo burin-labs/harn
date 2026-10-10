@@ -449,7 +449,12 @@ test("headings, text, status and button labels keep their text", async () => {
     () => app.byId("go").onclick(),
     elements("Studio 2", "Busy"),
   );
-  assert.deepEqual(texts(), ["Studio 2", "Sketch loosely.", "Busy", "Generate"]);
+  assert.deepEqual(texts(), [
+    "Studio 2",
+    "Sketch loosely.",
+    "Busy",
+    "Generate",
+  ]);
 });
 
 test("a canvas keeps its node and its handlers across a redraw", async () => {

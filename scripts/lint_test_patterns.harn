@@ -28,6 +28,10 @@ import { scan_glob } from "./path_visibility.harn"
 import { is_mechanically_checked_source_projection } from "./source_projections.harn"
 
 const THREAD_SLEEP_ALLOWLIST: list<string> = [
+  // Process-group disappearance is observed through kill(2), after the child
+  // and its descendant have reported readiness. A virtual clock cannot reap
+  // OS processes; the bounded poll names the surviving process group.
+  "crates/harn-vm/src/op_interrupt.rs",
   "crates/harn-hostlib/tests/harn_hostlib/process_tools.rs",
   // Real subprocess lifecycle e2e: probes OS process-group death and
   // `background: true` survival, so the waits observe host process state.
@@ -91,6 +95,8 @@ const TOKIO_SLEEP_ALLOWLIST: list<string> = [
 // Wall-clock `Instant::now() < deadline` comparisons inside any loop or
 // guard.
 const INSTANT_NOW_DEADLINE_ALLOWLIST: list<string> = [
+  // Bounds the kill(2) process-group reaping probe described above.
+  "crates/harn-vm/src/op_interrupt.rs",
   // Real subprocess lifecycle e2e: bounded probes wait on OS process-group
   // disappearance after SIGTERM/SIGKILL and cannot run on a virtual clock.
   "crates/harn-hostlib/tests/harn_hostlib/process_tools_e2e.rs",
@@ -119,7 +125,7 @@ const SYSTEM_TIME_ALLOWLIST: list<string> = [
 // assertion that fails under load. Named-constant variants are not caught
 // because a static text search cannot resolve the constant.
 //
-// A two-sided RATCHET, read by `report_pattern` like INLINE_TEST_GRANDFATHER:
+// A two-sided RATCHET, read by `report_pattern`:
 // each row pins the exact count of literal waits a file keeps, so a new one is
 // refused and a fixed one fails until its row is lowered or deleted. Every row
 // says why its waits are not hang detectors.
@@ -127,10 +133,9 @@ const LITERAL_TIMEOUT_BASELINE = [
   // The CLI case waits on a real Cargo child process.
   {rule: "literal_timeout", path: "crates/harn-cli/tests/harn_cli_e2e/host_lease_cli.rs", count: 1},
   // Runtime code, not a test wait: the inline-module split scans everything
-  // below a file's first `#[cfg(test)] mod`, and these files declare one
-  // above runtime code. The durations are user-supplied budgets.
+  // below a file's first inline `#[cfg(test)] mod` block, and this file
+  // declares one above runtime code. The duration is a user-supplied budget.
   {rule: "literal_timeout", path: "crates/harn-cli/src/commands/test/mod.rs", count: 1},
-  {rule: "literal_timeout", path: "crates/harn-vm/src/composition/mod.rs", count: 1},
   // Real subprocess JSON-RPC harness: a short drain of the child's stderr
   // after exit. Expiry means "nothing more buffered", not a failure.
   {rule: "literal_timeout", path: "crates/harn-cli/tests/test_util/stdio_jsonrpc.rs", count: 1},
@@ -147,6 +152,15 @@ const LITERAL_TIMEOUT_BASELINE = [
   // Deliberate quiescence: after the first OTLP export arrives, drain
   // whatever else is already buffered. Expiry ends the drain, not the test.
   {rule: "literal_timeout", path: "crates/harn-vm/tests/harn_vm/otel_sink_export.rs", count: 1},
+]
+
+// Live quality measurements need provider credentials and, for rejudging,
+// saved transcripts. Their deterministic logic runs in the default suite;
+// these two opt-in measurements remain ignored. Exact counts reject another
+// ignored test and require removing a row when its measurement is removed.
+const LIVE_PROVIDER_TEST_BASELINE = [
+  {rule: "ignore_attr", path: "crates/harn-vm/src/security/behavioral.rs", count: 1},
+  {rule: "ignore_attr", path: "crates/harn-vm/src/security/stance_judge.rs", count: 1},
 ]
 
 // Conformance tests that exercise real subprocesses should share the bounded
@@ -398,11 +412,6 @@ const DIRECT_HARN_BINARY_BASELINE = [
 const SHELL_SPAWN_LITERAL_BASELINE = [
   {path: "crates/harn-hostlib/tests/harn_hostlib/process_artifact_retention.rs", count: 1},
   {path: "crates/harn-vm/src/stdlib/sandbox/tests.rs", count: 1},
-  // Grandfathered by harn#8505, like the rows in INLINE_TEST_GRANDFATHER: an
-  // inline test module in a runtime file that no rule here had ever reached.
-  // This ratchet is already two-sided, so the row lives here rather than
-  // being duplicated into that table.
-  {path: "crates/harn-vm/src/op_interrupt.rs", count: 3},
 ]
 
 // Runtime files allowed to read host time directly (#1439). Each entry is a
@@ -836,7 +845,7 @@ pub fn inline_test_module_line(text: string) -> int? {
         probe = probe + 1
         continue
       }
-      if next.starts_with("mod ") || next.starts_with("pub mod ") {
+      if regex_match(r"^(pub(\([^)]*\))? +)?mod +[A-Za-z_][A-Za-z0-9_]* *\{", next) != nil {
         return line_no
       }
       break
@@ -1073,51 +1082,9 @@ pub fn has_mock_time(text: string) -> bool {
  * file for which `skip(rel)` is true. Prints each hit as `  <n>:<line>`
  * followed by the pre-formatted `hint_lines`; returns the violation count.
  */
-// Findings that existed before this gate began selecting its scan set by
-// content as well as by path (harn#8505). Every one is inside an inline
-// `#[cfg(test)]` module in a runtime file, so no rule here had ever applied to
-// it; they are grandfathered rather than introduced.
-//
-// This is a RATCHET, not an allowlist. Each row pins one rule against one file
-// at an exact finding count, and `report_pattern` fails when the observed count
-// differs in EITHER direction: a new finding in a listed file is refused, and
-// so is a row whose findings have been fixed but whose entry was left behind.
-// The set can therefore only shrink, and it shrinks by deleting rows.
-//
-// A row is coarse to the extent that it counts findings in a file rather than
-// identifying each one, so swapping one finding for another inside the same
-// file and rule would not be caught. That is the known limit of the file-level
-// mechanisms these rules already use.
-//
-// harn#8507 tracks fixing these rather than carrying them.
-const INLINE_TEST_GRANDFATHER = [
-  {rule: "ignore_attr", path: "crates/harn-vm/src/security/behavioral.rs", count: 1},
-  {rule: "ignore_attr", path: "crates/harn-vm/src/security/stance_judge.rs", count: 1},
-  {rule: "instant_now_deadline", path: "crates/harn-vm/src/op_interrupt.rs", count: 1},
-  {rule: "system_time", path: "crates/harn-hostlib/src/fs.rs", count: 1},
-  {rule: "system_time", path: "crates/harn-vm/src/agent_events/sinks.rs", count: 2},
-  {rule: "system_time", path: "crates/harn-vm/src/event_log/util.rs", count: 1},
-  {rule: "system_time", path: "crates/harn-vm/src/metadata.rs", count: 1},
-  {rule: "system_time", path: "crates/harn-vm/src/triggers/worker_queue.rs", count: 1},
-  {rule: "thread_sleep", path: "crates/harn-cli/src/commands/command_probe.rs", count: 1},
-  {rule: "thread_sleep", path: "crates/harn-vm/src/op_interrupt.rs", count: 2},
-  {rule: "thread_sleep", path: "crates/harn-vm/src/stdlib/clock.rs", count: 1},
-  {
-    rule: "tokio_sleep",
-    path: "crates/harn-cli/src/commands/orchestrator/listener/routes.rs",
-    count: 1,
-  },
-  {rule: "tokio_sleep", path: "crates/harn-serve/src/adapters/worker.rs", count: 1},
-  {rule: "tokio_sleep", path: "crates/harn-vm/src/composition/mod.rs", count: 1},
-  {rule: "tokio_sleep", path: "crates/harn-vm/src/llm/api/transport/ndjson.rs", count: 1},
-  {rule: "tokio_sleep", path: "crates/harn-vm/src/llm/fake.rs", count: 1},
-  {rule: "tokio_sleep", path: "crates/harn-vm/src/llm/structured_envelope.rs", count: 1},
-  {rule: "tokio_sleep", path: "crates/harn-vm/src/stdlib/monitors.rs", count: 1},
-]
-
 /** The pinned finding count for `rule` in `rel`, or nil when not pinned. */
-pub fn grandfather_count(rule: string, rel: string) -> int? {
-  for row in INLINE_TEST_GRANDFATHER + LITERAL_TIMEOUT_BASELINE {
+pub fn pattern_baseline_count(rule: string, rel: string) -> int? {
+  for row in LITERAL_TIMEOUT_BASELINE + LIVE_PROVIDER_TEST_BASELINE {
     if row.rule == rule && row.path == rel {
       return row.count
     }
@@ -1126,10 +1093,10 @@ pub fn grandfather_count(rule: string, rel: string) -> int? {
 }
 
 /** `rule:path` keys appearing more than once, which would make a row unreadable. */
-pub fn grandfather_duplicates() -> list<string> {
+pub fn pattern_baseline_duplicates() -> list<string> {
   let seen: list<string> = []
   let dupes: list<string> = []
-  for row in INLINE_TEST_GRANDFATHER + LITERAL_TIMEOUT_BASELINE {
+  for row in LITERAL_TIMEOUT_BASELINE + LIVE_PROVIDER_TEST_BASELINE {
     const key = row.rule + ":" + row.path
     if seen.contains(key) && !dupes.contains(key) {
       dupes = dupes + [key]
@@ -1153,7 +1120,7 @@ fn report_pattern(
       continue
     }
     const hits = find_hits(f.text, pattern)
-    const pinned = grandfather_count(rule, f.rel)
+    const pinned = pattern_baseline_count(rule, f.rel)
     if pinned != nil {
       // A pinned file is judged by count in both directions. Reporting each
       // hit again would bury the one number a reader has to change.
@@ -1169,9 +1136,7 @@ fn report_pattern(
             stdio.println(h)
           }
         } else {
-          stdio.println(
-            "    hint: findings were removed; delete this row from INLINE_TEST_GRANDFATHER",
-          )
+          stdio.println("    hint: findings were removed; lower or delete this rule's baseline row")
         }
         count = count + 1
       }
@@ -1259,6 +1224,16 @@ pipeline main(harness: Harness, task: unknown) {
   }
   let violations = 0
   harness.stdio.println("=== Checking test files for forbidden patterns ===")
+  for key in pattern_baseline_duplicates() {
+    harness.stdio.println("  duplicate pattern baseline: " + key)
+    violations = violations + 1
+  }
+  for row in LITERAL_TIMEOUT_BASELINE + LIVE_PROVIDER_TEST_BASELINE {
+    if !test_files.any({ f -> f.rel == row.path }) {
+      harness.stdio.println("  unscanned pattern baseline: " + row.rule + ":" + row.path)
+      violations = violations + 1
+    }
+  }
   harness.stdio.println("--- std::thread::sleep ---")
   violations = violations
     + report_pattern(

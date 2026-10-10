@@ -31,6 +31,9 @@
 
 mod context;
 
+#[cfg(all(test, unix))]
+mod probe_tests;
+
 #[cfg(test)]
 pub(crate) use context::install_for_vm;
 pub use context::{
@@ -1346,25 +1349,28 @@ mod tests {
     #[test]
     fn interrupted_wait_kills_process_group() {
         // Child spawns a grandchild; the whole group must die on interrupt.
-        let mut command = std::process::Command::new("sh");
-        command.args(["-c", "sleep 30 & wait"]);
-        configure_kill_group(&mut command);
-        let mut child = command.spawn().expect("spawn sh");
+        let mut child = super::probe_tests::start_process_probe("tree", true, None);
         let pgid = child.id();
 
         let cancel = Arc::new(AtomicBool::new(true));
         let _guard = install(Some(cancel), None);
         let started = Instant::now();
         let outcome = wait_child_interruptible(&mut child, None).expect("wait");
-        assert!(matches!(outcome, ChildWait::Interrupted(_, _)));
+        let ChildWait::Interrupted(_, report) = outcome else {
+            panic!("expected interrupt, got a different child wait outcome");
+        };
+        assert!(
+            !report.children.is_empty(),
+            "probe must reach a live descendant: {report:?}"
+        );
         assert!(started.elapsed() < Duration::from_secs(10));
 
         // kill(-pgid, 0) fails with ESRCH once every member is gone.
-        extern "C" {
-            fn kill(pid: i32, sig: i32) -> i32;
-        }
-        let group_gone = || unsafe { kill(-(pgid as i32), 0) } != 0;
-        let deadline = Instant::now() + Duration::from_secs(5);
+        let group_gone = || {
+            (unsafe { libc::kill(-(pgid as i32), 0) }) != 0
+                && std::io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH)
+        };
+        let deadline = Instant::now() + harn_clock::test_support::HANG_CEILING;
         while !group_gone() && Instant::now() < deadline {
             std::thread::sleep(Duration::from_millis(50));
         }
@@ -1383,47 +1389,24 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn escalating_terminate_kills_a_term_immune_child_and_asks_a_polite_one_first() {
-        use std::process::{Command, Stdio};
-
         let dir = tempfile::tempdir().expect("temp dir");
         let marker = dir.path().join("term-received.marker");
-
-        let mut immune = Command::new("sh")
-            .arg("-c")
-            .arg("trap '' TERM; while true; do sleep 0.05; done")
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-            .expect("spawn term-immune child");
-        let mut polite = Command::new("sh")
-            .arg("-c")
-            .arg(format!(
-                "trap 'printf TERM > {}; exit 0' TERM; while true; do sleep 0.05; done",
-                marker.display()
-            ))
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-            .expect("spawn polite child");
+        let mut immune = super::probe_tests::start_process_probe("immune", true, None);
+        let mut polite = super::probe_tests::start_process_probe("polite", true, Some(&marker));
 
         let immune_pid = immune.id();
         let polite_pid = polite.id();
 
         // Liveness first: a child that never started would make every clause
         // below pass for the wrong reason.
-        let started = Instant::now();
-        while started.elapsed() < Duration::from_secs(5)
-            && !(process_exists(immune_pid) && process_exists(polite_pid))
-        {
-            std::thread::sleep(Duration::from_millis(20));
-        }
         assert!(
             process_exists(immune_pid) && process_exists(polite_pid),
             "both probe children must be running before the terminate"
         );
-        assert!(
-            !marker.exists(),
-            "the SIGTERM marker must not exist before the terminate"
+        assert_eq!(
+            std::fs::read(&marker).unwrap(),
+            b"",
+            "no SIGTERM handled before termination"
         );
 
         let immune_report = terminate_pid_tree_group_and_token_with_report(immune_pid, None);
