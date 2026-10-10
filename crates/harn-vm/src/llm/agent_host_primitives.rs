@@ -1521,7 +1521,7 @@ pub(super) async fn host_agent_dispatch_tool_call(
         );
         // A write the handler finished before the cancel is a known change,
         // so the cancelled result says so instead of `unknown`.
-        let applied = crate::agent_sessions::take_tool_call_mutations(&session_id, &tool_id);
+        let applied = crate::tool_call_mutations::take(&session_id, &tool_id);
         if !applied.is_empty() {
             if let Some(obj) = cancelled.as_object_mut() {
                 obj.insert(

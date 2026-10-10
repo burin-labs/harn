@@ -14,16 +14,17 @@ use std::sync::{Arc, Mutex};
 use harn_vm::agent_events::{AgentEvent, AgentEventSink, ToolCallStatus, ToolMutationStatus};
 use harn_vm::bridge::HostBridge;
 
+/// `(tool_call_id, status, mutation_status, changed_paths)` of one update.
+type ObservedUpdate = (
+    String,
+    ToolCallStatus,
+    ToolMutationStatus,
+    Option<Vec<String>>,
+);
+
 #[derive(Default)]
 struct UpdateSink {
-    updates: Mutex<
-        Vec<(
-            String,
-            ToolCallStatus,
-            ToolMutationStatus,
-            Option<Vec<String>>,
-        )>,
-    >,
+    updates: Mutex<Vec<ObservedUpdate>>,
 }
 
 impl AgentEventSink for UpdateSink {
@@ -52,7 +53,6 @@ fn stopped_call_update(
     session: &str,
     writes: bool,
 ) -> (ToolCallStatus, ToolMutationStatus, Option<Vec<String>>) {
-    harn_vm::reset_thread_local_state();
     let write = if writes {
         r#"harness.fs.write_text(path_join(harness.fs.workspace_temp_dir(), "stopped-write.txt"), "applied before the stop")"#
     } else {
@@ -99,30 +99,36 @@ pipeline main(harness: Harness, _: unknown) {{
 }}
 "#
     );
-    let chunk = harn_vm::compile_source(&source).expect("source compiles");
     let sink = Arc::new(UpdateSink::default());
-    harn_vm::agent_events::register_sink(session, sink.clone());
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    rt.block_on(async {
-        let local = tokio::task::LocalSet::new();
-        local
-            .run_until(async {
-                let bridge = Arc::new(HostBridge::from_parts(
-                    Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
-                    Arc::new(AtomicBool::new(false)),
-                    Arc::new(Mutex::new(())),
-                    1,
-                ));
-                harn_vm::llm::install_current_host_bridge(bridge);
-                let mut vm = harn_vm::Vm::new();
-                harn_vm::register_vm_stdlib(&mut vm);
-                let _ = vm.execute(&chunk).await;
-                harn_vm::llm::clear_current_host_bridge();
-            })
-            .await
+    let registered = sink.clone();
+    let session_id = session.to_string();
+    harn_vm::on_vm_stack(move || {
+        // Reset first: it drops every sink registered before it.
+        harn_vm::reset_thread_local_state();
+        harn_vm::agent_events::register_sink(session_id, registered);
+        let chunk = harn_vm::compile_source(&source).expect("source compiles");
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        rt.block_on(async {
+            let local = tokio::task::LocalSet::new();
+            local
+                .run_until(async {
+                    let bridge = Arc::new(HostBridge::from_parts(
+                        Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
+                        Arc::new(AtomicBool::new(false)),
+                        Arc::new(Mutex::new(())),
+                        1,
+                    ));
+                    harn_vm::llm::install_current_host_bridge(bridge);
+                    let mut vm = harn_vm::Vm::new();
+                    harn_vm::register_vm_stdlib(&mut vm);
+                    let _ = vm.execute(&chunk).await;
+                    harn_vm::llm::clear_current_host_bridge();
+                })
+                .await;
+        });
     });
     let updates = sink.updates.lock().unwrap();
     updates

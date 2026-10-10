@@ -157,7 +157,7 @@ impl ToolLifecycleStarts {
                 // A terminal update reports the call's own outcome, so its
                 // mutation record is no longer needed and must not leak to a
                 // reused id.
-                let _ = crate::agent_sessions::take_tool_call_mutations(session_id, tool_call_id);
+                let _ = crate::tool_call_mutations::take(session_id, tool_call_id);
                 true
             }
             AgentEvent::ToolCallUpdate {
@@ -453,7 +453,7 @@ pub(crate) fn fire_session_end_hooks(session_id: &str, abandon_in_flight: bool) 
         // it finished. A recorded mutation is a known change; with none, the
         // handler may still have acted through a channel the runtime cannot
         // see (a host call, a subprocess), so the outcome stays unknown.
-        let applied = crate::agent_sessions::take_tool_call_mutations(session_id, &tool_call_id);
+        let applied = crate::tool_call_mutations::take(session_id, &tool_call_id);
         let (mutation_status, changed_paths) = if applied.is_empty() {
             (ToolMutationStatus::Unknown, None)
         } else {
@@ -843,16 +843,16 @@ mod tests {
         if let Ok(mut starts) = TOOL_LIFECYCLE_STARTS.lock() {
             starts.clear_session(SESSION_ID);
         }
-        crate::agent_sessions::clear_session_changed_paths(SESSION_ID);
+        crate::tool_call_mutations::clear_session(SESSION_ID);
         let sink = Arc::new(RecordingSink::default());
         let _guard = LoopSinkGuard::install(Some(sink.clone()));
 
         emit_agent_event_sync(&start(SESSION_ID, "wrote"));
         emit_agent_event_sync(&start(SESSION_ID, "silent"));
-        crate::agent_sessions::record_tool_call_mutation_for(SESSION_ID, "wrote", "src/edited.rs");
+        crate::tool_call_mutations::record(SESSION_ID, "wrote", "src/edited.rs");
         // A finished call's record is released with its own terminal update.
         emit_agent_event_sync(&start(SESSION_ID, "finished"));
-        crate::agent_sessions::record_tool_call_mutation_for(SESSION_ID, "finished", "src/a.rs");
+        crate::tool_call_mutations::record(SESSION_ID, "finished", "src/a.rs");
         emit_agent_event_sync(&finish(SESSION_ID, "finished"));
 
         fire_session_end_hooks(SESSION_ID, true);
@@ -879,7 +879,7 @@ mod tests {
         );
         assert_eq!(outcome("silent"), Some((ToolMutationStatus::Unknown, None)));
         assert!(
-            crate::agent_sessions::take_tool_call_mutations(SESSION_ID, "finished").is_empty(),
+            crate::tool_call_mutations::take(SESSION_ID, "finished").is_empty(),
             "a terminal update releases the call's record"
         );
     }

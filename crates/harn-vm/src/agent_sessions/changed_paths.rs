@@ -70,27 +70,14 @@ pub fn clear_session_changed_paths(session_id: &str) {
     if let Ok(mut store) = session_changed_paths_store().lock() {
         store.remove(session_id);
     }
-    if let Ok(mut store) = tool_call_mutations_store().lock() {
-        store.remove(session_id);
-    }
-}
-
-/// Completed workspace mutations, by session and then by the tool call that
-/// made them. A call the loop abandons at exit has no result of its own; this
-/// record is what lets it still report that it changed the workspace.
-type ToolCallMutations = BTreeMap<String, BTreeMap<String, BTreeSet<String>>>;
-
-static TOOL_CALL_MUTATIONS: OnceLock<Mutex<ToolCallMutations>> = OnceLock::new();
-
-fn tool_call_mutations_store() -> &'static Mutex<ToolCallMutations> {
-    TOOL_CALL_MUTATIONS.get_or_init(|| Mutex::new(BTreeMap::new()))
+    crate::tool_call_mutations::clear_session(session_id);
 }
 
 /// Record that the current tool call finished mutating `path`.
 ///
 /// Call it only AFTER the mutation succeeded, never before: a write that
-/// failed changed nothing, and an abandoned call must not report it as
-/// applied. A no-op outside an active session or tool-call scope.
+/// failed changed nothing, and a stopped call must not report it as applied.
+/// A no-op outside an active session or tool-call scope.
 pub fn record_tool_call_mutation(path: &str) {
     let Some(session_id) = super::current_session_id().filter(|id| !id.is_empty()) else {
         return;
@@ -98,39 +85,7 @@ pub fn record_tool_call_mutation(path: &str) {
     let Some(tool_call_id) = super::current_tool_call_id().filter(|id| !id.is_empty()) else {
         return;
     };
-    record_tool_call_mutation_for(&session_id, &tool_call_id, path);
-}
-
-/// [`record_tool_call_mutation`] for an explicit session and call.
-pub(crate) fn record_tool_call_mutation_for(session_id: &str, tool_call_id: &str, path: &str) {
-    if session_id.is_empty() || tool_call_id.is_empty() || path.is_empty() {
-        return;
-    }
-    let (session_id, tool_call_id) = (session_id.to_string(), tool_call_id.to_string());
-    if let Ok(mut store) = tool_call_mutations_store().lock() {
-        store
-            .entry(session_id)
-            .or_default()
-            .entry(tool_call_id)
-            .or_default()
-            .insert(path.to_string());
-    }
-}
-
-/// Read and release the paths `tool_call_id` finished mutating in
-/// `session_id`, sorted; empty when it recorded none.
-pub fn take_tool_call_mutations(session_id: &str, tool_call_id: &str) -> Vec<String> {
-    let Ok(mut store) = tool_call_mutations_store().lock() else {
-        return Vec::new();
-    };
-    let Some(calls) = store.get_mut(session_id) else {
-        return Vec::new();
-    };
-    let paths = calls.remove(tool_call_id).unwrap_or_default();
-    if calls.is_empty() {
-        store.remove(session_id);
-    }
-    paths.into_iter().collect()
+    crate::tool_call_mutations::record(&session_id, &tool_call_id, path);
 }
 
 /// Drop every session's recorded mutated paths at process teardown.
@@ -142,9 +97,7 @@ pub fn clear_all_session_changed_paths() {
     if let Ok(mut store) = session_changed_paths_store().lock() {
         store.clear();
     }
-    if let Ok(mut store) = tool_call_mutations_store().lock() {
-        store.clear();
-    }
+    crate::tool_call_mutations::clear_all();
 }
 
 #[cfg(test)]
