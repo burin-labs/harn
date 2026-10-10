@@ -6,6 +6,8 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 source "$script_dir/lib/cargo_env.sh"
 # shellcheck source=scripts/lib/harn_bin.sh
 source "$script_dir/lib/harn_bin.sh"
+# Restore before any Cargo probe below runs through the configured wrapper.
+harn_restore_configured_sccache_wrapper "$(cd "$script_dir/.." && pwd -P)"
 
 case "${HARN_BIN_NO_BUILD:-0}" in
   0) mode="build" ;;
