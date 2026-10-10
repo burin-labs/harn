@@ -1277,6 +1277,23 @@
       },
       "type": "object"
     },
+    "portal_default": {
+      "additionalProperties": false,
+      "properties": {
+        "model_id": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "reasoning_effort": {
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "model_id"
+      ],
+      "type": "object"
+    },
     "pricing": {
       "additionalProperties": false,
       "properties": {
@@ -2162,7 +2179,7 @@
     },
     "portal_defaults": {
       "additionalProperties": {
-        "type": "string"
+        "$ref": "#/$defs/portal_default"
       },
       "type": "object"
     },

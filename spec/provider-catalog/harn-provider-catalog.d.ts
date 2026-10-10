@@ -13,7 +13,12 @@ export interface HarnProviderCatalog {
   families: HarnCatalogModelFamily[]
   routing_routes?: HarnCatalogRoutingRoute[]
   qc_defaults: Record<string, string>
-  portal_defaults?: Record<string, string>
+  portal_defaults?: Record<string, HarnCatalogPortalDefault>
+}
+
+export interface HarnCatalogPortalDefault {
+  model_id: string
+  reasoning_effort?: string
 }
 
 export interface HarnCatalogProvider {

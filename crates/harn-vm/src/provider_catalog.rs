@@ -55,6 +55,8 @@ mod local_runtime_tests;
 #[cfg(test)]
 mod operation_tests;
 #[cfg(test)]
+mod portal_default_tests;
+#[cfg(test)]
 mod pricing_tests;
 #[cfg(test)]
 mod released_row_kind_tests;
@@ -185,10 +187,15 @@ fn artifact_from_config(
             .provider_defaults
             .iter()
             .filter_map(|(provider, defaults)| {
-                defaults
-                    .portal
-                    .clone()
-                    .map(|model| (provider.clone(), model))
+                defaults.portal.clone().map(|model_id| {
+                    (
+                        provider.clone(),
+                        CatalogPortalDefault {
+                            model_id,
+                            reasoning_effort: defaults.portal_reasoning_effort.clone(),
+                        },
+                    )
+                })
             })
             .collect(),
     }

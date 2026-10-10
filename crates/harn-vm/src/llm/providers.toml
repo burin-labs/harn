@@ -2702,15 +2702,19 @@ portal = "gemma-4-26b-a4b-it"
 runtime = "unsloth/Qwen3.6-35B-A3B-UD-MLX-4bit"
 portal = "unsloth/Qwen3.6-35B-A3B-UD-MLX-4bit"
 
-# The setup-UI offer is GPT-6.1 Sol, the `sol` alias target, in place of the
-# two-generation-old GPT-4o.
+# The setup-UI offer is GPT-6 Luna at high effort, in place of the
+# two-generation-old GPT-4o: the current generation's low-cost row, with its
+# effort raised for coding work.
 [provider_defaults.openai]
 runtime = "gpt-4o-mini"
-portal = "gpt-6.1-sol"
+portal = "gpt-6-luna"
+portal_reasoning_effort = "high"
 
+# The setup-UI offer is the catalog's recommended local model, the `local`
+# variant's Gemma 4 row, in place of Llama 3.2.
 [provider_defaults.ollama]
 runtime = "llama3.2"
-portal = "llama3.2"
+portal = "gemma4:26b"
 
 [provider_defaults.openrouter]
 runtime = "anthropic/claude-sonnet-4-6"

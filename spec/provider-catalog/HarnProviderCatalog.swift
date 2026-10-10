@@ -13,7 +13,7 @@ public struct HarnProviderCatalog: Codable, Sendable, Equatable {
     public let families: [HarnCatalogModelFamily]
     public let routingRoutes: [HarnCatalogRoutingRoute]?
     public let qcDefaults: [String: String]
-    public let portalDefaults: [String: String]?
+    public let portalDefaults: [String: HarnCatalogPortalDefault]?
 
     enum CodingKeys: String, CodingKey {
         case schemaVersion = "schema_version"
@@ -27,6 +27,16 @@ public struct HarnProviderCatalog: Codable, Sendable, Equatable {
         case routingRoutes = "routing_routes"
         case qcDefaults = "qc_defaults"
         case portalDefaults = "portal_defaults"
+    }
+}
+
+public struct HarnCatalogPortalDefault: Codable, Sendable, Equatable {
+    public let modelId: String
+    public let reasoningEffort: String?
+
+    enum CodingKeys: String, CodingKey {
+        case modelId = "model_id"
+        case reasoningEffort = "reasoning_effort"
     }
 }
 

@@ -27,10 +27,19 @@ pub fn schema_value() -> Value {
             "families": {"type": "array", "items": {"$ref": "#/$defs/model_family"}},
             "routing_routes": {"type": "array", "items": {"$ref": "#/$defs/routing_route"}},
             "qc_defaults": {"type": "object", "additionalProperties": {"type": "string"}},
-            "portal_defaults": {"type": "object", "additionalProperties": {"type": "string"}}
+            "portal_defaults": {"type": "object", "additionalProperties": {"$ref": "#/$defs/portal_default"}}
         },
         "additionalProperties": false,
         "$defs": {
+            "portal_default": {
+                "type": "object",
+                "required": ["model_id"],
+                "properties": {
+                    "model_id": {"type": "string", "minLength": 1},
+                    "reasoning_effort": {"type": "string", "minLength": 1}
+                },
+                "additionalProperties": false
+            },
             "provider": {
                 "type": "object",
                 "required": ["id", "display_name", "classification", "endpoint", "auth", "protocols", "features", "caveats"],

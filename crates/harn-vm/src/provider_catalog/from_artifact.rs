@@ -51,12 +51,13 @@ pub(crate) fn config_from_artifact(
         provider_defaults: artifact
             .portal_defaults
             .iter()
-            .map(|(provider, model)| {
+            .map(|(provider, portal)| {
                 (
                     provider.clone(),
                     llm_config::ProviderDefaultModels {
                         runtime: None,
-                        portal: Some(model.clone()),
+                        portal: Some(portal.model_id.clone()),
+                        portal_reasoning_effort: portal.reasoning_effort.clone(),
                     },
                 )
             })

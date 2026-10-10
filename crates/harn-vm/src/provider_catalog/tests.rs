@@ -1478,36 +1478,3 @@ fn provider_route_prefix_must_be_stripped(provider: &str) -> bool {
         "baseten" | "deepinfra" | "fireworks" | "nvidia" | "sambanova" | "together"
     )
 }
-
-#[test]
-fn the_artifact_carries_each_providers_setup_ui_default() {
-    let catalog = artifact_embedded(None, None);
-    // The setup-UI offer is current-generation and distinct from the cheap
-    // QC route, which deliberately stays on a sampling-tolerant model.
-    assert_eq!(
-        catalog.portal_defaults.get("anthropic").map(String::as_str),
-        Some("claude-sonnet-5-5")
-    );
-    assert_ne!(
-        catalog.portal_defaults.get("anthropic"),
-        catalog.qc_defaults.get("anthropic")
-    );
-    for (provider, model) in &catalog.portal_defaults {
-        assert!(
-            catalog
-                .models
-                .iter()
-                .any(|row| &row.provider == provider && &row.id == model),
-            "{provider} portal default {model} has no catalog row"
-        );
-    }
-    let config = config_from_artifact(&catalog);
-    assert_eq!(
-        config
-            .provider_defaults
-            .get("anthropic")
-            .and_then(|defaults| defaults.portal.as_deref()),
-        Some("claude-sonnet-5-5"),
-        "a host serving a remote artifact keeps the setup-UI default"
-    );
-}

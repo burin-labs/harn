@@ -40596,11 +40596,24 @@
     "zai": "glm-4.6"
   },
   "portal_defaults": {
-    "anthropic": "claude-sonnet-5-5",
-    "local": "gemma-4-26b-a4b-it",
-    "mlx": "unsloth/Qwen3.6-35B-A3B-UD-MLX-4bit",
-    "ollama": "llama3.2",
-    "openai": "gpt-6.1-sol",
-    "openrouter": "google/gemma-4-26b-a4b-it"
+    "anthropic": {
+      "model_id": "claude-sonnet-5-5"
+    },
+    "local": {
+      "model_id": "gemma-4-26b-a4b-it"
+    },
+    "mlx": {
+      "model_id": "unsloth/Qwen3.6-35B-A3B-UD-MLX-4bit"
+    },
+    "ollama": {
+      "model_id": "gemma4:26b"
+    },
+    "openai": {
+      "model_id": "gpt-6-luna",
+      "reasoning_effort": "high"
+    },
+    "openrouter": {
+      "model_id": "google/gemma-4-26b-a4b-it"
+    }
   }
 }
