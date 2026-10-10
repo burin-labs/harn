@@ -21,6 +21,9 @@ const arms = [...new Set(items.map(x => x.arm))].sort();
 const observation = item => item.observed.observations[0];
 const recovery = item => item.observed.recovery_nudges.length > 0;
 const correct = item => recovery(item) === item.expected.intended && (!item.expected.intended || observation(item).verdict.tool_name === item.expected.tool);
+const reportedCacheRead = usage => usage?.cache_supported === true &&
+  (usage.cache_accounting_declared === true || (Object.hasOwn(usage, 'cache_visibility') && usage.cache_visibility === null)) &&
+  typeof usage.cache_read_tokens === 'number' ? usage.cache_read_tokens : null;
 let seed = 8543;
 const random = () => ((seed = Math.imul(seed, 1664525) + 1013904223 >>> 0) / 4294967296);
 function paired(a, b, metric) {
@@ -43,8 +46,7 @@ for (const arm of arms) {
     const tool = verdict.decision?.value?.tool?.choice ?? legacy?.tool_name ?? '';
     if (item.expected.intended) calibration.push({question_id: 'tool', backend: arm, expected: item.expected.tool, predicted: tool, confidence: verdict.decision?.value?.tool?.confidence ?? legacy?.confidence ?? 0, abstained: !tool});
     const usage = verdict.typed_checkpoint?.usage ?? item.receipts[0]?.usage;
-    cache.push(usage && typeof usage.cache_read_tokens === 'number' &&
-      (arm !== 'native_decision' || usage.cache_accounting_declared === true) ? usage.cache_read_tokens : null);
+    cache.push(reportedCacheRead(usage));
   }
   report.arms[arm] = {rows: subset.length, correct_recovery_and_tool: subset.filter(correct).length, false_recovery: subset.filter(x => recovery(x) && !x.expected.intended).length, missed_recovery: subset.filter(x => !recovery(x) && x.expected.intended).length, ambiguous: subset.filter(x => observation(x).verdict.action === 'ambiguous').length, failures: subset.filter(x => observation(x).verdict.error).length, completed_runs: subset.filter(x => x.observed.status === 'done').length, classifier_latency_ms: {median: quantile(subset.map(x => observation(x).elapsed_ms), .5), max: Math.max(...subset.map(x => observation(x).elapsed_ms))}, run_latency_ms_median: quantile(subset.map(x => x.observed.elapsed_ms), .5), cost_usd: subset.reduce((n,x) => n+x.cost_usd,0), cache: {reported_rows: cache.filter(x => x !== null).length, unavailable_rows: cache.filter(x => x === null).length, positive_rows: cache.filter(x => x > 0).length}, by_language: Object.fromEntries(['en','es','fr'].map(lang => {const xs = subset.filter(x => x.language === lang); return [lang,{rows:xs.length,correct:xs.filter(correct).length}]}))};
   if (subset.some(item => item.cost_usd === null)) report.arms[arm].cost_usd = null;
@@ -70,4 +72,18 @@ report.backend_agreement = {paired_rows: pairs.length, same_action: pairs.filter
 report.served_models = Object.fromEntries(arms.map(arm => [arm, [...new Set(items.filter(x => x.arm === arm).flatMap(x => x.receipts.map(r => r.served_model)))]]));
 fs.writeFileSync(path.join(root,'analysis.json'), JSON.stringify(report,null,2));
 fs.writeFileSync(path.join(root,'calibration-rows.json'), JSON.stringify(calibration));
+fs.writeFileSync(path.join(root, 'observations.jsonl'), items.map(item => {
+  const obs = observation(item), receipt = item.receipts[0], checkpoint = obs.verdict.typed_checkpoint;
+  const usage = receipt?.usage ?? checkpoint?.usage;
+  return JSON.stringify({repeat: item.repeat, row_id: item.row_id, arm: item.arm, expected: item.expected,
+    status: item.observed.status, action: obs.verdict.action, tool_name: obs.verdict.tool_name,
+    confidence: obs.verdict.confidence ?? null, decision: obs.verdict.decision ?? null,
+    checkpoint_answer: checkpoint?.data ?? null, error: obs.verdict.error ?? null,
+    recovery_nudges: item.observed.recovery_nudges.length, verdict_events: item.observed.verdict_events?.length ?? null,
+    executed_tools: item.observed.executed_tools ?? null, classifier_elapsed_ms: obs.elapsed_ms,
+    run_elapsed_ms: item.observed.elapsed_ms, physical_requests: receipt?.physical_attempts ?? usage?.provider_call_count ?? null,
+    cost_usd: item.cost_usd, accounting_status: receipt?.accounting_status ?? (item.cost_usd === null ? 'usage_unknown' : 'settled'),
+    cache_read_tokens: reportedCacheRead(usage),
+    served_model: receipt?.served_model ?? null});
+}).join('\n') + '\n');
 console.log(JSON.stringify(report,null,2));
