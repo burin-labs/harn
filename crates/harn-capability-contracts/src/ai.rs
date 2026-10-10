@@ -633,7 +633,8 @@ capability_method!(
     // reject under agent-loop execution policy and abort turns mid-flight.
     [],
     "__cap_agent_session_messages(session_id: string) -> list",
-    "Read an agent session's messages."
+    "Read an agent session's messages.",
+    read_only_preparation
 );
 capability_method!(
     agent_session_visible_messages,

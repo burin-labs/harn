@@ -3,7 +3,7 @@
 use std::future::Future;
 use std::sync::Arc;
 
-use harn_builtin_meta::{BuiltinContract, BuiltinExposure, EffectAccess, EffectKind};
+use harn_builtin_meta::BuiltinContract;
 use serde_json::Value;
 
 use crate::value::{ErrorCategory, VmClosure, VmError};
@@ -33,20 +33,7 @@ pub(crate) fn enforce_contract(
     contract: Option<&BuiltinContract>,
 ) -> Result<(), VmError> {
     if PREPARING.try_with(|()| true).unwrap_or(false) {
-        let permitted = contract.is_some_and(|contract| {
-            let pure = matches!(
-                contract.exposure,
-                BuiltinExposure::PureGlobal | BuiltinExposure::StdlibInternal
-            );
-            (pure || !contract.effects.is_empty())
-                && contract.effects.iter().all(|effect| {
-                    effect.access == EffectAccess::Read
-                        && matches!(
-                            effect.kind,
-                            EffectKind::Fs | EffectKind::Env | EffectKind::State | EffectKind::Host
-                        )
-                })
-        });
+        let permitted = contract.is_some_and(|contract| contract.permits_read_only_preparation());
         if !permitted {
             return Err(VmError::CategorizedError {
                 message: format!("{name} is not a read-only invocation preparation operation"),
@@ -89,5 +76,27 @@ pub(crate) fn scope_subtask<F: Future>(
             }
         })
         .await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use harn_builtin_meta::BuiltinExposure;
+
+    #[tokio::test]
+    async fn compiler_schema_validation_is_pure_but_other_runtime_internals_stay_denied() {
+        let entry = crate::stdlib::builtin_manifest_entry("__assert_schema").unwrap();
+        assert_eq!(entry.contract.exposure, BuiltinExposure::RuntimeInternal);
+        assert!(entry.contract.effects.is_empty());
+        preparation(async {
+            enforce_contract(entry.name, Some(&entry.contract)).unwrap();
+            assert!(
+                enforce_contract("unknown_internal", Some(&BuiltinContract::RUNTIME_INTERNAL))
+                    .is_err()
+            );
+            assert!(enforce_contract("unregistered", None).is_err());
+        })
+        .await;
     }
 }

@@ -46,6 +46,9 @@ mod sig_parser;
 ///   fn into `Pin<Box<dyn Future<...>>>`.
 /// - `parser_only = true` — emit only the signature; no runtime registration.
 /// - `runtime_only = true` — emit only the runtime entry; signature suppressed.
+/// - `read_only_preparation = true` — explicitly declare a runtime journal read
+///   admissible during preparation, retaining its exposure and empty effects.
+///   Privileged wire calls and operations with effects cannot use this marker.
 /// - `doc = "..."` — override doc string (defaults to the fn's `///` block).
 #[proc_macro_attribute]
 pub fn harn_builtin(attr: TokenStream, item: TokenStream) -> TokenStream {
@@ -87,6 +90,7 @@ struct CapabilityMethodInput {
     doc: LitStr,
     effects_authorized_by: Option<LitStr>,
     runtime_control_plane: Option<proc_macro2::Span>,
+    read_only_preparation: bool,
 }
 
 impl Parse for CapabilityMethodInput {
@@ -105,23 +109,28 @@ impl Parse for CapabilityMethodInput {
         // string that delegates the declared (read-only) effects to that
         // grant, or the bare ident `runtime_control_plane`, which says the
         // operation mutates Harn's own control-plane state rather than the
-        // user's workspace or an external system. Never both.
+        // user's workspace or an external system. `read_only_preparation`
+        // declares an empty-effect runtime journal read. Exactly one marker.
         let mut effects_authorized_by = None;
         let mut runtime_control_plane = None;
+        let mut read_only_preparation = false;
         if !input.is_empty() {
             input.parse::<Token![,]>()?;
             if input.peek(LitStr) {
                 effects_authorized_by = Some(input.parse()?);
             } else {
                 let marker: Ident = input.parse()?;
-                if marker != "runtime_control_plane" {
+                if marker == "read_only_preparation" {
+                    read_only_preparation = true;
+                } else if marker == "runtime_control_plane" {
+                    runtime_control_plane = Some(marker.span());
+                } else {
                     return Err(syn::Error::new(
                         marker.span(),
                         "expected a `\"<capability>.<operation>\"` effect authorization or \
-                         the marker `runtime_control_plane`",
+                         the marker `runtime_control_plane` or `read_only_preparation`",
                     ));
                 }
-                runtime_control_plane = Some(marker.span());
             }
         }
         if !input.is_empty() {
@@ -135,6 +144,7 @@ impl Parse for CapabilityMethodInput {
             doc,
             effects_authorized_by,
             runtime_control_plane,
+            read_only_preparation,
         })
     }
 }
@@ -159,6 +169,7 @@ fn expand_capability_method(input: CapabilityMethodInput) -> syn::Result<TokenSt
         effects_declared: true,
         effects_authorized_by: input.effects_authorized_by,
         runtime_control_plane: input.runtime_control_plane,
+        read_only_preparation: input.read_only_preparation,
         parser_only: true,
         ..BuiltinAttrs::default()
     };
@@ -213,6 +224,7 @@ fn expand_leaf_capability_contract(input: CapabilityMethodInput) -> syn::Result<
         effects_declared: true,
         effects_authorized_by: input.effects_authorized_by,
         runtime_control_plane: input.runtime_control_plane,
+        read_only_preparation: input.read_only_preparation,
         parser_only: true,
         ..BuiltinAttrs::default()
     };
@@ -246,6 +258,7 @@ struct BuiltinAttrs {
     effects_declared: bool,
     effects_authorized_by: Option<LitStr>,
     runtime_control_plane: Option<proc_macro2::Span>,
+    read_only_preparation: bool,
     category: Option<LitStr>,
     kind: BuiltinKind,
     parser_only: bool,
@@ -294,6 +307,9 @@ impl Parse for BuiltinAttrs {
                         }
                         "parser_only" => out.parser_only = parse_lit_bool(&nv.value)?,
                         "runtime_only" => out.runtime_only = parse_lit_bool(&nv.value)?,
+                        "read_only_preparation" => {
+                            out.read_only_preparation = parse_lit_bool(&nv.value)?
+                        }
                         "aliases" => out.aliases = parse_str_array(&nv.value)?,
                         "exposure" => out.exposure = Some(parse_lit_str(&nv.value)?),
                         "effects" => {
@@ -529,6 +545,15 @@ fn expand(attrs: BuiltinAttrs, item_fn: ItemFn) -> syn::Result<TokenStream2> {
 }
 
 fn contract_expr(attrs: &BuiltinAttrs, support: &TokenStream2) -> syn::Result<TokenStream2> {
+    let contract = base_contract_expr(attrs, support)?;
+    if attrs.read_only_preparation {
+        Ok(quote!((#contract).with_read_only_preparation()))
+    } else {
+        Ok(contract)
+    }
+}
+
+fn base_contract_expr(attrs: &BuiltinAttrs, support: &TokenStream2) -> syn::Result<TokenStream2> {
     let Some(exposure) = attrs.exposure.as_ref() else {
         return Ok(quote!(#support::BuiltinContract::UNDECLARED));
     };
