@@ -4,10 +4,10 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 
-const [binary, workspace, root, repetitionsArg = '5', baselineRef = 'origin/main'] = process.argv.slice(2);
+const [binary, workspace, root, repetitionsArg = '5', baselineRef = 'origin/main', corpusName = 'cutover-2026-10-10.jsonl'] = process.argv.slice(2);
 const repetitions = Number(repetitionsArg);
 if (!binary || !workspace || !root || !Number.isInteger(repetitions) || repetitions < 1) {
-  throw Error('usage: node run-cutover.mjs BINARY WORKSPACE OUTPUT [REPETITIONS] [BASELINE_REF]');
+  throw Error('usage: node run-cutover.mjs BINARY WORKSPACE OUTPUT [REPETITIONS] [BASELINE_REF] [CORPUS_FILENAME]');
 }
 const hash = value => crypto.createHash('sha256').update(value).digest('hex');
 const git = args => {
@@ -17,9 +17,16 @@ const git = args => {
 };
 const baselineSha = git(['rev-parse', baselineRef]).trim();
 if (!/^[0-9a-f]{40}$/.test(baselineSha)) throw Error('baseline must resolve to one commit');
-const corpusFile = path.join(workspace, 'experiments/missing-tool-call-decision/cutover-2026-10-10.jsonl');
+const corpusFile = path.join(workspace, 'experiments/missing-tool-call-decision', corpusName);
 const corpusText = fs.readFileSync(corpusFile, 'utf8');
 const corpus = corpusText.trim().split('\n').map(JSON.parse);
+if (!corpus.length || new Set(corpus.map(row => row.row_id)).size !== corpus.length ||
+    !corpus.every(row => typeof row.row_id === 'string' && row.row_id.length > 0 &&
+      ['en', 'es', 'fr'].includes(row.language) && typeof row.assistant_text === 'string' &&
+      Buffer.byteLength(row.assistant_text) <= 4096 && typeof row.intended === 'boolean' &&
+      (row.intended ? ['read', 'edit', 'shell'].includes(row.tool) : row.tool === ''))) {
+  throw Error('corpus must contain unique, bounded, labeled assistant texts');
+}
 const env = {...process.env};
 const allowedKeys = ['OPENAI_API_KEY', 'OPENROUTER_API_KEY'];
 for (const line of fs.readFileSync(path.join(os.homedir(), 'gate-clone/.env'), 'utf8').split('\n')) {
@@ -61,7 +68,7 @@ const manifestPath = path.join(root, 'manifest.json');
 if (fs.existsSync(manifestPath) && fs.readFileSync(manifestPath, 'utf8') !== JSON.stringify(manifest, null, 2)) throw Error('study identity changed');
 fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
 fs.writeFileSync(path.join(root, 'corpus.jsonl'), corpusText);
-let totalCost = 0, completed = 0;
+let totalCost = 0, spendBound = 0, unmeasuredCost = 0, completed = 0;
 for (let repeat = 0; repeat < repetitions; repeat++) {
   const rows = [...corpus].sort((a, b) => hash(`${repeat}:${a.row_id}`).localeCompare(hash(`${repeat}:${b.row_id}`)));
   for (let rowIndex = 0; rowIndex < rows.length; rowIndex++) {
@@ -71,11 +78,14 @@ for (let repeat = 0; repeat < repetitions; repeat++) {
       const dir = path.join(root, `${repeat}-${row.row_id}-${arm.id}`);
       const resultPath = path.join(dir, 'result.json');
       if (fs.existsSync(resultPath)) {
-        totalCost += JSON.parse(fs.readFileSync(resultPath)).cost_usd;
+        const cost = JSON.parse(fs.readFileSync(resultPath)).cost_usd;
+        totalCost += cost ?? 0;
+        spendBound += cost ?? 0.05;
+        if (cost === null) unmeasuredCost++;
         completed++;
         continue;
       }
-      if (totalCost > 0.95) throw Error('study spend ceiling reached');
+      if (spendBound > 0.95) throw Error('study spend ceiling reached');
       fs.mkdirSync(dir, {recursive: true});
       const configFile = path.join(dir, 'config.json');
       const rowFile = path.join(dir, 'row.json');
@@ -99,19 +109,23 @@ for (let repeat = 0; repeat < repetitions; repeat++) {
           const content = payload.text ?? fs.readFileSync(path.join(tapeFile + '.cas', payload.content_hash), 'utf8');
           return JSON.parse(content).receipt;
         });
-      if (arm.id !== 'legacy_structured' && (receipts.length !== 1 || receipts[0].physical_attempts !== 1 || receipts[0].accounting_status !== 'settled')) throw Error(`unmeasured evaluator; see ${dir}`);
-      if (arm.id === 'legacy_structured' && !(observation.verdict.typed_checkpoint?.attempts >= 1)) throw Error(`baseline never dispatched; see ${dir}`);
+      if (arm.id !== 'legacy_structured' && (receipts.length !== 1 || receipts[0].physical_attempts !== 1 || !['settled', 'usage_unknown'].includes(receipts[0].accounting_status))) throw Error(`unmeasured evaluator; see ${dir}`);
+      if (arm.id === 'legacy_structured' && !(observation.verdict.typed_checkpoint?.usage?.provider_call_count >= 1)) throw Error(`baseline never dispatched; see ${dir}`);
       const cost = observation.cost_usd;
-      if (!Number.isFinite(cost)) throw Error(`unmeasured cost; see ${dir}`);
-      if (!Number.isFinite(observed.cost.total_cost) || Math.abs(cost - observed.cost.total_cost) > 1e-9) throw Error(`classifier and completing-run accounting disagree; see ${dir}`);
-      if (receipts.length && Math.abs(cost - receipts[0].cost_usd) > 1e-9) throw Error(`receipt and session accounting disagree; see ${dir}`);
+      if (cost !== null && !Number.isFinite(cost)) throw Error(`invalid cost; see ${dir}`);
+      if (cost === null ? observed.cost.total_cost !== null : !Number.isFinite(observed.cost.total_cost) || Math.abs(cost - observed.cost.total_cost) > 1e-9) throw Error(`classifier and completing-run accounting disagree; see ${dir}`);
+      if (receipts.length && (cost === null ? receipts[0].cost_usd !== null : !Number.isFinite(receipts[0].cost_usd) || Math.abs(cost - receipts[0].cost_usd) > 1e-9)) throw Error(`receipt and session accounting disagree; see ${dir}`);
       const item = {repeat, row_id: row.row_id, language: row.language, arm: arm.id,
         expected: {intended: row.intended, tool: row.tool}, cost_usd: cost, observed, receipts};
       fs.writeFileSync(resultPath, JSON.stringify(item, null, 2));
-      totalCost += cost;
+      totalCost += cost ?? 0;
+      // Reserve a deliberately loose allowance for an unpriced request on
+      // these fixed small inputs, rather than counting missing usage as free.
+      spendBound += cost ?? 0.05;
+      if (cost === null) unmeasuredCost++;
       completed++;
-      if (completed % 12 === 0) console.log(JSON.stringify({completed, expected: repetitions * corpus.length * arms.length, total_cost_usd: totalCost}));
+      if (completed % 12 === 0) console.log(JSON.stringify({completed, expected: repetitions * corpus.length * arms.length, measured_cost_usd: totalCost, unmeasured_cost_rows: unmeasuredCost, spend_allowance_usd: spendBound}));
     }
   }
 }
-console.log(JSON.stringify({completed, expected: repetitions * corpus.length * arms.length, total_cost_usd: totalCost}));
+console.log(JSON.stringify({completed, expected: repetitions * corpus.length * arms.length, measured_cost_usd: totalCost, unmeasured_cost_rows: unmeasuredCost, spend_allowance_usd: spendBound}));

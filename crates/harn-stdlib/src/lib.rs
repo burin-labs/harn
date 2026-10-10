@@ -505,6 +505,7 @@ pub const STDLIB_PROMPT_ASSETS: &[StdlibPromptAsset] = embedded_catalog!(StdlibP
     "llm/prompts/tool_binder_user.harn.prompt" => "stdlib/llm/prompts/tool_binder_user.harn.prompt",
     "llm/prompts/missing_tool_call_intent.harn.prompt" => "stdlib/llm/prompts/missing_tool_call_intent.harn.prompt",
     "llm/prompts/missing_tool_call_target.harn.prompt" => "stdlib/llm/prompts/missing_tool_call_target.harn.prompt",
+    "llm/prompts/evaluation_questions.harn.prompt" => "stdlib/llm/prompts/evaluation_questions.harn.prompt",
     "agent/prompts/compaction_classify.harn.prompt" => "stdlib/agent/prompts/compaction_classify.harn.prompt",
     "agent/prompts/compaction_rewrite.harn.prompt" => "stdlib/agent/prompts/compaction_rewrite.harn.prompt",
     "workflow/prompts/stage.harn.prompt" => "stdlib/workflow/prompts/stage.harn.prompt",

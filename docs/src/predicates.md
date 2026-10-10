@@ -176,6 +176,11 @@ routing restrictions. OpenRouter's native privacy controls remain unverified;
 direct TypeSafe retention is account-scoped. The receipt separates applied
 controls from gateway-reported routing facts.
 
+Structured requests deliver each question's instructions, choice meanings, and
+score levels in the user prompt as well as the output schema. Both projections
+come from the same typed question set. The evaluator instruction version is part
+of request identity, so a prompt change cannot reuse an older cached answer.
+
 Native evaluations reserve their complete request bound in the execution's
 shared monetary ledger before dispatch. Concurrent evaluations share the same
 allowance. A missing usage report or cancellation retains that reservation as
