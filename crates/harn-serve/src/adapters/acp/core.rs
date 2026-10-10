@@ -166,6 +166,7 @@ impl AcpServer {
         target_pipeline: Option<&str>,
         cwd: &Path,
         project_root: &Path,
+        store_scope: &harn_vm::SessionStoreScope,
         mode_id: &str,
     ) -> Result<(Option<harn_vm::VmBaseline>, Option<bool>, u64), String> {
         let Some(source_path) = source_path else {
@@ -188,6 +189,7 @@ impl AcpServer {
                     && entry.source == source
                     && entry.cwd == cwd
                     && entry.project_root == project_root
+                    && &entry.store_scope == store_scope
                     && entry.mode_id == mode_id
                 {
                     return Ok((
@@ -199,14 +201,15 @@ impl AcpServer {
             }
         }
 
-        let baseline = execute::prepare_vm_baseline(
-            source,
-            source_path,
-            cwd,
-            project_root.as_deref(),
-            self.runtime_configurator.clone(),
-        )
-        .await?;
+        let baseline = store_scope
+            .run(execute::prepare_vm_baseline(
+                source,
+                source_path,
+                cwd,
+                project_root.as_deref(),
+                self.runtime_configurator.clone(),
+            ))
+            .await?;
         if let Some((path, mtime)) = cache_key {
             self.vm_baseline_cache = Some(VmBaselineCacheEntry {
                 path,
@@ -215,6 +218,7 @@ impl AcpServer {
                 source: source.to_string(),
                 cwd: cwd.to_path_buf(),
                 project_root,
+                store_scope: store_scope.clone(),
                 mode_id: mode_id.to_string(),
                 baseline: baseline.clone(),
             });

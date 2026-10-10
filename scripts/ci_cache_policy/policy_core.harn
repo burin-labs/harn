@@ -198,17 +198,6 @@ pub const E2E_CAPACITY_DECISION_STEP = "Decide where the slow E2E suite lands"
 /** The input that carries the evacuation switch into that decision. */
 pub const RUST_CACHE_ACTION = "./.github/actions/rust-cache"
 
-// Authorized ci.yml cache writers must grant actions: write. The workflow
-// top-level token is contents/read-only; without a job-level grant, Swatinem
-// save fails under continue-on-error and the Linux workspace-tests cache stays
-// empty (#5003).
-pub const CI_CACHE_WRITE_JOBS = [
-  "package-audit",
-  "rust-cli",
-  "rust-check-inputs",
-  "rust-cache-refresh",
-]
-
 // Compile fan-out on the producer is measured, not typed, and the ceiling now
 // rests on a measurement rather than on a fear. It lives in
 // `scripts/ci/rust-resource-policy.json` beside the E2E ceiling.
@@ -1083,7 +1072,7 @@ pub fn cache_target_input_errors(action: dict, step: dict) -> list<string> {
 pub fn native_source_projection_errors(script: string) -> list<string> {
   const paths = join(NATIVE_SOURCE_PATHS, " ")
   if !contains(script, "SOURCE_PATHS=(${paths})")
-    || !contains(script, "git diff --quiet \"$recorded\" HEAD -- \"$" + "{SOURCE_PATHS[@]}\"")
+    || !contains(script, "git diff --quiet \"$recorded\" \"$head\" -- \"$" + "{SOURCE_PATHS[@]}\"")
     || !contains(script, "git ls-files --others --exclude-standard -- \"$" + "{SOURCE_PATHS[@]}\"") {
     return ["${WORKSPACE_REUSE_SCRIPT} must compare the canonical native source fingerprint roots"]
   }

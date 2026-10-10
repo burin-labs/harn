@@ -362,19 +362,16 @@ jobs:
         continue-on-error: true
         with:
           shared-key: package-audit
-          cache-on-failure: true
+          cache-on-failure: false
           cache-bin: false
           # Keep workspace artifacts: Swatinem's default strips them on save and
           # leaves merge_group recompiling every harn-* crate after an exact hit
           # (#5003).
           cache-workspace-crates: "true"
           reuse-workspace-crates: "true"
-          # Authorize this lane as the package-audit main-branch cache writer.
-          # Package-relevant merges are exactly the pushes where this lane runs,
-          # so the saved key tracks every lockfile/manifest change. Before this,
-          # NO Linux lane ever saved (`save` defaulted off at every call site),
-          # so every hosted run restored nothing and compiled from scratch.
-          save: "true"
+          # The serialized refresh owner admits and verifies persistent saves.
+          # Parallel main CI consumers must not upload outside its cache budget.
+          save: "false"
       - name: Check published crate packages
         id: release-audit-package
         # The verifier builds Harn and its AOT generator in one Cargo invocation
@@ -887,18 +884,17 @@ jobs:
       # Blacksmith has its sticky sccache above. The owned pool and hosted
       # runners both attempt an environment-compatible restore; differing
       # toolchains and environment keys can still require a cold build.
-      # Only the hosted rung ever
-      # writes it: `save` is restore-only off `main`, and the owned rung is
-      # pull-request-only, so the authorized main-branch writer is untouched.
+      # Both rungs restore only. The serialized main refresh is the sole
+      # writer and admits replacement space before the provider upload.
       - uses: ./.github/actions/rust-cache
         continue-on-error: true
         with:
           shared-key: harn-ci-cli
-          cache-on-failure: true
+          cache-on-failure: false
           cache-bin: false
           cache-workspace-crates: "true"
           reuse-workspace-crates: "true"
-          save: "true"
+          save: "false"
           persistent-target: ${{ env.HARN_RUNNER_TIER == 'self-hosted' }}
       # Read the counters before the first compile, so the summary below can
       # report what this job did rather than what the machine has done since
@@ -1051,18 +1047,17 @@ jobs:
       # Blacksmith has its sticky sccache above. The owned pool and hosted
       # runners both attempt an environment-compatible restore; differing
       # toolchains and environment keys can still require a cold build.
-      # Only the hosted rung ever
-      # writes it: `save` is restore-only off `main`, and the owned rung is
-      # pull-request-only, so the authorized main-branch writer is untouched.
+      # Both rungs restore only. The serialized main refresh is the sole
+      # writer and admits replacement space before the provider upload.
       - uses: ./.github/actions/rust-cache
         continue-on-error: true
         with:
           shared-key: workspace-tests
-          cache-on-failure: true
+          cache-on-failure: false
           cache-bin: false
           cache-workspace-crates: "true"
           reuse-workspace-crates: "true"
-          save: "true"
+          save: "false"
           persistent-target: ${{ env.HARN_RUNNER_TIER == 'self-hosted' }}
       # Read the counters before the first compile, so the summary below can
       # report what this job did rather than what the machine has done since
@@ -2374,6 +2369,9 @@ jobs:
           fi
       - name: Clippy all targets (deny warnings)
         shell: bash
+        env:
+          HARN_LINT_TIMINGS_DIR: ${{ matrix.kind == 'workspace' && format('{0}/macos-workspace-timings', runner.temp) || '' }}
+          HARN_LINT_SOURCE_SHA: ${{ github.sha }}
         # `--all-targets` so the cfg-gated *test* targets compile (that's
         # exactly where the v0.8.109 release blocker — an unused
         # `BTreeMap` import in `secret_store_os_native.rs` — hid). Clippy
@@ -2383,6 +2381,14 @@ jobs:
         # entrypoint invalidates restored workspace units first so Cargo cannot
         # call them fresh without replaying their diagnostics.
         run: ./scripts/ci/run_rust_lint_lane.sh --leg "${{ matrix.kind }}"
+      - name: Upload actual workspace compile timings
+        if: ${{ always() && matrix.kind == 'workspace' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: macos-workspace-compile-timings-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/macos-workspace-timings
+          if-no-files-found: error
+          retention-days: 3
       - name: Verify canonical package hash parity
         if: matrix.kind == 'workspace'
         run: >-
