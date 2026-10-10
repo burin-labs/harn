@@ -44,6 +44,7 @@ use crate::workspace_anchor::{
 
 mod changed_paths;
 mod health;
+#[cfg(test)]
 pub(crate) use changed_paths::record_tool_call_mutation_for;
 pub use changed_paths::{
     clear_all_session_changed_paths, clear_session_changed_paths, record_session_changed_path,
