@@ -10,14 +10,14 @@ description = "Authoritative Harn package resolution, materialization and connec
 include = ["src/**/*", "Cargo.toml"]
 
 [dependencies]
-harn-flock = { path = "../harn-flock", version = "=0.10.160" }
-harn-fmt = { path = "../harn-fmt", version = "=0.10.160" }
-harn-kernel = { path = "../harn-kernel", version = "=0.10.160" }
-harn-lexer = { path = "../harn-lexer", version = "=0.10.160" }
-harn-modules = { path = "../harn-modules", version = "=0.10.160" }
-harn-parser = { path = "../harn-parser", version = "=0.10.160" }
-harn-vm = { path = "../harn-vm", version = "=0.10.160", default-features = false }
-harn-rules = { path = "../harn-rules", version = "=0.10.160", optional = true }
+harn-flock = { path = "../harn-flock", version = "=0.10.161" }
+harn-fmt = { path = "../harn-fmt", version = "=0.10.161" }
+harn-kernel = { path = "../harn-kernel", version = "=0.10.161" }
+harn-lexer = { path = "../harn-lexer", version = "=0.10.161" }
+harn-modules = { path = "../harn-modules", version = "=0.10.161" }
+harn-parser = { path = "../harn-parser", version = "=0.10.161" }
+harn-vm = { path = "../harn-vm", version = "=0.10.161", default-features = false }
+harn-rules = { path = "../harn-rules", version = "=0.10.161", optional = true }
 base64 = "0.23"
 chrono-tz = "0.10.4"
 croner = "4.0.0"

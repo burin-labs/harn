@@ -9,6 +9,49 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.161
+
+### Added
+
+- The bundled catalog adds Claude Haiku 5.5 on its direct Anthropic and OpenRouter routes, with its
+  two prompt-length rate cards ($0.10 / $0.50 per MTok up to 100K input tokens, $0.50 / $2.50
+  above). Its capability rows carry the generation-5 surface: effort `low` through `max`, a
+  512-token cache floor, native mid-conversation system messages, and no sampling parameters or
+  assistant prefill. Unlike Sonnet 5.5 and Opus 5.5, it still accepts a forced tool choice.
+- New routes: Mistral Large 4 (direct and OpenRouter, with its launch sale as a reviewable
+  promotion), Grok 4.20 Reasoning, Non-Reasoning and Multi-Agent on xAI, Qwen3.8 Max on DashScope,
+  DeepSeek V4.1 Flash on Together, and GLM 5.3 Prime, Command A+ and MiMo v2.6 Pro and Flash on
+  OpenRouter. Every new route was probed live, and the probes produced three capability facts: GLM
+  5.3 Prime and Qwen3.8 Max cannot turn reasoning off, and Grok 4.20 Multi-Agent takes no tools.
+
+### Changed
+
+- The `haiku` alias now resolves to Claude Haiku 5.5. It rejects `temperature`, `top_p`, `top_k` and
+  assistant prefill, so pin the new `haiku45` alias for workflows that need those; `haiku55` names
+  5.5 explicitly. The sitrep, judge and approval-reviewer ladders and the Anthropic QC default stay
+  on Haiku 4.5, because their callers send a temperature.
+- The OpenRouter portal default moves from `Qwen/Qwen3.5-9B`, which OpenRouter retires on
+  2026-10-21, to `google/gemma-4-26b-a4b-it`.
+
+### Deprecated
+
+- Catalog rows now carry the sunset dates from current provider notices: Together's DeepSeek V4
+  Flash 0731 and Llama 3.3 70B Instruct Turbo (2026-10-22), SambaNova's MiniMax M2.7 (2026-10-01),
+  OpenAI's `o3` (2026-12-11), and OpenRouter's `qwen/qwen3.5-9b` route (2026-10-21).
+
+### Fixed
+
+- Grok 4.3 and Grok Build 0.1 now bill their 2x rates once a request reaches 200K input tokens, as
+  xAI's rate card states and as the newer Grok rows already did.
+- **Read-only tool preparation accepts pure Result constructors (#9460).** `Ok`, `Err`, and compiler-generated `try`
+  results can carry prepared execution facts without allowing file writes, processes, or other effects before consent.
+- Rust cache refresh retains its last usable generation until a replacement is verified and saved, and retires older
+  compatible CLI generations before admitting larger workspace caches.
+- Grok 4.20 Multi-Agent no longer claims tool support. Its route has no tool-accepting endpoint, but its
+  catalog tags still listed `tools` through the inherited text-tool channel.
+- Reduced the server dispatch stack frame when invoking exported functions and
+  pipelines, preserving workspace storage isolation, cancellation, and errors.
+
 ## v0.10.160
 
 ### Breaking
