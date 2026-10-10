@@ -42,23 +42,45 @@ usage() {
   exit 2
 }
 
-if ! merge_base=$(git merge-base "$BASE_SHA" "$HEAD_SHA" 2>/dev/null); then
-  merge_base="$BASE_SHA"
+for ref in "$BASE_SHA" "$HEAD_SHA"; do
+  if ! git cat-file -e "${ref}^{commit}" 2>/dev/null \
+    || ! git cat-file -e "${ref}^{tree}" 2>/dev/null; then
+    echo "::error title=$TITLE::commit or tree is unreadable: $ref; surface comparison is unmeasured." >&2
+    exit 1
+  fi
+done
+if ! merge_base=$(git merge-base "$BASE_SHA" "$HEAD_SHA"); then
+  echo "::error title=$TITLE::commit ancestry is unreadable; surface comparison is unmeasured." >&2
+  exit 1
 fi
 
 surface_entries() {
   grep -v '^#' | LC_ALL=C sort -u
 }
 
+# Missing paths are a valid absent surface; failed object reads are not.
+read_surface() {
+  local ref=$1 entry
+  entry=$(git ls-tree "$ref" -- "$SURFACE_FILE") || return 1
+  if [ -z "$entry" ]; then
+    return 0
+  fi
+  if [[ "$entry" != *" blob "* ]]; then
+    echo "::error title=$TITLE::$SURFACE_FILE is not a readable blob at $ref." >&2
+    return 1
+  fi
+  if ! git show "$ref:$SURFACE_FILE"; then
+    echo "::error title=$TITLE::$SURFACE_FILE is unreadable at $ref; surface comparison is unmeasured." >&2
+    return 1
+  fi
+}
+
 # Print each removed CLI surface entry, one per line.
 cli_breaks() {
   local before after
-  if ! before=$(git show "$merge_base:$SURFACE_FILE" 2>/dev/null); then
-    echo "::notice title=$TITLE::$SURFACE_FILE does not exist at the merge base; nothing to compare." >&2
-    return 0
-  fi
+  before=$(read_surface "$merge_base") || return 1
   # A deleted listing removes every entry, which is what it reads as.
-  after=$(git show "$HEAD_SHA:$SURFACE_FILE" 2>/dev/null || true)
+  after=$(read_surface "$HEAD_SHA") || return 1
   LC_ALL=C comm -23 \
     <(printf '%s\n' "$before" | surface_entries) \
     <(printf '%s\n' "$after" | surface_entries) \

@@ -22,9 +22,10 @@
 
 use std::collections::{BTreeSet, HashSet};
 use std::ops::Range;
-use std::path::Path;
+use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 
+use harn_vm::process_sandbox::FsAccess;
 use harn_vm::VmValue;
 use sha2::{Digest, Sha256};
 use tree_sitter::Node;
@@ -32,6 +33,7 @@ use tree_sitter::Node;
 use crate::ast::{api as ast_api, Language};
 use crate::error::HostlibError;
 use crate::tools::args::{build_dict, str_value};
+use crate::tools::permissions::enforce_path_scope;
 
 use super::state::IndexState;
 use super::symbol_graph::{EdgeKind, Node as GraphNode, NodeId, NodeKind, SymbolGraph};
@@ -201,8 +203,23 @@ pub(super) fn files_in_scope(
         // through staged-fs (#1722) when a session id is supplied so
         // we observe pending writes from the same session.
         for file in state.files.values() {
-            let abs = state.root.join(&file.relative_path);
-            if file_contains_word(&abs, name, session_id) {
+            let mentions = match contained_path(
+                "hostlib_code_index",
+                &state.root,
+                &file.relative_path,
+                FsAccess::Read,
+            ) {
+                Ok(abs) => file_contains_word(&abs, name, session_id),
+                // Out of reach now, so decide from what the index read
+                // when the file was inside, and keep it in scope whenever
+                // the index cannot rule a mention out. The rewrite pass then
+                // refuses the operation instead of leaving a use stale.
+                Err(_) => {
+                    !super::words::records(name)
+                        || state.words.get(name).iter().any(|hit| hit.file == file.id)
+                }
+            };
+            if mentions {
                 seen.insert(file.relative_path.clone());
             }
         }
@@ -255,7 +272,7 @@ pub(super) fn is_identifier_token(text: &str) -> bool {
 /// Node kinds that must terminate identifier descent — strings, comments,
 /// and anything else where a matching textual substring is *not* an
 /// identifier reference.
-fn is_skip_kind(kind: &str) -> bool {
+pub(super) fn is_skip_kind(kind: &str) -> bool {
     matches!(
         kind,
         "comment"
@@ -279,7 +296,7 @@ fn is_skip_kind(kind: &str) -> bool {
 
 /// Code embedded in a string: a Python f-string `{..}` or a TypeScript
 /// template `${..}`. Identifier descent re-enters a skipped string here.
-fn is_interpolation_kind(kind: &str) -> bool {
+pub(super) fn is_interpolation_kind(kind: &str) -> bool {
     matches!(kind, "interpolation" | "template_substitution")
 }
 
@@ -426,11 +443,19 @@ pub(super) fn splice(source: &str, edits: &[EditSpan]) -> String {
     out
 }
 
+/// The first reason `source` is not valid `language`: a tree-sitter
+/// ERROR/MISSING node, or Python layout tree-sitter accepts but Python
+/// rejects (indentation, a line break outside brackets). Every refactoring
+/// runs it on each file before rewriting it and again on the patched text.
 pub(super) fn first_syntax_error(source: &str, language: Language) -> Option<String> {
     let tree = ast_api::parse_tree(source, language).ok()?;
     let root = tree.root_node();
     if !root.has_error() {
-        return None;
+        return match language {
+            Language::Python => python_layout_error(root, source)
+                .or_else(|| python_continuation_error(root, source)),
+            _ => None,
+        };
     }
     let mut stack = vec![root];
     while let Some(node) = stack.pop() {
@@ -461,11 +486,191 @@ pub(super) fn first_syntax_error(source: &str, language: Language) -> Option<Str
     Some("post-edit source has parse errors".into())
 }
 
+/// A statement broken across lines outside brackets and without a trailing
+/// `\`. tree-sitter-python joins the lines (`b = a +` then `print(b)` parses
+/// as `b = a + print(b)`); Python rejects the break.
+fn python_continuation_error(root: Node<'_>, source: &str) -> Option<String> {
+    let mut stack = vec![root];
+    while let Some(node) = stack.pop() {
+        let mut cursor = node.walk();
+        for child in node.named_children(&mut cursor) {
+            stack.push(child);
+            let statement = match node.kind() {
+                "module" | "block" => !matches!(child.kind(), "decorated_definition" | "comment"),
+                // Decorators sit on their own lines; check the definition.
+                "decorated_definition" => child.kind() != "decorator",
+                // `elif`, `else`, `except`, `finally`, `case`: a clause with
+                // its own header line and body, nested under its statement.
+                _ => child.kind().ends_with("_clause") && has_block_child(child),
+            };
+            if !statement {
+                continue;
+            }
+            let mut tokens = Vec::new();
+            logical_line_tokens(child, &mut tokens);
+            let mut depth = 0usize;
+            let mut previous: Option<Node<'_>> = None;
+            for token in tokens {
+                // A comment outside brackets ends the logical line.
+                if token.kind() == "comment" && depth == 0 {
+                    break;
+                }
+                if let Some(prev) = previous {
+                    let gap = source
+                        .get(prev.end_byte()..token.start_byte())
+                        .unwrap_or("");
+                    if depth == 0 && gap.contains('\n') && !gap.trim_start().starts_with('\\') {
+                        let line = prev.end_position().row + 1;
+                        return Some(format!(
+                            "line {line} ends inside a statement without brackets or `\\`"
+                        ));
+                    }
+                }
+                match token.kind() {
+                    "(" | "[" | "{" => depth += 1,
+                    ")" | "]" | "}" => depth = depth.saturating_sub(1),
+                    _ => {}
+                }
+                previous = Some(token);
+            }
+        }
+    }
+    None
+}
+
+fn has_block_child(node: Node<'_>) -> bool {
+    let mut cursor = node.walk();
+    let found = node
+        .named_children(&mut cursor)
+        .any(|c| c.kind() == "block");
+    found
+}
+
+/// The tokens of a statement's own logical line: every leaf, strings as one
+fn logical_line_tokens<'t>(node: Node<'t>, out: &mut Vec<Node<'t>>) {
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        match child.kind() {
+            "block" => return,
+            "string" | "concatenated_string" => out.push(child),
+            _ if child.child_count() == 0 => out.push(child),
+            _ => logical_line_tokens(child, out),
+        }
+    }
+}
+
+/// tree-sitter-python recovers from indentation Python rejects (an
+/// unexpected indent, a dedent to no enclosing level, a tab against spaces)
+/// without an ERROR node. Every statement that starts a line in a block must
+/// share one column deeper than the block's header, and module statements
+/// sit at column 0.
+fn python_layout_error(root: Node<'_>, source: &str) -> Option<String> {
+    let bytes = source.as_bytes();
+    let starts_line = |node: Node<'_>| {
+        let start = node.start_byte();
+        let line_start = bytes[..start]
+            .iter()
+            .rposition(|b| *b == b'\n')
+            .map_or(0, |nl| nl + 1);
+        bytes[line_start..start]
+            .iter()
+            .all(|b| *b == b' ' || *b == b'\t')
+    };
+    let mut stack = vec![root];
+    while let Some(node) = stack.pop() {
+        let mut cursor = node.walk();
+        let children: Vec<Node<'_>> = node.named_children(&mut cursor).collect();
+        if matches!(node.kind(), "module" | "block") {
+            let floor = match node.kind() {
+                "module" => None,
+                _ => node.parent().map(|header| header.start_position().column),
+            };
+            let mut column = (node.kind() == "module").then_some(0);
+            for child in children
+                .iter()
+                .filter(|c| c.kind() != "comment" && starts_line(**c))
+            {
+                let at = child.start_position();
+                let expected = *column.get_or_insert(at.column);
+                if at.column != expected || floor.is_some_and(|f| at.column <= f) {
+                    return Some(format!(
+                        "inconsistent indentation at line {}, column {}",
+                        at.row + 1,
+                        at.column + 1
+                    ));
+                }
+            }
+        }
+        stack.extend(children);
+    }
+    None
+}
+
+/// The one workspace-containment check. Every refactoring reads and
+/// writes through [`read_source`] and [`write_plans`], which run it, so no
+/// op reaches a file outside the indexed workspace or the sandbox scope.
+///
+/// `rel` must be relative with no `..`, and once symlinks resolve it must
+/// stay under the canonical `root`. The index lists a path when it is
+/// built; a directory swapped for a symlink afterwards would otherwise
+/// send a read or write outside. The sandbox's `workspace_roots`, when a
+/// restricted profile is active, apply on top.
+pub(super) fn contained_path(
+    builtin: &'static str,
+    root: &Path,
+    rel: &str,
+    access: FsAccess,
+) -> Result<PathBuf, HostlibError> {
+    let path = root.join(rel);
+    if !resolves_inside(root, rel) {
+        return Err(HostlibError::SandboxViolation {
+            builtin,
+            path: path.display().to_string(),
+            message: format!(
+                "`{rel}` resolves outside the indexed workspace `{}`; nothing was read or written",
+                root.display()
+            ),
+        });
+    }
+    enforce_path_scope(builtin, &path, access)?;
+    Ok(path)
+}
+
+/// Whether `rel`, joined onto `root`, stays inside `root` once symlinks
+/// resolve: only normal components, and the deepest existing ancestor
+/// (the file itself, or a dangling link at it) canonicalizes under `root`.
+pub(super) fn resolves_inside(root: &Path, rel: &str) -> bool {
+    let lexical = Path::new(rel)
+        .components()
+        .all(|component| matches!(component, Component::Normal(_) | Component::CurDir));
+    if !lexical {
+        return false;
+    }
+    let Ok(canonical_root) = root.canonicalize() else {
+        return false;
+    };
+    let mut probe = root.join(rel);
+    loop {
+        if std::fs::symlink_metadata(&probe).is_ok() {
+            return probe
+                .canonicalize()
+                .is_ok_and(|resolved| resolved.starts_with(&canonical_root));
+        }
+        if !probe.pop() {
+            return false;
+        }
+    }
+}
+
+/// Read `rel` under `root`, through staged-fs when a session is active.
 pub(super) fn read_source(
     builtin: &'static str,
-    path: &Path,
+    root: &Path,
+    rel: &str,
     session_id: Option<&str>,
 ) -> Result<String, HostlibError> {
+    let path = contained_path(builtin, root, rel, FsAccess::Read)?;
+    let path = path.as_path();
     let bytes = if let Some(result) = crate::fs::read(path, session_id) {
         result.map_err(|err| HostlibError::Backend {
             builtin,
@@ -480,7 +685,7 @@ pub(super) fn read_source(
     Ok(String::from_utf8_lossy(&bytes).into_owned())
 }
 
-pub(super) fn write_source(
+fn write_source(
     builtin: &'static str,
     path: &Path,
     contents: &str,
@@ -504,30 +709,34 @@ pub(super) fn write_source(
 
 /// Persist every plan in one pass. Call only after every plan has passed
 /// pre-flight, so a clean run is all-or-nothing modulo mid-call disk
-/// failures; those come back as `(path, reason)`.
+/// failures; those come back as `(path, reason)`. Every target passes
+/// [`contained_path`] before the first byte is written, so one escaping
+/// plan refuses the whole batch.
 pub(super) fn write_plans(
     builtin: &'static str,
     root: &Path,
     plans: &[FilePlan],
     session_id: Option<&str>,
-) -> Vec<(String, String)> {
+) -> Result<Vec<(String, String)>, HostlibError> {
+    let targets = plans
+        .iter()
+        .map(|plan| contained_path(builtin, root, &plan.path, FsAccess::Write))
+        .collect::<Result<Vec<_>, _>>()?;
     let mut failed = Vec::new();
-    for plan in plans {
-        let abs = root.join(&plan.path);
-        if let Err(err) = write_source(builtin, &abs, &plan.patched, session_id) {
+    for (plan, abs) in plans.iter().zip(&targets) {
+        if let Err(err) = write_source(builtin, abs, &plan.patched, session_id) {
             failed.push((plan.path.clone(), err));
         }
     }
-    failed
+    Ok(failed)
 }
 
 // === Reference sites ===
 //
-// The move/extract/change-signature builtins are the production consumers
-// of this query; until they land only the golden tests call it.
+// `move_symbol` and `change_signature` consume this query; the extract
+// builtin will too.
 
 /// How a reference site uses the seed symbol.
-#[cfg_attr(not(test), allow(dead_code))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(super) enum ReferenceKind {
     /// `f(...)`.
@@ -578,14 +787,12 @@ pub(super) struct ReferenceSite {
 }
 
 /// An in-scope file the reference query could not read structurally.
-#[cfg_attr(not(test), allow(dead_code))]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct SkippedFile {
     pub path: String,
     pub reason: String,
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
 #[derive(Clone, Debug, Default)]
 pub(super) struct ReferenceSites {
     /// Sorted by path, then byte offset.
@@ -603,7 +810,6 @@ pub(super) struct ReferenceSites {
 /// Like rename, matching is by name inside identifier context. Declarations
 /// (the seed's own and any other of the same name) are not reference
 /// sites; [`competing_declarations`] reports the latter.
-#[cfg_attr(not(test), allow(dead_code))]
 pub(super) fn reference_sites(
     builtin: &'static str,
     state: &IndexState,
@@ -642,7 +848,7 @@ pub(super) fn reference_sites(
             });
             continue;
         };
-        let source = read_source(builtin, &state.root.join(&path), session_id)?;
+        let source = read_source(builtin, &state.root, &path, session_id)?;
         let tree = match ast_api::parse_tree(&source, language) {
             Ok(tree) => tree,
             Err(err) => {
@@ -964,3 +1170,7 @@ fn sha256_hex(bytes: &[u8]) -> String {
 #[cfg(test)]
 #[path = "refactor_core_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "containment_tests.rs"]
+mod containment_tests;

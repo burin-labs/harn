@@ -994,21 +994,22 @@ type ACPToolCallUpdate struct {
 // `sessionUpdate` discriminator will be populated; the rest stay zero-value
 // and are stripped via `omitempty` on serialization.
 type ACPSessionUpdateEnvelope struct {
-	SessionUpdate    string             `json:"sessionUpdate"`
-	Content          json.RawMessage    `json:"content,omitempty"`
-	MessageID        *string            `json:"messageId,omitempty"`
-	Entries          []json.RawMessage  `json:"entries,omitempty"`
-	KeptTurnCount    *int               `json:"keptTurnCount,omitempty"`
-	RemovedTurnCount *int               `json:"removedTurnCount,omitempty"`
-	NewTipTurnID     *string            `json:"newTipTurnId,omitempty"`
-	Reason           *string            `json:"reason,omitempty"`
-	ToolCallID       *string            `json:"toolCallId,omitempty"`
-	Title            *string            `json:"title,omitempty"`
-	Kind             *string            `json:"kind,omitempty"`
-	Status           *string            `json:"status,omitempty"`
-	RawInput         json.RawMessage    `json:"rawInput,omitempty"`
-	RawOutput        json.RawMessage    `json:"rawOutput,omitempty"`
-	Meta             *HarnExtensionMeta `json:"_meta,omitempty"`
+	SessionUpdate        string             `json:"sessionUpdate"`
+	Content              json.RawMessage    `json:"content,omitempty"`
+	MessageID            *string            `json:"messageId,omitempty"`
+	HistorySourceEventID *string            `json:"historySourceEventId,omitempty"`
+	Entries              []json.RawMessage  `json:"entries,omitempty"`
+	KeptTurnCount        *int               `json:"keptTurnCount,omitempty"`
+	RemovedTurnCount     *int               `json:"removedTurnCount,omitempty"`
+	NewTipTurnID         *string            `json:"newTipTurnId,omitempty"`
+	Reason               *string            `json:"reason,omitempty"`
+	ToolCallID           *string            `json:"toolCallId,omitempty"`
+	Title                *string            `json:"title,omitempty"`
+	Kind                 *string            `json:"kind,omitempty"`
+	Status               *string            `json:"status,omitempty"`
+	RawInput             json.RawMessage    `json:"rawInput,omitempty"`
+	RawOutput            json.RawMessage    `json:"rawOutput,omitempty"`
+	Meta                 *HarnExtensionMeta `json:"_meta,omitempty"`
 }
 
 // ACPSessionUpdateParams is the params payload of `session/update`.
@@ -1584,6 +1585,7 @@ var HarnPreparedSessionStates = []string{"needs_approval", "ready", "blocked", "
 var HarnPreparedSessionCommands = []string{"approval_decision", "attach", "turn", "request_delta", "stop", "pivot", "finish"}
 
 type HarnPreparedSessionApprovalDecision struct {
+	RequestID        string `json:"request_id"`
 	BatchFingerprint string `json:"batch_fingerprint"`
 	Approved         bool   `json:"approved"`
 	Decider          string `json:"decider"`
@@ -2116,4 +2118,26 @@ type HarnInferenceAdmissionSnapshot struct {
 	LocalRuntime           *bool                           `json:"local_runtime,omitempty"`
 	OpenWeight             *bool                           `json:"open_weight,omitempty"`
 	TrainingDefault        *string                         `json:"training_default,omitempty"`
+}
+type HarnCanonicalSessionBoundary struct {
+	Schema     string  `json:"schema"`
+	SessionID  string  `json:"session_id"`
+	EventID    *uint64 `json:"event_id,omitempty"`
+	RecordHash *string `json:"record_hash,omitempty"`
+}
+
+type HarnCanonicalHistoryPosition struct {
+	SourceEventID   string                       `json:"source_event_id"`
+	OriginSessionID string                       `json:"origin_session_id"`
+	BeforeBoundary  HarnCanonicalSessionBoundary `json:"before_boundary"`
+	Boundary        HarnCanonicalSessionBoundary `json:"boundary"`
+}
+
+type HarnCanonicalHistoryBoundaries struct {
+	Tip       HarnCanonicalSessionBoundary   `json:"tip"`
+	Positions []HarnCanonicalHistoryPosition `json:"positions"`
+}
+
+type HarnACPPromptCorrelation struct {
+	MessageID *string `json:"messageId,omitempty"`
 }

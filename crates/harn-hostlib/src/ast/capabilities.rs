@@ -159,8 +159,8 @@ mod tests {
         assert!(b(field(rust, "apply_node")));
         assert!(b(field(rust, "rename_symbol")));
         assert!(b(field(rust, "symbols")));
-        assert!(!b(field(rust, "move_symbol")));
-        assert!(!b(field(rust, "extract_function")));
+        assert!(b(field(rust, "move_symbol")));
+        assert!(b(field(rust, "extract_function")));
         assert!(b(field(rust, "change_signature")));
     }
 

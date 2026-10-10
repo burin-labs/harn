@@ -151,7 +151,21 @@ async fn execute_sub_agent_persists_one_stop_with_lineage() {
         .expect("flush subagent lifecycle");
     let topic =
         crate::event_log::Topic::new(format!("observability.agent_events.{parent}")).unwrap();
-    let lifecycle_events = lifecycle_log.read_range(&topic, None, 16).await.unwrap();
+    // Child observations share the parent's topic. The terminal can follow
+    // more than one page, so inspect the complete finite mock-run receipt.
+    let lifecycle_events = lifecycle_log
+        .read_range(&topic, None, usize::MAX)
+        .await
+        .unwrap();
+    assert!(
+        lifecycle_events.iter().any(|(_, event)| {
+            serde_json::from_value::<crate::agent_events::AgentEvent>(
+                event.payload["event"].clone(),
+            )
+            .is_ok_and(|event| event.session_id() == "child-subagent")
+        }),
+        "the parent observer must receive the executed child's events"
+    );
     let stops: Vec<_> = lifecycle_events
         .iter()
         .filter(|(_, event)| event.kind == "subagent_stop")

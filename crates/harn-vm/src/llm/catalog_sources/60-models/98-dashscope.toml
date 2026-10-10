@@ -89,3 +89,46 @@ pricing = { input_per_mtok = 2.50, output_per_mtok = 7.50, cache_read_per_mtok =
 tier = "frontier"
 open_weight = false
 strengths = ["coding", "agentic", "tool_use", "long_context", "reasoning"]
+
+# Qwen3.8 Max on DashScope international (Singapore). Model Studio's pricing
+# page (read 2026-10-09) lists both the `qwen3.8-max` alias and the
+# `qwen3.8-max-0902` snapshot at $2 / $6 per MTok in one 0-1M tier, the same
+# for thinking and non-thinking output; it discounts cache hits without a
+# figure, so the cache rates are those of Alibaba's own endpoint as OpenRouter
+# lists it ($0.25 read, $2.50 write). Probed 2026-10-09 through OpenRouter
+# pinned to that Alibaba endpoint (no DashScope key on this host): a native
+# tool call, the tool-result round trip, a required tool choice and effort
+# `high` returned 200, and reasoning off was a 400 "Reasoning is mandatory".
+# Model Studio documents `enable_thinking` as a hybrid toggle for this model;
+# the capability rule takes the probe's side so Harn never sends the disable.
+[models."dashscope/qwen3.8-max"]
+name = "Qwen3.8 Max (DashScope)"
+provider = "dashscope"
+wire_model = "qwen3.8-max"
+logical_model = "qwen3.8-max"
+equivalence_group = "qwen3.8-max"
+served_variant = "dashscope"
+api_dialect = "openai_chat"
+context_window = 1000000
+released = "2026-09-02"
+capabilities = ["tools", "vision", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 2.00, output_per_mtok = 6.00, cache_read_per_mtok = 0.25, cache_write_per_mtok = 2.50 }
+tier = "frontier"
+open_weight = false
+strengths = ["coding", "agentic", "tool_use", "long_context", "reasoning", "vision"]
+
+[models."dashscope/qwen3.8-max-0902"]
+name = "Qwen3.8 Max 0902 (DashScope)"
+provider = "dashscope"
+wire_model = "qwen3.8-max-0902"
+logical_model = "qwen3.8-max"
+equivalence_group = "qwen3.8-max"
+served_variant = "dashscope"
+api_dialect = "openai_chat"
+context_window = 1000000
+released = "2026-09-02"
+capabilities = ["tools", "vision", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 2.00, output_per_mtok = 6.00, cache_read_per_mtok = 0.25, cache_write_per_mtok = 2.50 }
+tier = "frontier"
+open_weight = false
+strengths = ["coding", "agentic", "tool_use", "long_context", "reasoning", "vision"]

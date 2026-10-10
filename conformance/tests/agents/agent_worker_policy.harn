@@ -16,6 +16,9 @@ fn write_tools() {
 }
 
 pipeline main(harness: Harness) {
+  harness.llm.mock_enqueue(
+    {tool_calls: [{id: "tool-ceiling-write", name: "write_note", arguments: {path: "note.txt"}}]},
+  )
   const denied = agent_loop(
     harness,
     "Try to write a note",
@@ -37,6 +40,13 @@ pipeline main(harness: Harness) {
   // denial still carries the gate and retry metadata for host harnesses.
   harness.stdio.println(transcript.contains("tool_ceiling"))
   harness.stdio.println(transcript.contains("retryable"))
+  harness.llm.mock_enqueue(
+    {
+      tool_calls: [
+        {id: "read-only-ceiling-write", name: "write_note", arguments: {path: "note.txt"}},
+      ],
+    },
+  )
   const read_only_denied = agent_loop(
     harness,
     "Try to write a note",

@@ -441,8 +441,8 @@
       "recommended": {
         "selector": "haiku",
         "provider": "anthropic",
-        "model": "claude-haiku-4-5-20251001",
-        "display_name": "Claude Haiku 4.5",
+        "model": "claude-haiku-5-5",
+        "display_name": "Claude Haiku 5.5",
         "tool_format": "native",
         "harn_options": [
           "provider = \"anthropic\"",
@@ -460,7 +460,9 @@
         "structured_output_mode": "native_json",
         "streaming": true,
         "reasoning_knobs": [
-          "enabled"
+          "adaptive",
+          "effort",
+          "reasoning_effort"
         ],
         "prompt_or_context_cache": true,
         "batch_api": true,
@@ -499,7 +501,8 @@
       },
       "notes": [
         "Native tools, prompt caching, file upload, and XML-oriented scaffolding are first-class in Harn capability data.",
-        "Claude 4.7 rows use adaptive thinking; older Claude 4 rows use explicit thinking controls where supported."
+        "Claude 4.7 rows use adaptive thinking; older Claude 4 rows use explicit thinking controls where supported.",
+        "Claude Haiku 5.5 (the `haiku` selector) rejects temperature, top_p, top_k and assistant prefill; pin `haiku45` for workflows that need them."
       ],
       "caveats": [
         "Strict JSON output is modeled as tool-use or XML-tagged output rather than OpenAI-style response_json_schema."

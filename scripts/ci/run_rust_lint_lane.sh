@@ -11,6 +11,10 @@ set -euo pipefail
 # The CI matrix in ci.yml:rust-checks names these legs; check-ci-cache-policy
 # holds the matrix to exactly this set.
 leg="all"
+if [[ ${1:-} == --list-legs && $# == 1 ]]; then
+  printf '%s\n' workspace lean-lsp freshness-checker
+  exit 0
+fi
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --leg)
@@ -25,16 +29,73 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+case "$leg" in
+  all|workspace|lean-lsp|freshness-checker) ;;
+  *)
+    echo "error: unknown --leg '$leg' (expected all, workspace, lean-lsp, or freshness-checker)" >&2
+    exit 2
+    ;;
+esac
+
+# Cargo does not inspect source contents once its timestamp-based fingerprint
+# says a unit is fresh, and it does not replay diagnostics from that prior
+# compile. A restored target/build directory can therefore contain a
+# warning-clean workspace unit whose artifact is newer than changed checkout
+# source; the strict invocation below then exits successfully without running
+# Clippy on that unit. Keep dependency artifacts warm, but invalidate every
+# workspace package at the lint boundary so every independent leg reaches
+# Clippy. Local all mode invalidates once before its three graphs.
+cargo clean --workspace
+
 lint_workspace() {
-  # Cargo does not inspect source contents once its timestamp-based fingerprint
-  # says a unit is fresh, and it does not replay diagnostics from that prior
-  # compile. A restored target/build directory can therefore contain a
-  # warning-clean workspace unit whose artifact is newer than changed checkout
-  # source; the strict invocation below then exits successfully without running
-  # Clippy on that unit. Keep dependency artifacts warm, but invalidate every
-  # workspace package at the lint boundary so the proof always reaches Clippy.
-  cargo clean --workspace
-  cargo clippy --workspace --all-targets -- -D warnings
+  if [[ -z "${HARN_LINT_TIMINGS_DIR:-}" ]]; then
+    cargo clippy --workspace --all-targets -- -D warnings
+    return
+  fi
+  # Collect Cargo's unit timings from this invocation, not a restored report.
+  # The ordinary strict compile is the only compile; no diagnostic rebuild runs.
+  local source tree target report status bytes report_blob rustc
+  source="$(git rev-parse HEAD)"
+  tree="$(git rev-parse 'HEAD^{tree}')"
+  if [[ "$source" != "${HARN_LINT_SOURCE_SHA:-}" ]] || ! git diff --quiet HEAD --; then
+    echo "error: lint timing source is not the requested clean commit" >&2
+    return 1
+  fi
+  if [[ -e "$HARN_LINT_TIMINGS_DIR" || -L "$HARN_LINT_TIMINGS_DIR" ]]; then
+    echo "error: lint timing output already exists" >&2
+    return 1
+  fi
+  target="$(cargo metadata --no-deps --format-version 1 | jq -er '.target_directory | select(type == "string" and startswith("/"))')"
+  report="$target/cargo-timings/cargo-timing.html"
+  rm -f "$report"
+  mkdir -p "$HARN_LINT_TIMINGS_DIR"
+  status=0
+  cargo clippy --workspace --all-targets --timings -- -D warnings || status=$?
+  if [[ ! -f "$report" || -L "$report" || ! -s "$report" ]]; then
+    echo "error: strict compile did not produce a new nonempty timing report" >&2
+    return 1
+  fi
+  bytes="$(wc -c < "$report" | tr -d ' ')"
+  if [[ "$bytes" -gt 10485760 ]]; then
+    echo "error: lint timing report exceeds 10 MiB" >&2
+    return 1
+  fi
+  if [[ "$(git rev-parse HEAD)" != "$source" || "$(git rev-parse 'HEAD^{tree}')" != "$tree" ]] \
+    || ! git diff --quiet HEAD --; then
+    echo "error: source changed during the timed strict compile" >&2
+    return 1
+  fi
+  report_blob="$(git hash-object "$report")"
+  rustc="$(rustc -Vv)"
+  cp "$report" "$HARN_LINT_TIMINGS_DIR/cargo-timing.html"
+  jq -n --arg source "$source" --arg tree "$tree" \
+    --arg report_blob "$report_blob" \
+    --arg rustc "$rustc" --argjson status "$status" --argjson bytes "$bytes" \
+    '{schema:"harn.strict_lint_timings.v1",sourceCommit:$source,sourceTree:$tree,
+      leg:"workspace",command:["cargo","clippy","--workspace","--all-targets","--timings","--","-D","warnings"],
+      exitCode:$status,report:"cargo-timing.html",reportBytes:$bytes,reportGitBlob:$report_blob,rustc:$rustc}' \
+    > "$HARN_LINT_TIMINGS_DIR/receipt.json"
+  return "$status"
 }
 
 lint_lean_lsp() {
@@ -77,8 +138,4 @@ case "$leg" in
   workspace) lint_workspace ;;
   lean-lsp) lint_lean_lsp ;;
   freshness-checker) lint_freshness_checker ;;
-  *)
-    echo "error: unknown --leg '$leg' (expected all, workspace, lean-lsp, or freshness-checker)" >&2
-    exit 2
-    ;;
 esac

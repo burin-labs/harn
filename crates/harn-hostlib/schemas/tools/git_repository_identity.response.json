@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/tools/git_repository_identity.response.json",
+  "title": "tools.git_repository_identity response",
+  "type": "object",
+  "properties": {
+    "worktree_root": { "type": "string", "minLength": 1 },
+    "common_directory": { "type": "string", "minLength": 1 }
+  },
+  "required": ["worktree_root", "common_directory"],
+  "additionalProperties": false
+}

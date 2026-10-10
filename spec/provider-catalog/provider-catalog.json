@@ -2655,7 +2655,7 @@
       "display_name": "Claude Haiku 4.5",
       "provider": "anthropic",
       "aliases": [
-        "haiku"
+        "haiku45"
       ],
       "context_window": 200000,
       "modalities": {
@@ -2740,7 +2740,8 @@
         }
       },
       "deprecation": {
-        "status": "active"
+        "status": "active",
+        "superseded_by": "claude-haiku-5-5"
       },
       "availability": "serverless",
       "quality_tags": [],
@@ -2768,6 +2769,155 @@
         "tool_use",
         "summarization"
       ]
+    },
+    {
+      "id": "claude-haiku-5-5",
+      "name": "Claude Haiku 5.5",
+      "operations": [
+        "text_generation",
+        "decision"
+      ],
+      "display_name": "Claude Haiku 5.5",
+      "provider": "anthropic",
+      "aliases": [
+        "haiku",
+        "haiku55"
+      ],
+      "context_window": 1000000,
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "audio",
+          "pdf"
+        ],
+        "output": [
+          "text",
+          "decision"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "parity_source": "derived",
+        "tool_search": [
+          "bm25",
+          "regex"
+        ],
+        "max_tools": 10000
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": true,
+        "prefers_markdown_scaffolding": false,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": true,
+        "thinking_block_style": "thinking_blocks"
+      },
+      "reasoning": {
+        "modes": [
+          "adaptive",
+          "effort"
+        ],
+        "effort_supported": true,
+        "effort_levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ],
+        "none_supported": false,
+        "interleaved_supported": true,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "batch": {
+        "wire_format": "anthropic_messages",
+        "input_mode": "inline_requests",
+        "result_ordering": "custom_id_rejoin",
+        "partial_failure": "per_request",
+        "cancellation": "supported",
+        "discount_percent": 50,
+        "turnaround_hours": 24,
+        "max_requests": 100000,
+        "max_input_bytes": 268435456,
+        "result_retention_days": 29,
+        "security_notes": [
+          "Message Batches are not eligible for Zero Data Retention.",
+          "Batch data is scoped to the workspace that owns the API key.",
+          "Request and response data is retained for up to 29 days unless deleted after processing."
+        ],
+        "operational_notes": [
+          "Most Message Batches complete within an hour, but callers must still budget for the published 24-hour window.",
+          "Prompt caching can be used with Message Batches, but cache hits are best effort because asynchronous requests may be processed concurrently and out of order.",
+          "Use a 1-hour prompt-cache duration for shared batch context when batches may run longer than the 5-minute default cache lifetime.",
+          "Message Batches do not support stream, speed, Threads state, routing hints, or max_tokens=0 cache prewarm requests."
+        ]
+      },
+      "pricing": {
+        "input_per_mtok": 0.1,
+        "output_per_mtok": 0.5,
+        "cache_read_per_mtok": 0.01,
+        "cache_write_per_mtok": 0.125,
+        "cache_write_1h_per_mtok": 0.2,
+        "input_token_bands": [
+          {
+            "minimum_input_tokens": 100001,
+            "input_multiplier": 5.0,
+            "output_multiplier": 5.0
+          }
+        ],
+        "hosted_tool_fees": {
+          "web_search": {
+            "per_1k_calls": 10.0,
+            "source_url": "https://platform.claude.com/docs/en/agents-and-tools/tool-use/web-search-tool"
+          }
+        }
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "tool_search",
+        "vision",
+        "audio",
+        "pdf",
+        "files",
+        "prompt_caching",
+        "thinking",
+        "extended_thinking",
+        "structured_output",
+        "batch"
+      ],
+      "family": "anthropic-claude",
+      "lineage": "claude-haiku",
+      "complementary_with": [
+        "openai-gpt",
+        "google-gemini",
+        "qwen",
+        "deepseek",
+        "kimi"
+      ],
+      "tier": "mid",
+      "open_weight": false,
+      "strengths": [
+        "speed",
+        "cheap",
+        "coding",
+        "tool_use",
+        "summarization",
+        "long_context"
+      ],
+      "released": "2026-10-07"
     },
     {
       "id": "claude-opus-4-1-20250805",
@@ -6676,6 +6826,182 @@
       ]
     },
     {
+      "id": "dashscope/qwen3.8-max",
+      "name": "Qwen3.8 Max (DashScope)",
+      "operations": [
+        "text_generation",
+        "decision"
+      ],
+      "display_name": "Qwen3.8 Max",
+      "provider": "dashscope",
+      "aliases": [],
+      "context_window": 1000000,
+      "logical_model": "qwen3.8-max",
+      "equivalence_group": "qwen3.8-max",
+      "served_variant": "dashscope",
+      "wire_model": "qwen3.8-max",
+      "api_dialect": "openai_chat",
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text",
+          "decision"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "parity_source": "derived",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "delimited",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "inline"
+      },
+      "reasoning": {
+        "modes": [
+          "enabled"
+        ],
+        "effort_supported": false,
+        "effort_levels": [],
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "pricing": {
+        "input_per_mtok": 2.0,
+        "output_per_mtok": 6.0,
+        "cache_read_per_mtok": 0.25,
+        "cache_write_per_mtok": 2.5
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "vision",
+        "prompt_caching",
+        "thinking",
+        "structured_output"
+      ],
+      "family": "qwen",
+      "lineage": "qwen3",
+      "tier": "frontier",
+      "open_weight": false,
+      "strengths": [
+        "coding",
+        "agentic",
+        "tool_use",
+        "long_context",
+        "reasoning",
+        "vision"
+      ],
+      "released": "2026-09-02"
+    },
+    {
+      "id": "dashscope/qwen3.8-max-0902",
+      "name": "Qwen3.8 Max 0902 (DashScope)",
+      "operations": [
+        "text_generation",
+        "decision"
+      ],
+      "display_name": "Qwen3.8 Max 0902",
+      "provider": "dashscope",
+      "aliases": [],
+      "context_window": 1000000,
+      "logical_model": "qwen3.8-max",
+      "equivalence_group": "qwen3.8-max",
+      "served_variant": "dashscope",
+      "wire_model": "qwen3.8-max-0902",
+      "api_dialect": "openai_chat",
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text",
+          "decision"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "parity_source": "derived",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "delimited",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "inline"
+      },
+      "reasoning": {
+        "modes": [
+          "enabled"
+        ],
+        "effort_supported": false,
+        "effort_levels": [],
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "pricing": {
+        "input_per_mtok": 2.0,
+        "output_per_mtok": 6.0,
+        "cache_read_per_mtok": 0.25,
+        "cache_write_per_mtok": 2.5
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "vision",
+        "prompt_caching",
+        "thinking",
+        "structured_output"
+      ],
+      "family": "qwen",
+      "lineage": "qwen3",
+      "tier": "frontier",
+      "open_weight": false,
+      "strengths": [
+        "coding",
+        "agentic",
+        "tool_use",
+        "long_context",
+        "reasoning",
+        "vision"
+      ],
+      "released": "2026-09-02"
+    },
+    {
       "id": "deepinfra/MiniMaxAI/MiniMax-M2.7-Turbo",
       "name": "MiniMax M2.7 Turbo (DeepInfra)",
       "operations": [
@@ -7366,104 +7692,6 @@
         "tool_use",
         "long_context",
         "cheap"
-      ]
-    },
-    {
-      "id": "deepinfra/Qwen/Qwen3.8-2.4T-A95B",
-      "name": "Qwen3.8 2.4T A95B (DeepInfra)",
-      "operations": [
-        "text_generation",
-        "decision"
-      ],
-      "display_name": "Qwen3.8 2.4T A95B",
-      "provider": "deepinfra",
-      "aliases": [],
-      "context_window": 262144,
-      "logical_model": "qwen3.8-2.4t-a95b",
-      "equivalence_group": "qwen3.8-2.4t-a95b",
-      "served_variant": "deepinfra",
-      "wire_model": "Qwen/Qwen3.8-2.4T-A95B",
-      "api_dialect": "openai_chat",
-      "modalities": {
-        "input": [
-          "text"
-        ],
-        "output": [
-          "text",
-          "decision"
-        ]
-      },
-      "tool_support": {
-        "native": true,
-        "text": true,
-        "preferred_format": "native",
-        "parity": "unknown",
-        "parity_source": "derived",
-        "tool_search": []
-      },
-      "structured_output": "native",
-      "format_preferences": {
-        "prefers_xml_scaffolding": false,
-        "prefers_markdown_scaffolding": true,
-        "structured_output_mode": "native_json",
-        "supports_assistant_prefill": false,
-        "prefers_role_developer": false,
-        "prefers_xml_tools": false,
-        "thinking_block_style": "inline"
-      },
-      "reasoning": {
-        "modes": [
-          "effort"
-        ],
-        "effort_supported": true,
-        "effort_levels": [
-          "low",
-          "medium",
-          "high",
-          "xhigh",
-          "max"
-        ],
-        "none_supported": false,
-        "interleaved_supported": false,
-        "preserve_thinking": false
-      },
-      "prompt_cache": true,
-      "pricing": {
-        "input_per_mtok": 2.0,
-        "output_per_mtok": 6.0,
-        "cache_read_per_mtok": 0.2,
-        "cache_write_per_mtok": null
-      },
-      "deprecation": {
-        "status": "active"
-      },
-      "availability": "serverless",
-      "quality_tags": [],
-      "capability_tags": [
-        "streaming",
-        "tools",
-        "prompt_caching",
-        "thinking",
-        "extended_thinking",
-        "structured_output"
-      ],
-      "family": "qwen",
-      "lineage": "qwen3",
-      "complementary_with": [
-        "anthropic-claude",
-        "openai-gpt",
-        "google-gemini",
-        "deepseek",
-        "kimi"
-      ],
-      "tier": "frontier",
-      "open_weight": true,
-      "strengths": [
-        "coding",
-        "agentic",
-        "long_context",
-        "tool_use",
-        "reasoning"
       ]
     },
     {
@@ -14551,6 +14779,133 @@
       ]
     },
     {
+      "id": "mistral-large-4-0",
+      "name": "Mistral Large 4",
+      "operations": [
+        "text_generation",
+        "decision"
+      ],
+      "display_name": "Mistral Large 4",
+      "provider": "mistral",
+      "aliases": [],
+      "context_window": 1048576,
+      "logical_model": "mistral-large-4-0",
+      "equivalence_group": "mistral-large-4-0",
+      "wire_model": "mistral-large-4",
+      "api_dialect": "openai_chat_compat",
+      "architecture": {
+        "parameter_count_b": 1050.0,
+        "active_parameter_count_b": 52.0,
+        "moe": true,
+        "source_url": "https://docs.mistral.ai/models/mistral-large-4-0",
+        "last_verified": "2026-10-09"
+      },
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text",
+          "decision"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "parity_source": "derived",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "reasoning_summary"
+      },
+      "reasoning": {
+        "modes": [
+          "enabled",
+          "effort"
+        ],
+        "effort_supported": true,
+        "effort_levels": [
+          "high"
+        ],
+        "none_supported": true,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "batch": {
+        "wire_format": "mistral",
+        "input_mode": "jsonl_or_inline",
+        "result_ordering": "custom_id_rejoin",
+        "partial_failure": "unknown",
+        "cancellation": "unknown",
+        "discount_percent": 50,
+        "max_requests": 100000,
+        "max_input_bytes": 536870912,
+        "result_retention_days": 1,
+        "operational_notes": [
+          "Batch jobs support chat completions, embeddings, FIM, moderation, OCR, classifications, conversations, and audio transcription endpoints.",
+          "Batch jobs use separate accounting from real-time rate limits.",
+          "The default timeout is 24 hours; results are downloadable for 24 hours after completion."
+        ]
+      },
+      "pricing": {
+        "input_per_mtok": 1.36,
+        "output_per_mtok": 4.18,
+        "cache_read_per_mtok": 0.14,
+        "cache_write_per_mtok": null,
+        "promotions": [
+          {
+            "id": "mistral-large-4-launch",
+            "starts_on": "2026-10-06",
+            "review_after": "2026-10-20",
+            "source_url": "https://docs.mistral.ai/models/mistral-large-4-0",
+            "input_per_mtok": 0.68,
+            "output_per_mtok": 2.09,
+            "cache_read_per_mtok": 0.07,
+            "cache_write_per_mtok": null
+          }
+        ]
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "vision",
+        "prompt_caching",
+        "thinking",
+        "extended_thinking",
+        "structured_output",
+        "batch"
+      ],
+      "family": "mistral",
+      "lineage": "mistral",
+      "tier": "frontier",
+      "open_weight": false,
+      "strengths": [
+        "coding",
+        "tool_use",
+        "reasoning",
+        "long_context",
+        "vision",
+        "agentic"
+      ],
+      "released": "2026-10-06"
+    },
+    {
       "id": "mistral-medium-3-5",
       "name": "Mistral Medium 3.5",
       "operations": [
@@ -20202,7 +20557,8 @@
       },
       "deprecation": {
         "status": "deprecated",
-        "note": "Shutdown 2026-12-11 (announced 2026-06-11) per OpenAI deprecations page. Harn recommends gpt-6.1-sol.",
+        "note": "Shutdown 2026-12-11 (announced 2026-06-11) per OpenAI deprecations page, which retires the only o3 snapshot (o3-2025-04-16; read 2026-10-09). Harn recommends gpt-6.1-sol.",
+        "sunset_date": "2026-12-11",
         "superseded_by": "gpt-6.1-sol"
       },
       "availability": "serverless",
@@ -20583,7 +20939,10 @@
         "cache_write_per_mtok": null
       },
       "deprecation": {
-        "status": "active"
+        "status": "deprecated",
+        "note": "OpenRouter retires this route 2026-10-21 (typed expiration_date on https://openrouter.ai/api/v1/models, read 2026-10-09). No provider notice explains it; Together still serves Qwen/Qwen3.5-9B directly. Use qwen/qwen3.6-35b-a3b.",
+        "sunset_date": "2026-10-21",
+        "superseded_by": "qwen/qwen3.6-35b-a3b"
       },
       "availability": "serverless",
       "quality_tags": [],
@@ -20828,7 +21187,8 @@
         "cache_write_1h_per_mtok": 2.0
       },
       "deprecation": {
-        "status": "active"
+        "status": "active",
+        "superseded_by": "anthropic/claude-haiku-5.5"
       },
       "availability": "serverless",
       "quality_tags": [],
@@ -20852,6 +21212,105 @@
         "tool_use",
         "summarization"
       ]
+    },
+    {
+      "id": "anthropic/claude-haiku-5.5",
+      "name": "Claude Haiku 5.5 (via OpenRouter)",
+      "operations": [
+        "text_generation",
+        "decision"
+      ],
+      "display_name": "Claude Haiku 5.5",
+      "provider": "openrouter",
+      "aliases": [],
+      "context_window": 1000000,
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "audio",
+          "pdf"
+        ],
+        "output": [
+          "text",
+          "decision"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "parity_source": "derived",
+        "tool_search": []
+      },
+      "structured_output": "tool_use",
+      "format_preferences": {
+        "prefers_xml_scaffolding": true,
+        "prefers_markdown_scaffolding": false,
+        "structured_output_mode": "xml_tagged",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": true,
+        "thinking_block_style": "thinking_blocks"
+      },
+      "reasoning": {
+        "modes": [],
+        "effort_supported": false,
+        "effort_levels": [],
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "pricing": {
+        "input_per_mtok": 0.1,
+        "output_per_mtok": 0.5,
+        "cache_read_per_mtok": 0.01,
+        "cache_write_per_mtok": 0.125,
+        "cache_write_1h_per_mtok": 0.2,
+        "input_token_bands": [
+          {
+            "minimum_input_tokens": 100001,
+            "input_multiplier": 5.0,
+            "output_multiplier": 5.0
+          }
+        ]
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "vision",
+        "audio",
+        "pdf",
+        "prompt_caching",
+        "structured_output"
+      ],
+      "family": "anthropic-claude",
+      "lineage": "claude-haiku",
+      "complementary_with": [
+        "openai-gpt",
+        "google-gemini",
+        "qwen",
+        "deepseek",
+        "kimi"
+      ],
+      "tier": "mid",
+      "open_weight": false,
+      "strengths": [
+        "speed",
+        "cheap",
+        "coding",
+        "tool_use",
+        "summarization",
+        "long_context"
+      ],
+      "released": "2026-10-07"
     },
     {
       "id": "anthropic/claude-opus-4.8",
@@ -21469,6 +21928,92 @@
         "vision",
         "long_context"
       ]
+    },
+    {
+      "id": "cohere/command-a-plus",
+      "name": "Command A+ (via OpenRouter)",
+      "operations": [
+        "text_generation",
+        "decision"
+      ],
+      "display_name": "Command A+",
+      "provider": "openrouter",
+      "aliases": [],
+      "context_window": 192000,
+      "logical_model": "command-a-plus-05-2026",
+      "equivalence_group": "command-a-plus-05-2026",
+      "served_variant": "openrouter",
+      "api_dialect": "openai_chat",
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text",
+          "decision"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "parity_source": "derived",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "reasoning_summary"
+      },
+      "reasoning": {
+        "modes": [
+          "enabled"
+        ],
+        "effort_supported": false,
+        "effort_levels": [],
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "pricing": {
+        "input_per_mtok": 0.3,
+        "output_per_mtok": 1.5,
+        "cache_read_per_mtok": 0.15,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "vision",
+        "prompt_caching",
+        "thinking",
+        "structured_output"
+      ],
+      "family": "openrouter",
+      "lineage": "openrouter",
+      "tier": "frontier",
+      "open_weight": true,
+      "strengths": [
+        "agentic",
+        "tool_use",
+        "reasoning",
+        "multilingual",
+        "vision"
+      ],
+      "released": "2026-09-22"
     },
     {
       "id": "cohere/north-mini-code:free",
@@ -23283,6 +23828,117 @@
         "long_context",
         "vision"
       ]
+    },
+    {
+      "id": "mistralai/mistral-large-4-0",
+      "name": "Mistral Large 4 (via OpenRouter)",
+      "operations": [
+        "text_generation",
+        "decision"
+      ],
+      "display_name": "Mistral Large 4",
+      "provider": "openrouter",
+      "aliases": [],
+      "context_window": 1048576,
+      "logical_model": "mistral-large-4-0",
+      "equivalence_group": "mistral-large-4-0",
+      "served_variant": "openrouter",
+      "api_dialect": "openai_chat",
+      "architecture": {
+        "parameter_count_b": 1050.0,
+        "active_parameter_count_b": 52.0,
+        "moe": true,
+        "source_url": "https://docs.mistral.ai/models/mistral-large-4-0",
+        "last_verified": "2026-10-09"
+      },
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text",
+          "decision"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "parity_source": "derived",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "reasoning_summary"
+      },
+      "reasoning": {
+        "modes": [
+          "enabled",
+          "effort"
+        ],
+        "effort_supported": true,
+        "effort_levels": [
+          "low",
+          "high"
+        ],
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "pricing": {
+        "input_per_mtok": 1.36,
+        "output_per_mtok": 4.18,
+        "cache_read_per_mtok": 0.14,
+        "cache_write_per_mtok": null,
+        "promotions": [
+          {
+            "id": "mistral-large-4-launch",
+            "starts_on": "2026-10-06",
+            "review_after": "2026-10-20",
+            "source_url": "https://openrouter.ai/api/v1/models/mistralai/mistral-large-4-0/endpoints",
+            "input_per_mtok": 0.68,
+            "output_per_mtok": 2.09,
+            "cache_read_per_mtok": 0.07,
+            "cache_write_per_mtok": null
+          }
+        ]
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "vision",
+        "prompt_caching",
+        "thinking",
+        "extended_thinking",
+        "structured_output"
+      ],
+      "family": "mistral",
+      "lineage": "mistral",
+      "tier": "frontier",
+      "open_weight": false,
+      "strengths": [
+        "coding",
+        "tool_use",
+        "reasoning",
+        "long_context",
+        "vision",
+        "agentic"
+      ],
+      "released": "2026-10-06"
     },
     {
       "id": "mistralai/mistral-medium-3-5",
@@ -27391,6 +28047,195 @@
       "released": "2026-09-21"
     },
     {
+      "id": "xiaomi/mimo-v2.6-flash",
+      "name": "MiMo v2.6 Flash (via OpenRouter)",
+      "operations": [
+        "text_generation",
+        "decision"
+      ],
+      "display_name": "MiMo v2.6 Flash",
+      "provider": "openrouter",
+      "aliases": [],
+      "context_window": 1050000,
+      "architecture": {
+        "parameter_count_b": 309.0,
+        "active_parameter_count_b": 15.0,
+        "moe": true,
+        "license": "MIT",
+        "source_url": "https://openrouter.ai/api/v1/models",
+        "last_verified": "2026-10-09"
+      },
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "audio",
+          "video"
+        ],
+        "output": [
+          "text",
+          "decision"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "parity_source": "derived",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "inline"
+      },
+      "reasoning": {
+        "modes": [
+          "enabled"
+        ],
+        "effort_supported": false,
+        "effort_levels": [],
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "pricing": {
+        "input_per_mtok": 0.14,
+        "output_per_mtok": 0.28,
+        "cache_read_per_mtok": 0.0028,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "vision",
+        "audio",
+        "video",
+        "prompt_caching",
+        "thinking",
+        "structured_output"
+      ],
+      "family": "openrouter",
+      "lineage": "openrouter",
+      "tier": "mid",
+      "open_weight": true,
+      "strengths": [
+        "speed",
+        "cheap",
+        "tool_use",
+        "reasoning",
+        "long_context"
+      ],
+      "released": "2026-09-21"
+    },
+    {
+      "id": "xiaomi/mimo-v2.6-pro",
+      "name": "MiMo v2.6 Pro (via OpenRouter)",
+      "operations": [
+        "text_generation",
+        "decision"
+      ],
+      "display_name": "MiMo v2.6 Pro",
+      "provider": "openrouter",
+      "aliases": [],
+      "context_window": 1050000,
+      "architecture": {
+        "parameter_count_b": 1020.0,
+        "active_parameter_count_b": 42.0,
+        "moe": true,
+        "license": "MIT",
+        "source_url": "https://huggingface.co/XiaomiMiMo/MiMo-V2.6-Pro-RL",
+        "last_verified": "2026-10-09"
+      },
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "audio",
+          "video"
+        ],
+        "output": [
+          "text",
+          "decision"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "parity_source": "derived",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "inline"
+      },
+      "reasoning": {
+        "modes": [
+          "enabled"
+        ],
+        "effort_supported": false,
+        "effort_levels": [],
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "pricing": {
+        "input_per_mtok": 0.435,
+        "output_per_mtok": 0.87,
+        "cache_read_per_mtok": 0.0036,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "vision",
+        "audio",
+        "video",
+        "prompt_caching",
+        "thinking",
+        "structured_output"
+      ],
+      "family": "openrouter",
+      "lineage": "openrouter",
+      "tier": "frontier",
+      "open_weight": true,
+      "strengths": [
+        "coding",
+        "agentic",
+        "tool_use",
+        "reasoning",
+        "long_context",
+        "cheap"
+      ],
+      "released": "2026-09-21"
+    },
+    {
       "id": "z-ai/glm-5",
       "name": "GLM 5 (via OpenRouter)",
       "operations": [
@@ -27939,6 +28784,96 @@
       ]
     },
     {
+      "id": "z-ai/glm-5.3-prime",
+      "name": "GLM 5.3 Prime (via OpenRouter)",
+      "operations": [
+        "text_generation",
+        "decision"
+      ],
+      "display_name": "GLM 5.3 Prime",
+      "provider": "openrouter",
+      "aliases": [],
+      "context_window": 1000000,
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text",
+          "decision"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "parity_source": "derived",
+        "parity_notes": "2026-08-15 cross-host native re-probe: single clean `message.tool_calls`, empty content, no `<tool_call>` markup. OpenRouter z-ai/glm-5.2 verified on tool_choice=auto and required, sync and streaming.",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "inline"
+      },
+      "reasoning": {
+        "modes": [
+          "effort"
+        ],
+        "effort_supported": true,
+        "effort_levels": [
+          "minimal",
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ],
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "pricing": {
+        "input_per_mtok": 2.8,
+        "output_per_mtok": 8.8,
+        "cache_read_per_mtok": 0.56,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "prompt_caching",
+        "thinking",
+        "extended_thinking",
+        "structured_output"
+      ],
+      "family": "glm",
+      "lineage": "glm",
+      "tier": "frontier",
+      "open_weight": true,
+      "strengths": [
+        "coding",
+        "agentic",
+        "tool_use",
+        "reasoning",
+        "long_context",
+        "speed"
+      ],
+      "released": "2026-09-23"
+    },
+    {
       "id": "z-ai/glm-5v-turbo",
       "name": "GLM 5V Turbo (via OpenRouter)",
       "operations": [
@@ -28264,7 +29199,8 @@
       },
       "deprecation": {
         "status": "deprecated",
-        "note": "Absent from SambaNova's model index (https://api.sambanova.ai/v1/models, read 2026-10-01), which lists MiniMax-M3 as its only MiniMax route. Not call-verified: the probe key was rejected with HTTP 401 that day.",
+        "note": "SambaNova's customer notice dated the deprecation 2026-10-01 with MiniMax M3 as the upgrade, and the route is absent from its model index (https://api.sambanova.ai/v1/models, read 2026-10-01), which lists MiniMax-M3 as its only MiniMax route. Its docs still listed MiniMax-M2.7 under Production on 2026-10-09, so the notice is the dated source. Not call-verified: the probe key was rejected with HTTP 401 on 2026-10-01.",
+        "sunset_date": "2026-10-01",
         "superseded_by": "sambanova/MiniMax-M3"
       },
       "availability": "serverless",
@@ -29487,7 +30423,10 @@
         "cache_write_per_mtok": null
       },
       "deprecation": {
-        "status": "active"
+        "status": "deprecated",
+        "note": "Together's customer notice (support@together.ai, received 2026-10-08) deprecates this serverless model on 2026-10-22 and names deepseek-ai/DeepSeek-V4.1-Flash as the replacement. Together's deprecations page did not list it yet on 2026-10-09. Together cancelled an earlier 2026-09-29 date for the same model, so recheck before the sunset.",
+        "sunset_date": "2026-10-22",
+        "superseded_by": "deepseek-ai/DeepSeek-V4.1-Flash"
       },
       "availability": "serverless",
       "quality_tags": [],
@@ -29626,6 +30565,103 @@
         "tool_use",
         "long_context"
       ]
+    },
+    {
+      "id": "deepseek-ai/DeepSeek-V4.1-Flash",
+      "name": "DeepSeek V4.1 Flash (Together)",
+      "operations": [
+        "text_generation",
+        "decision"
+      ],
+      "display_name": "DeepSeek V4.1 Flash",
+      "provider": "together",
+      "aliases": [],
+      "context_window": 1048576,
+      "logical_model": "deepseek-v4.1-flash",
+      "equivalence_group": "deepseek-v4.1-flash",
+      "served_variant": "together",
+      "wire_model": "deepseek-ai/DeepSeek-V4.1-Flash",
+      "api_dialect": "openai_chat",
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text",
+          "decision"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "parity_source": "derived",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "reasoning_summary"
+      },
+      "reasoning": {
+        "modes": [
+          "enabled",
+          "effort"
+        ],
+        "effort_supported": true,
+        "effort_levels": [],
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "batch": {
+        "wire_format": "openai",
+        "input_mode": "jsonl_file",
+        "result_ordering": "custom_id_rejoin",
+        "partial_failure": "per_request",
+        "cancellation": "unknown",
+        "discount_percent": 50,
+        "turnaround_hours": 24
+      },
+      "pricing": {
+        "input_per_mtok": 0.3,
+        "output_per_mtok": 1.2,
+        "cache_read_per_mtok": 0.006,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "prompt_caching",
+        "thinking",
+        "extended_thinking",
+        "structured_output",
+        "batch"
+      ],
+      "family": "deepseek",
+      "lineage": "deepseek",
+      "tier": "mid",
+      "open_weight": true,
+      "strengths": [
+        "speed",
+        "cheap",
+        "tool_use",
+        "reasoning",
+        "long_context"
+      ],
+      "released": "2026-09-11"
     },
     {
       "id": "google/gemma-4-31B-it",
@@ -29785,7 +30821,9 @@
         "cache_write_per_mtok": null
       },
       "deprecation": {
-        "status": "active"
+        "status": "deprecated",
+        "note": "Together's customer notice (support@together.ai, received 2026-10-08) deprecates this serverless model on 2026-10-22 and recommends transitioning; it names no single replacement, and Together's deprecations page did not list it yet on 2026-10-09.",
+        "sunset_date": "2026-10-22"
       },
       "availability": "serverless",
       "quality_tags": [],
@@ -30963,6 +32001,331 @@
       ]
     },
     {
+      "id": "grok-4.20-0309-non-reasoning",
+      "name": "Grok 4.20 Non-Reasoning",
+      "operations": [
+        "text_generation",
+        "decision"
+      ],
+      "display_name": "Grok 4.20 Non-Reasoning",
+      "provider": "xai",
+      "aliases": [],
+      "context_window": 1000000,
+      "api_dialect": "openai_chat_compat",
+      "rate_limits": {
+        "source_url": "https://docs.x.ai/docs/models/grok-4.20-0309-non-reasoning",
+        "last_verified": "2026-10-09"
+      },
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text",
+          "decision"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "parity_source": "derived",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "reasoning_summary"
+      },
+      "reasoning": {
+        "modes": [],
+        "effort_supported": false,
+        "effort_levels": [],
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "batch": {
+        "wire_format": "xai",
+        "input_mode": "jsonl_or_inline",
+        "result_ordering": "custom_id_rejoin",
+        "partial_failure": "unknown",
+        "cancellation": "unknown",
+        "turnaround_hours": 24,
+        "operational_notes": [
+          "Most text batch jobs complete within 24 hours, but completion time is best effort and not guaranteed.",
+          "Batch discounts vary by model; do not assume a global 50% discount for xAI.",
+          "Official pricing distinguishes text/language batch discounts from image/video paths that may bill at standard rates."
+        ]
+      },
+      "pricing": {
+        "input_per_mtok": 1.25,
+        "output_per_mtok": 2.5,
+        "cache_read_per_mtok": 0.2,
+        "cache_write_per_mtok": null,
+        "input_token_bands": [
+          {
+            "minimum_input_tokens": 200001,
+            "input_multiplier": 2.0,
+            "output_multiplier": 2.0
+          }
+        ]
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "vision",
+        "prompt_caching",
+        "structured_output",
+        "batch"
+      ],
+      "family": "xai",
+      "lineage": "xai",
+      "tier": "mid",
+      "open_weight": false,
+      "strengths": [
+        "speed",
+        "tool_use",
+        "vision",
+        "long_context"
+      ],
+      "released": "2026-03-09"
+    },
+    {
+      "id": "grok-4.20-0309-reasoning",
+      "name": "Grok 4.20 Reasoning",
+      "operations": [
+        "text_generation",
+        "decision"
+      ],
+      "display_name": "Grok 4.20 Reasoning",
+      "provider": "xai",
+      "aliases": [],
+      "context_window": 1000000,
+      "api_dialect": "openai_chat_compat",
+      "rate_limits": {
+        "source_url": "https://docs.x.ai/docs/models/grok-4.20-0309-reasoning",
+        "last_verified": "2026-10-09"
+      },
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text",
+          "decision"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "parity_source": "derived",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "reasoning_summary"
+      },
+      "reasoning": {
+        "modes": [
+          "adaptive"
+        ],
+        "effort_supported": false,
+        "effort_levels": [],
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "batch": {
+        "wire_format": "xai",
+        "input_mode": "jsonl_or_inline",
+        "result_ordering": "custom_id_rejoin",
+        "partial_failure": "unknown",
+        "cancellation": "unknown",
+        "turnaround_hours": 24,
+        "operational_notes": [
+          "Most text batch jobs complete within 24 hours, but completion time is best effort and not guaranteed.",
+          "Batch discounts vary by model; do not assume a global 50% discount for xAI.",
+          "Official pricing distinguishes text/language batch discounts from image/video paths that may bill at standard rates."
+        ]
+      },
+      "pricing": {
+        "input_per_mtok": 1.25,
+        "output_per_mtok": 2.5,
+        "cache_read_per_mtok": 0.2,
+        "cache_write_per_mtok": null,
+        "input_token_bands": [
+          {
+            "minimum_input_tokens": 200001,
+            "input_multiplier": 2.0,
+            "output_multiplier": 2.0
+          }
+        ]
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "vision",
+        "prompt_caching",
+        "thinking",
+        "extended_thinking",
+        "structured_output",
+        "batch"
+      ],
+      "family": "xai",
+      "lineage": "xai",
+      "tier": "frontier",
+      "open_weight": false,
+      "strengths": [
+        "agentic",
+        "tool_use",
+        "reasoning",
+        "vision",
+        "long_context"
+      ],
+      "released": "2026-03-09"
+    },
+    {
+      "id": "grok-4.20-multi-agent-0309",
+      "name": "Grok 4.20 Multi-Agent",
+      "operations": [
+        "text_generation",
+        "decision"
+      ],
+      "display_name": "Grok 4.20 Multi-Agent",
+      "provider": "xai",
+      "aliases": [],
+      "context_window": 1000000,
+      "api_dialect": "openai_chat_compat",
+      "rate_limits": {
+        "source_url": "https://docs.x.ai/docs/models/grok-4.20-multi-agent-0309",
+        "last_verified": "2026-10-09"
+      },
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text",
+          "decision"
+        ]
+      },
+      "tool_support": {
+        "native": false,
+        "text": false,
+        "preferred_format": "none",
+        "parity": "unsupported",
+        "parity_source": "derived",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "reasoning_summary"
+      },
+      "reasoning": {
+        "modes": [
+          "adaptive",
+          "effort"
+        ],
+        "effort_supported": true,
+        "effort_levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh"
+        ],
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "batch": {
+        "wire_format": "xai",
+        "input_mode": "jsonl_or_inline",
+        "result_ordering": "custom_id_rejoin",
+        "partial_failure": "unknown",
+        "cancellation": "unknown",
+        "turnaround_hours": 24,
+        "operational_notes": [
+          "Most text batch jobs complete within 24 hours, but completion time is best effort and not guaranteed.",
+          "Batch discounts vary by model; do not assume a global 50% discount for xAI.",
+          "Official pricing distinguishes text/language batch discounts from image/video paths that may bill at standard rates."
+        ]
+      },
+      "pricing": {
+        "input_per_mtok": 1.25,
+        "output_per_mtok": 2.5,
+        "cache_read_per_mtok": 0.2,
+        "cache_write_per_mtok": null,
+        "input_token_bands": [
+          {
+            "minimum_input_tokens": 200001,
+            "input_multiplier": 2.0,
+            "output_multiplier": 2.0
+          }
+        ]
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "vision",
+        "prompt_caching",
+        "thinking",
+        "extended_thinking",
+        "structured_output",
+        "batch"
+      ],
+      "family": "xai",
+      "lineage": "xai",
+      "tier": "frontier",
+      "open_weight": false,
+      "strengths": [
+        "reasoning",
+        "vision",
+        "long_context"
+      ],
+      "released": "2026-03-09"
+    },
+    {
       "id": "grok-4.3",
       "name": "Grok 4.3",
       "operations": [
@@ -31038,7 +32401,14 @@
         "input_per_mtok": 1.25,
         "output_per_mtok": 2.5,
         "cache_read_per_mtok": 0.2,
-        "cache_write_per_mtok": null
+        "cache_write_per_mtok": null,
+        "input_token_bands": [
+          {
+            "minimum_input_tokens": 200001,
+            "input_multiplier": 2.0,
+            "output_multiplier": 2.0
+          }
+        ]
       },
       "deprecation": {
         "status": "active"
@@ -31480,7 +32850,14 @@
         "input_per_mtok": 1.0,
         "output_per_mtok": 2.0,
         "cache_read_per_mtok": 0.2,
-        "cache_write_per_mtok": null
+        "cache_write_per_mtok": null,
+        "input_token_bands": [
+          {
+            "minimum_input_tokens": 200001,
+            "input_multiplier": 2.0,
+            "output_multiplier": 2.0
+          }
+        ]
       },
       "deprecation": {
         "status": "active"
@@ -32767,7 +34144,17 @@
     },
     {
       "name": "haiku",
+      "model_id": "claude-haiku-5-5",
+      "provider": "anthropic"
+    },
+    {
+      "name": "haiku45",
       "model_id": "claude-haiku-4-5-20251001",
+      "provider": "anthropic"
+    },
+    {
+      "name": "haiku55",
+      "model_id": "claude-haiku-5-5",
       "provider": "anthropic"
     },
     {
@@ -33462,7 +34849,7 @@
       "id": "vision-capable",
       "label": "Vision capable",
       "description": "Largest-context route that accepts image input.",
-      "model_id": "openai/gpt-6.1-sol-pro",
+      "model_id": "xiaomi/mimo-v2.6-pro",
       "provider": "openrouter",
       "source": "selector:largest_vision_context"
     },
@@ -33470,7 +34857,7 @@
       "id": "long-context",
       "label": "Long context",
       "description": "Largest context-window route in this catalog.",
-      "model_id": "openai/gpt-6.1-sol-pro",
+      "model_id": "xiaomi/mimo-v2.6-pro",
       "provider": "openrouter",
       "source": "selector:largest_context"
     }
@@ -33654,6 +35041,34 @@
         "pdf",
         "prefers_xml_scaffolding",
         "prompt_caching",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tool_search",
+        "tools",
+        "vision"
+      ]
+    },
+    {
+      "provider": "anthropic",
+      "model": "claude-haiku-5-5",
+      "base_url": "https://api.anthropic.com/v1",
+      "secret_env": "ANTHROPIC_API_KEY",
+      "label": "Claude Haiku 5.5",
+      "family": "anthropic-claude",
+      "capabilities": [
+        "audio",
+        "batch",
+        "extended_thinking",
+        "files",
+        "interleaved_thinking",
+        "native_tools",
+        "pdf",
+        "prefers_xml_scaffolding",
+        "prompt_caching",
+        "reasoning_effort",
         "streaming",
         "structured_output",
         "structured_output_mode:native_json",
@@ -34291,6 +35706,46 @@
       ]
     },
     {
+      "provider": "dashscope",
+      "model": "qwen3.8-max",
+      "base_url": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+      "secret_env": "DASHSCOPE_API_KEY",
+      "label": "Qwen3.8 Max (DashScope)",
+      "family": "qwen",
+      "capabilities": [
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "prompt_caching",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:delimited",
+        "text_tools",
+        "thinking",
+        "tools",
+        "vision"
+      ]
+    },
+    {
+      "provider": "dashscope",
+      "model": "qwen3.8-max-0902",
+      "base_url": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+      "secret_env": "DASHSCOPE_API_KEY",
+      "label": "Qwen3.8 Max 0902 (DashScope)",
+      "family": "qwen",
+      "capabilities": [
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "prompt_caching",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:delimited",
+        "text_tools",
+        "thinking",
+        "tools",
+        "vision"
+      ]
+    },
+    {
       "provider": "deepinfra",
       "model": "MiniMaxAI/MiniMax-M3",
       "base_url": "https://api.deepinfra.com/v1/openai",
@@ -34414,27 +35869,6 @@
         "streaming",
         "structured_output",
         "structured_output_mode:delimited",
-        "text_tools",
-        "thinking",
-        "tools"
-      ]
-    },
-    {
-      "provider": "deepinfra",
-      "model": "Qwen/Qwen3.8-2.4T-A95B",
-      "base_url": "https://api.deepinfra.com/v1/openai",
-      "secret_env": "DEEPINFRA_API_KEY",
-      "label": "Qwen3.8 2.4T A95B (DeepInfra)",
-      "family": "qwen",
-      "capabilities": [
-        "extended_thinking",
-        "native_tools",
-        "prefers_markdown_scaffolding",
-        "prompt_caching",
-        "reasoning_effort",
-        "streaming",
-        "structured_output",
-        "structured_output_mode:native_json",
         "text_tools",
         "thinking",
         "tools"
@@ -35665,6 +37099,29 @@
     },
     {
       "provider": "mistral",
+      "model": "mistral-large-4",
+      "base_url": "https://api.mistral.ai/v1",
+      "secret_env": "MISTRAL_API_KEY",
+      "label": "Mistral Large 4",
+      "family": "mistral",
+      "capabilities": [
+        "batch",
+        "extended_thinking",
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "prompt_caching",
+        "reasoning_effort",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools",
+        "vision"
+      ]
+    },
+    {
+      "provider": "mistral",
       "model": "mistral-medium-3-5",
       "base_url": "https://api.mistral.ai/v1",
       "secret_env": "MISTRAL_API_KEY",
@@ -36509,24 +37966,6 @@
     },
     {
       "provider": "openrouter",
-      "model": "qwen/qwen3.5-9b",
-      "base_url": "https://openrouter.ai/api/v1",
-      "secret_env": "OPENROUTER_API_KEY",
-      "label": "Qwen3.5 9B",
-      "family": "qwen",
-      "capabilities": [
-        "native_tools",
-        "prefers_markdown_scaffolding",
-        "streaming",
-        "structured_output",
-        "structured_output_mode:delimited",
-        "text_tools",
-        "thinking",
-        "tools"
-      ]
-    },
-    {
-      "provider": "openrouter",
       "model": "anthropic/claude-fable-5",
       "base_url": "https://openrouter.ai/api/v1",
       "secret_env": "OPENROUTER_API_KEY",
@@ -36573,6 +38012,27 @@
       "base_url": "https://openrouter.ai/api/v1",
       "secret_env": "OPENROUTER_API_KEY",
       "label": "Claude Haiku 4.5 (via OpenRouter)",
+      "family": "anthropic-claude",
+      "capabilities": [
+        "audio",
+        "native_tools",
+        "pdf",
+        "prefers_xml_scaffolding",
+        "prompt_caching",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:xml_tagged",
+        "text_tools",
+        "tools",
+        "vision"
+      ]
+    },
+    {
+      "provider": "openrouter",
+      "model": "anthropic/claude-haiku-5.5",
+      "base_url": "https://openrouter.ai/api/v1",
+      "secret_env": "OPENROUTER_API_KEY",
+      "label": "Claude Haiku 5.5 (via OpenRouter)",
       "family": "anthropic-claude",
       "capabilities": [
         "audio",
@@ -36732,6 +38192,26 @@
         "thinking",
         "tools",
         "video",
+        "vision"
+      ]
+    },
+    {
+      "provider": "openrouter",
+      "model": "cohere/command-a-plus",
+      "base_url": "https://openrouter.ai/api/v1",
+      "secret_env": "OPENROUTER_API_KEY",
+      "label": "Command A+ (via OpenRouter)",
+      "family": "openrouter",
+      "capabilities": [
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "prompt_caching",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools",
         "vision"
       ]
     },
@@ -37101,6 +38581,28 @@
         "thinking",
         "tools",
         "video",
+        "vision"
+      ]
+    },
+    {
+      "provider": "openrouter",
+      "model": "mistralai/mistral-large-4-0",
+      "base_url": "https://openrouter.ai/api/v1",
+      "secret_env": "OPENROUTER_API_KEY",
+      "label": "Mistral Large 4 (via OpenRouter)",
+      "family": "mistral",
+      "capabilities": [
+        "extended_thinking",
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "prompt_caching",
+        "reasoning_effort",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools",
         "vision"
       ]
     },
@@ -37956,6 +39458,50 @@
     },
     {
       "provider": "openrouter",
+      "model": "xiaomi/mimo-v2.6-flash",
+      "base_url": "https://openrouter.ai/api/v1",
+      "secret_env": "OPENROUTER_API_KEY",
+      "label": "MiMo v2.6 Flash (via OpenRouter)",
+      "family": "openrouter",
+      "capabilities": [
+        "audio",
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "prompt_caching",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools",
+        "video",
+        "vision"
+      ]
+    },
+    {
+      "provider": "openrouter",
+      "model": "xiaomi/mimo-v2.6-pro",
+      "base_url": "https://openrouter.ai/api/v1",
+      "secret_env": "OPENROUTER_API_KEY",
+      "label": "MiMo v2.6 Pro (via OpenRouter)",
+      "family": "openrouter",
+      "capabilities": [
+        "audio",
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "prompt_caching",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools",
+        "video",
+        "vision"
+      ]
+    },
+    {
+      "provider": "openrouter",
       "model": "z-ai/glm-5",
       "base_url": "https://openrouter.ai/api/v1",
       "secret_env": "OPENROUTER_API_KEY",
@@ -38067,6 +39613,27 @@
       "base_url": "https://openrouter.ai/api/v1",
       "secret_env": "OPENROUTER_API_KEY",
       "label": "GLM 5.3 FlashX (via OpenRouter)",
+      "family": "glm",
+      "capabilities": [
+        "extended_thinking",
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "prompt_caching",
+        "reasoning_effort",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools"
+      ]
+    },
+    {
+      "provider": "openrouter",
+      "model": "z-ai/glm-5.3-prime",
+      "base_url": "https://openrouter.ai/api/v1",
+      "secret_env": "OPENROUTER_API_KEY",
+      "label": "GLM 5.3 Prime (via OpenRouter)",
       "family": "glm",
       "capabilities": [
         "extended_thinking",
@@ -38376,10 +39943,10 @@
     },
     {
       "provider": "together",
-      "model": "deepseek-ai/DeepSeek-V4-Flash-0731",
+      "model": "deepseek-ai/DeepSeek-V4-Pro-0813",
       "base_url": "https://api.together.xyz/v1",
       "secret_env": "TOGETHER_AI_API_KEY",
-      "label": "DeepSeek V4 Flash 0731 (Together)",
+      "label": "DeepSeek V4 Pro 0813 (Together)",
       "family": "deepseek",
       "capabilities": [
         "batch",
@@ -38398,10 +39965,10 @@
     },
     {
       "provider": "together",
-      "model": "deepseek-ai/DeepSeek-V4-Pro-0813",
+      "model": "deepseek-ai/DeepSeek-V4.1-Flash",
       "base_url": "https://api.together.xyz/v1",
       "secret_env": "TOGETHER_AI_API_KEY",
-      "label": "DeepSeek V4 Pro 0813 (Together)",
+      "label": "DeepSeek V4.1 Flash (Together)",
       "family": "deepseek",
       "capabilities": [
         "batch",
@@ -38436,23 +40003,6 @@
         "thinking",
         "tools",
         "vision"
-      ]
-    },
-    {
-      "provider": "together",
-      "model": "meta-llama/Llama-3.3-70B-Instruct-Turbo",
-      "base_url": "https://api.together.xyz/v1",
-      "secret_env": "TOGETHER_AI_API_KEY",
-      "label": "Llama 3.3 70B Instruct Turbo (Together)",
-      "family": "llama",
-      "capabilities": [
-        "batch",
-        "native_tools",
-        "prefers_markdown_scaffolding",
-        "streaming",
-        "structured_output_mode:none",
-        "text_tools",
-        "tools"
       ]
     },
     {
@@ -38650,6 +40200,68 @@
         "structured_output_mode:native_json",
         "text_tools",
         "tools"
+      ]
+    },
+    {
+      "provider": "xai",
+      "model": "grok-4.20-0309-non-reasoning",
+      "base_url": "https://api.x.ai/v1",
+      "secret_env": "XAI_API_KEY",
+      "label": "Grok 4.20 Non-Reasoning",
+      "family": "xai",
+      "capabilities": [
+        "batch",
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "prompt_caching",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "tools",
+        "vision"
+      ]
+    },
+    {
+      "provider": "xai",
+      "model": "grok-4.20-0309-reasoning",
+      "base_url": "https://api.x.ai/v1",
+      "secret_env": "XAI_API_KEY",
+      "label": "Grok 4.20 Reasoning",
+      "family": "xai",
+      "capabilities": [
+        "batch",
+        "extended_thinking",
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "prompt_caching",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools",
+        "vision"
+      ]
+    },
+    {
+      "provider": "xai",
+      "model": "grok-4.20-multi-agent-0309",
+      "base_url": "https://api.x.ai/v1",
+      "secret_env": "XAI_API_KEY",
+      "label": "Grok 4.20 Multi-Agent",
+      "family": "xai",
+      "capabilities": [
+        "batch",
+        "extended_thinking",
+        "prefers_markdown_scaffolding",
+        "prompt_caching",
+        "reasoning_effort",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "thinking",
+        "vision"
       ]
     },
     {

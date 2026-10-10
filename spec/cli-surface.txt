@@ -7,6 +7,7 @@ harn
 harn --argument-schema
 harn --command
 harn --json-schemas
+harn --parent-secret-stdin
 harn --spend-policy
 harn add
 harn add --alias
@@ -1771,6 +1772,9 @@ harn session list
 harn session list --json
 harn session list --limit
 harn session list --session-root
+harn session publication-evidence
+harn session publication-evidence --project-root
+harn session publication-evidence <positional 1>
 harn session schema
 harn session schema --check
 harn session schema --out

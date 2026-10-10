@@ -9,6 +9,10 @@ async fn acp_websocket_lists_and_loads_a_store_only_session_from_its_project() {
     std::fs::create_dir_all(project.path().join(".harn")).expect("project state dir");
     let project_root = std::fs::canonicalize(project.path()).expect("canonical project root");
     let session_id = "01a003d0-1513-7271-90aa-4542d6059498";
+    let environment_policy = harn_serve::AcpSessionEnvironmentConfig {
+        kind: harn_vm::security::EnvironmentPolicyKind::Isolated,
+        grants: Vec::new(),
+    };
     {
         use harn_serve::{
             AppendEvent, CreateSession, SessionEventKind, SessionStore, SqliteSessionStore,
@@ -65,7 +69,11 @@ async fn acp_websocket_lists_and_loads_a_store_only_session_from_its_project() {
         &mut socket,
         2,
         "session/load",
-        json!({"sessionId": session_id, "cwd": cwd}),
+        serde_json::to_value(
+            harn_serve::AcpSessionLoadParams::new(session_id, environment_policy.clone())
+                .with_cwd(cwd),
+        )
+        .expect("typed cold-load params"),
     )
     .await;
     let mut replayed_text = String::new();
@@ -118,7 +126,10 @@ async fn acp_websocket_lists_and_loads_a_store_only_session_from_its_project() {
                     "jsonrpc": "2.0",
                     "id": 3,
                     "method": "session/load",
-                    "params": {"sessionId": session_id, "cwd": project_root},
+                    "params": harn_serve::AcpSessionLoadParams::new(
+                        session_id,
+                        environment_policy,
+                    ).with_cwd(project_root.display().to_string()),
                 }))
                 .expect("send in-process session/load");
             let mut replayed_text = String::new();

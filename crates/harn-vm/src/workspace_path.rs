@@ -54,7 +54,15 @@ impl WorkspacePathInfo {
     }
 
     pub fn resolved_host_path(&self) -> Option<PathBuf> {
-        self.host_path.as_ref().map(PathBuf::from)
+        self.host_path.as_ref().map(|path| {
+            // The wire uses forward slashes; Windows verbatim paths require
+            // native separators when handed back to filesystem APIs.
+            if cfg!(windows) {
+                PathBuf::from(path.replace('/', "\\"))
+            } else {
+                PathBuf::from(path)
+            }
+        })
     }
 }
 
@@ -91,6 +99,92 @@ pub fn canonicalize_existing_workspace_path(path: &Path, workspace_root: &Path) 
 }
 
 pub fn classify_workspace_path(path: &str, workspace_root: Option<&Path>) -> WorkspacePathInfo {
+    classify_path(path, workspace_root, true)
+}
+
+/// Classify permission resources without interpreting an absolute path as a
+/// misspelled workspace-relative path. Display recovery cannot grant access.
+pub fn classify_permission_path(path: &str, workspace_root: Option<&Path>) -> WorkspacePathInfo {
+    let mut info = classify_path(path, workspace_root, false);
+    if info.kind == WorkspacePathKind::Invalid
+        || unsupported_workspace_root(workspace_root)
+        || (is_absolute_path_syntax(path.trim()) && !Path::new(path.trim()).is_absolute())
+    {
+        return info;
+    }
+    let Some(root) = workspace_root else {
+        return info;
+    };
+    let input = Path::new(path.trim());
+    let target = if input.is_absolute() {
+        input.to_path_buf()
+    } else {
+        root.join(input)
+    };
+    let resolved = std::fs::canonicalize(root).and_then(|canonical_root| {
+        canonicalize_existing_ancestor(&target).map(|target| (canonical_root, target))
+    });
+    match resolved {
+        Ok((root, target)) => {
+            let host = normalize_host_path(&target);
+            info.workspace_path = target
+                .strip_prefix(root)
+                .ok()
+                .map(|relative| to_posix(&relative.to_string_lossy()));
+            info.host_path = Some(host.clone());
+            if info.workspace_path.is_none() {
+                info.kind = WorkspacePathKind::HostAbsolute;
+                info.normalized = host;
+                info.reason = Some("path resolves outside the workspace root".into());
+            } else {
+                info.reason = None;
+            }
+        }
+        Err(error) => {
+            info.kind = WorkspacePathKind::Invalid;
+            info.workspace_path = None;
+            info.reason = Some(format!("permission path cannot be resolved: {error}"));
+        }
+    }
+    info
+}
+
+fn canonicalize_existing_ancestor(path: &Path) -> std::io::Result<PathBuf> {
+    let mut ancestor = path;
+    let mut suffix = Vec::new();
+    loop {
+        match std::fs::canonicalize(ancestor) {
+            Ok(mut resolved) => {
+                for component in suffix.into_iter().rev() {
+                    resolved.push(component);
+                }
+                return Ok(resolved);
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                // An existing dangling symlink is an unresolved resource,
+                // not a new file under the symlink's lexical parent.
+                if std::fs::symlink_metadata(ancestor).is_ok() {
+                    return Err(error);
+                }
+                let Some(name) = ancestor.file_name() else {
+                    return Err(error);
+                };
+                suffix.push(name.to_os_string());
+                let Some(parent) = ancestor.parent() else {
+                    return Err(error);
+                };
+                ancestor = parent;
+            }
+            Err(error) => return Err(error),
+        }
+    }
+}
+
+fn classify_path(
+    path: &str,
+    workspace_root: Option<&Path>,
+    recover_workspace_drift: bool,
+) -> WorkspacePathInfo {
     let input = path.to_string();
     let trimmed = path.trim();
     if trimmed.is_empty() {
@@ -99,9 +193,27 @@ pub fn classify_workspace_path(path: &str, workspace_root: Option<&Path>) -> Wor
     if trimmed.contains('\0') {
         return invalid_info(input, to_posix(trimmed), "path contains NUL bytes");
     }
+    let serialized = to_posix(trimmed);
+    if crate::windows_path::is_opaque_device_path(&serialized) {
+        return invalid_info(
+            input,
+            serialized,
+            "unsupported or malformed Windows device namespace",
+        );
+    }
 
     let normalized_input = normalize_lexical(trimmed);
-    let root_path = workspace_root.map(normalize_workspace_root);
+    let unsupported_root = unsupported_workspace_root(workspace_root);
+    if unsupported_root && !is_absolute_path_syntax(trimmed) {
+        return invalid_info(
+            input,
+            normalized_input,
+            "unsupported or malformed Windows device workspace root",
+        );
+    }
+    let root_path = workspace_root
+        .filter(|_| !unsupported_root)
+        .map(normalize_workspace_root);
     let root_norm = root_path
         .as_ref()
         .map(|root| normalize_host_path(root))
@@ -151,7 +263,7 @@ pub fn classify_workspace_path(path: &str, workspace_root: Option<&Path>) -> Wor
             };
         }
 
-        if let Some(root_path) = root_path.as_ref() {
+        if let Some(root_path) = root_path.as_ref().filter(|_| recover_workspace_drift) {
             if let Some(recovered) = recover_root_drift(trimmed, root_path) {
                 return WorkspacePathInfo {
                     input,
@@ -201,6 +313,12 @@ fn normalize_workspace_root(root: &Path) -> PathBuf {
     }
 }
 
+fn unsupported_workspace_root(root: Option<&Path>) -> bool {
+    root.is_some_and(|root| {
+        crate::windows_path::is_opaque_device_path(&to_posix(&root.to_string_lossy()))
+    })
+}
+
 fn to_posix(s: &str) -> String {
     s.replace('\\', "/")
 }
@@ -216,26 +334,15 @@ pub(crate) fn is_absolute_path_syntax(path: &str) -> bool {
     bytes.len() >= 3 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' && bytes[2] == b'/'
 }
 
-fn split_segments(path: &str) -> (bool, Option<String>, Vec<String>) {
-    let posix = to_posix(path);
-    let mut drive: Option<String> = None;
-    let mut rest = posix.as_str();
-    let bytes = posix.as_bytes();
-    if bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' {
-        let (drive_prefix, remainder) = posix.split_at(2);
-        drive = Some(drive_prefix.to_string());
-        rest = remainder;
-    }
-    let absolute = rest.starts_with('/');
-    let segments = rest
-        .split('/')
-        .filter(|segment| !segment.is_empty())
-        .map(|segment| segment.to_string())
-        .collect();
-    (absolute, drive, segments)
+pub(crate) fn split_segments(path: &str) -> (bool, Option<String>, Vec<String>) {
+    crate::windows_path::split_segments(path)
 }
 
-fn normalize_lexical(path: &str) -> String {
+pub(crate) fn normalize_lexical(path: &str) -> String {
+    let serialized = to_posix(path);
+    if crate::windows_path::is_opaque_device_path(&serialized) {
+        return serialized;
+    }
     let (absolute, drive, segments) = split_segments(path);
     let mut stack = Vec::new();
     for segment in segments {
@@ -327,6 +434,89 @@ mod tests {
     use super::*;
 
     #[test]
+    fn windows_prefixes_survive_permission_path_normalization() {
+        for (input, expected) in [
+            (r"\\?\C:\repo\src\..\main.rs", "//?/C:/repo/main.rs"),
+            (
+                r"\\?\UNC\server\share\main.rs",
+                "//?/UNC/server/share/main.rs",
+            ),
+            (r"\\server\share\main.rs", "//server/share/main.rs"),
+        ] {
+            for info in [
+                classify_workspace_path(input, None),
+                classify_permission_path(input, None),
+            ] {
+                assert_eq!(info.host_path.as_deref(), Some(expected));
+                assert_eq!(info.kind, WorkspacePathKind::HostAbsolute);
+                assert!(info.resolved_host_path().is_some());
+            }
+        }
+        for (input, expected) in [
+            ("//server/share/../../..", "//server/share/"),
+            ("//?/UNC/server/share/../../..", "//?/UNC/server/share/"),
+            (r"\\server/share\..\..\..", "//server/share/"),
+            (r"\\?\UNC/server\share/..\..\..", "//?/UNC/server/share/"),
+        ] {
+            assert_eq!(normalize_lexical(input), expected);
+            assert!(split_segments(input).0, "UNC paths are absolute");
+        }
+        for (input, expected) in [
+            ("///a", "/a"),
+            ("//server", "/server"),
+            ("////", "/"),
+            ("//?/UNC/server", "//?/UNC/server"),
+            ("//?/UNC//share", "//?/UNC//share"),
+        ] {
+            assert_eq!(normalize_lexical(input), expected);
+        }
+        for input in [
+            r"\\?\Volume{GUID}\dir\..\..\secret",
+            r"\\?\pipe\name\..\..\secret",
+            r"\\.\pipe\name\..\..\secret",
+            "//?/UNC//share/../main.rs",
+            "//?/UNC/server/../../secret",
+            "//?/UNC/../share/secret",
+            "//?/UNC/server/./secret",
+            "//server/../secret",
+            "//../share/secret",
+            r"\\?\UNC/server\..\..\secret",
+            r"\\server/..\secret",
+            "//?/C:relative/../secret",
+            "//?//../secret",
+        ] {
+            let expected = to_posix(input);
+            assert_eq!(normalize_lexical(input), expected);
+            for info in [
+                classify_workspace_path(input, None),
+                classify_permission_path(input, None),
+            ] {
+                assert_eq!(info.kind, WorkspacePathKind::Invalid);
+                assert_eq!(info.normalized, expected);
+                assert!(info.resolved_host_path().is_none());
+                assert!(info.workspace_path.is_none());
+            }
+            for info in [
+                classify_workspace_path("secret", Some(Path::new(input))),
+                classify_permission_path("secret", Some(Path::new(input))),
+            ] {
+                assert_eq!(info.kind, WorkspacePathKind::Invalid);
+                assert!(info.resolved_host_path().is_none());
+                assert!(info.workspace_path.is_none());
+            }
+            let absolute = classify_permission_path("C:/safe/absolute", Some(Path::new(input)));
+            assert_eq!(absolute.kind, WorkspacePathKind::HostAbsolute);
+            assert_eq!(absolute.host_path.as_deref(), Some("C:/safe/absolute"));
+        }
+        for root in [r"\\?\C:\repo", r"\\?\UNC\server\share", r"\\server\share"] {
+            assert!(!unsupported_workspace_root(Some(Path::new(root))));
+            let info = classify_workspace_path("secret", Some(Path::new(root)));
+            assert_eq!(info.kind, WorkspacePathKind::WorkspaceRelative);
+            assert!(info.resolved_host_path().is_some());
+        }
+    }
+
+    #[test]
     fn relative_path_is_workspace_relative() {
         let dir = tempfile::tempdir().unwrap();
         let info = classify_workspace_path("src/main.rs", Some(dir.path()));
@@ -385,6 +575,100 @@ mod tests {
             Some("packages/app/host.harn")
         );
         assert!(info.recovered_root_drift);
+    }
+
+    #[test]
+    fn permission_path_does_not_recover_an_external_absolute_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("packages/app/host.harn");
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        std::fs::write(&file, "ok").unwrap();
+        let external = classify_permission_path("/packages/app/host.harn", Some(dir.path()));
+        assert_eq!(external.kind, WorkspacePathKind::HostAbsolute);
+        assert!(external.workspace_path.is_none());
+        assert_eq!(
+            external.host_path.as_deref(),
+            Some("/packages/app/host.harn")
+        );
+        assert!(!external.recovered_root_drift);
+        let inside = classify_permission_path(file.to_str().unwrap(), Some(dir.path()));
+        assert_eq!(
+            inside.workspace_path.as_deref(),
+            Some("packages/app/host.harn")
+        );
+        let relative = classify_permission_path("packages/app/host.harn", Some(dir.path()));
+        assert_eq!(relative.host_path, inside.host_path);
+        assert!(!relative.recovered_root_drift);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn permission_path_follows_existing_ancestors_without_admitting_symlink_escape() {
+        let workspace = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        std::os::unix::fs::symlink(outside.path(), workspace.path().join("linked")).unwrap();
+        let escaped = classify_permission_path("linked/new.txt", Some(workspace.path()));
+        assert!(escaped.workspace_path.is_none());
+        assert_eq!(escaped.kind, WorkspacePathKind::HostAbsolute);
+        assert_eq!(
+            escaped.host_path.as_deref(),
+            Some(
+                normalize_host_path(&outside.path().canonicalize().unwrap().join("new.txt"))
+                    .as_str()
+            )
+        );
+        let inside = classify_permission_path("new/nested.txt", Some(workspace.path()));
+        assert_eq!(inside.workspace_path.as_deref(), Some("new/nested.txt"));
+        std::os::unix::fs::symlink(
+            outside.path().join("absent"),
+            workspace.path().join("dangling"),
+        )
+        .unwrap();
+        let unresolved = classify_permission_path("dangling", Some(workspace.path()));
+        assert_eq!(unresolved.kind, WorkspacePathKind::Invalid);
+        assert!(unresolved.workspace_path.is_none());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn permission_path_resolves_symlinks_before_parent_traversal() {
+        let workspace = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        std::fs::create_dir(outside.path().join("child")).unwrap();
+        std::os::unix::fs::symlink(
+            outside.path().join("child"),
+            workspace.path().join("linked"),
+        )
+        .unwrap();
+        let escaped = classify_permission_path("linked/../secret.txt", Some(workspace.path()));
+        assert_eq!(escaped.kind, WorkspacePathKind::HostAbsolute);
+        assert!(escaped.workspace_path.is_none());
+        assert_eq!(
+            escaped.host_path.as_deref(),
+            Some(
+                normalize_host_path(&outside.path().canonicalize().unwrap().join("secret.txt"))
+                    .as_str()
+            )
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn permission_path_accepts_physical_and_declared_root_aliases() {
+        let workspace = tempfile::tempdir().unwrap();
+        let alias_parent = tempfile::tempdir().unwrap();
+        let alias = alias_parent.path().join("project");
+        std::os::unix::fs::symlink(workspace.path(), &alias).unwrap();
+        let physical = classify_permission_path(
+            workspace.path().join("new.txt").to_str().unwrap(),
+            Some(&alias),
+        );
+        let declared =
+            classify_permission_path(alias.join("new.txt").to_str().unwrap(), Some(&alias));
+        let relative = classify_permission_path("new.txt", Some(&alias));
+        assert_eq!(physical.workspace_path.as_deref(), Some("new.txt"));
+        assert_eq!(physical.host_path, declared.host_path);
+        assert_eq!(physical.host_path, relative.host_path);
     }
 
     #[test]

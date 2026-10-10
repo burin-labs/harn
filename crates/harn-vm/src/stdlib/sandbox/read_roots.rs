@@ -29,12 +29,9 @@ use crate::orchestration::CapabilityPolicy;
 /// ([`super::check_fs_path_scope`]) and the OS sandbox profile for a confined
 /// child resolve the same roots here.
 pub(super) fn normalized_read_only_roots(policy: &CapabilityPolicy) -> Vec<PathBuf> {
-    let mut roots: Vec<PathBuf> = Vec::new();
-    for root in &policy.read_only_roots {
-        let root = normalize_for_policy(&super::resolve_policy_path(root));
-        if !roots.contains(&root) {
-            roots.push(root);
-        }
+    let mut roots = normalized_declared_read_only_roots(policy);
+    if super::declared_path_roots_active() {
+        return roots;
     }
     // Object stores borrowed through `objects/info/alternates` (e.g. a
     // `git clone --shared`) live outside the workspace and are only ever read
@@ -43,6 +40,17 @@ pub(super) fn normalized_read_only_roots(policy: &CapabilityPolicy) -> Vec<PathB
     {
         if !roots.iter().any(|existing| existing == &dir) {
             roots.push(dir);
+        }
+    }
+    roots
+}
+
+pub(super) fn normalized_declared_read_only_roots(policy: &CapabilityPolicy) -> Vec<PathBuf> {
+    let mut roots: Vec<PathBuf> = Vec::new();
+    for root in &policy.read_only_roots {
+        let root = normalize_for_policy(&super::resolve_policy_path(root));
+        if !roots.contains(&root) {
+            roots.push(root);
         }
     }
     roots

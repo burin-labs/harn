@@ -24,6 +24,15 @@ pub const EXTERNAL_ROOT_READ_ONLY: &str = "external_root_read_only";
 /// The prepared-run network policy, evaluated before endpoint health.
 pub const SOURCE_NET_POLICY: &str = "harn.net_policy";
 
+pub(super) fn evaluate_context(
+    policy: &ToolApprovalPolicy,
+    ctx: &mut EvaluationContext,
+) -> Option<PolicyEvaluation> {
+    ctx.external_roots =
+        super::super::external_roots::governing_roots(&policy.external_roots, &ctx.path_entries);
+    default_guard(policy, ctx).map(|candidate| evaluation_from_candidate(candidate, ctx))
+}
+
 /// Which refusing mechanism a deciding rule belongs to.
 ///
 /// Three of the sources this module produces are not approval decisions.
@@ -71,6 +80,7 @@ pub(super) fn default_guard(
                 approval: ApprovalShape::default(),
                 risk_labels: vec!["sensitive_path".to_string()],
                 denied_paths: vec![path],
+                contributing_rules: Vec::new(),
             });
         }
     }
@@ -93,6 +103,7 @@ pub(super) fn default_guard(
                 approval: ApprovalShape::default(),
                 risk_labels: vec!["invalid_path".to_string()],
                 denied_paths: vec![entry.display_path().to_string()],
+                contributing_rules: Vec::new(),
             });
         }
         if entry.workspace_path.is_some() {
@@ -122,6 +133,7 @@ pub(super) fn default_guard(
                     approval: ApprovalShape::default(),
                     risk_labels: vec![EXTERNAL_ROOT_READ_ONLY.to_string()],
                     denied_paths: vec![entry.display_path().to_string()],
+                    contributing_rules: Vec::new(),
                 });
             }
         } else if !policy.allow_external_paths {
@@ -138,6 +150,7 @@ pub(super) fn default_guard(
                 approval: ApprovalShape::default(),
                 risk_labels: vec!["external_path".to_string()],
                 denied_paths: vec![entry.display_path().to_string()],
+                contributing_rules: Vec::new(),
             });
         }
     }

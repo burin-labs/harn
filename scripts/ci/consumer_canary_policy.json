@@ -1,0 +1,5 @@
+{
+  "window_seconds": 2700,
+  "deadline_seconds": 7200,
+  "poll_seconds": 60
+}

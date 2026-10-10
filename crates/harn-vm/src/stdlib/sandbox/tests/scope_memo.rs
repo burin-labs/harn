@@ -40,6 +40,33 @@ fn repeated_reads_under_one_policy_derive_the_roots_once() {
 }
 
 #[test]
+fn declared_selection_cannot_reuse_assembled_git_metadata_grants() {
+    let workspace = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    std::fs::write(
+        workspace.path().join(".git"),
+        format!("gitdir: {}\n", outside.path().display()),
+    )
+    .unwrap();
+    with_workspace_policy(workspace.path(), || {
+        assert!(
+            check_fs_path_scope(outside.path(), FsAccess::Read).is_ok(),
+            "assembled positive must prime the memo"
+        );
+        super::super::with_declared_path_roots(|| {
+            assert!(
+                check_fs_path_scope(outside.path(), FsAccess::Read).is_err(),
+                "a primed assembled memo is not declared authority"
+            );
+        });
+        assert!(
+            check_fs_path_scope(outside.path(), FsAccess::Read).is_ok(),
+            "ordinary root selection must be restored"
+        );
+    });
+}
+
+#[test]
 fn a_memo_older_than_the_bound_is_derived_again() {
     // Other tests move HOME and the working directory, which are memo inputs.
     let _env_lock = crate::runtime_paths::test_env_lock()

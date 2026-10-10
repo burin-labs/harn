@@ -223,6 +223,45 @@ fn sonnet_55_lowers_thinking_off_to_between_tools() {
     }
 }
 
+/// Haiku 5.5 keeps generation 5's `disabled` off switch (Sonnet 5.5 is the
+/// one that moved to `between_tools`) and its `high` effort ceiling, and it
+/// defaults thinking on where Haiku 4.5 needs an explicit field.
+#[test]
+fn haiku_55_lowers_thinking_off_to_disabled_under_the_high_ceiling() {
+    assert_eq!(claude_generation("claude-haiku-5-5"), Some((5, 5)));
+    assert_eq!(
+        claude_generation("anthropic/claude-haiku-5.5"),
+        Some((5, 5))
+    );
+    assert!(model_defaults_to_adaptive_thinking("claude-haiku-5-5"));
+    assert!(!model_defaults_to_adaptive_thinking("claude-haiku-4-5"));
+
+    let mut payload = base_payload();
+    payload.model = "claude-haiku-5-5".to_string();
+    payload.thinking = ThinkingConfig::Disabled;
+    assert_eq!(
+        AnthropicProvider::build_request_body(&payload)["thinking"],
+        serde_json::json!({ "type": "disabled" })
+    );
+
+    for effort in ["xhigh", "max"] {
+        let mut body = serde_json::json!({
+            "model": "claude-haiku-5-5",
+            "thinking": {"type": "disabled"},
+            "output_config": {"effort": effort},
+        });
+        reconcile_request_body(
+            &mut body,
+            "anthropic",
+            "claude-haiku-5-5",
+            &ThinkingConfig::Disabled,
+            None,
+        );
+        assert_eq!(body["output_config"]["effort"], "high", "{effort}");
+        assert_eq!(body["thinking"], serde_json::json!({ "type": "disabled" }));
+    }
+}
+
 #[test]
 fn opus_5_clamps_effort_when_thinking_is_disabled() {
     // `thinking:{disabled}` above effort `high` is a 400 on generation-5

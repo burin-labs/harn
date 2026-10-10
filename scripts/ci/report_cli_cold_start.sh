@@ -25,6 +25,14 @@ evidence="$(jq -n \
     and all($m.measurements[]; (.cold_ms | type) == "number" and .cold_ms >= 0)
     and ($m.failure_reasons | type) == "array"
     and all($m.failure_reasons[]; type == "string" and length > 0)
+    and (if $m.baselines == null then true else
+      ($m.baselines | type) == "object"
+      and ($m.baselines | keys) == ($m.expected_commands | sort)
+      and all($m.baselines[];
+        (.sha == null and .cold_ms == null)
+        or ((.sha | type) == "string" and (.sha | length) > 0
+          and (.cold_ms | type) == "number" and .cold_ms > 0))
+    end)
   ) catch false) as $readable |
   (if $readable then $m.expected_commands - ($m.measurements | keys) else null end) as $pending |
   (if $readable then ($m.measurements | keys) - $m.expected_commands else null end) as $unexpected |
@@ -43,6 +51,11 @@ evidence="$(jq -n \
     measured_count: (if $readable then $m.measurements | length else null end),
     pending_count: (if $readable then $pending | length else null end),
     pending_commands: $pending, unexpected_commands: $unexpected,
+    comparison_context: (if $readable then $m.context else null end),
+    baseline_comparison_count: (if $readable and $m.baselines != null
+      then [$m.baselines[] | select(.sha != null)] | length else null end),
+    baseline_unavailable_commands: (if $readable and $m.baselines != null
+      then [$m.baselines | to_entries[] | select(.value.sha == null) | .key] else null end),
     failure_reasons: (if $readable then $m.failure_reasons else null end)
   }')"
 

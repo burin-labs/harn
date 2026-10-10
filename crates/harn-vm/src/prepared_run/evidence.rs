@@ -65,6 +65,7 @@ pub(super) fn approval_batch(
     )
     .expect("approval groups serialize");
     Some(ApprovalBatch {
+        request_id: uuid::Uuid::new_v4(),
         batch_fingerprint,
         plan_fingerprint: plan_fingerprint.to_string(),
         groups,

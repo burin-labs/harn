@@ -51,7 +51,7 @@ impl AcpServer {
             return Ok(0.0);
         };
         let llm_spend = session.concurrent_control.llm_spend.clone();
-        let project_root = session.project_root.clone();
+        let store_scope = session.store_scope.clone();
         let known = llm_spend
             .lock()
             .unwrap_or_else(|error| error.into_inner())
@@ -59,10 +59,13 @@ impl AcpServer {
         if let Some(spent) = known {
             return Ok(spent);
         }
-        let spent =
-            harn_vm::agent_session_spend::load_session_llm_spend_usd(&project_root, session_id)
-                .await
-                .map_err(|error| error.to_string())?;
+        let spent = store_scope
+            .run(harn_vm::agent_session_spend::load_session_llm_spend_usd(
+                store_scope.workspace(),
+                session_id,
+            ))
+            .await
+            .map_err(|error| error.to_string())?;
         llm_spend
             .lock()
             .unwrap_or_else(|error| error.into_inner())
@@ -167,17 +170,19 @@ impl AcpServer {
             self.send_prompt_error(id, &message);
             return;
         }
-        let (cwd, project_root, environment_policy) = match self.sessions.get(&session_id) {
-            Some(session) => (
-                session.cwd.clone(),
-                session.project_root.clone(),
-                session.environment_policy.clone(),
-            ),
-            None => {
-                self.send_prompt_protocol_error(id, &format!("Unknown session: {session_id}"));
-                return;
-            }
-        };
+        let (cwd, project_root, store_scope, environment_policy) =
+            match self.sessions.get(&session_id) {
+                Some(session) => (
+                    session.cwd.clone(),
+                    session.project_root.clone(),
+                    session.store_scope.clone(),
+                    session.environment_policy.clone(),
+                ),
+                None => {
+                    self.send_prompt_protocol_error(id, &format!("Unknown session: {session_id}"));
+                    return;
+                }
+            };
         let turn_budget = llm_spend
             .lock()
             .unwrap_or_else(|error| error.into_inner())
@@ -282,21 +287,18 @@ impl AcpServer {
             retarget_prompt_text(&mut prompt, prompt_text.clone());
         }
 
-        let output = self.output.clone();
+        let output = self.output.for_prompt(prompt.correlation.clone());
         let pending = self.pending.clone();
         let next_id = &self.next_id;
         let sid = session_id.clone();
 
-        // Translate AgentEvents into ACP session/update notifications so
-        // the client observes tool lifecycle on the wire. The event-log
-        // sink is reinstalled here because prompt teardown clears all
-        // per-session transport sinks after each turn.
+        // Durable subscribers stay session-owned. The immutable ACP transport
+        // follows this execution and its cleanup, never a later session rebind.
         clear_session_sinks(&session_id);
         harn_vm::agent_sessions::register_event_log_sink(&session_id);
-        register_sink(
-            session_id.clone(),
-            Arc::new(AcpAgentEventSink::new(output.clone())),
-        );
+        let event_transport = harn_vm::agent_events::AgentEventTransport::new(Arc::new(
+            AcpAgentEventSink::new(output.clone()),
+        ));
 
         let bridge = Arc::new(AcpBridge {
             session_id: sid.clone(),
@@ -325,9 +327,13 @@ impl AcpServer {
             ),
         );
         host_bridge.set_session_id(&bridge.session_id);
+        host_bridge.set_caller_message_id(prompt.correlation.message_id.clone());
         if let Some(session) = self.sessions.get_mut(&session_id) {
             session.host_bridge = Some(host_bridge.clone());
             session.concurrent_control.set_prompt_active(true);
+            session
+                .concurrent_control
+                .set_prompt_transport(event_transport.clone());
         }
 
         let compile_started = Instant::now();
@@ -372,15 +378,16 @@ impl AcpServer {
         // Both scoped spans are boxed before they are awaited. `Scoped` holds the
         // wrapped future inline, so keeping these on the stack would add the whole
         // prompt body's state to this frame, which a nested descent re-enters.
-        let (vm_baseline, vm_baseline_cache_hit, vm_baseline_prepare_ms) = match mode_policy
-            .run(Box::pin(self.prepare_vm_baseline_cached(
+        let (vm_baseline, vm_baseline_cache_hit, vm_baseline_prepare_ms) = match store_scope
+            .run(mode_policy.run(Box::pin(self.prepare_vm_baseline_cached(
                 &source,
                 source_path.as_deref(),
                 target_pipeline.as_deref(),
                 &cwd,
                 &project_root,
+                &store_scope,
                 &current_mode_id,
-            )))
+            ))))
             .await
         {
             Ok(value) => value,
@@ -397,49 +404,48 @@ impl AcpServer {
         let send_output = self.output.clone();
         let host_bridge_for_response = host_bridge.clone();
         let runtime_configurator = self.runtime_configurator.clone();
-        let result = runtime_configurator
-            .run_prompt(
-                AcpPromptExecutionContext {
-                    session_id: &session_id,
-                    cwd: &cwd,
-                    project_root: &project_root,
-                    capability_policy: mode_policy.policy(),
-                    host_bridge: &host_bridge_for_response,
-                    cancelled: &cancellation.cancelled,
-                },
-                Box::pin(mode_policy.run(Box::pin(async {
-                    let _budget_guard =
-                        turn_budget.install_session_turn(llm_spent_usd.unwrap_or(0.0));
-                    let _spend_recorder = SessionSpendRecorder::new(
-                        llm_spend.clone(),
-                        &_budget_guard,
-                        llm_spent_usd.is_some(),
-                    );
-                    execute::execute_chunk(
-                        chunk,
-                        bridge.clone(),
-                        host_bridge,
-                        execute::PromptGlobals {
-                            text: &prompt_text,
-                            content: &prompt.content,
-                            messages: &prompt.messages,
-                        },
-                        execute::VmSetup {
-                            source: &source,
-                            baseline: vm_baseline.as_ref(),
-                            baseline_cache_hit: vm_baseline_cache_hit,
-                            baseline_prepare_ms: vm_baseline_prepare_ms,
-                            source_path: source_path.as_deref(),
-                            cwd: &cwd,
-                            project_root: Some(&project_root),
-                            runtime_configurator: self.runtime_configurator.clone(),
-                            session_environment: environment_policy.clone(),
-                        },
-                    )
-                    .await
-                }))),
-            )
-            .await;
+        let execution = runtime_configurator.run_prompt(
+            AcpPromptExecutionContext {
+                session_id: &session_id,
+                cwd: &cwd,
+                project_root: &project_root,
+                capability_policy: mode_policy.policy(),
+                budget: &turn_budget,
+                host_bridge: &host_bridge_for_response,
+                cancelled: &cancellation.cancelled,
+            },
+            Box::pin(store_scope.run(mode_policy.run(Box::pin(async {
+                let _budget_guard = turn_budget.install_session_turn(llm_spent_usd.unwrap_or(0.0));
+                let _spend_recorder = SessionSpendRecorder::new(
+                    llm_spend.clone(),
+                    &_budget_guard,
+                    llm_spent_usd.is_some(),
+                );
+                execute::execute_chunk(
+                    chunk,
+                    bridge.clone(),
+                    host_bridge,
+                    execute::PromptGlobals {
+                        text: &prompt_text,
+                        content: &prompt.content,
+                        messages: &prompt.messages,
+                    },
+                    execute::VmSetup {
+                        source: &source,
+                        baseline: vm_baseline.as_ref(),
+                        baseline_cache_hit: vm_baseline_cache_hit,
+                        baseline_prepare_ms: vm_baseline_prepare_ms,
+                        source_path: source_path.as_deref(),
+                        cwd: &cwd,
+                        project_root: Some(&project_root),
+                        runtime_configurator: self.runtime_configurator.clone(),
+                        session_environment: environment_policy.clone(),
+                    },
+                )
+                .await
+            })))),
+        );
+        let result = event_transport.scope(execution).await;
         self.finish_profile_turn(&session_id, profile_turn);
         let sink_flush_error = self.clear_active_prompt_transport(&session_id).await.err();
         let turn_spent_usd = llm_spent_usd.and_then(|_| {
@@ -450,12 +456,13 @@ impl AcpServer {
         });
         let persisted = match turn_spent_usd {
             Some(spent) => {
-                harn_vm::agent_session_spend::record_session_llm_spend_usd(
-                    &project_root,
-                    &session_id,
-                    spent,
-                )
-                .await
+                store_scope
+                    .run(harn_vm::agent_session_spend::record_session_llm_spend_usd(
+                        store_scope.workspace(),
+                        &session_id,
+                        spent,
+                    ))
+                    .await
             }
             None => Ok(()),
         };

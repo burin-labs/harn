@@ -20,6 +20,14 @@ const SKIP_SEGMENTS = [
 
 const PYTHON_ALLOWLIST = [
   {
+    kind: "exact",
+    pattern: "scripts/tests/fixtures/release_publication_github.py",
+    category: "subprocess-fixture",
+    owner: "Published release correction tag reader",
+    reason:
+      "Strict GitHub CLI transport fixture for durable publication proof and refusal controls.",
+  },
+  {
     kind: "prefix",
     pattern: "crates/harn-cli/assets/demo/",
     category: "fixture",

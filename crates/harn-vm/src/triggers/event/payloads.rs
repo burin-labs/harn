@@ -81,6 +81,14 @@ pub enum ProviderPayload {
 }
 
 impl ProviderPayload {
+    pub(crate) fn extension(provider: &str, schema_name: &str, raw: JsonValue) -> ProviderPayload {
+        ProviderPayload::Extension(ExtensionProviderPayload {
+            provider: provider.to_string(),
+            schema_name: schema_name.to_string(),
+            raw,
+        })
+    }
+
     pub fn provider(&self) -> &str {
         match self {
             Self::Known(known) => known.provider(),
