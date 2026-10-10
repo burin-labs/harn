@@ -83,7 +83,7 @@ fn platform_disposition(policy: &CapabilityPolicy, target: &Path) -> ChildWriteD
     if !Path::new("/usr/bin/sandbox-exec").exists() {
         return ChildWriteDisposition::Unknown;
     }
-    seatbelt_write_disposition(&super::macos::rendered_profile(policy), target)
+    super::macos::child_write_disposition(policy, target)
 }
 
 #[cfg(target_os = "linux")]
