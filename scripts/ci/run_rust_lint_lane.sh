@@ -54,7 +54,7 @@ lint_workspace() {
   fi
   # Collect Cargo's unit timings from this invocation, not a restored report.
   # The ordinary strict compile is the only compile; no diagnostic rebuild runs.
-  local source tree target report status bytes report_blob rustc
+  local source tree target report status bytes report_blob rustc sample_pid sample_dir sample_receipt started_at ended_at
   source="$(git rev-parse HEAD)"
   tree="$(git rev-parse 'HEAD^{tree}')"
   if [[ "$source" != "${HARN_LINT_SOURCE_SHA:-}" ]] || ! git diff --quiet HEAD --; then
@@ -69,8 +69,27 @@ lint_workspace() {
   report="$target/cargo-timings/cargo-timing.html"
   rm -f "$report"
   mkdir -p "$HARN_LINT_TIMINGS_DIR"
+  sample_dir="$(mktemp -d "$HARN_LINT_TIMINGS_DIR/compiler-observation.XXXXXX")"
+  sample_receipt="${sample_dir#"$HARN_LINT_TIMINGS_DIR/"}/compiler-sample.json"
+  sample_pid=""
+  if [[ "$(uname -s)" == Darwin ]]; then
+    node "$(dirname "${BASH_SOURCE[0]}")/macos_compiler_sample.cjs" \
+      "$$" "$sample_dir" "${GITHUB_RUN_ID:-}" "${GITHUB_RUN_ATTEMPT:-}" "$source" "$tree" &
+    sample_pid=$!
+  fi
   status=0
+  started_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   cargo clippy --workspace --all-targets --timings -- -D warnings || status=$?
+  ended_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  if [[ -n "$sample_pid" ]]; then
+    kill -TERM "$sample_pid" 2>/dev/null || true
+    wait "$sample_pid" || true
+  fi
+  if [[ ! -f "$sample_dir/compiler-sample.json" ]]; then
+    jq -n --arg source "$source" --arg tree "$tree" \
+      '{schema:"harn.macos_compiler_samples.v1",sourceCommit:$source,sourceTree:$tree,status:"UNMEASURED",reason:"sampler unavailable or interrupted",samples:[]}' \
+      > "$sample_dir/compiler-sample.json"
+  fi
   if [[ ! -f "$report" || -L "$report" || ! -s "$report" ]]; then
     echo "error: strict compile did not produce a new nonempty timing report" >&2
     return 1
@@ -90,9 +109,13 @@ lint_workspace() {
   cp "$report" "$HARN_LINT_TIMINGS_DIR/cargo-timing.html"
   jq -n --arg source "$source" --arg tree "$tree" \
     --arg report_blob "$report_blob" \
+    --arg started_at "$started_at" --arg ended_at "$ended_at" \
+    --arg sample_receipt "$sample_receipt" \
     --arg rustc "$rustc" --argjson status "$status" --argjson bytes "$bytes" \
     '{schema:"harn.strict_lint_timings.v1",sourceCommit:$source,sourceTree:$tree,
       leg:"workspace",command:["cargo","clippy","--workspace","--all-targets","--timings","--","-D","warnings"],
+      compileStartedAt:$started_at,compileFinishedAt:$ended_at,
+      compilerSampleReceipt:$sample_receipt,
       exitCode:$status,report:"cargo-timing.html",reportBytes:$bytes,reportGitBlob:$report_blob,rustc:$rustc}' \
     > "$HARN_LINT_TIMINGS_DIR/receipt.json"
   return "$status"
