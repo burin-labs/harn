@@ -42,8 +42,9 @@ value as `requested_posture`. `data_controls_outcome` is what that posture does
 on the route, and `data_controls_note` is the route's own handling note when its
 model row declares one, otherwise its provider's. A route the catalog records as
 training on API traffic with no control to stop it is `denied` under
-`strictest_available`, with governing rule `data_controls.training_refused`,
-because inference refuses it before sending.
+`strictest_available`, with governing rule `data_controls.training_refused`
+and the typed `data_controls_refusal: training_without_control`, because
+inference refuses it before sending. Hosts read the typed field.
 
 Embedders can call `harn_vm::llm::api::preview_inference_admission`. Request and
 snapshot schemas and host records are generated from those owning types in

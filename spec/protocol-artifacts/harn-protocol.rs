@@ -4923,6 +4923,61 @@ impl std::fmt::Display for HarnInferenceAdmissionDataControlsOutcome {
     }
 }
 
+/// Value-free inference admission vocabulary owned by harn_vm.
+/// Open vocabulary: unit variants are the values this binding was generated from, and `Unrecognized` carries any other string verbatim so a newer Harn never breaks an older consumer.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
+pub enum HarnInferenceAdmissionDataControlsRefusal {
+    TrainingWithoutControl,
+    /// A wire value outside the vocabulary this binding was generated from. Preserved verbatim.
+    Unrecognized(String),
+}
+
+impl HarnInferenceAdmissionDataControlsRefusal {
+    /// Every value this binding was generated from, in wire order.
+    /// Excludes the `Unrecognized` escape.
+    pub const KNOWN: &'static [Self] = &[Self::TrainingWithoutControl];
+
+    /// The JSON wire string for this value.
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::TrainingWithoutControl => "training_without_control",
+            Self::Unrecognized(value) => value.as_str(),
+        }
+    }
+
+    /// Parse a wire string. An unrecognized value is preserved rather than rejected.
+    pub fn from_wire(value: &str) -> Self {
+        match value {
+            "training_without_control" => Self::TrainingWithoutControl,
+            other => Self::Unrecognized(other.to_string()),
+        }
+    }
+
+    /// Whether this value is part of the vocabulary this binding was generated from.
+    pub fn is_known(&self) -> bool {
+        !matches!(self, Self::Unrecognized(_))
+    }
+}
+
+impl From<String> for HarnInferenceAdmissionDataControlsRefusal {
+    fn from(value: String) -> Self {
+        Self::from_wire(&value)
+    }
+}
+
+impl From<HarnInferenceAdmissionDataControlsRefusal> for String {
+    fn from(value: HarnInferenceAdmissionDataControlsRefusal) -> Self {
+        value.as_str().to_string()
+    }
+}
+
+impl std::fmt::Display for HarnInferenceAdmissionDataControlsRefusal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HarnInferenceAdmissionBoundary {
     pub reach: HarnInferenceAdmissionReach,
@@ -4951,6 +5006,8 @@ pub struct HarnInferenceAdmissionSnapshot {
     pub data_controls_note: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub data_controls_outcome: Option<HarnInferenceAdmissionDataControlsOutcome>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub data_controls_refusal: Option<HarnInferenceAdmissionDataControlsRefusal>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub effective_boundary: Option<HarnInferenceAdmissionBoundary>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

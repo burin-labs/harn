@@ -25,6 +25,16 @@
         }
       ]
     },
+    "DataControlsRefusal": {
+      "description": "Why a data posture refuses a route outright.",
+      "oneOf": [
+        {
+          "const": "training_without_control",
+          "description": "`strictest_available` on a route the catalog records as training on\nAPI traffic, with no per-request control that would stop it.",
+          "type": "string"
+        }
+      ]
+    },
     "DataPosture": {
       "description": "The registry's own default posture.\n\nMaking the strictest posture the default is a product decision for each\nembedder, and making it silently inside the runtime would repeat the\nmistake this registry exists to fix — a privacy-relevant default chosen by\nomission. So the shipped value is `default`, and an embedder flips it in\none place, in config, without patching Harn.",
       "oneOf": [
@@ -93,6 +103,17 @@
         }
       ],
       "description": "What that posture will do on this route, as the receipt will say it.\nAbsent when the route never resolved, so an unresolved route does not\nread as `not_requested`."
+    },
+    "data_controls_refusal": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/DataControlsRefusal"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Why the requested data posture refuses this route, when it does. A\ntyped fact so a host switches on it instead of matching\n`governing_rule` text. Absent when the posture admits the route."
     },
     "data_posture": {
       "$ref": "#/$defs/DataPosture",

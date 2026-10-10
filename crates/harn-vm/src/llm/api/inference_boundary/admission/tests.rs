@@ -274,10 +274,15 @@ fn preview_refuses_a_route_the_strict_posture_cannot_honor() {
         Some(DATA_CONTROLS_TRAINING_REFUSED_RULE)
     );
     assert_eq!(refused.data_posture, DataPosture::StrictestAvailable);
+    assert_eq!(
+        refused.data_controls_refusal,
+        Some(DataControlsRefusal::TrainingWithoutControl)
+    );
     // Negative control: the same posture on the route that does not train is
     // admitted, and the default posture admits the training route.
     let admitted = preview_inference_admission(&unbounded("meta", "muse-spark-1.3", strict));
     assert_eq!(admitted.status, InferenceAdmissionStatus::Admitted);
+    assert_eq!(admitted.data_controls_refusal, None);
     let default = preview_inference_admission(&unbounded(
         "meta",
         "muse-spark-1.3-contributor",

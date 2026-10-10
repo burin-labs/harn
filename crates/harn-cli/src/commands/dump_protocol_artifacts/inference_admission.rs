@@ -29,6 +29,10 @@ pub(super) fn append(out: &mut String, target: Target) {
             "DataControlsOutcome",
             "HarnInferenceAdmissionDataControlsOutcome",
         ),
+        (
+            "DataControlsRefusal",
+            "HarnInferenceAdmissionDataControlsRefusal",
+        ),
     ] {
         let schema = &definitions[key];
         let values = if let Some(values) = schema["enum"].as_array() {
@@ -98,6 +102,9 @@ pub(super) fn append(out: &mut String, target: Target) {
                 }
                 "data_controls_outcome" => Some(FieldKind::Named(
                     "HarnInferenceAdmissionDataControlsOutcome".into(),
+                )),
+                "data_controls_refusal" => Some(FieldKind::Named(
+                    "HarnInferenceAdmissionDataControlsRefusal".into(),
                 )),
                 _ => None,
             })
