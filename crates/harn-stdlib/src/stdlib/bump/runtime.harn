@@ -78,6 +78,9 @@ pub type BumpBaseAdoption = {
   detail: string,
 }
 
+/** Paths changed between two base identities; `ok == false` means unread. */
+pub type BumpBaseChanges = {ok: bool, paths: list<string>, detail: string}
+
 /** Observed state of an already-open bump PR, or nil when none exists. */
 pub type BumpPrState = {
   number: int,
@@ -134,6 +137,7 @@ pub type BumpAdapter = {
   working_changes: fn() -> BumpChangeSet,
   remote_base_head: fn() -> BumpBaseHead,
   adopt_base: fn(BumpBaseAdoptionRequest) -> BumpBaseAdoption,
+  base_changes: fn(string, string) -> BumpBaseChanges,
   find_bump_pr: fn() -> BumpPrState?,
   disable_auto_merge: fn(BumpPrState, string) -> bool,
   publish_commit: fn(BumpCommitRequest) -> BumpCommitResult,
@@ -189,6 +193,7 @@ pub type BumpReceipt = {
   base_check_phase: "before_refresh" | "before_publication" | "before_arming" | nil,
   recovery: BumpRecovery,
   base_adoptions: int,
+  published_behind_base: bool,
   lease_recovered: bool,
   repair_commits: list<string>,
   repair_conflicts: list<string>,
@@ -308,6 +313,7 @@ fn __bump_receipt_base(
     base_check_phase: nil,
     recovery: {kind: "none", base_oid: nil},
     base_adoptions: 0,
+    published_behind_base: false,
     lease_recovered: false,
     repair_commits: [],
     repair_conflicts: [],
@@ -418,6 +424,48 @@ fn __base_conflict_receipt(
         + [base.detail, "cannot adopt the advanced ${options.base}: ${adoption.detail}"]
         + contested,
     }
+}
+
+/**
+ * Accept a base that advanced after validation when none of the incoming
+ * commits changed a path this bump's refresh authored. The validated tree is
+ * then an ordinary pull request behind its base, and the base branch's merge
+ * queue tests the merged result as it does every other change. Re-deriving
+ * instead costs a full refresh and validation per advance, which never
+ * converges on a base that merges faster than one validation runs (harn#9627).
+ * An overlapping or unreadable comparison is not disjoint, and falls back to
+ * adoption.
+ */
+fn __accept_disjoint_advance(
+  adapter: BumpAdapter,
+  base: BumpBaseReconciliation,
+) -> BumpBaseReconciliation? {
+  const validated = base.receipt.expected_base_oid
+  const observed = base.receipt.observed_base_oid
+  if base.current || validated == nil || observed == nil {
+    return nil
+  }
+  const changes = adapter.base_changes(validated ?? "", observed ?? "")
+  if !changes.ok {
+    return nil
+  }
+  const authored = set(base.receipt.refreshed)
+  if len(changes.paths.filter({ path -> set_contains(authored, path) }).to_list()) > 0 {
+    return nil
+  }
+  return {
+    current: true,
+    receipt: base.receipt
+      + {
+        published_behind_base: true,
+        notes: base.receipt.notes
+          + [
+            "${base.detail}; the ${len(changes.paths)} incoming path(s) touch no refreshed path, "
+              + "so the validated tree stays on ${validated} and the merge queue tests the merge",
+          ],
+      },
+    detail: "",
+  }
 }
 
 type BumpBasePreparation = {existing: BumpPrState?, base: BumpBaseReconciliation}
@@ -672,9 +720,11 @@ pub fn run_bump(options: BumpOptions, adapter: BumpAdapter) -> BumpReceipt {
     }
     // Phase 6 — re-read the base immediately before publication. The connector
     // derives its payload against the local HEAD, so a tree proved against an
-    // older base can never be published as-is; the loop head decides whether
-    // this attempt adopts the new base or hands the race back.
+    // older base is published only on that older base, and only when the
+    // advance left every refreshed path alone. Otherwise the loop head decides
+    // whether this attempt adopts the new base or hands the race back.
     base = __observe_base_lease(adapter, receipt, "before_publication")
+    base = __accept_disjoint_advance(adapter, base) ?? base
     receipt = base.receipt
     if base.current {
       break
@@ -766,7 +816,8 @@ pub fn run_bump(options: BumpOptions, adapter: BumpAdapter) -> BumpReceipt {
   // PR creation can itself race the base branch. Re-read immediately before
   // arming so any stale publication remains visible but cannot enter the
   // merge queue. The controller retries from a fresh base checkout.
-  const arm_base = __observe_base_lease(adapter, receipt, "before_arming")
+  const observed_arm_base = __observe_base_lease(adapter, receipt, "before_arming")
+  const arm_base = __accept_disjoint_advance(adapter, observed_arm_base) ?? observed_arm_base
   receipt = arm_base.receipt
   if !arm_base.current {
     return __base_advanced_receipt(options, arm_base, adoptions)
