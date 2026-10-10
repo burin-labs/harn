@@ -1200,10 +1200,7 @@ fn workspace_temp_root() -> Result<PathBuf, VmError> {
             &error,
         )
     })?;
-    let ignore = path.join(".gitignore");
-    if !ignore.exists() {
-        let _ = std::fs::write(&ignore, "# Created by Harn; safe to delete.\n*\n");
-    }
+    let _ = crate::runtime_paths::ensure_self_ignored_dir(&path);
     Ok(path)
 }
 

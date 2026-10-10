@@ -223,6 +223,7 @@ pub fn persist_recording(
             parent.display()
         )
     })?;
+    crate::runtime_paths::self_ignore_default_run_root(parent);
     let bytes = serde_json::to_vec(recording)
         .map_err(|error| format!("failed to encode flight recording: {error}"))?;
     let write = || {
