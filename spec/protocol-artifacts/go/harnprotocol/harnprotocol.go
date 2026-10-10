@@ -2106,6 +2106,14 @@ var HarnInferenceAdmissionDataControlsOutcomeValues = []HarnInferenceAdmissionDa
 	"provider_unresearched",
 }
 
+// HarnInferenceAdmissionDataControlsRefusal is the named string type for the HarnInferenceAdmissionDataControlsRefusalValues wire vocabulary.
+type HarnInferenceAdmissionDataControlsRefusal string
+
+// HarnInferenceAdmissionDataControlsRefusalValues enumerates every wire value Harn currently emits for HarnInferenceAdmissionDataControlsRefusal.
+var HarnInferenceAdmissionDataControlsRefusalValues = []HarnInferenceAdmissionDataControlsRefusal{
+	"training_without_control",
+}
+
 type HarnInferenceAdmissionBoundary struct {
 	Reach                  HarnInferenceAdmissionReach `json:"reach"`
 	AllowTrainingDiscounts bool                        `json:"allow_training_discounts"`
@@ -2127,6 +2135,7 @@ type HarnInferenceAdmissionSnapshot struct {
 	DataPosture            HarnInferenceAdmissionDataPosture          `json:"data_posture"`
 	DataControlsNote       *string                                    `json:"data_controls_note,omitempty"`
 	DataControlsOutcome    *HarnInferenceAdmissionDataControlsOutcome `json:"data_controls_outcome,omitempty"`
+	DataControlsRefusal    *HarnInferenceAdmissionDataControlsRefusal `json:"data_controls_refusal,omitempty"`
 	EffectiveBoundary      *HarnInferenceAdmissionBoundary            `json:"effective_boundary,omitempty"`
 	GoverningRule          *string                                    `json:"governing_rule,omitempty"`
 	LocalRuntime           *bool                                      `json:"local_runtime,omitempty"`

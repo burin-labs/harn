@@ -64,6 +64,20 @@ pub struct InferenceAdmissionSnapshot {
     /// otherwise its provider's. Absent when neither level carries a note.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub data_controls_note: Option<String>,
+    /// Why the requested data posture refuses this route, when it does. A
+    /// typed fact so a host switches on it instead of matching
+    /// `governing_rule` text. Absent when the posture admits the route.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub data_controls_refusal: Option<DataControlsRefusal>,
+}
+
+/// Why a data posture refuses a route outright.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum DataControlsRefusal {
+    /// `strictest_available` on a route the catalog records as training on
+    /// API traffic, with no per-request control that would stop it.
+    TrainingWithoutControl,
 }
 
 /// Governing rule when the requested posture refuses the route outright: the
@@ -109,6 +123,7 @@ pub fn preview_inference_admission(
             .unwrap_or_else(crate::llm_config::data_controls_default_posture),
         data_controls_outcome: None,
         data_controls_note: None,
+        data_controls_refusal: None,
     };
     // Malformed host authority remains distinct from a valid policy refusal.
     // Never return its supplied bytes or guess that a default was admitted.
@@ -171,6 +186,7 @@ pub fn preview_inference_admission(
     {
         snapshot.status = InferenceAdmissionStatus::Denied;
         snapshot.governing_rule = Some(DATA_CONTROLS_TRAINING_REFUSED_RULE.into());
+        snapshot.data_controls_refusal = Some(DataControlsRefusal::TrainingWithoutControl);
         return snapshot;
     }
     let Some(boundary) = snapshot.effective_boundary else {
