@@ -163,9 +163,12 @@ fn __assert_pair(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError
     }
 }
 
+// Compiler-emitted default argument validation only inspects values. Keep the
+// existing runtime exposure, while declaring read-only preparation.
 #[harn_builtin(
     exposure = "runtime_internal",
     effects = [],
+    read_only_preparation = true,
     runtime_only = true, category = "shapes"
 )]
 fn __assert_schema(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
