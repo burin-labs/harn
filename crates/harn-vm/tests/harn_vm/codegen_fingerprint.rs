@@ -12,7 +12,6 @@ fn codegen_fingerprint_is_checkout_path_stable() {
     let right = tempfile::tempdir().unwrap();
     seed_compiler_sources(left.path(), "return 1;");
     seed_compiler_sources(right.path(), "return 1;");
-    assert_eq!(watch_roots(&left.path().join("harn-vm")).len(), 5);
 
     let left_hash = fingerprint_inputs(&compiler_inputs(&left.path().join("harn-vm")));
     let right_hash = fingerprint_inputs(&compiler_inputs(&right.path().join("harn-vm")));
@@ -21,6 +20,47 @@ fn codegen_fingerprint_is_checkout_path_stable() {
         left_hash, right_hash,
         "same compiler sources in different checkout roots must produce the same fingerprint"
     );
+}
+
+#[test]
+fn codegen_fingerprint_tracks_derived_interface_owners() {
+    let root = tempfile::tempdir().unwrap();
+    seed_compiler_sources(root.path(), "return 1;");
+    let manifest = root.path().join("harn-vm");
+    let baseline = fingerprint_inputs(&compiler_inputs(&manifest));
+
+    for relative in [
+        "harn-modules/src/package_imports.rs",
+        "harn-vm/src/bytecode_cache/graph.rs",
+        "harn-vm/src/bytecode_cache/interface.rs",
+        "harn-vm/src/context_manifest.rs",
+        "harn-vm/src/module_source.rs",
+    ] {
+        let path = root.path().join(relative);
+        let original = fs::read(&path).unwrap();
+        fs::write(&path, "pub fn changed_interface_behavior() {}").unwrap();
+        assert_ne!(
+            fingerprint_inputs(&compiler_inputs(&manifest)),
+            baseline,
+            "{relative} must invalidate interfaces produced by an older build"
+        );
+        fs::write(path, original).unwrap();
+    }
+
+    // New and deleted resolver modules must change the key and retrigger Cargo,
+    // even though the previous build never emitted a watch for the new file.
+    let new_module = root.path().join("harn-modules/src/new_resolver.rs");
+    fs::write(&new_module, "pub fn resolve() {}").unwrap();
+    assert_ne!(fingerprint_inputs(&compiler_inputs(&manifest)), baseline);
+    assert!(watch_roots(&manifest).contains(&root.path().join("harn-modules/src")));
+    assert!(watch_roots(&manifest).contains(&manifest.join("src/bytecode_cache")));
+    fs::remove_file(new_module).unwrap();
+    assert_eq!(fingerprint_inputs(&compiler_inputs(&manifest)), baseline);
+
+    // A cache key must not depend on unrelated product presentation.
+    let unrelated = manifest.join("src/unrelated_ui.rs");
+    fs::write(unrelated, "pub fn render() {}").unwrap();
+    assert_eq!(fingerprint_inputs(&compiler_inputs(&manifest)), baseline);
 }
 
 #[test]
@@ -85,6 +125,14 @@ fn seed_compiler_sources(root: &Path, compiler_body: &str) {
         ("harn-vm/src/compiler.rs", "pub struct Compiler;"),
         ("harn-vm/src/chunk.rs", "pub struct Chunk;"),
         ("harn-vm/src/chunk/portable.rs", "pub fn adapt() {}"),
+        ("harn-modules/src/package_imports.rs", "pub fn resolve() {}"),
+        ("harn-vm/src/bytecode_cache/graph.rs", "pub fn derive() {}"),
+        (
+            "harn-vm/src/bytecode_cache/interface.rs",
+            "pub fn recall() {}",
+        ),
+        ("harn-vm/src/context_manifest.rs", "pub fn validate() {}"),
+        ("harn-vm/src/module_source.rs", "pub fn identity() {}"),
         (
             "harn-vm/src/module_artifact.rs",
             "pub fn compile_artifact() {}",
