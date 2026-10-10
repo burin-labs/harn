@@ -23,4 +23,18 @@ for refusal in REQUIRES_REHEARSAL= REQUIRES_REHEARSAL=unknown SOURCE_SHA= \
   [[ ! -s "$tmp/output" ]] || fail "unauthorized output for $refusal"
 done
 if authorize REQUIRES_REHEARSAL=false; then fail 'unexpected replacement rehearsal accepted'; fi
+attach() {
+  authorize REQUIRES_REHEARSAL=false REHEARSAL_RESULT=skipped \
+    REQUIRES_ATTACHED_CONSUMER=true ATTACHED_RESULT=success \
+    ATTACHED_SOURCE_SHA="$sha" CANDIDATE_RUN_ID=123 ATTACHED_PRODUCER_RUN=123 "$@"
+}
+attach || fail 'authenticated completed child refused'
+grep -Fxq 'ready=true' "$tmp/output" || fail 'attached positive emitted no authorization'
+for refusal in REQUIRES_ATTACHED_CONSUMER=unknown ATTACHED_RESULT= ATTACHED_RESULT=failure \
+  ATTACHED_RESULT=skipped ATTACHED_SOURCE_SHA= ATTACHED_SOURCE_SHA=0000000000000000000000000000000000000000 \
+  CANDIDATE_RUN_ID=0 ATTACHED_PRODUCER_RUN=124 REHEARSAL_RESULT=success REQUIRES_REHEARSAL=true; do
+  if attach "$refusal"; then fail "accepted attached $refusal"; fi
+  [[ ! -s "$tmp/output" ]] || fail "unauthorized attached output for $refusal"
+done
+if authorize ATTACHED_RESULT=success; then fail 'unexpected attached result accepted'; fi
 echo 'release_rehearsal_authorization_test: ok'

@@ -36,6 +36,10 @@ on:
         description: Prior promotion with a measured successful rehearsal of this candidate
         required: false
         type: string
+      completed_consumer_run_id:
+        description: Exact originally dispatched child that completed after the producer observer deadline
+        required: false
+        type: string
   # Privileged `workflow_run` is intentional: the resolver executes trusted
   # main code and validates the producer before candidate source is read.
   workflow_run: # zizmor: ignore[dangerous-triggers] promotes only main push runs of this repository
@@ -68,6 +72,7 @@ jobs:
     outputs:
       source_sha: ${{ steps.source.outputs.source_sha }}
       run_id: ${{ steps.source.outputs.run_id }}
+      requires_attached_consumer: ${{ steps.source.outputs.requires_attached_consumer }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -79,6 +84,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           CANDIDATE_RUN_ID: ${{ inputs.candidate_run_id || github.event.workflow_run.id }}
           EXPECTED_SOURCE_SHA: ${{ inputs.candidate_sha || github.event.workflow_run.head_sha }}
+          COMPLETED_CONSUMER_RUN_ID: ${{ inputs.completed_consumer_run_id }}
         run: bash scripts/resolve-release-promotion-source.sh
 
   plan:
@@ -96,6 +102,7 @@ jobs:
       version: ${{ steps.plan.outputs.version }}
       major_minor: ${{ steps.plan.outputs.major_minor }}
       requires_rehearsal: ${{ steps.plan.outputs.requires_rehearsal }}
+      requires_attached_consumer: ${{ needs.resolve.outputs.requires_attached_consumer }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -113,6 +120,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           HEAD_SHA: ${{ needs.resolve.outputs.source_sha }}
+          REQUIRES_ATTACHED_CONSUMER: ${{ needs.resolve.outputs.requires_attached_consumer }}
           BUILD_RUN_ID: ${{ needs.resolve.outputs.run_id }}
           SOURCE_DIRECTORY: release-source
           RECOVERY: ${{ github.event_name == 'workflow_dispatch' }}
@@ -179,7 +187,10 @@ jobs:
             exit 1
           fi
           requires_rehearsal=false
-          if [[ "${RECOVERY:-false}" == true ]]; then
+          if [[ "${REQUIRES_ATTACHED_CONSUMER:-false}" == true ]]; then
+            [[ "${RECOVERY:-false}" == true ]] || exit 1
+            echo "::notice::Original observer remains unmeasured; exact completed-child authorization is required."
+          elif [[ "${RECOVERY:-false}" == true ]]; then
             consumer="$(release_consumer_verdict "$GITHUB_REPOSITORY" "$candidate_run" "$HEAD_SHA")"
             echo "Consumer release rehearsal run=$candidate_run source=$HEAD_SHA verdict=$consumer"
             if jq -e '.count == 0' <<< "$consumer" >/dev/null; then
@@ -241,6 +252,38 @@ jobs:
           SOURCE_SHA: ${{ needs.plan.outputs.source_sha }}
           WAIT_FOR_FULL_SUITE: 'true'
         run: bash scripts/ci/require_full_suite.sh
+      - name: Mint registered consumer read authority
+        if: needs.plan.outputs.requires_attached_consumer == 'true'
+        id: completed-consumer-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ secrets.RELEASE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ secrets.CONSUMER_CANARY_REPOSITORY }}
+          permission-actions: read
+      - name: Attach completed exact-source consumer
+        if: needs.plan.outputs.requires_attached_consumer == 'true'
+        id: attached-consumer
+        env:
+          GH_TOKEN: ${{ steps.completed-consumer-token.outputs.token }}
+          REHEARSAL_PROMOTION_READ_TOKEN: ${{ github.token }}
+          CANARY_REPOSITORY: ${{ github.repository_owner }}/${{ secrets.CONSUMER_CANARY_REPOSITORY }}
+          SOURCE_SHA: ${{ needs.plan.outputs.source_sha }}
+          CANDIDATE_RUN_ID: ${{ needs.plan.outputs.run_id }}
+          COMPLETED_CONSUMER_RUN_ID: ${{ inputs.completed_consumer_run_id }}
+          AUTHORIZATION_FILE: ${{ runner.temp }}/completed-consumer-authorization/authorization.json
+        run: |
+          mkdir "${RUNNER_TEMP}/completed-consumer-authorization"
+          bash scripts/authorize-completed-consumer.sh
+      - name: Preserve exact consumer authorization
+        if: needs.plan.outputs.requires_attached_consumer == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-consumer-authorization-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/completed-consumer-authorization/authorization.json
+          if-no-files-found: error
+          retention-days: 7
       - name: Require the owning rehearsal result
         id: authorize
         env:
@@ -249,6 +292,11 @@ jobs:
           REHEARSAL_RESULT: ${{ needs.consumer-rehearsal.result }}
           REHEARSAL_VERDICT: ${{ needs.consumer-rehearsal.outputs.verdict }}
           REHEARSAL_SOURCE_SHA: ${{ needs.consumer-rehearsal.outputs.source_revision }}
+          REQUIRES_ATTACHED_CONSUMER: ${{ needs.plan.outputs.requires_attached_consumer }}
+          ATTACHED_RESULT: ${{ steps.attached-consumer.outcome }}
+          ATTACHED_SOURCE_SHA: ${{ steps.attached-consumer.outputs.source_sha }}
+          ATTACHED_PRODUCER_RUN: ${{ steps.attached-consumer.outputs.producer_run }}
+          CANDIDATE_RUN_ID: ${{ needs.plan.outputs.run_id }}
         run: bash scripts/authorize-release-rehearsal.sh
 
   promote:
@@ -261,11 +309,13 @@ jobs:
       contents: read
       actions: read
       attestations: read
-    uses: burin-labs/.github/.github/workflows/promote-release.yml@4f755671f8c2eac4308eae2c2e20e0fbc99e03e2
+    uses: burin-labs/.github/.github/workflows/promote-release.yml@ec5c89707613dd618ec01c8806e01de9e03096e5
     with:
       sha: ${{ needs.plan.outputs.source_sha }}
       run-id: ${{ needs.plan.outputs.run_id }}
       tag: ${{ needs.plan.outputs.tag }}
+      authorization-run-id: ${{ needs.plan.outputs.requires_attached_consumer == 'true' && github.run_id || '' }}
+      authorization-attempt: ${{ needs.plan.outputs.requires_attached_consumer == 'true' && github.run_attempt || '' }}
     secrets:
       RELEASE_APP_CLIENT_ID: ${{ secrets.RELEASE_APP_CLIENT_ID }}
       RELEASE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
