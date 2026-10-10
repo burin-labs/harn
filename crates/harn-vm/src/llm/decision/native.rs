@@ -65,7 +65,7 @@ pub(super) fn request_body(request: &DecisionRequest<'_>) -> Result<Value, Decis
         || request.timeout_ms.is_some()
     {
         return Err(unsupported(
-            "native decision routes do not support temperature or effort",
+            "native decision routes do not support chat options",
         ));
     }
     if !matches!(

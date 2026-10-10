@@ -24,7 +24,7 @@ use super::question::QuestionBody;
 
 /// Bumped whenever the instruction or answer interpretation changes, because both
 /// change what the model was asked and therefore the cache identity.
-pub const EVALUATOR_INSTRUCTION_VERSION: &str = "harn.evaluator.structured.v4";
+pub const EVALUATOR_INSTRUCTION_VERSION: &str = "harn.evaluator.structured.v5";
 pub const OUTPUT_SCHEMA_VERSION: &str = "harn.evaluation.answers.v1";
 
 const INSTRUCTION: &str = "\
