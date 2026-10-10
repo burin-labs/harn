@@ -1,6 +1,23 @@
 [
   {
-    "default": "absent; use the built-in typed model checkpoint",
+    "default": "absent; resolve the loop route and select its decision backend",
+    "evidence": "__missing_tool_call_policy accepts an explicit EvaluationPolicy or resolves the configured model route. Consumer fixtures exercise both backends without provider fallback.",
+    "expiry": "2026-11-10",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "MissingToolCallRecoveryOptions.evaluation",
+    "reachability": "yes",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/llm/missing_tool_call.harn",
+        "reader": "__missing_tool_call_policy"
+      }
+    ],
+    "reason": "The typed policy selects the classifier backend and route; the consumer owns confidence thresholding.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "absent; use the built-in batched evaluation",
     "evidence": "llm.missing_tool_call.missing_tool_call_classifier invokes the custom closure only when supplied. Source review establishes the fallback; canonical host reachability is not inferred.",
     "expiry": "2026-09-13",
     "kind": "callback",
@@ -52,7 +69,7 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/llm/missing_tool_call.harn",
-        "reader": "missing-tool-recovery-key-domain"
+        "reader": "__missing_tool_call_policy"
       }
     ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
@@ -91,12 +108,7 @@
     "layer": "runner",
     "name": "MissingToolCallRecoveryOptions.max_tokens",
     "reachability": "unknown",
-    "readers": [
-      {
-        "file": "crates/harn-stdlib/src/stdlib/llm/missing_tool_call.harn",
-        "reader": ""
-      }
-    ],
+    "readers": [],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
     "verdict": "KEEP-with-expiry"
   },
@@ -116,6 +128,10 @@
       {
         "file": "crates/harn-stdlib/src/stdlib/llm/missing_tool_call.harn",
         "reader": "missing_tool_call_classifier"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/llm/missing_tool_call.harn",
+        "reader": "__missing_tool_call_policy"
       }
     ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
@@ -136,7 +152,7 @@
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/llm/missing_tool_call.harn",
-        "reader": ""
+        "reader": "__missing_tool_call_policy"
       }
     ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
@@ -150,12 +166,7 @@
     "layer": "runner",
     "name": "MissingToolCallRecoveryOptions.seed",
     "reachability": "unknown",
-    "readers": [
-      {
-        "file": "crates/harn-stdlib/src/stdlib/llm/missing_tool_call.harn",
-        "reader": "missing-tool-recovery-key-domain"
-      }
-    ],
+    "readers": [],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
     "verdict": "KEEP-with-expiry"
   },
@@ -170,7 +181,7 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/llm/missing_tool_call.harn",
-        "reader": ""
+        "reader": "__missing_tool_call_policy"
       }
     ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
@@ -184,12 +195,7 @@
     "layer": "runner",
     "name": "MissingToolCallRecoveryOptions.timeout_ms",
     "reachability": "unknown",
-    "readers": [
-      {
-        "file": "crates/harn-stdlib/src/stdlib/llm/missing_tool_call.harn",
-        "reader": "missing-tool-recovery-key-domain"
-      }
-    ],
+    "readers": [],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
     "verdict": "KEEP-with-expiry"
   },
@@ -201,12 +207,7 @@
     "layer": "runner",
     "name": "MissingToolCallRecoveryOptions.top_p",
     "reachability": "unknown",
-    "readers": [
-      {
-        "file": "crates/harn-stdlib/src/stdlib/llm/missing_tool_call.harn",
-        "reader": "missing-tool-recovery-key-domain"
-      }
-    ],
+    "readers": [],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
     "verdict": "KEEP-with-expiry"
   }

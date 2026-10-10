@@ -86,6 +86,8 @@ fn prepare(
         "effort": request.effort,
         "max_tokens": MAX_EVALUATION_OUTPUT_TOKENS,
         "output": {"schema": schema, "strict": true, "validation": "error"},
+        "mock_scope": "llm.evaluation",
+        "call_role": "llm.evaluation",
         // One physical request. No repair, no re-prompt, no failover.
         "schema_retries": 0,
     });
