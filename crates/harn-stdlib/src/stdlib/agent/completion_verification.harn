@@ -13,7 +13,15 @@ pub type CompletionVerificationStop = {
   verification?: CompletionVerificationState?,
 }
 
-/** Normalize a deterministic completion callback before model arbitration. */
+/**
+ * Normalize a deterministic completion callback before model arbitration.
+ * The callback retains its own capability effects and thrown failures.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ * @example: __judge_invoke_closure(verify_completion, payload)
+ */
 pub fn __judge_invoke_closure(
   verify_completion: unknown,
   payload: CompletionEvidenceSnapshot,
