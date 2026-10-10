@@ -40,6 +40,60 @@ import "./ci_cache_policy/fixtures.harn"
 import "./ci_cache_policy/policy_integration_test.harn"
 
 @test
+pipeline test_release_order_is_checked_before_expensive_ci_admission(harness: Harness) {
+  const ci = read_yaml(harness.fs, "../../.github/workflows/ci.yml")
+  const steps = ci.jobs.changes.steps
+  assert_eq(steps[0].with["fetch-depth"], 0)
+  assert_eq(steps[1].name, "Keep a release commit last in its merge group")
+  assert_eq(steps[1].if, "github.event_name == 'merge_group'")
+  assert(steps[1].run.contains("release_range_release_commits"))
+  assert_eq(steps[2].id, "filter")
+  // Every compile, artifact consumer, and product proof depends directly on
+  // admission. Capacity measurement and inexpensive hygiene can stay parallel.
+  for name in [
+    "fmt",
+    "package-audit",
+    "public-api",
+    "release-contract",
+    "release-residual-audit",
+    "rust-checks",
+    "rust-cli",
+    "rust-check-inputs",
+    "rust-test-partitions",
+    "rust-artifacts-ready",
+    "security-tests-ready",
+    "rust-test",
+    "rust-security",
+    "harn-audit",
+    "source-length-ratchet",
+    "windows-cross-check",
+    "macos-lint",
+    "portal",
+    "vscode",
+    "docs-site",
+    "docs-checks",
+    "setup-harn-action",
+  ] {
+    const needs = ci.jobs[name].needs
+    assert(needs == "changes" || (type_of(needs) == "list" && needs.contains("changes")))
+  }
+  assert_eq(ci.jobs["ci-status"].if, "always()")
+  assert(ci.jobs["ci-status"].needs.contains("changes"))
+  const aggregate = ci.jobs["ci-status"].steps[0].run
+  assert(aggregate.contains("CI tier was not measured."))
+  assert(aggregate.contains("[\"Detect changes\"]=\"$" + "{{ needs.changes.result }}\""))
+  assert_eq(
+    len(
+      ci.jobs["release-contract"].steps.filter(
+        { step -> step?.name == "Keep a release commit last in its merge group" },
+      )
+        .to_list(),
+    ),
+    0,
+  )
+}
+
+@test
 pipeline test_macos_lint_matrix_preserves_every_typed_graph_and_fail_closed_aggregate(
   harness: Harness,
 ) {
