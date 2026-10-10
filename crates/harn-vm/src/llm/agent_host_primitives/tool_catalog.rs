@@ -14,7 +14,9 @@ fn entry_for<'a>(
     })
 }
 
-pub(super) fn annotations_for(
+/// The annotations dispatch enforces for `tool_name`: the registry entry's
+/// own, else the ambient policy's. Argument normalization reads the same.
+pub(crate) fn annotations_for(
     tools_val: Option<&VmValue>,
     tool_name: &str,
 ) -> Option<crate::tool_annotations::ToolAnnotations> {
