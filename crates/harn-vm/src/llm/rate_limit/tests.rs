@@ -1,6 +1,36 @@
 use super::*;
 use crate::llm::api::LlmCallOptions;
 
+#[test]
+fn llm_call_admission_captures_consumer_session_and_reroute_policy() {
+    let mut opts = LlmCallOptions {
+        provider: "admission-provider".into(),
+        model: "admission-model".into(),
+        session_id: Some("session-one".into()),
+        rate_limit_consumer_id: Some("consumer-one".into()),
+        rate_limit_reroute_on_timeout: true,
+        max_tokens: 17,
+        messages: vec![serde_json::json!({"role":"user", "content":"projected prompt"})],
+        ..Default::default()
+    };
+    let admission = LlmCallAdmission::from_options(&opts);
+    assert_eq!(admission.provider, opts.provider);
+    assert_eq!(admission.model, opts.model);
+    assert_eq!(admission.request, RateLimitRequest::for_llm_call(&opts));
+    assert_eq!(admission.consumer_id.as_deref(), Some("consumer-one"));
+    assert_eq!(admission.session_id.as_deref(), Some("session-one"));
+    assert!(admission.reroute_on_timeout);
+    opts.rate_limit_consumer_id = None;
+    assert_eq!(
+        LlmCallAdmission::from_options(&opts).consumer_id.as_deref(),
+        Some("session-one")
+    );
+    opts.session_id = Some("session-two".into());
+    opts.rate_limit_reroute_on_timeout = false;
+    assert_eq!(admission.session_id.as_deref(), Some("session-one"));
+    assert!(admission.reroute_on_timeout);
+}
+
 fn assert_harn_admission(source: &str, expected_output: &str, expected_requests: u64) {
     let _guard = crate::llm::env_guard();
     let _durable_disabled = EnvVarGuard::set_value(DURABLE_RATE_LIMIT_ENABLED_ENV, "0");
@@ -23,20 +53,20 @@ fn assert_harn_admission(source: &str, expected_output: &str, expected_requests:
 }
 
 #[test]
-fn llm_call_admits_each_provider_request_once_at_concurrency_one() {
+fn scripted_llm_call_bypasses_provider_quota_at_concurrency_one() {
     assert_harn_admission(
         include_str!("fixtures/llm_call_admission.harn"),
         "reached-provider\n1",
-        1,
+        0,
     );
 }
 
 #[test]
-fn llm_caller_retry_admits_each_provider_attempt_once() {
+fn scripted_caller_retries_bypass_provider_quota() {
     assert_harn_admission(
         include_str!("fixtures/llm_caller_retry_admission.harn"),
         "reached-provider\n1\n2",
-        2,
+        0,
     );
 }
 

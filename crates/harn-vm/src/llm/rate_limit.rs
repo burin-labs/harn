@@ -1175,17 +1175,46 @@ pub(crate) fn observe_network_outcome_for_llm_call(
 pub(crate) async fn acquire_permit_for_llm_call(
     opts: &super::api::LlmCallOptions,
 ) -> Result<RateLimitPermit, crate::value::VmError> {
-    acquire_permit_for(
-        &opts.provider,
-        &opts.model,
-        RateLimitRequest::for_llm_call(opts),
-        opts.rate_limit_consumer_id
-            .as_deref()
-            .or(opts.session_id.as_deref()),
-        opts.session_id.as_deref(),
-        opts.rate_limit_reroute_on_timeout,
-    )
-    .await
+    LlmCallAdmission::from_options(opts).acquire().await
+}
+
+/// Immutable caller policy captured before work moves to a provider thread.
+#[derive(Clone)]
+pub(crate) struct LlmCallAdmission {
+    provider: String,
+    model: String,
+    request: RateLimitRequest,
+    consumer_id: Option<String>,
+    session_id: Option<String>,
+    reroute_on_timeout: bool,
+}
+
+impl LlmCallAdmission {
+    pub(crate) fn from_options(opts: &super::api::LlmCallOptions) -> Self {
+        Self {
+            provider: opts.provider.clone(),
+            model: opts.model.clone(),
+            request: RateLimitRequest::for_llm_call(opts),
+            consumer_id: opts
+                .rate_limit_consumer_id
+                .clone()
+                .or_else(|| opts.session_id.clone()),
+            session_id: opts.session_id.clone(),
+            reroute_on_timeout: opts.rate_limit_reroute_on_timeout,
+        }
+    }
+
+    pub(crate) async fn acquire(&self) -> Result<RateLimitPermit, crate::value::VmError> {
+        acquire_permit_for(
+            &self.provider,
+            &self.model,
+            self.request,
+            self.consumer_id.as_deref(),
+            self.session_id.as_deref(),
+            self.reroute_on_timeout,
+        )
+        .await
+    }
 }
 
 /// Reset all rate limiter state. Used between test runs.

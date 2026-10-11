@@ -5,22 +5,6 @@ use std::io::Write;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{mpsc, Arc};
 
-struct ReleaseBody(Option<mpsc::Sender<()>>);
-
-impl ReleaseBody {
-    fn release(&mut self) {
-        if let Some(sender) = self.0.take() {
-            let _ = sender.send(());
-        }
-    }
-}
-
-impl Drop for ReleaseBody {
-    fn drop(&mut self) {
-        self.release();
-    }
-}
-
 struct Cleanup;
 
 impl Drop for Cleanup {

@@ -440,20 +440,29 @@ fn rand_range_inclusive<R: rand::RngExt>(max: u64, rng: &mut R) -> u64 {
 pub(crate) struct ObservedAttemptToken {
     session_id: Option<String>,
     reasoning_receipts: super::reasoning_receipt::RequestReceipts,
+    rate_limit: super::rate_limit::LlmCallAdmission,
 }
 
 impl ObservedAttemptToken {
-    fn for_current_session(session_id: Option<&str>, call_id: &str) -> Self {
+    fn for_current_session(opts: &super::api::LlmCallOptions, call_id: &str) -> Self {
         Self {
             session_id: super::agent_runtime::current_agent_session_id(),
             reasoning_receipts: super::reasoning_receipt::RequestReceipts::for_journal(
-                session_id, call_id,
+                opts.session_id.as_deref(),
+                call_id,
             ),
+            rate_limit: super::rate_limit::LlmCallAdmission::from_options(opts),
         }
     }
 
     pub(crate) fn reasoning_receipts(&self) -> super::reasoning_receipt::RequestReceipts {
         self.reasoning_receipts.clone()
+    }
+
+    pub(super) async fn admit_provider_request(
+        &self,
+    ) -> Result<super::rate_limit::RateLimitPermit, crate::value::VmError> {
+        self.rate_limit.acquire().await
     }
 
     /// Record one physical provider dispatch.
@@ -548,8 +557,6 @@ pub(crate) async fn observed_llm_call(
         }
         let opts: &super::api::LlmCallOptions = working.as_ref();
 
-        let rate_limit_permit = super::rate_limit::acquire_permit_for_llm_call(opts).await?;
-
         // Rate governor (Layer 1, behind the `llm.rate_governor` flag; a byte-
         // identical no-op when off). Retries WAIT behind the governor instead of
         // blind-firing: an AIMD-shrunk concurrency limit, a full token bucket, or
@@ -615,8 +622,7 @@ pub(crate) async fn observed_llm_call(
             &effective_tool_format,
             opts,
         )?;
-        let observed_attempt =
-            ObservedAttemptToken::for_current_session(opts.session_id.as_deref(), &call_id);
+        let observed_attempt = ObservedAttemptToken::for_current_session(opts, &call_id);
 
         let first_token = super::first_token::FirstTokenTimer::for_current_span();
         let start = std::time::Instant::now();
@@ -724,7 +730,6 @@ pub(crate) async fn observed_llm_call(
             provider_call,
         )
         .await;
-        drop(rate_limit_permit);
         let duration_ms = start.elapsed().as_millis() as u64;
         let attempt_count = attempt + 1;
 

@@ -65,12 +65,37 @@ pub(crate) fn fixture_hash_for_request(request: &super::api::LlmRequestPayload) 
     )
 }
 
+#[cfg(test)]
 pub(crate) fn save_fixture(hash: &str, result: &LlmResult) {
     let dir = get_fixture_dir();
+    save_fixture_at(&dir, hash, result);
+}
+
+/// A caller's record destination stays valid when transport outlives it.
+#[derive(Clone)]
+pub(crate) struct FixtureRecorder {
+    directory: String,
+    hash: String,
+}
+
+impl FixtureRecorder {
+    pub(crate) fn capture(hash: &str) -> Option<Self> {
+        (get_replay_mode() == LlmReplayMode::Record).then(|| Self {
+            directory: get_fixture_dir(),
+            hash: hash.to_owned(),
+        })
+    }
+
+    pub(crate) fn record(&self, result: &LlmResult) {
+        save_fixture_at(&self.directory, &self.hash, result);
+    }
+}
+
+fn save_fixture_at(dir: &str, hash: &str, result: &LlmResult) {
     if dir.is_empty() {
         return;
     }
-    let _ = std::fs::create_dir_all(&dir);
+    let _ = std::fs::create_dir_all(dir);
     let path = format!("{dir}/{hash}.json");
     let json = serde_json::json!({
         "text": result.text,

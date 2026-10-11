@@ -5,9 +5,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, LazyLock, Mutex, MutexGuard};
 
 use super::api::{LlmResult, ProviderTelemetry, RawProviderToolCall};
-pub(crate) use super::hash_replay::{
-    fixture_hash_for_request, get_replay_mode, load_fixture, save_fixture,
-};
+pub(crate) use super::hash_replay::{fixture_hash_for_request, get_replay_mode, load_fixture};
 pub use super::hash_replay::{set_replay_mode, LlmReplayMode};
 pub use super::mock_error::MockError;
 use super::mock_store::{MockQueue, QueueMatch};

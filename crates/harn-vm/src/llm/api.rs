@@ -29,7 +29,7 @@ use crate::value::{ErrorCategory, VmError, VmValue};
 
 use super::mock::{
     fixture_hash_for_request, get_replay_mode, load_fixture, mock_llm_response,
-    record_cli_llm_result, save_fixture, LlmReplayMode,
+    record_cli_llm_result, LlmReplayMode,
 };
 
 // ─── Public surface (crate-wide) ────────────────────────────────────────
@@ -279,6 +279,7 @@ pub(crate) async fn vm_call_llm_full_single_route_prepared(
         observed,
         request,
         Some(delta_tx),
+        ProviderExecution::Inline,
     ));
     let result = loop {
         tokio::select! {
@@ -331,7 +332,13 @@ pub(crate) async fn vm_call_llm_full_streaming_single_route_prepared(
     delta_tx: DeltaSender,
 ) -> Result<LlmResult, VmError> {
     let reservation = super::admission::reserve(opts, request)?;
-    let result = vm_call_llm_full_inner_request(observed, request, Some(delta_tx)).await?;
+    let result = vm_call_llm_full_inner_request(
+        observed,
+        request,
+        Some(delta_tx),
+        ProviderExecution::Inline,
+    )
+    .await?;
     let admission_result = reservation
         .map(|reservation| reservation.settle(&result))
         .transpose();
@@ -371,48 +378,13 @@ pub(crate) async fn vm_call_llm_full_streaming_offthread_single_route_prepared(
     delta_tx: DeltaSender,
 ) -> Result<LlmResult, VmError> {
     let reservation = super::admission::reserve(opts, &request)?;
-    let cached = super::trigger_predicate::lookup_cached_result(&request).is_some();
-    let intercepted = crate::llm::providers::MockProvider::should_intercept_request(&request)
-        || crate::llm::fake::FakeLlmProvider::should_intercept(&request.provider);
-    let replay_mode = get_replay_mode();
-    if !cached && !intercepted && replay_mode == LlmReplayMode::Replay {
-        let hash = fixture_hash_for_request(&request);
-        if load_fixture(&hash).is_none() {
-            return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-                format!("No fixture found for LLM call (hash: {hash}). Run with --record first."),
-            ))));
-        }
-    }
-    if !cached && !intercepted && replay_mode != LlmReplayMode::Replay {
-        super::ensure_real_llm_allowed(&request.provider)?;
-    }
-    request.emit_reminder_lifecycle();
-    let raw_capture_context = crate::llm::agent_observe::current_raw_provider_capture_context();
-    let observed = observed.clone();
-    let reasoning_receipts = observed.reasoning_receipts();
-    let result = tokio::task::spawn(crate::orchestration::scope_inline_subtask(async move {
-        super::reasoning_receipt::scope_request_receipts(
-            reasoning_receipts,
-            Box::pin(async {
-                if let Some(context) = raw_capture_context {
-                    crate::llm::agent_observe::with_raw_provider_capture_context(context, async {
-                        vm_call_llm_full_inner_offthread(&observed, &request, Some(delta_tx)).await
-                    })
-                    .await
-                } else {
-                    vm_call_llm_full_inner_offthread(&observed, &request, Some(delta_tx)).await
-                }
-            }),
-        )
-        .await
-    }))
-    .await
-    .map_err(|join_err| {
-        VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
-            "llm_call background task failed: {join_err}"
-        ))))
-    })?
-    .map_err(OffthreadLlmError::into_vm_error)?;
+    let result = vm_call_llm_full_inner_request(
+        observed,
+        &request,
+        Some(delta_tx),
+        ProviderExecution::Offthread,
+    )
+    .await?;
     let admission_result = reservation
         .map(|reservation| reservation.settle(&result))
         .transpose();
@@ -422,10 +394,17 @@ pub(crate) async fn vm_call_llm_full_streaming_offthread_single_route_prepared(
     Ok(result)
 }
 
+#[derive(Clone, Copy)]
+enum ProviderExecution {
+    Inline,
+    Offthread,
+}
+
 async fn vm_call_llm_full_inner_request(
     observed: &super::agent_observe::ObservedAttemptToken,
     request: &LlmRequestPayload,
     delta_tx: Option<DeltaSender>,
+    execution: ProviderExecution,
 ) -> Result<LlmResult, VmError> {
     if let Some(result) = super::trigger_predicate::lookup_cached_result(request) {
         request.emit_reminder_lifecycle();
@@ -494,88 +473,91 @@ async fn vm_call_llm_full_inner_request(
     super::ensure_real_llm_allowed(&request.provider)?;
     let boundary_rule = inference_boundary::preflight_chat(request)?;
     request.emit_reminder_lifecycle();
-    observed.record_provider_dispatch();
-
     // Provider/model failover is owned by `routing::execute_with_routing`.
     // This layer executes exactly one route so no attempt can bypass the
     // canonical ledger, quarantine, or exhaustion contract.
-    let mut result = vm_call_llm_api(request, delta_tx).await?;
-    result.telemetry.inference_boundary_rule = boundary_rule.map(str::to_string);
-    super::mock::mark_live_after_mock_prefix(request, &mut result);
-
-    if replay_mode == LlmReplayMode::Record {
-        save_fixture(&hash, &result);
-    }
+    let result = execute_provider_request(
+        observed,
+        request,
+        delta_tx,
+        execution,
+        boundary_rule.map(str::to_owned),
+        super::hash_replay::FixtureRecorder::capture(&hash),
+    )
+    .await?;
     super::trigger_predicate::note_result(request, &result);
-    record_cli_llm_result(request, &result);
 
     Ok(result)
 }
 
-async fn vm_call_llm_full_inner_offthread(
+async fn execute_provider_request(
     observed: &super::agent_observe::ObservedAttemptToken,
     request: &LlmRequestPayload,
     delta_tx: Option<DeltaSender>,
-) -> Result<LlmResult, OffthreadLlmError> {
-    if let Some(result) = super::trigger_predicate::lookup_cached_result(request) {
-        record_cli_llm_result(request, &result);
-        return Ok(result);
+    execution: ProviderExecution,
+    boundary_rule: Option<String>,
+    recording: Option<super::hash_replay::FixtureRecorder>,
+) -> Result<LlmResult, VmError> {
+    if matches!(execution, ProviderExecution::Inline) {
+        return dispatch_provider_request(observed, request, delta_tx, boundary_rule, recording)
+            .await;
     }
-
-    if crate::llm::providers::MockProvider::should_intercept_request(request) {
-        observed.record_provider_dispatch();
-        let result = mock_llm_response(request).map_err(OffthreadLlmError::from_vm_error)?;
-        super::trigger_predicate::note_result(request, &result);
-        record_cli_llm_result(request, &result);
-        return Ok(result);
-    }
-
-    if crate::llm::fake::FakeLlmProvider::should_intercept(&request.provider) {
-        observed.record_provider_dispatch();
-        let mut result = crate::llm::fake::FakeLlmProvider
-            .chat_impl(request, delta_tx)
-            .await
-            .map_err(OffthreadLlmError::from_vm_error)?;
-        super::mock::mark_live_after_mock_prefix(request, &mut result);
-        super::trigger_predicate::note_result(request, &result);
-        record_cli_llm_result(request, &result);
-        return Ok(result);
-    }
-
-    let replay_mode = get_replay_mode();
-    let hash = fixture_hash_for_request(request);
-
-    if replay_mode == LlmReplayMode::Replay {
-        return load_fixture(&hash)
-            .inspect(|result| {
-                super::trigger_predicate::note_result(request, result);
-            })
-            .ok_or_else(|| {
-                OffthreadLlmError::from_display_message(format!(
-                    "No fixture found for LLM call (hash: {hash}). Run with --record first."
-                ))
-            });
-    }
-
-    super::ensure_real_llm_allowed(&request.provider).map_err(OffthreadLlmError::from_vm_error)?;
-    let boundary_rule =
-        inference_boundary::preflight_chat(request).map_err(OffthreadLlmError::from_vm_error)?;
-    observed.record_provider_dispatch();
-
-    // Keep the off-thread transport primitive single-route as well. The caller
-    // routing executor owns all retries across provider/model alternatives.
-    let mut result = vm_call_llm_api(request, delta_tx)
+    let request = request.clone();
+    let observed = observed.clone();
+    let raw_capture_context = crate::llm::agent_observe::current_raw_provider_capture_context();
+    let reasoning_receipts = observed.reasoning_receipts();
+    tokio::task::spawn(crate::orchestration::scope_inline_subtask(async move {
+        super::reasoning_receipt::scope_request_receipts(
+            reasoning_receipts,
+            Box::pin(async {
+                let call = async {
+                    dispatch_provider_request(
+                        &observed,
+                        &request,
+                        delta_tx,
+                        boundary_rule,
+                        recording,
+                    )
+                    .await
+                    .map_err(OffthreadLlmError::from_vm_error)
+                };
+                if let Some(context) = raw_capture_context {
+                    crate::llm::agent_observe::with_raw_provider_capture_context(context, call)
+                        .await
+                } else {
+                    call.await
+                }
+            }),
+        )
         .await
-        .map_err(OffthreadLlmError::from_vm_error)?;
-    result.telemetry.inference_boundary_rule = boundary_rule.map(str::to_string);
+    }))
+    .await
+    .map_err(|join_err| {
+        VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
+            "llm_call background task failed: {join_err}"
+        ))))
+    })?
+    .map_err(OffthreadLlmError::into_vm_error)
+}
+
+/// Both inline and offthread requests arrive here after local bypasses.
+/// The executing transport owns its permit even if its caller is dropped.
+async fn dispatch_provider_request(
+    observed: &super::agent_observe::ObservedAttemptToken,
+    request: &LlmRequestPayload,
+    delta_tx: Option<DeltaSender>,
+    boundary_rule: Option<String>,
+    recording: Option<super::hash_replay::FixtureRecorder>,
+) -> Result<LlmResult, VmError> {
+    let _permit = observed.admit_provider_request().await?;
+    observed.record_provider_dispatch();
+    let mut result = vm_call_llm_api(request, delta_tx).await?;
+    result.telemetry.inference_boundary_rule = boundary_rule;
     super::mock::mark_live_after_mock_prefix(request, &mut result);
-
-    if replay_mode == LlmReplayMode::Record {
-        save_fixture(&hash, &result);
+    if let Some(recording) = recording {
+        recording.record(&result);
     }
-    super::trigger_predicate::note_result(request, &result);
     record_cli_llm_result(request, &result);
-
     Ok(result)
 }
 
