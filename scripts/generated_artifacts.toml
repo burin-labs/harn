@@ -717,7 +717,7 @@ make_all = false  # excluded from `make all` for the same reason (no sibling che
 # file-drift scan: a stale binary or a warm target directory reports the
 # previous threshold rather than this tree.
 "check-stack-frames" = "excluded"
-# Compiles debug and release test binaries; the parser budget workflow owns it.
+# Compiles debug and release test binaries; the required CI aggregate owns it.
 "check-parser-stack" = "excluded"
 "check-test-target-coverage" = "source"
 "check-gate-path-visibility" = "source"

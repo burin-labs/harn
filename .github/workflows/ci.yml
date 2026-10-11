@@ -1869,6 +1869,24 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+  parser-stack:
+    name: Parser stack budget
+    needs: [changes]
+    if: needs.changes.outputs.rust == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      RUSTFLAGS: '-D warnings'
+      CARGO_INCREMENTAL: '0'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/rust-toolchain
+      - uses: taiki-e/install-action@83ac0ad63c0167e6f06796fab0fce28db1bf3db0 # v2.87.22
+        with:
+          tool: nextest@0.9.132
+      - name: Check accepted and refused depth in debug and release
+        run: make check-parser-stack
+
   # Refuses a stack frame that grew, and refuses outright any frame inside the
   # band that overflows a worker stack. It is a separate lane rather than a step
   # in the Rust lint job because the census needs clippy's `stack-size-threshold`
@@ -2642,6 +2660,7 @@ jobs:
         security-tests-ready,
         rust-test,
         rust-security,
+        parser-stack,
         stack-frames,
         harn-audit,
         fast-policy-gates,
@@ -2764,6 +2783,11 @@ jobs:
             echo "::error::Rust lint proof is missing for at least one leg."
             exit 1
           fi
+
+          parser_stack_result="${{ needs['parser-stack'].result }}"
+          echo "Parser stack budget: $parser_stack_result"
+          require_result "$parser_stack_result" "Parser stack budget failed or is missing." \
+            test "$RUST_PATHS_SELECTED" = "false"
 
           # The stack-frame budget. A skip is tolerated only when the changes
           # filter says no Rust was touched; when Rust was touched the lane must
