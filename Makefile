@@ -856,7 +856,7 @@ release-gate:
 # you only get the host platform, but the driver still exercises every
 # user-visible capability and prints a per-step status summary.
 release-smoke:
-	CARGO_PROFILE_RELEASE_LTO=thin $(HARN_CARGO_CMD) build --release -p harn-cli --bin harn
+	CARGO_PROFILE_RELEASE_LTO=thin $(HARN_CARGO_CMD) build --release -p harn-cli --bin harn --features embedded-stdlib
 	target/release/harn run --no-sandbox scripts/release_smoke.harn -- --candidate target/release/harn
 
 # Faster `release-smoke` variant that reuses the debug `harn` binary.

@@ -20,6 +20,7 @@ pub(crate) mod ops;
 mod scope;
 mod state;
 mod stdlib_artifact;
+mod stdlib_export;
 mod stdlib_registration;
 pub mod subtask;
 mod task_cleanup;
@@ -57,6 +58,11 @@ pub use modules::resolve_module_import_path;
 pub use state::{Vm, VmBaseline};
 pub(crate) use stdlib_artifact::prepare_stdlib_module_artifact;
 pub use stdlib_artifact::{warm_embedded_stdlib, StdlibWarmReport};
+#[cfg(test)]
+pub(crate) use stdlib_export::compile_one as compile_stdlib_module_artifact;
+pub use stdlib_export::{
+    compile_embedded_stdlib_artifacts, CompiledStdlibArtifact, StdlibArtifactBuild,
+};
 pub(crate) use task_cleanup::{PendingTaskCleanup, SpawnedTask};
 pub use work::{VmWork, VmWorkRecorder};
 

@@ -89,13 +89,20 @@ pub(super) fn stdlib_module_artifact(
         // purpose is to skip exactly that work.
         let lookup = {
             let _load_span = recorder.map(super::ModulePhaseRecorder::load_span);
-            bytecode_cache::load_module_for_key(
-                synthetic,
-                bytecode_cache::CacheKey::from_embedded_stdlib_module_content_hash(
-                    embedded.sha256(),
-                    ModuleProvenance::EmbeddedStdlib,
-                ),
-            )
+            let key = bytecode_cache::CacheKey::from_embedded_stdlib_module_content_hash(
+                embedded.sha256(),
+                ModuleProvenance::EmbeddedStdlib,
+            );
+            // Artifacts compiled into the host binary win over the shared
+            // cache, so a first run on a new machine compiles and writes
+            // nothing for the stdlib (harn#9652).
+            match bytecode_cache::load_embedded_stdlib_module(&key, synthetic) {
+                Some(artifact) => bytecode_cache::ModuleLookupOutcome {
+                    key,
+                    artifact: Some(artifact),
+                },
+                None => bytecode_cache::load_module_for_key(synthetic, key),
+            }
         };
         let artifact = if let Some(artifact) = lookup.artifact {
             artifact

@@ -1,0 +1,31 @@
+[package]
+name = "harn-stdlib-artifacts"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Precompiled Harn stdlib module artifacts for embedding in a host binary"
+build = "build.rs"
+
+[features]
+# Compile the stdlib at build time and embed it. Off by default because the
+# build script links its own copy of harn-vm: on a 12-core Linux host a cold
+# `harn` build took 337 s -> 390 s (dev) and 625 s -> 664 s (release), with
+# about 40% more compiler CPU. Hosts enable it for the binaries they ship.
+# Without it the table is empty and every import behaves as it always has.
+embed = ["dep:harn-vm"]
+
+[dependencies]
+harn-vm = { path = "../harn-vm", version = "=0.10.164", default-features = false }
+
+# The compiler the build script runs: the same harn-vm source the host links.
+# Stdlib bytecode does not depend on harn-vm's capability features (they only
+# decide which builtins exist, and naming a missing one is a compile error,
+# not different code), so the lean feature set keeps this second build small.
+[build-dependencies]
+harn-vm = { path = "../harn-vm", version = "=0.10.164", default-features = false, optional = true }
+
+[lints]
+workspace = true

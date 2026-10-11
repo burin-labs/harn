@@ -3505,6 +3505,7 @@ dependencies = [
  "harn-serve",
  "harn-skills",
  "harn-stdlib",
+ "harn-stdlib-artifacts",
  "harn-test-runner",
  "harn-vm",
  "hex",
@@ -4060,6 +4061,13 @@ dependencies = [
 [[package]]
 name = "harn-stdlib"
 version = "0.10.164"
+
+[[package]]
+name = "harn-stdlib-artifacts"
+version = "0.10.164"
+dependencies = [
+ "harn-vm",
+]
 
 [[package]]
 name = "harn-terminal"

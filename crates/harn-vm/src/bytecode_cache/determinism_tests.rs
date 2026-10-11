@@ -128,3 +128,35 @@ fn relocatable_keys_ignore_root_spelling_and_install_generation() {
         "only the edited module's key changes"
     );
 }
+
+/// harn#9652: a release precompiles once on macOS or Linux and copies the tree
+/// into its Windows archive. A relocatable label is part of the entry key, so
+/// one spelled with `\` on Windows would miss every shipped artifact there.
+#[test]
+fn relocatable_labels_use_forward_slashes_on_every_host() {
+    let base = std::path::Path::new("tree").join("mode");
+    let target = std::path::Path::new("tree")
+        .join("lib")
+        .join("tools")
+        .join("edit.harn");
+    assert_eq!(
+        super::relative_path_label(&base, &target).as_deref(),
+        Some("../lib/tools/edit.harn")
+    );
+}
+
+#[cfg(windows)]
+#[test]
+fn a_backslash_spelled_tree_labels_like_a_slash_spelled_one() {
+    let label = |base: &str, target: &str| {
+        super::relative_path_label(std::path::Path::new(base), std::path::Path::new(target))
+    };
+    assert_eq!(
+        label(r"C:\tree\mode", r"C:\tree\lib\tools\edit.harn"),
+        label("C:/tree/mode", "C:/tree/lib/tools/edit.harn"),
+    );
+    assert_eq!(
+        label(r"C:\tree\mode", r"C:\tree\lib\tools\edit.harn").as_deref(),
+        Some("../lib/tools/edit.harn")
+    );
+}

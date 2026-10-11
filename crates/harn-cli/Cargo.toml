@@ -77,6 +77,7 @@ harn-guard = { path = "../harn-guard", version = "=0.10.164" }
 harn-serve = { path = "../harn-serve", version = "=0.10.164" }
 harn-skills = { path = "../harn-skills", version = "=0.10.164" }
 harn-stdlib = { path = "../harn-stdlib", version = "=0.10.164" }
+harn-stdlib-artifacts = { path = "../harn-stdlib-artifacts", version = "=0.10.164" }
 # LSP and DAP are linked into the single multi-call `harn` binary and reached
 # via argv[0] dispatch (when invoked as `harn-lsp` / `harn-dap`). This replaces
 # shipping two additional fully-linked binaries that each re-statically-linked
@@ -204,6 +205,13 @@ guard-neural = ["harn-guard/neural"]
 # works without it, so the default distributed binary stays lean. Opt in for a
 # from-source build: `cargo install harn-cli --features testbench-wasi`.
 testbench-wasi = ["harn-vm/testbench-wasi"]
+# Carry the stdlib precompiled, so a first run on a new machine compiles no
+# stdlib module (harn#9652). Every distributed binary enables it, and the
+# release smoke refuses a candidate whose cold first run compiles the stdlib.
+# Off by default because it compiles harn-vm a second time for the build
+# script; see `harn-stdlib-artifacts`. From source:
+# `cargo install harn-cli --features embedded-stdlib`.
+embedded-stdlib = ["harn-stdlib-artifacts/embed"]
 
 [dev-dependencies]
 harn-clock = { path = "../harn-clock", version = "=0.10.164", features = ["test-support"] }

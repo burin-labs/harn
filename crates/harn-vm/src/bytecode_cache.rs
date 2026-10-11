@@ -45,7 +45,7 @@
 
 use std::borrow::Cow;
 use std::fs;
-use std::io::{self, Read as _};
+use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -61,13 +61,20 @@ use crate::context_manifest::{
 use crate::module_artifact::{ModuleArtifact, ModuleCompilationContext, ModuleProvenance};
 use crate::module_source::{self, ModuleSource};
 
+mod embedded_stdlib;
 mod graph;
+mod header;
 mod interface;
+pub(crate) use embedded_stdlib::load_embedded_stdlib_module;
+pub use embedded_stdlib::{
+    register_embedded_stdlib_artifacts, EmbeddedStdlibArtifact, EmbeddedStdlibRegistrationError,
+};
 pub(crate) use graph::derive_interface as module_compilation_context_with_manifest;
 pub use graph::prepare_entry_store;
 use graph::{
     hash_import_node, is_bare_import, relocatable_graph_hash, seed_entry_context_hasher, ImportNode,
 };
+use header::{read_header_from, ParsedHeader};
 pub(crate) use interface::InterfaceSlot;
 
 /// Header magic for all bytecode-cache artifact families.
@@ -971,27 +978,6 @@ fn provenance_tag(provenance: ModuleProvenance) -> u8 {
     }
 }
 
-/// Reads `len` bytes and reports whether they equal `expected`.
-///
-/// `len` comes off disk, so it is bounded before it becomes an allocation: a
-/// corrupted or hostile file must not be able to ask for an unbounded read.
-/// A length that cannot match `expected` is rejected without reading at all.
-fn read_length_prefixed_match(file: &mut fs::File, len: usize, expected: &[u8]) -> bool {
-    if len > 256 || len != expected.len() {
-        return false;
-    }
-    let mut buf = vec![0u8; len];
-    file.read_exact(&mut buf).is_ok() && buf == expected
-}
-
-/// Parsed cache header. Read by both the chunk and module loaders so the
-/// header-validation logic stays in one place.
-struct ParsedHeader {
-    kind: u8,
-    context_hash: [u8; 32],
-    payload: Vec<u8>,
-}
-
 /// True when the artifact at `path` was written for exactly `key` and carries
 /// `expected_kind`.
 ///
@@ -1030,78 +1016,12 @@ fn read_header_if_matches(
     key: &CacheKey,
     expected_context: Option<&[u8; 32]>,
 ) -> io::Result<Option<ParsedHeader>> {
-    let mut file = match fs::File::open(path) {
+    let file = match fs::File::open(path) {
         Ok(f) => f,
         Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(None),
         Err(err) => return Err(err),
     };
-    let mut header = [0u8; 8 + 4 + 4];
-    if file.read_exact(&mut header).is_err() {
-        return Ok(None);
-    }
-    if &header[..8] != MAGIC {
-        return Ok(None);
-    }
-    let schema = u32::from_le_bytes(header[8..12].try_into().unwrap());
-    if schema != SCHEMA_VERSION {
-        return Ok(None);
-    }
-    let version_len = u32::from_le_bytes(header[12..16].try_into().unwrap()) as usize;
-    if !read_length_prefixed_match(&mut file, version_len, key.harn_version.as_bytes()) {
-        return Ok(None);
-    }
-    // Which build produced this artifact, checkable without computing anything.
-    // The entry fast path proves its graph unchanged from a manifest and never
-    // recomputes the context hash, so a fingerprint carried only inside that
-    // hash would go unexamined and a chunk from a previous build of the same
-    // release would be replayed. See #5610.
-    let mut fingerprint_len_bytes = [0u8; 4];
-    if file.read_exact(&mut fingerprint_len_bytes).is_err() {
-        return Ok(None);
-    }
-    let fingerprint_len = u32::from_le_bytes(fingerprint_len_bytes) as usize;
-    if !read_length_prefixed_match(&mut file, fingerprint_len, CODEGEN_FINGERPRINT.as_bytes()) {
-        return Ok(None);
-    }
-    let mut compiler_kind_provenance = [0u8; 3];
-    if file.read_exact(&mut compiler_kind_provenance).is_err() {
-        return Ok(None);
-    }
-    if compiler_kind_provenance[0] != key.compiler_tag {
-        return Ok(None);
-    }
-    let kind = compiler_kind_provenance[1];
-    // The authority assertion, and the reason it is a header field rather than
-    // only a key field. Shared-cache entries are found by a key-derived
-    // filename, so the key alone separates them. An ADJACENT artifact is found
-    // by path: `dep.harnmod` beside `dep.harn` is offered to whoever imports
-    // that file. Without this comparison an ordinary import accepts an
-    // artifact compiled under a privileged authority, because every other
-    // header field is identical for the same source and context.
-    if compiler_kind_provenance[2] != provenance_tag(key.provenance) {
-        return Ok(None);
-    }
-    let mut hashes = [0u8; 64];
-    if file.read_exact(&mut hashes).is_err() {
-        return Ok(None);
-    }
-    if hashes[..32] != key.source_hash {
-        return Ok(None);
-    }
-    let mut context_hash = [0u8; 32];
-    context_hash.copy_from_slice(&hashes[32..]);
-    if expected_context.is_some_and(|expected| *expected != context_hash) {
-        return Ok(None);
-    }
-    let mut payload = Vec::new();
-    if file.read_to_end(&mut payload).is_err() {
-        return Ok(None);
-    }
-    Ok(Some(ParsedHeader {
-        kind,
-        context_hash,
-        payload,
-    }))
+    Ok(read_header_from(file, key, expected_context))
 }
 
 /// A candidate entry artifact whose header matches everything except the
@@ -1135,19 +1055,17 @@ fn read_module_if_matches(
     key: &CacheKey,
     source_path: &Path,
 ) -> io::Result<Option<ModuleArtifact>> {
-    let Some(header) = read_header_if_matches(path, key, Some(&key.context_hash))? else {
-        return Ok(None);
-    };
+    Ok(read_header_if_matches(path, key, Some(&key.context_hash))?
+        .and_then(|header| module_from_header(header, source_path)))
+}
+
+fn module_from_header(header: ParsedHeader, source_path: &Path) -> Option<ModuleArtifact> {
     if header.kind != KIND_MODULE_ARTIFACT {
-        return Ok(None);
+        return None;
     }
-    match deserialize_cache_payload::<ModuleArtifact>(&header.payload) {
-        Ok(mut artifact) => {
-            artifact.bind_source_file(source_path);
-            Ok(Some(artifact))
-        }
-        Err(_) => Ok(None),
-    }
+    let mut artifact = deserialize_cache_payload::<ModuleArtifact>(&header.payload).ok()?;
+    artifact.bind_source_file(source_path);
+    Some(artifact)
 }
 
 /// Compact representation of [`CompilerOptions`] for the cache header.
