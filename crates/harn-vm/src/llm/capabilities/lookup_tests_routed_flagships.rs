@@ -20,6 +20,7 @@ fn fireworks_qwen38_max_uses_measured_context_and_effort_not_template_toggles() 
     assert!(caps.vision_supported);
     assert!(caps.prompt_caching);
     assert!(caps.reasoning_none_supported);
+    assert!(!caps.reasoning_disable_supported);
     assert_eq!(caps.thinking_modes, ["effort"]);
     assert_eq!(
         caps.reasoning_effort_levels,

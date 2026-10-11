@@ -3440,7 +3440,9 @@ thinking_modes = ["effort"]
 reasoning_effort_supported = true
 reasoning_effort_levels = ["none", "low", "medium", "high", "xhigh", "max"]
 reasoning_none_supported = true
-reasoning_disable_supported = true
+# Off must be an authored effort=none; a boolean thinking=false has no wire
+# directive on this route and would leave the provider's reasoning enabled.
+reasoning_disable_supported = false
 prompt_caching = true
 vision = true
 vision_supported = true
