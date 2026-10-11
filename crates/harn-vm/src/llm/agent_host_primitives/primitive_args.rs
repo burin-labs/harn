@@ -4,6 +4,19 @@ use std::sync::Arc;
 
 use crate::value::{DictMap, VmError, VmValue};
 
+pub(super) fn qualified_tool_name(call: &DictMap) -> Option<String> {
+    let name = match call.get("name")? {
+        VmValue::String(name) if !name.trim().is_empty() => name,
+        _ => return None,
+    };
+    match call.get("toolset_name") {
+        Some(VmValue::String(namespace)) if !namespace.is_empty() => {
+            Some(format!("{namespace}.{name}"))
+        }
+        _ => Some(name.to_string()),
+    }
+}
+
 pub(super) fn tools(
     args: &[VmValue],
     index: usize,
