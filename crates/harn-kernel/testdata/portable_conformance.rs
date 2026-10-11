@@ -8,6 +8,53 @@ pub struct PureCase {
 
 pub const PURE_CASES: &[PureCase] = &[
     PureCase {
+        id: "runtime-string-repetition",
+        source: r#"
+            fn repeat(input: {text: string, count: int}) {
+              return [input.text * input.count, input.count * input.text, input.text * 0, input.text * -1, "" * input.count]
+            }
+        "#,
+        entry: "repeat",
+        input_json: r#"{"text":"λx","count":3}"#,
+        expected_json: r#"["λxλxλx","λxλxλx","","",""]"#,
+    },
+    PureCase {
+        id: "runtime-empty-string-repetition-with-huge-count",
+        source: r"fn repeat(input: {text: string, count: int}) { return input.text * input.count }",
+        entry: "repeat",
+        input_json: r#"{"text":"","count":9223372036854775807}"#,
+        expected_json: r#""""#,
+    },
+    PureCase {
+        id: "runtime-integer-exponent-promotes-beyond-u32",
+        source: r"fn power(input: int) { return [1 ** input, (-1) ** input, 2 ** -input] }",
+        entry: "power",
+        input_json: "4294967296",
+        expected_json: "[1.0,1.0,0.0]",
+    },
+    PureCase {
+        id: "runtime-float-integer-exponent-matches-folded-result",
+        source: r"
+            fn power(input: {base: float, exponent: int}) {
+              return [input.base ** input.exponent == 1.1 ** 7, input.base ** -input.exponent == 1.1 ** -7]
+            }
+        ",
+        entry: "power",
+        input_json: r#"{"base":1.1,"exponent":7}"#,
+        expected_json: "[true,true]",
+    },
+    PureCase {
+        id: "runtime-numeric-modulo-with-nonzero-divisors",
+        source: r"
+            fn modulo(input: {integer: int, floating: float}) {
+              return [input.integer % 3, input.integer % 2.5, input.floating % 3, input.floating % 2.5]
+            }
+        ",
+        entry: "modulo",
+        input_json: r#"{"integer":7,"floating":7.5}"#,
+        expected_json: "[1,2.0,1.5,0.0]",
+    },
+    PureCase {
         id: "typed-record-pick-preserves-nil-and-copies-values",
         source: r#"
             type Input = {name: string, age: int, absent: nil, nested: {count: int}}
@@ -402,6 +449,48 @@ pub struct RuntimeFailureCase {
 }
 
 pub const RUNTIME_FAILURE_CASES: &[RuntimeFailureCase] = &[
+    RuntimeFailureCase {
+        id: "string-repetition-rejects-output-over-byte-limit",
+        source: r"fn repeat(input: {text: string, count: int}) { return input.text * input.count }",
+        entry: "repeat",
+        input_json: r#"{"text":"ab","count":524289}"#,
+        expected_code: "value_byte_limit",
+    },
+    RuntimeFailureCase {
+        id: "string-repetition-rejects-overflowing-output-length",
+        source: r"fn repeat(input: {text: string, count: int}) { return input.count * input.text }",
+        entry: "repeat",
+        input_json: r#"{"text":"abc","count":9223372036854775807}"#,
+        expected_code: "value_byte_limit",
+    },
+    RuntimeFailureCase {
+        id: "integer-modulo-by-integer-zero",
+        source: r"fn modulo(input: {left: int, right: int}) { return input.left % input.right }",
+        entry: "modulo",
+        input_json: r#"{"left":7,"right":0}"#,
+        expected_code: "division_by_zero",
+    },
+    RuntimeFailureCase {
+        id: "float-modulo-by-integer-zero",
+        source: r"fn modulo(input: {left: float, right: int}) { return input.left % input.right }",
+        entry: "modulo",
+        input_json: r#"{"left":7.5,"right":0}"#,
+        expected_code: "division_by_zero",
+    },
+    RuntimeFailureCase {
+        id: "integer-modulo-by-float-zero",
+        source: r"fn modulo(input: {left: int, right: float}) { return input.left % input.right }",
+        entry: "modulo",
+        input_json: r#"{"left":7,"right":0.0}"#,
+        expected_code: "division_by_zero",
+    },
+    RuntimeFailureCase {
+        id: "float-modulo-by-negative-float-zero",
+        source: r"fn modulo(input: {left: float, right: float}) { return input.left % input.right }",
+        entry: "modulo",
+        input_json: r#"{"left":7.5,"right":-0.0}"#,
+        expected_code: "division_by_zero",
+    },
     RuntimeFailureCase {
         id: "declared-error-survives-transparent-rethrows",
         source: r"

@@ -297,24 +297,15 @@ pub(crate) fn swap_mutation_session(
     CURRENT_MUTATION_SESSION.with(|slot| std::mem::replace(&mut *slot.borrow_mut(), next))
 }
 
-/// How much of the offending payload a deserialization error quotes back.
-const PAYLOAD_SNIPPET_MAX_BYTES: usize = 600;
-
 pub(crate) fn parse_json_payload<T: for<'de> Deserialize<'de>>(
     json: serde_json::Value,
     label: &str,
 ) -> Result<T, VmError> {
-    let payload = json.to_string();
-    let mut deserializer = serde_json::Deserializer::from_str(&payload);
-    let mut tracker = serde_path_to_error::Track::new();
-    let path_deserializer = serde_path_to_error::Deserializer::new(&mut deserializer, &mut tracker);
-    T::deserialize(path_deserializer).map_err(|error| {
-        let snippet = crate::text::truncate_end_bytes(&payload, PAYLOAD_SNIPPET_MAX_BYTES);
+    // Payloads include prompts, tool results, and credentials. Serde errors
+    // and paths can quote invalid values or dynamic map keys as well.
+    serde_json::from_value(json).map_err(|_| {
         VmError::Runtime(format!(
-            "{label} parse error at {}: {} | payload={}",
-            tracker.path(),
-            error,
-            snippet
+            "{label} parse error: payload does not match expected schema"
         ))
     })
 }
