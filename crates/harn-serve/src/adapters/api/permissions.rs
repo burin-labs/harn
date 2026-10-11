@@ -80,7 +80,6 @@ pub(super) async fn respond_permission_request(
                 Some("approved" | "approve" | "selected")
             )
         });
-    let outcome = if approved { "approved" } else { "denied" };
     let (pending, mut claim) = {
         let mut inner = state.inner.lock().expect("api state poisoned");
         let Some(permission) = inner.permissions.get_mut(&request_id) else {
@@ -123,9 +122,32 @@ pub(super) async fn respond_permission_request(
             Err(_) => return task_store::unavailable_response(),
         }
     }
+    // ACP keeps queued requests after their caller disappears. Delivery owns
+    // the claim until acknowledgement so a disconnect cannot admit a second answer.
+    let delivery = tokio::spawn(deliver_permission_response(
+        state, pending, claim, input, approved,
+    ));
+    match delivery.await {
+        Ok(response) => response,
+        Err(_) => api_error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "permission_response_interrupted",
+            "permission response delivery was interrupted",
+        ),
+    }
+}
+
+async fn deliver_permission_response(
+    state: ApiState,
+    pending: PendingPermission,
+    mut claim: PermissionResponseClaim,
+    input: Value,
+    approved: bool,
+) -> Response {
+    let outcome = if approved { "approved" } else { "denied" };
     let delivery = if pending.hitl {
         let hitl_response = json!({
-            "request_id": request_id,
+            "request_id": claim.request_id,
             "approved": approved,
             "accepted": approved,
             "answer": input.get("answer").cloned().unwrap_or(Value::Null),

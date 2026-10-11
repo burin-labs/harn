@@ -2,6 +2,14 @@ use super::*;
 use harn_session_store::task::TaskStatus;
 
 fn pending_permission(root: &Path, hitl: bool) -> (ApiState, mpsc::UnboundedReceiver<Value>) {
+    pending_permission_for(root, hitl, "permission-one")
+}
+
+fn pending_permission_for(
+    root: &Path,
+    hitl: bool,
+    request_id: &str,
+) -> (ApiState, mpsc::UnboundedReceiver<Value>) {
     let script = root.join("agent.harn");
     write_test_pipeline(&script);
     let mut config = ApiServerConfig::for_pipeline(script.to_string_lossy().into_owned());
@@ -16,12 +24,12 @@ fn pending_permission(root: &Path, hitl: bool) -> (ApiState, mpsc::UnboundedRece
     state.acp.request_tx = tx;
     if hitl {
         state.register_hitl_request(Some("session-persisted".into()), Some("waiting".into()), &json!({
-            "update":{"_meta":{"harn":{"requestId":"permission-one", "kind":"approve", "payload":{}}}},
+            "update":{"_meta":{"harn":{"requestId":request_id, "kind":"approve", "payload":{}}}},
         }));
     } else {
         state.register_permission_request(json!({
             "id":41,"method":"session/request_permission",
-            "params":{"sessionId":"session-persisted","toolCall":{"toolCallId":"permission-one"}},
+            "params":{"sessionId":"session-persisted","toolCall":{"toolCallId":request_id}},
         }));
     }
     assert_eq!(
@@ -37,11 +45,15 @@ fn pending_permission(root: &Path, hitl: bool) -> (ApiState, mpsc::UnboundedRece
 }
 
 async fn respond(app: &Router, approved: bool) -> Response {
+    respond_to(app, "permission-one", approved).await
+}
+
+async fn respond_to(app: &Router, request_id: &str, approved: bool) -> Response {
     app.clone()
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri("/v1/permission-requests/permission-one/respond")
+                .uri(format!("/v1/permission-requests/{request_id}/respond"))
                 .header("content-type", "application/json")
                 .body(Body::from(json!({"approved":approved}).to_string()))
                 .unwrap(),
@@ -152,10 +164,11 @@ async fn permission_response_keeps_pending_on_failed_hitl_acknowledgement() {
 }
 
 #[tokio::test]
-async fn permission_response_claim_excludes_concurrent_answers_and_releases_on_drop() {
+async fn permission_response_claim_survives_caller_drop_until_rejected_ack() {
     let root = tempfile::tempdir().unwrap();
     let (state, mut requests) = pending_permission(root.path(), true);
     let app = api_router(state.clone());
+    let mut events = state.events_tx.subscribe();
     let before = permission(&app).await;
     let mut answer = Box::pin(respond(&app, true));
     let request = tokio::select! {
@@ -178,12 +191,28 @@ async fn permission_response_claim_excludes_concurrent_answers_and_releases_on_d
             .get_task("waiting")
             .unwrap()
             .status,
-        TaskStatus::InputRequired
+        TaskStatus::Working
     );
+    assert_eq!(respond(&app, false).await.status(), StatusCode::CONFLICT);
     state
         .acp
         .resolve_response(json!({"id":request["id"],"error":{"message":"not accepted"}}))
         .await;
+    loop {
+        let event = events.recv().await.unwrap();
+        if event.event == "task.input_required" {
+            break;
+        }
+    }
+    assert_eq!(
+        state
+            .task_store()
+            .unwrap()
+            .get_task("waiting")
+            .unwrap()
+            .status,
+        TaskStatus::InputRequired
+    );
     let accepted = async {
         let request = requests.recv().await.unwrap();
         state
@@ -194,6 +223,146 @@ async fn permission_response_claim_excludes_concurrent_answers_and_releases_on_d
     let (response, ()) = tokio::join!(respond(&app, true), accepted);
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(permission(&app).await["status"], "approved");
+}
+
+#[tokio::test]
+async fn permission_response_settles_late_hitl_success_after_caller_drop() {
+    use harn_vm::event_log::{EventLog, Topic};
+
+    let root = tempfile::tempdir().unwrap();
+    let request_id = "hitl_question_permission_one";
+    let (state, mut requests) = pending_permission_for(root.path(), true, request_id);
+    let log = harn_vm::event_log::install_memory_for_current_thread(32);
+    let chunk = harn_vm::compile_source(
+        "fn main(harness: Harness) { harness.runtime.waitpoint_create(\"hitl_question_permission_one\") }",
+    )
+    .unwrap();
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let mut vm = harn_vm::Vm::new();
+            harn_vm::register_vm_stdlib(&mut vm);
+            vm.execute(&chunk).await.unwrap();
+        })
+        .await;
+    let waitpoint_topic = Topic::new("waitpoint.state.hitl_question_permission_one").unwrap();
+    assert_eq!(
+        log.read_range(&waitpoint_topic, None, usize::MAX)
+            .await
+            .unwrap()
+            .last()
+            .unwrap()
+            .1
+            .payload["status"],
+        "open"
+    );
+    let app = api_router(state.clone());
+    let mut events = state.events_tx.subscribe();
+    let mut answer = Box::pin(respond_to(&app, request_id, true));
+    let request = tokio::select! {
+        request = requests.recv() => request.unwrap(),
+        response = &mut answer => panic!("response completed without ACP acknowledgement: {:?}", response.status()),
+    };
+    assert_eq!(request["method"], "harn.hitl.respond");
+    assert_eq!(request["params"]["request_id"], request_id);
+    assert_eq!(request["params"]["approved"], true);
+    assert_eq!(
+        respond_to(&app, request_id, false).await.status(),
+        StatusCode::CONFLICT
+    );
+    drop(answer);
+
+    let event_id = harn_vm::append_hitl_response(
+        Some(root.path()),
+        serde_json::from_value(request["params"].clone()).unwrap(),
+    )
+    .await
+    .expect("the queued HITL request is applied before its acknowledgement");
+    assert_eq!(
+        log.read_range(&waitpoint_topic, None, usize::MAX)
+            .await
+            .unwrap()
+            .last()
+            .unwrap()
+            .1
+            .payload["status"],
+        "completed"
+    );
+    state
+        .acp
+        .resolve_response(json!({"id":request["id"],"result":{"event_id":event_id}}))
+        .await;
+
+    let settlement = async {
+        loop {
+            let event = events.recv().await.unwrap();
+            if event.event == "permission.responded" {
+                break event;
+            }
+        }
+    };
+    let conflicting = async {
+        let mut retry = Box::pin(respond_to(&app, request_id, false));
+        tokio::select! {
+            response = &mut retry => response,
+            extra = requests.recv() => {
+                // Let an incorrect second delivery finish, so the old owner fails
+                // on its conflicting outcome instead of waiting forever for an ACK.
+                let extra = extra.unwrap();
+                assert_eq!(extra["method"], "harn.hitl.respond");
+                assert_eq!(extra["params"]["approved"], false);
+                harn_vm::append_hitl_response(Some(root.path()), serde_json::from_value(extra["params"].clone()).unwrap()).await.unwrap();
+                state.acp.resolve_response(json!({"id":extra["id"],"result":{}})).await;
+                retry.await
+            }
+        }
+    };
+    let (settled, opposite) = tokio::join!(settlement, conflicting);
+    assert_eq!(settled.payload["status"], "approved");
+    assert_eq!(opposite.status(), StatusCode::CONFLICT);
+    assert_eq!(permission(&app).await["status"], "approved");
+    assert_eq!(
+        state
+            .task_store()
+            .unwrap()
+            .get_task("waiting")
+            .unwrap()
+            .status,
+        TaskStatus::Working
+    );
+    let audit = state.permissions.history(&AuditFilter::default()).await;
+    assert_eq!(audit.len(), 1);
+    assert_eq!(audit[0].request.id, request_id);
+    assert_eq!(audit[0].outcome, crate::permissions::AuditOutcome::Granted);
+    let persisted = state
+        .task_store()
+        .unwrap()
+        .task_events(Some("waiting"), None)
+        .unwrap();
+    let responses: Vec<_> = persisted
+        .iter()
+        .filter(|event| event.event == "permission.responded")
+        .collect();
+    assert_eq!(responses.len(), 1);
+    assert_eq!(responses[0].payload["status"], "approved");
+    let received = log
+        .read_range(
+            &Topic::new(harn_vm::HITL_QUESTIONS_TOPIC).unwrap(),
+            None,
+            usize::MAX,
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        received
+            .iter()
+            .filter(|(_, event)| event.kind == "hitl.response_received")
+            .count(),
+        1
+    );
+    assert!(matches!(
+        requests.try_recv(),
+        Err(mpsc::error::TryRecvError::Empty)
+    ));
 }
 
 #[tokio::test]

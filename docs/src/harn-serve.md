@@ -137,6 +137,11 @@ Sessions attached to accepted tasks remain available through both the session
 list and individual session reads after restart. Live session metadata takes
 precedence when the same session is still loaded.
 
+Disconnecting the HTTP client doesn't withdraw a permission answer queued for
+delivery. HITL answers remain in flight until the runtime acknowledges them.
+Conflicting answers return `409` while delivery is pending or after the request
+is answered. Failed delivery leaves the request pending.
+
 Native workspace roots name existing directories on the server. Discovery
 advertises `/v1/runtime`, whose `workspace_root` reports the served directory.
 The Agents conformance runner uses that root when creating its probe workspace
