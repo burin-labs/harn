@@ -12,6 +12,12 @@ signals from provider sources, normalizes them, and emits:
   `.harn-runs/provider_catalog/refresh.json`, with adapter coverage,
   observations, provenance, conflicts, and typed drift.
 
+Refresh compares the stored rate card, including promotions, schedules, and
+input-token bands. `harness.llm.provider_catalog()` exposes that complete card
+without resolving it at the current time. Cost estimates and completed-call
+receipts resolve prices through the pricing engine, so an off-peak refresh does not
+mistake a scheduled discount for a changed base rate.
+
 The workflow never mutates the shipped catalog. The patch is a review
 aid: diff it against the TOML fragments under
 `crates/harn-vm/src/llm/catalog_sources/`, the capability fragments under

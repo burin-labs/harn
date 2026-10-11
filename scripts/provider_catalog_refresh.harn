@@ -368,33 +368,6 @@ fn __pricing_change(catalog_pricing: dict?, observed_pricing: dict?) -> list<dic
   return changes
 }
 
-fn __effective_catalog_pricing(pricing: dict?, observed_at: string?) -> dict? {
-  if pricing == nil || observed_at == nil {
-    return pricing
-  }
-  const date = to_string(observed_at).slice(0, 10)
-  let active = nil
-  for promotion in pricing?.promotions ?? [] {
-    const started = promotion?.starts_on != nil && promotion.starts_on <= date
-    const not_ended = promotion?.ends_on == nil || date <= promotion.ends_on
-    if started
-      && not_ended
-      && (active == nil || promotion.starts_on > active.starts_on) {
-      active = promotion
-    }
-  }
-  if active == nil {
-    return pricing
-  }
-  let effective = pricing
-  for field in PRICING_KEYS {
-    if active?.[field] != nil {
-      effective = effective + {[field]: active[field]}
-    }
-  }
-  return effective
-}
-
 fn __values_equal(left: any, right: any) {
   const lt = type_of(left)
   const rt = type_of(right)
@@ -491,10 +464,7 @@ pub fn build_drift(observations: list<dict>, catalog: dict) -> dict {
     } else {
       const cat = by_route[route]
       seen = seen + {[cat.provider + ":" + cat.id]: true}
-      const pricing_changes = __pricing_change(
-        __effective_catalog_pricing(cat.pricing, obs.observed_at),
-        obs.pricing,
-      )
+      const pricing_changes = __pricing_change(cat.pricing, obs.pricing)
       const capability_changes = __capability_changes(cat?.capabilities, obs?.capabilities)
       let ctx_change: dict? = nil
       if obs.context_window != nil && obs.context_window != cat.context_window {
