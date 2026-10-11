@@ -18,6 +18,12 @@ without resolving it at the current time. Cost estimates and completed-call
 receipts resolve prices through the pricing engine, so an off-peak refresh does not
 mistake a scheduled discount for a changed base rate.
 
+Price comparison ignores source links, review notes, and generated window or
+promotion names. It expands weekday groups and applies the pricing engine's
+default cache multipliers before comparing schedules. Rates, dates, time
+boundaries, weekdays, UTC offsets, token thresholds, and tool fees still count
+as price changes. Reports and candidate patches retain the original records.
+
 The workflow never mutates the shipped catalog. The patch is a review
 aid: diff it against the TOML fragments under
 `crates/harn-vm/src/llm/catalog_sources/`, the capability fragments under
@@ -873,7 +879,7 @@ replace them without forking the entry script.
   requires_key}`. Removals only fire when at least one source for
   that provider successfully reported, so a missing API key never
   silently looks like a removal. Missing price fields mean “not reported,”
-  not “removed.” Active dated promotions are used for price comparison.
+  not “removed.” Stored dated promotions are compared by their dates and rates.
 - `render_markdown_report(drift, conflicts, adapter_runs, meta)` —
   renders the section-by-section markdown report (adapter status,
   added/removed/changed models, conflicts, unknown pricing,

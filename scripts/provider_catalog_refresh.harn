@@ -149,7 +149,11 @@ fn __merge_field(
     return {value: incoming_value, conflict: nil}
   }
   if base_value == incoming_value
-    || (rate && __pricing_values_equal(base_value, incoming_value)) {
+    || (rate
+      && __pricing_values_equal(
+        __pricing_comparison_value(key, base_value),
+        __pricing_comparison_value(key, incoming_value),
+      )) {
     return {value: base_value, conflict: nil}
   }
   if base_owner == "provider" && incoming_owner != "provider" {
@@ -317,6 +321,60 @@ fn __normalized_rate(value: any) -> float {
   return round(to_float(value) * 1000000.0) / 1000000.0
 }
 
+fn __pricing_record_without(record: dict, metadata: list<string>) -> dict {
+  let result: dict = {}
+  for key in keys(record) {
+    if !contains(metadata, key) {
+      result = result + {[key]: record[key]}
+    }
+  }
+  return result
+}
+
+/** Compare settlement fields while retaining the original cards for reports. */
+fn __pricing_comparison_value(key: string, value: any) -> any {
+  if value == nil {
+    return nil
+  }
+  if key == "schedules" {
+    let windows: list<dict> = []
+    for window in value {
+      const record = __pricing_record_without(
+        window,
+        ["id", "source_url", "review_after", "note", "days"],
+      )
+        + {
+          utc_offset: window?.utc_offset ?? "+00:00",
+          cache_read_multiplier: window?.cache_read_multiplier ?? window.input_multiplier,
+          cache_write_multiplier: window?.cache_write_multiplier ?? window.input_multiplier,
+        }
+      for day in window.days.unique().sorted() {
+        windows = windows + [record + {days: [day]}]
+      }
+    }
+    return windows.sort_by(
+      { window -> window.days[0] + window.utc_offset + window.start + window.end },
+    )
+  }
+  if key == "promotions" {
+    return value.map(
+      { promotion -> __pricing_record_without(promotion, ["id", "source_url", "review_after"]) },
+    )
+      .sort_by({ promotion -> promotion.starts_on + (promotion?.starts_at ?? "00:00") })
+  }
+  if key == "input_token_bands" {
+    return value.sort_by({ band -> band.minimum_input_tokens })
+  }
+  if key == "hosted_tool_fees" {
+    let fees: dict = {}
+    for name in keys(value) {
+      fees = fees + {[name]: __pricing_record_without(value[name], ["source_url"])}
+    }
+    return fees
+  }
+  return value
+}
+
 fn __pricing_values_equal(left: any, right: any) -> bool {
   const lt = type_of(left)
   const rt = type_of(right)
@@ -361,7 +419,11 @@ fn __pricing_change(catalog_pricing: dict?, observed_pricing: dict?) -> list<dic
     }
     if cat == nil {
       changes = changes + [{key: key, from: nil, to: obs}]
-    } else if obs != nil && !__pricing_values_equal(cat, obs) {
+    } else if obs != nil
+      && !__pricing_values_equal(
+        __pricing_comparison_value(key, cat),
+        __pricing_comparison_value(key, obs),
+      ) {
       changes = changes + [{key: key, from: cat, to: obs}]
     }
   }
