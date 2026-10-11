@@ -345,11 +345,10 @@ fn main(harness: Harness) -> int {
   )
   // Only a distributed binary carries the precompiled stdlib; the debug
   // binary the residual audit smokes does not.
-  let cold_cache: dict = {}
+  let cold_cache_dir: string? = nil
   if options.require_embedded_stdlib ?? false {
-    const cold_cache_dir = path_join(temp, "cold-cache")
+    cold_cache_dir = path_join(temp, "cold-cache")
     harness.fs.mkdir(cold_cache_dir)
-    cold_cache = {cold_cache_dir: cold_cache_dir}
   }
   const report = try {
     run_release_smoke(
@@ -363,8 +362,8 @@ fn main(harness: Harness) -> int {
         step_timeout_ms: step_timeout_ms,
         watch_timeout_ms: watch_timeout_ms,
         watch_target: watch_target,
-      }
-        + cold_cache,
+        cold_cache_dir: cold_cache_dir,
+      },
     )
   } finally {
     harness.fs.delete(temp)
