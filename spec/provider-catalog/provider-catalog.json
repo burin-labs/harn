@@ -14976,8 +14976,8 @@
           {
             "id": "mistral-large-4-launch",
             "starts_on": "2026-10-06",
-            "review_after": "2026-10-20",
-            "source_url": "https://docs.mistral.ai/models/mistral-large-4-0",
+            "ends_on": "2026-10-19",
+            "source_url": "https://docs.mistral.ai/resources/changelogs",
             "input_per_mtok": 0.68,
             "output_per_mtok": 2.09,
             "cache_read_per_mtok": 0.07,
@@ -24012,8 +24012,8 @@
           {
             "id": "mistral-large-4-launch",
             "starts_on": "2026-10-06",
-            "review_after": "2026-10-20",
-            "source_url": "https://openrouter.ai/api/v1/models/mistralai/mistral-large-4-0/endpoints",
+            "ends_on": "2026-10-19",
+            "source_url": "https://docs.mistral.ai/resources/changelogs",
             "input_per_mtok": 0.68,
             "output_per_mtok": 2.09,
             "cache_read_per_mtok": 0.07,

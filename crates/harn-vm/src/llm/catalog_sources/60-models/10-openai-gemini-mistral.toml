@@ -809,9 +809,11 @@ strengths = ["coding", "tool_use", "reasoning", "long_context", "vision", "agent
 # 1.05T total MoE with a vision encoder and a 1M context window. Mistral's
 # model page (read 2026-10-09) lists a launch sale of $0.68 in / $0.07 cached /
 # $2.09 out against an original $1.36 / $0.14 / $4.18 per MTok; it states no
-# end date, and Artificial Analysis reports a two-week window (to about
-# 2026-10-20), so the row carries the original card with the sale as a
-# promotion to review then. The catalog id follows the docs slug and
+# exact expiry instant. Mistral's changelog (read 2026-10-11) states 50% off
+# for two weeks from the October 6 launch. In the catalog's inclusive date
+# contract, October 19 is the last promotional day; October 20 uses list
+# pricing. No UTC instant was published, so do not invent an `ends_at`.
+# The catalog id follows the docs slug and
 # OpenRouter, while the wire id is the API name the model card lists first
 # (`mistral-large-4`, shown with one alias; the reasoning guide names the
 # `mistral-large-4-0` alias). Medium 3.5's card lists `mistral-medium-3-5`
@@ -830,7 +832,7 @@ equivalence_group = "mistral-large-4-0"
 api_dialect = "openai_chat_compat"
 capabilities = ["tools", "vision", "streaming", "thinking", "prompt_caching"]
 pricing = { input_per_mtok = 1.36, output_per_mtok = 4.18, cache_read_per_mtok = 0.14, promotions = [
-  { id = "mistral-large-4-launch", starts_on = "2026-10-06", review_after = "2026-10-20", source_url = "https://docs.mistral.ai/models/mistral-large-4-0", input_per_mtok = 0.68, output_per_mtok = 2.09, cache_read_per_mtok = 0.07 },
+  { id = "mistral-large-4-launch", starts_on = "2026-10-06", ends_on = "2026-10-19", source_url = "https://docs.mistral.ai/resources/changelogs", input_per_mtok = 0.68, output_per_mtok = 2.09, cache_read_per_mtok = 0.07 },
 ] }
 architecture = { parameter_count_b = 1050.0, active_parameter_count_b = 52.0, moe = true, source_url = "https://docs.mistral.ai/models/mistral-large-4-0", last_verified = "2026-10-09" }
 tier = "frontier"
@@ -916,7 +918,7 @@ served_variant = "openrouter"
 api_dialect = "openai_chat"
 capabilities = ["tools", "vision", "streaming", "thinking", "prompt_caching"]
 pricing = { input_per_mtok = 1.36, output_per_mtok = 4.18, cache_read_per_mtok = 0.14, promotions = [
-  { id = "mistral-large-4-launch", starts_on = "2026-10-06", review_after = "2026-10-20", source_url = "https://openrouter.ai/api/v1/models/mistralai/mistral-large-4-0/endpoints", input_per_mtok = 0.68, output_per_mtok = 2.09, cache_read_per_mtok = 0.07 },
+  { id = "mistral-large-4-launch", starts_on = "2026-10-06", ends_on = "2026-10-19", source_url = "https://docs.mistral.ai/resources/changelogs", input_per_mtok = 0.68, output_per_mtok = 2.09, cache_read_per_mtok = 0.07 },
 ] }
 architecture = { parameter_count_b = 1050.0, active_parameter_count_b = 52.0, moe = true, source_url = "https://docs.mistral.ai/models/mistral-large-4-0", last_verified = "2026-10-09" }
 tier = "frontier"
