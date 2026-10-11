@@ -1,13 +1,86 @@
 import { agent_capture_events } from "std/agent/events"
 import { agent_loop } from "std/agent/loop"
-import { __intra_turn_resource_keys } from "std/agent/loop_resource_dispatch"
+import {
+  __intra_turn_call_signature,
+  __intra_turn_resource_keys,
+} from "std/agent/loop_resource_dispatch"
 import { llm_text, with_llm_script } from "std/testing"
 
 fn member_call(id: string, path: string, fail: bool = false) {
   return {id: id, name: "edit", toolset_name: "computer", arguments: {path: path, fail: fail}}
 }
 
+fn check_failure_fanout(harness: Harness) {
+  const members = harness.runtime.atomic(0)
+  const ordinary = harness.runtime.atomic(0)
+  let tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "computer.inspect",
+    "A failing member observation.",
+    {
+      handler: { _args ->
+        harness.runtime.atomic_add(members, 1)
+        throw "same failure"
+      },
+      parameters: {},
+      annotations: {kind: "read", side_effect_level: "read_only"},
+    },
+  )
+  tools = tool_define(
+    tools,
+    "inspect",
+    "An independent ordinary observation.",
+    {
+      handler: { _args ->
+        harness.runtime.atomic_add(ordinary, 1)
+        return "ordinary reached"
+      },
+      parameters: {},
+      annotations: {kind: "read", side_effect_level: "read_only"},
+    },
+  )
+  with_llm_script(
+    harness.llm,
+    [
+      {
+        tool_calls: [
+          {id: "member-1", name: "inspect", toolset_name: "computer", arguments: {}},
+          {id: "member-2", name: "inspect", toolset_name: "computer", arguments: {}},
+          {id: "member-3", name: "inspect", toolset_name: "computer", arguments: {}},
+          {id: "ordinary", name: "inspect", arguments: {}},
+        ],
+      },
+      llm_text("##DONE##"),
+    ],
+    { ->
+      const result = agent_loop(
+        harness,
+        "Collapse repeated member failures without suppressing the ordinary function.",
+        nil,
+        {
+          provider: "mock",
+          tools: tools,
+          tool_format: "native",
+          max_iterations: 3,
+          max_concurrent_tools: 1,
+          intra_turn_failure_fanout_cap: 2,
+          loop_until_done: true,
+          done_sentinel: "##DONE##",
+        },
+      )
+      require result.status == "done", "the capped batch must finish"
+    },
+  )
+  require harness.runtime.atomic_get(members) == 2, "the repeated member failure must be capped"
+  require harness.runtime.atomic_get(ordinary) == 1,
+    "the ordinary function must execute after the member cap is reached"
+}
+
 fn main(harness: Harness) {
+  require __intra_turn_call_signature({name: "edit", toolset_name: "computer", arguments: {}})
+    != __intra_turn_call_signature({name: "edit", arguments: {}}),
+    "retry and duplicate signatures must distinguish the same-named member and function"
   const mutations = harness.runtime.atomic(0)
   const observations = harness.runtime.atomic(0)
   let tools = tool_registry()
@@ -110,5 +183,6 @@ fn main(harness: Harness) {
   require harness.runtime.atomic_get(mutations) == 2,
     "only the failed member and independent-resource member may fire"
   require captured.result.status == "done", "the guarded batch must reach terminal completion"
+  check_failure_fanout(harness)
   harness.stdio.println("qualified phases and resource guards reached")
 }

@@ -251,7 +251,7 @@ fn __tool_batch_deferred_result(
   options: any,
 ) {
   const receipt = __tool_batch_receipt(plan, entry, "deferred", "effect_phase_boundary")
-  const name = receipt.tool_name
+  const name = __tool_registry_name(entry.call)
   const observation = "[deferred `" + name + "` tool call]\n"
     + "This call was NOT executed. The current response crossed from effect phase `"
     + plan.selected_phase
@@ -546,7 +546,7 @@ pub fn __intra_turn_call_signature(call: any) {
   if type_of(call) != "dict" {
     return nil
   }
-  const name = to_string(call?.name ?? call?.tool_name ?? "")
+  const name = __tool_registry_name(call)
   const args = call?.arguments ?? {}
   return sha256(json_stringify({name: name, args: args}))
 }
@@ -1116,8 +1116,8 @@ pub fn __intra_turn_has_keyed_mutating_calls(
  * @effects: []
  * @errors: []
  */
-pub fn __intra_turn_collapsed_result(call: any, sample_result: any) {
-  const name = to_string(call?.name ?? sample_result?.tool_name ?? "")
+pub fn __intra_turn_collapsed_result(call: any, _sample_result: any) {
+  const name = __tool_registry_name(call)
   const observation = "[collapsed remaining identical failing `" + name + "` call(s) "
     + "from this turn]\n"
     + "These calls had byte-identical arguments and produced the byte-identical "
@@ -1147,7 +1147,7 @@ pub fn __intra_turn_resource_blocked_result(
   index: any,
   skipped_suffix_count: any,
 ) {
-  const name = to_string(call?.name ?? call?.tool_name ?? "")
+  const name = __tool_registry_name(call)
   const receipt = __intra_turn_partial_apply_receipt(
     call,
     current_guard,
