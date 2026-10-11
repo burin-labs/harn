@@ -18,7 +18,7 @@
 use std::path::Path;
 use std::sync::OnceLock;
 
-use super::{cache_enabled, module_from_header, read_header_from, CacheKey};
+use super::{artifact_reads_switched_on, module_from_header, read_header_from, CacheKey};
 use crate::module_artifact::ModuleArtifact;
 
 /// One stdlib module artifact embedded in a host binary, stored under the
@@ -59,12 +59,13 @@ pub fn register_embedded_stdlib_artifacts(
 
 /// The embedded artifact stored under `key`, when one is registered and its
 /// header carries exactly this key. `HARN_BYTECODE_CACHE=0` turns it off with
-/// every other artifact read, so a compiler change is always exercised.
+/// every other artifact read, so a compiler change is always exercised. A
+/// missing cache directory does not: the table needs none.
 pub(crate) fn load_embedded_stdlib_module(
     key: &CacheKey,
     synthetic: &Path,
 ) -> Option<ModuleArtifact> {
-    if !cache_enabled() {
+    if !artifact_reads_switched_on() {
         return None;
     }
     lookup(EMBEDDED_STDLIB_ARTIFACTS.get()?, key, synthetic)

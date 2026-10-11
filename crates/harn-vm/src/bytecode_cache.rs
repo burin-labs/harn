@@ -534,14 +534,20 @@ pub fn packs_cache_dir() -> Option<PathBuf> {
 /// That is the state a missing cache root degrades into, so every read and
 /// write path already routes around it through the checks they had.
 pub fn cache_enabled() -> bool {
-    let switched_on = match std::env::var(CACHE_ENABLED_ENV).ok().as_deref() {
+    artifact_reads_switched_on() && matches!(cache_root(), Ok(Some(_)))
+}
+
+/// False only when `HARN_BYTECODE_CACHE` turns artifacts off. Artifacts that
+/// need no cache directory, such as those embedded in the binary, read this
+/// rather than [`cache_enabled`], so a host with no cache root still uses them.
+fn artifact_reads_switched_on() -> bool {
+    match std::env::var(CACHE_ENABLED_ENV).ok().as_deref() {
         Some(value) => !matches!(
             value.to_ascii_lowercase().as_str(),
             "0" | "false" | "no" | "off"
         ),
         None => true,
-    };
-    switched_on && matches!(cache_root(), Ok(Some(_)))
+    }
 }
 
 /// Try to load a cached chunk for `source_path` whose contents are
