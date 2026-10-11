@@ -8,6 +8,7 @@
   "full_run_jobs": [
     { "name": "Verify publishable crates", "match": "exact" },
     { "name": "Rust workspace tests", "match": "exact" },
+    { "name": "Parser stack budget", "match": "exact" },
     { "name": "Run Linux sandbox tests", "match": "exact" },
     { "name": "Run Harn conformance tests (1/4)", "match": "exact" },
     { "name": "Run Harn conformance tests (2/4)", "match": "exact" },
@@ -111,6 +112,7 @@
       "fast-policy-gates": { "budget_ms": 240000 },
       "shell-gates": { "budget_ms": 360000 },
       "stack-frames": { "budget_ms": 600000 },
+      "parser-stack": { "budget_ms": 120000 },
       "windows-cross-check": { "budget_ms": 360000 },
       "macos": { "budget_ms": 600000 },
       "portal": { "budget_ms": 30000 },
