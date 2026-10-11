@@ -186,12 +186,23 @@ pub struct ModuleArtifact {
     /// Public declarations whose runtime value is produced by replaying
     /// [`init_chunk`](Self::init_chunk), rather than the precompiled function
     /// table. This includes bindings, enums, tools, skills, and eval packs.
+    #[serde(serialize_with = "serialize_public_names")]
     pub public_value_names: HashSet<String>,
     /// Names of erased public type declarations (`type` and `interface`). They
     /// carry no runtime value of their own, but importers may still name them
     /// in selective imports. Public structs and enums are excluded because
     /// they export runtime constructors/namespaces.
+    #[serde(serialize_with = "serialize_public_names")]
     pub public_type_names: HashSet<String>,
+}
+
+fn serialize_public_names<S: serde::Serializer>(
+    names: &HashSet<String>,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    let mut names = names.iter().collect::<Vec<_>>();
+    names.sort_unstable();
+    names.serialize(serializer)
 }
 
 /// Specialize a fully compiled module for one closed-program export demand.
@@ -1061,6 +1072,40 @@ const ITEM_SCHEMA: Schema<Item> = schema_of(Item)
             .collect::<Vec<_>>();
         assert!(strings.contains(&"id"), "{strings:?}");
         assert!(!strings.contains(&"Item"), "{strings:?}");
+    }
+
+    #[test]
+    fn public_name_sets_preserve_legacy_wire_shape_with_canonical_order() {
+        #[derive(serde::Serialize)]
+        struct PublicNames<'a>(
+            #[serde(serialize_with = "super::serialize_public_names")]
+            &'a std::collections::HashSet<String>,
+        );
+
+        let mut artifact = compile_module_artifact_from_source(
+            Path::new("<test>/exports.harn"),
+            "pub type Zulu = int\npub type Alpha = string\npub const zulu = 2\npub const alpha = 1\n",
+        )
+        .expect("module compiles");
+        let canonical = postcard::to_allocvec(&artifact).expect("serialize artifact");
+        for (names, unsorted) in [
+            (&mut artifact.public_value_names, vec!["zulu", "alpha"]),
+            (&mut artifact.public_type_names, vec!["Zulu", "Alpha"]),
+        ] {
+            // Legacy HashSet payloads are sequences in arbitrary order.
+            let legacy = postcard::to_allocvec(&unsorted).expect("serialize legacy sequence");
+            *names = postcard::from_bytes(&legacy).expect("decode legacy names");
+            let mut sorted = unsorted;
+            sorted.sort_unstable();
+            assert_eq!(
+                postcard::to_allocvec(&PublicNames(names)).expect("serialize names"),
+                postcard::to_allocvec(&sorted).expect("serialize sorted sequence")
+            );
+        }
+        assert_eq!(
+            postcard::to_allocvec(&artifact).expect("reserialize artifact"),
+            canonical
+        );
     }
 
     #[test]

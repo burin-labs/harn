@@ -744,6 +744,49 @@ fn artifact_bytes(root: &Path) -> Vec<(PathBuf, Vec<u8>)> {
         .collect()
 }
 
+#[test]
+fn public_exports_precompile_to_reproducible_module_bytes() {
+    let workdir = tempfile::tempdir().expect("workdir");
+    let tree = workdir.path().join("src");
+    std::fs::create_dir(&tree).expect("mkdir src");
+    let mut source = String::new();
+    for index in 0..8 {
+        source.push_str(&format!("pub type Shape{index} = {{value: int}}\n"));
+        source.push_str(&format!("pub const value{index} = {index}\n"));
+    }
+    std::fs::write(tree.join("exports.harn"), source).expect("write exports");
+    let target = tree.to_string_lossy().into_owned();
+    let mut baseline = None;
+    for (index, jobs) in ["1", "1", "4"].into_iter().enumerate() {
+        let out = workdir.path().join(format!("out{index}"));
+        let out_arg = out.to_string_lossy().into_owned();
+        let run = run_precompile(&[&target, "--out", &out_arg, "--jobs", jobs], &[]);
+        assert_eq!(run.exit_code, 0, "stderr={}", run.stderr);
+        assert!(
+            run.stderr.contains("1 compiled, 0 reused, 0 failed"),
+            "each fresh output must compile the source: {}",
+            run.stderr
+        );
+        let modules = artifact_bytes(&out)
+            .into_iter()
+            .filter(|(path, _)| path.extension().is_some_and(|ext| ext == "harnmod"))
+            .collect::<Vec<_>>();
+        assert_eq!(modules.len(), 1, "one module artifact must be compared");
+        assert!(
+            !modules[0].1.is_empty(),
+            "module artifact must contain bytes"
+        );
+        if let Some(expected) = &baseline {
+            assert!(
+                modules == *expected,
+                "module bytes differ on cold run {index}"
+            );
+        } else {
+            baseline = Some(modules);
+        }
+    }
+}
+
 fn run_precompile(argv: &[&str], extra_env: &[(&str, &str)]) -> PrecompileOutcome {
     run_precompile_in(None, argv, extra_env)
 }
