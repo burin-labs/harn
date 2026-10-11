@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url';
 import {
   admitChild, admitObserver, githubRecord, observerContext, observerRunName,
   observerDeclarationName, observerRunNameExpression, observerDispatchActor,
+  qualifyOwnedChild, githubArtifactCensus, githubChildCensus, reconcileOwnedChildren,
 } from '../lib/consumer-observer.mjs';
 
 const context = {
@@ -55,6 +56,152 @@ test('dead, superseded, malformed, and unrelated parent readings cannot admit wo
   ]) assert.throws(() => admitObserver(context, record), /CONSUMER_OBSERVER reason=/);
   assert.throws(() => observerContext({ ...context, extra: true }), /context_shape_invalid/);
   assert.throws(() => observerContext({ ...context, parent_run_id: '' }), /context_identity_invalid/);
+});
+
+test('owned receipts remain bound to the historical parent and fresh child attempt', () => {
+  const receipt = admitChild(context, parent, expected, child, event, context);
+  const historicalParent = { ...parent, status: 'completed', conclusion: 'cancelled' };
+  const configured = { repository: expected.repository, workflow: expected.workflow };
+  const qualify = (reading = child, owner = receipt, declaration = context, parentReading = historicalParent) =>
+    qualifyOwnedChild(owner, context, parentReading, reading, configured, declaration);
+  assert.deepEqual(qualify(), receipt);
+  assert.deepEqual(qualify({ ...child, status: 'completed', conclusion: 'success' }), receipt);
+  assert.throws(() => admitObserver(context, historicalParent), /parent_ended/);
+  for (const reading of [
+    { ...child, run_attempt: 2 }, { ...child, id: 74 },
+    { ...child, head_sha: 'd'.repeat(40) }, { ...child, path: '.github/workflows/unrelated.yml' },
+    { ...child, actor: { login: 'unrelated[bot]', type: 'Bot' } },
+    { ...child, status: 'completed', conclusion: null }, { ...child, status: 'unknown' },
+  ]) assert.throws(() => qualify(reading), /CONSUMER_OBSERVER reason=/);
+  assert.throws(() => qualify(child, { ...receipt, reused: true }), /child_receipt_shape_or_context_unproven/);
+  assert.throws(() => qualify(child, { ...receipt, child: { ...receipt.child, run_attempt: 2 } }), /child_dispatch_identity_unproven/);
+  assert.throws(() => qualify(child, receipt, { ...context, dispatch_nonce: '11234567-89ab-4cde-8fab-0123456789ab' }), /dispatch_declaration_mismatch/);
+  assert.throws(() => qualify(child, receipt, context, { ...historicalParent, run_attempt: 3 }), /parent_attempt_superseded/);
+});
+
+test('historical parent API reads cannot silently substitute the latest attempt', async () => {
+  const reading = { ...parent, status: 'completed', conclusion: 'cancelled' };
+  const requested = [];
+  const fetchRecord = async url => {
+    requested.push(url);
+    return { ok: true, json: async () => reading };
+  };
+  assert.deepEqual(await githubRecord('fixture-read', context.parent_repository, '42', fetchRecord, 2), reading);
+  assert.equal(requested[0], 'https://api.github.com/repos/burin-labs/harn/actions/runs/42/attempts/2');
+  await assert.rejects(() => githubRecord('fixture-read', context.parent_repository, '42', fetchRecord, 1), /run_read_unmeasured/);
+  await assert.rejects(() => githubRecord('fixture-read', context.parent_repository, '42', fetchRecord, 0), /read_authority_or_identity_missing/);
+});
+
+test('artifact discovery measures complete pages and refuses false zero or partial custody', async () => {
+  const artifacts = Array.from({ length: 101 }, (_, index) => ({ id: index + 1 }));
+  const calls = [];
+  const read = pages => githubArtifactCensus('fixture-read', 'acme/widget-host', '73', async url => {
+    calls.push(url);
+    return { ok: true, json: async () => pages[Number(new URL(url).searchParams.get('page')) - 1] };
+  });
+  assert.deepEqual(await read([{ total_count: 0, artifacts: [] }]), []);
+  assert.deepEqual(await read([
+    { total_count: 101, artifacts: artifacts.slice(0, 100) },
+    { total_count: 101, artifacts: artifacts.slice(100) },
+  ]), artifacts);
+  assert.ok(calls.at(-1).endsWith('per_page=100&page=2'));
+  for (const pages of [
+    [{}], [{ total_count: 1, artifacts: [] }], [{ total_count: 1001, artifacts: [] }],
+    [{ total_count: 2, artifacts: [{ id: 1 }, { id: 1 }] }],
+    [{ total_count: 101, artifacts: artifacts.slice(0, 100) }, { total_count: 100, artifacts: [] }],
+    [{ total_count: 101, artifacts: artifacts.slice(0, 100) }, { total_count: 101, artifacts: [] }],
+  ]) await assert.rejects(() => read(pages), /observer_census_unmeasured/);
+});
+
+test('child discovery keeps a complete bounded census and never treats run names as authority', async () => {
+  let endpoint;
+  const read = async url => {
+    endpoint = new URL(url);
+    return { ok: true, json: async () => ({ total_count: 1, workflow_runs: [child] }) };
+  };
+  assert.deepEqual(await githubChildCensus('fixture-read', expected.repository,
+    expected.workflow, '2026-10-11T20:00:00Z', read), [child]);
+  assert.equal(endpoint.pathname, '/repos/acme/widget-host/actions/workflows/rehearsal.yml/runs');
+  assert.equal(endpoint.searchParams.get('created'), '>=2026-10-11T20:00:00Z');
+  assert.equal(endpoint.searchParams.get('event'), 'workflow_dispatch');
+  await assert.rejects(() => githubChildCensus('fixture-read', expected.repository,
+    '../unrelated.yml', '2026-10-11T20:00:00Z', read), /child_discovery_identity_invalid/);
+});
+
+test('the same reconciler cancels only receipt-owned live children of an ended exact parent', async () => {
+  const receipt = admitChild(context, parent, expected, child, event, context);
+  const endedParent = { ...parent, status: 'completed', conclusion: 'cancelled', created_at: '2026-10-11T20:00:00Z' };
+  const bytes = Buffer.from('authenticated-fixture-archive');
+  const digest = `sha256:${createHash('sha256').update(bytes).digest('hex')}`;
+  const metadata = (artifactId, name, runId, headSha) => ({
+    id: artifactId, name, expired: false, digest, size_in_bytes: bytes.length,
+    workflow_run: { id: Number(runId), head_sha: headSha },
+  });
+  const configured = { repository: expected.repository, workflow: expected.workflow };
+  const run = async ({ latest = child, parentReading = endedParent, missing = false, runs = [child], archiveReceipt = receipt, settlesAfter = 0, appeared = [] } = {}) => {
+    const calls = [];
+    const waits = [];
+    let cancelled = false;
+    let cancellationRead = 0;
+    let discoveries = 0;
+    const fetchRecord = async (url, options = {}) => {
+      calls.push({ url, method: options.method ?? 'GET' });
+      const endpoint = new URL(url);
+      if (endpoint.pathname.endsWith('/cancel')) {
+        cancelled = true;
+        return { status: 202 };
+      }
+      if (endpoint.pathname.endsWith('/runs/42/attempts/2')) return { ok: true, json: async () => parentReading };
+      if (endpoint.pathname.endsWith('/runs/42/artifacts')) return { ok: true, json: async () => ({
+        total_count: 1, artifacts: [metadata(501, observerDeclarationName(context), '42', context.parent_head_sha)],
+      }) };
+      if (endpoint.pathname.endsWith('/rehearsal.yml/runs')) {
+        const discovered = ++discoveries > 1 ? [...runs, ...appeared] : runs;
+        return { ok: true, json: async () => ({ total_count: discovered.length, workflow_runs: discovered }) };
+      }
+      if (endpoint.pathname.endsWith('/runs/73/artifacts')) return { ok: true, json: async () => ({
+        total_count: missing ? 0 : 1,
+        artifacts: missing ? [] : [metadata(502, `consumer-observer-${context.dispatch_nonce}`, '73', child.head_sha)],
+      }) };
+      if (endpoint.pathname.endsWith('/runs/73')) return { ok: true, json: async () => cancelled && ++cancellationRead > settlesAfter
+        ? { ...latest, status: 'completed', conclusion: 'cancelled' } : latest };
+      if (endpoint.pathname.endsWith('/zip')) return { ok: true, arrayBuffer: async () => bytes };
+      throw new Error('unexpected authenticated fixture request');
+    };
+    const result = await reconcileOwnedChildren('fixture-read', context, configured, fetchRecord,
+      (_, filename) => filename === 'consumer-observer.json' ? context : archiveReceipt,
+      async milliseconds => { waits.push(milliseconds); });
+    return { result, calls, waits };
+  };
+  const positive = await run();
+  assert.deepEqual(positive.result, { discovered: 1, owned: 1, terminal: 1, cancelled: 1, pending: 0, refused: 0 });
+  assert.equal(positive.calls.filter(call => call.method === 'POST').length, 1);
+  for (const control of [
+    { missing: true }, { latest: { ...child, run_attempt: 2 } },
+    { latest: { ...child, actor: { login: 'unrelated[bot]', type: 'Bot' } } },
+    { archiveReceipt: { ...receipt, child: { ...receipt.child, head_sha: 'd'.repeat(40) } } },
+    { parentReading: { ...endedParent, status: 'in_progress', conclusion: null } },
+    { runs: [] }, { runs: [{ ...child, display_title: 'ordinary successful rehearsal' }] },
+  ]) {
+    const negative = await run(control);
+    assert.equal(negative.calls.filter(call => call.method === 'POST').length, 0);
+    assert.ok(negative.result.pending + negative.result.refused > 0);
+  }
+  const complete = await run({ latest: { ...child, status: 'completed', conclusion: 'success' } });
+  assert.equal(complete.result.terminal, 1);
+  assert.equal(complete.calls.filter(call => call.method === 'POST').length, 0);
+  const settling = await run({ settlesAfter: 2 });
+  assert.equal(settling.result.terminal, 1);
+  assert.deepEqual(settling.waits, [5000, 5000]);
+  const unended = await run({ settlesAfter: 10 });
+  assert.equal(unended.result.cancelled, 1, 'accepted cancellation remains separate from termination');
+  assert.equal(unended.result.terminal, 0);
+  assert.equal(unended.result.pending, 1);
+  assert.deepEqual(unended.waits, [5000, 5000, 5000, 5000, 5000], 'bounded observation does not use real-time sleeps in tests');
+  const late = await run({ appeared: [{ ...child, id: 74 }] });
+  assert.equal(late.result.discovered, 2);
+  assert.equal(late.result.pending, 1, 'a dispatch appearing during cleanup cannot be omitted from the verdict');
+  assert.equal(late.calls.filter(call => call.method === 'POST').length, 1, 'late discovery alone cannot grant cancellation authority');
 });
 
 test('a matching run name cannot substitute for dispatch custody', () => {
@@ -208,7 +355,8 @@ test('the action entrypoint reaches private receipt creation and refuses dead pa
       fs.writeFileSync(censusFile, JSON.stringify(reading));
       const refused = spawnSync(process.execPath, [entry], { env, encoding: 'utf8' });
       assert.equal(refused.status, 1);
-      assert.match(refused.stderr, new RegExp(`reason=dispatch_declaration_${reason}`));
+      const diagnostic = reason === 'census_unmeasured' ? 'observer_census_unmeasured' : `dispatch_declaration_${reason}`;
+      assert.match(refused.stderr, new RegExp(`reason=${diagnostic}`));
       assert.equal(fs.readFileSync(output, 'utf8'), '');
       assert.equal(fs.existsSync(receiptFile), false);
     }

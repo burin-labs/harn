@@ -1,0 +1,30 @@
+name: Publish consumer observer declaration
+description: Store immutable public dispatch custody before a consumer is dispatched
+inputs:
+  source-revision:
+    description: Exact separately frozen source to rehearse
+    required: true
+  token:
+    description: Read authority for the public parent run
+    required: true
+outputs:
+  context:
+    description: Closed public identity for the subsequent consumer dispatch
+    value: ${{ steps.prepare.outputs.context }}
+runs:
+  using: composite
+  steps:
+    - name: Prepare public dispatch custody
+      id: prepare
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.token }}
+        SOURCE_REVISION: ${{ inputs.source-revision }}
+      run: node "$GITHUB_ACTION_PATH/../../../scripts/ci/consumer-observer-declare.mjs"
+    - name: Store the immutable public declaration
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      with:
+        name: ${{ steps.prepare.outputs.name }}
+        path: ${{ steps.prepare.outputs.file }}
+        if-no-files-found: error
+        retention-days: 7
