@@ -127,6 +127,19 @@ if [[ "$(find "${storage_root}/cargo-target-seed" -mindepth 1 -maxdepth 1 -type 
   exit 1
 fi
 
+# The cache-tag signature is a byte prefix; a trailing newline is optional.
+printf '%s' 'Signature: 8a477f597d28d172789f06886806bc55' > "${source_target}/CACHEDIR.TAG"
+valid_output="$(
+  env "${seed_env[@]}" HARN_CARGO_TARGET_SEED_KEY=valid-toolchain \
+    "${seed_tool}" publish "${source_target}" "${storage_root}" 2>&1
+)"
+if ! grep -Fq 'Published Cargo target seed' <<< "${valid_output}" \
+  || [[ ! -f "${storage_root}/cargo-target-seed/valid-toolchain/.harn-cargo-target-seed" ]] \
+  || [[ "$(cat "${source_target}/CACHEDIR.TAG")" != 'Signature: 8a477f597d28d172789f06886806bc55' ]]; then
+  echo "publish rejected or modified a valid cache signature without a newline" >&2
+  exit 1
+fi
+
 printf '%s\n' 'malformed-marker' > "${source_target}/CACHEDIR.TAG"
 malformed_output="$(
   env "${seed_env[@]}" HARN_CARGO_TARGET_SEED_KEY=malformed-toolchain \

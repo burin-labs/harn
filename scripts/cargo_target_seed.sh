@@ -107,6 +107,7 @@ copy_tree_cow() {
 clean_workspace_artifacts() {
   local target_dir="$1"
   local cache_tag="${target_dir}/CACHEDIR.TAG"
+  local signature='Signature: 8a477f597d28d172789f06886806bc55'
 
   # Both callers pass a newly allocated private clone, never the source target.
   # Cargo does not tag a target that setup created before its first build.
@@ -115,16 +116,16 @@ clean_workspace_artifacts() {
   [[ ! -L "${cache_tag}" ]] || return 1
   if [[ ! -e "${cache_tag}" ]]; then
     printf '%s\n' \
-      'Signature: 8a477f597d28d172789f06886806bc55' \
+      "${signature}" \
       '# Disposable Cargo target clone owned by cargo_target_seed.sh.' \
       > "${cache_tag}" || return 1
   fi
   # Cargo versions differ in whether scoped clean checks this signature. The
   # seed owner must enforce it before asking Cargo to prune the private clone.
   [[ -f "${cache_tag}" ]] || return 1
-  local signature
-  IFS= read -r signature < "${cache_tag}" || return 1
-  [[ "${signature}" == 'Signature: 8a477f597d28d172789f06886806bc55' ]] || return 1
+  local actual_signature
+  actual_signature="$(head -c "${#signature}" "${cache_tag}")" || return 1
+  [[ "${actual_signature}" == "${signature}" ]] || return 1
 
   # Cargo fingerprints and dep-info contain absolute paths to the worktree that
   # produced them. Keep third-party dependencies warm, but force every
