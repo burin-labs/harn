@@ -21,7 +21,7 @@ pub type ReleaseSmokeConfig = {
   step_timeout_ms: int,
   watch_timeout_ms: int,
   watch_target?: string,
-  cold_cache_dir?: string,
+  cold_cache_dir: string?,
 }
 
 pub type ReleaseSmokeReport = {platform: string, steps: list, failed: list, success: bool}

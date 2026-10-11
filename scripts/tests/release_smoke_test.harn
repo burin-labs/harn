@@ -2,7 +2,7 @@ import { command_result_fail, command_result_ok } from "std/command"
 import { gha_bool_output, gha_int_output } from "../bump-driver/wire_outputs"
 import { run_release_smoke } from "../release_smoke.harn"
 
-fn config(cold_cache_dir: string) {
+fn config(cold_cache_dir: string?) {
   return {
     candidate: "/candidate/harn",
     platform: "test",
@@ -291,8 +291,7 @@ pipeline test_a_cold_first_run_that_left_no_cache_entry_cannot_pass(harness: Har
 
 @test
 pipeline test_a_development_binary_smoke_skips_the_cold_first_run_check(harness: Harness) {
-  let unrequired = config("")
-  unrequired.cold_cache_dir = nil
+  const unrequired = config(nil)
   const report = run_release_smoke(
     harness.fs,
     harness.tools,
