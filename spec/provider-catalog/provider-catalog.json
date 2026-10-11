@@ -235,6 +235,7 @@
         "path": "/models"
       },
       "cache_usage_accounting": true,
+      "stream_usage_accounting": true,
       "data_controls": {
         "control_scope": "none",
         "retention_default": "not_retained",
@@ -1569,6 +1570,7 @@
         "method": "GET",
         "path": "/models"
       },
+      "cache_usage_accounting": true,
       "stream_usage_accounting": true,
       "data_controls": {
         "control_scope": "account",
