@@ -42,3 +42,28 @@ fn other_absolute_paths_beside_a_discarded_stream_are_still_outside() {
         );
     }
 }
+
+/// A POSIX stream spelling is not a native Windows device. In native argv or
+/// PowerShell it still denotes a filesystem operand outside these roots.
+#[cfg(windows)]
+#[test]
+fn native_windows_paths_do_not_inherit_posix_stream_exemptions() {
+    for context in [
+        ctx(&["cat", "/dev/null"]),
+        serde_json::json!({
+            "request": {
+                "mode": "shell",
+                "command": "Write-Output hi > /dev/null",
+                "cwd": "/tmp/work",
+                "shell": { "id": "pwsh", "platform": "windows" },
+            },
+            "workspace_roots": ["/tmp/work"],
+        }),
+    ] {
+        let scan = command_risk_scan_json(&context, None);
+        assert!(
+            labels(&scan).contains(&"outside_workspace".to_string()),
+            "native Windows filesystem operands remain scoped: {scan}"
+        );
+    }
+}

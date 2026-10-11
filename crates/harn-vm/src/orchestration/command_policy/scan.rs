@@ -12,7 +12,8 @@ pub(super) fn scan_command_risk_scan_json(
 ) -> JsonValue {
     let command_text = command_text(ctx);
     let lower = command_text.to_ascii_lowercase();
-    let (command_analysis, execution_semantics) = security_command_analysis_with_metadata(ctx);
+    let (command_analysis, execution_semantics, shell_dialect) =
+        security_command_analysis_with_metadata(ctx);
     let shell_command_groups = super::catastrophic::shell_command_groups(&command_text)
         .into_iter()
         .map(|group| {
@@ -113,7 +114,7 @@ pub(super) fn scan_command_risk_scan_json(
         labels.insert("process_kill".to_string());
         rationale.push("process kill command detected");
     }
-    if path_outside_workspace(ctx, &command_analysis) {
+    if path_outside_workspace(ctx, &command_analysis, shell_dialect) {
         labels.insert("outside_workspace".to_string());
         rationale.push("cwd or absolute path is outside workspace roots");
     }
@@ -305,7 +306,11 @@ pub(super) fn security_command_analysis(ctx: &JsonValue) -> super::catastrophic:
 
 fn security_command_analysis_with_metadata(
     ctx: &JsonValue,
-) -> (super::catastrophic::ShellAnalysis, JsonValue) {
+) -> (
+    super::catastrophic::ShellAnalysis,
+    JsonValue,
+    Option<crate::shells::ShellDialect>,
+) {
     match request_mode(ctx) {
         Some("argv") => match request_argv(ctx) {
             Ok(Some(argv)) => {
@@ -316,6 +321,7 @@ fn security_command_analysis_with_metadata(
                 return (
                     analysis,
                     execution_semantics_json("argv", None, "request", None, unresolved_reason),
+                    None,
                 );
             }
             Ok(None) | Err(()) => {
@@ -328,6 +334,7 @@ fn security_command_analysis_with_metadata(
                         None,
                         Some("argv_missing_or_invalid"),
                     ),
+                    None,
                 );
             }
         },
@@ -342,6 +349,7 @@ fn security_command_analysis_with_metadata(
                     None,
                     Some("execution_mode_unknown"),
                 ),
+                None,
             );
         }
     }
@@ -356,6 +364,7 @@ fn security_command_analysis_with_metadata(
                 resolution.shell_id.as_deref(),
                 resolution.unresolved_reason,
             ),
+            None,
         );
     };
     let analysis = super::catastrophic::analyze_shell_dialect(
@@ -376,6 +385,7 @@ fn security_command_analysis_with_metadata(
             resolution.shell_id.as_deref(),
             unresolved_reason,
         ),
+        Some(dialect),
     )
 }
 
@@ -1114,6 +1124,7 @@ pub(super) fn has_process_kill(lower: &str) -> bool {
 pub(super) fn path_outside_workspace(
     ctx: &JsonValue,
     analysis: &super::catastrophic::ShellAnalysis,
+    shell_dialect: Option<crate::shells::ShellDialect>,
 ) -> bool {
     let roots = ctx
         .get("workspace_roots")
@@ -1139,6 +1150,15 @@ pub(super) fn path_outside_workspace(
     // owns executable discovery. The executable's own location is not a path
     // the command reads or writes, even when that location is absolute.
     for path in absolute_path_candidates_from_words(analysis.path_operand_words()) {
+        // POSIX stream names belong to the declared shell, not the CI host's
+        // path syntax. Windows projects `/dev/null` onto the current drive;
+        // do not lose that stream identity before the shared classifier runs.
+        // Native Windows argv and shells retain their host filesystem checks.
+        if shell_dialect == Some(crate::shells::ShellDialect::Posix)
+            && crate::workspace_path::is_standard_io_device(Path::new(&path), false)
+        {
+            continue;
+        }
         let path = normalize_path(&path);
         // A redirect to `/dev/null` or a standard stream names no workspace
         // file, so it is neither inside nor outside one (harn#9655).
