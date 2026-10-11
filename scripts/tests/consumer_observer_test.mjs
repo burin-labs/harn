@@ -10,6 +10,7 @@ import {
   admitChild, admitObserver, githubRecord, observerContext, observerRunName,
   observerDeclarationName, observerRunNameExpression, observerDispatchActor,
   qualifyOwnedChild, githubArtifactCensus, githubChildCensus, reconcileOwnedChildren,
+  createTerminalReceipt, qualifyTerminalReceipt,
 } from '../lib/consumer-observer.mjs';
 
 const context = {
@@ -77,6 +78,34 @@ test('owned receipts remain bound to the historical parent and fresh child attem
   assert.throws(() => qualify(child, { ...receipt, child: { ...receipt.child, run_attempt: 2 } }), /child_dispatch_identity_unproven/);
   assert.throws(() => qualify(child, receipt, { ...context, dispatch_nonce: '11234567-89ab-4cde-8fab-0123456789ab' }), /dispatch_declaration_mismatch/);
   assert.throws(() => qualify(child, receipt, context, { ...historicalParent, run_attempt: 3 }), /parent_attempt_superseded/);
+});
+
+test('a private product decision requires authenticated custody and fresh completed success', () => {
+  const ownership = admitChild(context, parent, expected, child, event, context);
+  const configured = { repository: expected.repository, workflow: expected.workflow };
+  const product = {
+    source_revision: context.source_revision, verdict: 'pass', owed: 2, proven: 2, pending: 0, failed: 0,
+  };
+  const receipt = createTerminalReceipt(ownership, context, parent, child, configured, context, product);
+  const historicalParent = { ...parent, status: 'completed', conclusion: 'success' };
+  const completed = { ...child, status: 'completed', conclusion: 'success' };
+  const qualify = (input = receipt, reading = completed, parentReading = historicalParent, declaration = context) =>
+    qualifyTerminalReceipt(input, context, parentReading, reading, configured, declaration);
+  assert.deepEqual(qualify(), receipt);
+  for (const reading of [
+    child, { ...completed, conclusion: 'failure' }, { ...completed, conclusion: 'cancelled' },
+    { ...completed, conclusion: 'skipped' }, { ...completed, run_attempt: 2 },
+    { ...completed, head_sha: 'd'.repeat(40) },
+  ]) assert.throws(() => qualify(receipt, reading), /CONSUMER_OBSERVER reason=/);
+  for (const decision of [
+    null, {}, { ...product, owed: 0, proven: 0 }, { ...product, proven: 1 },
+    { ...product, pending: 1 }, { ...product, failed: 1 }, { ...product, verdict: 'fail' },
+    { ...product, source_revision: 'd'.repeat(40) }, { ...product, private_job: 'unowned' },
+  ]) assert.throws(() => qualify({ ...receipt, product: decision }), /product_decision_unmeasured/);
+  assert.throws(() => qualify({ ...receipt, reused: true }), /terminal_receipt_shape_unproven/);
+  assert.throws(() => qualify(receipt, completed, { ...historicalParent, run_attempt: 3 }), /parent_attempt_superseded/);
+  assert.throws(() => qualify(receipt, completed, historicalParent,
+    { ...context, dispatch_nonce: '11234567-89ab-4cde-8fab-0123456789ab' }), /dispatch_declaration_mismatch/);
 });
 
 test('historical parent API reads cannot silently substitute the latest attempt', async () => {

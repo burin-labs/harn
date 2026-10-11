@@ -35,6 +35,9 @@ const contextKeys = [
  * parent_run_attempt: number, parent_head_sha: string, source_revision: string,
  * dispatch_nonce: string}} ObserverContext */
 
+/** @typedef {{source_revision: string, verdict: 'pass', owed: number,
+ * proven: number, pending: 0, failed: 0}} ProductDecision */
+
 function refuse(reason) {
   throw new Error(`CONSUMER_OBSERVER reason=${reason}`);
 }
@@ -163,6 +166,54 @@ export function qualifyOwnedChild(input, context, parent, child, expected, decla
     headSha: receipt.head_sha, workflow: receipt.workflow,
   }, child);
   return { schema: input.schema, observer, child: { ...receipt } };
+}
+
+/** The consumer's canonical decision owns its proof counts. This transport
+ * validates a reached, complete decision without knowing private job names.
+ * @param {unknown} input
+ * @param {ObserverContext} context
+ * @returns {ProductDecision} */
+function terminalProduct(input, context) {
+  if (!input || typeof input !== 'object' || Array.isArray(input)
+    || Object.keys(input).sort().join(',') !== 'failed,owed,pending,proven,source_revision,verdict') {
+    refuse('product_decision_unmeasured');
+  }
+  const product = /** @type {ProductDecision} */ (input);
+  if (product.source_revision !== context.source_revision || product.verdict !== 'pass'
+    || !Number.isSafeInteger(product.owed) || product.owed < 1
+    || product.proven !== product.owed || product.pending !== 0 || product.failed !== 0) {
+    refuse('product_decision_unmeasured');
+  }
+  return {
+    source_revision: product.source_revision, verdict: product.verdict,
+    owed: product.owed, proven: product.proven, pending: 0, failed: 0,
+  };
+}
+
+/** A private producer records the actual canonical product decision while
+ * its job is live. Recording it does not authorize a completed verdict. */
+export function createTerminalReceipt(ownership, context, parent, child, expected, declaration, product) {
+  const receipt = qualifyOwnedChild(ownership, context, parent, child, expected, declaration);
+  return {
+    schema: 'harn.consumer_observer_terminal.v1', observer: receipt.observer,
+    child: receipt.child, product: terminalProduct(product, receipt.observer),
+  };
+}
+
+/** A fresh completed SUCCESS is required in addition to the private product
+ * decision. Neither a live run nor an advisory green step grants a pass. */
+export function qualifyTerminalReceipt(input, context, parent, child, expected, declaration) {
+  if (!input || typeof input !== 'object' || Array.isArray(input)
+    || Object.keys(input).sort().join(',') !== 'child,observer,product,schema'
+    || input.schema !== 'harn.consumer_observer_terminal.v1') {
+    refuse('terminal_receipt_shape_unproven');
+  }
+  const ownership = {
+    schema: 'harn.consumer_observer_receipt.v1', observer: input.observer, child: input.child,
+  };
+  const receipt = createTerminalReceipt(ownership, context, parent, child, expected, declaration, input.product);
+  if (child.status !== 'completed' || child.conclusion !== 'success') refuse('product_run_not_successful');
+  return receipt;
 }
 
 /** Bind admission to the child's actual event and authenticated run metadata.
