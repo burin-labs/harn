@@ -44,11 +44,10 @@ mod tests {
         let workspace = tempfile::tempdir().unwrap();
         let state = tempfile::tempdir().unwrap();
         let launcher = crate::security::LauncherEnvironment::from_snapshot(
-            [(
+            std::iter::once((
                 crate::runtime_paths::HARN_STATE_DIR_ENV.to_string(),
                 state.path().to_string_lossy().into_owned(),
-            )]
-            .into_iter()
+            ))
             .collect(),
         );
         let scope =
