@@ -730,6 +730,7 @@ mod tests {
     #[tokio::test]
     async fn journal_records_subagent_lineage_at_session_creation() {
         let root = tempfile::tempdir().expect("temp root");
+        let canonical_root = root.path().canonicalize().expect("canonical temp root");
         let mut options = options(root.path());
         options.put_str("parent_session_id", "parent-session");
         options.put_str("session_type", "subagent");
@@ -754,7 +755,7 @@ mod tests {
         assert_eq!(meta.session_type, Some(SessionType::Subagent));
         assert_eq!(
             meta.project_scope.as_deref(),
-            Some(root.path().to_string_lossy().as_ref())
+            Some(canonical_root.to_string_lossy().as_ref())
         );
     }
 
