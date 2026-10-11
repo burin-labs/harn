@@ -5,6 +5,57 @@ use super::super::*;
 use serde::Deserialize;
 
 #[test]
+fn chat_endpoint_overlay_replaces_adapter_as_a_unit() {
+    let host = parse_config_toml(
+        r#"
+[providers.ollama]
+chat_endpoint = "/v1/chat/completions"
+chat_api_adapter = "ollama_openai_compat"
+"#,
+    )
+    .unwrap();
+    for (overlay, endpoint, adapter) in [
+        (
+            "base_url = 'http://localhost:11435'",
+            "/v1/chat/completions",
+            Some(ChatApiAdapter::OllamaOpenAiCompat),
+        ),
+        ("chat_endpoint = '/api/chat'", "/api/chat", None),
+        (
+            "chat_endpoint = '/v1/chat/completions'",
+            "/v1/chat/completions",
+            None,
+        ),
+        (
+            "chat_api_adapter = 'model_default'",
+            "/v1/chat/completions",
+            Some(ChatApiAdapter::ModelDefault),
+        ),
+        (
+            "chat_endpoint = '/api/chat'\nchat_api_adapter = 'model_default'",
+            "/api/chat",
+            Some(ChatApiAdapter::ModelDefault),
+        ),
+        (
+            "chat_endpoint = '/v1/chat/completions'\nchat_api_adapter = 'ollama_openai_compat'",
+            "/v1/chat/completions",
+            Some(ChatApiAdapter::OllamaOpenAiCompat),
+        ),
+    ] {
+        let mut config = host.clone();
+        config.merge_from(&parse_config_toml(&format!("[providers.ollama]\n{overlay}")).unwrap());
+        assert_eq!(
+            config.providers["ollama"].chat_endpoint, endpoint,
+            "{overlay}"
+        );
+        assert_eq!(
+            config.providers["ollama"].chat_api_adapter, adapter,
+            "{overlay}"
+        );
+    }
+}
+
+#[test]
 fn presentation_rows_replace_whole_same_id_records_across_overlays() {
     let mut base = parse_config_toml(
         r#"

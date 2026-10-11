@@ -45,7 +45,8 @@ pub struct ProviderDef {
     pub auth_env: AuthEnv,
     /// Explicit adapter for a chat endpoint whose request/response contract
     /// differs from the model's default message wire format. Omitted keeps the
-    /// legacy provider/model dialect selection.
+    /// legacy provider/model dialect selection. An overlay declaring a chat
+    /// endpoint also replaces this adapter, including when it omits it.
     pub chat_api_adapter: Option<ChatApiAdapter>,
     /// How this provider's credentials are resolved. `"env"` (default) means
     /// the generic `auth_env` lookup is authoritative: missing env vars are a
@@ -337,13 +338,19 @@ impl ProviderDef {
         if !overlay.auth_env.is_none() {
             self.auth_env = overlay.auth_env.clone();
         }
-        merge_option(&mut self.chat_api_adapter, &overlay.chat_api_adapter);
+        match overlay.chat_wire_overlay() {
+            ChatWireOverlay::Endpoint => {
+                self.chat_endpoint.clone_from(&overlay.chat_endpoint);
+                self.chat_api_adapter = overlay.chat_api_adapter;
+            }
+            ChatWireOverlay::Adapter => self.chat_api_adapter = overlay.chat_api_adapter,
+            ChatWireOverlay::Inherit => {}
+        }
         if overlay.credential_resolution != default_credential_resolution() {
             self.credential_resolution = overlay.credential_resolution.clone();
         }
         merge_vec(&mut self.credential_env, &overlay.credential_env);
         self.extra_headers.extend(overlay.extra_headers.clone());
-        merge_string(&mut self.chat_endpoint, &overlay.chat_endpoint);
         merge_option(&mut self.completion_endpoint, &overlay.completion_endpoint);
         merge_option(&mut self.embeddings_endpoint, &overlay.embeddings_endpoint);
         merge_option(&mut self.command, &overlay.command);
@@ -377,6 +384,23 @@ impl ProviderDef {
         merge_option(&mut self.latency_p50_ms, &overlay.latency_p50_ms);
         merge_option(&mut self.performance, &overlay.performance);
     }
+
+    pub(super) fn chat_wire_overlay(&self) -> ChatWireOverlay {
+        if !self.chat_endpoint.is_empty() {
+            ChatWireOverlay::Endpoint
+        } else if self.chat_api_adapter.is_some() {
+            ChatWireOverlay::Adapter
+        } else {
+            ChatWireOverlay::Inherit
+        }
+    }
+}
+
+/// The merge decision shared by serving definitions and their provenance.
+pub(super) enum ChatWireOverlay {
+    Endpoint,
+    Adapter,
+    Inherit,
 }
 
 fn merge_option<T: Clone>(base: &mut Option<T>, overlay: &Option<T>) {

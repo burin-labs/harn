@@ -2240,6 +2240,13 @@ route without making a network call. This is useful when checking why a route
 uses a specific wire format, tool-call format, base URL host, or thinking-mode
 setting.
 
+The `chat_wire_contract` JSON field reports `chat_endpoint`,
+`chat_api_adapter`, and `sources` for both fields. Source layers are `embedded`,
+`host_config`, `user_config`, `runtime_catalog`, or `execution_override`;
+file layers include their path. An endpoint-only override reports
+`model_default` as its adapter and attributes both fields to that layer.
+Human output prints the same values and sources.
+
 ```bash
 harn provider dispatch-explain anthropic claude-sonnet-5 --json
 harn provider dispatch-explain openrouter anthropic/claude-sonnet-4.5 --thinking --tool-format native

@@ -909,8 +909,18 @@ sampling options it cannot carry. `/v1` does not carry `num_ctx` or
 when those runtime controls are needed. These fields follow
 [Ollama 0.34's compatibility handler](https://github.com/ollama/ollama/blob/v0.34.0/openai/openai.go).
 
-Set `chat_api_adapter = "model_default"` with `/api/chat` to override an
-inherited compatible adapter and restore native Ollama request and response handling.
+An overlay declaring `chat_endpoint` replaces the endpoint and its adapter
+together. Omitting `chat_api_adapter` restores the provider/model's default
+request and response handling. For Ollama, an endpoint-only `/api/chat`
+override therefore restores native Ollama handling. Declare
+`chat_api_adapter = "ollama_openai_compat"` whenever selecting `/v1/chat/completions`.
+
+An adapter-only overlay changes the adapter while retaining the endpoint.
+`chat_api_adapter = "model_default"` explicitly selects the default handling.
+Overlays declaring neither field preserve both values.
+
+[`harn provider dispatch-explain`](../cli-reference.md#harn-provider-dispatch-explain)
+reports the effective endpoint, adapter, and source layer for each field.
 
 ### Managed provider supply
 

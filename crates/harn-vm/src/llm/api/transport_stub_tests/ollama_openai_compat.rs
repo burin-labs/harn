@@ -71,7 +71,8 @@ fn install_ollama_route(addr: std::net::SocketAddr, adapter: crate::llm_config::
         providers.providers.get_mut("ollama").unwrap().merge_from(
             &crate::llm_config::ProviderDef {
                 chat_endpoint: "/api/chat".to_string(),
-                chat_api_adapter: Some(adapter),
+                // A legacy endpoint-only override must reset the compat adapter.
+                chat_api_adapter: None,
                 ..Default::default()
             },
         );
@@ -315,7 +316,18 @@ fn native_ollama_override_preserves_ndjson_text_and_usage() {
     let _env = env_guard();
     let _transport = allow_stubbed_llm_transport();
     let _cleanup = Cleanup;
-    let server = spawn_ollama_stub();
+    let observed = Arc::new(Mutex::new(None));
+    let capture = observed.clone();
+    let server = spawn_llm_stub("endpoint-only Ollama override", move |stream| {
+        use std::io::Write;
+        let (headers, body) = read_http_request(stream);
+        *capture.lock().unwrap() = Some((headers, body));
+        let response = concat!(
+            "{\"message\":{\"role\":\"assistant\",\"content\":\"hello world\"},\"done\":false}\n",
+            "{\"done\":true,\"prompt_eval_count\":3,\"eval_count\":2}\n"
+        );
+        write!(stream, "HTTP/1.1 200 OK\r\ncontent-type: application/x-ndjson\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{response}", response.len()).unwrap();
+    });
     install_ollama_route(
         server.addr(),
         crate::llm_config::ChatApiAdapter::ModelDefault,
@@ -333,5 +345,17 @@ fn native_ollama_override_preserves_ndjson_text_and_usage() {
         assert_eq!(result.text, "hello world");
         assert_eq!(result.input_tokens, 3);
         assert_eq!(result.output_tokens, 2);
+        let (headers, body) = observed
+            .lock()
+            .unwrap()
+            .clone()
+            .expect("HTTP request reached server");
+        assert!(headers.starts_with("POST /api/chat HTTP/1.1\r\n"));
+        assert!(
+            body["messages"][0]["content"].is_string(),
+            "native Ollama requires string content"
+        );
+        assert!(body.get("max_tokens").is_none());
+        assert!(body.get("stream_options").is_none());
     });
 }
