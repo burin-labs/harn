@@ -376,10 +376,6 @@ async fn call_harness_llm_method_with_session_secrets(
             vm.call_capability_builtin("llm_stream", args.to_vec())
                 .await
         }
-        "with_rate_limit" => {
-            vm.call_capability_builtin("with_rate_limit", args.to_vec())
-                .await
-        }
         "stream_call" => {
             vm.call_capability_builtin("llm_stream_call", args.to_vec())
                 .await

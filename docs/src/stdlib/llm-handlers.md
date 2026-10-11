@@ -1,25 +1,16 @@
 # Composable callers and middleware
 
-Harn's `agent_loop` and `harness.llm.call` historically exposed only a flat
-options dict for retry / fallback / shadow / budget behavior. v0.8
-opens an explicit **caller seam**: `agent_loop` accepts an
-`llm_caller:` closure that owns the single `harness.llm.call(...)` invocation,
-and the `std/llm/*` modules ship composable middleware for retry,
-fallback, shadowing, prompt rewriting, logging, budgeting, caching,
-circuit breaking, ensembles (best-of-N, self-consistency, debate),
-prompt refinement, model-aware default packs, and structured-output
-safety.
+`agent_loop` accepts an `llm_caller:` closure that invokes
+`harness.llm.call(...)`. The `std/llm/*` modules compose retry, fallback,
+logging, budgets, caching, and model options around that caller.
 
-Concretely:
-
-- `llm_caller(opts?)` from `std/llm/caller` is the blessed default
-  stack — `with_retry(default_llm_caller(), opts?.retry ?? {})` with
-  typed reserved-status classification and billed-empty re-dispatch on by
-  default. Reach for it before composing retry by hand.
-- `default_llm_caller()` from `std/llm/caller` is the bottom of the
+- `llm_caller(harness, opts?)` from `std/llm/caller` combines
+  `default_llm_caller(harness.agent, harness.llm)` with
+  `with_retry(harness, next, opts?.retry ?? {})`.
+- `default_llm_caller(agent, llm)` from `std/llm/caller` is the bottom of the
   middleware stack. It mirrors `agent_loop`'s built-in invocation.
 - `with_*` wrappers in `std/llm/handlers` take a `next` caller and
-  return a new caller. Compose them left-to-right with `compose([...])`.
+  return a new caller. In `compose([...])`, the leftmost wrapper is outermost.
 - Multi-call quality strategies (best-of-N, self-consistency, debate)
   live in `std/llm/ensemble`.
 - Catalog-aware option packs (`pack_for`, `pack_chat`, `pack_agent`,
@@ -31,6 +22,39 @@ Concretely:
 - Catalog accessors (`model_info`, `resolved_options`, `family_of`,
   `lineage_of`, `complementary_reviewer`, `has_capability`) live in
   `std/llm/catalog`.
+
+## Provider admission and retries
+
+Provider requests acquire rate-limit permits automatically. Configure
+`harness.llm.rate_limit`, provider/model `rate_limits`, or the
+`HARN_RATE_LIMIT_<PROVIDER>_*` environment variables to bound throughput
+and concurrency. Each retry acquires a permit for its own provider request.
+
+`harness.llm.with_rate_limit` and the native `with_rate_limit` alias were
+removed. Call `harness.llm.call` directly when you only need admission.
+Use `llm_caller` when you also need transient retries:
+
+```harn,ignore
+import { llm_caller } from "std/llm/caller"
+
+fn main(harness: Harness) {
+  const caller = llm_caller(harness, {
+    retry: {max_attempts: 6, base_ms: 500},
+  })
+  const result = caller({prompt: "Say hello", opts: {provider: "openai"}})
+  if result.ok {
+    harness.stdio.println(result.value.text)
+  } else {
+    throw result.error
+  }
+}
+```
+
+The former `max_retries: K` becomes `max_attempts: K + 1`;
+`backoff_ms` becomes `base_ms`. The caller returns an envelope, so read
+`result.value` after checking `result.ok`. Retry classification and pacing
+follow `with_retry`, including `Retry-After` and full jitter by default.
+The per-tool `with_rate_limit` middleware remains in `std/llm/tool_middleware`.
 
 ## Caller contract
 
@@ -65,13 +89,10 @@ the throw → envelope translation.
 
 These bit the implementing agents and will bite users:
 
-1. **`with_retry` does not mutate `call.turn.attempt` between retries.**
-   The original `call` dict is passed through unchanged. If you need
-   per-attempt counting inside a custom caller, use an `atomic` — it stays
-   correct even when the caller runs inside `parallel`/`spawn`, where
-   concurrent branches share one captured cell (see HARN-LNT-064).
+1. `with_retry` sets `call.turn.attempt` to the current attempt, starting at 1.
+   The original request remains unchanged.
 2. **`compose` takes a single list, not varargs.**
-   `compose([with_logging({}), with_retry({})])(base)`, not
+   `compose([with_logging(harness, {}), with_retry(harness, {})])(base)`, not
    `compose(a, b, c)(base)`.
 3. **`text: "DONE"` is a protocol-stripping marker** in synthetic test
    callers. The runtime strips it from `visible_text`. Use `"all-ok"`
@@ -94,38 +115,36 @@ These bit the implementing agents and will bite users:
 
 ## `std/llm/handlers` — composable middleware
 
-Higher-order functions returning a caller. Each `(next, opts)`
-middleware (`with_retry`, `with_logging`, `with_budget`,
-`with_circuit_breaker`, `with_repair`, `with_coerce`, `with_timeout`)
-supports two interchangeable call shapes:
+Retry, logging, budget, circuit-breaker, repair, and timeout middleware
+take a harness and support two call shapes:
 
 ```harn,ignore
-with_retry(next, opts)   // direct: returns a caller
+with_retry(harness, next, opts)   // direct: returns a caller
 // curried: returns fn(next) -> caller, drops into compose
-with_retry(opts)
+with_retry(harness, opts)
 ```
 
-Compose with `compose([with_logging({...}), with_retry({...})])(base)`
-or wrap explicitly with `with_retry(default_llm_caller(), {...})`.
-Telemetry goes via `agent_emit_event` when `call.turn.session_id` is
+Compose with `compose([with_logging(harness, {...}), with_retry(harness, {...})])(base)`
+or use `llm_caller(harness, {retry: {...}})` for the default retry stack.
+Telemetry goes via `harness.agent.emit_event` when `call.turn.session_id` is
 non-empty.
 
 | Function | Signature | Description |
 |---|---|---|
-| `llm_caller(opts?)` | `(dict?) -> caller` | (From `std/llm/caller`.) Blessed default stack: `with_retry(default_llm_caller(), opts?.retry ?? {})`. Typed reserved-status classification (no string sniffing) and billed-empty re-dispatch on by default. `opts.retry` tunes the retry layer; compose `with_cache` / `with_budget` / `with_logging` around it for more. |
-| `default_llm_caller()` | `() -> caller` | (From `std/llm/caller`.) Bottom of the stack; mirrors `agent_loop`'s built-in `__default_invoke_llm`. Returns `{ok: true, value}` on success; failures carry the typed reserved status projected from the thrown error (`rate_limited`, `timeout`, `network`, `provider_5xx`, `context_window_exceeded`, `auth`, `policy_blocked`, `budget_exhausted`, `transient`, `provider_error`, or `exception`). Never throws. |
-| `with_retry(next, opts?)` | `(caller, dict?) -> caller` | Bounded retry. Defaults: `max_attempts: 3, base_ms: 250, max_ms: 8000, backoff: "exponential", jitter: "full", honor_retry_after: true`. Honors `error.retry_after_ms` and case-insensitive `Retry-After`. Default predicate retries `transient/rate_limited/timeout/exception/network/provider_5xx/stream_interrupt`; never retries `schema_validation/auth/budget_exhausted/context_window_exceeded/policy_blocked/provider_error/caller_aborted/caller_skipped/circuit_open`. Returns the last envelope plus `retries_attempted: N`. Never throws. |
-| `with_fallback(callers)` | `(list<caller>) -> caller` | Try callers in order; advance on `{ok: false}`. On success: result + `{fallback_index, fallback_total}`. Emits `llm_fallback_attempt` per attempt. |
-| `with_shadow(primary, shadow, opts?)` | `(caller, caller, dict?) -> caller` | Run both via `parallel each`; return primary. `sampler(call) -> bool`, `on_diff(p, s) -> nil`, `diff_when ∈ {"any","ok_only"}`. Emits `llm_shadow_diff` when text differs. |
+| `llm_caller(harness, opts?)` | `(Harness, dict?) -> caller` | From `std/llm/caller`. Combines the default caller with typed retries; `opts.retry` configures `with_retry`. |
+| `default_llm_caller(agent, llm)` | `(HarnessAgent, HarnessLlm) -> caller` | From `std/llm/caller`. Makes one logical LLM call and returns `{ok: true, value}` or a classified failure envelope. Never throws. |
+| `with_retry(harness, next, opts?)` | `(Harness, caller, dict?) -> caller` | Bounded retry. Defaults: `max_attempts: 3, base_ms: 250, max_ms: 8000, backoff: "exponential", jitter: "full", honor_retry_after: true`. Honors `error.retry_after_ms` and case-insensitive `Retry-After`. Default predicate retries `transient/rate_limited/timeout/exception/network/provider_5xx/stream_interrupt`; never retries `schema_validation/auth/budget_exhausted/context_window_exceeded/policy_blocked/provider_error/caller_aborted/caller_skipped/circuit_open`. Returns the last envelope plus `retries_attempted: N`. Never throws. |
+| `with_fallback(agent, callers)` | `(HarnessAgent, list<caller>) -> caller` | Try callers in order; advance on `{ok: false}`. On success: result + `{fallback_index, fallback_total}`. Emits `llm_fallback_attempt` per attempt. |
+| `with_shadow(agent, primary, shadow, opts?)` | `(HarnessAgent, caller, caller, dict?) -> caller` | Run both via `parallel each`; return primary. `sampler(call) -> bool`, `on_diff(p, s) -> nil`, `diff_when ∈ {"any","ok_only"}`. Emits `llm_shadow_diff` when text differs. |
 | `with_prompt_rewrite(next, rewriter)` | `(caller, fn(prompt, system, opts) -> {prompt?, system?, opts?}) -> caller` | Rewrite the call before delegating; missing keys fall back to original. Used by `refine_caller`. |
-| `with_logging(next, opts?)` | `(caller, dict?) -> caller` | Structured `llm_call_log` event per call (`latency_ms`, `model`, `provider`, `status`, `iteration`, `attempt`). `level ∈ {"debug","info","warn"}`. `include_prompt: false` by default (PII-safe). Optional `sink(record) -> nil`. |
-| `with_budget(next, opts?)` | `(caller, dict?) -> caller` | Per-instance accumulator for `max_total_tokens` / `max_input_tokens` / `max_output_tokens` / `max_calls`. Counters are `atomic` so they survive Harn's by-value closure capture. `on_exceed ∈ {"throw","short_circuit"}` (default `"short_circuit"` → `{ok: false, status: "budget_exhausted"}`). Cost accounting is silently skipped when `pricing_per_1k_for(...)` is unavailable. |
-| `with_cache(next, opts?)` | `(caller, dict?) -> caller` | Response memoization backed by `std/cache`. Defaults to sqlite namespace `llm.with_cache`, TTL 10 minutes, LRU size 256, and skips calls with `opts.tools` unless `skip_when` overrides that policy. Also supports the direct `with_cache(prompt, system?, options?)` convenience form. |
-| `with_circuit_breaker(next, opts?)` | `(caller, dict?) -> caller` | Thin wrapper over `std/async` circuit primitives. Defaults derive the circuit name from provider/model; pass `opts.name` to share one circuit across calls. Throws the standardized `circuit_open` error when open. |
-| `with_repair(next, opts?)` | `(caller, dict?) -> caller` | One-shot repair pass on `schema_validation` failures. Appends a corrective nudge (deterministic by default; override via `opts.strategy: string \| closure`) and re-asks `next` once with `max_tokens: 600` and `temperature: 0.0`. Tags the second envelope `repair_attempted: true`. Other statuses pass through unchanged. |
+| `with_logging(harness, next, opts?)` | `(Harness, caller, dict?) -> caller` | Structured `llm_call_log` event per call (`latency_ms`, `model`, `provider`, `status`, `iteration`, `attempt`). `level ∈ {"debug","info","warn"}`. Prompts are omitted by default (`include_prompt: false`). Optional `sink(record) -> nil`. |
+| `with_budget(harness, next, opts?)` | `(Harness, caller, dict?) -> caller` | Per-instance accumulator for `max_total_tokens` / `max_input_tokens` / `max_output_tokens` / `max_calls`. Counters are `atomic` so they survive Harn's by-value closure capture. `on_exceed ∈ {"throw","short_circuit"}` (default `"short_circuit"` → `{ok: false, status: "budget_exhausted"}`). Cost accounting is silently skipped when `pricing_per_1k_for(...)` is unavailable. |
+| `with_cache(harness, next, opts?)` | `(Harness, caller, dict?) -> caller` | Response memoization backed by `std/cache`. Defaults to sqlite namespace `llm.with_cache`, TTL 10 minutes, LRU size 256, and skips calls with `opts.tools` unless `skip_when` overrides that policy. Also supports the direct `with_cache(harness, prompt, system?, options?)` convenience form. |
+| `with_circuit_breaker(harness, next, opts?)` | `(Harness, caller, dict?) -> caller` | Thin wrapper over `std/async` circuit primitives. Defaults derive the circuit name from provider/model; pass `opts.name` to share one circuit across calls. Throws the standardized `circuit_open` error when open. |
+| `with_repair(harness, next, opts?)` | `(Harness, caller, dict?) -> caller` | One-shot repair pass on `schema_validation` failures. Appends a corrective nudge (deterministic by default; override via `opts.strategy: string \| closure`) and re-asks `next` once with `max_tokens: 600` and `temperature: 0.0`. Tags the second envelope `repair_attempted: true`. Other statuses pass through unchanged. |
 | `with_coerce(next, opts?)` | `(caller, dict?) -> caller` | Normalize successful envelopes for downstream consumers. Recursively lowercases keys on `value.data` (`opts.lower_keys`, default true) so callers can read fields case-insensitively without per-site `dict_get_ci` dances. Optional `opts.on_text_json: true` parses JSON-shaped `value.text` into `value.data`. Failure envelopes pass through. |
-| `with_timeout(next, opts)` | `(caller, dict\|int) -> caller` | Soft, clock-aware deadline. Forwards `opts.ms` (or `opts.seconds`) to `call.opts.timeout_ms` so providers can cancel mid-flight, then post-checks elapsed time via `harness.clock.now_ms()`. Successes that overran convert to `{ok: false, status: "timeout", error: {timeout_ms, elapsed_ms}}`; slow failures relabel to `timeout` (set `opts.relabel_failures: false` to keep the original status). Honors the unified clock — mockable in tests. |
-| `with_routing(opts)` | `(dict) -> caller` | Pre-call routing: pick a caller before the request goes out. Required `opts.default`; optional `opts.routes: list of {when: closure(call) -> bool, caller, name?}`. First matching route wins; emits `llm_routing_decision` so receipts can audit cheap-vs-frontier escalation per call. Differs from `with_fallback`, which is post-failure. |
+| `with_timeout(harness, next, opts)` | `(Harness, caller, dict\|int) -> caller` | Soft, clock-aware deadline. Forwards `opts.ms` (or `opts.seconds`) to `call.opts.timeout_ms` so providers can cancel mid-flight, then post-checks elapsed time via `harness.clock.now_ms()`. Successes that overran convert to `{ok: false, status: "timeout", error: {timeout_ms, elapsed_ms}}`; slow failures relabel to `timeout` (set `opts.relabel_failures: false` to keep the original status). The clock is mockable in tests. |
+| `with_routing(agent, opts)` | `(HarnessAgent, dict) -> caller` | Pre-call routing: pick a caller before the request goes out. Required `opts.default`; optional `opts.routes: list of {when: closure(call) -> bool, caller, name?}`. First matching route wins; emits `llm_routing_decision` so receipts can audit cheap-vs-frontier escalation per call. Differs from `with_fallback`, which is post-failure. |
 | `compose(wrappers)` | `(list<fn(caller) -> caller>) -> fn(caller) -> caller` | Right-to-left application: `compose([a, b, c])(base) == a(b(c(base)))`. Equivalently, the leftmost wrapper is the outermost. |
 
 ### Minimal example
@@ -135,9 +154,9 @@ import {default_llm_caller} from "std/llm/caller"
 import {with_retry, with_logging, compose} from "std/llm/handlers"
 
 const caller = compose([
-  with_logging({level: "info"}),
-  with_retry({max_attempts: 4, backoff: "exponential"}),
-])(default_llm_caller())
+  with_logging(harness, {level: "info"}),
+  with_retry(harness, {max_attempts: 4, backoff: "exponential"}),
+])(default_llm_caller(harness.agent, harness.llm))
 
 const result = agent_loop(harness, task, system, {
   loop_until_done: true,
@@ -165,8 +184,12 @@ const route = agent_model_options({
     reasoning_task: "agent",
   },
 })
-const middleware = [with_retry({max_attempts: 3}), with_logging({})]
-const caller = compose(middleware)(default_llm_caller())
+const middleware = [
+  with_retry(harness, {max_attempts: 3}),
+  with_logging(harness, {}),
+]
+const base = default_llm_caller(harness.agent, harness.llm)
+const caller = compose(middleware)(base)
 const result = agent_loop(
   harness, task, system,
   route.options + {loop_until_done: true, llm_caller: caller},
@@ -196,28 +219,39 @@ import {
 
 // Cheap default: a fast / inexpensive model on a tight retry budget.
 const cheap = with_circuit_breaker(
-  with_retry(default_llm_caller(), {max_attempts: 2}),
+  harness,
+  with_retry(
+    harness, default_llm_caller(harness.agent, harness.llm),
+    {max_attempts: 2},
+  ),
   {threshold: 5, reset_ms: 30000},
 )
 
 // Frontier escalation: a stronger model with longer retries + a fallback
 // to a second strong model if the first provider trips a circuit.
 const frontier = with_circuit_breaker(
-  with_fallback([
-    with_retry(default_llm_caller(), {max_attempts: 3}),
-    with_retry(default_llm_caller(), {max_attempts: 2}),
+  harness,
+  with_fallback(harness.agent, [
+    with_retry(
+      harness, default_llm_caller(harness.agent, harness.llm),
+      {max_attempts: 3},
+    ),
+    with_retry(
+      harness, default_llm_caller(harness.agent, harness.llm),
+      {max_attempts: 2},
+    ),
   ]),
   {threshold: 5, reset_ms: 30000},
 )
 
 const receipts_sink = { record ->
   // Forward to cloud receipts / IDE-host transcript / etc.
-  agent_emit_event("ops.receipts", "llm_call_log", record)
+  harness.agent.emit_event("ops.receipts", "llm_call_log", record)
 }
 
 // with_routing is a base caller (it owns the call, not a wrapper around
 // `next`); the budget + logging middleware compose over it.
-const router = with_routing({
+const router = with_routing(harness.agent, {
   default: cheap,
   routes: [
     {name: "frontier",
@@ -230,8 +264,8 @@ const router = with_routing({
 })
 
 const persona_caller = compose([
-  with_logging({level: "info", sink: receipts_sink}),
-  with_budget({max_total_tokens: 250000, max_calls: 200}),
+  with_logging(harness, {level: "info", sink: receipts_sink}),
+  with_budget(harness, {max_total_tokens: 250000, max_calls: 200}),
 ])(router)
 
 agent_loop(harness, task, system, {
@@ -323,7 +357,10 @@ direct `harness.llm.call`-style usage, callers can invoke their wrapped caller
 explicitly:
 
 ```harn,ignore
-const caller = with_retry(default_llm_caller(), {max_attempts: 3})
+const caller = with_retry(
+  harness, default_llm_caller(harness.agent, harness.llm),
+  {max_attempts: 3},
+)
 const envelope = caller({
   prompt: "hello",
   system: nil,

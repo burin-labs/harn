@@ -730,7 +730,6 @@ const LLM_RUNTIME_PRIMITIVE_BUILTINS: &[&VmBuiltinDef] = &[
     // schema.recovery
     &SCHEMA_RECOVER_BUILTIN_DEF,
     // llm.rate_limit
-    &WITH_RATE_LIMIT_BUILTIN_DEF,
     // llm.host completion + stream
     &LLM_COMPLETION_BUILTIN_DEF,
     &LLM_STREAM_BUILTIN_WRAP_DEF,
@@ -835,76 +834,6 @@ async fn schema_recover_builtin(
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
     schema_recover::schema_recover_impl(args, None).await
-}
-
-/// Run a closure behind the provider rate limiter with retryable-error backoff.
-#[harn_builtin(
-    exposure = "harness.llm.with_rate_limit",
-    effects = ["state.mutate@arg0", "llm.write@arg0"],
-    sig = "__cap_llm_with_rate_limit(provider: string, callback: closure, options?: dict) -> any",
-    aliases = ["with_rate_limit"],
-    kind = "async",
-    category = "llm.rate_limit"
-)]
-async fn with_rate_limit_builtin(
-    ctx: crate::vm::AsyncBuiltinCtx,
-    args: Vec<VmValue>,
-) -> Result<VmValue, VmError> {
-    let provider = args.first().map(|a| a.display()).unwrap_or_default();
-    if provider.is_empty() {
-        return Err(VmError::Runtime(
-            "with_rate_limit: provider name is required".to_string(),
-        ));
-    }
-    let closure = match args.get(1) {
-        Some(VmValue::Closure(c)) => c.clone(),
-        _ => {
-            return Err(VmError::Runtime(
-                "with_rate_limit: second argument must be a closure".to_string(),
-            ))
-        }
-    };
-    let opts = args.get(2).and_then(|a| a.as_dict()).cloned();
-    let max_retries = helpers::opt_int(&opts, "max_retries").unwrap_or(5).max(0) as usize;
-    let mut backoff_ms = helpers::opt_int(&opts, "backoff_ms").unwrap_or(1000).max(1) as u64;
-
-    let mut attempt: usize = 0;
-    loop {
-        let (result, output) = {
-            let _rate_limit_permit = rate_limit::acquire_permit(&provider).await?;
-            let mut child_vm = ctx.child_vm();
-            let result = child_vm.call_closure_pub(&closure, &[]).await;
-            let output = child_vm.take_output();
-            (result, output)
-        };
-        ctx.forward_output(&output);
-        match result {
-            Ok(v) => return Ok(v),
-            Err(err) => {
-                let cat = crate::value::error_to_category(&err);
-                let retryable = matches!(
-                    cat,
-                    crate::value::ErrorCategory::RateLimit
-                        | crate::value::ErrorCategory::Overloaded
-                        | crate::value::ErrorCategory::TransientNetwork
-                        | crate::value::ErrorCategory::Timeout
-                );
-                if !retryable || attempt >= max_retries {
-                    return Err(err);
-                }
-                crate::events::log_debug(
-                    "llm.with_rate_limit",
-                    &format!(
-                        "retrying after {cat:?} (attempt {}/{max_retries}) in {backoff_ms}ms",
-                        attempt + 1
-                    ),
-                );
-                crate::clock_mock::sleep(std::time::Duration::from_millis(backoff_ms)).await;
-                backoff_ms = backoff_ms.saturating_mul(2).min(30_000);
-                attempt += 1;
-            }
-        }
-    }
 }
 
 /// Execute a fill-in-the-middle LLM completion request.

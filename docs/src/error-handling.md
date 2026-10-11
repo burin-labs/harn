@@ -148,9 +148,10 @@ retry 3 {
   rather than let it escape.
 - `return` inside a retry block propagates out (not retried).
 
-For a retry that reacts to *why* a call failed, use
-[`harness.llm.with_rate_limit`](./builtins.md#llm), which backs off only on
-`rate_limit`, `overloaded`, `transient_network`, and `timeout`.
+For LLM retries that classify failures, use
+[`llm_caller(harness, opts?)`](./stdlib/llm-handlers.md#provider-admission-and-retries).
+Its retry layer uses typed errors, honors `Retry-After`, and limits total
+attempts. Each provider request acquires its own rate-limit permit automatically.
 
 ## Try-expression
 

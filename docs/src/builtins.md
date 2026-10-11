@@ -1923,7 +1923,6 @@ See [LLM calls and agent loops](llm-and-agents.md) for full documentation.
 | `harness.llm.call(prompt, system?, options?)` | prompt: string, system: string, options: dict | dict | Single LLM request. Returns `{text, model, provider, input_tokens, output_tokens, usage, prose, visible_text, blocks, transcript?, tool_calls?, stop_reason?, data?}`. Supports `budget: {max_cost_usd?, max_input_tokens?, max_output_tokens?, total_budget_usd?}` pre-flight checks and throws on transport / rate-limit / budget / schema-validation failures |
 | `harness.llm.call_safe(prompt, system?, options?)` | prompt: string, system: string, options: dict | dict | Non-throwing envelope around `harness.llm.call`. Returns `{ok: bool, response: harness.llm.call result or nil, error: {category, kind, reason, message, provider?, model?, status?, retry_after_ms?} or nil}`. `error.category` is one of the [error categories](#error-categories) |
 | `harness.llm.stream_call(prompt, system?, options?)` | prompt: string, system: string, options: dict | stream | Streaming LLM request. Returns `Stream<{delta, visible_delta, partial, role, stop_reason}>`; dropping the stream cancels the background request. Uses the same options as `harness.llm.call`; the `stream` option remains the transport toggle |
-| `harness.llm.with_rate_limit(provider, fn, options?)` | provider: string, fn: closure, options: dict | whatever `fn` returns | Acquire a permit from the provider's sliding-window rate limiter, invoke `fn`, and retry with exponential backoff on retryable errors (`rate_limit`, `overloaded`, `transient_network`, `timeout`). Options: `max_retries` (default 5), `backoff_ms` (default 1000, capped at 30s after doubling) |
 | `harness.llm.completion(prefix, suffix?, system?, options?)` | prefix: string, suffix: string, system: string, options: dict | dict | Text completion / fill-in-the-middle request. Returns the same result shape as `harness.llm.call` |
 | `agent_loop(harness, prompt, system?, spec?)` | harness: `Harness`, prompt: string, system: string, spec: `AgentSpec` | `AgentResult` | Run the agent plane through typed setup, iteration, suspension, and finalization stages. `result.terminal.kind` is the stable completion decision, while `result.terminal.run_record_status` is its canonical persistence projection; transport status and stop-reason fields remain diagnostic data. Supports bounded execution, tools, cooperative suspension, daemon/idling behavior, context assembly, scratchpad management, progress events, and structured provider/tool failures. |
 | `agent_progress(agent, input)` | agent: `HarnessAgent`, input: dict | nil | Emit a `progress_reported` agent event for the current session. `input` requires either `message: string` or `entries: [{content, status, priority?}]`; `replace` defaults to `true`, and `metadata` defaults to `{}` |
@@ -2036,7 +2035,7 @@ harness.llm.mock_enqueue({
 // Error injection for testing resilient code paths. The mock
 // surfaces as a real `VmError::CategorizedError`, so `error_category`,
 // `try { ... } catch`, `harness.llm.call_safe`, and
-// `with_rate_limit` all see it the same way they would a live
+// `std/llm/caller::llm_caller` all see it the same way they would a live
 // provider failure.
 harness.llm.mock_enqueue({
   error: {category: "rate_limit", message: "429 Too Many Requests"}

@@ -8,6 +8,59 @@ pub struct PureCase {
 
 pub const PURE_CASES: &[PureCase] = &[
     PureCase {
+        id: "truthiness-empty-bytes",
+        source: r"
+            fn truth(input: bytes) {
+              if input { return [!input, input ? true : false] }
+              return [!input, false]
+            }
+        ",
+        entry: "truth",
+        input_json: r#"{"$bytes":[]}"#,
+        expected_json: "[true,false]",
+    },
+    PureCase {
+        id: "truthiness-nonempty-bytes-with-zero-byte",
+        source: r"
+            fn truth(input: bytes) {
+              if input { return [!input, input ? true : false] }
+              return [!input, false]
+            }
+        ",
+        entry: "truth",
+        input_json: r#"{"$bytes":[0]}"#,
+        expected_json: "[false,true]",
+    },
+    PureCase {
+        id: "truthiness-nan-folding-and-runtime-branches",
+        source: r"
+            fn truth(input: float) {
+              let nan = input / input
+              let branch = false
+              if nan { branch = true }
+              return [!(0.0 / 0.0), !nan, (0.0 / 0.0) ? true : false,
+                nan ? true : false, (0.0 / 0.0) && true, nan && true,
+                (0.0 / 0.0) || false, nan || false, branch, !input]
+            }
+        ",
+        entry: "truth",
+        input_json: "0.0",
+        expected_json: "[false,false,true,true,true,true,true,true,true,true]",
+    },
+    PureCase {
+        id: "truthiness-duration-and-empty-values",
+        source: r"
+            fn truth(input: {zero: int, one: int, text: string, items: list<int>, record: dict<string, int>}) {
+              return [!0ms, !1ms, !input.zero, !input.one, !input.text, !input.items, !input.record,
+                !nil, !false, !true, ![], !({}), !0.0, !1.0]
+            }
+        ",
+        entry: "truth",
+        input_json: r#"{"zero":0,"one":1,"text":"","items":[],"record":{}}"#,
+        expected_json:
+            "[true,false,true,false,true,true,true,true,true,false,true,true,true,false]",
+    },
+    PureCase {
         id: "runtime-string-repetition",
         source: r#"
             fn repeat(input: {text: string, count: int}) {

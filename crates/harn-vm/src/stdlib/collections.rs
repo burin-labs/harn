@@ -1,9 +1,9 @@
-use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use crate::stdlib::args::{ArgError, Args, ErrorKind, Expected};
 use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
-use crate::value::{value_structural_hash_key, DictRetain, VmError, VmValue};
+use crate::value::{dedup_values, DictRetain, VmError, VmSet, VmValue};
 use crate::vm::{AsyncBuiltinCtx, Vm};
 
 /// A dict argument, with `nil` read as the empty dict — the collection
@@ -193,11 +193,11 @@ async fn dedup_by_impl(ctx: AsyncBuiltinCtx, args: Vec<VmValue>) -> Result<VmVal
     let items = list_arg(&args, "dedup_by")?;
     let callable = required_callable(&args, 1, "dedup_by")?;
     let mut vm = current_async_vm(&ctx, "dedup_by");
-    let mut seen = HashSet::new();
+    let mut seen = VmSet::with_capacity(items.len());
     let mut out = Vec::new();
     for item in items.iter() {
         let key = vm.call_callable_one(callable, item).await?;
-        if seen.insert(value_structural_hash_key(&key)) {
+        if seen.insert(key) {
             out.push(item.clone());
         }
     }
@@ -535,7 +535,7 @@ pub(super) fn deep_merge_value(a: &VmValue, b: &VmValue) -> Result<VmValue, VmEr
 
 /// Returns a list with duplicate entries removed while preserving the
 /// first-seen order. Structural equality is used (matching `==` in
-/// scripts) via `value_structural_hash_key`, so two structurally equal
+/// scripts) via the set owner, so two structurally equal
 /// dicts collapse to a single entry.
 fn list_unique(value: &VmValue) -> Result<VmValue, VmError> {
     let items: &[VmValue] = match value {
@@ -549,14 +549,7 @@ fn list_unique(value: &VmValue) -> Result<VmValue, VmError> {
             )));
         }
     };
-    let mut seen: HashSet<String> = HashSet::with_capacity(items.len());
-    let mut out: Vec<VmValue> = Vec::with_capacity(items.len());
-    for item in items.iter() {
-        let key = value_structural_hash_key(item);
-        if seen.insert(key) {
-            out.push(item.clone());
-        }
-    }
+    let out = dedup_values(items);
     Ok(VmValue::List(std::sync::Arc::new(out)))
 }
 

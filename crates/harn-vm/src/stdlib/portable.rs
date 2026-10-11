@@ -120,7 +120,7 @@ fn execution_value(execution: Execution) -> VmValue {
     match execution {
         Execution::Completed { value } => VmValue::dict([
             ("status", VmValue::String("completed".into())),
-            ("value", data_vm_value(value)),
+            ("value", VmValue::from(value)),
         ]),
         Execution::Suspended { request, snapshot } => VmValue::dict([
             ("status", VmValue::String("suspended".into())),
@@ -139,7 +139,7 @@ fn request_value(request: CapabilityRequest) -> VmValue {
         ("id", VmValue::String(request.id.into())),
         ("capability", VmValue::String(request.capability.into())),
         ("operation", VmValue::String(request.operation.into())),
-        ("arguments", data_vm_value(request.arguments)),
+        ("arguments", VmValue::from(request.arguments)),
         (
             "expected",
             VmValue::String(value_shape_name(request.expected).into()),
@@ -180,25 +180,6 @@ fn diagnostic_value(diagnostic: Diagnostic) -> VmValue {
                 .unwrap_or(VmValue::Nil),
         ),
     ])
-}
-
-fn data_vm_value(value: DataValue) -> VmValue {
-    match value {
-        DataValue::Nil => VmValue::Nil,
-        DataValue::Bool(value) => VmValue::Bool(value),
-        DataValue::Int(value) => VmValue::Int(value),
-        DataValue::Float(value) => VmValue::Float(value),
-        DataValue::String(value) => VmValue::String(value.into()),
-        DataValue::Bytes(value) => VmValue::Bytes(Arc::new(value)),
-        DataValue::List(values) => {
-            VmValue::List(Arc::new(values.into_iter().map(data_vm_value).collect()))
-        }
-        DataValue::Record(entries) => VmValue::dict(
-            entries
-                .into_iter()
-                .map(|(key, value)| (key, data_vm_value(value))),
-        ),
-    }
 }
 
 fn data_value(value: Option<&VmValue>, builtin: &str, name: &str) -> Result<DataValue, VmError> {

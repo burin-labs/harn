@@ -541,41 +541,21 @@ impl VmValue {
     }
 
     pub fn is_truthy(&self) -> bool {
+        use harn_kernel::value::Truthiness as T;
         match self {
-            VmValue::Bool(b) => *b,
-            VmValue::Nil => false,
-            VmValue::Int(n) => *n != 0,
-            VmValue::Float(n) => *n != 0.0,
-            VmValue::Decimal(d) => **d != rust_decimal::Decimal::ZERO,
-            VmValue::String(s) => !s.is_empty(),
-            VmValue::Bytes(bytes) => !bytes.is_empty(),
-            VmValue::List(l) => !l.is_empty(),
-            VmValue::Dict(d) => !d.is_empty(),
-            VmValue::Closure(_) => true,
-            VmValue::BuiltinRef(_) => true,
-            VmValue::BuiltinRefId(_) => true,
-            VmValue::Duration(ms) => *ms != 0,
-            VmValue::EnumVariant(_) => true,
-            VmValue::StructInstance(_) => true,
-            VmValue::TaskHandle(_) => true,
-            VmValue::Channel(_) => true,
-            VmValue::Atomic(_) => true,
-            VmValue::Rng(_) => true,
-            VmValue::SyncPermit(_) => true,
-            VmValue::Resource(_) => true,
-            VmValue::ResourceGuard(_) => true,
-            VmValue::McpClient(_) => true,
-            VmValue::VerdictReceipt(_) => true,
-            VmValue::Set(s) => !s.is_empty(),
-            VmValue::Generator(_) => true,
-            VmValue::Stream(_) => true,
-            // Match Python semantics: range objects are always truthy,
-            // even the empty range (analogous to generators / iterators).
-            VmValue::Range(_) => true,
-            VmValue::Iter(_) => true,
-            VmValue::Pair(_) => true,
-            VmValue::Harness(_) => true,
+            VmValue::Bool(b) => T::Bool(*b),
+            VmValue::Nil => T::Nil,
+            VmValue::Int(n) | VmValue::Duration(n) => T::Int(*n),
+            VmValue::Float(n) => T::Float(*n),
+            VmValue::Decimal(d) => T::ExactZero(**d == rust_decimal::Decimal::ZERO),
+            VmValue::String(s) => T::Length(s.len()),
+            VmValue::Bytes(bytes) => T::Length(bytes.len()),
+            VmValue::List(l) => T::Length(l.len()),
+            VmValue::Dict(d) => T::Length(d.len()),
+            VmValue::Set(s) => T::Length(s.len()),
+            _ => T::Opaque,
         }
+        .is_truthy()
     }
 
     /// Every tag [`VmValue::type_name`] can return, excluding harness-object

@@ -101,10 +101,13 @@ fn native_vm_rejects_every_numeric_modulo_zero() {
 #[test]
 fn native_vm_matches_portable_conformance_corpus() {
     for case in PURE_CASES {
-        let input_literal = serde_json::to_string(case.input_json).expect("input JSON string");
+        let input = harn_kernel::DataValue::from_json(
+            serde_json::from_str(case.input_json).expect("input JSON"),
+        )
+        .expect("portable input");
         let source = format!(
-            "{}\npipeline default() {{ return {}(json_parse({})) }}",
-            case.source, case.entry, input_literal
+            "{}\npipeline default() {{ return {}(__portable_conformance_input) }}",
+            case.source, case.entry
         );
         let chunk = harn_vm::compile_source(&source).unwrap_or_else(|error| {
             panic!("{} did not compile in the native VM: {error}", case.id)
@@ -119,6 +122,10 @@ fn native_vm_matches_portable_conformance_corpus() {
                 .run_until(async move {
                     let mut vm = harn_vm::Vm::new();
                     harn_vm::register_vm_stdlib(&mut vm);
+                    vm.set_global(
+                        "__portable_conformance_input",
+                        harn_vm::VmValue::from(input),
+                    );
                     let value = vm.execute(&chunk).await.expect("native VM execution");
                     harn_vm::llm::vm_value_to_json(&value)
                 })

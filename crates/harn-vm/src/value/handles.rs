@@ -55,6 +55,10 @@ impl VmResourceHandle {
     pub fn ptr_eq(&self, other: &Self) -> bool {
         Arc::ptr_eq(&self.payload, &other.payload)
     }
+
+    pub(super) fn identity_ptr(&self) -> *const () {
+        Arc::as_ptr(&self.payload).cast::<()>()
+    }
 }
 
 impl std::fmt::Debug for VmResourceHandle {

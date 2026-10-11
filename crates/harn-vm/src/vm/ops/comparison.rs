@@ -35,7 +35,7 @@ impl super::super::Vm {
                 let key = item.display();
                 map.contains_key(key.as_str())
             }
-            VmValue::Set(items) => items.iter().any(|v| values_equal(v, &item)),
+            VmValue::Set(items) => items.contains(&item),
             VmValue::Range(r) => match &item {
                 VmValue::Int(n) => r.contains(*n),
                 _ => false,

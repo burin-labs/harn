@@ -6,8 +6,6 @@
     "AgentSpec._input_guardrail": "AgentSpec.input_guardrail",
     "AgentSpec._pre_turn_scope_classifier": "AgentSpec.pre_turn_scope_classifier",
     "AgentSpec._done_sentinel": "AgentSpec.done_sentinel",
-    "AgentSpec.max_retries": "RateLimitOptions.max_retries",
-    "AgentSpec.backoff_ms": "RateLimitOptions.backoff_ms",
     "AgentSpec._structural_validator": "AgentSpec.structural_validator",
     "AgentSpec.agent_await_resumption_enabled": "AgentLifecycleToolsOptions.agent_await_resumption_enabled",
     "AgentSpec._tool_caller": "AgentSpec.tool_caller",

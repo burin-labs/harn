@@ -1002,7 +1002,6 @@
     "with_command_policy",
     "with_dynamic_permissions",
     "with_execution_policy",
-    "with_rate_limit",
     "word_wrap",
     "workflow.continue_as_new",
     "workflow.pause",

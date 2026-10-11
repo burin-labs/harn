@@ -1169,14 +1169,6 @@ pub(crate) fn observe_network_outcome_for_llm_call(
     }
 }
 
-/// Wait until the provider rate limit allows an opaque request, then record it.
-/// Returns immediately if no limit is configured or the window has capacity.
-pub(crate) async fn acquire_permit(
-    provider: &str,
-) -> Result<RateLimitPermit, crate::value::VmError> {
-    acquire_permit_for(provider, "", RateLimitRequest::default(), None, None, false).await
-}
-
 /// Wait until all provider/model buckets allow this LLM request, then record it.
 /// The returned permit must be held until the provider call finishes so
 /// concurrency limits cover in-flight calls rather than just launch rate.

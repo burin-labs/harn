@@ -61,7 +61,7 @@ impl super::super::Vm {
             }
             (MethodCacheTarget::SetContains, VmValue::Set(items)) => {
                 let needle = args.first().unwrap_or(&VmValue::Nil);
-                Some(VmValue::Bool(items.iter().any(|v| values_equal(v, needle))))
+                Some(VmValue::Bool(items.contains(needle)))
             }
             _ => None,
         }

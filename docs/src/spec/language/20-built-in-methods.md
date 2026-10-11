@@ -64,7 +64,10 @@ cursor-style source scanners.
 
 Sets are created with the `set()` builtin and are immutable -- mutation
 operations return a new set. Sets deduplicate values using structural
-equality.
+equality, retaining the first occurrence. Membership uses the same equality
+as `==`, including mixed numeric coercion; closures and NaN are never equal.
+Two sets are equal when their members can be paired one-to-one with equal
+values, regardless of insertion order.
 
 | Function | Signature | Returns |
 |---|---|---|

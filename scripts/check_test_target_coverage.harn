@@ -86,6 +86,12 @@ const UNLINTED_HARN_ROOTS: list<UnlintedRoot> = [
       "Reviewer closures embedded by Rust permission-path tests, which execute the fixture and assert the actual permission metadata and host decision.",
   },
   {
+    root: "crates/harn-vm/src/llm/rate_limit/fixtures",
+    kind: "fixture_input",
+    reason:
+      "Executable Harn inputs embedded by Rust provider-admission tests, which assert provider reachability and exact permit accounting.",
+  },
+  {
     root: "crates/harn-cli/assets/evals",
     kind: "unlinted_backlog",
     reason:

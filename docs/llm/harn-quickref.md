@@ -4600,14 +4600,25 @@ if !r.ok {
 }
 const data = r.data
 
-// Scoped permit acquisition + backoff for flaky providers. Retries on
-// rate_limit / overloaded / transient_network / timeout categories with
-// exponential backoff (capped at 30s). Composes with
-// HARN_RATE_LIMIT_<PROVIDER>_RPM/_TPM and provider/model catalog
-// `rate_limits` fields.
-const r = harness.llm.with_rate_limit("openai", fn() {
-  harness.llm.call(user_prompt, nil, {provider: "openai"})
-}, {max_retries: 5, backoff_ms: 500})
+```
+
+Provider requests acquire rate-limit permits automatically. For bounded
+transient retries, use the canonical caller:
+
+```harn,ignore
+import { llm_caller } from "std/llm/caller"
+
+fn main(harness: Harness) {
+  const caller = llm_caller(harness, {
+    retry: {max_attempts: 6, base_ms: 500},
+  })
+  const result = caller({prompt: "Say hello", opts: {provider: "openai"}})
+  if result.ok {
+    harness.stdio.println(result.value.text)
+  } else {
+    throw result.error
+  }
+}
 ```
 
 `error.category` (both on the thrown dict and on
@@ -5146,9 +5157,8 @@ Per-provider and per-model rate limiting is built in:
 - Or richer env overrides such as `HARN_RATE_LIMIT_MYPROVIDER_RPM=1000`
   and `HARN_RATE_LIMIT_MYPROVIDER_TPM=1000000`.
 - Or `harness.llm.rate_limit("provider", {rpm: 600, tpm: 1000000})` at runtime.
-- Wrap individual call sites in
-  `harness.llm.with_rate_limit(provider, fn, opts?)`
-  to acquire a permit and auto-retry retryable failures.
+- Each provider request acquires a permit automatically, including retries
+  through `llm_caller(harness, {retry: ...})` from `std/llm/caller`.
 
 RPM/TPM shape sustained throughput; route `concurrency` and
 `max_concurrent` cap simultaneous in-flight work. RPM/TPM buckets are

@@ -856,8 +856,8 @@ fn hex_decode_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
         .map_err(VmError::Runtime)
 }
 
-// Stable FNV-1a over the canonical display form so logically-equal values
-// hash identically. For bucketing/indexing only — use sha256 for integrity.
+// FNV-1a over the established structural fingerprint, retained for recorded
+// replay and experiment identities. Collections use equality-confirmed buckets.
 #[harn_builtin(
     exposure = "pure",
     effects = [],
