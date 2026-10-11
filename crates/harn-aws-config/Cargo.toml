@@ -78,7 +78,6 @@ default = [
     "sso",
 ]
 default-https-client = ["aws-smithy-runtime/default-https-client"]
-legacy-client = ["aws-smithy-runtime/tls-rustls"]
 rt-tokio = [
     "aws-smithy-async/rt-tokio",
     "aws-smithy-runtime/rt-tokio",
