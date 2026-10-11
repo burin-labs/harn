@@ -9,7 +9,45 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
-## v0.10.164
+## Unreleased
+
+### Breaking
+
+- Publication evidence distinguishes source-linked harness bookkeeping from assistant messages needing model-dispatch
+  metadata. `AssistantPublicationRecord` Rust literals now require `origin`, and `SessionPublicationEvidence` literals
+  require `bookkeeping_count`. The reader retains every assistant row and complete event coverage; missing metadata on
+  an unmarked assistant remains unknown.
+
+  Migration: Add `origin: AssistantPublicationOrigin::UnmarkedAssistant` to existing assistant record literals and
+  `bookkeeping_count: 0` to existing evidence literals. Readers should use `origin` and `bookkeeping_count` to distinguish
+  harness bookkeeping, while retaining unknown metadata diagnostics for unmarked assistants.
+
+### Changed
+
+- A command-running tool call whose declared path is under a `read` external root is now admitted when the active
+  `os_hardened` sandbox measurably keeps that path read-only for the child. The answer is read from the rules the
+  macOS and Linux backends actually install. Anything unmeasured, Windows, and `unrestricted` still refuse.
+
+### Fixed
+
+- Remove the inline-test grandfather table from the test-pattern gate. Keep runtime code after sibling test-module
+  declarations in the runtime scan, synchronize monitor wakeups directly, and replace interrupt-test shell processes
+  with Rust probes that report readiness before interruption.
+- A tool call stopped after its handler finished a workspace write now reports
+  `mutationStatus: applied` with the written paths, for both a cancel of that
+  one call and a loop exit that abandons it. The runtime records each completed
+  write against the call that made it. A stopped call with no recorded write
+  still reports `unknown`.
+- A missing dev-setup rustc wrapper no longer breaks every Cargo command. The Cargo entry points
+  rebuild it in place, or name `make setup` when the configured wrapper came from an older source.
+- User tests now initialize project hooks only when their events fire, matching
+  normal execution and avoiding repeated loading of unrelated project modules.
+  Reached hooks still run with isolated per-case state and fail closed on errors.
+  Test suites retain prepared bytecode for their module graph using the same
+  bounded graph cache as hosted execution, avoiding repeated hydration when a
+  suite imports more modules than an ordinary VM's small cache can hold.
+
+## v0.10.164 (never published)
 
 ### Breaking
 
