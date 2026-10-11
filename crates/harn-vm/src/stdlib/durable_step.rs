@@ -503,6 +503,21 @@ mod tests {
     }
 
     #[test]
+    fn replay_hashes_preserve_legacy_mixed_numeric_set_fingerprints() {
+        let integers = VmValue::set([VmValue::Int(9_007_199_254_740_993)]);
+        let floats = VmValue::set([VmValue::Float(9_007_199_254_740_992.0)]);
+        assert!(crate::value::values_equal(&integers, &floats));
+        assert_eq!(
+            input_hash(&integers),
+            "sha256:e6d5bfa77829658a4c1a204f90b6debecd7c893fe502439d7f9bbad5646bf446"
+        );
+        assert_eq!(
+            input_hash(&floats),
+            "sha256:5463f5a066233fd615208517046fe1247644e9d9886bb85ae6e04cb1c20af8e9"
+        );
+    }
+
+    #[test]
     fn sequences_are_per_namespace_and_key() {
         reset_durable_step_state();
         assert_eq!(next_sequence("ns", "load"), 1);

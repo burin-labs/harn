@@ -839,6 +839,12 @@ harness.stdio.log(url_decode("hello+world"))         // hello world
 | `harness.crypto.sha256(string_or_bytes)` | string_or_bytes: string or bytes | string | Harness-scoped SHA-256 hash, returned as lowercase hex. Accepts `bytes` directly without stringifying, so content-addressing scripts can hash binary payloads unambiguously |
 | `sha256_hex(string_or_bytes)` | string_or_bytes: string or bytes | string | Compatibility alias for `harness.crypto.sha256(...)`. For string inputs the digest matches `sha256(...)` |
 | `md5(string)` | string: string | string | MD5 hash, returned as a lowercase hex-encoded string |
+| `hash_value(value)` | value: any | int | Equality-compatible value hash |
+
+`hash_value` returns the same integer for values that compare equal with `==`.
+Unequal values can share a hash; confirm equality after a hash lookup. Results
+have no stability guarantee across processes or Harn versions. For stored
+content identities, hash a documented serialized representation with `sha256`.
 
 Example:
 

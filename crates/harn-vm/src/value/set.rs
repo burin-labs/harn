@@ -1,8 +1,7 @@
 use std::collections::{hash_map::Entry, HashMap};
 use std::sync::Arc;
 
-use super::structural::value_membership_key;
-use super::{value_structural_hash_key, values_equal, VmValue};
+use super::{value_equality_hash_key, value_structural_hash_key, values_equal, VmValue};
 
 #[derive(Debug, Clone)]
 enum MemberBucket {
@@ -48,7 +47,7 @@ pub struct VmSet {
     /// the backing buffer with a `VmIter`/`IterState` without copying, and
     /// value-semantic mutation clones copy-on-write via `Arc::make_mut`.
     items: Arc<Vec<VmValue>>,
-    /// Insertion-time fingerprints retain recorded hash/replay encoding even
+    /// Insertion-time fingerprints retain recorded replay encoding even
     /// when a member's atomic contents or iterator state later change.
     fingerprints: Arc<Vec<String>>,
     buckets: HashMap<String, MemberBucket>,
@@ -69,7 +68,7 @@ impl VmSet {
 
     /// Insert `value`, returning `true` when no equal value was already present.
     pub fn insert(&mut self, value: VmValue) -> bool {
-        match self.buckets.entry(value_membership_key(&value)) {
+        match self.buckets.entry(value_equality_hash_key(&value)) {
             Entry::Occupied(mut entry) => {
                 if entry
                     .get()
@@ -93,7 +92,7 @@ impl VmSet {
     /// Indexed membership with equality confirmation inside the candidate bucket.
     pub fn contains(&self, value: &VmValue) -> bool {
         self.buckets
-            .get(&value_membership_key(value))
+            .get(&value_equality_hash_key(value))
             .is_some_and(|bucket| {
                 bucket
                     .indices()
@@ -120,7 +119,7 @@ impl VmSet {
             pending.push(root);
             let mut endpoint = None;
             'search: while let Some(left) = pending.pop() {
-                let key = value_membership_key(&self.items[left]);
+                let key = value_equality_hash_key(&self.items[left]);
                 let Some(candidates) = other.buckets.get(&key) else {
                     continue;
                 };
@@ -179,7 +178,7 @@ impl VmSet {
         self.buckets.clear();
         for (index, item) in self.items.iter().enumerate() {
             self.buckets
-                .entry(value_membership_key(item))
+                .entry(value_equality_hash_key(item))
                 .and_modify(|bucket| bucket.push(index))
                 .or_insert(MemberBucket::One(index));
         }

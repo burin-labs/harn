@@ -44,9 +44,8 @@ pub fn value_identity_key(v: &VmValue) -> String {
     }
 }
 
-/// Established structural fingerprint used by `hash_value` and replay input
-/// validation. Retain this encoding for recorded identities; collection
-/// membership uses a broader candidate projection and confirms equality.
+/// Established structural fingerprint for replay input validation and recorded
+/// identities. Preserve this encoding independently of equality-compatible keys.
 pub fn value_structural_hash_key(v: &VmValue) -> String {
     let mut out = String::new();
     write_structural_hash_key(v, &mut out, KeyPurpose::Fingerprint);
@@ -59,10 +58,11 @@ enum KeyPurpose {
     Membership,
 }
 
-/// Stable candidate bucket for structural equality, never an equality verdict.
+/// Equality-compatible key shared by collection buckets and public value hashes.
+/// Equal values have equal keys; a matching key is never an equality verdict.
 /// Separate from persisted fingerprints: lossy numeric equality and mutable
 /// atomic contents require broader buckets than their content encoding.
-pub(super) fn value_membership_key(v: &VmValue) -> String {
+pub fn value_equality_hash_key(v: &VmValue) -> String {
     let mut out = String::new();
     write_structural_hash_key(v, &mut out, KeyPurpose::Membership);
     out

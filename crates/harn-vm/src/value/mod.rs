@@ -45,7 +45,7 @@ pub use isolate::IsolateValue;
 pub use set::VmSet;
 pub(crate) use storage_json::vm_to_storage_json;
 pub use structural::{
-    compare_values, dedup_values, try_compare_values, value_identity_key,
+    compare_values, dedup_values, try_compare_values, value_equality_hash_key, value_identity_key,
     value_structural_hash_key, values_equal, values_identical,
 };
 

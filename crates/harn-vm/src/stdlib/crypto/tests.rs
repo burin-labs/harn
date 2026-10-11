@@ -1,6 +1,7 @@
 use super::es256_test_keys::{ES256_PRIVATE_KEY, ES256_PUBLIC_KEY};
 use super::*;
 use crate::vm::Vm;
+use std::sync::Arc;
 
 fn vm() -> Vm {
     let mut vm = Vm::new();
@@ -326,6 +327,70 @@ fn hash_value_nil() {
     let mut vm = vm();
     let result = call(&mut vm, "hash_value", vec![VmValue::Nil]).unwrap();
     assert!(matches!(result, VmValue::Int(_)));
+}
+
+#[test]
+fn hash_value_agrees_with_mixed_numeric_and_nested_set_equality() {
+    use crate::value::values_equal;
+    let mut vm = vm();
+    let mut hash = |value| call(&mut vm, "hash_value", vec![value]).unwrap().display();
+    let i1 = VmValue::Int(9_007_199_254_740_992);
+    let i2 = VmValue::Int(9_007_199_254_740_993);
+    let f = VmValue::Float(9_007_199_254_740_992.0);
+    assert!(!values_equal(&i1, &i2));
+    assert!(values_equal(&i2, &f));
+    assert_eq!(hash(i1.clone()), hash(i2.clone()));
+    assert_eq!(hash(i2.clone()), hash(f.clone()));
+    assert_ne!(hash(VmValue::Int(7)), hash(VmValue::Int(8)));
+    let integers = VmValue::set([i2.clone()]);
+    let floats = VmValue::set([f.clone()]);
+    assert!(values_equal(&integers, &floats));
+    assert_eq!(hash(integers), hash(floats));
+
+    let list = |values| VmValue::List(Arc::new(values));
+    let left = VmValue::set([
+        list(vec![i2.clone(), f.clone()]),
+        list(vec![i1.clone(), i1.clone()]),
+    ]);
+    let right = VmValue::set([list(vec![f, i1]), list(vec![i2.clone(), i2])]);
+    assert!(values_equal(&left, &right));
+    assert_eq!(hash(left.clone()), hash(right.clone()));
+    assert_eq!(hash(VmValue::set([left])), hash(VmValue::set([right])));
+}
+
+#[test]
+fn hash_value_uses_mutation_stable_atomic_and_resource_keys() {
+    use crate::value::{value_structural_hash_key, values_equal, VmAtomicHandle, VmResourceHandle};
+    use std::sync::atomic::{AtomicI64, Ordering};
+    let mut vm = vm();
+    let mut hash = |value| call(&mut vm, "hash_value", vec![value]).unwrap().display();
+    let contents = Arc::new(AtomicI64::new(1));
+    let atomic = VmValue::atomic(VmAtomicHandle {
+        value: contents.clone(),
+    });
+    let nested = |value| VmValue::set([VmValue::dict([("members", VmValue::set([value]))])]);
+    let resident = nested(atomic.clone());
+    let before = hash(resident.clone());
+    let fingerprint = value_structural_hash_key(&resident);
+    contents.store(2, Ordering::SeqCst);
+    let equal = nested(VmValue::atomic(VmAtomicHandle {
+        value: Arc::new(AtomicI64::new(2)),
+    }));
+    assert!(values_equal(&resident, &equal));
+    assert_eq!(hash(resident.clone()), hash(equal));
+    assert_eq!(hash(resident.clone()), before);
+    assert_eq!(value_structural_hash_key(&resident), fingerprint);
+    let different = VmValue::atomic(VmAtomicHandle {
+        value: Arc::new(AtomicI64::new(3)),
+    });
+    assert!(!values_equal(&atomic, &different));
+    assert_eq!(hash(atomic), hash(different));
+
+    let payload = Arc::new(7);
+    let first = VmValue::resource(VmResourceHandle::from_arc("first", payload.clone()));
+    let second = VmValue::resource(VmResourceHandle::from_arc("second", payload));
+    assert!(values_equal(&first, &second));
+    assert_eq!(hash(first), hash(second));
 }
 
 // RFC 4231 test case 2: key="Jefe", data="what do ya want for nothing?".

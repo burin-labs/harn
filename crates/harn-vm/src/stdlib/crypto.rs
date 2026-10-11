@@ -856,8 +856,8 @@ fn hex_decode_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
         .map_err(VmError::Runtime)
 }
 
-// FNV-1a over the established structural fingerprint, retained for recorded
-// replay and experiment identities. Collections use equality-confirmed buckets.
+// FNV-1a over the same equality-compatible projection as collection buckets.
+// Persisted replay fingerprints retain their separate legacy projection.
 #[harn_builtin(
     exposure = "pure",
     effects = [],
@@ -865,7 +865,7 @@ fn hex_decode_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
 )]
 fn hash_value_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let val = args.first().unwrap_or(&VmValue::Nil);
-    let key = crate::value::value_structural_hash_key(val);
+    let key = crate::value::value_equality_hash_key(val);
     let mut hash: u64 = 0xcbf29ce484222325;
     for byte in key.as_bytes() {
         hash ^= *byte as u64;
