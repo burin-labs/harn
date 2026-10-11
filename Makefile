@@ -763,6 +763,7 @@ test-pr-gate-scripts:
 	./scripts/tests/ci_wait_for_run_artifacts_test.sh
 	./scripts/tests/ci_reuse_workspace_crates_test.sh
 	./scripts/tests/ci_fetch_latest_main_artifact_test.sh
+	./scripts/tests/ci_find_merge_group_cli_test.sh
 	./scripts/tests/ci_write_walltime_report_test.sh
 	./scripts/tests/update_queued_pr_test.sh
 	./scripts/tests/cancel_superseded_merge_groups_test.sh

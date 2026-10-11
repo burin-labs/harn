@@ -466,7 +466,7 @@ fn persistent_compile_lane_errors(
   const caches = matching_steps(job, RUST_CACHE_ACTION)
   if len(caches) != 1 {
     errors = errors + ["ci.yml:${job_name} must configure ${RUST_CACHE_ACTION} exactly once"]
-  } else if trim(caches[0]?.if ?? "") != "" {
+  } else if !producer_build_guard_allowed(job_name, trim(caches[0]?.if ?? ""), "") {
     // Every tier this lane reaches restores the cache. A guard that lists the
     // tiers it knows makes a new tier skip in silence, which on this step
     // means a cold compile reported as a clean pass.
@@ -488,12 +488,30 @@ fn persistent_compile_lane_errors(
   // pass. The script itself distinguishes an absent sccache from an idle one
   // and leaves a host-supervised server running, so it is safe everywhere.
   const finalize = step_by_name(job?.steps ?? [], "Summarize and stop sccache")
-  if trim(finalize?.if ?? "") != "always()"
+  if !producer_build_guard_allowed(job_name, trim(finalize?.if ?? ""), "always()")
     || trim(finalize?.run ?? "")
       != "./scripts/ci/finalize_sccache.sh" {
     errors = errors + ["ci.yml:${job_name} must finalize its job-owned sccache daemon"]
   }
   return errors
+}
+
+/**
+ * A producer step may name no tier, but the CLI producer skips its build when
+ * a main push restores the bundle its merge group built for the same commit.
+ * That guard is about reuse, not tiers, so it is the one guard admitted.
+ */
+fn producer_build_guard_allowed(job_name: string, condition: string, base: string) -> bool {
+  if condition == base {
+    return true
+  }
+  if job_name != "rust-cli" {
+    return false
+  }
+  if base == "" {
+    return condition == PROVEN_CLI_BUILD_GUARD
+  }
+  return condition == base + " && " + PROVEN_CLI_BUILD_GUARD
 }
 
 /** The main-scoped coarse-cache writer stays on GitHub-hosted infrastructure. */

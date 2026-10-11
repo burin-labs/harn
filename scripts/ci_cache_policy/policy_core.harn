@@ -246,6 +246,9 @@ pub const ARTIFACT_READY_JOB = "rust-artifacts-ready"
 
 pub const SECURITY_READY_JOB = "security-tests-ready"
 
+/** The CLI producer skips its build when a main push restores its merge group's bundle. */
+pub const PROVEN_CLI_BUILD_GUARD = "steps.proven-cli.outputs.found != 'true'"
+
 // A cold merge-group producer has taken ~15.5m to publish the CLI, and a later
 // healthy producer remained queued for more than 16m before compilation. The
 // 45m poll budget covers admission plus the producer's bounded build; barrier

@@ -846,7 +846,33 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 1
+      # A main push lands the exact commit its merge group already built. The
+      # push restores that bundle, verified against this commit's manifest,
+      # instead of rebuilding it; with none to find, it builds as before.
+      - name: Find the merge group's CLI for this commit
+        id: proven-cli
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: bash scripts/ci/find_merge_group_cli.sh "$GITHUB_SHA" >> "$GITHUB_OUTPUT"
+      - name: Download the merge group's CLI
+        if: steps.proven-cli.outputs.found == 'true'
+        uses: ./.github/actions/download-artifact-with-retry
+        with:
+          name: harn-cli.tar.zst
+          path: ${{ runner.temp }}
+          skip-decompress: true
+          run-id: ${{ steps.proven-cli.outputs.run_id }}
+      - name: Verify the merge group's CLI
+        if: steps.proven-cli.outputs.found == 'true'
+        run: >-
+          ./scripts/ci/rust_artifact.sh restore-cli
+          "$RUNNER_TEMP/harn-cli.tar.zst"
+          "$RUNNER_TEMP/harn-cli-proven"
+          "$GITHUB_SHA"
       - uses: ./.github/actions/free-disk-space
+        if: steps.proven-cli.outputs.found != 'true'
       # How many rustc processes this box may start, measured here rather than
       # typed. A literal is right for the runner someone had in mind and wrong
       # for every other one: it oversubscribes a small hosted box and leaves a
@@ -854,6 +880,7 @@ jobs:
       # owner of that arithmetic and refuses by name when it cannot measure.
       - name: Measure the compile budget
         id: resource-budget
+        if: steps.proven-cli.outputs.found != 'true'
         run: bash scripts/ci/rust_resource_budget.sh
         env:
           # `runner.environment` reports a vendor VM and one of our own boxes
@@ -865,12 +892,14 @@ jobs:
           RUNNER_ENVIRONMENT: ${{ env.HARN_RUNNER_TIER == 'self-hosted' && 'self-hosted' || 'github-hosted' }}
           HARN_BUDGET_PROFILE: producer
       - name: Install mold linker
+        if: steps.proven-cli.outputs.found != 'true'
         uses: ./.github/actions/apt-install
         timeout-minutes: 5
         with:
           packages: mold
           check-command: mold
       - uses: ./.github/actions/rust-toolchain
+        if: steps.proven-cli.outputs.found != 'true'
       # Every tier gets an explicit answer, because a guard that names only
       # the tiers it knows turns a new tier into a silent skip: the first
       # self-hosted run would compile cold, report success, and say nothing.
@@ -880,6 +909,7 @@ jobs:
       # Both rungs restore only. The serialized main refresh is the sole
       # writer and admits replacement space before the provider upload.
       - uses: ./.github/actions/rust-cache
+        if: steps.proven-cli.outputs.found != 'true'
         continue-on-error: true
         with:
           shared-key: harn-ci-cli
@@ -893,8 +923,10 @@ jobs:
       # report what this job did rather than what the machine has done since
       # its cache server last started.
       - name: Record the sccache baseline
+        if: steps.proven-cli.outputs.found != 'true'
         run: ./scripts/ci/sccache_baseline.sh
       - name: Build portable Harn CLI
+        if: steps.proven-cli.outputs.found != 'true'
         timeout-minutes: ${{ env.HARN_RUNNER_TIER == 'self-hosted' && 31 || 31 }}
         env:
           CARGO_BUILD_JOBS: ${{ steps.resource-budget.outputs.build_jobs }}
@@ -917,7 +949,7 @@ jobs:
       # Name the commit this target was built from, for the next restore's
       # workspace crate reuse. Only a fully successful build may claim it.
       - name: Record the workspace cache source
-        if: success()
+        if: success() && steps.proven-cli.outputs.found != 'true'
         run: ./scripts/ci/reuse_workspace_crates.sh record
       # Report the compiler cache on every tier, named by nothing it excludes.
       # Guarding this on a single tier is what let the owned pool run for
@@ -928,7 +960,7 @@ jobs:
       # host-supervised server running instead of stopping one other jobs are
       # still using.
       - name: Summarize and stop sccache
-        if: always()
+        if: always() && steps.proven-cli.outputs.found != 'true'
         run: ./scripts/ci/finalize_sccache.sh
 
 
