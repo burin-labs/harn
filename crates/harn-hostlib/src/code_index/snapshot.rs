@@ -163,6 +163,7 @@ impl CodeIndexSnapshot {
     /// serialized copy in process memory, and concurrent writers must not
     /// share one fixed `.tmp` path.
     pub fn save(&self, workspace_root: &Path) -> std::io::Result<()> {
+        let _phase = super::timing::Phase::start("snapshot.write");
         let path = Self::path_for(workspace_root);
         let parent = path.parent().expect("snapshot path has a parent");
         std::fs::create_dir_all(parent)?;
@@ -183,6 +184,7 @@ impl CodeIndexSnapshot {
     /// exists but couldn't be parsed (caller is expected to fall back
     /// to `build_from_root`).
     pub fn load(workspace_root: &Path) -> std::io::Result<Option<Self>> {
+        let _phase = super::timing::Phase::start("snapshot.load");
         let path = Self::path_for(workspace_root);
         if !path.exists() {
             return Ok(None);
@@ -227,6 +229,7 @@ fn snapshot_matches_workspace(snap: &CodeIndexSnapshot, workspace_root: &Path) -
 impl IndexState {
     /// Capture the current state as a [`CodeIndexSnapshot`].
     pub fn snapshot(&self) -> CodeIndexSnapshot {
+        let _phase = super::timing::Phase::start("snapshot.capture");
         let files: Vec<SnapshotFile> = self
             .files
             .values()
@@ -283,12 +286,15 @@ impl IndexState {
     /// with that checkout's canonical path so a stored path string cannot
     /// redirect later persists.
     pub fn from_snapshot(snap: CodeIndexSnapshot) -> io::Result<Self> {
+        let _phase = super::timing::Phase::start("snapshot.restore");
         let root = PathBuf::from(snap.meta.workspace_root);
+        let graph_phase = super::timing::Phase::start("snapshot.restore_graph");
         let graph =
             SymbolGraph::from_snapshot(snap.symbols.ok_or_else(|| {
                 io::Error::new(io::ErrorKind::InvalidData, "missing symbol graph")
             })?)
             .map_err(|message| io::Error::new(io::ErrorKind::InvalidData, message))?;
+        drop(graph_phase);
         let mut files: HashMap<FileId, IndexedFile> = HashMap::with_capacity(snap.files.len());
         let mut path_to_id: HashMap<String, FileId> = HashMap::with_capacity(snap.files.len());
         for f in snap.files {
@@ -317,8 +323,12 @@ impl IndexState {
             path_to_id.insert(f.relative_path, f.id);
             files.insert(f.id, indexed);
         }
+        let trigrams_phase = super::timing::Phase::start("snapshot.restore_trigrams");
         let trigrams = TrigramIndex::from_postings(snap.trigrams);
+        drop(trigrams_phase);
+        let words_phase = super::timing::Phase::start("snapshot.restore_words");
         let words = WordIndex::from_postings(snap.words);
+        drop(words_phase);
         let deps = DepGraph::from_rows(snap.deps);
         let agents = AgentRegistry::from_snapshot(RegistryConfig::default(), snap.agents);
 

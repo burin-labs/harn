@@ -99,6 +99,7 @@ mod signature_syntax;
 mod snapshot;
 mod state;
 mod symbol_graph;
+mod timing;
 mod trigram;
 mod versions;
 mod walker;

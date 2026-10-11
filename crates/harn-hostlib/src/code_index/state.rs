@@ -160,6 +160,7 @@ impl IndexState {
     /// Build a fresh index over `root`. Returns the populated state plus a
     /// summary of how many files were indexed vs skipped.
     pub fn build_from_root(root: &Path) -> (Self, BuildOutcome) {
+        let _phase = super::timing::Phase::start("build.total");
         let canonical_root = canonicalize(root);
         let mut state = IndexState {
             root: canonical_root.clone(),
@@ -194,6 +195,7 @@ impl IndexState {
                     }
                 }
                 None => {
+                    super::timing::skipped(abs);
                     outcome.files_skipped += 1;
                 }
             }
@@ -246,6 +248,7 @@ impl IndexState {
     /// exists or fails the indexability/sensitivity filter, any existing
     /// entry under that path is removed and `None` is returned.
     pub fn reindex_file(&mut self, abs: &Path) -> Option<FileId> {
+        let _phase = super::timing::Phase::start("reindex.total");
         if !abs.exists() {
             self.remove_file_path(abs);
             return None;
@@ -325,6 +328,7 @@ impl IndexState {
         abs: &Path,
         known_metadata: Option<&Metadata>,
     ) -> Option<IngestedFile> {
+        let _phase = super::timing::Phase::start("ingest.total");
         if !is_indexable_file(abs) {
             return None;
         }
@@ -393,8 +397,14 @@ impl IndexState {
             symbols: Vec::new(),
             imports,
         };
-        self.trigrams.index_file(id, &content);
-        self.words.index_file(id, &content);
+        {
+            let _phase = super::timing::Phase::start("ingest.trigrams");
+            self.trigrams.index_file(id, &content);
+        }
+        {
+            let _phase = super::timing::Phase::start("ingest.words");
+            self.words.index_file(id, &content);
+        }
         self.files.insert(id, file);
         Some(IngestedFile {
             id,
@@ -510,6 +520,7 @@ impl IndexState {
     /// `outline_get` builtin doesn't have to re-parse on every call
     /// (issue #2456).
     pub(super) fn rebuild_symbol_graph_for(&mut self, id: FileId, source: &str) {
+        let _phase = super::timing::Phase::start("graph.rebuild_file");
         let Some(file) = self.files.get(&id).cloned() else {
             return;
         };
@@ -531,9 +542,12 @@ impl IndexState {
         // this, REFS depend on ingest order and an edit to a declaring
         // file drops every edge into it.
         let words = &self.words;
-        self.symbols.link_refs_into_file(id, |word| {
-            words.get(word).iter().map(|hit| hit.file).collect()
-        });
+        {
+            let _phase = super::timing::Phase::start("graph.refs_incoming");
+            self.symbols.link_refs_into_file(id, |word| {
+                words.get(word).iter().map(|hit| hit.file).collect()
+            });
+        }
         if let Some(file_mut) = self.files.get_mut(&id) {
             file_mut.symbols = outcome
                 .symbols
@@ -568,6 +582,7 @@ impl IndexState {
     /// the explicit import statements: a Swift or Go file calls into its
     /// own module's other files without importing them.
     pub(super) fn relink_dirty_calls(&mut self) {
+        let _phase = super::timing::Phase::start("graph.calls");
         let sites = self.symbols.take_dirty_call_sites();
         if sites.is_empty() {
             return;
@@ -589,6 +604,7 @@ impl IndexState {
     /// Idempotent; called once at end-of-rebuild and after every
     /// per-file reindex.
     pub(super) fn link_symbol_imports(&mut self) {
+        let _phase = super::timing::Phase::start("graph.imports");
         let mut resolved: HashMap<FileId, Vec<FileId>> = HashMap::new();
         for id in self.files.keys() {
             // Explicit import statements only. Module-wide visibility

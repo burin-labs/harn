@@ -54,6 +54,7 @@ impl IndexState {
         policy: CheckpointPolicy,
         mut checkpoint: impl FnMut(&Self),
     ) -> RefreshOutcome {
+        let _phase = super::timing::Phase::start("reconcile.total");
         let root = self.root.clone();
         let live_head = super::git_head::read_git_head(&root);
         let mut outcome = RefreshOutcome {
@@ -138,7 +139,10 @@ impl IndexState {
                         last_checkpoint = Instant::now();
                     }
                 }
-                None => outcome.files_skipped += 1,
+                None => {
+                    super::timing::skipped(abs);
+                    outcome.files_skipped += 1;
+                }
             }
         });
 

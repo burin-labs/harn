@@ -505,13 +505,18 @@ impl SymbolGraph {
         import_strings: &[String],
         visible: Option<&HashSet<FileId>>,
     ) -> RebuildOutcome {
-        self.remove_file(file_id);
+        let _phase = super::timing::Phase::start("graph.parse_and_replace");
+        {
+            let _phase = super::timing::Phase::start("graph.remove_file");
+            self.remove_file(file_id);
+        }
         let module_id = self.add_module_for_file(file_id, path, &language);
 
         // Parse once and reuse the tree for both symbol extraction and
         // the call-site sweep. Falling back to empty results when the
         // grammar is unhappy keeps one bad file from poisoning the
         // wider rebuild.
+        let parse_phase = super::timing::Phase::start("graph.parse");
         let (tree, symbols) = match ast_api::parse_with_symbols(source, language) {
             Ok((t, s)) => (Some(t), s),
             Err(err) => {
@@ -522,6 +527,7 @@ impl SymbolGraph {
                 (None, Vec::new())
             }
         };
+        drop(parse_phase);
 
         // Functions / Types / Modules + CONTAINS edges. Nested decls
         // point at a previously-emitted container symbol when one
@@ -604,6 +610,7 @@ impl SymbolGraph {
         // Harn answers from ModuleGraph (`definition_of`); a word match
         // here would collapse a local `run` with an imported `run`.
         if language.name() != "harn" {
+            let _phase = super::timing::Phase::start("graph.refs_outgoing");
             for target in self.collect_cross_file_refs(source, file_id) {
                 self.add_edge(module_id, target, EdgeKind::Refs);
             }
