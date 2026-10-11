@@ -171,25 +171,34 @@ fn main(harness: Harness) {
   let deferred = false
   let blocked = false
   let linked_blocker = false
+  let ordinary_receipt = false
   for event in captured.events {
     if event?.type == "tool_batch_disposition" {
       const receipt = event.receipt
       if receipt.tool_call_id == "deferred-member" {
         deferred = receipt.disposition == "deferred" && receipt.phase == "mutation"
+          && receipt.tool_name == "computer.edit"
       }
       if receipt.tool_call_id == "blocked-member" {
         blocked = receipt.disposition == "skipped_after_blocking_result"
           && receipt.reason == "blocked_by_prior_same_resource_failure"
+          && receipt.tool_name == "computer.edit"
+      }
+      if receipt.tool_call_id == "ordinary-observation" {
+        ordinary_receipt = receipt.disposition == "executed" && receipt.tool_name == "edit"
       }
     }
     if event?.type == "tool_call_update" && event?.tool_call_id == "blocked-member" {
       const output = event?.raw_output ?? {}
       const partial_apply = output?.partial_apply ?? {}
       linked_blocker = partial_apply?.blocking_prior_tool_call_id == "failed-member"
+        && partial_apply?.blocking_prior_tool_name == "computer.edit"
+        && partial_apply?.skipped_tool_name == "computer.edit"
     }
   }
   require deferred, "the namespaced mutation must wait for a new inference after observation"
   require blocked && linked_blocker, "a failed member must block its same-resource sibling"
+  require ordinary_receipt, "the ordinary observation receipt must retain its plain name"
   require harness.runtime.atomic_get(observations) == 1, "the ordinary observation must fire"
   require harness.runtime.atomic_get(mutations) == 2,
     "only the failed member and independent-resource member may fire"
