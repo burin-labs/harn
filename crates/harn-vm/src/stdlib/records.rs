@@ -888,8 +888,10 @@ fn run_record_eval_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, 
             .ok_or_else(|| VmError::Runtime("run_record_eval: missing run".to_string()))?,
     )?;
     let fixture: ReplayFixture = match args.get(1) {
-        Some(value) => serde_json::from_value(crate::llm::vm_value_to_json(value))
-            .map_err(|e| VmError::Runtime(format!("run_record_eval: {e}")))?,
+        Some(value) => crate::orchestration::parse_json_payload(
+            crate::llm::vm_value_to_json(value),
+            "run_record_eval fixture",
+        )?,
         None => replay_fixture_from_run(&run),
     };
     to_vm(&evaluate_run_against_fixture(&run, &fixture))
@@ -927,8 +929,10 @@ fn run_record_eval_suite_impl(args: &[VmValue], _out: &mut String) -> Result<VmV
             normalize_run_record(item)?
         };
         let fixture: ReplayFixture = match item.as_dict().and_then(|dict| dict.get("fixture")) {
-            Some(value) => serde_json::from_value(crate::llm::vm_value_to_json(value))
-                .map_err(|e| VmError::Runtime(format!("run_record_eval_suite: {e}")))?,
+            Some(value) => crate::orchestration::parse_json_payload(
+                crate::llm::vm_value_to_json(value),
+                "run_record_eval_suite fixture",
+            )?,
             None => replay_fixture_from_run(&run),
         };
         cases.push((run, fixture, source_path));
