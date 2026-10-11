@@ -1368,6 +1368,12 @@ check-harn-vm-layering:
 check-source-file-lengths:
 	@$(HARN_NO_BUILD_CMD) run scripts/check_source_file_lengths.harn
 
+# Measure actual recursive parser stack use in both build profiles.
+.PHONY: check-parser-stack
+check-parser-stack:
+	$(HARN_RUST_TEST_ENV) $(HARN_CARGO_CMD) nextest run --locked -p harn-parser --lib -E 'test(=parser::stack_tests::expression_stack_budget)' --no-tests fail --success-output immediate
+	$(HARN_RUST_TEST_ENV) $(HARN_CARGO_CMD) nextest run --locked --cargo-profile release -p harn-parser --lib -E 'test(=parser::stack_tests::expression_stack_budget)' --no-tests fail --success-output immediate
+
 # Refuse growth in the stack frames a nested descent RE-ENTERS. Frame size
 # alone is not the hazard; a command entry point is entered once. This needs a
 # clippy run of its own at a lowered threshold, so it is not part of the fast

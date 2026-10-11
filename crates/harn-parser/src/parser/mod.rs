@@ -1,10 +1,16 @@
 mod decls;
 mod error;
+mod expression_nodes;
 mod expressions;
 mod patterns;
+mod postfix;
+mod precedence;
 mod state;
 mod statements;
 mod types;
+
+#[cfg(test)]
+mod stack_tests;
 
 pub use error::ParserError;
 pub use state::{Parser, MAX_NESTING_DEPTH};

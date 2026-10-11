@@ -13,6 +13,10 @@ pub struct Parser {
     pub(super) pos: usize,
     pub(super) errors: Vec<ParserError>,
     nesting_depth: usize,
+    #[cfg(test)]
+    pub(super) stack_extent: (usize, usize),
+    #[cfg(test)]
+    pub(super) deepest_nesting: usize,
 }
 
 impl Parser {
@@ -26,6 +30,10 @@ impl Parser {
             pos: 0,
             errors: Vec::new(),
             nesting_depth: 0,
+            #[cfg(test)]
+            stack_extent: (usize::MAX, 0),
+            #[cfg(test)]
+            deepest_nesting: 0,
         }
     }
 
@@ -477,16 +485,34 @@ impl Parser {
         context: &'static str,
         f: impl FnOnce(&mut Self) -> Result<T, ParserError>,
     ) -> Result<T, ParserError> {
+        #[cfg(test)]
+        self.record_stack_position();
         if self.nesting_depth >= MAX_NESTING_DEPTH {
-            return Err(ParserError::Unexpected {
-                got: format!("{context} nesting depth exceeded"),
-                expected: format!("parser nesting depth within {MAX_NESTING_DEPTH} levels"),
-                span: self.current_span(),
-            });
+            return Err(self.nesting_limit_error(context));
         }
         self.nesting_depth += 1;
         let result = f(self);
         self.nesting_depth = self.nesting_depth.saturating_sub(1);
         result
+    }
+
+    #[cold]
+    #[inline(never)]
+    fn nesting_limit_error(&self, context: &'static str) -> ParserError {
+        ParserError::Unexpected {
+            got: format!("{context} nesting depth exceeded"),
+            expected: format!("parser nesting depth within {MAX_NESTING_DEPTH} levels"),
+            span: self.current_span(),
+        }
+    }
+
+    #[cfg(test)]
+    #[inline(never)]
+    pub(super) fn record_stack_position(&mut self) {
+        let marker = 0u8;
+        let address = std::hint::black_box(&marker) as *const u8 as usize;
+        self.stack_extent.0 = self.stack_extent.0.min(address);
+        self.stack_extent.1 = self.stack_extent.1.max(address);
+        self.deepest_nesting = self.deepest_nesting.max(self.nesting_depth);
     }
 }

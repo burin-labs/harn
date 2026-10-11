@@ -49,6 +49,7 @@ exempt_checks = [
   "check-provider-catalog-drift-core", # refresh and notice behavior without the nested sandbox proof
   "check-source-file-lengths",      # merge-base repo source LOC ratchet, not a generated mirror
   "check-stack-frames",             # re-entrant stack-frame budget ratchet, not a generated mirror
+  "check-parser-stack",             # recursive parser stack budget in debug and release
   "check-test-target-coverage",     # census that hand-listed test files are run by a CI target, not a generated mirror
   "check-gate-path-visibility",     # ratchet on the negated fs.exists guard in gate scripts, not a sync guard
   "check-python-boundary",          # repo-language boundary ratchet, not a sync guard

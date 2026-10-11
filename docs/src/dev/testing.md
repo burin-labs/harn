@@ -57,6 +57,21 @@ Release and audit gates that call `make test` must have nextest installed
 (they do after `make setup`); failing loudly is preferred to silently changing
 what "the tests pass" means (#6145).
 
+## Parser stack budget
+
+Run the expression parser's stack regression in unoptimized and release builds:
+
+```bash
+make check-parser-stack
+```
+
+The test parses expressions at the 64-level limit, checks the resulting tree,
+and verifies that the next level returns a nesting error.
+Test-only probes record native stack addresses during recursive descent.
+Accepted expressions must reach the declared depth and use less than 4 MiB.
+The dedicated thread uses the runtime's stack allocation so a regression can
+fail the budget assertion without aborting other tests.
+
 ## Source gate receipts
 
 Run the combined conformance and audit gate from a clean commit:

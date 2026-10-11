@@ -27,10 +27,11 @@ use std::thread::{Builder, JoinHandle, Scope, ScopedJoinHandle};
 
 /// Native stack a thread needs to parse any source the parser accepts.
 ///
-/// The parser recurses once per nesting level, and an unoptimized build spends
-/// about 140 KiB of stack on each level of nested expressions. Rust's 2 MiB
-/// default thread stack is exhausted after about a dozen levels, long before
-/// [`crate::MAX_NESTING_DEPTH`] refuses the source.
+/// Expression precedence levels forward heap-backed nodes to keep large syntax
+/// values out of recursive frames. `make check-parser-stack` checks accepted
+/// and refused expression nesting against a 4 MiB budget in debug and release.
+/// Declarations and other program walks still need stack headroom; Rust's
+/// default thread stack is insufficient for the complete runtime.
 ///
 /// The size follows the refusal, not the typical program: the parser must be
 /// able to reach the nesting limit and report it.
