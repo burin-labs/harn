@@ -491,14 +491,14 @@ impl LiveEndpointFamily {
 pub enum ComputerUseStyle {
     /// Anthropic `computer_20251124` native tool.
     NativeAnthropic,
-    /// Anthropic `computer_toolset_20260801` with namespaced member calls.
-    NativeAnthropicToolset,
     /// OpenAI Responses `computer` native tool.
     NativeOpenai,
     /// Accessibility / set-of-marks grounding over the universal function tool.
     Grounded,
     /// The plain function-schema `computer` tool (the universal default).
     Function,
+    /// Anthropic `computer_toolset_20260801` with namespaced member calls.
+    NativeAnthropicToolset,
 }
 
 /// Screenshot downscaling policy applied before an image reaches the model (the
