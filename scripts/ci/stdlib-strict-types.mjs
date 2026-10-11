@@ -1,4 +1,4 @@
-import { spawnSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { resolve, relative, sep } from 'node:path';
 
 const directory = 'crates/harn-stdlib/src/stdlib';
@@ -27,6 +27,12 @@ try {
     'checker failed before producing file results');
   const report = envelope.data;
   requireReport(Array.isArray(report?.files) && report.files.length > 0, 'no files measured');
+  // This repository gate covers every committed stdlib source, including a
+  // source omitted from the embedded catalog. Do not accept a partial census.
+  const expected = new Set(execFileSync('git', ['ls-files', '-z', '--', directory], {
+    encoding: 'utf8', timeout: 10_000, maxBuffer: 1024 * 1024,
+  }).split('\0').filter(path => path.endsWith('.harn') || path.endsWith('.harn.txt')));
+  requireReport(expected.size > 0, 'no committed stdlib sources');
   const measured = { ok: 0, warnings: 0, errors: 0, diagnostics: 0 };
   const paths = new Set();
   const failures = [];
@@ -60,6 +66,8 @@ try {
   }
   requireReport(Object.entries(measured).every(([key, value]) => count(report.summary?.[key])
     && report.summary[key] === value), 'summary disagrees with measured files');
+  requireReport(paths.size === expected.size && [...expected].every(path => paths.has(path)),
+    `partial stdlib census (${paths.size} reported, ${expected.size} committed sources)`);
   requireReport(!envelope.ok || measured.errors === 0, 'successful checker reports errors');
   requireReport(envelope.ok || measured.errors + measured.warnings > 0,
     'failed checker reports no failure findings');

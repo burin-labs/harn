@@ -2,13 +2,16 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
-import { spawnSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 
 const root = resolve(import.meta.dirname, '../..');
 const scratch = mkdtempSync(`${tmpdir()}/harn-strict-measurement-`);
 const fake = `${scratch}/harn`;
 writeFileSync(fake, '#!/usr/bin/env node\nimport("node:fs").then(({readFileSync}) => { process.stdout.write(readFileSync(process.env.FAKE_REPORT)); process.exitCode = Number(process.env.FAKE_STATUS); });\n', { mode: 0o700 });
 const path = 'crates/harn-stdlib/src/stdlib/cli/try.harn';
+const expected = execFileSync('git', ['ls-files', '-z', '--', 'crates/harn-stdlib/src/stdlib'], {
+  cwd: root, encoding: 'utf8',
+}).split('\0').filter(path => path.endsWith('.harn') || path.endsWith('.harn.txt'));
 const diagnostic = (code, severity = 'warning', source = 'lint') => ({
   code, severity, source, message: 'recorded finding',
 });
@@ -18,8 +21,11 @@ const report = (diagnostics = [], filePath = path) => {
   return {
     schemaVersion: 1, ok: true, error: null, warnings: [],
     data: {
-      files: [{ path: filePath, status, diagnostics, predicate_manifest: null }],
-      summary: { ok: Number(status === 'ok'), warnings: Number(status === 'warning'),
+      files: [{ path: filePath, status, diagnostics, predicate_manifest: null },
+        ...expected.filter(candidate => candidate !== filePath).map(path => ({
+          path, status: 'ok', diagnostics: [], predicate_manifest: null,
+        }))],
+      summary: { ok: expected.length - Number(status !== 'ok'), warnings: Number(status === 'warning'),
         errors: Number(status === 'error'), diagnostics: diagnostics.length },
     },
   };
@@ -35,7 +41,7 @@ function check(value, expected, status = value?.ok === false ? 1 : 0, message = 
   });
   assert.equal(result.error, undefined);
   assert.equal(result.status, expected, `${message}: ${result.stdout}${result.stderr}`);
-  assert.match(`${result.stdout}${result.stderr}`, expected === 0 ? /1 measured files/ : /refused|gate failed/);
+  assert.match(`${result.stdout}${result.stderr}`, expected === 0 ? /\d+ measured files/ : /refused|gate failed/);
   trials += 1;
 }
 try {
@@ -62,6 +68,7 @@ try {
   const summary = report(); summary.data.summary.ok = 99; check(summary, 1);
   const invalid = report([diagnostic('HARN-LNT-032', 'unexpected')]); check(invalid, 1);
   const missing = report(); delete missing.data.files[0].diagnostics; check(missing, 1);
+  const partial = report(); partial.data.files.pop(); partial.data.summary.ok -= 1; check(partial, 1);
   const version = report(); version.schemaVersion = 2; check(version, 1);
   const noData = { schemaVersion: 1, ok: false, data: null,
     error: { code: 'no_harn_files', message: 'empty', details: null }, warnings: [] };
