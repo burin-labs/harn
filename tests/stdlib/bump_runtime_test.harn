@@ -781,8 +781,8 @@ pipeline test_unreadable_base_advance_republishes_on_the_new_base(harness: Harne
 /**
  * Control for the falsifier above. When the advanced base changed a path this
  * bump's refresh also authors, adopting it would decide a contest between two
- * writers. The attempt must still abort, under its own named outcome, and name
- * the contested paths — so the retry cannot pass by never aborting.
+ * writers inside this checkout. The attempt names the paths and requests a
+ * fresh checkout, where the refresh can be derived from the new base.
  */
 pipeline test_advanced_base_touching_a_refreshed_path_aborts_as_a_conflict(
   harness: Harness,
@@ -806,13 +806,14 @@ pipeline test_advanced_base_touching_a_refreshed_path_aborts_as_a_conflict(
   assert_eq(receipt.ok, false)
   assert_eq(receipt.base_adoptions, 0)
   assert_eq(receipt.pr_action, "none")
-  assert_eq(receipt.recovery, {kind: "none", base_oid: "base999"})
+  assert_eq(receipt.recovery, {kind: "fresh_base_retry", base_oid: "base999"})
   assert_eq(
     receipt.notes,
     [
       "remote base advanced from base000 to base999",
       "cannot adopt the advanced main: 1 refreshed path(s) were also changed between base000 and base999",
       "the advanced main changed refreshed paths: harn.lock",
+      "retry the bump from a fresh checkout of main",
     ],
   )
   assert_eq(

@@ -401,29 +401,28 @@ fn __base_advanced_receipt(
 }
 
 /**
- * The one abort a fresh retry cannot fix: the advanced base changed a path this
- * bump's refresh also authors, so adopting it would decide a contest between
- * two writers of the same artifact. Name the paths and stop.
+ * An overlapping refresh cannot be adopted inside the obsolete checkout.
+ * Request a fresh base so the successor re-reads both pins before deriving
+ * refreshed output from the new base and the requested release.
  */
 fn __base_conflict_receipt(
   options: BumpOptions,
   base: BumpBaseReconciliation,
   adoption: BumpBaseAdoption,
+  adoptions: int,
 ) -> BumpReceipt {
   const contested = if len(adoption.conflicts) > 0 {
     ["the advanced ${options.base} changed refreshed paths: ${join(adoption.conflicts, ", ")}"]
   } else {
     []
   }
-  return base.receipt
-    + {
-      outcome: "base_conflict",
-      ok: false,
-      recovery: {kind: "none", base_oid: base.receipt.observed_base_oid},
-      notes: base.receipt.notes
-        + [base.detail, "cannot adopt the advanced ${options.base}: ${adoption.detail}"]
-        + contested,
-    }
+  return __base_advanced_receipt(
+    options,
+    base,
+    adoptions,
+    ["cannot adopt the advanced ${options.base}: ${adoption.detail}"] + contested,
+  )
+    + {outcome: "base_conflict"}
 }
 
 /**
@@ -493,6 +492,82 @@ fn __prepare_base_lease(adapter: BumpAdapter, receipt: BumpReceipt) -> BumpBaseP
   }
 }
 
+type BumpPins = {
+  version: string,
+  revision: string,
+  version_relation: BumpVersionRelation,
+  revision_relation: BumpRevisionRelation?,
+}
+
+fn __read_pins(
+  adapter: BumpAdapter,
+  target: string,
+  target_revision: string,
+  ready: bool,
+) -> BumpPins {
+  const previous = trim(adapter.read_current_version())
+  const relation = bump_version_relation(previous, target)
+  const previous_revision = if target_revision == "" {
+    ""
+  } else {
+    lowercase(trim(adapter.read_current_revision()))
+  }
+  return {
+    version: previous,
+    revision: previous_revision,
+    version_relation: relation,
+    revision_relation: if target_revision == "" || relation == "ahead" || !ready {
+      nil
+    } else {
+      adapter.revision_relation(previous_revision, target_revision, target)
+    },
+  }
+}
+
+/** The same readiness and monotonicity gate owns every checkout we adopt. */
+fn __pin_guard(receipt: BumpReceipt) -> BumpReceipt? {
+  if !receipt.ready {
+    return receipt
+      + {
+        outcome: "not_ready",
+        ok: true,
+        notes: receipt.notes + ["target release is not fully published yet"],
+      }
+  }
+  if receipt.version_relation == "equal"
+    && (receipt.revision_relation == nil || receipt.revision_relation == "equal") {
+    return receipt
+      + {
+        outcome: "already_current",
+        ok: true,
+        notes: receipt.notes + ["pin already matches ${receipt.target_tag}"],
+      }
+  }
+  if receipt.version_relation == "ahead" {
+    return receipt
+      + {
+        outcome: "already_current",
+        ok: true,
+        notes: receipt.notes
+          + [
+            "pin ${receipt.previous_version} is newer than requested target ${receipt.target_tag}; no downgrade applied",
+          ],
+      }
+  }
+  if receipt.revision_relation == "ahead" || receipt.revision_relation == "diverged" {
+    return receipt
+      + {
+        outcome: "revision_conflict",
+        ok: false,
+        notes: receipt.notes
+          + [
+            "source revision ${receipt.target_revision} is ${receipt.revision_relation} of current ${receipt.previous_revision}; no downgrade or divergent update applied",
+          ],
+      }
+  }
+  return nil
+}
+
 /**
  * Run the full bump state machine against an injected adapter and return its
  * receipt. Pure with respect to this process: all effects flow through
@@ -506,60 +581,20 @@ pub fn run_bump(options: BumpOptions, adapter: BumpAdapter) -> BumpReceipt {
   const target = adapter.resolve_target_tag(options.tag)
   const target_revision = lowercase(trim(options.source_revision))
   const readiness = adapter.release_ready(target)
-  const previous = trim(adapter.read_current_version())
-  const relation = bump_version_relation(previous, target)
-  const previous_revision = if target_revision == "" {
-    ""
-  } else {
-    lowercase(trim(adapter.read_current_revision()))
-  }
-  const revision_relation = if target_revision == "" || relation == "ahead" || !readiness.ready {
-    nil
-  } else {
-    adapter.revision_relation(previous_revision, target_revision, target)
-  }
+  const pins = __read_pins(adapter, target, target_revision, readiness.ready)
   let receipt = __bump_receipt_base(
     options,
     target,
     target_revision,
-    previous,
-    previous_revision,
-    relation,
-    revision_relation,
+    pins.version,
+    pins.revision,
+    pins.version_relation,
+    pins.revision_relation,
     readiness,
   )
-  // Phase 1 — release readiness gate. A target that is still publishing its
-  // assets is not an error; the scheduled rerun will pick it up.
-  if !readiness.ready {
-    return receipt
-      + {outcome: "not_ready", ok: true, notes: ["target release is not fully published yet"]}
-  }
-  // Phase 2 — idempotent no-op. Concurrent/scheduled reruns land here once the
-  // pin already matches, so the common steady state does zero mutation.
-  if relation == "equal" && (revision_relation == nil || revision_relation == "equal") {
-    return receipt
-      + {outcome: "already_current", ok: true, notes: ["pin already matches ${target}"]}
-  }
-  // A bump is monotonic. A stale explicit target can race with a newer release
-  // landing on the base branch; treat the newer pin as satisfied and never
-  // turn that race into a downgrade PR.
-  if relation == "ahead" {
-    return receipt
-      + {
-        outcome: "already_current",
-        ok: true,
-        notes: ["pin ${previous} is newer than requested target ${target}; no downgrade applied"],
-      }
-  }
-  if revision_relation == "ahead" || revision_relation == "diverged" {
-    return receipt
-      + {
-        outcome: "revision_conflict",
-        ok: false,
-        notes: [
-          "source revision ${target_revision} is ${revision_relation} of current ${previous_revision}; no downgrade or divergent update applied",
-        ],
-      }
+  const guarded = __pin_guard(receipt)
+  if guarded != nil {
+    return guarded
   }
   // Any previously armed bump must stop before the long refresh begins. It
   // could otherwise merge while this attempt is validating a replacement.
@@ -594,10 +629,10 @@ pub fn run_bump(options: BumpOptions, adapter: BumpAdapter) -> BumpReceipt {
         },
       )
       if !adoption.ok {
-        // Contested paths need a human. Everything else — an unreachable oid,
-        // a failed fetch — stays a retryable race for the controller.
+        // Overlapping refresh output and unavailable commits both request a
+        // fresh checkout. Preserve the overlap's named outcome and paths.
         if len(adoption.conflicts) > 0 {
-          return __base_conflict_receipt(options, base, adoption)
+          return __base_conflict_receipt(options, base, adoption, adoptions)
         }
         return __base_advanced_receipt(
           options,
@@ -620,6 +655,18 @@ pub fn run_bump(options: BumpOptions, adapter: BumpAdapter) -> BumpReceipt {
       // The adoption itself can lose the race again; re-read before spending.
       base = __observe_base_lease(adapter, receipt, "before_refresh")
       receipt = base.receipt
+      const adopted_pins = __read_pins(adapter, target, target_revision, readiness.ready)
+      receipt = receipt
+        + {
+          previous_version: adopted_pins.version,
+          previous_revision: adopted_pins.revision,
+          version_relation: adopted_pins.version_relation,
+          revision_relation: adopted_pins.revision_relation,
+        }
+      const adopted_guard = __pin_guard(receipt)
+      if adopted_guard != nil {
+        return adopted_guard
+      }
       continue
     }
     // Phase 3 — write the pin and regenerate derived sources (lockfile, codegen).
