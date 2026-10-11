@@ -91,8 +91,9 @@ pipeline test_price_metadata_and_band_order_preserve_economic_changes(harness: H
     output_per_mtok: 2.0,
     source_url: "https://example.test/pricing",
   }
+  const first_band = {minimum_input_tokens: 100, input_multiplier: 2.0, output_multiplier: 2.0}
   const bands = [
-    {minimum_input_tokens: 100, input_multiplier: 2.0, output_multiplier: 2.0},
+    first_band,
     {minimum_input_tokens: 200, input_multiplier: 3.0, output_multiplier: 3.0},
   ]
   const pricing = {
@@ -127,8 +128,8 @@ pipeline test_price_metadata_and_band_order_preserve_economic_changes(harness: H
   assert_eq(len(build_drift([obs], catalog).changed), 0)
   for changed in [
     {promotions: [promotion + {ends_on: "2026-11-02"}]},
-    {input_token_bands: [bands[0] + {minimum_input_tokens: 101}, bands[1]]},
-    {input_token_bands: [bands[0] + {input_multiplier: 2.1}, bands[1]]},
+    {input_token_bands: [first_band + {minimum_input_tokens: 101}, bands[1]]},
+    {input_token_bands: [first_band + {input_multiplier: 2.1}, bands[1]]},
     {hosted_tool_fees: {source_url: {per_1k_calls: 11.0, source_url: "https://example.test/fee"}}},
   ] {
     assert_eq(len(build_drift([obs + {pricing: equivalent + changed}], catalog).changed), 1)
