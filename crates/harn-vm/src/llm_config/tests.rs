@@ -888,7 +888,7 @@ fn provider_default_does_not_depend_on_the_default_provider() {
         set_user_overrides(Some(overlay));
         assert_eq!(
             default_model_for_provider("anthropic").as_deref(),
-            Ok("claude-sonnet-4-6"),
+            Ok("claude-sonnet-5-5"),
             "default_provider = {default_provider}"
         );
         assert!(

@@ -29,23 +29,22 @@ steps = [
 [model_ladders.agent_cheap]
 label = "low-cost agent summary and verification route"
 steps = [
-  { model = "gpt-4o-mini", provider = "openai", label = "cheap" },
+  { model = "gpt-6-luna", provider = "openai", label = "cheap" },
 ]
 
 # The sitrep, judge and approval-reviewer rows below (and the Anthropic QC
-# default) stay on Claude Haiku 4.5 rather than the `haiku` alias's Haiku 5.5:
-# std/agent/sitrep sends temperature 0.2 and the judge task profile sends 0.0,
-# and Haiku 5.5 rejects any non-default sampling parameter, which Harn refuses
-# locally as a terminal capability denial. Moving these roles needs those
-# callers to stop authoring temperature on routes that decline it first.
+# default) use the current generation: Claude Haiku 5.5 and GPT-6 Luna. Both
+# reject non-default sampling parameters, so these roles send no default
+# temperature on a route whose capability row says `temperature_supported =
+# false`; std/agent/sitrep checks before adding its summary default.
 #
 # Reverse-chronological cheap summarizers used by std/agent/sitrep. The stdlib
 # filters these routes by provider availability but never owns their model IDs.
 [model_ladders.sitrep]
 label = "sitrep summarizers, newest and strongest first"
 steps = [
-  { provider = "anthropic", model = "claude-haiku-4-5-20251001" },
-  { provider = "openai", model = "gpt-4o-mini" },
+  { provider = "anthropic", model = "claude-haiku-5-5" },
+  { provider = "openai", model = "gpt-6-luna" },
   { provider = "gemini", model = "gemini-3.5-flash-lite" },
   { provider = "openrouter", model = "google/gemini-3.5-flash-lite" },
   { provider = "deepseek", model = "deepseek-flash" },
@@ -73,8 +72,8 @@ steps = [
 [model_ladders.judge]
 label = "default judge model per provider family"
 steps = [
-  { provider = "anthropic", model = "claude-haiku-4-5-20251001", label = "anthropic" },
-  { provider = "openai", model = "gpt-4o-mini", label = "openai" },
+  { provider = "anthropic", model = "claude-haiku-5-5", label = "anthropic" },
+  { provider = "openai", model = "gpt-6-luna", label = "openai" },
   { provider = "gemini", model = "gemini-3.5-flash-lite", label = "gemini" },
   { provider = "openrouter", model = "google/gemini-3.5-flash-lite", label = "openrouter" },
   { provider = "deepseek", model = "deepseek-flash", label = "deepseek" },
@@ -97,8 +96,8 @@ steps = [
 [model_ladders.approval_reviewer]
 label = "cheap approval reviewer model per provider family"
 steps = [
-  { provider = "anthropic", model = "claude-haiku-4-5-20251001", label = "anthropic" },
-  { provider = "openai", model = "gpt-4o-mini", label = "openai" },
+  { provider = "anthropic", model = "claude-haiku-5-5", label = "anthropic" },
+  { provider = "openai", model = "gpt-6-luna", label = "openai" },
   { provider = "gemini", model = "gemini-3.5-flash-lite", label = "gemini" },
   { provider = "openrouter", model = "google/gemini-3.5-flash-lite", label = "openrouter" },
   { provider = "fireworks", model = "accounts/fireworks/models/gpt-oss-120b", label = "fireworks" },

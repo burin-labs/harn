@@ -3,7 +3,10 @@
 # passes. Scripts read these via `qc_default_model(provider)`.
 
 [qc_defaults]
-anthropic = "claude-haiku-4-5-20251001"
+# Claude Haiku 5.5 is the current Haiku: a tenth of Haiku 4.5's rate up to
+# 100K input tokens and the `haiku` alias target. It rejects non-default
+# sampling parameters; QC callers leave temperature unset on such routes.
+anthropic = "claude-haiku-5-5"
 openai = "gpt-6-luna"
 # OpenRouter retires google/gemini-2.5-flash on 2026-10-20 (typed
 # `expiration_date` on its /models index, read 2026-10-01). Gemini 3.5

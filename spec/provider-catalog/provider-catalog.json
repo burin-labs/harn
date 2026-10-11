@@ -40581,7 +40581,7 @@
     }
   ],
   "qc_defaults": {
-    "anthropic": "claude-haiku-4-5-20251001",
+    "anthropic": "claude-haiku-5-5",
     "cohere": "command-a-plus-05-2026",
     "deepseek": "deepseek-flash",
     "gemini": "gemini-3.5-flash-lite",

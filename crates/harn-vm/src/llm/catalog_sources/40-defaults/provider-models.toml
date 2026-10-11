@@ -3,12 +3,12 @@
 # setup UI. The two may differ deliberately, including in price.
 # Host-supplied local/MLX model environment variables still take precedence.
 
-# The setup-UI offer follows the current generation: Claude Sonnet 5.5, the
-# `sonnet` alias target. The runtime fallback stays on Sonnet 4.6 because
-# Sonnet 5.5 rejects non-default sampling parameters, and bare CLI callers may
-# still send temperature.
+# Both the setup-UI offer and the bare runtime fallback are the current
+# Sonnet, the `sonnet` alias target. It rejects non-default sampling
+# parameters, so a script that names only `anthropic` and sends a temperature
+# is refused by the capability check rather than silently changed.
 [provider_defaults.anthropic]
-runtime = "claude-sonnet-4-6"
+runtime = "claude-sonnet-5-5"
 portal = "claude-sonnet-5-5"
 
 [provider_defaults.local]
@@ -19,11 +19,10 @@ portal = "gemma-4-26b-a4b-it"
 runtime = "unsloth/Qwen3.6-35B-A3B-UD-MLX-4bit"
 portal = "unsloth/Qwen3.6-35B-A3B-UD-MLX-4bit"
 
-# The setup-UI offer is GPT-6 Luna at high effort, in place of the
-# two-generation-old GPT-4o: the current generation's low-cost row, with its
-# effort raised for coding work.
+# GPT-6 Luna, the current generation's low-cost row, is both the runtime
+# fallback and the setup-UI offer, which selects high effort for coding work.
 [provider_defaults.openai]
-runtime = "gpt-4o-mini"
+runtime = "gpt-6-luna"
 portal = "gpt-6-luna"
 portal_reasoning_effort = "high"
 
