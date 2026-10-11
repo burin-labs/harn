@@ -11,14 +11,52 @@ static MARKER_FD: AtomicI32 = AtomicI32::new(-1);
 extern "C" fn handle_term(_: libc::c_int) {
     // The handler can run on libtest's driver thread. Use only
     // async-signal-safe syscalls, with an already-open marker file.
+    // Group and direct-pid delivery can enter handlers on different threads.
+    // Only the receipt owner may exit, after its write has completed.
+    if !record_term_receipt(&MARKER_FD) {
+        return;
+    }
     unsafe {
-        libc::write(
-            MARKER_FD.load(Ordering::Relaxed),
-            b"TERM".as_ptr().cast(),
-            4,
-        );
         libc::_exit(0);
     }
+}
+
+fn record_term_receipt(marker_fd: &AtomicI32) -> bool {
+    let fd = marker_fd.swap(-1, Ordering::Relaxed);
+    if fd < 0 {
+        return false;
+    }
+    unsafe {
+        libc::write(fd, b"TERM".as_ptr().cast(), 4);
+    }
+    true
+}
+
+#[test]
+fn term_receipt_has_one_writer_under_concurrent_delivery() {
+    use std::os::fd::AsRawFd;
+    use std::sync::Barrier;
+
+    let marker = tempfile::NamedTempFile::new().expect("term receipt");
+    let fd = Arc::new(AtomicI32::new(marker.as_raw_fd()));
+    let ready = Arc::new(Barrier::new(8));
+    let writers = (0..8)
+        .map(|_| {
+            let fd = fd.clone();
+            let ready = ready.clone();
+            crate::runtime_stack::spawn(move || {
+                ready.wait();
+                record_term_receipt(&fd)
+            })
+        })
+        .collect::<Vec<_>>();
+    let owners = writers
+        .into_iter()
+        .map(|writer| writer.join().expect("receipt writer"))
+        .filter(|owned| *owned)
+        .count();
+    assert_eq!(owners, 1, "only the receipt owner may exit the child");
+    assert_eq!(std::fs::read(marker.path()).unwrap(), b"TERM");
 }
 
 #[test]
