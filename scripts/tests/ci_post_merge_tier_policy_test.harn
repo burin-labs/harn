@@ -14,7 +14,7 @@ fn status_command() -> string {
     + "  \"sandbox failed\" \\\n"
     + "  test \"$RUST\" != \"true\" -o \"$POST_MERGE_TIER_ACTIVE\" = \"true\"\n\n"
     + "require_result \"$harn_audit_result\" \"harn failed\" test \"$RUST\" != \"true\"\n\n"
-    + "require_result \"$macos_result\" \"macos failed\" test \"$POST_MERGE_TIER_ACTIVE\" = \"true\"\n\n"
+    + "require_result \"$macos_result\" \"macos failed\" test \"$EVENT_NAME\" != \"push\"\n\n"
     + "require_result \"$package_audit_result\" \"package failed\" test \"$POST_MERGE_TIER_ACTIVE\" = \"true\"\n\n"
     + "require_result \"$stack_frames_result\" \"stack frames failed\" test \"$POST_MERGE_TIER_ACTIVE\" = \"true\"\n\n"
     + "require_result \"$source_length_result\" \"lengths failed\" [ \"$RUST\" != \"true\" ]\n"
@@ -51,15 +51,16 @@ fn workflows() {
           if: "(github.event_name == 'merge_group' && " + GUARD + ")",
         },
         macos: {
-          needs: ["changes", "macos-plan"],
-          if: "needs.macos-plan.outputs.run_macos == 'true' && " + GUARD,
+          needs: ["changes", "macos-lint"],
+          if: gha("always() && github.event_name == 'push'"),
         },
-        "macos-lint": {needs: ["changes"], if: GUARD},
+        "macos-lint": {needs: ["changes"], if: "github.event_name == 'push'"},
         "ci-status": {
           steps: [
             {
               name: "Verify required CI jobs",
               env: {
+                EVENT_NAME: gha("github.event_name"),
                 POST_MERGE_TIER_ACTIVE: gha("needs.changes.outputs.post_merge_tier"),
                 WINDOWS_CROSS_REQUIRED: gha(
                   "(github.event_name == 'merge_group' && " + GUARD + ")",
@@ -234,4 +235,35 @@ pipeline test_post_merge_tier_policy_refuses_wrong_event_binding_and_missing_che
       ],
     )
   }
+}
+
+pipeline test_macos_runs_on_main_pushes_only(harness: Harness, task: unknown) {
+  const base = workflows()
+  // Back on full-suite pull requests and merge groups, macOS sets their finish.
+  const pre_merge = with_ci_job(base, "macos-lint", {needs: ["changes"], if: GUARD})
+  assert_eq(post_merge_tier_errors(pre_merge), ["ci.yml:macos-lint must run on main pushes only"])
+  // A tier excuse would let a main push pass with macOS skipped.
+  const status = base["ci.yml"].jobs["ci-status"]
+  const step = status.steps[0]
+  const tier_excused = with_ci_job(
+    base,
+    "ci-status",
+    {
+      ...status,
+      steps: [
+        {
+          ...step,
+          run: step.run.replace(
+            "\"macos failed\" test \"$EVENT_NAME\" != \"push\"",
+            "\"macos failed\" test \"$POST_MERGE_TIER_ACTIVE\" = \"true\"",
+          ),
+        },
+      ],
+    },
+  )
+  assert(
+    post_merge_tier_errors(tier_excused).contains(
+      "ci.yml:ci-status must require macOS on, and only on, main pushes",
+    ),
+  )
 }

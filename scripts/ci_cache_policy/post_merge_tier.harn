@@ -22,8 +22,6 @@ const TIER_EXCUSE = "\"$POST_MERGE_TIER_ACTIVE\" = \"true\""
 pub const POST_MERGE_TIER_JOBS: list<string> = [
   "security-tests-ready",
   "windows-cross-check",
-  "macos",
-  "macos-lint",
   "package-audit",
   "stack-frames",
 ]
@@ -35,10 +33,20 @@ pub const POST_MERGE_TIER_JOBS: list<string> = [
 const TIER_EXCUSED_RESULTS = [
   "security_tests_ready_result",
   "rust_security_result",
-  "macos_result",
   "package_audit_result",
   "stack_frames_result",
 ]
+
+/**
+ * Jobs that run on main pushes only, whatever the change selects: macOS was
+ * the last job to finish in about a quarter of full-suite pull request and
+ * merge-group runs. The aggregate requires them exactly on a push.
+ */
+pub const MAIN_PUSH_ONLY_JOBS: list<string> = ["macos", "macos-lint"]
+
+const MAIN_PUSH_GUARD = "github.event_name == 'push'"
+
+const MAIN_PUSH_EXCUSE = "test \"$EVENT_NAME\" != \"push\""
 
 fn gha(body: string) -> string {
   return "$" + "{{ " + body + " }}"
@@ -110,10 +118,23 @@ pub fn post_merge_tier_errors(workflows: dict) -> list<string> {
       errors = errors + ["ci.yml:${name} must skip under the post-merge tier decision"]
     }
   }
+  for name in MAIN_PUSH_ONLY_JOBS {
+    const job = ci?.jobs?.[name]
+    const condition = to_string(job?.if ?? "")
+    if !contains(condition, MAIN_PUSH_GUARD)
+      || contains(condition, POST_MERGE_TIER_GUARD)
+      || !needs_of(job).contains("changes") {
+      errors = errors + ["ci.yml:${name} must run on main pushes only"]
+    }
+  }
   const status = ci?.jobs?.["ci-status"]
   const status_step = step_by_name(status?.steps ?? [], "Verify required CI jobs")
   const command = to_string(status_step?.run ?? "")
   const env = status_step?.env ?? {}
+  if trim(to_string(env?.EVENT_NAME ?? "")) != gha("github.event_name")
+    || !contains(require_call(command, "macos_result"), MAIN_PUSH_EXCUSE) {
+    errors = errors + ["ci.yml:ci-status must require macOS on, and only on, main pushes"]
+  }
   if trim(to_string(env?.POST_MERGE_TIER_ACTIVE ?? ""))
     != gha("needs.changes.outputs.post_merge_tier")
     || !contains(to_string(env?.WINDOWS_CROSS_REQUIRED ?? ""), POST_MERGE_TIER_GUARD) {
