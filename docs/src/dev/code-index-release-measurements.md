@@ -9,17 +9,19 @@ each trial identifies its exact list through `skipped_file_inventory`.
 
 ## Workload and boundary
 
-The frozen Burin corpus contains 8,463 indexed files plus one controlled Rust
+The frozen downstream corpus contains 8,463 indexed files plus one controlled Rust
 fixture, 88,173,033 source bytes, 752,584 graph nodes, 5,036,843 edges, and
 441,301 resolved calls. Forty XML trace files are skipped; the record names
 them and distinguishes attempted reads from successful ingestion.
 
-The host is cattrick, an AMD Ryzen 5 3600X with 12 logical CPUs and about
+The benchmark host is an AMD Ryzen 5 3600X with 12 logical CPUs and about
 60 GiB reported RAM. Both binaries use Rust 1.95.0 and the repository release
 profile: optimization level 3, thin LTO, and 16 codegen units. Their common
 source base is `059ef4c45271aed0f975c695082875724dfa55ae`; runtime phase
 instrumentation is published separately in commit
 `7e21a3232ec04c375066282c8662780f108342d8`.
+Hostnames and disposable absolute roots use public placeholders in the record;
+timings and source, corpus, and binary digests retain their measured values.
 
 `crates/harn-hostlib/examples/code_index_latency.rs` calls the owning
 `IndexState::build_from_root` or `CodeIndexCapability::restore_from_disk` path
