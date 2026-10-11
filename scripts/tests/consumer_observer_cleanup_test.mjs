@@ -11,6 +11,9 @@ import { observerRunName, observerDeclarationName, observerDispatchActor, observ
 test('the inert declaration action projects the owning publication step identity', () => {
   const action = fs.readFileSync(new URL('../../.github/actions/consumer-observer-declare/action.yml', import.meta.url), 'utf8');
   assert.equal(/^name: (.+)$/m.exec(action)?.[1], observerDeclarationStep);
+  const listener = fs.readFileSync(new URL('../../.github/workflows/consumer-observer-cleanup.yml', import.meta.url), 'utf8');
+  assert.match(listener, /if: github\.event\.workflow_run\.head_repository\.full_name == github\.repository && github\.event\.workflow_run\.status == 'completed'/);
+  assert.doesNotMatch(listener, /ref:.*workflow_run|download-artifact|checkout.*workflow_run/);
 });
 
 test('declaration preparation reaches a closed public file only for a measured live parent', () => {
@@ -131,7 +134,8 @@ test('the completion entrypoint reaches owned cancellation without publishing pr
     assert.match(positive.run.stdout, /discovered=1 owned=1 terminal=1 cancelled=1 pending=0 refused=0/);
     assert.deepEqual(positive.posts.map(call => call.path), ['/repos/acme/widget-host/actions/runs/73/cancel']);
     for (const changes of [{ missing: 0 }, { missing: 1 }, { child: { ...child, run_attempt: 2 } },
-      { child: { ...child, actor: { login: 'unrelated[bot]', type: 'Bot' } } }]) {
+      { child: { ...child, actor: { login: 'unrelated[bot]', type: 'Bot' } } },
+      { parent: { ...parent, head_repository: { full_name: 'unrelated/foreign-parent' } } }]) {
       const negative = execute(changes);
       assert.equal(negative.run.status, 1);
       assert.equal(negative.posts.length, 0);

@@ -1,7 +1,9 @@
 name: Consumer observer cleanup
 
 on:
-  workflow_run:
+  # Trusted default-branch code authenticates same-repository custody; artifacts
+  # are bounded JSON data, never downloaded checkout or executable source.
+  workflow_run: # zizmor: ignore[dangerous-triggers] exact parent identity and private receipts authorize cleanup
     workflows: [Consumer canary, Build release binaries, Promote release]
     types: [completed]
 
@@ -10,6 +12,7 @@ permissions: {}
 jobs:
   reconcile:
     name: Reconcile owned consumer children
+    if: github.event.workflow_run.head_repository.full_name == github.repository && github.event.workflow_run.status == 'completed'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
