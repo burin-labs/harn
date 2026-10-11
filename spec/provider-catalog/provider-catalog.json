@@ -6251,11 +6251,16 @@
       },
       "reasoning": {
         "modes": [
-          "enabled"
+          "effort"
         ],
-        "effort_supported": false,
-        "effort_levels": [],
-        "none_supported": false,
+        "effort_supported": true,
+        "effort_levels": [
+          "none",
+          "low",
+          "medium",
+          "high"
+        ],
+        "none_supported": true,
         "interleaved_supported": false,
         "preserve_thinking": false
       },
@@ -6276,6 +6281,7 @@
         "tools",
         "vision",
         "thinking",
+        "extended_thinking",
         "structured_output"
       ],
       "family": "qwen",
@@ -35712,8 +35718,10 @@
       "label": "Qwen 3.8 27B (Cerebras)",
       "family": "qwen",
       "capabilities": [
+        "extended_thinking",
         "native_tools",
         "prefers_markdown_scaffolding",
+        "reasoning_effort",
         "streaming",
         "structured_output",
         "structured_output_mode:native_json",

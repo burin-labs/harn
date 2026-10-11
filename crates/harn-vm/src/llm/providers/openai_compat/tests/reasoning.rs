@@ -7,6 +7,39 @@ use crate::llm::providers::openai_compat::OpenAiCompatibleProvider;
 use serde_json::json;
 
 #[test]
+fn cerebras_qwen_efforts_reach_the_wire_without_native_qwen_toggles() {
+    let provider = OpenAiCompatibleProvider::new("cerebras".to_string());
+    for level in [
+        ReasoningEffort::None,
+        ReasoningEffort::Low,
+        ReasoningEffort::Medium,
+        ReasoningEffort::High,
+    ] {
+        let mut payload = base_request_payload();
+        payload.provider = "cerebras".to_string();
+        payload.model = "qwen-3.8-27b".to_string();
+        payload.thinking = ThinkingConfig::Effort { level };
+        let mut body = OpenAiCompatibleProvider::build_request_body(&payload);
+        provider.transform_request(&mut body);
+        assert_eq!(body["reasoning_effort"], level.as_str());
+        for unsupported in ["disable_reasoning", "enable_thinking", "thinking_budget"] {
+            assert!(body.get(unsupported).is_none(), "{unsupported}");
+        }
+    }
+    let mut payload = base_request_payload();
+    payload.provider = "cerebras".to_string();
+    payload.model = "gpt-oss-120b".to_string();
+    payload.thinking = ThinkingConfig::Effort {
+        level: ReasoningEffort::None,
+    };
+    let body = OpenAiCompatibleProvider::build_request_body(&payload);
+    assert!(
+        body.get("reasoning_effort").is_none(),
+        "GPT-OSS must not inherit Qwen's none effort"
+    );
+}
+
+#[test]
 fn kimi_replays_canonical_reasoning_under_its_typed_wire_field() {
     let mut payload = base_request_payload();
     payload.provider = "moonshot".to_string();

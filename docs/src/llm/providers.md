@@ -1182,6 +1182,16 @@ permissions.
 - Auth: `Authorization: Bearer <key>`
 - Same message format as OpenAI
 
+### Cerebras
+
+- Endpoint: `https://api.cerebras.ai/v1/chat/completions`
+- Auth: `Authorization: Bearer <CEREBRAS_API_KEY>`
+- Qwen 3.8 27B accepts `effort: "none"`, `"low"`, `"medium"`, and `"high"`.
+  `"none"` disables reasoning. GPT-OSS 120B accepts only `"low"`, `"medium"`, and `"high"`.
+- Streamed responses report input and output usage. See the
+  [Cerebras reasoning guide](https://inference-docs.cerebras.ai/capabilities/reasoning)
+  for provider defaults and response formats.
+
 ### Vercel AI Gateway
 
 - Endpoint: `https://ai-gateway.vercel.sh/v1/chat/completions` or `/v1/responses`
