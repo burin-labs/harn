@@ -301,13 +301,15 @@ pub(crate) fn parse_json_payload<T: for<'de> Deserialize<'de>>(
     json: serde_json::Value,
     label: &str,
 ) -> Result<T, VmError> {
-    // Payloads include prompts, tool results, and credentials. Serde errors
-    // and paths can quote invalid values or dynamic map keys as well.
-    serde_json::from_value(json).map_err(|_| {
-        VmError::Runtime(format!(
-            "{label} parse error: payload does not match expected schema"
-        ))
-    })
+    serde_json::from_value(json).map_err(|_| payload_parse_error(label))
+}
+
+pub(crate) fn payload_parse_error(label: &str) -> VmError {
+    // Payloads include prompts, tool results, and credentials. Parser errors
+    // and paths can quote invalid values, dynamic map keys, or source lines.
+    VmError::Runtime(format!(
+        "{label} parse error: payload does not match expected schema"
+    ))
 }
 
 pub(crate) fn parse_json_value<T: for<'de> Deserialize<'de>>(

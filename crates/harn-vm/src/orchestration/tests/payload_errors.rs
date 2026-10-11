@@ -102,3 +102,46 @@ fn invalid_dynamic_map_key_does_not_become_a_diagnostic_path() {
         "Runtime error: orchestration parse error: payload does not match expected schema"
     );
 }
+
+#[tokio::test(flavor = "current_thread")]
+async fn public_manifest_source_parser_does_not_echo_json_or_toml_values_or_source() {
+    let mut vm = crate::Vm::new();
+    crate::register_vm_stdlib(&mut vm);
+    for source in [
+        r#"{"name":"Private context","owner":"founder","version":"invalid-json-private-canary","metadata":{"api_key":"adjacent-private-canary"}}"#,
+        "name = \"Private context\"\nowner = \"founder\"\nversion = \"invalid-toml-private-canary\"\n[metadata]\napi_key = \"adjacent-private-canary\"",
+        r#"{"name":"Private context","owner":"founder","syntax-private-canary":}"#,
+        "name = \"Private context\"\nowner = \"founder\"\nsyntax-private-canary = { token = \"adjacent-private-canary\"",
+    ] {
+        let error = vm
+            .call_named_builtin(
+                "context_pack_manifest_parse",
+                vec![crate::json_to_vm_value(&json!(source))],
+            )
+            .await
+            .expect_err("invalid manifest must reach and fail the public source parser");
+        assert_eq!(
+            error.to_string(),
+            "Runtime error: context_pack_manifest_parse parse error: payload does not match expected schema"
+        );
+    }
+    for source in [
+        r#"{"name":"Build context","owner":"founder"}"#,
+        "name = \"Build context\"\nowner = \"founder\"",
+    ] {
+        let manifest = vm
+            .call_named_builtin(
+                "context_pack_manifest_parse",
+                vec![crate::json_to_vm_value(&json!(source))],
+            )
+            .await
+            .expect(
+                "valid JSON and TOML must still parse and normalize through the public builtin",
+            );
+        let manifest = crate::llm::vm_value_to_json(&manifest);
+        assert_eq!(manifest["name"], "Build context");
+        assert_eq!(manifest["owner"], "founder");
+        assert_eq!(manifest["version"], 1);
+        assert_eq!(manifest["id"], "build-context");
+    }
+}
