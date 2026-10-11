@@ -483,6 +483,7 @@ fn cerebras_qwen_38_catalog_row_preserves_public_route_metadata() {
             "tools".to_string(),
             "vision".to_string(),
             "thinking".to_string(),
+            "extended_thinking".to_string(),
             "structured_output".to_string(),
         ]
     );
@@ -500,7 +501,7 @@ fn cerebras_qwen_38_catalog_row_preserves_public_route_metadata() {
         capabilities.preferred_tool_format.as_deref(),
         Some("native")
     );
-    assert_eq!(capabilities.thinking_modes, vec!["enabled"]);
+    assert_eq!(capabilities.thinking_modes, vec!["enabled", "effort"]);
 }
 
 #[test]

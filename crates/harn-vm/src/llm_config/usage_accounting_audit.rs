@@ -342,32 +342,42 @@ mod tests {
     #[test]
     fn audit_accepts_partial_evidence_without_inventing_the_other_field() {
         let mut config = super::super::embedded_config(None);
-        let cerebras = config.providers.get("cerebras").expect("Cerebras provider");
-        assert_eq!(cerebras.cache_usage_accounting, Some(true));
-        assert_eq!(cerebras.stream_usage_accounting, None);
-
-        let audit = config
+        config.providers.insert(
+            "partial_probe".to_string(),
+            ProviderDef {
+                cache_usage_accounting: Some(true),
+                ..ProviderDef::default()
+            },
+        );
+        config
             .usage_accounting_audit
-            .as_ref()
-            .expect("usage accounting audit");
-        let cerebras = audit
+            .as_mut()
+            .expect("usage accounting audit")
             .verified
-            .iter()
-            .find(|entry| entry.provider == "cerebras")
-            .expect("Cerebras evidence");
-        assert_eq!(cerebras.fields, vec![UsageAccountingField::Cache]);
+            .push(VerifiedUsageAccountingAudit {
+                provider: "partial_probe".to_string(),
+                checked_on: "2026-08-25".to_string(),
+                fields: vec![UsageAccountingField::Cache],
+                sources: vec!["https://provider.example/accounting".to_string()],
+            });
+        let partial = config
+            .providers
+            .get("partial_probe")
+            .expect("partial fixture");
+        assert_eq!(partial.cache_usage_accounting, Some(true));
+        assert_eq!(partial.stream_usage_accounting, None);
 
         let validation = validate_usage_accounting_audit(&config, "2026-08-25");
         assert!(validation.is_clean(), "{:?}", validation.errors);
 
         config
             .providers
-            .get_mut("cerebras")
-            .expect("Cerebras provider")
+            .get_mut("partial_probe")
+            .expect("partial fixture")
             .cache_usage_accounting = None;
         let validation = validate_usage_accounting_audit(&config, "2026-08-25");
         assert!(validation.errors.iter().any(|error| {
-            error.contains("verified provider cerebras must declare cache_usage_accounting")
+            error.contains("verified provider partial_probe must declare cache_usage_accounting")
         }));
     }
 

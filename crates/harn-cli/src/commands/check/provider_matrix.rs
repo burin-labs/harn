@@ -584,7 +584,7 @@ mod tests {
         let markdown = generate_markdown(&rows, &catalog);
 
         assert!(markdown.contains(
-            "| `cerebras` | `qwen-3.8-27b` | `any` | `enabled` | `none` | yes | no | no | no | yes | no | `native`"
+            "| `cerebras` | `qwen-3.8-27b` | `any` | `enabled,effort` | `none` | yes | no | no | no | yes | no | `native`"
         ));
         assert!(markdown.contains(
             "| `cerebras` | `qwen-3.8-27b` | `native` | `unknown` | - | - | - | - | - | `data not yet collected`"
