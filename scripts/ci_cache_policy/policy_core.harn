@@ -242,7 +242,14 @@ pub const BUILD_BUDGET_PRODUCER_PROFILE = "producer"
 // the single owner of the value — ci.yml carries the same number.
 pub const EXECUTION_ONLY_TIMEOUT_MINUTES = "35"
 
-pub const ARTIFACT_READY_JOB = "rust-artifacts-ready"
+// Lanes that run the shared Harn CLI depend on its producer directly. A
+// waiter job that polled for the artifact held a hosted runner for the
+// whole build, which counts against the org's concurrent-job cap, to save
+// the producer's few seconds of post-upload bookkeeping.
+pub const CLI_PRODUCER_JOB = "rust-cli"
+
+pub const LIVE_CLI_CONSUMER_IF = "$"
+  + "{{ !cancelled() && needs.changes.outputs.rust == 'true' && needs.rust-cli.result == 'success' }}"
 
 pub const SECURITY_READY_JOB = "security-tests-ready"
 
@@ -403,8 +410,11 @@ pub const WINDOWS_CROSS_CHECK_IF =
 /** `ci-status` requires the cross-check exactly where the job itself must run. */
 pub const WINDOWS_CROSS_REQUIRED_ENV = "$" + "{{ " + WINDOWS_CROSS_CHECK_IF + " }}"
 
-pub const MAIN_ONLY_POLICY_IF = MAIN_ONLY_RUST_PATHS_IF
-  + " && needs.rust-artifacts-ready.result == 'success'"
+// `!cancelled()` because the producer's capacity ancestors skip outside
+// pull requests, and a skip reaches every dependent without a status check.
+pub const MAIN_ONLY_POLICY_IF = "$" + "{{ !cancelled() && "
+  + MAIN_ONLY_RUST_PATHS_IF
+  + " && needs.rust-cli.result == 'success' }}"
 
 pub const CI_CACHE_REFRESH_CONCURRENCY_GROUP = "harn-ci-rust-cache-refresh"
 
@@ -2154,10 +2164,6 @@ fn proven_push_main_only_errors(jobs: dict) -> list<string> {
   // The main-only lanes outlive the heavy-lane skip on a proven push, and use
   // the merge group's CLI when they do. Both halves are needed: the right
   // condition with this run's download fails on a run that built nothing.
-  if trim(jobs[ARTIFACT_READY_JOB]?.if ?? "") != "needs.changes.outputs.rust_paths == 'true'" {
-    errors = errors
-      + ["ci.yml:rust-artifacts-ready must run whenever a main-only lane needs the shared CLI"]
-  }
   const size_if = trim(jobs["binary-size-signal"]?.if ?? "")
   if !contains(size_if, "needs.changes.outputs.rust_paths == 'true'")
     || contains(size_if, "needs.changes.outputs.rust == ") {
@@ -2200,7 +2206,7 @@ pub fn minimal_pr_capacity_errors(ci: dict, publish: dict) -> list<string> {
   const jobs = ci?.jobs ?? {}
   // The Clippy and Harn proof lanes used to switch to Blacksmith Linux, which
   // cannot confine a Harn child; they run on the shared hosted runner.
-  for name in [ARTIFACT_READY_JOB, SECURITY_READY_JOB, "rust-checks", "harn-audit"] {
+  for name in [SECURITY_READY_JOB, "rust-checks", "harn-audit"] {
     if trim(jobs[name]?.["runs-on"] ?? "") != HOSTED_LINUX_RUNNER {
       errors = errors + ["ci.yml:${name} must use GitHub-hosted ${HOSTED_LINUX_RUNNER}"]
     }
@@ -2273,7 +2279,7 @@ pub fn minimal_pr_capacity_errors(ci: dict, publish: dict) -> list<string> {
     "fast-policy-gates",
     "shell-gates",
     "windows-cross-check",
-    ARTIFACT_READY_JOB,
+    CLI_PRODUCER_JOB,
     SECURITY_READY_JOB,
   ] {
     if !(status?.needs ?? []).contains(name) {

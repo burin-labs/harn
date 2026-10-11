@@ -27,8 +27,9 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   # A cold merge-group producer can take more than 15 minutes to publish its
-  # exact-run artifacts. Every live consumer shares this bounded wait policy;
-  # the barrier jobs add scheduling and API headroom above it. The waits share
+  # exact-run artifacts. The waits that remain (the security barrier and the
+  # lanes that overlap real work with the build) share this bounded policy,
+  # with scheduling and API headroom above it. The waits share
   # the workflow token's API budget with every job in the repository, so each
   # backs off from 10s to 15s between reads, and a producer still queued after
   # 30 minutes fails the wait by name, inside the shortest waiter's 45-minute
@@ -1231,33 +1232,9 @@ jobs:
           scripts/ci/run_rust_test_lane.sh
           bash scripts/ci/run_workspace_tests.sh "$HARN_EXT_TEST_PARTITION"
 
-  # GitHub job dependencies wait for terminal producer state, even when an
-  # immutable v4 artifact is already available. This single free-hosted barrier
-  # turns CLI visibility into the dependency contract and lets Harn consumers
-  # overlap both the security build and the producer's test phase.
-  rust-artifacts-ready:
-    name: Wait for shared Harn binary
-    needs: [changes]
-    if: needs.changes.outputs.rust_paths == 'true'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 50
-    permissions:
-      actions: read
-      contents: read
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 1
-      - name: Wait for shared Harn binary
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: >-
-          ./scripts/ci/wait_for_run_artifacts.sh
-          harn-cli.tar.zst
-
   # The Linux sandbox proof consumes its own exact-commit archive, which the
-  # producer uploads several minutes before it finishes its test phase. Like
-  # the CLI barrier, this one starts at once and lets the waiter read the
+  # producer uploads several minutes before it finishes its test phase. This
+  # barrier starts at once and lets the waiter read the
   # producer's state: a queued or running producer is pending, so queue time
   # cannot spend the wait, and a producer that completes without the archive
   # fails the wait by name. Waiting for producer completion instead (#8751)
@@ -1496,12 +1473,14 @@ jobs:
 
   harn-audit:
     name: ${{ matrix.name }}
-    # Start CLI-independent setup immediately. Each worker waits for and
-    # verifies the exact-commit binary only at the last responsible moment.
+    # Each worker starts once the producer has published the exact-commit
+    # CLI. Its setup before the CLI is seconds, so waiting in the job held a
+    # hosted runner for the whole build: about 16 minutes on each of seven
+    # workers, against the org's concurrent-job cap.
     # Merge tier: conformance and the Harn audits are how a runtime or stdlib
     # change proves itself before it lands (harn#9495).
-    needs: [changes]
-    if: needs.changes.outputs.rust == 'true'
+    needs: [changes, rust-cli]
+    if: ${{ !cancelled() && needs.changes.outputs.rust == 'true' && needs.rust-cli.result == 'success' }}
     runs-on: ubuntu-24.04
     # The immutable CLI producer is shared, and the Harn proof work after it is
     # spread over free hosted workers. Everything here starts only once the CLI
@@ -1611,10 +1590,6 @@ jobs:
       - name: Check generated parser is current
         if: matrix.kind == 'audit'
         run: make check-tree-sitter-parser
-      - name: Wait for shared Harn binary
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: ./scripts/ci/wait_for_run_artifacts.sh harn-cli.tar.zst
       # This lane only executes Harn scripts. Download the small CLI artifact,
       # not the multi-gigabyte nextest archive consumed in workspace-test archive mode.
       - name: Download shared Harn binary
@@ -1668,8 +1643,8 @@ jobs:
   source-length-ratchet:
     name: Check source file lengths
     # The execution budget starts after the shared CLI is actually available.
-    needs: [changes, rust-artifacts-ready]
-    if: needs.changes.outputs.rust == 'true' && needs.rust-artifacts-ready.result == 'success'
+    needs: [changes, rust-cli]
+    if: ${{ !cancelled() && needs.changes.outputs.rust == 'true' && needs.rust-cli.result == 'success' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
@@ -1741,7 +1716,7 @@ jobs:
   # instrument and what it does not prove.
   binary-size-signal:
     name: Binary size signal
-    needs: [changes, rust-artifacts-ready]
+    needs: [changes, rust-cli]
     # Merge-group runs re-measure a commit nobody is reviewing. The signal is
     # for the pull-request author, plus the main push that records the baseline
     # the next pull request compares against. That record reads `rust_paths`,
@@ -1749,8 +1724,9 @@ jobs:
     # lanes but must still publish the baseline, measured on the merge group's
     # CLI for the same commit.
     if: >-
-      needs.changes.outputs.rust_paths == 'true'
-      && (github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main'))
+      ${{ !cancelled() && needs.changes.outputs.rust_paths == 'true'
+      && needs.rust-cli.result == 'success'
+      && (github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main')) }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
@@ -1951,11 +1927,11 @@ jobs:
     # This report describes prior completed merge-group runs, so it does not
     # depend on the current conformance result. Start it as soon as the shared
     # CLI is visible instead of adding an API-scan tail to conformance.
-    needs: [changes, rust-artifacts-ready]
+    needs: [changes, rust-cli]
     if: >-
-      github.event_name == 'merge_group'
+      ${{ !cancelled() && github.event_name == 'merge_group'
       && needs.changes.outputs.rust == 'true'
-      && needs.rust-artifacts-ready.result == 'success'
+      && needs.rust-cli.result == 'success' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
@@ -2007,11 +1983,11 @@ jobs:
   fast-policy-gates:
     name: Check fast repository policies
     # Same live-artifact barrier as the other consumers of the shared CLI.
-    needs: [changes, rust-artifacts-ready]
+    needs: [changes, rust-cli]
     # No event condition, deliberately. The contract asserts its absence
     # rather than the absence of one spelling, because any event term here
     # would put these refusals back behind the merge.
-    if: needs.changes.outputs.rust == 'true' && needs.rust-artifacts-ready.result == 'success'
+    if: ${{ !cancelled() && needs.changes.outputs.rust == 'true' && needs.rust-cli.result == 'success' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
@@ -2120,14 +2096,14 @@ jobs:
     name: Check repository policies
     # Consumes only the small portable CLI bundle through the same live
     # artifact barrier as harn-audit.
-    needs: [changes, rust-artifacts-ready]
+    needs: [changes, rust-cli]
     # `rust_paths`, not `rust`: no merge group runs this lane, so a push the
     # merge group already proved still runs it, on that run's CLI.
     if: >-
-      github.event_name == 'push'
+      ${{ !cancelled() && github.event_name == 'push'
       && github.ref == 'refs/heads/main'
       && needs.changes.outputs.rust_paths == 'true'
-      && needs.rust-artifacts-ready.result == 'success'
+      && needs.rust-cli.result == 'success' }}
     # Keep this execution-only lane on elastic capacity. It gains no compiler
     # cache benefit from a persistent worker, and merge-queue bursts otherwise
     # leave it waiting behind compile-bearing jobs on the scarce stable pool.
@@ -2633,7 +2609,6 @@ jobs:
         rust-cli,
         rust-check-inputs,
         rust-test-partitions,
-        rust-artifacts-ready,
         security-tests-ready,
         rust-test,
         rust-security,
@@ -2805,11 +2780,6 @@ jobs:
           require_result "$rust_test_partitions_result" \
             "Rust workspace test partitions failed or skipped while Rust proof was required." \
             test "${{ needs.changes.outputs.rust }}" != "true" -o "$COLOCATED_TESTS_DISABLED" = "true"
-
-          rust_artifacts_ready_result="${{ needs['rust-artifacts-ready'].result }}"
-          echo "Rust artifacts ready: $rust_artifacts_ready_result"
-          require_result "$rust_artifacts_ready_result" \
-            "Rust artifact handoff failed or skipped while Rust proof was required." [ "${{ needs.changes.outputs.rust }}" != "true" ]
 
           security_tests_ready_result="${{ needs['security-tests-ready'].result }}"
           echo "Linux security test inputs: $security_tests_ready_result"

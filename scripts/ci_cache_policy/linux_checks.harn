@@ -850,11 +850,8 @@ fn producer_artifact_order_errors(workflow: dict) -> list<string> {
   return errors
 }
 
-fn artifact_ready_barrier_errors(workflow: dict) -> list<string> {
-  const ready_job = workflow?.jobs?.[ARTIFACT_READY_JOB]
-  const ready_needs = ready_job?.needs ?? []
-  const ready_step = step_by_name(ready_job?.steps ?? [], "Wait for shared Harn binary")
-  const ready_command = trim(ready_step?.run ?? "")
+/** The in-job waits that remain overlap real work; their budget is shared. */
+fn artifact_wait_budget_errors(workflow: dict) -> list<string> {
   if trim(workflow?.env?.HARN_EXT_ARTIFACT_WAIT_MAX_ATTEMPTS ?? "")
     != ARTIFACT_WAIT_MAX_ATTEMPTS
     || trim(workflow?.env?.HARN_EXT_ARTIFACT_WAIT_INTERVAL_SECONDS ?? "")
@@ -862,24 +859,8 @@ fn artifact_ready_barrier_errors(workflow: dict) -> list<string> {
     || trim(workflow?.env?.HARN_EXT_ARTIFACT_WAIT_STATE_EVERY_POLLS ?? "")
       != ARTIFACT_WAIT_STATE_EVERY_POLLS
     || trim(workflow?.env?.HARN_EXT_ARTIFACT_WAIT_RATE_LIMIT_MAX_SECONDS ?? "")
-      != ARTIFACT_WAIT_RATE_LIMIT_MAX_SECONDS
-    || trim(ready_job?.["runs-on"] ?? "") != HOSTED_LINUX_RUNNER
-    || trim(to_string(ready_job?.["timeout-minutes"] ?? ""))
-      != ARTIFACT_READY_TIMEOUT_MINUTES
-    || ready_needs != ["changes"]
-    || trim(ready_job?.permissions?.actions ?? "")
-      != "read"
-    || trim(ready_job?.permissions?.contents ?? "")
-      != "read"
-    || !contains(ready_command, "./scripts/ci/wait_for_run_artifacts.sh")
-    || !contains(ready_command, "harn-cli.tar.zst")
-    || contains(ready_command, "harn-security.tar.zst")
-    || len(matching_steps(ready_job, PERSISTENT_SCCACHE_ACTION))
-      > 0
-    || len(matching_steps(ready_job, RUST_CACHE_ACTION)) > 0 {
-    return [
-      "ci.yml:rust-artifacts-ready must be the bounded free-hosted immutable artifact barrier",
-    ]
+      != ARTIFACT_WAIT_RATE_LIMIT_MAX_SECONDS {
+    return ["ci.yml:artifact waits must share the bounded workflow wait budget"]
   }
   return []
 }
@@ -916,32 +897,28 @@ fn security_ready_barrier_errors(workflow: dict) -> list<string> {
 fn harn_audit_overlap_errors(workflow: dict) -> list<string> {
   const audit = workflow?.jobs?.["harn-audit"]
   const steps = audit?.steps ?? []
-  const wait_index = step_index_by_name(steps, "Wait for shared Harn binary")
   const download_index = step_index_by_name(steps, "Download shared Harn binary")
   const verify_index = step_index_by_name(steps, "Verify shared Harn binary")
   const grammar_index = step_index_by_name(steps, "Build tree-sitter grammar for the parse sweep")
   const parser_index = step_index_by_name(steps, "Check generated parser is current")
-  const wait_command = trim(step_by_name(steps, "Wait for shared Harn binary")?.run ?? "")
   const parser_command = trim(step_by_name(steps, "Check generated parser is current")?.run ?? "")
   const audit_command = trim(step_by_name(steps, "Run $" + "{{ matrix.step_name }}")?.run ?? "")
-  if (audit?.needs ?? []) != ["changes"]
-    || trim(audit?.if ?? "") != "needs.changes.outputs.rust == 'true'"
+  if (audit?.needs ?? []) != ["changes", CLI_PRODUCER_JOB]
+    || trim(audit?.if ?? "") != LIVE_CLI_CONSUMER_IF
+    || step_index_by_name(steps, "Wait for shared Harn binary") >= 0
     || trim(to_string(audit?.["timeout-minutes"] ?? ""))
       != HARN_AUDIT_TIMEOUT_MINUTES
-    || wait_index < 0
     || download_index < 0
     || verify_index < 0
     || grammar_index < 0
     || parser_index < 0
     || grammar_index >= parser_index
-    || parser_index >= wait_index
-    || wait_index >= download_index
+    || parser_index >= download_index
     || download_index >= verify_index
-    || !contains(wait_command, "wait_for_run_artifacts.sh harn-cli.tar.zst")
     || parser_command != "make check-tree-sitter-parser"
     || !contains(audit_command, "--tree-sitter-parser-preflighted") {
     return [
-      "ci.yml:harn-audit must overlap CLI-independent setup, then wait for and verify the exact shared Harn binary",
+      "ci.yml:harn-audit must start from the CLI producer and verify the exact shared Harn binary, not hold a runner waiting for it",
     ]
   }
   return []
@@ -964,12 +941,13 @@ fn artifact_consumer_handoff_errors(workflow: dict) -> list<string> {
     const consumer = workflow?.jobs?.[consumer_name]
     const consumer_needs = consumer?.needs ?? []
     const consumer_if = trim(consumer?.if ?? "")
-    if !consumer_needs.contains(ARTIFACT_READY_JOB)
+    if !consumer_needs.contains(CLI_PRODUCER_JOB)
       || consumer_needs.contains("rust-check-inputs")
-      || !contains(consumer_if, "needs.rust-artifacts-ready.result == 'success'") {
+      || !starts_with(consumer_if, "$" + "{{ !cancelled() && ")
+      || !contains(consumer_if, "needs.rust-cli.result == 'success'") {
       errors = errors
         + [
-          "ci.yml:${consumer_name} must consume live artifacts through rust-artifacts-ready, not producer completion",
+          "ci.yml:${consumer_name} must need rust-cli, require its success under !cancelled(), and not wait on the workspace producer",
         ]
     }
   }
@@ -979,11 +957,10 @@ fn artifact_consumer_handoff_errors(workflow: dict) -> list<string> {
   )
   const status_command = trim(status_step?.run ?? "")
   const status_needs = workflow?.jobs?.["ci-status"]?.needs ?? []
-  if !status_needs.contains(ARTIFACT_READY_JOB)
+  if !status_needs.contains(CLI_PRODUCER_JOB)
     || !status_needs.contains(SECURITY_READY_JOB)
-    || !contains(status_command, "needs['rust-artifacts-ready'].result")
-    || !contains(status_command, "needs['security-tests-ready'].result")
-    || !contains(status_command, "Rust artifact handoff failed or skipped") {
+    || !contains(status_command, "needs['rust-cli'].result")
+    || !contains(status_command, "needs['security-tests-ready'].result") {
     errors = errors + ["ci.yml:ci-status must fail closed on live artifact handoff"]
   }
   return errors
@@ -1059,7 +1036,7 @@ pub fn event_skip_propagation_errors(workflow: dict) -> list<string> {
 
 fn live_artifact_handoff_errors(workflow: dict) -> list<string> {
   return producer_artifact_order_errors(workflow)
-    + artifact_ready_barrier_errors(workflow)
+    + artifact_wait_budget_errors(workflow)
     + security_ready_barrier_errors(workflow)
     + harn_audit_overlap_errors(workflow)
     + artifact_consumer_handoff_errors(workflow)

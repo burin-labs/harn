@@ -60,7 +60,6 @@ pipeline test_release_order_is_checked_before_expensive_ci_admission(harness: Ha
     "rust-cli",
     "rust-check-inputs",
     "rust-test-partitions",
-    "rust-artifacts-ready",
     "security-tests-ready",
     "rust-test",
     "rust-security",
@@ -363,10 +362,10 @@ pipeline test_minimal_pr_capacity_policy_and_negative_controls(harness: Harness,
   const ci = read_yaml(harness.fs, "../../.github/workflows/ci.yml")
   assert_eq(minimal_pr_capacity_errors(ci, publish), [])
   let self_hosted_waiter = ci
-  self_hosted_waiter.jobs["rust-artifacts-ready"]["runs-on"] = "self-hosted"
+  self_hosted_waiter.jobs["security-tests-ready"]["runs-on"] = "self-hosted"
   assert(
     minimal_pr_capacity_errors(self_hosted_waiter, publish).contains(
-      "ci.yml:rust-artifacts-ready must use GitHub-hosted ubuntu-24.04",
+      "ci.yml:security-tests-ready must use GitHub-hosted ubuntu-24.04",
     ),
   )
   let pr_policy = ci
@@ -379,17 +378,19 @@ pipeline test_minimal_pr_capacity_policy_and_negative_controls(harness: Harness,
   // A main push the merge group already proved sets `rust` false. Main-only
   // lanes gated on it would never run again, so each one reads `rust_paths`.
   let heavy_gated_policy = ci
-  heavy_gated_policy.jobs["audit-scripts"].if = "github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.changes.outputs.rust == 'true' && needs.rust-artifacts-ready.result == 'success'"
+  heavy_gated_policy.jobs["audit-scripts"].if = "github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.changes.outputs.rust == 'true' && needs.rust-cli.result == 'success'"
   assert(
     minimal_pr_capacity_errors(heavy_gated_policy, publish).contains(
       "ci.yml:audit-scripts must run on Rust-changing main pushes only",
     ),
   )
-  let heavy_gated_ready = ci
-  heavy_gated_ready.jobs["rust-artifacts-ready"].if = "needs.changes.outputs.rust == 'true'"
+  // Without a status function the producer's skipped capacity ancestors
+  // skip the main-only lane on every push.
+  let skipped_policy = ci
+  skipped_policy.jobs["audit-scripts"].if = "github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.changes.outputs.rust_paths == 'true' && needs.rust-cli.result == 'success'"
   assert(
-    minimal_pr_capacity_errors(heavy_gated_ready, publish).contains(
-      "ci.yml:rust-artifacts-ready must run whenever a main-only lane needs the shared CLI",
+    minimal_pr_capacity_errors(skipped_policy, publish).contains(
+      "ci.yml:audit-scripts must run on Rust-changing main pushes only",
     ),
   )
   let heavy_gated_size = ci
@@ -453,7 +454,7 @@ pipeline test_minimal_pr_capacity_policy_and_negative_controls(harness: Harness,
     ),
   )
   let queued_cross = ci
-  queued_cross.jobs["windows-cross-check"].needs = ["changes", "rust-artifacts-ready"]
+  queued_cross.jobs["windows-cross-check"].needs = ["changes", "rust-cli"]
   assert(
     minimal_pr_capacity_errors(queued_cross, publish).contains(
       "ci.yml:windows-cross-check must need only changes",
