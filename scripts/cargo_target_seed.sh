@@ -119,6 +119,12 @@ clean_workspace_artifacts() {
       '# Disposable Cargo target clone owned by cargo_target_seed.sh.' \
       > "${cache_tag}" || return 1
   fi
+  # Cargo versions differ in whether scoped clean checks this signature. The
+  # seed owner must enforce it before asking Cargo to prune the private clone.
+  [[ -f "${cache_tag}" ]] || return 1
+  local signature
+  IFS= read -r signature < "${cache_tag}" || return 1
+  [[ "${signature}" == 'Signature: 8a477f597d28d172789f06886806bc55' ]] || return 1
 
   # Cargo fingerprints and dep-info contain absolute paths to the worktree that
   # produced them. Keep third-party dependencies warm, but force every
