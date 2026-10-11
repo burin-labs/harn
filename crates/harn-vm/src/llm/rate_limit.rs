@@ -1250,7 +1250,7 @@ fn get_model_rate_limits(provider: &str, model: &str) -> Option<crate::llm_confi
 }
 
 #[cfg(test)]
-fn provider_request_usage(provider: &str) -> u64 {
+pub(crate) fn provider_request_usage(provider: &str) -> u64 {
     ensure_initialized_from_config();
     let mut registry = registry().lock().expect("rate limiter mutex poisoned");
     let Some(limiter) = registry.limiters.get_mut(&provider_key(provider)) else {
