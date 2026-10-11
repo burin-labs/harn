@@ -9,7 +9,7 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
-## Unreleased
+## v0.10.165
 
 ### Breaking
 
@@ -22,11 +22,68 @@ keeps condensed series summaries instead of full per-patch history.
   `bookkeeping_count: 0` to existing evidence literals. Readers should use `origin` and `bookkeeping_count` to distinguish
   harness bookkeeping, while retaining unknown metadata diagnostics for unmarked assistants.
 
+- **Date and URL validation (#9684).** `date_parse` rejects malformed strings instead of extracting digits and discarding
+  offsets or fractional seconds. Invalid date formats return catchable errors. URL construction preserves reserved
+  characters in hierarchical paths and explicit empty queries and fragments.
+
+  Migration: replace slash-separated dates such as `2026/04/25` with `2026-04-25`, and handle rejected input with `try`.
+- **The provider catalog artifact (schema v13) carries each provider's
+  setup-UI default model.** `portal_defaults` maps a provider to the model a
+  host offers when a person picks it, read from `provider_defaults.<p>.portal`.
+  Each entry names `model_id` and, where the setup UI selects one,
+  `reasoning_effort` (from `provider_defaults.<p>.portal_reasoning_effort`).
+  It is separate from `qc_defaults`, the cheap quality-check route. The setup-UI
+  defaults move to the current generation: Anthropic `claude-sonnet-5-5`,
+  OpenAI `gpt-6-luna` at `high` effort, and Ollama `gemma4:26b`, the `local`
+  variant's row. Runtime fallbacks are unchanged.
+
+  Migration: regenerate vendored catalog artifacts and bindings at v13. Code
+  that builds a `ProviderCatalogArtifact` literal adds
+  `portal_defaults: BTreeMap::new()`, and code that builds a
+  `ProviderDefaultModels` literal adds `portal_reasoning_effort: None`.
+
+### Added
+
+- The `harn` binary now carries its stdlib precompiled, so a first run on a new machine compiles no stdlib module
+  and writes none to the bytecode cache. Embedders get the same by linking `harn-stdlib-artifacts` and calling
+  `harn_stdlib_artifacts::register()` at startup.
+
 ### Changed
 
 - A command-running tool call whose declared path is under a `read` external root is now admitted when the active
   `os_hardened` sandbox measurably keeps that path read-only for the child. The answer is read from the rules the
   macOS and Linux backends actually install. Anything unmeasured, Windows, and `unrestricted` still refuse.
+
+- Missing tool-call recovery evaluates intent and target tool in one bounded decision request. An explicit evaluation policy
+  can select a native decision route; otherwise recovery selects the backend from the loop route's capabilities.
+  Refusals remain ambiguous and cancellation still stops the loop.
+
+  Structured evaluation policies accept typed sampling, output-cap, and timeout overrides while keeping one-request
+  dispatch. Missing-call recovery preserves its explicit chat settings through that policy;
+  native routes refuse incompatible settings.
+
+  Structured evaluation delivers question instructions and label meanings in the prompt and schema from one question set.
+- Build configuration-audit indexes without repeatedly copying growing dictionaries, reducing the work needed to check
+  agent gates.
+- Quality-check, sitrep, judge and approval-reviewer defaults move to the
+  current generation: `claude-haiku-5-5` for Anthropic and `gpt-6-luna` for
+  OpenAI. The bare runtime fallbacks move to `claude-sonnet-5-5` and
+  `gpt-6-luna`. `std/agent/sitrep` resolves model aliases before adding its
+  summary temperature only on a route whose capability row accepts one, so
+  routes that reject non-default sampling no longer refuse the summary call.
+  Response compaction, prompt refinement, scratchpad reorganization and
+  missing-tool classification also leave sampling to the resolved route
+  instead of forcing an unsupported temperature. Explicit caller settings
+  still receive the provider's capability validation. Decision evaluations
+  preserve omitted effort and temperature instead of inventing defaults, allowing
+  structured classification on routes that reject sampling parameters.
+  Provider capability metadata exposes the supported effort ladder, and
+  missing-tool classification chooses the lowest catalog-supported effort
+  instead of forcing an unsupported reasoning-off setting. An unknown effort
+  ladder leaves reasoning to the provider. Native decision tape identities
+  remain unchanged when effort and sampling are omitted.
+  The standalone approval reviewer uses
+  Haiku 5.5, matching its Anthropic catalog role.
 
 ### Fixed
 
@@ -46,6 +103,44 @@ keeps condensed series summaries instead of full per-patch history.
   Test suites retain prepared bytecode for their module graph using the same
   bounded graph cache as hosted execution, avoiding repeated hydration when a
   suite imports more modules than an ordinary VM's small cache can hold.
+
+- The agent loop declares named terminal callback and dispatch failures. Type checking now rejects malformed failure
+  records, including a missing callback cause.
+- Reduce native stack use when parsing nested expressions while preserving the
+  64-level nesting limit and its diagnostics.
+- Precompiled module artifacts now serialize public value and type names in sorted order,
+  so repeated cold builds with the same compiler and sources produce identical `.harnmod` bytes.
+- Worker queue claims no longer read as expired because of timing under load.
+  A renewal now only extends a lease, so a background heartbeat renewal that
+  appends after a newer one cannot shorten it. Claim, renewal, and
+  `harn orchestrator queue drain` receipts judge a lease as of the instant it
+  was written instead of after a log read that can outlast a short TTL.
+- Runtime updates now request a fresh-base retry when main changes a file the update regenerates.
+  Every adopted checkout and fresh successor rereads both pins before writing, preserving newer pins without downgrades.
+- The command risk scan no longer labels a redirect to `/dev/null` or a standard stream as `outside_workspace`, so a
+  command such as `ruff check ... 2>/dev/null` against a workspace file is allowed instead of asking for approval.
+- The approval reviewer no longer refuses an action because the user asked for
+  something dangerous. Its prompt now defines each risk level by what the
+  action does to its real target and each authorization level by how far the
+  goal's consent reaches, with contrastive allow/deny examples. On the held-out
+  calibration rows, the bundled Haiku 4.5 reviewer's wrong approvals fell from
+  15.2% to 3.0%.
+- Agent sessions initialized with an explicit workspace root through a symlink now keep the same workspace identity
+  when reloaded after a restart. Explicit roots still use their own `.harn` directory, including roots that have not
+  been created yet.
+- New worktrees can reuse dependency snapshots from Cargo targets that setup created before the first build.
+  Snapshot preparation marks only its private clone as disposable cache, preserving the original target and Cargo's
+  cleanup guard.
+- Allow the release workflow to retire an unpublished candidate whose own producer
+  and exact-source main CI both failed, without requiring a downstream consumer run
+  that never started.
+- Fresh source setup gives the canonical CLI build a one-hour default budget instead of stopping a cold build after ten
+  minutes. Explicit build budgets remain authoritative, and warm-artifact discovery no longer emits a broken-pipe error on
+  an early cache hit.
+- Fetch missing advertised default-branch history before checking push signatures,
+  so a main-branch advance does not recheck the repository's entire history.
+- Cargo target seeds reject malformed cache ownership markers before workspace cleanup,
+  including with Cargo versions that accept those markers during scoped clean.
 
 ## v0.10.164 (never published)
 
