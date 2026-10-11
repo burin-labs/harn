@@ -265,6 +265,14 @@ discovered="$(
 )"
 [[ "$discovered" == "42" ]]
 
+echo "discover can stop at the first hit without breaking the JSON producer"
+export FAKE_RUNS_JSON="$(jq -nc '{workflow_runs: [range(0;30) | {id:42, conclusion:"success", metadata:("x" * 3500)}]}')"
+discovered="$(
+  env PATH="$tmpdir/bin:$PATH" HARN_CACHE_POLICY_PATH="$HARN_CACHE_POLICY_PATH" \
+    "$script" "$platform" discover --repo burin-labs/harn 2>"$tmpdir/discover.err"
+)"
+[[ "$discovered" == "42" && ! -s "$tmpdir/discover.err" ]]
+
 echo "download-and-restore uses discover + gh run download"
 rm -rf "$tmpdir/downloaded"
 mkdir -p "$tmpdir/fake-artifact"

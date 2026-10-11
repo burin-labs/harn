@@ -15,13 +15,14 @@ This script:
 - configures `.githooks` as the repo hook path
 - installs `cargo-nextest`, `sccache`, and `actionlint` when their toolchains are available
 - enables the sccache rustc wrapper via a local `.cargo/config.toml`
-- writes a per-worktree temp Cargo `target-dir` when `CODEX_WORKTREE_PATH` is
-  set so parallel Codex worktrees stay isolated
+- writes a private Cargo `target-dir` under the developer cache for each
+  worktree so parallel builds stay isolated
 - installs repo-local markdown tooling plus Node dependencies for the portal,
   `tree-sitter-harn/`, and `editors/vscode/` when `npm` is available
 - builds `crates/harn-cli/portal-dist` when `npm` is available
 - reuses the repo-root portal bootstrap path for `npm run portal:*` commands
-- runs `cargo check --workspace`
+- builds and verifies the canonical Harn CLI, then publishes a reusable
+  dependency seed
 
 Heavy setup phases are fingerprinted under `.codex/dev-setup/`, so rerunning
 the script in an already prepared checkout is normally a fast no-op. Set
@@ -45,24 +46,17 @@ make all
 
 ### Warm vs cold expectations
 
-On a modern workstation with a populated target/ cache you should see:
+The first setup may compile the full CLI dependency graph. It allows up to
+one hour for that build; ordinary binary-resolution commands retain their
+ten-minute default. Set `HARN_BIN_CARGO_TIMEOUT_SECONDS` to override either
+budget. Waiting for the shared Rust build lane is accounted for separately
+from compilation.
 
-- `cargo check --workspace`: ~0.1–5 s warm, ~30–90 s cold
-- `cargo test --workspace --lib`: ~0.1–0.5 s warm (after the initial build)
-- `cargo clippy --workspace --all-targets -- -D warnings`: ~1–20 s warm
-- `cargo run --bin harn -- test conformance`: ~7–15 s
-- Full `make all`: ~60–120 s warm, ~3–5 min cold
-
-What triggers a cold rebuild:
-
-- Editing `Cargo.toml` at the workspace or crate root (profile flips,
-  dependency changes, feature flag changes)
-- Toolchain bump (`rustup update` that installs a new stable)
-- `cargo clean`
-- Running `cargo fmt` on `Cargo.toml` files (rare, but it does re-stamp)
-
-On macOS, Spotlight may index freshly-linked test binaries on first run,
-adding ~30–60 s of stat traffic unrelated to cargo.
+Later builds reuse the worktree's artifacts. Fresh worktrees can restore a
+compatible dependency seed, while compiler objects are shared through sccache.
+Toolchain, dependency, feature, and source changes can invalidate that reuse.
+Use the [testing guide](docs/src/dev/testing.md) to select the smallest check
+that proves your change.
 
 ### Stale bytecode cache
 

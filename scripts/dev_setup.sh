@@ -574,7 +574,11 @@ if [[ "${SETUP_PROFILE}" != "bootstrap" ]]; then
   # Rust-heavy lease between them, and lets the authoritative freshness build
   # queue behind unrelated work after setup has already compiled the binary.
   log "Building and proving the canonical Harn CLI"
-  HARN_BIN='' HARN_BIN_NO_BUILD=0 ./scripts/harn_bin.sh --print >/dev/null
+  # Fresh setup can compile the entire graph. Keep the resolver's shorter
+  # interactive default for ordinary commands, but let this cold build finish.
+  HARN_BIN='' HARN_BIN_NO_BUILD=0 \
+    HARN_BIN_CARGO_TIMEOUT_SECONDS="${HARN_BIN_CARGO_TIMEOUT_SECONDS:-3600}" \
+    ./scripts/harn_bin.sh --print >/dev/null
   # Signing mutates the canonical artifact identity, so refresh the receipt
   # only after the final bytes are in place and before publishing a target seed.
   ./scripts/sign_local_macos.sh
