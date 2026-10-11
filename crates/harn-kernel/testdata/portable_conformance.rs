@@ -644,3 +644,31 @@ pub const INVALID_CASES: &[InvalidCase] = &[
         expected_code: "compile_frontend",
     },
 ];
+
+pub struct PackageCompilationCase {
+    pub id: &'static str,
+    pub source: &'static str,
+    pub entry: &'static str,
+    pub expected_ok: bool,
+}
+
+pub const PACKAGE_COMPILATION_CASES: &[PackageCompilationCase] = &[
+    PackageCompilationCase {
+        id: "removed-provider-wrapper-alias",
+        source: "fn reduce(input: string) { return with_rate_limit(input) }",
+        entry: "reduce",
+        expected_ok: false,
+    },
+    PackageCompilationCase {
+        id: "retained-provider-call-alias",
+        source: "fn reduce(input: string) { return llm_call(input) }",
+        entry: "reduce",
+        expected_ok: true,
+    },
+    PackageCompilationCase {
+        id: "retained-provider-call-method",
+        source: "fn reduce(harness: Harness, input: string) { return harness.llm.call(input) }",
+        entry: "reduce",
+        expected_ok: true,
+    },
+];

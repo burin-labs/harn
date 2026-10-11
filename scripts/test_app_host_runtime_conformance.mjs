@@ -27,12 +27,40 @@ const corpus = {
       expected_code: "known_failure",
     },
   ],
+  compilation: [
+    {
+      id: "compile-rejection",
+      package: { rootSource: "invalid", rootImports: [], modules: [] },
+      entry: "project",
+      expected_ok: false,
+      expected_diagnostics: [{ code: "undefined_name", message: "undefined" }],
+    },
+    {
+      id: "compile-acceptance",
+      package: { rootSource: "valid", rootImports: [], modules: [] },
+      entry: "project",
+      expected_ok: true,
+      expected_diagnostics: [],
+    },
+  ],
 };
 
-function runtime(value, failureStatus = "failed") {
+function runtime(value, failureStatus = "failed", diagnostic = "undefined") {
   return {
     compile(source) {
       return { ok: true, artifactBytes: () => source, free() {} };
+    },
+    compilePackage(packageJson) {
+      const { rootSource } = JSON.parse(packageJson);
+      const ok = rootSource === "valid";
+      return {
+        ok,
+        diagnosticsJson: () =>
+          JSON.stringify(
+            ok ? [] : [{ code: "undefined_name", message: diagnostic }],
+          ),
+        free() {},
+      };
     },
     start(artifact, input, grants) {
       assert.equal(input, "null");
@@ -50,15 +78,27 @@ function runtime(value, failureStatus = "failed") {
 test("conformance checks both successful values and runtime failures", () => {
   assert.equal(
     checkRuntimeConformance(runtime(7), corpus, "current"),
-    "current: 2/2 portable cases passed",
+    "current: 4/4 portable cases passed",
   );
   assert.throws(
     () => checkRuntimeConformance(runtime(6), corpus, "stale"),
-    /stale: 1\/2 cases passed; 1 failed\n {2}completion: expected 7, got 6/,
+    /stale: 3\/4 cases passed; 1 failed\n {2}completion: expected 7, got 6/,
   );
   assert.throws(
     () => checkRuntimeConformance(runtime(7, "completed"), corpus, "stale"),
     /failure: expected failed, got completed/,
+  );
+});
+
+test("compilation checks canonical diagnostics as well as rejection", () => {
+  assert.throws(
+    () =>
+      checkRuntimeConformance(
+        runtime(7, "failed", "use a removed method"),
+        corpus,
+        "stale",
+      ),
+    /stale: 3\/4 cases passed; 1 failed\n {2}compile-rejection: expected diagnostics/,
   );
 });
 
@@ -84,6 +124,27 @@ test("missing or empty corpus cannot establish conformance", () => {
         "empty",
       ),
     /failure corpus is empty or missing/,
+  );
+  assert.throws(
+    () =>
+      checkRuntimeConformance(
+        runtime(7),
+        { ...corpus, compilation: [] },
+        "empty",
+      ),
+    /compilation corpus is empty or missing/,
+  );
+  assert.throws(
+    () =>
+      checkRuntimeConformance(
+        runtime(7),
+        {
+          ...corpus,
+          compilation: [{ ...corpus.compilation[0], expected_diagnostics: [] }],
+        },
+        "empty",
+      ),
+    /expected compilation decision or diagnostics are missing/,
   );
 });
 

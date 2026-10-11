@@ -19,6 +19,9 @@ export function checkRuntimeConformance(runtime, corpus, label) {
   if (!Array.isArray(corpus.failures) || corpus.failures.length === 0) {
     throw new Error("portable failure corpus is empty or missing");
   }
+  if (!Array.isArray(corpus.compilation) || corpus.compilation.length === 0) {
+    throw new Error("portable compilation corpus is empty or missing");
+  }
 
   const failures = [];
   const cases = [...corpus.pure, ...corpus.failures];
@@ -76,10 +79,50 @@ export function checkRuntimeConformance(runtime, corpus, label) {
       compiled?.free();
     }
   }
+  for (const test of corpus.compilation) {
+    if (typeof test.id !== "string" || ids.has(test.id)) {
+      throw new Error("portable corpus has a missing or duplicate case ID");
+    }
+    ids.add(test.id);
+    let compiled;
+    try {
+      if (
+        typeof test.expected_ok !== "boolean" ||
+        !Array.isArray(test.expected_diagnostics) ||
+        (!test.expected_ok && test.expected_diagnostics.length === 0)
+      ) {
+        throw new Error(
+          "expected compilation decision or diagnostics are missing",
+        );
+      }
+      compiled = runtime.compilePackage(
+        JSON.stringify(test.package),
+        test.entry,
+        "function",
+      );
+      if (compiled.ok !== test.expected_ok) {
+        throw new Error(
+          `expected compilation ${test.expected_ok}, got ${compiled.ok}`,
+        );
+      }
+      const actual = JSON.parse(compiled.diagnosticsJson());
+      if (!isDeepStrictEqual(actual, test.expected_diagnostics)) {
+        throw new Error(
+          `expected diagnostics ${JSON.stringify(test.expected_diagnostics)}, got ${compiled.diagnosticsJson()}`,
+        );
+      }
+      completed++;
+    } catch (cause) {
+      failures.push(`  ${test.id}: ${cause.message}`);
+    } finally {
+      compiled?.free();
+    }
+  }
+  const total = cases.length + corpus.compilation.length;
   if (failures.length > 0) {
     throw new Error(
-      `${label}: ${completed}/${cases.length} cases passed; ${failures.length} failed\n${failures.join("\n")}`,
+      `${label}: ${completed}/${total} cases passed; ${failures.length} failed\n${failures.join("\n")}`,
     );
   }
-  return `${label}: ${completed}/${cases.length} portable cases passed`;
+  return `${label}: ${completed}/${total} portable cases passed`;
 }
