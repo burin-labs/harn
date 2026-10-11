@@ -79,7 +79,7 @@ structured_output = "native"
 # so both live Cerebras routes agree. Source is that provider-level statement,
 # not a per-model probe of this route.
 tools_exclude_response_format = true
-thinking_modes = ["effort"]
+thinking_modes = ["enabled", "effort"]
 reasoning_effort_supported = true
 reasoning_effort_levels = ["none", "low", "medium", "high"]
 reasoning_none_supported = true

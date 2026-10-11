@@ -6251,6 +6251,7 @@
       },
       "reasoning": {
         "modes": [
+          "enabled",
           "effort"
         ],
         "effort_supported": true,

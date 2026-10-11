@@ -243,7 +243,7 @@ fn cerebras_qwen_38_preserves_vision_and_its_measured_effort_ladder() {
     let caps = lookup("cerebras", "qwen-3.8-27b");
     assert!(caps.native_tools);
     assert!(caps.vision_supported);
-    assert_eq!(caps.thinking_modes, vec!["effort"]);
+    assert_eq!(caps.thinking_modes, vec!["enabled", "effort"]);
     assert!(caps.reasoning_effort_supported);
     assert!(caps.reasoning_none_supported);
     assert_eq!(
