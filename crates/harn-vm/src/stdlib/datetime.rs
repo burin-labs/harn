@@ -72,8 +72,7 @@ fn date_format_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
     let dt = datetime_from_arg(args.first(), "date_format")?;
     let fmt = args
         .get(1)
-        .map(|a| a.display())
-        .unwrap_or_else(|| DEFAULT_FORMAT.to_string());
+        .map_or_else(|| DEFAULT_FORMAT.to_string(), VmValue::display);
     let mut formatted = String::new();
     match args.get(2) {
         Some(VmValue::Nil) | None => dt.format(&fmt).write_to(&mut formatted),
