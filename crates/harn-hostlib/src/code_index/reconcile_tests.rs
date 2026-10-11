@@ -123,7 +123,7 @@ fn checkpoint_retains_complete_graph_and_unvisited_metadata_then_resumes() {
     interrupt_after_two(&mut state);
 
     let checkpoint = CodeIndexSnapshot::load(root).unwrap().unwrap();
-    let mut restored = IndexState::from_snapshot(checkpoint.clone()).unwrap();
+    let mut restored = IndexState::from_snapshot(checkpoint).unwrap();
     assert_eq!(restored.files[&c_id].content_hash, c_hash);
     assert_eq!(restored.files[&c_id].mtime_ms, c_mtime);
     assert!(restored.path_to_id.contains_key("deleted.py"));
