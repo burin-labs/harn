@@ -424,7 +424,7 @@ fn parse_datetime_auto(input: &str) -> Result<DateTime<Utc>, VmError> {
     }
 
     // RFC 3339 requires seconds; ISO 8601 also permits minute precision.
-    for fmt in ["%Y-%m-%dT%H:%M%:z", "%Y-%m-%d %H:%M%:z", "%Y-%m-%dT%H:%M%z"] {
+    for fmt in ["%Y-%m-%dT%H:%M%#z", "%Y-%m-%d %H:%M%#z"] {
         if let Ok(dt) = DateTime::parse_from_str(trimmed, fmt) {
             return Ok(dt.with_timezone(&Utc));
         }
