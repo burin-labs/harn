@@ -21,7 +21,10 @@ Upstream authorship, Apache-2.0 license, and SDK chain implementation remain
 in their original files. Harn removes upstream's `legacy-client` feature,
 which selects the deprecated Hyper 0.14 and Rustls 0.21 connector. Consumers
 that selected it must use `default-https-client`, or keep default features
-enabled. The modern TLS client and credential chains retain upstream behavior.
+enabled. The SDK's default connector also requires `BehaviorVersion::v2026_01_12()`
+or newer. Callers that keep an older behavior version must supply a modern HTTP
+client explicitly through `ConfigLoader::http_client`. The modern TLS client and
+credential chains retain upstream behavior.
 The published upstream archive omits the fixture
 directory used by its internal unit tests. Those unavailable tests and upstream
 doctests are disabled in the package manifest. A recorded crate-level
