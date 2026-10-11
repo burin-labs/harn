@@ -27,9 +27,10 @@ use super::IndexState;
 /// Current format version. Bumped whenever the snapshot layout changes
 /// in a non-additive way, or when graph edges a snapshot stores would be
 /// computed differently, since a restore keeps the stored edges for every
-/// file that has not changed. v3: `REFS` and `CALLS` edges no longer
-/// depend on the order files were indexed.
-pub const SNAPSHOT_FORMAT_VERSION: u32 = 3;
+/// file that has not changed. v4 adds partial HEAD-verification progress;
+/// older readers must not treat a checkpoint as a fully verified HEAD when
+/// the checkout reverts to the previously recorded commit.
+pub const SNAPSHOT_FORMAT_VERSION: u32 = 4;
 
 /// On-disk metadata header. Small and cheap to read so embedders can
 /// peek at a snapshot without parsing the whole thing.
@@ -143,6 +144,9 @@ pub struct CodeIndexSnapshot {
     /// queries can be served.
     #[serde(default)]
     pub(super) symbols: Option<GraphSnapshot>,
+    /// Completed content checks at a newer HEAD, before the full walk finished.
+    #[serde(default)]
+    pub(super) reconcile_progress: Option<super::reconcile::ReconcileProgress>,
 }
 
 impl CodeIndexSnapshot {
@@ -270,6 +274,7 @@ impl IndexState {
             versions: self.versions.clone(),
             agents: self.agents.snapshot(),
             symbols: Some(self.symbols.snapshot()),
+            reconcile_progress: self.reconcile_progress.clone(),
         }
     }
 
@@ -335,6 +340,7 @@ impl IndexState {
         state.symbols = graph;
         state.last_built_unix_ms = snap.meta.indexed_at_ms;
         state.git_head = snap.meta.git_head;
+        state.reconcile_progress = snap.reconcile_progress;
         state.set_next_file_id(snap.next_file_id);
         // Module membership is derived from the path table, not stored:
         // a snapshot that predates a resolver would otherwise restore a
@@ -426,6 +432,15 @@ mod tests {
         let dir = fixture_tree();
         let mut snap = snapshot_for(dir.path());
         snap.symbols = None;
+        snap.save(dir.path()).unwrap();
+        assert!(CodeIndexSnapshot::load(dir.path()).unwrap().is_none());
+    }
+
+    #[test]
+    fn load_rejects_v3_snapshots_without_checkpoint_semantics() {
+        let dir = fixture_tree();
+        let mut snap = snapshot_for(dir.path());
+        snap.meta.format_version = 3;
         snap.save(dir.path()).unwrap();
         assert!(CodeIndexSnapshot::load(dir.path()).unwrap().is_none());
     }

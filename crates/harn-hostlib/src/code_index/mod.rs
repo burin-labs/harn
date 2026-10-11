@@ -91,6 +91,7 @@ mod module_index;
 mod move_symbol;
 mod overlay;
 mod readonly;
+mod reconcile;
 mod refactor_core;
 mod rename;
 mod repo_map;
@@ -219,9 +220,10 @@ impl CodeIndexCapability {
     ///
     /// [`Self::warm_session`] returns [`SessionWarmOutcome::Building`]
     /// without joining the worker. A process that exits in that window
-    /// discards the in-flight walk and never writes a snapshot. Short-lived
-    /// embedders should call this before exit so a started warm can finish
-    /// and persist. Returns immediately when nothing is building.
+    /// can leave an incomplete cold build, or a reconcile that persisted only
+    /// its completed checkpoint batches. Short-lived embedders should call
+    /// this before exit so the warm can finish and persist its final state.
+    /// Returns immediately when nothing is building.
     pub fn wait_until_idle(&self) {
         self.warm.take_and_join_builder();
         self.warm.wait_until_idle();
@@ -249,7 +251,20 @@ fn restore_shared(
             // Reconcile against the files on disk before anyone can read
             // the index. A changed HEAD forces content verification even
             // when size and mtime happen to match.
-            let outcome = state.refresh_from_root(None);
+            let outcome = state.refresh_with_checkpoints(
+                None,
+                reconcile::CheckpointPolicy::default(),
+                |state| {
+                    if let Err(error) = state.snapshot().save(&state.root) {
+                        tracing::debug!(
+                            target: "harn_hostlib::code_index",
+                            %error,
+                            root = %state.root.display(),
+                            "code-index reconcile checkpoint could not be persisted",
+                        );
+                    }
+                },
+            );
             // Resolver-backed Harn references are omitted from the
             // snapshot. Project them once from this host after the file
             // graph is current, so a changed Harn file is not resolved

@@ -70,6 +70,8 @@ pub struct IndexState {
     pub last_built_unix_ms: i64,
     /// Best-effort `HEAD` SHA, or `None` if the workspace isn't a git repo.
     pub git_head: Option<String>,
+    /// Content checks completed during an interrupted HEAD reconciliation.
+    pub(super) reconcile_progress: Option<super::reconcile::ReconcileProgress>,
     next_id: FileId,
 }
 
@@ -81,6 +83,15 @@ pub struct BuildOutcome {
     /// Files that matched the filename filter but couldn't be read or
     /// were too large.
     pub files_skipped: u64,
+}
+
+/// File facts and graph parsing consume the same read. Keeping the source
+/// through the per-file commit prevents an editor write between two reads
+/// from giving a checkpoint one revision's hash and another's symbols.
+pub(super) struct IngestedFile {
+    pub id: FileId,
+    pub changed: bool,
+    pub source: String,
 }
 
 /// Summary returned from [`IndexState::refresh_from_root`].
@@ -164,14 +175,20 @@ impl IndexState {
             overlays: OverlayState::new(),
             last_built_unix_ms: now_unix_ms(),
             git_head: super::git_head::read_git_head(&canonical_root),
+            reconcile_progress: None,
             next_id: 1,
         };
         let mut outcome = BuildOutcome::default();
         let mut to_resolve: Vec<(FileId, String)> = Vec::new();
         walk_indexable(&canonical_root, |abs, meta| {
             match state.ingest(abs, Some(meta)) {
-                Some((file_id, _)) => {
+                Some(ingested) => {
+                    let file_id = ingested.id;
                     outcome.files_indexed += 1;
+                    // CALLS and IMPORTS resolve after the full path/declaration
+                    // set exists. Parsing can stream without retaining every
+                    // file's source or reading it a second time.
+                    state.rebuild_symbol_graph_for(file_id, &ingested.source);
                     if let Some(file) = state.files.get(&file_id) {
                         to_resolve.push((file_id, file.relative_path.clone()));
                     }
@@ -184,7 +201,6 @@ impl IndexState {
         state.refresh_module_index();
         for (id, rel) in to_resolve {
             state.rebuild_deps(id, &rel);
-            state.rebuild_symbol_graph_for(id);
         }
         // Second pass: every Module node exists now, so resolve IMPORTS.
         state.link_symbol_imports();
@@ -218,100 +234,11 @@ impl IndexState {
         &mut self,
         resolver: Option<&HarnReferenceResolver>,
     ) -> RefreshOutcome {
-        let root = self.root.clone();
-        let mut outcome = RefreshOutcome::default();
-        let live_head = super::git_head::read_git_head(&root);
-        outcome.git_head_changed = self.git_head != live_head;
-        self.git_head = live_head;
-        let mut seen: HashSet<String> = HashSet::with_capacity(self.files.len());
-        let mut reparse: Vec<(FileId, String)> = Vec::new();
-        let mut harn_touched = false;
-        let mut path_set_changed = false;
-
-        walk_indexable(&root, |abs, meta| {
-            outcome.files_scanned += 1;
-            let Some(rel) = relative_path_under_root(&root, abs) else {
-                return;
-            };
-            let known = self.path_to_id.get(&rel).copied();
-            if let Some(id) = known {
-                if let Some(file) = self.files.get(&id) {
-                    if !outcome.git_head_changed
-                        && file.size_bytes == meta.len()
-                        && file.mtime_ms == mtime_ms_of(meta)
-                    {
-                        outcome.files_unchanged += 1;
-                        seen.insert(rel);
-                        return;
-                    }
-                }
-            }
-            match self.ingest(abs, Some(meta)) {
-                Some((id, changed)) => {
-                    seen.insert(rel.clone());
-                    if known.is_none() {
-                        outcome.files_added += 1;
-                        path_set_changed = true;
-                    }
-                    if changed {
-                        outcome.files_reindexed += 1;
-                        if self.files.get(&id).is_some_and(|f| f.language == "harn") {
-                            harn_touched = true;
-                        }
-                        reparse.push((id, rel));
-                    } else {
-                        outcome.files_touched_only += 1;
-                    }
-                }
-                None => {
-                    outcome.files_skipped += 1;
-                }
-            }
-        });
-
-        // Anything tracked that the walk did not yield is gone (deleted,
-        // moved, or newly filtered out).
-        let stale: Vec<String> = self
-            .path_to_id
-            .keys()
-            .filter(|rel| !seen.contains(*rel))
-            .cloned()
-            .collect();
-        for rel in stale {
-            if self
-                .path_to_id
-                .get(&rel)
-                .and_then(|id| self.files.get(id))
-                .is_some_and(|f| f.language == "harn")
-            {
-                harn_touched = true;
-            }
-            self.remove_relative_path(&rel);
-            outcome.files_removed += 1;
-            path_set_changed = true;
-        }
-
-        if outcome.files_reindexed == 0 && outcome.files_added == 0 && outcome.files_removed == 0 {
-            return outcome;
-        }
-
-        if path_set_changed {
-            self.rebuild_all_deps();
-        } else {
-            for (id, rel) in &reparse {
-                self.rebuild_deps(*id, rel);
-            }
-        }
-        for (id, _) in &reparse {
-            self.rebuild_symbol_graph_for(*id);
-        }
-        self.link_symbol_imports();
-        self.relink_dirty_calls();
-        if harn_touched {
-            self.relink_harn_references(resolver);
-        }
-        self.last_built_unix_ms = now_unix_ms();
-        outcome
+        self.refresh_with_checkpoints(
+            resolver,
+            super::reconcile::CheckpointPolicy::disabled(),
+            |_| {},
+        )
     }
 
     /// Re-index a single file by its absolute path. Returns the id of the
@@ -329,7 +256,8 @@ impl IndexState {
         }
         let known =
             relative_path(&self.root, abs).is_some_and(|rel| self.path_to_id.contains_key(&rel));
-        let (id, _changed) = self.ingest(abs, None)?;
+        let ingested = self.ingest(abs, None)?;
+        let id = ingested.id;
         let rel = self
             .files
             .get(&id)
@@ -343,7 +271,7 @@ impl IndexState {
                 // A new path can resolve another file's dangling import.
                 self.rebuild_all_deps();
             }
-            self.rebuild_symbol_graph_for(id);
+            self.rebuild_symbol_graph_for(id, &ingested.source);
             self.link_symbol_imports();
             self.relink_dirty_calls();
         }
@@ -384,15 +312,19 @@ impl IndexState {
     }
 
     /// Read `abs` and install (or update) its row in every flat
-    /// sub-index. Returns the file id and whether the **contents**
-    /// changed; a file whose bytes hash the same as the indexed row
+    /// sub-index. Returns the file id, captured source, and whether the
+    /// **contents** changed; a file whose bytes hash the same as the indexed row
     /// reports `false` so the caller can skip the tree-sitter re-parse,
     /// and its recorded mtime is refreshed so the cheap stat gate stops
     /// re-reading it on every later refresh.
     ///
     /// `known_metadata` lets the directory walk hand over the `stat` it
     /// already performed instead of paying a second one per file.
-    fn ingest(&mut self, abs: &Path, known_metadata: Option<&Metadata>) -> Option<(FileId, bool)> {
+    pub(super) fn ingest(
+        &mut self,
+        abs: &Path,
+        known_metadata: Option<&Metadata>,
+    ) -> Option<IngestedFile> {
         if !is_indexable_file(abs) {
             return None;
         }
@@ -424,7 +356,11 @@ impl IndexState {
                         // time, and tell the caller nothing changed.
                         file.mtime_ms = mtime_ms;
                         file.size_bytes = metadata.len();
-                        return Some((existing_id, false));
+                        return Some(IngestedFile {
+                            id: existing_id,
+                            changed: false,
+                            source: content,
+                        });
                     }
                 }
                 existing_id
@@ -460,7 +396,11 @@ impl IndexState {
         self.trigrams.index_file(id, &content);
         self.words.index_file(id, &content);
         self.files.insert(id, file);
-        Some((id, true))
+        Some(IngestedFile {
+            id,
+            changed: true,
+            source: content,
+        })
     }
 
     /// Recompute module membership from the current path table. O(paths),
@@ -544,7 +484,7 @@ impl IndexState {
         out
     }
 
-    fn rebuild_deps(&mut self, id: FileId, relative_path: &str) {
+    pub(super) fn rebuild_deps(&mut self, id: FileId, relative_path: &str) {
         let Some(file) = self.files.get(&id).cloned() else {
             return;
         };
@@ -569,12 +509,8 @@ impl IndexState {
     /// same parse populates `IndexedFile::symbols` so the
     /// `outline_get` builtin doesn't have to re-parse on every call
     /// (issue #2456).
-    pub(super) fn rebuild_symbol_graph_for(&mut self, id: FileId) {
+    pub(super) fn rebuild_symbol_graph_for(&mut self, id: FileId, source: &str) {
         let Some(file) = self.files.get(&id).cloned() else {
-            return;
-        };
-        let abs = self.root.join(&file.relative_path);
-        let Ok(source) = std::fs::read_to_string(&abs) else {
             return;
         };
         let Some(language) = AstLanguage::detect(std::path::Path::new(&file.relative_path), None)
@@ -587,7 +523,7 @@ impl IndexState {
             id,
             &file.relative_path,
             language,
-            &source,
+            source,
             &file.imports,
         );
         // The rebuild linked this file to the declarations it names; now
@@ -610,7 +546,7 @@ impl IndexState {
     /// Redo the whole import-resolution table. A path appearing or
     /// disappearing can resolve or dangle an import in a file that did not
     /// itself change. Pure map lookups, no disk reads.
-    fn rebuild_all_deps(&mut self) {
+    pub(super) fn rebuild_all_deps(&mut self) {
         self.refresh_module_index();
         let all: Vec<(FileId, String)> = self
             .files
@@ -620,6 +556,7 @@ impl IndexState {
         for (id, rel) in all {
             self.rebuild_deps(id, &rel);
         }
+        self.symbols.invalidate_call_visibility();
     }
 
     /// Resolve every call site the last batch of graph edits could have
@@ -804,6 +741,7 @@ impl IndexState {
             overlays: OverlayState::new(),
             last_built_unix_ms: 0,
             git_head: None,
+            reconcile_progress: None,
             next_id: 1,
         }
     }
@@ -861,7 +799,7 @@ pub(crate) fn mtime_ms_of(metadata: &Metadata) -> i64 {
 /// yields is canonical-prefixed and a plain `strip_prefix` is correct.
 /// [`relative_path`] stays the entry point for caller-supplied paths,
 /// which may be symlinked, relative, or already deleted.
-fn relative_path_under_root(root: &Path, abs: &Path) -> Option<String> {
+pub(super) fn relative_path_under_root(root: &Path, abs: &Path) -> Option<String> {
     let stripped = abs.strip_prefix(root).ok()?;
     Some(crate::tools::args::to_agent_path(stripped))
 }

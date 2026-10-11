@@ -235,6 +235,7 @@ pub struct SymbolGraph {
     nodes: HashMap<NodeId, Node>,
     by_file: HashMap<FileId, Vec<NodeId>>,
     by_name: HashMap<String, Vec<NodeId>>,
+    functions_by_name: HashMap<String, FunctionBuckets>,
     out_edges: HashMap<NodeId, Vec<Edge>>,
     in_edges: HashMap<NodeId, Vec<Edge>>,
     next_id: NodeId,
@@ -244,6 +245,14 @@ pub struct SymbolGraph {
     dirty_call_names: HashSet<String>,
     /// Files rebuilt with call resolution deferred.
     dirty_call_files: HashSet<FileId>,
+}
+
+/// Declaration-only lookup. Keep the count alongside file buckets so the
+/// unique-workspace fallback never needs to scan unrelated files.
+#[derive(Debug, Default, Clone)]
+struct FunctionBuckets {
+    by_file: HashMap<FileId, Vec<NodeId>>,
+    count: usize,
 }
 
 /// Only the owning graph facts cross the snapshot boundary. Name, file, and
@@ -304,6 +313,7 @@ impl SymbolGraph {
                 .entry(node.name.clone())
                 .or_default()
                 .push(node.id);
+            graph.index_function(&node);
             graph.nodes.insert(node.id, node);
         }
         for edge in snapshot.edges {
@@ -397,6 +407,20 @@ impl SymbolGraph {
         let Some(node) = self.nodes.remove(&id) else {
             return;
         };
+        if node.kind == NodeKind::Function {
+            if let Some(functions) = self.functions_by_name.get_mut(&node.name) {
+                functions.count -= 1;
+                if let Some(bucket) = functions.by_file.get_mut(&node.file_id) {
+                    bucket.retain(|candidate| *candidate != id);
+                    if bucket.is_empty() {
+                        functions.by_file.remove(&node.file_id);
+                    }
+                }
+                if functions.count == 0 {
+                    self.functions_by_name.remove(&node.name);
+                }
+            }
+        }
         if let Some(bucket) = self.by_name.get_mut(&node.name) {
             bucket.retain(|n| *n != id);
             if bucket.is_empty() {
@@ -548,8 +572,7 @@ impl SymbolGraph {
                 });
                 self.add_edge(module_id, call_id, EdgeKind::Contains);
                 if let Some(visible) = visible {
-                    let functions = self.functions_named(&callee_name);
-                    for t in pick_call_targets(&functions, file_id, visible) {
+                    for t in self.call_targets(&callee_name, file_id, visible) {
                         self.add_edge(call_id, t, EdgeKind::Calls);
                     }
                 }
@@ -771,14 +794,23 @@ impl SymbolGraph {
         out
     }
 
-    /// Every function declaration named `name`, with its file.
-    fn functions_named(&self, name: &str) -> Vec<(NodeId, FileId)> {
-        self.nodes_named(name)
-            .iter()
-            .filter_map(|id| self.nodes.get(id))
-            .filter(|n| n.kind == NodeKind::Function)
-            .map(|n| (n.id, n.file_id))
-            .collect()
+    fn call_targets(&self, name: &str, file_id: FileId, visible: &HashSet<FileId>) -> Vec<NodeId> {
+        self.functions_by_name
+            .get(name)
+            .map(|functions| pick_call_targets(functions, file_id, visible))
+            .unwrap_or_default()
+    }
+
+    fn index_function(&mut self, node: &Node) {
+        if node.kind == NodeKind::Function {
+            let functions = self.functions_by_name.entry(node.name.clone()).or_default();
+            functions
+                .by_file
+                .entry(node.file_id)
+                .or_default()
+                .push(node.id);
+            functions.count += 1;
+        }
     }
 
     fn mark_function_names_dirty(&mut self, file_id: FileId) {
@@ -831,6 +863,13 @@ impl SymbolGraph {
         sites.into_iter().collect()
     }
 
+    /// A changed path set can change module/import visibility even when no
+    /// function name changed. Re-evaluate existing callers at the next batch
+    /// boundary, including callers of names declared only in unchanged files.
+    pub(super) fn invalidate_call_visibility(&mut self) {
+        self.dirty_call_files.extend(self.by_file.keys().copied());
+    }
+
     /// Replace the CALLS edges of each call site in `sites`. `visible`
     /// maps a call site's file to its resolved import set; a file with no
     /// entry imports nothing.
@@ -840,7 +879,6 @@ impl SymbolGraph {
         visible: &HashMap<FileId, HashSet<FileId>>,
     ) {
         let empty = HashSet::new();
-        let mut functions_by_name: HashMap<String, Vec<(NodeId, FileId)>> = HashMap::new();
         for site in sites {
             let Some((name, file_id)) = self
                 .nodes
@@ -851,11 +889,8 @@ impl SymbolGraph {
                 continue;
             };
             self.drop_out_edges(*site, EdgeKind::Calls);
-            let functions = functions_by_name
-                .entry(name)
-                .or_insert_with_key(|name| self.functions_named(name));
             let targets =
-                pick_call_targets(functions, file_id, visible.get(&file_id).unwrap_or(&empty));
+                self.call_targets(&name, file_id, visible.get(&file_id).unwrap_or(&empty));
             for target in targets {
                 self.add_edge(*site, target, EdgeKind::Calls);
             }
@@ -928,6 +963,7 @@ impl SymbolGraph {
         node.id = id;
         self.by_file.entry(node.file_id).or_default().push(id);
         self.by_name.entry(node.name.clone()).or_default().push(id);
+        self.index_function(&node);
         self.nodes.insert(id, node);
         id
     }
@@ -965,28 +1001,33 @@ impl SymbolGraph {
 ///    linking any of them is precisely the case where an edge would
 ///    be invented rather than found.
 fn pick_call_targets(
-    functions: &[(NodeId, FileId)],
+    functions: &FunctionBuckets,
     file_id: FileId,
     visible: &HashSet<FileId>,
 ) -> Vec<NodeId> {
-    let local: Vec<NodeId> = functions
-        .iter()
-        .filter(|(_, file)| *file == file_id)
-        .map(|(id, _)| *id)
-        .collect();
-    if !local.is_empty() {
-        return local;
+    if let Some(local) = functions.by_file.get(&file_id) {
+        return local.clone();
     }
-    let imported: Vec<NodeId> = functions
-        .iter()
-        .filter(|(_, file)| visible.contains(file))
-        .map(|(id, _)| *id)
-        .collect();
+    let mut imported = Vec::new();
+    if visible.len() < functions.by_file.len() {
+        for file in visible {
+            if let Some(bucket) = functions.by_file.get(file) {
+                imported.extend_from_slice(bucket);
+            }
+        }
+    } else {
+        for (file, bucket) in &functions.by_file {
+            if visible.contains(file) {
+                imported.extend_from_slice(bucket);
+            }
+        }
+    }
     if !imported.is_empty() {
+        imported.sort_unstable();
         return imported;
     }
-    if functions.len() == 1 {
-        return vec![functions[0].0];
+    if functions.count == 1 {
+        return functions.by_file.values().next().unwrap().clone();
     }
     Vec::new()
 }

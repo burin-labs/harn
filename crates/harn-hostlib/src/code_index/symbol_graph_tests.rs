@@ -1,6 +1,68 @@
 use super::*;
 
 #[test]
+fn function_buckets_survive_restore_rebuild_and_removal() {
+    let mut graph = SymbolGraph::new();
+    for file in 1..=4 {
+        graph.rebuild_file(
+            file,
+            &format!("{file}.rs"),
+            Language::Rust,
+            "fn run() {}\nstruct Thing;\nimpl Thing { fn run() {} }\n",
+            &[],
+            &[],
+        );
+    }
+    // Other same-named node kinds and call sites must not become candidates.
+    graph.rebuild_file(
+        5,
+        "use.rs",
+        Language::Rust,
+        "struct run;\nfn caller() { run(); }\n",
+        &[],
+        &[],
+    );
+    let mut graph = SymbolGraph::from_snapshot(graph.snapshot()).unwrap();
+    let expected = |graph: &SymbolGraph, file| -> Vec<NodeId> {
+        let mut ids: Vec<_> = graph
+            .iter_nodes()
+            .filter(|n| n.kind == NodeKind::Function && n.name == "run" && n.file_id == file)
+            .map(|n| n.id)
+            .collect();
+        ids.sort_unstable();
+        ids
+    };
+    assert_eq!(
+        graph.call_targets("run", 1, &HashSet::from([2, 3, 4])),
+        expected(&graph, 1)
+    );
+    // Exercise both sides of the smaller-set choice.
+    assert_eq!(
+        graph.call_targets("run", 5, &HashSet::from([2])),
+        expected(&graph, 2)
+    );
+    let mut all = expected(&graph, 2);
+    all.extend(expected(&graph, 4));
+    all.sort_unstable();
+    assert_eq!(
+        graph.call_targets("run", 5, &HashSet::from([2, 4, 6, 7, 8])),
+        all
+    );
+    assert!(graph.call_targets("run", 5, &HashSet::new()).is_empty());
+    for file in 1..=3 {
+        graph.remove_file(file);
+    }
+    graph.rebuild_file(4, "4.rs", Language::Rust, "fn run() {}\n", &[], &[]);
+    assert_eq!(
+        graph.call_targets("run", 5, &HashSet::new()),
+        expected(&graph, 4)
+    );
+    graph.remove_file(4);
+    assert!(graph.call_targets("run", 5, &HashSet::from([4])).is_empty());
+    assert!(!graph.functions_by_name.contains_key("run"));
+}
+
+#[test]
 fn add_and_remove_round_trip() {
     let mut g = SymbolGraph::new();
     let outcome = g.rebuild_file(1, "src/a.rs", Language::Rust, "fn foo() {}\n", &[], &[]);
