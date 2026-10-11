@@ -510,7 +510,7 @@ impl Parser {
     #[inline(never)]
     pub(super) fn record_stack_position(&mut self) {
         let marker = 0u8;
-        let address = std::hint::black_box(&marker) as *const u8 as usize;
+        let address = std::ptr::from_ref(std::hint::black_box(&marker)) as usize;
         self.stack_extent.0 = self.stack_extent.0.min(address);
         self.stack_extent.1 = self.stack_extent.1.max(address);
         self.deepest_nesting = self.deepest_nesting.max(self.nesting_depth);
