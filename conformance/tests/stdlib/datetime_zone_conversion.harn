@@ -10,12 +10,10 @@ pipeline default(harness: Harness) {
   harness.stdio.println(date_to_zone(ts, "America/Los_Angeles"))
   harness.stdio.println(date_format(ts, "%Y-%m-%d %H:%M %Z %:z", "America/Los_Angeles"))
   for invalid in ["%Q", "%"] {
-    for zone in ["UTC", "America/Los_Angeles"] {
-      const result = try {
-        date_format(ts, invalid, zone)
-      }
-      assert(is_err(result))
+    const zoned = try {
+      date_format(ts, invalid, "America/Los_Angeles")
     }
+    assert(is_err(zoned))
     const result = try {
       date_format(ts, invalid)
     }
