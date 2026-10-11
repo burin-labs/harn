@@ -142,6 +142,6 @@ async fn public_manifest_source_parser_does_not_echo_json_or_toml_values_or_sour
         assert_eq!(manifest["name"], "Build context");
         assert_eq!(manifest["owner"], "founder");
         assert_eq!(manifest["version"], 1);
-        assert_eq!(manifest["id"], "build-context");
+        assert_eq!(manifest["id"], "build_context");
     }
 }
