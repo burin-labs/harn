@@ -172,6 +172,7 @@ mod tests {
 
     use crate::compiler::Compiler;
     use crate::stdlib::register_vm_stdlib;
+    use crate::testbench::process_tape::{install_process_tape, ProcessTape, TapeEntry};
     use harn_lexer::Lexer;
     use harn_parser::Parser;
 
@@ -271,7 +272,11 @@ mod tests {
         assert_eq!(scope.waited_ms(), 17);
     }
 
-    async fn assert_harness_process_run_waits_for_shared_lane(source: &str) {
+    async fn assert_harness_process_run_waits_for_shared_lane(
+        source: &str,
+        command: &str,
+        args: &[&str],
+    ) {
         tokio::task::LocalSet::new()
             .run_until(async {
                 let mut lexer = Lexer::new(source);
@@ -294,28 +299,36 @@ mod tests {
                 register_vm_stdlib(&mut vm);
                 vm.set_harness(crate::Harness::real());
                 let caller_deadline = Arc::clone(&vm.execution_deadline);
-                let execution = tokio::task::spawn_local(async move {
-                    vm.execute_callable_entry_with_timeout(&entry, &[], Duration::from_secs(5))
-                        .await
-                });
-
-                for _ in 0..1_000 {
-                    if caller_deadline.is_active() && caller_deadline.current().is_none() {
-                        break;
-                    }
-                    tokio::task::yield_now().await;
-                }
+                // Replay starts after admission, so the real capability and
+                // policy path still have to reach the occupied host lane.
+                let tape = Arc::new(ProcessTape::replay_from(vec![TapeEntry {
+                    program: command.to_owned(),
+                    args: args.iter().map(|arg| (*arg).to_owned()).collect(),
+                    cwd: None,
+                    env: Default::default(),
+                    stdout: "admitted".to_owned(),
+                    stderr: String::new(),
+                    exit_code: 0,
+                    duration_ms: 0,
+                }]));
+                let _tape = install_process_tape(Arc::clone(&tape));
+                let execution =
+                    vm.execute_callable_entry_with_timeout(&entry, &[], Duration::from_secs(5));
+                tokio::pin!(execution);
+                assert!(futures::poll!(&mut execution).is_pending());
                 assert!(
                     caller_deadline.is_active() && caller_deadline.current().is_none(),
                     "HarnessProcess.run must wait for the shared host lane and pause the caller's outer deadline"
                 );
+                assert!(!tape.fully_consumed(), "no process runs before admission");
 
                 clock.advance(Duration::from_millis(25));
                 drop(occupied);
-                execution
+                let result = execution
                     .await
-                    .expect("process fixture task joins")
                     .expect("admission extends rather than spends the caller deadline");
+                assert!(matches!(result, crate::value::VmValue::String(value) if value == "admitted"));
+                assert!(tape.fully_consumed(), "the admitted process must execute");
                 assert_eq!(scope.waited_ms(), 25);
             })
             .await;
@@ -326,9 +339,11 @@ mod tests {
         assert_harness_process_run_waits_for_shared_lane(
             r#"
 pipeline blocked(harness: Harness) {
-  harness.process.run({program: "git", args: ["status", "--short"]})
+  return harness.process.run({program: "git", args: ["status", "--short"]}).stdout
 }
 "#,
+            "git",
+            &["status", "--short"],
         )
         .await;
     }
@@ -338,9 +353,11 @@ pipeline blocked(harness: Harness) {
         assert_harness_process_run_waits_for_shared_lane(
             r#"
 pipeline blocked(harness: Harness) {
-  harness.process.run({program: "rustc", args: ["--version"]})
+  return harness.process.run({program: "rustc", args: ["--version"]}).stdout
 }
 "#,
+            "rustc",
+            &["--version"],
         )
         .await;
     }
