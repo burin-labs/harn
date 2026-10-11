@@ -162,7 +162,8 @@ export async function githubDeclaration(token, context, fetchRecord = fetch, ext
   if (!token) refuse('read_authority_or_identity_missing');
   const headers = { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json' };
   const base = `https://api.github.com/repos/${observer.parent_repository}/actions`;
-  const response = await fetchRecord(`${base}/runs/${observer.parent_run_id}/artifacts?per_page=100`, {
+  const declarationName = encodeURIComponent(observerDeclarationName(observer));
+  const response = await fetchRecord(`${base}/runs/${observer.parent_run_id}/artifacts?per_page=100&name=${declarationName}`, {
     headers, signal: AbortSignal.timeout(30_000),
   });
   if (!response.ok) refuse('dispatch_declaration_read_refused');

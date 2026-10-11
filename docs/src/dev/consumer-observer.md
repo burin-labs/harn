@@ -51,6 +51,10 @@ checks its revision and archive digest, and requires the exact context. Missing,
 duplicate, expired, or mismatched declarations refuse ownership. A fabricated
 nonce for a real live parent is insufficient.
 
+The artifact request filters by the exact declaration name. Its matching census
+must be complete before admission; unrelated build artifacts do not consume the
+lookup's 100-result bound. Partial or ambiguous matching results refuse ownership.
+
 The action requires Node.js, `unzip`, and Actions read permission for both runs
 and the parent's declaration. Artifact archives are limited to 64 KiB and must
 contain only `consumer-observer.json`.

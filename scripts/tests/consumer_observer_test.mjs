@@ -129,10 +129,21 @@ test('the action entrypoint reaches private receipt creation and refuses dead pa
         return record.fixture_end_after_first_read && ++parentReads > 1
           ? {...record, status: 'completed'} : record;
       }
+      function artifactRead(url) {
+        const name = new URL(url).searchParams.get('name');
+        if (!name) {
+          return {total_count: 101, artifacts: Array.from({length: 100}, (_, index) =>
+            ({id: index + 100, name: 'unrelated-build-artifact-' + index}))};
+        }
+        if (name !== ${JSON.stringify(observerDeclarationName(context))}) {
+          return {total_count: 0, artifacts: []};
+        }
+        return JSON.parse(fs.readFileSync(${JSON.stringify(censusFile)}, 'utf8'));
+      }
       globalThis.fetch = async url => ({ok: true,
         arrayBuffer: async () => fs.readFileSync(${JSON.stringify(archiveFile)}),
         json: async () => url.includes('/artifacts?')
-          ? JSON.parse(fs.readFileSync(${JSON.stringify(censusFile)}, 'utf8'))
+          ? artifactRead(url)
           : url.endsWith('/42') ? parentRead()
           : JSON.parse(fs.readFileSync(${JSON.stringify(childFile)}, 'utf8'))});`);
     const env = {
