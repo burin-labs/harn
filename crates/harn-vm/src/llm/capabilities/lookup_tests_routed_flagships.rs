@@ -9,6 +9,63 @@ use super::*;
 use crate::llm_config;
 
 #[test]
+fn fireworks_qwen38_max_uses_measured_context_and_effort_not_template_toggles() {
+    reset();
+    let id = "accounts/fireworks/models/qwen3p8-max";
+    let row = llm_config::model_catalog_entry(id).expect("measured serverless row");
+    assert_eq!(row.provider, "fireworks");
+    assert_eq!(row.context_window, 262141);
+    let caps = lookup("fireworks", id);
+    assert!(caps.native_tools);
+    assert!(caps.vision_supported);
+    assert!(caps.prompt_caching);
+    assert!(caps.reasoning_none_supported);
+    assert_eq!(caps.thinking_modes, ["effort"]);
+    assert_eq!(
+        caps.reasoning_effort_levels,
+        ["none", "low", "medium", "high", "xhigh", "max"]
+    );
+    assert!(!caps.honors_chat_template_kwargs);
+    let older = lookup("fireworks", "accounts/fireworks/models/qwen3p6-plus");
+    assert!(older.honors_chat_template_kwargs);
+    assert_eq!(older.thinking_modes, ["enabled"]);
+    assert!(
+        llm_config::model_catalog_entry("accounts/fireworks/models/qwen3p8-max-prime").is_none()
+    );
+}
+
+#[test]
+fn direct_grok_efforts_are_scoped_to_probed_snapshots() {
+    reset();
+    for id in ["grok-4.5", "grok-4.6", "grok-4.7"] {
+        let caps = lookup("xai", id);
+        assert!(caps.native_tools, "{id}");
+        assert_eq!(
+            caps.reasoning_effort_levels,
+            ["low", "medium", "high", "xhigh"],
+            "{id}"
+        );
+        assert!(!caps.reasoning_none_supported, "{id}");
+        assert!(!caps.reasoning_disable_supported, "{id}");
+    }
+    for id in ["grok-4", "grok-4.3"] {
+        let caps = lookup("xai", id);
+        assert!(caps.reasoning_none_supported, "{id}");
+        assert_eq!(
+            caps.reasoning_effort_levels,
+            ["none", "low", "medium", "high", "xhigh"],
+            "{id}"
+        );
+    }
+    for id in ["grok-4.20-0309-reasoning", "grok-build-0.1", "grok-4.8"] {
+        let caps = lookup("xai", id);
+        assert_eq!(caps.thinking_modes, ["adaptive"], "{id}");
+        assert!(caps.reasoning_effort_levels.is_empty(), "{id}");
+    }
+    assert!(llm_config::model_catalog_entry("grok-4.8").is_none());
+}
+
+#[test]
 fn openrouter_qwen38_max_cannot_disable_reasoning_unlike_qwen37_max() {
     reset();
     let max38 = lookup("openrouter", "qwen/qwen3.8-max-0902");

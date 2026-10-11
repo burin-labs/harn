@@ -707,6 +707,11 @@ pub(super) async fn host_agent_dispatch_tool_call(
             return Ok(json_to_vm_value(&denied));
         }
     };
+    if let Some(VmValue::String(namespace)) = call.get("toolset_name") {
+        if !namespace.is_empty() {
+            tool_name = format!("{namespace}.{tool_name}");
+        }
+    }
     tools::recover_provider_safe_alias(&mut tool_name, tools);
     let mut tool_args = tools::normalize_tool_args(&tool_name, raw_args_json(), tools);
     let session_id = agent_primitive_option_str(options, "session_id")

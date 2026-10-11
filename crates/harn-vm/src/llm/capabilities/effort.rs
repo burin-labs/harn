@@ -19,6 +19,33 @@
 
 use super::rule::ProviderRule;
 
+/// Provider-agnostic reasoning effort, shared by rules and resolved requests.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ReasoningEffort {
+    None,
+    Minimal,
+    Low,
+    Medium,
+    High,
+    XHigh,
+    Max,
+}
+
+impl ReasoningEffort {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::Minimal => "minimal",
+            Self::Low => "low",
+            Self::Medium => "medium",
+            Self::High => "high",
+            Self::XHigh => "xhigh",
+            Self::Max => "max",
+        }
+    }
+}
+
 /// The reasoning-control shapes a route accepts.
 pub(super) fn rule_thinking_modes(rule: &ProviderRule) -> Vec<String> {
     let mut modes = rule.thinking_modes.clone().unwrap_or_else(|| {

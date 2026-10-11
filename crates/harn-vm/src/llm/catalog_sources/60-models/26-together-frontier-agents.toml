@@ -95,7 +95,7 @@ api_dialect = "openai_chat"
 capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
 pricing = { input_per_mtok = 0.14, output_per_mtok = 0.28, cache_read_per_mtok = 0.03 }
 deprecated = true
-deprecation_note = "Together's customer notice (support@together.ai, received 2026-10-08) deprecates this serverless model on 2026-10-22 and names deepseek-ai/DeepSeek-V4.1-Flash as the replacement. Together's deprecations page did not list it yet on 2026-10-09. Together cancelled an earlier 2026-09-29 date for the same model, so recheck before the sunset."
+deprecation_note = "Together's public deprecations page (https://docs.together.ai/docs/deprecations, read 2026-10-11) confirms removal from serverless inference on 2026-10-22 and names deepseek-ai/DeepSeek-V4.1-Flash as the replacement."
 sunset_date = "2026-10-22"
 superseded_by = "deepseek-ai/DeepSeek-V4.1-Flash"
 tier = "mid"
@@ -214,7 +214,7 @@ context_window = 131072
 capabilities = ["tools", "streaming"]
 pricing = { input_per_mtok = 1.04, output_per_mtok = 1.04 }
 deprecated = true
-deprecation_note = "Together's customer notice (support@together.ai, received 2026-10-08) deprecates this serverless model on 2026-10-22 and recommends transitioning; it names no single replacement, and Together's deprecations page did not list it yet on 2026-10-09."
+deprecation_note = "Together's public deprecations page (https://docs.together.ai/docs/deprecations, read 2026-10-11) confirms removal from serverless inference on 2026-10-22 and recommends meta-models/Muse-Glimmer-30B."
 sunset_date = "2026-10-22"
 logical_model = "llama-3.3-70b-instruct"
 equivalence_group = "llama-3.3-70b-instruct"

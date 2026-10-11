@@ -14,7 +14,8 @@ use crate::value::VmError;
 mod tool_history;
 
 use tool_history::{
-    assistant_tool_use_ids, normalize_tool_call_ids, preserve_orphan_results_as_text,
+    assistant_tool_use_ids, echo_toolset_names, normalize_tool_call_ids,
+    preserve_orphan_results_as_text,
 };
 
 pub(crate) const ANTHROPIC_INTERLEAVED_THINKING_BETA: &str = "interleaved-thinking-2025-05-14";
@@ -697,6 +698,7 @@ impl AnthropicProvider {
         normalize_tool_call_ids(&mut messages);
         let mut messages = enforce_tool_result_adjacency(messages);
         preserve_orphan_results_as_text(&mut messages);
+        echo_toolset_names(&mut messages);
         if let Some(ref prefill) = opts.prefill {
             // Admission is intentionally deferred until after provider
             // overrides. The final wire model and output shape, rather than
@@ -991,6 +993,9 @@ fn anthropic_translate_tool_role_message(message: serde_json::Value) -> serde_js
     if let Some(is_error) = message.get("is_error") {
         tool_result.insert("is_error".to_string(), is_error.clone());
     }
+    if let Some(toolset_name) = message.get("toolset_name") {
+        tool_result.insert("toolset_name".to_string(), toolset_name.clone());
+    }
     serde_json::json!({
         "role": "user",
         "content": [serde_json::Value::Object(tool_result)],
@@ -1076,12 +1081,16 @@ fn anthropic_translate_assistant_tool_calls(message: serde_json::Value) -> serde
             Some(other) if other.is_object() => other.clone(),
             _ => serde_json::json!({}),
         };
-        blocks.push(serde_json::json!({
+        let mut block = serde_json::json!({
             "type": "tool_use",
             "id": id,
             "name": name,
             "input": input,
-        }));
+        });
+        if let Some(toolset_name) = call.get("toolset_name") {
+            block["toolset_name"] = toolset_name.clone();
+        }
+        blocks.push(block);
     }
 
     let mut out = message;

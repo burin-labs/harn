@@ -395,6 +395,12 @@ pub struct ProviderRule {
     /// but rejects while reasoning is enabled; `*_supported` remains route-wide.
     #[serde(default)]
     pub reasoning_excluded_portable_options: Option<Vec<super::PortableOption>>,
+    /// Options admitted only with an explicitly selected, supported effort.
+    /// This overrides route-wide support for the listed options; an unset
+    /// request never satisfies the condition, even when its default is off.
+    #[serde(default)]
+    pub portable_option_effort_support:
+        Option<std::collections::BTreeMap<super::PortableOption, Vec<super::ReasoningEffort>>>,
     #[serde(default)]
     pub seed_supported: Option<bool>,
     #[serde(default)]
@@ -666,6 +672,7 @@ impl ProviderRule {
             reasoning_text_promotable,
             reasoning_wire_format,
             reasoning_excluded_portable_options,
+            portable_option_effort_support,
             seed_supported,
             top_k_supported,
             temperature_supported,
@@ -820,6 +827,10 @@ impl ProviderRule {
         fill_opt(
             &mut self.reasoning_excluded_portable_options,
             reasoning_excluded_portable_options,
+        );
+        fill_opt(
+            &mut self.portable_option_effort_support,
+            portable_option_effort_support,
         );
         fill_opt(&mut self.seed_supported, seed_supported);
         fill_opt(&mut self.top_k_supported, top_k_supported);

@@ -3,6 +3,24 @@ use chrono::NaiveDate;
 use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 
 #[test]
+fn openrouter_sol_pro_promotion_resolves_standard_prices_and_large_prompt_band() {
+    let id = "openai/gpt-5.6-sol-pro";
+    let current = OffsetDateTime::parse("2026-10-11T12:00:00Z", &Rfc3339).unwrap();
+    let small = model_pricing_for_input_tokens(id, 271999, current).expect("catalogued Pro rate");
+    assert_eq!(small.input_per_mtok, 2.0);
+    assert_eq!(small.output_per_mtok, 10.0);
+    assert_eq!(small.cache_read_per_mtok, Some(0.2));
+    assert_eq!(small.cache_write_per_mtok, Some(2.5));
+    let band = model_pricing_for_input_tokens(id, 272000, current).expect("large-prompt card");
+    assert_eq!(band.input_per_mtok, 4.0);
+    assert_eq!(band.output_per_mtok, 15.0);
+    let before = OffsetDateTime::parse("2026-08-20T12:00:00Z", &Rfc3339).unwrap();
+    let base = model_pricing_for_input_tokens(id, 100, before).expect("durable base card");
+    assert_eq!(base.input_per_mtok, 5.0);
+    assert_eq!(base.output_per_mtok, 30.0);
+}
+
+#[test]
 fn promotional_pricing_resolves_at_injected_date_boundaries() {
     let pricing = ModelPricing {
         input_per_mtok: 10.0,

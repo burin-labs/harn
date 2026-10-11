@@ -114,18 +114,18 @@ pub(crate) fn parse_llm_response(
                     let input = block["input"].clone();
                     let (name, input) =
                         crate::llm::tools::normalize_tool_call_shape(&raw_name, input);
-                    tool_calls.push(serde_json::json!({
+                    let mut call = serde_json::json!({
                         "id": id,
                         "name": name,
                         "arguments": input,
-                    }));
-                    blocks.push(serde_json::json!({
-                        "type": "tool_call",
-                        "id": block["id"].clone(),
-                        "name": name,
-                        "arguments": input,
-                        "visibility": "internal",
-                    }));
+                    });
+                    if let Some(toolset_name) = block.get("toolset_name") {
+                        call["toolset_name"] = toolset_name.clone();
+                    }
+                    tool_calls.push(call.clone());
+                    call["type"] = serde_json::json!("tool_call");
+                    call["visibility"] = serde_json::json!("internal");
+                    blocks.push(call);
                 }
                 Some("server_tool_use") => {
                     // Anthropic's server-side tool-search tool emits
@@ -265,6 +265,24 @@ mod tests {
             fields.get("output_tokens").and_then(VmValue::as_int),
             Some(output_tokens)
         );
+    }
+
+    #[test]
+    fn anthropic_toolset_namespace_survives_normalization() {
+        let response = serde_json::json!({
+            "content": [
+                {"type": "tool_use", "id": "native", "name": "screenshot", "toolset_name": "computer", "input": {}},
+                {"type": "tool_use", "id": "ordinary", "name": "screenshot", "input": {}}
+            ],
+            "stop_reason": "tool_use", "usage": {"input_tokens": 10, "output_tokens": 5}
+        });
+        let result =
+            parse_llm_response(&response, "anthropic", "claude-haiku-5-5", true, true).unwrap();
+        assert_eq!(result.tool_calls.len(), 2);
+        assert_eq!(result.tool_calls[0]["name"], "screenshot");
+        assert_eq!(result.tool_calls[0]["toolset_name"], "computer");
+        assert!(result.tool_calls[1].get("toolset_name").is_none());
+        assert_eq!(result.blocks[0]["toolset_name"], "computer");
     }
 
     #[test]

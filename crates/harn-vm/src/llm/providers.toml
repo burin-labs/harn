@@ -4863,7 +4863,7 @@ api_dialect = "openai_chat"
 capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
 pricing = { input_per_mtok = 0.14, output_per_mtok = 0.28, cache_read_per_mtok = 0.03 }
 deprecated = true
-deprecation_note = "Together's customer notice (support@together.ai, received 2026-10-08) deprecates this serverless model on 2026-10-22 and names deepseek-ai/DeepSeek-V4.1-Flash as the replacement. Together's deprecations page did not list it yet on 2026-10-09. Together cancelled an earlier 2026-09-29 date for the same model, so recheck before the sunset."
+deprecation_note = "Together's public deprecations page (https://docs.together.ai/docs/deprecations, read 2026-10-11) confirms removal from serverless inference on 2026-10-22 and names deepseek-ai/DeepSeek-V4.1-Flash as the replacement."
 sunset_date = "2026-10-22"
 superseded_by = "deepseek-ai/DeepSeek-V4.1-Flash"
 tier = "mid"
@@ -4982,7 +4982,7 @@ context_window = 131072
 capabilities = ["tools", "streaming"]
 pricing = { input_per_mtok = 1.04, output_per_mtok = 1.04 }
 deprecated = true
-deprecation_note = "Together's customer notice (support@together.ai, received 2026-10-08) deprecates this serverless model on 2026-10-22 and recommends transitioning; it names no single replacement, and Together's deprecations page did not list it yet on 2026-10-09."
+deprecation_note = "Together's public deprecations page (https://docs.together.ai/docs/deprecations, read 2026-10-11) confirms removal from serverless inference on 2026-10-22 and recommends meta-models/Muse-Glimmer-30B."
 sunset_date = "2026-10-22"
 logical_model = "llama-3.3-70b-instruct"
 equivalence_group = "llama-3.3-70b-instruct"
@@ -5990,6 +5990,27 @@ architecture = { parameter_count_b = 21.0, active_parameter_count_b = 3.6, moe =
 tier = "mid"
 open_weight = true
 strengths = ["speed", "cheap", "tool_use", "reasoning"]
+
+# Fireworks publishes contextLength=0 for this serverless route. Direct probe
+# 2026-10-11 accepted 262132 prompt tokens plus 2 output tokens and rejected
+# 262142 prompt tokens with "model maximum context length: 262141". Use the
+# measured ceiling rather than the training window or another host's limit.
+# Native tool call/result round trip and a red-image check both returned 200.
+[models."accounts/fireworks/models/qwen3p8-max"]
+name = "Qwen3.8 Max (Fireworks)"
+provider = "fireworks"
+context_window = 262141
+logical_model = "qwen3.8-max"
+equivalence_group = "qwen3.8-max"
+served_variant = "fireworks"
+wire_model = "accounts/fireworks/models/qwen3p8-max"
+api_dialect = "openai_chat"
+capabilities = ["tools", "vision", "streaming", "thinking", "prompt_caching"]
+# https://fireworks.ai/models/fireworks/qwen3p8-max, read 2026-10-11.
+pricing = { input_per_mtok = 2.00, output_per_mtok = 6.00, cache_read_per_mtok = 0.25 }
+tier = "frontier"
+open_weight = false
+strengths = ["coding", "agentic", "tool_use", "reasoning", "vision"]
 
 # Fireworks-hosted gpt-oss routes. Without a catalog row the wire id
 # `accounts/fireworks/models/gpt-oss-*` has NO context window, so the
@@ -7675,7 +7696,11 @@ logical_model = "gpt-5.6-sol"
 equivalence_group = "gpt-5.6-sol"
 served_variant = "openrouter_pro"
 capabilities = ["tools", "vision", "files", "streaming", "thinking", "prompt_caching"]
-pricing = { input_per_mtok = 5.00, output_per_mtok = 30.00, cache_read_per_mtok = 0.50, cache_write_per_mtok = 6.25, promotions = [{ id = "openrouter-sol-pro-2026-08", starts_on = "2026-08-21", review_after = "2026-11-21", source_url = "https://openrouter.ai/api/v1/models", input_per_mtok = 4.0, output_per_mtok = 20.0, cache_read_per_mtok = 0.4, cache_write_per_mtok = 5.0 }], input_token_bands = [{ minimum_input_tokens = 272000, input_multiplier = 2.0, output_multiplier = 1.5 }] }
+# Rechecked 2026-10-11: the OpenAI standard endpoint on this Pro slug now
+# publishes the same $2/$10, $0.20 cached read and $2.50 cached write card as
+# Sol, with discount=0.5. $1/$5 is flex; $4/$20 is fast or undiscounted Azure.
+# Keep the durable base and reviewed promotion rather than copying a tier.
+pricing = { input_per_mtok = 5.00, output_per_mtok = 30.00, cache_read_per_mtok = 0.50, cache_write_per_mtok = 6.25, promotions = [{ id = "openrouter-sol-pro-2026-08", starts_on = "2026-08-21", review_after = "2026-11-21", source_url = "https://openrouter.ai/api/v1/models/openai/gpt-5.6-sol-pro/endpoints", input_per_mtok = 2.0, output_per_mtok = 10.0, cache_read_per_mtok = 0.2, cache_write_per_mtok = 2.5 }], input_token_bands = [{ minimum_input_tokens = 272000, input_multiplier = 2.0, output_multiplier = 1.5 }] }
 superseded_by = "openai/gpt-6-sol-pro"
 tier = "frontier"
 open_weight = false

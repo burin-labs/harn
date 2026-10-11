@@ -97,6 +97,7 @@ pub(super) fn defaults_to_caps(defaults: &ProviderDefaults) -> Capabilities {
         reasoning_text_promotable: None,
         reasoning_wire_format: None,
         reasoning_excluded_portable_options: None,
+        portable_option_effort_support: None,
         seed_supported: None,
         top_k_supported: None,
         temperature_supported: None,
@@ -319,6 +320,10 @@ pub(super) fn rule_to_caps(rule: &ProviderRule, defaults: &ProviderDefaults) -> 
             .or_else(|| defaults.reasoning_wire_format.clone()),
         reasoning_excluded_portable_options: rule
             .reasoning_excluded_portable_options
+            .clone()
+            .unwrap_or_default(),
+        portable_option_effort_support: rule
+            .portable_option_effort_support
             .clone()
             .unwrap_or_default(),
         seed_supported: rule

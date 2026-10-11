@@ -791,6 +791,16 @@ jitter = true
 # --- source: 20-providers/00-anthropic.toml ---
 # ---------- Anthropic (Claude) ------------------------------------------------
 
+# Claude 5.5 on the Claude API and Google Cloud requires this toolset rather
+# than computer_20251124 (direct API 2026-10-11: legacy=400, toolset=200 on
+# Haiku, Sonnet and Opus). Its member results must echo toolset_name=computer.
+# Scope this protocol change to the measured generation; Bedrock owns a
+# separate capability layer and retains its existing projection.
+[[provider.anthropic]]
+model_match = ["claude-haiku-5-5", "claude-sonnet-5-5", "claude-opus-5-5", "anthropic/claude-haiku-5-5", "anthropic/claude-sonnet-5-5", "anthropic/claude-opus-5-5", "anthropic/claude-haiku-5.5", "anthropic/claude-sonnet-5.5", "anthropic/claude-opus-5.5"]
+extends = true
+computer_use_style = "native_anthropic_toolset"
+
 # `prompt_cache_min_prefix_tokens` is the shortest prefix Anthropic will
 # actually cache. Below it a `cache_control` breakpoint is accepted and then
 # silently ignored — no error, no cache_creation_input_tokens. The value is
@@ -1875,6 +1885,12 @@ model_match = [
   "openai/gpt-6.1-sol-pro",
 ]
 extends = true
+# The direct Sol/Luna explicit-none sampling exception cannot cross this
+# transport boundary. Luna's 2026-10-11 endpoint metadata omits temperature;
+# require_parameters=true with none+temperature returns 404, while the same
+# request without temperature returns 200. Ordinary 200s tolerate stripping.
+portable_option_effort_support = {}
+temperature_supported = false
 frequency_penalty_supported = false
 presence_penalty_supported = false
 stop_supported = false
@@ -2283,11 +2299,17 @@ thinking_block_style = "reasoning_summary"
 #   temperature=0.2 at the default effort       -> 400 "Only the default (1)"
 #   temperature=0.2 / top_p=0.5 at effort none  -> 200
 #   function tools on /v1/chat/completions      -> 400 unless effort is none
-# Temperature and top_p stay unsupported rather than reasoning-conditional:
-# the default effort is `medium`, so a call that leaves thinking unset still
-# reasons, and a conditional rule would admit a temperature the API rejects.
-# The Astra row above must stay first; this wildcard backstops the rest of the
-# GPT-6 family.
+# The route-wide sampling flags remain false: omission leaves the provider's
+# default medium effort enabled. The typed condition below grants temperature
+# only for an explicitly authored none. Rechecked on Luna's Responses route
+# 2026-10-11: temperature=0 with none -> 200; omitted/low effort -> 400.
+# OpenRouter clears this conditional grant at its unforwarded-parameter layer.
+[[provider.openai]]
+model_match = ["gpt-6-sol", "gpt-6-luna", "openai/gpt-6-sol", "openai/gpt-6-luna"]
+extends = true
+portable_option_effort_support = { temperature = ["none"] }
+
+# The Astra row above stays first; this wildcard backstops the GPT-6 family.
 [[provider.openai]]
 model_match = "gpt-6*"
 prompt_caching = true
@@ -3400,6 +3422,35 @@ supports_assistant_prefill = false
 prefers_role_developer = false
 prefers_xml_tools = false
 thinking_block_style = "inline"
+
+# Direct Fireworks probe 2026-10-11: native tool call/result round trip,
+# required tool choice and red-image recognition returned 200. Unlike
+# DashScope, enable_thinking and thinking_budget returned 400 (extra fields).
+# reasoning_effort=none produced zero reasoning tokens; low/medium/high/xhigh/
+# max produced reasoning, while an invalid effort returned 400. High/xhigh/max
+# share the same prompt shape, so this declares wire support, not distinct
+# quality levels. Do not inherit the older Qwen chat-template toggles.
+# Stable-session caching: 4112 input tokens reported 0 cached on the cold call
+# and 4111 cached on each of two repeats (2026-10-11).
+[[provider.fireworks]]
+model_match = "accounts/fireworks/models/qwen3p8-max"
+native_tools = true
+preferred_tool_format = "native"
+thinking_modes = ["effort"]
+reasoning_effort_supported = true
+reasoning_effort_levels = ["none", "low", "medium", "high", "xhigh", "max"]
+reasoning_none_supported = true
+reasoning_disable_supported = true
+prompt_caching = true
+vision = true
+vision_supported = true
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "reasoning_summary"
 
 # Fireworks-hosted GPT-OSS (`accounts/fireworks/models/gpt-oss-120b`) uses the
 # provider-native tool channel, re-measured 2026-09-27 in a downstream host:
@@ -6742,6 +6793,29 @@ text_tool_wire_format_supported = false
 thinking_modes = ["adaptive", "effort"]
 reasoning_effort_supported = true
 reasoning_effort_levels = ["low", "medium", "high", "xhigh"]
+
+# Direct xAI probes 2026-10-11: each snapshot accepts low/medium/high/xhigh
+# with reasoning tokens, and medium returns a native tool call. None and an
+# invalid effort return 400. Keep this scoped to the measured generations:
+# Grok 4.20 Reasoning and Build still reject reasoning_effort outright.
+[[provider.xai]]
+model_match = ["grok-4.5", "grok-4.6", "grok-4.7"]
+extends = true
+thinking_modes = ["adaptive", "effort"]
+reasoning_effort_supported = true
+reasoning_effort_levels = ["low", "medium", "high", "xhigh"]
+reasoning_none_supported = false
+reasoning_disable_supported = false
+
+# Grok 4.3 accepts none as well as the same four enabled efforts. The rolling
+# grok-4 id resolves to grok-4.3 in the direct API response on 2026-10-11.
+[[provider.xai]]
+model_match = ["grok-4.3", "grok-4"]
+extends = true
+thinking_modes = ["adaptive", "effort"]
+reasoning_effort_supported = true
+reasoning_effort_levels = ["none", "low", "medium", "high", "xhigh"]
+reasoning_none_supported = true
 
 [[provider.xai]]
 model_match = "grok-*"

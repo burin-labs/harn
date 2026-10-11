@@ -85,6 +85,27 @@ tier = "mid"
 open_weight = true
 strengths = ["speed", "cheap", "tool_use", "reasoning"]
 
+# Fireworks publishes contextLength=0 for this serverless route. Direct probe
+# 2026-10-11 accepted 262132 prompt tokens plus 2 output tokens and rejected
+# 262142 prompt tokens with "model maximum context length: 262141". Use the
+# measured ceiling rather than the training window or another host's limit.
+# Native tool call/result round trip and a red-image check both returned 200.
+[models."accounts/fireworks/models/qwen3p8-max"]
+name = "Qwen3.8 Max (Fireworks)"
+provider = "fireworks"
+context_window = 262141
+logical_model = "qwen3.8-max"
+equivalence_group = "qwen3.8-max"
+served_variant = "fireworks"
+wire_model = "accounts/fireworks/models/qwen3p8-max"
+api_dialect = "openai_chat"
+capabilities = ["tools", "vision", "streaming", "thinking", "prompt_caching"]
+# https://fireworks.ai/models/fireworks/qwen3p8-max, read 2026-10-11.
+pricing = { input_per_mtok = 2.00, output_per_mtok = 6.00, cache_read_per_mtok = 0.25 }
+tier = "frontier"
+open_weight = false
+strengths = ["coding", "agentic", "tool_use", "reasoning", "vision"]
+
 # Fireworks-hosted gpt-oss routes. Without a catalog row the wire id
 # `accounts/fireworks/models/gpt-oss-*` has NO context window, so the
 # agent's auto-compaction budget falls back to a placeholder and the prompt

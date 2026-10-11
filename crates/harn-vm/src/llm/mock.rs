@@ -802,19 +802,18 @@ fn build_mock_result(
                 .get("arguments")
                 .cloned()
                 .unwrap_or(serde_json::json!({}));
-            tool_calls.push(serde_json::json!({
+            let mut call = serde_json::json!({
                 "id": id,
                 "type": "tool_call",
                 "name": name,
                 "arguments": arguments,
-            }));
-            blocks.push(serde_json::json!({
-                "type": "tool_call",
-                "id": id,
-                "name": name,
-                "arguments": arguments,
-                "visibility": "internal",
-            }));
+            });
+            if let Some(namespace) = tc.get("toolset_name") {
+                call["toolset_name"] = namespace.clone();
+            }
+            tool_calls.push(call.clone());
+            call["visibility"] = serde_json::json!("internal");
+            blocks.push(call);
         }
 
         (tool_calls, blocks)

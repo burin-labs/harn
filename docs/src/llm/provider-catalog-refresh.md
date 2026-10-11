@@ -286,6 +286,16 @@ TOML.
 
 ## Measuring portable option claims
 
+An option can depend on an explicitly selected effort. A capability rule with
+`portable_option_effort_support = { temperature = ["none"] }` admits temperature
+only when the resolved request selects `effort: "none"` and the route supports
+that effort. This condition overrides the route-wide temperature flag for that
+request. An omitted effort does not satisfy it, even when Harn represents both
+omission and explicit `none` as disabled reasoning. Direct GPT-6 Sol and Luna
+use this condition. OpenRouter clears the grant because its endpoints do not
+advertise temperature, even with `none`; structured evaluations there omit
+sampling rather than relying on a tolerated, unforwarded field.
+
 Use `harn provider option-probe` when the catalog says an endpoint accepts or
 rejects one of Harn's portable generation options. The command makes one small
 request through the normal provider adapter and compares the provider's answer

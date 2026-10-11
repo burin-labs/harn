@@ -552,6 +552,18 @@ mod tests {
     #[test]
     fn computer_use_style_projects_per_provider() {
         reset();
+        for model in ["claude-haiku-5-5", "claude-sonnet-5-5", "claude-opus-5-5"] {
+            assert_eq!(
+                lookup("anthropic", model).computer_use_style,
+                Some(super::super::ComputerUseStyle::NativeAnthropicToolset),
+                "{model}"
+            );
+        }
+        assert_ne!(
+            lookup("anthropic", "claude-haiku-5-6").computer_use_style,
+            Some(super::super::ComputerUseStyle::NativeAnthropicToolset),
+            "unprobed generations do not inherit the toolset claim"
+        );
         // Anthropic vision models get the native-Anthropic projection style,
         // XGA screenshot scaling, and advertise the `computer_use` hosted tool.
         for model in [

@@ -6,6 +6,61 @@ use super::model::WireDialect;
 use super::*;
 
 #[test]
+fn gpt6_sampling_condition_is_direct_and_not_inherited_by_unforwarded_routes() {
+    reset();
+    let none = crate::llm::api::ThinkingConfig::Effort {
+        level: ReasoningEffort::None,
+    };
+    let low = crate::llm::api::ThinkingConfig::Effort {
+        level: ReasoningEffort::Low,
+    };
+    for (provider, model) in [("openai", "gpt-6-luna"), ("openai", "gpt-6-sol")] {
+        for thinking in [&crate::llm::api::ThinkingConfig::Disabled, &low] {
+            assert!(
+                admit_portable_option_for_thinking(
+                    provider,
+                    model,
+                    thinking,
+                    PortableOption::Temperature,
+                    None
+                )
+                .is_err(),
+                "{provider}:{model}"
+            );
+        }
+        admit_portable_option_for_thinking(
+            provider,
+            model,
+            &none,
+            PortableOption::Temperature,
+            None,
+        )
+        .expect("explicit none admits temperature");
+        assert!(!lookup(provider, model).temperature_supported);
+    }
+    for model in ["openai/gpt-6-luna", "openai/gpt-6-sol"] {
+        let caps = lookup("openrouter", model);
+        assert!(caps.portable_option_effort_support.is_empty());
+        admit_portable_option_for_thinking(
+            "openrouter",
+            model,
+            &none,
+            PortableOption::Temperature,
+            None,
+        )
+        .expect_err("an unforwarded option must not inherit direct conditional support");
+    }
+    admit_portable_option_for_thinking(
+        "openai",
+        "gpt-6-astra",
+        &none,
+        PortableOption::Temperature,
+        None,
+    )
+    .expect_err("Astra must not inherit a condition for Sol and Luna");
+}
+
+#[test]
 fn openai_gpt_54_supports_tool_search() {
     reset();
     let caps = lookup("openai", "gpt-5.4");

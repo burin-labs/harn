@@ -1,5 +1,15 @@
 # ---------- Anthropic (Claude) ------------------------------------------------
 
+# Claude 5.5 on the Claude API and Google Cloud requires this toolset rather
+# than computer_20251124 (direct API 2026-10-11: legacy=400, toolset=200 on
+# Haiku, Sonnet and Opus). Its member results must echo toolset_name=computer.
+# Scope this protocol change to the measured generation; Bedrock owns a
+# separate capability layer and retains its existing projection.
+[[provider.anthropic]]
+model_match = ["claude-haiku-5-5", "claude-sonnet-5-5", "claude-opus-5-5", "anthropic/claude-haiku-5-5", "anthropic/claude-sonnet-5-5", "anthropic/claude-opus-5-5", "anthropic/claude-haiku-5.5", "anthropic/claude-sonnet-5.5", "anthropic/claude-opus-5.5"]
+extends = true
+computer_use_style = "native_anthropic_toolset"
+
 # `prompt_cache_min_prefix_tokens` is the shortest prefix Anthropic will
 # actually cache. Below it a `cache_control` breakpoint is accepted and then
 # silently ignored — no error, no cache_creation_input_tokens. The value is

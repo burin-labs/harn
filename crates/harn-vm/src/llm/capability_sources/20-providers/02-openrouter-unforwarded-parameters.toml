@@ -117,6 +117,12 @@ model_match = [
   "openai/gpt-6.1-sol-pro",
 ]
 extends = true
+# The direct Sol/Luna explicit-none sampling exception cannot cross this
+# transport boundary. Luna's 2026-10-11 endpoint metadata omits temperature;
+# require_parameters=true with none+temperature returns 404, while the same
+# request without temperature returns 200. Ordinary 200s tolerate stripping.
+portable_option_effort_support = {}
+temperature_supported = false
 frequency_penalty_supported = false
 presence_penalty_supported = false
 stop_supported = false

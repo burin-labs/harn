@@ -65,7 +65,9 @@ fn declared_portable_option_support(
 /// This enum is the shared vocabulary for runtime admission, routing-step
 /// overrides, and static preflight. Provider-specific escape hatches remain
 /// below `provider_options.<provider>` and never enter this portable lane.
-#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, serde::Deserialize)]
+#[derive(
+    Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, serde::Serialize, serde::Deserialize,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum PortableOption {
     Temperature,
@@ -205,13 +207,21 @@ pub fn admit_portable_option(
     model: &str,
     option: PortableOption,
 ) -> Result<(), CapabilityAdmissionError> {
-    admit_portable_option_for_thinking(
-        provider,
-        model,
-        &crate::llm::api::ThinkingConfig::Disabled,
-        option,
-        None,
-    )
+    admit_portable_option_with_effort(provider, model, option, None)
+}
+
+/// Admit a statically known option and its explicitly authored effort.
+/// Omission does not satisfy a route's conditional support declaration.
+pub fn admit_portable_option_with_effort(
+    provider: &str,
+    model: &str,
+    option: PortableOption,
+    effort: Option<super::ReasoningEffort>,
+) -> Result<(), CapabilityAdmissionError> {
+    let thinking = effort.map_or(crate::llm::api::ThinkingConfig::Disabled, |level| {
+        crate::llm::api::ThinkingConfig::Effort { level }
+    });
+    admit_portable_option_for_thinking(provider, model, &thinking, option, None)
 }
 
 /// Admit a caller-selected portable option for one resolved call. Unlike the
@@ -238,10 +248,17 @@ pub(crate) fn admit_portable_option_for_thinking(
     let builtin = super::lookup::builtin();
     let (supported, _) =
         declared_portable_option_support(user.as_ref(), builtin, provider, model, option);
-    let rejected_while_reasoning = thinking.is_enabled()
-        && super::lookup::lookup(provider, model)
-            .reasoning_excluded_portable_options
-            .contains(&option);
+    let caps = super::lookup::lookup(provider, model);
+    let effort_requirement = caps.portable_option_effort_support.get(&option);
+    let explicit_effort_matches = effort_requirement.is_some_and(|levels| {
+        matches!(thinking, crate::llm::api::ThinkingConfig::Effort { level }
+            if levels.contains(level)
+                && caps.reasoning_effort_supported
+                && caps.reasoning_effort_levels.iter().any(|supported| supported == level.as_str())
+                && (*level != super::ReasoningEffort::None || caps.reasoning_none_supported))
+    });
+    let rejected_while_reasoning =
+        thinking.is_enabled() && caps.reasoning_excluded_portable_options.contains(&option);
     let requires_authored_support = matches!(
         option,
         PortableOption::Cache
@@ -254,9 +271,12 @@ pub(crate) fn admit_portable_option_for_thinking(
             | PortableOption::Mirostat
             | PortableOption::ParallelToolCalls
     );
-    if !rejected_while_reasoning
-        && (supported == Some(true) || (supported.is_none() && !requires_authored_support))
-    {
+    let admitted = if effort_requirement.is_some() {
+        explicit_effort_matches
+    } else {
+        supported == Some(true) || (supported.is_none() && !requires_authored_support)
+    };
+    if !rejected_while_reasoning && admitted {
         return Ok(());
     }
     Err(CapabilityAdmissionError {

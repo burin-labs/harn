@@ -10454,6 +10454,115 @@
       ]
     },
     {
+      "id": "accounts/fireworks/models/qwen3p8-max",
+      "name": "Qwen3.8 Max (Fireworks)",
+      "operations": [
+        "text_generation",
+        "decision"
+      ],
+      "display_name": "Qwen3.8 Max",
+      "provider": "fireworks",
+      "aliases": [],
+      "context_window": 262141,
+      "logical_model": "qwen3.8-max",
+      "equivalence_group": "qwen3.8-max",
+      "served_variant": "fireworks",
+      "wire_model": "accounts/fireworks/models/qwen3p8-max",
+      "api_dialect": "openai_chat",
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text",
+          "decision"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "parity_source": "derived",
+        "tool_search": []
+      },
+      "structured_output": "none",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "none",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "reasoning_summary"
+      },
+      "reasoning": {
+        "modes": [
+          "effort"
+        ],
+        "effort_supported": true,
+        "effort_levels": [
+          "none",
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ],
+        "none_supported": true,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "batch": {
+        "wire_format": "fireworks",
+        "input_mode": "jsonl_file",
+        "result_ordering": "custom_id_rejoin",
+        "partial_failure": "unknown",
+        "cancellation": "unknown",
+        "discount_percent": 50,
+        "turnaround_hours": 24,
+        "max_input_bytes": 1073741824,
+        "operational_notes": [
+          "Batch support is model-specific; Harn only marks catalog rows that advertise provider batch capability.",
+          "Prompt caching can combine with eligible batch jobs for additional savings.",
+          "Provider docs currently mention selectable 12/24/48/72 hour expiration windows and also say expired jobs expire after 24h; Harn treats the exact expiration as provider-ambiguous."
+        ]
+      },
+      "pricing": {
+        "input_per_mtok": 2.0,
+        "output_per_mtok": 6.0,
+        "cache_read_per_mtok": 0.25,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "vision",
+        "prompt_caching",
+        "thinking",
+        "extended_thinking",
+        "batch"
+      ],
+      "family": "qwen",
+      "lineage": "qwen3",
+      "tier": "frontier",
+      "open_weight": false,
+      "strengths": [
+        "coding",
+        "agentic",
+        "tool_use",
+        "reasoning",
+        "vision"
+      ]
+    },
+    {
       "id": "gemini-2.5-flash",
       "name": "Gemini 2.5 Flash",
       "operations": [
@@ -25333,11 +25442,11 @@
             "id": "openrouter-sol-pro-2026-08",
             "starts_on": "2026-08-21",
             "review_after": "2026-11-21",
-            "source_url": "https://openrouter.ai/api/v1/models",
-            "input_per_mtok": 4.0,
-            "output_per_mtok": 20.0,
-            "cache_read_per_mtok": 0.4,
-            "cache_write_per_mtok": 5.0
+            "source_url": "https://openrouter.ai/api/v1/models/openai/gpt-5.6-sol-pro/endpoints",
+            "input_per_mtok": 2.0,
+            "output_per_mtok": 10.0,
+            "cache_read_per_mtok": 0.2,
+            "cache_write_per_mtok": 2.5
           }
         ]
       },
@@ -30422,7 +30531,7 @@
       },
       "deprecation": {
         "status": "deprecated",
-        "note": "Together's customer notice (support@together.ai, received 2026-10-08) deprecates this serverless model on 2026-10-22 and names deepseek-ai/DeepSeek-V4.1-Flash as the replacement. Together's deprecations page did not list it yet on 2026-10-09. Together cancelled an earlier 2026-09-29 date for the same model, so recheck before the sunset.",
+        "note": "Together's public deprecations page (https://docs.together.ai/docs/deprecations, read 2026-10-11) confirms removal from serverless inference on 2026-10-22 and names deepseek-ai/DeepSeek-V4.1-Flash as the replacement.",
         "sunset_date": "2026-10-22",
         "superseded_by": "deepseek-ai/DeepSeek-V4.1-Flash"
       },
@@ -30820,7 +30929,7 @@
       },
       "deprecation": {
         "status": "deprecated",
-        "note": "Together's customer notice (support@together.ai, received 2026-10-08) deprecates this serverless model on 2026-10-22 and recommends transitioning; it names no single replacement, and Together's deprecations page did not list it yet on 2026-10-09.",
+        "note": "Together's public deprecations page (https://docs.together.ai/docs/deprecations, read 2026-10-11) confirms removal from serverless inference on 2026-10-22 and recommends meta-models/Muse-Glimmer-30B.",
         "sunset_date": "2026-10-22"
       },
       "availability": "serverless",
@@ -32373,11 +32482,18 @@
       },
       "reasoning": {
         "modes": [
-          "adaptive"
+          "adaptive",
+          "effort"
         ],
-        "effort_supported": false,
-        "effort_levels": [],
-        "none_supported": false,
+        "effort_supported": true,
+        "effort_levels": [
+          "none",
+          "low",
+          "medium",
+          "high",
+          "xhigh"
+        ],
+        "none_supported": true,
         "interleaved_supported": false,
         "preserve_thinking": false
       },
@@ -32484,10 +32600,16 @@
       },
       "reasoning": {
         "modes": [
-          "adaptive"
+          "adaptive",
+          "effort"
         ],
-        "effort_supported": false,
-        "effort_levels": [],
+        "effort_supported": true,
+        "effort_levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh"
+        ],
         "none_supported": false,
         "interleaved_supported": false,
         "preserve_thinking": false
@@ -32594,10 +32716,16 @@
       },
       "reasoning": {
         "modes": [
-          "adaptive"
+          "adaptive",
+          "effort"
         ],
-        "effort_supported": false,
-        "effort_levels": [],
+        "effort_supported": true,
+        "effort_levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh"
+        ],
         "none_supported": false,
         "interleaved_supported": false,
         "preserve_thinking": false
@@ -32703,10 +32831,16 @@
       },
       "reasoning": {
         "modes": [
-          "adaptive"
+          "adaptive",
+          "effort"
         ],
-        "effort_supported": false,
-        "effort_levels": [],
+        "effort_supported": true,
+        "effort_levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh"
+        ],
         "none_supported": false,
         "interleaved_supported": false,
         "preserve_thinking": false
@@ -36344,6 +36478,28 @@
         "text_tools",
         "thinking",
         "tools"
+      ]
+    },
+    {
+      "provider": "fireworks",
+      "model": "accounts/fireworks/models/qwen3p8-max",
+      "base_url": "https://api.fireworks.ai/inference/v1",
+      "secret_env": "FIREWORKS_API_KEY",
+      "label": "Qwen3.8 Max (Fireworks)",
+      "family": "qwen",
+      "capabilities": [
+        "batch",
+        "extended_thinking",
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "prompt_caching",
+        "reasoning_effort",
+        "streaming",
+        "structured_output_mode:none",
+        "text_tools",
+        "thinking",
+        "tools",
+        "vision"
       ]
     },
     {
@@ -40269,6 +40425,7 @@
         "native_tools",
         "prefers_markdown_scaffolding",
         "prompt_caching",
+        "reasoning_effort",
         "streaming",
         "structured_output",
         "structured_output_mode:native_json",
@@ -40291,6 +40448,7 @@
         "native_tools",
         "prefers_markdown_scaffolding",
         "prompt_caching",
+        "reasoning_effort",
         "streaming",
         "structured_output",
         "structured_output_mode:native_json",
@@ -40313,6 +40471,7 @@
         "native_tools",
         "prefers_markdown_scaffolding",
         "prompt_caching",
+        "reasoning_effort",
         "streaming",
         "structured_output",
         "structured_output_mode:native_json",
@@ -40335,6 +40494,7 @@
         "native_tools",
         "prefers_markdown_scaffolding",
         "prompt_caching",
+        "reasoning_effort",
         "streaming",
         "structured_output",
         "structured_output_mode:native_json",

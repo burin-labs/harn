@@ -22,7 +22,7 @@ import { protocol_violation_messages, violation_reports_lost_call } from "std/ll
 // so middleware doesn't have to peek at the underlying registry/schema:
 //
 //   envelope = {
-//     tool_name, tool_args, call_id,
+//     tool_name, toolset_name?, tool_args, call_id,
 //     declared_executor?, schema?, description?,
 //     turn: {iteration, session_id},
 //   }
@@ -188,7 +188,12 @@ pub fn __tool_envelope(random: HarnessRandom, call: dict, tools: dict, options: 
   } else {
     raw_call_id
   }
-  const entry = __tool_registry_entry(tools, tool_name)
+  const registry_name = if call?.toolset_name != nil && call.toolset_name != "" {
+    call.toolset_name + "." + tool_name
+  } else {
+    tool_name
+  }
+  const entry = __tool_registry_entry(tools, registry_name)
   const declared_executor = if entry == nil {
     nil
   } else {
@@ -209,7 +214,7 @@ pub fn __tool_envelope(random: HarnessRandom, call: dict, tools: dict, options: 
   } else {
     entry?.parameters ?? entry?.inputSchema
   }
-  const annotations = __tool_resource_annotations(entry, options?.policy, tool_name)
+  const annotations = __tool_resource_annotations(entry, options?.policy, registry_name)
   const description = if entry == nil {
     ""
   } else {
@@ -227,6 +232,7 @@ pub fn __tool_envelope(random: HarnessRandom, call: dict, tools: dict, options: 
   }
   return {
     tool_name: tool_name,
+    toolset_name: call?.toolset_name,
     tool_args: tool_args,
     call_id: call_id,
     declared_executor: declared_executor,
@@ -259,6 +265,7 @@ pub fn __default_invoke_tool(
       tool_call_id: envelope.call_id,
       name: envelope.tool_name,
       tool_name: envelope.tool_name,
+      toolset_name: envelope?.toolset_name,
       arguments: envelope.tool_args,
     }
   return agent_dispatch_tool_call(tool_runtime, next_call, registry, options)

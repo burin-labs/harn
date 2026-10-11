@@ -14,6 +14,18 @@ This keeps the tool contract explicit:
 
 ## Pattern
 
+For provider toolset members, register handlers under
+`<toolset_name>.<name>`, such as `computer.screenshot`. Harn dispatches using
+both fields, so a member cannot invoke an ordinary same-named function.
+Tool middleware receives the member in `envelope.tool_name` and its namespace
+in `envelope.toolset_name`. The Anthropic adapter echoes the namespace on
+results, including interruption placeholders.
+
+Claude 5.5 native computer projection uses `computer_toolset_20260801` without
+the legacy computer-use beta. Enable projection with
+`BURIN_COMPUTER_USE_NATIVE=1` only when the host supplies the member handlers
+and screen-coordinate mapping.
+
 Agent dispatch rejects freeform dictionary results, including results returned
 through helpers. Use a nominal struct with exactly one boolean `ok` or `success`
 field, or `agent_tool_handler_result(text, data, outcome)` from

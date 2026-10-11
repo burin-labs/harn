@@ -103,6 +103,24 @@ fn failed_update_for<'a>(events: &'a [AgentEvent], tool_call_id: &str) -> Option
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn anthropic_stream_preserves_toolset_namespace() {
+    let body = concat!(
+        "data: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":3}}}\n",
+        "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"tool_use\",\"id\":\"toolu_native\",\"name\":\"screenshot\",\"toolset_name\":\"computer\",\"input\":{}}}\n",
+        "data: {\"type\":\"content_block_stop\",\"index\":0}\n",
+        "data: {\"type\":\"message_delta\",\"usage\":{\"output_tokens\":5},\"delta\":{\"stop_reason\":\"tool_use\"}}}\n",
+        "data: [DONE]\n",
+    );
+    let session = fresh_session_id("anth-toolset");
+    let (result, _) = drive(body.as_bytes(), &session, true).await;
+    assert_eq!(result.tool_calls.len(), 1);
+    assert_eq!(result.tool_calls[0]["name"], "screenshot");
+    assert_eq!(result.tool_calls[0]["toolset_name"], "computer");
+    assert_eq!(result.blocks[0]["toolset_name"], "computer");
+    clear_session_sinks(&session);
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn anthropic_stream_announces_tool_call_then_streams_partials() {
     // Force COALESCE_WINDOW pauses by emitting deltas across the
     // 50ms boundary so the coalescer flushes more than once.

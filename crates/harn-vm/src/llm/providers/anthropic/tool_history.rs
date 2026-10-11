@@ -1,5 +1,40 @@
 use std::collections::{HashMap, HashSet};
 
+/// Results, including recovery placeholders, echo the paired member namespace.
+/// Pair by call id so a same-named ordinary function cannot inherit a toolset.
+pub(super) fn echo_toolset_names(messages: &mut [serde_json::Value]) {
+    let namespaces: HashMap<String, String> = messages
+        .iter()
+        .filter_map(|message| message.get("content")?.as_array())
+        .flatten()
+        .filter(|block| block["type"] == "tool_use")
+        .filter_map(|block| {
+            Some((
+                block["id"].as_str()?.to_owned(),
+                block["toolset_name"].as_str()?.to_owned(),
+            ))
+        })
+        .collect();
+    for message in messages {
+        let Some(blocks) = message
+            .get_mut("content")
+            .and_then(serde_json::Value::as_array_mut)
+        else {
+            continue;
+        };
+        for block in blocks {
+            if block["type"] == "tool_result" {
+                if let Some(namespace) = block["tool_use_id"]
+                    .as_str()
+                    .and_then(|id| namespaces.get(id))
+                {
+                    block["toolset_name"] = serde_json::json!(namespace);
+                }
+            }
+        }
+    }
+}
+
 /// Anthropic restricts both `tool_use.id` and the matching
 /// `tool_result.tool_use_id` to ASCII letters, digits, `_`, and `-`. Durable
 /// transcripts can originate in another provider or Harn subsystem whose id
@@ -169,6 +204,34 @@ pub(super) fn assistant_tool_use_ids(message: &serde_json::Value) -> Option<Hash
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn toolset_results_echo_the_paired_namespace_including_recovery() {
+        let mut messages = vec![
+            serde_json::json!({"role": "assistant", "content": [
+                {"type": "tool_use", "id": "native", "name": "screenshot", "toolset_name": "computer"},
+                {"type": "tool_use", "id": "ordinary", "name": "screenshot"},
+                {"type": "tool_use", "id": "interrupted", "name": "screenshot", "toolset_name": "computer"}
+            ]}),
+            serde_json::json!({"role": "user", "content": [
+                {"type": "tool_result", "tool_use_id": "native", "content": "image"},
+                {"type": "tool_result", "tool_use_id": "ordinary", "content": "text"}
+            ]}),
+        ];
+        messages = super::super::enforce_tool_result_adjacency(messages);
+        echo_toolset_names(&mut messages);
+        let results: Vec<_> = messages
+            .iter()
+            .skip(1)
+            .flat_map(|message| message["content"].as_array().unwrap())
+            .collect();
+        assert_eq!(results.len(), 3);
+        assert_eq!(results[0]["toolset_name"], "computer");
+        assert!(results[1].get("toolset_name").is_none());
+        assert_eq!(results[2]["tool_use_id"], "interrupted");
+        assert_eq!(results[2]["toolset_name"], "computer");
+        assert_eq!(results[2]["is_error"], true);
+    }
 
     #[test]
     fn durable_tool_ids_are_normalized_as_a_pair() {

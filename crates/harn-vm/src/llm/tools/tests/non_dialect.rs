@@ -173,6 +173,17 @@ fn normalize_tool_args_unwraps_only_complete_heredoc_values() {
 }
 
 #[test]
+fn assistant_toolset_messages_preserve_member_identity() {
+    let calls = [
+        json!({"id": "native", "name": "screenshot", "toolset_name": "computer", "arguments": {}}),
+        json!({"id": "ordinary", "name": "screenshot", "arguments": {}}),
+    ];
+    let message = build_assistant_response_message("", &[], &calls, None);
+    assert_eq!(message["tool_calls"][0]["toolset_name"], "computer");
+    assert!(message["tool_calls"][1].get("toolset_name").is_none());
+}
+
+#[test]
 fn assistant_messages_use_one_provider_neutral_shape() {
     let calls = [json!({
         "id": "call_001",

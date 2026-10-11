@@ -646,6 +646,7 @@ pub(super) async fn consume_sse_lines_with_policy<R: tokio::io::AsyncBufRead + U
 
     struct ToolBlock {
         name: String,
+        toolset_name: Option<String>,
         input_json: String,
         provider_id: String,
         /// Stable id used for `AgentEvent::ToolCall*` streaming
@@ -824,6 +825,10 @@ pub(super) async fn consume_sse_lines_with_policy<R: tokio::io::AsyncBufRead + U
                             );
                             current_tool = Some(ToolBlock {
                                 name,
+                                toolset_name: block
+                                    .get("toolset_name")
+                                    .and_then(serde_json::Value::as_str)
+                                    .map(str::to_owned),
                                 input_json: String::new(),
                                 provider_id: id,
                                 tool_call_id,
@@ -946,24 +951,34 @@ pub(super) async fn consume_sse_lines_with_policy<R: tokio::io::AsyncBufRead + U
                 Some("content_block_stop") => {
                     if let Some(tool) = current_tool.take() {
                         let args = parse_anthropic_streamed_tool_input(&tool.input_json);
+                        let mut raw_call = serde_json::json!({
+                            "type": "tool_use",
+                            "id": tool.provider_id,
+                            "name": tool.name,
+                            "input": args.clone(),
+                        });
+                        if let Some(toolset_name) = &tool.toolset_name {
+                            raw_call["toolset_name"] = serde_json::json!(toolset_name);
+                        }
                         raw_tool_calls.push(
-                            RawProviderToolCall::new(serde_json::json!({
-                                "type": "tool_use",
-                                "id": tool.provider_id,
-                                "name": tool.name,
-                                "input": args.clone(),
-                            }))
-                            .expect("anthropic stream raw tool call is an object"),
+                            RawProviderToolCall::new(raw_call)
+                                .expect("anthropic stream raw tool call is an object"),
                         );
                         let (name, args) =
                             crate::llm::tools::normalize_tool_call_shape(&tool.name, args);
                         // Dispatch under the id already used for
                         // streaming progress so the executed lifecycle
                         // continues on the same wire id.
-                        tool_calls.push(serde_json::json!({
+                        let mut call = serde_json::json!({
                             "id": tool.tool_call_id, "name": name, "arguments": args,
-                        }));
-                        blocks.push(serde_json::json!({"type": "tool_call", "id": tool.tool_call_id, "name": name, "arguments": args, "visibility": "internal"}));
+                        });
+                        if let Some(toolset_name) = tool.toolset_name {
+                            call["toolset_name"] = serde_json::json!(toolset_name);
+                        }
+                        tool_calls.push(call.clone());
+                        call["type"] = serde_json::json!("tool_call");
+                        call["visibility"] = serde_json::json!("internal");
+                        blocks.push(call);
                     } else if let Some(server_tool) = current_server_tool.take() {
                         // Emit a `tool_search_query` transcript event —
                         // not dispatchable, just observability.

@@ -8,32 +8,7 @@ use crate::value::VmValue;
 /// Sender for streaming text deltas from an in-flight LLM call.
 pub(crate) type DeltaSender = tokio::sync::mpsc::UnboundedSender<String>;
 
-/// Provider-agnostic reasoning effort.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
-#[serde(rename_all = "lowercase")]
-pub(crate) enum ReasoningEffort {
-    None,
-    Minimal,
-    Low,
-    Medium,
-    High,
-    XHigh,
-    Max,
-}
-
-impl ReasoningEffort {
-    pub(crate) fn as_str(self) -> &'static str {
-        match self {
-            ReasoningEffort::None => "none",
-            ReasoningEffort::Minimal => "minimal",
-            ReasoningEffort::Low => "low",
-            ReasoningEffort::Medium => "medium",
-            ReasoningEffort::High => "high",
-            ReasoningEffort::XHigh => "xhigh",
-            ReasoningEffort::Max => "max",
-        }
-    }
-}
+pub(crate) use crate::llm::capabilities::ReasoningEffort;
 
 /// Typed `harness.llm.call(..., { thinking: ... })` configuration.
 #[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize)]
@@ -838,18 +813,15 @@ impl LlmCallOptions {
         features
     }
 
-    /// Whether the resolved tool surface contains a provider-NATIVE computer
-    /// tool — a block whose `type` starts with `computer` (e.g.
-    /// `computer_20251124`). Deliberately does NOT match a plain function tool
-    /// merely named `computer`: that universal-path tool needs no provider beta
-    /// and matching it would leak the Anthropic beta onto the neutral path.
+    /// Only the legacy `computer_20251124` descriptor needs this beta.
+    /// The newer toolset and ordinary functions require no computer-use beta.
     /// Checks both `native_tools` and `provider_tools` so detection is
     /// order-independent with respect to the native-tool projection.
     fn request_has_native_computer_tool(&self) -> bool {
         let is_native_computer = |tool: &serde_json::Value| -> bool {
             tool.get("type")
                 .and_then(serde_json::Value::as_str)
-                .is_some_and(|ty| ty.starts_with("computer"))
+                .is_some_and(|ty| ty == "computer_20251124")
         };
         self.native_tools
             .as_deref()
@@ -1283,6 +1255,12 @@ mod tests {
                 .contains(&beta.to_string()),
             "beta must be requested when the native computer tool is projected"
         );
+        opts.provider_tools = vec![serde_json::json!({
+            "type": "computer_toolset_20260801"
+        })];
+        assert!(!opts
+            .anthropic_beta_features_for_request()
+            .contains(&beta.to_string()));
     }
 
     #[test]

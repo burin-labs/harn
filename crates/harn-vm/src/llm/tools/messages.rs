@@ -8,6 +8,8 @@ use super::handle_local::coerce_integer_like_tool_args;
 struct ConversationToolCall {
     id: String,
     name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    toolset_name: Option<String>,
     arguments: serde_json::Value,
     #[serde(skip_serializing_if = "Option::is_none")]
     provider_metadata: Option<serde_json::Value>,
@@ -40,6 +42,11 @@ impl ConversationToolCall {
         Self {
             id,
             name,
+            toolset_name: value
+                .get("toolset_name")
+                .and_then(serde_json::Value::as_str)
+                .filter(|namespace| !namespace.is_empty())
+                .map(str::to_owned),
             arguments,
             provider_metadata,
         }
