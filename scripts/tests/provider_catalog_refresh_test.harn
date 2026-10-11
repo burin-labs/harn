@@ -35,6 +35,7 @@ pipeline test_live_catalog_preserves_stored_schedules_bands_and_promotions(harne
       )
     },
   )
+    .to_list()
   assert_eq(len(expected), 3)
   assert(len(expected[0]?.pricing?.schedules ?? []) > 0)
   assert(len(expected[1]?.pricing?.input_token_bands ?? []) > 0)
