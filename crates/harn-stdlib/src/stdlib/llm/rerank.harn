@@ -1,4 +1,5 @@
 import { llm_call_options } from "std/llm/options"
+import { with_default_temperature } from "std/llm/safe"
 
 fn __rerank_text(value: any) {
   if type_of(value) == "string" {
@@ -175,16 +176,18 @@ fn __rerank_schema() {
   }
 }
 
-fn __rerank_llm_options(opts: dict) {
+fn __rerank_llm_options(llm: HarnessLlm, opts: dict) {
   const base = llm_call_options(opts?.llm_options ?? opts ?? {})
-  return base
-    + {
-      max_tokens: base?.max_tokens ?? 128,
-      temperature: base?.temperature ?? 0.0,
-      stream: false,
-      system: base?.system ?? opts?.system
-        ?? "You are a pairwise reward model. Pick the candidate that better satisfies the task and return only schema-valid JSON.",
-    }
+  return with_default_temperature(
+    llm,
+    base
+      + {
+        max_tokens: base?.max_tokens ?? 128,
+        stream: false,
+        system: base?.system ?? opts?.system
+          ?? "You are a pairwise reward model. Pick the candidate that better satisfies the task and return only schema-valid JSON.",
+      },
+  )
 }
 
 fn __rerank_compare(fs: HarnessFs, llm: HarnessLlm, left: dict, right: dict, opts: dict) {
@@ -200,7 +203,7 @@ fn __rerank_compare(fs: HarnessFs, llm: HarnessLlm, left: dict, right: dict, opt
   const result = llm.call_structured(
     __rerank_prompt(fs, left, right, opts),
     __rerank_schema(),
-    __rerank_llm_options(opts),
+    __rerank_llm_options(llm, opts),
   )
   return __rerank_normalize_decision(result)
 }

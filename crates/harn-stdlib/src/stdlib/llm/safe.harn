@@ -4,6 +4,7 @@
 // case-insensitive dict access, judge-payload reconstruction, free-text
 // cleanup of model output, and JSON salvage from freeform text.
 import { agent_session_messages } from "std/agent/state"
+import { LlmCallOptions } from "std/llm/options"
 
 // -------------------------------------------------------------------------------------------------
 
@@ -753,9 +754,6 @@ fn __apply_judge_defaults(llm: HarnessLlm, schema: dict, options: any) {
   if requested_max_tokens < floor {
     resolved = resolved + {max_tokens: floor}
   }
-  if resolved?.temperature == nil && __temperature_default_supported(llm, resolved) {
-    resolved = resolved + {temperature: 0.0}
-  }
   if resolved?.schema_retries == nil {
     resolved = resolved + {schema_retries: 2}
   }
@@ -786,7 +784,7 @@ fn __apply_judge_defaults(llm: HarnessLlm, schema: dict, options: any) {
     && __temperature_default_supported(llm, resolved + repair) {
     repair = repair + {temperature: 0.0}
   }
-  return resolved + {repair: repair}
+  return with_default_temperature(llm, resolved + {repair: repair})
 }
 
 /**
@@ -798,7 +796,22 @@ fn __apply_judge_defaults(llm: HarnessLlm, schema: dict, options: any) {
  * provider gives no evidence of support, so omit this optional default until
  * the runtime resolves the route. Unknown custom routes with an identified
  * provider remain open-world.
+ *
+ * @effects: [llm]
+ * @errors: []
+ * @api_stability: experimental
  */
+pub fn with_default_temperature(
+  llm: HarnessLlm,
+  options: LlmCallOptions,
+  temperature: float = 0.0,
+) -> LlmCallOptions {
+  if options?.temperature != nil || !__temperature_default_supported(llm, options) {
+    return options
+  }
+  return options + {temperature: temperature}
+}
+
 fn __temperature_default_supported(llm: HarnessLlm, options: dict) -> bool {
   const model = trim(to_string(options?.model ?? ""))
   if model == "" {
@@ -817,11 +830,11 @@ fn __temperature_default_supported(llm: HarnessLlm, options: dict) -> bool {
     return false
   }
   const capabilities = try {
-    llm.provider_capabilities(provider, model)
+    llm.provider_capabilities(provider, to_string(info?.id ?? model))
   } catch {
     nil
   }
-  return capabilities?.temperature_supported != false
+  return capabilities?.temperature_supported == true
 }
 
 /**

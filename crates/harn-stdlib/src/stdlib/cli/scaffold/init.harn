@@ -219,7 +219,7 @@ fn __agent_files(project_name: string, harn_range: string) -> list {
     + "      system: instructions,\n" + "      tools: tools,\n"
     + "      max_iterations: opts?.max_iterations ?? 6,\n"
     + "      loop_until_done: opts?.loop_until_done ?? true,\n"
-    + "      llm_options: opts?.llm_options ?? {temperature: 0},\n" + "    },\n" + "  )\n"
+    + "      llm_options: opts?.llm_options ?? {},\n" + "    },\n" + "  )\n"
     + "  const result = agent_loop(harness, task, audit_opts?.system, audit_opts)\n"
     + "  if opts?.emit_result ?? true {\n" + "    emit_agent_result(harness, result)\n" + "  }\n"
     + "  return result\n" + "}\n" + "\n"

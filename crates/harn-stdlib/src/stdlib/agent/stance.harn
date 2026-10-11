@@ -28,6 +28,7 @@ import { agent_tool_handler_result } from "std/agent/tool_lifecycle"
 // from annotations, and elevation is verified, evidenced, and traced.
 // Ships default-OFF and experimental.
 import { __tool_surface_filter_registry, __tool_surface_policy_tools } from "std/agent/tool_surface"
+import { with_default_temperature } from "std/llm/safe"
 
 fn __stance_config(opts: dict) {
   return opts?.read_only_stance ?? {}
@@ -146,13 +147,15 @@ pub fn agent_stance_default_consent_check(
     },
     required: ["consent", "reasoning"],
   }
-  const llm_options = (options ?? {})
-    + {
-      output: {schema: schema, strict: true, validation: "error"},
-      temperature: 0,
-      mock_scope: "agent.stance_consent",
-      _call_stage: "guard",
-    }
+  const llm_options = with_default_temperature(
+    llm,
+    (options ?? {})
+      + {
+        output: {schema: schema, strict: true, validation: "error"},
+        mock_scope: "agent.stance_consent",
+        _call_stage: "guard",
+      },
+  )
   const outcome = try {
     llm.call(prompt, nil, llm_options)
   } catch (e) {

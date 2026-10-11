@@ -19,7 +19,12 @@ import { cache_get, cache_put } from "std/cache"
 import { __with_cache_emit_hit, __with_cache_emit_miss } from "std/llm/handler_cache_events"
 import { llm_call_options } from "std/llm/options"
 pub import { with_fallback, with_retry } from "std/llm/resilience"
-import { parse_first_json, repair_min_max_tokens, with_case_insensitive_keys } from "std/llm/safe"
+import {
+  parse_first_json,
+  repair_min_max_tokens,
+  with_case_insensitive_keys,
+  with_default_temperature,
+} from "std/llm/safe"
 import { cosine_similarity } from "std/math"
 import { embed } from "std/memory"
 import { get_typed_issues } from "std/schema"
@@ -861,7 +866,7 @@ fn __result_schema_issue_text(candidate: any, schema: any) -> string {
  *   - strategy     : string | closure(prompt, system, opts, envelope) -> string
  *                    overriding the corrective nudge (as in `with_repair`).
  *   - max_tokens   : int (default 600) repair-pass budget, reasoning-aware floored.
- *   - temperature  : float (default 0.0) repair-pass temperature.
+ *   - temperature  : float (default 0.0 where supported; explicit call setting preserved).
  *   - on_exhaust   : "throw" | "return" (default "throw").
  *
  * @effects: [llm.call]
@@ -874,7 +879,7 @@ pub fn with_result_schema(harness: Harness, next: any, schema: any = nil, opts: 
   const cfg = __opts_dict(opts)
   const max_attempts = to_int(cfg?.max_attempts ?? 3)
   const strategy = cfg?.strategy
-  const {max_tokens = 600, temperature = 0.0} = cfg ?? {}
+  const {max_tokens = 600, temperature = nil} = cfg ?? {}
   const on_exhaust = to_string(cfg?.on_exhaust ?? "throw")
   return { call ->
     let attempt = 1
@@ -1049,6 +1054,8 @@ fn __repair_apply_strategy(
   }
   if temperature != nil {
     repaired_opts = repaired_opts + {temperature: temperature}
+  } else {
+    repaired_opts = with_default_temperature(llm, repaired_opts)
   }
   return {
     prompt: original_prompt + "\n\n" + nudge,
@@ -1064,7 +1071,7 @@ fn __repair_apply_strategy(
  * One-shot repair pass on `schema_validation` failures. When `next(call)`
  * returns `{ok: false, status: "schema_validation", error}`, the wrapper
  * appends a corrective nudge to `call.prompt`, sets `max_tokens` (reasoning-aware
- * floored) and `temperature` for the repair pass, and asks `next` once more. The
+ * floored) and a supported default `temperature` for the repair pass, and asks `next` once more. The
  * second envelope is returned with `repair_attempted: true`.
  *
  * Options:
@@ -1075,7 +1082,7 @@ fn __repair_apply_strategy(
  *                 floored reasoning-awarely via `repair_min_max_tokens` for the
  *                 call's route (raised, never lowered) so a reasoning route's
  *                 repaired JSON verdict is not starved by its reasoning channel
- *   - temperature: float (default 0.0)
+ *   - temperature: float (default 0.0 where supported; explicit call setting preserved)
  *   - enabled: bool (default true) — when false, behaves as a no-op pass
  *
  * Other failure statuses pass through unchanged. Successful responses
@@ -1093,7 +1100,7 @@ pub fn with_repair(harness: Harness, next: any, opts: any = nil) {
   const cfg = __opts_dict(opts)
   const enabled = cfg?.enabled ?? true
   const strategy = cfg?.strategy
-  const {max_tokens = 600, temperature = 0.0} = cfg ?? {}
+  const {max_tokens = 600, temperature = nil} = cfg ?? {}
   return { call ->
     const first = __safe_invoke(next, call)
     if !enabled {

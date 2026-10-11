@@ -12,7 +12,8 @@
 //   - OpenAI best-of-n / reranking patterns (cookbook).
 import { decisive_error, settle_with_abort } from "std/abort"
 import { agent_emit_event } from "std/agent/state"
-import { safe_call, with_case_insensitive_keys } from "std/llm/safe"
+import { LlmCallOptions } from "std/llm/options"
+import { safe_call, with_case_insensitive_keys, with_default_temperature } from "std/llm/safe"
 
 fn __clamp_int(n: any, lo: int, hi: int) {
   const v = to_int(n)
@@ -25,12 +26,17 @@ fn __clamp_int(n: any, lo: int, hi: int) {
   return v
 }
 
-fn __sampler_opts_for(opts: dict) {
+fn __sampler_opts_for(
+  llm: HarnessLlm,
+  opts: dict,
+  base_opts: LlmCallOptions,
+  temperature: float = 1.0,
+) {
   const so = opts?.sampler_opts
   if type_of(so) == "dict" {
     return so
   }
-  return {temperature: 1.0}
+  return with_default_temperature(llm, base_opts, temperature)
 }
 
 fn __merge_call_opts(base: any, sampler_opts: any) {
@@ -170,7 +176,7 @@ fn __structured_judge(llm: HarnessLlm, samples: any, opts: dict) {
  *
  * Options:
  *   - n: int (default 5; clamped to [2, 32])
- *   - sampler_opts: dict (default {temperature: 1.0})
+ *   - sampler_opts: dict (default temperature 1.0 where supported; explicit settings preserved)
  *   - judge: "structured" | closure (default "structured")
  *   - judge_opts, judge_model, judge_prompt, judge_system: optional
  *   - parallel: bool (default true)
@@ -189,13 +195,13 @@ pub fn best_of_n(llm: HarnessLlm, prompt: any, system: any, opts: any = nil) {
     {}
   }
   const n = __clamp_int(cfg?.n ?? 5, 2, 32)
-  const sampler_opts = __sampler_opts_for(cfg)
   const run_parallel = cfg?.parallel ?? true
   const base_opts = if type_of(cfg?.call_opts) == "dict" {
     cfg.call_opts
   } else {
     {}
   }
+  const sampler_opts = __sampler_opts_for(llm, cfg, base_opts)
   const samples = __collect_samples(llm, prompt, system, base_opts, sampler_opts, n, run_parallel)
   const valid = samples.filter({ s -> s?.ok ?? false })
   if len(valid) == 0 {
@@ -426,12 +432,12 @@ fn __build_distribution(keys_in_order: list, counts: any) {
 /**
  * self_consistency(harness.agent, harness.llm, prompt, system, opts) -> dict
  *
- * Sample N times at temperature > 0, extract a canonical answer per sample,
+ * Sample N times, extract a canonical answer per sample,
  * and majority-vote (Wang et al. 2022; arxiv:2203.11171).
  *
  * Options:
  *   - n: int (default 8)
- *   - sampler_opts: dict (default {temperature: 1.2})
+ *   - sampler_opts: dict (default temperature 1.2 where supported; explicit settings preserved)
  *   - extract: closure(text) -> any (REQUIRED)
  *   - normalize: closure(answer) -> any (default identity)
  *   - vote: "majority" | "weighted" (default "majority")
@@ -468,17 +474,13 @@ pub fn self_consistency(
     throw "self_consistency: opts.confidence_fn is required for weighted voting"
   }
   const n = __clamp_int(cfg?.n ?? 8, 2, 64)
-  const sampler_opts = if type_of(cfg?.sampler_opts) == "dict" {
-    cfg.sampler_opts
-  } else {
-    {temperature: 1.2}
-  }
   const run_parallel = cfg?.parallel ?? true
   const base_opts = if type_of(cfg?.call_opts) == "dict" {
     cfg.call_opts
   } else {
     {}
   }
+  const sampler_opts = __sampler_opts_for(llm, cfg, base_opts, 1.2)
   const samples = __collect_samples(llm, prompt, system, base_opts, sampler_opts, n, run_parallel)
   const tally = __tally_samples(samples, extract, cfg?.normalize, vote_mode, confidence_fn)
   if len(tally.keys_in_order) == 0 {
