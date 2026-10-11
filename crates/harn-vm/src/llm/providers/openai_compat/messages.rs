@@ -52,12 +52,20 @@ pub(super) fn enforce_tool_result_adjacency(
     normalized
 }
 
-pub(super) fn drop_orphan_tool_result_messages(
+/// Keep observations whose call envelope was removed by compaction,
+/// interruption, or session trimming without sending an invalid tool result.
+pub(super) fn preserve_orphan_tool_results_as_observations(
     messages: Vec<serde_json::Value>,
 ) -> Vec<serde_json::Value> {
     let mut live_tool_call_ids = HashSet::new();
     let mut normalized = Vec::with_capacity(messages.len());
+    let mut observations = Vec::new();
     for message in messages {
+        // Observations are user messages. Land them after the entire tool
+        // result run so they cannot split a valid parallel result envelope.
+        if message.get("role").and_then(|role| role.as_str()) != Some("tool") {
+            normalized.append(&mut observations);
+        }
         match message.get("role").and_then(|role| role.as_str()) {
             Some("assistant") => {
                 if let Some(ids) = assistant_tool_call_ids(&message) {
@@ -65,13 +73,40 @@ pub(super) fn drop_orphan_tool_result_messages(
                 }
                 normalized.push(message);
             }
-            Some("tool") => match message.get("tool_call_id").and_then(|value| value.as_str()) {
-                Some(id) if live_tool_call_ids.remove(id) => normalized.push(message),
-                _ => {}
-            },
+            Some("tool") => {
+                let paired = message
+                    .get("tool_call_id")
+                    .and_then(|value| value.as_str())
+                    .is_some_and(|id| live_tool_call_ids.remove(id));
+                if paired {
+                    normalized.push(message);
+                } else {
+                    let content = message.get("content").cloned().unwrap_or_default();
+                    let content = match content {
+                        serde_json::Value::Array(mut parts) => {
+                            parts.insert(
+                                0,
+                                serde_json::json!({
+                                    "type": "text",
+                                    "text": "[unpaired durable tool result]",
+                                }),
+                            );
+                            serde_json::Value::Array(parts)
+                        }
+                        serde_json::Value::String(text) => {
+                            serde_json::json!(format!("[unpaired durable tool result]\n{text}"))
+                        }
+                        other => {
+                            serde_json::json!(format!("[unpaired durable tool result]\n{other}"))
+                        }
+                    };
+                    observations.push(serde_json::json!({"role": "user", "content": content}));
+                }
+            }
             _ => normalized.push(message),
         }
     }
+    normalized.append(&mut observations);
     normalized
 }
 

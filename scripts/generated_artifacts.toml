@@ -248,6 +248,7 @@ sources = [
   "crates/harn-kernel/",
   "crates/harn-wasm/",
   "scripts/package_app_runtime.mjs",
+  "scripts/app_host_runtime_conformance.mjs",
 ]
 ci = true
 make_all = false

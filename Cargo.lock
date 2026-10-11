@@ -788,23 +788,17 @@ dependencies = [
  "aws-smithy-async",
  "aws-smithy-runtime-api",
  "aws-smithy-types",
- "h2 0.3.27",
- "h2 0.4.15",
- "http 0.2.12",
+ "h2",
  "http 1.5.0",
- "http-body 0.4.6",
- "hyper 0.14.32",
- "hyper 1.10.1",
- "hyper-rustls 0.24.2",
- "hyper-rustls 0.27.9",
+ "hyper",
+ "hyper-rustls",
  "hyper-util",
  "pin-project-lite",
- "rustls 0.21.12",
- "rustls 0.23.45",
+ "rustls",
  "rustls-native-certs",
  "rustls-pki-types",
  "tokio",
- "tokio-rustls 0.26.4",
+ "tokio-rustls",
  "tower 0.5.3",
  "tracing",
 ]
@@ -878,7 +872,6 @@ dependencies = [
  "aws-smithy-runtime-api-macros",
  "aws-smithy-types",
  "bytes",
- "http 0.2.12",
  "http 1.5.0",
  "pin-project-lite",
  "tokio",
@@ -972,7 +965,7 @@ dependencies = [
  "http 1.5.0",
  "http-body 1.0.1",
  "http-body-util",
- "hyper 1.10.1",
+ "hyper",
  "hyper-util",
  "itoa",
  "matchit",
@@ -1026,13 +1019,13 @@ dependencies = [
  "fs-err",
  "http 1.5.0",
  "http-body 1.0.1",
- "hyper 1.10.1",
+ "hyper",
  "hyper-util",
  "pin-project-lite",
- "rustls 0.23.45",
+ "rustls",
  "rustls-pki-types",
  "tokio",
- "tokio-rustls 0.26.4",
+ "tokio-rustls",
  "tower-service",
 ]
 
@@ -3352,25 +3345,6 @@ dependencies = [
 
 [[package]]
 name = "h2"
-version = "0.3.27"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0beca50380b1fc32983fc1cb4587bfa4bb9e78fc259aad4a0032d2080309222d"
-dependencies = [
- "bytes",
- "fnv",
- "futures-core",
- "futures-sink",
- "futures-util",
- "http 0.2.12",
- "indexmap",
- "slab",
- "tokio",
- "tokio-util",
- "tracing",
-]
-
-[[package]]
-name = "h2"
 version = "0.4.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6cb093c84e8bd9b188d4c4a8cb6579fc016968d14c99882163cd3ff402a4f155"
@@ -3401,7 +3375,7 @@ dependencies = [
 
 [[package]]
 name = "harn-aws-config"
-version = "0.10.165-dev"
+version = "0.10.165"
 dependencies = [
  "aws-credential-types",
  "aws-runtime",
@@ -3436,7 +3410,7 @@ dependencies = [
 
 [[package]]
 name = "harn-builtin-macros"
-version = "0.10.165-dev"
+version = "0.10.165"
 dependencies = [
  "harn-builtin-meta",
  "harn-builtin-registry",
@@ -3447,18 +3421,18 @@ dependencies = [
 
 [[package]]
 name = "harn-builtin-meta"
-version = "0.10.165-dev"
+version = "0.10.165"
 
 [[package]]
 name = "harn-builtin-registry"
-version = "0.10.165-dev"
+version = "0.10.165"
 dependencies = [
  "harn-builtin-meta",
 ]
 
 [[package]]
 name = "harn-capability-contracts"
-version = "0.10.165-dev"
+version = "0.10.165"
 dependencies = [
  "harn-builtin-macros",
  "harn-builtin-meta",
@@ -3469,7 +3443,7 @@ dependencies = [
 
 [[package]]
 name = "harn-cli"
-version = "0.10.165-dev"
+version = "0.10.165"
 dependencies = [
  "arcstr",
  "async-trait",
@@ -3525,7 +3499,7 @@ dependencies = [
  "regex",
  "reqwest 0.12.28",
  "rpassword",
- "rustls 0.23.45",
+ "rustls",
  "serde",
  "serde_json",
  "serde_yaml_ng",
@@ -3555,7 +3529,7 @@ dependencies = [
 
 [[package]]
 name = "harn-cli-aot-gen"
-version = "0.10.165-dev"
+version = "0.10.165"
 dependencies = [
  "harn-modules",
  "harn-parser",
@@ -3570,7 +3544,7 @@ dependencies = [
 
 [[package]]
 name = "harn-clock"
-version = "0.10.165-dev"
+version = "0.10.165"
 dependencies = [
  "async-trait",
  "parking_lot",
@@ -3581,7 +3555,7 @@ dependencies = [
 
 [[package]]
 name = "harn-dap"
-version = "0.10.165-dev"
+version = "0.10.165"
 dependencies = [
  "arcstr",
  "harn-modules",
@@ -3596,14 +3570,14 @@ dependencies = [
 
 [[package]]
 name = "harn-flock"
-version = "0.10.165-dev"
+version = "0.10.165"
 dependencies = [
  "tempfile",
 ]
 
 [[package]]
 name = "harn-fmt"
-version = "0.10.165-dev"
+version = "0.10.165"
 dependencies = [
  "harn-lexer",
  "harn-parser",
@@ -3623,14 +3597,14 @@ dependencies = [
 
 [[package]]
 name = "harn-glob"
-version = "0.10.165-dev"
+version = "0.10.165"
 dependencies = [
  "globset",
 ]
 
 [[package]]
 name = "harn-guard"
-version = "0.10.165-dev"
+version = "0.10.165"
 dependencies = [
  "harn-vm",
  "ort",
@@ -3644,7 +3618,7 @@ dependencies = [
 
 [[package]]
 name = "harn-hostlib"
-version = "0.10.165-dev"
+version = "0.10.165"
 dependencies = [
  "arcstr",
  "async-trait",
@@ -3721,7 +3695,7 @@ dependencies = [
 
 [[package]]
 name = "harn-ir"
-version = "0.10.165-dev"
+version = "0.10.165"
 dependencies = [
  "harn-builtin-meta",
  "harn-builtin-registry",
@@ -3732,7 +3706,7 @@ dependencies = [
 
 [[package]]
 name = "harn-kernel"
-version = "0.10.165-dev"
+version = "0.10.165"
 dependencies = [
  "arcstr",
  "blake3",
@@ -3751,14 +3725,14 @@ dependencies = [
 
 [[package]]
 name = "harn-lexer"
-version = "0.10.165-dev"
+version = "0.10.165"
 dependencies = [
  "serde",
 ]
 
 [[package]]
 name = "harn-lint"
-version = "0.10.165-dev"
+version = "0.10.165"
 dependencies = [
  "harn-builtin-meta",
  "harn-fmt",
@@ -3784,7 +3758,7 @@ dependencies = [
 
 [[package]]
 name = "harn-lsp"
-version = "0.10.165-dev"
+version = "0.10.165"
 dependencies = [
  "harn-builtin-meta",
  "harn-capability-contracts",
@@ -3809,7 +3783,7 @@ dependencies = [
 
 [[package]]
 name = "harn-mcp-compat"
-version = "0.10.165-dev"
+version = "0.10.165"
 dependencies = [
  "axum",
  "harn-serve",
@@ -3824,7 +3798,7 @@ dependencies = [
 
 [[package]]
 name = "harn-modules"
-version = "0.10.165-dev"
+version = "0.10.165"
 dependencies = [
  "blake3",
  "croner",
@@ -3842,7 +3816,7 @@ dependencies = [
 
 [[package]]
 name = "harn-opcode-macros"
-version = "0.10.165-dev"
+version = "0.10.165"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3862,7 +3836,7 @@ dependencies = [
 
 [[package]]
 name = "harn-package"
-version = "0.10.165-dev"
+version = "0.10.165"
 dependencies = [
  "base64 0.23.1",
  "chrono-tz",
@@ -3900,7 +3874,7 @@ dependencies = [
 
 [[package]]
 name = "harn-parser"
-version = "0.10.165-dev"
+version = "0.10.165"
 dependencies = [
  "harn-builtin-meta",
  "harn-builtin-registry",
@@ -3923,7 +3897,7 @@ dependencies = [
 
 [[package]]
 name = "harn-provider-catalog"
-version = "0.10.165-dev"
+version = "0.10.165"
 dependencies = [
  "chrono",
  "harn-clock",
@@ -3935,7 +3909,7 @@ dependencies = [
 
 [[package]]
 name = "harn-rules"
-version = "0.10.165-dev"
+version = "0.10.165"
 dependencies = [
  "harn-hostlib",
  "regex",
@@ -3950,7 +3924,7 @@ dependencies = [
 
 [[package]]
 name = "harn-rules-hostlib"
-version = "0.10.165-dev"
+version = "0.10.165"
 dependencies = [
  "harn-builtin-meta",
  "harn-fmt",
@@ -3965,11 +3939,11 @@ dependencies = [
 
 [[package]]
 name = "harn-secret-catalog"
-version = "0.10.165-dev"
+version = "0.10.165"
 
 [[package]]
 name = "harn-serve"
-version = "0.10.165-dev"
+version = "0.10.165"
 dependencies = [
  "arcstr",
  "async-compression",
@@ -3998,7 +3972,7 @@ dependencies = [
  "jsonwebtoken",
  "rcgen",
  "reqwest 0.12.28",
- "rustls 0.23.45",
+ "rustls",
  "schemars",
  "serde",
  "serde_json",
@@ -4019,7 +3993,7 @@ dependencies = [
 
 [[package]]
 name = "harn-session-store"
-version = "0.10.165-dev"
+version = "0.10.165"
 dependencies = [
  "async-trait",
  "base64 0.23.1",
@@ -4043,14 +4017,14 @@ dependencies = [
 
 [[package]]
 name = "harn-skills"
-version = "0.10.165-dev"
+version = "0.10.165"
 dependencies = [
  "tempfile",
 ]
 
 [[package]]
 name = "harn-sqlite"
-version = "0.10.165-dev"
+version = "0.10.165"
 dependencies = [
  "harn-flock",
  "rusqlite",
@@ -4060,18 +4034,18 @@ dependencies = [
 
 [[package]]
 name = "harn-stdlib"
-version = "0.10.165-dev"
+version = "0.10.165"
 
 [[package]]
 name = "harn-stdlib-artifacts"
-version = "0.10.165-dev"
+version = "0.10.165"
 dependencies = [
  "harn-vm",
 ]
 
 [[package]]
 name = "harn-terminal"
-version = "0.10.165-dev"
+version = "0.10.165"
 dependencies = [
  "portable-pty",
  "serde",
@@ -4081,7 +4055,7 @@ dependencies = [
 
 [[package]]
 name = "harn-test-runner"
-version = "0.10.165-dev"
+version = "0.10.165"
 dependencies = [
  "harn-lexer",
  "harn-modules",
@@ -4093,7 +4067,7 @@ dependencies = [
 
 [[package]]
 name = "harn-vm"
-version = "0.10.165-dev"
+version = "0.10.165"
 dependencies = [
  "aes-gcm",
  "apple-native-keyring-store",
@@ -4171,7 +4145,7 @@ dependencies = [
  "rmcp",
  "rusqlite",
  "rust_decimal",
- "rustls 0.23.45",
+ "rustls",
  "schemars",
  "scraper",
  "seccompiler",
@@ -4180,7 +4154,6 @@ dependencies = [
  "serde",
  "serde_ignored",
  "serde_json",
- "serde_path_to_error",
  "serde_yaml_ng",
  "sha1 0.11.0",
  "sha2 0.11.0",
@@ -4245,7 +4218,7 @@ dependencies = [
 
 [[package]]
 name = "harn-wasm"
-version = "0.10.165-dev"
+version = "0.10.165"
 dependencies = [
  "harn-kernel",
  "serde_json",
@@ -4449,30 +4422,6 @@ dependencies = [
 
 [[package]]
 name = "hyper"
-version = "0.14.32"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "41dfc780fdec9373c01bae43289ea34c972e40ee3c9f6b3c8801a35f35586ce7"
-dependencies = [
- "bytes",
- "futures-channel",
- "futures-core",
- "futures-util",
- "h2 0.3.27",
- "http 0.2.12",
- "http-body 0.4.6",
- "httparse",
- "httpdate",
- "itoa",
- "pin-project-lite",
- "socket2 0.5.10",
- "tokio",
- "tower-service",
- "tracing",
- "want",
-]
-
-[[package]]
-name = "hyper"
 version = "1.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "55281c53a1894c864990125767da440a4e630446785086f52523b20033b74498"
@@ -4481,7 +4430,7 @@ dependencies = [
  "bytes",
  "futures-channel",
  "futures-core",
- "h2 0.4.15",
+ "h2",
  "http 1.5.0",
  "http-body 1.0.1",
  "httparse",
@@ -4495,32 +4444,17 @@ dependencies = [
 
 [[package]]
 name = "hyper-rustls"
-version = "0.24.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ec3efd23720e2049821a693cbc7e65ea87c72f1c58ff2f9522ff332b1491e590"
-dependencies = [
- "futures-util",
- "http 0.2.12",
- "hyper 0.14.32",
- "log",
- "rustls 0.21.12",
- "tokio",
- "tokio-rustls 0.24.1",
-]
-
-[[package]]
-name = "hyper-rustls"
 version = "0.27.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "33ca68d021ef39cf6463ab54c1d0f5daf03377b70561305bb89a8f83aab66e0f"
 dependencies = [
  "http 1.5.0",
- "hyper 1.10.1",
+ "hyper",
  "hyper-util",
- "rustls 0.23.45",
+ "rustls",
  "rustls-native-certs",
  "tokio",
- "tokio-rustls 0.26.4",
+ "tokio-rustls",
  "tower-service",
  "webpki-roots 1.0.8",
 ]
@@ -4537,12 +4471,12 @@ dependencies = [
  "futures-util",
  "http 1.5.0",
  "http-body 1.0.1",
- "hyper 1.10.1",
+ "hyper",
  "ipnet",
  "libc",
  "percent-encoding",
  "pin-project-lite",
- "socket2 0.6.4",
+ "socket2",
  "tokio",
  "tower-service",
  "tracing",
@@ -6924,8 +6858,8 @@ dependencies = [
  "quinn-proto",
  "quinn-udp",
  "rustc-hash",
- "rustls 0.23.45",
- "socket2 0.6.4",
+ "rustls",
+ "socket2",
  "thiserror 2.0.21",
  "tokio",
  "tracing",
@@ -6946,7 +6880,7 @@ dependencies = [
  "rand_pcg",
  "ring",
  "rustc-hash",
- "rustls 0.23.45",
+ "rustls",
  "rustls-pki-types",
  "slab",
  "thiserror 2.0.21",
@@ -6964,7 +6898,7 @@ dependencies = [
  "cfg_aliases 0.2.1",
  "libc",
  "once_cell",
- "socket2 0.6.4",
+ "socket2",
  "tracing",
  "windows-sys 0.61.2",
 ]
@@ -7335,8 +7269,8 @@ dependencies = [
  "http 1.5.0",
  "http-body 1.0.1",
  "http-body-util",
- "hyper 1.10.1",
- "hyper-rustls 0.27.9",
+ "hyper",
+ "hyper-rustls",
  "hyper-util",
  "js-sys",
  "log",
@@ -7344,14 +7278,14 @@ dependencies = [
  "percent-encoding",
  "pin-project-lite",
  "quinn",
- "rustls 0.23.45",
+ "rustls",
  "rustls-pki-types",
  "serde",
  "serde_json",
  "serde_urlencoded",
  "sync_wrapper",
  "tokio",
- "tokio-rustls 0.26.4",
+ "tokio-rustls",
  "tokio-util",
  "tower 0.5.3",
  "tower-http 0.6.11",
@@ -7377,22 +7311,22 @@ dependencies = [
  "http 1.5.0",
  "http-body 1.0.1",
  "http-body-util",
- "hyper 1.10.1",
- "hyper-rustls 0.27.9",
+ "hyper",
+ "hyper-rustls",
  "hyper-util",
  "js-sys",
  "log",
  "percent-encoding",
  "pin-project-lite",
  "quinn",
- "rustls 0.23.45",
+ "rustls",
  "rustls-pki-types",
  "rustls-platform-verifier",
  "serde",
  "serde_json",
  "sync_wrapper",
  "tokio",
- "tokio-rustls 0.26.4",
+ "tokio-rustls",
  "tokio-util",
  "tower 0.5.3",
  "tower-http 0.6.11",
@@ -7606,18 +7540,6 @@ dependencies = [
 
 [[package]]
 name = "rustls"
-version = "0.21.12"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3f56a14d1f48b391359b22f731fd4bd7e43c97f3c50eee276f3aa09c94784d3e"
-dependencies = [
- "log",
- "ring",
- "rustls-webpki 0.101.7",
- "sct",
-]
-
-[[package]]
-name = "rustls"
 version = "0.23.45"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0d41d731c7d2f962d1ccc364cec258de3c0e93b38c2fb3ba97ac74513048d634"
@@ -7627,7 +7549,7 @@ dependencies = [
  "once_cell",
  "ring",
  "rustls-pki-types",
- "rustls-webpki 0.103.15",
+ "rustls-webpki",
  "subtle",
  "zeroize",
 ]
@@ -7665,10 +7587,10 @@ dependencies = [
  "jni",
  "log",
  "once_cell",
- "rustls 0.23.45",
+ "rustls",
  "rustls-native-certs",
  "rustls-platform-verifier-android",
- "rustls-webpki 0.103.15",
+ "rustls-webpki",
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs",
@@ -7680,16 +7602,6 @@ name = "rustls-platform-verifier-android"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f87165f0995f63a9fbeea62b64d10b4d9d8e78ec6d7d51fb2125fda7bb36788f"
-
-[[package]]
-name = "rustls-webpki"
-version = "0.101.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8b6275d1ee7a1cd780b64aca7726599a1dbc893b1e64144529e55c3c2f745765"
-dependencies = [
- "ring",
- "untrusted 0.9.0",
-]
 
 [[package]]
 name = "rustls-webpki"
@@ -7804,16 +7716,6 @@ dependencies = [
  "precomputed-hash",
  "selectors",
  "tendril",
-]
-
-[[package]]
-name = "sct"
-version = "0.7.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "da046153aa2352493d6cb7da4b6e5c0c057d8a1d0a9aa8560baffdd945acd414"
-dependencies = [
- "ring",
- "untrusted 0.9.0",
 ]
 
 [[package]]
@@ -8284,16 +8186,6 @@ dependencies = [
 
 [[package]]
 name = "socket2"
-version = "0.5.10"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e22376abed350d73dd1cd119b57ffccad95b4e585a7cda43e286245ce23c0678"
-dependencies = [
- "libc",
- "windows-sys 0.52.0",
-]
-
-[[package]]
-name = "socket2"
 version = "0.6.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "52d1cfed4120b4d927bf7c0f86d2087a4a7d6027c906d9f9d525a80573b9be51"
@@ -8392,7 +8284,7 @@ dependencies = [
  "memchr",
  "percent-encoding",
  "rust_decimal",
- "rustls 0.23.45",
+ "rustls",
  "serde",
  "serde_json",
  "smallvec",
@@ -8893,7 +8785,7 @@ dependencies = [
  "mio",
  "pin-project-lite",
  "signal-hook-registry",
- "socket2 0.6.4",
+ "socket2",
  "tokio-macros",
  "windows-sys 0.61.2",
 ]
@@ -8911,21 +8803,11 @@ dependencies = [
 
 [[package]]
 name = "tokio-rustls"
-version = "0.24.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c28327cf380ac148141087fbfb9de9d7bd4e84ab5d2c28fbc911d753de8a7081"
-dependencies = [
- "rustls 0.21.12",
- "tokio",
-]
-
-[[package]]
-name = "tokio-rustls"
 version = "0.26.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1729aa945f29d91ba541258c8df89027d5792d85a8841fb65e8bf0f4ede4ef61"
 dependencies = [
- "rustls 0.23.45",
+ "rustls",
  "tokio",
 ]
 
@@ -8960,10 +8842,10 @@ checksum = "17a073bfed563fa236697a068031408a93cd9522e08abf9933ead3e73411bd71"
 dependencies = [
  "futures-util",
  "log",
- "rustls 0.23.45",
+ "rustls",
  "rustls-pki-types",
  "tokio",
- "tokio-rustls 0.26.4",
+ "tokio-rustls",
  "tungstenite 0.30.0",
  "webpki-roots 0.26.11",
 ]
@@ -9329,7 +9211,7 @@ dependencies = [
 
 [[package]]
 name = "tree-sitter-harn"
-version = "0.10.165-dev"
+version = "0.10.165"
 dependencies = [
  "cc",
  "serde_json",
@@ -9610,7 +9492,7 @@ dependencies = [
  "httparse",
  "log",
  "rand 0.10.3",
- "rustls 0.23.45",
+ "rustls",
  "rustls-pki-types",
  "sha1 0.11.0",
  "thiserror 2.0.21",
@@ -9748,7 +9630,7 @@ dependencies = [
  "base64 0.22.1",
  "log",
  "percent-encoding",
- "rustls 0.23.45",
+ "rustls",
  "rustls-pki-types",
  "socks",
  "ureq-proto",

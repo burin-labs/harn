@@ -4,8 +4,8 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use super::super::{
-    default_run_dir, new_id, now_unix_seconds_text, parse_json_payload, sync_run_handoffs,
-    CompactionReceipt, RecapMetrics,
+    default_run_dir, new_id, now_unix_seconds_text, parse_json_payload, payload_parse_error,
+    sync_run_handoffs, CompactionReceipt, RecapMetrics,
 };
 use super::action_graph::{publish_action_graph_event, refresh_run_observability};
 use super::eval_pack::replay_fixture_from_run;
@@ -163,11 +163,10 @@ pub async fn load_agent_session_replay_events_from_log(
             let Some(event_value) = record.payload.get("event").cloned() else {
                 continue;
             };
-            let event = serde_json::from_value::<AgentEvent>(event_value).map_err(|error| {
-                VmError::Runtime(format!(
-                    "failed to decode agent event replay record {event_id}: {error}"
-                ))
-            })?;
+            let event: AgentEvent = parse_json_payload(
+                event_value,
+                &format!("agent event replay record {event_id}"),
+            )?;
             if event.session_id() == session_id {
                 events.push(AgentSessionReplayEvent {
                     event_id,
@@ -669,8 +668,8 @@ pub fn load_run_record(path: &Path) -> Result<RunRecord, VmError> {
 pub(super) fn load_run_record_snapshot(path: &Path) -> Result<(RunRecord, Vec<u8>), VmError> {
     let content = std::fs::read(path)
         .map_err(|e| VmError::Runtime(format!("failed to read run record: {e}")))?;
-    let mut run: RunRecord = serde_json::from_slice(&content)
-        .map_err(|e| VmError::Runtime(format!("failed to parse run record: {e}")))?;
+    let mut run: RunRecord =
+        serde_json::from_slice(&content).map_err(|_| payload_parse_error("run record"))?;
     normalize_evidence_identity(&mut run);
     materialize_child_runs_from_stage_metadata(&mut run);
     if run.replay_fixture.is_none() {

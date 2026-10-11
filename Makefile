@@ -127,7 +127,10 @@ gen-app-runtime: wasm-build
 	node scripts/package_app_runtime.mjs
 
 check-app-runtime: wasm-build
-	node scripts/package_app_runtime.mjs --check
+	node --test scripts/test_app_host_runtime_conformance.mjs
+	@corpus="$$(mktemp)"; trap 'rm -f "$$corpus"' EXIT; \
+		$(HARN_CARGO_CMD) run --quiet -p harn-kernel --example portable_conformance_json > "$$corpus" && \
+		node scripts/package_app_runtime.mjs --check --corpus "$$corpus"
 
 # Core Wasm must import only the tiny generated wasm-bindgen exception Adapter.
 # Any other host import is an authority change and fails closed for review.

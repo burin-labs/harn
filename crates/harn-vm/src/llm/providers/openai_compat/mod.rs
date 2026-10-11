@@ -30,9 +30,9 @@ use crate::llm::providers::schema_compat::{
 use crate::value::VmError;
 
 use self::messages::{
-    drop_orphan_tool_result_messages, enforce_single_tool_call_history,
-    enforce_tool_result_adjacency, maybe_remap_tool_call_text,
-    relocate_tool_message_images_to_user, sanitize_openai_message_for_request,
+    enforce_single_tool_call_history, enforce_tool_result_adjacency, maybe_remap_tool_call_text,
+    preserve_orphan_tool_results_as_observations, relocate_tool_message_images_to_user,
+    sanitize_openai_message_for_request,
 };
 use self::reasoning::{
     enabled_reasoning_config, groq_qwen_reasoning_effort, is_openrouter_reasoning_disable,
@@ -198,9 +198,7 @@ impl OpenAiCompatibleProvider {
             }));
         }
         msgs = crate::llm::api::normalize_openai_style_messages(msgs, false);
-        if has_native_tools {
-            msgs = drop_orphan_tool_result_messages(msgs);
-        }
+        msgs = preserve_orphan_tool_results_as_observations(msgs);
         if caps.requires_tool_result_adjacency {
             msgs = enforce_tool_result_adjacency(msgs);
         }

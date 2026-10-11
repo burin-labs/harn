@@ -7,6 +7,7 @@ use serde_json::Value as JsonValue;
 use sha2::{Digest, Sha256};
 
 use super::types::{RunRecord, RunTranscriptArtifactDescriptor, RunTranscriptPointerRecord};
+use crate::orchestration::payload_parse_error;
 
 const DESCRIPTOR_SCHEMA_VERSION: &str = "harn.llm_transcript_artifact.v1";
 const ARTIFACT_KIND: &str = "llm_jsonl";
@@ -275,13 +276,14 @@ fn scan_jsonl(
         if line.is_empty() {
             continue;
         }
-        let event: JsonValue = serde_json::from_str(line).map_err(|error| {
+        let event: JsonValue = serde_json::from_str(line).map_err(|_| {
             LlmTranscriptDescriptorError::new(
                 "malformed_jsonl",
                 format!(
-                    "{}:{} failed to parse JSONL row: {error}",
+                    "{}:{} {}",
                     transcript_path.display(),
-                    idx + 1
+                    idx + 1,
+                    payload_parse_error("transcript JSONL row")
                 ),
             )
         })?;

@@ -132,7 +132,7 @@ fn strict_provider_keeps_parallel_tool_results_adjacent() {
 }
 
 #[test]
-fn native_route_drops_orphan_tool_result_messages() {
+fn native_route_preserves_unpaired_results_without_tool_metadata() {
     let mut payload = base_request_payload();
     payload.provider = "groq".to_string();
     payload.model = "openai/gpt-oss-120b".to_string();
@@ -172,16 +172,74 @@ fn native_route_drops_orphan_tool_result_messages() {
         .map(|message| message["role"].as_str().unwrap_or("?"))
         .collect::<Vec<_>>();
 
-    assert_eq!(roles, vec!["user", "assistant", "tool", "user"]);
-    assert_eq!(messages[2]["tool_call_id"], "call_001");
-    assert_eq!(messages[2]["content"], "fresh result");
-    assert!(
-        messages
-            .iter()
-            .all(|message| message["content"] != "stale compacted result"
-                && message["content"] != "duplicate result"),
-        "orphaned or duplicate tool results must not reach native tool providers: {messages:?}"
+    assert_eq!(
+        roles,
+        vec!["user", "user", "assistant", "tool", "user", "user"]
     );
+    assert_eq!(messages[3]["tool_call_id"], "call_001");
+    assert_eq!(messages[3]["content"], "fresh result");
+    for (index, observation) in [(1, "stale compacted result"), (4, "duplicate result")] {
+        assert_eq!(
+            messages[index]["content"],
+            format!("[unpaired durable tool result]\n{observation}")
+        );
+        assert!(messages[index].get("tool_call_id").is_none());
+        assert!(messages[index].get("name").is_none());
+    }
+}
+
+#[test]
+fn unpaired_observation_does_not_split_parallel_tool_results() {
+    let mut payload = base_request_payload();
+    payload.messages = vec![
+        json!({
+            "role": "assistant", "content": "",
+            "tool_calls": [
+                {"id": "c1", "function": {"name": "read", "arguments": "{}"}},
+                {"id": "c2", "function": {"name": "read", "arguments": "{}"}},
+            ],
+        }),
+        json!({"role": "tool", "tool_call_id": "c1", "content": "first"}),
+        json!({"role": "tool", "tool_call_id": "stale", "content": "still useful"}),
+        json!({"role": "tool", "tool_call_id": "c2", "content": "second"}),
+    ];
+    let body = OpenAiCompatibleProvider::build_request_body(&payload);
+    let messages = body["messages"].as_array().expect("messages array");
+    assert_eq!(messages[0]["role"], "assistant");
+    assert_eq!(messages[1]["tool_call_id"], "c1");
+    assert_eq!(messages[2]["tool_call_id"], "c2");
+    assert_eq!(messages[3]["role"], "user");
+    assert_eq!(
+        messages[3]["content"],
+        "[unpaired durable tool result]\nstill useful"
+    );
+}
+
+#[test]
+fn trimmed_result_keeps_text_and_images_when_next_request_has_no_tools() {
+    let mut payload = base_request_payload();
+    payload.messages = vec![json!({
+        "role": "tool_result",
+        "tool_use_id": "trimmed_call",
+        "name": "screenshot",
+        "content": [
+            {"type": "text", "text": "The build failed."},
+            {"type": "image_url", "image_url": {"url": "data:image/png;base64,AAAA"}},
+        ],
+    })];
+
+    let body = OpenAiCompatibleProvider::build_request_body(&payload);
+    let messages = body["messages"].as_array().expect("messages array");
+    assert_eq!(messages.len(), 1);
+    assert_eq!(messages[0]["role"], "user");
+    assert!(messages[0].get("tool_call_id").is_none());
+    assert!(messages[0].get("name").is_none());
+    let content = messages[0]["content"]
+        .as_array()
+        .expect("multimodal observation");
+    assert_eq!(content[0]["text"], "[unpaired durable tool result]");
+    assert_eq!(content[1]["text"], "The build failed.");
+    assert_eq!(content[2]["image_url"]["url"], "data:image/png;base64,AAAA");
 }
 
 #[test]

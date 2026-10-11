@@ -10,6 +10,8 @@ mod execution_evidence;
 mod execution_persistence;
 mod from_session;
 mod json;
+#[cfg(test)]
+mod payload_errors;
 mod persistence;
 mod report;
 mod time;
