@@ -3,6 +3,7 @@
 # success, and must rehearse exactly the pairing it was given.
 set -euo pipefail
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
+node --test "$root/scripts/tests/consumer_observer_test.mjs"
 scratch=$(mktemp -d "${TMPDIR:-/tmp}/harn-consumer-canary.XXXXXX")
 trap 'rm -rf "$scratch"' EXIT
 
