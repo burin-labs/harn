@@ -153,7 +153,7 @@ pub fn records(word: &str) -> bool {
 /// Split a single line into identifier tokens. A token matches
 /// `[A-Za-z_][A-Za-z0-9_]*`. Numeric-only runs are skipped. `yield_token`
 /// is invoked once per occurrence — dedupe is the caller's responsibility.
-pub fn tokenize(line: &str, mut yield_token: impl FnMut(&str)) {
+pub fn tokenize<'a>(line: &'a str, mut yield_token: impl FnMut(&'a str)) {
     let bytes = line.as_bytes();
     let mut i = 0;
     while i < bytes.len() {

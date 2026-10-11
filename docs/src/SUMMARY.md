@@ -405,4 +405,5 @@
 - [Update Harn's ACP integration](./dev/acp-maintenance.md)
 - [Thread-local work-stealing audit](./dev/thread-local-work-stealing-audit.md)
 - [VM and stdlib perf notes](./dev/vm-stdlib-perf-notes.md)
+- [Code-index release measurements](./dev/code-index-release-measurements.md)
 - [Bytecode cache](./perf/bytecode-cache.md)

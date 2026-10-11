@@ -89,6 +89,7 @@ mod imports_swift;
 mod module_graph;
 mod module_index;
 mod move_symbol;
+mod name_index;
 mod overlay;
 mod readonly;
 mod reconcile;

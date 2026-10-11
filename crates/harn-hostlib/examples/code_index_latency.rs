@@ -181,6 +181,7 @@ fn report(
     );
 }
 
+#[allow(clippy::assertions_on_constants)] // Keep debug builds compilable, but refuse their timings.
 fn main() {
     let args: Vec<_> = std::env::args_os().collect();
     let root = Path::new(args.get(1).expect("disposable corpus root"));
@@ -196,7 +197,6 @@ fn main() {
         b"disposable\n",
         "the benchmark rewrites snapshots, its fixture, and Git HEAD"
     );
-    #[allow(clippy::assertions_on_constants)] // Keep debug builds compilable, but refuse their timings.
     assert!(
         !cfg!(debug_assertions),
         "this benchmark requires a release build"

@@ -20,6 +20,7 @@ use crate::ast::{api as ast_api, Language, Symbol, SymbolKind};
 use crate::ResolvedHarnReference;
 
 use super::file_table::FileId;
+use super::name_index::NameIndex;
 
 /// Typed node identifier. Stable across `rebuild_file` calls that don't
 /// touch the file (id assignment is per-file deterministic — see
@@ -234,8 +235,7 @@ pub struct RebuildOutcome {
 pub struct SymbolGraph {
     nodes: HashMap<NodeId, Node>,
     by_file: HashMap<FileId, Vec<NodeId>>,
-    by_name: HashMap<String, Vec<NodeId>>,
-    functions_by_name: HashMap<String, FunctionBuckets>,
+    names: NameIndex,
     out_edges: HashMap<NodeId, Vec<Edge>>,
     in_edges: HashMap<NodeId, Vec<Edge>>,
     next_id: NodeId,
@@ -245,14 +245,6 @@ pub struct SymbolGraph {
     dirty_call_names: HashSet<String>,
     /// Files rebuilt with call resolution deferred.
     dirty_call_files: HashSet<FileId>,
-}
-
-/// Declaration-only lookup. Keep the count alongside file buckets so the
-/// unique-workspace fallback never needs to scan unrelated files.
-#[derive(Debug, Default, Clone)]
-struct FunctionBuckets {
-    by_file: HashMap<FileId, Vec<NodeId>>,
-    count: usize,
 }
 
 /// Only the owning graph facts cross the snapshot boundary. Name, file, and
@@ -308,12 +300,7 @@ impl SymbolGraph {
                 return Err("symbol graph has an invalid or duplicate node id");
             }
             graph.by_file.entry(node.file_id).or_default().push(node.id);
-            graph
-                .by_name
-                .entry(node.name.clone())
-                .or_default()
-                .push(node.id);
-            graph.index_function(&node);
+            graph.names.insert(&node);
             graph.nodes.insert(node.id, node);
         }
         for edge in snapshot.edges {
@@ -369,10 +356,7 @@ impl SymbolGraph {
 
     /// All nodes matching `name` (case-sensitive). Empty when no match.
     pub fn nodes_named(&self, name: &str) -> &[NodeId] {
-        match self.by_name.get(name) {
-            Some(v) => v.as_slice(),
-            None => &[],
-        }
+        self.names.named(name)
     }
 
     /// Outgoing edges from `id`.
@@ -398,34 +382,16 @@ impl SymbolGraph {
         let Some(node_ids) = self.by_file.remove(&file_id) else {
             return;
         };
+        self.names
+            .remove_file(file_id, node_ids.iter().filter_map(|id| self.nodes.get(id)));
         for id in node_ids {
             self.drop_node(id);
         }
     }
 
     fn drop_node(&mut self, id: NodeId) {
-        let Some(node) = self.nodes.remove(&id) else {
+        if self.nodes.remove(&id).is_none() {
             return;
-        };
-        if node.kind == NodeKind::Function {
-            if let Some(functions) = self.functions_by_name.get_mut(&node.name) {
-                functions.count -= 1;
-                if let Some(bucket) = functions.by_file.get_mut(&node.file_id) {
-                    bucket.retain(|candidate| *candidate != id);
-                    if bucket.is_empty() {
-                        functions.by_file.remove(&node.file_id);
-                    }
-                }
-                if functions.count == 0 {
-                    self.functions_by_name.remove(&node.name);
-                }
-            }
-        }
-        if let Some(bucket) = self.by_name.get_mut(&node.name) {
-            bucket.retain(|n| *n != id);
-            if bucket.is_empty() {
-                self.by_name.remove(&node.name);
-            }
         }
         if let Some(outs) = self.out_edges.remove(&id) {
             for e in outs {
@@ -792,32 +758,17 @@ impl SymbolGraph {
     /// token of `source`. Each target id appears at most once.
     fn collect_cross_file_refs(&self, source: &str, this_file: FileId) -> BTreeSet<NodeId> {
         let mut out: BTreeSet<NodeId> = BTreeSet::new();
-        if self.by_name.is_empty() {
-            return out;
-        }
+        let mut seen = HashSet::new();
         super::words::tokenize(source, |word| {
-            self.absorb_word_refs(word, this_file, &mut out);
+            if word.len() >= MIN_REF_WORD_LEN && seen.insert(word) {
+                self.absorb_word_refs(word, this_file, &mut out);
+            }
         });
         out
     }
 
     fn call_targets(&self, name: &str, file_id: FileId, visible: &HashSet<FileId>) -> Vec<NodeId> {
-        self.functions_by_name
-            .get(name)
-            .map(|functions| pick_call_targets(functions, file_id, visible))
-            .unwrap_or_default()
-    }
-
-    fn index_function(&mut self, node: &Node) {
-        if node.kind == NodeKind::Function {
-            let functions = self.functions_by_name.entry(node.name.clone()).or_default();
-            functions
-                .by_file
-                .entry(node.file_id)
-                .or_default()
-                .push(node.id);
-            functions.count += 1;
-        }
+        self.names.call_targets(name, file_id, visible)
     }
 
     fn mark_function_names_dirty(&mut self, file_id: FileId) {
@@ -857,15 +808,7 @@ impl SymbolGraph {
             }
         }
         for name in names {
-            for id in self.nodes_named(&name) {
-                if self
-                    .nodes
-                    .get(id)
-                    .is_some_and(|n| n.kind == NodeKind::CallSite)
-                {
-                    sites.insert(*id);
-                }
-            }
+            sites.extend(self.names.call_sites(&name));
         }
         sites.into_iter().collect()
     }
@@ -925,26 +868,13 @@ impl SymbolGraph {
 
     /// Add every cross-file declaration named `word` to `bag`.
     ///
-    /// `by_name` indexes every node, including call sites, because the
-    /// CALLS resolver and the Cypher executor both need that. The REFS
-    /// heuristic is narrower: it wants declarations a bare identifier in
-    /// another file could actually be naming, so it filters to
-    /// [`NodeKind::is_name_addressable`].
+    /// The name index materializes only name-addressable declarations for
+    /// this lookup. Call expressions and scoped fields never enter the scan.
     fn absorb_word_refs(&self, word: &str, this_file: FileId, bag: &mut BTreeSet<NodeId>) {
-        if word.len() < MIN_REF_WORD_LEN {
-            return;
-        }
-        let Some(ids) = self.by_name.get(word) else {
-            return;
-        };
-        for nid in ids {
-            let Some(node) = self.nodes.get(nid) else {
-                continue;
-            };
-            if node.file_id == this_file || !node.kind.is_name_addressable() {
-                continue;
+        for (id, file) in self.names.references(word) {
+            if *file != this_file {
+                bag.insert(*id);
             }
-            bag.insert(*nid);
         }
     }
 
@@ -969,8 +899,7 @@ impl SymbolGraph {
         self.next_id = self.next_id.checked_add(1).expect("NodeId overflow");
         node.id = id;
         self.by_file.entry(node.file_id).or_default().push(id);
-        self.by_name.entry(node.name.clone()).or_default().push(id);
-        self.index_function(&node);
+        self.names.insert(&node);
         self.nodes.insert(id, node);
         id
     }
@@ -980,63 +909,6 @@ impl SymbolGraph {
         self.out_edges.entry(from).or_default().push(edge);
         self.in_edges.entry(to).or_default().push(edge);
     }
-}
-
-/// Which functions a call to `callee_name` in `file_id` can be
-/// reaching, in order of confidence.
-///
-/// The old rule was "every function with this name, anywhere". On a
-/// 7,038-file workspace that made a call to `assert` link to all
-/// seven unrelated functions of that name, so six of every seven
-/// edges were wrong and one function node collected 32,887 callers
-/// (#8107).
-///
-/// The replacement never guesses between candidates it cannot
-/// distinguish:
-///
-/// 1. **Same file.** A local definition shadows anything imported,
-///    so if the file defines the name itself, that is the call.
-/// 2. **Imported files.** Otherwise the call can only reach what
-///    this file actually imports. All matching declarations in the
-///    resolved import set are returned, because a genuine ambiguity
-///    across two imports is a fact about the code, not a guess.
-/// 3. **Exactly one declaration workspace-wide.** A unique name is
-///    unambiguous whether or not the import resolver saw the edge,
-///    which keeps recall for implicit visibility — a sibling module
-///    in the same crate, a global, a language with no import syntax.
-/// 4. **Otherwise, nothing.** Several candidates and no import
-///    linking any of them is precisely the case where an edge would
-///    be invented rather than found.
-fn pick_call_targets(
-    functions: &FunctionBuckets,
-    file_id: FileId,
-    visible: &HashSet<FileId>,
-) -> Vec<NodeId> {
-    if let Some(local) = functions.by_file.get(&file_id) {
-        return local.clone();
-    }
-    let mut imported = Vec::new();
-    if visible.len() < functions.by_file.len() {
-        for file in visible {
-            if let Some(bucket) = functions.by_file.get(file) {
-                imported.extend_from_slice(bucket);
-            }
-        }
-    } else {
-        for (file, bucket) in &functions.by_file {
-            if visible.contains(file) {
-                imported.extend_from_slice(bucket);
-            }
-        }
-    }
-    if !imported.is_empty() {
-        imported.sort_unstable();
-        return imported;
-    }
-    if functions.count == 1 {
-        return functions.by_file.values().next().unwrap().clone();
-    }
-    Vec::new()
 }
 
 /// Derive a coarse module name from a workspace-relative path (basename

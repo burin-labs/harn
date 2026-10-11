@@ -1,6 +1,66 @@
 use super::*;
 
 #[test]
+fn repeated_calls_expand_only_declarations_across_restore_and_rebuild() {
+    let mut graph = SymbolGraph::new();
+    graph.rebuild_file(1, "decl.rs", Language::Rust, "fn shared() {}", &[], &[]);
+    graph.rebuild_file(2, "type.rs", Language::Rust, "struct shared;", &[], &[]);
+    graph.rebuild_file(
+        3,
+        "fields.rs",
+        Language::Rust,
+        "struct Other { shared: u32 }",
+        &[],
+        &[],
+    );
+    let source = format!("fn caller() {{ {} }}", "shared();".repeat(256));
+    graph.rebuild_file(4, "use.rs", Language::Rust, &source, &[], &[]);
+    let mut graph = SymbolGraph::from_snapshot(graph.snapshot()).unwrap();
+    assert_eq!(graph.names.call_sites("shared").len(), 256);
+    assert!(graph.nodes_named("shared").len() > 256);
+    // The actual reference-expansion scan stays bounded by declarations,
+    // regardless of how many same-named call expressions the parser produced.
+    assert_eq!(graph.names.references("shared").len(), 2);
+    let refs = graph.collect_cross_file_refs(&source, 4);
+    assert_eq!(refs.len(), 2);
+    assert!(refs
+        .iter()
+        .all(|id| graph.node(*id).unwrap().kind.is_name_addressable()));
+    let module = graph
+        .nodes_of_kind(NodeKind::Module)
+        .into_iter()
+        .find(|id| graph.node(*id).unwrap().file_id == 4)
+        .unwrap();
+    assert_eq!(
+        graph
+            .outgoing(module)
+            .iter()
+            .filter(|edge| edge.kind == EdgeKind::Refs)
+            .count(),
+        2
+    );
+    graph.rebuild_file(
+        1,
+        "decl.rs",
+        Language::Rust,
+        "fn replacement() {}",
+        &[],
+        &[],
+    );
+    assert_eq!(graph.names.references("shared").len(), 1);
+    assert_eq!(graph.collect_cross_file_refs(&source, 4).len(), 1);
+    assert_eq!(graph.take_dirty_call_sites().len(), 256);
+    graph.remove_file(4);
+    assert!(graph.names.call_sites("shared").is_empty());
+    graph.remove_file(2);
+    assert!(graph.names.references("shared").is_empty());
+    assert!(
+        !graph.nodes_named("shared").is_empty(),
+        "scoped field still exists"
+    );
+}
+
+#[test]
 fn function_buckets_survive_restore_rebuild_and_removal() {
     let mut graph = SymbolGraph::new();
     for file in 1..=4 {
@@ -59,7 +119,12 @@ fn function_buckets_survive_restore_rebuild_and_removal() {
     );
     graph.remove_file(4);
     assert!(graph.call_targets("run", 5, &HashSet::from([4])).is_empty());
-    assert!(!graph.functions_by_name.contains_key("run"));
+    assert_eq!(graph.names.references("run").len(), 1);
+    assert!(graph
+        .names
+        .references("run")
+        .iter()
+        .all(|(_, file)| *file == 5));
 }
 
 #[test]
