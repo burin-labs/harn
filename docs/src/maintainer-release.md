@@ -61,6 +61,30 @@ attempt, including after a crash. Missing or incomplete reservation history
 refuses automatic repair. Do not change the fixed anchor or seed to clear a
 reservation, and do not infer completed integration from a reserved attempt.
 
+## Retire an unpublished candidate with failed source CI
+
+Read the failed producer and the main-push CI run at its exact source. If both
+are terminal failures and the version was never published, request retirement
+through the existing development bump workflow:
+
+```bash
+gh workflow run open-development-bump.yml --repo burin-labs/harn --ref main \
+  -f published_tag=vPREDECESSOR \
+  -f retire_source_sha=FULL_SHA -f retire_release_pr=PR_NUMBER \
+  -f retire_producer_run=PRODUCER_RUN -f retire_source_ci_run=CI_RUN
+```
+
+Replace the placeholders with the published predecessor and the owning release
+records. Omit every consumer-retirement input: mixing the two evidence paths
+is refused. The planner requires complete terminal job censuses with actual
+failed checks, exact source identity, main ancestry and the merged release PR.
+It also proves that the version has no tag or release and that neither
+publication workflow is active, with known positive reads on those paths.
+The opener repeats those checks after preparation before opening its normal
+development-version PR. Follow that PR through the merge queue, then use the
+release opener for the next version. This retires an unpublished identity; it
+does not publish files from a failed candidate.
+
 ## Follow certification and publication
 
 Record the release pull request and the exact commit that lands on main.

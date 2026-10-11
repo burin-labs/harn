@@ -98,10 +98,19 @@ if [[ -z "$pr_url" ]]; then
   body_file="$(mktemp)"
   trap 'rm -f "$body_file"' EXIT
   if [[ -n "$retired_version" ]]; then
-    printf 'Retire failed, never-published v%s and start %s. Carry its notes into the next release; keep %s as the install and comparison base.\n\nRetained producer %s certifies source %s. Promotion %s refused publication after consumer run %s reached failing required job %s. This change does not publish the retired identity.\n' \
-      "$retired_version" "$actual" "$RELEASE_PUBLISHED_VERSION" \
-      "$RETIRE_PRODUCER_RUN" "$RETIRE_SOURCE_SHA" "$RETIRE_PROMOTION_RUN" \
-      "$RETIRE_CONSUMER_RUN" "$RETIRE_FAILED_JOB" > "$body_file"
+    {
+      printf 'Retire failed, never-published v%s and start %s. Carry its notes into the next release; keep %s as the install and comparison base.\n\n' \
+        "$retired_version" "$actual" "$RELEASE_PUBLISHED_VERSION"
+      if [[ -n "${RETIRE_SOURCE_CI_RUN:-}" ]]; then
+        printf 'Producer %s and main CI %s failed at exact source %s; complete job censuses and fresh nonpublication checks authorize retirement.\n' \
+          "$RETIRE_PRODUCER_RUN" "$RETIRE_SOURCE_CI_RUN" "$RETIRE_SOURCE_SHA"
+      else
+        printf 'Retained producer %s certifies source %s. Promotion %s refused publication after consumer run %s reached failing required job %s.\n' \
+          "$RETIRE_PRODUCER_RUN" "$RETIRE_SOURCE_SHA" "$RETIRE_PROMOTION_RUN" \
+          "$RETIRE_CONSUMER_RUN" "$RETIRE_FAILED_JOB"
+      fi
+      printf 'This change does not publish the retired identity.\n'
+    } > "$body_file"
   else
     printf '%s\n' \
       "Automated post-release cutover to the next patch development identity." \
