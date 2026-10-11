@@ -91,6 +91,7 @@ pub const KNOWN_MOCK_SCOPES: &[&str] = &[
     "agent.input_guardrail",
     "agent.approval_review",
     "agent.missing_tool_call",
+    "llm.evaluation",
     "agent.scope_classifier",
     "agent.stance_consent",
     "agent.attachment_description",

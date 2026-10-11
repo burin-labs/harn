@@ -471,7 +471,7 @@
     "file": "crates/harn-stdlib/src/stdlib/agent/postturn.harn",
     "expression": "missing_tool_call_classifier(harness, options)",
     "owner": "missing_tool_call_classifier",
-    "evidence": "The consumer opts is typed MissingToolCallRecoveryOptions and its file is a required extra source; all literal reads and the dynamic override domain are independently scanned."
+    "evidence": "The consumer opts is typed MissingToolCallRecoveryOptions and its file is a required extra source; all literal reads are independently scanned."
   },
   {
     "scope": "MissingToolCallRecoveryOptions",
@@ -490,9 +490,9 @@
   {
     "scope": "MissingToolCallRecoveryOptions",
     "file": "crates/harn-stdlib/src/stdlib/llm/missing_tool_call.harn",
-    "expression": "cfg[key]",
-    "owner": "missing_tool_call_classifier",
-    "evidence": "The key iterates the literal override list; missing-tool-recovery-key-domain independently audits every list member and requires a nonempty domain."
+    "expression": "__missing_tool_call_policy(harness.llm, cfg)",
+    "owner": "__missing_tool_call_policy",
+    "evidence": "The consumer cfg is typed MissingToolCallRecoveryOptions in the required classifier source; it resolves the route and constructs one typed EvaluationPolicy."
   },
   {
     "scope": "MonologueActuationConfig",

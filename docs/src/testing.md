@@ -91,7 +91,10 @@ test file also lowers its imports and top-level declarations once, then emits
 one immutable callable entry per selected test pipeline; parameterized rows
 share that entry. This work completes before any per-test clock starts. Every
 test still instantiates fresh module state and runs module initialization in
-its own VM. Use `--max-test-ms` when total wall time is a performance
+its own VM. Project hooks initialize on their first matching event, as in
+normal execution. An unused hook does no work; a reached hook's initialization
+and dispatch belong to that test's execution phase and deadline.
+Use `--max-test-ms` when total wall time is a performance
 requirement, or `--max-execute-ms` to ratchet execution cost. Either
 measurement budget makes the runner use one worker even when `--parallel` or
 `--jobs` is present, so co-scheduled test VMs cannot change the verdict. Use

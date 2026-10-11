@@ -13,6 +13,7 @@ use crate::orchestration::{
 
 use super::*;
 
+mod agent_terminal;
 mod executor_failures;
 mod identity_session;
 mod live_approval;

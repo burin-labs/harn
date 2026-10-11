@@ -28,7 +28,8 @@
   },
   "layers": [
     [
-      "value"
+      "value",
+      "tool_call_mutations"
     ],
     [
       "vm"

@@ -280,6 +280,7 @@ pub fn register_agent_stdlib(vm: &mut Vm) {
 /// installs the macro-emitted signature slice into the parser registry
 /// (idempotent under repeat calls with the same slice pointer).
 pub fn register_vm_stdlib(vm: &mut Vm) {
+    sandbox::child_write::install_child_write_probe();
     if !vm.install_shared_stdlib_registration() {
         register_stdlib_bindings(vm);
     }

@@ -1,10 +1,66 @@
+import { AgentLoopCancelledFailure } from "std/agent/failure_types"
 pub import { MissingToolCallClassifier, MissingToolCallVerdict } from "std/agent/options_types"
 import { MissingToolCallRecoveryOptions } from "std/agent/options_types"
-import { agent_typed_output_checkpoint } from "std/agent/primitives"
+import { EvaluationOutcome, EvaluationPolicy, boolean, choice } from "std/predicate"
 
 type MissingToolCallAction = "tool_call_intended" | "no_tool_call_intended" | "ambiguous"
 
 type MissingToolCallTool = {name: string, description?: string}
+
+type MissingToolCallRoute = {provider: string, model: string}
+
+type MissingToolCallCapabilities = {decision_protocol: string?}
+
+fn __missing_tool_call_policy(
+  llm: HarnessLlm,
+  cfg: MissingToolCallRecoveryOptions,
+) -> EvaluationPolicy {
+  if cfg.evaluation != nil {
+    return cfg.evaluation + {threshold: 0.0}
+  }
+  const route: MissingToolCallRoute = schema_expect(
+    llm.resolved_options({provider: cfg.provider ?? "", model: cfg.model ?? ""}),
+    schema_of(MissingToolCallRoute),
+  )
+  const capabilities: MissingToolCallCapabilities = schema_expect(
+    llm.provider_capabilities(route.provider, route.model),
+    schema_of(MissingToolCallCapabilities),
+  )
+  const native = capabilities.decision_protocol != nil
+    && capabilities.decision_protocol != "structured_llm"
+  let policy: EvaluationPolicy = {
+    backend: if native {
+      "native_decision"
+    } else {
+      "structured_llm"
+    },
+    provider: route.provider,
+    model: route.model,
+    threshold: 0.0,
+  }
+  if !native {
+    policy = policy + {effort: "none", temperature: 0.0, max_tokens: 192}
+  }
+  if cfg.effort != nil {
+    policy = policy + {effort: cfg.effort}
+  }
+  if cfg.temperature != nil {
+    policy = policy + {temperature: cfg.temperature}
+  }
+  if cfg.max_tokens != nil {
+    policy = policy + {max_tokens: cfg.max_tokens}
+  }
+  if cfg.top_p != nil {
+    policy = policy + {top_p: cfg.top_p}
+  }
+  if cfg.seed != nil {
+    policy = policy + {seed: cfg.seed}
+  }
+  if cfg.timeout_ms != nil {
+    policy = policy + {timeout_ms: cfg.timeout_ms}
+  }
+  return policy
+}
 
 fn __missing_tool_call_string(value: any) -> string {
   if value == nil {
@@ -107,38 +163,6 @@ fn __missing_tool_call_tool_name(value: any, candidate_tools: list<MissingToolCa
   return ""
 }
 
-fn __missing_tool_call_schema() {
-  return {
-    type: "object",
-    properties: {
-      action: {
-        type: "string",
-        enum: ["tool_call_intended", "no_tool_call_intended", "ambiguous"],
-        description: "One of: tool_call_intended, no_tool_call_intended, ambiguous.",
-      },
-      tool_name: {
-        type: "string",
-        description:
-          "Exact candidate tool name when action is tool_call_intended; otherwise empty.",
-      },
-      confidence: {type: "number", description: "Confidence from 0.0 to 1.0."},
-      evidence: {type: "string", description: "Brief reason grounded in the assistant text."},
-      language: {type: "string", description: "Detected language or mixed/unknown."},
-    },
-    required: ["action", "tool_name", "confidence", "evidence"],
-  }
-}
-
-fn __missing_tool_call_prompt(fs: HarnessFs, payload: dict, candidate_tools: any) {
-  return fs.render_prompt(
-    "std/llm/prompts/missing_tool_call_classifier.harn.prompt",
-    {
-      assistant_text: __missing_tool_call_string(payload?.text ?? payload?.visible_text),
-      candidate_tools_json: json_stringify(candidate_tools),
-    },
-  )
-}
-
 fn __missing_tool_call_action(value: any) -> MissingToolCallAction {
   const action = __missing_tool_call_string(value)
   if action == "tool_call_intended" || action == "no_tool_call_intended" || action == "ambiguous" {
@@ -213,11 +237,12 @@ fn __missing_tool_call_fail_open(error: any, threshold: float) -> MissingToolCal
  * config overrides them. Pass `missing_tool_call_recovery: false` to disable it
  * or `missing_tool_call_recovery: { ... }` to configure classifier-specific
  * settings. Mock/custom-caller tests can pass `classifier` inside that config
- * for deterministic behavior; the live path uses a schema-bound typed-output
- * checkpoint and fails open to `ambiguous`.
+ * for deterministic behavior. The live path evaluates intent and target in
+ * one request, using `evaluation` when configured and the active structured
+ * model otherwise. Refusal fails open to `ambiguous`; cancellation propagates.
  *
  * @effects: [llm.call]
- * @errors: []
+ * @errors: ["invalid classifier configuration", "cancelled"]
  * @api_stability: experimental
  */
 pub fn missing_tool_call_classifier(
@@ -278,38 +303,87 @@ pub fn missing_tool_call_classifier(
       return __missing_tool_call_normalize(unwrap(custom), candidate_tools, threshold)
         + {classifier_kind: "custom"}
     }
-    const schema = __missing_tool_call_schema()
-    let llm_opts = {
-      output: {schema: schema, strict: true, validation: "error"},
-      max_tokens: cfg.max_tokens ?? 192,
-      temperature: cfg.temperature ?? 0.0,
-      session_id: payload?.session_id ?? "",
-      mock_scope: "agent.missing_tool_call",
+    const resolved = try {
+      __missing_tool_call_policy(harness.llm, cfg)
     }
-    if model != "" {
-      llm_opts = llm_opts + {model: model}
+    if is_err(resolved) {
+      return __missing_tool_call_fail_open(unwrap_err(resolved), threshold)
+        + {classifier_kind: "llm", model: model}
     }
-    if cfg.provider != nil {
-      llm_opts = llm_opts + {provider: cfg.provider}
+    const policy: EvaluationPolicy = unwrap(resolved)
+    const state: {candidate_tools: list<MissingToolCallTool>, text: string} = {
+      candidate_tools: candidate_tools,
+      text: __missing_tool_call_string(payload?.text ?? payload?.visible_text),
     }
-    for key in ["top_p", "seed", "effort", "timeout_ms"] {
-      if cfg[key] != nil {
-        llm_opts[key] = cfg[key]
+    let criteria: dict<string, string> = {}
+    for candidate in candidate_tools {
+      criteria[candidate.name] = candidate.description ?? ""
+    }
+    let outcome: EvaluationOutcome? = nil
+    try {
+      outcome = harness.llm.evaluate_request(
+        "agent.missing_tool_call.v1",
+        state,
+        {
+          intended: boolean(
+            harness.fs.render_prompt("std/llm/prompts/missing_tool_call_intent.harn.prompt", {}),
+          ),
+          tool: choice(
+            harness.fs.render_prompt("std/llm/prompts/missing_tool_call_target.harn.prompt", {}),
+            criteria,
+          ),
+        },
+        policy,
+      )
+    } catch (err) {
+      if error_category(err) == "cancelled" {
+        throw err
       }
+      return __missing_tool_call_fail_open(err, threshold)
+        + {classifier_kind: "llm", model: policy.model}
     }
-    const checkpoint = agent_typed_output_checkpoint(
-      harness.agent,
-      harness.llm,
-      "agent.missing_tool_call",
-      __missing_tool_call_prompt(harness.fs, classifier_payload, candidate_tools),
-      schema,
-      llm_opts,
+    if outcome == nil {
+      return __missing_tool_call_fail_open("evaluation returned no outcome", threshold)
+        + {classifier_kind: "llm", model: policy.model}
+    }
+    if outcome.kind == "cancelled" {
+      const failure: AgentLoopCancelledFailure = {
+        category: "cancelled",
+        message: "missing tool call evaluation cancelled",
+      }
+      throw failure
+    }
+    const metadata = {classifier_kind: "llm", model: policy.model, decision: outcome}
+    if outcome.kind != "answered" {
+      return __missing_tool_call_fail_open(outcome, threshold) + metadata
+    }
+    const intended = outcome.value.intended
+    const target = outcome.value.tool
+    if intended.kind != "boolean" || target.kind != "choice" {
+      return __missing_tool_call_fail_open("invalid answer kinds", threshold) + metadata
+    }
+    return __missing_tool_call_normalize(
+      {
+        action: if intended.verdict {
+          "tool_call_intended"
+        } else {
+          "no_tool_call_intended"
+        },
+        tool_name: if intended.verdict {
+          target.choice
+        } else {
+          ""
+        },
+        confidence: if intended.verdict {
+          min(intended.confidence, target.confidence)
+        } else {
+          intended.confidence
+        },
+        evidence: intended.evidence,
+      },
+      candidate_tools,
+      threshold,
     )
-    if !checkpoint.ok {
-      return __missing_tool_call_fail_open(checkpoint.error, threshold)
-        + {classifier_kind: "llm", model: model, typed_checkpoint: checkpoint}
-    }
-    return __missing_tool_call_normalize(checkpoint.data, candidate_tools, threshold)
-      + {classifier_kind: "llm", model: model, typed_checkpoint: checkpoint}
+      + metadata
   }
 }

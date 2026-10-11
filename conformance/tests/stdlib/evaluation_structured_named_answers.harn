@@ -52,6 +52,14 @@ pipeline test(harness: Harness) {
         }
       }
       assert_eq(len(harness.llm.mock_calls()), 1)
+      const request = harness.llm.mock_calls()[0]
+      const prompt = request.messages[0].content
+      assert(prompt.contains("safe: Safe?"), "boolean instructions reach the actual prompt")
+      assert(prompt.contains("tool: Which?"), "choice instructions reach the actual prompt")
+      assert(prompt.contains("left = Left"), "choice meanings share the schema's owner")
+      assert(prompt.contains("risk: Risk?"), "score instructions reach the actual prompt")
+      assert(prompt.contains("Levels, lowest to highest: low, high"))
+      assert(prompt.contains("State:"))
     },
   )
   with_llm_script(

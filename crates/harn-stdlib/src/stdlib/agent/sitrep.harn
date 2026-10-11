@@ -124,7 +124,11 @@ fn __sitrep_format_messages(messages: list, max_chars_per_message: int) {
  * default only on a route the catalog says accepts one. Generation-5 rows
  * refuse any non-default sampling parameter, so the default is left unset there.
  */
-fn __sitrep_temperature(llm: HarnessLlm, route: {provider: string, model: string}, opts: any) -> dict {
+fn __sitrep_temperature(
+  llm: HarnessLlm,
+  route: {provider: string, model: string},
+  opts: any,
+) -> {temperature?: float} {
   if opts?.temperature != nil {
     return {temperature: opts.temperature}
   }

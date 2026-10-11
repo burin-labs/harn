@@ -162,8 +162,12 @@ route using it needs `text_generation` as well. A route on a native protocol
 `decision` alone, and must not inherit a chat transport from its provider. An
 explicit native contract takes precedence over derived structured support.
 
-`effort` and `temperature` are optional chat options. Omit both for
-`native_decision`; supplying either refuses with `unsupported_options` before
+`effort`, `temperature`, `max_tokens`, `top_p`, `seed`, and `timeout_ms` are
+optional chat options. The structured defaults are effort `none`, temperature
+`0.0`, and at most `2048` output tokens. Supplied settings participate in the
+request identity and output caps participate in budget admission. Unsupported
+route settings refuse instead of being dropped. Omit these options for
+`native_decision`; supplying any refuses with `unsupported_options` before
 dispatch. Native routes use the catalog's TypeSafe, Vercel, or OpenRouter
 decision protocol, never a chat endpoint. The HTTP client disables retries and
 redirects. Provider rate limits and overload responses remain typed outcomes.
@@ -171,6 +175,11 @@ Vercel requests apply the catalog's documented zero-retention and no-training
 routing restrictions. OpenRouter's native privacy controls remain unverified;
 direct TypeSafe retention is account-scoped. The receipt separates applied
 controls from gateway-reported routing facts.
+
+Structured requests deliver each question's instructions, choice meanings, and
+score levels in the user prompt as well as the output schema. Both projections
+come from the same typed question set. The evaluator instruction version is part
+of request identity, so a prompt change cannot reuse an older cached answer.
 
 Native evaluations reserve their complete request bound in the execution's
 shared monetary ledger before dispatch. Concurrent evaluations share the same

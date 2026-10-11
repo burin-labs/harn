@@ -584,7 +584,7 @@ fn build_repair_prompt(raw_text: &str, schema: &VmValue) -> String {
     let mut bindings = crate::value::DictMap::new();
     bindings.put_str("schema_text", schema_text);
     bindings.put_str("raw_text", raw_text);
-    crate::stdlib::template::render_stdlib_prompt_asset(
+    crate::llm::helpers::render_stdlib_prompt_asset(
         "llm/prompts/schema_recover_repair.harn.prompt",
         Some(&bindings),
     )

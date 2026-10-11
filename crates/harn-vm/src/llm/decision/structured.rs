@@ -24,7 +24,7 @@ use super::question::QuestionBody;
 
 /// Bumped whenever the instruction or answer interpretation changes, because both
 /// change what the model was asked and therefore the cache identity.
-pub const EVALUATOR_INSTRUCTION_VERSION: &str = "harn.evaluator.structured.v3";
+pub const EVALUATOR_INSTRUCTION_VERSION: &str = "harn.evaluator.structured.v6";
 pub const OUTPUT_SCHEMA_VERSION: &str = "harn.evaluation.answers.v1";
 
 const INSTRUCTION: &str = "\
@@ -121,24 +121,15 @@ impl DecisionBackend for StructuredLlmBackend {
         &self,
         request: DecisionRequest<'_>,
     ) -> Result<RawDecisionResponse, DecisionTransportError> {
-        // The profile is temperature exactly zero and an explicit effort. A
-        // route that cannot honor both is unavailable; nothing is dropped to
-        // make the call succeed.
-        if request.temperature != 0.0 {
-            return Err(DecisionTransportError::UnsupportedOptions {
-                diagnostic: "the structured evaluation profile requires temperature 0".into(),
-            });
-        }
+        // Transport validates declared sampling options against the route.
+        // Unsupported options are refused rather than silently dropped.
         if request.effort.trim().is_empty() {
             return Err(DecisionTransportError::UnsupportedOptions {
                 diagnostic: "the structured evaluation profile requires an explicit effort".into(),
             });
         }
         let schema = answers_schema(request.questions);
-        let prompt = format!(
-            "State:\n{}\n\nAnswer every question in the schema.",
-            serde_json::to_string(request.state).unwrap_or_else(|_| "{}".into())
-        );
+        let prompt = request_prompt(request.state, &schema)?;
         let response =
             super::transport::one_structured_call(&request, &prompt, INSTRUCTION, &schema).await?;
         let answers = read_answers(request.questions, &response.data).map_err(|error| {
@@ -155,6 +146,39 @@ impl DecisionBackend for StructuredLlmBackend {
             physical_attempts: response.physical_attempts,
         })
     }
+}
+
+fn request_prompt(state: &JsonValue, schema: &JsonValue) -> Result<String, DecisionTransportError> {
+    let questions = schema
+        .pointer("/properties/answers/properties")
+        .and_then(JsonValue::as_object)
+        .ok_or_else(|| schema_invalid("evaluation schema has no questions"))?;
+    let descriptions = questions
+        .iter()
+        .map(|(id, answer)| {
+            answer
+                .get("description")
+                .and_then(JsonValue::as_str)
+                .map(|description| format!("{id}: {description}"))
+                .ok_or_else(|| schema_invalid("evaluation question has no description"))
+        })
+        .collect::<Result<Vec<_>, _>>()?
+        .join("\n");
+    let bindings: crate::value::DictMap = [
+        ("questions", crate::value::VmValue::string(descriptions)),
+        (
+            "state_json",
+            crate::value::VmValue::string(state.to_string()),
+        ),
+    ]
+    .into_iter()
+    .map(|(key, value)| (crate::value::intern_key(key), value))
+    .collect();
+    crate::llm::helpers::render_stdlib_prompt_asset(
+        "llm/prompts/evaluation_questions.harn.prompt",
+        Some(&bindings),
+    )
+    .map_err(|error| schema_invalid(error.to_string()))
 }
 
 fn schema_invalid(diagnostic: impl Into<String>) -> DecisionTransportError {

@@ -507,9 +507,9 @@ fn __classify_missing_tool_call(
     harness.agent,
     session.session_id,
     "missing_tool_call_verdict",
-    // The verdict already carries the classifier's own `evidence`; a second
-    // excerpt of the same turn text has no field to land in and was discarded.
-    result + {iteration: iteration},
+    // Diagnostics stay on the classifier return and their owning receipt logs.
+    // The event carries the registered recovery verdict fields.
+    result.removing("decision").removing("typed_checkpoint") + {iteration: iteration},
   )
   const tool_name = result?.tool_name ?? ""
   if result?.action == "tool_call_intended" && tool_name != ""

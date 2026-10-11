@@ -16,6 +16,7 @@ import {
   BumpAutoMerge,
   BumpBaseAdoption,
   BumpBaseAdoptionRequest,
+  BumpBaseChanges,
   BumpBaseHead,
   BumpChangeSet,
   BumpCommitRequest,
@@ -259,6 +260,45 @@ fn __apply_version(
   }
 }
 
+/** Paths changed between two local commits. */
+fn __changed_paths(
+  tools: HarnessTools,
+  cfg: LiveBumpConfig,
+  from_oid: string,
+  to_oid: string,
+) -> BumpBaseChanges {
+  const comparison = __git(tools, cfg.repo_dir, ["diff", "--name-only", "${from_oid}..${to_oid}"])
+  if !comparison.success {
+    return {
+      ok: false,
+      paths: [],
+      detail: "comparing ${from_oid} with ${to_oid} failed: "
+        + trim((comparison.stderr ?? "") + (comparison.stdout ?? "")),
+    }
+  }
+  return {ok: true, paths: __lines(comparison.stdout), detail: ""}
+}
+
+/** Fetch an advanced base without moving the checkout, then list what it changed. */
+fn __base_changes(
+  tools: HarnessTools,
+  remote: LiveBumpRemote,
+  cfg: LiveBumpConfig,
+  from_oid: string,
+  to_oid: string,
+) -> BumpBaseChanges {
+  const older = lowercase(trim(from_oid))
+  const newer = lowercase(trim(to_oid))
+  if older == "" || newer == "" {
+    return {ok: false, paths: [], detail: "no base identities to compare"}
+  }
+  const fetch = remote.fetch_base(newer)
+  if !fetch.ok {
+    return {ok: false, paths: [], detail: "fetching ${newer} failed: ${fetch.detail}"}
+  }
+  return __changed_paths(tools, cfg, older, newer)
+}
+
 fn __adoption_failure(detail: string, conflicts: list<string> = []) -> BumpBaseAdoption {
   return {ok: false, adopted_oid: nil, conflicts: conflicts, detail: detail}
 }
@@ -301,14 +341,11 @@ fn __adopt_base(
   } else {
     lowercase(trim(__git(tools, cfg.repo_dir, ["rev-parse", "HEAD"]).stdout ?? ""))
   }
-  const comparison = __git(tools, cfg.repo_dir, ["diff", "--name-only", "${from_oid}..${to_oid}"])
-  if !comparison.success {
-    return __adoption_failure(
-      "comparing ${from_oid} with ${to_oid} failed: "
-        + trim((comparison.stderr ?? "") + (comparison.stdout ?? "")),
-    )
+  const comparison = __changed_paths(tools, cfg, from_oid, to_oid)
+  if !comparison.ok {
+    return __adoption_failure(comparison.detail)
   }
-  const incoming = __lines(comparison.stdout)
+  const incoming = comparison.paths
   const authored = set(request.refreshed ?? [])
   const conflicts = incoming.filter({ path -> set_contains(authored, path) }).to_list()
   if len(conflicts) > 0 {
@@ -510,6 +547,8 @@ pub fn live_bump_adapter(
     working_changes: fn() { return __working_changes(tools, cfg.repo_dir) },
     remote_base_head: remote.base_head,
     adopt_base: fn(request) { return __adopt_base(fs, tools, remote, cfg, request) },
+    base_changes:
+      fn(from_oid, to_oid) { return __base_changes(tools, remote, cfg, from_oid, to_oid) },
     find_bump_pr: remote.find_bump_pr,
     disable_auto_merge: remote.disable_auto_merge,
     publish_commit: remote.publish_commit,

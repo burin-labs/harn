@@ -3,6 +3,26 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+/// Whether `path` is a standard process I/O device: a stream the process
+/// already holds, not a file in any workspace. The one owner for both the
+/// sandbox's path scoping and the command risk scan, so `2>/dev/null` is not
+/// an outside-workspace write in one place and exempt in the other
+/// (harn#9655). `write` excludes `/dev/stdin`, which a process only reads.
+pub fn is_standard_io_device(path: &Path, write: bool) -> bool {
+    let Some(text) = path.to_str() else {
+        return false;
+    };
+    let named = match text {
+        "/dev/stdout" | "/dev/stderr" | "/dev/null" => true,
+        "/dev/stdin" => !write,
+        _ => false,
+    };
+    named
+        || text
+            .strip_prefix("/dev/fd/")
+            .is_some_and(|fd| !fd.is_empty() && fd.bytes().all(|byte| byte.is_ascii_digit()))
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum WorkspacePathKind {

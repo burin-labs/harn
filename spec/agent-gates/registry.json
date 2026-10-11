@@ -225,15 +225,6 @@
       "key_form": "literal"
     },
     {
-      "id": "missing-tool-recovery-key-domain",
-      "kind": "option",
-      "glob": "crates/harn-stdlib/src/stdlib/llm/missing_tool_call.harn",
-      "language": "harn",
-      "query": "((for_statement variable: (identifier) @variable iterable: (list_literal (string_literal) @key)) (#eq? @variable \"key\"))",
-      "prefix": "MissingToolCallRecoveryOptions.",
-      "key_form": "literal"
-    },
-    {
       "id": "judge-override-key-domain",
       "kind": "option",
       "glob": "crates/harn-stdlib/src/stdlib/agent/judge_internals.harn",

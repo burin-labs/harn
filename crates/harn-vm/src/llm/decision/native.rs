@@ -57,9 +57,15 @@ pub(super) fn request_body(request: &DecisionRequest<'_>) -> Result<Value, Decis
             "native backend requires a native decision protocol",
         ));
     }
-    if request.temperature != 0.0 || !matches!(request.effort, "" | "none") {
+    if request.temperature != 0.0
+        || !matches!(request.effort, "" | "none")
+        || request.max_tokens.is_some()
+        || request.top_p.is_some()
+        || request.seed.is_some()
+        || request.timeout_ms.is_some()
+    {
         return Err(unsupported(
-            "native decision routes do not support temperature or effort",
+            "native decision routes do not support chat options",
         ));
     }
     if !matches!(

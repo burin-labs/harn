@@ -240,6 +240,12 @@ impl ActivePreparedSession {
     pub fn authorize(&self, requirement: &AuthorityRequirement) -> Result<(), String> {
         self.authority.authorize(requirement)
     }
+
+    /// Publish the actual agent terminal to the shared authority receipt
+    /// owner before `finish` or `stop` retires this session.
+    pub fn record_agent_terminal(&self, terminal: crate::agent_events::AgentTerminalOutcome) {
+        self.authority.record_agent_terminal(terminal);
+    }
 }
 
 /// Versioned host/session state machine. It owns preparation, one grouped
@@ -790,13 +796,12 @@ impl<E> PreparedSession<E> {
         active: ActivePreparedSession,
         pivot: bool,
     ) -> Result<PreparedSessionUpdate, String> {
+        active.authority.record_accepted_stop(pivot);
         let mut receipt = active
             .authority
             .terminal_receipt(false, (self.run.now_ms)());
         // This control was accepted by the session owner. Preserve its typed
         // outcome in durable evidence instead of reporting executor failure.
-        receipt.stage = AuthorityReceiptStage::Stopped;
-        receipt.status = AuthorityReceiptStatus::Stopped;
         receipt.diagnostics.push(AuthorityDiagnostic {
             code: if pivot {
                 "prepared_session_pivot"

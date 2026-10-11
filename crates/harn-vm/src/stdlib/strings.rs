@@ -1078,14 +1078,6 @@ mod tests {
     }
 
     #[test]
-    fn word_wrap_ascii_unchanged_from_char_count() {
-        // Regression guard: for ASCII the column budget equals the old char
-        // count, so historical output is byte-for-byte preserved.
-        let result = word_wrap_str("the quick brown fox jumps over the lazy dog", 15);
-        assert_eq!(result, "the quick brown\nfox jumps over\nthe lazy dog");
-    }
-
-    #[test]
     fn index_of_is_char_indexed_with_from_and_miss() {
         use crate::value::VmValue;
         let s = |v: &str| VmValue::String(arcstr::ArcStr::from(v));

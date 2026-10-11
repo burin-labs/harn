@@ -1,0 +1,12 @@
+{"row_id":"en-inspect-imports","language":"en","assistant_text":"I am about to inspect the imports in server.rs by reading that file.","intended":true,"tool":"read"}
+{"row_id":"en-run-check","language":"en","assistant_text":"I will execute the formatter check in the terminal as my next step.","intended":true,"tool":"shell"}
+{"row_id":"en-past-edit","language":"en","assistant_text":"Earlier I updated the configuration file. The fix is complete.","intended":false,"tool":""}
+{"row_id":"en-quoted-command","language":"en","assistant_text":"The tutorial says, 'I will run the tests now.' That is a quotation from its example.","intended":false,"tool":""}
+{"row_id":"es-edit-next","language":"es","assistant_text":"Ahora voy a cambiar el nombre de la variable en el archivo fuente.","intended":true,"tool":"edit"}
+{"row_id":"es-read-next","language":"es","assistant_text":"Mi siguiente paso es abrir README.md y leer las instrucciones de instalación.","intended":true,"tool":"read"}
+{"row_id":"es-final-status","language":"es","assistant_text":"El archivo ya contiene la opción correcta y todas las pruebas han pasado.","intended":false,"tool":""}
+{"row_id":"es-request-permission","language":"es","assistant_text":"¿Me das permiso para ejecutar el comando de migración? No lo ejecutaré hasta que respondas.","intended":false,"tool":""}
+{"row_id":"fr-edit-next","language":"fr","assistant_text":"Je vais maintenant remplacer le nom de cette fonction dans le fichier source.","intended":true,"tool":"edit"}
+{"row_id":"fr-run-check","language":"fr","assistant_text":"Mon prochain geste est de lancer la vérification du formatage dans le terminal.","intended":true,"tool":"shell"}
+{"row_id":"fr-question-read","language":"fr","assistant_text":"Souhaites-tu que je lise le journal avant de continuer ? J'attends ta réponse.","intended":false,"tool":""}
+{"row_id":"fr-description","language":"fr","assistant_text":"La commande de vérification affiche les erreurs de formatage sans modifier les fichiers.","intended":false,"tool":""}

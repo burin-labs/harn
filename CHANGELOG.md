@@ -9,6 +9,92 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.164
+
+### Breaking
+
+- Publication evidence distinguishes source-linked harness bookkeeping from assistant messages needing model-dispatch
+  metadata. `AssistantPublicationRecord` Rust literals now require `origin`, and `SessionPublicationEvidence` literals
+  require `bookkeeping_count`. The reader retains every assistant row and complete event coverage; missing metadata on
+  an unmarked assistant remains unknown.
+
+  Migration: Add `origin: AssistantPublicationOrigin::UnmarkedAssistant` to existing assistant record literals and
+  `bookkeeping_count: 0` to existing evidence literals. Readers should use `origin` and `bookkeeping_count` to distinguish
+  harness bookkeeping, while retaining unknown metadata diagnostics for unmarked assistants.
+
+### Changed
+
+- A command-running tool call whose declared path is under a `read` external root is now admitted when the active
+  `os_hardened` sandbox measurably keeps that path read-only for the child. The answer is read from the rules the
+  macOS and Linux backends actually install. Anything unmeasured, Windows, and `unrestricted` still refuse.
+
+### Fixed
+
+- Remove the inline-test grandfather table from the test-pattern gate. Keep runtime code after sibling test-module
+  declarations in the runtime scan, synchronize monitor wakeups directly, and replace interrupt-test shell processes
+  with Rust probes that report readiness before interruption.
+- A tool call stopped after its handler finished a workspace write now reports
+  `mutationStatus: applied` with the written paths, for both a cancel of that
+  one call and a loop exit that abandons it. The runtime records each completed
+  write against the call that made it. A stopped call with no recorded write
+  still reports `unknown`.
+- A missing dev-setup rustc wrapper no longer breaks every Cargo command. The Cargo entry points
+  rebuild it in place, or name `make setup` when the configured wrapper came from an older source.
+- User tests now initialize project hooks only when their events fire, matching
+  normal execution and avoiding repeated loading of unrelated project modules.
+  Reached hooks still run with isolated per-case state and fail closed on errors.
+  Test suites retain prepared bytecode for their module graph using the same
+  bounded graph cache as hosted execution, avoiding repeated hydration when a
+  suite imports more modules than an ordinary VM's small cache can hold.
+
+## v0.10.163
+
+### Breaking
+
+- Prepared execution authority receipts preserve the agent's typed terminal.
+  A delivered cancellation is recorded as stopped rather than completed;
+  failed and suspended agent results cannot claim completed work. Authority
+  evidence omits provider diagnostic prose and redacts custom stop reasons.
+
+  Migration: Rust consumers constructing `RunAuthorityReceipt` literals must
+  add `agent_terminal: None`. Agent executors report their actual producer
+  outcome through `AuthorityUse::record_agent_terminal` before returning;
+  attached sessions use `ActivePreparedSession::record_agent_terminal`.
+- **The inference admission snapshot reports the resolved data posture.**
+  `harn provider admission` and `preview_inference_admission` now return
+  `data_posture` (the posture inference will send on the route),
+  `data_controls_outcome`, and `data_controls_note` (the route's own handling
+  note when its model row declares one). A route the `strictest_available`
+  posture refuses now previews as `denied` with governing rule
+  `data_controls.training_refused` and the typed
+  `data_controls_refusal: training_without_control`, instead of `admitted`.
+
+  Migration: code that builds an `InferenceAdmissionSnapshot` literal adds the
+  four fields, for example `data_posture: DataPosture::Default,
+  data_controls_outcome: None, data_controls_note: None,
+  data_controls_refusal: None`.
+  Hosts decoding the JSON need no change.
+
+### Fixed
+
+- Release recovery can attach the original exact-source consumer's completed proof after an observer deadline without
+  rebuilding certified archives or changing the deadline verdict. Publication still requires authenticated completion,
+  every producer product check, archive integrity and source identity.
+- Invalidate compiled bytecode and saved import interfaces when the import resolver, interface derivation, or cache
+  validation changes within the same Harn version. Cargo watches the same source registry used to compute the cache
+  build identity.
+- Text displaying fix for std/ui.
+- Main CI recovery retries failed jobs once, then records complete failure evidence for diagnosis.
+  It no longer attributes repeated CI failures to source commits or publishes automatic reverts.
+- **MCP OAuth client identity (#9612).** Restore the default public client metadata document to the website, include its
+  required identity URL, and refuse a website build that omits or changes that identity.
+- **Release queue admission (#9613).** Reject merge groups that queue source changes behind a release before starting
+  expensive CI proofs, preserving the release's source identity while avoiding wasted builds.
+- **Runtime bumps land while the base keeps moving (#9627).** A validated bump whose base advances without
+  touching any refreshed path is published on its validated base and armed, and the merge queue tests the
+  merge. Before, every advance re-ran refresh and validation, so a base that merged faster than one validation
+  never got a pull request.
+
 ## v0.10.162
 
 ### Fixed

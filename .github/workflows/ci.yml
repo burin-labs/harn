@@ -27,8 +27,9 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   # A cold merge-group producer can take more than 15 minutes to publish its
-  # exact-run artifacts. Every live consumer shares this bounded wait policy;
-  # the barrier jobs add scheduling and API headroom above it. The waits share
+  # exact-run artifacts. The waits that remain (the security barrier and the
+  # lanes that overlap real work with the build) share this bounded policy,
+  # with scheduling and API headroom above it. The waits share
   # the workflow token's API budget with every job in the repository, so each
   # backs off from 10s to 15s between reads, and a producer still queued after
   # 30 minutes fails the wait by name, inside the shortest waiter's 45-minute
@@ -449,18 +450,9 @@ jobs:
           EVENT: ${{ github.event_name }}
           MERGE_GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha }}
           PUSH_BEFORE_SHA: ${{ github.event.before }}
-        run: |
-          set -euo pipefail
-          # The checkout is shallow, so name the "before" commit explicitly
-          # rather than asking git for a merge base: a pull request's merge
-          # commit's first parent, the merge group's base, or the pushed range.
-          case "$EVENT" in
-            pull_request) base="$(git rev-parse HEAD^1)" ;;
-            merge_group) base="$MERGE_GROUP_BASE_SHA" ;;
-            *) base="$PUSH_BEFORE_SHA" ;;
-          esac
-          git fetch --no-tags --depth=1 origin "$base"
-          echo "base_sha=$base" >> "$GITHUB_OUTPUT"
+        # A merge group or push that lands several pull requests puts the
+        # baseline past the shallow checkout; the script deepens to it.
+        run: ./.github/scripts/resolve-public-api-baseline.sh
       - name: Check public Rust API for an undeclared break
         env:
           BASE_SHA: ${{ steps.api-baseline.outputs.base_sha }}
@@ -855,7 +847,33 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 1
+      # A main push lands the exact commit its merge group already built. The
+      # push restores that bundle, verified against this commit's manifest,
+      # instead of rebuilding it; with none to find, it builds as before.
+      - name: Find the merge group's CLI for this commit
+        id: proven-cli
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: bash scripts/ci/find_merge_group_cli.sh "$GITHUB_SHA" >> "$GITHUB_OUTPUT"
+      - name: Download the merge group's CLI
+        if: steps.proven-cli.outputs.found == 'true'
+        uses: ./.github/actions/download-artifact-with-retry
+        with:
+          name: harn-cli.tar.zst
+          path: ${{ runner.temp }}
+          skip-decompress: true
+          run-id: ${{ steps.proven-cli.outputs.run_id }}
+      - name: Verify the merge group's CLI
+        if: steps.proven-cli.outputs.found == 'true'
+        run: >-
+          ./scripts/ci/rust_artifact.sh restore-cli
+          "$RUNNER_TEMP/harn-cli.tar.zst"
+          "$RUNNER_TEMP/harn-cli-proven"
+          "$GITHUB_SHA"
       - uses: ./.github/actions/free-disk-space
+        if: steps.proven-cli.outputs.found != 'true'
       # How many rustc processes this box may start, measured here rather than
       # typed. A literal is right for the runner someone had in mind and wrong
       # for every other one: it oversubscribes a small hosted box and leaves a
@@ -863,6 +881,7 @@ jobs:
       # owner of that arithmetic and refuses by name when it cannot measure.
       - name: Measure the compile budget
         id: resource-budget
+        if: steps.proven-cli.outputs.found != 'true'
         run: bash scripts/ci/rust_resource_budget.sh
         env:
           # `runner.environment` reports a vendor VM and one of our own boxes
@@ -874,12 +893,14 @@ jobs:
           RUNNER_ENVIRONMENT: ${{ env.HARN_RUNNER_TIER == 'self-hosted' && 'self-hosted' || 'github-hosted' }}
           HARN_BUDGET_PROFILE: producer
       - name: Install mold linker
+        if: steps.proven-cli.outputs.found != 'true'
         uses: ./.github/actions/apt-install
         timeout-minutes: 5
         with:
           packages: mold
           check-command: mold
       - uses: ./.github/actions/rust-toolchain
+        if: steps.proven-cli.outputs.found != 'true'
       # Every tier gets an explicit answer, because a guard that names only
       # the tiers it knows turns a new tier into a silent skip: the first
       # self-hosted run would compile cold, report success, and say nothing.
@@ -889,6 +910,7 @@ jobs:
       # Both rungs restore only. The serialized main refresh is the sole
       # writer and admits replacement space before the provider upload.
       - uses: ./.github/actions/rust-cache
+        if: steps.proven-cli.outputs.found != 'true'
         continue-on-error: true
         with:
           shared-key: harn-ci-cli
@@ -902,8 +924,10 @@ jobs:
       # report what this job did rather than what the machine has done since
       # its cache server last started.
       - name: Record the sccache baseline
+        if: steps.proven-cli.outputs.found != 'true'
         run: ./scripts/ci/sccache_baseline.sh
       - name: Build portable Harn CLI
+        if: steps.proven-cli.outputs.found != 'true'
         timeout-minutes: ${{ env.HARN_RUNNER_TIER == 'self-hosted' && 31 || 31 }}
         env:
           CARGO_BUILD_JOBS: ${{ steps.resource-budget.outputs.build_jobs }}
@@ -926,7 +950,7 @@ jobs:
       # Name the commit this target was built from, for the next restore's
       # workspace crate reuse. Only a fully successful build may claim it.
       - name: Record the workspace cache source
-        if: success()
+        if: success() && steps.proven-cli.outputs.found != 'true'
         run: ./scripts/ci/reuse_workspace_crates.sh record
       # Report the compiler cache on every tier, named by nothing it excludes.
       # Guarding this on a single tier is what let the owned pool run for
@@ -937,7 +961,7 @@ jobs:
       # host-supervised server running instead of stopping one other jobs are
       # still using.
       - name: Summarize and stop sccache
-        if: always()
+        if: always() && steps.proven-cli.outputs.found != 'true'
         run: ./scripts/ci/finalize_sccache.sh
 
 
@@ -1240,33 +1264,9 @@ jobs:
           scripts/ci/run_rust_test_lane.sh
           bash scripts/ci/run_workspace_tests.sh "$HARN_EXT_TEST_PARTITION"
 
-  # GitHub job dependencies wait for terminal producer state, even when an
-  # immutable v4 artifact is already available. This single free-hosted barrier
-  # turns CLI visibility into the dependency contract and lets Harn consumers
-  # overlap both the security build and the producer's test phase.
-  rust-artifacts-ready:
-    name: Wait for shared Harn binary
-    needs: [changes]
-    if: needs.changes.outputs.rust_paths == 'true'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 50
-    permissions:
-      actions: read
-      contents: read
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 1
-      - name: Wait for shared Harn binary
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: >-
-          ./scripts/ci/wait_for_run_artifacts.sh
-          harn-cli.tar.zst
-
   # The Linux sandbox proof consumes its own exact-commit archive, which the
-  # producer uploads several minutes before it finishes its test phase. Like
-  # the CLI barrier, this one starts at once and lets the waiter read the
+  # producer uploads several minutes before it finishes its test phase. This
+  # barrier starts at once and lets the waiter read the
   # producer's state: a queued or running producer is pending, so queue time
   # cannot spend the wait, and a producer that completes without the archive
   # fails the wait by name. Waiting for producer completion instead (#8751)
@@ -1505,12 +1505,14 @@ jobs:
 
   harn-audit:
     name: ${{ matrix.name }}
-    # Start CLI-independent setup immediately. Each worker waits for and
-    # verifies the exact-commit binary only at the last responsible moment.
+    # Each worker starts once the producer has published the exact-commit
+    # CLI. Its setup before the CLI is seconds, so waiting in the job held a
+    # hosted runner for the whole build: about 16 minutes on each of seven
+    # workers, against the org's concurrent-job cap.
     # Merge tier: conformance and the Harn audits are how a runtime or stdlib
     # change proves itself before it lands (harn#9495).
-    needs: [changes]
-    if: needs.changes.outputs.rust == 'true'
+    needs: [changes, rust-cli]
+    if: ${{ !cancelled() && needs.changes.outputs.rust == 'true' && needs.rust-cli.result == 'success' }}
     runs-on: ubuntu-24.04
     # The immutable CLI producer is shared, and the Harn proof work after it is
     # spread over free hosted workers. Everything here starts only once the CLI
@@ -1620,10 +1622,6 @@ jobs:
       - name: Check generated parser is current
         if: matrix.kind == 'audit'
         run: make check-tree-sitter-parser
-      - name: Wait for shared Harn binary
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: ./scripts/ci/wait_for_run_artifacts.sh harn-cli.tar.zst
       # This lane only executes Harn scripts. Download the small CLI artifact,
       # not the multi-gigabyte nextest archive consumed in workspace-test archive mode.
       - name: Download shared Harn binary
@@ -1677,8 +1675,8 @@ jobs:
   source-length-ratchet:
     name: Check source file lengths
     # The execution budget starts after the shared CLI is actually available.
-    needs: [changes, rust-artifacts-ready]
-    if: needs.changes.outputs.rust == 'true' && needs.rust-artifacts-ready.result == 'success'
+    needs: [changes, rust-cli]
+    if: ${{ !cancelled() && needs.changes.outputs.rust == 'true' && needs.rust-cli.result == 'success' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
@@ -1750,7 +1748,7 @@ jobs:
   # instrument and what it does not prove.
   binary-size-signal:
     name: Binary size signal
-    needs: [changes, rust-artifacts-ready]
+    needs: [changes, rust-cli]
     # Merge-group runs re-measure a commit nobody is reviewing. The signal is
     # for the pull-request author, plus the main push that records the baseline
     # the next pull request compares against. That record reads `rust_paths`,
@@ -1758,8 +1756,9 @@ jobs:
     # lanes but must still publish the baseline, measured on the merge group's
     # CLI for the same commit.
     if: >-
-      needs.changes.outputs.rust_paths == 'true'
-      && (github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main'))
+      ${{ !cancelled() && needs.changes.outputs.rust_paths == 'true'
+      && needs.rust-cli.result == 'success'
+      && (github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main')) }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
@@ -1857,8 +1856,9 @@ jobs:
             echo "::notice::Posted the binary-size comment."
           fi
 
-      # Only main publishes the baseline. Source-qualified so the artifact list
-      # can be sorted to the newest one, and retained long enough that a quiet
+      # Only main publishes the baseline. Named `<prefix><sha>` because the
+      # reader looks it up by exact name for each of main's newest commits, and
+      # retained long enough that a quiet
       # weekend does not leave the next pull request without a comparison.
       - name: Record main's debug measurement
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -1959,11 +1959,11 @@ jobs:
     # This report describes prior completed merge-group runs, so it does not
     # depend on the current conformance result. Start it as soon as the shared
     # CLI is visible instead of adding an API-scan tail to conformance.
-    needs: [changes, rust-artifacts-ready]
+    needs: [changes, rust-cli]
     if: >-
-      github.event_name == 'merge_group'
+      ${{ !cancelled() && github.event_name == 'merge_group'
       && needs.changes.outputs.rust == 'true'
-      && needs.rust-artifacts-ready.result == 'success'
+      && needs.rust-cli.result == 'success' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
@@ -2015,11 +2015,11 @@ jobs:
   fast-policy-gates:
     name: Check fast repository policies
     # Same live-artifact barrier as the other consumers of the shared CLI.
-    needs: [changes, rust-artifacts-ready]
+    needs: [changes, rust-cli]
     # No event condition, deliberately. The contract asserts its absence
     # rather than the absence of one spelling, because any event term here
     # would put these refusals back behind the merge.
-    if: needs.changes.outputs.rust == 'true' && needs.rust-artifacts-ready.result == 'success'
+    if: ${{ !cancelled() && needs.changes.outputs.rust == 'true' && needs.rust-cli.result == 'success' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
@@ -2128,14 +2128,14 @@ jobs:
     name: Check repository policies
     # Consumes only the small portable CLI bundle through the same live
     # artifact barrier as harn-audit.
-    needs: [changes, rust-artifacts-ready]
+    needs: [changes, rust-cli]
     # `rust_paths`, not `rust`: no merge group runs this lane, so a push the
     # merge group already proved still runs it, on that run's CLI.
     if: >-
-      github.event_name == 'push'
+      ${{ !cancelled() && github.event_name == 'push'
       && github.ref == 'refs/heads/main'
       && needs.changes.outputs.rust_paths == 'true'
-      && needs.rust-artifacts-ready.result == 'success'
+      && needs.rust-cli.result == 'success' }}
     # Keep this execution-only lane on elastic capacity. It gains no compiler
     # cache benefit from a persistent worker, and merge-queue bursts otherwise
     # leave it waiting behind compile-bearing jobs on the scarce stable pool.
@@ -2295,18 +2295,16 @@ jobs:
     runs-on: macos-latest
     timeout-minutes: 60
     needs: [changes]
-    # macOS coverage stays off the default PR / merge-queue critical path, but
-    # runs before merge for changes that touch macOS-gated process, sandbox,
-    # secret-store, or CLI paths. Other PRs rely on the main-push backstop plus
-    # the full macos-nightly.yml surface. This lane is the PR-time guard that
-    # keeps `#[cfg(target_os = "macos")]` warnings (unused imports, dead_code,
-    # deprecations) from slipping to main and breaking the release `prepare`
-    # build one `-D warnings` error at a time. It compiles + clippy-lints every
+    # Main pushes only. Pull requests and merge groups never wait for macOS:
+    # when the full suite was selected this lane was the last job to finish in
+    # about a quarter of runs, at 18-27 minutes against a ~16 minute Linux
+    # graph. A `#[cfg(target_os = "macos")]` warning that a Linux lane cannot
+    # see now surfaces on the main push and the macos-nightly.yml surface,
+    # where main-CI recovery files it as one issue. It compiles + clippy-lints every
     # target — including the cfg-gated test targets like
     # `secret_store_os_native` that no Linux lane ever builds — but does NOT
     # execute the live-Keychain tests (that's the nightly's job).
-    if: >-
-      needs.changes.outputs.post_merge_tier != 'true'
+    if: github.event_name == 'push'
     env:
       RUSTFLAGS: "-D warnings"
     steps:
@@ -2404,7 +2402,7 @@ jobs:
   macos:
     name: Rust on macOS (deny-warnings build + lint)
     needs: [changes, macos-lint]
-    if: ${{ always() && needs.changes.outputs.post_merge_tier != 'true' }}
+    if: ${{ always() && github.event_name == 'push' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
@@ -2641,7 +2639,6 @@ jobs:
         rust-cli,
         rust-check-inputs,
         rust-test-partitions,
-        rust-artifacts-ready,
         security-tests-ready,
         rust-test,
         rust-security,
@@ -2814,11 +2811,6 @@ jobs:
             "Rust workspace test partitions failed or skipped while Rust proof was required." \
             test "${{ needs.changes.outputs.rust }}" != "true" -o "$COLOCATED_TESTS_DISABLED" = "true"
 
-          rust_artifacts_ready_result="${{ needs['rust-artifacts-ready'].result }}"
-          echo "Rust artifacts ready: $rust_artifacts_ready_result"
-          require_result "$rust_artifacts_ready_result" \
-            "Rust artifact handoff failed or skipped while Rust proof was required." [ "${{ needs.changes.outputs.rust }}" != "true" ]
-
           security_tests_ready_result="${{ needs['security-tests-ready'].result }}"
           echo "Linux security test inputs: $security_tests_ready_result"
           require_result "$security_tests_ready_result" \
@@ -2898,10 +2890,10 @@ jobs:
             "Windows cross-compile check failed or skipped on a merge-group candidate or a Rust-changing main push." \
             [ "$WINDOWS_CROSS_REQUIRED" != "true" ]
 
-          # macOS may skip only when the tier decision defers its proof.
+          # macOS runs on main pushes only, so only a main push requires it.
           macos_result="${{ needs.macos.result }}"
           echo "Rust on macOS (deny-warnings build + lint): $macos_result"
-          require_result "$macos_result" "macOS job failed or is missing." test "$POST_MERGE_TIER_ACTIVE" = "true"
+          require_result "$macos_result" "macOS job failed or is missing." test "$EVENT_NAME" != "push"
 
           # Portal and docs-site jobs are path-gated by `changes`: they run
           # when the frontend/docs surfaces or this workflow change, and skip

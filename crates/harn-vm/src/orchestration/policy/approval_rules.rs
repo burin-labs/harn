@@ -25,8 +25,9 @@ use identity_match::LiteralResourceIdentity;
 pub use identity_match::PolicyIdentityMatch;
 pub(super) use invocation_memory::evaluate_dispatch;
 pub use path_guards::{
-    denial_gate_for_source, EXTERNAL_ROOT_READ_ONLY, SOURCE_DEFAULT_EXTERNAL_PATH,
-    SOURCE_DEFAULT_PATH_GUARD, SOURCE_DEFAULT_SENSITIVE_PATH, SOURCE_NET_POLICY,
+    denial_gate_for_source, install_child_write_probe, ChildWriteProbe, EXTERNAL_ROOT_READ_ONLY,
+    SOURCE_DEFAULT_EXTERNAL_PATH, SOURCE_DEFAULT_PATH_GUARD, SOURCE_DEFAULT_SENSITIVE_PATH,
+    SOURCE_NET_POLICY,
 };
 pub use rule_source::PolicyRuleSource;
 

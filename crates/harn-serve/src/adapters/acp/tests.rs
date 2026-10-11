@@ -1361,7 +1361,7 @@ fn acp_agent_capabilities_use_canonical_initialize_shape() {
         capabilities["promptCapabilities"],
         serde_json::json!({
             "image": true,
-            "audio": true,
+            "audio": false,
             "embeddedContext": false,
         })
     );

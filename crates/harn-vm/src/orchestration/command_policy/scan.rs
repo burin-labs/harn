@@ -1139,7 +1139,13 @@ pub(super) fn path_outside_workspace(
     // owns executable discovery. The executable's own location is not a path
     // the command reads or writes, even when that location is absolute.
     for path in absolute_path_candidates_from_words(analysis.path_operand_words()) {
-        if !under_any_root(&normalize_path(&path), &roots) {
+        let path = normalize_path(&path);
+        // A redirect to `/dev/null` or a standard stream names no workspace
+        // file, so it is neither inside nor outside one (harn#9655).
+        if crate::workspace_path::is_standard_io_device(&path, false) {
+            continue;
+        }
+        if !under_any_root(&path, &roots) {
             return true;
         }
     }

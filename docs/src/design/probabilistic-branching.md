@@ -197,9 +197,11 @@ The initial implementation uses the existing structured LLM transport. A
 resource bounds, deadline and admitted budget handle. Its backend configuration
 is a closed variant: `structured_llm` or, when implemented, `native_decision`.
 There is no ambient actor-model fallback. The `structured_llm` variant requires
-explicit effort (examples assume `low`) and temperature exactly `0`. An endpoint
-that cannot honor that combination returns `unsupported_options`, rather than
-silently dropping a parameter. The `native_decision` variant cannot carry either
+an admitted chat profile (default effort `none`, temperature `0`, and output cap
+`2048`). Callers may supply typed sampling, output-cap, and timeout overrides;
+they participate in request identity. An endpoint that cannot honor the profile
+returns `unsupported_options`, rather than silently dropping a parameter.
+The `native_decision` variant cannot carry chat options
 setting unless its operation contract explicitly supports it. Model selection
 remains catalog-owned.
 

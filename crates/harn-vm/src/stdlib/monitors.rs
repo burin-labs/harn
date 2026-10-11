@@ -767,26 +767,6 @@ pipeline test(harness: Harness, task: unknown) {
                 let dir = tempfile::tempdir().expect("tempdir");
                 reset_thread_local_state();
                 let log = install_memory_for_current_thread(MONITOR_EVENT_LOG_QUEUE_DEPTH);
-                let push_log = log.clone();
-                tokio::task::spawn_local(async move {
-                    tokio::time::sleep(StdDuration::from_millis(20)).await;
-                    let topic = Topic::new(TRIGGER_INBOX_ENVELOPES_TOPIC).unwrap();
-                    push_log
-                        .append(
-                            &topic,
-                            LogEvent::new(
-                                "event_ingested",
-                                serde_json::json!({
-                                    "event": {
-                                        "provider": "github",
-                                        "kind": "deployment_status"
-                                    }
-                                }),
-                            ),
-                        )
-                        .await
-                        .expect("append push wakeup");
-                });
 
                 let source = r#"
 import { wait_for } from "std/monitors"
@@ -818,16 +798,33 @@ pipeline test(harness: Harness, task: unknown) {
                 let mut vm = Vm::new();
                 register_vm_stdlib(&mut vm);
                 vm.set_source_dir(dir.path());
-                let task = tokio::task::spawn_local(async move {
+                let task = async move {
                     vm.execute(&chunk)
                         .await
                         .map(|_| vm.output().trim_end().to_string())
-                });
-                tokio::task::yield_now().await;
-                tokio::time::advance(StdDuration::from_millis(20)).await;
-                let output = task
+                };
+                tokio::pin!(task);
+                assert!(
+                    futures::poll!(&mut task).is_pending(),
+                    "monitor must subscribe and wait before the push arrives"
+                );
+                let topic = Topic::new(TRIGGER_INBOX_ENVELOPES_TOPIC).unwrap();
+                log.append(
+                    &topic,
+                    LogEvent::new(
+                        "event_ingested",
+                        serde_json::json!({
+                            "event": {
+                                "provider": "github",
+                                "kind": "deployment_status"
+                            }
+                        }),
+                    ),
+                )
+                .await
+                .expect("append push wakeup");
+                let output = harn_clock::test_support::within("monitor push wakeup", task)
                     .await
-                    .expect("monitor task joins")
                     .expect("monitor script succeeds");
                 assert_eq!(output, "matched\n2\n1");
             })
