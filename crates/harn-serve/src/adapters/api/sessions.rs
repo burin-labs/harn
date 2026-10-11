@@ -3,32 +3,7 @@
 //! session-scoped task list and submission entry points.
 
 use super::*;
-
-#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "lowercase")]
-enum SessionReasoningEffort {
-    None,
-    Minimal,
-    Low,
-    Medium,
-    High,
-    Xhigh,
-    Max,
-}
-
-impl SessionReasoningEffort {
-    const fn as_str(self) -> &'static str {
-        match self {
-            Self::None => "none",
-            Self::Minimal => "minimal",
-            Self::Low => "low",
-            Self::Medium => "medium",
-            Self::High => "high",
-            Self::Xhigh => "xhigh",
-            Self::Max => "max",
-        }
-    }
-}
+use harn_vm::llm::capabilities::ReasoningEffort;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -36,7 +11,7 @@ struct SessionModelPolicy {
     provider: String,
     model: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    reasoning_effort: Option<SessionReasoningEffort>,
+    reasoning_effort: Option<ReasoningEffort>,
 }
 
 #[derive(Clone, Debug)]
@@ -456,7 +431,7 @@ async fn apply_model_policy_change(
             format!("{}:{}", policy.provider, policy.model),
             policy
                 .reasoning_effort
-                .map(SessionReasoningEffort::as_str)
+                .map(ReasoningEffort::as_str)
                 .unwrap_or("@inherit"),
         ),
     };
