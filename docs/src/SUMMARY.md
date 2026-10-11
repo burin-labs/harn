@@ -386,6 +386,7 @@
 - [Maintainer release workflow](./maintainer-release.md)
 - [Release assets manifest](./dev/release-assets-manifest.md)
 - [Release opener outcome](./dev/release-opener-receipt.md)
+- [Consumer observer admission](./dev/consumer-observer.md)
 - [Release runner policy](./dev/release-runner-policy.md)
 - [Release binary-size policy](./dev/release-binary-size-policy.md)
 - [Reusable bump-harn workflow](./dev/reusable-bump-harn-runtime.md)
