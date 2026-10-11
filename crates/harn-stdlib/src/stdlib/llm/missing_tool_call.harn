@@ -26,22 +26,29 @@ fn __missing_tool_call_policy(
     llm.provider_capabilities(route.provider, route.model),
     schema_of(MissingToolCallCapabilities),
   )
-  if capabilities.decision_protocol != nil && capabilities.decision_protocol != "structured_llm" {
-    return {
-      backend: "native_decision",
-      provider: route.provider,
-      model: route.model,
-      threshold: 0.0,
-    }
-  }
+  const native = capabilities.decision_protocol != nil
+    && capabilities.decision_protocol != "structured_llm"
   let policy: EvaluationPolicy = {
-    backend: "structured_llm",
+    backend: if native {
+      "native_decision"
+    } else {
+      "structured_llm"
+    },
     provider: route.provider,
     model: route.model,
-    effort: cfg.effort ?? "none",
-    temperature: cfg.temperature ?? 0.0,
-    max_tokens: cfg.max_tokens ?? 192,
     threshold: 0.0,
+  }
+  if !native {
+    policy = policy + {effort: "none", temperature: 0.0, max_tokens: 192}
+  }
+  if cfg.effort != nil {
+    policy = policy + {effort: cfg.effort}
+  }
+  if cfg.temperature != nil {
+    policy = policy + {temperature: cfg.temperature}
+  }
+  if cfg.max_tokens != nil {
+    policy = policy + {max_tokens: cfg.max_tokens}
   }
   if cfg.top_p != nil {
     policy = policy + {top_p: cfg.top_p}

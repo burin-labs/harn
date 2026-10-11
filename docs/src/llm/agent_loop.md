@@ -143,7 +143,9 @@ requires conservative run budget authority from the start of the run.
 On the inherited chat route, classifier `max_tokens` defaults to `192`,
 `temperature` to `0.0`, and `effort` to `none`. Optional `top_p`, `seed`, and
 `timeout_ms` retain their transport meanings. An explicit `evaluation` supplies
-its own chat settings; native policies omit chat settings.
+its own chat settings. Automatically selected native policies omit chat defaults;
+explicit chat settings remain in the evaluation policy and native evaluation
+refuses them without a recovery nudge.
 
 `confidence_threshold` defaults to `0.65`. Recovery requires both intent and
 target confidence to meet that floor. A confident negative intent doesn't need

@@ -60,7 +60,7 @@ pub type MissingToolCallRecoveryOptions = {
   max_tokens?: int,
   temperature?: float,
   classifier?: MissingToolCallCustomClassifier,
-  /** Explicit decision route; absent uses the loop's structured model route. */
+  /** Explicit decision route; absent selects from the loop route's capabilities. */
   evaluation?: EvaluationPolicy,
   /**
    * Whether a claimed tool call may reach the provider as a decode grammar.

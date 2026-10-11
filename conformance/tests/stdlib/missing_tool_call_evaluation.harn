@@ -77,6 +77,36 @@ pipeline test(harness: Harness) {
       },
     )
   }
+  for overrides in [
+    {temperature: 0.1},
+    {max_tokens: 256},
+    {top_p: 0.9},
+    {seed: 8543},
+    {effort: "low"},
+    {timeout_ms: 30000},
+  ] {
+    with_llm_script(
+      harness.llm,
+      [],
+      { ->
+        const native = missing_tool_call_classifier(
+          harness,
+          {provider: "vercel_ai_gateway", model: "vercel/typesafe-ai/jev"} + overrides,
+        )(
+          request,
+        )
+        assert(native != nil)
+        assert_eq(native.action, "ambiguous")
+        const decision = native.decision
+        if decision != nil && decision.kind == "unavailable" {
+          assert_eq(decision.reason, "unsupported_options")
+        } else {
+          throw "native chat settings must refuse"
+        }
+        assert_eq(len(harness.llm.mock_calls()), 0)
+      },
+    )
+  }
   for row in [
     {intended: true, intent_confidence: 0.95, tool_confidence: 0.92, action: "tool_call_intended"},
     {intended: true, intent_confidence: 0.95, tool_confidence: 0.1, action: "ambiguous"},
