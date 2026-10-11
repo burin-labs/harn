@@ -166,6 +166,17 @@ impl EvaluationPolicy {
                     .into(),
             );
         }
+        // Admit explicit chat effort before cache lookup, where an invalid
+        // string must never alias the identity of an omitted option.
+        if policy.backend == BackendKind::StructuredLlm {
+            if let Some(effort) = policy.effort.as_deref() {
+                crate::llm::helpers::parse_reasoning_effort_field(
+                    "evaluation policy effort",
+                    effort,
+                )
+                .map_err(|error| error.to_string())?;
+            }
+        }
         Ok(policy)
     }
 

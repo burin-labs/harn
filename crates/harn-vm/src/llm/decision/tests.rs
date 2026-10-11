@@ -547,6 +547,7 @@ fn chat_overrides_change_identity_and_admission_without_allowing_retry_options()
         );
     }
     for (key, setting) in [
+        ("effort", VmValue::String("unset".into())),
         ("max_tokens", VmValue::Int(0)),
         ("timeout_ms", VmValue::Int(-1)),
         ("top_p", VmValue::Float(1.1)),

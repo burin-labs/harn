@@ -95,7 +95,9 @@ pub(crate) use system_prompt::{
     system_prompt_metadata,
 };
 pub use thinking::admit_reasoning_literals;
-pub(crate) use thinking::{resolve_catalog_thinking_config, resolve_thinking_config};
+pub(crate) use thinking::{
+    parse_reasoning_effort_field, resolve_catalog_thinking_config, resolve_thinking_config,
+};
 
 /// Resolve an outbound call after refreshing runtime-owned capabilities.
 ///

@@ -5,7 +5,7 @@ pub(super) fn thinking_error(message: impl Into<String>) -> VmError {
     VmError::Thrown(VmValue::String(arcstr::ArcStr::from(message.into())))
 }
 
-pub(super) fn parse_reasoning_effort_field(
+pub(crate) fn parse_reasoning_effort_field(
     field: &str,
     raw: &str,
 ) -> Result<crate::llm::api::ReasoningEffort, VmError> {

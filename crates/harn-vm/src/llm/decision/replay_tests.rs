@@ -46,15 +46,19 @@ fn replay_and_cache_inherit_into_children_and_keep_occurrences_and_cost_separate
 
             let cache = EvaluationReplayScope::cache();
             vm.set_evaluation_replay(cache.clone());
+            let mut cached_arguments = args("cached");
+            let mut policy = cached_arguments[3].as_dict().unwrap().clone();
+            policy.remove("effort");
+            cached_arguments[3] = VmValue::dict(policy.clone());
             let first = evaluate_internal(
                 &crate::vm::AsyncBuiltinCtx::for_test(vm.child_vm()),
-                &args("cached"),
+                &cached_arguments,
             )
             .await
             .unwrap();
             let second = evaluate_internal(
                 &crate::vm::AsyncBuiltinCtx::for_test(vm.child_vm()),
-                &args("cached"),
+                &cached_arguments,
             )
             .await
             .unwrap();
@@ -66,6 +70,22 @@ fn replay_and_cache_inherit_into_children_and_keep_occurrences_and_cost_separate
             assert_ne!(first.3.invocation_id, second.3.invocation_id);
             assert_eq!(second.3.source, EvaluationSource::Cache);
             assert_eq!(second.3.physical_attempts, 0);
+            policy.insert(crate::value::intern_key("effort"), VmValue::string("unset"));
+            cached_arguments[3] = VmValue::dict(policy);
+            assert!(
+                evaluate_internal(
+                    &crate::vm::AsyncBuiltinCtx::for_test(vm.child_vm()),
+                    &cached_arguments,
+                )
+                .await
+                .is_err(),
+                "invalid explicit effort cannot reuse the omitted-effort answer"
+            );
+            assert_eq!(
+                backend.request_count(),
+                2,
+                "invalid effort never dispatched"
+            );
             cache.finish().unwrap();
         });
 }
