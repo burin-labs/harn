@@ -54,7 +54,7 @@ fn __tool_batch_entry_executor(entry: any) -> string {
 }
 
 fn __tool_batch_call_classification(call: any, tools: any, options: any = {}) {
-  const tool_name = to_string(call?.name ?? call?.tool_name ?? "")
+  const tool_name = __tool_registry_name(call)
   const entry = __tool_registry_entry(tools, tool_name)
   const annotations = __tool_resource_annotations(entry, options?.policy, tool_name)
   const kind = __intra_turn_annotation_text(
@@ -872,7 +872,7 @@ pub fn __intra_turn_dependency_target_keys(resource_keys: any, args: any, annota
 }
 
 pub fn __intra_turn_resource_keys(call: any, tools: any, options: any = {}) {
-  const tool_name = to_string(call?.name ?? call?.tool_name ?? "")
+  const tool_name = __tool_registry_name(call)
   const entry = __tool_registry_entry(tools, tool_name)
   const annotations = __tool_resource_annotations(entry, options?.policy, tool_name)
   if !__intra_turn_annotations_mutate_resource(annotations) {
@@ -893,7 +893,7 @@ pub fn __intra_turn_resource_keys(call: any, tools: any, options: any = {}) {
 }
 
 pub fn __intra_turn_resource_guard(call: any, tools: any, options: any = {}) {
-  const tool_name = to_string(call?.name ?? call?.tool_name ?? "")
+  const tool_name = __tool_registry_name(call)
   const entry = __tool_registry_entry(tools, tool_name)
   const annotations = __tool_resource_annotations(entry, options?.policy, tool_name)
   if !__intra_turn_annotations_mutate_resource(annotations) {

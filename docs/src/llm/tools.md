@@ -17,6 +17,7 @@ This keeps the tool contract explicit:
 For provider toolset members, register handlers under
 `<toolset_name>.<name>`, such as `computer.screenshot`. Harn dispatches using
 both fields, so a member cannot invoke an ordinary same-named function.
+Batch ordering and resource failure guards use the qualified handler's annotations.
 Tool middleware receives the member in `envelope.tool_name` and its namespace
 in `envelope.toolset_name`. The Anthropic adapter echoes the namespace on
 results, including interruption placeholders.

@@ -174,6 +174,17 @@ pub fn __tool_resource_annotations(entry: any, policy: any, tool_name: string) {
   return agent_tool_annotations(entry, policy, tool_name)
 }
 
+pub fn __tool_registry_name(call: any) -> string {
+  const tool_name = to_string(call?.name ?? call?.tool_name ?? "")
+  if call?.toolset_name == nil {
+    return tool_name
+  }
+  if type_of(call.toolset_name) == "string" && call.toolset_name != "" {
+    return call.toolset_name + "." + tool_name
+  }
+  return ""
+}
+
 pub fn __tool_envelope(random: HarnessRandom, call: dict, tools: dict, options: dict) {
   const tool_name = to_string(call?.name ?? call?.tool_name ?? "")
   const tool_args_raw = call?.arguments ?? call?.tool_args
@@ -188,14 +199,7 @@ pub fn __tool_envelope(random: HarnessRandom, call: dict, tools: dict, options: 
   } else {
     raw_call_id
   }
-  const registry_name = if call?.toolset_name == nil {
-    tool_name
-  } else if type_of(call.toolset_name) == "string"
-    && call.toolset_name != "" {
-    call.toolset_name + "." + tool_name
-  } else {
-    ""
-  }
+  const registry_name = __tool_registry_name(call)
   const entry = __tool_registry_entry(tools, registry_name)
   const declared_executor = if entry == nil {
     nil
