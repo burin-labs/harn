@@ -128,10 +128,21 @@ impl Parser {
     }
 
     fn parse_additive(&mut self) -> Result<Expression, ParserError> {
-        self.parse_binary_level(
-            Self::parse_nil_coalescing,
-            &[(TokenKind::Plus, "+"), (TokenKind::Minus, "-")],
-        )
+        let mut left = self.parse_nil_coalescing()?;
+        // A leading minus on a new line starts a separate unary expression.
+        while self.check_skip_newlines(&TokenKind::Plus) || self.check(&TokenKind::Minus) {
+            let op = if self.check(&TokenKind::Plus) {
+                "+"
+            } else {
+                "-"
+            };
+            let start = left.span;
+            self.advance();
+            self.skip_newlines();
+            let right = self.parse_nil_coalescing()?;
+            left = nodes::binary(op, left, right, Span::merge(start, self.prev_span()));
+        }
+        Ok(left)
     }
 
     // `??` binds tighter than addition/comparison and looser than multiplication.
@@ -211,5 +222,33 @@ impl Parser {
             operand,
             Span::merge(start, self.prev_span()),
         ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ast::Node;
+    use harn_lexer::Lexer;
+
+    #[test]
+    fn additive_newlines_preserve_statement_boundaries() {
+        let tokens = Lexer::new("1\n-2").tokenize().unwrap();
+        let program = Parser::new(tokens).parse().unwrap();
+        assert_eq!(program.len(), 2);
+        assert!(matches!(program[0].node, Node::IntLiteral(1)));
+        assert!(matches!(&program[1].node, Node::UnaryOp { op, operand }
+            if op == "-" && matches!(operand.node, Node::IntLiteral(2))));
+
+        for (source, expected_op) in [("1\n+2", "+"), ("1-\n2", "-")] {
+            let tokens = Lexer::new(source).tokenize().unwrap();
+            let expression = Parser::new(tokens).parse_single_expression().unwrap();
+            assert!(
+                matches!(&expression.node, Node::BinaryOp { op, left, right }
+                if op == expected_op
+                    && matches!(left.node, Node::IntLiteral(1))
+                    && matches!(right.node, Node::IntLiteral(2)))
+            );
+        }
     }
 }
