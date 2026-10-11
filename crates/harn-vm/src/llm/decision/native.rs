@@ -58,7 +58,7 @@ pub(super) fn request_body(request: &DecisionRequest<'_>) -> Result<Value, Decis
         ));
     }
     if request.temperature.is_some_and(|value| value != 0.0)
-        || !matches!(request.effort, "" | "none")
+        || !matches!(request.effort, None | Some("" | "none"))
         || request.max_tokens.is_some()
         || request.top_p.is_some()
         || request.seed.is_some()

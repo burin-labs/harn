@@ -46,7 +46,10 @@ fn __missing_tool_call_policy(
     // The catalog lists supported effort levels from lowest to highest.
     // Keep this bounded classifier at the lowest declared effort instead of
     // inventing an off switch that the route may reject.
-    policy = policy + {effort: levels[0] ?? "none", max_tokens: 192}
+    policy = policy + {max_tokens: 192}
+    if len(levels) > 0 {
+      policy = policy + {effort: levels[0]}
+    }
   }
   if cfg.effort != nil {
     policy = policy + {effort: cfg.effort}

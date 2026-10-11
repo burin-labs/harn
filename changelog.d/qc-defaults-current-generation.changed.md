@@ -8,11 +8,12 @@
   missing-tool classification also leave sampling to the resolved route
   instead of forcing an unsupported temperature. Explicit caller settings
   still receive the provider's capability validation. Decision evaluations
-  preserve an omitted temperature instead of changing it to zero, allowing
+  preserve omitted effort and temperature instead of inventing defaults, allowing
   structured classification on routes that reject sampling parameters.
   Provider capability metadata exposes the supported effort ladder, and
   missing-tool classification chooses the lowest catalog-supported effort
-  instead of forcing an unsupported reasoning-off setting. Native decision
-  tape identities remain unchanged when sampling is omitted.
+  instead of forcing an unsupported reasoning-off setting. An unknown effort
+  ladder leaves reasoning to the provider. Native decision tape identities
+  remain unchanged when effort and sampling are omitted.
   The standalone approval reviewer uses
   Haiku 5.5, matching its Anthropic catalog role.

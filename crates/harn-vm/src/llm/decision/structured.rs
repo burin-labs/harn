@@ -123,9 +123,12 @@ impl DecisionBackend for StructuredLlmBackend {
     ) -> Result<RawDecisionResponse, DecisionTransportError> {
         // Transport validates declared sampling options against the route.
         // Unsupported options are refused rather than silently dropped.
-        if request.effort.trim().is_empty() {
+        if request
+            .effort
+            .is_some_and(|effort| effort.trim().is_empty())
+        {
             return Err(DecisionTransportError::UnsupportedOptions {
-                diagnostic: "the structured evaluation profile requires an explicit effort".into(),
+                diagnostic: "an explicit structured evaluation effort must not be empty".into(),
             });
         }
         let schema = answers_schema(request.questions);

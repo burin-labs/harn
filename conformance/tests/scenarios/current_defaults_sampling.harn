@@ -1,3 +1,4 @@
+import { MissingToolCallRecoveryOptions } from "std/agent/options_types"
 import { agent_scratchpad_reorganize } from "std/agent/scratchpad"
 import { missing_tool_call_classifier } from "std/llm/missing_tool_call"
 import { refine_prompt } from "std/llm/refine"
@@ -109,8 +110,62 @@ fn run_case(harness: Harness, provider: string, model: string) {
   )
 }
 
+fn unknown_effort_case(harness: Harness, effort: string?) {
+  const model = "deepseek-ai/DeepSeek-V4-Pro-0813"
+  const capabilities = harness.llm.provider_capabilities("together", model)
+  assert_eq(capabilities.reasoning_effort_levels, [])
+  let config: MissingToolCallRecoveryOptions = {provider: "together", model: model}
+  if effort != nil {
+    config = config + {effort: effort}
+  }
+  with_llm_script(
+    harness.llm,
+    [
+      llm_text(
+        json_stringify(
+          {
+            answers: {
+              intended: {verdict: true, confidence: 0.95, evidence: "explicit inspection intent"},
+              tool: {choice: "inspect", confidence: 0.95, evidence: "inspection tool"},
+            },
+          },
+        ),
+      )
+        + {provider: "together", model: model},
+    ],
+    { ->
+      const result = missing_tool_call_classifier(harness, config)(
+        {
+          session_id: "unknown-effort-" + harness.random.uuid(),
+          iteration: 1,
+          text: "I will inspect the file now.",
+          visible_text: nil,
+          tools: [{name: "inspect", description: "Inspect a file"}],
+          tool_names: ["inspect"],
+        },
+      )
+      assert_eq(result?.decision?.kind, "answered")
+      assert_eq(result?.tool_name, "inspect")
+      const calls = harness.llm.mock_calls()
+      assert_eq(len(calls), 1, "unknown effort still dispatches")
+      assert_eq(
+        calls[0].thinking,
+        if effort == nil {
+          {mode: "disabled"}
+        } else {
+          {mode: "effort", level: effort}
+        },
+        "unknown ladder preserves omitted or explicit effort",
+      )
+      assert_eq(calls[0].max_tokens, 192)
+    },
+  )
+}
+
 pipeline test(harness: Harness) {
   run_case(harness, "openai", "gpt-6-luna")
   run_case(harness, "anthropic", "claude-sonnet-5-5")
+  unknown_effort_case(harness, "low")
+  unknown_effort_case(harness, nil)
   harness.stdio.println("current defaults dispatch; explicit unsupported sampling refuses")
 }

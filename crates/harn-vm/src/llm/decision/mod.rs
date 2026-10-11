@@ -47,7 +47,7 @@ pub(crate) struct EvaluationPolicy {
     pub backend: BackendKind,
     pub provider: String,
     pub model: String,
-    pub effort: String,
+    pub effort: Option<String>,
     pub temperature: Option<f64>,
     pub max_tokens: Option<i64>,
     pub top_p: Option<f64>,
@@ -111,11 +111,10 @@ impl EvaluationPolicy {
             backend,
             provider: text("provider")?,
             model: text("model")?,
-            effort: if fields.contains_key("effort") {
-                text("effort")?
-            } else {
-                "none".into()
-            },
+            effort: fields
+                .contains_key("effort")
+                .then(|| text("effort"))
+                .transpose()?,
             temperature: fields
                 .contains_key("temperature")
                 .then(|| number("temperature"))
@@ -179,7 +178,11 @@ impl EvaluationPolicy {
             self.backend.as_str().to_string(),
             self.provider.clone(),
             self.model.clone(),
-            self.effort.clone(),
+            match (self.backend, self.effort.as_deref()) {
+                (BackendKind::NativeDecision, None) => "none".into(),
+                (_, None) => "unset".into(),
+                (_, Some(value)) => value.to_string(),
+            },
             match (self.backend, self.temperature) {
                 // Native requests never emit sampling. Retain the identity of
                 // existing tapes when the omitted option has no wire effect.
@@ -548,7 +551,7 @@ async fn evaluate_live(
             state: &state,
             questions: &questions,
             contract: &route,
-            effort: &policy.effort,
+            effort: policy.effort.as_deref(),
             temperature: policy.temperature,
             max_tokens: policy.max_tokens,
             top_p: policy.top_p,
@@ -762,7 +765,7 @@ async fn dispatch(
         state: &evaluation.state,
         questions: &evaluation.questions,
         contract: route,
-        effort: &evaluation.policy.effort,
+        effort: evaluation.policy.effort.as_deref(),
         temperature: evaluation.policy.temperature,
         max_tokens: evaluation.policy.max_tokens,
         top_p: evaluation.policy.top_p,

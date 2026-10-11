@@ -478,7 +478,7 @@ fn the_policy_digest_covers_the_threshold() {
         backend: BackendKind::StructuredLlm,
         provider: "mock".into(),
         model: "fixture".into(),
-        effort: "low".into(),
+        effort: Some("low".into()),
         temperature: Some(0.0),
         max_tokens: None,
         top_p: None,
@@ -520,6 +520,17 @@ fn runtime_policy_uses_the_closed_registry_and_optional_caps_are_explicit_in_ide
 fn chat_overrides_change_identity_and_admission_without_allowing_retry_options() {
     let value = policy_value(0.5, 1.0);
     let default = EvaluationPolicy::from_value(&value).unwrap();
+    let mut effort_fields = value.as_dict().unwrap().clone();
+    effort_fields.remove("effort");
+    let omitted = EvaluationPolicy::from_value(&VmValue::dict(effort_fields.clone())).unwrap();
+    assert_eq!(omitted.effort, None);
+    effort_fields.insert(
+        crate::value::intern_key("effort"),
+        VmValue::String("none".into()),
+    );
+    let explicit_none = EvaluationPolicy::from_value(&VmValue::dict(effort_fields)).unwrap();
+    assert_eq!(explicit_none.effort.as_deref(), Some("none"));
+    assert_ne!(omitted.digest(), explicit_none.digest());
     for (key, setting) in [
         ("max_tokens", VmValue::Int(192)),
         ("top_p", VmValue::Float(0.9)),
@@ -1100,7 +1111,7 @@ fn the_dispatched_request_carries_the_admitted_profile_unchanged() {
     assert_eq!(seen.len(), 1, "one evaluation, one physical request");
     assert_eq!(seen[0].provider, "mock");
     assert_eq!(seen[0].model, "fixture");
-    assert_eq!(seen[0].effort, "low");
+    assert_eq!(seen[0].effort.as_deref(), Some("low"));
     assert_eq!(seen[0].temperature, Some(0.0));
     assert_eq!(seen[0].question_ids, vec!["safe".to_string()]);
     assert_eq!(

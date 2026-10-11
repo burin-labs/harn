@@ -55,7 +55,7 @@ fn native_routes_project_wire_answers_and_refuse_partial_tapes() {
             state: &state,
             questions: &questions,
             contract: &contract,
-            effort: "none",
+            effort: Some("none"),
             temperature: Some(0.0),
             max_tokens: None,
             top_p: None,

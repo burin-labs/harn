@@ -82,7 +82,6 @@ fn prepare(
     let mut options = serde_json::json!({
         "provider": request.provider,
         "model": request.model,
-        "effort": request.effort,
         "max_tokens": request.max_tokens.unwrap_or(MAX_EVALUATION_OUTPUT_TOKENS),
         "output": {"schema": schema, "strict": true, "validation": "error"},
         "mock_scope": "llm.evaluation",
@@ -90,6 +89,9 @@ fn prepare(
         // One physical request. No repair, no re-prompt, no failover.
         "schema_retries": 0,
     });
+    if let Some(effort) = request.effort {
+        options["effort"] = JsonValue::from(effort);
+    }
     if let Some(temperature) = request.temperature {
         options["temperature"] = JsonValue::from(temperature);
     }

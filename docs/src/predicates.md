@@ -163,9 +163,9 @@ route using it needs `text_generation` as well. A route on a native protocol
 explicit native contract takes precedence over derived structured support.
 
 `effort`, `temperature`, `max_tokens`, `top_p`, `seed`, and `timeout_ms` are
-optional chat options. The structured defaults are effort `none`, provider
-sampling, and at most `2048` output tokens. An omitted temperature stays omitted
-through dispatch; explicit temperature zero remains an explicit request.
+optional chat options. The structured profile caps output at `2048` tokens by
+default. It does not add omitted effort or temperature to chat options;
+explicit temperature zero remains an explicit request.
 Supplied settings participate in the
 request identity and output caps participate in budget admission. Unsupported
 route settings refuse instead of being dropped. Omit these options for
