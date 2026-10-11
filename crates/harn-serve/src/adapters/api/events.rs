@@ -14,7 +14,7 @@ pub(super) async fn list_events(
         return response;
     }
     let filter = EventFilter::from_query(&query, None, None);
-    Json(list_response(state.history(&filter))).into_response()
+    history_response(&state, &filter)
 }
 
 pub(super) async fn list_workflow_trigger_runs(
@@ -77,7 +77,7 @@ pub(super) async fn list_session_events(
         return response;
     }
     let filter = EventFilter::from_query(&query, Some(session_id), None);
-    Json(list_response(state.history(&filter))).into_response()
+    history_response(&state, &filter)
 }
 
 pub(super) async fn list_task_events(
@@ -91,7 +91,7 @@ pub(super) async fn list_task_events(
         return response;
     }
     let filter = EventFilter::from_query(&query, None, Some(task_id));
-    Json(list_response(state.history(&filter))).into_response()
+    history_response(&state, &filter)
 }
 
 pub(super) async fn stream_events(
@@ -150,30 +150,92 @@ async fn stream_events_response(
     if let Err(response) = authorize(&state, Method::GET, &uri, &headers, Bytes::new()).await {
         return response;
     }
-    let history = state.history(&filter);
-    let replay = stream::iter(history.into_iter().map(|event| Ok(sse_event(&event))));
-    let live = live_event_stream(state.events_tx.subscribe(), filter);
+    // Subscribe before replay so a committed event cannot fall between them.
+    let rx = state.events_tx.subscribe();
+    let history = match state.history(&filter) {
+        Ok(history) => history,
+        Err(_) => return task_store::unavailable_response(),
+    };
+    // The database and live projections are separate replay snapshots. A
+    // higher replayed ID does not imply every earlier event was replayed.
+    let replayed = history.iter().map(|event| event.id.clone()).collect();
+    let replay = stream::iter(
+        history
+            .into_iter()
+            .map(|event| Ok::<_, Infallible>(sse_event(&event))),
+    );
+    let live = live_api_event_stream(rx, filter, replayed).map(|event| Ok(sse_event(&event)));
     Sse::new(replay.chain(live))
         .keep_alive(KeepAlive::default())
         .into_response()
 }
 
-fn live_event_stream(
+fn history_response(state: &ApiState, filter: &EventFilter) -> Response {
+    match state.history(filter) {
+        Ok(history) => Json(list_response(history)).into_response(),
+        Err(_) => task_store::unavailable_response(),
+    }
+}
+
+fn live_api_event_stream(
     rx: broadcast::Receiver<ApiEvent>,
     filter: EventFilter,
-) -> impl Stream<Item = Result<Event, Infallible>> {
-    stream::unfold((rx, filter), |(mut rx, filter)| async move {
-        loop {
-            match rx.recv().await {
-                Ok(event) if filter.matches(&event) => {
-                    return Some((Ok(sse_event(&event)), (rx, filter)));
+    replayed: BTreeSet<String>,
+) -> impl Stream<Item = ApiEvent> {
+    stream::unfold(
+        (rx, filter, replayed),
+        |(mut rx, filter, replayed)| async move {
+            loop {
+                match rx.recv().await {
+                    Ok(event) if filter.matches(&event) && !replayed.contains(&event.id) => {
+                        return Some((event, (rx, filter, replayed)));
+                    }
+                    Ok(_) => continue,
+                    Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(broadcast::error::RecvError::Closed) => return None,
                 }
-                Ok(_) => continue,
-                Err(broadcast::error::RecvError::Lagged(_)) => continue,
-                Err(broadcast::error::RecvError::Closed) => return None,
             }
+        },
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use futures::FutureExt;
+
+    fn event(id: u64) -> ApiEvent {
+        ApiEvent {
+            id: format!("event_{id:016x}"),
+            object: "event",
+            created_at: "2026-10-11T00:00:00Z".into(),
+            event: "message.created".into(),
+            session_id: Some("session-one".into()),
+            task_id: Some("task-one".into()),
+            payload: json!({}),
         }
-    })
+    }
+
+    #[tokio::test]
+    async fn replay_dedup_keeps_lower_live_ids_and_original_cursor() {
+        let (tx, rx) = broadcast::channel(16);
+        // The task snapshot ended at 6; the later RAM snapshot saw 8. Both
+        // notifications reached this subscriber while replay was assembled.
+        let replayed = BTreeSet::from([event(8).id]);
+        let filter = EventFilter {
+            after: Some(event(6).id),
+            ..EventFilter::default()
+        };
+        assert!(tx.send(event(6)).is_ok());
+        assert!(tx.send(event(7)).is_ok());
+        assert!(tx.send(event(8)).is_ok());
+        assert!(tx.send(event(9)).is_ok());
+        let live = live_api_event_stream(rx, filter, replayed);
+        futures::pin_mut!(live);
+        assert_eq!(live.next().await.unwrap().id, event(7).id);
+        assert_eq!(live.next().await.unwrap().id, event(9).id);
+        assert!(live.next().now_or_never().is_none());
+    }
 }
 
 async fn read_api_event_log_topic(

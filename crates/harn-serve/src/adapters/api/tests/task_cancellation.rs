@@ -1,18 +1,6 @@
 use super::*;
 
-fn task(task_id: &str, session_id: &str, status: &str) -> Value {
-    json!({
-        "id": task_id,
-        "object": "task",
-        "session_id": session_id,
-        "status": status,
-        "updated_at": "2026-08-22T00:00:00Z",
-        "completed_at": (status == "COMPLETED").then_some("2026-08-22T00:00:00Z"),
-        "canceled_at": null,
-        "outcome_id": (status == "COMPLETED").then_some(format!("outcome_{task_id}")),
-        "failure": (status == "FAILED").then_some(json!({"code": "failed"})),
-    })
-}
+use harn_session_store::task::{TaskStatus, TaskUpdate};
 
 async fn cancel(app: &Router, task_id: &str) -> Response {
     app.clone()
@@ -37,21 +25,32 @@ async fn task_cancel_is_idempotent_and_preserves_other_terminal_outcomes() {
         script.to_string_lossy().to_string(),
     ));
     let state = server.state.clone();
-    let session_id = "session-cancel-regression";
-    {
-        let mut inner = state.inner.lock().expect("api state");
-        inner.tasks.insert(
-            "task-working".to_string(),
-            task("task-working", session_id, "WORKING"),
-        );
-        inner.tasks.insert(
-            "task-completed".to_string(),
-            task("task-completed", session_id, "COMPLETED"),
-        );
-        inner
-            .active_task_by_session
-            .insert(session_id.to_string(), "task-working".to_string());
-    }
+    let store = state.task_store().unwrap();
+    let _live_claim = store.claim_task_execution("task-working").unwrap();
+    store
+        .admit_task(super::task_retry::admission(
+            "task-working",
+            dir.path(),
+            None,
+        ))
+        .unwrap();
+    store
+        .admit_task(super::task_retry::admission(
+            "task-completed",
+            dir.path(),
+            None,
+        ))
+        .unwrap();
+    store
+        .update_task(
+            "task-completed",
+            TaskUpdate {
+                status: TaskStatus::Completed,
+                at: "completed".into(),
+                failure: None,
+            },
+        )
+        .unwrap();
     let app = api_router(state.clone());
 
     let first = cancel(&app, "task-working").await;
@@ -71,19 +70,21 @@ async fn task_cancel_is_idempotent_and_preserves_other_terminal_outcomes() {
         "an idempotent retry returns the same resource"
     );
 
-    let completed_before =
-        { state.inner.lock().expect("api state").tasks["task-completed"].clone() };
+    let completed_before = store.get_task("task-completed").unwrap();
     let terminal = cancel(&app, "task-completed").await;
     assert_eq!(terminal.status(), StatusCode::CONFLICT);
     let terminal_error = read_json(terminal).await;
     assert_eq!(terminal_error["error"]["code"], "task_not_cancelable");
 
-    let inner = state.inner.lock().expect("api state");
-    assert_eq!(inner.tasks["task-completed"], completed_before);
-    assert_eq!(inner.tasks["task-working"]["canceled_at"], canceled_at);
+    assert_eq!(store.get_task("task-completed").unwrap(), completed_before);
     assert_eq!(
-        inner
-            .events
+        store.get_task("task-working").unwrap().resource()["canceled_at"],
+        canceled_at
+    );
+    assert_eq!(
+        store
+            .task_events(None, None)
+            .unwrap()
             .iter()
             .filter(|event| event.event == "task.canceled")
             .count(),

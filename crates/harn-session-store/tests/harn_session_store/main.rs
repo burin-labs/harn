@@ -12,3 +12,4 @@ mod process_test_support;
 mod sqlite_concurrency;
 mod sqlite_initialization;
 mod store;
+mod task;

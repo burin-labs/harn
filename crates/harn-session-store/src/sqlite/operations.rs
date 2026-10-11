@@ -62,6 +62,10 @@ impl SessionStore for SqliteSessionStore {
         &self.inner.hooks
     }
 
+    fn task_store(&self) -> Option<&dyn crate::task::TaskStore> {
+        Some(self)
+    }
+
     async fn create(&self, request: CreateSession) -> StoreResult<SessionMeta> {
         let meta = crate::memory_helpers::meta_for_create(request);
         let mut conn = self.lock_for_mutation()?;

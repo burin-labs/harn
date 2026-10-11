@@ -82,6 +82,73 @@ pub struct SessionWriteLease {
     _session: File,
 }
 
+/// A live executor's claim on one task, distinct from its transcript writer.
+#[derive(Debug)]
+pub struct TaskExecutionLease {
+    inner: TaskExecutionLeaseInner,
+}
+
+#[derive(Debug)]
+enum TaskExecutionLeaseInner {
+    File {
+        _project: SessionMutationLease,
+        _task: File,
+    },
+    Memory {
+        claims: std::sync::Arc<std::sync::Mutex<std::collections::BTreeSet<String>>>,
+        task_id: String,
+    },
+}
+
+impl TaskExecutionLease {
+    pub(crate) fn try_acquire_file(
+        store_dir: &Path,
+        task_id: &str,
+    ) -> Result<Self, SessionLeaseError> {
+        let project = SessionMutationLease::try_acquire(store_dir)?;
+        let identity = blake3::hash(task_id.as_bytes()).to_hex();
+        let path = session_lease_directory(store_dir).join(format!("task-{identity}.lock"));
+        let task = open_lease_file(&path)?;
+        try_lock(&task, &path, LockMode::Exclusive)?;
+        Ok(Self {
+            inner: TaskExecutionLeaseInner::File {
+                _project: project,
+                _task: task,
+            },
+        })
+    }
+
+    pub(crate) fn try_acquire_memory(
+        claims: &std::sync::Arc<std::sync::Mutex<std::collections::BTreeSet<String>>>,
+        task_id: &str,
+    ) -> Result<Self, crate::StoreError> {
+        let mut guard = claims.lock().unwrap_or_else(|error| error.into_inner());
+        if !guard.insert(task_id.to_owned()) {
+            return Err(crate::StoreError::Contention {
+                kind: crate::StoreContention::TaskExecutionHeld,
+                message: "another executor owns the task".into(),
+            });
+        }
+        Ok(Self {
+            inner: TaskExecutionLeaseInner::Memory {
+                claims: claims.clone(),
+                task_id: task_id.to_owned(),
+            },
+        })
+    }
+}
+
+impl Drop for TaskExecutionLease {
+    fn drop(&mut self) {
+        if let TaskExecutionLeaseInner::Memory { claims, task_id } = &self.inner {
+            claims
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .remove(task_id);
+        }
+    }
+}
+
 impl SessionWriteLease {
     /// Claim a writer slot without waiting.
     ///
@@ -157,7 +224,7 @@ pub fn session_lease_directory(store_dir: &Path) -> PathBuf {
     store_dir.join(LEASE_DIRECTORY)
 }
 
-fn project_lease_path(store_dir: &Path) -> PathBuf {
+pub(crate) fn project_lease_path(store_dir: &Path) -> PathBuf {
     session_lease_directory(store_dir).join(PROJECT_LEASE_FILE)
 }
 

@@ -1014,13 +1014,13 @@ fn canonicalize_sandbox_roots(roots: Vec<String>) -> Vec<String> {
 /// Cached compiled pipeline. The ACP server re-uses the same pipeline file
 /// across every `session/prompt`; recompiling on each turn was the dominant
 /// per-turn overhead inside the VM (~80ms on auto.harn) before this cache.
-/// Keyed by (path, mtime, target_pipeline_name) — when the file's mtime moves
-/// forward we discard the cache and re-read/re-compile.
+/// The bytecode-cache key admits the complete imported source graph; path,
+/// mtime, and pipeline selection keep their existing invalidation behavior.
 struct CompileCacheEntry {
     path: PathBuf,
     mtime: SystemTime,
     target_pipeline: Option<String>,
-    source: String,
+    source_key: harn_vm::bytecode_cache::CacheKey,
     chunk: harn_vm::Chunk,
 }
 
@@ -1032,7 +1032,7 @@ struct VmBaselineCacheEntry {
     path: PathBuf,
     mtime: SystemTime,
     target_pipeline: Option<String>,
-    source: String,
+    source_key: harn_vm::bytecode_cache::CacheKey,
     cwd: PathBuf,
     project_root: Option<PathBuf>,
     store_scope: harn_vm::SessionStoreScope,

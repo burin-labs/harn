@@ -47,11 +47,12 @@ use super::store::{
     SweepReport, TruncateResult, UpdateSession, VerifyReport, MAX_READ_BATCH,
 };
 
-// v5 adds `sessions.title_pinned`. Adding a column has to move this number:
+// v6 adds durable task admission, execution descriptors, and control events.
+// Adding a table or column has to move this number:
 // the shared initializer fast-paths out of schema setup entirely when the
 // recorded version already matches, so an unbumped column never reaches an
 // existing database.
-const SCHEMA_VERSION: i64 = 5;
+const SCHEMA_VERSION: i64 = 6;
 const SCHEMA_NAME: &str = "session_store";
 const DEFAULT_BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 const SQLITE_SCHEMA: SchemaVersion = SchemaVersion::new(SCHEMA_NAME, SCHEMA_VERSION);
@@ -70,6 +71,7 @@ struct StoreInner {
     path: PathBuf,
     mutation_admission: MutationAdmission,
     _snapshot: Option<tempfile::TempDir>,
+    task_claims: Arc<Mutex<std::collections::BTreeSet<String>>>,
 }
 
 #[derive(Debug)]
@@ -152,6 +154,7 @@ impl SqliteSessionStore {
                 path,
                 mutation_admission: MutationAdmission::ReadOnly,
                 _snapshot: Some(snapshot),
+                task_claims: Arc::default(),
             }),
         })
     }
@@ -232,6 +235,7 @@ impl SqliteSessionStore {
                 path,
                 mutation_admission,
                 _snapshot: None,
+                task_claims: Arc::default(),
             }),
         })
     }
@@ -479,6 +483,45 @@ fn initialize_session_schema(transaction: &Transaction<'_>) -> StoreResult<()> {
                 source_digest   TEXT NOT NULL,
                 session_id      TEXT NOT NULL,
                 event_count     INTEGER NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS agent_task_sessions (
+                id TEXT PRIMARY KEY,
+                record_json TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS agent_control_event_sequence (
+                singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+                next_id INTEGER NOT NULL
+            );
+            INSERT OR IGNORE INTO agent_control_event_sequence (singleton, next_id) VALUES (1, 1);
+            CREATE TABLE IF NOT EXISTS agent_tasks (
+                id TEXT PRIMARY KEY,
+                session_id TEXT NOT NULL,
+                workspace_id TEXT NOT NULL,
+                status TEXT NOT NULL,
+                record_json TEXT NOT NULL,
+                FOREIGN KEY (session_id) REFERENCES agent_task_sessions(id)
+            );
+            CREATE INDEX IF NOT EXISTS agent_tasks_session ON agent_tasks(session_id);
+            CREATE INDEX IF NOT EXISTS agent_tasks_workspace ON agent_tasks(workspace_id);
+            CREATE TABLE IF NOT EXISTS task_retry_bindings (
+                binding_digest TEXT PRIMARY KEY,
+                request_fingerprint TEXT NOT NULL,
+                task_id TEXT NOT NULL,
+                expires_at_ms INTEGER NOT NULL,
+                FOREIGN KEY (task_id) REFERENCES agent_tasks(id)
+            );
+            CREATE TABLE IF NOT EXISTS agent_task_events (
+                id TEXT PRIMARY KEY,
+                task_id TEXT NOT NULL,
+                session_id TEXT NOT NULL,
+                record_json TEXT NOT NULL,
+                FOREIGN KEY (task_id) REFERENCES agent_tasks(id)
+            );
+            CREATE INDEX IF NOT EXISTS agent_task_events_task ON agent_task_events(task_id, id);
+            CREATE INDEX IF NOT EXISTS agent_task_events_session ON agent_task_events(session_id, id);
+            CREATE TABLE IF NOT EXISTS agent_task_message_projections (
+                session_id TEXT PRIMARY KEY,
+                record_json TEXT NOT NULL
             );
             CREATE TABLE IF NOT EXISTS session_tags (
                 session_id  TEXT NOT NULL,
@@ -1186,6 +1229,7 @@ fn append_in_tx(
 
 #[path = "sqlite/operations.rs"]
 mod operations;
+mod tasks;
 
 #[cfg(test)]
 #[path = "sqlite_tests.rs"]

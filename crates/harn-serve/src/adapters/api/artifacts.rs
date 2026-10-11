@@ -383,12 +383,22 @@ fn validate_artifact_links(
         }
     }
     if let Some(task_id) = task_id {
-        if !inner.tasks.contains_key(task_id) {
-            return Err(ArtifactInputError::new(
-                StatusCode::NOT_FOUND,
-                "not_found",
-                "task not found",
-            ));
+        match state.task_store().and_then(|store| store.get_task(task_id)) {
+            Ok(_) => {}
+            Err(harn_session_store::StoreError::NotFound(_)) => {
+                return Err(ArtifactInputError::new(
+                    StatusCode::NOT_FOUND,
+                    "not_found",
+                    "task not found",
+                ))
+            }
+            Err(_) => {
+                return Err(ArtifactInputError::new(
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "task_store_unavailable",
+                    "durable task storage is unavailable",
+                ))
+            }
         }
     }
     if let Some(workspace_id) = workspace_id.as_deref() {

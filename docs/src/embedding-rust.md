@@ -4,6 +4,14 @@
 Rust API. Use it when a host application wants Harn in-process instead of
 spawning the CLI as a child process.
 
+File-backed served pipelines resolve imported types and option contracts before
+execution, including `AgentSpec` re-exported by `std/agent/options`. Hosts using
+the VM directly should call `harn_vm::compile_source_at_path(source, path,
+pipeline_name)` for a module anchored at a filesystem path. The supplied source
+is the root buffer; imports resolve through Harn's module graph. The inline
+`compile_source` and `compile_source_named` functions do not load filesystem
+import contracts, and none of these functions grants privileged host dispatch.
+
 ## Add the crate
 
 Until Harn is published on crates.io, depend on the repository tag you ship

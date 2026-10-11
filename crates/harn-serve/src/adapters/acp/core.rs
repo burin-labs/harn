@@ -131,20 +131,23 @@ impl AcpServer {
                 .ok()
                 .map(|mtime| (path.to_path_buf(), mtime))
         });
+        let source_key =
+            source_path.map(|path| harn_vm::bytecode_cache::CacheKey::from_source(path, source));
         if let Some((ref path, mtime)) = cache_key {
             if let Some(entry) = self.compile_cache.as_ref() {
                 if entry.path == *path
                     && entry.mtime == mtime
                     && entry.target_pipeline == target_owned
-                    && entry.source == source
+                    && Some(&entry.source_key) == source_key.as_ref()
                 {
                     return Ok((entry.chunk.clone(), true));
                 }
             }
         }
-        let chunk = match target_pipeline {
-            Some(name) => harn_vm::compile_source_named(source, name),
-            None => harn_vm::compile_source(source),
+        let chunk = match (source_path, target_pipeline) {
+            (Some(path), target) => harn_vm::compile_source_at_path(source, path, target),
+            (None, Some(name)) => harn_vm::compile_source_named(source, name),
+            (None, None) => harn_vm::compile_source(source),
         }
         .map_err(|e| format!("Compilation error: {e}"))?;
         if let Some((path, mtime)) = cache_key {
@@ -152,7 +155,7 @@ impl AcpServer {
                 path,
                 mtime,
                 target_pipeline: target_owned,
-                source: source.to_string(),
+                source_key: source_key.expect("file-backed cache has a source key"),
                 chunk: chunk.clone(),
             });
         }
@@ -179,6 +182,7 @@ impl AcpServer {
             .and_then(|m| m.modified())
             .ok()
             .map(|mtime| (source_path.to_path_buf(), mtime));
+        let source_key = harn_vm::bytecode_cache::CacheKey::from_source(source_path, source);
         let project_root = Some(project_root.to_path_buf());
 
         if let Some((ref path, mtime)) = cache_key {
@@ -186,7 +190,7 @@ impl AcpServer {
                 if entry.path == *path
                     && entry.mtime == mtime
                     && entry.target_pipeline == target_owned
-                    && entry.source == source
+                    && entry.source_key == source_key
                     && entry.cwd == cwd
                     && entry.project_root == project_root
                     && &entry.store_scope == store_scope
@@ -215,7 +219,7 @@ impl AcpServer {
                 path,
                 mtime,
                 target_pipeline: target_owned,
-                source: source.to_string(),
+                source_key,
                 cwd: cwd.to_path_buf(),
                 project_root,
                 store_scope: store_scope.clone(),

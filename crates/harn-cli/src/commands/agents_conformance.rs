@@ -19,8 +19,8 @@ const REPORT_SCHEMA: &str = "harn-agents-conformance-2026-04-25";
 use wire::{
     error_code, expect_array_field, expect_error_code, expect_field_eq, expect_json,
     expect_list_response, expect_status, expect_status_any, expect_string_array_contains,
-    expect_string_field, expect_task_status, expect_u64_field, first_id_from_list,
-    is_terminal_status, list_data, stream_sse_frames, validate_sse_frames,
+    expect_string_field, expect_task_status, expect_task_submission, expect_u64_field,
+    first_id_from_list, is_terminal_status, list_data, stream_sse_frames, validate_sse_frames,
     validate_status_transitions, ConformanceClient, ProbeResult, PROTOCOL_VERSION,
 };
 
@@ -433,18 +433,31 @@ async fn workspace_crud(client: &ConformanceClient, state: &mut ProbeState) -> P
         return Ok(());
     }
 
+    if state.discovery.is_none() {
+        discovery(client, state).await?;
+    }
+    let mut root = format!("harn://conformance/{}", state.run_id);
+    if let Some(resource) = state
+        .discovery
+        .as_ref()
+        .and_then(|body| body.pointer("/resources/runtime"))
+    {
+        let path = resource
+            .as_str()
+            .filter(|path| !path.trim().is_empty())
+            .ok_or_else(|| "discovery.resources.runtime must be a non-empty string".to_owned())?;
+        let response = client.get_json(path).await?;
+        expect_status(&response, StatusCode::OK)?;
+        if let Some(physical_root) = runtime_workspace_root(expect_json(&response)?)? {
+            root = physical_root.to_owned();
+        }
+    }
     let request = json!({
         "name": format!("agents-conformance-{}", state.run_id),
-        "root": format!("harn://conformance/{}", state.run_id),
+        "root": root,
         "metadata": conformance_metadata(&state.run_id),
     });
-    let response = client
-        .post_json(
-            "/v1/workspaces",
-            &request,
-            Some(&format!("{}-workspace", state.run_id)),
-        )
-        .await?;
+    let response = client.post_json("/v1/workspaces", &request).await?;
     if response.status() == StatusCode::NOT_FOUND
         || response.status() == StatusCode::NOT_IMPLEMENTED
     {
@@ -462,14 +475,24 @@ async fn workspace_crud(client: &ConformanceClient, state: &mut ProbeState) -> P
         "metadata": conformance_metadata(&state.run_id),
     });
     let response = client
-        .patch_json(
-            &format!("/v1/workspaces/{workspace_id}"),
-            &patch,
-            Some(&format!("{}-workspace-patch", state.run_id)),
-        )
+        .patch_json(&format!("/v1/workspaces/{workspace_id}"), &patch)
         .await?;
     expect_status_any(&response, &[StatusCode::OK, StatusCode::NOT_IMPLEMENTED])?;
     Ok(())
+}
+
+fn runtime_workspace_root(runtime: &Value) -> ProbeResult<Option<&str>> {
+    expect_field_eq(runtime, "object", "runtime")?;
+    runtime
+        .get("workspace_root")
+        .map(|root| {
+            root.as_str()
+                .filter(|root| !root.trim().is_empty())
+                .ok_or_else(|| {
+                    "runtime.workspace_root must be a non-empty string when present".to_owned()
+                })
+        })
+        .transpose()
 }
 
 async fn session_crud(client: &ConformanceClient, state: &mut ProbeState) -> ProbeResult {
@@ -485,13 +508,7 @@ async fn session_crud(client: &ConformanceClient, state: &mut ProbeState) -> Pro
         "initial_messages": [message_input("agents conformance session setup")],
         "metadata": conformance_metadata(&state.run_id),
     });
-    let response = client
-        .post_json(
-            "/v1/sessions",
-            &request,
-            Some(&format!("{}-session", state.run_id)),
-        )
-        .await?;
+    let response = client.post_json("/v1/sessions", &request).await?;
     expect_status_any(&response, &[StatusCode::CREATED, StatusCode::OK])?;
     let body = expect_json(&response)?;
     expect_field_eq(body, "object", "session")?;
@@ -503,11 +520,7 @@ async fn session_crud(client: &ConformanceClient, state: &mut ProbeState) -> Pro
         "metadata": conformance_metadata(&state.run_id),
     });
     let response = client
-        .patch_json(
-            &format!("/v1/sessions/{session_id}"),
-            &patch,
-            Some(&format!("{}-session-patch", state.run_id)),
-        )
+        .patch_json(&format!("/v1/sessions/{session_id}"), &patch)
         .await?;
     expect_status_any(&response, &[StatusCode::OK, StatusCode::NOT_IMPLEMENTED])?;
     Ok(())
@@ -519,7 +532,6 @@ async fn message_crud(client: &ConformanceClient, state: &mut ProbeState) -> Pro
         .post_json(
             &format!("/v1/sessions/{session_id}/messages"),
             &json!({"message": message_input("agents conformance message")}),
-            Some(&format!("{}-message", state.run_id)),
         )
         .await?;
     expect_status_any(&response, &[StatusCode::CREATED, StatusCode::OK])?;
@@ -559,7 +571,6 @@ async fn task_crud(client: &ConformanceClient, state: &mut ProbeState) -> ProbeR
         .post_json(
             &format!("/v1/tasks/{task_id}/cancel"),
             &json!({"reason": "agents conformance cancellation probe"}),
-            Some(&format!("{}-cancel", state.run_id)),
         )
         .await?;
     expect_status_any(
@@ -590,7 +601,6 @@ async fn artifact_crud(client: &ConformanceClient, state: &mut ProbeState) -> Pr
                 "workspace_id": workspace_id,
                 "metadata": conformance_metadata(&state.run_id),
             }),
-            Some(&format!("{}-artifact", state.run_id)),
         )
         .await?;
     expect_status_any(&response, &[StatusCode::CREATED, StatusCode::OK])?;
@@ -644,7 +654,6 @@ async fn extended_read_surfaces(client: &ConformanceClient, state: &mut ProbeSta
                 "base_ref": "main",
                 "metadata": conformance_metadata(&state.run_id),
             }),
-            Some(&format!("{}-branch", state.run_id)),
         )
         .await?;
     expect_status_any(
@@ -678,7 +687,6 @@ async fn session_sse_event_shape(
         .post_json(
             &format!("/v1/sessions/{session_id}/messages"),
             &json!({"message": message_input("agents conformance stream event")}),
-            Some(&format!("{}-stream-message", state.run_id)),
         )
         .await;
     let frames = stream
@@ -744,7 +752,6 @@ async fn cancel_terminal_consistency(
         .post_json(
             &format!("/v1/tasks/{task_id}/cancel"),
             &json!({"reason": "agents conformance cancellation lifecycle"}),
-            Some(&format!("{}-lifecycle-cancel", state.run_id)),
         )
         .await?;
     expect_status_any(
@@ -774,24 +781,12 @@ async fn same_key_same_body_reuses_task(
     let session_id = ensure_session(client, state).await?;
     let body = json!({"input": message_input("agents conformance idempotent task")});
     let key = format!("{}-same-body", state.run_id);
-    let first = client
-        .post_json(
-            &format!("/v1/sessions/{session_id}/tasks"),
-            &body,
-            Some(&key),
-        )
-        .await?;
-    expect_status_any(&first, &[StatusCode::ACCEPTED, StatusCode::OK])?;
-    let second = client
-        .post_json(
-            &format!("/v1/sessions/{session_id}/tasks"),
-            &body,
-            Some(&key),
-        )
-        .await?;
-    expect_status_any(&second, &[StatusCode::ACCEPTED, StatusCode::OK])?;
-    let first_id = expect_string_field(expect_json(&first)?, "id")?;
-    let second_id = expect_string_field(expect_json(&second)?, "id")?;
+    let first = client.create_task(&session_id, &body, Some(&key)).await?;
+    let first_task = expect_task_submission(&first)?;
+    let second = client.create_task(&session_id, &body, Some(&key)).await?;
+    let second_task = expect_task_submission(&second)?;
+    let first_id = expect_string_field(first_task, "id")?;
+    let second_id = expect_string_field(second_task, "id")?;
     if first_id != second_id {
         return Err(format!(
             "same Idempotency-Key created different tasks: {first_id} != {second_id}"
@@ -807,16 +802,16 @@ async fn same_key_different_body_conflicts(
     let session_id = ensure_session(client, state).await?;
     let key = format!("{}-different-body", state.run_id);
     let first = client
-        .post_json(
-            &format!("/v1/sessions/{session_id}/tasks"),
+        .create_task(
+            &session_id,
             &json!({"input": message_input("first idempotent body")}),
             Some(&key),
         )
         .await?;
-    expect_status_any(&first, &[StatusCode::ACCEPTED, StatusCode::OK])?;
+    expect_task_submission(&first)?;
     let second = client
-        .post_json(
-            &format!("/v1/sessions/{session_id}/tasks"),
+        .create_task(
+            &session_id,
             &json!({"input": message_input("second idempotent body")}),
             Some(&key),
         )
@@ -955,11 +950,7 @@ async fn receipt_verification(client: &ConformanceClient, state: &mut ProbeState
         return skip("no receipt available for verification");
     };
     let response = client
-        .post_json(
-            &format!("/v1/receipts/{receipt_id}/verify"),
-            &json!({}),
-            Some(&format!("{}-receipt-verify", state.run_id)),
-        )
+        .post_json(&format!("/v1/receipts/{receipt_id}/verify"), &json!({}))
         .await?;
     expect_status(&response, StatusCode::OK)?;
     let body = expect_json(&response)?;
@@ -981,7 +972,6 @@ async fn vault_create_and_read(client: &ConformanceClient, state: &mut ProbeStat
                 "capabilities": ["oauth_refresh"],
                 "metadata": conformance_metadata(&state.run_id),
             }),
-            Some(&format!("{}-vault", state.run_id)),
         )
         .await?;
     expect_status_any(
@@ -1109,16 +1099,13 @@ async fn submit_task(
 ) -> ProbeResult<Value> {
     let session_id = ensure_session(client, state).await?;
     let response = client
-        .post_json(
-            &format!("/v1/sessions/{session_id}/tasks"),
+        .create_task(
+            &session_id,
             &json!({"input": message_input(text)}),
             Some(&format!("{}-task-{}", state.run_id, Uuid::new_v4())),
         )
         .await?;
-    expect_status_any(&response, &[StatusCode::ACCEPTED, StatusCode::OK])?;
-    let task = expect_json(&response)?.clone();
-    expect_field_eq(&task, "object", "task")?;
-    expect_task_status(&task)?;
+    let task = expect_task_submission(&response)?.clone();
     remember_task_links(state, &task);
     Ok(task)
 }
@@ -1357,6 +1344,31 @@ fn skip<T>(reason: &str) -> ProbeResult<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn workspace_setup_uses_remote_runtime_root_and_rejects_malformed_claims() {
+        assert_eq!(
+            runtime_workspace_root(
+                &json!({"object":"runtime", "workspace_root":"/remote/served/root"})
+            )
+            .unwrap(),
+            Some("/remote/served/root")
+        );
+        assert_eq!(
+            runtime_workspace_root(&json!({"object":"runtime"})).unwrap(),
+            None
+        );
+        for root in [Value::Null, json!(7), json!(""), json!(" ")] {
+            assert!(
+                runtime_workspace_root(&json!({"object":"runtime", "workspace_root":root}))
+                    .is_err()
+            );
+        }
+        assert!(runtime_workspace_root(
+            &json!({"object":"workspace", "workspace_root":"/remote/root"})
+        )
+        .is_err());
+    }
 
     #[test]
     fn parses_default_categories() {

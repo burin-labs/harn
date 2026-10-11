@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Harn Agents Protocol API
-  version: agents-protocol-2026-04-25
+  version: agents-protocol-2026-10-11
   summary: OpenAPI description for the Harn Agents Protocol v1 REST surface.
   description: |
     Machine-readable REST and SSE contract for managed Harn agents. The
@@ -242,7 +242,6 @@ paths:
       summary: Create or import a Persona definition.
       parameters:
         - $ref: "#/components/parameters/ProtocolVersion"
-        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -283,7 +282,6 @@ paths:
       parameters:
         - $ref: "#/components/parameters/ProtocolVersion"
         - $ref: "#/components/parameters/PersonaId"
-        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -324,7 +322,6 @@ paths:
       summary: Create a Workspace isolation boundary.
       parameters:
         - $ref: "#/components/parameters/ProtocolVersion"
-        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -365,7 +362,6 @@ paths:
       parameters:
         - $ref: "#/components/parameters/ProtocolVersion"
         - $ref: "#/components/parameters/WorkspaceId"
-        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -410,7 +406,6 @@ paths:
         - $ref: "#/components/parameters/ProtocolVersion"
         - $ref: "#/components/parameters/WorkspaceId"
         - $ref: "#/components/parameters/FilePathQuery"
-        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -452,7 +447,6 @@ paths:
       summary: Create a Session bound to a Persona and Workspace.
       parameters:
         - $ref: "#/components/parameters/ProtocolVersion"
-        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -493,7 +487,6 @@ paths:
       parameters:
         - $ref: "#/components/parameters/ProtocolVersion"
         - $ref: "#/components/parameters/SessionId"
-        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -518,7 +511,6 @@ paths:
       parameters:
         - $ref: "#/components/parameters/ProtocolVersion"
         - $ref: "#/components/parameters/SessionId"
-        - $ref: "#/components/parameters/IdempotencyKey"
       responses:
         "200":
           description: Closed Session.
@@ -555,7 +547,6 @@ paths:
       parameters:
         - $ref: "#/components/parameters/ProtocolVersion"
         - $ref: "#/components/parameters/SessionId"
-        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -580,7 +571,6 @@ paths:
       parameters:
         - $ref: "#/components/parameters/ProtocolVersion"
         - $ref: "#/components/parameters/SessionId"
-        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -605,7 +595,6 @@ paths:
       parameters:
         - $ref: "#/components/parameters/ProtocolVersion"
         - $ref: "#/components/parameters/SessionId"
-        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -630,7 +619,6 @@ paths:
       parameters:
         - $ref: "#/components/parameters/ProtocolVersion"
         - $ref: "#/components/parameters/SessionId"
-        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -655,7 +643,6 @@ paths:
       parameters:
         - $ref: "#/components/parameters/ProtocolVersion"
         - $ref: "#/components/parameters/SessionId"
-        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: false
         content:
@@ -680,7 +667,6 @@ paths:
       parameters:
         - $ref: "#/components/parameters/ProtocolVersion"
         - $ref: "#/components/parameters/SessionId"
-        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -723,7 +709,6 @@ paths:
       parameters:
         - $ref: "#/components/parameters/ProtocolVersion"
         - $ref: "#/components/parameters/SessionId"
-        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -774,12 +759,27 @@ paths:
             schema:
               $ref: "#/components/schemas/SubmitTaskRequest"
       responses:
+        "200":
+          description: Existing Task returned by a retry.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Task"
+        "201":
+          description: Created Task.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Task"
         "202":
           description: Accepted Task.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Task"
+        "409":
+          description: The retry key is already bound to a different request.
+          $ref: "#/components/responses/Error"
         default:
           $ref: "#/components/responses/Error"
 
@@ -809,7 +809,6 @@ paths:
       parameters:
         - $ref: "#/components/parameters/ProtocolVersion"
         - $ref: "#/components/parameters/SessionId"
-        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -899,12 +898,27 @@ paths:
             schema:
               $ref: "#/components/schemas/SubmitTaskRequest"
       responses:
+        "200":
+          description: Existing Task returned by a retry.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Task"
+        "201":
+          description: Created Task.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Task"
         "202":
           description: Accepted Task.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Task"
+        "409":
+          description: The retry key is already bound to a different request.
+          $ref: "#/components/responses/Error"
         default:
           $ref: "#/components/responses/Error"
 
@@ -934,7 +948,6 @@ paths:
       parameters:
         - $ref: "#/components/parameters/ProtocolVersion"
         - $ref: "#/components/parameters/TaskId"
-        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: false
         content:
@@ -1007,10 +1020,11 @@ paths:
         The local API forwards responses through the same runtime path as ACP
         `session/request_permission` or `harn.hitl.respond`, so decisions are
         captured by the active transcript, EventLog, replay, and receipt flows.
+        A request stays pending until the runtime accepts its response. Concurrent
+        responses, already answered requests, and terminal tasks return `409`.
       parameters:
         - $ref: "#/components/parameters/ProtocolVersion"
         - $ref: "#/components/parameters/PermissionRequestId"
-        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -1024,6 +1038,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/PermissionRequest"
+        "409":
+          description: The permission is already answered, has a response in progress, or belongs to a terminal task.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
         default:
           $ref: "#/components/responses/Error"
 
@@ -1231,7 +1251,6 @@ paths:
       parameters:
         - $ref: "#/components/parameters/ProtocolVersion"
         - $ref: "#/components/parameters/TaskId"
-        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: false
         content:
@@ -1261,7 +1280,6 @@ paths:
       parameters:
         - $ref: "#/components/parameters/ProtocolVersion"
         - $ref: "#/components/parameters/TaskId"
-        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -1402,7 +1420,6 @@ paths:
       summary: Register an Artifact or mediated upload URI.
       parameters:
         - $ref: "#/components/parameters/ProtocolVersion"
-        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -1543,7 +1560,6 @@ paths:
       parameters:
         - $ref: "#/components/parameters/ProtocolVersion"
         - $ref: "#/components/parameters/ReceiptId"
-        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: false
         content:
@@ -1586,7 +1602,6 @@ paths:
       summary: Create a durable Memory record.
       parameters:
         - $ref: "#/components/parameters/ProtocolVersion"
-        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -1627,7 +1642,6 @@ paths:
       parameters:
         - $ref: "#/components/parameters/ProtocolVersion"
         - $ref: "#/components/parameters/MemoryId"
-        - $ref: "#/components/parameters/IdempotencyKey"
       responses:
         "204":
           description: Memory deleted or tombstoned.
@@ -1659,7 +1673,6 @@ paths:
       summary: Create or register a Vault.
       parameters:
         - $ref: "#/components/parameters/ProtocolVersion"
-        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -1873,16 +1886,20 @@ components:
       description: Date-stamped Harn Agents Protocol version.
       schema:
         type: string
-        enum: [agents-protocol-2026-04-25]
+        enum: [agents-protocol-2026-10-11]
     IdempotencyKey:
       name: Idempotency-Key
       in: header
       required: false
-      description: Client-generated key used to safely retry non-idempotent writes.
+      description: |
+        Client-generated task-create retry key. Leading and trailing ASCII spaces
+        are trimmed; the normalized key must contain 1 to 255 printable ASCII
+        bytes. Other operations reject this header.
       schema:
         type: string
         minLength: 1
         maxLength: 255
+        pattern: '^[ -~]+$'
     Limit:
       name: limit
       in: query
@@ -2103,7 +2120,7 @@ components:
           enum: [harn_agents_protocol]
         current_version:
           type: string
-          enum: [agents-protocol-2026-04-25]
+          enum: [agents-protocol-2026-10-11]
         supported_versions:
           type: array
           items:

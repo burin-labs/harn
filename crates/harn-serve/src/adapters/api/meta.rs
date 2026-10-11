@@ -35,9 +35,18 @@ pub(super) async fn openapi_json() -> Response {
 
 pub(super) async fn api_root() -> Response {
     Json(json!({
-        "object": "api",
+        "object": "protocol_discovery",
+        "protocol_family": "harn_agents_protocol",
         "version": env!("CARGO_PKG_VERSION"),
-        "protocol_version": API_PROTOCOL_VERSION,
+        "current_version": API_PROTOCOL_VERSION,
+        "supported_versions": [API_PROTOCOL_VERSION],
+        "capabilities": {
+            "rest": true,
+            "sse": true,
+            "websocket": false,
+            "receipts": false,
+            "replay": false
+        },
         "openapi": "/openapi.json",
         "resources": {
             "runtime": "/v1/runtime",
@@ -69,6 +78,13 @@ pub(super) async fn runtime(
     if let Err(response) = authorize(&state, Method::GET, &uri, &headers, Bytes::new()).await {
         return response;
     }
+    let task_count = match state
+        .task_store()
+        .and_then(|store| store.list_tasks(None, None))
+    {
+        Ok(tasks) => tasks.len(),
+        Err(_) => return task_store::unavailable_response(),
+    };
     let inner = state.inner.lock().expect("api state poisoned");
     Json(json!({
         "object": "runtime",
@@ -77,7 +93,7 @@ pub(super) async fn runtime(
         "adapter": "harn-serve-api",
         "workspace_root": inner.root_workspace_path,
         "session_count": inner.sessions.len(),
-        "task_count": inner.tasks.len(),
+        "task_count": task_count,
         "capabilities": capability_values()
     }))
     .into_response()

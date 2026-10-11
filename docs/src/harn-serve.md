@@ -107,6 +107,47 @@ effects, so use it only for a server whose callers are authorized to run those
 effects. Selecting a mode does not supply an embedder for product-specific
 `host/call` operations; those pipelines still need their host adapter.
 
+Requests use `Harn-Agents-Protocol-Version: agents-protocol-2026-10-11`.
+An absent or unsupported version returns `426` with
+`unsupported_protocol_version`; public discovery does not require the header.
+
+Task submission accepts `Idempotency-Key` on `POST /v1/tasks` and
+`POST /v1/sessions/{session_id}/tasks`. Use the same key when retrying the same
+accepted JSON request. Both routes resolve to the same session target and
+return the original task ID. A changed request returns `409` with
+`idempotency_key_reused`. Other local API routes reject this header with
+`idempotency_not_supported`.
+
+Keys contain 1 to 255 printable ASCII bytes after surrounding spaces are
+trimmed. Each binding belongs to the authenticated principal, workspace, and
+session. API keys have distinct, stable private identities; embedders can set
+`ApiKeyEntry::with_subject` to keep an account identity across key rotation.
+Admission persists the task, retry binding, and initial control events in one
+transaction. Bindings last 24 hours from creation and remain bound while the
+task is active. A retry does not renew that expiry.
+
+Tasks and their control history survive a server restart. An unfinished task
+whose execution lease is no longer held becomes `FAILED` with
+`task_interrupted`; retrying its key reads that result without dispatching the
+prompt again. A task still running in another server is left active. This
+prevents duplicate task dispatch, but does not promise exactly-once external
+effects after a process interruption. Session transcripts retain their
+existing workspace store.
+Sessions attached to accepted tasks remain available through both the session
+list and individual session reads after restart. Live session metadata takes
+precedence when the same session is still loaded.
+
+Native workspace roots name existing directories on the server. Discovery
+advertises `/v1/runtime`, whose `workspace_root` reports the served directory.
+The Agents conformance runner uses that root when creating its probe workspace
+and session, including when only the idempotency category is selected. A
+logical URI such as `harn://conformance/...` does not create a native directory.
+
+Permission responses stay pending until the runtime accepts the answer. If
+task storage or response delivery fails, the request remains available to
+retry. Concurrent answers, repeated answers, and answers for terminal tasks
+return `409`; a successfully acknowledged answer cannot be answered again.
+
 Session create and update requests accept an optional typed `model_policy`:
 
 ```json

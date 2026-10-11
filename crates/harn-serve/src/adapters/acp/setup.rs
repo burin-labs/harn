@@ -386,6 +386,7 @@ impl AcpServer {
             let principal = AuthenticatedPrincipal {
                 subject: "anonymous".to_string(),
                 scheme: "none".to_string(),
+                issuer: None,
                 granted_scopes: std::collections::BTreeSet::new(),
                 tenant_id: None,
             };
