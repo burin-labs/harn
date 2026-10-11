@@ -357,7 +357,7 @@ Same as `harness.llm.call`, plus additional options:
 | `prompts` / `prompt_overrides` | dict | nil | Override validated logical agent prompt ids such as `agent.loop_contract`, `agent.tool_contract_text`, and `agent.completion_judge_system` with a prompt asset path, `{text}`, `{path}`, or render closure. Unknown ids are rejected. For typo-resistant authoring, pass the typed override shape through `agent_prompt_overrides(...)` from `std/agent/prompts` |
 | `post_turn_callback` | closure | nil | Hook called after each turn. Receives turn metadata and may inject a message, request an immediate stage stop, claim one exact next tool with `next_tool_claim: {tool_name}`, or merge next-turn options such as `llm_options: {tool_choice: "none"}`. Rich verdicts may include `feedback_kind: string` to give injected feedback a stable semantic identity |
 | `deadline_ms` | int | nil | Monotonic duration from `agent_loop` entry. The earliest of this value and `iteration_budget.wall_clock_ms` is the enclosing terminal deadline used for completion-judge admission. It is a duration, never a cross-process absolute timestamp. |
-| `verify_completion` | closure | nil | Hook called when the loop is about to stop naturally. Return `nil`/`true` to accept the stop or feedback text to veto and continue |
+| `verify_completion` | closure | nil | Hook called when the loop is about to stop naturally. Return `nil`/`true` to accept, feedback text or `{confirm: false}` to veto and continue, or `{confirm: false, action: "stop_unverified", reason: "host_check_failed"}` to end as `completion_unverified` and withhold the unverified reply. A final refusal requires a nonempty reason; contradictory or unknown actions are refused as invalid results. |
 | `verify_completion_judge` | bool/dict | nil | Structured judge for a proposed stop. `true` uses defaults. A dict may set `provider`, `model`, `system`, `feedback_fallback`, `operation_timeout_ms` (default `60000`), `deadline_reserve_ms` (default `5000`), and `max_invocations` (default `5`; `0` disables the cap). The loop ends as `completion_unverified` when the judge cannot fit before the loop deadline, times out, or reaches its cap. |
 | `turn_end_condition` | bool/dict | nil | Structured judge for natural completion or a done sentinel. The model returns `{verdict, detail}` where `verdict` is `done` or `continue`; `detail` is supporting evidence for `done`, or the single gap and next action for `continue`. Harn produces `stop_unverified` when a deadline or policy limit prevents a verdict. It shares the timeout fields above and supports `max_invocations` plus `cadence: {every?, when?, max_invocations?, min_iterations_before_first?}`. |
 | `step_judge` | dict | nil | Per-turn structured judge that runs after an assistant turn and before tool dispatch. Dict configs may include `provider`, `model`, `on_veto` (`"replace"` or `"retain"`), `max_attempts`, `skip_when_empty`, `skip_when_stalled`, and `skip_when_iterations_remaining` (default `1`, skips when no regeneration turn remains). Skips emit `step_judge_decision` with `skipped: true` |
@@ -1617,7 +1617,11 @@ default, and declared host-absolute paths outside the workspace require an
 explicit `external_roots` allowance. Each root carries an `access` mode,
 `read` (the default, and the meaning of a bare path string) or `read_write`;
 a call that is not read-only is refused under a `read` root with
-`external_root_read_only`. Ask decisions call
+`external_root_read_only`. The one exception is a command-running call
+(`process_exec`) whose child provably cannot write the declared path: the
+active policy is `os_hardened`, the platform is macOS or Linux, and the
+backend's installed rules refuse every write to that path. Unmeasured is
+refused, never admitted. Ask decisions call
 `session/request_permission`; the host request and the transcript event both
 carry a `policyDecision` receipt with matched rule and rationale.
 

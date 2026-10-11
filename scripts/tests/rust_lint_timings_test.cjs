@@ -89,6 +89,9 @@ process.exit(process.env.MODE==='failed'?7:0);
       assert.equal(diagnostic.sourceCommit, source);
       assert.equal(diagnostic.sourceTree, receipt.sourceTree);
       assert.equal(diagnostic.status, 'UNMEASURED', 'mock compiler must not supply real symbol evidence');
+      assert(diagnostic.refusal && ['execution_identity','settlement'].includes(diagnostic.refusal.stage), 'diagnostic absence needs its measured stage');
+      assert(['unsupported_host','unsupported_or_invalid','receipt_missing','interrupted'].includes(diagnostic.refusal.cause), 'diagnostic absence needs a closed cause');
+      if (process.platform !== 'darwin') assert.equal(diagnostic.observerExitCode, null);
       if (real) {
         const report=fs.readFileSync(path.join(output,'cargo-timing.html'),'utf8');
         assert(report.includes('harn-timing-fixture'), 'actual Cargo report did not include the compiled fixture');
@@ -108,12 +111,39 @@ process.exit(process.env.MODE==='failed'?7:0);
     console.log(`rust_lint_timings_test: ${real?'actual Cargo ':''}${mode} reached`);
   }
   const sampling = require('../ci/macos_compiler_sample.cjs');
+  const commandProbe = path.join(root, 'command-probe.cjs');
+  fs.writeFileSync(commandProbe, `const {hostCommand}=require(${JSON.stringify(path.resolve(__dirname, '../ci/macos_compiler_sample.cjs'))});
+const selected=process.argv[2];
+const fixtures={
+ positive:[process.execPath,['-e','process.stdout.write("measured")'],32768,3000],
+ unavailable:[${JSON.stringify(path.join(root, 'absent-command'))},[],32768,3000],
+ empty:[process.execPath,['-e','process.exit(0)'],32768,3000],
+ failed:[process.execPath,['-e','process.stderr.write("PRIVATE HOST PATH AND PAYLOAD");process.exit(7)'],32768,3000],
+ clipped:[process.execPath,['-e','process.stdout.write(JSON.stringify({ok:true})+" ".repeat(4096))'],32,3000],
+ timeout:[process.execPath,['-e','process.kill(process.pid,"SIGSTOP")'],32768,50],
+};
+const [program,args,limit,timeout]=fixtures[selected];
+hostCommand(program,args,limit,'sample_command',timeout).result.then(
+ output=>console.log(JSON.stringify({status:'MEASURED',output})),
+ error=>console.log(JSON.stringify({status:'UNMEASURED',stage:error.stage,cause:error.cause,message:error.message})),
+);
+`);
+  for (const [selected, cause] of Object.entries({positive:null,unavailable:'unavailable',empty:'empty_output',failed:'command_failed',clipped:'clipped',timeout:'timed_out'})) {
+    const probe = spawnSync(process.execPath, [commandProbe, selected], {encoding:'utf8', timeout:10000, maxBuffer:32768});
+    assert.equal(probe.status, 0, probe.stderr);
+    const measured = JSON.parse(probe.stdout);
+    if (cause === null) assert.deepEqual(measured, {status:'MEASURED', output:'measured'});
+    else assert.deepEqual(measured, {status:'UNMEASURED',stage:'sample_command',cause,message:'unmeasured host observation'});
+    assert(!probe.stdout.includes('PRIVATE HOST'), 'host errors must never enter the diagnostic');
+    console.log(`rust_lint_timings_test: actual observation command ${selected} reached`);
+  }
   const stamp = 'Sat Oct 10 01:10:00 2026';
   const row = (pid, parent, executable, start = stamp) => `${pid} ${parent} ${start} ${executable}`;
   const complete = [row(10, 1, '/bin/bash'), row(11, 10, '/bin/cargo'), row(12, 11, '/bin/clippy-driver'), row(13, 1, '/bin/rustc')].join('\n');
   const observed = sampling.census(complete, 10);
   assert.deepEqual(observed.compilers.map(value => value.pid), [12], 'foreign compiler must not be sampled');
   assert.throws(() => sampling.census('', 10), /unmeasured/);
+  assert.throws(() => sampling.census('', 10), error => error.stage === 'process_census' && error.cause === 'malformed_row');
   assert.throws(() => sampling.census(complete.replace(row(11, 10, '/bin/cargo'), ''), 10), /unmeasured/);
   assert.throws(() => sampling.census(complete + '\n' + row(12, 11, '/bin/clippy-driver'), 10), /incomplete/);
   assert.throws(() => sampling.census(complete.replace(stamp, 'Sat Oct 10 01:10:01 2026'), 10, observed.owner), /changed/);
@@ -124,6 +154,7 @@ process.exit(process.env.MODE==='failed'?7:0);
   assert.throws(() => sampling.symbolStacks(symbols.replace('[321]', '[322]'), sampledTarget), /unmeasured/);
   assert.throws(() => sampling.symbolStacks(symbols.replace('Process: clippy-driver', 'Process: rustc'), sampledTarget), /unmeasured/);
   assert.throws(() => sampling.symbolStacks(symbols.split('Total number')[0], sampledTarget), /unmeasured/);
+  assert.throws(() => sampling.symbolStacks(symbols.split('Total number')[0], sampledTarget), error => error.stage === 'sample_parse' && error.cause === 'incomplete_graph');
   assert.throws(() => sampling.symbolStacks(symbols.replace('rustc_hir_typeck', 'sleep'), sampledTarget), /unmeasured/);
   assert.throws(() => sampling.symbolStacks(symbols.replace('  20', 'x'.repeat(131073)), sampledTarget), /unmeasured/);
   // A real process census reaches a known live owned child, without inspecting
@@ -160,6 +191,8 @@ child.on('close',code=>{
   assert(settled.elapsed < 5000, 'owned sampler did not settle after interruption');
   assert.equal(settled.receipt.status, 'UNMEASURED');
   assert.deepEqual(settled.receipt.samples, []);
+  if (process.platform === 'darwin') assert.deepEqual(settled.receipt.refusal, {stage:'settlement',cause:'interrupted'});
+  else assert.deepEqual(settled.receipt.refusal, {stage:'execution_identity',cause:'unsupported_or_invalid'});
   if (process.platform === 'darwin') assert.equal(settled.receipt.owner.pid, settled.owner);
   console.log('rust_lint_timings_test: compiler identity, foreign owner, clipped symbols and actual live-child controls reached');
 } finally {

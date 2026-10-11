@@ -7,6 +7,7 @@ use super::*;
     exposure = "runtime_internal",
     effects = [],
     sig = "__host_agent_session_messages(session_id: string) -> list",
+    read_only_preparation = true,
     category = "agent.host",
     runtime_only = true
 )]

@@ -471,7 +471,7 @@ fn agent_session_list_roots_builtin(
     exposure = "runtime_internal",
     effects = [],
     sig = "agent_session_exists(id: string) -> bool",
-    category = "agent.session",
+    read_only_preparation = true, category = "agent.session",
     doc = "Return whether an agent session exists."
 )]
 fn agent_session_exists_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {

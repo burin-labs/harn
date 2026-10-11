@@ -45,6 +45,32 @@ evidence without parsing a rendered string or rereading a shared event store.
 or receipt persistence failures owned by Harn. Existing string-only executors
 use `type Error = String`; no adapter or side channel is required.
 
+Agent executors call `AuthorityUse::record_agent_terminal` with the actual
+producer's `AgentTerminalOutcome` before returning. Attached sessions expose
+the same operation as `ActivePreparedSession::record_agent_terminal`. The
+authority owner retains the decision in the optional receipt `agent_terminal`
+field and projects its shared lifecycle before the terminal receipt is
+persisted. Hosts do not rewrite authority receipts after execution.
+Provider diagnostic `message` and `detail` are omitted from authority evidence.
+Custom reasons use the producer's current journal redaction policy when recorded;
+ordinary stop reasons and typed owner identity are retained.
+
+| Producer lifecycle | Authority stage / status |
+| --- | --- |
+| Completed, executor succeeded | terminal / completed |
+| Cancelled or stopped | stopped / stopped |
+| Failed | terminal / failed |
+| Suspended or otherwise unfinished | terminal / failed |
+| Completed, executor failed | terminal / failed |
+
+Suspension retains its producer identity but cannot claim completed work in a
+finished generic invocation. An executor error outranks an earlier natural
+terminal. With no recorded agent terminal, ordinary generic executor result
+semantics remain in effect; absence does not imply a stop.
+`ExecutionOutcome::Completed` means the executor delivered its output. Read
+the authority receipt to determine whether that agent work completed, stopped,
+or remained unfinished.
+
 The normative JSON Schema for the normalized plan is
 [`run-authority-plan.v1.json`](../schemas/run-authority-plan.v1.json). The
 serialized contract contains secret references and exact consumer bindings,

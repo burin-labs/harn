@@ -36,7 +36,7 @@ pub(crate) fn dialect_of(protocol: StreamProtocol) -> DataControlDialect {
 }
 
 /// What Harn did about data controls on one request.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum DataControlsOutcome {
     /// The caller left the posture at `default`. Harn set nothing and the

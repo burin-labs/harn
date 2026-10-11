@@ -5,6 +5,8 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 # shellcheck source=lib/file_time.sh
 source "$ROOT_DIR/scripts/lib/file_time.sh"
+# shellcheck source=lib/cargo_env.sh
+source "$ROOT_DIR/scripts/lib/cargo_env.sh"
 
 SETUP_STATE_DIR="${HARN_DEV_SETUP_STATE_DIR:-$ROOT_DIR/.codex/dev-setup}"
 SETUP_PROFILE="${HARN_DEV_SETUP_PROFILE:-full}"
@@ -344,38 +346,7 @@ install_locked_node_dependencies() {
 }
 
 build_sccache_rustc_wrapper() {
-  local source_path="$ROOT_DIR/scripts/sccache_rustc_wrapper.rs"
-  local source_hash host_triple executable_suffix wrapper_dir wrapper_path temporary_path
-  source_hash="$(shasum -a 256 < "$source_path" | awk '{print $1}')"
-  host_triple="$(rustc -vV | sed -n 's/^host: //p')"
-  if [[ -z "$host_triple" ]]; then
-    echo "error: rustc did not report a host triple for the sccache wrapper" >&2
-    return 1
-  fi
-
-  executable_suffix=""
-  case "${OS:-$(uname -s)}" in
-    Windows_NT | MINGW* | MSYS* | CYGWIN*) executable_suffix=".exe" ;;
-  esac
-  wrapper_dir="$HARN_DEV_SETUP_STORAGE_ROOT/sccache-wrapper/$host_triple-$source_hash"
-  wrapper_path="$wrapper_dir/harn-sccache-wrapper$executable_suffix"
-  if [[ ! -x "$wrapper_path" ]]; then
-    mkdir -p "$wrapper_dir"
-    temporary_path="$wrapper_path.tmp.$$"
-    rustc --edition=2021 -C strip=symbols "$source_path" -o "$temporary_path"
-    # A same-filesystem hard link publishes the complete executable atomically
-    # and never replaces a live wrapper, including on Windows. A concurrent
-    # publisher may win first; its source-addressed artifact is equivalent.
-    if ! ln "$temporary_path" "$wrapper_path" 2>/dev/null \
-      && [[ ! -x "$wrapper_path" ]]; then
-      rm -f "$temporary_path"
-      echo "error: failed to publish the sccache wrapper" >&2
-      return 1
-    fi
-    rm -f "$temporary_path"
-  fi
-
-  printf '%s\n' "$wrapper_path"
+  harn_build_sccache_wrapper "$ROOT_DIR" "$HARN_DEV_SETUP_STORAGE_ROOT"
 }
 
 echo "=== Harn dev setup ==="

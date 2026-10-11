@@ -55,6 +55,8 @@ fn make_fake(config: dict = {}) {
     disable_ok: true,
     disable_expected_base_oid: nil,
     advance_base_during_disarm_to: nil,
+    base_changes_ok: true,
+    base_change_paths: ["src/unrelated.harn"],
   }
     + config
   let current_remote_base_oid = cfg.remote_base_oid
@@ -121,6 +123,22 @@ fn make_fake(config: dict = {}) {
         current_remote_base_oid = value.oid
       }
       return value
+    },
+    base_changes: fn(from_oid, to_oid) {
+      record("base_changes", {from: from_oid, to: to_oid})
+      return {
+        ok: cfg.base_changes_ok,
+        paths: if cfg.base_changes_ok {
+          cfg.base_change_paths
+        } else {
+          []
+        },
+        detail: if cfg.base_changes_ok {
+          ""
+        } else {
+          "comparison unavailable"
+        },
+      }
     },
     adopt_base: fn(request) {
       record("adopt_base", request)
@@ -653,17 +671,63 @@ pipeline test_branch_matching_base_closes_stale_pr(harness: Harness, task: unkno
 }
 
 /**
- * Falsifier. The base advances between validation and publication. The bump
- * must adopt the new base, re-apply, and publish there — not discard the
- * attempt. Before the bounded adoption loop existed this asserted
- * `base_advanced` with no PR.
+ * Falsifier for harn#9627. The base advances between validation and
+ * publication with commits that touch no refreshed path. The validated tree is
+ * published on its validated base and armed, with one refresh and one
+ * validation; the merge queue tests the merge. Before, every such advance cost
+ * a full re-derivation, and a base merging faster than one validation never
+ * produced a PR.
  */
-pipeline test_base_advance_after_validation_republishes_on_the_new_base(
-  harness: Harness,
-  task: unknown,
-) {
+pipeline test_disjoint_base_advance_publishes_the_validated_tree(harness: Harness, task: unknown) {
   const fake = make_fake(
     {
+      remote_base_sequence: [
+        {available: true, oid: "base000", detail: ""},
+        {available: true, oid: "base999", detail: ""},
+        {available: true, oid: "base9999", detail: ""},
+      ],
+    },
+  )
+  const receipt = run_bump(opts(), fake.adapter)
+  assert_eq(receipt.outcome, "committed")
+  assert_eq(receipt.ok, true)
+  assert_eq(receipt.base_adoptions, 0)
+  assert_eq(receipt.published_behind_base, true)
+  assert_eq(receipt.expected_base_oid, "base000")
+  assert_eq(receipt.observed_base_oid, "base9999")
+  assert_eq(receipt.auto_merge?.enabled, true)
+  const publication = fake.calls().filter({ call -> call.name == "publish_commit" }).to_list()
+  assert_eq(publication[0].arg.base_sha, "base000")
+  const compared = fake.calls().filter({ call -> call.name == "base_changes" }).to_list()
+  assert_eq(
+    compared.map({ call -> call.arg }).to_list(),
+    [{from: "base000", to: "base999"}, {from: "base000", to: "base9999"}],
+  )
+  assert_eq(
+    call_names(fake.calls()),
+    [
+      "remote_base_head",
+      "apply_version",
+      "run_validation",
+      "remote_base_head",
+      "base_changes",
+      "publish_commit",
+      "upsert_pr",
+      "remote_base_head",
+      "base_changes",
+      "enable_auto_merge",
+    ],
+  )
+}
+
+/**
+ * When the advance's changed paths cannot be read, absence is not disjoint:
+ * the bump adopts the new base, re-applies, and publishes there.
+ */
+pipeline test_unreadable_base_advance_republishes_on_the_new_base(harness: Harness, task: unknown) {
+  const fake = make_fake(
+    {
+      base_changes_ok: false,
       remote_base_sequence: [
         {available: true, oid: "base000", detail: ""},
         {available: true, oid: "base999", detail: ""},
@@ -699,6 +763,7 @@ pipeline test_base_advance_after_validation_republishes_on_the_new_base(
       "apply_version",
       "run_validation",
       "remote_base_head",
+      "base_changes",
       "adopt_base",
       "remote_base_head",
       "apply_version",
@@ -710,6 +775,7 @@ pipeline test_base_advance_after_validation_republishes_on_the_new_base(
       "enable_auto_merge",
     ],
   )
+  assert_eq(receipt.published_behind_base, false)
 }
 
 /**
@@ -724,6 +790,7 @@ pipeline test_advanced_base_touching_a_refreshed_path_aborts_as_a_conflict(
 ) {
   const fake = make_fake(
     {
+      base_change_paths: ["src/unrelated.harn", "harn.lock"],
       adopt_ok: false,
       adopt_conflicts: ["harn.lock"],
       adopt_detail: "1 refreshed path(s) were also changed between base000 and base999",
@@ -735,6 +802,7 @@ pipeline test_advanced_base_touching_a_refreshed_path_aborts_as_a_conflict(
   )
   const receipt = run_bump(opts(), fake.adapter)
   assert_eq(receipt.outcome, "base_conflict")
+  assert_eq(receipt.published_behind_base, false)
   assert_eq(receipt.ok, false)
   assert_eq(receipt.base_adoptions, 0)
   assert_eq(receipt.pr_action, "none")
@@ -749,17 +817,28 @@ pipeline test_advanced_base_touching_a_refreshed_path_aborts_as_a_conflict(
   )
   assert_eq(
     call_names(fake.calls()),
-    ["remote_base_head", "apply_version", "run_validation", "remote_base_head", "adopt_base"],
+    [
+      "remote_base_head",
+      "apply_version",
+      "run_validation",
+      "remote_base_head",
+      "base_changes",
+      "adopt_base",
+    ],
   )
 }
 
-/** A base that keeps moving is bounded: three adoptions, then hand back the race. */
+/**
+ * A base that keeps moving through refreshed paths is bounded: three
+ * adoptions, then hand back the race.
+ */
 pipeline test_repeatedly_advancing_base_stops_after_three_adoptions(
   harness: Harness,
   task: unknown,
 ) {
   const fake = make_fake(
     {
+      base_change_paths: ["harn.lock"],
       remote_base_sequence: [
         {available: true, oid: "base000", detail: ""},
         {available: true, oid: "base001", detail: ""},
@@ -808,12 +887,14 @@ pipeline test_missing_remote_base_identity_cannot_read_as_current(harness: Harne
   assert_eq(call_names(fake.calls()), ["remote_base_head"])
 }
 
+/** An advance through a refreshed path just before arming leaves the PR unarmed. */
 pipeline test_base_advance_before_arming_leaves_refreshed_pr_unarmed(
   harness: Harness,
   task: unknown,
 ) {
   const fake = make_fake(
     {
+      base_change_paths: ["harn.lock"],
       remote_base_sequence: [
         {available: true, oid: "base000", detail: ""},
         {available: true, oid: "base000", detail: ""},
@@ -838,6 +919,7 @@ pipeline test_base_advance_before_arming_leaves_refreshed_pr_unarmed(
       "publish_commit",
       "upsert_pr",
       "remote_base_head",
+      "base_changes",
     ],
   )
 }
@@ -850,6 +932,7 @@ pipeline test_base_advance_before_arming_leaves_refreshed_pr_unarmed(
 pipeline test_failed_adoption_stays_a_fresh_base_retry(harness: Harness, task: unknown) {
   const stale = make_fake(
     {
+      base_changes_ok: false,
       adopt_ok: false,
       adopt_conflicts: [],
       adopt_detail: "advanced base base999 is still not present after fetching main",

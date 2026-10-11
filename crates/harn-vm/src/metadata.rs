@@ -1697,18 +1697,17 @@ mod tests {
         assert!(!glob_match("missing", "src/nested/main.rs"));
     }
 
-    fn temp_path(name: &str) -> PathBuf {
-        let unique = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_nanos();
-        std::env::temp_dir().join(format!("harn-metadata-{name}-{unique}"))
+    fn temp_path(name: &str) -> tempfile::TempDir {
+        tempfile::Builder::new()
+            .prefix(&format!("harn-metadata-{name}-"))
+            .tempdir()
+            .expect("metadata fixture directory")
     }
 
     #[test]
     fn metadata_resolve_preserves_namespace_structure() {
         let base = temp_path("resolve");
-        let mut state = MetadataState::new(&base);
+        let mut state = MetadataState::new(base.path());
         state.set_namespace(
             "",
             "classification",
@@ -1732,7 +1731,7 @@ mod tests {
     #[test]
     fn metadata_save_writes_namespace_shards() {
         let base = temp_path("save");
-        let mut state = MetadataState::new(&base);
+        let mut state = MetadataState::new(base.path());
         state.set_namespace(
             ".",
             "classification",
@@ -1745,7 +1744,7 @@ mod tests {
         );
         state.save().expect("save");
 
-        let metadata_root = crate::runtime_paths::metadata_dir(&base);
+        let metadata_root = crate::runtime_paths::metadata_dir(base.path());
         let classification = std::fs::read_to_string(
             metadata_root
                 .join("classification")
@@ -1778,7 +1777,7 @@ mod tests {
     #[test]
     fn metadata_load_merges_legacy_and_namespace_shards() {
         let base = temp_path("load");
-        let metadata_root = crate::runtime_paths::metadata_dir(&base);
+        let metadata_root = crate::runtime_paths::metadata_dir(base.path());
         std::fs::create_dir_all(metadata_root.join("facts")).unwrap();
         std::fs::write(
             metadata_root.join(LEGACY_SHARD_NAME),
@@ -1812,7 +1811,7 @@ mod tests {
         )
         .unwrap();
 
-        let mut state = MetadataState::new(&base);
+        let mut state = MetadataState::new(base.path());
         state.ensure_loaded();
         assert_eq!(
             state
@@ -1835,7 +1834,7 @@ mod tests {
     #[test]
     fn path_metadata_file_round_trip_does_not_inherit() {
         let base = temp_path("path_file_roundtrip");
-        let mut state = MetadataState::new(&base);
+        let mut state = MetadataState::new(base.path());
 
         // Dir-level fact set on a parent — should not leak into file lookup.
         state.set_namespace(
@@ -1868,7 +1867,7 @@ mod tests {
     #[test]
     fn path_metadata_persists_files_alongside_dirs() {
         let base = temp_path("path_persist");
-        let mut state = MetadataState::new(&base);
+        let mut state = MetadataState::new(base.path());
         state.set_namespace(
             ".",
             "classification",
@@ -1887,7 +1886,7 @@ mod tests {
         state.save().expect("save");
 
         let facts_shard = std::fs::read_to_string(
-            crate::runtime_paths::metadata_dir(&base)
+            crate::runtime_paths::metadata_dir(base.path())
                 .join("facts")
                 .join(NAMESPACE_ENTRIES_FILE),
         )
@@ -1899,7 +1898,7 @@ mod tests {
 
         // Dir-only namespace must not write a `files` field.
         let class_shard = std::fs::read_to_string(
-            crate::runtime_paths::metadata_dir(&base)
+            crate::runtime_paths::metadata_dir(base.path())
                 .join("classification")
                 .join(NAMESPACE_ENTRIES_FILE),
         )
@@ -1908,7 +1907,7 @@ mod tests {
         assert!(parsed.get("files").is_none());
 
         // Reload from disk and verify file entries round-trip.
-        let mut reloaded = MetadataState::new(&base);
+        let mut reloaded = MetadataState::new(base.path());
         let fields = reloaded
             .file_namespace("src/foo.rs", "facts")
             .expect("reloaded");
@@ -1921,7 +1920,7 @@ mod tests {
     #[test]
     fn path_metadata_load_tolerates_stale_snapshot_without_files_section() {
         let base = temp_path("path_stale");
-        let metadata_root = crate::runtime_paths::metadata_dir(&base);
+        let metadata_root = crate::runtime_paths::metadata_dir(base.path());
         std::fs::create_dir_all(metadata_root.join("facts")).unwrap();
         // Pre-v2 shard with only `entries`, no `files` — must still load.
         std::fs::write(
@@ -1937,7 +1936,7 @@ mod tests {
         )
         .unwrap();
 
-        let mut state = MetadataState::new(&base);
+        let mut state = MetadataState::new(base.path());
         state.ensure_loaded();
         assert_eq!(
             state
@@ -1971,10 +1970,10 @@ mod tests {
     #[test]
     fn scan_options_filter_hidden_and_depth() {
         let base = temp_path("scan");
-        std::fs::create_dir_all(base.join("project/deep")).unwrap();
-        std::fs::write(base.join("project/root.txt"), "root").unwrap();
-        std::fs::write(base.join("project/.hidden.txt"), "hidden").unwrap();
-        std::fs::write(base.join("project/deep/nested.txt"), "nested").unwrap();
+        std::fs::create_dir_all(base.path().join("project/deep")).unwrap();
+        std::fs::write(base.path().join("project/root.txt"), "root").unwrap();
+        std::fs::write(base.path().join("project/.hidden.txt"), "hidden").unwrap();
+        std::fs::write(base.path().join("project/deep/nested.txt"), "nested").unwrap();
 
         let options = ScanOptions {
             pattern: Some(".txt".into()),
@@ -1984,7 +1983,8 @@ mod tests {
             include_files: true,
         };
         let mut results = Vec::new();
-        scan_dir_recursive(&base.join("project"), &base, &options, &mut results, 0);
+        let project = base.path().join("project");
+        scan_dir_recursive(&project, base.path(), &options, &mut results, 0);
         let paths: Vec<String> = results
             .into_iter()
             .map(|value| match value {
@@ -1993,6 +1993,5 @@ mod tests {
             })
             .collect();
         assert_eq!(paths, vec!["project/root.txt".to_string()]);
-        let _ = std::fs::remove_dir_all(base);
     }
 }

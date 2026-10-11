@@ -252,3 +252,47 @@ fn local_read_file_honors_offset_and_limit() {
     assert!(!result.contains("8\tline 8"));
     assert!(result.contains("offset=8"));
 }
+
+/// OpenAI strict mode marks every property required, so a model fills the
+/// optional arguments it does not use: a host's `look` tool arrived as
+/// `{"file": "calc.py", "folder": ""}` and path validation refused the empty
+/// folder before the read ran. An empty optional path is absent; a required
+/// one keeps its value for validation to judge.
+#[test]
+fn normalize_tool_args_drops_unused_optional_arguments() {
+    let optional = |ty: &str| vm_dict(&[("type", vm_str(ty)), ("required", vm_bool(false))]);
+    let mut parameters = BTreeMap::new();
+    parameters.insert("path".to_string(), vm_dict(&[("type", vm_str("string"))]));
+    parameters.insert("file".to_string(), optional("string"));
+    parameters.insert("content".to_string(), optional("string"));
+    parameters.insert("limit".to_string(), optional("int"));
+    let tools = vm_dict(&[(
+        "tools",
+        vm_list(vec![vm_dict(&[
+            ("name", vm_str("look")),
+            ("parameters", VmValue::dict(parameters)),
+        ])]),
+    )]);
+
+    let normalized = normalize_tool_args(
+        "look",
+        json!({"path": "", "file": "", "content": "", "limit": null}),
+        Some(&tools),
+    );
+    assert_eq!(
+        normalized,
+        json!({"path": "", "content": "", "limit": null}),
+        "an empty optional path is unused; an empty non-path string is a \
+         value, an explicit null is left for typed validation, and a required \
+         path keeps its value"
+    );
+    let normalized = normalize_tool_args(
+        "look",
+        json!({"path": "src", "file": "calc.py", "limit": 80}),
+        Some(&tools),
+    );
+    assert_eq!(
+        normalized,
+        json!({"path": "src", "file": "calc.py", "limit": 80})
+    );
+}

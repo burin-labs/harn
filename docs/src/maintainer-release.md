@@ -143,6 +143,18 @@ candidate manifest attached to the release record.
   pass before publication. Missing, failed, cancelled or mismatched results
   refuse publication. A producer's existing failed rehearsal is not replaced.
   Recovery publishes the existing files without rebuilding them.
+- The consumer observer reached its deadline, but its exact dispatched child
+  later succeeded: after the completed-child recovery policy is on main,
+  dispatch the normal promoter with the same producer and source plus
+  `-f completed_consumer_run_id=CHILD_RUN_ID`. The authorization job verifies
+  the original dispatch and deadline, every producer build/smoke/audit result,
+  the child's complete successful census and product receipts, then rechecks
+  both latest attempts. Only the observer deadline and its derived final
+  verdict may have failed. Cancelled, failed, partial, replaced or mismatched
+  children refuse. The shared publisher authenticates the attempt-bound
+  authorization artifact before applying all normal archive and publication
+  checks. The original deadline remains unmeasured; no result is rewritten
+  and no equal-tree source substitution is accepted.
 - Crate publication failed after the tag exists: rerun the failed jobs in the
   tag's `publish-release.yml` run. Its publisher resumes remaining crates.
   If publication policy needed a repair on main, dispatch `publish-release.yml`

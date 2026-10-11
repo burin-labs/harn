@@ -863,6 +863,12 @@ async fn accepted_stop_and_pivot_persist_stopped_authority_and_retire_the_lease(
             .attach(lease.clone(), host_facts(), prepared_runtime_attachment())
             .expect("attach approved lease");
         assert_eq!(session.run_turn(&active).await.unwrap(), "completed");
+        if !pivot {
+            active.record_agent_terminal(crate::agent_events::AgentTerminalOutcome::new(
+                crate::agent_events::AgentTerminalKind::UserCancelled,
+                "actual accepted user stop",
+            ));
+        }
         let stopped = session
             .stop(active, pivot)
             .expect("persist accepted control");
@@ -873,6 +879,20 @@ async fn accepted_stop_and_pivot_persist_stopped_authority_and_retire_the_lease(
         };
         assert_eq!(receipt.stage, AuthorityReceiptStage::Stopped);
         assert_eq!(receipt.status, AuthorityReceiptStatus::Stopped);
+        let producer_terminal = receipt.agent_terminal.as_ref().expect("stop identity");
+        assert_eq!(
+            producer_terminal.kind,
+            crate::agent_events::AgentTerminalKind::UserCancelled
+        );
+        assert_eq!(producer_terminal.owner, "user");
+        assert_eq!(
+            producer_terminal.reason,
+            if pivot {
+                "session/pivot"
+            } else {
+                "actual accepted user stop"
+            }
+        );
         assert_eq!(receipt.used.len(), executor_requirements().len());
         assert_eq!(
             receipt.used.len() + receipt.unused.len(),

@@ -122,6 +122,30 @@ jobs:
       post_merge_tier: ${{ steps.post_merge_tier.outputs.active }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      # Refuse a group that would bury a release before admitting expensive
+      # proofs. The group's base is the previous queue entry, so compare with
+      # fetched main rather than that base. All product proofs need changes;
+      # its failure also remains a required failure in the CI aggregate.
+      - name: Keep a release commit last in its merge group
+        if: github.event_name == 'merge_group'
+        env:
+          MAIN_REF: refs/remotes/origin/main
+          HEAD_SHA: ${{ github.event.merge_group.head_sha }}
+        run: |
+          set -euo pipefail
+          # shellcheck source=scripts/lib/release_version.sh
+          source scripts/lib/release_version.sh
+          main_sha="$(git rev-parse --verify "$MAIN_REF^{commit}")"
+          releases="$(release_range_release_commits "$(git merge-base "$main_sha" "$HEAD_SHA")" "$HEAD_SHA")"
+          if [[ -n "$releases" && "$releases" != "$HEAD_SHA" ]]; then
+            echo "::error::This entry is queued behind release commit(s) ${releases//$'\n'/, }. A release must be the last entry of its merge group; re-queue this entry after the release merges."
+            exit 1
+          fi
+
       - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
         id: filter
         with:
@@ -145,6 +169,7 @@ jobs:
               - 'editors/vscode/**'
             docs_site:
               - '.github/workflows/ci.yml'
+              - 'crates/harn-vm/src/mcp_auth.rs'
               - 'docs/**'
               - 'scripts/build_docs_site.sh'
               - 'website/**'
@@ -424,18 +449,9 @@ jobs:
           EVENT: ${{ github.event_name }}
           MERGE_GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha }}
           PUSH_BEFORE_SHA: ${{ github.event.before }}
-        run: |
-          set -euo pipefail
-          # The checkout is shallow, so name the "before" commit explicitly
-          # rather than asking git for a merge base: a pull request's merge
-          # commit's first parent, the merge group's base, or the pushed range.
-          case "$EVENT" in
-            pull_request) base="$(git rev-parse HEAD^1)" ;;
-            merge_group) base="$MERGE_GROUP_BASE_SHA" ;;
-            *) base="$PUSH_BEFORE_SHA" ;;
-          esac
-          git fetch --no-tags --depth=1 origin "$base"
-          echo "base_sha=$base" >> "$GITHUB_OUTPUT"
+        # A merge group or push that lands several pull requests puts the
+        # baseline past the shallow checkout; the script deepens to it.
+        run: ./.github/scripts/resolve-public-api-baseline.sh
       - name: Check public Rust API for an undeclared break
         env:
           BASE_SHA: ${{ steps.api-baseline.outputs.base_sha }}
@@ -495,29 +511,6 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-
-      # The merge queue lands a whole group in one push, and a release is built
-      # and promoted only from the head of its push. An entry queued behind a
-      # release commit would bury it, so that entry leaves the queue and is
-      # re-queued after the release merges. The group's `base_sha` is the
-      # previous entry's head, not main, so the range starts at main as fetched
-      # by the full checkout; an entry behind a release read from its own base
-      # sees an empty range (v0.10.158 was buried that way).
-      - name: Keep a release commit last in its merge group
-        if: github.event_name == 'merge_group'
-        env:
-          MAIN_REF: refs/remotes/origin/main
-          HEAD_SHA: ${{ github.event.merge_group.head_sha }}
-        run: |
-          set -euo pipefail
-          # shellcheck source=scripts/lib/release_version.sh
-          source scripts/lib/release_version.sh
-          main_sha="$(git rev-parse --verify "$MAIN_REF^{commit}")"
-          releases="$(release_range_release_commits "$(git merge-base "$main_sha" "$HEAD_SHA")" "$HEAD_SHA")"
-          if [[ -n "$releases" && "$releases" != "$HEAD_SHA" ]]; then
-            echo "::error::This entry is queued behind release commit(s) ${releases//$'\n'/, }. A release must be the last entry of its merge group; re-queue this entry after the release merges."
-            exit 1
-          fi
 
       - name: Check out the pinned release orchestrator
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -1855,8 +1848,9 @@ jobs:
             echo "::notice::Posted the binary-size comment."
           fi
 
-      # Only main publishes the baseline. Source-qualified so the artifact list
-      # can be sorted to the newest one, and retained long enough that a quiet
+      # Only main publishes the baseline. Named `<prefix><sha>` because the
+      # reader looks it up by exact name for each of main's newest commits, and
+      # retained long enough that a quiet
       # weekend does not leave the next pull request without a comparison.
       - name: Record main's debug measurement
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'

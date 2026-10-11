@@ -19,14 +19,16 @@ pub struct PreparedModuleGenerationStats {
 }
 
 impl PreparedModuleCache {
-    /// Create a cache large enough to retain one complete immutable module
-    /// generation. This shares the same hard ceiling as remembered graph
-    /// interfaces, so preparation cannot silently publish a generation whose
-    /// earliest artifacts were evicted before its first call.
+    /// Create a bounded cache for a complete module graph.
+    ///
+    /// Test suites and immutable hosted generations share the interface ceiling
+    /// so preparing a graph larger than the ordinary VM cache does not evict its
+    /// earliest artifacts before the first invocation. This only retains
+    /// bytecode; runtime module state and filesystem validation remain separate.
     pub fn for_immutable_generation() -> Self {
         Self::with_capacity(
             NonZeroUsize::new(MAX_REMEMBERED_INTERFACES)
-                .expect("immutable generation capacity is non-zero"),
+                .expect("module graph capacity is non-zero"),
         )
     }
 

@@ -720,6 +720,7 @@ test-pr-gate-scripts:
 	./scripts/tests/changelog_fragment_check_test.sh
 	./scripts/tests/breaking_surface_check_test.sh
 	bash ./scripts/tests/pr_gate_range_test.sh
+	./scripts/tests/public_api_baseline_test.sh
 	./scripts/tests/release_pr_drift_check_test.sh
 	./scripts/tests/release_ship_fragment_guard_test.sh
 	./scripts/tests/release_ship_root_harn_bin_test.sh
@@ -729,8 +730,10 @@ test-pr-gate-scripts:
 	./scripts/tests/release_promotion_plan_test.sh
 	bash ./scripts/tests/release_promotion_source_test.sh
 	bash ./scripts/tests/release_rehearsal_authorization_test.sh
+	bash ./scripts/tests/completed_consumer_recovery_test.sh
 	bash ./scripts/tests/release_consumer_candidate_verdict_test.sh
 	bash ./scripts/tests/failed_rehearsal_observation_test.sh
+	bash ./scripts/tests/successful_rehearsal_reuse_test.sh
 	bash ./scripts/tests/unpublished_retirement_test.sh
 	./scripts/tests/check_linux_glibc_floor_test.sh
 	./scripts/tests/release_version_test.sh
@@ -821,6 +824,7 @@ test-pr-gate-post-warm-integrations: test-rust-lint-lane-cache
 	HARN_BIN="$(HARN_BIN)" ./scripts/tests/nextest_filters_from_paths_test.sh
 	HARN_BIN="$(HARN_BIN)" ./scripts/tests/claude_dev_setup_once_test.sh
 	./scripts/tests/sccache_rustc_wrapper_test.sh
+	./scripts/tests/sccache_wrapper_restore_test.sh
 	HARN_BIN="$(HARN_BIN)" ./scripts/tests/publish_script_test.sh
 	HARN_BIN="$(HARN_BIN)" ./scripts/tests/ci_preemption_recover_test.sh
 	HARN_BIN="$(HARN_BIN)" ./scripts/tests/check_harn_syntax_sensitive_scans_performance_test.sh

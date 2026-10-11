@@ -44,6 +44,9 @@
 #   SOURCE_REVISION    the commit under test.
 #   WORKSPACE_VERSION  the workspace version at that commit, as X.Y.Z[-dev].
 #   PAIRING_TEXT       description and commit messages to read trailers from.
+#   REHEARSAL_PROMOTION_RUN_ID  optional prior publication attempt to authenticate.
+#   CANDIDATE_RUN_ID   certified producer bound to that prior attempt.
+#   REHEARSAL_PROMOTION_READ_TOKEN  scoped read authority for the prior attempt.
 #   GH_TOKEN           may dispatch and read the consumer's workflow runs.
 #   CANARY_POLL_SECONDS, CANARY_DEADLINE_SECONDS  optional overrides.
 #   GITHUB_OUTPUT      when set, receives verdict=pass|fail once the consumer
@@ -131,6 +134,20 @@ canary_dispatch() {
   else
     ref=$(gh api "repos/$repo" --jq .default_branch 2> /dev/null) \
       || canary_fail consumer_unreadable
+  fi
+
+  if [[ -n "${REHEARSAL_PROMOTION_RUN_ID:-}" ]]; then
+    [[ -z "$paired" ]] || canary_fail recovered_pairing_unsupported
+    # shellcheck source=scripts/lib/release_consumer_verdict.sh
+    source "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/lib/release_consumer_verdict.sh"
+    local reused
+    reused="$(release_authenticated_successful_rehearsal "$GITHUB_REPOSITORY" \
+      "$REHEARSAL_PROMOTION_RUN_ID" "${CANDIDATE_RUN_ID:-}" "$revision" "$repo")" \
+      || canary_fail recovered_rehearsal_unqualified
+    CANARY_RUN_ID=$reused
+    CANARY_STARTED_AT=$(date +%s)
+    canary_say "CONSUMER_CANARY reused run=$reused promotion=$REHEARSAL_PROMOTION_RUN_ID"
+    return
   fi
 
   local started dispatched run_id

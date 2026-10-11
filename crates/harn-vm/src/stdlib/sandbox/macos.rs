@@ -157,6 +157,45 @@ fn wrap_with_sandbox_exec(
     })
 }
 
+/// Whether a child spawned under `policy` could write `target`, measured on
+/// the confinement the spawn path will really apply (harn#9622).
+///
+/// An unsandboxed process wraps the child in the rendered profile, so that
+/// profile is read. An already-sandboxed one runs the child under its own
+/// inherited profile instead, so that profile is asked directly about the
+/// target, and only a denial of every write operation there counts. A refused
+/// spawn measures nothing.
+pub(super) fn child_write_disposition(
+    policy: &CapabilityPolicy,
+    target: &Path,
+) -> super::child_write::ChildWriteDisposition {
+    use super::child_write::ChildWriteDisposition;
+    match nested::nesting(policy) {
+        nested::Nesting::NotNested => super::child_write::seatbelt_write_disposition(
+            &render_profile_for_program(policy, "/bin/sh"),
+            target,
+        ),
+        nested::Nesting::Inherit => {
+            // `sandbox_check` cannot be trusted on a path that does not exist:
+            // measured, it reports a denial the profile does not make. An
+            // ancestor is no substitute, since a rule may name the target
+            // alone, so a missing target measures nothing.
+            if !target.exists() {
+                return ChildWriteDisposition::Unknown;
+            }
+            let denied = ["file-write-data", "file-write-create", "file-write-unlink"]
+                .iter()
+                .all(|operation| nested::outer_denies(operation, Some(target)));
+            if denied {
+                ChildWriteDisposition::EnforcedReadOnly
+            } else {
+                ChildWriteDisposition::Unknown
+            }
+        }
+        nested::Nesting::Unenforceable(_) => ChildWriteDisposition::Unknown,
+    }
+}
+
 fn render_profile_for_program(policy: &CapabilityPolicy, program: &str) -> String {
     let mut developer_toolchain_read_roots = process_sandbox_developer_toolchain_read_roots(policy);
     developer_toolchain_read_roots.extend(toolchain_roots::go_read_root(policy, program));
@@ -583,3 +622,7 @@ mod write_roots_tests;
 #[cfg(test)]
 #[path = "macos/external_root_tests.rs"]
 mod external_root_tests;
+
+#[cfg(test)]
+#[path = "macos/child_write_nested_tests.rs"]
+mod child_write_nested_tests;

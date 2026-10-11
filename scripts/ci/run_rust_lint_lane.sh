@@ -54,7 +54,7 @@ lint_workspace() {
   fi
   # Collect Cargo's unit timings from this invocation, not a restored report.
   # The ordinary strict compile is the only compile; no diagnostic rebuild runs.
-  local source tree target report status bytes report_blob rustc sample_pid sample_dir sample_receipt started_at ended_at
+  local source tree target report status bytes report_blob rustc sample_pid sample_status sample_dir sample_receipt started_at ended_at
   source="$(git rev-parse HEAD)"
   tree="$(git rev-parse 'HEAD^{tree}')"
   if [[ "$source" != "${HARN_LINT_SOURCE_SHA:-}" ]] || ! git diff --quiet HEAD --; then
@@ -72,6 +72,7 @@ lint_workspace() {
   sample_dir="$(mktemp -d "$HARN_LINT_TIMINGS_DIR/compiler-observation.XXXXXX")"
   sample_receipt="${sample_dir#"$HARN_LINT_TIMINGS_DIR/"}/compiler-sample.json"
   sample_pid=""
+  sample_status=""
   if [[ "$(uname -s)" == Darwin ]]; then
     node "$(dirname "${BASH_SOURCE[0]}")/macos_compiler_sample.cjs" \
       "$$" "$sample_dir" "${GITHUB_RUN_ID:-}" "${GITHUB_RUN_ATTEMPT:-}" "$source" "$tree" &
@@ -83,11 +84,14 @@ lint_workspace() {
   ended_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   if [[ -n "$sample_pid" ]]; then
     kill -TERM "$sample_pid" 2>/dev/null || true
-    wait "$sample_pid" || true
+    sample_status=0
+    wait "$sample_pid" || sample_status=$?
   fi
   if [[ ! -f "$sample_dir/compiler-sample.json" ]]; then
-    jq -n --arg source "$source" --arg tree "$tree" \
-      '{schema:"harn.macos_compiler_samples.v1",sourceCommit:$source,sourceTree:$tree,status:"UNMEASURED",reason:"sampler unavailable or interrupted",samples:[]}' \
+    jq -n --arg source "$source" --arg tree "$tree" --arg observer_status "$sample_status" \
+      '{schema:"harn.macos_compiler_samples.v1",sourceCommit:$source,sourceTree:$tree,status:"UNMEASURED",reason:"sampler unavailable or interrupted",samples:[],
+        observerExitCode:(if $observer_status == "" then null else ($observer_status|tonumber) end),
+        refusal:(if $observer_status == "" then {stage:"execution_identity",cause:"unsupported_host"} else {stage:"settlement",cause:"receipt_missing"} end)}' \
       > "$sample_dir/compiler-sample.json"
   fi
   if [[ ! -f "$report" || -L "$report" || ! -s "$report" ]]; then

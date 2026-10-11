@@ -1,0 +1,63 @@
+/**
+ * OpenAI strict mode lists every tool property as required, so a model fills
+ * the optional arguments it does not use. A host's `look` tool arrived as
+ * `{file: "calc.py", folder: ""}` and was refused as a malformed path before
+ * it ran. An unused optional argument is absent at dispatch; a required path
+ * that is empty is still refused.
+ */
+import { agent_dispatch_tool_call } from "std/agent/primitives"
+
+fn look_tools() {
+  return tool_define(
+    tool_registry(),
+    "look",
+    "Read a file or outline a folder.",
+    {
+      handler: { args ->
+        "file=" + to_string(args?.file ?? "-") + " folder=" + to_string(args?.folder ?? "-")
+      },
+      parameters: {
+        file: {type: "string", description: "File to read", required: false},
+        folder: {type: "string", description: "Folder to outline", required: false},
+        limit: {type: "integer", description: "Line limit", required: false},
+      },
+      annotations: {kind: "read", arg_schema: {path_params: ["file", "folder"]}},
+    },
+  )
+}
+
+fn read_tools() {
+  return tool_define(
+    tool_registry(),
+    "read",
+    "Read one file.",
+    {
+      handler: { args -> "read " + to_string(args?.path ?? "-") },
+      parameters: {path: {type: "string", description: "File to read"}},
+      annotations: {kind: "read", arg_schema: {path_params: ["path"]}},
+    },
+  )
+}
+
+fn main(harness: Harness) {
+  const filled = agent_dispatch_tool_call(
+    harness.tools,
+    {name: "look", arguments: {file: "calc.py", folder: ""}},
+    look_tools(),
+  )
+  harness.stdio.println(filled.ok)
+  harness.stdio.println(filled.rendered_result)
+  const folder_only = agent_dispatch_tool_call(
+    harness.tools,
+    {name: "look", arguments: {file: "", folder: "src"}},
+    look_tools(),
+  )
+  harness.stdio.println(folder_only.ok)
+  harness.stdio.println(folder_only.rendered_result)
+  const required_empty = agent_dispatch_tool_call(
+    harness.tools,
+    {name: "read", arguments: {path: ""}},
+    read_tools(),
+  )
+  harness.stdio.println(required_empty.ok)
+}

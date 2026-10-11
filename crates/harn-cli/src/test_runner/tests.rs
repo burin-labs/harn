@@ -6,6 +6,8 @@ use harn_vm::VmValue;
 
 mod compile_once_tests;
 mod egress_isolation;
+mod manifest_hooks;
+mod prepared_graph;
 mod sharding;
 mod work;
 
@@ -400,7 +402,7 @@ handlers = "hooks.harn"
 
 [[hooks]]
 event = "PostTurn"
-handler = "handlers::missing"
+handler = "invalid-handler-path"
 "#,
     );
     temp.write("suite/hooks.harn", "pub fn valid(_event) {}\n");

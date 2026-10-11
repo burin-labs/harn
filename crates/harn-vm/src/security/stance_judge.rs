@@ -461,14 +461,10 @@ mod tests {
     #[test]
     #[ignore = "calls a live judge model; run on demand against a saved dump"]
     fn rejudge_transcript_dump() {
-        let Ok(dump) = std::env::var("STANCE_DUMP") else {
-            eprintln!("[stance-judge] no STANCE_DUMP path in env; skipping");
-            return;
-        };
-        let Ok(api_key) = std::env::var("STANCE_JUDGE_API_KEY") else {
-            eprintln!("[stance-judge] no STANCE_JUDGE_API_KEY in env; skipping");
-            return;
-        };
+        let dump =
+            std::env::var("STANCE_DUMP").expect("live stance measurement requires STANCE_DUMP");
+        let api_key = std::env::var("STANCE_JUDGE_API_KEY")
+            .expect("live stance measurement requires STANCE_JUDGE_API_KEY");
         let base_url = std::env::var("STANCE_JUDGE_BASE_URL")
             .unwrap_or_else(|_| "https://api.fireworks.ai/inference/v1".to_string());
         let model = std::env::var("STANCE_JUDGE_MODEL")

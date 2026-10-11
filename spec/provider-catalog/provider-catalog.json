@@ -29143,9 +29143,7 @@
       ],
       "display_name": "MiniMax M2.7",
       "provider": "sambanova",
-      "aliases": [
-        "sambanova-minimax-m2.7"
-      ],
+      "aliases": [],
       "context_window": 196608,
       "logical_model": "minimax-m2.7",
       "equivalence_group": "minimax-m2.7",
@@ -34630,12 +34628,6 @@
       "model_id": "sambanova/Meta-Llama-3.3-70B-Instruct",
       "provider": "sambanova",
       "tool_format": "native"
-    },
-    {
-      "name": "sambanova-minimax-m2.7",
-      "model_id": "sambanova/MiniMax-M2.7",
-      "provider": "sambanova",
-      "tool_format": "text"
     },
     {
       "name": "sambanova-minimax-m3",

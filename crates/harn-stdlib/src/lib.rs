@@ -354,6 +354,7 @@ pub const STDLIB_SOURCES: &[StdlibSource] = embedded_catalog!(StdlibSource, modu
     "agent/completion_claim" => "stdlib/agent/completion_claim.harn",
     "agent/completion_evidence" => "stdlib/agent/completion_evidence.harn",
     "agent/completion_precheck" => "stdlib/agent/completion_precheck.harn",
+    "agent/completion_verification" => "stdlib/agent/completion_verification.harn",
     "agent/judge_precheck" => "stdlib/agent/judge_precheck.harn",
     "agent/obligations" => "stdlib/agent/obligations.harn",
     "agent/judge" => "stdlib/agent/judge.harn",

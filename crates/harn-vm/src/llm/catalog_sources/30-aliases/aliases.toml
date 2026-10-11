@@ -349,12 +349,8 @@ id = "sambanova/Meta-Llama-3.3-70B-Instruct"
 provider = "sambanova"
 tool_format = "native"
 
-# probed 2026-06-24 (provider-tool-mode-sweep): native AND fenced-JSON both
-# corrupt backslash bodies (0/5), heredoc text 5/5 byte-clean. Pin text.
-[aliases."sambanova-minimax-m2.7"]
-id = "sambanova/MiniMax-M2.7"
-provider = "sambanova"
-tool_format = "text"
+# Retired the M2.7 alias after its recorded 2026-10-01 sunset. The historical
+# model row keeps its identity and retirement facts; M3 has its own selector.
 
 # M3 traffic was unavailable during the 2026-08-26 audit. Keep the proven
 # SambaNova MiniMax family format until a route-specific fidelity sweep passes.

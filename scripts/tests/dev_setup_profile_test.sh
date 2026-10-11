@@ -57,6 +57,7 @@ make_fixture_repo() {
   cp "$repo_root/scripts/sccache_rustc_wrapper.rs" "$repo/scripts/sccache_rustc_wrapper.rs"
   cp "$repo_root/scripts/cargo_target_seed.sh" "$repo/scripts/cargo_target_seed.sh"
   cp "$repo_root/scripts/lib/file_time.sh" "$repo/scripts/lib/file_time.sh"
+  cp "$repo_root/scripts/lib/cargo_env.sh" "$repo/scripts/lib/cargo_env.sh"
   chmod +x "$repo/scripts/dev_setup.sh" "$repo/scripts/cargo_target_seed.sh"
   printf '[package]\nname = "setup-fixture"\nversion = "0.1.0"\n' > "$repo/Cargo.toml"
   printf '#!/usr/bin/env bash\nset -euo pipefail\n' > "$repo/scripts/sign_local_macos.sh"

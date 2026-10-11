@@ -2289,6 +2289,17 @@ class HarnInferenceAdmissionReach(str, Enum):
 class HarnInferenceAdmissionDataPosture(str, Enum):
     DEFAULT = "default"
     STRICTEST_AVAILABLE = "strictest_available"
+
+
+class HarnInferenceAdmissionDataControlsOutcome(str, Enum):
+    NOT_REQUESTED = "not_requested"
+    APPLIED = "applied"
+    NO_CONTROL_AVAILABLE = "no_control_available"
+    PROVIDER_UNRESEARCHED = "provider_unresearched"
+
+
+class HarnInferenceAdmissionDataControlsRefusal(str, Enum):
+    TRAINING_WITHOUT_CONTROL = "training_without_control"
 @dataclass
 class HarnInferenceAdmissionBoundary(_HarnDataclass):
     reach: HarnInferenceAdmissionReach
@@ -2308,6 +2319,10 @@ class HarnInferenceAdmissionSnapshot(_HarnDataclass):
     model: str
     status: HarnInferenceAdmissionStatus
     training_control_planned: bool
+    data_posture: HarnInferenceAdmissionDataPosture
+    data_controls_note: Optional[str] = None
+    data_controls_outcome: Optional[HarnInferenceAdmissionDataControlsOutcome] = None
+    data_controls_refusal: Optional[HarnInferenceAdmissionDataControlsRefusal] = None
     effective_boundary: Optional[HarnInferenceAdmissionBoundary] = None
     governing_rule: Optional[str] = None
     local_runtime: Optional[bool] = None

@@ -1,4 +1,5 @@
 {
+  "client_id": "https://harnlang.com/.well-known/oauth-client.json",
   "client_name": "Harn MCP Client",
   "client_uri": "https://harnlang.com/",
   "redirect_uris": [

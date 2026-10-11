@@ -196,10 +196,18 @@ arbitrary orchestration ref.
   validation, and again immediately before arming. The connector derives and
   publishes a GitHub-signed commit only while the measured lease is current.
   Stale actors fail closed.
+- Disjoint advance after validation: when the base moves after validation and
+  none of the incoming commits changed a path the refresh authored, the
+  validated tree is published on its validated base and armed. The pull
+  request is then an ordinary change behind its base, and the base branch's
+  merge queue tests the merged result. The receipt sets
+  `published_behind_base: true` and names both base identities. The same rule
+  applies to an advance just before arming. An overlapping advance, or one
+  whose changed paths cannot be read, falls through to adoption.
 - Advanced base: a refresh takes long enough that the base branch can move
   under it, and the refreshed content is a pure function of the base content
   and the target release. So a moved base is re-derived, not discarded. Before
-  refresh and before publication, the runtime adopts the observed base head
+  refresh, and before publication when the advance is not disjoint, the runtime adopts the observed base head
   into the checkout (an authenticated fetch through the provider capability,
   exact cleanup of the discarded refresh paths, then a detached checkout of
   that head) and re-runs apply and validation against it, holding the disarm
@@ -216,9 +224,10 @@ arbitrary orchestration ref.
   decide a contest between two writers of one artifact, so the attempt returns
   `outcome: base_conflict` and names the contested paths for a human. This is
   the only base-race exit a fresh retry cannot clear on its own.
-- Base advance immediately before arming: the PR is already published, so the
-  attempt stops rather than redoing the refresh. It returns `base_advanced`
-  and leaves the PR unarmed; the next run refreshes that PR head and arms it.
+- Overlapping base advance immediately before arming: the PR is already
+  published, so the attempt stops rather than redoing the refresh. It returns
+  `base_advanced` and leaves the PR unarmed; the next run refreshes that PR
+  head and arms it.
 
 ## Version availability
 

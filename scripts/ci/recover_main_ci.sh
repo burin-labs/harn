@@ -28,7 +28,29 @@ if [[ -n "$existing" ]]; then
   echo "Run already recorded in issue #$existing."
   exit 0
 fi
-jobs=$(gh api --paginate "repos/$GH_REPO/actions/runs/$RUN_ID/attempts/1/jobs?per_page=100" --jq '.jobs[] | select(.conclusion == "failure" and .name != "CI status") | .name')
+cat > "$scratch/census.jq" <<'JQ'
+def positive_integer: type == "number" and . > 0 and floor == .;
+def named: .name | type == "string" and length > 0;
+def status_valid: .status | IN("queued", "in_progress", "completed", "waiting", "pending", "requested");
+def conclusion_valid: .conclusion == null or (.conclusion | type == "string");
+def step_valid: type == "object" and named and status_valid and conclusion_valid;
+def job_valid:
+  type == "object" and (.id | positive_integer) and named and status_valid and conclusion_valid
+  and (.steps == null or (.steps | type == "array" and all(.[]; step_valid)));
+if type != "array" or length == 0 then error("missing job pages") else . end
+| . as $pages
+| if all($pages[]; type == "object" and (.jobs | type == "array") and (.total_count | positive_integer))
+  then [$pages[] | .jobs[]] else error("malformed job census") end
+| . as $jobs
+| if ($pages[0].total_count != length)
+     or any($pages[]; .total_count != $pages[0].total_count)
+     or (all($jobs[]; job_valid) | not)
+     or ([$jobs[].id] | unique | length) != length
+  then error("incomplete or malformed job census") else . end
+JQ
+gh api --paginate --slurp "repos/$GH_REPO/actions/runs/$RUN_ID/attempts/1/jobs?per_page=100" > "$scratch/first-pages.json"
+jq -f "$scratch/census.jq" "$scratch/first-pages.json" > "$scratch/first.json"
+jobs=$(jq -r '.[] | select(.conclusion == "failure" and .name != "CI status") | .name' "$scratch/first.json")
 [[ -n "$jobs" ]] || { echo 'No measured first-attempt failures; refusing classification.' >&2; exit 1; }
 # shellcheck disable=SC2016 # Markdown code spans, not shell substitutions.
 printf '%s\n\nSource: `%s`\nRun: https://github.com/%s/actions/runs/%s\n\nFirst-attempt failing jobs:\n%s\n' "$marker" "$sha" "$GH_REPO" "$RUN_ID" "$jobs" > "$scratch/body"
@@ -36,52 +58,30 @@ if [[ "$conclusion" == success ]]; then
   gh issue create --repo "$GH_REPO" --title "[CI] Flaky main suite at ${sha:0:12}" --body-file "$scratch/body"
   exit 0
 fi
-latest=$(gh api --paginate "repos/$GH_REPO/actions/runs/$RUN_ID/jobs?filter=latest&per_page=100" --jq '.jobs[] | select(.conclusion == "failure" and .name != "CI status") | .name')
+gh api --paginate --slurp "repos/$GH_REPO/actions/runs/$RUN_ID/jobs?filter=latest&per_page=100" > "$scratch/latest-pages.json"
+jq -f "$scratch/census.jq" "$scratch/latest-pages.json" > "$scratch/latest.json"
+latest=$(jq -r '.[] | select(.conclusion == "failure" and .name != "CI status") | .name' "$scratch/latest.json")
 [[ -n "$latest" ]] || { echo 'No measured retry failures; refusing culprit attribution.' >&2; exit 1; }
-persistent=false
-while IFS= read -r name; do
-  if grep -Fxq "$name" <<< "$latest"; then persistent=true; fi
-done <<< "$jobs"
-printf '\nRetry failing jobs:\n%s\n' "$latest" >> "$scratch/body"
-if [[ "$persistent" != true ]]; then
-  printf '\nThe retry failed different jobs; no persistent culprit was established.\n' >> "$scratch/body"
-  gh issue create --repo "$GH_REPO" --title "[CI] Unstable main suite at ${sha:0:12}" --body-file "$scratch/body"
-  exit 0
-fi
-
-# Only a commit whose parent has full-suite proof is a measured culprit.
-# A red parent is an existing incident, not evidence against this change.
-git cat-file -e "$sha^{commit}"
-parent=$(git rev-parse "$sha^1")
-branch="automation/revert-main-$sha"
-prior=$(gh pr list --repo "$GH_REPO" --head "$branch" --state all --json number --jq '.[0].number // empty')
-if [[ -n "$prior" ]]; then
-  echo "Culprit already has revert PR #$prior."
-  exit 0
-fi
-if ! SOURCE_SHA="$parent" bash scripts/ci/require_full_suite.sh; then
-  printf '\nParent has no green full-suite proof; culprit attribution needs investigation.\n' >> "$scratch/body"
-  gh issue create --repo "$GH_REPO" --title "[CI] Persistent main failure at ${sha:0:12}" --body-file "$scratch/body"
-  exit 0
-fi
-base=$(git rev-parse HEAD)
-parents=$(git rev-list --parents -n 1 "$sha")
-read -ra parent_ids <<< "$parents"
-args=()
-if (( ${#parent_ids[@]} > 2 )); then args=(-m 1); fi
-if ! git revert --no-commit "${args[@]}" "$sha"; then
-  git revert --abort
-  printf '\nThe culprit revert conflicts with current main and needs recovery.\n' >> "$scratch/body"
-  gh issue create --repo "$GH_REPO" --title "[CI] Main culprit revert conflicts at ${sha:0:12}" --body-file "$scratch/body"
-  exit 0
-fi
-HARN_BRANCH_COMMIT_TOKEN="$GH_TOKEN" \
-  HARN_BRANCH_COMMIT_BRANCH="$branch" \
-  HARN_BRANCH_COMMIT_BASE_OID="$base" \
-  HARN_BRANCH_COMMIT_HEADLINE="[CI] Revert failing main commit ${sha:0:12}" \
-  "${HARN_BIN:?Harn required}" run --no-sandbox scripts/bump-driver/publish_branch_commit.harn
-pr=$(gh pr list --repo "$GH_REPO" --head "$branch" --state all --json number --jq '.[0].number // empty')
-if [[ -z "$pr" ]]; then
-  pr=$(gh pr create --repo "$GH_REPO" --base main --head "$branch" --title "[CI] Revert failing main commit ${sha:0:12}" --body-file "$scratch/body")
-fi
-gh pr edit "$pr" --repo "$GH_REPO" --add-label ship
+# Repeated jobs, even a test step, can fail during setup or compilation. These
+# observations do not establish a source culprit. Record the complete census
+# for diagnosis; source changes go through an independently reviewed PR.
+jq -n --slurpfile first "$scratch/first.json" --slurpfile latest "$scratch/latest.json" '
+  def evidence:
+    . as $jobs | {
+      measured_jobs: length,
+      pending: [$jobs[] | select(.status != "completed") | .name],
+      failing: [$jobs[] | select(.conclusion == "failure") | {
+        name,
+        failed_steps: [.steps[]? | select(.conclusion == "failure") | .name],
+        steps_reported: (.steps | type == "array")
+      }]
+    };
+  {first: ($first[0] | evidence), latest: ($latest[0] | evidence),
+   source_cause: "unestablished", automatic_source_action: "none"}' > "$scratch/evidence.json"
+{
+  printf '\nRetry failing jobs:\n%s\n' "$latest"
+  # shellcheck disable=SC2016 # Markdown fences are literal, not substitutions.
+  printf '\nObserved failure evidence:\n```json\n%s\n```\n' "$(cat "$scratch/evidence.json")"
+  printf '\nThe retry remains red. Source causality is unestablished; diagnose the failed steps and submit any source correction through an independently reviewed PR.\n'
+} >> "$scratch/body"
+gh issue create --repo "$GH_REPO" --title "[CI] Persistent main failure at ${sha:0:12}" --body-file "$scratch/body"
