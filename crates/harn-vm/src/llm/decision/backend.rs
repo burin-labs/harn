@@ -27,7 +27,7 @@ pub struct DecisionRequest<'a> {
     /// Explicit, and exactly what the policy admitted. A backend that cannot
     /// honor both returns `UnsupportedOptions` rather than dropping one.
     pub effort: &'a str,
-    pub temperature: f64,
+    pub temperature: Option<f64>,
     pub max_tokens: Option<i64>,
     pub top_p: Option<f64>,
     pub seed: Option<i64>,

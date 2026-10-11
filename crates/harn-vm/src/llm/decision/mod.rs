@@ -48,7 +48,7 @@ pub(crate) struct EvaluationPolicy {
     pub provider: String,
     pub model: String,
     pub effort: String,
-    pub temperature: f64,
+    pub temperature: Option<f64>,
     pub max_tokens: Option<i64>,
     pub top_p: Option<f64>,
     pub seed: Option<i64>,
@@ -116,11 +116,10 @@ impl EvaluationPolicy {
             } else {
                 "none".into()
             },
-            temperature: if fields.contains_key("temperature") {
-                number("temperature")?
-            } else {
-                0.0
-            },
+            temperature: fields
+                .contains_key("temperature")
+                .then(|| number("temperature"))
+                .transpose()?,
             max_tokens: optional_int("max_tokens")?,
             top_p: fields
                 .contains_key("top_p")
@@ -150,7 +149,7 @@ impl EvaluationPolicy {
         };
         if !policy.threshold.is_finite()
             || !(0.0..=1.0).contains(&policy.threshold)
-            || !policy.temperature.is_finite()
+            || policy.temperature.is_some_and(|value| !value.is_finite())
             || policy.max_tokens.is_some_and(|limit| limit <= 0)
             || policy.timeout_ms.is_some_and(|limit| limit <= 0)
             || policy
@@ -181,7 +180,13 @@ impl EvaluationPolicy {
             self.provider.clone(),
             self.model.clone(),
             self.effort.clone(),
-            format!("{:?}", self.temperature),
+            match (self.backend, self.temperature) {
+                // Native requests never emit sampling. Retain the identity of
+                // existing tapes when the omitted option has no wire effect.
+                (BackendKind::NativeDecision, None) => "0.0".into(),
+                (_, None) => "unset".into(),
+                (_, Some(value)) => format!("{value:?}"),
+            },
             self.native_options_supplied.to_string(),
             format!("{:?}", self.threshold),
             format!("{:?}", self.evaluation_cost_limit),

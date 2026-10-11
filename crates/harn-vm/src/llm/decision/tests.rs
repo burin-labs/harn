@@ -479,7 +479,7 @@ fn the_policy_digest_covers_the_threshold() {
         provider: "mock".into(),
         model: "fixture".into(),
         effort: "low".into(),
-        temperature: 0.0,
+        temperature: Some(0.0),
         max_tokens: None,
         top_p: None,
         seed: None,
@@ -1101,7 +1101,7 @@ fn the_dispatched_request_carries_the_admitted_profile_unchanged() {
     assert_eq!(seen[0].provider, "mock");
     assert_eq!(seen[0].model, "fixture");
     assert_eq!(seen[0].effort, "low");
-    assert_eq!(seen[0].temperature, 0.0);
+    assert_eq!(seen[0].temperature, Some(0.0));
     assert_eq!(seen[0].question_ids, vec!["safe".to_string()]);
     assert_eq!(
         seen[0].state.get("text").and_then(|text| text.as_str()),

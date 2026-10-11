@@ -266,8 +266,7 @@ fn __refine_prompt_dict(llm: HarnessLlm, opts: dict?) {
   if provider != nil {
     call_opts = call_opts + {provider: provider}
   }
-  // Force determinism on the meta-call so cached refinements stay stable.
-  call_opts = call_opts + {temperature: 0.0}
+  // Leave sampling to the selected route; current defaults can reject it.
   const envelope = safe_call(llm, meta_prompt, "", call_opts)
   if !(envelope?.ok ?? false) {
     return {

@@ -319,6 +319,10 @@ pub(crate) fn capabilities_to_vm_value(
         VmValue::Bool(caps.reasoning_effort_supported),
     );
     dict.insert(
+        crate::value::intern_key("reasoning_effort_levels"),
+        string_list_to_vm_value(caps.reasoning_effort_levels.clone()),
+    );
+    dict.insert(
         crate::value::intern_key("reasoning_none_supported"),
         VmValue::Bool(caps.reasoning_none_supported),
     );

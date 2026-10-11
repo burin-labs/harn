@@ -120,10 +120,10 @@ reasoning_modes = [
 
 # OpenAI names this as GPT-5.4 Nano's replacement, and a strict `json_schema`
 # response_format returned HTTP 200 with schema-valid JSON (live probe
-# 2026-10-01, default effort and `none`). Decision evaluations still refuse it
-# before dispatch: the structured profile requires temperature 0, which GPT-6
-# accepts only at an explicit effort of `none`, and the capability rule cannot
-# express that condition (harn#9157). gpt-5.4-mini serves decisions meanwhile.
+# 2026-10-01, default effort and `none`). Structured decisions preserve omitted
+# sampling so Luna can serve them. Explicit temperature remains refused: GPT-6
+# accepts it only at an explicit effort of `none`, and the capability rule
+# cannot express that condition yet (harn#9157).
 [models."gpt-6-luna"]
 name = "GPT-6 Luna"
 blurb = "Fastest and lowest-cost GPT-6 option for routine edits, summaries, and extraction."

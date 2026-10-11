@@ -4,6 +4,15 @@
   `gpt-6-luna`. `std/agent/sitrep` now adds its summary temperature only on a
   route whose capability row accepts one, so these routes, which reject
   non-default sampling, no longer refuse the summary call.
-  Response compaction also leaves sampling to the resolved route instead of
-  forcing an unsupported temperature. The standalone approval reviewer uses
+  Response compaction, prompt refinement, scratchpad reorganization and
+  missing-tool classification also leave sampling to the resolved route
+  instead of forcing an unsupported temperature. Explicit caller settings
+  still receive the provider's capability validation. Decision evaluations
+  preserve an omitted temperature instead of changing it to zero, allowing
+  structured classification on routes that reject sampling parameters.
+  Provider capability metadata exposes the supported effort ladder, and
+  missing-tool classification chooses the lowest catalog-supported effort
+  instead of forcing an unsupported reasoning-off setting. Native decision
+  tape identities remain unchanged when sampling is omitted.
+  The standalone approval reviewer uses
   Haiku 5.5, matching its Anthropic catalog role.

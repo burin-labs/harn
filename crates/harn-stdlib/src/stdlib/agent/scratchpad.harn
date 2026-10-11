@@ -465,9 +465,6 @@ fn __scratchpad_reorganizer_options(opts: dict, cfg: dict) {
   if out?.model == nil && opts?.model != nil {
     out = out + {model: opts.model}
   }
-  if out?.temperature == nil {
-    out = out + {temperature: 0.0}
-  }
   if out?.retries == nil {
     out = out + {retries: cfg.schema_retries}
   }

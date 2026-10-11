@@ -778,6 +778,10 @@ See llama.cpp's [`/props` response](https://github.com/ggml-org/llama.cpp/blob/m
 and Ollama's [`/api/show` response](https://docs.ollama.com/api/show)
 for the upstream fields.
 
+The returned `reasoning_effort_levels` lists the route's declared effort
+ladder from lowest to highest. An empty list means unknown or unrestricted,
+so it does not prove that any particular effort is supported.
+
 First match wins. User rules for a given provider are consulted
 before the shipped rules — so the order inside the TOML file matters
 (place more specific patterns above wildcards).

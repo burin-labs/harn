@@ -36,7 +36,7 @@ pub struct MockSeenRequest {
     pub model: String,
     pub question_ids: Vec<String>,
     pub effort: String,
-    pub temperature: f64,
+    pub temperature: Option<f64>,
     pub state: serde_json::Value,
 }
 

@@ -82,7 +82,6 @@ fn prepare(
     let mut options = serde_json::json!({
         "provider": request.provider,
         "model": request.model,
-        "temperature": request.temperature,
         "effort": request.effort,
         "max_tokens": request.max_tokens.unwrap_or(MAX_EVALUATION_OUTPUT_TOKENS),
         "output": {"schema": schema, "strict": true, "validation": "error"},
@@ -91,6 +90,9 @@ fn prepare(
         // One physical request. No repair, no re-prompt, no failover.
         "schema_retries": 0,
     });
+    if let Some(temperature) = request.temperature {
+        options["temperature"] = JsonValue::from(temperature);
+    }
     for (key, value) in [
         ("top_p", request.top_p.map(JsonValue::from)),
         ("seed", request.seed.map(JsonValue::from)),

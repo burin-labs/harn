@@ -9,7 +9,10 @@ type MissingToolCallTool = {name: string, description?: string}
 
 type MissingToolCallRoute = {provider: string, model: string}
 
-type MissingToolCallCapabilities = {decision_protocol: string?}
+type MissingToolCallCapabilities = {
+  decision_protocol: string?,
+  reasoning_effort_levels: list<string>?,
+}
 
 fn __missing_tool_call_policy(
   llm: HarnessLlm,
@@ -39,7 +42,11 @@ fn __missing_tool_call_policy(
     threshold: 0.0,
   }
   if !native {
-    policy = policy + {effort: "none", temperature: 0.0, max_tokens: 192}
+    const levels = capabilities.reasoning_effort_levels ?? []
+    // The catalog lists supported effort levels from lowest to highest.
+    // Keep this bounded classifier at the lowest declared effort instead of
+    // inventing an off switch that the route may reject.
+    policy = policy + {effort: levels[0] ?? "none", max_tokens: 192}
   }
   if cfg.effort != nil {
     policy = policy + {effort: cfg.effort}
