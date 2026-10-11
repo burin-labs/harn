@@ -13,6 +13,8 @@ const FIXTURE_BASE = {
   http_options: {fetched_at: "fixture-time"},
 }
 
+type StoredProviderRateCard = {id: string, provider: string, pricing: dict}
+
 @test
 pipeline test_live_catalog_preserves_stored_schedules_bands_and_promotions(harness: Harness) {
   const stored = schema_expect(
@@ -20,29 +22,23 @@ pipeline test_live_catalog_preserves_stored_schedules_bands_and_promotions(harne
     {
       type: "object",
       required: ["models"],
-      properties: {
-        models: {
-          type: "array",
-          items: {
-            type: "object",
-            required: ["id", "provider", "pricing"],
-            properties: {
-              id: {type: "string"},
-              provider: {type: "string"},
-              pricing: {type: "object"},
-            },
-          },
-        },
-      },
+      properties: {models: {type: "array", items: {type: "object"}}},
     },
   )
   const catalog = harness.llm.provider_catalog()
   const ids = ["deepseek/deepseek-v4-pro-0813", "x-ai/grok-4.5", "openai/gpt-5.6-sol"]
-  const expected = ids.map({ id -> stored.models.filter({ row -> row.id == id })[0] })
+  const expected: list<StoredProviderRateCard> = ids.map(
+    { id ->
+      return schema_expect(
+        stored.models.filter({ row -> row.id == id })[0],
+        schema_of(StoredProviderRateCard),
+      )
+    },
+  )
   assert_eq(len(expected), 3)
-  assert(len(expected[0].pricing?.schedules ?? []) > 0)
-  assert(len(expected[1].pricing?.input_token_bands ?? []) > 0)
-  assert(len(expected[2].pricing?.promotions ?? []) > 0)
+  assert(len(expected[0]?.pricing?.schedules ?? []) > 0)
+  assert(len(expected[1]?.pricing?.input_token_bands ?? []) > 0)
+  assert(len(expected[2]?.pricing?.promotions ?? []) > 0)
   const observations = expected.map(
     { row ->
       observation(
