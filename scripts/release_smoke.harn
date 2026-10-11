@@ -46,13 +46,19 @@ fn arg_spec() {
           parse: "int",
           default: DEFAULT_WATCH_TIMEOUT_MS,
         },
+        {
+          kind: "switch",
+          name: "require_embedded_stdlib",
+          long: "--require-embedded-stdlib",
+          default: false,
+        },
       ],
     },
   )
 }
 
 fn usage() -> string {
-  return "usage: harn run scripts/release_smoke.harn -- --candidate PATH [--step-timeout-ms MS] [--watch-timeout-ms MS]"
+  return "usage: harn run scripts/release_smoke.harn -- --candidate PATH [--step-timeout-ms MS] [--watch-timeout-ms MS] [--require-embedded-stdlib]"
 }
 
 fn display_platform(value: string) -> string {
@@ -212,8 +218,8 @@ fn cold_first_run_step(
   config: ReleaseSmokeConfig,
   adapters: any,
 ) {
-  const cache = config.cold_cache_dir
-  if cache == nil {
+  const cache = config.cold_cache_dir ?? ""
+  if cache == "" {
     return command_result_fail(2, "release-smoke: cold_cache_dir is required")
       + {name: COLD_FIRST_RUN_STEP, timed_out: false}
   }
@@ -271,7 +277,9 @@ pub fn run_release_smoke(
     )
     steps = steps + [result]
   }
-  steps = steps + [cold_first_run_step(fs, tools, clock, config, resolved_adapters)]
+  if config.cold_cache_dir != nil {
+    steps = steps + [cold_first_run_step(fs, tools, clock, config, resolved_adapters)]
+  }
   steps = steps + [watch_step(config, resolved_adapters)]
   const failed = steps.filter({ step -> !(step?.success ?? false) })
   return {platform: config.platform, steps: steps, failed: failed, success: failed.count == 0}
@@ -335,8 +343,14 @@ fn main(harness: Harness) -> int {
     watch_target,
     "fn main(harness: Harness) {\n  harness.stdio.println(\"watch boot\")\n}\n",
   )
-  const cold_cache_dir = path_join(temp, "cold-cache")
-  harness.fs.mkdir(cold_cache_dir)
+  // Only a distributed binary carries the precompiled stdlib; the debug
+  // binary the residual audit smokes does not.
+  let cold_cache: dict = {}
+  if options.require_embedded_stdlib ?? false {
+    const cold_cache_dir = path_join(temp, "cold-cache")
+    harness.fs.mkdir(cold_cache_dir)
+    cold_cache = {cold_cache_dir: cold_cache_dir}
+  }
   const report = try {
     run_release_smoke(
       harness.fs,
@@ -349,8 +363,8 @@ fn main(harness: Harness) -> int {
         step_timeout_ms: step_timeout_ms,
         watch_timeout_ms: watch_timeout_ms,
         watch_target: watch_target,
-        cold_cache_dir: cold_cache_dir,
-      },
+      }
+        + cold_cache,
     )
   } finally {
     harness.fs.delete(temp)

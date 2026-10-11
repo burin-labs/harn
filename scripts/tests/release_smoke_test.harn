@@ -288,3 +288,18 @@ pipeline test_a_cold_first_run_that_left_no_cache_entry_cannot_pass(harness: Har
   assert_eq(report.failed.count, 1)
   assert_eq(contains(report.failed[0].stderr, "cannot tell which cache it used"), true)
 }
+
+@test
+pipeline test_a_development_binary_smoke_skips_the_cold_first_run_check(harness: Harness) {
+  let unrequired = config("")
+  unrequired.cold_cache_dir = nil
+  const report = run_release_smoke(
+    harness.fs,
+    harness.tools,
+    harness.clock,
+    unrequired,
+    ready_adapters(),
+  )
+  assert_eq(report.success, true)
+  assert_eq(report.steps.count, 13)
+}

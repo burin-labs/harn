@@ -193,3 +193,4 @@ jobs:
           "$HARN_BINARY" run --no-sandbox scripts/release_smoke.harn --
           --candidate "$HARN_BINARY"
           --step-timeout-ms 120000
+          --require-embedded-stdlib
