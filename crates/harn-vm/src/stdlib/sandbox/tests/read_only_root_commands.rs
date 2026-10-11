@@ -80,6 +80,7 @@ fn run_admitted(policy: &CapabilityPolicy, root: &Path, path: &Path) -> bool {
 /// Run `script` through the confined spawn path under `policy`: the same
 /// `std_command_for` a process capability builds its child with. Returns
 /// whether the shell exited zero; a refused spawn is a refused write.
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 fn shell_succeeds(policy: &CapabilityPolicy, script: &str) -> bool {
     push_execution_policy(policy.clone());
     let output =
