@@ -188,10 +188,13 @@ pub fn __tool_envelope(random: HarnessRandom, call: dict, tools: dict, options: 
   } else {
     raw_call_id
   }
-  const registry_name = if call?.toolset_name != nil && call.toolset_name != "" {
+  const registry_name = if call?.toolset_name == nil {
+    tool_name
+  } else if type_of(call.toolset_name) == "string"
+    && call.toolset_name != "" {
     call.toolset_name + "." + tool_name
   } else {
-    tool_name
+    ""
   }
   const entry = __tool_registry_entry(tools, registry_name)
   const declared_executor = if entry == nil {

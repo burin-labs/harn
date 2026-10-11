@@ -10,10 +10,11 @@ pub(super) fn qualified_tool_name(call: &DictMap) -> Option<String> {
         _ => return None,
     };
     match call.get("toolset_name") {
+        Some(VmValue::Nil) | None => Some(name.to_string()),
         Some(VmValue::String(namespace)) if !namespace.is_empty() => {
             Some(format!("{namespace}.{name}"))
         }
-        _ => Some(name.to_string()),
+        _ => None,
     }
 }
 

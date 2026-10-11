@@ -20,6 +20,8 @@ both fields, so a member cannot invoke an ordinary same-named function.
 Tool middleware receives the member in `envelope.tool_name` and its namespace
 in `envelope.toolset_name`. The Anthropic adapter echoes the namespace on
 results, including interruption placeholders.
+An authored namespace must be a non-empty string. Invalid namespaces return
+recoverable tool feedback and cannot invoke an ordinary same-named function.
 
 Claude 5.5 native computer projection uses `computer_toolset_20260801` without
 the legacy computer-use beta. Enable projection with

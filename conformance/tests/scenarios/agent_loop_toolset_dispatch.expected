@@ -3,4 +3,7 @@ native member reached
 ordinary.screenshot
 ordinary function reached
 unregistered.screenshot
+malformed_number: rejected true
+malformed_dict: rejected true
+malformed_empty: rejected true
 done

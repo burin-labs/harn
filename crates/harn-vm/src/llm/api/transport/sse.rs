@@ -646,7 +646,7 @@ pub(super) async fn consume_sse_lines_with_policy<R: tokio::io::AsyncBufRead + U
 
     struct ToolBlock {
         name: String,
-        toolset_name: Option<String>,
+        toolset_name: Option<serde_json::Value>,
         input_json: String,
         provider_id: String,
         /// Stable id used for `AgentEvent::ToolCall*` streaming
@@ -825,10 +825,7 @@ pub(super) async fn consume_sse_lines_with_policy<R: tokio::io::AsyncBufRead + U
                             );
                             current_tool = Some(ToolBlock {
                                 name,
-                                toolset_name: block
-                                    .get("toolset_name")
-                                    .and_then(serde_json::Value::as_str)
-                                    .map(str::to_owned),
+                                toolset_name: block.get("toolset_name").cloned(),
                                 input_json: String::new(),
                                 provider_id: id,
                                 tool_call_id,
@@ -958,7 +955,7 @@ pub(super) async fn consume_sse_lines_with_policy<R: tokio::io::AsyncBufRead + U
                             "input": args.clone(),
                         });
                         if let Some(toolset_name) = &tool.toolset_name {
-                            raw_call["toolset_name"] = serde_json::json!(toolset_name);
+                            raw_call["toolset_name"] = toolset_name.clone();
                         }
                         raw_tool_calls.push(
                             RawProviderToolCall::new(raw_call)
@@ -973,7 +970,7 @@ pub(super) async fn consume_sse_lines_with_policy<R: tokio::io::AsyncBufRead + U
                             "id": tool.tool_call_id, "name": name, "arguments": args,
                         });
                         if let Some(toolset_name) = tool.toolset_name {
-                            call["toolset_name"] = serde_json::json!(toolset_name);
+                            call["toolset_name"] = toolset_name;
                         }
                         tool_calls.push(call.clone());
                         call["type"] = serde_json::json!("tool_call");
