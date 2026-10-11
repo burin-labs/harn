@@ -295,42 +295,6 @@ fn parse_live_outcome_stdout(stdout: &str) -> Result<EvalPackLiveVerifyOutcome, 
         .map_err(|_| payload_parse_error("live executor JSON outcome").to_string())
 }
 
-#[cfg(test)]
-mod payload_error_tests {
-    use super::*;
-
-    #[test]
-    fn executor_output_parser_redacts_invalid_values_and_preserves_valid_outcomes() {
-        for (stdout, valid) in [
-            (r#"{"stage_count":"private-stdout-canary"}"#, false),
-            (r#"{"stage_count":1,"passed":true}"#, true),
-            ("progress\n{\"stage_count\":1,\"passed\":true}", true),
-        ] {
-            let mut failures = Vec::new();
-            let outcome = live_outcome_from_executor_output(
-                EvalPackCommandOutput {
-                    exit_code: 0,
-                    stdout: stdout.into(),
-                    stderr: String::new(),
-                    timed_out: false,
-                    wall_time_seconds: 0.0,
-                },
-                &mut failures,
-            );
-            if valid {
-                assert!(failures.is_empty(), "{failures:?}");
-                assert_eq!(outcome.stage_count, Some(1));
-                assert_eq!(outcome.passed, Some(true));
-            } else {
-                assert_eq!(
-                    failures,
-                    ["Runtime error: live executor JSON outcome parse error: payload does not match expected schema"]
-                );
-            }
-        }
-    }
-}
-
 pub(super) fn live_outcome_verification(outcome: &EvalPackLiveVerifyOutcome) -> String {
     if let Some(verification) = outcome.verification.as_deref() {
         return normalize_live_verification(verification);
@@ -501,4 +465,40 @@ fn json_value_usize(value: &serde_json::Value) -> Option<usize> {
         .as_u64()
         .and_then(|value| usize::try_from(value).ok())
         .or_else(|| value.as_i64().and_then(|value| usize::try_from(value).ok()))
+}
+
+#[cfg(test)]
+mod payload_error_tests {
+    use super::*;
+
+    #[test]
+    fn executor_output_parser_redacts_invalid_values_and_preserves_valid_outcomes() {
+        for (stdout, valid) in [
+            (r#"{"stage_count":"private-stdout-canary"}"#, false),
+            (r#"{"stage_count":1,"passed":true}"#, true),
+            ("progress\n{\"stage_count\":1,\"passed\":true}", true),
+        ] {
+            let mut failures = Vec::new();
+            let outcome = live_outcome_from_executor_output(
+                EvalPackCommandOutput {
+                    exit_code: 0,
+                    stdout: stdout.into(),
+                    stderr: String::new(),
+                    timed_out: false,
+                    wall_time_seconds: 0.0,
+                },
+                &mut failures,
+            );
+            if valid {
+                assert!(failures.is_empty(), "{failures:?}");
+                assert_eq!(outcome.stage_count, Some(1));
+                assert_eq!(outcome.passed, Some(true));
+            } else {
+                assert_eq!(
+                    failures,
+                    ["Runtime error: live executor JSON outcome parse error: payload does not match expected schema"]
+                );
+            }
+        }
+    }
 }
