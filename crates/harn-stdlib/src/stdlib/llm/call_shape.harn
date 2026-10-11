@@ -18,6 +18,17 @@
 // spells a delimiter out for itself.
 import { call_block, prose_block } from "std/llm/tool_parse_result"
 
+pub fn __tool_registry_name(call: any) -> string {
+  const tool_name = to_string(call?.name ?? call?.tool_name ?? "")
+  if call?.toolset_name == nil {
+    return tool_name
+  }
+  if type_of(call.toolset_name) == "string" && call.toolset_name != "" {
+    return call.toolset_name + "." + tool_name
+  }
+  return ""
+}
+
 /**
  * How one tool format is taught and rendered.
  *
@@ -194,7 +205,7 @@ pub fn tool_call_history_text(tool_format: string?, prose: string?, calls: list?
     parts = parts.appending(opening)
   }
   for call in turn_calls {
-    const name = trim(to_string(call?.name ?? call?.tool_name ?? ""))
+    const name = trim(__tool_registry_name(call))
     if name == "" {
       continue
     }

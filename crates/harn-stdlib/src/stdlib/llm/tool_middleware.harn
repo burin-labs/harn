@@ -1,6 +1,3 @@
-// @harn-entrypoint-category llm.stdlib
-//
-// std/llm/tool_middleware — composable middleware around tool execution.
 //
 // Two seams (mirrors the LLM-caller pattern in std/llm/handlers):
 //
@@ -59,6 +56,10 @@
 // Composition uses `compose_tool_callers(harness, [outer, ..., inner])` — leftmost is
 // the outermost wrapper. Exactly mirrors std/llm/handlers `compose`.
 import { cache_get, cache_put } from "std/cache"
+// @harn-entrypoint-category llm.stdlib
+//
+// std/llm/tool_middleware — composable middleware around tool execution.
+import { __tool_registry_name } from "std/llm/call_shape"
 import { resolve_telemetry_sink, tool_call_span } from "std/llm/tool_telemetry"
 
 // -------------------------------------------------------------------------------------------------
@@ -160,15 +161,16 @@ fn __tool_mw_sha256_value(value: unknown) -> string {
 }
 
 fn __tool_mw_short_circuit(envelope: dict, status: string, fields: dict) {
+  const tool_name = __tool_registry_name(envelope)
   const base = {
     ok: false,
     status: "error",
-    tool_name: envelope.tool_name,
+    tool_name: tool_name,
     tool_call_id: envelope.call_id,
     arguments: envelope.tool_args,
     result: nil,
     rendered_result: "",
-    observation: "[blocked: " + envelope.tool_name + " — " + status + "]",
+    observation: "[blocked: " + tool_name + " — " + status + "]",
     error: status,
     error_category: status,
     executor: nil,
@@ -216,15 +218,16 @@ fn __safe_call_caller(clock: HarnessClock, caller: unknown, envelope: dict, next
   }
   if is_err(outcome) {
     const err = unwrap_err(outcome)
+    const tool_name = __tool_registry_name(envelope)
     return {
       ok: false,
       status: "error",
-      tool_name: envelope.tool_name,
+      tool_name: tool_name,
       tool_call_id: envelope.call_id,
       arguments: envelope.tool_args,
       result: nil,
       rendered_result: to_string(err),
-      observation: "[error from " + envelope.tool_name + "]\n" + to_string(err) + "\n",
+      observation: "[error from " + tool_name + "]\n" + to_string(err) + "\n",
       error: to_string(err),
       error_category: "tool_middleware_exception",
       executor: nil,
@@ -504,7 +507,8 @@ pub fn with_required_reason(opts: any = nil) {
         call,
         "schema_violation",
         {
-          error: "with_required_reason: tool `" + call.tool_name + "` was invoked without a `"
+          error: "with_required_reason: tool `" + __tool_registry_name(call)
+            + "` was invoked without a `"
             + field
             + "` (required by middleware)",
           error_category: "schema_violation",
@@ -655,7 +659,7 @@ fn __tool_mw_tool_call_receipt(
     session_id: to_string(turn?.session_id ?? ""),
     run_id: __tool_mw_optional_text(turn?.run_id),
     tool_call_id: to_string(call?.call_id ?? ""),
-    tool_name: to_string(call?.tool_name ?? ""),
+    tool_name: __tool_registry_name(call),
     iteration: iteration,
     turn_index: turn_index,
     emit_order: __tool_mw_nonnegative_int(turn?.tool_call_index),
@@ -910,8 +914,9 @@ pub fn with_scoped_executor(runtime: HarnessRuntime, opts: dict) {
     {stage: stage}
   }
   return { call, next ->
-    if restrict_tools && !contains(allowed, call.tool_name) {
-      const reason = "tool '" + call.tool_name + "' not in stage '" + stage + "' allowlist"
+    const tool_name = __tool_registry_name(call)
+    if restrict_tools && !contains(allowed, tool_name) {
+      const reason = "tool '" + tool_name + "' not in stage '" + stage + "' allowlist"
       if on_violation == "raise" {
         throw "scope_violation: " + reason
       }
@@ -974,21 +979,22 @@ pub fn with_dry_run(opts: any = nil) {
   const only = __tool_mw_list(cfg?.only)
   const except = __tool_mw_list(cfg?.except)
   return { call, next ->
-    const in_only = len(only) == 0 || contains(only, call.tool_name)
-    const in_except = contains(except, call.tool_name)
+    const tool_name = __tool_registry_name(call)
+    const in_only = len(only) == 0 || contains(only, tool_name)
+    const in_except = contains(except, tool_name)
     if !in_only || in_except {
       return next(call)
     }
-    const summary = message + " — " + call.tool_name + "(" + to_string(call.tool_args) + ")"
+    const summary = message + " — " + tool_name + "(" + to_string(call.tool_args) + ")"
     return {
       ok: true,
       status: "dry_run",
-      tool_name: call.tool_name,
+      tool_name: tool_name,
       tool_call_id: call.call_id,
       arguments: call.tool_args,
       result: {dry_run: true, args: call.tool_args},
       rendered_result: summary,
-      observation: "[dry run of " + call.tool_name + "]\n" + summary + "\n",
+      observation: "[dry run of " + tool_name + "]\n" + summary + "\n",
       error: nil,
       error_category: nil,
       executor: nil,
@@ -1013,8 +1019,9 @@ pub fn with_redaction(redactor: any) {
     throw "with_redaction: redactor must be callable; got " + type_of(redactor)
   }
   return { call, next ->
+    const tool_name = __tool_registry_name(call)
     const in_redact = try {
-      redactor({phase: "in", tool_name: call.tool_name, args: call.tool_args, result: nil})
+      redactor({phase: "in", tool_name: tool_name, args: call.tool_args, result: nil})
     }
     const inbound = if is_err(in_redact) {
       {args: call.tool_args, redacted_fields: []}
@@ -1028,7 +1035,7 @@ pub fn with_redaction(redactor: any) {
     }
     const result = next(call + {tool_args: safe_args})
     const out_redact = try {
-      redactor({phase: "out", tool_name: call.tool_name, args: safe_args, result: result?.result})
+      redactor({phase: "out", tool_name: tool_name, args: safe_args, result: result?.result})
     }
     const outbound = if is_err(out_redact) {
       {result: result?.result, redacted_fields: []}
@@ -1451,8 +1458,9 @@ pub fn with_timeout(clock: HarnessClock, opts: dict) {
   const per_tool = __tool_mw_dict(cfg?.per_tool)
   const message = to_string(cfg?.message ?? "tool call exceeded time budget")
   return { call, next ->
-    const limit = if per_tool[call.tool_name] != nil {
-      per_tool[call.tool_name]
+    const tool_name = __tool_registry_name(call)
+    const limit = if per_tool[tool_name] != nil {
+      per_tool[tool_name]
     } else {
       default_ms
     }
