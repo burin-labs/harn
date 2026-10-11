@@ -106,6 +106,19 @@ copy_tree_cow() {
 
 clean_workspace_artifacts() {
   local target_dir="$1"
+  local cache_tag="${target_dir}/CACHEDIR.TAG"
+
+  # Both callers pass a newly allocated private clone, never the source target.
+  # Cargo does not tag a target that setup created before its first build.
+  # Mark only this disposable clone so Cargo can safely prune it. Do not follow
+  # a copied tag link or overwrite an existing malformed ownership marker.
+  [[ ! -L "${cache_tag}" ]] || return 1
+  if [[ ! -e "${cache_tag}" ]]; then
+    printf '%s\n' \
+      'Signature: 8a477f597d28d172789f06886806bc55' \
+      '# Disposable Cargo target clone owned by cargo_target_seed.sh.' \
+      > "${cache_tag}" || return 1
+  fi
 
   # Cargo fingerprints and dep-info contain absolute paths to the worktree that
   # produced them. Keep third-party dependencies warm, but force every
