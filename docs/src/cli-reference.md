@@ -209,6 +209,13 @@ commands. In `isolated` and `granted`, platform SDKs cannot silently fall back
 to home-directory profiles, metadata services, or application-default
 credentials. Supply the required values as grants or choose `inherited`.
 
+`harness.env.get` and `harness.env.get_or` emit a warning when the policy
+refuses a read. The structured event category is
+`environment_policy.read_refused`; its metadata contains only `name` and
+`policy`, never the value. The read still returns `nil` or the supplied default.
+A permitted but unset variable produces no warning. Command-bound grants
+don't permit script reads; use a session-wide or `to=in_process` grant.
+
 This policy governs environment *variables* only. It is a different boundary
 from the filesystem and process sandbox, which decides which directories a run
 may touch and what a spawned command may do. See

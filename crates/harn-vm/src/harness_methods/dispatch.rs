@@ -552,7 +552,7 @@ fn call_harness_env_method_sync_fast(
                 Ok(name) => name,
                 Err(err) => return Some(Err(err)),
             };
-            Some(Ok(crate::stdlib::process::read_env_value(name)
+            Some(Ok(crate::stdlib::process::read_script_env_value(name)
                 .map(vm_string)
                 .unwrap_or(VmValue::Nil)))
         }
@@ -562,7 +562,7 @@ fn call_harness_env_method_sync_fast(
                 Err(err) => return Some(Err(err)),
             };
             let default = args.get(1).cloned().unwrap_or(VmValue::Nil);
-            Some(Ok(crate::stdlib::process::read_env_value(name)
+            Some(Ok(crate::stdlib::process::read_script_env_value(name)
                 .map(vm_string)
                 .unwrap_or(default)))
         }

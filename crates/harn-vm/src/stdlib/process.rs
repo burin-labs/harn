@@ -245,9 +245,39 @@ pub(crate) fn runtime_child_env_overlay() -> Vec<(String, String)> {
 }
 
 pub(crate) fn read_env_value(name: &str) -> Option<String> {
-    env_override(name)
+    read_env_with_policy(name).ok()?.into_value()
+}
+
+fn read_env_with_policy(name: &str) -> Result<crate::security::EnvironmentRead, VmError> {
+    if let Some(value) = env_override(name)
         .or_else(|| current_execution_context().and_then(|context| context.env.get(name).cloned()))
-        .or_else(|| session_env_var(name).ok().flatten())
+    {
+        return Ok(crate::security::EnvironmentRead::Permitted(Some(value)));
+    }
+    session_env_read_with(name, &resolve_grant_secret)
+}
+
+pub(crate) fn read_script_env_value(name: &str) -> Option<String> {
+    use crate::security::EnvironmentRead;
+    match read_env_with_policy(name).ok()? {
+        EnvironmentRead::Permitted(value) => value,
+        EnvironmentRead::Refused(policy) => {
+            let policy = policy.as_str();
+            let message = format!(
+                "environment read {name:?} refused by {policy} policy; \
+                 use a granted policy with an in-process environment grant"
+            );
+            crate::events::log_warn_meta(
+                "environment_policy.read_refused",
+                &message,
+                BTreeMap::from([
+                    ("name".into(), serde_json::json!(name)),
+                    ("policy".into(), serde_json::json!(policy)),
+                ]),
+            );
+            None
+        }
+    }
 }
 
 pub fn runtime_root_base() -> PathBuf {
@@ -341,7 +371,7 @@ pub(crate) fn register_process_builtins(vm: &mut Vm) {
 )]
 fn env_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let name = args.first().map(|a| a.display()).unwrap_or_default();
-    if let Some(value) = read_env_value(&name) {
+    if let Some(value) = read_script_env_value(&name) {
         return Ok(VmValue::String(arcstr::ArcStr::from(value)));
     }
     Ok(VmValue::Nil)
@@ -356,7 +386,7 @@ fn env_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
 fn env_or_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let name = args.first().map(|a| a.display()).unwrap_or_default();
     let default = args.get(1).cloned().unwrap_or(VmValue::Nil);
-    if let Some(value) = read_env_value(&name) {
+    if let Some(value) = read_script_env_value(&name) {
         return Ok(VmValue::String(arcstr::ArcStr::from(value)));
     }
     Ok(default)
@@ -1267,8 +1297,17 @@ fn session_env_var_with(
     name: &str,
     resolve_secret: &dyn Fn(&str, &str) -> Option<String>,
 ) -> Result<Option<String>, VmError> {
+    session_env_read_with(name, resolve_secret)
+        .map(crate::security::environment_policy::EnvironmentRead::into_value)
+}
+
+fn session_env_read_with(
+    name: &str,
+    resolve_secret: &dyn Fn(&str, &str) -> Option<String>,
+) -> Result<crate::security::environment_policy::EnvironmentRead, VmError> {
+    use crate::security::environment_policy::EnvironmentRead;
     let Some(environment) = current_session_environment() else {
-        return Ok(std::env::var(name).ok());
+        return Ok(EnvironmentRead::Permitted(std::env::var(name).ok()));
     };
     let workspace_defaults = workspace_env_defaults();
     let is_grant_target = environment.is_host_inference_target(name)
@@ -1278,16 +1317,12 @@ fn session_env_var_with(
             .any(|grant| grant.exposed_env_var() == Some(name));
     if !is_grant_target {
         if let Some(value) = workspace_defaults.get(name) {
-            return Ok(Some(value.clone()));
+            return Ok(EnvironmentRead::Permitted(Some(value.clone())));
         }
     }
-    let resolved = crate::security::lookup_env(
-        &environment,
-        name,
-        &session_env_lookup(&workspace_defaults),
-        resolve_secret,
-    )
-    .map_err(grant_env_error)?;
+    let resolved =
+        crate::security::environment_policy::lookup_env_read(&environment, name, resolve_secret)
+            .map_err(grant_env_error)?;
     Ok(resolved)
 }
 
