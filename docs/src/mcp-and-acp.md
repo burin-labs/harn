@@ -1035,7 +1035,10 @@ selects the state directory directly. Relative overrides resolve from the
 selected workspace. A physical store shared by multiple workspaces exposes
 only rows whose `cwd` and `project_scope` match the selected canonical workspace.
 Cold loading never searches siblings or admits a session from process telemetry.
-The Harn CLI's explicit session-store `root` option keeps its existing meaning.
+The Harn CLI's explicit session-store `root` option selects that tree's `.harn`.
+Named roots resolve symlinks before recording workspace identity, so a session
+saved through an alias reloads from the same physical workspace after a restart.
+Missing suffix directories remain creatable; dangling links are refused.
 
 ### Session modes
 

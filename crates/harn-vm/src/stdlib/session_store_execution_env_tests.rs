@@ -10,6 +10,7 @@ async fn exercise_execution_env_store(
         crate::orchestration::AmbientExecutionScope::default(),
         async move {
             let root_value = root.to_string_lossy().into_owned();
+            let canonical_root = root.canonicalize().unwrap();
             let mut env = BTreeMap::new();
             if patch_mode {
                 env.insert("HARN_TEST_INHERITED".to_string(), "kept".to_string());
@@ -32,7 +33,7 @@ async fn exercise_execution_env_store(
             );
             assert_eq!(
                 canonical_store_state_dir(None).unwrap(),
-                SessionStoreDir::under_root(&root),
+                SessionStoreDir::under_root(&canonical_root),
                 "{label}: native store root must match the VM-visible environment"
             );
 
@@ -43,7 +44,7 @@ async fn exercise_execution_env_store(
             let database_path = PathBuf::from(database_path.display());
             assert_eq!(
                 database_path,
-                store_path(&SessionStoreDir::under_root(&root))
+                store_path(&SessionStoreDir::under_root(&canonical_root))
             );
 
             session_store_append_impl(
@@ -119,11 +120,15 @@ async fn execution_env_isolates_patch_replace_and_concurrent_stores() {
 
     assert_eq!(
         patch_path,
-        store_path(&SessionStoreDir::under_root(&patch_root))
+        store_path(&SessionStoreDir::under_root(
+            &patch_root.canonicalize().unwrap()
+        ))
     );
     assert_eq!(
         replace_path,
-        store_path(&SessionStoreDir::under_root(&replace_root))
+        store_path(&SessionStoreDir::under_root(
+            &replace_root.canonicalize().unwrap()
+        ))
     );
     assert!(patch_path.is_file());
     assert!(replace_path.is_file());
@@ -132,4 +137,29 @@ async fn execution_env_isolates_patch_replace_and_concurrent_stores() {
         !store_path(&SessionStoreDir::under_root(&fallback_root)).exists(),
         "the inherited/global fallback store must remain untouched"
     );
+}
+
+#[cfg(unix)]
+#[tokio::test(flavor = "current_thread")]
+async fn execution_env_root_alias_uses_the_physical_store() {
+    let root = tempfile::tempdir().unwrap();
+    let fallback = tempfile::tempdir().unwrap();
+    let alias = fallback.path().join("alias");
+    std::os::unix::fs::symlink(root.path(), &alias).unwrap();
+    let path = tokio::task::LocalSet::new()
+        .run_until(exercise_execution_env_store(
+            "alias",
+            false,
+            alias,
+            fallback.path().to_path_buf(),
+        ))
+        .await;
+    assert_eq!(
+        path,
+        store_path(&SessionStoreDir::under_root(
+            &root.path().canonicalize().unwrap()
+        ))
+    );
+    assert!(path.is_file());
+    assert!(!fallback.path().join(".harn").exists());
 }

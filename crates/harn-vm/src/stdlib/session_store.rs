@@ -807,37 +807,9 @@ fn verify_report_value(report: VerifyReport, broken_at: Option<usize>) -> Result
     Ok(json_to_vm_value(&value))
 }
 
-/// The directory session-store files live in.
-///
-/// A caller that names a tree — via the `root` option or `HARN_SESSION_STORE_ROOT`
-/// — gets that tree's `.harn`, because it asked for a specific location. With
-/// neither, the location is Harn's own default, so it goes through
-/// [`crate::runtime_paths::state_root`] and honors `HARN_STATE_DIR` like every
-/// other state consumer. Resolving both cases here keeps one owner for the
-/// question; downstream helpers only join file names onto the result.
-pub(crate) fn canonical_store_state_dir(
-    options: Option<&DictMap>,
-) -> Result<SessionStoreDir, VmError> {
-    let explicit_root = option_string(options, "root")?
-        .map(|root| crate::stdlib::process::resolve_source_relative_path(&root));
-    if explicit_root.is_none() && crate::persistent_state::current_session_workspace().is_some() {
-        return Ok(SessionStoreDir(
-            crate::persistent_state::current_persistent_state_root()
-                .expect("session scope has a state root"),
-        ));
-    }
-    let named_root = explicit_root.or_else(|| {
-        crate::stdlib::process::read_env_value(STORE_ROOT_ENV)
-            .filter(|value| !value.trim().is_empty())
-            .map(|root| crate::stdlib::process::resolve_source_relative_path(&root))
-    });
-    Ok(match named_root {
-        Some(root) => SessionStoreDir::under_root(&root),
-        None => SessionStoreDir(crate::runtime_paths::state_root(
-            &crate::stdlib::process::runtime_root_base(),
-        )),
-    })
-}
+#[path = "session_store_root.rs"]
+mod root;
+pub(crate) use root::canonical_store_state_dir;
 
 fn store_state_dir(options: Option<&DictMap>) -> Result<SessionStoreDir, VmError> {
     canonical_store_state_dir(options)
@@ -1193,7 +1165,10 @@ mod tests {
         let named_root = tempfile::TempDir::new().unwrap();
         let options = json_to_vm_value(&json!({"root": named_root.path().to_string_lossy()}));
         let named = canonical_store_state_dir(options.as_dict()).unwrap();
-        assert_eq!(named, SessionStoreDir::under_root(named_root.path()));
+        assert_eq!(
+            named,
+            SessionStoreDir::under_root(&named_root.path().canonicalize().unwrap())
+        );
 
         // The defaulted case is Harn's own state, so it follows HARN_STATE_DIR
         // like every other state consumer.

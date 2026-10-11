@@ -72,6 +72,130 @@ fn spawn_acp(temp: &TempDir, fixture: &str) -> StdioJsonRpcClient {
 }
 
 #[test]
+#[cfg(unix)]
+fn acp_cli_explicit_root_alias_preserves_history_after_cold_restart() {
+    let _guard = lock_acp_cli_tests();
+    for use_alias in [false, true] {
+        let temp = TempDir::new().unwrap();
+        let workspace = temp.path().canonicalize().unwrap();
+        let alias = temp.path().join("alias");
+        std::os::unix::fs::symlink(&workspace, &alias).unwrap();
+        let root = if use_alias { &alias } else { &workspace };
+        write_file(temp.path(), "root.harn", &format!(
+            "pipeline default(harness: Harness) {{\n\
+             const frame = harness.agent.session_init(prompt, nil, {{root: {}}})\n\
+             return harness.agent.session_finalize(frame.session_id, {{final_status: \"completed\"}})\n\
+             }}\n", serde_json::to_string(root).unwrap(),
+        ));
+        let mut client = spawn_acp(&temp, "root.harn");
+        let (_, initialized) = send_request(
+            &mut client,
+            json!({
+                "jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}
+            }),
+        );
+        assert!(initialized["error"].is_null(), "{initialized}");
+        let policy = json!({"kind": "isolated", "grants": []});
+        let (_, created) = send_request(
+            &mut client,
+            json!({
+                "jsonrpc": "2.0", "id": 2, "method": "session/new",
+                "params": {"cwd": workspace, "environmentPolicy": policy}
+            }),
+        );
+        let session = created["result"]["sessionId"]
+            .as_str()
+            .expect("session created");
+        let (_, turn) = send_request(
+            &mut client,
+            json!({
+                "jsonrpc": "2.0", "id": 3, "method": "session/prompt",
+                "params": {"sessionId": session, "messageId": "9d45dd0c-a118-4e4a-8778-642695b4d325",
+                    "prompt": [{"type": "text", "text": "root identity probe"}]}
+            }),
+        );
+        assert_eq!(turn["result"]["stopReason"], "end_turn", "{turn}");
+        let (_, history) = send_request(
+            &mut client,
+            json!({
+                "jsonrpc": "2.0", "id": 4, "method": "harn.session_history.boundaries",
+                "params": {"sessionId": session}
+            }),
+        );
+        let positions = history["result"]["positions"]
+            .as_array()
+            .expect("history measured");
+        assert!(
+            positions
+                .iter()
+                .any(|position| position["source_event_id"].as_str().is_some()),
+            "the controlled turn must have a canonical source event: {history}"
+        );
+        client.shutdown_expect_success();
+
+        let mut cold = spawn_acp(&temp, "root.harn");
+        let (_, initialized) = send_request(
+            &mut cold,
+            json!({
+                "jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}
+            }),
+        );
+        assert!(initialized["error"].is_null(), "{initialized}");
+        let (_, loaded) = send_request(
+            &mut cold,
+            json!({
+                "jsonrpc": "2.0", "id": 2, "method": "session/load",
+                "params": {"sessionId": session, "cwd": workspace, "environmentPolicy": policy}
+            }),
+        );
+        assert!(
+            loaded["error"].is_null(),
+            "cold reload (alias={use_alias}): {loaded}"
+        );
+        assert!(
+            loaded["result"].is_object(),
+            "cold load must acknowledge the session: {loaded}"
+        );
+        let (_, reloaded) = send_request(
+            &mut cold,
+            json!({
+                "jsonrpc": "2.0", "id": 3, "method": "harn.session_history.boundaries",
+                "params": {"sessionId": session}
+            }),
+        );
+        assert_eq!(
+            reloaded["result"]["positions"], history["result"]["positions"],
+            "cold reload must retain the acknowledged history"
+        );
+        cold.shutdown_expect_success();
+
+        // Loading an already live session retains its original workspace.
+        // A fresh server must instead resolve this requested workspace.
+        let mut foreign_client = spawn_acp(&temp, "root.harn");
+        let (_, initialized) = send_request(
+            &mut foreign_client,
+            json!({
+                "jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}
+            }),
+        );
+        assert!(initialized["error"].is_null(), "{initialized}");
+        let foreign = TempDir::new().unwrap();
+        let (_, denied) = send_request(
+            &mut foreign_client,
+            json!({
+                "jsonrpc": "2.0", "id": 4, "method": "session/load",
+                "params": {"sessionId": session, "cwd": foreign.path(), "environmentPolicy": policy}
+            }),
+        );
+        assert_eq!(
+            denied["error"]["code"], -32602,
+            "a cold load must not find the session in another workspace: {denied}"
+        );
+        foreign_client.shutdown_expect_success();
+    }
+}
+
+#[test]
 fn acp_cli_host_requests_attribute_imported_callers_without_argument_values() {
     let _guard = lock_acp_cli_tests();
     let temp = TempDir::new().unwrap();

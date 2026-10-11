@@ -169,7 +169,9 @@ pub fn classify_permission_path(path: &str, workspace_root: Option<&Path>) -> Wo
     info
 }
 
-fn canonicalize_existing_ancestor(path: &Path) -> std::io::Result<PathBuf> {
+/// Resolve physical path identity while preserving a not-yet-created suffix.
+/// Dangling links and errors other than absence remain errors.
+pub(crate) fn canonicalize_existing_ancestor(path: &Path) -> std::io::Result<PathBuf> {
     let mut ancestor = path;
     let mut suffix = Vec::new();
     loop {
