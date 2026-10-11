@@ -3500,6 +3500,9 @@ determinism).
 
 ### URL parsing
 
+`url_build` assigns each component separately, percent-encodes reserved characters in hierarchical paths,
+and preserves explicit empty queries and fragments.
+
 ```harn
 url_parse("https://api.example.com:8080/v1/items?q=hi#frag")
 // → {scheme: "https", host: "api.example.com", port: 8080,

@@ -1035,8 +1035,8 @@ helpers such as `add_business_days` and `next_business_day`.
 |---|---|---|---|
 | `harness.clock.now()` | none | dict | Current UTC datetime as dict with `year`, `month`, `day`, `hour`, `minute`, `second`, `weekday`, `timestamp`, and `iso8601` fields |
 | `harness.clock.date_iso()` | none | string | Current UTC datetime as RFC 3339 / ISO 8601 string |
-| `date_parse(str)` | str: string | int or float | Parse RFC 3339 / ISO 8601 strings (including offsets and fractional seconds) into a Unix timestamp. Falls back to legacy numeric-component extraction for malformed legacy inputs, but validates the resulting calendar date |
-| `date_format(dt, format?, tz?)` | dt: float, int, or dict; format: string (default `"%Y-%m-%d %H:%M:%S"`); tz: IANA timezone string | string | Format a timestamp or date dict using chrono/strftime format codes such as `%Y`, `%m`, `%d`, `%H`, `%M`, `%S`, `%A`, `%B`, `%Z`, `%z`, `%:z`, `%f`, `%3f`, and `%s`. Negative pre-epoch timestamps are supported |
+| `date_parse(str)` | str: string | int or float | Parse RFC 3339 timestamps, minute-precision timestamps with offsets, or `YYYY-MM-DD` with an optional `HH:MM[:SS[.fraction]]` time separated by `T` or a space. Times without offsets use UTC. Invalid dates, offsets, and trailing text throw |
+| `date_format(dt, format?, tz?)` | dt: float, int, or dict; format: string (default `"%Y-%m-%d %H:%M:%S"`); tz: IANA timezone string | string | Format a timestamp or date dict using chrono/strftime format codes such as `%Y`, `%m`, `%d`, `%H`, `%M`, `%S`, `%A`, `%B`, `%Z`, `%z`, `%:z`, `%f`, `%3f`, and `%s`. Negative pre-epoch timestamps are supported. Invalid format codes throw |
 | `date_in_zone(dt, tz)` | dt: float, int, or dict; tz: IANA timezone string | dict | Convert a timestamp into timezone-local fields: `year`, `month`, `day`, `hour`, `minute`, `second`, `weekday`, `zone`, `offset_seconds`, `timestamp`, and `iso8601` |
 | `date_to_zone(dt, tz)` | dt: float, int, or dict; tz: IANA timezone string | string | Convert a timestamp to an RFC 3339 string with the timezone's offset |
 | `date_from_components(parts, tz?)` | parts: dict; tz: IANA timezone string (default UTC) | int or float | Build a Unix timestamp from `{year, month, day, hour?, minute?, second?}` interpreted in the given timezone |
@@ -1052,10 +1052,8 @@ helpers such as `add_business_days` and `next_business_day`.
 | `weekday_name(dt, tz?)` | dt: float, int, or dict; tz: IANA timezone string | string | Weekday name for a timestamp, optionally in a timezone |
 | `month_name(dt, tz?)` | dt: float, int, or dict; tz: IANA timezone string | string | Month name for a timestamp, optionally in a timezone |
 
-Migration note: `date_parse` now tries standards-compliant RFC 3339 / ISO 8601 parsing first.
-Malformed strings that previously happened to work through digit extraction still fall back to
-that behavior, but impossible calendar dates such as `"2024-02-31"` now throw instead of rolling
-through timestamp arithmetic.
+Migration note: `date_parse` no longer extracts digits from malformed input.
+Use one of the formats above; strings such as `"2026/04/25"` throw.
 
 ## Vision
 
