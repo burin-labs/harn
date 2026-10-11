@@ -25,6 +25,17 @@ printf '[package]\nname = "fixture"\nversion = "0.0.0"\nedition = "2021"\n[works
 mkdir -p "$checkout/src" && printf 'fn main() {}\n' >"$checkout/src/main.rs"
 
 wrapper=$(harn_sccache_wrapper_path "$checkout" "$storage")
+
+# The rebuilt wrapper ends in an exec of a program named `sccache`, and the
+# repository-policy lane installs no compiler cache. Stand up a forwarding stub
+# there rather than skipping, as sccache_rustc_wrapper_test.sh does.
+if ! command -v sccache >/dev/null 2>&1; then
+  mkdir -p "$tmp_root/stub-bin"
+  printf '#!/usr/bin/env bash\n# Stands in for sccache: run the compiler, cache nothing.\nexec "$@"\n' \
+    >"$tmp_root/stub-bin/sccache"
+  chmod +x "$tmp_root/stub-bin/sccache"
+  PATH="$tmp_root/stub-bin:$PATH"
+fi
 write_config() {
   printf '[build]\nrustc-wrapper = "%s"\ntarget-dir = "%s" # harn-dev-setup-managed\n' \
     "$1" "$tmp_root/target" >"$checkout/.cargo/config.toml"
