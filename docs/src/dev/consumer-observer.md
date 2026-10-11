@@ -25,7 +25,23 @@ The closed context contains:
 Admission reads authenticated parent and child workflow metadata. It requires
 the expected parent workflow, revision, current attempt, and live state. The
 child must be the expected workflow dispatch by the trusted App, with the
-expected source and the same context in its actual event inputs.
+expected source and the same context in its actual event inputs. The shared
+owner fixes the dispatch actor to `harn-release-bot[bot]`; callers cannot change
+that trust anchor through action inputs or environment variables.
+
+Consumers must register the discovery projection on their workflow:
+
+```yaml
+run-name: >-
+  ${{ inputs.observer
+    && format('Consumer observer {0}.{1}/{2} @ {3}', fromJSON(inputs.observer).parent_run_id, fromJSON(inputs.observer).parent_run_attempt, fromJSON(inputs.observer).dispatch_nonce, fromJSON(inputs.observer).source_revision)
+    || 'Consumer rehearsal' }}
+```
+
+This expression is mechanically checked against `observerRunNameExpression`.
+The exact title binds discovery to the admitted dispatch; an ordinary workflow
+title does not satisfy observer admission. The action cannot set a workflow's
+run name.
 
 Before dispatch, the parent stores the exact closed context as
 `consumer-observer.json` in an immutable artifact named by

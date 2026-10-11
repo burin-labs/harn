@@ -12,10 +12,6 @@ inputs:
   token:
     description: Read authority for the consumer and public parent run
     required: true
-  dispatch-actor:
-    description: Trusted App that dispatches owned consumer rehearsals
-    required: false
-    default: 'harn-release-bot[bot]'
 outputs:
   owned:
     description: Explicit ownership after successful admission
@@ -36,5 +32,4 @@ runs:
         GH_TOKEN: ${{ inputs.token }}
         OBSERVER_CONTEXT: ${{ inputs.observer }}
         SOURCE_REVISION: ${{ inputs.source-revision }}
-        OBSERVER_DISPATCH_ACTOR: ${{ inputs.dispatch-actor }}
       run: node "$GITHUB_ACTION_PATH/../../../scripts/ci/consumer-observer-admit.mjs"

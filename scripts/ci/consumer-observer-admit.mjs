@@ -29,7 +29,6 @@ async function main() {
     headSha: env.GITHUB_SHA,
     workflow: env.GITHUB_WORKFLOW_REF.slice(workflowPrefix.length).split('@')[0],
     sourceRevision: env.SOURCE_REVISION,
-    dispatchActor: env.OBSERVER_DISPATCH_ACTOR,
   }, child, event, declaration);
   const file = path.join(env.RUNNER_TEMP, `consumer-observer-${context.dispatch_nonce}.json`);
   fs.writeFileSync(file, `${JSON.stringify(receipt)}\n`, { flag: 'wx', mode: 0o600 });

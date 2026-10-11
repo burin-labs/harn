@@ -8,7 +8,7 @@ import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import {
   admitChild, admitObserver, githubRecord, observerContext, observerRunName,
-  observerDeclarationName, observerRunNameExpression,
+  observerDeclarationName, observerRunNameExpression, observerDispatchActor,
 } from '../lib/consumer-observer.mjs';
 
 const context = {
@@ -28,13 +28,13 @@ const parent = {
 const expected = {
   repository: 'acme/widget-host', runId: '73', attempt: 1,
   headSha: 'c'.repeat(40), workflow: '.github/workflows/rehearsal.yml',
-  sourceRevision: context.source_revision, dispatchActor: 'release-app[bot]',
+  sourceRevision: context.source_revision,
 };
 const child = {
   id: 73, run_attempt: 1, head_sha: expected.headSha,
   head_repository: { full_name: expected.repository },
   path: expected.workflow, event: 'workflow_dispatch', status: 'in_progress',
-  actor: { login: expected.dispatchActor, type: 'Bot' },
+  actor: { login: observerDispatchActor, type: 'Bot' },
   display_title: observerRunName(context),
 };
 const event = { inputs: { observer: JSON.stringify(context), source_revision: context.source_revision } };
@@ -62,7 +62,7 @@ test('a matching run name cannot substitute for dispatch custody', () => {
     { ...child, id: 74 }, { ...child, path: '.github/workflows/other.yml' },
     { ...child, event: 'pull_request' }, { ...child, head_sha: 'd'.repeat(40) },
     { ...child, actor: { login: 'unrelated[bot]', type: 'Bot' } },
-    { ...child, actor: { login: expected.dispatchActor, type: 'User' } },
+    { ...child, actor: { login: observerDispatchActor, type: 'User' } },
     { ...child, run_attempt: 2 },
   ]) assert.throws(() => admitChild(context, parent, expected, record, event, context), /child_dispatch_identity_unproven/);
   assert.throws(() => admitChild(context, parent, expected, child, {
@@ -83,6 +83,8 @@ test('workflow run-name projection agrees mechanically with the owning renderer'
   const projected = template.replace(/\{([0-9]+)\}/g, (_, index) => context[fields[Number(index)]]);
   assert.equal(projected, observerRunName(context));
   assert.ok(projected.length < 255);
+  const documentation = fs.readFileSync(new URL('../../docs/src/dev/consumer-observer.md', import.meta.url), 'utf8');
+  assert.ok(documentation.includes(observerRunNameExpression), 'documented caller projection must match the owner');
 });
 
 test('missing authenticated API records are unknown, while a nonempty reading reaches admission', async () => {
@@ -102,6 +104,7 @@ test('the action entrypoint reaches private receipt creation and refuses dead pa
     const eventFile = path.join(scratch, 'event.json');
     const preload = path.join(scratch, 'fetch.mjs');
     const parentFile = path.join(scratch, 'parent.json');
+    const childFile = path.join(scratch, 'child.json');
     const censusFile = path.join(scratch, 'census.json');
     const declarationFile = path.join(scratch, 'consumer-observer.json');
     const archiveFile = path.join(scratch, 'declaration.zip');
@@ -130,7 +133,8 @@ test('the action entrypoint reaches private receipt creation and refuses dead pa
         arrayBuffer: async () => fs.readFileSync(${JSON.stringify(archiveFile)}),
         json: async () => url.includes('/artifacts?')
           ? JSON.parse(fs.readFileSync(${JSON.stringify(censusFile)}, 'utf8'))
-          : url.endsWith('/42') ? parentRead() : ${JSON.stringify(child)}});`);
+          : url.endsWith('/42') ? parentRead()
+          : JSON.parse(fs.readFileSync(${JSON.stringify(childFile)}, 'utf8'))});`);
     const env = {
       PATH: process.env.PATH,
       NODE_OPTIONS: `--import=${preload}`,
@@ -144,11 +148,11 @@ test('the action entrypoint reaches private receipt creation and refuses dead pa
       GITHUB_SHA: expected.headSha,
       GITHUB_WORKFLOW_REF: `${expected.repository}/${expected.workflow}@refs/heads/main`,
       SOURCE_REVISION: expected.sourceRevision,
-      OBSERVER_DISPATCH_ACTOR: expected.dispatchActor,
       RUNNER_TEMP: scratch,
     };
     const entry = fileURLToPath(new URL('../ci/consumer-observer-admit.mjs', import.meta.url));
     fs.writeFileSync(parentFile, JSON.stringify(parent));
+    fs.writeFileSync(childFile, JSON.stringify(child));
     const admitted = spawnSync(process.execPath, [entry], { env, encoding: 'utf8' });
     assert.equal(admitted.status, 0, admitted.stderr);
     assert.match(fs.readFileSync(output, 'utf8'), /^owned=true\n/);
@@ -159,6 +163,15 @@ test('the action entrypoint reaches private receipt creation and refuses dead pa
 
     fs.rmSync(receiptFile);
     fs.writeFileSync(output, '');
+    fs.writeFileSync(childFile, JSON.stringify({ ...child, actor: { login: 'unrelated[bot]', type: 'Bot' } }));
+    const forgedActor = spawnSync(process.execPath, [entry], {
+      env: { ...env, OBSERVER_DISPATCH_ACTOR: 'unrelated[bot]' }, encoding: 'utf8',
+    });
+    assert.equal(forgedActor.status, 1);
+    assert.match(forgedActor.stderr, /reason=child_dispatch_identity_unproven/);
+    assert.equal(fs.existsSync(receiptFile), false);
+    assert.equal(fs.readFileSync(output, 'utf8'), '');
+    fs.writeFileSync(childFile, JSON.stringify(child));
     fs.writeFileSync(censusFile, JSON.stringify({ total_count: 0, artifacts: [] }));
     const unissued = spawnSync(process.execPath, [entry], { env, encoding: 'utf8' });
     assert.equal(unissued.status, 1);

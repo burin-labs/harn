@@ -5,6 +5,7 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 
 const parentRepository = 'burin-labs/harn';
+export const observerDispatchActor = 'harn-release-bot[bot]';
 const parentWorkflows = new Set([
   '.github/workflows/consumer-canary.yml',
   '.github/workflows/build-release-binaries.yml',
@@ -97,7 +98,7 @@ export function admitObserver(input, parent) {
  * @param {ObserverContext} context
  * @param {object} parent
  * @param {{repository: string, runId: string, attempt: number, headSha: string,
- * workflow: string, sourceRevision: string, dispatchActor: string}} expected
+ * workflow: string, sourceRevision: string}} expected
  * @param {object} child
  * @param {object} event */
 export function admitChild(context, parent, expected, child, event, declaration) {
@@ -109,7 +110,7 @@ export function admitChild(context, parent, expected, child, event, declaration)
   if (String(child?.id) !== expected.runId || child.run_attempt !== expected.attempt
     || child.head_sha !== expected.headSha || child.head_repository?.full_name !== expected.repository
     || child.path !== expected.workflow || child.event !== 'workflow_dispatch'
-    || child.actor?.login !== expected.dispatchActor || child.actor?.type !== 'Bot'
+    || child.actor?.login !== observerDispatchActor || child.actor?.type !== 'Bot'
     || expected.sourceRevision !== observer.source_revision
     || event?.inputs?.source_revision !== observer.source_revision
     || JSON.stringify(observerContext(JSON.parse(event?.inputs?.observer ?? 'null'))) !== JSON.stringify(observer)
@@ -125,7 +126,7 @@ export function admitChild(context, parent, expected, child, event, declaration)
       run_attempt: expected.attempt,
       head_sha: expected.headSha,
       workflow: expected.workflow,
-      dispatch_actor: expected.dispatchActor,
+      dispatch_actor: observerDispatchActor,
     },
   };
 }
