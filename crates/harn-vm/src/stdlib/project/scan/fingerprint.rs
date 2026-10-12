@@ -11,16 +11,6 @@ pub(in super::super) fn detect_project_fingerprint(dir: &Path) -> ProjectFingerp
         signals.add_language_signal("typescript");
         signals.build_tools.insert("next".to_string());
     }
-    if signals.node_project
-        && !signals.package_managers.contains("npm")
-        && !signals.package_managers.contains("pnpm")
-        && !signals.package_managers.contains("yarn")
-        && !signals.package_managers.contains("bun")
-    {
-        signals
-            .package_managers
-            .insert(crate::package_scripts::DEFAULT_MANAGER.name().to_string());
-    }
     if signals.python_project
         && !signals.package_managers.contains("poetry")
         && !signals.package_managers.contains("uv")
@@ -145,7 +135,7 @@ pub(super) fn walk_project_fingerprint(
         }
 
         if file_type.is_file() {
-            inspect_fingerprint_file(&path, &rel, &name, signals);
+            inspect_fingerprint_file(base, &path, &rel, &name, signals);
         }
     }
 }
@@ -184,17 +174,17 @@ pub(super) fn inspect_fingerprint_dir(rel: &str, name: &str, signals: &mut Finge
 }
 
 pub(super) fn inspect_fingerprint_file(
+    root: &Path,
     path: &Path,
     rel: &str,
     name: &str,
     signals: &mut FingerprintSignals,
 ) {
-    if let Some((_, manager)) = crate::package_scripts::LOCKFILES
+    if crate::package_scripts::LOCKFILES
         .iter()
-        .find(|(file, _)| *file == name)
+        .any(|(file, _)| *file == name)
     {
         signals.lockfile_paths.insert(rel.to_string());
-        signals.package_managers.insert(manager.name().to_string());
     }
     if let Some((_lockfile, manager)) = PROJECT_LOCKFILES
         .iter()
@@ -228,7 +218,7 @@ pub(super) fn inspect_fingerprint_file(
 
     match name {
         "Cargo.toml" => inspect_cargo_manifest(path, signals),
-        "package.json" => inspect_package_json(path, signals),
+        "package.json" => inspect_package_json(root, path, signals),
         "pyproject.toml" => inspect_pyproject(path, signals),
         "requirements.txt" | "requirements-dev.txt" | "requirements-test.txt" => {
             inspect_python_requirements(path, signals);
@@ -359,7 +349,7 @@ pub(super) fn inspect_cargo_manifest(path: &Path, signals: &mut FingerprintSigna
     }
 }
 
-pub(super) fn inspect_package_json(path: &Path, signals: &mut FingerprintSignals) {
+pub(super) fn inspect_package_json(root: &Path, path: &Path, signals: &mut FingerprintSignals) {
     let Some(parsed) = read_json_object(path.to_path_buf()) else {
         return;
     };
@@ -394,8 +384,12 @@ pub(super) fn inspect_package_json(path: &Path, signals: &mut FingerprintSignals
         signals.has_tests = true;
     }
 
-    if let Ok(Some(manager)) = crate::package_scripts::declared_manager(&parsed) {
-        signals.package_managers.insert(manager.name().to_string());
+    if let Some(directory) = path.parent() {
+        if let crate::package_scripts::Discovery::Resolved(scripts) =
+            crate::package_scripts::discover(root, directory)
+        {
+            signals.package_managers.insert(scripts.manager);
+        }
     }
 
     if let Some(scripts) = parsed.get("scripts").and_then(|value| value.as_object()) {
