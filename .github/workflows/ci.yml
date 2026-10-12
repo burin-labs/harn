@@ -2461,10 +2461,14 @@ jobs:
     name: VS Code extension
     needs: changes
     if: needs.changes.outputs.vscode == 'true'
-    # Keep editor-only changes off the unrelated Rust graph without dropping
-    # their actual owner checks. This also runs when ci.yml changes so the
-    # routing and required-status wiring test themselves.
+    # The LSP test launches the shared CLI as harn-lsp. Rust changes require
+    # this run's verified artifact; editor-only changes use the published
+    # workspace version because the native server did not change.
     runs-on: ubuntu-24.04
+    timeout-minutes: 50
+    permissions:
+      actions: read
+      contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/node-cache
@@ -2475,8 +2479,47 @@ jobs:
         working-directory: editors/vscode
       - run: npm run compile
         working-directory: editors/vscode
+      - name: Wait for shared Harn binary
+        if: needs.changes.outputs.rust == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ./scripts/ci/wait_for_run_artifacts.sh harn-cli.tar.zst
+      - name: Download shared Harn binary
+        if: needs.changes.outputs.rust == 'true'
+        uses: ./.github/actions/download-artifact-with-retry
+        with:
+          name: harn-cli.tar.zst
+          path: ${{ runner.temp }}
+          skip-decompress: true
+      - name: Verify shared Harn binary
+        if: needs.changes.outputs.rust == 'true'
+        run: >-
+          ./scripts/ci/rust_artifact.sh restore-cli
+          "$RUNNER_TEMP/harn-cli.tar.zst"
+          "$RUNNER_TEMP/harn-cli"
+          "$GITHUB_SHA"
+          "$GITHUB_ENV"
+      - name: Resolve the published workspace version
+        if: needs.changes.outputs.rust != 'true'
+        id: harn-version
+        shell: bash
+        run: |
+          set -euo pipefail
+          source scripts/lib/release_version.sh
+          workspace_version="$(cargo metadata --locked --no-deps --format-version 1 \
+            | jq -er '[.packages[] | select(.name == "harn-cli") | .version] | unique | if length == 1 then .[0] else error("expected one harn-cli version") end')"
+          version="$(release_published_version_for_workspace "$workspace_version")"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - name: Install pinned Harn release
+        if: needs.changes.outputs.rust != 'true'
+        id: harn
+        uses: ./.github/actions/setup-harn
+        with:
+          version: ${{ steps.harn-version.outputs.version }}
       - run: npm test
         working-directory: editors/vscode
+        env:
+          HARN_BIN: ${{ env.HARN_BIN || steps.harn.outputs.path }}
 
   docs-site:
     name: Docs site

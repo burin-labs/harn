@@ -129,7 +129,13 @@ function fileUri(filePath) {
   return pathToFileURL(filePath).toString();
 }
 
-function buildLspBinary(root) {
+function lspEnvironment() {
+  const env = { ...process.env, HARN_LLM_CALLS_DISABLED: "1" };
+  delete env.HARN_LSP_BIN;
+  return env;
+}
+
+function resolveLspBinary(root) {
   const suppliedBinary = process.env.HARN_LSP_BIN || process.env.HARN_BIN;
   if (suppliedBinary) {
     assert.ok(
@@ -139,33 +145,28 @@ function buildLspBinary(root) {
     return suppliedBinary;
   }
 
-  const cargo = path.join(root, "scripts/cargo_with_worktree_build_dir.sh");
-  const env = {
-    ...process.env,
-    HARN_LLM_CALLS_DISABLED: "1",
-  };
-  const options = { cwd: root, env, encoding: "utf8" };
-  const metadata = spawnSync(
-    "bash",
-    [cargo, "metadata", "--no-deps", "--format-version", "1"],
-    options,
+  assert.notEqual(
+    process.env.CI,
+    "true",
+    "CI must supply the verified Harn artifact through HARN_LSP_BIN or HARN_BIN",
   );
-  assert.equal(metadata.status, 0, `Cargo metadata failed: ${metadata.stderr}`);
-  const targetDir = JSON.parse(metadata.stdout).target_directory;
-  assert.equal(typeof targetDir, "string");
-  const build = spawnSync(
+
+  const resolver = path.join(root, "scripts/harn_bin.sh");
+  const env = lspEnvironment();
+  const options = { cwd: root, env, encoding: "utf8" };
+  const resolved = spawnSync(
     "bash",
-    [cargo, "build", "--quiet", "-p", "harn-lsp", "--bin", "harn-lsp"],
+    [resolver, "--print"],
     options,
   );
   assert.equal(
-    build.status,
+    resolved.status,
     0,
-    `cargo build failed\nstdout:\n${build.stdout}\nstderr:\n${build.stderr}`,
+    `Harn binary resolution failed\nstdout:\n${resolved.stdout}\nstderr:\n${resolved.stderr}`,
   );
-
-  const exe = process.platform === "win32" ? "harn-lsp.exe" : "harn-lsp";
-  return path.join(targetDir, "debug", exe);
+  const binary = resolved.stdout.trim();
+  assert.ok(binary && fs.existsSync(binary), `Harn binary does not exist: ${binary}`);
+  return binary;
 }
 
 function positionOf(source, needle) {
@@ -181,12 +182,12 @@ function positionOf(source, needle) {
 
 test("VS Code-facing LSP surface supports on-type formatting, folding, and call hierarchy", async (t) => {
   const root = repoRoot();
-  const lspBinary = buildLspBinary(root);
+  const lspBinary = resolveLspBinary(root);
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "harn-lsp-"));
   const server = spawn(lspBinary, [], {
     argv0: "harn-lsp",
     cwd: root,
-    env: { ...process.env, HARN_LLM_CALLS_DISABLED: "1" },
+    env: lspEnvironment(),
     stdio: ["pipe", "pipe", "pipe"],
   });
   const client = new LspClient(server);

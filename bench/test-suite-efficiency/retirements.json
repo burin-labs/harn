@@ -1,0 +1,53 @@
+{
+  "issue": 9649,
+  "baselineRevision": "7deefa6d8215dc5ce0bac2705624516d17c89392",
+  "removedCases": [
+    {
+      "path": "crates/harn-cli/src/commands/eval_tool_calls.rs",
+      "name": "selector_accepts_key_value_and_colon_forms",
+      "reason": "Exact copy of the same shared selector's owning test.",
+      "retainedPath": "crates/harn-cli/src/commands/eval_model_selector.rs",
+      "retainedName": "selector_accepts_key_value_and_colon_forms"
+    },
+    {
+      "path": "crates/harn-vm/src/stdlib/strings.rs",
+      "name": "word_wrap_breaks_at_word_boundary",
+      "reason": "Identical input, width, and expected output through the public builtin in conformance.",
+      "retainedPath": "conformance/tests/strings/string_formatting_helpers.harn",
+      "retainedAssertion": "word_wrap breaks at word boundary"
+    },
+    {
+      "path": "crates/harn-vm/src/stdlib/strings.rs",
+      "name": "word_wrap_preserves_paragraphs",
+      "reason": "Identical input, width, and expected output through the public builtin in conformance.",
+      "retainedPath": "conformance/tests/strings/string_formatting_helpers.harn",
+      "retainedAssertion": "word_wrap preserves paragraphs under the limit"
+    },
+    {
+      "path": "crates/harn-vm/src/stdlib/strings.rs",
+      "name": "word_wrap_measures_cjk_as_double_width",
+      "reason": "Identical CJK input, width, and expected output through the public builtin in conformance.",
+      "retainedPath": "conformance/tests/strings/string_formatting_helpers.harn",
+      "retainedAssertion": "word_wrap counts CJK glyphs as two columns"
+    },
+    {
+      "path": "crates/harn-vm/src/stdlib/strings.rs",
+      "name": "word_wrap_measures_emoji_as_double_width",
+      "reason": "Identical emoji input, width, and expected output through the public builtin in conformance.",
+      "retainedPath": "conformance/tests/strings/string_formatting_helpers.harn",
+      "retainedAssertion": "word_wrap counts an emoji as two columns"
+    }
+  ],
+  "retainedScenarios": [
+    {
+      "path": "crates/harn-vm/src/stdlib/strings.rs",
+      "name": "dedent_preserves_line_structure",
+      "scenarios": [
+        "minimum common prefix",
+        "blank lines",
+        "no common prefix"
+      ],
+      "removedCaseCredit": 0
+    }
+  ]
+}

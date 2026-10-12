@@ -1014,57 +1014,24 @@ mod tests {
     use super::{dedent_str, word_wrap_str};
 
     #[test]
-    fn dedent_strips_minimum_common_prefix() {
-        let input = "    line one\n      line two\n    line three\n";
-        let result = dedent_str(input);
-        assert_eq!(result, "line one\n  line two\nline three\n");
-    }
-
-    #[test]
-    fn dedent_ignores_blank_lines_when_computing_prefix() {
-        let input = "  one\n\n  two\n";
-        let result = dedent_str(input);
-        assert_eq!(result, "one\n\ntwo\n");
-    }
-
-    #[test]
-    fn dedent_with_no_common_prefix_is_passthrough() {
-        let input = "  foo\nbar\n";
-        let result = dedent_str(input);
-        assert_eq!(result, "  foo\nbar\n");
-    }
-
-    #[test]
-    fn word_wrap_breaks_at_word_boundary() {
-        let result = word_wrap_str("the quick brown fox jumps over the lazy dog", 15);
-        assert_eq!(result, "the quick brown\nfox jumps over\nthe lazy dog");
-    }
-
-    #[test]
-    fn word_wrap_preserves_paragraphs() {
-        let result = word_wrap_str("alpha beta\ngamma delta", 20);
-        assert_eq!(result, "alpha beta\ngamma delta");
+    fn dedent_preserves_line_structure() {
+        for (name, input, expected) in [
+            (
+                "minimum common prefix",
+                "    line one\n      line two\n    line three\n",
+                "line one\n  line two\nline three\n",
+            ),
+            ("blank lines", "  one\n\n  two\n", "one\n\ntwo\n"),
+            ("no common prefix", "  foo\nbar\n", "  foo\nbar\n"),
+        ] {
+            assert_eq!(dedent_str(input), expected, "{name}");
+        }
     }
 
     #[test]
     fn word_wrap_long_word_keeps_word_intact() {
         let result = word_wrap_str("aa supercalifragilistic bb", 5);
         assert_eq!(result, "aa\nsupercalifragilistic\nbb");
-    }
-
-    #[test]
-    fn word_wrap_measures_cjk_as_double_width() {
-        // Each glyph is one grapheme but two columns. Under a budget of 5,
-        // exactly two glyphs fit per line (2 + 1 + 2 = 5); a grapheme count
-        // would have packed three (3 <= 5) and overflowed to six columns.
-        let result = word_wrap_str("日 本 語 で", 5);
-        assert_eq!(result, "日 本\n語 で");
-    }
-
-    #[test]
-    fn word_wrap_measures_emoji_as_double_width() {
-        let result = word_wrap_str("🚀 🚀 🚀", 5);
-        assert_eq!(result, "🚀 🚀\n🚀");
     }
 
     #[test]
