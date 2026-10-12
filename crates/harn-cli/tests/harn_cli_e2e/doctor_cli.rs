@@ -22,7 +22,10 @@ fn sandbox_doctor_streams_all_cases_without_polluting_json() {
 
     let output = Command::new(binary_path())
         .args(["doctor", "sandbox", "--json"])
-        .env("HARN_CONFORMANCE_UNDECLARED_NAME", "must-not-reach-child")
+        .env(
+            "SANDBOX_CONFORMANCE_UNDECLARED_NAME",
+            "must-not-reach-child",
+        )
         .output()
         .expect("spawn sandbox doctor");
     let parsed: serde_json::Value = serde_json::from_slice(&output.stdout)
@@ -75,7 +78,10 @@ fn sandbox_doctor_refuses_an_escape_in_the_json_envelope() {
     let output = Command::new(binary_path())
         .args(["doctor", "sandbox", "--json"])
         .env("HARN_HANDLER_SANDBOX", "off")
-        .env("HARN_CONFORMANCE_UNDECLARED_NAME", "must-not-reach-child")
+        .env(
+            "SANDBOX_CONFORMANCE_UNDECLARED_NAME",
+            "must-not-reach-child",
+        )
         .output()
         .expect("spawn deliberately unconfined sandbox doctor");
     let parsed: serde_json::Value = serde_json::from_slice(&output.stdout)
