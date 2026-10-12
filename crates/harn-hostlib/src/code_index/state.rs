@@ -465,10 +465,17 @@ impl IndexState {
         self.modules = imports::ModuleIndex::build(&self.path_to_id).with_go_modules(go_modules);
     }
 
-    /// [`Self::refresh_module_index`] for the snapshot-restore path,
-    /// which fills the path table in from disk rather than by walking.
+    /// Restore derived module membership and imported-module visibility.
+    /// Dependency snapshot rows retain explicit file edges, but not module
+    /// roots or their reverse projection. Derive those from saved imports
+    /// through the same resolver as a live edit, without expanding modules
+    /// into a file-edge cross-product or invalidating the restored call graph.
     pub(crate) fn rebuild_module_index(&mut self) {
         self.refresh_module_index();
+        for file in self.files.values() {
+            let resolved = self.resolve_file_imports(file, &file.relative_path);
+            self.deps.set_module_imports(file.id, resolved.modules);
+        }
     }
 
     /// Every file `id` depends on: the targets of its own import
@@ -504,19 +511,23 @@ impl IndexState {
     }
 
     pub(super) fn rebuild_deps(&mut self, id: FileId, relative_path: &str) {
-        let Some(file) = self.files.get(&id).cloned() else {
+        let Some(file) = self.files.get(&id) else {
             return;
         };
-        let resolved = imports::resolve(
+        let resolved = self.resolve_file_imports(file, relative_path);
+        self.deps.set_module_imports(id, resolved.modules);
+        self.deps
+            .set_edges(id, resolved.resolved, resolved.unresolved);
+    }
+
+    fn resolve_file_imports(&self, file: &IndexedFile, relative_path: &str) -> imports::Resolved {
+        imports::resolve(
             &file.imports,
             relative_path,
             &file.language,
             &self.path_to_id,
             &self.modules,
-        );
-        self.deps.set_module_imports(id, resolved.modules);
-        self.deps
-            .set_edges(id, resolved.resolved, resolved.unresolved);
+        )
     }
 
     /// Re-parse `id`'s source and replace its slice of the typed symbol

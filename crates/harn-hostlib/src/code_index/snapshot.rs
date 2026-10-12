@@ -357,9 +357,10 @@ impl IndexState {
         state.git_head = snap.meta.git_head;
         state.reconcile_progress = snap.reconcile_progress;
         state.set_next_file_id(snap.next_file_id);
-        // Module membership is derived from the path table, not stored:
-        // a snapshot that predates a resolver would otherwise restore a
-        // stale answer that no refresh with an unchanged path set fixes.
+        // Membership and imported-module visibility derive from saved file
+        // facts through the owning resolver. Explicit dependency rows alone
+        // lose whole-module imports when a later edit resolves callers again.
+        let _phase = super::timing::Phase::start("snapshot.restore_dependencies");
         state.rebuild_module_index();
         Ok(state)
     }

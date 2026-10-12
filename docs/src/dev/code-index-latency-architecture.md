@@ -15,6 +15,13 @@ normalization and removal semantics. Words share one immutable term allocation
 between forward and reverse projections. Tokenization groups borrowed tokens
 per file rather than allocating strings for every occurrence.
 
+Recovery also derives imported-module roots and their reverse projection from
+saved file imports through the same resolver as live edits. Explicit dependency
+snapshot rows do not retain whole-module visibility. Keeping that projection
+restored prevents a later declaration edit from dropping callers in unchanged
+importing files. Resolution borrows the saved file facts instead of cloning
+their complete symbol outline.
+
 Recovery adopts contiguous posting vectors, derives the removal projection
 once, and reserves the graph's known node count. Atomic snapshot replacement,
 graph validation, content reconciliation, checkpoint recovery, and query
