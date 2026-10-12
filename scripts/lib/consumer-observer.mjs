@@ -10,11 +10,12 @@ export const observerDispatchActor = 'harn-release-bot[bot]';
 // Workflow projections use this exact publication-step identity. Reusable
 // callers prefix job names, but GitHub retains the owned step name unchanged.
 export const observerDeclarationStep = 'Publish consumer observer declaration';
-const parentWorkflows = new Set([
-  '.github/workflows/consumer-canary.yml',
-  '.github/workflows/build-release-binaries.yml',
-  '.github/workflows/promote-release.yml',
-]);
+export const observerParentWorkflows = Object.freeze({
+  canary:'.github/workflows/consumer-canary.yml',
+  candidate:'.github/workflows/build-release-binaries.yml',
+  promotion:'.github/workflows/promote-release.yml',
+});
+const parentWorkflows = new Set(Object.values(observerParentWorkflows));
 const sha = /^[0-9a-f]{40}$/;
 const id = /^[1-9][0-9]*$/;
 const nonce = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
@@ -165,6 +166,11 @@ export function qualifyOwnedChild(input, context, parent, child, expected, decla
     repository: receipt.repository, runId: receipt.run_id, attempt: receipt.run_attempt,
     headSha: receipt.head_sha, workflow: receipt.workflow,
   }, child);
+  if ((expected.headSha !== undefined && (!sha.test(expected.headSha) || child.head_sha !== expected.headSha))
+    || (expected.branch !== undefined && (typeof expected.branch !== 'string' || !expected.branch
+      || child.head_branch !== expected.branch))) {
+    refuse('child_source_no_longer_eligible');
+  }
   return { schema: input.schema, observer, child: {
     repository:receipt.repository, workflow:receipt.workflow,
     run_id:receipt.run_id, run_attempt:receipt.run_attempt,
@@ -476,6 +482,55 @@ export async function dispatchObserverConsumer(parentToken, consumerToken, conte
   return {dispatched:true};
 }
 
+async function githubDefaultSource(token, repository, fetchRecord) {
+  const read=async suffix=>{
+    if (!token || !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository)) refuse('read_authority_or_identity_missing');
+    const response=await fetchRecord(`https://api.github.com/repos/${repository}${suffix}`, {
+      headers:{Authorization:`Bearer ${token}`,Accept:'application/vnd.github+json'},signal:AbortSignal.timeout(30_000),
+    });
+    if (!response.ok) refuse('consumer_source_read_refused');
+    return response.json();
+  };
+  const repositoryRecord=await read('');
+  if(repositoryRecord?.full_name!==repository || typeof repositoryRecord.default_branch!=='string'
+    || !repositoryRecord.default_branch) refuse('consumer_source_unmeasured');
+  const commit=await read(`/commits/${encodeURIComponent(repositoryRecord.default_branch)}`);
+  if(typeof commit?.sha!=='string' || !sha.test(commit.sha)) refuse('consumer_source_unmeasured');
+  return {headSha:commit.sha,branch:repositoryRecord.default_branch};
+}
+
+/** A public parent selector discovers custody; it does not grant it. Reuse
+ * returns only the original authenticated public context and reached decision,
+ * with no new declaration or cancellation ownership. */
+export async function readConsumerParentProduct(token, selection, expected, fetchRecord = fetch, extract = artifactJsonFromZip) {
+  if(!selection || Object.keys(selection).sort().join(',')!=='parentRunId,requireCurrentDefault,role,sourceRevision'
+    || typeof selection.parentRunId!=='string' || !id.test(selection.parentRunId)
+    || !Object.hasOwn(observerParentWorkflows,selection.role) || !sha.test(selection.sourceRevision)
+    || typeof selection.requireCurrentDefault!=='boolean') refuse('parent_selection_unproven');
+  const parent=await githubRecord(token,parentRepository,selection.parentRunId,fetchRecord);
+  if(parent.head_repository?.full_name!==parentRepository || parent.path!==observerParentWorkflows[selection.role]
+    || parent.status!=='completed' || !completedConclusions.has(parent.conclusion)) refuse('parent_selection_unproven');
+  const declarations=await githubParentDeclarations(token,selection.parentRunId,parent.run_attempt,fetchRecord,extract);
+  if(declarations.length!==1) refuse('dispatch_declaration_missing_or_ambiguous');
+  const context=declarations[0];
+  qualifyObserverParent(context,parent);
+  if(context.source_revision!==selection.sourceRevision) refuse('parent_selection_source_unproven');
+  const source=selection.requireCurrentDefault?await githubDefaultSource(token,expected.repository,fetchRecord):{};
+  const reading=await readConsumerProduct(token,context,{...expected,...source},fetchRecord,extract,async()=>{
+    const finalParent=await githubRecord(token,parentRepository,selection.parentRunId,fetchRecord);
+    qualifyObserverParent(context,finalParent);
+    if(finalParent.status!=='completed' || finalParent.conclusion!==parent.conclusion) refuse('parent_selection_unproven');
+    if(selection.requireCurrentDefault){
+      const finalSource=await githubDefaultSource(token,expected.repository,fetchRecord);
+      if(finalSource.headSha!==source.headSha || finalSource.branch!==source.branch) refuse('child_source_no_longer_eligible');
+    }
+  });
+  if(reading.discovered!==1 || reading.owned!==1 || reading.pending!==0 || reading.refused!==0 || !reading.product){
+    refuse('product_decision_unmeasured');
+  }
+  return {context,reading,owned:false};
+}
+
 /** Authenticated private custody is shared by observation and cleanup. */
 async function readOwnedChild(token, observer, parent, expected, candidate, declaration, fetchRecord, extract) {
   const runId = String(candidate.id);
@@ -495,6 +550,13 @@ async function readOwnedChild(token, observer, parent, expected, candidate, decl
  * zero product counts. The final reads narrow, but cannot atomically eliminate,
  * a dispatch or rerun racing the observation. */
 export async function observeConsumerProduct(token, context, expected, fetchRecord = fetch, extract = artifactJsonFromZip) {
+  return readConsumerProduct(token,context,expected,fetchRecord,extract);
+}
+
+// Reuse's eligibility reads run before the final child census and status read,
+// so selecting the current default source cannot leave an old child snapshot
+// at the end of its authority decision. The callback is private to this owner.
+async function readConsumerProduct(token, context, expected, fetchRecord, extract, beforeFinalRead = null) {
   const observer = observerContext(context);
   const parent = await githubRecord(token, observer.parent_repository, observer.parent_run_id,
     fetchRecord, observer.parent_run_attempt);
@@ -520,6 +582,7 @@ export async function observeConsumerProduct(token, context, expected, fetchReco
       runId:String(candidate.id), headSha:candidate.head_sha, name,
       filename:`consumer-observer-${observer.dispatch_nonce}.json`,
     }, fetchRecord, extract);
+    if(beforeFinalRead) await beforeFinalRead();
     const finalRuns = await githubChildCensus(token, expected.repository, expected.workflow,
       parent.created_at, fetchRecord);
     const finalMatching = finalRuns.filter(run => run.display_title === observerRunName(observer));

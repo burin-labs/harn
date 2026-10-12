@@ -6,7 +6,7 @@ import path from 'node:path';
 import {spawnSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
 import {fileURLToPath} from 'node:url';
-import {observerDeclarationName, observerDispatchActor, observerRunName, observerTerminalName} from '../lib/consumer-observer.mjs';
+import {observerDeclarationName, observerDeclarationStep, observerDispatchActor, observerRunName, observerTerminalName} from '../lib/consumer-observer.mjs';
 
 test('the terminal entrypoint records only an authenticated reached product decision', () => {
   const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'harn-observer-terminal-'));
@@ -118,12 +118,14 @@ test('the terminal entrypoint records only an authenticated reached product deci
       size_in_bytes:bytes.length,digest:`sha256:${createHash('sha256').update(bytes).digest('hex')}`,
       workflow_run:{id:73,head_sha:child.head_sha}}});
     const observerPreload=path.join(scratch,'observe-fetch.mjs');
+    const lastRead=path.join(scratch,'last-read.json');
     fs.writeFileSync(observerPreload,`import fs from 'node:fs';
       const fixture=JSON.parse(fs.readFileSync(${JSON.stringify(fixture)},'utf8'));
-      let censusReads=0,childReads=0;
+      let censusReads=0,childReads=0,parentReads=0,sourceReads=0;
       globalThis.fetch=async(url,options={})=>{
         if(options.method==='POST')throw new Error('unexpected-private-post');
         const endpoint=new URL(url),p=endpoint.pathname;
+        fs.writeFileSync(${JSON.stringify(lastRead)},JSON.stringify(p));
         if(p.endsWith('/zip')){
           const index=Number(/artifacts\\/(50[123])\\//.exec(p)?.[1])-501;
           return {ok:true,arrayBuffer:async()=>fs.readFileSync(fixture.archives[index].archive)};
@@ -131,10 +133,15 @@ test('the terminal entrypoint records only an authenticated reached product deci
         let record;
         if(p.endsWith('/artifacts')){
           const wanted=endpoint.searchParams.get('name');
-          if(!wanted)throw new Error('unfiltered-private-read');
-          const selected=fixture.archives.filter((a,index)=>a.metadata.name===wanted&&fixture.missing!==index);
+          if(!wanted&&!p.includes('/42/'))throw new Error('unfiltered-private-read');
+          const selected=fixture.archives.filter((a,index)=>(wanted?a.metadata.name===wanted:index===0)&&fixture.missing!==index);
           record={total_count:selected.length,artifacts:selected.map(a=>a.metadata)};
         }else if(p.endsWith('/42/attempts/2'))record=fixture.parent;
+        else if(p.endsWith('/42/attempts/2/jobs'))record={total_count:1,jobs:[{id:701,conclusion:'success',steps:[{
+          name:${JSON.stringify(observerDeclarationStep)},status:'completed',conclusion:fixture.publication??'success'}]}]};
+        else if(p.endsWith('/42'))record=++parentReads>1&&fixture.finalParent?fixture.finalParent:fixture.parent;
+        else if(p==='/repos/acme/widget-host')record={full_name:'acme/widget-host',default_branch:'main'};
+        else if(p.endsWith('/commits/main'))record={sha:++sourceReads>1&&fixture.finalSource?fixture.finalSource:fixture.source??'c'.repeat(40)};
         else if(p.endsWith('/73'))record=++childReads>1&&fixture.finalChild?fixture.finalChild:fixture.child;
         else if(p.endsWith('/rehearsal.yml/runs')){
           const rows=++censusReads>1&&fixture.finalRuns?fixture.finalRuns:fixture.runs;
@@ -196,6 +203,40 @@ test('the terminal entrypoint records only an authenticated reached product deci
     assert.equal(foreignReading.run.status,0,foreignReading.run.stderr);
     assert.equal(foreignReading.fields.verdict,'refused');
     assert.equal(foreignReading.reading.product,null);
+
+    const readParentEntry=fileURLToPath(new URL('../ci/consumer-observer-read-parent.mjs',import.meta.url));
+    const terminalParent={...parent,status:'completed',conclusion:'success',created_at:'2026-10-11T20:00:00Z'};
+    const reusableChild={...completed,head_branch:'main'};
+    const readParent=(changes={},extraEnv={})=>{
+      const output=path.join(scratch,`reuse-${sequence++}`);
+      fs.writeFileSync(fixture,JSON.stringify({parent:terminalParent,child:reusableChild,runs:[reusableChild],archives,...changes}));
+      const run=spawnSync(process.execPath,[readParentEntry],{encoding:'utf8',env:{PATH:process.env.PATH,
+        NODE_OPTIONS:`--import=${observerPreload}`,GH_TOKEN:'fixture-read',PARENT_RUN_ID:'42',PARENT_ROLE:'canary',
+        SOURCE_REVISION:context.source_revision,REQUIRE_CURRENT_DEFAULT:'true',CANARY_REPOSITORY:'acme/widget-host',
+        CANARY_WORKFLOW:'rehearsal.yml',GITHUB_OUTPUT:output,...extraEnv}});
+      const text=fs.existsSync(output)?fs.readFileSync(output,'utf8'):'';
+      assert.doesNotMatch(run.stdout+run.stderr+text,/widget-host|dispatch_actor|\/73|"run_id"/);
+      return {run,text};
+    };
+    const reused=readParent();assert.equal(reused.run.status,0,reused.run.stderr);
+    const reusedValue=JSON.parse(reused.run.stdout);
+    assert.deepEqual(reusedValue.context,context);assert.deepEqual(reusedValue.reading.product,product);
+    assert.equal(reusedValue.owned,false,'historical success does not grant new cancellation ownership');
+    assert.match(reused.text,/owned=false/);
+    assert.equal(JSON.parse(fs.readFileSync(lastRead,'utf8')),'/repos/acme/widget-host/actions/runs/73',
+      'the fresh child status follows public-parent and current-default eligibility reads');
+    for(const changes of [{runs:[]},{runs:[reusableChild,{...reusableChild,id:74}]},{missing:0},{missing:1},{missing:2},
+      {partial:true},{publication:'skipped'},{publication:'failure'},
+      {parent:{...terminalParent,status:'in_progress',conclusion:null}},
+      {finalParent:{...terminalParent,run_attempt:3}},
+      {child:{...reusableChild,head_branch:'other'}},{source:'d'.repeat(40)},{finalSource:'d'.repeat(40)},
+      {child:{...reusableChild,conclusion:'failure'}},{finalChild:{...reusableChild,run_attempt:2}}]){
+      const negative=readParent(changes);assert.equal(negative.run.status,1,JSON.stringify(changes));assert.equal(negative.text,'');
+    }
+    for(const extraEnv of [{PARENT_ROLE:'promotion'},{PARENT_ROLE:'unknown'},
+      {SOURCE_REVISION:'d'.repeat(40)},{REQUIRE_CURRENT_DEFAULT:'unknown'}]){
+      const negative=readParent({},extraEnv);assert.equal(negative.run.status,1);assert.equal(negative.text,'');
+    }
   } finally {
     fs.rmSync(scratch,{recursive:true});
   }
