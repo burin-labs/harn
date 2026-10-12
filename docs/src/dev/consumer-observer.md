@@ -129,22 +129,29 @@ reading. The producer's current run, attempt and revision must match that readin
 An ordinary rehearsal emits `recorded=false` without requiring a product file.
 
 The canonical decision file contains exactly `source_revision`, `verdict`,
-`owed`, `proven`, `pending` and `failed`. Recording requires the observer's source,
-`verdict=pass`, a positive owed count, every owed check proven, and no pending or
-failed check. Missing, skipped, empty or partial decisions refuse recording.
+`owed`, `proven`, `pending`, `failed` and `failed_suites`. Recording requires the
+observer's source, a positive owed count, no pending checks, and
+`owed=proven+failed`. A pass has no failures and an empty `failed_suites`; a
+failure has positive failures and exactly that many distinct suite identifiers.
+Missing, skipped, empty or partial decisions refuse recording.
 Harn validates this shape; the consumer owns which product checks are owed and
-must emit the file only after its actual canonical judgment succeeds.
+must emit the file only after its actual canonical judgment reaches every owed
+check. A reached failure requires a source-qualified suite receipt and actual
+producer failure. Setup, logging, skipped or missing evidence cannot manufacture
+a product failure.
 
 The action returns `recorded=true`, a private receipt path and the canonical
 `artifact` name. Store the file in the consumer repository under that name,
 `consumer-observer-product-<nonce>`. Its archive contains the single standard
 filename `consumer-observer-<nonce>.json`. No child identity is published upstream.
 Recording while the producer runs does not authorize release: a reader must
-apply `qualifyTerminalReceipt` to this receipt and fresh completed child SUCCESS,
-with the same authenticated ownership and parent declaration.
+apply `qualifyTerminalReceipt` with the same authenticated ownership and parent
+declaration. A pass requires fresh completed child SUCCESS; a reached product
+failure requires fresh completed child FAILURE. Execution failure alone leaves
+the product decision unreported.
 
 `consumer-observer-observe.mjs` reads that decision through the same custody
-owner used by cleanup. Its outputs are `verdict` (`pass`, `pending` or `refused`)
+owner used by cleanup. Its outputs are `verdict` (`pass`, `fail`, `pending` or `refused`)
 and a closed `reading` with `discovered`, `owned`, `pending`, `refused` and
 `product`. Missing or ambiguous children and missing product receipts have
 `product=null`; this is an unreported decision, not measured zero checks.

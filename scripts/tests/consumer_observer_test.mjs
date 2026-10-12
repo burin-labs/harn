@@ -84,7 +84,7 @@ test('a private product decision requires authenticated custody and fresh comple
   const ownership = admitChild(context, parent, expected, child, event, context);
   const configured = { repository: expected.repository, workflow: expected.workflow };
   const product = {
-    source_revision: context.source_revision, verdict: 'pass', owed: 2, proven: 2, pending: 0, failed: 0,
+    source_revision: context.source_revision, verdict: 'pass', owed: 2, proven: 2, pending: 0, failed: 0, failed_suites: [],
   };
   const receipt = createTerminalReceipt(ownership, context, parent, child, configured, context, product);
   const historicalParent = { ...parent, status: 'completed', conclusion: 'success' };

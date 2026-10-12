@@ -12,7 +12,7 @@ async function main() {
   // The closed reading contains counts and a public source decision only.
   // Neither private discovery IDs nor custody receipts cross this boundary.
   const verdict = reading.product !== null && reading.discovered === 1
-    && reading.owned === 1 && reading.pending === 0 && reading.refused === 0 ? 'pass'
+    && reading.owned === 1 && reading.pending === 0 && reading.refused === 0 ? reading.product.verdict
     : reading.refused > 0 ? 'refused' : 'pending';
   fs.appendFileSync(env.GITHUB_OUTPUT, `verdict=${verdict}\nreading=${JSON.stringify(reading)}\n`);
   console.log(`CONSUMER_OBSERVER observe=measured verdict=${verdict} discovered=${reading.discovered} owned=${reading.owned} pending=${reading.pending} refused=${reading.refused}`);

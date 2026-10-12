@@ -49,7 +49,7 @@ async function main() {
   const file = path.join(directory, `${name}.json`);
   fs.writeFileSync(file, `${JSON.stringify(receipt)}\n`, {flag:'wx',mode:0o600});
   fs.appendFileSync(env.GITHUB_OUTPUT, `recorded=true\nreceipt=${file}\nartifact=${artifact}\n`);
-  console.log(`CONSUMER_OBSERVER product=recorded owed=${receipt.product.owed} proven=${receipt.product.proven} pending=0 failed=0`);
+  console.log(`CONSUMER_OBSERVER product=recorded owed=${receipt.product.owed} proven=${receipt.product.proven} pending=${receipt.product.pending} failed=${receipt.product.failed}`);
 }
 
 main().catch(error => {

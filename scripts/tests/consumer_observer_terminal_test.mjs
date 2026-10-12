@@ -55,7 +55,7 @@ test('the terminal entrypoint records only an authenticated reached product deci
         else throw new Error('unknown-private-url');
         return {ok:true,json:async()=>record};
       };`);
-    const product = {source_revision:context.source_revision,verdict:'pass',owed:2,proven:2,pending:0,failed:0};
+    const product = {source_revision:context.source_revision,verdict:'pass',owed:2,proven:2,pending:0,failed:0,failed_suites:[]};
     const entry = fileURLToPath(new URL('../ci/consumer-observer-terminal.mjs',import.meta.url));
     let sequence=0;
     const execute = (changes={},decision=product,extraEnv={}) => {
@@ -87,9 +87,16 @@ test('the terminal entrypoint records only an authenticated reached product deci
     assert.notDeepEqual(Object.keys(receipt.child),Object.keys(ownership.child),
       'the actual producer normalizes equivalent reordered custody once');
     assert.equal(fs.statSync(recorded.receipt).mode&0o777,0o600);
+    const failedProduct={...product,verdict:'fail',proven:1,failed:1,failed_suites:['harn-linked']};
+    const failedProducer=execute({},failedProduct);
+    assert.equal(failedProducer.run.status,0,failedProducer.run.stderr);
+    assert.match(failedProducer.run.stdout,/owed=2 proven=1 pending=0 failed=1/);
     for(const decision of [null,{}, {...product,owed:0,proven:0}, {...product,proven:1},
       {...product,pending:1}, {...product,failed:1}, {...product,source_revision:'d'.repeat(40)},
-      {...product,extra:'unmeasured'}]){
+      {...product,extra:'unmeasured'}, {...failedProduct,failed_suites:[]},
+      {...failedProduct,failed_suites:['harn-linked','harn-linked']},
+      {...failedProduct,verdict:'pass'}, {...failedProduct,proven:2},
+      {...failedProduct,failed_suites:['']}, {...failedProduct,pending:1}]){
       const negative=execute({},decision);
       assert.equal(negative.run.status,1);
       assert.equal(negative.output,'');
@@ -204,6 +211,27 @@ test('the terminal entrypoint records only an authenticated reached product deci
     assert.equal(foreignReading.fields.verdict,'refused');
     assert.equal(foreignReading.reading.product,null);
 
+    const failedFields=Object.fromEntries(failedProducer.output.trim().split('\n').map(line=>{
+      const split=line.indexOf('=');return [line.slice(0,split),line.slice(split+1)];
+    }));
+    const failedArchive=path.join(scratch,'failed-product.zip');
+    const failedZip=spawnSync('zip',['-j',failedArchive,failedFields.receipt],
+      {env:{PATH:process.env.PATH,LC_ALL:'C'},encoding:'utf8'});
+    assert.equal(failedZip.status,0,failedZip.stderr);
+    const failedBytes=fs.readFileSync(failedArchive);
+    const failedArchives=[...archives.slice(0,2),{archive:failedArchive,metadata:{
+      ...archives[2].metadata,size_in_bytes:failedBytes.length,
+      digest:`sha256:${createHash('sha256').update(failedBytes).digest('hex')}`}}];
+    const reachedFailure=observe({archives:failedArchives,child:{...completed,conclusion:'failure'}});
+    assert.equal(reachedFailure.run.status,0,reachedFailure.run.stderr);
+    assert.equal(reachedFailure.fields.verdict,'fail');
+    assert.deepEqual(reachedFailure.reading.product,failedProduct);
+    for(const changes of [{archives:failedArchives},{archives:failedArchives,child:{...completed,conclusion:'cancelled'}},
+      {archives:failedArchives,child:{...completed,conclusion:'failure'},finalChild:{...completed,run_attempt:2,conclusion:'failure'}}]){
+      const refused=observe(changes);assert.equal(refused.fields.verdict,'refused');
+      assert.equal(refused.reading.product,null);
+    }
+
     const readParentEntry=fileURLToPath(new URL('../ci/consumer-observer-read-parent.mjs',import.meta.url));
     const terminalParent={...parent,status:'completed',conclusion:'success',created_at:'2026-10-11T20:00:00Z'};
     const reusableChild={...completed,head_branch:'main'};
@@ -230,6 +258,7 @@ test('the terminal entrypoint records only an authenticated reached product deci
       {parent:{...terminalParent,status:'in_progress',conclusion:null}},
       {finalParent:{...terminalParent,run_attempt:3}},
       {child:{...reusableChild,head_branch:'other'}},{source:'d'.repeat(40)},{finalSource:'d'.repeat(40)},
+      {archives:failedArchives,child:{...reusableChild,conclusion:'failure'}},
       {child:{...reusableChild,conclusion:'failure'}},{finalChild:{...reusableChild,run_attempt:2}}]){
       const negative=readParent(changes);assert.equal(negative.run.status,1,JSON.stringify(changes));assert.equal(negative.text,'');
     }

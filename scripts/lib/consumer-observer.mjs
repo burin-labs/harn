@@ -36,8 +36,8 @@ const contextKeys = [
  * parent_run_attempt: number, parent_head_sha: string, source_revision: string,
  * dispatch_nonce: string}} ObserverContext */
 
-/** @typedef {{source_revision: string, verdict: 'pass', owed: number,
- * proven: number, pending: 0, failed: 0}} ProductDecision */
+/** @typedef {{source_revision: string, verdict: 'pass'|'fail', owed: number,
+ * proven: number, pending: 0, failed: number, failed_suites: string[]}} ProductDecision */
 
 function refuse(reason) {
   throw new Error(`CONSUMER_OBSERVER reason=${reason}`);
@@ -185,18 +185,26 @@ export function qualifyOwnedChild(input, context, parent, child, expected, decla
  * @returns {ProductDecision} */
 function terminalProduct(input, context) {
   if (!input || typeof input !== 'object' || Array.isArray(input)
-    || Object.keys(input).sort().join(',') !== 'failed,owed,pending,proven,source_revision,verdict') {
+    || Object.keys(input).sort().join(',') !== 'failed,failed_suites,owed,pending,proven,source_revision,verdict') {
     refuse('product_decision_unmeasured');
   }
   const product = /** @type {ProductDecision} */ (input);
-  if (product.source_revision !== context.source_revision || product.verdict !== 'pass'
+  if (product.source_revision !== context.source_revision || !['pass','fail'].includes(product.verdict)
     || !Number.isSafeInteger(product.owed) || product.owed < 1
-    || product.proven !== product.owed || product.pending !== 0 || product.failed !== 0) {
+    || !Number.isSafeInteger(product.proven) || product.proven < 0
+    || !Number.isSafeInteger(product.failed) || product.failed < 0
+    || product.proven + product.failed !== product.owed || product.pending !== 0
+    || !Array.isArray(product.failed_suites)
+    || product.failed_suites.some(suite => typeof suite !== 'string' || !/^[a-z][a-z0-9-]*$/.test(suite))
+    || new Set(product.failed_suites).size !== product.failed_suites.length
+    || product.failed_suites.length !== product.failed
+    || (product.verdict === 'pass' ? product.failed !== 0 : product.failed === 0)) {
     refuse('product_decision_unmeasured');
   }
   return {
     source_revision: product.source_revision, verdict: product.verdict,
-    owed: product.owed, proven: product.proven, pending: 0, failed: 0,
+    owed: product.owed, proven: product.proven, pending: 0, failed: product.failed,
+    failed_suites: [...product.failed_suites].sort(),
   };
 }
 
@@ -210,8 +218,8 @@ export function createTerminalReceipt(ownership, context, parent, child, expecte
   };
 }
 
-/** A fresh completed SUCCESS is required in addition to the private product
- * decision. Neither a live run nor an advisory green step grants a pass. */
+/** A fresh completed run must agree with the reached private decision.
+ * Execution failure alone never manufactures a reached product failure. */
 export function qualifyTerminalReceipt(input, context, parent, child, expected, declaration) {
   if (!input || typeof input !== 'object' || Array.isArray(input)
     || Object.keys(input).sort().join(',') !== 'child,observer,product,schema'
@@ -222,7 +230,8 @@ export function qualifyTerminalReceipt(input, context, parent, child, expected, 
     schema: 'harn.consumer_observer_receipt.v1', observer: input.observer, child: input.child,
   };
   const receipt = createTerminalReceipt(ownership, context, parent, child, expected, declaration, input.product);
-  if (child.status !== 'completed' || child.conclusion !== 'success') refuse('product_run_not_successful');
+  const conclusion = receipt.product.verdict === 'pass' ? 'success' : 'failure';
+  if (child.status !== 'completed' || child.conclusion !== conclusion) refuse('product_run_conclusion_unproven');
   return receipt;
 }
 
@@ -525,7 +534,8 @@ export async function readConsumerParentProduct(token, selection, expected, fetc
       if(finalSource.headSha!==source.headSha || finalSource.branch!==source.branch) refuse('child_source_no_longer_eligible');
     }
   });
-  if(reading.discovered!==1 || reading.owned!==1 || reading.pending!==0 || reading.refused!==0 || !reading.product){
+  if(reading.discovered!==1 || reading.owned!==1 || reading.pending!==0 || reading.refused!==0
+    || reading.product?.verdict!=='pass'){
     refuse('product_decision_unmeasured');
   }
   return {context,reading,owned:false};
@@ -574,7 +584,7 @@ async function readConsumerProduct(token, context, expected, fetchRecord, extrac
     if (!owned) return result;
     result.owned = 1;
     if (owned.child.status !== 'completed') return result;
-    if (owned.child.conclusion !== 'success') refuse('product_run_not_successful');
+    if (!['success','failure'].includes(owned.child.conclusion)) refuse('product_run_conclusion_unproven');
     const name = observerTerminalName(observer);
     const artifacts = await githubArtifactCensus(token, expected.repository, String(candidate.id), fetchRecord, name);
     if (artifacts.length !== 1 || artifacts[0].name !== name) return result;
