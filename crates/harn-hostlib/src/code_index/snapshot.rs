@@ -265,7 +265,7 @@ impl CodeIndexSnapshot {
             return Err(invalid("code-index snapshot has trailing bytes"));
         }
         // The sections share nothing, so decoding takes the longest of them.
-        let (core, symbols, trigrams, words) = std::thread::scope(|scope| {
+        let (core, symbols, trigrams, words) = harn_parser::runtime_stack::scope(|scope| {
             let graph = scope.spawn(|| decode_section("snapshot.decode_graph", graph));
             let trigrams = scope.spawn(|| decode_section("snapshot.decode_trigrams", trigrams));
             let words = scope.spawn(|| decode_section("snapshot.decode_words", words));
@@ -466,7 +466,7 @@ impl IndexState {
             .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "missing symbol graph"))?;
         // The graph and the two posting stores share no state, so restore
         // takes the longest of them rather than their sum.
-        let (graph, trigrams, words) = std::thread::scope(|scope| {
+        let (graph, trigrams, words) = harn_parser::runtime_stack::scope(|scope| {
             let trigrams = scope.spawn(|| {
                 let _phase = super::timing::Phase::start("snapshot.restore_trigrams");
                 TrigramIndex::from_postings(snap.trigrams)

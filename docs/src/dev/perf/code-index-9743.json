@@ -6,7 +6,7 @@
  "candidate": {
   "binary_sha256": "0dfd5c3976657483562bca933dfd767d8c5016c99a37ff5e87251bf0473cfcd5",
   "profile": "release, thin LTO, 16 codegen units, no native-CPU flags",
-  "source": "runtime source at b847ad32a1; later commits change only tests and documentation"
+  "source": "runtime source at b847ad32a1; later commits change tests and documentation, and spawn the same restore threads through harn_parser::runtime_stack::scope, which differs only in thread stack size"
  },
  "host": {
   "cpu": "AMD Ryzen 5 3600X 6-Core Processor",
