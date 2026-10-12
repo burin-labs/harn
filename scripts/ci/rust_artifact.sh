@@ -465,11 +465,13 @@ build_security_bundle() {
   staging="$(mktemp -d "${output_dir}/rust-security-artifact.XXXXXX")"
   cleanup_dir="$staging"
 
-  # Match the following workspace test build's unified feature graph. The
-  # filter limits archived binaries, not compilation, so security consumers
-  # still receive only their selected tests without a second crate build.
-  cargo-nextest nextest archive --locked --workspace --profile ci \
-    -E "$SECURITY_FILTER" \
+  # Match the following workspace test build's unified feature graph:
+  # `--workspace` keeps every member's features, so the later full build reuses
+  # these artifacts. The `--test` targets limit compilation to the two security
+  # binaries, so the sandbox lane receives its archive without waiting for the
+  # rest of the workspace test graph (#9649); the filter limits what is archived.
+  cargo-nextest nextest archive --locked --workspace --test harn_vm --test harn_hostlib \
+    --profile ci -E "$SECURITY_FILTER" \
     --archive-file "$staging/harn-security-tests.tar.zst"
   write_security_manifest "$staging" "$commit" "$(rustc_identity_sha256)"
   (
