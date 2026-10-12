@@ -39,10 +39,7 @@ pipeline test(harness: Harness) {
   harness.fs.write_text(path_join(lock_conflict, "pnpm-lock.yaml"), "KNOWN_PNPM_LOCK\n")
   harness.fs.write_text(path_join(lock_conflict, "yarn.lock"), "KNOWN_YARN_LOCK\n")
   const conflicting_fingerprint = harness.project.fingerprint(lock_conflict)
-  assert(
-    conflicting_fingerprint.lockfile_paths.len() == 2,
-    "both conflicting locks must be reached",
-  )
+  assert(len(conflicting_fingerprint.lockfile_paths) == 2, "both conflicting locks must be reached")
   assert(
     conflicting_fingerprint.package_managers == [],
     "conflicting locks cannot select a manager",
