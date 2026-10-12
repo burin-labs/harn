@@ -111,3 +111,26 @@ child reading narrows the read/cancel race but cannot eliminate it. Reconciliati
 prints only declaration and outcome counts, never private repository identities,
 child run IDs, receipt contents, or arbitrary network errors. The automatic parent
 dispatch callers remain unchanged until the operational lifecycle is qualified.
+
+## Product decision receipt
+
+The `consumer-observer-terminal` action records the private consumer's reached
+canonical decision. It reads the authenticated ownership artifact from its own
+run, the parent's declaration and exact historical attempt, and a fresh child
+reading. The producer's current run, attempt and revision must match that reading.
+An ordinary rehearsal emits `recorded=false` without requiring a product file.
+
+The canonical decision file contains exactly `source_revision`, `verdict`,
+`owed`, `proven`, `pending` and `failed`. Recording requires the observer's source,
+`verdict=pass`, a positive owed count, every owed check proven, and no pending or
+failed check. Missing, skipped, empty or partial decisions refuse recording.
+Harn validates this shape; the consumer owns which product checks are owed and
+must emit the file only after its actual canonical judgment succeeds.
+
+The action returns `recorded=true`, a private receipt path and the public nonce.
+Store the file in the consumer repository as an artifact named
+`consumer-observer-product-<nonce>`. Its archive contains the single standard
+filename `consumer-observer-<nonce>.json`. No child identity is published upstream.
+Recording while the producer runs does not authorize release: a reader must
+apply `qualifyTerminalReceipt` to this receipt and fresh completed child SUCCESS,
+with the same authenticated ownership and parent declaration.

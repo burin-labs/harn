@@ -1,0 +1,34 @@
+name: Record a consumer product decision
+description: Bind the canonical consumer decision to its authenticated private ownership
+inputs:
+  observer:
+    description: Closed public parent identity; empty for an ordinary rehearsal
+    required: false
+    default: ''
+  product-decision:
+    description: Private file emitted by the reached canonical consumer decision
+    required: true
+  token:
+    description: Read authority for the consumer and public parent run
+    required: true
+outputs:
+  recorded:
+    description: Explicit recording after authenticated product qualification
+    value: ${{ steps.record.outputs.recorded }}
+  receipt:
+    description: Private terminal receipt path; store only in the consumer repository
+    value: ${{ steps.record.outputs.receipt }}
+  key:
+    description: Public dispatch nonce naming the private terminal artifact
+    value: ${{ steps.record.outputs.key }}
+runs:
+  using: composite
+  steps:
+    - name: Record the reached consumer product decision
+      id: record
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.token }}
+        OBSERVER_CONTEXT: ${{ inputs.observer }}
+        PRODUCT_DECISION_FILE: ${{ inputs.product-decision }}
+      run: node "$GITHUB_ACTION_PATH/../../../scripts/ci/consumer-observer-terminal.mjs"
