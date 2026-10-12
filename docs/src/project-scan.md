@@ -157,6 +157,11 @@ string-valued `package.json` scripts. Each manifest uses the nearest supported
 nested manifest's own evidence takes precedence over inherited evidence. A
 manifest with no manager evidence uses npm.
 
+Explicit declarations require an exact semantic version, including valid
+prerelease or build metadata. Ranges, tags and malformed versions are refused.
+Manifest files and inherited manifest evidence must physically remain within
+the scan root; legitimate file aliases within that root are accepted.
+
 Supported managers are npm, pnpm, yarn and bun. npm and pnpm invoke the test
 lifecycle as `npm test` and `pnpm test`; their other scripts, and yarn and bun
 scripts, use `<manager> run <script>`. Config-tier scans project the actual

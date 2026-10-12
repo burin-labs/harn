@@ -107,10 +107,10 @@ pub fn discover(project_root: &Path, manifest_dir: &Path) -> Discovery {
     if !manifest_dir.starts_with(&project_root) {
         return Discovery::Refused(SelectionError::OutsideProject);
     }
-    let bytes = match std::fs::read(manifest_dir.join("package.json")) {
-        Ok(bytes) => bytes,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Discovery::Absent,
-        Err(_) => return Discovery::Refused(SelectionError::UnreadableManifest),
+    let bytes = match read_manifest_bytes(&project_root, &manifest_dir) {
+        Ok(Some(bytes)) => bytes,
+        Ok(None) => return Discovery::Absent,
+        Err(error) => return Discovery::Refused(error),
     };
     let manifest: Map<String, Value> = match serde_json::from_slice(&bytes) {
         Ok(manifest) => manifest,
@@ -120,6 +120,23 @@ pub fn discover(project_root: &Path, manifest_dir: &Path) -> Discovery {
         Ok(scripts) => Discovery::Resolved(scripts),
         Err(error) => Discovery::Refused(error),
     }
+}
+
+fn read_manifest_bytes(
+    project_root: &Path,
+    directory: &Path,
+) -> Result<Option<Vec<u8>>, SelectionError> {
+    let path = match directory.join("package.json").canonicalize() {
+        Ok(path) => path,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(_) => return Err(SelectionError::UnreadableManifest),
+    };
+    if !path.starts_with(project_root) {
+        return Err(SelectionError::OutsideProject);
+    }
+    std::fs::read(path)
+        .map(Some)
+        .map_err(|_| SelectionError::UnreadableManifest)
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -190,7 +207,7 @@ pub(crate) fn declared_manager(
         return Ok(None);
     };
     let declaration = value.as_str().ok_or(SelectionError::InvalidDeclaration)?;
-    let (name, _) = declaration
+    let (name, version) = declaration
         .split_once('@')
         .filter(|(_, version)| !version.is_empty())
         .ok_or(SelectionError::InvalidDeclaration)?;
@@ -201,6 +218,7 @@ pub(crate) fn declared_manager(
         "bun" => PackageManager::Bun,
         _ => return Err(SelectionError::UnsupportedDeclaration(name.to_string())),
     };
+    semver::Version::parse(version).map_err(|_| SelectionError::InvalidDeclaration)?;
     Ok(Some(manager))
 }
 
@@ -238,12 +256,15 @@ fn select_manager(
             return Ok(DEFAULT_MANAGER);
         }
         current = current.parent().ok_or(SelectionError::OutsideProject)?;
-        value = match std::fs::read(current.join("package.json")) {
-            Ok(bytes) => {
+        value = match read_manifest_bytes(project_root, current) {
+            Ok(Some(bytes)) => {
                 serde_json::from_slice(&bytes).map_err(|_| SelectionError::InvalidAncestor)?
             }
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Map::new(),
-            Err(_) => return Err(SelectionError::UnreadableAncestor),
+            Ok(None) => Map::new(),
+            Err(SelectionError::UnreadableManifest) => {
+                return Err(SelectionError::UnreadableAncestor)
+            }
+            Err(error) => return Err(error),
         };
     }
 }
@@ -261,6 +282,7 @@ mod tests {
             ("pnpm@10.28.0", "pnpm test"),
             ("yarn@4.9.0", "yarn run test"),
             ("bun@1.2.0", "bun run test"),
+            ("pnpm@10.28.0-rc.1+sha224.abcdef", "pnpm test"),
         ] {
             let manifest = json!({"packageManager":declaration});
             let manager =
@@ -274,6 +296,23 @@ mod tests {
     }
 
     #[test]
+    fn malformed_versions_refuse_manager_substitution() {
+        for declaration in [
+            "npm@10@not-semver",
+            "npm@10",
+            "npm@latest",
+            "pnpm@^10.0.0",
+            "yarn@1.2.3.4",
+            "bun@1.2.3-01",
+        ] {
+            assert_eq!(
+                declared_manager(json!({"packageManager": declaration}).as_object().unwrap()),
+                Err(SelectionError::InvalidDeclaration)
+            );
+        }
+    }
+
+    #[test]
     fn contradictory_and_unsupported_evidence_cannot_default() {
         let root = tempfile::tempdir().unwrap();
         std::fs::write(root.path().join("pnpm-lock.yaml"), "lockfileVersion: 9").unwrap();
@@ -281,7 +320,7 @@ mod tests {
             select_manager(
                 root.path(),
                 root.path(),
-                json!({"packageManager":"npm@10"}).as_object().unwrap()
+                json!({"packageManager":"npm@10.0.0"}).as_object().unwrap()
             ),
             Err(SelectionError::ConflictingManagers)
         );
@@ -317,7 +356,7 @@ mod tests {
             select_manager(
                 root.path(),
                 &child,
-                json!({"packageManager":"npm@10"}).as_object().unwrap()
+                json!({"packageManager":"npm@10.0.0"}).as_object().unwrap()
             )
             .unwrap(),
             PackageManager::Npm

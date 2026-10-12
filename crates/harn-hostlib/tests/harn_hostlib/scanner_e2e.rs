@@ -30,21 +30,41 @@ fn package_script_aliases_stay_within_physical_project() {
     write(
         &project,
         "package.json",
-        r#"{"name":"inside","packageManager":"pnpm@10","scripts":{"test":"echo KNOWN_INSIDE"}}"#,
+        r#"{"name":"inside","packageManager":"pnpm@10.0.0","scripts":{"test":"echo KNOWN_INSIDE"}}"#,
     );
     write(
         &project,
         "owned/package.json",
-        r#"{"name":"owned","packageManager":"npm@10","scripts":{"test":"echo KNOWN_OWNED"}}"#,
+        r#"{"name":"owned","packageManager":"npm@10.0.0","scripts":{"test":"echo KNOWN_OWNED"}}"#,
     );
     write(
         &outside,
         "package.json",
-        r#"{"name":"outside","packageManager":"npm@10","scripts":{"test":"echo KNOWN_OUTSIDE"}}"#,
+        r#"{"name":"outside","packageManager":"npm@10.0.0","scripts":{"test":"echo KNOWN_OUTSIDE"}}"#,
     );
     fs::create_dir(project.join("packages")).unwrap();
     std::os::unix::fs::symlink(&outside, project.join("packages/escaped")).unwrap();
     std::os::unix::fs::symlink(project.join("owned"), project.join("packages/aliased")).unwrap();
+    write(
+        &project,
+        "packages/escaped-manifest/index.js",
+        "// known source",
+    );
+    std::os::unix::fs::symlink(
+        outside.join("package.json"),
+        project.join("packages/escaped-manifest/package.json"),
+    )
+    .unwrap();
+    write(
+        &project,
+        "packages/linked-manifest/index.js",
+        "// known source",
+    );
+    std::os::unix::fs::symlink(
+        project.join("owned/package.json"),
+        project.join("packages/linked-manifest/package.json"),
+    )
+    .unwrap();
     let initial_alias = fixture.path().join("initial-alias");
     std::os::unix::fs::symlink(&project, &initial_alias).unwrap();
 
@@ -63,10 +83,33 @@ fn package_script_aliases_stay_within_physical_project() {
             .unwrap()
             .contains("KNOWN_OWNED"));
         assert!(!commands.contains_key("cd packages/escaped && npm test"));
+        assert!(commands
+            .get("cd packages/linked-manifest && npm test")
+            .unwrap()
+            .contains("KNOWN_OWNED"));
         assert!(!commands
             .values()
             .any(|label| label.contains("KNOWN_OUTSIDE")));
     }
+    write(
+        &project,
+        "packages/inherited/package.json",
+        r#"{"scripts":{"test":"echo KNOWN_INHERITED"}}"#,
+    );
+    fs::remove_file(project.join("package.json")).unwrap();
+    std::os::unix::fs::symlink(outside.join("package.json"), project.join("package.json")).unwrap();
+    let result = scan_project(
+        &project,
+        ScanProjectOptions {
+            include_git_history: false,
+            ..ScanProjectOptions::default()
+        },
+    );
+    assert!(!result
+        .project
+        .test_commands
+        .values()
+        .any(|body| body.contains("KNOWN_OUTSIDE") || body.contains("KNOWN_INHERITED")));
 }
 
 fn write(root: &Path, rel: &str, content: &str) {

@@ -4151,6 +4151,7 @@ dependencies = [
  "seccompiler",
  "secret-service",
  "security-framework",
+ "semver",
  "serde",
  "serde_ignored",
  "serde_json",

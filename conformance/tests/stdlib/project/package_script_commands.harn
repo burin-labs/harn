@@ -82,9 +82,34 @@ pipeline test(harness: Harness) {
   assert(unsupported_vm.build_commands == [], "unsupported manager cannot become npm")
   assert(unsupported_vm.package_scripts.state == "refused")
   assert(unsupported_vm.package_scripts.error == "unsupported_declaration")
+  for declaration in ["npm@10@not-semver", "npm@10", "pnpm@latest", "yarn@^4.0.0", "bun@1.2.3-01"] {
+    harness.fs.write_text(
+      path_join(refused, "package.json"),
+      json_stringify({packageManager: declaration, scripts: {test: body}}),
+    )
+    const invalid = harness.project.scan(refused, {tiers: ["config"]})
+    const invalid_host = harness.scanner.scan_project({root: refused, include_git_history: false})
+    assert(
+      invalid.package_scripts.state == "refused"
+        && invalid.package_scripts.error == "invalid_declaration",
+    )
+    assert(
+      invalid.build_commands == [] && invalid_host.project.test_commands == {},
+      "malformed versions must not propose a runner",
+    )
+  }
   harness.fs.write_text(
     path_join(refused, "package.json"),
-    json_stringify({packageManager: "npm@10", scripts: {test: body}}),
+    json_stringify({packageManager: "pnpm@10.28.0-rc.1+sha224.abcdef", scripts: {test: body}}),
+  )
+  const exact = harness.project.scan(refused, {tiers: ["config"]})
+  assert(
+    exact.package_scripts.state == "resolved" && exact.package_scripts.commands.test == "pnpm test",
+    "exact prerelease and hash metadata remain valid",
+  )
+  harness.fs.write_text(
+    path_join(refused, "package.json"),
+    json_stringify({packageManager: "npm@10.0.0", scripts: {test: body}}),
   )
   harness.fs.write_text(path_join(refused, "pnpm-lock.yaml"), "lockfileVersion: '9.0'\n")
   const conflict_host = harness.scanner.scan_project({root: refused, include_git_history: false})
@@ -99,7 +124,7 @@ pipeline test(harness: Harness) {
   harness.fs.mkdir(path_join(nested, "packages/independent"))
   harness.fs.write_text(
     path_join(nested, "package.json"),
-    json_stringify({packageManager: "pnpm@10", scripts: {test: body}}),
+    json_stringify({packageManager: "pnpm@10.0.0", scripts: {test: body}}),
   )
   harness.fs.write_text(
     path_join(nested, "packages/inherited/package.json"),
@@ -107,7 +132,7 @@ pipeline test(harness: Harness) {
   )
   harness.fs.write_text(
     path_join(nested, "packages/independent/package.json"),
-    json_stringify({packageManager: "npm@10", scripts: {test: body}}),
+    json_stringify({packageManager: "npm@10.0.0", scripts: {test: body}}),
   )
   const nested_host = harness.scanner.scan_project({root: nested, include_git_history: false})
   const nested_vm = harness.project.scan_tree(nested, {tiers: ["config"]})
