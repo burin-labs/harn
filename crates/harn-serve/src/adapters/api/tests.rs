@@ -7,6 +7,7 @@ mod permission_response;
 mod resource_contract;
 mod served_agent_turn;
 mod session_model_policy;
+mod session_resume;
 mod shared_workspace_authority;
 mod task_cancellation;
 mod task_event_identity;

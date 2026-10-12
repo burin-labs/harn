@@ -77,18 +77,21 @@ pub(super) async fn list_task_events(
 pub(super) async fn stream_events(
     State(state): State<ApiState>,
     Query(query): Query<ListQuery>,
+    headers: HeaderMap,
 ) -> Response {
-    stream_events_response(state, EventFilter::from_query(&query, None, None)).await
+    stream_events_response(state, EventFilter::from_query(&query, None, None), headers).await
 }
 
 pub(super) async fn stream_session_events(
     State(state): State<ApiState>,
     AxumPath(session_id): AxumPath<String>,
     Query(query): Query<ListQuery>,
+    headers: HeaderMap,
 ) -> Response {
     stream_events_response(
         state,
         EventFilter::from_query(&query, Some(session_id), None),
+        headers,
     )
     .await
 }
@@ -97,17 +100,61 @@ pub(super) async fn stream_task_events(
     State(state): State<ApiState>,
     AxumPath(task_id): AxumPath<String>,
     Query(query): Query<ListQuery>,
+    headers: HeaderMap,
 ) -> Response {
-    stream_events_response(state, EventFilter::from_query(&query, None, Some(task_id))).await
+    stream_events_response(
+        state,
+        EventFilter::from_query(&query, None, Some(task_id)),
+        headers,
+    )
+    .await
 }
 
-async fn stream_events_response(state: ApiState, filter: EventFilter) -> Response {
+fn cursor_error(message: &'static str) -> Response {
+    Sse::new(stream::iter([Ok::<_, Infallible>(
+        Event::default()
+            .event("error")
+            .data(json!({"error":{"code":"cursor_unavailable", "message":message}}).to_string()),
+    )]))
+    .into_response()
+}
+
+async fn stream_events_response(
+    state: ApiState,
+    mut filter: EventFilter,
+    headers: HeaderMap,
+) -> Response {
+    let mut values = headers.get_all("last-event-id").iter();
+    if let Some(value) = values.next() {
+        let Ok(cursor) = value.to_str() else {
+            return cursor_error("Last-Event-ID must be a valid event cursor");
+        };
+        if values.next().is_some()
+            || cursor.is_empty()
+            || filter.after.as_deref().is_some_and(|after| after != cursor)
+        {
+            return cursor_error("event cursors are empty, duplicated, or disagree");
+        }
+        filter.after = Some(cursor.to_owned());
+    }
     // Subscribe before replay so a committed event cannot fall between them.
     let rx = state.events_tx.subscribe();
+    let cursor = filter.after.take();
     let history = match state.history(&filter) {
         Ok(history) => history,
         Err(_) => return task_store::unavailable_response(),
     };
+    if cursor
+        .as_ref()
+        .is_some_and(|cursor| !history.iter().any(|event| &event.id == cursor))
+    {
+        return cursor_error("event cursor is unknown or no longer available in this stream");
+    }
+    filter.after = cursor;
+    let history: Vec<_> = history
+        .into_iter()
+        .filter(|event| filter.matches(event))
+        .collect();
     // The database and live projections are separate replay snapshots. A
     // higher replayed ID does not imply every earlier event was replayed.
     let replayed = history.iter().map(|event| event.id.clone()).collect();

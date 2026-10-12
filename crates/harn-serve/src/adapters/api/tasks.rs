@@ -63,6 +63,7 @@ pub(super) async fn submit_task_inner(
     if state.recover_interrupted_tasks().is_err() {
         return task_store::unavailable_response();
     }
+    let admission_control = state.session_control.lock().await;
     let descriptor = match state.session_descriptor(&session_id) {
         Ok(descriptor) => descriptor,
         Err(StoreError::NotFound(_)) => {
@@ -141,7 +142,7 @@ pub(super) async fn submit_task_inner(
     let message = message_resource(&session_id, Some(&task_id), message_input.clone());
     let admission = store.admit_task(AdmitTask {
         task,
-        session: descriptor.clone(),
+        session: descriptor,
         retry: retry.map(|retry| StoredTaskRetry {
             binding_digest: retry.scope().digest().into(),
             request_fingerprint: retry.fingerprint().as_hex().into(),
@@ -164,6 +165,9 @@ pub(super) async fn submit_task_inner(
             )
         }
         Ok(TaskAdmission::Created(task)) => task,
+        Err(StoreError::Conflict(_)) => {
+            return api_error(StatusCode::CONFLICT, "session_closed", "session is closed")
+        }
         Err(_) => return task_store::unavailable_response(),
     };
     let events = match store.task_events(Some(&task_id), None) {
@@ -173,43 +177,20 @@ pub(super) async fn submit_task_inner(
     for event in events {
         state.publish_task_event(event);
     }
-    let was_live = state
-        .inner
-        .lock()
-        .expect("api state poisoned")
-        .sessions
-        .contains_key(&session_id);
+    drop(admission_control);
     let prompt = prompt_text(&message_input);
     let task_state = state.clone();
     tokio::spawn(async move {
         let _claim = claim;
         let result = async {
-            if !was_live {
-                task_state
-                    .acp
-                    .call(
-                        "session/load",
-                        json!({
-                            "sessionId": session_id, "cwd": descriptor.workspace_root,
-                        }),
-                    )
-                    .await?;
-                task_state
-                    .acp
-                    .call(
-                        "session/set_mode",
-                        json!({
-                            "sessionId": session_id, "modeId": descriptor.mode_id,
-                        }),
-                    )
-                    .await?;
-                sessions::restore_model_policy(
-                    &task_state,
-                    &session_id,
-                    descriptor.model_policy.as_ref(),
-                )
-                .await?;
-            }
+            let control = task_state
+                .restore_session(&session_id)
+                .await
+                .map_err(|_| "task session could not be restored".to_owned())?;
+            task_state
+                .require_open_session(&session_id)
+                .map_err(|_| "task session is closed".to_owned())?;
+            drop(control);
             let prompt =
                 prompt.ok_or_else(|| "task input did not contain prompt text".to_owned())?;
             // Restore can wait on RPC acknowledgements. A cancellation during

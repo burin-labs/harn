@@ -105,7 +105,7 @@ impl AcpServer {
                 if self.reject_unauthenticated(&id) {
                     return;
                 }
-                self.handle_session_truncate(&id, &params);
+                self.handle_session_truncate(&id, &params).await;
             }
             "session/set_mode" => {
                 if self.reject_unauthenticated(&id) {

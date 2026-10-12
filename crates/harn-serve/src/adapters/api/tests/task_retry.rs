@@ -40,6 +40,8 @@ pub(super) fn admission(id: &str, root: &Path, retry: Option<StoredTaskRetry>) -
             persona_id: None,
             created_at: "2026-10-11T00:00:00Z".into(),
             updated_at: "2026-10-11T00:00:00Z".into(),
+            summary: None,
+            status: harn_session_store::SessionStatus::Open,
         },
         retry,
         initial_events: vec![NewTaskControlEvent {

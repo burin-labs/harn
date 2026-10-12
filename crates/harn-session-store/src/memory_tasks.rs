@@ -2,7 +2,8 @@ use super::*;
 use crate::task::{
     retry_decision, status_event, AdmitTask, NewTaskControlEvent, RetryDecision, StoredTaskRetry,
     TaskAdmission, TaskBinding, TaskChange, TaskControlEvent, TaskMessageView, TaskRecord,
-    TaskSessionDescriptor, TaskStore, TaskUpdate, TASK_RETRY_RETENTION_MS,
+    TaskSessionChange, TaskSessionDescriptor, TaskSessionUpdate, TaskStatus, TaskStore, TaskUpdate,
+    TASK_RETRY_RETENTION_MS,
 };
 use serde_json::Value;
 
@@ -32,6 +33,15 @@ impl TaskStore for MemorySessionStore {
         if guard.tasks.contains_key(&request.task.id) {
             return Err(StoreError::AlreadyExists(request.task.id));
         }
+        if guard
+            .task_sessions
+            .get(&request.session.id)
+            .unwrap_or(&request.session)
+            .status
+            != SessionStatus::Open
+        {
+            return Err(StoreError::Conflict("session is closed".into()));
+        }
         let task = request.task.redacted(&self.hooks)?;
         let session = request.session.redacted(&self.hooks);
         let mut events = vec![TaskControlEvent::new(
@@ -48,7 +58,10 @@ impl TaskStore for MemorySessionStore {
                 &self.hooks,
             ));
         }
-        guard.task_sessions.insert(session.id.clone(), session);
+        guard
+            .task_sessions
+            .entry(session.id.clone())
+            .or_insert(session);
         guard.tasks.insert(task.id.clone(), task.clone());
         guard.task_events.extend(events);
         if let Some(StoredTaskRetry {
@@ -110,6 +123,59 @@ impl TaskStore for MemorySessionStore {
             .cloned()
             .map(|session| session.redacted(&self.hooks))
             .collect())
+    }
+
+    fn update_task_session(
+        &self,
+        session_id: &str,
+        update: TaskSessionUpdate,
+    ) -> StoreResult<TaskSessionChange> {
+        let mut guard = lock(&self.inner);
+        let mut session = guard
+            .task_sessions
+            .get(session_id)
+            .cloned()
+            .ok_or_else(|| StoreError::NotFound(session_id.into()))?;
+        update.apply(&mut session)?;
+        let session = session.redacted(&self.hooks);
+        let mut events = Vec::new();
+        let mut tasks = Vec::new();
+        let mut sequence = guard.control_event_seq;
+        if session.status == SessionStatus::Closed {
+            let active: Vec<_> = guard
+                .tasks
+                .values()
+                .filter(|task| task.session_id == session_id && task.status.is_active())
+                .cloned()
+                .collect();
+            for mut task in active {
+                let previous = task.status;
+                task.transition(TaskUpdate {
+                    status: TaskStatus::Canceled,
+                    at: session.updated_at.clone(),
+                    failure: None,
+                });
+                let task = task.redacted(&self.hooks)?;
+                let id = allocate_id(&mut sequence)?;
+                let event = TaskControlEvent::new(
+                    id,
+                    &task,
+                    status_event(&task, Some(previous)),
+                    &self.hooks,
+                );
+                tasks.push(task);
+                events.push(event);
+            }
+        }
+        guard.control_event_seq = sequence;
+        for task in tasks {
+            guard.tasks.insert(task.id.clone(), task);
+        }
+        guard.task_events.extend(events.clone());
+        guard
+            .task_sessions
+            .insert(session_id.into(), session.clone());
+        Ok(TaskSessionChange { session, events })
     }
 
     fn update_task(&self, task_id: &str, update: TaskUpdate) -> StoreResult<TaskChange> {
@@ -249,11 +315,14 @@ impl TaskStore for MemorySessionStore {
 }
 
 fn next_id(inner: &mut Inner) -> StoreResult<String> {
-    let next = inner
-        .control_event_seq
+    allocate_id(&mut inner.control_event_seq)
+}
+
+fn allocate_id(sequence: &mut u64) -> StoreResult<String> {
+    let next = sequence
         .checked_add(1)
         .filter(|next| *next < i64::MAX as u64)
         .ok_or_else(|| StoreError::Backend("control event sequence exhausted".into()))?;
-    inner.control_event_seq = next;
+    *sequence = next;
     Ok(format!("event_{next:016x}"))
 }

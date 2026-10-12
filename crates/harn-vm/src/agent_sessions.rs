@@ -1256,7 +1256,7 @@ pub use canonical_boundary::{
 mod truncation;
 pub use durable_fork::{fork_canonical, CanonicalForkError, CanonicalForkResult};
 use truncation::truncate_state;
-pub use truncation::{trim, truncate};
+pub use truncation::{trim, truncate, truncate_canonical};
 
 mod pop_last_assistant;
 pub use pop_last_assistant::pop_last_if_assistant;

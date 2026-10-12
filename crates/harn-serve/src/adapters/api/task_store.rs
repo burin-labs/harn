@@ -36,15 +36,23 @@ fn session_resource(
         "persona_id": session.persona_id, "root_session_id": null, "parent_session_id": null,
         "branch_id": null, "last_event_id": null, "summary": null, "expires_at": null,
     });
+    resource["summary"] = json!(session.summary);
+    if session.status != harn_session_store::SessionStatus::Open {
+        resource["state"] = json!("CLOSED");
+    }
     if let Some(policy) = session.model_policy {
         resource["model_policy"] = policy;
     }
-    if active {
+    if active && session.status == harn_session_store::SessionStatus::Open {
         resource["state"] = json!("WORKING");
     }
     if let Some(event) = last_event {
         resource["last_event_id"] = json!(event.id);
-        resource["updated_at"] = json!(event.created_at);
+        let descriptor_time = OffsetDateTime::parse(&session.updated_at, &Rfc3339).ok();
+        let event_time = OffsetDateTime::parse(&event.created_at, &Rfc3339).ok();
+        if descriptor_time.is_none() || event_time > descriptor_time {
+            resource["updated_at"] = json!(event.created_at);
+        }
     }
     resource
 }
@@ -211,6 +219,12 @@ impl ApiState {
                 persona_id: session["persona_id"].as_str().map(str::to_owned),
                 created_at: session["created_at"].as_str().unwrap_or_default().into(),
                 updated_at: session["updated_at"].as_str().unwrap_or_default().into(),
+                summary: session["summary"].as_str().map(str::to_owned),
+                status: if session["state"] == "CLOSED" {
+                    harn_session_store::SessionStatus::Closed
+                } else {
+                    harn_session_store::SessionStatus::Open
+                },
             });
         }
         drop(inner);

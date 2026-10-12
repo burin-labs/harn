@@ -43,6 +43,8 @@ pub(crate) fn request(id: &str, fingerprint: &str, now_ms: i64) -> AdmitTask {
             persona_id: None,
             created_at: "2026-10-11T00:00:00Z".into(),
             updated_at: "2026-10-11T00:00:00Z".into(),
+            summary: None,
+            status: harn_session_store::SessionStatus::Open,
         },
         retry: Some(StoredTaskRetry {
             binding_digest: "a".repeat(64),

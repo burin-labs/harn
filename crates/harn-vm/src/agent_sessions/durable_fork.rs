@@ -52,14 +52,7 @@ pub async fn fork_canonical(
     // session/load registers a live transport record before the first prompt.
     // Only an active journal owns newer context than the canonical store.
     if !super::has_journal(source) {
-        super::replace_messages_with_summary(
-            source,
-            &hydrated.messages,
-            hydrated.summary.as_deref(),
-        )
-        .map_err(VmError::Runtime)?;
-        super::restore_message_event_ids(source, &hydrated.source_event_ids)
-            .map_err(VmError::Runtime)?;
+        hydrated.restore(source).map_err(VmError::Runtime)?;
     }
     let boundary = boundary.unwrap_or_else(|| {
         events.last().map_or_else(
@@ -81,10 +74,7 @@ pub async fn fork_canonical(
     );
     let child = super::fork(source, destination).map_err(CanonicalForkError::Admission)?;
     let Some(child) = child else { return Ok(None) };
-    if let Err(error) =
-        super::replace_messages_with_summary(&child, &copied.messages, copied.summary.as_deref())
-            .and_then(|()| super::restore_message_event_ids(&child, &copied.source_event_ids))
-    {
+    if let Err(error) = copied.restore(&child) {
         super::close(&child);
         return Err(VmError::Runtime(error).into());
     }

@@ -163,9 +163,16 @@ prompt again. A task still running in another server is left active. This
 prevents duplicate task dispatch, but does not promise exactly-once external
 effects after a process interruption. Session transcripts retain their
 existing workspace store.
-Sessions attached to accepted tasks remain available through both the session
-list and individual session reads after restart. Live session metadata takes
-precedence when the same session is still loaded.
+Sessions attached to accepted tasks remain readable and mutable after restart.
+Task execution and session controls restore the same ACP session and API
+projection. Metadata, summary, and model-policy updates remain in the existing
+session descriptor. A failed update restores the previous policy or discards the
+live projection so the next control must restore the stored configuration.
+Truncation retains the requested leading messages in the canonical transcript,
+including across restart and the next provider call. It refuses a still-active
+transcript writer or a failed store write; the earlier audit events remain stored.
+Closing a session durably cancels
+its unfinished tasks; new task submissions return `409 session_closed`.
 
 Disconnecting the HTTP client doesn't withdraw a permission answer queued for
 delivery. HITL answers remain in flight until the runtime acknowledges them.
@@ -187,6 +194,12 @@ SSE streams. Their sequence is the existing durable event allocation number;
 gaps are permitted. Task control events retain their sequence on replay after
 restart. Live notifications and standalone non-task history stay in the serving
 process; the native discovery response advertises no replay capability.
+
+SSE reconnects accept `Last-Event-ID`; the existing `after` and `cursor` query
+parameters remain supported. A known cursor resumes after that event. Conflicting,
+unknown, or unavailable cursors emit `error` with `cursor_unavailable` and close
+the stream. Close the client stream when handling this terminal error; automatic
+reconnection cannot recover unavailable history.
 
 Sessions default to the configured workspace when `workspace_id` is omitted.
 An explicit ID must name a registered workspace. An unknown ID returns `404`

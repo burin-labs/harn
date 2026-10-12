@@ -39,6 +39,7 @@ mod canonical_sessions;
 mod events;
 mod meta;
 mod permissions;
+mod session_control;
 mod sessions;
 mod task_admission;
 mod task_store;
@@ -134,6 +135,7 @@ impl ApiServer {
             event_log,
             event_log_error,
             canonical_sessions,
+            session_control: Arc::new(tokio::sync::Mutex::new(())),
         };
         client.spawn_output_loop(response_rx, state.clone());
         Self { state }
@@ -174,6 +176,8 @@ struct ApiState {
     event_log: Option<Arc<AnyEventLog>>,
     event_log_error: Option<String>,
     canonical_sessions: Option<crate::sessions::SharedSessionStore>,
+    /// Serialize restoration and configuration acknowledgements, never execution.
+    session_control: Arc<tokio::sync::Mutex<()>>,
 }
 
 #[derive(Clone, Default)]

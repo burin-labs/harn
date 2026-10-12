@@ -156,6 +156,17 @@ pub(crate) struct HydratedTranscript {
     pub summary: Option<String>,
 }
 
+impl HydratedTranscript {
+    pub(crate) fn restore(&self, session_id: &str) -> Result<(), String> {
+        crate::agent_sessions::replace_messages_with_summary(
+            session_id,
+            &self.messages,
+            self.summary.as_deref(),
+        )?;
+        crate::agent_sessions::restore_message_event_ids(session_id, &self.source_event_ids)
+    }
+}
+
 pub(crate) struct PreparedJournal {
     pub transcript: HydratedTranscript,
     pub state: JournalState,
@@ -396,14 +407,7 @@ fn append_event_for_mutation(
             summary,
             source_event_ids,
         } => {
-            let mut event = AppendEvent::new(
-                SessionEventKind::Compaction,
-                serde_json::json!({
-                    "messages": messages,
-                    "summary": summary,
-                    "source_event_ids": source_event_ids,
-                }),
-            );
+            let mut event = messages_replaced_event(messages, summary, source_event_ids);
             apply_identity(&mut event, config, None, None, None)?;
             Ok(event)
         }
@@ -424,6 +428,21 @@ fn append_event_for_mutation(
             Ok(event)
         }
     }
+}
+
+pub(crate) fn messages_replaced_event(
+    messages: Vec<serde_json::Value>,
+    summary: Option<String>,
+    source_event_ids: Vec<Option<String>>,
+) -> AppendEvent {
+    AppendEvent::new(
+        SessionEventKind::Compaction,
+        serde_json::json!({
+            "messages": messages,
+            "summary": summary,
+            "source_event_ids": source_event_ids,
+        }),
+    )
 }
 
 fn event_kind_for_transcript(event: &serde_json::Value, message_default: bool) -> SessionEventKind {

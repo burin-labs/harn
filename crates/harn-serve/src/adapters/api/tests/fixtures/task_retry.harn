@@ -16,6 +16,10 @@ pipeline main(harness: Harness) {
       const response = agent_loop(harness, prompt, nil, options)
       assert(response.visible_text == "provider-reached", "the streaming provider path fired")
       assert(len(harness.llm.mock_calls()) == 1, "one provider call per admitted task")
+      harness.fs.write_text(
+        "task-retry-provider-request.json",
+        json_stringify(harness.llm.mock_calls()),
+      )
       const marker = "task-retry-provider.txt"
       const previous = if harness.fs.exists(marker) {
         harness.fs.read_text(marker)

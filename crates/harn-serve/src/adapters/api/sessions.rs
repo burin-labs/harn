@@ -3,6 +3,8 @@
 //! session-scoped task list and submission entry points.
 
 use super::*;
+use harn_session_store::task::TaskSessionUpdate;
+use harn_session_store::SessionStatus;
 use harn_vm::llm::capabilities::ReasoningEffort;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -90,7 +92,7 @@ pub(super) async fn create_session(State(state): State<ApiState>, body: Bytes) -
                 // hosted surface: its sessions never had the launcher's
                 // environment, so naming `isolated` records the behaviour that
                 // was already true instead of choosing a new one.
-                "environmentPolicy": {"kind": "isolated", "grants": []},
+                "environmentPolicy": session_control::environment_policy(),
             }),
         )
         .await
@@ -121,6 +123,22 @@ pub(super) async fn create_session(State(state): State<ApiState>, body: Bytes) -
         }
     }
     if let Err(message) = apply_model_policy_change(&state, &session_id, &model_policy).await {
+        return api_error(StatusCode::BAD_GATEWAY, "acp_error", &message);
+    }
+    // A successful custom pipeline need not invoke agent_loop. Record its
+    // empty canonical parent now, using the same owner as forks and replay.
+    if let Err(message) = state
+        .acp
+        .call(
+            harn_vm::agent_sessions::CANONICAL_HISTORY_BOUNDARIES_METHOD,
+            json!({"sessionId": session_id}),
+        )
+        .await
+    {
+        let _ = state
+            .acp
+            .call("session/close", json!({"sessionId": session_id}))
+            .await;
         return api_error(StatusCode::BAD_GATEWAY, "acp_error", &message);
     }
     let mut session = json!({
@@ -171,8 +189,12 @@ pub(super) async fn list_session_live_clients(
     State(state): State<ApiState>,
     AxumPath(session_id): AxumPath<String>,
 ) -> Response {
-    if !api_session_exists(&state, &session_id) {
-        return api_error(StatusCode::NOT_FOUND, "not_found", "session not found");
+    let _control = match state.restore_session(&session_id).await {
+        Ok(control) => control,
+        Err(error) => return error.response(),
+    };
+    if let Err(error) = state.require_open_session(&session_id) {
+        return error.response();
     }
     match state
         .acp
@@ -222,12 +244,16 @@ async fn live_client_mutation(
     body: Bytes,
     method: &'static str,
 ) -> Response {
-    if !api_session_exists(&state, &session_id) {
-        return api_error(StatusCode::NOT_FOUND, "not_found", "session not found");
-    }
     let Ok(input) = parse_json_body(&body) else {
         return invalid_json_response();
     };
+    let _control = match state.restore_session(&session_id).await {
+        Ok(control) => control,
+        Err(error) => return error.response(),
+    };
+    if let Err(error) = state.require_open_session(&session_id) {
+        return error.response();
+    }
     let params = json!({
         "sessionId": session_id,
         "clientId": input.get("client_id").cloned().unwrap_or(Value::Null),
@@ -307,14 +333,81 @@ pub(super) async fn update_session(
             return api_error(StatusCode::BAD_REQUEST, "invalid_model_policy", &message)
         }
     };
+    if input
+        .get("metadata")
+        .is_some_and(|value| !value.is_object())
+        || input
+            .get("summary")
+            .is_some_and(|value| !value.is_null() && !value.is_string())
     {
-        let inner = state.inner.lock().expect("api state poisoned");
-        if !inner.sessions.contains_key(&session_id) {
-            return api_error(StatusCode::NOT_FOUND, "not_found", "session not found");
-        }
+        return api_error(
+            StatusCode::BAD_REQUEST,
+            "invalid_request",
+            "metadata must be an object and summary a string or null",
+        );
     }
-    if let Err(message) = apply_model_policy_change(&state, &session_id, &model_policy).await {
-        return api_error(StatusCode::BAD_GATEWAY, "acp_error", &message);
+    let _control = match state.restore_session(&session_id).await {
+        Ok(control) => control,
+        Err(error) => return error.response(),
+    };
+    if let Err(error) = state.require_open_session(&session_id) {
+        return error.response();
+    }
+    let previous = state.inner.lock().expect("api state poisoned").sessions[&session_id].clone();
+    let mut proposed = previous.clone();
+    merge_mutable_fields(&mut proposed, &input, &["summary", "metadata"]);
+    project_model_policy(&mut proposed, &model_policy);
+    if apply_model_policy_change(&state, &session_id, &model_policy)
+        .await
+        .is_err()
+    {
+        rollback_model_policy(&state, &session_id, &previous).await;
+        return api_error(
+            StatusCode::BAD_GATEWAY,
+            "acp_error",
+            "session model policy could not be applied",
+        );
+    }
+    let now = now_rfc3339();
+    let persisted = match state.update_session_facts(
+        &session_id,
+        TaskSessionUpdate {
+            metadata: input.get("metadata").cloned(),
+            summary: input
+                .get("summary")
+                .map(|value| value.as_str().map(str::to_owned)),
+            model_policy: if matches!(model_policy, ModelPolicyChange::Unchanged) {
+                None
+            } else {
+                Some(proposed.get("model_policy").cloned())
+            },
+            updated_at: now.clone(),
+            ..TaskSessionUpdate::default()
+        },
+    ) {
+        Ok(persisted) => persisted,
+        Err(_) => {
+            // Restore the previous policy before another control can run.
+            // A failed rollback discards the live projection so the next
+            // control must restore the authoritative descriptor again.
+            if !matches!(model_policy, ModelPolicyChange::Unchanged) {
+                rollback_model_policy(&state, &session_id, &previous).await;
+            }
+            return task_store::unavailable_response();
+        }
+    };
+    if let Some(persisted) = persisted {
+        proposed["metadata"] = persisted.metadata;
+        proposed["summary"] = json!(persisted.summary);
+        match persisted.model_policy {
+            Some(policy) => proposed["model_policy"] = policy,
+            None => {
+                proposed
+                    .as_object_mut()
+                    .expect("session resource")
+                    .remove("model_policy");
+            }
+        }
     }
     let session = {
         let mut inner = state.inner.lock().expect("api state poisoned");
@@ -322,9 +415,18 @@ pub(super) async fn update_session(
             .sessions
             .get_mut(&session_id)
             .expect("session existence checked before policy update");
-        merge_mutable_fields(session, &input, &["summary", "metadata"]);
-        project_model_policy(session, &model_policy);
-        session["updated_at"] = json!(now_rfc3339());
+        session["metadata"] = proposed["metadata"].clone();
+        session["summary"] = proposed["summary"].clone();
+        match proposed.get("model_policy") {
+            Some(policy) => session["model_policy"] = policy.clone(),
+            None => {
+                session
+                    .as_object_mut()
+                    .expect("session resource")
+                    .remove("model_policy");
+            }
+        }
+        session["updated_at"] = json!(now);
         session.clone()
     };
     state.append_event(Some(session_id), None, "session.updated", session.clone());
@@ -374,9 +476,23 @@ pub(super) async fn restore_model_policy(
 ) -> Result<(), String> {
     let input = policy
         .map(|policy| json!({"model_policy": policy}))
-        .unwrap_or_else(|| json!({}));
+        .unwrap_or_else(|| json!({"model_policy":null}));
     let change = parse_model_policy_change(&input, &state.provider_catalog)?;
     apply_model_policy_change(state, session_id, &change).await
+}
+
+async fn rollback_model_policy(state: &ApiState, session_id: &str, previous: &Value) {
+    if restore_model_policy(state, session_id, previous.get("model_policy"))
+        .await
+        .is_err()
+    {
+        state
+            .inner
+            .lock()
+            .expect("api state poisoned")
+            .sessions
+            .remove(session_id);
+    }
 }
 
 async fn apply_model_policy_change(
@@ -439,6 +555,20 @@ pub(super) async fn close_session(
     State(state): State<ApiState>,
     AxumPath(session_id): AxumPath<String>,
 ) -> Response {
+    let _control = match state.restore_session(&session_id).await {
+        Ok(control) => control,
+        Err(error) => return error.response(),
+    };
+    if let Err(error) = state.update_session_facts(
+        &session_id,
+        TaskSessionUpdate {
+            status: Some(SessionStatus::Closed),
+            updated_at: now_rfc3339(),
+            ..TaskSessionUpdate::default()
+        },
+    ) {
+        return session_control::SessionControlError::from(error).response();
+    }
     state.acp.send_raw(
         json!({"jsonrpc": "2.0", "method": "session/cancel", "params": {"sessionId": session_id}}),
     );
@@ -461,6 +591,13 @@ pub(super) async fn fork_session(
     body: Bytes,
 ) -> Response {
     let input = parse_json_body(&body).unwrap_or_else(|_| json!({}));
+    let _control = match state.restore_session(&session_id).await {
+        Ok(control) => control,
+        Err(error) => return error.response(),
+    };
+    if let Err(error) = state.require_open_session(&session_id) {
+        return error.response();
+    }
     let parent = {
         let inner = state.inner.lock().expect("api state poisoned");
         inner.sessions.get(&session_id).cloned()
@@ -584,11 +721,12 @@ pub(super) async fn truncate_session(
             )
         }
     };
-    {
-        let inner = state.inner.lock().expect("api state poisoned");
-        if !inner.sessions.contains_key(&session_id) {
-            return api_error(StatusCode::NOT_FOUND, "not_found", "session not found");
-        }
+    let _control = match state.restore_session(&session_id).await {
+        Ok(control) => control,
+        Err(error) => return error.response(),
+    };
+    if let Err(error) = state.require_open_session(&session_id) {
+        return error.response();
     }
 
     let mut acp_params = json!({
@@ -733,11 +871,12 @@ pub(super) async fn append_session_message(
     };
     let message_input = input.get("message").cloned().unwrap_or(input.clone());
     let message = message_resource(&session_id, None, message_input.clone());
-    {
-        let inner = state.inner.lock().expect("api state poisoned");
-        if !inner.sessions.contains_key(&session_id) {
-            return api_error(StatusCode::NOT_FOUND, "not_found", "session not found");
-        }
+    let control = match state.restore_session(&session_id).await {
+        Ok(control) => control,
+        Err(error) => return error.response(),
+    };
+    if let Err(error) = state.require_open_session(&session_id) {
+        return error.response();
     }
     if state
         .append_event_with_persistence(
@@ -751,6 +890,7 @@ pub(super) async fn append_session_message(
     {
         return task_store::unavailable_response();
     }
+    drop(control);
     if input.get("run").and_then(Value::as_bool).unwrap_or(false) {
         if let Some(prompt) = prompt_text(&message_input) {
             let result = state

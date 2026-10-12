@@ -6,7 +6,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::{StoreError, StoreHooks, StoreResult, TaskExecutionLease};
+use crate::{SessionStatus, StoreError, StoreHooks, StoreResult, TaskExecutionLease};
 
 pub const TASK_RETRY_RETENTION_MS: i64 = 24 * 60 * 60 * 1_000;
 
@@ -81,6 +81,66 @@ pub struct TaskSessionDescriptor {
     pub persona_id: Option<String>,
     pub created_at: String,
     pub updated_at: String,
+    #[serde(default)]
+    pub summary: Option<String>,
+    #[serde(default = "open_session_status")]
+    pub status: SessionStatus,
+}
+
+fn open_session_status() -> SessionStatus {
+    SessionStatus::Open
+}
+
+/// Mutable session facts. Identity and transcript ownership cannot change here.
+#[derive(Clone, Debug, Default)]
+pub struct TaskSessionUpdate {
+    pub metadata: Option<Value>,
+    pub summary: Option<Option<String>>,
+    pub model_policy: Option<Option<Value>>,
+    pub status: Option<SessionStatus>,
+    pub updated_at: String,
+}
+
+#[derive(Clone, Debug)]
+pub struct TaskSessionChange {
+    pub session: TaskSessionDescriptor,
+    /// Closing a session atomically cancels its accepted unfinished tasks.
+    pub events: Vec<TaskControlEvent>,
+}
+
+impl TaskSessionUpdate {
+    pub(crate) fn apply(self, session: &mut TaskSessionDescriptor) -> StoreResult<()> {
+        if self.updated_at.is_empty()
+            || self
+                .metadata
+                .as_ref()
+                .is_some_and(|value| !value.is_object())
+            || self
+                .model_policy
+                .as_ref()
+                .and_then(Option::as_ref)
+                .is_some_and(|value| !value.is_object())
+            || (session.status != SessionStatus::Open && self.status == Some(SessionStatus::Open))
+        {
+            return Err(StoreError::InvalidInput(
+                "invalid task session update".into(),
+            ));
+        }
+        if let Some(metadata) = self.metadata {
+            session.metadata = metadata;
+        }
+        if let Some(summary) = self.summary {
+            session.summary = summary;
+        }
+        if let Some(policy) = self.model_policy {
+            session.model_policy = policy;
+        }
+        if let Some(status) = self.status {
+            session.status = status;
+        }
+        session.updated_at = self.updated_at;
+        Ok(())
+    }
 }
 
 impl TaskSessionDescriptor {
@@ -89,6 +149,11 @@ impl TaskSessionDescriptor {
             redactor.redact_json_in_place(&mut self.metadata);
             if let Some(policy) = self.model_policy.as_mut() {
                 redactor.redact_json_in_place(policy);
+            }
+            if let Some(summary) = self.summary.take() {
+                let mut summary = Value::String(summary);
+                redactor.redact_json_in_place(&mut summary);
+                self.summary = summary.as_str().map(str::to_owned);
             }
         }
         self
@@ -423,6 +488,11 @@ pub trait TaskStore: Send + Sync {
     ) -> StoreResult<Vec<TaskRecord>>;
     fn get_task_session(&self, session_id: &str) -> StoreResult<TaskSessionDescriptor>;
     fn list_task_sessions(&self) -> StoreResult<Vec<TaskSessionDescriptor>>;
+    fn update_task_session(
+        &self,
+        session_id: &str,
+        update: TaskSessionUpdate,
+    ) -> StoreResult<TaskSessionChange>;
     fn update_task(&self, task_id: &str, update: TaskUpdate) -> StoreResult<TaskChange>;
     fn append_task_event(
         &self,

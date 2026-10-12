@@ -747,7 +747,7 @@ impl AcpServer {
         })
     }
 
-    pub(super) fn handle_session_truncate(
+    pub(super) async fn handle_session_truncate(
         &mut self,
         id: &serde_json::Value,
         params: &serde_json::Value,
@@ -784,7 +784,39 @@ impl AcpServer {
                 return;
             }
         }
-        let result = match harn_vm::agent_sessions::truncate(&session_id, keep_first) {
+        let scope = self
+            .sessions
+            .get(&session_id)
+            .expect("validated session")
+            .store_scope
+            .clone();
+        let opened = {
+            let _scope = scope.enter();
+            harn_vm::open_canonical_store(scope.workspace())
+        };
+        let store = match opened {
+            Ok(store) => store,
+            Err(error) => {
+                self.send_error(id, -32000, &error.to_string());
+                return;
+            }
+        };
+        let Some(store_dir) = store.path().parent() else {
+            self.send_error(
+                id,
+                -32000,
+                "canonical transcript store has no parent directory",
+            );
+            return;
+        };
+        let result = match harn_vm::agent_sessions::truncate_canonical(
+            &store,
+            store_dir,
+            &session_id,
+            keep_first,
+        )
+        .await
+        {
             Ok(Some(result)) => result,
             Ok(None) => {
                 self.send_error(
@@ -794,8 +826,8 @@ impl AcpServer {
                 );
                 return;
             }
-            Err(message) => {
-                self.send_error(id, -32000, &message);
+            Err(error) => {
+                self.send_error(id, -32000, &error.to_string());
                 return;
             }
         };

@@ -2,7 +2,8 @@ use super::*;
 use crate::task::{
     retry_decision, status_event, AdmitTask, NewTaskControlEvent, RetryDecision, TaskAdmission,
     TaskBinding, TaskChange, TaskControlEvent, TaskMessageProjection, TaskMessageView, TaskRecord,
-    TaskSessionDescriptor, TaskStore, TaskUpdate, TASK_RETRY_RETENTION_MS,
+    TaskSessionChange, TaskSessionDescriptor, TaskSessionUpdate, TaskStatus, TaskStore, TaskUpdate,
+    TASK_RETRY_RETENTION_MS,
 };
 use serde_json::Value;
 
@@ -129,11 +130,26 @@ impl TaskStore for SqliteSessionStore {
         {
             return Err(StoreError::AlreadyExists(request.task.id));
         }
+        let stored_session: Option<String> = tx
+            .query_row(
+                "SELECT record_json FROM agent_task_sessions WHERE id = ?1",
+                params![request.session.id],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(map_sql)?;
+        let session = stored_session
+            .map(|encoded| decode::<TaskSessionDescriptor>(&encoded))
+            .transpose()?
+            .unwrap_or(request.session)
+            .redacted(self.hooks());
+        if session.status != SessionStatus::Open {
+            return Err(StoreError::Conflict("session is closed".into()));
+        }
         let task = request.task.redacted(self.hooks())?;
-        let session = request.session.redacted(self.hooks());
         tx.execute(
             "INSERT INTO agent_task_sessions (id, record_json) VALUES (?1, ?2)
-             ON CONFLICT(id) DO UPDATE SET record_json = excluded.record_json",
+             ON CONFLICT(id) DO NOTHING",
             params![session.id, encode(&session)?],
         )
         .map_err(map_sql)?;
@@ -218,6 +234,67 @@ impl TaskStore for SqliteSessionStore {
             Ok(decode::<TaskSessionDescriptor>(&row.map_err(map_sql)?)?.redacted(self.hooks()))
         })
         .collect()
+    }
+
+    fn update_task_session(
+        &self,
+        session_id: &str,
+        update: TaskSessionUpdate,
+    ) -> StoreResult<TaskSessionChange> {
+        let mut conn = self.lock_for_mutation()?;
+        let tx = write_transaction(&mut conn)?;
+        let encoded: String = tx
+            .query_row(
+                "SELECT record_json FROM agent_task_sessions WHERE id = ?1",
+                params![session_id],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(map_sql)?
+            .ok_or_else(|| StoreError::NotFound(session_id.into()))?;
+        let mut session: TaskSessionDescriptor = decode(&encoded)?;
+        update.apply(&mut session)?;
+        let session = session.redacted(self.hooks());
+        tx.execute(
+            "UPDATE agent_task_sessions SET record_json = ?2 WHERE id = ?1",
+            params![session_id, encode(&session)?],
+        )
+        .map_err(map_sql)?;
+        let mut events = Vec::new();
+        if session.status == SessionStatus::Closed {
+            let active = {
+                let mut statement = tx
+                    .prepare(
+                        "SELECT record_json FROM agent_tasks WHERE session_id = ?1 ORDER BY id",
+                    )
+                    .map_err(map_sql)?;
+                let rows = statement
+                    .query_map(params![session_id], |row| row.get::<_, String>(0))
+                    .map_err(map_sql)?;
+                rows.map(|row| decode::<TaskRecord>(&row.map_err(map_sql)?))
+                    .collect::<StoreResult<Vec<_>>>()?
+            };
+            for mut task in active.into_iter().filter(|task| task.status.is_active()) {
+                let previous = task.status;
+                task.transition(TaskUpdate {
+                    status: TaskStatus::Canceled,
+                    at: session.updated_at.clone(),
+                    failure: None,
+                });
+                let task = task.redacted(self.hooks())?;
+                write_task(&tx, &task)?;
+                let event = TaskControlEvent::new(
+                    next_id(&tx)?,
+                    &task,
+                    status_event(&task, Some(previous)),
+                    self.hooks(),
+                );
+                write_event(&tx, &event)?;
+                events.push(event);
+            }
+        }
+        tx.commit().map_err(map_sql)?;
+        Ok(TaskSessionChange { session, events })
     }
 
     fn update_task(&self, task_id: &str, update: TaskUpdate) -> StoreResult<TaskChange> {
