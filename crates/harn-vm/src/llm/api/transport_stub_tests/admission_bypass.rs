@@ -62,12 +62,18 @@ async fn call(opts: &LlmCallOptions, offthread: bool) -> (LlmResult, Vec<String>
 
 fn chat_stub(
     requests: Arc<AtomicUsize>,
+    expected_stream: bool,
     mut first_body_gate: Option<(tokio::sync::oneshot::Sender<()>, mpsc::Receiver<()>)>,
 ) -> LlmStub {
     spawn_llm_stub_many("physical admission", 2, move |attempt, stream| {
         let (headers, body) = ollama_openai_compat::read_http_request(stream);
         assert!(headers.starts_with("POST /v1/chat/completions "));
         assert_eq!(body["model"], "admission-model");
+        if expected_stream {
+            assert_eq!(body["stream"], true, "wire streaming mode");
+        } else {
+            assert!(body.get("stream").is_none(), "nonstream wire omits stream");
+        }
         requests.fetch_add(1, Ordering::SeqCst);
         let (content_type, response) = if body["stream"] == true {
             (
@@ -108,7 +114,7 @@ fn assert_cache_or_replay_bypass(offthread: bool, replay: bool) {
     let dir = tempfile::tempdir().unwrap();
     runtime().block_on(async {
         let requests = Arc::new(AtomicUsize::new(0));
-        let server = chat_stub(requests.clone(), None);
+        let server = chat_stub(requests.clone(), true, None);
         install_openai_stub_provider(PROVIDER, server.addr());
         limits(PROVIDER);
         let mut opts = options(PROVIDER);
@@ -258,7 +264,7 @@ fn detached_offthread_transport_keeps_its_permit_until_body_completion() {
         let requests = Arc::new(AtomicUsize::new(0));
         let (received_tx, received_rx) = tokio::sync::oneshot::channel();
         let (release_tx, release_rx) = mpsc::channel();
-        let server = chat_stub(requests.clone(), Some((received_tx, release_rx)));
+        let server = chat_stub(requests.clone(), false, Some((received_tx, release_rx)));
         let mut release = ReleaseBody(Some(release_tx));
         install_openai_stub_provider(PROVIDER, server.addr());
         limits(PROVIDER);
