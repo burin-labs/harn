@@ -79,6 +79,9 @@ pub struct TaskSessionDescriptor {
     pub model_policy: Option<Value>,
     pub metadata: Value,
     pub persona_id: Option<String>,
+    pub root_session_id: Option<String>,
+    pub parent_session_id: Option<String>,
+    pub branch_id: Option<String>,
     pub created_at: String,
     pub updated_at: String,
     #[serde(default)]

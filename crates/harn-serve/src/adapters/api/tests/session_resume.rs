@@ -40,11 +40,26 @@ async fn completed_session(root: &Path) -> (ApiServerConfig, String, String) {
     .await;
     assert_eq!(response.status(), StatusCode::CREATED);
     let session = read_json(response).await["id"].as_str().unwrap().to_owned();
+    let task =
+        submit_completed_task(&app, &mut events, &session, "initial-transcript-canary").await;
+    assert_eq!(
+        std::fs::read_to_string(root.join("task-retry-provider.txt")).unwrap(),
+        "provider-reached\n"
+    );
+    (config, session, task)
+}
+
+async fn submit_completed_task(
+    app: &Router,
+    events: &mut tokio::sync::broadcast::Receiver<ApiEvent>,
+    session: &str,
+    input: &str,
+) -> String {
     let response = request(
-        &app,
+        app,
         "POST",
         &format!("/v1/sessions/{session}/tasks"),
-        json!({"input":"initial-transcript-canary"}),
+        json!({"input":input}),
     )
     .await;
     assert_eq!(response.status(), StatusCode::ACCEPTED);
@@ -58,11 +73,103 @@ async fn completed_session(root: &Path) -> (ApiServerConfig, String, String) {
             }
         }
     }
-    assert_eq!(
-        std::fs::read_to_string(root.join("task-retry-provider.txt")).unwrap(),
-        "provider-reached\n"
-    );
-    (config, session, task)
+    task
+}
+
+#[tokio::test]
+async fn accepted_forks_retain_nested_lineage_after_restart() {
+    let root = tempfile::tempdir().unwrap();
+    let (config, original, _) = completed_session(root.path()).await;
+    let mut server = ApiServer::new(config.clone());
+    let mut app = api_router(server.state.clone());
+    let mut parent = original.clone();
+    let response = request(
+        &app,
+        "PATCH",
+        &format!("/v1/sessions/{parent}"),
+        json!({"metadata":{"known_parent":true}}),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let before = {
+        let inner = server.state.inner.lock().unwrap();
+        assert!(inner.sessions.contains_key(&parent));
+        (inner.sessions.len(), inner.events.len())
+    };
+    for invalid in [json!({"branch_id":7}), json!({"metadata":[]}), json!(null)] {
+        let response = request(
+            &app,
+            "POST",
+            &format!("/v1/sessions/{parent}/fork"),
+            invalid,
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/v1/sessions/{parent}/fork"))
+                .header("content-type", "application/json")
+                .body(Body::from("{"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    for invalid in [json!({"metadata":[]}), json!({"persona_id":7})] {
+        let response = request(&app, "POST", "/v1/sessions", invalid).await;
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+    {
+        let inner = server.state.inner.lock().unwrap();
+        assert_eq!((inner.sessions.len(), inner.events.len()), before);
+    }
+    for (index, branch) in ["child", "grandchild"].into_iter().enumerate() {
+        let previous = read_json(get(&app, &format!("/v1/sessions/{parent}")).await).await;
+        assert!(previous["last_event_id"].is_string());
+        let response = request(
+            &app,
+            "POST",
+            &format!("/v1/sessions/{parent}/fork"),
+            json!({"branch_id":branch, "metadata":{"fork_canary":branch}}),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::CREATED);
+        let child = read_json(response).await;
+        let id = child["id"].as_str().unwrap().to_owned();
+        assert_eq!(child["transcript"]["session_id"], id);
+        assert_ne!(child["last_event_id"], previous["last_event_id"]);
+        let mut events = server.state.events_tx.subscribe();
+        submit_completed_task(&app, &mut events, &id, "fork-provider-canary").await;
+        assert_eq!(
+            std::fs::read_to_string(root.path().join("task-retry-provider.txt")).unwrap(),
+            "provider-reached\n".repeat(index + 2),
+            "each accepted fork must reach a provider and complete"
+        );
+        drop(app);
+        drop(server);
+        server = ApiServer::new(config.clone());
+        app = api_router(server.state.clone());
+        let restored = read_json(get(&app, &format!("/v1/sessions/{id}")).await).await;
+        assert_eq!(restored["id"], id);
+        assert_eq!(restored["parent_session_id"], parent);
+        assert_eq!(restored["root_session_id"], original);
+        assert_eq!(restored["branch_id"], branch);
+        assert_eq!(restored["transcript"], child["transcript"]);
+        assert_eq!(restored["metadata"], child["metadata"]);
+        let listed = read_json(get(&app, "/v1/sessions").await).await;
+        let listed = listed["data"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|session| session["id"] == id)
+            .unwrap();
+        assert_eq!(listed, &restored);
+        parent = id;
+    }
 }
 
 async fn first_frame(

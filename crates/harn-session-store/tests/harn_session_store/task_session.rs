@@ -11,6 +11,9 @@ use std::sync::Arc;
 fn mutation_contract(store: &dyn TaskStore) {
     let mut first = request("first", "b", 0);
     first.task.status = TaskStatus::Submitted;
+    first.session.root_session_id = Some("root".into());
+    first.session.parent_session_id = Some("parent".into());
+    first.session.branch_id = Some("branch".into());
     store.admit_task(first).unwrap();
     let change = store
         .update_task_session(
@@ -96,6 +99,9 @@ fn updates_preserve_facts_and_close_all_admitted_tasks() {
     assert_eq!(descriptor.summary.as_deref(), Some("summary"));
     assert_eq!(descriptor.model_policy.unwrap()["model"], "o3");
     assert_eq!(descriptor.status, SessionStatus::Closed);
+    assert_eq!(descriptor.root_session_id.as_deref(), Some("root"));
+    assert_eq!(descriptor.parent_session_id.as_deref(), Some("parent"));
+    assert_eq!(descriptor.branch_id.as_deref(), Some("branch"));
 }
 
 #[test]

@@ -23,7 +23,7 @@ pub(super) fn task_response(result: StoreResult<TaskRecord>) -> Response {
     }
 }
 
-fn session_resource(
+pub(super) fn session_resource(
     session: TaskSessionDescriptor,
     active: bool,
     last_event: Option<&TaskControlEvent>,
@@ -33,10 +33,10 @@ fn session_resource(
         "updated_at": session.updated_at, "metadata": session.metadata,
         "workspace_id": session.workspace_id, "state": "IDLE", "mode_id": session.mode_id,
         "transcript": {"source": "harn.acp", "session_id": session.id},
-        "persona_id": session.persona_id, "root_session_id": null, "parent_session_id": null,
-        "branch_id": null, "last_event_id": null, "summary": null, "expires_at": null,
+        "persona_id": session.persona_id, "root_session_id": session.root_session_id,
+        "parent_session_id": session.parent_session_id, "branch_id": session.branch_id,
+        "last_event_id": null, "summary": session.summary, "expires_at": null,
     });
-    resource["summary"] = json!(session.summary);
     if session.status != harn_session_store::SessionStatus::Open {
         resource["state"] = json!("CLOSED");
     }
@@ -217,6 +217,9 @@ impl ApiState {
                     .cloned(),
                 metadata: session["metadata"].clone(),
                 persona_id: session["persona_id"].as_str().map(str::to_owned),
+                root_session_id: session["root_session_id"].as_str().map(str::to_owned),
+                parent_session_id: session["parent_session_id"].as_str().map(str::to_owned),
+                branch_id: session["branch_id"].as_str().map(str::to_owned),
                 created_at: session["created_at"].as_str().unwrap_or_default().into(),
                 updated_at: session["updated_at"].as_str().unwrap_or_default().into(),
                 summary: session["summary"].as_str().map(str::to_owned),

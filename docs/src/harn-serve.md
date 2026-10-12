@@ -168,6 +168,12 @@ Task execution and session controls restore the same ACP session and API
 projection. Metadata, summary, and model-policy updates remain in the existing
 session descriptor. A failed update restores the previous policy or discards the
 live projection so the next control must restore the stored configuration.
+Accepted forks retain their parent, root, and branch identity across restart,
+including when another fork descends from a restored session. A fork returns
+its own transcript identity and does not inherit its parent's event cursor.
+Creation validates object `metadata` and a string or null `persona_id`. Fork requests
+require a string or null `branch_id` and object `metadata`; malformed bodies
+fail before creating a child.
 Truncation retains the requested leading messages in the canonical transcript,
 including across restart and the next provider call. It refuses a still-active
 transcript writer or a failed store write; the earlier audit events remain stored.
