@@ -1102,15 +1102,14 @@ jobs:
         env:
           CARGO_BUILD_JOBS: ${{ steps.resource-budget.outputs.build_jobs }}
         run: |
-          # Log-only: report the largest resident process this build reached,
-          # so a later kill can be read against a measured peak instead of a
-          # guess. Printed by GNU time after the command returns, so a runner
-          # shutdown mid-step still leaves nothing.
+          # Stream resource snapshots before and during the build. A runner
+          # shutdown can skip both GNU time's final peak and the failure report.
           timer=()
           if [ -x /usr/bin/time ]; then
             timer=(/usr/bin/time -v)
           fi
-          "${timer[@]}" ./scripts/ci/rust_artifact.sh build-security \
+          bash ./scripts/ci/run_with_host_telemetry.sh "security archive build" \
+            "${timer[@]}" ./scripts/ci/rust_artifact.sh build-security \
             "$RUNNER_TEMP/harn-security.tar.zst" \
             "$GITHUB_SHA"
       # This step has been killed by a signal at around 330 seconds on hosted
