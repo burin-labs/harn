@@ -645,11 +645,56 @@ pub const INVALID_CASES: &[InvalidCase] = &[
     },
 ];
 
+#[derive(Clone, Copy)]
 pub struct PackageCompilationCase {
     pub id: &'static str,
     pub source: &'static str,
     pub entry: &'static str,
     pub expected_ok: bool,
+}
+
+impl PackageCompilationCase {
+    pub fn package(&self) -> harn_kernel::PortableSourcePackage {
+        harn_kernel::PortableSourcePackage {
+            root_source: self.source.to_string(),
+            root_imports: Vec::new(),
+            modules: Vec::new(),
+        }
+    }
+
+    pub fn compile(&self) -> Result<harn_kernel::ProgramArtifact, Vec<harn_kernel::Diagnostic>> {
+        let result = harn_kernel::compile_source_package(
+            self.package(),
+            self.entry,
+            harn_kernel::EntryKind::Function,
+        );
+        assert_eq!(
+            result.is_ok(),
+            self.expected_ok,
+            "{} compilation decision drifted",
+            self.id
+        );
+        if let Err(diagnostics) = &result {
+            assert!(
+                !diagnostics.is_empty(),
+                "{} has no failure diagnostic",
+                self.id
+            );
+        }
+        result
+    }
+}
+
+pub fn package_compilation_cases() -> impl Iterator<Item = PackageCompilationCase> {
+    INVALID_CASES
+        .iter()
+        .map(|case| PackageCompilationCase {
+            id: case.id,
+            source: case.source,
+            entry: case.entry,
+            expected_ok: false,
+        })
+        .chain(PACKAGE_COMPILATION_CASES.iter().copied())
 }
 
 pub const PACKAGE_COMPILATION_CASES: &[PackageCompilationCase] = &[

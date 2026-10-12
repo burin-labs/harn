@@ -97,23 +97,13 @@ fn save_fixture_at(dir: &str, hash: &str, result: &LlmResult) {
     }
     let _ = std::fs::create_dir_all(dir);
     let path = format!("{dir}/{hash}.json");
-    let json = serde_json::json!({
-        "text": result.text,
-        "tool_calls": result.tool_calls,
-        "raw_tool_calls": result.raw_tool_calls,
-        "input_tokens": result.input_tokens,
-        "output_tokens": result.output_tokens,
-        "cache_read_tokens": result.cache_read_tokens,
-        "cache_write_tokens": result.cache_write_tokens,
-        "model": result.model,
-        "provider": result.provider,
-        "thinking": result.thinking,
-        "thinking_summary": result.thinking_summary,
-        "stop_reason": result.stop_reason,
-        "blocks": result.blocks,
-        "logprobs": result.logprobs,
-        "telemetry": result.telemetry,
-    });
+    let Ok(serde_json::Value::Object(mut json)) = serde_json::to_value(result) else {
+        return;
+    };
+    // Replay restores the provider result, without the original call's retry
+    // context or billing tier. Derived text projection already skips serde.
+    json.remove("attempts");
+    json.remove("served_fast");
     let _ = std::fs::write(
         &path,
         serde_json::to_string_pretty(&json).unwrap_or_default(),
@@ -152,4 +142,57 @@ pub(crate) fn load_fixture(hash: &str) -> Option<LlmResult> {
         logprobs: json["logprobs"].as_array().cloned().unwrap_or_default(),
         telemetry: serde_json::from_value(json["telemetry"].clone()).unwrap_or_default(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::llm::api::{test_text_projection, ProviderAttempts};
+
+    #[test]
+    fn recording_round_trips_cache_support_without_replaying_attempt_context() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().to_str().unwrap();
+        for cache_supported in [false, true] {
+            let mut result = LlmResult {
+                text: "recorded provider result".to_string(),
+                tool_calls: Vec::new(),
+                raw_tool_calls: Vec::new(),
+                text_projection: None,
+                input_tokens: 29,
+                output_tokens: 3,
+                cache_read_tokens: 0,
+                cache_write_tokens: 0,
+                cache_supported,
+                model: "recording-proof".to_string(),
+                provider: "ollama".to_string(),
+                thinking: None,
+                thinking_summary: None,
+                stop_reason: Some("stop".to_string()),
+                blocks: Vec::new(),
+                logprobs: Vec::new(),
+                telemetry: Box::default(),
+                attempts: ProviderAttempts {
+                    total: 3,
+                    rate_limited: 2,
+                    ..Default::default()
+                },
+                served_fast: true,
+            };
+            result.text_projection = Some(Box::new(test_text_projection(&result, None)));
+            let hash = format!("cache-{cache_supported}");
+            set_replay_mode(LlmReplayMode::Record, path);
+            let recorder =
+                FixtureRecorder::capture(&hash).expect("record mode captures destination");
+            recorder.record(&result);
+            set_replay_mode(LlmReplayMode::Replay, path);
+            let replayed = load_fixture(&hash).expect("recorded fixture loads");
+            assert_eq!(replayed.cache_supported, cache_supported);
+            result.attempts = Default::default();
+            result.text_projection = None;
+            result.served_fast = false;
+            assert_eq!(replayed, result, "provider result changed during replay");
+        }
+        set_replay_mode(LlmReplayMode::Off, "");
+    }
 }

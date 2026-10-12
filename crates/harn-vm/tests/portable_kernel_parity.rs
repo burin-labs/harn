@@ -153,4 +153,14 @@ fn native_adapter_preserves_invalid_diagnostics_exactly() {
         );
         assert_eq!(first[0].code, case.expected_code, "{} drifted", case.id);
     }
+    for case in package_compilation_cases() {
+        let first = case.compile();
+        let second = case.compile();
+        assert_eq!(
+            first.map(|program| program.bytes().to_vec()),
+            second.map(|program| program.bytes().to_vec()),
+            "{} package compilation was not deterministic",
+            case.id,
+        );
+    }
 }
