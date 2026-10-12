@@ -1,0 +1,89 @@
+import { resolve_workspace_guidance } from "std/agent/workspace_guidance"
+
+/**
+ * User-scope guidance is bounded by home through symlinks, not just by
+ * spelling. A link inside home that points outside it is refused before it is
+ * read, at the entry and at every import; a link to another file inside home
+ * (the dotfiles convention) still loads. The outside-pointing links are the
+ * load-bearing half: a lexical check passes every in-home assertion below and
+ * still reads the outside text.
+ */
+pipeline test(harness: Harness) {
+  // `ln -s` is the portable way to make the fixture; Windows symlinks need a
+  // privilege the runner does not hold, so the case is POSIX-only.
+  if harness.system.platform().os == "windows" {
+    harness.stdio.log("workspace_guidance_user_scope_symlinks passed")
+    return
+  }
+  const base = harness.fs.mkdtemp_in_workspace("harn-guidance-links-")
+  const home = path_join(base, "home")
+  const outside = path_join(base, "outside")
+  const plain = path_join(base, "repo")
+  harness.fs.mkdir(path_join(home, ".host"))
+  harness.fs.mkdir(path_join(home, "dotfiles"))
+  harness.fs.mkdir(outside)
+  harness.fs.mkdir(plain)
+  harness.fs.write_text(path_join(outside, "secret.md"), "Outside secret.")
+  harness.fs.write_text(path_join(outside, "AGENTS.md"), "Outside entry.")
+  harness.fs.write_text(path_join(home, "dotfiles/inner.md"), "In-home linked import.")
+  harness.fs.write_text(
+    path_join(home, "dotfiles/AGENTS.md"),
+    "Dotfiles rule.\n@linked.md\n@leak.md\n@missing.md",
+  )
+  // Entry links: one to a dotfiles copy in home, one straight out of home.
+  link(harness.process, path_join(home, "dotfiles/AGENTS.md"), path_join(home, ".host/AGENTS.md"))
+  link(harness.process, path_join(outside, "AGENTS.md"), path_join(home, ".host/OUT.md"))
+  // Imports resolve beside the entry as spelled, so the import links sit there.
+  link(harness.process, path_join(home, "dotfiles/inner.md"), path_join(home, ".host/linked.md"))
+  link(harness.process, path_join(outside, "secret.md"), path_join(home, ".host/leak.md"))
+  const resolved = resolve_workspace_guidance(
+    harness.fs,
+    {
+      workspace_root: plain,
+      home_dir: home,
+      include_ancestors: false,
+      user_scope_files: [".host/AGENTS.md", ".host/OUT.md"],
+    },
+  )
+  const body = join(resolved.sources.map({ entry -> entry.body }).to_list(), "\n")
+  const refused = resolved.omitted.filter({ entry -> entry.reason == "outside_scope" }).map(
+    { entry -> entry.path },
+  )
+    .to_list()
+  const deps = resolved.dependencies.map({ entry -> entry.path }).to_list()
+  // Negative controls first: neither outside target reaches the model.
+  assert(!body.contains("Outside entry."), "an entry linked outside home is not read")
+  assert(!body.contains("Outside secret."), "an import linked outside home is not read")
+  assert(
+    refused.contains(path_join(home, ".host/OUT.md")),
+    "an entry linked outside home is refused as outside_scope",
+  )
+  assert(
+    refused.contains(path_join(home, ".host/leak.md")),
+    "an import linked outside home is refused as outside_scope",
+  )
+  assert(!deps.contains(path_join(home, ".host/leak.md")), "a refused link is never a dependency")
+  // Positive controls: links that stay in home load as before.
+  assert(body.contains("Dotfiles rule."), "an entry linked to a file in home loads")
+  assert(body.contains("In-home linked import."), "an import linked to a file in home loads")
+  // A missing import is still unreadable, not refused: absence is not escape.
+  assert(
+    resolved.dependencies.filter(
+      { entry -> entry.path == path_join(home, ".host/missing.md") && entry.state == "unreadable" },
+    )
+      .to_list()
+      .count()
+      == 1,
+    "a missing in-home import stays an unreadable dependency",
+  )
+  assert(
+    !refused.contains(path_join(home, ".host/missing.md")),
+    "a missing in-home import is not refused",
+  )
+  harness.stdio.log("workspace_guidance_user_scope_symlinks passed")
+}
+
+fn link(process: HarnessProcess, target: string, path: string) {
+  const made = process.exec("ln", "-s", target, path)
+  assert(made.success, "ln -s " + target + " " + path + ": " + made.stderr)
+}
