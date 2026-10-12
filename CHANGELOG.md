@@ -9,6 +9,241 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.166
+
+### Breaking
+
+- **Rust provider capability API adds effort conditions and Anthropic toolsets
+  (#9697).** `ProviderCapabilityMatrixRow` adds `portable_option_effort_support`,
+  and `ComputerUseStyle` adds `NativeAnthropicToolset`. Existing computer-style
+  numeric discriminants retain their values; serialized spellings are unchanged.
+
+  Migration: initialize `portable_option_effort_support` with `Default::default()`
+  in existing matrix-row struct literals. Add a `NativeAnthropicToolset` arm to
+  exhaustive computer-style matches; that route uses namespaced members of
+  `computer_toolset_20260801`, and its tool results must preserve `toolset_name`.
+- **AWS TLS connector (#9700).** `harn-aws-config` no longer exports the
+  `legacy-client` feature that selected the deprecated Hyper 0.14 and Rustls
+  0.21 stack. The default modern TLS client and credential chains remain available.
+
+  Migration: remove `legacy-client` from dependency features. Keep default
+  features enabled, or select `default-https-client` explicitly. Use
+  `BehaviorVersion::v2026_01_12()` or newer for the default connector. To retain
+  an older behavior version, supply a modern client through
+  `ConfigLoader::http_client`.
+- The native `harness.llm.with_rate_limit` wrapper and global alias have been
+  removed because nesting them around a provider call could deadlock at concurrency
+  one. Provider requests acquire their own permits automatically. The per-tool
+  middleware remains available.
+
+  Migration: Remove the native `with_rate_limit` wrapper around provider calls.
+  Use `llm_caller` with `with_retry` for retries; `max_retries: K` becomes
+  `max_attempts: K + 1`, and `backoff_ms` becomes `base_ms`.
+
+  `hash_value` now uses the equality-compatible collection projection. Numeric,
+  compound, and identity-based values may return different hashes.
+
+  Migration: Regenerate saved `hash_value` results and experiment IDs or seeded
+  assignments derived from them. Durable-step replay fingerprints retain their
+  previous encoding.
+- Provider option probes qualify changing router pools separately from stable
+  endpoints. Reports retain the provider's selected model for the option and its
+  control; missing selection remains unmeasured, and controlled pool rejection
+  reports unavailable instead of changing a stable capability claim. Campaigns
+  retain unavailable cells in their census and refuse a complete result while
+  any unavailable or eligible unmeasured cells remain.
+
+  Migration: `provider_option_probe_report` now accepts a required
+  `ProviderOptionProbeContext` and an attempt. Move the former endpoint, option,
+  claim, and ungated arguments into that context, including the authored
+  `catalog.qualification` (`stable_endpoint` or `changing_pool`). JSON consumers
+  must accept option-probe schema `harn.provider_option_probe.v2` and campaign
+  schema `harn.provider_tool_probe_campaign.v12`, handle `unavailable` as an
+  incomplete qualification, and include `unavailable_count` in the selected-cell
+  census. Stable endpoint claims and provider privacy settings retain their
+  existing meaning.
+- Rust test-runner callers must now select LLM authority through the public
+  `RunOptions.llm_policy` field. Ordinary tests default to `TestLlmPolicy::Hermetic`;
+  recording and replay callers use `Record` and `Replay` respectively.
+
+  Migration: add `llm_policy: TestLlmPolicy::Hermetic` to exhaustive `RunOptions`
+  literals, or use `..RunOptions::default()` to keep ordinary tests hermetic.
+  Select `Record` or `Replay` explicitly for fixture recording or playback;
+  ambient VM replay state no longer admits those modes for a test suite.
+
+### Added
+
+- Added an optional observer admission action for downstream rehearsals. It
+  refuses stale parent attempts before expensive work starts and stores the
+  ownership receipt with the consumer.
+  The shared owner fixes the trusted dispatch App and checks the documented
+  workflow run-name projection.
+
+### Changed
+
+- CI security archive builds now stream timestamped memory, process, and kernel
+  snapshots every 30 seconds, preserving readings before a runner shutdown
+  prevents final diagnostics (#8516).
+- Fireworks Qwen3.8-Max is available with a measured context limit, native tools,
+  vision, and route-specific reasoning controls. Direct Grok 4.3 and 4.5 through
+  4.7 accept their measured effort levels. OpenRouter GPT-5.6 Sol Pro reflects
+  the current standard-endpoint promotion, and Together retirement notices now
+  cite the public October 22 deprecation schedule.
+  Claude 5.5 native computer requests use the new toolset descriptor. Member
+  namespaces survive streaming, dispatch, transcript replay, and interrupted
+  tool-result recovery.
+  Malformed namespaces return recoverable feedback instead of aborting the agent
+  loop or invoking an ordinary same-named function.
+  Toolset members use their qualified handler annotations for batch ordering and
+  same-resource failure guards.
+  Middleware allowlists, dry-run filters, redactors, per-tool limits, audit records,
+  and text history also retain the qualified member identity.
+- VS Code CI checks reuse the verified Harn CLI's language server instead of
+  compiling a separate server inside the test. Editor-only checks use the
+  published workspace version, and CI refuses a missing binary input.
+- Code-index recovery retains compact posting lists and shares identifier keys across their per-file removal projection,
+  reducing repeated reconstruction work. Resident edits restore import edges for the changed file and its direct importers
+  instead of revisiting the workspace. Snapshot loading separately reports file reading and JSON decoding phases.
+  Recovery reconstructs imported-module visibility so editing a declaration keeps its existing callers linked.
+- Five repository policy guards now run in Harn: stdlib boundary validation,
+  public return annotations, schema facade strictness, host-neutral wording,
+  and agent-facing path normalization. Existing shell entrypoints launch Harn
+  without building; policy and regression checks no longer depend on Bash text
+  processing or Node.
+- Retire copied runtime test programs whose exact outputs are already checked by
+  public conformance fixtures, and keep one owner for the custom composition
+  dispatcher callback regression.
+
+  Keep template and XML behavior checks at their existing public conformance
+  owners. Preserve the native workspace runner's test inventory in CI artifacts
+  so selected, filtered, and ignored cases remain auditable.
+
+### Fixed
+
+- Cerebras now declares its measured stream-usage accounting, and Together declares its measured cached-input accounting.
+  Cache misses on Together can be distinguished from missing accounting evidence.
+- Sandbox conformance tests and `harn doctor sandbox` report each case before and after execution,
+  so an interrupted run identifies the unfinished case and retains earlier verdicts.
+  Doctor progress goes to stderr, preserving the JSON report on stdout.
+  Failed or incomplete measurements now set `ok: false` with
+  `sandbox_conformance_failed`, retaining the case report in `data`.
+  The daemon fixture identifies and cleans up only its own helpers, so concurrent
+  or deliberately unconfined measurements cannot poison another case.
+- Script environment reads refused by the session policy now emit a warning with
+  the variable name and policy, without revealing values. Unset variables permitted
+  by the policy remain quiet, and `harness.env.get` and `get_or` retain their fallback
+  behavior.
+  Allowlisted environment names now use Windows case-insensitive matching for
+  script reads.
+- Provider catalog refresh compares stored pricing, including promotions,
+  schedules, and input-token bands, rather than prices resolved at the current
+  time. `harness.llm.provider_catalog()` retains the complete stored card; cost
+  estimates and call receipts continue to resolve prices for the request.
+  Equivalent weekday groupings, generated identifiers, and source review metadata
+  no longer create false pricing drift; changes to settlement fields still do.
+- Provider capabilities can admit a generation option only when the request
+  selects a supported effort explicitly. GPT-6 Sol and Luna accept temperature
+  with `effort: "none"` on direct OpenAI; leaving effort unset still refuses
+  temperature locally. OpenRouter keeps unforwarded sampling denied and uses
+  sampling omission for structured decisions.
+- Provider overlays now replace the chat endpoint and adapter together. An
+  endpoint-only override restores default wire handling instead of retaining an
+  incompatible adapter. `harn provider dispatch-explain` reports the effective
+  endpoint, adapter, and source layers.
+- Code index reconciliation saves consistent partial progress, so restarting a
+  session resumes completed file and Git HEAD checks instead of repeating them.
+  Existing index caches rebuild once to adopt the checkpoint snapshot format.
+- Code index call resolution looks up function declarations by name and file,
+  avoiding repeated scans of unrelated declarations with common names.
+- Mistral Large 4 launch pricing now expires after its documented two-week window on direct and OpenRouter routes.
+  Cost estimates return to list pricing on October 20 instead of retaining the launch discount indefinitely.
+- Consumer observer cleanup authenticates the completed parent attempt and
+  dispatch declaration before cancelling receipt-owned live child runs.
+  Missing or partial custody remains unknown, and ordinary rehearsals are
+  preserved. Automatic dispatch wiring remains unchanged during qualification.
+- Fixed POSIX shell stream redirects being classified as outside-workspace files
+  when the command scanner runs on Windows. Native Windows filesystem checks
+  remain scoped to the workspace.
+- Automated release and development-update pull requests now enroll in Smart Ship,
+  preserving explicit stops on existing pull requests. The development-update monitor
+  reports an open update as pending until the expected version reaches main, and
+  refuses ambiguous or incomplete pull-request measurements.
+- Portable execution now matches native Harn for string repetition, numeric modulo by zero, and integer exponents.
+  Repeated strings are bounded before allocation, and runtime float powers use the same integer-exponent path as
+  constant folding.
+
+  The packaged browser runtime check now executes the shared portable conformance corpus against both shipped and
+  rebuilt Wasm, so stale behavior fails even when the module ABI is unchanged.
+
+  OpenAI-compatible requests retain tool observations whose calls were removed from history, including images,
+  without splitting valid parallel tool results. Regex caches cannot confuse pattern bytes with invalid flags.
+  Malformed orchestration records, imports, eval fixtures, and JSON or TOML manifests report parse failure without
+  echoing private prompts, credentials, tool outputs, or source lines.
+- Code indexing resolves identifier references from typed declaration buckets and
+  expands each distinct identifier once per file, avoiding repeated scans of
+  same-named call expressions. Snapshot restoration and file replacement derive
+  all name candidates through one index without changing graph query results.
+- CI and end-to-end capacity checks use an independent standard hosted bootstrap before selecting execution runners.
+- Sets, `unique`, and `dedup_by` now agree with structural equality for hash collisions,
+  large mixed numbers, and mutable handles. Cached set methods preserve the same answers
+  as uncached methods, and set equality pairs each member exactly once.
+  `hash_value` now returns the same hash for equal mixed numbers and nested sets,
+  including sets with mutable atomics, while preserving recorded replay fingerprints.
+
+  Constant folding, native execution, and portable execution now share truthiness rules.
+  NaN is truthy, empty bytes are falsy, and zero durations remain falsy in folded expressions.
+
+  Native text and fill-in-the-middle completions now use the same provider request
+  and concurrency limits as chat calls. Their permits cover response-body reads
+  and release on cancellation; chat-based completions acquire once through chat.
+
+  Cached, mocked and replayed chat results no longer consume provider quota.
+  Inline and offthread calls share the same local-result owner, so offthread calls
+  retain caller cache and replay state. Detached provider requests keep their
+  concurrency permit and recording destination until transport finishes.
+
+  The desktop browser runtime no longer suggests the removed provider wrapper.
+  Packaged runtime checks now compare linked compiler decisions and diagnostics
+  with the native compiler, including retained provider methods and aliases.
+
+  Recorded provider results preserve prompt-cache support and confirmed serving
+  tier during replay, keeping unsupported cache accounting and premium pricing intact.
+- Stdlib type checks now refuse missing, malformed or inconsistent checker measurements
+  instead of treating a crashed checker as a clean result.
+- Portable tool-permission activity types are now included in the embedded standard library,
+  fixing their unresolved public import.
+- Cerebras Qwen 3.8 27B now honors its measured `none`, `low`, `medium`, and `high` reasoning efforts.
+  Explicit `none` reaches the provider and disables reasoning instead of falling through to the model's default.
+- File-backed session notifications resolve current committed metadata and deliver
+  accepted changes in order, preventing delayed watcher reads from reverting a
+  session title or overtaking an earlier notification.
+  Failed reads retry through the existing watcher, and observers can remove their
+  last subscription during delivery without trying to join their own watcher thread.
+  Retiring readers stay owned until they close, so an external store close waits
+  for an unsubscribing callback and resubscription keeps a live watcher.
+  Watcher reconciliation samples current store claims and subscriptions together,
+  preventing stale close or unsubscribe decisions from stopping replacement readers
+  or clearing their notification state.
+  Query-only watch readers reject missing databases while preserving SQLite WAL
+  checkpoint and cleanup behavior.
+- **Recorded LLM replay preserves streamed text and CLI capture (#9732).**
+  Inline and offthread replay emit the saved response text once and forward it
+  to the CLI recorder without another provider request. Cache and mock results
+  share that projection; scripted mock chunks retain their order.
+- `harn test --record` now admits real provider calls unless the launcher disables
+  them, and uses normal model selection instead of injecting the mock provider.
+  Recording and replay modes reach file fixtures and every sequential or parallel
+  test case. Ordinary tests remain hermetic; replay never falls back to live calls.
+- Documentation evidence downloads, schemas, and illustrations now publish beside
+  their pages at the same URLs for HTML and agent Markdown.
+- Read consumer release decisions through authenticated dispatch custody, keeping missing product evidence and failed
+  execution separate from a reached product verdict. Deadline recovery binds the original admitted child and requires
+  its measured completion after the original observation deadline.
+  Use one pairing-trailer grammar for the legacy canary and authenticated selector, refusing malformed lines beside
+  a valid pairing.
+- The Unix installer retains Harn's project licenses and third-party notices in `harn-licenses/` beside the binary,
+  and refuses incomplete legal payloads before changing an installation.
+
 ## v0.10.165
 
 ### Breaking
