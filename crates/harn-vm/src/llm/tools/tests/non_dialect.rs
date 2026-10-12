@@ -269,14 +269,37 @@ fn local_read_file_honors_offset_and_limit() {
 /// `{"file": "calc.py", "folder": ""}` and path validation refused the empty
 /// folder before the read ran. An empty optional path is absent; a required
 /// one keeps its value for validation to judge.
+///
+/// The strict projection now lets each optional property accept `null` for
+/// "not used", so `null` on an optional argument whose type rejects it is
+/// absent too, at any object depth. Where `null` is a legal value, or the
+/// argument is required, it stays.
 #[test]
 fn normalize_tool_args_drops_unused_optional_arguments() {
     let optional = |ty: &str| vm_dict(&[("type", vm_str(ty)), ("required", vm_bool(false))]);
+    let mut range_fields = BTreeMap::new();
+    range_fields.insert("start".to_string(), vm_dict(&[("type", vm_str("int"))]));
+    range_fields.insert("end".to_string(), vm_dict(&[("type", vm_str("int"))]));
     let mut parameters = BTreeMap::new();
     parameters.insert("path".to_string(), vm_dict(&[("type", vm_str("string"))]));
     parameters.insert("file".to_string(), optional("string"));
     parameters.insert("content".to_string(), optional("string"));
     parameters.insert("limit".to_string(), optional("int"));
+    parameters.insert(
+        "label".to_string(),
+        vm_dict(&[
+            ("type", vm_list(vec![vm_str("string"), vm_str("null")])),
+            ("required", vm_bool(false)),
+        ]),
+    );
+    parameters.insert(
+        "range".to_string(),
+        vm_dict(&[
+            ("type", vm_str("object")),
+            ("required", vm_bool(false)),
+            ("properties", VmValue::dict(range_fields)),
+        ]),
+    );
     let tools = vm_dict(&[(
         "tools",
         vm_list(vec![vm_dict(&[
@@ -287,15 +310,30 @@ fn normalize_tool_args_drops_unused_optional_arguments() {
 
     let normalized = normalize_tool_args(
         "look",
-        json!({"path": "", "file": "", "content": "", "limit": null}),
+        json!({
+            "path": "",
+            "file": "",
+            "content": "",
+            "limit": null,
+            "label": null,
+            "range": {"start": 3, "end": null}
+        }),
         Some(&tools),
     );
     assert_eq!(
         normalized,
-        json!({"path": "", "content": "", "limit": null}),
-        "an empty optional path is unused; an empty non-path string is a \
-         value, an explicit null is left for typed validation, and a required \
-         path keeps its value"
+        json!({"path": "", "content": "", "label": null, "range": {"start": 3}}),
+        "an empty optional path and a null optional int are unused, and so is \
+         a null optional field of a nested object; an empty non-path string \
+         is a value, a null where null is legal stays, and a required path \
+         keeps its value"
+    );
+    let normalized =
+        normalize_tool_args("look", json!({"path": null, "range": null}), Some(&tools));
+    assert_eq!(
+        normalized,
+        json!({"path": null}),
+        "a required argument keeps an explicit null for validation to refuse"
     );
     let normalized = normalize_tool_args(
         "look",

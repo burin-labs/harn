@@ -410,9 +410,16 @@ fn infer_tool_name_from_arguments(arguments: &serde_json::Value) -> Option<Strin
 ///
 /// Only a path parameter the schema declares optional is touched: there `""`
 /// cannot name anything, so it is absent. Elsewhere an empty string can be a
-/// real value, such as an empty file body, and an explicit `null` stays for
-/// typed validation to judge. A required path keeps its value so validation
-/// still reports what is missing.
+/// real value, such as an empty file body. A required path keeps its value so
+/// validation still reports what is missing.
+///
+/// `null` is the other spelling of "not used". The strict provider projection
+/// (`llm::providers::schema_compat`) lets every optional property accept
+/// `null` precisely so the model need not invent a value, and this is the
+/// inverse step: `null` for an optional argument, or an optional field of a
+/// nested object argument, whose declared type does not itself admit `null`
+/// is absent. Where `null` is a legal value, or the type is not known here, it
+/// stays for typed validation to judge.
 pub(crate) fn drop_unused_optional_args(
     map: &mut serde_json::Map<String, serde_json::Value>,
     schema: Option<&super::ToolSchema>,
@@ -421,12 +428,61 @@ pub(crate) fn drop_unused_optional_args(
     let Some(schema) = schema else {
         return;
     };
-    for param in schema.params.iter().filter(|param| !param.required) {
-        let names_no_path = path_parameters.contains(&param.name)
-            && matches!(map.get(&param.name), Some(serde_json::Value::String(value)) if value.trim().is_empty());
-        if names_no_path {
+    for param in &schema.params {
+        let unused = !param.required
+            && match map.get(&param.name) {
+                Some(serde_json::Value::Null) => !type_expr_admits_null(&param.ty),
+                Some(serde_json::Value::String(value)) => {
+                    path_parameters.contains(&param.name) && value.trim().is_empty()
+                }
+                _ => false,
+            };
+        if unused {
             map.remove(&param.name);
+        } else if let Some(value) = map.get_mut(&param.name) {
+            drop_null_optional_fields(value, &param.ty);
         }
+    }
+}
+
+fn drop_null_optional_fields(value: &mut serde_json::Value, ty: &super::type_expr::TypeExpr) {
+    use super::type_expr::TypeExpr;
+    match (ty, value) {
+        (TypeExpr::Object(fields), serde_json::Value::Object(map)) => {
+            for field in fields {
+                let unused = !field.required
+                    && matches!(map.get(&field.name), Some(serde_json::Value::Null))
+                    && !type_expr_admits_null(&field.ty);
+                if unused {
+                    map.remove(&field.name);
+                } else if let Some(nested) = map.get_mut(&field.name) {
+                    drop_null_optional_fields(nested, &field.ty);
+                }
+            }
+        }
+        (TypeExpr::Array(item), serde_json::Value::Array(items)) => {
+            for nested in items {
+                drop_null_optional_fields(nested, item);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// True unless the declared type definitely rejects `null`. An unresolved
+/// reference or unmapped shape counts as admitting it, so dispatch never
+/// discards a value it cannot prove meaningless.
+fn type_expr_admits_null(ty: &super::type_expr::TypeExpr) -> bool {
+    use super::type_expr::TypeExpr;
+    match ty {
+        // JSON-schema-derived types spell it `null`; pipeline VM-dict schemas
+        // keep the Harn spelling `nil`.
+        TypeExpr::Primitive(name) => matches!(name.as_str(), "null" | "nil" | "any" | "unknown"),
+        TypeExpr::Literal(value) => value.is_null(),
+        TypeExpr::Union(members) => members.iter().any(type_expr_admits_null),
+        TypeExpr::Intersection(members) => members.iter().all(type_expr_admits_null),
+        TypeExpr::Array(_) | TypeExpr::Object(_) => false,
+        TypeExpr::Ref(_) | TypeExpr::Unknown => true,
     }
 }
 
