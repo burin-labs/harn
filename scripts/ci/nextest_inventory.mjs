@@ -10,10 +10,14 @@ export function selectedInventory(document) {
     throw new Error("inventory has no rust-suites object");
   }
   const selected = new Set();
+  const unlisted = [];
   let skipped = 0;
   let ignored = 0;
   for (const [binaryId, suite] of Object.entries(suites)) {
-    if (suite.status !== "listed") continue;
+    if (suite.status !== "listed") {
+      unlisted.push(binaryId);
+      continue;
+    }
     const packageName = suite["package-name"];
     const binaryName = suite["binary-name"];
     const testcases = suite.testcases;
@@ -59,7 +63,7 @@ export function selectedInventory(document) {
     );
   }
   if (selected.size === 0) throw new Error("inventory selected zero tests");
-  return { selected, skipped, ignored };
+  return { selected, skipped, ignored, unlisted };
 }
 
 if (
@@ -71,7 +75,7 @@ if (
       JSON.parse(fs.readFileSync(process.argv[2], "utf8")),
     );
     console.error(
-      `nextest_inventory eligible=${inventory.selected.size} excluded=${inventory.skipped} ignored=${inventory.ignored}`,
+      `nextest_inventory eligible=${inventory.selected.size} excluded=${inventory.skipped} ignored=${inventory.ignored} unlisted_suites=${JSON.stringify(inventory.unlisted)}`,
     );
     console.log(inventory.selected.size);
   } catch (error) {

@@ -71,10 +71,12 @@ fi
 jq -e '.["rust-suites"].fixture.testcases.case["filter-match"].status == "mismatch"' "$RUNNER_TEMP/harn-nextest-inventory.json" > /dev/null
 GITHUB_WORKSPACE="$scratch/repo" bash "$root/scripts/ci/run_workspace_tests.sh" all "$scratch/tests.tar.zst" > "$scratch/log"
 grep -Fq -- "--archive-file $scratch/tests.tar.zst --workspace-remap $scratch/repo" "$scratch/listed"
-grep -Fq -- "--archive-file $scratch/tests.tar.zst --workspace-remap $scratch/repo" "$scratch/ran"
+grep -q -- '--cargo-metadata .*/target/nextest/cargo-metadata.json' "$scratch/ran"
+grep -q -- '--binaries-metadata .*/target/nextest/binaries-metadata.json' "$scratch/ran"
+grep -Fq -- "--workspace-remap $scratch/repo" "$scratch/ran"
 grep -q -- '--no-tests fail' "$scratch/ran"
-if grep -Eq -- '--locked|--partition' "$scratch/ran"; then
-  echo 'Archive replay included source-only or partition flags' >&2; exit 1
+if grep -Eq -- '--locked|--partition|--archive-file' "$scratch/ran"; then
+  echo 'Archive replay rebuilt, partitioned, or unpacked the archive twice' >&2; exit 1
 fi
 rm "$scratch/ran"
 if MATCH_STATUS=mismatch GITHUB_WORKSPACE="$scratch/repo" bash "$root/scripts/ci/run_workspace_tests.sh" all "$scratch/tests.tar.zst" > "$scratch/log" 2>&1; then

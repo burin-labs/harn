@@ -6,6 +6,7 @@ partition=${1:?partition or all required}
 script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 host_bound_filter=$(bash "$script_dir/host_bound_rust_test_filter.sh")
 args=(--profile ci -E "not (${host_bound_filter})")
+extracted=
 if [[ -n "${2:-}" ]]; then
   selected=archive
   args+=(--archive-file "$2" --workspace-remap "${GITHUB_WORKSPACE:?workspace remap required}")
@@ -15,8 +16,18 @@ else
   args+=(--locked "${packages[@]}")
 fi
 census=$(mktemp)
-trap 'rm -f "$census"' EXIT
-cargo-nextest nextest list "${args[@]}" --message-format json > "$census"
+trap 'rm -f "$census"; if [[ -n "$extracted" ]]; then rm -rf "$extracted"; fi' EXIT
+if [[ "$selected" == archive ]]; then
+  extracted=$(mktemp -d)
+  cargo-nextest nextest list "${args[@]}" --extract-to "$extracted" --message-format json > "$census"
+  # Reuse nextest's normalized metadata rather than unpacking the archive twice.
+  args=(--profile ci -E "not (${host_bound_filter})"
+    --cargo-metadata "$extracted/target/nextest/cargo-metadata.json"
+    --binaries-metadata "$extracted/target/nextest/binaries-metadata.json"
+    --target-dir-remap "$extracted/target" --workspace-remap "$GITHUB_WORKSPACE")
+else
+  cargo-nextest nextest list "${args[@]}" --message-format json > "$census"
+fi
 if [[ -n "${RUNNER_TEMP:-}" ]]; then
   cp "$census" "$RUNNER_TEMP/harn-nextest-inventory.json"
 fi
