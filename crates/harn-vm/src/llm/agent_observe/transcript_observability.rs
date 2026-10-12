@@ -33,7 +33,9 @@ fn try_append_llm_transcript_entry_to_dir(entry: &serde_json::Value, dir: Option
     forward_transcript_run_events(&redacted);
     let event_log_persisted = append_llm_transcript_event_log(&redacted);
     let Some(dir) = dir else {
-        return false;
+        // Definitions are claimed only against a durable sink, so without an
+        // event log there is nothing for this result to vouch for.
+        return event_log_persisted && crate::event_log::active_event_log().is_some();
     };
     let _ = std::fs::create_dir_all(dir);
     let path = format!("{dir}/llm_transcript.jsonl");
@@ -444,14 +446,14 @@ pub(super) fn dump_llm_request(
     let tool_schemas =
         crate::llm::tools::collect_tool_schemas(opts.tools.as_ref(), opts.native_tools.as_deref());
     emit_tool_schemas_if_changed(&tool_schemas);
-    for definition in served_context_receipts::served_message_definitions(&payload.messages) {
-        let Some(message_id) = definition
-            .get("content_hash")
-            .and_then(serde_json::Value::as_str)
-        else {
-            continue;
-        };
-        if served_message_needs_definition(message_id) && append_llm_transcript_entry(&definition) {
+    let message_contents = crate::llm::content_hash::redacted_contents(&payload.messages);
+    for (message, content) in payload.messages.iter().zip(&message_contents) {
+        let message_id = content.hash();
+        if served_message_needs_definition(message_id)
+            && append_llm_transcript_entry(&served_context_receipts::served_message_definition(
+                message, message_id,
+            ))
+        {
             record_served_message_definition(message_id);
         }
     }

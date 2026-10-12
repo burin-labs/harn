@@ -42,6 +42,7 @@ fn message_role(message: &serde_json::Value) -> String {
 
 fn message_lineage_manifest(
     messages: &[serde_json::Value],
+    contents: &[std::rc::Rc<crate::llm::content_hash::RedactedContent>],
     lineage: Option<&crate::llm::message_lineage::MessageLineageManifest>,
     iteration: usize,
     call_id: &str,
@@ -53,13 +54,14 @@ fn message_lineage_manifest(
     let lineage = lineage.filter(|lineage| lineage.messages.len() == messages.len());
     let messages = messages
         .iter()
+        .zip(contents)
         .enumerate()
-        .map(|(position, message)| {
+        .map(|(position, (message, content))| {
             let entry = lineage
                 .and_then(|lineage| lineage.messages.get(position))
                 .cloned()
                 .unwrap_or_default();
-            let message_content_hash = stable_redacted_json_hash(message);
+            let message_content_hash = content.hash().to_string();
             ServedMessageLineage {
                 position,
                 role: message_role(message),
@@ -83,21 +85,19 @@ fn message_lineage_manifest(
     }
 }
 
-pub(super) fn served_message_definitions(messages: &[serde_json::Value]) -> Vec<serde_json::Value> {
-    messages
-        .iter()
-        .map(|message| {
-            let content_hash = stable_redacted_json_hash(message);
-            serde_json::json!({
-                "type": "served_message",
-                "timestamp": chrono_now(),
-                "span_id": crate::tracing::current_span_id(),
-                "schema": SERVED_MESSAGE_SCHEMA,
-                "content_hash": content_hash,
-                "message": message,
-            })
-        })
-        .collect()
+/// One content-addressed `served_message` definition.
+pub(super) fn served_message_definition(
+    message: &serde_json::Value,
+    content_hash: &str,
+) -> serde_json::Value {
+    serde_json::json!({
+        "type": "served_message",
+        "timestamp": chrono_now(),
+        "span_id": crate::tracing::current_span_id(),
+        "schema": SERVED_MESSAGE_SCHEMA,
+        "content_hash": content_hash,
+        "message": message,
+    })
 }
 
 /// Names of the tools the model was actually offered, in served order.
@@ -226,7 +226,7 @@ pub(super) fn served_context_receipt(
     session_id: Option<&str>,
 ) -> serde_json::Value {
     let system_prompt = payload.system.as_deref().unwrap_or("");
-    let messages = serde_json::Value::Array(payload.messages.clone());
+    let message_contents = crate::llm::content_hash::redacted_contents(&payload.messages);
     let tool_schemas_value = serde_json::to_value(tool_schemas).unwrap_or(serde_json::Value::Null);
     let native_tools = payload
         .native_tools
@@ -236,6 +236,7 @@ pub(super) fn served_context_receipt(
     let manifest_value = manifest.as_json();
     let message_lineage = message_lineage_manifest(
         &payload.messages,
+        &message_contents,
         payload.aligned_message_lineage(opts),
         iteration,
         call_id,
@@ -250,7 +251,7 @@ pub(super) fn served_context_receipt(
         "manifest_content_hash": stable_redacted_json_hash(&manifest_value),
         "system_prompt_content_hash": stable_redacted_string_hash(system_prompt),
         "system_prompt_bytes": system_prompt.len(),
-        "messages_content_hash": stable_redacted_json_hash(&messages),
+        "messages_content_hash": crate::llm::content_hash::redacted_sequence_hash(&message_contents),
         "message_count": payload.messages.len(),
         "message_lineage": message_lineage,
         "tool_schemas_content_hash": stable_redacted_json_hash(&tool_schemas_value),

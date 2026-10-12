@@ -531,12 +531,28 @@ fn first_provider_cache_usage_i64(
     extractor: fn(&serde_json::Value) -> Result<i64, VmError>,
 ) -> Result<i64, VmError> {
     for source in sources {
-        let tokens = extractor(&vm_to_json(source))?;
+        let tokens = extractor(&cache_usage_json(source))?;
         if tokens != 0 {
             return Ok(tokens);
         }
     }
     Ok(0)
+}
+
+/// The members of `source` the cache-usage aliases can read, as JSON. The
+/// source is often the whole LLM result, transcript included, so converting it
+/// in full made usage recording cost the whole transcript on every turn.
+fn cache_usage_json(source: &VmValue) -> serde_json::Value {
+    let Some(dict) = source.as_dict() else {
+        return vm_to_json(source);
+    };
+    let mut projected = crate::value::DictMap::new();
+    for root in super::usage::cache_field_roots() {
+        if let Some(member) = dict.get(root) {
+            projected.insert(root.into(), member.clone());
+        }
+    }
+    vm_to_json(&VmValue::dict(projected))
 }
 
 fn opt_str(map: &crate::value::DictMap, key: &str) -> Option<String> {

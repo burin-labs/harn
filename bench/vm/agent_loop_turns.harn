@@ -1,0 +1,62 @@
+// Per-turn harness overhead of a long agent loop. A scripted mock provider
+// makes model latency zero, and each tool result is a few kilobytes like a
+// file read, so the time is spent re-processing the growing transcript.
+import { agent_loop } from "std/agent/loop"
+import { AgentSpec } from "std/agent/options"
+import { llm_text, with_llm_script } from "std/testing"
+
+fn bench_tools() {
+  const registry = tool_registry()
+  const body = "fn example(value: int) -> int { return value * 2 + 1 }  // file content\n".repeat(
+    40,
+  )
+  return tool_define(
+    registry,
+    "read",
+    "Read a synthetic path",
+    {
+      parameters: {path: {type: "string"}, line: {type: "integer"}},
+      handler: { args -> "read " + args.path + ":" + to_string(args.line) + "\n" + body },
+      returns: {type: "string"},
+      annotations: {kind: "read"},
+    },
+  )
+}
+
+pipeline default(harness: Harness, task: unknown) {
+  const turns = 120
+  let script = []
+  for i in 0 to turns - 1 {
+    script = script
+      + [
+        {
+          tool_calls: [
+            {
+              id: "call_" + to_string(i),
+              name: "read",
+              arguments: {path: "src/f" + to_string(i) + ".harn", line: i},
+            },
+          ],
+        },
+      ]
+  }
+  script = script + [llm_text("<user_response>done</user_response><done>##DONE##</done>")]
+  with_llm_script(
+    harness.llm,
+    script,
+    { ->
+      const opts: AgentSpec = {
+        provider: "mock",
+        tools: bench_tools(),
+        tool_format: "native",
+        max_iterations: turns + 2,
+        loop_until_done: true,
+        session_id: "bench-agent-loop-turns",
+      }
+      const result = agent_loop(harness, "read files", nil, opts)
+      if result.status != "done" {
+        harness.stdio.log("unexpected status " + result.status)
+      }
+    },
+  )
+}

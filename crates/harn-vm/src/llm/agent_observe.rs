@@ -1315,6 +1315,8 @@ mod cost_tests;
 #[cfg(test)]
 mod empty_completion_retry_tests;
 #[cfg(test)]
+mod event_log_definition_tests;
+#[cfg(test)]
 mod retry_tests;
 #[cfg(test)]
 mod streaming_detector_tests;

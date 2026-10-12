@@ -224,7 +224,7 @@ plan = "arc_registry_scope"
 
 [[thread_local]]
 path = "src/llm/agent_observe/transcript_ambient.rs"
-statics = ["LAST_SYSTEM_PROMPT_HASH", "LAST_CONTEXT_MANIFEST_HASH", "LAST_TOOL_SCHEMAS_HASH", "EMITTED_CAPABILITY_SNAPSHOT_IDS", "EMITTED_SERVED_MESSAGE_IDS", "EMITTED_OUTPUT_SCHEMA_IDS", "TRANSCRIPT_DIR_STACK"]
+statics = ["LAST_SYSTEM_PROMPT_HASH", "LAST_CONTEXT_MANIFEST_HASH", "LAST_TOOL_SCHEMAS_HASH", "EMITTED_CAPABILITY_SNAPSHOT_IDS", "EMITTED_SERVED_MESSAGE_IDS", "EMITTED_OUTPUT_SCHEMA_IDS", "TRANSCRIPT_DIR_STACK", "DEFINITION_SCOPE"]
 category = "logical_task"
 plan = "task_local_or_explicit"
 
@@ -257,6 +257,18 @@ path = "src/llm/autonomy_budget.rs"
 statics = ["AUTONOMY_COUNTERS"]
 category = "logical_task"
 plan = "task_local_or_explicit"
+
+[[thread_local]]
+path = "src/llm/content_hash.rs"
+statics = ["REDACTED_CONTENT_MEMO", "FINGERPRINT_BUFFER"]
+category = "thread_private"
+plan = "thread_private_cache"
+
+[[thread_local]]
+path = "src/llm/cost_context.rs"
+statics = ["MESSAGE_TOKEN_MEMO"]
+category = "thread_private"
+plan = "thread_private_cache"
 
 [[thread_local]]
 path = "src/llm/cache.rs"
@@ -549,7 +561,7 @@ plan = "task_local_or_explicit"
 
 [[thread_local]]
 path = "src/redact/patterns.rs"
-statics = ["CUSTOM_PATTERNS", "AUDIT_SINK", "AUDIT_RING"]
+statics = ["CUSTOM_PATTERNS", "AUDIT_SINK", "AUDIT_RING", "AUDIT_EVENTS_EMITTED"]
 category = "logical_task"
 plan = "task_local_or_explicit"
 

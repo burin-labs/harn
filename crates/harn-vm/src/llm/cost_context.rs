@@ -54,6 +54,41 @@ pub(super) fn estimate_json_tokens(value: &serde_json::Value, model: &str) -> i6
     }
 }
 
+/// Token estimate for one transcript message. Each call re-sends the whole
+/// transcript, so estimates are memoized by message content and model rather
+/// than re-tokenized on every turn.
+fn message_tokens(message: &serde_json::Value, model: &str) -> i64 {
+    let key = super::content_hash::content_fingerprint(message);
+    MESSAGE_TOKEN_MEMO.with(|memo| {
+        let mut memo = memo.borrow_mut();
+        if memo.model != model {
+            memo.entries.clear();
+            memo.model = model.to_string();
+        }
+        if let Some(tokens) = memo.entries.get(&key) {
+            return tokens;
+        }
+        let tokens = estimate_json_tokens(message, model);
+        memo.entries.insert(key, tokens, 1);
+        tokens
+    })
+}
+
+struct MessageTokenMemo {
+    model: String,
+    entries: super::content_hash::ContentMemo<i64>,
+}
+
+thread_local! {
+    static MESSAGE_TOKEN_MEMO: std::cell::RefCell<MessageTokenMemo> =
+        std::cell::RefCell::new(MessageTokenMemo {
+            model: String::new(),
+            entries: super::content_hash::ContentMemo::new(MESSAGE_TOKEN_MEMO_ENTRIES),
+        });
+}
+
+const MESSAGE_TOKEN_MEMO_ENTRIES: usize = 65_536;
+
 fn estimate_text_tokens_for_model(text: &str, model: &str) -> i64 {
     super::token_count::estimate_text_tokens(text, Some(model)).tokens
 }
@@ -76,7 +111,7 @@ pub(crate) fn project_llm_call_context_breakdown(
     let mut tool_result_tokens = 0;
     let mut other_message_tokens = 0;
     for message in &opts.messages {
-        let tokens = estimate_json_tokens(message, &opts.model);
+        let tokens = message_tokens(message, &opts.model);
         if super::context_breakdown::message_is_tool_result(message) {
             tool_result_tokens += tokens;
             continue;

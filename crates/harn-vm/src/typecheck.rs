@@ -271,7 +271,14 @@ pub(crate) fn validate_user_call_args(
         let Some(slot) = user_param_for_arg(func, i) else {
             continue;
         };
-        let Some(expected) = &slot.type_expr else {
+        // `any` and `unknown` accept every value. Validating them would
+        // convert the whole argument, often an options dict carrying the
+        // transcript, to JSON on every call for a schema that cannot reject it.
+        let Some(expected) = slot
+            .type_expr
+            .as_ref()
+            .filter(|expected| harn_kernel::type_contract::requires_runtime_type_check(expected))
+        else {
             continue;
         };
         if let Some(guard) = &slot.runtime_guard {

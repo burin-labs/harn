@@ -21,6 +21,62 @@ thread_local! {
     /// transcript. Request receipts carry these ids as schema hashes.
     static EMITTED_OUTPUT_SCHEMA_IDS: RefCell<BTreeSet<String>> = const { RefCell::new(BTreeSet::new()) };
     static TRANSCRIPT_DIR_STACK: RefCell<Vec<TranscriptDirFrame>> = const { RefCell::new(Vec::new()) };
+    /// Durable sinks the emitted definition ids above were persisted to.
+    static DEFINITION_SCOPE: RefCell<Option<DefinitionScope>> = const { RefCell::new(None) };
+}
+
+/// The durable sinks a definition reaches: the pushed transcript file and the
+/// active event log. A later reference may omit a definition only while it
+/// reaches the same sinks, because nothing compacts the transcript topic
+/// during a run. The event log is held weakly so a replaced log never compares
+/// equal to the one that received the definition.
+#[derive(Clone)]
+struct DefinitionScope {
+    transcript_dir: Option<String>,
+    event_log: Option<std::sync::Weak<crate::event_log::AnyEventLog>>,
+}
+
+impl DefinitionScope {
+    fn current() -> Option<Self> {
+        let scope = Self {
+            transcript_dir: current_transcript_dir(),
+            event_log: crate::event_log::active_event_log().map(|log| Arc::downgrade(&log)),
+        };
+        (scope.transcript_dir.is_some() || scope.event_log.is_some()).then_some(scope)
+    }
+
+    fn same_sinks(&self, other: &Self) -> bool {
+        self.transcript_dir == other.transcript_dir
+            && match (&self.event_log, &other.event_log) {
+                (None, None) => true,
+                (Some(mine), Some(theirs)) => mine.ptr_eq(theirs),
+                _ => false,
+            }
+    }
+}
+
+/// True when emitted definitions remain reachable from the current sinks.
+/// Moving to different sinks forgets every claimed definition.
+fn definitions_are_retained() -> bool {
+    let Some(current) = DefinitionScope::current() else {
+        return false;
+    };
+    let unchanged = DEFINITION_SCOPE.with(|slot| {
+        slot.borrow()
+            .as_ref()
+            .is_some_and(|scope| scope.same_sinks(&current))
+    });
+    if !unchanged {
+        clear_definition_ids();
+        DEFINITION_SCOPE.with(|slot| *slot.borrow_mut() = Some(current));
+    }
+    true
+}
+
+fn clear_definition_ids() {
+    EMITTED_CAPABILITY_SNAPSHOT_IDS.with(|ids| ids.borrow_mut().clear());
+    EMITTED_SERVED_MESSAGE_IDS.with(|ids| ids.borrow_mut().clear());
+    EMITTED_OUTPUT_SCHEMA_IDS.with(|ids| ids.borrow_mut().clear());
 }
 
 static NEXT_TRANSCRIPT_DIR_FRAME_ID: std::sync::atomic::AtomicU64 =
@@ -65,6 +121,7 @@ pub(crate) struct LlmTranscriptAmbient {
     served_message_ids: BTreeSet<String>,
     output_schema_ids: BTreeSet<String>,
     transcript_dirs: Vec<TranscriptDirFrame>,
+    definition_scope: Option<DefinitionScope>,
 }
 
 pub(crate) fn swap_llm_transcript_ambient(
@@ -89,6 +146,8 @@ pub(crate) fn swap_llm_transcript_ambient(
             .with(|slot| std::mem::replace(&mut *slot.borrow_mut(), replacement.output_schema_ids)),
         transcript_dirs: TRANSCRIPT_DIR_STACK
             .with(|slot| std::mem::replace(&mut *slot.borrow_mut(), replacement.transcript_dirs)),
+        definition_scope: DEFINITION_SCOPE
+            .with(|slot| std::mem::replace(&mut *slot.borrow_mut(), replacement.definition_scope)),
     }
 }
 
@@ -96,9 +155,8 @@ fn reset_deduplication() {
     LAST_SYSTEM_PROMPT_HASH.with(|hash| *hash.borrow_mut() = None);
     LAST_CONTEXT_MANIFEST_HASH.with(|hash| *hash.borrow_mut() = None);
     LAST_TOOL_SCHEMAS_HASH.with(|hash| *hash.borrow_mut() = None);
-    EMITTED_CAPABILITY_SNAPSHOT_IDS.with(|ids| ids.borrow_mut().clear());
-    EMITTED_SERVED_MESSAGE_IDS.with(|ids| ids.borrow_mut().clear());
-    EMITTED_OUTPUT_SCHEMA_IDS.with(|ids| ids.borrow_mut().clear());
+    clear_definition_ids();
+    DEFINITION_SCOPE.with(|slot| *slot.borrow_mut() = None);
 }
 
 pub(super) fn system_prompt_changed(current: u64) -> bool {
@@ -113,61 +171,51 @@ pub(super) fn tool_schemas_changed(current: u64) -> bool {
     hash_changed(&LAST_TOOL_SCHEMAS_HASH, current)
 }
 
-/// Whether this transcript scope still needs a capability definition.
+/// Whether the current sinks still need a capability definition.
 ///
-/// Without an explicit transcript directory there is no durable scope in
-/// which a prior definition is guaranteed to remain reachable (run-event and
-/// event-log sinks may turn over independently), so callers conservatively
-/// emit the definition beside every reference.
+/// Without a transcript file or an active event log nothing retains a prior
+/// definition, so callers emit it beside every reference.
 pub(super) fn capability_snapshot_needs_definition(snapshot_id: &str) -> bool {
-    if current_transcript_dir().is_none() {
-        return true;
-    }
-    EMITTED_CAPABILITY_SNAPSHOT_IDS.with(|ids| !ids.borrow().contains(snapshot_id))
+    !definitions_are_retained()
+        || EMITTED_CAPABILITY_SNAPSHOT_IDS.with(|ids| !ids.borrow().contains(snapshot_id))
 }
 
 /// Mark a definition only after its transcript write succeeds. Claiming before
 /// the append would let one transient I/O failure poison every later reference.
 pub(super) fn record_capability_snapshot_definition(snapshot_id: &str) {
-    if current_transcript_dir().is_some() {
+    if definitions_are_retained() {
         EMITTED_CAPABILITY_SNAPSHOT_IDS.with(|ids| {
             ids.borrow_mut().insert(snapshot_id.to_string());
         });
     }
 }
 
-/// Whether a provider-visible message needs a retained definition in the
-/// active transcript. Unscoped sinks receive definitions beside every
-/// reference because they cannot promise that an earlier definition remains
-/// reachable.
+/// Whether a provider-visible message needs a definition in the current
+/// sinks. Without durable sinks it is emitted beside every reference.
 pub(super) fn served_message_needs_definition(message_id: &str) -> bool {
-    if current_transcript_dir().is_none() {
-        return true;
-    }
-    EMITTED_SERVED_MESSAGE_IDS.with(|ids| !ids.borrow().contains(message_id))
+    !definitions_are_retained()
+        || EMITTED_SERVED_MESSAGE_IDS.with(|ids| !ids.borrow().contains(message_id))
 }
 
 /// Claim a provider-visible message definition only after persistence.
 pub(super) fn record_served_message_definition(message_id: &str) {
-    if current_transcript_dir().is_some() {
+    if definitions_are_retained() {
         EMITTED_SERVED_MESSAGE_IDS.with(|ids| {
             ids.borrow_mut().insert(message_id.to_string());
         });
     }
 }
 
-/// Whether an output schema needs a retained definition in the active
-/// transcript; unscoped sinks receive it beside every reference.
+/// Whether an output schema needs a definition in the current sinks; without
+/// durable sinks it is emitted beside every reference.
 pub(super) fn output_schema_needs_definition(schema_id: &str) -> bool {
-    if current_transcript_dir().is_none() {
-        return true;
-    }
-    EMITTED_OUTPUT_SCHEMA_IDS.with(|ids| !ids.borrow().contains(schema_id))
+    !definitions_are_retained()
+        || EMITTED_OUTPUT_SCHEMA_IDS.with(|ids| !ids.borrow().contains(schema_id))
 }
 
 /// Claim an output schema definition only after persistence.
 pub(super) fn record_output_schema_definition(schema_id: &str) {
-    if current_transcript_dir().is_some() {
+    if definitions_are_retained() {
         EMITTED_OUTPUT_SCHEMA_IDS.with(|ids| {
             ids.borrow_mut().insert(schema_id.to_string());
         });
@@ -260,9 +308,10 @@ mod tests {
     #[test]
     fn capability_snapshot_claims_are_scoped_to_a_pushed_transcript() {
         let saved = swap_llm_transcript_ambient(LlmTranscriptAmbient::default());
+        let saved_log = crate::event_log::swap_active_event_log(None);
         assert!(
             capability_snapshot_needs_definition("blake3:unscoped"),
-            "an unscoped event sink needs a definition beside every reference"
+            "without a durable sink every reference carries its definition"
         );
         assert!(capability_snapshot_needs_definition("blake3:unscoped"));
 
@@ -283,6 +332,38 @@ mod tests {
             "a new pushed scope cannot inherit a prior file's definitions"
         );
         pop_llm_transcript_dir();
+        crate::event_log::swap_active_event_log(saved_log);
+        let _ = swap_llm_transcript_ambient(saved);
+    }
+
+    #[test]
+    fn active_event_log_retains_definitions_until_it_is_replaced() {
+        let saved = swap_llm_transcript_ambient(LlmTranscriptAmbient::default());
+        let saved_log = crate::event_log::swap_active_event_log(None);
+
+        assert!(served_message_needs_definition("blake3:m"));
+        record_served_message_definition("blake3:m");
+        assert!(
+            served_message_needs_definition("blake3:m"),
+            "without a durable sink every reference carries its definition"
+        );
+
+        let first = crate::event_log::install_memory_for_current_thread(8);
+        assert!(served_message_needs_definition("blake3:m"));
+        record_served_message_definition("blake3:m");
+        assert!(
+            !served_message_needs_definition("blake3:m"),
+            "the active event log retains a persisted definition"
+        );
+
+        let _second = crate::event_log::install_memory_for_current_thread(8);
+        assert!(
+            served_message_needs_definition("blake3:m"),
+            "a replacement event log cannot inherit the first log's definitions"
+        );
+        drop(first);
+
+        crate::event_log::swap_active_event_log(saved_log);
         let _ = swap_llm_transcript_ambient(saved);
     }
 

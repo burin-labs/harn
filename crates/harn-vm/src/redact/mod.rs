@@ -614,6 +614,33 @@ pub fn clear_policy_stack() {
     patterns::clear_audit_ring();
 }
 
+/// Everything that determines redacted output on this thread: the active
+/// policy and the installed custom patterns. Caches of redacted bytes compare
+/// it before reusing an entry.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct RedactionConfig {
+    policy: RedactionPolicy,
+    custom_patterns: Vec<(&'static str, String)>,
+}
+
+impl RedactionConfig {
+    pub(crate) fn current() -> Self {
+        Self {
+            policy: current_policy(),
+            custom_patterns: patterns::custom_pattern_identity(),
+        }
+    }
+
+    pub(crate) fn policy(&self) -> &RedactionPolicy {
+        &self.policy
+    }
+}
+
+/// Number of redaction audit events emitted on this thread so far.
+pub(crate) fn audit_events_emitted() -> u64 {
+    patterns::audit_events_emitted()
+}
+
 /// Return the currently installed policy, falling back to
 /// [`RedactionPolicy::default`] when the stack is empty. Always returns
 /// an owned clone so callers can drop the borrow before recursing.
