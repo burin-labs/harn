@@ -136,6 +136,12 @@ pub(crate) async fn run_bench(path: &str, iterations: usize, profile: RunProfile
             vm.set_source_dir(source_parent);
         }
         vm.set_harness(harn_vm::Harness::real());
+        // Every production host (`harn run`, serve, ACP, trigger dispatch) arms
+        // cooperative cancellation, which changes how the interpreter polls for
+        // interrupts. Arm it here too so `bench/vm` measures that path.
+        vm.install_cancel_token(std::sync::Arc::new(std::sync::atomic::AtomicBool::new(
+            false,
+        )));
 
         if let Some(manifest) = extensions.root_manifest.as_ref() {
             if !manifest.mcp.is_empty() {

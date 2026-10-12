@@ -1098,3 +1098,21 @@ fn unsatisfiable_analysis_proves_only_structural_contradictions() {
         );
     }
 }
+
+#[test]
+fn typed_leaf_params_skip_only_a_delegate_that_cannot_reject() {
+    let int_schema = make_vm_dict(vec![("type", s("int"))]);
+    assert!(schema_assert_param(&VmValue::Int(3), "n", &int_schema).is_ok());
+    assert!(schema_assert_param(&s("3"), "n", &int_schema).is_err());
+
+    // A keyword outside the allowlist still reaches the JSON Schema delegate.
+    let bounded = make_vm_dict(vec![("type", s("int")), ("min", VmValue::Int(5))]);
+    assert!(schema_assert_param(&VmValue::Int(5), "n", &bounded).is_ok());
+    assert!(schema_assert_param(&VmValue::Int(3), "n", &bounded).is_err());
+
+    // The delegate sees a non-finite float as JSON null and rejects it.
+    let float_schema = make_vm_dict(vec![("type", s("float"))]);
+    assert!(schema_assert_param(&VmValue::Float(1.5), "x", &float_schema).is_ok());
+    assert!(schema_assert_param(&VmValue::Int(2), "x", &float_schema).is_ok());
+    assert!(schema_assert_param(&VmValue::Float(f64::NAN), "x", &float_schema).is_err());
+}

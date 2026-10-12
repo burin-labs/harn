@@ -260,6 +260,7 @@ impl Vm {
     }
 
     /// True when cooperative cancellation has been requested.
+    #[inline]
     pub fn is_cancel_requested(&self) -> bool {
         self.cancel_token
             .as_ref()

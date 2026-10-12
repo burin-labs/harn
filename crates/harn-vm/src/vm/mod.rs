@@ -17,6 +17,7 @@ mod methods;
 mod module_phase_timing;
 mod modules;
 pub(crate) mod ops;
+mod process_exit;
 mod scope;
 mod state;
 mod stdlib_artifact;

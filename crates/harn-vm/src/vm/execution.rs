@@ -20,6 +20,7 @@ pub(super) fn new_execution_deadline_state(
 #[cfg(test)]
 thread_local! {
     static SCOPE_INTERRUPT_ASYNC_DISPATCHES: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+    static SCOPE_INTERRUPT_POLLS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
 }
 
 #[cfg(test)]
@@ -40,21 +41,41 @@ enum DeadlineKind {
 }
 
 impl Vm {
-    /// Returns true when no scope-level async machinery is armed. The hot
-    /// interpreter loop uses this to skip both the `pending_scope_interrupt`
-    /// future and the `execute_op_with_scope_interrupts` `tokio::select!`
-    /// wrapper on every dispatch — both are necessary for cancellable /
-    /// deadlined VMs but pure overhead in the common case (benchmarks,
-    /// background script execution, etc.).
+    /// Returns true when no scope-level async machinery is armed. Async
+    /// opcodes use this to skip the `execute_op_with_scope_interrupts`
+    /// `tokio::select!` wrapper, which an armed cancel token or deadline
+    /// needs so it can stop an in-flight await.
     #[inline]
     pub(crate) fn scope_interrupts_clean(&self) -> bool {
-        self.requested_process_exit().is_none()
+        !self.process_exit_requested()
             && self.cancel_token.is_none()
             && self.interrupt_signal_token.is_none()
             && self.pending_interrupt_signal.is_none()
             && self.interrupt_handler_deadline.is_none()
             && !self.execution_deadline.is_active()
             && self.deadlines.is_empty()
+    }
+
+    /// Returns true when `pending_scope_interrupt` could report something at
+    /// this instruction boundary. Every production host (`harn run`, serve,
+    /// ACP, trigger dispatch) arms a cancel token, so this checks whether a
+    /// request is pending rather than whether the machinery is armed. An armed
+    /// but unset token costs one atomic load per instruction instead of the
+    /// full poll, which takes the host signal mutex.
+    ///
+    /// The host signal token is covered by the cancel flag because hosts write
+    /// the signal before flipping cancellation. Deadlines are time-based, so
+    /// an armed one still polls the clock at every boundary. A leftover cancel
+    /// grace counter polls once more so it resets before the next request.
+    #[inline]
+    fn scope_interrupt_poll_due(&self) -> bool {
+        self.process_exit_requested()
+            || self.is_cancel_requested()
+            || self.pending_interrupt_signal.is_some()
+            || self.cancel_grace_instructions_remaining.is_some()
+            || self.interrupt_handler_deadline.is_some()
+            || self.execution_deadline.is_active()
+            || !self.deadlines.is_empty()
     }
 
     /// Execute a compiled chunk.
@@ -414,11 +435,12 @@ impl Vm {
         loop {
             // Slow path only: the interrupt-handler future, deadline check,
             // and host-signal poll inside `pending_scope_interrupt` are all
-            // no-ops when no cancel/interrupt/deadline machinery is armed
-            // (the common case for unsupervised execution), so guard them
-            // with a sync check that avoids the per-iteration future
-            // state-machine allocation.
-            if !self.scope_interrupts_clean() {
+            // no-ops until a request is pending or a deadline is armed, so
+            // guard them with a sync check that avoids the per-iteration
+            // future state machine.
+            if self.scope_interrupt_poll_due() {
+                #[cfg(test)]
+                SCOPE_INTERRUPT_POLLS.set(SCOPE_INTERRUPT_POLLS.get().saturating_add(1));
                 if let Some(err) = self.pending_scope_interrupt().await {
                     match self.handle_error(err) {
                         Ok(None) => continue,
@@ -1387,6 +1409,57 @@ pipeline default(harness: Harness) {
             .await
             .expect("host admission extends rather than spends the execution budget");
         assert!(matches!(value, VmValue::Int(42)));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn armed_cancel_token_polls_only_once_requested() {
+        let local = tokio::task::LocalSet::new();
+        local
+            .run_until(async {
+                let mut vm = Vm::new();
+                register_vm_stdlib(&mut vm);
+                let cancel = Arc::new(AtomicBool::new(false));
+                vm.install_cancel_token(Arc::clone(&cancel));
+                vm.install_interrupt_signal_token(Arc::new(std::sync::Mutex::new(None)));
+                let flip = Arc::clone(&cancel);
+                vm.register_builtin("request_cancel", move |_, _| {
+                    flip.store(true, Ordering::SeqCst);
+                    Ok(VmValue::Nil)
+                });
+
+                SCOPE_INTERRUPT_POLLS.set(0);
+                let finite = compile_harn(
+                    r"
+pipeline default(harness: Harness) {
+  let total = 0
+  for i in 0 to 10000 {
+    total = total + i
+  }
+  return total
+}
+",
+                );
+                let value = vm.execute(&finite).await.unwrap();
+                assert!(matches!(value, VmValue::Int(_)));
+                assert_eq!(
+                    SCOPE_INTERRUPT_POLLS.get(),
+                    0,
+                    "an armed but unset cancel token polled the instruction boundary"
+                );
+
+                // Negative control: the same armed token still stops a loop
+                // made only of sync opcodes once a request is pending.
+                let spinning = compile_harn(
+                    "pipeline default(harness: Harness) { request_cancel()\n while true {} }",
+                );
+                let error = vm.execute(&spinning).await.unwrap_err();
+                assert!(
+                    error.to_string().contains("cancelled"),
+                    "expected cancellation, got {error:?}"
+                );
+                assert!(SCOPE_INTERRUPT_POLLS.get() > 0);
+            })
+            .await;
     }
 
     #[tokio::test(flavor = "current_thread")]

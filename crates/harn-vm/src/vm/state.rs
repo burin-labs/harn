@@ -1,7 +1,6 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Instant;
 
 use crate::chunk::{Chunk, ChunkRef, Constant};
@@ -15,6 +14,7 @@ use crate::BuiltinId;
 use super::debug::DebugHook;
 pub(crate) use super::execution_deadline::{ExecutionDeadlinePauseGuard, ExecutionDeadlineState};
 use super::modules::ModuleCache;
+use super::process_exit::ProcessExitRequest;
 use super::VmBuiltinMetadata;
 
 /// A lazy callable's resolved export set together with the module graph that
@@ -174,44 +174,6 @@ pub(crate) struct TaskScope {
     pub(crate) frame_depth: usize,
     /// Env scope depth at open, for unwind pruning.
     pub(crate) env_scope_depth: usize,
-}
-
-/// Terminal exit requested by any VM in one execution tree. A process exit is
-/// global control flow, so child VMs share this latch with their parent rather
-/// than relying on a task being explicitly awaited.
-pub(crate) struct ProcessExitRequest {
-    code: Mutex<Option<i32>>,
-    requested: AtomicBool,
-}
-
-impl ProcessExitRequest {
-    fn new() -> Self {
-        Self {
-            code: Mutex::new(None),
-            requested: AtomicBool::new(false),
-        }
-    }
-
-    fn request(&self, code: i32) {
-        let mut recorded = self
-            .code
-            .lock()
-            .expect("process exit request lock poisoned");
-        if recorded.is_none() {
-            *recorded = Some(code);
-            self.requested.store(true, Ordering::Release);
-        }
-    }
-
-    fn code(&self) -> Option<i32> {
-        if !self.requested.load(Ordering::Acquire) {
-            return None;
-        }
-        *self
-            .code
-            .lock()
-            .expect("process exit request lock poisoned")
-    }
 }
 
 /// Iterator state for for-in loops.
@@ -1240,14 +1202,6 @@ impl Vm {
             scope_deadline: self.deadlines.last().map(|(deadline, _)| *deadline),
             handler_deadline: self.interrupt_handler_deadline,
         }
-    }
-
-    pub(crate) fn request_process_exit(&self, code: i32) {
-        self.process_exit_request.request(code);
-    }
-
-    pub(crate) fn requested_process_exit(&self) -> Option<i32> {
-        self.process_exit_request.code()
     }
 
     /// Set the source directory for import resolution and introspection.

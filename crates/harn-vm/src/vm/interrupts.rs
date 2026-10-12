@@ -278,8 +278,11 @@ impl Vm {
             return Some(VmError::ExecutionDeadlineExceeded);
         }
 
+        // Hosts write the signal name before flipping the cancel flag (see
+        // `install_interrupt_signal_token`), so an unset flag means there is
+        // no signal to take and the signal mutex stays off this path.
         let mut pending_from_host = false;
-        if self.pending_interrupt_signal.is_none() {
+        if self.pending_interrupt_signal.is_none() && self.is_cancel_requested() {
             self.pending_interrupt_signal = self.take_host_interrupt_signal();
             pending_from_host = self.pending_interrupt_signal.is_some();
         }

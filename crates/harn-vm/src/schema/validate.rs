@@ -187,6 +187,9 @@ fn first_param_validation_error_body(
             ));
         }
     }
+    if type_check_is_complete(value, schema) {
+        return None;
+    }
     let result =
         jsonschema_validate::validate_schema_fragment(value, schema, root_schema, "root", options);
     if result.errors.is_empty() {
@@ -206,6 +209,30 @@ fn first_param_validation_error_body(
             .join("; ");
         Some(format!("parameter '{param_name}': {detail}"))
     }
+}
+
+/// True when the generic JSON Schema delegate cannot reject `value` for this
+/// leaf fragment because the fragment names only a type that the tag check
+/// above already enforced. Typed parameters such as `x: int` take this path on
+/// every call, and the delegate would otherwise convert the schema and value
+/// to JSON and hash the schema to find its compiled validator. A key outside
+/// the allowlist keeps the delegate, so a new keyword costs time rather than
+/// skipping a check. `float` excludes non-finite values, which the delegate
+/// sees as JSON `null` and rejects.
+fn type_check_is_complete(value: &VmValue, schema: &crate::value::DictMap) -> bool {
+    let tag_is_exact = match schema_type_name(schema) {
+        Some("int" | "string" | "bool" | "nil" | "any") => true,
+        Some("float") => match value {
+            VmValue::Int(_) => true,
+            VmValue::Float(number) => number.is_finite(),
+            _ => false,
+        },
+        _ => false,
+    };
+    tag_is_exact
+        && schema
+            .keys()
+            .all(|key| matches!(key.as_str(), "type" | "nullable" | "description" | "title"))
 }
 
 fn first_object_param_error(
