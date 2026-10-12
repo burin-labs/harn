@@ -44,7 +44,7 @@ impl DaemonProbe {
         )
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, unix))]
     fn alive(&self) -> bool {
         !self.helper_states().is_empty()
     }
