@@ -46,9 +46,6 @@ pub fn check_files(text: string, exit_code: int) -> list<DiagnosticFile> {
   if envelope.data == nil {
     throw "check report unavailable"
   }
-  if exit_code != 0 && exit_code != 1 {
-    throw "checker did not finish normally: ${exit_code}"
-  }
   if !envelope.ok && envelope.error?.code != "check_failed" {
     throw "checker failed before producing file results"
   }
@@ -73,6 +70,9 @@ pub fn check_files(text: string, exit_code: int) -> list<DiagnosticFile> {
 
 /** Decode once, then require a nonempty, unique measurement. */
 pub fn lint_files(text: string, exit_code: int) -> list<DiagnosticFile> {
+  if exit_code != 0 && exit_code != 1 {
+    throw "checker did not finish normally: ${exit_code}"
+  }
   const envelope = match decode_lint_json(text, {exit_status: exit_code}) {
     Ok(value) -> { value }
     Err(failure) -> {

@@ -179,6 +179,39 @@ pipeline test_diagnostic_collection_refuses_missing_and_contradictory_evidence()
   )
 }
 
+pipeline test_lint_report_cannot_excuse_an_abnormal_child_exit() {
+  const report = json_stringify(
+    {
+      schemaVersion: 1,
+      ok: false,
+      data: {
+        files: [
+          {
+            path: "x.harn",
+            status: "warning",
+            diagnostics: [
+              {
+                source: "lint",
+                severity: "warning",
+                code: "HARN-STD-102",
+                message: "missing annotation",
+              },
+            ],
+            fixable: 0,
+            fixed: 0,
+          },
+        ],
+        summary: {ok: 0, warnings: 1, errors: 0, diagnostics: 1, fixable: 0, fixed: 0},
+      },
+      error: {code: "lint_failed", message: "findings", details: nil},
+      warnings: [],
+    },
+  )
+  assert_eq(lint_files(report, 1).count, 1)
+  assert_throws({ -> lint_files(report, 7) })
+  assert_throws({ -> lint_files(report, 124) })
+}
+
 pipeline test_return_baseline_renderer_preserves_reviewed_entries(harness: Harness) {
   const baseline = harness.fs.read_text("../stdlib-public-return-type-baseline.txt")
   const keys = baseline_lines(baseline)
