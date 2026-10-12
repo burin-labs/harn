@@ -184,6 +184,13 @@ reuse; `--decision` returns a reached pass or failure through the same reader.
 Both return `owned=false`. Reuse requires the current default consumer source
 and retains the original context, rather than issuing another declaration.
 
+The legacy canary and authenticated selector use `consumerPairing` for the
+same trailer grammar. The legacy shell projects that owner through the
+stdin-only `consumer-pairing.mjs` command with an environment containing only
+`PATH`. The workflow installs the pinned Node runtime before its existing
+dispatch. An absent trailer selects the default source; malformed, zero or
+ambiguous pairings refuse the entire input.
+
 The declaration owner records `started_at` immediately before qualifying the
 live parent and uploading its immutable declaration. The budget therefore
 includes declaration qualification and upload, but excludes earlier candidate

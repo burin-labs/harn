@@ -306,6 +306,46 @@ pipeline test_consumer_canary_accepts_checkout_mint_and_script(harness: Harness,
 }
 
 @test
+pipeline test_consumer_pairing_runtime_has_only_the_canonical_closed_capability() {
+  const node = {
+    runs: {steps: [{uses: "actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e"}]},
+  }
+  const setup = {
+    id: "pairing-node",
+    name: "Pairing runtime",
+    uses: node.runs.steps[0].uses,
+    with: {"node-version": "22"},
+  }
+  const check = fn(step: dict, owner: dict? = node) { return consumer_canary_errors(
+    consumer_canary_workflow([step]),
+    nil,
+    owner,
+  ) }
+  assert_eq(check(setup), [])
+  for owner in [
+    nil,
+    {},
+    {runs: {steps: []}},
+    {runs: {steps: [{uses: "actions/upload-artifact@v4"}]}},
+  ] {
+    assert(len(check(setup, owner)) > 0)
+  }
+  for invalid in [
+    setup + {uses: "actions/setup-node@unknown"},
+    setup + {uses: "actions/upload-artifact@v4"},
+    setup + {with: {"node-version": "22", cache: "npm"}},
+    setup + {with: {"node-version": "24"}},
+    setup + {env: {TOKEN: "unmasked"}},
+    setup + {run: "echo data >> $GITHUB_STEP_SUMMARY"},
+    setup + {if: "true"},
+    setup + {"continue-on-error": true},
+    setup + {id: "other-node"},
+  ] {
+    assert(len(check(invalid)) > 0)
+  }
+}
+
+@test
 pipeline test_consumer_observer_cannot_hide_publication(harness: Harness, task: unknown) {
   const workflow = consumer_canary_workflow([{uses: "./.github/actions/observe-consumer"}])
   assert(len(consumer_canary_errors(workflow)) > 0)

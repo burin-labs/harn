@@ -524,7 +524,11 @@ test('the terminal entrypoint records only an authenticated reached product deci
     }
     const fresh=readParent({}, {REHEARSAL_PROMOTION_RUN_ID:'',PAIRING_TEXT:'Pairs-with: consumer#7'},true);
     assert.equal(fresh.run.status,0,fresh.run.stderr);assert.equal(fresh.text,'reused=false\npaired_pull=7\n');
-    for(const pairing of ['Pairs-with: consumer#7\nPairs-with: consumer#8','Pairs-with: other#7']){
+    const freshDefault=readParent({}, {REHEARSAL_PROMOTION_RUN_ID:'',PAIRING_TEXT:'no pairing trailer'},true);
+    assert.equal(freshDefault.run.status,0,freshDefault.run.stderr);
+    assert.equal(freshDefault.text,'reused=false\npaired_pull=\n');
+    for(const pairing of ['Pairs-with: consumer#7\nPairs-with: consumer#8','Pairs-with: other#7',
+      'Pairs-with: consumer#7\nPairs-with: other#7','Pairs-with: consumer#0']){
       const invalid=readParent({}, {REHEARSAL_PROMOTION_RUN_ID:'',PAIRING_TEXT:pairing},true);
       assert.equal(invalid.run.status,1);assert.equal(invalid.text,'');
     }

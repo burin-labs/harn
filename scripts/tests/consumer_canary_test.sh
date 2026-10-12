@@ -135,8 +135,30 @@ grep -q "ref=pull-7" "$scratch/out"
 # A pairing it cannot honour fails by name instead of rehearsing the default.
 echo "open someone/fork fix-flag" > "$scratch/pull"
 refuses paired_pull_from_fork 'Pairs-with: consumer#7'
-refuses "pairing_ambiguous pulls=7,8" $'Pairs-with: consumer#7\nPairs-with: consumer#8'
+refuses pairing_ambiguous $'Pairs-with: consumer#7\nPairs-with: consumer#8'
 refuses pairing_unrecognized 'Pairs-with: other#7'
+refuses pairing_unrecognized 'Pairs-with: consumer#0'
+echo "open acme/widget-host fix-flag" > "$scratch/pull"
+refuses pairing_unrecognized $'Pairs-with: consumer#7\nPairs-with: other#7'
+
+# The pure parser must fail closed when its declared runtime is unavailable.
+# This search directory has only the parser's shell bootstrap utilities.
+mkdir "$scratch/no-node"
+ln -s /usr/bin/env "$scratch/no-node/env"
+ln -s /usr/bin/dirname "$scratch/no-node/dirname"
+cat > "$scratch/read-pairing.sh" <<'EOF'
+source "$PAIRING_OWNER"
+canary_read_pairing "$PAIRING_TEXT"
+printf '%s' "$CANARY_PAIRED"
+EOF
+env -i PATH="$PATH" PAIRING_OWNER="$root/scripts/ci/consumer_canary.sh" \
+  PAIRING_TEXT='Pairs-with: consumer#7' /bin/bash "$scratch/read-pairing.sh" > "$scratch/pairing-only"
+[[ $(cat "$scratch/pairing-only") == 7 ]]
+if env -i PATH="$scratch/no-node" PAIRING_OWNER="$root/scripts/ci/consumer_canary.sh" \
+  PAIRING_TEXT='Pairs-with: consumer#7' /bin/bash "$scratch/read-pairing.sh" > "$scratch/out" 2>&1; then
+  echo 'missing Node runtime selected a pairing' >&2; exit 1
+fi
+grep -q 'node:' "$scratch/out"
 
 # Negative control for the identity guard: a line naming the consumer is
 # refused instead of printed.
@@ -278,12 +300,13 @@ fn main(harness: Harness) {
     workflow: read_yaml(harness.fs, ".github/workflows/consumer-canary.yml", nil),
     action: read_yaml(harness.fs, ".github/actions/observe-consumer/action.yml", nil),
     policy: read_json(harness.fs, "scripts/ci/consumer_canary_policy.json"),
+    node: read_yaml(harness.fs, ".github/actions/node-cache/action.yml", nil),
   }))
 }' > "$scratch/observer-contract.json"
 node - "$scratch/observer-contract.json" <<'JS'
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
-const { workflow: { jobs }, action, policy } = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+const { workflow: { jobs }, action, policy, node } = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
 const steps = jobs.consumers.steps;
 assert.equal(jobs.decide.steps[0].with.ref, '${{ github.sha }}');
 assert.equal(steps[0].with.ref, '${{ github.sha }}');
@@ -293,6 +316,16 @@ const dispatch = steps.filter((step) => step.id === 'canary');
 assert.equal(dispatch.length, 1);
 assert(dispatch[0].run.includes('--dispatch'));
 assert(dispatch[0].run.includes('certified-consumer-source/Cargo.toml'));
+const verifyNode = (candidate) => {
+  const setup = candidate.filter((step) => step.id === 'pairing-node');
+  assert.equal(setup.length, 1);
+  assert.equal(setup[0].uses, node.runs.steps[0].uses);
+  assert.equal(setup[0].with['node-version'], '22');
+  assert.equal(setup[0].if, undefined);
+  assert(candidate.indexOf(setup[0]) < candidate.findIndex((step) => step.id === 'canary'));
+};
+verifyNode(steps);
+assert.throws(() => verifyNode(steps.filter((step) => step.id !== 'pairing-node')));
 const windows = steps.filter((step) => step.uses === './.github/actions/observe-consumer');
 assert.equal(windows.length, Math.ceil(policy.deadline_seconds / policy.window_seconds));
 for (const step of windows) {

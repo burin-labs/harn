@@ -111,6 +111,11 @@ jobs:
           sparse-checkout: Cargo.toml
           sparse-checkout-cone-mode: false
           persist-credentials: false
+      - name: Set up the shared pairing reader runtime
+        id: pairing-node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: "22"
       - name: Mint the consumer dispatch credential
         id: consumer-token
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0

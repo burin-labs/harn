@@ -74,24 +74,12 @@ canary_fail() {
   exit 1
 }
 
-# Sets CANARY_PAIRED to the paired pull request number, or empty when
-# unpaired. Two different pairings cannot both be rehearsed in one run, so
-# that is a named failure rather than a silent pick.
+# The shared source selector owns pairing grammar. This legacy dispatcher
+# projects that owner without inheriting credentials into the pure parser.
 canary_read_pairing() {
-  local text=$1 pairs
-  CANARY_PAIRED=
-  pairs=$(grep -E '^[[:space:]]*Pairs-with:' <<< "$text" | tr -d '\r' || true)
-  [[ -z "$pairs" ]] && return 0
-  local numbers
-  numbers=$(sed -nE "s/^[[:space:]]*Pairs-with:[[:space:]]*consumer#([0-9]+)[[:space:]]*$/\1/p" \
-    <<< "$pairs" | sort -u)
-  if [[ -z "$numbers" ]]; then
-    canary_fail pairing_unrecognized "expected=Pairs-with:consumer#N"
-  fi
-  if (($(wc -l <<< "$numbers") > 1)); then
-    canary_fail pairing_ambiguous "pulls=$(paste -sd, - <<< "$numbers")"
-  fi
-  CANARY_PAIRED=$numbers
+  local text=$1 reader
+  reader="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/consumer-pairing.mjs"
+  CANARY_PAIRED=$(printf '%s' "$text" | env -i PATH="$PATH" node "$reader") || exit 1
 }
 
 canary_dispatch() {
