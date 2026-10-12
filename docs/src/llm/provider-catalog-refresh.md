@@ -388,12 +388,17 @@ harn run --no-sandbox scripts/provider_tool_probe_campaign.harn -- \
 
 Review the dry run, then add `--live`. A live option campaign is incomplete
 unless it contains at least one measured-supported and one measured-unsupported
-control. Its `claim_controls` receipt prints both counts and the unmeasured
-count, so zero observations cannot read as healthy. Individual
+control, with no unavailable or eligible unmeasured option cells. Its
+`claim_controls` receipt counts support, non-support, account-policy exclusions,
+unavailable backends, and unmeasured cells separately. A changing pool's
+controlled rejection measures current compatible-backend availability rather
+than stable non-support; its probe and control receipts retain the selected
+backend identities. Missing selection remains unmeasured. Individual
 `option-probe-*.json` receipts join the same catalog hash, runtime fingerprint,
 sharding, credential-name readiness, and budget ledger as tool-call receipts.
-Credential-missing and otherwise skipped option cells count as unmeasured in a
-live campaign, so partial endpoint coverage cannot satisfy the control. Pass
+Credential-missing option cells count as unmeasured in a live campaign;
+account-policy exclusions have their own count. Partial eligible endpoint
+coverage cannot satisfy the control. Pass
 `--provider` to declare the providers a run is responsible for; a declared
 provider with no credential still fails the run. The weekly `Provider contract
 probe` workflow declares its providers in `PROBE_PROVIDERS` next to the secrets

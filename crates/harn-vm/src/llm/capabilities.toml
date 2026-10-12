@@ -7995,6 +7995,7 @@ thinking_block_style = "inline"
 
 [[provider.openrouter]]
 model_match = "openrouter/free"
+portable_option_qualification = "changing_pool"
 top_k_supported = true
 native_tools = true
 preferred_tool_format = "native"

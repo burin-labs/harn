@@ -2218,9 +2218,9 @@ harn provider option-probe anthropic \
 
 `--plan` reports the endpoint, exact catalog field, claim, and initial request
 count without contacting the provider. A live report records `match`, `drift`,
-or `unmeasured`. Provider acceptance and provider rejection are measurements;
+`unavailable`, or `unmeasured`. Stable endpoint acceptance and controlled rejection are measurements;
 authentication failures, throttling, unavailable models, and local gates are
-not. With `--fail-on-drift`, drift exits 1 and an unmeasured request exits 2.
+not. With `--fail-on-drift`, drift exits 1; unavailable and unmeasured requests exit 2.
 
 A rejection counts only when a control request without the option succeeds.
 A failed control leaves the result `unmeasured` with `failure_class:
@@ -2229,6 +2229,17 @@ costs include retries and controls; requests without prices remain explicit
 accounting gaps in campaign reports.
 `cost_usd` sums priced requests; `observed_cost_count` below `request_count`
 means that sum is incomplete.
+
+The capability field `portable_option_qualification` defaults to
+`stable_endpoint`. A `changing_pool` routes each request among currently
+available backends, as [OpenRouter's free router](https://openrouter.ai/docs/guides/routing/routers/free-router)
+does. Acceptance qualifies the option only when the provider identifies the
+selected backend. The report retains that exact `response_model` separately
+from `control_response_model`; neither is inferred from the requested router.
+A controlled pool rejection reports `unavailable`, with no stable support
+verdict. Missing or echoed selection leaves the result `unmeasured`, including
+when the no-option control succeeds. Campaigns count unavailable and unmeasured
+cells separately, and neither can produce a complete qualification.
 
 The command normally suspends catalog shaping for only the selected option, so
 a negative claim can be falsified at the wire. The typed authority is captured
@@ -2240,7 +2251,8 @@ non-default value, not that a provider necessarily honored the value.
 Ungated OpenRouter probes set
 [`provider.require_parameters`](https://openrouter.ai/docs/guides/routing/provider-selection#requiring-providers-to-support-all-parameters)
 to `true`, requiring an endpoint that advertises support for every requested
-parameter. An explicit parameter-routing rejection counts as a measurement.
+parameter. A controlled parameter-routing rejection measures stable endpoint
+support or changing-pool availability according to the authored qualification.
 Routes pinned to specific upstream providers apply that same allowlist before
 parameter filtering.
 Missing endpoints, account privacy restrictions, and ambiguous routing failures

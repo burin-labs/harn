@@ -13,6 +13,16 @@ use serde::Deserialize;
 use super::decision::{DecisionLimits, DecisionProtocol, DecisionQuestionKind};
 use super::rule::ProviderRule;
 
+/// Whether a generation-option observation applies to a stable endpoint or
+/// only to the compatible backends available in a changing routing pool.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PortableOptionQualification {
+    #[default]
+    StableEndpoint,
+    ChangingPool,
+}
+
 /// Why a self-hosted row chose native vs text tools.
 ///
 /// A capability row is a decision about how every request on that route is
@@ -867,6 +877,8 @@ pub struct Capabilities {
     /// See [`ProviderRule::portable_option_effort_support`].
     pub portable_option_effort_support:
         BTreeMap<super::PortableOption, Vec<super::ReasoningEffort>>,
+    /// Scope of the portable option declarations and their empirical probes.
+    pub portable_option_qualification: PortableOptionQualification,
     pub seed_supported: bool,
     pub top_k_supported: bool,
     pub temperature_supported: bool,
@@ -1012,6 +1024,7 @@ impl Default for Capabilities {
             reasoning_wire_format: None,
             reasoning_excluded_portable_options: Vec::new(),
             portable_option_effort_support: BTreeMap::new(),
+            portable_option_qualification: PortableOptionQualification::default(),
             seed_supported: true,
             top_k_supported: true,
             temperature_supported: true,

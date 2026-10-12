@@ -359,6 +359,13 @@ pub(crate) fn capabilities_to_vm_value(
         VmValue::Bool(caps.seed_supported),
     );
     dict.insert(
+        crate::value::intern_key("portable_option_qualification"),
+        json_to_vm_value(
+            &serde_json::to_value(caps.portable_option_qualification)
+                .expect("typed option qualification is serializable"),
+        ),
+    );
+    dict.insert(
         crate::value::intern_key("top_k_supported"),
         VmValue::Bool(caps.top_k_supported),
     );

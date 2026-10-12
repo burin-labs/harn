@@ -1,5 +1,8 @@
+import { get_typed_value } from "std/schema"
 import { assert_eq } from "std/testing"
 import {
+  ProviderOptionProbeContext,
+  ProviderOptionProbeReport,
   provider_option_probe_catalog_claim,
   provider_option_probe_classify,
   provider_option_probe_confirm_rejection,
@@ -7,6 +10,79 @@ import {
   provider_option_probe_retry_delay_ms,
   provider_option_probe_retry_result,
 } from "../../crates/harn-stdlib/src/stdlib/cli/providers/option_probe"
+
+fn report_context(claimed: bool, ungated: bool) -> ProviderOptionProbeContext {
+  return {
+    endpoint: {provider: "anthropic", model: "stable-proof", route: "anthropic:default"},
+    option: "temperature",
+    catalog: {
+      field: "temperature_supported",
+      claimed_supported: claimed,
+      qualification: "stable_endpoint",
+    },
+    ungated: ungated,
+  }
+}
+
+pipeline test_changing_pool_retains_selection_and_does_not_infer_stable_non_support() {
+  const stable = report_context(true, true)
+  const pool = stable + {catalog: stable.catalog + {qualification: "changing_pool"}}
+  const served = provider_option_probe_classify(
+    Ok({usage: {provider_telemetry: {response_model: "selected-backend"}, input_tokens: 4}}),
+  )
+  assert_eq(served.response_model, "selected-backend")
+  const accepted = provider_option_probe_report(pool, served)
+  assert_eq(accepted.diff.status, "match")
+  assert_eq(accepted.diff.observed_supported, true)
+  assert_eq(accepted.probe.attempt.response_model, "selected-backend")
+  const missing = provider_option_probe_report(
+    pool,
+    provider_option_probe_classify(Ok({usage: {input_tokens: 4}})),
+  )
+  assert_eq(missing.diff.status, "unmeasured")
+  const echoed = provider_option_probe_report(pool, served + {response_model: pool.endpoint.model})
+  assert_eq(echoed.diff.status, "unmeasured")
+  const rejected = {verdict: "rejected", measured: true, request_count: 1}
+  const controlled = provider_option_probe_confirm_rejection(rejected, served)
+  assert_eq(controlled.control_response_model, "selected-backend")
+  const unavailable = provider_option_probe_report(pool, controlled)
+  assert_eq(unavailable.diff.status, "unavailable")
+  assert_eq(unavailable.diff.observed_supported, nil)
+  assert_eq(unavailable.probe.measured_count, 0)
+  assert_eq(unavailable.probe.request_count, 2)
+  const unidentified_control = provider_option_probe_classify(Ok({usage: {input_tokens: 4}}))
+  const missing_control_report = get_typed_value(
+    provider_option_probe_report(
+      pool,
+      provider_option_probe_confirm_rejection(rejected, unidentified_control),
+    ),
+    schema_of(ProviderOptionProbeReport),
+  )
+  assert_eq(missing_control_report.diff.status, "unmeasured")
+  assert_eq(
+    provider_option_probe_report(
+      pool,
+      provider_option_probe_confirm_rejection(rejected, unidentified_control),
+    ).diff.status,
+    "unmeasured",
+  )
+  const empty_control = provider_option_probe_classify(
+    Err({origin: "provider", kind: "terminal", reason: "empty_generation"}),
+  )
+  assert_eq(empty_control.verdict, "accepted")
+  assert_eq(
+    provider_option_probe_report(
+      pool,
+      provider_option_probe_confirm_rejection(rejected, empty_control),
+    ).diff.status,
+    "unmeasured",
+  )
+  // The identical refusal remains option-contract evidence for a stable endpoint.
+  assert_eq(provider_option_probe_report(stable, controlled).diff.status, "drift")
+  const failed_control = provider_option_probe_confirm_rejection(rejected, rejected)
+  assert_eq(provider_option_probe_report(pool, failed_control).diff.status, "unmeasured")
+  assert_eq(failed_control.failure_class, "control_failed")
+}
 
 @test
 pipeline test_provider_option_probe_reads_each_catalog_field(harness: Harness, task: unknown) {
@@ -78,56 +154,31 @@ pipeline test_provider_option_probe_diff_cannot_turn_no_measurement_into_green(
   task: unknown,
 ) {
   const matched = provider_option_probe_report(
-    "anthropic",
-    "claude-sonnet-5",
-    "anthropic:default",
-    "temperature",
-    false,
-    true,
+    report_context(false, true),
     {verdict: "rejected", measured: true, request_count: 1},
   )
   assert_eq(matched.diff.status, "match")
   assert_eq(matched.probe.request_count, 1)
   assert_eq(matched.probe.measured_count, 1)
   const drifted = provider_option_probe_report(
-    "anthropic",
-    "claude-sonnet-5",
-    "anthropic:default",
-    "temperature",
-    true,
-    true,
+    report_context(true, true),
     {verdict: "rejected", measured: true, request_count: 1},
   )
   assert_eq(drifted.diff.status, "drift")
   const unmeasured = provider_option_probe_report(
-    "anthropic",
-    "claude-sonnet-5",
-    "anthropic:default",
-    "temperature",
-    false,
-    false,
+    report_context(false, false),
     {verdict: "gated_locally", measured: false, request_count: 0},
   )
   assert_eq(unmeasured.diff.status, "unmeasured")
   assert_eq(unmeasured.probe.request_count, 0)
   assert_eq(unmeasured.probe.measured_count, 0)
   const absent = provider_option_probe_report(
-    "anthropic",
-    "claude-sonnet-5",
-    "anthropic:default",
-    "temperature",
-    true,
-    true,
+    report_context(true, true),
     {verdict: "accepted", measured: false, request_count: 1},
   )
   assert_eq(absent.diff.status, "unmeasured")
   const no_request = provider_option_probe_report(
-    "anthropic",
-    "claude-sonnet-5",
-    "anthropic:default",
-    "temperature",
-    true,
-    true,
+    report_context(true, true),
     {verdict: "accepted", measured: true, request_count: 0},
   )
   assert_eq(no_request.diff.status, "unmeasured")
@@ -200,15 +251,7 @@ pipeline test_provider_option_probe_reads_openrouter_parameter_refusals_as_rejec
     ),
   )
   assert_eq(unrelated_policy.verdict, "inconclusive")
-  const report = provider_option_probe_report(
-    "openrouter",
-    "nvidia/nemotron-3-super-120b-a12b:free",
-    "openai:default",
-    "temperature",
-    true,
-    true,
-    policy,
-  )
+  const report = provider_option_probe_report(report_context(true, true), policy)
   assert_eq(report.diff.observed_supported, nil)
   assert_eq(report.probe.measured_count, 0)
 }
@@ -244,15 +287,7 @@ pipeline test_provider_option_probe_needs_a_passing_control_to_blame_the_option(
   assert_eq(unattributed.measured, false)
   assert_eq(unattributed.failure_class, "control_failed")
   assert_eq(unattributed.request_count, 2)
-  const report = provider_option_probe_report(
-    "openrouter",
-    "moonshotai/kimi-k2.7-code",
-    "openai:default",
-    "temperature",
-    false,
-    true,
-    unattributed,
-  )
+  const report = provider_option_probe_report(report_context(false, true), unattributed)
   assert_eq(report.diff.status, "unmeasured")
 }
 

@@ -149,3 +149,31 @@ fn openrouter_free_nemotron_is_declared_to_train_unlike_the_nim_route() {
         "the Cohere free route served the probe account normally"
     );
 }
+#[test]
+fn changing_pool_qualification_is_authored_for_the_exact_router() {
+    use super::PortableOptionQualification::{ChangingPool, StableEndpoint};
+
+    reset();
+    assert_eq!(
+        lookup("openrouter", "openrouter/free").portable_option_qualification,
+        ChangingPool
+    );
+    for model in [
+        "openrouter/freex",
+        "openrouter/auto",
+        "qwen/qwen3.6-35b-a3b",
+    ] {
+        assert_eq!(
+            lookup("openrouter", model).portable_option_qualification,
+            StableEndpoint,
+            "{model}"
+        );
+    }
+    assert!(super::parse_capabilities_toml(
+        r#"[[provider.test]]
+model_match = "*"
+portable_option_qualification = "unknown_scope"
+"#,
+    )
+    .is_err());
+}

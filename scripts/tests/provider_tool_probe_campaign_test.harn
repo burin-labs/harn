@@ -845,7 +845,7 @@ pipeline test_provider_tool_probe_campaign_report_summarizes_cells(
     verified_runtime(),
     verified_catalog(),
   )
-  assert_eq(report.schema_version, "harn.provider_tool_probe_campaign.v11")
+  assert_eq(report.schema_version, PROVIDER_TOOL_PROBE_CAMPAIGN_SCHEMA)
   assert_eq(report.runtime, verified_runtime())
   assert_eq(report.catalog, verified_catalog())
   assert_eq(report.summary.planned, 3)
@@ -1182,10 +1182,14 @@ pipeline test_provider_tool_probe_campaign_requires_measured_true_and_false_cont
   const behavior = first_behavior(provider_tool_probe_campaign_select_behaviors(["temperature"]))
   const command = ["harn", "provider", "option-probe"]
   const accepted_report = {
-    schema_version: "harn.provider_option_probe.v1",
+    schema_version: "harn.provider_option_probe.v2",
     endpoint: {provider: route.provider, model: route.model, route: "anthropic:default"},
     option: "temperature",
-    catalog: {field: "temperature_supported", claimed_supported: true},
+    catalog: {
+      field: "temperature_supported",
+      claimed_supported: true,
+      qualification: "stable_endpoint",
+    },
     probe: {
       ungated: true,
       request_count: 1,
@@ -1197,7 +1201,7 @@ pipeline test_provider_tool_probe_campaign_requires_measured_true_and_false_cont
   }
   const rejected_report = accepted_report
     + {
-      catalog: {field: "temperature_supported", claimed_supported: false},
+      catalog: accepted_report.catalog + {claimed_supported: false},
       probe: accepted_report.probe
         + {
           verdict: "rejected",
@@ -1401,6 +1405,67 @@ pipeline test_provider_tool_probe_campaign_requires_measured_true_and_false_cont
   assert_eq(
     control_cell.reason,
     "the provider rejected the request without the option too, so the rejection is not evidence about the option",
+  )
+  const unavailable_report = accepted_report
+    + {
+      catalog: accepted_report.catalog + {qualification: "changing_pool"},
+      probe: accepted_report.probe
+        + {
+          verdict: "rejected",
+          request_count: 2,
+          measured_count: 0,
+          attempt: {
+            verdict: "rejected",
+            measured: true,
+            request_count: 2,
+            control_response_model: "selected-control-backend",
+            cost_usd: 0.001,
+            observed_cost_count: 2,
+          },
+        },
+      diff: {status: "unavailable", claimed_supported: true, observed_supported: nil},
+    }
+  const unavailable_cell = provider_tool_probe_campaign_option_probe_cell(
+    harness.llm,
+    route,
+    behavior,
+    unavailable_report,
+    "unavailable.json",
+    command,
+    2,
+  )
+  assert_eq(unavailable_cell.status, "unavailable")
+  const incomplete = provider_tool_probe_campaign_report(
+    [route],
+    [behavior],
+    [accepted, rejected, unavailable_cell, control_cell, policy_cell],
+    true,
+    false,
+    ".out",
+    1,
+    {env: {}, env_source: {checked: true}},
+    verified_runtime(),
+    verified_catalog(),
+  )
+  assert_eq(incomplete.schema_version, PROVIDER_TOOL_PROBE_CAMPAIGN_SCHEMA)
+  assert_eq(incomplete.cell_count, 5)
+  assert_eq(incomplete.summary.pass, 2)
+  assert_eq(incomplete.summary.unavailable, 1)
+  assert_eq(incomplete.summary.error, 1)
+  assert_eq(incomplete.summary.skip, 1)
+  assert_eq(incomplete.claim_controls.selected_count, 5)
+  assert_eq(incomplete.claim_controls.measured_supported_count, 1)
+  assert_eq(incomplete.claim_controls.measured_unsupported_count, 1)
+  assert_eq(incomplete.claim_controls.excluded_by_account_policy_count, 1)
+  assert_eq(incomplete.claim_controls.unavailable_count, 1)
+  assert_eq(incomplete.claim_controls.unmeasured_count, 1)
+  assert_eq(incomplete.claim_controls.status, "incomplete")
+  assert_contains(provider_tool_probe_campaign_markdown(incomplete), "| UNAVAILABLE |")
+  assert_contains(
+    provider_tool_probe_campaign_markdown(
+      incomplete + {cells: [unavailable_cell + {status: "unexpected"}]},
+    ),
+    "| UNEXPECTED |",
   )
 }
 

@@ -98,6 +98,7 @@ pub(super) fn defaults_to_caps(defaults: &ProviderDefaults) -> Capabilities {
         reasoning_wire_format: None,
         reasoning_excluded_portable_options: None,
         portable_option_effort_support: None,
+        portable_option_qualification: None,
         seed_supported: None,
         top_k_supported: None,
         temperature_supported: None,
@@ -326,6 +327,7 @@ pub(super) fn rule_to_caps(rule: &ProviderRule, defaults: &ProviderDefaults) -> 
             .portable_option_effort_support
             .clone()
             .unwrap_or_default(),
+        portable_option_qualification: rule.portable_option_qualification.unwrap_or_default(),
         seed_supported: rule
             .seed_supported
             .or(defaults.seed_supported)

@@ -20,6 +20,7 @@ pub fn __provider_catalog_claim(llm: HarnessLlm, route: ProviderToolProbeRoute) 
     top_p_supported: caps?.top_p_supported,
     top_k_supported: caps?.top_k_supported,
     seed_supported: caps?.seed_supported,
+    portable_option_qualification: caps.portable_option_qualification,
   }
 }
 

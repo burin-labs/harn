@@ -401,6 +401,10 @@ pub struct ProviderRule {
     #[serde(default)]
     pub portable_option_effort_support:
         Option<std::collections::BTreeMap<super::PortableOption, Vec<super::ReasoningEffort>>>,
+    /// A changing pool admits options by routing to currently compatible
+    /// backends; one controlled refusal does not establish stable non-support.
+    #[serde(default)]
+    pub portable_option_qualification: Option<super::PortableOptionQualification>,
     #[serde(default)]
     pub seed_supported: Option<bool>,
     #[serde(default)]
@@ -673,6 +677,7 @@ impl ProviderRule {
             reasoning_wire_format,
             reasoning_excluded_portable_options,
             portable_option_effort_support,
+            portable_option_qualification,
             seed_supported,
             top_k_supported,
             temperature_supported,
@@ -834,6 +839,10 @@ impl ProviderRule {
         );
         fill_opt(&mut self.seed_supported, seed_supported);
         fill_opt(&mut self.top_k_supported, top_k_supported);
+        fill_opt(
+            &mut self.portable_option_qualification,
+            portable_option_qualification,
+        );
         fill_opt(&mut self.temperature_supported, temperature_supported);
         fill_opt(&mut self.top_p_supported, top_p_supported);
         fill_opt(
