@@ -48,6 +48,16 @@ else
         fi
       done
     fi
+    # Alone, harn-vm resolves only its own default features, which would
+    # compile out code that other members enable (harn-cli's `otel`). Build it
+    # with the feature set the whole workspace resolves for it.
+    if [[ "$group" == vm && ${#grouped[@]} -gt 0 ]]; then
+      vm_features=$(cargo metadata --locked --format-version 1 | jq -er '
+        (.packages[] | select(.name == "harn-vm" and .source == null) | .id) as $id
+        | .resolve.nodes[] | select(.id == $id) | .features | join(",")')
+      [[ -n "$vm_features" ]] || { echo 'harn-vm has no resolved workspace features' >&2; exit 1; }
+      grouped+=(--features "harn-vm/${vm_features//,/,harn-vm/}")
+    fi
     if ((${#grouped[@]} == 0)); then
       echo "Workspace tests: packages=$selected group=$group selects nothing; partition=$partition skipped"
       if [[ -n "${RUNNER_TEMP:-}" ]]; then
