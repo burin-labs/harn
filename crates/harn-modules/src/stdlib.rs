@@ -24,6 +24,32 @@ pub(crate) fn is_stdlib_virtual_path(path: &Path) -> bool {
     path.to_str().is_some_and(|path| path.starts_with("<std>/"))
 }
 
+/// The canonical form of a virtual stdlib path, or `None` for an ordinary one.
+///
+/// Module-graph paths (`<std>/module`) are canonical as written. Every other
+/// embedded-stdlib spelling, such as the runtime's `<stdlib>/module.harn` or a
+/// virtual parent directory, cannot exist on disk: canonicalizing it always
+/// fails and is never memoized, so module sibling checks would call `realpath`
+/// on every import. It resolves lexically, exactly as that failure path does.
+pub(crate) fn canonical_virtual_path(path: &Path) -> Option<PathBuf> {
+    if is_stdlib_virtual_path(path) {
+        return Some(path.to_path_buf());
+    }
+    is_embedded_stdlib_spelling(path).then(|| crate::manifest_walk::normalize_lexically(path))
+}
+
+/// Whether `path` lies under either virtual stdlib root: the module graph's
+/// `<std>` or the runtime's `<stdlib>`, including the roots themselves.
+pub(crate) fn is_embedded_stdlib_spelling(path: &Path) -> bool {
+    let Some(path) = path.to_str() else {
+        return false;
+    };
+    ["<std>", "<stdlib>"].iter().any(|root| {
+        path.strip_prefix(root)
+            .is_some_and(|rest| rest.is_empty() || rest.starts_with('/'))
+    })
+}
+
 /// Resolve a relative import owned by an embedded stdlib module.
 ///
 /// Embedded modules use virtual paths rather than mirror files on disk. Keep

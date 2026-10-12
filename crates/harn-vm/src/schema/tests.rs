@@ -1115,4 +1115,24 @@ fn typed_leaf_params_skip_only_a_delegate_that_cannot_reject() {
     assert!(schema_assert_param(&VmValue::Float(1.5), "x", &float_schema).is_ok());
     assert!(schema_assert_param(&VmValue::Int(2), "x", &float_schema).is_ok());
     assert!(schema_assert_param(&VmValue::Float(f64::NAN), "x", &float_schema).is_err());
+
+    let list_schema = make_vm_dict(vec![("type", s("list"))]);
+    assert!(schema_assert_param(
+        &make_list(vec![s("a"), VmValue::Int(1)]),
+        "xs",
+        &list_schema
+    )
+    .is_ok());
+    assert!(schema_assert_param(&s("a"), "xs", &list_schema).is_err());
+    let dict_schema = make_vm_dict(vec![("type", s("dict"))]);
+    assert!(schema_assert_param(&make_vm_dict(vec![("k", s("v"))]), "d", &dict_schema).is_ok());
+    assert!(schema_assert_param(&VmValue::Int(1), "d", &dict_schema).is_err());
+
+    // Element types still reach the delegate.
+    let ints = make_vm_dict(vec![
+        ("type", s("list")),
+        ("items", make_vm_dict(vec![("type", s("int"))])),
+    ]);
+    assert!(schema_assert_param(&make_list(vec![VmValue::Int(1)]), "xs", &ints).is_ok());
+    assert!(schema_assert_param(&make_list(vec![s("a")]), "xs", &ints).is_err());
 }

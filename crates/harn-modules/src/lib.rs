@@ -1467,8 +1467,8 @@ fn normalize_path(path: &Path) -> PathBuf {
 /// `<std>/` virtual paths pass through untouched.
 pub fn canonical_path(path: &Path) -> PathBuf {
     use std::sync::OnceLock;
-    if stdlib_module_name(path).is_some() {
-        return path.to_path_buf();
+    if let Some(virtual_path) = stdlib::canonical_virtual_path(path) {
+        return virtual_path;
     }
     // Read-mostly: every scan over every checked file's import closure asks
     // for the same paths, so readers must not serialize on one another.

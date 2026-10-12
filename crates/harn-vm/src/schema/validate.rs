@@ -221,7 +221,7 @@ fn first_param_validation_error_body(
 /// sees as JSON `null` and rejects.
 fn type_check_is_complete(value: &VmValue, schema: &crate::value::DictMap) -> bool {
     let tag_is_exact = match schema_type_name(schema) {
-        Some("int" | "string" | "bool" | "nil" | "any") => true,
+        Some("int" | "string" | "bool" | "nil" | "any" | "list" | "dict") => true,
         Some("float") => match value {
             VmValue::Int(_) => true,
             VmValue::Float(number) => number.is_finite(),
