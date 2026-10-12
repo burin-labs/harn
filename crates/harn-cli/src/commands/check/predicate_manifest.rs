@@ -50,32 +50,14 @@ pub(super) fn collect(
             }
             pending.push(path.clone());
             let parsed = census_parse(analysis, &path)?;
-            let (source, program) = &*parsed;
-            let mut candidate = false;
-            harn_parser::visit::walk_program_interpolated(source, program, &mut |node| {
-                let method = match &node.node {
-                    Node::MethodCall { method, .. } | Node::OptionalMethodCall { method, .. } => {
-                        method
-                    }
-                    Node::PropertyAccess { property, .. }
-                    | Node::OptionalPropertyAccess { property, .. } => property,
-                    _ => return,
-                };
-                candidate |= harn_parser::builtin_signatures::lookup_capability_method(
-                    harn_builtin_meta::CapabilityId::Llm,
-                    method,
-                )
-                .is_some_and(|signature| {
-                    signature.name == harn_builtin_meta::predicate::EVALUATE.name
-                        || signature.name == harn_builtin_meta::predicate::EVALUATE_REQUEST.name
-                        || signature.name == harn_builtin_meta::predicate::EVALUATE_PREDICATE.name
-                });
-            });
+            let candidate = *parsed
+                .predicate_candidate
+                .get_or_init(|| may_contain_predicate_operation(&parsed.source, &parsed.program));
             if !candidate {
                 continue;
             }
             let id = SourceId::path(&path);
-            analysis.set_source(id.clone(), source.clone(), SourceVersion(1));
+            analysis.set_source(id.clone(), parsed.source.clone(), SourceVersion(1));
             let mut checked = analysis
                 .typecheck(&id, super::analysis::typecheck_config(&path, config, graph))
                 .map_err(|error| {
@@ -153,5 +135,34 @@ fn census_parse(
             path.display()
         )
     })?;
-    Ok(std::sync::Arc::new((parsed.source, parsed.program)))
+    Ok(super::source::ParsedModuleSource::new(
+        parsed.source,
+        parsed.program,
+    ))
+}
+
+/// Whether a module names one of the LLM predicate operations anywhere,
+/// including inside string interpolations. Only such modules are type checked
+/// for the census. The answer depends only on the module, so the parse memo
+/// keeps it for every checked file whose closure reaches the module.
+fn may_contain_predicate_operation(source: &str, program: &[harn_parser::SNode]) -> bool {
+    let mut candidate = false;
+    harn_parser::visit::walk_program_interpolated(source, program, &mut |node| {
+        let method = match &node.node {
+            Node::MethodCall { method, .. } | Node::OptionalMethodCall { method, .. } => method,
+            Node::PropertyAccess { property, .. }
+            | Node::OptionalPropertyAccess { property, .. } => property,
+            _ => return,
+        };
+        candidate |= harn_parser::builtin_signatures::lookup_capability_method(
+            harn_builtin_meta::CapabilityId::Llm,
+            method,
+        )
+        .is_some_and(|signature| {
+            signature.name == harn_builtin_meta::predicate::EVALUATE.name
+                || signature.name == harn_builtin_meta::predicate::EVALUATE_REQUEST.name
+                || signature.name == harn_builtin_meta::predicate::EVALUATE_PREDICATE.name
+        });
+    });
+    candidate
 }

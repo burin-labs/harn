@@ -730,14 +730,23 @@ pub fn register_all_macro_builtins(vm: &mut Vm) {
 /// Return the canonical list of all stdlib builtin names. Used by
 /// harn-lint and harn-lsp to avoid hardcoded duplicate lists.
 pub fn stdlib_builtin_names() -> Vec<String> {
-    let vm = stdlib_probe_vm();
-    let mut names = vm.builtin_names();
-    // Special opcodes/keywords, not registered builtins, but linter
-    // should recognize them as valid function calls.
-    for extra in harn_parser::builtin_signatures::LANGUAGE_INTRINSICS {
-        names.push(extra.to_string());
-    }
-    names
+    // Building the probe VM registers the whole stdlib, and the linter asks
+    // for these names for every file it lints. Registration varies only with
+    // the legacy ambient-capability bridge, so keep one answer per setting.
+    static NAMES: [std::sync::OnceLock<Vec<String>>; 2] =
+        [std::sync::OnceLock::new(), std::sync::OnceLock::new()];
+    NAMES[usize::from(harn_parser::legacy_ambient_capabilities_enabled())]
+        .get_or_init(|| {
+            let vm = stdlib_probe_vm();
+            let mut names = vm.builtin_names();
+            // Special opcodes/keywords, not registered builtins, but linter
+            // should recognize them as valid function calls.
+            for extra in harn_parser::builtin_signatures::LANGUAGE_INTRINSICS {
+                names.push(extra.to_string());
+            }
+            names
+        })
+        .clone()
 }
 
 /// Return discoverable metadata for registered stdlib builtins.

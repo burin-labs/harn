@@ -49,7 +49,7 @@ pub(crate) fn derive_interface(
         source_path,
         source,
         super::CODEGEN_FINGERPRINT,
-        true,
+        super::GraphOutputs::ManifestAndEntryContext,
     );
     let context = match result.entry_compilation_context {
         Some(context) => {

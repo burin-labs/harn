@@ -107,8 +107,8 @@ fn collect_mock_host_capabilities_from_node(
             if let Some(parsed) = parse_resolved_module(&import_path) {
                 collect_mock_host_capabilities(
                     &import_path,
-                    &parsed.0,
-                    &parsed.1,
+                    &parsed.source,
+                    &parsed.program,
                     visited,
                     capabilities,
                 );

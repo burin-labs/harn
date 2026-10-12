@@ -146,8 +146,8 @@ fn scan_node_preflight(
                 if let Some(parsed) = parse_resolved_module(&import_path) {
                     scan_program_preflight(
                         &import_path,
-                        &parsed.0,
-                        &parsed.1,
+                        &parsed.source,
+                        &parsed.program,
                         config,
                         host_capabilities,
                         visited,

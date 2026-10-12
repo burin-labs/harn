@@ -256,7 +256,7 @@ fn scan_node_bundle(
                 if let Some(parsed) = parse_resolved_module(&import_path) {
                     manifest.add_module(&import_path, "import");
                     manifest.add_import_edge(file_path, &import_path);
-                    scan_program_bundle(&import_path, &parsed.1, config, visited, manifest);
+                    scan_program_bundle(&import_path, &parsed.program, config, visited, manifest);
                 }
             }
         }

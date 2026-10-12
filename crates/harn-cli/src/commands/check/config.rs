@@ -182,7 +182,15 @@ fn seed_parsed_source(
 }
 
 pub(crate) fn ensure_module_dependencies(files: &[PathBuf]) {
+    // Materialization depends only on each file's nearest manifest, and
+    // confirming it re-hashes the installed package tree. Checking it once per
+    // project instead of once per file keeps a large tree from hashing every
+    // package hundreds of times before the first file is checked.
+    let mut projects = HashSet::new();
     for file in files {
+        if !projects.insert(crate::package::find_nearest_manifest_dir(file)) {
+            continue;
+        }
         if let Err(error) = crate::package::ensure_dependencies_materialized(file) {
             eprintln!("error: {error}");
             process::exit(1);

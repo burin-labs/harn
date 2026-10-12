@@ -699,7 +699,7 @@ impl<'a> GraphWalk<'a> {
                 self.source_path,
                 self.source,
                 CODEGEN_FINGERPRINT,
-                false,
+                GraphOutputs::Manifest,
             )
         })
     }
@@ -1172,13 +1172,25 @@ thread_local! {
 /// disk files), so without this fold a stdlib edit between development
 /// builds would leave user-file caches pinned to a stale stdlib snapshot.
 fn hash_transitive_user_imports(source_path: &Path, source: &str) -> [u8; 32] {
-    hash_transitive_user_imports_fingerprinted(source_path, source, CODEGEN_FINGERPRINT).0
+    walk_import_graph_fingerprinted(
+        source_path,
+        source,
+        CODEGEN_FINGERPRINT,
+        GraphOutputs::Hashes,
+    )
+    .canonical
 }
 
 /// Root-relative companion to [`hash_transitive_user_imports`]. Only closed,
 /// packaged source trees use this identity; shared host caches stay canonical.
 fn hash_relocatable_user_imports(source_path: &Path, source: &str) -> [u8; 32] {
-    walk_import_graph_fingerprinted(source_path, source, CODEGEN_FINGERPRINT, false).relocatable
+    walk_import_graph_fingerprinted(
+        source_path,
+        source,
+        CODEGEN_FINGERPRINT,
+        GraphOutputs::Hashes,
+    )
+    .relocatable
 }
 
 /// As [`hash_transitive_user_imports`], but also returns the manifest that
@@ -1194,13 +1206,32 @@ fn hash_transitive_user_imports_with_manifest(
 /// Inner form of [`hash_transitive_user_imports`] parameterized on the compiler
 /// fingerprint so tests can vary it; production always passes
 /// [`CODEGEN_FINGERPRINT`].
+#[cfg(test)]
 fn hash_transitive_user_imports_fingerprinted(
     source_path: &Path,
     source: &str,
     codegen_fingerprint: &str,
 ) -> ([u8; 32], Option<ContextManifest>) {
-    let result = walk_import_graph_fingerprinted(source_path, source, codegen_fingerprint, false);
+    let result = walk_import_graph_fingerprinted(
+        source_path,
+        source,
+        codegen_fingerprint,
+        GraphOutputs::Manifest,
+    );
     (result.canonical, result.manifest)
+}
+
+/// What a graph walk must produce beyond its content hashes.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum GraphOutputs {
+    /// Only the canonical and relocatable hashes. Building the manifest parses
+    /// every module in the closure to derive its compilation context, so a
+    /// caller that only needs a key must not pay for it.
+    Hashes,
+    /// The hashes plus a manifest a later process can re-check with stats.
+    Manifest,
+    /// As [`Self::Manifest`], plus the entry module's compilation context.
+    ManifestAndEntryContext,
 }
 
 struct GraphHashes {
@@ -1214,7 +1245,7 @@ fn walk_import_graph_fingerprinted(
     source_path: &Path,
     source: &str,
     codegen_fingerprint: &str,
-    capture_entry_compilation_context: bool,
+    outputs: GraphOutputs,
 ) -> GraphHashes {
     #[cfg(test)]
     WALKS_PERFORMED.with(|c| c.set(c.get() + 1));
@@ -1232,10 +1263,10 @@ fn walk_import_graph_fingerprinted(
     // at the entry, because that is what the observations are relative to, and
     // stamped before the first file is stat'ed, so entries observed inside a
     // timestamp tick are recognizable as such later. Set to `None` the moment
-    // the graph contains something stats cannot describe.
-    let mut manifest = Some(ContextManifest::begin(module_source::canonical_identity(
-        source_path,
-    )));
+    // the graph contains something stats cannot describe, and never started
+    // when the caller asked only for hashes.
+    let mut manifest = (outputs != GraphOutputs::Hashes)
+        .then(|| ContextManifest::begin(module_source::canonical_identity(source_path)));
 
     while let Some((anchor, import)) = frontier.pop() {
         let Some(resolved) = harn_modules::resolve_import_path(&anchor, &import) else {
@@ -1340,7 +1371,7 @@ fn walk_import_graph_fingerprinted(
             .as_mut()
             .expect("manifest presence checked")
             .package_import_aliases = graph.package_import_aliases();
-        if capture_entry_compilation_context {
+        if outputs == GraphOutputs::ManifestAndEntryContext {
             entry_compilation_context =
                 ModuleCompilationContext::for_source_in_graph(&graph, source_path, source).ok();
         }

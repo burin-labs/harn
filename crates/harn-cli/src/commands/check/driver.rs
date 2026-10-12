@@ -146,13 +146,16 @@ pub(crate) fn check_files_independently(
 ) -> Vec<CheckedFile> {
     let workers = worker_count(files.len());
     let config_by_dir = build_check_contexts(files, overrides);
+    // Dependencies belong to each file's project, not to the file, so prepare
+    // them once before fan-out rather than once per file in the workers.
+    super::ensure_module_dependencies(files);
     let mut checked = run_ordered_checks(
         files,
         workers,
         want_text,
         || (),
         |(), file| {
-            let module_graph = super::build_module_graph(std::slice::from_ref(file));
+            let module_graph = harn_modules::build(std::slice::from_ref(file));
             let cross_file_imports = super::collect_cross_file_imports(&module_graph);
             let mut analysis = AnalysisDatabase::new();
             check_one(

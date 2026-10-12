@@ -1470,10 +1470,12 @@ pub fn canonical_path(path: &Path) -> PathBuf {
     if stdlib_module_name(path).is_some() {
         return path.to_path_buf();
     }
-    static MEMO: OnceLock<std::sync::Mutex<HashMap<PathBuf, PathBuf>>> = OnceLock::new();
-    let memo = MEMO.get_or_init(|| std::sync::Mutex::new(HashMap::new()));
+    // Read-mostly: every scan over every checked file's import closure asks
+    // for the same paths, so readers must not serialize on one another.
+    static MEMO: OnceLock<std::sync::RwLock<HashMap<PathBuf, PathBuf>>> = OnceLock::new();
+    let memo = MEMO.get_or_init(|| std::sync::RwLock::new(HashMap::new()));
     if let Some(hit) = memo
-        .lock()
+        .read()
         .expect("canonical path memo lock poisoned")
         .get(path)
         .cloned()
@@ -1482,7 +1484,7 @@ pub fn canonical_path(path: &Path) -> PathBuf {
     }
     match path.canonicalize() {
         Ok(canonical) => {
-            memo.lock()
+            memo.write()
                 .expect("canonical path memo lock poisoned")
                 .insert(path.to_path_buf(), canonical.clone());
             canonical
