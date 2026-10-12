@@ -831,18 +831,33 @@ pipeline test_release_workflow_generates_aot_once_for_release_and_benchmark_targ
   )
 }
 
+type ArtifactDownloadWorkflow = {jobs: dict<string, {steps?: list<{name?: string, uses?: string}>}>}
+
+fn artifact_download_report(
+  workflow: ArtifactDownloadWorkflow,
+) -> {bounded: int, failures: list<string>} {
+  let bounded = 0
+  let failures: list<string> = []
+  for job in workflow.jobs {
+    for step in job.value.steps ?? [] {
+      const action = step.uses ?? ""
+      if action == "./.github/actions/download-artifact-with-retry" {
+        bounded = bounded + 1
+      } else if action.starts_with("actions/download-artifact@") {
+        failures = failures + [job.key + "/" + (step.name ?? action)]
+      }
+    }
+  }
+  return {bounded: bounded, failures: failures}
+}
+
 @test
 pipeline test_artifact_download_retry_is_bounded_and_fail_closed(harness: Harness, task: unknown) {
   const action = harness.fs.read_text(
     "../../.github/actions/download-artifact-with-retry/action.yml",
   )
-  const release_workflow_text = harness.fs.read_text(
-    "../../.github/workflows/build-release-binaries.yml",
-  )
-  const ci_workflow_text = harness.fs.read_text("../../.github/workflows/ci.yml")
   const official_download =
     "uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c"
-  const bounded_download = "uses: ./.github/actions/download-artifact-with-retry"
   assert_eq(action.split(official_download).count, 4)
   assert_eq(action.split("continue-on-error: true").count, 3)
   assert(action.contains("if: steps.attempt_1.outcome == 'failure'"))
@@ -851,10 +866,32 @@ pipeline test_artifact_download_retry_is_bounded_and_fail_closed(harness: Harnes
   assert_eq(action.split("sleep 5").count, 2)
   assert(action.contains("Download artifact (attempt 3/3)"))
   assert(!action.contains("continue-on-error: false"))
-  assert(!release_workflow_text.contains(official_download))
-  assert(!ci_workflow_text.contains(official_download))
-  assert_eq(release_workflow_text.split(bounded_download).count, 7)
-  assert_eq(ci_workflow_text.split(bounded_download).count, 12)
+  for path in [
+    "../../.github/workflows/build-release-binaries.yml",
+    "../../.github/workflows/ci.yml",
+  ] {
+    const workflow = schema_expect(
+      yaml_parse(harness.fs.read_text(path)),
+      schema_of(ArtifactDownloadWorkflow),
+    )
+    const report = artifact_download_report(workflow)
+    assert(report.bounded > 0, "no artifact consumers measured: " + path)
+    assert_eq(report.failures, [], path)
+  }
+  const planted = artifact_download_report(
+    {
+      jobs: {
+        probe: {
+          steps: [
+            {uses: "./.github/actions/download-artifact-with-retry"},
+            {name: "unbounded", uses: "actions/download-artifact@other-version"},
+          ],
+        },
+      },
+    },
+  )
+  assert_eq(planted.bounded, 1)
+  assert_eq(planted.failures, ["probe/unbounded"])
 }
 
 // --- format_mib -------------------------------------------------------------
