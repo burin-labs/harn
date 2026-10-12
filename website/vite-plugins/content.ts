@@ -15,7 +15,7 @@
 // needs real text metrics, so ```mermaid fences become a figure here and the
 // browser renders the SVG into it (src/lib/mermaid.ts) on the handful of pages
 // that have one.
-import { readFileSync, readdirSync, statSync } from "node:fs"
+import { readFileSync, readdirSync, lstatSync } from "node:fs"
 import { join, dirname, relative, posix } from "node:path"
 import { load as loadYaml } from "js-yaml"
 import { unified } from "unified"
@@ -113,6 +113,13 @@ export interface LoadedDocs {
   search: SearchDoc[]
   // SUMMARY.md page order, excluding missing files. Used by the agent index.
   order: string[]
+  // Source-owned files published unchanged beside HTML and agent Markdown.
+  assets: DocAsset[]
+}
+
+export interface DocAsset {
+  sourcePath: string
+  sourceRel: string
 }
 
 const GITHUB_EDIT_BASE = "https://github.com/burin-labs/harn/edit/main/docs/src/"
@@ -1133,18 +1140,31 @@ function parseSummary(repoRoot: string): { parts: RawPart[]; order: string[] } {
 // Assembly
 // ---------------------------------------------------------------------------
 
-function collectMarkdownFiles(root: string): string[] {
-  const out: string[] = []
+export function collectDocContent(root: string): { pages: string[]; assets: DocAsset[] } {
+  const pages: string[] = []
+  const assets: DocAsset[] = []
+  if (lstatSync(root).isSymbolicLink()) {
+    throw new Error(`documentation content cannot be a symbolic link: ${root}`)
+  }
   const walk = (dir: string) => {
     for (const entry of readdirSync(dir)) {
       const full = join(dir, entry)
-      const st = statSync(full)
+      const st = lstatSync(full)
+      if (st.isSymbolicLink()) {
+        throw new Error(`documentation content cannot be a symbolic link: ${full}`)
+      }
       if (st.isDirectory()) walk(full)
-      else if (entry.endsWith(".md") && entry !== "SUMMARY.md") out.push(full)
+      else if (st.isFile()) {
+        if (entry.endsWith(".md")) {
+          if (entry !== "SUMMARY.md") pages.push(full)
+        } else {
+          assets.push({ sourcePath: full, sourceRel: relative(root, full).split("\\").join("/") })
+        }
+      }
     }
   }
   walk(root)
-  return out
+  return { pages, assets }
 }
 
 function decodedAnchor(anchor: string): string {
@@ -1235,9 +1255,9 @@ export function loadAllDocs(repoRoot: string): LoadedDocs {
   const search: SearchDoc[] = []
   const anchorsBySlug = new Map<string, Set<string>>()
   const links: InternalLink[] = []
-  const files = collectMarkdownFiles(srcRoot)
+  const content = collectDocContent(srcRoot)
 
-  for (const fileAbs of files) {
+  for (const fileAbs of content.pages) {
     const sourceRel = relative(srcRoot, fileAbs).split("\\").join("/")
     const slug = sourceRel.replace(/\.md$/, "")
     const raw = readFileSync(fileAbs, "utf8")
@@ -1356,5 +1376,5 @@ export function loadAllDocs(repoRoot: string): LoadedDocs {
     }
   }).filter((s) => s.groups.length > 0)
 
-  return { nav, meta, pages, search, order: orderedExisting }
+  return { nav, meta, pages, search, order: orderedExisting, assets: content.assets }
 }
