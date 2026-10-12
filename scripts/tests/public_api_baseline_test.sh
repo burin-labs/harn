@@ -7,6 +7,17 @@ resolve="$repo_root/.github/scripts/resolve-public-api-baseline.sh"
 gate="$repo_root/.github/scripts/breaking-surface-check.sh"
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
+# Exercise the lifecycle under aggressive inherited auto-maintenance. Each
+# fixture repository must own its policy before its first object write.
+export GIT_CONFIG_GLOBAL="$tmp/gitconfig"
+export GIT_CONFIG_NOSYSTEM=1
+git config --file "$GIT_CONFIG_GLOBAL" maintenance.auto true
+git config --file "$GIT_CONFIG_GLOBAL" maintenance.autoDetach true
+git config --file "$GIT_CONFIG_GLOBAL" maintenance.strategy incremental
+git config --file "$GIT_CONFIG_GLOBAL" maintenance.loose-objects.enabled true
+git config --file "$GIT_CONFIG_GLOBAL" maintenance.loose-objects.auto 1
+git config --file "$GIT_CONFIG_GLOBAL" gc.auto 1
+git config --file "$GIT_CONFIG_GLOBAL" gc.autoPackLimit 1
 source_repo="$tmp/source"
 git init -q -b main "$source_repo"
 git -C "$source_repo" config user.name 'Harn Test'
@@ -27,7 +38,8 @@ done
 checkout() {
   cd "$tmp"
   rm -rf "$tmp/checkout"
-  git clone -q --depth=2 --single-branch --branch main "file://$source_repo" "$tmp/checkout"
+  git clone -q -c maintenance.auto=false -c gc.auto=0 \
+    --depth=2 --single-branch --branch main "file://$source_repo" "$tmp/checkout"
   cd "$tmp/checkout"
 }
 
