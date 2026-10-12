@@ -183,7 +183,7 @@ async fn configure_stable_vm(
 
 pub(super) async fn prepare_vm_baseline(
     source: &str,
-    source_path: &Path,
+    source_path: Option<&Path>,
     cwd: &Path,
     project_root: Option<&Path>,
     runtime_configurator: Arc<dyn AcpRuntimeConfigurator>,
@@ -192,7 +192,7 @@ pub(super) async fn prepare_vm_baseline(
     configure_stable_vm(
         &mut vm,
         source,
-        Some(source_path),
+        source_path,
         cwd,
         project_root,
         runtime_configurator,

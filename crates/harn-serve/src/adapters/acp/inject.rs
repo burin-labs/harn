@@ -31,7 +31,7 @@ impl AcpServer {
         &mut self,
         id: &serde_json::Value,
         params: &serde_json::Value,
-        prepared_cancellation: Option<bool>,
+        prepared_cancellation: Option<Result<bool, TaskAdmissionError>>,
     ) {
         let Some(session_id) = session_id_param(params) else {
             if !id.is_null() {
@@ -39,9 +39,7 @@ impl AcpServer {
             }
             return;
         };
-        let Some(cancellation) =
-            lookup_session_cancellation(&self.session_cancellations, &session_id)
-        else {
+        let Some(_) = lookup_session_cancellation(&self.session_cancellations, &session_id) else {
             // A stop the server cannot honor must say so. The notification form
             // has no response to carry a refusal, and an unregistered session
             // has no event sink the control outcome is guaranteed to reach, so
@@ -68,16 +66,29 @@ impl AcpServer {
         };
 
         let actor = control_actor_from_params(params);
-        let newly_cancelled = prepared_cancellation.unwrap_or_else(|| {
-            let newly_cancelled = cancellation.cancel();
-            if newly_cancelled {
-                // A stop has to reach the processes the session started, not just
-                // its loop. Backgrounded command handles outlive the tool call by
-                // design, so unwinding the loop never reaches them.
-                cancel_session_command_handles(&session_id);
-            }
-            newly_cancelled
+        let result = prepared_cancellation.unwrap_or_else(|| {
+            prompt_owner::cancel_session_prompt(
+                &self.session_cancellations,
+                &self.concurrent_controls,
+                params,
+            )
+            .expect("registered session")
         });
+        let newly_cancelled = match result {
+            Ok(cancelled) => cancelled,
+            Err(error) => {
+                prompt_owner::record_cancel_refusal(
+                    &self.concurrent_controls,
+                    &session_id,
+                    params,
+                    error,
+                );
+                if !id.is_null() {
+                    self.send_error(id, error.rpc_code(), error.message());
+                }
+                return;
+            }
+        };
         let status = if newly_cancelled {
             "cancelled"
         } else {
@@ -292,6 +303,33 @@ impl AcpServer {
         &mut self,
         session_id: &str,
     ) -> Result<(), harn_vm::agent_events::AgentEventSinkError> {
+        // Close admission before waiting for the queue. An admitted input either
+        // becomes visible before this sweep or is rejected by the closed owner.
+        let closing = self.sessions.get(session_id).and_then(|session| {
+            session
+                .concurrent_control
+                .close_prompt_owner()
+                .map(|owner| (owner, session.concurrent_control.inject_state.clone()))
+        });
+        if let Some((owner, inject_state)) = closing {
+            if let Some(task) = owner.task() {
+                for message in inject_state.revoke_task_user_messages(&task.task_id).await {
+                    let actor = self
+                        .concurrent_controls
+                        .inject_owner(session_id, &message.message_id)
+                        .unwrap_or(serde_json::Value::Null);
+                    self.emit_control_outcome(
+                        session_id,
+                        "session/revoke_inject",
+                        "revoked",
+                        "accepted",
+                        actor,
+                        serde_json::json!({"sessionId":session_id,"messageId":message.message_id}),
+                        Some("task_prompt_ended"),
+                    );
+                }
+            }
+        }
         let flush_result = flush_and_clear_session_sinks(session_id).await;
         if let Some(session) = self.sessions.get_mut(session_id) {
             session.host_bridge = None;

@@ -179,7 +179,7 @@ impl AcpServer {
                     return;
                 }
                 let cancelled = match preparation {
-                    PreparedSessionRequest::Cancel { newly_cancelled } => Some(newly_cancelled),
+                    PreparedSessionRequest::Cancel { result } => Some(result),
                     _ => None,
                 };
                 self.handle_session_cancel(&id, &params, cancelled);

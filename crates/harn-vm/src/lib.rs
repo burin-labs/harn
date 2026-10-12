@@ -450,8 +450,8 @@ pub use stdlib::fs::ignore_policy;
 #[doc(hidden)]
 pub use stdlib::fs::invalidate_cached_file_text;
 pub use stdlib::hitl::{
-    append_hitl_response, ApprovalRequest, HitlHostResponse, HITL_APPROVALS_TOPIC,
-    HITL_DUAL_CONTROL_TOPIC, HITL_ESCALATIONS_TOPIC, HITL_QUESTIONS_TOPIC,
+    append_hitl_response, append_hitl_response_on, ApprovalRequest, HitlHostResponse,
+    HITL_APPROVALS_TOPIC, HITL_DUAL_CONTROL_TOPIC, HITL_ESCALATIONS_TOPIC, HITL_QUESTIONS_TOPIC,
 };
 /// Per-turn memo for turn-stable host reads. See [`stdlib::host::turn_cache`].
 pub use stdlib::host::turn_cache as host_turn_cache;

@@ -42,7 +42,8 @@ fn pending_permission_kind(
     } else {
         state.register_permission_request(json!({
             "id":41,"method":"session/request_permission",
-            "params":{"sessionId":"session-persisted","toolCall":{"toolCallId":request_id}},
+            "params":{"sessionId":"session-persisted","toolCall":{"toolCallId":request_id},
+                "_meta":{"harn":{"task":{"taskId":"waiting"}}}},
         }));
     }
     assert_eq!(

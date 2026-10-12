@@ -245,12 +245,7 @@ async fn task_input_admission_and_publication_survive_http_caller_drop() {
         )
         .await
         .unwrap();
-    assert_eq!(pending["pendingCount"], 1);
-    assert_eq!(pending["injections"][0]["messageId"], message_id);
-    assert_eq!(
-        pending["injections"][0]["content"],
-        "continue after disconnect"
-    );
+    assert_eq!(pending["pendingCount"], 0);
 }
 
 #[tokio::test]

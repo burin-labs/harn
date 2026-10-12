@@ -35,7 +35,7 @@ async fn idle_plan_mutation_does_not_leave_a_transport_for_late_prompt_events() 
     let correlation: AcpPromptCorrelation =
         serde_json::from_value(serde_json::json!({"messageId": "old-prompt"})).unwrap();
     let old = AgentEventTransport::new(Arc::new(events::AcpAgentEventSink::new(
-        output.for_prompt(correlation),
+        output.for_prompt(correlation, None),
     )));
     server
         .handle_incoming_message(serde_json::json!({
@@ -103,7 +103,7 @@ async fn event_emitted_after_same_session_rebind_keeps_originating_wire_correlat
         let correlation: AcpPromptCorrelation =
             serde_json::from_value(serde_json::json!({"messageId": id})).unwrap();
         AgentEventTransport::new(Arc::new(events::AcpAgentEventSink::new(
-            output.for_prompt(correlation),
+            output.for_prompt(correlation, None),
         )))
     };
     let old = transport("old-prompt");

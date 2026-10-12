@@ -11,6 +11,7 @@ use harn_vm::visible_text::sanitize_visible_assistant_text;
 pub(super) struct AcpAgentEventSink {
     output: AcpOutput,
     replayed: bool,
+    hitl_log: Option<super::prompt_owner::PromptExecutionOwner>,
 }
 
 impl AcpAgentEventSink {
@@ -18,6 +19,18 @@ impl AcpAgentEventSink {
         Self {
             output,
             replayed: false,
+            hitl_log: None,
+        }
+    }
+
+    pub(super) fn for_prompt(
+        output: AcpOutput,
+        hitl_log: super::prompt_owner::PromptExecutionOwner,
+    ) -> Self {
+        Self {
+            output,
+            replayed: false,
+            hitl_log: Some(hitl_log),
         }
     }
 
@@ -25,6 +38,7 @@ impl AcpAgentEventSink {
         Self {
             output,
             replayed: true,
+            hitl_log: None,
         }
     }
 
@@ -928,6 +942,11 @@ impl AgentEventSink for AcpAgentEventSink {
                 kind,
                 payload,
             } => {
+                if let Some(log) = &self.hitl_log {
+                    // HITL emits this only after creating the request and its
+                    // waitpoint. Cached turns can create their log lazily.
+                    log.capture_current();
+                }
                 let mut update = serde_json::json!({
                     "sessionUpdate": "hitl_request",
                 });

@@ -22,7 +22,9 @@ use time::OffsetDateTime;
 use tokio::sync::{broadcast, mpsc, oneshot};
 use uuid::Uuid;
 
-use crate::adapters::acp::{run_acp_channel_server, AcpServerConfig};
+use crate::adapters::acp::{
+    run_acp_channel_server, AcpServerConfig, TaskAdmissionError, TaskPromptTarget,
+};
 use crate::auth::{AuthPolicy, AuthRequest, AuthenticatedPrincipal, AuthorizationDecision};
 use crate::permissions::{
     ActionClass, AuditFilter, DecisionScope, InMemoryPermissionStore, PermissionDecision,
@@ -426,7 +428,22 @@ impl ApiState {
         match method.as_str() {
             "session/update" => self.register_session_update(message),
             _ => {
-                self.append_event(None, None, &method, message);
+                let params = message.get("params").cloned().unwrap_or_else(|| json!({}));
+                let Ok(task_id) = self.frame_task_id(&params) else {
+                    tracing::warn!("Refused invalid task-owned ACP notification");
+                    return;
+                };
+                let session_id = params
+                    .get("sessionId")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned);
+                let _ = self.append_event_with_persistence(
+                    session_id,
+                    task_id,
+                    &method,
+                    message,
+                    EventPersistence::LiveProjection,
+                );
             }
         }
     }
@@ -443,9 +460,15 @@ impl ApiState {
             .and_then(Value::as_str)
             .map(str::to_string)
             .unwrap_or_else(|| format!("permission_{}", Uuid::now_v7()));
-        let task_id = session_id
-            .as_ref()
-            .and_then(|session_id| self.active_task_id(session_id));
+        let task_id = match self.frame_task_id(&params) {
+            Ok(task_id) => task_id,
+            Err(error) => {
+                self.acp
+                    .send_raw(json!({"jsonrpc":"2.0", "id":message["id"],
+                    "error":{"code":error.rpc_code(), "message":error.message()}}));
+                return;
+            }
+        };
         let now = now_rfc3339();
         let public = json!({
             "id": request_id,
@@ -507,9 +530,10 @@ impl ApiState {
             .get("sessionId")
             .and_then(Value::as_str)
             .map(str::to_string);
-        let task_id = session_id
-            .as_ref()
-            .and_then(|session_id| self.active_task_id(session_id));
+        let Ok(task_id) = self.frame_task_id(&params) else {
+            tracing::warn!("Refused invalid task-owned ACP session update");
+            return;
+        };
         if params
             .pointer("/update/sessionUpdate")
             .and_then(Value::as_str)
@@ -598,14 +622,28 @@ impl ApiState {
         );
     }
 
-    fn active_task_id(&self, session_id: &str) -> Option<String> {
-        self.task_store()
-            .and_then(|store| store.list_tasks(Some(session_id), None))
-            .ok()?
-            .into_iter()
-            .rev()
-            .find(|task| task.status.is_active())
-            .map(|task| task.id)
+    fn frame_task_id(&self, params: &Value) -> Result<Option<String>, TaskAdmissionError> {
+        let Some(target) = TaskPromptTarget::from_params(params)? else {
+            return Ok(None);
+        };
+        let session_id = params
+            .get("sessionId")
+            .and_then(Value::as_str)
+            .ok_or(TaskAdmissionError::InvalidTaskContext)?;
+        let task = self
+            .task_store()
+            .map_err(|_| TaskAdmissionError::StorageUnavailable)?
+            .get_task(&target.task_id)
+            .map_err(|error| match error {
+                harn_session_store::StoreError::NotFound(_) => {
+                    TaskAdmissionError::InvalidTaskContext
+                }
+                _ => TaskAdmissionError::StorageUnavailable,
+            })?;
+        if task.session_id != session_id {
+            return Err(TaskAdmissionError::InvalidTaskContext);
+        }
+        Ok(Some(target.task_id))
     }
 
     fn append_event(

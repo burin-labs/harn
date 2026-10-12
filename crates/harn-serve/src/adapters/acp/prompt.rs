@@ -129,26 +129,27 @@ impl AcpServer {
         };
         let prompt_text = prompt.text.clone();
 
-        if let Some(admission) = &self.concurrent_controls.task_admission {
-            if let Some(target) = params.pointer("/_meta/harn/task") {
-                let target = match serde_json::from_value::<TaskPromptTarget>(target.clone()) {
-                    Ok(target) => target,
-                    Err(_) => {
-                        let error = TaskAdmissionError::InvalidTaskContext;
-                        self.send_error(id, error.rpc_code(), error.message());
+        let candidate_task = if self.concurrent_controls.task_admission.is_some() {
+            match TaskPromptTarget::from_params(params) {
+                Ok(Some(target)) => {
+                    if !self.sessions.contains_key(&session_id) {
+                        self.send_prompt_protocol_error(
+                            id,
+                            &format!("Unknown session: {session_id}"),
+                        );
                         return;
                     }
-                };
-                if !self.sessions.contains_key(&session_id) {
-                    self.send_prompt_protocol_error(id, &format!("Unknown session: {session_id}"));
-                    return;
+                    Some(target)
                 }
-                if let Err(error) = admission.admit_prompt(&session_id, &target) {
+                Ok(None) => None,
+                Err(error) => {
                     self.send_error(id, error.rpc_code(), error.message());
                     return;
                 }
             }
-        }
+        } else {
+            None
+        };
 
         let (
             cancellation,
@@ -308,55 +309,6 @@ impl AcpServer {
             retarget_prompt_text(&mut prompt, prompt_text.clone());
         }
 
-        let output = self.output.for_prompt(prompt.correlation.clone());
-        let pending = self.pending.clone();
-        let next_id = &self.next_id;
-        let sid = session_id.clone();
-
-        // Durable subscribers stay session-owned. The immutable ACP transport
-        // follows this execution and its cleanup, never a later session rebind.
-        clear_session_sinks(&session_id);
-        harn_vm::agent_sessions::register_event_log_sink(&session_id);
-        let event_transport = harn_vm::agent_events::AgentEventTransport::new(Arc::new(
-            AcpAgentEventSink::new(output.clone()),
-        ));
-
-        let bridge = Arc::new(AcpBridge {
-            session_id: sid.clone(),
-            output: output.clone(),
-            pending: pending.clone(),
-            next_id_counter: AtomicU64::new(next_id.fetch_add(1000, Ordering::SeqCst)),
-            cancellation: cancellation.clone(),
-            script_name: std::sync::Mutex::new(String::new()),
-            assistant_state: std::sync::Mutex::new(VisibleTextState::default()),
-        });
-        let bridge_output = output.clone();
-        let host_bridge = Arc::new(
-            harn_vm::bridge::HostBridge::from_parts_with_writer_and_control(
-                bridge.pending.clone(),
-                Arc::new(move |line| {
-                    bridge_output.write_line(line);
-                    Ok(())
-                }),
-                bridge.next_id_counter.fetch_add(10_000, Ordering::SeqCst),
-                harn_vm::bridge::HostBridgeControlState::new(
-                    cancellation.cancelled.clone(),
-                    cancellation.notify.clone(),
-                    inject_state,
-                    tool_call_cancellations,
-                ),
-            ),
-        );
-        host_bridge.set_session_id(&bridge.session_id);
-        host_bridge.set_caller_message_id(prompt.correlation.message_id.clone());
-        if let Some(session) = self.sessions.get_mut(&session_id) {
-            session.host_bridge = Some(host_bridge.clone());
-            session.concurrent_control.set_prompt_active(true);
-            session
-                .concurrent_control
-                .set_prompt_transport(event_transport.clone());
-        }
-
         let compile_started = Instant::now();
         let (chunk, cache_hit) = match self.compile_pipeline_cached(
             &source,
@@ -379,22 +331,6 @@ impl AcpServer {
             }
         };
         let compile_ms = compile_started.elapsed().as_millis() as u64;
-        bridge.send_log(
-            "info",
-            &format!(
-                "ACP_BOOT: compile_ms={compile_ms} cache={}",
-                if cache_hit { "hit" } else { "miss" }
-            ),
-            Some(serde_json::json!({
-                "compile_ms": compile_ms,
-                "compile_cache": if cache_hit { "hit" } else { "miss" },
-                "pipeline": source_path
-                    .as_ref()
-                    .map(|p| p.display().to_string())
-                    .unwrap_or_else(|| "<inline>".to_string()),
-            })),
-        );
-        let profile_turn = self.begin_profile_turn(&session_id);
         let mode_policy = modes::ModePolicyScope::new(&current_mode_id, &self.sandbox);
         // Both scoped spans are boxed before they are awaited. `Scoped` holds the
         // wrapped future inline, so keeping these on the stack would add the whole
@@ -413,7 +349,6 @@ impl AcpServer {
         {
             Ok(value) => value,
             Err(mut message) => {
-                self.finish_profile_turn(&session_id, profile_turn);
                 if let Err(error) = self.clear_active_prompt_transport(&session_id).await {
                     message.push_str(&format!("; failed to persist agent events: {error}"));
                 }
@@ -421,6 +356,80 @@ impl AcpServer {
                 return;
             }
         };
+        // Compile and host preparation precede task execution. Durable admission
+        // and its current owner become visible together before bytecode executes.
+        let control = self
+            .sessions
+            .get(&session_id)
+            .expect("prepared session")
+            .concurrent_control
+            .clone();
+        let owner = match control.admit_and_bind_prompt(
+            candidate_task.clone(),
+            cancellation.clone(),
+            || match (&self.concurrent_controls.task_admission, &candidate_task) {
+                (Some(admission), Some(target)) => admission.admit_prompt(&session_id, target),
+                _ => Ok(()),
+            },
+        ) {
+            Ok(owner) => owner,
+            Err(error) => {
+                self.send_error(id, error.rpc_code(), error.message());
+                return;
+            }
+        };
+        let output = self
+            .output
+            .for_prompt(prompt.correlation.clone(), owner.task().cloned());
+        // Durable subscribers stay session-owned; this transport stays with its turn.
+        clear_session_sinks(&session_id);
+        harn_vm::agent_sessions::register_event_log_sink(&session_id);
+        let event_transport = harn_vm::agent_events::AgentEventTransport::new(Arc::new(
+            AcpAgentEventSink::for_prompt(output.clone(), owner),
+        ));
+        let bridge = Arc::new(AcpBridge {
+            session_id: session_id.clone(),
+            output: output.clone(),
+            pending: self.pending.clone(),
+            next_id_counter: AtomicU64::new(self.next_id.fetch_add(1000, Ordering::SeqCst)),
+            cancellation: cancellation.clone(),
+            script_name: std::sync::Mutex::new(String::new()),
+            assistant_state: std::sync::Mutex::new(VisibleTextState::default()),
+        });
+        let host_bridge = Arc::new(
+            harn_vm::bridge::HostBridge::from_parts_with_writer_and_control(
+                bridge.pending.clone(),
+                Arc::new(move |line| {
+                    output.write_line(line);
+                    Ok(())
+                }),
+                bridge.next_id_counter.fetch_add(10_000, Ordering::SeqCst),
+                harn_vm::bridge::HostBridgeControlState::new(
+                    cancellation.cancelled.clone(),
+                    cancellation.notify.clone(),
+                    inject_state,
+                    tool_call_cancellations,
+                ),
+            ),
+        );
+        host_bridge.set_session_id(&bridge.session_id);
+        host_bridge.set_caller_message_id(prompt.correlation.message_id.clone());
+        if let Some(session) = self.sessions.get_mut(&session_id) {
+            session.host_bridge = Some(host_bridge.clone());
+            session
+                .concurrent_control
+                .set_prompt_transport(event_transport.clone());
+        }
+        if cancellation.cancelled.load(Ordering::SeqCst) {
+            let error = self.clear_active_prompt_transport(&session_id).await.err();
+            self.send_response(id, cancelled_prompt_result(error.as_ref()));
+            return;
+        }
+        bridge.send_log("info", &format!("ACP_BOOT: compile_ms={compile_ms} cache={}", if cache_hit { "hit" } else { "miss" }), Some(serde_json::json!({
+            "compile_ms":compile_ms,"compile_cache":if cache_hit {"hit"} else {"miss"},
+            "pipeline":source_path.as_ref().map(|path|path.display().to_string()).unwrap_or_else(||"<inline>".into()),
+        })));
+        let profile_turn = self.begin_profile_turn(&session_id);
         let id_owned = id.clone();
         let send_output = self.output.clone();
         let host_bridge_for_response = host_bridge.clone();

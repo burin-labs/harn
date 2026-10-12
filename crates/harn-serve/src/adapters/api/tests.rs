@@ -7,7 +7,9 @@ mod permission_response;
 mod served_agent_turn;
 mod session_model_policy;
 mod task_cancellation;
+mod task_event_identity;
 mod task_input;
+mod task_preparation;
 mod task_retry;
 
 struct Request;

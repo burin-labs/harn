@@ -126,14 +126,27 @@ Admission persists the task, retry binding, and initial control events in one
 transaction. Bindings last 24 hours from creation and remain bound while the
 task is active. A retry does not renew that expiry.
 
-An accepted task starts as `SUBMITTED`. Dispatch changes it to `WORKING` and
-sets `started_at`. Cancellation during session restore or before prompt
+File-backed and inline tasks stay `SUBMITTED` during source and VM preparation. Prompt
+admission publishes its execution owner, changes it to `WORKING`, and sets
+`started_at`. Cancellation during session restore or before prompt
 admission prevents execution. Ordinary session messages with `run: true`
 continue to run without a Task. Approval requests use `AUTH_REQUIRED`; questions use
 `INPUT_REQUIRED`. Failed answer delivery restores the previous waiting state.
+Task-owned approval, progress, and output events retain their admitted task ID
+when another task queues in the same session. Session-wide events remain taskless.
+Approval answers reach a waiting task while its prompt is suspended; they do not
+wait behind the prompt they must resume.
 Task input is recorded with its generated message ID before it enters the
 session input queue. Storage failure returns `503` without queueing the input;
 an accepted input remains recorded and published if its HTTP caller disconnects.
+Input addressed to a queued task returns `409`: steering belongs to the task
+currently executing in that session. Undelivered task inputs are revoked when
+its prompt ends, so they cannot reach the next task. Ordinary session-scoped ACP
+inputs continue across prompt replacement.
+Task cancellation selects only that task's admitted prompt. Canceling a queued
+task doesn't stop the running task, and canceling the running task doesn't stop
+queued tasks from starting. Untargeted ACP session cancellation still stops all
+prepared prompts in the session.
 
 Tasks and their control history survive a server restart. An unfinished task
 whose execution lease is no longer held becomes `FAILED` with

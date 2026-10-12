@@ -15,10 +15,53 @@ pub struct TaskInjectionTarget {
     pub message: serde_json::Value,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct TaskPromptTarget {
     pub task_id: String,
+}
+
+impl TaskPromptTarget {
+    pub(crate) fn from_params(
+        params: &serde_json::Value,
+    ) -> Result<Option<Self>, TaskAdmissionError> {
+        params
+            .pointer("/_meta/harn/task")
+            .map(|value| {
+                let target: Self = serde_json::from_value(value.clone())
+                    .map_err(|_| TaskAdmissionError::InvalidTaskContext)?;
+                if target.task_id.trim().is_empty() {
+                    return Err(TaskAdmissionError::InvalidTaskContext);
+                }
+                Ok(target)
+            })
+            .transpose()
+    }
+
+    pub(crate) fn project_into(
+        &self,
+        params: &mut serde_json::Value,
+    ) -> Result<(), TaskAdmissionError> {
+        if Self::from_params(params)?.is_some_and(|supplied| supplied != *self) {
+            return Err(TaskAdmissionError::InvalidTaskContext);
+        }
+        let harn = params
+            .as_object_mut()
+            .ok_or(TaskAdmissionError::InvalidTaskContext)?
+            .entry("_meta")
+            .or_insert_with(|| serde_json::json!({}))
+            .as_object_mut()
+            .ok_or(TaskAdmissionError::InvalidTaskContext)?
+            .entry("harn")
+            .or_insert_with(|| serde_json::json!({}))
+            .as_object_mut()
+            .ok_or(TaskAdmissionError::InvalidTaskContext)?;
+        harn.insert(
+            "task".into(),
+            serde_json::to_value(self).map_err(|_| TaskAdmissionError::InvalidTaskContext)?,
+        );
+        Ok(())
+    }
 }
 
 /// Host policy owns admission; client metadata only identifies the target task.
@@ -42,6 +85,7 @@ pub enum TaskAdmissionError {
     InvalidTaskContext,
     TaskNotSteerable,
     TaskNotRunnable,
+    TaskNotCurrent,
     StorageUnavailable,
 }
 
@@ -49,7 +93,7 @@ impl TaskAdmissionError {
     pub fn rpc_code(self) -> i64 {
         match self {
             Self::InvalidTaskContext => -32602,
-            Self::TaskNotSteerable | Self::TaskNotRunnable => -32000,
+            Self::TaskNotSteerable | Self::TaskNotRunnable | Self::TaskNotCurrent => -32000,
             Self::StorageUnavailable => TASK_ADMISSION_STORAGE_UNAVAILABLE_RPC_CODE,
         }
     }
@@ -59,6 +103,7 @@ impl TaskAdmissionError {
             Self::InvalidTaskContext => "task context is invalid",
             Self::TaskNotSteerable => "task cannot accept this session input",
             Self::TaskNotRunnable => "task cannot dispatch this session prompt",
+            Self::TaskNotCurrent => "task does not own the current session prompt",
             Self::StorageUnavailable => "durable task storage is unavailable",
         }
     }
@@ -104,9 +149,22 @@ impl ConcurrentSessionControls {
                     )
                     .with_goal(command.goal)
                     .with_actor(command.actor.clone());
+                    let mut delivery_owner = harn_vm::bridge::UserMessageDeliveryOwner::Session;
                     if let Some(admission) = &self.task_admission {
-                        projection =
-                            Some(admission.admit_input(session_id, &control, target.as_ref())?);
+                        projection = Some(match target.as_ref() {
+                            Some(task) => self
+                                .registered_control(session_id)
+                                .ok_or(TaskAdmissionError::TaskNotSteerable)?
+                                .with_current_task(&task.task_id, |_| {
+                                    admission.admit_input(session_id, &control, Some(task))
+                                })?,
+                            None => admission.admit_input(session_id, &control, None)?,
+                        });
+                        if let Some(task) = &target {
+                            delivery_owner = harn_vm::bridge::UserMessageDeliveryOwner::Task(
+                                task.task_id.clone(),
+                            );
+                        }
                     }
                     self.record_inject_owner(
                         session_id,
@@ -114,7 +172,7 @@ impl ConcurrentSessionControls {
                         command.actor.clone(),
                     );
                     super::core::record_and_emit_control(self, session_id, control);
-                    Ok(())
+                    Ok(delivery_owner)
                 },
             )
             .await?;

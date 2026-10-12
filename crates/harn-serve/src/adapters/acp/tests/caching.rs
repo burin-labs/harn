@@ -345,7 +345,7 @@ async fn vm_baseline_cached_serves_file_backed_context_until_key_changes() {
         "session project root is part of baseline invalidation"
     );
 
-    let (baseline, hit6, ms6) = server
+    let (baseline, hit6, _ms6) = server
         .prepare_vm_baseline_cached(
             source,
             None,
@@ -357,7 +357,9 @@ async fn vm_baseline_cached_serves_file_backed_context_until_key_changes() {
         )
         .await
         .expect("inline prepare");
-    assert!(baseline.is_none());
+    assert!(
+        baseline.is_some(),
+        "inline VM setup must precede prompt admission"
+    );
     assert_eq!(hit6, None);
-    assert_eq!(ms6, 0);
 }

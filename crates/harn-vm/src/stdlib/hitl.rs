@@ -360,6 +360,15 @@ pub(crate) fn restore_hitl_state(state: RequestSequenceState) {
 
 pub async fn append_hitl_response(
     base_dir: Option<&Path>,
+    response: HitlHostResponse,
+) -> Result<u64, String> {
+    let log = ensure_hitl_event_log_for(base_dir)?;
+    append_hitl_response_on(&log, response).await
+}
+
+/// Answer a waitpoint on its owning log, independent of ambient execution state.
+pub async fn append_hitl_response_on(
+    log: &Arc<AnyEventLog>,
     mut response: HitlHostResponse,
 ) -> Result<u64, String> {
     let kind = HitlRequestKind::from_request_id(&response.request_id)
@@ -367,7 +376,6 @@ pub async fn append_hitl_response(
     if response.responded_at.is_none() {
         response.responded_at = Some(now_rfc3339());
     }
-    let log = ensure_hitl_event_log_for(base_dir)?;
     let headers = response_headers(&response.request_id);
     let topic = Topic::new(kind.topic()).map_err(|error| error.to_string())?;
     let event_id = log
@@ -384,7 +392,7 @@ pub async fn append_hitl_response(
         )
         .await
         .map_err(|error| error.to_string())?;
-    finalize_hitl_response(&log, kind, &response).await?;
+    finalize_hitl_response(log, kind, &response).await?;
     Ok(event_id)
 }
 

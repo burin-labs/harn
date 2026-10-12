@@ -238,7 +238,7 @@ pub(super) async fn submit_task_inner(
                     "session/prompt",
                     json!({
                         "sessionId": session_id, "prompt": [{"type": "text", "text": prompt}],
-                        "_meta": {"harn": {"task": {"taskId": task_id}}},
+                        "_meta": {"harn": {"task": TaskPromptTarget {task_id: task_id.clone()}}},
                     }),
                 )
                 .await
@@ -399,6 +399,11 @@ pub(super) async fn cancel_task(
             "task became terminal before cancellation",
         );
     }
-    state.acp.send_raw(json!({"jsonrpc": "2.0", "method": "session/cancel", "params": {"sessionId": task.session_id}}));
+    state.acp.send_raw(
+        json!({"jsonrpc": "2.0", "method": "session/cancel", "params": {
+            "sessionId": task.session_id,
+            "_meta":{"harn":{"task":crate::adapters::acp::TaskPromptTarget {task_id}}}
+        }}),
+    );
     Json(canceled.resource()).into_response()
 }

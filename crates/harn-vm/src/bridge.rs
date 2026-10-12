@@ -3,12 +3,14 @@
 mod authority;
 mod control;
 mod correlation;
+mod injection_lifecycle;
 mod pending_call;
 mod remind;
 pub use authority::leading_authority_param_count;
 pub use authority::{inject_leading_authorities, inject_leading_authority};
 pub use control::HostBridgeControlState;
 use control::{handle_cancel_tool_call_notification, DaemonIdleState};
+pub use injection_lifecycle::UserMessageDeliveryOwner;
 use remind::queued_session_remind_from_params;
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::future::Future;
@@ -335,6 +337,7 @@ pub struct QueuedUserMessage {
     pub content: String,
     pub transcript_content: serde_json::Value,
     pub mode: QueuedUserMessageMode,
+    pub delivery_owner: UserMessageDeliveryOwner,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -434,7 +437,7 @@ impl HostBridgeInjectionState {
         mode: &str,
     ) -> String {
         self.push_pending_user_message_admitted(content, transcript_content, mode, |_| {
-            Ok::<_, std::convert::Infallible>(())
+            Ok::<_, std::convert::Infallible>(UserMessageDeliveryOwner::Session)
         })
         .await
         .unwrap()
@@ -447,11 +450,11 @@ impl HostBridgeInjectionState {
         content: String,
         transcript_content: serde_json::Value,
         mode: &str,
-        admit: impl FnOnce(&str) -> Result<(), E>,
+        admit: impl FnOnce(&str) -> Result<UserMessageDeliveryOwner, E>,
     ) -> Result<String, E> {
         let message_id = new_inject_message_id();
         let mut state = self.inner.lock().await;
-        admit(&message_id)?;
+        let delivery_owner = admit(&message_id)?;
         state
             .queue
             .push_back(QueuedTranscriptInjection::User(QueuedUserMessage {
@@ -459,6 +462,7 @@ impl HostBridgeInjectionState {
                 content,
                 transcript_content,
                 mode: QueuedUserMessageMode::from_str(mode),
+                delivery_owner,
             }));
         Ok(message_id)
     }

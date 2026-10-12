@@ -152,6 +152,7 @@ async fn deliver_permission_response(
     let delivery = if pending.hitl {
         let hitl_response = json!({
             "request_id": claim.request_id,
+            "sessionId": pending.public["session_id"],
             "approved": approved,
             "accepted": approved,
             "answer": input.get("answer").cloned().unwrap_or(Value::Null),

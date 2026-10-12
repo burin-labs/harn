@@ -474,7 +474,10 @@ async fn task_control_persistence_keeps_acp_transcript_updates_live_only() {
         json!({"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"live-transcript-canary"}}),
         json!({"sessionUpdate":"tool_call","toolCallId":"live-tool","title":"live-transcript-canary","status":"in_progress"}),
     ] {
-        state.handle_acp_notification(json!({"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"session-persisted","update":update}}));
+        state.handle_acp_notification(json!({"jsonrpc":"2.0","method":"session/update","params":{
+            "sessionId":"session-persisted","update":update,
+            "_meta":{"harn":{"task":TaskPromptTarget {task_id:"live-task".into()}}}
+        }}));
     }
     let live = state.inner.lock().unwrap().events.clone();
     assert_eq!(
