@@ -1,11 +1,12 @@
 use super::*;
 use axum::body::{to_bytes, Body};
-use axum::http::Request as RawRequest;
+use axum::http::{Method, Request as RawRequest};
 use tower::ServiceExt;
 mod live_controls;
 mod permission_response;
 mod served_agent_turn;
 mod session_model_policy;
+mod shared_workspace_authority;
 mod task_cancellation;
 mod task_event_identity;
 mod task_input;

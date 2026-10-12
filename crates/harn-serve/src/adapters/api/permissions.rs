@@ -8,12 +8,7 @@ use super::*;
 pub(super) async fn list_permission_requests(
     State(state): State<ApiState>,
     Query(query): Query<ListQuery>,
-    OriginalUri(uri): OriginalUri,
-    headers: HeaderMap,
 ) -> Response {
-    if let Err(response) = authorize(&state, Method::GET, &uri, &headers, Bytes::new()).await {
-        return response;
-    }
     let inner = state.inner.lock().expect("api state poisoned");
     Json(list_response(limit_values(
         inner
@@ -37,12 +32,7 @@ pub(super) async fn list_task_permission_requests(
     State(state): State<ApiState>,
     AxumPath(task_id): AxumPath<String>,
     Query(query): Query<ListQuery>,
-    OriginalUri(uri): OriginalUri,
-    headers: HeaderMap,
 ) -> Response {
-    if let Err(response) = authorize(&state, Method::GET, &uri, &headers, Bytes::new()).await {
-        return response;
-    }
     let inner = state.inner.lock().expect("api state poisoned");
     Json(list_response(limit_values(
         inner
@@ -61,13 +51,8 @@ pub(super) async fn list_task_permission_requests(
 pub(super) async fn respond_permission_request(
     State(state): State<ApiState>,
     AxumPath(request_id): AxumPath<String>,
-    OriginalUri(uri): OriginalUri,
-    headers: HeaderMap,
     body: Bytes,
 ) -> Response {
-    if let Err(response) = authorize(&state, Method::POST, &uri, &headers, body.clone()).await {
-        return response;
-    }
     let Ok(input) = parse_json_body(&body) else {
         return invalid_json_response();
     };
@@ -382,14 +367,7 @@ fn parse_decision_scope(raw: &str) -> Option<DecisionScope> {
     }
 }
 
-pub(super) async fn get_permissions_policy(
-    State(state): State<ApiState>,
-    OriginalUri(uri): OriginalUri,
-    headers: HeaderMap,
-) -> Response {
-    if let Err(response) = authorize(&state, Method::GET, &uri, &headers, Bytes::new()).await {
-        return response;
-    }
+pub(super) async fn get_permissions_policy(State(state): State<ApiState>) -> Response {
     let policy = state.permissions.policy().await;
     let version = policy.version();
     Json(json!({
@@ -400,15 +378,7 @@ pub(super) async fn get_permissions_policy(
     .into_response()
 }
 
-pub(super) async fn put_permissions_policy(
-    State(state): State<ApiState>,
-    OriginalUri(uri): OriginalUri,
-    headers: HeaderMap,
-    body: Bytes,
-) -> Response {
-    if let Err(response) = authorize(&state, Method::PUT, &uri, &headers, body.clone()).await {
-        return response;
-    }
+pub(super) async fn put_permissions_policy(State(state): State<ApiState>, body: Bytes) -> Response {
     let Ok(input) = parse_json_body(&body) else {
         return invalid_json_response();
     };
@@ -440,14 +410,7 @@ pub(super) async fn put_permissions_policy(
     .into_response()
 }
 
-pub(super) async fn list_permission_rules(
-    State(state): State<ApiState>,
-    OriginalUri(uri): OriginalUri,
-    headers: HeaderMap,
-) -> Response {
-    if let Err(response) = authorize(&state, Method::GET, &uri, &headers, Bytes::new()).await {
-        return response;
-    }
+pub(super) async fn list_permission_rules(State(state): State<ApiState>) -> Response {
     let rules = state.permissions.rules().await;
     let data: Vec<Value> = rules
         .into_iter()
@@ -456,15 +419,7 @@ pub(super) async fn list_permission_rules(
     Json(list_response(data)).into_response()
 }
 
-pub(super) async fn create_permission_rule(
-    State(state): State<ApiState>,
-    OriginalUri(uri): OriginalUri,
-    headers: HeaderMap,
-    body: Bytes,
-) -> Response {
-    if let Err(response) = authorize(&state, Method::POST, &uri, &headers, body.clone()).await {
-        return response;
-    }
+pub(super) async fn create_permission_rule(State(state): State<ApiState>, body: Bytes) -> Response {
     let Ok(input) = parse_json_body(&body) else {
         return invalid_json_response();
     };
@@ -485,12 +440,7 @@ pub(super) async fn create_permission_rule(
 pub(super) async fn revoke_permission_rule(
     State(state): State<ApiState>,
     AxumPath(rule_id): AxumPath<String>,
-    OriginalUri(uri): OriginalUri,
-    headers: HeaderMap,
 ) -> Response {
-    if let Err(response) = authorize(&state, Method::DELETE, &uri, &headers, Bytes::new()).await {
-        return response;
-    }
     let id = RuleId(rule_id);
     if state.permissions.revoke_rule(&id).await {
         StatusCode::NO_CONTENT.into_response()
@@ -512,12 +462,7 @@ pub(super) struct PermissionHistoryQuery {
 pub(super) async fn get_permission_history(
     State(state): State<ApiState>,
     Query(query): Query<PermissionHistoryQuery>,
-    OriginalUri(uri): OriginalUri,
-    headers: HeaderMap,
 ) -> Response {
-    if let Err(response) = authorize(&state, Method::GET, &uri, &headers, Bytes::new()).await {
-        return response;
-    }
     let filter = AuditFilter {
         tenant_id: query.tenant_id,
         session_id: query.session_id,
@@ -535,15 +480,7 @@ pub(super) async fn get_permission_history(
     Json(list_response(data)).into_response()
 }
 
-pub(super) async fn check_permission(
-    State(state): State<ApiState>,
-    OriginalUri(uri): OriginalUri,
-    headers: HeaderMap,
-    body: Bytes,
-) -> Response {
-    if let Err(response) = authorize(&state, Method::POST, &uri, &headers, body.clone()).await {
-        return response;
-    }
+pub(super) async fn check_permission(State(state): State<ApiState>, body: Bytes) -> Response {
     let Ok(input) = parse_json_body(&body) else {
         return invalid_json_response();
     };

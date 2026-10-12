@@ -98,6 +98,14 @@ Behavior today:
 - supports the same API-key, HMAC, and TLS listener settings as the other HTTP
   adapters
 
+The native Agents API serves one shared local workspace. Every accepted
+credential authorizes that whole workspace, including the canonical session-store
+routes. A key's subject namespaces retry bindings; it does not make tasks or
+sessions private to their creator. Tenant-bound credentials and credentials with
+scoped grants return `403 unsupported_authorization_policy`. Use a hosted or site
+authorization owner when you need tenant, scope, or resource restrictions. Health,
+version, OpenAPI, and the API root remain public discovery routes.
+
 New sessions use ACP `ask` mode unless the server was started with
 `--default-session-mode` or the create request supplies `mode_id`. The accepted
 values are `ask`, `architect`, `code`, and `shadow`; an invalid value is rejected

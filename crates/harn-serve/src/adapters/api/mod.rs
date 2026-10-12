@@ -7,12 +7,12 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use axum::body::Bytes;
-use axum::extract::{DefaultBodyLimit, OriginalUri, Path as AxumPath, Query, State};
-use axum::http::{HeaderMap, Method, StatusCode, Uri};
+use axum::extract::{DefaultBodyLimit, Path as AxumPath, Query, State};
+use axum::http::{HeaderMap, StatusCode};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
-use axum::{Json, Router};
+use axum::{Extension, Json, Router};
 use futures::{stream, Stream, StreamExt};
 use harn_vm::event_log::{AnyEventLog, EventLog, LogEvent, Topic};
 use serde::{Deserialize, Serialize};
@@ -25,15 +25,16 @@ use uuid::Uuid;
 use crate::adapters::acp::{
     run_acp_channel_server, AcpServerConfig, TaskAdmissionError, TaskPromptTarget,
 };
-use crate::auth::{AuthPolicy, AuthRequest, AuthenticatedPrincipal, AuthorizationDecision};
+use crate::auth::{AuthPolicy, AuthenticatedPrincipal};
 use crate::permissions::{
     ActionClass, AuditFilter, DecisionScope, InMemoryPermissionStore, PermissionDecision,
     PermissionPolicy, PermissionRequest, PermissionStore, RememberRule, RememberSpec, RuleId,
 };
 use crate::tls::HttpTlsConfig;
-use harn_vm::task_retry::{TaskRetryKey, TaskRetryPolicy};
+use harn_vm::task_retry::{TaskRetryError, TaskRetryKey, TaskRetryPolicy};
 
 mod artifacts;
+mod authentication;
 mod canonical_sessions;
 mod events;
 mod meta;
@@ -967,6 +968,10 @@ fn api_router(state: ApiState) -> Router {
             "/v1/sessions/{session_id}/tasks",
             task_create_route(post(sessions::submit_session_task)),
         )
+        .route_layer(axum::middleware::from_fn_with_state(
+            state.auth_policy.clone(),
+            authentication::shared_workspace_authority,
+        ))
         .route_layer(axum::middleware::from_fn(protocol_version_guard))
         .merge(public)
         .layer(DefaultBodyLimit::max(crate::DEFAULT_HTTP_BODY_LIMIT_BYTES))
@@ -1024,92 +1029,35 @@ async fn retry_policy_guard(
     next.run(request).await
 }
 
-async fn authorize(
-    state: &ApiState,
-    method: Method,
-    uri: &Uri,
-    headers: &HeaderMap,
-    body: Bytes,
-) -> Result<AuthenticatedPrincipal, Response> {
-    authorize_with_retry(
-        state,
-        method,
-        uri,
-        headers,
-        body,
-        TaskRetryPolicy::Unsupported,
-    )
-    .await
-    .map(|(principal, _)| principal)
+enum TaskRetryHeaderError {
+    MultipleKeys,
+    Key(TaskRetryError),
 }
 
-async fn authorize_with_retry(
-    state: &ApiState,
-    method: Method,
-    uri: &Uri,
-    headers: &HeaderMap,
-    body: Bytes,
-    retry_policy: TaskRetryPolicy,
-) -> Result<(AuthenticatedPrincipal, Option<TaskRetryKey>), Response> {
-    let request = AuthRequest::from_http(&method, uri.path(), body.to_vec(), headers);
-    match state.auth_policy.authorize(&request).await {
-        AuthorizationDecision::Authorized(principal) => {
-            let mut keys = headers.get_all("idempotency-key").iter();
-            let key = match keys.next() {
-                None => None,
-                Some(_) if retry_policy.supported_method() != Some(method.as_str()) => {
-                    return Err(api_error(
-                        StatusCode::BAD_REQUEST,
-                        "idempotency_not_supported",
-                        "this operation does not support an idempotency key",
-                    ))
-                }
-                Some(raw) => {
-                    if keys.next().is_some() {
-                        return Err(api_error(
-                            StatusCode::BAD_REQUEST,
-                            "invalid_idempotency_key",
-                            "provide one idempotency key",
-                        ));
-                    }
-                    let parsed = raw
-                        .to_str()
-                        .ok()
-                        .and_then(|raw| TaskRetryKey::parse(raw).ok());
-                    Some(parsed.ok_or_else(|| {
-                        api_error(
-                            StatusCode::BAD_REQUEST,
-                            "invalid_idempotency_key",
-                            "idempotency key must contain 1 to 255 printable ASCII bytes",
-                        )
-                    })?)
-                }
-            };
-            Ok((principal, key))
-        }
-        AuthorizationDecision::Rejected(message) => Err(api_error(
-            StatusCode::UNAUTHORIZED,
-            "unauthenticated",
-            &message,
-        )),
-        // Today this REST adapter calls `authorize` with no per-route
-        // scopes, so reaching `MissingScope` requires an explicit
-        // future caller. Wire it defensively so the surface returns the
-        // structured 403 rather than dropping into a non-exhaustive
-        // match panic.
-        AuthorizationDecision::MissingScope { required, granted } => {
-            Err(forbidden_api_error(&required, &granted))
-        }
-        // `authorize_mcp` is the only call site that produces this
-        // variant. The REST API edge never invokes it, so any leak here
-        // is a policy-wiring bug — surface a 403 with the policy's own
-        // reason string so the upstream operator gets actionable text.
-        AuthorizationDecision::McpNotAllowlisted { reason, .. } => Err(api_error(
-            StatusCode::FORBIDDEN,
-            "mcp_not_allowlisted",
-            &reason,
-        )),
+impl IntoResponse for TaskRetryHeaderError {
+    fn into_response(self) -> Response {
+        let message = match self {
+            Self::MultipleKeys => "provide one idempotency key".to_owned(),
+            Self::Key(error) => error.to_string(),
+        };
+        api_error(StatusCode::BAD_REQUEST, "invalid_idempotency_key", &message)
     }
+}
+
+fn task_retry_key(headers: &HeaderMap) -> Result<Option<TaskRetryKey>, TaskRetryHeaderError> {
+    let mut keys = headers.get_all("idempotency-key").iter();
+    let Some(raw) = keys.next() else {
+        return Ok(None);
+    };
+    if keys.next().is_some() {
+        return Err(TaskRetryHeaderError::MultipleKeys);
+    }
+    let raw = raw
+        .to_str()
+        .map_err(|_| TaskRetryHeaderError::Key(TaskRetryError::InvalidKey))?;
+    TaskRetryKey::parse(raw)
+        .map(Some)
+        .map_err(TaskRetryHeaderError::Key)
 }
 
 /// Render a scope mismatch as the REST API's standard `forbidden` error

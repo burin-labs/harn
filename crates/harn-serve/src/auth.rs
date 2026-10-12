@@ -384,8 +384,9 @@ impl AuthPolicy {
 
     /// Authenticate without checking any per-route scopes. Equivalent to
     /// `authorize_with_scopes(request, &BTreeSet::new())`. Retained as the
-    /// short-form for callers that don't have route metadata (e.g. the
-    /// REST API adapter's static handlers).
+    /// short-form for callers that don't have route scope metadata. The native
+    /// Agents API uses this at its router boundary and rejects tenant-bound or
+    /// scoped principals that its shared-workspace authority cannot enforce.
     pub async fn authorize(&self, request: &AuthRequest) -> AuthorizationDecision {
         self.authorize_with_scopes(request, &BTreeSet::new()).await
     }

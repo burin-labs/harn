@@ -21,29 +21,14 @@ enum ModelPolicyChange {
     Set(SessionModelPolicy),
 }
 
-pub(super) async fn list_sessions(
-    State(state): State<ApiState>,
-    OriginalUri(uri): OriginalUri,
-    headers: HeaderMap,
-) -> Response {
-    if let Err(response) = authorize(&state, Method::GET, &uri, &headers, Bytes::new()).await {
-        return response;
-    }
+pub(super) async fn list_sessions(State(state): State<ApiState>) -> Response {
     match state.session_resources() {
         Ok(sessions) => Json(list_response(sessions)).into_response(),
         Err(_) => task_store::unavailable_response(),
     }
 }
 
-pub(super) async fn create_session(
-    State(state): State<ApiState>,
-    OriginalUri(uri): OriginalUri,
-    headers: HeaderMap,
-    body: Bytes,
-) -> Response {
-    if let Err(response) = authorize(&state, Method::POST, &uri, &headers, body.clone()).await {
-        return response;
-    }
+pub(super) async fn create_session(State(state): State<ApiState>, body: Bytes) -> Response {
     let Ok(input) = parse_json_body(&body) else {
         return invalid_json_response();
     };
@@ -164,12 +149,7 @@ pub(super) async fn create_session(
 pub(super) async fn get_session(
     State(state): State<ApiState>,
     AxumPath(session_id): AxumPath<String>,
-    OriginalUri(uri): OriginalUri,
-    headers: HeaderMap,
 ) -> Response {
-    if let Err(response) = authorize(&state, Method::GET, &uri, &headers, Bytes::new()).await {
-        return response;
-    }
     match state.session_resource(&session_id) {
         Ok(session) => Json(session).into_response(),
         Err(harn_session_store::StoreError::NotFound(_)) => {
@@ -182,12 +162,7 @@ pub(super) async fn get_session(
 pub(super) async fn list_session_live_clients(
     State(state): State<ApiState>,
     AxumPath(session_id): AxumPath<String>,
-    OriginalUri(uri): OriginalUri,
-    headers: HeaderMap,
 ) -> Response {
-    if let Err(response) = authorize(&state, Method::GET, &uri, &headers, Bytes::new()).await {
-        return response;
-    }
     if !api_session_exists(&state, &session_id) {
         return api_error(StatusCode::NOT_FOUND, "not_found", "session not found");
     }
@@ -204,54 +179,41 @@ pub(super) async fn list_session_live_clients(
 pub(super) async fn attach_session_client(
     State(state): State<ApiState>,
     AxumPath(session_id): AxumPath<String>,
-    OriginalUri(uri): OriginalUri,
-    headers: HeaderMap,
     body: Bytes,
 ) -> Response {
-    live_client_mutation(state, session_id, uri, headers, body, "session/attach").await
+    live_client_mutation(state, session_id, body, "session/attach").await
 }
 
 pub(super) async fn takeover_session_client(
     State(state): State<ApiState>,
     AxumPath(session_id): AxumPath<String>,
-    OriginalUri(uri): OriginalUri,
-    headers: HeaderMap,
     body: Bytes,
 ) -> Response {
-    live_client_mutation(state, session_id, uri, headers, body, "session/takeover").await
+    live_client_mutation(state, session_id, body, "session/takeover").await
 }
 
 pub(super) async fn detach_session_client(
     State(state): State<ApiState>,
     AxumPath(session_id): AxumPath<String>,
-    OriginalUri(uri): OriginalUri,
-    headers: HeaderMap,
     body: Bytes,
 ) -> Response {
-    live_client_mutation(state, session_id, uri, headers, body, "session/detach").await
+    live_client_mutation(state, session_id, body, "session/detach").await
 }
 
 pub(super) async fn heartbeat_session_client(
     State(state): State<ApiState>,
     AxumPath(session_id): AxumPath<String>,
-    OriginalUri(uri): OriginalUri,
-    headers: HeaderMap,
     body: Bytes,
 ) -> Response {
-    live_client_mutation(state, session_id, uri, headers, body, "session/heartbeat").await
+    live_client_mutation(state, session_id, body, "session/heartbeat").await
 }
 
 async fn live_client_mutation(
     state: ApiState,
     session_id: String,
-    uri: Uri,
-    headers: HeaderMap,
     body: Bytes,
     method: &'static str,
 ) -> Response {
-    if let Err(response) = authorize(&state, Method::POST, &uri, &headers, body.clone()).await {
-        return response;
-    }
     if !api_session_exists(&state, &session_id) {
         return api_error(StatusCode::NOT_FOUND, "not_found", "session not found");
     }
@@ -305,12 +267,7 @@ fn project_live_client_state(state: &ApiState, session_id: &str, result: &Value)
 pub(super) async fn get_session_view(
     State(state): State<ApiState>,
     AxumPath(session_id): AxumPath<String>,
-    OriginalUri(uri): OriginalUri,
-    headers: HeaderMap,
 ) -> Response {
-    if let Err(response) = authorize(&state, Method::GET, &uri, &headers, Bytes::new()).await {
-        return response;
-    }
     let session = match state.session_resource(&session_id) {
         Ok(session) => session,
         Err(harn_session_store::StoreError::NotFound(_)) => {
@@ -331,13 +288,8 @@ pub(super) async fn get_session_view(
 pub(super) async fn update_session(
     State(state): State<ApiState>,
     AxumPath(session_id): AxumPath<String>,
-    OriginalUri(uri): OriginalUri,
-    headers: HeaderMap,
     body: Bytes,
 ) -> Response {
-    if let Err(response) = authorize(&state, Method::PATCH, &uri, &headers, body.clone()).await {
-        return response;
-    }
     let Ok(input) = parse_json_body(&body) else {
         return invalid_json_response();
     };
@@ -478,13 +430,7 @@ fn project_model_policy(session: &mut Value, change: &ModelPolicyChange) {
 pub(super) async fn close_session(
     State(state): State<ApiState>,
     AxumPath(session_id): AxumPath<String>,
-    OriginalUri(uri): OriginalUri,
-    headers: HeaderMap,
-    body: Bytes,
 ) -> Response {
-    if let Err(response) = authorize(&state, Method::POST, &uri, &headers, body).await {
-        return response;
-    }
     state.acp.send_raw(
         json!({"jsonrpc": "2.0", "method": "session/cancel", "params": {"sessionId": session_id}}),
     );
@@ -504,13 +450,8 @@ pub(super) async fn close_session(
 pub(super) async fn fork_session(
     State(state): State<ApiState>,
     AxumPath(session_id): AxumPath<String>,
-    OriginalUri(uri): OriginalUri,
-    headers: HeaderMap,
     body: Bytes,
 ) -> Response {
-    if let Err(response) = authorize(&state, Method::POST, &uri, &headers, body.clone()).await {
-        return response;
-    }
     let input = parse_json_body(&body).unwrap_or_else(|_| json!({}));
     let parent = {
         let inner = state.inner.lock().expect("api state poisoned");
@@ -616,13 +557,8 @@ fn session_message_snapshot(
 pub(super) async fn truncate_session(
     State(state): State<ApiState>,
     AxumPath(session_id): AxumPath<String>,
-    OriginalUri(uri): OriginalUri,
-    headers: HeaderMap,
     body: Bytes,
 ) -> Response {
-    if let Err(response) = authorize(&state, Method::POST, &uri, &headers, body.clone()).await {
-        return response;
-    }
     let Ok(input) = parse_json_body(&body) else {
         return invalid_json_response();
     };
@@ -768,12 +704,7 @@ pub(super) async fn list_session_messages(
     State(state): State<ApiState>,
     AxumPath(session_id): AxumPath<String>,
     Query(query): Query<ListQuery>,
-    OriginalUri(uri): OriginalUri,
-    headers: HeaderMap,
 ) -> Response {
-    if let Err(response) = authorize(&state, Method::GET, &uri, &headers, Bytes::new()).await {
-        return response;
-    }
     let messages = match session_message_snapshot(&state, &session_id) {
         Ok(snapshot) => snapshot.entries.into_iter().map(|entry| entry.1).collect(),
         Err(harn_session_store::StoreError::NotFound(_)) => {
@@ -787,13 +718,8 @@ pub(super) async fn list_session_messages(
 pub(super) async fn append_session_message(
     State(state): State<ApiState>,
     AxumPath(session_id): AxumPath<String>,
-    OriginalUri(uri): OriginalUri,
-    headers: HeaderMap,
     body: Bytes,
 ) -> Response {
-    if let Err(response) = authorize(&state, Method::POST, &uri, &headers, body.clone()).await {
-        return response;
-    }
     let Ok(input) = parse_json_body(&body) else {
         return invalid_json_response();
     };
@@ -841,12 +767,7 @@ pub(super) async fn list_session_tasks(
     State(state): State<ApiState>,
     AxumPath(session_id): AxumPath<String>,
     Query(query): Query<ListQuery>,
-    OriginalUri(uri): OriginalUri,
-    headers: HeaderMap,
 ) -> Response {
-    if let Err(response) = authorize(&state, Method::GET, &uri, &headers, Bytes::new()).await {
-        return response;
-    }
     if !api_session_exists(&state, &session_id) {
         return api_error(StatusCode::NOT_FOUND, "not_found", "session not found");
     }
@@ -869,11 +790,11 @@ pub(super) async fn list_session_tasks(
 pub(super) async fn submit_session_task(
     State(state): State<ApiState>,
     AxumPath(session_id): AxumPath<String>,
-    OriginalUri(uri): OriginalUri,
+    Extension(principal): Extension<AuthenticatedPrincipal>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
-    tasks::submit_task_inner(state, Some(session_id), uri, headers, body).await
+    tasks::submit_task_inner(state, Some(session_id), principal, headers, body).await
 }
 
 fn api_session_view(session: &Value, history: &[ApiEvent]) -> harn_vm::orchestration::SessionView {

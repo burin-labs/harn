@@ -70,14 +70,7 @@ pub(super) async fn api_root() -> Response {
     .into_response()
 }
 
-pub(super) async fn runtime(
-    State(state): State<ApiState>,
-    OriginalUri(uri): OriginalUri,
-    headers: HeaderMap,
-) -> Response {
-    if let Err(response) = authorize(&state, Method::GET, &uri, &headers, Bytes::new()).await {
-        return response;
-    }
+pub(super) async fn runtime(State(state): State<ApiState>) -> Response {
     let task_count = match state
         .task_store()
         .and_then(|store| store.list_tasks(None, None))
@@ -99,25 +92,11 @@ pub(super) async fn runtime(
     .into_response()
 }
 
-pub(super) async fn provider_catalog(
-    State(state): State<ApiState>,
-    OriginalUri(uri): OriginalUri,
-    headers: HeaderMap,
-) -> Response {
-    if let Err(response) = authorize(&state, Method::GET, &uri, &headers, Bytes::new()).await {
-        return response;
-    }
+pub(super) async fn provider_catalog(State(state): State<ApiState>) -> Response {
     Json(state.provider_catalog.artifact()).into_response()
 }
 
-pub(super) async fn capabilities(
-    State(state): State<ApiState>,
-    OriginalUri(uri): OriginalUri,
-    headers: HeaderMap,
-) -> Response {
-    if let Err(response) = authorize(&state, Method::GET, &uri, &headers, Bytes::new()).await {
-        return response;
-    }
+pub(super) async fn capabilities() -> Response {
     Json(json!({
         "object": "capability_summary",
         "capabilities": capability_values()
@@ -125,26 +104,11 @@ pub(super) async fn capabilities(
     .into_response()
 }
 
-pub(super) async fn list_tools(
-    State(state): State<ApiState>,
-    OriginalUri(uri): OriginalUri,
-    headers: HeaderMap,
-) -> Response {
-    if let Err(response) = authorize(&state, Method::GET, &uri, &headers, Bytes::new()).await {
-        return response;
-    }
+pub(super) async fn list_tools() -> Response {
     Json(list_response(tool_values())).into_response()
 }
 
-pub(super) async fn get_tool(
-    State(state): State<ApiState>,
-    AxumPath(tool_id): AxumPath<String>,
-    OriginalUri(uri): OriginalUri,
-    headers: HeaderMap,
-) -> Response {
-    if let Err(response) = authorize(&state, Method::GET, &uri, &headers, Bytes::new()).await {
-        return response;
-    }
+pub(super) async fn get_tool(AxumPath(tool_id): AxumPath<String>) -> Response {
     let Some(tool) = tool_values()
         .into_iter()
         .find(|tool| tool.get("id").and_then(Value::as_str) == Some(tool_id.as_str()))

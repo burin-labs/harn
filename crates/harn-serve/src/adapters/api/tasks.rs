@@ -11,32 +11,23 @@ use harn_vm::task_retry::{
 
 pub(super) async fn submit_task(
     State(state): State<ApiState>,
-    OriginalUri(uri): OriginalUri,
+    Extension(principal): Extension<AuthenticatedPrincipal>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
-    submit_task_inner(state, None, uri, headers, body).await
+    submit_task_inner(state, None, principal, headers, body).await
 }
 
 pub(super) async fn submit_task_inner(
     state: ApiState,
     path_session_id: Option<String>,
-    uri: Uri,
+    principal: AuthenticatedPrincipal,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
-    let (principal, key) = match authorize_with_retry(
-        &state,
-        Method::POST,
-        &uri,
-        &headers,
-        body.clone(),
-        TaskRetryPolicy::TaskCreate,
-    )
-    .await
-    {
-        Ok(admission) => admission,
-        Err(response) => return response,
+    let key = match task_retry_key(&headers) {
+        Ok(key) => key,
+        Err(error) => return error.into_response(),
     };
     let Ok(mut input) = parse_json_body(&body) else {
         return invalid_json_response();
@@ -264,12 +255,7 @@ pub(super) async fn submit_task_inner(
 pub(super) async fn list_tasks(
     State(state): State<ApiState>,
     Query(query): Query<ListQuery>,
-    OriginalUri(uri): OriginalUri,
-    headers: HeaderMap,
 ) -> Response {
-    if let Err(response) = authorize(&state, Method::GET, &uri, &headers, Bytes::new()).await {
-        return response;
-    }
     let tasks = state.ready_task_store().and_then(|store| {
         store.list_tasks(query.session_id.as_deref(), query.workspace_id.as_deref())
     });
@@ -286,12 +272,7 @@ pub(super) async fn list_tasks(
 pub(super) async fn get_task(
     State(state): State<ApiState>,
     AxumPath(task_id): AxumPath<String>,
-    OriginalUri(uri): OriginalUri,
-    headers: HeaderMap,
 ) -> Response {
-    if let Err(response) = authorize(&state, Method::GET, &uri, &headers, Bytes::new()).await {
-        return response;
-    }
     task_store::task_response(
         state
             .ready_task_store()
@@ -302,13 +283,8 @@ pub(super) async fn get_task(
 pub(super) async fn append_task_message(
     State(state): State<ApiState>,
     AxumPath(task_id): AxumPath<String>,
-    OriginalUri(uri): OriginalUri,
-    headers: HeaderMap,
     body: Bytes,
 ) -> Response {
-    if let Err(response) = authorize(&state, Method::POST, &uri, &headers, body.clone()).await {
-        return response;
-    }
     let Ok(input) = parse_json_body(&body) else {
         return invalid_json_response();
     };
@@ -361,13 +337,7 @@ pub(super) async fn append_task_message(
 pub(super) async fn cancel_task(
     State(state): State<ApiState>,
     AxumPath(task_id): AxumPath<String>,
-    OriginalUri(uri): OriginalUri,
-    headers: HeaderMap,
-    body: Bytes,
 ) -> Response {
-    if let Err(response) = authorize(&state, Method::POST, &uri, &headers, body).await {
-        return response;
-    }
     let task = match state
         .ready_task_store()
         .and_then(|store| store.get_task(&task_id))

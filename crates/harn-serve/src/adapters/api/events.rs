@@ -7,12 +7,7 @@ use super::*;
 pub(super) async fn list_events(
     State(state): State<ApiState>,
     Query(query): Query<ListQuery>,
-    OriginalUri(uri): OriginalUri,
-    headers: HeaderMap,
 ) -> Response {
-    if let Err(response) = authorize(&state, Method::GET, &uri, &headers, Bytes::new()).await {
-        return response;
-    }
     let filter = EventFilter::from_query(&query, None, None);
     history_response(&state, &filter)
 }
@@ -20,12 +15,7 @@ pub(super) async fn list_events(
 pub(super) async fn list_workflow_trigger_runs(
     State(state): State<ApiState>,
     Query(query): Query<ListQuery>,
-    OriginalUri(uri): OriginalUri,
-    headers: HeaderMap,
 ) -> Response {
-    if let Err(response) = authorize(&state, Method::GET, &uri, &headers, Bytes::new()).await {
-        return response;
-    }
     let Some(event_log) = state.event_log.clone() else {
         return api_error(
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -70,12 +60,7 @@ pub(super) async fn list_session_events(
     State(state): State<ApiState>,
     AxumPath(session_id): AxumPath<String>,
     Query(query): Query<ListQuery>,
-    OriginalUri(uri): OriginalUri,
-    headers: HeaderMap,
 ) -> Response {
-    if let Err(response) = authorize(&state, Method::GET, &uri, &headers, Bytes::new()).await {
-        return response;
-    }
     let filter = EventFilter::from_query(&query, Some(session_id), None);
     history_response(&state, &filter)
 }
@@ -84,12 +69,7 @@ pub(super) async fn list_task_events(
     State(state): State<ApiState>,
     AxumPath(task_id): AxumPath<String>,
     Query(query): Query<ListQuery>,
-    OriginalUri(uri): OriginalUri,
-    headers: HeaderMap,
 ) -> Response {
-    if let Err(response) = authorize(&state, Method::GET, &uri, &headers, Bytes::new()).await {
-        return response;
-    }
     let filter = EventFilter::from_query(&query, None, Some(task_id));
     history_response(&state, &filter)
 }
@@ -97,30 +77,18 @@ pub(super) async fn list_task_events(
 pub(super) async fn stream_events(
     State(state): State<ApiState>,
     Query(query): Query<ListQuery>,
-    OriginalUri(uri): OriginalUri,
-    headers: HeaderMap,
 ) -> Response {
-    stream_events_response(
-        state,
-        EventFilter::from_query(&query, None, None),
-        uri,
-        headers,
-    )
-    .await
+    stream_events_response(state, EventFilter::from_query(&query, None, None)).await
 }
 
 pub(super) async fn stream_session_events(
     State(state): State<ApiState>,
     AxumPath(session_id): AxumPath<String>,
     Query(query): Query<ListQuery>,
-    OriginalUri(uri): OriginalUri,
-    headers: HeaderMap,
 ) -> Response {
     stream_events_response(
         state,
         EventFilter::from_query(&query, Some(session_id), None),
-        uri,
-        headers,
     )
     .await
 }
@@ -129,27 +97,11 @@ pub(super) async fn stream_task_events(
     State(state): State<ApiState>,
     AxumPath(task_id): AxumPath<String>,
     Query(query): Query<ListQuery>,
-    OriginalUri(uri): OriginalUri,
-    headers: HeaderMap,
 ) -> Response {
-    stream_events_response(
-        state,
-        EventFilter::from_query(&query, None, Some(task_id)),
-        uri,
-        headers,
-    )
-    .await
+    stream_events_response(state, EventFilter::from_query(&query, None, Some(task_id))).await
 }
 
-async fn stream_events_response(
-    state: ApiState,
-    filter: EventFilter,
-    uri: Uri,
-    headers: HeaderMap,
-) -> Response {
-    if let Err(response) = authorize(&state, Method::GET, &uri, &headers, Bytes::new()).await {
-        return response;
-    }
+async fn stream_events_response(state: ApiState, filter: EventFilter) -> Response {
     // Subscribe before replay so a committed event cannot fall between them.
     let rx = state.events_tx.subscribe();
     let history = match state.history(&filter) {
