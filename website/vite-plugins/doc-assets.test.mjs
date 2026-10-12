@@ -47,7 +47,11 @@ describe("documentation asset publication", () => {
     publishDocAssets(dist, content.assets)
     expect(readFileSync(join(dist, "dev/perf/trials.json"), "utf8")).toBe(evidence)
     expect(JSON.parse(readFileSync(join(dist, "dev/perf/trials.json"), "utf8")).trials).toHaveLength(1)
-    expect(readFileSync(join(dist, "dev/assets/proof.png"))).toEqual(image)
+    const publishedImage = readFileSync(join(dist, "dev/assets/proof.png"))
+    expect(publishedImage.equals(image)).toBe(true)
+    const alteredImage = Buffer.from(image)
+    alteredImage[alteredImage.length - 1] ^= 1
+    expect(publishedImage.equals(alteredImage)).toBe(false)
     expect(readFileSync(join(dist, "dev/report.md"), "utf8")).toContain("perf/trials.json")
   })
 
@@ -141,7 +145,9 @@ describe("documentation asset publication", () => {
     expect(content.assets.length).toBeGreaterThan(0)
     publishDocAssets(dist, content.assets)
     for (const asset of content.assets) {
-      expect(readFileSync(join(dist, asset.sourceRel)), asset.sourceRel).toEqual(readFileSync(asset.sourcePath))
+      // Native byte comparison avoids recursively inspecting large Buffers.
+      const published = readFileSync(join(dist, asset.sourceRel))
+      expect(published.equals(readFileSync(asset.sourcePath)), asset.sourceRel).toBe(true)
     }
     const trials = JSON.parse(readFileSync(join(dist, "dev/perf/code-index-9712.json"), "utf8"))
     expect(Object.keys(trials).length).toBeGreaterThan(0)

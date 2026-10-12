@@ -37,6 +37,7 @@ npm run typecheck   # tsc -b --noEmit
 - **Content pipeline** (`vite-plugins/content.ts`): inventories pages and assets under `docs/src`, resolves mdBook
   `{{#include}}` directives, rewrites intra-doc links to `.html` URLs, parses `SUMMARY.md` into the
   nav tree + section tabs, and renders Markdown to HTML with `unified`/`remark`/`rehype`.
+  Development asset requests use that inventory and Vite's file-serving middleware.
 - **Harn highlighting**: a grammar ported from the old `harn-hljs.js`, fed by the Rust-generated
   `docs/theme/harn-keywords.js` (regenerate with `make gen-highlight`).
 - **Search**: a client-side index (`_content/search.json`) fetched on first ⌘K.

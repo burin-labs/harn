@@ -263,7 +263,7 @@ Caches successful tool results keyed by `key_fn(call) -> string`,
 backed by `std/cache` so the cache outlives the caller closure. Repeat
 queries within the TTL reuse cached results.
 
-### `with_rate_limit(harness.runtime, opts) -> caller`
+### `tool_middleware.with_rate_limit(harness.runtime, opts) -> caller`
 
 Caps the total number of tool calls processed by this caller. Once
 `max_calls` is hit, further calls short-circuit with `rate_limited`.
@@ -336,36 +336,34 @@ caps at a tool budget, and handoff payloads surface as typed records
 on the receipts ledger. One stack covers all of it.
 
 ```harn,ignore
-import {
-  compose_tool_callers,
-  with_audit_log,
-  with_consent,
-  with_dry_run,
-  with_handoff_artifact,
-  with_idempotency,
-  with_rate_limit,
-  with_redaction,
-  with_required_reason,
-  with_summary,
-  with_telemetry,
-} from "std/llm/tool_middleware"
+import * as tool_middleware from "std/llm/tool_middleware"
 
-const reason_mw = with_required_reason({schema_required: false})
+const reason_mw = tool_middleware.with_required_reason({
+  schema_required: false,
+})
 
-const captain_tool_caller = compose_tool_callers([
+const captain_tool_caller = tool_middleware.compose_tool_callers([
   // typed tool receipts
-  with_audit_log({sink: "both", redact: ["token", "content"]}),
+  tool_middleware.with_audit_log({
+    sink: "both", redact: ["token", "content"],
+  }),
   // tool-call spans
-  with_telemetry({sink: "langfuse", project: "harn-dev"}),
-  with_summary({ call, _r -> describe(call) }), // user-facing one-liner
-  with_consent(persona.autonomy_policy),       // act_with_approval gate
+  tool_middleware.with_telemetry({sink: "langfuse", project: "harn-dev"}),
+  // user-facing one-liner
+  tool_middleware.with_summary({ call, _r -> describe(call) }),
+  // act_with_approval gate
+  tool_middleware.with_consent(persona.autonomy_policy),
   reason_mw.caller,                            // require `reason` arg
-  with_redaction(unified_redaction_policy),    // strip secrets
-  with_handoff_artifact({sink: handoff_emitter}), // typed handoff records
-  with_idempotency(per_tool_idempotency_keyer),
-  with_rate_limit(harness.runtime, {max_calls: persona.tool_budget}),
+  // strip secrets
+  tool_middleware.with_redaction(unified_redaction_policy),
+  // typed handoff records
+  tool_middleware.with_handoff_artifact({sink: handoff_emitter}),
+  tool_middleware.with_idempotency(per_tool_idempotency_keyer),
+  tool_middleware.with_rate_limit(
+    harness.runtime, {max_calls: persona.tool_budget},
+  ),
   // crystallization shadow runs
-  with_dry_run({only: persona.shadow_tools}),
+  tool_middleware.with_dry_run({only: persona.shadow_tools}),
 ])
 
 const registry = tools_use_middleware(
