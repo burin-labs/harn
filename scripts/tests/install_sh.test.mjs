@@ -68,13 +68,15 @@ esac
       for (const name of legalFiles) writeFileSync(join(destination, 'harn-licenses', name), `previous ${name}\n`);
     }
     const externalSentinel = join(root, 'external-sentinel');
+    const externalTarget = invalidDestination?.directoryTarget ? join(root, 'external-directory') : externalSentinel;
     if (invalidDestination) {
       writeFileSync(externalSentinel, 'external bytes must survive\n');
+      if (invalidDestination.directoryTarget) mkdirSync(externalTarget);
       const path = invalidDestination.payload
         ? join(destination, invalidDestination.name)
         : join(destination, 'harn-licenses', invalidDestination.name);
       rmSync(path);
-      if (invalidDestination.kind === 'symlink') symlinkSync(externalSentinel, path);
+      if (invalidDestination.kind === 'symlink') symlinkSync(externalTarget, path);
       else {
         mkdirSync(path);
         writeFileSync(join(path, 'retained-child'), 'previous directory child\n');
@@ -82,7 +84,7 @@ esac
     }
     const requests = join(root, 'requests');
     const assertInvalidDestination = path => {
-      if (invalidDestination.kind === 'symlink') assert.equal(readlinkSync(path), externalSentinel);
+      if (invalidDestination.kind === 'symlink') assert.equal(readlinkSync(path), externalTarget);
       else assert.equal(readFileSync(join(path, 'retained-child'), 'utf8'), 'previous directory child\n');
     };
     const result = spawnSync('/bin/sh', [installer], {
@@ -100,7 +102,7 @@ esac
     assert.deepEqual(readdirSync(paths.tmp), [], 'download/extraction directory must be removed');
     if (invalid || badChecksum || invalidDestination) {
       assert.notEqual(result.status, 0, 'invalid payload or destination must refuse');
-      if (invalidDestination) assert.match(result.stderr, /must (not be a symbolic link|be a regular file)/);
+      if (invalidDestination) assert.match(result.stderr, /must (not be a symbolic link|be a regular file|point to)/);
       else assert.match(result.stderr, invalid ? new RegExp(`missing or invalid ${invalid.name.replaceAll('.', '\\.')}`) : /checksum mismatch/);
       if (existing) {
         if (invalidDestination?.payload && invalidDestination.name === 'harn') assertInvalidDestination(join(destination, 'harn'));
@@ -115,6 +117,7 @@ esac
           else assert.equal(readFileSync(path, 'utf8'), `previous ${name}\n`);
         }
         if (invalidDestination) assert.equal(readFileSync(externalSentinel, 'utf8'), 'external bytes must survive\n');
+        if (invalidDestination?.directoryTarget) assert.deepEqual(readdirSync(externalTarget), [], 'alias installation must not write into an external directory');
       } else assert.equal(existsSync(destination), false, 'refusal must not create an installation');
     } else {
       assert.equal(result.status, 0, result.stderr);
@@ -143,6 +146,11 @@ for (const name of ['harn', 'harn-dap', 'harn-lsp']) {
   test(`real installer preflights existing payload directory ${name}`, () => fixture(targets[0], undefined, true, false, { name, kind: 'directory', payload: true }));
 }
 test('real installer preflights existing payload symlink harn', () => fixture(targets[0], undefined, true, false, { name: 'harn', kind: 'symlink', payload: true }));
+for (const name of ['harn-dap', 'harn-lsp']) {
+  for (const directoryTarget of [false, true]) {
+    test(`real installer refuses external alias symlink ${name}, directory=${directoryTarget}`, () => fixture(targets[0], undefined, true, false, { name, kind: 'symlink', payload: true, directoryTarget }));
+  }
+}
 for (const kind of ['missing', 'empty', 'directory', 'symlink']) {
   test(`real installer refuses ${kind} executable before changing legal files`, () => fixture(targets[0], { name: 'harn', kind }, true));
 }

@@ -231,7 +231,12 @@ for alias in harn-dap harn-lsp; do
   [ -e "$WORKDIR/$alias" ] || continue
   destination="$INSTALL_DIR/$alias"
   # Existing multi-call links and legacy executable copies can both upgrade.
-  [ -L "$destination" ] || check_regular_destination "$destination"
+  if [ -L "$destination" ]; then
+    [ "$destination" -ef "$INSTALL_DIR/harn" ] \
+      || die "$destination must point to $INSTALL_DIR/harn"
+  else
+    check_regular_destination "$destination"
+  fi
 done
 LICENSE_DIR="$INSTALL_DIR/harn-licenses"
 [ ! -L "$LICENSE_DIR" ] || die "$LICENSE_DIR must not be a symbolic link"
