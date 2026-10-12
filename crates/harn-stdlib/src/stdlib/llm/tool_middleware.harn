@@ -2,7 +2,7 @@
 // Two seams (mirrors the LLM-caller pattern in std/llm/handlers):
 //
 //   1. Schema-time:    tools_use_middleware(registry, transform) -> registry'
-//   2. Execution-time: agent_loop(harness, {tool_caller: compose_tool_callers(harness, [..])})
+//   2. Execution-time: agent_loop(harness, {tool_caller: compose_tool_callers(harness.clock, [..])})
 //
 // Middleware envelope (passed to every tool_caller):
 //
@@ -53,7 +53,7 @@
 //   "policy_blocked", "scope_violation", "executor_error", "redacted",
 //   "dry_run", "rate_limited", "exception", "tool_middleware_exception".
 //
-// Composition uses `compose_tool_callers(harness, [outer, ..., inner])` — leftmost is
+// Composition uses `compose_tool_callers(clock, [outer, ..., inner])` — leftmost is
 // the outermost wrapper. Exactly mirrors std/llm/handlers `compose`.
 import { cache_get, cache_put } from "std/cache"
 // @harn-entrypoint-category llm.stdlib
@@ -385,7 +385,7 @@ pub fn tool_inject_param(entry: dict, name: string, schema_fragment: dict, opts:
  * default_tool_caller() -> caller
  *
  * Returns a closure that just delegates to the runtime default dispatch.
- * Useful as the bottom of a `compose_tool_callers(harness, [..])` stack when you
+ * Useful as the bottom of a `compose_tool_callers(clock, [..])` stack when you
  * want to be explicit (the agent_loop runtime treats `tool_caller: nil`
  * as "no middleware" and short-circuits to the same path automatically).
  *
@@ -397,10 +397,10 @@ pub fn default_tool_caller() {
 }
 
 /**
- * compose_tool_callers(harness, [outer, ..., inner]) -> caller
+ * compose_tool_callers(clock, [outer, ..., inner]) -> caller
  *
  * Wrappers apply right-to-left: leftmost is the outermost wrapper, so
- * `compose_tool_callers(harness, [a, b, c])` invokes `a` first; `a` may call
+ * `compose_tool_callers(clock, [a, b, c])` invokes `a` first; `a` may call
  * `next` to reach `b`, and so on. If the list is empty, returns a
  * passthrough caller.
  *
@@ -854,7 +854,7 @@ pub fn with_consent(clock: HarnessClock, prompt_fn: any) {
 }
 
 /**
- * with_scoped_executor(opts) -> caller
+ * with_scoped_executor(runtime, opts) -> caller
  *
  * Narrows the active CapabilityPolicy for the duration of one tool
  * dispatch. Wraps the downstream caller in `harness.runtime.with_execution_policy(...)`
@@ -868,9 +868,9 @@ pub fn with_consent(clock: HarnessClock, prompt_fn: any) {
  * Compose this OUTSIDE binder/consent layers so it can reject before
  * either does expensive work:
  *
- *     compose_tool_callers(harness, [
+ *     compose_tool_callers(harness.clock, [
  *       with_audit_log(harness.clock, harness.fs, {...}),
- *       with_scoped_executor({stage: "research", allowed_tools: [...]}),
+ *       with_scoped_executor(harness.runtime, {stage: "research", allowed_tools: [...]}),
  *       with_consent(harness.clock, ...),
  *       default_tool_caller(),
  *     ])
@@ -1060,7 +1060,7 @@ pub fn with_redaction(redactor: any) {
 }
 
 /**
- * with_idempotency(key_fn, opts?) -> caller
+ * with_idempotency(llm, key_fn, opts?) -> caller
  *
  * Caches successful tool results keyed by `key_fn(call) -> string`.
  * Identical keys reuse the cached result within the configured TTL.
@@ -1166,7 +1166,7 @@ pub fn with_rate_limit(runtime: HarnessRuntime, opts: dict) {
 }
 
 /**
- * with_telemetry(sink_or_opts) -> caller
+ * with_telemetry(harness, sink_or_opts) -> caller
  *
  * Builds a standardized tool-call span for every dispatch and fans it
  * out to one or more sinks. The span shape is documented in
@@ -1192,10 +1192,10 @@ pub fn with_rate_limit(runtime: HarnessRuntime, opts: dict) {
  *
  * Examples:
  *
- *     with_telemetry(my_callable)
- *     with_telemetry("langfuse")
- *     with_telemetry({sink: "langfuse", project: "harn-dev"})
- *     with_telemetry({sinks: ["langfuse", "stderr"], persona: "merge_captain"})
+ *     with_telemetry(harness, my_callable)
+ *     with_telemetry(harness, "langfuse")
+ *     with_telemetry(harness, {sink: "langfuse", project: "harn-dev"})
+ *     with_telemetry(harness, {sinks: ["langfuse", "stderr"], persona: "merge_captain"})
  *
  * @effects: []
  * @errors: []
@@ -1432,7 +1432,7 @@ fn __tool_mw_handoff_dict_candidate(raw_result: unknown) {
 }
 
 /**
- * with_timeout(opts) -> caller
+ * with_timeout(clock, opts) -> caller
  *
  * Caps wall-clock time per tool call. The result of `next(call)` is
  * tagged "ok" when `elapsed < max_ms` and "timeout" otherwise — the
