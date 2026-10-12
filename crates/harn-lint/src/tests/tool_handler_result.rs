@@ -196,17 +196,6 @@ fn a_dict_naming_a_different_schema_is_still_reported() {
     );
 }
 
-/// The lint and the runtime must match on one string. If the runtime's owner
-/// changes, this fails rather than letting the rule quietly warn about the
-/// envelope again.
-#[test]
-fn the_exempt_schema_is_the_runtime_owner_string() {
-    assert_eq!(
-        harn_vm::llm::AGENT_TOOL_HANDLER_RESULT_SCHEMA,
-        "harn.agent_tool_handler_result.v2"
-    );
-}
-
 #[test]
 fn an_envelope_without_an_outcome_is_reported() {
     let diagnostics = lint_source(

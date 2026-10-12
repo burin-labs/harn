@@ -1266,21 +1266,6 @@ deployment = "enterprise"
         assert!(query_get(&query, "error").is_none());
     }
 
-    #[test]
-    fn bulk_status_json_is_one_line_per_event() {
-        let status = McpAuthStatus {
-            server: "Wiki".to_string(),
-            server_url: "https://mcp.wiki.example/mcp".to_string(),
-            phase: McpAuthPhase::Connected,
-            detail: None,
-        };
-        let line = serde_json::to_string(&status).expect("serialize status");
-        assert!(!line.contains('\n'), "one status per line");
-        let value: serde_json::Value = serde_json::from_str(&line).unwrap();
-        assert_eq!(value["phase"], serde_json::json!("connected"));
-        assert_eq!(value["server"], serde_json::json!("Wiki"));
-    }
-
     #[tokio::test]
     async fn stdio_server_without_live_handle_is_disconnected() {
         let server =

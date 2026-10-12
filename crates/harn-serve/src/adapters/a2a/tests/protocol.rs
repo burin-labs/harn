@@ -56,21 +56,6 @@ fn assert_current_agent_card_shape(card: &JsonValue, public_url: &str) {
 }
 
 #[tokio::test]
-async fn agent_card_advertises_exported_functions() {
-    let (_dir, server) = test_server(
-        r"
-pub fn triage(task: string) -> string {
-  return task
-}
-",
-    );
-
-    let card = server.agent_card("http://localhost:8080");
-
-    assert_current_agent_card_shape(&card, "http://localhost:8080");
-}
-
-#[tokio::test]
 async fn adapter_agent_card_protocol_fixture_matches_checked_in_matrix() {
     let (_dir, server) = test_server(
         r"

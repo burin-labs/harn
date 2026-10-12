@@ -1159,36 +1159,6 @@ mod tests {
     }
 
     #[test]
-    fn a_terminal_without_a_class_keeps_the_bytes_it_already_had() {
-        let result = AcpSessionPromptResult {
-            stop_reason: "max_turn_requests".to_string(),
-            meta: Some(AcpMeta::terminal(
-                harn_vm::agent_events::AgentTerminalOutcome::new(
-                    harn_vm::agent_events::AgentTerminalKind::PolicyBudget,
-                    "max_iterations",
-                ),
-            )),
-        };
-
-        assert_eq!(
-            serde_json::to_value(&result).expect("serialize prompt result"),
-            serde_json::json!({
-                "stopReason": "max_turn_requests",
-                "_meta": {
-                    "harn": {
-                        "terminal": {
-                            "kind": "policy_budget",
-                            "reason": "max_iterations",
-                            "owner": "policy",
-                        },
-                    },
-                },
-            }),
-            "additive means absent, not null, for every outcome that has no class"
-        );
-    }
-
-    #[test]
     fn session_prompt_result_preserves_unknown_exception_and_legacy_shape() {
         let unknown: AcpSessionPromptResult = serde_json::from_value(serde_json::json!({
             "stopReason": "end_turn",

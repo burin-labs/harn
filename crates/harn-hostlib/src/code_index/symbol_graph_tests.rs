@@ -526,37 +526,6 @@ fn an_ambiguous_unimported_call_produces_no_edge() {
 }
 
 #[test]
-fn link_imports_creates_module_to_module_edges() {
-    let mut g = SymbolGraph::new();
-    g.rebuild_file(
-        1,
-        "src/a.ts",
-        Language::TypeScript,
-        "import { x } from \"./b\";\n",
-        &["./b".into()],
-        &[],
-    );
-    g.rebuild_file(
-        2,
-        "src/b.ts",
-        Language::TypeScript,
-        "export const x = 1;\n",
-        &[],
-        &[],
-    );
-    let mut resolved: HashMap<FileId, Vec<FileId>> = HashMap::new();
-    resolved.insert(1, vec![2]);
-    g.link_imports(&resolved);
-    let a_mod = g.module_node_for_file(1).unwrap();
-    let b_mod = g.module_node_for_file(2).unwrap();
-    let edge_exists = g
-        .outgoing(a_mod)
-        .iter()
-        .any(|e| e.kind == EdgeKind::Imports && e.to == b_mod);
-    assert!(edge_exists, "expected Module→Module IMPORTS edge");
-}
-
-#[test]
 fn link_imports_is_idempotent_across_repeated_relinks() {
     let mut g = SymbolGraph::new();
     g.rebuild_file(

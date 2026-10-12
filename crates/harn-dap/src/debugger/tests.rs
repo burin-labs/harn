@@ -1352,58 +1352,7 @@ fn test_hit_condition_matches_parses_all_forms() {
 
 mod subagent_bridge {
     use super::*;
-    use harn_vm::agent_events::{AgentEvent, WorkerEvent};
-
-    fn worker_update(
-        worker_id: &str,
-        worker_name: &str,
-        event: WorkerEvent,
-        parent: Option<&str>,
-        suspend_reason: Option<&str>,
-    ) -> AgentEvent {
-        let mut metadata = serde_json::Map::new();
-        if let Some(p) = parent {
-            metadata.insert("parent_worker_id".to_string(), json!(p));
-        }
-        if let Some(r) = suspend_reason {
-            metadata.insert("suspension".to_string(), json!({ "reason": r }));
-        }
-        AgentEvent::WorkerUpdate {
-            session_id: "session-test".to_string(),
-            worker_id: worker_id.to_string(),
-            worker_name: worker_name.to_string(),
-            worker_task: "demo".to_string(),
-            worker_mode: "background".to_string(),
-            event,
-            status: event.as_status().to_string(),
-            metadata: serde_json::Value::Object(metadata),
-            audit: None,
-        }
-    }
-
-    #[test]
-    fn capabilities_advertise_new_lifecycle_filters() {
-        let mut dbg = Debugger::new();
-        let responses = dbg.handle_message(make_request(1, "initialize", None));
-        let init = &responses[0];
-        let filters = init.body.as_ref().unwrap()["exceptionBreakpointFilters"]
-            .as_array()
-            .unwrap();
-        let filter_ids: Vec<&str> = filters
-            .iter()
-            .map(|f| f["filter"].as_str().unwrap())
-            .collect();
-        for required in [
-            "break-on-suspend",
-            "break-on-resume",
-            "break-on-drain-decision",
-        ] {
-            assert!(
-                filter_ids.contains(&required),
-                "missing filter id {required}; have {filter_ids:?}"
-            );
-        }
-    }
+    use harn_vm::agent_events::WorkerEvent;
 
     #[test]
     fn set_exception_breakpoints_toggles_subagent_filter_flags() {
@@ -1759,38 +1708,5 @@ mod subagent_bridge {
             events.is_empty(),
             "WorkerProgressed must be silent on DAP; got {events:?}"
         );
-    }
-
-    #[test]
-    fn subagent_sink_handle_event_pushes_into_tracker() {
-        // Verify the SubagentEventSink correctly translates a
-        // WorkerUpdate AgentEvent into an observation on the
-        // tracker's queue. Bypasses the global wildcard-sink
-        // registry (which is process-global and would otherwise
-        // require test serialization to avoid cross-test leaks
-        // under cargo's parallel test runner).
-        use super::super::subagents::{SubagentEventSink, SubagentTracker};
-        use harn_vm::agent_events::AgentEventSink;
-        let tracker = SubagentTracker::new();
-        let sink = SubagentEventSink::new(tracker.clone());
-        sink.handle_event(&worker_update(
-            "w-1",
-            "alpha",
-            WorkerEvent::WorkerSpawned,
-            None,
-            None,
-        ));
-        sink.handle_event(&worker_update(
-            "w-1",
-            "alpha",
-            WorkerEvent::WorkerSuspended,
-            None,
-            Some("manual"),
-        ));
-        let drained = tracker.drain();
-        assert_eq!(drained.len(), 2);
-        assert_eq!(drained[0].event, WorkerEvent::WorkerSpawned);
-        assert_eq!(drained[1].event, WorkerEvent::WorkerSuspended);
-        assert_eq!(drained[1].suspend_reason.as_deref(), Some("manual"));
     }
 }

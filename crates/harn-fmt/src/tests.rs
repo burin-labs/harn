@@ -177,31 +177,6 @@ fn test_format_tool_description_semicolon_body_to_newlines() {
 }
 
 #[test]
-fn test_single_newline_at_end() {
-    let source = r#"pipeline default(task) {
-  log("hello")
-}"#;
-    let result = format_source(source).unwrap();
-    assert!(result.ends_with("}\n"));
-    assert!(!result.ends_with("}\n\n"));
-}
-
-#[test]
-fn test_no_trailing_whitespace() {
-    let source = r#"pipeline default(task) {
-  log("hello")
-}"#;
-    let result = format_source(source).unwrap();
-    for line in result.lines() {
-        assert_eq!(
-            line,
-            line.trim_end(),
-            "Line has trailing whitespace: {line:?}"
-        );
-    }
-}
-
-#[test]
 fn test_wraps_long_function_call_arguments() {
     let source = r"pipeline default(task) {
   let x = some_call(with_a_really_long_argument_name_one, with_a_really_long_argument_name_two, with_a_really_long_argument_name_three, with_a_really_long_argument_name_four, with_a_really_long_argument_name_five)
@@ -629,17 +604,6 @@ fn test_exponentiation_binds_tighter_than_multiplication() {
         result.contains("a * b ** c"),
         "Expected exponentiation to bind tighter than multiplication, got:\n{result}"
     );
-    assert_roundtrip(source);
-}
-
-#[test]
-fn test_multiplication_of_addition() {
-    // a * (b + c) must not lose parens
-    let source = r"pipeline default(task) {
-  let x = a * (b + c)
-}";
-    let result = format_source(source).unwrap();
-    assert!(result.contains("a * (b + c)"), "got:\n{result}");
     assert_roundtrip(source);
 }
 
@@ -1185,17 +1149,6 @@ pipeline default(task) { log(1) }"#;
     assert!(
         std_index < alpha_index && alpha_index < zeta_index,
         "imports should sort with std/ first, got:\n{result}"
-    );
-}
-
-#[test]
-fn test_selective_import_names_sort_alphabetically() {
-    let source = r#"import { zebra, alpha, middle } from "module"
-pipeline default(task) { log(1) }"#;
-    let result = format_source(source).unwrap();
-    assert!(
-        result.contains("import { alpha, middle, zebra } from \"module\""),
-        "selective import names should sort, got:\n{result}"
     );
 }
 

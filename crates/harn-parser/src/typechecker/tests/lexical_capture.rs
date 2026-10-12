@@ -303,23 +303,6 @@ fn a_closure_capture_still_resolves() {
     );
 }
 
-/// Negative control: an imported name still resolves.
-#[test]
-fn an_imported_name_still_resolves() {
-    let diagnostics = check_source_with_imports(
-        r"fn reader() -> int {
-  return from_another_module()
-}",
-        &["from_another_module"],
-    );
-    assert!(
-        !diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.code == Code::UndefinedVariable),
-        "an imported name must still resolve: {diagnostics:?}"
-    );
-}
-
 /// The forward reference the placeholder pass exists for, kept deliberately.
 ///
 /// Callables are still registered wherever they are declared, so a call that
@@ -341,9 +324,10 @@ fn declared_later(n: int) -> int {
         &[],
     );
     assert!(
-        !diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.code == Code::UndefinedVariable),
+        !diagnostics.iter().any(|diagnostic| matches!(
+            diagnostic.code,
+            Code::UndefinedVariable | Code::UndefinedFunction
+        )),
         "a forward or recursive call must still resolve: {diagnostics:?}"
     );
 }

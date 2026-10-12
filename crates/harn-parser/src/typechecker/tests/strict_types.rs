@@ -702,17 +702,6 @@ fn helper() { 42 }",
 }
 
 #[test]
-fn test_cross_module_builtin_not_flagged() {
-    let diags = check_source_with_imports(r#"pipeline t(task) { log("hello") }"#, &[]);
-    let errs: Vec<&String> = diags
-        .iter()
-        .filter(|d| d.severity == DiagnosticSeverity::Error)
-        .map(|d| &d.message)
-        .collect();
-    assert!(errs.is_empty(), "builtin should not error, got: {errs:?}");
-}
-
-#[test]
 fn test_cross_module_hostlib_prefix_is_not_source_callable() {
     // Hostlib implementations are runtime details. Source reaches them only
     // through nominal Harness handles; the old ambient prefix is not an

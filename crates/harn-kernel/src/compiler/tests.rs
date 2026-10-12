@@ -845,7 +845,7 @@ fn attributed_top_level_fn_does_not_emit_spurious_pop() {
     let pop_count = |chunk: &Chunk| {
         disasm_opcodes(&chunk.disassemble("module"))
             .into_iter()
-            .filter(|op| *op == "Pop")
+            .filter(|op| *op == "POP")
             .count()
     };
 

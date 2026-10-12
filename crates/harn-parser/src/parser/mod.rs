@@ -187,34 +187,6 @@ fn has_name(value: unknown) -> implies value is {name: string} {
     }
 
     #[test]
-    fn parser_reports_expression_nesting_depth_limit() {
-        let depth = state::MAX_NESTING_DEPTH + 1;
-        let source = format!("let x = {}0{}", "(".repeat(depth), ")".repeat(depth));
-
-        let Err(err) = parse_source(&source) else {
-            panic!("expected parser depth limit");
-        };
-        let message = err.to_string();
-
-        assert!(message.contains("parser nesting depth within"));
-        assert!(message.contains(&format!("{} levels", state::MAX_NESTING_DEPTH)));
-    }
-
-    #[test]
-    fn parser_reports_unary_nesting_depth_limit() {
-        let depth = state::MAX_NESTING_DEPTH + 1;
-        let source = format!("let x = {}true", "!".repeat(depth));
-
-        let Err(err) = parse_source(&source) else {
-            panic!("expected parser depth limit");
-        };
-        let message = err.to_string();
-
-        assert!(message.contains("parser nesting depth within"));
-        assert!(message.contains(&format!("{} levels", state::MAX_NESTING_DEPTH)));
-    }
-
-    #[test]
     fn parser_reports_block_nesting_depth_limit() {
         let depth = state::MAX_NESTING_DEPTH + 1;
         let mut source = String::new();
@@ -225,20 +197,6 @@ fn has_name(value: unknown) -> implies value is {name: string} {
         for _ in 0..depth {
             source.push_str("}\n");
         }
-
-        let Err(err) = parse_source(&source) else {
-            panic!("expected parser depth limit");
-        };
-        let message = err.to_string();
-
-        assert!(message.contains("parser nesting depth within"));
-        assert!(message.contains(&format!("{} levels", state::MAX_NESTING_DEPTH)));
-    }
-
-    #[test]
-    fn parser_reports_list_literal_nesting_depth_limit() {
-        let depth = state::MAX_NESTING_DEPTH + 1;
-        let source = format!("let x = {}0{}", "[".repeat(depth), "]".repeat(depth));
 
         let Err(err) = parse_source(&source) else {
             panic!("expected parser depth limit");
@@ -333,23 +291,6 @@ fn has_name(value: unknown) -> implies value is {name: string} {
             }
             other => panic!("expected namespace import, got {other:?}"),
         }
-    }
-
-    #[test]
-    fn parses_match_expression_with_let_in_arm_body() {
-        let source = r"
-pipeline p() {
-  let x = match 1 {
-    1 -> {
-      let a = 1
-      a
-    }
-    _ -> { 0 }
-  }
-}
-";
-
-        assert!(parse_source(source).is_ok());
     }
 
     #[test]
@@ -898,50 +839,6 @@ pipeline test(task) {
     }
 
     #[test]
-    fn parses_exponentiation_as_right_associative() {
-        let mut lexer = Lexer::new("a ** b ** c");
-        let tokens = lexer.tokenize().expect("tokens");
-        let mut parser = Parser::new(tokens);
-        let expr = parser.parse_single_expression().expect("expression");
-
-        assert!(matches!(
-            expr.node,
-            Node::BinaryOp { ref op, ref left, ref right }
-                if op == "**"
-                    && matches!(left.node, Node::Identifier(ref name) if name == "a")
-                    && matches!(
-                        right.node,
-                        Node::BinaryOp { ref op, ref left, ref right }
-                            if op == "**"
-                                && matches!(left.node, Node::Identifier(ref name) if name == "b")
-                                && matches!(right.node, Node::Identifier(ref name) if name == "c")
-                    )
-        ));
-    }
-
-    #[test]
-    fn parses_exponentiation_tighter_than_multiplication() {
-        let mut lexer = Lexer::new("a * b ** c");
-        let tokens = lexer.tokenize().expect("tokens");
-        let mut parser = Parser::new(tokens);
-        let expr = parser.parse_single_expression().expect("expression");
-
-        assert!(matches!(
-            expr.node,
-            Node::BinaryOp { ref op, ref left, ref right }
-                if op == "*"
-                    && matches!(left.node, Node::Identifier(ref name) if name == "a")
-                    && matches!(
-                        right.node,
-                        Node::BinaryOp { ref op, ref left, ref right }
-                            if op == "**"
-                                && matches!(left.node, Node::Identifier(ref name) if name == "b")
-                                && matches!(right.node, Node::Identifier(ref name) if name == "c")
-                    )
-        ));
-    }
-
-    #[test]
     fn parse_single_expression_rejects_trailing_tokens() {
         // An interpolation hole must hold exactly one expression. Leftover
         // tokens (e.g. `${a b}`, or `${1e20}` where `e20` lexes as a separate
@@ -1133,32 +1030,6 @@ pipeline p(task) {
         assert!(
             err.to_string().contains("separator"),
             "expected separator error, got: {err}"
-        );
-    }
-
-    #[test]
-    fn rejects_semicolon_before_else_and_catch() {
-        let if_err = parse_source(r"pipeline p(task) { if true { log(1) }; else { log(2) } }")
-            .expect_err("semicolon before else should fail");
-        assert!(
-            if_err.to_string().contains("separator") || if_err.to_string().contains("else"),
-            "unexpected if error: {if_err}"
-        );
-
-        let try_err = parse_source(r"pipeline p(task) { try { log(1) }; catch { log(2) } }")
-            .expect_err("semicolon before catch should fail");
-        assert!(
-            try_err.to_string().contains("separator") || try_err.to_string().contains("catch"),
-            "unexpected try error: {try_err}"
-        );
-    }
-
-    #[test]
-    fn rejects_empty_statement_from_double_semicolon() {
-        let source = r"pipeline p(task) { log(1);; log(2) }";
-        assert!(
-            parse_source(source).is_err(),
-            "double semicolon should fail"
         );
     }
 

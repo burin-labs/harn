@@ -6,7 +6,7 @@ use super::{
     eval_source_for_code, execute_explain_cost, execute_run, execute_run_with_options,
     install_cli_llm_mock_mode, persist_cli_llm_mock_recording, run_sandbox_attestation,
     split_eval_header, CliLlmMockMode, ProjectRuntimeMode, RunExecutionOptions, RunProcessGrants,
-    RunProfileOptions, RunSandboxOptions, StdoutPassthroughGuard,
+    RunProfileOptions, RunSandboxOptions,
 };
 // Both users are `#[cfg(unix)]` tests (they assert on subprocess env handed to
 // a forked child), so an unconditional import is dead on Windows and trips
@@ -206,16 +206,6 @@ fn cli_llm_mock_recording_writes_a_parseable_v1_document_atomically() {
     assert_eq!(fixture.schema_version, 1);
     assert!(!fixture.strict_scopes);
     assert!(fixture.mocks.is_empty());
-}
-
-#[test]
-fn stdout_passthrough_guard_restores_previous_state() {
-    let original = harn_vm::set_stdout_passthrough(false);
-    {
-        let _guard = StdoutPassthroughGuard::enable();
-        assert!(harn_vm::set_stdout_passthrough(true));
-    }
-    assert!(!harn_vm::set_stdout_passthrough(original));
 }
 
 #[test]

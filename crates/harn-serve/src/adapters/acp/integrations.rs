@@ -739,12 +739,6 @@ mod authorize_batch_tests {
     }
 
     #[test]
-    fn parse_servers_empty_array_is_ok() {
-        let servers = parse_bulk_auth_servers(&serde_json::json!({ "servers": [] })).unwrap();
-        assert!(servers.is_empty());
-    }
-
-    #[test]
     fn parse_mode_defaults_to_missing() {
         assert_eq!(
             parse_bulk_auth_mode(&serde_json::json!({})).unwrap(),

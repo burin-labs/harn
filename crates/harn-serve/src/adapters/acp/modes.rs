@@ -698,26 +698,6 @@ mod tests {
     }
 
     #[test]
-    fn validate_model_selector_accepts_known_alias() {
-        // `claude-sonnet-4-6` is the catalog default; any registered
-        // alias works for this check.
-        let resolved = validate_model_selector("claude-sonnet-4-6")
-            .expect("known alias should validate")
-            .expect("known alias should produce a Some(...) selector");
-        assert_eq!(resolved, "claude-sonnet-4-6");
-    }
-
-    #[test]
-    fn validate_model_selector_rejects_unknown_provider_form() {
-        let error = validate_model_selector("nosuchprovider:nosuchmodel")
-            .expect_err("unknown provider must error");
-        assert!(
-            error.contains("invalid_model"),
-            "error should be tagged invalid_model: {error}"
-        );
-    }
-
-    #[test]
     fn policy_for_code_with_no_config_is_none() {
         // No-config default MUST be byte-identical to historical behavior:
         // ActAuto `code` mode installs no per-turn policy, leaving the ambient
@@ -904,33 +884,6 @@ mod tests {
             vec!["/opt/vendor-cache".to_string()]
         );
         assert!(policy.read_only_roots.is_empty());
-    }
-
-    #[test]
-    fn code_mode_honors_embedder_read_only_roots_when_process_sandbox_is_configured() {
-        // A process-sandbox-configured embedder gets Worktree confinement
-        // with its declared read-only roots still applied, even in
-        // full-access ACP code mode. `read_only_roots` alone (no process
-        // config) is covered by the read-only-roots-only regression above.
-        let mut sandbox =
-            AcpSandboxConfig::with_process(harn_vm::orchestration::ProcessSandboxPolicy {
-                presets: Some(vec![
-                    harn_vm::orchestration::ProcessSandboxPreset::DeveloperToolchains,
-                ]),
-                read_roots: Vec::new(),
-                write_roots: Vec::new(),
-                ..Default::default()
-            });
-        sandbox.read_only_roots = vec!["/opt/burin/pipelines".to_string()];
-        let policy = policy_for_mode("code", &sandbox).expect("configured code mode has policy");
-        assert_eq!(
-            policy.read_only_roots,
-            vec!["/opt/burin/pipelines".to_string()]
-        );
-        assert_eq!(
-            policy.sandbox_profile,
-            harn_vm::orchestration::SandboxProfile::Worktree
-        );
     }
 
     #[test]

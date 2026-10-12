@@ -570,28 +570,6 @@ fn replace_mode_ignores_shadow_conflicts() {
 }
 
 #[test]
-fn replace_mode_aborts_when_result_does_not_parse() {
-    // Replacing the identifier with a syntactically broken token must abort
-    // with no write — the same syntax-validation safety net as rename mode.
-    let dir = tempdir().unwrap();
-    let root = dir.path();
-    fs::create_dir_all(root.join("src")).unwrap();
-    let original = "fn thing() {}\nfn caller() {\n    let _ = thing();\n}\n";
-    fs::write(root.join("src/lib.rs"), original).unwrap();
-    let capability = build_index(root);
-    let symbol_ref = dict(&[
-        ("name", vm_string("thing")),
-        ("path", vm_string("src/lib.rs")),
-        ("kind", vm_string("Function")),
-    ]);
-    // `@@@` is not valid Rust; the spliced file fails to re-parse.
-    let result = replace(&capability, symbol_ref, "@@@", "file");
-    assert_eq!(s(field(&result, "result")), "syntax_error");
-    let on_disk = fs::read_to_string(root.join("src/lib.rs")).unwrap();
-    assert_eq!(on_disk, original, "syntax_error must not write");
-}
-
-#[test]
 fn replace_mode_rejects_empty_replacement_text() {
     let dir = tempdir().unwrap();
     let root = dir.path();

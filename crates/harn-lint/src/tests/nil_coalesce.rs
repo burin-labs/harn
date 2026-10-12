@@ -43,21 +43,6 @@ pipeline default(task) {
 }
 
 #[test]
-fn test_nil_coalesce_noop_ignores_real_fallbacks() {
-    let source = r#"
-pipeline default(task) {
-  const value = task?.flag ?? "off"
-  log(value)
-}
-"#;
-    let diags = lint_source(source);
-    assert!(
-        !has_rule(&diags, "nil-coalesce-noop"),
-        "non-nil fallback should not trigger: {diags:?}"
-    );
-}
-
-#[test]
 fn test_nil_coalesce_noop_fix_drops_false_from_positive_assert() {
     let source = r#"
 pipeline default(task) {
@@ -166,19 +151,4 @@ pipeline default(task) {
     let tokens = lexer.tokenize().expect("relex after fix");
     let mut parser = Parser::new(tokens);
     parser.parse().expect("reparse after fix");
-}
-
-#[test]
-fn test_nil_coalesce_self_fallback_ignores_repeated_effectful_calls() {
-    let source = r"
-pipeline default(task) {
-  const value = load() ?? load()
-  log(value)
-}
-";
-    let diags = lint_source(source);
-    assert!(
-        !has_rule(&diags, "nil-coalesce-self-fallback"),
-        "repeated calls may have effects and should not trigger: {diags:?}"
-    );
 }

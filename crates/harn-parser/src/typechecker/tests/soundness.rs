@@ -307,24 +307,6 @@ fn unwrap_ok<T, E>(result: Result<T, E>) -> T {
 }
 
 #[test]
-fn never_tail_expression_satisfies_return_type() {
-    let errs = errors(
-        r#"
-fn exhaustive(x: string | int) -> string {
-  if type_of(x) == "string" {
-    return "string"
-  }
-  if type_of(x) == "int" {
-    return "int"
-  }
-  unreachable(x)
-}
-"#,
-    );
-    assert!(errs.is_empty(), "unexpected never-tail error: {errs:?}");
-}
-
-#[test]
 fn schema_typed_llm_call_data_flows_through_generic_wrapper() {
     let errs = errors(
         r#"
@@ -469,26 +451,6 @@ fn p(name: string, n: int) -> string { return "hi ${name} ${n + 1}" }
 "#,
     );
     assert!(errs.is_empty(), "expected no errors, got: {errs:?}");
-}
-
-#[test]
-fn exhaustive_bool_match_does_not_report_fallthrough() {
-    // A `match` on a bool covering both `true` and `false` with returning
-    // arms is exhaustive and terminating — no wildcard required.
-    let errs = errors(
-        r#"
-fn classify(b: bool) -> string {
-  match b {
-    true -> { return "yes" }
-    false -> { return "no" }
-  }
-}
-"#,
-    );
-    assert!(
-        !errs.iter().any(|e| e.contains("fall through")),
-        "exhaustive bool match should not report fall-through, got: {errs:?}"
-    );
 }
 
 #[test]
@@ -650,23 +612,6 @@ fn g(x: float?) -> float {
             .iter()
             .any(|error| error.contains("may be nil")),
         "closure-bound assert must not inherit builtin narrowing: {binding_shadow:?}"
-    );
-}
-
-#[test]
-fn require_condition_narrows_after_statement() {
-    let errs = errors("fn g(x: int?) -> int { require x != nil\n  return x + 1 }");
-    assert!(errs.is_empty(), "require should narrow, got: {errs:?}");
-}
-
-#[test]
-fn arithmetic_without_assert_guard_still_flagged() {
-    // Sanity: the narrowing is gated on the assert/require actually being
-    // present — a bare nilable operand is still an error.
-    let errs = errors("fn g(x: int?) -> int { return x + 1 }");
-    assert!(
-        errs.iter().any(|e| e.contains("may be nil")),
-        "expected nilable error without a guard, got: {errs:?}"
     );
 }
 

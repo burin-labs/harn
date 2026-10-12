@@ -667,12 +667,47 @@ mod tests {
         );
     }
 
-    #[test]
-    fn sandbox_outer_policy_limits_runtime_authority_to_its_own_origin() {
-        assert!(SANDBOX_DOCUMENT_CSP.contains("img-src 'self' data: blob:"));
-        assert!(SANDBOX_DOCUMENT_CSP.contains("media-src 'self' data: blob:"));
-        assert!(SANDBOX_DOCUMENT_CSP.contains("worker-src 'self'"));
-        assert!(SANDBOX_DOCUMENT_CSP.contains("connect-src 'self'"));
+    #[tokio::test]
+    async fn sandbox_outer_policy_limits_runtime_authority_to_its_own_origin() {
+        // Read the header the `/sandbox` route actually serves, not the
+        // constant, so a handler that drops or replaces the policy fails.
+        let response = sandbox_page().await;
+        let header_value = |name| {
+            response
+                .headers()
+                .get(name)
+                .and_then(|value| value.to_str().ok())
+                .map(str::to_owned)
+        };
+        let policy = header_value(header::CONTENT_SECURITY_POLICY)
+            .expect("sandbox document must serve a CSP header");
+        let directives: Vec<&str> = policy.split(';').map(str::trim).collect();
+        for directive in [
+            "default-src 'none'",
+            "img-src 'self' data: blob:",
+            "media-src 'self' data: blob:",
+            "worker-src 'self'",
+            "connect-src 'self'",
+            "base-uri 'none'",
+            "form-action 'none'",
+        ] {
+            assert!(
+                directives.contains(&directive),
+                "served sandbox CSP lacks `{directive}`: {policy}"
+            );
+        }
+        assert_eq!(
+            header_value(header::CACHE_CONTROL).as_deref(),
+            Some("no-store")
+        );
+        assert_eq!(
+            header_value(header::X_CONTENT_TYPE_OPTIONS).as_deref(),
+            Some("nosniff")
+        );
+        assert_eq!(
+            header_value(header::REFERRER_POLICY).as_deref(),
+            Some("no-referrer")
+        );
     }
 
     #[test]

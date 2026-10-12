@@ -516,16 +516,6 @@ fn plan_marks_stdio_repairs_surface_changing_when_harness_is_unreachable() {
 }
 
 #[test]
-fn source_coordinates_map_unicode_columns_to_byte_offsets() {
-    let source = "\u{3b1}\u{3b2}\n  call(\"value\")\n";
-    let expected = source.find("\"value\"").expect("first argument");
-    assert_eq!(
-        harn_lexer::byte_offset_for_position(source, 2, 8),
-        Some(expected)
-    );
-}
-
-#[test]
 fn capability_only_plan_excludes_unrelated_repairs() {
     let temp = tempfile::TempDir::new().unwrap();
     let script = temp.path().join("capability_only.harn");

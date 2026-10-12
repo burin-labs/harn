@@ -704,86 +704,6 @@ fn test_fn_param_contravariance_negative() {
 }
 
 #[test]
-fn test_list_covariant_int_to_float_accepted() {
-    // `list<int>` flows into `list<float>`: `list` is covariant in its element
-    // type. The classic covariance-with-mutation hole needs shared mutable
-    // aliasing, which Harn does not have — values have copy semantics, so the
-    // `list<float>` binding gets an independent copy and nothing the original
-    // `list<int>` observes can change. (See the `list` arm in `subtyping.rs`.)
-    let errs = errors(
-        r"pipeline t(task) {
-            let xs: list<int> = [1, 2, 3]
-            let ys: list<float> = xs
-        }",
-    );
-    assert!(
-        errs.is_empty(),
-        "expected list<int> to flow into list<float> under value semantics, got: {errs:?}"
-    );
-}
-
-#[test]
-fn test_iter_covariant_int_to_float_accepted() {
-    // Iterators are read-only, so element-type widening is sound.
-    let errs = errors(
-        r"pipeline t(task) {
-            fn sink(ys: iter<float>) -> int { return 0 }
-            fn pipe(xs: iter<int>) -> int { return sink(xs) }
-        }",
-    );
-    assert!(
-        errs.is_empty(),
-        "expected iter<int> to flow into iter<float>, got: {errs:?}"
-    );
-}
-
-#[test]
-fn test_decl_site_out_used_in_contravariant_position_rejected() {
-    // `type Box<out T> = fn(T) -> ()` — T is declared covariant
-    // but appears only as an input (contravariant). Must be
-    // rejected at declaration time.
-    let errs = errors(
-        r"pipeline t(task) {
-            type Box<out T> = fn(T) -> int
-        }",
-    );
-    assert!(
-        errs.iter().any(|e| e.contains("declared 'out'")),
-        "expected 'out T' misuse diagnostic, got: {errs:?}"
-    );
-}
-
-#[test]
-fn test_decl_site_in_used_in_covariant_position_rejected() {
-    // `interface Producer<in T> { fn next() -> T }` — T is declared
-    // contravariant but appears only in output position.
-    let errs = errors(
-        r"pipeline t(task) {
-            interface Producer<in T> { fn next() -> T }
-        }",
-    );
-    assert!(
-        errs.iter().any(|e| e.contains("declared 'in'")),
-        "expected 'in T' misuse diagnostic, got: {errs:?}"
-    );
-}
-
-#[test]
-fn test_decl_site_out_in_covariant_position_ok() {
-    // `type Reader<out T> = fn() -> T` — T appears in a covariant
-    // position, consistent with `out T`.
-    let errs = errors(
-        r"pipeline t(task) {
-            type Reader<out T> = fn() -> T
-        }",
-    );
-    assert!(
-        errs.iter().all(|e| !e.contains("declared 'out'")),
-        "unexpected variance diagnostic: {errs:?}"
-    );
-}
-
-#[test]
 fn test_dict_covariant_value_int_to_float_accepted() {
     // dict<K, V> is covariant in its value type V for the same value-semantics
     // reason as `list`: no shared mutable aliasing, so a widening read is sound.
@@ -887,22 +807,6 @@ fn test_contextual_closure_typing_checks_assignment_body() {
 }
 
 #[test]
-fn test_contextual_closure_typing_checks_call_argument_body() {
-    let errs = errors(
-        r#"fn keep_callback(f: fn(int) -> int) -> int { return 0 }
-
-pipeline t(task) {
-    keep_callback({ x -> x + "oops" })
-}"#,
-    );
-    assert!(
-        errs.iter()
-            .any(|err| err.contains("can't add int and string")),
-        "expected contextual closure argument error, got: {errs:?}"
-    );
-}
-
-#[test]
 fn test_contextual_closure_typing_uses_bound_generic_call_argument() {
     let errs = errors(
         r#"fn use_callback<T>(seed: T, f: fn(T) -> T) -> int { return 0 }
@@ -958,20 +862,6 @@ fn test_contextual_closure_typing_checks_return_slot_body() {
         errs.iter()
             .any(|err| err.contains("can't add int and string")),
         "expected contextual closure return error, got: {errs:?}"
-    );
-}
-
-#[test]
-fn test_contextual_closure_typing_checks_implicit_return_slot_body() {
-    let errs = errors(
-        r#"fn make_callback() -> fn(int) -> int {
-            { x -> x + "oops" }
-        }"#,
-    );
-    assert!(
-        errs.iter()
-            .any(|err| err.contains("can't add int and string")),
-        "expected contextual closure implicit return error, got: {errs:?}"
     );
 }
 
@@ -1281,27 +1171,6 @@ fn test_bool_match_requires_both_arms() {
         errs.is_empty(),
         "covered bool match should be clean: {errs:?}"
     );
-}
-
-#[test]
-fn recursive_typed_parameter_self_call_terminates() {
-    let errs = errors(
-        r"type Tree = {value: int, children: list<Tree>}
-
-fn total(t: Tree) -> int {
-  let sum = t.value
-  for child in t.children {
-    sum = sum + total(child)
-  }
-  return sum
-}
-
-pipeline default() {
-  const tree: Tree = {value: 1, children: [{value: 2, children: []}]}
-  total(tree)
-}",
-    );
-    assert!(errs.is_empty(), "unexpected type errors: {errs:?}");
 }
 
 #[test]

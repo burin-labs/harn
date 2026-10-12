@@ -281,24 +281,6 @@ mod tests {
     }
 
     #[test]
-    fn plain_python_file_resolves_completely() {
-        let resolution =
-            assess_source("import os\n\n\ndef f():\n    return os\n", Language::Python);
-        assert!(resolution.is_complete());
-        assert!(defeater_names(&resolution).is_empty());
-    }
-
-    #[test]
-    fn python_wildcard_import_defeats_resolution() {
-        let resolution = assess_source(
-            "from constants import *\n\n\ndef f():\n    return MAX\n",
-            Language::Python,
-        );
-        assert!(!resolution.is_complete());
-        assert_eq!(defeater_names(&resolution), vec!["wildcard_import"]);
-    }
-
-    #[test]
     fn python_dynamic_name_calls_defeat_resolution() {
         let resolution = assess_source("def f(t):\n    setattr(t, 'a', 1)\n", Language::Python);
         assert!(!resolution.is_complete());

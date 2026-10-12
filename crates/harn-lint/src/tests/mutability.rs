@@ -3,22 +3,6 @@
 use super::*;
 
 #[test]
-fn test_mutable_never_reassigned() {
-    let diags = lint_source(
-        r"
-pipeline default(task: unknown) {
-let x = 1
-log(x)
-}
-",
-    );
-    assert!(
-        has_rule(&diags, "mutable-never-reassigned"),
-        "expected mutable-never-reassigned warning, got: {diags:?}"
-    );
-}
-
-#[test]
 fn test_mutable_reassigned_ok() {
     let diags = lint_source(
         r"

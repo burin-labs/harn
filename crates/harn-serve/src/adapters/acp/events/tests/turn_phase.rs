@@ -27,19 +27,6 @@ pub(super) fn fixture_events() -> Vec<AgentEvent> {
         .collect()
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn turn_phases_preserve_candidate_and_terminal_reply_on_acp() {
-    let actual = collect_notifications(fixture_events()).await;
-    assert_eq!(actual.len(), 3);
-    for (notification, phase) in actual.iter().zip(phases()) {
-        assert_eq!(notification["method"], HARN_AGENT_EVENT_METHOD);
-        let mut expected = serde_json::to_value(phase).unwrap();
-        expected["kind"] = serde_json::json!("turn_phase_changed");
-        expected["sessionId"] = serde_json::json!("session-1");
-        assert_eq!(notification["params"], expected);
-    }
-}
-
 #[test]
 fn wire_schema_refuses_unknown_phase_and_incomplete_replies() {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))

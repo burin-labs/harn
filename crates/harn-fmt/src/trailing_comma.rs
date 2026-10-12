@@ -414,7 +414,12 @@ mod tests {
     #[test]
     fn fires_on_method_call_args() {
         let src = "fn f() {\n  const xs = [1, 2]\n  xs.map(fn(x) {\n    x + 1\n  })\n}\n";
-        let _ = fix(src); // smoke test — the method call has args, span should be marked.
+        // The closure argument spans lines, so the argument list counts as
+        // multiline and gains a trailing comma after the closure body.
+        assert_eq!(
+            fix(src),
+            "fn f() {\n  const xs = [1, 2]\n  xs.map(fn(x) {\n    x + 1\n  },)\n}\n"
+        );
     }
 
     #[test]
