@@ -35,6 +35,7 @@ mod cache_conformance_fixtures;
 mod codegen_fingerprint;
 mod compaction_policy_primitive;
 mod connector_testkit_public_api;
+mod environment_read_admission;
 mod external_agent_errors;
 mod flow_backend;
 mod github_stdlib_connectors;
