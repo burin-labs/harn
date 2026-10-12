@@ -96,29 +96,63 @@ pub struct ResolvedScripts {
 
 /// Read and normalize one manifest for scanners and command-planning adapters.
 pub fn discover(project_root: &Path, manifest_dir: &Path) -> Discovery {
-    let project_root = match project_root.canonicalize() {
-        Ok(root) => root,
-        Err(_) => return Discovery::Refused(SelectionError::UnreadableRoot),
-    };
-    let manifest_dir = match manifest_dir.canonicalize() {
-        Ok(dir) => dir,
-        Err(_) => return Discovery::Refused(SelectionError::UnreadableManifest),
-    };
-    if !manifest_dir.starts_with(&project_root) {
-        return Discovery::Refused(SelectionError::OutsideProject);
-    }
-    let physical = match read_manifest(&project_root, &manifest_dir) {
-        Ok(Some(physical)) => physical,
-        Ok(None) => return Discovery::Absent,
+    let evidence = match package_evidence(project_root, manifest_dir) {
+        Ok(evidence) => evidence,
         Err(error) => return Discovery::Refused(error),
     };
-    let manifest: Map<String, Value> = match serde_json::from_slice(&physical.bytes) {
-        Ok(manifest) => manifest,
-        Err(_) => return Discovery::Refused(SelectionError::InvalidManifest),
+    let Some(manifest) = evidence.manifest else {
+        return Discovery::Absent;
     };
-    match resolve_scripts(&project_root, &physical.directory, &manifest) {
+    match resolve_scripts(&evidence.root, &evidence.directory, &manifest) {
         Ok(scripts) => Discovery::Resolved(scripts),
         Err(error) => Discovery::Refused(error),
+    }
+}
+
+/// Manager metadata does not authorize scripts when no manifest exists.
+pub(crate) fn manager_facts(
+    project_root: &Path,
+    directory: &Path,
+) -> Result<Option<String>, SelectionError> {
+    let evidence = package_evidence(project_root, directory)?;
+    match evidence.manifest {
+        Some(manifest) => resolve_scripts(&evidence.root, &evidence.directory, &manifest)
+            .map(|scripts| Some(scripts.manager)),
+        None => select_manager(&evidence.root, &evidence.directory, &Map::new())
+            .map(|manager| manager.map(|manager| manager.name().to_string())),
+    }
+}
+
+struct PackageEvidence {
+    root: PathBuf,
+    directory: PathBuf,
+    manifest: Option<Map<String, Value>>,
+}
+
+fn package_evidence(root: &Path, directory: &Path) -> Result<PackageEvidence, SelectionError> {
+    let root = root
+        .canonicalize()
+        .map_err(|_| SelectionError::UnreadableRoot)?;
+    let directory = directory
+        .canonicalize()
+        .map_err(|_| SelectionError::UnreadableManifest)?;
+    if !directory.starts_with(&root) {
+        return Err(SelectionError::OutsideProject);
+    }
+    match read_manifest(&root, &directory)? {
+        Some(physical) => Ok(PackageEvidence {
+            root,
+            directory: physical.directory,
+            manifest: Some(
+                serde_json::from_slice(&physical.bytes)
+                    .map_err(|_| SelectionError::InvalidManifest)?,
+            ),
+        }),
+        None => Ok(PackageEvidence {
+            root,
+            directory,
+            manifest: None,
+        }),
     }
 }
 
@@ -159,7 +193,7 @@ fn resolve_scripts(
     manifest_dir: &Path,
     manifest: &Map<String, Value>,
 ) -> Result<ResolvedScripts, SelectionError> {
-    let manager = select_manager(project_root, manifest_dir, manifest)?;
+    let manager = select_manager(project_root, manifest_dir, manifest)?.unwrap_or(DEFAULT_MANAGER);
     let empty_scripts = Map::new();
     let scripts = match manifest.get("scripts") {
         Some(value) => value.as_object().ok_or(SelectionError::InvalidScripts)?,
@@ -232,12 +266,12 @@ pub(crate) fn declared_manager(
 
 /// Resolve the nearest manifest/lock evidence within the scanned project.
 /// Nested declarations override inherited evidence. Contradictory evidence at
-/// one directory is refused; no evidence uses the same npm default everywhere.
+/// one directory is refused; absence remains unmeasured manager metadata.
 fn select_manager(
     project_root: &Path,
     manifest_dir: &Path,
     manifest: &Map<String, Value>,
-) -> Result<PackageManager, SelectionError> {
+) -> Result<Option<PackageManager>, SelectionError> {
     if !manifest_dir.starts_with(project_root) {
         return Err(SelectionError::OutsideProject);
     }
@@ -274,10 +308,10 @@ fn select_manager(
             }
         }
         if let Some(manager) = selected {
-            return Ok(manager);
+            return Ok(Some(manager));
         }
         if current == project_root {
-            return Ok(DEFAULT_MANAGER);
+            return Ok(None);
         }
         current = current
             .parent()
@@ -368,13 +402,14 @@ mod tests {
             ("pnpm@10.28.0-rc.1+sha224.abcdef", "pnpm test"),
         ] {
             let manifest = json!({"packageManager":declaration});
-            let manager =
-                select_manager(root.path(), root.path(), manifest.as_object().unwrap()).unwrap();
+            let manager = select_manager(root.path(), root.path(), manifest.as_object().unwrap())
+                .unwrap()
+                .unwrap();
             assert_eq!(manager.script_command("test"), expected);
         }
         assert_eq!(
             select_manager(root.path(), root.path(), json!({}).as_object().unwrap()).unwrap(),
-            PackageManager::Npm
+            None
         );
     }
 
@@ -435,7 +470,7 @@ mod tests {
         std::fs::create_dir_all(&child).unwrap();
         assert_eq!(
             select_manager(&physical_root, &child, json!({}).as_object().unwrap()).unwrap(),
-            PackageManager::Pnpm
+            Some(PackageManager::Pnpm)
         );
         assert_eq!(
             select_manager(
@@ -444,11 +479,11 @@ mod tests {
                 json!({"packageManager":"npm@10.0.0"}).as_object().unwrap()
             )
             .unwrap(),
-            PackageManager::Npm
+            Some(PackageManager::Npm)
         );
         assert_eq!(
             select_manager(&child, &child, json!({}).as_object().unwrap()).unwrap(),
-            PackageManager::Npm
+            None
         );
     }
 }

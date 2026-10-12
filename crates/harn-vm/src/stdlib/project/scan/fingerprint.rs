@@ -116,6 +116,18 @@ pub(super) fn walk_project_fingerprint(
     let mut entries = read_dir.flatten().collect::<Vec<_>>();
     entries.sort_by_key(|entry| entry.file_name());
 
+    // One evidence read per package directory, including lock-only projects.
+    // Presence routes the projection; the shared owner validates and selects.
+    if entries.iter().any(|entry| {
+        let name = entry.file_name();
+        name == "package.json"
+            || crate::package_scripts::LOCKFILE_NAMES.contains(&name.to_string_lossy().as_ref())
+    }) {
+        if let Ok(Some(manager)) = crate::package_scripts::manager_facts(base, dir) {
+            signals.package_managers.insert(manager);
+        }
+    }
+
     for entry in entries {
         let Ok(file_type) = entry.file_type() else {
             continue;
@@ -135,7 +147,7 @@ pub(super) fn walk_project_fingerprint(
         }
 
         if file_type.is_file() {
-            inspect_fingerprint_file(base, &path, &rel, &name, signals);
+            inspect_fingerprint_file(&path, &rel, &name, signals);
         }
     }
 }
@@ -174,7 +186,6 @@ pub(super) fn inspect_fingerprint_dir(rel: &str, name: &str, signals: &mut Finge
 }
 
 pub(super) fn inspect_fingerprint_file(
-    root: &Path,
     path: &Path,
     rel: &str,
     name: &str,
@@ -218,7 +229,7 @@ pub(super) fn inspect_fingerprint_file(
 
     match name {
         "Cargo.toml" => inspect_cargo_manifest(path, signals),
-        "package.json" => inspect_package_json(root, path, signals),
+        "package.json" => inspect_package_json(path, signals),
         "pyproject.toml" => inspect_pyproject(path, signals),
         "requirements.txt" | "requirements-dev.txt" | "requirements-test.txt" => {
             inspect_python_requirements(path, signals);
@@ -349,7 +360,7 @@ pub(super) fn inspect_cargo_manifest(path: &Path, signals: &mut FingerprintSigna
     }
 }
 
-pub(super) fn inspect_package_json(root: &Path, path: &Path, signals: &mut FingerprintSignals) {
+pub(super) fn inspect_package_json(path: &Path, signals: &mut FingerprintSignals) {
     let Some(parsed) = read_json_object(path.to_path_buf()) else {
         return;
     };
@@ -382,14 +393,6 @@ pub(super) fn inspect_package_json(root: &Path, path: &Path, signals: &mut Finge
     if deps.contains("mocha") {
         signals.test_runners.insert("mocha".to_string());
         signals.has_tests = true;
-    }
-
-    if let Some(directory) = path.parent() {
-        if let crate::package_scripts::Discovery::Resolved(scripts) =
-            crate::package_scripts::discover(root, directory)
-        {
-            signals.package_managers.insert(scripts.manager);
-        }
     }
 
     if let Some(scripts) = parsed.get("scripts").and_then(|value| value.as_object()) {

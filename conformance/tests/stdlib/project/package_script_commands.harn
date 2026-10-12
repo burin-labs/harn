@@ -10,11 +10,42 @@ pipeline test(harness: Harness) {
   assert(absent.package_scripts.state == "absent")
   assert(absent.package_scripts.manager == nil)
   assert(absent.package_scripts.commands == {})
+  assert(harness.project.fingerprint(root).package_managers == [])
   const catalog = harness.project.catalog()
   const javascript = catalog.filter({ entry -> entry.id == "javascript" })[0]
   assert(
     javascript.default_build_cmd == nil && javascript.default_test_cmd == nil,
     "context-free catalog must not invent package scripts",
+  )
+  for lock in [
+    {file: "package-lock.json", manager: "npm"},
+    {file: "npm-shrinkwrap.json", manager: "npm"},
+    {file: "pnpm-lock.yaml", manager: "pnpm"},
+    {file: "yarn.lock", manager: "yarn"},
+    {file: "bun.lock", manager: "bun"},
+    {file: "bun.lockb", manager: "bun"},
+  ] {
+    const dir = path_join(root, harness.random.uuid())
+    harness.fs.mkdir(dir)
+    harness.fs.write_text(path_join(dir, lock.file), "KNOWN_LOCK_ONLY_EVIDENCE\n")
+    const scripts = harness.project.scan(dir, {tiers: ["config"]}).package_scripts
+    const fingerprint = harness.project.fingerprint(dir)
+    assert(scripts.state == "absent" && scripts.commands == {}, "a lock cannot invent scripts")
+    assert(fingerprint.package_managers == [lock.manager], "lock-only manager metadata is measured")
+    assert(fingerprint.lockfile_paths == [lock.file], "the known lock must be observed")
+  }
+  const lock_conflict = path_join(root, harness.random.uuid())
+  harness.fs.mkdir(lock_conflict)
+  harness.fs.write_text(path_join(lock_conflict, "pnpm-lock.yaml"), "KNOWN_PNPM_LOCK\n")
+  harness.fs.write_text(path_join(lock_conflict, "yarn.lock"), "KNOWN_YARN_LOCK\n")
+  const conflicting_fingerprint = harness.project.fingerprint(lock_conflict)
+  assert(
+    conflicting_fingerprint.lockfile_paths.len() == 2,
+    "both conflicting locks must be reached",
+  )
+  assert(
+    conflicting_fingerprint.package_managers == [],
+    "conflicting locks cannot select a manager",
   )
   const cases: list<ScriptCase> = [
     {declaration: nil, command: "npm test", manager: "npm"},
