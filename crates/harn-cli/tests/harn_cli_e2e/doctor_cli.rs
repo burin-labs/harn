@@ -51,7 +51,7 @@ fn sandbox_doctor_streams_all_cases_without_polluting_json() {
             ),
         );
         assert!(receipts[2 * index + 1]
-            .starts_with(&format!("harn.sandbox_conformance case={} ", contract.id(),)));
+            .starts_with(&format!("harn.sandbox_conformance case={} ", contract.id())));
         assert!(receipts[2 * index + 1].contains(&format!(
             "\"verdict\":\"{}\"",
             case["verdict"].as_str().expect("verdict"),
