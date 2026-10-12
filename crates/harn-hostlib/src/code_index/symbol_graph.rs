@@ -13,6 +13,7 @@
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 
+use foldhash::HashMap as FastMap;
 use serde::{Deserialize, Serialize};
 use tree_sitter::{Node as TsNode, Tree};
 
@@ -233,11 +234,13 @@ pub struct RebuildOutcome {
 /// Typed symbol graph for a single workspace.
 #[derive(Debug, Default, Clone)]
 pub struct SymbolGraph {
-    nodes: HashMap<NodeId, Node>,
-    by_file: HashMap<FileId, Vec<NodeId>>,
+    // Maps every restore rebuilds and every query probes. foldhash is seeded
+    // per process like the default hasher, at a fraction of SipHash's cost.
+    nodes: FastMap<NodeId, Node>,
+    by_file: FastMap<FileId, Vec<NodeId>>,
     names: NameIndex,
-    out_edges: HashMap<NodeId, Vec<Edge>>,
-    in_edges: HashMap<NodeId, Vec<Edge>>,
+    out_edges: FastMap<NodeId, Vec<Edge>>,
+    in_edges: FastMap<NodeId, Vec<Edge>>,
     next_id: NodeId,
     /// Function names whose declarations changed since the last
     /// [`Self::take_dirty_call_sites`]. Every call site with one of these
@@ -291,27 +294,56 @@ impl SymbolGraph {
         if snapshot.next_id == 0 {
             return Err("symbol graph next id is zero");
         }
+        let node_count = snapshot.nodes.len();
         let mut graph = Self {
             next_id: snapshot.next_id,
-            nodes: HashMap::with_capacity(snapshot.nodes.len()),
+            nodes: FastMap::with_capacity_and_hasher(node_count, Default::default()),
+            out_edges: FastMap::with_capacity_and_hasher(node_count, Default::default()),
+            in_edges: FastMap::with_capacity_and_hasher(node_count, Default::default()),
             ..Self::default()
         };
         for node in snapshot.nodes {
-            if node.id == 0 || node.id >= graph.next_id || graph.nodes.contains_key(&node.id) {
+            if node.id == 0 || node.id >= graph.next_id {
                 return Err("symbol graph has an invalid or duplicate node id");
             }
             graph.by_file.entry(node.file_id).or_default().push(node.id);
             graph.names.insert(&node);
-            graph.nodes.insert(node.id, node);
+            if graph.nodes.insert(node.id, node).is_some() {
+                return Err("symbol graph has an invalid or duplicate node id");
+            }
         }
+        // A snapshot lists each node's outgoing edges together, so the
+        // forward lists are adopted one run at a time rather than looked up
+        // once per edge. Runs that repeat a source still merge correctly.
+        let mut run: Vec<Edge> = Vec::new();
         for edge in snapshot.edges {
             if !graph.nodes.contains_key(&edge.from) || !graph.nodes.contains_key(&edge.to) {
                 return Err("symbol graph edge names an absent node");
             }
-            graph.out_edges.entry(edge.from).or_default().push(edge);
+            if run.last().is_some_and(|last| last.from != edge.from) {
+                graph.adopt_out_run(&mut run);
+            }
             graph.in_edges.entry(edge.to).or_default().push(edge);
+            run.push(edge);
         }
+        graph.adopt_out_run(&mut run);
         Ok(graph)
+    }
+
+    fn adopt_out_run(&mut self, run: &mut Vec<Edge>) {
+        let Some(first) = run.first() else {
+            return;
+        };
+        let from = first.from;
+        let edges = std::mem::take(run);
+        match self.out_edges.entry(from) {
+            std::collections::hash_map::Entry::Vacant(entry) => {
+                entry.insert(edges);
+            }
+            std::collections::hash_map::Entry::Occupied(mut entry) => {
+                entry.get_mut().extend(edges);
+            }
+        }
     }
 
     /// Total node count.

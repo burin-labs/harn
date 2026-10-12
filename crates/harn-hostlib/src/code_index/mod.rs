@@ -125,7 +125,7 @@ pub use graph::DepGraph;
 pub use imports::{ModuleTarget, ResolutionStrategy};
 pub use overlay::{BranchOverlay, OverlayState};
 pub use readonly::ReadonlyRoots;
-pub use snapshot::{CodeIndexSnapshot, SnapshotMeta};
+pub use snapshot::{CodeIndexSnapshot, SnapshotMeta, SNAPSHOT_FORMAT_VERSION};
 pub use state::{BuildOutcome, ImportCensusRow, IndexState, RefreshOutcome};
 pub use symbol_graph::{Edge, EdgeKind, Node, NodeId, NodeKind, SymbolGraph};
 pub use trigram::TrigramIndex;

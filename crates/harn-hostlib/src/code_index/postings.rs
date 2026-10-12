@@ -4,8 +4,10 @@
 //! stores one shared term per contributing file, never one key per occurrence.
 
 use std::borrow::Borrow;
-use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 use std::hash::Hash;
+
+use foldhash::HashMap as FastMap;
 
 use super::file_table::FileId;
 
@@ -50,15 +52,17 @@ impl FilePosting for FileId {
 
 #[derive(Debug, Clone)]
 pub(super) struct FilePostings<K, H> {
-    forward: HashMap<K, Vec<H>>,
-    reverse: HashMap<FileId, Vec<K>>,
+    // Word keys come from file contents, so the hasher stays seeded per
+    // process; foldhash does that at a fraction of SipHash's cost.
+    forward: FastMap<K, Vec<H>>,
+    reverse: FastMap<FileId, Vec<K>>,
 }
 
 impl<K, H> Default for FilePostings<K, H> {
     fn default() -> Self {
         Self {
-            forward: HashMap::new(),
-            reverse: HashMap::new(),
+            forward: FastMap::default(),
+            reverse: FastMap::default(),
         }
     }
 }
@@ -124,18 +128,19 @@ impl<K: Eq + Hash + Clone, H: FilePosting> FilePostings<K, H> {
 
     /// Adopt snapshot vectors, merge repeated keys, then derive removal once.
     pub fn from_rows(rows: impl ExactSizeIterator<Item = (K, Vec<H>)>) -> Self {
-        let mut forward: HashMap<K, Vec<H>> = HashMap::with_capacity(rows.len());
+        let mut forward: FastMap<K, Vec<H>> =
+            FastMap::with_capacity_and_hasher(rows.len(), Default::default());
         for (key, hits) in rows {
             match forward.entry(key) {
-                std::collections::hash_map::Entry::Vacant(entry) => {
+                Entry::Vacant(entry) => {
                     entry.insert(hits);
                 }
-                std::collections::hash_map::Entry::Occupied(mut entry) => {
+                Entry::Occupied(mut entry) => {
                     entry.get_mut().extend(hits);
                 }
             }
         }
-        let mut reverse: HashMap<FileId, Vec<K>> = HashMap::new();
+        let mut reverse: FastMap<FileId, Vec<K>> = FastMap::default();
         let mut files = Vec::new();
         forward.retain(|key, hits| {
             H::normalize(hits);

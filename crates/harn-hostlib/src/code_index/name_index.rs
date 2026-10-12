@@ -1,13 +1,15 @@
 //! One owner for the graph's name lookup and its typed candidate projections.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
+
+use foldhash::HashMap as FastMap;
 
 use super::file_table::FileId;
 use super::symbol_graph::{Node, NodeId, NodeKind};
 
 #[derive(Debug, Default, Clone)]
 pub(super) struct NameIndex {
-    buckets: HashMap<String, NameBucket>,
+    buckets: FastMap<String, NameBucket>,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -15,13 +17,22 @@ struct NameBucket {
     all: Vec<NodeId>,
     references: Vec<(NodeId, FileId)>,
     calls: Vec<NodeId>,
-    functions: HashMap<FileId, Vec<NodeId>>,
+    functions: FastMap<FileId, Vec<NodeId>>,
     function_count: usize,
 }
 
 impl NameIndex {
     pub fn insert(&mut self, node: &Node) {
-        let bucket = self.buckets.entry(node.name.clone()).or_default();
+        // Most names repeat (every call of `len`), so look up before paying
+        // for the owned key a new bucket needs.
+        if !self.buckets.contains_key(node.name.as_str()) {
+            self.buckets
+                .insert(node.name.clone(), NameBucket::default());
+        }
+        let bucket = self
+            .buckets
+            .get_mut(node.name.as_str())
+            .expect("bucket exists");
         bucket.all.push(node.id);
         if node.kind.is_name_addressable() {
             bucket.references.push((node.id, node.file_id));

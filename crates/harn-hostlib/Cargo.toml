@@ -135,6 +135,10 @@ harn-terminal = { path = "../harn-terminal", version = "=0.10.166-dev", optional
 async-trait = "0.1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# The code-index snapshot codec. Already in the workspace graph through harn-vm.
+postcard = { version = "1.1", default-features = false, features = ["use-std"] }
+# Seeded fast hashing for code-index maps rebuilt on every restore.
+foldhash = "0.2"
 sha2 = "0.11"
 hex = "0.4"
 tokio = { version = "1", features = ["rt", "macros", "sync", "fs", "net", "process", "time"] }

@@ -28,7 +28,7 @@ use std::path::Path;
 use std::sync::atomic::{AtomicI64, Ordering};
 
 use harn_hostlib::{
-    code_index::{CodeIndexCapability, IndexState},
+    code_index::{CodeIndexCapability, CodeIndexSnapshot, IndexState},
     BuiltinRegistry, HostlibCapability, RegisteredBuiltin,
 };
 use harn_vm::VmValue;
@@ -399,7 +399,7 @@ fn a_refresh_that_changed_nothing_does_not_rewrite_the_snapshot() {
     rebuild(&registry, dir.path());
     cap.persist_to_disk().expect("snapshot saved");
 
-    let snapshot = dir.path().join(".burin/index/snapshot.json");
+    let snapshot = CodeIndexSnapshot::path_for(dir.path());
     let before = fs::metadata(&snapshot)
         .expect("snapshot exists")
         .modified()

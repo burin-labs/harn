@@ -1,8 +1,12 @@
 //! Persistent on-disk snapshot of the workspace index.
 //!
-//! v2 uses a single JSON file at `.burin/index/snapshot.json` and includes
-//! the typed symbol graph. A v1 snapshot cannot safely answer graph queries,
-//! so it is rebuilt rather than restored with a measured zero graph.
+//! One file at `.burin/index/snapshot.bin`: an eight-byte magic, the
+//! little-endian format version, then the [`CodeIndexSnapshot`] encoded with
+//! postcard. The header lets a reader reject another layout before decoding
+//! it. Restart time is dominated by decoding this file, and a compact binary
+//! body decodes several times faster than the JSON it replaced while taking
+//! about a third of the space. Earlier versions, including every JSON
+//! snapshot, are rebuilt rather than restored.
 //!
 //! The snapshot is the recovery primitive. On daemon startup, the
 //! embedder restores from the snapshot if one exists, then calls
@@ -30,15 +34,23 @@ use super::IndexState;
 /// computed differently, since a restore keeps the stored edges for every
 /// file that has not changed. v4 adds partial HEAD-verification progress;
 /// older readers must not treat a checkpoint as a fully verified HEAD when
-/// the checkout reverts to the previously recorded commit.
-pub const SNAPSHOT_FORMAT_VERSION: u32 = 4;
+/// the checkout reverts to the previously recorded commit. v5 replaces JSON
+/// with the binary layout described in the module documentation.
+pub const SNAPSHOT_FORMAT_VERSION: u32 = 5;
+
+/// Leading bytes of every binary snapshot.
+const SNAPSHOT_MAGIC: &[u8; 8] = b"HARNIDX\0";
+/// Magic plus the little-endian `u32` format version.
+const SNAPSHOT_HEADER_LEN: usize = SNAPSHOT_MAGIC.len() + 4;
+/// The pre-v5 JSON file. Removed when a binary snapshot replaces it.
+const LEGACY_JSON_SNAPSHOT: &str = "snapshot.json";
 
 /// On-disk metadata header. Small and cheap to read so embedders can
 /// peek at a snapshot without parsing the whole thing.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SnapshotMeta {
-    /// Format version. Must equal [`SNAPSHOT_FORMAT_VERSION`] for now;
-    /// older snapshots are dropped.
+    /// Format version. Written to the file header, which is what a load
+    /// checks; must equal [`SNAPSHOT_FORMAT_VERSION`] to restore.
     pub format_version: u32,
     /// Workspace root the snapshot was captured against.
     pub workspace_root: String,
@@ -161,7 +173,7 @@ impl CodeIndexSnapshot {
         workspace_root
             .join(".burin")
             .join("index")
-            .join("snapshot.json")
+            .join("snapshot.bin")
     }
 
     /// Stream to a unique sibling temporary file and atomically replace the
@@ -176,10 +188,14 @@ impl CodeIndexSnapshot {
         let mut tmp = tempfile::NamedTempFile::new_in(parent)?;
         {
             let mut writer = BufWriter::new(tmp.as_file_mut());
-            serde_json::to_writer(&mut writer, self).map_err(io::Error::other)?;
+            writer.write_all(SNAPSHOT_MAGIC)?;
+            writer.write_all(&self.meta.format_version.to_le_bytes())?;
+            let mut writer = postcard::to_io(self, writer).map_err(io::Error::other)?;
             writer.flush()?;
         }
         tmp.persist(&path).map_err(|error| error.error)?;
+        // A superseded JSON snapshot is hundreds of megabytes nothing reads.
+        let _ = std::fs::remove_file(parent.join(LEGACY_JSON_SNAPSHOT));
         Ok(())
     }
 
@@ -198,20 +214,32 @@ impl CodeIndexSnapshot {
         let read_phase = super::timing::Phase::start("snapshot.read");
         let bytes = std::fs::read(&path)?;
         drop(read_phase);
-        let decode_phase = super::timing::Phase::start("snapshot.decode");
-        let snap: CodeIndexSnapshot = serde_json::from_slice(&bytes).map_err(io::Error::other)?;
-        drop(decode_phase);
-        drop(bytes);
-        if snap.meta.format_version != SNAPSHOT_FORMAT_VERSION {
+        let Some(body) = bytes
+            .strip_prefix(SNAPSHOT_MAGIC.as_slice())
+            .filter(|_| bytes.len() >= SNAPSHOT_HEADER_LEN)
+        else {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "code-index snapshot has no binary header",
+            ));
+        };
+        let (version, body) = body.split_at(4);
+        let format_version = u32::from_le_bytes(version.try_into().expect("four bytes"));
+        if format_version != SNAPSHOT_FORMAT_VERSION {
             tracing::debug!(
                 target: "harn_hostlib::code_index",
                 path = %path.display(),
-                format_version = snap.meta.format_version,
+                format_version,
                 expected = SNAPSHOT_FORMAT_VERSION,
                 "code-index snapshot format mismatch; ignoring",
             );
             return Ok(None);
         }
+        let decode_phase = super::timing::Phase::start("snapshot.decode");
+        let snap: CodeIndexSnapshot = postcard::from_bytes(body)
+            .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+        drop(decode_phase);
+        drop(bytes);
         if snap.symbols.is_none() || !snapshot_matches_workspace(&snap, workspace_root) {
             return Ok(None);
         }
@@ -300,13 +328,32 @@ impl IndexState {
     pub fn from_snapshot(snap: CodeIndexSnapshot) -> io::Result<Self> {
         let _phase = super::timing::Phase::start("snapshot.restore");
         let root = PathBuf::from(snap.meta.workspace_root);
-        let graph_phase = super::timing::Phase::start("snapshot.restore_graph");
-        let graph =
-            SymbolGraph::from_snapshot(snap.symbols.ok_or_else(|| {
-                io::Error::new(io::ErrorKind::InvalidData, "missing symbol graph")
-            })?)
-            .map_err(|message| io::Error::new(io::ErrorKind::InvalidData, message))?;
-        drop(graph_phase);
+        let symbols = snap
+            .symbols
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "missing symbol graph"))?;
+        // The graph and the two posting stores share no state, so restore
+        // takes the longest of them rather than their sum.
+        let (graph, trigrams, words) = std::thread::scope(|scope| {
+            let trigrams = scope.spawn(|| {
+                let _phase = super::timing::Phase::start("snapshot.restore_trigrams");
+                TrigramIndex::from_postings(snap.trigrams)
+            });
+            let words = scope.spawn(|| {
+                let _phase = super::timing::Phase::start("snapshot.restore_words");
+                WordIndex::from_postings(snap.words)
+            });
+            let graph = {
+                let _phase = super::timing::Phase::start("snapshot.restore_graph");
+                SymbolGraph::from_snapshot(symbols)
+            };
+            fn joined<T>(handle: std::thread::ScopedJoinHandle<'_, T>) -> T {
+                handle
+                    .join()
+                    .unwrap_or_else(|panic| std::panic::resume_unwind(panic))
+            }
+            (graph, joined(trigrams), joined(words))
+        });
+        let graph = graph.map_err(|message| io::Error::new(io::ErrorKind::InvalidData, message))?;
         let mut files: HashMap<FileId, IndexedFile> = HashMap::with_capacity(snap.files.len());
         let mut path_to_id: HashMap<String, FileId> = HashMap::with_capacity(snap.files.len());
         for f in snap.files {
@@ -335,12 +382,6 @@ impl IndexState {
             path_to_id.insert(f.relative_path, f.id);
             files.insert(f.id, indexed);
         }
-        let trigrams_phase = super::timing::Phase::start("snapshot.restore_trigrams");
-        let trigrams = TrigramIndex::from_postings(snap.trigrams);
-        drop(trigrams_phase);
-        let words_phase = super::timing::Phase::start("snapshot.restore_words");
-        let words = WordIndex::from_postings(snap.words);
-        drop(words_phase);
         let deps = DepGraph::from_rows(snap.deps);
         let agents = AgentRegistry::from_snapshot(RegistryConfig::default(), snap.agents);
 
@@ -479,6 +520,76 @@ mod tests {
             .err()
             .expect("invalid graph");
         assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+    }
+
+    #[test]
+    fn load_refuses_a_truncated_snapshot() {
+        let dir = fixture_tree();
+        snapshot_for(dir.path()).save(dir.path()).unwrap();
+        let path = CodeIndexSnapshot::path_for(dir.path());
+        let bytes = fs::read(&path).unwrap();
+        // Cut inside the header, then inside the body. Both are refused as
+        // invalid data so the caller rebuilds instead of serving a prefix.
+        for len in [SNAPSHOT_HEADER_LEN - 1, bytes.len() / 2] {
+            fs::write(&path, &bytes[..len]).unwrap();
+            let error = CodeIndexSnapshot::load(dir.path()).err().expect("refused");
+            assert_eq!(error.kind(), io::ErrorKind::InvalidData, "length {len}");
+        }
+    }
+
+    #[test]
+    fn load_refuses_a_file_without_the_binary_header() {
+        let dir = fixture_tree();
+        let snap = snapshot_for(dir.path());
+        let path = CodeIndexSnapshot::path_for(dir.path());
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(&path, serde_json::to_vec(&snap).unwrap()).unwrap();
+        let error = CodeIndexSnapshot::load(dir.path()).err().expect("refused");
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+    }
+
+    #[test]
+    fn a_binary_save_retires_the_legacy_json_snapshot() {
+        let dir = fixture_tree();
+        let legacy = CodeIndexSnapshot::path_for(dir.path()).with_file_name(LEGACY_JSON_SNAPSHOT);
+        fs::create_dir_all(legacy.parent().unwrap()).unwrap();
+        fs::write(&legacy, b"{}").unwrap();
+        snapshot_for(dir.path()).save(dir.path()).unwrap();
+        assert!(!legacy.exists());
+        assert!(CodeIndexSnapshot::load(dir.path()).unwrap().is_some());
+    }
+
+    #[test]
+    fn restored_postings_forget_an_edited_files_old_terms() {
+        let dir = fixture_tree();
+        fs::write(
+            dir.path().join("src/beta.rs"),
+            "pub fn beta() -> i32 { 2 }\n",
+        )
+        .unwrap();
+        snapshot_for(dir.path()).save(dir.path()).unwrap();
+        let snap = CodeIndexSnapshot::load(dir.path()).unwrap().unwrap();
+        let mut state = IndexState::from_snapshot(snap).unwrap();
+        let alpha = state.path_to_id["src/alpha.rs"];
+        let unique = super::super::trigram::query_trigrams("alpha");
+        let trigram_files = |state: &IndexState| state.trigrams.query(&unique);
+        assert_eq!(
+            state.words.get("alpha").len(),
+            1,
+            "restored before the edit"
+        );
+        assert!(trigram_files(&state).contains(&alpha));
+
+        // A same-size edit with a later timestamp, so the stat gate rereads it.
+        let path = dir.path().join("src/alpha.rs");
+        fs::write(&path, "pub fn gamma() -> i32 { 1 }\n").unwrap();
+        filetime::set_file_mtime(&path, filetime::FileTime::from_unix_time(2_000_000_000, 0))
+            .unwrap();
+        assert_eq!(state.refresh_from_root(None).files_reindexed, 1);
+        assert!(state.words.get("alpha").is_empty());
+        assert!(!trigram_files(&state).contains(&alpha));
+        assert_eq!(state.words.get("gamma").len(), 1);
+        assert_eq!(state.words.get("beta").len(), 1, "other files keep theirs");
     }
 
     #[test]

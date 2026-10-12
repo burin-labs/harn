@@ -6,7 +6,9 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
-use harn_hostlib::code_index::{CodeIndexCapability, CodeIndexSnapshot, IndexState, NodeKind};
+use harn_hostlib::code_index::{
+    CodeIndexCapability, CodeIndexSnapshot, IndexState, NodeKind, SNAPSHOT_FORMAT_VERSION,
+};
 use harn_hostlib::{BuiltinRegistry, HostlibCapability};
 use harn_vm::VmValue;
 use sha2::{Digest, Sha256};
@@ -233,6 +235,9 @@ fn main() {
         std::fs::write(&fixture, original).unwrap();
         let mut snapshot: CodeIndexSnapshot =
             serde_json::from_slice(&std::fs::read(&base).unwrap()).unwrap();
+        // The JSON seed carries the facts, not a layout; persist it in this
+        // build's format.
+        snapshot.meta.format_version = SNAPSHOT_FORMAT_VERSION;
         let head = snapshot
             .meta
             .git_head
@@ -466,6 +471,9 @@ fn main() {
     report(scenario, trial, start, &timings, state, root);
     if scenario == "cold" {
         // Preserve the next scenario's seed outside the measured operation.
-        std::fs::copy(CodeIndexSnapshot::path_for(root), base).unwrap();
+        // The seed stays JSON whatever the persisted format is, so builds
+        // with different snapshot layouts prepare from identical facts.
+        let writer = std::io::BufWriter::new(std::fs::File::create(base).unwrap());
+        serde_json::to_writer(writer, &state.snapshot()).unwrap();
     }
 }
