@@ -49,7 +49,7 @@ cat > "$scratch/bin/cargo-nextest" <<'SH'
 set -euo pipefail
 case "$*" in
   'nextest list '*)
-    jq -n --arg status "${MATCH_STATUS:-matches}" '{"rust-suites": {fixture: {testcases: {case: {ignored: false, "filter-match": {status: $status}}}}}}'
+    jq -n --arg status "${MATCH_STATUS:-matches}" '{"rust-suites": {fixture: {status: "listed", testcases: {case: {ignored: false, "filter-match": {status: $status}}}}, excluded: {status: "skipped"}}}'
     ;;
   'nextest run '*) printf '%s\n' "$*" > "$RAN_TESTS" ;;
   *) exit 9 ;;

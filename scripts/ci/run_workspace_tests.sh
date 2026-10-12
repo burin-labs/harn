@@ -16,7 +16,7 @@ if [[ -n "${RUNNER_TEMP:-}" ]]; then
 fi
 eligible=$(jq -er '
   .["rust-suites"] | to_entries
-  | map(.value.testcases | to_entries | map(select(.value["filter-match"].status == "matches" and .value.ignored == false)) | length)
+  | map(select(.value.status == "listed") | .value.testcases | to_entries | map(select(.value["filter-match"].status == "matches" and .value.ignored == false)) | length)
   | add // 0
 ' "$census")
 if (( eligible == 0 )); then
