@@ -771,6 +771,15 @@ fn auth_request_with_bearer(token: &str) -> AuthRequest {
     }
 }
 
+fn assert_private_card_principal(card: &JsonValue, api_key: &str) {
+    let expected = crate::ApiKeyEntry::new(api_key, []).subject;
+    assert_eq!(card["metadata"]["principal"], expected);
+    assert!(
+        !card.to_string().contains(api_key),
+        "authenticated card must omit the raw credential"
+    );
+}
+
 fn assert_unauthorized_processed(processed: ProcessedRpc) -> JsonValue {
     assert_eq!(processed.status, Some(StatusCode::UNAUTHORIZED));
     let challenge = processed
@@ -1089,7 +1098,7 @@ pub fn triage(task: string) -> string {
     );
     assert!(card.get("supportedInterfaces").is_none());
     assert_eq!(card["metadata"]["extendedAgentCard"], true);
-    assert_eq!(card["metadata"]["principal"], "api-key");
+    assert_private_card_principal(card, "secret");
     assert_eq!(card["securitySchemes"]["apiKey"]["type"], "apiKey");
     assert_eq!(card["security"][0]["apiKey"], json!([]));
     assert_eq!(card["skills"][0]["id"], "triage");
@@ -1212,7 +1221,7 @@ pub fn triage(task: string) -> string {
         .expect("body");
     let envelope: JsonValue = serde_json::from_slice(&bytes).expect("envelope");
     assert_eq!(envelope["result"]["metadata"]["extendedAgentCard"], true);
-    assert_eq!(envelope["result"]["metadata"]["principal"], "api-key");
+    assert_private_card_principal(&envelope["result"], "secret");
 }
 
 /// End-to-end: a `.harn` handler declares `@scopes("personas:read")`,

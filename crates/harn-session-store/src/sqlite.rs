@@ -52,10 +52,10 @@ use super::store::{
 // the shared initializer fast-paths out of schema setup entirely when the
 // recorded version already matches, so an unbumped column never reaches an
 // existing database.
-const SCHEMA_VERSION: i64 = 6;
 const SCHEMA_NAME: &str = "session_store";
 const DEFAULT_BUSY_TIMEOUT: Duration = Duration::from_secs(5);
-const SQLITE_SCHEMA: SchemaVersion = SchemaVersion::new(SCHEMA_NAME, SCHEMA_VERSION);
+const SQLITE_SCHEMA: SchemaVersion =
+    SchemaVersion::new(SCHEMA_NAME, SqliteSessionStore::SCHEMA_VERSION);
 
 #[derive(Clone)]
 pub struct SqliteSessionStore {
@@ -102,6 +102,9 @@ impl DerefMut for MutationConnection<'_> {
 }
 
 impl SqliteSessionStore {
+    /// Current schema version supported by the session store initializer.
+    pub const SCHEMA_VERSION: i64 = 6;
+
     pub fn open(path: impl AsRef<Path>) -> StoreResult<Self> {
         Self::open_with_hooks(path, StoreHooks::default())
     }
@@ -394,11 +397,11 @@ fn initialize_session_schema(transaction: &Transaction<'_>) -> StoreResult<()> {
     } else {
         0
     };
-    if previous_schema_version > SCHEMA_VERSION {
+    if previous_schema_version > SqliteSessionStore::SCHEMA_VERSION {
         return Err(StoreError::SchemaIncompatible {
             schema: SCHEMA_NAME.to_string(),
             stored: previous_schema_version,
-            supported: SCHEMA_VERSION,
+            supported: SqliteSessionStore::SCHEMA_VERSION,
         });
     }
 
@@ -562,7 +565,7 @@ fn initialize_session_schema(transaction: &Transaction<'_>) -> StoreResult<()> {
                 ON sessions(project_scope, updated_at_ms);",
         )
         .map_err(map_sql)?;
-    if previous_schema_version < SCHEMA_VERSION {
+    if previous_schema_version < SqliteSessionStore::SCHEMA_VERSION {
         // Foreign-key enforcement is connection-local and does not repair
         // child rows orphaned by v1. This guarded cleanup runs once while
         // upgrading from a pre-foreign-key schema.
