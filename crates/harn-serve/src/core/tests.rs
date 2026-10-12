@@ -607,11 +607,11 @@ pub fn actor_chain(harness: Harness) -> any {
     .expect("write script");
 
     let mut config = DispatchCoreConfig::for_script(&script);
+    let key = crate::auth::ApiKeyEntry::new("actor-key", []);
+    let subject = key.subject.clone();
     config.auth_policy = crate::auth::AuthPolicy {
         methods: vec![crate::auth::AuthMethodConfig::ApiKey(
-            crate::auth::ApiKeyAuthConfig {
-                keys: vec![crate::auth::ApiKeyEntry::new("actor-key", [])],
-            },
+            crate::auth::ApiKeyAuthConfig { keys: vec![key] },
         )],
         mcp_allowlist: None,
     };
@@ -649,12 +649,16 @@ pub fn actor_chain(harness: Harness) -> any {
         .expect("dispatch");
 
     let expected = serde_json::json!({
-        "sub": "api-key",
+        "sub": subject,
         "act": {
             "sub": "agent:merge-captain"
         }
     });
     assert_eq!(response.value, expected);
+    assert!(
+        !response.value.to_string().contains("actor-key"),
+        "actor chain must omit the raw credential"
+    );
     assert_eq!(
         harn_vm::agent_sessions::actor_chain("dispatch-actor-chain")
             .map(|chain| chain.to_json_value()),

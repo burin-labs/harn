@@ -122,8 +122,23 @@ async fn task_input_store_failure_rejects_before_queueing_and_audit() {
         .unwrap()
         .task_events(Some(&task_id), None)
         .unwrap();
-    let path = harn_vm::runtime_paths::state_root(root.path()).join("session-store.sqlite");
-    let conn = rusqlite::Connection::open(path).unwrap();
+    let store = harn_vm::open_canonical_store(root.path()).unwrap();
+    let conn = rusqlite::Connection::open_with_flags(
+        store.path(),
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE,
+    )
+    .unwrap();
+    let stored_task: String = conn
+        .query_row(
+            "SELECT id FROM agent_tasks WHERE id = ?1",
+            [&task_id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        stored_task, task_id,
+        "fault injection must reach the actual task store"
+    );
     let next_id: i64 = conn
         .query_row(
             "SELECT next_id FROM agent_control_event_sequence WHERE singleton = 1",
